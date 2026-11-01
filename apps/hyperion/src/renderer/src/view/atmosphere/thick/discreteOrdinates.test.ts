@@ -1271,3 +1271,81 @@ describe("the helpers' refusals", () => {
     }
   });
 });
+
+/**
+ * Henyey–Greenstein's χ_l = g^l to l = 15 by repeated products, which are the same bits on every
+ * platform, where `**` need not be (`lib/pinnedMathPaths.test.ts`).
+ */
+function powersOf(g: number): Float64Array {
+  const out = new Float64Array(DISCRETE_ORDINATE_STREAMS);
+  let power = 1;
+  for (let l = 0; l < out.length; l += 1) {
+    out[l] = power;
+    power *= g;
+  }
+  return out;
+}
+
+/** FNV-1a and a golden-ratio multiply over every byte of `arrays`: equal digests, equal bits. */
+function digestOf(arrays: ReadonlyArray<Float64Array>): string {
+  let fnv = 0x811c9dc5;
+  let golden = 0x2545f491;
+  for (const values of arrays) {
+    for (const byte of new Uint8Array(values.buffer, values.byteOffset, values.byteLength)) {
+      fnv = Math.imul(fnv ^ byte, 0x01000193) >>> 0;
+      golden = Math.imul(golden ^ byte, 0x9e3779b1) >>> 0;
+    }
+  }
+  return `${fnv.toString(16).padStart(8, "0")}${golden.toString(16).padStart(8, "0")}`;
+}
+
+describe("a solve's bits (R08.T14.b)", () => {
+  it("gives a fixed column every field to the bits it gave before the bake's levers", () => {
+    // A conservative layer, one that absorbs alone, forward peaks, a beam at an eigenvalue's
+    // reciprocal, one below the horizontal on its spherical path, a Lambertian ground and an
+    // emitting column: every path of the solve, pinned to R08.T14.a's arithmetic.
+    const forward: OrdinateLayer = {
+      opticalDepth: 1.3,
+      singleScatteringAlbedo: 0.8,
+      moments: powersOf(0.5),
+    };
+    const layers: OrdinateLayer[] = [
+      { opticalDepth: 0.05, singleScatteringAlbedo: 1, moments: RAYLEIGH },
+      { opticalDepth: 0.4, singleScatteringAlbedo: 0.97, moments: powersOf(0.7) },
+      forward,
+      { opticalDepth: 0.2, singleScatteringAlbedo: 0, moments: ISOTROPIC },
+      { opticalDepth: 2.5, singleScatteringAlbedo: 0.999, moments: powersOf(0.85) },
+      { opticalDepth: 0.6, singleScatteringAlbedo: 0.6, moments: RAYLEIGH },
+    ];
+    const rates = homogeneousSolution(forward, 1, doubleGaussQuadrature()).decayRates;
+    const rate = Array.from(rates).find((k) => k > 1.5 && k < 4);
+    if (rate === undefined) {
+      throw new Error("no decay rate between 1.5 and 4");
+    }
+    const beamCosines = [-0.05, 0.1, 1 / rate, 0.55, 1];
+    const heights = Float64Array.from({ length: 7 }, (_, k) => 60_000 * (1 - k / 6));
+    const depths = Float64Array.from(layers, (layer) => layer.opticalDepth);
+    const solution = solveDiscreteOrdinates({
+      layers,
+      groundAlbedo: 0.2,
+      beamCosines,
+      userCosines: [0.1, 0.45, 0.9],
+      maxMode: 3,
+      beamPaths: beamCosines.map((mu0) => sphericalBeamPath(6_371_000, heights, depths, mu0)),
+      thermal: { interfacePlanck: [0.1, 0.2, 0.4, 0.5, 0.9, 1.1, 1.4], groundPlanck: 1.6 },
+    });
+    const arrays: Float64Array[] = [solution.interfaceDepths];
+    const { thermal } = solution;
+    for (const { fluxes, modes } of [
+      ...solution.beams,
+      ...(thermal === undefined ? [] : [{ fluxes: thermal.fluxes, modes: [thermal.mode] }]),
+    ]) {
+      arrays.push(fluxes.direct, fluxes.diffuseDown, fluxes.diffuseUp, fluxes.meanIntensity);
+      for (const mode of modes) {
+        arrays.push(mode.quadratureUp, mode.quadratureDown, mode.userUp, mode.userDown);
+      }
+    }
+    expect(arrays).toHaveLength(1 + 5 * (4 + 4 * 4) + 4 + 4);
+    expect(digestOf(arrays)).toBe("bc28397ba9670299");
+  });
+});

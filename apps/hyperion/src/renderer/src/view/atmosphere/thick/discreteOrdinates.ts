@@ -552,6 +552,18 @@ interface LayerMode extends HomogeneousSolution {
   readonly eigenvectors: Float64Array;
   /** d_i = 1 ÷ √(w_i μ_i). */
   readonly scale: Float64Array;
+  /**
+   * What the sources take of the layer whatever the beam (R08.T14.b's lever), each formed as the
+   * beam's terms formed it, so that a product with them is the beam's own to the bit: the mode's
+   * w_j Λ_l(μ_j) at `l × N + j` ({@link weightedLegendreTable}); per l, (ω ÷ 2)(2l + 1) χ_l (the
+   * scattered field's) and (2 − δ_m0)(ω ÷ 4π)(2l + 1) χ_l (the beam's); (2l + 1) χ_l Λ_l(μ_i) at
+   * `l × N + i`; and per node, 2 √(w_i ÷ μ_i) (2 − δ_m0)(ω ÷ 4π), q's and p's factor.
+   */
+  readonly weightedNodeLegendre: Float64Array;
+  readonly sourceCoefficients: Float64Array;
+  readonly beamCoefficients: Float64Array;
+  readonly nodeMoments: Float64Array;
+  readonly particularFactors: Float64Array;
 }
 
 /**
@@ -572,7 +584,23 @@ export function homogeneousSolution(
   requireMode(mode, quadrature.streams);
   const prepared = prepareLayer(layer, 0, quadrature.streams);
   const nodeLegendre = legendreTable(mode, quadrature.streams - 1, quadrature.nodes);
-  return layerMode(prepared, mode, quadrature, nodeLegendre);
+  return layerMode(
+    prepared,
+    mode,
+    quadrature,
+    nodeLegendre,
+    weightedLegendreTable(nodeLegendre, quadrature),
+  );
+}
+
+/** w_j Λ_l(μ_j) of a mode's node Legendre table, at `l × N + j`: the half-range moments' weights. */
+function weightedLegendreTable(
+  nodeLegendre: Float64Array,
+  quadrature: DoubleGaussQuadrature,
+): Float64Array {
+  const { weights } = quadrature;
+  const n = weights.length;
+  return nodeLegendre.map((value, k) => at(weights, k % n) * value);
 }
 
 function layerMode(
@@ -580,6 +608,7 @@ function layerMode(
   m: number,
   quadrature: DoubleGaussQuadrature,
   nodeLegendre: Float64Array,
+  weightedNodeLegendre: Float64Array,
 ): LayerMode {
   const { nodes, weights, streams } = quadrature;
   const n = nodes.length;
@@ -689,6 +718,21 @@ function layerMode(
       linear[i] = at(linear, i) * at(scale, i);
     }
   }
+  const strength = (omega * (m === 0 ? 1 : 2)) / (4 * Math.PI);
+  const sourceCoefficients = new Float64Array(lmax + 1);
+  const beamCoefficients = new Float64Array(lmax + 1);
+  const nodeMoments = new Float64Array((lmax + 1) * n);
+  for (let l = m; l <= lmax; l += 1) {
+    sourceCoefficients[l] = (omega / 2) * (2 * l + 1) * at(moments, l);
+    beamCoefficients[l] = strength * (2 * l + 1) * at(moments, l);
+    for (let i = 0; i < n; i += 1) {
+      nodeMoments[l * n + i] = (2 * l + 1) * at(moments, l) * at(nodeLegendre, l * n + i);
+    }
+  }
+  const particularFactors = Float64Array.from(
+    nodes,
+    (mu, i) => Math.sqrt(at(weights, i) / mu) * 2 * strength,
+  );
   return {
     mode: m,
     decayRatesSquared,
@@ -701,6 +745,11 @@ function layerMode(
     cholesky,
     eigenvectors: eigen.vectors,
     scale,
+    weightedNodeLegendre,
+    sourceCoefficients,
+    beamCoefficients,
+    nodeMoments,
+    particularFactors,
   };
 }
 
@@ -747,34 +796,30 @@ function particularScratch(n: number, users: number): ParticularScratch {
  */
 function particularInto(
   lm: LayerMode,
-  quadrature: DoubleGaussQuadrature,
-  nodeLegendre: Float64Array,
   beamLegendre: Float64Array,
   slant: number,
   scratch: ParticularScratch,
 ): void {
-  const { nodes, weights, streams } = quadrature;
-  const n = nodes.length;
-  const lmax = streams - 1;
+  const n = lm.decayRates.length;
+  const lmax = lm.sourceCoefficients.length - 1;
   const m = lm.mode;
-  const { omega, moments } = lm.layer;
-  const strength = (omega * (m === 0 ? 1 : 2)) / (4 * Math.PI);
+  const { nodeMoments, particularFactors } = lm;
   // q and p from X0± at the nodes: X0⁺_i = c Σ (−1)^{l+m} (…) and X0⁻_i = c Σ (…).
   const { q, p, lInvP, t, coefficients, yc, difference, up, down } = scratch;
   for (let i = 0; i < n; i += 1) {
+    // The terms of l + m even, then odd, each summed in l's order.
     let even = 0;
-    let odd = 0;
-    for (let l = m; l <= lmax; l += 1) {
-      const term = (2 * l + 1) * at(moments, l) * at(nodeLegendre, l * n + i) * at(beamLegendre, l);
-      if ((l + m) % 2 === 0) {
-        even += term;
-      } else {
-        odd += term;
-      }
+    for (let l = m; l <= lmax; l += 2) {
+      even += at(nodeMoments, l * n + i) * at(beamLegendre, l);
     }
-    const factor = Math.sqrt(at(weights, i) / at(nodes, i));
-    q[i] = factor * 2 * strength * even;
-    p[i] = -factor * 2 * strength * odd;
+    let odd = 0;
+    for (let l = m + 1; l <= lmax; l += 2) {
+      odd += at(nodeMoments, l * n + i) * at(beamLegendre, l);
+    }
+    // −2 √(w ÷ μ) s is −(2 √(w ÷ μ) s) exactly: the negation commutes with each rounding.
+    const factor = at(particularFactors, i);
+    q[i] = factor * even;
+    p[i] = -factor * odd;
   }
   const { cholesky, eigenvectors: y, decayRatesSquared, scale } = lm;
   lInvP.set(p);
@@ -1074,34 +1119,29 @@ function psi(a: number, b: number, depth: number): number {
  */
 function userSource(
   lm: LayerMode,
-  quadrature: DoubleGaussQuadrature,
-  nodeLegendre: Float64Array,
   userLegendre: Float64Array,
   intensityUp: Float64Array,
   intensityDown: Float64Array,
   outUp: Float64Array,
   outDown: Float64Array,
 ): void {
-  const { weights, streams } = quadrature;
-  const n = weights.length;
+  const { weightedNodeLegendre, sourceCoefficients } = lm;
+  const n = lm.decayRates.length;
   const users = outUp.length;
-  const lmax = streams - 1;
+  const lmax = sourceCoefficients.length - 1;
   const m = lm.mode;
-  const { omega, moments } = lm.layer;
   outUp.fill(0);
   outDown.fill(0);
   for (let l = m; l <= lmax; l += 1) {
     const sign = (l + m) % 2 === 0 ? 1 : -1;
-    const coefficient = (omega / 2) * (2 * l + 1) * at(moments, l);
+    const coefficient = at(sourceCoefficients, l);
     if (coefficient === 0) {
       continue;
     }
     let half = 0;
     for (let j = 0; j < n; j += 1) {
       half +=
-        at(weights, j) *
-        at(nodeLegendre, l * n + j) *
-        (at(intensityUp, j) + sign * at(intensityDown, j));
+        at(weightedNodeLegendre, l * n + j) * (at(intensityUp, j) + sign * at(intensityDown, j));
     }
     const c = coefficient * half;
     for (let u = 0; u < users; u += 1) {
@@ -1125,8 +1165,6 @@ interface UserTransfer {
 
 function userTransfer(
   lm: LayerMode,
-  quadrature: DoubleGaussQuadrature,
-  nodeLegendre: Float64Array,
   userLegendre: Float64Array,
   userCosines: Float64Array,
 ): UserTransfer {
@@ -1147,32 +1185,14 @@ function userTransfer(
       // The constant solution's source, ≈ 1, and the linear one's: t × it plus that of (u, −u).
       vectorUp.fill(1);
       vectorDown.fill(1);
-      userSource(
-        lm,
-        quadrature,
-        nodeLegendre,
-        userLegendre,
-        vectorUp,
-        vectorDown,
-        sourceUp,
-        sourceDown,
-      );
+      userSource(lm, userLegendre, vectorUp, vectorDown, sourceUp, sourceDown);
       const constantUp = Float64Array.from(sourceUp);
       const constantDown = Float64Array.from(sourceDown);
       for (let i = 0; i < n; i += 1) {
         vectorUp[i] = at(lm.linear, i);
         vectorDown[i] = -at(lm.linear, i);
       }
-      userSource(
-        lm,
-        quadrature,
-        nodeLegendre,
-        userLegendre,
-        vectorUp,
-        vectorDown,
-        sourceUp,
-        sourceDown,
-      );
+      userSource(lm, userLegendre, vectorUp, vectorDown, sourceUp, sourceDown);
       for (let u = 0; u < users; u += 1) {
         const mu = at(userCosines, u);
         const passed = -expm1(-depth / mu);
@@ -1190,16 +1210,7 @@ function userTransfer(
       vectorUp[i] = at(lm.up, k * n + i);
       vectorDown[i] = at(lm.down, k * n + i);
     }
-    userSource(
-      lm,
-      quadrature,
-      nodeLegendre,
-      userLegendre,
-      vectorUp,
-      vectorDown,
-      sourceUp,
-      sourceDown,
-    );
+    userSource(lm, userLegendre, vectorUp, vectorDown, sourceUp, sourceDown);
     const rate = at(lm.decayRates, k);
     for (let u = 0; u < users; u += 1) {
       const mu = at(userCosines, u);
@@ -1449,6 +1460,7 @@ export function solveDiscreteOrdinates(
   const planck =
     problem.thermal === undefined ? undefined : checkedThermal(problem.thermal, layers);
   const perBeam: ModeIntensities[][] = beams.map(() => []);
+  const exponentials = beams.map(() => beamExponentials(layerCount, userCosines.length));
   let thermal: ThermalSolution | undefined;
   for (let m = 0; m <= problem.maxMode; m += 1) {
     const ground =
@@ -1456,7 +1468,7 @@ export function solveDiscreteOrdinates(
         ? undefined
         : groundModeTerms(groundReflectance, m, quadrature, userCosines, beamCosines);
     const context = modeContext(m, quadrature, layers, userCosines, problem.groundAlbedo, ground);
-    solveBeamModes(context, beams).forEach((mode, b) => {
+    solveBeamModes(context, beams, exponentials).forEach((mode, b) => {
       perBeam[b]?.push(mode);
     });
     if (m === 0 && planck !== undefined) {
@@ -1548,11 +1560,12 @@ function modeContext(
   const n = quadrature.nodes.length;
   const nodeLegendre = legendreTable(m, lmax, quadrature.nodes);
   const userLegendre = legendreTable(m, lmax, userCosines);
-  const layerModes = layers.map((layer) => layerMode(layer, m, quadrature, nodeLegendre));
-  const faces = layerModes.map(scalarFaces);
-  const transfers = layerModes.map((lm) =>
-    userTransfer(lm, quadrature, nodeLegendre, userLegendre, userCosines),
+  const weightedNodeLegendre = weightedLegendreTable(nodeLegendre, quadrature);
+  const layerModes = layers.map((layer) =>
+    layerMode(layer, m, quadrature, nodeLegendre, weightedNodeLegendre),
   );
+  const faces = layerModes.map(scalarFaces);
+  const transfers = layerModes.map((lm) => userTransfer(lm, userLegendre, userCosines));
   let reflection: Float64Array | undefined;
   if (m === 0 && groundAlbedo > 0) {
     const r = new Float64Array(n * n);
@@ -1597,6 +1610,7 @@ interface BeamSolve {
 function solveBeamModes(
   context: ModeContext,
   beams: ReadonlyArray<PreparedBeam>,
+  exponentials: ReadonlyArray<BeamExponentials>,
 ): ModeIntensities[] {
   const { m, quadrature, layerModes, userCosines, stack } = context;
   const n = quadrature.nodes.length;
@@ -1638,7 +1652,11 @@ function solveBeamModes(
   const particulars = solves.map((solve, j): ModeParticulars => {
     legendreInto(m, quadrature.streams - 1, solve.beam.cosine, beamLegendre, 0, 1);
     const parts = modeParticulars(layerCount, span, users);
-    beamParticularsInto(context, solve.beam, solve.slantFactor, beamLegendre, scratch, parts);
+    const own = exponentials[solve.beam.index];
+    if (own === undefined) {
+      throw new Error(`beam ${solve.beam.index} has no exponentials`);
+    }
+    beamParticularsInto(context, solve.beam, solve.slantFactor, beamLegendre, own, scratch, parts);
     rightHandSideInto(
       stack,
       parts,
@@ -1686,34 +1704,72 @@ function solveBeamModes(
 }
 
 /**
+ * A beam's exponentials through each layer, the same at every mode: e^{−λ_p Δ_p}, and per user
+ * cosine φ(λ_p + 1 ÷ μ_u, Δ_p) and ψ(λ_p, 1 ÷ μ_u, Δ_p) at `p × U + u`, made at the beam's first
+ * solve of the layer at its own slant factor and read at the rest (R08.T14.b's lever), the same
+ * calls' results to the bit.
+ */
+interface BeamExponentials {
+  /** Whether layer p's are made. */
+  readonly made: Uint8Array;
+  readonly through: Float64Array;
+  readonly along: Float64Array;
+  readonly against: Float64Array;
+}
+
+function beamExponentials(layerCount: number, users: number): BeamExponentials {
+  return {
+    made: new Uint8Array(layerCount),
+    through: new Float64Array(layerCount),
+    along: new Float64Array(layerCount * users),
+    against: new Float64Array(layerCount * users),
+  };
+}
+
+/**
  * A beam's particular solutions in every layer at its slant factors, into `out` (zeros where the
  * beam does not reach or the layer does not scatter), with the source they and the beam itself give
- * the user streams.
+ * the user streams; its exponentials from `exponentials` where a layer's slant factor is the beam's
+ * own.
  */
 function beamParticularsInto(
   context: ModeContext,
   beam: PreparedBeam,
   slantFactor: Float64Array,
   beamLegendre: Float64Array,
+  exponentials: BeamExponentials,
   scratch: ParticularScratch,
   out: ModeParticulars,
 ): void {
-  const { m, quadrature, layerModes, nodeLegendre, userLegendre, userCosines } = context;
+  const { m, quadrature, layerModes, userLegendre, userCosines } = context;
   const n = quadrature.nodes.length;
   const span = 2 * n;
   const users = userCosines.length;
   const { sourceUp, sourceDown } = scratch;
+  const { made, through: throughs, along, against } = exponentials;
   layerModes.forEach((lm, p) => {
     const transmission = at(beam.topTransmission, p);
     const lambda = at(slantFactor, p);
-    const { omega, opticalDepth: depth, moments } = lm.layer;
+    const { omega, opticalDepth: depth } = lm.layer;
     if (!(transmission > 0 && omega > 0)) {
       return;
     }
-    particularInto(lm, quadrature, nodeLegendre, beamLegendre, lambda, scratch);
+    const row = p * users;
+    const own = lambda === at(beam.slantFactor, p);
+    if (!own || made[p] === 0) {
+      throughs[p] = exp(-lambda * depth);
+      for (let u = 0; u < users; u += 1) {
+        const inverse = 1 / at(userCosines, u);
+        along[row + u] = phi(lambda + inverse, depth);
+        against[row + u] = psi(lambda, inverse, depth);
+      }
+      // A shifted solve's are its own: the next solve at the beam's slant makes the layer's anew.
+      made[p] = own ? 1 : 0;
+    }
+    particularInto(lm, beamLegendre, lambda, scratch);
     const zUp = scratch.up;
     const zDown = scratch.down;
-    const through = exp(-lambda * depth);
+    const through = at(throughs, p);
     const face = p * span;
     for (let i = 0; i < n; i += 1) {
       out.top[face + i] = transmission * at(zUp, i);
@@ -1723,11 +1779,11 @@ function beamParticularsInto(
     }
     // The source at the user cosines: the scattered particular solution and the beam itself,
     // X0(+μ_u) = c Σ (2l + 1) χ_l (−1)^{l+m} Λ_l(μ_u) Λ_l(μ₀) and X0(−μ_u) without the sign.
-    userSource(lm, quadrature, nodeLegendre, userLegendre, zUp, zDown, sourceUp, sourceDown);
-    const strength = (omega * (m === 0 ? 1 : 2)) / (4 * Math.PI);
+    userSource(lm, userLegendre, zUp, zDown, sourceUp, sourceDown);
+    const { beamCoefficients } = lm;
     for (let l = m; l < quadrature.streams; l += 1) {
       const sign = (l + m) % 2 === 0 ? 1 : -1;
-      const c = strength * (2 * l + 1) * at(moments, l) * at(beamLegendre, l);
+      const c = at(beamCoefficients, l) * at(beamLegendre, l);
       if (c === 0) {
         continue;
       }
@@ -1737,12 +1793,10 @@ function beamParticularsInto(
         sourceDown[u] = at(sourceDown, u) + term;
       }
     }
-    const row = p * users;
     for (let u = 0; u < users; u += 1) {
       const inverse = 1 / at(userCosines, u);
-      out.userUp[row + u] = transmission * at(sourceUp, u) * inverse * phi(lambda + inverse, depth);
-      out.userDown[row + u] =
-        transmission * at(sourceDown, u) * inverse * psi(lambda, inverse, depth);
+      out.userUp[row + u] = transmission * at(sourceUp, u) * inverse * at(along, row + u);
+      out.userDown[row + u] = transmission * at(sourceDown, u) * inverse * at(against, row + u);
     }
   });
 }
@@ -2074,17 +2128,8 @@ function solveThermalMode(
         particulars.bottom[p * span + r] = b0 + b1 * depth + b1 * at(z, r);
       }
       // The source at the user cosines: (b₀ + b₁t)(1 − ω + ω̃) + b₁ J_z, ω̃ the constant's.
-      userSource(lm, quadrature, nodeLegendre, userLegendre, ones, ones, constantUp, constantDown);
-      userSource(
-        lm,
-        quadrature,
-        nodeLegendre,
-        userLegendre,
-        z.subarray(0, n),
-        z.subarray(n),
-        slopeUp,
-        slopeDown,
-      );
+      userSource(lm, userLegendre, ones, ones, constantUp, constantDown);
+      userSource(lm, userLegendre, z.subarray(0, n), z.subarray(n), slopeUp, slopeDown);
       const transfer = transfers[p];
       if (transfer === undefined) {
         throw new Error(`layer ${p} has no user-angle transfer`);

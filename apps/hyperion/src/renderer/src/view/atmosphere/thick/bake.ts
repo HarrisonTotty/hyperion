@@ -1380,12 +1380,31 @@ function solveOf(
   const { nodes, weights } = solution.quadrature;
   const n = nodes.length;
   const half = new Float64Array(order);
+  // Per mode w_n Λ_l(μ_n), and per point and mode (2l + 1) χ_l Λ_l(μ_u): the products the sums
+  // below took term by term, formed once as they formed them (R08.T14.b's lever).
+  const weightedNodes = legendre.nodes.map((nodeL) =>
+    nodeL.map((value, i) => (weights[i % n] ?? Number.NaN) * value),
+  );
+  const viewMoments = legendre.views.map((viewL) => new Float64Array(viewL.length));
   for (let a = 0; a < altitudes; a += 1) {
     const point = points[a];
     if (point === undefined || point.scatteringPerM === 0) {
       continue;
     }
     const k = layers - a * grid.altitudeStride;
+    for (let m = 0; m < THICK_BAKE_MODES; m += 1) {
+      const viewL = legendre.views[m];
+      const moments = viewMoments[m];
+      if (viewL === undefined || moments === undefined) {
+        throw new Error(`no mode ${m}`);
+      }
+      for (let l = m; l < order; l += 1) {
+        for (let u = 0; u < views; u += 1) {
+          moments[l * views + u] =
+            (2 * l + 1) * (point.moments[l] ?? Number.NaN) * (viewL[l * views + u] ?? Number.NaN);
+        }
+      }
+    }
     for (let s = 0; s < suns; s += 1) {
       const beam = solution.beams[s];
       const tScaled = scaledBeams[s]?.interfaceTransmission[k] ?? Number.NaN;
@@ -1401,13 +1420,13 @@ function solveOf(
         ((1 - point.forwardDelta) * 4 * Math.PI * meanDiffuse + point.kept * aureole);
       for (let m = 0; m < THICK_BAKE_MODES; m += 1) {
         const mode = beam.modes[m];
-        const nodeL = legendre.nodes[m];
-        const viewL = legendre.views[m];
+        const weightedNodeL = weightedNodes[m];
+        const viewMomentsL = viewMoments[m];
         const sunL = legendre.suns[m];
         if (
           mode === undefined ||
-          nodeL === undefined ||
-          viewL === undefined ||
+          weightedNodeL === undefined ||
+          viewMomentsL === undefined ||
           sunL === undefined
         ) {
           throw new Error(`no mode ${m}`);
@@ -1418,8 +1437,7 @@ function solveOf(
           let sum = 0;
           for (let j = 0; j < n; j += 1) {
             sum +=
-              (weights[j] ?? Number.NaN) *
-              (nodeL[l * n + j] ?? Number.NaN) *
+              (weightedNodeL[l * n + j] ?? Number.NaN) *
               ((mode.quadratureUp[k * n + j] ?? Number.NaN) +
                 sign * (mode.quadratureDown[k * n + j] ?? Number.NaN));
           }
@@ -1427,22 +1445,20 @@ function solveOf(
         }
         const azimuthal = (m === 0 ? 1 : 2) / (4 * Math.PI);
         for (let u = 0; u < views; u += 1) {
+          // The terms of l + m even, then odd, each summed in l's order.
           let even = 0;
-          let odd = 0;
           let beamEven = 0;
+          for (let l = m; l < order; l += 2) {
+            const c = viewMomentsL[l * views + u] ?? Number.NaN;
+            even += c * (half[l] ?? Number.NaN);
+            beamEven += c * (sunL[l * suns + s] ?? Number.NaN);
+          }
+          let odd = 0;
           let beamOdd = 0;
-          for (let l = m; l < order; l += 1) {
-            const c =
-              (2 * l + 1) * (point.moments[l] ?? Number.NaN) * (viewL[l * views + u] ?? Number.NaN);
-            const diffuse = c * (half[l] ?? Number.NaN);
-            const scatteredBeam = c * (sunL[l * suns + s] ?? Number.NaN);
-            if ((l + m) % 2 === 0) {
-              even += diffuse;
-              beamEven += scatteredBeam;
-            } else {
-              odd += diffuse;
-              beamOdd += scatteredBeam;
-            }
+          for (let l = m + 1; l < order; l += 2) {
+            const c = viewMomentsL[l * views + u] ?? Number.NaN;
+            odd += c * (half[l] ?? Number.NaN);
+            beamOdd += c * (sunL[l * suns + s] ?? Number.NaN);
           }
           // Upward at +μ_u: ½ Σ c H, and the beam at −μ₀ through (−1)^{l+m}; downward the reverse.
           const smoothUp = 0.5 * (even + odd) + azimuthal * (beamEven - beamOdd) * aureole;
