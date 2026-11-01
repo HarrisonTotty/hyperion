@@ -8,8 +8,9 @@
 //! 4.26 Myr. A galaxy's own start, its gas's cap + L + H (3.85 Myr in the Milky Way fixture), lies
 //! within it, so no survivor is both an entry and the class's. Those launched between the two,
 //! a few per cent, are neither, so that the class, as every other part of the fields, does not
-//! depend on the seed through its gas's drawn pressure floor (lean, 2026-11-01). At the galaxy's own Type Ia rate, steady over the survivors' 10–20 Myr in the cube,
-//! population i of [`SURVIVOR_POPULATIONS`] then holds `rate × shareᵢ × (path ÷ v_eff,ᵢ − S)`,
+//! depend on the seed through its gas's drawn pressure floor (lean, 2026-11-01). At the galaxy's
+//! own Type Ia rate, steady over the survivors' 10–20 Myr in the cube, population i of
+//! [`SURVIVOR_POPULATIONS`] then holds `rate × shareᵢ × (path ÷ v_eff,ᵢ − S)`,
 //! with `path` the form table's mean path from launch to the cube's face (P15.T6.f) and `v_eff,ᵢ`
 //! the population's `1 ÷ ⟨1 ÷ v⟩`. That is ruling 128.1's weight less the interval. The rate is
 //! the whole galaxy's ([`DelayTimeDistribution::from_galaxy`]), whose every Type Ia leaves its
@@ -23,11 +24,19 @@
 //!   by bisection;
 //! - its time since launch, on `runaway.ejection`, uniform on `[S, path ÷ v]`.
 //!
-//! Placement draws its star from them (`placement::marks`), and the kinematics its velocity:
-//! that speed, straight away from the galactic centre, the centre of `HYPERVELOCITY`'s cored power
-//! law, whose γ ≈ 2 is a central source's `1 ÷ r²` (lean, 2026-11-01). The survivors outrun plan
-//! 03's pad, so from the same version layer D pads at `UNBOUND_PAD_SPEED`
-//! ([`pad_speed_in`](crate::galaxy::query::pad_speed_in)).
+//! From them follow the survivor's star and its line:
+//!
+//! - **The donor.** A survivor is its double detonation's donor, flung out at its orbital speed at
+//!   Roche-lobe contact beside an accretor of [`ACCRETOR_MASS`] ([`contact_speed`], by Eggleton's
+//!   lobe and Nauenberg's cold radius), so its mass is its speed's inverse, [`donor_mass`]: about
+//!   0.15–0.28 M☉ in the slow band, a helium white dwarf, and 0.87–1.0 M☉ in the fast, a C/O white
+//!   dwarf ([`DonorKind`]). Placement gives each its star (`placement::marks`).
+//! - **The motion.** It flies in a straight line at its speed, straight away from the galactic
+//!   centre, the centre of `HYPERVELOCITY`'s cored power law, whose γ ≈ 2 is a central source's
+//!   `1 ÷ r²` (lean, 2026-11-01).
+//!
+//! The survivors outrun plan 03's pad, so from the same version layer D pads at
+//! `UNBOUND_PAD_SPEED` ([`pad_speed_in`](crate::galaxy::query::pad_speed_in)).
 
 use super::class_table::{FormTable, SURVIVOR_POPULATIONS, SurvivorPopulation};
 use crate::GeneratorVersion;
@@ -35,11 +44,13 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::supernova::SupernovaInterval;
 use crate::galaxy::catalogue_classes::type_ia::DelayTimeDistribution;
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
+use crate::galaxy::imf::MASS_BAND_EDGES;
 use crate::galaxy::snr::SHELL_WINDOW_CAP;
 use crate::id::SystemId;
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
-use crate::units::{KilometresPerSecond, Years};
+use crate::units::consts::{GM_SUN, SOLAR_RADIUS_M};
+use crate::units::{KilometresPerSecond, SolarMasses, Years};
 
 /// The generator version from which the hypervelocity survivors' class has its weight
 /// ([`Survivors`], the hold of [`HypervelocityRules`]).
@@ -63,8 +74,118 @@ pub(crate) enum HypervelocityRules {
     Weighted,
 }
 
-/// Bisection steps of a survivor's speed quantile: 2⁻⁴⁸ of its band.
+/// Bisection steps of a survivor's speed quantile, 2⁻⁴⁸ of its band, and of its donor's mass.
 const SPEED_BISECTIONS: u32 = 48;
+
+/// The accretor whose detonation flings the donor out: a 1.0 M☉ C/O white dwarf, the mass whose
+/// bare detonation gives a normal Type Ia's nickel (Shen et al. 2018, ApJ 854, 52) (lean,
+/// 2026-11-01).
+pub const ACCRETOR_MASS: SolarMasses = SolarMasses::new(1.0);
+
+/// The lightest donor: a 0.15 M☉ helium white dwarf, about the least that degenerate helium cores
+/// make (the extremely low-mass white dwarfs' 0.15–0.3 M☉; Brown et al. 2016, ApJ 818, 155). A
+/// survivor slower than its contact speed, 1,290 km/s, takes it (lean, 2026-11-01).
+pub const LIGHTEST_DONOR: SolarMasses = SolarMasses::new(0.15);
+
+/// The heaviest helium white dwarf the class's donors are: 0.30 M☉, under the lightest naked helium
+/// star that burns helium in the stellar stage, 0.31–0.35 M☉ over its metallicities (the core at
+/// an `M_HeF` star's helium ignition, `Track::helium_star`), which builds it. Nature's helium
+/// white dwarfs reach about 0.45 M☉, under the degenerate core at the helium flash (Hurley, Pols
+/// and Tout 2000, MNRAS 315, 543); a heavier donor here is a C/O white dwarf. The bands' donors
+/// lie on either side of both, 0.15–0.28 M☉ and 0.87–1.0 M☉.
+pub const HEAVIEST_HELIUM_WHITE_DWARF: SolarMasses = SolarMasses::new(0.30);
+
+/// Nauenberg's (1972, ApJ 175, 417) mass M₃ of a cold white dwarf's radius law: 5.816 ÷ μₑ² M☉ at
+/// μₑ = 2, 1.454 M☉.
+const NAUENBERG_MASS: SolarMasses = SolarMasses::new(5.816 / 4.0);
+
+/// Nauenberg's radius scale, R☉: R = 0.0112 R☉ [(M ÷ M₃)^−2/3 − (M ÷ M₃)^2/3]^1/2.
+const NAUENBERG_RADIUS_SOLAR: f64 = 0.0112;
+
+/// What a survivor's donor is (module documentation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum DonorKind {
+    /// A helium white dwarf, up to [`HEAVIEST_HELIUM_WHITE_DWARF`]: the slow band's.
+    Helium,
+    /// A C/O white dwarf, or an O/Ne one of the heaviest progenitors: the fast band's.
+    CarbonOxygen,
+}
+
+impl DonorKind {
+    /// The kind of a donor of `mass`.
+    #[must_use]
+    pub fn of(mass: SolarMasses) -> Self {
+        if mass.value() <= HEAVIEST_HELIUM_WHITE_DWARF.value() {
+            Self::Helium
+        } else {
+            Self::CarbonOxygen
+        }
+    }
+}
+
+/// A cold white dwarf's radius, m, at `mass`: Nauenberg's (1972) law
+/// ([`NAUENBERG_RADIUS_SOLAR`]), for 0 < `mass` < M₃.
+#[must_use]
+fn cold_white_dwarf_radius_m(mass: SolarMasses) -> f64 {
+    let x = math::powf(mass.value() / NAUENBERG_MASS.value(), 2.0 / 3.0);
+    NAUENBERG_RADIUS_SOLAR * SOLAR_RADIUS_M * (1.0 / x - x).max(0.0).sqrt()
+}
+
+/// The donor's Roche lobe over the separation at mass ratio `q`, donor over accretor: Eggleton's
+/// (1983, ApJ 268, 368) 0.49 q^2/3 ÷ (0.6 q^2/3 + ln(1 + q^1/3)).
+#[must_use]
+fn roche_lobe_share(q: f64) -> f64 {
+    let q13 = math::cbrt(q);
+    let q23 = q13 * q13;
+    0.49 * q23 / (0.6 * q23 + math::ln(1.0 + q13))
+}
+
+/// A donor's orbital speed at Roche-lobe contact beside an accretor, a cold white dwarf of
+/// `donor` filling its lobe (module documentation).
+///
+/// It is `M₁ ÷ (M₁ + M₂) × √(G (M₁ + M₂) ÷ a)` with the separation `a = R₂ ÷ r_L(M₂ ÷ M₁)`: the
+/// donor's speed about the pair's centre of mass when the accretor detonates, km/s. It holds for
+/// donors of 0 < M₂ < Nauenberg's M₃, 1.454 M☉, past which the cold radius vanishes.
+#[must_use]
+pub fn contact_speed(donor: SolarMasses, accretor: SolarMasses) -> KilometresPerSecond {
+    let (m1, m2) = (accretor.value(), donor.value());
+    let a = cold_white_dwarf_radius_m(donor) / roche_lobe_share(m2 / m1);
+    let orbit = (GM_SUN * (m1 + m2) / a).sqrt();
+    KilometresPerSecond::new(m1 / (m1 + m2) * orbit / 1_000.0)
+}
+
+/// The donor whose contact speed beside [`ACCRETOR_MASS`] is `speed`: [`contact_speed`]'s inverse,
+/// by bisection, held to [`LIGHTEST_DONOR`] and the accretor's own mass, which a donor's cannot
+/// pass.
+#[must_use]
+pub fn donor_mass(speed: KilometresPerSecond) -> SolarMasses {
+    let v = |m: f64| contact_speed(SolarMasses::new(m), ACCRETOR_MASS).value();
+    let (mut lo, mut hi) = (LIGHTEST_DONOR.value(), ACCRETOR_MASS.value());
+    if speed.value() <= v(lo) {
+        return LIGHTEST_DONOR;
+    }
+    if speed.value() >= v(hi) {
+        return ACCRETOR_MASS;
+    }
+    for _ in 0..SPEED_BISECTIONS {
+        let mid = f64::midpoint(lo, hi);
+        if v(mid) < speed.value() {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    SolarMasses::new(f64::midpoint(lo, hi))
+}
+
+/// The initial mass of a C/O donor's progenitor: Kalirai et al.'s (2008, ApJ 676, 594) initial–
+/// final relation, `M_wd = 0.109 M_i + 0.394` M☉, inverted, held to layer D's masses, the class's
+/// layer, 2.5–8 M☉.
+#[must_use]
+pub fn donor_progenitor_mass(donor: SolarMasses) -> SolarMasses {
+    let initial = (donor.value() - 0.394) / 0.109;
+    SolarMasses::new(initial.clamp(MASS_BAND_EDGES[3], MASS_BAND_EDGES[4]))
+}
 
 /// One of [`SURVIVOR_POPULATIONS`]: the slow donors or the fast (ruling 128.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -112,12 +233,14 @@ pub struct Survivors {
     mean_exit_ly: f64,
 }
 
-/// A hypervelocity survivor's flight: its population, its launch speed and its time since launch.
+/// A hypervelocity survivor's flight: its population, its launch speed, its time since launch and
+/// its donor's mass.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurvivorFlight {
     band: SurvivorBand,
     speed: KilometresPerSecond,
     since_launch: Years,
+    donor: SolarMasses,
 }
 
 impl SurvivorFlight {
@@ -137,6 +260,18 @@ impl SurvivorFlight {
     #[must_use]
     pub const fn since_launch(&self) -> Years {
         self.since_launch
+    }
+
+    /// Its donor's mass, the white dwarf it is: its speed's ([`donor_mass`]).
+    #[must_use]
+    pub const fn donor(&self) -> SolarMasses {
+        self.donor
+    }
+
+    /// What its donor is.
+    #[must_use]
+    pub fn donor_kind(&self) -> DonorKind {
+        DonorKind::of(self.donor)
     }
 }
 
@@ -276,6 +411,7 @@ impl Survivors {
             band,
             speed: launch,
             since_launch: self.since_launch(launch, open(tags::RUNAWAY_EJECTION).uniform()),
+            donor: donor_mass(launch),
         }
     }
 }
@@ -305,6 +441,7 @@ fn survivors_launched_before(
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::stats::{ALPHA, assert_p_value, normal_cdf};
 
     use super::*;
@@ -396,6 +533,62 @@ mod tests {
                 assert!((share - u).abs() < 1e-6, "{band:?}: {share} at {u}");
             }
         }
+    }
+
+    /// The donor's contact speed beside a 1.0 M☉ accretor against its mass, to 2% of a hand
+    /// computation of cold donors filling their lobes by the same two laws with M₃ = 1.44 M☉, which
+    /// Nauenberg's own 1.454 M☉ runs 0.2–0.7% under: 1,289 km/s at 0.15 M☉, 1,386 at 0.2, 1,527 at
+    /// 0.3, 1,716 at 0.5, 1,869 at 0.7, 2,038 at 0.9 and 2,146 at 1.0; and the speed rises with the
+    /// donor's mass, which inverts it.
+    #[test]
+    fn the_contact_speed_follows_the_donors_mass() {
+        let accretor = ACCRETOR_MASS;
+        for (donor, km_s) in [
+            (0.15, 1_289.0),
+            (0.2, 1_386.0),
+            (0.3, 1_527.0),
+            (0.5, 1_716.0),
+            (0.7, 1_869.0),
+            (0.9, 2_038.0),
+            (1.0, 2_146.0),
+        ] {
+            let v = contact_speed(SolarMasses::new(donor), accretor).value();
+            assert!(
+                (v / km_s - 1.0).abs() < 0.02,
+                "{donor} M☉: {v} km/s against {km_s}"
+            );
+            let back = donor_mass(KilometresPerSecond::new(v)).value();
+            assert!((back - donor).abs() < 1e-9, "{donor} M☉ back as {back}");
+        }
+        // The other accretors of the table, 0.8 and 1.1 M☉, at 0.3 M☉.
+        for (accretor, km_s) in [(0.8, 1_368.0), (1.1, 1_598.0)] {
+            let v = contact_speed(SolarMasses::new(0.3), SolarMasses::new(accretor)).value();
+            assert!(
+                (v / km_s - 1.0).abs() < 0.02,
+                "{accretor} M☉: {v} km/s against {km_s}"
+            );
+        }
+        // The bands' donors: the slow band's helium white dwarfs, held at the lightest below its
+        // contact speed, and the fast band's C/O ones, held at the accretor's mass above its.
+        let mass = |km_s: f64| donor_mass(KilometresPerSecond::new(km_s));
+        assert_same_bits(mass(1_000.0).value(), LIGHTEST_DONOR.value());
+        let slowest_top = mass(SurvivorBand::Slow.population().max_km_s);
+        assert_eq!(DonorKind::of(slowest_top), DonorKind::Helium);
+        assert!(
+            slowest_top.value() < HEAVIEST_HELIUM_WHITE_DWARF.value(),
+            "{slowest_top:?}"
+        );
+        let fastest_foot = mass(SurvivorBand::Fast.population().min_km_s);
+        assert_eq!(DonorKind::of(fastest_foot), DonorKind::CarbonOxygen);
+        assert!(fastest_foot.value() > 0.8, "{fastest_foot:?}");
+        assert_same_bits(mass(2_500.0).value(), ACCRETOR_MASS.value());
+        // A C/O donor's progenitor is of layer D's masses.
+        for donor in [0.5, 0.666, 0.9, 1.0] {
+            let initial = donor_progenitor_mass(SolarMasses::new(donor)).value();
+            assert!((2.5..=8.0).contains(&initial), "{donor}: {initial}");
+        }
+        let initial = donor_progenitor_mass(SolarMasses::new(0.9)).value();
+        assert!((initial - (0.9 - 0.394) / 0.109).abs() < 1e-12, "{initial}");
     }
 
     /// A flight's time since launch is never under S, nor over the path at its speed, and its

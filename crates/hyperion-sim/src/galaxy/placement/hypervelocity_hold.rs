@@ -7,9 +7,9 @@
 //!   held arm plan 03's pad;
 //! - every exempt class padded with the class's weight (P08.T12.d's check), the survivors alone in
 //!   layer D;
-//! - each survivor launched before the Type Ia class's interval, a white dwarf already when it
-//!   was, moving straight out at its speed below layer D's pad, as P08.T17's debug assertion holds,
-//!   and the same twice;
+//! - each survivor launched before the Type Ia class's interval, its donor a helium white dwarf
+//!   of its speed's mass or a C/O one already when it was, moving straight out at its speed below
+//!   layer D's pad, as P08.T17's debug assertion holds, and the same twice;
 //! - layer D's cells visited at |t| = H rising by under a third with its raised pad;
 //! - and, slow, at t = ±H a 50 ly query about each of 100 centres, each with a survivor within
 //!   15 ly outside it at the epoch, equal to the brute-force enumeration.
@@ -26,13 +26,15 @@ use hyperion_testkit::threads::in_shares;
 
 use super::candidate::Picked;
 use super::velocity_hold::exempt_classes_padded;
-use super::{CellKey, NoCache, SystemRecord, generate_cell, marks, survivor_flight};
+use super::{
+    CellKey, NoCache, SystemRecord, generate_cell, is_helium_donor, marks, survivor_flight,
+};
 use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::galaxy::catalogue_classes::supernova::SupernovaInterval;
 use crate::galaxy::displaced::class_table::{ClassKey, hypervelocity_class};
 use crate::galaxy::displaced::hold::displaced;
-use crate::galaxy::displaced::survivors::SurvivorBand;
+use crate::galaxy::displaced::survivors::{DonorKind, SurvivorBand, SurvivorFlight};
 use crate::galaxy::displaced::{DisplacedKind, PlacementClass};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::kinematics::draw;
@@ -46,8 +48,9 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::snr::ShellEnvironment;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
+use crate::stellar::Phase;
+use crate::stellar::brief::BriefModel;
 use crate::stellar::multiplicity::MultiplicityContext;
-use crate::stellar::remnant::RemnantKind;
 use crate::stellar::system::SystemStars;
 use crate::time::{CLOCK_WINDOW_H, UniverseTime};
 use crate::units::consts::SPEED_OF_LIGHT;
@@ -270,13 +273,103 @@ fn survivors_at(
         .collect()
 }
 
-/// At the Sun-like point, above the bulge and in the halo, each survivor's marks: launched no later
-/// than the Type Ia class's interval's start, where the entries take over, nor before its path
-/// across the cube allows; of layer D's masses, born in a component with Type Ia, and dead before
-/// its launch, as the stellar stage builds its star, a white dwarf. Its velocity is its launch
-/// speed straight away from the centre, under layer D's pad, and `epoch_velocity` (whose debug
-/// assertion, P08.T17's, holds it below the pad) gives it. The populations come in the counts'
-/// odds.
+/// What a test knows of a survivor's marks: the lifetime they gave, where it drew them, or nothing,
+/// for a record a cell generated.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Marked {
+    /// The marks' lifetime.
+    Lifetime(Option<f64>),
+    /// A generated record's, whose marks are not at hand.
+    Generated,
+}
+
+/// Checks the survivor `record` (whose marks are `marked`) and gives its flight and its star's
+/// phase at the epoch: launched no later than the Type Ia class's interval's
+/// start, where the entries take over, nor before its path across the cube allows, born in a
+/// component with Type Ia; its donor of its speed's mass, a helium white dwarf of that mass and
+/// age, or a C/O or O/Ne one whose layer-D progenitor died before the launch, as the stellar stage
+/// builds the star; and its velocity its speed straight out from the centre, under layer D's pad,
+/// as `epoch_velocity` (whose debug assertion, P08.T17's, holds it below the pad) gives it.
+fn check_survivor(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    marked: Marked,
+) -> (SurvivorFlight, Phase) {
+    let survivors = galaxy
+        .fields()
+        .displaced()
+        .and_then(|fields| fields.class_table().survivors())
+        .expect("weighted under every 27 hold");
+    assert!(is_survivor(record), "{record:?}");
+    assert_eq!(record.layer(), Layer::D);
+    let flight = survivor_flight(galaxy, record).expect("a survivor has its flight");
+    let since = flight.since_launch().value();
+    let band = flight.band().population();
+    let v = flight.speed().value();
+    assert!((band.min_km_s..=band.max_km_s).contains(&v), "{flight:?}");
+    assert!(since >= survivors.youngest().value(), "{flight:?}");
+    let inside = survivors.mean_exit_ly() / (v / (SPEED_OF_LIGHT / 1_000.0));
+    assert!(since <= inside * (1.0 + 1e-12), "{flight:?}");
+    let born = record.component().expect("a grid record has a component");
+    assert!(survivors.births_per_year()[born.index()] > 0.0, "{born:?}");
+    let stars = SystemStars::generate_in(galaxy, record, MultiplicityContext::ForcedSingle);
+    let primary = stars.primary();
+    let state = primary
+        .state_at(UniverseTime::EPOCH)
+        .expect("a survivor's white dwarf is born");
+    let mass = record.primary_initial_mass();
+    match (flight.band(), flight.donor_kind()) {
+        (SurvivorBand::Slow, DonorKind::Helium) => {
+            assert_same_bits(mass.value(), flight.donor().value());
+            assert!((0.15..=0.5).contains(&mass.value()), "{flight:?}");
+            assert_eq!(state.phase(), Phase::HeliumWhiteDwarf, "{flight:?}");
+            assert!(
+                (state.mass().value() - mass.value()).abs() < 1e-9,
+                "{state:?}"
+            );
+            assert_same_bits(record.age_at_epoch().value(), since);
+            assert!(matches!(marked, Marked::Lifetime(None) | Marked::Generated));
+        }
+        (SurvivorBand::Fast, DonorKind::CarbonOxygen) => {
+            assert!((2.5..=8.0).contains(&mass.value()), "{mass:?}");
+            assert!(
+                matches!(
+                    state.phase(),
+                    Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
+                ),
+                "{state:?}"
+            );
+            let death = primary.death().expect("a dead progenitor").age().value();
+            match marked {
+                Marked::Lifetime(life) => {
+                    assert_same_bits(
+                        death,
+                        life.expect("a C/O donor's marks give its progenitor's lifetime"),
+                    );
+                }
+                Marked::Generated => {}
+            }
+            let age = record.age_at_epoch().value();
+            assert!(age - death >= since * (1.0 - 1e-9), "{age} {death} {since}");
+        }
+        other => panic!("a survivor of the {other:?}: {flight:?}"),
+    }
+    let velocity = draw(galaxy, record);
+    let speed = velocity.velocity().speed().value() / 1_000.0;
+    assert!((speed - v).abs() <= 1e-9 * v, "{speed} {v}");
+    assert!(speed < pad_speed_in(galaxy, Layer::D).value());
+    assert!((velocity.cut().value() - UNBOUND_PAD_SPEED.value()).abs() < 1e-9);
+    let p = PointLy::from(record.epoch_position());
+    let r = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt();
+    let w = velocity.velocity().metres_per_second();
+    let outward = (w[0] * p.x + w[1] * p.y + w[2] * p.z) / (r * speed * 1_000.0);
+    assert!(outward > 1.0 - 1e-12, "{outward}");
+    assert_eq!(epoch_velocity(galaxy, record), velocity.velocity());
+    (flight, state.phase())
+}
+
+/// At the Sun-like point, above the bulge and in the halo, each survivor's marks, star and line
+/// ([`check_survivor`]); the populations come in the counts' odds.
 #[test]
 fn a_survivor_is_a_white_dwarf_launched_before_the_interval() {
     let galaxy = weighted();
@@ -285,7 +378,6 @@ fn a_survivor_is_a_white_dwarf_launched_before_the_interval() {
         .displaced()
         .and_then(|fields| fields.class_table().survivors())
         .expect("weighted under every 27 hold");
-    let youngest = survivors.youngest().value();
     let at = |ly: [f64; 3]| GalacticPosition::from_light_years(ly).expect("in the cube");
     let (mut seen, mut fast) = (0_u32, 0_u32);
     for place in [
@@ -294,47 +386,7 @@ fn a_survivor_is_a_white_dwarf_launched_before_the_interval() {
         at([0.0, 0.0, 30_000.0]),
     ] {
         for (record, lifetime) in survivors_at(galaxy, &place, 400) {
-            assert!(is_survivor(&record), "{record:?}");
-            assert_eq!(record.layer(), Layer::D);
-            let flight = survivor_flight(galaxy, &record).expect("a survivor has its flight");
-            let since = flight.since_launch().value();
-            let band = flight.band().population();
-            let v = flight.speed().value();
-            assert!((band.min_km_s..=band.max_km_s).contains(&v), "{flight:?}");
-            assert!(since >= youngest, "{flight:?}");
-            let inside = survivors.mean_exit_ly() / (v / (SPEED_OF_LIGHT / 1_000.0));
-            assert!(since <= inside * (1.0 + 1e-12), "{flight:?}");
-            let mass = record.primary_initial_mass().value();
-            assert!((2.5..=8.0).contains(&mass), "{mass}");
-            let born = record.component().expect("a grid record has a component");
-            assert!(survivors.births_per_year()[born.index()] > 0.0, "{born:?}");
-            let age = record.age_at_epoch().value();
-            let life = lifetime.expect("a survivor's marks give its lifetime");
-            assert!(age - life >= since * (1.0 - 1e-9), "{age} {life} {since}");
-            let stars =
-                SystemStars::generate_in(galaxy, &record, MultiplicityContext::ForcedSingle);
-            let primary = stars.primary();
-            let death = primary
-                .death()
-                .expect("a star of layer D dies")
-                .age()
-                .value();
-            assert_same_bits(death, life);
-            assert_eq!(
-                primary.remnant().map(|r| r.kind()),
-                Some(RemnantKind::WhiteDwarf)
-            );
-            let velocity = draw(galaxy, &record);
-            let speed = velocity.velocity().speed().value() / 1_000.0;
-            assert!((speed - v).abs() <= 1e-9 * v, "{speed} {v}");
-            assert!(speed < pad_speed_in(galaxy, Layer::D).value());
-            assert!((velocity.cut().value() - UNBOUND_PAD_SPEED.value()).abs() < 1e-9);
-            let p = PointLy::from(record.epoch_position());
-            let r = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt();
-            let w = velocity.velocity().metres_per_second();
-            let outward = (w[0] * p.x + w[1] * p.y + w[2] * p.z) / (r * speed * 1_000.0);
-            assert!(outward > 1.0 - 1e-12, "{outward}");
-            assert_eq!(epoch_velocity(galaxy, &record), velocity.velocity());
+            let (flight, _) = check_survivor(galaxy, &record, Marked::Lifetime(lifetime));
             seen += 1;
             fast += u32::from(flight.band() == SurvivorBand::Fast);
         }
@@ -347,6 +399,22 @@ fn a_survivor_is_a_white_dwarf_launched_before_the_interval() {
         2.0 * normal_cdf(-z.abs()),
         ALPHA,
     );
+}
+
+/// A survivor's brief is its system's: the brief model takes a helium donor's white dwarf exactly,
+/// as the stellar stage builds it, and a C/O donor's by its routes, the same at the epoch.
+#[test]
+fn a_survivors_brief_is_its_white_dwarfs() {
+    let galaxy = weighted();
+    let at = GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).expect("in the cube");
+    let mut kinds = [0_u32; 2];
+    for (record, _) in survivors_at(galaxy, &at, 200) {
+        let brief = BriefModel::new(galaxy, &record).brief_at(UniverseTime::EPOCH);
+        let stars = SystemStars::generate_in(galaxy, &record, MultiplicityContext::ForcedSingle);
+        assert_eq!(brief, stars.brief_at(UniverseTime::EPOCH), "{record:?}");
+        kinds[usize::from(is_helium_donor(&record))] += 1;
+    }
+    assert!(kinds[0] > 0 && kinds[1] > 0, "{kinds:?}");
 }
 
 /// The same seed gives the same survivors twice: two galaxies built apart draw each survivor's
@@ -377,6 +445,7 @@ fn the_same_seed_gives_the_same_survivors_twice() {
     let first = survivors_at(weighted(), &at, 200);
     let second = survivors_at(&again, &at, 200);
     assert_eq!(first, second);
+    let mut helium = 0;
     for ((a, _), (b, _)) in first.iter().zip(&second) {
         assert_eq!(survivor_flight(weighted(), a), survivor_flight(&again, b));
         let (va, vb) = (draw(weighted(), a).velocity(), draw(&again, b).velocity());
@@ -387,7 +456,20 @@ fn the_same_seed_gives_the_same_survivors_twice() {
         {
             assert_same_bits(x, y);
         }
+        // The star each builds, a helium donor's through its own branch, and its brief.
+        let star = |galaxy: &Galaxy, record: &SystemRecord| {
+            SystemStars::generate_in(galaxy, record, MultiplicityContext::ForcedSingle)
+                .primary()
+                .state_at(UniverseTime::EPOCH)
+        };
+        assert_eq!(star(weighted(), a), star(&again, b), "{a:?}");
+        assert_eq!(
+            BriefModel::new(weighted(), a).brief_at(UniverseTime::EPOCH),
+            BriefModel::new(&again, b).brief_at(UniverseTime::EPOCH)
+        );
+        helium += u32::from(is_helium_donor(a));
     }
+    assert!(helium > 0, "no helium donor among the survivors");
 }
 
 /// Layer D's cells visited by a sphere of 50 ly about `centre` at `t`, padded at `speed`.
@@ -565,10 +647,16 @@ fn at_the_window_ends_a_query_beside_a_survivor_is_the_brute_force_enumeration()
         expected,
         ALPHA,
     );
+    let (mut helium, mut carbon_oxygen) = (0_u32, 0_u32);
     for record in &found {
-        let flight = survivor_flight(galaxy, record).expect("a survivor has its flight");
+        let (flight, _) = check_survivor(galaxy, record, Marked::Generated);
         assert!(flight.since_launch() >= survivors.youngest(), "{flight:?}");
+        match flight.donor_kind() {
+            DonorKind::Helium => helium += 1,
+            DonorKind::CarbonOxygen => carbon_oxygen += 1,
+        }
     }
+    eprintln!("{helium} helium and {carbon_oxygen} C/O or O/Ne white dwarfs");
     assert!(found.len() >= 100, "{} survivors", found.len());
     let [minus_h, plus_h] = window_ends();
     let h_years = CLOCK_WINDOW_H.as_julian_years_f64();

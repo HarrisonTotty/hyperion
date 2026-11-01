@@ -62,7 +62,7 @@
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::features::members::{FeatureInteriorCache, MemberRecord, resolve_member};
-use crate::galaxy::placement::{ResolveSystemError, SystemOrigin, SystemRecord};
+use crate::galaxy::placement::{ResolveSystemError, SystemOrigin, SystemRecord, is_helium_donor};
 use crate::id::{BodyId, SystemIdKind};
 use crate::math;
 use crate::rng::Mark;
@@ -312,9 +312,7 @@ impl BriefModel {
     #[must_use]
     pub fn certifies(galaxy: &Galaxy, record: &SystemRecord) -> bool {
         let composition = draw_metallicity(galaxy, record);
-        let kept = record
-            .kick_range(galaxy)
-            .map(|_| primary_model(galaxy, record, composition).0);
+        let kept = kept_primary(galaxy, record, composition);
         let primary = kept
             .as_ref()
             .map_or(KeptPrimary::FromRecord, KeptPrimary::Model);
@@ -438,9 +436,7 @@ impl BriefModel {
         // the gate reads its stripped mark, and a certified primary is its exact model, since the
         // table's and the remnant build's routes read the remnant's draws of the record's own
         // attempt.
-        let kept = record
-            .kick_range(galaxy)
-            .map(|_| primary_model(galaxy, record, composition).0);
+        let kept = kept_primary(galaxy, record, composition);
         let Gate {
             star_count,
             certified,
@@ -1016,6 +1012,20 @@ fn table_primary(
 #[must_use]
 fn age_at(age_at_epoch: Years, t: UniverseTime) -> f64 {
     age_at_epoch.value() + t.since_epoch().as_julian_years_f64()
+}
+
+/// The primary a record's brief takes from [`primary_model`] rather than its own routes, if any:
+/// a record whose class constrains its kick (plan 08's retained and displaced remnants), whose
+/// model the kick loop keeps (P08.T12.c), and a hypervelocity survivor's helium white dwarf, which
+/// no route but the model's builds (plan 09, P09.T34.b).
+#[must_use]
+fn kept_primary(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: Composition,
+) -> Option<StarModel> {
+    (record.kick_range(galaxy).is_some() || is_helium_donor(record))
+        .then(|| primary_model(galaxy, record, composition).0)
 }
 
 #[cfg(test)]

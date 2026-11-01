@@ -555,8 +555,7 @@ domain_tags! {
     DISPLACED_KIND: System = "displaced.kind";
 
     /// A displaced or layer-E record's initial mass from its class's conditional table: one
-    /// uniform per attempt (P08.T12.c); a hypervelocity survivor's from layer D's mass function,
-    /// one uniform per draw until its fate is a white dwarf (P09.T34.b).
+    /// uniform per attempt (P08.T12.c).
     DISPLACED_MASS: System = "displaced.mass";
 
     /// A displaced or retained record's time since death, and its birth component: one uniform

@@ -12,9 +12,9 @@
 //!   and its birth component at that mass on `displaced.birth`.
 //! - **Layer D, the hypervelocity survivors** (from generator version 27, plan 09's P09.T34.b): a
 //!   double detonation's donor white dwarf. Its birth component by the components' Type Ia rates
-//!   on `displaced.birth`, its initial mass from layer D's mass function on `displaced.mass`, and
-//!   its flight ([`Survivors::flight`]). Its progenitor is dead at `Z_ref` before its launch, as a
-//!   remnant's is before its death below (lean, 2026-11-01).
+//!   on `displaced.birth`, and its flight ([`Survivors::flight`]), whose speed sets its donor's
+//!   mass: a helium white dwarf of that mass, or a C/O one whose progenitor is dead at `Z_ref`
+//!   before its launch, as a remnant's is before its death below.
 //! - **Layer D, a field component of a source that ejects runaways** (the thin disc and the
 //!   nuclear disc): plan 03's mass and age, and the runaway reduction. A living star is rejected
 //!   with the probability that it is a runaway or a walkaway already ejected (on `displaced.kind`),
@@ -64,7 +64,7 @@ use crate::galaxy::displaced::marks::{
     time_since_death,
 };
 use crate::galaxy::displaced::runaway::Ejected;
-use crate::galaxy::displaced::survivors::SurvivorFlight;
+use crate::galaxy::displaced::survivors::{DonorKind, SurvivorFlight, donor_progenitor_mass};
 use crate::galaxy::displaced::{
     BirthSource, DisplacedClassId, DisplacedFields, DisplacedKind, PlacementClass, SpeedBin,
 };
@@ -550,23 +550,15 @@ fn displaced_marks(
     }
 }
 
-/// The draws of a survivor's initial mass that may leave no white dwarf before it takes layer D's
-/// least: only the top of layer D's masses, whose electron-capture fate leaves a neutron star,
-/// does, so a record seldom draws a second.
-const SURVIVOR_MASS_ATTEMPTS: usize = 8;
-
 /// A hypervelocity survivor's marks (module documentation): its birth component on
-/// `displaced.birth`, its initial mass on `displaced.mass`, and its age on `displaced.death`, its
-/// progenitor dead at its source's reference composition at least its flight's time since launch
-/// before the epoch.
+/// `displaced.birth`, and its star, its donor of its flight's mass ([`SurvivorFlight::donor`]):
 ///
-/// The record is the donor white dwarf of a double detonation, of layer D's initial masses, which
-/// the stellar stage's initial-final relation makes white dwarfs of about 0.7–1.2 M☉ (lean,
-/// 2026-11-01). Those are the fast population's donors. The slow population's speeds are those of
-/// donors of about 0.5 M☉ or less, helium or hybrid white dwarfs of progenitors below layer D's
-/// masses, which the class's layer does not hold. A mass whose fate is no white dwarf is drawn
-/// again, on the stream's next words, up to [`SURVIVOR_MASS_ATTEMPTS`] draws, and then the band's
-/// least is taken.
+/// - a helium white dwarf is the record's primary itself, of the donor's mass, its age its time
+///   since launch, the stellar stage building it as one ([`is_helium_donor`]; heated by its
+///   companion's detonation, it cools from its launch; lean, 2026-11-01);
+/// - a C/O one's progenitor is of the donor's initial mass by the initial–final relation's inverse
+///   ([`donor_progenitor_mass`]), in layer D, dead at its source's reference composition at least
+///   its flight's time since launch before the epoch, its age on `displaced.death`.
 #[must_use]
 fn survivor_marks(
     galaxy: &Galaxy,
@@ -585,37 +577,57 @@ fn survivor_marks(
         .fields()
         .component_id(index)
         .expect("the births are the galaxy's components'");
-    let z_ref = table.reference_composition(table.component_source(component));
-    let nodes = table.nodes(MassBand::D);
-    let density = PiecewiseLinear::new(nodes.masses(), nodes.pdf())
-        .expect("layer D's mass function has weight at its nodes");
-    let mut masses = stream(galaxy, tags::DISPLACED_MASS, id);
-    let draws = draws_of(galaxy, id);
-    let progenitor = |mass: SolarMasses| Progenitor {
-        mass,
-        component,
-        fate: fate(galaxy, mass, &z_ref, &draws),
+    let flight = survivors.flight(galaxy.seed(), id);
+    let placement = PlacementClass::Displaced {
+        class,
+        kind: DisplacedKind::HypervelocitySurvivor,
     };
-    let star = (0..SURVIVOR_MASS_ATTEMPTS)
-        .map(|_| progenitor(SolarMasses::new(density.sample(&mut masses))))
-        .find(|star| star.fate.remnant.kind() == RemnantKind::WhiteDwarf)
-        .unwrap_or_else(|| progenitor(SolarMasses::new(nodes.masses()[0])));
-    let mass = star.mass;
-    let since = survivors.flight(galaxy.seed(), id).since_launch();
-    let u = stream(galaxy, tags::DISPLACED_DEATH, id).uniform();
-    let (age, life) = dead_age(galaxy, &star, (since, None), u);
-    DrawnMarks {
-        component,
-        mass,
-        age,
-        placement: PlacementClass::Displaced {
-            class,
-            kind: DisplacedKind::HypervelocitySurvivor,
+    match flight.donor_kind() {
+        DonorKind::Helium => DrawnMarks {
+            component,
+            mass: flight.donor(),
+            age: flight.since_launch(),
+            placement,
+            attempt: 0,
+            metallicity_age_years: None,
+            lifetime: None,
         },
-        attempt: 0,
-        metallicity_age_years: None,
-        lifetime: Some(life),
+        DonorKind::CarbonOxygen => {
+            let mass = donor_progenitor_mass(flight.donor());
+            let z_ref = table.reference_composition(table.component_source(component));
+            let star = Progenitor {
+                mass,
+                component,
+                fate: fate(galaxy, mass, &z_ref, &draws_of(galaxy, id)),
+            };
+            let u = stream(galaxy, tags::DISPLACED_DEATH, id).uniform();
+            let (age, life) = dead_age(galaxy, &star, (flight.since_launch(), None), u);
+            DrawnMarks {
+                component,
+                mass,
+                age,
+                placement,
+                attempt: 0,
+                metallicity_age_years: None,
+                lifetime: Some(life),
+            }
+        }
     }
+}
+
+/// Whether `record` is a hypervelocity survivor whose donor is a helium white dwarf, the record's
+/// primary of its own mass, which the stellar stage builds as one (plan 09, P09.T34.b;
+/// `StarModel::helium_white_dwarf_under`): a survivor of a mass up to the heaviest helium white
+/// dwarf, since a C/O donor's progenitor is of layer D's masses.
+#[must_use]
+pub(crate) fn is_helium_donor(record: &SystemRecord) -> bool {
+    matches!(
+        record.placement_class(),
+        PlacementClass::Displaced {
+            kind: DisplacedKind::HypervelocitySurvivor,
+            ..
+        }
+    ) && DonorKind::of(record.primary_initial_mass()) == DonorKind::Helium
 }
 
 /// A hypervelocity survivor's flight (plan 09, P09.T34.b): its population, launch speed and time

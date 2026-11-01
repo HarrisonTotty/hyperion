@@ -28,7 +28,9 @@ use crate::coords::SystemVelocity;
 use crate::events::{EventSeries, tags as event_tags};
 use crate::galaxy::displaced::PlacementClass;
 use crate::galaxy::fields::Component;
-use crate::galaxy::placement::{Existence, KickConstraint, SystemKind, SystemOrigin, SystemRecord};
+use crate::galaxy::placement::{
+    Existence, KickConstraint, SystemKind, SystemOrigin, SystemRecord, is_helium_donor,
+};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{BodyId, SystemId};
 use crate::math;
@@ -462,6 +464,48 @@ impl StarModel {
             model.remnant = remnant_stage(&track, &model.draws, model.rules);
             model.evolution = Evolution::Track(Arc::new(track));
         }
+        Ok(model)
+    }
+
+    /// A helium white dwarf of mass `m`, `age_at_epoch` since it became one, under `rules`: plan
+    /// 11's naked helium star below the lightest that burns helium, a helium white dwarf from its
+    /// start (`Track::helium_star`). Plan 09's hypervelocity survivors of the slow band are such
+    /// donors (P09.T34.b), of 0.15–0.28 M☉, under the lightest helium star's 0.31–0.35 M☉.
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](Self::new).
+    pub(crate) fn helium_white_dwarf_under(
+        m: SolarMasses,
+        composition: Composition,
+        draws: StarDraws,
+        age_at_epoch: Years,
+        rules: StellarRules,
+    ) -> Result<Self, BuildStarModelError> {
+        check_star_inputs(m, age_at_epoch)?;
+        let mut model = Self {
+            initial_mass: m,
+            composition,
+            draws,
+            age_at_epoch,
+            evolution: Evolution::Cooling,
+            remnant: None,
+            rules,
+        };
+        let end = model.age_at(ClockWindow::END).value();
+        let track = Track::helium_star(
+            m,
+            &model.composition,
+            &model.draws,
+            Years::new(if end > 0.0 { end } else { 0.0 }),
+        );
+        debug_assert!(
+            track.is_remnant_from_its_start(),
+            "a helium white dwarf of {} M☉ is lighter than the lightest helium star that burns",
+            m.value()
+        );
+        model.remnant = remnant_stage(&track, &model.draws, model.rules);
+        model.evolution = Evolution::Track(Arc::new(track));
         Ok(model)
     }
 
@@ -2706,7 +2750,9 @@ pub(crate) const KICK_LOOP_CAP: u32 = 4_096;
 
 /// The primary's model of the grid system `record` in `galaxy` at `composition`, and the attempts
 /// plan 08's kick loop made for it (P08.T12.c, Design note 17): 1 where the record constrains no
-/// kick, which is every record of the version's galaxies.
+/// kick, which is every record of the version's galaxies. A hypervelocity survivor whose donor is a
+/// helium white dwarf is that white dwarf, of the record's mass and age
+/// ([`StarModel::helium_white_dwarf_under`]; plan 09, P09.T34.b).
 ///
 /// Where the record has a [`kick_constraint`](SystemRecord::kick_constraint), the remnant stage
 /// is repeated on the one track the record's draws build, with the remnant's, the stripped mark's
@@ -2734,6 +2780,17 @@ pub(crate) fn primary_model(
     record: &SystemRecord,
     composition: Composition,
 ) -> (StarModel, u32) {
+    if is_helium_donor(record) {
+        let model = StarModel::helium_white_dwarf_under(
+            record.primary_initial_mass(),
+            composition,
+            primary_draws(galaxy, record),
+            record.age_at_epoch(),
+            galaxy.rules().stellar,
+        )
+        .expect("a hypervelocity survivor's helium white dwarf has a mass and a finite age");
+        return (model, 1);
+    }
     let model = StarModel::new_under(
         record.primary_initial_mass(),
         composition,
