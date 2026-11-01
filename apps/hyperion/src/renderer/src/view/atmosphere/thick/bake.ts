@@ -124,8 +124,8 @@
  * approximation drops (Dahlback and Stamnes 1991, above, cited not re-read: derived here from
  * Ω·∇ with the sun fixed in space). For each row of μ₀ ≤ {@link HORIZON_SUN_COSINE} the field is
  * then I + B, B the solve's own field of the first two applied to the row's I, a source per stream
- * and mode on the row's factorisation (`discreteOrdinates.ts`'s "Stream sources"): the lateral term (sin θ₀ ÷ β′r) √(1 − μ²) cos Δφ ∂I ÷ ∂μ₀ and the
- * curvature term −((1 − μ²) ÷ β′r) ∂I ÷ ∂μ, β′ the delta-M extinction a metre, each linear in τ
+ * and mode on the row's factorisation (`discreteOrdinates.ts`'s "Stream sources"): the lateral term
+ * (sin θ₀ ÷ β′r) √(1 − μ²) cos Δφ ∂I ÷ ∂μ₀ and the curvature term −((1 − μ²) ÷ β′r) ∂I ÷ ∂μ, β′ the delta-M extinction a metre, each linear in τ
  * through a layer (its mean in one thinner than {@link HORIZON_THIN_DEPTH}). The third is left
  * out: it vanishes with the sun on the horizon. ∂ ÷ ∂μ₀ is taken across the table's own rows,
  * whose fields every row solves, so a row costs a source, not a solve. The terms are B's alone,

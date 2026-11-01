@@ -18,8 +18,8 @@ import { OpticsJobs } from "../opticsJobs";
 import type { KeptBakeLights, OpticsRequest } from "../opticsMessages";
 import { molecularMixture } from "../rayleigh";
 import { EARTH_CASE, EARTH_REFERENCE_RADIUS_M, referenceCaseBakeLights } from "../reference/cases";
-import { bakeMultipleScattering, prepareBake, type ThickBakeBody } from "./bake";
-import { keptColumnOf, sphereBakeBody } from "./keptBake";
+import { bakeMultipleScattering, HORIZON_TERMS, prepareBake, type ThickBakeBody } from "./bake";
+import { bakeKeptCase, keptColumnOf, sphereBakeBody } from "./keptBake";
 import type { SpectralColumn } from "./spectralColumn";
 
 /** The generated Earth under the Sun, its water's and CO₂'s lines on the toy tables. */
@@ -219,6 +219,35 @@ describe("the optics worker's thick bake", () => {
       );
       expect(above).toBeGreaterThanOrEqual(0);
       expect(belowShare).toBeGreaterThanOrEqual(-1e-6);
+    },
+  );
+
+  it(
+    "bakes a request that asks the horizon's terms as the kept bake with both, to the bit (R08.T14.d.4)",
+    // Two full-grid bakes with the terms, some 2 s each on a pod (2026-11-01).
+    { timeout: 60_000 },
+    async () => {
+      const jobs = new OpticsJobs(toyLoader());
+      const lights = referenceCaseBakeLights(EARTH_CASE);
+      const request = keptEarthRequest(lights);
+      if (request.kind !== "thick-bake") {
+        throw new Error("a kept request is a thick bake");
+      }
+      const { reply } = await jobs.answer({ ...request, horizonTerms: true });
+      if (reply.kind !== "thick-baked") {
+        throw new Error(`the kept bake was answered ${reply.kind}`);
+      }
+      const direct = bakeKeptCase(EARTH_CASE, lights, request.body, {
+        bands: [0],
+        horizonTerms: HORIZON_TERMS,
+      });
+      const values = reply.tables[0]?.slots[0]?.values ?? new Float32Array(0);
+      const expected = direct[0]?.slots[0]?.values ?? new Float32Array(1);
+      // Compared entry by entry: a failing toEqual of some 900,000 floats takes minutes to print.
+      expect([
+        values.length === expected.length,
+        values.every((value, i) => Object.is(value, expected[i])),
+      ]).toEqual([true, true]);
     },
   );
 
