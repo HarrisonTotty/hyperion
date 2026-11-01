@@ -172,7 +172,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "binary_reach",
         revision: 0,
-        since_generator_version: 21,
+        since_generator_version: 26,
         provisional: false,
     },
     TableInfo {
