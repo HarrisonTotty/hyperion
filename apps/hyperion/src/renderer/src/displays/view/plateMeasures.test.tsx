@@ -159,6 +159,7 @@ describe("the upper plate's measures (R10.T12.b)", () => {
       pinnedLines: 4,
       bodyPx: 280,
       positionPx: 18,
+      widthPx: 300,
     });
   });
 
@@ -214,17 +215,17 @@ describe("the upper plate's measures (R10.T12.b)", () => {
 });
 
 describe("the lower plate's forms (R10.T12.b)", () => {
-  it("measures each form's plate", () => {
+  it("measures each form's plate, its height and its width", () => {
     const root = laidOutPlate(
       <div>
         <div data-form="whole">
-          <div className="view-label" data-px="120" />
+          <div className="view-label" data-px="120" data-width-px="384" />
         </div>
         <div data-form="readout">
-          <div className="view-label" data-px="60" />
+          <div className="view-label" data-px="60" data-width-px="384" />
         </div>
         <div data-form="survey">
-          <div className="view-label" data-px="40" />
+          <div className="view-label" data-px="40" data-width-px="360" />
         </div>
       </div>,
     );
@@ -233,6 +234,9 @@ describe("the lower plate's forms (R10.T12.b)", () => {
       readoutYieldedPx: 60,
       surveyYieldedPx: 40,
       passing: [],
+      wholeWidthPx: 384,
+      readoutYieldedWidthPx: 384,
+      surveyYieldedWidthPx: 360,
     });
   });
 
@@ -298,6 +302,9 @@ describe("the lower plate's forms (R10.T12.b)", () => {
       readoutYieldedPx: null,
       surveyYieldedPx: null,
       passing: [],
+      wholeWidthPx: 300,
+      readoutYieldedWidthPx: null,
+      surveyYieldedWidthPx: null,
     });
   });
 
@@ -400,8 +407,17 @@ describe("two measures of the room alike (R10.T12.b)", () => {
       pinnedLines: 3,
       bodyPx: 420,
       positionPx: 18,
+      widthPx: 384,
     },
-    lower: { wholePx: 120, readoutYieldedPx: 60, surveyYieldedPx: null, passing: [] },
+    lower: {
+      wholePx: 120,
+      readoutYieldedPx: 60,
+      surveyYieldedPx: null,
+      passing: [],
+      wholeWidthPx: 384,
+      readoutYieldedWidthPx: 384,
+      surveyYieldedWidthPx: null,
+    },
   };
 
   /** The stage of a 1280 × 720 window at 100%, CSS px. */
@@ -427,6 +443,30 @@ describe("two measures of the room alike (R10.T12.b)", () => {
 
   it("counts measures more than a twentieth of a pixel apart as changed", () => {
     expect(sameRoomMeasures(withWhole(440), withWhole(440.06))).toBe(false);
+  });
+
+  it("counts a plate grown wider as changed, since its cover of the picture grows (the owner's delegated call)", () => {
+    const lower = PLATES.lower;
+    const wider: PlateMeasures = {
+      ...PLATES,
+      lower: lower === null ? null : { ...lower, readoutYieldedWidthPx: 390 },
+    };
+    expect(
+      sameRoomMeasures(
+        { full: PLATES, beside: null, stage: STAGE },
+        { full: wider, beside: null, stage: STAGE },
+      ),
+    ).toBe(false);
+  });
+
+  it("counts an upper plate grown wider as changed", () => {
+    const wider: PlateMeasures = { ...PLATES, upper: { ...PLATES.upper, widthPx: 390 } };
+    expect(
+      sameRoomMeasures(
+        { full: PLATES, beside: null, stage: STAGE },
+        { full: wider, beside: null, stage: STAGE },
+      ),
+    ).toBe(false);
   });
 
   it("counts a line more before STARS as changed", () => {
@@ -574,6 +614,9 @@ describe("an instrument's GROUND page as laid out (R10.T12.d)", () => {
       readoutYieldedPx: 120,
       surveyYieldedPx: 60,
       passing: [],
+      wholeWidthPx: 300,
+      readoutYieldedWidthPx: 300,
+      surveyYieldedWidthPx: 300,
     });
   });
 

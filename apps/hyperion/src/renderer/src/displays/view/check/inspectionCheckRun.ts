@@ -20,7 +20,10 @@
  *    exposure must stand at `AUTO`, which the inspection opens on, and, for a body whose record
  *    (`body_detail`, asked in step 1) has a surface, the ground at the line of sight on the lower
  *    plate must read the body's surveyed ground (`ELEVATION`), the inspection having surveyed it as
- *    it opened, or the plate must say `TERRAIN: NOT YET MODELLED`; a giant states none. Once
+ *    it opened, or the plate must say `TERRAIN: NOT YET MODELLED`; a giant states none. Where the
+ *    room holds the readout back for the picture (the plates' cap, the owner's delegated call,
+ *    2026-11-01; {@link readoutHeldBack}), the ground is read under `MAXIMIZE VIEW`, which gives
+ *    the picture back with the readout standing, as its capture is taken. Once
  *    `AUTO` has settled and a few frames are drawn the page is captured as
  *    `inspection-<system>-<index>`; then with `MAXIMIZE VIEW` on, the panels hidden and the stage
  *    the display's whole body, as `inspection-<system>-<index>-maximized` (the owner's request,
@@ -32,11 +35,13 @@
  *    has all but run out,
  *    until it stands {@link CLOSE_ALTITUDE_SHARE} of the body's radius above it (at least
  *    {@link CLOSE_ALTITUDE_MIN_M}); once the terrain has streamed, its ground is read, `AUTO` has
- *    settled and a few frames are drawn, it is captured as `inspection-<system>-<index>-close`.
+ *    settled and a few frames are drawn, it is captured as `inspection-<system>-<index>-close`;
+ *    where the room holds the readout back there, its ground is read under `MAXIMIZE VIEW` after.
  * 6. With the frame profile alone, the camera closes in on by the same holds to
  *    {@link LOW_HEIGHT_M} above the ground at its line of sight (`SLANT RANGE FROM CAMERA`), where
  *    the shadow cascades draw, and once the terrain has streamed and `AUTO` has settled its third
- *    window is measured.
+ *    window is measured; where the room holds the readout back, the slant range is read under
+ *    `MAXIMIZE VIEW` on the way down, which is turned off again before the window.
  *
  * The run fails where a step does not take effect within its wait, where `VIEW BODY` is held back
  * (with its reason), where the primary's label block shows a fault line as it is captured, or as
@@ -277,6 +282,20 @@ export class LitBodyDraws implements SubmissionWatcher {
   drewSince(fromMs: number): boolean {
     return this.#lastFrameMs !== null && this.#lastFrameMs >= fromMs;
   }
+}
+
+/** The name a lower plate's yield line gives the readout it holds back (`viewRoom.ts`' `lowerYieldLine`). */
+const READOUT_NAME = "GROUND AT LINE OF SIGHT";
+
+/**
+ * Whether the lower plate's lines hold its readout back for the room: a yield line naming
+ * `GROUND AT LINE OF SIGHT` in its place (`viewRoom.ts`' `lowerYieldLine`), as the plates' cap
+ * gives it way at 1280 × 720 (the owner's delegated call, 2026-11-01).
+ */
+export function readoutHeldBack(lines: ReadonlyArray<string>): boolean {
+  return lines.some(
+    (line) => line.startsWith("NOT AVAILABLE: no room for ") && line.includes(READOUT_NAME),
+  );
 }
 
 /** Metres in each of the `POSITION` line's units. */
@@ -558,7 +577,7 @@ async function inspect(
   if (hasSurface) {
     await grounded.until(
       "the ground at the line of sight did not read surveyed",
-      () => inspectionGround(ground()) !== "waiting",
+      () => inspectionGround(ground()) !== "waiting" || readoutHeldBack(ground()),
       () => ground().join("; "),
     );
   }
@@ -633,9 +652,29 @@ async function inspect(
   // MAXIMIZE VIEW by its key, as an operator turns it on, captured, and off again.
   const maximized = (): boolean =>
     document.querySelector(".view__side")?.hasAttribute("hidden") === true;
+  /** The ground at the line of sight, under `MAXIMIZE VIEW`, once it reads anything but waiting. */
+  const groundMaximized = async (what: string): Promise<ReadonlyArray<string>> => {
+    await grounded.until(
+      `the ground at the line of sight did not read under MAXIMIZE VIEW ${what}`,
+      () => inspectionGround(ground()) !== "waiting",
+      () => ground().join("; "),
+    );
+    return ground();
+  };
+  /** Turns `MAXIMIZE VIEW` on or off by its key, as an operator does, and waits for it. */
+  const setMaximized = async (on: boolean, what: string): Promise<void> => {
+    stopped();
+    pressKey(document.body, MAXIMIZE_KEY);
+    await until(
+      `MAXIMIZE VIEW did not ${on ? "hide" : "show"} the panels ${what}`,
+      () => maximized() === on,
+    );
+  };
   pressKey(document.body, MAXIMIZE_KEY);
   await until("MAXIMIZE VIEW did not hide the panels", maximized);
   const maximizedFromMs = await framesDrawn();
+  // Where the room held the readout back for the picture, MAXIMIZE VIEW gives it back standing.
+  const groundRead = readoutHeldBack(groundSaid) ? await groundMaximized("from orbit") : groundSaid;
   const saidMaximized = plate();
   if (saidMaximized.faults.length > 0) {
     throw new Error(
@@ -662,9 +701,9 @@ async function inspect(
     frame: said.line("FRAME"),
     exposure: said.line("EXPOSURE"),
     statements: said.statements,
-    ground: groundSaid,
+    ground: groundRead,
   };
-  if (inspectionGround(groundSaid) !== "surveyed") {
+  if (inspectionGround(groundRead) !== "surveyed") {
     return { ...orbit, closeGround: null };
   }
 
@@ -754,7 +793,7 @@ async function inspect(
     "the terrain did not stream once the camera closed in",
     () =>
       !plate().statements.includes("TERRAIN: STREAMING") &&
-      inspectionGround(ground()) === "surveyed",
+      (inspectionGround(ground()) === "surveyed" || readoutHeldBack(ground())),
     () => [...plate().statements, ...ground()].join("; "),
   );
   await lit("the close inspection");
@@ -765,10 +804,21 @@ async function inspect(
     throw new Error(`views check: the close inspection shows faults: ${close.faults.join("; ")}`);
   }
   shown("the close inspection", close, closeFromMs);
-  const closeGround = ground();
+  const closeShown = ground();
   stopped();
   await deps.api.capture(`${label}-close`);
   await measured("close", "the close window");
+  let closeGround = closeShown;
+  if (readoutHeldBack(closeShown)) {
+    await setMaximized(true, "closed in");
+    closeGround = await groundMaximized("closed in");
+    await setMaximized(false, "closed in");
+    if (inspectionGround(closeGround) !== "surveyed") {
+      throw new Error(
+        `views check: the ground closed in did not read surveyed under MAXIMIZE VIEW (${closeGround.join("; ")})`,
+      );
+    }
+  }
   // 6. With the frame profile, low over the same ground, where the cascades draw (main's ask).
   if (deps.profile !== null) {
     const aboveGround = (): number => {
@@ -779,6 +829,12 @@ async function inspect(
       }
       return heightM;
     };
+    // The slant range is the readout's: read under MAXIMIZE VIEW where the room holds it back.
+    const heldLow = readoutHeldBack(ground());
+    if (heldLow) {
+      await setMaximized(true, "on the way down");
+      await groundMaximized("on the way down");
+    }
     await closeIn(
       () => aboveGround() - LOW_HEIGHT_M,
       CLOSE_TOLERANCE * LOW_HEIGHT_M,
@@ -786,6 +842,9 @@ async function inspect(
         `the camera did not close to ${String(LOW_HEIGHT_M / 1000)} km above the ground (at ${String(Math.round(aboveGround()))} m)`,
       timing.closeHolds,
     );
+    if (heldLow) {
+      await setMaximized(false, "low over the ground");
+    }
     await grounded.until(
       "the terrain did not stream once the camera stood low over the ground",
       () => !plate().statements.includes("TERRAIN: STREAMING"),

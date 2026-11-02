@@ -21,6 +21,7 @@ import {
   lowerYieldLine,
   type PlateArrangement,
   type PlateMeasures,
+  PLATES_COVER_CAP,
   type RoomInput,
   roomToOpen,
   sameRoom,
@@ -35,6 +36,19 @@ import {
   wholeRoom,
   type YieldingPart,
 } from "./viewRoom";
+
+/**
+ * The plates' width in the tests that are not the cap's, 300 px: under it no test's plates but the
+ * floor's cover half the 1280 px stage, so that the cap leaves them as the room's own steps do.
+ */
+const PLATE_WIDTH_PX = 300;
+
+/** A lower plate's widths, every form {@link PLATE_WIDTH_PX} wide. */
+const LOWER_WIDTHS = {
+  wholeWidthPx: PLATE_WIDTH_PX,
+  readoutYieldedWidthPx: PLATE_WIDTH_PX,
+  surveyYieldedWidthPx: PLATE_WIDTH_PX,
+} as const;
 
 /**
  * The plates at the stage's full width: an upper plate 440 px whole whose eleven lines before
@@ -54,8 +68,9 @@ const FULL: PlateMeasures = {
     pinnedLines: 6,
     bodyPx: 420,
     positionPx: 18,
+    widthPx: PLATE_WIDTH_PX,
   },
-  lower: { wholePx: 120, readoutYieldedPx: 60, surveyYieldedPx: 40, passing: [] },
+  lower: { wholePx: 120, readoutYieldedPx: 60, surveyYieldedPx: 40, passing: [], ...LOWER_WIDTHS },
 };
 
 /**
@@ -70,8 +85,9 @@ const BESIDE: PlateMeasures = {
     pinnedLines: 6,
     bodyPx: 620,
     positionPx: 18,
+    widthPx: PLATE_WIDTH_PX,
   },
-  lower: { wholePx: 160, readoutYieldedPx: 80, surveyYieldedPx: 60, passing: [] },
+  lower: { wholePx: 160, readoutYieldedPx: 80, surveyYieldedPx: 60, passing: [], ...LOWER_WIDTHS },
 };
 
 /** {@link FULL} with its upper plate `wholePx` tall whole, its lines before `STARS` as they are. */
@@ -86,7 +102,14 @@ function besideWith(wholePx: number): PlateMeasures {
 
 /** Plates that stand whole on any stage here: the slots' tests' own. */
 const TINY: PlateMeasures = {
-  upper: { wholePx: 100, middleLinesPx: [], pinnedLines: 0, bodyPx: 80, positionPx: 18 },
+  upper: {
+    wholePx: 100,
+    middleLinesPx: [],
+    pinnedLines: 0,
+    bodyPx: 80,
+    positionPx: 18,
+    widthPx: PLATE_WIDTH_PX,
+  },
   lower: null,
 };
 
@@ -366,12 +389,20 @@ describe("VIEW's room: the width test (R10.T12.c; decision-r10-t12a-scope §7 it
       readoutYieldedPx: 60,
       surveyYieldedPx: null,
       passing: ["survey"],
+      ...LOWER_WIDTHS,
+      surveyYieldedWidthPx: null,
     };
     expect(leastStepOf(readoutOnly)).toBe(0);
   });
 });
 
-/** The floor's upper plate as measured (R10.T12.c): `wholePx` tall, ten 19 px lines before `STARS`. */
+/** A plate's width in columns at the floor, px: its 24 rem column, as the owner's captures at 25 lay it out. */
+const FLOOR_COLUMN_PX = 384;
+
+/**
+ * The floor's upper plate as measured (R10.T12.c): `wholePx` tall, ten 19 px lines before `STARS`,
+ * {@link FLOOR_COLUMN_PX} wide.
+ */
 function floorUpper(wholePx: number): UpperPlateMeasures {
   return {
     wholePx,
@@ -379,16 +410,27 @@ function floorUpper(wholePx: number): UpperPlateMeasures {
     pinnedLines: 5,
     bodyPx: wholePx - 22,
     positionPx: 18,
+    widthPx: FLOOR_COLUMN_PX,
   };
 }
 
-/** The floor's lower plate at its tallest (R10.T12.c), `wholePx` whole, 77 and 40 px given way. */
-function floorLower(wholePx: number): LowerPlateMeasures {
+/**
+ * The floor's lower plate at its tallest (R10.T12.c), `wholePx` whole and, unless given, 77 and 40
+ * px given way, each form {@link FLOOR_COLUMN_PX} wide.
+ */
+function floorLower(
+  wholePx: number,
+  readoutYieldedPx = 77,
+  surveyYieldedPx = 40,
+): LowerPlateMeasures {
   return {
     wholePx,
-    readoutYieldedPx: 77,
-    surveyYieldedPx: 40,
+    readoutYieldedPx,
+    surveyYieldedPx,
     passing: [],
+    wholeWidthPx: FLOOR_COLUMN_PX,
+    readoutYieldedWidthPx: FLOOR_COLUMN_PX,
+    surveyYieldedWidthPx: FLOOR_COLUMN_PX,
   };
 }
 
@@ -396,7 +438,7 @@ describe("VIEW's room: the plates in columns (R10.T12.c)", () => {
   /** In columns on the stage: no slot standing, the stage fitting them. */
   const COLUMNS: Partial<RoomInput> = { columns: true };
 
-  it("stands the readout at the floor in its tallest state beside a photorealistic CHASE plate, as measured", () => {
+  it("stands the readout at the floor by its height in its tallest state beside a photorealistic CHASE plate, where the cap gives it way", () => {
     // TERRAIN TEST at 1280 × 720, 100% (pod, SwiftShader): the upper plate 401 px whole stacked,
     // 438 px capped short of the centre (its STARS line and one note on a second row); the lower
     // plate at its tallest 210 px at the full width and, by arithmetic, 324 px in its 24 rem column
@@ -413,14 +455,21 @@ describe("VIEW's room: the plates in columns (R10.T12.c)", () => {
       }),
       null,
     );
+    // In columns both stand by their heights (step 0); together they would cover 66.9% of the
+    // picture, so the cap scrolls the upper plate's lines and gives the readout way (the owner's
+    // delegated call, 2026-11-01).
     expect({
       fits: columnsFit(stage),
       stacked: stacked.readout,
-      columns: [columns.arrangement, columns.readout, columns.survey, columns.upper.kind],
+      columns: [columns.arrangement, columns.step, columns.readout, columns.survey],
+      upper: columns.upper.kind,
+      capped: columns.cover?.capped,
     }).toEqual({
       fits: true,
       stacked: "yields",
-      columns: ["columns", "stands", "stands", "whole"],
+      columns: ["columns", 0, "yields", "stands"],
+      upper: "middle",
+      capped: "readout",
     });
   });
 
@@ -439,7 +488,13 @@ describe("VIEW's room: the plates in columns (R10.T12.c)", () => {
   it("gives the lower plate's parts way only for its own height, the upper plate whole", () => {
     const tallLower: PlateMeasures = {
       ...FULL,
-      lower: { wholePx: 520, readoutYieldedPx: 60, surveyYieldedPx: 40, passing: [] },
+      lower: {
+        wholePx: 520,
+        readoutYieldedPx: 60,
+        surveyYieldedPx: 40,
+        passing: [],
+        ...LOWER_WIDTHS,
+      },
     };
     const room = roomAt(530, { ...COLUMNS, full: tallLower });
     expect([room.step, room.readout, room.survey, room.upper]).toEqual([
@@ -478,7 +533,7 @@ describe("VIEW's room: the plates in columns (R10.T12.c)", () => {
     // The lower plate whole takes 520 px of a 514 px room at 530, and 530.5 with its spare.
     const tall = (wholePx: number): PlateMeasures => ({
       ...FULL,
-      lower: { wholePx, readoutYieldedPx: 60, surveyYieldedPx: 40, passing: [] },
+      lower: { wholePx, readoutYieldedPx: 60, surveyYieldedPx: 40, passing: [], ...LOWER_WIDTHS },
     });
     const yielded = roomAt(530, { ...COLUMNS, full: tall(520) });
     expect([
@@ -824,6 +879,217 @@ describe("the lower plate's yield line (R10.T12.b)", () => {
   });
 });
 
+/**
+ * The stage at 1280 × 720 in the owner's `VIEW BODY` captures at version 25 (low): 816 × 500 px,
+ * 51 × 31.25 rem, where the plates stand in columns.
+ */
+const FLOOR_STAGE = stageOf(500, 816);
+
+/**
+ * The upper plate of `.0705`'s close-in in those captures, 444 px tall and 384 px wide: `FRAME` to
+ * `METER` its ten 19 px lines before `STARS`, `TERRAIN: DETAIL LIMITED`, two atmosphere notes and
+ * `› 10 REASONS` among its statements.
+ */
+const CLOSE_IN_UPPER = floorUpper(444);
+
+/** The upper plate of `.0400`'s orbit in those captures, 366 px tall: one statement, `ATMOSPHERE: PENDING`. */
+const ORBIT_UPPER = floorUpper(366);
+
+/**
+ * The lower plate of both in those captures, 267 px tall and 384 px wide whole: the survey line and
+ * `DATUM` on two rows each and the readout's nine; given way, by its rows, 134 px (the readout's
+ * yield line on two rows) and 73 px (the one yield line on three).
+ */
+const FLOOR_LOWER = floorLower(267, 134, 73);
+
+describe("VIEW's room: the plates' cover capped at half the picture (the owner's delegated call, 2026-11-01)", () => {
+  /** In columns on the floor's stage, as the captures stand them. */
+  const atFloor = (upper: UpperPlateMeasures, previous: ViewRoom | null = null): ViewRoom =>
+    viewRoom(
+      inputOn(FLOOR_STAGE, { full: { upper, lower: FLOOR_LOWER }, columns: true }),
+      previous,
+    );
+
+  /** The share of the floor's stage the plates cover at their heights alone, as measured. */
+  const coverOf = (upper: UpperPlateMeasures): number =>
+    (FLOOR_COLUMN_PX * (upper.wholePx + FLOOR_LOWER.wholePx)) / (816 * 500);
+
+  it("holds .0705's close-in, 66.9% at its heights, to 47.2%: the lines to FRAME–CAMERA, then the readout", () => {
+    const room = atFloor(CLOSE_IN_UPPER);
+    expect({
+      before: Number(coverOf(CLOSE_IN_UPPER).toFixed(3)),
+      share: Number(room.cover?.share.toFixed(3)),
+      capped: room.cover?.capped,
+      parts: [room.arrangement, room.step, room.readout, room.survey],
+      upper: room.upper,
+    }).toEqual({
+      before: 0.669,
+      share: 0.472,
+      capped: "readout",
+      parts: ["columns", 0, "yields", "stands"],
+      upper: { kind: "middle", heightPx: 5 * 19, lines: 5 },
+    });
+  });
+
+  it("holds .0400's orbit, 59.6% at its heights, to 39.8% by the same step", () => {
+    const room = atFloor(ORBIT_UPPER);
+    expect({
+      before: Number(coverOf(ORBIT_UPPER).toFixed(3)),
+      share: Number(room.cover?.share.toFixed(3)),
+      capped: room.cover?.capped,
+      parts: [room.readout, room.survey, room.upper.kind],
+    }).toEqual({
+      before: 0.596,
+      share: 0.398,
+      capped: "readout",
+      parts: ["yields", "stands", "middle"],
+    });
+  });
+
+  it("scrolls the upper plate's lines first, only as far as the cap needs", () => {
+    // 384 × (300 + 267) px is 53.4% of the picture: three lines fewer, with the position line under
+    // them, is 49.7%.
+    const room = atFloor(floorUpper(300));
+    expect([room.cover?.capped, room.readout, room.upper]).toEqual([
+      "scroll",
+      "stands",
+      { kind: "middle", heightPx: 7 * 19, lines: 7 },
+    ]);
+    expect(room.cover?.share).toBeLessThanOrEqual(PLATES_COVER_CAP);
+  });
+
+  it("gives the survey line's values and DATUM way last, the readout given way before them", () => {
+    // With a lower plate that, its readout given way, is still 260 px tall.
+    const room = viewRoom(
+      inputOn(FLOOR_STAGE, {
+        full: { upper: CLOSE_IN_UPPER, lower: floorLower(400, 260, 73) },
+        columns: true,
+      }),
+      null,
+    );
+    expect([room.cover?.capped, room.readout, room.survey, room.upper.kind]).toEqual([
+      "survey",
+      "yields",
+      "yields",
+      "middle",
+    ]);
+  });
+
+  it("gives nothing way where the plates cover less than half", () => {
+    const room = atFloor(floorUpper(200));
+    expect([room.cover?.capped, room.readout, room.upper.kind]).toEqual([
+      "none",
+      "stands",
+      "whole",
+    ]);
+    expect(room.cover?.share).toBeCloseTo((384 * (200 + 267)) / (816 * 500), 9);
+  });
+
+  it("returns a part only once the plates would stay under half with a line to spare", () => {
+    // Capped by its scroll at 300 px: whole, 260 px is 49.6% of the picture, and 51.2% with a line
+    // of 17.5 px across 384 px to spare; at 240 px, 47.7% and 49.4% with it.
+    const capped = atFloor(floorUpper(300));
+    expect([
+      atFloor(floorUpper(260)).cover?.capped,
+      atFloor(floorUpper(260), capped).cover?.capped,
+      atFloor(floorUpper(240), capped).cover?.capped,
+    ]).toEqual(["none", "scroll", "none"]);
+  });
+
+  it("caps the plates stacked too, past the room's own steps", () => {
+    // .0705's close-in stacked on a 700 × 560 px stage: by their heights the survey line and DATUM
+    // give way (444 + 8 + 73 of 544 px), and 384 × (444 + 73) px is 50.6% of the picture, so the
+    // lines before STARS scroll too, two fewer.
+    const room = viewRoom(
+      inputOn(stageOf(560, 700), { full: { upper: CLOSE_IN_UPPER, lower: FLOOR_LOWER } }),
+      null,
+    );
+    expect([room.arrangement, room.step, room.survey, room.cover?.capped, room.upper]).toEqual([
+      "stacked",
+      2,
+      "yields",
+      "scroll",
+      { kind: "middle", heightPx: 8 * 19, lines: 8 },
+    ]);
+  });
+
+  it("returns a readout the cap gave way only once the plates would stay under half with a line to spare", () => {
+    // With the lines at FRAME–CAMERA and the readout standing, 340 px is 49.9% of the picture and
+    // 51.5% with the line to spare; 320 px, 48.0% and 49.6%.
+    const capped = atFloor(CLOSE_IN_UPPER);
+    expect([
+      atFloor(floorUpper(340)).cover?.capped,
+      atFloor(floorUpper(340), capped).cover?.capped,
+      atFloor(floorUpper(320), capped).cover?.capped,
+    ]).toEqual(["scroll", "readout", "scroll"]);
+  });
+
+  it("caps the plates beside a slot that stands, the slot standing", () => {
+    // 690 px wide beside the slot on a 1280 × 700 px stage: 690 × (600 + 60) px is 50.8% of it, and
+    // the lines before STARS scroll two fewer.
+    const upper: UpperPlateMeasures = { ...floorUpper(600), widthPx: 690 };
+    const lower: LowerPlateMeasures = {
+      ...floorLower(60, 40, 30),
+      wholeWidthPx: 690,
+      readoutYieldedWidthPx: 690,
+      surveyYieldedWidthPx: 690,
+    };
+    const room = roomAt(700, { slots: [OPEN, CLOSED], beside: { upper, lower } });
+    expect([room.slots[0], room.heldForPlates, room.cover?.capped, room.upper]).toEqual([
+      "stands",
+      false,
+      "scroll",
+      { kind: "middle", heightPx: 8 * 19, lines: 8 },
+    ]);
+  });
+
+  it("gives nothing way under MAXIMIZE VIEW's bare upper plate, the readout standing", () => {
+    // Folded to its faults alone, 60 px: with the lower plate whole, 30.8% of the picture.
+    const bare: UpperPlateMeasures = {
+      wholePx: 60,
+      middleLinesPx: [],
+      pinnedLines: 0,
+      bodyPx: 40,
+      positionPx: 18,
+      widthPx: FLOOR_COLUMN_PX,
+    };
+    const room = atFloor(bare);
+    expect([room.cover?.capped, room.readout, room.survey]).toEqual(["none", "stands", "stands"]);
+  });
+
+  it("stays over half where what never gives way alone holds the plates there", () => {
+    // Stacked on a 600 × 560 px stage the survey line gives way by the heights, and with the lines
+    // at FRAME–CAMERA the plates still cover 50.3%: nothing more gives way.
+    const room = viewRoom(
+      inputOn(stageOf(560, 600), { full: { upper: CLOSE_IN_UPPER, lower: FLOOR_LOWER } }),
+      null,
+    );
+    expect([room.cover?.capped, room.upper, room.survey]).toEqual([
+      "scroll",
+      { kind: "middle", heightPx: 5 * 19, lines: 5 },
+      "yields",
+    ]);
+    expect(room.cover?.share).toBeGreaterThan(PLATES_COVER_CAP);
+  });
+
+  it("tells two rooms capped apart", () => {
+    expect(sameRoom(atFloor(CLOSE_IN_UPPER), atFloor(floorUpper(200)))).toBe(false);
+  });
+
+  it("tells two rooms apart that differ in their cover alone", () => {
+    const room = atFloor(CLOSE_IN_UPPER);
+    const cover = room.cover;
+    if (cover === null) {
+      throw new Error("a room decided on measures has a cover");
+    }
+    expect([
+      sameRoom(room, { ...room, cover: { ...cover, share: cover.share - 0.01 } }),
+      sameRoom(room, { ...room, cover: { ...cover, capped: "survey" } }),
+      sameRoom(room, { ...room }),
+    ]).toEqual([false, false, true]);
+  });
+});
+
 describe("VIEW's room before anything is laid out (R10.T12.b)", () => {
   const SLOTS: RoomInput["slots"] = [OPEN, CLOSED];
 
@@ -837,6 +1103,7 @@ describe("VIEW's room before anything is laid out (R10.T12.b)", () => {
       survey: "stands",
       upper: { kind: "whole" },
       arrangement: "stacked",
+      cover: null,
       basis: null,
     });
   });

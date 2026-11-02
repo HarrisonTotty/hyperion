@@ -20,6 +20,11 @@ function heightOf(element: Element): number {
   return element.getBoundingClientRect().height;
 }
 
+/** An element's laid-out width, CSS px, fractions kept. */
+function widthOf(element: Element): number {
+  return element.getBoundingClientRect().width;
+}
+
 /** A computed length, px, or 0 where it reads as none. */
 function lengthPx(text: string): number {
   const px = Number.parseFloat(text);
@@ -77,6 +82,7 @@ export function measureUpperPlate(
     pinnedLines: Math.min(pinnedLines, middleLinesPx.length),
     bodyPx: wholePx - chromePx,
     positionPx,
+    widthPx: widthOf(plate),
   };
 }
 
@@ -99,26 +105,29 @@ export function passingParts(plate: Element): YieldingPart[] {
 }
 
 /**
- * The lower plate's heights ({@link LowerPlateMeasures}) from its forms in `root`, each a plate
- * under an element whose `data-form` names it: `whole`, `readout` (the readout given way) and
+ * The lower plate's heights and widths ({@link LowerPlateMeasures}) from its forms in `root`, each a
+ * plate under an element whose `data-form` names it: `whole`, `readout` (the readout given way) and
  * `survey` (the survey line's values and `DATUM` given way too), and the parts whose runs pass the
  * whole form's plate; `null` without a whole form.
  */
 export function measureLowerForms(root: Element): LowerPlateMeasures | null {
   const plateOf = (name: string): Element | null =>
     root.querySelector(`[data-form="${name}"] > .view-label`);
-  const form = (name: string): number | null => {
+  const form = (name: string, of: (element: Element) => number): number | null => {
     const plate = plateOf(name);
-    return plate === null ? null : heightOf(plate);
+    return plate === null ? null : of(plate);
   };
   const whole = plateOf("whole");
   return whole === null
     ? null
     : {
         wholePx: heightOf(whole),
-        readoutYieldedPx: form("readout"),
-        surveyYieldedPx: form("survey"),
+        readoutYieldedPx: form("readout", heightOf),
+        surveyYieldedPx: form("survey", heightOf),
         passing: passingParts(whole),
+        wholeWidthPx: widthOf(whole),
+        readoutYieldedWidthPx: form("readout", widthOf),
+        surveyYieldedWidthPx: form("survey", widthOf),
       };
 }
 
@@ -197,6 +206,9 @@ function sameLowerForms(a: LowerPlateMeasures | null, b: LowerPlateMeasures | nu
     : samePx(a.wholePx, b.wholePx) &&
         samePx(a.readoutYieldedPx, b.readoutYieldedPx) &&
         samePx(a.surveyYieldedPx, b.surveyYieldedPx) &&
+        samePx(a.wholeWidthPx, b.wholeWidthPx) &&
+        samePx(a.readoutYieldedWidthPx, b.readoutYieldedWidthPx) &&
+        samePx(a.surveyYieldedWidthPx, b.surveyYieldedWidthPx) &&
         a.passing.join() === b.passing.join();
 }
 
@@ -211,6 +223,7 @@ function samePlates(a: PlateMeasures | null, b: PlateMeasures | null): boolean {
     samePx(a.upper.wholePx, b.upper.wholePx) &&
     samePx(a.upper.bodyPx, b.upper.bodyPx) &&
     samePx(a.upper.positionPx, b.upper.positionPx) &&
+    samePx(a.upper.widthPx, b.upper.widthPx) &&
     a.upper.pinnedLines === b.upper.pinnedLines &&
     lines.length === otherLines.length &&
     lines.every((linePx, index) => samePx(linePx, otherLines[index] ?? null))

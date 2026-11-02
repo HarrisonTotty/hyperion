@@ -25,6 +25,16 @@
  * with one label row ({@link LINE_SPARE_REM}) to spare, so that a part that gave way at the edge
  * does not come back and go again as one statement clears and returns.
  *
+ * The cap (the owner's delegated call, 2026-11-01): the picture comes first, so the two plates
+ * together cover at most half the picture's area ({@link PLATES_COVER_CAP}) on every stage. It binds
+ * at the floor, where in columns they covered 59 to 67% of it (the owner's `VIEW BODY` captures at
+ * version 25). Past it, after the room's own steps, these give way in turn, each as a cut: first the
+ * upper plate's lines before `STARS` scroll, keeping `FRAME` to `CAMERA` in view (step 3); then the
+ * readout (step 1); then the survey line's values and `DATUM` (step 2) ({@link CapStep}). Each
+ * returns once the plates would stay under half with one label row to spare across the wider plate.
+ * What never gives way never gives way to the cap either: where it alone holds the plates over half,
+ * as stacked on a short stage, they stay over it with the three given way.
+ *
  * The width test (R10.T12.c; decision-r10-t12a-scope §7 item 4): a part of the lower plate whose
  * widest unbroken run, at its tallest, passes its plate gives way in the same order whatever the
  * heights (the readout first, then the survey line's values and `DATUM`), so that no run stands
@@ -88,6 +98,12 @@ export const PRIMARY_LABEL_MIN_REM = 14;
  * title row as tall as its 2 rem `CLOSE` and its reason's line, as measured at 1280 × 720.
  */
 export const STUB_HEIGHT_REM = 4;
+
+/**
+ * The most of the picture's area the `PRIMARY` view's two plates together cover, as a share: half
+ * (the owner's delegated call, 2026-11-01).
+ */
+export const PLATES_COVER_CAP = 0.5;
 
 /** The stub's reason, in its slot's corner (decision-r10-view-block-room §3). */
 export const STUB_REASON = "NOT AVAILABLE: no room at this window size";
@@ -160,6 +176,8 @@ export interface UpperPlateMeasures {
   readonly bodyPx: number;
   /** A position line under a scroll (`1-6 of 11`), with its margin. */
   readonly positionPx: number;
+  /** Its width as laid out, by which its cover of the picture is reckoned. */
+  readonly widthPx: number;
 }
 
 /** A part of the lower plate that gives way. */
@@ -173,6 +191,12 @@ export interface LowerPlateMeasures {
   readonly readoutYieldedPx: number | null;
   /** With its survey line's values and `DATUM` given way too; `null` where it holds neither. */
   readonly surveyYieldedPx: number | null;
+  /** Its width whole, by which, with its height, its cover of the picture is reckoned. */
+  readonly wholeWidthPx: number;
+  /** Its width with its readout given way; `null` where it holds no readout. */
+  readonly readoutYieldedWidthPx: number | null;
+  /** Its width with its survey line's values and `DATUM` given way too; `null` where it holds neither. */
+  readonly surveyYieldedWidthPx: number | null;
   /**
    * The parts whose widest unbroken run, at its tallest, passes the plate at this width (R10.T12.c;
    * decision-r10-t12a-scope §7 item 4), each of which gives way whatever the heights; none where
@@ -277,6 +301,12 @@ export interface ViewRoom {
   /** How the plates stand: stacked, beside the slots among them, or in columns (R10.T12.c). */
   readonly arrangement: PlateArrangement;
   /**
+   * How much of the picture the plates cover as they stand, and the cap's step that holds them under
+   * {@link PLATES_COVER_CAP}; `null` before the stage and the plates are measured. {@link step} stays
+   * the room's own step, and `readout`, `survey` and `upper` are as the cap leaves them.
+   */
+  readonly cover: PlatesCover | null;
+  /**
    * The stage it was decided at, from plates measured there, or `null` where it was not (before
    * the stage is laid out, or on stale measures): only a room decided at the same stage, so
    * measured, sets the next one's hysteresis, so that a resize or a change of interface scale is
@@ -337,6 +367,7 @@ export function wholeRoom(slots: RoomInput["slots"], columnsFitting = false): Vi
     survey: "stands",
     upper: { kind: "whole" },
     arrangement: columns ? "columns" : "stacked",
+    cover: null,
     basis: null,
   };
 }
@@ -422,6 +453,20 @@ export function leastStepOf(lower: LowerPlateMeasures | null): PlateStep {
     return 2;
   }
   return lower.readoutYieldedPx !== null && passing.includes("readout") ? 1 : 0;
+}
+
+/**
+ * The cap's steps, the furthest that applies (the owner's delegated call, 2026-11-01): `none`; the
+ * upper plate's lines before `STARS` scrolling, down to `FRAME`–`CAMERA` (step 3); then the readout
+ * given way too (step 1); then the survey line's values and `DATUM` too (step 2).
+ */
+export type CapStep = "none" | "scroll" | "readout" | "survey";
+
+/** How much of the picture the plates cover as they stand, and the cap's step that holds them. */
+export interface PlatesCover {
+  /** The share of the picture's area the two plates cover, 0 to 1. */
+  readonly share: number;
+  readonly capped: CapStep;
 }
 
 /** The plates' standing at one width, or `null` where none of the steps allowed holds them. */
@@ -563,6 +608,8 @@ function columnsAt(
   previous: ViewRoom | null,
 ): PlatesStanding {
   const { upper, lower } = measures;
+  // The room before as it stood, the cap's give-way among it: a part the cap held back returns to
+  // these steps with a line to spare, as one they held back does, and the cap then decides again.
   const previousLower: PlateStep =
     previous === null
       ? 0
@@ -585,6 +632,167 @@ function columnsAt(
   };
 }
 
+/** The upper plate's height, px, standing as `room` has it. */
+function upperHeightOf(upper: UpperPlateMeasures, room: UpperRoom): number {
+  let heightPx: number;
+  switch (room.kind) {
+    case "whole":
+      heightPx = upper.wholePx;
+      break;
+    case "middle": {
+      const middlePx = upper.middleLinesPx.reduce((sum, linePx) => sum + linePx, 0);
+      heightPx = upper.wholePx - middlePx + upper.positionPx + room.heightPx;
+      break;
+    }
+    case "body":
+      heightPx = upper.wholePx - upper.bodyPx + upper.positionPx + room.heightPx;
+      break;
+  }
+  return heightPx;
+}
+
+/** The lower plate's width at a step, as {@link lowerAt} its height; 0 with no lower plate. */
+function lowerWidthAt(lower: LowerPlateMeasures | null, step: PlateStep): number {
+  if (lower === null) {
+    return 0;
+  }
+  if (step >= 2 && lower.surveyYieldedWidthPx !== null) {
+    return lower.surveyYieldedWidthPx;
+  }
+  if (step >= 1 && lower.readoutYieldedWidthPx !== null) {
+    return lower.readoutYieldedWidthPx;
+  }
+  return lower.wholeWidthPx;
+}
+
+/** The area the two plates cover, px², the upper plate as `upper` and the lower at `lowerStep`. */
+function coveredPx2(measures: PlateMeasures, upper: UpperRoom, lowerStep: PlateStep): number {
+  const lowerPx = lowerAt(measures.lower, lowerStep) ?? 0;
+  return (
+    measures.upper.widthPx * upperHeightOf(measures.upper, upper) +
+    lowerWidthAt(measures.lower, lowerStep) * lowerPx
+  );
+}
+
+/** A standing the cap may take, with its place in the cap's order. */
+interface CapStanding {
+  readonly upper: UpperRoom;
+  readonly lowerStep: PlateStep;
+  readonly capped: CapStep;
+  /** Its place in the cap's order: 0 for none, one more for each line scrolled, then the readout, then the survey line. */
+  readonly rank: number;
+}
+
+/** The cap's ranks of the readout and of the survey line given way, after every scroll's. */
+function capRanks(upper: UpperPlateMeasures): {
+  readonly readout: number;
+  readonly survey: number;
+} {
+  const least = Math.max(1, upper.pinnedLines);
+  const readout = Math.max(0, upper.middleLinesPx.length - least) + 1;
+  return { readout, survey: readout + 1 };
+}
+
+/**
+ * The standings the cap may take from the room's own (`upper`, `lowerStep`), in its order: as they
+ * stand; the upper plate's lines before `STARS` scrolling, one line fewer at a time, down to
+ * `FRAME`–`CAMERA`; then, its lines held so, the readout given way; then the survey line's values
+ * and `DATUM`. A part the room's own steps gave way already gives way at each.
+ */
+function capStandings(
+  measures: PlateMeasures,
+  upper: UpperRoom,
+  lowerStep: PlateStep,
+): ReadonlyArray<CapStanding> {
+  const lines = measures.upper.middleLinesPx;
+  const least = Math.max(1, measures.upper.pinnedLines);
+  const ranks = capRanks(measures.upper);
+  let last: CapStanding = { upper, lowerStep, capped: "none", rank: 0 };
+  const standings: CapStanding[] = [last];
+  // Lines already scrolling scroll no further than the room's own step left them; a scroll of
+  // every line is no scroll; the whole plate scrolling is past the cap's scroll.
+  const shown = upper.kind === "whole" ? lines.length : upper.kind === "middle" ? upper.lines : 0;
+  for (let count = Math.min(shown, lines.length) - 1; count >= least; count -= 1) {
+    const heightPx = lines.slice(0, count).reduce((sum, linePx) => sum + linePx, 0);
+    last = {
+      upper: { kind: "middle", heightPx, lines: count },
+      lowerStep,
+      capped: "scroll",
+      rank: lines.length - count,
+    };
+    standings.push(last);
+  }
+  const lower = measures.lower;
+  if (lower !== null && lower.readoutYieldedPx !== null && last.lowerStep < 1) {
+    last = { upper: last.upper, lowerStep: 1, capped: "readout", rank: ranks.readout };
+    standings.push(last);
+  }
+  if (lower !== null && lower.surveyYieldedPx !== null && last.lowerStep < 2) {
+    standings.push({ upper: last.upper, lowerStep: 2, capped: "survey", rank: ranks.survey });
+  }
+  return standings;
+}
+
+/** The rank in the cap's order of the standing `room` was capped at, on `measures`. */
+function capRankOf(room: ViewRoom, measures: PlateMeasures): number {
+  const ranks = capRanks(measures.upper);
+  let rank: number;
+  switch (room.cover?.capped ?? "none") {
+    case "none":
+      rank = 0;
+      break;
+    case "scroll":
+      rank =
+        room.upper.kind === "middle" ? measures.upper.middleLinesPx.length - room.upper.lines : 0;
+      break;
+    case "readout":
+      rank = ranks.readout;
+      break;
+    case "survey":
+      rank = ranks.survey;
+      break;
+  }
+  return rank;
+}
+
+/**
+ * The plates as the room's own steps stand them, given way further where they would cover more than
+ * {@link PLATES_COVER_CAP} of `stage`'s picture (the owner's delegated call, 2026-11-01): the
+ * first of the cap's standings ({@link capStandings}) that stays under it, a return to one before
+ * the standing the room before was capped at only with one label row (`sparePx`) to spare across
+ * the wider plate; the last where none does. The room's own step stays its own.
+ */
+function cappedAt(
+  measures: PlateMeasures,
+  plates: PlatesStanding,
+  stage: StageRoom,
+  sparePx: number,
+  previous: ViewRoom | null,
+): { readonly plates: PlatesStanding; readonly cover: PlatesCover } {
+  const areaPx2 = stage.widthPx * stage.heightPx;
+  const capPx2 = PLATES_COVER_CAP * areaPx2;
+  const lowerStep = plates.lowerStep ?? plates.step;
+  const standings = capStandings(measures, plates.upper, lowerStep);
+  const previousRank = previous === null ? 0 : capRankOf(previous, measures);
+  const sparePx2 = sparePx * Math.max(measures.upper.widthPx, measures.lower?.wholeWidthPx ?? 0);
+  let chosen: CapStanding | null = null;
+  for (const standing of standings) {
+    const coverPx2 = coveredPx2(measures, standing.upper, standing.lowerStep);
+    chosen = standing;
+    if (coverPx2 + (standing.rank < previousRank ? sparePx2 : 0) <= capPx2) {
+      break;
+    }
+  }
+  const held: CapStanding = chosen ?? { upper: plates.upper, lowerStep, capped: "none", rank: 0 };
+  return {
+    plates: { step: plates.step, upper: held.upper, lowerStep: held.lowerStep },
+    cover: {
+      share: areaPx2 > 0 ? coveredPx2(measures, held.upper, held.lowerStep) / areaPx2 : 0,
+      capped: held.capped,
+    },
+  };
+}
+
 /**
  * The room decided for the stage's present measures (decision-r10-view-block-room §3), from the
  * room decided before, whose standing sets each part's hysteresis.
@@ -595,8 +803,9 @@ function columnsAt(
  * 4) and the plates take the full width, at any step. With no slot standing, on a stage that fits
  * them, the plates stand in columns ({@link PlateArrangement}), each decided in the stage's whole
  * height (R10.T12.c). Slots held for the plates return once the
- * plates beside them would stand at step 3 or less with a line to spare. Before the stage or the
- * plates are measured, nothing gives way.
+ * plates beside them would stand at step 3 or less with a line to spare. Last, wherever they stand,
+ * the cap ({@link PLATES_COVER_CAP}): past half the picture, the cap's steps give way in their order
+ * ({@link CapStep}). Before the stage or the plates are measured, nothing gives way.
  *
  * @param decidedBefore - The room decided before, or `null` for the first; its hysteresis holds
  *   only where it was decided at this stage from plates measured there, and these plates were too.
@@ -620,12 +829,19 @@ export function viewRoom(input: RoomInput, decidedBefore: ViewRoom | null): View
   const decided = (
     slots: readonly [SlotStanding, SlotStanding],
     heldForPlates: boolean,
-    plates: PlatesStanding,
+    standing: PlatesStanding,
     arrangement: PlateArrangement,
+    measures: PlateMeasures | null,
   ): ViewRoom => {
     const lower = full.lower;
     const hasReadout = lower !== null && lower.readoutYieldedPx !== null;
     const hasSurvey = lower !== null && lower.surveyYieldedPx !== null;
+    // The plates are capped as measured where they stand; beside the slots before they are
+    // measured there, as nothing else gives way, the cap does not either.
+    const { plates, cover } =
+      measures === null
+        ? { plates: standing, cover: null }
+        : cappedAt(measures, standing, stage, sparePx, previous);
     const lowerStep = plates.lowerStep ?? plates.step;
     return {
       slots,
@@ -636,13 +852,14 @@ export function viewRoom(input: RoomInput, decidedBefore: ViewRoom | null): View
       survey: lowerStep >= 2 && hasSurvey ? "yields" : "stands",
       upper: plates.upper,
       arrangement,
+      cover,
       basis,
     };
   };
   if (anyStands) {
     const beside = input.beside;
     if (beside === null) {
-      return decided(ownSlots, false, { step: 0, upper: { kind: "whole" } }, "stacked");
+      return decided(ownSlots, false, { step: 0, upper: { kind: "whole" } }, "stacked", null);
     }
     // Held for the plates, the slots return only with a line to spare beside them.
     const returning = previous?.heldForPlates === true;
@@ -655,7 +872,7 @@ export function viewRoom(input: RoomInput, decidedBefore: ViewRoom | null): View
       3,
     );
     if (besideStanding !== null) {
-      return decided(ownSlots, false, besideStanding, "stacked");
+      return decided(ownSlots, false, besideStanding, "stacked", beside);
     }
   }
   const held: readonly [SlotStanding, SlotStanding] = [
@@ -670,8 +887,8 @@ export function viewRoom(input: RoomInput, decidedBefore: ViewRoom | null): View
       : (platesAt(full, roomPx, gapPx, sparePx, previousStep, 5) ??
         bodyScrollAt(full, roomPx, gapPx, sparePx));
   return anyStands
-    ? decided(held, true, plates, arrangement)
-    : decided(ownSlots, false, plates, arrangement);
+    ? decided(held, true, plates, arrangement, full)
+    : decided(ownSlots, false, plates, arrangement, full);
 }
 
 /**
@@ -734,6 +951,8 @@ export function sameRoom(a: ViewRoom, b: ViewRoom): boolean {
     a.readout === b.readout &&
     a.survey === b.survey &&
     a.arrangement === b.arrangement &&
+    a.cover?.share === b.cover?.share &&
+    a.cover?.capped === b.cover?.capped &&
     (a.basis === b.basis || sameStage(a.basis, b.basis))
   );
 }

@@ -16,10 +16,12 @@ import {
   LitBodyDraws,
   LOW_HEIGHT_M,
   positionRangeM,
+  readoutHeldBack,
   recordInspectionCheck,
   runInspectionCheck,
   slantRangeM,
 } from "./inspectionCheckRun";
+import { lowerYieldLine } from "../viewRoom";
 
 /** A profiled window, as the frame profile measured it. */
 const WINDOW: InspectionTimingWindow = {
@@ -310,6 +312,15 @@ describe("the inspection run's reading of the ground and the camera's range", ()
         [],
       ].map(inspectionGround),
     ).toEqual(["surveyed", "waiting", "not modelled", "waiting"]);
+  });
+
+  it("tells a readout the room holds back from the ground it reads", () => {
+    expect([
+      readoutHeldBack([lowerYieldLine(["readout"])]),
+      readoutHeldBack([lowerYieldLine(["survey", "datum", "readout"])]),
+      readoutHeldBack([lowerYieldLine(["survey"])]),
+      readoutHeldBack(["GROUND AT LINE OF SIGHT", "ELEVATION ~617.9 m ± 0.4 m"]),
+    ]).toEqual([true, true, false, false]);
   });
 
   it("reads the POSITION line's range in its unit, its digits grouped", () => {

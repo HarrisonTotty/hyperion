@@ -803,9 +803,9 @@ Four classes, shared by the whole ship:
     tall and at least 48 rem wide, as at the floor (see "Layout"), the two stand in columns instead,
     either side of the picture's centre, where the line of sight falls, neither within 1 rem of it:
     the upper plate at the top left and the lower plate at the bottom right, each reckoned in the
-    picture's whole height within its insets. The upper plate stands so whether or not the view
-    states a body's terrain, so that the centre stays clear and the plate does not move as the
-    terrain comes and goes. In every view's label block, the primary's two plates included, a
+    picture's whole height within its insets and at most as wide as its half less its inset. The
+    upper plate stands so whether or not the view states a body's terrain, so that the centre stays
+    clear and the plate does not move as the terrain comes and goes. In every view's label block, the primary's two plates included, a
     reading's label stands whole wherever its plate is as wide as the label: its value stands beside
     it where the label and the value's widest unbroken part share a line, and otherwise under it
     (see "Layout"), and the `DATUM`'s figure may break after its `×`,
@@ -839,6 +839,15 @@ Four classes, shared by the whole ship:
     Below the floor (see "Layout") the upper plate's lines may scroll down to one, and where even
     its lines from `STARS` on, statements and faults would not fit, the whole plate scrolls, held at
     its foot so that its faults and last statements stay in view.
+
+    The picture comes first: together the two plates cover at most half the picture's area, on
+    every stage. Where they would cover more, parts give way in turn, beyond what the room above
+    has given way, each at once and as a cut. Under the cap the upper plate's lines scroll only to
+    `FRAME`–`CAMERA`; past that the terrain readout, then the survey line's values and `DATUM`,
+    give way. Each returns once the plates would stay under half with a line to spare. The cap
+    gives way to what always stands whole: the statements, the star count, the faults, the `STARS`
+    line and those after it, the survey line's states, the lines saying what is held back, and
+    opened reasons, which may carry the plates past half.
 
   - a slot that the stage cannot hold whole, for the window, the interface scale, its own statements
     or the room the `PRIMARY` view's label block needs, is held: it draws nothing, its view is not
