@@ -1494,6 +1494,34 @@ describe("each view's selection margin for its motion (R10.T16; the batch review
     ]);
   });
 
+  it("holds no margin with no clock, and none for a view that left and came back", async () => {
+    const inputs: SelectionInput[] = [];
+    const unclocked = await sharedPass("high", {
+      frustumMargin: "motion",
+      onSelect: (input) => inputs.push(input),
+    });
+    const turn = 10 * PIXEL_RAD;
+    const nudge = 2 * PIXEL_RAD;
+    for (const yawRad of [0, turn, turn + nudge]) {
+      unclocked.pass.step({ views: [passView(PRIMARY, low(yawRad))], grounded: [] });
+    }
+    const unheld = inputs.map((input) => input.views[0]?.frustumMarginRad);
+    const left: SelectionInput[] = [];
+    const clocked = await sharedPass("high", {
+      frustumMargin: "motion",
+      lookaheadClockMs: () => 0,
+      onSelect: (input) => left.push(input),
+    });
+    clocked.pass.step({ views: [passView(PRIMARY, low(0))], grounded: [] });
+    clocked.pass.step({ views: [passView(PRIMARY, low(turn))], grounded: [] });
+    clocked.pass.step({ views: [passView(INSTRUMENT, low(0))], grounded: [] });
+    clocked.pass.step({ views: [passView(PRIMARY, low(turn + nudge))], grounded: [] });
+    expect([unheld, left.at(-1)?.views[0]?.frustumMarginRad]).toEqual([
+      [PIXEL_RAD, expect.closeTo(PIXEL_RAD + turn, 12), expect.closeTo(PIXEL_RAD + nudge, 12)],
+      PIXEL_RAD,
+    ]);
+  });
+
   it("holds a margin wider than the rule's from when it was set, and takes a wider or a later one", () => {
     const held = { rad: 0.02, sinceMs: 1_000 };
     expect([

@@ -755,9 +755,10 @@ export interface TerrainPassOptions {
    * The clock the pass looks ahead of its views' motion by, monotonic milliseconds (plan R10,
    * R10.T14.b; `lookahead.ts`): at each selection it selects again for each view that moves, at its
    * pose L ahead, and asks for that selection's demand at half the view's weight, never drawing it.
-   * It times each step's views' velocities and each bake's demand → resident time, L's samples.
-   * Absent, the pass looks ahead of nothing and asks for its selection's demand alone, as R05's
-   * spike's `frame` does, bit for bit; the terrain session's passes take the session's.
+   * It times each step's views' velocities and each bake's demand → resident time, L's samples,
+   * and holds each view's widest frustum margin ({@link heldFrustumMargin}; R10.T16.i). Absent, the
+   * pass looks ahead of nothing, holds no margin and asks for its selection's demand alone, as
+   * R05's spike's `frame` does, bit for bit; the terrain session's passes take the session's.
    */
   readonly lookaheadClockMs?: () => number;
   /**

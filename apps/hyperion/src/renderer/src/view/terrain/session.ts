@@ -254,8 +254,9 @@ export interface TerrainSessionOptions {
   readonly horizonMap?: HorizonLayerSetting;
   /**
    * The clock its passes look ahead of their views' motion by, monotonic milliseconds (plan R10,
-   * R10.T14.b; `TerrainPassOptions.lookaheadClockMs`): `performance.now()` in the app, a test's
-   * fake clock; absent, its passes look ahead of nothing.
+   * R10.T14.b; `TerrainPassOptions.lookaheadClockMs`), and hold their views' widest frustum margins
+   * on (R10.T16.i): `performance.now()` in the app, a test's fake clock; absent, its passes look
+   * ahead of nothing and hold no margin.
    */
   readonly lookaheadClockMs?: () => number;
   /**
