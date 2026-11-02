@@ -13,10 +13,12 @@
 //! halo's companions within 0.25 M☉ under the turn-off beside an evolved primary, about 12.5 per
 //! horizontal-branch star stayed detached at P ≥ 10³ d, every one with no mass accreted.
 //!
-//! From 27 ([`WindAccretionRules::BondiHoyle`]) a pair the lobe and decay tests pass over is walked
-//! over its partner's own track: a hydrogen main-sequence star of at least 0.1 M☉ on its own track
-//! takes BSE's equation-6 share of its partner's wind ([`bondi_hoyle_share`], the engine's own
-//! expression), with equation 9's wind speed and at most equation 10's 0.8, step by step between
+//! From 27 ([`WindAccretionRules::WindRocheLobe`]) a pair the lobe and decay tests pass over is
+//! walked over its partner's own track: a hydrogen main-sequence star of at least 0.1 M☉ on its own
+//! track takes BSE's equation-6 share of its partner's wind ([`bondi_hoyle_share`], the engine's own
+//! expression), with equation 9's wind speed and at most equation 10's 0.8, or, beside a partner on
+//! its asymptotic giant branch, the larger share of wind Roche-lobe overflow
+//! ([`wind_roche_lobe_share`], Abate et al. 2013), step by step between
 //! the knots at which the partner's track integrates its mass (`Track::mass_breaks`, cut into
 //! [`STEPS_PER_INTERVAL`]), at the orbit the Jeans mode widens (a ∝ 1 ÷ M, the drawn eccentricity
 //! kept). Where what it takes reaches [`LEAST_ACCRETED_MSUN`] the pair is no longer two single
@@ -30,6 +32,12 @@
 //!    ([`rejuvenated_tau_unheld`]), to the end of its main sequence;
 //! 3. from there, the accretor on a track of its mass, placed at its Hertzsprung gap's start as the
 //!    engine places a carried main sequence that ends (`Engine::after_boundary`).
+//!
+//! Wind Roche-lobe overflow (Mohamed and Podsiadlowski 2007, ASP Conf. Ser. 372, 397; Abate et al.
+//! 2013, A&A 552, A26): an AGB star's slow wind is accelerated by the dust that condenses in it, and
+//! where the dust forms near the star's Roche lobe the wind fills the lobe and flows through its
+//! inner point, so the companion takes far more of it than the Bondi–Hoyle share. research-leans-30
+//! (§2) chose it over engine-side wind as the first lever on the halo's blue stragglers.
 //!
 //! The donor keeps its own track throughout, and the orbit shown is the drawn one, as for every
 //! pair passed over: the widening enters the share alone. Leans of 2026-11-01, recorded in plan 11:
@@ -56,13 +64,15 @@ use crate::units::{SolarMasses, Years};
 
 use super::BinaryParams;
 use super::detached::last_living;
-use super::evolve::{drawn_orbit_path, offset_for, reach_margin_years, track_mass, track_reaching};
+use super::evolve::{
+    drawn_orbit_path, offset_for, reach_margin_years, roche_lobe, track_mass, track_reaching,
+};
 use super::rlof::rejuvenated_tau_unheld;
 use super::star::{G, Kind, Member, Path};
 use super::timeline::{BinaryInput, BinaryTimeline, Context, Segment, SegmentKind};
 
 /// The generator version whose stellar rules give a passed-over pair's main-sequence star its share
-/// of its partner's wind (P11.T12's fix): [`WindAccretionRules::BondiHoyle`].
+/// of its partner's wind (P11.T12's fix): [`WindAccretionRules::WindRocheLobe`].
 ///
 /// Below it every pair takes the held arm, [`WindAccretionRules::OwnTracks`], the code of version
 /// 24 verbatim, so every generated value keeps its bits; the tests reach the new arm through
@@ -81,9 +91,14 @@ pub(crate) enum WindAccretionRules {
     /// Version 26's and before: a pair the lobe and decay tests pass over is two single stars on
     /// their orbit, plan 06's own.
     OwnTracks,
-    /// Version 27's: its main-sequence star takes its Bondi–Hoyle share of its partner's wind, and
-    /// from [`LEAST_ACCRETED_MSUN`] the pair is wind-fed.
+    /// Its main-sequence star takes its Bondi–Hoyle share of its partner's wind alone, and from
+    /// [`LEAST_ACCRETED_MSUN`] the pair is wind-fed: the arm as first built, which no version
+    /// takes, for the tests that hold the closed form against the engine's own Bondi–Hoyle wind.
+    #[cfg(test)]
     BondiHoyle,
+    /// Version 27's: as [`WindAccretionRules::BondiHoyle`], with the larger share of wind Roche-lobe
+    /// overflow beside a partner on its asymptotic giant branch ([`wind_roche_lobe_share`]).
+    WindRocheLobe,
 }
 
 impl WindAccretionRules {
@@ -92,7 +107,21 @@ impl WindAccretionRules {
     pub(crate) const fn accretes(self) -> bool {
         match self {
             Self::OwnTracks => false,
+            #[cfg(test)]
             Self::BondiHoyle => true,
+            Self::WindRocheLobe => true,
+        }
+    }
+
+    /// Whether an AGB partner's wind overflows to its companion through its Roche lobe under these
+    /// rules ([`wind_roche_lobe_share`]).
+    #[must_use]
+    const fn overflows(self) -> bool {
+        match self {
+            Self::OwnTracks => false,
+            #[cfg(test)]
+            Self::BondiHoyle => false,
+            Self::WindRocheLobe => true,
         }
     }
 
@@ -115,6 +144,76 @@ pub(crate) const LEAST_ACCRETED_MSUN: f64 = 1.0e-4;
 /// at each step's middle, and the mass lost over it exactly. Two hold the accreted mass to 0.3%
 /// of eight's on the halo's 0.85 + 0.80 M☉ pair at 3,000 d (`the_walk_has_converged`).
 pub(crate) const STEPS_PER_INTERVAL: u32 = 2;
+
+/// The condensation temperature of the dust that drives an AGB star's wind, K: 1,500 K for
+/// carbon-rich dust (Höfner 2007, ASP Conf. Ser. 378, 145), as Abate et al. (2013, A&A 552, A26,
+/// section 2) take it (both recalled, not read in the pod). They take it for every AGB donor, as
+/// here, though a low-mass metal-poor donor's dredge-up may not lift its C/O above 1.
+pub(crate) const DUST_CONDENSATION_K: f64 = 1_500.0;
+
+/// The coefficients c₁, c₂ and c₃ of Abate et al. (2013, A&A 552, A26, equation 9)'s quadratic
+/// in `R_d` ÷ `R_L`, their fit to the accretion efficiencies of Mohamed and Podsiadlowski's (2007,
+/// 2012) hydrodynamical runs (recalled, not read in the pod).
+pub(crate) const WIND_ROCHE_LOBE_COEFFICIENTS: [f64; 3] = [-0.284, 0.918, -0.234];
+
+/// The largest share of its partner's wind a star takes by wind Roche-lobe overflow: Abate et al.
+/// (2013, A&A 552, A26)'s `β_acc,max`, 0.5 (recalled, not read in the pod).
+pub(crate) const WIND_ROCHE_LOBE_MAX_SHARE: f64 = 0.5;
+
+/// The ratio x = `R_d` ÷ `R_L` at which [`wind_roche_lobe_efficiency`]'s quadratic peaks, −c₂ ÷ 2c₁
+/// (about 1.62), past which the efficiency is held at its peak.
+const WIND_ROCHE_LOBE_PEAK_X: f64 =
+    -WIND_ROCHE_LOBE_COEFFICIENTS[1] / (2.0 * WIND_ROCHE_LOBE_COEFFICIENTS[0]);
+
+/// The radius at which the dust of the wind of a star of radius `r` (any unit) and effective
+/// temperature `t_eff_k` (K) condenses, in `r`'s unit: Höfner (2007, ASP Conf. Ser. 378, 145)'s
+/// `R_d` = ½ R (`T_eff` ÷ `T_cond`)^((4 + p) ÷ 2), with p = 1 for carbon-rich dust, as Abate et al.
+/// (2013, A&A 552, A26, section 2) take it (recalled, not read in the pod), at
+/// [`DUST_CONDENSATION_K`].
+#[must_use]
+pub(crate) fn dust_radius(r: f64, t_eff_k: f64) -> f64 {
+    let y = (t_eff_k / DUST_CONDENSATION_K).max(0.0);
+    // (T ÷ T_cond)^2.5 as y² √y: products and a square root alone, so the bits are every target's.
+    0.5 * r * (y * y * y.sqrt())
+}
+
+/// The share of an AGB star's wind its companion takes by wind Roche-lobe overflow, for a mass
+/// ratio `q` = `M_accretor` ÷ `M_donor` and a ratio `x` of the donor's dust radius to its Roche lobe:
+/// Abate et al. (2013, A&A 552, A26, equation 9)'s (25 ÷ 9) q² (c₁ x² + c₂ x + c₃), normalised to
+/// Mohamed and Podsiadlowski's q of 0.6, at most [`WIND_ROCHE_LOBE_MAX_SHARE`] and at least 0
+/// (the quadratic falls below 0 for x under about 0.28, where Bondi–Hoyle's share is the one).
+///
+/// Lean (2026-11-02): past the quadratic's peak, x ≈ 1.62 ([`WIND_ROCHE_LOBE_PEAK_X`]), the
+/// efficiency is held at the peak's. The fit falls again beyond it, to 0 at x ≈ 2.95, past the runs
+/// it fits, which would give a closer pair less of the wind than a wider one. Beside a donor
+/// heavier than about 0.6 of its partner's mass the cap, not the fit, sets the share near the lobe:
+/// the q² law is the fit's, carried past the one q its runs took.
+#[must_use]
+pub(crate) fn wind_roche_lobe_efficiency(q: f64, x: f64) -> f64 {
+    let [c1, c2, c3] = WIND_ROCHE_LOBE_COEFFICIENTS;
+    let x = x.min(WIND_ROCHE_LOBE_PEAK_X);
+    let fit = 25.0 / 9.0 * q * q * ((c1 * x + c2) * x + c3);
+    fit.clamp(0.0, WIND_ROCHE_LOBE_MAX_SHARE)
+}
+
+/// The share of its partner's wind a star of `m_accretor` M☉ takes by wind Roche-lobe overflow
+/// from a partner on its asymptotic giant branch of `m_donor` M☉, radius `r_donor` (R☉) and
+/// effective temperature `t_eff_k` (K), on an orbit of semi-major axis `a` (R☉): its
+/// [`wind_roche_lobe_efficiency`] at the donor's [`dust_radius`] over its Roche lobe at `a`
+/// (Eggleton 1983). Lean (2026-11-02): the lobe at the semi-major axis, as for the circular orbits
+/// Abate et al. (2013) ran, whatever the eccentricity.
+#[must_use]
+fn wind_roche_lobe_share(m_donor: f64, r_donor: f64, t_eff_k: f64, m_accretor: f64, a: f64) -> f64 {
+    let x = dust_radius(r_donor, t_eff_k) / roche_lobe(m_donor, m_accretor, a);
+    wind_roche_lobe_efficiency(m_accretor / m_donor, x)
+}
+
+/// Whether a star in `phase` loses an AGB star's dust-driven wind: the early and the thermally
+/// pulsing asymptotic giant branch (HPT types 5 and 6).
+#[must_use]
+const fn on_the_agb(phase: Phase) -> bool {
+    matches!(phase, Phase::EarlyAgb | Phase::ThermallyPulsingAgb)
+}
 
 /// The share of a wind-losing star's wind that its companion accretes: BSE equation 6, with
 /// equation 9's wind speed `v_W²` = 2 `β_W` G `M_d` ÷ `R_d`, at most equation 10's
@@ -165,6 +264,8 @@ struct Walk<'a> {
     e: f64,
     total0: f64,
     steps: u32,
+    /// Whether an AGB partner's wind overflows its Roche lobe ([`WindAccretionRules::overflows`]).
+    overflows: bool,
 }
 
 impl<'a> Walk<'a> {
@@ -187,6 +288,7 @@ impl<'a> Walk<'a> {
             e: orbit.eccentricity().value(),
             total0: m1 + m2,
             steps: STEPS_PER_INTERVAL,
+            overflows: input.rules().wind_accretion.overflows(),
         })
     }
 
@@ -204,25 +306,80 @@ impl<'a> Walk<'a> {
         (end > start).then_some((start, end))
     }
 
-    /// At most what the accretor can take of its partner's wind from `start` to `end`, M☉, for a
-    /// screen before the walk: the wind's share at its largest, every factor at its bound (the
-    /// partner's largest radius and least mass, the accretor at its most, the drawn orbit, the
-    /// slowest wind, no orbital speed), times all the partner loses.
+    /// Whether the accretor surely takes under [`LEAST_ACCRETED_MSUN`] of its partner's wind from
+    /// `start` to `end`, the screen before the walk: its [`Walk::bondi_hoyle_bound`] is under it,
+    /// and so is that and its [`Walk::overflow_bound`] where the partner's wind overflows (read
+    /// only then, as it reads the partner's AGB step by step).
     #[must_use]
-    fn bound(&self, end: f64) -> f64 {
-        let least = self.donor.mass_at(end);
-        let lost = (self.donor.initial_mass().value() - least).max(0.0);
+    fn takes_too_little(&self, start: f64, end: f64) -> bool {
+        let bondi_hoyle = self.bondi_hoyle_bound(end);
+        bondi_hoyle < LEAST_ACCRETED_MSUN
+            && (!self.overflows
+                || bondi_hoyle + self.overflow_bound(start, end) < LEAST_ACCRETED_MSUN)
+    }
+
+    /// What the partner loses by `end`, M☉, and the most the accretor's mass can be by then: its
+    /// initial mass and the largest share of every wind, BSE's 0.8, of that loss.
+    #[must_use]
+    fn lost_and_most(&self, end: f64) -> (f64, f64) {
+        let lost = (self.donor.initial_mass().value() - self.donor.mass_at(end)).max(0.0);
+        let most = self.accretor.initial_mass().value() + self.params.max_wind_accretion * lost;
+        (lost, most)
+    }
+
+    /// At most what the accretor takes of its partner's wind by `end` of the Bondi–Hoyle share,
+    /// M☉: the share at its largest, every factor at its bound (the partner's largest radius and
+    /// least mass, the accretor at its most, the drawn orbit, the slowest wind, no orbital speed),
+    /// times all the partner loses.
+    #[must_use]
+    fn bondi_hoyle_bound(&self, end: f64) -> f64 {
+        let (lost, most) = self.lost_and_most(end);
         if lost <= 0.0 {
             return 0.0;
         }
+        let least = self.donor.mass_at(end);
         let radius = self.donor.max_radius_until(Years::new(end)).value();
-        let most = self.accretor.initial_mass().value() + self.params.max_wind_accretion * lost;
         // G M_a ÷ v_W² = M_a R ÷ (2 β_W M_d).
         let focus = most * radius / (2.0 * self.params.wind_speed_factor.least() * least);
         let share = self.params.bondi_hoyle * focus * focus
             / (2.0 * self.a0 * self.a0)
             / (1.0 - self.e * self.e).sqrt();
         share.min(self.params.max_wind_accretion) * lost
+    }
+
+    /// At most what the accretor takes of its partner's wind from `start` to `end` by wind
+    /// Roche-lobe overflow, M☉: over the walk's own steps on the partner's asymptotic giant branch,
+    /// each read where [`Walk::taken`] reads it, the overflow's share with the accretor at its most
+    /// ([`Walk::lost_and_most`]) and the orbit the drawn one (the Jeans mode only widens it), times
+    /// what the partner loses over the step: the efficiency never falls as q or x grows. With
+    /// [`Walk::bondi_hoyle_bound`] it bounds the walk, which takes the larger of the two shares.
+    #[must_use]
+    fn overflow_bound(&self, start: f64, end: f64) -> f64 {
+        let agb = [Phase::EarlyAgb, Phase::ThermallyPulsingAgb]
+            .into_iter()
+            .filter_map(|phase| self.donor.age_in_phase(phase, 0.0))
+            .reduce(f64::min);
+        let Some(agb) = agb.filter(|&age| age < end) else {
+            return 0.0;
+        };
+        let (_, most) = self.lost_and_most(end);
+        self.steps(start, end)
+            .skip_while(|&(_, t1)| t1 <= agb)
+            .map(|(t0, t1)| {
+                let lost = (self.donor.mass_at(t0) - self.donor.mass_at(t1)).max(0.0);
+                if lost <= 0.0 {
+                    return 0.0;
+                }
+                let state = self.donor.state_at(Years::new(f64::midpoint(t0, t1)));
+                let (m_donor, r_donor) = (state.mass().value(), state.radius().value());
+                if !(on_the_agb(state.phase()) && m_donor > 0.0 && r_donor > 0.0) {
+                    return 0.0;
+                }
+                let dust = dust_radius(r_donor, state.effective_temperature().value());
+                let x = dust / roche_lobe(m_donor, most, self.a0);
+                lost * wind_roche_lobe_efficiency(most / m_donor, x)
+            })
+            .sum()
     }
 
     /// The walk's steps from `start` to `end`, years, in age order: the spans between the
@@ -252,7 +409,9 @@ impl<'a> Walk<'a> {
     }
 
     /// What an accretor of `m_accretor` M☉ takes of the partner's wind over the step from `t0` to
-    /// `t1`, M☉: the share at the step's middle times the mass the partner loses over it.
+    /// `t1`, M☉: the share at the step's middle times the mass the partner loses over it, the
+    /// Bondi–Hoyle share or, from an AGB partner whose wind overflows, the overflow's if larger
+    /// (Abate et al. 2013, section 2.2: the larger of the two, recalled).
     #[must_use]
     fn taken(&self, t0: f64, t1: f64, m_accretor: f64) -> f64 {
         let lost = (self.donor.mass_at(t0) - self.donor.mass_at(t1)).max(0.0);
@@ -266,7 +425,15 @@ impl<'a> Walk<'a> {
         }
         let a = self.a0 * self.total0 / (m_donor + m_accretor);
         let kind = Kind::of(state.phase(), m_donor);
-        lost * bondi_hoyle_share(self.params, kind, m_donor, r_donor, m_accretor, a, self.e)
+        let share = bondi_hoyle_share(self.params, kind, m_donor, r_donor, m_accretor, a, self.e);
+        if self.overflows && on_the_agb(state.phase()) {
+            let t_eff = state.effective_temperature().value();
+            lost * share.max(wind_roche_lobe_share(
+                m_donor, r_donor, t_eff, m_accretor, a,
+            ))
+        } else {
+            lost * share
+        }
     }
 
     /// The first step's start at which what the accretor, on its own track, has taken by that
@@ -301,7 +468,7 @@ pub(super) fn onset(input: &BinaryInput, members: &[Member; 2], until: f64) -> O
         .filter_map(|accretor| {
             let walk = Walk::of(input, members, accretor)?;
             let (start, end) = walk.span()?;
-            if walk.bound(end) < LEAST_ACCRETED_MSUN {
+            if walk.takes_too_little(start, end) {
                 return None;
             }
             let age = walk.onset(start, end, until)?;

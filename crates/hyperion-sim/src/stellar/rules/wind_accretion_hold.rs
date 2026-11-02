@@ -6,6 +6,8 @@
 //! - Failing first, the brief's halo pair: 0.85 + 0.80 M☉ at Z = 0.0003 on a 3,000-day orbit.
 //!   Under the arm the 0.80 M☉ star has gained mass by 12 Gyr and the pair can interact; under the
 //!   held arm it has not, and the pair is one detached segment of its own models.
+//! - Failing first, wind Roche-lobe overflow: the same pair's 0.80 M☉ star takes at least three
+//!   times under 27's arm what it takes of the Bondi–Hoyle share alone.
 //! - Under the arm the pair's past does not depend on the age it is run to, and its masses are
 //!   continuous where its segments meet.
 //! - The cheap path: a pair of main-sequence stars, and one too wide to take 10⁻⁴ M☉, are their
@@ -18,6 +20,7 @@ use crate::GENERATOR_VERSION;
 use crate::galaxy::rules::GalaxyRules;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::stellar::Composition;
+use crate::stellar::binary::wind_accretion::WIND_ROCHE_LOBE_MAX_SHARE;
 use crate::stellar::binary::{
     BinaryInput, BinaryTimeline, Segment, SegmentKind, can_interact, evolve,
 };
@@ -34,7 +37,16 @@ fn version() -> StellarRules {
     StellarRules::of_version(GENERATOR_VERSION)
 }
 
-/// The version's rules with this hold's arm on alone.
+/// The version's rules with this hold's arm, 27's, on alone.
+fn arm() -> StellarRules {
+    StellarRules {
+        wind_accretion: WindAccretionRules::WindRocheLobe,
+        ..version()
+    }
+}
+
+/// The version's rules with the test-only Bondi–Hoyle arm on alone: the arm as first built, with
+/// no wind Roche-lobe overflow.
 fn bondi_hoyle() -> StellarRules {
     StellarRules {
         wind_accretion: WindAccretionRules::BondiHoyle,
@@ -94,20 +106,21 @@ fn the_wind_accretion_is_held_only_until_the_27_bump() {
     for v in [GENERATOR_VERSION.get(), 25, 26] {
         assert_eq!(at(v), WindAccretionRules::OwnTracks, "version {v}");
     }
-    assert_eq!(at(27), WindAccretionRules::BondiHoyle);
+    assert_eq!(at(27), WindAccretionRules::WindRocheLobe);
     assert_eq!(
         StellarRules::every_26_hold_with_its_retargets().wind_accretion,
         WindAccretionRules::OwnTracks
     );
     assert_eq!(
         StellarRules::every_27_hold().wind_accretion,
-        WindAccretionRules::BondiHoyle
+        WindAccretionRules::WindRocheLobe
     );
     assert_eq!(
         GalaxyRules::every_27_hold().stellar.wind_accretion,
-        WindAccretionRules::BondiHoyle
+        WindAccretionRules::WindRocheLobe
     );
     assert!(version().wind_accretion.fitted_tables_hold());
+    assert!(!arm().wind_accretion.fitted_tables_hold());
     assert!(!bondi_hoyle().wind_accretion.fitted_tables_hold());
 }
 
@@ -119,10 +132,10 @@ fn the_wind_accretion_is_held_only_until_the_27_bump() {
 fn a_wide_halo_pair_s_companion_takes_its_partner_s_wind_under_the_arm() {
     let until = Years::new(UNTIL);
     let held = evolve(&halo_pair(version()), until);
-    let arm = evolve(&halo_pair(bondi_hoyle()), until);
-    let kinds: Vec<SegmentKind> = arm.segments().iter().map(Segment::kind).collect();
-    let (before, after) = (secondary_mass(&held, UNTIL), secondary_mass(&arm, UNTIL));
-    let now = arm.state_at(until);
+    let fed = evolve(&halo_pair(arm()), until);
+    let kinds: Vec<SegmentKind> = fed.segments().iter().map(Segment::kind).collect();
+    let (before, after) = (secondary_mass(&held, UNTIL), secondary_mass(&fed, UNTIL));
+    let now = fed.state_at(until);
     println!(
         "at 12 Gyr: the 0.80 M_sun star {before:.5} M_sun held, {after:.5} under the arm ({:?}, \
          its partner a {:?} of {:.3} M_sun; class {:?} held, {:?} under the arm); segments {:?} \
@@ -131,26 +144,26 @@ fn a_wide_halo_pair_s_companion_takes_its_partner_s_wind_under_the_arm() {
         now.stars()[0].phase(),
         now.stars()[0].mass().value(),
         held.class_at(until),
-        arm.class_at(until),
+        fed.class_at(until),
         kinds,
-        arm.segments()[1].start().value() / 1e9,
+        fed.segments()[1].start().value() / 1e9,
     );
     assert_eq!(held.segments().len(), 1);
     assert!(!can_interact(&halo_pair(version()), until));
-    assert!(can_interact(&halo_pair(bondi_hoyle()), until));
-    assert!(!can_interact(&halo_pair(bondi_hoyle()), Years::new(5.0e9)));
+    assert!(can_interact(&halo_pair(arm()), until));
+    assert!(!can_interact(&halo_pair(arm()), Years::new(5.0e9)));
     assert!(
         kinds.iter().all(|&k| k == SegmentKind::Detached),
         "{kinds:?}"
     );
-    assert!(arm.segments().len() >= 2, "{kinds:?}");
+    assert!(fed.segments().len() >= 2, "{kinds:?}");
     assert!(
         after > before + 5e-3,
         "{before} held, {after} under the arm"
     );
     // Before its onset the pair is its own models under the arm too.
     let early = Years::new(5.0e9);
-    assert_eq!(held.state_at(early), arm.state_at(early));
+    assert_eq!(held.state_at(early), fed.state_at(early));
 }
 
 /// Under the arm the halo pair's past does not depend on the age it is run to: run to 12 Gyr, to
@@ -159,7 +172,7 @@ fn a_wide_halo_pair_s_companion_takes_its_partner_s_wind_under_the_arm() {
 /// with no jump at the accretor's main-sequence end.
 #[test]
 fn the_wind_fed_pair_s_past_does_not_depend_on_its_age() {
-    let input = halo_pair(bondi_hoyle());
+    let input = halo_pair(arm());
     let full = evolve(&input, Years::new(UNTIL));
     let onset = full.segments()[1].start().value();
     let fed = full.segments()[1].end().value().min(UNTIL);
@@ -204,7 +217,7 @@ fn the_wind_fed_pair_s_past_does_not_depend_on_its_age() {
 fn pairs_that_take_too_little_wind_stay_their_own_models() {
     let until = Years::new(UNTIL);
     for (m1, m2, days, fe_h) in [(0.6, 0.3, 1.0e3, 0.0), (0.85, 0.80, 1.0e8, -1.82)] {
-        let [held, arm] = [version(), bondi_hoyle()].map(|rules| pair(m1, m2, days, fe_h, rules));
+        let [held, arm] = [version(), arm()].map(|rules| pair(m1, m2, days, fe_h, rules));
         assert!(!can_interact(&arm, until), "{m1} + {m2} M_sun at {days} d");
         let [held, arm] = [held, arm].map(|input| evolve(&input, until));
         assert_eq!(arm.segments().len(), 1, "{m1} + {m2} M_sun at {days} d");
@@ -216,5 +229,60 @@ fn pairs_that_take_too_little_wind_stay_their_own_models() {
                 "{m1} + {m2} M_sun at {days} d"
             );
         }
+    }
+}
+
+/// Failing first, wind Roche-lobe overflow (research-leans-30 §2): beside its partner's
+/// asymptotic giant branch the halo pair's 0.80 M☉ star takes at least three times under 27's arm
+/// what it takes of the Bondi–Hoyle share alone, 2 Myr after its partner's death, and no more than
+/// half the wind its partner loses on that branch beyond its Bondi–Hoyle share before it. Before
+/// the branch the two arms agree, state for state.
+#[test]
+fn an_agb_partner_s_wind_overflows_to_its_companion_under_the_arm() {
+    let until = Years::new(UNTIL);
+    let [own, held, overflow] =
+        [version(), bondi_hoyle(), arm()].map(|rules| evolve(&halo_pair(rules), until));
+    let primary = own.state_at(until);
+    let death = (1..=12_000)
+        .map(|k| 1.0e6 * f64::from(k))
+        .find(|&age| !own.state_at(Years::new(age)).stars()[0].phase().is_living())
+        .expect("the primary dies by 12 Gyr");
+    let agb = (1..=12_000)
+        .map(|k| 1.0e6 * f64::from(k))
+        .find(|&age| {
+            matches!(
+                own.state_at(Years::new(age)).stars()[0].phase(),
+                crate::stellar::Phase::EarlyAgb | crate::stellar::Phase::ThermallyPulsingAgb
+            )
+        })
+        .expect("the primary reaches its asymptotic giant branch");
+    let after = death + 2.0e6;
+    let gained =
+        |timeline: &BinaryTimeline| secondary_mass(timeline, after) - secondary_mass(&own, after);
+    let (by_bondi_hoyle, by_overflow) = (gained(&held), gained(&overflow));
+    let lost_on_the_agb = own.state_at(Years::new(agb - 1.0e6)).stars()[0]
+        .mass()
+        .value()
+        - primary.stars()[0].mass().value();
+    println!(
+        "by {:.4} Gyr: {by_bondi_hoyle:.5} M_sun of the Bondi-Hoyle share, {by_overflow:.5} with          the overflow ({:.2} times); the primary lost {lost_on_the_agb:.4} M_sun from its AGB at          {:.4} Gyr; at 12 Gyr the 0.80 M_sun star is a {:?} of {:.5} M_sun",
+        after / 1e9,
+        by_overflow / by_bondi_hoyle,
+        agb / 1e9,
+        overflow.state_at(until).stars()[1].phase(),
+        secondary_mass(&overflow, UNTIL),
+    );
+    assert!(by_bondi_hoyle > 5e-3, "{by_bondi_hoyle}");
+    assert!(
+        by_overflow >= 3.0 * by_bondi_hoyle,
+        "{by_overflow} with the overflow against {by_bondi_hoyle}"
+    );
+    assert!(
+        by_overflow <= by_bondi_hoyle + WIND_ROCHE_LOBE_MAX_SHARE * lost_on_the_agb,
+        "{by_overflow} against {lost_on_the_agb} lost on the AGB"
+    );
+    for j in 0..=100 {
+        let age = Years::new((agb - 1.0e6) * f64::from(j) / 100.0);
+        assert_eq!(held.state_at(age), overflow.state_at(age), "at {age:?}");
     }
 }

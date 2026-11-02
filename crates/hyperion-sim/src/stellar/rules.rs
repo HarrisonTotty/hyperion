@@ -90,7 +90,8 @@
 //! - [`wind_accretion`](StellarRules::wind_accretion), at [`WIND_ACCRETION_VERSION`] (plan 11,
 //!   P11.T12's fix): whether a pair the pre-test's lobe and decay tests pass over takes its winds,
 //!   two single stars on their orbit below it, from it a main-sequence star fed its Bondi–Hoyle
-//!   share of its partner's wind, read at one choke point, `wind_accretion::onset`, through the
+//!   share of its partner's wind, or the larger share of an AGB partner's wind Roche-lobe
+//!   overflow, read at one choke point, `wind_accretion::onset`, through the
 //!   pair's input's rules, by `can_interact` and `evolve`'s pass-over. The fitted tables keep the
 //!   version's rules until the bump refits them, and the range brief's gate refuses them under
 //!   another arm (`stellar/rules/wind_accretion_hold.rs` lists the movers).
@@ -211,7 +212,7 @@ impl StellarRules {
                 PinnedWhiteDwarfRules::Born
             },
             wind_accretion: if version.get() >= WIND_ACCRETION_VERSION.get() {
-                WindAccretionRules::BondiHoyle
+                WindAccretionRules::WindRocheLobe
             } else {
                 WindAccretionRules::OwnTracks
             },
