@@ -226,17 +226,17 @@ mod tests {
     }
 
     /// The census's black-hole primaries beside low-mass companions under every 27 hold, by their
-    /// fallback (complete first) and their end, as measured (2026-11-01).
+    /// fallback (complete first) and their end, as measured (2026-11-01, at generator version 25).
     const ENDS: [((bool, End), usize); 9] = [
-        ((true, End::MergedBeforeInEnvelope), 21),
-        ((true, End::MergedBeforeOtherwise), 21),
-        ((true, End::TransferringElsewhen), 1),
-        ((true, End::Detached), 14),
-        ((false, End::MergedBeforeInEnvelope), 49),
-        ((false, End::MergedBeforeOtherwise), 14),
-        ((false, End::Unbound), 12),
-        ((false, End::MergedAfter), 1),
-        ((false, End::Detached), 3),
+        ((true, End::MergedBeforeInEnvelope), 22),
+        ((true, End::MergedBeforeOtherwise), 17),
+        ((true, End::Detached), 13),
+        ((false, End::MergedBeforeInEnvelope), 59),
+        ((false, End::MergedBeforeOtherwise), 15),
+        ((false, End::Unbound), 41),
+        ((false, End::MergedAfter), 3),
+        ((false, End::TransferringElsewhen), 3),
+        ((false, End::Detached), 4),
     ];
 
     /// P11.T4's diagnosis of the black-hole low-mass X-ray binaries (`fix-p11-t4-bh-lmxb-masses`):
