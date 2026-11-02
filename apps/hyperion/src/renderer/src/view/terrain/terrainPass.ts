@@ -158,6 +158,7 @@ import {
   ContactRecords,
   fadeWord,
   INSTANCE_RECORD_BYTES,
+  MIX_STEPS,
   InstanceRecords,
   NO_PARENT_SLOT,
   parentQuadrant,
@@ -807,7 +808,7 @@ interface BakeSizes {
  * for it (`TimeMorph.heightWords`: bits 8 to 31, its rebake's or rise's fade and older slot).
  */
 function fadeWordOf(own: number, heights: number): number {
-  return fadeWord(own, (heights >>> 8) & 0xff, heights >>> 16);
+  return fadeWord(own, (heights >>> 8) & MIX_STEPS, heights >>> 20);
 }
 
 /** No area was seen at the last step: every patch drawn where nothing was appears at once. */

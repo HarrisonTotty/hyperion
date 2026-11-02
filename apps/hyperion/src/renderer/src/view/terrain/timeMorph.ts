@@ -41,7 +41,14 @@
 
 import type { CachedPatch, DrawnPatch, DrawSet } from "./cache";
 import type { FadeFootprint } from "./coarseFineHolds";
-import { DATUM_SLOT, fadeWord, MAX_SUB_PATCH_LEVELS, PARENT_MIX_SLOT } from "./gpu/uniforms";
+import {
+  DATUM_SLOT,
+  fadeWord,
+  MAX_SUB_PATCH_LEVELS,
+  MIX_STEPS,
+  mixStep,
+  PARENT_MIX_SLOT,
+} from "./gpu/uniforms";
 import { childKeys, type PatchKey, patchKeyString } from "./patchKey";
 
 /**
@@ -323,7 +330,7 @@ export class TimeMorph {
       t: 0,
     });
     // At its start: the older bake's whole, until the first draw stamps it.
-    this.#rebakeWords.set(keyString, fadeWord(0, 255, oldSlot));
+    this.#rebakeWords.set(keyString, fadeWord(0, MIX_STEPS, oldSlot));
   }
 
   /**
@@ -791,8 +798,8 @@ export class TimeMorph {
         this.#rebakeWords.delete(keyString);
         this.#released.push(rebake.slot);
       } else {
-        const byte = Math.round(fade * 255);
-        this.#rebakeWords.set(keyString, byte === 0 ? 0 : fadeWord(0, byte, rebake.slot));
+        const step = mixStep(fade);
+        this.#rebakeWords.set(keyString, step === 0 ? 0 : fadeWord(0, step, rebake.slot));
       }
     }
     const out: FadeFootprint[] = [];
@@ -809,13 +816,13 @@ export class TimeMorph {
       }
       this.#swapDue ||= transition.held !== null && ended;
       if (transition.rise) {
-        rises.set(areaString, Math.round(fade * 255));
+        rises.set(areaString, mixStep(fade));
       }
       for (const area of transition.footprints) {
         out.push({ area, fade });
         if (this.#parentMix) {
           const areaKey = patchKeyString(area);
-          mixes.set(areaKey, Math.max(mixes.get(areaKey) ?? 0, Math.round(fade * 255)));
+          mixes.set(areaKey, Math.max(mixes.get(areaKey) ?? 0, mixStep(fade)));
         }
       }
     }

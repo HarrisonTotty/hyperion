@@ -32,6 +32,7 @@ import { vertexDir } from "./cube";
 import { packSurveyMask, surveyCellCode, surveyedAt } from "./gpu/resources";
 import {
   DATUM_SLOT,
+  MIX_STEPS,
   PARENT_MIX_SLOT,
   INSTANCE_RECORD_BYTES,
   MAX_SUB_PATCH_LEVELS,
@@ -529,8 +530,8 @@ function instancesOf(
       const area: PatchKey = { face, level: level + levels, i: i * s + partI, j: j * s + partJ };
       const parentSlot = word(6);
       const fades = word(11);
-      const olderSlot = fades >>> 16;
-      const rebakeFade = ((fades >>> 8) & 0xff) / FADE_STEPS;
+      const olderSlot = fades >>> 20;
+      const rebakeFade = ((fades >>> 8) & MIX_STEPS) / MIX_STEPS;
       drawn.set(patchKeyString(area), {
         area,
         held,

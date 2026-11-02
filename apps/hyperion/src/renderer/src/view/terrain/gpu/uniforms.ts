@@ -92,8 +92,19 @@ export function subPatchWord(levels: number, i: number, j: number): number {
   return (levels | (i << 5) | (j << 18)) >>> 0;
 }
 
-/** The most slots a rebake's fade can name its old bake's in ({@link fadeWord}): 16 bits. */
-export const MAX_FADE_SLOT = 0xffff;
+/** The most slots a rebake's fade can name its old bake's in ({@link fadeWord}): 12 bits. */
+export const MAX_FADE_SLOT = 0xfff;
+
+/**
+ * The steps of a heights mix's fade ({@link fadeWord}): 12 bits, so that a mix over a change of a
+ * thousand pixels on screen (newly surveyed relief near the ground) steps a quarter of one.
+ */
+export const MIX_STEPS = 0xfff;
+
+/** A heights mix's fade of 0 to 1 as its step of {@link MIX_STEPS}, rounded to the nearest. */
+export function mixStep(fade: number): number {
+  return Math.round(Math.min(1, Math.max(0, fade)) * MIX_STEPS);
+}
 
 /**
  * The slot a rise from the reference surface names as its older bake ({@link fadeWord}; plan R10,
@@ -111,24 +122,26 @@ export const DATUM_SLOT = MAX_FADE_SLOT;
 export const PARENT_MIX_SLOT = MAX_FADE_SLOT - 1;
 
 /**
- * The instance record's word of its own fade and its rebake's (plan R10, R10.T16.i): bits 0 to 7
- * its own fade's byte (`coarseFineHolds.ts`' `fadeByte`), 8 to 15 the fade of its rebake, from the
- * bake in slot `oldSlot` (bits 16 to 31) to the slot's own, 0 with none. A fading rebake's instance
- * carries both slots: the new in its `slot`, the old here.
+ * The instance record's word of its own fade and its heights' mix (plan R10, R10.T16.i): bits 0 to
+ * 7 its own fade's byte (`coarseFineHolds.ts`' `fadeByte`), 8 to 19 the mix's fade in steps of
+ * {@link MIX_STEPS} ({@link mixStep}), from the surface `oldSlot` names (bits 20 to 31: an older
+ * bake's slot, {@link DATUM_SLOT} or {@link PARENT_MIX_SLOT}) to the slot's own, 0 with none. A
+ * fading rebake's instance carries both slots: the new in its `slot`, the old here.
  *
- * @throws RangeError for a byte that is not a whole number of 0 to 255, or a slot past
- *   {@link MAX_FADE_SLOT}.
+ * @throws RangeError for an own fade that is not a whole number of 0 to 255, a mix's of 0 to
+ *   {@link MIX_STEPS}, or a slot past {@link MAX_FADE_SLOT}.
  */
-export function fadeWord(own: number, rebake: number, oldSlot: number): number {
-  for (const byte of [own, rebake]) {
-    if (!Number.isInteger(byte) || byte < 0 || byte > 0xff) {
-      throw new RangeError(`a fade byte ${byte} is not 0 to 255`);
-    }
+export function fadeWord(own: number, mix: number, oldSlot: number): number {
+  if (!Number.isInteger(own) || own < 0 || own > 0xff) {
+    throw new RangeError(`a fade byte ${own} is not 0 to 255`);
+  }
+  if (!Number.isInteger(mix) || mix < 0 || mix > MIX_STEPS) {
+    throw new RangeError(`a mix's fade ${mix} is not 0 to ${MIX_STEPS}`);
   }
   if (!Number.isInteger(oldSlot) || oldSlot < 0 || oldSlot > MAX_FADE_SLOT) {
     throw new RangeError(`a rebake's old slot ${oldSlot} is not 0 to ${MAX_FADE_SLOT}`);
   }
-  return (own | (rebake << 8) | (oldSlot << 16)) >>> 0;
+  return (own | (mix << 8) | (oldSlot << 20)) >>> 0;
 }
 
 /**

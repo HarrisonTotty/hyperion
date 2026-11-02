@@ -176,13 +176,13 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // and its rebakes', rises', refines' and coarsens' mix of heights, normals and maturity
   // (R10.T16.i), which with no fade are k and the newer bake, bit for bit.
   ...[
-    ["terrain-lit-baked-offsets", "e3aa235fa4256f7e"],
-    ["terrain-lit-face-differences", "b6162310eb183ebf"],
+    ["terrain-lit-baked-offsets", "f23284b1dc535aba"],
+    ["terrain-lit-face-differences", "187754748cba3ccb"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "6eedd2574e753fcd"],
-    ["terrain-depth-face-differences", "6acbfb03de4091a0"],
-    ["terrain-shadow-baked-offsets", "135f9b5aa269b31"],
-    ["terrain-shadow-face-differences", "411d39e2296d0cd4"],
+    ["terrain-depth-baked-offsets", "5cdd41f0be91d121"],
+    ["terrain-depth-face-differences", "d1468e59deeeb604"],
+    ["terrain-shadow-baked-offsets", "60c2b22ee4d3b88d"],
+    ["terrain-shadow-face-differences", "411247d2d21025e0"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const spec = [
       ...TERRAIN_LIT_MATERIALS,

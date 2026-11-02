@@ -24,7 +24,13 @@ import { distanceToBoxM, relativeBounds } from "./bounds";
 import type { DrawSet } from "./cache";
 import { vertexDir } from "./cube";
 import { finestPatchSizeM } from "./grounded";
-import { INSTANCE_RECORD_BYTES, NO_PARENT_SLOT, subPatchOf } from "./gpu/uniforms";
+import {
+  INSTANCE_RECORD_BYTES,
+  MIX_STEPS,
+  mixStep,
+  NO_PARENT_SLOT,
+  subPatchOf,
+} from "./gpu/uniforms";
 import { FADE_STEPS, fadeByte, fadedMorph } from "./coarseFineHolds";
 import {
   LOOKAHEAD_SAMPLES,
@@ -1323,16 +1329,16 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     pass.frame(inputAt(view, 6_000 + MORPH_IN_MS / 2));
     const halfway = recordWords(engine);
     const midway = drawnBy(pass.lastStep?.drawSet ?? first.drawSet, drawn.patch.key).map(
-      (n) => ((halfway[n]?.[11] ?? 0) >>> 8) & 0xff,
+      (n) => ((halfway[n]?.[11] ?? 0) >>> 8) & MIX_STEPS,
     );
     const done = pass.frame(inputAt(view, 6_000 + MORPH_IN_MS));
     const after = recordWords(engine);
     const ended = drawnBy(done.drawSet, drawn.patch.key).map((n) => (after[n]?.[11] ?? 0) >>> 8);
     expect(rebaking.length).toBeGreaterThan(0);
     expect([
-      rebaking.every((word) => word >>> 16 === older && ((word >>> 8) & 0xff) === FADE_STEPS),
+      rebaking.every((word) => word >>> 20 === older && ((word >>> 8) & MIX_STEPS) === MIX_STEPS),
       pass.resident(drawn.keyString)?.slot !== older,
-      midway.every((byte) => byte === fadeByte(0.5)),
+      midway.every((step) => step === mixStep(0.5)),
       ended.every((word) => word === 0),
     ]).toEqual([true, true, true, true]);
   });

@@ -198,18 +198,18 @@ fn surfaceHeightsAt(slot : u32, at : vec2f) -> vec2f {
 
 // The slot a rise from the reference surface names (uniforms.ts' `DATUM_SLOT`): the datum, height
 // 0 everywhere (R10.T16.i).
-const DATUM_SLOT : u32 = 0xffffu;
+const DATUM_SLOT : u32 = 0xfffu;
 
 // The slot a refine's or a coarsen's fade names (uniforms.ts' `PARENT_MIX_SLOT`; R10.T16.i): the
 // instance's parent, its heights read at the instance's place in it (`parentPlaceOf`) and held at
 // the datum where the parent's survey held it unsurveyed, so that a change between two bakes that
 // disagree (the survey's delta, its edge) fades from the parent's drawn surface.
-const PARENT_MIX_SLOT : u32 = 0xfffeu;
+const PARENT_MIX_SLOT : u32 = 0xffeu;
 
 // The rebake an instance fades from (plan R10, R10.T16.i; uniforms.ts' `fadeWord`): the slot of
-// the older bake (bits 16 to 31 of `sub.w`), or `DATUM_SLOT` for ground rising out of the reference
-// surface, and the fade of its heights, normals and maturity towards it (bits 8 to 15), 0 with
-// none. A material's own source gives `olderHeightsAt`, the older bake's own and morph heights.
+// the older bake (bits 20 to 31 of `sub.w`), `DATUM_SLOT` for ground rising out of the reference
+// surface or `PARENT_MIX_SLOT` for a refine's or a coarsen's parent, and the fade of its heights,
+// normals and maturity towards it (bits 8 to 19, in 4095 steps), 0 with none. A material's own source gives `olderHeightsAt`, the older bake's own and morph heights.
 struct Rebake {
   slot : u32,
   fade : f32,
@@ -224,8 +224,8 @@ fn parentPlaceOf(quadrant : u32, at : vec2f) -> vec2f {
 
 fn rebakeOf(inst : Instance) -> Rebake {
   var r : Rebake;
-  r.slot = inst.sub.w >> 16u;
-  r.fade = fadeOf(inst.sub.w, 1u);
+  r.slot = inst.sub.w >> 20u;
+  r.fade = f32((inst.sub.w >> 8u) & 0xfffu) / 4095.0;
   return r;
 }
 

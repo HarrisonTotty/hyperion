@@ -5,7 +5,7 @@ import { selectionOf } from "../../test/terrainFixtures";
 import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { childKeys, type PatchKey, patchKeyString, rootKey } from "./patchKey";
 import { slotLayout } from "./slotLayout";
-import { DATUM_SLOT, fadeWord, PARENT_MIX_SLOT } from "./gpu/uniforms";
+import { DATUM_SLOT, fadeWord, MIX_STEPS, mixStep, PARENT_MIX_SLOT } from "./gpu/uniforms";
 import { MORPH_IN_MS, MORPH_MAX_MS, MORPH_MS_PER_PX, TimeMorph } from "./timeMorph";
 
 /** A cache of `slots` slots holding `keys`. */
@@ -304,11 +304,11 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     morph.footprintsAt(1_000);
     const words = [...morph.heightWords.subarray(0, 2)];
     morph.footprintsAt(1_000 + MORPH_IN_MS / 2);
-    const halfway = (morph.heightWords[1] ?? 0) >>> 8;
+    const halfway = morph.heightWords[1];
     morph.footprintsAt(1_000 + MORPH_IN_MS);
     expect([words, halfway, morph.heightWords[1], morph.active]).toEqual([
-      [0, ((255 << 8) | (DATUM_SLOT << 16)) >>> 0],
-      (DATUM_SLOT << 8) | 128,
+      [0, fadeWord(0, MIX_STEPS, DATUM_SLOT)],
+      fadeWord(0, mixStep(0.5), DATUM_SLOT),
       0,
       false,
     ]);
@@ -324,7 +324,7 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     const start = morph.heightWords[0];
     morph.footprintsAt(1_000 + MORPH_IN_MS);
     expect([start, morph.heightWords[0], morph.takeReleased()]).toEqual([
-      ((255 << 8) | (7 << 16)) >>> 0,
+      fadeWord(0, MIX_STEPS, 7),
       0,
       [7],
     ]);
@@ -406,7 +406,7 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
       morph.swapDue,
       morph.heightWords[0],
       morph.takeReleased(),
-    ]).toEqual([true, false, true, fadeWord(0, 255, PARENT_MIX_SLOT), [7]]);
+    ]).toEqual([true, false, true, fadeWord(0, MIX_STEPS, PARENT_MIX_SLOT), [7]]);
   });
 
   it("mixes a refine's heights from its parent's surface by its fade, and none on the wireframe's", () => {
@@ -432,7 +432,7 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
       return [start, morph.heightWords[n]];
     };
     expect([wordAt(true), wordAt(false)]).toEqual([
-      [fadeWord(0, 255, PARENT_MIX_SLOT), fadeWord(0, 128, PARENT_MIX_SLOT)],
+      [fadeWord(0, MIX_STEPS, PARENT_MIX_SLOT), fadeWord(0, mixStep(0.5), PARENT_MIX_SLOT)],
       [0, 0],
     ]);
   });

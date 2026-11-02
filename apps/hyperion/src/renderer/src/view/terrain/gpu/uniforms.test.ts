@@ -10,6 +10,7 @@ import {
   ContactRecords,
   DATUM_SLOT,
   fadeWord,
+  MIX_STEPS,
   INSTANCE_RECORD_BYTES,
   InstanceRecords,
   MAX_CONTACTS,
@@ -167,12 +168,12 @@ describe("an instance record", () => {
 
   it("carries its edges' fades, its corners' and its own and its rebake's word (R10.T16.i)", () => {
     const records = new InstanceRecords(1);
-    const own = fadeWord(7, 200, 1_234);
+    const own = fadeWord(7, 2_000, 1_234);
     records.push(1, vec3(0, 0, 0), 0, 1, 9, 0, 0, 0, 0x0102_0304, 0xff00_00ff, own);
     const u = new Uint32Array(records.buffer);
     expect([Array.from(u.slice(9, 12)), own]).toEqual([
       [0x0102_0304, 0xff00_00ff, own],
-      (7 | (200 << 8) | (1_234 << 16)) >>> 0,
+      (7 | (2_000 << 8) | (1_234 << 20)) >>> 0,
     ]);
   });
 
@@ -187,14 +188,15 @@ describe("an instance record", () => {
   });
 
   it("packs a rebake's fade and its older slot, the datum's for a rise, and refuses what does not fit", () => {
-    expect([fadeWord(0, 0, 0), fadeWord(255, 0, 0), fadeWord(0, 128, DATUM_SLOT)]).toEqual([
+    expect([fadeWord(0, 0, 0), fadeWord(255, 0, 0), fadeWord(0, 2_048, DATUM_SLOT)]).toEqual([
       0,
       255,
-      ((128 << 8) | (0xffff << 16)) >>> 0,
+      ((2_048 << 8) | (0xfff << 20)) >>> 0,
     ]);
     for (const [own, rebake, slot] of [
       [256, 0, 0],
       [0, -1, 0],
+      [0, MIX_STEPS + 1, 0],
       [0.5, 0, 0],
       [0, 0, DATUM_SLOT + 1],
     ] as const) {
