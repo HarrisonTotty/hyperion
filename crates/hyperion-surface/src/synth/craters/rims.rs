@@ -335,13 +335,42 @@ impl CoarseRims {
         if field.cell(cell).is_none() {
             return Err(QueryHeightError::NotSurveyed(cell));
         }
-        Ok(self.sum_in(field, cell, dir, level))
+        Ok(self.sum_in::<true, F>(field, cell, dir, level))
+    }
+
+    /// [`at`](Self::at)'s height alone, metres, bit for bit: the same reads, so the same error, the
+    /// same craters summed alike, and no gradient made (a far field's heights read none).
+    ///
+    /// # Errors
+    ///
+    /// As [`at`](Self::at).
+    ///
+    /// # Panics
+    ///
+    /// As [`at`](Self::at).
+    pub(crate) fn height_m_at<F: FieldView>(
+        &self,
+        field: &F,
+        dir: [f64; 3],
+        level: BandLevel,
+    ) -> Result<f64, QueryHeightError> {
+        assert!(
+            Self::new(field.header()) == *self,
+            "coarse rims read the field whose header made them"
+        );
+        let cell = PatchKey::containing(self.level.get(), dir)
+            .expect("a coarse level is below the cube's deepest");
+        if field.cell(cell).is_none() {
+            return Err(QueryHeightError::NotSurveyed(cell));
+        }
+        Ok(self.sum_in::<false, F>(field, cell, dir, level).height_m)
     }
 
     /// The sharpening at `dir` of the craters of `field`'s index for `cell`, at `level`
-    /// ([`at`](Self::at) at the cell it finds).
+    /// ([`at`](Self::at) at the cell it finds), its gradient made only where `GRADIENT` asks for it
+    /// (zero otherwise).
     #[must_use]
-    fn sum_in<F: FieldView>(
+    fn sum_in<const GRADIENT: bool, F: FieldView>(
         &self,
         field: &F,
         cell: PatchKey,
@@ -372,13 +401,19 @@ impl CoarseRims {
                 let rim_m = 0.5 * shape.diameter().value();
                 let (h, slope) = sharpening.height_and_slope(distance / rim_m);
                 height += h;
-                if distance > 0.0 {
+                if GRADIENT && distance > 0.0 {
                     let along = slope / (rim_m * distance);
                     for (g, d) in gradient.iter_mut().zip(delta) {
                         *g += along * d;
                     }
                 }
             }
+        }
+        if !GRADIENT {
+            return HeightSample {
+                height_m: num::assert_finite(height),
+                gradient,
+            };
         }
         let gradient = direction_gradient(&self.figure, dir, gradient);
         HeightSample {

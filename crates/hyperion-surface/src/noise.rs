@@ -575,6 +575,27 @@ pub fn gradient_noise(
     octave: &Octave,
     cache: &mut LatticeCache,
 ) -> (f64, [f64; 3]) {
+    noise_at::<true>(point, octave, cache)
+}
+
+/// [`gradient_noise`]'s value alone, bit for bit: the same operations on the same values, the
+/// gradient's left out (a far field's heights read no gradient).
+///
+/// # Panics
+///
+/// As [`gradient_noise`].
+#[must_use]
+pub(crate) fn noise_value(point: [f64; 3], octave: &Octave, cache: &mut LatticeCache) -> f64 {
+    noise_at::<false>(point, octave, cache).0
+}
+
+/// [`gradient_noise`], its gradient made only where `GRADIENT` asks for it (zero otherwise): the
+/// value's operations are the same either way.
+fn noise_at<const GRADIENT: bool>(
+    point: [f64; 3],
+    octave: &Octave,
+    cache: &mut LatticeCache,
+) -> (f64, [f64; 3]) {
     assert!(
         point.iter().all(|c| c.is_finite()),
         "a noise point must be finite, got {point:?}"
@@ -604,11 +625,17 @@ pub fn gradient_noise(
         });
         let weight = w[0].0 * w[1].0 * w[2].0;
         value += weight * dot;
-        grad[0] += w[0].1 * w[1].0 * w[2].0 * dot + weight * g[0];
-        grad[1] += w[0].0 * w[1].1 * w[2].0 * dot + weight * g[1];
-        grad[2] += w[0].0 * w[1].0 * w[2].1 * dot + weight * g[2];
+        if GRADIENT {
+            grad[0] += w[0].1 * w[1].0 * w[2].0 * dot + weight * g[0];
+            grad[1] += w[0].0 * w[1].1 * w[2].0 * dot + weight * g[1];
+            grad[2] += w[0].0 * w[1].0 * w[2].1 * dot + weight * g[2];
+        }
     }
-    (value, octave.gradient_to_body(grad))
+    if GRADIENT {
+        (value, octave.gradient_to_body(grad))
+    } else {
+        (value, [0.0; 3])
+    }
 }
 
 /// [`gradient_noise`] of `octave` at `N` points at once, given axis by axis (`points[a][l]` is

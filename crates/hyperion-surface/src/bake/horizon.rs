@@ -1068,17 +1068,18 @@ impl<F: FieldView> FarGround<'_, '_, F> {
             return 0.0;
         }
         let band = BandLevel::new(level).expect("a far step's level is at most its patch's");
+        // Its height alone, without the gradient no far-field step reads (R10.T6.a's lever).
         match self
             .synth
-            .height_at(cache, lattice_vertex_dir(face, level, i, j), band)
+            .height_m_at(cache, lattice_vertex_dir(face, level, i, j), band)
         {
-            Ok(sample) => {
+            Ok(height_m) => {
                 let kept = cache.far_heights_mut();
                 if kept.heights.len() >= FAR_HEIGHTS_HELD {
                     kept.heights.clear();
                 }
-                kept.heights.insert(key, sample.height_m);
-                sample.height_m
+                kept.heights.insert(key, height_m);
+                height_m
             }
             Err(QueryHeightError::NotSurveyed(cell)) => {
                 // A cell the view does not hold: the reference surface, until a block brings it,

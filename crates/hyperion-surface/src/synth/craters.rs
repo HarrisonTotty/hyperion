@@ -2522,6 +2522,35 @@ impl SmallCraters {
     }
 }
 
+impl SmallCraters {
+    /// [`at`](Self::at)'s height alone, metres, bit for bit: the same craters in the same order,
+    /// each its profile's height, summed alike, and no gradient made (a far field's heights read
+    /// none).
+    ///
+    /// # Panics
+    ///
+    /// As [`at`](Self::at).
+    pub(crate) fn height_at(
+        &self,
+        dir: [f64; 3],
+        level: BandLevel,
+        through: u8,
+        cache: &mut CraterCache,
+    ) -> f64 {
+        let figure = self.octaves.inputs.figure;
+        let band = band_half_width(&figure, level);
+        let mut height = 0.0;
+        self.each_reaching(dir, through, cache, |crater, id, _, distance, profiles| {
+            let profile = profiles.get_or_make(id, level, || {
+                CraterProfile::new(crater.shape, band, crater.wear)
+            });
+            let rim_m = 0.5 * crater.shape.diameter().value();
+            height += profile.height_and_slope(distance / rim_m).0;
+        });
+        num::assert_finite(height)
+    }
+}
+
 /// The relative margin a cell's [`CellEdges::gap_m`] is taken short by before it puts a cell
 /// beyond an octave's reach: 10⁻⁹, far beyond the rounding of the gap and of the craters' and the
 /// point's spheroid points, a few times 2.2 × 10⁻¹⁶ of them.

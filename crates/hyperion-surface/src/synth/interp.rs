@@ -240,6 +240,42 @@ where
     V: CellRecords<N> + ?Sized,
     C: Controls<N> + ?Sized,
 {
+    interpolate_each_with::<N, true, V, C>(values, dir, controls)
+}
+
+/// [`interpolate_each`]'s values alone, bit for bit, their gradients zero and unmade: the same
+/// reads in the same order, so the same error, and the same operations on the values (a far
+/// field's heights read no gradient).
+///
+/// # Errors
+///
+/// As [`interpolate_each`].
+///
+/// # Panics
+///
+/// As [`interpolate_each`].
+pub(crate) fn interpolate_each_value<const N: usize, V, C>(
+    values: &V,
+    dir: [f64; 3],
+    controls: &mut C,
+) -> Result<[Interpolated; N], ReadCellError>
+where
+    V: CellRecords<N> + ?Sized,
+    C: Controls<N> + ?Sized,
+{
+    interpolate_each_with::<N, false, V, C>(values, dir, controls)
+}
+
+/// [`interpolate_each`], its gradients made only where `GRADIENT` asks for them (zero otherwise).
+fn interpolate_each_with<const N: usize, const GRADIENT: bool, V, C>(
+    values: &V,
+    dir: [f64; 3],
+    controls: &mut C,
+) -> Result<[Interpolated; N], ReadCellError>
+where
+    V: CellRecords<N> + ?Sized,
+    C: Controls<N> + ?Sized,
+{
     let level = values.level();
     assert!(
         (1..=MAX_LEVEL).contains(&level),
@@ -250,7 +286,7 @@ where
     let grid = Grid::new(level);
     let mut terms = [None; 6];
     for (slot, face) in terms.iter_mut().zip(Face::ALL) {
-        *slot = face_term(values, controls, &grid, face, dir, &reference)?;
+        *slot = face_term::<N, GRADIENT, V, C>(values, controls, &grid, face, dir, &reference)?;
     }
     let mut weight = 0.0;
     let mut weighted = [0.0; N];
@@ -262,7 +298,7 @@ where
     }
     let relative = weighted.map(|w| w / weight);
     let mut gradient = [[0.0; 3]; N];
-    for term in terms.iter().flatten() {
+    for term in terms.iter().flatten().filter(|_| GRADIENT) {
         for ((gradient, (value, relative)), value_gradient) in gradient
             .iter_mut()
             .zip(term.value.iter().zip(&relative))
@@ -279,7 +315,11 @@ where
     }
     Ok(std::array::from_fn(|n| Interpolated {
         value: reference[n] + relative[n],
-        gradient: gradient[n].map(|g| g / weight),
+        gradient: if GRADIENT {
+            gradient[n].map(|g| g / weight)
+        } else {
+            [0.0; 3]
+        },
     }))
 }
 
@@ -303,6 +343,34 @@ pub fn base_elevation<F: FieldView>(
 ) -> Result<HeightSample, ReadCellError> {
     let mm = interpolate(&Elevations(field), dir)?;
     Ok(elevation_sample(field.header(), mm))
+}
+
+/// [`base_elevation`]'s height alone, metres, bit for bit: the same reads, so the same error, and
+/// no gradient made.
+///
+/// # Errors
+///
+/// As [`base_elevation`].
+///
+/// # Panics
+///
+/// As [`base_elevation`].
+pub(crate) fn base_elevation_m<F: FieldView>(
+    field: &F,
+    dir: [f64; 3],
+) -> Result<f64, ReadCellError> {
+    let [mm] = interpolate_each_value(&Single(&Elevations(field)), dir, &mut Fresh)?;
+    Ok(elevation_m(mm))
+}
+
+/// [`elevation_sample`]'s height alone, metres, from the interpolated elevation `mm`.
+///
+/// # Panics
+///
+/// If the height is not finite (a bug).
+#[must_use]
+pub(crate) fn elevation_m(mm: Interpolated) -> f64 {
+    num::assert_finite(mm.value / MM_PER_M)
 }
 
 /// The base elevation of a field of header `header` from its interpolated elevations `mm`, in
@@ -438,8 +506,9 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// `face`'s term at the direction `dir`, or `None` where its weight is zero.
-fn face_term<const N: usize, V, C>(
+/// `face`'s term at the direction `dir`, or `None` where its weight is zero; its gradients made
+/// only where `GRADIENT` asks for them.
+fn face_term<const N: usize, const GRADIENT: bool, V, C>(
     values: &V,
     controls: &mut C,
     grid: &Grid,
@@ -469,12 +538,21 @@ where
     if weight <= 0.0 {
         return Ok(None);
     }
+    let SplineSums { value, d_x, d_y } =
+        spline::<N, GRADIENT, V, C>(values, controls, grid, face, x, y, reference)?;
+    if !GRADIENT {
+        return Ok(Some(FaceTerm {
+            weight,
+            weight_gradient: [0.0; 3],
+            value,
+            value_gradient: [[0.0; 3]; N],
+        }));
+    }
     // ∇X = 2ᴸ (ds/du) ∇u, with ∇u = (e_u − u n) ÷ (d · n), and likewise Y.
     let dx_du = grid.side * warp_slope(u);
     let dy_dv = grid.side * warp_slope(v);
     let grad_x = [0, 1, 2].map(|k| dx_du * ((e_u[k] - u * normal[k]) / along));
     let grad_y = [0, 1, 2].map(|k| dy_dv * ((e_v[k] - v * normal[k]) / along));
-    let SplineSums { value, d_x, d_y } = spline(values, controls, grid, face, x, y, reference)?;
     let weight_slope = [dwx * wy, wx * dwy];
     Ok(Some(FaceTerm {
         weight,
@@ -569,9 +647,9 @@ struct SplineSums<const N: usize> {
 }
 
 /// Face `face`'s spline at the cell coordinates (`x`, `y`), each value relative to its
-/// `reference`, and their derivatives in x and y; the 4 × 4 control points summed row by row, each
-/// row in order of i.
-fn spline<const N: usize, V, C>(
+/// `reference`, and their derivatives in x and y where `GRADIENT` asks for them (zero otherwise);
+/// the 4 × 4 control points summed row by row, each row in order of i.
+fn spline<const N: usize, const GRADIENT: bool, V, C>(
     values: &V,
     controls: &mut C,
     grid: &Grid,
@@ -598,7 +676,9 @@ where
             let c = controls.relative(values, grid, face, i, j, reference)?;
             for ((row, row_dx), c) in row.iter_mut().zip(&mut row_dx).zip(c) {
                 *row += wi * c;
-                *row_dx += di * c;
+                if GRADIENT {
+                    *row_dx += di * c;
+                }
             }
         }
         for (((value, d_x), d_y), (row, row_dx)) in value
@@ -608,8 +688,10 @@ where
             .zip(row.iter().zip(&row_dx))
         {
             *value += wj * row;
-            *d_x += wj * row_dx;
-            *d_y += dj * row;
+            if GRADIENT {
+                *d_x += wj * row_dx;
+                *d_y += dj * row;
+            }
         }
     }
     Ok(SplineSums { value, d_x, d_y })

@@ -310,6 +310,79 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         self.finish(cache, dir, &parts)
     }
 
+    /// [`height_at`](Self::height_at)'s height alone, metres, bit for bit, its error included:
+    /// each contribution's height made by the same operations, from the same reads in the same
+    /// order, and no gradient made (the horizon map's far field reads only heights). Every
+    /// contribution's gradient arithmetic is left out: the structural octaves', the noise's, the
+    /// interpolant's, the channels', the small craters' and the coarse rims'.
+    ///
+    /// # Errors
+    ///
+    /// As [`height_at`](Self::height_at).
+    ///
+    /// # Panics
+    ///
+    /// As [`height_at`](Self::height_at).
+    pub(crate) fn height_m_at(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+    ) -> Result<f64, QueryHeightError> {
+        let field = self.field;
+        let header = field.header();
+        let set = self.parts.bounds.set(level);
+        let (base, relief) = match set.relief_through() {
+            Some(through) if self.parts.relief.evaluates(through) => {
+                let (base, style) = match cache.controls.memo_for(self.parts.channels.id()) {
+                    Some(memo) => relief::base_and_style_height(field, dir, memo)?,
+                    None => relief::base_and_style_height(field, dir, &mut interp::Fresh)?,
+                };
+                let relief = self.parts.relief.height_in_style(
+                    header,
+                    dir,
+                    through,
+                    &style,
+                    cache.lattice_mut(),
+                );
+                (base, relief)
+            }
+            Some(_) | None => (interp::base_elevation_m(field, dir)?, 0.0),
+        };
+        let channels = match set.channels_through() {
+            Some(through) => self
+                .parts
+                .channels
+                .incision_height_at(field, dir, through, cache)?,
+            None => 0.0,
+        };
+        let craters = match set.craters_through() {
+            Some(through) => self
+                .parts
+                .craters
+                .height_at(dir, level, through, &mut cache.craters),
+            None => 0.0,
+        };
+        let rims = self.parts.rims.height_m_at(field, dir, level)?;
+        // `finish`'s sum and the channels' floor, on the heights alone.
+        let mut height = base;
+        for part in [relief, channels, craters, rims] {
+            height += part;
+        }
+        let sea = header.sea_level().value();
+        if height < sea && channels < 0.0 {
+            let (_, record) = self.cell_at(dir)?;
+            if !record.is_under_water() && !record.epoch_incision.is_epoch() {
+                let mut without = base;
+                for part in [relief, craters, rims] {
+                    without += part;
+                }
+                height = if without >= sea { sea } else { without };
+            }
+        }
+        Ok(num::assert_finite(height))
+    }
+
     /// [`height_at`](Self::height_at) at `level` and at `parent`, a coarser level, from one pass
     /// where the two share it: each the point query's answer at its level, bit for bit, its error
     /// included.

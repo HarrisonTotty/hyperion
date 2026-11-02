@@ -1394,15 +1394,32 @@ impl Groove {
     }
 
     /// The groove's depth at `q` (metres), positive, and its gradient there.
+    #[cfg(test)]
+    #[must_use]
+    fn at(&self, q: [f64; 3]) -> Value {
+        self.at_with::<true>(q)
+    }
+
+    /// [`at`](Self::at), its gradient made only where `GRADIENT` asks for it (zero otherwise):
+    /// the value's operations are the same either way.
     #[must_use]
     #[expect(
         clippy::many_single_char_names,
         reason = "the point, the chord's parameter, distance and the profile's x and f, as the \
                   module documentation names them"
     )]
-    fn at(&self, q: [f64; 3]) -> Value {
+    fn at_with<const GRADIENT: bool>(&self, q: [f64; 3]) -> Value {
         if let Some(bent) = &self.bent {
-            return self.bent_at(bent, q);
+            // A bent groove's walk makes its gradient whatever is asked; its value is the same.
+            let v = self.bent_at(bent, q);
+            return if GRADIENT {
+                v
+            } else {
+                Value {
+                    value: v.value,
+                    gradient: [0.0; 3],
+                }
+            };
         }
         // The nearest point over its chords, the first of equals.
         let mut best: Option<(f64, f64, [f64; 3], [f64; 3])> = None;
@@ -1436,6 +1453,12 @@ impl Groove {
         }
         let (f, df) = profile(x);
         let (depth, d_depth) = self.depth.at(t);
+        if !GRADIENT {
+            return Value {
+                value: depth * f,
+                gradient: [0.0; 3],
+            };
+        }
         let across = if d > 0.0 {
             [0, 1, 2].map(|k| gap[k] / d)
         } else {
@@ -1727,12 +1750,24 @@ pub(crate) fn corner_cells(cell: PatchKey) -> [Vec<PatchKey>; 4] {
 /// gradients on the unit sphere, per radian.
 #[must_use]
 fn cell_coordinates(cell: PatchKey, dir: [f64; 3]) -> (f64, f64, [f64; 3], [f64; 3]) {
+    cell_coordinates_with::<true>(cell, dir)
+}
+
+/// [`cell_coordinates`], the gradients made only where `GRADIENT` asks for them (zero otherwise).
+#[must_use]
+fn cell_coordinates_with<const GRADIENT: bool>(
+    cell: PatchKey,
+    dir: [f64; 3],
+) -> (f64, f64, [f64; 3], [f64; 3]) {
     let side = f64::from(1_u32 << cell.level());
     let (normal, e_u, e_v) = axes(cell.face());
     let along = dot(dir, normal);
     let (u, v) = uv_on_face(cell.face(), dir);
     let x = num::max(0.0, num::min(uv_to_st(u) * side - f64::from(cell.i()), 1.0));
     let y = num::max(0.0, num::min(uv_to_st(v) * side - f64::from(cell.j()), 1.0));
+    if !GRADIENT {
+        return (x, y, [0.0; 3], [0.0; 3]);
+    }
     let dx_du = side * warp_slope(u);
     let dy_dv = side * warp_slope(v);
     let grad_x = [0, 1, 2].map(|k| dx_du * ((e_u[k] - u * normal[k]) / along));
@@ -2095,6 +2130,16 @@ impl<F: FieldView> Incision<'_, F> {
     /// The raw incision of every level from the first to `last` at the unit direction `dir`,
     /// level by level ([`Raw`]).
     fn raw(&mut self, dir: [f64; 3], last: u8) -> Result<PerLevel<Raw>, ReadCellError> {
+        self.raw_with::<true>(dir, last)
+    }
+
+    /// [`raw`](Self::raw), the gradients made only where `GRADIENT` asks for them (zero
+    /// otherwise): the same reads, and the same operations on the values.
+    fn raw_with<const GRADIENT: bool>(
+        &mut self,
+        dir: [f64; 3],
+        last: u8,
+    ) -> Result<PerLevel<Raw>, ReadCellError> {
         let first = self.first();
         let q = self.channels.figure.point(dir);
         let finest = deepest_cell(dir);
@@ -2107,14 +2152,18 @@ impl<F: FieldView> Incision<'_, F> {
                 if !groove.may_reach(q) {
                     continue;
                 }
-                let v = groove.at(q);
+                let v = groove.at_with::<GRADIENT>(q);
                 if v.value > deepest.value {
                     deepest = v;
                 }
             }
             out.push(Value {
                 value: envelope.value - deepest.value,
-                gradient: [0, 1, 2].map(|k| envelope.gradient[k] - deepest.gradient[k]),
+                gradient: if GRADIENT {
+                    [0, 1, 2].map(|k| envelope.gradient[k] - deepest.gradient[k])
+                } else {
+                    [0.0; 3]
+                },
             });
             envelope = deepest;
         }
@@ -2256,6 +2305,16 @@ impl<F: FieldView> Incision<'_, F> {
         dir: [f64; 3],
         through: u8,
     ) -> Result<PerLevel<LevelSample>, ReadCellError> {
+        self.levels_with::<true>(dir, through)
+    }
+
+    /// [`levels`](Self::levels), the gradients made only where `GRADIENT` asks for them (zero
+    /// otherwise): the same reads, so the same error, and the same operations on the values.
+    fn levels_with<const GRADIENT: bool>(
+        &mut self,
+        dir: [f64; 3],
+        through: u8,
+    ) -> Result<PerLevel<LevelSample>, ReadCellError> {
         let first = self.first();
         let mut out = PerLevel::new(LevelSample::ZERO);
         if through < first {
@@ -2270,13 +2329,27 @@ impl<F: FieldView> Incision<'_, F> {
         }
         let (_, around) = self.deepest(coarse)?;
         let last = through.min(around);
-        let raw = self.raw(dir, last)?;
-        let by_water = (!shore.is_inland()).then(|| cell_coordinates(coarse, dir));
+        let raw = self.raw_with::<GRADIENT>(dir, last)?;
+        let by_water = (!shore.is_inland()).then(|| cell_coordinates_with::<GRADIENT>(coarse, dir));
         for (level, &r) in (first..=last).zip(raw.as_slice()) {
             let parent = self.parent_of(ancestor(finest, level));
             let correction = self.correction(level, parent)?;
-            let (x, y, grad_x, grad_y) = cell_coordinates(parent, dir);
+            let (x, y, grad_x, grad_y) = cell_coordinates_with::<GRADIENT>(parent, dir);
             let (c, d_x, d_y) = correction.at(x, y);
+            if !GRADIENT {
+                let value = match by_water {
+                    None => r.value - c,
+                    Some((cx, cy, _, _)) => {
+                        shore.fade(cx, cy, fade_width(first, level)).0 * r.value - c
+                    }
+                };
+                out.push(LevelSample {
+                    value,
+                    of_point: [0.0; 3],
+                    of_direction: [0.0; 3],
+                });
+                continue;
+            }
             out.push(match by_water {
                 None => LevelSample {
                     value: r.value - c,
@@ -2421,6 +2494,35 @@ impl Channels {
         self.check_field(field);
         let levels = self.incision(field, cache).levels(dir, through)?;
         Ok(summed(field.header(), dir, levels.as_slice()))
+    }
+
+    /// [`incision_at`](Self::incision_at)'s height alone, metres, bit for bit: the same reads, so
+    /// the same error, the levels' values made alike and summed in level order, and no gradient
+    /// made (a far field's heights read none).
+    ///
+    /// # Errors
+    ///
+    /// As [`incision_at`](Self::incision_at).
+    ///
+    /// # Panics
+    ///
+    /// As [`incision_at`](Self::incision_at).
+    pub(crate) fn incision_height_at<F: FieldView>(
+        &self,
+        field: &F,
+        dir: [f64; 3],
+        through: u8,
+        cache: &mut SynthCache,
+    ) -> Result<f64, ReadCellError> {
+        self.check_field(field);
+        let levels = self
+            .incision(field, cache)
+            .levels_with::<false>(dir, through)?;
+        let mut height = 0.0;
+        for level in levels.as_slice() {
+            height += level.value;
+        }
+        Ok(num::assert_finite(height))
     }
 
     /// [`incision_at`](Self::incision_at) through `through` and through `parent_through`, no

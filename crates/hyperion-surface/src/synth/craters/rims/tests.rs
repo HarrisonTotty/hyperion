@@ -339,8 +339,8 @@ fn a_coarse_crater_s_sharpening_is_continuous_across_the_coarse_cell_edges_it_sp
                         // The edge's own direction, the same from either cell.
                         let dir = cell.vertex_dir(x, y);
                         for level in sharpening_levels {
-                            let here = rims.sum_in(field, cell, dir, level);
-                            let there = rims.sum_in(field, neighbour, dir, level);
+                            let here = rims.sum_in::<true, _>(field, cell, dir, level);
+                            let there = rims.sum_in::<true, _>(field, neighbour, dir, level);
                             assert_eq!(
                                 sample_bits(here),
                                 sample_bits(there),

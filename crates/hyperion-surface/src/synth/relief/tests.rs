@@ -83,6 +83,11 @@ impl Lattice for Recording {
         self.reads.push(octave.index());
         gradient_noise(x, octave, &mut self.cache)
     }
+
+    fn noise_value(&mut self, octave: &Octave, x: [f64; 3]) -> f64 {
+        self.reads.push(octave.index());
+        noise::noise_value(x, octave, &mut self.cache)
+    }
 }
 
 /// The full belt's style: amplitude 2.5, all belt, no shear.
@@ -438,7 +443,7 @@ fn octave_moments(points: &[[f64; 3]], style: ReliefStyle) -> Vec<(u8, [f64; 4],
     let mixes = [0.0, FRAC_PI_2 / 2.0, 0.96, FRAC_PI_2].map(math::sin_cos);
     let mut cache = LatticeCache::new();
     for &dir in points {
-        relief.octave_terms(
+        relief.octave_terms::<true>(
             &table,
             header.figure().point(dir),
             &StyleSample::uniform(style),
@@ -793,7 +798,7 @@ fn sampled_slopes<const N: usize>(
     let mut cache = LatticeCache::new();
     let mut height = |point: [f64; 3]| {
         let mut h = 0.0;
-        relief.octave_terms(&table, point, &uniform, finest, &mut cache, |t| {
+        relief.octave_terms::<true>(&table, point, &uniform, finest, &mut cache, |t| {
             h += t.height.value;
         });
         h
@@ -957,7 +962,7 @@ fn assert_as_before(relief: &Relief, table: &[Octave], point: [f64; 3], style: &
     let theta_gradient = style.belt.gradient.map(|g| FRAC_PI_2 * g);
     let a = style.amplitude;
     let mut cache = LatticeCache::new();
-    relief.octave_terms(
+    relief.octave_terms::<true>(
         table,
         point,
         style,
@@ -1905,7 +1910,7 @@ fn plain_and_ridged(
     let m = pair.variance.first + 1;
     let mut out = [Smooth::constant(0.0); 2];
     let style = StyleSample::uniform(ReliefStyle::REFERENCE);
-    pair.octave_terms(table, point, &style, m, cache, |t| {
+    pair.octave_terms::<true>(table, point, &style, m, cache, |t| {
         if t.octave == m {
             out = [t.plain, t.ridged];
         }
@@ -2046,7 +2051,7 @@ fn window_mean_squares(style: ReliefStyle, windows: usize, seed: u64) -> Vec<f64
             for &y in &offsets {
                 let q = [0, 1, 2].map(|a| p[a] + x * e1[a] + y * e2[a]);
                 let mut h = 0.0;
-                relief.octave_terms(
+                relief.octave_terms::<true>(
                     &table,
                     q,
                     &uniform,
@@ -2148,7 +2153,7 @@ fn a_full_belt_s_point_variance_is_its_sampled_variance() {
     let (mut sum, mut sum_sq, mut sum_4) = (0.0, 0.0, 0.0);
     for &dir in &points {
         let mut h = 0.0;
-        relief.octave_terms(
+        relief.octave_terms::<true>(
             &table,
             header.figure().point(dir),
             &style,

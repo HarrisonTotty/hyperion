@@ -409,6 +409,76 @@ fn rows_of_heights_and_pairs_are_their_point_queries_bit_for_bit() {
 }
 
 #[test]
+fn the_height_only_query_is_the_point_query_s_height_bit_for_bit() {
+    // The far field's query (`height_m_at`), every gradient left out, answers each point as the
+    // point query's height, bit for bit, at every level from 0 to past the complete level, through
+    // a bake's memo and a fresh cache; and over a view holding one cell with its margin, where it
+    // refuses each point the point query refuses, naming the same cell.
+    for (k, &kind) in SyntheticWorld::ALL.iter().enumerate() {
+        let field = world(kind);
+        let synth = Synthesiser::new(field, SEED);
+        let coarse = field.header().level().get();
+        let mut rng = Lcg::new(0x6865_6967 + u64::try_from(k).unwrap());
+        let mut cells = random_cells(coarse, 3, &mut rng);
+        cells.extend(rim_cells(field, 1));
+        let held = Held {
+            inner: field,
+            held: king_distances(cells[0], SYNTHESIS_MARGIN_CELLS)
+                .into_keys()
+                .collect(),
+        };
+        let part = Synthesiser::new(&held, SEED);
+        let finest = (complete_level(&synth) + 1).min(MAX_LEVEL);
+        let (mut refused, mut answered, mut cut) = (0, 0, 0);
+        for &cell in &cells {
+            let mut baked = SynthCache::new();
+            bake::cover_patch(&synth, &mut baked, patch_in(cell, coarse + 2));
+            let mut dirs = random_points_in(cell, 3, &mut rng);
+            dirs.extend(random_points_in(cells[0], 2, &mut rng));
+            for n in 0..=finest {
+                let level = BandLevel::new(n).unwrap();
+                for &dir in &dirs {
+                    let expected = synth.height_at(&mut SynthCache::new(), dir, level);
+                    for cache in [&mut baked, &mut SynthCache::new()] {
+                        let got = synth.height_m_at(cache, dir, level);
+                        assert_eq!(
+                            got.map(bits),
+                            expected.map(|s| bits(s.height_m)),
+                            "{kind:?} {level:?} {dir:?}"
+                        );
+                    }
+                    let parts = synth
+                        .contributions(&mut SynthCache::new(), dir, level)
+                        .unwrap();
+                    if parts.channels.height_m < 0.0 {
+                        cut += 1;
+                    }
+                    let expected = part.height_at(&mut SynthCache::new(), dir, level);
+                    if expected.is_ok() {
+                        answered += 1;
+                    } else {
+                        refused += 1;
+                    }
+                    let got = part.height_m_at(&mut SynthCache::new(), dir, level);
+                    assert_eq!(
+                        got.map(bits),
+                        expected.map(|s| bits(s.height_m)),
+                        "part {kind:?} {level:?} {dir:?}"
+                    );
+                }
+            }
+        }
+        assert!(
+            answered > 0 && refused > 0,
+            "{kind:?}: {answered} and {refused}"
+        );
+        if kind == SyntheticWorld::EarthLike {
+            assert!(cut > 0, "some Earth-like point lies where the channels cut");
+        }
+    }
+}
+
+#[test]
 fn no_height_depends_on_the_order_of_queries_or_the_cache() {
     // The Mars-like world's trunks are bent, each reading its cell's edge neighbours (R09.T6.h),
     // and the Earth-like world's trunks and tributaries too, reading their continuity (R09.T6.i).

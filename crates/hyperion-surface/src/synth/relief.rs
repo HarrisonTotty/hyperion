@@ -1366,16 +1366,58 @@ pub(crate) fn base_and_style<F: FieldView>(
     ))
 }
 
+/// [`base_and_style`]'s base elevation alone, metres, and the style's values, bit for bit, no
+/// gradient made (the style's gradients zero): the same reads in the same order, so the same
+/// error (a far field's heights read no gradient).
+///
+/// # Errors
+///
+/// As [`base_and_style`].
+///
+/// # Panics
+///
+/// As [`base_and_style`].
+pub(crate) fn base_and_style_height<F: FieldView>(
+    field: &F,
+    dir: [f64; 3],
+    controls: &mut impl Controls<ELEVATION_AND_STYLE>,
+) -> Result<(f64, StyleSample), ReadCellError> {
+    let [mm, amplitude, belt, shear] =
+        interp::interpolate_each_value(&ElevationAndStyle(field), dir, controls)?;
+    let header = field.header();
+    Ok((
+        interp::elevation_m(mm),
+        StyleSample {
+            amplitude: smooth_of(header, amplitude),
+            belt: smooth_of(header, belt),
+            shear: smooth_of(header, shear),
+        },
+    ))
+}
+
 /// Where the octaves' noise is read: the caller's lattice cache, or a test's recording of it.
 trait Lattice {
     /// The noise of `octave` at `x` (radii) and its gradient per radius.
     fn noise(&mut self, octave: &Octave, x: [f64; 3]) -> (f64, [f64; 3]);
+
+    /// [`noise`](Self::noise)'s value alone, bit for bit.
+    fn noise_value(&mut self, octave: &Octave, x: [f64; 3]) -> f64;
 }
 
 impl Lattice for LatticeCache {
     fn noise(&mut self, octave: &Octave, x: [f64; 3]) -> (f64, [f64; 3]) {
         gradient_noise(x, octave, self)
     }
+
+    fn noise_value(&mut self, octave: &Octave, x: [f64; 3]) -> f64 {
+        noise::noise_value(x, octave, self)
+    }
+}
+
+/// `gradient()` where `GRADIENT` asks for a gradient, and zero otherwise, unmade.
+#[must_use]
+fn gradient_if<const GRADIENT: bool>(gradient: impl FnOnce() -> [f64; 3]) -> [f64; 3] {
+    if GRADIENT { gradient() } else { [0.0; 3] }
 }
 
 /// One octave's term at a point: its noise at unit RMS n̂, its ridged transform r̂, the style's
@@ -1680,7 +1722,7 @@ impl Relief {
         let last = through.min(self.variance.finest);
         let mut height = 0.0;
         let mut gradient = [0.0; 3];
-        self.octave_terms(
+        self.octave_terms::<true>(
             &table,
             header.figure().point(dir),
             style,
@@ -1699,6 +1741,44 @@ impl Relief {
             height_m: num::assert_finite(height),
             gradient: gradient.map(num::assert_finite),
         }
+    }
+
+    /// [`at_in_style`](Self::at_in_style)'s height alone, metres, bit for bit, no gradient made:
+    /// the octaves' values take the same operations, and their gradients are left out (a far
+    /// field's heights read none). `style`'s gradients are not read.
+    ///
+    /// # Panics
+    ///
+    /// As [`at_in_style`](Self::at_in_style).
+    pub(crate) fn height_in_style(
+        &self,
+        header: &FieldHeader,
+        dir: [f64; 3],
+        through: u8,
+        style: &StyleSample,
+        lattice: &mut LatticeCache,
+    ) -> f64 {
+        debug_assert!(self.evaluates(through), "no octave through {through}");
+        debug_assert_eq!(
+            first_octave(header.level()),
+            self.variance.first,
+            "a relief read with a field other than the one whose header made it"
+        );
+        let key = NoiseKey::Relief(self.seed);
+        let seed = self.seed;
+        let table = lattice.take_octaves(key, || octave_table(seed));
+        let last = through.min(self.variance.finest);
+        let mut height = 0.0;
+        self.octave_terms::<false>(
+            &table,
+            header.figure().point(dir),
+            style,
+            last,
+            lattice,
+            |term| height += term.height.value,
+        );
+        lattice.restore_octaves(key, table);
+        num::assert_finite(height)
     }
 
     /// [`at_in_style`](Self::at_in_style) through `through` and through `parent_through`, no finer,
@@ -1731,7 +1811,7 @@ impl Relief {
         let mut height = 0.0;
         let mut gradient = [0.0; 3];
         let mut parent = (0.0, [0.0; 3]);
-        self.octave_terms(
+        self.octave_terms::<true>(
             &table,
             header.figure().point(dir),
             style,
@@ -1980,7 +2060,7 @@ impl Relief {
             return Ok(());
         }
         let style = styles(field, dir)?;
-        self.octave_terms(
+        self.octave_terms::<true>(
             table,
             field.header().figure().point(dir),
             &style,
@@ -1993,8 +2073,9 @@ impl Relief {
 
     /// Octaves [`first_octave`](Self::first_octave) to `last` of `table` at the spheroid point
     /// `point` (metres), in the style `style`: each octave's term handed to `emit` in octave order
-    /// (see the module documentation).
-    fn octave_terms(
+    /// (see the module documentation), its gradients made only where `GRADIENT` asks for them
+    /// (zero otherwise), the values' operations the same either way.
+    fn octave_terms<const GRADIENT: bool>(
         &self,
         table: &[Octave],
         point: [f64; 3],
@@ -2007,7 +2088,7 @@ impl Relief {
         let unit = point.map(|c| c / radius);
         let belt = style.belt;
         let theta = FRAC_PI_2 * belt.value;
-        let theta_gradient = belt.gradient.map(|g| FRAC_PI_2 * g);
+        let theta_gradient = gradient_if::<GRADIENT>(|| belt.gradient.map(|g| FRAC_PI_2 * g));
         let full_mix = sin_cos_at_zero(theta);
         let shear = style.shear;
         // The three octaves above the one evaluated, nearest first: their n̂ and its gradient.
@@ -2015,36 +2096,24 @@ impl Relief {
         // The raw ridge r of the octave above, which weights this one's ridged term.
         let mut coarser_ridge: Option<Smooth> = None;
         for m in self.variance.first..=last {
-            let lambda = spacing_in_radii(m);
-            let warped = m - self.variance.first >= WARP_START;
-            let scale = WARP_SCALE * lambda;
-            let at = if warped {
-                [0, 1, 2].map(|k| unit[k] + shear.value * scale * above[k].value)
-            } else {
-                unit
-            };
-            let (n, lattice_gradient) = lattice.noise(&table[usize::from(m)], at);
-            // ∂n/∂P = g ÷ R + J_Wᵀ g, with g the lattice gradient and J_W the warp's Jacobian in
-            // metres: ∂W_k/∂P = c λ_m (s ∇n̂_k + n̂_k ∇s).
-            let mut noise_gradient = lattice_gradient.map(|d| d / radius);
-            if warped {
-                for (k, along) in lattice_gradient.iter().enumerate() {
-                    for (axis, out) in noise_gradient.iter_mut().enumerate() {
-                        *out += along
-                            * scale
-                            * (shear.value * above[k].gradient[axis]
-                                + above[k].value * shear.gradient[axis]);
-                    }
-                }
-            }
+            let (n, noise_gradient) = self.warped_noise::<GRADIENT>(
+                m,
+                &table[usize::from(m)],
+                unit,
+                shear,
+                &above,
+                lattice,
+            );
             let plain = Smooth {
                 value: n / NOISE_RMS,
-                gradient: noise_gradient.map(|d| d / NOISE_RMS),
+                gradient: gradient_if::<GRADIENT>(|| noise_gradient.map(|d| d / NOISE_RMS)),
             };
             let (raw, raw_slope) = ridge(n);
             let centred = Smooth {
                 value: (raw - RIDGE_MEAN) / RIDGE_RMS,
-                gradient: noise_gradient.map(|d| raw_slope / RIDGE_RMS * d),
+                gradient: gradient_if::<GRADIENT>(|| {
+                    noise_gradient.map(|d| raw_slope / RIDGE_RMS * d)
+                }),
             };
             let ridged = match coarser_ridge {
                 None => centred,
@@ -2052,10 +2121,12 @@ impl Relief {
                     let (w, w_slope) = ridge_weight(coarser.value);
                     Smooth {
                         value: w * centred.value / RIDGE_WEIGHT_RMS,
-                        gradient: [0, 1, 2].map(|k| {
-                            (w * centred.gradient[k]
-                                + centred.value * w_slope * coarser.gradient[k])
-                                / RIDGE_WEIGHT_RMS
+                        gradient: gradient_if::<GRADIENT>(|| {
+                            [0, 1, 2].map(|k| {
+                                (w * centred.gradient[k]
+                                    + centred.value * w_slope * coarser.gradient[k])
+                                    / RIDGE_WEIGHT_RMS
+                            })
                         }),
                     }
                 }
@@ -2070,13 +2141,15 @@ impl Relief {
             } else {
                 sin_cos_at_zero(theta * share)
             };
-            let swing = cos * ridged.value - sin * plain.value;
             let mixed = Smooth {
                 value: cos * plain.value + sin * ridged.value,
-                gradient: [0, 1, 2].map(|k| {
-                    cos * plain.gradient[k]
-                        + sin * ridged.gradient[k]
-                        + swing * (theta_gradient[k] * share)
+                gradient: gradient_if::<GRADIENT>(|| {
+                    let swing = cos * ridged.value - sin * plain.value;
+                    [0, 1, 2].map(|k| {
+                        cos * plain.gradient[k]
+                            + sin * ridged.gradient[k]
+                            + swing * (theta_gradient[k] * share)
+                    })
                 }),
             };
             let sigma = self.variance.rms_m[usize::from(m)];
@@ -2086,12 +2159,14 @@ impl Relief {
             let amplitude = style.amplitude;
             let height = Smooth {
                 value: amplitude.value * sigma * lift * mixed.value,
-                gradient: [0, 1, 2].map(|k| {
-                    sigma
-                        * lift
-                        * (mixed.value * amplitude.gradient[k]
-                            + amplitude.value * mixed.gradient[k]
-                            + amplitude.value * mixed.value * log_factor * belt.gradient[k])
+                gradient: gradient_if::<GRADIENT>(|| {
+                    [0, 1, 2].map(|k| {
+                        sigma
+                            * lift
+                            * (mixed.value * amplitude.gradient[k]
+                                + amplitude.value * mixed.gradient[k]
+                                + amplitude.value * mixed.value * log_factor * belt.gradient[k])
+                    })
                 }),
             };
             emit(Term {
@@ -2104,9 +2179,50 @@ impl Relief {
             above = [plain, above[0], above[1]];
             coarser_ridge = Some(Smooth {
                 value: raw,
-                gradient: noise_gradient.map(|d| raw_slope * d),
+                gradient: gradient_if::<GRADIENT>(|| noise_gradient.map(|d| raw_slope * d)),
             });
         }
+    }
+
+    /// Octave `m`'s noise `octave` at the unit point `unit` (radii), warped where the octave is by
+    /// the shear `shear` and the three octaves `above` it, nearest first, and its gradient per
+    /// metre through the warp's Jacobian where `GRADIENT` asks for it (zero otherwise):
+    /// [`octave_terms`](Self::octave_terms)' n and ∂n/∂P.
+    fn warped_noise<const GRADIENT: bool>(
+        &self,
+        m: u8,
+        octave: &Octave,
+        unit: [f64; 3],
+        shear: Smooth,
+        above: &[Smooth; 3],
+        lattice: &mut impl Lattice,
+    ) -> (f64, [f64; 3]) {
+        let radius = self.radius_m;
+        let warped = m - self.variance.first >= WARP_START;
+        let scale = WARP_SCALE * spacing_in_radii(m);
+        let at = if warped {
+            [0, 1, 2].map(|k| unit[k] + shear.value * scale * above[k].value)
+        } else {
+            unit
+        };
+        if !GRADIENT {
+            return (lattice.noise_value(octave, at), [0.0; 3]);
+        }
+        let (n, lattice_gradient) = lattice.noise(octave, at);
+        // ∂n/∂P = g ÷ R + J_Wᵀ g, with g the lattice gradient and J_W the warp's Jacobian in
+        // metres: ∂W_k/∂P = c λ_m (s ∇n̂_k + n̂_k ∇s).
+        let mut noise_gradient = lattice_gradient.map(|d| d / radius);
+        if warped {
+            for (k, along) in lattice_gradient.iter().enumerate() {
+                for (axis, out) in noise_gradient.iter_mut().enumerate() {
+                    *out += along
+                        * scale
+                        * (shear.value * above[k].gradient[axis]
+                            + above[k].value * shear.gradient[axis]);
+                }
+            }
+        }
+        (n, noise_gradient)
     }
 
     /// Sets `cache` to hold the lattice corners of octaves [`first_octave`] to `through` within
