@@ -57,8 +57,31 @@
 //! - [`FateHost`]: the [`StarModel`]s of the stars the body orbits (ruling 34), from the context:
 //!   one star for a planet of a star, and every star below the pair for a circumbinary planet,
 //!   which orbits the pair's total mass. A companion's planets have their own star alone as host,
-//!   so they see its mass loss and not their companion's: until P11.T4's post-explosion binary
-//!   orbits, plan 14's T28.c treats a companion's planets as a single star's.
+//!   so they see its mass loss and not their companion's. Below generator version 27 each star is
+//!   a single star; from it (P14.T28.g, `BINARY_HOST_FATE_VERSION`) a star of a pair the binary
+//!   engine ran is read from its pair's timeline (`FateHost::evolved`), as the next section says.
+//!
+//! # Hosts of a pair the engine ran
+//!
+//! From generator version 27 (P14.T28.g; research-binary-hosts R3–R5) a paired star's mass, which
+//! a body's orbit widens or shrinks with by a M = constant (Veras et al. 2011, eq. 18), and its
+//! largest radius, which engulfs, are its pair's timeline's, and the pair's own events replace its
+//! stars' single-star deaths as the host's sudden events:
+//!
+//! - a common envelope (Hurley, Tout and Pols 2002, MNRAS 329, 897, §2.7.1), and the coalescence
+//!   that ends a pair without one (their §§2.6.4–2.6.6), engulfs a planet of either star
+//!   (`Destroyed { Engulfed }`): the envelope engulfs the binary's orbit (Paczyński 1976; Ivanova
+//!   et al. 2013, A&ARv 21, 59, §1), and every S-type orbit lies inside 0.43 of it (Holman and
+//!   Wiegert 1999, AJ 117, 621, eq. 1);
+//! - for a circumbinary planet the same events are a sudden loss of the pair's mass with no kick,
+//!   the supernova's step (lean, 2026-11-02: BSE ejects the envelope at once, and over about a year
+//!   a planet at 3–100 au is in Veras et al.'s non-adiabatic regime); a planet inside its reach of
+//!   the larger star before the envelope is engulfed by the search, as before any death;
+//! - a supernova of a star moves its own planets as a single star's does, with the remnant's natal
+//!   kick, and its companion's not at all; a circumbinary planet takes the pair's mass loss with
+//!   the pair's recoil (their eq. A14), and is `Unbound` where the explosion, or a white dwarf's
+//!   birth, unbinds the pair (lean, 2026-11-02: the stars separate at about their orbital speed);
+//! - a host the engine leaves with no mass unbinds its planets, by the step.
 //! - [`FateBody`]: its [`Formation`] (drawn with the body from its seed, ID, mass and its disc's
 //!   lifetime, P14.T30.a), its primordial elements about its host's initial mass, its mass, its
 //!   bulk density for the Roche test, and T8.e's circularisation time.
@@ -81,20 +104,87 @@ use crate::Seed;
 use crate::coords::SystemVelocity;
 use crate::id::BodyId;
 use crate::orbit::KeplerElements;
+use crate::planetary::context::SystemContext;
 use crate::planetary::drift::{DriftingOrbit, EvolvingLaw, composite_excess, drift_cell};
 use crate::planetary::hosts::evolved::{
     Aftermath, Circularisation, circularised, circularised_axis, engulfment_reach, expanded,
     expanded_axis, first_engulfment, supernova,
 };
 use crate::planetary::hosts::young::Formation;
+use crate::planetary::placement::OrbitZone;
 use crate::planetary::record::BodyOrbit;
 use crate::stellar::Phase;
-use crate::stellar::system::StarModel;
+use crate::stellar::binary::{BinaryTimeline, Component as PairComponent, SegmentKind};
+use crate::stellar::remnant::NatalKick;
+use crate::stellar::system::{StarModel, pair_of};
 use crate::time::{ClockWindow, SourceHorizon, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{
     EarthMasses, GravitationalParameter, KilogramsPerCubicMetre, Metres, SolarMasses, Years,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
+
+/// The generator version from which the fate transform reads a star of a pair the binary engine
+/// ran from its pair's timeline (P14.T28.g; the [module documentation](self)): 27, held with the
+/// 27 train.
+///
+/// Below it [`BinaryHostFateRules::in_force`] is [`BinaryHostFateRules::SingleModels`]: every
+/// host star is its own single-star model, so that a planet of a star whose companion swallowed
+/// it in a common envelope survives about the mass of both, and every figure is version 26's bit
+/// for bit. 27's bump deletes this hold, [`BinaryHostFateRules`] with its `SingleModels` arm, the
+/// tests' switch and its tripwire (`the_binary_host_fate_is_held_only_until_the_27_bump`).
+pub(crate) const BINARY_HOST_FATE_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// Where the fate transform reads a paired star (its hold, [`BINARY_HOST_FATE_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum BinaryHostFateRules {
+    /// Version 26's and before: every star's own single-star model, with its own deaths.
+    SingleModels,
+    /// Version 27's: a star of a pair the engine ran from its pair's timeline, with the pair's
+    /// events.
+    Engine,
+}
+
+impl BinaryHostFateRules {
+    /// The rules this generator version gives: the engine's from [`BINARY_HOST_FATE_VERSION`],
+    /// the single models' below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_binary_host_fate`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = BINARY_HOST_FATE_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= BINARY_HOST_FATE_VERSION {
+            Self::Engine
+        } else {
+            Self::SingleModels
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The paired hosts' fate rules a test sets on its thread, `None` for the version's.
+    static BINARY_HOST_FATE_RULES: core::cell::Cell<Option<BinaryHostFateRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the paired hosts' fate rules `rules` on this thread, for the tests to reach
+/// the engine's fates ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. 27's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_binary_host_fate<R>(rules: BinaryHostFateRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<BinaryHostFateRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            BINARY_HOST_FATE_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(BINARY_HOST_FATE_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
 
 /// A body's state at a time: a prefix of not yet formed → present → destroyed or unbound
 /// (P14.T28's test).
@@ -372,13 +462,68 @@ impl Error for BuildFateHostError {}
 #[derive(Debug, Clone, PartialEq)]
 pub struct FateHost<'a> {
     stars: Vec<&'a StarModel>,
+    /// For each of `stars`, in order, the engine's run of it (P14.T28.g): its pair, by its index
+    /// in `timelines`, and its component there; `None` for a star the engine ran in no pair, and
+    /// for every star of a host built from its models alone.
+    paired: Vec<Option<(usize, PairComponent)>>,
+    /// The timelines of the pairs `paired` names.
+    timelines: Vec<&'a BinaryTimeline>,
+    /// The pairs' sudden events the host's bodies feel, by time ([`PairEvent`]).
+    events: Vec<PairEvent>,
+}
+
+/// A sudden event of a pair the binary engine ran, as a host's bodies feel it (P14.T28.g; the
+/// [module documentation](self)).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PairEvent {
+    /// The event's clock time.
+    at: UniverseTime,
+    /// Its age on its pair's timeline, Julian years: the start of the segment it opens, or the
+    /// supernova's own.
+    age: f64,
+    /// Its pair, by its index in the host's timelines.
+    pair: usize,
+    /// What it does to the host's bodies.
+    effect: PairEffect,
+}
+
+/// What a [`PairEvent`] does to a host's bodies.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PairEffect {
+    /// Every body is `Destroyed { Engulfed }`: a star's planets at its pair's common envelope or
+    /// coalescence.
+    Engulf,
+    /// Every body takes the sudden step from the host's mass just before the event to just after
+    /// it, its centre moving off at `kick`, m s⁻¹ along the system frame's axes: a circumbinary
+    /// body at a common envelope or a coalescence (no kick) and at a supernova that leaves its pair
+    /// bound (the pair's recoil), and a star's planets at its own supernova (its natal kick).
+    Step {
+        /// The velocity the host's centre takes.
+        kick: SystemVelocity,
+    },
+    /// Every body is `Unbound`: a circumbinary body when its pair is unbound.
+    Unbind,
+}
+
+/// Which of a pair's stars a host holds, for its events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PairShare {
+    /// One star, the host's own: an S-type zone.
+    Star(PairComponent),
+    /// Both: a circumbinary zone, or one above it.
+    Both,
 }
 
 impl<'a> FateHost<'a> {
     /// The single star `star`.
     #[must_use]
     pub fn star(star: &'a StarModel) -> Self {
-        Self { stars: vec![star] }
+        Self {
+            stars: vec![star],
+            paired: vec![None],
+            timelines: Vec::new(),
+            events: Vec::new(),
+        }
     }
 
     /// The stars `stars`, which a circumbinary body orbits together.
@@ -402,7 +547,61 @@ impl<'a> FateHost<'a> {
         {
             return Err(BuildFateHostError::NotCoeval { first, other });
         }
-        Ok(Self { stars })
+        Ok(Self {
+            paired: vec![None; stars.len()],
+            stars,
+            timelines: Vec::new(),
+            events: Vec::new(),
+        })
+    }
+
+    /// The stars the bodies of `zone`, a zone of `ctx`, orbit: [`FateHost::stars`] of the zone's
+    /// members in body order, and from generator version 27 (P14.T28.g) each star of a pair the
+    /// binary engine ran read from its pair's timeline, with the pair's events in place of its
+    /// single-star deaths (the [module documentation](self)).
+    ///
+    /// # Panics
+    ///
+    /// If `zone` is not a zone of `ctx`'s stars.
+    #[must_use]
+    pub(crate) fn evolved(ctx: &'a SystemContext, zone: &OrbitZone) -> Self {
+        let stars = ctx.stars();
+        let mut host = Self::stars(zone.members().map(|member| &stars[usize::from(member)]))
+            .expect("a zone has a component, and a system's stars are coeval");
+        match BinaryHostFateRules::in_force() {
+            BinaryHostFateRules::SingleModels => return host,
+            BinaryHostFateRules::Engine => {}
+        }
+        let members: Vec<u8> = zone.members().collect();
+        for (k, &member) in members.iter().enumerate() {
+            let Some((pair, component)) = pair_of(ctx.pairs(), member) else {
+                continue;
+            };
+            let timeline = pair.timeline();
+            let index = host
+                .timelines
+                .iter()
+                .position(|&t| core::ptr::eq(t, timeline))
+                .unwrap_or_else(|| {
+                    let both = pair.stars().iter().all(|s| members.contains(&s.get()));
+                    let share = if both {
+                        PairShare::Both
+                    } else {
+                        PairShare::Star(component)
+                    };
+                    host.timelines.push(timeline);
+                    let index = host.timelines.len() - 1;
+                    let first = host.stars[0];
+                    host.events
+                        .extend(pair_events(timeline, first, index, share));
+                    index
+                });
+            host.paired[k] = Some((index, component));
+        }
+        // By time, and at one time in the order found: the pairs' depth-first order, each pair's
+        // events by their kind's order in `pair_events`.
+        host.events.sort_by_key(|event| event.at);
+        host
     }
 
     /// The stars, in the order given.
@@ -425,6 +624,138 @@ impl<'a> FateHost<'a> {
     fn first(&self) -> &'a StarModel {
         self.stars[0]
     }
+
+    /// The age on the timeline of pair `pair` at `t`, Julian years: its stars' age then, held on
+    /// the side of each of the pair's events that `t` is on, so that the clock's rounding of an
+    /// event's age never reads the state across it, and inside the ages the timeline was run to.
+    #[must_use]
+    fn pair_age(&self, pair: usize, t: UniverseTime) -> f64 {
+        let mut age = self.first().age_at(t).value();
+        for event in self.events.iter().filter(|event| event.pair == pair) {
+            age = if t >= event.at {
+                age.max(event.age)
+            } else {
+                age.min(event.age.next_down())
+            };
+        }
+        age.clamp(0.0, self.timelines[pair].until().value())
+    }
+
+    /// The mass at `t` of the star the engine ran as `component` of pair `pair`, M☉: its state's
+    /// on the pair's timeline then.
+    #[must_use]
+    fn paired_mass(&self, pair: usize, component: PairComponent, t: UniverseTime) -> SolarMasses {
+        let age = Years::new(self.pair_age(pair, t));
+        self.timelines[pair].state_at(age).stars()[component.index()].mass()
+    }
+
+    /// The largest radius by `t` of the star the engine ran as `component` of pair `pair`, m.
+    #[must_use]
+    fn paired_radius(&self, pair: usize, component: PairComponent, t: UniverseTime) -> f64 {
+        let age = Years::new(self.pair_age(pair, t));
+        Metres::from(self.timelines[pair].max_radius_until(component, age)).value()
+    }
+
+    /// Each star's death, if it has died by the end of the clock window ([`death_of`]): none for a
+    /// star the engine ran in a pair, whose pair's events stand in for its deaths (P14.T28.g).
+    #[must_use]
+    fn deaths(&self) -> Vec<Option<StarDeath>> {
+        self.stars
+            .iter()
+            .zip(&self.paired)
+            .map(|(star, paired)| match paired {
+                Some(_) => None,
+                None => death_of(star),
+            })
+            .collect()
+    }
+
+    /// Whether the star the engine ran as `component` of pair `pair` has not exploded by `t`.
+    #[must_use]
+    fn paired_lives_at(&self, pair: usize, component: PairComponent, t: UniverseTime) -> bool {
+        self.timelines[pair].supernovae().iter().all(|sn| {
+            sn.component() != component
+                || clock_time(self.first(), sn.age()).is_none_or(|at| at > t)
+        })
+    }
+}
+
+/// The events of `timeline`, the host's pair `pair`, that a host holding `share` of its stars
+/// feels (P14.T28.g; the [module documentation](self)), each at its clock time on `first`'s clock,
+/// in the timeline's order: its segments' events, then its supernovae. An event off the clock is
+/// left out.
+#[must_use]
+fn pair_events(
+    timeline: &BinaryTimeline,
+    first: &StarModel,
+    pair: usize,
+    share: PairShare,
+) -> Vec<PairEvent> {
+    let merged = timeline.merger_age().map(Years::value);
+    let mut events = Vec::new();
+    let mut push = |age: f64, effect: PairEffect| {
+        if let Some(at) = clock_time(first, Years::new(age)) {
+            events.push(PairEvent {
+                at,
+                age,
+                pair,
+                effect,
+            });
+        }
+    };
+    let segments = timeline.segments();
+    for (before, segment) in segments.iter().zip(segments.iter().skip(1)) {
+        let effect = match (segment.kind(), share) {
+            // A common envelope that ends in a coalescence is one event, the envelope's.
+            (SegmentKind::Merged, _) if before.kind() == SegmentKind::CommonEnvelope => None,
+            (SegmentKind::CommonEnvelope | SegmentKind::Merged, PairShare::Star(_)) => {
+                Some(PairEffect::Engulf)
+            }
+            (SegmentKind::CommonEnvelope | SegmentKind::Merged, PairShare::Both) => {
+                Some(PairEffect::Step {
+                    kick: SystemVelocity::ZERO,
+                })
+            }
+            (SegmentKind::Disrupted { .. }, PairShare::Both) => Some(PairEffect::Unbind),
+            (SegmentKind::Disrupted { .. }, PairShare::Star(_))
+            | (
+                SegmentKind::Detached | SegmentKind::StableTransfer { .. } | SegmentKind::Contact,
+                _,
+            ) => None,
+        };
+        if let Some(effect) = effect {
+            push(segment.start().value(), effect);
+        }
+    }
+    for sn in timeline.supernovae() {
+        let natal = sn.kick().map_or(SystemVelocity::ZERO, kick_velocity);
+        let effect = match share {
+            PairShare::Star(own) if sn.component() == own => Some(PairEffect::Step { kick: natal }),
+            PairShare::Star(_) => None,
+            // A coalesced pair's product explodes as a single star, with its own kick.
+            PairShare::Both if merged.is_some_and(|age| age <= sn.age().value()) => {
+                Some(PairEffect::Step { kick: natal })
+            }
+            PairShare::Both => Some(
+                sn.recoil()
+                    .map_or(PairEffect::Unbind, |kick| PairEffect::Step { kick }),
+            ),
+        };
+        if let Some(effect) = effect {
+            push(sn.age().value(), effect);
+        }
+    }
+    events
+}
+
+/// A host's sudden change, by where the host keeps it: a single star's sudden death, by the star's
+/// index, or a pair's event, by its index in the host's events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Sudden {
+    /// The sudden death of the host's star of this index.
+    Death(usize),
+    /// The host's pair event of this index.
+    Event(usize),
 }
 
 /// A body's state and orbit at a time: what [`state_at`] and [`BodyFate::at`] return.
@@ -754,11 +1085,17 @@ impl<'a> BodyFate<'a> {
     /// ```
     #[must_use]
     pub fn resolve_all(bodies: &[&'a FateBody], host: &'a FateHost<'a>) -> Vec<Self> {
-        let deaths: Vec<Option<StarDeath>> = host.stars.iter().map(|star| death_of(star)).collect();
-        let mut sudden: Vec<(UniverseTime, usize)> = deaths
+        let deaths = host.deaths();
+        let mut sudden: Vec<(UniverseTime, Sudden)> = deaths
             .iter()
             .enumerate()
-            .filter_map(|(k, death)| death.filter(|d| d.sudden).map(|d| (d.at, k)))
+            .filter_map(|(k, death)| death.filter(|d| d.sudden).map(|d| (d.at, Sudden::Death(k))))
+            .chain(
+                host.events
+                    .iter()
+                    .enumerate()
+                    .map(|(k, event)| (event.at, Sudden::Event(k))),
+            )
             .collect();
         sudden.sort_unstable();
         let mut fates: Vec<Self> = bodies
@@ -788,10 +1125,11 @@ impl<'a> BodyFate<'a> {
     #[must_use]
     pub fn resolve_among(bodies: &[&'a FateBody], index: usize, host: &'a FateHost<'a>) -> Self {
         let body = bodies[index];
-        let sudden = host
-            .stars
-            .iter()
-            .any(|star| death_of(star).is_some_and(|death| death.sudden));
+        let sudden = !host.events.is_empty()
+            || host
+                .deaths()
+                .iter()
+                .any(|death| death.is_some_and(|death| death.sudden));
         if sudden {
             Self::resolve_all(bodies, host).swap_remove(index)
         } else {
@@ -810,6 +1148,7 @@ impl<'a> BodyFate<'a> {
                 match body.generation {
                     Generation::Primordial => {
                         deaths.iter().flatten().all(|death| death.at > *formed)
+                            && host.events.iter().all(|event| event.at > *formed)
                     }
                     Generation::Second => true,
                 }
@@ -1014,8 +1353,18 @@ impl<'a> BodyFate<'a> {
     fn breaks(&self, segment: &Segment, last: UniverseTime) -> Vec<UniverseTime> {
         let inside = |at: &UniverseTime| segment.start < *at && *at < last;
         let mut breaks: Vec<UniverseTime> = Vec::new();
-        for star in &self.host.stars {
+        for (star, paired) in self.host.stars.iter().zip(&self.host.paired) {
             breaks.extend(star.mass_breaks(segment.start, last));
+            // A paired star's mass is its timeline's, which turns at the timeline's segments.
+            if let Some((pair, _)) = paired {
+                breaks.extend(
+                    self.host.timelines[*pair]
+                        .segments()
+                        .iter()
+                        .filter_map(|s| clock_time(self.host.first(), s.start()))
+                        .filter(inside),
+                );
+            }
         }
         breaks.extend(
             self.deaths
@@ -1025,6 +1374,7 @@ impl<'a> BodyFate<'a> {
                 .map(|death| death.at)
                 .filter(inside),
         );
+        breaks.extend(self.host.events.iter().map(|event| event.at).filter(inside));
         let circularisation = self.body.circularisation;
         let e0 = segment.orbit.eccentricity().value();
         if segment.circularises && circularisation.timescale().is_some() && e0 > 0.0 {
@@ -1047,13 +1397,20 @@ impl<'a> BodyFate<'a> {
     /// stars, and through it, or with `None` to the end of its host's known history
     /// ([`BodyFate::known_until`]): the engulfment search on the segment, then the death's
     /// aftermath. A body not formed, not formed by then, or gone already is left as it is.
-    fn live_to(&mut self, next: Option<(UniverseTime, usize)>) {
+    fn live_to(&mut self, next: Option<(UniverseTime, Sudden)>) {
         let (Some(formed), None) = (self.formed_at, self.ending) else {
             return;
         };
         // A body that forms after the clock window, about a host alive then, has no history the
         // host's models can tell yet.
         if formed > self.known_until() {
+            return;
+        }
+        // A pair's event before a body forms, which only a second-generation body outlives, is
+        // none of its history.
+        if let Some((at, Sudden::Event(_))) = next
+            && at <= formed
+        {
             return;
         }
         let segment = *self.segments.last().expect("a formed body has a segment");
@@ -1068,10 +1425,32 @@ impl<'a> BodyFate<'a> {
             });
             return;
         }
-        let Some((at, star)) = next else {
+        let Some((at, sudden)) = next else {
             return;
         };
-        let (aftermath, reference) = self.explode(&segment, at, star);
+        let (aftermath, reference) = match sudden {
+            Sudden::Death(star) => self.explode(&segment, at, star),
+            Sudden::Event(k) => {
+                let event = self.host.events[k];
+                match event.effect {
+                    PairEffect::Engulf => {
+                        self.ending = Some(BodyState::Destroyed {
+                            cause: DestructionCause::Engulfed,
+                            at,
+                        });
+                        return;
+                    }
+                    PairEffect::Unbind => {
+                        self.ending = Some(BodyState::Unbound { at });
+                        return;
+                    }
+                    PairEffect::Step { kick } => match self.step(&segment, event, kick) {
+                        Some(stepped) => stepped,
+                        None => return,
+                    },
+                }
+            }
+        };
         let after = |orbit| Segment {
             start: at,
             orbit,
@@ -1131,11 +1510,11 @@ impl<'a> BodyFate<'a> {
     ) -> (Aftermath, SolarMasses) {
         let death = self.deaths[star].expect("a star that explodes has a death");
         let (mut before, mut after) = (SolarMasses::ZERO, SolarMasses::ZERO);
-        for (k, model) in self.host.stars.iter().enumerate() {
+        for k in 0..self.host.stars.len() {
             let (b, a) = if k == star {
                 (death.before, death.after)
             } else {
-                let m = star_mass(model, self.deaths[k], at);
+                let m = self.member_mass(k, at);
                 (m, m)
             };
             before = before + b;
@@ -1207,25 +1586,92 @@ impl<'a> BodyFate<'a> {
     /// [`BodyFate::at`].
     #[must_use]
     pub fn host_mass(&self, t: UniverseTime) -> SolarMasses {
-        self.host
-            .stars
-            .iter()
-            .zip(&self.deaths)
-            .fold(SolarMasses::ZERO, |sum, (model, death)| {
-                sum + star_mass(model, *death, t)
-            })
+        (0..self.host.stars.len()).fold(SolarMasses::ZERO, |sum, k| sum + self.member_mass(k, t))
+    }
+
+    /// The mass of host star `k` at `t`, M☉: its pair's timeline's for a star the engine ran in a
+    /// pair (P14.T28.g), and otherwise [`star_mass`]'s.
+    #[must_use]
+    fn member_mass(&self, k: usize, t: UniverseTime) -> SolarMasses {
+        match self.host.paired[k] {
+            Some((pair, component)) => self.host.paired_mass(pair, component, t),
+            None => star_mass(self.host.stars[k], self.deaths[k], t),
+        }
     }
 
     /// The largest radius any of the host's stars has had by `t`, among those that had not died
-    /// by the segment's start, m.
+    /// by the segment's start, m: a paired star's from its pair's timeline (P14.T28.g), not
+    /// counted once it has exploded.
     fn largest_radius(&self, segment: &Segment, t: UniverseTime) -> f64 {
         self.host
             .stars
             .iter()
             .zip(&self.deaths)
-            .filter(|(_, death)| death.is_none_or(|d| d.at > segment.start))
-            .map(|(model, _)| Metres::from(model.max_radius_until(t)).value())
+            .zip(&self.host.paired)
+            .filter(|((_, death), paired)| {
+                death.is_none_or(|d| d.at > segment.start)
+                    && paired.is_none_or(|(pair, component)| {
+                        self.host.paired_lives_at(pair, component, segment.start)
+                    })
+            })
+            .map(|((model, _), paired)| match paired {
+                Some((pair, component)) => self.host.paired_radius(*pair, *component, t),
+                None => Metres::from(model.max_radius_until(t)).value(),
+            })
             .fold(0.0, f64::max)
+    }
+
+    /// What pair event `event` leaves of the body on `segment`, with the mass the body orbits
+    /// afterwards, its host's centre moving off at `kick`, the pair's share of it where the host
+    /// holds other stars too (P14.T28.g): the supernova's step from the host's mass just before the
+    /// event to just after it, or `None` where neither the mass nor the centre moves, which leaves
+    /// the segment as it is.
+    fn step(
+        &self,
+        segment: &Segment,
+        event: PairEvent,
+        kick: SystemVelocity,
+    ) -> Option<(Aftermath, SolarMasses)> {
+        let (mut before, mut after, mut paired_after) =
+            (SolarMasses::ZERO, SolarMasses::ZERO, SolarMasses::ZERO);
+        for k in 0..self.host.stars.len() {
+            let (b, a) = match self.host.paired[k] {
+                Some((pair, component)) if pair == event.pair => {
+                    let timeline = self.host.timelines[pair];
+                    let mass = |age: f64| {
+                        timeline.state_at(Years::new(age)).stars()[component.index()].mass()
+                    };
+                    let a = mass(event.age);
+                    paired_after = paired_after + a;
+                    (mass(event.age.next_down().max(0.0)), a)
+                }
+                Some(_) | None => {
+                    let m = self.member_mass(k, event.at);
+                    (m, m)
+                }
+            };
+            before = before + b;
+            after = after + a;
+        }
+        let k = kick.metres_per_second();
+        let still = k.iter().all(|v| v.total_cmp(&0.0).is_eq());
+        if still && before.total_cmp(&after).is_eq() {
+            return None;
+        }
+        let orbit = self.orbit_in(segment, event.at, before);
+        let mu_per_solar_mass =
+            self.body.orbit.gravitational_parameter().value() / self.host.initial_mass().value();
+        let mu_after = GravitationalParameter::new(mu_per_solar_mass * after.value());
+        let share = if after.value() > 0.0 {
+            paired_after.value() / after.value()
+        } else {
+            0.0
+        };
+        let kick = SystemVelocity::new([k[0] * share, k[1] * share, k[2] * share]);
+        Some((
+            supernova(&orbit, event.at, mu_after, kick, self.body.density),
+            after,
+        ))
     }
 }
 
@@ -1254,11 +1700,9 @@ fn death_of(star: &StarModel) -> Option<StarDeath> {
     let remnant = star.remnant()?;
     let at = clock_time(star, death.age())?;
     let progenitor = death.progenitor();
-    let kick = star.natal_kick().map_or(SystemVelocity::ZERO, |kick| {
-        let [x, y, z] = kick.direction().components();
-        let speed = kick.speed().value();
-        SystemVelocity::new([x * speed, y * speed, z * speed])
-    });
+    let kick = star
+        .natal_kick()
+        .map_or(SystemVelocity::ZERO, kick_velocity);
     Some(StarDeath {
         at,
         sudden: death.kind().is_sudden(),
@@ -1266,6 +1710,15 @@ fn death_of(star: &StarModel) -> Option<StarDeath> {
         after: remnant.mass(),
         kick,
     })
+}
+
+/// The velocity a natal kick gives its remnant, m s⁻¹ along the system frame's axes, which are the
+/// galactic axes' (the vertical slice's note).
+#[must_use]
+fn kick_velocity(kick: NatalKick) -> SystemVelocity {
+    let [x, y, z] = kick.direction().components();
+    let speed = kick.speed().value();
+    SystemVelocity::new([x * speed, y * speed, z * speed])
 }
 
 /// The clock time at which `star` is `age` old, in the arithmetic of plan 06's clock deaths, or
@@ -1341,5 +1794,7 @@ impl BodyFate<'_> {
 
 mod scatter;
 
+#[cfg(test)]
+mod binary_host_tests;
 #[cfg(test)]
 mod tests;

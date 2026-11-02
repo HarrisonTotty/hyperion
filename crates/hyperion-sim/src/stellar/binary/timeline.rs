@@ -25,7 +25,7 @@ use crate::stellar::{Composition, Phase, StarState, substellar};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
     GravitationalParameter, Metres, Radians, SolarLuminosities, SolarMasses, SolarMassesPerYear,
-    Years,
+    SolarRadii, Years,
 };
 
 use super::params::BinaryParams;
@@ -749,6 +749,30 @@ impl BinaryTimeline {
             |track, at| track.max_luminosity_until(at).value(),
         );
         SolarLuminosities::new(peak.max(now.value()))
+    }
+
+    /// The largest radius `component` has had up to `age`, R☉, never below its radius at `age`:
+    /// what plan 14's engulfment reads for a star of a pair the engine ran (P14.T28.g), as
+    /// [`StarModel::max_radius_until`] is a single star's, read over the segments as
+    /// [`max_luminosity_until`](Self::max_luminosity_until) reads the luminosity
+    /// ([`Track::max_radius_until`] on a track).
+    ///
+    /// [`StarModel::max_radius_until`]: crate::stellar::system::StarModel::max_radius_until
+    /// [`Track::max_radius_until`]: crate::stellar::sse::Track::max_radius_until
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`state_at`](Self::state_at).
+    #[must_use]
+    pub(crate) fn max_radius_until(&self, component: Component, age: Years) -> SolarRadii {
+        let now = self.state_at(age).stars()[component.index()].radius();
+        let peak = self.max_until(
+            component,
+            age,
+            |state| state.radius().value(),
+            |track, at| track.max_radius_until(at).value(),
+        );
+        SolarRadii::new(peak.max(now.value()))
     }
 
     /// The largest of `quantity` that `component` has had over the segments up to `age`, as

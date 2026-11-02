@@ -6721,9 +6721,7 @@ fn first_death(stars: &[&StarModel]) -> Option<UniverseTime> {
 /// or every component under its pair, in body order.
 #[must_use]
 fn fate_host<'c>(ctx: &'c SystemContext, zone: &OrbitZone) -> FateHost<'c> {
-    let stars = ctx.stars();
-    FateHost::stars(zone.members().map(|member| &stars[usize::from(member)]))
-        .expect("a zone has a component, and a system's stars are coeval")
+    FateHost::evolved(ctx, zone)
 }
 
 /// What the queries at one time share: the context, the time, the stars' states then and the

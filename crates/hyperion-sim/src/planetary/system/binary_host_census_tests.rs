@@ -1,7 +1,7 @@
 //! The binary hosts' census (research-binary-hosts §1): the planets of the sample's systems whose
 //! zones hold a star of a pair the binary engine ran, classed by the worst of those pairs'
 //! histories before the epoch ([`PairHistory`]), and what each reads of its stars against what
-//! the engine says of them (P14.T1.e).
+//! the engine says of them (P14.T1.e and P14.T28.g).
 //!
 //! The galaxies are version 27's, the systems the [`SYSTEMS`] nearest the Sun-like point. Each planet
 //! of such a zone is counted, and each present at the epoch on the fate in force read: the light
@@ -23,6 +23,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{Existence, SystemKind, SystemRecord};
 use crate::planetary::context::{BinaryHostLightRules, with_binary_host_light};
+use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
 use crate::planetary::testing::{PairHistory, SampleFilter, sample_records, with_every_27_hold};
 use crate::stellar::system::SystemStars;
 
@@ -54,6 +55,10 @@ struct Row {
     planets: usize,
     /// Those present at the epoch.
     present: usize,
+    /// Those unbound by the epoch.
+    unbound: usize,
+    /// Those destroyed by the epoch.
+    destroyed: usize,
     /// Present planets whose zone's light read lies off the engine's ([`LIGHT_TOLERANCE`]).
     light_off: usize,
     /// Present planets whose zone's light read is not the engine's to [`UNEQUAL`]: the light
@@ -83,6 +88,8 @@ impl Census {
             sum.systems.extend(row.systems.iter().copied());
             sum.planets += row.planets;
             sum.present += row.present;
+            sum.unbound += row.unbound;
+            sum.destroyed += row.destroyed;
             sum.light_off += row.light_off;
             sum.light_unequal += row.light_unequal;
             sum.mass_off += row.mass_off;
@@ -95,11 +102,13 @@ impl Census {
     /// The census as a table, a row a history and a total.
     fn table(&self, title: &str) -> String {
         let mut out = format!(
-            "{title}\n{:<26} {:>7} {:>8} {:>8} {:>9} {:>7} {:>8} {:>9} {:>8}\n",
+            "{title}\n{:<26} {:>7} {:>8} {:>8} {:>8} {:>9} {:>9} {:>7} {:>8} {:>9} {:>8}\n",
             "history",
             "systems",
             "planets",
             "present",
+            "unbound",
+            "destroyed",
             "light off",
             "light ≠",
             "mass off",
@@ -109,10 +118,12 @@ impl Census {
         let line = |out: &mut String, name: &str, row: &Row| {
             writeln!(
                 out,
-                "{name:<26} {:>7} {:>8} {:>8} {:>9} {:>7} {:>8} {:>9} {:>8}",
+                "{name:<26} {:>7} {:>8} {:>8} {:>8} {:>9} {:>9} {:>7} {:>8} {:>9} {:>8}",
                 row.systems.len(),
                 row.planets,
                 row.present,
+                row.unbound,
+                row.destroyed,
                 row.light_off,
                 row.light_unequal,
                 row.mass_off,
@@ -217,8 +228,17 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], census: &mut Census) {
                 let Some(fate) = fate else {
                     continue;
                 };
-                if fate.at(t).state() != BodyState::Present {
-                    continue;
+                match fate.at(t).state() {
+                    BodyState::Present => {}
+                    BodyState::Unbound { .. } => {
+                        row.unbound += 1;
+                        continue;
+                    }
+                    BodyState::Destroyed { .. } => {
+                        row.destroyed += 1;
+                        continue;
+                    }
+                    BodyState::NotYetFormed => continue,
                 }
                 row.present += 1;
                 let read = epoch.luminosity(zone).map_or(0.0, SolarLuminosities::value);
@@ -232,12 +252,21 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], census: &mut Census) {
     }
 }
 
-/// The census before and after the binary hosts' holds at 27: every present planet's zone light
-/// reads as the engine's after P14.T1.e, where before, in the research's sample, nearly 19,000 of
-/// 500,000 systems' did not (research-binary-hosts §1).
+/// The binary hosts' holds at 27 set back to their held arms, on this thread.
+fn held<R>(run: impl FnOnce() -> R) -> R {
+    with_binary_host_light(BinaryHostLightRules::SingleModels, || {
+        with_binary_host_fate(BinaryHostFateRules::SingleModels, run)
+    })
+}
+
+/// The census before and after the binary hosts' holds at 27. After them, every present planet's
+/// zone light reads as the engine's (P14.T1.e) and the mass its orbit follows is the engine's, no
+/// S-type planet of a pair that went through a common envelope is left, and none orbits a host the
+/// engine left with no mass (P14.T28.g), where before, in the research's sample of 500,000
+/// systems, some 19,000, 19,600, 392 and 549 did not (research-binary-hosts §1).
 #[test]
 #[ignore = "slow: the binary hosts' census, 100,000 systems under two rules, about 80 s"]
-fn the_binary_hosts_census_reads_every_paired_star_s_light_as_the_engine_s() {
+fn the_binary_hosts_census_reads_every_paired_star_as_the_engine_does() {
     let (mut before, mut after) = (Census::default(), Census::default());
     for seed in GALAXY_SEEDS {
         let galaxy = Galaxy::from_params_at_version(
@@ -247,11 +276,7 @@ fn the_binary_hosts_census_reads_every_paired_star_s_light_as_the_engine_s() {
         )
         .expect("the Milky Way fixture's gas is mostly neutral");
         let records = sample_records(&galaxy, SYSTEMS, SampleFilter::ALL).unwrap();
-        with_every_27_hold(|| {
-            with_binary_host_light(BinaryHostLightRules::SingleModels, || {
-                census_of(&galaxy, &records, &mut before);
-            });
-        });
+        with_every_27_hold(|| held(|| census_of(&galaxy, &records, &mut before)));
         with_every_27_hold(|| census_of(&galaxy, &records, &mut after));
     }
     eprintln!(
@@ -259,14 +284,27 @@ fn the_binary_hosts_census_reads_every_paired_star_s_light_as_the_engine_s() {
         before.table("before: every 27 hold, the binary hosts' set back"),
         after.table("after: every 27 hold")
     );
+    let held = before.total();
     assert!(
-        before.total().light_off > 0,
-        "the single models light no zone off the engine's"
+        held.light_off > 0 && held.mass_off > 0 && held.enveloped > 0 && held.massless > 0,
+        "the single models read every paired star as the engine does: {held:?}"
     );
     for (history, row) in &after.rows {
         assert_eq!(
             row.light_unequal, 0,
             "{history:?}: zones lit off the engine's"
+        );
+        assert_eq!(
+            row.mass_off, 0,
+            "{history:?}: orbits about a mass off the engine's"
+        );
+        assert_eq!(
+            row.enveloped, 0,
+            "{history:?}: S-type planets through an envelope"
+        );
+        assert_eq!(
+            row.massless, 0,
+            "{history:?}: planets of a host with no mass"
         );
     }
     assert_eq!(before.total().planets, after.total().planets);

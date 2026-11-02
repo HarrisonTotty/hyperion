@@ -948,7 +948,7 @@ Order and parallelism:
   27). The context keeps `SystemStars::pairs`, and every light read takes a paired star's state,
   and its peak, from its pair's timeline, where `SystemStars::state_at` reads it.
   - _Accept:_ `cargo test -p hyperion-sim --lib -- planetary::context binary_host`, and the slow
-    `the_binary_hosts_census_reads_every_paired_star_s_light_as_the_engine_s` by name.
+    `the_binary_hosts_census_reads_every_paired_star_as_the_engine_does` by name.
 
 #### P14.T2 Orbit additions
 
@@ -3269,8 +3269,8 @@ elements into elements at a time.
   both masses and the pair's mass-weighted specific angular momentum and energy. Its only draws are
   an ejection survivor's, on `planet.scatter`. _Slice:_ until P06.T19
   there is no kick law, so `SystemStars::natal_kick()` is `None` and T28.c applies a zero kick; the
-  kick changes output later, with P06.T19's bump. Until P11.T4 the companion's planets see the mass
-  loss as a single star's.
+  kick changes output later, with P06.T19's bump. Below 27 the companion's planets see the mass loss
+  as a single star's; from 27 a paired host is its pair's timeline's (P14.T28.g).
 - **P14.T28.d White dwarfs.** The pollution mark and the dusty disc of D11 on `belt.population`, the
   disc as a `DebrisDisc` body inside the white dwarf's Roche limit of about 1 R☉, present from the
   start of the white dwarf phase with a lifetime set by the cooling age.
@@ -3300,6 +3300,13 @@ planetary::system::tests::no_orbits_cross`.
   `valid_until` on an aligned 1-year step (a delegated decision, item 9). That step does not bound
   the drift (see "Risks and open points", the bullet on these two findings), and it was never
   built.
+- **P14.T28.g A paired host's fate from its pair's timeline** (research-binary-hosts R3–R5, held at
+  27). `FateHost::evolved` reads a paired star's mass and largest radius from its pair's timeline,
+  and the pair's common envelopes, mergers and supernovae replace its single-star deaths: a star's
+  planets are engulfed at its pair's envelope or merger, and a circumbinary planet takes the
+  sudden step, with the pair's recoil at a supernova, or is unbound with its pair.
+  - _Accept:_ `cargo test -p hyperion-sim --lib -- planetary::fate`, and the slow
+    `the_binary_hosts_census_reads_every_paired_star_as_the_engine_does` by name.
 
 #### P14.T29 Tidal and encounter stripping
 
@@ -9595,7 +9602,8 @@ it:
   abundances change with a version bump.
 - **Interacting binaries.** The golden set holds none, on purpose. From 27 the stage reads the
   binary engine's state of each star of a pair it ran (research-binary-hosts):
-  - its light and peak luminosity (P14.T1.e, `BINARY_HOST_LIGHT_VERSION`).
+  - its light and peak luminosity (P14.T1.e, `BINARY_HOST_LIGHT_VERSION`);
+  - its mass, largest radius and sudden events in the fate (P14.T28.g, `BINARY_HOST_FATE_VERSION`).
 - **Plan 05's spatial view** is unit-agnostic, which the orbit map needs, and its plane follows
   `scene.frame`, so a tilted plane is a frame and not a change to `PlaneSpec` (D21, T40.b). Its
   `LocalFrame` names its axes coreward, spinward and north; on the orbit map those names hold only
@@ -34242,3 +34250,14 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   (`census_tests::HOT_SMALL_SURVIVORS`, pinned by the slow
   `composition_census_under_every_27_hold_publishes_five_hot_small_bodies_past_1_gyr`). So
   P14.T55.b.a, their evaporation held at 28, is briefed, not built.
+- **P14.T28.g's paired fate, as built (lane `fix-binary-hosts`, 2026-11-02).** Held at 27
+  (`fate::BINARY_HOST_FATE_VERSION`; `BinaryHostFateRules::{SingleModels, Engine}`,
+  `with_binary_host_fate`, a line in `with_every_27_hold`). Nothing moves at 24, 25 or 26.
+  - _New items:_ `FateHost::evolved(ctx, zone)` (`fate_host` calls it) with its paired members
+    and `PairEvent`s; `BinaryTimeline::max_radius_until`; `SystemContext::pairs` is read here.
+  - _Leans (2026-11-02):_ a common envelope's loss is sudden; a pair unbound by a supernova or a
+    white dwarf's birth unbinds its circumbinary bodies; a coalesced pair's product explodes as a
+    single star, with its natal kick; a merger that keeps the pair's mass starts no new segment.
+  - _Left out:_ a paired star's mass is read at its f64 age, not split as `phase_and_mass_at`
+    splits a track's, and its drift breaks are its timeline's segment starts, not its paths' knots.
+  - _For 27's bump:_ delete what `the_binary_host_fate_is_held_only_until_the_27_bump` lists.
