@@ -166,6 +166,11 @@ export interface SeamRun {
   readonly selectedEvicted: number;
   /** Each demanded patch's time from its first demand to its residency, seconds. */
   readonly latenciesS: ReadonlyArray<number>;
+  /**
+   * Each patch made resident while demanded: its time from the start of that unbroken demand to
+   * its residency, seconds (R10.T16.i), so that a demand withdrawn and made again counts its last.
+   */
+  readonly spanLatenciesS: ReadonlyArray<number>;
   readonly frames: ReadonlyArray<SeamFrame>;
   readonly events: ReadonlyArray<SeamEvent>;
   readonly collapses: ReadonlyArray<SeamCollapse>;
@@ -194,6 +199,14 @@ export const FLIP_S = 1;
 /** A change of this many levels or more is a jump (the research's "changes of ≥ 3 levels"). */
 export const JUMP_LEVELS = 3;
 
+/** A run's latencies' percentiles and largest, seconds, `null` with none, and how many. */
+export interface SeamLatencies {
+  readonly p50: number | null;
+  readonly p95: number | null;
+  readonly max: number | null;
+  readonly count: number;
+}
+
 /** The probe's figures, which its acceptance bounds read. */
 export interface SeamSummary {
   /** The span measured, from the first frame to the last, seconds. */
@@ -207,12 +220,9 @@ export interface SeamSummary {
    */
   readonly holeFrames: number;
   /** Demand → resident, seconds; `null` with no residency. */
-  readonly demandToResidentS: {
-    readonly p50: number | null;
-    readonly p95: number | null;
-    readonly max: number | null;
-    readonly count: number;
-  };
+  readonly demandToResidentS: SeamLatencies;
+  /** Demand → resident over the demand's last unbroken span ({@link SeamRun.spanLatenciesS}). */
+  readonly demandSpanToResidentS: SeamLatencies;
   /**
    * Frames whose drawn ground collapsed: the drawn count below half the frame before's (of more
    * than 20) while the selection held at least half of its own ({@link isCollapse}).
@@ -347,6 +357,16 @@ function popsByCause(pops: ReadonlyArray<SeamPop>): Record<SeamPopCause, number>
   return counts;
 }
 
+/** `latencies`' percentiles and largest ({@link SeamLatencies}). */
+function latenciesOf(latencies: ReadonlyArray<number>): SeamLatencies {
+  return {
+    p50: percentile(latencies, 50),
+    p95: percentile(latencies, 95),
+    max: latencies.length === 0 ? null : maxOf(latencies),
+    count: latencies.length,
+  };
+}
+
 /** The figures of `run` ({@link SeamSummary}). */
 export function summariseSeamRun(run: SeamRun): SeamSummary {
   const { frames, events } = run;
@@ -395,12 +415,8 @@ export function summariseSeamRun(run: SeamRun): SeamSummary {
     standInFrames:
       frames.length === 0 ? 0 : frames.filter((f) => f.standingIn > 0).length / frames.length,
     holeFrames: frames.filter((f) => f.missing > 0 && f.drawn > 0).length,
-    demandToResidentS: {
-      p50: percentile(latencies, 50),
-      p95: percentile(latencies, 95),
-      max: latencies.length === 0 ? null : maxOf(latencies),
-      count: latencies.length,
-    },
+    demandToResidentS: latenciesOf(latencies),
+    demandSpanToResidentS: latenciesOf(run.spanLatenciesS),
     collapses,
     drawnHalvings,
     flickers,

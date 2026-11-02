@@ -1155,6 +1155,7 @@ async function play(options: ProbeOptions): Promise<Played> {
   const collapses: SeamCollapse[] = [];
   const trace: TraceEntry[] = [];
   const latenciesS: number[] = [];
+  const spanLatenciesS: number[] = [];
   const resident = new Map<string, Held>();
   // The bake each slot holds, an older bake's kept in its retired slot until the slot is reused.
   const slots = new Map<number, Held>();
@@ -1167,6 +1168,8 @@ async function play(options: ProbeOptions): Promise<Played> {
   // The camera the frame before drew from.
   let drawnCamera: FrameCamera | null = null;
   const firstDemandS = new Map<string, number>();
+  // Each demanded patch's start of its unbroken demand, for its residency's span latency.
+  const demandSinceS = new Map<string, number>();
   const rebaked: Array<{ readonly old: Held; readonly now: Held }> = [];
   let lastDrawn = new Map<string, DrawnArea>();
   let selectedResident = new Set<string>();
@@ -1208,10 +1211,20 @@ async function play(options: ProbeOptions): Promise<Played> {
           bands[2 * level + 1] = end;
         }
         latest.cam = { view, bands };
+        const demanded = new Set<string>();
         for (const request of selection.demand) {
           const keyString = patchKeyString(request.key);
+          demanded.add(keyString);
           if (!firstDemandS.has(keyString)) {
             firstDemandS.set(keyString, nowS);
+          }
+          if (!demandSinceS.has(keyString)) {
+            demandSinceS.set(keyString, nowS);
+          }
+        }
+        for (const keyString of demandSinceS.keys()) {
+          if (!demanded.has(keyString)) {
+            demandSinceS.delete(keyString);
           }
         }
         if (nowS >= TRACE_FROM_S && nowS <= TRACE_TO_S) {
@@ -1260,6 +1273,11 @@ async function play(options: ProbeOptions): Promise<Played> {
         if (askedS !== undefined) {
           latenciesS.push(nowS - askedS);
           firstDemandS.delete(keyString);
+        }
+        const sinceS = demandSinceS.get(keyString);
+        if (sinceS !== undefined) {
+          spanLatenciesS.push(nowS - sinceS);
+          demandSinceS.delete(keyString);
         }
       },
       onRefused: () => {
@@ -1495,6 +1513,7 @@ async function play(options: ProbeOptions): Promise<Played> {
       refusedBakes,
       selectedEvicted,
       latenciesS,
+      spanLatenciesS,
       frames,
       events,
       collapses,

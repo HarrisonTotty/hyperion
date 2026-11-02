@@ -53,6 +53,7 @@ function runOf(frames: SeamFrame[], events: SeamEvent[], more: Partial<SeamRun> 
     refusedBakes: 0,
     selectedEvicted: 0,
     latenciesS: [],
+    spanLatenciesS: [],
     frames,
     events,
     collapses: [],
@@ -111,7 +112,9 @@ describe("the seamless probe's summary", () => {
       eventAt(1.5, { kind: "appear", levelJump: 0, maxPx: -1, levelPx: -1, maxNormalDeg: -1 }),
       eventAt(2, { kind: "rebake", levelJump: 0, maxNormalDeg: 30 }),
     ];
-    const summary = summariseSeamRun(runOf(frames, events, { latenciesS: [1, 2, 3] }));
+    const summary = summariseSeamRun(
+      runOf(frames, events, { latenciesS: [1, 2, 30], spanLatenciesS: [1, 2, 0.5] }),
+    );
     expect(summary).toMatchObject({
       spanS: 2,
       frames: 3,
@@ -124,7 +127,8 @@ describe("the seamless probe's summary", () => {
       largestCoarsenLevelPx: 4,
       popsPerS: 1.5,
       refinesBelowHalfK: 1,
-      demandToResidentS: { p50: 2, p95: 3, max: 3, count: 3 },
+      demandToResidentS: { p50: 2, p95: 30, max: 30, count: 3 },
+      demandSpanToResidentS: { p50: 1, p95: 2, max: 2, count: 3 },
       normalJumpDeg: { max: 30 },
     });
     expect(summary.standInFrames).toBeCloseTo(1 / 3, 12);
