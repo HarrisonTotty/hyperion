@@ -1475,11 +1475,11 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.2247981361661768e-7,
+                  "effective_radius_m": 1.2247981361661778e-7,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 4171.409334093871,
-                "tau_550": 9816935.925339477,
+                "tau_550": 9816935.92533947,
                 "tau_basis": "sphere",
                 "base_pa": 999999999.9999993,
                 "top_pa": 2376312.8389387666,
@@ -1494,11 +1494,11 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.862624347107444e-7,
+                  "effective_radius_m": 1.862624347107466e-7,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 308.0975030700753,
-                "tau_550": 1264684.3737880592,
+                "tau_550": 1264684.373788049,
                 "tau_basis": "sphere",
                 "base_pa": 970517637.3453927,
                 "top_pa": 920143.2015283837,
@@ -1513,11 +1513,11 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.829762951106409e-7,
+                  "effective_radius_m": 1.8297629511063915e-7,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 3474.6283994497826,
-                "tau_550": 10794378.866373368,
+                "tau_550": 10794378.866373379,
                 "tau_basis": "sphere",
                 "base_pa": 884280998.9052861,
                 "top_pa": 832687.2746623612,
@@ -1532,11 +1532,11 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.9662348244432903e-7,
+                  "effective_radius_m": 1.9662348244432887e-7,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 45855.94069538409,
-                "tau_550": 134908255.10253927,
+                "tau_550": 134908255.10253936,
                 "tau_basis": "sphere",
                 "base_pa": 728032201.368191,
                 "top_pa": 648706.4151794605,
@@ -1568,11 +1568,11 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 2.0271673426939834e-7,
+                  "effective_radius_m": 2.027167342693976e-7,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 22473.707038813704,
-                "tau_550": 63374524.65129237,
+                "tau_550": 63374524.6512924,
                 "tau_basis": "sphere",
                 "base_pa": 481602892.04240966,
                 "top_pa": 435065.0703075627,
@@ -1587,11 +1587,11 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.7444089346336575e-7,
+                  "effective_radius_m": 1.7444089346336713e-7,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 96.60214594137496,
-                "tau_550": 259412.69401736872,
+                "tau_550": 259412.6940173668,
                 "tau_basis": "phase_table",
                 "base_pa": 247684271.03032634,
                 "top_pa": 10111585.934398549,
@@ -1606,11 +1606,11 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 2.7092286238252606e-7,
+                  "effective_radius_m": 2.7092286238252834e-7,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 105.15875432193933,
-                "tau_550": 362846.78041380714,
+                "tau_550": 362846.78041380463,
                 "tau_basis": "phase_table",
                 "base_pa": 98714609.25356174,
                 "top_pa": 3724640.294832248,
@@ -1625,11 +1625,11 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 2.747410746781268e-7,
+                  "effective_radius_m": 2.74741074678126e-7,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 5.078255387617501,
-                "tau_550": 13074.16728620527,
+                "tau_550": 13074.167286205291,
                 "tau_basis": "phase_table",
                 "base_pa": 38190023.649400406,
                 "top_pa": 1442235.377964425,
@@ -1644,11 +1644,11 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.928076452778832e-7,
+                  "effective_radius_m": 1.928076452778835e-7,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 1.99285930212408,
-                "tau_550": 5400.0741449164925,
+                "tau_550": 5400.074144916484,
                 "tau_basis": "sphere_fallback",
                 "base_pa": 31630404.459532235,
                 "top_pa": 1305156.6802906974,
@@ -1663,15 +1663,15 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 0.000028816897161321813,
+                  "effective_radius_m": 0.00002881689716132193,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 0.0323331168307826,
-                "tau_550": 1.7291286735758837,
+                "tau_550": 1.7291286735758769,
                 "tau_basis": "sphere",
                 "base_pa": 487260.56951421977,
                 "top_pa": 177089.48342126535,
-                "f_sed": 7132.201803528546,
+                "f_sed": 4.918486320580371,
                 "coverage": 1.0,
                 "temperature_k": 278.1627007020195
               },
@@ -1682,15 +1682,15 @@
                 "shape": "crystal",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 0.000010180706089884123,
+                  "effective_radius_m": 0.000010180706089884296,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 0.012038894088536756,
-                "tau_550": 1.595328332236391,
+                "tau_550": 1.5953283322363634,
                 "tau_basis": "sphere_fallback",
                 "base_pa": 212776.17069147376,
                 "top_pa": 112982.72578934742,
-                "f_sed": 954.3914206577477,
+                "f_sed": 11.830940211009988,
                 "coverage": 1.0,
                 "temperature_k": 215.76648711777005
               },
@@ -1701,15 +1701,15 @@
                 "shape": "crystal",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 8.259272489654469e-6,
+                  "effective_radius_m": 8.25927248965455e-6,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 0.010194596641747053,
-                "tau_550": 2.3941855246856822,
+                "tau_550": 2.3941855246856574,
                 "tau_basis": "sphere_fallback",
                 "base_pa": 64149.77329982213,
                 "top_pa": 10807.741278364832,
-                "f_sed": 367.8636081900273,
+                "f_sed": 5.646653275332412,
                 "coverage": 1.0,
                 "temperature_k": 149.15835454757962
               }
@@ -2213,14 +2213,14 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 7.296580398826573e-8,
+                  "effective_radius_m": 7.296580398826533e-8,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 5.766175224538273,
-                "tau_550": 9173.557715111458,
+                "column_mass_kg_m2": 5.670719494909922,
+                "tau_550": 9021.69471912449,
                 "tau_basis": "sphere_fallback",
                 "base_pa": 392369.52729903546,
-                "top_pa": 362.2731476951932,
+                "top_pa": 100000.0,
                 "f_sed": 2.0,
                 "coverage": 1.0,
                 "temperature_k": 2204.5788038494443
@@ -2232,14 +2232,14 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 7.054737624026263e-8,
+                  "effective_radius_m": 7.054737624026277e-8,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 0.4264838495665474,
-                "tau_550": 1485.1030736385696,
+                "column_mass_kg_m2": 0.41728914552882146,
+                "tau_550": 1453.0852534057447,
                 "tau_basis": "phase_table",
                 "base_pa": 359298.11537695536,
-                "top_pa": 344.62707784172375,
+                "top_pa": 100000.0,
                 "f_sed": 2.0,
                 "coverage": 1.0,
                 "temperature_k": 2148.535236761985
@@ -2251,14 +2251,14 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 5.3931728949491054e-8,
+                  "effective_radius_m": 5.3931728949490955e-8,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 43.592851550640574,
-                "tau_550": 118146.39183566406,
+                "column_mass_kg_m2": 41.99416503824199,
+                "tau_550": 113813.59330568422,
                 "tau_basis": "sphere",
                 "base_pa": 300988.3774151456,
-                "top_pa": 1882.343138101846,
+                "top_pa": 100000.0,
                 "f_sed": 2.0,
                 "coverage": 1.0,
                 "temperature_k": 2039.5777792063043
@@ -2270,14 +2270,14 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 6.26734670839426e-8,
+                  "effective_radius_m": 6.267346708394273e-8,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 49.77706812420489,
-                "tau_550": 80567.87248937857,
+                "column_mass_kg_m2": 45.17670678336659,
+                "tau_550": 73121.84684180774,
                 "tau_basis": "phase_table",
                 "base_pa": 221179.94797514466,
-                "top_pa": 659.5946257418727,
+                "top_pa": 100000.0,
                 "f_sed": 2.0,
                 "coverage": 1.0,
                 "temperature_k": 1883.2922757519689
@@ -2289,14 +2289,14 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 3.332639027634141e-8,
+                  "effective_radius_m": 3.332639027634131e-8,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 16.169154451284125,
-                "tau_550": 10795.850037418857,
+                "column_mass_kg_m2": 8.17554618932528,
+                "tau_550": 5458.663339500523,
                 "tau_basis": "phase_table",
                 "base_pa": 126468.2220648575,
-                "top_pa": 983.4925723505299,
+                "top_pa": 100000.0,
                 "f_sed": 2.0,
                 "coverage": 1.0,
                 "temperature_k": 1724.3526264809439
@@ -2308,16 +2308,16 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.3040872686633714e-8,
+                  "effective_radius_m": 1.3040872686633646e-8,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 0.028051940697740203,
-                "tau_550": 97.39730418969334,
+                "tau_550": 97.39730418969339,
                 "tau_basis": "phase_table",
                 "base_pa": 27541.944455503144,
                 "top_pa": 4861.239162480225,
-                "f_sed": 4.5,
-                "coverage": 1.0,
+                "f_sed": 3.4950838026962217,
+                "coverage": 0.0,
                 "temperature_k": 1520.5630104889915
               },
               {
@@ -2327,16 +2327,16 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 9.146199205585483e-9,
+                  "effective_radius_m": 9.146199205585498e-9,
                   "effective_variance": 0.6168066722416747
                 },
                 "column_mass_kg_m2": 0.0005625279340204681,
-                "tau_550": 0.17023615597054784,
+                "tau_550": 0.17023615597054997,
                 "tau_basis": "phase_table",
                 "base_pa": 7722.021638687886,
                 "top_pa": 5371.808003398927,
-                "f_sed": 4.5,
-                "coverage": 1.0,
+                "f_sed": 0.4881406493791829,
+                "coverage": 0.0,
                 "temperature_k": 1345.0943179412786
               }
             ],

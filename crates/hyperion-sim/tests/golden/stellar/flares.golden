@@ -1,4 +1,4 @@
-# generator_version = 25
+# generator_version = 26
 
 # the template
 profile at -0.5 half widths = 0x3fc8985045fb5e6e  # 0.1921482412060302
@@ -9,7 +9,7 @@ profile area (half widths) = 0x3ffcf5cb7a7f8e43  # 1.8100085053528268
 
 # a saturated M dwarf, 0.2 M☉ at 300 Myr, over three days
 phase at the epoch: MainSequence
-Rossby number at the epoch = 0x3fa25ce083450c28  # 0.035864845298896164
+Rossby number at the epoch = 0x3fa25ce083450c27  # 0.03586484529889616
 log L(X) / L(bol) at the epoch = 0xc0090a3d70a3d70a  # -3.13
 floor (J) = 0x44d95476770d7d30  # 4.7846889952153106e23
 listed rate (per s) = 0x3f185ac8c6ff89e6  # 9.290552566158065e-5
@@ -233,7 +233,7 @@ rate above E0 (per s) = 0x3eca7498461d5540  # 3.1537352222314188e-6
 
 # a Sun-like G dwarf, 1 M☉ at 4.57 Gyr, over three days
 phase at the epoch: MainSequence
-Rossby number at the epoch = 0x400008ee50cf086e  # 2.0043608010465084
+Rossby number at the epoch = 0x400008ee50cf086d  # 2.004360801046508
 log L(X) / L(bol) at the epoch = 0xc01959cada10159f  # -6.337687880737035
 floor (J) = 0x44d95476770d7d30  # 4.7846889952153106e23
 listed rate (per s) = 0x3e5db5e376d56bf1  # 2.7670061288547116e-8
@@ -241,7 +241,7 @@ rate above E0 (per s) = 0x3e1022fc2bcdb3aa  # 9.392772525163112e-10
 
 # the same G dwarf over a year
 phase at the epoch: MainSequence
-Rossby number at the epoch = 0x400008ee50cf086e  # 2.0043608010465084
+Rossby number at the epoch = 0x400008ee50cf086d  # 2.004360801046508
 log L(X) / L(bol) at the epoch = 0xc01959cada10159f  # -6.337687880737035
 floor (J) = 0x44d95476770d7d30  # 4.7846889952153106e23
 listed rate (per s) = 0x3e5db5e376d56bf1  # 2.7670061288547116e-8

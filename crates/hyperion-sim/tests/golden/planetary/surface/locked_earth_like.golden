@@ -1,12 +1,12 @@
-# generator_version = 25
+# generator_version = 26
 world locked_earth_like level 8 cells 393216 climate cells 98304 craters 1
 header body system 0 index 6
 header radius m = 0x41584dae00000000  # 6371000.0
 header figure equatorial radius m = 0x415854a60d61fde7  # 6378136.209105945
 header figure polar radius m = 0x41583fc3e1aa07d4  # 6356751.526002843
 header boundary diameter m = 0x40f4b7a97db7bb63  # 84858.5931927986
-header sea level m = 0xc06631e8686b36a0  # -177.55962010326493
-header lapse rate K m-1 = 0x3f77dfaa6489e490  # 0.0058285385099391546
+header sea level m = 0xc06513ddc92012e0  # -168.62082344307328
+header lapse rate K m-1 = 0x3f77e7a04497df7f  # 0.0058361301867008155
 header spectrum exponent = 0x4000000000000000  # 2.0
 header spectrum unit degree variance m2 = 0x41757d254fc94d14  # 22532692.986645773
 header spectrum break degree = 0x40d38bc58e10e572  # 20015.086796020572
@@ -22,11 +22,11 @@ header craters target density kg m-3 = 0x40a3ec0000000000  # 2550.0
 header craters system age Gyr = 0x4012449ba5e353f8  # 4.567
 header climate model 1 (LockedEnergyBalance)
 header precipitation 0 (Heuristic)
-header realised sigma_h m = 0x40a39c041894a12e  # 2510.0080000349762
-header realised relief m = 0x40d22f91d9d4263a  # 18622.278920209246
+header realised sigma_h m = 0x40a39c001ffbe0dd  # 2510.000244017791
+header realised relief m = 0x40d22f2c6e7071c8  # 18620.694240676035
 header months 1
 header season eccentricity = 0x0000000000000000  # 0.0
-header reference temperature K = 0x4072000000000000  # 288.0
+header reference temperature K = 0x406e5f0a3d70a3d7  # 242.97
 header temperature step 0
 header anomaly step 0
 header surface age Gyr = 0x3fb999999999999a  # 0.1
@@ -85,37 +85,37 @@ palette[3] liquid scattering m-1 digest = 0x1ca6874458ab08c6
 palette[3] liquid surface tension N m-1 = 0x3fb26ca03c4b09ea  # 0.07197
 palette[3] liquid viscosity Pa s = 0x3f4d29dc725c3dee  # 0.00089
 palette[3] FeO mass fraction none
-cells elevation_mm digest = 0xe630e5deb6f0e2b9
+cells elevation_mm digest = 0x6c95255888067eae
 cells boundary_distance_km digest = 0x3462f6b4defbae30
 cells plate digest = 0xfa0f272c8f8c8cf5
 cells crust digest = 0x37c0ea0fef9c6cf8
 cells boundary digest = 0x37dfeee3b1ae2a65
 cells boundary_obliquity digest = 0xea54fa78cc14b717
-cells flow digest = 0xe2b06f1a1410f0a0
-cells drainage digest = 0x98751ec5abd96d84
-cells steepness digest = 0x0c3c49b9e07be098
-cells runoff digest = 0xfb9205aec69685e7
-cells catchment_runoff digest = 0xbcc0fafae0918120
+cells flow digest = 0x9ed5ade3d4c1205d
+cells drainage digest = 0x7b5b71b7e736b63f
+cells steepness digest = 0x17555601c0fbe402
+cells runoff digest = 0x13d19d4e2a628549
+cells catchment_runoff digest = 0x5b42fd7a56a4c6d5
 cells epoch_incision digest = 0x3fe01b4acfe22325
-cells water_surface_mm digest = 0x4b7ed69dd2b6bc7a
-cells ice digest = 0xde7424378fc52a71
-cells substances digest = 0xa9768a7e9c04a8b3
-cells class digest = 0xb04626c2babdbfa5
-cells crater_state digest = 0x8630c108bc488b22
+cells water_surface_mm digest = 0x21de2260cd228036
+cells ice digest = 0xe5553b4c3d9678a0
+cells substances digest = 0x8c34b72cc7198d6a
+cells class digest = 0x0a7b3d1b69ebaace
+cells crater_state digest = 0xd0acb5eaf30ed8b4
 cells seafloor digest = 0xf8ccb8198c3e6d5f
-cells elevation mm min -10188410 max 8433869
+cells elevation mm min -10187758 max 8432936
 cells by crust Continental 159371 Oceanic 233845 Lid 0 Province 0
 cells by boundary Absent 0 Subduction 88036 Collision 46660 Divergent 135262 Transform 123258
-cells under water 285097
-cells with ice 18266
-cells by class 64:266186 65:5811 66:13100 67:5165 72:102954
-cells crater state min 1 median 1 max 108; at code 1 290262
+cells under water 286700
+cells with ice 18212
+cells by class 64:266995 65:7396 66:12309 67:5902 68:1 72:100613
+cells crater state min 1 median 1 max 108; at code 1 292602
 cells epoch incision NONE 393216 UNCUT 0 cut 0; cut codes none
-climate sea_level_temperature digest = 0xf778384958cb2c99
+climate sea_level_temperature digest = 0x42ab7871cb690f61
 climate month_anomaly digest = 0xdfc1881767622325
-climate month_precipitation digest = 0x110d043dbcb759ba
-climate wind azimuth digest = 0x0744e0fdea864250
-climate wind speed digest = 0x66509b6131a18f05
+climate month_precipitation digest = 0xde196e7156eb368d
+climate wind azimuth digest = 0x9f3bc583b99a59df
+climate wind speed digest = 0xcff117aaa9473825
 craters count 1
 craters centre digest = 0x675a8e3d75780303
 craters diameter digest = 0x3e8948b276faba2c
@@ -125,7 +125,7 @@ craters degradation digest = 0xa84d603227b1db41
 craters reach digest = 0xd7255b4a57a59d5c
 craters degradation min 10 max 10
 payload blocks 15 bytes 15141052 lengths 1048572,1048558,1048558,1048558,1048558,1048558,1048558,1048558,1048558,1048556,1048558,1048558,1048558,1048558,461228
-payload digest = 0xe46d63a41d99fbca
+payload digest = 0xaa01381b19296d43
 hypsometry land mode m = 0x405f400000000000  # 125.0
 hypsometry ocean modal bin m = 0xc0b1170000000000  # -4375.0
-hypsometry mean below -2 km m = 0xc0b0d8a41f17bf89  # -4312.641099437963
+hypsometry mean below -2 km m = 0xc0b0e0c113ee0080  # -4320.754210353014

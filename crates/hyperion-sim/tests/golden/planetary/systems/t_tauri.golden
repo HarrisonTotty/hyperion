@@ -1,4 +1,4 @@
-# generator_version = 25
+# generator_version = 26
 t_tauri 0x41fe2c960000000c: YoungThinDisc, 1 stars
 fe_h = 0xbfa279dd7c75657a  # -0.036086007540414536
 age_at_epoch_yr = 0x414b4d30ecc44e4c  # 3578465.849740779
@@ -9,7 +9,7 @@ luminosity_lsun = 0x3fe82910b67c8ba4  # 0.755012852114636
 teff_k = 0x40b0ebf5334c985a  # 4331.957814013667
 host Star(0): drawn TerrestrialOnly, placed TerrestrialOnly
 
-epoch: 35 bodies at UniverseTime { seconds: 0, nanos: 0 }
+epoch: 36 bodies at UniverseTime { seconds: 0, nanos: 0 }
 belts: [e100, e200, e300, e400]
 halo: none
 body 0100 A b: Planet about Some(Star(0)), NotYetFormed
@@ -104,6 +104,26 @@ bulk: NotApplicable
 moons: []
 rings: []
 population: NotApplicable
+surface: NotApplicable
+hooks: NotApplicable
+rotation: NotApplicable
+figure: NotApplicable
+photometry: NotApplicable
+envelope: NotApplicable
+body e000 DISC: ProtoplanetaryDisc about Some(Star(0)), Present
+mass_mearth = 0x4082d521f474c7a5  # 602.6415795443942
+orbit: NotApplicable
+position: none
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+protoplanetary disc about Star(0)
+inner_m = 0x420535bac48ff87a  # 11386968209.996326
+outer_m = 0x42a9fbf38ff2eb92  # 14284956891509.785
+snow_line_m = 0x425059f29c395b49  # 280914194661.42633
+characteristic_radius_m = 0x429152a25ff747b7  # 4761652297169.929
+gas_msun = 0x3f5d60bb3eb14846  # 0.0017930821002392224
+solid_mearth = 0x4016915516a9f4ef  # 5.6419261494859105
 surface: NotApplicable
 hooks: NotApplicable
 rotation: NotApplicable
@@ -503,7 +523,7 @@ figure: NotApplicable
 photometry: NotApplicable
 envelope: NotApplicable
 
-+H: 35 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
++H: 36 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
 belts: [e100, e200, e300, e400]
 halo: none
 body 0100 A b: Planet about Some(Star(0)), NotYetFormed
@@ -598,6 +618,26 @@ bulk: NotApplicable
 moons: []
 rings: []
 population: NotApplicable
+surface: NotApplicable
+hooks: NotApplicable
+rotation: NotApplicable
+figure: NotApplicable
+photometry: NotApplicable
+envelope: NotApplicable
+body e000 DISC: ProtoplanetaryDisc about Some(Star(0)), Present
+mass_mearth = 0x4082d521f474c7a5  # 602.6415795443942
+orbit: NotApplicable
+position: none
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+protoplanetary disc about Star(0)
+inner_m = 0x420535bac48ff87a  # 11386968209.996326
+outer_m = 0x42a9fbf38ff2eb92  # 14284956891509.785
+snow_line_m = 0x425059f29c395b49  # 280914194661.42633
+characteristic_radius_m = 0x429152a25ff747b7  # 4761652297169.929
+gas_msun = 0x3f5d60bb3eb14846  # 0.0017930821002392224
+solid_mearth = 0x4016915516a9f4ef  # 5.6419261494859105
 surface: NotApplicable
 hooks: NotApplicable
 rotation: NotApplicable

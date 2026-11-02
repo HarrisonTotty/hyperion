@@ -1,4 +1,4 @@
-# generator_version = 25
+# generator_version = 26
 3 0x3ff0000000000000 0x3ff0000000000000 12 Seabed 0
 2 0x3ff0000000000000 0x3ff0000000000000 3 Sand 1
 1 0x3ff0000000000000 0xbff0000000000000 12 Seabed 0
@@ -190,7 +190,7 @@
 2 0xbfcc3e7aa6ae04af 0x3fec65cb7f2b7621 2 Soil 1
 4 0xbfd54b9323725e2a 0xbfbf53e9cf5000cb 12 Seabed 1
 0 0x3fc59f1f0f1836ee 0x3fe543b98efd46cf 3 Sand 1
-4 0xbfd7f08c6c093c5f 0x3fcc5659f857f674 4 Sediment 1
+4 0xbfd7f08c6c093c5f 0x3fcc5659f857f674 3 Sand 1
 4 0xbfec8af9c3c8d6c9 0xbfe821a1221354da 12 Seabed 1
 0 0xbfe2e4de11b109f4 0x3fe289a39ae370cf 12 Seabed 0
 0 0x3fb8aa66e6c0521a 0x3fc9f99036c2846b 2 Soil 1
@@ -436,13 +436,13 @@
 2 0xbfee0d38b4b6d64f 0xbfe75fcfe3763a1b 2 Soil 1
 0 0x3fd3a46571503c67 0x3fe948476cba2604 2 Soil 1
 3 0x3fc63a51fcf03e9d 0xbfe8baac7661e70c 12 Seabed 0
-4 0xbfe86d6e26265837 0xbfee8c26fb085c54 4 Sediment 1
+4 0xbfe86d6e26265837 0xbfee8c26fb085c54 3 Sand 1
 4 0x3fe40f81bd1e2b8a 0x3feba7f24dc9878d 3 Sand 1
 1 0xbfe3aa833a5d3308 0x3fef4759b26b126d 0 Bedrock 1
 2 0x3fd1d59fbd58574d 0xbf9e8dcbbe72cd5e 9 SeaIce 2
 0 0xbfbf15f0c4f0ee3c 0x3fe5e46663bdf3e7 3 Sand 1
 4 0xbfe3520bcded2e97 0x3f9315c81fdbcdee 3 Sand 1
-0 0x3fe3d565e616fae7 0xbfe8ad730504edac 2 Soil 1
+0 0x3fe3d565e616fae7 0xbfe8ad730504edac 3 Sand 1
 5 0xbfd46c5d9967c01c 0xbfe05dd2cf9fcda4 12 Seabed 0
 1 0xbfe45bfc07c12f0c 0xbfe6d7887766c4ba 12 Seabed 0
 4 0xbfe1f62abfdb4016 0x3fe04fb03cd514b2 3 Sand 1
@@ -464,7 +464,7 @@
 5 0xbf94c411509bf63a 0x3faf95408792d55c 9 SeaIce 2
 3 0x3fe21b27eb6f3faf 0x3fd36d6102668116 12 Seabed 0
 0 0xbfcaf01d8e021d64 0x3fdf6f54921fe3ee 12 Seabed 0
-2 0x3fe357e86c65328f 0x3fe26fa44524912a 2 Soil 1
+2 0x3fe357e86c65328f 0x3fe26fa44524912a 4 Sediment 1
 4 0xbfececc07593ac4e 0xbfee388e8d58f8a8 3 Sand 1
 3 0xbfd2a3d6b1b5fe09 0xbfe75dcbe00c5b58 12 Seabed 0
 0 0x3fe390d2e4d85d02 0xbfcfe88e5d3be3f1 3 Sand 1
@@ -484,7 +484,7 @@
 5 0xbfe93a69394bfb4d 0x3fef16f7ca88602c 2 Soil 1
 3 0xbfcd1073fbc09f55 0x3fec6aedef456edb 12 Seabed 0
 4 0xbfe78bb3fa92f999 0x3fe0a6e251b5c322 3 Sand 1
-4 0xbfd609836a2231ba 0xbfe0264aaedd85cc 2 Soil 1
+4 0xbfd609836a2231ba 0xbfe0264aaedd85cc 4 Sediment 1
 2 0xbfda41662162d5bb 0xbfee03ef0e0155f2 8 Snow 2
 3 0xbfe21d35f91ba1fc 0xbfc43d607f9273d5 12 Seabed 0
 1 0xbfcf509ff6a65f5f 0xbfccfddadcad0338 12 Seabed 0
@@ -747,7 +747,7 @@
 2 0xbfc49220c52746ab 0xbf7606bdadaf756a 7 Glacier 2
 4 0x3fea85c806a515da 0xbfe19aa0cc14df2e 12 Seabed 0
 2 0xbfefdd6a2a26cce8 0xbfd21ff90c2d1700 2 Soil 1
-0 0xbf7399ece1dac2e1 0xbfb09e9bbe0b9888 2 Soil 1
+0 0xbf7399ece1dac2e1 0xbfb09e9bbe0b9888 0 Bedrock 1
 4 0xbfe5123cfb1093e0 0x3fc80b66960b5bc3 3 Sand 1
 0 0xbfeefd2fdb4867ba 0xbfe6c08638567d7a 3 Sand 1
 2 0x3fea6f976f317535 0x3fcf5d2720f7e449 12 Seabed 0
@@ -795,7 +795,7 @@
 2 0xbfd167d173a5cdc4 0xbfe4bbfc61244209 2 Soil 1
 0 0xbfe0de8d6842ac46 0x3fe6a5f41d471855 12 Seabed 0
 3 0xbfec056897533c5c 0xbfab4abfef8b7e7c 12 Seabed 0
-0 0x3fef44730b0dfd87 0x3fd7d68d7f063d52 2 Soil 1
+0 0x3fef44730b0dfd87 0x3fd7d68d7f063d52 0 Bedrock 1
 5 0xbfceb6eaa59029ab 0xbfe144452ff871dd 12 Seabed 0
 1 0xbfd8955c2d75a23b 0xbfe2888ef342c60b 12 Seabed 0
 0 0xbfec03231e3f3199 0xbfdd1656220b7793 3 Sand 1

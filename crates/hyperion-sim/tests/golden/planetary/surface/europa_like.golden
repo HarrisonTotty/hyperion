@@ -1,4 +1,4 @@
-# generator_version = 25
+# generator_version = 26
 world europa_like level 6 cells 24576 climate cells 6144 craters 0
 header body system 0 index 5
 header radius m = 0x4137d0e000000000  # 1560800.0
@@ -74,8 +74,8 @@ cells with ice 0
 cells by class 71:24576
 cells crater state min 122 median 122 max 122; at code 1 0
 cells epoch incision NONE 24576 UNCUT 0 cut 0; cut codes none
-climate sea_level_temperature digest = 0x1b2ea395ea1e6ccd
-climate month_anomaly digest = 0xc8a6df07fe4b2b2d
+climate sea_level_temperature digest = 0xade126af0bde6055
+climate month_anomaly digest = 0x08192183adee024d
 climate month_precipitation digest = 0x47e2fabfb2562325
 climate wind azimuth digest = 0x47e2fabfb2562325
 climate wind speed digest = 0x47e2fabfb2562325
@@ -88,4 +88,4 @@ craters degradation digest = 0xcbf29ce484222325
 craters reach digest = 0xcbf29ce484222325
 craters degradation none
 payload blocks 1 bytes 946495 lengths 946495
-payload digest = 0xe45eeaeacf9b2d3d
+payload digest = 0x9658087d808c9305

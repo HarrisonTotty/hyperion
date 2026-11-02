@@ -1,4 +1,4 @@
-# generator_version = 25
+# generator_version = 26
 pair 17367 to 1.3787e10 yr: 12.1799 + 10.2325 M☉, P 36708.1 d, e 0.769, 10 segments
   segment 0: Detached, Protostar | Protostar
   segment 0 start, yr = 0x0000000000000000  # 0.0
@@ -456,8 +456,8 @@ pair 68325 to 1.3787e10 yr: 17.5461 + 10.2541 M☉, P 12119.9 d, e 0.500, 10 seg
   segment 9 end, yr = 0x4209ae2766000000  # 13787000000.0
   segment 9 primary, M☉ = 0x4012aadae74100c7  # 4.666850674955817
   segment 9 secondary, M☉ = 0x3ff899326f63d6a4  # 1.537401614300884
-  segment 9 axis, m = 0x422a6a35d75d723e  # 56725531566.72313
-  segment 9 e = 0x3fea5937feb229cb  # 0.8233909582643774
+  segment 9 axis, m = 0x422a53c6638cfc9d  # 56537330118.493385
+  segment 9 e = 0x3fea53e8b8a9e88b  # 0.8227428061211567
   supernova 0: Primary into a BlackHole, bound true
   supernova 0 age, yr = 0x416897162c4b969b  # 12892337.384227088
   supernova 0 remnant, M☉ = 0x4012a9330b8b592c  # 4.66523378408446
@@ -471,13 +471,13 @@ pair 68325 to 1.3787e10 yr: 17.5461 + 10.2541 M☉, P 12119.9 d, e 0.500, 10 seg
   supernova 1: Secondary into a NeutronStar, bound true
   supernova 1 age, yr = 0x417aec18ddc2b52a  # 28230029.860036053
   supernova 1 remnant, M☉ = 0x3ff899326f63d6a4  # 1.537401614300884
-  supernova 1 kick, m/s = 0x41046f988eda95e4  # 167411.06975285627
-  supernova 1 velocity 0.0, m/s = 0xc0e0c91fe608c581  # -34376.99683035445
-  supernova 1 velocity 0.1, m/s = 0x40e7e7935b5cf844  # 48956.60490272989
-  supernova 1 velocity 0.2, m/s = 0x40c8c7d8c11e101f  # 12687.693393476364
-  supernova 1 velocity 1.0, m/s = 0xc0e0c91fe608c581  # -34376.99683035445
-  supernova 1 velocity 1.1, m/s = 0x40e7e7935b5cf844  # 48956.60490272989
-  supernova 1 velocity 1.2, m/s = 0x40c8c7d8c11e101f  # 12687.693393476364
+  supernova 1 kick, m/s = 0x41046b044c2b053f  # 167264.53719143008
+  supernova 1 velocity 0.0, m/s = 0xc0e0c892c67366a6  # -34372.586724949346
+  supernova 1 velocity 0.1, m/s = 0x40e7e50b941d778d  # 48936.36183045721
+  supernova 1 velocity 0.2, m/s = 0x40c8b8efd214e043  # 12657.873598680022
+  supernova 1 velocity 1.0, m/s = 0xc0e0c892c67366a6  # -34372.586724949346
+  supernova 1 velocity 1.1, m/s = 0x40e7e50b941d778d  # 48936.36183045721
+  supernova 1 velocity 1.2, m/s = 0x40c8b8efd214e043  # 12657.873598680022
 pair 80075 to 1.3787e10 yr: 9.9362 + 3.1952 M☉, P 46176.9 d, e 0.465, 8 segments
   segment 0: Detached, Protostar | Protostar
   segment 0 start, yr = 0x0000000000000000  # 0.0
@@ -560,10 +560,10 @@ pair 2 to 1.3787e10 yr: 8.5073 + 0.7123 M☉, P 10942063.4 d, e 0.941, 2 segment
   supernova 0: Primary into a NeutronStar, bound false
   supernova 0 age, yr = 0x41818f390fa769d8  # 36824865.95674485
   supernova 0 remnant, M☉ = 0x3ff30cc81500861f  # 1.1906205006020014
-  supernova 0 kick, m/s = 0x40f8f51ab54d4aa4  # 102225.6692631641
-  supernova 0 velocity 0.0, m/s = 0x40ecf3fc6864b748  # 59295.887743337604
-  supernova 0 velocity 0.1, m/s = 0x40f3dd8e30c12fc5  # 81368.8869029871
-  supernova 0 velocity 0.2, m/s = 0xc0d16119a6321722  # -17796.40076877841
+  supernova 0 kick, m/s = 0x40f8f1026ef478ef  # 102160.1520886158
+  supernova 0 velocity 0.0, m/s = 0x40ecef3e4d8faf5b  # 59257.9469679284
+  supernova 0 velocity 0.1, m/s = 0x40f3da4b74a54c77  # 81316.71597795362
+  supernova 0 velocity 0.2, m/s = 0xc0d15e3c9927f861  # -17784.94684790855
   supernova 0 velocity 1.0, m/s = 0xc090e7544beda5a2  # -1081.8323208935112
   supernova 0 velocity 1.1, m/s = 0x4076c609776fec3e  # 364.37731116981365
   supernova 0 velocity 1.2, m/s = 0xc08a0d5773cade22  # -833.667701325325
@@ -608,10 +608,10 @@ pair 9 to 1.3787e10 yr: 11.8955 + 2.1411 M☉, P 36761.0 d, e 0.370, 2 segments
   supernova 0: Primary into a NeutronStar, bound false
   supernova 0 age, yr = 0x4172c9673632fc92  # 19699315.3874479
   supernova 0 remnant, M☉ = 0x3ff8360e2164e85e  # 1.5131970695934096
-  supernova 0 kick, m/s = 0x40e79f119ba6dc33  # 48376.55025046356
-  supernova 0 velocity 0.0, m/s = 0x40e392d7d22c50ee  # 40086.7444058972
-  supernova 0 velocity 0.1, m/s = 0xc0b60640095e41b5  # -5638.250142947237
-  supernova 0 velocity 0.2, m/s = 0x40d54fa47c9cfae8  # 21822.570105786348
+  supernova 0 kick, m/s = 0x40e79d25508d80a0  # 48361.16608309862
+  supernova 0 velocity 0.0, m/s = 0x40e39127bb1ac781  # 40073.24158991781
+  supernova 0 velocity 0.1, m/s = 0xc0b60427a6e869a3  # -5636.154890561857
+  supernova 0 velocity 0.2, m/s = 0x40d54de022a9f8de  # 21815.502115719828
   supernova 0 velocity 1.0, m/s = 0x40c5e2dd9a016951  # 11205.731262375282
   supernova 0 velocity 1.1, m/s = 0xc0b1868f948b507a  # -4486.560860354564
   supernova 0 velocity 1.2, m/s = 0x409dbd7905309d71  # 1903.3681838604064
@@ -632,10 +632,10 @@ pair 10 to 1.3787e10 yr: 8.8771 + 0.1481 M☉, P 697381.7 d, e 0.782, 2 segments
   supernova 0: Primary into a NeutronStar, bound false
   supernova 0 age, yr = 0x4180fba183afea29  # 35615792.460895844
   supernova 0 remnant, M☉ = 0x3ff3951c6416dafc  # 1.2239040288674792
-  supernova 0 kick, m/s = 0x41032e89b608d2e6  # 157137.2138840176
-  supernova 0 velocity 0.0, m/s = 0xc10102c0c84f5de5  # -139352.0978076301
-  supernova 0 velocity 0.1, m/s = 0xc0d3345be944747b  # -19665.43611251235
-  supernova 0 velocity 0.2, m/s = 0x40f112601a8766e2  # 69926.00647678555
+  supernova 0 kick, m/s = 0x41032a54d3f7670f  # 157002.6034992267
+  supernova 0 velocity 0.0, m/s = 0xc100ff05cf891b22  # -139232.72633572767
+  supernova 0 velocity 0.1, m/s = 0xc0d33027503e5998  # -19648.614272677893
+  supernova 0 velocity 0.2, m/s = 0x40f10ea1c7dab3d0  # 69866.11129255523
   supernova 0 velocity 1.0, m/s = 0x406d4f819088ade2  # 234.48456598944819
   supernova 0 velocity 1.1, m/s = 0x409a114d85be34e0  # 1668.3257055015347
   supernova 0 velocity 1.2, m/s = 0xc07b4e51c2ae6a87  # -436.8949610531931
@@ -656,10 +656,10 @@ pair 12 to 1.3787e10 yr: 22.7680 + 4.1595 M☉, P 54548943.6 d, e 0.887, 2 segme
   supernova 0: Primary into a NeutronStar, bound false
   supernova 0 age, yr = 0x41612a84bc306141  # 8999973.88090575
   supernova 0 remnant, M☉ = 0x3ffcc94e925e5494  # 1.799147197486751
-  supernova 0 kick, m/s = 0x412c78419128b300  # 932896.7835136354
-  supernova 0 velocity 0.0, m/s = 0x41278507a2d5fcef  # 770691.818038849
-  supernova 0 velocity 0.1, m/s = 0x410817d0704d479f  # 197370.05483489946
-  supernova 0 velocity 0.2, m/s = 0x411dbdbf9bf6504e  # 487279.90230679966
+  supernova 0 kick, m/s = 0x412c675197cb867f  # 930728.7964746504
+  supernova 0 velocity 0.0, m/s = 0x41277709ab4db072  # 768900.8345770969
+  supernova 0 velocity 0.1, m/s = 0x4108097c54ca4768  # 196911.54140144144
+  supernova 0 velocity 0.2, m/s = 0x411dac0e0aa178d7  # 486147.5103815919
   supernova 0 velocity 1.0, m/s = 0xc04ef2d4a0261435  # -61.89711381778071
   supernova 0 velocity 1.1, m/s = 0xc0689c4aa9bb5fa6  # -196.8841141376153
   supernova 0 velocity 1.2, m/s = 0xc02ec8c667b1e3aa  # -15.392138710465435
@@ -680,10 +680,10 @@ pair 16 to 1.3787e10 yr: 11.7957 + 2.6160 M☉, P 169133.1 d, e 0.328, 2 segment
   supernova 0: Primary into a NeutronStar, bound false
   supernova 0 age, yr = 0x417458dc23277462  # 21335490.197132476
   supernova 0 remnant, M☉ = 0x3ff956f5047acdd5  # 1.5837297606457146
-  supernova 0 kick, m/s = 0x41104c9a028404a0  # 267046.50245673396
-  supernova 0 velocity 0.0, m/s = 0xc0eb9680a05b2525  # -56500.01957471137
-  supernova 0 velocity 0.1, m/s = 0x40f53bea4eb9bf0d  # 86974.64422011022
-  supernova 0 velocity 0.2, m/s = 0x410e03a53c83061d  # 245876.65454678322
+  supernova 0 kick, m/s = 0x411046cb2c753e76  # 266674.7934160003
+  supernova 0 velocity 0.0, m/s = 0xc0eb8c58392ecc5d  # -56418.75698032298
+  supernova 0 velocity 0.1, m/s = 0x40f53464167a663a  # 86854.25548782284
+  supernova 0 velocity 0.2, m/s = 0x410df8f3fd8b0261  # 245534.49880029543
   supernova 0 velocity 1.0, m/s = 0xc0be71fc0d13486b  # -7793.984574513607
   supernova 0 velocity 1.1, m/s = 0xc09f52b4330865b7  # -2004.6759759246904
   supernova 0 velocity 1.2, m/s = 0xc07013a39cc84393  # -257.22744444110975
@@ -752,10 +752,10 @@ pair 20 to 1.3787e10 yr: 8.4272 + 3.4137 M☉, P 38105915.0 d, e 0.895, 2 segmen
   supernova 0: Primary into a NeutronStar, bound false
   supernova 0 age, yr = 0x4182cb0c3b0c02c6  # 39412103.380864665
   supernova 0 remnant, M☉ = 0x3ff320be7c6c23c7  # 1.1954941616297547
-  supernova 0 kick, m/s = 0x4108735e1289801a  # 200299.7590513237
-  supernova 0 velocity 0.0, m/s = 0xc0fb2721999e67b6  # -111218.10000458252
-  supernova 0 velocity 0.1, m/s = 0x41039c8c00e60960  # 160657.50043876003
-  supernova 0 velocity 0.2, m/s = 0xc0e58584d1ef7183  # -44076.150626870825
+  supernova 0 kick, m/s = 0x41086cd89acb891a  # 200091.07558352576
+  supernova 0 velocity 0.0, m/s = 0xc0fb1fe54a237005  # -111102.33060020216
+  supernova 0 velocity 0.1, m/s = 0x41039750ae165964  # 160490.08500356518
+  supernova 0 velocity 0.2, m/s = 0xc0e57fc40495f52d  # -44030.12555978666
   supernova 0 velocity 1.0, m/s = 0x406deb7f531e7676  # 239.3592925639129
   supernova 0 velocity 1.1, m/s = 0x40534cd6a6f4a260  # 77.20060132875506
   supernova 0 velocity 1.2, m/s = 0xc06dfe3ecc611f5c  # -239.94516581506002
@@ -784,6 +784,30 @@ pair 23 to 1.3787e10 yr: 20.7575 + 0.4838 M☉, P 33609437.4 d, e 0.877, 2 segme
   supernova 0 velocity 1.0, m/s = 0xc029dbdaf0dd3afd  # -12.929404761319796
   supernova 0 velocity 1.1, m/s = 0xc032f37354823410  # -18.950978547847683
   supernova 0 velocity 1.2, m/s = 0xc023bd358cd0e923  # -9.869549179555696
+pair 26 to 1.3787e10 yr: 124.7151 + 5.3544 M☉, P 69058.5 d, e 0.495, 2 segments
+  segment 0: Detached, Protostar | Protostar
+  segment 0 start, yr = 0x0000000000000000  # 0.0
+  segment 0 end, yr = 0x414bf875983e6505  # 3666155.1894041323
+  segment 0 primary, M☉ = 0x3f50624dd2f1a9fc  # 0.001
+  segment 0 secondary, M☉ = 0x3f50624dd2f1a9fc  # 0.001
+  segment 0 axis, m = 0x42b6b57c54662319  # 24968730797603.098
+  segment 0 e = 0x3fdfa8531781efd6  # 0.4946487168851922
+  segment 1: Disrupted { by: Primary }, BlackHole | MainSequence
+  segment 1 start, yr = 0x414bf875983e6505  # 3666155.1894041323
+  segment 1 end, yr = 0x4209ae2766000000  # 13787000000.0
+  segment 1 primary, M☉ = 0x401224e50b7d7795  # 4.536029986889749
+  segment 1 secondary, M☉ = 0x40156aa85c029a79  # 5.354157865198993
+  segment 1: unbound
+  supernova 0: Primary into a BlackHole, bound false
+  supernova 0 age, yr = 0x414bf875983e6505  # 3666155.1894041323
+  supernova 0 remnant, M☉ = 0x401224e50b7d7795  # 4.536029986889749
+  supernova 0 kick, m/s = 0x40e6de2a08b1fd6b  # 46833.313561434705
+  supernova 0 velocity 0.0, m/s = 0xc0cc26a3ecab7cc5  # -14413.280660091326
+  supernova 0 velocity 0.1, m/s = 0x40e002250e30f876  # 32785.15798233535
+  supernova 0 velocity 0.2, m/s = 0xc0ddce496beea9d0  # -30521.14721266349
+  supernova 0 velocity 1.0, m/s = 0xc07fcef6f5179797  # -508.9352923318451
+  supernova 0 velocity 1.1, m/s = 0x404fa3713c81b80f  # 63.276893199290605
+  supernova 0 velocity 1.2, m/s = 0x408ad0168423f878  # 858.0109942255212
 pair 28 to 1.3787e10 yr: 9.0000 + 3.1427 M☉, P 1227726017.7 d, e 0.841, 2 segments
   segment 0: Detached, Protostar | Protostar
   segment 0 start, yr = 0x0000000000000000  # 0.0
@@ -850,10 +874,10 @@ pair 31 to 1.3787e10 yr: 10.7315 + 1.9864 M☉, P 104185297.2 d, e 0.572, 2 segm
   supernova 0: Primary into a NeutronStar, bound false
   supernova 0 age, yr = 0x417870bed28893fa  # 25627629.158344246
   supernova 0 remnant, M☉ = 0x3ff73a67f59d982a  # 1.4517592996940132
-  supernova 0 kick, m/s = 0x4110cdeea79d7ffc  # 275323.6636867521
-  supernova 0 velocity 0.0, m/s = 0x41015b937ed7630c  # 142194.4369342554
-  supernova 0 velocity 0.1, m/s = 0xc109018e5972aff3  # -204849.79367577992
-  supernova 0 velocity 0.2, m/s = 0xc0fc71a795f2751b  # -116506.47410817856
+  supernova 0 kick, m/s = 0x4110c7af33c84d3f  # 274923.800568778
+  supernova 0 velocity 0.0, m/s = 0x4101551fa12872f7  # 141987.95369043175
+  supernova 0 velocity 0.1, m/s = 0xc108f840f88c370d  # -204552.12136118897
+  supernova 0 velocity 0.2, m/s = 0xc0fc67138c19ac73  # -116337.22170417178
   supernova 0 velocity 1.0, m/s = 0xc05b68bea934cc1e  # -109.63663702159872
   supernova 0 velocity 1.1, m/s = 0xc081b21f698552ca  # -566.2653379836931
   supernova 0 velocity 1.2, m/s = 0xc0640712a562d52d  # -160.2210261278464
@@ -874,61 +898,38 @@ pair 32 to 1.3787e10 yr: 12.9767 + 0.3597 M☉, P 196593.7 d, e 0.539, 2 segment
   supernova 0: Primary into a NeutronStar, bound false
   supernova 0 age, yr = 0x4172ad9e4bd4fea1  # 19585508.739500646
   supernova 0 remnant, M☉ = 0x3ff67a104b6c912d  # 1.404800696015694
-  supernova 0 kick, m/s = 0x41215cf5319f4eac  # 568954.5969185433
-  supernova 0 velocity 0.0, m/s = 0xc0fa3cb623741b16  # -107467.383655649
-  supernova 0 velocity 0.1, m/s = 0xc1116201e139fafd  # -284800.46994774026
-  supernova 0 velocity 0.2, m/s = 0x411d55e98b8d9998  # 480634.38628234854
+  supernova 0 kick, m/s = 0x41214db7690fefca  # 567003.7051997122
+  supernova 0 velocity 0.0, m/s = 0xc0fa25a72ab4fe4e  # -107098.44792651499
+  supernova 0 velocity 0.1, m/s = 0xc11152c14df8fd5c  # -283824.32614513277
+  supernova 0 velocity 0.2, m/s = 0x411d3c283488dd45  # 478986.051303346
   supernova 0 velocity 1.0, m/s = 0xc0b174c033456d8a  # -4468.750782336467
   supernova 0 velocity 1.1, m/s = 0x40b044127f59e58e  # 4164.072255724472
   supernova 0 velocity 1.2, m/s = 0x40a6995b5ab7acc3  # 2892.678426494445
-pair 46 to 1.3787e10 yr: 15.7305 + 1.1197 M☉, P 27180834.8 d, e 0.796, 2 segments
+pair 36 to 1.3787e10 yr: 102.1593 + 4.8314 M☉, P 8081458.8 d, e 0.895, 2 segments
   segment 0: Detached, Protostar | Protostar
   segment 0 start, yr = 0x0000000000000000  # 0.0
-  segment 0 end, yr = 0x416c7f7c2522c225  # 14941153.160492966
+  segment 0 end, yr = 0x414cb57a7613b5d6  # 3762932.9224765105
   segment 0 primary, M☉ = 0x3f50624dd2f1a9fc  # 0.001
   segment 0 secondary, M☉ = 0x3f50624dd2f1a9fc  # 0.001
-  segment 0 axis, m = 0x430348f94ef6015f  # 678532520788011.9
-  segment 0 e = 0x3fe97791d8fed3dc  # 0.7958459127609063
-  segment 1: Disrupted { by: Primary }, BlackHole | PreMainSequence
-  segment 1 start, yr = 0x416c7f7c2522c225  # 14941153.160492966
+  segment 0 axis, m = 0x42ffd0f37d01c0b9  # 559716779432971.56
+  segment 0 e = 0x3feca7cad3d28922  # 0.8954824578434322
+  segment 1: Detached, BlackHole | MainSequence
+  segment 1 start, yr = 0x414cb57a7613b5d6  # 3762932.9224765105
   segment 1 end, yr = 0x4209ae2766000000  # 13787000000.0
-  segment 1 primary, M☉ = 0x400a5d896b5a930f  # 3.2956722628608826
-  segment 1 secondary, M☉ = 0x3ff1ea6e0ac42441  # 1.1197338505319439
-  segment 1: unbound
-  supernova 0: Primary into a BlackHole, bound false
-  supernova 0 age, yr = 0x416c7f7c2522c225  # 14941153.160492966
-  supernova 0 remnant, M☉ = 0x400a5d896b5a930f  # 3.2956722628608826
-  supernova 0 kick, m/s = 0x40f6dcef69ca0015  # 93646.96332740814
-  supernova 0 velocity 0.0, m/s = 0x40eb3405ebbf9426  # 55712.18502787528
-  supernova 0 velocity 0.1, m/s = 0xc0f2380454741bdc  # -74624.2706185425
-  supernova 0 velocity 0.2, m/s = 0xc0c3f19434c447d1  # -10211.157860312525
-  supernova 0 velocity 1.0, m/s = 0x40860088dba20c3d  # 704.0668251667008
-  supernova 0 velocity 1.1, m/s = 0x4094e06ec9d0a991  # 1336.108191738462
-  supernova 0 velocity 1.2, m/s = 0xc091fbd7af35d9ab  # -1150.960629311953
-pair 51 to 1.3787e10 yr: 10.9298 + 2.4636 M☉, P 32327.1 d, e 0.229, 2 segments
-  segment 0: Detached, Protostar | Protostar
-  segment 0 start, yr = 0x0000000000000000  # 0.0
-  segment 0 end, yr = 0x41783c70123990f8  # 25413377.13905427
-  segment 0 primary, M☉ = 0x3f50624dd2f1a9fc  # 0.001
-  segment 0 secondary, M☉ = 0x3f50624dd2f1a9fc  # 0.001
-  segment 0 axis, m = 0x4299ab0c3d79c55e  # 7055608864369.342
-  segment 0 e = 0x3fcd40c46c733f43  # 0.22853904052180427
-  segment 1: Disrupted { by: Primary }, NeutronStar | MainSequence
-  segment 1 start, yr = 0x41783c70123990f8  # 25413377.13905427
-  segment 1 end, yr = 0x4209ae2766000000  # 13787000000.0
-  segment 1 primary, M☉ = 0x3ffacf0239bab898  # 1.675539231782329
-  segment 1 secondary, M☉ = 0x4003b580ef46a1dc  # 2.463624829619432
-  segment 1: unbound
-  supernova 0: Primary into a NeutronStar, bound false
-  supernova 0 age, yr = 0x41783c70123990f8  # 25413377.13905427
-  supernova 0 remnant, M☉ = 0x3ffacf0239bab898  # 1.675539231782329
-  supernova 0 kick, m/s = 0x4101ba8fa232969e  # 145233.95419805212
-  supernova 0 velocity 0.0, m/s = 0x40f60b4a9b240d16  # 90292.6628761779
-  supernova 0 velocity 0.1, m/s = 0x40f255ac9cdbb45b  # 75098.78829546405
-  supernova 0 velocity 0.2, m/s = 0xc0f4c5476fb72cb2  # -85076.46477429828
-  supernova 0 velocity 1.0, m/s = 0x40c264c37e6270c0  # 9417.527294449857
-  supernova 0 velocity 1.1, m/s = 0xc0b989c7bb2d0928  # -6537.780199827896
-  supernova 0 velocity 1.2, m/s = 0x40a651d4ed9c02b7  # 2856.9158753159822
+  segment 1 primary, M☉ = 0x40442211bb3f6a58  # 40.26616612049537
+  segment 1 secondary, M☉ = 0x4013536077463143  # 4.831422675761419
+  segment 1 axis, m = 0x4312ded30789d35b  # 1327886881682646.8
+  segment 1 e = 0x3feca7cad3d28922  # 0.8954824578434322
+  supernova 0: Primary into a BlackHole, bound true
+  supernova 0 age, yr = 0x414cb57a7613b5d6  # 3762932.9224765105
+  supernova 0 remnant, M☉ = 0x40442211bb3f6a58  # 40.26616612049537
+  supernova 0 kick, m/s = 0x0000000000000000  # 0.0
+  supernova 0 velocity 0.0, m/s = 0x0000000000000000  # 0.0
+  supernova 0 velocity 0.1, m/s = 0x3d16b4d0fa2214ac  # 2.0167257852340403e-14
+  supernova 0 velocity 0.2, m/s = 0x0000000000000000  # 0.0
+  supernova 0 velocity 1.0, m/s = 0x0000000000000000  # 0.0
+  supernova 0 velocity 1.1, m/s = 0x3d16b4d0fa2214ac  # 2.0167257852340403e-14
+  supernova 0 velocity 1.2, m/s = 0x0000000000000000  # 0.0
 pair 35928 to 6.0000e7 yr: 8.3032 + 5.8848 M☉, P 56572.6 d, e 0.471, 2 segments
   segment 0: Detached, Protostar | Protostar
   segment 0 start, yr = 0x0000000000000000  # 0.0

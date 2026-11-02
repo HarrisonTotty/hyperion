@@ -1,4 +1,4 @@
-# generator_version = 25
+# generator_version = 26
 cloud.tracers 300 300
 cloud.mass = 0x40d3880000000002  # 20000.000000000007
 cloud.trailing.mass = 0x40c3880000000002  # 10000.000000000004
@@ -17,15 +17,15 @@ cloud.noise.511 = 0x3ff663db97cc7a8e  # 1.3993793420446852
 epoch.tracers 1000 1000
 epoch.mass = 0x40e3e509fa884360  # 40744.311832553474
 epoch.trailing.mass = 0x40d3e509fa884360  # 20372.155916276737
-epoch.span.low = 0xbf62fb1cc3c85900  # -0.0023170053302791205
-epoch.span.high = 0x3f62381ebb119e00  # 0.0022240257463186364
-epoch.knots.digest = 0xb62408845e306014
-epoch.trailing.first.psi = 0xbf62fb1cc3c85900  # -0.0023170053302791205
+epoch.span.low = 0xbf62fb1eef9271c0  # -0.0023170093741795295
+epoch.span.high = 0x3f623821394b24c0  # 0.002224030390014592
+epoch.knots.digest = 0x14fc9c30b1b9bbf0
+epoch.trailing.first.psi = 0xbf62fb1eef9271c0  # -0.0023170093741795295
 epoch.trailing.last.psi = 0x0000000000000000  # 0.0
 epoch.leading.first.psi = 0x0000000000000000  # 0.0
-epoch.leading.last.psi = 0x3f62381ebb119e00  # 0.0022240257463186364
+epoch.leading.last.psi = 0x3f623821394b24c0  # 0.002224030390014592
 epoch.along_cells 1024
-epoch.noise.0 = 0x3ff3cb941d21a2f3  # 1.2372017991967226
-epoch.noise.341 = 0x3fe2be5b5ff27eff  # 0.5857369302720769
-epoch.noise.512 = 0x3fe9b72a0bf6a435  # 0.8036089166317938
-epoch.noise.1023 = 0x3ff74199606a1286  # 1.4535154119668348
+epoch.noise.0 = 0x3ff3cb9ff68f959a  # 1.2372130996021498
+epoch.noise.341 = 0x3fe2be57512951b0  # 0.5857349953826567
+epoch.noise.512 = 0x3fe9b71e37203bb5  # 0.8036032749822569
+epoch.noise.1023 = 0x3ff74197c059f9e9  # 1.4535138620118409

@@ -1,8 +1,8 @@
-# generator_version = 25
+# generator_version = 26
 rate inside a window (per s) = 0x3d873a44e964ccdc  # 2.6406739845024123e-12
 
 # a 60 M☉ star of solar composition ten years past its window, 40 series
-window from T-51854750020.209938050 s to T-315576000.000000000 s
+window from T-42933862846.714492798 s to T-315576000.000000000 s
 bound of the start bin (per s) = 0x3d873a44e964ccdc  # 2.6406739845024123e-12
 bound of the end bin (per s) = 0x3d873a44e964ccdc  # 2.6406739845024123e-12
 0200080020000000.0000:0107fffffffff300 at T-40578032261.582765905 s
@@ -10,316 +10,239 @@ bound of the end bin (per s) = 0x3d873a44e964ccdc  # 2.6406739845024123e-12
   peak luminosity (L☉) = 0x415f86097c1307e1  # 8263717.938661546
   rise +20456941.611334361 s
   duration +81827766.445337444 s
-  quiescent luminosity (L☉) = 0x4125abf951ccc471  # 710140.6597653759
-  peak factor = 0x40274601feaf12e9  # 11.636733969565698
-  factor at half the rise = 0x400b4a45b1a235cd  # 3.4112657430293667
-  factor at the peak = 0x40274601feaf12e9  # 11.636733969565698
-  factor at half the decline = 0x400b4a45b1a235cd  # 3.4112657430293667
-  factor at a day before the end = 0x3ff00e2d293e6cb1  # 1.0034610377395377
+  quiescent luminosity (L☉) = 0x4125ba12ee4935d0  # 711945.4654022995
+  peak factor = 0x402736e76f5961cf  # 11.607234458599946
+  factor at half the rise = 0x400b416951db6186  # 3.4069391627382997
+  factor at the peak = 0x402736e76f5961cf  # 11.607234458599946
+  factor at half the decline = 0x400b416951db6186  # 3.4069391627382997
+  factor at a day before the end = 0x3ff00e2966afff20  # 1.0034574519376704
 0200080020000000.0004:0107fffffffff500 at T-32080040450.550056409 s
   ejected mass (M☉) = 0x400aae0d167c72b7  # 3.3349859005669162
   peak luminosity (L☉) = 0x414f6bfd2bb28486  # 4118522.341385427
   rise +9345821.912371767 s
   duration +37383287.649487070 s
-  quiescent luminosity (L☉) = 0x41259e932ed0e59a  # 708425.5914375067
-  peak factor = 0x401741278235ebc5  # 5.813627275982928
-  factor at half the rise = 0x40034a07286a78e5  # 2.4111464650624037
-  factor at the peak = 0x401741278235ebc5  # 5.813627275982928
-  factor at half the decline = 0x40034a07286a78e8  # 2.411146465062405
-  factor at a day before the end = 0x3ff016472c02ea17  # 1.0054389685816483
+  quiescent luminosity (L☉) = 0x4125aca41396778f  # 710226.0382573473
+  peak factor = 0x4017321019377fbd  # 5.7988895359157455
+  factor at half the rise = 0x400343c3d41f3b3f  # 2.4080883571654392
+  factor at the peak = 0x4017321019377fbd  # 5.7988895359157455
+  factor at half the decline = 0x400343c3d41f3b41  # 2.40808835716544
+  factor at a day before the end = 0x3ff0163eecefbc47  # 1.0054311042147377
 0200080020000000.0005:0107fffffffffb00 at T-13481325030.319631181 s
   ejected mass (M☉) = 0x4014db582aa5de50  # 5.214203516362957
   peak luminosity (L☉) = 0x414a5b5c03d8a873  # 3454648.0300493776
   rise +105274428.840293884 s
   duration +421097715.361175537 s
-  quiescent luminosity (L☉) = 0x4125815cdc157395  # 704686.4298511619
-  peak factor = 0x40139c0c3e90aa4a  # 4.902390458659804
-  factor at half the rise = 0x4001b68c03f724e0  # 2.214134245853174
-  factor at the peak = 0x40139c0c3e90aa4a  # 4.902390458659804
-  factor at half the decline = 0x4001b68c03f724e0  # 2.214134245853174
-  factor at a day before the end = 0x3ff001c820680dc8  # 1.0004349962117534
+  quiescent luminosity (L☉) = 0x41258f5abe4f1619  # 706477.3716971307
+  peak factor = 0x40138f526508cf75  # 4.889962748205893
+  factor at half the rise = 0x4001b0cbb1b5a4cd  # 2.2113260158117556
+  factor at the peak = 0x40138f526508cf75  # 4.889962748205893
+  factor at half the decline = 0x4001b0cbb1b5a4cd  # 2.2113260158117556
+  factor at a day before the end = 0x3ff001c765ed2642  # 1.0004343015192636
 0200080020000000.000c:0107fffffffff600 at T-31556027783.158930366 s
   ejected mass (M☉) = 0x3ff369db6c7e644a  # 1.2133440244708873
   peak luminosity (L☉) = 0x417358d4eab7f27b  # 20286798.66990898
   rise +98631001.014214038 s
   duration +394524004.056856155 s
-  quiescent luminosity (L☉) = 0x41259dbff0fa96bc  # 708319.9706618409
-  peak factor = 0x403ca406a9a0b5a3  # 28.640726663337443
-  factor at half the rise = 0x40156824df3914eb  # 5.351703155383102
-  factor at the peak = 0x403ca406a9a0b5a3  # 28.640726663337443
-  factor at half the decline = 0x40156824df3914eb  # 5.351703155383102
-  factor at a day before the end = 0x3ff00403b0aaedb8  # 1.00098008166138
-0200080020000000.000e:0107fffffffff000 at T-47672747520.341185234 s
-  ejected mass (M☉) = 0x40226ed18803ccb7  # 9.216442347015215
-  peak luminosity (L☉) = 0x414d61fb121d53a7  # 3851254.141519982
-  rise +144080837.954482406 s
-  duration +576323351.817929625 s
-  quiescent luminosity (L☉) = 0x4125b72f6567a111  # 711575.6980562528
-  peak factor = 0x4015a62f6399a9a6  # 5.412290149930788
-  factor at half the rise = 0x40029c88dd67c806  # 2.326432924012809
-  factor at the peak = 0x4015a62f6399a9a6  # 5.412290149930788
-  factor at half the decline = 0x40029c88dd67c807  # 2.3264329240128094
-  factor at a day before the end = 0x3ff00162005554ff  # 1.000337601949752
+  quiescent luminosity (L☉) = 0x4125abd04c4fdd82  # 710120.1490468236
+  peak factor = 0x403c917068775e2d  # 28.568121461050556
+  factor at half the rise = 0x4015613185de12c1  # 5.344915477446819
+  factor at the peak = 0x403c917068775e2d  # 28.568121461050556
+  factor at half the decline = 0x4015613185de12c1  # 5.344915477446819
+  factor at a day before the end = 0x3ff00402e984afc1  # 1.0009793397721156
 0200080020000000.0010:0107fffffffffc00 at T-10991812978.369764322 s
   ejected mass (M☉) = 0x3ff98ab9c0502fe4  # 1.596368552421148
   peak luminosity (L☉) = 0x4177f3350e97ae2b  # 25113424.912031334
   rise +17563014.437817305 s
   duration +70252057.751269221 s
-  quiescent luminosity (L☉) = 0x41257d76db358c14  # 704187.4281429076
-  peak factor = 0x4041d4dca80ae1d1  # 35.662983899415515
-  factor at half the rise = 0x4017e32c7596d417  # 5.97184928639492
-  factor at the peak = 0x4041d4dca80ae1d1  # 35.662983899415515
-  factor at half the decline = 0x4017e32c7596d417  # 5.97184928639492
-  factor at a day before the end = 0x3ff018139b6cd1c6  # 1.005878073815539
+  quiescent luminosity (L☉) = 0x41258b72334aae10  # 705977.1001791377
+  peak factor = 0x4041c94a35da410d  # 35.57257722050608
+  factor at half the rise = 0x4017db6aed263fae  # 5.964275079211729
+  factor at the peak = 0x4041c94a35da410d  # 35.57257722050608
+  factor at half the decline = 0x4017db6aed263fae  # 5.964275079211729
+  factor at a day before the end = 0x3ff0180f37910a18  # 1.005873887116314
 0200080020000000.0013:0107fffffffff900 at T-21784242165.925564274 s
   ejected mass (M☉) = 0x3feac5f020bdadcc  # 0.8366623534652091
   peak luminosity (L☉) = 0x41565cd09e70f983  # 5862210.475645426
   rise +22626236.624349635 s
   duration +90504946.497398540 s
-  quiescent luminosity (L☉) = 0x41258e62797ea5d7  # 706353.2372943711
-  peak factor = 0x40209938d96e6e88  # 8.299261851053657
-  factor at half the rise = 0x40070bf7e9625476  # 2.8808439477093613
-  factor at the peak = 0x40209938d96e6e88  # 8.299261851053657
-  factor at half the decline = 0x40070bf7e9625478  # 2.880843947709362
-  factor at a day before the end = 0x3ff00b0c3b46a5ab  # 1.0026972117869757
+  quiescent luminosity (L☉) = 0x41259c68d57e7b09  # 708148.4169805954
+  peak factor = 0x40208e733cf88b30  # 8.278222947444732
+  factor at half the rise = 0x4007047c40043e42  # 2.87719011319112
+  factor at the peak = 0x40208e733cf88b30  # 8.278222947444732
+  factor at half the decline = 0x4007047c40043e44  # 2.877190113191121
+  factor at a day before the end = 0x3ff00b08d5aad664  # 1.002693972242377
 0200080020000000.0020:0107fffffffff700 at T-26143097596.589948187 s
   ejected mass (M☉) = 0x3fd0a722072de460  # 0.2602009840116519
   peak luminosity (L☉) = 0x414fea230ae2cb18  # 4183110.0850461833
   rise +87963262.137581467 s
   duration +351853048.550325870 s
-  quiescent luminosity (L☉) = 0x4125953bb4f4136a  # 707229.8534246508
-  peak factor = 0x4017a8bc7e4981d2  # 5.914781544910925
-  factor at half the rise = 0x400374cd65c724e7  # 2.4320323897742244
-  factor at the peak = 0x4017a8bc7e4981d2  # 5.914781544910925
-  factor at half the decline = 0x400374cd65c724e7  # 2.4320323897742244
-  factor at a day before the end = 0x3ff0026266ea6d40  # 1.0005821247239766
+  quiescent luminosity (L☉) = 0x4125a34685c03688  # 709027.2612320939
+  peak factor = 0x40179961dca4d55d  # 5.899787375984798
+  factor at half the rise = 0x40036e7c2e10b164  # 2.4289477919430045
+  factor at the peak = 0x40179961dca4d55d  # 5.899787375984798
+  factor at half the decline = 0x40036e7c2e10b164  # 2.4289477919430045
+  factor at a day before the end = 0x3ff0026187b40c65  # 1.000581293192931
 0200080020000000.0026:0107fffffffffd00 at T-7482872096.849242686 s
   ejected mass (M☉) = 0x3fc30ebb1535a069  # 0.14888704810732925
   peak luminosity (L☉) = 0x417966d8b1e8f05f  # 26635659.11936986
   rise +13005958.485747657 s
   duration +52023833.942990630 s
-  quiescent luminosity (L☉) = 0x412577f9618673fc  # 703484.6904789205
-  peak factor = 0x4042ee6500fafd27  # 37.86245739226643
-  factor at half the rise = 0x40189cecf7cace3d  # 6.153247710946343
-  factor at the peak = 0x4042ee6500fafd27  # 37.86245739226643
-  factor at half the decline = 0x40189cecf7cace3f  # 6.153247710946345
-  factor at a day before the end = 0x3ff02117dbf1749d  # 1.008079394486493
+  quiescent luminosity (L☉) = 0x412585f123a9442e  # 705272.5696507746
+  peak factor = 0x4042e21bdd48b4bd  # 37.76647535371874
+  factor at half the rise = 0x401894ef218f8526  # 6.145443462738774
+  factor at the peak = 0x4042e21bdd48b4bd  # 37.76647535371874
+  factor at half the decline = 0x401894ef218f8527  # 6.145443462738775
+  factor at a day before the end = 0x3ff02111eafd879c  # 1.0080737284956518
 
 # a 150 M☉ star of solar composition ten years past its window, the first 100,000 years of its window, one series
-window from T-23212188194420.878906250 s to T-315576000.000000000 s
+window from T-15759336172651.757812500 s to T-315576000.000000000 s
 bound of the start bin (per s) = 0x3d873a44e964ccdc  # 2.6406739845024123e-12
 bound of the end bin (per s) = 0x3d873a44e964ccdc  # 2.6406739845024123e-12
-0200080020000000.0028:0107ffffffe34500 at T-23209273730199.400841774 s
-  ejected mass (M☉) = 0x401a0effcacb61ef  # 6.514647644675718
-  peak luminosity (L☉) = 0x415473108dd2a55a  # 5360706.215981806
-  rise +74652879.750559166 s
-  duration +298611519.002236664 s
-  quiescent luminosity (L☉) = 0x4143767959682d77  # 2551026.698491748
-  peak factor = 0x4000cfa66d93b2a8  # 2.101391655034906
-  factor at half the rise = 0x3ff731a264e334f2  # 1.449617761699582
-  factor at the peak = 0x4000cfa66d93b2a8  # 2.101391655034906
-  factor at half the decline = 0x3ff731a264e334f2  # 1.449617761699582
-  factor at a day before the end = 0x3ff0012c718c7e6b  # 1.0002865252971798
-0200080020000000.0028:0107ffffffe34a00 at T-23194301990795.467622792 s
-  ejected mass (M☉) = 0x3ff1c0dea52987c6  # 1.1095873309754878
-  peak luminosity (L☉) = 0x416788e553f15b57  # 12338986.6232125
-  rise +148814732.207480847 s
-  duration +595258928.829923391 s
-  quiescent luminosity (L☉) = 0x414376bb1ef52649  # 2551158.2418563706
-  peak factor = 0x401358b349bf6953  # 4.836621429736925
-  factor at half the rise = 0x40019806f39a52d1  # 2.199232009074287
-  factor at the peak = 0x401358b349bf6953  # 4.836621429736925
-  factor at half the decline = 0x40019806f39a52d1  # 2.199232009074287
-  factor at a day before the end = 0x3ff0013fe919defb  # 1.000305090476046
-0200080020000000.0028:0107ffffffe3e600 at T-22699934710015.246904012 s
-  ejected mass (M☉) = 0x3fddad83859a8eda  # 0.4637154392932935
-  peak luminosity (L☉) = 0x4176699df745a30c  # 23501279.454501197
-  rise +14251232.624457048 s
-  duration +57004930.497828193 s
-  quiescent luminosity (L☉) = 0x41437f58fafeaf53  # 2555569.960897365
-  peak factor = 0x40226467596d51d9  # 9.196100992769901
-  factor at half the rise = 0x400842933a4f9b8c  # 3.0325073771995843
-  factor at the peak = 0x40226467596d51d9  # 9.196100992769901
-  factor at half the decline = 0x400842933a4f9b8c  # 3.0325073771995843
-  factor at a day before the end = 0x3ff012683f8c5907  # 1.0044939501145238
-0200080020000000.0028:0107ffffffe58500 at T-21390307536722.221238735 s
-  ejected mass (M☉) = 0x3fc65c36bf09f678  # 0.1746891434485638
-  peak luminosity (L☉) = 0x41651de8f2562fc6  # 11071303.573020827
-  rise +35454621.985820494 s
-  duration +141818487.943281978 s
-  quiescent luminosity (L☉) = 0x414390ca8c1f347d  # 2564501.094702302
-  peak factor = 0x401144bfaa3f211e  # 4.31713739404975
-  factor at half the rise = 0x40009f470a8926d9  # 2.077772219000377
-  factor at the peak = 0x401144bfaa3f211e  # 4.31713739404975
-  factor at half the decline = 0x40009f470a8926d9  # 2.077772219000377
-  factor at a day before the end = 0x3ff004de865684da  # 1.0011887786461586
-0200080020000000.0028:0107ffffffe5c100 at T-21201823043834.449578133 s
-  ejected mass (M☉) = 0x400f0d15d721708c  # 3.881389313419339
-  peak luminosity (L☉) = 0x415ee521f7953d2c  # 8098951.868483823
-  rise +67623395.099284902 s
-  duration +270493580.397139608 s
-  quiescent luminosity (L☉) = 0x414391c638050d42  # 2565004.4376541683
-  peak factor = 0x40094285367e62ed  # 3.1574806458778455
-  factor at half the rise = 0x3ffc6e4e46a0c4fb  # 1.776930118456504
-  factor at the peak = 0x40094285367e62ed  # 3.1574806458778455
-  factor at half the decline = 0x3ffc6e4e46a0c4fb  # 1.776930118456504
-  factor at a day before the end = 0x3ff0020196644a30  # 1.0004897951772698
-0200080020000000.0028:0107ffffffe5d000 at T-21154127968093.743576124 s
-  ejected mass (M☉) = 0x3fd019b1720ee40b  # 0.25156818521969687
-  peak luminosity (L☉) = 0x4163168a5107dd33  # 10007634.532209968
-  rise +59698536.370933249 s
-  duration +238794145.483732998 s
-  quiescent luminosity (L☉) = 0x414391ef2dc6d0ef  # 2565086.3576298873
-  peak factor = 0x400f363b6f32641a  # 3.901480549550354
-  factor at half the rise = 0x3fff9a7cb4246a17  # 1.9752165829473876
-  factor at the peak = 0x400f363b6f32641a  # 3.901480549550354
-  factor at half the decline = 0x3fff9a7cb4246a16  # 1.9752165829473873
-  factor at a day before the end = 0x3ff002b0e1143df0  # 1.0006569664145637
-0200080020000000.0028:0107ffffffe65c00 at T-20712602943802.340758865 s
-  ejected mass (M☉) = 0x401ef9dfe287bba7  # 7.744018115553366
-  peak luminosity (L☉) = 0x415f4e0e0d9761b6  # 8206392.212364605
-  rise +40905134.822718404 s
-  duration +163620539.290873616 s
-  quiescent luminosity (L☉) = 0x41439179d8a882fb  # 2564851.692642567
-  peak factor = 0x400998b1f5745ab6  # 3.199558179486611
-  factor at half the rise = 0x3ffc9ea446d0f97d  # 1.7887308851491917
-  factor at the peak = 0x400998b1f5745ab6  # 3.199558179486611
-  factor at half the decline = 0x3ffc9ea446d0f97e  # 1.7887308851491919
-  factor at a day before the end = 0x3ff0035af7befc59  # 1.0008191754893885
-0200080020000000.0028:0107ffffffe6ad00 at T-20457573953656.049496317 s
-  ejected mass (M☉) = 0x3fc775af0987f85a  # 0.18327892270457619
-  peak luminosity (L☉) = 0x4160651e58597ce7  # 8595698.760923816
-  rise +8555747.038221295 s
-  duration +34222988.152885183 s
-  quiescent luminosity (L☉) = 0x41438f711f7531f9  # 2563810.245764014
-  peak factor = 0x400ad256dcb9eb0a  # 3.3527047390210827
-  factor at half the rise = 0x3ffd4befd051c5e0  # 1.8310392510869562
-  factor at the peak = 0x400ad256dcb9eb0a  # 3.3527047390210827
-  factor at half the decline = 0x3ffd4befd051c5e3  # 1.8310392510869569
-  factor at a day before the end = 0x3ff010b6ca1fee25  # 1.0040805716988725
+0200080020000000.0028:0107ffffffecb800 at T-15574859422653.131376623 s
+  ejected mass (M☉) = 0x3ff419a535a92774  # 1.2562610717891092
+  peak luminosity (L☉) = 0x4150f56bd1f54a0e  # 4445615.280596269
+  rise +26955068.606911391 s
+  duration +107820274.427645564 s
+  quiescent luminosity (L☉) = 0x4143799ee985fe9a  # 2552637.8244016888
+  peak factor = 0x3ffbdd7fd38eb0ab  # 1.741576982875851
+  factor at half the rise = 0x3ff51d7163931c5f  # 1.3196882142672377
+  factor at the peak = 0x3ffbdd7fd38eb0ab  # 1.741576982875851
+  factor at half the decline = 0x3ff51d7163931c5f  # 1.3196882142672377
+  factor at a day before the end = 0x3ff0026dbde9ece0  # 1.0005929392344157
+0200080020000000.0028:0107ffffffed0600 at T-15328726001433.398569398 s
+  ejected mass (M☉) = 0x3fc70551741607b9  # 0.17984979789986058
+  peak luminosity (L☉) = 0x417513adba9d5c6a  # 22100699.66341821
+  rise +24876428.130663089 s
+  duration +99505712.522652357 s
+  quiescent luminosity (L☉) = 0x41437dedbf8992c0  # 2554843.496385902
+  peak factor = 0x40214d0fab76bf6c  # 8.650510175939154
+  factor at half the rise = 0x40078786bd7ae662  # 2.9411749652033885
+  factor at the peak = 0x40214d0fab76bf6c  # 8.650510175939154
+  factor at half the decline = 0x40078786bd7ae664  # 2.9411749652033894
+  factor at a day before the end = 0x3ff00a3e8951b8ae  # 1.002501045611591
+0200080020000000.0028:0107ffffffedbc00 at T-14756203547607.029829656 s
+  ejected mass (M☉) = 0x3fdf1c1c236a96a0  # 0.4860906930792712
+  peak luminosity (L☉) = 0x416deb45e0a692d5  # 15686191.020333687
+  rise +10390563.916368953 s
+  duration +41562255.665475815 s
+  quiescent luminosity (L☉) = 0x4143876b14c42379  # 2559702.162235674
+  peak factor = 0x40188334dc1dc35a  # 6.128131331745715
+  factor at half the rise = 0x4003cdd63c43c28a  # 2.475506277864331
+  factor at the peak = 0x40188334dc1dc35a  # 6.128131331745715
+  factor at half the decline = 0x4003cdd63c43c28c  # 2.4755062778643318
+  factor at a day before the end = 0x3ff014a237bbddcd  # 1.0050375153640403
+0200080020000000.0028:0107ffffffedd100 at T-14688576172247.507634129 s
+  ejected mass (M☉) = 0x4012655612c5edc3  # 4.598961156206715
+  peak luminosity (L☉) = 0x41729e296fca25c9  # 19522198.98685244
+  rise +31152047.462288644 s
+  duration +124608189.849154576 s
+  quiescent luminosity (L☉) = 0x4143886e46a311a4  # 2560220.551851468
+  peak factor = 0x401e8034f6fd759a  # 7.625202044696744
+  factor at half the rise = 0x4006174cbd6d6106  # 2.7613768385891744
+  factor at the peak = 0x401e8034f6fd759a  # 7.625202044696744
+  factor at half the decline = 0x4006174cbd6d6106  # 2.7613768385891744
+  factor at a day before the end = 0x3ff007b328c47160  # 1.0018798439478687
+0200080020000000.0028:0107ffffffedea00 at T-14609790360391.815858845 s
+  ejected mass (M☉) = 0x3ff903b4b188aa80  # 1.5634047446170882
+  peak luminosity (L☉) = 0x4161172ed2440849  # 8960374.570804732
+  rise +69327721.973940312 s
+  duration +277310887.895761251 s
+  quiescent luminosity (L☉) = 0x414389918622ce4c  # 2560803.04793719
+  peak factor = 0x400bfe0d3e695213  # 3.4990486980334565
+  factor at half the rise = 0x3ffdeddf7416d62a  # 1.8705744299635492
+  factor at the peak = 0x400bfe0d3e695213  # 3.4990486980334565
+  factor at half the decline = 0x3ffdeddf7416d62a  # 1.8705744299635492
+  factor at a day before the end = 0x3ff00221b95d66dd  # 1.0005204430403218
+0200080020000000.0028:0107ffffffee4200 at T-14331729363472.872198401 s
+  ejected mass (M☉) = 0x40113f9134733718  # 4.312077350170306
+  peak luminosity (L☉) = 0x417a7c239a1459ba  # 27771449.629968382
+  rise +77488761.733237802 s
+  duration +309955046.932951211 s
+  quiescent luminosity (L☉) = 0x41438d2848cf1013  # 2562640.568819055
+  peak factor = 0x4025ac911575774e  # 10.837044401730648
+  factor at half the rise = 0x400a55f29bf23f35  # 3.291966646509446
+  factor at the peak = 0x4025ac911575774e  # 10.837044401730648
+  factor at half the decline = 0x400a55f29bf23f35  # 3.291966646509446
+  factor at a day before the end = 0x3ff003a11acbf8a9  # 1.0008860632656627
+0200080020000000.0028:0107ffffffee5300 at T-14278707410272.349850528 s
+  ejected mass (M☉) = 0x3fbff18369657325  # 0.1247789509120137
+  peak luminosity (L☉) = 0x415340b6c52cff8a  # 5047003.080871472
+  rise +24879839.459294978 s
+  duration +99519357.837179914 s
+  quiescent luminosity (L☉) = 0x41438dc140b16b9f  # 2562946.5054144408
+  peak factor = 0x3fff81ebd578672d  # 1.9692190493282837
+  factor at half the rise = 0x3ff673dece030a49  # 1.403288655027284
+  factor at the peak = 0x3fff81ebd578672d  # 1.9692190493282837
+  factor at half the decline = 0x3ff673dece030a49  # 1.403288655027284
+  factor at a day before the end = 0x3ff00336d58afa8a  # 1.0007847157973253
+0200080020000000.0028:0107ffffffeeb900 at T-13956745310554.951127809 s
+  ejected mass (M☉) = 0x3fe876006a2706f9  # 0.7644044945993463
+  peak luminosity (L☉) = 0x417cc1605158c4e7  # 30152197.084172156
+  rise +9576583.915712067 s
+  duration +38306335.662848271 s
+  quiescent luminosity (L☉) = 0x414390a920f5f33f  # 2564434.257505804
+  peak factor = 0x402784030ff89285  # 11.757835864156059
+  factor at half the rise = 0x400b6e87de96297e  # 3.428970087964614
+  factor at the peak = 0x402784030ff89285  # 11.757835864156059
+  factor at half the decline = 0x400b6e87de962980  # 3.4289700879646148
+  factor at a day before the end = 0x3ff01e78899207b0  # 1.0074391721577562
+0200080020000000.0028:0107ffffffeed000 at T-13884850918057.846373913 s
+  ejected mass (M☉) = 0x40146a044f568864  # 5.103532066017667
+  peak luminosity (L☉) = 0x416d5cab79f97cf5  # 15394139.811705092
+  rise +49554269.232397444 s
+  duration +198217076.929589778 s
+  quiescent luminosity (L☉) = 0x4143911ea9ff4232  # 2564669.3281023735
+  peak factor = 0x40180271f099b861  # 6.002387771017397
+  factor at half the rise = 0x4003998d977acd9e  # 2.44997709601894
+  factor at the peak = 0x40180271f099b861  # 6.002387771017397
+  factor at half the decline = 0x4003998d977acd9e  # 2.44997709601894
+  factor at a day before the end = 0x3ff00444bb6388dc  # 1.0010421104312206
+0200080020000000.0028:0107ffffffeee100 at T-13828731234398.063391289 s
+  ejected mass (M☉) = 0x3fd62dff10a500af  # 0.3465573942703583
+  peak luminosity (L☉) = 0x415dbef0c1d9b935  # 7797699.028913786
+  rise +10000651.104568520 s
+  duration +40002604.418274082 s
+  quiescent luminosity (L☉) = 0x4143916cc1be416b  # 2564825.5136186383
+  peak factor = 0x4008526c31415be7  # 3.04024542313299
+  factor at half the rise = 0x3ffbe5e8864f1462  # 1.7436299559060662
+  factor at the peak = 0x4008526c31415be7  # 3.04024542313299
+  factor at half the decline = 0x3ffbe5e8864f1462  # 1.7436299559060662
+  factor at a day before the end = 0x3ff00d231aab9f0c  # 1.0032073060810403
+0200080020000000.0028:0107ffffffef2b00 at T-13597965286496.429167738 s
+  ejected mass (M☉) = 0x3fe4a6881bec2b89  # 0.645328573738298
+  peak luminosity (L☉) = 0x4178e4fb24ce2e14  # 26103730.300336912
+  rise +38685042.557430334 s
+  duration +154740170.229721337 s
+  quiescent luminosity (L☉) = 0x414392263c6791b9  # 2565196.471910682
+  peak factor = 0x40245a2b8a876bfd  # 10.176113442450509
+  factor at half the rise = 0x4009851fd31cbc93  # 3.190002106966469
+  factor at the peak = 0x40245a2b8a876bfd  # 10.176113442450509
+  factor at half the decline = 0x4009851fd31cbc93  # 3.190002106966469
+  factor at a day before the end = 0x3ff00714ad64264d  # 1.0017287037939184
+0200080020000000.0028:0107ffffffef6500 at T-13415119722810.859269449 s
+  ejected mass (M☉) = 0x3fcd28f5df491097  # 0.22781251337631112
+  peak luminosity (L☉) = 0x417a7be0357b70a9  # 27770371.342636738
+  rise +41734739.008400917 s
+  duration +166938956.033603668 s
+  quiescent luminosity (L☉) = 0x4143920f82fa6401  # 2565151.023266316
+  peak factor = 0x4025a6ebd752e3fc  # 10.826018074863889
+  factor at half the rise = 0x400a528457f42d8b  # 3.2902914878265554
+  factor at the peak = 0x4025a6ebd752e3fc  # 10.826018074863889
+  factor at half the decline = 0x400a528457f42d8b  # 3.2902914878265554
+  factor at a day before the end = 0x3ff006bcfb916ba0  # 1.0016450716854948
+0200080020000000.0028:0107ffffffeff200 at T-12967910252395.855082889 s
+  ejected mass (M☉) = 0x3fe23ff5af95bfdf  # 0.5703075818437319
+  peak luminosity (L☉) = 0x4171ebb4abbbe9a0  # 18791242.7333771
+  rise +34766558.552557721 s
+  duration +139066234.210230886 s
+  quiescent luminosity (L☉) = 0x41438f06fec17271  # 2563597.990278535
+  peak factor = 0x401d51f29f89bb72  # 7.330027096539981
+  factor at half the rise = 0x4005a8c286934a18  # 2.707402278299252
+  factor at the peak = 0x401d51f29f89bb72  # 7.330027096539981
+  factor at half the decline = 0x4005a8c286934a18  # 2.707402278299252
+  factor at a day before the end = 0x3ff006c3b46fb7e1  # 1.0016514824196678
 
 # a 60 M☉ star at [Fe/H] = −1 ten years past its window, the first 100,000 years of its window, one series
-window from T-6720220023033.944335938 s to T-315576000.000000000 s
+window from T-35174015052.919448853 s to T-315576000.000000000 s
 bound of the start bin (per s) = 0x3d873a44e964ccdc  # 2.6406739845024123e-12
 bound of the end bin (per s) = 0x3d873a44e964ccdc  # 2.6406739845024123e-12
-0200080020000000.002a:0107fffffff7c500 at T-6647630126550.529676783 s
-  ejected mass (M☉) = 0x401638b3bcbc07cf  # 5.555373143173667
-  peak luminosity (L☉) = 0x416910f90064997d  # 13141960.01228022
-  rise +15882030.307477425 s
-  duration +63528121.229909703 s
-  quiescent luminosity (L☉) = 0x41326895fd5a435f  # 1206421.9896585566
-  peak factor = 0x4025c96353df307b  # 10.893335934634015
-  factor at half the rise = 0x400a676f60d63dc0  # 3.3005054059392194
-  factor at the peak = 0x4025c96353df307b  # 10.893335934634015
-  factor at half the decline = 0x400a676f60d63dc1  # 3.30050540593922
-  factor at a day before the end = 0x3ff011c6cff1bf70  # 1.0043399927926338
-0200080020000000.002a:0107fffffff81700 at T-6388254545921.338926367 s
-  ejected mass (M☉) = 0x40198f104f7491c8  # 6.38971065663322
-  peak luminosity (L☉) = 0x4163405650696295  # 10093234.51286439
-  rise +14157113.758151020 s
-  duration +56628455.032604083 s
-  quiescent luminosity (L☉) = 0x4132910541787cb5  # 1216773.2557447378
-  peak factor = 0x402097150ced4acb  # 8.295082477537468
-  factor at half the rise = 0x40070a7b8f312fd5  # 2.880118483246387
-  factor at the peak = 0x402097150ced4acb  # 8.295082477537468
-  factor at half the decline = 0x40070a7b8f312fd5  # 2.880118483246387
-  factor at a day before the end = 0x3ff011aab69db489  # 1.0043131955565363
-0200080020000000.002a:0107fffffff81e00 at T-6366159046904.717258622 s
-  ejected mass (M☉) = 0x3fc1a2d2c70363fe  # 0.1377814742798193
-  peak luminosity (L☉) = 0x415cceac63f91c73  # 7551665.562079537
-  rise +21022215.657618507 s
-  duration +84088862.630474030 s
-  quiescent luminosity (L☉) = 0x4132923d3391eabd  # 1217085.201445266
-  peak factor = 0x4018d1a08a85c720  # 6.204713978209639
-  factor at half the rise = 0x4003ed6ac88a281c  # 2.490926329342086
-  factor at the peak = 0x4018d1a08a85c720  # 6.204713978209639
-  factor at half the decline = 0x4003ed6ac88a281c  # 2.490926329342086
-  factor at a day before the end = 0x3ff00a416357ad0c  # 1.0025037651601592
-0200080020000000.002a:0107fffffff94800 at T-5425090489267.760106710 s
-  ejected mass (M☉) = 0x3fef72cfb4a3db77  # 0.9827650573850936
-  peak luminosity (L☉) = 0x416a4bc629a47686  # 13786673.301326048
-  rise +45734763.690916419 s
-  duration +182939054.763665676 s
-  quiescent luminosity (L☉) = 0x4132c66dc5910606  # 1230445.7717441334
-  peak factor = 0x402668c386bfe783  # 11.2046167477854
-  factor at half the rise = 0x400ac754d7c6e942  # 3.3473297936990614
-  factor at the peak = 0x402668c386bfe783  # 11.2046167477854
-  factor at half the decline = 0x400ac754d7c6e942  # 3.3473297936990614
-  factor at a day before the end = 0x3ff0063cbb4b4d8a  # 1.0015227619340714
-0200080020000000.002a:0107fffffff9f500 at T-4879604665369.674132885 s
-  ejected mass (M☉) = 0x3fe536a76cce3a62  # 0.6629216313466026
-  peak luminosity (L☉) = 0x416426278d6366aa  # 10563900.418383915
-  rise +151853593.302442699 s
-  duration +607414373.209770798 s
-  quiescent luminosity (L☉) = 0x4132e4f1342a321e  # 1238257.2037688564
-  peak factor = 0x40211001f9586b95  # 8.531265060466277
-  factor at half the rise = 0x40075ddda901d852  # 2.920832939499669
-  factor at the peak = 0x40211001f9586b95  # 8.531265060466277
-  factor at half the decline = 0x40075ddda901d852  # 2.920832939499669
-  factor at a day before the end = 0x3ff001aa68ed9a7b  # 1.0004066561465652
-0200080020000000.002a:0107fffffffa1d00 at T-4755508373104.087785942 s
-  ejected mass (M☉) = 0x3fe6ceb690157230  # 0.712733537114735
-  peak luminosity (L☉) = 0x416d5023cd4884da  # 15368478.415102411
-  rise +41008690.399958819 s
-  duration +164034761.599835276 s
-  quiescent luminosity (L☉) = 0x4132ebe9314342f6  # 1240041.19243258
-  peak factor = 0x4028c97bc7da203a  # 12.393522496582694
-  factor at half the rise = 0x400c29de494397e6  # 3.5204435085060934
-  factor at the peak = 0x4028c97bc7da203a  # 12.393522496582694
-  factor at half the decline = 0x400c29de494397e6  # 3.5204435085060934
-  factor at a day before the end = 0x3ff0073f4c44449e  # 1.001769349972427
-0200080020000000.002a:0107fffffffa2800 at T-4719043898391.675524433 s
-  ejected mass (M☉) = 0x3fc8492ac281aca4  # 0.1897328805674522
-  peak luminosity (L☉) = 0x4164e0bac2777f64  # 10946006.077087112
-  rise +12152680.126336233 s
-  duration +48610720.505344934 s
-  quiescent luminosity (L☉) = 0x4132edf5e36b2383  # 1240565.888353557
-  peak factor = 0x4021a5945ea59a59  # 8.823397596087647
-  factor at half the rise = 0x4007c36bcaca6df3  # 2.970420440962465
-  factor at the peak = 0x4021a5945ea59a59  # 8.823397596087647
-  factor at half the decline = 0x4007c36bcaca6df4  # 2.9704204409624655
-  factor at a day before the end = 0x3ff01530c3df3768  # 1.0051734591720223
-0200080020000000.002a:0107fffffffafa00 at T-4056717001957.855287584 s
-  ejected mass (M☉) = 0x4004edfeda498b1b  # 2.6162087491696986
-  peak luminosity (L☉) = 0x414ff79fc86d6306  # 4190015.5658382205
-  rise +38232462.554984301 s
-  duration +152929850.219937205 s
-  quiescent luminosity (L☉) = 0x41331356ff7920ce  # 1250134.9979420188
-  peak factor = 0x400ad02e20779c9f  # 3.35165047993685
-  factor at half the rise = 0x3ffd4ac1eb957343  # 1.8307513430110738
-  factor at the peak = 0x400ad02e20779c9f  # 3.35165047993685
-  factor at half the decline = 0x3ffd4ac1eb957343  # 1.8307513430110738
-  factor at a day before the end = 0x3ff003bbc17bfdd2  # 1.0009114797575092
-0200080020000000.002a:0107fffffffb3700 at T-3863433517797.817641377 s
-  ejected mass (M☉) = 0x401c33cbfafdce2c  # 7.050582811108637
-  peak luminosity (L☉) = 0x417524acb6e63b60  # 22170315.43120897
-  rise +34315153.753282323 s
-  duration +137260615.013129293 s
-  quiescent luminosity (L☉) = 0x41331e4d63ba8283  # 1252941.3895646639
-  peak factor = 0x4031b1d248e43ca1  # 17.694614940378077
-  factor at half the rise = 0x4010d373e2928738  # 4.20649675387704
-  factor at the peak = 0x4031b1d248e43ca1  # 17.694614940378077
-  factor at half the decline = 0x4010d373e2928738  # 4.20649675387704
-  factor at a day before the end = 0x3ff009e3a8a9c69d  # 1.002414378014158
-0200080020000000.002a:0107fffffffb4900 at T-3808384448271.211969602 s
-  ejected mass (M☉) = 0x400730ee9a77edf5  # 2.8988925998544297
-  peak luminosity (L☉) = 0x414ec0b4a6deb6d3  # 4030825.3036716967
-  rise +96695059.660621345 s
-  duration +386780238.642485380 s
-  quiescent luminosity (L☉) = 0x4133216dd477efed  # 1253741.8299550966
-  peak factor = 0x4009b864df3bdbb8  # 3.2150361480848595
-  factor at half the rise = 0x3ffcb0577da83da6  # 1.7930521877750407
-  factor at the peak = 0x4009b864df3bdbb8  # 3.2150361480848595
-  factor at half the decline = 0x3ffcb0577da83da6  # 1.7930521877750407
-  factor at a day before the end = 0x3ff0016ccb00deae  # 1.0003478936977603
-0200080020000000.002a:0107fffffffb8e00 at T-3588370244932.705234423 s
-  ejected mass (M☉) = 0x400bb1f6fc4536c2  # 3.461896868574372
-  peak luminosity (L☉) = 0x4154a5acc7fb3c39  # 5412531.124709182
-  rise +99596040.786302193 s
-  duration +398384163.145208775 s
-  quiescent luminosity (L☉) = 0x41332df20d903f8a  # 1256946.0529823028
-  peak factor = 0x401139716313e88f  # 4.306096599664797
-  factor at half the rise = 0x400099d52d7ae74f  # 2.07511363536188
-  factor at the peak = 0x401139716313e88f  # 4.306096599664797
-  factor at half the decline = 0x400099d52d7ae750  # 2.0751136353618804
-  factor at a day before the end = 0x3ff001bacbf1ae05  # 1.0004222837986856

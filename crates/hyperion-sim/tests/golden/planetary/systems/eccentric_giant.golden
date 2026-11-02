@@ -1,4 +1,4 @@
-# generator_version = 25
+# generator_version = 26
 eccentric_giant 0x4200acaa0000000a: OldThinDisc, 1 stars
 fe_h = 0x3fb3d2e626b5a5da  # 0.07743681378419556
 age_at_epoch_yr = 0x41c1c1464f80acf2  # 595758239.0052779
@@ -9,7 +9,7 @@ luminosity_lsun = 0x3fdee64ac4d12e56  # 0.4828059122125742
 teff_k = 0x40b492357a00a14a  # 5266.208892859819
 host Star(0): drawn EccentricGiant, placed EccentricGiant
 
-epoch: 14 bodies at UniverseTime { seconds: 0, nanos: 0 }
+epoch: 15 bodies at UniverseTime { seconds: 0, nanos: 0 }
 belts: [e100]
 halo: none
 body 0100 A b: Planet about Some(Star(0)), Present
@@ -38,7 +38,7 @@ iron = 0x3fa13db307ac6bce  # 0.033673853575428944
 rock = 0x3fb1e774fe1f5c42  # 0.06993800357973703
 water = 0x3fbef8f7ae43658f  # 0.12098644260858847
 envelope = 0x3fe8d01739f8e109  # 0.7754017002362456
-t_eq_k = 0x4064cfd3e2f076e0  # 166.49461504903502
+t_eq_k = 0x4064cfd3e2f521f6  # 166.4946150577304
 moons: [0101, 0102, 0103]
 rings: [0180]
 population: NotApplicable
@@ -76,9 +76,9 @@ figure_pole_y = 0x3fc6b11b83907281  # 0.17727989124331958
 figure_pole_z = 0xbfaa8ebfc5718b6c  # -0.05187033925246606
 moment_of_inertia_factor = 0x3fce03b29cb0288d  # 0.23448784495150612
 photometry: Jupiter, provisional true
-geometric_albedo_b = 0x3fe1fe9e41d5a8e3  # 0.5623313222725098
-geometric_albedo_v = 0x3fe5da7e511bbfd0  # 0.6829215606830932
-geometric_albedo_r = 0x3fe41b5992f3f0b8  # 0.6283386106656712
+geometric_albedo_b = 0x3fe1fe9e41cb4f87  # 0.5623313221972105
+geometric_albedo_v = 0x3fe5da7e510f2e4f  # 0.6829215605916462
+geometric_albedo_r = 0x3fe41b5992e86060  # 0.6283386105815332
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -86,8 +86,8 @@ phase_integral_b = 0x3ff4fccd045b90a7  # 1.3117189569684713
 phase_integral_v = 0x3ff4fccd045b90a7  # 1.3117189569684713
 phase_integral_r = 0x3ff4fccd045b90a7  # 1.3117189569684713
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fe3801d6748a473  # 0.6093890206585811
-bond_ratio = 0x3ff7851d829b2126  # 1.4699988462253457
+bond_albedo = 0x3fe3801d673d6d63  # 0.6093890205769806
+bond_ratio = 0x3ff7851d829b2125  # 1.4699988462253455
 envelope: Ok
 body 0101 A b I: Moon(Captured) about Some(Body(BodyIndex(256))), Present
 mass_mearth = 0x3ec4e425a45f3d96  # 2.4904250350632642e-6
@@ -375,6 +375,20 @@ rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
 envelope: NotApplicable
+body e000 DISC: ProtoplanetaryDisc about Some(Star(0)), Destroyed { cause: Dispersed, at: UniverseTime { seconds: -18701213575070536, nanos: 0 } }
+mass_mearth = 0x40a320e6f9f344ca  # 2448.4511257192107
+orbit: NotApplicable
+position: none
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+population: NotApplicable
+surface: NotApplicable
+hooks: NotApplicable
+rotation: NotApplicable
+figure: NotApplicable
+photometry: NotApplicable
+envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3f66c604dd685506  # 0.0027799696938567457
 orbit: NotApplicable
@@ -471,7 +485,7 @@ bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x4041d922717ddc41  # 35.69636362691427
 equator_pole_contrast_k = 0x4030f47604ba6e25  # 16.95492581893463
-day_night_contrast_k = 0x0000000000000000  # 0.0
+day_night_contrast_k = 0x40187a8108b07650  # 6.119632850428005
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x409a279c8b41d465  # 1673.9028749738584
 continental_fraction = 0x0000000000000000  # 0.0
@@ -563,7 +577,7 @@ bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x4044cdcad7b574b2  # 41.607752765275464
 equator_pole_contrast_k = 0x40305354c8cba5f7  # 16.32551245662577
-day_night_contrast_k = 0x3fde07d08c503900  # 0.4692269678352119
+day_night_contrast_k = 0x401f9225537ebe30  # 7.892720512972616
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a11776ff7443a5  # 2187.7324177105497
 continental_fraction = 0x0000000000000000  # 0.0
@@ -659,7 +673,7 @@ bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x40433dcd6f30a328  # 38.482831858395286
 equator_pole_contrast_k = 0x402ddf55149e0c42  # 14.936195987980799
-day_night_contrast_k = 0x3fc43aa7c63f4b00  # 0.1580400197986691
+day_night_contrast_k = 0x401bf65f26760148  # 6.990597344353155
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a475cd49368874  # 2618.9009491960114
 continental_fraction = 0x0000000000000000  # 0.0
@@ -751,7 +765,7 @@ bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x40433b61f83ea737  # 38.463927298157095
 equator_pole_contrast_k = 0x4029adf01363b020  # 12.839722257536835
-day_night_contrast_k = 0x3fb1b4a58d806a00  # 0.0691626997435506
+day_night_contrast_k = 0x4016282f15cc2e28  # 5.539242115580727
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a8691ae4f19454  # 3124.5525279515805
 continental_fraction = 0x0000000000000000  # 0.0
@@ -843,7 +857,7 @@ bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x404297df2099078d  # 37.18649680587905
 equator_pole_contrast_k = 0x40328ae97046546f  # 18.542624489946714
-day_night_contrast_k = 0x3fd1db74f72f9800  # 0.27901958598374677
+day_night_contrast_k = 0x401c4b3ef39fa918  # 7.073482329006104
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40abaa9f5dafcbdd  # 3541.3112616478306
 continental_fraction = 0x0000000000000000  # 0.0
@@ -935,7 +949,7 @@ bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x4043f2fff20e5770  # 39.89843583774825
 equator_pole_contrast_k = 0x4033daaf24793b8e  # 19.854234962079822
-day_night_contrast_k = 0x3fdf5e701347b780  # 0.4901390255243925
+day_night_contrast_k = 0x401e1cba2fcc88d8  # 7.52805399595146
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40ad5a2f85916373  # 3757.092815917387
 continental_fraction = 0x0000000000000000  # 0.0
@@ -1027,7 +1041,7 @@ bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x4044417447349cc3  # 40.51136102742159
 equator_pole_contrast_k = 0x402a6a72fb69c30c  # 13.207908493671788
-day_night_contrast_k = 0x3fe6cc6246919780  # 0.7124492052359841
+day_night_contrast_k = 0x402103fea1a64da8  # 8.5078020587451
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40afa5ae692c5515  # 4050.840646157633
 continental_fraction = 0x0000000000000000  # 0.0
@@ -1123,7 +1137,7 @@ bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x40459f358a3d11a1  # 43.24382141095999
 equator_pole_contrast_k = 0x402a6c5da1893f50  # 13.211651847843001
-day_night_contrast_k = 0x3feacd453c255800  # 0.8375574278568365
+day_night_contrast_k = 0x4020916b847db290  # 8.284023418754515
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40b13502a93dbd2a  # 4405.010394915278
 continental_fraction = 0x0000000000000000  # 0.0
@@ -1144,7 +1158,7 @@ melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x409ffe3e38699e50  # 2047.5607620718838
 envelope: NotApplicable
 
-+H: 14 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
++H: 15 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
 belts: [e100]
 halo: none
 body 0100 A b: Planet about Some(Star(0)), Present
@@ -1173,7 +1187,7 @@ iron = 0x3fa13db307ac6bce  # 0.033673853575428944
 rock = 0x3fb1e774fe1f5c42  # 0.06993800357973703
 water = 0x3fbef8f7ae43658f  # 0.12098644260858847
 envelope = 0x3fe8d01739f8e109  # 0.7754017002362456
-t_eq_k = 0x4064cfd3f96eb986  # 166.49462577463072
+t_eq_k = 0x4064cfd3f973649e  # 166.49462578332617
 moons: [0101, 0102, 0103]
 rings: [0180]
 population: NotApplicable
@@ -1211,9 +1225,9 @@ figure_pole_y = 0x3fc6b11b83907281  # 0.17727989124331958
 figure_pole_z = 0xbfaa8ebfc5718b6c  # -0.05187033925246606
 moment_of_inertia_factor = 0x3fce03b29cb0288d  # 0.23448784495150612
 photometry: Jupiter, provisional true
-geometric_albedo_b = 0x3fe1fe9e185d8f9a  # 0.5623312450302251
-geometric_albedo_v = 0x3fe5da7e1ebf0f7b  # 0.682921466876436
-geometric_albedo_r = 0x3fe41b59649db542  # 0.628338524356572
+geometric_albedo_b = 0x3fe1fe9e1853363b  # 0.5623312449549255
+geometric_albedo_v = 0x3fe5da7e1eb27df6  # 0.6829214667849886
+geometric_albedo_r = 0x3fe41b59649224e7  # 0.6283385242724336
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -1221,7 +1235,7 @@ phase_integral_b = 0x3ff4fccd045b90a7  # 1.3117189569684713
 phase_integral_v = 0x3ff4fccd045b90a7  # 1.3117189569684713
 phase_integral_r = 0x3ff4fccd045b90a7  # 1.3117189569684713
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fe3801d3a58277c  # 0.609388936952413
+bond_albedo = 0x3fe3801d3a4cf068  # 0.6093889368708121
 bond_ratio = 0x3ff7851d829b2125  # 1.4699988462253455
 envelope: Ok
 body 0101 A b I: Moon(Captured) about Some(Body(BodyIndex(256))), Present
@@ -1510,6 +1524,20 @@ rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
 envelope: NotApplicable
+body e000 DISC: ProtoplanetaryDisc about Some(Star(0)), Destroyed { cause: Dispersed, at: UniverseTime { seconds: -18701213575070536, nanos: 0 } }
+mass_mearth = 0x40a320e6f9f344ca  # 2448.4511257192107
+orbit: NotApplicable
+position: none
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+population: NotApplicable
+surface: NotApplicable
+hooks: NotApplicable
+rotation: NotApplicable
+figure: NotApplicable
+photometry: NotApplicable
+envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3f66c604dd0dcfde  # 0.0027799696912840085
 orbit: NotApplicable
@@ -1606,7 +1634,7 @@ bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x4041d92274249413  # 35.69636394296699
 equator_pole_contrast_k = 0x4030f476073f2e20  # 16.95492596905217
-day_night_contrast_k = 0x0000000000000000  # 0.0
+day_night_contrast_k = 0x40187a8102fa6df0  # 6.1196327653265
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x409a279c8b41d465  # 1673.9028749738584
 continental_fraction = 0x0000000000000000  # 0.0
@@ -1698,7 +1726,7 @@ bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x4044cdcadacc922d  # 41.60775313366717
 equator_pole_contrast_k = 0x40305354cb3876a1  # 16.325512601170548
-day_night_contrast_k = 0x3fde07d098995e80  # 0.46922697927718815
+day_night_contrast_k = 0x401f92255a9079b8  # 7.892720618312914
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a11776ff7443a5  # 2187.7324177105497
 continental_fraction = 0x0000000000000000  # 0.0
@@ -1794,7 +1822,7 @@ bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x40433dcd720c5618  # 38.48283219911917
 equator_pole_contrast_k = 0x402ddf55190e039a  # 14.936196120224668
-day_night_contrast_k = 0x3fc43aa8b85e1500  # 0.1580401325447056
+day_night_contrast_k = 0x401bf65f33adfde8  # 6.990597541327112
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a475cd49368874  # 2618.9009491960114
 continental_fraction = 0x0000000000000000  # 0.0
@@ -1886,7 +1914,7 @@ bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x40433b61fb19fe24  # 38.46392763871361
 equator_pole_contrast_k = 0x4029adf017343534  # 12.839722371218706
-day_night_contrast_k = 0x3fb1b4a88af80a00  # 0.0691628779677913
+day_night_contrast_k = 0x4016282f2637e7e8  # 5.5392423602697605
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40a8691ae4f19454  # 3124.5525279515805
 continental_fraction = 0x0000000000000000  # 0.0
@@ -1978,7 +2006,7 @@ bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x404297df235c1497  # 37.1864971351253
 equator_pole_contrast_k = 0x40328ae9730774a6  # 18.542624654121617
-day_night_contrast_k = 0x3fd1db75ee3f0f80  # 0.2790198160766906
+day_night_contrast_k = 0x401c4b3f0864cbb8  # 7.07348263850411
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40abaa9f5dafcbdd  # 3541.3112616478306
 continental_fraction = 0x0000000000000000  # 0.0
@@ -2070,7 +2098,7 @@ bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x4043f2fff504f4d3  # 39.89843619100579
 equator_pole_contrast_k = 0x4033daaf276c3c48  # 19.85423513786762
-day_night_contrast_k = 0x3fdf5e70fd823200  # 0.49013924366661854
+day_night_contrast_k = 0x401e1cba43f85f00  # 7.528054296526307
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40ad5a2f85916373  # 3757.092815917387
 continental_fraction = 0x0000000000000000  # 0.0
@@ -2162,7 +2190,7 @@ bond_ratio = 0x3fda75ce943cd76c  # 0.413440365565626
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x404441744a36e190  # 40.51136138610593
 equator_pole_contrast_k = 0x402a6a72ff5648b4  # 13.20790861061355
-day_night_contrast_k = 0x3fe6cc62bb1c2980  # 0.7124494223110531
+day_night_contrast_k = 0x402103feabfb2c74  # 8.507802366648527
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40afa5ae692c5515  # 4050.840646157633
 continental_fraction = 0x0000000000000000  # 0.0
@@ -2258,7 +2286,7 @@ bond_ratio = 0x3fda75ce943cd76b  # 0.41344036556562597
 surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x40459f358d734aa5  # 43.24382179383728
 equator_pole_contrast_k = 0x402a6c5da5760dd4  # 13.211651964817896
-day_night_contrast_k = 0x3feacd459a34cc80  # 0.837557603057931
+day_night_contrast_k = 0x4020916b8d51e644  # 8.284023681876654
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40b13502a93dbd2a  # 4405.010394915278
 continental_fraction = 0x0000000000000000  # 0.0

@@ -1,4 +1,4 @@
-# generator_version = 25
+# generator_version = 26
 world mars_like level 7 cells 98304 climate cells 24576 craters 325
 header body system 0 index 2
 header radius m = 0x4149dc1e00000000  # 3389500.0
@@ -91,21 +91,21 @@ cells runoff digest = 0x79e5e3825e98b4a5
 cells catchment_runoff digest = 0x19fc49459775d2c0
 cells epoch_incision digest = 0x3735e04f5cbdf661
 cells water_surface_mm digest = 0x9d26da11526b1998
-cells ice digest = 0x849ce82a062481bd
-cells substances digest = 0xddd655300b16c5ed
-cells class digest = 0x88721ed471427dc5
-cells crater_state digest = 0x71b443ecd40467c6
+cells ice digest = 0x95fd1b3d3103e7ef
+cells substances digest = 0xf37747656a49ffed
+cells class digest = 0xa000d39fdfb3767c
+cells crater_state digest = 0x2021eac25ef44be5
 cells seafloor digest = 0x3b2dc8fe17122325
 cells elevation mm min -6480498 max 22487433
 cells by crust Continental 0 Oceanic 0 Lid 54874 Province 43430
 cells by boundary Absent 98304 Subduction 0 Collision 0 Divergent 0 Transform 0
 cells under water 0
 cells with ice 774
-cells by class 67:772 68:2 71:97530
-cells crater state min 1 median 184 max 184; at code 1 44037
+cells by class 67:773 68:1 71:97530
+cells crater state min 1 median 184 max 184; at code 1 44038
 cells epoch incision NONE 0 UNCUT 70414 cut 27890; cut codes p10 96 p50 130 p90 152 max 202
-climate sea_level_temperature digest = 0x97c0824f6ef61a5d
-climate month_anomaly digest = 0x09c25c4777e2f70d
+climate sea_level_temperature digest = 0x05b2abda6ab4a8b5
+climate month_anomaly digest = 0x78a9a99b85db46a5
 climate month_precipitation digest = 0x852488313cf22325
 climate wind azimuth digest = 0x852488313cf22325
 climate wind speed digest = 0x852488313cf22325
@@ -118,4 +118,4 @@ craters degradation digest = 0x72f120c8c734d411
 craters reach digest = 0xb2a2f858c1e728ee
 craters degradation min 7 max 110
 payload blocks 4 bytes 3852141 lengths 1048565,1048556,1048554,706466
-payload digest = 0x826ff4c47d9585cd
+payload digest = 0x93ca68e9ee4cc3b6

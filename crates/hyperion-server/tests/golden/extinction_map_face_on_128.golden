@@ -1,9 +1,9 @@
-# generator_version = 25
+# generator_version = 26
 seed = 0x00000000000004d2
 size = 128 x 128 px, 1024 ly per px
 floor_log10_mag = 0xc000000000000000  # -2.0
-ceiling_log10_mag = 0x3fd499a8c0000000  # 0.3218786120414734
-code_sum = 1449344
+ceiling_log10_mag = 0x3fd49e05a0000000  # 0.32214489579200745
+code_sum = 1449692
 code[64,64] = 195
 code[64,32] = 169
 code[32,64] = 169

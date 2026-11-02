@@ -1,13 +1,13 @@
-# generator_version = 25
-core.systems = 0x40e01dbe11e8ea29  # 33005.93968625769
-core.extent = 0x40861d96932ec0a0  # 707.6985229160819
+# generator_version = 26
+core.systems = 0x40e03006ba0cd9b6  # 33152.21021120569
+core.extent = 0x40861d7f062f4505  # 707.6870235150278
 core.scale = 0x40748b36dba7943f  # 328.70089307270604
 core.dispersion = 0x40116a3e2e40cdc8  # 4.353752825455963
 core.fe_h = 0xc0009bc33f36a0a2  # -2.0760559977098447
 core.fe_h_spread = 0x3fde6f8b5769d5ec  # 0.4755581239363369
 core.tail_end = 0x41ddcd6500000000  # 2000000000.0
-core.peak = 0x40409bde37ddff06  # 33.217719062229705
-A.members 22092
+core.peak = 0x4040aebedd587f5d  # 33.36519972630661
+A.members 22187
 A.0.id = 0xf400000080000000
 A.0.class Living attempt 0
 A.0.position.x = 0x40dd2c1b6539cd4d  # 29872.42805333184
@@ -41,7 +41,7 @@ A.2.fe_h = 0xc004285c23d99e5a  # -2.5197069931780733
 A.2.velocity.x = 0x40ff510798540dfa  # 128272.47468953571
 A.2.velocity.y = 0xc0f4d4b48a74e476  # -85323.28380288355
 A.2.velocity.z = 0x40d650e45ea7f8fc  # 22851.568277352475
-B.members 3899
+B.members 3916
 B.0.id = 0xf400000090016000
 B.0.class Living attempt 0
 B.0.position.x = 0x40dd2e55107a16d5  # 29881.32913067083
@@ -75,7 +75,7 @@ B.2.fe_h = 0xc0093492163c7963  # -3.1506692635731937
 B.2.velocity.x = 0x40feb4d801e1431c  # 125773.50045896735
 B.2.velocity.y = 0xc0f284fc8a58c5ca  # -75855.78377606641
 B.2.velocity.z = 0x40da322dbbbe27ae  # 26824.714583910703
-C.members 5539
+C.members 5564
 C.0.id = 0xf4000000a000a000
 C.0.class Living attempt 0
 C.0.position.x = 0x40dd2ced26dafba2  # 29875.70549654554
@@ -109,7 +109,7 @@ C.2.fe_h = 0xc0057c64771a0804  # -2.685738497239983
 C.2.velocity.x = 0x40fe287b6bb385ec  # 123527.71379425348
 C.2.velocity.y = 0xc0f3885fd56620b5  # -80005.98959934975
 C.2.velocity.z = 0x40ddcef96c31e63c  # 30523.897228693808
-D.members 1137
+D.members 1139
 D.0.id = 0xf4000000b0034000
 D.0.class WhiteDwarf attempt 0
 D.0.position.x = 0x40dd2dd8bfd5c8d2  # 29879.38670868503

@@ -1,4 +1,4 @@
-# generator_version = 25
+# generator_version = 26
 filler_a 0x01fffb2c60000000: OldThinDisc, 1 stars
 fe_h = 0xbf70b24aa3d74c50  # -0.004076282084002861
 age_at_epoch_yr = 0x41dad10eaeb2f274  # 1799633594.7960482
@@ -9,7 +9,7 @@ luminosity_lsun = 0x3f9072c09d8014cf  # 0.016062745678955544
 teff_k = 0x40ac1c946830c86d  # 3598.2898574108754
 host Star(0): drawn CompactMulti, placed CompactMulti
 
-epoch: 5 bodies at UniverseTime { seconds: 0, nanos: 0 }
+epoch: 6 bodies at UniverseTime { seconds: 0, nanos: 0 }
 belts: [e100]
 halo: none
 body 0100 A b: Planet about Some(Star(0)), Present
@@ -105,6 +105,20 @@ peak_central_temperature_k: none
 envelope: NotApplicable
 body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), Unbound { at: UniverseTime { seconds: -56792117131135768, nanos: 0 } }
 mass_mearth = 0x3f61a851be737767  # 0.0021554562150489123
+orbit: NotApplicable
+position: none
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+population: NotApplicable
+surface: NotApplicable
+hooks: NotApplicable
+rotation: NotApplicable
+figure: NotApplicable
+photometry: NotApplicable
+envelope: NotApplicable
+body e000 DISC: ProtoplanetaryDisc about Some(Star(0)), Destroyed { cause: Dispersed, at: UniverseTime { seconds: -56740374876741912, nanos: 0 } }
+mass_mearth = 0x4086f4a7d206a133  # 734.5819435613579
 orbit: NotApplicable
 position: none
 bulk: NotApplicable
@@ -316,7 +330,7 @@ melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40bae52d955bcc35  # 6885.178060281139
 envelope: NotApplicable
 
-+H: 5 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
++H: 6 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
 belts: [e100]
 halo: none
 body 0100 A b: Planet about Some(Star(0)), Present
@@ -412,6 +426,20 @@ peak_central_temperature_k: none
 envelope: NotApplicable
 body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), Unbound { at: UniverseTime { seconds: -56792117131135768, nanos: 0 } }
 mass_mearth = 0x3f61a851be737767  # 0.0021554562150489123
+orbit: NotApplicable
+position: none
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+population: NotApplicable
+surface: NotApplicable
+hooks: NotApplicable
+rotation: NotApplicable
+figure: NotApplicable
+photometry: NotApplicable
+envelope: NotApplicable
+body e000 DISC: ProtoplanetaryDisc about Some(Star(0)), Destroyed { cause: Dispersed, at: UniverseTime { seconds: -56740374876741912, nanos: 0 } }
+mass_mearth = 0x4086f4a7d206a133  # 734.5819435613579
 orbit: NotApplicable
 position: none
 bulk: NotApplicable

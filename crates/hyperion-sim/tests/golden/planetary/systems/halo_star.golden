@@ -1,4 +1,4 @@
-# generator_version = 25
+# generator_version = 26
 halo_star 0x02025b2be0000001: Halo, 1 stars
 fe_h = 0xbfe895d39c3897aa  # -0.7682893801872883
 age_at_epoch_yr = 0x4205d0e564f12767  # 11712375966.14424
@@ -9,7 +9,7 @@ luminosity_lsun = 0x3f9c5cbd7239acc5  # 0.02769752511669023
 teff_k = 0x40ae14a1aa599cd9  # 3850.3157527927365
 host Star(0): drawn CompactMulti, placed CompactMulti
 
-epoch: 3 bodies at UniverseTime { seconds: 0, nanos: 0 }
+epoch: 4 bodies at UniverseTime { seconds: 0, nanos: 0 }
 belts: [e100]
 halo: none
 body 0100 A b: Planet about Some(Star(0)), Present
@@ -194,6 +194,20 @@ crust: lid Primary; primary ultramafic, secondary basalt, tertiary none, bulk no
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k: none
 envelope: NotApplicable
+body e000 DISC: ProtoplanetaryDisc about Some(Star(0)), Destroyed { cause: Dispersed, at: UniverseTime { seconds: -369428793454362432, nanos: 0 } }
+mass_mearth = 0x406b485ef2550199  # 218.26159016230375
+orbit: NotApplicable
+position: none
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+population: NotApplicable
+surface: NotApplicable
+hooks: NotApplicable
+rotation: NotApplicable
+figure: NotApplicable
+photometry: NotApplicable
+envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3dd7d4ffa6229b0a  # 8.670040513112042e-11
 orbit: NotApplicable
@@ -217,7 +231,7 @@ figure: NotApplicable
 photometry: NotApplicable
 envelope: NotApplicable
 
-+H: 3 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
++H: 4 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
 belts: [e100]
 halo: none
 body 0100 A b: Planet about Some(Star(0)), Present
@@ -401,6 +415,20 @@ ice_fraction = 0x0000000000000000  # 0.0
 crust: lid Primary; primary ultramafic, secondary basalt, tertiary none, bulk none; provinces basalt; Intermediate, RockMelted(MagmaOcean)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k: none
+envelope: NotApplicable
+body e000 DISC: ProtoplanetaryDisc about Some(Star(0)), Destroyed { cause: Dispersed, at: UniverseTime { seconds: -369428793454362432, nanos: 0 } }
+mass_mearth = 0x406b485ef2550199  # 218.26159016230375
+orbit: NotApplicable
+position: none
+bulk: NotApplicable
+moons: NotApplicable
+rings: NotApplicable
+population: NotApplicable
+surface: NotApplicable
+hooks: NotApplicable
+rotation: NotApplicable
+figure: NotApplicable
+photometry: NotApplicable
 envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3dd7d4ff8400ee60  # 8.670039773002226e-11
