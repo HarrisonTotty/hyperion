@@ -60,6 +60,8 @@
 //!
 //! [`CentreClasses`]: super::CentreClasses
 
+use std::sync::OnceLock;
+
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::imf::MassBand;
@@ -282,6 +284,62 @@ impl CentreMemberRecord {
     }
 }
 
+/// Each band's bound at each corner radius a cell of [`centre_grid`] has: the bound a uniform
+/// cell is proposed under, every class's density at the cell's nearest radius times its greatest
+/// angular factor (module documentation), a pure function of the band and the cell's
+/// [`CornerKey`](super::super::nested::NestedGrid::corner_key), which gives that radius to the bit
+/// (P09.T37's bench).
+///
+/// A 50 ly census about the black hole reads some 1.5 × 10⁶ cells and bands, and found each
+/// bound again in 560 ms of the query's 680 (measured 2026-11-02, pod, release), where a level
+/// has at most 769 corner radii. So each level's and band's bounds are made at once, when a
+/// cell of theirs is first read, in some 0.3 ms, and kept with the galaxy's centre
+/// ([`CentreModel`]): bounded by the grid, 12 levels × 5 bands × 769, some 370 kB, they need no
+/// budget of their own. They are the same bits whenever made, so a model's equality and its
+/// `Debug` text do not depend on what has read them.
+#[derive(Clone)]
+pub(crate) struct CornerBounds(Box<[OnceLock<Box<[f64]>>]>);
+
+impl Default for CornerBounds {
+    /// None made yet: a table for each level and band of the centre's grid.
+    fn default() -> Self {
+        let tables = usize::from(CENTRE_GRID_LEVELS) * MassBand::ALL.len();
+        Self((0..tables).map(|_| OnceLock::new()).collect())
+    }
+}
+
+impl CornerBounds {
+    /// The table of `band`'s bounds on `level`, made or not, by the corner keys' sums of squares.
+    #[must_use]
+    fn table(&self, level: u8, band: MassBand) -> &OnceLock<Box<[f64]>> {
+        &self.0[usize::from(level) * MassBand::ALL.len() + band.index()]
+    }
+
+    /// The bytes its tables own on the heap once all are made, whether or not they are yet, so
+    /// that a model's count does not depend on what has read it.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        let radii = usize::try_from(centre_grid().corner_squares_max())
+            .expect("a level's 769 corner radii fit in usize")
+            + 1;
+        size_of_val(&*self.0) + self.0.len() * radii * size_of::<f64>()
+    }
+}
+
+/// Equal always: the bounds are a pure function of the model they are kept with.
+impl PartialEq for CornerBounds {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not a table has been made.
+impl std::fmt::Debug for CornerBounds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CornerBounds")
+    }
+}
+
 /// One class of a band as the placement reads it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct BandClass {
@@ -390,6 +448,62 @@ impl<'a> CentrePlacement<'a> {
             .sum()
     }
 
+    /// `band`'s bound at the nearest radius of the owned `cell`, whose box is `local`:
+    /// [`bound_density`](Self::bound_density) there, bit for bit, read from the model's
+    /// [`CornerBounds`], which the cell's level and band are made in if no reading has yet.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `local` is not `cell`'s box.
+    #[must_use]
+    fn corner_bound(&self, band: MassBand, cell: NestedCell, local: &LocalCell) -> f64 {
+        let (level, squares) = self.grid.corner_key(cell).parts();
+        self.corner_bound_at(band, (level, squares), local)
+    }
+
+    /// [`corner_bound`](Self::corner_bound) of the cell whose corner key's level and sum of
+    /// squares are `key` and whose box is `local`.
+    #[must_use]
+    fn corner_bound_at(
+        &self,
+        band: MassBand,
+        (level, squares): (u8, u32),
+        local: &LocalCell,
+    ) -> f64 {
+        // A corner's offsets are whole numbers of one power-of-two edge, so its squared radius is
+        // its sum of squares times the edge's square exactly, as `nearest_radius` sums it.
+        let square = local.edge * local.edge;
+        debug_assert!(
+            (f64::from(squares) * square)
+                .sqrt()
+                .total_cmp(&local.nearest_radius())
+                .is_eq(),
+            "a corner key has one radius: level {level}, {squares} at {local:?}"
+        );
+        let table = self
+            .model
+            .corner_bounds()
+            .table(level, band)
+            .get_or_init(|| {
+                (0..=self.grid.corner_squares_max())
+                    .map(|s| self.bound_density(band, (f64::from(s) * square).sqrt()))
+                    .collect()
+            });
+        table[usize::try_from(squares).expect("a sum of three squares of cells fits in usize")]
+    }
+
+    /// [`proposal`](Self::proposal) of the owned `cell`, whose box is `local`, bit for bit: a
+    /// uniform cell's bound from the model's corner bounds ([`corner_bound`](Self::corner_bound)).
+    #[must_use]
+    fn cell_proposal(&self, band: MassBand, cell: NestedCell, local: &LocalCell) -> CentreProposal {
+        if local.nearest_radius() > 0.0 {
+            return CentreProposal::Uniform {
+                bound: self.corner_bound(band, cell, local) * (1.0 + 1e-12),
+            };
+        }
+        self.proposal(band, local)
+    }
+
     /// How `band`'s candidates are proposed in `cell` (module documentation).
     #[must_use]
     pub fn proposal(&self, band: MassBand, cell: &LocalCell) -> CentreProposal {
@@ -423,7 +537,25 @@ impl<'a> CentrePlacement<'a> {
     #[must_use]
     pub fn expected_candidates(&self, band: MassBand, cell: NestedCell) -> f64 {
         let local = self.grid.local_cell(cell);
-        self.proposal(band, &local).expected(&local)
+        self.cell_proposal(band, cell, &local).expected(&local)
+    }
+
+    /// The expected candidates of every band in `cell`, in [`MassBand::ALL`]'s order:
+    /// [`expected_candidates`](Self::expected_candidates) of each, bit for bit, with the cell's
+    /// box found once, for the census, which reads every band of every cell (P09.T37's bench).
+    #[must_use]
+    pub(crate) fn expected_by_band(&self, cell: NestedCell) -> [f64; MassBand::ALL.len()] {
+        let local = self.grid.local_cell(cell);
+        let key = self.grid.corner_key(cell).parts();
+        // A cell whose nearest corner is the black hole's, the one sum of squares of zero, is a
+        // cusp's ([`cell_proposal`](Self::cell_proposal)).
+        if key.1 == 0 {
+            return MassBand::ALL.map(|band| self.proposal(band, &local).expected(&local));
+        }
+        MassBand::ALL.map(|band| {
+            let bound = self.corner_bound_at(band, key, &local) * (1.0 + 1e-12);
+            CentreProposal::Uniform { bound }.expected(&local)
+        })
     }
 
     /// The member ID of candidate `index` of `band` in `cell`.
@@ -489,7 +621,7 @@ impl<'a> CentrePlacement<'a> {
         index: u16,
     ) -> Option<CentreMemberRecord> {
         let local = self.grid.local_cell(cell);
-        let proposal = self.proposal(band, &local);
+        let proposal = self.cell_proposal(band, cell, &local);
         self.candidate_under(galaxy, band, cell, index, &proposal, &local)
     }
 
@@ -566,7 +698,7 @@ impl<'a> CentrePlacement<'a> {
         cell: NestedCell,
     ) -> Vec<CentreMemberRecord> {
         let local = self.grid.local_cell(cell);
-        let proposal = self.proposal(band, &local);
+        let proposal = self.cell_proposal(band, cell, &local);
         let n = count_from_mean(
             galaxy,
             self.member_id(band, cell, 0),
@@ -889,6 +1021,36 @@ mod tests {
 
     fn innermost(placement: &CentrePlacement<'_>) -> NestedCell {
         placement.grid().cell(0, [16, 16, 16]).unwrap()
+    }
+
+    /// P09.T37's bench: every owned cell's proposal in every band, its bound read from the model's
+    /// corner bounds, is the one found without them, and so are its expected candidates, bit for
+    /// bit, one band at a time and every band at once, whichever cell made its level's tables.
+    #[test]
+    fn the_corner_bounds_change_no_cell_s_proposal() {
+        let model = CentreModel::from_params(&GalaxyParams::milky_way_like()).unwrap();
+        let placement = CentrePlacement::new(&model);
+        let cells: Vec<NestedCell> = placement.grid().owned_cells().collect();
+        assert_eq!(cells.len(), 32_768 + 11 * (32_768 - 4_096));
+        // Outermost first, so that each level's tables are made by its last cell in the walk.
+        for &cell in cells.iter().rev() {
+            let local = placement.grid().local_cell(cell);
+            let by_band = placement.expected_by_band(cell);
+            for band in MassBand::ALL {
+                let found = placement.proposal(band, &local);
+                assert_eq!(
+                    placement.cell_proposal(band, cell, &local),
+                    found,
+                    "{cell:?}"
+                );
+                let expected = found.expected(&local);
+                hyperion_testkit::float::assert_same_bits(
+                    placement.expected_candidates(band, cell),
+                    expected,
+                );
+                hyperion_testkit::float::assert_same_bits(by_band[band.index()], expected);
+            }
+        }
     }
 
     /// P09.T27 and ruling 144.5a: the fullest cell and band, under the flattened bound, at the

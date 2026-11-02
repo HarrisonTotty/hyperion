@@ -5905,3 +5905,6 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     interior or bound (`list`), charged `FeatureLevelList::heap_bytes` in its own budget;
     `FeatureLevelList::listed_of` is `pub`, and `FeatureMemberSource::read_ahead` makes the lists.
   - _Bench._ `served_at_27` adds the global list, the black hole's 50 ly query and a galaxy's first.
+  - _Centre's census._ `CentreModel` keeps each level's and band's bounds by corner key
+    (`members::CornerBounds`, made when first read, 370 kB, bounded by the grid);
+    `CentreMemberSource` reads no cell and no list for a sphere asked for no layer.

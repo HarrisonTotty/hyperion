@@ -857,12 +857,10 @@ impl SystemSource for CentreMemberSource<'_> {
             .grid()
             .cells_touching(&centre, sphere.radius())
         {
+            let expected = self.placement.expected_by_band(cell);
             for band in BANDS_COARSEST_FIRST {
                 let layer = band.layer();
-                counts.set(
-                    layer,
-                    counts.get(layer) + self.placement.expected_candidates(band, cell),
-                );
+                counts.set(layer, counts.get(layer) + expected[band.index()]);
             }
         }
         if holds_black_hole(sphere) {
@@ -921,7 +919,19 @@ impl SystemSource for CentreMemberSource<'_> {
                 out.extend(victim_hit(victim, sphere, from_black_hole));
             }
         }
+        // A query whose census admits no layer, as one about the black hole that nothing fits,
+        // takes nothing of the list or the cells: placing the one and walking the other for no
+        // layer took 126 ms of its 136 (P09.T37's bench, measured 2026-11-02, pod, release).
+        if layers.is_empty() {
+            return;
+        }
         self.recent_hits(sphere, layers, LightYears::new(from_black_hole), out);
+        if !BANDS_COARSEST_FIRST
+            .iter()
+            .any(|band| layers.contains(band.layer()))
+        {
+            return;
+        }
         self.cells_reaching(sphere, |cell| {
             for band in BANDS_COARSEST_FIRST {
                 if !layers.contains(band.layer()) {
@@ -1023,6 +1033,41 @@ fn max_speed_km_s(profile: &CentreProfile, floor_km2_s2: f64, r: f64) -> f64 {
 mod tests {
     use super::*;
     use crate::galaxy::features::centre::testing;
+
+    /// A sphere asked for no layer, as a query about the black hole that nothing fits asks its
+    /// sources, gets no hit and walks no cell; asked for layer E alone it gets the black hole and
+    /// band E's members alone, as every layer's hits hold them (P09.T37's bench).
+    #[test]
+    fn a_sphere_asked_for_no_layer_gets_no_hit_and_reads_no_cell() {
+        let galaxy = testing::milky_way_galaxy();
+        let orbits = KeepCentreOrbits::new(galaxy);
+        let source = CentreMemberSource::new(galaxy, &orbits).unwrap();
+        let sphere = QuerySphere::new(
+            GalacticPosition::ORIGIN,
+            LightYears::new(0.05),
+            UniverseTime::EPOCH,
+            LightYears::ZERO,
+        )
+        .unwrap();
+        let hits = |layers: LayerSet| {
+            let mut out = Vec::new();
+            source.systems_in_sphere(galaxy, &sphere, layers, &mut out);
+            out
+        };
+        assert_eq!(hits(LayerSet::EMPTY), Vec::<SystemHit>::new());
+        assert_eq!(
+            orbits.kept.lock().unwrap().len(),
+            0,
+            "no cell is read for no layer"
+        );
+        let every: LayerSet = Layer::ALL.into_iter().collect();
+        let in_e: Vec<SystemHit> = hits(every)
+            .into_iter()
+            .filter(|hit| hit.record().layer() == Layer::E)
+            .collect();
+        assert!(!in_e.is_empty(), "the black hole is inside");
+        assert_eq!(hits(LayerSet::EMPTY.with(Layer::E)), in_e);
+    }
 
     /// Each level's reach holds every one of its owned cells', the pre-selection the hits rest on:
     /// a cell outside the full scan moves at most the level's pad, and a full-scan cell lies inside

@@ -79,6 +79,8 @@ pub struct CentreModel {
     loss_cone: LossCone,
     acceptance: [f64; 4],
     classes: CentreClasses,
+    /// Each band's bound at each corner radius of the grid, made when first read.
+    corner_bounds: members::CornerBounds,
 }
 
 impl CentreModel {
@@ -139,6 +141,7 @@ impl CentreModel {
             loss_cone,
             acceptance,
             classes,
+            corner_bounds: members::CornerBounds::default(),
         })
     }
 
@@ -184,8 +187,9 @@ impl CentreModel {
         &self.marks[tracer.index()]
     }
 
-    /// The bytes it owns on the heap, about 0.5 MiB, most of it the four distribution functions'
-    /// panels: what [`Galaxy::heap_bytes`] adds once the galaxy has built its centre (P09.T29).
+    /// The bytes it owns on the heap, about 0.9 MiB, most of it the four distribution functions'
+    /// panels and the grid's corner bounds, made or not: what [`Galaxy::heap_bytes`] adds once the
+    /// galaxy has built its centre (P09.T29).
     #[must_use]
     pub(crate) fn heap_bytes(&self) -> usize {
         self.profile.heap_bytes()
@@ -200,6 +204,14 @@ impl CentreModel {
                 .map(DistributionFunction::heap_bytes)
                 .sum::<usize>()
             + self.classes.heap_bytes()
+            + self.corner_bounds.heap_bytes()
+    }
+
+    /// Each band's bound at each corner radius of the grid ([`members::CornerBounds`]), which the
+    /// placement reads.
+    #[must_use]
+    pub(crate) fn corner_bounds(&self) -> &members::CornerBounds {
+        &self.corner_bounds
     }
 
     /// The stars' profile and the potential.
