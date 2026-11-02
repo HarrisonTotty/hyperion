@@ -34,11 +34,15 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::ages::SubDisc;
 use crate::galaxy::catalogue_classes::binary::feature::is_listed_binary;
 use crate::galaxy::catalogue_classes::source::member_layers;
-use crate::galaxy::catalogue_classes::{CatalogueClassSource, ClassId};
-use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord, NoFeatureCache};
+use crate::galaxy::catalogue_classes::{CatalogueClassSource, CatalogueMotion, ClassId};
+use crate::galaxy::displaced::ExplosionSite;
+use crate::galaxy::features::catalogue::{
+    FeatureCatalogue, FeatureRecord, NoFeatureCache, bulk_velocity,
+};
 use crate::galaxy::features::centre::events::victims::victim_count;
+use crate::galaxy::features::centre::members::centre_composition;
 use crate::galaxy::features::centre::members::resolve_centre_member_with;
-use crate::galaxy::features::centre::recent::CentreRecent;
+use crate::galaxy::features::centre::recent::{CentreRecent, TracerProfiles};
 use crate::galaxy::features::centre::{CentreMemberSource, CentrePath, KeepCentreOrbits};
 use crate::galaxy::features::ids::{FeatureKind, FeatureProcess};
 use crate::galaxy::features::members::level_list::registered_classes;
@@ -56,6 +60,9 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::id::{Layer, MemberSlot, SystemId, SystemIdKind};
 use crate::observe::{Drift, Trajectory};
 use crate::planetary::testing::{with_every_26_hold_with_its_retargets, with_every_27_hold};
+use crate::stellar::Composition;
+use crate::stellar::multiplicity::MultiplicityContext;
+use crate::stellar::system::SystemStars;
 use crate::time::UniverseTime;
 use crate::units::{KilometresPerSecond, LightYears, Years};
 
@@ -774,6 +781,150 @@ fn every_listed_binary_in_a_sphere_is_returned_once_under_every_27_hold() {
                 "the centre's binaries under every 27 hold",
                 centre.0,
                 &centre.1,
+            );
+        });
+    });
+}
+
+/// A listed core collapse's place at `t` from its death on, as the class's entries move
+/// (`CatalogueMotion::broken`; research-leans-31): its site, plus its progenitor's `velocity` and
+/// the natal kick of its own stars (`ForcedSingle`, of `composition`) times the time since its
+/// death; `None` before its death or for a remnant that takes no kick.
+fn kicked_at(
+    galaxy: &Galaxy,
+    (record, site, velocity): (&SystemRecord, &ExplosionSite, GalacticVelocity),
+    composition: &Composition,
+    t: UniverseTime,
+) -> Option<GalacticPosition> {
+    if site.death() > t {
+        return None;
+    }
+    let stars = SystemStars::generate_with(
+        galaxy,
+        record,
+        composition,
+        MultiplicityContext::ForcedSingle,
+    );
+    let kick = stars.natal_kick().filter(|k| k.speed().value() > 0.0)?;
+    let remnant = velocity + GalacticVelocity::new(kick.velocity());
+    Some(CatalogueMotion::broken(*site.position(), site.death(), velocity, remnant).position_at(t))
+}
+
+/// The features' and the centre's listed core collapses that have died by the epoch or by +H and
+/// take a kick, each with its time and its kicked place then (`kicked_at`), in `galaxy`, of the
+/// features `asked`.
+fn kicked_entries(
+    galaxy: &Galaxy,
+    asked: &[FeatureRecord],
+) -> Vec<(SystemId, UniverseTime, GalacticPosition)> {
+    let times = [0, 1_000]
+        .map(|years| UniverseTime::from_julian_years(years).expect("in the clock window"));
+    let mut kicked = Vec::new();
+    for feature in asked {
+        let velocity = bulk_velocity(galaxy, feature).expect("a feature with its kinematic tables");
+        for entry in FeatureLevelList::of(galaxy, feature).recent_entries(galaxy) {
+            let Some(site) = entry
+                .site()
+                .filter(|_| entry.class() == RecentClass::CoreCollapse)
+            else {
+                continue;
+            };
+            let member = entry.member();
+            for t in times {
+                if let Some(at) = kicked_at(
+                    galaxy,
+                    (member.record(), site, velocity),
+                    member.composition(),
+                    t,
+                ) {
+                    kicked.push((member.record().id(), t, at));
+                }
+            }
+        }
+    }
+    let model = galaxy.centre().expect("the Milky Way's centre builds");
+    let recent = CentreRecent::new(
+        galaxy,
+        model,
+        victim_count(galaxy).expect("the disruptions build"),
+    );
+    let profiles = TracerProfiles::of(model);
+    for entry in recent.list(galaxy).entries() {
+        if RecentClass::of(entry.class()) != Some(RecentClass::CoreCollapse) {
+            continue;
+        }
+        let Some(place) = recent.place(
+            galaxy,
+            model,
+            &profiles,
+            RecentClass::CoreCollapse,
+            entry.index(),
+        ) else {
+            continue;
+        };
+        let Some(kept) = place.kept(galaxy) else {
+            continue;
+        };
+        let site = kept.site().expect("a core collapse's site");
+        for t in times {
+            if let Some(at) = kicked_at(
+                galaxy,
+                (kept.member().record(), site, place.velocity()),
+                &centre_composition(),
+                t,
+            ) {
+                kicked.push((kept.member().record().id(), t, at));
+            }
+        }
+    }
+    kicked
+}
+
+/// Every 27 hold (research-leans-31, fix-p09-recent-kicks): from its death on, a listed core
+/// collapse, a feature's or the centre's, is where its remnant's kick takes it, its site plus its
+/// progenitor's velocity and its own stars' natal kick times the time since, as the class's
+/// entries move: a query of half a light-year about that place, at the epoch or at +H, returns it
+/// there once, and its placement by ID puts it there too.
+#[test]
+#[ignore = "slow: four features' and the centre's listed core collapses, queried where their kicks \
+            take them, under every 27 hold"]
+fn a_listed_core_collapse_moves_on_its_remnant_s_kick_under_every_27_hold() {
+    with_every_27_hold(|| {
+        let galaxy = milky_way(GalaxyRules::every_27_hold());
+        let kicked = kicked_entries(&galaxy, &features_asked(&galaxy, Kind::Recent));
+        eprintln!("{} kicked places", kicked.len());
+        assert!(kicked.len() > 4, "listed core collapses with kicks");
+        with_served(&galaxy, |sources, reads| {
+            let mut cells = KeepCells::default();
+            let mut faults = Vec::new();
+            for &(id, t, at) in &kicked {
+                let q = query(&at, LightYears::new(ABOUT_AN_ENTRY_LY), t, Kind::Recent);
+                let result = range_query(&galaxy, &mut cells, sources, &q);
+                let hits: Vec<_> = result.systems().iter().filter(|h| h.id() == id).collect();
+                let placed = hits
+                    .first()
+                    .and_then(|hit| placed_by_id(&galaxy, reads, hit.record(), t));
+                let agrees = match (hits.as_slice(), placed) {
+                    ([hit], Some((position, _))) => {
+                        hit.position() == &at
+                            && match id.kind() {
+                                SystemIdKind::Centre(_) => position == at,
+                                _ => at.distance_to(&position).value() <= LINE_ROUNDING_M,
+                            }
+                    }
+                    _ => false,
+                };
+                if !agrees {
+                    faults.push(format!(
+                        "{id:?} at {t:?}: {} hits about its kicked place, placed by its ID at {placed:?}",
+                        hits.len()
+                    ));
+                }
+            }
+            assert_no_faults(
+                "the kicked core collapses under every 27 hold",
+                kicked.len(),
+                &faults,
             );
         });
     });
