@@ -1567,6 +1567,42 @@ function report(played: Played, summary: SeamSummary): Record<string, unknown> {
   };
 }
 
+/**
+ * The per-frame figures' bounds on each setting (R10.T16.i), at the default knobs alone (3 workers
+ * × 41 ms, whole bakes, the lookahead on, the default morph, hold and stride): the brief's where
+ * they hold, the measure's with headroom for the lookahead's run-to-run cadence where they do not
+ * (2026-11-02; the outbox's findings: one coarsen at the survey's delta moving 3 to 4 px, and the
+ * survey mask's edge turning the normal up to 19°, which the normal's bound leaves to its p95).
+ */
+const FRAME_BOUNDS: Readonly<
+  Record<
+    QualitySetting,
+    {
+      readonly movePx: number;
+      readonly normalDegP95: number;
+      readonly popsPerS: number;
+      readonly flipFlopsPerS: number;
+      readonly appearMovePx: number;
+    }
+  >
+> = {
+  high: { movePx: 6, normalDegP95: 2, popsPerS: 1, flipFlopsPerS: 0.2, appearMovePx: 1 },
+  low: { movePx: 6, normalDegP95: 2, popsPerS: 1, flipFlopsPerS: 0.2, appearMovePx: 2 },
+};
+
+/** Whether every knob the bounds were measured at is its default ({@link FRAME_BOUNDS}). */
+const AT_DEFAULT_KNOBS =
+  COST_MS === 41 &&
+  WORKERS === 3 &&
+  DRAFT_SHARE === 1 &&
+  LOOKAHEAD &&
+  MORPH_MS === MORPH_IN_MS &&
+  FRAME_STRIDE === 8 &&
+  HZ === 60 &&
+  knob("SEAM_BUDGET_HOLD") === undefined &&
+  knob("SEAM_FROM_S") === undefined &&
+  knob("SEAM_TO_S") === undefined;
+
 /** The script's first draws on high: past the hand-over at 40.55 s. */
 const SHORT_TO_S = 42;
 
@@ -1613,6 +1649,19 @@ describe.runIf(SLOW)("the seamless probe's acceptance (HYPERION_SLOW_TESTS=1)", 
       // before the other, and the coarsen shows it (largestCoarsenPx, recorded: the rebake's
       // fade is seamless-2's).
       expect(summary.largestCoarsenLevelPx).toBeLessThanOrEqual(10);
+      // Each frame's change of the drawn ground (R10.T16.i), bound at the default knobs alone.
+      const bounds = AT_DEFAULT_KNOBS ? FRAME_BOUNDS[setting] : null;
+      const over =
+        bounds === null
+          ? []
+          : [
+              ["movePx", summary.frameMovePxMax, bounds.movePx],
+              ["normalDegP95", summary.frameNormalDeg.p95, bounds.normalDegP95],
+              ["popsPerS", summary.framePopsPerS, bounds.popsPerS],
+              ["flipFlopsPerS", summary.flipFlopsLimitedPerS, bounds.flipFlopsPerS],
+              ["appearMovePx", summary.appearMovePxMax, bounds.appearMovePx],
+            ].filter(([, value, bound]) => Number(value) > Number(bound));
+      expect(over).toEqual([]);
     },
   );
 
