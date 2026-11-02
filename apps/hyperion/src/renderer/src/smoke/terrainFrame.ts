@@ -31,7 +31,11 @@
  *   (`whollyOnTheDatum`), seen grazing it: from 10 km up at 2°, a mark 1 km behind the ground,
  *   which the terrain's depth hides (its old slope term, some 16 km there, showed it); and from
  *   2 km up at 2°, 10° and 60°, a line on the ground drawn as the survey edge is, pulled to the
- *   ground, which draws whole, where the same line not pulled loses its nearer half.
+ *   ground, which draws whole, where the same line not pulled loses its nearer half;
+ * - and its per-fragment pull, over a fourth pass wholly on the datum but for a ridge across the
+ *   view (`ridged`): from 10 km up at 2°, a line on the datum drawn as the survey edge is, behind
+ *   the ridge by less than the 3 px of the datum's depth slope every fragment was once pulled by,
+ *   draws no pixel.
  */
 
 import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
@@ -82,6 +86,7 @@ import {
   type TerrainPool,
 } from "../view/terrain/terrainPass";
 import { LIT_INTERIOR_INDICES, LIT_PATCH_INDICES } from "../view/terrain/gpu/resources";
+import { PATCH_VERTICES_PER_SIDE } from "../view/terrain/slotLayout";
 import type { BakedPatch } from "../view/terrain/workers/messages";
 import { HeightWorkerPool, type HeightWorkerLane } from "../view/terrain/workers/pool";
 import {
@@ -140,6 +145,54 @@ const BEYOND: PatchKey = { ...OVER, i: OVER.i + 1 };
  */
 function whollyOnTheDatum(bake: BakedPatch): BakedPatch {
   return { ...onTheDatum(bake), originM: datumAt(bake.key, 32, 32).p, heightRangeM: [0, 0] };
+}
+
+/** The ridge's height at its crest, m (R10.T16.c's ridge check, {@link ridged}). */
+const RIDGE_HEIGHT_M = 1_500;
+
+/** How far either side of its crest the ridge falls to the datum, m. */
+const RIDGE_HALF_WIDTH_M = 2_500;
+
+/** How much nearer the camera's foot than the edge behind it the ridge's crest stands, m. */
+const RIDGE_LEAD_M = 11_700;
+
+/**
+ * Bakes laid wholly on the datum ({@link whollyOnTheDatum}) but for a ridge across `view`: its
+ * crest {@link RIDGE_LEAD_M} nearer the camera's foot along the surface than the body-fixed point
+ * `edgeM`, {@link RIDGE_HEIGHT_M} high there and falling as cos² to the datum
+ * {@link RIDGE_HALF_WIDTH_M} either side, each vertex's own and morph heights alike. Their cluster
+ * errors, measured on the bake's own ground, are dropped, so that no cluster of the ridge is drawn
+ * coarser on them (unmeasured records are drawn whole).
+ */
+function ridged(view: Pose, edgeM: Vec3): (bake: BakedPatch) => BakedPatch {
+  const foot = normalise(view.cameraM);
+  const radiusM = norm(edgeM);
+  const alongM = (p: Vec3): number => Math.acos(Math.min(1, dot(normalise(p), foot))) * radiusM;
+  const crestM = alongM(edgeM) - RIDGE_LEAD_M;
+  return (bake) => {
+    const { clusterErrors: _clusterErrors, ...laid } = whollyOnTheDatum(bake);
+    const heights = new Float32Array(bake.heights.length);
+    let topM = 0;
+    for (let y = 0; y < PATCH_VERTICES_PER_SIDE; y += 1) {
+      for (let x = 0; x < PATCH_VERTICES_PER_SIDE; x += 1) {
+        const offM = alongM(datumAt(bake.key, x, y).p) - crestM;
+        const heightM =
+          Math.abs(offM) < RIDGE_HALF_WIDTH_M
+            ? RIDGE_HEIGHT_M * Math.cos(((Math.PI / 2) * offM) / RIDGE_HALF_WIDTH_M) ** 2
+            : 0;
+        const n = y * PATCH_VERTICES_PER_SIDE + x;
+        heights[2 * n] = heightM;
+        heights[2 * n + 1] = heightM;
+        topM = Math.max(topM, heightM);
+      }
+    }
+    return {
+      ...laid,
+      heights,
+      heightRangeM: [0, topM],
+      boundingRadiusM: bake.boundingRadiusM + topM,
+    };
+  };
 }
 
 /** A lane of the pool whose bakes are laid on the datum by `lay` before the pass takes them. */
@@ -963,8 +1016,8 @@ export async function checkTerrainFrame(
     // A line on the ground across the view along row 23's pixel centres, as the survey edge is
     // drawn (its batch's `groundCentreF32`), from 2 km up at 2°, 10° and 60°: drawn whole, every
     // pixel it draws with no terrain depth, where the same line off the ground loses its nearer
-    // half to the ground. Its 6 px are wider than the edge's cased 1 px, within the 3 px the list's
-    // slope term pulls it by.
+    // half to the ground. Its 6 px are wider than the edge's cased 1 px: each fragment of its
+    // nearer half is pulled to the datum's plane at its own pixel.
     /** The line's look at `deg`: whether it holds, and what it read. */
     const lineAt = async (
       deg: number,
@@ -1026,6 +1079,57 @@ export async function checkTerrainFrame(
       "R10.T16.c a line on the ground, as the survey edge is drawn, draws whole over grazing ground at 2°, 10° and 60°, where one off it loses its nearer half",
       looks.every(({ ok }) => ok),
       looks.map(({ read }) => read).join("; "),
+    );
+
+    // R10.T16.c's per-fragment pull: an edge on the ground behind a nearer ridge draws no pixel.
+    // From 10 km up at 2°, over a pass wholly on the datum but for a ridge across the view
+    // (`ridged`), its crest 11.7 km nearer than a line on the datum along row 23's pixel centres,
+    // drawn as the survey edge is at the views' stroke scale of 2: on the ground, 2 px with a 2 px
+    // casing. The rays through its marked pixels meet the ridge's face some 13 km in front of it,
+    // about 2.5 px of the datum's depth slope there (5.3 km): beyond the 1.7 px they are pulled by,
+    // a pixel's and their own offset's, and within the 3 px every fragment was pulled by before
+    // (this list's `occluderSlopePx`, at a stroke scale of 1; 5 in the views).
+    const ridgeEdge = [8, 32, 56].map((x) => datumOnRay(graze, x + 0.5, GRAZE_ROW + 0.5));
+    const [edgeStart, edgeMiddle, edgeEnd] = ridgeEdge;
+    if (edgeStart === undefined || edgeMiddle === undefined || edgeEnd === undefined) {
+      throw new Error("the edge has three points");
+    }
+    const ridgePass = await makePass(ridged(graze, add(graze.cameraM, edgeMiddle)));
+    const ridgeLine: LineBatch = {
+      ...markBatch("behind the ridge", edgeStart, edgeMiddle),
+      segments: Float32Array.from(
+        [edgeStart, edgeMiddle, edgeMiddle, edgeEnd].flatMap((v) => [v.x, v.y, v.z]),
+      ),
+      widthPx: 2,
+      casingWidthPx: 2,
+      groundCentreF32: Float32Array.from([-graze.cameraM.x, -graze.cameraM.y, -graze.cameraM.z]),
+    };
+    // The edge's points and the ridge's crest on the rays to them, body-fixed.
+    const ridgeNear = ridgeEdge.flatMap((p) => [
+      add(graze.cameraM, p),
+      add(graze.cameraM, scale(p, 1 - RIDGE_LEAD_M / norm(p))),
+    ]);
+    const ridgeSettled = await settled(ridgePass, mask, graze, ridgeNear);
+    await photoreal.prepare(VIEWPORT, "low", "eye", graze.camera);
+    const ridgeList = { ...emptyDrawList(viewStrokesAt(1)), lines: [ridgeLine] };
+    const behindRidge = await drawFrame(
+      ridgeList,
+      { withDepth: true, giveWay: true, pass: ridgePass, view: graze },
+      [],
+    );
+    const ridgeBare = await drawFrame(
+      ridgeList,
+      { withDepth: false, giveWay: true, pass: ridgePass, view: graze },
+      [],
+    );
+    checks.check(
+      "R10.T16.c an edge on the ground behind a nearer ridge, by less than the 3 px of slope it was once pulled by, draws no pixel, seen from 10 km up at 2°",
+      ridgeSettled.done &&
+        behindRidge.handedOver &&
+        behindRidge.depthDraws >= 1 &&
+        behindRidge.marked === 0 &&
+        ridgeBare.marked >= 40,
+      `settled ${String(ridgeSettled.done)} (${ridgeSettled.state}), handed over ${String(behindRidge.handedOver)}, ${String(behindRidge.depthDraws)} depth draws: the edge's pixels ${String(behindRidge.marked)} (by row ${behindRidge.markedRows.slice(GRAZE_ROW - 3, GRAZE_ROW + 4).join(" ")} about its row); with no terrain depth, ${String(ridgeBare.marked)}; digests ${behindRidge.digest} with depth, ${ridgeBare.digest} without`,
     );
     // The cluster path is the setting's (plan R14, R14.T1.e's choice); the scene's depth is recorded
     // where it differs, its reference surfaces' depth hiding marks on their datum.

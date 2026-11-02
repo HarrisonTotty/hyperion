@@ -237,11 +237,11 @@ export interface LineBatch {
   readonly body?: string;
   /**
    * The centre, from the camera, `f32` m along the camera frame's axes, of the body whose ground
-   * the batch is drawn on (plan R10, R10.T16.c): the survey edge's, whose depth is tested pulled
-   * towards the camera by {@link WireframeDrawList.occluderSlopePx} pixels of the datum's depth
-   * slope at each point, so that the ground it lies on stays behind it while the terrain's own
-   * depth is pushed by its constant fraction alone (`lineStroke.wgsl`'s `line_depth`); absent for
-   * every other batch.
+   * the batch is drawn on (plan R10, R10.T16.c): the survey edge's, each of whose fragments is
+   * tested at the depth the datum's plane through its point has at the fragment's pixel where that
+   * is nearer, so that the ground beneath its nearer half stays behind it while the terrain's own
+   * depth is pushed by its constant fraction alone, and a nearer ridge hides its centre line
+   * (`lineStroke.wgsl`'s `line_depth`); absent for every other batch.
    */
   readonly groundCentreF32?: Float32Array;
 }
@@ -1094,6 +1094,7 @@ export function buildWireframeDrawList(
       remPx: options.remPx,
       keepClear: lineOfSight.tripod?.segments ?? [],
       rangeFromM: own === undefined ? null : fromCamera(own.pose.position),
+      lineWidthPx: drawnPx(STROKE_PX.thin),
     });
     const segments = new Float32Array(mark.line.length + mark.ticks.length);
     segments.set(mark.line);

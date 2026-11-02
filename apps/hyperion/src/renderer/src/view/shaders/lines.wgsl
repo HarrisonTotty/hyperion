@@ -20,7 +20,8 @@ struct Draw {
   dashOnPx: f32,
   dashOffPx: f32,
   // A batch on a body's ground (R10.T16.c, `line_depth`): xyz the body's centre from the camera,
-  // m, w the list's `occluderSlopePx`; w 0 for any other batch.
+  // m, w the pixels of the datum's depth slope it is pulled by beside each fragment's own offset
+  // (`GROUND_PULL_PX`); w 0 for any other batch.
   ground: vec4f,
 }
 

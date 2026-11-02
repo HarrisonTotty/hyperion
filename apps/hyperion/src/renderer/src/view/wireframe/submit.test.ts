@@ -29,6 +29,7 @@ import {
   viewRotation4,
 } from "../camera/projection";
 import { quaternionFromAxisAngle } from "../camera/quaternion";
+import { GROUND_PULL_PX } from "../depth/groundPull";
 import { PSF_QUAD_PX, PSF_SIGMA_PX } from "../photometry/magnitude";
 import {
   type DrawCamera,
@@ -360,7 +361,7 @@ describe("packWireframe", () => {
     ]);
   });
 
-  it("pulls a batch on a body's ground by the list's slope term, about its centre, and no other (R10.T16.c)", () => {
+  it("pulls a batch on a body's ground to its datum's plane, about its centre, and no other (R10.T16.c)", () => {
     const grounded = packWireframe(
       {
         ...list,
@@ -376,8 +377,8 @@ describe("packWireframe", () => {
       .filter((d) => d.material === "lines")
       .map((d) => Array.from(d.uniforms["ground"] ?? []));
     expect(grounds).toEqual([
-      [1, 2, -3e6, 5],
-      [1, 2, -3e6, 5],
+      [1, 2, -3e6, GROUND_PULL_PX],
+      [1, 2, -3e6, GROUND_PULL_PX],
       [0, 0, 0, 0],
       [0, 0, 0, 0],
     ]);

@@ -24,6 +24,7 @@ import { type ClusterConsumer, ClusterConsumerPath } from "../clusters/consumer"
 import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
 import { CLUSTER_SHAPE_CODE } from "../clusters/record";
 import { meshClusterMesh } from "../clusters/templates";
+import { GROUND_PULL_PX } from "../depth/groundPull";
 import { BUFFER_USAGE } from "../engine/gpuFlags";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { GeometryPagePool } from "../clusters/pages";
@@ -921,7 +922,7 @@ export function packWireframe(
         dashOnPx: new Float32Array([batch.dash?.onPx ?? 0]),
         dashOffPx: new Float32Array([batch.dash?.offPx ?? 0]),
         // A batch on a body's ground pulls its depth towards the camera (R10.T16.c); w 0 for none.
-        ground: groundOf(batch, list.occluderSlopePx),
+        ground: groundOf(batch),
       };
       const offsetFromCameraM = batch.space === "view" ? batch.originF32 : ZERO_OFFSET;
       if (batch.body === undefined || datum === undefined || centre === undefined) {
@@ -964,15 +965,15 @@ export function packWireframe(
 
 /**
  * A line batch's `ground` uniform (R10.T16.c; `lineStroke.wgsl`'s `line_depth`): the centre of the
- * body whose ground it is drawn on and the slope term it is pulled by, or zeros for a batch off the
- * ground.
+ * body whose ground it is drawn on and {@link GROUND_PULL_PX}, the pull its fragments take beside
+ * each one's own to the datum's plane at its pixel, or zeros for a batch off the ground.
  */
-function groundOf(batch: LineBatch, occluderSlopePx: number): Float32Array {
+function groundOf(batch: LineBatch): Float32Array {
   const centre = batch.groundCentreF32;
   if (centre === undefined || batch.space !== "view") {
     return new Float32Array(4);
   }
-  return Float32Array.from([centre[0] ?? 0, centre[1] ?? 0, centre[2] ?? 0, occluderSlopePx]);
+  return Float32Array.from([centre[0] ?? 0, centre[1] ?? 0, centre[2] ?? 0, GROUND_PULL_PX]);
 }
 
 function centreOf(sphere: OccluderSphere): Vec3 {

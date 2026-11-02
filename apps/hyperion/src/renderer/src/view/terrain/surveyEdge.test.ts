@@ -2,7 +2,7 @@ import type { CoverDto } from "@hyperion/protocol";
 import { describe, expect, it, vi } from "vitest";
 
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
+import { NEAR_PLANE_M, type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { lookAlong } from "../camera/quaternion";
 import { IDENTITY_ROTATION } from "../coords/rotation";
 import { CoverageView, fieldCellIndex } from "./coverage";
@@ -10,6 +10,7 @@ import { faceUvToDir, stToUv } from "./cube";
 import type { Face } from "./patchKey";
 import {
   groundHidesPoint,
+  groundHidesTick,
   SURVEY_EDGE_NOTE,
   SURVEY_EDGE_TICK_REM,
   SURVEY_EDGE_TICK_SPACING_REM,
@@ -23,7 +24,12 @@ import {
 const RADIUS_M = 1e6;
 const VIEWPORT: Viewport = { widthPx: 800, heightPx: 600 };
 const REM_PX = 16;
-const OPTIONS: SurveyEdgeOptions = { remPx: REM_PX, keepClear: [], rangeFromM: null };
+const OPTIONS: SurveyEdgeOptions = {
+  remPx: REM_PX,
+  keepClear: [],
+  rangeFromM: null,
+  lineWidthPx: 2,
+};
 
 /** A level-5 coverage of the cells `(face, i, j)` given, each surveyed at code 8. */
 function surveyed(...cells: ReadonlyArray<readonly [Face, number, number]>): CoverageView {
@@ -400,6 +406,109 @@ describe("the drawn ground between the camera and an edge's point (R10.T16.c)", 
   });
 });
 
+describe("the drawn ground between the camera and a tick's foot (R10.T16.c)", () => {
+  const FIGURE = { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M };
+  // The camera 1 km over the pole, a foot on the datum 20 km away along the surface, a pixel 1 mrad.
+  const cameraM = vec3(0, 0, RADIUS_M + 1_000);
+  const footM = scale(normalise(vec3(20_000 / RADIUS_M, 0, 1)), RADIUS_M);
+  const PIXEL_RAD = 1e-3;
+  /** Half the 2 px line's width, the tolerance the mark gives the march. */
+  const TOLERANCE_PX = 1;
+  /** The along-surface distance from the pole of the point `q`, m. */
+  const alongOf = (q: Vec3): number => Math.atan2(Math.hypot(q.x, q.y), q.z) * RADIUS_M;
+  /** The line of sight's height over the datum `alongM` from the pole, and a pixel there, m. */
+  const sightAt = (alongM: number): { readonly heightM: number; readonly pixelM: number } => {
+    const back = sub(cameraM, footM);
+    let low = 0;
+    let high = 1;
+    for (let step = 0; step < 60; step += 1) {
+      const mid = (low + high) / 2;
+      if (alongOf(add(footM, scale(back, mid))) > alongM) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+    const q = add(footM, scale(back, low));
+    return { heightM: norm(q) - RADIUS_M, pixelM: norm(sub(cameraM, q)) * PIXEL_RAD };
+  };
+  /** Ground `px` pixels above the line of sight between 9 and 11 km from the pole, datum elsewhere. */
+  const ridge = (px: number): { heightAtM: (d: Vec3) => number; ceilingM: number } => ({
+    heightAtM: (d) => {
+      const alongM = alongOf(d);
+      if (alongM < 9_000 || alongM > 11_000) {
+        return 0;
+      }
+      const { heightM, pixelM } = sightAt(alongM);
+      return heightM + px * pixelM;
+    },
+    ceilingM: 1_000,
+  });
+
+  it("hides a foot behind a ridge standing more than a pixel above its line of sight", () => {
+    expect(groundHidesTick(cameraM, footM, FIGURE, ridge(2), PIXEL_RAD, TOLERANCE_PX)).toBe(true);
+  });
+
+  it("hides no foot behind a ridge within a pixel of its line of sight", () => {
+    expect(groundHidesTick(cameraM, footM, FIGURE, ridge(0.5), PIXEL_RAD, TOLERANCE_PX)).toBe(
+      false,
+    );
+  });
+
+  it("hides no foot where no ground is drawn", () => {
+    expect(
+      groundHidesTick(
+        cameraM,
+        footM,
+        FIGURE,
+        { heightAtM: () => null, ceilingM: 0 },
+        PIXEL_RAD,
+        TOLERANCE_PX,
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    { name: "a sphere", a: RADIUS_M, c: RADIUS_M, latDeg: 90 },
+    { name: "an Earth's spheroid, at 45°", a: 6_378_137, c: 6_356_752.3, latDeg: 45 },
+  ])(
+    "hides no foot over flat ground on $name with the camera inside the ground's highest shell",
+    ({ a, c, latDeg }) => {
+      // The camera 1 km over the datum, the shell 2 km above the equatorial radius; feet on the
+      // datum 2 to 30 km away along the meridian, each its line of sight marched to the camera.
+      const figure = { equatorialRadiusM: a, polarRadiusM: c };
+      const pointAt = (lat: number, upM: number): Vec3 => {
+        const d = normalise(vec3(Math.cos(lat), 0, Math.sin(lat)));
+        const datum = vec3(a * d.x, a * d.y, c * d.z);
+        return add(datum, scale(normalise(vec3(d.x / a, d.y / a, d.z / c)), upM));
+      };
+      const lat = (latDeg * Math.PI) / 180;
+      const camera = pointAt(lat, 1_000);
+      const hidden = Array.from({ length: 2_000 }, (_, k) =>
+        groundHidesTick(
+          camera,
+          pointAt(lat - (2_000 + 14 * k) / a, 0),
+          figure,
+          { heightAtM: () => 0, ceilingM: 2_000 },
+          PIXEL_RAD,
+          TOLERANCE_PX,
+        ),
+      ).filter(Boolean);
+      expect(hidden).toEqual([]);
+    },
+  );
+
+  it("reads no ground within its line's footprint before the foot", () => {
+    // A wall 100 m high from 19.8 km to the foot: within a pixel of the datum's depth slope, 330 m.
+    const wall = {
+      heightAtM: (d: Vec3): number =>
+        Math.atan2(Math.hypot(d.x, d.y), d.z) * RADIUS_M >= 19_800 ? 100 : 0,
+      ceilingM: 100,
+    };
+    expect(groundHidesTick(cameraM, footM, FIGURE, wall, PIXEL_RAD, TOLERANCE_PX)).toBe(false);
+  });
+});
+
 describe("the survey edge's note counts only the points the operator can see (R10.T16.c)", () => {
   it("gives the same range where the drawn ground hides nothing", () => {
     const { view, camera } = viewOf(surveyed([0, 16, 16]), 200_000);
@@ -469,6 +578,123 @@ describe("the survey edge's note counts only the points the operator can see (R1
     const seen = surveyEdgeMark({ ...view, ground }, camera, VIEWPORT, OPTIONS);
     expect(seen.nearestRangeM).not.toBeNull();
     expect(seen.nearestRangeM ?? 0).toBeGreaterThan((bare.nearestRangeM ?? 0) + 10);
+  });
+});
+
+/** How many ticks a mark draws. */
+function ticksOf(mark: { readonly ticks: Float32Array }): number {
+  return mark.ticks.length / 6;
+}
+
+describe("the survey edge's pieces over a bump in its rim (R10.T16.c)", () => {
+  // A bump in the rim at the middle of the cell's side at t = 16, a Gaussian 1 km wide along it.
+  const middle = faceUvToDir(0, stToUv(16.5 / 32), stToUv(16 / 32));
+  const bump =
+    (heightM: number): ((d: Vec3) => number) =>
+    (d) => {
+      const offM = Math.acos(Math.min(1, dot(normalise(d), middle))) * RADIUS_M;
+      return heightM * Math.exp(-((offM / 1_000) ** 2) / 2);
+    };
+  const piecesOf = (heightM: number | null): number => {
+    const { view, camera } = viewOf(surveyed([0, 16, 16]), 200_000);
+    const rim = heightM === null ? view : { ...view, heightAtM: bump(heightM) };
+    return surveyEdgeMark(rim, camera, VIEWPORT, OPTIONS).line.length / 6;
+  };
+
+  it("halves the pieces whose middle stands more than half a pixel off their chord", () => {
+    // 5 km high, the rim's points move some 2 px on the view, its curve sharp across a piece.
+    expect(piecesOf(5_000)).toBeGreaterThan(piecesOf(null));
+  });
+
+  it("leaves the pieces whole where the rim's curve stays within half a pixel of their chords", () => {
+    // 0.2 km high, the rim's points move a tenth of a pixel at the most.
+    expect(piecesOf(200)).toBe(piecesOf(null));
+  });
+});
+
+describe("the survey edge's ticks seen obliquely (R10.T16.c)", () => {
+  // The camera 50 km over cell (16, 14), looking at cell (16, 16)'s centre, so that the ticks of
+  // the cell's nearer side point towards the camera, over nearer ground.
+  const up = cellCentre(0, 16, 14);
+  const cameraM = scale(up, RADIUS_M + 50_000);
+  const targetM = scale(cellCentre(0, 16, 16), RADIUS_M);
+  const view: SurveyEdgeView = {
+    body: "test",
+    coverage: surveyed([0, 16, 16]),
+    figure: { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M },
+    rotation: IDENTITY_ROTATION,
+    centreM: scale(cameraM, -1),
+    heightAtM: () => null,
+  };
+  const camera = { orientation: lookAlong(normalise(sub(targetM, cameraM)), up), fovXRad: 1 };
+  const ticks = segmentsOf(surveyEdgeMark(view, camera, VIEWPORT, OPTIONS).ticks);
+  /**
+   * How far a tick's end stands off the plane through its foot parallel to the datum's, m: its
+   * `f32` ends 50 km out are some 4 mm apart.
+   */
+  const offPlaneM = ([foot, end]: readonly [Vec3, Vec3]): number =>
+    Math.abs(dot(sub(end, foot), normalise(sub(foot, view.centreM))));
+  /** How much nearer the camera a tick's end stands than its foot, along the view's axis, m. */
+  const nearerM = ([foot, end]: readonly [Vec3, Vec3]): number =>
+    project(foot, camera, VIEWPORT).depth > 0
+      ? NEAR_PLANE_M / project(foot, camera, VIEWPORT).depth -
+        NEAR_PLANE_M / project(end, camera, VIEWPORT).depth
+      : 0;
+
+  it("lays each tick towards nearer ground on the plane through its foot, the plane its line is pulled to", () => {
+    const towards = ticks.filter((tick) => nearerM(tick) > 1);
+    expect([towards.length > 0, towards.every((tick) => offPlaneM(tick) < 0.05)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("keeps every tick the guide's length on the view", () => {
+    const lengths = ticks.map(([foot, end]) => {
+      const a = project(foot, camera, VIEWPORT);
+      const b = project(end, camera, VIEWPORT);
+      return Math.hypot(b.xPx - a.xPx, b.yPx - a.yPx);
+    });
+    expect(lengths.every((px) => Math.abs(px - SURVEY_EDGE_TICK_REM * REM_PX) < 1e-3)).toBe(true);
+  });
+});
+
+describe("the survey edge's ticks behind nearer ground (R10.T16.c)", () => {
+  // The camera 200 km over a point of the cell nearer its west side, and a tower halfway to the
+  // line's nearest point, which hides that stretch of it.
+  const up = faceUvToDir(0, stToUv(16.2 / 32), stToUv(16.5 / 32));
+  const cameraM = scale(up, RADIUS_M + 200_000);
+  const view: SurveyEdgeView = {
+    body: "test",
+    coverage: surveyed([0, 16, 16]),
+    figure: { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M },
+    rotation: IDENTITY_ROTATION,
+    centreM: scale(cameraM, -1),
+    heightAtM: () => null,
+  };
+  const camera = { orientation: lookAlong(scale(up, -1), vec3(0, 0, 1)), fovXRad: Math.PI / 3 };
+  const tower = normalise(add(up, nearestPointDir(view, camera)));
+  const ground = {
+    heightAtM: (d: Vec3): number =>
+      Math.acos(Math.min(1, dot(normalise(d), tower))) * RADIUS_M < 3_000 ? 180_000 : 0,
+    ceilingM: 180_000,
+  };
+  const bare = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
+  const behind = surveyEdgeMark({ ...view, ground }, camera, VIEWPORT, OPTIONS);
+
+  it("leaves out the ticks whose feet the nearer tower hides, and keeps others", () => {
+    expect([ticksOf(behind) > 0, ticksOf(behind) < ticksOf(bare)]).toEqual([true, true]);
+  });
+
+  it("draws the line behind the tower whole, for the depth test to hide", () => {
+    expect(behind.line).toEqual(bare.line);
+  });
+
+  it("keeps every tick over ground that hides none of them", () => {
+    const flat = { heightAtM: () => 0, ceilingM: 1_000 };
+    expect(surveyEdgeMark({ ...view, ground: flat }, camera, VIEWPORT, OPTIONS).ticks).toEqual(
+      bare.ticks,
+    );
   });
 });
 

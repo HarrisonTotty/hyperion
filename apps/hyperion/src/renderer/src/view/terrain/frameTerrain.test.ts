@@ -996,7 +996,7 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
       edge,
       { orientation: POSE.orientation, fovXRad: DRAW_CAMERA.fovXRad },
       VIEWPORT,
-      { remPx: 16, keepClear: [], rangeFromM: null },
+      { remPx: 16, keepClear: [], rangeFromM: null, lineWidthPx: 2 },
     );
     const a = edge.figure.equatorialRadiusM;
     const c = edge.figure.polarRadiusM;

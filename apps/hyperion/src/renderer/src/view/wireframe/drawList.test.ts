@@ -1465,6 +1465,7 @@ function edgeTicksPx(list: WireframeDrawList): ScreenSegment[] {
       remPx: 16,
       keepClear: [],
       rangeFromM: null,
+      lineWidthPx: 2,
     }).line.length / 6;
   const s = edgeOf(list)?.segments ?? new Float32Array(0);
   const at = (i: number): { xPx: number; yPx: number } => {

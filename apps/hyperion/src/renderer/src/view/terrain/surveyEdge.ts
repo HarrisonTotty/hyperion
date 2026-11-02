@@ -17,8 +17,9 @@
  * side to the crossing, and at the near plane, where the piece is a straight segment in view space
  * cut at its view depth, so that the line runs on to the view's edge beneath a ship low over it.
  * The line and the ticks are view-space segments, so that the draw's depth test hides them behind
- * nearer ground (R02's lines). The first view to draw a body's terrain (R10.T10.e's hand-over,
- * T11's wireframe) gives the view its coverage and heights; R10.T16.c lists the note
+ * nearer ground (R02's lines), and a tick whose foot that ground hides is left out, so that none
+ * stands alone over a ridge (R10.T16.c). The first view to draw a body's terrain (R10.T10.e's
+ * hand-over, T11's wireframe) gives the view its coverage and heights; R10.T16.c lists the note
  * (decision-r10-t16-review §1), and T12 draws the line-of-sight mark the ticks keep clear of.
  *
  * The note's range counts only the points the operator can see (plan R10, R10.T16.c; the
@@ -39,6 +40,7 @@ import {
   type Viewport,
 } from "../camera/projection";
 import { rotationRows } from "../camera/quaternion";
+import { GROUND_PULL_PX } from "../depth/groundPull";
 import { narrow } from "../coords/narrow";
 import { type Rotation3, rotateToBody, rotateToBodyFixed } from "../coords/rotation";
 import { type ScreenPx, type ScreenSegment, segmentDistancePx } from "../wireframe/symbology";
@@ -64,6 +66,14 @@ export const SURVEY_EDGE_TICK_CLEARANCE_REM = 0.5;
  * from its chords by a small part of a pixel.
  */
 export const SURVEY_EDGE_PIECE_PX = 8;
+
+/**
+ * How far a piece's middle may stand off its chord on the view, device px (plan R10, R10.T16.c): a
+ * piece is halved past it, so that the line stays within the ground pull's pixel
+ * (`GROUND_PULL_PX`) of the drawn ground beneath it. Its 8 px chords sagged by up to 0.9 px at the
+ * 99th percentile under the drawn ground of TERRAIN TEST's 248 s look, and 2 px at the most.
+ */
+export const SURVEY_EDGE_SAG_PX = 0.5;
 
 /**
  * The pieces a side is first cut into where an end lies off the view, behind the camera or below
@@ -92,6 +102,20 @@ export const SIGHT_SAMPLES = 32;
  * nothing.
  */
 export const SIGHT_TOLERANCE_M = 1;
+
+/**
+ * The samples a tick's foot's line of sight is marched in (plan R10, R10.T16.c), from beyond its
+ * stroke's footprint out to where it enters the ground's highest shell, each a fixed ratio farther
+ * from the foot than the last: a ridge 300 m before a foot 7 km out, as on TERRAIN TEST's 248 s
+ * look, is sampled some 30 m apart.
+ */
+export const TICK_SIGHT_SAMPLES = 48;
+
+/**
+ * The golden-section steps that read the crest about the highest sample of a tick's line of sight
+ * (plan R10, R10.T16.c): 8, to 0.05 of the spacing between its neighbours.
+ */
+export const TICK_SIGHT_REFINEMENTS = 8;
 
 /**
  * The most drawn pieces' nearest points tested for sight, nearest first: a hand cap on the note's
@@ -152,6 +176,15 @@ export interface SurveyEdgeOptions {
    * `null` with none, from the camera (the list's ranges, Design note 17 of R02).
    */
   readonly rangeFromM: Vec3 | null;
+  /**
+   * The line's drawn width, device px: the list's thin stroke at its stroke scale. A tick is left
+   * out where nearer drawn ground stands more than half of it above its foot's line of sight
+   * (R10.T16.c, {@link groundHidesTick}): where the line's stroke is hidden beneath it, past the
+   * resident heights' differences from the drawn triangles. On TERRAIN TEST's 248 s look, its 2 px
+   * line's two ticks standing alone over a ridge stood 1.05 and 1.34 px under it, and every tick
+   * on a drawn line at most 0.65 px (lean, 2026-11-02).
+   */
+  readonly lineWidthPx: number;
 }
 
 /** A survey edge's mark on one view. */
@@ -403,10 +436,17 @@ function onViewport(
  * the edge. A tick stands at every {@link SURVEY_EDGE_TICK_SPACING_REM} of a drawn run's length on
  * the view, the first half a spacing from the run's start, at right angles to the line on the view
  * and {@link SURVEY_EDGE_TICK_REM} long, towards the side the unsurveyed cell lies on there; its
- * far end is placed at its foot's depth, so that its length on the view is the guide's. Only the
- * ticks within a tick's length of the view are placed. A tick any of which would come within
+ * far end is placed on its foot's ray to that pixel, so that its length on the view is the
+ * guide's: at its foot's depth, or where that lies beyond the plane through the foot parallel to
+ * the datum's tangent plane there, towards nearer ground, on that plane, which its line is pulled
+ * to. A piece in the view is halved too where its middle stands more than
+ * {@link SURVEY_EDGE_SAG_PX} off its chord there. Only the ticks within a tick's length of the
+ * view are placed. A tick any of which would come within
  * {@link SURVEY_EDGE_TICK_CLEARANCE_REM} of the line-of-sight mark's ticks, segment to segment on
- * the view, is left out. The line is never dashed.
+ * the view, is left out, and so is one whose foot nearer drawn ground hides
+ * ({@link groundHidesTick}): the depth test hides its line there, but not the part of it that
+ * stands above the ridge's skyline, at its foot's depth over the farther ground. The line is never
+ * dashed.
  */
 export function surveyEdgeMark(
   view: SurveyEdgeView,
@@ -531,13 +571,38 @@ export function surveyEdgeMark(
         // The segment's point that lands u of the way along it on the view: 1 ÷ w is linear there.
         const t = (u * wp) / (u * wp + (1 - u) * wq);
         const footM = add(pM, scale(sub(qM, pM), t));
+        // Left out where nearer drawn ground hides its foot, so that none stands alone over a ridge
+        // that hides its line (R10.T16.c).
+        if (
+          view.ground !== undefined &&
+          groundHidesTick(
+            cameraBodyFixedM,
+            rotateToBodyFixed(rotation, sub(footM, centreM)),
+            figure,
+            view.ground,
+            2 / (s * viewport.widthPx),
+            options.lineWidthPx / 2,
+          )
+        ) {
+          continue;
+        }
         // A view offset of (Δx, Δy) px at a point w along the view's axis is (Δx, −Δy) × 2w ÷ (s W)
         // along the camera's right and up axes (`project`'s inverse at that depth).
         const metresPerPx = (2 * depthOf(footM)) / (s * viewport.widthPx);
-        const endM = add(
+        const atFootM = add(
           footM,
           add(scale(right, tickPx * nx * metresPerPx), scale(up, -tickPx * ny * metresPerPx)),
         );
+        // A tick towards nearer ground lies on the plane through its foot parallel to the datum's
+        // tangent plane there, the plane its line is pulled to (R10.T16.c), so that the ground
+        // beneath it does not cut it short; one towards farther ground stays at its foot's depth,
+        // so that no ground beyond the edge cuts it either. Its length on the view is the same.
+        const normalM = normalise(sub(footM, centreM));
+        const toPlane = dot(footM, normalM) / dot(atFootM, normalM);
+        const endM =
+          toPlane > 0 && toPlane < 1 && toPlane * depthOf(atFootM) >= NEAR_PLANE_M
+            ? scale(atFootM, toPlane)
+            : atFootM;
         pushSegment(ticks, footM, endM);
       }
     }
@@ -592,7 +657,6 @@ export function surveyEdgeMark(
     const qs = screenOf(qM);
     if (
       splits < MAX_SPLITS &&
-      Math.hypot(qs.xPx - ps.xPx, qs.yPx - ps.yPx) > SURVEY_EDGE_PIECE_PX &&
       insideView(
         toViewAxes(pM, camera.orientation),
         toViewAxes(qM, camera.orientation),
@@ -601,9 +665,17 @@ export function surveyEdgeMark(
       ) !== null
     ) {
       const mid = pointAt(side, (p.t + q.t) / 2);
-      piece(side, p, mid, splits + 1);
-      piece(side, mid, q, splits + 1);
-      return;
+      const sags =
+        p.wM >= NEAR_PLANE_M &&
+        q.wM >= NEAR_PLANE_M &&
+        mid.wM >= NEAR_PLANE_M &&
+        mid.above &&
+        offChordPx(screenOf(mid.fromCameraM), ps, qs) > SURVEY_EDGE_SAG_PX;
+      if (sags || Math.hypot(qs.xPx - ps.xPx, qs.yPx - ps.yPx) > SURVEY_EDGE_PIECE_PX) {
+        piece(side, p, mid, splits + 1);
+        piece(side, mid, q, splits + 1);
+        return;
+      }
     }
     if (p.wM < NEAR_PLANE_M) {
       gap();
@@ -734,6 +806,140 @@ export function groundHidesPoint(
     }
   }
   return false;
+}
+
+/**
+ * Whether nearer drawn ground hides a tick's foot from the camera (plan R10, R10.T16.c).
+ *
+ * @remarks
+ * The foot's line of sight is marched in {@link TICK_SIGHT_SAMPLES} from beyond the ground its
+ * line's centre is pulled over, `GROUND_PULL_PX` of the datum's depth slope before the foot, where
+ * the resident heights' coarse copy of a wholly surveyed bake differs most from the rim's, out to
+ * where it enters the shell of the ground's highest, short of the camera, and the highest sample's
+ * crest is read in {@link TICK_SIGHT_REFINEMENTS} steps between its neighbours: a point is hidden
+ * where it stands more than `tolerancePx` at its distance below the drawn ground over it, as
+ * {@link groundHidesPoint} measures it. No foot is hidden where no ground stands above
+ * the datum, or whose line of sight grazes the datum's plane there or passes under it.
+ *
+ * @param cameraM - The camera from the body's centre, body-fixed, m.
+ * @param footM - The tick's foot from the body's centre, body-fixed, m.
+ * @param pixelRad - A pixel's angle at the view's centre, rad.
+ * @param tolerancePx - How far the ground must stand above the line of sight to hide the foot, px
+ *   at its distance: half the line's drawn width ({@link SurveyEdgeOptions.lineWidthPx}).
+ */
+export function groundHidesTick(
+  cameraM: Vec3,
+  footM: Vec3,
+  figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">,
+  ground: SurveyEdgeGround,
+  pixelRad: number,
+  tolerancePx: number,
+): boolean {
+  const topM = ground.ceilingM;
+  if (!(topM > 0)) {
+    return false;
+  }
+  const a = figure.equatorialRadiusM;
+  const c = figure.polarRadiusM;
+  const back = sub(cameraM, footM);
+  const rangeM = norm(back);
+  const sight = scale(back, 1 / rangeM);
+  const footDirection = normalise(vec3(footM.x / a, footM.y / a, footM.z / c));
+  const up = normalise(vec3(footDirection.x / a, footDirection.y / a, footDirection.z / c));
+  const sinGrazing = dot(sight, up);
+  if (!(sinGrazing > 0)) {
+    return false;
+  }
+  const fromM = (GROUND_PULL_PX * rangeM * pixelRad) / sinGrazing;
+  // Out to where the line of sight, from the foot, leaves the shell: the nearer root, from the
+  // camera, of |C + t (F − C)|² = shell², where the camera stands outside it.
+  let toM = rangeM;
+  const shellM = a + topM;
+  const outside = dot(cameraM, cameraM) - shellM * shellM;
+  if (outside > 0) {
+    const d = scale(back, -1);
+    const qa = dot(d, d);
+    const qb = 2 * dot(cameraM, d);
+    const discriminant = qb * qb - 4 * qa * outside;
+    if (!(discriminant > 0)) {
+      return false;
+    }
+    toM = (1 - Math.max(0, (-qb - Math.sqrt(discriminant)) / (2 * qa))) * rangeM;
+  }
+  if (!(fromM < toM)) {
+    return false;
+  }
+  // How far the drawn ground stands above the line of sight `deltaM` before the foot, px there.
+  const aboveSightPx = (deltaM: number): number => {
+    const q = add(footM, scale(sight, deltaM));
+    const direction = normalise(vec3(q.x / a, q.y / a, q.z / c));
+    const datum = vec3(a * direction.x, a * direction.y, c * direction.z);
+    const normal = normalise(vec3(direction.x / a, direction.y / a, direction.z / c));
+    const heightM = dot(sub(q, datum), normal);
+    const fromCameraM = rangeM - deltaM;
+    // At the camera, or a rounding past it, nothing hides the foot.
+    if (!(fromCameraM > 0)) {
+      return -Infinity;
+    }
+    return ((ground.heightAtM(direction) ?? 0) - heightM) / (fromCameraM * pixelRad);
+  };
+  const ratio = (toM / fromM) ** (1 / (TICK_SIGHT_SAMPLES - 1));
+  let bestPx = -Infinity;
+  let bestM = fromM;
+  let deltaM = fromM;
+  for (let k = 0; k < TICK_SIGHT_SAMPLES; k += 1) {
+    const px = aboveSightPx(deltaM);
+    if (px > tolerancePx) {
+      return true;
+    }
+    if (px > bestPx) {
+      bestPx = px;
+      bestM = deltaM;
+    }
+    deltaM *= ratio;
+  }
+  if (!(bestPx > 0)) {
+    return false;
+  }
+  // The highest sample's crest between its neighbours, by golden section, so that a ridge narrower
+  // than the samples' spacing is read at its top.
+  let low = Math.max(fromM, bestM / ratio);
+  let high = Math.min(toM, bestM * ratio);
+  const golden = (Math.sqrt(5) - 1) / 2;
+  let x1 = high - golden * (high - low);
+  let x2 = low + golden * (high - low);
+  let f1 = aboveSightPx(x1);
+  let f2 = aboveSightPx(x2);
+  for (let step = 0; step < TICK_SIGHT_REFINEMENTS; step += 1) {
+    if (Math.max(f1, f2) > tolerancePx) {
+      return true;
+    }
+    if (f1 > f2) {
+      high = x2;
+      x2 = x1;
+      f2 = f1;
+      x1 = high - golden * (high - low);
+      f1 = aboveSightPx(x1);
+    } else {
+      low = x1;
+      x1 = x2;
+      f1 = f2;
+      x2 = low + golden * (high - low);
+      f2 = aboveSightPx(x2);
+    }
+  }
+  return Math.max(f1, f2) > tolerancePx;
+}
+
+/** How far `m` stands from the line through `a` and `b` on the view, px; from `a` where they meet. */
+function offChordPx(m: ScreenPx, a: ScreenPx, b: ScreenPx): number {
+  const dx = b.xPx - a.xPx;
+  const dy = b.yPx - a.yPx;
+  const lengthPx = Math.hypot(dx, dy);
+  if (!(lengthPx > 1e-9)) {
+    return Math.hypot(m.xPx - a.xPx, m.yPx - a.yPx);
+  }
+  return Math.abs(dx * (m.yPx - a.yPx) - dy * (m.xPx - a.xPx)) / lengthPx;
 }
 
 /** The camera's right and up axes in its frame's axes: its orientation's first two columns. */

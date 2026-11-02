@@ -19,6 +19,11 @@ struct LineVarying {
   // by its ends: for a view batch, read where a line is discarded over a body's surveyed ground
   // (linesSurveyed.wgsl, R10.T11).
   @location(4) chordM: vec3f,
+  // The stroke's unit normal on the view, px, y down: the direction `across` is measured along
+  // (R10.T16.c, `line_depth`).
+  @location(5) @interpolate(flat) normalPx: vec2f,
+  // The segment's reversed depth at its two ends as drawn, clipped to the near plane (`line_depth`).
+  @location(6) @interpolate(flat) endDepths: vec2f,
 }
 
 // The coverage's antialiasing fringe beyond the stroke's half-width, px.
@@ -60,6 +65,8 @@ fn line_vertex(corner: vec3f, instance: u32) -> LineVarying {
     out.lengthPx = 0.0;
     out.dashPx = 0.0;
     out.chordM = vec3f(0.0);
+    out.normalPx = vec2f(0.0);
+    out.endDepths = vec2f(0.0);
     return out;
   }
   var pa = a.xyz;
@@ -94,6 +101,8 @@ fn line_vertex(corner: vec3f, instance: u32) -> LineVarying {
   out.lengthPx = lengthPx;
   out.dashPx = a.w + out.along;
   out.chordM = draw.offsetFromCameraM + mix(pa, pb, endT);
+  out.normalPx = normal;
+  out.endDepths = vec2f(ca.z / ca.w, cb.z / cb.w);
   return out;
 }
 
@@ -114,13 +123,19 @@ fn line_coverage(v: LineVarying) -> f32 {
 }
 
 // The depth a fragment of a stroke is tested at (plan R10, R10.T16.c): its own, or for a batch
-// drawn on a body's ground (the survey edge; `draw.ground.w` the list's `occluderSlopePx`, 0 for
-// any other batch, `draw.ground.xyz` the body's centre from the camera) pulled towards the camera
-// by that many pixels of the screen slope the datum's tangent plane at its point has in depth, so
-// that the ground it lies on, and the nearer ground beneath its own width, stay behind it while the
-// terrain's depth is pushed by its constant fraction alone (`groundPull.ts`' twin). Under the
-// reversed, infinite projection a plane's depth n (r . N) / (Q . N) is affine in the ray r, so its
-// slope is n / |Q . N| times the plane's tilt into the screen's two axes.
+// drawn on a body's ground (the survey edge; `draw.ground.w` `GROUND_PULL_PX`, 0 for any other
+// batch, `draw.ground.xyz` the body's centre from the camera) its segment's at the point the
+// fragment lies across from, pulled to the depth that the plane through that point, parallel to the
+// datum's tangent plane there, has at the fragment's own pixel, where that is nearer, the plane's
+// depth gradient across the fragment's offset from the point, and by `draw.ground.w` pixels of the
+// plane's depth slope besides, for the rim drawn off the drawn ground. The ground beneath the
+// stroke's nearer half then stays behind it while the terrain's depth is pushed by its constant
+// fraction alone, and a nearer ridge hides its centre line by more than that pixel
+// (`groundPull.ts`' twin). A segment's reversed depth is affine along it on the view, so the
+// point's is its ends' mixed by its place along it; the quad's own, interpolated over its round
+// caps too, stands a part of a cap's length off it. Under the reversed, infinite projection a
+// plane's depth n (r . N) / (Q . N) is affine in the ray r, so its gradient is n / (Q . N) times
+// the plane's tilt into the screen's two axes, y down on the view.
 fn line_depth(v: LineVarying) -> f32 {
   if (!(draw.ground.w > 0.0)) {
     return v.position.z;
@@ -128,11 +143,16 @@ fn line_depth(v: LineVarying) -> f32 {
   let up = normalize(v.chordM - draw.ground.xyz);
   let q = (frame.viewRotation * vec4f(v.chordM, 0.0)).xyz;
   let n = (frame.viewRotation * vec4f(up, 0.0)).xyz;
-  let heightM = max(abs(dot(q, n)), 1e-6);
-  let tilt = vec2f(
+  let qn = dot(q, n);
+  let heightM = select(-1.0, 1.0, qn >= 0.0) * max(abs(qn), 1e-6);
+  let gradient = frame.clipProjection[3][2] / heightM * vec2f(
     n.x * 2.0 / (frame.viewport.x * frame.clipProjection[0][0]),
-    n.y * 2.0 / (frame.viewport.y * frame.clipProjection[1][1]),
+    -n.y * 2.0 / (frame.viewport.y * frame.clipProjection[1][1]),
   );
-  let slope = frame.clipProjection[3][2] / heightM * length(tilt);
-  return min(v.position.z + draw.ground.w * slope, 1.0);
+  let u = clamp(v.along, 0.0, v.lengthPx);
+  let point = mix(v.endDepths.x, v.endDepths.y, u / max(v.lengthPx, 1e-6));
+  // From the point to the fragment, px: along the segment past a cap's end, and across it.
+  let unit = vec2f(v.normalPx.y, -v.normalPx.x);
+  let offset = unit * (v.along - u) + v.normalPx * v.across;
+  return min(point + draw.ground.w * length(gradient) + max(dot(gradient, offset), 0.0), 1.0);
 }
