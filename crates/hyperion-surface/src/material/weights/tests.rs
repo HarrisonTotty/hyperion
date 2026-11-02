@@ -167,15 +167,24 @@ fn polar_exceedance(mean: f64, variance: f64, threshold: f64) -> f64 {
     1.0 - sum * h / 3.0
 }
 
+/// Both of the steepness tails' rules: the quadrature held below 27, and 27's Q₁
+/// ([`STEEPNESS_TAILS_VERSION`]).
+const TAILS: [SteepnessTailsRules; 2] =
+    [SteepnessTailsRules::Quadrature, SteepnessTailsRules::Marcum];
+
 #[test]
 fn material_weights_the_rayleigh_tail_at_a_zero_mean() {
-    for (variance, threshold) in [(0.01, 0.84), (0.3, 0.84), (1.0, 0.1), (4.0, 1.73)] {
-        let expected = math::exp(-threshold * threshold / (2.0 * variance));
-        let got = exceedance(0.0, variance, threshold);
-        assert!(
-            (got - expected).abs() < 1e-9,
-            "{variance} {threshold}: {got} against {expected}"
-        );
+    for rules in TAILS {
+        with_steepness_tails(rules, || {
+            for (variance, threshold) in [(0.01, 0.84), (0.3, 0.84), (1.0, 0.1), (4.0, 1.73)] {
+                let expected = math::exp(-threshold * threshold / (2.0 * variance));
+                let got = exceedance(0.0, variance, threshold);
+                assert!(
+                    (got - expected).abs() < 1e-9,
+                    "{rules:?}, {variance} {threshold}: {got} against {expected}"
+                );
+            }
+        });
     }
 }
 
@@ -196,13 +205,15 @@ fn material_weights_the_exceedance_matches_an_independent_polar_sum() {
                 math::tan(CLIFF_SLOPE.value()),
                 math::tan(SNOW_SHED_SLOPE.value()),
             ] {
-                let got = exceedance(mean, variance, threshold);
                 let expected = polar_exceedance(mean, variance, threshold);
-                worst = worst.max((got - expected).abs());
-                assert!(
-                    (got - expected).abs() < 1e-6,
-                    "m {mean}, v {variance}, t {threshold}: {got} against {expected}"
-                );
+                for rules in TAILS {
+                    let got = with_steepness_tails(rules, || exceedance(mean, variance, threshold));
+                    worst = worst.max((got - expected).abs());
+                    assert!(
+                        (got - expected).abs() < 1e-6,
+                        "{rules:?}, m {mean}, v {variance}, t {threshold}: {got} against {expected}"
+                    );
+                }
             }
         }
     }
@@ -211,20 +222,114 @@ fn material_weights_the_exceedance_matches_an_independent_polar_sum() {
 
 #[test]
 fn material_weights_the_exceedance_falls_with_the_threshold_and_rises_with_the_mean() {
-    for variance in [1e-3, 0.05, 0.5] {
-        let mut last = 1.0;
-        for k in 1..=40 {
-            let p = exceedance(0.5, variance, 0.05 * f64::from(k));
-            assert!(p <= last + 1e-9, "{variance} at {k}: {p} after {last}");
-            last = p;
-        }
-        let mut last = 0.0;
-        for k in 0..=40 {
-            let p = exceedance(0.05 * f64::from(k), variance, 0.84);
-            assert!(p >= last - 1e-9, "{variance} at {k}: {p} after {last}");
-            last = p;
+    for rules in TAILS {
+        with_steepness_tails(rules, || {
+            for variance in [1e-3, 0.05, 0.5] {
+                let mut last = 1.0;
+                for k in 1..=40 {
+                    let p = exceedance(0.5, variance, 0.05 * f64::from(k));
+                    assert!(
+                        p <= last + 1e-9,
+                        "{rules:?}, {variance} at {k}: {p} after {last}"
+                    );
+                    last = p;
+                }
+                let mut last = 0.0;
+                for k in 0..=40 {
+                    let p = exceedance(0.05 * f64::from(k), variance, 0.84);
+                    assert!(
+                        p >= last - 1e-9,
+                        "{rules:?}, {variance} at {k}: {p} after {last}"
+                    );
+                    last = p;
+                }
+            }
+        });
+    }
+}
+
+#[test]
+fn material_weights_the_steepness_tails_are_held_only_until_the_27_bump() {
+    use SteepnessTailsRules::{Marcum, Quadrature};
+    assert!(
+        GENERATOR_VERSION < STEEPNESS_TAILS_VERSION,
+        "the 26 → 27 bump takes the steepness tails by Marcum's Q₁ (R10.T6.a): delete \
+         `STEEPNESS_TAILS_VERSION`, `SteepnessTailsRules` with its `Quadrature` arm, \
+         `exceedance_by_quadrature` with its constants, the tests' `with_steepness_tails`, its \
+         switch in the sim's `with_every_27_hold`, the tests' both-rules loops and this test; \
+         re-bless the movers R10.T6.a's record lists"
+    );
+    assert_eq!(SteepnessTailsRules::in_force(), Quadrature);
+    assert_eq!(
+        with_steepness_tails(Marcum, SteepnessTailsRules::in_force),
+        Marcum
+    );
+    assert_eq!(SteepnessTailsRules::in_force(), Quadrature);
+}
+
+/// Marcum's Q₁ at points of the class weights' domain and about it, at 60 digits by the Bessel
+/// series' recurrence started far past [`marcum_q1`]'s, which agrees there with the Rice density's
+/// integral to 25 digits (mpmath 1.4.1, 2026-11-02): (a, b, Q₁).
+const MARCUM_Q1_REFERENCE: [(f64, f64, f64); 10] = [
+    (0.0, 8.5, 2.046_971_713_164_204_3e-16),
+    (0.5, 2.0, 0.169_140_638_509_467_17),
+    (3.0, 4.0, 0.196_512_189_388_407_62),
+    (10.0, 12.0, 0.025_329_474_297_941_42),
+    (20.0, 19.0, 0.847_473_586_937_428_9),
+    (2.0, 1.5, 0.790_767_779_396_770_1),
+    (30.0, 33.0, 0.001_422_011_718_932_621),
+    (34.0, 35.5, 0.068_691_511_657_657_54),
+    (12.0, 20.5, 1.243_088_596_849_287_5e-17),
+    (5.0, 5.0, 0.540_098_386_773_718_4),
+];
+
+#[test]
+fn material_weights_marcum_q1_is_its_60_digit_values() {
+    for (a, b, expected) in MARCUM_Q1_REFERENCE {
+        let got = marcum_q1(a, b);
+        assert!(
+            (got - expected).abs() <= 1e-14 * expected,
+            "Q₁({a}, {b}) = {got:e}, against {expected:e}"
+        );
+    }
+    // Beyond the negligible gap, either way, the tail is taken as 0 (or 1): there below 2⁻⁵⁴.
+    assert_eq!(
+        bits(marcum_q1(0.05, 9.0)),
+        bits(0.0),
+        "Q₁ there is 2.7 × 10⁻¹⁸"
+    );
+    assert_eq!(bits(marcum_q1(25.0, 16.0)), bits(1.0));
+    // Just short of it the series' value is below 2⁻⁵³, so the step to 0 moves it less than that.
+    let short = marcum_q1(20.0, 20.0 + 8.652);
+    assert!(short > 0.0 && short < f64::EPSILON / 2.0, "{short:e}");
+}
+
+#[test]
+fn material_weights_marcum_q1_agrees_with_the_quadrature_within_its_error() {
+    // Over the class weights' envelope: both thresholds, σ² from 7.3 × 10⁻⁵ to 0.0112 (the bakes'
+    // range) and the mean from the threshold's 9 deviations beyond to 10 short of it. The
+    // quadrature's largest error against 60-digit values there is 3.3 × 10⁻¹¹ ([`marcum_q1`]'s
+    // documentation), and Q₁'s 1.2 × 10⁻¹⁴.
+    let mut worst: f64 = 0.0;
+    for threshold in [
+        math::tan(CLIFF_SLOPE.value()),
+        math::tan(SNOW_SHED_SLOPE.value()),
+    ] {
+        for k in 0..=9 {
+            let variance = 7.3e-5 * math::powf(0.0112 / 7.3e-5, f64::from(k) / 9.0);
+            let sd = variance.sqrt();
+            for g in -18..=20 {
+                let mean = threshold - 0.5 * f64::from(g) * sd;
+                if mean < 0.0 {
+                    continue;
+                }
+                let held = exceedance_by_quadrature(mean, variance, threshold);
+                let q1 = marcum_q1(mean / sd, threshold / sd);
+                worst = worst.max((held - q1).abs());
+            }
         }
     }
+    assert!(worst < 4e-11, "{worst:e}");
 }
 
 #[test]
@@ -397,6 +502,17 @@ fn material_weights_a_rule_on_the_height_changes_only_across_a_listed_break() {
 
 #[test]
 fn material_weights_the_steepness_cases_sum_to_one_and_tend_to_the_level_s_own() {
+    for rules in TAILS {
+        with_steepness_tails(
+            rules,
+            steepness_cases_sum_to_one_and_tend_to_the_level_s_own,
+        );
+    }
+}
+
+/// [`material_weights_the_steepness_cases_sum_to_one_and_tend_to_the_level_s_own`] under the
+/// rules in force.
+fn steepness_cases_sum_to_one_and_tend_to_the_level_s_own() {
     let mut rng = Lcg::new(0x0073_7465_6570);
     for &w in &BODIES {
         let field = world(w);

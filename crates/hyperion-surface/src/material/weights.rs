@@ -21,6 +21,7 @@ use core::f64::consts::{SQRT_2, TAU};
 
 use hyperion_base::math;
 use hyperion_base::units::Metres;
+use hyperion_base::{GENERATOR_VERSION, GeneratorVersion};
 
 use super::classify::{
     IcePlacement, Point, Site, Steepness, cos_slope, finest_band, ice_share_at, kept_forms,
@@ -69,6 +70,79 @@ const PANEL_DEVIATIONS: f64 = 2.0;
 /// there the error stays below 3 × 10⁻⁷ at σ = 10⁻³ and 3 × 10⁻⁶ at σ = 3 × 10⁻⁵ (the science
 /// check's measurement), far below a byte's 1 ÷ 255.
 const MAX_PANELS: u32 = 16;
+
+/// The generator version from which a steepness tail is Marcum's Q₁ by its Bessel series (the
+/// crate's `marcum_q1`), in place of the Gauss–Legendre sums of `exceedance_by_quadrature`: 27
+/// (R10.T6.a's lever, main's rule B, 2026-11-02).
+///
+/// It is the steepness tails' one hold. Below it [`SteepnessTailsRules::in_force`] is
+/// [`SteepnessTailsRules::Quadrature`], and every weight is the quadrature's, bit for bit. 27's
+/// bump deletes this hold, [`SteepnessTailsRules`] with its `Quadrature` arm and
+/// `exceedance_by_quadrature` with its constants, the tests' `with_steepness_tails`, its switch in
+/// the sim's `with_every_27_hold`, and the tripwire
+/// `the_steepness_tails_are_held_only_until_the_27_bump`; it re-blesses the movers R10.T6.a's
+/// record lists.
+pub const STEEPNESS_TAILS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// How a vertex's steepness tails are made (the crate's `exceedance`; the hold,
+/// [`STEEPNESS_TAILS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SteepnessTailsRules {
+    /// Version 26's and before: the Gauss–Legendre sums.
+    Quadrature,
+    /// Version 27's: Marcum's Q₁ by its Bessel series.
+    Marcum,
+}
+
+impl SteepnessTailsRules {
+    /// The rules this generator version gives: Q₁ from [`STEEPNESS_TAILS_VERSION`], the quadrature
+    /// below it; in the tests, the rules a switch sets on its thread (`with_steepness_tails`).
+    #[must_use]
+    pub fn in_force() -> Self {
+        #[cfg(any(test, feature = "testing"))]
+        if let Some(rules) = STEEPNESS_TAILS_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= STEEPNESS_TAILS_VERSION {
+            Self::Marcum
+        } else {
+            Self::Quadrature
+        }
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+thread_local! {
+    /// The steepness tails' rules a test sets on its thread, `None` for the version's.
+    static STEEPNESS_TAILS_RULES: core::cell::Cell<Option<SteepnessTailsRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the steepness tails' rules `rules` on this thread, for the tests to reach
+/// version 27's tails ahead of the bump, the sim's `with_every_27_hold` among them; the version's
+/// rules are set back after, a panic in `run` included. 27's bump deletes it with the hold.
+#[cfg(any(test, feature = "testing"))]
+pub fn with_steepness_tails<R>(rules: SteepnessTailsRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<SteepnessTailsRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            STEEPNESS_TAILS_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(STEEPNESS_TAILS_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// The gap b − a, in deviations, from which Marcum's Q₁(a, b) is below 2⁻⁵⁴ ([`marcum_q1`]): 8.6522,
+/// just above √(108 ln 2) = 8.65216, where e^(−gap² ÷ 2), which bounds it, is 2⁻⁵⁴. A tail that
+/// small is below half the smallest difference from 1 that [`exceedance_by_quadrature`]'s
+/// 1 − ∫ can hold, 2⁻⁵³, so the quadrature gives it as 0 or with an error larger than itself.
+const NEGLIGIBLE_GAP: f64 = 8.6522;
+
+/// The largest the backward recurrence's values grow to before [`marcum_q1`] scales them down by
+/// its inverse, exactly: 2⁶⁰⁰.
+const RECURRENCE_CEILING: f64 = 4.149_515_568_880_993e180;
 
 /// A point's class weights: up to [`MAX_CLASSES`] materials, each a form of one of the body's
 /// palette entries ([`GroundMaterial`]), with a byte each, the bytes summing to [`WEIGHT_TOTAL`]
@@ -476,6 +550,23 @@ fn steepness_cases(
 /// Tech. J. 24, 46, §3.10, eq. 3.10-11, p. 100), which is Marcum's Q₁(`mean` ÷ σ, t ÷ σ) (Marcum
 /// 1960, IRE Trans. Inf. Theory IT-6, 59; not read here).
 ///
+/// By the rules in force ([`SteepnessTailsRules::in_force`]): [`exceedance_by_quadrature`] below
+/// [`STEEPNESS_TAILS_VERSION`], and [`marcum_q1`] from it. `mean` and `threshold` are non-negative
+/// and `variance` positive.
+#[must_use]
+pub(crate) fn exceedance(mean: f64, variance: f64, threshold: f64) -> f64 {
+    match SteepnessTailsRules::in_force() {
+        SteepnessTailsRules::Quadrature => exceedance_by_quadrature(mean, variance, threshold),
+        SteepnessTailsRules::Marcum => {
+            let sd = variance.sqrt();
+            marcum_q1(mean / sd, threshold / sd)
+        }
+    }
+}
+
+/// [`exceedance`] as version 26 and before make it, verbatim (the hold's held arm,
+/// [`STEEPNESS_TAILS_VERSION`]).
+///
 /// It is 1 less the probability of the disc, integrated in closed form along one axis and by
 /// Gauss–Legendre along the other, ∫ φ(x − mean) erf(√(t² − x²) ÷ σ√2) dx over |x| ≤ t with φ the
 /// normal density of variance σ², by x = t sin θ, which takes the square root's end points out of
@@ -485,7 +576,7 @@ fn steepness_cases(
 /// exp(−t² ÷ 2σ²) at a zero mean and to an independent polar sum elsewhere, both within 10⁻⁶ over
 /// variances of 10⁻⁴ to 1.
 #[must_use]
-pub(crate) fn exceedance(mean: f64, variance: f64, threshold: f64) -> f64 {
+pub(crate) fn exceedance_by_quadrature(mean: f64, variance: f64, threshold: f64) -> f64 {
     let sd = variance.sqrt();
     let low = num::max(-threshold, mean - GAUSSIAN_REACH * sd);
     let high = num::min(threshold, mean + GAUSSIAN_REACH * sd);
@@ -516,6 +607,88 @@ pub(crate) fn exceedance(mean: f64, variance: f64, threshold: f64) -> f64 {
     }
     let inside = inside * half / (sd * TAU.sqrt());
     num::max(0.0, num::min(1.0 - inside, 1.0))
+}
+
+/// Marcum's Q₁(`a`, `b`) = ∫ x e^(−(x² + a²) ÷ 2) I₀(a x) dx over x from `b` on, for `a` ≥ 0 and
+/// `b` > 0: the probability that the Rice variable of noncentrality `a` exceeds `b` (Marcum 1960,
+/// IRE Trans. Inf. Theory IT-6, 59; not read here), from the series of the modified Bessel
+/// functions `I_k` (version 27's [`exceedance`], [`STEEPNESS_TAILS_VERSION`]):
+///
+/// > Q₁(a, b) = e^(−(b − a)² ÷ 2) Σ_{k ≥ 0} ρ^k `Ĩ_k(ab)`, ρ = a ÷ b, where b ≥ a, and
+/// > 1 − Q₁(a, b) = e^(−(a − b)² ÷ 2) Σ_{k ≥ 1} ρ^k `Ĩ_k(ab)`, ρ = b ÷ a, where a > b,
+///
+/// with `Ĩ_k(z)` = e^(−z) `I_k(z)`, each a sum of positive terms, checked against the integral of
+/// the Rice density to 25 digits (60-digit arithmetic, mpmath). The `Ĩ_k` come from J. C. P.
+/// Miller's backward recurrence, `J_(k−1)` = k (2 ÷ z) `J_k` + `J_(k+1)` from `J_(n+1)` = 0 and
+/// `J_n` = 1, which `I_k` satisfies and which is stable downward, normalised by the generating
+/// function's value at t = 1, e^z = `I_0(z)` + 2 Σ_{k ≥ 1} `I_k(z)`, so that `Ĩ_k` = `J_k` ÷
+/// (`J_0` + 2 Σ `J_k`). It starts at n = ⌈9 √z⌉ + 20, past the k at which `Ĩ_k` ÷ `Ĩ_0` ≈
+/// e^(−k² ÷ 2z) falls below 2⁻⁵⁴ (8.65 √z), and scales its values down by [`RECURRENCE_CEILING`]
+/// exactly where they would grow past it.
+///
+/// Since Σ_{k ≥ 0} `Ĩ_k` = (1 + `Ĩ_0`) ÷ 2 ≤ 1, Q₁ ≤ e^(−(b − a)² ÷ 2) where b ≥ a, and likewise
+/// 1 − Q₁ where a > b, so from [`NEGLIGIBLE_GAP`] on it is 0 (or 1) without the series: over the
+/// class weights' domain, 99% of the tails (the steepness tails of four synthetic worlds' bakes,
+/// 3.36 million of them, pod, 2026-11-02). At a = 0 it is the Rayleigh tail e^(−b² ÷ 2).
+///
+/// Against 60-digit values over 7,151 points of the domain (6,000 of its tails with b − a below
+/// 10, and two grids of its envelope: a to 36, b − a from −9 to 10, σ² from 7.3 × 10⁻⁵ to 0.0112,
+/// at both thresholds), its largest error is 1.2 × 10⁻¹⁴ (relative, where Q₁ passes 10⁻⁶,
+/// 1.2 × 10⁻¹³), against [`exceedance_by_quadrature`]'s 3.3 × 10⁻¹¹ (3.3 × 10⁻⁷); nowhere is it
+/// larger than the quadrature's, but at one point where both lie within an ulp of the value
+/// (8 × 10⁻¹⁷ against 2 × 10⁻¹⁷). The quadrature took 2.6 µs a tail on the domain and this
+/// 6.2 ns (natively, pod, 2026-11-02).
+#[must_use]
+pub(crate) fn marcum_q1(a: f64, b: f64) -> f64 {
+    let gap = b - a;
+    if gap >= NEGLIGIBLE_GAP {
+        return 0.0;
+    }
+    if -gap >= NEGLIGIBLE_GAP {
+        return 1.0;
+    }
+    let z = a * b;
+    if z <= 0.0 {
+        return math::exp(-0.5 * b * b);
+    }
+    let (below, rho) = if b >= a {
+        (true, a / b)
+    } else {
+        (false, b / a)
+    };
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a positive whole number; z is a product of two finite deviations, far below 2^64"
+    )]
+    let start = (9.0 * z.sqrt()).ceil() as u64 + 20;
+    let two_over_z = 2.0 / z;
+    // J_(k+1) and J_k, from k = n down; Σ_{j ≥ k} J_j, and Σ_{j ≥ k} ρ^(j − k + 1) J_j by Horner's
+    // rule from the top.
+    let (mut next, mut current) = (0.0_f64, 1.0_f64);
+    let (mut tail, mut series) = (0.0_f64, 0.0_f64);
+    for k in (1..=start).rev() {
+        tail += current;
+        series = rho * (current + series);
+        #[expect(clippy::cast_precision_loss, reason = "k is below 2^53, exact in f64")]
+        let previous = k as f64 * two_over_z * current + next;
+        next = current;
+        current = previous;
+        if current > RECURRENCE_CEILING {
+            let down = 1.0 / RECURRENCE_CEILING;
+            current *= down;
+            next *= down;
+            tail *= down;
+            series *= down;
+        }
+    }
+    let norm = current + 2.0 * tail;
+    let lift = math::exp(-0.5 * gap * gap);
+    if below {
+        lift * ((current + series) / norm)
+    } else {
+        1.0 - lift * (series / norm)
+    }
 }
 
 /// The standard normal distribution's cumulative probability at `z`.
