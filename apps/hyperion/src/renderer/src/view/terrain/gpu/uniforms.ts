@@ -405,16 +405,16 @@ export class InstanceRecords {
   }
 
   /** Records this frame. */
+  get count(): number {
+    return this.#count;
+  }
+
   /**
    * Its records' 32-bit words, read only: the whole capacity's, of which the first
    * {@link InstanceRecords.count} × 12 are this frame's (plan R14, R14.T6.a).
    */
   get words(): Uint32Array {
     return this.#u32;
-  }
-
-  get count(): number {
-    return this.#count;
   }
 
   /** Starts a frame with no records. */

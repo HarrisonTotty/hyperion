@@ -466,13 +466,14 @@ export interface TerrainCascadeFrame {
    * compiled, or with no draw of the view's terrain, when the lit draw samples nothing. A far
    * cascade the frame holds from an earlier one has none (plan R14, R14.T6.b;
    * `GeometrySettings.farCascadeRate`), so that at a rate of 4 a held view's frames render 4, 2, 3,
-   * 2, 3… passes.
+   * 2, 3… passes; nor has a cascade it reuses ({@link TerrainCascadeFrame.reused}).
    */
   readonly passes: ReadonlyArray<DepthLayerPass>;
   /**
    * Each cascade's patches cast by the lit mesh this frame, nearest first (10,752 triangles each):
    * the edge patches', and the interior patches' off the cluster path, whose own counts are the
-   * cluster counters' ({@link TerrainPass.clusterStats}; plan R14, R14.T1.b).
+   * cluster counters' ({@link TerrainPass.clusterStats}; plan R14, R14.T1.b). 0 for a cascade the
+   * frame holds or reuses, which draws none.
    */
   readonly litMeshCasters: readonly [number, number, number, number];
   /** Whether the interior patches cast through the cluster path this frame (R14.T1.b). */

@@ -2437,6 +2437,19 @@ describe("the cascades re-rendered only when they change (plan R14, R14.T6.a)", 
     ]);
   });
 
+  it("renders again where the draw set's keys change, a landed bake drawn, and none after", async () => {
+    const made = await everyFrame();
+    const still = frameOf(NEAR, true);
+    const before = rendersOf(made, [still, still]);
+    const keysOf = (): string =>
+      (made.pass.lastStep?.drawSet.patches ?? []).map((entry) => entry.keyString).join();
+    const keys = keysOf();
+    made.lane().bakeDemand(made.pass);
+    made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
+    const after = rendersOf(made, [still, still]).map((each) => each.length > 0);
+    expect([before, keysOf() !== keys, after]).toEqual([[[0, 1, 2, 3], []], true, [true, false]]);
+  });
+
   it("renders again where a drawn patch is baked again, and none after", async () => {
     const made = await settled();
     made.pass.setReducedMotion(true);
