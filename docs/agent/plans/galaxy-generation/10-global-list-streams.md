@@ -2412,3 +2412,13 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     centre member's stars (no multiplicity context is ruled for the centre's cells).
   - _Test._ Slow, by name: `requests::galaxy::placed::from_27_every_system_a_query_returns_is_placed_by_its_id`.
     Rows at the epoch and ±10³ yr; at ±10⁴ yr against the sources, since no query reaches past ±H.
+- **P10.T10.b, the centre rows' velocity (lane `fix-p09-recent-dead`, 2026-11-01, at 24; centre
+  rows exist from 27 alone; no output moved at 24–26; research-leans-30 §3).**
+  - _Rows._ `convert::placed_by` gives a centre member's row its velocity on its `CentrePath` at the
+    query's time, through `RowPlacers`' orbits (new, `RowReads::orbits`), as `system_motion` does;
+    the "_Contract._" above's epoch velocity for centre rows is gone. `SystemRecord.velocity_km_s`'s
+    doc says so (the bindings regenerated, no wire change).
+  - _Recent entries._ `fix-p09-recent-dead` places them straight at their velocity, as `CentrePath`'s
+    `Straight` does, and its range test places each returned entry by its ID (plan 09's records).
+  - _Test._ `from_27_every_system_a_query_returns_is_placed_by_its_id` checks every row's velocity
+    against `system_motion`'s, the centre's at a year and at ±10³ yr about the black hole.

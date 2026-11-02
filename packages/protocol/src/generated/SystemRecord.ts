@@ -59,7 +59,8 @@ placement?: PlacementKind,
  * Its velocity at the epoch, in km/s along the `GALACTIC` frame's axes (plan 08, P08.T7.a):
  * +x along the bar, +z to galactic north. Systems move in straight lines at it, so its
  * position at the query's time is its epoch position plus this times the time since the
- * epoch.
+ * epoch. A galactic centre's member's, from generator version 27, which first serves them, is
+ * its orbit's at the query's time instead: its orbit turns it (plan 10, P10.T10.b).
  */
 velocity_km_s: [number, number, number], 
 /**

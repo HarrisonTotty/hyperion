@@ -193,6 +193,12 @@ impl<'a> RowReads<'a> {
         self.list
     }
 
+    /// The centre's orbits the query read, its centre members' paths found through.
+    #[must_use]
+    pub fn orbits(&self) -> &'a CentreOrbitHandle<'a> {
+        self.orbits
+    }
+
     /// What the rows' systems are placed and observed through: the interiors, the centre's
     /// orbits and the list's source, the ones the query read.
     #[must_use]

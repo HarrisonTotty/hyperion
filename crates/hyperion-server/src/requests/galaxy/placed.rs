@@ -232,7 +232,7 @@ async fn pick(
 }
 
 /// [`system_motion`] places each system at its row's position and with its row's velocity at the
-/// row's time, but a centre member's velocity away from the epoch.
+/// row's time, a centre member's its orbit's then (research-leans-30 §3).
 fn placed_as_their_rows(galaxy: &Galaxy, reads: MotionReads<'_>, picked: &[Picked]) {
     for p in picked {
         let placed = system_motion(galaxy, reads, p.hit.record(), p.t);
@@ -245,9 +245,7 @@ fn placed_as_their_rows(galaxy: &Galaxy, reads: MotionReads<'_>, picked: &[Picke
             p.what,
             p.t
         );
-        if !p.of_the_centre() || p.t == UniverseTime::EPOCH {
-            assert_eq!(row_velocity(moving), p.velocity, "{} at {}", p.what, p.t);
-        }
+        assert_eq!(row_velocity(moving), p.velocity, "{} at {}", p.what, p.t);
     }
 }
 
@@ -272,6 +270,40 @@ async fn placed_at_the_window_s_edges(
             assert_eq!(bits(&position), bits(hit.position()), "{} at {t}", p.what);
             assert_eq!(row_velocity(moving), velocity, "{} at {t}", p.what);
         }
+    }
+}
+
+/// A centre cell member's rows at ±10³ years, the clock window's edges, carry the velocity
+/// [`system_motion`] gives it then, its orbit's (research-leans-30 §3), where it places it, bit for
+/// bit: a member 60 ly from the black hole, beyond the reach of any orbit the centre scans in full
+/// a millennium on (some 1.4 ly), found among a query's of 5 ly, so that queries of 2 ly about its
+/// places then stay cheap.
+async fn the_centre_s_rows_move_on_their_orbits_at_the_window_s_edges(
+    served: &Served,
+    (caches, galaxy): (&RangeCaches, &Arc<Galaxy>),
+    reads: MotionReads<'_>,
+) {
+    let far = GalacticPosition::from_light_years([60.0, 0.0, 0.0]).expect("in the cube");
+    let rows = served.answer(caches, galaxy, request(&far, 5.0, 0)).await;
+    let (member, _) = row_of(&rows, |h| {
+        matches!(h.id().kind(), SystemIdKind::Centre(id) if matches!(id.slot(), MemberSlot::InCell { .. }))
+    })
+    .expect("a centre cell member 60 ly from the black hole");
+    for years in [-1_000, 1_000] {
+        let t = at_years(years);
+        let (position, moving) = system_motion(galaxy, reads, member.record(), t)
+            .unwrap_or_else(|error| panic!("a centre member at {t}: {error}"));
+        let rows = served
+            .answer(caches, galaxy, request(&position, 2.0, years))
+            .await;
+        let (hit, velocity) = row_of(&rows, |h| h.id() == member.id())
+            .unwrap_or_else(|| panic!("the centre member among its query's rows at {t}"));
+        assert_eq!(
+            bits(&position),
+            bits(hit.position()),
+            "a centre member at {t}"
+        );
+        assert_eq!(row_velocity(moving), velocity, "a centre member at {t}");
     }
 }
 
@@ -359,10 +391,11 @@ fn framed_and_observed(
 /// each taken from a served query's rows:
 ///
 /// - [`system_motion`] places it at its row's position bit for bit, at the epoch, and for a
-///   centre member a year on, with its row's velocity but for a centre member's away from the
-///   epoch, which is its orbit's then where the row carries its epoch's (P09.T37.b's lean); and,
-///   from a served query of 50 ly about where it places it then, at ±10³ years, the clock window's
-///   edges, for every kind but the centre's, whose full scan a millennium on is beyond a test;
+///   centre member a year on, with its row's velocity, a centre member's its orbit's then
+///   (research-leans-30 §3); from a served query of 50 ly about where it places it then, at ±10³
+///   years, the clock window's edges, for every kind but the centre's, whose full scan a
+///   millennium on is beyond a test, and a centre cell member's 60 ly out from queries of 2 ly,
+///   its velocity its orbit's;
 /// - ten thousand years either way, beyond any query, it places each where the source that found
 ///   it places it then, bit for bit;
 /// - `scene_ship` frames a ship on each, on the path `system_motion` reads, and observed mode reads
@@ -389,6 +422,12 @@ async fn from_27_every_system_a_query_returns_is_placed_by_its_id() {
     let reads = MotionReads::new(&interiors, &orbits).with_list(tubes);
     placed_as_their_rows(&galaxy, reads, &picked);
     placed_at_the_window_s_edges(&served, (&caches, &galaxy), reads, &picked).await;
+    the_centre_s_rows_move_on_their_orbits_at_the_window_s_edges(
+        &served,
+        (&caches, &galaxy),
+        reads,
+    )
+    .await;
     let list = GlobalListSource::new(&galaxy, tubes, &orbits).expect("the centre builds");
     placed_as_their_sources(&galaxy, reads, &list, &picked);
     framed_and_observed(&galaxy, (&listing, reads), (tubes, &list), &picked);

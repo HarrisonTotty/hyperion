@@ -466,9 +466,11 @@ async fn served_query(
 fn row_origins<'a>(members: FeatureMembers, reads: &RowReads<'a>) -> RowOrigins<'a> {
     match members {
         FeatureMembers::Held => RowOrigins::Unsent,
-        FeatureMembers::Served => {
-            RowOrigins::Sent(RowPlacers::new(reads.interiors(), reads.list()))
-        }
+        FeatureMembers::Served => RowOrigins::Sent(RowPlacers::new(
+            reads.interiors(),
+            reads.orbits(),
+            reads.list(),
+        )),
     }
 }
 

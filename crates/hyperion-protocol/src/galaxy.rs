@@ -578,7 +578,8 @@ pub struct SystemRecord {
     /// Its velocity at the epoch, in km/s along the `GALACTIC` frame's axes (plan 08, P08.T7.a):
     /// +x along the bar, +z to galactic north. Systems move in straight lines at it, so its
     /// position at the query's time is its epoch position plus this times the time since the
-    /// epoch.
+    /// epoch. A galactic centre's member's, from generator version 27, which first serves them, is
+    /// its orbit's at the query's time instead: its orbit turns it (plan 10, P10.T10.b).
     pub velocity_km_s: [f64; 3],
     /// What its primary is now, when the request set `include_stellar` (plan 06, P06.T33); in
     /// observed mode, what it was when the light left it, absent if it had not formed then (plan

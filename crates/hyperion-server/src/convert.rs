@@ -42,11 +42,13 @@ use hyperion_protocol::{
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity, LyCell};
 use hyperion_sim::galaxy::catalogue_classes::system_of_record;
 use hyperion_sim::galaxy::features::centre::members::resolve_centre_member;
+use hyperion_sim::galaxy::features::centre::{CentreOrbitCache, CentrePath};
 use hyperion_sim::galaxy::features::members::resolve_member;
 use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
 use hyperion_sim::galaxy::gas::params::GasParams;
 use hyperion_sim::galaxy::global_list::GlobalListSource;
 use hyperion_sim::galaxy::imf::MassFunctionKind;
+use hyperion_sim::galaxy::motion::StateAt;
 use hyperion_sim::galaxy::params::{
     ArmParams, GalaxyParams, HaloComponentKind, HaloComponentParams, HaloParams,
 };
@@ -561,24 +563,30 @@ impl fmt::Debug for RowOrigins<'_> {
 }
 
 /// What a range answer's member rows are resolved through again ([`RowOrigins::Sent`]): the
-/// server's feature interiors, and the global list's source if the query took it (plan 10,
-/// P10.T10.b), whose tables, band shares and cores' models resolve a stream's or a dwarf core's
-/// member without planning the galaxy's debris again.
+/// server's feature interiors, the centre's orbits the query read, and the global list's source if
+/// the query took it (plan 10, P10.T10.b), whose tables, band shares and cores' models resolve a
+/// stream's or a dwarf core's member without planning the galaxy's debris again.
 #[derive(Clone, Copy)]
 pub(crate) struct RowPlacers<'a> {
     interiors: &'a dyn FeatureInteriorCache,
+    orbits: &'a dyn CentreOrbitCache,
     list: Option<&'a GlobalListSource<'a>>,
 }
 
 impl<'a> RowPlacers<'a> {
-    /// The placers of a query whose members are resolved through `interiors`, and its list's
-    /// members through `list`, the source it took.
+    /// The placers of a query whose members are resolved through `interiors`, the centre's on
+    /// their paths through `orbits`, and its list's members through `list`, the source it took.
     #[must_use]
     pub(crate) fn new(
         interiors: &'a dyn FeatureInteriorCache,
+        orbits: &'a dyn CentreOrbitCache,
         list: Option<&'a GlobalListSource<'a>>,
     ) -> Self {
-        Self { interiors, list }
+        Self {
+            interiors,
+            orbits,
+            list,
+        }
     }
 }
 
@@ -588,11 +596,13 @@ impl<'a> RowPlacers<'a> {
 /// - A grid system moves at plan 08's epoch velocity, and has no class.
 /// - A catalogue feature's member, and a stream's or a dwarf core's, at its member record's
 ///   velocity, its cluster's or its tube's motion and its own, with its member class.
-/// - A member of the galactic centre at its epoch velocity, its orbit's start (plan 09, P09.T37.b):
-///   the row is the state at the epoch but for the position and the age, as a grid row is, and a
-///   member's orbit, unlike their lines, turns its velocity from that start (lean, 2026-11-01). A
-///   member of the centre's grid carries its centre class, a tidal disruption's victim, on the
-///   centre's feature-level list, the list's class, and the black hole none.
+/// - A member of the galactic centre at its velocity on its path at `t` ([`CentrePath`], through
+///   the query's orbits), as [`system_motion`](self::motion::system_motion) places it: its orbit
+///   turns its velocity, so its epoch's is not what moved it to its row's position (research-leans-30
+///   §3; plan 10's P10.T10.b). Centre rows exist from generator version 27 alone, where the query
+///   takes the list's source, so this is held there with them. A member of the centre's grid
+///   carries its centre class, a tidal disruption's victim, on the centre's feature-level list,
+///   the list's class, and the black hole none.
 /// - A catalogue class's host at its class's velocity at `t`, which is its remnant's after its
 ///   explosion as its place is, and no member class: it is not a feature's member.
 ///
@@ -634,8 +644,13 @@ fn placed_by(
             };
             let member = resolve_centre_member(galaxy, id)
                 .expect("a centre member found by the range query resolves in its galaxy");
+            let path = CentrePath::of(galaxy, placers.orbits, id)
+                .expect("a centre member found by the range query has its path in its galaxy");
+            let StateAt::Exists(state) = path.state_at(t) else {
+                unreachable!("the centre's source returns a member only while it is a system")
+            };
             (
-                member.velocity(),
+                state.velocity(),
                 origin,
                 features::centre_member_class(id, &member),
             )
