@@ -364,72 +364,6 @@ pub(super) const HOLD_GAIN: f64 = 0.2;
 /// arriving over the orbits after, so that cancelling the whole drift at once overshoots.
 pub(super) const HOLD_DRIFT_SHARE: f64 = 0.6;
 
-/// The generator version from which the zonal search's first run, Z₀, holds its branch: 26
-/// (R09.T13.i; the lane's lean, 2026-10-30, as main set it: version 25's list was closed).
-///
-/// It is Z₀'s branch's one hold. Below it [`Z0BranchRules::in_force`] is [`Z0BranchRules::Held`]:
-/// Z₀ marches to the search's stop or its last orbit, and every record is version 25's bit for bit.
-/// 26's bump deletes this hold, [`Z0BranchRules`] with its `Held` arm and its match in
-/// `ZonalSearch::begin`, the tests' switch [`with_z0_branch`] with its re-export in `climate`, its
-/// line in `with_every_26_hold` (and the helper where it is the last), the helper's test
-/// (`the_z0_branch_is_in_force_inside_26_s_helper_alone`), the tests that compare 26 with and
-/// without it (`the_z0_branch_leaves_the_*_unchanged_to_the_bit`), the wording "under
-/// `Z0_BRANCH_VERSION`" on the items it gates, and its tripwire
-/// (`the_z0_branch_is_held_only_until_the_26_bump`).
-pub(crate) const Z0_BRANCH_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether the zonal search's Z₀ holds its branch (its hold, [`Z0_BRANCH_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum Z0BranchRules {
-    /// Version 25's and before: Z₀ marches to the search's stop or its last orbit.
-    Held,
-    /// Version 26's: Z₀'s drift stop ends it ([`drifting`]) once its mean lies more than
-    /// [`Z0_DEPARTURE_K`] from T\* and drifts away from it, and the held run takes its place, its
-    /// u held toward T\* to the search's own precision ([`Z0_HELD_STOP`]).
-    Kept,
-}
-
-impl Z0BranchRules {
-    /// The rules this generator version gives: Z₀ holds its branch from [`Z0_BRANCH_VERSION`],
-    /// not below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_z0_branch`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = Z0_BRANCH.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= Z0_BRANCH_VERSION {
-            Self::Kept
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The zonal hold's rules a test sets on its thread, `None` for the version's.
-    static Z0_BRANCH: core::cell::Cell<Option<Z0BranchRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the zonal hold's rules `rules` on this thread, for the tests to reach
-/// version 26's Z₀ ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 26's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_z0_branch<R>(rules: Z0BranchRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<Z0BranchRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            Z0_BRANCH.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(Z0_BRANCH.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
 /// The bound of G1's probe stop on its surface mean's remainder, K: 0.05 (`Adopted`,
 /// decision-r09-t13i's §2.4 follow-up 8 §1). G1 measures d and G2's start, not the climate, so it
 /// needs only d's precision: half the climate's bound, so that d's error (at most 0.05 K, moving
@@ -649,7 +583,7 @@ fn settled_probe(
     MeanProbe::of(orbits, (mean_k, change_k), ratios, ratio)
 }
 
-/// Whether a run's drift stop ends it (G1's, and under [`Z0_BRANCH_VERSION`] Z₀'s) after an
+/// Whether a run's drift stop ends it (G1's, and Z₀'s) after an
 /// orbit, `fresh` orbits since its start or its last
 /// jump that stood, over which its surface mean changed by `change_k` after the fresh changes
 /// `earlier`, K (the lane's lean, 2026-10-30): after at least [`PROBE_FRESH_ORBITS`] fresh orbits,
@@ -670,7 +604,7 @@ fn drifting(fresh: u32, change_k: f64, earlier: [Option<f64>; 2]) -> bool {
 
 /// Whether a run of surface mean and change over its last orbit `(mean_k, change_k)`, K, lies more
 /// than [`Z0_DEPARTURE_K`] from T\* = `target_k`, K, and drifts away from it, as a Z₀ that has left
-/// its branch does under [`Z0_BRANCH_VERSION`] ([`Drift::Leaves`]). A mean or a change that is not
+/// its branch does ([`Drift::Leaves`]). A mean or a change that is not
 /// a number never departs.
 #[must_use]
 fn departing((mean_k, change_k): (f64, f64), target_k: f64) -> bool {
@@ -708,7 +642,7 @@ enum Drift {
     /// On a grid of more than one column: G1's, on the whole grid.
     EndsOnTheWholeGrid,
     /// On any grid, once its surface mean lies more than [`Z0_DEPARTURE_K`] from `target_k`, K,
-    /// T\*, and drifts away from it: Z₀'s, on the zonal grid, under [`Z0_BRANCH_VERSION`].
+    /// T\*, and drifts away from it: Z₀'s, on the zonal grid,.
     Leaves {
         /// T\*, K.
         target_k: f64,
@@ -743,8 +677,8 @@ const SEARCH_STOP: Stop = Stop {
     reduced_rank: false,
 };
 
-/// How far from T\* Z₀'s surface mean must lie for its drift stop to end it under
-/// [`Z0_BRANCH_VERSION`], K: 2 (`Adopted`, the lane's lean, 2026-10-30). On the warm branch the
+/// How far from T\* Z₀'s surface mean must lie for its drift stop to end it (R09.T13.i, from
+/// generator version 26), K: 2 (`Adopted`, the lane's lean, 2026-10-30). On the warm branch the
 /// seasonal mean lies about 1.5 K below its steady state (decision-r09-t13i's §2.4 follow-up, row
 /// 1), the steady state at T\*, so a Z₀ farther than 2 K from T\* and still drifting away from it
 /// has left its branch. Over the small Earth's twelve seeds and the reference Earth, the Z₀ runs
@@ -771,7 +705,7 @@ const G2_HELD_STOP: HeldStop = HeldStop {
     miss_k: PROBE_STOP_K,
 };
 
-/// Z₀'s held stop under [`Z0_BRANCH_VERSION`]: the search's stop, its mean within
+/// Z₀'s held stop: the search's stop, its mean within
 /// [`SEARCH_CONVERGENCE_K`] of T\*, the search's own answer, so that the search ends at it.
 const Z0_HELD_STOP: HeldStop = HeldStop {
     bound_k: SEARCH_CONVERGENCE_K,
@@ -3798,7 +3732,7 @@ impl EnergyBalance {
     ///
     /// 1. **The zonal search** Z(T\*) on `zonal`, the fit's own zonal model, each run under the
     ///    search's stop ([`SEARCH_STOP`]), recording both stops' flags: Z₀ at the fit's u₀ from its
-    ///    zonal steady state `steady_k` (under [`Z0_BRANCH_VERSION`], held where it leaves its
+    ///    zonal steady state `steady_k` (held where it leaves its
     ///    branch: `ZonalSearch::begin`), then by [`search`], its first step on the zonal steady
     ///    states' two-sided slope in u at u₀ ± [`CORRECTION_STEP`] (on `fit`'s set-up), as ruled
     ///    before.
@@ -4017,7 +3951,7 @@ impl EnergyBalance {
 
     /// The held run of `run` from the steady state `steady_k`, K (on the zonal grid), broadcast to
     /// every column, at the drift's sensitivity `sensitivity`, positive, K an orbit per unit of u,
-    /// stopped as `until` says ([`held`](Self::held)'s, for G2 and, under [`Z0_BRANCH_VERSION`],
+    /// stopped as `until` says ([`held`](Self::held)'s, for G2 and,,
     /// Z₀): the run, its last orbit's emission factor and radiation, and its record at that
     /// orbit's u.
     #[must_use]
@@ -4317,7 +4251,7 @@ impl EnergyBalance {
         let mut trail = MeanTrail::default();
         let mut mean_probe = None;
         // The run's drift where its drift stop ended it: G1's on the whole grid, and Z₀'s under
-        // `Z0_BRANCH_VERSION` once it lies far from T* (the lane's lean, 2026-10-30).
+        // once it lies far from T* (the lane's lean, 2026-10-30).
         let (drift_stop, departure) = match stop.drift {
             Drift::Runs => (false, None),
             Drift::EndsOnTheWholeGrid => (grid.columns() > 1, None),
@@ -5486,8 +5420,7 @@ struct ZonalSearch<'a> {
 
 impl<'a> ZonalSearch<'a> {
     /// The search's first run, Z₀, at the fit's u₀ from its zonal steady state `steady_k`, K, under
-    /// the search's stop, and the steady states' slope on `fit`'s set-up. Under
-    /// [`Z0_BRANCH_VERSION`] Z₀'s drift stop ends it once its mean lies more than
+    /// the search's stop, and the steady states' slope on `fit`'s set-up. Z₀'s drift stop ends it once its mean lies more than
     /// [`Z0_DEPARTURE_K`] from T\* and drifts away from it ([`Drift::Leaves`]), and the held run
     /// from the same state takes its place, to the search's precision ([`Z0_HELD_STOP`]): u₀ then
     /// lies past the zonal model's own warm fold (the small Earth's under seeds 4 and 5, whose Z₀
@@ -5514,15 +5447,12 @@ impl<'a> ZonalSearch<'a> {
                 stop,
             )
         };
-        let first = match Z0BranchRules::in_force() {
-            Z0BranchRules::Held => marched(SEARCH_STOP),
-            Z0BranchRules::Kept => marched(Stop {
-                drift: Drift::Leaves {
-                    target_k: at.mean_k,
-                },
-                ..SEARCH_STOP
-            }),
-        };
+        let first = marched(Stop {
+            drift: Drift::Leaves {
+                target_k: at.mean_k,
+            },
+            ..SEARCH_STOP
+        });
         let sensitivity = first
             .drift_k
             .and_then(|_| model.drift_sensitivity(zonal, &at, steady_k, at.u0));
@@ -5730,7 +5660,7 @@ pub(super) struct CorrectionRun {
     /// ([`drifting`]): G1's, never another kept record's (a held Z₀'s is its held run's, `None`).
     pub(super) drift_k: Option<f64>,
     /// Whether its u was held orbit by orbit, its last orbit's u the record's: G2 where G1 measured
-    /// no d ([`EnergyBalance::held`]), and under [`Z0_BRANCH_VERSION`] a Z₀ that left its branch
+    /// no d ([`EnergyBalance::held`]), and a Z₀ that left its branch
     /// ([`EnergyBalance::held_at`]).
     pub(super) held: bool,
 }
@@ -5763,7 +5693,7 @@ pub(super) const DEFECT_PAIR_SPREAD_K: f64 = 0.1;
 /// How a run of the zonal search took its u (decision-r09-t13i's §2.4 follow-up 4 §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum SearchStep {
-    /// Z₀: at the fit's u, from its zonal steady state; under [`Z0_BRANCH_VERSION`], where it
+    /// Z₀: at the fit's u, from its zonal steady state;, where it
     /// left its branch, the held run from that state, at its last orbit's u.
     Fit,
     /// By the zonal steady states' slope from run `from`.
@@ -7741,29 +7671,6 @@ mod tests {
         assert!(!drifting(4, 0.255, falling));
         assert!(!drifting(4, f64::NAN, falling));
         assert!(!drifting(4, -0.255, [Some(f64::NAN), Some(-0.248)]));
-    }
-
-    /// The zonal search's Z₀ hold (R09.T13.i) is held until the 25 → 26 bump: the rules in force
-    /// are version 25's, Z₀ marching, and its switch sets 26's on this thread alone.
-    #[test]
-    fn the_z0_branch_is_held_only_until_the_26_bump() {
-        assert!(
-            GENERATOR_VERSION < Z0_BRANCH_VERSION,
-            "the 25 → 26 bump puts Z₀'s drift stop and its held run on the record: delete \
-             `Z0_BRANCH_VERSION`, `Z0BranchRules` with its `Held` arm and its match in \
-             `ZonalSearch::begin` (`Drift::Leaves` then always), the tests' `with_z0_branch` \
-             and its re-export in `climate`, its line in `with_every_26_hold` (and the helper \
-             where it is the last), `the_z0_branch_is_in_force_inside_26_s_helper_alone`, \
-             `the_z0_branch_leaves_the_zonal_earth_unchanged_to_the_bit` and \
-             `the_z0_branch_leaves_the_reference_earth_unchanged_to_the_bit`, the wording \
-             \"under `Z0_BRANCH_VERSION`\" on the items it gates, and this test"
-        );
-        assert_eq!(Z0BranchRules::in_force(), Z0BranchRules::Held);
-        assert_eq!(
-            with_z0_branch(Z0BranchRules::Kept, Z0BranchRules::in_force),
-            Z0BranchRules::Kept
-        );
-        assert_eq!(Z0BranchRules::in_force(), Z0BranchRules::Held);
     }
 
     /// Z₀'s departure under the zonal hold (R09.T13.i): more than 2 K from T\* and moving away from

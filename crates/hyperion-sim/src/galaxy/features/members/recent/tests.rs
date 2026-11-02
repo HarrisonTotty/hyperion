@@ -34,9 +34,9 @@ use crate::time::UniverseTime;
 /// The seed of the tests' Milky Way.
 const SEED: u64 = 0x0935_0000_0000_0001;
 
-/// Every 26 hold, the Humphreys–Davidson limit's included (`GalaxyRules::every_26_hold`).
+/// Every 26 hold with its retargets.
 fn rules_26() -> GalaxyRules {
-    GalaxyRules::every_26_hold()
+    GalaxyRules::every_26_hold_with_its_retargets()
 }
 
 /// The Milky Way at [`SEED`] under `rules`, with its kinematic tables, which a list needs.
@@ -110,13 +110,13 @@ fn list_id(feature: &FeatureRecord, index: u16) -> FeatureMemberId {
     .unwrap()
 }
 
-/// P09.T36 is held until the 25 → 26 bump: the rules in force are version 25's and before, under
+/// P09.T36 is held until the 26 → 27 bump: the rules in force are version 26's and before, under
 /// which no feature lists a recent class.
 #[test]
-fn the_feature_classes_are_held_only_until_the_26_bump() {
+fn the_feature_classes_are_held_only_until_the_27_bump() {
     assert!(
         GENERATOR_VERSION < FEATURE_CLASSES_VERSION,
-        "the 25 → 26 bump puts P09.T36 on the record: catalogue features and the centre list \
+        "the 26 → 27 bump puts P09.T36 on the record: catalogue features and the centre list \
          their recently dead and their luminous blue variables, and their band-E cells give them \
          up. Delete `FEATURE_CLASSES_VERSION`, `FeatureClassesRules` with its `Unlisted` arm, \
          `GalaxyRules::feature_classes`, the `match`es in `FeatureStars::listing`, \

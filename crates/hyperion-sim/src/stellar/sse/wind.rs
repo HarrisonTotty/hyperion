@@ -59,8 +59,9 @@
 //!   smaller jump near 15,000 K at high Z (their section 5.2) is left out, as Belczynski et al.
 //!   leave it.
 //! - An evolved hydrogen-rich star beyond the Humphreys–Davidson limit loses 1.5 × 10⁻⁴ M☉ per
-//!   year, independent of metallicity, as the whole of its wind below version 26 (Belczynski et
-//!   al. 2010, equation 8 with `f_lbv` = 1.5); from 26 it is a floor (below).
+//!   year, independent of metallicity, at least: a floor (Belczynski et al. 2010, equation 8 with
+//!   `f_lbv` = 1.5), with the limit enforced above it (below; to version 25 it was the whole of
+//!   its wind).
 //! - Naked helium stars follow Hamann and Koesterke (1998, A&A 335, 1003) in HPT's reduced form
 //!   10⁻¹³ L^1.5, scaled as (Z ÷ Z☉)^0.86 (Vink and de Koter 2005, A&A 442, 587, for WN stars
 //!   over 10⁻³ ≲ Z ÷ Z☉ ≲ 1), which is Belczynski et al. (2010) equation 9.
@@ -85,9 +86,10 @@
 //!
 //! The recipe is continuous in effective temperature: the bi-stability jump and the hand-over
 //! from the cool rate to Vink's are linear blends across a band (see [`vink`] and
-//! [`hot_or_cool`]). The one step left is the Humphreys–Davidson limit, where Belczynski et al.'s
-//! constant rate switches on by design, about six times the rate just inside it for a 60 M☉ star
-//! of 10⁶ L☉. Between phases the rate may step, as in the codes the recipe follows: at low Z most
+//! [`hot_or_cool`]). At the Humphreys–Davidson limit Belczynski et al.'s constant is a floor under
+//! the rate the star would have inside the limit, with HPT's luminous-blue-variable term added
+//! (P06.T42.a's [`modern_limited`]), so the rate steps there only where the floor exceeds that
+//! rate. Between phases the rate may step, as in the codes the recipe follows: at low Z most
 //! of all where a giant cooler than 11,500 K is stripped to a naked helium star, since HPT's
 //! small-envelope term carries no Z and the helium stars' rate carries Z^0.86 (a fall of about 95
 //! times at Z = 10⁻⁴ and 7 at 0.002).
@@ -102,12 +104,10 @@
 //! cool side at log L 5.8–5.9 and about five times below it at log L 6.3 (8.1 × 10⁻⁴ M☉ per year
 //! for 80 M☉ at 4,000 K), so the tracks keep cool supergiants there for some 2 × 10⁵ years.
 //! Ruling 29 of signoff 12 (rendering plan R06's ask A2) has the tracks shed them.
-//! [`modern_limited`] is that rate, built pure by P06.T42.a. P06.T42.b's swap makes it `Modern`'s
-//! from version 26 on, behind the stellar rules' hold ([`HD_LIMIT_VERSION`], the `hd_limit`
-//! field): [`rate`] reads it under [`HdLimitRules::Enforced`] and [`modern`] under
-//! [`HdLimitRules::Belczynski`], the arm every version before 26 takes. Below 26 the Modern
-//! recipe is therefore the one described above, Belczynski et al.'s constant the whole of an
-//! evolved star's wind past the limit.
+//! [`modern_limited`] is that rate, built pure by P06.T42.a, and P06.T42.b's swap makes it
+//! `Modern`'s from version 26 on: [`rate`] reads it. The recipe described above, Belczynski et
+//! al.'s constant the whole of an evolved star's wind past the limit (`modern`), stays only as
+//! P06.T42.a's tests' reference.
 //!
 //! Past the limit it is the larger of [`MODERN_LBV`] and the rate the star would have inside it
 //! (the cool side's HPT rates or Vink's, through [`hot_or_cool`]), steepened near the Eddington
@@ -127,10 +127,8 @@
 //! the cube without the − 1.0, a slip the journal's text corrects; at 4,000 K the preprint's form
 //! would be 21–28% higher from log L 5.78 to 5.90.
 
-use crate::GeneratorVersion;
 use crate::math;
 use crate::stellar::composition::Z_SOLAR;
-use crate::stellar::rules::StellarRules;
 use crate::stellar::{Composition, Phase, StarState};
 use crate::units::consts::{GM_SUN, SOLAR_LUMINOSITY_W, SPEED_OF_LIGHT};
 use crate::units::{SolarLuminosities, SolarMasses, SolarMassesPerYear};
@@ -142,48 +140,11 @@ pub enum WindRecipe {
     /// that the backbone can be validated against SSE's output (P06.T12.b).
     Hurley2000,
     /// The generator's default: Vink, de Koter and Lamers (2001) for hot hydrogen-rich stars, the
-    /// luminous-blue-variable rate of Belczynski et al. (2010) beyond the Humphreys–Davidson
-    /// limit, Hamann and Koesterke (1998) scaled as Z^0.86 (Vink and de Koter 2005) for naked
+    /// Humphreys–Davidson limit enforced beyond it (Belczynski et al.'s 2010 luminous-blue-variable
+    /// rate as a floor, HPT's term on top; P06.T42.b), Hamann and Koesterke (1998) scaled as Z^0.86 (Vink and de Koter 2005) for naked
     /// helium stars, and Hurley, Pols and Tout's prescriptions elsewhere.
     #[default]
     Modern,
-}
-
-/// The generator version whose stellar rules enforce the Humphreys–Davidson limit in the modern
-/// winds (plan 06, P06.T42.b's swap of rendering plan R06's ask A2; ruling 29 of signoff 12):
-/// [`rate`]'s `Modern` arm reads [`modern_limited`], and a luminous blue variable's giant
-/// eruptions are thinned to the instants at which the star is one (research-p06 §8).
-///
-/// Below it every track takes the held arm, [`HdLimitRules::Belczynski`], the code of version 24
-/// verbatim, so every generated value keeps its bits; the tests reach the enforced arm through
-/// `StellarRules::every_26_hold()`. The bump to 26 deletes this hold: [`HdLimitRules`] with its
-/// `Belczynski` arm, the stellar rules' `hd_limit` field, [`modern`]'s call in [`rate`] (it stays
-/// the reference of P06.T42.a's tests, under `cfg(test)`), the eruptions' match on the field and
-/// the tripwire (`the_hd_limit_is_held_only_until_the_26_bump`).
-pub(crate) const HD_LIMIT_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// How the modern winds treat an evolved star past the Humphreys–Davidson limit (the stellar
-/// rules' `hd_limit` field, the hold of [`HD_LIMIT_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum HdLimitRules {
-    /// Version 25's and before: Belczynski et al.'s (2010) constant, [`MODERN_LBV`], is the whole
-    /// of the star's wind past the limit ([`modern`]), and a luminous blue variable erupts at the
-    /// full rate anywhere in the hull of its window.
-    Belczynski,
-    /// Version 26's: the limit enforced, the constant a floor with HPT's luminous-blue-variable
-    /// term added ([`modern_limited`]), and the eruptions thinned to the instants at which the
-    /// star is a luminous blue variable.
-    Enforced,
-}
-
-impl HdLimitRules {
-    /// Whether the tables fitted offline from the tracks, which `hyperion-fit` builds under the
-    /// generator version's rules (the fates' `tables::stellar_fates_*` among them), hold for a
-    /// track under this arm: under the version's arm only, until the bump refits them.
-    #[must_use]
-    pub(crate) fn fitted_tables_hold(self) -> bool {
-        self == StellarRules::of_version(crate::GENERATOR_VERSION).hd_limit
-    }
 }
 
 /// Reimers' η, the dimensionless efficiency of the Kudritzki–Reimers wind (HPT equation 106):
@@ -223,9 +184,7 @@ impl ReimersEta {
 /// `recipe`, with Reimers' `eta`: M☉ per Julian year, non-negative, positive for loss as in
 /// [`StarStateParts::mass_loss_rate`](crate::stellar::StarStateParts::mass_loss_rate).
 ///
-/// The stellar stage's `rules` choose the `Modern` recipe's treatment of the Humphreys–Davidson
-/// limit: the winds' one `match` on their [`hd_limit`](StellarRules::hd_limit) field, which every track
-/// reaches through its options. Under the version's rules it is [`modern`].
+/// The `Modern` recipe enforces the Humphreys–Davidson limit ([`modern_limited`], P06.T42.b).
 ///
 /// Remnants, protostars, pre-main-sequence stars, substellar objects and the post-AGB crossing
 /// have none: HPT's recipe starts on the main sequence, and the post-AGB crossing begins when the
@@ -240,7 +199,6 @@ pub(crate) fn rate(
     state: &StarState,
     composition: &Composition,
     eta: ReimersEta,
-    rules: StellarRules,
 ) -> SolarMassesPerYear {
     let regime = Regime::of(state.phase());
     if regime == Regime::Windless {
@@ -250,10 +208,7 @@ pub(crate) fn rate(
     debug_assert!(s.m > 0.0, "a star with a wind has mass: {state:?}");
     SolarMassesPerYear::new(match recipe {
         WindRecipe::Hurley2000 => hurley(regime, &s, eta),
-        WindRecipe::Modern => match rules.hd_limit {
-            HdLimitRules::Belczynski => modern(regime, &s, eta),
-            HdLimitRules::Enforced => modern_limited(regime, &s, eta),
-        },
+        WindRecipe::Modern => modern_limited(regime, &s, eta),
     })
 }
 
@@ -375,8 +330,8 @@ const HURLEY_LBV: f64 = 0.1;
 
 /// The luminous-blue-variable rate beyond the Humphreys–Davidson limit, M☉ yr⁻¹: `f_lbv` × 10⁻⁴
 /// with Belczynski et al.'s (2010, equation 8) standard `f_lbv` = 1.5, independent of metallicity:
-/// the whole of the star's wind under [`HdLimitRules::Belczynski`], a floor under
-/// [`HdLimitRules::Enforced`].
+/// a floor under the enforced limit ([`modern_limited`]), and the whole of the star's wind in
+/// `modern`, P06.T42.a's tests' reference.
 const MODERN_LBV: f64 = 1.5e-4;
 
 /// The power of Z ÷ Z☉ in a Wolf-Rayet star's wind: Vink and de Koter (2005, section 4) find
@@ -566,7 +521,9 @@ fn hurley_evolved(s: &Surface, eta: ReimersEta, agb: bool) -> f64 {
 }
 
 /// Design note 6's modern recipe with P06.T39's steepening near the Eddington limit (module
-/// documentation).
+/// documentation), Belczynski et al.'s constant the whole of the wind past the
+/// Humphreys–Davidson limit: version 25's and before, now P06.T42.a's tests' reference.
+#[cfg(test)]
 #[must_use]
 fn modern(regime: Regime, s: &Surface, eta: ReimersEta) -> f64 {
     with_eddington_kink(regime, s, |surface| modern_below_kink(regime, surface, eta))
@@ -819,38 +776,19 @@ mod tests {
             state,
             &metals(z),
             ReimersEta::HURLEY,
-            version(),
         )
         .value()
     }
 
-    /// The modern rate under the version's rules, the held arm of `HD_LIMIT_VERSION`.
+    /// The modern rate, the Humphreys–Davidson limit enforced.
     fn modern_rate(state: &StarState, z: f64) -> f64 {
-        rate(
-            WindRecipe::Modern,
-            state,
-            &metals(z),
-            ReimersEta::HURLEY,
-            version(),
-        )
-        .value()
+        rate(WindRecipe::Modern, state, &metals(z), ReimersEta::HURLEY).value()
     }
 
-    /// The generator version's stellar rules.
-    fn version() -> StellarRules {
-        StellarRules::of_version(crate::GENERATOR_VERSION)
-    }
-
-    /// The choke point: under the version's rules the modern recipe is [`modern`] and with the
-    /// limit's arm turned on [`modern_limited`], bit for bit, over a grid of states inside and past
-    /// the limit; HPT's recipe reads no field.
+    /// The modern recipe is [`modern_limited`], bit for bit, over a grid of states inside and past
+    /// the limit, and moves from [`modern`] past it; HPT's recipe is its own.
     #[test]
-    fn the_rules_choose_the_modern_rate_past_the_limit() {
-        let enforced = StellarRules {
-            hd_limit: HdLimitRules::Enforced,
-            ..version()
-        };
-        assert_eq!(version().hd_limit, HdLimitRules::Belczynski);
+    fn the_modern_recipe_enforces_the_limit() {
         let mut past = 0;
         for phase in [
             Phase::MainSequence,
@@ -872,14 +810,14 @@ mod tests {
                         let surface = Surface::of(&s, &comp);
                         let regime = Regime::of(phase);
                         let eta = ReimersEta::HURLEY;
-                        let rule = |rules| rate(WindRecipe::Modern, &s, &comp, eta, rules).value();
-                        assert_same_bits(rule(version()), modern(regime, &surface, eta));
-                        assert_same_bits(rule(enforced), modern_limited(regime, &surface, eta));
+                        let limited = rate(WindRecipe::Modern, &s, &comp, eta).value();
+                        assert_same_bits(limited, modern_limited(regime, &surface, eta));
                         assert_same_bits(
-                            rate(WindRecipe::Hurley2000, &s, &comp, eta, enforced).value(),
-                            hurley_rate(&s, 0.02),
+                            rate(WindRecipe::Hurley2000, &s, &comp, eta).value(),
+                            hurley(regime, &surface, eta),
                         );
-                        past += u32::from(rule(version()).total_cmp(&rule(enforced)).is_ne());
+                        past +=
+                            u32::from(modern(regime, &surface, eta).total_cmp(&limited).is_ne());
                     }
                 }
             }
@@ -1066,7 +1004,7 @@ mod tests {
             let none = Regime::of(phase) == Regime::Windless;
             windless += usize::from(none);
             for recipe in [WindRecipe::Hurley2000, WindRecipe::Modern] {
-                let mdot = rate(recipe, &s, &metals(0.02), ReimersEta::HURLEY, version()).value();
+                let mdot = rate(recipe, &s, &metals(0.02), ReimersEta::HURLEY).value();
                 if none {
                     assert_same_bits(mdot, 0.0);
                 } else {
@@ -1257,15 +1195,15 @@ mod tests {
             Phase::EarlyAgb,
         ] {
             let lbv = star(phase, 60.0, 20.0, 1e6, 150.0);
-            assert_same_bits(modern_rate(&lbv, 0.02), 1.5e-4);
+            assert_same_bits(todays_rate(&lbv, 0.02), 1.5e-4);
         }
         let inside = star(Phase::HertzsprungGap, 60.0, 20.0, 1e6, 90.0);
-        let within = modern_rate(&inside, 0.02);
+        let within = todays_rate(&inside, 0.02);
         assert!(within < 1e-4, "inside the limit: {within:e}");
         let main_sequence = star(Phase::MainSequence, 60.0, 0.0, 1e6, 150.0);
         let s = surface(&main_sequence, 0.02);
         assert_same_bits(
-            modern_rate(&main_sequence, 0.02),
+            todays_rate(&main_sequence, 0.02),
             hot_or_cool(&s, nieuwenhuijzen_de_jager(&s)),
         );
     }
@@ -1400,13 +1338,13 @@ mod tests {
             let cool = star_at(Phase::CoreHeliumBurning, m, 0.5 * m, l, 5_000.0);
             assert!(beyond_humphreys_davidson(&surface(&cool, 0.02)));
             let expected = MODERN_LBV * math::powf(gamma / EDDINGTON_KINK, 3.99);
-            assert_close("LBV", modern_rate(&cool, 0.02), expected, 1e-9);
+            assert_close("LBV", todays_rate(&cool, 0.02), expected, 1e-9);
             let hot = star_at(Phase::MainSequence, m, 0.0, l, 45_000.0);
             let at_kink = star_at(Phase::MainSequence, kink, 0.0, l, 45_000.0);
             assert_close(
                 "Vink",
-                modern_rate(&hot, 0.02),
-                modern_rate(&at_kink, 0.02) * math::powf(gamma / EDDINGTON_KINK, 3.99),
+                todays_rate(&hot, 0.02),
+                todays_rate(&at_kink, 0.02) * math::powf(gamma / EDDINGTON_KINK, 3.99),
                 1e-9,
             );
         }
@@ -1415,7 +1353,7 @@ mod tests {
         let s = surface(&faint, 0.02);
         assert!(eddington_factor(SolarLuminosities::new(s.l), SolarMasses::new(s.m)) < 0.7);
         assert_same_bits(
-            modern_rate(&faint, 0.02),
+            todays_rate(&faint, 0.02),
             hot_or_cool(&s, nieuwenhuijzen_de_jager(&s)),
         );
     }
@@ -1429,9 +1367,9 @@ mod tests {
         )
     }
 
-    /// Today's modern rate for `state` at metal fraction `z`, with HPT's η: [`modern`] itself, not
-    /// [`rate`], so that T42.a's tests keep their reference when P06.T42.b points `rate` at the
-    /// limited rate.
+    /// Belczynski et al.'s modern rate for `state` at metal fraction `z`, with HPT's η: [`modern`]
+    /// itself, not [`rate`], which P06.T42.b points at the limited rate, so that T42.a's tests
+    /// keep their reference.
     fn todays_rate(state: &StarState, z: f64) -> f64 {
         modern(
             Regime::of(state.phase()),

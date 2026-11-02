@@ -1214,25 +1214,6 @@ fn the_exact_step_moves_the_baseline_s_columns_under_a_percent() {
     }
 }
 
-/// P14.T54.b.l's false position for `r_w` is held until the 25 → 26 bump: the root in force is the
-/// bisections'.
-#[test]
-fn the_fall_radius_root_is_held_only_until_the_26_bump() {
-    assert!(
-        GENERATOR_VERSION < FALL_RADIUS_VERSION,
-        "the 25 → 26 bump puts P14.T54.b.l's false position for `r_w` on the record: delete \
-         `FALL_RADIUS_VERSION`, `FallRadiusRoot::in_force`'s version test, the tests' \
-         `with_fall_radius` and its switch in `with_every_26_hold`, and this test, keeping \
-         `FallRadiusRoot::Bisections` as the tests' oracle of the false position"
-    );
-    assert_eq!(FallRadiusRoot::in_force(), FallRadiusRoot::Bisections);
-    assert_eq!(
-        with_fall_radius(FallRadiusRoot::FalsePosition, FallRadiusRoot::in_force),
-        FallRadiusRoot::FalsePosition
-    );
-    assert_eq!(FallRadiusRoot::in_force(), FallRadiusRoot::Bisections);
-}
-
 /// Under 26's false position each level's `r_w` is the bisections' within their width: over airs
 /// of H₂, N₂ and CO₂ from 1 mPa to 100 bar and 50 to 2,500 K, grains of 900 to 5,000 kg m⁻³ and w*
 /// from 10⁻⁶ to 10 m s⁻¹, the two radii lie within 2⁻⁴⁸ of the range's 18.4 in ln r, those held

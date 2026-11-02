@@ -1,5 +1,5 @@
-//! White dwarfs' pollution and dusty debris discs (plan 14, design note 11, P14.T28.d), behind
-//! their hold at generator version 26 (`WHITE_DWARF_DEBRIS_VERSION`).
+//! White dwarfs' pollution and dusty debris discs (plan 14, design note 11, P14.T28.d), from
+//! generator version 26.
 //!
 //! A white dwarf that keeps a belt and at least one planet through its giant branches goes on
 //! scattering asteroids inward, and those that cross its Roche limit are torn apart: their dust
@@ -44,72 +44,6 @@ use crate::stellar::draws::UnitUniform;
 use crate::units::{
     Kelvin, Kilograms, KilogramsPerCubicMetre, Metres, SolarMasses, SolarRadii, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-/// The generator version from which a white dwarf's system is marked polluted and may carry a
-/// debris disc in belt slot `0xEE` (P14.T28.d): 26, the first galaxy train after the task lands
-/// (the bump plan).
-///
-/// It is T28.d's one hold. Below it [`WhiteDwarfDebrisRules::in_force`] is
-/// [`WhiteDwarfDebrisRules::Held`]: no system is marked and none has the body, and every generated
-/// value is version 25's bit for bit. 26's bump deletes this hold, [`WhiteDwarfDebrisRules`] with
-/// its `Held` arm, the tests' switch and its tripwire
-/// (`the_white_dwarf_debris_is_held_only_until_the_26_bump`).
-pub(crate) const WHITE_DWARF_DEBRIS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether P14.T28.d's pollution and debris discs are in force (its hold,
-/// [`WHITE_DWARF_DEBRIS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum WhiteDwarfDebrisRules {
-    /// Version 25's and before: no white dwarf's system is marked.
-    Held,
-    /// Version 26's: the pollution mark and the debris disc.
-    Debris,
-}
-
-impl WhiteDwarfDebrisRules {
-    /// The rules this generator version gives: the debris's from [`WHITE_DWARF_DEBRIS_VERSION`],
-    /// none below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_white_dwarf_debris`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = DEBRIS_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= WHITE_DWARF_DEBRIS_VERSION {
-            Self::Debris
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The debris's rules a test sets on its thread, `None` for the version's.
-    static DEBRIS_RULES: core::cell::Cell<Option<WhiteDwarfDebrisRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the debris's rules `rules` on this thread, for the tests to reach them
-/// ahead of the bump; the version's rules are set back after, a panic in `run` included. 26's
-/// bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_white_dwarf_debris<R>(
-    rules: WhiteDwarfDebrisRules,
-    run: impl FnOnce() -> R,
-) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<WhiteDwarfDebrisRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            DEBRIS_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(DEBRIS_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The belt slot of the debris disc: `Belt(14)`, slot `0xEE` (design note 3), which no belt
 /// takes ([`LAST_BELT_SLOT`](crate::planetary::belts::LAST_BELT_SLOT) is 13).
@@ -291,45 +225,10 @@ mod tests {
     use super::*;
     use crate::coords::{CellSize, GenCell};
     use crate::id::Layer;
-    use crate::planetary::testing::with_every_26_hold;
 
     fn system(index: u32) -> SystemId {
         let cell = GenCell::new(CellSize::Ly8, [3, -2, 1]).expect("a cell of the grid");
         SystemId::from_parts(Layer::A, cell, index).expect("a system of the cell")
-    }
-
-    /// P14.T28.d is held until the 25 → 26 bump, inside 26's helper alone.
-    #[test]
-    fn the_white_dwarf_debris_is_held_only_until_the_26_bump() {
-        assert!(
-            GENERATOR_VERSION < WHITE_DWARF_DEBRIS_VERSION,
-            "the 25 → 26 bump marks white dwarfs' systems polluted and gives some a debris disc \
-             (P14.T28.d): delete `WHITE_DWARF_DEBRIS_VERSION`, `WhiteDwarfDebrisRules` with its \
-             `Held` arm and the held arm of `SystemDiscs::find`, the tests' \
-             `with_white_dwarf_debris`, its switch in `with_every_26_hold` and this test, and \
-             re-bless the goldens whose systems have a white dwarf"
-        );
-        assert_eq!(
-            WhiteDwarfDebrisRules::in_force(),
-            WhiteDwarfDebrisRules::Held
-        );
-        assert_eq!(
-            with_every_26_hold(WhiteDwarfDebrisRules::in_force),
-            WhiteDwarfDebrisRules::Debris
-        );
-        assert_eq!(
-            with_every_26_hold(|| {
-                with_white_dwarf_debris(
-                    WhiteDwarfDebrisRules::Held,
-                    WhiteDwarfDebrisRules::in_force,
-                )
-            }),
-            WhiteDwarfDebrisRules::Held
-        );
-        assert_eq!(
-            WhiteDwarfDebrisRules::in_force(),
-            WhiteDwarfDebrisRules::Held
-        );
     }
 
     #[test]

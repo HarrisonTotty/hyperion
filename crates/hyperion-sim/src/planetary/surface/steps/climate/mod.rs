@@ -145,18 +145,10 @@ mod tests;
 /// hold to the record's conditions' to the bit.
 #[cfg(test)]
 pub(crate) use airless::regolith_inertia_of;
-/// The zonal search's Z₀ hold at version 26 (R09.T13.i) and its switch, which version 26's
-/// helper (`planetary::testing::with_every_26_hold`) sets.
-#[cfg(test)]
-pub(crate) use ebm::{Z0BranchRules, with_z0_branch};
 /// R09.T16.a's check of the water cycle's shared month terms, which the erosion's tests run beside
 /// the lakes' (`after_erosion::assert_the_net_loss_shares_its_month_terms`) on one climate pass.
 #[cfg(test)]
 pub(crate) use hydrology::assert_the_sea_rates_share_their_month_terms;
-/// R09.T13.n's hold and the tests' switch, under which the pass's determinism tests run version
-/// 26's water cycle ahead of its bump.
-#[cfg(test)]
-pub(crate) use partition::{PartitionThermodynamics, with_partition_thermodynamics};
 mod transport;
 mod wind;
 

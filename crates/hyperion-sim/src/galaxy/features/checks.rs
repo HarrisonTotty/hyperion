@@ -1,6 +1,5 @@
 //! The globular system's tests and the Milky Way checks (plan 09, P09.T11–T14).
 
-use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, assert_poisson_count, ks_one_sample};
 
 use super::FeatureProcess;
@@ -8,15 +7,13 @@ use super::catalogue::{FeatureCatalogue, FeatureMarks, FeatureRecord, bulk_veloc
 use super::cluster::{ClusterModel, central_escape_speed};
 use super::interior::retention::{EFFECTIVE_ESCAPE_FACTOR, retention};
 use super::kinds::globular::{
-    BOUND_SHARE, GLOBULAR_CUT, GlobularMarks, GlobularSystem, HALF_MASS_RADIUS_LAW, bound_share,
-    history, history_on_orbit,
+    GLOBULAR_CUT, GlobularMarks, GlobularSystem, HALF_MASS_RADIUS_LAW, history, history_on_orbit,
 };
 use super::testing::milky_way_globulars;
 use crate::Seed;
 use crate::galaxy::consts::{LIGHT_YEARS_PER_KILOPARSEC, LIGHT_YEARS_PER_PARSEC};
 use crate::galaxy::imf::MassFunctionKind;
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::math;
 use crate::stellar::Composition;
@@ -193,68 +190,16 @@ fn inversion_against_the_catalogue(galaxy: &Galaxy) -> (f64, f64, f64) {
     (median_offset, share, median_ratio)
 }
 
-/// Ruling 145.5 under every 26 hold. The catalogue's clusters, inverted at the halo's own μ, meet
-/// Baumgardt et al. 2019's initial masses closer than at BM03's 0.70 (a median offset of −0.072
-/// dex against −0.168), inside P09.T13's windows. The fixture's globulars, on their orbits, are
-/// each born heavier by more than 1 and less than BM03's 0.70 over their own μ of about 0.47 (the
-/// ruling's "about 1.5 times"): nearly that for a cluster whose dissolution time is far beyond its
-/// age (at most 1.447), little for one nearly dissolved, whose birth mass its dissolution time sets
-/// (at least 1.007), a median of 1.239. Their orbits stay as they were.
+/// Ruling 145.5: the catalogue's clusters, inverted at the halo's own μ, meet Baumgardt et al.
+/// 2019's initial masses inside P09.T13's windows (BM03's 0.70 put the median offset at −0.168
+/// dex, the own μ at −0.072).
 #[test]
-fn under_every_26_hold_the_globulars_are_born_heavier_by_bm03_s_share_over_their_own() {
-    let held = milky_way(0).with_full_potential();
-    // Every 26 hold but the field share, the carve-out and the displaced classes, which the galaxy
-    // reads when it is built and which reach no globular (P09.T2.c, P09.T35, P08.T12).
-    let own = held.clone().with_rules(GalaxyRules {
-        field_share: held.rules().field_share,
-        carve_out: held.rules().carve_out,
-        displaced: held.rules().displaced,
-        ..GalaxyRules::every_26_hold()
-    });
-    let (offset_held, ..) = inversion_against_the_catalogue(&held);
-    let (median_offset, share, median_ratio) = inversion_against_the_catalogue(&own);
-    assert!(median_offset.abs() < offset_held.abs(), "{median_offset}");
+fn the_globulars_inverted_at_their_own_mu_meet_the_catalogue() {
+    let galaxy = milky_way(0).with_full_potential();
+    let (median_offset, share, median_ratio) = inversion_against_the_catalogue(&galaxy);
     assert!(median_offset.abs() <= 0.25, "{median_offset}");
     assert!(share >= 0.7, "{share} within 0.25 dex");
     assert!((1.5..=2.3).contains(&median_ratio), "{median_ratio}");
-    let mut ratios = Vec::new();
-    for (f, m) in globulars(&held) {
-        let run = |galaxy: &Galaxy| {
-            history(
-                galaxy,
-                f.position(),
-                bulk_velocity(galaxy, &f),
-                m.origin().population(),
-                m.mass(),
-                m.half_mass_radius(),
-                m.age(),
-            )
-        };
-        let (before, after) = (run(&held), run(&own));
-        let mu = bound_share(&own, m.origin().population(), m.age());
-        let ratio = after.initial_mass.value() / before.initial_mass.value();
-        assert!(
-            ratio > 1.0 && ratio < BOUND_SHARE / mu,
-            "{:?}: {ratio}",
-            f.id()
-        );
-        assert_same_bits(after.apocentre.value(), before.apocentre.value());
-        ratios.push((ratio, math::log10(m.mass().value())));
-    }
-    ratios.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let median = ratios[ratios.len() / 2].0;
-    let (least, most) = (ratios[0], ratios[ratios.len() - 1]);
-    eprintln!(
-        "{} globulars born heavier by a median {median:.3}, from {:.3} (log M {:.2}) to {:.3} \
-         (log M {:.2})",
-        ratios.len(),
-        least.0,
-        least.1,
-        most.0,
-        most.1
-    );
-    assert!((1.15..=1.35).contains(&median), "{median}");
-    assert!((1.40..=1.48).contains(&most.0), "{}", most.0);
 }
 
 // --- P09.T11 ---

@@ -60,10 +60,11 @@ use hyperion_sim::math;
 use hyperion_sim::units::LightYears;
 
 use super::births::ThinHistory;
-use super::cells::{BarCells, RzCells};
+use super::cells::{BarCells, RzCells, total_variation};
 use super::fit_disc::{DiscFits, DisciplineSettings, fit_disc};
 use super::fit_old::{
     Elongation, OldFit, OldSettings, elongation, fit_mixtures, fit_spheroids, own_form,
+    unkicked_form,
 };
 use super::histogram::ClassHistogram;
 use super::hypervelocity::{HypervelocityFit, HypervelocitySettings, fit_hypervelocity};
@@ -74,8 +75,10 @@ use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput};
 
 /// The task's revision: 1 from its re-emission at generator version 25 (P14.T54.c), on P15.T3.c's
-/// potential and P15.T6.b's joined histogram files.
-pub const REVISION: u32 = 1;
+/// potential and P15.T6.b's joined histogram files; 2 since the disc-born layer's central hole and
+/// boxes (P15.T6.c), 3 since the barred sources' own form is the unkicked orbits' (P15.T6.d;
+/// research p15-t6-forms).
+pub const REVISION: u32 = 3;
 
 /// The histograms' file within their dataset, when it is one file.
 pub const ORBITS_FILE: &str = "displaced_orbits.txt";
@@ -394,6 +397,9 @@ pub struct FormFits {
     pub records: Vec<ClassHistogram>,
     /// The bar's elongation by speed bin against its control.
     pub bar_elongation: Vec<Option<Elongation>>,
+    /// How much of each barred source's own form, the unkicked orbits', its field density
+    /// misplaces: bulge, bar and nuclear disc, in the order of [`Source::BARRED`].
+    pub field_misplaced: [f64; 3],
     /// The hypervelocity row.
     pub hypervelocity: HypervelocityFit,
     /// The galaxy's scales.
@@ -431,10 +437,13 @@ fn age_weights(fields: &Fields, scales: &GalaxyScales) -> [f64; AGE_BINS] {
     out
 }
 
-/// The flared layer's density at `(r, z)`, `R_d`, before normalisation.
+/// The flared layer's density at `(r, z)`, `R_d`, before normalisation; `r` positive for a holed
+/// layer.
+#[must_use]
 fn layer_at(l: &FlaredLayerParams, r: f64, z: f64) -> f64 {
     let h = l.h_0 * math::exp(r / l.r_flare);
-    math::exp(-r / l.h_r) * math::exp(-math::powf(z.abs() / h, l.beta)) / h
+    let hole_term = if l.hole > 0.0 { l.hole / r } else { 0.0 };
+    math::exp(-r / l.h_r - hole_term) * math::exp(-math::powf(z.abs() / h, l.beta)) / h
 }
 
 /// The cored power law's density at `(r, z)`, `R_d`, before normalisation.
@@ -493,6 +502,10 @@ fn half_height(cells: &RzCells, disc: &DiscFits, radius: f64) -> f64 {
 /// # Errors
 ///
 /// [`RunTaskError::Threads`] if the thread pool cannot be built.
+///
+/// # Panics
+///
+/// Never: every barred source is one of [`Source::BARRED`], and has its control in [`classes`].
 pub fn fit_all(
     params: &FitParams,
     records: Vec<ClassHistogram>,
@@ -521,12 +534,19 @@ pub fn fit_all(
     )?;
     let mut old: [Vec<OldFit>; 5] = Default::default();
     let mut bar_elongation = Vec::new();
+    let mut field_misplaced = [0.0; 3];
     for (slot, source) in old.iter_mut().zip(Source::OLD) {
         let kicked = of(&|c| c.source == source && c.speed.is_some());
         *slot = if source.is_barred() {
-            let own = own_form(&fields, source.population(), &bar_cells, r_d);
+            let control = of(&|c| c.source == source && c.speed.is_none());
+            let own = unkicked_form(&control[0], &kicked[0]);
+            let field = own_form(&fields, source.population(), &bar_cells, r_d);
+            let k = Source::BARRED
+                .iter()
+                .position(|&s| s == source)
+                .expect("a barred source is one of Source::BARRED");
+            field_misplaced[k] = total_variation(&field, &own);
             if source == Source::LongBar {
-                let control = of(&|c| c.source == source && c.speed.is_none());
                 let radius = 2.0 * galaxy_params.bar().half_length().value();
                 bar_elongation = elongation(&kicked, &control[0], radius);
             }
@@ -550,6 +570,7 @@ pub fn fit_all(
         old,
         records,
         bar_elongation,
+        field_misplaced,
         hypervelocity,
         scales,
         half_height_ly,
@@ -563,12 +584,13 @@ fn lit(v: f64) -> String {
 
 fn layer_text(l: &FlaredLayerParams) -> String {
     format!(
-        "FlaredLayerParams {{ weight: {}, h_r: {}, h_0: {}, r_flare: {}, beta: {} }}",
+        "FlaredLayerParams {{ weight: {}, h_r: {}, h_0: {}, r_flare: {}, beta: {}, hole: {} }}",
         lit(l.weight),
         lit(l.h_r),
         lit(l.h_0),
         lit(l.r_flare),
-        lit(l.beta)
+        lit(l.beta),
+        lit(l.hole)
     )
 }
 
@@ -769,6 +791,17 @@ fn notes(fits: &FormFits) -> Vec<String> {
         "One orbit run, at the fixture's halo mass and bar, fills each node array: the value".to_owned(),
         "measured there stands at all three nodes until the runs at other halo masses and".to_owned(),
         "corotation ratios exist (P15.T6.d–e).".to_owned(),
+        String::new(),
+        "The bulge's, bar's and nuclear disc's own-form shares are measured against the unkicked"
+            .to_owned(),
+        "orbits: the bar-frame histogram of each source's control and its slowest class pooled"
+            .to_owned(),
+        "(P15.T6.d). Plan 08 still places the retained share with the field component's density"
+            .to_owned(),
+        format!(
+            "(Design note 13), which misplaces {:.3}, {:.3} and {:.3} of the unkicked orbits.",
+            fits.field_misplaced[0], fits.field_misplaced[1], fits.field_misplaced[2]
+        ),
     ];
     if let Some(by) = fits.histograms.provisional() {
         out.push(String::new());
@@ -789,6 +822,24 @@ fn notes(fits: &FormFits) -> Vec<String> {
             })
             .collect();
         out.push(format!("- row {s}: {}", cells.join(", ")));
+    }
+    out.push(String::new());
+    out.push("Misplaced share less its noise floor, old sources, by speed bin (0–7):".to_owned());
+    for (name, old) in ["thick disc", "halo", "bulge", "bar", "nuclear disc"]
+        .into_iter()
+        .zip(&fits.old)
+    {
+        let cells: Vec<String> = old
+            .iter()
+            .map(|f| {
+                if f.empty {
+                    "-".to_owned()
+                } else {
+                    format!("{:.3}", f.misplaced - f.floor)
+                }
+            })
+            .collect();
+        out.push(format!("- {name}: {}", cells.join(", ")));
     }
     out.push(String::new());
     out.extend(fates(fits));
@@ -871,8 +922,8 @@ pub fn acceptance(fits: &FormFits) -> String {
     format!(
         "on {} ({} orbits, {captured} captured by the black hole and {unresolved} unresolved): \
          disc-born weighted mean misplaced share {:.4} (unregularised {:.4}, λ \
-         {}); {edges} of 56 classes with a parameter on a box edge, {heavy_edges} of them over \
-         10⁻⁴ of the weight; {} second-difference sign changes along the rows; worst misplaced \
+         {}); {edges} of 56 classes with a parameter on a box edge (the no-flare and no-hole ends \
+         are limits), {heavy_edges} of them over 10⁻⁴ of the weight; {} second-difference sign changes along the rows; worst misplaced \
          share thick disc {:.3}, halo {:.3}, bulge {:.3}, bar {:.3}, nuclear disc {:.3}; own-form \
          shares at the fixture's corotation ratio {:.2}, bar {}, bulge {}, nuclear disc {}; bar \
          elongation over the control {} and length within {:.2} of it; slowest thin class's \
@@ -1054,6 +1105,41 @@ mod tests {
             read_orbits(&text[..text.len() / 2]),
             Err(ReadOrbitsError::Malformed(_))
         ));
+    }
+
+    /// P15.T6.c: the table reads and writes the hole as the sim's layer does: `layer_at` is the
+    /// layer without it times `exp(−hole ÷ R)`, and a row renders its hole.
+    #[test]
+    fn the_table_reads_and_renders_the_hole() {
+        let plain = FlaredLayerParams {
+            weight: 1.0,
+            h_r: 1.2,
+            h_0: 0.04,
+            r_flare: 6.0,
+            beta: 1.3,
+            hole: 0.0,
+        };
+        let holed = FlaredLayerParams {
+            hole: 0.55,
+            ..plain
+        };
+        for r in [0.1, 1.0, 3.0] {
+            let ratio = layer_at(&holed, r, 0.02) / layer_at(&plain, r, 0.02);
+            assert!(
+                (ratio / math::exp(-0.55 / r) - 1.0).abs() < 1e-12,
+                "{r}: {ratio}"
+            );
+        }
+        assert!(
+            layer_text(&plain).ends_with("beta: 1.3, hole: 0.0 }"),
+            "{}",
+            layer_text(&plain)
+        );
+        assert!(
+            layer_text(&holed).ends_with("hole: 0.55 }"),
+            "{}",
+            layer_text(&holed)
+        );
     }
 
     /// P15.T6.b: a run's file cut at class lines into several reads back joined in the listed

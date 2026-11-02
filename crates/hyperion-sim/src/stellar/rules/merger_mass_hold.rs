@@ -87,7 +87,7 @@ fn every_26() -> Galaxy {
     Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_26_hold(),
+        GalaxyRules::every_26_hold_with_its_retargets(),
     )
     .expect("the Milky Way fixture's gas is mostly neutral")
 }
@@ -120,14 +120,14 @@ fn first_attempt(galaxy: &Galaxy, record: &SystemRecord) -> SystemStars {
     )
 }
 
-/// The version's rules keep the held arm, every version below 26 does and 26 takes the pair's
-/// masses; the fitted tables hold only under the version's arm. The tripwire: the bump to 26
+/// The version's rules keep the held arm, every version below 27 does and 27 takes the pair's
+/// masses; the fitted tables hold only under the version's arm. The tripwire: the bump to 27
 /// deletes this hold.
 #[test]
-fn the_merger_mass_is_held_only_until_the_26_bump() {
+fn the_merger_mass_is_held_only_until_the_27_bump() {
     assert!(
         GENERATOR_VERSION < MERGER_MASS_VERSION,
-        "the bump to 26 deletes P11.T4.d's merger-mass hold: `MERGER_MASS_VERSION`, \
+        "the bump to 27 deletes P11.T4.d's merger-mass hold: `MERGER_MASS_VERSION`, \
          `MergerMassRules` with its `ThermalLimit` arm, `StellarRules::merger_mass`, \
          `merge_dynamically`'s match on it, the brief's read of \
          `MergerMassRules::fitted_tables_hold`, this module and its line in `stellar/rules.rs`, \
@@ -135,16 +135,16 @@ fn the_merger_mass_is_held_only_until_the_26_bump() {
     );
     assert_eq!(version().merger_mass, MergerMassRules::ThermalLimit);
     let at = |v: u32| StellarRules::of_version(crate::GeneratorVersion::new(v)).merger_mass;
-    for v in [GENERATOR_VERSION.get(), 25] {
+    for v in [GENERATOR_VERSION.get(), 25, 26] {
         assert_eq!(at(v), MergerMassRules::ThermalLimit, "version {v}");
     }
-    assert_eq!(at(26), MergerMassRules::Pair);
+    assert_eq!(at(27), MergerMassRules::Pair);
     assert_eq!(
-        StellarRules::every_26_hold().merger_mass,
+        StellarRules::every_27_hold().merger_mass,
         MergerMassRules::Pair
     );
     assert_eq!(
-        GalaxyRules::every_26_hold().stellar.merger_mass,
+        GalaxyRules::every_27_hold().stellar.merger_mass,
         MergerMassRules::Pair
     );
     assert!(version().merger_mass.fitted_tables_hold());
@@ -257,7 +257,11 @@ fn gap_pair(rules: StellarRules) -> (BinaryInput, Years) {
 #[test]
 fn the_gap_accretor_takes_the_whole_donor_under_the_arm() {
     let mut products = Vec::new();
-    for rules in [version(), pair_rules(), StellarRules::every_26_hold()] {
+    for rules in [
+        version(),
+        pair_rules(),
+        StellarRules::every_26_hold_with_its_retargets(),
+    ] {
         let (input, age) = gap_pair(rules);
         let until = Years::new(age.value() + 1.0e3);
         let product = secondary_dynamical_merger(&input, age, until);

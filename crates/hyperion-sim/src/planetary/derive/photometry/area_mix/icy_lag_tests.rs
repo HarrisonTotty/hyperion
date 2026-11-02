@@ -52,29 +52,29 @@ fn enceladus_tidal_flux() -> WattsPerSquareMetre {
     WattsPerSquareMetre::new(15.8e9 / (4.0 * core::f64::consts::PI * r * r))
 }
 
-/// P14.T49.m is held until the 25 → 26 bump: the rules in force are version 25's and before, every
-/// `H2O` regolith T49.i's frost, and 26's helper reaches the mixture.
+/// P14.T49.m is held until the 26 → 27 bump: the rules in force are version 26's and before, every
+/// `H2O` regolith T49.i's frost, and 27's helper reaches the mixture.
 #[test]
-fn the_icy_regolith_is_held_only_until_the_26_bump() {
-    use crate::planetary::testing::with_every_26_hold;
+fn the_icy_regolith_is_held_only_until_the_27_bump() {
+    use crate::planetary::testing::with_every_27_hold;
     assert!(
         GENERATOR_VERSION < ICY_REGOLITH_VERSION,
-        "the 25 → 26 bump puts P14.T49.m's icy lag on the record \
+        "the 26 → 27 bump puts P14.T49.m's icy lag on the record \
          (decision-p14-t54a-ganymede §1.5): delete `ICY_REGOLITH_VERSION`, `IcyRegolithRules` with \
          its `Frost` arm and the guards that read it in `Regolith::weathered_lid` and \
-         `Regolith::icy_lag`, the tests' `with_icy_regolith`, its switch in `with_every_26_hold` \
-         (and the helper, if no other 26 hold is left), the frost arms of `icy_lag_tests` and of \
+         `Regolith::icy_lag`, the tests' `with_icy_regolith`, its switch in `with_every_27_hold` \
+         (and the helper, if no other 27 hold is left), the frost arms of `icy_lag_tests` and of \
          the tests that run under both (`an_airless_body_s_edge_is_110_k`, \
          `the_table_s_climate_ranges_are_the_ruling_s`, `the_cold_traps_census_is_stated`, \
          `the_borrowed_curves_keep_their_ratios`), and this test"
     );
     assert_eq!(IcyRegolithRules::in_force(), IcyRegolithRules::Frost);
     assert_eq!(
-        with_every_26_hold(IcyRegolithRules::in_force),
+        with_every_27_hold(IcyRegolithRules::in_force),
         IcyRegolithRules::Mixture
     );
     assert_eq!(
-        with_every_26_hold(|| with_icy_regolith(
+        with_every_27_hold(|| with_icy_regolith(
             IcyRegolithRules::Frost,
             IcyRegolithRules::in_force
         )),

@@ -443,25 +443,13 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// - the planets' lag, `PLANET_LAG_VERSION` (P14.T56.g's rule for an airless planet), at
 ///   `PlanetLagRules::Airless` through `with_planet_lag`: an airless or tenuous planet over a hot
 ///   ice bulk derived once more under the rock lag.
-/// - the decks' fall radius, `FALL_RADIUS_VERSION` (P14.T54.b.l's cost lever), at
-///   `FallRadiusRoot::FalsePosition` through `with_fall_radius`: each level's `r_w` by the Illinois
-///   false position on ln `v_f` in ln r, to the bisections' width.
-/// - the settled compression, `SETTLED_COMPRESSION_VERSION` (P14.T54.b.l's cost lever), at
-///   `CompressionRules::Settled` through `with_compression`: a liquid's compression ended by the
-///   first step that moves its density by at most 2⁻⁴⁰ of itself.
 /// - the CO₂ cap's energy balance, `CAP_BALANCE_VERSION` (P14.T53.h), at
 ///   `CapBalanceRules::Balanced` through `with_cap_balance`.
 /// - the tidal and encounter stripping, `STRIP_VERSION` (P14.T29), at `StripRules::Stripped`
 ///   through `with_stripping`: plan 09's sphere of influence and a feature member's encounter cut.
-/// - the passes' own residual, `PASS_STOP_VERSION` (P14.T54.b.l's cost lever), at
-///   `PassStop::OwnResidual` through `with_pass_stop`: a body's plain passes ended at the first
-///   pass that settles alone.
 /// - the 100 Pa line read once, `LINE_SWITCH_VERSION` (P14.T53.i), at `LineSwitchRules::OneSwitch`
 ///   through `with_line_switch`: a sub-line solve whose last step read the bulk climate held once
 ///   more over the airless span its record publishes.
-/// - the passes' Aitken step, `AITKEN_STEP_VERSION` (P14.T54.b.l's cost lever), at
-///   `PassStep::Aitken` through `with_pass_step`: a pass reading Aitken's Δ² extrapolation once
-///   three plain passes in a row show linear convergence, under the own residual's stop.
 /// - a solid body's supercritical envelope's, `SUPERCRITICAL_ENVELOPE_VERSION` (P14.T53.f), at
 ///   `SupercriticalEnvelopeRules::Modelled` through `with_supercritical_envelope`: its envelope
 ///   section's model, which nothing else reads;
@@ -471,35 +459,12 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// - a hot envelope's dayside above 1 bar, `DAYSIDE_DECKS_VERSION` (P14.T52.h), at
 ///   `DaysideDecksRules::Cleared` through `with_dayside_decks`: each refractory, sulphide or salt
 ///   mode of an envelope at `T_eq` ≥ 950 K cut at 1 bar, or its photosphere where deeper.
-/// - the protoplanetary disc body, `PROTOPLANETARY_DISC_VERSION` (P14.T28.a), at
-///   `ProtoplanetaryDiscRules::Disc` through `with_protoplanetary_disc`.
-/// - a white dwarf's pollution and debris disc, `WHITE_DWARF_DEBRIS_VERSION` (P14.T28.d), at
-///   `WhiteDwarfDebrisRules::Debris` through `with_white_dwarf_debris`.
-/// - a neutron star's second-generation planets, `SECOND_GENERATION_VERSION` (P14.T28.e), at
-///   `SecondGenerationRules::Planets` through `with_second_generation`.
 /// - an envelope's formation draws, `FORMATION_DRAWS_VERSION` (P14.T50.d), at
 ///   `FormationDrawRules::Drawn` through `with_formation_draws`: its enrichment's scatter and its
 ///   solids' share, on its own stream.
 /// - a regolith's pore gas, `PORE_GAS_VERSION` (P14.T49.l), at `RegolithInertiaRules::PoreGas`
 ///   through `with_regolith_inertia`: the gas in a ground's pores at its column's pressure, and the
 ///   outer system's fluffy amorphous ice as an airless lid's water-ice form.
-/// - the zonal search's Z₀, `Z0_BRANCH_VERSION` (R09.T13.i), at `Z0BranchRules::Kept` through
-///   `with_z0_branch`: Z₀'s drift stop, and the held run in its place where it drifted.
-/// - the icy lid's regolith, `ICY_REGOLITH_VERSION` (P14.T49.m), at `IcyRegolithRules::Mixture`
-///   through `with_icy_regolith`: an airless or tenuous body's `H2O` regolith ice with its rock's
-///   lag where its tidal heat does not resurface it.
-/// - a minor condensable's own cloud, `MINOR_CLOUDS_VERSION` (P14.T24.h.b), at
-///   `MinorCloudsRules::OwnShare` through `with_minor_clouds`: a cloud whose condensable is not
-///   water covers Titan's measured share.
-/// - the organic sediment, `ORGANIC_SEDIMENT_VERSION` (P14.T24.h.b), at
-///   `OrganicSedimentRules::Sediment` through `with_organic_sediment`: a hazy air's fallout covers
-///   its share of the regolith and the `H2O` ice.
-/// - the Rayleigh layer added, `RAYLEIGH_ADDING_VERSION` (P14.T24.h.b), at
-///   `RayleighAddingRules::Added` through `with_rayleigh_adding`: the air's layer over the area mix
-///   by the adding rule, Earth's cloud re-split.
-/// - the haze layer, `HAZE_LAYER_VERSION` (P14.T24.h.b), at `HazeLayerRules::Absorbing` through
-///   `with_haze_layer`: a hazy air's haze an absorbing layer over the rest of its disc, its
-///   absorption the anti-greenhouse.
 ///
 /// A system or a record is read under the rules in force when it is generated: one generated
 /// outside the helper (the tests' caches, `whole` and `golden_systems`, are the version's) is not
@@ -507,69 +472,60 @@ pub fn admit_free_floating_hosts_in_this_process() {
 /// deletes this helper with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::chem::condense::{
-        DeckProfileRules, FallRadiusRoot, with_deck_profile, with_fall_radius,
-    };
+    use crate::planetary::chem::condense::{DeckProfileRules, with_deck_profile};
     use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
     use crate::planetary::derive::atmosphere::{
         LineSwitchRules, LockedStateRules, MeltOxygenRules, SeaDeckRules, with_line_switch,
         with_locked_state, with_melt_oxygen, with_sea_deck,
     };
-    use crate::planetary::derive::passes::{PassStep, PassStop, with_pass_step, with_pass_stop};
-    use crate::planetary::derive::photometry::area_mix::{
-        HazeLayerRules, IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules,
-        RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
-        with_organic_sediment, with_rayleigh_adding,
-    };
     use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
     use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
     use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
-    use crate::planetary::hosts::second_generation::{
-        SecondGenerationRules, with_second_generation,
-    };
     use crate::planetary::hosts::strip::{StripRules, with_stripping};
     use crate::planetary::hosts::substellar::{
         RoguePlanetRules, SubstellarHostRules, with_rogue_planets, with_substellar_hosts,
     };
-    use crate::planetary::hosts::white_dwarfs::{WhiteDwarfDebrisRules, with_white_dwarf_debris};
-    use crate::planetary::hosts::young::{ProtoplanetaryDiscRules, with_protoplanetary_disc};
-    use crate::planetary::surface::steps::climate::{Z0BranchRules, with_z0_branch};
     use crate::planetary::system::envelope::{
         SupercriticalEnvelopeRules, with_supercritical_envelope,
     };
     use crate::planetary::system::planet_lag::{PlanetLagRules, with_planet_lag};
-    use crate::substance::helmholtz::{CompressionRules, with_compression};
-    let run = move || with_z0_branch(Z0BranchRules::Kept, run);
     let run = move || with_melt_oxygen(MeltOxygenRules::Published, run);
     let run = move || with_substellar_hosts(SubstellarHostRules::BrownDwarfs, run);
     let run = move || with_rogue_planets(RoguePlanetRules::Bodies, run);
     let run = move || with_locked_state(LockedStateRules::Eyeball, run);
     let run = move || with_sea_deck(SeaDeckRules::Dry, run);
     let run = move || with_planet_lag(PlanetLagRules::Airless, run);
-    let run = move || with_fall_radius(FallRadiusRoot::FalsePosition, run);
-    let run = move || with_compression(CompressionRules::Settled, run);
     let run = move || with_cap_balance(CapBalanceRules::Balanced, run);
     let run = move || with_stripping(StripRules::Stripped, run);
-    let run = move || with_pass_stop(PassStop::OwnResidual, run);
     let run = move || with_line_switch(LineSwitchRules::OneSwitch, run);
-    let run = move || with_pass_step(PassStep::Aitken, run);
     let run = move || with_supercritical_envelope(SupercriticalEnvelopeRules::Modelled, run);
     let run = move || with_deck_profile(DeckProfileRules::Saturation, run);
     let run = move || with_dayside_decks(DaysideDecksRules::Cleared, run);
-    let run = move || with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, run);
-    let run = move || with_white_dwarf_debris(WhiteDwarfDebrisRules::Debris, run);
-    let run = move || with_second_generation(SecondGenerationRules::Planets, run);
     let run = move || with_formation_draws(FormationDrawRules::Drawn, run);
     let run = move || {
         use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
         with_regolith_inertia(RegolithInertiaRules::PoreGas, run)
+    };
+    with_locked_climate(LockedClimateRules::Deck, run)
+}
+
+/// `run`'s result with every 26 hold ([`with_every_26_hold`]) and those retargeted from 26 to 27
+/// in force on this thread (train 26, 2026-11-01: P14.T49.m's icy regolith and P14.T24.h.b's minor
+/// clouds, organic sediment, Rayleigh adding and haze layer): the rules their tests were measured
+/// under while they were held at 26. The 27 bump deletes it with them.
+#[cfg(test)]
+pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::derive::photometry::area_mix::{
+        HazeLayerRules, IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules,
+        RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
+        with_organic_sediment, with_rayleigh_adding,
     };
     let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
     let run = move || with_minor_clouds(MinorCloudsRules::OwnShare, run);
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    with_locked_climate(LockedClimateRules::Deck, run)
+    with_every_26_hold(run)
 }
 
 /// `run`'s result with every landed hold at generator version 27 in force on this thread, for a
@@ -609,6 +565,21 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 /// - the coarse pass's seasonal runs extrapolated by RRE(2), `ORBIT_EXTRAPOLATION_VERSION`
 ///   (rendering plan R09, I13), at `OrbitExtrapolationRules::ReducedRank` through
 ///   `with_orbit_extrapolation`: the climate's orbits to their stop, and so every wet world's field.
+/// - the icy lid's regolith, `ICY_REGOLITH_VERSION` (P14.T49.m), at `IcyRegolithRules::Mixture`
+///   through `with_icy_regolith`: an airless or tenuous body's `H2O` regolith ice with its rock's
+///   lag where its tidal heat does not resurface it.
+/// - a minor condensable's own cloud, `MINOR_CLOUDS_VERSION` (P14.T24.h.b), at
+///   `MinorCloudsRules::OwnShare` through `with_minor_clouds`: a cloud whose condensable is not
+///   water covers Titan's measured share.
+/// - the organic sediment, `ORGANIC_SEDIMENT_VERSION` (P14.T24.h.b), at
+///   `OrganicSedimentRules::Sediment` through `with_organic_sediment`: a hazy air's fallout covers
+///   its share of the regolith and the `H2O` ice.
+/// - the Rayleigh layer added, `RAYLEIGH_ADDING_VERSION` (P14.T24.h.b), at
+///   `RayleighAddingRules::Added` through `with_rayleigh_adding`: the air's layer over the area mix
+///   by the adding rule, Earth's cloud re-split.
+/// - the haze layer, `HAZE_LAYER_VERSION` (P14.T24.h.b), at `HazeLayerRules::Absorbing` through
+///   `with_haze_layer`: a hazy air's haze an absorbing layer over the rest of its disc, its
+///   absorption the anti-greenhouse.
 ///
 /// As under [`with_every_26_hold`], a system or a record is read under the rules in force when
 /// it is generated, so a test generates afresh inside it; the carriers' rules are read when a
@@ -622,6 +593,11 @@ pub(crate) fn with_every_26_hold<R>(run: impl FnOnce() -> R) -> R {
 /// `merger_channels`) and runs inside this helper for the planetary ones.
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::derive::photometry::area_mix::{
+        HazeLayerRules, IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules,
+        RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
+        with_organic_sediment, with_rayleigh_adding,
+    };
     use crate::planetary::derive::photometry::envelope_bond::{
         EnvelopeBondRules, with_envelope_bond,
     };
@@ -646,6 +622,11 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_eccentricity_damping(EccentricityDampingRules::Damped, run);
     let run = move || with_surface_heat(SurfaceHeatRules::Radiated, run);
     let run = move || with_envelope_bond(EnvelopeBondRules::Own, run);
+    let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
+    let run = move || with_minor_clouds(MinorCloudsRules::OwnShare, run);
+    let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
+    let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
+    let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
     with_every_26_hold(|| with_minor_oxides(MinorOxidesRules::Chondritic, run))
 }
 
@@ -855,23 +836,6 @@ mod tests {
             DaysideDecksRules::Held
         );
         assert_eq!(DaysideDecksRules::in_force(), DaysideDecksRules::Held);
-    }
-
-    /// 26's switch, the zonal search's Z₀ (R09.T13.i): in force inside 26's helper, and held
-    /// outside it and where a test sets it back.
-    #[test]
-    fn the_z0_branch_is_in_force_inside_26_s_helper_alone() {
-        use crate::planetary::surface::steps::climate::{Z0BranchRules, with_z0_branch};
-        assert_eq!(Z0BranchRules::in_force(), Z0BranchRules::Held);
-        assert_eq!(
-            with_every_26_hold(Z0BranchRules::in_force),
-            Z0BranchRules::Kept
-        );
-        assert_eq!(
-            with_every_26_hold(|| with_z0_branch(Z0BranchRules::Held, Z0BranchRules::in_force)),
-            Z0BranchRules::Held
-        );
-        assert_eq!(Z0BranchRules::in_force(), Z0BranchRules::Held);
     }
 
     /// 27's carriers' switch (P14.T52.e): in force inside 27's helper, held outside it, inside

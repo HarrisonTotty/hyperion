@@ -303,8 +303,8 @@ pub struct StarSummaryDto {
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<PlanetaryNebulaDto>>", optional)]
     pub planetary_nebula: Modelled<PlanetaryNebulaDto>,
-    /// Its events in progress at the summary's time, by onset; empty when none is. Absent until
-    /// plan 06's T28.
+    /// Its events in progress at the summary's time, by onset; empty when none is (plan 06,
+    /// P06.T28.g). Absent for a star its pair has changed, whose events are not composed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub active_events: Option<Vec<StarEventDto>>,

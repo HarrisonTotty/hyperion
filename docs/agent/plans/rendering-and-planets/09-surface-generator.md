@@ -157,7 +157,7 @@ Design note 4), which holds R05's `selftest.surface.test_planet` and tests the `
 | `surface.coarse.erosion` | `SurfaceCoarse` | `surface_cell` | random receivers and the multigrid's jitter                                                   |
 | `surface.relief`         | `SurfaceDetail` | `surface_item` | structural noise: a 3D lattice corner's word, as R05's `noise` keys it                        |
 | `surface.channel`        | `SurfaceDetail` | `surface_cell` | Dendry key points per cell and level                                                          |
-| `surface.channel.bend`   | `SurfaceDetail` | `surface_cell` | a world dry now's trunk's bend, word (c − 1)(D − 1) + k − 1 for chord c's vertex k (R09.T6.h) |
+| `surface.channel.bend`   | `SurfaceDetail` | `surface_cell` | a trunk's or tributary's bend, word (c − 1)(D − 1) + k − 1 of chord c's vertex k (T6.h, T6.i) |
 | `surface.crater`         | `SurfaceDetail` | `surface_cell` | craters below D_b per octave cell                                                             |
 
 `surface.relief` is keyed as R05's noise keys its lattice corners (`noise::Octave`'s corner
@@ -1266,7 +1266,9 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     from the coarser one and jittered on `surface.channel` (ε = 0.25), join the nearest segment of
     all coarser levels; neighbourhoods are graph neighbourhoods on the cube and distances 3D chords
     between canonical key points, so a face edge needs no special case (on a world dry now a
-    trunk's chords are its bent course's sub-chords, R09.T6.h). The paper's height
+    trunk's chords are its bent course's sub-chords, R09.T6.h; from 26, under R09.T6.i's rules, on
+    a world wet now too, every trunk's and tributary's, a join moved from the nearest point by the
+    72° junction angle and the cut a continuous level weighting its last level). The paper's height
     reconstruction is replaced by the physics: the bed at the steady-state slope S = k_s (r̄ ÷ r)^θ
     A^−θ, with A from Hack's law in SI (a geometric area, Hack 1957, p. 47), k_s the coarse cell's
     geometric index, r̄ its catchment runoff and r its own runoff, since a tributary's steady state
@@ -2060,6 +2062,62 @@ channel_water_worlds --cargo-profile slow-test --profile slow --run-ignored only
   - _Built 2026-10-30_ (lane r09-t6h-bend, on R09.T6.g re-cut at 24; its records). D = 16 in two
     Dendry passes, f 0.1, `EPOCH_TRUNK_SINUOSITY` 1.05; the look is no longer a visibly wrong
     picture.
+- **R09.T6.i The wet-now tributaries' valleys** (rides 26, held behind `TRIBUTARIES_VERSION`
+  by main's rule, a hold by default, with nothing moving at 24 or 25; after R09.T6.g and R09.T6.h,
+  in series on one branch, which ride 25's train; decision-bump-plan-after-22 §1.4;
+  research-r09-earth-look). On a world wet now, T6.b's tributaries read as detached bullet-shaped
+  notches in starbursts, between planar facets, and their dissection steps at coarse-cell edges
+  (the reference Earth's look at 50–600 m a pixel, bands 10 and 12). The causes: a tributary's
+  depth is its inherited top less a bed that rises only over its own stretch of main stream, so its
+  head is nearly as deep as its join and ends in a full-depth cap; the nearest-point join gives 90°
+  junctions and puts a third of the tributaries on their parent's head; the walls are half a
+  level's cell whatever the depth; and the inherited top is held to each cell's height above the
+  sea, so the depth steps cell by cell.
+  Records: [09-surface-generator/records/R09.T6.i.md](09-surface-generator/records/R09.T6.i.md).
+  - _(a) Accordant, with each head at its own relief._ A tributary's stream-power rise is scaled
+    by φ = max(1, (G_join − R_head) ÷ rise(L_k, L_k + ℓ)), with G_join its inherited top less its
+    bed at the join and R_head the rise from its cell's channel heads to its key point, so that its
+    depth falls from its parent's at the join (Playfair's accordant junctions) to R_head at its
+    head. The segment's bed carries φ, so every finer join stays accordant.
+  - _(b) The walls._ On a world wet now each wall is min(1.5 G ÷ `VALLEY_WALL_GRADIENT`, half the
+    level's mean cell) across, 2.5 G, at every point, trunks and tributaries alike: each wall's
+    steepest gradient is the design cap 0.6. A world dry now keeps its epoch's walls.
+  - _(c) The junction angle._ The join moves along the nearest segment's chosen chord by d cot α
+    from the key point's projection, α = 72° (Seybold, Rothman and Kirchner 2017's humid mean),
+    after Dendry's `AngleMid`; the choice of segment and its ties are unchanged.
+  - _(d) The bend and the grade on worlds wet now._ T6.h's graded depth on the wet-now trunks,
+    and its subdivision and displacement on them and every tributary (keyed by its own cell), the
+    connector curving into its parent.
+  - _(e) Continuity across coarse cells._ A tributary's steepness, runoff and cut level are
+    interpolated at its key point between its coarse cell's corners, each the mean of the cells
+    sharing it. The cut becomes a continuous level, whose fraction weights the groove.
+  - _The closed forms._ `level_term` with the depth-scaled walls, a tributary level's G averaged
+    along its profile from G_join to R_head; `MEAN_TRIBUTARY_LENGTH`, `TRIBUTARY_VARIANCE_SHARE` and
+    `WHOLE_VARIANCE_SHARE` re-measured; `C_c` books them through T6.g's (b). A world dry now's
+    closure (decision-r09-t14-mars-ceiling §2.2) does not move.
+  - _Tests._ The look's census on both Earths: interior junction angles' median within 72° ± 5°
+    with an interquartile range of at least 15°; join points with three or more inflows at most
+    1.5%; heads at most 0.6 of their join's depth at the cut's level (medians); the step at the
+    join 0 at the median, the share over 10 m recorded. The beds
+    accordant bit for bit; no wall steeper than 0.6; the gradient's central difference; the order
+    and cache test on the Earth-like world; an extension golden; the WebAssembly suites.
+  - _Version._ It moves the wet worlds' synthesis and, through `C_c`, their coarse fields, so it
+    rides a version: 26's, behind its hold (`ChannelRules`, carried by value in the field's header,
+    the network, the closed forms' `ChannelBody` and the coarse pass, after R09.T7.g's
+    `ROUGH_PLAINS_VERSION`), so that at 24 and 25 nothing moves; 26's bump deletes the hold and
+    re-blesses by name the wet worlds' synthesis goldens and the sim's wet coarse goldens. No Moon,
+    Ceres, Europa or Mars-like golden moves. No payload layout moves.
+  - _Not in scope._ The cut at the channel heads alone (×2.6 the cost); a smooth maximum; the
+    coastline's staircase; the angle's aridity dependence.
+  - _Acceptance._ `cargo test -p hyperion-surface synth::channels`, `synth::levels`,
+    `synth::height_golden`, `worker::` and `material::`; the sim's `planetary::surface::steps::relief`
+    and `::erosion`; the slow census and `channel_water_worlds` by name; `just test-wasm-fast` and
+    `just test-wasm-slow`.
+  - _Built 2026-10-31_ (lane r09-t6i, on R09.T6.h at 24, behind 26's hold; its records). Parts
+    (a)–(e) as drafted, committed separately; the tributaries' bend at `BEND_FACTOR` of their own
+    chord at every level, the look's choice; each wet sub-chord's depth read on its own line; the
+    census met on both Earths, the cell edges recorded by frame. The look: valleys joined to
+    valleys.
 
 Acceptance: `cargo test -p hyperion-surface synth::channels`.
 

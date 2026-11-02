@@ -57,7 +57,6 @@
 //! M☉, 2.8–15 kpc and ε ≤ 0.8; the globulars above and beyond are an extrapolation of its `N`
 //! scaling, as Baumgardt et al. 2019 also make.
 
-use crate::GeneratorVersion;
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
 use crate::galaxy::fates::{CensusFates, Counted, fates_for, present_share_of_formed_with};
@@ -580,40 +579,18 @@ const BM03_BETA: f64 = 1.91e6;
 const BM03_EXPONENT: f64 = 0.75;
 /// Their mean stellar mass, M☉.
 const BM03_MEAN_MASS: f64 = 0.547;
-/// The bound share of the inverted mass law, `M = 0.70 M₀ (1 − t ÷ t_dis)`: the intercept of
-/// BM03's linear law, for their Kroupa function from 0.1 to 15 M☉ (the held arm of
-/// `bound_share`).
+/// The bound share of BM03's inverted mass law, `M = 0.70 M₀ (1 − t ÷ t_dis)`: the intercept of
+/// their linear law, for their Kroupa function from 0.1 to 15 M☉, which [`bound_share`] replaced
+/// at 26 by the cluster's own population's (ruling 145.5).
 pub const BOUND_SHARE: f64 = 0.70;
-
-/// The generator version from which a globular's history takes its own population's μ in place
-/// of [`BOUND_SHARE`] (plan 09's ruling 145.5; the hold of [`BoundShareRules`]).
-///
-/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`BoundShareRules::Bm03`], the code of version 24 verbatim, so every generated value keeps its
-/// bits; the tests reach the new arm through a galaxy built under `GalaxyRules::every_26_hold()`.
-/// The bump to 26 deletes this hold, [`BoundShareRules`] with its `Bm03` arm, the galaxy's
-/// `bound_share` field and its tripwire (`the_bound_share_is_held_only_until_the_26_bump`).
-pub(crate) const BOUND_SHARE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// The share of its birth mass that a globular's history says stellar evolution left it (the
-/// hold of [`BOUND_SHARE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum BoundShareRules {
-    /// Version 25's and before: BM03's [`BOUND_SHARE`], 0.70, for every cluster.
-    Bm03,
-    /// Version 26's: the cluster's own population's present mass per mass formed at its age,
-    /// under the galaxy's mass function and the population's fates ([`bound_share`]).
-    OwnMu,
-}
 
 /// The share μ of a globular's birth mass that stellar evolution leaves at `age`, in its history
 /// `M = μ M₀ (1 − t ÷ t_dis)`, for a cluster of `population` in `galaxy`.
 ///
-/// Under [`BoundShareRules::Bm03`] it is BM03's [`BOUND_SHARE`]. Under
-/// [`BoundShareRules::OwnMu`] (ruling 145.5) it is the present mass per mass formed of systems
-/// born `age` ago ([`present_share_of_formed`](crate::galaxy::fates::present_share_of_formed))
-/// under the galaxy's mass function and `population`'s fates ([`fates_for`]), the stars,
-/// lifetimes and remnants that count the galaxy's systems. It counts the living stars and the
+/// It is the present mass per mass formed of systems born `age` ago
+/// ([`present_share_of_formed`](crate::galaxy::fates::present_share_of_formed)) under the
+/// galaxy's mass function and `population`'s fates ([`fates_for`]), the stars, lifetimes and
+/// remnants that count the galaxy's systems (ruling 145.5, in place of BM03's [`BOUND_SHARE`]). It counts the living stars and the
 /// white dwarfs ([`Counted::StarsAndWhiteDwarfs`]). A globular keeps few of its neutron stars past
 /// their kicks. BM03's models, whose function stops at 15 M☉, hold no black holes, and the
 /// cluster's model counts its own as a class apart (`M − M_BH`, ruling 145.1). At 12 Gyr under the
@@ -623,15 +600,12 @@ pub(crate) enum BoundShareRules {
 /// (`Galaxy::companions`, built once a galaxy).
 #[must_use]
 pub(crate) fn bound_share(galaxy: &Galaxy, population: Population, age: Years) -> f64 {
-    match galaxy.rules().bound_share {
-        BoundShareRules::Bm03 => BOUND_SHARE,
-        BoundShareRules::OwnMu => present_share_of_formed_with(
-            galaxy.mass_function(),
-            &CensusFates::new(fates_for(population), Counted::StarsAndWhiteDwarfs),
-            galaxy.companions(),
-            age,
-        ),
-    }
+    present_share_of_formed_with(
+        galaxy.mass_function(),
+        &CensusFates::new(fates_for(population), Counted::StarsAndWhiteDwarfs),
+        galaxy.companions(),
+        age,
+    )
 }
 
 /// Baumgardt and Makino's dissolution time of a cluster of initial mass `m0` on an orbit of
@@ -841,14 +815,14 @@ mod tests {
     use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
     use super::*;
-    use crate::GENERATOR_VERSION;
+
     use crate::galaxy::fates::present_share_of_formed;
     use crate::galaxy::params::GalaxyParams;
-    use crate::galaxy::rules::GalaxyRules;
+
     use crate::rng::{ObjectKey, Seed, Stream, tags};
 
-    /// The Milky Way fixture under the generator version's rules: the held arm.
-    fn held() -> &'static Galaxy {
+    /// The Milky Way fixture.
+    fn fixture() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
         GALAXY.get_or_init(|| {
             Galaxy::from_params(
@@ -859,57 +833,17 @@ mod tests {
         })
     }
 
-    /// [`held`]'s galaxy under every 26 hold but the field share, the carve-out and the displaced
-    /// classes, which the galaxy reads when it is built and which reach no globular (P09.T2.c,
-    /// P09.T35, P08.T12): the own-μ arm.
-    fn own() -> &'static Galaxy {
-        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-        GALAXY.get_or_init(|| held().clone().with_rules(own_rules()))
-    }
-
-    /// [`own`]'s rules.
-    fn own_rules() -> GalaxyRules {
-        GalaxyRules {
-            field_share: held().rules().field_share,
-            carve_out: held().rules().carve_out,
-            displaced: held().rules().displaced,
-            ..GalaxyRules::every_26_hold()
-        }
-    }
-
-    /// P09.T13's bound share (ruling 145.5) is held until the 25 → 26 bump: the rules in force are
-    /// version 25's and before, under which every globular's history takes BM03's 0.70.
+    /// Ruling 145.5: μ is the population's stars and white dwarfs per mass formed, 0.46–0.49 at the
+    /// globulars' ages under the default function, falling with age, and the galaxy's companions
+    /// give a fresh integral's bits whichever population and age is asked first, built or not.
     #[test]
-    fn the_bound_share_is_held_only_until_the_26_bump() {
-        assert!(
-            GENERATOR_VERSION < BOUND_SHARE_VERSION,
-            "the 25 → 26 bump puts ruling 145.5 on the record: a globular's history takes its own \
-             population's μ (`bound_share`), so its birth mass, mass-loss rate, retention, black \
-             holes, first population and tails move. Delete `BOUND_SHARE_VERSION`, \
-             `BoundShareRules` with its `Bm03` arm, `GalaxyRules::bound_share`, the `match` in \
-             `bound_share` and this test, in the bump's own commit"
-        );
-        assert_eq!(held().rules().bound_share, BoundShareRules::Bm03);
-        assert_eq!(
-            GalaxyRules::of_version(GENERATOR_VERSION).bound_share,
-            BoundShareRules::Bm03
-        );
-        assert_eq!(own().rules().bound_share, BoundShareRules::OwnMu);
-    }
-
-    /// Ruling 145.5: under the held arm μ is BM03's 0.70 for every cluster; under every 26 hold it
-    /// is the population's stars and white dwarfs per mass formed, 0.46–0.49 at the globulars'
-    /// ages under the default function, falling with age, and the galaxy's companions give a fresh
-    /// integral's bits whichever population and age is asked first, built or not.
-    #[test]
-    fn the_bound_share_is_bm03_s_until_26_then_the_population_s_own() {
+    fn the_bound_share_is_the_population_s_own() {
         let ages = [ACCRETED_AGES.0, 12e9, IN_SITU_AGE, ACCRETED_AGES.1].map(Years::new);
         let populations = [Population::Bulge, Population::ThickDisc, Population::Halo];
         for p in populations {
             let mut previous = 1.0;
             for age in ages {
-                assert_same_bits(bound_share(held(), p, age), BOUND_SHARE);
-                let mu = bound_share(own(), p, age);
+                let mu = bound_share(fixture(), p, age);
                 eprintln!("{p:?} at {:.1} Gyr: μ {mu:.4}", age.value() / 1e9);
                 assert!((0.46..=0.49).contains(&mu), "{p:?} at {age:?}: {mu}");
                 assert!(mu < previous, "{p:?} at {age:?}: {mu} after {previous}");
@@ -917,7 +851,7 @@ mod tests {
                 let fates = CensusFates::new(fates_for(p), Counted::StarsAndWhiteDwarfs);
                 assert_same_bits(
                     mu,
-                    present_share_of_formed(own().mass_function(), &fates, age),
+                    present_share_of_formed(fixture().mass_function(), &fates, age),
                 );
             }
         }
@@ -925,46 +859,36 @@ mod tests {
             .iter()
             .flat_map(|&p| ages.map(|a| (p, a)))
             .collect();
-        assert_order_independent(&keys, |&(p, a)| bits(bound_share(own(), p, a)));
-        // Each on a galaxy whose companions are not yet built: the held arm never reads them.
-        let cold = || held().clone().with_rules(own_rules());
+        assert_order_independent(&keys, |&(p, a)| bits(bound_share(fixture(), p, a)));
+        // Each on a galaxy whose companions are not yet built.
+        let cold = || {
+            Galaxy::from_params(
+                Seed::new(0x0913_0000_0000_0145),
+                GalaxyParams::milky_way_like(),
+            )
+            .expect("the Milky Way fixture builds")
+        };
         assert_order_independent(&keys, |&(p, a)| bits(bound_share(&cold(), p, a)));
     }
 
-    /// Ruling 145.5 under every 26 hold: on the same orbit the history solves `M = μ M₀ (1 − t ÷
-    /// t_dis)` at the cluster's own μ, with `Ṁ = μ M₀ ÷ t_dis`, and the cluster is born heavier
-    /// than under the held arm, though by less than `0.70 ÷ μ`, since a heavier cluster dissolves
-    /// more slowly. The orbit is the same.
+    /// Ruling 145.5: on its orbit the history solves `M = μ M₀ (1 − t ÷ t_dis)` at the cluster's
+    /// own μ, with `Ṁ = μ M₀ ÷ t_dis`, and the cluster is born heavier than it is now.
     #[test]
-    fn under_every_26_hold_the_history_solves_its_law_at_the_own_mu() {
+    fn the_history_solves_its_law_at_the_own_mu() {
         let (peri, apo) = (
             LightYears::new(2.0 * LIGHT_YEARS_PER_KILOPARSEC),
             LightYears::new(8.0 * LIGHT_YEARS_PER_KILOPARSEC),
         );
         let (m, r_h) = (SolarMasses::new(2e5), LightYears::new(10.0));
         let age = Years::new(12e9);
-        let run = |galaxy| history_on_orbit(galaxy, peri, apo, Population::Halo, m, r_h, age);
-        let (before, after) = (run(held()), run(own()));
-        for (h, mu) in [
-            (before, BOUND_SHARE),
-            (after, bound_share(own(), Population::Halo, age)),
-        ] {
-            let m0 = h.initial_mass.value();
-            let t_dis = h.dissolution_time.value();
-            let law = mu * m0 * (1.0 - age.value() / t_dis);
-            assert!((law / m.value() - 1.0).abs() < 1e-9, "{law} against {m:?}");
-            assert_same_bits(h.mass_loss_rate, mu * m0 / t_dis);
-        }
-        let mu = bound_share(own(), Population::Halo, age);
-        let ratio = after.initial_mass.value() / before.initial_mass.value();
-        assert!(ratio > 1.0 && ratio < BOUND_SHARE / mu, "{ratio}");
-        assert_same_bits(after.pericentre.value(), before.pericentre.value());
-        assert_same_bits(after.apocentre.value(), before.apocentre.value());
-        assert_same_bits(after.eccentricity, before.eccentricity);
-        assert_same_bits(
-            after.birth_half_mass_radius.value(),
-            before.birth_half_mass_radius.value(),
-        );
+        let h = history_on_orbit(fixture(), peri, apo, Population::Halo, m, r_h, age);
+        let mu = bound_share(fixture(), Population::Halo, age);
+        let m0 = h.initial_mass.value();
+        let t_dis = h.dissolution_time.value();
+        let law = mu * m0 * (1.0 - age.value() / t_dis);
+        assert!((law / m.value() - 1.0).abs() < 1e-9, "{law} against {m:?}");
+        assert_same_bits(h.mass_loss_rate, mu * m0 / t_dis);
+        assert!(m0 > m.value(), "{m0}");
     }
 
     /// P09.T12.a (ruling 126.5): 0.874 of the count placed; the metal-poor median inside the cut

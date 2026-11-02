@@ -3309,22 +3309,8 @@ const CONTINENT_JJA_RISE: f64 = 1.75;
 /// world's mean constant c = −1.99 K; 12 under the own record's (decision-r09-t13m §3.3 as main
 /// ruled it, 2026-10-30, on research-r09-t13m-landing's Q1; 0.76–0.999 of the bound, at
 /// 11.0–12.3° N; as built before it, 130). The target stays none: the monsoon's northern edge
-/// falling short at the coast. Under the held rule the test keeps 12
-/// ([`CONTINENT_LOW_ARID_CELLS_OWN_AIR`]).
+/// falling short at the coast.
 const CONTINENT_LOW_ARID_CELLS: usize = 25;
-
-/// The flat continent's [`CONTINENT_LOW_ARID_CELLS`] under the own record's air, the rule to
-/// version 25: 12. 26's bump deletes it with the hold.
-const CONTINENT_LOW_ARID_CELLS_OWN_AIR: usize = 12;
-
-/// The flat continent's most arid cells within 12.5° N under the rule in force
-/// ([`partition::PartitionThermodynamics::in_force`]).
-fn continent_low_arid_cells() -> usize {
-    match partition::PartitionThermodynamics::in_force() {
-        partition::PartitionThermodynamics::OwnRecord => CONTINENT_LOW_ARID_CELLS_OWN_AIR,
-        partition::PartitionThermodynamics::Shown => CONTINENT_LOW_ARID_CELLS,
-    }
-}
 
 /// Decision-r09-t13m §3.3: on the reference Earth's inputs with one flat continent, 10° S–40° N by
 /// 30–120° E at 300 m ([`flat_continent`]), at level 7, the continent's own energy-flux equator in
@@ -3334,7 +3320,7 @@ fn continent_low_arid_cells() -> usize {
 /// all-land climate cells within 12.5° of the equator in the summer hemisphere of its monsoon, the
 /// north, none is a desert (BW, [`Run::desert`]) and at most [`CONTINENT_LOW_ARID_CELLS`] are arid
 /// by Köppen–Geiger's bound at their own temperature ([`Run::arid`]), as main ruled (2026-10-30
-/// and 2026-10-31), [`CONTINENT_LOW_ARID_CELLS_OWN_AIR`] under the held rule.
+/// and 2026-10-31).
 /// Prints its JJA, DJF and annual rates by 5° band, and its arid cells by band.
 #[test]
 #[ignore = "slow: the reference Earth's step at level 7 with a flat continent, about 60 s"]
@@ -3434,7 +3420,7 @@ fn the_flat_continent_s_monsoon_is_wet_and_its_low_latitudes_are_not_desert() {
         "desert within 12.5° N: {desert_low:?}"
     );
     assert!(
-        arid_low.len() <= continent_low_arid_cells(),
+        arid_low.len() <= CONTINENT_LOW_ARID_CELLS,
         "arid within 12.5° N: {arid_low:?}"
     );
 }
@@ -4013,8 +3999,8 @@ fn the_shown_air_is_the_normalised_record_plus_the_mean_s_constant_held_at_the_l
 }
 
 /// The reference locked Earth's coarse pass to the climate at its coarse level (level 8) under
-/// R09.T13.n's partition, the shown climate's thermodynamics
-/// ([`partition::with_partition_thermodynamics`]), its input mean surface temperature `mean_k`
+/// R09.T13.n's partition, the shown climate's thermodynamics, its input mean surface temperature
+/// `mean_k`
 /// where given, K; and, with `deep`, its water cycle again on a clone of the finished state at
 /// the deep tolerance, under the same rule: the run, and the deep run's diagnostics and records.
 fn shown_locked_run(
@@ -4033,30 +4019,29 @@ fn shown_locked_run(
     };
     let level = hyperion_surface::field::coarse_level(inputs.radius());
     let (field, climate) = (CellGraph::for_field(level), CellGraph::for_climate(level));
-    let (working, diagnostics, deep) =
-        partition::with_partition_thermodynamics(partition::PartitionThermodynamics::Shown, || {
-            let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
-            let mut working = Working::initial(&pass);
-            steps::plates::run(&pass, &mut working);
-            steps::relief::run(&pass, &mut working);
-            steps::craters::run(&pass, &mut working);
-            steps::relief::run_after_craters(&pass, &mut working);
-            let model = normalised(&pass, &working);
-            let diagnostics = finish(&pass, &mut working, model);
-            let kept = finished_model(&working);
-            let deep = deep.then(|| {
-                let mut deep_working = working.clone();
-                let water = hydrology::run_with(
-                    &pass,
-                    &mut deep_working,
-                    &kept,
-                    &Parameters::deep().with_tolerance(EARTH_DEEP_TOLERANCE),
-                )
-                .expect("the locked Earth's model keeps its own records");
-                (water, deep_working.climate)
-            });
-            (working, diagnostics, deep)
+    let (working, diagnostics, deep) = {
+        let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
+        let mut working = Working::initial(&pass);
+        steps::plates::run(&pass, &mut working);
+        steps::relief::run(&pass, &mut working);
+        steps::craters::run(&pass, &mut working);
+        steps::relief::run_after_craters(&pass, &mut working);
+        let model = normalised(&pass, &working);
+        let diagnostics = finish(&pass, &mut working, model);
+        let kept = finished_model(&working);
+        let deep = deep.then(|| {
+            let mut deep_working = working.clone();
+            let water = hydrology::run_with(
+                &pass,
+                &mut deep_working,
+                &kept,
+                &Parameters::deep().with_tolerance(EARTH_DEEP_TOLERANCE),
+            )
+            .expect("the locked Earth's model keeps its own records");
+            (water, deep_working.climate)
         });
+        (working, diagnostics, deep)
+    };
     let run = Run {
         field,
         climate,

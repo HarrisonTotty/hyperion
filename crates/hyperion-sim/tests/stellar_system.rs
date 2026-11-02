@@ -143,6 +143,27 @@ fn write_star(w: &mut GoldenWriter, lead: &str, star: &StarSummary) {
         }
         None => w.line(&format!("{lead}not variable")),
     }
+    // P06.T28.g: the events in progress, by onset, and the light they make.
+    match star.active_events() {
+        Some(events) => {
+            for event in events {
+                w.line(&format!(
+                    "{lead}event {:?} from {}",
+                    event.kind(),
+                    event.onset()
+                ));
+                w.f64(
+                    &format!("{lead}event duration s"),
+                    event.duration().as_seconds_f64(),
+                );
+            }
+        }
+        None => w.line(&format!("{lead}events not composed")),
+    }
+    if let Some(effects) = star.event_effects() {
+        w.f64(&format!("{lead}event L"), effects.luminosity().value());
+        w.f64(&format!("{lead}event R"), effects.radius().value());
+    }
 }
 
 /// The dozen systems the summaries golden pins: three, two, two, two and three of layers A to E

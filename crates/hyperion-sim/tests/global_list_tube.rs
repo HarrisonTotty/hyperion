@@ -973,9 +973,10 @@ impl hyperion_sim::galaxy::global_list::TubeLookup for OneTube {
     }
 }
 
-/// P10.T8.b: `resolve_with` reaches a drawn stream's members through the caller's tube, each
-/// the record placing it gave; plan 03's `resolve` does not. A member is in the cells its tube's
-/// `cells_touching` finds about it.
+/// P10.T8.b: `resolve_with` reaches a drawn stream's members through the caller's tube and the
+/// galaxy's list, each the record placing it gave, and a member outside its stream's shell is none
+/// (P10.T9); plan 03's `resolve` does not. A member is in the cells its tube's `cells_touching`
+/// finds about it.
 #[test]
 #[ignore = "slow: builds a galaxy's full potential and debris and sprays one of its streams"]
 fn resolve_with_reaches_a_drawn_stream_s_members() {
@@ -986,11 +987,12 @@ fn resolve_with_reaches_a_drawn_stream_s_members() {
     use hyperion_sim::units::LightYears;
     let (galaxy, spec, tube) = drawn_stream();
     let shares = StreamBandShares::of(galaxy, spec);
-    let lookup = OneTube(
-        hyperion_sim::galaxy::global_list::GlobalList::default(),
-        spec.clone(),
-        std::sync::Arc::clone(tube),
-    );
+    let list = hyperion_sim::galaxy::global_list::GlobalList::build(galaxy);
+    let shell = list
+        .stream_entry(spec.number())
+        .expect("the galaxy's list holds its streams")
+        .shell();
+    let lookup = OneTube(list, spec.clone(), std::sync::Arc::clone(tube));
     let mut members = Vec::new();
     let mut resolved = 0;
     for along in (0..tube.along_cells()).step_by(3) {
@@ -1008,7 +1010,16 @@ fn resolve_with_reaches_a_drawn_stream_s_members() {
             stream_cell_members(galaxy, tube, &shares, cell, MassBand::A, &mut members);
             for m in &members {
                 let id = m.record().id();
-                assert_eq!(resolve_with(galaxy, id, &lookup), Ok(*m.record()));
+                let inside = shell.contains(
+                    &hyperion_sim::coords::GalacticPosition::ORIGIN
+                        .displacement_to(m.record().epoch_position()),
+                );
+                let expected = if inside {
+                    Ok(*m.record())
+                } else {
+                    Err(ResolveSystemError::NoSuchSystem)
+                };
+                assert_eq!(resolve_with(galaxy, id, &lookup), expected);
                 assert_eq!(
                     resolve(galaxy, id),
                     Err(ResolveSystemError::KindNotGenerated)

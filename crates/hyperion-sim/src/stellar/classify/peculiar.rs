@@ -30,7 +30,7 @@
 //! observed T* at τ = 20 (Crowther 2007, section 3.3), so the backbone's Wolf-Rayet stars are
 //! mostly early types (a finding recorded in plan 06's Risks).
 //!
-//! P06.T24.b adds two families, behind their hold ([`PECULIAR_CLASSES_VERSION`]):
+//! P06.T24.b adds two families:
 //!
 //! - **Young stars** ([`young_class`]): on its contraction to the main sequence, after the
 //!   protostar phase, a star of under 2 M☉
@@ -50,7 +50,6 @@
 use core::fmt;
 use core::ops::Range;
 
-use crate::GeneratorVersion;
 use crate::math;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::premain::disc_lifetime;
@@ -498,28 +497,6 @@ pub(crate) fn wolf_rayet_class(wr: WolfRayetType) -> Classification {
     let mut class = Classification::bare(SpectralType::WolfRayet(wr));
     class.peculiar = Some(PeculiarClass::WolfRayet);
     class
-}
-
-/// The generator version from which P06.T24.b's young stars and S and carbon stars are classed:
-/// 26, the stellar train after 25's (decision-bump-plan-after-22: "25 if landed when its wiring
-/// starts, else 26").
-///
-/// It is P06.T24.b's one hold, carried as [`StellarRules::peculiar_classes`]. Below it every star
-/// is classed as at 24, bit for bit: no `CTTS`, `WTTS`, `HAeBe`, `MS`, `S`, `SC` or `C-N`. 26's
-/// bump deletes this hold, [`PeculiarClassRules`] with its `Held` arm, the field and its tripwire
-/// (`the_young_and_carbon_classes_are_held_only_until_the_26_bump`).
-///
-/// [`StellarRules::peculiar_classes`]: crate::stellar::rules::StellarRules::peculiar_classes
-pub(crate) const PECULIAR_CLASSES_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether P06.T24.b's classes are in force (its hold, [`PECULIAR_CLASSES_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum PeculiarClassRules {
-    /// Version 25's and before: no young, S or carbon class.
-    Held,
-    /// Version 26's: the young stars' classes on their contraction ([`young_class`]), and the
-    /// S and carbon stars' on the thermally pulsing AGB ([`DredgeUp`]).
-    Full,
 }
 
 /// The heaviest T Tauri star, M☉ of initial mass, exclusive: 2, where the Herbig Ae/Be stars

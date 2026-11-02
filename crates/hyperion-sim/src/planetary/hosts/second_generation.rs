@@ -1,5 +1,5 @@
-//! Second-generation planets of neutron stars (plan 14, design note 11, P14.T28.e), behind their
-//! hold at generator version 26 (`SECOND_GENERATION_VERSION`).
+//! Second-generation planets of neutron stars (plan 14, design note 11, P14.T28.e), from generator
+//! version 26.
 //!
 //! A supernova unbinds nearly every planet of its star, but the fallback disc it leaves about the
 //! neutron star can grow a few rocky bodies again, as PSR B1257+12's three (Wolszczan and Frail
@@ -60,70 +60,6 @@ use crate::units::{
     AstronomicalUnits, Days, EarthMasses, GravitationalParameter, Megayears, Metres, Radians,
     SolarMasses,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-/// The generator version from which a neutron star may have second-generation planets
-/// (P14.T28.e): 26, the first galaxy train after the task lands (the bump plan).
-///
-/// It is T28.e's one hold. Below it [`SecondGenerationRules::in_force`] is
-/// [`SecondGenerationRules::Held`]: no system has them, and every generated value is version 25's
-/// bit for bit. 26's bump deletes this hold, [`SecondGenerationRules`] with its `Held` arm, the
-/// tests' switch and its tripwire (`the_second_generation_is_held_only_until_the_26_bump`).
-pub(crate) const SECOND_GENERATION_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether P14.T28.e's second-generation planets are in force (its hold,
-/// [`SECOND_GENERATION_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum SecondGenerationRules {
-    /// Version 25's and before: no second-generation planets.
-    Held,
-    /// Version 26's: a neutron star's fallback-disc planets.
-    Planets,
-}
-
-impl SecondGenerationRules {
-    /// The rules this generator version gives: the planets' from [`SECOND_GENERATION_VERSION`],
-    /// none below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_second_generation`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= SECOND_GENERATION_VERSION {
-            Self::Planets
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The second generation's rules a test sets on its thread, `None` for the version's.
-    static RULES: core::cell::Cell<Option<SecondGenerationRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the second generation's rules `rules` on this thread, for the tests to
-/// reach them ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 26's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_second_generation<R>(
-    rules: SecondGenerationRules,
-    run: impl FnOnce() -> R,
-) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<SecondGenerationRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The probability that a neutron star has a second-generation system: 0.005, a parameter of the
 /// generator version (design note 11). Niţu et al. (2022, MNRAS 512, 2446) bound pulsar planets

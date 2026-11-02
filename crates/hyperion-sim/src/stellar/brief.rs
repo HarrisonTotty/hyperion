@@ -487,16 +487,10 @@ impl BriefModel {
         // guard passes, and no track at all: asked first, since a dead star's main sequence
         // (with its winds' knots, for a massive one) would be built for nothing.
         let first = age_at(age_at_epoch, ClockWindow::START);
-        // The fate table is the version's tracks': under another Humphreys–Davidson arm the
-        // primary takes the exact route.
-        let fitted = rules.hd_limit.fitted_tables_hold();
-        let dead = fitted
-            .then(|| fates.fate_fitted(m0, &composition, eta))
-            .flatten()
-            .filter(|fate| {
-                let margin = (STATED_FACTOR * fate.bounds.0).max(DEAD_MARGIN_FLOOR);
-                first > fate.death_age.value() * (1.0 + margin)
-            });
+        let dead = fates.fate_fitted(m0, &composition, eta).filter(|fate| {
+            let margin = (STATED_FACTOR * fate.bounds.0).max(DEAD_MARGIN_FLOOR);
+            first > fate.death_age.value() * (1.0 + margin)
+        });
         if let Some(fate) = dead {
             let draws = primary_draws(galaxy, record);
             let primary = table_primary(fate, composition, &draws, (age_at_epoch, m0), options)
@@ -777,8 +771,7 @@ fn gate(
     let redrawn = redraws(galaxy, record, ctx);
     let stars = attempt.stars();
     let stellar = galaxy.rules().stellar;
-    let tables_hold = stellar.hd_limit.fitted_tables_hold()
-        && stellar.merger_mass.fitted_tables_hold()
+    let tables_hold = stellar.merger_mass.fitted_tables_hold()
         && stellar.ns_accretion.fitted_tables_hold()
         && stellar.heavy_donor.fitted_tables_hold();
     // From version 27 a supernova that unbinds any pair changes what the system shows (P11.T10),

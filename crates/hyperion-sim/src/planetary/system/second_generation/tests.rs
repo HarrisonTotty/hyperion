@@ -3,7 +3,7 @@
 use super::*;
 use crate::planetary::fate::BodyState;
 use crate::planetary::fate::FateHost;
-use crate::planetary::hosts::second_generation::{SecondGenerationDraws, with_second_generation};
+use crate::planetary::hosts::second_generation::SecondGenerationDraws;
 use crate::planetary::label::BodyLabel;
 use crate::planetary::record::Section;
 use crate::planetary::system::tests::{SEED, id};
@@ -12,6 +12,14 @@ use crate::planetary::testing::synthetic_star;
 use crate::time::{Span, UniverseTime};
 use crate::units::consts::{SOLAR_LUMINOSITY_W, STEFAN_BOLTZMANN};
 use crate::units::{Dex, SolarMasses};
+
+/// `system` without its second-generation planets: what [`generate`] gave to version 25, since its
+/// step 10 only adds them.
+fn without_second_generation(system: &PlanetarySystem) -> PlanetarySystem {
+    let mut held = system.clone();
+    held.bodies.retain(|body| !body.is_second_generation());
+    held
+}
 
 /// A star of `mass` M☉, `after` years after its death at the epoch, as the system `index`, and
 /// its death's clock time.
@@ -65,8 +73,7 @@ fn neutron_stars_with_a_mark(
 
 /// P14.T28.e's test (e), its time: a neutron star's second-generation planets are not formed until
 /// 10 Myr after its death, and present from then on, in slots from `0xC0`, lettered after every
-/// primordial planet of their host; below the hold no system has them, and a host whose mark says
-/// none has none.
+/// primordial planet of their host; a host whose mark says none has none.
 #[test]
 fn a_neutron_star_s_second_generation_appears_ten_myr_after_its_death() {
     let day = Span::from_seconds(86_400);
@@ -74,14 +81,13 @@ fn a_neutron_star_s_second_generation_appears_ten_myr_after_its_death() {
         .expect("a span");
     let mut planets = 0;
     for (ctx, death) in neutron_stars_with_a_mark(30_000, 6, 3.0e7) {
-        let held = with_second_generation(SecondGenerationRules::Held, || generate(SEED, &ctx));
+        let held = without_second_generation(&generate(SEED, &ctx));
         assert!(
             held.bodies()
                 .iter()
                 .all(|body| !body.is_second_generation())
         );
-        let system =
-            with_second_generation(SecondGenerationRules::Planets, || generate(SEED, &ctx));
+        let system = generate(SEED, &ctx);
         let second: Vec<&Body> = system
             .bodies()
             .iter()
@@ -153,9 +159,8 @@ fn a_neutron_star_s_second_generation_appears_ten_myr_after_its_death() {
 fn a_second_generation_planet_is_lit_by_its_pulsar_s_spin_down_alone() {
     let mut derived = 0;
     for (ctx, _) in neutron_stars_with_a_mark(40_000, 4, 3.0e7) {
-        let held = with_second_generation(SecondGenerationRules::Held, || generate(SEED, &ctx));
-        let system =
-            with_second_generation(SecondGenerationRules::Planets, || generate(SEED, &ctx));
+        let held = without_second_generation(&generate(SEED, &ctx));
+        let system = generate(SEED, &ctx);
         let Some(star) = system.pulsar_host() else {
             continue;
         };
@@ -226,23 +231,17 @@ fn a_second_generation_planet_is_lit_by_its_pulsar_s_spin_down_alone() {
 fn the_second_generation_is_the_same_twice_and_in_both_queries() {
     let mut planets = 0;
     for (ctx, _) in neutron_stars_with_a_mark(50_000, 3, 3.0e7) {
-        let [a, b] = [(); 2].map(|()| {
-            with_second_generation(SecondGenerationRules::Planets, || generate(SEED, &ctx))
-        });
+        let [a, b] = [(); 2].map(|()| generate(SEED, &ctx));
         assert_eq!(a, b, "{:?}", ctx.id());
         planets += a
             .bodies()
             .iter()
             .filter(|body| body.is_second_generation())
             .count();
-        let snapshot = with_second_generation(SecondGenerationRules::Planets, || {
-            a.snapshot_at(&ctx, UniverseTime::EPOCH)
-        });
+        let snapshot = { a.snapshot_at(&ctx, UniverseTime::EPOCH) };
         for (record, index) in snapshot.bodies().iter().zip(a.indices()) {
-            let alone = with_second_generation(SecondGenerationRules::Planets, || {
-                a.body_at(&ctx, index, UniverseTime::EPOCH)
-            })
-            .expect("a body of the system");
+            let alone =
+                { a.body_at(&ctx, index, UniverseTime::EPOCH) }.expect("a body of the system");
             assert_eq!(format!("{record:?}"), format!("{alone:?}"));
         }
     }

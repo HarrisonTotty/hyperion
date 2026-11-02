@@ -44,11 +44,11 @@ use crate::stellar::binary::{
 };
 use crate::stellar::classify::{
     ClassExtras, Classification, DredgeUp, HeliumSurface, LuminosityClass, PeculiarClass,
-    PeculiarClassRules, SpectralType, chemical_class, classify_under, young_class,
+    SpectralType, chemical_class, classify_under, young_class,
 };
 use crate::stellar::draws::{StandardNormal, StarDraws, UnitUniform};
 use crate::stellar::events::thermal_pulse::ThermalPulseModel;
-use crate::stellar::events::{EventEffects, StarEvent, StarEventRules, StarEvents};
+use crate::stellar::events::{EventEffects, StarEvent, StarEvents};
 #[cfg(doc)]
 use crate::stellar::multiplicity::draw_hierarchy_of_composition;
 use crate::stellar::multiplicity::{
@@ -916,7 +916,6 @@ impl StarModel {
     ) -> ClassExtras {
         let extras = self.history_extras_at(state, t);
         peculiar_extras(
-            self.rules,
             extras,
             || {
                 young_class(
@@ -1244,25 +1243,18 @@ pub(crate) enum Pulses<'a> {
     Unopened,
 }
 
-/// `extras`, version 25's, with P06.T24.b's class under `rules`: the one choke point of its hold
-/// ([`PECULIAR_CLASSES_VERSION`](crate::stellar::classify::PECULIAR_CLASSES_VERSION)), which
-/// [`StarModel::class_extras_at`] and a paired star's summary both read.
-///
-/// Under the held arm `extras` as they are, and neither class is evaluated; under the full arm the
-/// young star's class `young` gives, else the S or carbon class `chemistry` gives.
+/// `extras` with P06.T24.b's class: the young star's class `young` gives, else the S or carbon
+/// class `chemistry` gives. [`StarModel::class_extras_at`] and a paired star's summary both read
+/// it.
 #[must_use]
 fn peculiar_extras(
-    rules: StellarRules,
     extras: ClassExtras,
     young: impl FnOnce() -> Option<PeculiarClass>,
     chemistry: impl FnOnce() -> Option<PeculiarClass>,
 ) -> ClassExtras {
-    match rules.peculiar_classes {
-        PeculiarClassRules::Held => extras,
-        PeculiarClassRules::Full => young()
-            .or_else(chemistry)
-            .map_or(extras, |class| extras.with_peculiar(class)),
-    }
+    young()
+        .or_else(chemistry)
+        .map_or(extras, |class| extras.with_peculiar(class))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1450,8 +1442,8 @@ impl StarSummary {
 
     /// The star's events running at the time summarised, by onset, then kind, then ID
     /// ([`StarEvents::at`], P06.T28.g): empty where none runs, and `None` where they are not
-    /// composed, below version 26 (`STAR_EVENTS_VERSION`) and for a star its pair has changed,
-    /// whose events would be its own single-star model's (the lane's lean, 2026-10-31).
+    /// composed, for a star its pair has changed, whose events would be its own single-star
+    /// model's (the lane's lean, 2026-10-31).
     #[must_use]
     pub fn active_events(&self) -> Option<&[StarEvent]> {
         self.active_events.as_deref()
@@ -2790,7 +2782,6 @@ impl PairedStar {
     #[must_use]
     fn class_extras_of(&self, star: &StarModel) -> ClassExtras {
         peculiar_extras(
-            star.rules,
             self.class_extras(),
             || {
                 young_class(
@@ -3264,23 +3255,16 @@ pub(crate) fn star_summary(
 ) -> Option<StarSummary> {
     let body = streams.body();
     let state = star.state_at(t)?;
-    let events = match star.rules.star_events {
-        StarEventRules::Held => None,
-        StarEventRules::Composed => Some(StarEvents::of(star, streams.seed(), body)),
-    };
-    let pulses = events.as_ref().map_or(Pulses::Opened(streams), |events| {
-        Pulses::Built(events.pulses())
-    });
+    let events = StarEvents::of(star, streams.seed(), body);
     let classification = classify_under(
         &state,
         star.composition(),
         star.draws(),
-        star.class_extras_at(&state, t, pulses),
+        star.class_extras_at(&state, t, Pulses::Built(events.pulses())),
         star.rules,
     );
-    let (active_events, event_effects) = events
-        .map(|events| events.at(t, &state))
-        .map_or((None, None), |(active, effects)| (Some(active), effects));
+    let (active, event_effects) = events.at(t, &state);
+    let active_events = Some(active);
     let spin = star.rotation_of(&state);
     let activity = rotation::activity(&state, spin.as_ref());
     let remnant = if state.phase().is_remnant() {

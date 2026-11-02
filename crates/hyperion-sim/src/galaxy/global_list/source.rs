@@ -10,9 +10,8 @@
 //!   [`global_list`](super), "Bounding shells"). The census tests the shells against the
 //!   unpadded radius at the epoch, the hits against the radius padded at
 //!   [`UNBOUND_PAD_SPEED`], above every member's speed bound. A stream's shell bounds its members
-//!   from version 26 (`STREAM_SHELL_VERSION`); below it the source
-//!   visits every stream, since a member may lie outside its shell then. A dwarf core's members
-//!   lie within its extent of its centre, which its shell holds at every version.
+//!   (from version 26, P10.T9), and a dwarf core's members lie within its extent of its centre,
+//!   which its shell holds.
 //! - **A stream**: its table through the caller's [`TubeLookup`], the tube cells touching the
 //!   sphere ([`TubeTable::cells_touching`]) and their members ([`stream_cell_members`]). The
 //!   census is the exact sum of the means ([`expected_members`]) of the cells touching the
@@ -70,8 +69,8 @@ use super::members::{
     stream_cell_members,
 };
 use super::{
-    BoundingShell, GlobalEntryKind, GlobalList, StreamNumber, StreamShellRules, TubeLookup,
-    TubeTable, in_stream_shell,
+    BoundingShell, GlobalEntryKind, GlobalList, StreamNumber, TubeLookup, TubeTable,
+    in_stream_shell,
 };
 
 /// The generator version from which the range query registers the global list's members, the
@@ -291,7 +290,7 @@ impl<'a> GlobalListSource<'a> {
                     .ok_or(ResolveSystemError::NoSuchSystem)?;
                 let tube = self.lookup.tube(number);
                 let found = resolve_stream_member(galaxy, &tube, self.shares(number), member)?;
-                if in_stream_shell(galaxy, &entry.shell(), found.record().epoch_position()) {
+                if in_stream_shell(&entry.shell(), found.record().epoch_position()) {
                     Ok(found)
                 } else {
                     Err(ResolveSystemError::NoSuchSystem)
@@ -342,8 +341,7 @@ impl<'a> GlobalListSource<'a> {
     }
 
     /// The streams and the cores whose shells `sphere`, out to its padded radius, meets, in list
-    /// order, each with its shell; under [`StreamShellRules::Unbounded`] every stream (module
-    /// documentation).
+    /// order, each with its shell (module documentation).
     fn entries_near<'s>(
         &'s self,
         sphere: &'s QuerySphere,
@@ -354,7 +352,7 @@ impl<'a> GlobalListSource<'a> {
     /// The streams of `list`, `galaxy`'s global list, whose tube tables the source reads to answer
     /// a range query of `query`, in number order: those whose shells its sphere meets at its time,
     /// padded at [`UNBOUND_PAD_SPEED`] as its hits are, which holds every stream its census at the
-    /// epoch reads too; under the held shell rule (`StreamShellRules::Unbounded`) every stream.
+    /// epoch reads too.
     ///
     /// A caller that builds tables off the query's own thread, as a server's pool does, builds
     /// these before it asks, so that the query reads no table cold.
@@ -523,20 +521,17 @@ impl SystemSource for GlobalListSource<'_> {
 }
 
 /// The streams and the cores of `list`, `galaxy`'s, whose shells `sphere`, out to its padded
-/// radius, meets, in list order, each with its shell; under [`StreamShellRules::Unbounded`] every
-/// stream ([`GlobalListSource::entries_near`]).
+/// radius, meets, in list order, each with its shell ([`GlobalListSource::entries_near`]).
 fn entries_near<'s>(
-    galaxy: &Galaxy,
+    _galaxy: &Galaxy,
     list: &'s GlobalList,
     sphere: &'s QuerySphere,
 ) -> impl Iterator<Item = (GlobalEntryKind, BoundingShell)> + 's {
-    let every_stream = galaxy.rules().stream_shell == StreamShellRules::Unbounded;
     list.entries()
         .iter()
         .filter(move |e| match e.kind() {
             GlobalEntryKind::Centre => false,
-            GlobalEntryKind::Stream(_) => every_stream || e.shell().touches(sphere),
-            GlobalEntryKind::DwarfCore(_) => e.shell().touches(sphere),
+            GlobalEntryKind::Stream(_) | GlobalEntryKind::DwarfCore(_) => e.shell().touches(sphere),
         })
         .map(|e| (e.kind(), e.shell()))
 }
@@ -587,7 +582,7 @@ fn stream_hits(
             stream_cell_members(galaxy, tube, shares, cell, band, members);
             let inside = members
                 .iter()
-                .filter(|m| in_stream_shell(galaxy, shell, m.record().epoch_position()));
+                .filter(|m| in_stream_shell(shell, m.record().epoch_position()));
             for member in inside {
                 visit(member);
             }

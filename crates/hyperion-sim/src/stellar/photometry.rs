@@ -16,9 +16,8 @@
 //! [`giant_bolometric_correction_v`] lies 0.16, 0.77 and 1.34 mag below this table there. Straižys
 //! and Kuriliene's own bolometric corrections (zero point BC<sub>V</sub>☉ = −0.07; Torres 2010, AJ
 //! 140, 1158) give 0.1–0.5, 1.1 and 1.7 mag, as P06.T23 read them from the paper's scan; the table
-//! that holds them was not re-read (plan 06's Risks). To version 25 every star but a white dwarf
-//! reads this table so; from 26 (`V_MAGNITUDE_VERSION`) an evolved star reads the giants'
-//! correction instead, and that difference ends.
+//! that holds them was not re-read (plan 06's Risks). An evolved star reads the giants' correction
+//! instead (P06.T43.b), and that difference ends there.
 //!
 //! - Above the table's hottest row (O3V, 44,900 K), BC<sub>V</sub> falls by 7.5 mag per dex of
 //!   temperature from O3V's −4.01, the Rayleigh–Jeans limit, where the flux in V grows as
@@ -29,16 +28,15 @@
 //!   −8.16 against −7.94 at 150,000 K), and whose B − V moves only from −0.30 to −0.36.
 //! - The table gives BC<sub>V</sub> down to L5V (1,710 K) and B − V down to M9V (2,380 K); cooler
 //!   objects have none here, as none is measured: a T dwarf is not observed in V.
-//! - Neutron stars and black holes have no absolute V magnitude here, nor do white dwarfs to
-//!   version 25. A degenerate atmosphere is not on the dwarf sequence: at 4,000 K the Montreal DA
+//! - Neutron stars and black holes have no absolute V magnitude here. A white dwarf reads the
+//!   Montreal grid (below), since a degenerate atmosphere is not on the dwarf sequence: at 4,000 K the Montreal DA
 //!   models give BC<sub>V</sub> = −0.40 where the M dwarfs' is −1.02, and B − V differs by up to
 //!   0.25 mag from 8,000 to 40,000 K. Their photometry needs the white-dwarf model grids, which
 //!   this table is not.
 //!
-//! # Ask A4's photometry (P06.T43.a, held for 26 by P06.T43.b)
+//! # Ask A4's photometry (P06.T43.a and T43.b)
 //!
-//! Two corrections, which [`absolute_magnitude_v`] reads under the stellar rules' `v_magnitude`
-//! field from `V_MAGNITUDE_VERSION` (`VMagnitudeRules::A4`; A4's interim to 25):
+//! Two corrections, which [`absolute_magnitude_v`] reads:
 //!
 //! - [`white_dwarf_absolute_magnitude_v`] and [`white_dwarf_bolometric_correction_v`]: a white
 //!   dwarf's V from the Montreal group's pure-hydrogen grid at its temperature and gravity, the
@@ -78,19 +76,15 @@
 //!   [`PROTOSTAR_DURATION`](crate::stellar::premain::PROTOSTAR_DURATION)), so the phase alone
 //!   decides. A Class II star, on the pre-main sequence, takes no circumstellar term: its birth
 //!   cloud's extinction is plan 07's.
-//! - **A4, white dwarfs (the interim, to version 25).** Under `VMagnitudeRules::Interim` plan
-//!   06's photometry gives no white dwarf a V magnitude ([`absolute_magnitude_v`]), so a white
-//!   dwarf is dark here; the sky's census counts it in its tallies. M giants are as bright as the
-//!   dwarf table makes them (up to 1.34 mag too bright at M6 III by the giants' correction, 1.7 by
-//!   Straižys and Kuriliene's). Under `VMagnitudeRules::A4`, from 26, the interim ends: a white
-//!   dwarf takes its V from the Montreal grid through `absolute_magnitude_v_under`, and
-//!   `absolute_v_of_state_under` reads it as it reads every other living star. Neutron stars and
-//!   black holes stay dark.
+//! - **A4, white dwarfs.** A white dwarf takes its V from the Montreal grid through
+//!   `absolute_magnitude_v_under`, and `absolute_v_of_state_under` reads it as it reads every
+//!   other living star (A4's interim, which left white dwarfs dark, ended at 26). Neutron stars
+//!   and black holes stay dark.
 //!
 //! When plan 06 answers A3, [`absolute_v_of_state`] switches to its photometry. These functions
 //! sat in the sky's own `photometry` module until the crate split (CS.T1) moved them here, beside
-//! the photometry they stand in for; the sky re-exports them, and the census restates the bounds
-//! that rest on A4's interim under the A4 arm (`sky::census`'s `BoundStar::brightest`).
+//! the photometry they stand in for; the sky re-exports them, and the census bounds a star its pair
+//! changes by the white dwarfs' brightest (`sky::census`'s `BoundStar::brightest`).
 //!
 //! Extinction and apparent magnitudes belong to plan 07.
 
@@ -98,56 +92,16 @@ mod levesque05;
 mod montreal_da;
 mod wl11;
 
+use crate::GENERATOR_VERSION;
 use crate::math;
 use crate::stellar::classify::pm13::{Column, DwarfSequence};
 use crate::stellar::rules::StellarRules;
 use crate::stellar::{Phase, StarState};
 use crate::units::{Dex, Kelvin, Magnitudes, SolarLuminosities};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
-/// The generator version whose stellar rules give white dwarfs a V magnitude and evolved stars
-/// the giants' bolometric correction (plan 06, P06.T43.b's swap of rendering plan R06's ask A4;
-/// ruling 29 of signoff 12): [`absolute_magnitude_v_under`] reads
-/// [`white_dwarf_absolute_magnitude_v`] and [`giant_bolometric_correction_v`] under
-/// [`VMagnitudeRules::A4`].
-///
-/// Below it every star takes the held arm, [`VMagnitudeRules::Interim`], the code of version 24
-/// verbatim, so every generated value keeps its bits; the tests reach the new arm through
-/// `StellarRules::every_26_hold()`. The bump to 26 deletes this hold: [`VMagnitudeRules`] with its
-/// `Interim` arm, the stellar rules' `v_magnitude` field, the `match` in
-/// [`absolute_magnitude_v_under`], [`VMagnitudeRules::white_dwarfs_brightest_v`]'s `None` and the
-/// tripwire (`the_a4_magnitudes_are_held_only_until_the_26_bump`).
-pub(crate) const V_MAGNITUDE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Which V magnitudes plan 06's photometry gives white dwarfs and evolved stars (the stellar rules'
-/// `v_magnitude` field, the hold of [`V_MAGNITUDE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum VMagnitudeRules {
-    /// Version 25's and before, A4's interim: no white dwarf has a V magnitude, and every living
-    /// star reads the dwarf table's correction at its temperature, whatever its gravity.
-    Interim,
-    /// Version 26's: a white dwarf reads the Montreal grid
-    /// ([`white_dwarf_absolute_magnitude_v`]), and every living star past the hydrogen main
-    /// sequence reads the giants' correction at its gravity ([`giant_bolometric_correction_v`]).
-    A4,
-}
-
-impl VMagnitudeRules {
-    /// The brightest absolute V a white dwarf can have under this arm, which the sky's census
-    /// bounds a star that may be one by: `None` under the interim, where white dwarfs are dark, and
-    /// [`WHITE_DWARF_BRIGHTEST_V`] under A4.
-    #[must_use]
-    pub(crate) const fn white_dwarfs_brightest_v(self) -> Option<Magnitudes> {
-        match self {
-            Self::Interim => None,
-            Self::A4 => Some(WHITE_DWARF_BRIGHTEST_V),
-        }
-    }
-}
-
-/// The brightest absolute V, mag, that any white dwarf of the generator reads under
-/// [`VMagnitudeRules::A4`], margin included: the bound the sky's census gives a star that may be a
-/// white dwarf until the 26 bump refits its tables with white-dwarf rows.
+/// The brightest absolute V, mag, that any white dwarf of the generator reads, margin included:
+/// the bound the sky's census gives a star its pair changes, whose white dwarfs the pair-light
+/// tables do not hold.
 ///
 /// A white dwarf is brightest in V as it forms: at its progenitor's last luminosity, hot, and not
 /// yet shrunk to its degenerate radius. Beyond the Montreal grid's 150,000 K its correction falls
@@ -324,67 +278,52 @@ pub fn absolute_magnitude_v(state: &StarState) -> Option<Magnitudes> {
 }
 
 /// [`absolute_magnitude_v`] under the stellar stage's `rules`: what a star generated in a galaxy is
-/// given, from its model's rules. Its dwarf sequence is theirs, and their `v_magnitude` field is
-/// chosen here, the hold's one choke point ([`V_MAGNITUDE_VERSION`]):
-///
-/// - under [`VMagnitudeRules::Interim`], a living star reads the dwarf table's correction at its
-///   temperature and a remnant has none;
-/// - under [`VMagnitudeRules::A4`], a white dwarf reads [`white_dwarf_absolute_magnitude_v`], and
-///   every living state past the hydrogen main sequence (the Hertzsprung gap, the giant branches,
-///   core helium burning, the asymptotic giant branch, the naked helium stars and the post-AGB
-///   crossing) reads [`giant_bolometric_correction_v`] at its surface gravity. A protostar, a
-///   pre-main-sequence or main-sequence star and a substellar object keep the dwarf table's, bit
-///   for bit, and so does every star from 6,000 K, where the giants' correction is the table's.
+/// given, from its model's rules, whose dwarf sequence it reads. A white dwarf reads
+/// [`white_dwarf_absolute_magnitude_v`], and every living state past the hydrogen main sequence
+/// (the Hertzsprung gap, the giant branches, core helium burning, the asymptotic giant branch, the
+/// naked helium stars and the post-AGB crossing) reads [`giant_bolometric_correction_v`] at its
+/// surface gravity (P06.T43.b). A protostar, a pre-main-sequence or main-sequence star and a
+/// substellar object keep the dwarf table's, and so does every star from 6,000 K, where the
+/// giants' correction is the table's; a neutron star, a black hole and no remnant have none.
 #[must_use]
 pub(crate) fn absolute_magnitude_v_under(
     state: &StarState,
     rules: StellarRules,
 ) -> Option<Magnitudes> {
-    let phase = state.phase();
-    match rules.v_magnitude {
-        VMagnitudeRules::Interim => {
-            if !phase.is_living() {
-                return None;
-            }
+    match state.phase() {
+        Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => {
+            white_dwarf_absolute_magnitude_v(state)
+        }
+        Phase::NeutronStar | Phase::BlackHole | Phase::NoRemnant => None,
+        Phase::HertzsprungGap
+        | Phase::FirstGiantBranch
+        | Phase::CoreHeliumBurning
+        | Phase::EarlyAgb
+        | Phase::ThermallyPulsingAgb
+        | Phase::HeliumMainSequence
+        | Phase::HeliumHertzsprungGap
+        | Phase::HeliumGiantBranch
+        | Phase::PostAgb => {
+            let m_bol = absolute_bolometric_magnitude(state.luminosity())?;
+            let bc = giant_bolometric_correction_v_under(
+                state.effective_temperature(),
+                state.surface_gravity()?,
+                rules,
+            )?;
+            Some(m_bol - bc)
+        }
+        Phase::Protostar | Phase::PreMainSequence | Phase::MainSequence | Phase::Substellar => {
             let m_bol = absolute_bolometric_magnitude(state.luminosity())?;
             let bc = bolometric_correction_v_under(state.effective_temperature(), rules)?;
             Some(m_bol - bc)
         }
-        VMagnitudeRules::A4 => match phase {
-            Phase::HeliumWhiteDwarf
-            | Phase::CarbonOxygenWhiteDwarf
-            | Phase::OxygenNeonWhiteDwarf => white_dwarf_absolute_magnitude_v(state),
-            Phase::NeutronStar | Phase::BlackHole | Phase::NoRemnant => None,
-            Phase::HertzsprungGap
-            | Phase::FirstGiantBranch
-            | Phase::CoreHeliumBurning
-            | Phase::EarlyAgb
-            | Phase::ThermallyPulsingAgb
-            | Phase::HeliumMainSequence
-            | Phase::HeliumHertzsprungGap
-            | Phase::HeliumGiantBranch
-            | Phase::PostAgb => {
-                let m_bol = absolute_bolometric_magnitude(state.luminosity())?;
-                let bc = giant_bolometric_correction_v_under(
-                    state.effective_temperature(),
-                    state.surface_gravity()?,
-                    rules,
-                )?;
-                Some(m_bol - bc)
-            }
-            Phase::Protostar | Phase::PreMainSequence | Phase::MainSequence | Phase::Substellar => {
-                let m_bol = absolute_bolometric_magnitude(state.luminosity())?;
-                let bc = bolometric_correction_v_under(state.effective_temperature(), rules)?;
-                Some(m_bol - bc)
-            }
-        },
     }
 }
 
 /// The V-band bolometric correction of a cool giant or supergiant at effective temperature `teff`
 /// and surface gravity `log_g` (log₁₀ g in cm s⁻², as [`StarState::surface_gravity`] gives it):
 /// plan 06's gravity-dependent correction for ask A4 (P06.T43.a), which [`absolute_magnitude_v`]
-/// reads for evolved stars from version 26 (`V_MAGNITUDE_VERSION`).
+/// reads for evolved stars (P06.T43.b).
 ///
 /// - To 5,000 K it is Worthey and Lee's (2011) correction at solar abundance at `log_g` from 1.0
 ///   up, and at log g 0.0 and below Levesque et al.'s (2005, Table 6) column for red supergiants
@@ -525,8 +464,7 @@ pub fn white_dwarf_bolometric_correction_v(teff: Kelvin, log_g: Dex) -> Option<M
 
 /// The absolute V magnitude of a white dwarf from the Montreal grid: M<sub>bol</sub> −
 /// BC<sub>V</sub> with [`white_dwarf_bolometric_correction_v`] at its effective temperature and
-/// surface gravity (P06.T43.a, ask A4), which [`absolute_magnitude_v`] reads from version 26
-/// (`V_MAGNITUDE_VERSION`).
+/// surface gravity (P06.T43.a, ask A4), which [`absolute_magnitude_v`] reads (P06.T43.b).
 ///
 /// `None` for anything but a white dwarf, for one without luminosity, mass or radius, and below
 /// the grid's 1,500 K.
@@ -620,8 +558,7 @@ pub fn absolute_v_of_state(state: &StarState) -> Option<Magnitudes> {
 /// [`absolute_v_of_state`] under the stellar stage's `rules`: what the sky census gives a star of
 /// its galaxy, from the galaxy's rules. The sky's fitted tables take the version's.
 ///
-/// A white dwarf reads [`absolute_magnitude_v_under`], which gives it none under A4's interim and
-/// the Montreal grid's V under [`VMagnitudeRules::A4`]: the hold is chosen there alone.
+/// A white dwarf reads [`absolute_magnitude_v_under`], the Montreal grid's V.
 #[must_use]
 pub(crate) fn absolute_v_of_state_under(
     state: &StarState,
@@ -678,7 +615,6 @@ mod tests {
     use hyperion_testkit::float::bits;
 
     use super::*;
-    use crate::stellar::classify::pm13;
     use crate::stellar::draws::StarDraws;
     use crate::stellar::sse::Track;
     use crate::stellar::{Composition, StarStateParts};
@@ -714,23 +650,10 @@ mod tests {
         assert!((b_v.value() - 0.65).abs() < 1e-3, "{b_v:?}");
     }
 
-    /// At every row the table's own numbers come back, bit for bit, since the interpolation's
-    /// fraction is then exactly zero.
-    #[test]
-    fn the_rows_are_reproduced_exactly() {
-        for row in pm13::DWARF_SEQUENCE {
-            let t = Kelvin::new(row.teff_k);
-            let bc = bolometric_correction_v(t).map(|m| bits(m.value()));
-            assert_eq!(bc, row.bc_v.map(bits), "{row:?}");
-            let colour = colour_b_v(t).map(|m| bits(m.value()));
-            assert_eq!(colour, row.colour_b_v.map(bits), "{row:?}");
-        }
-    }
-
     /// Continuous across the hottest row, and falling at the Rayleigh–Jeans rate beyond it.
     #[test]
     fn the_hot_tail_continues_the_table() {
-        let edge = pm13::DWARF_SEQUENCE[0].teff_k;
+        let edge = crate::tables::dwarf_sequence::TEFF_HOT_K;
         let below = bolometric_correction_v(Kelvin::new(edge * (1.0 - 1e-12))).unwrap();
         let above = bolometric_correction_v(Kelvin::new(edge * (1.0 + 1e-12))).unwrap();
         assert!((below.value() - above.value()).abs() < 1e-9);
@@ -738,32 +661,6 @@ mod tests {
         assert!((ten_times.value() - (-4.01 - 7.5)).abs() < 1e-9);
         let hot = colour_b_v(Kelvin::new(1e6)).map(|m| bits(m.value()));
         assert_eq!(hot, Some(bits(-0.330)));
-    }
-
-    /// Between two rows, a correction and a colour lie between the rows' own values, from the
-    /// last row with a value to the hottest.
-    #[test]
-    fn values_lie_between_their_rows() {
-        let rows = &pm13::DWARF_SEQUENCE;
-        let mut t = 1_710.0_f64;
-        while t < rows[0].teff_k {
-            let hot = rows.iter().rposition(|r| r.teff_k >= t).unwrap();
-            let (a, b) = (&rows[hot], &rows[(hot + 1).min(rows.len() - 1)]);
-            let within = |value: f64, x: f64, y: f64| value >= x.min(y) && value <= x.max(y);
-            let bc = bolometric_correction_v(Kelvin::new(t)).unwrap().value();
-            assert!(
-                within(bc, a.bc_v.unwrap(), b.bc_v.unwrap_or(bc)),
-                "{t} K: {bc}"
-            );
-            if let Some(colour) = colour_b_v(Kelvin::new(t)) {
-                let colour = colour.value();
-                assert!(
-                    within(colour, a.colour_b_v.unwrap(), b.colour_b_v.unwrap()),
-                    "{t} K: {colour}"
-                );
-            }
-            t *= 1.001;
-        }
     }
 
     #[test]

@@ -206,7 +206,7 @@ fn the_runaway_deaths_are_held_only_until_the_27_bump() {
     }
     assert_eq!(at(27), RunawayDeathsRules::Ejected);
     assert_eq!(
-        GalaxyRules::every_26_hold().runaway_deaths,
+        GalaxyRules::every_26_hold_with_its_retargets().runaway_deaths,
         RunawayDeathsRules::FieldOnly
     );
     assert_eq!(
@@ -228,7 +228,7 @@ fn the_held_arm_is_every_26_hold_s() {
             .expect("the Milky Way fixture's gas is mostly neutral")
             .with_full_potential()
     };
-    let every_26 = built(GalaxyRules::every_26_hold());
+    let every_26 = built(GalaxyRules::every_26_hold_with_its_retargets());
     let held = built(GalaxyRules {
         runaway_deaths: RunawayDeathsRules::FieldOnly,
         binary_tables: crate::galaxy::catalogue_classes::binary::BinaryTableRules::Scratch,
@@ -1097,7 +1097,7 @@ fn the_held_arm_s_cell_is_pinned_under_every_26_hold() {
     let galaxy = Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_26_hold(),
+        GalaxyRules::every_26_hold_with_its_retargets(),
     )
     .expect("the Milky Way fixture's gas is mostly neutral")
     .with_full_potential();

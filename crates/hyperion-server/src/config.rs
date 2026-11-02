@@ -392,8 +392,9 @@ pub enum GlobalListWarmUp {
     AtOpen,
 }
 
-/// The generator version from which the server serves plan 09's feature members: 26, P09.T2.c's,
-/// the serve gate of P09.T40.a (main's ruling of 2026-10-30; plan 09's Risks, "P09.T39 as built").
+/// The generator version from which the server serves plan 09's feature members: 27, P09.T2.c's,
+/// the serve gate of P09.T40.a (main's ruling of 2026-10-30; plan 09's Risks, "P09.T39 as built"),
+/// raised from 26 with P09.T2.c, which rides 27 with R06.T16.a.
 ///
 /// Until P09.T2.c gives up φ, each population's share in the features, the field still places the
 /// whole of every population, so a feature's members registered beside it would be counted twice
@@ -403,7 +404,7 @@ pub enum GlobalListWarmUp {
 /// gas in the sky's sightlines all wait for it, so that at the version in force no reply moves.
 /// Its tripwire, `the_feature_members_gate_holds_until_its_version`, fails at the version, so that
 /// the bump that reaches it opens the gate with P09.T2.c, or raises it to the train P09.T2.c rides.
-pub const FEATURE_MEMBERS_FROM: GeneratorVersion = GeneratorVersion::new(26);
+pub const FEATURE_MEMBERS_FROM: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether the server serves plan 09's feature members (P09.T40.a): the serve gate,
 /// [`FEATURE_MEMBERS_FROM`].
@@ -1700,7 +1701,8 @@ mod tests {
         let at = |v| FeatureMembers::of_version(GeneratorVersion::new(v));
         assert_eq!(at(23), FeatureMembers::Held);
         assert_eq!(at(25), FeatureMembers::Held);
-        assert_eq!(at(26), FeatureMembers::Served);
+        assert_eq!(at(26), FeatureMembers::Held);
         assert_eq!(at(27), FeatureMembers::Served);
+        assert_eq!(at(28), FeatureMembers::Served);
     }
 }

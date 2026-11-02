@@ -20,7 +20,7 @@ task = "binary_cooling_floor"
 revision = 0
 inputs_sha256 = "ad373b9c00ea234be39929744e186614c28d487bde080e3739c08f98c9b41bc4"
 body_sha256 = "bd6f65a9bb49829e11c43bdecbf6d8ec7e53b40f9c2e134a2fcc610c5f471004"
-fingerprint = [4.0, 53.0, 10.575539587421403, 1027.0, 10.742286216643546, 1044.0, 14.287777844693743, 1398.0, 15.069499575952564, 1476.0, 10.987455740641234, 1068.0, 11.15424096869619, 1085.0, 14.407691179764827, 1410.0, 16.07553209081891, 1577.0, 11.064789173746222, 1076.0, 11.231597577803782, 1093.0, 14.348788867189512, 1404.0, 16.72643456883263, 1642.0, 10.990884358175533, 1069.0, 11.157683567268858, 1085.0, 14.225949416310911, 1392.0, 16.226455842541974, 1592.0]
+fingerprint = [4.0, 53.0, 10.5755395874214, 1027.0, 10.742286216643544, 1044.0, 14.287777844693752, 1398.0, 15.069499575952566, 1476.0, 10.987455740641227, 1068.0, 11.154240968696186, 1085.0, 14.407691179764827, 1410.0, 16.075532090818918, 1577.0, 11.064789173746224, 1076.0, 11.231597577803784, 1093.0, 14.348788867189512, 1404.0, 16.72643456883263, 1642.0, 10.990884358175528, 1069.0, 11.157683567268855, 1085.0, 14.22594941631091, 1392.0, 16.226455842541984, 1592.0]
 since_generator_version = 21
 provisional = false
 acceptance = "212 values (4 metallicity intervals × 53 age bins) from 1116180 evaluations of the cooling fits; stored V +10.27 to +16.42 mag, margin included, 0 with no V; every interval's floor rises or holds with age; the sim's `no_cooling_star_is_brighter_than_its_floor` checks 20,000 random cooling stars against it and `the_lazy_values_are_fresh_builds` holds it to a fresh build"
@@ -106,7 +106,7 @@ body_sha256 = "48a15ea4f829ed94761d32db041f73dfb47a29d9170c727f01783552c70d5ed2"
 fingerprint = [0.7222612477767937, 0.1276205961457899, 0.1301055942610584, 0.020012561816357913]
 since_generator_version = 14
 provisional = false
-acceptance = "s = 0.9201 (1σ 0.8507–0.9927; under the IFMRs of Cummings 2018 0.8957, El-Badry 2018 0.9352); over primaries below 8 M☉: band shares A–D 67.7, 12.0, 16.8, 3.45% against 66.5, 12.8, 17.8, 2.85%, misses of -0.73, +1.19, +1.15, -1.53 Poisson errors, χ² 5.62 on 2 dof (passes); all stars below 0.5 M☉ 69.84% in 67.8–71.0% (passes); local mid-plane mean per system in stars and white dwarfs 0.5517 M☉ in 0.54–0.60 (passes). Reported: the all-inclusive local mean 0.6115 M☉, of which neutron stars and black holes 0.0530; the primaries' mean present mass 0.4027 M☉ against the census's 0.437"
+acceptance = "s = 0.9201 (1σ 0.8507–0.9927; under the IFMRs of Cummings 2018 0.8957, El-Badry 2018 0.9352); over primaries below 8 M☉: band shares A–D 67.7, 12.0, 16.8, 3.45% against 66.5, 12.8, 17.8, 2.85%, misses of -0.73, +1.19, +1.15, -1.53 Poisson errors, χ² 5.62 on 2 dof (passes); all stars below 0.5 M☉ 69.84% in 67.8–71.0% (passes); local mid-plane mean per system in stars and white dwarfs 0.5517 M☉ in 0.54–0.60 (passes). Reported: the all-inclusive local mean 0.6081 M☉, of which neutron stars and black holes 0.0496; the primaries' mean present mass 0.4027 M☉ against the census's 0.437"
 
 [[table]]
 name = "class_boundaries"
@@ -245,7 +245,7 @@ path = "displaced_forms.rs"
 task = "displaced_forms"
 revision = 1
 inputs_sha256 = "7d5b7fe0f90c7e306a69c670648ae599a2e450355e044d8d7f5d36ce8289b056"
-body_sha256 = "266b0c06a017c87a096e3ae5dd5810ac4a90f423bc71f3eececce9364b4de762"
+body_sha256 = "de6a8ad18fcaf682ce12634945e79406700bb4f9363278eb9b9d9bf003df205f"
 fingerprint = [7000.0, 223.92287694638227, 2.5748643758710665, 130.78058386294995, 1.24, 0.0054, 0.26, 1000.0, 1500.0, 0.04, 2000.0, 2500.0]
 since_generator_version = 25
 provisional = true
@@ -339,11 +339,11 @@ path = "lbv.rs"
 task = "lbv"
 revision = 0
 inputs_sha256 = "8776b3519710b79328e0c68d2ead3294b1e3814aa9f6a1dd31402a7841f0cfdc"
-body_sha256 = "2b7bed255d941cf7511b132849d6c1ab8670336897ddd98164ff0a1cea76a8d0"
-fingerprint = [-1.0, -1.0, 5579848.018950851, 5743636.147637185, 4655979.100824139, 4846843.53950812, 3756154.343645124, 3757909.7152576996, 2436746.353321887, 3045531.5356050567, 150.0, 150.0]
-since_generator_version = 24
+body_sha256 = "b0cddb8f73271e32cf7906e850580049bfb5f73bcfa4d61c1518b9d66d0ad0d3"
+fingerprint = [6485973.186367863, 6486045.05919523, 5579848.810334875, 5637243.747185056, 4655979.102816211, 4657520.103534312, 3756154.3428181875, 3757436.789487088, 2436746.353321887, 2833347.8875492387, 150.0, 150.0]
+since_generator_version = 26
 provisional = false
-acceptance = "32–36 M☉ windows 6297001–6513368 yr, held as 6171000–6644000; 36–43 M☉ windows 5052087–6297279 yr, held as 4951000–6424000; 43–55 M☉ windows 4157256–5463241 yr, held as 4074000–5573000; 55–97 M☉ windows 3492249–4630717 yr, held as 3422000–4724000; 97–150 M☉ windows 2144118–3821010 yr, held as 2101000–3898000; no track from 24 M☉ to the lowest node has a window (passes); the class's million-star sample and its masses' K–S test at 1% are the sim's slow `the_class_test_holds_every_host_of_a_million_layer_e_stars`"
+acceptance = "32–36 M☉ windows 6255927–6900667 yr, held as 6130000–7039000; 36–43 M☉ windows 5040922–6349046 yr, held as 4940000–6477000; 43–55 M☉ windows 4157256–5352657 yr, held as 4074000–5460000; 55–97 M☉ windows 3492249–4539851 yr, held as 3422000–4631000; 97–150 M☉ windows 2144118–3581469 yr, held as 2101000–3654000; no track from 24 M☉ to the lowest node has a window (passes); the class's million-star sample and its masses' K–S test at 1% are the sim's slow `the_class_test_holds_every_host_of_a_million_layer_e_stars`"
 
 [[table]]
 name = "lifetime_bracket"
@@ -351,11 +351,11 @@ path = "lifetime_bracket.rs"
 task = "lifetime_bracket"
 revision = 0
 inputs_sha256 = "c07f89ef768f526ef9c0f425111a24cd6194a00d2ed482e3e8bbd66204e6d135"
-body_sha256 = "837c227f7d5a022acfcf93b6f1b5845f4bb30ad7a99506da7dd67003036f0607"
-fingerprint = [495286679.0645464, 41120225.717763394, 10963201.340789307, 2751693.9715536297, 848636206.7161552, 41598879.237608194, 9326246.457168067, 3277732.618513564, 0.0001, 0.03, 13.0, 33.0, 2.5, 8.0, 150.0, 150.0, 0.02]
-since_generator_version = 22
+body_sha256 = "5bfed9caa2bf264597e09d14f72a330bec6e42f473b4b8d36b5d83b1f31f06d3"
+fingerprint = [495286679.0645464, 41120225.717763394, 10963201.340789307, 2756936.4924124596, 848636206.7161552, 41598879.237608194, 9326246.457168067, 3384998.577735398, 0.0001, 0.03, 13.0, 33.0, 2.5, 8.0, 150.0, 150.0, 0.02]
+since_generator_version = 26
 provisional = false
-acceptance = "the table is `LifetimeBracket::new()` bit for bit (read from it, and held to a fresh build by the sim's `the_shared_bracket_is_new_bit_for_bit`); band D's lifetimes 4.0917e7–8.4864e8 years, its widest node's greatest 1.713 times its least; band E's 2.7517e6–4.3548e7 years and 1.210; least and greatest fall with mass at every node (passes)"
+acceptance = "the table is `LifetimeBracket::new()` bit for bit (read from it, and held to a fresh build by the sim's `the_shared_bracket_is_new_bit_for_bit`); band D's lifetimes 4.0917e7–8.4864e8 years, its widest node's greatest 1.713 times its least; band E's 2.7558e6–4.3548e7 years and 1.244; least and greatest fall with mass at every node (passes)"
 
 [[table]]
 name = "limb_darkening"
@@ -480,11 +480,11 @@ path = "sky_envelope.rs"
 task = "sky_envelope"
 revision = 0
 inputs_sha256 = "00377553328a5b60882b41de374419edba60f6a5c54f3ecb00b69718eb5f4526"
-body_sha256 = "8841e95158b9b9d6cce97bd51a8509e601386bc715eba3c2b86f58d8b917c61f"
-fingerprint = [198.0, 0.01240972504160122, 150.0, 13.027943055377502, 1993.4781831135954, 133.0, 10.575633729507718, 2368.9939198679826, 193.0, 6.267617009745397, 1120.9128833378002, 140.0, -5.411961658162702, 505.6570579529913, 129.0, -6.793861382632567, 88.43501502549661, 88.0, -8.90197030109447, -162.3651081653379, 40.0, -11.728990488164943, -184.84175081816403, 29.0, 13.026173102302929, 2255.3841823514726, 150.0, 10.925813147852466, 2453.6402372068605, 193.0, 6.2676170289564626, 1184.0868225594265, 140.0, -4.296032284572494, 645.9453638455362, 138.0, -5.6895332473556595, 62.13218991923444, 94.0, -8.451132076011069, -181.42412128769683, 38.0, -10.471742109188583, -203.55765805416397, 29.0]
-since_generator_version = 19
+body_sha256 = "023457839b1221778924463b3ae42bfa75e8d3f0c80df3007ffc65168b6a40dc"
+fingerprint = [198.0, 0.01240972504160122, 150.0, 13.027943055377513, 1993.4794028037816, 133.0, 10.575633729507715, 2368.9939198679826, 193.0, 6.267617009745398, 1120.9128833378002, 140.0, -5.411961658162702, 626.4287147744297, 140.0, -6.793861382632567, 572.5474417976977, 140.0, -8.90197030109447, -162.36510816533786, 40.0, -9.188167758834048, -173.85290700612342, 29.0, 13.026173102302941, 2255.3848259309757, 150.0, 10.925813147852462, 2453.6402372068565, 193.0, 6.267617028956463, 1184.1003924255472, 140.0, -4.296032284572494, 662.1630876930934, 140.0, -5.6895332473556595, 482.2872868478137, 140.0, -8.49940156273453, -181.48517153032068, 38.0, -9.502526674827104, -201.88821077078032, 29.0]
+since_generator_version = 26
 provisional = false
-acceptance = "198 mass nodes × 193 age bins from 9240 tracks; 1856 bins dark; every stored value brighter than the build's by 0.000000 to 0.001000 mag (never fainter, so the table bounds the build); brightest -12.850 mag"
+acceptance = "198 mass nodes × 193 age bins from 9240 tracks; 1856 bins dark; every stored value brighter than the build's by 0.000000 to 0.001000 mag (never fainter, so the table bounds the build); brightest -10.102 mag"
 
 [[table]]
 name = "sky_phase_envelope"
@@ -492,11 +492,11 @@ path = "sky_phase_envelope.rs"
 task = "sky_phase_envelope"
 revision = 0
 inputs_sha256 = "6c383342a33bcc36ac48cfc0f9b749aa8a84a8eed37d8cf0d85110aaa7d0b5fa"
-body_sha256 = "a905eb4a16eadddc5d7383f6b5450bc8cb876b7067c55411714bdb30f7919255"
-fingerprint = [198.0, 0.01240972504160122, 150.0, 3135.200629251452, 0.0, 57.0, 840.6061083037024, 13.026173102302929, 0.0, 135.0, 1836.7577018800384, 10.575633729507718, 0.0, 64.0, 637.2106755136858, 6.267616976433615, 3395.0, 332.0, -48.02438056332567, -5.296648202109787, 2041.0, 378.0, 406.3197030603642, -3.816923123561792, 1538.0, 379.0, 901.9536133131066, -1.6909826094614504, 17489.0, 357.0, -683.5650780518276, -6.151294708685611, 24785.0, 654.0, -2310.0645875150803, -6.9492230464171385, 26689.0, 466.0, -2068.472730743051, -5.96135135577902, 34068.0, 233.0, -993.1117459444654, -8.450988196992652, 36813.0, 232.0, -1248.9196635919998, -9.999264782660214]
-since_generator_version = 21
+body_sha256 = "2cbc57ea6a3bb17afbd890e609970e0d0e1b57f1685931d22becb6e2dca9094f"
+fingerprint = [198.0, 0.01240972504160122, 150.0, 3135.200629251452, 0.0, 57.0, 840.6054061662139, 13.026173102302941, 0.0, 135.0, 1836.7586044843574, 10.575633729507715, 0.0, 64.0, 637.2187354920819, 6.267616976433616, 3395.0, 364.0, 377.6181829437777, -5.297012630346251, 2041.0, 410.0, 964.2252057699136, -3.822112043938717, 1538.0, 411.0, 1291.9379075089055, -1.6909826094614506, 17489.0, 387.0, -191.03379885944665, -6.152512872390798, 24785.0, 684.0, -1606.6879569437608, -6.9492230464171385, 26689.0, 466.0, -2085.337816534597, -5.967558004843184, 34068.0, 233.0, -959.8785679213419, -8.49940156273453, 36712.0, 186.0, -800.5972158234373, -9.769000325915693]
+since_generator_version = 26
 provisional = false
-acceptance = "6501 cells × 322 bins (mass intervals 0..197 sampled) from 253736 samples (each interval sampling its own ends), 197225 of them tracks; 4224 of 9504 node lifetimes at the cap; cells by spread [4662, 5, 826, 447, 391, 87, 31, 52] (of [0.0005, 0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064]), 52 of them passing no spread; 3349 distinct rows of 66112 segments; 64 cells lit beyond the fine bins; every stored value brighter than V 10 brighter than its bins, less the margin, by at most 0.2009 mag; brightest -12.850 mag"
+acceptance = "6501 cells × 322 bins (mass intervals 0..197 sampled) from 253736 samples (each interval sampling its own ends), 197225 of them tracks; 4224 of 9504 node lifetimes at the cap; cells by spread [4719, 6, 762, 414, 365, 153, 40, 42] (of [0.0005, 0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064]), 42 of them passing no spread; 3345 distinct rows of 65528 segments; 1539 cells lit beyond the fine bins; every stored value brighter than V 10 brighter than its bins, less the margin, by at most 0.2009 mag; brightest -10.140 mag"
 
 [[table]]
 name = "space_weathering"
@@ -588,11 +588,11 @@ path = "stellar_fates_high.rs"
 task = "stellar_fates_high"
 revision = 0
 inputs_sha256 = "ab3cd3282dbb1d3cafa85ebb8470c9790bd70e78c1a05feb65903bce1bcf0eea"
-body_sha256 = "0bcd17130b9317fce32dbd74cf0645de9f8bd67bbd8fd2088e6e22b10e4602fd"
-fingerprint = [6.9943222296256256, 5.0077445862515795, 6.665239455001237, 18.647754626514384]
-since_generator_version = 16
+body_sha256 = "bb56991e22d3f5d2a25624b0c07dc28342c493d15b26af179108fa6a772ed349"
+fingerprint = [6.9943222296256256, 5.0077445862515795, 6.664861129002288, 17.395795161440116]
+since_generator_version = 26
 provisional = false
-acceptance = "8260 full tracks; 99 of 1633 cells (6.1%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 6.8e-3, a 5.7e-4 and 9.0e-2, b 1.3e-4 and 4.0e-2"
+acceptance = "8260 full tracks; 103 of 1633 cells (6.3%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 6.8e-3, a 8.7e-4 and 1.0e-1, b 3.7e-4 and 6.3e-2"
 
 [[table]]
 name = "stellar_fates_low"
@@ -636,11 +636,11 @@ path = "stripping.rs"
 task = "stripping"
 revision = 0
 inputs_sha256 = "865b5a384d01768752dcab8474e86208635c9decfce206c839ce5a8a455dac54"
-body_sha256 = "688d35dc29459779a4569d5ce8125458fc04afe54e7bc4826de8092d2cb712b3"
+body_sha256 = "e277dc44ed7db6aa4a95a61f928f44aaa6df4d6b3a55f64953006b853a494ecb"
 fingerprint = [0.3460343735586854, 0.5343901251039018, 0.4818157115990379, 1.183367218815104, 1.9333278054314231, 2.8904931250733537]
-since_generator_version = 16
+since_generator_version = 26
 provisional = false
-acceptance = "at the centres of 330 cells, the share within 0.0688 of the exact (median 6.5e-4), the core-helium-burning radius within 0.023 relative where the cell's four radii agree to 25% (62 cells spread more)"
+acceptance = "at the centres of 330 cells, the share within 0.0877 of the exact (median 8.3e-4), the core-helium-burning radius within 0.045 relative where the cell's four radii agree to 25% (99 cells spread more)"
 
 [[table]]
 name = "stripping_helium"
@@ -648,11 +648,11 @@ path = "stripping_helium.rs"
 task = "stripping_helium"
 revision = 0
 inputs_sha256 = "40da3188a6c47a9591d32487becf41cc52a4b002e71e9f734f50543703d94ead"
-body_sha256 = "07df5750b14a3eebb76c02e6d359324ed61817257ab0c58243cc2f70faa77ed3"
-fingerprint = [0.3464733090200039, 2.4326460420632987, 0.5826806772873225, 2.899762712023834, 0.5791207631486106, 3.277018310912176]
-since_generator_version = 24
+body_sha256 = "b17fbe867af2f01139096ed3357d6e9ae15cbfdfce7579940caa7b2fc0049e59"
+fingerprint = [0.3464733090200039, 2.4326460420632987, 0.5826806772873225, 2.899762712023834, 0.5039890930223838, 2.8271634708760005]
+since_generator_version = 26
 provisional = false
-acceptance = "at the centres of 990 cells in ln m, [Fe/H] and the helium excess, the share within 0.0693 of the exact (median 6.5e-4), the core-helium-burning radius within 0.023 relative where the cell's eight radii agree to 25% (220 cells spread more)"
+acceptance = "at the centres of 990 cells in ln m, [Fe/H] and the helium excess, the share within 0.0866 of the exact (median 8.9e-4), the core-helium-burning radius within 0.037 relative where the cell's eight radii agree to 25% (345 cells spread more)"
 
 [[table]]
 name = "substance_albedos"
@@ -700,7 +700,7 @@ body_sha256 = "c356be8135a256dd4e83491211e6eb5d2dd868929792e859437efa23d6d2bf86"
 fingerprint = [42550000.0, 13700000000.0, 0.00024271086255782685, 0.0008023004142646763, 12499416363.886879, 805033612.7064793, 122457088.15469107, 42548568.488513984, 0.0688898199785383, 2.5, 0.1, 3.0, 0.53, 0.3, 0.04, 0.13]
 since_generator_version = 15
 provisional = false
-acceptance = "the yield integrates to 1.000000 of 1.3 × 10⁻³ per M☉ (passes); 0.187 of delays under 0.1 Gyr (a fifth, passes) and 0.617 under 1 Gyr (about 62%, passes); the lightest primary 2.500 M☉ and layer C's largest share 0.0e0 (passes); at Milky Way values 0.462 Type Ia a century (0.42–0.53, ruling 141.4; passes) and the old populations' exploded share of layer D 0.0360–0.0407 (2–4.5%; passes); primary white dwarfs 0.667–1.266 M☉ (Kalirai et al. 2008); the primaries' 17-point quantiles within 0.0155 of the exact mixture's CDF"
+acceptance = "the yield integrates to 1.000000 of 1.3 × 10⁻³ per M☉ (passes); 0.187 of delays under 0.1 Gyr (a fifth, passes) and 0.617 under 1 Gyr (about 62%, passes); the lightest primary 2.500 M☉ and layer C's largest share 0.0e0 (passes); at Milky Way values 0.465 Type Ia a century (0.42–0.53, ruling 141.4; passes) and the old populations' exploded share of layer D 0.0360–0.0407 (2–4.5%; passes); primary white dwarfs 0.667–1.266 M☉ (Kalirai et al. 2008); the primaries' 17-point quantiles within 0.0155 of the exact mixture's CDF"
 
 [[table]]
 name = "wd_cooling"

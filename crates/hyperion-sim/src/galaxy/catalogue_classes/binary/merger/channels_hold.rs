@@ -60,9 +60,13 @@ fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
         let params = GalaxyParams::milky_way_like();
-        Galaxy::from_params_with_rules(Seed::new(SEED), params, GalaxyRules::every_26_hold())
-            .expect("the Milky Way fixture's gas is mostly neutral")
-            .with_full_potential()
+        Galaxy::from_params_with_rules(
+            Seed::new(SEED),
+            params,
+            GalaxyRules::every_26_hold_with_its_retargets(),
+        )
+        .expect("the Milky Way fixture's gas is mostly neutral")
+        .with_full_potential()
     })
 }
 
@@ -102,24 +106,24 @@ fn all_entries() -> impl Iterator<Item = &'static MergerEntry> {
         .flat_map(|(_, cell)| cell.iter().map(CatalogueEntry::value))
 }
 
-/// The version's class keeps the held arm, every version below 26 does, and 26 and every 26 hold
-/// take the engine's channels. The tripwire: the bump to 26 deletes this hold.
+/// The version's class keeps the held arm, every version below 27 does, and 27 and every 27 hold
+/// take the engine's channels. The tripwire: the bump to 27 deletes this hold.
 #[test]
-fn the_merger_class_is_held_only_until_the_26_bump() {
+fn the_merger_class_is_held_only_until_the_27_bump() {
     assert!(
         GENERATOR_VERSION < MERGER_CLASS_VERSION,
-        "the bump to 26 deletes P11.T8.c's channel hold: `MERGER_CLASS_VERSION`, \
+        "the bump to 27 deletes P11.T8.c's channel hold: `MERGER_CLASS_VERSION`, \
          `MergerClassRules` with its `ContactOnly` arm, `GalaxyRules::merger_class`, the scan's \
          match on it and its contact-only path's mark `MergerMark::MassRatio`, the neutron-star \
          remnant's match in `scan::nsm::remnant_mass_under`, and this module's tripwire"
     );
     let at = |v: u32| GalaxyRules::of_version(GeneratorVersion::new(v)).merger_class;
-    for v in [GENERATOR_VERSION.get(), 25] {
+    for v in [GENERATOR_VERSION.get(), 25, 26] {
         assert_eq!(at(v), MergerClassRules::ContactOnly, "version {v}");
     }
-    assert_eq!(at(26), MergerClassRules::Channels);
+    assert_eq!(at(27), MergerClassRules::Channels);
     assert_eq!(
-        GalaxyRules::every_26_hold().merger_class,
+        GalaxyRules::every_27_hold().merger_class,
         MergerClassRules::Channels
     );
 }

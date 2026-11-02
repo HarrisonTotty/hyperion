@@ -23,9 +23,7 @@ use crate::galaxy::global_list::dwarf_core::{DwarfCoreModel, resolve_dwarf_core_
 use crate::galaxy::global_list::members::{
     GlobalMemberRecord, StreamBandShares, resolve_stream_member,
 };
-use crate::galaxy::global_list::{
-    Debris, StreamNumber, StreamShellRules, TubeLookup, in_stream_shell,
-};
+use crate::galaxy::global_list::{Debris, StreamNumber, TubeLookup, in_stream_shell};
 use crate::id::{DwarfCoreMemberId, StreamMemberId, SystemId, SystemIdKind};
 use crate::units::Years;
 
@@ -212,17 +210,12 @@ fn resolve_listed_stream_member(
     let tube = lookup.tube(spec.number());
     let shares = StreamBandShares::of(galaxy, spec);
     let member = resolve_stream_member(galaxy, &tube, &shares, id)?;
-    // From version 26 a member outside its stream's shell, which the list holds, is none
-    // (P10.T9; `global_list`'s "Bounding shells").
-    let admitted = match galaxy.rules().stream_shell {
-        StreamShellRules::Unbounded => true,
-        StreamShellRules::Shell => lookup
-            .global_list()
-            .stream_entry(spec.number())
-            .is_some_and(|entry| {
-                in_stream_shell(galaxy, &entry.shell(), member.record().epoch_position())
-            }),
-    };
+    // A member outside its stream's shell, which the list holds, is none (P10.T9;
+    // `global_list`'s "Bounding shells").
+    let admitted = lookup
+        .global_list()
+        .stream_entry(spec.number())
+        .is_some_and(|entry| in_stream_shell(&entry.shell(), member.record().epoch_position()));
     if admitted {
         Ok(member)
     } else {

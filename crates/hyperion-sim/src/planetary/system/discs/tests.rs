@@ -5,10 +5,7 @@ use hyperion_testkit::lcg::Lcg;
 use super::*;
 use crate::planetary::SystemContext;
 use crate::planetary::fate::FateHost;
-use crate::planetary::hosts::white_dwarfs::{
-    POLLUTED_SHARE, WhiteDwarfDebrisRules, with_white_dwarf_debris,
-};
-use crate::planetary::hosts::young::with_protoplanetary_disc;
+use crate::planetary::hosts::white_dwarfs::POLLUTED_SHARE;
 use crate::planetary::system::tests::{SEED, id};
 use crate::planetary::system::{generate, generate_planets};
 use crate::planetary::testing::synthetic_star;
@@ -31,9 +28,7 @@ fn star(index: u32, mass: f64, age: f64) -> SystemContext {
 /// both, without its later stages, which the disc does not read.
 fn planets_with_disc(ctx: &SystemContext) -> PlanetarySystem {
     let mut system = generate_planets(SEED, ctx);
-    let discs = with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, || {
-        SystemDiscs::find(SEED, ctx, &system)
-    });
+    let discs = { SystemDiscs::find(SEED, ctx, &system) };
     system.discs = discs;
     system
 }
@@ -254,8 +249,15 @@ enum Rank {
 }
 
 fn assert_the_disc_moves_no_other_record(ctx: &SystemContext, expected: Rank) {
-    let held = with_protoplanetary_disc(ProtoplanetaryDiscRules::Held, || generate(SEED, ctx));
-    let with = with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, || generate(SEED, ctx));
+    let with = generate(SEED, ctx);
+    // The same system without its disc body: what the held arm gave to version 25.
+    let held = PlanetarySystem {
+        discs: SystemDiscs {
+            protoplanetary: None,
+            ..with.discs
+        },
+        ..with.clone()
+    };
     assert_eq!(held.protoplanetary_disc(), None);
     let disc = *with.protoplanetary_disc().expect("a disc");
     let mut indices = held.indices();
@@ -354,8 +356,7 @@ fn a_quarter_to_a_half_of_white_dwarfs_with_a_belt_and_a_planet_are_polluted() {
         let mass = 1.2 + 2.8 * lcg.next_f64();
         let cooling = 1.0e9 + 2.0e9 * lcg.next_f64();
         let (ctx, _) = white_dwarf(10_000 + i, mass, cooling);
-        let system =
-            with_white_dwarf_debris(WhiteDwarfDebrisRules::Debris, || generate(SEED, &ctx));
+        let system = generate(SEED, &ctx);
         let wd = system
             .white_dwarf()
             .expect("a single white dwarf is marked");
@@ -402,8 +403,7 @@ fn a_debris_disc_lies_inside_its_white_dwarf_s_roche_limit_from_its_birth() {
         }
         let mass = 1.2 + 2.8 * lcg.next_f64();
         let (ctx, birth) = white_dwarf(index, mass, 2.0e8);
-        let system =
-            with_white_dwarf_debris(WhiteDwarfDebrisRules::Debris, || generate(SEED, &ctx));
+        let system = generate(SEED, &ctx);
         let wd = *system
             .white_dwarf()
             .expect("a single white dwarf is marked");
@@ -455,8 +455,14 @@ fn a_debris_disc_lies_inside_its_white_dwarf_s_roche_limit_from_its_birth() {
             (BodyState::Destroyed { .. }, Section::NotApplicable) => {}
             (state, population) => panic!("{state:?} with {population:?}"),
         }
-        let held = with_white_dwarf_debris(WhiteDwarfDebrisRules::Held, || generate(SEED, &ctx));
-        assert_eq!(held.white_dwarf(), None);
+        // The same system without its white dwarf's marks: what the held arm gave to version 25.
+        let held = PlanetarySystem {
+            discs: SystemDiscs {
+                white_dwarf: None,
+                ..system.discs
+            },
+            ..system.clone()
+        };
         let (a, b) = (
             held.snapshot_at(&ctx, UniverseTime::EPOCH),
             system.snapshot_at(&ctx, UniverseTime::EPOCH),
@@ -495,11 +501,11 @@ fn assert_the_same_twice_and_in_both_queries(
 #[test]
 fn the_disc_bodies_are_the_same_twice_and_in_both_queries() {
     let young = star(30_000, 1.0, 1.0e6);
-    let system = with_protoplanetary_disc(ProtoplanetaryDiscRules::Disc, || {
+    let system = {
         assert_the_same_twice_and_in_both_queries(&young, UniverseTime::EPOCH, || {
             generate(SEED, &young)
         })
-    });
+    };
     let disc = system.protoplanetary_disc().expect("a young star's disc");
     let record = system
         .body_at(&young, disc.index(), UniverseTime::EPOCH)
@@ -514,11 +520,11 @@ fn the_disc_bodies_are_the_same_twice_and_in_both_queries() {
             .is_some()
             .then(|| white_dwarf(index, 1.2 + 2.8 * lcg.next_f64(), 1.0e7).0)
             .filter(|ctx| {
-                with_white_dwarf_debris(WhiteDwarfDebrisRules::Debris, || {
+                {
                     assert_the_same_twice_and_in_both_queries(ctx, UniverseTime::EPOCH, || {
                         generate(SEED, ctx)
                     })
-                })
+                }
                 .white_dwarf()
                 .is_some_and(|wd| wd.debris_disc().is_some())
             })

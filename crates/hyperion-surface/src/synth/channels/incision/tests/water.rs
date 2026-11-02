@@ -199,6 +199,7 @@ fn no_trunk_s_valley_is_cut_below_its_base_level() {
         let mut halves: Vec<TrunkHalf> = (g > 0.0)
             .then_some(TrunkHalf {
                 depth_m: g,
+                end_m: g,
                 floor_m: 0.5 * trunk.bankfull_width().value(),
                 fade,
             })
@@ -220,6 +221,7 @@ fn no_trunk_s_valley_is_cut_below_its_base_level() {
             );
             halves.push(TrunkHalf {
                 depth_m: depth,
+                end_m: depth,
                 floor_m: 0.5 * segment.bankfull_width().value(),
                 fade: UNFADED,
             });

@@ -99,11 +99,11 @@ use super::level_list::ListClass;
 /// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
 /// [`FeatureClassesRules::Unlisted`], the code of version 25 verbatim: no class is registered on a
 /// feature's list and the cells claim nothing. The tests reach the new arm through a galaxy built
-/// under every 26 hold (`GalaxyRules::every_26_hold`). The bump to 26 deletes this hold,
+/// under every 27 hold (`GalaxyRules::every_27_hold`). The bump to 27 deletes this hold,
 /// [`FeatureClassesRules`] with its `Unlisted` arm, `GalaxyRules::feature_classes`, the `match`es
 /// in [`FeatureStars::listing`], [`FeatureStars::claiming`] and the centre's list, and the tripwire
-/// (`the_feature_classes_are_held_only_until_the_26_bump`).
-pub(crate) const FEATURE_CLASSES_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+/// (`the_feature_classes_are_held_only_until_the_27_bump`).
+pub(crate) const FEATURE_CLASSES_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether catalogue features list their recently dead (the hold of [`FEATURE_CLASSES_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

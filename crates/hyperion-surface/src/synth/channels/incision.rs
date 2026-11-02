@@ -178,9 +178,14 @@ pub const VALLEY_WALL_SHARE: f64 = 0.5;
 /// The steepest gradient a valley's wall may have, metres a metre: 0.6, a design cap at the low
 /// end of measured critical hillslope gradients. Godard et al. 2020 (Earth Surf. Dynam. 8, 221,
 /// `doi:10.5194/esurf-8-221-2020`, §4.1) take a critical gradient of 0.6 m m⁻¹, "close to the
-/// natural angle of repose in many granular materials (∼ 30°)"; Grieve, Hurst and Mudd 2016
-/// (Earth Surf. Dynam. 4, 309, `doi:10.5194/esurf-4-309-2016`) find 0.57 at Coweeta and 0.79–0.8 in the Oregon
-/// Coast Range (as this task's science check read them). Low confidence as a valley-wall figure.
+/// natural angle of repose in many granular materials (∼ 30°)"; Grieve, Mudd, Hurst and
+/// Milodowski 2016 (Earth Surf. Dynam. 4, 309, `doi:10.5194/esurf-4-309-2016`) use 0.57 at Coweeta
+/// (Fig. 6, lower than any published before) and fit 0.83 ± 0.01 in the Oregon Coast Range
+/// (Table 1; 0.79 in Grieve, Mudd and Hurst 2016, Earth Surf. Process. Landforms 41, 1039,
+/// `doi:10.1002/esp.3884`). Low confidence as a valley-wall figure. It is a design cap, not the critical gradient itself (Roering, Kirchner
+/// and Dietrich 1999, Water Resour. Res. 35, 853, `doi:10.1029/1998WR900090`, Table 1: `S_c` = 1.25
+/// in basin MR1 of the Oregon Coast Range, 1.27 ± 0.16 over five basins): under R09.T6.i a world
+/// wet now's walls are as steep as it allows, 2.5 G across.
 pub const VALLEY_WALL_GRADIENT: f64 = 0.6;
 
 /// The narrowest channel a level is evaluated for: two band limits, 4 m, below which the band
@@ -521,6 +526,20 @@ struct Moments {
 }
 
 impl Moments {
+    /// A depth linear along the chord from `from` to `to`: ⟨Gⁿ⟩ = (G₁ⁿ⁺¹ − G₀ⁿ⁺¹) ÷ ((n + 1)(G₁ −
+    /// G₀)), in its expanded form, exact where the two are equal (R09.T6.i's tributary profile, a
+    /// linear stand-in for the concave stream-power one, whose ⟨G⟩ it puts low by 2–6% of the
+    /// rise, which [`BENT_TRIBUTARY_VARIANCE_SHARE`] absorbs).
+    #[must_use]
+    fn linear(from: f64, to: f64) -> Self {
+        let (a, b) = (from, to);
+        Self {
+            mean: f64::midpoint(a, b),
+            mean_square: (a * a + a * b + b * b) / 3.0,
+            mean_cube: 0.25 * (a + b) * (a * a + b * b),
+        }
+    }
+
     #[must_use]
     fn of(from: f64, to: f64) -> Self {
         let step = to - from;
@@ -677,6 +696,50 @@ pub fn deepest_level(cell: &SynthesisCell, body: ChannelBody) -> u8 {
     deepest_level_cut(cell, body, CUT_WIDTH.value())
 }
 
+/// The continuous cut of the coarse cell `cell` of `body` under R09.T6.i (its (e)): the level, not
+/// held to a whole one, whose mean cell is the larger of its channel heads' drainage
+/// ([`channel_head_area`] of its tributaries' steepness) and the area whose channel at its own
+/// runoff is [`CUT_WIDTH`] wide ([`super::cut_area_m2`]), L + log₄ of the coarse mean cell over
+/// it, and never above the coarse level L itself; L where the cell carries no tributaries or is a
+/// world dry now's. [`deepest_level`] is about its whole part.
+#[must_use]
+pub(crate) fn cut_level(cell: &SynthesisCell, body: ChannelBody) -> f64 {
+    let first = f64::from(body.level);
+    let Some(steepness) = tributary_steepness_of(cell) else {
+        return first;
+    };
+    if cell.epoch_incision.is_epoch() {
+        return first;
+    }
+    let heads = channel_head_area(steepness).value();
+    let cut = super::cut_area_m2(cell.runoff.metres_per_year(), CUT_WIDTH, body.gravity);
+    let coarse = mean_cell_area(body.radius.value(), body.level);
+    num::max(
+        first,
+        first + 0.5 * math::log2(coarse / num::max(heads, cut)),
+    )
+}
+
+/// The deepest level the closed forms count below the coarse cell `cell` of `body`: the deepest its
+/// continuous cut weights above zero, the first level below [`cut_level`] + 1, at most
+/// [`deepest_possible_level`] (R09.T6.i's (e)).
+#[must_use]
+fn drawn_deepest_level(cell: &SynthesisCell, body: ChannelBody) -> u8 {
+    levels_below(body, cut_level(cell, body) + 1.0)
+}
+
+/// The deepest level below `reach` (a continuous level) of a network of `body`, from its coarse
+/// level, at most [`deepest_possible_level`].
+#[must_use]
+fn levels_below(body: ChannelBody, reach: f64) -> u8 {
+    let deepest = deepest_possible_level(body.radius.value(), body.level);
+    let mut level = body.level;
+    while level < deepest && f64::from(level + 1) < reach {
+        level += 1;
+    }
+    level
+}
+
 /// [`deepest_level`] with channels narrower than `cut_m` metres cut, rather than [`CUT_WIDTH`]:
 /// `f64::INFINITY` cuts every finer level, and 0 ends the network at the channel heads alone.
 #[must_use]
@@ -746,8 +809,19 @@ enum Depth {
     /// A world dry now's trunk's: graded along its second chord to its receiver's
     /// ([`graded_depth_m`]; R09.T6.h).
     Graded { from_m: f64, to_m: f64, exit: f64 },
+    /// A world wet now's trunk's under R09.T6.i: its valley graded along its second chord to its
+    /// receiver's ([`graded_depth_m`]), at least its channel's `floor_m` and at most the level's
+    /// `cap_m`.
+    GradedValley {
+        from_m: f64,
+        to_m: f64,
+        exit: f64,
+        floor_m: f64,
+        cap_m: f64,
+    },
     /// A tributary's: min(max(top − bed(t), `floor_m`), `cap_m`), with the bed `bed_to_m` plus its
-    /// stream-power rise from the join ([`rise`], as [`Segment::bed_at`] computes it).
+    /// stream-power rise from the join scaled by `scale` ([`rise`], as [`Segment::bed_at`] computes
+    /// it; φ under R09.T6.i, 1 below it).
     Tributary {
         top_m: f64,
         bed_to_m: f64,
@@ -756,6 +830,7 @@ enum Depth {
         length_m: f64,
         floor_m: f64,
         cap_m: f64,
+        scale: f64,
     },
 }
 
@@ -766,6 +841,22 @@ impl Depth {
         match *self {
             Self::Constant(depth) => (depth, 0.0),
             Self::Graded { from_m, to_m, exit } => graded_depth_m(from_m, to_m, exit, t),
+            Self::GradedValley {
+                from_m,
+                to_m,
+                exit,
+                floor_m,
+                cap_m,
+            } => {
+                let (valley, d_valley) = graded_depth_m(from_m, to_m, exit, t);
+                if valley <= floor_m {
+                    (floor_m, 0.0)
+                } else if valley >= cap_m {
+                    (cap_m, 0.0)
+                } else {
+                    (valley, d_valley)
+                }
+            }
             Self::Tributary {
                 top_m,
                 bed_to_m,
@@ -774,16 +865,17 @@ impl Depth {
                 length_m,
                 floor_m,
                 cap_m,
+                scale,
             } => {
                 let main_stream = head_m + t * length_m;
-                let below = top_m - (bed_to_m + rise.from(main_stream));
+                let below = top_m - (bed_to_m + scale * rise.from(main_stream));
                 if below <= floor_m {
                     (floor_m, 0.0)
                 } else if below >= cap_m {
                     (cap_m, 0.0)
                 } else {
-                    // The bed falls by S ℓ a unit of t, so the depth below the top grows by it.
-                    (below, rise.slope_at(main_stream) * length_m)
+                    // The bed falls by φ S ℓ a unit of t, so the depth below the top grows by it.
+                    (below, scale * rise.slope_at(main_stream) * length_m)
                 }
             }
         }
@@ -812,36 +904,55 @@ struct Groove {
 #[derive(Debug, Clone, PartialEq)]
 struct BentGroove {
     bend: Arc<Bend>,
-    /// Each half's box, low and high corners, body-fixed, metres.
+    /// Each half's box, low and high corners, body-fixed, metres; a tributary's second is empty.
     boxes: [([f64; 3], [f64; 3]); 2],
     wall: Wall,
+    /// The continuous cut's weight on its depth, 1 but at a tributary's partial level (R09.T6.i).
+    weight: f64,
+    /// Where a sub-chord reads its depth beyond its ends.
+    ends: Ends,
 }
 
-/// How a groove's wall width follows its depth.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Wall {
-    /// T6.b's: the same all along it, metres.
-    Fixed(f64),
-    /// A valley of a short wet epoch's: W = min([`WALL_RUN_PER_DEPTH`] G, `cap_m`), at every point
-    /// ([`EpochValley`]).
-    PerDepth { cap_m: f64 },
+/// Where a bent groove's sub-chord reads its depth for a point beyond its ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ends {
+    /// At its end, its nearest point (R09.T6.h's, a world dry now's): each sub-chord's end cap is
+    /// its end's depth.
+    Nearest,
+    /// At the point's projection on its line, held to the course's ends (R09.T6.i's, a world wet
+    /// now's): where the depth changes quickly along a course, as a tributary's does, a cap at its
+    /// end's depth would stand a scallop above the next sub-chord's floor and walls at every
+    /// vertex; read on its line, a sub-chord's depth beyond its end is its neighbour's there.
+    OnLine,
 }
+
+/// How a bent groove's wall width follows its depth: W = min(`per_depth` G, `cap_m`) at every
+/// point, a valley of a short wet epoch's [`WALL_RUN_PER_DEPTH`] ([`EpochValley`]), or under
+/// R09.T6.i a world wet now's [`WET_WALL_PER_DEPTH`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Wall {
+    /// Metres across a metre of depth.
+    per_depth: f64,
+    /// The widest wall, metres: T6.b's, half the level's mean cell.
+    cap_m: f64,
+}
+
+/// A world wet now's walls under R09.T6.i, in metres across per metre of depth:
+/// [`STEEPEST_WALL`] ÷ [`VALLEY_WALL_GRADIENT`], 2.5, so that every wall's steepest gradient,
+/// 1.5 G ÷ W, is the design cap [`VALLEY_WALL_GRADIENT`] wherever the level's half cell does not
+/// cap it (its (b)).
+const WET_WALL_PER_DEPTH: f64 = STEEPEST_WALL / VALLEY_WALL_GRADIENT;
 
 impl Wall {
     /// The wall's width at a depth `depth` changing at `d_depth` a unit of t, metres, and its
     /// change a unit of t.
     #[must_use]
     fn at(self, depth: f64, d_depth: f64) -> (f64, f64) {
-        match self {
-            Self::Fixed(wall) => (wall, 0.0),
-            Self::PerDepth { cap_m } => {
-                let wall = WALL_RUN_PER_DEPTH * depth;
-                if wall < cap_m {
-                    (wall, WALL_RUN_PER_DEPTH * d_depth)
-                } else {
-                    (cap_m, 0.0)
-                }
-            }
+        let wall = self.per_depth * depth;
+        if wall < self.cap_m {
+            (wall, self.per_depth * d_depth)
+        } else {
+            (self.cap_m, 0.0)
         }
     }
 }
@@ -911,6 +1022,24 @@ fn nearest_of(q: [f64; 3], chord: Chord) -> (f64, f64, [f64; 3], [f64; 3]) {
     (d2, t, gap, along)
 }
 
+/// The parameter along the course of `q`'s projection on `chord`'s line, held to the course's
+/// ends, [0, 1], and its gradient as a function of `q` (zero where it is held).
+#[must_use]
+fn on_line_of(q: [f64; 3], chord: Chord) -> (f64, [f64; 3]) {
+    let Chord { from, to, span } = chord;
+    let ab = [0, 1, 2].map(|k| to[k] - from[k]);
+    let aq = [0, 1, 2].map(|k| q[k] - from[k]);
+    let ab2 = dot(ab, ab);
+    let raw = span.0 + (span.1 - span.0) * (dot(aq, ab) / ab2);
+    let t = num::max(0.0, num::min(raw, 1.0));
+    let rate = if raw > 0.0 && raw < 1.0 {
+        (span.1 - span.0) / ab2
+    } else {
+        0.0
+    };
+    (t, [0, 1, 2].map(|k| rate * ab[k]))
+}
+
 /// A groove's value at a point and its gradient there, as a function of the point (metres a metre).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Value {
@@ -923,6 +1052,107 @@ impl Value {
         value: 0.0,
         gradient: [0.0; 3],
     };
+}
+
+/// What a bent groove's segment gives it ([`Groove::bent`]): its own depth and its deepest, metres,
+/// how its depth runs along it, its wall, its weight and where its sub-chords read their depth.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BentDepth {
+    own_m: f64,
+    deepest_m: f64,
+    depth: Depth,
+    wall: Wall,
+    weight: f64,
+    ends: Ends,
+}
+
+/// [`BentDepth`] of the bent segment `segment` at its level's T6.b wall `wall_m` and cap `cap_m`.
+#[must_use]
+fn bent_depth(segment: &Segment, wall_m: f64, cap_m: f64) -> BentDepth {
+    let floor_depth = segment.depth_m;
+    let wet = |own_m: f64, deepest_m: f64, depth: Depth, weight: f64| BentDepth {
+        own_m,
+        deepest_m,
+        depth,
+        wall: Wall {
+            per_depth: WET_WALL_PER_DEPTH,
+            cap_m: wall_m,
+        },
+        weight,
+        ends: Ends::OnLine,
+    };
+    match segment.kind {
+        Kind::Trunk {
+            valley_m,
+            epoch_wall_m: Some(_),
+            receiver_valley_m,
+            exit,
+            ..
+        } => BentDepth {
+            own_m: valley_m,
+            deepest_m: receiver_valley_m.map_or(valley_m, |to_m| num::max(valley_m, to_m)),
+            depth: receiver_valley_m.map_or(Depth::Constant(valley_m), |to_m| Depth::Graded {
+                from_m: valley_m,
+                to_m,
+                exit,
+            }),
+            wall: Wall {
+                per_depth: WALL_RUN_PER_DEPTH,
+                cap_m: wall_m,
+            },
+            weight: 1.0,
+            ends: Ends::Nearest,
+        },
+        Kind::Trunk {
+            valley_m,
+            epoch_wall_m: None,
+            receiver_valley_m,
+            exit,
+            ..
+        } => {
+            let own = trunk_depth_m(valley_m, floor_depth, cap_m);
+            match receiver_valley_m {
+                Some(to_m) => wet(
+                    own,
+                    num::max(own, trunk_depth_m(to_m, floor_depth, cap_m)),
+                    Depth::GradedValley {
+                        from_m: valley_m,
+                        to_m,
+                        exit,
+                        floor_m: num::min(floor_depth, cap_m),
+                        cap_m,
+                    },
+                    1.0,
+                ),
+                None => wet(own, own, Depth::Constant(own), 1.0),
+            }
+        }
+        Kind::Tributary {
+            steepness,
+            head_m,
+            length_m,
+            top_m,
+            scale,
+            weight,
+            ..
+        } => {
+            let floor = num::min(floor_depth, cap_m);
+            let depth = Depth::Tributary {
+                top_m,
+                bed_to_m: segment.bed_to_m,
+                rise: RiseTo::new(steepness, head_m + length_m),
+                head_m,
+                length_m,
+                floor_m: floor,
+                cap_m,
+                scale,
+            };
+            // Its bed rises from its join to its head, so it is deepest at its join, and its walls
+            // widest there.
+            let deepest = depth.at(1.0).0;
+            wet(deepest, deepest, depth, weight)
+        }
+    }
 }
 
 impl Groove {
@@ -959,6 +1189,7 @@ impl Groove {
                 head_m,
                 length_m,
                 top_m,
+                scale,
                 ..
             } => {
                 let chord = Chord {
@@ -974,6 +1205,7 @@ impl Groove {
                     length_m,
                     floor_m: num::min(floor_depth, cap_m),
                     cap_m,
+                    scale,
                 };
                 ([chord, chord], 1, depth, wall_m)
             }
@@ -983,6 +1215,7 @@ impl Groove {
         let deepest = match depth {
             Depth::Constant(d) => d,
             Depth::Graded { from_m, to_m, .. } => num::max(from_m, to_m),
+            Depth::GradedValley { cap_m, .. } => cap_m,
             Depth::Tributary { floor_m, cap_m, .. } => num::max(floor_m, cap_m),
         };
         if deepest <= 0.0 {
@@ -1012,53 +1245,47 @@ impl Groove {
         })
     }
 
-    /// The groove of the bent trunk `segment`, whose course is `bend`, at its level's T6.b wall
-    /// `wall_m` and cap `cap_m`, or `None` where its own cell's valley is nowhere deeper than zero
-    /// (R09.T6.h): its depth graded along its second chord where it has its receiver's, and on a
-    /// world dry now its wall [`WALL_RUN_PER_DEPTH`] times its depth at every point, at most T6.b's.
+    /// The groove of the bent segment `segment`, whose course is `bend`, at its level's T6.b wall
+    /// `wall_m` and cap `cap_m`, or `None` where it is nowhere deeper than zero: a world dry now's
+    /// trunk's, its depth graded along its second chord where it has its receiver's and its wall
+    /// [`WALL_RUN_PER_DEPTH`] times its depth at every point, at most T6.b's (R09.T6.h); and under
+    /// R09.T6.i a world wet now's trunk's, its valley graded so, and a tributary's, each wall
+    /// [`WET_WALL_PER_DEPTH`] times its depth, at most T6.b's, a tributary's depth weighted by its
+    /// continuous cut.
     #[must_use]
     fn bent(segment: &Segment, bend: &Arc<Bend>, wall_m: f64, cap_m: f64) -> Option<Self> {
-        let Kind::Trunk {
-            valley_m,
-            epoch_wall_m,
-            receiver_valley_m,
-            exit,
-            ..
-        } = segment.kind
-        else {
-            unreachable!("a bent segment is a trunk");
-        };
-        let (own_m, wall) = match epoch_wall_m {
-            None => (
-                trunk_depth_m(valley_m, segment.depth_m, cap_m),
-                Wall::Fixed(wall_m),
-            ),
-            Some(_) => (valley_m, Wall::PerDepth { cap_m: wall_m }),
-        };
-        if own_m <= 0.0 {
+        let BentDepth {
+            own_m,
+            deepest_m: deepest,
+            depth,
+            wall,
+            weight,
+            ends,
+        } = bent_depth(segment, wall_m, cap_m);
+        if own_m <= 0.0 || weight <= 0.0 {
             return None;
         }
-        let (depth, deepest) = match receiver_valley_m {
-            Some(to_m) => (
-                Depth::Graded {
-                    from_m: own_m,
-                    to_m,
-                    exit,
-                },
-                num::max(own_m, to_m),
-            ),
-            None => (Depth::Constant(own_m), own_m),
-        };
         let floor_m = 0.5 * segment.width_m;
-        let first = reach_m(floor_m, wall.at(own_m, 0.0).0);
         let widest = wall.at(deepest, 0.0).0;
-        let boxes = [
-            chords_box(bend.chords(0), first),
-            chords_box(bend.chords(1), reach_m(floor_m, widest)),
-        ];
+        let boxes = if bend.halves() == 2 {
+            [
+                chords_box(bend.chords(0), reach_m(floor_m, wall.at(own_m, 0.0).0)),
+                chords_box(bend.chords(1), reach_m(floor_m, widest)),
+            ]
+        } else {
+            [
+                chords_box(bend.chords(0), reach_m(floor_m, widest)),
+                chords_box(std::iter::empty(), 0.0),
+            ]
+        };
         let low = [0, 1, 2].map(|k| num::min(boxes[0].0[k], boxes[1].0[k]));
         let high = [0, 1, 2].map(|k| num::max(boxes[0].1[k], boxes[1].1[k]));
-        let chords = segment.chords().expect("a trunk has two chords");
+        let chord = Chord {
+            from: segment.from_m,
+            to: segment.to_m,
+            span: (0.0, 1.0),
+        };
+        let chords = segment.chords().unwrap_or([chord, chord]);
         Some(Self {
             chords,
             chord_count: 2,
@@ -1066,6 +1293,8 @@ impl Groove {
                 bend: Arc::clone(bend),
                 boxes,
                 wall,
+                weight,
+                ends,
             }),
             depth,
             floor_m,
@@ -1172,24 +1401,42 @@ impl Groove {
     }
 
     /// A bent groove's depth at `q` (metres), positive, and its gradient there: the deepest of its
-    /// sub-chords' grooves, each its depth G(t) and wall W(t) at its own nearest point, the first
-    /// of equals, so that a depth varying along the course leaves no step across a bend's
-    /// bisector where the nearest sub-chord changes (R09.T6.h).
+    /// sub-chords' grooves, each its depth G(t) and wall W(t) at its own nearest point (on a world
+    /// wet now, at `q`'s projection on its line, [`Ends::OnLine`]), the first of equals, so that a
+    /// depth varying along the course leaves no step across a bend's bisector where the nearest
+    /// sub-chord changes (R09.T6.h).
     #[must_use]
     fn bent_at(&self, bent: &BentGroove, q: [f64; 3]) -> Value {
         let mut deepest: Option<Nearest> = None;
+        // A sub-chord farther than the floor and the widest wall from `q` cuts nothing there.
+        let reach = reach_m(self.floor_m, self.wall_m);
         for half in 0..2 {
             if !in_box(q, &bent.boxes[half]) {
                 continue;
             }
             for chord in bent.bend.chords(half) {
-                let (d2, t, gap, along) = nearest_of(q, chord);
+                let near = (0..3).all(|k| {
+                    q[k] >= num::min(chord.from[k], chord.to[k]) - reach
+                        && q[k] <= num::max(chord.from[k], chord.to[k]) + reach
+                });
+                if !near {
+                    continue;
+                }
+                let (d2, nearest_t, gap, nearest_along) = nearest_of(q, chord);
+                let d = d2.sqrt();
+                // Beyond the widest wall no depth reaches.
+                if d - self.floor_m >= self.wall_m {
+                    continue;
+                }
+                let (t, along) = match bent.ends {
+                    Ends::Nearest => (nearest_t, nearest_along),
+                    Ends::OnLine => on_line_of(q, chord),
+                };
                 let (depth, _) = self.depth.at(t);
                 if depth <= 0.0 {
                     continue;
                 }
                 let (wall, _) = bent.wall.at(depth, 0.0);
-                let d = d2.sqrt();
                 let x = (d - self.floor_m) / wall;
                 if x >= 1.0 {
                     continue;
@@ -1226,12 +1473,14 @@ impl Groove {
         } else {
             [0.0; 3]
         };
-        // x = (d − h) ÷ W(t): its gradient is the across direction ÷ W less x W′ ÷ W along t.
+        // x = (d − h) ÷ W(t): its gradient is the across direction ÷ W less x W′ ÷ W along t; the
+        // continuous cut weights the whole.
+        let w = bent.weight;
         Value {
-            value,
+            value: w * value,
             gradient: [0, 1, 2].map(|k| {
-                f * d_depth * along[k]
-                    + depth * df * (across[k] / wall - x * d_wall / wall * along[k])
+                w * (f * d_depth * along[k]
+                    + depth * df * (across[k] / wall - x * d_wall / wall * along[k]))
             }),
         }
     }
@@ -1409,7 +1658,7 @@ fn mean_grid(cell: PatchKey) -> Vec<Sample> {
 /// The cells that share each of `cell`'s corners, in the order of [`Correction`]'s corners: the
 /// cell, its two edge neighbours there and the cell across the corner, which a cube corner lacks.
 #[must_use]
-fn corner_cells(cell: PatchKey) -> [Vec<PatchKey>; 4] {
+pub(crate) fn corner_cells(cell: PatchKey) -> [Vec<PatchKey>; 4] {
     let across = cell.corner_neighbours();
     let edge = |e: Edge| cell.edge_neighbour(e);
     let corners = [
@@ -1600,12 +1849,7 @@ impl<F: FieldView> Incision<'_, F> {
 
     /// The segment `cell`'s key point heads, through the cache's memo of the network.
     fn segment(&mut self, cell: PatchKey) -> Result<Option<Segment>, ReadCellError> {
-        super::ChannelNetwork {
-            channels: self.channels,
-            field: self.field,
-            memo: super::Memo::Cache(&mut self.cache.network),
-        }
-        .segment(cell)
+        self.network().segment(cell)
     }
 
     /// The deepest evaluated level of the coarse cell `coarse`, and the deepest within two king
@@ -1617,14 +1861,38 @@ impl<F: FieldView> Incision<'_, F> {
         if let Some(&d) = self.cache.deepest.get(&key) {
             return Ok(d);
         }
-        let body = self.channels.body();
-        let own = deepest_level(read(self.field, coarse)?, body);
+        let own = self.deepest_of(coarse)?;
         let mut around = own;
         for cell in two_moves(coarse) {
-            around = around.max(deepest_level(read(self.field, cell)?, body));
+            around = around.max(self.deepest_of(cell)?);
         }
         self.cache.deepest.insert(key, (own, around));
         Ok((own, around))
+    }
+
+    /// The deepest level whose grooves are evaluated below the coarse cell `coarse`: the deepest
+    /// level its continuous cut weights above zero anywhere in it ([`super::Continuity::deepest`],
+    /// its corners'; R09.T6.i), never past the deepest a cell of the body can reach
+    /// ([`deepest_possible_level`]).
+    fn deepest_of(&mut self, coarse: PatchKey) -> Result<u8, ReadCellError> {
+        let body = self.channels.body();
+        let record = read(self.field, coarse)?;
+        let first = self.first();
+        if tributary_steepness_of(record).is_none() || record.epoch_incision.is_epoch() {
+            return Ok(first);
+        }
+        let reach = self.network().continuity(coarse)?.deepest() + 1.0;
+        Ok(levels_below(body, reach))
+    }
+
+    /// The network over the field, through the cache's memo of it.
+    #[must_use]
+    fn network(&mut self) -> super::ChannelNetwork<'_, F> {
+        super::ChannelNetwork {
+            channels: self.channels,
+            field: self.field,
+            memo: super::Memo::Cache(&mut self.cache.network),
+        }
     }
 
     /// The water of the coarse cell `coarse` and of the cells across its edges and corners
@@ -1986,6 +2254,96 @@ impl<F: FieldView> Incision<'_, F> {
     }
 }
 
+/// A coarse cell's channel incision variance as the synthesis realises it and as its closed forms
+/// count it ([`Channels::variance_check`]; feature `testing`): what R09.T6.b's and R09.T6.i's
+/// constants were measured from.
+#[cfg(any(test, feature = "testing"))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct VarianceCheck {
+    /// The whole incision's variance over the cell, square metres.
+    pub whole_m2: f64,
+    /// Each evaluated level's own realised variance, from the coarse level, square metres.
+    pub realised_m2: Vec<(u8, f64)>,
+    /// Each level's closed-form variance, as the synthesis's terms count it (each finer level's
+    /// already its variance share's), square metres.
+    pub closed_m2: Vec<(u8, f64)>,
+    /// The share of the levels' summed variances the whole realises in the closed form.
+    pub whole_share: f64,
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl Channels {
+    /// [`VarianceCheck`] of the coarse cell `coarse` of `field`: its incision sampled on an `n` ×
+    /// `n` grid even in its face coordinates, weighted by area, against the closed forms
+    /// [`drawn_channel_variance`] sums; `None` where `field` lacks a cell those read.
+    ///
+    /// # Errors
+    ///
+    /// [`ReadCellError`] naming the first cell read that `field` does not hold.
+    ///
+    /// # Panics
+    ///
+    /// If `field`'s header is not of the body these channels were made for, `coarse` is not of the
+    /// field's level, or `n` is zero.
+    pub fn variance_check<F: FieldView>(
+        &self,
+        field: &F,
+        coarse: PatchKey,
+        n: u32,
+        cache: &mut SynthCache,
+    ) -> Result<Option<VarianceCheck>, ReadCellError> {
+        self.check_field(field);
+        assert!(n > 0, "a grid has a point");
+        let Some((record, terms)) = synthesised_terms(field, coarse) else {
+            return Ok(None);
+        };
+        let side = f64::from(1_u32 << coarse.level());
+        let (mut sum, mut square, mut weights) = (0.0, 0.0, 0.0);
+        let mut by_level = [(0.0, 0.0); LEVELS];
+        let mut count = 0;
+        let across = f64::from(n);
+        for row in 0..n {
+            for column in 0..n {
+                let s = (f64::from(coarse.i()) + (f64::from(column) + 0.5) / across) / side;
+                let t = (f64::from(coarse.j()) + (f64::from(row) + 0.5) / across) / side;
+                let uv = FaceUv {
+                    face: coarse.face(),
+                    u: st_to_uv(s),
+                    v: st_to_uv(t),
+                };
+                let along = 1.0 + uv.u * uv.u + uv.v * uv.v;
+                // The area element of the warp and the gnomonic face.
+                let weight = warp_rate(s) * warp_rate(t) / (along * along.sqrt());
+                let levels = self
+                    .incision(field, cache)
+                    .levels(unit_dir(face_uv_to_xyz(uv)), MAX_LEVEL)?;
+                let values = levels.as_slice();
+                count = count.max(values.len());
+                let total: f64 = values.iter().map(|sample| sample.value).sum();
+                sum += weight * total;
+                square += weight * total * total;
+                weights += weight;
+                for (level, sample) in by_level.iter_mut().zip(values) {
+                    level.0 += weight * sample.value;
+                    level.1 += weight * sample.value * sample.value;
+                }
+            }
+        }
+        let mean = sum / weights;
+        let first = self.first_level();
+        let realised_m2 = (first..)
+            .zip(&by_level[..count])
+            .map(|(level, (s, s2))| (level, s2 / weights - (s / weights) * (s / weights)))
+            .collect();
+        Ok(Some(VarianceCheck {
+            whole_m2: square / weights - mean * mean,
+            realised_m2,
+            closed_m2: terms.iter().map(|t| (t.level, t.variance)).collect(),
+            whole_share: whole_share(record),
+        }))
+    }
+}
+
 impl Channels {
     /// The channels' incision at the unit direction `dir`, levels [`first_level`](Self::first_level)
     /// to `through` (inclusive, and never past the deepest the cut evaluates about the point): its
@@ -2216,15 +2574,45 @@ pub const TRIBUTARY_VARIANCE_SHARE: f64 = 0.46;
 /// and Mars-like worlds, 0.27 to 1.38 (R09.T6.b's measurement on 32 × 32 grids). Provisional.
 pub const WHOLE_VARIANCE_SHARE: f64 = 0.52;
 
+/// A tributary's mean length under R09.T6.i's rules, in mean cells of its level, from its key point
+/// along its bent course to its join: 0.71, the mean over levels L + 1 to L + 4 below 12 coarse
+/// cells each of the synthetic Earth-like world, the reference Earth and the locked Earth, 0.706,
+/// 0.700 and 0.715 (0.58 to 0.77 by level and world; R09.T6.i's measurement, as
+/// [`MEAN_TRIBUTARY_LENGTH`] was taken): the join moved along its parent by the junction angle
+/// ([`JUNCTION_ANGLE_COT`](super::JUNCTION_ANGLE_COT)) and the bend add about 1 ÷ sin 72° and its
+/// `s_net`.
+pub const MEAN_BENT_TRIBUTARY_LENGTH: f64 = 0.71;
+
+/// A world wet now's bent trunks' mean length over their straight chords', `s_net`, under
+/// R09.T6.i's rules: 1.05, over every dry trunk of the synthetic Earth-like world, the reference
+/// Earth and the locked Earth, 1.0471, 1.0539 and 1.0539 (R09.T6.i's measurement), the same bend as
+/// a world dry now's ([`EPOCH_TRUNK_SINUOSITY`]).
+pub const WET_TRUNK_SINUOSITY: f64 = 1.05;
+
+/// [`TRIBUTARY_VARIANCE_SHARE`] under R09.T6.i's rules, 0.82: the median over the three wet worlds'
+/// tributary levels, 204 of them below 20 coarse cells each on 32 × 32 grids, of the realised
+/// variance over the closed form's (0.77, 0.68 and 1.06 by world, p10 0.12 and p90 1.85 pooled;
+/// R09.T6.i's measurement, as R09.T6.b's was, the coarse passes booked under it). Nearer 1 than
+/// T6.b's: the accordant grooves cut below their parents' walls where T6.b's, half a cell wide,
+/// buried them. Provisional.
+pub const BENT_TRIBUTARY_VARIANCE_SHARE: f64 = 0.82;
+
+/// [`WHOLE_VARIANCE_SHARE`] under R09.T6.i's rules, 0.91: the median over 58 coarse cells of the
+/// three wet worlds of the whole incision's realised variance over the sum of its levels' (0.91,
+/// 0.91 and 0.93 by world; R09.T6.i's measurement). The levels anticorrelate far less than T6.b's,
+/// their walls 2.5 G across rather than half a cell, so that a finer level's grooves seldom lie
+/// inside a coarser one's. Provisional.
+pub const BENT_WHOLE_VARIANCE_SHARE: f64 = 0.91;
+
 /// The share of the sum of a coarse cell's levels' variances that their summed incision realises:
-/// [`WHOLE_VARIANCE_SHARE`] where the levels anticorrelate, and 1 on a world dry now's cell, whose
-/// one level, its epoch's trunk, has no other to anticorrelate with (R09.T6.c).
+/// [`BENT_WHOLE_VARIANCE_SHARE`] where the levels anticorrelate (R09.T6.i), and 1 on a world dry
+/// now's cell, whose one level, its epoch's trunk, has no other to anticorrelate with (R09.T6.c).
 #[must_use]
 fn whole_share(cell: &SynthesisCell) -> f64 {
     if cell.epoch_incision.is_epoch() {
         1.0
     } else {
-        WHOLE_VARIANCE_SHARE
+        BENT_WHOLE_VARIANCE_SHARE
     }
 }
 
@@ -2270,6 +2658,9 @@ enum TrunkValley {
         /// How much the cell's own trunk's valley is held, metres: what its tributaries' depths
         /// below their inherited top lose.
         held_by_m: f64,
+        /// The cell's own trunk's groove depth G, metres, zero where it heads none: the depth at
+        /// which its first level of tributaries joins it under R09.T6.i's rules.
+        own_m: f64,
     },
     /// A world dry now's, as the synthesis cuts it (R09.T6.h): the cell's own epoch valley, its
     /// second chord graded to its receiver's valley depth, metres.
@@ -2283,6 +2674,9 @@ enum TrunkValley {
 struct TrunkHalf {
     /// Its groove's depth G at its axis, metres ([`trunk_depth_m`]).
     depth_m: f64,
+    /// The depth its groove grades to along it, metres: `depth_m` but for a donor's half under
+    /// R09.T6.i's rules, graded to the cell's own trunk's valley (its (d)).
+    end_m: f64,
     /// Half its channel's bankfull width, metres.
     floor_m: f64,
     /// The fade along it: none, or [`INTO_WATER_FADE`] for the cell's own trunk into water.
@@ -2321,7 +2715,7 @@ fn level_terms(cell: &SynthesisCell, body: ChannelBody) -> Vec<LevelTerm> {
     level_terms_to(
         cell,
         body,
-        deepest_level(cell, body),
+        drawn_deepest_level(cell, body),
         &TrunkValley::FromTheCell,
     )
 }
@@ -2367,7 +2761,7 @@ fn drawn_terms<'a>(
     if record.is_under_water() {
         return Some((record, Vec::new()));
     }
-    let last = deepest_level(record, body);
+    let last = drawn_deepest_level(record, body);
     if record.epoch_incision.is_epoch() {
         // Its trunk's depth grades to its receiver's valley (R09.T6.h).
         let receiver_m = match record.flow.edge() {
@@ -2382,6 +2776,10 @@ fn drawn_terms<'a>(
     let cap = groove_cap_m(body.radius.value(), body.level);
     let mut halves = Vec::new();
     let mut held_by_m = 0.0;
+    // The valley a donor's trunk grades to under R09.T6.i's rules: the cell's own, or none where it
+    // heads no trunk (its (d)).
+    let mut own_valley_m = 0.0;
+    let mut own_m = 0.0;
     if let Some(edge) = record.flow.edge() {
         let receiver = cells(key.edge_neighbour(edge))?;
         let valley = trunk_valley_m(record, receiver, sea_level, body);
@@ -2393,8 +2791,16 @@ fn drawn_terms<'a>(
         } else {
             UNFADED
         };
-        halves.extend(trunk_half(record, valley, cap, body, fade));
+        let own = trunk_half(record, valley, Grade::Level, cap, body, fade);
+        own_m = own.map_or(0.0, |half| half.depth_m);
+        halves.extend(own);
+        if record.catchment_runoff != crate::field::LogRunoff::NONE {
+            own_valley_m = valley;
+        }
     }
+    let donors_grade = Grade::To {
+        valley_m: own_valley_m,
+    };
     // A cell no water drains through, on a field never routed, has no donor to read.
     let donors: &[Edge] = if record.drainage == crate::field::LogArea::ZERO {
         &[]
@@ -2411,7 +2817,7 @@ fn drawn_terms<'a>(
             continue;
         }
         let valley = trunk_valley_m(donor, record, sea_level, body);
-        halves.extend(trunk_half(donor, valley, cap, body, UNFADED));
+        halves.extend(trunk_half(donor, valley, donors_grade, cap, body, UNFADED));
     }
     Some((
         record,
@@ -2419,18 +2825,37 @@ fn drawn_terms<'a>(
             record,
             body,
             last,
-            &TrunkValley::Drawn { halves, held_by_m },
+            &TrunkValley::Drawn {
+                halves,
+                held_by_m,
+                own_m,
+            },
         ),
     ))
 }
 
+/// How a trunk's half runs along it in a cell's closed forms.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Grade {
+    /// At its own valley's depth all along it.
+    Level,
+    /// Graded by the smoothstep to the valley `valley_m` deep (metres): a donor's half under
+    /// R09.T6.i's rules, into the cell's own valley (its (d)).
+    To {
+        /// The depth of the valley it grades to, metres.
+        valley_m: f64,
+    },
+}
+
 /// The half in a cell of the steady-state trunk of the dry coarse cell `cell`, whose valley is
-/// `valley_m` deep, on a body of `body` whose trunks' grooves are capped at `cap_m`, faded by
-/// `fade`; `None` where it cuts nothing, its catchment shedding no runoff.
+/// `valley_m` deep and runs along it as `grade` says, on a body of `body` whose trunks' grooves are
+/// capped at `cap_m`, faded by `fade`; `None` where it cuts nothing, its catchment shedding no
+/// runoff.
 #[must_use]
 fn trunk_half(
     cell: &SynthesisCell,
     valley_m: f64,
+    grade: Grade,
     cap_m: f64,
     body: ChannelBody,
     fade: Fade,
@@ -2443,6 +2868,10 @@ fn trunk_half(
     let g = trunk_depth_m(valley_m, depth, cap_m);
     (g > 0.0).then_some(TrunkHalf {
         depth_m: g,
+        end_m: match grade {
+            Grade::Level => g,
+            Grade::To { valley_m: to_m } => trunk_depth_m(to_m, depth, cap_m),
+        },
         floor_m: 0.5 * width,
         fade,
     })
@@ -2471,6 +2900,61 @@ fn trunk_term(level: u8, halves: &[TrunkHalf], cell_m: f64, wall_m: f64) -> Leve
         level,
         variance: num::max(square - mean * mean, 0.0),
         slope2,
+    }
+}
+
+/// The trunk level's closed-form statistics of `halves` under R09.T6.i's rules, each
+/// [`MEAN_TRUNK_LENGTH`] × [`WET_TRUNK_SINUOSITY`] ÷ 2 mean cells of bent groove in a cell of
+/// `cell_m` mean width, whose walls are 2.5 G across ([`WET_WALL_PER_DEPTH`]; its (b)) and whose
+/// depth grades from its `depth_m` to its `end_m` by the smoothstep ([`Moments`]; its (d)): with
+/// W = aG each side, ∫ g = 2h⟨G⟩ + a⟨G²⟩, ∫ g² = 2h⟨G²⟩ + 26a⟨G³⟩ ÷ 35 and the slope's mean square
+/// 1.2⟨G⟩ ÷ a, each times its fade's mean or mean square, summed in their order. Every G is at
+/// most the trunk's cap, where 2.5 G meets the half cell, so no wall is capped.
+#[must_use]
+fn wet_trunk_term(level: u8, halves: &[TrunkHalf], cell_m: f64) -> LevelTerm {
+    let density = 0.5 * MEAN_TRUNK_LENGTH * WET_TRUNK_SINUOSITY / cell_m;
+    let (mut mean, mut square, mut slope2) = (0.0, 0.0, 0.0);
+    for half in halves {
+        let m = Moments::of(half.depth_m, half.end_m);
+        let h = half.floor_m;
+        let Fade {
+            mean: fade,
+            mean_square: fade2,
+        } = half.fade;
+        let across = wet_across(h, m);
+        mean += fade * density * across.mean;
+        square += fade2 * density * across.square;
+        slope2 += fade2 * density * across.slope2;
+    }
+    LevelTerm {
+        level,
+        variance: num::max(square - mean * mean, 0.0),
+        slope2,
+    }
+}
+
+/// A wet-now groove's integrals across it, both sides, averaged along it, under R09.T6.i's rules:
+/// its walls W = aG ([`WET_WALL_PER_DEPTH`]), its floor `h` either side of the axis and its depth's
+/// moments `m` along it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Across {
+    /// ⟨∫ g⟩ = 2h⟨G⟩ + a⟨G²⟩, square metres.
+    mean: f64,
+    /// ⟨∫ g²⟩ = 2h⟨G²⟩ + 26a⟨G³⟩ ÷ 35, cubic metres.
+    square: f64,
+    /// ⟨∫ g′²⟩ ÷ 2, the slope's mean square along a random direction, 1.2⟨G⟩ ÷ a, metres.
+    slope2: f64,
+}
+
+/// [`Across`] of a groove of floor `h` and depth moments `m`: [`level_term`]'s integrals with
+/// W = aG, polynomials in G.
+#[must_use]
+fn wet_across(h: f64, m: Moments) -> Across {
+    let a = WET_WALL_PER_DEPTH;
+    Across {
+        mean: 2.0 * h * m.mean + a * m.mean_square,
+        square: 2.0 * h * m.mean_square + 26.0 * a * m.mean_cube / 35.0,
+        slope2: 1.2 * m.mean / a,
     }
 }
 
@@ -2530,6 +3014,9 @@ fn level_terms_to(
     valley: &TrunkValley,
 ) -> Vec<LevelTerm> {
     body.check();
+    if !cell.epoch_incision.is_epoch() {
+        return bent_level_terms_to(cell, body, last, valley);
+    }
     let (r, level) = (body.radius.value(), body.level);
     let mut out = Vec::new();
     let wall = VALLEY_WALL_SHARE * mean_cell_width(r, level);
@@ -2586,7 +3073,9 @@ fn level_terms_to(
             }
             0.0
         }
-        TrunkValley::Drawn { halves, held_by_m } => {
+        TrunkValley::Drawn {
+            halves, held_by_m, ..
+        } => {
             if !halves.is_empty() {
                 out.push(trunk_term(level, halves, mean_cell_width(r, level), wall));
             }
@@ -2628,6 +3117,94 @@ fn level_terms_to(
             slope2: TRIBUTARY_VARIANCE_SHARE * term.slope2,
             ..term
         });
+    }
+    out
+}
+
+/// [`level_terms_to`] under R09.T6.i's rules on a world wet now: the trunk level's bent grooves,
+/// their walls 2.5 G and the donors' halves graded to the cell's own valley ([`wet_trunk_term`]);
+/// and each tributary level's grooves along their accordant profile, from the depth at their join,
+/// the parent level's mean G (the trunk's own at L + 1), down to their heads' relief, the rise from
+/// the cell's channel heads to the level's main stream (or their own rise less, where that is the
+/// less: φ = 1), each held to the channel's depth and the level's cap, with ⟨Gⁿ⟩ of a linear
+/// profile ([`Moments::linear`]) and walls 2.5 G ([`wet_across`]); [`MEAN_BENT_TRIBUTARY_LENGTH`]
+/// mean cells of groove each, weighted by the continuous cut, clamp(ℓ − k + 1, 0, 1) of the cell's
+/// own [`cut_level`] ℓ (its (e)), and [`BENT_TRIBUTARY_VARIANCE_SHARE`] of their variance realised.
+#[must_use]
+fn bent_level_terms_to(
+    cell: &SynthesisCell,
+    body: ChannelBody,
+    last: u8,
+    valley: &TrunkValley,
+) -> Vec<LevelTerm> {
+    let (r, level) = (body.radius.value(), body.level);
+    let cell_m = mean_cell_width(r, level);
+    let mut out = Vec::new();
+    let tributaries = tributary_steepness_of(cell);
+    // The trunk level, and the depth its first tributaries join it at.
+    let trunk_m = match valley {
+        TrunkValley::FromTheCell => {
+            if cell.flow.edge().is_none() {
+                return out;
+            }
+            let (_, width, depth) = channel_size(
+                cell.catchment_runoff.metres_per_year(),
+                cell.drainage.area(),
+                body.gravity,
+            );
+            let valley = tributaries.map_or(0.0, |k| valley_depth(k, body.radius, level).value());
+            let g = trunk_depth_m(valley, depth, groove_cap_m(r, level));
+            if g > 0.0 {
+                let half = TrunkHalf {
+                    depth_m: g,
+                    end_m: g,
+                    floor_m: 0.5 * width,
+                    fade: UNFADED,
+                };
+                out.push(wet_trunk_term(level, &[half, half], cell_m));
+            }
+            g
+        }
+        TrunkValley::Drawn { halves, own_m, .. } => {
+            if !halves.is_empty() {
+                out.push(wet_trunk_term(level, halves, cell_m));
+            }
+            if cell.flow.edge().is_none() {
+                return out;
+            }
+            *own_m
+        }
+        TrunkValley::Epoch { .. } => unreachable!("a world dry now's cell takes R09.T6.h's forms"),
+    };
+    let Some(steepness) = tributaries else {
+        return out;
+    };
+    let runoff = cell.runoff.metres_per_year();
+    let cut = cut_level(cell, body);
+    let mut join_m = trunk_m;
+    for k in level + 1..=last.min(MAX_LEVEL) {
+        let cell_width = mean_cell_width(r, k);
+        let cap = groove_cap_m(r, k);
+        let length = MEAN_BENT_TRIBUTARY_LENGTH * cell_width;
+        let head = head_length(body.radius, k).value();
+        let relief = super::head_relief_m(steepness, head);
+        let area = super::hack_area(Metres::new(head + length));
+        let (_, width, depth) = channel_size(runoff, area, body.gravity);
+        let kept = |g: f64| num::min(num::max(g, depth), cap);
+        let at_head = num::min(relief, join_m - rise(steepness, head, head + length));
+        let profile = Moments::linear(kept(at_head), kept(join_m));
+        let weight = super::cut_weight(cut, k);
+        let density = TRIBUTARY_SHARE * length / (cell_width * cell_width);
+        let across = wet_across(0.5 * width, profile);
+        let mean = weight * density * across.mean;
+        let square = weight * weight * density * across.square;
+        let slope2 = weight * weight * density * across.slope2;
+        out.push(LevelTerm {
+            level: k,
+            variance: BENT_TRIBUTARY_VARIANCE_SHARE * num::max(square - mean * mean, 0.0),
+            slope2: BENT_TRIBUTARY_VARIANCE_SHARE * slope2,
+        });
+        join_m = profile.mean;
     }
     out
 }

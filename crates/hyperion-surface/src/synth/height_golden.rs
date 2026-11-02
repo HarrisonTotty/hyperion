@@ -1742,9 +1742,10 @@ fn the_playas_heights_are_independent_of_the_cache_and_the_order() {
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod native_only {
     /// The height goldens: two of each of the six worlds, four of all of them, the Earth-like
-    /// world's playas, and the Mars-like world's bent trunks and its graded forms (the latter
-    /// written by the channels' own tests).
-    const HEIGHT_GOLDENS: usize = 19;
+    /// world's playas, the Mars-like world's bent trunks and its graded forms, and the Earth-like
+    /// world's tributaries under R09.T6.i's rules (the last two written by the channels' own
+    /// tests).
+    const HEIGHT_GOLDENS: usize = 20;
 
     /// Every golden file under `tests/golden/height/` carries `GENERATOR_VERSION`, not R05's
     /// `TEST_PLANET_VERSION`, which heads the files directly under `tests/golden/`.

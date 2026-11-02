@@ -105,7 +105,7 @@ fn plan_03_s_layers_a_to_c_are_unchanged_and_d_and_e_move() {
     let drawn_displaced = Galaxy::from_params_with_rules(
         drawn_seed,
         GalaxyParams::from_seed(drawn_seed, MassFunctionKind::default()),
-        GalaxyRules::every_26_hold(),
+        GalaxyRules::every_26_hold_with_its_retargets(),
     )
     .expect("the drawn galaxy builds its displaced classes");
     let (mut a, mut b) = (Vec::new(), Vec::new());

@@ -610,7 +610,8 @@ fn a_key_point_next_to_a_face_edge_gives_the_same_segments_from_either_face() {
 
 #[test]
 fn the_network_does_not_depend_on_the_order_it_is_built_in() {
-    // The epoch Mars-like world's trunks are its epoch's valleys (R09.T6.c).
+    // The epoch Mars-like world's trunks are its epoch's valleys (R09.T6.c), and the Earth-like
+    // world's tributaries read their continuity, bend and join at an angle (R09.T6.i).
     for field in [earth(), world(SyntheticWorld::MarsLike)] {
         let channels = Channels::new(field.header(), SEED);
         let coarse = channelled(field, 3);
@@ -681,7 +682,7 @@ fn the_same_seed_draws_the_same_network_and_another_seed_another() {
             once.network(field).key_point(c),
             other.network(field).key_point(c)
         );
-        // A world dry now's bend, drawn on its own tag, moves with the seed too (R09.T6.h).
+        // A bend, drawn on its own tag, moves with the seed too (R09.T6.h, R09.T6.i).
         let bent = once.network(field).segment(c).unwrap();
         if let Some(bent) = bent.as_ref().and_then(Segment::bend_m) {
             let elsewhere = other.network(field).segment(c).unwrap().unwrap();
@@ -767,17 +768,23 @@ fn king_distances(cell: PatchKey, radius: u8) -> std::collections::BTreeMap<Patc
     distances
 }
 
-/// The farthest king moves from a coarse cell that its segments' reads reach, to L + 3.
+/// The farthest king moves from a coarse cell that R09.T6.h's segments' reads reached, to L + 3.
 const READ_RADIUS: u8 = 3;
 
 /// The farthest king moves from a coarse cell of a world dry now that its trunk's reads reach: its
 /// receiver's, and for its bend its edge neighbours', its largest inflow among them (R09.T6.h).
 const BENT_READ_RADIUS: u8 = 1;
 
+/// The farthest king moves from a coarse cell of a world wet now that its segments' reads reach, to
+/// L + 3: one further than [`READ_RADIUS`], each trunk's valley grading to its receiver's, which
+/// reads the receiver's own receiver (R09.T6.i's (d)).
+const TRIBUTARIES_READ_RADIUS: u8 = READ_RADIUS + 1;
+
 #[test]
-fn the_segments_below_a_coarse_cell_read_within_three_king_moves_of_it() {
-    let mut farthest = 0;
+fn the_segments_below_a_coarse_cell_read_within_four_king_moves_of_it() {
+    // Four on a world wet now, a trunk's grade reading its receiver's receiver (R09.T6.i).
     let mut bent_farthest = 0;
+    let mut tributaries_farthest = 0;
     for field in [earth(), mars(), world(SyntheticWorld::MarsLike)] {
         let channels = Channels::new(field.header(), SEED);
         for c in channelled(field, 8) {
@@ -800,7 +807,7 @@ fn the_segments_below_a_coarse_cell_read_within_three_king_moves_of_it() {
                 if bent {
                     bent_farthest = bent_farthest.max(d);
                 } else {
-                    farthest = farthest.max(d);
+                    tributaries_farthest = tributaries_farthest.max(d);
                 }
             }
             // Without the coarse cell itself, the first tributary names it.
@@ -829,6 +836,6 @@ fn the_segments_below_a_coarse_cell_read_within_three_king_moves_of_it() {
             });
         }
     }
-    assert_eq!(farthest, READ_RADIUS);
     assert_eq!(bent_farthest, BENT_READ_RADIUS);
+    assert_eq!(tributaries_farthest, TRIBUTARIES_READ_RADIUS);
 }

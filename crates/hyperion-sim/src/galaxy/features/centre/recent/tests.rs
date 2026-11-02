@@ -23,11 +23,11 @@ fn milky_way(rules: GalaxyRules) -> Galaxy {
     Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules).unwrap()
 }
 
-/// The Milky Way under every 26 hold (`GalaxyRules::every_26_hold`): the classes listed and the
-/// cells' claim.
+/// The Milky Way under every 26 hold with its retargets
+/// (`GalaxyRules::every_26_hold_with_its_retargets`): the classes listed and the cells' claim.
 fn listed() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_26_hold()))
+    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_26_hold_with_its_retargets()))
 }
 
 /// The same galaxy under the held arm of P09.T36's hold.
@@ -36,7 +36,7 @@ fn held() -> &'static Galaxy {
     GALAXY.get_or_init(|| {
         milky_way(GalaxyRules {
             feature_classes: FeatureClassesRules::Unlisted,
-            ..GalaxyRules::every_26_hold()
+            ..GalaxyRules::every_26_hold_with_its_retargets()
         })
     })
 }

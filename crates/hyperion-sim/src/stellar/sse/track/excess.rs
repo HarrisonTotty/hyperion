@@ -16,12 +16,10 @@
 //! step of it, so the stars the grid places, all of ΔY = 0, are bit-identical whatever the table
 //! holds. The committed table is the identity (P06.T17); plan 15's P15.T7.b fits it.
 //!
-//! The fitted table, `tables::helium_26`, is held until version 26 ([`HELIUM_VERSION`], the
-//! stellar rules' `helium` field): a track takes the table its options' rules choose, through
-//! [`HeliumTable::of`], and the fitted arm holds the branch's shift at the envelope mass its fit
-//! reached and floors it at zero ([`HeliumHook::horizontal_branch`]; decision-p15-t7b-leans §8).
+//! Every track takes P15.T7.b's fitted table, `tables::helium_26`, through [`HeliumTable::of`]
+//! (from version 26), which holds the branch's shift at the envelope mass its fit reached and
+//! floors it at zero ([`HeliumHook::horizontal_branch`]; decision-p15-t7b-leans §8).
 
-use crate::GeneratorVersion;
 use crate::math;
 use crate::stellar::Composition;
 use crate::stellar::rules::StellarRules;
@@ -30,30 +28,6 @@ use crate::tables::{helium, helium_26};
 #[cfg(any(test, feature = "testing"))]
 use crate::units::HeliumExcess;
 use crate::units::{SolarMasses, SolarRadii};
-
-/// The generator version whose stellar rules take the fitted helium table, `tables::helium_26`
-/// (plan 15, P15.T7.b's swap; decision-p15-t7b-leans L1–L4 and §8): every member with a helium
-/// excess, the second populations of globular clusters (plan 09), moves; no star of ΔY = 0 does.
-///
-/// Below it every track takes the held arm, [`HeliumRules::Identity`], P06.T17's identity read
-/// through the code of version 24 verbatim, so every generated value keeps its bits; the tests
-/// reach the fitted arm through `StellarRules::every_26_hold()`. The bump to 26 deletes this hold:
-/// [`HeliumRules`] with its `Identity` arm, the stellar rules' `helium` field, the table's
-/// `Option` bound and its tripwire (`the_helium_table_is_held_only_until_the_26_bump`), and
-/// moves the fit into `tables::helium`.
-pub(crate) const HELIUM_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Which helium-excess table the tracks read (the stellar rules' `helium` field, the hold of
-/// [`HELIUM_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum HeliumRules {
-    /// Version 25's and before: P06.T17's identity, `tables::helium`, every coefficient zero,
-    /// with the branch's shift linear in the envelope mass and unbounded.
-    Identity,
-    /// Version 26's: P15.T7.b's fit to `BaSTI`'s helium-enhanced models, `tables::helium_26`, its
-    /// branch's shift held at `HB_ENVELOPE_MAX` and floored at zero.
-    Fitted,
-}
 
 /// A helium-excess table in [`tables::helium`](crate::tables::helium)'s shape.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -72,7 +46,9 @@ pub(crate) struct HeliumTable {
 }
 
 impl HeliumTable {
-    /// The committed table, [`tables::helium`](crate::tables::helium): P06.T17's identity.
+    /// The committed table, [`tables::helium`](crate::tables::helium): P06.T17's identity, which
+    /// the tests read beside the fitted one.
+    #[cfg(test)]
     pub(crate) const COMMITTED: Self = Self {
         log_z_nodes: helium::LOG_Z_NODES,
         lifetime_slope: helium::LIFETIME_SLOPE,
@@ -80,8 +56,8 @@ impl HeliumTable {
         hb_envelope_max: None,
     };
 
-    /// P15.T7.b's fitted table, [`tables::helium_26`](crate::tables::helium_26), held until
-    /// [`HELIUM_VERSION`].
+    /// P15.T7.b's fitted table, [`tables::helium_26`](crate::tables::helium_26), which every
+    /// track reads.
     pub(crate) const FITTED: Self = Self {
         log_z_nodes: helium_26::LOG_Z_NODES,
         lifetime_slope: helium_26::LIFETIME_SLOPE,
@@ -89,18 +65,13 @@ impl HeliumTable {
         hb_envelope_max: Some(helium_26::HB_ENVELOPE_MAX),
     };
 
-    /// The table the stellar stage's `rules` choose: the one `match` on their
-    /// [`helium`](StellarRules::helium) field.
-    ///
-    /// Every track reads its table here, from the rules its options carry
-    /// (`TrackOptions::rules`), as does `turn_off_mass` under the version's. At the version's
-    /// rules it is [`COMMITTED`](Self::COMMITTED).
+    /// The table the stellar stage's rules read: the fitted one, [`FITTED`](Self::FITTED), at
+    /// every version. Every track reads its table here, from the rules its options carry
+    /// (`TrackOptions::rules`), as does `turn_off_mass` under the version's: the one choke point
+    /// a later hold of the table would turn on.
     #[must_use]
-    pub(crate) const fn of(rules: StellarRules) -> Self {
-        match rules.helium {
-            HeliumRules::Identity => Self::COMMITTED,
-            HeliumRules::Fitted => Self::FITTED,
-        }
+    pub(crate) const fn of(_rules: StellarRules) -> Self {
+        Self::FITTED
     }
 }
 
@@ -405,16 +376,11 @@ mod tests {
         assert!(branch_shift(shift, None, 10.0, 0.18) < -3.0);
     }
 
-    /// The choke point: the version's rules read the committed identity, unbounded, and every 26
-    /// hold the fitted table, with plan 06's nodes bit for bit, c₂ zero at every node and its bound.
+    /// The choke point: the version's rules read the fitted table, with plan 06's nodes bit for
+    /// bit, c₂ zero at every node and its bound.
     #[test]
-    fn the_rules_choose_the_table() {
-        assert_eq!(
-            HeliumTable::of(StellarRules::of_version(GENERATOR_VERSION)),
-            HeliumTable::COMMITTED
-        );
-        assert_eq!(HeliumTable::COMMITTED.hb_envelope_max, None);
-        let fitted = HeliumTable::of(StellarRules::every_26_hold());
+    fn the_rules_read_the_fitted_table() {
+        let fitted = HeliumTable::of(StellarRules::of_version(GENERATOR_VERSION));
         assert_eq!(fitted, HeliumTable::FITTED);
         for (f, c) in fitted.log_z_nodes.iter().zip(helium::LOG_Z_NODES) {
             assert_same_bits(*f, c);
@@ -423,5 +389,40 @@ mod tests {
             assert_same_bits(row[2], 0.0);
         }
         assert_eq!(fitted.hb_envelope_max, Some(helium_26::HB_ENVELOPE_MAX));
+    }
+
+    /// The fitted table's values, pinned bit for bit (P15.T7.b): a 0.8 M☉ star of \[Fe/H\] −1.5
+    /// and ΔY = 0.1 dies at 7.42 Gyr, and is on a blue horizontal branch, near 8,600 K, at the
+    /// first 10 Myr step past 1 Gyr that finds it burning helium in its core. A later change that
+    /// moves them re-pins them here by name.
+    #[test]
+    fn the_fitted_table_s_values_are_pinned() {
+        use crate::stellar::Phase;
+        use crate::stellar::draws::StarDraws;
+        use crate::stellar::sse::{Track, TrackOptions};
+        use crate::units::Years;
+        let rich = Composition::from_fe_h(Dex::new(-1.5), HeliumExcess::new(0.1));
+        let track = Track::full_with(
+            SolarMasses::new(0.8),
+            &rich,
+            &StarDraws::median(),
+            TrackOptions::default(),
+        );
+        assert_same_bits(
+            track.lifetime().expect("a full track dies").value(),
+            7_419_064_629.866_532,
+        );
+        let age = (0..4000)
+            .map(|i| 1e9 + 1e7 * f64::from(i))
+            .find(|&a| track.state_at(Years::new(a)).phase() == Phase::CoreHeliumBurning)
+            .expect("a horizontal branch");
+        assert_same_bits(age, 7.31e9);
+        assert_same_bits(
+            track
+                .state_at(Years::new(age))
+                .effective_temperature()
+                .value(),
+            8_632.309_939_944_349,
+        );
     }
 }

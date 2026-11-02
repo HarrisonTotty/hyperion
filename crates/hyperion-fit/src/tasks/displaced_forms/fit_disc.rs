@@ -6,9 +6,15 @@
 //! Nelder–Mead from a fixed start ([`nelder_mead`](super::nelder_mead)). The scratch fits behind
 //! the brainstorm ran to unconstrained directions where the spheroid carried little weight, so:
 //!
-//! - the parameters are boxed ([`BOXES`]): γ to [2, 8], a to [0.2, 12] `R_d`, q to [0.02, 1], β
-//!   to [0.8, 3], `r_flare` to [1, 50] `R_d`, and, where the plan gives no box, `h_r` to [0.05,
-//!   50] `R_d` and `h_0` to [10⁻⁴, 20] `R_d`;
+//! - the parameters are boxed ([`BOXES`]): γ to [2, 12], a to [0.2, 12] `R_d`, q to [0.02, 1], β
+//!   to [0.5, 6], `r_flare` to [1, 50] `R_d`, and, where the plan gives no box, `h_r` to [0.05,
+//!   50] `R_d`, `h_0` to [10⁻⁴, 20] `R_d` and the central hole to [10⁻³, 3] `R_d` (P15.T6.c's
+//!   fix, research p15-t6-forms: the remnants keep the thin disc's holed birth profile, which a
+//!   plain exponential misplaces by 0.08, and the first-excursion and phase-mixed classes press
+//!   β at both of the plan's ends and γ at 8);
+//! - two ends are limits, not edges, and are not counted as a parameter on its box's edge: the
+//!   flare's upper end, a layer that does not flare, and the hole's lower end, which the table
+//!   writes as no hole ([`NO_HOLE`]);
 //! - a spheroid fitted at under [`DisciplineSettings::drop_weight`] (0.05) of the weight is set to
 //!   zero and the layer refitted alone;
 //! - along each speed row the parameters of neighbouring age bins are tied by a quadratic penalty
@@ -34,25 +40,57 @@ use super::kinematics::in_cube;
 use super::nelder_mead::{Bounded, Stop, minimise};
 use crate::parallel::BuildThreadPoolError;
 
-/// The boxes of `[h_r, h_0, r_flare, β, a, q, γ, spheroid weight]`, lengths in `R_d` (plan 15,
-/// P15.T6.c).
-pub const BOXES: [Bounded; 8] = [
+/// The boxes of `[h_r, h_0, r_flare, β, hole, a, q, γ, spheroid weight]`, lengths in `R_d` (plan
+/// 15, P15.T6.c; module documentation).
+pub const BOXES: [Bounded; PARAMETERS] = [
     Bounded::log(0.05, 50.0),
     Bounded::log(1e-4, 20.0),
     Bounded::log(1.0, 50.0),
-    Bounded::linear(0.8, 3.0),
+    Bounded::linear(0.5, 6.0),
+    Bounded::log(1e-3, 3.0),
     Bounded::log(0.2, 12.0),
     Bounded::log(0.02, 1.0),
-    Bounded::linear(2.0, 8.0),
+    Bounded::linear(2.0, 12.0),
     Bounded::linear(0.0, 1.0),
 ];
 
+/// The parameters of the full form: the layer's five, then the spheroid's three and its weight.
+pub const PARAMETERS: usize = 9;
+
+/// The layer's parameters, at the front of [`BOXES`].
+const LAYER_PARAMETERS: usize = 5;
+
+/// The hole's index in [`BOXES`].
+const HOLE: usize = 4;
+
+/// The flare radius's index in [`BOXES`].
+const FLARE: usize = 2;
+
+/// The hole the table writes for a fit at its box's lower end: none.
+pub const NO_HOLE: f64 = 0.0;
+
 /// The fixed start, in the order of [`BOXES`]: a layer of a scale length and a twentieth of one
-/// high, flaring over five, and a round-ish spheroid of a fifth of the weight.
-pub const START: [f64; 8] = [1.0, 0.05, 5.0, 1.5, 1.0, 0.5, 4.0, 0.2];
+/// high, flaring over five, with a hole of half a scale length, and a round-ish spheroid of a
+/// fifth of the weight.
+pub const START: [f64; PARAMETERS] = [1.0, 0.05, 5.0, 1.5, 0.5, 1.0, 0.5, 4.0, 0.2];
 
 /// The names of the parameters, for the report.
-pub const NAMES: [&str; 8] = ["h_r", "h_0", "r_flare", "beta", "a", "q", "gamma", "weight"];
+pub const NAMES: [&str; PARAMETERS] = [
+    "h_r", "h_0", "r_flare", "beta", "hole", "a", "q", "gamma", "weight",
+];
+
+/// Whether parameter `i` (an index of [`BOXES`]) at `value` sits on its box's edge: within
+/// [`EDGE_FRACTION`] of an end that is not a limit (the flare's upper end and the hole's lower
+/// end, module documentation).
+#[must_use]
+fn on_edge(i: usize, value: f64) -> bool {
+    let b = BOXES[i];
+    match i {
+        FLARE => b.at_low_end(value, EDGE_FRACTION),
+        HOLE => value > NO_HOLE && b.at_high_end(value, EDGE_FRACTION),
+        _ => b.at_edge(value, EDGE_FRACTION),
+    }
+}
 
 /// How close to a box's end, as a share of its width on its scale, counts as on the edge.
 pub const EDGE_FRACTION: f64 = 1e-3;
@@ -97,10 +135,14 @@ pub struct DiscFit {
 }
 
 impl DiscFit {
-    /// The parameter vector, in the order of [`BOXES`].
-    fn params(&self) -> [f64; 8] {
+    /// The parameter vector, in the order of [`BOXES`]: no hole as the box's lower end, where
+    /// the fit found it, so that a restart and the row's penalty read it on the box's scale.
+    fn params(&self) -> [f64; PARAMETERS] {
         let (l, s) = (&self.layer, &self.spheroid);
-        [l.h_r, l.h_0, l.r_flare, l.beta, s.a, s.q, s.gamma, s.weight]
+        let hole = l.hole.max(BOXES[HOLE].lo);
+        [
+            l.h_r, l.h_0, l.r_flare, l.beta, hole, s.a, s.q, s.gamma, s.weight,
+        ]
     }
 }
 
@@ -128,15 +170,16 @@ impl Scratch {
     }
 }
 
-/// The layer's shares of the cells: `exp(−R ÷ h_r) exp(−(|z| ÷ h)^β) ÷ h`, `h = h₀ e^(R ÷
-/// r_flare)`.
+/// The layer's shares of the cells: `exp(−hole ÷ R − R ÷ h_r) exp(−(|z| ÷ h)^β) ÷ h`, `h = h₀
+/// e^(R ÷ r_flare)`; every node's R is positive.
 fn layer_shares(cells: &RzCells, p: &[f64], out: &mut [f64]) {
-    let (h_r, h_0, r_flare, beta) = (p[0], p[1], p[2], p[3]);
+    let (h_r, h_0, r_flare, beta, hole) = (p[0], p[1], p[2], p[3], p[HOLE]);
     let ln_h0 = math::ln(h_0);
     cells.integrate_by_radius(
         |r| {
             let ln_h = ln_h0 + r / r_flare;
-            (math::exp(-r / h_r - ln_h), ln_h)
+            let hole_term = if hole > NO_HOLE { hole / r } else { 0.0 };
+            (math::exp(-r / h_r - hole_term - ln_h), ln_h)
         },
         |ln_h, _, ln_z| math::exp(-math::exp(beta * (ln_z - ln_h))),
         out,
@@ -176,22 +219,22 @@ impl Form {
     /// The parameters it fits, from the front of [`BOXES`].
     const fn parameters(self) -> usize {
         match self {
-            Self::Full => 8,
-            Self::LayerOnly => 4,
+            Self::Full => PARAMETERS,
+            Self::LayerOnly => LAYER_PARAMETERS,
         }
     }
 }
 
 /// The model's shares for the parameters `p` (in the order of [`BOXES`]; for the layer alone the
-/// spheroid's weight is 0 whatever `p[7]`).
+/// spheroid's weight is 0 whatever `p[8]`).
 fn model(cells: &RzCells, p: &[f64], form: Form, s: &mut Scratch) {
     layer_shares(cells, p, &mut s.layer);
     let w = match form {
-        Form::Full => p[7],
+        Form::Full => p[8],
         Form::LayerOnly => 0.0,
     };
     if w > 0.0 {
-        spheroid_shares(cells, p[4], p[5], p[6], &mut s.spheroid);
+        spheroid_shares(cells, p[5], p[6], p[7], &mut s.spheroid);
         for ((m, l), sp) in s.model.iter_mut().zip(&s.layer).zip(&s.spheroid) {
             *m = (1.0 - w) * l + w * sp;
         }
@@ -204,7 +247,7 @@ fn model(cells: &RzCells, p: &[f64], form: Form, s: &mut Scratch) {
 /// strength λ.
 #[derive(Debug, Clone, Copy)]
 struct Tie<'a> {
-    neighbours: &'a [([f64; 8], Form)],
+    neighbours: &'a [([f64; PARAMETERS], Form)],
     lambda: f64,
 }
 
@@ -237,7 +280,7 @@ impl Tie<'_> {
 fn fit_one(
     cells: &RzCells,
     class: &Class,
-    start: &[f64; 8],
+    start: &[f64; PARAMETERS],
     form: Form,
     tie: Tie<'_>,
     limits: Stop,
@@ -259,21 +302,30 @@ fn fit_one(
     let mut p = *start;
     p[..n].copy_from_slice(&found.values);
     if form == Form::LayerOnly {
-        p[7] = 0.0;
+        p[8] = 0.0;
     }
     finish(cells, class, &p, form, &mut s)
 }
 
-/// The fit at the parameters `p`: its misplaced share, noise floor and edges.
-fn finish(cells: &RzCells, class: &Class, p: &[f64; 8], form: Form, s: &mut Scratch) -> DiscFit {
-    model(cells, p, form, s);
+/// The fit at the parameters `p`: its misplaced share, noise floor and edges, with a hole at its
+/// box's lower end read as none ([`NO_HOLE`]) and the share measured so.
+fn finish(
+    cells: &RzCells,
+    class: &Class,
+    p: &[f64; PARAMETERS],
+    form: Form,
+    s: &mut Scratch,
+) -> DiscFit {
+    let mut p = *p;
+    if BOXES[HOLE].at_low_end(p[HOLE], EDGE_FRACTION) {
+        p[HOLE] = NO_HOLE;
+    }
+    model(cells, &p, form, s);
     let misplaced = total_variation(&s.model, &class.observed);
     let n = form.parameters();
-    let at_edge = (0..n)
-        .filter(|&i| BOXES[i].at_edge(p[i], EDGE_FRACTION))
-        .count();
+    let at_edge = (0..n).filter(|&i| on_edge(i, p[i])).count();
     let weight = match form {
-        Form::Full => p[7],
+        Form::Full => p[8],
         Form::LayerOnly => 0.0,
     };
     DiscFit {
@@ -283,12 +335,13 @@ fn finish(cells: &RzCells, class: &Class, p: &[f64; 8], form: Form, s: &mut Scra
             h_0: p[1],
             r_flare: p[2],
             beta: p[3],
+            hole: p[HOLE],
         },
         spheroid: CoredPowerLawParams {
             weight,
-            a: p[4],
-            q: p[5],
-            gamma: p[6],
+            a: p[5],
+            q: p[6],
+            gamma: p[7],
         },
         misplaced,
         floor: noise_floor(&s.model, class.bound),
@@ -302,17 +355,18 @@ fn empty_fit() -> DiscFit {
     let p = START;
     DiscFit {
         layer: FlaredLayerParams {
-            weight: 1.0 - p[7],
+            weight: 1.0 - p[8],
             h_r: p[0],
             h_0: p[1],
             r_flare: p[2],
             beta: p[3],
+            hole: NO_HOLE,
         },
         spheroid: CoredPowerLawParams {
-            weight: p[7],
-            a: p[4],
-            q: p[5],
-            gamma: p[6],
+            weight: p[8],
+            a: p[5],
+            q: p[6],
+            gamma: p[7],
         },
         misplaced: 0.0,
         floor: 0.0,
@@ -374,7 +428,7 @@ fn sweep_row(
             if out[a].empty {
                 continue;
             }
-            let neighbours: Vec<([f64; 8], Form)> = [a.checked_sub(1), Some(a + 1)]
+            let neighbours: Vec<([f64; PARAMETERS], Form)> = [a.checked_sub(1), Some(a + 1)]
                 .into_iter()
                 .flatten()
                 .filter(|&b| b < out.len() && !out[b].empty)
@@ -515,10 +569,10 @@ pub fn fit_disc(
 pub fn second_difference_sign_changes(fits: &DiscFits) -> usize {
     let mut changes = 0;
     for row in &fits.fits {
-        for k in 0..8 {
+        for k in 0..PARAMETERS {
             let logs: Vec<f64> = row
                 .iter()
-                .filter(|f| !f.empty && (k < 4 || f.spheroid.weight > 0.0))
+                .filter(|f| !f.empty && (k < LAYER_PARAMETERS || f.spheroid.weight > 0.0))
                 .map(|f| math::ln(f.params()[k].max(1e-300)))
                 .collect();
             let second: Vec<f64> = logs.windows(3).map(|w| w[0] - 2.0 * w[1] + w[2]).collect();
@@ -533,15 +587,11 @@ mod tests {
     use super::*;
     use crate::tasks::displaced_forms::histogram::{r_cell, z_cell};
 
-    /// A histogram drawn from a known flared layer is fitted back to it.
-    #[test]
-    fn a_layer_is_fitted_back() {
-        let r_d = 7_000.0;
-        let cells = RzCells::new(r_d, 2);
-        let truth = [1.2, 0.04, 6.0, 1.3, 1.0, 0.5, 4.0, 0.0];
+    /// The first fit of a histogram drawn from the layer `truth` (in the order of [`BOXES`], the
+    /// spheroid's weight 0): exact expected counts of 10⁶ objects, rounded.
+    fn fitted_back(cells: &RzCells, truth: &[f64; PARAMETERS]) -> DiscFit {
         let mut s = Scratch::new();
-        model(&cells, &truth, Form::LayerOnly, &mut s);
-        // Exact expected counts of 10⁶ objects, rounded.
+        model(cells, truth, Form::LayerOnly, &mut s);
         #[expect(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
@@ -562,9 +612,44 @@ mod tests {
             rise_limit: 0.003,
             sweeps: 1,
         };
-        let fit = first_fit(&cells, &class, &settings);
+        first_fit(cells, &class, &settings)
+    }
+
+    /// A histogram drawn from a known flared layer is fitted back to it.
+    #[test]
+    fn a_layer_is_fitted_back() {
+        let r_d = 7_000.0;
+        let cells = RzCells::new(r_d, 2);
+        let fit = fitted_back(&cells, &[1.2, 0.04, 6.0, 1.3, NO_HOLE, 1.0, 0.5, 4.0, 0.0]);
         assert!(fit.misplaced < 0.01, "{fit:?}");
         assert!((fit.layer.h_0 / 0.04 - 1.0).abs() < 0.1, "{fit:?}");
+        // No hole is written as none, and read back on the box's scale at its lower end.
+        assert!(fit.layer.hole <= NO_HOLE, "{fit:?}");
+        assert!(
+            (fit.params()[HOLE] - BOXES[HOLE].lo).abs() < 1e-18,
+            "{fit:?}"
+        );
+        assert!(empty_fit().layer.hole <= NO_HOLE);
         assert!(r_cell(r_d) > 0 && z_cell(1.0) > 0);
+    }
+
+    /// P15.T6.c: a holed layer, the thin disc's own hole, is fitted back with its hole.
+    #[test]
+    fn a_holed_layer_is_fitted_back_with_its_hole() {
+        let cells = RzCells::new(7_000.0, 2);
+        let fit = fitted_back(&cells, &[1.2, 0.04, 6.0, 1.3, 0.55, 1.0, 0.5, 4.0, 0.0]);
+        assert!(fit.misplaced < 0.01, "{fit:?}");
+        assert!((fit.layer.hole / 0.55 - 1.0).abs() < 0.1, "{fit:?}");
+        assert_eq!(fit.at_edge, 0, "{fit:?}");
+    }
+
+    /// The ends that are limits are not edges: a layer that does not flare, and one without a
+    /// hole; the other ends of the same boxes are.
+    #[test]
+    fn the_no_flare_and_no_hole_ends_are_not_edges() {
+        assert!(!on_edge(FLARE, BOXES[FLARE].hi) && on_edge(FLARE, BOXES[FLARE].lo));
+        assert!(!on_edge(HOLE, NO_HOLE) && !on_edge(HOLE, BOXES[HOLE].lo));
+        assert!(on_edge(HOLE, BOXES[HOLE].hi));
+        assert!(on_edge(3, BOXES[3].hi) && on_edge(3, BOXES[3].lo));
     }
 }

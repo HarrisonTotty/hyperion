@@ -525,26 +525,6 @@ fn the_range_query_merges_the_list_s_members() {
     assert!(a > alone.census().expected().get(Layer::A), "{a}");
 }
 
-/// The stream shell's hold, P10.T9: until the bump to 26 every galaxy built by `from_params`
-/// takes the held arm, and the tests reach the new one under every 26 hold.
-#[test]
-fn the_stream_shell_is_held_only_until_the_26_bump() {
-    assert!(
-        crate::GENERATOR_VERSION < crate::galaxy::global_list::STREAM_SHELL_VERSION,
-        "the 25 → 26 bump puts P10.T9's shell on the record: a stream's member outside its \
-         bounding shell is none, so `resolve_with`'s answers for those members and the global list \
-         source's hits and census move. Delete `STREAM_SHELL_VERSION`, `StreamShellRules` with \
-         its `Unbounded` arm, `GalaxyRules::stream_shell`, the `match` in `in_stream_shell` and \
-         in `resolve_with`, `GlobalListSource::entries_near`'s `every_stream` and this test, in \
-         the bump's own commit; `tests/global_list_tube.rs`'s \
-         `resolve_with_reaches_a_drawn_stream_s_members` then needs its galaxy's list, not \
-         `GlobalList::default()`, and to expect `NoSuchSystem` for a member outside the shell"
-    );
-    let built = Galaxy::from_params(SEED, GalaxyParams::milky_way_like()).expect("builds");
-    assert_eq!(built.rules().stream_shell, StreamShellRules::Unbounded);
-    assert_eq!(galaxy(true).rules().stream_shell, StreamShellRules::Shell);
-}
-
 /// The list source's hold, P10.T10.b's registration member with P10.T3.d.b: until the bump to 27
 /// no galaxy built by `from_params` registers the source or stores the halo's discrete share, and
 /// under every 27 hold a galaxy does both.
@@ -608,10 +588,8 @@ fn every_member(
     all
 }
 
-/// The hits a brute-force scan of `all` makes in `sphere`, those inside `shell` under the
-/// galaxy's rules, sorted by ID.
+/// The hits a brute-force scan of `all` makes in `sphere`, those inside `shell`, sorted by ID.
 fn brute_force(
-    galaxy: &Galaxy,
     all: &[GlobalMemberRecord],
     shell: &BoundingShell,
     sphere: &QuerySphere,
@@ -619,7 +597,7 @@ fn brute_force(
     let elapsed = Seconds::new(sphere.time().since_epoch().as_seconds_f64());
     let mut want: Vec<SystemHit> = all
         .iter()
-        .filter(|m| in_stream_shell(galaxy, shell, m.record().epoch_position()))
+        .filter(|m| in_stream_shell(shell, m.record().epoch_position()))
         .filter_map(|m| hit_at(m.record(), m.velocity(), sphere, elapsed))
         .collect();
     want.sort_by_key(|hit| hit.id().raw());
@@ -693,7 +671,7 @@ fn a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube() {
                             )
                         })
                         .collect();
-                    let want = brute_force(galaxy, &all, &shell, &s);
+                    let want = brute_force(&all, &shell, &s);
                     assert_eq!(ids(&mine), ids(&want), "{name} {at_26} {u} {years}");
                     assert_eq!(mine, want, "{name} {at_26} {u} {years}");
                     if occupied {

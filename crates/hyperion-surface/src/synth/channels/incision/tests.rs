@@ -980,7 +980,7 @@ fn the_structure_function_rises_as_its_slopes_and_saturates_at_twice_the_varianc
 }
 
 /// The variance of the channels' whole incision over `coarse` on an `n` × `n` grid weighted by
-/// area, and the sum of its levels' own variances.
+/// area, and the sum of its levels' own variances ([`Channels::variance_check`]).
 fn realised_variance(
     channels: &Channels,
     field: &CoarseField,
@@ -988,33 +988,12 @@ fn realised_variance(
     coarse: PatchKey,
     n: u32,
 ) -> (f64, f64) {
-    let (mut sum, mut square, mut weights) = (0.0, 0.0, 0.0);
-    let mut by_level = [(0.0, 0.0); LEVELS];
-    for b in 0..n {
-        for a in 0..n {
-            let x = (f64::from(a) + 0.5) / f64::from(n);
-            let y = (f64::from(b) + 0.5) / f64::from(n);
-            let w = area_weight(coarse, x, y);
-            let levels = channels
-                .incision(field, cache)
-                .levels(at(coarse, x, y), MAX_LEVEL)
-                .unwrap();
-            let total: f64 = levels.as_slice().iter().map(|l| l.value).sum();
-            sum += w * total;
-            square += w * total * total;
-            weights += w;
-            for (s, l) in by_level.iter_mut().zip(levels.as_slice()) {
-                s.0 += w * l.value;
-                s.1 += w * l.value * l.value;
-            }
-        }
-    }
-    let mean = sum / weights;
-    let levels: f64 = by_level
-        .iter()
-        .map(|(s, s2)| s2 / weights - (s / weights) * (s / weights))
-        .sum();
-    (square / weights - mean * mean, levels)
+    let check = channels
+        .variance_check(field, coarse, n, cache)
+        .unwrap()
+        .expect("the whole field holds every cell its closed forms read");
+    let levels: f64 = check.realised_m2.iter().map(|&(_, v)| v).sum();
+    (check.whole_m2, levels)
 }
 
 #[test]
@@ -1231,6 +1210,7 @@ fn every_groove_is_within_its_level_s_cap() {
                         let deepest_groove = match groove.depth {
                             Depth::Constant(d) => d,
                             Depth::Graded { from_m, to_m, .. } => from_m.max(to_m),
+                            Depth::GradedValley { cap_m, .. } => cap_m,
                             Depth::Tributary { floor_m, cap_m, .. } => floor_m.max(cap_m),
                         };
                         assert!(deepest_groove <= groove_cap_m(radius_m, level));
@@ -1511,4 +1491,5 @@ fn the_drawn_valleys_void_is_the_closure_s() {
 
 mod bend;
 mod depth;
+mod tributaries;
 mod water;

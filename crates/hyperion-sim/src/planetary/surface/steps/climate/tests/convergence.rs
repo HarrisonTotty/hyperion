@@ -1,9 +1,8 @@
 //! The energy-balance model's seasonal runs converge under their cap (R09.T13.i; the lane's lean,
 //! 2026-10-30): G1's drift stop and the held G2 on the small Earth, pinned in a golden on both
 //! targets, every reference world's kept run within [`MAX_ORBITS`], and the held run's state from
-//! two starts; and under version 26's hold (`Z0_BRANCH_VERSION`), the zonal search's Z₀ held
-//! where it leaves its branch, the census of the small Earth's seeds, and the reference Earth's
-//! records unchanged to the bit.
+//! two starts; and the zonal search's Z₀ held where it leaves its branch (from version 26), and the
+//! census of the small Earth's seeds.
 
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::{GoldenWriter, f64_digest};
@@ -19,8 +18,6 @@ use super::super::sun::NOMINAL_STEP;
 use super::super::{
     Diagnostics, SurfaceMeans, point_sea_shares, reliefs, run_diagnosed, sea_transport,
 };
-use super::super::{Z0BranchRules, with_z0_branch};
-use super::assert_same_correction;
 use crate::GENERATOR_VERSION;
 use crate::planetary::surface::SurfaceSeed;
 use crate::planetary::surface::grid::CellGraph;
@@ -425,40 +422,12 @@ fn under_26_the_small_earth_s_z0_holds_its_branch_under_seed_5() {
     assert_z0_holds_under_26(5);
 }
 
-/// Inside version 26's helper Z₀'s branch (`Z0_BRANCH_VERSION`) leaves the zonal Earth at the sea
-/// level, 70% sea, whose Z₀ settles on its branch, as it is with the hold set back, to the bit: the
-/// hold reads its drift and never ends it.
-#[test]
-fn the_z0_branch_leaves_the_zonal_earth_unchanged_to_the_bit() {
-    let inputs = reference::earth_like();
-    let solve = || {
-        ebm::solve(
-            &inputs,
-            &ModelGrid::zonal(),
-            &[0.7; LATITUDE_BANDS],
-            NOMINAL_STEP,
-            Ground::SeaLevel,
-            OceanTransport::None,
-        )
-    };
-    let held = || with_z0_branch(Z0BranchRules::Held, solve);
-    let (at_25, at_26) = (with_every_26_hold(held), with_every_26_hold(solve));
-    super::assert_same_solution("the zonal Earth", &at_25, &at_26);
-    super::assert_same_values(
-        "the zonal Earth's annual field",
-        &at_25.climate.annual_k,
-        &at_26.climate.annual_k,
-    );
-}
-
 /// The census of the small Earth's twelve seeds holds under version 26's hold: every kept run
 /// converges under the cap on its warm branch, within 2 K of plan 14's mean (no snowball and no
 /// runaway; the census's farthest, seed 7's, lies 1.35 K above it); Z₀ is held at that mean under
-/// seeds 2, 4, 5 and 8 alone; and under every other seed the correction is the one with the hold
-/// set back, to the bit.
+/// seeds 2, 4, 5 and 8 alone.
 #[test]
-#[ignore = "slow: the small Earth's climate under twelve seeds, and under eight of them again \
-            with the hold set back, about 13 min"]
+#[ignore = "slow: the small Earth's climate under twelve seeds, about 8 min"]
 fn under_26_the_census_of_the_small_earth_s_seeds_holds() {
     let mean = reference::small_earth().mean_surface_temperature().value();
     let mut held = Vec::new();
@@ -495,61 +464,8 @@ fn under_26_the_census_of_the_small_earth_s_seeds_holds() {
                 "seed {seed:#x}: {z0:?}"
             );
             held.push(seed);
-        } else {
-            let at_25 = staged_under(
-                SurfaceSeed::new(seed),
-                &reference::small_earth(),
-                |pass, working| {
-                    with_every_26_hold(|| {
-                        with_z0_branch(Z0BranchRules::Held, || run_diagnosed(pass, working))
-                    })
-                },
-            )
-            .surface_means
-            .expect("the small Earth runs the energy balance");
-            assert_same_correction(
-                &format!("seed {seed:#x}"),
-                &at_25.correction,
-                &means.correction,
-            );
         }
     }
     eprintln!("Z₀ held under seeds {held:?}");
     assert_eq!(held, [2, 4, 5, 8]);
-}
-
-/// Inside version 26's helper Z₀'s branch leaves the reference Earth's climate step as it is with
-/// the hold set back, to the bit: every record of its correction, and every climate cell's
-/// temperatures, from one staged state.
-#[test]
-#[ignore = "slow: the reference Earth's pass to its climate at level 8, its climate step twice, \
-            about 100 s"]
-fn the_z0_branch_leaves_the_reference_earth_unchanged_to_the_bit() {
-    let inputs = reference::earth_like();
-    let ((at_25, cells_25), (at_26, cells_26)) = staged(&inputs, |pass, working| {
-        let mut again = working.clone();
-        let cells = |working: &Working| -> Vec<f64> {
-            working
-                .climate
-                .iter()
-                .flat_map(|state| {
-                    core::iter::once(state.sea_level_temperature.value())
-                        .chain(state.month_anomaly_k)
-                })
-                .collect()
-        };
-        let at_25 = with_every_26_hold(|| {
-            with_z0_branch(Z0BranchRules::Held, || run_diagnosed(pass, working))
-        })
-        .surface_means;
-        let at_26 = with_every_26_hold(|| run_diagnosed(pass, &mut again)).surface_means;
-        ((at_25, cells(working)), (at_26, cells(&again)))
-    });
-    let (at_25, at_26) = (
-        at_25.expect("the Earth runs the energy balance"),
-        at_26.expect("the Earth runs the energy balance"),
-    );
-    assert_same_correction("the reference Earth", &at_25.correction, &at_26.correction);
-    assert_eq!(at_25.orbits, at_26.orbits);
-    super::assert_same_values("the reference Earth's climate cells", &cells_25, &cells_26);
 }

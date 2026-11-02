@@ -5,7 +5,8 @@
 mod displaced_support;
 
 use displaced_support::{
-    AGE_MIDS, OLD_SOURCES, disc_born, old_born, own_shares, scales_and_fields, seed_params,
+    AGE_MIDS, HOLE, HOLED_CLASS, OLD_SOURCES, disc_born, old_born, own_shares, scales_and_fields,
+    seed_params,
 };
 use hyperion_sim::galaxy::PointLy;
 use hyperion_sim::galaxy::displaced::forms::{
@@ -13,6 +14,7 @@ use hyperion_sim::galaxy::displaced::forms::{
     FlaredLayerParams, OwnFormMixture, cube_integral, keeps_arm, young_disc,
 };
 use hyperion_sim::galaxy::displaced::{AGE_BINS, AgeBin, SPEED_BINS};
+use hyperion_sim::galaxy::fields::disc::hole_mass_fraction;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::math;
 use hyperion_testkit::lcg::Lcg;
@@ -25,8 +27,9 @@ fn age(i: usize) -> AgeBin {
     AgeBin::new(u8::try_from(i).unwrap()).unwrap()
 }
 
-/// P08.T10.a: the layer's column density is `exp(−R ÷ h_R) × 2Γ(1 + 1 ÷ β)` to 10⁻⁶, across the
-/// table's rows and radii from the centre to the cube's edge.
+/// P08.T10.a: the layer's column density is `exp(−R_h ÷ R − R ÷ h_R) × 2Γ(1 + 1 ÷ β)` to 10⁻⁶,
+/// across the table's rows and radii from the centre to the cube's edge; a holed layer's is 0 on
+/// the axis.
 #[test]
 fn the_layers_column_is_its_closed_form() {
     let (scales, _) = scales_and_fields(&GalaxyParams::milky_way_like());
@@ -37,6 +40,14 @@ fn the_layers_column_is_its_closed_form() {
             for r in [0.0, 3_000.0, 26_000.0, 60_000.0] {
                 let closed = layer.radial(r) * 2.0 * math::gamma(1.0 + 1.0 / row.beta);
                 let column = layer.column(r);
+                if row.hole > 0.0 && r <= 0.0 {
+                    assert_eq!(
+                        (closed, column),
+                        (0.0, 0.0),
+                        "bin ({speed}, {a}) on the axis"
+                    );
+                    continue;
+                }
                 assert!(
                     (column / closed - 1.0).abs() < 1e-6,
                     "bin ({speed}, {a}) at {r} ly: {column} against {closed}"
@@ -352,6 +363,7 @@ fn a_flared_layer_has_its_rows_shape() {
         h_0: 0.05,
         r_flare: 4.0,
         beta: 1.2,
+        hole: 0.0,
     };
     let layer = FlaredLayer::new(&row, &scales).unwrap();
     let r = 20_000.0;
@@ -362,4 +374,50 @@ fn a_flared_layer_has_its_rows_shape() {
     assert!((layer.shape(r, z) / shape - 1.0).abs() < 1e-12);
     assert!((layer.density(&PointLy::new(r, 0.0, z)) / (layer.norm() * shape) - 1.0).abs() < 1e-12);
     assert!(FlaredLayer::new(&FlaredLayerParams { beta: 0.0, ..row }, &scales).is_err());
+    for hole in [-0.1, f64::NAN, f64::INFINITY] {
+        let refused = FlaredLayer::new(&FlaredLayerParams { hole, ..row }, &scales).unwrap_err();
+        assert_eq!(refused.quantity, "hole", "{hole}");
+    }
+}
+
+/// P15.T6.c: a holed layer is the layer without the hole times `exp(−R_h ÷ R)`, empty on the axis,
+/// and its normalisation over the cube holds the holed disc's mass: against the layer without it,
+/// [`hole_mass_fraction`]'s `2x K₂(2√x)` to 10⁻³ for a layer that does not flare (the cube's edge,
+/// about nine scale lengths out, cuts under 10⁻³ of either).
+#[test]
+fn a_holed_layer_holds_the_holed_discs_mass() {
+    let (scales, _) = scales_and_fields(&GalaxyParams::milky_way_like());
+    let r_d = scales.r_d().value();
+    let (holed_row, _, _) = disc_born(HOLED_CLASS.0, HOLED_CLASS.1);
+    assert!((holed_row.hole - HOLE).abs() < 1e-15);
+    let holed = FlaredLayer::new(&holed_row, &scales).unwrap();
+    let plain = FlaredLayer::new(
+        &FlaredLayerParams {
+            hole: 0.0,
+            ..holed_row
+        },
+        &scales,
+    )
+    .unwrap();
+    for r in [100.0, 3_000.0, 26_000.0] {
+        let factor = math::exp(-HOLE * r_d / r);
+        assert!((holed.shape(r, 50.0) / (plain.shape(r, 50.0) * factor) - 1.0).abs() < 1e-12);
+    }
+    assert_eq!(holed.density(&PointLy::new(0.0, 0.0, 10.0)), 0.0);
+    let thin = FlaredLayerParams {
+        weight: 1.0,
+        h_r: 1.0,
+        h_0: 0.05,
+        r_flare: 1e6,
+        beta: 1.0,
+        hole: HOLE,
+    };
+    let holed = FlaredLayer::new(&thin, &scales).unwrap();
+    let plain = FlaredLayer::new(&FlaredLayerParams { hole: 0.0, ..thin }, &scales).unwrap();
+    let ratio = plain.norm() / holed.norm();
+    let expected = hole_mass_fraction(HOLE);
+    assert!(
+        (ratio / expected - 1.0).abs() < 1e-3,
+        "{ratio} against {expected}"
+    );
 }

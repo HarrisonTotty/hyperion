@@ -5,44 +5,12 @@ use hyperion_testkit::float::assert_same_bits;
 use super::*;
 use crate::coords::{CellSize, GenCell};
 use crate::id::Layer;
-use crate::planetary::testing::with_every_26_hold;
 
 /// System `index` of a run of cells, a thousand to a cell.
 fn system(index: u32) -> SystemId {
     let column = i32::try_from(index / 1_000).expect("a small index");
     let cell = GenCell::new(CellSize::Ly8, [5, column, -3]).expect("a cell of the grid");
     SystemId::from_parts(Layer::A, cell, index % 1_000).expect("a system of the cell")
-}
-
-/// P14.T28.e is held until the 25 → 26 bump, inside 26's helper alone.
-#[test]
-fn the_second_generation_is_held_only_until_the_26_bump() {
-    assert!(
-        GENERATOR_VERSION < SECOND_GENERATION_VERSION,
-        "the 25 → 26 bump gives neutron stars their second-generation planets (P14.T28.e): \
-         delete `SECOND_GENERATION_VERSION`, `SecondGenerationRules` with its `Held` arm and the \
-         held arm of `PlanetarySystem::add_second_generation`, the tests' \
-         `with_second_generation`, its switch in `with_every_26_hold` and this test; re-bless \
-         the goldens whose systems have a neutron star with such planets"
-    );
-    assert_eq!(
-        SecondGenerationRules::in_force(),
-        SecondGenerationRules::Held
-    );
-    assert_eq!(
-        with_every_26_hold(SecondGenerationRules::in_force),
-        SecondGenerationRules::Planets
-    );
-    assert_eq!(
-        with_every_26_hold(|| {
-            with_second_generation(SecondGenerationRules::Held, SecondGenerationRules::in_force)
-        }),
-        SecondGenerationRules::Held
-    );
-    assert_eq!(
-        SecondGenerationRules::in_force(),
-        SecondGenerationRules::Held
-    );
 }
 
 #[test]

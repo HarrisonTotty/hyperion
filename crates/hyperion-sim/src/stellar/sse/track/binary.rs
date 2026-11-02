@@ -1067,15 +1067,12 @@ pub(crate) fn main_sequence_structure(
         phase_fraction: tau,
     };
     let state = StarState::new(parts);
-    // The version's rules: a main-sequence or helium main-sequence star's wind is the same under
-    // every arm of the Humphreys–Davidson hold, whose limit acts on evolved stars alone.
     let options = TrackOptions::default();
     let rate = wind::rate(
         options.wind(),
         &state,
         comp,
         reimers_eta(draws.eta().value()),
-        options.rules(),
     );
     let state = StarState::new(StarStateParts {
         mass_loss_rate: rate,

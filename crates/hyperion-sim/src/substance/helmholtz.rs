@@ -32,7 +32,6 @@
 
 use crate::math;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// A polynomial or exponential term of a residual Helmholtz energy: n δ^d τ^t, times exp(−δ^c)
 /// when c is not 0 (IAPWS R6-95(2018), Eq. (6), its terms 1–51).
@@ -267,78 +266,20 @@ const NEWTON_STEPS: usize = 4;
 /// saturated density.
 pub(crate) const COMPRESSION_STEPS: usize = 16;
 
-/// The generator version from which a liquid's compression settles, 26.
-///
-/// From it the compression is [`CompressionRules::Settled`]'s: a planetary bump after 25
-/// (P14.T54.b.l's cost lever; perf-24's handoff, the compression's Newton). Below it
-/// [`CompressionRules::in_force`] is [`CompressionRules::Fixed`], and every compression is version
-/// 24's bit for bit. 26's bump deletes this hold and the tests' switch (`with_compression`), keeps
-/// the fixed count as the tests' oracle of the settled one, and deletes the tripwire
-/// (`the_settled_compression_is_held_only_until_the_26_bump`).
-pub(crate) const SETTLED_COMPRESSION_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
 /// The share of its density at or under which a step of the settled compression ends it: 2⁻⁴⁰,
-/// 9.1 × 10⁻¹³ ([`CompressionRules::Settled`]).
+/// 9.1 × 10⁻¹³ (P14.T54.b.l's settled compression, from 26).
 ///
 /// Newton's convergence is quadratic along the isotherm, so the step after one this small would
 /// move the density by about its square, under rounding: the stop ends the steps where
 /// [`iterate`]'s rounding cycles begin.
 const COMPRESSION_TOLERANCE: f64 = 1.0 / 1_099_511_627_776.0;
 
-/// How a liquid's compression steps ([`SETTLED_COMPRESSION_VERSION`]'s hold).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum CompressionRules {
-    /// Version 25's and before: [`COMPRESSION_STEPS`] from the equation's saturated liquid, ended
-    /// where the density repeats ([`iterate`]).
-    Fixed,
-    /// Version 26's: at most [`COMPRESSION_STEPS`] from the equation's saturated liquid, ended by
-    /// the first step that moves the density by at most [`COMPRESSION_TOLERANCE`] of itself.
-    Settled,
-}
-
-impl CompressionRules {
-    /// The rules this generator version gives: the settled compression from
-    /// [`SETTLED_COMPRESSION_VERSION`], the fixed count below it; in the tests, the rules a test's
-    /// switch sets on its thread (`with_compression`).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = COMPRESSION.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= SETTLED_COMPRESSION_VERSION {
-            Self::Settled
-        } else {
-            Self::Fixed
-        }
-    }
-}
-
 #[cfg(test)]
 thread_local! {
-    /// The rules a test sets on its thread, `None` for the version's.
-    static COMPRESSION: core::cell::Cell<Option<CompressionRules>> =
-        const { core::cell::Cell::new(None) };
     /// The settled compressions on this thread and their steps, while a test counts them
     /// ([`with_compression_steps`]).
     static COMPRESSION_COUNT: core::cell::Cell<Option<(u64, u64)>> =
         const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the compression's rules `rules` on this thread, for the tests to reach
-/// 26's settled compression ahead of the bump; the version's rules are set back after, a panic in
-/// `run` included. 26's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_compression<R>(rules: CompressionRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<CompressionRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            COMPRESSION.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(COMPRESSION.with(|cell| cell.replace(Some(rules))));
-    run()
 }
 
 /// `run`'s result with the settled compressions on this thread and their steps.
@@ -897,24 +838,20 @@ impl Isotherm<'_> {
     /// spinodal, ends the iteration at the density it would step from, so that a finite start
     /// never gives a density that is not a number.
     ///
-    /// From generator version 26 the steps end by [`CompressionRules::Settled`]'s tolerance
-    /// ([`settled_density`](Self::settled_density)), held until then
-    /// ([`SETTLED_COMPRESSION_VERSION`]).
+    /// The steps end by [`COMPRESSION_TOLERANCE`] ([`settled_density`](Self::settled_density);
+    /// P14.T54.b.l, from generator version 26); `compressed_density_in` at [`COMPRESSION_STEPS`],
+    /// version 25's fixed count, is the tests' oracle of it.
     #[must_use]
     pub(crate) fn compressed_density(
         &self,
         saturated: KilogramsPerCubicMetre,
         pressure: Pascals,
     ) -> KilogramsPerCubicMetre {
-        match CompressionRules::in_force() {
-            CompressionRules::Fixed => {
-                self.compressed_density_in(saturated, pressure, COMPRESSION_STEPS)
-            }
-            CompressionRules::Settled => self.settled_density(saturated, pressure),
-        }
+        self.settled_density(saturated, pressure)
     }
 
-    /// [`compressed_density`](Self::compressed_density) in `steps` steps.
+    /// [`compressed_density`](Self::compressed_density) in `steps` steps: the tests' oracle.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn compressed_density_in(
         &self,
@@ -930,7 +867,7 @@ impl Isotherm<'_> {
     }
 
     /// The compressed liquid's density at `pressure` on this isotherm from `saturated` by version
-    /// 26's rules ([`CompressionRules::Settled`]): [`compressed_density`](Self::compressed_density)'s
+    /// 26's rules: [`compressed_density`](Self::compressed_density)'s
     /// steps, ended by the first that moves the density by at most [`COMPRESSION_TOLERANCE`] of
     /// itself, or at the most, [`COMPRESSION_STEPS`]; where a step is not finite, the density it
     /// would step from.

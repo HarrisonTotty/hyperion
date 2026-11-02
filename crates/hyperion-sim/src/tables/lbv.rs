@@ -5,16 +5,16 @@
 //! inputs-sha256: 8776b3519710b79328e0c68d2ead3294b1e3814aa9f6a1dd31402a7841f0cfdc
 //! manifest: crates/hyperion-fit/manifests/lbv.toml
 //! data: none
-//! sim-fingerprint: 62c32e4c752977dfec137501f44b66f3feeef3787730a1eb43902124e542d76f
-//! since-generator-version: 24
+//! sim-fingerprint: cabe6254b188e715e97e8c4772e64e0111ab929618d26ce97baf52395c7e6816
+//! since-generator-version: 26
 //! source: plan 06's tracks (Hurley, Pols and Tout 2000, MNRAS 315, 543; the
 //!   luminous-blue-variable criterion after their section 7.1 and Humphreys and Davidson 1994,
 //!   PASP 106, 1025) at the median draws, under the generator version's stellar rules; the floor
 //!   against Smith 2014, ARA&A 52, 487
-//! acceptance: 32–36 M☉ windows 6297001–6513368 yr, held as 6171000–6644000; 36–43 M☉ windows
-//!   5052087–6297279 yr, held as 4951000–6424000; 43–55 M☉ windows 4157256–5463241 yr, held as
-//!   4074000–5573000; 55–97 M☉ windows 3492249–4630717 yr, held as 3422000–4724000; 97–150 M☉
-//!   windows 2144118–3821010 yr, held as 2101000–3898000; no track from 24 M☉ to the lowest node
+//! acceptance: 32–36 M☉ windows 6255927–6900667 yr, held as 6130000–7039000; 36–43 M☉ windows
+//!   5040922–6349046 yr, held as 4940000–6477000; 43–55 M☉ windows 4157256–5352657 yr, held as
+//!   4074000–5460000; 55–97 M☉ windows 3492249–4539851 yr, held as 3422000–4631000; 97–150 M☉
+//!   windows 2144118–3581469 yr, held as 2101000–3654000; no track from 24 M☉ to the lowest node
 //!   has a window (passes); the class's million-star sample and its masses' K–S test at 1% are
 //!   the sim's slow `the_class_test_holds_every_host_of_a_million_layer_e_stars`
 //!
@@ -70,28 +70,28 @@ pub const LBV_SAMPLER: LbvSampler = LbvSampler {
     nodes: [
         LbvNode {
             mass: SolarMasses::new(32.0),
-            first: Years::new(6_171_000.0),
-            last: Years::new(6_644_000.0),
+            first: Years::new(6_130_000.0),
+            last: Years::new(7_039_000.0),
         },
         LbvNode {
             mass: SolarMasses::new(36.0),
-            first: Years::new(4_951_000.0),
-            last: Years::new(6_424_000.0),
+            first: Years::new(4_940_000.0),
+            last: Years::new(6_477_000.0),
         },
         LbvNode {
             mass: SolarMasses::new(43.0),
             first: Years::new(4_074_000.0),
-            last: Years::new(5_573_000.0),
+            last: Years::new(5_460_000.0),
         },
         LbvNode {
             mass: SolarMasses::new(55.0),
             first: Years::new(3_422_000.0),
-            last: Years::new(4_724_000.0),
+            last: Years::new(4_631_000.0),
         },
         LbvNode {
             mass: SolarMasses::new(97.0),
             first: Years::new(2_101_000.0),
-            last: Years::new(3_898_000.0),
+            last: Years::new(3_654_000.0),
         },
     ],
     top: SolarMasses::new(150.0),

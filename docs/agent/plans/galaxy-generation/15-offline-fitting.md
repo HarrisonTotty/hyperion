@@ -3297,3 +3297,35 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
   the class's own launches: S ≤ τ ≤ path ÷ v from the sim's
   `Survivors::launches_per_year_per_cubic_ly` (a kernel hollow inside vS), each population at its
   share and speed density, normalised to `Survivors::count`.
+- **T6.c–d's form fixes (lane `p15-t6-forms`, 2026-10-31, at `GENERATOR_VERSION` 24; no output
+  moves).** `FlaredLayerParams` gains `hole` (R_h in R_d, 0 none); `bound::layer_bound` takes the
+  envelope at the cell's radius nearest `√(R_h h_R)` (`FlaredLayer::radial_sup`), P08.T11's
+  nearest corner without a hole. The fit's boxes: hole ln [10⁻³, 3] R_d (its low end written as
+  none), β [0.5, 6], γ [2, 12], since the orbits press β at both of the plan's ends and γ at 8.
+- **T6.d's own form as built (lane `p15-t6-forms`, 2026-10-31).** `fit_old::unkicked_form`, the
+  bar-frame histogram of the control and s0 pooled, so s0's share is fitted against a form holding
+  its own orbits (larger controls would replace it). Plan 08 still places the share with the
+  field's density, which misplaces 0.15–0.55 of the unkicked orbits.
+- **`displaced_forms` is revision 3 (lane `p15-t6-forms`, 2026-10-31; renumbered by train 26, as
+  25's re-emission took 1).** T6.c is revision 2 and T6.d 3. The committed provisional table only
+  gains `hole: 0.0`, with its lock body hash, so `fit-check` finds its inputs changed until 26's
+  refit.
+- **T6.c's box edges, restated** (research p15-t6-forms, 2026-10-31): the no-flare end, `r_flare`
+  at 50 R_d, and the no-hole end are physical limits, not runaways, and are not counted as edges.
+- **T6.d's shares, restated** (research p15-t6-forms, 2026-10-31): against the control and s0
+  pooled, since the births are no equilibrium of the fit's weak bar; within 0.08 of the brainstorm
+  for the bar and bulge, where bar s2–s3 and bulge s0 miss the bracket by at most 0.02 and the
+  nuclear disc's shares miss: findings. Monotonic above 0.1, where the spheroid's core is not
+  degenerate with the share.
+- **T6.d's misplaced share, restated** (research p15-t6-forms, 2026-10-31): at most 0.03 over its
+  noise floor for the bulge, 0.07 for the bar, since the 24 × 24 × 20 bar-frame cells put the
+  floor at 0.04–0.07 in s0–s6 and 0.24 in s7.
+- **T6.d's elongation and length, restated** (research p15-t6-forms, 2026-10-31): the plan's
+  figures are moments of the orbits, not of the form, so they are reported. The form's length is
+  within 10% of its class's where the class's elongation is over 0.05; the form's elongation is a
+  finding (a bar-aligned spheroid is the follow-up).
+- **T6.e's slowest class, restated** (research p15-t6-forms, 2026-10-31): `mean_phi` is in v_c at
+  3 R_d, so it is held within 0.01 of its τ < 0.1 class's, the births' own rotation (0.953).
+- **T6.e's neutron-star height, restated** (research p15-t6-forms, 2026-10-31): the forms' height
+  within 5% of the histograms' own (132–139 pc at 26,000 ly). The 110–130 pc window is a finding
+  until it is sourced (ruling 137.6).

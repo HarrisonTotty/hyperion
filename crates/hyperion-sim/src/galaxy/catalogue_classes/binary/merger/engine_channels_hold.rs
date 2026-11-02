@@ -131,7 +131,7 @@ fn the_merger_channels_are_held_only_until_the_27_bump() {
     }
     assert_eq!(at(27), MergerChannelRules::WithDynamical);
     assert_eq!(
-        GalaxyRules::every_26_hold().merger_channels,
+        GalaxyRules::every_26_hold_with_its_retargets().merger_channels,
         MergerChannelRules::ContactAndEvolved
     );
     assert_eq!(
@@ -149,7 +149,7 @@ fn every_26() -> Galaxy {
     Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_26_hold(),
+        GalaxyRules::every_26_hold_with_its_retargets(),
     )
     .expect("the Milky Way fixture's gas is mostly neutral")
     .with_full_potential()

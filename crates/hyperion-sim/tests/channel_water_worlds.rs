@@ -53,6 +53,7 @@ mod common;
 
 use std::collections::BTreeSet;
 
+use common::channels::{point_in, quantile};
 use common::surface_worlds::sample_world;
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::Metres;
@@ -88,18 +89,6 @@ const BELOW_SEA_M: f64 = 10.0;
 
 /// A cell's points a side: 4 × 4, 16 a cell.
 const SIDE: u32 = 4;
-
-/// The unit direction at face coordinates (`x`, `y`) of `cell`, each in [0, 1].
-fn point_in(cell: PatchKey, x: f64, y: f64) -> [f64; 3] {
-    let side = f64::from(1_u32 << cell.level());
-    let s = (f64::from(cell.i()) + x) / side;
-    let t = (f64::from(cell.j()) + y) / side;
-    unit_dir(face_uv_to_xyz(FaceUv {
-        face: cell.face(),
-        u: st_to_uv(s),
-        v: st_to_uv(t),
-    }))
-}
 
 /// `cell`'s points: the centres of a [`SIDE`] × [`SIDE`] grid in its face coordinates.
 fn points_of(cell: PatchKey) -> Vec<[f64; 3]> {
@@ -451,18 +440,6 @@ fn check_the_budget(name: &str, field: &CoarseField, synth: &Synthesiser<'_, Coa
         (realised / target - 1.0).abs() <= 1e-3,
         "{name}: the realised σ_h {realised} m misses plan 14's {target} m"
     );
-}
-
-/// The `q` quantile of `sorted`, the nearest rank's.
-fn quantile(sorted: &[f64], q: f64) -> f64 {
-    #[expect(
-        clippy::cast_precision_loss,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "a rank of a list of cells, exact in f64 and back"
-    )]
-    let rank = ((sorted.len() - 1) as f64 * q).round() as usize;
-    sorted[rank]
 }
 
 /// (a): the census of the drawn steady-state trunk valleys against decision-r09-channel-term

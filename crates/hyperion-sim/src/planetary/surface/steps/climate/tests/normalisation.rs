@@ -1222,8 +1222,7 @@ fn the_step_writes_the_same_bits_from_the_same_state() {
     runs_twice_to_the_same_bits("locked Earth", &super::locked_earth(0.0, 0.0), None);
 }
 
-/// [`the_step_writes_the_same_bits_from_the_same_state`] under R09.T13.n's shown thermodynamics
-/// ([`super::super::with_partition_thermodynamics`]), version 26's water cycle ahead of its bump:
+/// [`the_step_writes_the_same_bits_from_the_same_state`] under R09.T13.n's shown thermodynamics:
 /// the reference Earth at level 5 on its synthetic sea ([`super::synthetic_sea`]; its column
 /// budgets read the shown air) and the reference Earth locked 1:1 (its zonal budget does), each
 /// run twice from the same state, the locked Earth's two between the Earth's, write every climate
@@ -1231,27 +1230,24 @@ fn the_step_writes_the_same_bits_from_the_same_state() {
 /// the step finished it ([`super::hydrology::finished_model`]) is the step's own.
 #[test]
 fn under_the_shown_thermodynamics_the_step_writes_the_same_bits_from_the_same_state() {
-    super::super::with_partition_thermodynamics(
-        super::super::PartitionThermodynamics::Shown,
-        || {
-            let inputs = reference::earth_like();
-            let (field, climate_grid) = grids(5);
-            let pass = Pass::new(reference::SEED, &inputs, &field, &climate_grid);
-            let mut start = Working::initial(&pass);
-            super::synthetic_sea(&pass, &mut start, &super::EARTH_HYPSOMETRY_M);
-            let (mut first, mut second) = (start.clone(), start);
-            let diagnostics = run_diagnosed(&pass, &mut first);
-            runs_twice_to_the_same_bits("locked Earth", &super::locked_earth(0.0, 0.0), None);
-            run(&pass, &mut second);
-            assert_same_working("reference Earth", &first, &second);
-            let model = super::hydrology::finished_model(&first);
-            let again = super::super::hydrology::run(&pass, &mut first.clone(), &model);
-            assert_eq!(
-                again, diagnostics.water,
-                "the water cycle again on the finished model"
-            );
-        },
-    );
+    {
+        let inputs = reference::earth_like();
+        let (field, climate_grid) = grids(5);
+        let pass = Pass::new(reference::SEED, &inputs, &field, &climate_grid);
+        let mut start = Working::initial(&pass);
+        super::synthetic_sea(&pass, &mut start, &super::EARTH_HYPSOMETRY_M);
+        let (mut first, mut second) = (start.clone(), start);
+        let diagnostics = run_diagnosed(&pass, &mut first);
+        runs_twice_to_the_same_bits("locked Earth", &super::locked_earth(0.0, 0.0), None);
+        run(&pass, &mut second);
+        assert_same_working("reference Earth", &first, &second);
+        let model = super::hydrology::finished_model(&first);
+        let again = super::super::hydrology::run(&pass, &mut first.clone(), &model);
+        assert_eq!(
+            again, diagnostics.water,
+            "the water cycle again on the finished model"
+        );
+    };
 }
 
 /// [`the_step_writes_the_same_bits_from_the_same_state`] on the reference Earth locked 1:1 on an

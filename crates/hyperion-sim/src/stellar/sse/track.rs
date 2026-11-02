@@ -115,7 +115,7 @@ pub(crate) use binary::{
 pub(crate) use binary::{early_agb_core_radius_bound, helium_zams_radius};
 use build::Builder;
 pub(crate) use build::Resolution;
-pub(crate) use excess::{HELIUM_VERSION, HeliumHook, HeliumRules, HeliumTable};
+pub(crate) use excess::{HeliumHook, HeliumTable};
 // P15.T7.b's tracks under a candidate helium table, for `hyperion-fit`'s fit of `tables::helium`.
 #[cfg(any(test, feature = "testing"))]
 pub use excess::{CandidateHeliumTable, track_with_helium_table};
@@ -1367,13 +1367,7 @@ impl Track {
     fn star_state(&self, evaluated: &Evaluated, age: f64) -> StarState {
         let parts = evaluated.parts(age);
         let state = StarState::new(parts);
-        let rate = wind::rate(
-            self.options.wind,
-            &state,
-            &self.composition,
-            self.eta,
-            self.options.rules,
-        );
+        let rate = wind::rate(self.options.wind, &state, &self.composition, self.eta);
         StarState::new(StarStateParts {
             mass_loss_rate: rate,
             ..parts

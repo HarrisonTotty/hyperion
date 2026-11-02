@@ -65,7 +65,7 @@
 //! from their epoch positions, which the query's padded radius covers, as it does for the grid's
 //! cells.
 //!
-//! **A stream's shell bounds its members from version 26** (`STREAM_SHELL_VERSION`, P10.T9).
+//! **A stream's shell bounds its members** (from version 26, P10.T9).
 //! The shell holds the tracers, but not every point of the tube's cut. At a tip, where its few
 //! oldest tracers lie sparse, a knot's kernel spans a long arc of the orbit, and fitted in x, y
 //! and z its centre line was a chord inside the arc, with widths some ten times the median:
@@ -117,7 +117,6 @@ pub(crate) use source::{LIST_SOURCE_VERSION, ListSourceRules};
 pub use spec::{ClusterStars, DwarfCoreSpec, MassLoss, SphericalOrbit, StreamSpec};
 pub use tube::{TubeLookup, TubeTable};
 
-use crate::GeneratorVersion;
 use crate::coords::{GalacticDisplacement, GalacticPosition, ROOT_HALF_WIDTH_LY};
 use crate::galaxy::features::{FeatureId, FeatureKind};
 use crate::galaxy::potential::PotentialTables;
@@ -145,41 +144,11 @@ pub const CUT_WIDTHS: f64 = 4.0;
 /// quarter to spare, for those streams' eccentricities.
 pub const SHELL_WIDENING: f64 = 4.0;
 
-/// The generator version from which a stream's bounding shell bounds its members (module
-/// documentation, "Bounding shells"; the hold of [`StreamShellRules`]).
-///
-/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`StreamShellRules::Unbounded`], which reads no shell for a stream's members, so every generated
-/// value keeps its bits; the tests reach the new arm through a galaxy built under
-/// `GalaxyRules::every_26_hold()`. The bump to 26 deletes this hold, [`StreamShellRules`] with its
-/// `Unbounded` arm, the galaxy's `stream_shell` field and its tripwire
-/// (`the_stream_shell_is_held_only_until_the_26_bump`).
-pub(crate) const STREAM_SHELL_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether a stream's bounding shell bounds its members (the hold of [`STREAM_SHELL_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum StreamShellRules {
-    /// Version 25's and before: a member is every point of the tube's cut in the root cube.
-    Unbounded,
-    /// Version 26's: a member outside its stream's shell is none.
-    Shell,
-}
-
-/// Whether a stream member at `position` is one in `galaxy`, whose stream's shell is `shell`
-/// (module documentation, "Bounding shells"): every point under [`StreamShellRules::Unbounded`],
-/// and those inside the shell under [`StreamShellRules::Shell`].
+/// Whether a stream member at `position` is one, whose stream's shell is `shell` (module
+/// documentation, "Bounding shells"): those inside the shell (P10.T9).
 #[must_use]
-pub(crate) fn in_stream_shell(
-    galaxy: &Galaxy,
-    shell: &BoundingShell,
-    position: &GalacticPosition,
-) -> bool {
-    match galaxy.rules().stream_shell {
-        StreamShellRules::Unbounded => true,
-        StreamShellRules::Shell => {
-            shell.contains(&GalacticPosition::ORIGIN.displacement_to(position))
-        }
-    }
+pub(crate) fn in_stream_shell(shell: &BoundingShell, position: &GalacticPosition) -> bool {
+    shell.contains(&GalacticPosition::ORIGIN.displacement_to(position))
 }
 
 /// A stream's number on the global list, below 2¹² = 4,096 (plan 01's 12-bit field of a

@@ -13,8 +13,7 @@ use crate::Seed;
 use crate::math;
 use crate::planetary::chem::condense::DeckBound;
 use crate::planetary::chem::condense::{
-    DeckProfileRules, FallRadiusRoot, ResolveOpticalDepthError, SizeModeError, with_deck_profile,
-    with_fall_radius,
+    DeckProfileRules, ResolveOpticalDepthError, SizeModeError, with_deck_profile,
 };
 use crate::planetary::chem::envelope_abundances::{
     EnvelopeDraws, FormationDrawRules, Migration, with_formation_draws,
@@ -1741,17 +1740,14 @@ fn dayside_tau_above(envelope: &Envelope, level: f64) -> f64 {
 }
 
 /// The fixture's hot Jupiter under every 26 hold with the dayside decks' rules `rules`, derived
-/// inside the switches, and P14.T52.g's deck profile and P14.T54.b.l's fall radius, which also
-/// move an envelope's modes, set back to `Held` and the bisections: so that `Held` against the
-/// version's rules is the dayside's difference alone.
+/// inside the switches, and P14.T52.g's deck profile, which also moves an envelope's modes, set
+/// back to `Held`: so that `Held` against the version's rules is the dayside's difference alone.
 fn fixture_at_26(rules: DaysideDecksRules) -> Envelope {
     let hot = fixture_hot_jupiter();
     with_every_26_hold(|| {
         with_deck_profile(DeckProfileRules::Held, || {
-            with_fall_radius(FallRadiusRoot::Bisections, || {
-                with_dayside_decks(rules, || {
-                    envelope_by_hand(&hot).expect("the fixture's hot Jupiter")
-                })
+            with_dayside_decks(rules, || {
+                envelope_by_hand(&hot).expect("the fixture's hot Jupiter")
             })
         })
     })

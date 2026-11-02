@@ -3222,28 +3222,6 @@ fn the_slot_gives_the_direct_density() {
     assert!(asked > 500, "{asked}");
 }
 
-/// P14.T54.b.l's settled compression is held until the 25 → 26 bump: the rules in force are the
-/// fixed count's.
-#[test]
-fn the_settled_compression_is_held_only_until_the_26_bump() {
-    use super::super::helmholtz::{
-        CompressionRules, SETTLED_COMPRESSION_VERSION, with_compression,
-    };
-    assert!(
-        crate::GENERATOR_VERSION < SETTLED_COMPRESSION_VERSION,
-        "the 25 → 26 bump puts P14.T54.b.l's settled compression on the record: delete \
-         `SETTLED_COMPRESSION_VERSION`, `CompressionRules::in_force`'s version test, the tests' \
-         `with_compression` and its switch in `with_every_26_hold`, and this test, keeping \
-         `CompressionRules::Fixed` as the tests' oracle of the settled compression"
-    );
-    assert_eq!(CompressionRules::in_force(), CompressionRules::Fixed);
-    assert_eq!(
-        with_compression(CompressionRules::Settled, CompressionRules::in_force),
-        CompressionRules::Settled
-    );
-    assert_eq!(CompressionRules::in_force(), CompressionRules::Fixed);
-}
-
 /// Under 26's settled compression every compressible row's density is the fixed count's within
 /// 10⁻¹² of itself, over [`the_compression_converges_over_every_row_s_liquid_range`]'s
 /// temperatures and pressures, in fewer steps: their mean and most are stated.

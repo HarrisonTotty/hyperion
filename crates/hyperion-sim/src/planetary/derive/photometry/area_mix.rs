@@ -1568,8 +1568,8 @@ impl Regolith {
 /// the record is version 25's bit for bit. 26's bump deletes this hold, [`IcyRegolithRules`] with
 /// its `Frost` arm, the guards that read it in [`Regolith::weathered_lid`] and
 /// [`Regolith::bond`], the tests' switch and its tripwire
-/// (`the_icy_regolith_is_held_only_until_the_26_bump`).
-pub(crate) const ICY_REGOLITH_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+/// (`the_icy_regolith_is_held_only_until_the_27_bump`).
+pub(crate) const ICY_REGOLITH_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether an `H2O` regolith takes its rock's lag (its hold, [`ICY_REGOLITH_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -2044,8 +2044,8 @@ fn surface_bond_with(
 /// [`OrganicSedimentRules::Bare`]: the ground is its rows' and its regolith's, as to 25, bit for
 /// bit. 26's bump deletes this hold, [`OrganicSedimentRules`] with its `Bare` arm, the guard in
 /// [`sediment_share`], the tests' switch and its tripwire
-/// (`the_organic_sediment_is_held_only_until_the_26_bump`).
-pub(crate) const ORGANIC_SEDIMENT_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+/// (`the_organic_sediment_is_held_only_until_the_27_bump`).
+pub(crate) const ORGANIC_SEDIMENT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether a hazy air's fallout covers its solid ground (its hold, [`ORGANIC_SEDIMENT_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -2302,8 +2302,8 @@ fn cloud_condensable(partition: &Partition, shade: &HostShade) -> Option<(Substa
 /// [`MinorCloudsRules::WaterShare`]: every temperate or snowball world's cloud takes water's 0.67
 /// before its availability, as to 25, bit for bit. 26's bump deletes this hold, [`MinorCloudsRules`]
 /// with its `WaterShare` arm, the guard in [`condensable_cloud_share`], the tests' switch and its
-/// tripwire (`the_minor_clouds_are_held_only_until_the_26_bump`).
-pub(crate) const MINOR_CLOUDS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+/// tripwire (`the_minor_clouds_are_held_only_until_the_27_bump`).
+pub(crate) const MINOR_CLOUDS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether a cloud whose condensable is not water covers its own share (its hold,
 /// [`MINOR_CLOUDS_VERSION`]).
@@ -2555,8 +2555,8 @@ pub(crate) fn reference_earth_clear_sky_added() -> f64 {
 /// the floor, and the water cloud's calibration Earth's 0.294 without its air, as to 25, bit for
 /// bit. 26's bump deletes this hold, [`RayleighAddingRules`] with its `Max` arm, the guards in
 /// [`water_cloud_albedo`] and `surface_mix::floored`, the tests' switch and its tripwire
-/// (`the_rayleigh_adding_is_held_only_until_the_26_bump`).
-pub(crate) const RAYLEIGH_ADDING_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+/// (`the_rayleigh_adding_is_held_only_until_the_27_bump`).
+pub(crate) const RAYLEIGH_ADDING_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// How the air's Rayleigh layer joins the area mix (its hold, [`RAYLEIGH_ADDING_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -2619,8 +2619,8 @@ pub(crate) fn with_rayleigh_adding<R>(rules: RayleighAddingRules, run: impl FnOn
 /// hold, [`HazeLayerRules`] with its `Clear` arm, the guards in [`hazed_bins`],
 /// [`anti_greenhouse_share`] and [`step_anti_greenhouse`] and the one in `escaping`'s solve that
 /// builds the step's closure, the tests' switch, its line in `with_scattering_held` and its tripwire
-/// (`the_haze_layer_is_held_only_until_the_26_bump`).
-pub(crate) const HAZE_LAYER_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+/// (`the_haze_layer_is_held_only_until_the_27_bump`).
+pub(crate) const HAZE_LAYER_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether a hazy air's haze absorbs (its hold, [`HAZE_LAYER_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

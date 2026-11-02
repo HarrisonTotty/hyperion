@@ -80,14 +80,12 @@ use crate::galaxy::displaced::{
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::imf::MassBand;
 use crate::id::{BodyId, SystemId};
-use crate::math;
 use crate::rng::{Mark, ObjectKey, PiecewiseLinear, Stream, Threshold, tags};
 use crate::stellar::brief::{IRON_CORE_CORNERS, STATED_FACTOR};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::fates::{FateRoute, FittedFates, stripped_mark_matters};
 use crate::stellar::remnant::RemnantKind;
 use crate::stellar::remnant::collapse::RemnantDraws;
-use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{Fate, MAX_INITIAL_MASS, TrackOptions, fate_of, lifetime_under};
 use crate::stellar::system::{draw_metallicity, metallicity_of, primary_draws};
 use crate::stellar::{Composition, Phase};
@@ -119,36 +117,6 @@ pub(crate) enum PlacementFateRules {
     /// ([`table_fate`]), and the time since death is drawn after its lifetime bracket's upper
     /// end; elsewhere the exact fate, as under [`PlacementFateRules::Exact`].
     Fitted,
-}
-
-/// The initial masses, M☉, below which the Humphreys–Davidson arms build the same track, bit for
-/// bit, by the least \[Fe/H\] of `z_fit` from which each holds, ascending: no lighter star's track
-/// reaches the limit, past which the arms' winds part (`wind`'s), so that the fate table, fitted
-/// under the version's arm, is the table of either arm's fates there. The hold's sweep finds the
-/// first track the arms part at 31.7 M☉ at the least `z_fit`, 39.2 at \[Fe/H\] −0.55, 42.8 at
-/// −0.25, 49.4 at 0, 51.5 at +0.05 and 54.4 at +0.1, rising with the metallicity between; each
-/// step is about nine tenths of the first at its least \[Fe/H\] (−2.3 is `Z_FIT_MIN`'s).
-pub(super) const HD_FREE_MASSES: [(f64, f64); 6] = [
-    (-2.3, 30.0),
-    (-0.55, 36.0),
-    (-0.25, 39.0),
-    (0.0, 45.0),
-    (0.05, 47.0),
-    (0.1, 50.0),
-];
-
-/// The initial mass below which the Humphreys–Davidson arms build the same track for a star of
-/// `composition` ([`HD_FREE_MASSES`]), read at the \[Fe/H\] of its `z_fit`, as the fate table
-/// reads it.
-#[must_use]
-pub(super) fn hd_free_mass(composition: &Composition) -> SolarMasses {
-    let fe_h = math::log10(composition.z_fit().value() / 0.02);
-    let step = HD_FREE_MASSES
-        .iter()
-        .rev()
-        .find(|&&(least, _)| fe_h >= least)
-        .unwrap_or(&HD_FREE_MASSES[0]);
-    SolarMasses::new(step.1)
 }
 
 /// The attempts layer D's runaway reduction makes before it keeps the last: a star is rejected
@@ -377,7 +345,7 @@ fn fate(galaxy: &Galaxy, m: SolarMasses, composition: &Composition, draws: &Star
     };
     let rules = galaxy.rules();
     if rules.placement_fates == PlacementFateRules::Fitted
-        && let Some(read) = table_fate(rules.stellar, m, composition, draws)
+        && let Some(read) = table_fate(m, composition, draws)
     {
         return read;
     }
@@ -392,10 +360,8 @@ fn fate(galaxy: &Galaxy, m: SolarMasses, composition: &Composition, draws: &Star
 }
 
 /// The fate table's read of the fate of a star of `m` (at most [`MAX_INITIAL_MASS`]),
-/// `composition` and `draws` under the stellar rules `rules`, or `None` where it cannot stand for
-/// the track's:
+/// `composition` and `draws`, or `None` where it cannot stand for the track's:
 ///
-/// - under a Humphreys–Davidson arm the table was not fitted for, from [`hd_free_mass`] up;
 /// - where the table does not answer ([`FittedFates::fate_fitted`]): outside its domain, across a
 ///   change of route, or in a cell whose validation failed;
 /// - for a white dwarf's route or no remnant's, where the companion-stripped mark can move the
@@ -412,14 +378,10 @@ fn fate(galaxy: &Galaxy, m: SolarMasses, composition: &Composition, draws: &Star
 /// death age.
 #[must_use]
 pub(super) fn table_fate(
-    rules: StellarRules,
     m: SolarMasses,
     composition: &Composition,
     draws: &StarDraws,
 ) -> Option<FateRead> {
-    if !(rules.hd_limit.fitted_tables_hold() || m < hd_free_mass(composition)) {
-        return None;
-    }
     let fate = FittedFates::generator().fate_fitted(m, composition, draws.eta())?;
     let remnant = match fate.route {
         FateRoute::HeliumWhiteDwarf

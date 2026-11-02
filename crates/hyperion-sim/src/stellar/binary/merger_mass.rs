@@ -28,12 +28,12 @@ use crate::stellar::rules::StellarRules;
 ///
 /// Below it every pair takes the held arm, [`MergerMassRules::ThermalLimit`], the code of version
 /// 24 verbatim, so every generated value keeps its bits; the tests reach the new arm through
-/// `StellarRules::every_26_hold()`. The bump to 26 deletes this hold: this module with
+/// `StellarRules::every_27_hold()`. The bump to 27 deletes this hold: this module with
 /// [`MergerMassRules`], the stellar rules' `merger_mass` field, `merge_dynamically`'s match on it,
 /// the brief's read of [`MergerMassRules::fitted_tables_hold`], and the tripwire
-/// (`the_merger_mass_is_held_only_until_the_26_bump`); the bump refits the pair-light and reach
+/// (`the_merger_mass_is_held_only_until_the_27_bump`); the bump refits the pair-light and reach
 /// tables, which the engine's runs fit.
-pub(crate) const MERGER_MASS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+pub(crate) const MERGER_MASS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// What a dynamically transferring pair's merger keeps when its accretor is on the main sequence
 /// or in the Hertzsprung gap (the stellar rules' `merger_mass` field, the hold of

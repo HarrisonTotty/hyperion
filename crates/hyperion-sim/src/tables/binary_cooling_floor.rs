@@ -6,7 +6,7 @@
 //! inputs-sha256: ad373b9c00ea234be39929744e186614c28d487bde080e3739c08f98c9b41bc4
 //! manifest: crates/hyperion-fit/manifests/binary_cooling_floor.toml
 //! data: none
-//! sim-fingerprint: 865fd609e7e59330e3e687b9859d7cb99148678e6ba550dead1a5ca81d0df9e5
+//! sim-fingerprint: 94076dbb0e9ae8417ffaa7088e6f08c1feffa7a899c7f11d44b77f40e6c780e2
 //! since-generator-version: 21
 //! source: the generator's own cooling fits below 0.1 M☉ (P06.T13: Burrows, Hubbard, Lunine and
 //!   Liebert 2001, Rev. Mod. Phys. 73, 719, and Baraffe et al. 2015, A&A 577, A42) through plan

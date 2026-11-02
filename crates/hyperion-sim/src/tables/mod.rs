@@ -304,13 +304,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "lbv",
         revision: 0,
-        since_generator_version: 24,
+        since_generator_version: 26,
         provisional: false,
     },
     TableInfo {
         name: "lifetime_bracket",
         revision: 0,
-        since_generator_version: 22,
+        since_generator_version: 26,
         provisional: false,
     },
     TableInfo {
@@ -370,13 +370,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "sky_envelope",
         revision: 0,
-        since_generator_version: 19,
+        since_generator_version: 26,
         provisional: false,
     },
     TableInfo {
         name: "sky_phase_envelope",
         revision: 0,
-        since_generator_version: 21,
+        since_generator_version: 26,
         provisional: false,
     },
     TableInfo {
@@ -418,7 +418,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "stellar_fates_high",
         revision: 0,
-        since_generator_version: 16,
+        since_generator_version: 26,
         provisional: false,
     },
     TableInfo {
@@ -442,13 +442,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "stripping",
         revision: 0,
-        since_generator_version: 16,
+        since_generator_version: 26,
         provisional: false,
     },
     TableInfo {
         name: "stripping_helium",
         revision: 0,
-        since_generator_version: 24,
+        since_generator_version: 26,
         provisional: false,
     },
     TableInfo {

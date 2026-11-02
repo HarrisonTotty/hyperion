@@ -1353,7 +1353,6 @@ impl RecentDeath {
             draws.eta(),
             candidate.age_at_epoch,
             || draws.clone(),
-            galaxy.rules().stellar,
             candidate.lifetime,
         )?;
         let stars = SystemStars::generate_with(

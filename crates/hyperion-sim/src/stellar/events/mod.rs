@@ -24,8 +24,8 @@
 //! [`StarEvents`] builds each kind's model of one star once and lists its events of every kind as
 //! [`StarEvent`]s, over a window ([`events_in`]) or running at a time ([`active_at`]), each by
 //! onset, then kind, then ID; [`StarEvents::at`] also composes the light they make,
-//! [`EventEffects`], which a star's summary carries beside its track's state from version 26
-//! (`STAR_EVENTS_VERSION`), the state itself unchanged:
+//! [`EventEffects`], which a star's summary carries beside its track's state, the state itself
+//! unchanged:
 //!
 //! - L = min(L(t) + Σ `ΔLᵢ`, max(`L_Edd`, L(t))) + ΔL of a giant eruption: L(t) the track's, and the
 //!   excesses `ΔLᵢ` = (Fᵢ − 1) × L summed in the order flares (L the flare model's, the epoch's),
@@ -52,7 +52,6 @@ pub mod lbv;
 pub mod magnetar;
 pub mod thermal_pulse;
 
-use crate::GeneratorVersion;
 use crate::events::{EventId, EventSeries, TimeWindow, tags};
 use crate::id::BodyId;
 use crate::math;
@@ -71,29 +70,6 @@ use glitches::{Glitch, GlitchCycle, GlitchModel, LargeGlitch};
 use lbv::{Eruption, LbvModel};
 use magnetar::{Burst, GiantFlare, MagnetarModel, MagnetarSeries};
 use thermal_pulse::{ThermalPulse, ThermalPulseModel};
-
-/// The generator version from which a star's summary composes its active events (P06.T28.g): 26,
-/// with P06.T24.b's classes (decision-bump-plan-after-22: "25 if landed when its wiring starts,
-/// else 26").
-///
-/// It is P06.T28.g's one hold, carried as [`StellarRules::star_events`]. Below it a summary holds
-/// no events and no event light, and the wire sends no `active_events`, so every figure is
-/// version 24's and 25's bit for bit; [`events_in`], [`active_at`] and [`StarEvents`] are new functions,
-/// which no version's output reads yet. 26's bump deletes this hold, [`StarEventRules`] with its
-/// `Held` arm, the field and its tripwire (`the_star_events_are_held_only_until_the_26_bump`).
-///
-/// [`StellarRules::star_events`]: crate::stellar::rules::StellarRules::star_events
-pub(crate) const STAR_EVENTS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whether a star's summary composes its active events (P06.T28.g's hold,
-/// [`STAR_EVENTS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum StarEventRules {
-    /// Version 25's and before: no events in the summary, and the track's light.
-    Held,
-    /// Version 26's: the summary's active events and the light they make ([`EventEffects`]).
-    Composed,
-}
 
 /// What kind of single-star event a [`StarEvent`] is (P06.T28.g): the wire's kinds. A magnetar's
 /// outburst episode is none: its bursts are.

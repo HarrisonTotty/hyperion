@@ -4292,7 +4292,7 @@ mod tests {
     fn under_every_26_hold_the_icy_moons_take_their_rock_s_lag() {
         use crate::planetary::derive::atmosphere::{Gas, SurfaceState, jeans_parameter};
         use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
-        use crate::planetary::testing::with_every_26_hold;
+        use crate::planetary::testing::with_every_26_hold_with_its_retargets;
         let jupiter = table_giant("Jupiter", 5, None);
         let saturn = table_giant("Saturn", 6, None);
         let neptune = table_giant("Neptune", 8, None);
@@ -4314,9 +4314,10 @@ mod tests {
             };
             for rank in every_rank(keep) {
                 let derive = || own_moon((kg, rank), &orbit, giant, &volatiles, bulk);
-                let (at_24, at_26) = (derive(), with_every_26_hold(derive));
-                let held =
-                    with_every_26_hold(|| with_icy_regolith(IcyRegolithRules::Frost, derive));
+                let (at_24, at_26) = (derive(), with_every_26_hold_with_its_retargets(derive));
+                let held = with_every_26_hold_with_its_retargets(|| {
+                    with_icy_regolith(IcyRegolithRules::Frost, derive)
+                });
                 let (bond_24, bond_26) = (at_24.albedo().value(), at_26.albedo().value());
                 let lambda = |moon: &DerivedMoon| {
                     jeans_parameter(
@@ -4340,7 +4341,7 @@ mod tests {
                 );
                 assert_eq!(
                     format!("{at_26:?}"),
-                    format!("{:?}", with_every_26_hold(derive)),
+                    format!("{:?}", with_every_26_hold_with_its_retargets(derive)),
                     "{name}: twice under the rule"
                 );
                 assert_same_bits(
@@ -4396,7 +4397,7 @@ mod tests {
             HazeLayerRules, sediment_share, snapshot_haze_optical_depth, with_haze_layer,
             with_scattering_held,
         };
-        use crate::planetary::testing::with_every_26_hold;
+        use crate::planetary::testing::with_every_26_hold_with_its_retargets;
         let saturn = table_giant("Saturn", 6, None);
         let ((kg, keep), orbit) = table_moon(TITAN, &saturn);
         for rank in every_rank(keep) {
@@ -4409,17 +4410,19 @@ mod tests {
                     MoonBulk::Derived,
                 )
             };
-            let at_26 = with_every_26_hold(derive);
+            let at_26 = with_every_26_hold_with_its_retargets(derive);
             assert_eq!(
                 format!("{at_26:?}"),
-                format!("{:?}", with_every_26_hold(derive)),
+                format!("{:?}", with_every_26_hold_with_its_retargets(derive)),
                 "Titan at {rank:?}: twice under every 26 hold"
             );
-            let held = with_every_26_hold(|| with_scattering_held(derive));
-            let clear = with_every_26_hold(|| with_haze_layer(HazeLayerRules::Clear, derive));
+            let held = with_every_26_hold_with_its_retargets(|| with_scattering_held(derive));
+            let clear = with_every_26_hold_with_its_retargets(|| {
+                with_haze_layer(HazeLayerRules::Clear, derive)
+            });
             let air = at_26.atmosphere();
             let (cloud, bond) = (air.cloud_fraction(), at_26.albedo().value());
-            let (haze, sediment) = with_every_26_hold(|| {
+            let (haze, sediment) = with_every_26_hold_with_its_retargets(|| {
                 let haze = snapshot_haze_optical_depth(
                     air.partial_pressures(),
                     at_26.body().surface_gravity(),

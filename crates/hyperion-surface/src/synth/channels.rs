@@ -179,6 +179,12 @@ pub mod incision;
 pub use bend::{BEND_FACTOR, BEND_PARTS};
 use bend::{Bend, CourseEnds};
 
+#[cfg(any(test, feature = "testing"))]
+pub use incision::VarianceCheck;
+pub use incision::{
+    BENT_TRIBUTARY_VARIANCE_SHARE, BENT_WHOLE_VARIANCE_SHARE, MEAN_BENT_TRIBUTARY_LENGTH,
+    WET_TRUNK_SINUOSITY,
+};
 pub use incision::{
     CHANNEL_HEAD_AREA, CUT_WIDTH, ChannelBody, DEBRIS_FLOW_SLOPE, EPOCH_TRUNK_SINUOSITY,
     EpochValley, MEAN_SAMPLES, MEAN_TRIBUTARY_LENGTH, MEAN_TRUNK_LENGTH, TRIBUTARY_SHARE,
@@ -407,6 +413,63 @@ pub fn bankfull_width(discharge_m3_s: f64, gravity: MetresPerSecondSquared) -> M
 pub fn bankfull_depth(discharge_m3_s: f64, gravity: MetresPerSecondSquared) -> Metres {
     let g = check_discharge(discharge_m3_s, gravity);
     Metres::new(BANKFULL_DEPTH_COEFFICIENT * math::powf(discharge_m3_s * discharge_m3_s / g, 0.2))
+}
+
+/// The drainage area, square metres, whose channel at the runoff `runoff_m_per_year` is `width`
+/// wide at bankfull on a body of surface gravity `gravity`: [`bankfull_width`] of
+/// [`channel_forming_discharge_m3_s`] of [`mean_discharge_m3_s`] inverted in closed form, with no
+/// search (R09.T6.i's continuous cut).
+///
+/// The width is B = c Q^(2/5 + 0.0667) with c = 4.63 g^(−1/5) (√(g D) D²)^(−0.0667), so the
+/// channel-forming discharge is (B ÷ c)^(1 ÷ 0.4667); it is 55 (A ÷ 5 km²)^(−1/4) r A ÷ yr between
+/// the ratio's fitted ends, so A = (Q yr ÷ (55 (5 km²)^(1/4) r))^(4/3) there, and Q yr ÷ (ratio r)
+/// beyond either end, where the ratio is held. Infinite where the runoff is zero.
+///
+/// # Panics
+///
+/// If `runoff_m_per_year` or `width` is negative or not finite, or `gravity` is not finite and
+/// positive.
+#[must_use]
+pub(crate) fn cut_area_m2(
+    runoff_m_per_year: f64,
+    width: Metres,
+    gravity: MetresPerSecondSquared,
+) -> f64 {
+    let (runoff, width) = (runoff_m_per_year, width.value());
+    assert!(
+        runoff.is_finite() && runoff >= 0.0 && width.is_finite() && width >= 0.0,
+        "a runoff and a width must be finite and non-negative, got {runoff} m a⁻¹ and {width} m"
+    );
+    if runoff <= 0.0 {
+        return f64::INFINITY;
+    }
+    let g = check_discharge(0.0, gravity);
+    let grain = REFERENCE_GRAIN_SIZE.value();
+    let exponent = 0.4 + BANKFULL_WIDTH_EXPONENT;
+    let coefficient = BANKFULL_WIDTH_COEFFICIENT
+        * math::powf(g, -0.2)
+        * math::powf((g * grain).sqrt() * grain * grain, -BANKFULL_WIDTH_EXPONENT);
+    let forming = math::powf(width / coefficient, 1.0 / exponent);
+    let per_year = forming * SECONDS_PER_JULIAN_YEAR;
+    let (low, high) = BANKFULL_RATIO_RANGE_M2;
+    let ratio_at = |area: f64| {
+        BANKFULL_RATIO * math::powf(area / BANKFULL_RATIO_AREA.value(), BANKFULL_RATIO_EXPONENT)
+    };
+    let between = math::powf(
+        per_year
+            / (BANKFULL_RATIO
+                * math::powf(BANKFULL_RATIO_AREA.value(), -BANKFULL_RATIO_EXPONENT)
+                * runoff),
+        1.0 / (1.0 + BANKFULL_RATIO_EXPONENT),
+    );
+    let area = if between < low {
+        per_year / (ratio_at(low) * runoff)
+    } else if between > high {
+        per_year / (ratio_at(high) * runoff)
+    } else {
+        between
+    };
+    num::assert_finite(area)
 }
 
 /// A tributary's steepness index, m^0.9, in a coarse cell of geometric steepness index
@@ -864,7 +927,10 @@ enum Kind {
     /// A tributary: the cell heading the segment it joins and the parameter there, its steepness
     /// index (m^0.9, [`tributary_steepness_m0_9`]), the main stream's length above its key point and
     /// its own length (metres), and the height above the datum of its trunk's valley top, which it
-    /// inherits at its join (metres; see [`Channels::incision_at`]).
+    /// inherits at its join (metres; see [`Channels::incision_at`]); the factor φ on its
+    /// stream-power rise, which brings its head to its own relief (1 below R09.T6.i), the weight
+    /// the continuous cut gives its groove (1 below R09.T6.i) and its bent course, `None` for one
+    /// straight chord (R09.T6.i).
     Tributary {
         parent: PatchKey,
         at: f64,
@@ -872,6 +938,9 @@ enum Kind {
         head_m: f64,
         length_m: f64,
         top_m: f64,
+        scale: f64,
+        weight: f64,
+        bend: Option<Arc<Bend>>,
     },
 }
 
@@ -941,6 +1010,10 @@ impl Segment {
             Kind::Trunk {
                 bend: Some(ref bend),
                 ..
+            }
+            | Kind::Tributary {
+                bend: Some(ref bend),
+                ..
             } => bend.point_m(t),
             Kind::Trunk {
                 exit, crossing_m, ..
@@ -965,28 +1038,22 @@ impl Segment {
         }
     }
 
-    /// Its course's points, body-fixed, metres, where it is a bent trunk (R09.T6.h): its key
-    /// point, its first chord's [`BEND_PARTS`] − 1, its crossing, its second chord's and its
-    /// receiver's key point; `None` for a straight trunk or a tributary.
+    /// Its course's points, body-fixed, metres, where it is bent: a trunk's key point, its first
+    /// chord's [`BEND_PARTS`] − 1, its crossing, its second chord's and its receiver's key point
+    /// (R09.T6.h), or a tributary's key point, its chord's [`BEND_PARTS`] − 1 and its join
+    /// (R09.T6.i); `None` for straight chords.
     #[must_use]
     pub fn bend_m(&self) -> Option<&[[f64; 3]]> {
-        match self.kind {
-            Kind::Trunk {
-                bend: Some(ref bend),
-                ..
-            } => Some(bend.points()),
-            Kind::Trunk { .. } | Kind::Tributary { .. } => None,
-        }
+        self.bend().map(|bend| bend.points())
     }
 
     /// Its length along it: the chord's, a trunk's two chords', or its bent course's sub-chords'.
     #[must_use]
     pub fn length(&self) -> Metres {
+        if let Some(bend) = self.bend() {
+            return Metres::new(bend.length_m());
+        }
         Metres::new(match self.kind {
-            Kind::Trunk {
-                bend: Some(ref bend),
-                ..
-            } => bend.length_m(),
             Kind::Trunk { crossing_m, .. } => {
                 distance(self.from_m, crossing_m) + distance(crossing_m, self.to_m)
             }
@@ -1033,8 +1100,9 @@ impl Segment {
                 steepness,
                 head_m,
                 length_m,
+                scale,
                 ..
-            } => self.bed_to_m + rise(steepness, head_m + t * length_m, head_m + length_m),
+            } => self.bed_to_m + scale * rise(steepness, head_m + t * length_m, head_m + length_m),
         })
     }
 
@@ -1081,9 +1149,9 @@ impl Segment {
         check_parameter(t);
         match self.kind {
             Kind::Trunk { .. } => (self.bed_from_m - self.bed_to_m) / self.length().value(),
-            Kind::Tributary { steepness, .. } => {
-                tributary_slope(steepness, self.main_stream_at(t).value())
-            }
+            Kind::Tributary {
+                steepness, scale, ..
+            } => scale * tributary_slope(steepness, self.main_stream_at(t).value()),
         }
     }
 
@@ -1190,13 +1258,13 @@ impl Segment {
     }
 
     /// How many straight chords its course has: a trunk's two, or its bent course's 2D, and a
-    /// tributary's one.
+    /// tributary's one, or its bent course's D.
     #[must_use]
     fn chord_count(&self) -> usize {
-        match self.kind {
-            Kind::Trunk { bend: Some(_), .. } => 2 * BEND_PARTS,
-            Kind::Trunk { .. } => 2,
-            Kind::Tributary { .. } => 1,
+        match (&self.kind, self.bend()) {
+            (_, Some(bend)) => bend.halves() * BEND_PARTS,
+            (Kind::Trunk { .. }, None) => 2,
+            (Kind::Tributary { .. }, None) => 1,
         }
     }
 
@@ -1204,18 +1272,15 @@ impl Segment {
     /// spans, in order from its key point.
     #[must_use]
     fn chord(&self, k: usize) -> Chord {
-        match (&self.kind, self.chords()) {
-            (
-                Kind::Trunk {
-                    bend: Some(bend), ..
-                },
-                _,
-            ) => bend
+        if let Some(bend) = self.bend() {
+            return bend
                 .chords(k / BEND_PARTS)
                 .nth(k % BEND_PARTS)
-                .expect("a bent course has 2D sub-chords"),
-            (_, Some(chords)) => chords[k],
-            (_, None) => Chord {
+                .expect("a bent course has D sub-chords a half");
+        }
+        match self.chords() {
+            Some(chords) => chords[k],
+            None => Chord {
                 from: self.from_m,
                 to: self.to_m,
                 span: (0.0, 1.0),
@@ -1223,14 +1288,67 @@ impl Segment {
         }
     }
 
-    /// Its bent course, where it is a bent trunk.
+    /// Its bent course, where it is bent.
     #[must_use]
     fn bend(&self) -> Option<&Arc<Bend>> {
         match self.kind {
-            Kind::Trunk { ref bend, .. } => bend.as_ref(),
-            Kind::Tributary { .. } => None,
+            Kind::Trunk { ref bend, .. } | Kind::Tributary { ref bend, .. } => bend.as_ref(),
         }
     }
+}
+
+impl Segment {
+    /// Scales a tributary's stream-power rise by φ = max(1, (`G_join` − `R_head`) ÷ rise(Lₖ, Lₖ +
+    /// ℓ)), its inherited top less its bed at its join over its own rise, less the relief above its
+    /// key point from its cell's channel heads, so that its depth below the top falls from its
+    /// parent's at its join (Playfair's accordant junctions: Playfair 1802, *Illustrations of the
+    /// Huttonian Theory of the Earth*, §99; Niemann, Gasparini, Tucker and Bras 2001, Earth Surf.
+    /// Process. Landforms 26, 1317, `doi:10.1002/esp.272`) to its own relief at its head
+    /// (R09.T6.i's (a)). Its bed and its children's joins then read φ, so every finer join stays
+    /// accordant bit for bit.
+    fn accord(&mut self) {
+        let Kind::Tributary {
+            steepness,
+            head_m,
+            length_m,
+            top_m,
+            ref mut scale,
+            ..
+        } = self.kind
+        else {
+            unreachable!("a trunk's bed is its cells' water");
+        };
+        let join = top_m - self.bed_to_m;
+        let total = rise(steepness, head_m, head_m + length_m);
+        if total > 0.0 {
+            *scale = num::assert_finite(num::max(
+                1.0,
+                (join - head_relief_m(steepness, head_m)) / total,
+            ));
+        }
+    }
+}
+
+/// `R_head`, the relief a tributary of steepness index `steepness` (m^0.9) cuts above its key point
+/// `head_m` metres of main stream from its divide: the rise from its cell's channel heads
+/// ([`channel_head_area`], Hack's length) down to it, zero where the key point lies above them
+/// (R09.T6.i's (a); its closed forms read the same).
+#[must_use]
+pub(crate) fn head_relief_m(steepness: f64, head_m: f64) -> f64 {
+    let heads = main_stream_length(channel_head_area(steepness)).value();
+    if head_m > heads {
+        rise(steepness, heads, head_m)
+    } else {
+        0.0
+    }
+}
+
+/// The weight on a level-`level` groove of a continuous cut `cut` (a level): clamp(ℓ − k + 1, 0, 1),
+/// whole down to the cut's whole part, its fraction at the next level and nothing below (R09.T6.i's
+/// (e); its closed forms read the same).
+#[must_use]
+pub(crate) fn cut_weight(cut: f64, level: u8) -> f64 {
+    num::max(0.0, num::min(cut - f64::from(level) + 1.0, 1.0))
 }
 
 /// Asserts a segment's parameter is in [0, 1].
@@ -1379,6 +1497,37 @@ impl Channels {
         Bend::new(ends, straight_m, self.figure, &stream, BEND_FACTOR)
     }
 
+    /// The bent course of the tributary of `cell`, whose key point is the unit direction `key`, into
+    /// its join `best` ([`Bend::tributary`]), its ends the spheroid points `ends`: drawn on
+    /// `surface.channel.bend` keyed by its own cell, with the trunks' [`BEND_FACTOR`] of its own
+    /// chord at every level, not quartered at each as Dendry's levels are (R09.T6.i's (d), the
+    /// look's choice: quartered, the finer tributaries drew as straight thorns at 150 m and the
+    /// junction angles' interquartile range was 4° on the reference Earth, against 17° here).
+    #[must_use]
+    fn tributary_bend(
+        &self,
+        cell: PatchKey,
+        key: [f64; 3],
+        best: &Nearest,
+        ends: [[f64; 3]; 2],
+    ) -> Bend {
+        let (a, c) = (self.figure.equatorial_radius_m, self.figure.polar_radius_m);
+        let direction = |p: [f64; 3]| unit_dir([p[0] / a, p[1] / a, p[2] / c]);
+        let stream = self.seed.stream(
+            SURFACE_CHANNEL_BEND,
+            ObjectKey::surface_cell(cell.face().index(), cell.level(), cell.i(), cell.j(), 0)
+                .expect("a patch key is a surface cell"),
+        );
+        Bend::tributary(
+            cell,
+            [key, direction(best.point), direction(best.segment.to_m)],
+            ends,
+            self.figure,
+            &stream,
+            BEND_FACTOR,
+        )
+    }
+
     /// The key point `cell` draws for itself on `surface.channel`, before inheritance.
     #[must_use]
     fn drawn_key_point(&self, cell: PatchKey) -> KeyPoint {
@@ -1435,12 +1584,17 @@ struct Nearest {
     segment: Segment,
     at: f64,
     point: [f64; 3],
+    /// The chord its point lies on.
+    chord: Chord,
 }
 
 impl Nearest {
     /// Whether this is nearer than `other`, ties to the coarser level, then the lower cell key,
-    /// then the lower parameter along the segment: a total order, so the winner does not depend on
-    /// the order the candidates are offered in (both parameters are finite, and never −0).
+    /// then the lower parameter along the segment, then the chord whose span starts lower (at a
+    /// vertex two chords share, so that R09.T6.i's junction angle reads the same chord): a total
+    /// order, so the winner does not depend on the order the candidates are offered in (every
+    /// parameter is finite, and never −0), but for a zero-length sub-chord, which ties the next
+    /// one's start and is decided by the search's fixed order, the course's.
     #[must_use]
     fn beats(&self, other: &Self) -> bool {
         self.distance2
@@ -1449,6 +1603,7 @@ impl Nearest {
                 (self.level, self.owner.to_u64()).cmp(&(other.level, other.owner.to_u64()))
             })
             .then_with(|| self.at.total_cmp(&other.at))
+            .then_with(|| self.chord.span.0.total_cmp(&other.chord.span.0))
             .is_lt()
     }
 }
@@ -1472,11 +1627,44 @@ fn nearest_on(q: [f64; 3], part: &Part<'_>, level: u8) -> Nearest {
         segment: part.segment.clone(),
         at,
         point,
+        chord: part.chord,
     }
 }
 
-/// What a [`NetworkMemo`] was filled for: its body, seed, level, radius, figure and gravity, and the
-/// header's sea level, realised `σ_h` and relief, which tell one coarse pass's field from another's.
+/// cot α of the junction angle α between a tributary and its parent's upstream branch: cot 72°,
+/// the nearest double, a literal so that no tangent runs (R09.T6.i). 72° is the humid mean of
+/// Seybold, Rothman and Kirchner 2017 (GRL 44, 2272, doi:10.1002/2016GL072089, §2.2 and Fig. 2e:
+/// of 934,207 `NHDPlus` Version 2 junctions, those at an aridity index P ÷ PET of at least 2 average
+/// 72 ± 1°, a standard error, their SD about 35°; the angle is between the orthogonal-regression
+/// lines of the two upstream tributaries); the arid end-member's 47 ± 1° (an index of at most 0.2)
+/// is not modelled (a deferred item).
+pub const JUNCTION_ANGLE_COT: f64 = 0.324_919_696_232_906_34;
+
+impl Nearest {
+    /// The join moved downstream along its parent's course, from `q`'s projection on its chosen
+    /// chord's line, by d cot α, d the distance from `q` to the line, held to the parent's ends, so
+    /// that the tributary meets its parent at the junction angle ([`JUNCTION_ANGLE_COT`]; Dendry's
+    /// `AngleMid`, from its description, R09.T6.i). The candidate and its ties are the nearest
+    /// point's; the shift runs along the course, past the chord's end where the course bends, since
+    /// a bent parent's sub-chords are shorter than the shift.
+    fn at_the_junction_angle(&mut self, q: [f64; 3]) {
+        let Chord { from, to, span } = self.chord;
+        let ab = [0, 1, 2].map(|k| to[k] - from[k]);
+        let aq = [0, 1, 2].map(|k| q[k] - from[k]);
+        let ab2 = dot(ab, ab);
+        let along = dot(aq, ab) / ab2;
+        let foot = [0, 1, 2].map(|k| from[k] + along * ab[k]);
+        let d = distance(q, foot);
+        let length = self.segment.length().value();
+        let moved = span.0 + (span.1 - span.0) * along + d * JUNCTION_ANGLE_COT / length;
+        self.at = num::max(0.0, num::min(num::assert_finite(moved), 1.0));
+        self.point = self.segment.point_m(self.at);
+    }
+}
+
+/// What a [`NetworkMemo`] was filled for: its body, seed, level, radius, figure and gravity, the
+/// header's sea level, realised `σ_h` and relief, which tell one coarse pass's field from another's,
+/// and its channel rules.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct NetworkId {
     seed: DetailSeed,
@@ -1493,6 +1681,8 @@ pub(crate) struct NetworkId {
 pub(crate) struct NetworkMemo {
     key_points: BTreeMap<u64, KeyPoint>,
     segments: BTreeMap<u64, Option<Segment>>,
+    /// Per coarse cell, its corners' tributary steepness, runoff and cut (R09.T6.i).
+    continuity: BTreeMap<u64, Continuity>,
 }
 
 impl NetworkMemo {
@@ -1502,6 +1692,7 @@ impl NetworkMemo {
         Self {
             key_points: BTreeMap::new(),
             segments: BTreeMap::new(),
+            continuity: BTreeMap::new(),
         }
     }
 
@@ -1509,6 +1700,58 @@ impl NetworkMemo {
     #[must_use]
     fn len(&self) -> (usize, usize) {
         (self.key_points.len(), self.segments.len())
+    }
+}
+
+/// A coarse cell's corners for R09.T6.i's continuity across coarse cells (its (e)): at each corner,
+/// in [`Correction`](incision)'s order (0, 0), (1, 0), (1, 1), (0, 1), the mean over the cells that
+/// share it, in packed-key order, of their tributaries' steepness index (m^0.9, zero where a cell
+/// carries none), their own runoff (m a⁻¹) and their continuous cut ([`incision::cut_level`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Continuity {
+    steepness: [f64; 4],
+    runoff_m_per_year: [f64; 4],
+    level: [f64; 4],
+}
+
+/// What [`Continuity`] gives a tributary at its key point.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ContinuousAt {
+    /// Its steepness index, m^0.9.
+    pub(crate) steepness: f64,
+    /// Its runoff, m a⁻¹.
+    pub(crate) runoff_m_per_year: f64,
+    /// Its continuous cut, a level.
+    pub(crate) level: f64,
+}
+
+impl Continuity {
+    /// Its values at `key`, a key point in the coarse cell `coarse`, bilinear in the cell's face
+    /// coordinates between its corners.
+    #[must_use]
+    fn at(&self, key: KeyPoint, coarse: PatchKey) -> ContinuousAt {
+        let side = f64::from(1_u32 << coarse.level());
+        let (s, t) = key.st();
+        let x = s * side - f64::from(coarse.i());
+        let y = t * side - f64::from(coarse.j());
+        let bilinear = |[c00, c10, c11, c01]: [f64; 4]| {
+            let low = c00 + x * (c10 - c00);
+            let high = c01 + x * (c11 - c01);
+            num::assert_finite(low + y * (high - low))
+        };
+        ContinuousAt {
+            steepness: num::max(0.0, bilinear(self.steepness)),
+            runoff_m_per_year: num::max(0.0, bilinear(self.runoff_m_per_year)),
+            level: bilinear(self.level),
+        }
+    }
+
+    /// The deepest of its corners' cuts, which bounds the cut anywhere in the cell.
+    #[must_use]
+    pub(crate) fn deepest(&self) -> f64 {
+        self.level
+            .iter()
+            .fold(f64::NEG_INFINITY, |a, &b| num::max(a, b))
     }
 }
 
@@ -1666,15 +1909,12 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
         let (from_m, to_m) = (figure.point(from), figure.point(to));
         let crossed = crossing(coarse, edge, from, to);
         let crossing_m = figure.point(crossed);
-        // A world dry now's trunk is bent (R09.T6.h); its ends stay the straight trunk's.
-        let bend = if own.epoch_incision.is_epoch() {
-            let ends = self.course_ends(coarse, receiver, into, [from, crossed, to])?;
-            Some(Arc::new(
-                self.channels.bend(&ends, [from_m, crossing_m, to_m]),
-            ))
-        } else {
-            None
-        };
+        // Every trunk is bent (R09.T6.h on a world dry now, R09.T6.i on one wet now); its ends
+        // stay the straight trunk's.
+        let ends = self.course_ends(coarse, receiver, into, [from, crossed, to])?;
+        let bend = Some(Arc::new(
+            self.channels.bend(&ends, [from_m, crossing_m, to_m]),
+        ));
         let exit = if let Some(bend) = &bend {
             bend.exit()
         } else {
@@ -1703,10 +1943,16 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
                 Some(num::assert_finite(onward)),
             )
         } else {
+            // Its valley grades to its receiver's where the receiver is dry (R09.T6.i).
+            let onward = if into.is_under_water() {
+                None
+            } else {
+                Some(num::assert_finite(self.onward_valley_m(receiver, into)?))
+            };
             (
                 trunk_valley_m(own, into, self.channels.sea_level(), self.channels.body()),
                 None,
-                None,
+                onward,
             )
         };
         Ok(Some(Segment {
@@ -1729,6 +1975,29 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
                 receiver_valley_m,
             },
         }))
+    }
+
+    /// The valley depth of the steady-state trunk of the dry coarse cell `receiver`, whose record is
+    /// `into`, to which a trunk into it grades (R09.T6.i): its [`trunk_valley_m`], reading its own
+    /// receiver, and zero where it heads no trunk.
+    fn onward_valley_m(
+        &mut self,
+        receiver: PatchKey,
+        into: &SynthesisCell,
+    ) -> Result<f64, ReadCellError> {
+        let Some(edge) = into.flow.edge() else {
+            return Ok(0.0);
+        };
+        if into.catchment_runoff == LogRunoff::NONE {
+            return Ok(0.0);
+        }
+        let beyond = read(self.field, receiver.edge_neighbour(edge))?;
+        Ok(trunk_valley_m(
+            into,
+            beyond,
+            self.channels.sea_level(),
+            self.channels.body(),
+        ))
     }
 
     /// The ends a bent trunk of the coarse cell `coarse` runs through to `receiver`, whose record
@@ -1783,14 +2052,48 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
         })
     }
 
+    /// The coarse cell `coarse`'s corners for R09.T6.i's continuity ([`Continuity`]), memoised;
+    /// it reads the cells within one king move.
+    pub(crate) fn continuity(&mut self, coarse: PatchKey) -> Result<Continuity, ReadCellError> {
+        let key = coarse.to_u64();
+        if let Some(&memo) = self.memo.get().continuity.get(&key) {
+            return Ok(memo);
+        }
+        let body = self.channels.body();
+        let mut out = Continuity {
+            steepness: [0.0; 4],
+            runoff_m_per_year: [0.0; 4],
+            level: [0.0; 4],
+        };
+        for (n, cells) in incision::corner_cells(coarse).iter().enumerate() {
+            let (mut steepness, mut runoff, mut level) = (0.0, 0.0, 0.0);
+            for &cell in cells {
+                let record = read(self.field, cell)?;
+                steepness += tributary_steepness_of(record).unwrap_or(0.0);
+                runoff += record.runoff.metres_per_year();
+                level += incision::cut_level(record, body);
+            }
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "three or four cells, exact in f64"
+            )]
+            let count = cells.len() as f64;
+            out.steepness[n] = steepness / count;
+            out.runoff_m_per_year[n] = runoff / count;
+            out.level[n] = level / count;
+        }
+        self.memo.get().continuity.insert(key, out);
+        Ok(out)
+    }
+
     /// The tributary of `cell`, finer than the first level.
     fn tributary(&mut self, cell: PatchKey) -> Result<Option<Segment>, ReadCellError> {
         let first = self.channels.level;
         let coarse = ancestor(cell, first);
         let own = *read(self.field, coarse)?;
-        let Some(steepness) = tributary_steepness_of(&own) else {
+        if tributary_steepness_of(&own).is_none() {
             return Ok(None);
-        };
+        }
         // A world dry now's epoch cut its trunks alone: its level cut is the coarse level
         // (R09.T6.c; [`EpochValley`]).
         if own.epoch_incision.is_epoch() {
@@ -1799,6 +2102,14 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
         if self.is_inherited(cell) {
             return Ok(None);
         }
+        // Its steepness, runoff and cut are its coarse cell's interpolated at its key point
+        // (R09.T6.i's (e)).
+        let at = self.continuity(coarse)?.at(self.key_point(cell), coarse);
+        let (steepness, runoff_m_per_year, weight) = (
+            at.steepness,
+            at.runoff_m_per_year,
+            cut_weight(at.level, cell.level()),
+        );
         let figure = self.channels.figure;
         let q = figure.point(self.key_point(cell).dir());
         let mut best: Option<Nearest> = None;
@@ -1822,12 +2133,23 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
                 }
             }
         }
-        let best = best
+        let mut best = best
             .expect("a coarse cell with channels has a trunk, so its key points find a segment");
         if best.distance2 <= 0.0 {
             return Ok(None);
         }
-        let length_m = distance(q, best.point);
+        // The join moves to the junction angle (R09.T6.i's (c)) and the course bends into it (its
+        // (d)).
+        best.at_the_junction_angle(q);
+        let bend = Some(Arc::new(self.channels.tributary_bend(
+            cell,
+            self.key_point(cell).dir(),
+            &best,
+            [q, best.point],
+        )));
+        let length_m = bend
+            .as_ref()
+            .map_or_else(|| distance(q, best.point), |b| b.length_m());
         let mut segment = Segment {
             cell,
             from_m: q,
@@ -1844,11 +2166,15 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
                 head_m: head_length(self.channels.radius, cell.level()).value(),
                 length_m,
                 top_m: num::assert_finite(best.segment.top_at(best.at)),
+                scale: 1.0,
+                weight,
+                bend,
             },
         };
+        segment.accord();
         segment.bed_from_m = num::assert_finite(segment.bed_at(0.0).value());
         let (discharge, width_m, depth_m) = channel_size(
-            own.runoff.metres_per_year(),
+            runoff_m_per_year,
             segment.area_at(1.0),
             self.channels.gravity,
         );

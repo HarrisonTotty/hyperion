@@ -24,27 +24,27 @@ fn earth_like() -> Partition {
     partitioned((261.0, 288.0, 305.0), wet, 9.82)
 }
 
-/// P14.T24.h.b's first part is held until the 25 → 26 bump: the rules in force are version 25's and
-/// before, any condensable's cloud at water's share, and 26's helper reaches its own.
+/// P14.T24.h.b's first part is held until the 26 → 27 bump: the rules in force are version 26's and
+/// before, any condensable's cloud at water's share, and 27's helper reaches its own.
 #[test]
-fn the_minor_clouds_are_held_only_until_the_26_bump() {
-    use crate::planetary::testing::with_every_26_hold;
+fn the_minor_clouds_are_held_only_until_the_27_bump() {
+    use crate::planetary::testing::with_every_27_hold;
     assert!(
         GENERATOR_VERSION < MINOR_CLOUDS_VERSION,
-        "the 25 → 26 bump puts P14.T24.h.b's minor clouds on the record (decision-p14-t51-batch \
+        "the 26 → 27 bump puts P14.T24.h.b's minor clouds on the record (decision-p14-t51-batch \
          §9.4): delete `MINOR_CLOUDS_VERSION`, `MinorCloudsRules` with its `WaterShare` arm and the \
          guard that reads it in `condensable_cloud_share`, the tests' `with_minor_clouds`, its \
-         switch in `with_every_26_hold` and in `with_scattering_held` with its callers (and the \
-         helpers, if no other 26 hold is left), the `WaterShare` arms of `scattering_tests`, and \
+         switch in `with_every_27_hold` and in `with_scattering_held` with its callers (and the \
+         helpers, if no other 27 hold is left), the `WaterShare` arms of `scattering_tests`, and \
          this test"
     );
     assert_eq!(MinorCloudsRules::in_force(), MinorCloudsRules::WaterShare);
     assert_eq!(
-        with_every_26_hold(MinorCloudsRules::in_force),
+        with_every_27_hold(MinorCloudsRules::in_force),
         MinorCloudsRules::OwnShare
     );
     assert_eq!(
-        with_every_26_hold(|| with_minor_clouds(
+        with_every_27_hold(|| with_minor_clouds(
             MinorCloudsRules::WaterShare,
             MinorCloudsRules::in_force
         )),
@@ -95,27 +95,27 @@ fn a_minor_condensable_s_cloud_covers_titan_s_share() {
     );
 }
 
-/// P14.T24.h.b's second part is held until the 25 → 26 bump: the rules in force are version 25's
-/// and before, no sediment, and 26's helper reaches it.
+/// P14.T24.h.b's second part is held until the 26 → 27 bump: the rules in force are version 26's
+/// and before, no sediment, and 27's helper reaches it.
 #[test]
-fn the_organic_sediment_is_held_only_until_the_26_bump() {
-    use crate::planetary::testing::with_every_26_hold;
+fn the_organic_sediment_is_held_only_until_the_27_bump() {
+    use crate::planetary::testing::with_every_27_hold;
     assert!(
         GENERATOR_VERSION < ORGANIC_SEDIMENT_VERSION,
-        "the 25 → 26 bump puts P14.T24.h.b's organic sediment on the record \
+        "the 26 → 27 bump puts P14.T24.h.b's organic sediment on the record \
          (decision-p14-t51-batch §9.4): delete `ORGANIC_SEDIMENT_VERSION`, `OrganicSedimentRules` \
          with its `Bare` arm and the guards that read it in `sediment_share` and \
          `surface_mix::pass_haze`, the tests' `with_organic_sediment`, its switch in \
-         `with_every_26_hold` and in `with_scattering_held` with its callers (and the helpers, if \
-         no other 26 hold is left), the `Bare` arms of `scattering_tests`, and this test"
+         `with_every_27_hold` and in `with_scattering_held` with its callers (and the helpers, if \
+         no other 27 hold is left), the `Bare` arms of `scattering_tests`, and this test"
     );
     assert_eq!(OrganicSedimentRules::in_force(), OrganicSedimentRules::Bare);
     assert_eq!(
-        with_every_26_hold(OrganicSedimentRules::in_force),
+        with_every_27_hold(OrganicSedimentRules::in_force),
         OrganicSedimentRules::Sediment
     );
     assert_eq!(
-        with_every_26_hold(|| with_organic_sediment(
+        with_every_27_hold(|| with_organic_sediment(
             OrganicSedimentRules::Bare,
             OrganicSedimentRules::in_force
         )),
@@ -254,27 +254,27 @@ fn titan_s_solid_ground_is_its_haze_s_sediment() {
     assert!(sedimented < bare, "{sedimented} against {bare}");
 }
 
-/// P14.T24.h.b's fourth part is held until the 25 → 26 bump: the rules in force are version 25's
-/// and before, the floor's max, and 26's helper reaches the adding rule.
+/// P14.T24.h.b's fourth part is held until the 26 → 27 bump: the rules in force are version 26's
+/// and before, the floor's max, and 27's helper reaches the adding rule.
 #[test]
-fn the_rayleigh_adding_is_held_only_until_the_26_bump() {
-    use crate::planetary::testing::with_every_26_hold;
+fn the_rayleigh_adding_is_held_only_until_the_27_bump() {
+    use crate::planetary::testing::with_every_27_hold;
     assert!(
         GENERATOR_VERSION < RAYLEIGH_ADDING_VERSION,
-        "the 25 → 26 bump puts P14.T24.h.b's adding rule on the record (decision-p14-t51-batch \
+        "the 26 → 27 bump puts P14.T24.h.b's adding rule on the record (decision-p14-t51-batch \
          §9.4): delete `RAYLEIGH_ADDING_VERSION`, `RayleighAddingRules` with its `Max` arm and the \
          guards that read it in `water_cloud_albedo` and `surface_mix::floored`, the tests' \
-         `with_rayleigh_adding`, its switch in `with_every_26_hold` and in `with_scattering_held` \
-         with its callers (and the helpers, if no other 26 hold is left), the `Max` arms of \
+         `with_rayleigh_adding`, its switch in `with_every_27_hold` and in `with_scattering_held` \
+         with its callers (and the helpers, if no other 27 hold is left), the `Max` arms of \
          `scattering_tests`, and this test"
     );
     assert_eq!(RayleighAddingRules::in_force(), RayleighAddingRules::Max);
     assert_eq!(
-        with_every_26_hold(RayleighAddingRules::in_force),
+        with_every_27_hold(RayleighAddingRules::in_force),
         RayleighAddingRules::Added
     );
     assert_eq!(
-        with_every_26_hold(|| with_rayleigh_adding(
+        with_every_27_hold(|| with_rayleigh_adding(
             RayleighAddingRules::Max,
             RayleighAddingRules::in_force
         )),
@@ -391,27 +391,27 @@ fn under_the_adding_rule_the_table_s_airless_bodies_and_venus_keep_their_bonds()
     assert_eq!(seen, ["Ceres", "Earth", "Mars", "Mercury", "Moon", "Venus"]);
 }
 
-/// P14.T24.h.b's third part is held until the 25 → 26 bump: the rules in force are version 25's
-/// and before, no haze layer, and 26's helper reaches it.
+/// P14.T24.h.b's third part is held until the 26 → 27 bump: the rules in force are version 26's
+/// and before, no haze layer, and 27's helper reaches it.
 #[test]
-fn the_haze_layer_is_held_only_until_the_26_bump() {
-    use crate::planetary::testing::with_every_26_hold;
+fn the_haze_layer_is_held_only_until_the_27_bump() {
+    use crate::planetary::testing::with_every_27_hold;
     assert!(
         GENERATOR_VERSION < HAZE_LAYER_VERSION,
-        "the 25 → 26 bump puts P14.T24.h.b's haze layer on the record (decision-p14-t51-batch \
+        "the 26 → 27 bump puts P14.T24.h.b's haze layer on the record (decision-p14-t51-batch \
          §9.4): delete `HAZE_LAYER_VERSION`, `HazeLayerRules` with its `Clear` arm and the guards \
          that read it in `hazed`, `hazed_bins`, `anti_greenhouse_share`, `step_anti_greenhouse`, \
          `surface_mix::pass_haze` and `escaping`'s solve, the tests' `with_haze_layer`, its switch \
-         in `with_every_26_hold` and in `with_scattering_held` with its callers (and the helpers, \
-         if no other 26 hold is left), the `Clear` arms of `scattering_tests`, and this test"
+         in `with_every_27_hold` and in `with_scattering_held` with its callers (and the helpers, \
+         if no other 27 hold is left), the `Clear` arms of `scattering_tests`, and this test"
     );
     assert_eq!(HazeLayerRules::in_force(), HazeLayerRules::Clear);
     assert_eq!(
-        with_every_26_hold(HazeLayerRules::in_force),
+        with_every_27_hold(HazeLayerRules::in_force),
         HazeLayerRules::Absorbing
     );
     assert_eq!(
-        with_every_26_hold(|| with_haze_layer(HazeLayerRules::Clear, HazeLayerRules::in_force)),
+        with_every_27_hold(|| with_haze_layer(HazeLayerRules::Clear, HazeLayerRules::in_force)),
         HazeLayerRules::Clear
     );
     assert_eq!(HazeLayerRules::in_force(), HazeLayerRules::Clear);

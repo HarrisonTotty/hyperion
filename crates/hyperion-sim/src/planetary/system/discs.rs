@@ -1,7 +1,6 @@
 //! The discs of a system's young and dead hosts as bodies (plan 14, design notes 11 and 12): the
 //! protoplanetary disc in belt slot `0xE0` (P14.T28.a) and a white dwarf's debris disc in `0xEE`
-//! with its pollution mark (P14.T28.d), each behind its hold at generator version 26
-//! (`PROTOPLANETARY_DISC_VERSION`, `WHITE_DWARF_DEBRIS_VERSION`).
+//! with its pollution mark (P14.T28.d), from generator version 26.
 //!
 //! # The protoplanetary disc
 //!
@@ -35,10 +34,10 @@ use crate::planetary::SystemContext;
 use crate::planetary::disc::DiscProfile;
 use crate::planetary::fate::{BodyFate, BodyState, DestructionCause, FateHost};
 use crate::planetary::hosts::white_dwarfs::{
-    DEBRIS_DISC_SLOT, Survivors, WhiteDwarfDebrisRules, WhiteDwarfDraws, WhiteDwarfMarks,
-    debris_disc_inner_edge, debris_disc_outer_edge,
+    DEBRIS_DISC_SLOT, Survivors, WhiteDwarfDraws, WhiteDwarfMarks, debris_disc_inner_edge,
+    debris_disc_outer_edge,
 };
-use crate::planetary::hosts::young::{FormationKind, ProtoplanetaryDiscRules};
+use crate::planetary::hosts::young::FormationKind;
 use crate::planetary::index::{BodyIndex, BodySlot, BodySub};
 use crate::planetary::label::BodyLabel;
 use crate::planetary::placement::OrbitHost;
@@ -152,9 +151,9 @@ impl WhiteDwarfSystem {
 /// ([`SystemDiscs::find`]), so that a system keeps them whichever test reads it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct SystemDiscs {
-    /// Its protoplanetary disc, from [`PROTOPLANETARY_DISC_VERSION`](crate::planetary::hosts::young::PROTOPLANETARY_DISC_VERSION).
+    /// Its protoplanetary disc (P14.T28.a, from generator version 26).
     protoplanetary: Option<ProtoplanetaryDisc>,
-    /// Its white dwarf's marks, from [`WHITE_DWARF_DEBRIS_VERSION`](crate::planetary::hosts::white_dwarfs::WHITE_DWARF_DEBRIS_VERSION).
+    /// Its white dwarf's marks (P14.T28.d, from generator version 26).
     white_dwarf: Option<WhiteDwarfSystem>,
 }
 
@@ -167,25 +166,16 @@ impl SystemDiscs {
     };
 
     /// The disc bodies of `system`, generated from `ctx` in the universe of `seed`, under the rules
-    /// in force: from
-    /// [`PROTOPLANETARY_DISC_VERSION`](crate::planetary::hosts::young::PROTOPLANETARY_DISC_VERSION)
-    /// the disc of its first host in zone order that has one, and from
-    /// [`WHITE_DWARF_DEBRIS_VERSION`](crate::planetary::hosts::white_dwarfs::WHITE_DWARF_DEBRIS_VERSION)
-    /// its white dwarf's marks (the [module](self) documentation).
+    /// in force: the disc of its first host in zone order that has one (P14.T28.a), and its white
+    /// dwarf's marks (P14.T28.d; the [module](self) documentation).
     #[must_use]
     pub(crate) fn find(seed: Seed, ctx: &SystemContext, system: &PlanetarySystem) -> Self {
-        let protoplanetary = match ProtoplanetaryDiscRules::in_force() {
-            ProtoplanetaryDiscRules::Held => None,
-            ProtoplanetaryDiscRules::Disc => system
-                .hosts
-                .iter()
-                .find(|host| host.disc.profile().is_some())
-                .map(|host| ProtoplanetaryDisc { host: host.host }),
-        };
-        let white_dwarf = match WhiteDwarfDebrisRules::in_force() {
-            WhiteDwarfDebrisRules::Held => None,
-            WhiteDwarfDebrisRules::Debris => system.white_dwarf_of(seed, ctx),
-        };
+        let protoplanetary = system
+            .hosts
+            .iter()
+            .find(|host| host.disc.profile().is_some())
+            .map(|host| ProtoplanetaryDisc { host: host.host });
+        let white_dwarf = system.white_dwarf_of(seed, ctx);
         Self {
             protoplanetary,
             white_dwarf,
@@ -202,16 +192,16 @@ impl SystemDiscs {
 }
 
 impl PlanetarySystem {
-    /// The system's protoplanetary disc body, if it has one (P14.T28.a): none below generator
-    /// version 26, and none for a system without a disc.
+    /// The system's protoplanetary disc body, if it has one (P14.T28.a, from generator version
+    /// 26): none for a system without a disc.
     #[must_use]
     pub fn protoplanetary_disc(&self) -> Option<&ProtoplanetaryDisc> {
         self.discs.protoplanetary.as_ref()
     }
 
-    /// The system's white dwarf host as P14.T28.d marks it, if it has one: none below generator
-    /// version 26, and none for a system whose first single-star zone has no white dwarf by the
-    /// end of the clock window.
+    /// The system's white dwarf host as P14.T28.d marks it (from generator version 26), if it has
+    /// one: none for a system whose first single-star zone has no white dwarf by the end of the
+    /// clock window.
     #[must_use]
     pub fn white_dwarf(&self) -> Option<&WhiteDwarfSystem> {
         self.discs.white_dwarf.as_ref()

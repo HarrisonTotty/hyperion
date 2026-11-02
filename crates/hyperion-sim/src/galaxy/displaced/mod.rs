@@ -62,10 +62,10 @@ use crate::GeneratorVersion;
 /// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
 /// [`DisplacedRules::FieldOnly`], which installs nothing, so every reader takes version 25's path
 /// verbatim and every generated value keeps its bits; the tests reach the new arm through a galaxy
-/// built under `GalaxyRules::every_26_hold()`. The bump to 26 deletes this hold,
+/// built under `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold,
 /// [`DisplacedRules`] with its `FieldOnly` arm, the galaxy's `displaced` field and its tripwire
-/// (`the_displaced_classes_are_held_only_until_the_26_bump`).
-pub(crate) const DISPLACED_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+/// (`the_displaced_classes_are_held_only_until_the_27_bump`).
+pub(crate) const DISPLACED_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether layers D and E hold plan 08's displaced classes (the hold of [`DISPLACED_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

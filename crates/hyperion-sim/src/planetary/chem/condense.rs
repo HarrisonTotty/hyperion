@@ -200,65 +200,21 @@ pub const BULK_BOUND: f64 = 0.5;
 /// to lie within the deck: its top is the shallowest such level.
 pub const TOP_FRACTION: f64 = 1e-6;
 
-/// The bisections that find each level's `r_w`, in ln r over [`RADIUS_RANGE_M`].
+/// The bisections that found each level's `r_w` to version 25, in ln r over [`RADIUS_RANGE_M`]:
+/// the tests' oracle of the false position.
+#[cfg(test)]
 const RADIUS_BISECTIONS: u32 = 48;
 
-/// The generator version from which each level's `r_w` is found by the false position, 26.
-///
-/// From it, [`FallRadiusRoot::FalsePosition`] finds `r_w` on ln `v_f` in ln r: a planetary bump
-/// after 25 (P14.T54.b.l's cost lever; perf-24's handoff, the envelope's decks). Below it
-/// [`FallRadiusRoot::in_force`] is [`FallRadiusRoot::Bisections`], and every deck is version 24's
-/// and 25's bit for bit. 26's bump deletes this hold and the tests' switch (`with_fall_radius`), keeps the
-/// bisections as the tests' oracle of the false position, and deletes the tripwire
-/// (`the_fall_radius_root_is_held_only_until_the_26_bump`).
-pub(crate) const FALL_RADIUS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// The most steps of the false position for `r_w` ([`FallRadiusRoot::FalsePosition`]): 48, the
-/// bisections' own [`RADIUS_BISECTIONS`], so that it never evaluates the fall speed more often
+/// The most steps of the false position for `r_w` (P14.T54.b.l's cost lever, from 26): 48, the
+/// bisections' own (`RADIUS_BISECTIONS`, the tests' oracle), so that it never evaluates the fall speed more often
 /// beyond the range's two ends. ln `v_f` is nearly linear in ln r, its slope 1 in the free
 /// molecular regime, 2 in Stokes's and ½ past it, and the condensation tests' airs take 7.6 steps
 /// a call, at most 12 (stated by `under_the_false_position_r_w_is_the_bisections_within_their_width`).
 const RADIUS_STEPS: u32 = 48;
 
 /// The width at which the false position for `r_w` stops, as a share of [`RADIUS_RANGE_M`]'s in
-/// ln r: 2⁻⁴⁸, the width [`RADIUS_BISECTIONS`] leave, 6.5 × 10⁻¹⁴ in ln r.
+/// ln r: 2⁻⁴⁸, the width the 48 bisections of version 25 left, 6.5 × 10⁻¹⁴ in ln r.
 const RADIUS_STOP_SHARE: f64 = 1.0 / 281_474_976_710_656.0;
-
-/// How a deck's level finds `r_w`, the radius whose fall speed is w* ([`FALL_RADIUS_VERSION`]'s
-/// hold).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum FallRadiusRoot {
-    /// Version 25's and before: [`RADIUS_BISECTIONS`] bisections in ln r, the bracket's midpoint.
-    Bisections,
-    /// Version 26's: the Illinois false position on ln `v_f` − ln w* in ln r, to the bisections'
-    /// width, the bracket's midpoint.
-    FalsePosition,
-}
-
-impl FallRadiusRoot {
-    /// The root this generator version gives: the false position from [`FALL_RADIUS_VERSION`],
-    /// the bisections below it; in the tests, the root a test's switch sets on its thread
-    /// (`with_fall_radius`).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(root) = FALL_RADIUS.with(core::cell::Cell::get) {
-            return root;
-        }
-        if GENERATOR_VERSION >= FALL_RADIUS_VERSION {
-            Self::FalsePosition
-        } else {
-            Self::Bisections
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The root a test sets on its thread, `None` for the version's.
-    static FALL_RADIUS: core::cell::Cell<Option<FallRadiusRoot>> =
-        const { core::cell::Cell::new(None) };
-}
 
 #[cfg(test)]
 thread_local! {
@@ -288,22 +244,6 @@ pub(crate) fn with_fall_radius_steps<R>(run: impl FnOnce() -> R) -> (R, (u64, u6
         .unwrap_or_default();
     drop(restore);
     (result, tally)
-}
-
-/// `run`'s result with `r_w` found by `root` on this thread, for the tests to reach 26's false
-/// position ahead of the bump; the version's root is set back after, a panic in `run` included.
-/// 26's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_fall_radius<R>(root: FallRadiusRoot, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's root back as it drops.
-    struct Restore(Option<FallRadiusRoot>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            FALL_RADIUS.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(FALL_RADIUS.with(|cell| cell.replace(Some(root))));
-    run()
 }
 
 /// The radii `r_w` is sought between, m: a nanometre to ten centimetres.
@@ -2608,8 +2548,8 @@ impl Air {
         stokes * math::powf(1.0 + math::powf(inertia, 0.4), -1.25)
     }
 
-    /// The radius, m, whose fall speed is `speed_m_s`, m s⁻¹, by the root in force
-    /// ([`FallRadiusRoot::in_force`]).
+    /// The radius, m, whose fall speed is `speed_m_s`, m s⁻¹, by the Illinois false position
+    /// ([`false_position_radius`](Self::false_position_radius); P14.T54.b.l, from 26).
     ///
     /// The root is sought in ln r over [`RADIUS_RANGE_M`], whose logarithms (of metres) are
     /// `ln_range_m`.
@@ -2620,16 +2560,12 @@ impl Air {
         density: KilogramsPerCubicMetre,
         ln_range_m: (f64, f64),
     ) -> f64 {
-        match FallRadiusRoot::in_force() {
-            FallRadiusRoot::Bisections => self.bisected_radius(speed_m_s, density, ln_range_m),
-            FallRadiusRoot::FalsePosition => {
-                self.false_position_radius(speed_m_s, density, ln_range_m)
-            }
-        }
+        self.false_position_radius(speed_m_s, density, ln_range_m)
     }
 
     /// [`radius_falling_at`](Self::radius_falling_at) by [`RADIUS_BISECTIONS`] bisections, held at
-    /// the range's ends: version 25's and before.
+    /// the range's ends: version 25's and before, now the tests' oracle of the false position.
+    #[cfg(test)]
     #[must_use]
     fn bisected_radius(
         &self,
@@ -2648,8 +2584,7 @@ impl Air {
         math::exp(f64::midpoint(small, large))
     }
 
-    /// [`radius_falling_at`](Self::radius_falling_at) by the Illinois false position, from 26
-    /// ([`FallRadiusRoot::FalsePosition`]).
+    /// [`radius_falling_at`](Self::radius_falling_at) by the Illinois false position, from 26.
     ///
     /// The false position (Dowell and Jarratt 1971, BIT 11, 168, from memory) is on g =
     /// ln `v_f`(r) − ln `speed_m_s` in ln r: each step the false position a − g′(a) (b − a) ÷

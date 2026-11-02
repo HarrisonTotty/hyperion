@@ -14,8 +14,8 @@
 //!    centre held at the ascending branch's cap (rotating worlds) or the substellar convergence
 //!    (locked ones), Siler et al.'s partition and each band's E − P. The partition's air, its h and
 //!    L q, is the own record's to version 25 and from 26 the climate the world shows, the field the
-//!    climate cells are interpolated from at each grid point ([`shown_months_k`]; R09.T13.n,
-//!    [`PartitionThermodynamics`]), each column's at its points.
+//!    climate cells are interpolated from at each grid point ([`shown_months_k`]; R09.T13.n), each
+//!    column's at its points.
 //! 2. **Evaporation** ([`evaporation`](super::evaporation)) over each field cell under the climate
 //!    condensable's own liquid (its `liquid_entry` the palette's `Liquid` entry of the condensable),
 //!    over its open months, those at or above the model's freezing point at its water surface:
@@ -108,9 +108,7 @@ use super::evaporation::ClimateCellTerms;
 use super::evaporation::OpenMonth;
 use super::grid::{BandStencil, ColumnRead, LATITUDE_BANDS, ModelGrid};
 use super::lfpm::{self, CellWind, Cover, GroundState, Mesh, Month, Parameters};
-use super::partition::{
-    self, Bands, Budget, Circulation, DEGREE_RAD, PartitionThermodynamics, Turning,
-};
+use super::partition::{self, Bands, Budget, Circulation, DEGREE_RAD, Turning};
 use super::seas;
 use super::wind::{self, LOWER_BRANCH_DEPTH_SHARE};
 use super::{Normalised, finite_k, month_shares};
@@ -299,8 +297,7 @@ pub(super) enum Columns {
 }
 
 /// [`run`] at the orographic model's `parameters`, its columns' budgets as `columns` says, and the
-/// partition's air as [`PartitionThermodynamics::in_force`] says: the own record's, or the shown
-/// field's ([`shown_months_k`]).
+/// partition's air the shown field's ([`shown_months_k`]; R09.T13.n).
 fn run_at(
     pass: &Pass<'_>,
     working: &mut Working,
@@ -312,19 +309,12 @@ fn run_at(
         calm(working);
         return None;
     };
-    let shown_k;
-    let air_k = match PartitionThermodynamics::in_force() {
-        PartitionThermodynamics::OwnRecord => &own.months_k,
-        PartitionThermodynamics::Shown => {
-            shown_k = shown_months_k(model, working.months);
-            &shown_k
-        }
-    };
+    let air_k = shown_months_k(model, working.months);
     Some(water_cycle(
         pass,
         working,
         (&model.grid, model.coordinates),
-        (own, air_k),
+        (own, &air_k),
         parameters,
         columns,
     ))
@@ -338,7 +328,7 @@ fn run_at(
 /// twelve months and the record holds twelve, and its annual mean otherwise, plus the mean's
 /// constant c as [`finish`](super::finish) leaves it, held at the model's lower bound as
 /// [`floor_climate`](super::floor_climate) holds the cells. The partition's air reads it from
-/// version 26 ([`PartitionThermodynamics::Shown`]).
+/// version 26 (R09.T13.n).
 ///
 /// It is a modelling choice, not Siler, Roe and Armour's: their partition splits a model's energy
 /// flux, which here stays the model's own record's, balancing its radiation, while the air that

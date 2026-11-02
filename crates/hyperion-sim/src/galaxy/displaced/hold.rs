@@ -49,7 +49,7 @@ pub(crate) fn held() -> &'static Galaxy {
 pub(crate) const fn field_only_rules() -> GalaxyRules {
     GalaxyRules {
         displaced: DisplacedRules::FieldOnly,
-        ..GalaxyRules::every_26_hold()
+        ..GalaxyRules::every_26_hold_with_its_retargets()
     }
 }
 
@@ -76,7 +76,7 @@ pub(crate) fn displaced() -> &'static Galaxy {
         Galaxy::from_params_with_rules(
             Seed::new(MILKY_WAY_SEED),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_26_hold(),
+            GalaxyRules::every_26_hold_with_its_retargets(),
         )
         .expect("the Milky Way fixture builds its displaced classes")
     })
@@ -154,13 +154,13 @@ fn sample_points(n: usize, key: u64) -> Vec<PointLy> {
         .collect()
 }
 
-/// P08.T12 is held until the bump to 26: the rules in force are version 25's and before, under
+/// P08.T12 is held until the bump to 27: the rules in force are version 26's and before, under
 /// which layers D and E hold the field components alone.
 #[test]
-fn the_displaced_classes_are_held_only_until_the_26_bump() {
+fn the_displaced_classes_are_held_only_until_the_27_bump() {
     assert!(
         GENERATOR_VERSION < DISPLACED_VERSION,
-        "the bump to 26 puts P08.T12 on the record (decision-galaxy-25-train §1; S2 with plan \
+        "the bump to 27 puts P08.T12 on the record (decision-galaxy-25-train §1; S2 with plan \
          15's production `displaced_forms`): layers D and E with their displaced classes, their \
          stay shares and their candidates. Delete `DISPLACED_VERSION`, `DisplacedRules` with its \
          `FieldOnly` arm, `GalaxyRules::displaced`, the build's `match` on it and this test, in \
@@ -174,7 +174,7 @@ fn the_displaced_classes_are_held_only_until_the_26_bump() {
         DisplacedRules::FieldOnly
     );
     assert_eq!(
-        GalaxyRules::every_26_hold().displaced,
+        GalaxyRules::every_27_hold().displaced,
         DisplacedRules::Displaced
     );
     assert!(galaxy.fields().displaced().is_none());
@@ -196,7 +196,10 @@ fn the_version_s_galaxy_holds_no_displaced_class() {
     assert_eq!(held(), &explicit);
     assert_eq!(format!("{:?}", held()), format!("{explicit:?}"));
     assert_ne!(held(), displaced());
-    assert_eq!(displaced().rules(), GalaxyRules::every_26_hold());
+    assert_eq!(
+        displaced().rules(),
+        GalaxyRules::every_26_hold_with_its_retargets()
+    );
     // The field galaxy under the new arm is the held galaxy: what the classes are built from.
     assert_eq!(held().params(), displaced().params());
     assert_eq!(
@@ -212,7 +215,7 @@ fn the_version_s_galaxy_holds_no_displaced_class() {
 fn with_rules_refuses_another_displaced_arm() {
     let _ = field_only()
         .clone()
-        .with_rules(GalaxyRules::every_26_hold());
+        .with_rules(GalaxyRules::every_26_hold_with_its_retargets());
 }
 
 /// `with_rules` refuses other stellar rules for a galaxy that holds the classes, whose class table
@@ -237,7 +240,7 @@ fn the_same_seed_twice_gives_the_same_classes() {
     let again = Galaxy::from_params_with_rules(
         Seed::new(MILKY_WAY_SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_26_hold(),
+        GalaxyRules::every_26_hold_with_its_retargets(),
     )
     .expect("the Milky Way fixture builds its displaced classes");
     assert_eq!(&again, displaced());
@@ -595,8 +598,12 @@ fn headroom_holds_for_seeds(seeds: std::ops::Range<u64>) {
     for i in seeds {
         let seed = Seed::new(0x0812_a000_0000_0000 + i);
         let params = GalaxyParams::from_seed(seed, crate::galaxy::imf::MassFunctionKind::default());
-        let galaxy = Galaxy::from_params_with_rules(seed, params, GalaxyRules::every_26_hold())
-            .expect("a drawn galaxy builds its displaced classes");
+        let galaxy = Galaxy::from_params_with_rules(
+            seed,
+            params,
+            GalaxyRules::every_26_hold_with_its_retargets(),
+        )
+        .expect("a drawn galaxy builds its displaced classes");
         assert!(galaxy.fields().displaced().is_some());
         check_index_headroom(&galaxy).unwrap_or_else(|e| panic!("seed {i}: {e}"));
     }

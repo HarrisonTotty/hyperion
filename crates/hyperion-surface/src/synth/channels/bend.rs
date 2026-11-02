@@ -104,13 +104,14 @@ pub(crate) struct CourseEnds {
     pub(crate) after: Option<[f64; 3]>,
 }
 
-/// A bent trunk's course: its points, spheroid points in the body-fixed frame (metres), and each
-/// point's parameter along it, 0 at the key point and 1 at the receiver's key point in proportion
-/// to the length along the course.
+/// A bent course: its points, spheroid points in the body-fixed frame (metres), and each point's
+/// parameter along it, 0 at the key point and 1 at its outlet in proportion to the length along the
+/// course. A trunk's has two halves of [`BEND_PARTS`] sub-chords, to its crossing and beyond it; a
+/// tributary's one, its key point to its join (R09.T6.i).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Bend {
-    points: [[f64; 3]; COURSE_POINTS],
-    at: [f64; COURSE_POINTS],
+    points: Vec<[f64; 3]>,
+    at: Vec<f64>,
     length_m: f64,
 }
 
@@ -155,7 +156,7 @@ impl Bend {
             1,
             factor,
         );
-        let mut points = [[0.0; 3]; COURSE_POINTS];
+        let mut points = vec![[0.0; 3]; COURSE_POINTS];
         points[0] = key_m;
         points[BEND_PARTS] = crossing_m;
         points[COURSE_POINTS - 1] = onward_m;
@@ -163,14 +164,59 @@ impl Bend {
             points[k] = figure.point(first[k - 1]);
             points[BEND_PARTS + k] = figure.point(second[k - 1]);
         }
-        let mut along = [0.0; COURSE_POINTS];
-        for k in 1..COURSE_POINTS {
+        Self::along(points)
+    }
+
+    /// A tributary's course from its key point `from` to its join `to`, unit directions, with its
+    /// spheroid points `[from_m, to_m]` (bit for bit its ends), in the face plane of its own cell
+    /// `cell` (R09.T6.i): one chord split as a trunk's half is, on Dendry's `AngleMid` spline, from
+    /// the reflected start through `onward`, its parent's far end where it lies in front of the
+    /// plane, so that the inflows at a shared join converge on its parent's course, displaced by
+    /// the words of `stream` (chord 1's) and `factor`, and held to no cell.
+    ///
+    /// # Panics
+    ///
+    /// If a point is not finite or the start or the join lies behind the plane (a bug: both are
+    /// within two cells of the key point's).
+    #[must_use]
+    pub(crate) fn tributary(
+        cell: PatchKey,
+        [from, to, onward]: [[f64; 3]; 3],
+        [from_m, to_m]: [[f64; 3]; 2],
+        figure: Spheroid,
+        stream: &Stream,
+        factor: f64,
+    ) -> Self {
+        let face = cell.face();
+        let onward = in_front(face, onward).then_some(onward);
+        let inner = half_on(
+            face,
+            Held::NONE,
+            [None, Some(from), Some(to), onward],
+            stream,
+            0,
+            factor,
+        );
+        let mut points = vec![[0.0; 3]; BEND_PARTS + 1];
+        points[0] = from_m;
+        points[BEND_PARTS] = to_m;
+        for k in 1..BEND_PARTS {
+            points[k] = figure.point(inner[k - 1]);
+        }
+        Self::along(points)
+    }
+
+    /// The course through `points`, its parameters in proportion to the length along it, 0 and 1
+    /// exactly at its ends.
+    #[must_use]
+    fn along(points: Vec<[f64; 3]>) -> Self {
+        let mut along = vec![0.0; points.len()];
+        for k in 1..points.len() {
             along[k] = along[k - 1] + distance(points[k - 1], points[k]);
         }
-        let length_m = num::assert_finite(along[COURSE_POINTS - 1]);
-        assert!(length_m > 0.0, "a trunk's course has a length");
-        // 0 and 1 exactly at the ends.
-        let at = along.map(|l| l / length_m);
+        let length_m = num::assert_finite(along[points.len() - 1]);
+        assert!(length_m > 0.0, "a course has a length");
+        let at = along.into_iter().map(|l| l / length_m).collect();
         Self {
             points,
             at,
@@ -178,17 +224,23 @@ impl Bend {
         }
     }
 
-    /// Its points, the key point first and the receiver's key point last.
+    /// Its points, the key point first and its outlet last.
     #[must_use]
-    pub(crate) const fn points(&self) -> &[[f64; 3]; COURSE_POINTS] {
+    pub(crate) fn points(&self) -> &[[f64; 3]] {
         &self.points
     }
 
     /// Each point's parameter along it, 0 to 1.
     #[cfg(test)]
     #[must_use]
-    pub(crate) const fn params(&self) -> &[f64; COURSE_POINTS] {
+    pub(crate) fn params(&self) -> &[f64] {
         &self.at
+    }
+
+    /// How many halves of [`BEND_PARTS`] sub-chords it has: a trunk's two, a tributary's one.
+    #[must_use]
+    pub(crate) fn halves(&self) -> usize {
+        (self.points.len() - 1) / BEND_PARTS
     }
 
     /// Its length along its sub-chords, metres.
@@ -197,9 +249,9 @@ impl Bend {
         self.length_m
     }
 
-    /// The parameter at its crossing, where it leaves its cell.
+    /// The parameter at its crossing, where a trunk leaves its cell.
     #[must_use]
-    pub(crate) const fn exit(&self) -> f64 {
+    pub(crate) fn exit(&self) -> f64 {
         self.at[BEND_PARTS]
     }
 
@@ -218,13 +270,12 @@ impl Bend {
     /// The sub-chord whose parameters span `t`, the first of two that share it.
     #[must_use]
     fn part_of(&self, t: f64) -> usize {
-        (0..COURSE_POINTS - 2)
-            .find(|&k| t <= self.at[k + 1])
-            .unwrap_or(COURSE_POINTS - 2)
+        let last = self.points.len() - 2;
+        (0..last).find(|&k| t <= self.at[k + 1]).unwrap_or(last)
     }
 
-    /// Its sub-chords of half `half` (0 to the crossing, 1 beyond), in order, each with the
-    /// parameters it spans.
+    /// Its sub-chords of half `half` (0 to a trunk's crossing, 1 beyond; a tributary's 0 alone), in
+    /// order, each with the parameters it spans.
     pub(crate) fn chords(&self, half: usize) -> impl Iterator<Item = Chord> + '_ {
         (half * BEND_PARTS..(half + 1) * BEND_PARTS).map(|k| Chord {
             from: self.points[k],
@@ -250,19 +301,30 @@ impl Bend {
 #[must_use]
 fn half(
     cell: PatchKey,
+    control: [Option<[f64; 3]>; 4],
+    stream: &Stream,
+    index: u64,
+    factor: f64,
+) -> [[f64; 3]; BEND_PARTS - 1] {
+    half_on(cell.face(), Held::of(cell), control, stream, index, factor)
+}
+
+/// [`half`] in `face`'s plane, its new points held to `held`.
+#[must_use]
+fn half_on(
+    face: Face,
+    held: Held,
     [before, from, to, after]: [Option<[f64; 3]>; 4],
     stream: &Stream,
     index: u64,
     factor: f64,
 ) -> [[f64; 3]; BEND_PARTS - 1] {
-    let face = cell.face();
     let on_plane = |dir: [f64; 3]| plane(face, dir);
     let a = on_plane(from.expect("a chord has its start"));
     let b = on_plane(to.expect("a chord has its end"));
     // Dendry's reflected points, 2A − B and 2B − A.
     let p0 = before.map_or([2.0 * a[0] - b[0], 2.0 * a[1] - b[1]], on_plane);
     let p3 = after.map_or([2.0 * b[0] - a[0], 2.0 * b[1] - a[1]], on_plane);
-    let held = Held::of(cell);
     let parts = u32::try_from(BEND_PARTS).expect("a few parts");
     let shift =
         |k: u32| signed_uniform(stream.word_at(index * u64::from(parts - 1) + u64::from(k - 1)));
@@ -336,6 +398,12 @@ struct Held {
 }
 
 impl Held {
+    /// No hold: a tributary's points lie where the spline and the displacement put them.
+    const NONE: Self = Self {
+        u: (f64::NEG_INFINITY, f64::INFINITY),
+        v: (f64::NEG_INFINITY, f64::INFINITY),
+    };
+
     #[must_use]
     fn of(cell: PatchKey) -> Self {
         let [u_low, u_high, v_low, v_high] = held_rectangle(cell);
@@ -365,6 +433,14 @@ fn signed_uniform(word: u64) -> f64 {
     #[expect(clippy::cast_precision_loss, reason = "a 53-bit integer, exact in f64")]
     let mark = (word >> 11) as f64;
     2.0 * (mark * TWO_POW_MINUS_53) - 1.0
+}
+
+/// Whether the unit direction `dir` lies in front of `face`'s plane, a tenth of the way from its
+/// edge-on, so that its gnomonic projection is well inside the plane's reach.
+#[must_use]
+fn in_front(face: Face, dir: [f64; 3]) -> bool {
+    let (normal, _, _) = axes(face);
+    normal[0] * dir[0] + normal[1] * dir[1] + normal[2] * dir[2] > 0.1
 }
 
 /// The (u, v) of the unit direction `dir` on `face`'s plane, its gnomonic projection.

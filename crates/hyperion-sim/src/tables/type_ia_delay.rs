@@ -14,7 +14,7 @@
 //!   136.9 (Srivastav et al. 2022; Shen et al. 2018; Foley et al. 2013)
 //! acceptance: the yield integrates to 1.000000 of 1.3 × 10⁻³ per M☉ (passes); 0.187 of delays
 //!   under 0.1 Gyr (a fifth, passes) and 0.617 under 1 Gyr (about 62%, passes); the lightest
-//!   primary 2.500 M☉ and layer C's largest share 0.0e0 (passes); at Milky Way values 0.462 Type
+//!   primary 2.500 M☉ and layer C's largest share 0.0e0 (passes); at Milky Way values 0.465 Type
 //!   Ia a century (0.42–0.53, ruling 141.4; passes) and the old populations' exploded share of
 //!   layer D 0.0360–0.0407 (2–4.5%; passes); primary white dwarfs 0.667–1.266 M☉ (Kalirai et al.
 //!   2008); the primaries' 17-point quantiles within 0.0155 of the exact mixture's CDF

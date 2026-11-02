@@ -13,20 +13,17 @@
 use crate::galaxy::Galaxy;
 use crate::math;
 use crate::sky::colour::{AtmosphereGrid, StarColour, star_colour};
+use crate::stellar::Phase;
 use crate::stellar::multiplicity::StarIndex;
-use crate::stellar::photometry::{
-    absolute_bolometric_magnitude, absolute_magnitude_v_under, bolometric_correction_v_under,
-};
-use crate::stellar::rules::StellarRules;
+use crate::stellar::photometry::absolute_magnitude_v_under;
 use crate::stellar::system::SystemStars;
-use crate::stellar::{Phase, StarState};
 use crate::tables::limb_darkening::{
     NORMAL, NORMAL_LOG_G, NORMAL_LOG_TEFF, WHITE_DWARF, WHITE_DWARF_LOG_G, WHITE_DWARF_LOG_TEFF,
 };
 use crate::tables::star_colour::LUMINANCE_RGB;
 use crate::time::UniverseTime;
 use crate::units::consts::{METRES_PER_PARSEC, SOLAR_RADIUS_M};
-use crate::units::{CandelasPerSquareMetre, Kelvin, Magnitudes, Metres, Radians};
+use crate::units::{CandelasPerSquareMetre, Kelvin, Metres, Radians};
 
 /// One row of the fitted limb-darkening table: c and α in B, V and R.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
@@ -227,26 +224,6 @@ pub(crate) fn grid_of(phase: Phase) -> AtmosphereGrid {
     }
 }
 
-/// A star's absolute V magnitude for its disc: plan 06's under the galaxy's stellar `rules`; for a
-/// white dwarf to which they give none (A4's interim, to version 25), the bolometric magnitude less
-/// the dwarfs' correction at its temperature (`photometry`'s own caution: up to about 0.6 mag off
-/// at 4,000 K). From 26 a white dwarf reads the Montreal grid's V instead, and the stand-in ends.
-/// Both read the dwarf sequence the rules choose.
-#[must_use]
-fn disc_absolute_v(state: &StarState, rules: StellarRules) -> Option<Magnitudes> {
-    match grid_of(state.phase()) {
-        AtmosphereGrid::WhiteDwarf => absolute_magnitude_v_under(state, rules).or_else(|| {
-            Some(
-                absolute_bolometric_magnitude(state.luminosity())?
-                    - bolometric_correction_v_under(state.effective_temperature(), rules)?,
-            )
-        }),
-        AtmosphereGrid::MainSequence | AtmosphereGrid::Giant => {
-            absolute_magnitude_v_under(state, rules)
-        }
-    }
-}
-
 /// The disc of each of `stars`' stars that shines at time `t` (Design note 16): its radius,
 /// `T_eff` and log g from plan 06's state ([`SystemStars::state_at`], the pair-evolved state), its
 /// colour, the photopic mean luminance per channel from its V flux and radius, and the central
@@ -300,7 +277,7 @@ pub fn host_discs(galaxy: &Galaxy, stars: &SystemStars, t: UniverseTime) -> Vec<
         .iter()
         .enumerate()
         .filter_map(|(i, star)| {
-            let m_v = disc_absolute_v(star, rules)?;
+            let m_v = absolute_magnitude_v_under(star, rules)?;
             let log_g = star.surface_gravity()?.value();
             let radius = star.radius().value() * SOLAR_RADIUS_M;
             let teff = star.effective_temperature();
@@ -366,6 +343,7 @@ fn bracket(nodes: &[f64], x: f64) -> (usize, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stellar::StarState;
     use crate::stellar::photometry::absolute_magnitude_v;
 
     fn sun() -> [PowerTwo; 3] {

@@ -5,9 +5,12 @@
 //! |y| or |z| is taken at the cell's nearest corner, and a factor that is unimodal in one scalar at
 //! its supremum over that scalar's range across the cell.
 //!
-//! - A flared layer is its radial envelope `exp(−R ÷ h_R)` at the nearest corner times the flare
-//!   factor's supremum ([`FlareFactor`]): at the cell's least |z|, `exp(−(z₁ ÷ h)^β) ÷ h` over the
-//!   heights `h(R)` of the cell's radii, which peaks at `h★ = z₁ β^(1 ÷ β)`.
+//! - A flared layer is its radial envelope's supremum over the cell's radii times the flare
+//!   factor's supremum ([`FlareFactor`]). The envelope `exp(−R_h ÷ R − R ÷ h_R)` is unimodal in R,
+//!   with its peak at `√(R_h h_R)` (P15.T6.c's hole), so it is taken at the cell's radius nearest
+//!   that, the nearest corner for a layer without a hole ([`FlaredLayer::radial_sup`]). The flare
+//!   factor is `exp(−(z₁ ÷ h)^β) ÷ h` at the cell's least |z| over the heights `h(R)` of the cell's
+//!   radii, which peaks at `h★ = z₁ β^(1 ÷ β)`.
 //! - A cored power law falls with R and |z|, so it is its value at the nearest corner.
 //! - The ballistic layer is the young disc's envelope bound (its hole's factor at the farthest
 //!   radius, plan 02) at the stretched height.
@@ -44,7 +47,7 @@ pub const BOUND_SLACK: f64 = 1.0 + 4.0 * BOUND_MARGIN;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let params = GalaxyParams::milky_way_like();
 /// let scales = GalaxyScales::new(&params, &PotentialTables::in_plane(&MassModel::new(&params)));
-/// let row = FlaredLayerParams { weight: 1.0, h_r: 1.2, h_0: 0.05, r_flare: 4.0, beta: 1.3 };
+/// let row = FlaredLayerParams { weight: 1.0, h_r: 1.2, h_0: 0.05, r_flare: 4.0, beta: 1.3, hole: 0.0 };
 /// let layer = FlaredLayer::new(&row, &scales)?;
 /// let cell = CellBox::new([25_984, 128, 512], 128)?;
 /// let bound = layer_bound(&layer, &cell);
@@ -58,7 +61,7 @@ pub fn layer_bound(layer: &FlaredLayer, cell: &CellBox) -> f64 {
     let radii = cell.r_cyl_range();
     let z_min = cell.nearest_corner().z.abs();
     let flare: FlareFactor = layer.flare_factor(z_min);
-    layer.norm() * layer.radial(radii.lo) * flare.sup(radii) * BOUND_SLACK
+    layer.norm() * layer.radial_sup(radii) * flare.sup(radii) * BOUND_SLACK
 }
 
 /// An upper bound on `spheroid`'s density over `cell`: its value at the nearest corner.
@@ -120,8 +123,13 @@ mod tests {
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::potential::{MassModel, PotentialTables};
     use crate::math;
+    use hyperion_testkit::float::assert_same_bits;
 
     fn layer(beta: f64) -> FlaredLayer {
+        holed_layer(beta, 0.0)
+    }
+
+    fn holed_layer(beta: f64, hole: f64) -> FlaredLayer {
         let params = GalaxyParams::milky_way_like();
         let scales = GalaxyScales::new(
             &params,
@@ -133,6 +141,7 @@ mod tests {
             h_0: 0.04,
             r_flare: 3.0,
             beta,
+            hole,
         };
         FlaredLayer::new(&row, &scales).unwrap()
     }
@@ -163,6 +172,38 @@ mod tests {
             let h_star = 300.0 * math::powf(beta, 1.0 / beta);
             let g = |h: f64| math::exp(-math::powf(300.0 / h, beta)) / h;
             assert!(g(h_star) >= g(h_star * 1.01) && g(h_star) >= g(h_star * 0.99));
+        }
+    }
+
+    /// P15.T6.c: a holed layer's radial envelope peaks at `√(R_h h_R)`, and its supremum over a
+    /// range of radii is attained on the range: at the peak where the range holds it, at the
+    /// nearer end otherwise, never below the envelope there. Without a hole it is the nearest
+    /// corner's value, bit for bit.
+    #[test]
+    fn the_holed_envelope_peaks_at_the_root_of_the_hole_times_the_length() {
+        let holed = holed_layer(1.3, 0.55);
+        let peak = (holed.hole_ly() * holed.radial_scale()).sqrt();
+        for (lo, hi) in [
+            (0.0, 181.0),
+            (0.5 * peak, 2.0 * peak),
+            (peak + 10.0, peak + 191.0),
+            (20_000.0, 30_000.0),
+        ] {
+            let sup = holed.radial_sup(ScalarRange::new(lo, hi));
+            let mut best: f64 = 0.0;
+            for i in 0..=1_000 {
+                let r = lo + (hi - lo) * f64::from(i) / 1_000.0;
+                best = best.max(holed.radial(r));
+            }
+            assert!(best <= sup, "R {lo}–{hi}: {best} over {sup}");
+            assert!(best >= sup * (1.0 - 1e-6), "loose: {best} against {sup}");
+        }
+        assert_eq!(holed.radial(0.0), 0.0);
+        // A hole of −0 is none: on the axis too, where its peak would otherwise be −0.
+        for plain in [layer(1.3), holed_layer(1.3, -0.0)] {
+            for (lo, hi) in [(0.0, 181.0), (8_000.0, 8_181.0)] {
+                assert_same_bits(plain.radial_sup(ScalarRange::new(lo, hi)), plain.radial(lo));
+            }
         }
     }
 }

@@ -6,8 +6,9 @@
 //! slow classes rising with speed and age, a spheroid that takes more of the weight as the speed
 //! rises, a slope of 2.5 for the fastest classes, and the brainstorm's own-form shares at a
 //! corotation ratio of 1.2 (bar 0.95, 0.61, 0.20, 0.05; bulge 0.91, 0.76, 0.55, 0.25; nuclear disc
-//! 0.88, 0.67, 0.43), continued by Design note 13's placeholders. The forms' tests and bounds'
-//! tests read it; nothing generated does.
+//! 0.88, 0.67, 0.43), continued by Design note 13's placeholders. One class, [`HOLED_CLASS`], has
+//! the thin disc's central hole (P15.T6.c), so the forms' and bounds' tests cover it. The forms'
+//! tests and bounds' tests read it; nothing generated does.
 
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::displaced::forms::{CoredPowerLawParams, FlaredLayerParams};
@@ -26,6 +27,13 @@ pub const AGE_MIDS: [f64; AGE_BINS] = [0.05, 0.2, 0.6, 1.5, 3.0, 6.0, 20.0];
 /// The old sources whose classes have one cored power law per speed bin.
 pub const OLD_SOURCES: usize = 5;
 
+/// The disc-born class, `(speed bin, age bin)`, whose layer has a central hole: a phase-mixed one,
+/// as the fits find (P15.T6.c).
+pub const HOLED_CLASS: (usize, usize) = (2, 4);
+
+/// [`HOLED_CLASS`]'s hole, `R_d`: the thin disc's own (`THIN_DISC_HOLE_LENGTHS`).
+pub const HOLE: f64 = 0.55;
+
 /// One disc-born class's row: the layer, the spheroid and `⟨uτ⟩`.
 #[must_use]
 pub fn disc_born(speed: usize, age: usize) -> (FlaredLayerParams, CoredPowerLawParams, f64) {
@@ -40,6 +48,11 @@ pub fn disc_born(speed: usize, age: usize) -> (FlaredLayerParams, CoredPowerLawP
         h_0: 0.04 + 0.1 * u * tau.sqrt(),
         r_flare: 3.0 + 2.0 * u,
         beta: 1.0 + 0.12 * s,
+        hole: if (speed, age) == HOLED_CLASS {
+            HOLE
+        } else {
+            0.0
+        },
     };
     let spheroid = CoredPowerLawParams {
         weight: spheroid_weight,

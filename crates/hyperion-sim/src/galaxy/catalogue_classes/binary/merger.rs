@@ -106,11 +106,11 @@ use crate::units::{
 ///
 /// Below it the class takes the held arm, [`MergerClassRules::ContactOnly`], the code of version
 /// 24 verbatim, so every generated value keeps its bits; the tests reach the new arm through
-/// `GalaxyRules::every_26_hold()`. The bump to 26 deletes this hold: [`MergerClassRules`] with its
+/// `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold: [`MergerClassRules`] with its
 /// `ContactOnly` arm, the galaxy rules' `merger_class` field, the scan's and the neutron-star
 /// remnant's matches on it, `MergerMark::MassRatio`, and the tripwire
-/// (`the_merger_class_is_held_only_until_the_26_bump`).
-pub(crate) const MERGER_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+/// (`the_merger_class_is_held_only_until_the_27_bump`).
+pub(crate) const MERGER_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// The generator version whose stellar merger class adds the engine's dynamical main-sequence
 /// mergers (P11.T8.c's missing channel, research-leans-16 §1.1): a third channel, a low-mass

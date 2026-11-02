@@ -225,10 +225,6 @@ pub fn death_in_interval(
 /// [`SystemStars::death_time`], bit for bit, under every arm. Under the version's rules it is
 /// [`death_in_interval`].
 ///
-/// Under a Humphreys–Davidson arm the fate table was not fitted for (`HdLimitRules`'
-/// `fitted_tables_hold`) its tier is skipped, as the range brief skips it, and the mass bracket
-/// and the exact lifetime decide.
-///
 /// # Panics
 ///
 /// As [`death_in_interval`] does.
@@ -245,15 +241,14 @@ pub(crate) fn death_in_interval_under(
         m0,
         age_at_epoch,
         &given_marks(composition, eta, draws),
-        rules,
         |m, composition, draws| lifetime_under(m, composition, draws, rules),
     )
 }
 
-/// [`death_in_interval_under`] of a primary whose lifetime under `rules` is known, `lifetime`:
+/// [`death_in_interval_under`] of a primary whose lifetime under its rules is known, `lifetime`:
 /// the exact tier takes it rather than computing it again, which costs some 0.4 ms for a layer-E
 /// star (plan 09, P09.T33.b's cost). It must be `lifetime_under` of the track mass, `composition`
-/// and the draws under `rules`, bit for bit, so that the verdict is
+/// and the draws under those rules, bit for bit, so that the verdict is
 /// [`death_in_interval_under`]'s.
 ///
 /// # Panics
@@ -266,14 +261,12 @@ pub(crate) fn death_in_interval_knowing(
     eta: StandardNormal,
     age_at_epoch: Years,
     draws: impl FnOnce() -> StarDraws,
-    rules: StellarRules,
     lifetime: Years,
 ) -> Option<UniverseTime> {
     decide(
         m0,
         age_at_epoch,
         &given_marks(composition, eta, draws),
-        rules,
         |_, _, _| lifetime,
     )
 }
@@ -384,7 +377,6 @@ pub(crate) fn explosion_site_knowing(
         record.primary_initial_mass(),
         record.age_at_epoch(),
         &marks,
-        rules,
         |m, composition, draws| {
             known.unwrap_or_else(|| lifetime_under(m, composition, draws, rules))
         },
@@ -466,21 +458,19 @@ pub(crate) fn keeps_a_recent_type_ia(stars: &SystemStars) -> bool {
 }
 
 /// The predicate's core: [`death_in_interval`] of a primary of initial mass `m0` and age at the
-/// epoch `age_at_epoch`, whose other `marks` are read only where a tier needs them, under the
-/// stellar stage's `rules`, with the exact tier's death age given by `exact_death_age` of the
-/// track mass, the composition and the draws, the lifetime under the same rules.
+/// epoch `age_at_epoch`, whose other `marks` are read only where a tier needs them, with the exact
+/// tier's death age given by `exact_death_age` of the track mass, the composition and the draws,
+/// the lifetime under the stellar stage's rules.
 ///
 /// Every side of the shared test decides through this one function: [`death_in_interval_under`]
 /// with the marks given and `lifetime_under`, [`explosion_site`] with a grid record's marks made
 /// lazily, the soundness test with its own death age; and P08.T12.c will pass the lifetime it has
-/// already computed for a layer-E record (Design note 19) rather than compute it again. The fate
-/// table's tier is asked only under the Humphreys–Davidson arm it was fitted for.
+/// already computed for a layer-E record (Design note 19) rather than compute it again.
 #[must_use]
 fn decide<C, E, D>(
     m0: SolarMasses,
     age_at_epoch: Years,
     marks: &Marks<C, E, D>,
-    rules: StellarRules,
     exact_death_age: impl FnOnce(SolarMasses, &Composition, &StarDraws) -> Years,
 ) -> Option<UniverseTime>
 where
@@ -501,12 +491,10 @@ where
         count(Verdict::Bracket);
         return None;
     }
-    // 2. The fate table, which holds unstripped stars on the version's tracks: under another
-    //    Humphreys–Davidson arm the exact tier decides.
+    // 2. The fate table, which holds unstripped stars on the version's tracks.
     let eta = *LazyCell::force(&marks.eta);
-    if rules.hd_limit.fitted_tables_hold()
-        && let Some(fate) =
-            FittedFates::generator().fate_fitted(m0, LazyCell::force(&marks.composition), eta)
+    if let Some(fate) =
+        FittedFates::generator().fate_fitted(m0, LazyCell::force(&marks.composition), eta)
     {
         let (lo, hi) = STRIPPED_WINDOW;
         let stripped = (lo..=hi).contains(&m0.value())
@@ -816,7 +804,6 @@ mod tests {
     use crate::rng::{ObjectKey, Stream, tags};
     use crate::stellar::draws::StarDrawsParts;
     use crate::stellar::lifetime;
-    use crate::stellar::sse::wind::HdLimitRules;
     use crate::stellar::system::{ClockDeath, SystemStars};
     use crate::units::{Dex, HeliumExcess, LightYears};
 
@@ -1005,7 +992,6 @@ mod tests {
                     p.m0,
                     age,
                     &given_marks(&p.composition, eta, || p.draws.clone()),
-                    StellarRules::of_version(GENERATOR_VERSION),
                     |_, _, _| death_age,
                 );
                 if expected.is_some() && got.is_none() {
@@ -1098,7 +1084,6 @@ mod tests {
                         draws.eta(),
                         age,
                         || draws.clone(),
-                        rules,
                         life
                     ),
                     death_in_interval_under(
@@ -1115,14 +1100,11 @@ mod tests {
         }
     }
 
-    /// The fate table is the version's tracks', so its tier decides only under the
-    /// Humphreys–Davidson arm it was fitted for.
-    ///
-    /// At an age that puts a 20 M☉ star's death a year past +H at the table's least death age,
-    /// the table decides `None` under the version's rules; under the enforced limit the exact tier
-    /// decides, here on a death age that puts the death at the epoch.
+    /// The fate table is the version's tracks', so its tier decides: at an age that puts a 20 M☉
+    /// star's death a year past +H at the table's least death age, it decides `None` before the
+    /// exact tier is asked.
     #[test]
-    fn the_fate_table_decides_only_under_the_arm_it_was_fitted_for() {
+    fn the_fate_table_decides_on_the_version_s_tracks() {
         let (m0, solar, draws) = (
             SolarMasses::new(20.0),
             Composition::SOLAR,
@@ -1136,27 +1118,18 @@ mod tests {
         let (widest, _) = LifetimeBracket::shared().bracket(m0).expect("in its range");
         assert!(widest.value() < least.value() - 1e3, "{widest:?} {least:?}");
         let age = Years::new(least.value() - CLOCK_WINDOW_H.as_julian_years_f64() - 1.0);
-        let version = StellarRules::of_version(GENERATOR_VERSION);
-        let enforced = StellarRules {
-            hd_limit: HdLimitRules::Enforced,
-            ..version
-        };
-        let ask = |rules| {
-            decide(
-                m0,
-                age,
-                &given_marks(&solar, eta, || draws.clone()),
-                rules,
-                |_, _, _| age,
-            )
-        };
         take_verdicts();
-        assert_eq!(ask(version), None);
-        assert_eq!(ask(enforced), Some(UniverseTime::EPOCH));
+        let decided = decide(
+            m0,
+            age,
+            &given_marks(&solar, eta, || draws.clone()),
+            |_, _, _| age,
+        );
+        assert_eq!(decided, None);
         let verdicts = take_verdicts();
         assert_eq!(
             (verdicts.bracket, verdicts.table, verdicts.exact_inside),
-            (0, 1, 1)
+            (0, 1, 0)
         );
     }
 

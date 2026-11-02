@@ -22,7 +22,7 @@
 //! (`B2Ia+ LBV`), and T24.c's stripped helium stars (`He-sdO3`), follow from the state
 //! (`peculiar`); P06.T24.b's young stars (`K5IV CTTS`, `A2IV HAeBe`) and its S and carbon stars
 //! of the thermally pulsing AGB (`MS6III`, `S6III`, `SC6III`, `C-N6`) from the state and the
-//! star's track and pulses, behind their hold (`PECULIAR_CLASSES_VERSION`). What only a star's
+//! star's track and pulses. What only a star's
 //! history knows, a neutron star's pulsar class, a helium star's surface and a young or AGB star's
 //! class, arrives through [`ClassExtras`].
 
@@ -49,9 +49,7 @@ pub use peculiar::{
     T_TAURI_MAX_MASS, WOLF_RAYET_MIN_TEFF, WolfRayetSequence, WolfRayetType, carbon_shows_after,
     carbon_star_window, is_luminous_blue_variable,
 };
-pub(crate) use peculiar::{
-    DredgeUp, PECULIAR_CLASSES_VERSION, PeculiarClassRules, chemical_class, young_class,
-};
+pub(crate) use peculiar::{DredgeUp, chemical_class, young_class};
 
 /// A spectral class letter: the MK sequence O to M and its extension to the brown dwarfs, L, T
 /// and Y, from hottest to coolest.
@@ -662,7 +660,7 @@ pub fn subtype_from_teff(teff: Kelvin) -> Option<SpectralCode> {
 }
 
 /// [`subtype_from_teff`] on the dwarf sequence the stellar stage's `rules` choose
-/// ([`DwarfSequence::of`]): the rows to version 25, the fitted grids from 26.
+/// ([`DwarfSequence::of`]).
 #[must_use]
 pub(crate) fn subtype_from_teff_under(teff: Kelvin, rules: StellarRules) -> Option<SpectralCode> {
     let t = teff.value();
@@ -1057,8 +1055,7 @@ pub(crate) mod tests {
         assert_eq!(SpectralLetter::from_index(10), None);
     }
 
-    /// The dwarf scale's subtype is monotone in temperature from 60,000 K to 100 K, and hits
-    /// every row of the table exactly.
+    /// The dwarf scale's subtype is monotone in temperature from 60,000 K to 100 K.
     #[test]
     fn the_dwarf_subtype_is_monotone_in_teff() {
         let mut previous = SpectralCode::HOTTEST.value();
@@ -1068,10 +1065,6 @@ pub(crate) mod tests {
             assert!(code >= previous, "{t} K: {code} after {previous}");
             previous = code;
             t *= 0.9995;
-        }
-        for row in pm13::DWARF_SEQUENCE {
-            let code = subtype_from_teff(Kelvin::new(row.teff_k)).unwrap();
-            assert_eq!(bits(code.value()), bits(row.code()), "{row:?}");
         }
         assert_eq!(subtype_from_teff(Kelvin::ZERO), None);
         assert_eq!(subtype_from_teff(Kelvin::new(f64::INFINITY)), None);

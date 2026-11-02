@@ -378,13 +378,6 @@ impl<'a> ClassContext<'a> {
         self.composition
     }
 
-    /// The pair's stellar rules.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn rules(&self) -> StellarRules {
-        self.rules
-    }
-
     /// Component `c`'s pulsar, if it is one.
     #[must_use]
     pub const fn pulsar(&self, c: Component) -> Option<&PulsarAt> {

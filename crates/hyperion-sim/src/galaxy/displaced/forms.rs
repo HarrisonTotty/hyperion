@@ -8,8 +8,10 @@
 //! speed `v_c` ([`GalaxyScales`]). [`FlaredLayerParams`] and [`CoredPowerLawParams`] are one row
 //! of it each; the density types here carry them into light-years for one galaxy.
 //!
-//! - [`FlaredLayer`]: `exp(−R ÷ h_R) × exp(−(|z| ÷ h)^β) ÷ h` with `h = h₀ exp(R ÷ r_flare)`, the
-//!   disc-born classes' layer. Its vertical integral is `2Γ(1 + 1 ÷ β)` at every radius.
+//! - [`FlaredLayer`]: `exp(−R_h ÷ R − R ÷ h_R) × exp(−(|z| ÷ h)^β) ÷ h` with `h = h₀ exp(R ÷
+//!   r_flare)`, the disc-born classes' layer, with the thin disc's own central hole `R_h` (none at
+//!   0; [`fields::disc`](crate::galaxy::fields::disc)). Its vertical integral is `2Γ(1 + 1 ÷ β)` at
+//!   every radius.
 //! - [`CoredPowerLaw`]: `(1 + (R² + z² ÷ q²) ÷ a²)^(−γ ÷ 2)`, the spheroid of every class.
 //! - [`BallisticLayer`]: for the two youngest age bins (τ < 0.3 `R_d ÷ v_c`) the brainstorm's
 //!   analytic form replaces the fitted layer: the young disc's own envelope, its height widened to
@@ -119,8 +121,9 @@ impl From<BuildFieldError> for BuildFormError {
     }
 }
 
-/// One flared layer of plan 15's table, dimensionless: `weight × exp(−R ÷ h_r) × exp(−(|z| ÷
-/// h)^β) ÷ h` with `h = h_0 exp(R ÷ r_flare)`, lengths in `R_d` (P15.T6's `FlaredLayer`).
+/// One flared layer of plan 15's table, dimensionless: `weight × exp(−hole ÷ R − R ÷ h_r) ×
+/// exp(−(|z| ÷ h)^β) ÷ h` with `h = h_0 exp(R ÷ r_flare)`, lengths in `R_d` (P15.T6's
+/// `FlaredLayer`, with P15.T6.c's central hole).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlaredLayerParams {
     /// The layer's share of the class's bound members inside the cube, 0–1.
@@ -133,6 +136,9 @@ pub struct FlaredLayerParams {
     pub r_flare: f64,
     /// The vertical profile's exponent β.
     pub beta: f64,
+    /// The central hole `R_h`, `R_d`: the thin disc's own form of hole, `exp(−R_h ÷ R)` on the
+    /// radial factor (plan 02, ruling 32), which the remnants born in it keep; 0 for none.
+    pub hole: f64,
 }
 
 /// One cored power law of plan 15's table, dimensionless: `weight × (1 + (R² + z² ÷ q²) ÷
@@ -241,10 +247,12 @@ fn inverse(integral: f64, quantity: &'static str) -> Result<f64, BuildFormError>
 /// # fn main() -> Result<(), hyperion_sim::galaxy::displaced::forms::BuildFormError> {
 /// let params = GalaxyParams::milky_way_like();
 /// let scales = GalaxyScales::new(&params, &PotentialTables::in_plane(&MassModel::new(&params)));
-/// let row = FlaredLayerParams { weight: 1.0, h_r: 1.2, h_0: 0.05, r_flare: 4.0, beta: 1.3 };
+/// let row = FlaredLayerParams { weight: 1.0, h_r: 1.2, h_0: 0.05, r_flare: 4.0, beta: 1.3, hole: 0.5 };
 /// let layer = FlaredLayer::new(&row, &scales)?;
 /// // The layer flares: it is taller at the Sun than at the centre.
 /// assert!(layer.scale_height(26_000.0) > layer.scale_height(0.0));
+/// // And it has a central hole: nothing on the axis.
+/// assert_eq!(layer.radial(0.0), 0.0);
 /// # Ok(())
 /// # }
 /// ```
@@ -252,6 +260,8 @@ fn inverse(integral: f64, quantity: &'static str) -> Result<f64, BuildFormError>
 pub struct FlaredLayer {
     /// `1 ÷ h_R`, ly⁻¹.
     inv_h_r: f64,
+    /// The central hole `R_h`, ly; +0 for none.
+    hole_ly: f64,
     /// `h₀`, ly.
     h_0: f64,
     /// `1 ÷ r_flare`, ly⁻¹.
@@ -266,16 +276,24 @@ impl FlaredLayer {
     ///
     /// # Errors
     ///
-    /// [`BuildFormError`] if a length or β is not positive and finite, or the layer's integral over
-    /// the cube is not.
+    /// [`BuildFormError`] if a length or β is not positive and finite, the hole is negative or not
+    /// finite, or the layer's integral over the cube is not positive and finite.
     pub fn new(row: &FlaredLayerParams, scales: &GalaxyScales) -> Result<Self, BuildFormError> {
         BuildFormError::check_positive("radial scale", row.h_r)?;
         BuildFormError::check_positive("scale height", row.h_0)?;
         BuildFormError::check_positive("flare radius", row.r_flare)?;
         BuildFormError::check_positive("beta", row.beta)?;
+        if !(row.hole.is_finite() && row.hole >= 0.0) {
+            return Err(BuildFormError {
+                quantity: "hole",
+                value: row.hole,
+            });
+        }
         let r_d = scales.r_d().value();
         let mut layer = Self {
             inv_h_r: 1.0 / (row.h_r * r_d),
+            // −0 is no hole, stored as +0, so that the bound's peak is never −0.
+            hole_ly: if row.hole > 0.0 { row.hole * r_d } else { 0.0 },
             h_0: row.h_0 * r_d,
             inv_r_flare: 1.0 / (row.r_flare * r_d),
             beta: row.beta,
@@ -291,10 +309,36 @@ impl FlaredLayer {
         self.h_0 * math::exp(r * self.inv_r_flare)
     }
 
-    /// The radial envelope `exp(−R ÷ h_R)` at `r` (ly).
+    /// The radial envelope `exp(−R_h ÷ R − R ÷ h_R)` at `r` (ly, not negative): 0 on the axis for a
+    /// holed layer, `exp(−R ÷ h_R)` bit for bit for one without a hole.
     #[must_use]
     pub fn radial(&self, r: f64) -> f64 {
-        math::exp(-r * self.inv_h_r)
+        math::exp(-radial_exponent(r, self.inv_h_r, self.hole_ly))
+    }
+
+    /// The radial envelope's supremum over the radii `range` (ly): its value at the range's radius
+    /// nearest its peak, `√(R_h h_R)`, since it rises to the peak and falls beyond it; at
+    /// `range.lo` for a layer without a hole, bit for bit.
+    #[must_use]
+    pub fn radial_sup(&self, range: ScalarRange) -> f64 {
+        if self.hole_ly <= 0.0 {
+            return self.radial(range.lo);
+        }
+        let peak = (self.hole_ly / self.inv_h_r).sqrt();
+        let at = if peak < range.lo {
+            range.lo
+        } else if peak > range.hi {
+            range.hi
+        } else {
+            peak
+        };
+        self.radial(at)
+    }
+
+    /// The central hole `R_h`, ly; 0 for none.
+    #[must_use]
+    pub fn hole_ly(&self) -> f64 {
+        self.hole_ly
     }
 
     /// The vertical factor `exp(−(|z| ÷ h)^β) ÷ h` at height `z` for scale height `h` (ly), ly⁻¹.
@@ -328,8 +372,8 @@ impl FlaredLayer {
     }
 
     /// The unnormalised form's column through the whole of z at radius `r` (ly), by quadrature
-    /// over the vertical factor from 0 to 256 scale heights: `exp(−R ÷ h_R) × 2Γ(1 + 1 ÷ β)` to
-    /// the quadrature's accuracy (module documentation).
+    /// over the vertical factor from 0 to 256 scale heights: [`radial`](Self::radial)`(r) × 2Γ(1 +
+    /// 1 ÷ β)` to the quadrature's accuracy (module documentation).
     #[must_use]
     pub fn column(&self, r: f64) -> f64 {
         let h = self.scale_height(r);

@@ -179,11 +179,11 @@ pub enum FeatureShare {
 ///
 /// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
 /// [`FieldShareRules::None`], the code of version 25 verbatim, so every generated value keeps its
-/// bits; the tests reach the new arm through a galaxy built under `GalaxyRules::every_26_hold()`.
-/// It rides 26 with rendering plan R06's R06.T16.a, which takes the features' members into the
-/// sky. The bump to 26 deletes this hold, [`FieldShareRules`] with its `None` arm, the galaxy's
-/// `field_share` field and its tripwire (`the_field_share_is_held_only_until_the_26_bump`).
-pub(crate) const FIELD_SHARE_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+/// bits; the tests reach the new arm through a galaxy built under `GalaxyRules::every_27_hold()`.
+/// It rides 27 with rendering plan R06's R06.T16.a, which takes the features' members into the
+/// sky. The bump to 27 deletes this hold, [`FieldShareRules`] with its `None` arm, the galaxy's
+/// `field_share` field and its tripwire (`the_field_share_is_held_only_until_the_27_bump`).
+pub(crate) const FIELD_SHARE_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether the field gives up the features' share of its systems (the hold of
 /// [`FIELD_SHARE_VERSION`]).

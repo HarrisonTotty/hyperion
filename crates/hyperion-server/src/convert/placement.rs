@@ -2,8 +2,8 @@
 //! beside its birth population, from the sim's placement class.
 //!
 //! A row carries it only from a galaxy that holds plan 08's displaced classes, every galaxy from
-//! generator version 26 (P08.T12's hold, `DISPLACED_VERSION`). One that holds none places every
-//! system in the field, which its rows leave unsaid, so that below 26 every range answer keeps the
+//! generator version 27 (P08.T12's hold, `DISPLACED_VERSION`). One that holds none places every
+//! system in the field, which its rows leave unsaid, so that below 27 every range answer keeps the
 //! bytes the server's goldens pin, as P09.T40.a's gate keeps the rows' origins (lean, 2026-11-01).
 
 use hyperion_protocol::PlacementKind;
@@ -55,15 +55,15 @@ mod tests {
     use crate::convert::origins::{a_catalogue_system, a_feature_member, a_grid_system};
     use crate::convert::{RangeRequest, RowOrigins, systems_in_range};
 
-    /// The Milky Way fixture under version 26's rules, every hold at 26 in force, so that it holds
+    /// The Milky Way fixture under version 27's rules, every hold at 27 in force, so that it holds
     /// plan 08's displaced classes.
-    fn milky_way_26() -> &'static Galaxy {
+    fn milky_way_27() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
         GALAXY.get_or_init(|| {
             Galaxy::from_params_at_version(
                 Seed::new(0x4d2),
                 GalaxyParams::milky_way_like(),
-                GeneratorVersion::new(26),
+                GeneratorVersion::new(27),
             )
             .expect("the Milky Way fixture builds")
         })
@@ -151,8 +151,8 @@ mod tests {
     #[test]
     fn in_a_galaxy_with_the_classes_only_a_grid_system_carries_a_placement() {
         // The rule reads the galaxy's classes and the record's origin alone, so the server tests'
-        // records of each origin stand for those of a galaxy at 26.
-        let galaxy = milky_way_26();
+        // records of each origin stand for those of a galaxy at 27.
+        let galaxy = milky_way_27();
         assert_eq!(
             grid_placement(galaxy, &a_grid_system()),
             Some(PlacementKind::Field)
@@ -190,8 +190,8 @@ mod tests {
     }
 
     #[test]
-    fn below_26_every_grid_system_is_in_the_field_and_no_row_says_so() {
-        // The 26 bump, which installs the classes in every galaxy, retires this test.
+    fn below_27_every_grid_system_is_in_the_field_and_no_row_says_so() {
+        // The 27 bump, which installs the classes in every galaxy, retires this test.
         assert!(
             milky_way().fields().displaced().is_none(),
             "the version in force holds plan 08's displaced classes"
@@ -218,11 +218,11 @@ mod tests {
     }
 
     #[test]
-    fn under_every_26_hold_a_layer_e_row_of_each_kind_is_served_with_its_placement() {
+    fn under_every_27_hold_a_layer_e_row_of_each_kind_is_served_with_its_placement() {
         // Layer E within 250 ly of a point in the plane at 16,000 ly, where the young disc's
         // living massive stars are dense enough for some of each kind: 4,049 rows at this seed,
         // four in the field, five runaways and five walkaways among them (2026-11-01).
-        let (answer, classes) = served(milky_way_26(), &layer_e_within([0, 16_000, 0], 250.0));
+        let (answer, classes) = served(milky_way_27(), &layer_e_within([0, 16_000, 0], 250.0));
         let counts = counted(&placements(&answer, &classes));
         for kind in [
             PlacementKind::Field,

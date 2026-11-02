@@ -121,13 +121,13 @@ fn cell(galaxy: &Galaxy, key: CellKey) -> Vec<SystemRecord> {
     records
 }
 
-/// P09.T2.c is held until the 25 → 26 bump: the rules in force are version 25's and before,
+/// P09.T2.c is held until the 26 → 27 bump: the rules in force are version 26's and before,
 /// under which the field is every population's whole budget.
 #[test]
-fn the_field_share_is_held_only_until_the_26_bump() {
+fn the_field_share_is_held_only_until_the_27_bump() {
     assert!(
         GENERATOR_VERSION < FIELD_SHARE_VERSION,
-        "the 25 → 26 bump puts P09.T2.c on the record, with rendering plan R06's R06.T16.a: the \
+        "the 26 → 27 bump puts P09.T2.c on the record, with rendering plan R06's R06.T16.a: the \
          field gives up the features' share φ (placement's thinning, the expected counts, the \
          core-collapse and Type Ia classes and the class table's stay shares read the field). \
          Delete `FIELD_SHARE_VERSION`, `FieldShareRules` with its `None` arm, \
@@ -141,7 +141,7 @@ fn the_field_share_is_held_only_until_the_26_bump() {
         FieldShareRules::None
     );
     assert_eq!(
-        GalaxyRules::every_26_hold().field_share,
+        GalaxyRules::every_27_hold().field_share,
         FieldShareRules::Phi
     );
 }
@@ -174,7 +174,9 @@ fn a_galaxy_carries_the_version_s_field_share() {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "the field share is read when a galaxy is built")]
 fn with_rules_refuses_to_change_the_field_share() {
-    let _ = held().clone().with_rules(GalaxyRules::every_26_hold());
+    let _ = held()
+        .clone()
+        .with_rules(GalaxyRules::every_26_hold_with_its_retargets());
 }
 
 /// Each component keeps its field factor of its budget in every band: its population's

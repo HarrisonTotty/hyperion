@@ -1,6 +1,7 @@
 //! Bounds for the flared displaced classes (plan 08, P08.T11): the flare factor's supremum and
-//! the radial envelope's nearest corner, checked by sampling and by a hunt for violations in the
-//! inner galaxy, against the test-only form table (`displaced_support`).
+//! the radial envelope's supremum over the cell's radii (its nearest corner without a hole,
+//! P15.T6.c), checked by sampling and by a hunt for violations in the inner galaxy, against the
+//! test-only form table (`displaced_support`).
 
 #[expect(
     dead_code,

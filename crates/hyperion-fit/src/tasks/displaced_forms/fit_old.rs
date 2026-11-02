@@ -4,9 +4,17 @@
 //!   class's (R, |z|) histogram as the disc-born forms are ([`fit_disc`](super::fit_disc)).
 //! - **Bulge, bar and nuclear disc:** the brainstorm's mixture, a share `s` of the population's
 //!   own form plus a spheroid, fitted to the class's bar-frame histogram in |x|, |y|, |z|
-//!   ([`BarCells`]). The own form is the field component's density, the shape plan 08 places
-//!   the retained share with (its Design note 13), integrated over the same cells. The bar lies
-//!   along x in the sim's fields and in the orbits' rotating frame at the epoch alike.
+//!   ([`BarCells`]). The own form is the unkicked orbits' ([`unkicked_form`]): the bar-frame
+//!   histogram of the source's unkicked control and its slowest class pooled, the same
+//!   distribution to their noise for the bulge and bar and to 0.012 over it for the nuclear disc
+//!   (P15.T6.d, research p15-t6-forms). The field component's density ([`own_form`]) is not: the
+//!   fit's bar is plan 15's weak quadrupole and the births are not its equilibrium, so even the
+//!   unkicked orbits leave it (it misplaces 0.15–0.55 of them, the table's notes give each), and a
+//!   share measured against it falls far below the brainstorm's at the slowest kicks. The slowest
+//!   class's share is so fitted against a form that holds its own orbits; larger controls would
+//!   replace the pooling. Plan 08 still
+//!   places the retained share with the field's density (its Design note 13). The bar lies along x
+//!   in the sim's fields and in the orbits' rotating frame at the epoch alike.
 //!
 //! The run holds one corotation ratio (the fixture's) and one bar mass, so the share measured
 //! there fills all three of `COROTATION_RATIO_NODES` until the runs at the other nodes exist
@@ -146,8 +154,9 @@ pub fn fit_spheroids(
     })
 }
 
-/// The own form of `population`, its field density integrated over the bar-frame cells and
-/// normalised: lengths in `R_d` of `r_d` ly.
+/// The field form of `population`, its field density integrated over the bar-frame cells and
+/// normalised: lengths in `R_d` of `r_d` ly. Plan 08 places the retained share with it; the fit's
+/// own form is [`unkicked_form`] (module documentation).
 #[must_use]
 pub fn own_form(fields: &Fields, population: Population, cells: &BarCells, r_d: f64) -> Vec<f64> {
     let mut out = vec![0.0; BAR_CELLS.iter().product()];
@@ -157,6 +166,23 @@ pub fn own_form(fields: &Fields, population: Population, cells: &BarCells, r_d: 
     );
     normalise(&mut out);
     out
+}
+
+/// The own form of a barred source, as its own-form shares are measured against: the bar-frame
+/// histogram of its unkicked control and of its slowest class pooled, as shares of the cells
+/// (module documentation). A record without a bar-frame histogram adds nothing.
+#[must_use]
+pub fn unkicked_form(control: &ClassHistogram, slowest: &ClassHistogram) -> Vec<f64> {
+    let mut pooled = vec![0; BAR_CELLS.iter().product()];
+    for bar in [&control.bar_frame, &slowest.bar_frame]
+        .into_iter()
+        .flatten()
+    {
+        for (p, &n) in pooled.iter_mut().zip(bar) {
+            *p += n;
+        }
+    }
+    shares(&pooled)
 }
 
 /// The spheroid's shares of the bar-frame cells.
@@ -340,5 +366,37 @@ mod tests {
         assert!(bar_cell([4_000.0, 1_000.0, 0.0]) < BAR_CELLS.iter().product());
         // Nothing inside the radius reads as unknown.
         assert!(elongation(std::slice::from_ref(&control), &control, 10.0)[0].is_none());
+    }
+
+    /// The unkicked form pools the control's and the slowest class's bar-frame counts, as shares.
+    #[test]
+    fn the_unkicked_form_pools_the_control_and_the_slowest_class() {
+        let put = |points: &[[f64; 3]]| {
+            let mut r = ClassHistogram::new(true);
+            for &x in points {
+                r.record(x, [0.0; 3], true, Integration::default());
+            }
+            r
+        };
+        let (a, b) = ([4_000.0, 1_000.0, 0.0], [-200.0, 300.0, 50.0]);
+        let control = put(&[a, a, b]);
+        let slowest = put(&[b]);
+        let form = unkicked_form(&control, &slowest);
+        assert!(
+            (form[bar_cell(a)] - 0.5).abs() < 1e-15,
+            "{}",
+            form[bar_cell(a)]
+        );
+        assert!(
+            (form[bar_cell(b)] - 0.5).abs() < 1e-15,
+            "{}",
+            form[bar_cell(b)]
+        );
+        assert!((form.iter().sum::<f64>() - 1.0).abs() < 1e-15);
+        assert!(
+            unkicked_form(&ClassHistogram::new(false), &ClassHistogram::new(false))
+                .iter()
+                .all(|&s| s <= 0.0)
+        );
     }
 }

@@ -47,12 +47,12 @@
 //! the exact quadrature and track outside it. Every reader reads the same two functions, so the
 //! mark, the kick law, the hierarchy draw and plan 08's class table (P08.T9) agree.
 //!
-//! A star with a helium excess, a cluster's second population's, is not the table's, and takes
-//! the exact path, some 3.5 ms a star. From version 26 (`STRIPPING_HELIUM_VERSION`) its share
-//! and radii are read from the table's helium axis instead ([`HeliumStrippingTable`],
-//! `hyperion-fit`'s `stripping_helium` task, `tables::stripping_helium`): three slices of
-//! helium excess over the same grid, interpolated linearly in ΔY from the table's own at none. It
-//! is the one table built under a held arm, the fitted helium table's, and is read only under it.
+//! A star with a helium excess, a cluster's second population's, is not the table's: its share and
+//! radii are read from the table's helium axis ([`HeliumStrippingTable`], `hyperion-fit`'s
+//! `stripping_helium` task, `tables::stripping_helium`; from version 26, P11.T1.d), three slices
+//! of helium excess over the same grid, interpolated linearly in ΔY from the table's own at none,
+//! built under the fitted helium table the tracks read. Past the axis it takes the exact path,
+//! some 3.5 ms a star.
 //!
 //! Plan 06's companion-stripped mark is read against [`stripped_share`] (P11.T1.d, edit 4), and
 //! plan 11's hierarchy draws a marked primary's innermost orbit from its stripping band and an
@@ -61,6 +61,7 @@
 //!
 //! [`can_interact`]: crate::stellar::binary::can_interact
 
+use crate::GENERATOR_VERSION;
 use crate::math;
 use crate::orbit::roche_lobe_radius;
 use crate::rng::{Mark, Threshold};
@@ -72,13 +73,11 @@ use crate::stellar::multiplicity::{
 };
 use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{
-    HeliumRules, MAX_INITIAL_MASS, MIN_INITIAL_MASS, Stage, Track, TrackOptions,
-    main_sequence_start,
+    MAX_INITIAL_MASS, MIN_INITIAL_MASS, Stage, Track, TrackOptions, main_sequence_start,
 };
 use crate::tables::{stripping, stripping_helium};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{Metres, SolarMasses, Years};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// The median draws with the companion-stripped mark [`NEVER_STRIPPED`]: a star evolving as it
 /// would alone, whose radii say where a companion would strip it.
@@ -397,32 +396,19 @@ pub fn stripped_share(m: SolarMasses, comp: &Composition) -> f64 {
 /// (P15.T7.b's hold, `stellar::rules`); from 26 its helium axis does.
 #[must_use]
 pub(crate) fn stripped_share_under(m: SolarMasses, comp: &Composition, rules: StellarRules) -> f64 {
-    tabulated_node(m, comp, rules).map_or_else(
+    tabulated_node(m, comp).map_or_else(
         || exact_stripped_share_under(m, comp, rules),
         |node| node.share,
     )
 }
 
-/// The node of a primary of initial mass `m1` and composition `comp` that a table holds under the
-/// stellar stage's `rules`, if one does: [`StrippingTable::generator`]'s, and under
-/// [`StrippingRules::HeliumTabulated`] its helium axis's for a star with a helium excess
-/// ([`HeliumStrippingTable::generator`]), which is read only under the fitted helium table it was
-/// built under (`HeliumRules::Fitted`, P15.T7.b's 26 arm). The exact path answers the rest.
+/// The node of a primary of initial mass `m1` and composition `comp` that a table holds, if one
+/// does: [`HeliumStrippingTable::generator`]'s, which is [`StrippingTable::generator`]'s for a star
+/// with no helium excess and its helium axis's for one with (P11.T1.d), built under the fitted
+/// helium table (P15.T7.b) the tracks read. The exact path answers the rest.
 #[must_use]
-fn tabulated_node(
-    m1: SolarMasses,
-    comp: &Composition,
-    rules: StellarRules,
-) -> Option<StrippingNode> {
-    match (rules.stripping, rules.helium) {
-        (StrippingRules::HeliumTabulated, HeliumRules::Fitted) => {
-            HeliumStrippingTable::generator().at(m1, comp)
-        }
-        (StrippingRules::HeliumExact, HeliumRules::Identity | HeliumRules::Fitted)
-        | (StrippingRules::HeliumTabulated, HeliumRules::Identity) => {
-            StrippingTable::generator().at(m1, comp)
-        }
-    }
+fn tabulated_node(m1: SolarMasses, comp: &Composition) -> Option<StrippingNode> {
+    HeliumStrippingTable::generator().at(m1, comp)
 }
 
 /// [`stripped_share`] with the primary's full track `track`, already built at the median draws
@@ -466,7 +452,7 @@ pub(crate) fn stripping_node_under(
     comp: &Composition,
     rules: StellarRules,
 ) -> StrippingNode {
-    tabulated_node(m1, comp, rules).unwrap_or_else(|| StrippingNode::of_under(m1, comp, rules))
+    tabulated_node(m1, comp).unwrap_or_else(|| StrippingNode::of_under(m1, comp, rules))
 }
 
 /// A companion-stripped mark that no share below 1 sets: the largest mark, 2⁵³ − 1, which lies
@@ -570,20 +556,13 @@ impl StrippingNode {
         Self::of_under(m1, comp, StellarRules::of_version(GENERATOR_VERSION))
     }
 
-    /// [`StrippingNode::of`] with the fitted helium table (`tables::helium_26`) in its track and
-    /// the version's other stellar rules: what [`HeliumStrippingTable`] tabulates, as
+    /// [`StrippingNode::of`], whose track reads the fitted helium table (`tables::helium_26`)
+    /// under the version's stellar rules: what [`HeliumStrippingTable`] tabulates, as
     /// `hyperion-fit`'s `stripping_helium` task computes each node, so that its helium axis holds
     /// the helium excess's own effect over the same tracks as the table at none.
     #[must_use]
     pub fn of_fitted_helium(m1: SolarMasses, comp: &Composition) -> Self {
-        Self::of_under(
-            m1,
-            comp,
-            StellarRules {
-                helium: HeliumRules::Fitted,
-                ..StellarRules::of_version(GENERATOR_VERSION)
-            },
-        )
+        Self::of(m1, comp)
     }
 
     /// [`StrippingNode::of`] with the track built under the stellar stage's `rules`.
@@ -762,25 +741,6 @@ fn interpolate(nodes: &[(f64, f64, f64, f64)], mass: f64, fe_h: f64) -> [f64; 4]
         row(line) + across * (row(line + 1) - row(line))
     };
     [mix(|n| n.0), mix(|n| n.1), mix(|n| n.2), mix(|n| n.3)]
-}
-
-/// The generator version whose stellar rules read the stripped share and stage radii of a star
-/// with a helium excess from [`HeliumStrippingTable`] in place of the exact path, a track and a
-/// quadrature of some 3.5 ms (plan 11, P11.T1.d's helium axis; [`StrippingRules`]). Members are
-/// first served at 26, and only they carry a helium excess. The 25 → 26 bump deletes this
-/// constant, [`StrippingRules`] with its `HeliumExact` arm, `StellarRules::stripping`, the `match`
-/// in `tabulated_node` and the tripwire `the_stripping_helium_axis_is_held_only_until_the_26_bump`,
-/// and refits the axis under 26's rules with the table at none.
-pub(crate) const STRIPPING_HELIUM_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Where a star with a helium excess reads its stripped share and stage radii (the hold of
-/// [`STRIPPING_HELIUM_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum StrippingRules {
-    /// Version 25's and before: the exact path, a track and the quadrature.
-    HeliumExact,
-    /// Version 26's: [`HeliumStrippingTable`], the exact path only outside it.
-    HeliumTabulated,
 }
 
 /// The number of [`HeliumStrippingTable`]'s slices above the stripping table's own at no helium

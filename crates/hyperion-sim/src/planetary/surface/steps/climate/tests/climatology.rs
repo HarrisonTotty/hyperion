@@ -12,7 +12,6 @@ use core::f64::consts::TAU;
 use hyperion_surface::field::month_edges;
 
 use super::super::grid::{GEOGRAPHIC_COLUMNS, LATITUDE_BANDS, ModelGrid, index};
-use super::super::partition;
 use super::gpcp_boxes::GPCP_LAND_BOXES_HUNDREDTH_MM_PER_DAY;
 use super::hydrology::is_arid;
 use super::ncep_air::{MONTH_DAYS, REDUCTION_LAPSE_RATE_K_PER_M};
@@ -904,15 +903,11 @@ fn the_relief_earth_s_months_follow_gpcp_and_ncep_r1_its_lees_and_west_coasts_ar
 }
 
 /// R09.T13.n's twin of R09.T13.l's test: the relief Earth under the partition's shown
-/// thermodynamics ([`partition::with_partition_thermodynamics`]), version 26's water cycle ahead
-/// of its bump, holds the same assertions.
+/// thermodynamics holds the same assertions.
 #[test]
 #[ignore = "slow: the reference Earth's step at level 7 on its geographic model, about 55 s"]
 fn under_the_shown_thermodynamics_the_relief_earth_holds_r09_t13_l_s_figures() {
-    partition::with_partition_thermodynamics(
-        partition::PartitionThermodynamics::Shown,
-        assert_the_relief_earth,
-    );
+    assert_the_relief_earth();
 }
 
 /// R09.T13.l's test's body ([`the_relief_earth_s_months_follow_gpcp_and_ncep_r1_its_lees_and_west_coasts_are_drier_and_india_is_wetter_in_jja`]),

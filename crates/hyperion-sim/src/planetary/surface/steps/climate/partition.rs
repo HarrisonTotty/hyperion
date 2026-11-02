@@ -19,7 +19,7 @@
 //!   model's flux form, F = −Λ (cos φ ÷ Δφ)(`h_k` − `h_k−1`) per 2πR² ([`ModelGrid::edge_conductance`],
 //!   the discretisation of the model's own convergence). Since that form is linear, the band means
 //!   give the geographic model's zonal-mean flux exactly.
-//! - **The air** (R09.T13.n, held at [`SHOWN_THERMODYNAMICS_VERSION`]): the h and L q that set
+//! - **The air** (R09.T13.n, from generator version 26): the h and L q that set
 //!   `h_T`, the gross moist stability `h_T` − h, the latent flux and E − P are the own record's to
 //!   version 25 and from 26 the climate the world shows, while F and the energy-flux equators stay
 //!   the own record's ([`budget_in_air`]). A modelling choice, not Siler et al.'s: their partition
@@ -63,9 +63,9 @@ use core::f64::consts::PI;
 use super::ebm::EnergyBalance;
 use super::grid::{LATITUDE_BANDS, ModelGrid};
 use super::transport::{REFERENCE_PRESSURE_PA, rotation_ratio};
+use crate::math;
 use crate::planetary::surface::inputs::CoarseInputs;
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
-use crate::{GENERATOR_VERSION, GeneratorVersion, math};
 
 /// The Hadley cell's edge at Earth's rotation, degrees: 25.1°, Kaspi and Showman 2015's (ApJ 804,
 /// 60) Fig. 6a width at Ω⊕, as the lane read it (decision-r09-t13ge §2.5, e5). With the ruled
@@ -591,79 +591,6 @@ pub(super) fn hadley_part_kg_m2_s(
         .collect()
 }
 
-/// The generator version from which the partition's thermodynamics are the climate the world shows
-/// (R09.T13.n): 26, so that at 25 nothing moves and the rule lands after 25's bump without waiting
-/// for 26's train (main's ruling of 2026-10-30).
-///
-/// Below it [`PartitionThermodynamics::in_force`] is [`PartitionThermodynamics::OwnRecord`], so
-/// that every water cycle is R09.T13.m's bit for bit. 26's bump deletes this hold, the enum and
-/// its `OwnRecord` arm, the tests' switch [`with_partition_thermodynamics`], the flat continent's
-/// held pin (`CONTINENT_LOW_ARID_CELLS_OWN_AIR`, `continent_low_arid_cells`), and its tripwire
-/// (`the_shown_thermodynamics_are_held_only_until_the_26_bump`).
-pub(crate) const SHOWN_THERMODYNAMICS_VERSION: GeneratorVersion = GeneratorVersion::new(26);
-
-/// Whose thermodynamics, h and L q, the partition's air reads ([`budget_in_air`]'s `air`; the hold,
-/// [`SHOWN_THERMODYNAMICS_VERSION`]). Its energy flux F, and with it the energy-flux equators, is
-/// the model's own record's under either.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum PartitionThermodynamics {
-    /// The model's own records', before R09.T13.d's correction (decision-r09-t13ge §2.11), as
-    /// R09.T13.e built it: to version 25.
-    OwnRecord,
-    /// The climate the world shows, the field its climate cells are interpolated from, the
-    /// normalised record plus the mean's constant ([`hydrology::shown_months_k`]; R09.T13.n): from
-    /// version 26.
-    ///
-    /// [`hydrology::shown_months_k`]: super::hydrology::shown_months_k
-    Shown,
-}
-
-impl PartitionThermodynamics {
-    /// The rule this generator version gives: [`Self::Shown`] from
-    /// [`SHOWN_THERMODYNAMICS_VERSION`], [`Self::OwnRecord`] below it; in the tests, the rule a
-    /// test's switch sets on its thread ([`with_partition_thermodynamics`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rule) = PARTITION_THERMODYNAMICS.with(core::cell::Cell::get) {
-            return rule;
-        }
-        if GENERATOR_VERSION >= SHOWN_THERMODYNAMICS_VERSION {
-            Self::Shown
-        } else {
-            Self::OwnRecord
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The partition's thermodynamics a test sets on its thread, `None` for the version's.
-    static PARTITION_THERMODYNAMICS: core::cell::Cell<Option<PartitionThermodynamics>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the partition's thermodynamics `rule` on this thread, for the tests to reach
-/// 26's water cycle ahead of the bump; the version's rule is set back after, a panic in `run`
-/// included. The water cycle reads it as it runs ([`PartitionThermodynamics::in_force`]), so a
-/// test runs its pass inside it, never through a pass a fixture built outside. 26's bump deletes
-/// it with the hold.
-#[cfg(test)]
-pub(crate) fn with_partition_thermodynamics<R>(
-    rule: PartitionThermodynamics,
-    run: impl FnOnce() -> R,
-) -> R {
-    /// Sets the thread's rule back as it drops.
-    struct Restore(Option<PartitionThermodynamics>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            PARTITION_THERMODYNAMICS.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(PARTITION_THERMODYNAMICS.with(|cell| cell.replace(Some(rule))));
-    run()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -830,36 +757,5 @@ mod tests {
         let flux = edge_fluxes(&grid, 1.0, &flat);
         let efe = energy_flux_equator(&grid, &flux, &flat);
         assert!((efe - grid.edge_sine(36)).abs() < 1e-15, "{efe}");
-    }
-
-    /// R09.T13.n's hold: below [`SHOWN_THERMODYNAMICS_VERSION`] the partition reads the own
-    /// record's thermodynamics, and the tests' switch sets the shown climate's and back.
-    #[test]
-    fn the_shown_thermodynamics_are_held_only_until_the_26_bump() {
-        assert!(
-            GENERATOR_VERSION < SHOWN_THERMODYNAMICS_VERSION,
-            "the 25 → 26 bump puts R09.T13.n's partition thermodynamics on the generator: every \
-             water cycle reads its air's h and L q from the climate the world shows. Delete \
-             `SHOWN_THERMODYNAMICS_VERSION`, `PartitionThermodynamics` and its `OwnRecord` arm \
-             (`hydrology::run_at`'s `air_k` then always `shown_months_k`'s, and `budget` its \
-             `budget_in_air`), the tests' switch `with_partition_thermodynamics` and its thread's \
-             rule, the flat continent's held pin (`CONTINENT_LOW_ARID_CELLS_OWN_AIR` and \
-             `continent_low_arid_cells`'s `OwnRecord` arm), and this test; re-bless \
-             `planetary/surface/earth_like` and `locked_earth_like` by name in the bump commit."
-        );
-        assert_eq!(
-            PartitionThermodynamics::in_force(),
-            PartitionThermodynamics::OwnRecord
-        );
-        with_partition_thermodynamics(PartitionThermodynamics::Shown, || {
-            assert_eq!(
-                PartitionThermodynamics::in_force(),
-                PartitionThermodynamics::Shown
-            );
-        });
-        assert_eq!(
-            PartitionThermodynamics::in_force(),
-            PartitionThermodynamics::OwnRecord
-        );
     }
 }

@@ -311,7 +311,8 @@ fn a_height_pair_is_its_two_point_queries_bit_for_bit() {
 
 #[test]
 fn no_height_depends_on_the_order_of_queries_or_the_cache() {
-    // The Mars-like world's trunks are bent, each reading its cell's edge neighbours (R09.T6.h).
+    // The Mars-like world's trunks are bent, each reading its cell's edge neighbours (R09.T6.h),
+    // and the Earth-like world's trunks and tributaries too, reading their continuity (R09.T6.i).
     for kind in [
         SyntheticWorld::EarthLike,
         SyntheticWorld::MarsLike,
@@ -340,6 +341,8 @@ fn no_height_depends_on_the_order_of_queries_or_the_cache() {
 #[test]
 fn the_whole_height_function_reads_within_the_synthesis_margin() {
     let margin = SYNTHESIS_MARGIN_CELLS;
+    // The Earth-like world's tributaries read the corners of their coarse cells' continuity
+    // (R09.T6.i).
     for (k, &kind) in SyntheticWorld::ALL.iter().enumerate() {
         let field = world(kind);
         let coarse = field.header().level();
@@ -382,16 +385,43 @@ fn the_whole_height_function_reads_within_the_synthesis_margin() {
 #[test]
 fn a_cell_with_its_margin_held_answers_as_the_whole_field() {
     // With the margin about a cell held, and nothing else, the cell's every point is answered as
-    // from the whole field at every level; with less, a corner is refused.
-    for kind in [SyntheticWorld::MarsLike, SyntheticWorld::CeresLike] {
-        let field = world(kind);
+    // from the whole field at every level; with less, a corner is refused. The Earth-like world's
+    // reads reach the margin itself (R09.T6.i): two of its cells carrying tributaries.
+    let tributaries = world(SyntheticWorld::EarthLike);
+    let body = channels::ChannelBody::of(tributaries.header());
+    let channelled: Vec<PatchKey> = (0..tributaries.header().level().cell_count())
+        .map(|n| crate::field::cell_at_index(body.level, n).unwrap())
+        .filter(|&c| {
+            let record = tributaries.cell(c).unwrap();
+            !record.is_under_water() && channels::deepest_level(record, body) > body.level
+        })
+        .step_by(97)
+        .take(2)
+        .collect();
+    let worlds = [SyntheticWorld::MarsLike, SyntheticWorld::CeresLike]
+        .map(|kind| {
+            let field = world(kind);
+            let level = field.header().level().get();
+            let last = (1_u32 << level) - 1;
+            (
+                format!("{kind:?}"),
+                field,
+                vec![
+                    PatchKey::new(crate::cube::Face::PosY, level, 0, last).unwrap(),
+                    PatchKey::new(crate::cube::Face::NegZ, level, last / 2, 3).unwrap(),
+                ],
+            )
+        })
+        .into_iter()
+        .chain([(
+            "EarthLike under R09.T6.i".to_owned(),
+            tributaries,
+            channelled,
+        )]);
+    for (kind, field, cells) in worlds {
         let level = field.header().level().get();
         let whole = Synthesiser::new(field, SEED);
-        let last = (1_u32 << level) - 1;
-        for cell in [
-            PatchKey::new(crate::cube::Face::PosY, level, 0, last).unwrap(),
-            PatchKey::new(crate::cube::Face::NegZ, level, last / 2, 3).unwrap(),
-        ] {
+        for cell in cells {
             let held = Held {
                 inner: field,
                 held: king_distances(cell, SYNTHESIS_MARGIN_CELLS)
@@ -412,7 +442,7 @@ fn a_cell_with_its_margin_held_answers_as_the_whole_field() {
                     assert_eq!(
                         sample_bits(from_part),
                         sample_bits(from_whole),
-                        "{kind:?} {cell:?} at {band:?}"
+                        "{kind} {cell:?} at {band:?}"
                     );
                 }
             }
@@ -426,7 +456,7 @@ fn a_cell_with_its_margin_held_answers_as_the_whole_field() {
                 thin_synth.height_at(&mut SynthCache::new(), dir, BandLevel::new(level).unwrap());
             assert!(
                 matches!(result, Err(QueryHeightError::NotSurveyed(c)) if !thin.held.contains(&c)),
-                "{kind:?}: {result:?}"
+                "{kind}: {result:?}"
             );
         }
     }

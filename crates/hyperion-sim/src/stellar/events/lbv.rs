@@ -6,15 +6,13 @@
 //! A star erupts inside its LBV window, the clock interval of [`StarModel::lbv_window`]
 //! (P06.T24.a): the hull from the first to the last age at which the star lies beyond the
 //! Humphreys–Davidson limit and is hotter than 8,000 K ([`is_luminous_blue_variable`]), in any
-//! living phase, within the part of its life the track is built for. Below version 26 eruptions
-//! are not thinned inside the hull, so a star whose track leaves the region and comes back erupts
-//! in the gap too: at [Fe/H] = −1 the windows of 45–100 M☉ span some 2 × 10⁵ years with a
-//! red-supergiant stretch near 4,000 K inside them, and a 150 M☉ star's starts on its main
-//! sequence (both deferred findings in plan 06, P06.T28.e). From version 26, behind the stellar
-//! rules' `hd_limit` hold (P06.T42.b's swap, which enforces the limit in the winds;
-//! `wind::HD_LIMIT_VERSION`), each candidate is thinned by [`is_luminous_blue_variable`] at its
-//! onset, so a star erupts only while it is one (research-p06 §8): the bound stays the constant,
-//! so the bins' words and every other eruption keep their places. The window is found once per
+//! living phase, within the part of its life the track is built for. A star whose track leaves the
+//! region and comes back would erupt in the gap too (at [Fe/H] = −1 the windows of 45–100 M☉ span
+//! some 2 × 10⁵ years with a red-supergiant stretch near 4,000 K inside them, and a 150 M☉ star's
+//! starts on its main sequence: plan 06, P06.T28.e), so each candidate is thinned by
+//! [`is_luminous_blue_variable`] at its onset, and a star erupts only while it is one (P06.T42.b's
+//! swap, which enforces the limit in the winds; research-p06 §8): the bound stays the constant, so
+//! the bins' words and every other eruption keep their places. The window is found once per
 //! call on the star's track. A star with no window (every star below about 40 M☉, whose track
 //! never reaches 6 × 10⁵ L☉) has no eruptions.
 //!
@@ -85,7 +83,6 @@ use crate::events::{
 };
 use crate::math;
 use crate::stellar::classify::is_luminous_blue_variable;
-use crate::stellar::sse::wind::HdLimitRules;
 use crate::stellar::system::StarModel;
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
@@ -371,17 +368,14 @@ impl RateModel for LbvModel<'_> {
         }
     }
 
-    /// The constant inside the window; under the enforced Humphreys–Davidson limit only where the
-    /// star is a luminous blue variable at `t` as well (the module documentation's thinning).
+    /// The constant inside the window, where the star is a luminous blue variable at `t` as well
+    /// (the module documentation's thinning).
     fn rate(&self, t: UniverseTime) -> EventsPerSecond {
         let erupts = self.erupts_at(t)
-            && match self.star.rules().hd_limit {
-                HdLimitRules::Belczynski => true,
-                HdLimitRules::Enforced => self
-                    .star
-                    .state_at(t)
-                    .is_some_and(|state| is_luminous_blue_variable(&state)),
-            };
+            && self
+                .star
+                .state_at(t)
+                .is_some_and(|state| is_luminous_blue_variable(&state));
         if erupts {
             eruption_rate()
         } else {
@@ -1124,7 +1118,7 @@ mod tests {
         }
     }
 
-    /// Under the 26 hold of the Humphreys–Davidson limit (P06.T42.b) a 150 M☉ star at \[Fe/H\] −2,
+    /// Under the enforced Humphreys–Davidson limit (P06.T42.b) a 150 M☉ star at \[Fe/H\] −2,
     /// whose window crosses states that are not luminous blue variables, erupts at exactly the
     /// candidates of the same bins inside its window whose onset is one: each eruption is the
     /// candidate's, its ID regenerates it and a dropped candidate's names none, and the listing is
@@ -1132,10 +1126,7 @@ mod tests {
     #[test]
     fn the_thinned_eruptions_are_the_windows_candidates_at_lbv_states() {
         use crate::stellar::rules::StellarRules;
-        let rules = StellarRules {
-            hd_limit: HdLimitRules::Enforced,
-            ..StellarRules::of_version(GENERATOR_VERSION)
-        };
+        let rules = StellarRules::of_version(GENERATOR_VERSION);
         let s = StarModel::new_under(
             SolarMasses::new(150.0),
             Composition::from_fe_h(Dex::new(-2.0), HeliumExcess::ZERO),

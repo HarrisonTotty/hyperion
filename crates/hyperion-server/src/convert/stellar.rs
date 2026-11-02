@@ -1002,7 +1002,7 @@ mod tests {
 
     /// What this generator version does not compute is absent from the wire, not `null`; what it
     /// computes and the star lacks is `null`; a Sun-like star's rotation and activity are values
-    /// (P06.T25).
+    /// (P06.T25), and its events in progress a list (P06.T28.g).
     #[test]
     fn what_is_not_computed_is_absent_and_what_is_lacking_is_null() {
         let living = answer(&system(1.0, 4.6e9), 0);
@@ -1013,8 +1013,10 @@ mod tests {
             assert_eq!(fields.get(null), Some(&serde_json::Value::Null), "{null}");
         }
         assert!(
-            !fields.contains_key("active_events"),
-            "active_events is sent: {wire}"
+            fields
+                .get("active_events")
+                .is_some_and(serde_json::Value::is_array),
+            "active_events is not sent: {wire}"
         );
         for value in ["rotation_period_d", "activity_log_lx_lbol"] {
             assert!(
@@ -1037,8 +1039,7 @@ mod tests {
     /// From version 26 (P06.T28.g's hold) a star's running events are on the wire with the light
     /// they make: a saturated dwarf's flare, by onset, with its duration, and its luminosity and
     /// `M_V` the summary's composed ones over the track's, its temperature the track's; at a time
-    /// with none running the list is sent empty and `M_V` is the track's. Below 26 the key is absent
-    /// (the test above).
+    /// with none running the list is sent empty and `M_V` is the track's.
     #[test]
     fn from_26_the_running_events_and_their_light_are_sent() {
         let stars = system_in(galaxy_26(), 0.2, 3e8);

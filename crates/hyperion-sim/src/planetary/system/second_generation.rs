@@ -1,6 +1,5 @@
 //! A neutron star's second-generation planets as bodies of its system (plan 14, design note 11,
-//! P14.T28.e), [`generate`](super::generate)'s step 10, behind its hold at generator version 26
-//! (`SECOND_GENERATION_VERSION`).
+//! P14.T28.e), [`generate`](super::generate)'s step 10, from generator version 26.
 //!
 //! Each single-star zone whose star is a neutron star by the end of the clock window, and whose
 //! host has a primordial disc for the derivation's snow line to read, draws its system on
@@ -27,7 +26,7 @@ use crate::planetary::fate::{FateBody, Generation, ScatterDraws};
 use crate::planetary::hosts::evolved::Circularisation;
 use crate::planetary::hosts::second_generation::{
     FIRST_SECOND_GENERATION_SLOT, SECOND_GENERATION_DELAY, SECOND_GENERATION_ECCENTRICITY,
-    SecondGenerationPlanet, SecondGenerationRules, place_second_generation,
+    SecondGenerationPlanet, place_second_generation,
 };
 use crate::planetary::hosts::young::{Formation, FormationDraws};
 use crate::planetary::index::BodySlot;
@@ -98,14 +97,9 @@ impl Body {
 }
 
 impl PlanetarySystem {
-    /// [`generate`](super::generate)'s step 10 under the rules in force: from
-    /// `SECOND_GENERATION_VERSION` each neutron star's second-generation planets, with their
-    /// rotation laws (the [module](self) documentation).
+    /// [`generate`](super::generate)'s step 10: each neutron star's second-generation planets, with
+    /// their rotation laws (the [module](self) documentation).
     pub(super) fn add_second_generation(&mut self, seed: Seed, ctx: &SystemContext) {
-        match SecondGenerationRules::in_force() {
-            SecondGenerationRules::Held => return,
-            SecondGenerationRules::Planets => {}
-        }
         let mut slot = FIRST_SECOND_GENERATION_SLOT;
         let mut added = Vec::new();
         for (zone, host) in self.zones.iter().zip(&self.hosts) {

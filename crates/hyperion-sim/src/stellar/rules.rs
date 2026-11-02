@@ -30,54 +30,7 @@
 //! - [`kick_rank`](StellarRules::kick_rank), the ordinary kick's rank table. No version holds a
 //!   second table yet, so every version takes the committed one. The tests reach a test-only
 //!   second table through it, to show that every reader goes through the choke point.
-//! - [`dwarf_sequence`](StellarRules::dwarf_sequence), at [`DWARF_SEQUENCE_VERSION`] (plan 06,
-//!   P06.T23.a's licence fix): the dwarf sequence that classification, photometry and rotation
-//!   read, the source's rows to 25 and the fitted grids from 26, through
-//!   [`DwarfSequence::of`]. Its readers on the record are a star's classification, photometry and
-//!   rotation in its summary and its range brief, the binary engine's Be stars, the sky census's
-//!   stars and the host stars' discs. The sky's fitted tables, the server's converters and
-//!   `hyperion-fit` take the version's rules, as do the sky's luminosity tables
-//!   (`sky::luminosity`): the server builds them once per seed and keeps them under a key of the
-//!   seed alone, so they follow the version, not a test's arm. The 25 → 26 bump deletes the field,
-//!   its held arm and its tripwire.
-//! - [`helium`](StellarRules::helium), the helium-excess table the tracks read, at
-//!   [`HELIUM_VERSION`] (plan 15, P15.T7.b's swap): P06.T17's identity below it, the fitted
-//!   `tables::helium_26` from it. A track's rules ride its [`TrackOptions`], whose builders read
-//!   the table at one choke point, [`HeliumTable::of`]; `StarModel::new_under`, the engine's
-//!   context and the brief put the galaxy's rules on the options of every track they build.
-//! - [`hd_limit`](StellarRules::hd_limit), the Humphreys–Davidson limit in the modern winds, at
-//!   [`HD_LIMIT_VERSION`] (plan 06, P06.T42.b's swap, rendering plan R06's ask A2): Belczynski et
-//!   al.'s constant below it, the limit enforced from it, read at one choke point, the wind's
-//!   rate, through every track's options as the helium table is; and from it a luminous blue
-//!   variable's eruptions are thinned to the instants at which it is one. The fitted tables built
-//!   from the tracks keep the version's rules until the bump refits them, and with them the
-//!   galaxy's mean masses and so its parameters (`stellar/rules/hd_limit_hold.rs` lists them).
-//! - [`v_magnitude`](StellarRules::v_magnitude), the V magnitudes of white dwarfs and evolved
-//!   stars, at [`V_MAGNITUDE_VERSION`] (plan 06, P06.T43.b's swap, rendering plan R06's ask A4):
-//!   A4's interim below it, white dwarfs dark and every living star on the dwarf table's
-//!   correction; from it the Montreal grid's V for white dwarfs and the giants' correction for
-//!   every living state past the hydrogen main sequence, chosen at one choke point,
-//!   [`absolute_magnitude_v_under`]. Its readers on the record are a star's summary, the sky
-//!   census's stars and the host stars' discs; the range brief reads no V. The census restates the
-//!   bounds that rest on dark white dwarfs under the new arm (its `BoundStar::brightest`). The
-//!   sky's fitted tables, its luminosity tables, the pair-light tables, the server's converters
-//!   and `hyperion-fit` take the version's rules, as for the dwarf sequence
-//!   (`stellar/rules/v_magnitude_hold.rs` lists them).
 //!
-//! - [`stripping`](StellarRules::stripping), where a star with a helium excess reads its stripped
-//!   share and stage radii, at [`STRIPPING_HELIUM_VERSION`] (plan 11, P11.T1.d's helium axis): the
-//!   exact path below it, `binarity::HeliumStrippingTable` from it, read at one choke point,
-//!   `binarity::tabulated_node`, by the companion-stripped mark, the kick and the hierarchy draw.
-//!   Only cluster members carry a helium excess. The bump deletes the field, its held arm and its
-//!   tripwire.
-//!
-//! - [`peculiar_classes`](StellarRules::peculiar_classes), at [`PECULIAR_CLASSES_VERSION`]
-//!   (P06.T24.b): the young stars' classes and the S and carbon stars', chosen in one `match`
-//!   (`system::peculiar_extras`), which a star's own summary and brief and a paired star's
-//!   summary read. Its tests are in `rules/classes_hold.rs`.
-//! - [`star_events`](StellarRules::star_events), at [`STAR_EVENTS_VERSION`] (P06.T28.g): a star's
-//!   active events and the light they make in its summary, and so on the wire, chosen in one
-//!   `match` in `system::star_summary`. Its tests are in `rules/events_hold.rs`.
 //! - [`merger_mass`](StellarRules::merger_mass), at [`MERGER_MASS_VERSION`] (plan 11, P11.T4.d's
 //!   fix): what the binary engine's dynamical main-sequence merger keeps, the accretor's mass and
 //!   what its thermal timescale allows below it, both stars' masses from it, read at one choke
@@ -112,28 +65,16 @@
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
-//! [`DwarfSequence::of`]: crate::stellar::classify::pm13::DwarfSequence::of
-//! [`TrackOptions`]: crate::stellar::sse::TrackOptions
-//! [`HeliumTable::of`]: crate::stellar::sse::track::HeliumTable::of
-//! [`V_MAGNITUDE_VERSION`]: crate::stellar::photometry::V_MAGNITUDE_VERSION
 //! [`SystemStars::exploded_pair`]: crate::stellar::system::SystemStars::exploded_pair
-//! [`absolute_magnitude_v_under`]: crate::stellar::photometry::absolute_magnitude_v_under
 //! [`BINARY_KICKS_VERSION`]: crate::stellar::system::BINARY_KICKS_VERSION
 //! [`SystemStars::shown_at`]: crate::stellar::system::SystemStars::shown_at
 
 use crate::GeneratorVersion;
-use crate::galaxy::displaced::binarity::{STRIPPING_HELIUM_VERSION, StrippingRules};
 use crate::stellar::binary::heavy_donor::{HEAVY_DONOR_VERSION, HeavyDonorRules};
 use crate::stellar::binary::ia::{IA_EXPLOSION_VERSION, IaExplosionRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
 use crate::stellar::binary::ns_accretion::{NS_ACCRETION_VERSION, NsAccretionRules};
-use crate::stellar::classify::pm13::{DWARF_SEQUENCE_VERSION, DwarfSequenceRules};
-use crate::stellar::classify::{PECULIAR_CLASSES_VERSION, PeculiarClassRules};
-use crate::stellar::events::{STAR_EVENTS_VERSION, StarEventRules};
-use crate::stellar::photometry::{V_MAGNITUDE_VERSION, VMagnitudeRules};
 use crate::stellar::remnant::KickRankRules;
-use crate::stellar::sse::wind::{HD_LIMIT_VERSION, HdLimitRules};
-use crate::stellar::sse::{HELIUM_VERSION, HeliumRules};
 use crate::stellar::system::{BINARY_KICKS_VERSION, BinaryKicksRules};
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -144,28 +85,6 @@ pub(crate) struct StellarRules {
     ///
     /// [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
     pub(crate) kick_rank: KickRankRules,
-    /// The dwarf sequence classification, photometry and rotation read
-    /// ([`DwarfSequence::of`](crate::stellar::classify::pm13::DwarfSequence::of)).
-    pub(crate) dwarf_sequence: DwarfSequenceRules,
-    /// The helium-excess table the tracks read ([`HeliumTable::of`]), the hold of
-    /// [`HELIUM_VERSION`].
-    ///
-    /// [`HeliumTable::of`]: crate::stellar::sse::track::HeliumTable::of
-    pub(crate) helium: HeliumRules,
-    /// How the modern winds treat an evolved star past the Humphreys–Davidson limit (the wind's
-    /// rate, `wind::rate`), and whether a luminous blue variable's eruptions are thinned to it,
-    /// the hold of [`HD_LIMIT_VERSION`].
-    pub(crate) hd_limit: HdLimitRules,
-    /// Which V magnitudes white dwarfs and evolved stars read (`photometry`'s
-    /// `absolute_magnitude_v_under`), the hold of [`V_MAGNITUDE_VERSION`].
-    pub(crate) v_magnitude: VMagnitudeRules,
-    /// Where a star with a helium excess reads its stripped share and stage radii, the hold of
-    /// [`STRIPPING_HELIUM_VERSION`].
-    pub(crate) stripping: StrippingRules,
-    /// Whether P06.T24.b's young, S and carbon classes are in force (`system::peculiar_extras`).
-    pub(crate) peculiar_classes: PeculiarClassRules,
-    /// Whether P06.T28.g's events are composed into a star's summary (`system::star_summary`).
-    pub(crate) star_events: StarEventRules,
     /// What a dynamically transferring main-sequence pair's merger keeps in the binary engine,
     /// the hold of [`MERGER_MASS_VERSION`].
     pub(crate) merger_mass: MergerMassRules,
@@ -192,41 +111,6 @@ impl StellarRules {
     pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
         Self {
             kick_rank: KickRankRules::Committed,
-            dwarf_sequence: if version.get() >= DWARF_SEQUENCE_VERSION.get() {
-                DwarfSequenceRules::Reduced
-            } else {
-                DwarfSequenceRules::Rows
-            },
-            helium: if version.get() >= HELIUM_VERSION.get() {
-                HeliumRules::Fitted
-            } else {
-                HeliumRules::Identity
-            },
-            hd_limit: if version.get() >= HD_LIMIT_VERSION.get() {
-                HdLimitRules::Enforced
-            } else {
-                HdLimitRules::Belczynski
-            },
-            v_magnitude: if version.get() >= V_MAGNITUDE_VERSION.get() {
-                VMagnitudeRules::A4
-            } else {
-                VMagnitudeRules::Interim
-            },
-            stripping: if version.get() >= STRIPPING_HELIUM_VERSION.get() {
-                StrippingRules::HeliumTabulated
-            } else {
-                StrippingRules::HeliumExact
-            },
-            peculiar_classes: if version.get() >= PECULIAR_CLASSES_VERSION.get() {
-                PeculiarClassRules::Full
-            } else {
-                PeculiarClassRules::Held
-            },
-            star_events: if version.get() >= STAR_EVENTS_VERSION.get() {
-                StarEventRules::Composed
-            } else {
-                StarEventRules::Held
-            },
             merger_mass: if version.get() >= MERGER_MASS_VERSION.get() {
                 MergerMassRules::Pair
             } else {
@@ -265,6 +149,20 @@ impl StellarRules {
         Self::of_version(GeneratorVersion::new(26))
     }
 
+    /// Every stellar hold at 26 with those retargeted from 26 to 27 in force too (P11.T4.d's
+    /// `merger_mass`): the stellar part of [`GalaxyRules::every_26_hold_with_its_retargets`].
+    ///
+    /// [`GalaxyRules::every_26_hold_with_its_retargets`]:
+    ///     crate::galaxy::rules::GalaxyRules::every_26_hold_with_its_retargets
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
+        Self {
+            merger_mass: MergerMassRules::Pair,
+            ..Self::of_version(GeneratorVersion::new(26))
+        }
+    }
+
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
     /// 26's and those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion` and
     /// `heavy_donor`, and P11.T10's `binary_kicks`).
@@ -297,11 +195,7 @@ mod classes_hold;
 #[cfg(test)]
 mod events_hold;
 #[cfg(test)]
-mod hd_limit_hold;
-#[cfg(test)]
 mod heavy_donor_hold;
-#[cfg(test)]
-mod helium_hold;
 #[cfg(test)]
 mod ia_hold;
 #[cfg(test)]
@@ -312,5 +206,3 @@ mod ns_accretion_hold;
 mod stripping_hold;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod v_magnitude_hold;
