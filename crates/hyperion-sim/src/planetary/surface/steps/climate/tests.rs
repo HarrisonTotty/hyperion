@@ -2741,11 +2741,20 @@ pub(super) mod other_regimes {
     }
 }
 
+/// The small Earth's surface seed for the reduced rank's test at generator version 25
+/// ([`under_the_27_hold_a_rejected_g_run_extrapolates_by_reduced_rank`]): [`reference::SEED`] with
+/// bits 41 and 42 flipped. Under `reference::SEED` itself, version 25's drift stop ends the small
+/// Earth's G1 at its fifth orbit, drifting, before any jump (R09.T13.i's lean), so that the run
+/// tells nothing of the extrapolation.
+const REDUCED_RANK_SEED: hyperion_base::rng::SurfaceSeed =
+    hyperion_base::rng::SurfaceSeed::new(0x58ed_0009_0010);
+
 /// Under the orbit extrapolation's 27 hold (rendering plan R09, I13), a geographic run whose jump by
 /// one ratio is rejected extrapolates by RRE(2), and the extrapolation stands: the small Earth's G1
-/// rejects its first jump at its third orbit. Under version 26's rules it rejects two and makes
-/// none. Its G1 lies past the geographic model's fold and stops at 40 orbits either way
-/// (R09.T13.i's I12).
+/// under [`REDUCED_RANK_SEED`] rejects one jump, then jumps twice and settles in 14 orbits. Under
+/// version 26's rules it rejects two, makes none and settles in 22 (both at generator version 25;
+/// at 24, under `reference::SEED`, it rejected its first jump at its third orbit and stopped at 40
+/// orbits past the fold either way, R09.T13.i's I12).
 #[test]
 #[ignore = "slow: the small Earth's climate step under the 27 hold, under 150 s in the test \
             profile"]
@@ -2755,7 +2764,7 @@ fn under_the_27_hold_a_rejected_g_run_extrapolates_by_reduced_rank() {
     let inputs = reference::small_earth();
     let level = hyperion_surface::field::coarse_level(inputs.radius());
     let (field, climate) = grids(level.get());
-    let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
+    let pass = Pass::new(REDUCED_RANK_SEED, &inputs, &field, &climate);
     let mut working = Working::initial(&pass);
     steps::plates::run(&pass, &mut working);
     steps::relief::run(&pass, &mut working);
