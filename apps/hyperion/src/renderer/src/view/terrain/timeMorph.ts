@@ -68,9 +68,10 @@ export const MORPH_MS_PER_PX = (1.5 * 1000) / 60 / (2 / 3);
 
 /**
  * The longest a change morphs in over, ms: a hand value, so that a rebake's spare slot and a
- * coarsen's finer patches come back (the probe found no bake refused with it).
+ * coarsen's finer patches come back; long enough that newly surveyed relief rising some 400 px
+ * on screen near the ground (TERRAIN TEST at 180 s) moves at most a pixel a frame.
  */
-export const MORPH_MAX_MS = 8_000;
+export const MORPH_MAX_MS = 16_000;
 
 /**
  * The spans of the drawn ground's changes (R10.T16.i): each change's span is at least the morph's

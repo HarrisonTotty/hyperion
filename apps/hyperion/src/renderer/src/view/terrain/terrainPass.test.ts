@@ -1273,6 +1273,27 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     expect([(beforeLongest ?? 0) > 0, atLongest]).toEqual([true, 0]);
   });
 
+  it("lengthens a refine's fade by its disagreement with its parent's surface, where its own morph moves nothing", async () => {
+    const view = northPole(2_000_000);
+    const nearestM = Math.hypot(1_000, 2_000, view.cameraM.z - PLANET.figure.polarRadiusM) - 1;
+    const radPerPx = (2 * Math.tan(view.fovXRad / 2)) / view.viewport.widthPx;
+    const { pass, pool, engine } = await standingIn();
+    // The child's own and morph heights 100 px above its flat parent's at their shared corner.
+    const heights = new Float32Array(65 * 65 * 2);
+    heights[0] = 100 * nearestM * radPerPx;
+    heights[1] = heights[0];
+    pool().heightsOf.set(patchKeyString(CHILD), heights);
+    pool().deliver(pass, CHILD);
+    pass.frame(inputAt(view, 6_000));
+    const fadeAt = (ms: number): number => {
+      const frame = pass.frame(inputAt(view, 6_000 + ms));
+      const [n] = drawnBy(frame.drawSet, CHILD);
+      return (recordWords(engine)[n ?? -1]?.[11] ?? -1) & 0xff;
+    };
+    const spanMs = 100 * MORPH_MS_PER_PX;
+    expect([fadeAt(MORPH_IN_MS) > fadeByte(0.5), fadeAt(spanMs)]).toEqual([true, 0]);
+  });
+
   it("cuts a refine at its first draw under reduced motion", async () => {
     const { pass, pool, engine, view } = await standingIn();
     pass.setReducedMotion(true);

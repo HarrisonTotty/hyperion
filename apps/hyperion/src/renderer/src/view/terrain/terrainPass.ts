@@ -165,7 +165,7 @@ import {
   subPatchOf,
   WirePhaseRecords,
 } from "./gpu/uniforms";
-import { MAX_LEVEL, type PatchKey, patchKeyString } from "./patchKey";
+import { MAX_LEVEL, type PatchKey, parentKey, patchKeyString } from "./patchKey";
 import { type PlanetGeometry, planetGeometry, surfacePoint } from "./planet";
 import { type MorphSpans, TimeMorph } from "./timeMorph";
 import {
@@ -801,6 +801,8 @@ interface BakeSizes {
   readonly reliefM: number;
   /** h₀ at every {@link SIZE_STRIDE}th vertex each way, m, 0 off the survey: a rebake's change. */
   readonly coarseM: Float32Array;
+  /** h₁ there, the same way: the patch's own parent-level surface, which its parent's should be. */
+  readonly coarseMorphM: Float32Array;
 }
 
 /**
@@ -827,6 +829,7 @@ function bakeSizesOf(bake: BakedPatch): BakeSizes {
   let morphM = 0;
   let reliefM = 0;
   const coarseM = new Float32Array(SIZE_SIDE * SIZE_SIDE);
+  const coarseMorphM = new Float32Array(SIZE_SIDE * SIZE_SIDE);
   for (let y = 0; y < PATCH_VERTICES_PER_SIDE; y += 1) {
     for (let x = 0; x < PATCH_VERTICES_PER_SIDE; x += 1) {
       const v = y * PATCH_VERTICES_PER_SIDE + x;
@@ -837,11 +840,35 @@ function bakeSizesOf(bake: BakedPatch): BakeSizes {
       morphM = Math.max(morphM, Math.abs(own - (h[2 * v + 1] ?? 0)));
       reliefM = Math.max(reliefM, Math.abs(own));
       if (x % SIZE_STRIDE === 0 && y % SIZE_STRIDE === 0) {
-        coarseM[(y / SIZE_STRIDE) * SIZE_SIDE + x / SIZE_STRIDE] = own;
+        const at = (y / SIZE_STRIDE) * SIZE_SIDE + x / SIZE_STRIDE;
+        coarseM[at] = own;
+        coarseMorphM[at] = h[2 * v + 1] ?? 0;
       }
     }
   }
-  return { morphM, reliefM, coarseM };
+  return { morphM, reliefM, coarseM, coarseMorphM };
+}
+
+/**
+ * How far a patch's parent-level surface stands from its parent's own, m (R10.T16.i): the largest
+ * |h₁ − the parent's h₀| at the samples the two coarse grids share (every second of the patch's,
+ * by its `quadrant` in the parent), each 0 off its own bake's survey. A refine's and a coarsen's
+ * heights mix from the parent's surface, and move by this as well as by the patch's own morph
+ * where the two bakes disagree (the survey's delta, its edge); 0 where they agree.
+ */
+function parentDisagreementM(patch: BakeSizes, parent: BakeSizes, quadrant: number): number {
+  const half = (SIZE_SIDE - 1) / 2;
+  const qx = (quadrant & 1) * half;
+  const qy = ((quadrant >> 1) & 1) * half;
+  let changeM = 0;
+  for (let cy = 0; cy < SIZE_SIDE; cy += 2) {
+    for (let cx = 0; cx < SIZE_SIDE; cx += 2) {
+      const own = patch.coarseMorphM[cy * SIZE_SIDE + cx] ?? 0;
+      const theirs = parent.coarseM[(qy + cy / 2) * SIZE_SIDE + qx + cx / 2] ?? 0;
+      changeM = Math.max(changeM, Math.abs(own - theirs));
+    }
+  }
+  return changeM;
 }
 
 /** The largest change between two bakes' {@link BakeSizes.coarseM}, m. */
@@ -1638,8 +1665,7 @@ export class TerrainPass {
     this.#budgetHoldMargin =
       options.budgetHoldMargin === undefined ? BUDGET_HOLD_MARGIN : options.budgetHoldMargin;
     this.#morphSpans = {
-      morphPx: (keyString) =>
-        this.#screenPx(keyString, this.#device.residents.get(keyString)?.sizes.morphM ?? 0),
+      morphPx: (keyString) => this.#screenPx(keyString, this.#morphSizeM(keyString)),
       risePx: (keyString) =>
         this.#screenPx(keyString, this.#device.residents.get(keyString)?.sizes.reliefM ?? 0),
       changePx: (keyString, changeM) => this.#screenPx(keyString, changeM),
@@ -3654,6 +3680,28 @@ export class TerrainPass {
         )
       );
     };
+  }
+
+  /**
+   * How far a refine or a coarsen over the resident patch keyed `keyString` moves its ground, m: its
+   * own morph's |h₀ − h₁|, or its disagreement with its resident parent's surface, which its heights
+   * mix from (`parentDisagreementM`), where that is more; 0 for a patch not resident.
+   */
+  #morphSizeM(keyString: string): number {
+    const residents = this.#device.residents;
+    const resident = residents.get(keyString);
+    const key = this.#device.cache.get(keyString)?.key;
+    if (resident === undefined || key === undefined) {
+      return 0;
+    }
+    const parent = parentKey(key);
+    const above = parent === null ? undefined : residents.get(patchKeyString(parent));
+    return above === undefined
+      ? resident.sizes.morphM
+      : Math.max(
+          resident.sizes.morphM,
+          parentDisagreementM(resident.sizes, above.sizes, parentQuadrant(key)),
+        );
   }
 
   /**
