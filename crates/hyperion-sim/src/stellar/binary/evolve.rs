@@ -50,6 +50,7 @@ use super::timeline::{
     BinaryInput, BinaryTimeline, Context, FixedOrbit, OrbitPath, PooledIaEvent, Segment,
     SegmentKind, SupernovaRecord,
 };
+use super::wind_accretion;
 
 /// The most segments a timeline holds (P11.T4.f): reaching it is a broken invariant, counted in
 /// the tests.
@@ -97,10 +98,12 @@ pub(super) const MAX_STEPS: u32 = 200_000;
 ///
 /// A star that has not arrived by then takes its zero-age main-sequence radius, as the engine
 /// carries it (P11.T4.i). A star below 0.1 M☉ takes the largest radius of P06.T13's cooling fits,
-/// their first. Everything else is two single stars on an orbit that their core collapses change
-/// (BSE appendix A1, P11.T4.l): a pair this passes over at an age shows no interaction before that
-/// age and before its first supernova in a run to any later age (P11.T4.j's wording). After a
-/// collapse a later run may take the pair over where an earlier one keeps its new orbit fixed.
+/// their first. Under the 27 hold of P11.T12's fix (`wind_accretion`) a pair those tests pass over
+/// can interact too where its main-sequence star takes 10⁻⁴ M☉ of its partner's wind by then.
+/// Everything else is two single stars on an orbit that their core collapses change (BSE appendix
+/// A1, P11.T4.l): a pair this passes over at an age shows no interaction before that age and
+/// before its first supernova in a run to any later age (P11.T4.j's wording). After a collapse a
+/// later run may take the pair over where an earlier one keeps its new orbit fixed.
 ///
 /// # Examples
 ///
@@ -146,7 +149,7 @@ pub(super) const MAX_STEPS: u32 = 200_000;
 pub fn can_interact(input: &BinaryInput, until_age: Years) -> bool {
     let until = until_age.value().max(0.0);
     let members = own_members(input, until, None);
-    interacts(input, &members, until)
+    interacts(input, &members, until) || wind_accretion::onset(input, &members, until).is_some()
 }
 
 /// [`can_interact`] with the stars' own tracks where the caller holds them, as
@@ -159,7 +162,7 @@ pub(crate) fn can_interact_with_tracks(
 ) -> bool {
     let until = until_age.value().max(0.0);
     let members = own_members_with(input, until, tracks);
-    interacts(input, &members, until)
+    interacts(input, &members, until) || wind_accretion::onset(input, &members, until).is_some()
 }
 
 /// Runs the pair of `input` forward once from zero age to `until_age`, into its timeline (plan
@@ -168,8 +171,9 @@ pub(crate) fn can_interact_with_tracks(
 /// A pair that cannot interact ([`can_interact`]) is two single stars on their drawn orbit, whose
 /// states are plan 06's own, until a star's collapse, which BSE appendix A1 applies to that orbit
 /// (P11.T4.l), unless, under the stellar rules of P11.T10's fix (from version 27, `collapses.rs`),
-/// a star of it dies suddenly by `until_age`, when the engine runs it. Otherwise the engine runs
-/// event to event (see the module documentation).
+/// a star of it dies suddenly by `until_age`, when the engine runs it. A pair whose stars only take
+/// each other's wind (from the 27 hold of P11.T12's fix) is the closed form of `wind_accretion`.
+/// Otherwise the engine runs event to event (see the module documentation).
 ///
 /// # Examples
 ///
@@ -285,6 +289,9 @@ fn run_pair(
             .runs_pair(first_sudden_death(&members, pinned), until)
     };
     if gated && !interacts(input, &members, until) && !collapses() {
+        if let Some(onset) = wind_accretion::onset(input, &members, until) {
+            return wind_accretion::wind_fed_timeline(input, members, until, ctx, onset);
+        }
         let pin = pin.map(|p| p.pin);
         return Engine::passed_over(input, ctx, until, members, pin, own_end, pre_test);
     }
@@ -335,6 +342,15 @@ pub(super) fn engine_runs(input: &BinaryInput, until_age: Years) -> bool {
             .rules()
             .collapses
             .runs_pair(first_sudden_death(&members, pinned), until)
+}
+
+/// The drawn orbit of `input` at every age: a passed-over pair's, two single stars on their orbit.
+#[must_use]
+pub(super) fn drawn_orbit_path(input: &BinaryInput) -> OrbitPath {
+    OrbitPath {
+        fixed: Some(FixedOrbit::always(*input.orbit())),
+        ..LiveOrbit::of(input, Years::ZERO).path()
+    }
 }
 
 /// [`evolve`] past the pre-test: the engine runs every pair, whether [`can_interact`] passes it or

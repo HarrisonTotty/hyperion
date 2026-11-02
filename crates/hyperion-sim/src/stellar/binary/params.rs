@@ -146,6 +146,16 @@ impl WindSpeedFactor {
             }
         }
     }
+
+    /// The least `β_W` [`WindSpeedFactor::of`] gives any star: the slowest wind, whose companion
+    /// takes the largest share of it.
+    #[must_use]
+    pub(crate) const fn least(self) -> f64 {
+        match self {
+            Self::Fixed(beta) => beta,
+            Self::StarTrack => Self::COOL,
+        }
+    }
 }
 
 #[cfg(test)]

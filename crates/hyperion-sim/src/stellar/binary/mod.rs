@@ -58,6 +58,7 @@ pub mod scan;
 mod star;
 mod supernova;
 mod timeline;
+pub(crate) mod wind_accretion;
 pub(crate) mod xrb_class;
 
 #[cfg(any(test, feature = "testing"))]

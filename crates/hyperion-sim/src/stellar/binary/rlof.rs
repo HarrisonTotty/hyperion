@@ -1079,9 +1079,7 @@ impl Engine {
     pub(super) fn rejuvenated_tau(&self, i: usize, tau: f64, m0: f64, m1: f64, dt: f64) -> f64 {
         match &self.members[i] {
             Member::MainSequence { helium, .. } => {
-                let mixed = !*helium && !(0.35..=1.25).contains(&m1);
-                let tau = if mixed && m1 > m0 { tau * m0 / m1 } else { tau };
-                (tau + dt / sse::main_sequence_lifetime(self.ctx.coeffs(), *helium, m1)).min(1.0)
+                rejuvenated_tau_unheld(self.ctx.coeffs(), *helium, tau, m0, m1, dt).min(1.0)
             }
             Member::Track { .. }
             | Member::Shaped { .. }
@@ -1374,6 +1372,25 @@ impl Engine {
         );
         self.explode(i, m, remnant, Some(kick));
     }
+}
+
+/// τ of a carried main sequence (`helium` for a helium one) that grows from `m0` to `m1` M☉ over
+/// `dt` years, not yet held to 1: `Engine::rejuvenated_tau`'s rule (BSE section 2.6.6, after Tout
+/// et al. 1997), which a wide pair's wind accretion reads too (`wind_accretion`). τ is kept for a
+/// star with a radiative core (0.35–1.25 M☉) or a helium main sequence (P11.T4.m) and lowered by
+/// m₀ ÷ m₁ for one whose convective core mixes in the new fuel, then advances by dt ÷ `t_MS`(m₁).
+#[must_use]
+pub(super) fn rejuvenated_tau_unheld(
+    coeffs: &sse::ZCoeffs,
+    helium: bool,
+    tau: f64,
+    m0: f64,
+    m1: f64,
+    dt: f64,
+) -> f64 {
+    let mixed = !helium && !(0.35..=1.25).contains(&m1);
+    let tau = if mixed && m1 > m0 { tau * m0 / m1 } else { tau };
+    tau + dt / sse::main_sequence_lifetime(coeffs, helium, m1)
 }
 
 /// The Kelvin–Helmholtz timescale of a star of structure `s` and type `kind`, years (BSE

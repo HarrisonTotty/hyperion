@@ -87,6 +87,13 @@
 //!   `match`, [`PinnedWhiteDwarfRules::holds`], by the strip (`Engine::stripped_member_at`) and a
 //!   merger's product that no star can hold (`Engine::held_product`)
 //!   (`stellar/rules/pinned_white_dwarfs_hold.rs` lists the movers).
+//! - [`wind_accretion`](StellarRules::wind_accretion), at [`WIND_ACCRETION_VERSION`] (plan 11,
+//!   P11.T12's fix): whether a pair the pre-test's lobe and decay tests pass over takes its winds,
+//!   two single stars on their orbit below it, from it a main-sequence star fed its Bondi–Hoyle
+//!   share of its partner's wind, read at one choke point, `wind_accretion::onset`, through the
+//!   pair's input's rules, by `can_interact` and `evolve`'s pass-over. The fitted tables keep the
+//!   version's rules until the bump refits them, and the range brief's gate refuses them under
+//!   another arm (`stellar/rules/wind_accretion_hold.rs` lists the movers).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -94,6 +101,7 @@
 //! [`SystemStars::exploded_pair`]: crate::stellar::system::SystemStars::exploded_pair
 //! [`BINARY_KICKS_VERSION`]: crate::stellar::system::BINARY_KICKS_VERSION
 //! [`SystemStars::shown_at`]: crate::stellar::system::SystemStars::shown_at
+//! [`WIND_ACCRETION_VERSION`]: crate::stellar::binary::wind_accretion::WIND_ACCRETION_VERSION
 
 use crate::GeneratorVersion;
 use crate::stellar::binary::awd_donors::{AWD_DONORS_VERSION, AwdDonorRules};
@@ -105,6 +113,7 @@ use crate::stellar::binary::ns_accretion::{NS_ACCRETION_VERSION, NsAccretionRule
 use crate::stellar::binary::pinned_white_dwarfs::{
     PINNED_WHITE_DWARFS_VERSION, PinnedWhiteDwarfRules,
 };
+use crate::stellar::binary::wind_accretion::{WIND_ACCRETION_VERSION, WindAccretionRules};
 use crate::stellar::binary::xrb_class::{XRB_CLASS_VERSION, XrbClassRules};
 use crate::stellar::remnant::KickRankRules;
 use crate::stellar::system::{BINARY_KICKS_VERSION, BinaryKicksRules};
@@ -143,6 +152,9 @@ pub(crate) struct StellarRules {
     /// Whether a pinned primary, its pin pending, that its binary would make a white dwarf is
     /// held until its pin, the hold of [`PINNED_WHITE_DWARFS_VERSION`].
     pub(crate) pinned_white_dwarfs: PinnedWhiteDwarfRules,
+    /// Whether a pair the pre-test's lobe and decay tests pass over takes its winds, the hold of
+    /// [`WIND_ACCRETION_VERSION`].
+    pub(crate) wind_accretion: WindAccretionRules,
 }
 
 impl StellarRules {
@@ -198,6 +210,11 @@ impl StellarRules {
             } else {
                 PinnedWhiteDwarfRules::Born
             },
+            wind_accretion: if version.get() >= WIND_ACCRETION_VERSION.get() {
+                WindAccretionRules::BondiHoyle
+            } else {
+                WindAccretionRules::OwnTracks
+            },
         }
     }
 
@@ -218,7 +235,7 @@ impl StellarRules {
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
     /// those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion`, `heavy_donor`
     /// and `pinned_white_dwarfs`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and `xrb_class`,
-    /// and P11.T10's `binary_kicks` and `collapses`).
+    /// P11.T10's `binary_kicks` and `collapses`, and P11.T12's `wind_accretion`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.
@@ -265,5 +282,7 @@ mod pinned_white_dwarfs_hold;
 mod stripping_hold;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wind_accretion_hold;
 #[cfg(test)]
 mod xrb_class_hold;
