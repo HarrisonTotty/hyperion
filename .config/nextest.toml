@@ -349,6 +349,12 @@ threads-required = 16
 filter = "package(hyperion-sim) & test(=stellar::rules::heavy_donor_hold::census_of_the_heavy_donors)"
 threads-required = 16
 
+# P11.T4's dwarf-limit census runs its generated pairs in sixteen shares of its own (`in_shares`,
+# `dwarf_limit_hold::THREADS`), so it reserves sixteen slots too.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::rules::dwarf_limit_hold::no_white_dwarf_passes_the_chandrasekhar_mass_under_every_27_hold)"
+threads-required = 16
+
 # P09.T36.a's census walks every catalogue feature's list and two classes' cells in sixteen shares of
 # its own (`in_shares`), so it reserves sixteen slots too.
 [[profile.slow.overrides]]

@@ -203,3 +203,45 @@ pub(crate) fn massive_records(galaxy: &Galaxy, n: u32, lcg_seed: u64) -> Vec<Sys
         })
         .collect()
 }
+
+/// Whether `timeline` shows a white dwarf above the Chandrasekhar mass at a segment's edge or at a
+/// knot of a remnant's mass, at or before `until` years (P11.T4's dwarf limit, `dwarf_limit`).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn shows_a_dwarf_above_the_limit(
+    timeline: &crate::stellar::binary::BinaryTimeline,
+    until: f64,
+) -> bool {
+    use crate::stellar::Phase;
+    use crate::stellar::binary::star::Member;
+    use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
+
+    timeline
+        .segments()
+        .iter()
+        .flat_map(|s| {
+            let knots = s.members().iter().flat_map(|m| match m {
+                Member::Remnant { mass, .. } => mass.knots(),
+                Member::Track { .. }
+                | Member::Shaped { .. }
+                | Member::MainSequence { .. }
+                | Member::Cooling { .. }
+                | Member::Frozen { .. }
+                | Member::Gone => &[],
+            });
+            [s.start().value(), s.end().value()]
+                .into_iter()
+                .chain(knots.map(|k| k[0]))
+        })
+        .filter(|&age| age <= until)
+        .any(|age| {
+            timeline.state_at(Years::new(age)).stars().iter().any(|s| {
+                matches!(
+                    s.phase(),
+                    Phase::HeliumWhiteDwarf
+                        | Phase::CarbonOxygenWhiteDwarf
+                        | Phase::OxygenNeonWhiteDwarf
+                ) && s.mass() > CHANDRASEKHAR_MASS
+            })
+        })
+}

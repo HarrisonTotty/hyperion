@@ -7518,3 +7518,13 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   - _Acceptance:_ the lib tests `wind_accretion` and `whatever_age_it_is_run_to`; slow,
     `old_populations_hold_blue_stragglers_and_hot_subdwarfs` (the halo still short of its window:
     a finding).
+- **P11.T4's dwarf limit, held at 27** (lane `fix-swollen-he-wd-and-merger-dwarf`, 2026-11-02;
+  nothing moves at 24–26). From `DWARF_LIMIT_VERSION` = 27 (`stellar/binary/dwarf_limit.rs`,
+  `StellarRules::dwarf_limit`) no engine white dwarf passes the Chandrasekhar mass:
+  `Engine::finish_merger` collapses a merged dwarf at it as an accreting one, and a dwarf fed helium
+  past the edge-lit mark, or by a wind in a detached phase (`detached::Stop::Chandrasekhar`),
+  collapses there too. `Engine::new_star`'s unplaced product is oxygen–neon
+  where its carbon–oxygen core's `sse::pulsing_agb_helium_core` is 1.6 M☉ or more or it merged
+  from one (lean, 2026-11-02), and a helium core at or above the Chandrasekhar mass is its naked
+  helium star, not a collapse (lean, 2026-11-02). The brief's gate refuses the fitted tables
+  under it. Test helper: `binary::testing::shows_a_dwarf_above_the_limit`.

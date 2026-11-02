@@ -109,7 +109,7 @@ use super::wind::{self, ReimersEta, WindRecipe};
 pub(crate) use binary::{
     CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, Remains, Structure,
     bare_core_light, giant_radius_exponent, lightest_helium_star, main_sequence_lifetime,
-    main_sequence_radius, main_sequence_structure, new_star_mass,
+    main_sequence_radius, main_sequence_structure, new_star_mass, pulsing_agb_helium_core,
 };
 #[cfg(test)]
 pub(crate) use binary::{early_agb_core_radius_bound, helium_zams_radius};

@@ -95,6 +95,12 @@
 //!   pair's input's rules, by `can_interact` and `evolve`'s pass-over. The fitted tables keep the
 //!   version's rules until the bump refits them, and the range brief's gate refuses them under
 //!   another arm (`stellar/rules/wind_accretion_hold.rs` lists the movers).
+//! - [`dwarf_limit`](StellarRules::dwarf_limit), at [`DWARF_LIMIT_VERSION`] (plan 11, P11.T4's
+//!   fix): whether the binary engine holds its white dwarfs below the Chandrasekhar mass and types
+//!   the dwarf a merger's unplaced product leaves by its core, read by `Engine::new_star`'s
+//!   fallback, `Engine::finish_merger` and the accretor's events through the engine's input's
+//!   rules. The fitted tables keep the version's rules until the bump refits them
+//!   (`stellar/rules/dwarf_limit_hold.rs` lists the movers).
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -107,6 +113,7 @@
 use crate::GeneratorVersion;
 use crate::stellar::binary::awd_donors::{AWD_DONORS_VERSION, AwdDonorRules};
 use crate::stellar::binary::collapses::{COLLAPSES_VERSION, CollapseRules};
+use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
 use crate::stellar::binary::heavy_donor::{HEAVY_DONOR_VERSION, HeavyDonorRules};
 use crate::stellar::binary::ia::{IA_EXPLOSION_VERSION, IaExplosionRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
@@ -156,6 +163,9 @@ pub(crate) struct StellarRules {
     /// Whether a pair the pre-test's lobe and decay tests pass over takes its winds, the hold of
     /// [`WIND_ACCRETION_VERSION`].
     pub(crate) wind_accretion: WindAccretionRules,
+    /// Whether the binary engine holds its white dwarfs below the Chandrasekhar mass and types the
+    /// dwarf a merger's unplaced product leaves by its core, the hold of [`DWARF_LIMIT_VERSION`].
+    pub(crate) dwarf_limit: DwarfLimitRules,
 }
 
 impl StellarRules {
@@ -216,6 +226,11 @@ impl StellarRules {
             } else {
                 WindAccretionRules::OwnTracks
             },
+            dwarf_limit: if version.get() >= DWARF_LIMIT_VERSION.get() {
+                DwarfLimitRules::Chandrasekhar
+            } else {
+                DwarfLimitRules::Unchecked
+            },
         }
     }
 
@@ -234,9 +249,9 @@ impl StellarRules {
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion`, `heavy_donor`
-    /// and `pinned_white_dwarfs`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and `xrb_class`,
-    /// P11.T10's `binary_kicks` and `collapses`, and P11.T12's `wind_accretion`).
+    /// those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion`, `heavy_donor`,
+    /// `pinned_white_dwarfs` and `dwarf_limit`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and
+    /// `xrb_class`, P11.T10's `binary_kicks` and `collapses`, and P11.T12's `wind_accretion`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.
@@ -267,6 +282,8 @@ mod binary_kicks_hold;
 mod classes_hold;
 #[cfg(test)]
 mod collapses_hold;
+#[cfg(test)]
+mod dwarf_limit_hold;
 #[cfg(test)]
 mod events_hold;
 #[cfg(test)]

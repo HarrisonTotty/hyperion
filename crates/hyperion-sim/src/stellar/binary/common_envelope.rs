@@ -44,6 +44,7 @@ use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
 use crate::stellar::{Phase, StarState, StarStateParts};
 use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
 
+use super::dwarf_limit::{DwarfLimitRules, Unplaced};
 use super::evolve::{Engine, roche_lobe, track_mass};
 use super::merger_mass::MergerMassRules;
 use super::params::BinaryParams;
@@ -662,7 +663,7 @@ impl Engine {
             (
                 Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf,
                 Kind::LowMassMainSequence | Kind::MainSequence,
-            ) => self.new_star(Kind::PulsingAgb, total, m_hi, 1.0, 0.0),
+            ) => self.new_star_around(Kind::PulsingAgb, total, m_hi, 1.0, 0.0, Some(hi)),
             (Kind::HeliumWhiteDwarf, Kind::HeliumMainSequence) => {
                 let tau = s_lo.burnt * m_lo / total;
                 self.helium_main_sequence(total, tau)
@@ -670,7 +671,7 @@ impl Engine {
             (
                 Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf,
                 Kind::HeliumMainSequence,
-            ) => self.new_star(Kind::HeliumGiant, total, m_hi, 1.0, 0.0),
+            ) => self.new_star_around(Kind::HeliumGiant, total, m_hi, 1.0, 0.0, Some(hi)),
             (Kind::HeliumWhiteDwarf, Kind::HeliumWhiteDwarf) => {
                 self.pool(PooledIaEvent::new(
                     Years::new(self.age),
@@ -685,7 +686,7 @@ impl Engine {
                     IaPoolChannel::Merger,
                     masses,
                 ));
-                self.new_star(Kind::HeliumGiant, total, m_hi, 1.0, 0.0)
+                self.new_star_around(Kind::HeliumGiant, total, m_hi, 1.0, 0.0, Some(hi))
             }
             (
                 Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf,
@@ -701,12 +702,17 @@ impl Engine {
                 } else {
                     Phase::CarbonOxygenWhiteDwarf
                 };
-                if total < chandrasekhar {
-                    self.white_dwarf(phase, total)
-                } else {
-                    self.finish_merger(self.white_dwarf(phase, total));
-                    self.accretion_induced_collapse(0, total);
-                    return;
+                match self.ctx.rules().dwarf_limit {
+                    // From 27 `finish_merger` collapses a dwarf at the Chandrasekhar mass, as here.
+                    DwarfLimitRules::Chandrasekhar => self.white_dwarf(phase, total),
+                    DwarfLimitRules::Unchecked if total < chandrasekhar => {
+                        self.white_dwarf(phase, total)
+                    }
+                    DwarfLimitRules::Unchecked => {
+                        self.finish_merger(self.white_dwarf(phase, total));
+                        self.accretion_induced_collapse(0, total);
+                        return;
+                    }
                 }
             }
             (
@@ -750,7 +756,27 @@ impl Engine {
     }
 
     /// Records the merger: `product` in the primary's place, nothing in the secondary's, no orbit.
+    ///
+    /// From version 27 a white dwarf product at or above the Chandrasekhar mass collapses at once,
+    /// as an accreting one does (`Engine::accretor_events`): a Type Ia candidate is pooled unless
+    /// it is oxygen–neon, with the two stars' masses before the merger, and the dwarf collapses by
+    /// accretion-induced collapse ([`DwarfLimitRules::collapses`]).
     fn finish_merger(&mut self, product: Member) {
+        let limit = self.ctx.rules().dwarf_limit;
+        let dwarf = if let Member::Remnant { phase, mass, .. } = &product
+            && matches!(
+                phase,
+                Phase::HeliumWhiteDwarf
+                    | Phase::CarbonOxygenWhiteDwarf
+                    | Phase::OxygenNeonWhiteDwarf
+            )
+            && limit.collapses(mass.at(self.age))
+        {
+            Some((*phase, mass.at(self.age)))
+        } else {
+            None
+        };
+        let masses = dwarf.map(|_| [0, 1].map(|i| SolarMasses::new(self.current(i).0)));
         self.close_segment();
         self.set_member(0, product);
         self.set_member(1, Member::Gone);
@@ -758,6 +784,16 @@ impl Engine {
         self.kind = SegmentKind::Merged;
         self.stripped[1] = false;
         self.corotate(0);
+        if let (Some((phase, m)), Some(masses)) = (dwarf, masses) {
+            if phase != Phase::OxygenNeonWhiteDwarf {
+                self.pool(PooledIaEvent::new(
+                    Years::new(self.age),
+                    IaPoolChannel::Accretion,
+                    masses,
+                ));
+            }
+            self.accretion_induced_collapse(0, m);
+        }
     }
 
     /// The stars collide at periastron, or come into contact: a common envelope around a
@@ -1202,6 +1238,22 @@ impl Engine {
     /// places it; a star that cannot be placed becomes the remnant of its core.
     #[must_use]
     fn new_star(&self, kind: Kind, m: f64, core: f64, burnt: f64, fraction: f64) -> Member {
+        self.new_star_around(kind, m, core, burnt, fraction, None)
+    }
+
+    /// [`Engine::new_star`] for a product whose core is the white dwarf of kind `dwarf` it merged
+    /// from, if it is one, which types the dwarf an unplaced product leaves from version 27
+    /// ([`DwarfLimitRules::unplaced`]).
+    #[must_use]
+    fn new_star_around(
+        &self,
+        kind: Kind,
+        m: f64,
+        core: f64,
+        burnt: f64,
+        fraction: f64,
+        dwarf: Option<Kind>,
+    ) -> Member {
         let target = match kind {
             Kind::LowMassMainSequence | Kind::MainSequence => {
                 return self.main_sequence_star(m, 0.0);
@@ -1238,14 +1290,12 @@ impl Engine {
             Kind::Massless => return Member::Gone,
         };
         self.placed_star(0, target, m, core).unwrap_or_else(|| {
-            let phase = if core < 0.5 {
-                Phase::HeliumWhiteDwarf
-            } else {
-                Phase::CarbonOxygenWhiteDwarf
-            };
-            let mass = core.max(1e-3).min(m);
-            self.held_product(target, phase, SolarMasses::new(mass))
-                .unwrap_or_else(|| self.white_dwarf(phase, mass))
+            match self.ctx.rules().dwarf_limit.unplaced(kind, m, core, dwarf) {
+                Unplaced::WhiteDwarf { phase, mass } => self
+                    .held_product(target, phase, SolarMasses::new(mass))
+                    .unwrap_or_else(|| self.white_dwarf(phase, mass)),
+                Unplaced::HeliumStar { mass } => self.helium_main_sequence(mass, burnt),
+            }
         })
     }
 

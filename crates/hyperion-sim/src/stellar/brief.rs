@@ -794,7 +794,8 @@ fn gate(
         && stellar.ns_accretion.fitted_tables_hold()
         && stellar.heavy_donor.fitted_tables_hold()
         && stellar.collapses.fitted_tables_hold()
-        && stellar.wind_accretion.fitted_tables_hold();
+        && stellar.wind_accretion.fitted_tables_hold()
+        && stellar.dwarf_limit.fitted_tables_hold();
     // From version 27 a supernova that unbinds any pair changes what the system shows (P11.T10),
     // so every pair is checked, as for a system the grid redraws.
     let every_pair = redrawn || stellar.binary_kicks == BinaryKicksRules::Alone;

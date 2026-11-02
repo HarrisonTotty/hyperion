@@ -999,14 +999,7 @@ pub(crate) fn new_star_mass(
             0.0,
         )),
         NewStar::PulsingAgb => {
-            let helium_core = if mc >= 0.44 * 2.25 + 0.448 {
-                (mc + 0.35) / 0.773
-            } else if mc > 0.8 {
-                (mc - 0.448) / 0.44
-            } else {
-                mc
-            };
-            let m0 = inverse_mc_bagb(helium_core, c)?;
+            let m0 = inverse_mc_bagb(pulsing_agb_helium_core(mc), c)?;
             Some((SolarMasses::new(m0), Phase::ThermallyPulsingAgb, 0.0))
         }
         NewStar::HeliumGiant => {
@@ -1037,6 +1030,23 @@ pub(crate) fn new_star_mass(
                 0.0,
             ))
         }
+    }
+}
+
+/// The core at the base of the AGB, M☉, of a thermally pulsing AGB star placed with the
+/// carbon–oxygen core `mc` M☉ (BSE section 2.7.4, `gntage.f`'s `mcx` for type 6, as BSE solves
+/// HPT's relations back): `Mc,BAGB` = (Mc + 0.35) ÷ 0.773 at or above `Mc,DU` of `Mc,BAGB` = 2.25
+/// (0.44 × 2.25 + 0.448 M☉), where only the core at the supernova (HPT equation 75) could reach it;
+/// (Mc − 0.448) ÷ 0.44 above 0.8 M☉, the core at the second dredge-up (HPT equation 69); and the
+/// core itself below.
+#[must_use]
+pub(crate) fn pulsing_agb_helium_core(mc: f64) -> f64 {
+    if mc >= 0.44 * 2.25 + 0.448 {
+        (mc + 0.35) / 0.773
+    } else if mc > 0.8 {
+        (mc - 0.448) / 0.44
+    } else {
+        mc
     }
 }
 

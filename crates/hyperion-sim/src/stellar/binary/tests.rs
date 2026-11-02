@@ -6312,3 +6312,269 @@ fn the_last_capped_sample_ends_as_it_does_with_the_cap_raised() {
         [Phase::OxygenNeonWhiteDwarf, Phase::NoRemnant]
     );
 }
+
+// --- P11.T4: the dwarf limit (held at 27) ------------------------------------------------------
+
+/// The version's rules with P11.T4's dwarf-limit arm on alone, so that the other 27 holds move
+/// nothing it holds equal (`stellar/rules/dwarf_limit_hold.rs`).
+fn dwarf_limit_rules() -> crate::stellar::rules::StellarRules {
+    crate::stellar::rules::StellarRules {
+        dwarf_limit: super::dwarf_limit::DwarfLimitRules::Chandrasekhar,
+        ..crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION)
+    }
+}
+
+/// The state of `timeline` at the start of its first merged segment, and that age, years.
+fn merged_state(timeline: &BinaryTimeline) -> (BinaryState, f64) {
+    let merged = timeline
+        .segments()
+        .iter()
+        .find(|s| s.kind() == SegmentKind::Merged)
+        .unwrap_or_else(|| panic!("the pair merges: {}", describe(timeline)));
+    let age = merged.start().value();
+    (timeline.state_at(Years::new(age)), age)
+}
+
+/// P11.T4's dwarf limit: a merger's product around a carbon–oxygen core that no star of its kind
+/// can hold leaves the engine's own remnant only under the arm. Pinned pairs 0252 and 0902 merge
+/// into a thermally pulsing AGB product around a carbon–oxygen core of 1.765 and 1.948 M☉, which
+/// the held arm shows as a carbon–oxygen dwarf of that mass to 12 Gyr and the arm collapses at
+/// once to the 1.26 M☉ neutron star of an accretion-induced collapse. Under the arm the same pair
+/// twice gives the same timeline.
+#[test]
+fn an_unplaced_carbon_oxygen_core_collapses_at_the_chandrasekhar_mass() {
+    use super::testing::shows_a_dwarf_above_the_limit;
+    use crate::stellar::remnant::RemnantKind;
+
+    let until = 1.2e10;
+    let held_rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+    let run =
+        |input: &BinaryInput, rules| evolve(&input.clone().with_rules(rules), Years::new(until));
+    for (name, input, core) in [
+        ("0252", pinned_sample_pair(252), 1.764_8),
+        ("0902", pinned_sample_pair(902), 1.947_7),
+    ] {
+        let (held, arm) = (run(&input, held_rules), run(&input, dwarf_limit_rules()));
+        let (state, age) = merged_state(&held);
+        assert_eq!(
+            state.stars()[0].phase(),
+            Phase::CarbonOxygenWhiteDwarf,
+            "{name}"
+        );
+        assert!(
+            (state.stars()[0].mass().value() - core).abs() < 1e-4,
+            "{name}: {state:?}"
+        );
+        assert!(shows_a_dwarf_above_the_limit(&held, until), "{name}");
+        assert!(
+            !shows_a_dwarf_above_the_limit(&arm, until),
+            "{name}: {}",
+            describe(&arm)
+        );
+        let collapse = arm
+            .supernovae()
+            .iter()
+            .find(|s| (s.age().value() - age).abs() <= 1e-9 * age)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{name}'s product collapses at the merger: {}",
+                    describe(&arm)
+                )
+            });
+        assert_eq!(
+            collapse.remnant().kind(),
+            RemnantKind::NeutronStar,
+            "{name}"
+        );
+        assert_eq!(
+            collapse.remnant(),
+            crate::stellar::remnant::collapse::electron_capture_remnant(),
+            "{name}"
+        );
+        assert_eq!(run(&input, dwarf_limit_rules()), arm, "{name}");
+    }
+}
+
+/// P11.T4's dwarf limit: a merger's product around a helium core that no star of its kind can hold
+/// leaves the engine's own remnant only under the arm. Pinned pair 0438 (13.7 + 3.7 M☉ at 16.7 d)
+/// and a 108 + 78 M☉ pair at 8.67 d merge into a core-helium-burning product around a helium core
+/// of 3.22 and 28.6 M☉, which the held arm shows as a carbon–oxygen dwarf and the arm makes the
+/// naked helium star of that core, which then dies by plan 06; pinned pair 0787's product around
+/// a 0.457 M☉ carbon–oxygen core, a helium dwarf under the held arm, is a carbon–oxygen one under
+/// the arm.
+#[test]
+fn an_unplaced_helium_core_is_its_helium_star() {
+    use super::testing::shows_a_dwarf_above_the_limit;
+
+    let until = 1.2e10;
+    let held_rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+    let run =
+        |input: &BinaryInput, rules| evolve(&input.clone().with_rules(rules), Years::new(until));
+    // The 108 + 78 M☉ pair and pinned pair 0787 merge so under every 27 hold alone, but P11.T4's
+    // pinned white dwarfs', which holds a product its primary's pin is pending for at its core's
+    // last living state: both arms set that hold back.
+    let every_27 = crate::stellar::rules::StellarRules {
+        pinned_white_dwarfs: super::pinned_white_dwarfs::PinnedWhiteDwarfRules::Born,
+        ..crate::stellar::rules::StellarRules::every_27_hold()
+    };
+    let every_27_held = crate::stellar::rules::StellarRules {
+        dwarf_limit: super::dwarf_limit::DwarfLimitRules::Unchecked,
+        ..every_27
+    };
+    for (name, input, core, [held_rules, arm_rules]) in [
+        (
+            "0438",
+            pinned_sample_pair(438),
+            3.224_5,
+            [held_rules, dwarf_limit_rules()],
+        ),
+        (
+            "108 + 78",
+            pair(108.0, 78.0, 8.67, 0.0, 0.02),
+            28.614,
+            [every_27_held, every_27],
+        ),
+    ] {
+        let (held, arm) = (run(&input, held_rules), run(&input, arm_rules));
+        let (state, _) = merged_state(&held);
+        assert_eq!(
+            state.stars()[0].phase(),
+            Phase::CarbonOxygenWhiteDwarf,
+            "{name}"
+        );
+        assert!(
+            (state.stars()[0].mass().value() - core).abs() < 1e-3,
+            "{name}: {state:?}"
+        );
+        assert!(
+            !shows_a_dwarf_above_the_limit(&arm, until),
+            "{name}: {}",
+            describe(&arm)
+        );
+        let (state, age) = merged_state(&arm);
+        let star = state.stars()[0];
+        assert_eq!(
+            star.phase(),
+            Phase::HeliumMainSequence,
+            "{name}: {}",
+            describe(&arm)
+        );
+        assert!(
+            (star.mass().value() - core).abs() < 1e-3,
+            "{name}: {star:?}"
+        );
+        let death = arm
+            .supernovae()
+            .iter()
+            .find(|s| s.age().value() > age)
+            .unwrap_or_else(|| panic!("{name}'s helium star dies: {}", describe(&arm)));
+        println!("{name}: a {core} M☉ helium star at {age} yr, then {death:?}");
+    }
+    // Pinned pair 0787 merges so under every 27 hold alone.
+    let input = pinned_sample_pair(787);
+    let (held, arm) = (run(&input, every_27_held), run(&input, every_27));
+    let ((held, _), (arm, _)) = (merged_state(&held), merged_state(&arm));
+    assert_eq!(held.stars()[0].phase(), Phase::HeliumWhiteDwarf);
+    assert_eq!(arm.stars()[0].phase(), Phase::CarbonOxygenWhiteDwarf);
+    assert_eq!(arm.stars()[0].mass(), held.stars()[0].mass());
+    assert!(
+        (arm.stars()[0].mass().value() - 0.457_2).abs() < 1e-4,
+        "{arm:?}"
+    );
+}
+
+/// P11.T4's dwarf limit: a carbon–oxygen dwarf fed helium past the edge-lit detonation's 0.15 M☉
+/// collapses at the Chandrasekhar mass only under the arm. Two pairs whose primary's dwarf is fed
+/// by its companion's naked helium star after a common envelope (5.43 + 1.69 M☉ at 7 d and 6.6 +
+/// 1.65 M☉ at 3.4 d, solar) show a dwarf above the Chandrasekhar mass under the held arm; under
+/// the arm none, and the dwarf collapses to the 1.26 M☉ neutron star of an accretion-induced
+/// collapse, its edge-lit candidate pooled first.
+#[test]
+fn a_dwarf_fed_helium_collapses_at_the_chandrasekhar_mass() {
+    use super::testing::shows_a_dwarf_above_the_limit;
+
+    let until = 1.2e10;
+    let held_rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+    for (m1, m2, period) in [(5.43, 1.69, 7.0), (6.6, 1.65, 3.4)] {
+        let input = pair(m1, m2, period, 0.0, 0.02);
+        let held = evolve(&input.clone().with_rules(held_rules), Years::new(until));
+        let arm = evolve(&input.with_rules(dwarf_limit_rules()), Years::new(until));
+        assert!(shows_a_dwarf_above_the_limit(&held, until), "{m1} + {m2}");
+        assert!(
+            !shows_a_dwarf_above_the_limit(&arm, until),
+            "{m1} + {m2}: {}",
+            describe(&arm)
+        );
+        let pooled = arm.pooled_ia().expect("the edge-lit candidate is pooled");
+        assert_eq!(pooled.channel(), IaPoolChannel::Accretion);
+        assert_eq!(held.pooled_ia(), Some(pooled), "{m1} + {m2}");
+        let collapse = arm
+            .supernovae()
+            .iter()
+            .find(|s| s.age() > pooled.age())
+            .unwrap_or_else(|| panic!("{m1} + {m2}'s dwarf collapses: {}", describe(&arm)));
+        assert_eq!(
+            collapse.remnant(),
+            crate::stellar::remnant::collapse::electron_capture_remnant(),
+            "{m1} + {m2}"
+        );
+        let before = arm.state_at(Years::new(collapse.age().value() * (1.0 - 1e-12)));
+        let dwarf = before.stars()[collapse.component().index()];
+        assert_eq!(dwarf.phase(), Phase::CarbonOxygenWhiteDwarf, "{m1} + {m2}");
+        println!(
+            "{m1} + {m2}: collapses at {:?} from {:?}",
+            collapse.age(),
+            dwarf.mass()
+        );
+    }
+}
+
+/// P11.T4's dwarf limit: over the pinned thousand the arm moves exactly the pairs that show a
+/// white dwarf above the Chandrasekhar mass under the held arm, which are listed: three whose
+/// merger's product no star holds (0252 and 0902 around a carbon–oxygen core, 0438 around a
+/// helium one).
+#[test]
+fn the_dwarf_limit_moves_only_the_pairs_that_reach_it() {
+    use super::testing::shows_a_dwarf_above_the_limit;
+
+    let held_rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+    let until = 1.2e10;
+    let mut mix = Mix(0x0b1e_0001);
+    let (mut moved, mut above) = (Vec::new(), Vec::new());
+    for i in 0..1000 {
+        let input = pinned_pair(&mut mix, i);
+        let held = evolve(&input.clone().with_rules(held_rules), Years::new(until));
+        let arm = evolve(&input.with_rules(dwarf_limit_rules()), Years::new(until));
+        if !same_outcome(&held, &arm) {
+            moved.push(i);
+        }
+        if shows_a_dwarf_above_the_limit(&held, until) {
+            above.push(i);
+        }
+    }
+    assert_eq!(moved, above);
+    assert_eq!(moved, DWARF_LIMIT_MOVERS);
+}
+
+/// Whether timelines `a` and `b` hold the same segments, events and states at every segment's
+/// edge, bit for bit, whatever rules their tracks were built under (their `Debug` and so their
+/// [`digest`]s carry them).
+fn same_outcome(a: &BinaryTimeline, b: &BinaryTimeline) -> bool {
+    let edges = |t: &BinaryTimeline| -> Vec<(SegmentKind, f64, f64)> {
+        t.segments()
+            .iter()
+            .map(|s| (s.kind(), s.start().value(), s.end().value()))
+            .collect()
+    };
+    edges(a) == edges(b)
+        && a.supernovae() == b.supernovae()
+        && a.pooled_ia() == b.pooled_ia()
+        && edges(a).iter().all(|&(_, start, end)| {
+            [start, end.min(a.until().value())]
+                .iter()
+                .all(|&age| a.state_at(Years::new(age)) == b.state_at(Years::new(age)))
+        })
+}
+
+/// The pinned pairs the dwarf limit moves, as measured (2026-11-02, at generator version 25).
+const DWARF_LIMIT_MOVERS: [u32; 3] = [252, 438, 902];

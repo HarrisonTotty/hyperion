@@ -122,6 +122,9 @@ pub(super) enum Stop {
     Stripped(usize),
     /// The orbit can hold no angular momentum left: the stars spiral together.
     Coalescence,
+    /// Member `i`, a white dwarf a wind feeds, reaches the Chandrasekhar mass (from version 27,
+    /// P11.T4's `dwarf_limit`; [`Engine::collapse_fed_dwarf`]).
+    Chandrasekhar(usize),
 }
 
 /// The limits on one step: its length from the rates, and the events it may land on, of which
@@ -218,6 +221,7 @@ impl Engine {
             Stop::Roche(i) => self.roche_onset(i),
             Stop::Collision | Stop::Coalescence => self.collide(),
             Stop::Stripped(i) => self.strip(i),
+            Stop::Chandrasekhar(i) => self.collapse_fed_dwarf(i),
         }
     }
 
@@ -719,6 +723,22 @@ impl Engine {
         r
     }
 
+    /// The time, years, in which member `i`, a white dwarf a wind feeds at `rates` from `s`,
+    /// reaches the Chandrasekhar mass, at which it stops from version 27 (P11.T4's `dwarf_limit`,
+    /// [`Stop::Chandrasekhar`]); `None` for any other member, or under the held arm.
+    #[must_use]
+    fn to_the_dwarf_limit(&self, i: usize, s: &Snapshot, rates: &Rates) -> Option<f64> {
+        let limit = self.ctx.rules().dwarf_limit.limit()?;
+        let Member::Remnant { phase, .. } = &self.members[i] else {
+            return None;
+        };
+        let dwarf = matches!(
+            phase,
+            Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
+        );
+        (dwarf && rates.mass[i] > 0.0).then(|| ((limit - s.masses[i]) / rates.mass[i]).max(0.0))
+    }
+
     /// The step's length from `s` and the event it lands on, if its limit is one (BSE section
     /// 2.8's limits; see the module documentation).
     #[must_use]
@@ -794,6 +814,9 @@ impl Engine {
                         limits.event(0.0, Stop::Stripped(i));
                     }
                 }
+            }
+            if let Some(dt) = self.to_the_dwarf_limit(i, s, rates) {
+                limits.event(dt, Stop::Chandrasekhar(i));
             }
             if rates.braking[i] > 0.0 {
                 limits.length(BRAKING_STEP * s.spins[i] / rates.braking[i]);

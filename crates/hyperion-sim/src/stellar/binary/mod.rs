@@ -37,6 +37,7 @@ mod classify;
 pub(crate) mod collapses;
 mod common_envelope;
 mod detached;
+pub(crate) mod dwarf_limit;
 pub mod events;
 mod evolve;
 pub(crate) mod heavy_donor;

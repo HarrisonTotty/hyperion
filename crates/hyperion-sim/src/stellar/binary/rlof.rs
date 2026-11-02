@@ -602,9 +602,11 @@ impl Engine {
                         self.strip(i);
                         return;
                     }
+                    // A fed dwarf at the Chandrasekhar mass collapses in the accretor's events.
                     super::detached::Stop::Roche(_)
                     | super::detached::Stop::Collision
-                    | super::detached::Stop::Coalescence => {}
+                    | super::detached::Stop::Coalescence
+                    | super::detached::Stop::Chandrasekhar(_) => {}
                 }
             }
         }
@@ -1158,9 +1160,12 @@ impl Engine {
                 );
                 false
             }
+            // From 27 a dwarf at the Chandrasekhar mass collapses below, edge-lit or not
+            // (`dwarf_limit`, P11.T4's fix).
             Kind::CarbonOxygenWhiteDwarf
                 if kd.surface() == Surface::Helium
-                    && self.accreted_helium[a_idx] >= EDGE_LIT_HELIUM =>
+                    && self.accreted_helium[a_idx] >= EDGE_LIT_HELIUM
+                    && !self.ctx.rules().dwarf_limit.collapses(ma) =>
             {
                 let masses = masses_now(self);
                 self.pool(PooledIaEvent::new(
@@ -1337,6 +1342,26 @@ impl Engine {
         self.close_segment();
         self.set_member(i, member);
         true
+    }
+
+    /// Member `i`, a white dwarf a wind has fed to the Chandrasekhar mass in a detached phase,
+    /// collapses as a dwarf fed by stable transfer does there ([`Engine::accretor_events`]; from
+    /// version 27, P11.T4's `dwarf_limit`): a Type Ia candidate pooled unless it is oxygen–neon,
+    /// with the two stars' masses, and then its accretion-induced collapse.
+    pub(super) fn collapse_fed_dwarf(&mut self, i: usize) {
+        let (m, _) = self.current(i);
+        let (other, _) = self.current(1 - i);
+        if let Member::Remnant { phase, .. } = &self.members[i]
+            && *phase != Phase::OxygenNeonWhiteDwarf
+        {
+            self.pool(PooledIaEvent::new(
+                Years::new(self.age),
+                IaPoolChannel::Accretion,
+                [SolarMasses::new(m), SolarMasses::new(other)],
+            ));
+        }
+        self.close_segment();
+        self.accretion_induced_collapse(i, m);
     }
 
     /// Member `i`, a white dwarf of mass `m` at the Chandrasekhar mass, collapses to a neutron star

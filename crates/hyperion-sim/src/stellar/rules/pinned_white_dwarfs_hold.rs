@@ -117,8 +117,10 @@ fn galaxy() -> &'static Galaxy {
     })
 }
 
-/// The Milky Way fixture under every 27 hold but this one, built under them, as the agreement
-/// tests build theirs.
+/// The Milky Way fixture under every 27 hold but this one and P11.T4's dwarf limit, built under
+/// them, as the agreement tests build theirs. The dwarf limit, held at 27 beside this hold, would
+/// otherwise collapse the third system's merged dwarf above the Chandrasekhar mass at its merger,
+/// before its pin, so this arm keeps the white dwarfs both holds act on.
 fn born() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
@@ -129,6 +131,7 @@ fn born() -> &'static Galaxy {
             GalaxyRules {
                 stellar: StellarRules {
                     pinned_white_dwarfs: PinnedWhiteDwarfRules::Born,
+                    dwarf_limit: crate::stellar::binary::dwarf_limit::DwarfLimitRules::Unchecked,
                     ..rules.stellar
                 },
                 ..rules
