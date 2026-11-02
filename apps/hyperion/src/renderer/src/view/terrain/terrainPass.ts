@@ -810,6 +810,9 @@ function fadeWordOf(own: number, heights: number): number {
   return fadeWord(own, (heights >>> 8) & 0xff, heights >>> 16);
 }
 
+/** No area was seen at the last step: every patch drawn where nothing was appears at once. */
+const NEVER_SEEN = (): boolean => false;
+
 /** The vertices between the samples of {@link BakeSizes.coarseM}, each way. */
 const SIZE_STRIDE = 4;
 
@@ -1537,6 +1540,8 @@ export class TerrainPass {
   readonly #frustumMargin: TerrainFrustumMargin;
   readonly #morphInMs: number | undefined;
   readonly #budgetHoldMargin: number | null;
+  /** Whether the drawn ground's changes cut ({@link TerrainPass.setReducedMotion}). */
+  #reducedMotion = false;
   /** The pixels each change moves the ground by, from the resident patches' sizes (R10.T16.i). */
   readonly #morphSpans: MorphSpans;
   /** The lookahead's clock ({@link TerrainPassOptions.lookaheadClockMs}), or `null` for none. */
@@ -1807,6 +1812,15 @@ export class TerrainPass {
    */
   get refining(): number {
     return this.#device.pool.refiningCount ?? 0;
+  }
+
+  /**
+   * Whether the operator asks for reduced motion (plan R10, R10.T16.i; the UX guide's "Motion and
+   * sound"): the drawn ground's changes then cut at their first draw rather than morph in, its
+   * distance's morph, which moves with the camera alone, kept. Off as the pass is made.
+   */
+  setReducedMotion(on: boolean): void {
+    this.#reducedMotion = on;
   }
 
   get lastStep(): Pick<TerrainStep, "selection" | "drawSet"> | null {
@@ -2934,8 +2948,9 @@ export class TerrainPass {
     }
     const keyString = patchKeyString(bake.key);
     // A rebake of a drawn patch takes a spare slot, where one is, so that the older bake fades out
-    // from its own (R10.T16.i).
-    const rebake = device.residents.has(keyString);
+    // from its own (R10.T16.i); the wireframe's replaces it in place, its contours stating the
+    // elevations of one bake or the other, never a mix.
+    const rebake = device.residents.has(keyString) && this.#shading !== "wire";
     const sizes = bakeSizesOf(bake);
     let retired: number | null = null;
     let stored: CacheInsert;
@@ -3576,10 +3591,12 @@ export class TerrainPass {
     // patch to draw it, so that its first draw has no hole: the roots a view sees can land frames
     // apart, one of them drafted (the look-ahead's re-measure, 40.58 s on high at half-cost drafts).
     const held = !device.firstDrawn && resolved.missing > 0;
+    // The wireframe's ground appears at once where none was drawn: its contours state elevations,
+    // and a rise would draw ones the survey does not hold (the UX guide's principle 5).
     const drawSet = device.morph.present(
       held ? { ...resolved, count: 0 } : resolved,
       device.cache,
-      this.#seenAtLastStep(selection),
+      this.#shading === "wire" ? NEVER_SEEN : this.#seenAtLastStep(selection),
     );
     device.firstDrawn ||= drawSet.count > 0;
     device.cache.retain(selection, drawSet);
@@ -3666,7 +3683,7 @@ export class TerrainPass {
   /** The drawn instances' fades at the draw time `nowMs`, made once a time ({@link Device.fades}). */
   #fadesAt(device: Device, nowMs: number): TransitionFades {
     if (device.fadesAtMs !== nowMs) {
-      device.fades.update(device.drawnKeys, device.morph.footprintsAt(nowMs));
+      device.fades.update(device.drawnKeys, device.morph.footprintsAt(nowMs, this.#reducedMotion));
       device.fadesAtMs = nowMs;
       this.#releaseRetired(device);
     }

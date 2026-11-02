@@ -1267,6 +1267,20 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     expect([(beforeLongest ?? 0) > 0, atLongest]).toEqual([true, 0]);
   });
 
+  it("cuts a refine at its first draw under reduced motion", async () => {
+    const { pass, pool, engine, view } = await standingIn();
+    pass.setReducedMotion(true);
+    pool().deliver(pass, CHILD);
+    const frame = pass.frame(inputAt(view, 6_000));
+    const words = recordWords(engine);
+    const fades = drawnBy(frame.drawSet, CHILD).flatMap((n) => [
+      words[n]?.[9],
+      words[n]?.[10],
+      words[n]?.[11],
+    ]);
+    expect([fades.length > 0, fades.every((word) => word === 0)]).toEqual([true, true]);
+  });
+
   it("draws the distance's k once the change has morphed in", async () => {
     const { pass, pool, engine, view } = await standingIn();
     pool().deliver(pass, CHILD);

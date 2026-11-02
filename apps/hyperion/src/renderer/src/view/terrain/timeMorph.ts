@@ -730,11 +730,15 @@ export class TimeMorph {
   /**
    * Advances `progress` to the draw at `nowMs` by the span it sets now: from 0 at its first draw,
    * by the time since the last over the span, so that a span lengthening as a camera closes in
-   * slows it there and then; a draw at or before the last advances nothing.
+   * slows it there and then; a draw at or before the last advances nothing; with `cut`, to its end.
    */
-  #advance(progress: Progress, nowMs: number): void {
+  #advance(progress: Progress, nowMs: number, cut: boolean): void {
     const lastMs = progress.lastMs;
     progress.lastMs = nowMs;
+    if (cut) {
+      progress.t = 1;
+      return;
+    }
     if (lastMs === null || !(nowMs > lastMs) || progress.t >= 1) {
       return;
     }
@@ -759,11 +763,12 @@ export class TimeMorph {
    * The footprints of the transitions in progress at `nowMs`, each at its fade there: a frame's
    * draws read them (`TransitionFades`). A transition the step made starts at the first such call;
    * a refine whose fade has reached 0 ends; a coarsen whose fade has reached 1 holds there until
-   * the next step presents its patch ({@link TimeMorph.swapDue}).
+   * the next step presents its patch ({@link TimeMorph.swapDue}). With `cut` (reduced motion),
+   * every change in progress ends at once.
    */
-  footprintsAt(nowMs: number): FadeFootprint[] {
+  footprintsAt(nowMs: number, cut = false): FadeFootprint[] {
     for (const [keyString, rebake] of this.#rebakes) {
-      this.#advance(rebake, nowMs);
+      this.#advance(rebake, nowMs, cut);
       const fade = 1 - smooth(rebake.t);
       if (rebake.t >= 1) {
         this.#rebakes.delete(keyString);
@@ -777,7 +782,7 @@ export class TimeMorph {
     const out: FadeFootprint[] = [];
     const rises = new Map<string, number>();
     for (const [areaString, transition] of this.#transitions) {
-      this.#advance(transition, nowMs);
+      this.#advance(transition, nowMs, cut);
       const fade = fadeOf(transition);
       const ended = transition.t >= 1;
       if (transition.held === null && ended && fade <= 0) {

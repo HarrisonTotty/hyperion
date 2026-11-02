@@ -2881,6 +2881,9 @@ function ViewPanels({
   const link = useServerLink();
   // One body_detail fetch for the terrain session and the atmosphere cache (R08.T10.b).
   const share = useBodyDetailShare(link.requests);
+  // The session's changes of the drawn ground cut rather than morph in under
+  // `prefers-reduced-motion` (R10.T16.i).
+  const reducedMotion = usePrefersReducedMotion();
   const terrain = useTerrainSession({
     engineState,
     source: terrainSessionSource(
@@ -2899,6 +2902,7 @@ function ViewPanels({
     performanceThreads,
     setting,
     geometry: terrainGeometry,
+    reducedMotion,
   });
   // The atmosphere cache of the stage's device (R08.T10.b), which asks a server scene's bodies'
   // records through the share; a kept scene's bodies bring their own settings.

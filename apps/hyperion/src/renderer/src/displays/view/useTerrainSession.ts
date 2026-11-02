@@ -170,6 +170,12 @@ export interface TerrainSessionInput {
    * override over the setting's; the setting's where absent. A change makes it anew.
    */
   readonly geometry?: GeometrySettings | undefined;
+  /**
+   * Whether the operator asks for reduced motion (`usePrefersReducedMotion`): the session's changes
+   * of the drawn ground then cut rather than morph in (`TerrainSession.setReducedMotion`; plan R10,
+   * R10.T16.i). Absent, they morph.
+   */
+  readonly reducedMotion?: boolean | undefined;
 }
 
 /** The session the hook holds, outside React, so that its making is an effect's and renders it. */
@@ -233,6 +239,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
     setting,
     horizonMap,
     geometry,
+    reducedMotion = false,
   } = input;
   const engine = engineState.kind === "ready" ? engineState.engine : null;
   const universe = source?.kind === "server" ? source.universe : null;
@@ -323,6 +330,10 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
       session.setLinkUp(linkUp);
     }
   }, [session, linkUp, fixture]);
+
+  useEffect(() => {
+    session?.setReducedMotion(reducedMotion);
+  }, [session, reducedMotion]);
 
   useEffect(() => {
     if (session === null || onSurface === null) {

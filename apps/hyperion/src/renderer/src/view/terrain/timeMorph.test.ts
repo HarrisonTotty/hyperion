@@ -388,6 +388,26 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     expect([morph.heightWords[0], morph.takeReleased(), morph.active]).toEqual([0, [7], false]);
   });
 
+  it("cuts every change at its first draw under reduced motion", () => {
+    const cache = cacheWith([ROOT, ...CHILDREN]);
+    const resolver = new DrawSetResolver(cache);
+    const morph = new TimeMorph(32);
+    morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+    morph.footprintsAt(0);
+    morph.present(resolver.resolve(selectionOf([ROOT])), cache, unseen);
+    morph.rebake(patchKeyString(ROOT), 7);
+    const cut = footprints(morph, 1_000);
+    const due = morph.swapDue;
+    morph.footprintsAt(1_000, true);
+    expect([
+      cut.length > 0,
+      due,
+      morph.swapDue,
+      morph.heightWords[0],
+      morph.takeReleased(),
+    ]).toEqual([true, false, true, 0, [7]]);
+  });
+
   it("swaps a coarsen at once, counted, where its finer patches have left the cache", () => {
     const cache = cacheWith([ROOT, ...CHILDREN]);
     const resolver = new DrawSetResolver(cache);

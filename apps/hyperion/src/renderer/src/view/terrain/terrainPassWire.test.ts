@@ -689,6 +689,28 @@ describe("the wireframe's phase records (R10.T11)", () => {
   });
 });
 
+describe("the wireframe's ground under the time morph (R10.T16.i)", () => {
+  it("replaces a rebaked patch in its slot at once, mixing no older bake into its contours", async () => {
+    const made = await wirePass();
+    streamed(made);
+    made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE));
+    const patch = made.pass.lastStep?.drawSet.patches[0];
+    if (patch === undefined) {
+      throw new Error("the pass drew no patch");
+    }
+    const { key, slot } = patch.patch;
+    made.lane().deliver(made.pass, key);
+    made.pass.step({ views: [passView(VIEW)], grounded: [] });
+    made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE, 16));
+    const words = new Uint32Array(lastWrite(made.engine, `terrain instances (${PRIMARY})`));
+    const fades = Array.from({ length: words.length / WORDS }, (_, n) => words[n * WORDS + 11]);
+    expect([made.pass.resident(patchKeyString(key))?.slot, fades.every((w) => w === 0)]).toEqual([
+      slot,
+      true,
+    ]);
+  });
+});
+
 describe("the wireframe's annunciation and mask (R10.T11)", () => {
   it("says no DETAIL LIMITED on the low setting once everything is resident, its τ and depth the high setting's", async () => {
     const made = await wirePass("low");

@@ -862,6 +862,8 @@ export class TerrainSession {
   /** Its passes' geometry (plan R14), `null` for their setting's. */
   readonly #geometry: GeometrySettings | null;
   readonly #morphInMs: number | undefined;
+  /** Whether the passes' changes cut ({@link TerrainSession.setReducedMotion}). */
+  #reducedMotion = false;
   readonly #budgetHoldMargin: number | null | undefined;
   #faults: ReadonlyMap<ViewId, TerrainFault> = NO_FAULTS;
   /** The terrain's fault by its first cause raised, which stands for the session; `null` before. */
@@ -1199,6 +1201,22 @@ export class TerrainSession {
       views = [...this.#reports.keys()];
     }
     this.#followFaults(views);
+  }
+
+  /**
+   * Whether the operator asks for reduced motion (plan R10, R10.T16.i; the UX guide's "Motion and
+   * sound": under `prefers-reduced-motion` every non-physical motion stops): every pass's changes
+   * of the drawn ground then cut at their first draw rather than morph in
+   * (`TerrainPass.setReducedMotion`), the passes made later's too.
+   */
+  setReducedMotion(on: boolean): void {
+    if (this.#disposed) {
+      return;
+    }
+    this.#reducedMotion = on;
+    for (const pass of [...this.#passes.values(), ...this.#wirePasses.values()]) {
+      pass.setReducedMotion(on);
+    }
   }
 
   /**
@@ -1786,6 +1804,7 @@ export class TerrainSession {
       }
       throw error;
     }
+    pass.setReducedMotion(this.#reducedMotion);
     passes.set(body, pass);
     void pass.ready().catch((error: unknown) => {
       console.error(`the ${material} of ${body} failed:`, error);
