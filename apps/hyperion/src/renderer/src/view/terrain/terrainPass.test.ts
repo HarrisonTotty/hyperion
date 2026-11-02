@@ -40,7 +40,7 @@ import {
   type PatchKey,
   patchKeyString,
 } from "./patchKey";
-import { MORPH_IN_MS } from "./timeMorph";
+import { MORPH_IN_MS, MORPH_MAX_MS, MORPH_MS_PER_PX } from "./timeMorph";
 import { planetGeometry, surfacePoint } from "./planet";
 import {
   type PatchRequest,
@@ -49,6 +49,7 @@ import {
   type SelectionInput,
   selectionErrorM,
   selectPatches,
+  splitKeysOf,
 } from "./select";
 import {
   RESELECT_MOVE_FRACTION,
@@ -71,6 +72,7 @@ import { lavaWorldSurface } from "../../test/thermalSurfaces";
 import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import {
   BAND_SLEW_PER_STEP,
+  BUDGET_HOLD_MARGIN,
   effectiveTauPx,
   morphRangeM,
   SELECT_MEASURE,
@@ -108,6 +110,8 @@ class FakePool implements TerrainPool {
   layers: TerrainLayers | null = null;
   /** Each key's own layers where a test gives them (R10.T16.b's rebake rule), else {@link layers}. */
   readonly layersOf = new Map<string, TerrainLayers>();
+  /** Each key's own heights where a test gives them (R10.T16.i's spans), else flat at the datum. */
+  readonly heightsOf = new Map<string, Float32Array>();
   /** Whether every worker is lost (R10.T16.b's fault). */
   unavailable = false;
   readonly #listeners = new Set<(bake: BakedPatch) => void>();
@@ -198,7 +202,7 @@ class FakePool implements TerrainPool {
       key,
       generation: 1,
       originM: { x: 1_000, y: 2_000, z: PLANET.figure.polarRadiusM },
-      heights: new Float32Array(65 * 65 * 2),
+      heights: this.heightsOf.get(patchKeyString(key)) ?? new Float32Array(65 * 65 * 2),
       offsets: this.settings.vertexPath === "baked-offsets" ? new Float32Array(65 * 65 * 6) : null,
       normals: new Float16Array(n * n * 2).fill(normals?.fill ?? 0),
       heightRangeM: [0, 0],
@@ -264,7 +268,13 @@ async function passOn(
   extra: Partial<
     Pick<
       TerrainPassOptions,
-      "measureSelection" | "onResident" | "onSelect" | "terrain" | "source" | "lookaheadClockMs"
+      | "measureSelection"
+      | "onResident"
+      | "onSelect"
+      | "terrain"
+      | "source"
+      | "lookaheadClockMs"
+      | "budgetHoldMargin"
     >
   > = {},
 ): Promise<{ pass: TerrainPass; pool: () => FakePool; engine: CountingRenderEngine }> {
@@ -1053,6 +1063,46 @@ describe("the morph bands under the patch budget", () => {
   });
 });
 
+describe("the budget's hold on the last selection's splits (R10.T16.i)", () => {
+  /** The inputs of a pass's first two selections, the second after a bake lands. */
+  async function twoSelections(
+    extra: Partial<Pick<TerrainPassOptions, "budgetHoldMargin">> = {},
+  ): Promise<ReadonlyArray<readonly [SelectionInput, Selection]>> {
+    const seen: Array<readonly [SelectionInput, Selection]> = [];
+    const { pass, pool } = await passOn("high", {
+      ...extra,
+      onSelect: (input, selection) => seen.push([input, selection]),
+    });
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view, 0));
+    pool().bakeDemand(pass);
+    pass.frame(inputAt(view, 16));
+    return seen;
+  }
+
+  it("holds each selection on the splits of the one before, at its margin, from the second on", async () => {
+    const [first, second] = await twoSelections();
+    if (first === undefined || second === undefined) {
+      throw new Error("the pass did not select twice");
+    }
+    expect([
+      first[0].budgetHold,
+      second[0].budgetHold?.margin,
+      [...(second[0].budgetHold?.split ?? [])].toSorted(),
+    ]).toEqual([
+      undefined,
+      BUDGET_HOLD_MARGIN,
+      [...splitKeysOf(first[1].patches.values())].toSorted(),
+    ]);
+  });
+
+  it("selects with no hold, as before, given no margin", async () => {
+    const seen = await twoSelections({ budgetHoldMargin: null });
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen.map(([input]) => input.budgetHold)).toEqual(seen.map(() => undefined));
+  });
+});
+
 describe("the morph bands' slew (R10.T16.i)", () => {
   it("steps the bands' tolerance at most 2% towards the selection's, either way, and to it within a step", () => {
     const step = 1 + BAND_SLEW_PER_STEP;
@@ -1183,6 +1233,38 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     });
     expect(drawn.length).toBeGreaterThan(0);
     expect(drawn).toEqual(drawn.map(() => [FADE_STEPS, 1]));
+  });
+
+  it("lengthens a refine's fade by the pixels its morph moves the ground, to the longest", async () => {
+    // The fake bakes' origin and bounding radius, and the view's pixel: the pass's `#screenPx`.
+    const view = northPole(2_000_000);
+    const nearestM = Math.hypot(1_000, 2_000, view.cameraM.z - PLANET.figure.polarRadiusM) - 1;
+    const radPerPx = (2 * Math.tan(view.fovXRad / 2)) / view.viewport.widthPx;
+    const fadesOver = async (px: number, atMs: ReadonlyArray<number>): Promise<number[]> => {
+      const { pass, pool, engine } = await standingIn();
+      // The child's morph moves its ground `px` pixels: |h₀ − h₁| at one vertex.
+      const heights = new Float32Array(65 * 65 * 2);
+      heights[0] = px * nearestM * radPerPx;
+      pool().heightsOf.set(patchKeyString(CHILD), heights);
+      pool().deliver(pass, CHILD);
+      pass.frame(inputAt(view, 6_000));
+      return atMs.map((ms) => {
+        const frame = pass.frame(inputAt(view, 6_000 + ms));
+        const [n] = drawnBy(frame.drawSet, CHILD);
+        return (recordWords(engine)[n ?? -1]?.[11] ?? -1) & 0xff;
+      });
+    };
+    const spanMs = 100 * MORPH_MS_PER_PX;
+    const [atLeast, half, ended] = await fadesOver(100, [MORPH_IN_MS, spanMs / 2, spanMs]);
+    // The smoothstep's tail is flat: 0.8 of the longest span leaves a tenth of the fade.
+    const [beforeLongest, atLongest] = await fadesOver(1_000, [0.8 * MORPH_MAX_MS, MORPH_MAX_MS]);
+    // Half way down the smoothstep, within a step of the byte: the span is the heights' f32 one.
+    expect({
+      atLeast: (atLeast ?? 0) > fadeByte(0.5),
+      half: Math.abs((half ?? 0) - fadeByte(0.5)) <= 1,
+      ended,
+    }).toEqual({ atLeast: true, half: true, ended: 0 });
+    expect([(beforeLongest ?? 0) > 0, atLongest]).toEqual([true, 0]);
   });
 
   it("draws the distance's k once the change has morphed in", async () => {

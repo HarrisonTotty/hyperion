@@ -320,6 +320,20 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     ]).toEqual([37.5, [[patchKeyString(first), 0.5]], 0, [], [], [7]]);
   });
 
+  it("swaps a rebake at once, counted, whose spare slot the record cannot name, and gives the slot back", () => {
+    const cache = cacheWith([ROOT]);
+    const resolver = new DrawSetResolver(cache);
+    const morph = new TimeMorph(32);
+    morph.present(resolver.resolve(selectionOf([ROOT])), cache, unseen);
+    morph.rebake(patchKeyString(ROOT), DATUM_SLOT);
+    morph.footprintsAt(1_000);
+    expect([morph.heightWords[0], morph.rebakesSwapped, morph.takeReleased()]).toEqual([
+      0,
+      1,
+      [DATUM_SLOT],
+    ]);
+  });
+
   it("swaps a coarsen at once, counted, where its finer patches have left the cache", () => {
     const cache = cacheWith([ROOT, ...CHILDREN]);
     const resolver = new DrawSetResolver(cache);

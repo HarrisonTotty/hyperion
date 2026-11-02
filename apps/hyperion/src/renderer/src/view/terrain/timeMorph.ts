@@ -36,7 +36,7 @@
 
 import type { CachedPatch, DrawnPatch, DrawSet } from "./cache";
 import type { FadeFootprint } from "./coarseFineHolds";
-import { DATUM_SLOT, MAX_SUB_PATCH_LEVELS } from "./gpu/uniforms";
+import { DATUM_SLOT, fadeWord, MAX_SUB_PATCH_LEVELS } from "./gpu/uniforms";
 import { childKeys, type PatchKey, patchKeyString } from "./patchKey";
 
 /**
@@ -287,13 +287,17 @@ export class TimeMorph {
       this.#rebakes.delete(keyString);
       this.#rebakeWords.delete(keyString);
     }
-    if (oldSlot === null) {
+    if (oldSlot === null || oldSlot >= DATUM_SLOT) {
+      // No slot was spare, or the record cannot name it (`DATUM_SLOT` and past): swapped at once.
+      if (oldSlot !== null) {
+        this.#released.push(oldSlot);
+      }
       this.#rebakesSwapped += 1;
       return;
     }
     this.#rebakes.set(keyString, { slot: oldSlot, startMs: null, spanMs: this.#spanFor(changePx) });
     // At its start: the older bake's whole, until the first draw stamps it.
-    this.#rebakeWords.set(keyString, ((255 << 8) | (oldSlot << 16)) >>> 0);
+    this.#rebakeWords.set(keyString, fadeWord(0, 255, oldSlot));
   }
 
   /**
@@ -705,10 +709,7 @@ export class TimeMorph {
         this.#released.push(rebake.slot);
       } else {
         const byte = Math.round(fade * 255);
-        this.#rebakeWords.set(
-          keyString,
-          byte === 0 ? 0 : ((byte << 8) | (rebake.slot << 16)) >>> 0,
-        );
+        this.#rebakeWords.set(keyString, byte === 0 ? 0 : fadeWord(0, byte, rebake.slot));
       }
     }
     const out: FadeFootprint[] = [];
@@ -740,7 +741,7 @@ export class TimeMorph {
     for (let n = 0; n < set.count; n += 1) {
       const rebake = this.#rebakeWords.get(set.patches[n]?.keyString ?? "") ?? 0;
       const rise = rises.get(this.#areas[n] ?? "") ?? 0;
-      words[n] = rebake !== 0 ? rebake : rise === 0 ? 0 : ((rise << 8) | (DATUM_SLOT << 16)) >>> 0;
+      words[n] = rebake !== 0 ? rebake : rise === 0 ? 0 : fadeWord(0, rise, DATUM_SLOT);
     }
     return out;
   }

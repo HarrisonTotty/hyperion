@@ -8,6 +8,8 @@ import {
   CONTACT_RECORD_BYTES,
   CONTACTS_HEADER_BYTES,
   ContactRecords,
+  DATUM_SLOT,
+  fadeWord,
   INSTANCE_RECORD_BYTES,
   InstanceRecords,
   MAX_CONTACTS,
@@ -161,6 +163,43 @@ describe("an instance record", () => {
       (0b1_0000_0001 << 2) | 2,
       2 * INSTANCE_RECORD_BYTES,
     ]);
+  });
+
+  it("carries its edges' fades, its corners' and its own and its rebake's word (R10.T16.i)", () => {
+    const records = new InstanceRecords(1);
+    const own = fadeWord(7, 200, 1_234);
+    records.push(1, vec3(0, 0, 0), 0, 1, 9, 0, 0, 0, 0x0102_0304, 0xff00_00ff, own);
+    const u = new Uint32Array(records.buffer);
+    expect([Array.from(u.slice(9, 12)), own]).toEqual([
+      [0x0102_0304, 0xff00_00ff, own],
+      (7 | (200 << 8) | (1_234 << 16)) >>> 0,
+    ]);
+  });
+
+  it("refuses a fades word that is not a u32", () => {
+    const records = new InstanceRecords(1);
+    expect(() => {
+      records.push(1, vec3(0, 0, 0), 0, 1, 9, 0, 0, 0, 0, 0, -1);
+    }).toThrow(RangeError);
+    expect(() => {
+      records.push(1, vec3(0, 0, 0), 0, 1, 9, 0, 0, 0, 2 ** 32, 0, 0);
+    }).toThrow(RangeError);
+  });
+
+  it("packs a rebake's fade and its older slot, the datum's for a rise, and refuses what does not fit", () => {
+    expect([fadeWord(0, 0, 0), fadeWord(255, 0, 0), fadeWord(0, 128, DATUM_SLOT)]).toEqual([
+      0,
+      255,
+      ((128 << 8) | (0xffff << 16)) >>> 0,
+    ]);
+    for (const [own, rebake, slot] of [
+      [256, 0, 0],
+      [0, -1, 0],
+      [0.5, 0, 0],
+      [0, 0, DATUM_SLOT + 1],
+    ] as const) {
+      expect(() => fadeWord(own, rebake, slot)).toThrow(RangeError);
+    }
   });
 
   it("carries the sub-patch it draws of its slot's patch, 0 for the whole patch", () => {

@@ -156,6 +156,7 @@ import {
 } from "./gpu/resources";
 import {
   ContactRecords,
+  fadeWord,
   INSTANCE_RECORD_BYTES,
   InstanceRecords,
   NO_PARENT_SLOT,
@@ -799,6 +800,14 @@ interface BakeSizes {
   readonly reliefM: number;
   /** h₀ at every {@link SIZE_STRIDE}th vertex each way, m, 0 off the survey: a rebake's change. */
   readonly coarseM: Float32Array;
+}
+
+/**
+ * An instance's fades word (`fadeWord`) from its own fade's byte and the time morph's heights word
+ * for it (`TimeMorph.heightWords`: bits 8 to 31, its rebake's or rise's fade and older slot).
+ */
+function fadeWordOf(own: number, heights: number): number {
+  return fadeWord(own, (heights >>> 8) & 0xff, heights >>> 16);
 }
 
 /** The vertices between the samples of {@link BakeSizes.coarseM}, each way. */
@@ -3792,7 +3801,7 @@ export class TerrainPass {
           within === null ? 0 : subPatchOf(patch.key, within),
           fades.edges[n] ?? 0,
           fades.corners[n] ?? 0,
-          ((fades.own[n] ?? 0) | (device.morph.heightWords[n] ?? 0)) >>> 0,
+          fadeWordOf(fades.own[n] ?? 0, device.morph.heightWords[n] ?? 0),
         );
         (inner ? state.interiorDrawn : drawnIndices).push(n);
         const phasesOf = inner ? interiorPhases : phases;
