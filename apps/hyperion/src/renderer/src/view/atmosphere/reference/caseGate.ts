@@ -45,8 +45,11 @@
  * 7. the legs apart (#65's deferred item) on `earth` and `earth-ozone-slab`: the twin's
  *    T(u_view) T(u_sun) against the reference's T(u_view + u_sun), by the client's own curve read;
  * 8. the attribution: each geometry whose cone meets the ground, its cone share, the twin's
- *    surface share, and its verdict with the drawn surface's transmittance taken per channel in
- *    place of the mean, which sorts a miss under R08.T8.b's deferred finding.
+ *    surface share, and its verdict with the drawn surface's transmittance taken by the client's own
+ *    converged quadrature per channel ({@link chromaticSurfaceOf}) in place of the twin's. Until
+ *    R08.T9.c the twin took the mean there, and the sort told a miss of R08.T8.b's deferred finding,
+ *    the grey; since it the twin takes the march's or the volume's per channel, and the sort tells a
+ *    miss of their quadrature.
  *
  * Every verdict is recorded, never asserted: a miss is a finding (ruling 12).
  */
@@ -533,7 +536,9 @@ function amountsCombined(
  * the cone's average, by the twin's own weights, of the lit ground's radiance (`twin.ts`'s
  * `litGroundRadiance`) times {@link groundToObserverTransmittance} along each direction that meets
  * the ground within the view, times the sun's irradiance; the twin's own takes the march's or the
- * volume's mean over the channels there (`composite.wgsl`'s `colour * marched.a`).
+ * volume's per channel there since R08.T9.c, as the composite does (`composite.wgsl`'s
+ * `marchedThrough` and `aerialTransmittanceAt`), so that the two differ by the march's quadrature
+ * alone, where until it they differed by the channels' mean.
  */
 export function chromaticSurfaceOf(
   twin: ReferenceTwin,

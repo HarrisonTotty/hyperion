@@ -140,6 +140,12 @@
 // ends, and the hand Jupiter's routed march at the high setting's 36 read 12-24% dark in red against
 // its own at 32 times them; it reads within 1% in every channel, and a segment onto an envelope's
 // floor keeps R05.T12.e's placement again.
+//
+// Changes (plan R08, R08.T9.c): a ray's march returns its transmittance per channel beside the mean
+// (`MarchedRay`), slot 0's throughput, which the entry points store in the second target
+// (`rayMarchTransmittanceOut`, rgb, the mean in a; `storeMarched`), the footprint's mean taken over
+// it as over the first; the composite dims a drawn surface by it in place of the mean. The first
+// target is as before, to the bit.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -157,6 +163,26 @@
 @group(0) @binding(13) var lastAbsorberPressureColumn : texture_2d_array<f32>;
 @group(0) @binding(14) var lobeTables : texture_2d_array<f32>;
 @group(0) @binding(15) var oblateBody : texture_2d<f32>;
+@group(0) @binding(19) var rayMarchTransmittanceOut : texture_storage_2d<rgba16float, write>;
+
+// One ray's march (`marchRay`): the first target's texel, its in-scatter (rgb) and mean
+// transmittance (a), and its transmittance per channel, the second's (R08.T9.c).
+struct MarchedRay {
+  light : vec4f,
+  transmittance : vec3f,
+}
+
+// What a ray that misses the air marches: no light, and a transmittance of 1.
+fn marchMissed() -> MarchedRay {
+  return MarchedRay(vec4f(0.0, 0.0, 0.0, 1.0), vec3f(1.0));
+}
+
+// Stores `marched` at `texel` of both targets: the first's texel, and the second's transmittance
+// per channel with the mean in a (R08.T9.c).
+fn storeMarched(texel : vec2u, marched : MarchedRay) {
+  textureStore(rayMarchOut, texel, marched.light);
+  textureStore(rayMarchTransmittanceOut, texel, vec4f(marched.transmittance, marched.light.a));
+}
 
 // A ray's quadric about a shell of equatorial radius `radius`, in space scaled by
 // S = diag(1, 1, k) to a sphere of that radius: Q(t) = |S (P + t d)|^2 - radius^2 = qa t^2 +
@@ -723,10 +749,11 @@ fn rayMarchSamplesOf(kind : u32, depthG : f32, samples : u32, edges : u32) -> u3
 }
 
 // One ray of the march, through `uv` of the output, the scene's reversed-Z depth under the texel
-// `depth` (0 where nothing is drawn): its in-scatter (rgb) and mean transmittance (a), (0, 0, 0, 1)
-// where it misses the air. The texel's centre ray, and each node of its far-limb footprint
-// (R08.T8.c), each at the scene's depth under its own point.
-fn marchRay(uv : vec2f, depth : f32) -> vec4f {
+// `depth` (0 where nothing is drawn): its in-scatter (rgb) and mean transmittance (a), and its
+// transmittance per channel (R08.T9.c), `marchMissed` where it misses the air. The texel's centre
+// ray, and each node of its far-limb footprint (R08.T8.c), each at the scene's depth under its own
+// point.
+fn marchRay(uv : vec2f, depth : f32) -> MarchedRay {
   let topM = medium.topHeightM;
   let body = oblateBodyOf(oblateBody);
   var tSurface = 3.4e38;
@@ -755,7 +782,7 @@ fn marchRay(uv : vec2f, depth : f32) -> vec4f {
   }
   tEnd = min(tEnd, tSurface);
   if (shell.y <= 0.0 || tEnd <= tStart) {
-    return vec4f(0.0, 0.0, 0.0, 1.0);
+    return marchMissed();
   }
   // The medium's layer edges are the same for every pixel, so each branch on them is uniform
   // (R08.T6.i).
@@ -890,8 +917,10 @@ fn marchRay(uv : vec2f, depth : f32) -> vec4f {
   }
   // A sky pixel whose ray meets the ground sees nothing of space behind it: no sun's disc there.
   var meanTransmittance = viewMeanTransmittance(&march);
+  var transmittanceRgb = march.throughput0;
   if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
     meanTransmittance = 0.0;
+    transmittanceRgb = vec3f(0.0);
   }
-  return vec4f(luminance, meanTransmittance);
+  return MarchedRay(vec4f(luminance, meanTransmittance), transmittanceRgb);
 }

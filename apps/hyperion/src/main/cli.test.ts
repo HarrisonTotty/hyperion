@@ -679,7 +679,7 @@ describe("the several-views check's options", () => {
     });
   });
 
-  it.each(["sky-off", "transmittance-off", "per-pixel"] as const)(
+  it.each(["sky-off", "transmittance-off", "per-pixel", "surface-grey"] as const)(
     "takes --composite-probe %s, the frame profile's probe of the composite (the owner's priority)",
     (probe) => {
       expect(

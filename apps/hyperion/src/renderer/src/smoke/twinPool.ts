@@ -24,7 +24,8 @@ import type {
   TwinTable,
   TwinTransmittance,
   TwinView,
-  TwinVolume,
+  TwinAerialVolume,
+  TwinMarchTarget,
 } from "../view/atmosphere/tablesCpu";
 import { handled } from "./ordered";
 import type { TwinAnswer, TwinJob, TwinReply, TwinRequest } from "./twinJobs";
@@ -203,7 +204,7 @@ export class TwinPool {
     size: VolumeSize,
     samplesPerSlice: number,
     reachM: number,
-  ): Promise<TwinVolume> {
+  ): Promise<TwinAerialVolume> {
     return this.#run(
       { kind: "aerialPerspective", planet, view, size, samplesPerSlice, reachM },
       (answer) => (answer.kind === "aerialPerspective" ? answer.twin : null),
@@ -221,7 +222,7 @@ export class TwinPool {
     view: TwinView,
     settings: RayMarchSettings,
     depth: number,
-  ): Promise<TwinTable> {
+  ): Promise<TwinMarchTarget> {
     return this.#run({ kind: "rayMarch", planet, view, settings, depth }, (answer) =>
       answer.kind === "rayMarch" ? answer.twin : null,
     );
@@ -295,7 +296,7 @@ export class TwinPool {
     size: VolumeSize,
     samplesPerSlice: number,
     reachM: number,
-  ): Promise<TwinVolume> {
+  ): Promise<TwinAerialVolume> {
     return this.#run(
       { kind: "oblateAerialPerspective", planet, view, size, samplesPerSlice, reachM },
       (answer) => (answer.kind === "oblateAerialPerspective" ? answer.twin : null),
@@ -313,7 +314,7 @@ export class TwinPool {
     view: TwinView,
     settings: RayMarchSettings,
     depth: number,
-  ): Promise<TwinTable> {
+  ): Promise<TwinMarchTarget> {
     return this.#run({ kind: "oblateRayMarch", planet, view, settings, depth }, (answer) =>
       answer.kind === "oblateRayMarch" ? answer.twin : null,
     );

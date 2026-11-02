@@ -37,7 +37,8 @@ import {
   type TwinTable,
   type TwinTransmittance,
   type TwinView,
-  type TwinVolume,
+  type TwinAerialVolume,
+  type TwinMarchTarget,
   transmittanceTablesTwin,
   transmittanceTwin,
 } from "../view/atmosphere/tablesCpu";
@@ -165,12 +166,12 @@ export type TwinAnswer =
   | { readonly kind: "transmittance"; readonly twin: TwinTable }
   | { readonly kind: "multiScattering"; readonly twin: TwinTable }
   | { readonly kind: "skyView"; readonly twin: TwinTable }
-  | { readonly kind: "aerialPerspective"; readonly twin: TwinVolume }
-  | { readonly kind: "rayMarch"; readonly twin: TwinTable }
+  | { readonly kind: "aerialPerspective"; readonly twin: TwinAerialVolume }
+  | { readonly kind: "rayMarch"; readonly twin: TwinMarchTarget }
   | { readonly kind: "oblateBand"; readonly twin: TwinBand }
   | { readonly kind: "oblateSkyView"; readonly twin: TwinTable }
-  | { readonly kind: "oblateAerialPerspective"; readonly twin: TwinVolume }
-  | { readonly kind: "oblateRayMarch"; readonly twin: TwinTable }
+  | { readonly kind: "oblateAerialPerspective"; readonly twin: TwinAerialVolume }
+  | { readonly kind: "oblateRayMarch"; readonly twin: TwinMarchTarget }
   | { readonly kind: "irradiance"; readonly twin: TwinTable };
 
 /** What the page posts to a twin worker: a job and the number its reply is matched by. */

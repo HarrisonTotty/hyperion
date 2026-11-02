@@ -4803,6 +4803,21 @@ to 10⁸ m shows no step at the switch, recorded here.
   under its eclipse; and the readbacks within 3 × 10⁻⁶ (the table) and 6.3 × 10⁻⁵ (the lookups) of
   the twin.
 
+- **R08.T9.c A drawn surface's transmittance per channel** (lane `fix-surface-transmittance`, from
+  T8.b's and T9.a's deferred findings; research-next-work-12, lane 1). The composite dims a surface
+  seen through the air by its transmittance per channel in place of R05's grey mean: the
+  aerial-perspective volume and the ray march store it in a second `rgba16float` texture beside
+  their light (rgb, the mean in a), and the composite reads it there. The lever is
+  `AtmosphereSettings.surfaceTransmittance`, `channels` on both settings, `grey` the way back.
+
+  Tests: the twins' transmittance per channel within 1% of a 4,096-step march (in optical depth,
+  relative where τ > 1) from 2 m over 5 km and from 400 km through the limb; the case gate
+  re-recorded. Smoke: both second textures against their twins to 10⁻³, and the composite moving
+  only a surface's pixels, each by its colour × (T_c − T̄). Acceptance: `pnpm test` and
+  `just test-render` pass.
+
+  _Built 2026-11-02_ (Risks, "R08.T9.c, as built").
+
 ### R08.T10 The medium of a body
 
 In two subtasks (split on re-validation, since as built the atmosphere is not yet drawn in the
@@ -24629,3 +24644,27 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     worst; the liquid H₂SO₄ sulphate layer's (`sphere`) +2.8 × 10⁻⁶.
   - `test/atmosphereRecords.ts`'s `detailOf` takes an optional system; `planetaryFixture.ts` gains
     `temperateWorldDetail` and `TEMPERATE_WORLD_SYSTEM`; R08.T3.e's column test reads the message.
+- **R08.T9.c, as built** (2026-11-02; lane `fix-surface-transmittance`; its figures in the lane's
+  outbox). Closes T9.a's "_The volume's transmittance is grey_" and T8.b's deferred finding on
+  drawn surfaces from above the top. Renderer only; no generated value moves.
+  - `hillaire.ts`: `SurfaceTransmittance` (`"channels" | "grey"`) is
+    `AtmosphereSettings.surfaceTransmittance`, the composite's `levers.y`: `channels` on both
+    settings and in `PER_PIXEL_LEVERS`. `grey` still writes both second textures, so it draws the
+    old pixels to the bit and saves no memory or store (lean, 2026-11-02).
+  - The second textures, rgb per channel with the mean in a: `FrameOutputs` and `frameTables` gain
+    `aerialTransmittance` and `rayMarchTransmittance`; the kernels write `aerialTransmittanceOut` and
+    `rayMarchTransmittanceOut` (`rayMarch.wgsl`'s `storeMarched`), the composite reads bindings 13
+    and 14. A missed ray and the fill write (1, 1, 1, 1); a sky ray onto the bare ground 0.
+  - For R10's and R11's own passes: `AerialPerspective.transmittanceVolume`, read by
+    `aerialRead.wgsl`'s `aerialTransmittanceAt`; `aerialPerspectiveAt`'s alpha stays the mean.
+  - Twins: `TwinAerialVolume`, `TwinMarchTarget`, `TwinMarchedTexel`; `rayMarchTexelsTwin`,
+    `rayMarchTargetTexelsTwin`, `oblateRayMarchTargetTexelsTwin` and `belowDeckMarchTexelsTwin`
+    beside the four-float forms; `TwinOptions.surfaceTransmittance`, `channels` by default, a grey
+    path (its channels equal to the bit) taking the mean, so that the sweep cases, whose traced
+    outputs carry their SHA-256, stand as they were (they moved by an ulp alone; lean, 2026-11-02).
+  - `--composite-probe surface-grey` (`COMPOSITE_PROBE` 4) draws the grey composite, for the A/B.
+  - Re-recorded: `caseGate.json` (check 8's sort now tells the march's quadrature, not the grey),
+    `vectorGate.json`, `sweepBoundary.json`'s case-gate headlines, the thin and thick kernels'
+    digests, and `HAZE_GATE_MISSES`' `disc-p60/r`, 1.074344 → 1.075547 (`routing.ts`; within its
+    1.08 bound, the haze's route open as before).
+  - Pending, the owner's Mac A/B (the lane's outbox has its command).

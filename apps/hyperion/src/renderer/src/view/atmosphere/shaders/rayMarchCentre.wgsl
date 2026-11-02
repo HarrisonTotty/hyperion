@@ -4,7 +4,8 @@
 // footprint's own test (`farLimb.wgsl`'s farLimbFootprintOf), writes the tile's kind for the
 // footprint's entry point (`rayMarchFootprint.wgsl`), dispatched after it, and takes the tiles no
 // footprint can blend in: (0, 0, 0, 1) on a tile every ray misses, and the centre ray, as the
-// footprint's entry point marches a texel of w_L 0, elsewhere. It holds none of the footprint
+// footprint's entry point marches a texel of w_L 0, elsewhere, each into both targets
+// (`storeMarched`, R08.T9.c). It holds none of the footprint
 // across its march, which cost the one kernel 0.42-0.86 ms from orbit (QW2 and QW3's Kn - K0, plan
 // R08's "Deviations in T8.e, as built"); on the RTX 3080 the two dispatches cost 0.4-1.0 ms more
 // than the one kernel from 400 km and 1e7 m and saved 0.4-1.3 ms farther, so the cull is a cover of
@@ -83,7 +84,7 @@ fn main(
     return;
   }
   if (kind == MARCH_TILE_MISS) {
-    textureStore(rayMarchOut, texel, vec4f(0.0, 0.0, 0.0, 1.0));
+    storeMarched(texel, marchMissed());
     return;
   }
   let uv = (vec2f(texel) + 0.5) / vec2f(size);
@@ -99,9 +100,9 @@ fn main(
   // below it the surfaces beyond the aerial-perspective volume's reach (R08.T8).
   let needed = view.exact.w > 0.0 || (depth > 0.0 && tSurface > reach);
   if (!needed) {
-    textureStore(rayMarchOut, texel, vec4f(0.0, 0.0, 0.0, 1.0));
+    storeMarched(texel, marchMissed());
     return;
   }
   // The centre ray alone, as the footprint's entry point marches a texel of w_L 0.
-  textureStore(rayMarchOut, texel, marchRay(uv, depth));
+  storeMarched(texel, marchRay(uv, depth));
 }

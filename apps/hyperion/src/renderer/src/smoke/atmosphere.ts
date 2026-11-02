@@ -70,6 +70,8 @@ import {
   atmosphereInputs,
   type CompositeTransmittance,
   bodyOfFigure,
+  PER_PIXEL_LEVERS,
+  type SurfaceTransmittance,
   createAtmosphereFrameKernels,
   curveSlotOf,
   type FrameOutputs,
@@ -92,6 +94,8 @@ import {
 import {
   MARCH_TILE_CODES,
   MARCH_TILE_TEXELS,
+  type MarchAreaTexels,
+  marchAreaTexels,
   type MarchTileKind,
 } from "../view/atmosphere/marchArea";
 import {
@@ -135,7 +139,7 @@ import {
 } from "../view/atmosphere/thick/read";
 import {
   belowDeckAerialPerspectiveTwin,
-  belowDeckMarchTexelTwin,
+  belowDeckMarchTexelsTwin,
   belowDeckSkyViewTexelsTwin,
   belowDeckSurfaceLightingTwin,
   type FarLimbShells,
@@ -171,7 +175,8 @@ import {
   type TwinTable,
   type TwinTransmittance,
   type TwinView,
-  type TwinVolume,
+  type TwinAerialVolume,
+  type TwinMarchTarget,
   unitRayTwin,
 } from "../view/atmosphere/tablesCpu";
 import {
@@ -1816,15 +1821,22 @@ interface FrameReadback {
   readonly skyView: Float32Array;
   readonly aerial: Float32Array;
   readonly rayMarch: Float32Array;
+  /** The volume's and the march's transmittance per channel (R08.T9.c), rgb with the mean in a. */
+  readonly aerialTransmittance: Float32Array;
+  readonly rayMarchTransmittance: Float32Array;
 }
 
-/** Reads the latest frame's sky view, aerial volume and ray march back. */
+/**
+ * Reads the latest frame's sky view, aerial volume and ray march back, with the volume's and the
+ * march's transmittance per channel (R08.T9.c).
+ */
 async function readFrameOutputs(
   engine: RenderEngine,
   atmosphere: HillaireAtmosphere,
 ): Promise<FrameReadback> {
-  const { skyView, aerial, rayMarch } = atmosphere.frameTables;
-  if (rayMarch === null) {
+  const { skyView, aerial, rayMarch, aerialTransmittance, rayMarchTransmittance } =
+    atmosphere.frameTables;
+  if (rayMarch === null || rayMarchTransmittance === null) {
     throw new Error("the ray march drew no target");
   }
   const read = async (texture: TextureHandle): Promise<Float32Array> =>
@@ -1833,6 +1845,8 @@ async function readFrameOutputs(
     skyView: await read(skyView),
     aerial: await read(aerial),
     rayMarch: await read(rayMarch),
+    aerialTransmittance: await read(aerialTransmittance),
+    rayMarchTransmittance: await read(rayMarchTransmittance),
   };
 }
 
@@ -1862,6 +1876,9 @@ interface FrameAgreements {
   readonly skyView: TwinAgreement;
   readonly aerial: TwinAgreement;
   readonly rayMarch: TwinAgreement;
+  /** The volume's and the march's transmittance per channel (R08.T9.c) against their twins'. */
+  readonly aerialTransmittance: TwinAgreement;
+  readonly rayMarchTransmittance: TwinAgreement;
   readonly compositeWithinRange: boolean;
 }
 
@@ -1975,11 +1992,14 @@ function oblatePlanetOf(
   };
 }
 
-/** A frame's three per-view twins, begun on the twin workers. */
+/**
+ * A frame's three per-view twins, begun on the twin workers, the volume's and the march's with
+ * their transmittance per channel (R08.T9.c).
+ */
 interface FrameTwins {
   readonly skyView: Promise<TwinTable>;
-  readonly aerial: Promise<TwinVolume>;
-  readonly rayMarch: Promise<TwinTable>;
+  readonly aerial: Promise<TwinAerialVolume>;
+  readonly rayMarch: Promise<TwinMarchTarget>;
 }
 
 /**
@@ -2054,13 +2074,41 @@ async function frameAgreements(
   const gpu = await readFrameOutputs(engine, atmosphere);
   return async () => {
     const aerial = await frameTwins.aerial;
+    const rayMarch = await frameTwins.rayMarch;
     return {
       skyView: twinAgreement(gpu.skyView, await frameTwins.skyView, false),
       aerial: twinAgreement(gpu.aerial, aerial, true),
-      rayMarch: twinAgreement(gpu.rayMarch, await frameTwins.rayMarch, true),
+      rayMarch: twinAgreement(gpu.rayMarch, rayMarch, true),
+      aerialTransmittance: twinAgreement(
+        gpu.aerialTransmittance,
+        { ...aerial, texels: aerial.transmittance },
+        true,
+      ),
+      rayMarchTransmittance: twinAgreement(
+        gpu.rayMarchTransmittance,
+        { ...rayMarch, texels: rayMarch.transmittance },
+        true,
+      ),
       compositeWithinRange: withinHalfRange(composite),
     };
   };
+}
+
+/**
+ * Records a frame's transmittances per channel (R08.T9.c), the volume's and the march's second
+ * textures, as the checks "R08.T9.c … agrees with the CPU twin to 10⁻³".
+ */
+function recordTransmittances(checks: Checks, label: string, result: FrameAgreements): void {
+  for (const [what, held] of [
+    ["the aerial perspective's", result.aerialTransmittance],
+    ["the ray march's", result.rayMarchTransmittance],
+  ] as const) {
+    checks.check(
+      `R08.T9.c ${label}: ${what} transmittance per channel agrees with the CPU twin to 10⁻³`,
+      held.worst <= 1 && held.above > 0,
+      `worst ${held.at}; ${held.above} channels above 10⁻⁶ of the largest, ${held.over} over the bound`,
+    );
+  }
 }
 
 /** Records an agreement as the check "R08.T6.b … agrees with the CPU twin to 10⁻³". */
@@ -2119,6 +2167,7 @@ async function checkFrameTwins(
         recordAgreement(checks, `${label}: the sky view`, result.skyView);
         recordAgreement(checks, `${label}: the aerial perspective`, result.aerial);
         recordAgreement(checks, `${label}: the ray march`, result.rayMarch);
+        recordTransmittances(checks, label, result);
         checks.check(
           `R08.T6.c ${label}: the composite, its read of the tables at the camera, is finite and within rgba16float's range`,
           result.compositeWithinRange,
@@ -2460,12 +2509,12 @@ export async function checkBelowDeckFrameTwins(
           const h = Math.ceil(FRAME_SIZE.heightPx * sizes.rayMarchScale);
           const depth = frame.surfaceM === null ? 0 : NEAR_M / frame.surfaceM;
           const march = new Float64Array(w * h * 4);
+          const marchTransmittance = new Float64Array(w * h * 4);
           for (let y = 0; y < h; y += 1) {
             for (let x = 0; x < w; x += 1) {
-              march.set(
-                belowDeckMarchTexelTwin(below, view, w, h, reachM, x, y, depth),
-                (y * w + x) * 4,
-              );
+              const marched = belowDeckMarchTexelsTwin(below, view, w, h, reachM, x, y, depth);
+              march.set(marched.light, (y * w + x) * 4);
+              marchTransmittance.set(marched.transmittance, (y * w + x) * 4);
             }
           }
           const label = `R08.T15.b.2 R05's Earth beneath a deck, high, ${frame.name}`;
@@ -2486,6 +2535,22 @@ export async function checkBelowDeckFrameTwins(
             [
               "the ray march",
               twinAgreement(gpu.rayMarch, { widthTexels: w, heightTexels: h, texels: march }, true),
+            ],
+            [
+              "the aerial perspective's transmittance per channel (R08.T9.c)",
+              twinAgreement(
+                gpu.aerialTransmittance,
+                { ...aerial, texels: aerial.transmittance },
+                true,
+              ),
+            ],
+            [
+              "the ray march's transmittance per channel (R08.T9.c)",
+              twinAgreement(
+                gpu.rayMarchTransmittance,
+                { widthTexels: w, heightTexels: h, texels: marchTransmittance },
+                true,
+              ),
             ],
           ] as const) {
             later.check(
@@ -2589,6 +2654,14 @@ async function checkThickTwinBodies(
               ["the sky view", result.skyView],
               ["the aerial perspective", result.aerial],
               ["the ray march", result.rayMarch],
+              [
+                "the aerial perspective's transmittance per channel (R08.T9.c)",
+                result.aerialTransmittance,
+              ],
+              [
+                "the ray march's transmittance per channel (R08.T9.c)",
+                result.rayMarchTransmittance,
+              ],
             ] as const) {
               later.check(
                 `${over.replace("{label}", label).replace("{what}", what)} agrees with the CPU twin to 10⁻³`,
@@ -3962,6 +4035,7 @@ async function behindReadsOf(
 ): Promise<BehindReads> {
   const atmosphere = HillaireAtmosphere.over(engine, tables, twinSizes(TABLE_SIZES.low), kernels, {
     compositeTransmittance: transmittance,
+    surfaceTransmittance: "channels",
   });
   const targetOf = (name: string, depth: boolean): RenderTarget =>
     engine.createRenderTarget({
@@ -4394,6 +4468,7 @@ async function checkBinaryFrames(
         record("sky view", frame.suns.length, result.skyView);
         record("aerial perspective", frame.suns.length, result.aerial);
         record("ray march", marched, result.rayMarch);
+        recordTransmittances(checks, label, result);
         checks.check(
           `R08.T7 ${label}: the composite is finite and within rgba16float's range`,
           result.compositeWithinRange,
@@ -5266,6 +5341,8 @@ async function readKernelArm(engine: RenderEngine, outputs: FrameOutputs): Promi
     skyView: await read(outputs.skyView),
     aerial: await read(outputs.aerial),
     rayMarch: await read(outputs.rayMarch),
+    aerialTransmittance: await read(outputs.aerialTransmittance),
+    rayMarchTransmittance: await read(outputs.rayMarchTransmittance),
   };
 }
 
@@ -6662,11 +6739,15 @@ function pickRectangle(
   return [left, -4 * d, 4 * aspect * d, top];
 }
 
-/** A frame of low's pick's checks, read back: the composite, the scene's colour and the march. */
+/**
+ * A frame of low's pick's checks, read back: the composite, the scene's colour and the march, with
+ * the march's transmittance per channel (R08.T9.c).
+ */
 interface PickFrame {
   readonly composite: Float32Array;
   readonly scene: Float32Array;
   readonly march: Float32Array;
+  readonly transmittance: Float32Array;
 }
 
 /**
@@ -6702,14 +6783,17 @@ async function pickFrame(
     suns,
     { label: "atmosphere pick", surface: drawn, preExposure: SMOKE_EXPOSURE_SCALE },
     async (output, scene) => {
-      const { rayMarch } = atmosphere.frameTables;
-      if (rayMarch === null) {
+      const { rayMarch, rayMarchTransmittance } = atmosphere.frameTables;
+      if (rayMarch === null || rayMarchTransmittance === null) {
         throw new Error("the ray march drew no target");
       }
       return {
         composite: halfTexels(await engine.readTexture(output.colour)),
         scene: halfTexels(await engine.readTexture(scene.colour)),
         march: halfTexels(await engine.readTexture(rayMarch, 0, undefined, "tolerance")),
+        transmittance: halfTexels(
+          await engine.readTexture(rayMarchTransmittance, 0, undefined, "tolerance"),
+        ),
       };
     },
   );
@@ -6819,8 +6903,8 @@ function describeWriteSlack(rounding: TargetRounding): string {
 /**
  * Whether pixel `k`'s colour channels agree with what the composite draws from above the top
  * from march texel `t` (`composite.wgsl`'s fragment): over the sky, depth 0, the scene's colour
- * (black) times the transmittance plus rgb × the factor; over a surface, its colour × alpha +
- * rgb × the factor.
+ * (black) times the transmittance plus rgb × the factor; over a surface, its colour × its
+ * transmittance per channel, the second target's at `t` (R08.T9.c), + rgb × the factor.
  *
  * @remarks
  * A sky channel writes the march texel's own value, which `rgba16float` holds exactly, and is held
@@ -6841,12 +6925,12 @@ function pickedPixel(
   rounding: TargetRounding,
 ): PickedPixel {
   const m = (t[1] * marchWidth + t[0]) * 4;
-  const alpha = frame.march[m + 3] ?? Number.NaN;
   let ratio = 0;
   let text = "";
   for (let c = 0; c < 3; c += 1) {
     const rgb = (frame.march[m + c] ?? Number.NaN) * COMPOSITE_FACTOR;
-    const colour = surface ? (frame.scene[k * 4 + c] ?? Number.NaN) * alpha : 0;
+    const through = frame.transmittance[m + c] ?? Number.NaN;
+    const colour = surface ? (frame.scene[k * 4 + c] ?? Number.NaN) * through : 0;
     const expected = colour + rgb;
     const actual = frame.composite[k * 4 + c] ?? Number.NaN;
     let off: number;
@@ -6956,11 +7040,11 @@ function litTexels(march: Float32Array): number {
  * (trunc(x ÷ 2 − ½) on each axis), is counted against the same bound and must fail somewhere, so
  * that the check fails before the fix. Then a surface over the lower right ({@link PICK_SURFACE}),
  * its edges on pixel boundaries: every pixel must be the texel the shader's pick takes by its
- * depths and then its distance ({@link pickedTexel}), the surface's colour × alpha + rgb where
- * covered; the pixels within two rows or columns of its edge whose depth-nearest texel is not the
+ * depths and then its distance ({@link pickedTexel}), the surface's colour × its transmittance per
+ * channel (the march's second target, R08.T9.c) + rgb where covered; the pixels within two rows or columns of its edge whose depth-nearest texel is not the
  * nearest are counted, and must include some that the nearest would draw wrong.
  *
- * A covered pixel's colour × alpha + rgb is formed in `f32` and rounded by the target's write, so
+ * A covered pixel's colour × T_c + rgb is formed in `f32` and rounded by the target's write, so
  * it is held to the write's slack under the adapter's probed `rgba16float` rounding (`rounding`,
  * the graphics status's `targetRounding`, as R07.T14.b's bloom takes it; R01's Design note 22): on
  * the RTX 3080, which truncates, the surface check failed on half a step to nearest while its pick
@@ -10025,4 +10109,386 @@ export async function checkFarLimbFootprint(
       }
     }
   });
+}
+
+// --- R08.T9.c: a drawn surface's transmittance per channel -----------------------------------------
+
+/** One frame of {@link checkSurfaceTransmittance}: the camera's height and the surface's distance. */
+interface SurfaceTransmittanceFrame {
+  readonly name: string;
+  readonly heightM: number;
+  /** The full-screen surface's distance ahead, m, or `null` for the sky alone. */
+  readonly surfaceM: number | null;
+}
+
+/**
+ * {@link checkSurfaceTransmittance}'s frames: the sky alone from the ground and from orbit; a
+ * surface 5 km ahead from 2 m, within the aerial-perspective volume's reach, and 60 km ahead, beyond
+ * it, the ray march's; and from 400 km a surface at the limb's tangent point, some 2,290 km ahead.
+ */
+const SURFACE_TRANSMITTANCE_FRAMES: ReadonlyArray<SurfaceTransmittanceFrame> = [
+  { name: "2 m, the sky alone", heightM: 2, surfaceM: null },
+  { name: "400 km, the sky alone", heightM: 400_000, surfaceM: null },
+  { name: "2 m, a surface 5 km ahead", heightM: 2, surfaceM: 5_000 },
+  { name: "2 m, a surface 60 km ahead", heightM: 2, surfaceM: 60_000 },
+  { name: "400 km, a surface at the limb's tangent point", heightM: 400_000, surfaceM: 2_290_000 },
+];
+
+/** One composite of {@link checkSurfaceTransmittance}, read back with what it read. */
+interface SurfaceReads {
+  readonly output: Float32Array;
+  readonly scene: Float32Array;
+  /** The volume's and the march's transmittance per channel, rgb with the mean in a. */
+  readonly aerialTransmittance: Float32Array;
+  readonly rayMarchTransmittance: Float32Array;
+  /** The march's area, its texels, over which the composite reads the air. */
+  readonly area: MarchAreaTexels;
+}
+
+/**
+ * R08.T9.c: the composite dims a drawn surface seen through the air by its transmittance per
+ * channel (`AtmosphereSettings`' `channels`) in place of the channels' mean (`grey`, the way back),
+ * and changes nothing else. The measured Earth on its body over one set of tables and the device's
+ * shared kernels, on both settings, in {@link SURFACE_TRANSMITTANCE_FRAMES}, each drawn both ways:
+ *
+ * - a frame of the sky alone draws every pixel the same both ways, to the bit;
+ * - a surface's pixel moves by its colour times (T_c − T̄), its transmittance per channel less their
+ *   mean: through the ray march exactly, the second target's texel the composite reads (its choice
+ *   among a half-resolution pixel's candidates and the march's area taken as `composite.wgsl` takes
+ *   them), and through the volume within the second volume's froxels about its read; each to the
+ *   half floats' rounding of the two outputs.
+ *
+ * The changes are listed: how many pixels moved, and each channel's least and greatest move as a
+ * share of the grey frame's light.
+ */
+export async function checkSurfaceTransmittance(
+  engine: RenderEngine,
+  checks: Checks,
+): Promise<void> {
+  const kernels = await createAtmosphereFrameKernels(engine, { reads: "by slot" });
+  const sliced = earthBody();
+  const tables = new AtmosphereTables(
+    engine,
+    EARTH_REFERENCE,
+    tableRadiusM(sliced.figure),
+    EARTH_REFERENCE_CURVES,
+    sliced,
+  );
+  try {
+    for (const setting of ["high", "low"] as const) {
+      const sizes = TABLE_SIZES[setting];
+      for (const frame of SURFACE_TRANSMITTANCE_FRAMES) {
+        const camera = equatorCamera(frame.heightM, FRAME_SIZE, sliced.figure);
+        // The harness's GPU work runs in order: each frame is read back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const channels = await surfaceReadsOf(
+          engine,
+          tables,
+          kernels,
+          sizes,
+          camera,
+          frame,
+          "channels",
+        );
+        // The grey frame after it, the same scene, read back before the next frame draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const grey = await surfaceReadsOf(engine, tables, kernels, sizes, camera, frame, "grey");
+        const label = `R08.T9.c the measured Earth, ${setting}, ${frame.name}`;
+        if (frame.surfaceM === null) {
+          const differing = countDiffering(channels.output, grey.output);
+          checks.check(
+            `${label}: the sky draws every pixel the same per channel as by the mean, to the bit`,
+            differing === 0,
+            `${differing} of ${channels.output.length / 4} pixels differ`,
+          );
+          continue;
+        }
+        const moved = surfaceMoves(channels, grey, sizes, camera, frame.surfaceM);
+        checks.check(
+          `${label}: each surface pixel moves by its colour times its transmittance per channel less their mean`,
+          moved.outside === 0 && moved.meanKept,
+          `${moved.outside} of ${moved.pixels} pixels outside, the worst ${moved.worst}; ${moved.changed} moved: ${moved.listed}; the march's second target's alpha ${moved.meanKept ? "is" : "is not"} its channels' mean`,
+        );
+      }
+    }
+  } finally {
+    tables.dispose();
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/** How many of two `rgba` read-backs' channels differ. */
+function countDiffering(a: Float32Array, b: Float32Array): number {
+  let differing = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2] || a[i + 3] !== b[i + 3]) {
+      differing += 1;
+    }
+  }
+  return differing;
+}
+
+/**
+ * One frame of {@link checkSurfaceTransmittance}: `tables` over the frame's surface, drawn
+ * {@link SURFACE_GREY}, its composite under `surface` read back with the scene and the second
+ * textures it read.
+ */
+async function surfaceReadsOf(
+  engine: RenderEngine,
+  tables: AtmosphereTables,
+  kernels: AtmosphereFrameKernels,
+  sizes: TableSizes,
+  camera: AtmosphereCamera,
+  frame: SurfaceTransmittanceFrame,
+  surface: SurfaceTransmittance,
+): Promise<SurfaceReads> {
+  const atmosphere = HillaireAtmosphere.over(engine, tables, sizes, kernels, {
+    ...PER_PIXEL_LEVERS,
+    surfaceTransmittance: surface,
+  });
+  const surfaceM = frame.surfaceM;
+  const drawn: SceneSurface | null =
+    surfaceM === null
+      ? null
+      : () =>
+          drawOf(
+            fullScreenMesh(engine, "surface transmittance surface", -surfaceM),
+            engine.createMaterial(flatSpec("surface transmittance surface")),
+            [SURFACE_GREY, SURFACE_GREY, SURFACE_GREY, 1],
+          );
+  try {
+    return await drawComposite(
+      engine,
+      atmosphere,
+      camera,
+      [sunAt(30)],
+      { label: "surface transmittance", surface: drawn, preExposure: SMOKE_EXPOSURE_SCALE },
+      async (output, sceneTarget) => {
+        const { aerialTransmittance, rayMarchTransmittance, marchArea } = atmosphere.frameTables;
+        if (rayMarchTransmittance === null || marchArea === null) {
+          throw new Error("the ray march drew no target");
+        }
+        const read = async (texture: TextureHandle): Promise<Float32Array> =>
+          halfTexels(await engine.readTexture(texture, 0, undefined, "tolerance"));
+        return {
+          output: halfTexels(await engine.readTexture(output.colour)),
+          scene: halfTexels(await engine.readTexture(sceneTarget.colour)),
+          aerialTransmittance: await read(aerialTransmittance),
+          rayMarchTransmittance: await read(rayMarchTransmittance),
+          area: marchAreaTexels(marchArea),
+        };
+      },
+    );
+  } finally {
+    atmosphere.dispose();
+  }
+}
+
+/** A surface frame's moves between its two composites ({@link checkSurfaceTransmittance}). */
+interface SurfaceMoves {
+  readonly pixels: number;
+  /** The pixels whose move lies outside what their transmittance per channel gives. */
+  readonly outside: number;
+  readonly worst: string;
+  /** The pixels that moved at all. */
+  readonly changed: number;
+  /** Each channel's least and greatest move, as a share of the grey frame's light there. */
+  readonly listed: string;
+  /** Whether the march's second target's alpha is its channels' mean, to their half floats. */
+  readonly meanKept: boolean;
+}
+
+/**
+ * The moves of a surface frame's pixels from `grey` to `channels`, each against colour × (T_c − T̄)
+ * of the texel or froxels it read (`composite.wgsl`): beyond the volume's reach the march's second
+ * target at the texel `rayMarchTexelOf` chooses, inside the march's area (`marchedHere`), and
+ * (1, 1, 1, 1) outside it; within the reach the second volume's froxels about the read, the range
+ * of colour × (T_c − T̄) over the texels about it on each axis ({@link aerialMoveRanges}).
+ */
+function surfaceMoves(
+  channels: SurfaceReads,
+  grey: SurfaceReads,
+  sizes: TableSizes,
+  camera: AtmosphereCamera,
+  surfaceM: number,
+): SurfaceMoves {
+  const { widthPx: w, heightPx: h } = camera.viewport;
+  const marchScale = sizes.rayMarchScale;
+  const tw = Math.ceil(w * marchScale);
+  const th = Math.ceil(h * marchScale);
+  const volume = sizes.aerialPerspective;
+  const reachM = sizes.aerialPerspectiveReachM;
+  const tanX = Math.tan(camera.fovXRad / 2);
+  const tanY = (tanX * h) / w;
+  const least = [Infinity, Infinity, Infinity];
+  const most = [-Infinity, -Infinity, -Infinity];
+  let outside = 0;
+  let changed = 0;
+  let worst = "none";
+  let worstExcess = 0;
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const i = (y * w + x) * 4;
+      const u = (x + 0.5) / w;
+      const v = (y + 0.5) / h;
+      const nx = 2 * u - 1;
+      const ny = 1 - 2 * v;
+      const distanceM = surfaceM * Math.sqrt(1 + (nx * tanX) ** 2 + (ny * tanY) ** 2);
+      let ranges: ReadonlyArray<readonly [number, number]>;
+      if (distanceM <= reachM) {
+        ranges = aerialMoveRanges(channels.aerialTransmittance, volume, u, v, distanceM / reachM);
+      } else {
+        const t = marchTexelOf(x, y, marchScale, tw, th, channels.area);
+        ranges = [0, 1, 2].map((c) => {
+          if (t === null) {
+            return [0, 0] as const;
+          }
+          const at = (t[1] * tw + t[0]) * 4;
+          const move =
+            (channels.rayMarchTransmittance[at + c] ?? Number.NaN) -
+            (channels.rayMarchTransmittance[at + 3] ?? Number.NaN);
+          return [move, move] as const;
+        });
+      }
+      let moved = false;
+      let off = false;
+      for (const c of [0, 1, 2] as const) {
+        const after = channels.output[i + c] ?? Number.NaN;
+        const before = grey.output[i + c] ?? Number.NaN;
+        const colour = channels.scene[i + c] ?? Number.NaN;
+        const [lo, hi] = ranges[c] ?? [Number.NaN, Number.NaN];
+        // Each output rounded to a half float: half an ulp of each.
+        const tolerance = 2 ** -11 * (Math.abs(after) + Math.abs(before)) + 2 ** -24;
+        const delta = after - before;
+        const excess = Math.max(colour * lo - delta, delta - colour * hi) - tolerance;
+        if (!(excess <= 0)) {
+          off = true;
+          if (!(excess <= worstExcess)) {
+            worstExcess = excess;
+            worst = `(${x}, ${y}) channel ${c}: moved ${delta.toExponential(3)} against ${(colour * lo).toExponential(3)} to ${(colour * hi).toExponential(3)}`;
+          }
+        }
+        if (delta !== 0) {
+          moved = true;
+          const share = before > 0 ? delta / before : 0;
+          least[c] = Math.min(least[c] ?? Infinity, share);
+          most[c] = Math.max(most[c] ?? -Infinity, share);
+        }
+      }
+      changed += moved ? 1 : 0;
+      outside += off ? 1 : 0;
+    }
+  }
+  let meanKept = true;
+  for (let i = 0; i < channels.rayMarchTransmittance.length; i += 4) {
+    const mean = channels.rayMarchTransmittance[i + 3] ?? Number.NaN;
+    const [r = 0, g = 0, b = 0] = channels.rayMarchTransmittance.subarray(i, i + 3);
+    // The mean of the stored channels, each a half float's rounding of its own, within 2⁻¹⁰.
+    meanKept &&= Math.abs((r + g + b) / 3 - mean) <= 2 ** -10 * Math.max(mean, 2 ** -14);
+  }
+  const listed = (["red", "green", "blue"] as const)
+    .map(
+      (name, c) =>
+        `${name} ${((least[c] ?? 0) * 100).toFixed(1)}% to ${((most[c] ?? 0) * 100).toFixed(1)}%`,
+    )
+    .join(", ");
+  return {
+    pixels: w * h,
+    outside,
+    worst,
+    changed,
+    listed: changed > 0 ? listed : "none",
+    meanKept,
+  };
+}
+
+/**
+ * Each colour channel's range of T_c − T̄ over the second volume's froxels about a read at the
+ * screen's (`u`, `v`) at `share` of the reach (`aerialRead.wgsl`'s `aerialVolumeRead`): the two
+ * texels about it on each axis, which hold the filtered read whatever the filter's weights, and a
+ * third where the read stands within 10⁻³ of a texel's centre, where the composite's distance, from
+ * the scene's depth, may fall on the centre's other side.
+ */
+function aerialMoveRanges(
+  texels: Float32Array,
+  size: TableSizes["aerialPerspective"],
+  u: number,
+  v: number,
+  share: number,
+): ReadonlyArray<readonly [number, number]> {
+  const { widthTexels: w, heightTexels: h, slices } = size;
+  const z = Math.min(Math.max(share - 0.5 / slices, 0), 1) * slices - 0.5;
+  const [x0, x1] = texelSpanOf(u * (w - 1), w);
+  const [y0, y1] = texelSpanOf(v * (h - 1), h);
+  const [z0, z1] = texelSpanOf(z, slices);
+  return [0, 1, 2].map((c) => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let zi = z0; zi <= z1; zi += 1) {
+      for (let yi = y0; yi <= y1; yi += 1) {
+        for (let xi = x0; xi <= x1; xi += 1) {
+          const at = ((zi * h + yi) * w + xi) * 4;
+          const move = (texels[at + c] ?? Number.NaN) - (texels[at + 3] ?? Number.NaN);
+          lo = Math.min(lo, move);
+          hi = Math.max(hi, move);
+        }
+      }
+    }
+    return [lo, hi] as const;
+  });
+}
+
+/**
+ * The texels about a filtered read at texel coordinate `at` on an axis of `count`, held to it: the
+ * two either side, and a third where `at` stands within 10⁻³ of a texel's centre.
+ */
+function texelSpanOf(at: number, count: number): readonly [number, number] {
+  return [clampTo(Math.floor(at - 1e-3), count), clampTo(Math.ceil(at + 1e-3), count)];
+}
+
+/** `value` held to a texel of an axis of `count`, 0 to `count` − 1. */
+function clampTo(value: number, count: number): number {
+  return Math.min(Math.max(value, 0), count - 1);
+}
+
+/**
+ * The ray march's texel the composite reads for pixel (`x`, `y`) of a scene of one depth
+ * (`composite.wgsl`'s `rayMarchTexelOf`, each candidate's depth tying): at full resolution the
+ * pixel's own; at `scale` below 1, of the four about it, the nearest centre, the first of two
+ * alike; `null` where `marchedHere` puts the pixel outside the march's `area`, which reads no air.
+ */
+function marchTexelOf(
+  x: number,
+  y: number,
+  marchScale: number,
+  tw: number,
+  th: number,
+  area: MarchAreaTexels,
+): readonly [number, number] | null {
+  const inArea = (lowX: number, lowY: number, highX: number, highY: number): boolean =>
+    lowX >= area.x0 && lowY >= area.y0 && highX < area.x1 && highY < area.y1;
+  if (marchScale >= 1) {
+    return inArea(x, y, x, y) ? [x, y] : null;
+  }
+  // WGSL's vec2i of an f32 truncates towards 0.
+  const bx = Math.trunc(x * marchScale - 0.5);
+  const by = Math.trunc(y * marchScale - 0.5);
+  if (!inArea(clampTo(bx, tw), clampTo(by, th), clampTo(bx + 1, tw), clampTo(by + 1, th))) {
+    return null;
+  }
+  let best: readonly [number, number] = [clampTo(bx, tw), clampTo(by, th)];
+  let bestDistance = Infinity;
+  for (let j = 0; j < 2; j += 1) {
+    for (let i = 0; i < 2; i += 1) {
+      const t = [clampTo(bx + i, tw), clampTo(by + j, th)] as const;
+      const distance =
+        ((t[0] + 0.5) / marchScale - (x + 0.5)) ** 2 + ((t[1] + 0.5) / marchScale - (y + 0.5)) ** 2;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = t;
+      }
+    }
+  }
+  return best;
 }

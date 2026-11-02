@@ -419,20 +419,37 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
 export type CompositeTransmittance = "march" | "per-pixel";
 
 /**
- * The atmosphere's frame-cost levers on a setting, `SETTINGS[s].atmosphereLevers` (the owner's
- * priority, 2026-11-01), each with the way back beside it, as R14's `GeometrySettings` keeps its
- * own.
+ * What the composite dims a drawn surface seen through the air by (plan R08, R08.T9.c): `channels`,
+ * its transmittance per channel, which the aerial-perspective volume and the ray march store in a
+ * second texture beside their light (`aerialRead.wgsl`'s `aerialTransmittanceAt`, `rayMarch.wgsl`'s
+ * `storeMarched`); or `grey`, the channels' mean, R05's choice (Hillaire 2020, §5.4, "the mean of the
+ * wavelength dependent RGB transmittance"), the way back. Through 5 km from 2 m on the measured
+ * Earth the mean left the ground 13% too dim in red and 23% too bright in blue, and through the limb
+ * from orbit grey where the air reddens it. Both store the second textures, so `grey` draws the
+ * pixels it drew before, to the bit.
+ */
+export type SurfaceTransmittance = "channels" | "grey";
+
+/**
+ * The atmosphere's levers on a setting, `SETTINGS[s].atmosphereLevers` (the owner's priority,
+ * 2026-11-01), each with the way back beside it, as R14's `GeometrySettings` keeps its own.
  */
 export interface AtmosphereSettings {
   /** {@link CompositeTransmittance}: `march` on both settings; `per-pixel` is the way back. */
   readonly compositeTransmittance: CompositeTransmittance;
+  /** {@link SurfaceTransmittance} (R08.T9.c): `channels` on both settings; `grey` is the way back. */
+  readonly surfaceTransmittance: SurfaceTransmittance;
 }
 
 /**
- * The composite as it was before the levers: what an atmosphere drawn outside a view takes (the
- * smoke's checks, the descent spike), unless given its view's.
+ * The composite with its transmittance behind the sky per pixel, as before the cost levers, and its
+ * surfaces dimmed per channel (R08.T9.c): what an atmosphere drawn outside a view takes (the smoke's
+ * checks, the descent spike), unless given its view's.
  */
-export const PER_PIXEL_LEVERS: AtmosphereSettings = { compositeTransmittance: "per-pixel" };
+export const PER_PIXEL_LEVERS: AtmosphereSettings = {
+  compositeTransmittance: "per-pixel",
+  surfaceTransmittance: "channels",
+};
 
 /**
  * The datum spheroid the atmosphere stands on: R05's `BodyFigure` (planet.ts, T7.a) has these
@@ -1500,6 +1517,9 @@ export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
     { name: "oblateBody", binding: 11, sampleType: "unfilterable-float" },
     // What lies behind the sky from above at the march's resolution (the owner's priority).
     { name: "behindMarch", binding: 12 },
+    // The transmittance per channel beside the volume and the march (R08.T9.c).
+    { name: "aerialTransmittance", binding: 13, viewDimension: "3d" },
+    { name: "rayMarchTransmittance", binding: 14 },
   ],
   cullMode: "none",
   depthWrite: false,
@@ -1510,21 +1530,23 @@ export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
 /**
  * A views check's probe of the composite's cost (the owner's priority, 2026-11-01): `sky-off`, every
  * sky pixel keeping the scene's light; `transmittance-off`, the sky drawn with no transmittance
- * across from above (`composite.wgsl`'s `transmittanceAcrossFromAbove`, 1 in its place); or
+ * across from above (`composite.wgsl`'s `transmittanceAcrossFromAbove`, 1 in its place);
  * `per-pixel`, that transmittance formed per pixel whatever the setting's
  * {@link AtmosphereSettings.compositeTransmittance}, the way back's composite, the frame forming its
  * target at the march's resolution all the same, so that one build's profiles tell the composite's
- * saving apart from that pass's cost. It is check-only: an inspection profile's `--composite-probe`,
- * never drawn on a player's launch.
+ * saving apart from that pass's cost; or `surface-grey`, every drawn surface dimmed by the channels'
+ * mean whatever {@link AtmosphereSettings.surfaceTransmittance} (R08.T9.c), the grey way back's
+ * composite, the frame storing the transmittance per channel all the same. It is check-only: an
+ * inspection profile's `--composite-probe`, never drawn on a player's launch.
  */
-export type CompositeProbe = "sky-off" | "transmittance-off" | "per-pixel";
+export type CompositeProbe = "sky-off" | "transmittance-off" | "per-pixel" | "surface-grey";
 
 /** The line of `composite.wgsl` a probe's material replaces. */
 const COMPOSITE_PROBE_LINE = "const COMPOSITE_PROBE : u32 = 0u;";
 
 /**
  * {@link COMPOSITE_MATERIAL} under `probe`: the same draw with `composite.wgsl`'s `COMPOSITE_PROBE`
- * set, 1 for `sky-off`, 2 for `transmittance-off` and 3 for `per-pixel`.
+ * set, 1 for `sky-off`, 2 for `transmittance-off`, 3 for `per-pixel` and 4 for `surface-grey`.
  *
  * @throws Error if the composite's WGSL no longer declares the probe's constant.
  */
@@ -1539,6 +1561,9 @@ export function compositeProbedMaterial(probe: CompositeProbe): WgslMaterialSpec
       break;
     case "per-pixel":
       value = 3;
+      break;
+    case "surface-grey":
+      value = 4;
       break;
   }
   if (!COMPOSITE_WGSL.includes(COMPOSITE_PROBE_LINE)) {
@@ -2101,11 +2126,17 @@ export function tablesFigureOf(tables: AtmosphereTables): SpheroidFigure {
   return tables.body?.figure ?? { equatorialRadiusM: radiusM, polarRadiusM: radiusM };
 }
 
-/** The per-frame tables a frame writes: the sky view, the aerial-perspective volume, the march. */
+/**
+ * The per-frame tables a frame writes: the sky view, the aerial-perspective volume, the march, and
+ * beside the volume and the march their transmittance per channel (R08.T9.c), rgb with the mean in
+ * a.
+ */
 export interface FrameOutputs {
   readonly skyView: TextureHandle;
   readonly aerial: TextureHandle;
   readonly rayMarch: TextureHandle;
+  readonly aerialTransmittance: TextureHandle;
+  readonly rayMarchTransmittance: TextureHandle;
 }
 
 /**
@@ -2140,6 +2171,14 @@ export interface AerialPerspective {
    * (i, j) ÷ (size − 1), slice k reaching (k + 1) reach ÷ slices.
    */
   readonly volume: TextureHandle;
+  /**
+   * The volume's transmittance per channel (plan R08, R08.T9.c), `rgba16float`, 3D, beside
+   * {@link AerialPerspective.volume} froxel for froxel: each channel's transmittance from the camera
+   * to the slice's far face (rgb), and their mean (a). Read through `aerialRead.wgsl`'s
+   * `aerialTransmittanceAt(volume, sampler, uv, distanceM, reachM)`, so that a pass dims its colour
+   * per channel as the composite does under `AtmosphereSettings`' `channels`.
+   */
+  readonly transmittanceVolume: TextureHandle;
   readonly size: VolumeSize;
   /** The volume's reach, m. */
   readonly reachM: number;
@@ -2358,10 +2397,14 @@ export function skyAzimuthOrigin(zenith: Vec3, sun: Vec3): Vec3 {
 interface FrameResources {
   readonly skyView: TextureHandle;
   readonly aerial: TextureHandle;
+  /** The volume's transmittance per channel (R08.T9.c). */
+  readonly aerialTransmittance: TextureHandle;
   readonly kernels: FrameKernels;
   readonly composite: MaterialHandle;
   readonly triangle: MeshHandle;
   rayMarch: TextureHandle | null;
+  /** The march's transmittance per channel (R08.T9.c), made and grown with its target. */
+  rayMarchTransmittance: TextureHandle | null;
   rayMarchSize: ViewSize | null;
   /**
    * What lies behind the sky from above at the march's resolution (the owner's priority,
@@ -2382,7 +2425,9 @@ interface KernelArmResources {
   readonly kernels: FrameKernels;
   readonly skyView: TextureHandle;
   readonly aerial: TextureHandle;
+  readonly aerialTransmittance: TextureHandle;
   rayMarch: TextureHandle | null;
+  rayMarchTransmittance: TextureHandle | null;
   rayMarchSize: ViewSize | null;
 }
 
@@ -2446,10 +2491,21 @@ function createFrameResources(
       ],
       "rgba16float",
     ),
+    aerialTransmittance: frameTexture(
+      engine,
+      "atmosphere aerial transmittance",
+      [
+        sizes.aerialPerspective.widthTexels,
+        sizes.aerialPerspective.heightTexels,
+        sizes.aerialPerspective.slices,
+      ],
+      "rgba16float",
+    ),
     kernels: shared ?? marchKernelsOf(engine, (pair) => pair),
     composite: shared?.composite ?? engine.createMaterial(COMPOSITE_MATERIAL),
     triangle: shared?.triangle ?? compositeTriangle(engine),
     rayMarch: null,
+    rayMarchTransmittance: null,
     rayMarchSize: null,
     behindMarch: null,
     behindMarchSize: null,
@@ -2527,7 +2583,18 @@ function createKernelArmResources(engine: RenderEngine, sizes: TableSizes): Kern
       ],
       KERNEL_ARM_FORMAT,
     ),
+    aerialTransmittance: frameTexture(
+      engine,
+      "atmosphere aerial transmittance (kernel arm)",
+      [
+        sizes.aerialPerspective.widthTexels,
+        sizes.aerialPerspective.heightTexels,
+        sizes.aerialPerspective.slices,
+      ],
+      KERNEL_ARM_FORMAT,
+    ),
     rayMarch: null,
+    rayMarchTransmittance: null,
     rayMarchSize: null,
   };
 }
@@ -2805,6 +2872,13 @@ export class HillaireAtmosphere {
     readonly skyView: TextureHandle;
     readonly aerial: TextureHandle;
     readonly rayMarch: TextureHandle | null;
+    /** The volume's transmittance per channel (R08.T9.c), rgb with the mean in a. */
+    readonly aerialTransmittance: TextureHandle;
+    /**
+     * The march's transmittance per channel (R08.T9.c), rgb with the mean in a, (1, 1, 1, 1) where
+     * the first target reads (0, 0, 0, 1); `null` before the first frame.
+     */
+    readonly rayMarchTransmittance: TextureHandle | null;
     /**
      * The tile cull's kinds the latest frame wrote, one `u32` a tile of its area, row by row
      * (`marchArea.wgsl`'s `MARCH_TILE_*`; R08.T11.d), `null` before the first frame that marched.
@@ -2820,6 +2894,8 @@ export class HillaireAtmosphere {
       skyView: this.#frame.skyView,
       aerial: this.#frame.aerial,
       rayMarch: this.#frame.rayMarch,
+      aerialTransmittance: this.#frame.aerialTransmittance,
+      rayMarchTransmittance: this.#frame.rayMarchTransmittance,
       marchTiles: this.#frame.marchTiles,
       marchArea: this.#area,
     };
@@ -2995,10 +3071,16 @@ export class HillaireAtmosphere {
       throw new AtmosphereRetired();
     }
     const frame = this.#frame;
-    const rayMarch = this.#rayMarchTexture(view.viewport);
+    const { rayMarch, rayMarchTransmittance } = this.#rayMarchTextures(view.viewport);
     const { inputs, curvature } = this.#dispatchFrame(
       frame.kernels,
-      { skyView: frame.skyView, aerial: frame.aerial, rayMarch },
+      {
+        skyView: frame.skyView,
+        aerial: frame.aerial,
+        rayMarch,
+        aerialTransmittance: frame.aerialTransmittance,
+        rayMarchTransmittance,
+      },
       view,
       suns,
       scene,
@@ -3024,6 +3106,8 @@ export class HillaireAtmosphere {
         oblateBody: this.#tables.oblateBody,
         // The march's own target where the frame formed none, which the composite then never reads.
         behindMarch: this.#behindFormed ? (frame.behindMarch ?? rayMarch) : rayMarch,
+        aerialTransmittance: frame.aerialTransmittance,
+        rayMarchTransmittance,
       },
     };
   }
@@ -3036,7 +3120,8 @@ export class HillaireAtmosphere {
    * reads only {@link HillaireAtmosphere.drawFrame}'s tables. The kernels and targets are made at
    * the first call, and the ray march's anew when the viewport changes.
    *
-   * @returns The arm's three `rgba32float` targets, for a tolerance read-back.
+   * @returns The arm's `rgba32float` targets, the three tables and the volume's and the march's
+   *   transmittance per channel (R08.T9.c), for a tolerance read-back.
    * @throws RangeError as {@link HillaireAtmosphere.drawFrame}.
    */
   drawKernelArm(
@@ -3050,26 +3135,42 @@ export class HillaireAtmosphere {
     const size = arm.rayMarchSize;
     if (
       arm.rayMarch === null ||
+      arm.rayMarchTransmittance === null ||
       size === null ||
       size.widthPx !== view.viewport.widthPx ||
       size.heightPx !== view.viewport.heightPx
     ) {
-      if (arm.rayMarch !== null) {
-        engine.releaseTexture(arm.rayMarch);
+      for (const texture of [arm.rayMarch, arm.rayMarchTransmittance]) {
+        if (texture !== null) {
+          engine.releaseTexture(texture);
+        }
       }
       const scale = this.#sizes.rayMarchScale;
+      const marchSize: [number, number] = [
+        Math.max(1, Math.ceil(view.viewport.widthPx * scale)),
+        Math.max(1, Math.ceil(view.viewport.heightPx * scale)),
+      ];
       arm.rayMarch = frameTexture(
         engine,
         "atmosphere ray march (kernel arm)",
-        [
-          Math.max(1, Math.ceil(view.viewport.widthPx * scale)),
-          Math.max(1, Math.ceil(view.viewport.heightPx * scale)),
-        ],
+        marchSize,
+        KERNEL_ARM_FORMAT,
+      );
+      arm.rayMarchTransmittance = frameTexture(
+        engine,
+        "atmosphere ray march's transmittance (kernel arm)",
+        marchSize,
         KERNEL_ARM_FORMAT,
       );
       arm.rayMarchSize = view.viewport;
     }
-    const outputs = { skyView: arm.skyView, aerial: arm.aerial, rayMarch: arm.rayMarch };
+    const outputs: FrameOutputs = {
+      skyView: arm.skyView,
+      aerial: arm.aerial,
+      rayMarch: arm.rayMarch,
+      aerialTransmittance: arm.aerialTransmittance,
+      rayMarchTransmittance: arm.rayMarchTransmittance,
+    };
     this.#dispatchFrame(arm.kernels, outputs, view, suns, scene, false);
     return outputs;
   }
@@ -3094,12 +3195,20 @@ export class HillaireAtmosphere {
     // Its own frame's textures: a view makes one of these a body, and lets it go as the body leaves
     // its picture (R08.T10.b). Its kernels and composite stay, the shared ones their owner's.
     const frame = this.#frame;
-    for (const texture of [frame.skyView, frame.aerial, frame.rayMarch, frame.behindMarch]) {
+    for (const texture of [
+      frame.skyView,
+      frame.aerial,
+      frame.aerialTransmittance,
+      frame.rayMarch,
+      frame.rayMarchTransmittance,
+      frame.behindMarch,
+    ]) {
       if (texture !== null) {
         this.#engine.releaseTexture(texture);
       }
     }
     frame.rayMarch = null;
+    frame.rayMarchTransmittance = null;
     frame.rayMarchSize = null;
     frame.behindMarch = null;
     frame.behindMarchSize = null;
@@ -3110,7 +3219,13 @@ export class HillaireAtmosphere {
     frame.marchTilesBytes = 0;
     const arm = this.#arm;
     if (arm !== null) {
-      for (const texture of [arm.skyView, arm.aerial, arm.rayMarch]) {
+      for (const texture of [
+        arm.skyView,
+        arm.aerial,
+        arm.aerialTransmittance,
+        arm.rayMarch,
+        arm.rayMarchTransmittance,
+      ]) {
         if (texture !== null) {
           this.#engine.releaseTexture(texture);
         }
@@ -3143,6 +3258,7 @@ export class HillaireAtmosphere {
       view,
       aerial: {
         volume: frame.aerial,
+        transmittanceVolume: frame.aerialTransmittance,
         size: sizes.aerialPerspective,
         reachM: sizes.aerialPerspectiveReachM,
         scaleCdPerM2,
@@ -3261,6 +3377,16 @@ export class HillaireAtmosphere {
         ATMOSPHERE_VIEW_PASS,
       );
     };
+    // The volume and its transmittance per channel (R08.T9.c), written together.
+    const aerialStorage = {
+      aerialOut: { texture: outputs.aerial, level: 0 },
+      aerialTransmittanceOut: { texture: outputs.aerialTransmittance, level: 0 },
+    };
+    // The march's target and its transmittance per channel (R08.T9.c), written together.
+    const marchStorage = {
+      rayMarchOut: { texture: outputs.rayMarch, level: 0 },
+      rayMarchTransmittanceOut: { texture: outputs.rayMarchTransmittance, level: 0 },
+    };
     const aerial = (): void => {
       if (beneath !== null && belowSampled !== null) {
         engine.dispatch(
@@ -3269,7 +3395,7 @@ export class HillaireAtmosphere {
             buffers: {},
             sampled: belowSampled,
             uniforms: { view: viewUniforms },
-            storage: { aerialOut: { texture: outputs.aerial, level: 0 } },
+            storage: aerialStorage,
           },
           groups8(sizes.aerialPerspective.widthTexels, sizes.aerialPerspective.heightTexels),
           ATMOSPHERE_VIEW_PASS,
@@ -3281,7 +3407,7 @@ export class HillaireAtmosphere {
         {
           ...common,
           uniforms: { medium: perFrameMedium, view: viewUniforms },
-          storage: { aerialOut: { texture: outputs.aerial, level: 0 } },
+          storage: aerialStorage,
         },
         groups8(sizes.aerialPerspective.widthTexels, sizes.aerialPerspective.heightTexels),
         ATMOSPHERE_VIEW_PASS,
@@ -3342,7 +3468,7 @@ export class HillaireAtmosphere {
           buffers: {},
           sampled: { ...belowSampled, sceneDepth: scene.depth },
           uniforms: { view: viewUniforms, marchArea: areaUniform },
-          storage: { rayMarchOut: { texture: outputs.rayMarch, level: 0 } },
+          storage: marchStorage,
         },
         [area.tilesAcross, area.tilesDown, 1],
         ATMOSPHERE_VIEW_PASS,
@@ -3362,7 +3488,7 @@ export class HillaireAtmosphere {
           layerEdges: tables.layerEdges,
           marchArea: areaUniform,
         },
-        storage: { rayMarchOut: { texture: outputs.rayMarch, level: 0 } },
+        storage: marchStorage,
       };
       const tiles = [area.tilesAcross, area.tilesDown, 1] as const;
       const marched = thermal === null ? march() : null;
@@ -3435,7 +3561,12 @@ export class HillaireAtmosphere {
     }
     if (deferUnread) {
       this.#behindFormed = formsBehind;
-      this.#uniforms["levers"]?.set([formsBehind ? 1 : 0, 0, 0, 0]);
+      this.#uniforms["levers"]?.set([
+        formsBehind ? 1 : 0,
+        this.#levers.surfaceTransmittance === "channels" ? 1 : 0,
+        0,
+        0,
+      ]);
     }
     // The rest of the target, (0, 0, 0, 1), for a reader of the whole (R08.T11.d): the frame's
     // waits for one, and the kernel arm's read-backs take it at once.
@@ -3448,7 +3579,7 @@ export class HillaireAtmosphere {
               buffers: {},
               sampled: {},
               uniforms: { marchArea: areaUniform },
-              storage: { rayMarchOut: { texture: outputs.rayMarch, level: 0 } },
+              storage: marchStorage,
             },
             groups8(area.widthTexels, area.heightTexels),
             ATMOSPHERE_VIEW_PASS,
@@ -3501,7 +3632,7 @@ export class HillaireAtmosphere {
   /**
    * The tile cull's kinds' buffer for `area` (R08.T11.d), one `u32` a tile: made for the whole
    * target's tiles, its largest, and grown with the target, never made smaller, as the ray-march
-   * target is ({@link HillaireAtmosphere.drawFrame}'s `#rayMarchTexture`).
+   * target is ({@link HillaireAtmosphere.drawFrame}'s `#rayMarchTextures`).
    */
   #marchTiles(area: MarchArea): BufferHandle {
     const frame = this.#frame;
@@ -3530,35 +3661,48 @@ export class HillaireAtmosphere {
   }
 
   /**
-   * The ray-march target at the setting's scale of the largest output so far: it grows on a
-   * resize and is never remade smaller, so that a window resized back and forth makes nothing new;
-   * the kernel and the composite address it by the current output's size.
+   * The ray-march target and its transmittance per channel (R08.T9.c) at the setting's scale of the
+   * largest output so far: they grow on a resize, releasing the smaller, and are never remade
+   * smaller, so that a window resized back and forth makes nothing new; the kernel and the composite
+   * address them by the current output's size.
    */
-  #rayMarchTexture(viewport: ViewSize): TextureHandle {
+  #rayMarchTextures(viewport: ViewSize): {
+    readonly rayMarch: TextureHandle;
+    readonly rayMarchTransmittance: TextureHandle;
+  } {
     const frame = this.#frame;
     const fits =
       frame.rayMarchSize !== null &&
       frame.rayMarchSize.widthPx >= viewport.widthPx &&
       frame.rayMarchSize.heightPx >= viewport.heightPx;
-    if (frame.rayMarch !== null && fits) {
-      return frame.rayMarch;
+    if (frame.rayMarch !== null && frame.rayMarchTransmittance !== null && fits) {
+      return { rayMarch: frame.rayMarch, rayMarchTransmittance: frame.rayMarchTransmittance };
+    }
+    for (const texture of [frame.rayMarch, frame.rayMarchTransmittance]) {
+      if (texture !== null) {
+        this.#engine.releaseTexture(texture);
+      }
     }
     const grown: ViewSize = {
       widthPx: Math.max(viewport.widthPx, frame.rayMarchSize?.widthPx ?? 0),
       heightPx: Math.max(viewport.heightPx, frame.rayMarchSize?.heightPx ?? 0),
     };
     const scale = this.#sizes.rayMarchScale;
-    frame.rayMarch = frameTexture(
+    const size: [number, number] = [
+      Math.max(1, Math.ceil(grown.widthPx * scale)),
+      Math.max(1, Math.ceil(grown.heightPx * scale)),
+    ];
+    const rayMarch = frameTexture(this.#engine, "atmosphere ray march", size, "rgba16float");
+    const rayMarchTransmittance = frameTexture(
       this.#engine,
-      "atmosphere ray march",
-      [
-        Math.max(1, Math.ceil(grown.widthPx * scale)),
-        Math.max(1, Math.ceil(grown.heightPx * scale)),
-      ],
+      "atmosphere ray march's transmittance",
+      size,
       "rgba16float",
     );
+    frame.rayMarch = rayMarch;
+    frame.rayMarchTransmittance = rayMarchTransmittance;
     frame.rayMarchSize = grown;
-    return frame.rayMarch;
+    return { rayMarch, rayMarchTransmittance };
   }
 
   /**

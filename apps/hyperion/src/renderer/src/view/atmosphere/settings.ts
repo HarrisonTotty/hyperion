@@ -34,7 +34,12 @@ export { MAX_SKY_LIGHT_SLOTS, MAX_SKY_SOURCES } from "./hillaire";
  * The atmosphere's levers' types and the composite as drawn before them, `hillaire.ts`'s (where the
  * frame takes them), exported here beside their values per setting.
  */
-export { type AtmosphereSettings, type CompositeTransmittance, PER_PIXEL_LEVERS } from "./hillaire";
+export {
+  type AtmosphereSettings,
+  type CompositeTransmittance,
+  PER_PIXEL_LEVERS,
+  type SurfaceTransmittance,
+} from "./hillaire";
 
 /** Where aerial perspective applies: R05's `TableSizes.aerialPerspectiveScope`. */
 export type AerialPerspectiveScope = TableSizes["aerialPerspectiveScope"];
@@ -151,10 +156,14 @@ export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>> = {
  * high once its frame-rate floor draws the air at low's sizes; at full resolution the composite's
  * pixels are the march's texels, and it forms the term per pixel as before. On SwiftShader at low
  * from orbit (pod, 16 vCPU) the term took 480 of the composite's 607 ms.
+ *
+ * `channels` (plan R08, R08.T9.c) dims a drawn surface seen through the air per channel on both
+ * settings, its cost the second textures' memory (the volume's 262 KB on high, 131 KB on low, and
+ * 8 bytes a march texel) and one more store a froxel and a march texel; `grey` is the way back.
  */
 export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSettings>> = {
-  high: { compositeTransmittance: "march" },
-  low: { compositeTransmittance: "march" },
+  high: { compositeTransmittance: "march", surfaceTransmittance: "channels" },
+  low: { compositeTransmittance: "march", surfaceTransmittance: "channels" },
 };
 
 /** The atmosphere's quality limits per setting: `SETTINGS[s].atmosphereView.qualityLimits`. */

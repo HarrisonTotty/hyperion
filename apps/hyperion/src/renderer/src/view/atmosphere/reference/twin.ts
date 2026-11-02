@@ -25,8 +25,10 @@
  * Lambertian ground of the medium's albedo, lit by `surfaceLighting.wgsl`'s lookups as
  * `terrainLit.wgsl` takes them for a star, A ÷ π (μ₀ T(0, μ₀) + E_sky(0, μ₀)) per unit of the sun's
  * irradiance (`atmosphere_sun_transmittance` and `atmosphere_sky_irradiance`, `tablesCpu.ts`'s
- * `surfaceLightingTwin`), behind the march's mean transmittance (from orbit, the march ending on
- * that surface) or the volume's at the ground's distance (aerial perspective). The tracer traces
+ * `surfaceLightingTwin`), behind the march's transmittance (from orbit, the march ending on that
+ * surface) or the volume's at the ground's distance (aerial perspective), per channel as the
+ * composite takes it since R08.T9.c, or their mean, R05's grey, under
+ * {@link TwinOptions.surfaceTransmittance}. The tracer traces
  * the same ray to the ground and reflects it there, so the comparison is of the whole pixel: the
  * ground's skylight and the ground–sky bounces Hillaire's one bounce leaves out are the analytic
  * path's errors, which τ* sees. {@link ReferenceTwin.groundConeShare} gives a geometry's share of
@@ -94,6 +96,7 @@ import {
   marchWeightOf,
   type SpheroidFigure,
   type SunState,
+  type SurfaceTransmittance,
   TABLE_SIZES,
   tableRadiusM,
   type TableSizes,
@@ -124,11 +127,11 @@ import {
   oblateCompositeTransmittanceTwin,
   oblateIrradianceTwin,
   oblatePlanetTwin,
-  oblateRayMarchTargetTexelTwin,
+  oblateRayMarchTargetTexelsTwin,
   oblateSkyViewReadTwin,
   oblateSkyViewTexelsTwin,
   type PlanetTwin,
-  rayMarchTargetTexelTwin,
+  rayMarchTargetTexelsTwin,
   skyViewReadTwin,
   skyViewTexelsTwin,
   surfaceLightingTwin,
@@ -138,8 +141,8 @@ import {
   type TwinBody,
   twinBandOf,
   type TwinBelowDeck,
+  type TwinAerialVolume,
   type TwinTable,
-  type TwinVolume,
   twinView,
   type TwinView,
 } from "../tablesCpu";
@@ -247,6 +250,12 @@ export interface TwinOptions {
    * (`decision-r08-t13c2-classes.md` §1).
    */
   readonly multiScatteringSize: TableSize;
+  /**
+   * What a drawn surface's light is dimmed by (plan R08, R08.T9.c; `hillaire.ts`'s
+   * `SurfaceTransmittance`): the march's or the volume's transmittance per channel by default, as
+   * the composite takes it on both settings, or `grey`, their mean, the way back.
+   */
+  readonly surfaceTransmittance: SurfaceTransmittance;
 }
 
 /** A cloud deck a twin reads as its medium's ground ({@link TwinOptions.deck}; R08.T15.a.2). */
@@ -274,7 +283,20 @@ export const DEFAULT_TWIN_OPTIONS: TwinOptions = {
   polarisation: null,
   deck: null,
   multiScatteringSize: MULTI_SCATTERING_SIZE,
+  surfaceTransmittance: "channels",
 };
+
+/**
+ * A 2 × 2 aerial-perspective volume's mean over its four froxels at `slice`, `channel` of each
+ * texel: the composite's read at the screen's centre ({@link AERIAL_FROXEL_SCALE}).
+ */
+function centralFroxelOf(texels: Float64Array, slice: number, channel: number): number {
+  let sum = 0;
+  for (let k = 0; k < 4; k += 1) {
+    sum += texels[(slice * 4 + k) * 4 + channel] ?? Number.NaN;
+  }
+  return sum / 4;
+}
 
 /**
  * The camera a twin looks through from orbit and for aerial perspective, device pixels: 1,921 ×
@@ -972,6 +994,17 @@ export function referenceTwin(
     };
   };
 
+  // What a drawn surface's light passes through (R08.T9.c): a second target's transmittance per
+  // channel, or the mean beside it (its fourth), as the composite's `levers.y` takes them. A grey
+  // path, its channels equal to the bit, takes the mean, an ulp from them, so that a grey medium's
+  // records stand as they were: the sweep cases, whose traced outputs name each case by its SHA-256.
+  const surfaceThrough = (t: readonly [number, number, number, number]): Rgb => {
+    const grey = t[0] === t[1] && t[1] === t[2];
+    return settings.surfaceTransmittance === "channels" && !grey
+      ? [t[0], t[1], t[2]]
+      : [t[3], t[3], t[3]];
+  };
+
   const orbitAlong = (geometry: ReferenceGeometry, direction: Vec3): TwinParts => {
     const originM = observerOf(geometry);
     const sun = sunState(geometry);
@@ -981,14 +1014,16 @@ export function referenceTwin(
     const depth = groundM === null ? 0 : NEAR_M / groundM;
     const x = (TWIN_VIEWPORT.widthPx - 1) / 2;
     const y = (TWIN_VIEWPORT.heightPx - 1) / 2;
-    const [r, g, b, t] = sphere
-      ? rayMarchTargetTexelTwin(planet, view, sizes, x, y, depth)
-      : oblateRayMarchTargetTexelTwin(oblate, view, sizes, x, y, depth);
+    const marchedTexel = sphere
+      ? rayMarchTargetTexelsTwin(planet, view, sizes, x, y, depth)
+      : oblateRayMarchTargetTexelsTwin(oblate, view, sizes, x, y, depth);
+    const [r, g, b] = marchedTexel.light;
     if (groundM === null) {
       return { total: [r, g, b], surface: DARK };
     }
+    const t = surfaceThrough(marchedTexel.transmittance);
     const lit = litGroundRadiance(pointAlong(originM, direction, groundM), sun.directionBodyFixed);
-    const surface: Rgb = [lit[0] * t, lit[1] * t, lit[2] * t];
+    const surface: Rgb = [lit[0] * t[0], lit[1] * t[1], lit[2] * t[2]];
     return { total: [r + surface[0], g + surface[1], b + surface[2]], surface };
   };
 
@@ -1006,7 +1041,7 @@ export function referenceTwin(
     const samplesPerSlice = sizes.aerialPerspectiveSamplesPerSlice;
     // Beneath a deck the volume is the table below's, and the ground the case's own (R08.T15.b.2).
     const below = belowTheSplit(geometry);
-    let volume: TwinVolume;
+    let volume: TwinAerialVolume;
     if (below) {
       volume = belowDeckAerialPerspectiveTwin(belowOf(geometry), view, size, reachM);
     } else if (sphere) {
@@ -1030,23 +1065,20 @@ export function referenceTwin(
     const z0 = Math.floor(pz);
     const z1 = Math.min(z0 + 1, slices - 1);
     const fz = pz - z0;
-    const froxel = (slice: number, channel: number): number => {
-      let sum = 0;
-      for (let k = 0; k < 4; k += 1) {
-        sum += volume.texels[(slice * 4 + k) * 4 + channel] ?? Number.NaN;
-      }
-      return sum / 4;
-    };
-    const at = (channel: number): number =>
-      froxel(z0, channel) * (1 - fz) + froxel(z1, channel) * fz;
+    const read = (texels: Float64Array, channel: number): number =>
+      centralFroxelOf(texels, z0, channel) * (1 - fz) + centralFroxelOf(texels, z1, channel) * fz;
+    const at = (channel: number): number => read(volume.texels, channel);
     const fade = Math.min(Math.max(surfaceM / (reachM / slices), 0), 1);
     const inscattered: Rgb = [at(0) * fade, at(1) * fade, at(2) * fade];
     if (!onGround) {
       return { total: inscattered, surface: DARK };
     }
-    const transmittance = 1 + (at(3) - 1) * fade;
+    // `aerialRead.wgsl`'s fade from 1 at the camera, of the second volume's (R08.T9.c) or the mean.
+    const through = (channel: number): number =>
+      1 + (read(volume.transmittance, channel) - 1) * fade;
+    const t = surfaceThrough([through(0), through(1), through(2), 1 + (at(3) - 1) * fade]);
     const lit = litGroundRadiance(pointAlong(originM, direction, surfaceM), sun.directionBodyFixed);
-    const surface: Rgb = [lit[0] * transmittance, lit[1] * transmittance, lit[2] * transmittance];
+    const surface: Rgb = [lit[0] * t[0], lit[1] * t[1], lit[2] * t[2]];
     return {
       total: [
         inscattered[0] + surface[0],

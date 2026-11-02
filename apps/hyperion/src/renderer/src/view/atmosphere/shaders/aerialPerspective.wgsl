@@ -28,7 +28,9 @@
 // `tablesCpu.ts`'s oblateAerialPerspectiveTwin marches them. Changes (plan R08, R08.T8.d;
 // `decision-r08-t8-leans.md` section 8): no step takes or returns an array by value
 // (source.wgsl's header): the sources and their angles are formed at each step from the view
-// (`viewSourcesAt`), not held a froxel; the arithmetic unchanged.
+// (`viewSourcesAt`), not held a froxel; the arithmetic unchanged. Changes (plan R08, R08.T9.c): each
+// slice's transmittance per channel, slot 0's throughput, is stored beside it in a second volume
+// (rgb, with the mean in a), which the composite dims a drawn surface by in place of the mean.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -44,6 +46,7 @@
 @group(0) @binding(11) var lastAbsorberPressureColumn : texture_2d_array<f32>;
 @group(0) @binding(12) var lobeTables : texture_2d_array<f32>;
 @group(0) @binding(13) var oblateBody : texture_2d<f32>;
+@group(0) @binding(14) var aerialTransmittanceOut : texture_storage_3d<rgba16float, write>;
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id : vec3u) {
@@ -91,6 +94,8 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       let shares = viewSourcesAt(body, start, up, dir, lobes, local);
       viewMarchStep(&march, local, shares, dt);
     }
-    textureStore(aerialOut, vec3u(id.xy, slice), vec4f(march.luminance, viewMeanTransmittance(&march)));
+    let mean = viewMeanTransmittance(&march);
+    textureStore(aerialOut, vec3u(id.xy, slice), vec4f(march.luminance, mean));
+    textureStore(aerialTransmittanceOut, vec3u(id.xy, slice), vec4f(march.throughput0, mean));
   }
 }

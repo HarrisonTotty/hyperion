@@ -28,12 +28,26 @@ fn belowDeckSkyAt(body : OblateBody, n : vec3f, dir : vec3f, heightStarM : f32) 
   return sum;
 }
 
-// The path's light from the camera along the unit `dir` to `t` beneath a deck, and T's mean over the
-// channels (`tablesCpu.ts`'s belowDeckAerialPerspectiveTwin): I(h*_camera, Omega) - T I(h*_t, Omega)
-// held at 0, `atCamera` the first, T = e^(-tau) of the path's depth, h_t the height along the ray on
-// its own sphere R_alpha from the camera's unclamped height (`common.wgsl`'s shellHeightAlong's
-// form), each read in the camera's frame.
-fn belowDeckPathTo(body : OblateBody, dir : vec3f, atCamera : vec3f, fromM : f32, t : f32) -> vec4f {
+// A path's light beneath a deck (`belowDeckPathTo`): its light (rgb) and T's mean over the channels
+// (a), as the volume and the march store them, and T per channel, which their second targets store
+// (plan R08, R08.T9.c).
+struct BelowDeckPath {
+  light : vec4f,
+  transmittance : vec3f,
+}
+
+// The path's light from the camera along the unit `dir` to `t` beneath a deck, and T, its mean over
+// the channels and per channel (`tablesCpu.ts`'s belowDeckAerialPerspectiveTwin): I(h*_camera, Omega)
+// - T I(h*_t, Omega) held at 0, `atCamera` the first, T = e^(-tau) of the path's depth, h_t the
+// height along the ray on its own sphere R_alpha from the camera's unclamped height (`common.wgsl`'s
+// shellHeightAlong's form), each read in the camera's frame.
+fn belowDeckPathTo(
+  body : OblateBody,
+  dir : vec3f,
+  atCamera : vec3f,
+  fromM : f32,
+  t : f32,
+) -> BelowDeckPath {
   let n = view.up.xyz;
   let bottom = cameraCurvatureAlong(view.curvature.x, view.curvature.y, n, dir);
   let heightM = view.camera.w;
@@ -46,8 +60,11 @@ fn belowDeckPathTo(body : OblateBody, dir : vec3f, atCamera : vec3f, fromM : f32
   let toM = clamp(split + s * heightAlongM, 0.0, split);
   let atTarget = belowDeckSkyAt(body, n, dir, toM);
   let transmitted = exp(-belowDeckPathDepth(belowDeckTable, body, oblateBody, s, fromM, toM, t));
-  return vec4f(
-    max(atCamera - transmitted * atTarget, vec3f(0.0)),
-    (transmitted.x + transmitted.y + transmitted.z) / 3.0,
+  return BelowDeckPath(
+    vec4f(
+      max(atCamera - transmitted * atTarget, vec3f(0.0)),
+      (transmitted.x + transmitted.y + transmitted.z) / 3.0,
+    ),
+    transmitted,
   );
 }

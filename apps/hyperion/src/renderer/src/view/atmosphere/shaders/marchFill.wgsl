@@ -1,10 +1,12 @@
 // The ray march's target outside the air's area (plan R08, R08.T11.d), for a reader of the whole
 // target (`hillaire.ts`'s frameTables, the smoke page's read-backs): (0, 0, 0, 1), what the march
 // writes where its ray misses the air, on every texel of the target's share outside the area, which
-// the march leaves as it was and the composite does not read. Follows `marchArea.wgsl`.
+// the march leaves as it was and the composite does not read; and (1, 1, 1, 1) on its second target,
+// the transmittance per channel (plan R08, R08.T9.c). Follows `marchArea.wgsl`.
 
 @group(0) @binding(0) var<uniform> marchArea : MarchArea;
 @group(0) @binding(1) var rayMarchOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(2) var rayMarchTransmittanceOut : texture_storage_2d<rgba16float, write>;
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id : vec3u) {
@@ -18,4 +20,5 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     return;
   }
   textureStore(rayMarchOut, id.xy, vec4f(0.0, 0.0, 0.0, 1.0));
+  textureStore(rayMarchTransmittanceOut, id.xy, vec4f(1.0));
 }

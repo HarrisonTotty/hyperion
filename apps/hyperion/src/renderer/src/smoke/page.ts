@@ -89,6 +89,7 @@ import {
   checkLowPick,
   checkCompositeArea,
   checkCompositeBehind,
+  checkSurfaceTransmittance,
   checkMarchArea,
   checkMarchBand,
   checkMarchOneBand,
@@ -669,6 +670,9 @@ async function run(
   );
   await group(11, "R08.T10.b the air over a drawn ground", () =>
     checkAtmosphereFrame(engine, checks),
+  );
+  await group(11, "R08.T9.c a drawn surface's transmittance per channel", () =>
+    checkSurfaceTransmittance(engine, checks),
   );
   await group(10, "R10.T16.g the datum inside the figure", () => checkDatumFrame(engine, checks));
   await group(1, "R05.T11.a the terrain's resources", () => checkTerrainResources(engine, checks));

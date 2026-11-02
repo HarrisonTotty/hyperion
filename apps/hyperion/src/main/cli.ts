@@ -86,10 +86,11 @@
  * `--atmosphere`. With `--timing` too (the owner's report, 2026-11-01) the inspection run profiles
  * its frame from orbit, closed in and low over the ground, per pass and per thread, into
  * `target/views-check/timing/`; `--timing` is refused without `--inspection`. With
- * `--composite-probe sky-off|transmittance-off|per-pixel` too (the owner's priority, 2026-11-01) that
- * profile draws the atmosphere's composite under the probe, its sky branch off, its transmittance
- * across from above off, or that transmittance per pixel as the way back forms it, for an A/B of
- * the composite's cost; it is refused without `--timing`.
+ * `--composite-probe sky-off|transmittance-off|per-pixel|surface-grey` too (the owner's priority,
+ * 2026-11-01) that profile draws the atmosphere's composite under the probe, its sky branch off, its
+ * transmittance across from above off, that transmittance per pixel as the way back forms it, or
+ * every drawn surface dimmed by the channels' mean as the grey way back does (plan R08, R08.T9.c),
+ * for an A/B of the composite's cost; it is refused without `--timing`.
  *
  * `--device-pixel-ratio <N>` draws a hidden check's page at a device-pixel ratio of N, 1 to 3, as a
  * HiDPI display does (the owner's Retina report, 2026-11-01): its offscreen window N times its
@@ -391,8 +392,8 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option(
         "--composite-probe <PROBE>",
-        "the frame profile's composite probe (the owner's priority): its sky branch, or its transmittance from above, off, or that per pixel",
-      ).choices(["sky-off", "transmittance-off", "per-pixel"]),
+        "the frame profile's composite probe (the owner's priority): its sky branch, or its transmittance from above, off, that per pixel, or its surfaces grey",
+      ).choices(["sky-off", "transmittance-off", "per-pixel", "surface-grey"]),
     )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
@@ -715,7 +716,10 @@ function compositeProbeOf(
   options: Readonly<Record<string, unknown>>,
 ): { readonly compositeProbe: CompositeProbeName } | Record<string, never> {
   const probe = options["compositeProbe"];
-  return probe === "sky-off" || probe === "transmittance-off" || probe === "per-pixel"
+  return probe === "sky-off" ||
+    probe === "transmittance-off" ||
+    probe === "per-pixel" ||
+    probe === "surface-grey"
     ? { compositeProbe: probe }
     : {};
 }

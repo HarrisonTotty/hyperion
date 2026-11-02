@@ -11,7 +11,12 @@ import { belowPatternAt, belowPatternDepth, patternedDeckTables } from "../../..
 import { DEFAULT_FOV_DEG } from "../../camera/projection";
 import { lookAlong } from "../../camera/quaternion";
 import { EARTH_SLAB_REFERENCE, EARTH_SLAB_REFERENCE_CURVES } from "../earth";
-import { type AtmosphereCamera, type SunState, TABLE_SIZES } from "../hillaire";
+import {
+  type AtmosphereCamera,
+  type SunState,
+  type SurfaceTransmittance,
+  TABLE_SIZES,
+} from "../hillaire";
 import { MARCH_TOLERANCE } from "../marchSteps";
 import { type AtmosphereMedium, columnLengthM, densityAt } from "../medium";
 import { bodyGravity } from "../oblate";
@@ -22,6 +27,7 @@ import {
   MULTI_SCATTERING_KERNEL_OPTIONS,
   multiScatteringTwin,
   planetTwin,
+  rayMarchTargetTexelsTwin,
   rayMarchTargetTexelTwin,
   skyViewReadTwin,
   skyViewTexelsTwin,
@@ -359,6 +365,84 @@ describe("the reference twin's reads", { timeout: TWIN_TIMEOUT_MS }, () => {
     expect(drawn.total[1]).toBeGreaterThan(drawn.surface[1]);
   });
 });
+
+describe(
+  "the reference twin's drawn surface per channel (R08.T9.c)",
+  { timeout: TWIN_TIMEOUT_MS },
+  () => {
+    const curves = EARTH_SLAB_REFERENCE_CURVES;
+    // The slab Earth, whose air reddens what it passes, as the composite draws it and as the grey way
+    // back does, each built once for the tests that read it.
+    const built = new Map<SurfaceTransmittance, ReferenceTwin>();
+    const twinUnder = (surfaceTransmittance: SurfaceTransmittance): ReferenceTwin => {
+      let twin = built.get(surfaceTransmittance);
+      if (twin === undefined) {
+        twin = referenceTwin(EARTH_SLAB_REFERENCE, FIGURE, { curves, surfaceTransmittance });
+        built.set(surfaceTransmittance, twin);
+      }
+      return twin;
+    };
+
+    it.each([
+      ["per channel by default", "channels", [0, 1, 2]],
+      ["by the mean, the way back", "grey", [3, 3, 3]],
+    ] as const)(
+      "dims the disc's lit ground from orbit by the march's second target %s",
+      (_, surfaceTransmittance, channels) => {
+        const twin = twinUnder(surfaceTransmittance);
+        const geometry = geometryNamed("disc-p30");
+        const direction = axisOf(geometry);
+        const groundM = groundDistanceM(observerOf(geometry), direction, RADIUS_M);
+        if (groundM === null) {
+          throw new Error("the disc looks down at the ground");
+        }
+        const view = twinView(cameraAlong(geometry, direction), sunStateOf(geometry), SPHERE, 1);
+        const { transmittance } = rayMarchTargetTexelsTwin(
+          twin.planet,
+          view,
+          TABLE_SIZES.high,
+          960,
+          540,
+          1 / groundM,
+        );
+        const lit = twin.litGroundRadiance({ x: RADIUS_M, y: 0, z: 0 }, sunOf(geometry));
+        const drawn = twin.radianceAlong(geometry, direction);
+        for (const [c, t] of channels.entries()) {
+          expect(drawn.surface[c]).toBeCloseTo((lit[c] ?? Number.NaN) * transmittance[t], 12);
+        }
+      },
+    );
+
+    /** The share of the lit ground's light that reaches the observer short of an aerial target. */
+    const passedShortOfTarget = (surfaceTransmittance: SurfaceTransmittance): number[] => {
+      const twin = twinUnder(surfaceTransmittance);
+      const geometry = geometryNamed("aerial-10km");
+      const originM = observerOf(geometry);
+      const below = localDirectionVector(0, { zenithDeg: 90.3, azimuthDeg: 90 });
+      const groundM = groundDistanceM(originM, below, RADIUS_M) ?? Number.NaN;
+      const lit = twin.litGroundRadiance(
+        {
+          x: originM.x + groundM * below.x,
+          y: originM.y + groundM * below.y,
+          z: originM.z + groundM * below.z,
+        },
+        sunOf(geometry),
+      );
+      const { surface } = twin.radianceAlong(geometry, below);
+      return [0, 1, 2].map((c) => (surface[c] ?? Number.NaN) / (lit[c] ?? Number.NaN));
+    };
+
+    it("dims the lit ground short of an aerial target per channel by default, the red passing more than the blue", () => {
+      const [red = Number.NaN, , blue = Number.NaN] = passedShortOfTarget("channels");
+      expect(red).toBeGreaterThan(blue);
+    });
+
+    it("dims the lit ground short of an aerial target by the mean, the way back, every channel alike", () => {
+      const [red = Number.NaN, , blue = Number.NaN] = passedShortOfTarget("grey");
+      expect(red).toBeCloseTo(blue, 12);
+    });
+  },
+);
 
 describe("the reference twin's media", { timeout: TWIN_TIMEOUT_MS }, () => {
   it("keeps a grey medium's three channels equal", () => {

@@ -67,7 +67,7 @@ describe("a probed engine's depth layers (R10.T9.b)", () => {
 describe("a probed engine's composite probe (the owner's priority, 2026-11-01)", () => {
   /** The WGSL each material was made with through `engine`, by name, in order. */
   async function madeWith(
-    probe: "sky-off" | "transmittance-off" | "per-pixel" | null,
+    probe: "sky-off" | "transmittance-off" | "per-pixel" | "surface-grey" | null,
   ): Promise<ReadonlyArray<readonly [string, string]>> {
     const device = await new FakeAdapter({ info: SWIFTSHADER_INFO, features: [] }).requestDevice();
     const inner = new FakeRenderEngine(device);
@@ -94,6 +94,7 @@ describe("a probed engine's composite probe (the owner's priority, 2026-11-01)",
     ["sky-off", "1"],
     ["transmittance-off", "2"],
     ["per-pixel", "3"],
+    ["surface-grey", "4"],
   ] as const)("makes the composite alone under %s", async (probe, value) => {
     expect(await madeWith(probe)).toEqual([
       ["atmosphere composite", value],

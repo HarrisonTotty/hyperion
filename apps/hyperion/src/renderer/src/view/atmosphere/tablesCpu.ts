@@ -230,6 +230,54 @@ export interface TwinVolume extends TwinTable {
 }
 
 /**
+ * An aerial-perspective volume's twin with its transmittance per channel (plan R08, R08.T9.c): the
+ * volume's texels, and froxel for froxel the second volume's, each channel's transmittance (rgb) and
+ * their mean (a), as `aerialPerspective.wgsl` stores them.
+ */
+export interface TwinAerialVolume extends TwinVolume {
+  readonly transmittance: Float64Array;
+}
+
+/**
+ * A ray-march target's twin with its transmittance per channel (plan R08, R08.T9.c): the target's
+ * texels, and texel for texel the second target's, each channel's transmittance (rgb) and their mean
+ * (a), as `rayMarch.wgsl`'s `storeMarched` writes them.
+ */
+export interface TwinMarchTarget extends TwinTable {
+  readonly transmittance: Float64Array;
+}
+
+/**
+ * One ray-march texel's twin in both targets (plan R08, R08.T9.c): the first's in-scatter (rgb) and
+ * mean transmittance (a), and the second's transmittance per channel (rgb) and their mean (a).
+ */
+export interface TwinMarchedTexel {
+  readonly light: readonly [number, number, number, number];
+  readonly transmittance: readonly [number, number, number, number];
+}
+
+/** The floats of a march texel's twin in both targets: the first's four and the second's four. */
+const MARCHED_TEXEL_FLOATS = 8;
+
+/** The first four of `out`, a march texel's twin in both targets. */
+function lightOf(out: Float64Array): readonly [number, number, number, number] {
+  return [out[0] ?? Number.NaN, out[1] ?? Number.NaN, out[2] ?? Number.NaN, out[3] ?? Number.NaN];
+}
+
+/** Both targets' four of `out`, a march texel's twin in both targets. */
+function marchedTexelOf(out: Float64Array): TwinMarchedTexel {
+  return {
+    light: lightOf(out),
+    transmittance: [
+      out[4] ?? Number.NaN,
+      out[5] ?? Number.NaN,
+      out[6] ?? Number.NaN,
+      out[7] ?? Number.NaN,
+    ],
+  };
+}
+
+/**
  * One term as the twin reads it: its profile, its coefficients at unit density, its phase, and, for
  * an absorber, its slot and n ÷ U (`tables.ts`'s `absorberSlots`, R08.T6.c).
  */
@@ -3533,7 +3581,8 @@ export function twinTableTexels(table: TwinTable): (x: number, y: number) => Rgb
  * in the view's sources' weights (rgb; R08.T7) and the mean transmittance (a) at each slice's far face, out to
  * `reachM` in slices of equal depth with `samplesPerSlice` even steps each (at least 1), on the
  * camera's own sphere, as `aerialPerspective.wgsl` stores them, froxel (x, y) along the ray through
- * the screen at (x, y) ÷ (size − 1), Bruneton's texel mapping (plan R08, Design note 19).
+ * the screen at (x, y) ÷ (size − 1), Bruneton's texel mapping (plan R08, Design note 19); and beside
+ * it the transmittance per channel and its mean (R08.T9.c), the second volume's.
  *
  * @throws RangeError for a medium with a tabulated term that ends below its top at a density
  *   other than 0 (the module's remarks).
@@ -3544,7 +3593,7 @@ export function aerialPerspectiveTwin(
   size: VolumeSize,
   samplesPerSlice: number,
   reachM: number,
-): TwinVolume {
+): TwinAerialVolume {
   const terms = termsOf(planet.medium);
   const pressureBarOf = pressureBarLookup(planet.medium);
   const sources = tableSources(planet);
@@ -3557,6 +3606,7 @@ export function aerialPerspectiveTwin(
   const n = view.normal;
   const originM = { x: n.x * lift, y: n.y * lift, z: n.z * lift };
   const texels = new Float64Array(w * h * slices * 4);
+  const transmittance = new Float64Array(w * h * slices * 4);
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
       // Bruneton's mapping on the screen axes (Design note 19): froxel (x, y) at (x, y) ÷ (size − 1).
@@ -3576,11 +3626,14 @@ export function aerialPerspectiveTwin(
           marcher.step((slice * perSlice + step + 0.5) * dtM, dtM);
         }
         const t = marcher.throughput;
-        texels.set([...marcher.luminance, (t[0] + t[1] + t[2]) / 3], ((slice * h + y) * w + x) * 4);
+        const mean = (t[0] + t[1] + t[2]) / 3;
+        const at = ((slice * h + y) * w + x) * 4;
+        texels.set([...marcher.luminance, mean], at);
+        transmittance.set([t[0], t[1], t[2], mean], at);
       }
     }
   }
-  return { widthTexels: w, heightTexels: h, slices, texels };
+  return { widthTexels: w, heightTexels: h, slices, texels, transmittance };
 }
 
 // --- Below the deck (R08.T15.b.2) ----------------------------------------------------------------
@@ -3679,27 +3732,32 @@ export function belowDeckSkyViewTexelsTwin(
  * path's light I(h\*_camera, Ω) − T I(h\*_t, Ω) summed over the view's sources and held at 0
  * (rgb), and T's mean over the channels (a), T = e^(−Δτ) of the path's depth
  * ({@link belowDeckPathDepthInto}), h_t the height along the ray on the camera's own sphere
- * (`common.wgsl`'s `shellHeightAlong`), each read in the camera's frame.
+ * (`common.wgsl`'s `shellHeightAlong`), each read in the camera's frame; and beside it T per
+ * channel and its mean (R08.T9.c), the second volume's.
  */
 export function belowDeckAerialPerspectiveTwin(
   below: TwinBelowDeck,
   view: TwinView,
   size: VolumeSize,
   reachM: number,
-): TwinVolume {
+): TwinAerialVolume {
   const { widthTexels: w, heightTexels: h, slices } = size;
   const path = belowDeckPathTwin(below, view);
   const texels = new Float64Array(w * h * slices * 4);
+  const transmittance = new Float64Array(w * h * slices * 4);
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
       const direction = unit(unnormalisedRay(view, unitOfTexel(x, w), unitOfTexel(y, h)));
       const to = path(direction);
       for (let slice = 0; slice < slices; slice += 1) {
-        texels.set(to(((slice + 1) * reachM) / slices), ((slice * h + y) * w + x) * 4);
+        const marched = to(((slice + 1) * reachM) / slices);
+        const at = ((slice * h + y) * w + x) * 4;
+        texels.set(marched.light, at);
+        transmittance.set(marched.transmittance, at);
       }
     }
   }
-  return { widthTexels: w, heightTexels: h, slices, texels };
+  return { widthTexels: w, heightTexels: h, slices, texels, transmittance };
 }
 
 /**
@@ -3707,12 +3765,13 @@ export function belowDeckAerialPerspectiveTwin(
  * unit direction, to each distance t, I(h\*_camera, Ω) − T I(h\*_t, Ω) summed over the view's
  * sources and held at 0, and T's mean over the channels, T = e^(−Δτ) of the path's depth
  * ({@link belowDeckPathDepthInto}), h_t the height along the ray on the camera's own sphere
- * (`common.wgsl`'s `shellHeightAlong`), each read in the camera's frame.
+ * (`common.wgsl`'s `shellHeightAlong`), each read in the camera's frame; and T per channel with its
+ * mean (R08.T9.c), the second targets'.
  */
 export function belowDeckPathTwin(
   below: TwinBelowDeck,
   view: TwinView,
-): (direction: Vec3) => (tM: number) => [number, number, number, number] {
+): (direction: Vec3) => (tM: number) => TwinMarchedTexel {
   const bottom = view.cameraRadiusM;
   const heightM = view.heightM;
   const fromM = belowDeckHeightStarM(below, heightM);
@@ -3743,12 +3802,16 @@ export function belowDeckPathTwin(
         depth,
       );
       const transmitted: TwinRgb = [exp(-depth[0]), exp(-depth[1]), exp(-depth[2])];
-      return [
-        Math.max(atCamera[0] - transmitted[0] * atTarget[0], 0),
-        Math.max(atCamera[1] - transmitted[1] * atTarget[1], 0),
-        Math.max(atCamera[2] - transmitted[2] * atTarget[2], 0),
-        (transmitted[0] + transmitted[1] + transmitted[2]) / 3,
-      ];
+      const mean = (transmitted[0] + transmitted[1] + transmitted[2]) / 3;
+      return {
+        light: [
+          Math.max(atCamera[0] - transmitted[0] * atTarget[0], 0),
+          Math.max(atCamera[1] - transmitted[1] * atTarget[1], 0),
+          Math.max(atCamera[2] - transmitted[2] * atTarget[2], 0),
+          mean,
+        ],
+        transmittance: [transmitted[0], transmitted[1], transmitted[2], mean],
+      };
     };
   };
 }
@@ -3768,17 +3831,36 @@ export function belowDeckMarchTexelTwin(
   x: number,
   y: number,
   depth: number,
-): [number, number, number, number] {
+): readonly [number, number, number, number] {
+  return belowDeckMarchTexelsTwin(below, view, widthTexels, heightTexels, reachM, x, y, depth)
+    .light;
+}
+
+/**
+ * {@link belowDeckMarchTexelTwin}'s texel in both targets (plan R08, R08.T9.c): with the second's T
+ * per channel and its mean, (1, 1, 1, 1) where the first reads (0, 0, 0, 1).
+ */
+export function belowDeckMarchTexelsTwin(
+  below: TwinBelowDeck,
+  view: TwinView,
+  widthTexels: number,
+  heightTexels: number,
+  reachM: number,
+  x: number,
+  y: number,
+  depth: number,
+): TwinMarchedTexel {
   const u = (x + 0.5) / widthTexels;
   const v = (y + 0.5) / heightTexels;
+  const none: TwinMarchedTexel = { light: [0, 0, 0, 1], transmittance: [1, 1, 1, 1] };
   if (!(depth > 0)) {
-    return [0, 0, 0, 1];
+    return none;
   }
   const ray = unnormalisedRay(view, u, v);
   // `view.wgsl`'s distanceAtDepth: near ÷ depth over the cosine between the ray and the forward axis.
   const tSurface = (view.nearM / depth) * Math.sqrt(ray.x * ray.x + ray.y * ray.y + ray.z * ray.z);
   if (!(tSurface > reachM)) {
-    return [0, 0, 0, 1];
+    return none;
   }
   return belowDeckPathTwin(below, view)(unitRayTwin(view, u, v))(tSurface);
 }
@@ -4051,9 +4133,25 @@ export function rayMarchTexelTwin(
   settings: RayMarchSettings,
   marched: RayMarchRay | null,
 ): readonly [number, number, number, number] {
-  const out = new Float64Array(4);
+  return rayMarchTexelsTwin(planet, view, settings, marched).light;
+}
+
+/**
+ * {@link rayMarchTexelTwin}'s texel in both targets (plan R08, R08.T9.c): with the second's
+ * transmittance per channel and its mean, (1, 1, 1, 1) where the first reads (0, 0, 0, 1), and
+ * (0, 0, 0, 0) where the bare ground ends the ray.
+ *
+ * @throws RangeError as {@link rayMarchTexelTwin}.
+ */
+export function rayMarchTexelsTwin(
+  planet: PlanetTwin,
+  view: TwinView,
+  settings: RayMarchSettings,
+  marched: RayMarchRay | null,
+): TwinMarchedTexel {
+  const out = new Float64Array(MARCHED_TEXEL_FLOATS);
   rayMarchTexelInto(rayMarchContext(planet, view, settings), marched, out);
-  return [out[0] ?? Number.NaN, out[1] ?? Number.NaN, out[2] ?? Number.NaN, out[3] ?? Number.NaN];
+  return marchedTexelOf(out);
 }
 
 /** What every ray-march texel of a view reads. */
@@ -4154,7 +4252,11 @@ function rayMarchContext(
   };
 }
 
-/** One ray-march texel into `out`, RGBA: `rayMarch.wgsl`'s `main` along its clipped ray. */
+/**
+ * One ray-march texel into `out`, {@link MARCHED_TEXEL_FLOATS} of them, `rayMarch.wgsl`'s `main`
+ * along its clipped ray: the first target's RGBA, then the second's (R08.T9.c), the transmittance
+ * per channel and its mean.
+ */
 function rayMarchTexelInto(
   context: RayMarchContext,
   marched: RayMarchRay | null,
@@ -4163,7 +4265,7 @@ function rayMarchTexelInto(
   const { medium, terms, edgesM, pressureBarOf, reads, countReads, geometry, view, depthSteps } =
     context;
   if (marched === null) {
-    out.set([0, 0, 0, 1]);
+    out.set([0, 0, 0, 1, 1, 1, 1, 1]);
     return;
   }
   const { ray, bareGroundM, datumHitM } = marched;
@@ -4200,6 +4302,7 @@ function rayMarchTexelInto(
   const luminance = marcher.luminance;
   const t = marcher.throughput;
   let meanTransmittance = (t[0] + t[1] + t[2]) / 3;
+  let transmittance: TwinRgb = [t[0], t[1], t[2]];
   if (bareGroundM !== null) {
     const o = ray.originM;
     const d = ray.direction;
@@ -4232,8 +4335,9 @@ function rayMarchTexelInto(
       }
     }
     meanTransmittance = 0;
+    transmittance = [0, 0, 0];
   }
-  out.set([...luminance, meanTransmittance]);
+  out.set([...luminance, meanTransmittance, ...transmittance, meanTransmittance]);
 }
 
 /**
@@ -4637,7 +4741,8 @@ export function sphereBareGroundDepthG(
  * draws it ({@link rayMarchTargetTexelTwin}): its in-scattered radiance in the view's sources'
  * weights (rgb; R08.T7) and mean transmittance (a), with the bare ground seen from above lit by
  * the sun, and (0, 0, 0, 1) where the kernel marches nothing; from above the top, where a texel's
- * footprint meets the shell, its far-limb footprint's mean blended in by w_L (R08.T8.c).
+ * footprint meets the shell, its far-limb footprint's mean blended in by w_L (R08.T8.c); and beside
+ * it the second target's transmittance per channel and its mean (R08.T9.c).
  *
  * @param depthAt - The scene's reversed-Z depth at a full-resolution pixel, 0 where nothing is
  *   drawn: the texel the kernel loads.
@@ -4649,27 +4754,46 @@ export function rayMarchTwin(
   view: TwinView,
   settings: RayMarchSettings,
   depthAt: (xPx: number, yPx: number) => number,
-): TwinTable {
+): TwinMarchTarget {
   const context = rayMarchContext(planet, view, settings);
   const shells = farLimbShellsOf(planet, view);
   const fullW = view.viewport.widthPx;
   const fullH = view.viewport.heightPx;
   const w = Math.ceil(fullW * settings.rayMarchScale);
   const h = Math.ceil(fullH * settings.rayMarchScale);
+  return marchTargetOf(w, h, (x, y, out) => {
+    marchTargetTexelInto(
+      context,
+      shells,
+      (u, v, depthHere) => rayMarchRayTwin(planet.medium, view, u, v, depthHere, settings),
+      (u, v) => depthAtUv(depthAt, fullW, fullH, u, v),
+      { x, y, widthTexels: w, heightTexels: h },
+      out,
+    );
+  });
+}
+
+/**
+ * A ray-march target's twin of `w` × `h` texels, both targets' (R08.T9.c), each texel by `texelInto`
+ * into its {@link MARCHED_TEXEL_FLOATS}.
+ */
+function marchTargetOf(
+  w: number,
+  h: number,
+  texelInto: (x: number, y: number, out: Float64Array) => void,
+): TwinMarchTarget {
   const texels = new Float64Array(w * h * 4);
+  const transmittance = new Float64Array(w * h * 4);
+  const out = new Float64Array(MARCHED_TEXEL_FLOATS);
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
-      marchTargetTexelInto(
-        context,
-        shells,
-        (u, v, depthHere) => rayMarchRayTwin(planet.medium, view, u, v, depthHere, settings),
-        (u, v) => depthAtUv(depthAt, fullW, fullH, u, v),
-        { x, y, widthTexels: w, heightTexels: h },
-        texels.subarray((y * w + x) * 4, (y * w + x) * 4 + 4),
-      );
+      texelInto(x, y, out);
+      const at = (y * w + x) * 4;
+      texels.set(out.subarray(0, 4), at);
+      transmittance.set(out.subarray(4, 8), at);
     }
   }
-  return { widthTexels: w, heightTexels: h, texels };
+  return { widthTexels: w, heightTexels: h, texels, transmittance };
 }
 
 /**
@@ -4692,7 +4816,24 @@ export function rayMarchTargetTexelTwin(
   y: number,
   depth: number,
 ): readonly [number, number, number, number] {
-  const out = new Float64Array(4);
+  return rayMarchTargetTexelsTwin(planet, view, settings, x, y, depth).light;
+}
+
+/**
+ * {@link rayMarchTargetTexelTwin}'s texel in both targets (plan R08, R08.T9.c): with the second's
+ * transmittance per channel and its mean, the footprint's mean blended in as the first's.
+ *
+ * @throws RangeError as {@link rayMarchTexelTwin}.
+ */
+export function rayMarchTargetTexelsTwin(
+  planet: PlanetTwin,
+  view: TwinView,
+  settings: RayMarchSettings,
+  x: number,
+  y: number,
+  depth: number,
+): TwinMarchedTexel {
+  const out = new Float64Array(MARCHED_TEXEL_FLOATS);
   marchTargetTexelInto(
     rayMarchContext(planet, view, settings),
     farLimbShellsOf(planet, view),
@@ -4701,7 +4842,7 @@ export function rayMarchTargetTexelTwin(
     targetTexelOf(view, settings, x, y),
     out,
   );
-  return [out[0] ?? Number.NaN, out[1] ?? Number.NaN, out[2] ?? Number.NaN, out[3] ?? Number.NaN];
+  return marchedTexelOf(out);
 }
 
 // --- The far limb's footprint (R08.T8.c) ---------------------------------------------------------
@@ -5163,10 +5304,11 @@ function depthAtUv(
 }
 
 /**
- * One texel of a ray-march target into `out` as the kernel draws it (R08.T8.c): its centre ray's
- * texel, and with `shells` (the camera above the top) its footprint's mean blended in by w_L, the
- * space share counted as (0, 0, 0, 1), what the kernel writes for a ray that misses the air; each
- * ray at the scene's depth under its own point (`depthAt`).
+ * One texel of a ray-march target into `out` as the kernel draws it (R08.T8.c), both targets'
+ * {@link MARCHED_TEXEL_FLOATS} (R08.T9.c): its centre ray's texel, and with `shells` (the camera
+ * above the top) its footprint's mean blended in by w_L, the space share counted as (0, 0, 0, 1)
+ * and (1, 1, 1, 1), what the kernel writes for a ray that misses the air; each ray at the scene's
+ * depth under its own point (`depthAt`).
  */
 function marchTargetTexelInto(
   context: RayMarchContext,
@@ -5183,17 +5325,18 @@ function marchTargetTexelInto(
   if (footprint === null || !(footprint.blend > 0)) {
     return;
   }
-  const mean = Float64Array.of(0, 0, 0, footprint.spaceShare);
-  const node = new Float64Array(4);
+  const space = footprint.spaceShare;
+  const mean = Float64Array.of(0, 0, 0, space, space, space, space, space);
+  const node = new Float64Array(MARCHED_TEXEL_FLOATS);
   for (const { u, v, weight } of footprint.nodes) {
     rayMarchTexelInto(context, rayAt(u, v, depthAt(u, v)), node);
-    for (let c = 0; c < 4; c += 1) {
+    for (let c = 0; c < MARCHED_TEXEL_FLOATS; c += 1) {
       mean[c] = (mean[c] ?? Number.NaN) + weight * (node[c] ?? Number.NaN);
     }
   }
   // As WGSL's mix, (1 − w) × the centre + w × the mean: the mean alone at w = 1.
   const b = footprint.blend;
-  for (let c = 0; c < 4; c += 1) {
+  for (let c = 0; c < MARCHED_TEXEL_FLOATS; c += 1) {
     const m = mean[c] ?? Number.NaN;
     out[c] = b === 1 ? m : (1 - b) * (out[c] ?? Number.NaN) + b * m;
   }
@@ -6874,7 +7017,7 @@ export function oblateAerialPerspectiveTwin(
   size: VolumeSize,
   samplesPerSlice: number,
   reachM: number,
-): TwinVolume {
+): TwinAerialVolume {
   const terms = termsOf(planet.medium);
   const pressureBarOf = pressureBarLookup(planet.medium);
   const reader = oblateReaderOf(planet);
@@ -6884,6 +7027,7 @@ export function oblateAerialPerspectiveTwin(
   const dtM = reachM / (slices * perSlice);
   const n = view.normal;
   const texels = new Float64Array(w * h * slices * 4);
+  const transmittance = new Float64Array(w * h * slices * 4);
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
       const direction = unit(unnormalisedRay(view, unitOfTexel(x, w), unitOfTexel(y, h)));
@@ -6919,11 +7063,14 @@ export function oblateAerialPerspectiveTwin(
           marcher.step((slice * perSlice + step + 0.5) * dtM, dtM);
         }
         const t = marcher.throughput;
-        texels.set([...marcher.luminance, (t[0] + t[1] + t[2]) / 3], ((slice * h + y) * w + x) * 4);
+        const mean = (t[0] + t[1] + t[2]) / 3;
+        const at = ((slice * h + y) * w + x) * 4;
+        texels.set([...marcher.luminance, mean], at);
+        transmittance.set([t[0], t[1], t[2], mean], at);
       }
     }
   }
-  return { widthTexels: w, heightTexels: h, slices, texels };
+  return { widthTexels: w, heightTexels: h, slices, texels, transmittance };
 }
 
 /** 1 ÷ s at the equator and at the pole: the oblate ray march's shells' scales (Design note 17). */
@@ -7071,9 +7218,9 @@ export function oblateRayMarchTexelTwin(
   settings: RayMarchSettings,
   marched: RayMarchRay | null,
 ): readonly [number, number, number, number] {
-  const out = new Float64Array(4);
+  const out = new Float64Array(MARCHED_TEXEL_FLOATS);
   rayMarchTexelInto(oblateRayMarchContext(planet, view, settings), marched, out);
-  return [out[0] ?? Number.NaN, out[1] ?? Number.NaN, out[2] ?? Number.NaN, out[3] ?? Number.NaN];
+  return lightOf(out);
 }
 
 /**
@@ -7089,27 +7236,23 @@ export function oblateRayMarchTwin(
   view: TwinView,
   settings: RayMarchSettings,
   depthAt: (xPx: number, yPx: number) => number,
-): TwinTable {
+): TwinMarchTarget {
   const context = oblateRayMarchContext(planet, view, settings);
   const shells = oblateFarLimbShellsOf(planet, view);
   const fullW = view.viewport.widthPx;
   const fullH = view.viewport.heightPx;
   const w = Math.ceil(fullW * settings.rayMarchScale);
   const h = Math.ceil(fullH * settings.rayMarchScale);
-  const texels = new Float64Array(w * h * 4);
-  for (let y = 0; y < h; y += 1) {
-    for (let x = 0; x < w; x += 1) {
-      marchTargetTexelInto(
-        context,
-        shells,
-        (u, v, depthHere) => oblateRayMarchRayTwin(planet, view, u, v, depthHere, settings),
-        (u, v) => depthAtUv(depthAt, fullW, fullH, u, v),
-        { x, y, widthTexels: w, heightTexels: h },
-        texels.subarray((y * w + x) * 4, (y * w + x) * 4 + 4),
-      );
-    }
-  }
-  return { widthTexels: w, heightTexels: h, texels };
+  return marchTargetOf(w, h, (x, y, out) => {
+    marchTargetTexelInto(
+      context,
+      shells,
+      (u, v, depthHere) => oblateRayMarchRayTwin(planet, view, u, v, depthHere, settings),
+      (u, v) => depthAtUv(depthAt, fullW, fullH, u, v),
+      { x, y, widthTexels: w, heightTexels: h },
+      out,
+    );
+  });
 }
 
 /**
@@ -7127,7 +7270,24 @@ export function oblateRayMarchTargetTexelTwin(
   y: number,
   depth: number,
 ): readonly [number, number, number, number] {
-  const out = new Float64Array(4);
+  return oblateRayMarchTargetTexelsTwin(planet, view, settings, x, y, depth).light;
+}
+
+/**
+ * {@link oblateRayMarchTargetTexelTwin}'s texel in both targets (plan R08, R08.T9.c), as
+ * {@link rayMarchTargetTexelsTwin}'s on the oblate march.
+ *
+ * @throws RangeError as {@link rayMarchTexelTwin}.
+ */
+export function oblateRayMarchTargetTexelsTwin(
+  planet: OblatePlanetTwin,
+  view: TwinView,
+  settings: RayMarchSettings,
+  x: number,
+  y: number,
+  depth: number,
+): TwinMarchedTexel {
+  const out = new Float64Array(MARCHED_TEXEL_FLOATS);
   marchTargetTexelInto(
     oblateRayMarchContext(planet, view, settings),
     oblateFarLimbShellsOf(planet, view),
@@ -7136,7 +7296,7 @@ export function oblateRayMarchTargetTexelTwin(
     targetTexelOf(view, settings, x, y),
     out,
   );
-  return [out[0] ?? Number.NaN, out[1] ?? Number.NaN, out[2] ?? Number.NaN, out[3] ?? Number.NaN];
+  return marchedTexelOf(out);
 }
 
 /**

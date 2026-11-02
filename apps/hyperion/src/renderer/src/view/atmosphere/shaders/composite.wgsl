@@ -66,6 +66,12 @@
 // four candidates interpolated (`behindAtMarch`) where all are sky and either thin or dim behind;
 // elsewhere, and within a source's disc, it is formed per pixel as before (`AtmosphereSettings`'
 // `compositeTransmittance`, whose `per-pixel` is the way back).
+// Changes (plan R08, R08.T9.c): a drawn surface seen through the air is dimmed by its transmittance
+// per channel, the aerial-perspective volume's second texture (`aerialTransmittanceAt`) or the ray
+// march's second target, in place of the channels' mean, R05's grey, which left the ground 13% too
+// dim in red and 23% too bright in blue through 5 km from 2 m on the measured Earth, and through the
+// limb from orbit grey where the air reddens it (`AtmosphereSettings`' `surfaceTransmittance`,
+// `levers.y`, whose `grey` is the way back).
 
 struct Draw {
   offsetFromCameraM : vec3f,
@@ -114,7 +120,8 @@ struct Draw {
   // The composite's levers (the owner's priority, 2026-11-01; `settings.ts`'s AtmosphereSettings):
   // x 1 where what lies behind the sky from above the top is read at the march's resolution
   // (`behindMarch`, which `compositeBehind.wgsl` wrote over the march's area this frame), 0 where
-  // it is formed per pixel.
+  // it is formed per pixel; y 1 where a drawn surface is dimmed by its transmittance per channel
+  // (R08.T9.c), 0 where by the channels' mean.
   levers : vec4f,
 }
 
@@ -135,6 +142,10 @@ struct Draw {
 // channel's ln tau, tau = -ln T, at each sky texel of the march's area (`compositeBehind.wgsl`);
 // read only where `levers.x` is 1.
 @group(2) @binding(12) var behindMarch : texture_2d<f32>;
+// The transmittance per channel beside the volume and the march (R08.T9.c): the volume's second
+// texture and the march's second target, rgb, each with the mean in a.
+@group(2) @binding(13) var aerialTransmittance : texture_3d<f32>;
+@group(2) @binding(14) var rayMarchTransmittance : texture_2d<f32>;
 
 const HALF_MAX : f32 = 65504.0;
 
@@ -142,9 +153,10 @@ const HALF_MAX : f32 = 65504.0;
 // `hillaire.ts`'s compositeProbedMaterial): 0, the composite as drawn, on every launch but an
 // inspection profile's `--composite-probe`, whose material sets 1, every sky pixel keeping the
 // scene's light (no sky branch); 2, the sky drawn with no transmittance across from above, 1 in its
-// place (neither the far-limb footprint nor the sliced lookups it takes); or 3, that transmittance
-// formed per pixel whatever `levers.x`, the way back's composite. A constant, so that the composite
-// every player draws compiles none of them.
+// place (neither the far-limb footprint nor the sliced lookups it takes); 3, that transmittance
+// formed per pixel whatever `levers.x`, the way back's composite; or 4, every drawn surface dimmed by
+// the channels' mean whatever `levers.y`, the grey way back's (R08.T9.c). A constant, so that the
+// composite every player draws compiles none of them.
 const COMPOSITE_PROBE : u32 = 0u;
 
 struct VertexOut {
@@ -210,16 +222,33 @@ fn withinDisc(dir : vec3f, source : SkySource) -> bool {
 // tie-break every sky and limb pixel, whose four depths are all 0, took the first candidate, so the
 // half-resolution layer stood one output pixel down and right of the scene.
 fn rayMarched(pixel : vec2u, depth : f32) -> vec4f {
+  let at = rayMarchTexelOf(pixel, depth);
+  if (!at.found) {
+    return vec4f(0.0, 0.0, 0.0, 1.0);
+  }
+  return textureLoad(rayMarch, at.texel, 0);
+}
+
+// The ray march's texel `rayMarched` reads for a pixel (R08.T9.c, which reads the second target
+// there too): `found` false where no candidate's depth compares (a NaN), which reads (0, 0, 0, 1).
+struct MarchTexel {
+  texel : vec2u,
+  found : bool,
+}
+
+// `rayMarched`'s choice of texel: at full resolution the pixel's own; at half, of the four nearest,
+// the one whose source pixel's depth is closest to this pixel's, ties to the nearest centre.
+fn rayMarchTexelOf(pixel : vec2u, depth : f32) -> MarchTexel {
   let scale = draw.output.z;
   if (scale >= 1.0) {
-    return textureLoad(rayMarch, pixel, 0);
+    return MarchTexel(pixel, true);
   }
   // The target may be larger than this frame's output; the kernel filled only its share.
   let size = vec2u(ceil(draw.output.xy * scale));
   let full = vec2u(draw.output.xy);
   let base = vec2i(vec2f(pixel) * scale - 0.5);
   let centre = vec2f(pixel) + 0.5;
-  var best = vec4f(0.0, 0.0, 0.0, 1.0);
+  var best = MarchTexel(vec2u(0u), false);
   var bestError = 3.4e38;
   var bestDistance = 3.4e38;
   for (var j = 0; j < 2; j++) {
@@ -234,7 +263,7 @@ fn rayMarched(pixel : vec2u, depth : f32) -> vec4f {
       if (error < bestError || (error == bestError && distance < bestDistance)) {
         bestError = error;
         bestDistance = distance;
-        best = textureLoad(rayMarch, t, 0);
+        best = MarchTexel(t, true);
       }
     }
   }
@@ -321,12 +350,43 @@ fn marchedHere(pixel : vec2u) -> bool {
 }
 
 // The ray march's texel for this pixel (`rayMarched`) where the march wrote it, and outside the
-// area what it would have written there, its ray missing the air (R08.T11.d).
-fn marchedAt(pixel : vec2u, depth : f32, here : bool) -> vec4f {
+// area what it would have written there, its ray missing the air (R08.T11.d): the first target's
+// alone, for the sky.
+fn marchedLightAt(pixel : vec2u, depth : f32, here : bool) -> vec4f {
   if (here) {
     return rayMarched(pixel, depth);
   }
   return vec4f(0.0, 0.0, 0.0, 1.0);
+}
+
+// The ray march's two targets at a pixel's texel: the first's in-scatter and mean transmittance,
+// and the second's transmittance per channel (R08.T9.c).
+struct Marched {
+  light : vec4f,
+  transmittance : vec3f,
+}
+
+// `marchedLightAt` with the second target's texel beside the first's (R08.T9.c), for a surface.
+fn marchedAt(pixel : vec2u, depth : f32, here : bool) -> Marched {
+  if (here) {
+    let at = rayMarchTexelOf(pixel, depth);
+    if (at.found) {
+      return Marched(
+        textureLoad(rayMarch, at.texel, 0),
+        textureLoad(rayMarchTransmittance, at.texel, 0).rgb,
+      );
+    }
+  }
+  return Marched(vec4f(0.0, 0.0, 0.0, 1.0), vec3f(1.0));
+}
+
+// What a drawn surface's light passes through the march's air: its transmittance per channel where
+// `channels` (R08.T9.c), else the channels' mean.
+fn marchedThrough(marched : Marched, channels : bool) -> vec3f {
+  if (channels) {
+    return marched.transmittance;
+  }
+  return vec3f(marched.light.a);
 }
 
 // Whether the composite draws source `direction`'s disc, `disc` its light, along `dir`: the full
@@ -451,7 +511,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
         inscattered = textureSampleLevel(skyView, linearClamp, skyUv, 0.0).rgb;
       }
       if (marchWeight > 0.0) {
-        let marched = marchedAt(pixel, depth, here);
+        let marched = marchedLightAt(pixel, depth, here);
         if (marchWeight < 1.0) {
           inscattered = mix(inscattered, marched.rgb, marchWeight);
         } else {
@@ -490,19 +550,30 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
 
   let distance = distanceAtDepth(v, uv, depth);
   let reach = v.tables.y;
+  // The surface's light through the air per channel (R08.T9.c), or by the channels' mean, the way
+  // back; the same for every pixel, so each branch on it is uniform.
+  let channels = draw.levers.y > 0.5 && COMPOSITE_PROBE != 4u;
   // Within the volume's reach, the volume, through the read every reader of it takes
   // (`aerialRead.wgsl`, R08.T9.a), blended with the ray march by its share in the march band
   // (R08.T8); beyond it, and from the band's upper edge up (above the air included), the ray march.
   if (distance <= reach && marchWeight < 1.0) {
     let aerialAt = aerialPerspectiveAt(aerial, linearClamp, uv, distance, reach);
-    var luminance = colour * aerialAt.a + aerialAt.rgb * factor;
+    var through = vec3f(aerialAt.a);
+    if (channels) {
+      through = aerialTransmittanceAt(aerialTransmittance, linearClamp, uv, distance, reach);
+    }
+    var luminance = colour * through + aerialAt.rgb * factor;
     if (marchWeight > 0.0) {
       let marched = marchedAt(pixel, depth, here);
-      luminance = mix(luminance, colour * marched.a + marched.rgb * factor, marchWeight);
+      luminance = mix(
+        luminance,
+        colour * marchedThrough(marched, channels) + marched.light.rgb * factor,
+        marchWeight,
+      );
     }
     return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
   }
   let marched = marchedAt(pixel, depth, here);
-  let luminance = colour * marched.a + marched.rgb * factor;
+  let luminance = colour * marchedThrough(marched, channels) + marched.light.rgb * factor;
   return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
 }

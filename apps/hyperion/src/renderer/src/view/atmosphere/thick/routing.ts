@@ -215,7 +215,7 @@ export interface GateMiss {
 export const HAZE_GATE_MISSES: ReadonlyArray<GateMiss> = [
   { image: "ground-s30", value: "ground-s30-v30-a45/r", ratio: 1.039095 },
   { image: "ground-s30", value: "ground-s30-v30-a180/r", ratio: 1.637087 },
-  { image: "disc-p60", value: "disc-p60/r", ratio: 1.074344 },
+  { image: "disc-p60", value: "disc-p60/r", ratio: 1.075547 },
 ];
 
 /**
@@ -256,7 +256,7 @@ export const HAZE_GATE_EXCEPTIONS: ReadonlyArray<GateException> = [
     value: "disc-p60/r",
     bound: 1.08,
     cause:
-      "mode-free and red alone: the bins' red conversion, its methane's channel curve at the floor (T14.d.1's record); the image's worst channel through the analytic path, its blue at 2.25 of the edge, is larger than through the route, its red at 1.07; 1.04 before R08.T16.a.2's march, whose red then stood 0.24% under its own converged march, which it now meets within 0.03% (lean, 2026-11-02)",
+      "mode-free and red alone: the bins' red conversion, its methane's channel curve at the floor (T14.d.1's record); the image's worst channel through the analytic path, its blue at 2.25 of the edge, is larger than through the route, its red at 1.08 (1.074 before R08.T9.c drew the disc per channel); 1.04 before R08.T16.a.2's march, whose red then stood 0.24% under its own converged march, which it now meets within 0.03% (lean, 2026-11-02)",
   },
 ];
 

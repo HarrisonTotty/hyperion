@@ -1110,9 +1110,12 @@ export interface ViewsCheckLaunch {
  * `transmittance-off` draws the sky with no transmittance across from above the top (the per-pixel,
  * per-channel lookups over the far limb's footprint), 1 in its place; `per-pixel` forms that
  * transmittance per pixel whatever the setting, the way back's composite, the frame forming its
- * target at the march's resolution all the same. Each is a measurement's picture, never a player's.
+ * target at the march's resolution all the same; `surface-grey` dims every drawn surface by the
+ * channels' mean whatever the setting (plan R08, R08.T9.c), the grey way back's composite, the frame
+ * storing the transmittance per channel all the same. Each is a measurement's picture, never a
+ * player's.
  */
-export type CompositeProbeName = "sky-off" | "transmittance-off" | "per-pixel";
+export type CompositeProbeName = "sky-off" | "transmittance-off" | "per-pixel" | "surface-grey";
 
 /**
  * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s

@@ -503,6 +503,12 @@ describe("HillaireAtmosphere", () => {
   it("makes nothing new after the first frame, and grows the ray-march target only past its size", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    const destroyed: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        destroyed.push(event.name);
+      }
+    });
     const at = (widthPx: number, heightPx: number): AtmosphereCamera => ({
       ...CAMERA,
       viewport: { widthPx, heightPx },
@@ -514,8 +520,19 @@ describe("HillaireAtmosphere", () => {
     expect(engine.counts.textures).toBe(textures);
     atmosphere.drawFrame(at(128, 64), [DUSK], SCENE);
     atmosphere.drawFrame(at(64, 32), [DUSK], SCENE);
-    expect(engine.counts.textures).toBe(textures + 1);
-    expect(engine.textureSpecs.at(-1)?.size).toEqual([128, 64]);
+    // The target and its transmittance per channel beside it (R08.T9.c), grown together.
+    expect(engine.counts.textures).toBe(textures + 2);
+    expect(engine.textureSpecs.slice(-2).map((spec) => [spec.name, spec.size])).toEqual([
+      ["atmosphere ray march", [128, 64]],
+      ["atmosphere ray march's transmittance", [128, 64]],
+    ]);
+    // The smaller pair is released as the larger is made (R08.T9.c), and the tile cull's kinds grow
+    // with them (R08.T11.d).
+    expect(destroyed).toEqual([
+      "atmosphere ray march",
+      "atmosphere ray march's transmittance",
+      "atmosphere ray march's tiles",
+    ]);
   });
 
   it("hands the smoke page the frame's sky-view table, aerial volume and ray-march target", async () => {
@@ -1756,8 +1773,17 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
     expect(engine.dispatched[0]?.bindings.storage["skyViewOut"]?.texture).toBe(arm.skyView);
     expect(engine.dispatched[1]?.bindings.storage["aerialOut"]?.texture).toBe(arm.aerial);
     expect(engine.dispatched[2]?.bindings.storage["rayMarchOut"]?.texture).toBe(arm.rayMarch);
+    // And the volume's and the march's transmittance per channel beside them (R08.T9.c).
+    expect(engine.dispatched[1]?.bindings.storage["aerialTransmittanceOut"]?.texture).toBe(
+      arm.aerialTransmittance,
+    );
+    expect(engine.dispatched[2]?.bindings.storage["rayMarchTransmittanceOut"]?.texture).toBe(
+      arm.rayMarchTransmittance,
+    );
     const armSpecs = engine.textureSpecs.filter((spec) => spec.name.endsWith("(kernel arm)"));
     expect(armSpecs.map((spec) => spec.format)).toEqual([
+      KERNEL_ARM_FORMAT,
+      KERNEL_ARM_FORMAT,
       KERNEL_ARM_FORMAT,
       KERNEL_ARM_FORMAT,
       KERNEL_ARM_FORMAT,
@@ -1787,9 +1813,11 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
     const wider = { ...CAMERA, viewport: { widthPx: 96, heightPx: 32 } };
     const second = atmosphere.drawKernelArm(wider, [NOON], SCENE).rayMarch;
     expect(second).not.toBe(first);
-    // And the tile cull's kinds, grown with the target (R08.T11.d).
+    // And its transmittance per channel (R08.T9.c), and the tile cull's kinds, grown with the
+    // target (R08.T11.d).
     expect(destroyed).toEqual([
       "atmosphere ray march (kernel arm)",
+      "atmosphere ray march's transmittance (kernel arm)",
       "atmosphere ray march's tiles",
     ]);
     expect(engine.textureSpecs.at(-1)?.size).toEqual([96, 32]);
@@ -2962,8 +2990,60 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
 
   it("takes the setting's levers in every view: the march's resolution on both", () => {
     expect([SETTINGS.high.atmosphereLevers, SETTINGS.low.atmosphereLevers]).toEqual([
-      { compositeTransmittance: "march" },
-      { compositeTransmittance: "march" },
+      { compositeTransmittance: "march", surfaceTransmittance: "channels" },
+      { compositeTransmittance: "march", surfaceTransmittance: "channels" },
+    ]);
+  });
+});
+
+describe("HillaireAtmosphere's surfaces dimmed per channel (R08.T9.c)", () => {
+  it.each([
+    ["per channel, on both settings", ATMOSPHERE_SETTINGS.high, 1],
+    ["per channel, outside a view", PER_PIXEL_LEVERS, 1],
+    ["by the mean, the way back", { ...PER_PIXEL_LEVERS, surfaceTransmittance: "grey" }, 0],
+  ] as const)("dims them %s, the composite's levers.y", async (_, levers, lever) => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      R05_EARTH_REFERENCE,
+      TABLE_SIZES.high,
+      WGS84,
+      NO_ABSORBER_CURVES,
+      null,
+      levers,
+    );
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    expect(draw.uniforms["levers"]?.[1]).toBe(lever);
+  });
+
+  it("writes the volume's and the march's transmittance per channel beside them, which the composite reads", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    engine.dispatched.length = 0;
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    const { aerialTransmittance, rayMarchTransmittance } = atmosphere.frameTables;
+    const storage = (kernel: string, name: string): unknown =>
+      engine.dispatched.find((d) => d.kernel === kernel)?.bindings.storage[name]?.texture;
+    expect({
+      aerial: storage("atmosphere aerial perspective", "aerialTransmittanceOut"),
+      march: storage("atmosphere ray march", "rayMarchTransmittanceOut"),
+      readAerial: draw.textures["aerialTransmittance"],
+      readMarch: draw.textures["rayMarchTransmittance"],
+      published: atmosphere.aerialPerspective(CAMERA)?.transmittanceVolume,
+    }).toEqual({
+      aerial: aerialTransmittance,
+      march: rayMarchTransmittance,
+      readAerial: aerialTransmittance,
+      readMarch: rayMarchTransmittance,
+      published: aerialTransmittance,
+    });
+    const specs = engine.textureSpecs.filter((spec) => spec.category === "atmosphere-view");
+    expect(specs.map((spec) => [spec.name, spec.format, spec.size])).toEqual([
+      ["atmosphere sky view", "rgba16float", [192, 108]],
+      ["atmosphere aerial perspective", "rgba16float", [32, 32, 32]],
+      ["atmosphere aerial transmittance", "rgba16float", [32, 32, 32]],
+      ["atmosphere ray march", "rgba16float", [64, 32]],
+      ["atmosphere ray march's transmittance", "rgba16float", [64, 32]],
     ]);
   });
 });

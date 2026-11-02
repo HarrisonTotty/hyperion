@@ -58,6 +58,7 @@ const COMPOSITE_PROBES: ReadonlyArray<CompositeProbeName> = [
   "sky-off",
   "transmittance-off",
   "per-pixel",
+  "surface-grey",
 ];
 
 /** The hand-over check's looks, in the order a run takes them, which `--look` may name one of. */

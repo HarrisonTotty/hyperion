@@ -747,8 +747,8 @@
   ],
   "caseGate": {
     "headlines": {
-      "earth": ["miss", 183, 109, 68],
-      "earth-ozone-slab": ["miss", 184, 108, 68],
+      "earth": ["miss", 186, 106, 68],
+      "earth-ozone-slab": ["miss", 187, 105, 68],
       "mars": ["miss", 75, 213, 96],
       "saturn-oblate": ["miss", 197, 255, 22]
     },

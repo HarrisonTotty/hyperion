@@ -2,7 +2,9 @@
 // R08.T11.d, `decision-r08-t8-leans.md` section 11, Ruling 4, the tile cull's second): each texel of
 // a tile the centre's entry point (`rayMarchCentre.wgsl`) classed as one whose footprint may blend,
 // marched as the one kernel marched every texel before. Under the reference path (`marchArea.bound.x`
-// 0) it marches every texel of the area, the whole frame, and reads no tile's kind. Appended last
+// 0) it marches every texel of the area, the whole frame, and reads no tile's kind. Each texel goes
+// to both targets, the footprint's mean of the transmittance per channel taken as the first's
+// (`storeMarched`, R08.T9.c). Appended last
 // to make `hillaire.ts`'s RAY_MARCH_KERNEL and RAY_MARCH_SLOTS_KERNEL, after `marchArea.wgsl`,
 // `rayMarch.wgsl` and the source's read.
 
@@ -38,7 +40,7 @@ fn main(
   // (R08.T8); below it, the surfaces beyond the aerial-perspective volume's reach.
   let needed = view.exact.w > 0.0 || (depth > 0.0 && tSurface > reach);
   if (!needed) {
-    textureStore(rayMarchOut, texel, vec4f(0.0, 0.0, 0.0, 1.0));
+    storeMarched(texel, marchMissed());
     return;
   }
   // From above the top, a texel whose footprint meets the shell takes its mean across the limb,
@@ -56,6 +58,10 @@ fn main(
   var blend = 0.0;
   var marched = vec4f(0.0);
   var mean = vec4f(0.0);
+  // The transmittance per channel (R08.T9.c): the centre ray's, and the footprint's mean, a ray that
+  // misses the air passing all.
+  var marchedRgb = vec3f(0.0);
+  var meanRgb = vec3f(0.0);
   for (var j = 0u; j <= nodes; j++) {
     var rayUv = uv;
     var rayDepth = depth;
@@ -68,6 +74,7 @@ fn main(
         blend = footprint.blend;
         nodes = select(0u, footprint.count, footprint.blend > 0.0);
         mean = vec4f(0.0, 0.0, 0.0, footprint.spaceShare);
+        meanRgb = vec3f(footprint.spaceShare);
         if (blend >= 1.0) {
           j = 1u;
         }
@@ -85,17 +92,21 @@ fn main(
     }
     let one = marchRay(rayUv, rayDepth);
     if (j == 0u) {
-      marched = one;
+      marched = one.light;
+      marchedRgb = one.transmittance;
     } else {
-      mean += weight * one;
+      mean += weight * one.light;
+      meanRgb += weight * one.transmittance;
     }
   }
   if (blend > 0.0) {
     if (blend >= 1.0) {
       marched = mean;
+      marchedRgb = meanRgb;
     } else {
       marched = mix(marched, mean, blend);
+      marchedRgb = mix(marchedRgb, meanRgb, blend);
     }
   }
-  textureStore(rayMarchOut, texel, marched);
+  storeMarched(texel, MarchedRay(marched, marchedRgb));
 }
