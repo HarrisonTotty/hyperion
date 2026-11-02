@@ -108,8 +108,8 @@ use super::wind::{self, ReimersEta, WindRecipe};
 // Plan 11's hooks: the helium star of ruling 34.1 and a star whose mass a companion sets.
 pub(crate) use binary::{
     CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, Remains, Structure,
-    giant_radius_exponent, lightest_helium_star, main_sequence_lifetime, main_sequence_radius,
-    main_sequence_structure, new_star_mass,
+    bare_core_light, giant_radius_exponent, lightest_helium_star, main_sequence_lifetime,
+    main_sequence_radius, main_sequence_structure, new_star_mass,
 };
 #[cfg(test)]
 pub(crate) use binary::{early_agb_core_radius_bound, helium_zams_radius};

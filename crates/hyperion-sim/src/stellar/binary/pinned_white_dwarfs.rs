@@ -17,7 +17,7 @@
 //! 55 white dwarfs at it, and 8 whose neutron star came from a later merger or accretion-induced
 //! collapse, at 45–128 Myr.
 //!
-//! From 27 ([`PinnedWhiteDwarfRules::Held`]) no exit leaves a pinned primary whose pin is pending
+//! From 27 ([`PinnedWhiteDwarfRules::Frozen`]) no exit leaves a pinned primary whose pin is pending
 //! a white dwarf:
 //!
 //! - a strip that would (`Engine::stripped_member_at`, through which `Engine::hold` strips a bare
@@ -32,6 +32,9 @@
 //!   at that core's mass with its white dwarf's luminosity and radius at formation
 //!   (`Engine::held_product`; a lean of 2026-11-01, recorded in plan 11).
 //!
+//! A held core at or above the Chandrasekhar mass, which has no white dwarf, shows the zero-age
+//! helium star of its mass instead (`sse::bare_core_light`, a lean of 2026-11-01).
+//!
 //! The pin then collapses the held star from its mass with plan 06's remnant and kick
 //! (`Engine::pinned_collapse`, `held_to`). A companion, a primary with no pin, and a primary whose
 //! pin has passed take the held arm's white dwarf under either arm.
@@ -40,7 +43,7 @@ use crate::GeneratorVersion;
 
 /// The generator version whose stellar rules hold a pinned primary that its binary would make a
 /// white dwarf before its pin until the pin (P11.T4's fix): `Engine::stripped_member_at` and
-/// `Engine::held_product` take [`PinnedWhiteDwarfRules::Held`].
+/// `Engine::held_product` take [`PinnedWhiteDwarfRules::Frozen`].
 ///
 /// Below it every pair takes the held arm, [`PinnedWhiteDwarfRules::Born`], the code of version 24
 /// verbatim, so every generated value keeps its bits; the tests reach the new arm through
@@ -58,7 +61,7 @@ pub(crate) enum PinnedWhiteDwarfRules {
     /// Version 26's and before: it is born a white dwarf, and its pin finds nothing living.
     Born,
     /// Version 27's: it is held at its core's last living state until its pin collapses it.
-    Held,
+    Frozen,
 }
 
 impl PinnedWhiteDwarfRules {
@@ -70,7 +73,7 @@ impl PinnedWhiteDwarfRules {
     pub(crate) const fn holds(self) -> bool {
         match self {
             Self::Born => false,
-            Self::Held => true,
+            Self::Frozen => true,
         }
     }
 }

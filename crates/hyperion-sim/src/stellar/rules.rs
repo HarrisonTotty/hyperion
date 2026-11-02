@@ -194,7 +194,7 @@ impl StellarRules {
                 CollapseRules::Gated
             },
             pinned_white_dwarfs: if version.get() >= PINNED_WHITE_DWARFS_VERSION.get() {
-                PinnedWhiteDwarfRules::Held
+                PinnedWhiteDwarfRules::Frozen
             } else {
                 PinnedWhiteDwarfRules::Born
             },

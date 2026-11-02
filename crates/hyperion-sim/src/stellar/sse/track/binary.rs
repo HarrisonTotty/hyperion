@@ -23,12 +23,13 @@
 
 use crate::math;
 use crate::stellar::draws::StarDraws;
+use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::structure::{OXYGEN_NEON_MC_BAGB, white_dwarf_radius};
 use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts};
 use crate::units::{
-    Megayears, SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years,
+    Megayears, MetalFraction, SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years,
 };
 
 use super::super::agb::CHANDRASEKHAR_MSUN;
@@ -437,8 +438,9 @@ impl Track {
         // star's mass.
         let mc = point.core_mass.value().min(mass);
         let luminosity = point.luminosity;
-        let white_dwarf =
-            |phase: Phase, core: Structure| white_dwarf_of(phase, mc, luminosity, &core);
+        let white_dwarf = |phase: Phase, core: Structure| {
+            white_dwarf_of(phase, SolarMasses::new(mc), luminosity, &core)
+        };
         // The core's last living state: the track's structure here at the core's mass, as
         // `collapse` takes it.
         let core = || self.structure_at(age, mc);
@@ -464,7 +466,9 @@ impl Track {
                 let phase = self
                     .fate
                     .map_or(Phase::CarbonOxygenWhiteDwarf, |fate| fate.phase);
-                white_dwarf(phase, self.bare_agb_core(age, mc, phase))
+                // A post-AGB star's fate is its white dwarf, carbon–oxygen as the phase defaults.
+                let kind = WhiteDwarfCore::of(phase).unwrap_or(WhiteDwarfCore::CarbonOxygen);
+                white_dwarf(phase, self.bare_agb_core(age, SolarMasses::new(mc), kind))
             }
             Model::HertzsprungGap { core: helium, .. }
             | Model::FirstGiantBranch { core: helium, .. } => match helium {
@@ -494,12 +498,12 @@ impl Track {
                 let oxygen_neon = self.segments[..index].iter().rev().any(|s| {
                     matches!(&s.model, Model::EarlyAgb { phase, .. } if phase.mc_bagb() >= OXYGEN_NEON_MC_BAGB)
                 });
-                let phase = if oxygen_neon {
-                    Phase::OxygenNeonWhiteDwarf
+                let (phase, kind) = if oxygen_neon {
+                    (Phase::OxygenNeonWhiteDwarf, WhiteDwarfCore::OxygenNeon)
                 } else {
-                    Phase::CarbonOxygenWhiteDwarf
+                    (Phase::CarbonOxygenWhiteDwarf, WhiteDwarfCore::CarbonOxygen)
                 };
-                white_dwarf(phase, self.bare_agb_core(age, mc, phase))
+                white_dwarf(phase, self.bare_agb_core(age, SolarMasses::new(mc), kind))
             }
             // No white dwarf is born at or above the Chandrasekhar mass (ruling 129.4c): the bare
             // core collapses at once, companion-stripped, on a helium-star track of its own
@@ -523,31 +527,29 @@ impl Track {
         }
     }
 
-    /// The bare core of `mc` M☉ at `age` of a thermally pulsing AGB star or a post-AGB one, its
+    /// The bare core of `mc` at `age_years` of a thermally pulsing AGB star or a post-AGB one, its
     /// last living state where the star's envelope goes at once ([`Remains::WhiteDwarf`]'s
     /// `core`): the track's structure there at the core's mass, at the luminosity and radius of
-    /// the white dwarf of `phase` it becomes, at formation. That is HPT section 6.3's limit of a
-    /// giant as its envelope goes (µ = 0; the published SSE code's `hrdiag`), where the other
-    /// giants' perturbation leaves their bare cores (`model::perturb_to_white_dwarf`). Under the
-    /// post-AGB bridge (P06.T16.a) the AGB's closed forms keep the giant's own luminosity and
-    /// radius until the envelope is lost, and the bridge crosses from there, so the structure
-    /// alone holds a bare core at a giant's radius: 1,158 R☉ on the AGB for a 1.439 M☉ core, and
-    /// 476 R☉ at the start of a 1.37 M☉ core's crossing, against their white dwarfs' 3.3 × 10⁻⁴
-    /// and 3.0 × 10⁻³ R☉ (P11.T4's fix, 2026-11-01).
+    /// [`bare_core_light`], its white dwarf's of `kind` at formation. That is HPT section 6.3's
+    /// limit of a giant as its envelope goes (µ = 0; the published SSE code's `hrdiag`), where the
+    /// other giants' perturbation leaves their bare cores (`model::perturb_to_white_dwarf`). Under
+    /// the post-AGB bridge (P06.T16.a) the AGB's closed forms keep the giant's own luminosity and
+    /// radius until the envelope is lost, and the bridge crosses from there, so the structure alone
+    /// holds a bare core at a giant's radius: 1,158 R☉ on the AGB for a 1.4391 M☉ core, and 476 R☉
+    /// at the start of a 1.37 M☉ core's crossing, against their white dwarfs' 3.3 × 10⁻⁴ and
+    /// 3.0 × 10⁻³ R☉ (P11.T4's fix, 2026-11-01).
     #[must_use]
-    fn bare_agb_core(&self, age: f64, mc: f64, phase: Phase) -> Structure {
-        let mut core = self.structure_at(age, mc);
+    fn bare_agb_core(&self, age_years: f64, mc: SolarMasses, kind: WhiteDwarfCore) -> Structure {
+        let mut core = self.structure_at(age_years, mc.value());
         let phys = self.physics();
-        let mass = SolarMasses::new(mc);
-        let kind = WhiteDwarfCore::of(phase).unwrap_or(WhiteDwarfCore::CarbonOxygen);
+        let (luminosity, radius) = bare_core_light(phys.remnant, phys.z, kind, mc);
         core.state = StarState::new(StarStateParts {
-            luminosity: white_dwarf::formation_luminosity(phys.remnant, kind, mass, phys.z),
-            radius: white_dwarf_radius(phys.remnant, mass),
+            luminosity,
+            radius,
             ..state_parts(&core.state)
         });
         // sse's degenerate core radius, 5 R_WD, held to the radius, as a held state's is.
-        core.core_radius =
-            SolarRadii::new(core.core_radius.value().min(core.state.radius().value()));
+        core.core_radius = SolarRadii::new(core.core_radius.value().min(radius.value()));
         core
     }
 
@@ -839,26 +841,53 @@ impl LastLiving {
     }
 }
 
-/// [`Remains::WhiteDwarf`] of `phase` for a core of `mc` M☉ in a star of `last_luminosity`, with
-/// the core's last living structure `core` at the core's mass: a star the binary carries may keep
+/// [`Remains::WhiteDwarf`] of `phase` for a core of `mc` in a star of `last_luminosity`, with the
+/// core's last living structure `core` at the core's mass: a star the binary carries may keep
 /// more of it than its track's own wind leaves it.
 #[must_use]
 fn white_dwarf_of(
     phase: Phase,
-    mc: f64,
+    mc: SolarMasses,
     last_luminosity: SolarLuminosities,
     core: &Structure,
 ) -> Remains {
     Remains::WhiteDwarf {
         phase,
-        mass: SolarMasses::new(mc),
+        mass: mc,
         last_luminosity,
         core: StarState::new(StarStateParts {
-            mass: SolarMasses::new(mc),
-            core_mass: SolarMasses::new(mc),
+            mass: mc,
+            core_mass: mc,
             ..state_parts(&core.state)
         }),
         core_radius: core.core_radius,
+    }
+}
+
+/// The luminosity and radius of a bare core of `mc` that a pinned primary is held at until its pin
+/// (plan 11, P11.T4's fix at 27): below the Chandrasekhar mass its white dwarf's of `kind` at
+/// formation under `recipe` at metal fraction `z` (`white_dwarf::formation_luminosity` and HPT
+/// equation 91's radius), HPT section 6.3's limit of a giant as its envelope goes (µ = 0).
+///
+/// From the Chandrasekhar mass equation 91 has no white dwarf: its radius falls to the neutron
+/// star's floor, 12 km, at which a 1.49 M☉ core would show some 4 × 10⁶ K. There the core takes the
+/// zero-age helium star's of its mass instead (HPT equations 77 and 78), the remnant towards which
+/// HPT section 6.3 perturbs a non-degenerate core: 942 L☉ and 0.274 R☉, 61 kK, at 1.49 M☉. A lean
+/// of 2026-11-01, recorded in plan 11: such a core has no static state, and collapses at its pin.
+#[must_use]
+pub(crate) fn bare_core_light(
+    recipe: RemnantRecipe,
+    z: MetalFraction,
+    kind: WhiteDwarfCore,
+    mc: SolarMasses,
+) -> (SolarLuminosities, SolarRadii) {
+    if mc.value() >= CHANDRASEKHAR_MSUN {
+        (helium::zams_luminosity(mc), helium::zams_radius(mc))
+    } else {
+        (
+            white_dwarf::formation_luminosity(recipe, kind, mc, z),
+            white_dwarf_radius(recipe, mc),
+        )
     }
 }
 
@@ -1676,6 +1705,67 @@ mod tests {
                 other => panic!("{m}: expected a collapse or a white dwarf, got {other:?}"),
             }
         }
+    }
+
+    /// P11.T4's pinned white dwarfs: [`Remains::WhiteDwarf`] carries its bare core's last living
+    /// state, all core at the white dwarf's mass, with a core radius no larger than its radius. A
+    /// degenerate giant-branch core is the track's own structure there; a thermally pulsing AGB
+    /// core takes its white dwarf's luminosity and radius at formation ([`bare_core_light`]),
+    /// which from the Chandrasekhar mass are the zero-age helium star's of its mass.
+    #[test]
+    fn a_white_dwarf_s_remains_carry_its_bare_core() {
+        let draws = StarDraws::median();
+        let recipe = RemnantRecipe::default();
+        let z = solar().z_fit();
+        for m in [1.2, 3.0] {
+            let track = Track::full(SolarMasses::new(m), &solar(), &draws);
+            let phase = if m < 2.0 {
+                Phase::FirstGiantBranch
+            } else {
+                Phase::ThermallyPulsingAgb
+            };
+            let age = track
+                .age_in_phase(phase, 0.5)
+                .expect("the phase is on the track");
+            let Remains::WhiteDwarf {
+                phase: dwarf,
+                mass,
+                core,
+                core_radius,
+                ..
+            } = track.remains_at(age, 10.0, &draws, None)
+            else {
+                panic!("{m}: expected a white dwarf");
+            };
+            assert!(core.phase().is_living(), "{m}: {core:?}");
+            assert_eq!(core.mass(), mass, "{m}");
+            assert_eq!(core.core_mass(), mass, "{m}");
+            assert!(
+                core_radius <= core.radius(),
+                "{m}: {core_radius:?} in {core:?}"
+            );
+            if phase == Phase::ThermallyPulsingAgb {
+                let kind = WhiteDwarfCore::of(dwarf).expect("a white dwarf");
+                let (luminosity, radius) = bare_core_light(recipe, z, kind, mass);
+                assert_eq!(core.luminosity(), luminosity, "{m}");
+                assert_eq!(core.radius(), radius, "{m}");
+                assert_eq!(radius, white_dwarf_radius(recipe, mass), "{m}");
+            }
+        }
+        let kind = WhiteDwarfCore::CarbonOxygen;
+        let below = SolarMasses::new(1.3);
+        assert_eq!(
+            bare_core_light(recipe, z, kind, below),
+            (
+                white_dwarf::formation_luminosity(recipe, kind, below, z),
+                white_dwarf_radius(recipe, below)
+            )
+        );
+        let above = SolarMasses::new(1.49);
+        assert_eq!(
+            bare_core_light(recipe, z, kind, above),
+            (helium::zams_luminosity(above), helium::zams_radius(above))
+        );
     }
 
     /// P11.T4.k (ruling p11-supernova-pins, 2026-10-06; finding F8): a core whose naked helium
