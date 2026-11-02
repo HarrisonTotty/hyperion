@@ -17,7 +17,9 @@ use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::golden::f64_digest;
 use hyperion_testkit::order::assert_order_independent;
 
-use super::kepler_regime_hold::{apart, census_galaxies, census_radius, ly, records_within, years};
+use super::kepler_regime_hold::{
+    apart, census_galaxies, census_galaxies_under, census_radius, ly, records_within, years,
+};
 use super::*;
 use crate::GENERATOR_VERSION;
 use crate::galaxy::Population;
@@ -351,7 +353,11 @@ fn the_exact_orbits_heap_is_counted() {
         galaxy.centre_potential().heap_bytes(),
     );
     assert!(potential > 10_000, "{potential} bytes");
-    assert_eq!(galaxy.heap_bytes(), before + motion + potential);
+    // The potential is shared (P09.T28.d.c), so its own value is on the heap too.
+    assert_eq!(
+        galaxy.heap_bytes(),
+        before + motion + size_of::<CentrePotential>() + potential
+    );
     let kept = KeepCentreOrbits::new(&galaxy);
     let source = CentreMemberSource::new(&galaxy, &kept).expect("the fixture's centre builds");
     let placement = source.placement();
@@ -446,12 +452,25 @@ fn sort(hits: &mut [SystemHit]) {
 /// source chooses its cells by P09.T29's pads and skips members by their Kepler orbits' shells,
 /// and its hits equal a brute-force scan of every member within 0.2 ly on its exact orbit, for
 /// spheres within 0.1 ly of the black hole a decade either way, as P09.T29's fast test does under
-/// the two-body law.
+/// the two-body law: under every 25 hold, the series, and under every 27 hold, the arc from the
+/// epoch (P09.T28.d.c).
 #[test]
 fn the_centre_s_source_finds_what_a_scan_finds_on_the_exact_orbits() {
-    let galaxy = Galaxy::from_params(
+    for rules in [
+        GalaxyRules::of_version(GENERATOR_VERSION),
+        GalaxyRules::every_27_hold(),
+    ] {
+        the_centre_s_source_finds_what_a_scan_finds_under(rules);
+    }
+}
+
+/// [`the_centre_s_source_finds_what_a_scan_finds_on_the_exact_orbits`] in a galaxy built under
+/// `rules`.
+fn the_centre_s_source_finds_what_a_scan_finds_under(rules: GalaxyRules) {
+    let galaxy = Galaxy::from_params_with_rules(
         Seed::new(0x0929_0000_0000_0001),
         GalaxyParams::milky_way_like(),
+        rules,
     )
     .expect("the Milky Way fixture builds");
     let kept = KeepCentreOrbits::new(&galaxy);
@@ -462,7 +481,8 @@ fn the_centre_s_source_finds_what_a_scan_finds_on_the_exact_orbits() {
         .filter(|m| law_of(&Trajectory::new(&galaxy, **m)) == "spherical")
         .count();
     println!(
-        "{} members within 0.2 ly, {exact} on exact orbits",
+        "{:?}: {} members within 0.2 ly, {exact} on exact orbits",
+        rules.kepler_arc,
         members.len()
     );
     assert!(exact * 2 > members.len(), "{exact} of {}", members.len());
@@ -515,14 +535,22 @@ fn the_centre_s_source_finds_what_a_scan_finds_on_the_exact_orbits() {
 /// by law, the movers by count, the largest move, every mover finite, no record outside the exact
 /// law moved, every record within the walk's pad and its Kepler orbit's shell, and no placed record
 /// carved out (the loss cone's verdict reads the Kepler orbit, so the carve-outs are
-/// P09.T28.b.b's).
+/// P09.T28.b.b's). Under the version's rules, the series, and under every 27 hold, the arc from the
+/// epoch (P09.T28.d.c), in the three galaxies built under those rules.
 #[test]
-#[ignore = "slow: generates the grid's central cells of every layer for three galaxies, some \
-            minutes"]
+#[ignore = "slow: generates the grid's central cells of every layer for three galaxies twice, \
+            some minutes"]
 fn the_exact_orbit_s_census_near_the_black_hole() {
     for (label, galaxy) in census_galaxies() {
         let edge = galaxy.centre_motion().influence_radius().value();
         println!("{label}: edge {edge:.3} ly");
+        for layer in Layer::ALL {
+            census_of_the_layer(&galaxy, layer);
+        }
+    }
+    for (label, galaxy) in census_galaxies_under(GalaxyRules::every_27_hold()) {
+        let edge = galaxy.centre_motion().influence_radius().value();
+        println!("{label}, every 27 hold: edge {edge:.3} ly");
         for layer in Layer::ALL {
             census_of_the_layer(&galaxy, layer);
         }

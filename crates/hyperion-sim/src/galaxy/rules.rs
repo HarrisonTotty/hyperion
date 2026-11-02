@@ -14,6 +14,10 @@
 //!
 //! The holds, each a field:
 //!
+//! - [`kepler_arc`](GalaxyRules::kepler_arc), at [`KEPLER_ARC_VERSION`] (plan 09, P09.T28.d.c):
+//!   a non-circular exact orbit's state within half a radial period of the epoch by the arc from
+//!   the epoch. It is read where a trajectory is prepared (`Trajectory::new`), and reaches none of
+//!   the galaxy's memos.
 //! - [`field_share`](GalaxyRules::field_share), at [`FIELD_SHARE_VERSION`] (plan 09, P09.T2.c):
 //!   the field gives up the features' share φ of its systems. It is read where the galaxy is built,
 //!   which installs the field's factors, so `Galaxy::with_rules` refuses to change it.
@@ -104,6 +108,7 @@ use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureC
 use crate::galaxy::global_list::orphans::{ORPHAN_STREAMS_VERSION, OrphanStreamsRules};
 use crate::galaxy::global_list::spray::{ORPHAN_SPRAY_VERSION, OrphanSprayRules};
 use crate::galaxy::global_list::{LIST_SOURCE_VERSION, ListSourceRules};
+use crate::galaxy::motion::spherical::{KEPLER_ARC_VERSION, KeplerArcRules};
 use crate::galaxy::placement::{PLACEMENT_FATES_VERSION, PlacementFateRules};
 use crate::stellar::rules::StellarRules;
 
@@ -111,6 +116,9 @@ use crate::stellar::rules::StellarRules;
 /// (decision-galaxy-25-train §1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct GalaxyRules {
+    /// How an exact orbit takes its state: from the series at every time, or within half a radial
+    /// period of the epoch by the arc from the epoch (P09.T28.d.c).
+    pub(crate) kepler_arc: KeplerArcRules,
     /// Whether the field gives up the features' share φ of its systems (P09.T2.c).
     pub(crate) field_share: FieldShareRules,
     /// Whether the grid gives the catalogue classes their hosts (P09.T35).
@@ -161,6 +169,11 @@ impl GalaxyRules {
     #[must_use]
     pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
         Self {
+            kepler_arc: if version.get() >= KEPLER_ARC_VERSION.get() {
+                KeplerArcRules::Local
+            } else {
+                KeplerArcRules::Series
+            },
             field_share: if version.get() >= FIELD_SHARE_VERSION.get() {
                 FieldShareRules::Phi
             } else {
@@ -264,13 +277,14 @@ impl GalaxyRules {
     /// version's rules with the galaxy's holds at 27 (`orphan_streams`, P15.T11.b,
     /// `merger_channels`, P11.T8.c's missing channel, `binary_tables`, P15.T10.b, `class_source`,
     /// P09.T37.a, `feature_binaries`, P11.T8.f, `runaway_deaths`, P09.T33.b, `hypervelocity`,
-    /// P09.T34.b, `orphan_spray`, P10.T10.b's warm-up, `placement_fates`, P08.T12 at 27, and
-    /// `list_source`, P10.T10.b's registration with P10.T3.d.b, and those retargeted from 26,
-    /// `field_share`, P09.T2.c, `carve_out`, P09.T35, `feature_classes`, P09.T36, `merger_class`,
-    /// P11.T8.c–d, and `displaced`, P08.T12) and the stellar rules' `ia_explosion`, P11.T6,
-    /// `ns_accretion`, `heavy_donor`, `pinned_white_dwarfs` and `dwarf_limit`, P11.T4,
-    /// `awd_donors`, P11.T5's fix, `xrb_class`, P11.T5's and P11.T8.b's fix, `binary_kicks` and
-    /// `collapses`, P11.T10, and `merger_mass`, P11.T4.d ([`StellarRules::every_27_hold`]).
+    /// P09.T34.b, `orphan_spray`, P10.T10.b's warm-up, `placement_fates`, P08.T12 at 27,
+    /// `list_source`, P10.T10.b's registration with P10.T3.d.b, and `kepler_arc`, P09.T28.d.c, and
+    /// those retargeted from 26, `field_share`, P09.T2.c, `carve_out`, P09.T35, `feature_classes`,
+    /// P09.T36, `merger_class`, P11.T8.c–d, and `displaced`, P08.T12) and the stellar rules'
+    /// `ia_explosion`, P11.T6, `ns_accretion`, `heavy_donor`, `pinned_white_dwarfs` and
+    /// `dwarf_limit`, P11.T4, `awd_donors`, P11.T5's fix, `xrb_class`, P11.T5's and P11.T8.b's fix,
+    /// `binary_kicks` and `collapses`, P11.T10, and `merger_mass`, P11.T4.d
+    /// ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -526,9 +540,23 @@ mod tests {
             GalaxyRules::every_27_hold().list_source,
             ListSourceRules::Registered
         );
+        let arc = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).kepler_arc;
+        for v in [23, 24, 25, 26] {
+            assert_eq!(arc(v), KeplerArcRules::Series, "{v}");
+        }
+        assert_eq!(arc(27), KeplerArcRules::Local);
+        assert_eq!(
+            GalaxyRules::every_26_hold_with_its_retargets().kepler_arc,
+            KeplerArcRules::Series
+        );
+        assert_eq!(
+            GalaxyRules::every_27_hold().kepler_arc,
+            KeplerArcRules::Local
+        );
         assert_eq!(
             GalaxyRules::every_27_hold(),
             GalaxyRules {
+                kepler_arc: KeplerArcRules::Local,
                 orphan_streams: OrphanStreamsRules::Fitted,
                 merger_channels: MergerChannelRules::WithDynamical,
                 binary_tables: BinaryTableRules::Fitted,

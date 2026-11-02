@@ -40,7 +40,10 @@
 //! exactly, with the Schwarzschild advance on top ([`spherical`]), and one that is not keeps the
 //! [`KeplerOrbit`]: through [`Trajectory::new`], which [`position_velocity_at`] and the centre's
 //! source read. The Kepler orbit still sets the bounds read off it (the loss cone's verdict,
-//! P09.T28.c's radius, P09.T29's shells and pads), which hold the exact orbit too.
+//! P09.T28.c's radius, P09.T29's shells and pads), which hold the exact orbit too. From version 27
+//! (P09.T28.d.c, behind `KEPLER_ARC_VERSION`) an exact orbit not near a circle takes its state
+//! within half a radial period of the epoch by the arc from the epoch ([`spherical`]'s "The arc
+//! from the epoch").
 //!
 //! # The range query near the black hole (P09.T29)
 //!
@@ -102,8 +105,9 @@
 
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
 
-use self::spherical::{CentrePotential, SphericalOrbit};
+use self::spherical::{CentrePotential, KeplerArcRules, SphericalOrbit};
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::features::centre::members::CentreMemberRecord;
 use crate::galaxy::features::centre::{BuildCentreError, CentreProfile, LossCone};
@@ -1306,13 +1310,20 @@ enum Law {
 }
 
 impl Trajectory {
-    /// The trajectory of `start` in `galaxy`, under its regime's law (as [`position_velocity_at`]):
-    /// from generator version 25, [`in_potential`](Self::in_potential) in the galaxy's centre's
-    /// potential (P09.T28.d.b).
+    /// The trajectory of `start` in `galaxy`, under its regime's law as the galaxy's rules take it
+    /// (as [`position_velocity_at`]): from generator version 25,
+    /// [`in_potential`](Self::in_potential) in the galaxy's centre's potential (P09.T28.d.b), and
+    /// [`in_potential_by_arc`](Self::in_potential_by_arc) from version 27 (`KEPLER_ARC_VERSION`,
+    /// P09.T28.d.c).
     #[must_use]
     pub fn new(galaxy: &Galaxy, start: EpochState) -> Self {
         let motion = galaxy.centre_motion();
-        Self::in_potential(motion, galaxy.centre_potential(), start)
+        match galaxy.rules().kepler_arc {
+            KeplerArcRules::Series => Self::in_potential(motion, galaxy.centre_potential(), start),
+            KeplerArcRules::Local => {
+                Self::in_potential_by_arc(motion, galaxy.centre_potential(), start)
+            }
+        }
     }
 
     /// The trajectory of `start` about a galaxy's centre whose motion is `motion`
@@ -1389,6 +1400,90 @@ impl Trajectory {
         potential: &CentrePotential,
         start: EpochState,
     ) -> Self {
+        Self::exact_in(motion, potential, start, |orbit| {
+            SphericalOrbit::new(potential, orbit)
+        })
+    }
+
+    /// [`in_potential`](Self::in_potential), but that an exact orbit that is not near-circular
+    /// takes its state within half a radial period of the epoch by the arc from the epoch
+    /// ([`spherical::SphericalOrbit::by_arc`]; P09.T28.d.c, from version 27).
+    ///
+    /// An orbit on the arc keeps a clone of `potential`. A galaxy's law at its version is
+    /// [`new`](Self::new)'s; this is the arm itself, for the benches and the tests.
+    ///
+    /// # Examples
+    ///
+    /// A member 0.1 ly from the Milky Way's black hole at 1.6 times its Kepler orbit's circular
+    /// speed, bound only some 10⁴ ly out: a second on, the arc keeps it on the epoch state's
+    /// course, where the series alone is some 3 au off it.
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
+    /// use hyperion_sim::galaxy::Population;
+    /// use hyperion_sim::galaxy::motion::spherical::CentrePotential;
+    /// use hyperion_sim::galaxy::motion::{CentreMotion, EpochState, StateAt, Trajectory};
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    /// use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
+    /// use hyperion_sim::galaxy::potential::MassModel;
+    /// use hyperion_sim::id::{CentreMemberId, Layer, MemberSlot, SystemId};
+    /// use hyperion_sim::time::{Span, UniverseTime};
+    /// use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+    /// use hyperion_sim::units::{GravitationalParameter, LightYears, SolarMasses, Years};
+    ///
+    /// let params = GalaxyParams::milky_way_like();
+    /// let motion = CentreMotion::new(&params, &MassModel::new(&params))?;
+    /// let potential = Arc::new(CentrePotential::new(&motion));
+    /// let slot = MemberSlot::InCell { band: Layer::A, level: 4, cell: [0, 0, 0], index: 0 };
+    /// let record = SystemRecord::from_parts(
+    ///     SystemId::from(CentreMemberId::new(slot)?),
+    ///     GalacticPosition::from_light_years([0.1, 0.0, 0.0]).expect("in range"),
+    ///     SystemOrigin::CentreMember { attempt: 0 },
+    ///     Population::NuclearDisc,
+    ///     SolarMasses::new(1.0),
+    ///     Years::new(1e9),
+    /// );
+    /// let r = 0.1;
+    /// let mu = GravitationalParameter::from_solar_masses(motion.enclosed_mass(LightYears::new(r)));
+    /// let speed = 1.6 * (mu.value() / (r * METRES_PER_LIGHT_YEAR)).sqrt();
+    /// let velocity = GalacticVelocity::new([0.3 * speed, 0.95 * speed, 0.0]);
+    /// let start = EpochState::new(record, velocity)?;
+    /// let t = UniverseTime::EPOCH
+    ///     .checked_add(Span::from_seconds(1))
+    ///     .expect("in the clock window");
+    /// let at = |trajectory: Trajectory| match trajectory.state_at(t) {
+    ///     StateAt::Exists(state) => *state.position(),
+    ///     StateAt::NoSuchSystem => panic!("far from the loss cone"),
+    /// };
+    /// // A second along the Kepler orbit, whose pull at the epoch radius is the potential's.
+    /// let kepler = at(Trajectory::of(&motion, start));
+    /// let off = |p: GalacticPosition| p.distance_to(&kepler).value() / METRES_PER_LIGHT_YEAR;
+    /// assert!(off(at(Trajectory::in_potential_by_arc(&motion, &potential, start))) < 1e-12);
+    /// assert!(off(at(Trajectory::in_potential(&motion, &potential, start))) > 1e-5);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn in_potential_by_arc(
+        motion: &CentreMotion,
+        potential: &Arc<CentrePotential>,
+        start: EpochState,
+    ) -> Self {
+        Self::exact_in(motion, potential, start, |orbit| {
+            SphericalOrbit::by_arc(potential, orbit)
+        })
+    }
+
+    /// [`of`](Self::of)'s trajectory, but that a Kepler orbit with an `exact` orbit in
+    /// `potential` follows it.
+    #[must_use]
+    fn exact_in(
+        motion: &CentreMotion,
+        potential: &CentrePotential,
+        start: EpochState,
+        exact: impl FnOnce(&KeplerOrbit) -> Option<SphericalOrbit>,
+    ) -> Self {
         debug_assert!(
             (potential.black_hole().value()
                 / GravitationalParameter::from_solar_masses(motion.profile().black_hole()).value()
@@ -1398,10 +1493,9 @@ impl Trajectory {
             "the potential is the same centre's as the motion"
         );
         let law = match Self::of(motion, start).law {
-            Law::Kepler(orbit) => SphericalOrbit::new(potential, &orbit)
-                .map_or(Law::Kepler(orbit), |exact| {
-                    Law::Spherical(orbit, Box::new(exact))
-                }),
+            Law::Kepler(orbit) => exact(&orbit).map_or(Law::Kepler(orbit), |exact| {
+                Law::Spherical(orbit, Box::new(exact))
+            }),
             law @ (Law::Straight | Law::Still | Law::NoSuchSystem | Law::Spherical(..)) => law,
         };
         Self { start, law }
@@ -1417,6 +1511,9 @@ impl Trajectory {
     }
 
     /// The bytes it owns on the heap: its exact orbit's, if it has one, for P09.T29's cache.
+    ///
+    /// The centre's potential an orbit on the arc from the epoch holds is the galaxy's, shared, and
+    /// counted there ([`Galaxy::heap_bytes`]).
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         match &self.law {
@@ -1736,6 +1833,8 @@ pub mod secular;
 pub mod spherical;
 pub mod tidal;
 
+#[cfg(test)]
+mod kepler_arc_hold;
 #[cfg(test)]
 mod kepler_regime_hold;
 #[cfg(test)]

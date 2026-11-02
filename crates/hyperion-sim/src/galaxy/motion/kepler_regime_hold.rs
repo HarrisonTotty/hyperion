@@ -21,6 +21,7 @@ use hyperion_testkit::golden::f64_digest;
 use hyperion_testkit::order::assert_order_independent;
 
 use super::*;
+use crate::GENERATOR_VERSION;
 use crate::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use crate::galaxy::catalogue_classes::type_ia::TypeIaProcess;
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId, system_of};
@@ -34,6 +35,7 @@ use crate::galaxy::query::{
     count_cells_in_sphere, decide_census, expected_counts, kepler_pad_for, pad_for, pad_speed_in,
     position_at, range_query, sphere_for_layer, walk_pad,
 };
+use crate::galaxy::rules::GalaxyRules;
 use crate::id::{Layer, SystemId, SystemIdKind};
 use crate::rng::Seed;
 use crate::time::{ClockWindow, Span};
@@ -550,18 +552,29 @@ impl Ask {
 
 /// The census C1's galaxies: P09.T28.b.a's pre-pin's three, with their kinematic tables.
 pub(super) fn census_galaxies() -> [(&'static str, Galaxy); 3] {
+    census_galaxies_under(GalaxyRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`census_galaxies`] built under `rules`, for a census under holds that are read when a galaxy
+/// is built (P09.T28.d.c's, under every 27 hold).
+pub(super) fn census_galaxies_under(rules: GalaxyRules) -> [(&'static str, Galaxy); 3] {
     let drawn = |seed: u64| {
-        Galaxy::from_params(
+        Galaxy::from_params_with_rules(
             Seed::new(seed),
             GalaxyParams::from_seed(Seed::new(seed), MassFunctionKind::default()),
+            rules,
         )
         .expect("a drawn galaxy keeps half its gas neutral")
     };
     [
         (
             "milky_way_like",
-            Galaxy::from_params(Seed::new(MILKY_WAY_SEED), GalaxyParams::milky_way_like())
-                .expect("the Milky Way fixture builds"),
+            Galaxy::from_params_with_rules(
+                Seed::new(MILKY_WAY_SEED),
+                GalaxyParams::milky_way_like(),
+                rules,
+            )
+            .expect("the Milky Way fixture builds"),
         ),
         ("seed 0x5eed0000c0ffee00", drawn(PLUNGING_SEED)),
         ("seed 0x2", drawn(2)),

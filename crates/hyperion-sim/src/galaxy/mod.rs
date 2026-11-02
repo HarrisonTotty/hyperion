@@ -815,16 +815,19 @@ impl Galaxy {
     /// first read, as [`centre_motion`](Self::centre_motion) is, from that motion alone, in well
     /// under a millisecond once the motion is built: the same bits whichever caller reads it first
     /// and whenever, and the galaxy's equality and `Debug` text do not depend on whether it has
-    /// been read. The builders that carry the motion carry it, built or not.
+    /// been read. The builders that carry the motion carry it, built or not. It is shared, so that
+    /// an exact orbit whose state is taken by the arc from the epoch holds it (P09.T28.d.c).
     ///
     /// # Panics
     ///
     /// As [`centre_motion`](Self::centre_motion), which it reads.
     #[must_use]
-    pub(crate) fn centre_potential(&self) -> &motion::spherical::CentrePotential {
-        self.centre_potential
-            .0
-            .get_or_init(|| motion::spherical::CentrePotential::new(self.centre_motion()))
+    pub(crate) fn centre_potential(&self) -> &Arc<motion::spherical::CentrePotential> {
+        self.centre_potential.0.get_or_init(|| {
+            Arc::new(motion::spherical::CentrePotential::new(
+                self.centre_motion(),
+            ))
+        })
     }
 
     /// The galaxy-side holds' arms this galaxy takes, which each held call site reads its field of
@@ -978,11 +981,9 @@ impl Galaxy {
                 // is not lost, `centre` returns it at every read.
                 .and_then(|built| built.as_deref().ok())
                 .map_or(0, |model| size_of::<CentreModel>() + model.heap_bytes())
-            + self
-                .centre_potential
-                .0
-                .get()
-                .map_or(0, motion::spherical::CentrePotential::heap_bytes)
+            + self.centre_potential.0.get().map_or(0, |potential| {
+                size_of::<motion::spherical::CentrePotential>() + potential.heap_bytes()
+            })
             + self
                 .kinematics
                 .as_ref()
@@ -1090,9 +1091,10 @@ impl fmt::Debug for CentreModelCell {
     }
 }
 
-/// [`Galaxy::centre_potential`]'s value, built when first read, as [`CentreMotionCell`] is.
+/// [`Galaxy::centre_potential`]'s value, built when first read, as [`CentreMotionCell`] is; shared,
+/// as the exact orbits under the arc from the epoch hold it (P09.T28.d.c).
 #[derive(Clone, Default)]
-struct CentrePotentialCell(OnceLock<motion::spherical::CentrePotential>);
+struct CentrePotentialCell(OnceLock<Arc<motion::spherical::CentrePotential>>);
 
 /// Equal always, as [`CentreMotionCell`]: the potential is a pure function of the centre's
 /// motion, itself one of what the galaxy's equality compares.

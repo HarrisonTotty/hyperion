@@ -1263,6 +1263,8 @@ hundred innermost members.
       field in the every-27 list and the tripwire `the_kepler_arc_is_held_only_until_the_27_bump`
       (decision-galaxy-25-train §1.3's pattern). Under `Series`, T28.d.b's code verbatim, no golden
       changes; it reaches generated output only through T28.b.b's and T28.d.b's holds.
+    - _Built behind its hold (lane `fix-p09-t28d-local-arc`, 2026-11-02, at `GENERATOR_VERSION`
+      24, no output moved): see Risks, "P09.T28.d.c as built"._
 
 #### P09.T29 The range query at the centre
 
@@ -5977,3 +5979,28 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Digests._ `ENTRIES_DIGEST` and `CENTRE_ENTRIES_DIGEST` re-pinned (places and velocities).
   - _Test (slow)._ `verification::recent_in_range::a_listed_core_collapse_moves_on_its_remnant_s_kick_under_every_27_hold`,
     which failed on BASE at all 90 kicked places.
+- **P09.T28.d.c as built (lane `fix-p09-t28d-local-arc`, 2026-11-02, behind `KEPLER_ARC_VERSION`
+  = 27; no output moved at 24–26).**
+  - _Names._ `motion::spherical::{KEPLER_ARC_VERSION, KeplerArcRules::{Series, Local}}`,
+    `GalaxyRules::kepler_arc`; `SphericalOrbit::by_arc(&Arc<CentrePotential>, &KeplerOrbit)` and
+    `Trajectory::in_potential_by_arc(&CentreMotion, &Arc<CentrePotential>, EpochState)`, read by
+    `Trajectory::new`'s one `match`; `SphericalOrbit::new` and `Trajectory::in_potential` stay the
+    series. `Galaxy::centre_potential()` now returns `&Arc<CentrePotential>`, and the galaxy's
+    `heap_bytes` counts the shared value too; an orbit on the arc holds a clone, counted there.
+  - _Deviation (lean, 2026-11-02)._ The arc's η₀ is its own, from ln r₀ and the turning points
+    (`tan(η₀ ÷ 2) = √((ln r₀ − ln r_p) ÷ (ln r_a − ln r₀))`), not the series': the series' η₀ is
+    the wide orbits' miss (from it the arc erred as the series does), so the series' state jumps
+    at the epoch on them, some 3 au a second on the ×1.6 orbit from 0.1 ly.
+  - _Leans, measured (figures in the lane's outbox)._ The half-period span, the split at a turning
+    point, three quadratures, and `ARC_FLOOR`'s limit within F's rounding of a turning point.
+  - _Lean: the arc from Δ 0.03 (`ARC_LEAST_RANGE`)._ Nearer a circle F is too small beside its
+    terms for nodes near a turning point, and the series is the more exact, so the orbit keeps it
+    (`the_arc_meets_the_plan_s_bound_near_a_circle`).
+  - _The solve._ The wobble's bracket is cut to a radial period on the epoch's side; a state that
+    rounds non-finite, or a root off by more than `ARC_RESIDUAL` allows, takes the series.
+  - _For the 27 bump._ It re-blesses `galaxy/motion/centre_motion.golden`
+    (`centre_motion_figures_are_pinned`) and the slow `galaxy/motion/regime.golden`
+    (`regime_records_near_the_centre_are_pinned`), both 25's re-blesses too; no other golden of
+    the fast suite moves (checked by blessing with the 25 holds forced on and testing with the arc
+    on). It deletes the tripwire `the_kepler_arc_is_held_only_until_the_27_bump`, the `Series` arm
+    and the plan's test's 25 figures.
