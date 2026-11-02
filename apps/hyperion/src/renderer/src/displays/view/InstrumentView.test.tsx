@@ -719,7 +719,7 @@ describe("VIEW's instruments in the server's scene (R07.T19)", () => {
     expect(await nextReport(view)).toBe(2);
   });
 
-  it("states an instrument's camera limit at the primary's exposure, held to the sky's cut (R07.T13.e; R06.T13.i)", async () => {
+  it("states an instrument's camera limit at the primary's exposure, under its camera sky's cut (R07.T13.e; R06.T13.i)", async () => {
     vi.stubGlobal("Worker", InThreadSkyWorker);
     const view = await serverScene();
     await skyArrives(view);
@@ -729,7 +729,7 @@ describe("VIEW's instruments in the server's scene (R07.T19)", () => {
     await view.user.keyboard("15{Enter}");
     view.advance(300);
     expect([atDefault, instrumentStars("INSTRUMENT 1")]).toEqual([
-      "V 9.5 mag CAM",
+      "V 9.6 mag CAM",
       "V 2.6 mag CAM",
     ]);
   });
@@ -785,11 +785,12 @@ function starsLines(instruments: ReadonlyArray<string>): Array<string | null> {
 }
 
 /**
- * The primary eye's and an instrument camera's limits at the default exposure: the camera's held to
- * the eye's sky's cut, V 9.5, where its own over the fixture's band is 9.6 at 60° (R06.T13.i).
+ * The camera limit at the default exposure over the fixture's band at 60°, under the cut of the sky
+ * the primary's camera asks (R06.T13.i): the primary's and an instrument's alike, both cameras at
+ * 60° (ux-calls-view, item 3a), so these tests tell the two lines apart by their notes alone; an
+ * eye's own limit is `useViewSky.test.tsx`'s.
  */
-const EYE = "V 7.4 mag EYE";
-const CAM = "V 9.5 mag CAM";
+const CAM = "V 9.6 mag CAM";
 /** The fixture reply's one gap, as the line names it. */
 const LEFT_OUT = "CLUSTERS: NOT YET MODELLED";
 
@@ -810,8 +811,8 @@ describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", (
     const streaming = starsLines([]);
     await skyReplyAt(view, [null, null, null], true);
     expect([streaming, starsLines([])]).toEqual([
-      [`${EYE} · BEYOND 2000 ly: STREAMING · ${LEFT_OUT}`],
-      [`${EYE} · ${LEFT_OUT}`],
+      [`${CAM} · BEYOND 2000 ly: STREAMING · ${LEFT_OUT}`],
+      [`${CAM} · ${LEFT_OUT}`],
     ]);
   });
 
@@ -832,7 +833,7 @@ describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", (
       field?.querySelector(".stale-mark")?.textContent,
       reading.classList.contains("stale"),
     ]).toEqual([
-      `V 7.4 mag Sstale EYE · BEYOND 2000 ly Sstale: STREAMING · ${LEFT_OUT}`,
+      `V 9.6 mag Sstale CAM · BEYOND 2000 ly Sstale: STREAMING · ${LEFT_OUT}`,
       true,
       true,
       "S",
@@ -854,8 +855,8 @@ describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", (
       await skyReplyAt(view, [null, null, null], true);
       const each = instruments.map(() => `${CAM} · ${LEFT_OUT}`);
       expect([streaming, starsLines(instruments)]).toEqual([
-        [`${EYE} · BEYOND 16,000 ly: STREAMING`, ...each],
-        [`${EYE} · ${LEFT_OUT}`, ...each],
+        [`${CAM} · BEYOND 16,000 ly: STREAMING`, ...each],
+        [`${CAM} · ${LEFT_OUT}`, ...each],
       ]);
     },
   );
@@ -880,14 +881,14 @@ describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", (
     view.advance(300);
     await settle();
     expect([unsized, starsLines(["INSTRUMENT 1"])]).toEqual([
-      [`${EYE} · ${LEFT_OUT}`, STAR_SOURCE],
-      [`${EYE} · BEYOND 2000 ly: STREAMING`, `${CAM} · ${LEFT_OUT}`],
+      [`${CAM} · ${LEFT_OUT}`, STAR_SOURCE],
+      [`${CAM} · BEYOND 2000 ly: STREAMING`, `${CAM} · ${LEFT_OUT}`],
     ]);
   });
 });
 
 describe("VIEW's star limits while the link is down (R06.T13.j)", () => {
-  it("mutes the primary eye's limit and an instrument camera's, each S after its unit and before its kind", async () => {
+  it("mutes the primary's camera limit and an instrument's, each S after its unit and before its kind", async () => {
     vi.stubGlobal("Worker", InThreadSkyWorker);
     const view = await serverScene();
     await openInstrument(view, "INSTRUMENT 1");
@@ -910,8 +911,8 @@ describe("VIEW's star limits while the link is down (R06.T13.j)", () => {
       },
     );
     expect(limits).toEqual([
-      [`V 7.4 mag Sstale EYE · ${LEFT_OUT}`, "V 7.4 mag", "S", " EYE", false],
-      [`V 9.5 mag Sstale CAM · ${LEFT_OUT}`, "V 9.5 mag", "S", " CAM", false],
+      [`V 9.6 mag Sstale CAM · ${LEFT_OUT}`, "V 9.6 mag", "S", " CAM", false],
+      [`V 9.6 mag Sstale CAM · ${LEFT_OUT}`, "V 9.6 mag", "S", " CAM", false],
     ]);
   });
 
@@ -927,8 +928,8 @@ describe("VIEW's star limits while the link is down (R06.T13.j)", () => {
       },
     );
     expect(limits).toEqual([
-      ["V 7.4 mag", "13ch", null],
-      ["V 9.5 mag", "13ch", null],
+      ["V 9.6 mag", "13ch", null],
+      ["V 9.6 mag", "13ch", null],
     ]);
   });
 
@@ -944,7 +945,7 @@ describe("VIEW's star limits while the link is down (R06.T13.j)", () => {
         ),
     );
     expect(parts).toEqual([
-      [EYE, "· BEYOND 2000 ly: STREAMING"],
+      [CAM, "· BEYOND 2000 ly: STREAMING"],
       [CAM, `· ${LEFT_OUT}`],
     ]);
   });

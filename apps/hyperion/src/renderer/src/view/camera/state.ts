@@ -35,8 +35,14 @@ export type CameraPreset = "seat" | "chase" | "free";
 export type RenderStyle = "wireframe" | "photorealistic";
 
 /**
- * What a view stands for: `eye` for the single-player cockpit view, whose star limits are a human
- * eye's, and `camera` for every other view (R06's star limits read it).
+ * What a view stands for: `camera` for a ship's camera feed, every view a display draws (`VIEW`'s
+ * primary and its instruments, the main screen's), and `eye` for a view seen by eye through a
+ * ship's window, whose star limits and glare are a human eye's (R06's star limits, R07's glare and
+ * the host discs' reach read it).
+ *
+ * @remarks
+ * No display offers a view through a window yet; the role is kept for one (ux-calls-view, item 3a,
+ * the owner's delegated call, 2026-11-01).
  */
 export type ViewRole = "eye" | "camera";
 

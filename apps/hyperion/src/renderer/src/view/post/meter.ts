@@ -31,8 +31,9 @@ export type MeterClass = (typeof METER_CLASS)[keyof typeof METER_CLASS];
  * this many counts for a pixel of that class.
  *
  * @remarks
- * Every mode gives the host disc 0, so the exposure does not step when the star enters the frame
- * (brainstorm, "Exposure and tone mapping").
+ * Every mode gives the host disc 0, so the disc's own light never steps the exposure as the star
+ * enters the frame (brainstorm, "Exposure and tone mapping"); its glare's veil, which the histogram
+ * weighs, does in a camera view, whole once the disc touches the frame (`histogram.wgsl`).
  */
 export function meterWeights(mode: MeterMode): readonly [number, number, number, number] {
   let weights: readonly [number, number, number, number];

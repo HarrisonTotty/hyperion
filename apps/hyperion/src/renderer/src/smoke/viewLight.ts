@@ -9,9 +9,13 @@
  * Four framings, each settled and captured with its verdict:
  *
  * - (a) `LIT` on the crescent planet with the Sun at the frame's left edge: the disc saturated
- *   (sRGB 250 or more), the sky beyond 30° from the Sun no brighter than the closed form at 30°
- *   (the brief's code 32 is a finding: the eye's tail is drawn whole); and the same
- *   framing turned 1.1° so that the Sun is just outside, whose exposure is within 0.3 EV of it.
+ *   (sRGB 250 or more), the sky beyond 30° from the Sun below code 32, the brief's figure, and no
+ *   brighter than the closed form at 30°; and the same framing turned 1.1° so that the Sun is just
+ *   outside, whose lit planet's shown light is within 0.3 EV of it. The view is this model's camera
+ *   (`startRun`, `disc.ts`; ux-calls-view, item 3a), whose glare is whole while the disc is in
+ *   frame and none once it is out, so the exposure steps by the veil's share over the lit side as
+ *   the Sun leaves, 0.32 EV here (EV100 13.91 against 13.59, a pod run of 2026-11-01), and the
+ *   planet as shown does not.
  * - (b) The first framing under `AVG`: the frame's median below code 128, the disc saturated.
  * - (c) The Sun alone in a dark field under `AVG`: the frame's median below code 64, the white
  *   frame's regression capture.
@@ -43,7 +47,7 @@ import { DEFAULT_EYE_OBSERVER } from "../view/sky/eye";
 import { AutoExposure } from "../view/post/autoExposure";
 import type { Histogram } from "../view/post/histogram";
 import { METER_CLASS, type MeterMode } from "../view/post/meter";
-import { viewId } from "../view/camera/state";
+import { type ViewRole, viewId } from "../view/camera/state";
 import { phasePlanetDirection, phaseScene } from "../view/scenes/phaseScene";
 import { HostDiscLayer } from "../view/sky/disc";
 import { emptyDrawList, viewStrokesAt } from "../view/wireframe/drawList";
@@ -116,9 +120,12 @@ interface Settled {
   readonly firstPresentedEv100: number;
   readonly srgb: Uint8Array;
   readonly hdr: Float32Array;
-  /** The last presented frame's glare sources and pre-exposure, for the halo's closed form. */
+  /**
+   * The last presented frame's glare sources, pre-exposure and role, for the halo's closed form.
+   */
   readonly glare: ReadonlyArray<GlareSource>;
   readonly preExposure: number;
+  readonly role: ViewRole;
 }
 
 /** Waits for the renderer's next histogram, read back after its frame's copy has settled. */
@@ -226,6 +233,7 @@ async function settle(
     hdr: halfTexels(await engine.readTexture(colours.drawn)),
     glare,
     preExposure,
+    role: run.camera.role,
   };
 }
 
@@ -246,7 +254,7 @@ interface ProfilePoint {
  */
 function haloProfile(settled: Settled, framing: Framing): ProfilePoint[] {
   const toStar = rotateInto(framing, TO_STAR);
-  const terms = glareSpreadTerms("eye", DEFAULT_EYE_OBSERVER);
+  const terms = glareSpreadTerms(settled.role, DEFAULT_EYE_OBSERVER);
   const bins = PROFILE_DEG.map((): number[] => []);
   for (let y = 0; y < VIEWPORT.heightPx; y += 1) {
     for (let x = 0; x < VIEWPORT.widthPx; x += 1) {
@@ -279,7 +287,7 @@ function haloProfile(settled: Settled, framing: Framing): ProfilePoint[] {
 function closedFormCode(
   settled: Settled,
   deg: number,
-  terms = glareSpreadTerms("eye", DEFAULT_EYE_OBSERVER),
+  terms = glareSpreadTerms(settled.role, DEFAULT_EYE_OBSERVER),
 ): number {
   const theta = (deg * Math.PI) / 180;
   const light: [number, number, number] = [0, 0, 0];
@@ -291,6 +299,33 @@ function closedFormCode(
   }
   const [, g] = tonemapTexel(light, 1, null);
   return Math.round(g * 255);
+}
+
+/**
+ * The light, as exposed, that the tone curve and the encoding give a grey's green `code` (the
+ * centre of its rounding), found by bisection over 2⁻³⁰ to 2²⁰: `tonemapTexel`'s inverse, in the
+ * exposure's units; `NaN` for a code that is not finite or lies outside 1 to 250, AgX's range
+ * (its ceiling is code 250.6), which bounds the light without giving it, so that a check of a step
+ * between two of them fails rather than passes on nothing measured.
+ */
+function shownLightOfCode(code: number): number {
+  if (!Number.isFinite(code) || code < 1 || code > 250) {
+    return Number.NaN;
+  }
+  const target = code / 255;
+  let lowLog2 = -30;
+  let highLog2 = 20;
+  for (let step = 0; step < 60; step += 1) {
+    const midLog2 = (lowLog2 + highLog2) / 2;
+    const light = 2 ** midLog2;
+    const [, g] = tonemapTexel([light, light, light], 1, null);
+    if (g < target) {
+      lowLog2 = midLog2;
+    } else {
+      highLog2 = midLog2;
+    }
+  }
+  return 2 ** ((lowLog2 + highLog2) / 2);
 }
 
 /** A profile as a check's detail: `deg°: measured/closed form`. */
@@ -395,7 +430,8 @@ export async function captureViewLight(
     }
   >();
   try {
-    await renderer.prepare(VIEWPORT, "high", "eye", {
+    // The view's role as its runs start, a camera's (`startRun`).
+    await renderer.prepare(VIEWPORT, "high", startRun(phaseScene()).camera.role, {
       orientation: lookAlong(SUN_IN_FRAME.forward, SUN_IN_FRAME.up),
       fovXRad: FOV_DEG * RAD_PER_DEG,
     });
@@ -431,20 +467,26 @@ export async function captureViewLight(
   const outside = results.get("a-lit-sun-just-outside");
   const b = results.get("b-avg-sun-in-frame");
   const c = results.get("c-avg-sun-alone");
-  // The brief's figure for the sky beyond 30°, code 32, was set before the eye's tail was drawn
-  // whole; the sky is held to the closed form there instead, and the figure logged.
   const atThirty = a === undefined ? Number.NaN : closedFormCode(a.settled, 30);
   checks.check(
-    "fix-view-light (a) LIT with the Sun in frame: the disc saturated, the sky beyond 30° no brighter than the closed form at 30°",
-    a !== undefined && a.figures.disc >= 250 && a.figures.farSky <= atThirty + 3,
+    "fix-view-light (a) LIT with the Sun in frame: the disc saturated, the sky beyond 30° below code 32 and no brighter than the closed form at 30°",
+    a !== undefined &&
+      a.figures.disc >= 250 &&
+      a.figures.farSky < 32 &&
+      a.figures.farSky <= atThirty + 3,
     `${said("a-lit-sun-in-frame")}; the closed form at 30° ${String(atThirty)}`,
   );
+  // The lit planet as shown, its median code taken back through the tone curve, not the exposure,
+  // which steps by the camera's veil over the lit side as the Sun leaves the frame (the module's
+  // remarks).
+  const litStepEv =
+    a === undefined || outside === undefined
+      ? Number.NaN
+      : Math.log2(shownLightOfCode(a.figures.lit) / shownLightOfCode(outside.figures.lit));
   checks.check(
-    "fix-view-light (a) LIT's exposure within 0.3 EV of the same framing with the Sun just outside",
-    a !== undefined &&
-      outside !== undefined &&
-      Math.abs(a.settled.ev100 - outside.settled.ev100) <= 0.3,
-    said("a-lit-sun-just-outside"),
+    "fix-view-light (a) LIT's lit planet as shown within 0.3 EV of the same framing with the Sun just outside",
+    Math.abs(litStepEv) <= 0.3,
+    `${said("a-lit-sun-just-outside")}; the lit planet's step ${litStepEv.toFixed(2)} EV`,
   );
   checks.check(
     "fix-view-light (b) AVG with the Sun in frame: the frame's median below code 128, the disc saturated",

@@ -10090,3 +10090,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   (`InspectionTimingWindowName`), is measured there, where the cascades' weight is above 0 and
   `terrain shadows` draws on high. The timing file's shape is unchanged (version 1). Pending: the
   owner's Mac profile, for R14.T6.b's gain.
+- **VIEW's primary is a camera (ux-calls-view, item 3a, the owner's delegated call, 2026-11-01).**
+  `startRun` and `startServerRun` now make the `camera` role, so the primary takes the camera's
+  glare, no host disc's from outside its frame, and the camera's sky (`camera_limit_v`, `STARS V …
+  mag CAM`), as the instruments do. `eye` is kept for a view through a ship's window, which no
+  display offers yet. T13.e's "Who asks a camera's limit" is superseded: the primary sends
+  `camera_limit_v`. Pending: the owner's RTX and M5 runs of the deeper sky's reply and the frame's
+  cost, 1080p high.

@@ -106,13 +106,17 @@ interface SkyProps {
 }
 
 /** The view's sky for the camera run, over a welcomed link, at an exposure and a setting. */
-function renderViewSky(exposure: ExposureControl, setting: QualitySetting = "high") {
+function renderViewSky(
+  exposure: ExposureControl,
+  setting: QualitySetting = "high",
+  run: ViewRun = RUN,
+) {
   const hook = renderHook(
     (props: SkyProps) =>
       useViewSky({
         universe: UNIVERSE,
         place: chartedPlace(),
-        run: RUN,
+        run,
         exposure: props.exposure,
         widthPx: 1_920,
         setting,
@@ -201,6 +205,20 @@ describe("a camera view's sky", () => {
     const { socket } = renderViewSky(exposure);
     const limitV = socket.requestsOfKind("sky").at(-1)?.body.camera_limit_v ?? Number.NaN;
     expect(Math.round(limitV * 100) / 100).toBe(10.15);
+  });
+
+  it("is asked for VIEW's primary as a camera's, at V 10.15 at 60° with no eye, at the setting's N_max (ux-calls-view, item 3a)", () => {
+    const primary = startServerRun(SCENE);
+    const { socket } = renderViewSky(DEFAULT_EXPOSURE, "high", {
+      ...primary,
+      camera: { ...primary.camera, fovDeg: 60 },
+    });
+    const body = socket.requestsOfKind("sky").at(-1)?.body;
+    expect([
+      body?.eye,
+      Math.round((body?.camera_limit_v ?? Number.NaN) * 100) / 100,
+      body?.n_max,
+    ]).toEqual([null, 10.15, 300_000]);
   });
 
   it("is not asked again as AUTO steps and MAN is entered once it is held", async () => {
@@ -448,8 +466,14 @@ describe("a view's star limit while the link is down (R06.T13.j)", () => {
     vi.useRealTimers();
   });
 
-  /** An eye view of the server's scene at 60°, the `PRIMARY` view's role. */
+  /** An eye view of the server's scene at 60°: a window's role, which no display draws yet. */
   function eyeRun(): ViewRun {
+    const run = startServerRun(SCENE);
+    return { ...run, camera: { ...run.camera, fovDeg: 60, role: "eye" } };
+  }
+
+  /** The `PRIMARY` view of the server's scene at 60°, a ship's camera (ux-calls-view, item 3a). */
+  function primaryRun(): ViewRun {
     const run = startServerRun(SCENE);
     return { ...run, camera: { ...run.camera, fovDeg: 60 } };
   }
@@ -509,6 +533,7 @@ describe("a view's star limit while the link is down (R06.T13.j)", () => {
   it.each([
     { kind: "an eye", run: eyeRun, limit: "V 7.4 mag", line: "V 7.4 mag EYE" },
     { kind: "a camera", run: cameraRun, limit: "V 9.6 mag", line: "V 9.6 mag CAM" },
+    { kind: "the primary's camera", run: primaryRun, limit: "V 9.6 mag", line: "V 9.6 mag CAM" },
   ])(
     "reads $kind's limit muted with its S on the primary's line and an instrument's, the sky still drawn",
     async ({ run, limit, line }) => {

@@ -1173,13 +1173,16 @@ describe("the VIEW display's server scene", () => {
     view.advance(300);
     await settle();
     const after = labelBlock();
+    // The primary is a ship's camera, so its sky is asked at the camera's black-sky limit, V 10.15
+    // at 60°, with no eye (ux-calls-view, item 3a).
     expect([
       before,
-      sky.body.eye?.field_factor,
+      sky.body.eye,
+      Math.round((sky.body.camera_limit_v ?? Number.NaN) * 100) / 100,
       sky.body.exclude_system,
-      after.includes("V 7.4 mag EYE · CLUSTERS: NOT YET MODELLED"),
+      after.includes("V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED"),
       after.includes(STAR_SOURCE),
-    ]).toEqual(["PENDING", 1.4, ELSEWHERE, true, false]);
+    ]).toEqual(["PENDING", null, 10.15, ELSEWHERE, true, false]);
   });
 
   it("names a system from a server that states no place by its ID, with no stars", async () => {

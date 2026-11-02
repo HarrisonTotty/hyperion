@@ -7,9 +7,19 @@ import { DISC_ANNULI_HIGH } from "../../view/lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH } from "../../view/lighting/planetshine";
 import { lightingFramesOf } from "../../view/lighting/retarded";
 import { DEFAULT_EXPOSURE, controlEv100, exposureScale } from "../../view/photometry/exposure";
-import { PHASE_GIANT, PHASE_PLANETS, PHASE_STAR, phaseScene } from "../../view/scenes/phaseScene";
+import {
+  PHASE_GIANT,
+  PHASE_PLANETS,
+  PHASE_STAR,
+  phasePlanetDirection,
+  phaseScene,
+} from "../../view/scenes/phaseScene";
 import { HostDiscLayer, NO_AIR } from "../../view/sky/disc";
-import { buildWireframeDrawList, viewStrokesAt } from "../../view/wireframe/drawList";
+import {
+  buildWireframeDrawList,
+  emptyDrawList,
+  viewStrokesAt,
+} from "../../view/wireframe/drawList";
 import { vec3 } from "../../geometry/vec3";
 import { FIXTURE_EARTH, FIXTURE_JUPITER } from "../../test/planetaryFixture";
 import { lavaWorldSurface } from "../../test/thermalSurfaces";
@@ -34,7 +44,8 @@ import { AtmosphereTables } from "../../view/atmosphere/tables";
 import type { FrameAtmosphere } from "../../view/photoreal/renderer";
 import { type DiscAir, glareDiscAir } from "../../view/post/glareAir";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
-import { IDENTITY_QUATERNION } from "../../view/camera/quaternion";
+import { IDENTITY_QUATERNION, lookAlong } from "../../view/camera/quaternion";
+import type { ViewRole } from "../../view/camera/state";
 import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import type { TextureHandle } from "../../view/engine/types";
 import type { ClassMapSource } from "../../view/terrain/classMap";
@@ -234,8 +245,41 @@ describe("a photorealistic frame of the phase scene", () => {
   it("draws no sky without one, and takes the camera's role and field", async () => {
     const frame = await frameOfPhaseScene();
     expect(frame.sky).toEqual([]);
-    expect(frame.role).toBe("eye");
+    expect(frame.role).toBe("camera");
     expect(frame.camera.fovXRad).toBeCloseTo(Math.PI / 3, 12);
+  });
+
+  it("frames VIEW's primary as a ship's camera, which takes no glare from the Sun 5° outside it, where a window's eye would (ux-calls-view, item 3a)", async () => {
+    const engine = await countingRenderEngine();
+    const start = startRun(phaseScene());
+    // Looking 35° from the Sun across a 60° field puts its disc 5° outside the frame's left edge.
+    const pose = {
+      ...start.camera.pose,
+      orientation: lookAlong(phasePlanetDirection(180 - 35), vec3(0, 1, 0)),
+    };
+    const frameAs = (role: ViewRole) =>
+      photorealFrame({
+        run: { ...start, camera: { ...start.camera, role, pose, style: "photorealistic" } },
+        pose,
+        viewport: VIEWPORT,
+        presentedPx: VIEWPORT,
+        setting: "high",
+        exposureScale: exposureScale(controlEv100(DEFAULT_EXPOSURE)),
+        list: emptyDrawList(viewStrokesAt(1)),
+        sky: null,
+        band: null,
+        discs: new HostDiscLayer(engine),
+        cube: null,
+        previousRegimes: new Map(),
+        overlay: null,
+        meter: "average",
+      });
+    const primary = frameAs(start.camera.role);
+    expect([primary.role, primary.glareSources, frameAs("eye").glareSources.length]).toEqual([
+      "camera",
+      [],
+      1,
+    ]);
   });
 
   it("carries the presented size beside its own viewport, for the hand-over's pixel (R10.T10.g)", async () => {

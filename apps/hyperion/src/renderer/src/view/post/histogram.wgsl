@@ -6,10 +6,12 @@
 // A pixel's luminance is the light the optic delivers there: its stored value plus every glare
 // source's veil at it, of the source's whole light, which no pre-exposure changes (`glare_per_unit`
 // from `glare.wgsl`, with the frame's view rotation and projection as the tone-mapping pass reads
-// them). The host disc's own pixels still weigh nothing, so the exposure does not step as the star
-// enters the frame: its veil rises smoothly as it nears. The bloom chain's gathered light is left
-// out: the chain only moves the weighed texels' light, conserving it, and leaves the disc's texels
-// out, whose light the veil of the whole light holds.
+// them). The host disc's own pixels still weigh nothing, so the disc's own light never steps the
+// exposure; its veil does by its role (`disc.ts`): an eye view's rises smoothly over its 45° reach
+// beyond the frame, and a camera view's, every console view's, stands whole as soon as the disc
+// touches the frame and is gone once it leaves (ux-calls-view, item 3a). The bloom chain's gathered
+// light is left out: the chain only moves the weighed texels' light, conserving it, and leaves the
+// disc's texels out, whose light the veil of the whole light holds.
 //
 // Concatenated after `glare.wgsl`. Its CPU twin is `cpuHistogram` in `histogram.ts`, which the smoke
 // harness compares bin for bin.

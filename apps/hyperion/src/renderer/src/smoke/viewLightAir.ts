@@ -12,8 +12,9 @@
  * glare dimmed by the air (`frameGlareAir`), and, for the owner's comparison, its glare as it was
  * before, the disc's light as the frame's bodies leave it (`NO_AIR`). Each records the factor the
  * air gives the glare's light (`discLightThroughAir`); the composite's on the disc, the drawn disc's
- * light over the scene's before the composite, summed over the disc's texels, which the glare's is
- * held to within 5% in each channel whose factor is 10⁻³ or more (below it the sky the air scatters
+ * light over the scene's before the composite, summed over the disc's texels in a frame drawn at
+ * an exposure that holds the disc inside the target's range (`DISC_IN_RANGE_EV100`), which the
+ * glare's is held to within 5% in each channel whose factor is 10⁻³ or more (below it the sky the air scatters
  * onto the disc's pixels is a share of their light: 12% in blue at 1°, and all of it at 0°); and
  * the halo's radial profile, the sky's median green code at angles from 1° to 24°, against the
  * median of each such pixel's own light plus the closed form's veil, times the transmittance,
@@ -23,13 +24,13 @@
  */
 
 import { photorealFrame, frameGlareAir } from "../displays/view/photorealFrame";
-import { startRun } from "../displays/view/viewRun";
+import { startRun, type ViewRun } from "../displays/view/viewRun";
 import { add, norm, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
 import { AtmosphereTables } from "../view/atmosphere/tables";
 import type { CameraPose } from "../view/camera/pose";
 import type { Viewport } from "../view/camera/projection";
 import { conjugate, lookAlong, rotate } from "../view/camera/quaternion";
-import { viewId } from "../view/camera/state";
+import { type ViewRole, viewId } from "../view/camera/state";
 import type { RenderEngine, RenderView } from "../view/engine/types";
 import {
   controlEv100,
@@ -163,9 +164,8 @@ interface Settled {
   readonly ev100: number;
   readonly frames: number;
   readonly srgb: Uint8Array;
-  /** The frame's texels after the composite, and the scene's before it, pre-exposed. */
+  /** The frame's texels after the composite, pre-exposed. */
   readonly drawn: Float32Array;
-  readonly scene: Float32Array;
   /** The last presented frame, as drawn. */
   readonly frame: PhotorealFrame;
   /** Its glare sources as they were before the air was taken (`clearSources`). */
@@ -205,6 +205,96 @@ function clearSources(frame: PhotorealFrame, discs: HostDiscLayer): GlareSource[
   );
 }
 
+/** `framing`'s run, its camera placed and turned to the Sun, and its pose. */
+function framingRun(framing: Framing): { readonly run: ViewRun; readonly pose: CameraPose } {
+  const start = startRun(atmosphereScene());
+  const pose: CameraPose = {
+    frame: { kind: "system", system: KEPT_SYSTEM },
+    positionM: framing.positionM,
+    orientation: lookAlong(toStar(framing.positionM), framing.up),
+  };
+  return {
+    run: {
+      ...start,
+      camera: { ...start.camera, pose, fovDeg: FOV_DEG, style: "photorealistic" as const },
+    },
+    pose,
+  };
+}
+
+/**
+ * The photorealistic frame of `run` at `ev100` with `TEST EARTH`'s air, its histogram taken under
+ * `meter`, or none for `null`.
+ */
+function airFrame(
+  run: ViewRun,
+  pose: CameraPose,
+  discs: HostDiscLayer,
+  tables: AtmosphereTables,
+  ev100: number,
+  meter: "average" | null,
+  present: boolean,
+): PhotorealFrame {
+  return photorealFrame({
+    run,
+    pose,
+    viewport: VIEWPORT,
+    presentedPx: VIEWPORT,
+    setting: "high",
+    exposureScale: exposureScale(ev100),
+    list: NO_LIST,
+    sky: null,
+    band: null,
+    discs,
+    cube: null,
+    previousRegimes: new Map(),
+    overlay: null,
+    meter,
+    present,
+    atmospheres: (body) => (body === ATMOSPHERE_EARTH ? tables : null),
+  });
+}
+
+/**
+ * The exposure at which the composite's transmittance on the disc is read, EV100: 18, at which the
+ * scene's Sun (`sunLikeHostDisc`'s mean of 1.96 × 10⁹ cd/m², resolved at 1 au) is pre-exposed to
+ * some 6,200 and its brightest texel, the disc's centre in red, to some 8,500, an eighth of
+ * `rgba16float`'s 65,504, whatever `AVG` settles at.
+ *
+ * @remarks
+ * A camera's `AVG` settles below 12 on the Sun through the limb (ux-calls-view, item 3a), where the
+ * disc's texels pass the target's range, which they fit only from EV100 15.05 up, and the sky the
+ * air scatters onto them is a share of the clamped light: at 12 km, blue 0.0824 against the
+ * glare's 0.0716, some 15% over (smoke part 1 with `--captures`, a pod run of 2026-11-01).
+ */
+const DISC_IN_RANGE_EV100 = 18;
+
+/**
+ * The composite's transmittance on the disc in one frame of `framing` with the air drawn at
+ * {@link DISC_IN_RANGE_EV100} (`compositeDiscTransmittance`), not presented and taking no
+ * histogram, so that no reading of it reaches the next framing's controller.
+ */
+async function inRangeDiscTransmittance(
+  engine: RenderEngine,
+  renderer: PhotorealRenderer,
+  view: RenderView,
+  discs: HostDiscLayer,
+  tables: AtmosphereTables,
+  framing: Framing,
+): Promise<Rgb> {
+  const { run, pose } = framingRun(framing);
+  renderer.render(view, airFrame(run, pose, discs, tables, DISC_IN_RANGE_EV100, null, false));
+  const colours = renderer.frameColours;
+  if (colours === null) {
+    throw new Error("the photorealistic renderer drew no frame");
+  }
+  const [drawn, scene] = await Promise.all([
+    engine.readTexture(colours.drawn).then(halfTexels),
+    engine.readTexture(colours.scene.colour).then(halfTexels),
+  ]);
+  return compositeDiscTransmittance(drawn, scene);
+}
+
 /**
  * Draws `framing` until the controller's exposure settles, its glare through the air where
  * `air` holds and as before where not, and reads its last frame back.
@@ -218,16 +308,7 @@ async function settle(
   framing: Framing,
   air: boolean,
 ): Promise<Settled> {
-  const start = startRun(atmosphereScene());
-  const pose: CameraPose = {
-    frame: { kind: "system", system: KEPT_SYSTEM },
-    positionM: framing.positionM,
-    orientation: lookAlong(toStar(framing.positionM), framing.up),
-  };
-  const run = {
-    ...start,
-    camera: { ...start.camera, pose, fovDeg: FOV_DEG, style: "photorealistic" as const },
-  };
+  const { run, pose } = framingRun(framing);
   const exposure = new AutoExposure({
     source: viewId("smoke"),
     program: VIEW_CAMERA,
@@ -243,24 +324,7 @@ async function settle(
   for (; frames < MAX_FRAMES; frames += 1) {
     const ev100 = controlEv100(exposure.step(histogram, STEP_S).control);
     const present = !exposure.holds;
-    const drawnFrame = photorealFrame({
-      run,
-      pose,
-      viewport: VIEWPORT,
-      presentedPx: VIEWPORT,
-      setting: "high",
-      exposureScale: exposureScale(ev100),
-      list: NO_LIST,
-      sky: null,
-      band: null,
-      discs,
-      cube: null,
-      previousRegimes: new Map(),
-      overlay: null,
-      meter: "average",
-      present,
-      atmospheres: (body) => (body === ATMOSPHERE_EARTH ? tables : null),
-    });
+    const drawnFrame = airFrame(run, pose, discs, tables, ev100, "average", present);
     // Of the disc's light at this frame's exposure, which the layer's last frame holds.
     const clear = clearSources(drawnFrame, discs);
     const frame = air ? drawnFrame : { ...drawnFrame, glareSources: clear };
@@ -291,11 +355,8 @@ async function settle(
   if (colours === null || presented === null) {
     throw new Error("the photorealistic renderer presented no frame");
   }
-  const [drawn, scene] = await Promise.all([
-    engine.readTexture(colours.drawn).then(halfTexels),
-    engine.readTexture(colours.scene.colour).then(halfTexels),
-  ]);
-  return { ev100: last, frames: frames + 1, srgb, drawn, scene, ...presented };
+  const drawn = halfTexels(await engine.readTexture(colours.drawn));
+  return { ev100: last, frames: frames + 1, srgb, drawn, ...presented };
 }
 
 /** The view-space direction through pixel (x, y)'s centre, unit. */
@@ -340,9 +401,9 @@ function codeOf(light: Rgb, veil: Rgb, exposure: number): number {
   return Math.round(g * 255);
 }
 
-/** The veil of `sources` at `thetaRad` from the Sun, cd/m². */
-function veilOf(sources: ReadonlyArray<GlareSource>, thetaRad: number): Rgb {
-  const terms = glareSpreadTerms("eye", DEFAULT_EYE_OBSERVER);
+/** The veil of `sources` at `thetaRad` from the Sun in a view of `role`, cd/m². */
+function veilOf(sources: ReadonlyArray<GlareSource>, thetaRad: number, role: ViewRole): Rgb {
+  const terms = glareSpreadTerms(role, DEFAULT_EYE_OBSERVER);
   const veil: [number, number, number] = [0, 0, 0];
   for (const source of sources) {
     const [r, g, b] = glareSourceVeilOf(source, thetaRad, terms);
@@ -377,8 +438,8 @@ function haloProfile(
     }),
   );
   const veils = PROFILE_DEG.map((deg) => ({
-    dimmed: veilOf(dimmed, deg * RAD_PER_DEG),
-    clear: veilOf(clear, deg * RAD_PER_DEG),
+    dimmed: veilOf(dimmed, deg * RAD_PER_DEG, settled.frame.role),
+    clear: veilOf(clear, deg * RAD_PER_DEG, settled.frame.role),
   }));
   for (let y = 0; y < VIEWPORT.heightPx; y += 1) {
     for (let x = 0; x < VIEWPORT.widthPx; x += 1) {
@@ -422,20 +483,20 @@ function haloProfile(
 }
 
 /**
- * The composite's transmittance on the disc in `settled`: its drawn light over the scene's before
+ * The composite's transmittance on the disc in a frame: its `drawn` light over the `scene`'s before
  * the composite, each summed over the scene's disc texels (meter class 0), per channel; `NaN` with
  * none in frame.
  */
-function compositeDiscTransmittance(settled: Settled): Rgb {
+function compositeDiscTransmittance(drawnTexels: Float32Array, sceneTexels: Float32Array): Rgb {
   const drawn: [number, number, number] = [0, 0, 0];
   const before: [number, number, number] = [0, 0, 0];
   for (let i = 0; i < VIEWPORT.widthPx * VIEWPORT.heightPx; i += 1) {
-    if (Math.round(settled.scene[4 * i + 3] ?? 1) !== METER_CLASS.hostDisc) {
+    if (Math.round(sceneTexels[4 * i + 3] ?? 1) !== METER_CLASS.hostDisc) {
       continue;
     }
     for (const c of [0, 1, 2] as const) {
-      drawn[c] += settled.drawn[4 * i + c] ?? 0;
-      before[c] += settled.scene[4 * i + c] ?? 0;
+      drawn[c] += drawnTexels[4 * i + c] ?? 0;
+      before[c] += sceneTexels[4 * i + c] ?? 0;
     }
   }
   return [drawn[0] / before[0], drawn[1] / before[1], drawn[2] / before[2]];
@@ -526,7 +587,8 @@ export async function captureViewLightAir(
   const results: Result[] = [];
   try {
     const first = FRAMINGS[0];
-    await renderer.prepare(VIEWPORT, "high", "eye", {
+    // The view's role as its runs start, a camera's (`startRun`).
+    await renderer.prepare(VIEWPORT, "high", startRun(atmosphereScene()).camera.role, {
       orientation: lookAlong(toStar(first?.positionM ?? vec3(1, 0, 0)), first?.up ?? vec3(0, 1, 0)),
       fovXRad: FOV_DEG * RAD_PER_DEG,
     });
@@ -534,8 +596,13 @@ export async function captureViewLightAir(
       // Each drawing settles before the next, as the views' frames do.
       // oxlint-disable-next-line no-await-in-loop
       const withAir = await settle(engine, renderer, view, discs, tables, framing, true);
+      // Its comparison drawn on the same renderer after it, settled on its own.
       // oxlint-disable-next-line no-await-in-loop
       const withoutAir = await settle(engine, renderer, view, discs, tables, framing, false);
+      // The in-range frame reads the renderer's latest targets, so it follows the framing's
+      // settles.
+      // oxlint-disable-next-line no-await-in-loop
+      const discT = await inRangeDiscTransmittance(engine, renderer, view, discs, tables, framing);
       const dimmed = withAir.frame.glareSources;
       const { clear } = withAir;
       results.push({
@@ -543,7 +610,7 @@ export async function captureViewLightAir(
         withAir,
         withoutAir,
         glareT: glareLight(withAir.frame, dimmed[0] ?? clear[0]),
-        discT: compositeDiscTransmittance(withAir),
+        discT,
         profile: haloProfile(withAir, dimmed, clear),
       });
       for (const [suffix, settled] of [

@@ -163,10 +163,14 @@ export interface ViewRun {
 /**
  * A run at the start of `kept`'s script, its camera at the seat (or free, with no own ship), in the
  * scene's start style (`KeptScene.startStyle`; the wireframe unless it gives one).
+ *
+ * @remarks
+ * The camera is of R02's `camera` role: a console view is a ship's camera feed, not a window
+ * (ux-calls-view, item 3a, the owner's delegated call).
  */
 export function startRun(kept: KeptScene): ViewRun {
   const scene = kept.sceneAt(0);
-  const camera = newCameraState(cameraSceneOf(scene), "eye");
+  const camera = newCameraState(cameraSceneOf(scene), "camera");
   return {
     source: { kind: "kept", kept },
     tS: 0,
@@ -190,14 +194,14 @@ export function framedRun(run: ViewRun, aspect: number): ViewRun {
 
 /**
  * A run of the server's scene from `scene`, its first frame, the camera at the seat of the ship
- * stand-in; each step takes the scene its frame brings.
+ * stand-in, of the `camera` role as {@link startRun}'s; each step takes the scene its frame brings.
  */
 export function startServerRun(scene: ViewScene): ViewRun {
   return {
     source: { kind: "server" },
     tS: 0,
     scene,
-    camera: newCameraState(cameraSceneOf(scene), "eye"),
+    camera: newCameraState(cameraSceneOf(scene), "camera"),
   };
 }
 

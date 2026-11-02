@@ -422,9 +422,10 @@ export async function captureEclipse(engine: RenderEngine): Promise<CapturedImag
   const discs = new HostDiscLayer(engine);
   const images: CapturedImage[] = [];
   try {
-    // The pipelines compile once, before the first frame; a camera of another field only moves
-    // the bloom kernel, which the renderer follows.
-    await renderer.prepare(CAPTURE_VIEWPORT, "high", "eye", {
+    // The pipelines compile once, before the first frame, for the view's role as its runs start,
+    // a camera's (`startRun`); a camera of another field only moves the bloom kernel, which the
+    // renderer follows.
+    await renderer.prepare(CAPTURE_VIEWPORT, "high", startRun(eclipseScene()).camera.role, {
       orientation: ECLIPSE_CAMERA_POSE.orientation,
       fovXRad: (60 * Math.PI) / 180,
     });
