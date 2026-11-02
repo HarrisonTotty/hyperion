@@ -44,7 +44,7 @@
 //! each band-E member is asked `claimed_by`, the same test on its own marks, and a member it
 //! claims resolves to "no such system", so that a recent death or a variable is the list's or the
 //! cells' and never both (P09.T38's complementarity; plan 03's carve-out, P09.T35's for the grid).
-//! From 27 a death the claim finds a runaway's ([`Claim::Runaway`]) is neither's: the
+//! From 27 a death the claim finds a runaway's (`Claim::Runaway`) is neither's: the
 //! core-collapse class's runaway terms hold it, in the field, so the cells give it up and the list
 //! drops it (P09.T37's fix of the claim, which named it the list's).
 //!
