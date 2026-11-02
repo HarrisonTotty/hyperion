@@ -248,14 +248,61 @@ fn material_weights_kernels_match_their_golden() {
     golden!("weights/kernels", &kernels_text());
 }
 
+/// Version 27's steepness tails ahead of their bump ([`STEEPNESS_TAILS_VERSION`]): [`exceedance`]
+/// over the kernels' grid under [`SteepnessTailsRules::Marcum`], and [`marcum_q1`] at a few
+/// points about the class weights' domain, its scaled recurrence and its smallest product among
+/// them, so that the wasip1 and browser suites hold Q₁'s bits to the native ones before 27 makes
+/// them the kernels'. 27's bump re-blesses `weights/kernels` to this grid's values and deletes
+/// this golden.
+fn kernels_27_text() -> String {
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    out.line("exceedance at 27");
+    with_steepness_tails(SteepnessTailsRules::Marcum, || {
+        for mean in [0.0, 0.05, 0.3, 0.8, 0.839, 0.85, 1.2, 2.0, 5.0] {
+            for variance in [1e-8, 9e-10, 1e-6, 1e-4, 1e-2, 0.1, 1.0, 4.0] {
+                for threshold in [0.1, 0.839_099_631_177_280, 1.732_050_807_568_877] {
+                    out.f64(
+                        &format!("exceedance({mean}, {variance}, {threshold})"),
+                        exceedance(mean, variance, threshold),
+                    );
+                }
+            }
+        }
+    });
+    out.line("marcum_q1");
+    for (a, b) in [
+        (0.5, 2.0),
+        (3.0, 4.0),
+        (10.0, 12.0),
+        (20.0, 19.0),
+        (30.0, 33.0),
+        (34.0, 35.5),
+        (12.0, 20.5),
+        (5.0, 5.0),
+        (1e-10, 3.0),
+        (1e-130, 8.4),
+        (25.0, 31.0),
+        (35.0, 41.0),
+    ] {
+        out.f64(&format!("marcum_q1({a}, {b})"), marcum_q1(a, b));
+    }
+    out.finish()
+}
+
+#[test]
+fn material_weights_kernels_at_27_match_their_golden() {
+    golden!("weights/kernels_27", &kernels_27_text());
+}
+
 /// The tests that read files, which the browser target cannot (plan R04, Design note 12).
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod native_only {
     use std::path::Path;
 
-    /// The weights' goldens: one for each synthetic world, the cold-trapped pole's and the
-    /// kernels'.
-    const WEIGHTS_GOLDENS: usize = 8;
+    /// The weights' goldens: one for each synthetic world, the cold-trapped pole's, the kernels'
+    /// and the kernels' at 27.
+    const WEIGHTS_GOLDENS: usize = 9;
 
     /// Every golden file of `tests/golden/weights/` carries `GENERATOR_VERSION`, not R05's
     /// `TEST_PLANET_VERSION`, which heads the files directly under `tests/golden/`.

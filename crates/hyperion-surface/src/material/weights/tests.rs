@@ -254,10 +254,11 @@ fn material_weights_the_steepness_tails_are_held_only_until_the_27_bump() {
     assert!(
         GENERATOR_VERSION < STEEPNESS_TAILS_VERSION,
         "the 26 → 27 bump takes the steepness tails by Marcum's Q₁ (R10.T6.a): delete \
-         `STEEPNESS_TAILS_VERSION`, `SteepnessTailsRules` with its `Quadrature` arm, \
-         `exceedance_by_quadrature` with its constants, the tests' `with_steepness_tails`, its \
-         switch in the sim's `with_every_27_hold`, the tests' both-rules loops and this test; \
-         re-bless the movers R10.T6.a's record lists"
+         `STEEPNESS_TAILS_VERSION`, `SteepnessTailsRules` with its `Quadrature` arm, the tests' \
+         `with_steepness_tails`, the `hold-switches` feature and the sim's dev-dependency on it, \
+         its switch in the sim's `with_every_27_hold`, the tests' both-rules loops and this test \
+         (`exceedance_by_quadrature` stays, `marcum_q1`'s fallback); re-bless the movers \
+         R10.T6.a's record lists"
     );
     assert_eq!(SteepnessTailsRules::in_force(), Quadrature);
     assert_eq!(
@@ -269,8 +270,9 @@ fn material_weights_the_steepness_tails_are_held_only_until_the_27_bump() {
 
 /// Marcum's Q₁ at points of the class weights' domain and about it, at 60 digits by the Bessel
 /// series' recurrence started far past [`marcum_q1`]'s, which agrees there with the Rice density's
-/// integral to 25 digits (mpmath 1.4.1, 2026-11-02): (a, b, Q₁).
-const MARCUM_Q1_REFERENCE: [(f64, f64, f64); 10] = [
+/// integral to 25 digits (mpmath 1.4.1, 2026-11-02): (a, b, Q₁). (10⁻¹⁰, 3) scales the
+/// recurrence down on its way, and (10⁻¹³⁰, 8.4) lies below the smallest product.
+const MARCUM_Q1_REFERENCE: [(f64, f64, f64); 12] = [
     (0.0, 8.5, 2.046_971_713_164_204_3e-16),
     (0.5, 2.0, 0.169_140_638_509_467_17),
     (3.0, 4.0, 0.196_512_189_388_407_62),
@@ -281,6 +283,8 @@ const MARCUM_Q1_REFERENCE: [(f64, f64, f64); 10] = [
     (34.0, 35.5, 0.068_691_511_657_657_54),
     (12.0, 20.5, 1.243_088_596_849_287_5e-17),
     (5.0, 5.0, 0.540_098_386_773_718_4),
+    (1e-10, 3.0, 0.011_108_996_538_242_306),
+    (1e-130, 8.4, 4.765_304_735_299_08e-16),
 ];
 
 #[test]
@@ -302,6 +306,13 @@ fn material_weights_marcum_q1_is_its_60_digit_values() {
     // Just short of it the series' value is below 2⁻⁵³, so the step to 0 moves it less than that.
     let short = marcum_q1(20.0, 20.0 + 8.652);
     assert!(short > 0.0 && short < f64::EPSILON / 2.0, "{short:e}");
+    // Past the largest product, the quadrature's: there Q₁(a, a + 1) tends to the normal tail
+    // ½ erfc(1 ÷ √2) = 0.158 66 as a grows.
+    let far = marcum_q1(1e6, 1e6 + 1.0);
+    assert!((far - 0.158_655_253_931_457).abs() < 1e-4, "{far}");
+    for (a, b) in [(1e-300, 1.0), (1e-200, 5.0), (7.0, 1e-25)] {
+        assert!(marcum_q1(a, b).is_finite(), "Q₁({a:e}, {b:e})");
+    }
 }
 
 #[test]

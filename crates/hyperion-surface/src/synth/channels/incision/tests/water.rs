@@ -478,9 +478,21 @@ fn by_water_the_floor_keeps_the_level_bound_and_continuity() {
         }
         let fine = synth.height_at(&mut cache, dir, finest).unwrap().height_m;
         floored += usize::from(bits(fine) == bits(header.sea_level().value()));
+        // The far field's height-only query (R10.T6.a) takes the floor and the shore's fade by its
+        // own copies of them: the same bits here, where both bind.
+        let only = synth
+            .height_m_at(&mut SynthCache::new(), dir, finest)
+            .unwrap();
+        assert_eq!(bits(only), bits(fine), "the height-only query at {dir:?}");
         for band in [4, 5, 6, 7, 9, 12, 15, 18] {
             let level = BandLevel::new(band).unwrap();
             let h = synth.height_at(&mut cache, dir, level).unwrap().height_m;
+            let only = synth.height_m_at(&mut cache, dir, level).unwrap();
+            assert_eq!(
+                bits(only),
+                bits(h),
+                "the height-only query at band level {band}, {dir:?}"
+            );
             let bound = synth.level_bound_m(level);
             assert!(
                 (h - fine).abs() <= bound,

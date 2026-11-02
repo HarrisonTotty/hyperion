@@ -60,32 +60,34 @@ pub const SLOPE_LAG: Metres = Metres::new(0.05);
 /// hold 1.2 × 10⁻¹⁵ of it.
 const GAUSSIAN_REACH: f64 = 8.0;
 
-/// The deviations of the normal density each panel of [`exceedance`]'s eight-point Gauss–Legendre
+/// The deviations of the normal density each panel of [`exceedance_by_quadrature`]'s eight-point
+/// Gauss–Legendre
 /// spans, at most: 2, where the rule integrates a Gaussian to about 10⁻¹⁰ of it.
 const PANEL_DEVIATIONS: f64 = 2.0;
 
-/// The most panels [`exceedance`] integrates over: 16, a bound on its cost. The reach's 16
+/// The most panels [`exceedance_by_quadrature`] integrates over: 16, a bound on its cost. The reach's 16
 /// deviations need 8 at [`PANEL_DEVIATIONS`]; the bound binds where the reach meets the disc's
 /// edge and the threshold is long against the deviation, since x = t sin θ stretches θ there, and
 /// there the error stays below 3 × 10⁻⁷ at σ = 10⁻³ and 3 × 10⁻⁶ at σ = 3 × 10⁻⁵ (the science
 /// check's measurement), far below a byte's 1 ÷ 255.
 const MAX_PANELS: u32 = 16;
 
-/// The generator version from which a steepness tail is Marcum's Q₁ by its Bessel series (the
-/// crate's `marcum_q1`), in place of the Gauss–Legendre sums of `exceedance_by_quadrature`: 27
-/// (R10.T6.a's lever, main's rule B, 2026-11-02).
+/// The generator version from which a steepness tail is Marcum's Q₁ by its Bessel series
+/// ([`marcum_q1`]), in place of [`exceedance_by_quadrature`]'s Gauss–Legendre sums: 27 (R10.T6.a's
+/// lever, main's rule B, 2026-11-02).
 ///
 /// It is the steepness tails' one hold. Below it [`SteepnessTailsRules::in_force`] is
 /// [`SteepnessTailsRules::Quadrature`], and every weight is the quadrature's, bit for bit. 27's
-/// bump deletes this hold, [`SteepnessTailsRules`] with its `Quadrature` arm and
-/// `exceedance_by_quadrature` with its constants, the tests' `with_steepness_tails`, its switch in
-/// the sim's `with_every_27_hold`, and the tripwire
-/// `the_steepness_tails_are_held_only_until_the_27_bump`; it re-blesses the movers R10.T6.a's
-/// record lists.
-pub const STEEPNESS_TAILS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+/// bump deletes this hold, [`SteepnessTailsRules`] with its `Quadrature` arm, the tests'
+/// `with_steepness_tails`, the `hold-switches` feature with the sim's dev-dependency on it, its
+/// switch in the sim's `with_every_27_hold`, and the tripwire
+/// `the_steepness_tails_are_held_only_until_the_27_bump`; [`exceedance_by_quadrature`] stays, as
+/// [`marcum_q1`]'s fallback past [`LARGEST_PRODUCT`]. It re-blesses the movers R10.T6.a's record
+/// lists.
+pub(crate) const STEEPNESS_TAILS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
-/// How a vertex's steepness tails are made (the crate's `exceedance`; the hold,
-/// [`STEEPNESS_TAILS_VERSION`]).
+/// How a vertex's steepness tails are made (the crate's `exceedance`), held at generator version
+/// 27, `STEEPNESS_TAILS_VERSION`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SteepnessTailsRules {
     /// Version 26's and before: the Gauss–Legendre sums.
@@ -98,8 +100,8 @@ impl SteepnessTailsRules {
     /// The rules this generator version gives: Q₁ from [`STEEPNESS_TAILS_VERSION`], the quadrature
     /// below it; in the tests, the rules a switch sets on its thread (`with_steepness_tails`).
     #[must_use]
-    pub fn in_force() -> Self {
-        #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(any(test, feature = "hold-switches"))]
         if let Some(rules) = STEEPNESS_TAILS_RULES.with(core::cell::Cell::get) {
             return rules;
         }
@@ -111,7 +113,7 @@ impl SteepnessTailsRules {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "hold-switches"))]
 thread_local! {
     /// The steepness tails' rules a test sets on its thread, `None` for the version's.
     static STEEPNESS_TAILS_RULES: core::cell::Cell<Option<SteepnessTailsRules>> =
@@ -120,8 +122,10 @@ thread_local! {
 
 /// `run`'s result with the steepness tails' rules `rules` on this thread, for the tests to reach
 /// version 27's tails ahead of the bump, the sim's `with_every_27_hold` among them; the version's
-/// rules are set back after, a panic in `run` included. 27's bump deletes it with the hold.
-#[cfg(any(test, feature = "testing"))]
+/// rules are set back after, a panic in `run` included. Only this crate's tests and the
+/// `hold-switches` feature, which only the sim's dev-dependency enables, have it, so no build of
+/// the server or the client carries the switch. 27's bump deletes it with the hold.
+#[cfg(any(test, feature = "hold-switches"))]
 pub fn with_steepness_tails<R>(rules: SteepnessTailsRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
     struct Restore(Option<SteepnessTailsRules>);
@@ -141,8 +145,22 @@ pub fn with_steepness_tails<R>(rules: SteepnessTailsRules, run: impl FnOnce() ->
 const NEGLIGIBLE_GAP: f64 = 8.6522;
 
 /// The largest the backward recurrence's values grow to before [`marcum_q1`] scales them down by
-/// its inverse, exactly: 2⁶⁰⁰.
+/// its inverse, exactly: 2⁶⁰⁰. One step multiplies by at most 2n ÷ z, below 2⁶⁶ from
+/// [`SMALLEST_PRODUCT`] on, so no step overflows.
 const RECURRENCE_CEILING: f64 = 4.149_515_568_880_993e180;
+
+/// The product z = ab below which [`marcum_q1`] is the Rayleigh tail e^(−b² ÷ 2): 2⁻⁶⁰. There,
+/// within [`NEGLIGIBLE_GAP`] of each other, a and b are both below 8.7 and one below 2⁻³⁰, and
+/// Q₁ differs from the Rayleigh tail by less than 2⁻⁶⁰.
+const SMALLEST_PRODUCT: f64 = 8.673_617_379_884_035e-19;
+
+/// The product z = ab above which [`marcum_q1`] is [`exceedance_by_quadrature`]'s at unit variance:
+/// 10¹⁰, where the recurrence would take 900,020 steps. No bake's tail comes near it: the class
+/// weights' largest is about 7,300 (a to 36, b to 202), and one past it needs a deviation below
+/// 10⁻⁵ of the threshold with the mean within 8.65 deviations of it. The quadrature is the poorer
+/// there, its panels' bound binding: at z = 7.8 × 10⁸ (`kernels_27`'s σ² = 9 × 10⁻¹⁰) it is
+/// 1.7 × 10⁻⁸ off and the series 5 × 10⁻¹⁵.
+const LARGEST_PRODUCT: f64 = 1e10;
 
 /// A point's class weights: up to [`MAX_CLASSES`] materials, each a form of one of the body's
 /// palette entries ([`GroundMaterial`]), with a byte each, the bytes summing to [`WEIGHT_TOTAL`]
@@ -629,7 +647,9 @@ pub(crate) fn exceedance_by_quadrature(mean: f64, variance: f64, threshold: f64)
 /// Since Σ_{k ≥ 0} `Ĩ_k` = (1 + `Ĩ_0`) ÷ 2 ≤ 1, Q₁ ≤ e^(−(b − a)² ÷ 2) where b ≥ a, and likewise
 /// 1 − Q₁ where a > b, so from [`NEGLIGIBLE_GAP`] on it is 0 (or 1) without the series: over the
 /// class weights' domain, 99% of the tails (the steepness tails of four synthetic worlds' bakes,
-/// 3.36 million of them, pod, 2026-11-02). At a = 0 it is the Rayleigh tail e^(−b² ÷ 2).
+/// 3.36 million of them, pod, 2026-11-02). Below [`SMALLEST_PRODUCT`] it is the Rayleigh tail
+/// e^(−b² ÷ 2), a = 0's exactly, and above [`LARGEST_PRODUCT`], which no bake reaches, the
+/// quadrature's.
 ///
 /// Against 60-digit values over 7,151 points of the domain (6,000 of its tails with b − a below
 /// 10, and two grids of its envelope: a to 36, b − a from −9 to 10, σ² from 7.3 × 10⁻⁵ to 0.0112,
@@ -648,8 +668,11 @@ pub(crate) fn marcum_q1(a: f64, b: f64) -> f64 {
         return 1.0;
     }
     let z = a * b;
-    if z <= 0.0 {
+    if z < SMALLEST_PRODUCT {
         return math::exp(-0.5 * b * b);
+    }
+    if z > LARGEST_PRODUCT {
+        return exceedance_by_quadrature(a, 1.0, b);
     }
     let (below, rho) = if b >= a {
         (true, a / b)
@@ -659,9 +682,9 @@ pub(crate) fn marcum_q1(a: f64, b: f64) -> f64 {
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        reason = "a positive whole number; z is a product of two finite deviations, far below 2^64"
+        reason = "a whole number from 1 to 900,000: z is at most LARGEST_PRODUCT, 10^10"
     )]
-    let start = (9.0 * z.sqrt()).ceil() as u64 + 20;
+    let start = (9.0 * z.sqrt()).ceil() as u32 + 20;
     let two_over_z = 2.0 / z;
     // J_(k+1) and J_k, from k = n down; Σ_{j ≥ k} J_j, and Σ_{j ≥ k} ρ^(j − k + 1) J_j by Horner's
     // rule from the top.
@@ -670,8 +693,7 @@ pub(crate) fn marcum_q1(a: f64, b: f64) -> f64 {
     for k in (1..=start).rev() {
         tail += current;
         series = rho * (current + series);
-        #[expect(clippy::cast_precision_loss, reason = "k is below 2^53, exact in f64")]
-        let previous = k as f64 * two_over_z * current + next;
+        let previous = f64::from(k) * two_over_z * current + next;
         next = current;
         current = previous;
         if current > RECURRENCE_CEILING {

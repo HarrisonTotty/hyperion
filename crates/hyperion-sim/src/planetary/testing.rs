@@ -479,8 +479,8 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   condensates list no liquid water published `Desert`, a label no hook or figure reads.
 /// - the class weights' steepness tails by Marcum's Q₁, the surface crate's
 ///   `STEEPNESS_TAILS_VERSION` (rendering plan R10, R10.T6.a), at `SteepnessTailsRules::Marcum`
-///   through `hyperion_surface::material::with_steepness_tails`, under the sim's `testing` feature,
-///   which brings the surface crate's (every gate's run enables it).
+///   through `hyperion_surface::material::with_steepness_tails`, which the sim's tests have through
+///   their dev-dependency on the surface crate's `hold-switches` feature.
 ///
 /// A system or a record is read under the rules in force when it is generated, so a test
 /// generates afresh inside it; the carriers' rules are read when a system's equilibrium network is
@@ -528,7 +528,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
     let run = move || with_desert(DesertRules::Labelled, run);
-    #[cfg(feature = "testing")]
     let run = move || {
         use hyperion_surface::material::{SteepnessTailsRules, with_steepness_tails};
         with_steepness_tails(SteepnessTailsRules::Marcum, run)

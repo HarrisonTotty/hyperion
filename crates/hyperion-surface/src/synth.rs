@@ -335,10 +335,10 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         let (base, relief) = match set.relief_through() {
             Some(through) if self.parts.relief.evaluates(through) => {
                 let (base, style) = match cache.controls.memo_for(self.parts.channels.id()) {
-                    Some(memo) => relief::base_and_style_height(field, dir, memo)?,
-                    None => relief::base_and_style_height(field, dir, &mut interp::Fresh)?,
+                    Some(memo) => relief::base_m_and_style(field, dir, memo)?,
+                    None => relief::base_m_and_style(field, dir, &mut interp::Fresh)?,
                 };
-                let relief = self.parts.relief.height_in_style(
+                let relief = self.parts.relief.height_m_in_style(
                     header,
                     dir,
                     through,
@@ -353,14 +353,15 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
             Some(through) => self
                 .parts
                 .channels
-                .incision_height_at(field, dir, through, cache)?,
+                .incision_height_m_at(field, dir, through, cache)?,
             None => 0.0,
         };
         let craters = match set.craters_through() {
-            Some(through) => self
-                .parts
-                .craters
-                .height_at(dir, level, through, &mut cache.craters),
+            Some(through) => {
+                self.parts
+                    .craters
+                    .height_m_at(dir, level, through, &mut cache.craters)
+            }
             None => 0.0,
         };
         let rims = self.parts.rims.height_m_at(field, dir, level)?;

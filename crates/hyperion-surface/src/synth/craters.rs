@@ -2530,7 +2530,7 @@ impl SmallCraters {
     /// # Panics
     ///
     /// As [`at`](Self::at).
-    pub(crate) fn height_at(
+    pub(crate) fn height_m_at(
         &self,
         dir: [f64; 3],
         level: BandLevel,

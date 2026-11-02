@@ -1377,7 +1377,7 @@ pub(crate) fn base_and_style<F: FieldView>(
 /// # Panics
 ///
 /// As [`base_and_style`].
-pub(crate) fn base_and_style_height<F: FieldView>(
+pub(crate) fn base_m_and_style<F: FieldView>(
     field: &F,
     dir: [f64; 3],
     controls: &mut impl Controls<ELEVATION_AND_STYLE>,
@@ -1750,7 +1750,7 @@ impl Relief {
     /// # Panics
     ///
     /// As [`at_in_style`](Self::at_in_style).
-    pub(crate) fn height_in_style(
+    pub(crate) fn height_m_in_style(
         &self,
         header: &FieldHeader,
         dir: [f64; 3],

@@ -2541,7 +2541,7 @@ impl Channels {
     /// # Panics
     ///
     /// As [`incision_at`](Self::incision_at).
-    pub(crate) fn incision_height_at<F: FieldView>(
+    pub(crate) fn incision_height_m_at<F: FieldView>(
         &self,
         field: &F,
         dir: [f64; 3],
