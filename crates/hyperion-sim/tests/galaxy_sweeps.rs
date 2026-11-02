@@ -517,8 +517,8 @@ fn the_densities_over_a_thousand_seeds() {
 /// deviations and index 0 stay under the centre's 16-bit index, 65,536 (ruled 2026-10-26).
 ///
 /// The first 10³ seeds, as plan 02's costlier sweeps take: a centre's classes cost about a fifth
-/// of a second in the slow-test profile (10³ seeds in 206 s), so the 10⁴ would take over half an
-/// hour.
+/// of a second in the slow-test profile (10³ seeds in 206 s on one thread, 15 s on sixteen), so
+/// the 10⁴ would take over half an hour on one.
 ///
 /// Printed: any seed that fails at eight or at five standard deviations, then the seeds run, how
 /// many fail at eight and at the plan's five, how many expect 65,535 candidates or more, how many
@@ -535,7 +535,7 @@ fn the_densities_over_a_thousand_seeds() {
 /// candidates, 3.47 times the worst. Against 13 bits, 393 failed (plan 11's Risks, "The centre's
 /// feature-level index, as measured (P11.T8.e)", and "The centre's feature-level index, ruled").
 #[test]
-#[ignore = "slow: the centre's classes of 10³ galaxies, about 3½ minutes in the slow-test profile"]
+#[ignore = "slow: the centre's classes of 10³ galaxies, about 15 s on sixteen threads"]
 fn the_centre_s_feature_level_list_over_a_thousand_seeds() {
     const SEEDS: u64 = 1_000;
     let (mut n, mut failing, mut failing_at_five, mut overflowing, mut capped) =
