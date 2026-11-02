@@ -974,29 +974,50 @@ const OLD_LAYER_A_SIZE: usize = 100_000;
 /// stars, companions in, is recorded.
 const GIANTS_AND_HB_OF_OBJECTS: (f64, f64) = (0.003, 0.03);
 
-/// Blue stragglers per horizontal-branch star where they are measured: the halo field's about 4
-/// (Preston and Sneden 2000, AJ 120, 1014) and the bulge's 0.29–0.37 (Clarkson et al. 2011, ApJ
-/// 735, 37), both recalled, not checked against the papers in the pod (it reads no web), and taken
-/// within a factor of three either way.
-const BLUE_STRAGGLERS_PER_HB: [(Population, f64, f64); 2] = [
-    (Population::Halo, 4.0 / 3.0, 12.0),
-    (Population::Bulge, 0.29 / 3.0, 0.37 * 3.0),
+/// Blue stragglers per horizontal-branch star where they are measured, each counted as its survey
+/// counts it ([`BlueCount`]): the inner halo's 1.5–2.0 per blue horizontal-branch star at |Z| ≈ 5
+/// kpc, both classes A-type stars at [`BLUE_STAR_MIN_TEFF_K`] or hotter (Santucci et al. 2015,
+/// ApJ 801, 116; Preston and Sneden's 2000 figure of about 4, AJ 120, 1014, is the local halo's),
+/// taken on 0.6–5.5 (research's ruling of 2026-11-02); and the bulge's 0.29–0.37 of all its
+/// stragglers per horizontal-branch star (Clarkson et al. 2011, ApJ 735, 37; recalled, not checked
+/// against the paper), taken within a factor of three either way.
+const BLUE_STRAGGLERS_PER_HB: [(Population, BlueCount, f64, f64); 2] = [
+    (Population::Halo, BlueCount::AType, 0.6, 5.5),
+    (Population::Bulge, BlueCount::All, 0.29 / 3.0, 0.37 * 3.0),
 ];
+
+/// How a survey counts blue stragglers per horizontal-branch star.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlueCount {
+    /// Every blue straggler per horizontal-branch star.
+    All,
+    /// The A-type ones per blue horizontal-branch star, both at [`BLUE_STAR_MIN_TEFF_K`] or
+    /// hotter.
+    AType,
+}
+
+/// The least effective temperature of an A-type blue straggler and of a blue horizontal-branch
+/// star as Santucci et al. (2015) count them, K: 7,650.
+const BLUE_STAR_MIN_TEFF_K: f64 = 7_650.0;
 
 /// The widest blue stragglers per horizontal-branch star that is not absurd: a population of
 /// them with none, or with thirty times its horizontal branch, would be a class absurd.
 const BLUE_STRAGGLERS_ABSURD: (f64, f64) = (0.0, 30.0);
 
 /// What one record of an old population shows at the epoch: its stars (objects), its first-giant-
-/// branch and core-helium-burning stars, its pairs of class blue straggler and hot subdwarf, its
-/// helium main-sequence stars of the hot subdwarfs' masses, paired or not, and its primary alone
-/// as plan 06 counts it (an object, and a giant or horizontal-branch star).
+/// branch and core-helium-burning stars (the hot ones, at [`BLUE_STAR_MIN_TEFF_K`] or more, the
+/// blue horizontal branch), its pairs of class blue straggler (those whose main-sequence star is
+/// as hot, A-type) and hot subdwarf, its helium main-sequence stars of the hot subdwarfs' masses,
+/// paired or not, and its primary alone as plan 06 counts it (an object, and a giant or
+/// horizontal-branch star).
 #[derive(Debug, Clone, Copy, Default)]
 struct OldTally {
     objects: f64,
     giants: f64,
     horizontal_branch: f64,
+    blue_horizontal_branch: f64,
     blue_stragglers: f64,
+    a_type_blue_stragglers: f64,
     hot_subdwarfs: f64,
     subdwarf_stars: f64,
     primaries: f64,
@@ -1029,18 +1050,34 @@ impl OldTally {
                 continue;
             }
             t.objects += 1.0;
+            let hot = star.effective_temperature().value() >= BLUE_STAR_MIN_TEFF_K;
             match star.phase() {
                 Phase::FirstGiantBranch => t.giants += 1.0,
-                Phase::CoreHeliumBurning => t.horizontal_branch += 1.0,
+                Phase::CoreHeliumBurning => {
+                    t.horizontal_branch += 1.0;
+                    if hot {
+                        t.blue_horizontal_branch += 1.0;
+                    }
+                }
                 Phase::HeliumMainSequence if star.mass() >= low && star.mass() <= high => {
                     t.subdwarf_stars += 1.0;
                 }
                 _ => {}
             }
         }
-        for pair in now.pairs() {
+        for (timeline, pair) in stars.pairs().iter().zip(now.pairs()) {
             match pair.class() {
-                BinaryClass::BlueStraggler => t.blue_stragglers += 1.0,
+                BinaryClass::BlueStraggler => {
+                    t.blue_stragglers += 1.0;
+                    let a_type = timeline.stars().iter().any(|&i| {
+                        let star = &now.stars()[usize::from(i.get())];
+                        star.phase() == Phase::MainSequence
+                            && star.effective_temperature().value() >= BLUE_STAR_MIN_TEFF_K
+                    });
+                    if a_type {
+                        t.a_type_blue_stragglers += 1.0;
+                    }
+                }
                 BinaryClass::HotSubdwarf => t.hot_subdwarfs += 1.0,
                 _ => {}
             }
@@ -1053,7 +1090,9 @@ impl OldTally {
         self.objects += w * other.objects;
         self.giants += w * other.giants;
         self.horizontal_branch += w * other.horizontal_branch;
+        self.blue_horizontal_branch += w * other.blue_horizontal_branch;
         self.blue_stragglers += w * other.blue_stragglers;
+        self.a_type_blue_stragglers += w * other.a_type_blue_stragglers;
         self.hot_subdwarfs += w * other.hot_subdwarfs;
         self.subdwarf_stars += w * other.subdwarf_stars;
         self.primaries += w * other.primaries;
@@ -1072,7 +1111,8 @@ impl OldTally {
 /// masses, single or paired) are each counted per horizontal-branch star. Every population has
 /// blue stragglers, short of thirty per horizontal-branch star, and fewer hot subdwarfs than
 /// horizontal-branch stars, and the old populations together have hot subdwarfs; a figure outside
-/// its measured window ([`BLUE_STRAGGLERS_PER_HB`]) is a finding.
+/// its measured window ([`BLUE_STRAGGLERS_PER_HB`]), counted as its survey counts it (the halo's
+/// A-type stragglers per blue horizontal-branch star, like for like), is a finding.
 #[test]
 #[ignore = "slow: 5.1 × 10⁵ generated systems, their pairs run through the engine"]
 fn old_populations_hold_blue_stragglers_and_hot_subdwarfs() {
@@ -1114,14 +1154,21 @@ fn old_populations_hold_blue_stragglers_and_hot_subdwarfs() {
             t.hot_subdwarfs / hb,
             t.subdwarf_stars / hb,
         );
-        if let Some(&(_, lo, hi)) = BLUE_STRAGGLERS_PER_HB
+        if let Some(&(_, counted, lo, hi)) = BLUE_STRAGGLERS_PER_HB
             .iter()
-            .find(|(p, _, _)| *p == population)
+            .find(|(p, _, _, _)| *p == population)
         {
+            let (measured, what) = match counted {
+                BlueCount::All => (per_hb, "blue stragglers per horizontal-branch star"),
+                BlueCount::AType => (
+                    t.a_type_blue_stragglers / t.blue_horizontal_branch,
+                    "A-type blue stragglers per blue horizontal-branch star",
+                ),
+            };
             println!(
-                "{population:?}: blue stragglers per horizontal-branch star {per_hb:.3} against \
-                 the measured window {lo:.2}–{hi:.2}: {}",
-                if (lo..=hi).contains(&per_hb) {
+                "{population:?}: {what} {measured:.3} against the measured window {lo:.2}–{hi:.2}: \
+                 {}",
+                if (lo..=hi).contains(&measured) {
                     "inside"
                 } else {
                     "a finding"

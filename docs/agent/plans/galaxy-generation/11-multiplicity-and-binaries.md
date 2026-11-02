@@ -7349,6 +7349,14 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   - _Sources:_ the blue-straggler, hot-subdwarf and recycled-field windows are recalled. The pod
     reads no web, so they go unchecked against their papers, and a miss of any of them is a
     finding, not a failure.
+  - _The halo's window, like for like_ (research's ruling of 2026-11-02). Preston and Sneden's
+    about 4 blue stragglers per horizontal-branch star is the local halo's; at |Z| ≈ 5 kpc, where
+    the halo's records are sought, the inner halo gives 1.5–2.0 per blue horizontal-branch star,
+    both classes A-type stars at T_eff ≥ 7,650 K (Santucci et al. 2015, ApJ 801, 116).
+    `old_populations_hold_blue_stragglers_and_hot_subdwarfs` counts the halo's so (`BlueCount`),
+    against 0.6–5.5; the bulge keeps all its stragglers per horizontal-branch star. Measured
+    (2026-11-02): the halo's A-type stragglers are 0.101 per blue horizontal-branch star, a
+    finding (all of them per horizontal-branch star 0.333); the bulge's 0.243, inside.
 - **P11.T5's and P11.T8.b's X-ray binaries, held at 27** (lane `fix-p11-t5-awd-helium`'s pod,
   brief `fix-p11-t8b-xrb-carving`, 2026-11-01; research-p15-t10b-rates; at 24–26 nothing moves).
   - _The hold._ `XRB_CLASS_VERSION` = 27 (`stellar/binary/xrb_class.rs`),
