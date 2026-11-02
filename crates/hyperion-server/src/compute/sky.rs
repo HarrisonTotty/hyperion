@@ -1563,8 +1563,8 @@ pub(crate) struct SkyMembers {
 impl SkyMembers {
     /// The caches `galaxy`'s census takes its members through, or `None` where it takes none:
     /// `features` and `interiors` exactly where its field gives up the features' members
-    /// ([`takes_feature_members`]), `classes` exactly where its grid gives up the catalogue
-    /// classes' hosts ([`takes_class_hosts`], the carve-out), and `list` exactly where the range
+    /// ([`takes_feature_members`]), `classes` exactly where it gives up some catalogue class's
+    /// hosts ([`takes_class_hosts`]), and `list` exactly where the range
     /// query registers the global list's source ([`GlobalListSource::is_registered_in`]), the
     /// hold under which the halo's field gives up the list's share. So the sky and the field flip
     /// together, whatever version holds each.
@@ -1572,15 +1572,14 @@ impl SkyMembers {
     pub(crate) fn of(
         galaxy: &Galaxy,
         (features, interiors, classes): (
-            &Arc<SharedFeatureCellCache>,
-            &Arc<SharedClusterModelCache>,
-            &Arc<SharedClassCellCache>,
+            Arc<SharedFeatureCellCache>,
+            Arc<SharedClusterModelCache>,
+            Arc<SharedClassCellCache>,
         ),
         list: Option<(ListedTubes, Arc<SharedCentreOrbitCache>)>,
     ) -> Option<Self> {
-        let features =
-            takes_feature_members(galaxy).then(|| (Arc::clone(features), Arc::clone(interiors)));
-        let classes = takes_class_hosts(galaxy).then(|| Arc::clone(classes));
+        let features = takes_feature_members(galaxy).then_some((features, interiors));
+        let classes = takes_class_hosts(galaxy).then_some(classes);
         let list = list.filter(|_| GlobalListSource::is_registered_in(galaxy));
         (features.is_some() || classes.is_some() || list.is_some()).then_some(Self {
             features,
@@ -2213,6 +2212,20 @@ pub(crate) mod tests {
         pool.shutdown().await.unwrap();
     }
 
+    /// Fresh caches of 64 MiB each that a census's members are drawn through: the features' cells,
+    /// their interiors and the classes' cells.
+    fn member_caches() -> (
+        Arc<SharedFeatureCellCache>,
+        Arc<SharedClusterModelCache>,
+        Arc<SharedClassCellCache>,
+    ) {
+        (
+            Arc::new(SharedFeatureCellCache::new(64 << 20)),
+            Arc::new(SharedClusterModelCache::new(64 << 20)),
+            Arc::new(SharedClassCellCache::new(64 << 20)),
+        )
+    }
+
     /// The sim's census of `plan`'s `shells` as [`serial_census`] takes it, and each shell's
     /// members beyond the grid in one part through sources over `features` and `interiors`, over
     /// `classes` if given and over `list` if given (R06.T16.a).
@@ -2290,17 +2303,20 @@ pub(crate) mod tests {
             .with_full_potential(),
         );
         let key = GalaxyKey::new(0x4d2, version);
-        let (features, interiors, classes) = (
-            Arc::new(SharedFeatureCellCache::new(64 << 20)),
-            Arc::new(SharedClusterModelCache::new(64 << 20)),
-            Arc::new(SharedClassCellCache::new(64 << 20)),
-        );
-        let members = SkyMembers::of(&galaxy, (&features, &interiors, &classes), None);
+        let (features, interiors, classes) = member_caches();
+        let caches = || {
+            (
+                Arc::clone(&features),
+                Arc::clone(&interiors),
+                Arc::clone(&classes),
+            )
+        };
+        let members = SkyMembers::of(&galaxy, caches(), None);
         assert!(members.is_some(), "a galaxy of 27 gives up φ");
         // At the version in force, below φ's and the carve-out's, the field keeps every
         // population's budget and the grid the classes' hosts.
         let held = Galaxy::new(Seed::new(0x4d2));
-        assert!(SkyMembers::of(&held, (&features, &interiors, &classes), None).is_none());
+        assert!(SkyMembers::of(&held, caches(), None).is_none());
 
         let near = sun().position().to_owned();
         let cluster = hyperion_sim::galaxy::features::catalogue::FeatureCatalogue::near(
@@ -2419,14 +2435,14 @@ pub(crate) mod tests {
             .expect("a luminous blue variable within 20,000 ly of the Sun")
     }
 
-    /// Where the galaxy's grid gives up the catalogue classes' hosts, at 26 (the carve-out), its
-    /// census's jobs take them (R06.T16.a): 10 ly from the luminous blue variable nearest the
+    /// Where the galaxy's field gives up the catalogue classes' hosts, at 26 (the carve-out's and
+    /// φ's holds), its census's jobs take them (R06.T16.a): 10 ly from the luminous blue variable nearest the
     /// Sun, A to 5 ly, B to 10 and C, D and E to 30 ly in shells to 20 and 30 ly at V 11, after
     /// each step the census is the sim's of the shells done with the features' and the classes'
     /// sources, serially and in one part a shell, star for star, and the last lists the variable;
     /// without the member caches the same sky lists no class host.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn where_the_grid_gives_up_the_class_hosts_the_jobs_census_takes_them() {
+    async fn where_the_field_gives_up_the_class_hosts_the_jobs_census_takes_them() {
         let version = hyperion_sim::GeneratorVersion::new(26);
         let galaxy = Arc::new(
             Galaxy::from_params_at_version(
@@ -2439,12 +2455,16 @@ pub(crate) mod tests {
         );
         assert!(takes_class_hosts(&galaxy));
         let key = GalaxyKey::new(0x4d2, version);
-        let (features, interiors, classes) = (
-            Arc::new(SharedFeatureCellCache::new(64 << 20)),
-            Arc::new(SharedClusterModelCache::new(64 << 20)),
-            Arc::new(SharedClassCellCache::new(64 << 20)),
+        let (features, interiors, classes) = member_caches();
+        let members = SkyMembers::of(
+            &galaxy,
+            (
+                Arc::clone(&features),
+                Arc::clone(&interiors),
+                Arc::clone(&classes),
+            ),
+            None,
         );
-        let members = SkyMembers::of(&galaxy, (&features, &interiors, &classes), None);
         assert!(
             members
                 .as_ref()
@@ -2545,11 +2565,7 @@ pub(crate) mod tests {
         );
         assert!(GlobalListSource::is_registered_in(&galaxy));
         let key = GalaxyKey::new(0x4d2, version);
-        let (features, interiors, classes) = (
-            Arc::new(SharedFeatureCellCache::new(64 << 20)),
-            Arc::new(SharedClusterModelCache::new(64 << 20)),
-            Arc::new(SharedClassCellCache::new(64 << 20)),
-        );
+        let (features, interiors, classes) = member_caches();
         let global_list = hyperion_sim::galaxy::global_list::GlobalList::build(&galaxy);
         let core = global_list
             .debris()
@@ -2567,8 +2583,18 @@ pub(crate) mod tests {
             Arc::new(crate::compute::TubeTableCache::new(64 << 20)),
         );
         let orbits = Arc::new(SharedCentreOrbitCache::new(64 << 20));
-        let caches = (&features, &interiors, &classes);
-        let members = SkyMembers::of(&galaxy, caches, Some((listed.clone(), Arc::clone(&orbits))));
+        let caches = || {
+            (
+                Arc::clone(&features),
+                Arc::clone(&interiors),
+                Arc::clone(&classes),
+            )
+        };
+        let members = SkyMembers::of(
+            &galaxy,
+            caches(),
+            Some((listed.clone(), Arc::clone(&orbits))),
+        );
         assert!(
             members
                 .as_ref()
@@ -2653,7 +2679,7 @@ pub(crate) mod tests {
         assert!(last.listed().iter().any(|star| in_core(&star)));
 
         let without = CensusInputs {
-            members: SkyMembers::of(&galaxy, caches, None),
+            members: SkyMembers::of(&galaxy, caches(), None),
             ..inputs
         };
         let censused = steps_censused_within(

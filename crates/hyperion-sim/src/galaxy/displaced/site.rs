@@ -411,8 +411,8 @@ pub(crate) type RecentDeathClaim = fn(&Galaxy, &ExplosionSite, &SystemRecord) ->
 /// reply; the two turn on together. The bump to 27 deletes this hold, [`CarveOutRules`] with its
 /// `Unclaimed` arm, `GalaxyRules::carve_out`, the `match`es in [`recent_death_claim`],
 /// `Galaxy::build` (so `Galaxy::layer_d_kept` loses its `Option`) and the sky's
-/// `takes_class_hosts` (which then always holds; rendering plan R06, R06.T16.a) and the tripwire
-/// (`the_carve_out_is_held_only_until_the_27_bump`), and makes the claim the one item
+/// `takes_hosts_of` (whose carve-out arm then always holds; rendering plan R06, R06.T16.a) and the
+/// tripwire (`the_carve_out_is_held_only_until_the_27_bump`), and makes the claim the one item
 /// `Some(recent_death_claims)` again.
 pub(crate) const CARVE_OUT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 

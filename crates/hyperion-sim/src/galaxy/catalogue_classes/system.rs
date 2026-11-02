@@ -22,13 +22,13 @@ use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 #[cfg(doc)]
 use crate::galaxy::placement::SystemOrigin;
-use crate::galaxy::placement::{ResolveSystemError, SystemRecord};
+use crate::galaxy::placement::{Existence, ResolveSystemError, SystemRecord};
 use crate::id::{CatalogueSystemId, SystemIdKind};
 use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::system::SystemStars;
 use crate::time::UniverseTime;
-use crate::units::Seconds;
+use crate::units::{MetresPerSecond, Seconds};
 
 /// Where a catalogue system is at any time: a straight line through a point, broken there at one
 /// instant (plan 09, P09.T33.a).
@@ -106,6 +106,12 @@ impl CatalogueMotion {
     #[must_use]
     pub fn velocity_at(&self, t: UniverseTime) -> GalacticVelocity {
         if t < self.at { self.before } else { self.after }
+    }
+
+    /// The faster of its two lines' speeds.
+    #[must_use]
+    pub(crate) fn fastest(&self) -> MetresPerSecond {
+        MetresPerSecond::new(self.before.speed().value().max(self.after.speed().value()))
     }
 
     /// The position at `t`: the break's point moved along [`velocity_at`](Self::velocity_at) over
@@ -230,6 +236,24 @@ impl CatalogueSystem {
     #[must_use]
     pub fn position_at(&self, t: UniverseTime) -> GalacticPosition {
         self.motion.position_at(t)
+    }
+
+    /// Whether it is seen at `t`, as the range query lists it and the sky shows it in light emitted
+    /// then (P09.T37.a; rendering plan R06, R06.T16.a): where its record exists then, and a further
+    /// member of its entry only from its entry's break, before which a Type Ia's survivor is its
+    /// progenitor's companion, at member 0's place (P09.T34.a's lean).
+    #[must_use]
+    pub fn shown_at(&self, t: UniverseTime) -> bool {
+        let SystemIdKind::Catalogue(id) = self.record.id().kind() else {
+            unreachable!("a catalogue system's record carries its 111 ID");
+        };
+        if id.member() > 0 && t < self.motion.at() {
+            return false;
+        }
+        match self.record.existence_at(t) {
+            Existence::NoSystemYet => false,
+            Existence::Exists => true,
+        }
     }
 
     /// The composition its stars are generated at and the multiplicity context they are drawn

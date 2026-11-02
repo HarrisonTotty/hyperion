@@ -74,15 +74,16 @@ use crate::GeneratorVersion;
 use crate::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
 use crate::galaxy::Galaxy;
 use crate::galaxy::features::members::source::part_of_key;
-use crate::galaxy::placement::{Existence, SystemRecord};
+use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::{
     LayerCounts, LayerSet, PAD_SPEED, QuerySphere, RangeQuery, SystemHit, SystemSource, pad_for,
     widest_sphere,
 };
-use crate::id::{CatalogueSystemId, Layer, SystemIdKind};
+use crate::id::{CatalogueSystemId, Layer};
 use crate::math;
-use crate::time::UniverseTime;
+use crate::time::{Span, UniverseTime};
 use crate::units::LightYears;
+use crate::units::consts::SPEED_OF_LIGHT;
 
 /// The generator version from which the range query registers the catalogue classes beside the
 /// grid (plan 09, P09.T37.a; the hold of [`ClassSourceRules`]).
@@ -303,16 +304,17 @@ impl<L: ClassLookup> CachedClassSource<'_, L> {
         }
     }
 
-    /// Each class host of `layer` that may lie between `inner` and `outer` of `centre` at some
-    /// time of `window`, existing by its end, given to `each` in the source's order: the classes
-    /// in [`ALL_CLASSES`] order, then the cells its hits would read for the sphere of `outer`
+    /// Each class host of `layer` of the classes `taken` holds that may lie between `inner` and
+    /// `outer` of `centre` at some time of `window`, seen by its end, given to `each` in the
+    /// source's order: the classes in [`ALL_CLASSES`] order, then the cells its hits would read for
+    /// the sphere of `outer`
     /// about `centre` at the window's farthest time from the epoch, those of the part `part` of
     /// `parts` by their key ([`part_of_key`]), then each cell's systems in the hits' order
     /// (rendering plan R06, R06.T16.a). A placed class's candidate is built only if its place,
-    /// padded by the farthest its hosts drift over the window, reaches the shell; a further
-    /// member of an entry is given only once its entry's break is past by the window's end; and a
-    /// host's broken line over the window must come within `outer` and reach out to `inner`. It
-    /// may give a host beyond the shell, never leave one out.
+    /// padded by the farthest its hosts drift over the window, reaches the shell; and a host's
+    /// broken line over the window, opened earlier by the light-cone step's residual
+    /// ([`seen_in_shell`]), must come within `outer` and reach out to `inner`. It may give a host
+    /// beyond the shell, never leave one out.
     ///
     /// # Panics
     ///
@@ -323,6 +325,7 @@ impl<L: ClassLookup> CachedClassSource<'_, L> {
         centre: &GalacticPosition,
         window: (UniverseTime, UniverseTime),
         ((layer, inner, outer), part): ((Layer, LightYears, LightYears), (u32, NonZeroU32)),
+        taken: &dyn Fn(ClassId) -> bool,
         each: &mut dyn FnMut(&CatalogueSystem),
     ) {
         let (from, to) = window;
@@ -335,7 +338,7 @@ impl<L: ClassLookup> CachedClassSource<'_, L> {
         };
         let sphere = QuerySphere::new(*centre, outer, farthest, LightYears::ZERO)
             .expect("a shell's outer distance is finite and positive");
-        for class in ALL_CLASSES {
+        for class in ALL_CLASSES.into_iter().filter(|&class| taken(class)) {
             let visit = ShellHosts {
                 galaxy,
                 sphere: &sphere,
@@ -875,11 +878,17 @@ impl ClassVisitor for ShellHosts<'_> {
     }
 }
 
-/// Whether `system` may be of `layer` and between `inner` and `outer` of `centre` at some time of
-/// `window`: of the layer, existing by the window's end and, a further member of its entry, past
-/// its entry's break by then; and its broken line over the window, the straight runs between the
-/// window's ends and the break within it, coming within `outer` of `centre` and reaching out to
-/// `inner`, each with a margin over the rounding.
+/// Whether `system` may be of `layer` and between `inner` and `outer` of `centre` in light
+/// emitted in `window`: of the layer, seen by the window's end ([`CatalogueSystem::shown_at`]),
+/// and its broken line, the straight runs between the window's ends and the break within it,
+/// coming within `outer` of `centre` and reaching out to `inner`, each with a margin over the
+/// rounding. The line is opened before the window by twice the census's light-cone step's
+/// residual, at the host's faster speed.
+///
+/// # Panics
+///
+/// If the window's start, so opened, is off the clock, which no cap's is.
+#[must_use]
 fn seen_in_shell(
     system: &CatalogueSystem,
     layer: Layer,
@@ -890,31 +899,31 @@ fn seen_in_shell(
     /// The margin on each distance, ly: far above the rounding of a point of the root cube about
     /// a line's ends, some 10⁻¹¹ ly.
     const MARGIN_LY: f64 = 1e-6;
-    let record = system.record();
-    if record.layer() != layer {
+    /// How many times the light-cone step's bound on its residual the line is opened by.
+    const LEAD_FACTOR: f64 = 2.0;
+    /// The lead over the emitted time's rounding to the nanosecond, s.
+    const ROUNDING_S: f64 = 1.0;
+    if system.record().layer() != layer || !system.shown_at(to) {
         return false;
     }
-    match record.existence_at(to) {
-        Existence::NoSystemYet => return false,
-        Existence::Exists => {}
-    }
-    let SystemIdKind::Catalogue(id) = record.id().kind() else {
-        unreachable!("a catalogue system's record carries its 111 ID");
-    };
-    let at = system.motion().at();
-    if id.member() > 0 && to < at {
-        return false;
-    }
+    let motion = system.motion();
+    // The census's one fixed-point step on the light cone (`observe::retarded`) emits within (v ÷
+    // c)² of the light time of the cone's emission, so a host it keeps may be seen in light from
+    // before the window.
+    let beta = motion.fastest().value() / SPEED_OF_LIGHT;
+    let light_s = to
+        .checked_since(from)
+        .expect("a window's ends are a span apart")
+        .as_seconds_f64();
+    let lead = Span::from_seconds_f64(LEAD_FACTOR * beta * beta * light_s + ROUNDING_S)
+        .expect("a lead of a few years is a span");
+    let start = from
+        .checked_sub(lead)
+        .expect("a window's start less a few years is on the clock");
     let c = centre.to_light_years_f64();
-    let corners = if from < at && at < to {
-        vec![from, at, to]
-    } else {
-        vec![from, to]
-    };
-    let points: Vec<[f64; 3]> = corners
-        .iter()
-        .map(|&t| system.position_at(t).to_light_years_f64())
-        .collect();
+    // A break outside the opened window repeats an end, a run of no length.
+    let points = [start, motion.at().clamp(start, to), to]
+        .map(|t| system.position_at(t).to_light_years_f64());
     // Each run's distance from the centre is convex along it, so its farthest is at an end.
     let farthest = points
         .iter()
@@ -1005,10 +1014,10 @@ fn place_reach(sphere: &QuerySphere) -> LightYears {
     LightYears::new(sphere.radius().value() + drift * (1.0 + DRIFT_MARGIN) + NEAR_MARGIN_LY)
 }
 
-/// Appends `system`'s hit to `out` if it is in `layers`, exists at the sphere's time and lies, at
-/// its class's position then, inside the unpadded radius: [`hit_at`](crate::galaxy::query::hit_at)'s
-/// test. A further member of an entry is listed from its own break only, before which a Type Ia's
-/// survivor is its progenitor's companion, at member 0's place (P09.T34.a's lean).
+/// Appends `system`'s hit to `out` if it is in `layers`, is seen at the sphere's time
+/// ([`CatalogueSystem::shown_at`]: it exists then, a further member of an entry from its own break)
+/// and lies, at its class's position then, inside the unpadded radius:
+/// [`hit_at`](crate::galaxy::query::hit_at)'s test.
 fn push_hit(
     system: &CatalogueSystem,
     sphere: &QuerySphere,
@@ -1016,18 +1025,8 @@ fn push_hit(
     out: &mut Vec<SystemHit>,
 ) {
     let record = system.record();
-    if !layers.contains(record.layer()) {
+    if !layers.contains(record.layer()) || !system.shown_at(sphere.time()) {
         return;
-    }
-    let SystemIdKind::Catalogue(id) = record.id().kind() else {
-        unreachable!("a catalogue system's record carries its 111 ID");
-    };
-    if id.member() > 0 && sphere.time() < system.motion().at() {
-        return;
-    }
-    match record.existence_at(sphere.time()) {
-        Existence::NoSystemYet => return,
-        Existence::Exists => {}
     }
     let position = system.position_at(sphere.time());
     let distance = LightYears::from(sphere.centre().distance_to(&position));

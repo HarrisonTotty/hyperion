@@ -37,12 +37,14 @@
 //! ruled for its cells and its remnants are dark (lean, 2026-11-02); its black hole, its tidal
 //! disruptions' victims and its recent entries are not taken.
 //!
-//! From plan 09's P09.T35 the grid gives the catalogue classes their hosts, and the census takes
-//! them exactly there ([`takes_class_hosts`], the carve-out's hold): every host of every class the
-//! production lookup has, through its [`CachedClassSource`], each on its broken line
-//! ([`CatalogueMotion`](crate::galaxy::catalogue_classes::CatalogueMotion)) with its class's own
-//! stars and multiplicity ([`CatalogueSystem::stars`]), and seen only where it exists at its
-//! emitted time, a further member of an entry from its entry's break, as the range query lists it.
+//! The field gives the catalogue classes their hosts, the core collapses' and the luminous blue
+//! variables' under plan 09's carve-out (P09.T35) and plan 11's binary classes' with φ, and the
+//! census takes each class's exactly there ([`takes_hosts_of`]; lean, 2026-11-02): every host of
+//! those classes the production lookup has, through its [`CachedClassSource`], each on its broken
+//! line ([`CatalogueMotion`](crate::galaxy::catalogue_classes::CatalogueMotion)) with its class's
+//! own stars and multiplicity ([`CatalogueSystem::stars`]; the Type Ia's members have none), and
+//! seen only where it exists at its emitted time, a further member of an entry from its entry's
+//! break, as the range query lists it ([`CatalogueSystem::shown_at`]).
 //!
 //! # The band and the caps
 //!
@@ -57,7 +59,9 @@
 use core::num::NonZeroU32;
 
 use crate::galaxy::Galaxy;
-use crate::galaxy::catalogue_classes::{CachedClassSource, CatalogueSystem, ClassLookup};
+use crate::galaxy::catalogue_classes::{
+    ALL_CLASSES, CachedClassSource, CatalogueSystem, ClassId, ClassLookup,
+};
 use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::features::centre::path::CellPath;
 use crate::galaxy::features::centre::{CentreClassKind, CentreMemberLight};
@@ -67,8 +71,6 @@ use crate::galaxy::global_list::GlobalListSource;
 use crate::galaxy::global_list::members::GlobalMemberRecord;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::motion::Trajectory;
-use crate::galaxy::placement::Existence;
-use crate::id::SystemIdKind;
 use crate::math;
 use crate::observe::{Drift, Observer, Retardation, retarded};
 use crate::stellar::multiplicity::MultiplicityContext;
@@ -150,24 +152,14 @@ impl SkyMember<'_> {
         }
     }
 
-    /// Whether it is seen in light emitted at `emitted`: a class host where it exists then, and a
-    /// further member of its entry from its entry's break, as the range query lists it
-    /// (`catalogue_classes::source`'s hits); every other member, whose stars say when they exist.
+    /// Whether it is seen in light emitted at `emitted`: a class host as the range query lists it
+    /// ([`CatalogueSystem::shown_at`]: where it exists then, and a further member of its entry from
+    /// its entry's break); every other member, whose stars say when they exist.
     #[must_use]
     fn shown_at(&self, emitted: UniverseTime) -> bool {
         match self {
             Self::Feature(_) | Self::Listed(_) | Self::Centre(..) => true,
-            Self::Class(system) => {
-                let record = system.record();
-                let SystemIdKind::Catalogue(id) = record.id().kind() else {
-                    unreachable!("a catalogue system's record carries its 111 ID");
-                };
-                let broken = id.member() == 0 || emitted >= system.motion().at();
-                match record.existence_at(emitted) {
-                    Existence::NoSystemYet => false,
-                    Existence::Exists => broken,
-                }
-            }
+            Self::Class(system) => system.shown_at(emitted),
         }
     }
 
@@ -299,13 +291,14 @@ impl SkySource for GlobalListSource<'_> {
 }
 
 impl<L: ClassLookup> SkySource for CachedClassSource<'_, L> {
-    /// The hosts of the band's layer whose broken lines can bring them between `inner` and `outer`
-    /// over the light's window, from the class cells the range query's hits would read for a
-    /// sphere of `outer` at the window's farthest time from the epoch.
+    /// The hosts of the band's layer, of the classes whose hosts the galaxy's field gives up
+    /// ([`takes_hosts_of`]), whose broken lines can bring them between `inner` and `outer` over
+    /// the light's window, from the class cells the range query's hits would read for a sphere of
+    /// `outer` at the window's farthest time from the epoch.
     ///
     /// # Panics
     ///
-    /// As [`FeatureMemberSource`]'s.
+    /// As [`FeatureMemberSource`]'s; and if `outer` is not finite and positive.
     fn members_seen(
         &self,
         galaxy: &Galaxy,
@@ -318,6 +311,7 @@ impl<L: ClassLookup> SkySource for CachedClassSource<'_, L> {
             observer.position(),
             window(observer, outer),
             ((band.layer(), inner, outer), (part.index, part.of)),
+            &|class| takes_hosts_of(galaxy, class),
             &mut |system| each(SkyMember::Class(system)),
         );
     }
@@ -354,21 +348,46 @@ pub fn takes_feature_members(galaxy: &Galaxy) -> bool {
     galaxy.field_share().is_some()
 }
 
-/// Whether the census takes the catalogue classes' hosts in `galaxy`: exactly where its grid gives
-/// them up, under plan 09's carve-out (P09.T35, the galaxy rules' `carve_out`), whatever generator
-/// version holds it, so that a host is never counted twice nor lost from the sky.
+/// Whether the census takes `class`'s hosts in `galaxy`: exactly where its field gives them up,
+/// whatever generator version holds each, so that a host is never counted twice nor lost from the
+/// sky (rendering plan R06, R06.T16.a; lean, 2026-11-02). The core collapses', the luminous blue
+/// variables' and the Type Ia's under plan 09's carve-out (P09.T35, the galaxy rules'
+/// `carve_out`), whose claims take their hosts from the grid; plan 11's binary classes' where the
+/// field gives up their share with φ (P11.T7's `class_share`, which only the field share applies:
+/// the galaxy rules' `field_share`); and no other's, the tidal-disruption victims', which are the
+/// centre's, among them.
 ///
-/// A server gives a census the classes' source ([`CachedClassSource`]) where this holds. The
-/// range query registers the same source only from its own hold
+/// The range query registers the classes only from its own hold
 /// ([`registered_in`](crate::galaxy::catalogue_classes::CatalogueClassSource::registered_in),
 /// P09.T37.a), so between the two a host is in the sky and not in a range reply. No version of
-/// its own: the carve-out's hold's tripwire covers both.
+/// its own: the carve-out's and φ's tripwires cover it.
+#[must_use]
+pub fn takes_hosts_of(galaxy: &Galaxy, class: ClassId) -> bool {
+    match class {
+        ClassId::CORE_COLLAPSE | ClassId::LUMINOUS_BLUE_VARIABLE | ClassId::TYPE_IA => {
+            match galaxy.rules().carve_out {
+                CarveOutRules::Unclaimed => false,
+                CarveOutRules::Claimed => true,
+            }
+        }
+        ClassId::ACCRETING_WHITE_DWARF
+        | ClassId::ACCRETING_WHITE_DWARF_SLOW
+        | ClassId::XRAY_BINARY
+        | ClassId::STELLAR_MERGER
+        | ClassId::NEUTRON_STAR_MERGER => takes_feature_members(galaxy),
+        // The victims, and any value no class holds.
+        _ => false,
+    }
+}
+
+/// Whether the census takes any catalogue class's hosts in `galaxy` ([`takes_hosts_of`]): where a
+/// server gives a census the classes' source ([`CachedClassSource`]), which takes each class's
+/// where that class's own switch gives them up.
 #[must_use]
 pub fn takes_class_hosts(galaxy: &Galaxy) -> bool {
-    match galaxy.rules().carve_out {
-        CarveOutRules::Unclaimed => false,
-        CarveOutRules::Claimed => true,
-    }
+    ALL_CLASSES
+        .into_iter()
+        .any(|class| takes_hosts_of(galaxy, class))
 }
 
 /// The streams whose tube tables the census of `plan` for `query` reads through a
@@ -1458,9 +1477,10 @@ mod tests {
 
     /// The brute force of the classes' hosts for plain caps of `radius`: every host the range
     /// query returns within `radius`, its layers' farthest star offset and a margin of the
-    /// observer at its time, each retarded on its own line and kept where it is shown then and its
-    /// nearest possible star lies within `radius`, as the census's shells together hold it, every
-    /// star of it measured and kept within `radius`; with their tallies.
+    /// observer at its time, of a class whose hosts the census takes ([`takes_hosts_of`]), each
+    /// retarded on its own line and kept where it is shown then and its nearest possible star lies
+    /// within `radius`, as the census's shells together hold it, every star of it measured and kept
+    /// within `radius`; with their tallies.
     fn every_class_host(
         galaxy: &Galaxy,
         query: &SkyQuery,
@@ -1493,6 +1513,10 @@ mod tests {
             let SystemIdKind::Catalogue(id) = hit.id().kind() else {
                 unreachable!("the classes' source returns class hosts")
             };
+            let class = CatalogueCellKey::of(id).expect("a host's cell").class();
+            if !takes_hosts_of(galaxy, class) {
+                continue;
+            }
             let system = system_of(galaxy, id).expect("a host the query returns resolves");
             let host = SkyMember::Class(&system);
             let r = host.retarded(observer);
@@ -1573,35 +1597,49 @@ mod tests {
         (stars, tallies)
     }
 
-    /// The census takes the catalogue classes' hosts exactly where the grid gives them up, and
-    /// then each host the range query returns within its shells once (R06.T16.a, from the
-    /// carve-out), each property on one build of the fixture at each version from the switch, 26
-    /// and 27:
+    /// The census takes the catalogue classes' hosts exactly where the field gives them up, and
+    /// then each host with stars the range query returns within its shells once (R06.T16.a), each
+    /// property on one build of the fixture at each version from the switches, 26 and 27:
     ///
-    /// - the switch: no hosts under the carve-out's held arm, every other 26 hold given, and hosts
-    ///   under its arm;
+    /// - the switches: none at 24; the carve-out's classes under its arm and not its held arm, and
+    ///   the binary classes under φ's arm and not its held arm, each whatever the other gives;
     /// - from the Sun to 400 ly at V 11, the hosts' stars of one shell are those of a brute force
     ///   over every host the range query returns, each on its own line, every star measured (the
     ///   accreting white dwarfs' and a stellar merger's, some hundred), and those of shells to 200
     ///   and 400 ly, in one part or three, through class cells made for the census, kept by an
-    ///   earlier one or not kept, bit for bit and tally for tally;
+    ///   earlier one or not kept, bit for bit and tally for tally; with φ held, none of them;
     /// - 30 ly from the luminous blue variable nearest the Sun, to 100 ly, it is listed, and the
     ///   same holds of shells to 50 and 100 ly in three parts;
     /// - at 27, each job's census is the same whatever ran before it through the kept cells, and a
     ///   century on the census of the hosts' moving lines is the brute force's still.
     #[test]
-    fn the_census_takes_each_class_host_once_where_the_grid_gives_them_up() {
+    fn the_census_takes_each_class_host_once_where_the_field_gives_them_up() {
         assert!(!takes_class_hosts(milky_way_galaxy()));
-        let held = Galaxy::from_params_with_rules(
+        let carved_held = Galaxy::from_params_with_rules(
             Seed::new(SEED),
             GalaxyParams::milky_way_like(),
             GalaxyRules {
                 carve_out: CarveOutRules::Unclaimed,
-                ..GalaxyRules::every_26_hold_with_its_retargets()
+                ..phi_rules()
             },
         )
         .expect("the fixture builds");
-        assert!(!takes_class_hosts(&held));
+        for (galaxy, carved, binaries) in [
+            (&carved_held, false, true),
+            (budget_galaxy(), true, false),
+            (phi_galaxy(), true, true),
+        ] {
+            for class in [ClassId::CORE_COLLAPSE, ClassId::LUMINOUS_BLUE_VARIABLE] {
+                assert_eq!(takes_hosts_of(galaxy, class), carved, "{class}");
+            }
+            for class in [ClassId::ACCRETING_WHITE_DWARF, ClassId::STELLAR_MERGER] {
+                assert_eq!(takes_hosts_of(galaxy, class), binaries, "{class}");
+            }
+        }
+        assert!(!takes_hosts_of(
+            phi_galaxy(),
+            ClassId::TIDAL_DISRUPTION_VICTIM
+        ));
         let (one, three) = (NonZeroU32::MIN, NonZeroU32::new(3).expect("not zero"));
         for galaxy in [phi_galaxy(), list_galaxy()] {
             assert!(takes_class_hosts(galaxy));
@@ -1641,6 +1679,15 @@ mod tests {
                 lbv.id()
             );
         }
+
+        // Where the field keeps φ, it keeps the binary classes' share, and the census takes none
+        // of their hosts by the Sun.
+        let budget = budget_galaxy();
+        let query = forced(budget, SUN_LY, 11.0, &[]);
+        let (_, tallies) =
+            checked_class_census(budget, (&query, 400.0), &KeepClassCells::default(), &[]);
+        let hosts: u64 = generated_and_accepted(&tallies).iter().map(|c| c.0).sum();
+        assert_eq!(hosts, 0, "hosts by the Sun with φ held");
 
         // Each job's census is the same whatever ran before it through the kept cells.
         let galaxy = list_galaxy();

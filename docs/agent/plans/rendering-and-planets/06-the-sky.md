@@ -3110,7 +3110,8 @@ draft, and the owner's sign-off recorded in this plan.
       in `SystemsInRange`, and `FeatureGas` passed where `NoModifiers` is.
 
     P09.T40's centre and catalogue-class sources wait on P09.T29 and T37, and are not needed. The
-    centre's members join with P09.T28.b–T29, which clears the `centre_members` gap.
+    centre's members join with P09.T28.b–T29, which clears the `centre_members` gap. _Both joined
+    the census on 2026-11-02 (Risks, "R06.T16.a at 27" and "the catalogue classes' hosts")._
 
   - **The census.** The sky handler builds the same sources over P09.T40's caches. The census
     reads `FeatureMemberSource` through the `SystemSource` hook, with the same skips (a member's
@@ -9990,25 +9991,30 @@ CensusCost)`.
   - **The flag.** `SkySource::holds_feature_members` says which source clears
     `feature_members_absent`; the list's does not.
   - **Left (finding).** The catalogue classes' hosts: the grid gives them up from 26
-    (`CARVE_OUT_VERSION`), and no census source places them yet.
+    (`CARVE_OUT_VERSION`), and no census source places them yet. _Closed 2026-11-02 (below)._
   - **Cost.** `sky/census_near_sun_members/served_5.0_27`: the measurements in the lane's outbox;
     the centre's cached cells keep 32 bytes more a member (`CentreMemberLight`).
   - _Movers at 27._ Sky replies list the streams', dwarf cores' and centre's living members' stars,
     with their tallies and overflow; the sky's pins move only with the field's own 27 holds.
 - **R06.T16.a: the catalogue classes' hosts (2026-11-02).**
-  - **The switch.** `sky::census::takes_class_hosts`, the carve-out's hold (`CARVE_OUT_VERSION`,
-    26), under which the grid gives the hosts up; the server's `SkyMembers::of` takes its class
-    cells there. The range query registers the classes only at 27, so at 26 a host is in the sky
-    and in no range reply (finding).
-  - **The source.** `CachedClassSource` is a `SkySource` (`SkyMember::Class`): every class of the
-    production lookup, on its broken line, with its class's own stars and multiplicity, seen where
-    it exists at its emitted time and a further member from its entry's break, as `push_hit` lists.
+  - **The switch (lean, 2026-11-02).** Each class's own (`sky::census::takes_hosts_of`): the core
+    collapses', luminous blue variables' and Type Ia's under the carve-out (`CARVE_OUT_VERSION`),
+    and plan 11's binary classes' under φ (`field_share`), whose `class_share` the field gives up.
+    Both are at 26; the server's `SkyMembers::of` takes its class cells where any class's holds.
+  - **Not in range replies.** The range query registers the classes only at 27, so at 26 a host is
+    in the sky and in no range reply (finding).
+  - **The source.** `CachedClassSource` is a `SkySource` (`SkyMember::Class`), on each host's broken
+    line, with its class's own stars and multiplicity, seen as the range query lists it
+    (`CatalogueSystem::shown_at`, which `push_hit` now reads too).
   - **The walk.** The hits' cells about the shell's sphere at the window's farthest time, in parts
     by cell key; a placed class's candidate built only where its place, padded by its drift, meets
-    the shell; each host's broken line over the window tested against the shell.
-  - **The test.** Every host the range query returns within the shells is in the census once, at 26
-    and 27: from the Sun to 400 ly (some hundred, mostly accreting white dwarfs), and 30 ly from the
-    nearest luminous blue variable, which is listed.
+    the shell; each host's line tested against the shell from before the window by twice the
+    light-cone step's residual, (v ÷ c)² of the light time.
+  - **The test.** Every host with stars the range query returns within the shells is in the census
+    once, at 26 and 27: from the Sun to 400 ly (some hundred, mostly accreting white dwarfs; none
+    with φ held), and 30 ly from the nearest luminous blue variable, which is listed.
+  - **Left (finding).** The Type Ia class's progenitors and survivors have no stars, so the sky
+    lists none of them, though the range query returns them.
   - **Cost.** `sky/census_near_sun_members/*`: the measurements in the lane's outbox.
   - _Movers at 26._ Sky replies list the classes' hosts' stars, with their tallies and overflow; the
     sky's pins census with no sources and do not move.

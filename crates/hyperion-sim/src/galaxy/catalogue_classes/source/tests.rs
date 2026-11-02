@@ -1014,3 +1014,145 @@ fn a_cell_s_systems_are_its_members_resolves() {
     }
     assert!(members > 9, "{members}");
 }
+
+/// The sky's walk never leaves out a host the census keeps (rendering plan R06, R06.T16.a): a host
+/// about 1,000 ly from an observer, whose line reverses at its break, at 1,000 km/s towards the
+/// observer before it and away after, its break swept over a few years about its light's emission
+/// and its place over the hundredth of a light-year inside the shell's outer edge, is one
+/// `seen_in_shell` gives wherever the census's one fixed-point step on the light cone
+/// ([`retarded`](crate::observe::retarded)) shows it inside the edge, though the step shows some
+/// from before the light's window.
+#[test]
+fn the_sky_s_walk_keeps_every_host_the_census_shows_in_the_shell() {
+    use crate::coords::GalacticVelocity;
+    use crate::galaxy::Population;
+    use crate::galaxy::catalogue_classes::CatalogueMotion;
+    use crate::observe::{Observer, retarded};
+    use crate::time::Span;
+    use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
+    use crate::units::{SolarMasses, Years};
+
+    /// The shell's outer edge, ly.
+    const OUTER_LY: f64 = 1_000.0;
+    /// The host's speed each side of its break, m/s.
+    const SPEED: f64 = 1e6;
+    let here = [0.0, 26_000.0, 0.0];
+    let observer = Observer::new(
+        GalacticPosition::from_light_years(here).expect("in the cube"),
+        UniverseTime::EPOCH,
+    )
+    .expect("on the clock");
+    let years = |y: f64| Span::from_seconds_f64(y * SECONDS_PER_JULIAN_YEAR).expect("a span");
+    let earliest = UniverseTime::EPOCH
+        .checked_sub(years(OUTER_LY))
+        .expect("on the clock");
+    let window = (earliest, UniverseTime::EPOCH);
+    let id = CatalogueCellKey::new(ClassId::LUMINOUS_BLUE_VARIABLE, [0, 6, 0])
+        .expect("a cell")
+        .candidate_id(0, 0)
+        .expect("an ID");
+    let (mut kept, mut early) = (0, 0);
+    for j in 0..100 {
+        let distance = OUTER_LY - 0.01 + f64::from(j) * 1e-4;
+        let point =
+            GalacticPosition::from_light_years([distance, here[1], here[2]]).expect("in the cube");
+        let record = SystemRecord::from_parts(
+            SystemId::from(id),
+            point,
+            SystemOrigin::CatalogueSystem(ClassId::LUMINOUS_BLUE_VARIABLE),
+            Population::YoungThinDisc,
+            SolarMasses::new(40.0),
+            Years::new(5e6),
+        );
+        for k in -40..=40 {
+            let at = UniverseTime::EPOCH
+                .checked_sub(years(distance + f64::from(k) * 0.1))
+                .expect("on the clock");
+            let motion = CatalogueMotion::broken(
+                point,
+                at,
+                GalacticVelocity::new([-SPEED, 0.0, 0.0]),
+                GalacticVelocity::new([SPEED, 0.0, 0.0]),
+            );
+            let system = CatalogueSystem::new(record, motion);
+            let r = retarded(&observer, &motion);
+            let shown = observer
+                .position()
+                .distance_to(r.apparent_position())
+                .value()
+                / METRES_PER_LIGHT_YEAR;
+            if shown < OUTER_LY {
+                kept += 1;
+                early += usize::from(r.emitted() < earliest);
+                assert!(
+                    seen_in_shell(
+                        &system,
+                        Layer::E,
+                        observer.position(),
+                        window,
+                        (LightYears::ZERO, LightYears::new(OUTER_LY)),
+                    ),
+                    "a host {distance} ly away, broken {k} tenths of a year from its light's \
+                     emission, shown at {shown} ly, is left out"
+                );
+            }
+        }
+    }
+    assert!(
+        early > 0,
+        "of {kept} hosts kept, none shown from before the window"
+    );
+}
+
+/// A class host is seen where its record exists, and a further member of its entry only from its
+/// entry's break (P09.T34.a's lean; [`CatalogueSystem::shown_at`]): a Type Ia's member 1 at its
+/// break and not a second before it, its member 0 on both sides, and a record a century old at the
+/// epoch not two centuries before it but half a century before it.
+#[test]
+fn a_host_is_seen_where_it_exists_and_a_further_member_from_its_break() {
+    use crate::coords::GalacticVelocity;
+    use crate::galaxy::Population;
+    use crate::galaxy::catalogue_classes::CatalogueMotion;
+    use crate::time::Span;
+    use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
+    use crate::units::{SolarMasses, Years};
+
+    let years = |y: f64| Span::from_seconds_f64(y * SECONDS_PER_JULIAN_YEAR).expect("a span");
+    let before_epoch = |y: f64| {
+        UniverseTime::EPOCH
+            .checked_sub(years(y))
+            .expect("on the clock")
+    };
+    let key = CatalogueCellKey::new(ClassId::TYPE_IA, [0, 50, 0]).expect("a cell");
+    let place = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in the cube");
+    let at = before_epoch(500.0);
+    let motion = CatalogueMotion::broken(
+        place,
+        at,
+        GalacticVelocity::new([1e5, 0.0, 0.0]),
+        GalacticVelocity::new([-2e5, 0.0, 0.0]),
+    );
+    let host = |member: u8, age: f64| {
+        let id = key.candidate_id(0, member).expect("an ID");
+        CatalogueSystem::new(
+            SystemRecord::from_parts(
+                SystemId::from(id),
+                place,
+                SystemOrigin::CatalogueSystem(ClassId::TYPE_IA),
+                Population::OldThinDisc,
+                SolarMasses::new(1.0),
+                Years::new(age),
+            ),
+            motion,
+        )
+    };
+    let just_before = at
+        .checked_sub(Span::from_seconds_f64(1.0).expect("a span"))
+        .expect("on the clock");
+    assert!(!host(1, 1e9).shown_at(just_before));
+    assert!(host(1, 1e9).shown_at(at));
+    assert!(host(0, 1e9).shown_at(just_before));
+    let young = host(0, 100.0);
+    assert!(!young.shown_at(before_epoch(200.0)));
+    assert!(young.shown_at(before_epoch(50.0)));
+}

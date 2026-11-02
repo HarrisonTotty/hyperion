@@ -3291,8 +3291,8 @@ mod members {
     /// `census_near_sun_members/served_5.0_27` is the same at generator version 27, where the
     /// census takes the global list's members too, the streams', the dwarf cores' and the
     /// galactic centre's ([`GlobalListSource`]), its stream tables built first and timed apart.
-    /// Both take the catalogue classes' hosts where the grid gives them up ([`takes_class_hosts`],
-    /// from the carve-out at 26), their class cells made for the census and kept for its jobs.
+    /// Both take the catalogue classes' hosts where the field gives them up ([`takes_class_hosts`],
+    /// from 26), their class cells made for the census and kept for its jobs.
     pub(super) fn census_near_sun_members(c: &mut Criterion) {
         let mut group = c.benchmark_group("sky");
         group.sample_size(10);
