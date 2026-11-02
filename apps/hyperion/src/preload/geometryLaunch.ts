@@ -7,14 +7,15 @@
  * `clusterPath`, `casterDepthCull`, `litClusters`, `figureClusters`, `hullClusters` and
  * `wireClusters` `true` or `false`,
  * `casterStrideCap` 1, 2, 4 or 8, `overlayDepth` `redraw`, `scene-depth` or `cluster`,
- * `farCascadeRate` 1, 2 or 4, and `pageBytes` a whole number of bytes. As `qualityLaunch.ts` does for the setting, it rides in the
+ * `farCascadeRate` 1, 2 or 4, `pageBytes` a whole number of bytes, and `meshTolerancePx`
+ * `<camera>:<wireframe occluder>` px. As `qualityLaunch.ts` does for the setting, it rides in the
  * renderer's own `argv` as an extra switch, `--hyperion-geometry=<override>`, present only when the
  * launch gave one, in the canonical form {@link geometryText} writes, and the preload gives it to
  * `HyperionApi.geometry`. Both sides of the hand-off use this module; it imports types only, so it
  * is safe in either bundle.
  */
 
-import type { GeometryOverride } from "./api";
+import type { GeometryOverride, MeshTolerancePx } from "./api";
 
 export type { GeometryOverride } from "./api";
 
@@ -33,6 +34,7 @@ const FIELDS = [
   "hullClusters",
   "wireClusters",
   "pageBytes",
+  "meshTolerancePx",
 ] as const;
 
 /** A field's values, as a refusal names them. */
@@ -47,6 +49,7 @@ const VALUES: Readonly<Record<(typeof FIELDS)[number], string>> = {
   hullClusters: "true or false",
   wireClusters: "true or false",
   pageBytes: "a whole number of bytes",
+  meshTolerancePx: "<camera>:<wireframe occluder> px, each a number of at least 0",
 };
 
 /** The refusal of `text` as `field`'s value. */
@@ -69,6 +72,15 @@ function booleanOf(
     throw refused(field, text);
   }
   return text === "true";
+}
+
+/**
+ * `text` as a mesh tolerance, `<camera>:<wireframe occluder>` px, each a decimal of at least 0, or
+ * `null`.
+ */
+function meshToleranceOf(text: string): MeshTolerancePx | null {
+  const match = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(text);
+  return match === null ? null : { camera: Number(match[1]), wireframeOccluder: Number(match[2]) };
 }
 
 /** An override being read, its fields written one by one. */
@@ -115,6 +127,14 @@ function readField(out: OverrideBeingRead, field: (typeof FIELDS)[number], text:
       out.pageBytes = bytes;
       break;
     }
+    case "meshTolerancePx": {
+      const tolerance = meshToleranceOf(text);
+      if (tolerance === null) {
+        throw refused(field, text);
+      }
+      out.meshTolerancePx = tolerance;
+      break;
+    }
   }
 }
 
@@ -140,11 +160,23 @@ export function parseGeometryOverride(text: string): GeometryOverride {
   return out;
 }
 
+/**
+ * A field's value as the override writes it, and as the smoke page's query carries it: a number
+ * or word as it is, and the meshes' tolerance `<camera>:<wireframe occluder>`.
+ */
+export function geometryValueText(
+  value: NonNullable<GeometryOverride[keyof GeometryOverride]>,
+): string {
+  return typeof value === "object"
+    ? `${String(value.camera)}:${String(value.wireframeOccluder)}`
+    : String(value);
+}
+
 /** The override in its canonical form, `<field>=<value>` in the fields' order, comma-separated. */
 export function geometryText(override: GeometryOverride): string {
   return FIELDS.flatMap((field) => {
     const value = override[field];
-    return value === undefined ? [] : [`${field}=${String(value)}`];
+    return value === undefined ? [] : [`${field}=${geometryValueText(value)}`];
   }).join(",");
 }
 

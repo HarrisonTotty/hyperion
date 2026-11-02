@@ -75,7 +75,7 @@ import {
   refusalLine,
   withGpuExits,
 } from "./childWindow";
-import { parseGeometryOverride } from "../preload/geometryLaunch";
+import { geometryValueText, parseGeometryOverride } from "../preload/geometryLaunch";
 import { startSoak } from "./soak";
 
 /** The value of `--<name>=value` on the command line, or `fallback`. */
@@ -457,7 +457,7 @@ void app
           : Object.fromEntries(
               Object.entries(parseGeometryOverride(geometryText)).map(([field, value]) => [
                 `geometry-${field}`,
-                String(value),
+                geometryValueText(value),
               ]),
             )),
         ...(video === "" ? {} : { video: pathToFileURL(video).href }),

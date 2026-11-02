@@ -98,7 +98,11 @@ import {
   TERRAIN_SHADOW_MATERIALS,
 } from "../terrain/terrainMaterial";
 import { TERRAIN_WIRE_CLUSTER_MATERIALS, TERRAIN_WIRE_MATERIALS } from "../terrain/terrainWire";
-import { HULL_CLUSTER_MATERIALS, WIREFRAME_MATERIALS } from "../wireframe/submit";
+import {
+  HULL_CLUSTER_MATERIALS,
+  MESH_OCCLUDER_MATERIAL,
+  WIREFRAME_MATERIALS,
+} from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
 import type {
   PointSplatSpec,
@@ -145,6 +149,7 @@ const WIREFRAME_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...Object.values(WIREFRAME_MATERIALS),
   // The hulls' faces on the cluster path (plan R14, R14.T4.b).
   ...Object.values(HULL_CLUSTER_MATERIALS),
+  MESH_OCCLUDER_MATERIAL,
 ].map((spec) => ({ kind: "material", spec }));
 
 /**

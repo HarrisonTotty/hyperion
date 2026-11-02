@@ -4,6 +4,7 @@ import {
   geometryFromArgv,
   geometrySwitch,
   geometryText,
+  geometryValueText,
   parseGeometryOverride,
 } from "./geometryLaunch";
 
@@ -61,6 +62,34 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
       expect(() => parseGeometryOverride(text)).toThrow("pageBytes is a whole number of bytes");
     },
   );
+
+  it("reads and writes the meshes' tolerance as <camera>:<wireframe occluder> px, last in the fields' order (R14.T5.f)", () => {
+    const override = parseGeometryOverride("meshTolerancePx=2:0.25,pageBytes=0");
+    expect([override, geometryText(override)]).toEqual([
+      { meshTolerancePx: { camera: 2, wireframeOccluder: 0.25 }, pageBytes: 0 },
+      "pageBytes=0,meshTolerancePx=2:0.25",
+    ]);
+  });
+
+  it("writes each field's value as the smoke page's query reads it, the meshes' tolerance as <camera>:<occluder> (R14.T5.f)", () => {
+    expect([
+      geometryValueText({ camera: 2, wireframeOccluder: 0.25 }),
+      geometryValueText(33_554_432),
+      geometryValueText("scene-depth"),
+      geometryValueText(false),
+    ]).toEqual(["2:0.25", "33554432", "scene-depth", "false"]);
+  });
+
+  it.each([
+    "meshTolerancePx=1",
+    "meshTolerancePx=1:-1",
+    "meshTolerancePx=a:b",
+    "meshTolerancePx=1:2:3",
+  ])("refuses %s, the meshes' tolerance two numbers of at least 0 (R14.T5.f)", (text) => {
+    expect(() => parseGeometryOverride(text)).toThrow(
+      "meshTolerancePx is <camera>:<wireframe occluder> px",
+    );
+  });
 
   it("carries an override through the renderer's argv, and none where the launch gave none", () => {
     const override = { clusterPath: false } as const;

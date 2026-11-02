@@ -69,9 +69,34 @@ function countFigures(value: unknown): SpikeCountFigures | null | undefined {
 
 /**
  * The fields a file written before each lacks: the consumers' levers (plan R14's T4), each absent
- * one read as off, and the mesh page pool's bytes (T5.b), absent read as 0, no pool.
+ * one read as off, the mesh page pool's bytes (T5.b), absent read as 0, no pool, and the meshes'
+ * tolerance (T5.f), absent read as 0 px, the finest cut.
  */
-const LATER_FIELDS = ["figureClusters", "hullClusters", "wireClusters", "pageBytes"] as const;
+const LATER_FIELDS = [
+  "figureClusters",
+  "hullClusters",
+  "wireClusters",
+  "pageBytes",
+  "meshTolerancePx",
+] as const;
+
+/** `value` as a mesh tolerance, two numbers of at least 0, px, or `null`. */
+function meshToleranceOf(
+  value: unknown,
+): SpikeGeometryReport["settings"]["meshTolerancePx"] | null {
+  if (!isRecord(value) || Object.keys(value).length !== 2) {
+    return null;
+  }
+  const { camera, wireframeOccluder } = value;
+  return typeof camera === "number" &&
+    typeof wireframeOccluder === "number" &&
+    Number.isFinite(camera) &&
+    Number.isFinite(wireframeOccluder) &&
+    camera >= 0 &&
+    wireframeOccluder >= 0
+    ? { camera, wireframeOccluder }
+    : null;
+}
 
 /**
  * `value` as the geometry's settings at results `version`, every field of its kind, or `null`:
@@ -93,7 +118,9 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     hullClusters = false,
     wireClusters = false,
     pageBytes = 0,
+    meshTolerancePx: tolerance = { camera: 0, wireframeOccluder: 0 },
   } = value;
+  const meshTolerancePx = meshToleranceOf(tolerance);
   if (
     (farCascadeRate !== 1 && farCascadeRate !== 2 && farCascadeRate !== 4) ||
     typeof clusterPath !== "boolean" ||
@@ -103,6 +130,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     typeof hullClusters !== "boolean" ||
     typeof wireClusters !== "boolean" ||
     !isCount(pageBytes) ||
+    meshTolerancePx === null ||
     (casterStrideCap !== 1 &&
       casterStrideCap !== 2 &&
       casterStrideCap !== 4 &&
@@ -122,6 +150,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     hullClusters,
     wireClusters,
     pageBytes,
+    meshTolerancePx,
   };
 }
 
@@ -221,8 +250,9 @@ function settingsWords(settings: SpikeGeometryReport["settings"]): string {
     hullClusters,
     wireClusters,
     pageBytes,
+    meshTolerancePx,
   } = settings;
-  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}`;
+  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}, meshes cut at ${String(meshTolerancePx.camera)} px in the camera and ${String(meshTolerancePx.wireframeOccluder)} px as the wireframe's occluders`;
 }
 
 /** The summary's "Geometry" section of `geometry` (plan R14, R14.T1.f). */

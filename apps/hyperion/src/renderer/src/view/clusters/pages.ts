@@ -6,8 +6,8 @@
  * @remarks
  * - **Slots**: the pool's bytes (`GeometrySettings.pageBytes`) hold
  *   {@link ROOT_POOL_SHARE} of root slots of `ROOT_PAGE_BYTES` and the rest page slots of
- *   `MAX_PAGE_BYTES`, each slot with its {@link MAX_PAGE_CLUSTERS} records and LOD spheres in the
- *   pool's record buffers, so that all three buffers together stay within the pool's bytes
+ *   `MAX_PAGE_BYTES`, each slot with its {@link MAX_PAGE_CLUSTERS} records, LOD spheres and errors as built
+ *   in the pool's record buffers, so that all four buffers together stay within the pool's bytes
  *   ({@link pagePoolLayout}). A slot's index is its records' page, which the cull's instances
  *   name; its page's bytes start at {@link pageSlotOffsetBytes}. A root page larger than a root
  *   slot takes as many consecutive root slots as it needs, its records in the first.
@@ -30,6 +30,7 @@
  *   note 15): after a device loss its owner makes a new pool, which fetches again.
  */
 
+import type { Vec3 } from "../../geometry/vec3";
 import type { BufferHandle, RenderEngine } from "../engine/types";
 import { BUFFER_USAGE } from "../engine/gpuFlags";
 import {
@@ -46,8 +47,12 @@ import {
 /** The share of the pool's bytes its root slots take: Design note 14's 10% (lean). */
 export const ROOT_POOL_SHARE = 0.1;
 
-/** Bytes of a slot's records and LOD spheres. */
-const SLOT_RECORD_BYTES = MAX_PAGE_CLUSTERS * (PAGE_RECORD_BYTES + PAGE_LOD_BYTES);
+/** Bytes of a cluster's own error as built, `f32` m (R14.T5.f). */
+const PAGE_ERROR_BYTES = 4;
+
+/** Bytes of a slot's records, LOD spheres and errors as built. */
+const SLOT_RECORD_BYTES =
+  MAX_PAGE_CLUSTERS * (PAGE_RECORD_BYTES + PAGE_LOD_BYTES + PAGE_ERROR_BYTES);
 
 /** What the pool asks of the engine. */
 export type GeometryPagePoolEngine = Pick<
@@ -65,6 +70,8 @@ export interface PagePoolLayout {
   readonly pagesBytes: number;
   readonly recordsBytes: number;
   readonly lodsBytes: number;
+  /** Bytes of the errors' buffer: each record's own error as built (R14.T5.f). */
+  readonly errorsBytes: number;
 }
 
 /**
@@ -94,6 +101,7 @@ export function pagePoolSlots(rootSlots: number, pageSlots: number): PagePoolLay
     pagesBytes: rootSlots * ROOT_PAGE_BYTES + pageSlots * MAX_PAGE_BYTES,
     recordsBytes: slots * MAX_PAGE_CLUSTERS * PAGE_RECORD_BYTES,
     lodsBytes: slots * MAX_PAGE_CLUSTERS * PAGE_LOD_BYTES,
+    errorsBytes: slots * MAX_PAGE_CLUSTERS * PAGE_ERROR_BYTES,
   };
 }
 
@@ -154,17 +162,18 @@ interface Resident {
   forced: boolean;
 }
 
-/** A mesh in the pool: its index and its resident pages' slots. */
+/** A mesh in the pool: its index, its resident pages' slots, and their origin once one is. */
 interface PoolMesh {
   readonly index: MeshIndex;
   readonly slots: Map<number, number>;
+  originM: Vec3 | null;
 }
 
 /**
  * The mesh page pool (see the module's remarks).
  *
  * @remarks
- * It makes its three buffers, category `geometry-pages`, when constructed, and releases them in
+ * It makes its four buffers, category `geometry-pages`, when constructed, and releases them in
  * {@link GeometryPagePool.dispose}.
  */
 export class GeometryPagePool {
@@ -175,6 +184,12 @@ export class GeometryPagePool {
   readonly records: BufferHandle;
   /** Each record's LOD sphere, the cull's `lods`. */
   readonly lods: BufferHandle;
+  /**
+   * Each record's own error as its page holds it, `f32` m, never rewritten (R14.T5.f): a stand-in's
+   * deviation from its leaves, which its record's own error, written 0, no longer says; the
+   * wireframe's mesh occluders push their depth back by it (`meshOccluderCluster.wgsl`).
+   */
+  readonly errors: BufferHandle;
   readonly #engine: GeometryPagePoolEngine;
   readonly #slots: Array<Resident | "spanned" | null>;
   readonly #meshes = new Map<number, PoolMesh>();
@@ -184,7 +199,7 @@ export class GeometryPagePool {
   #pagesRefused = 0;
 
   /**
-   * @param poolBytesOrSlots - The pool's bytes, all three buffers together
+   * @param poolBytesOrSlots - The pool's bytes, all four buffers together
    *   (`GeometrySettings.pageBytes`), or its slots ({@link pagePoolSlots}).
    */
   constructor(engine: GeometryPagePoolEngine, poolBytesOrSlots: number | PagePoolLayout) {
@@ -197,6 +212,7 @@ export class GeometryPagePool {
     this.pages = made("geometry pages", this.layout.pagesBytes);
     this.records = made("geometry page records", this.layout.recordsBytes);
     this.lods = made("geometry page lods", this.layout.lodsBytes);
+    this.errors = made("geometry page errors", this.layout.errorsBytes);
     this.#slots = Array.from({ length: this.layout.rootSlots + this.layout.pageSlots }, () => null);
   }
 
@@ -204,7 +220,7 @@ export class GeometryPagePool {
   addMesh(index: MeshIndex): number {
     const mesh = this.#nextMesh;
     this.#nextMesh += 1;
-    this.#meshes.set(mesh, { index, slots: new Map() });
+    this.#meshes.set(mesh, { index, slots: new Map(), originM: null });
     return mesh;
   }
 
@@ -224,6 +240,14 @@ export class GeometryPagePool {
   /** The mesh's index, or `undefined` for one not in the pool. */
   index(mesh: number): MeshIndex | undefined {
     return this.#meshes.get(mesh)?.index;
+  }
+
+  /**
+   * The origin of `mesh`'s pages in its frame, m, the same for every page (`page.rs`), once one
+   * has been stored; `undefined` before, or for a mesh not in the pool.
+   */
+  originOf(mesh: number): Vec3 | undefined {
+    return this.#meshes.get(mesh)?.originM ?? undefined;
   }
 
   /** The slot holding `page` of `mesh`, or `undefined` where it is not resident. */
@@ -308,6 +332,7 @@ export class GeometryPagePool {
       this.#slots[slot + k] = "spanned";
     }
     held.slots.set(page.index, slot);
+    held.originM ??= page.originM;
     this.#engine.writeBuffer(
       this.pages,
       pageSlotOffsetBytes(this.layout, slot),
@@ -317,6 +342,14 @@ export class GeometryPagePool {
       this.lods,
       slot * MAX_PAGE_CLUSTERS * PAGE_LOD_BYTES,
       new Uint8Array(page.body, page.sections.lods, page.clusters * PAGE_LOD_BYTES),
+    );
+    const source = new DataView(page.body, page.sections.records);
+    this.#engine.writeBuffer(
+      this.errors,
+      slot * MAX_PAGE_CLUSTERS * PAGE_ERROR_BYTES,
+      Float32Array.from({ length: page.clusters }, (_, c) =>
+        source.getFloat32(c * PAGE_RECORD_BYTES + 16, true),
+      ),
     );
     // The slot's records past its clusters hold none, so that a page of fewer clusters than the
     // last one here draws nothing of it.
@@ -402,6 +435,7 @@ export class GeometryPagePool {
     this.#engine.releaseBuffer(this.pages);
     this.#engine.releaseBuffer(this.records);
     this.#engine.releaseBuffer(this.lods);
+    this.#engine.releaseBuffer(this.errors);
     this.#slots.fill(null);
     this.#meshes.clear();
   }

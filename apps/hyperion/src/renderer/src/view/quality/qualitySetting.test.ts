@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import type { GeometryOverride } from "../../../../preload/api";
+import { STROKE_PX } from "../wireframe/drawList";
 import {
   GEOMETRY_BEFORE_R14,
   geometryOf,
@@ -131,7 +132,11 @@ describe("the quality settings", () => {
 describe("the geometry's settings (plan R14)", () => {
   it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, and keeps the way back", () => {
     for (const setting of QUALITY_SETTINGS) {
-      const { pageBytes: _pageBytes, ...levers } = SETTINGS[setting].geometry;
+      const {
+        pageBytes: _pageBytes,
+        meshTolerancePx: _meshTolerancePx,
+        ...levers
+      } = SETTINGS[setting].geometry;
       expect(levers).toEqual({
         clusterPath: true,
         casterDepthCull: true,
@@ -158,7 +163,17 @@ describe("the geometry's settings (plan R14)", () => {
       hullClusters: false,
       wireClusters: false,
       pageBytes: 0,
+      meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
     });
+  });
+
+  it("cuts meshes at 1 px high and 2 px low in the camera, and at half the thin stroke as the wireframe's occluders (plan R14, R14.T5.f)", () => {
+    expect([SETTINGS.high.geometry.meshTolerancePx, SETTINGS.low.geometry.meshTolerancePx]).toEqual(
+      [
+        { camera: 1, wireframeOccluder: STROKE_PX.thin / 2 },
+        { camera: 2, wireframeOccluder: STROKE_PX.thin / 2 },
+      ],
+    );
   });
 
   it("takes a launch's override over the setting's, field by field, the override's fields the settings' own (Design note 17)", () => {

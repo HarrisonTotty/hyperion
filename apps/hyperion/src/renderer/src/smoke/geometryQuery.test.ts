@@ -7,7 +7,7 @@ describe("the smoke page's geometry override (plan R14, Design note 17)", () => 
     expect(
       queryOverride(
         new URLSearchParams(
-          "geometry-clusterPath=false&geometry-casterStrideCap=4&geometry-overlayDepth=redraw&geometry-litClusters=false&geometry-farCascadeRate=2&geometry-figureClusters=false&geometry-hullClusters=true&geometry-wireClusters=false&geometry-pageBytes=1048576",
+          "geometry-clusterPath=false&geometry-casterStrideCap=4&geometry-overlayDepth=redraw&geometry-litClusters=false&geometry-farCascadeRate=2&geometry-figureClusters=false&geometry-hullClusters=true&geometry-wireClusters=false&geometry-pageBytes=1048576&geometry-meshTolerancePx=2:0.5",
         ),
       ),
     ).toEqual({
@@ -20,6 +20,7 @@ describe("the smoke page's geometry override (plan R14, Design note 17)", () => 
       hullClusters: true,
       wireClusters: false,
       pageBytes: 1_048_576,
+      meshTolerancePx: { camera: 2, wireframeOccluder: 0.5 },
     });
   });
 
@@ -27,7 +28,7 @@ describe("the smoke page's geometry override (plan R14, Design note 17)", () => 
     expect([
       queryOverride(
         new URLSearchParams(
-          "geometry-farCascadeRate=3&geometry-casterDepthCull=1&geometry-pageBytes=1MiB",
+          "geometry-farCascadeRate=3&geometry-casterDepthCull=1&geometry-pageBytes=1MiB&geometry-meshTolerancePx=1",
         ),
       ),
       queryOverride(new URLSearchParams("")),

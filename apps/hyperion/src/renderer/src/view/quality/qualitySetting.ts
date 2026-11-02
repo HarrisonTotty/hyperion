@@ -25,7 +25,7 @@ import { DISC_ANNULI_HIGH, DISC_ANNULI_LOW } from "../lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
 import { BLOOM_LEVELS, type BloomLevels } from "../post/bloom";
 import { HIGH_SKY, LOW_SKY, type SkySettings } from "../sky/setting";
-import type { GeometryOverride } from "../../../../preload/api";
+import type { GeometryOverride, MeshTolerancePx } from "../../../../preload/api";
 import type { Stride } from "../clusters/templates";
 import type { FarCascadeRate } from "../terrain/shadows/cascades";
 import type { R11Ladder } from "../surface/decoration/decorationSetting";
@@ -141,6 +141,13 @@ export interface GeometrySettings {
    * meshes' pinned roots. 0 on the way back, which has no pool.
    */
   readonly pageBytes: number;
+  /**
+   * R14.T5.f: a mesh's DAG-cut tolerance, px: `camera`, its camera pass's (T5.e's), 1 high and 2
+   * low; `wireframeOccluder`, its occluder depth's in the wireframe, 0.5, half the thin stroke at a
+   * stroke scale of 1, so that a cut's silhouette moves under every stroke's half-width and hidden-
+   * line removal holds (Design note 13; both leans). 0 on the way back: the finest cut.
+   */
+  readonly meshTolerancePx: MeshTolerancePx;
 }
 
 /**
@@ -163,6 +170,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   hullClusters: false,
   wireClusters: false,
   pageBytes: 0,
+  meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
 };
 
 /**
@@ -333,6 +341,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       hullClusters: true,
       wireClusters: true,
       pageBytes: 128 * 2 ** 20,
+      meshTolerancePx: { camera: 1, wireframeOccluder: 0.5 },
     },
     decoration: true,
     scatterDensity: 1,
@@ -376,6 +385,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       hullClusters: true,
       wireClusters: true,
       pageBytes: 32 * 2 ** 20,
+      meshTolerancePx: { camera: 2, wireframeOccluder: 0.5 },
     },
     decoration: false,
     scatterDensity: 0,

@@ -239,6 +239,14 @@ export interface GeometryOverride {
   readonly wireClusters?: boolean;
   /** R14.T5.b: the mesh page pool's bytes, 0 for none. */
   readonly pageBytes?: number;
+  /** R14.T5.f: a mesh's DAG-cut tolerance, px, in its camera pass and as a wireframe occluder. */
+  readonly meshTolerancePx?: MeshTolerancePx;
+}
+
+/** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */
+export interface MeshTolerancePx {
+  readonly camera: number;
+  readonly wireframeOccluder: number;
 }
 
 declare global {

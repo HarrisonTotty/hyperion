@@ -2691,6 +2691,7 @@ describe("the schema check", () => {
         hullClusters: true,
         wireClusters: true,
         pageBytes: 134_217_728,
+        meshTolerancePx: { camera: 1, wireframeOccluder: 0.5 },
       },
       segments: [
         {
@@ -2737,7 +2738,7 @@ describe("the schema check", () => {
     const markdown = summaryMarkdown(results);
     expect(markdown).toContain("## Geometry (plan R14)");
     expect(markdown).toContain(
-      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters, the wireframe's interior patches by clusters, the mesh page pool's bytes 128 MiB.",
+      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters, the wireframe's interior patches by clusters, the mesh page pool's bytes 128 MiB, meshes cut at 1 px in the camera and 0.5 px as the wireframe's occluders.",
     );
     expect(markdown).toContain(
       "| orbit coast | 59 (61) | 33 (33) | 868,352 (880,000) | 700,000 (712,000) | — | 600,001 (610,001) |",
@@ -2775,6 +2776,7 @@ describe("the schema check", () => {
             hullClusters: false,
             wireClusters: false,
             pageBytes: 0,
+            meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
           },
           segments,
         },
@@ -2798,9 +2800,20 @@ describe("the schema check", () => {
       // The page pool's bytes (R14.T5.b) the same: a count where the file holds it.
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, pageBytes: 33_554_432 })),
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, pageBytes: -1 })),
-    ]).toEqual([[], malformed, malformed, malformed, [], malformed, [], malformed]);
+      // And the meshes' tolerance (R14.T5.f): two numbers of at least 0 px where the file holds it.
+      validateResults(
+        asFile(8, {
+          ...settings,
+          farCascadeRate: 1,
+          meshTolerancePx: { camera: 2, wireframeOccluder: 0.5 },
+        }),
+      ),
+      validateResults(
+        asFile(8, { ...settings, farCascadeRate: 1, meshTolerancePx: { camera: 2 } }),
+      ),
+    ]).toEqual([[], malformed, malformed, malformed, [], malformed, [], malformed, [], malformed]);
     expect(summaryMarkdown(results)).toContain(
-      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool.",
+      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool, meshes cut at 0 px in the camera and 0 px as the wireframe's occluders.",
     );
   });
 

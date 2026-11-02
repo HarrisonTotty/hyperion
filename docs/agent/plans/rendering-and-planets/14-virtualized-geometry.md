@@ -903,11 +903,16 @@ through `lit_place`.
       DAG cut draws a cluster where own ≤ τ < parent, so where τ asks for children whose pages are
       not resident, the parent is not drawn (τ < own) and the children are absent; pinning the roots
       does not fill that gap. So on a group's pages arriving or leaving, the pool rewrites its
-      parent clusters' records:
-      - a parent whose children's group is not wholly resident has its own error set to 0, so it
-        draws whenever τ < its parent's;
-      - a group's children are drawn only once all of its pages are resident;
-      - all of a group's pages are evicted together;
+      resident clusters' records by reachability (as built in T5.b: these rules alone overlap in a
+      DAG):
+      - a group is open once all the pages of its children and its parents are resident and every
+        cluster it made is reachable; a cluster is reachable if it is a root or its consuming group
+        is open;
+      - a reachable cluster whose generating group is not open has its own error set to 0, so it
+        draws whenever τ < its parent's; one not reachable has its parent error set to 0, so its
+        group's children are drawn only once the group is open;
+      - all of a group's pages are evicted together: a page leaves with every page its leaving
+        strands;
       - a mesh's DAG root pages are pinned, so some cut is always resident.
     - **Where demand comes from**: the DAG cut is made on the GPU, but a `presentation-only`
       kernel's output never reaches the CPU (`readBuffer` throws `PresentationOnlyReadback`), so
@@ -920,7 +925,9 @@ through `lit_place`.
       root of its own. Procedural decoration is instanced from a bounded set of prototypes a biome
       (lean: 64 DAGs, each instance with its own scale and rotation); unique meshes are only the
       could-touch rocks, which collision reads analytically. Pinned roots stay within 10% of
-      `pageBytes` (lean); past it a request is refused and annunciated as the terrain cache's is.
+      `pageBytes` (lean); past it a request is refused and annunciated as the terrain cache's is
+      (the condition is the pool's `pressure().rootsRefused`; the wording and its guide row come
+      with the first view that draws meshes, lean).
     - **The page table** earns its place only where a cluster reads pages other than its own
       (normals from a finer resident page, a mesh's shared vertex pages); until then a slot index is
       the address, as today.
@@ -928,19 +935,20 @@ through `lit_place`.
 15. **Memory budgets per setting.** Estimates from formats and sizes, to be measured by each task
     (R12 Design note 6's tally reads the categories):
 
-    | Item                                            | High                                                                                 | Low                                                                                               | Category            |
-    | ----------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | ------------------- |
-    | Cluster records, terrain                        | 3.7 MB (1,208 slots)                                                                 | 1.2 MB (375)                                                                                      | `geometry-clusters` |
-    | Cluster records, wireframe terrain              | 1.6 MB (520 slots)                                                                   | 1.6 MB                                                                                            | `geometry-clusters` |
-    | Buckets and arguments, a lit view (T1)          | ≤ 15.8 MB (4 cascades × 4 strides, the overlay at stride 1)                          | ≤ 0.3 MB (the overlay's)                                                                          | `geometry-clusters` |
-    | The same with T2.a's scan                       | ≤ 5.6 MB (6 passes, one list each)                                                   | ≤ 0.6 MB (2 passes)                                                                               | `geometry-clusters` |
-    | Visibility IDs, a view (T2)                     | 8.3 MB at 1920 × 1080                                                                | 3.7 MB at 1280 × 720                                                                              | `render-targets`    |
-    | Depth pyramid, a view (T3.d)                    | 2.8 MB (from half resolution)                                                        | 1.2 MB                                                                                            | `geometry-clusters` |
-    | Mesh page pool (T5)                             | 128 MiB (lean)                                                                       | 32 MiB (lean)                                                                                     | `geometry-pages`    |
-    | The pool's CPU-side copy                        | None (lean: refetched after a loss)                                                  | None                                                                                              | —                   |
-    | Buckets, a wireframe view (T4.c)                | 0.4 MB (one pass at stride 1, 520 slots)                                             | 0.4 MB                                                                                            | `geometry-clusters` |
-    | Today's path while kept (Design note 17)        | About 0.4 MB (four per-cascade instance copies, 4 × 1,208 × 32 B, and the lit mesh)  | About 0.2 MB                                                                                      | As today            |
-    | **A lit primary and two wireframe instruments** | 21.9 MB with T1 (5.3 + 15.8 + 0.8); 22.7 MB from T2–T3 (5.3 + 5.6 + 8.3 + 2.8 + 0.8) | 3.8 MB with T1; 4.1 MB forward from T2.a, 5.4 MB with `hzb`, 9.0 MB were the visibility buffer on |                     |
+    | Item                                            | High                                                                                                                | Low                                                                                               | Category            |
+    | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------- |
+    | Cluster records, terrain                        | 3.7 MB (1,208 slots)                                                                                                | 1.2 MB (375)                                                                                      | `geometry-clusters` |
+    | Cluster records, wireframe terrain              | 1.6 MB (520 slots)                                                                                                  | 1.6 MB                                                                                            | `geometry-clusters` |
+    | Buckets and arguments, a lit view (T1)          | ≤ 15.8 MB (4 cascades × 4 strides, the overlay at stride 1)                                                         | ≤ 0.3 MB (the overlay's)                                                                          | `geometry-clusters` |
+    | The same with T2.a's scan                       | ≤ 5.6 MB (6 passes, one list each)                                                                                  | ≤ 0.6 MB (2 passes)                                                                               | `geometry-clusters` |
+    | Visibility IDs, a view (T2)                     | 8.3 MB at 1920 × 1080                                                                                               | 3.7 MB at 1280 × 720                                                                              | `render-targets`    |
+    | Depth pyramid, a view (T3.d)                    | 2.8 MB (from half resolution)                                                                                       | 1.2 MB                                                                                            | `geometry-clusters` |
+    | Mesh page pool (T5)                             | 128 MiB (lean)                                                                                                      | 32 MiB (lean)                                                                                     | `geometry-pages`    |
+    | The pool's CPU-side copy                        | None (lean: refetched after a loss; the producer's worker holds each loaded mesh's file until it is unloaded, lean) | None                                                                                              | —                   |
+    | Buckets, a wireframe view (T4.c)                | 0.4 MB (one pass at stride 1, 520 slots)                                                                            | 0.4 MB                                                                                            | `geometry-clusters` |
+    | Mesh occluders, a wireframe view (T5.f)         | 32 B an instance, a resident page, and its bucket's 128 entries of 4 B (lean)                                       | The same                                                                                          | `geometry-clusters` |
+    | Today's path while kept (Design note 17)        | About 0.4 MB (four per-cascade instance copies, 4 × 1,208 × 32 B, and the lit mesh)                                 | About 0.2 MB                                                                                      | As today            |
+    | **A lit primary and two wireframe instruments** | 21.9 MB with T1 (5.3 + 15.8 + 0.8); 22.7 MB from T2–T3 (5.3 + 5.6 + 8.3 + 2.8 + 0.8)                                | 3.8 MB with T1; 4.1 MB forward from T2.a, 5.4 MB with `hzb`, 9.0 MB were the visibility buffer on |                     |
 
     Buckets are sized by `InstanceRecords`' capacity, the slot count (1,208 high, 375 low), times 96
     clusters and 8 B an entry, so no draw set can overflow them (Design note 16). Before T5's pool,
@@ -976,18 +984,22 @@ through `lit_place`.
     budget's third rule). R12.T0 inventories it; R12.T11 may move its values within this policy,
     never the policy:
 
-    | Field             | High                                                                       | Low                                                                        | Policy                                               |
-    | ----------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------- |
-    | `clusterPath`     | on                                                                         | on                                                                         | Every consumer on the path; off is today's path      |
-    | `casterDepthCull` | on                                                                         | on (no cascades on low)                                                    | Exact                                                |
-    | `casterStrideCap` | 8                                                                          | 8 (no cascades on low)                                                     | Casters at their texel                               |
-    | `overlayDepth`    | T1.e's choice (lean `scene-depth`); `cluster` once `strides` is `measured` | T1.e's choice (lean `scene-depth`); `cluster` once `strides` is `measured` | No mark's visibility changes                         |
-    | `shading`         | `visibility` (after T2.e)                                                  | `forward` until the owner's UHD 620 run (lean, T2.e)                       | One shading a pixel where it pays                    |
-    | `strides`         | `measured` (after T3.c)                                                    | `measured`                                                                 | Drawn error within τ′; stride 1 in the forced region |
-    | `occlusion`       | `hzb` (after T3.d)                                                         | `hzb` (after T3.d; the UHD 620's run may turn it off)                      | Exact                                                |
-    | `pageBytes`       | 128 MiB                                                                    | 32 MiB                                                                     | Within the memory ceilings                           |
-    | `meshTolerancePx` | camera 1, wireframe occluder half the stroke width (lean)                  | camera 2, the same occluder rule (lean)                                    | A mesh's DAG cut within τ; hidden-line removal holds |
-    | `farCascadeRate`  | 4 (lean, T6.b)                                                             | 4 (no cascades on low)                                                     | Far cascades' edges within a texel; 1 the way back   |
+    | Field             | High                                                                       | Low                                                                        | Policy                                                 |
+    | ----------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------ |
+    | `clusterPath`     | on                                                                         | on                                                                         | Every consumer on the path; off is today's path        |
+    | `casterDepthCull` | on                                                                         | on (no cascades on low)                                                    | Exact                                                  |
+    | `casterStrideCap` | 8                                                                          | 8 (no cascades on low)                                                     | Casters at their texel                                 |
+    | `overlayDepth`    | T1.e's choice (lean `scene-depth`); `cluster` once `strides` is `measured` | T1.e's choice (lean `scene-depth`); `cluster` once `strides` is `measured` | No mark's visibility changes                           |
+    | `shading`         | `visibility` (after T2.e)                                                  | `forward` until the owner's UHD 620 run (lean, T2.e)                       | One shading a pixel where it pays                      |
+    | `strides`         | `measured` (after T3.c)                                                    | `measured`                                                                 | Drawn error within τ′; stride 1 in the forced region   |
+    | `occlusion`       | `hzb` (after T3.d)                                                         | `hzb` (after T3.d; the UHD 620's run may turn it off)                      | Exact                                                  |
+    | `pageBytes`       | 128 MiB                                                                    | 32 MiB                                                                     | Within the memory ceilings                             |
+    | `meshTolerancePx` | camera 1, wireframe occluder half the stroke width (lean)                  | camera 2, the same occluder rule (lean)                                    | A mesh's DAG cut within τ; hidden-line removal holds   |
+    | `farCascadeRate`  | 4 (lean, T6.b)                                                             | 4 (no cascades on low)                                                     | Far cascades' edges within a texel; 1 the way back     |
+    | `litClusters`     | on (T2.a)                                                                  | on                                                                         | The lit pass's interiors on the path; off the way back |
+    | `figureClusters`  | on (T4.a)                                                                  | on                                                                         | Byte-identical figures; off the way back               |
+    | `hullClusters`    | on (T4.b)                                                                  | on                                                                         | Byte-identical hull faces; off the way back            |
+    | `wireClusters`    | on (T4.c)                                                                  | on                                                                         | Byte-identical wireframe terrain; off the way back     |
     - Nothing here moves a figure the brainstorm states (τ, 720p, 30 fps, the 4 px wireframe
       tolerance): strides stay within τ′, and `TERRAIN: DETAIL LIMITED` keeps its trigger, the
       selection's budget binding; if T3.e lets a triangle budget bind beyond τ′, that raises it too.
@@ -2118,3 +2130,34 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     it waits for the first view that draws meshes); `meshTolerancePx`; `just mesh-pages` and
     bundled pages (nothing draws a mesh until T5.e); the restore test (no device record owns a
     pool yet: it comes with the pool's first owner).
+- **R14.T5.f** (`r14-t4-consumers`):
+  - `GeometrySettings.meshTolerancePx` (`MeshTolerancePx` in `preload/api.ts`): camera 1 px high and
+    2 low, the occluder 0.5 px, half the thin stroke at a stroke scale of 1 (lean, 2026-11-02); 0
+    and 0 in `GEOMETRY_BEFORE_R14`. `--geometry meshTolerancePx=<camera>:<occluder>`, the smoke
+    page (`geometryValueText`, which the harness writes the page's query with), and results
+    version 8, where a file without it reads 0 and 0.
+  - The DAG consumers' occluders: `wireframe/meshOccluders.ts` (`MeshOccluder`,
+    `meshOccluderFrame`, `wireframeToleranceRad`) and `meshOccluderCluster.wgsl`, which decodes
+    each corner from the pool's pages and records. `WireframeDrawList.meshOccluders?` (no scene's
+    list has one yet), `WireframeRenderer.setMeshPages(pool | null)`, which a device restore
+    clears, and `lastMeshOccluders`; material `wireframe:occluderMeshCluster` in `WGSL_CATALOGUE`;
+    timed pass `mesh occluder cull`.
+  - Each corner is pushed away from the camera along its ray by its cluster's own error as built,
+    so that a coarser cut's faces lie no nearer than its leaves' (lean, 2026-11-02: Design note
+    13's tolerance bounds the silhouette, not depth; the slope term covers a face seen edge on). The
+    pool gains `errors`, each record's own error as built, which the rewrites leave alone: its
+    slots become 145 + 219 low and 582 + 877 high.
+  - The tolerance is converted at the view's corners, f (1 + tan² θ_c), where an angle is most px,
+    for the hulls' cull too: a one-level DAG, so the hulls draw the same cut as at T4.b's τ 0.
+  - A mesh's frame is the camera frame's axes: an instance's rotation is T5.d's (lean,
+    2026-11-02). Off the cluster path no mesh occluder draws: meshes have no instanced draw.
+    `GeometryPagePool.originOf(mesh)` gives a mesh's pages' origin.
+  - The acceptance on SwiftShader (`smoke/meshOccluders.ts`, test-render part 1): each hull frame's
+    hulls, and `TEST_HULL` from outside, as two-level page meshes whose roots move 90% of the
+    allowance, outward in one file and inward in another. At τ 0 they draw the quantised faces'
+    frames to the byte; at 0.5 px the coarser cut draws, and no hull edge flips between shown and
+    hidden at every point sampled on it (lean, 2026-11-02: a point at an edge's end by a silhouette
+    may move within the tolerance; the lane's outbox has the numbers).
+  - The four leans stand, as edits: Design note 14's rewrites by reachability and its
+    annunciation's condition, Design note 15's row, and Design note 17's table, which takes
+    `litClusters` (T2.a), `figureClusters`, `hullClusters` and `wireClusters` (T4).

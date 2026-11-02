@@ -26,6 +26,13 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     depth === "redraw" || depth === "scene-depth" || depth === "cluster" ? depth : undefined;
   const rate = parameters.get("geometry-farCascadeRate");
   const farCascadeRate = rate === "1" ? 1 : rate === "2" ? 2 : rate === "4" ? 4 : undefined;
+  const toleranceText = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(
+    parameters.get("geometry-meshTolerancePx") ?? "",
+  );
+  const tolerance =
+    toleranceText === null
+      ? null
+      : { camera: Number(toleranceText[1]), wireframeOccluder: Number(toleranceText[2]) };
   const pool = parameters.get("geometry-pageBytes");
   const pageBytes = pool !== null && /^\d+$/.test(pool) ? Number(pool) : undefined;
   return {
@@ -39,5 +46,6 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     ...(hullClusters === undefined ? {} : { hullClusters }),
     ...(wireClusters === undefined ? {} : { wireClusters }),
     ...(pageBytes === undefined || !Number.isSafeInteger(pageBytes) ? {} : { pageBytes }),
+    ...(tolerance === null ? {} : { meshTolerancePx: tolerance }),
   };
 }

@@ -59,6 +59,7 @@ import { runPose, SCENE_OPTIONS, startRun } from "../displays/view/viewRun";
 import { aViewCraft, aViewScene, FIXTURE_SYSTEM, NO_TURN } from "../test/viewFixtures";
 import { type HullOutline, hullOutline } from "../view/scene/hull";
 import { smokeGeometry } from "./geometry";
+import { checkMeshOccluders, testHullFrames } from "./meshOccluders";
 import { bytesDigest, type Checks, halfTexels, pause, show, texel } from "./harness";
 
 /** The side of the square targets the checks draw into, px. */
@@ -432,6 +433,14 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
   await checkWindow(engine, renderer, tokens, checks);
   await checkStarSprite(engine, renderer, checks);
   await checkHullClusters(engine, made, ready, hullFrames, checks);
+  await checkMeshOccluders(
+    engine,
+    made,
+    ready,
+    [...hullFrames, ...testHullFrames(tokens)],
+    smokeGeometry("high"),
+    checks,
+  );
   made.dispose();
 }
 

@@ -68,15 +68,16 @@ function key(page: number, cluster: number): number {
 
 describe("the mesh page pool's slots (plan R14, R14.T5.b)", () => {
   it.each([
-    ["low", 32 * 2 ** 20, 148, 220],
-    ["high", 128 * 2 ** 20, 595, 880],
+    ["low", 32 * 2 ** 20, 145, 219],
+    ["high", 128 * 2 ** 20, 582, 877],
   ])(
-    "holds %s's pages, records and LOD spheres within its bytes, its roots within 10%%",
+    "holds %s's pages, records, LOD spheres and errors within its bytes, its roots within 10%%",
     (_, bytes, roots, pages) => {
       const layout = pagePoolLayout(bytes);
       const engine = new MirrorEngine();
       const pool = new GeometryPagePool(engine, bytes);
-      const record = MAX_PAGE_CLUSTERS * 48;
+      // A record's 32 B, its LOD sphere's 16 and its error's 4 (R14.T5.f).
+      const record = MAX_PAGE_CLUSTERS * 52;
       expect([
         layout.rootSlots,
         layout.pageSlots,
@@ -203,6 +204,15 @@ describe("the mesh page pool's pins and eviction (plan R14, R14.T5.b)", () => {
     expect([empty.length, empty.flat().every((r) => r === -1)]).toEqual([2, true]);
   });
 
+  it("holds a mesh's pages' origin once one is stored", () => {
+    const file = dag();
+    const { pool } = poolOf(1);
+    const mesh = pool.addMesh(file.index);
+    const before = pool.originOf(mesh);
+    store(pool, mesh, file, [0]);
+    expect([before, pool.originOf(mesh)]).toEqual([undefined, file.pages[0]?.originM]);
+  });
+
   it("frees a removed mesh's slots, its roots' with them, and writes them as no cluster", () => {
     const file = dag();
     const { pool, engine } = poolOf(5);
@@ -233,6 +243,21 @@ describe("the mesh page pool's record rewrites (plan R14, R14.T5.b, Design note 
     const errors = pool.writtenErrors(mesh).get(pool.slotOf(mesh, 1) ?? -1);
     // M0: unreachable, its parent written 0; M1: its own written 0, standing in for its leaves.
     expect([...(errors ?? [])]).toEqual([1, 0, 0, 4]);
+  });
+
+  it("keeps each record's own error as built in its errors, where its record stands in at 0", () => {
+    const file = dag();
+    const { pool, engine } = poolOf(5);
+    const mesh = pool.addMesh(file.index);
+    store(pool, mesh, file, [0, 1, 2]);
+    const slot = pool.slotOf(mesh, 1) ?? -1;
+    const errors = new Float32Array(
+      engine.bytes(pool.errors).buffer,
+      slot * MAX_PAGE_CLUSTERS * 4,
+      2,
+    );
+    // M1 stands in for its missing leaves, its record's own error written 0; its error stays 1 m.
+    expect([[...errors], pool.writtenErrors(mesh).get(slot)?.[2]]).toEqual([[1, 1], 0]);
   });
 
   it("keeps one cut, no hole and no overlap, at every residency state of the three-level DAG", () => {

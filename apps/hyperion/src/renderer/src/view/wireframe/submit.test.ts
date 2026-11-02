@@ -703,15 +703,16 @@ describe("WireframeRenderer", () => {
     const renderer = new WireframeRenderer(engine);
     engine.restore();
     renderer.dispose();
-    // Its seven and the hulls' two on the cluster path (plan R14, R14.T4.b), each time.
-    expect(engine.materials.length).toBe(18);
+    // Its seven, the hulls' two on the cluster path (plan R14, R14.T4.b) and the mesh occluders'
+    // (R14.T5.f), each time.
+    expect(engine.materials.length).toBe(20);
   });
 
   it("stops following the engine's restores once disposed", () => {
     const engine = new RecordingEngine();
     new WireframeRenderer(engine).dispose();
     engine.restore();
-    expect(engine.materials.length).toBe(9);
+    expect(engine.materials.length).toBe(10);
   });
 });
 
@@ -1202,7 +1203,7 @@ describe("WireframeRenderer over the bodies' terrain (R10.T11)", () => {
     expect(frames).toEqual([expected]);
   });
 
-  it("makes its seven materials, the datum's two among them, and the hulls' two on the cluster path", () => {
+  it("makes its seven materials, the datum's two among them, the hulls' two on the cluster path and the mesh occluders'", () => {
     const engine = new SpecRecordingEngine();
     new WireframeRenderer(engine).dispose();
     expect(engine.specs.map((spec) => [spec.name, spec.displayName])).toEqual([
@@ -1215,6 +1216,7 @@ describe("WireframeRenderer over the bodies' terrain (R10.T11)", () => {
       ["wireframe:occluderSphereSurveyed", "DATUM OCCLUDER"],
       ["wireframe:occluderHullCluster", "HULL OCCLUDER CLUSTERS"],
       ["wireframe:hullSilhouetteCluster", "SILHOUETTE CLUSTERS"],
+      ["wireframe:occluderMeshCluster", "MESH OCCLUDER CLUSTERS"],
     ]);
   });
 });

@@ -39,6 +39,7 @@ import {
 import { behindLimb, sphereInFrustum } from "./cull";
 import type { Polyline } from "./curve";
 import { hullBoundingRadiusM, hullEdges, hullFaces, hullOnView } from "./hulls";
+import type { MeshOccluder } from "./meshOccluders";
 import { orbitPath } from "./orbits";
 import { surveyEdgeMark, type SurveyEdgeView } from "../terrain/surveyEdge";
 import { type DatumSpheroid, stretched } from "./spheroid";
@@ -390,6 +391,12 @@ export interface WireframeDrawList {
    * `--surface-0` by `overlayDrawList` over the photorealistic image (R07.T16.e).
    */
   readonly occluderMeshes: ReadonlyArray<OccluderMesh>;
+  /**
+   * The DAG consumers' meshes drawn as occluders from the renderer's page pool (plan R14,
+   * R14.T5.f; `meshOccluders.ts`), depth only, after the hulls' faces; absent where none is, as in
+   * every scene's list until a view draws meshes.
+   */
+  readonly meshOccluders?: ReadonlyArray<MeshOccluder>;
   /** The line batches, view-space first, then screen-space symbology. */
   readonly lines: ReadonlyArray<LineBatch>;
   /** The star sprites. */

@@ -257,6 +257,9 @@ describe("the wireframe renderer's hulls on the cluster path (plan R14, R14.T4.b
         "wireframe:hull cluster records",
         "wireframe:hull cluster lods",
         "wireframe:hull cluster instances",
+        // The mesh occluders' instances (plan R14, R14.T5.f); their buckets, made at their first
+        // cull, are not made here.
+        "wireframe:mesh occluder instances",
       ].toSorted(),
     );
   });
