@@ -109,6 +109,8 @@ export interface SeamPop {
   /** Its own fade and its rebake's or rise's, 0 to 1. */
   readonly ownFade: number;
   readonly rebakeFade: number;
+  /** Whether it fades beside a transition alone, on its edges or corners, with no fade of its own. */
+  readonly beside: boolean;
   /** The morph factor at its worst vertex, and the one drawn there the frame before. */
   readonly k: number;
   readonly kBefore: number;
@@ -171,6 +173,13 @@ export interface SeamRun {
   readonly frameChanges: ReadonlyArray<SeamFrameChange>;
   /** Every instance whose change in a frame showed, in order. */
   readonly pops: ReadonlyArray<SeamPop>;
+  /**
+   * Selected patches that reversed a change of the selection within {@link FLIP_S} (R10.T16.i;
+   * research-next-work-11): one coarsened away and refined back, or refined in and coarsened away;
+   * and those of them where the budget bound the selection that reversed it.
+   */
+  readonly flipFlops: number;
+  readonly flipFlopsLimited: number;
 }
 
 /** A change moving the drawn surface more than this on screen is a pop, pixels. */
@@ -178,6 +187,9 @@ export const POP_PX = 1;
 
 /** A change turning the drawn shading normal more than this is a pop, degrees. */
 export const POP_NORMAL_DEG = 2;
+
+/** A selection's change reversed within this long is a flip-flop, seconds ({@link SeamRun.flipFlops}). */
+export const FLIP_S = 1;
 
 /** A change of this many levels or more is a jump (the research's "changes of ≥ 3 levels"). */
 export const JUMP_LEVELS = 3;
@@ -189,7 +201,10 @@ export interface SeamSummary {
   readonly frames: number;
   /** The share of frames with a selected patch standing in, 0 to 1. */
   readonly standInFrames: number;
-  /** Frames with a selected, seen patch that has no resident ancestor. */
+  /**
+   * Frames that draw the ground with a selected, seen patch that has no resident ancestor: a hole;
+   * before the first draw the reference surface stands in whole.
+   */
   readonly holeFrames: number;
   /** Demand → resident, seconds; `null` with no residency. */
   readonly demandToResidentS: {
@@ -249,6 +264,9 @@ export interface SeamSummary {
   readonly framePopsPerS: number;
   /** Those instances by what their change came from. */
   readonly framePopsByCause: Readonly<Record<SeamPopCause, number>>;
+  /** Flip-flops a second ({@link SeamRun.flipFlops}), and those where the budget bound. */
+  readonly flipFlopsPerS: number;
+  readonly flipFlopsLimitedPerS: number;
   /** Instances drawn over ground the view saw with no rise out of the datum, and the largest move. */
   readonly appearsWithoutTransition: number;
   readonly appearMovePxMax: number;
@@ -376,7 +394,7 @@ export function summariseSeamRun(run: SeamRun): SeamSummary {
     frames: frames.length,
     standInFrames:
       frames.length === 0 ? 0 : frames.filter((f) => f.standingIn > 0).length / frames.length,
-    holeFrames: frames.filter((f) => f.missing > 0).length,
+    holeFrames: frames.filter((f) => f.missing > 0 && f.drawn > 0).length,
     demandToResidentS: {
       p50: percentile(latencies, 50),
       p95: percentile(latencies, 95),
@@ -408,6 +426,8 @@ export function summariseSeamRun(run: SeamRun): SeamSummary {
     },
     framePopsPerS: drawnSpanS > 0 ? changes.reduce((sum, c) => sum + c.pops, 0) / drawnSpanS : 0,
     framePopsByCause: popsByCause(run.pops),
+    flipFlopsPerS: drawnSpanS > 0 ? run.flipFlops / drawnSpanS : 0,
+    flipFlopsLimitedPerS: drawnSpanS > 0 ? run.flipFlopsLimited / drawnSpanS : 0,
     appearsWithoutTransition: changes.reduce((sum, c) => sum + c.appears, 0),
     appearMovePxMax: maxOf(changes.map((c) => c.appearMovePx)),
   };

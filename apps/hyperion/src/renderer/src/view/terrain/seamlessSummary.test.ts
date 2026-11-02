@@ -58,6 +58,8 @@ function runOf(frames: SeamFrame[], events: SeamEvent[], more: Partial<SeamRun> 
     collapses: [],
     frameChanges: [],
     pops: [],
+    flipFlops: 0,
+    flipFlopsLimited: 0,
     ...more,
   };
 }
@@ -128,7 +130,7 @@ describe("the seamless probe's summary", () => {
     expect(summary.standInFrames).toBeCloseTo(1 / 3, 12);
   });
 
-  it("takes the frames' largest move and turn, their pops a second and the appearances", () => {
+  it("takes the frames' largest move and turn, their pops and flip-flops a second, and the appearances", () => {
     const frameChanges = [
       { tS: 1, movePx: 0.5, normalDeg: 1, pops: 0, appears: 0, appearMovePx: 0 },
       { tS: 2, movePx: 3, normalDeg: 0.5, pops: 2, appears: 1, appearMovePx: 7 },
@@ -142,6 +144,7 @@ describe("the seamless probe's summary", () => {
       normalDeg: 0.5,
       ownFade: 0.5,
       rebakeFade: 0,
+      beside: false,
       k: 0.5,
       kBefore: 0,
     };
@@ -150,16 +153,28 @@ describe("the seamless probe's summary", () => {
       { ...pop, cause: "refine" as const },
     ];
     const summary = summariseSeamRun(
-      runOf([frameAt(0, 10), frameAt(4, 10)], [], { frameChanges, pops }),
+      runOf([frameAt(0, 10), frameAt(4, 10)], [], {
+        frameChanges,
+        pops,
+        flipFlops: 6,
+        flipFlopsLimited: 2,
+      }),
     );
     expect(summary).toMatchObject({
       frameMovePxMax: 3,
       frameNormalDeg: { max: 1 },
       framePopsPerS: 0.5,
       framePopsByCause: { fade: 0, rebake: 0, refine: 2, coarsen: 0, appear: 0, survey: 0 },
+      flipFlopsPerS: 1.5,
+      flipFlopsLimitedPerS: 0.5,
       appearsWithoutTransition: 1,
       appearMovePxMax: 7,
     });
+  });
+
+  it("counts a hole only in a frame that draws the ground", () => {
+    const frames = [frameAt(0, 0, { missing: 2 }), frameAt(1, 10, { missing: 1 }), frameAt(2, 10)];
+    expect(summariseSeamRun(runOf(frames, [])).holeFrames).toBe(1);
   });
 
   it("measures the bands' steps of τ′ with the excess floored at 1", () => {

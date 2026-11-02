@@ -1,7 +1,8 @@
 /**
  * The drawn ground's changes morphed in over time (plan R10, R10.T16.i; the seamless lane's brief
- * 2, the owner's priority, 2026-11-01): each refine and coarsen of the draw set fades over
- * {@link MORPH_IN_MS}, so that a level change lands on the old surface whatever CDLOD's k gives.
+ * 2, the owner's priority, 2026-11-01): each refine and coarsen of the draw set fades over at least
+ * {@link MORPH_IN_MS}, and as long as its size on screen asks ({@link MorphSpans}), so that a level
+ * change lands on the old surface whatever CDLOD's k gives.
  *
  * @remarks
  * CDLOD's morph hides a level change only where it lands at its band's end. A bake's round trip
@@ -17,7 +18,8 @@
  *   one level draws the area's nearest resident ancestor between the two first, over the area,
  *   a level at a time;
  * - **coarsen**: a patch drawn where finer ones were waits while they rise to a fade of 1 on their
- *   parents' mesh, still drawn and pinned, and then takes their place;
+ *   parents' mesh, still drawn and pinned, and then takes their place; the parts it drew itself
+ *   are its surface already, and hold without rising;
  * - **rebake**: a resident patch's newer bake, stored in a spare slot, mixes its heights, normals
  *   and maturity from its older one, kept in its slot, by a fade falling from 1, the datum's where
  *   the older one's survey mask held its ground unsurveyed; where no slot is spare the newer bake
@@ -38,10 +40,12 @@ import { DATUM_SLOT, MAX_SUB_PATCH_LEVELS } from "./gpu/uniforms";
 import { childKeys, type PatchKey, patchKeyString } from "./patchKey";
 
 /**
- * The time a change of the drawn ground morphs in over at least, ms: a hand value (the brief's
- * 0.4 s), the seamless probe's to set.
+ * The time a change of the drawn ground morphs in over at least, ms: the seamless probe's, for the
+ * brief's hand value of 0.4 s turned the shading normal 2° to 8° a frame on low, and 0.6 s takes
+ * the research's largest turn, 47°, at 2° a 60 Hz frame where the smoothstep is steepest
+ * (1.5 × 47° ÷ (60 × 0.6 s) = 1.96°).
  */
-export const MORPH_IN_MS = 400;
+export const MORPH_IN_MS = 600;
 
 /**
  * How long a change morphs in over for each pixel it moves the ground on screen, ms: two thirds of

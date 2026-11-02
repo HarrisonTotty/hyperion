@@ -265,6 +265,15 @@ export interface SelectionInput {
    */
   readonly maxPatches?: number;
   /**
+   * The budget's hold (plan R10, R10.T16.i; research-next-work-11), a hysteresis on its refusals:
+   * a split the last selection did not make is refused past `1 − margin` of `maxPatches`, and one
+   * it made only past the whole of it, so that at the budget's margin a patch split last time stays
+   * split, and a pair near the margin does not coarsen and refine by turns. Past the first refusal,
+   * which sets `limitExcess`, the last selection's splits alone go on. It moves no split where the
+   * budget does not bind. Absent, the selection has no history, as before, bit for bit.
+   */
+  readonly budgetHold?: BudgetHold;
+  /**
    * The skirt margin the height workers bake with, metres (the bake's `skirtM`): the bounds reach
    * down to the skirts' bottoms. Absent, 0.
    */
@@ -1050,6 +1059,38 @@ class CandidateHeap {
   }
 }
 
+/** The budget's hold on the last selection's splits ({@link SelectionInput.budgetHold}). */
+export interface BudgetHold {
+  /** The patches the last selection split: every ancestor of one of its patches. */
+  readonly split: ReadonlySet<string>;
+  /** The share of `maxPatches` the last selection's splits alone may take, 0 to 1. */
+  readonly margin: number;
+}
+
+/**
+ * The keys of the patches a selection split to select `patches`: each one's every ancestor, as
+ * `patchKeyString`s, for {@link SelectionInput.budgetHold}.
+ */
+export function splitKeysOf(patches: Iterable<SelectedPatch>): Set<string> {
+  const split = new Set<string>();
+  for (const { key } of patches) {
+    for (let level = key.level - 1; level >= 0; level -= 1) {
+      const cells = 2 ** (key.level - level);
+      const keyString = patchKeyString({
+        face: key.face,
+        level,
+        i: Math.floor(key.i / cells),
+        j: Math.floor(key.j / cells),
+      });
+      if (split.has(keyString)) {
+        break;
+      }
+      split.add(keyString);
+    }
+  }
+  return split;
+}
+
 /**
  * Selects the patches to draw for every view at once (Design note 7, with the patch-demand ruling
  * of 2026-10-03): from the six roots, the patch with the largest weighted error is split first,
@@ -1121,6 +1162,9 @@ export function selectPatches(input: SelectionInput): Selection {
       offer(root);
     }
   }
+  const hold = input.budgetHold ?? null;
+  // A split the last selection did not make is refused past this many patches (`budgetHold`).
+  const newMax = hold === null ? maxPatches : maxPatches * (1 - hold.margin);
   let limited = false;
   let limitExcess = 0;
   for (let node = heap.pop(); node !== undefined; node = heap.pop()) {
@@ -1128,13 +1172,24 @@ export function selectPatches(input: SelectionInput): Selection {
     if (node.split) {
       continue;
     }
+    const held =
+      hold !== null && hold.split.has((node.cell.keyString ??= patchKeyString(node.key)));
+    if (limited && !held && !node.forced) {
+      // Past the first refusal, the hold lets the last selection's splits alone go on.
+      continue;
+    }
     tree.begin();
     const added = tree.splitBalanced(node.key, childOf);
-    if (!node.forced && tree.size > maxPatches) {
+    if (!node.forced && tree.size > (held ? maxPatches : newMax)) {
       tree.rollback();
-      limited = true;
-      limitExcess = node.weighted;
-      break;
+      if (!limited) {
+        limited = true;
+        limitExcess = node.weighted;
+      }
+      if (hold === null) {
+        break;
+      }
+      continue;
     }
     tree.commit();
     for (const leaf of added) {

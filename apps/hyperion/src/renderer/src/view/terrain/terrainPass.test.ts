@@ -891,8 +891,8 @@ function streamedUnderBudget(): Promise<BudgetStream> {
       sizes.push(frame.selection.patches.size);
     }
     // The bands reach the last selection's τ′ at 2% a frame (R10.T16.i): 2.6 × 10² frames for a
-    // τ′ 200 times the setting's.
-    for (const stop = n + 400; n < stop; n += 1) {
+    // τ′ 200 times the setting's; and the refines go down a level a span, 0.6 s each.
+    for (const stop = n + 800; n < stop; n += 1) {
       frame = pass.frame(inputAt(BUDGET_VIEW, 16 * n));
     }
     return {
@@ -1121,6 +1121,32 @@ function drawnBy(drawSet: DrawSet, key: PatchKey): number[] {
 
 describe("the drawn ground's changes over time (R10.T16.i)", () => {
   const CHILD: PatchKey = { face: 2, level: 1, i: 0, j: 0 };
+
+  it("holds the first draw until every seen patch has a resident patch to draw it", async () => {
+    const made = await passOn("high");
+    // Far over the pole: the view sees several roots, none yet resident.
+    const view = northPole(20_000_000);
+    made.pass.frame(inputAt(view, 0));
+    const seen = [...(made.pass.lastStep?.selection.patches.values() ?? [])].filter((p) => p.seen);
+    const [lastToLand, ...others] = seen;
+    if (lastToLand === undefined) {
+      throw new Error("the view saw no patch");
+    }
+    // The draw set is rewritten in place each step: its counts are read as each step leaves them.
+    const counts = (): readonly [number, number] => {
+      const drawSet = made.pass.lastStep?.drawSet;
+      return [drawSet?.missing ?? -1, drawSet?.count ?? -1];
+    };
+    for (const patch of others) {
+      made.pool().deliver(made.pass, patch.key);
+    }
+    made.pass.frame(inputAt(view, 16));
+    const partly = counts();
+    made.pool().deliver(made.pass, lastToLand.key);
+    made.pass.frame(inputAt(view, 32));
+    const [missing, count] = counts();
+    expect([others.length > 0, partly, missing, count > 0]).toEqual([true, [1, 0], 0, true]);
+  });
 
   /** A pass over the north pole with the roots and the face's other children baked, and `CHILD` not. */
   async function standingIn(): Promise<{

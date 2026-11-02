@@ -44,6 +44,7 @@ import {
   selectionErrorM,
   selectPatches,
   screenSpaceErrorPx,
+  splitKeysOf,
   type SurveyLookup,
   type ViewSelectionInput,
 } from "./select";
@@ -661,6 +662,45 @@ describe("selection under a patch budget", () => {
       );
     });
     expect([capped.limited, overTau]).toEqual([true, true]);
+  });
+
+  describe("its hold on the last selection's splits (R10.T16.i)", () => {
+    const budgeted = (more: Partial<SelectionInput> = {}): Selection =>
+      selectPatches({
+        planet: PLANET,
+        views: [pose()],
+        setting: "high",
+        grounded: [],
+        maxPatches: 300,
+        ...more,
+      });
+
+    it("makes again every split the last selection made, at its pose", () => {
+      const before = budgeted();
+      const again = budgeted({
+        budgetHold: { split: splitKeysOf(before.patches.values()), margin: 0.2 },
+      });
+      expect([...again.patches.keys()].toSorted()).toEqual([...before.patches.keys()].toSorted());
+    });
+
+    it("refuses a split the last selection did not make past its share, within the budget", () => {
+      const free = budgeted();
+      const unheld = budgeted({ budgetHold: { split: new Set(), margin: 0.2 } });
+      expect({
+        free: free.patches.size > 240 && free.patches.size <= 300,
+        unheld: unheld.patches.size <= 240,
+        limited: unheld.limited,
+      }).toEqual({ free: true, unheld: true, limited: true });
+    });
+
+    it("moves no split where the budget does not bind", () => {
+      const free = select([pose()]);
+      const roomy = budgeted({
+        maxPatches: 2 * free.patches.size,
+        budgetHold: { split: new Set(), margin: 0.2 },
+      });
+      expect([...roomy.patches.keys()].toSorted()).toEqual([...free.patches.keys()].toSorted());
+    });
   });
 
   it("keeps every forced patch whatever the budget", () => {

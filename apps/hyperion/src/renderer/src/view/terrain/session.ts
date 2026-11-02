@@ -261,6 +261,11 @@ export interface TerrainSessionOptions {
    * `MORPH_IN_MS`.
    */
   readonly morphInMs?: number;
+  /**
+   * The budget's hold's margin its passes take (plan R10, R10.T16.i;
+   * `TerrainPassOptions.budgetHoldMargin`): absent, the pass's own; `null`, no hold.
+   */
+  readonly budgetHoldMargin?: number | null;
 }
 
 /**
@@ -857,6 +862,7 @@ export class TerrainSession {
   /** Its passes' geometry (plan R14), `null` for their setting's. */
   readonly #geometry: GeometrySettings | null;
   readonly #morphInMs: number | undefined;
+  readonly #budgetHoldMargin: number | null | undefined;
   #faults: ReadonlyMap<ViewId, TerrainFault> = NO_FAULTS;
   /** The terrain's fault by its first cause raised, which stands for the session; `null` before. */
   #cause: TerrainFault | null = null;
@@ -882,6 +888,7 @@ export class TerrainSession {
     this.#lookaheadClockMs = options.lookaheadClockMs ?? null;
     this.#geometry = options.geometry ?? null;
     this.#morphInMs = options.morphInMs;
+    this.#budgetHoldMargin = options.budgetHoldMargin;
     // A readout worker beside the bake workers, so that the readout, which a choice of BASELINE
     // asks at once, never waits behind their bakes (R10.T12.c).
     const pool = new HeightWorkerPool({
@@ -1769,6 +1776,9 @@ export class TerrainSession {
         ...(this.#lookaheadClockMs === null ? {} : { lookaheadClockMs: this.#lookaheadClockMs }),
         ...(this.#geometry === null ? {} : { geometry: this.#geometry }),
         ...(this.#morphInMs === undefined ? {} : { morphInMs: this.#morphInMs }),
+        ...(this.#budgetHoldMargin === undefined
+          ? {}
+          : { budgetHoldMargin: this.#budgetHoldMargin }),
       });
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {

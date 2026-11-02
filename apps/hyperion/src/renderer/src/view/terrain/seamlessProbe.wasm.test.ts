@@ -40,6 +40,7 @@ import { handoverTauPx, handsOver, limbDistanceM, pixelAngleRad } from "./handov
 import { parentKey, type PatchKey, patchKeyString } from "./patchKey";
 import { type BodyFigure, spheroidNormal, surfacePoint } from "./planet";
 import {
+  FLIP_S,
   isDrawnHalving,
   POP_NORMAL_DEG,
   POP_PX,
@@ -104,7 +105,8 @@ import type { WorkerLike } from "./workers/pool";
  * - `SEAM_FROM_S`, `SEAM_TO_S` (the script's span) and `SEAM_HZ` (60).
  * - `SEAM_STRIDE` (2): every how many vertices a change is measured at, and `SEAM_FRAME_STRIDE` (8)
  *   a frame's changed instances.
- * - `SEAM_MORPH_MS`: the time morph's span (`TerrainPassOptions.morphInMs`), `MORPH_IN_MS` unset.
+ * - `SEAM_MORPH_MS`: the time morph's least span (`TerrainPassOptions.morphInMs`), `MORPH_IN_MS`
+ *   unset; `SEAM_BUDGET_HOLD`: the budget's hold's margin (`budgetHoldMargin`), `off` for none.
  * - `SEAM_TRACE_FROM_S` and `SEAM_TRACE_TO_S`: each selection between them in `meta.seamless.trace`
  *   (its margin, size, seen patches, nearest ground and levels).
  * - `SEAM_RECORD=1`: the frames, events and latencies too.
@@ -132,6 +134,15 @@ const HZ = numberKnob("SEAM_HZ", 60);
 const STRIDE = numberKnob("SEAM_STRIDE", 2);
 const FRAME_STRIDE = numberKnob("SEAM_FRAME_STRIDE", 8);
 const MORPH_MS = numberKnob("SEAM_MORPH_MS", MORPH_IN_MS);
+
+/** The budget's hold's margin (`SEAM_BUDGET_HOLD`): a number, `off` for none; unset, the pass's. */
+function budgetHoldKnob(): { budgetHoldMargin?: number | null } {
+  const text = knob("SEAM_BUDGET_HOLD");
+  if (text === undefined) {
+    return {};
+  }
+  return { budgetHoldMargin: text === "off" ? null : numberKnob("SEAM_BUDGET_HOLD", 0) };
+}
 const TRACE_FROM_S = numberKnob("SEAM_TRACE_FROM_S", Number.POSITIVE_INFINITY);
 const TRACE_TO_S = numberKnob("SEAM_TRACE_TO_S", Number.NEGATIVE_INFINITY);
 const RECORD = knob("SEAM_RECORD") === "1";
@@ -170,7 +181,8 @@ interface Answers {
 
 /**
  * A height worker on the fake clock: first in first out, a bake taking `costMs`, a drafted one
- * {@link DRAFT_SHARE} of it and its refinement the rest, everything else ~0.
+ * `draftShare` of it ({@link DRAFT_SHARE} by default) and its refinement the rest, everything else
+ * ~0.
  */
 class LatencyWorker implements WorkerLike {
   readonly #fields = new WorkerFields(MODULE);
@@ -178,12 +190,14 @@ class LatencyWorker implements WorkerLike {
   readonly #wrappers = new Map<unknown, EventListenerObject>();
   readonly #answers: Answers;
   readonly #costMs: number;
+  readonly #draftShare: number;
   #busyUntilMs = 0;
   #terminated = false;
 
-  constructor(answers: Answers, costMs: number) {
+  constructor(answers: Answers, costMs: number, draftShare: number) {
     this.#answers = answers;
     this.#costMs = costMs;
+    this.#draftShare = draftShare;
   }
 
   postMessage(message: HeightWorkerRequest): void {
@@ -191,12 +205,13 @@ class LatencyWorker implements WorkerLike {
       return;
     }
     const now = Date.now();
-    let cost = 0;
-    if (message.kind === "bake") {
-      cost = message.draft === true ? DRAFT_SHARE * this.#costMs : this.#costMs;
-    } else if (message.kind === "refine-normals") {
-      cost = (1 - DRAFT_SHARE) * this.#costMs;
-    }
+    // A draft's bake takes its share of a whole one's cost, and its normals' refinement the rest.
+    const cost =
+      message.kind === "bake"
+        ? this.#costMs * (message.draft === true ? this.#draftShare : 1)
+        : message.kind === "refine-normals"
+          ? this.#costMs * (1 - this.#draftShare)
+          : 0;
     this.#busyUntilMs = Math.max(now, this.#busyUntilMs) + cost;
     setTimeout(() => {
       if (this.#terminated) {
@@ -796,7 +811,10 @@ function frameChangeOf(
     let instDeg = 0;
     let covered = false;
     let bare = false;
-    let worst: Omit<SeamPop, "tS" | "areaLevel" | "level" | "ownFade" | "rebakeFade"> | null = null;
+    let worst: Omit<
+      SeamPop,
+      "tS" | "areaLevel" | "level" | "ownFade" | "rebakeFade" | "beside"
+    > | null = null;
     let worstBadness = 0;
     for (const y of lines) {
       for (const x of lines) {
@@ -863,6 +881,10 @@ function frameChangeOf(
         level: inst.held.key.level,
         ownFade: inst.ownFade / FADE_STEPS,
         rebakeFade: inst.rebakeFade,
+        beside:
+          inst.ownFade === 0 &&
+          inst.rebakeFade === 0 &&
+          (inst.edgeFades !== 0 || inst.cornerFades !== 0),
         ...worst,
         movePx: instPx,
         normalDeg: instDeg,
@@ -884,6 +906,57 @@ function causeOf(inst: DrawnInstance, was: DrawnInstance): SeamPopCause {
     return level > before ? "refine" : "coarsen";
   }
   return was.held === inst.held ? "fade" : "rebake";
+}
+
+/**
+ * A run's selections' flip-flops ({@link SeamRun.flipFlops}): each patch that coarsened away and
+ * refined back, or refined in and coarsened away, within {@link FLIP_S}.
+ */
+class SelectionFlips {
+  #before: Selection | null = null;
+  readonly #coarsenedAtS = new Map<string, number>();
+  readonly #refinedAtS = new Map<string, number>();
+  count = 0;
+  limited = 0;
+
+  /** Takes the selection `selection` that stood at `tS`, a new one or the last again. */
+  note(selection: Selection, tS: number): void {
+    const before = this.#before;
+    this.#before = selection;
+    if (before === null || before === selection) {
+      return;
+    }
+    const flipped = (at: number | undefined): void => {
+      if (at !== undefined && tS - at <= FLIP_S) {
+        this.count += 1;
+        this.limited += selection.limited ? 1 : 0;
+      }
+    };
+    for (const [keyString, patch] of before.patches) {
+      const parent = parentKey(patch.key);
+      if (
+        !selection.patches.has(keyString) &&
+        parent !== null &&
+        selection.patches.has(patchKeyString(parent))
+      ) {
+        flipped(this.#refinedAtS.get(keyString));
+        this.#refinedAtS.delete(keyString);
+        this.#coarsenedAtS.set(keyString, tS);
+      }
+    }
+    for (const [keyString, patch] of selection.patches) {
+      const parent = parentKey(patch.key);
+      if (
+        !before.patches.has(keyString) &&
+        parent !== null &&
+        before.patches.has(patchKeyString(parent))
+      ) {
+        flipped(this.#coarsenedAtS.get(keyString));
+        this.#coarsenedAtS.delete(keyString);
+        this.#refinedAtS.set(keyString, tS);
+      }
+    }
+  }
 }
 
 /** The primary view's frame of `passView` drawn at `tS`: its view, a sun overhead, no lights. */
@@ -935,17 +1008,22 @@ interface ProbeOptions {
   readonly setting: QualitySetting;
   readonly fromS: number;
   readonly toS: number;
+  /** A drafted bake's share of a bake's cost; {@link DRAFT_SHARE} by default. */
+  readonly draftShare?: number;
 }
 
 /** What a run gives: the record, and the trace of its selections in the trace's span. */
 interface Played {
   readonly run: SeamRun;
+  /** A drafted bake's share of a bake's cost, the run's. */
+  readonly draftShare: number;
   readonly trace: ReadonlyArray<TraceEntry>;
 }
 
 /** Plays TERRAIN TEST's script from `fromS` to `toS` at {@link HZ} and records the drawn ground. */
 async function play(options: ProbeOptions): Promise<Played> {
   const { setting, fromS, toS } = options;
+  const draftShare = options.draftShare ?? DRAFT_SHARE;
   initSync({ module: wasmBytes() });
   vi.useFakeTimers({
     toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
@@ -960,11 +1038,12 @@ async function play(options: ProbeOptions): Promise<Played> {
     universe: TERRAIN_TEST_UNIVERSE,
     requests: link.requests,
     linkUp: true,
-    createWorker: () => new LatencyWorker(answers, COST_MS),
+    createWorker: () => new LatencyWorker(answers, COST_MS, draftShare),
     workers: WORKERS,
     setting,
     ...(LOOKAHEAD ? { lookaheadClockMs: () => Date.now() } : {}),
     morphInMs: MORPH_MS,
+    ...budgetHoldKnob(),
   });
   link.onSurface((event) => {
     if (event.kind === "revisions") {
@@ -1031,6 +1110,8 @@ async function play(options: ProbeOptions): Promise<Played> {
   const pops: SeamPop[] = [];
   const masks = new SurveyMasks();
   let drawnBefore = new Map<string, DrawnInstance>();
+  // The selection's changes, for its flip-flops: when each patch last coarsened away or refined in.
+  const flips = new SelectionFlips();
   // The camera the frame before drew from.
   let drawnCamera: FrameCamera | null = null;
   const firstDemandS = new Map<string, number>();
@@ -1217,6 +1298,7 @@ async function play(options: ProbeOptions): Promise<Played> {
         }
       }
       selectedResident = nowSelectedResident;
+      flips.note(last.selection, tS);
       const frame: SeamFrame = {
         tS,
         drawn: ds.count,
@@ -1366,7 +1448,10 @@ async function play(options: ProbeOptions): Promise<Played> {
       collapses,
       frameChanges,
       pops,
+      flipFlops: flips.count,
+      flipFlopsLimited: flips.limited,
     },
+    draftShare,
     trace,
   };
 }
@@ -1408,7 +1493,7 @@ function report(played: Played, summary: SeamSummary): Record<string, unknown> {
     costMs: run.costMs,
     workers: run.workers,
     lookahead: LOOKAHEAD,
-    draftShare: DRAFT_SHARE,
+    draftShare: played.draftShare,
     fromS: run.fromS,
     toS: run.toS,
     handOverS: run.handOverS,
@@ -1420,6 +1505,12 @@ function report(played: Played, summary: SeamSummary): Record<string, unknown> {
     // The largest pops of a frame's change, by move and by turn.
     popsByMove: run.pops.toSorted((a, b) => b.movePx - a.movePx).slice(0, 60),
     popsByTurn: run.pops.toSorted((a, b) => b.normalDeg - a.normalDeg).slice(0, 60),
+    // The fades' own pops, the most of a run's, a sample of the largest by move.
+    fadePops: run.pops
+      .filter((pop) => pop.cause === "fade")
+      .toSorted((a, b) => b.movePx - a.movePx)
+      .slice(0, 40),
+    fadePopsBeside: run.pops.filter((pop) => pop.cause === "fade" && pop.beside).length,
     trace: played.trace,
     ...(RECORD ? { record: run } : {}),
   };
@@ -1471,6 +1562,18 @@ describe.runIf(SLOW)("the seamless probe's acceptance (HYPERION_SLOW_TESTS=1)", 
       // before the other, and the coarsen shows it (largestCoarsenPx, recorded: the rebake's
       // fade is seamless-2's).
       expect(summary.largestCoarsenLevelPx).toBeLessThanOrEqual(10);
+    },
+  );
+
+  it(
+    "draws no hole at the hand-over with drafts at half a bake's cost, as the app bakes on high",
+    { timeout: 10 * 60 * 1000 },
+    async ({ task }) => {
+      // The hand-over's roots land frames apart, one of them drafted (the look-ahead's re-measure).
+      const played = await play({ setting: "high", fromS: 0, toS: 45, draftShare: 0.5 });
+      const summary = summariseSeamRun(played.run);
+      Object.assign(task.meta, { seamless: report(played, summary) });
+      expect([played.run.firstDrawS !== null, summary.holeFrames]).toEqual([true, 0]);
     },
   );
 });

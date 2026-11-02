@@ -180,6 +180,7 @@ import {
   type SelectionInput,
   selectionErrorM,
   selectPatches,
+  splitKeysOf,
   type SurveyLookup,
   type ViewSelectionInput,
 } from "./select";
@@ -683,6 +684,13 @@ export interface TerrainPassOptions {
    */
   readonly morphInMs?: number;
   /**
+   * The budget's hold's margin (plan R10, R10.T16.i; `SelectionInput.budgetHold`): the share of the
+   * patch budget the last selection's splits alone may take, so that a pair at the budget's margin
+   * does not coarsen and refine by turns. Absent, {@link BUDGET_HOLD_MARGIN}; `null`, no hold, the
+   * selection with no history, as before.
+   */
+  readonly budgetHoldMargin?: number | null;
+  /**
    * Called with each selection's input and result, right after `selectPatches` and outside the
    * `terrain.select` span, for the spike's second, calibrated pass (T13.c). Unset, it costs nothing.
    */
@@ -871,6 +879,11 @@ interface Device {
   readonly fades: TransitionFades;
   /** The draw time {@link Device.fades} were last made at, ms; `null` before any. */
   fadesAtMs: number | null;
+  /**
+   * Whether the device has drawn its ground yet (R10.T16.i): until a draw set leaves no seen
+   * selected patch without a resident patch to draw it, it draws none (`#present`).
+   */
+  firstDrawn: boolean;
   /**
    * The drawn patches' areas the holds are made from, a sub-patch's its missing patch's, and the
    * levels they are drawn at, a sub-patch's its patch's, reused from selection to selection.
@@ -1421,6 +1434,14 @@ export function effectiveTauPx(tauPx: number, limitExcess: number, weight: numbe
 }
 
 /**
+ * The budget's hold's margin (plan R10, R10.T16.i; {@link TerrainPassOptions.budgetHoldMargin}): the
+ * share of the patch budget the last selection's splits alone may take, a hand value (lean,
+ * 2026-11-01), against seamless-1's finding of four level-8 patches coarsening and refining by
+ * turns every 0.1 to 0.3 s on low at TERRAIN TEST's delta.
+ */
+export const BUDGET_HOLD_MARGIN = 0.05;
+
+/**
  * The most a view's morph bands' tolerance moves a step, as a fraction (plan R10, R10.T16.i; a
  * hand value): the budget's τ′ steps by up to 50 to 63 times between selections (TERRAIN TEST,
  * research-terrain-seamless), and a vertex in its band moves by about 6 Δτ′ ÷ τ′ in k, so that the
@@ -1506,6 +1527,7 @@ export class TerrainPass {
   #observers = NO_OBSERVERS;
   readonly #frustumMargin: TerrainFrustumMargin;
   readonly #morphInMs: number | undefined;
+  readonly #budgetHoldMargin: number | null;
   /** The pixels each change moves the ground by, from the resident patches' sizes (R10.T16.i). */
   readonly #morphSpans: MorphSpans;
   /** The lookahead's clock ({@link TerrainPassOptions.lookaheadClockMs}), or `null` for none. */
@@ -1598,6 +1620,8 @@ export class TerrainPass {
     this.#onSelect = options.onSelect ?? null;
     this.#frustumMargin = options.frustumMargin ?? "none";
     this.#morphInMs = options.morphInMs;
+    this.#budgetHoldMargin =
+      options.budgetHoldMargin === undefined ? BUDGET_HOLD_MARGIN : options.budgetHoldMargin;
     this.#morphSpans = {
       morphPx: (keyString) =>
         this.#screenPx(keyString, this.#device.residents.get(keyString)?.sizes.morphM ?? 0),
@@ -2796,6 +2820,7 @@ export class TerrainPass {
       morph: new TimeMorph(layout.slots.slotCount, this.#morphInMs, this.#morphSpans),
       fades: new TransitionFades(layout.slots.slotCount),
       fadesAtMs: null,
+      firstDrawn: false,
       drawnKeys: [],
       drawnLevels: [],
       pool,
@@ -3319,6 +3344,8 @@ export class TerrainPass {
     nowMs: number,
   ): void {
     const planet = this.#planet;
+    const last = this.#selected?.selection;
+    const holdMargin = this.#budgetHoldMargin;
     const selectionInput: SelectionInput = {
       planet,
       // Selection's own view inputs, without the pass's names for them.
@@ -3345,6 +3372,9 @@ export class TerrainPass {
       heightRanges: this.#device.cache,
       skirtMarginM: WORKER_SKIRT_MARGIN_M,
       ...(this.#survey === null ? {} : { survey: this.#survey }),
+      ...(holdMargin === null || last === undefined
+        ? {}
+        : { budgetHold: { split: splitKeysOf(last.patches.values()), margin: holdMargin } }),
     };
     // The lookahead's cadence reads the selection's cost too.
     const timed = this.#measureSelection || this.#lookaheadClockMs !== null;
@@ -3528,7 +3558,16 @@ export class TerrainPass {
    * through each coarsen, with the cache's pins and the coarse–fine holds made from it.
    */
   #present(device: Device, selection: Selection, resolved: DrawSet): DrawSet {
-    const drawSet = device.morph.present(resolved, device.cache, this.#seenAtLastStep(selection));
+    // The hand-over holds the reference surface until every seen selected patch has a resident
+    // patch to draw it, so that its first draw has no hole: the roots a view sees can land frames
+    // apart, one of them drafted (the look-ahead's re-measure, 40.58 s on high at half-cost drafts).
+    const held = !device.firstDrawn && resolved.missing > 0;
+    const drawSet = device.morph.present(
+      held ? { ...resolved, count: 0 } : resolved,
+      device.cache,
+      this.#seenAtLastStep(selection),
+    );
+    device.firstDrawn ||= drawSet.count > 0;
     device.cache.retain(selection, drawSet);
     // The holds at the drawn set's coarse–fine edges, stand-ins included, the same for every view:
     // each view's bands are its own, and need not leave the coarse side at k = 0 there, nor the
