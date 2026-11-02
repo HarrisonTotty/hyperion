@@ -248,7 +248,8 @@ export type TerrainViewId = ViewId | typeof DEFAULT_TERRAIN_VIEW;
  * How a pass opens each view's frustum for its selection (plan R10, R10.T16; the batch review's
  * S6): `none`, the camera's own frustum, as R05's spike selects; `motion`, opened by
  * {@link frustumMarginRad}, so that a view turning or moving between selections, or drawing a frame
- * after the step that selected for it, finds its leading edge selected.
+ * after the step that selected for it, finds its leading edge selected, and with a step's clock
+ * held at its widest a while ({@link heldFrustumMargin}).
  */
 export type TerrainFrustumMargin = "none" | "motion";
 
@@ -1669,6 +1670,39 @@ export function frustumMarginRad(
   return Math.min(pixelRad + turnedRad + movedRad, MAX_FRUSTUM_MARGIN_RAD);
 }
 
+/**
+ * How long a view's frustum margin is held at its widest, ms (plan R10, R10.T16.i; lean,
+ * 2026-11-02): a margin opened by one step's near ground and closed a few steps later (TERRAIN TEST
+ * on high at 8 workers, drafts at half, 250–253 s at the survey's exit: 0.0047 to 0.0187 rad for
+ * three selections) splits the ground it opens onto, which takes the budget's margin, and
+ * coarsens it again within a second.
+ */
+export const FRUSTUM_MARGIN_HOLD_MS = 1_500;
+
+/** A view's frustum margin as {@link heldFrustumMargin} holds it: rad, and since when, ms. */
+export interface HeldFrustumMargin {
+  readonly rad: number;
+  readonly sinceMs: number;
+}
+
+/**
+ * The frustum margin a view selects at, at `nowMs`, its motion's being `ruleRad`
+ * ({@link frustumMarginRad}): `held`'s where it is wider and was set less than
+ * {@link FRUSTUM_MARGIN_HOLD_MS} before, and otherwise the rule's, held from `nowMs`.
+ *
+ * @param held - The margin the view's last selection held, or `undefined` before one.
+ */
+export function heldFrustumMargin(
+  held: HeldFrustumMargin | undefined,
+  ruleRad: number,
+  nowMs: number,
+): HeldFrustumMargin {
+  if (held !== undefined && held.rad > ruleRad && nowMs - held.sinceMs < FRUSTUM_MARGIN_HOLD_MS) {
+    return held;
+  }
+  return { rad: ruleRad, sinceMs: nowMs };
+}
+
 /** The terrain pass of one body, shared by the views that hand it over. */
 export class TerrainPass {
   readonly #engine: RenderEngine;
@@ -1740,6 +1774,8 @@ export class TerrainPass {
    * none.
    */
   readonly #nearestGround = new Map<TerrainViewId, number>();
+  /** Each view's frustum margin as its last selection held it ({@link heldFrustumMargin}). */
+  readonly #margins = new Map<TerrainViewId, HeldFrustumMargin>();
   /** What the render thread keeps of the resident bakes' heights (R10.T16.c), on the current device. */
   readonly #heights = new ResidentHeights();
   /** The planet as selection reads it: its figure and the field's level table, which grows. */
@@ -2541,7 +2577,7 @@ export class TerrainPass {
     this.#stepCostMs = 0;
     let reselected = false;
     if (this.#due(views, input)) {
-      this.#select(this.#withMargins(views), input, nowMs);
+      this.#select(this.#withMargins(views, clock === null ? null : nowMs), input, nowMs);
       reselected = true;
     }
     for (const view of views) {
@@ -2890,6 +2926,7 @@ export class TerrainPass {
   #forgetView(id: TerrainViewId): void {
     this.#stepped.delete(id);
     this.#nearestGround.delete(id);
+    this.#margins.delete(id);
     this.#views.get(id)?.clusters?.stats?.dispose();
     if (this.#views.delete(id)) {
       this.#device.resources.releaseView(id);
@@ -2923,6 +2960,7 @@ export class TerrainPass {
       this.#views.clear();
       this.#stepped.clear();
       this.#nearestGround.clear();
+      this.#margins.clear();
       this.#heights.clear();
       try {
         device.resources.dispose();
@@ -3509,7 +3547,10 @@ export class TerrainPass {
   /**
    * `views` with each one's frustum margin under `motion` ({@link frustumMarginRad}), from its
    * camera at the last step and its nearest ground: the nearest a selection last gave it, and no
-   * nearer than the camera's height above the drawn ground beneath it; unchanged under `none`.
+   * nearer than the camera's height above the drawn ground beneath it; at a step's clock `nowMs`,
+   * held at its widest a while ({@link heldFrustumMargin}); unchanged under `none`.
+   *
+   * @param nowMs - The step's clock, ms, or `null` with none, when no margin is held, as before.
    *
    * @remarks
    * The margin's ground was the last selection's, and so fed back into the next one's, which
@@ -3525,7 +3566,10 @@ export class TerrainPass {
    * distance no box makes, so that neither feeds back; the survey's nearest stands in only for a
    * view never given ground.
    */
-  #withMargins(views: ReadonlyArray<PassSelectionView>): ReadonlyArray<PassSelectionView> {
+  #withMargins(
+    views: ReadonlyArray<PassSelectionView>,
+    nowMs: number | null,
+  ): ReadonlyArray<PassSelectionView> {
     if (this.#frustumMargin === "none") {
       return views;
     }
@@ -3538,10 +3582,13 @@ export class TerrainPass {
           Number.POSITIVE_INFINITY,
         this.#heightAboveGroundM(view.camera.positionM),
       );
-      return {
-        ...view,
-        frustumMarginRad: frustumMarginRad(view, this.#stepped.get(view.id) ?? null, nearestM),
-      };
+      let marginRad = frustumMarginRad(view, this.#stepped.get(view.id) ?? null, nearestM);
+      if (nowMs !== null) {
+        const held = heldFrustumMargin(this.#margins.get(view.id), marginRad, nowMs);
+        this.#margins.set(view.id, held);
+        marginRad = held.rad;
+      }
+      return { ...view, frustumMarginRad: marginRad };
     });
   }
 

@@ -44,7 +44,9 @@ import { RESELECT_MOVE_FRACTION } from "./selectionTolerance";
 import { terrainDepthMaterialSpec, type TerrainLighting } from "./terrainMaterial";
 import {
   DEFAULT_TERRAIN_VIEW,
+  FRUSTUM_MARGIN_HOLD_MS,
   frustumMarginRad,
+  heldFrustumMargin,
   MAX_FRUSTUM_MARGIN_RAD,
   morphRangeM,
   TerrainPass,
@@ -247,7 +249,10 @@ interface Made {
 async function sharedPass(
   setting: "high" | "low",
   extra: Partial<
-    Pick<TerrainPassOptions, "source" | "survey" | "onSelect" | "planet" | "frustumMargin">
+    Pick<
+      TerrainPassOptions,
+      "source" | "survey" | "onSelect" | "planet" | "frustumMargin" | "lookaheadClockMs"
+    >
   > = {},
   given?: CountingRenderEngine,
 ): Promise<Made> {
@@ -1456,6 +1461,52 @@ describe("each view's selection margin for its motion (R10.T16; the batch review
     const moved = { ...at, cameraM: add(at.cameraM, vec3(0, 10, 0)) };
     made.pass.step({ views: [passView(PRIMARY, moved)], grounded: [] });
     expect(inputs.at(-1)?.views[0]?.frustumMarginRad).toBeCloseTo(PIXEL_RAD + 10 / 5_000, 6);
+  });
+
+  it("holds a view's widest margin for 1.5 s on a step's clock, then opens it by its motion again", async () => {
+    const inputs: SelectionInput[] = [];
+    let clockMs = 0;
+    const made = await sharedPass("high", {
+      frustumMargin: "motion",
+      lookaheadClockMs: () => clockMs,
+      onSelect: (input) => inputs.push(input),
+    });
+    const step = (yawRad: number, atMs: number): number | undefined => {
+      clockMs = atMs;
+      const before = inputs.length;
+      made.pass.step({ views: [passView(PRIMARY, low(yawRad))], grounded: [] });
+      return inputs.length > before ? inputs.at(-1)?.views[0]?.frustumMarginRad : undefined;
+    };
+    const turn = 10 * PIXEL_RAD;
+    const nudge = 2 * PIXEL_RAD;
+    expect([
+      step(0, 0),
+      step(turn, 100),
+      step(turn + nudge, 200),
+      step(turn + 2 * nudge, 100 + FRUSTUM_MARGIN_HOLD_MS - 1),
+      step(turn + 3 * nudge, 100 + FRUSTUM_MARGIN_HOLD_MS),
+    ]).toEqual([
+      PIXEL_RAD,
+      expect.closeTo(PIXEL_RAD + turn, 12),
+      expect.closeTo(PIXEL_RAD + turn, 12),
+      expect.closeTo(PIXEL_RAD + turn, 12),
+      expect.closeTo(PIXEL_RAD + nudge, 12),
+    ]);
+  });
+
+  it("holds a margin wider than the rule's from when it was set, and takes a wider or a later one", () => {
+    const held = { rad: 0.02, sinceMs: 1_000 };
+    expect([
+      heldFrustumMargin(undefined, 0.01, 0),
+      heldFrustumMargin(held, 0.01, 1_000 + FRUSTUM_MARGIN_HOLD_MS - 1),
+      heldFrustumMargin(held, 0.03, 1_100),
+      heldFrustumMargin(held, 0.01, 1_000 + FRUSTUM_MARGIN_HOLD_MS),
+    ]).toEqual([
+      { rad: 0.01, sinceMs: 0 },
+      held,
+      { rad: 0.03, sinceMs: 1_100 },
+      { rad: 0.01, sinceMs: 1_000 + FRUSTUM_MARGIN_HOLD_MS },
+    ]);
   });
 
   it("opens a session's pass's views by their motion, and the spike's frame by none", async () => {
