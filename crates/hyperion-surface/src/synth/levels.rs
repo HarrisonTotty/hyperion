@@ -95,12 +95,19 @@
 //!   in a cell under water, so no height lies below the lesser of the sea level and the base
 //!   elevation's lowest less the other contributions' reach. Where the sea lies at or above that,
 //!   as over a view that holds deep sea floor or a world's lowest ground, the channels add nothing
-//!   to the lowest height; over a view of highlands alone their reach stops at the sea level.
+//!   to the lowest height; over a view of highlands alone their reach stops at the sea level;
+//! - **the corrections, jointly** (R09.T8.d (b2)): a level's correction is linear in the means it
+//!   reads, each within its level's cap, so its bilinear part and its bubble cannot both reach
+//!   their own bounds at once. It raises a height by at most 1 ÷ B times its cap, the bubble alone
+//!   with every corner by water, and by 2.9 times where no held cell is under water, so that no
+//!   corner is; it lowers one by at most 1.9 times (`CORRECTION_UP_BY_WATER`,
+//!   `CORRECTION_UP_INLAND` and `CORRECTION_DOWN` in `channels::incision`), against the header's
+//!   1 + 1 ÷ B up and 1 ÷ B down.
 //!
-//! The level bound's channel term is held by the first two (R09.T8.d (b3); the crate's
-//! `LevelBounds::held_bound_m`), as selection's charge alone. The bound the skirts, the boxes and
-//! the floors read stays the header's: a held bound there would make a bake's bytes depend on which
-//! blocks its worker holds.
+//! The level bound's channel term is held by the first two and the last (R09.T8.d (b3) and (b2);
+//! the crate's `LevelBounds::held_bound_m`), as selection's charge alone, and the range's lowest by
+//! all four. The bound the skirts, the boxes and the floors read stays the header's: a held bound
+//! there would make a bake's bytes depend on which blocks its worker holds.
 //!
 //! [`octave_spacing`]: super::relief::octave_spacing
 //! [`band_half_width`]: super::craters::band_half_width
@@ -110,8 +117,8 @@ use hyperion_base::math;
 use hyperion_base::units::Metres;
 
 use super::channels::incision::{
-    BUBBLE_MEAN_FLOOR, ChannelBody, carries_tributaries, deepest_possible_level, groove_cap_m,
-    mean_cell_width, trunk_groove_m,
+    BUBBLE_MEAN_FLOOR, CORRECTION_DOWN, CORRECTION_UP_BY_WATER, CORRECTION_UP_INLAND, ChannelBody,
+    carries_tributaries, deepest_possible_level, groove_cap_m, mean_cell_width, trunk_groove_m,
 };
 use super::craters::bound::{
     OctaveMarks, RimMarks, chord_area_allowance, coarse_marks, octave_marks, poisson_tail_bound,
@@ -383,10 +390,12 @@ impl LevelBounds {
     ///
     /// It bounds |h(n) − h(m)| for every finer level m at every point a query over the view
     /// answers, since every cell a query reads is held: the coarse level's cap is the deepest
-    /// groove a held cell's trunk can cut, and no finer level counts where no held cell carries
-    /// tributaries. It is selection's charge alone, never the skirts' or the boxes' bound. With the
-    /// header's caps whole it is [`bound_m`](Self::bound_m), bit for bit, and it is never larger.
-    /// The craters' share is the same 1 − 10⁻⁹ quantile.
+    /// groove a held cell's trunk can cut, no finer level counts where no held cell carries
+    /// tributaries, and the corrections are bounded jointly (R09.T8.d (b2)). It is selection's
+    /// charge alone, never the skirts' or the boxes' bound. On a body with air it is below
+    /// [`bound_m`](Self::bound_m) wherever a level leaves a channel level out, with the header's
+    /// caps whole too, and `bound_m` elsewhere; its relief and craters' shares are `bound_m`'s, the
+    /// craters' the same 1 − 10⁻⁹ quantile.
     #[must_use]
     pub(crate) fn held_bound_m(&self, level: BandLevel, held: &HeldChannels) -> f64 {
         let n = usize::from(level.get());
@@ -415,10 +424,11 @@ impl LevelBounds {
     /// [module documentation](self), "What the cells held certify"; R09.T8.d (b2)). It bounds
     /// every height a point query of the level answers over the view, the channels' floor at the
     /// sea included ([`Synthesiser::height_at`](super::Synthesiser::height_at)), since every cell a
-    /// query reads is held. Its highest is the header's, and with the header's caps whole so is
-    /// its lowest, bit for bit: the base's range plus
-    /// [`contribution_range_m`](Self::contribution_range_m). It is never wider. The craters'
-    /// share is the same 1 − 10⁻⁹ quantile.
+    /// query reads is held. Its highest is the header's: the base's highest plus
+    /// [`contribution_range_m`](Self::contribution_range_m)'s. Its lowest is never below the
+    /// header's, and on a body with air is above it wherever the level evaluates a channel level,
+    /// the corrections bounded jointly (R09.T8.d (b2)). The craters' share is the same 1 − 10⁻⁹
+    /// quantile.
     ///
     /// # Panics
     ///
@@ -468,6 +478,8 @@ pub(crate) struct HeldChannels {
     epoch: bool,
     /// Whether a cell held carries tributaries, which evaluate levels finer than the coarse one.
     tributaries: bool,
+    /// Whether a cell held is under water, where a correction's corners may be by water.
+    water: bool,
     /// The deepest groove a held cell's trunk can cut, metres.
     trunk_m: f64,
 }
@@ -482,6 +494,7 @@ impl HeldChannels {
             coarse_cap_m: groove_cap_m(body.radius.value(), body.level),
             epoch: false,
             tributaries: false,
+            water: false,
             trunk_m: 0.0,
         }
     }
@@ -494,12 +507,25 @@ impl HeldChannels {
     /// header a field holds reaches.
     pub(crate) fn hold(&mut self, cell: &SynthesisCell) {
         self.epoch |= cell.epoch_incision.is_epoch();
+        self.water |= cell.is_under_water();
         if !self.tributaries {
             self.tributaries = carries_tributaries(cell);
         }
         // No trunk cuts deeper than the coarse level's cap, so from it on none is read.
         if self.trunk_m < self.coarse_cap_m {
             self.trunk_m = num::max(self.trunk_m, trunk_groove_m(cell, self.body));
+        }
+    }
+
+    /// The most a level's correction can raise a height over the view, over its cap
+    /// ([`CORRECTION_UP_BY_WATER`] where a held cell is under water, so that a correction's corner
+    /// may be by water, and [`CORRECTION_UP_INLAND`] where none is).
+    #[must_use]
+    fn correction_up(&self) -> f64 {
+        if self.water {
+            CORRECTION_UP_BY_WATER
+        } else {
+            CORRECTION_UP_INLAND
         }
     }
 
@@ -771,8 +797,10 @@ impl ChannelCaps {
     /// groove of that level being a trunk's, and no finer level counts where no held cell carries
     /// tributaries, since a query evaluates no level past the deepest of the cells within two king
     /// moves of its own. The raw incision of the levels evaluated is at most the deepest of their
-    /// caps deep. With the header's caps whole it is [`reach_m`](Self::reach_m)'s low, bit for bit,
-    /// since the caps halve from level to level ([`of`](Self::of)).
+    /// caps deep, and each level's correction, bounded jointly in its bilinear part and its bubble,
+    /// lowers a height by at most [`CORRECTION_DOWN`] times its cap, since each mean it reads is
+    /// its level's raw incision's (R09.T8.d (b2)). It is never above [`reach_m`](Self::reach_m)'s
+    /// low, whose bubble alone takes 1 ÷ B.
     #[must_use]
     fn held_low_m(&self, through: Option<u8>, held: &HeldChannels) -> f64 {
         let Some(t) = through else {
@@ -786,7 +814,7 @@ impl ChannelCaps {
         let cap_of = |k: u8| self.held_cap_m(k, held);
         let caps: f64 = (self.first..=last).map(cap_of).sum();
         let deepest = (self.first..=last).map(cap_of).fold(0.0, num::max);
-        deepest + caps / BUBBLE_MEAN_FLOOR
+        deepest + CORRECTION_DOWN * caps
     }
 
     /// The levels `through` leaves out over a view whose cells `held` certifies:
@@ -794,8 +822,13 @@ impl ChannelCaps {
     ///
     /// The coarse level's cap, which counts only where `through` evaluates no level, is held to the
     /// deepest groove a held cell's trunk can cut, and no finer level counts where no held cell
-    /// carries tributaries, since no query over the view evaluates one. With the header's caps
-    /// whole it is [`omitted_m`](Self::omitted_m), bit for bit.
+    /// carries tributaries, since no query over the view evaluates one. The corrections are bounded
+    /// jointly (R09.T8.d (b2)): the omitted levels' raw incision lowers a height by at most the
+    /// deepest of their caps, and their corrections raise it by at most Σ⁺ Σ `G_j` and lower it by
+    /// at most [`CORRECTION_DOWN`] Σ `G_j`, Σ⁺ [`CORRECTION_UP_BY_WATER`] where a held cell is
+    /// under water and [`CORRECTION_UP_INLAND`] where none is, so that no correction's corner is
+    /// by water. It is below [`omitted_m`](Self::omitted_m)'s (1 + 1 ÷ B) Σ `G_j` wherever a level
+    /// is left out, and zero where none is.
     #[must_use]
     fn held_omitted_m(&self, through: Option<u8>, held: &HeldChannels) -> f64 {
         let from = through.map_or(self.first, |t| t + 1);
@@ -807,8 +840,13 @@ impl ChannelCaps {
         if from > last {
             return 0.0;
         }
-        let caps: f64 = (from..=last).map(|k| self.held_cap_m(k, held)).sum();
-        Self::correction_factor() * caps
+        let cap_of = |k: u8| self.held_cap_m(k, held);
+        let caps: f64 = (from..=last).map(cap_of).sum();
+        let deepest = (from..=last).map(cap_of).fold(0.0, num::max);
+        num::max(
+            held.correction_up() * caps,
+            deepest + CORRECTION_DOWN * caps,
+        )
     }
 
     /// Level `k`'s groove cap over a view whose cells `held` certifies, metres: the coarse level's

@@ -852,9 +852,10 @@ fn worker_level_table_holds_every_baked_height_and_tightens_the_channels_on_a_we
 
 /// R09.T8.d (b3): the level charge is the table's bound with the channels' share held by the cells
 /// held. It is the bound to the bit on an airless world after every block; on a world wet now it
-/// is never above it, below it at the levels that evaluate no channel, grows as blocks bring cells,
-/// is the same whatever their order, and bounds every difference between levels at the points the
-/// field answers, the cube corner the fixture's cell touches among them.
+/// is never above it, below it at every level to the coarse one (R09.T8.d (b2): the corrections
+/// bounded jointly), grows as blocks bring cells, is the same whatever their order, and bounds
+/// every difference between levels at the points the field answers, the cube corner the fixture's
+/// cell touches among them.
 #[test]
 fn worker_level_charge_is_the_table_s_bound_held_by_the_cells_held() {
     let f = fixture();
@@ -877,15 +878,15 @@ fn worker_level_charge_is_the_table_s_bound_held_by_the_cells_held() {
     let charge = fields.level_charge_m(f.body).unwrap();
     let field = fields.field(f.body).unwrap();
     let synth = Synthesiser::new(field, SEED);
+    // Every level to the coarse one leaves a finer channel level out, and the charge is below the
+    // stated bound there, the corrections bounded jointly (R09.T8.d (b2)).
+    let coarse = field.header().level().get();
     for (level, &c) in (0..=MAX_LEVEL).zip(&charge) {
         let stated = table[usize::from(level) * LEVEL_TABLE_STRIDE];
-        let evaluates_channels = synth.level_set(band(level)).channels_through().is_some();
         assert!(c <= stated, "{level}: {c} m over {stated} m");
-        assert_eq!(
-            c < stated,
-            !evaluates_channels,
-            "{level}: {c} m, {stated} m"
-        );
+        if level <= coarse {
+            assert!(c < stated, "{level}: {c} m, {stated} m");
+        }
     }
     // The same charge, bit for bit, whatever the order of the blocks after the first, and never
     // falling as they come: the fixture's payload cut into blocks of a kibibyte.

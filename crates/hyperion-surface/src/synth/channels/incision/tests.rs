@@ -1267,6 +1267,100 @@ fn the_bubble_s_weighted_mean_stays_above_its_floor() {
     );
 }
 
+/// The correction over `cell` as a linear function of the means it reads: by linearity, its
+/// value per unit of each corner's value and per unit of the cell's mean, at (`x`, `y`).
+fn correction_basis(grid: &[Sample], x: f64, y: f64) -> ([f64; 4], f64) {
+    let corner = |c: usize| {
+        let mut corners = [0.0; 4];
+        corners[c] = 1.0;
+        Correction::over(grid, corners, 0.0).at(x, y).0
+    };
+    let mean = Correction::over(grid, [0.0; 4], 1.0).at(x, y).0;
+    ([0, 1, 2, 3].map(corner), mean)
+}
+
+#[test]
+fn a_correction_s_coefficients_stay_within_their_joint_bounds() {
+    // Every cell at the coarse level 5 of a face, and at each level to the deepest the cells
+    // nearest a face's corners, edges and centre, as the bubble's floor is swept: at each point of
+    // a 17 × 17 grid of the cell, the centre among them, and for every set of corners by water
+    // (each corner's cells' means, the cell's own included, in [−1, 0], zero by water), the sums
+    // of the correction's positive and negative coefficients (R09.T8.d (b2)).
+    let points: Vec<(f64, f64)> = (0..=16)
+        .flat_map(|j| (0..=16).map(move |i| (f64::from(i) / 16.0, f64::from(j) / 16.0)))
+        .collect();
+    let mut highest = [0.0_f64; 3];
+    for level in 5..=MAX_LEVEL {
+        let last = (1_u32 << level) - 1;
+        let cells: Vec<PatchKey> = if level == 5 {
+            (0..=last)
+                .flat_map(|i| (0..=last).map(move |j| (i, j)))
+                .map(|(i, j)| PatchKey::new(crate::cube::Face::PosZ, level, i, j).unwrap())
+                .collect()
+        } else {
+            let along = [0, 1, last / 4, last / 2, last / 2 + 1, last - 1, last];
+            along
+                .iter()
+                .flat_map(|&i| {
+                    along.map(|j| PatchKey::new(crate::cube::Face::NegX, level, i, j).unwrap())
+                })
+                .collect()
+        };
+        for cell in cells {
+            let grid = mean_grid(cell);
+            let corners = corner_cells(cell);
+            let mut keys: Vec<u64> = corners.iter().flatten().map(|q| q.to_u64()).collect();
+            keys.sort_unstable();
+            keys.dedup();
+            let own = keys.binary_search(&cell.to_u64()).unwrap();
+            for &(x, y) in &points {
+                let (per_corner, per_mean) = correction_basis(&grid, x, y);
+                for wet in 0_u8..16 {
+                    let mut coefficient = vec![0.0; keys.len()];
+                    coefficient[own] += per_mean;
+                    for (c, sharing) in corners.iter().enumerate() {
+                        if wet & (1 << c) != 0 {
+                            continue;
+                        }
+                        #[expect(
+                            clippy::cast_precision_loss,
+                            reason = "three or four cells, exact in f64"
+                        )]
+                        let count = sharing.len() as f64;
+                        for q in sharing {
+                            let at = keys.binary_search(&q.to_u64()).unwrap();
+                            coefficient[at] += per_corner[c] / count;
+                        }
+                    }
+                    let up: f64 = coefficient.iter().filter(|&&a| a > 0.0).sum();
+                    let down: f64 = -coefficient.iter().filter(|&&a| a < 0.0).sum::<f64>();
+                    let (bound, slot) = if wet == 0 {
+                        (CORRECTION_UP_INLAND, 0)
+                    } else {
+                        (CORRECTION_UP_BY_WATER, 1)
+                    };
+                    assert!(up <= bound, "{cell:?} ({x}, {y}), wet {wet:04b}: up {up}");
+                    assert!(
+                        down <= CORRECTION_DOWN,
+                        "{cell:?} ({x}, {y}), wet {wet:04b}: down {down}"
+                    );
+                    highest[slot] = highest[slot].max(up);
+                    highest[2] = highest[2].max(down);
+                }
+            }
+        }
+    }
+    // Each bound within a per cent of the most the sweep finds.
+    for (found, bound) in highest.iter().zip([
+        CORRECTION_UP_INLAND,
+        CORRECTION_UP_BY_WATER,
+        CORRECTION_DOWN,
+    ]) {
+        assert!(*found > 0.99 * bound, "{highest:?}");
+    }
+    eprintln!("the correction's largest sums: inland up, up by water, down {highest:?}");
+}
+
 #[test]
 fn every_groove_is_within_its_level_s_cap() {
     for field in [earth(), mars(), mars_epoch()] {

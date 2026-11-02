@@ -78,8 +78,8 @@
 //!   ([`WorkerFields::level_sigma_m`], R10.T4.b), which with the table's hard bound makes the
 //!   body's level bounds; and its `levelChargeM()` a `Float64Array` of 25, level n at n, the
 //!   body's level charge, metres: the table's `ε_n` with the channels' share held by what the
-//!   cells held certify, which selection charges under the hard rule
-//!   ([`WorkerFields::level_charge_m`], R09.T8.d (b3)). `fieldRelease(system, body)` drops it,
+//!   cells held certify and the corrections bounded jointly, which selection charges under the
+//!   hard rule ([`WorkerFields::level_charge_m`], R09.T8.d (b3) and (b2)). `fieldRelease(system, body)` drops it,
 //!   `true` if one was held, and `heldBytes` is what every field holds on the heap.
 //!   `figureM(system, body)` is the held field's datum, a `Float64Array` of 2, its equatorial then
 //!   its polar radius, metres, or `undefined` where none is held (rendering plan R14, R14.T3.b).

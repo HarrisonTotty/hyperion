@@ -271,6 +271,32 @@ pub(crate) fn deepest_possible_level(radius_m: f64, level: u8) -> u8 {
 /// bounds the correction, and with it the level bound's channel term (R09.T8).
 pub(crate) const BUBBLE_MEAN_FLOOR: f64 = 0.284;
 
+/// The most a level's correction can raise a height, over the largest magnitude of the means it
+/// reads, wherever water stands at its corners: 1 ÷ [`BUBBLE_MEAN_FLOOR`], 3.52 (R09.T8.d (b2)).
+///
+/// The correction is linear in the means of its parent cell and of the cells that share its
+/// corners, each in [−M, 0] ([`Correction`]), so at a point it lies in [−M Σ⁺, M Σ⁻], Σ⁺ and Σ⁻ the
+/// sums of its positive and its negative coefficients there, and the level's incision, its raw
+/// incision less the correction, is raised by at most M Σ⁺ and lowered by at most M Σ⁻: a joint
+/// bound on the bilinear part and the bubble, which cannot both reach their own bounds, M and
+/// M ÷ B, at once. Σ⁺ is largest at the cell's centre with every corner by water, where the
+/// correction is the bubble alone, its coefficient on the cell's mean b ÷ b̄ ≤ 1 ÷ B; with fewer
+/// corners by water it is at most 3.37 (`a_correction_s_coefficients_stay_within_their_joint_bounds`
+/// sweeps every configuration).
+pub(crate) const CORRECTION_UP_BY_WATER: f64 = 1.0 / BUBBLE_MEAN_FLOOR;
+
+/// [`CORRECTION_UP_BY_WATER`] where no corner is by water: 2.9, over the cell's centre's
+/// 0.75 ÷ B + 0.25 = 2.891 (each corner's value the mean of four cells, the bilinear part's weight
+/// at each a quarter), with a margin for the warp's uneven weights and the cube's corners (R09.T8.d
+/// (b2); `a_correction_s_coefficients_stay_within_their_joint_bounds`).
+pub(crate) const CORRECTION_UP_INLAND: f64 = 2.9;
+
+/// The most a level's correction can lower a height, over the largest magnitude of the means it
+/// reads, Σ⁻ at its largest ([`CORRECTION_UP_BY_WATER`]): 1.9, over the cell's centre's
+/// 0.75 ÷ B − 0.75 = 1.891 with no corner by water, the most of every configuration, with the same
+/// margin (R09.T8.d (b2)).
+pub(crate) const CORRECTION_DOWN: f64 = 1.9;
+
 /// The depth of a trunk's valley, metres: the relief a coarse cell's tributaries of steepness index
 /// `steepness_m0_9` (m^0.9, [`super::tributary_steepness_m0_9`]) cut between its channel heads and its
 /// trunk, on a body of mean radius `radius` whose coarse cells are of `level`.
@@ -1579,6 +1605,29 @@ fn bubble(x: f64) -> (f64, f64) {
 }
 
 impl Correction {
+    /// The correction over the parent cell whose mean grid is `grid` ([`mean_grid`]), its corners'
+    /// values `corners` and the cell's mean `mean`: bilinear between the corners, plus the bubble
+    /// scaled so that the correction's mean on the grid is `mean`.
+    #[must_use]
+    fn over(grid: &[Sample], corners: [f64; 4], mean: f64) -> Self {
+        let plain = Self {
+            corners,
+            bubble: 0.0,
+        };
+        let (mut linear, mut bump, mut weights) = (0.0, 0.0, 0.0);
+        for sample in grid {
+            let (bx, _) = bubble(sample.x);
+            let (by, _) = bubble(sample.y);
+            linear += sample.weight * plain.at(sample.x, sample.y).0;
+            bump += sample.weight * bx * by;
+            weights += sample.weight;
+        }
+        Self {
+            corners,
+            bubble: (mean - linear / weights) / (bump / weights),
+        }
+    }
+
     /// Its value at the cell's face coordinates (`x`, `y`), each in [0, 1], and its derivatives in
     /// them.
     #[must_use]
@@ -2276,23 +2325,8 @@ impl<F: FieldView> Incision<'_, F> {
             let count = cells.len() as f64;
             *corner = sum / count;
         }
-        let plain = Correction {
-            corners,
-            bubble: 0.0,
-        };
-        let (mut linear, mut bump, mut weights) = (0.0, 0.0, 0.0);
-        for sample in mean_grid(parent) {
-            let (bx, _) = bubble(sample.x);
-            let (by, _) = bubble(sample.y);
-            linear += sample.weight * plain.at(sample.x, sample.y).0;
-            bump += sample.weight * bx * by;
-            weights += sample.weight;
-        }
         let mean = self.mean(level, parent)?;
-        let correction = Correction {
-            corners,
-            bubble: (mean - linear / weights) / (bump / weights),
-        };
+        let correction = Correction::over(&mean_grid(parent), corners, mean);
         self.cache.corrections.insert(key, correction);
         self.cache.recent_correction[slot] = Some((key.1, correction));
         Ok(correction)

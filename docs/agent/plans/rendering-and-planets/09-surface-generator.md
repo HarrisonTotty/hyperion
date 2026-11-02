@@ -2733,6 +2733,8 @@ planetary::surface::quantise`, the slow
   - _Built 2026-10-21_ (`f547af5a`, `82e36522`). _(b2) built 2026-11-01_ for the table's lowest,
     from the cells held (`af6ab09`, `8c64485`; the record's "(b2), as built"). _(b3) built
     2026-11-02_ for selection's charge, ε held by the cells (the record's "(b3), as built").
+    _(b2)'s joint bound built 2026-11-02_ for the held charge and lowest (the record's "(b2)'s
+    joint bound, as built").
 
 ### R09.T9 Golden heights across targets
 

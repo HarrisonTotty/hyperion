@@ -476,30 +476,48 @@ fn an_airless_body_s_channels_reach_nothing_and_omit_nothing() {
     assert!(channels.omitted_m(None) > 0.0);
 }
 
+/// A certificate that holds nothing back over the field of `header`: an epoch's valleys,
+/// tributaries, water and trunks as deep as any cap.
+fn whole(header: &FieldHeader) -> HeldChannels {
+    HeldChannels {
+        epoch: true,
+        tributaries: true,
+        water: true,
+        trunk_m: f64::INFINITY,
+        ..HeldChannels::new(header)
+    }
+}
+
+/// The header's groove caps of the channel levels from `from` to the deepest, their sum and the
+/// deepest of them, metres.
+fn caps_from(header: &FieldHeader, from: u8) -> (f64, f64) {
+    let radius_m = header.radius().value();
+    let first = header.level().get();
+    let deepest = deepest_possible_level(radius_m, first);
+    if header.is_airless() || from > deepest {
+        return (0.0, 0.0);
+    }
+    let caps: f64 = (from..=deepest).map(|k| groove_cap_m(radius_m, k)).sum();
+    (caps, groove_cap_m(radius_m, from))
+}
+
 #[test]
-fn the_held_range_is_the_header_s_with_its_caps_whole_and_its_highest_always() {
+fn the_held_range_is_never_below_the_header_s_and_its_highest_always_the_header_s() {
     for &kind in SyntheticWorld::ALL {
         let field = world(kind);
         let header = field.header();
-        // A certificate that holds nothing back: an epoch's valleys, tributaries and trunks as deep
-        // as any cap.
-        let whole = HeldChannels {
-            epoch: true,
-            tributaries: true,
-            trunk_m: f64::INFINITY,
-            ..HeldChannels::new(header)
-        };
+        let whole = whole(header);
         let bounds = LevelBounds::new(header);
         let (base, held) = held_over(field);
         let coarse_cap = groove_cap_m(header.radius().value(), header.level().get());
         // What each world's cells certify (R09.T8.d (b2)).
         match kind {
             SyntheticWorld::EarthLike => {
-                assert!(!held.epoch && held.tributaries, "{held:?}");
+                assert!(!held.epoch && held.tributaries && held.water, "{held:?}");
                 assert!(0.0 < held.trunk_m && held.trunk_m < coarse_cap, "{held:?}");
             }
             SyntheticWorld::MarsLike => {
-                assert!(held.epoch && !held.tributaries, "{held:?}");
+                assert!(held.epoch && !held.tributaries && !held.water, "{held:?}");
                 assert!(0.0 < held.trunk_m && held.trunk_m < coarse_cap, "{held:?}");
             }
             SyntheticWorld::MoonLike
@@ -514,23 +532,46 @@ fn the_held_range_is_the_header_s_with_its_caps_whole_and_its_highest_always() {
             let n = usize::from(level.get());
             let (low, high) = bounds.contribution_range_m(level);
             let (whole_low, whole_high) = bounds.held_height_range_m(level, base, &whole);
-            assert_same_bits(whole_low, base.0 + low);
+            // With the caps whole the corrections lower a height by 1.9 times their caps at most,
+            // where the header's bubble alone takes 1 ÷ B (R09.T8.d (b2)).
+            let first = header.level().get();
+            let through = bounds.set(level).channels_through();
+            let channels = through.map_or(0.0, |t| {
+                let (all, deepest) = caps_from(header, first);
+                let (finer, _) = caps_from(header, t.saturating_add(1));
+                let caps = all - finer;
+                if caps > 0.0 {
+                    deepest + CORRECTION_DOWN * caps
+                } else {
+                    0.0
+                }
+            });
+            let others = bounds.relief_reach_m[n] + bounds.craters_reach_m[n];
+            assert!(
+                (whole_low - (base.0 + -(others + channels))).abs() <= 1e-9 * low.abs(),
+                "{kind:?} {n}: {whole_low} m against {} m",
+                base.0 + -(others + channels)
+            );
+            assert!(
+                base.0 + low <= whole_low,
+                "{kind:?} {n}: {whole_low} m below {} m",
+                base.0 + low
+            );
             assert_same_bits(whole_high, base.1 + high);
             let (held_low, held_high) = bounds.held_height_range_m(level, base, &held);
             assert!(
                 whole_low <= held_low,
                 "{kind:?} {n}: {held_low} m below {whole_low} m"
             );
-            tightened |= whole_low < held_low;
+            tightened |= base.0 + low < held_low;
             if header.is_airless() {
-                assert_same_bits(held_low, whole_low);
+                assert_same_bits(held_low, base.0 + low);
             }
             // The highest is the header's, which the off-survey ceiling reads.
             assert_same_bits(held_high, whole_high);
             // On a world wet now the channels add nothing to the lowest height: the sea floor
             // holds, and the sea lies above the base's lowest less the other contributions.
             if kind == SyntheticWorld::EarthLike {
-                let others = bounds.relief_reach_m[n] + bounds.craters_reach_m[n];
                 assert_same_bits(held_low, base.0 + -others);
             }
         }
@@ -539,51 +580,70 @@ fn the_held_range_is_the_header_s_with_its_caps_whole_and_its_highest_always() {
 }
 
 #[test]
-fn the_held_bound_is_the_header_s_with_its_caps_whole_and_never_above_it() {
+fn the_held_bound_is_below_the_header_s_wherever_channels_are_left_out() {
     for &kind in SyntheticWorld::ALL {
         let field = world(kind);
         let header = field.header();
-        let whole = HeldChannels {
-            epoch: true,
-            tributaries: true,
-            trunk_m: f64::INFINITY,
-            ..HeldChannels::new(header)
-        };
+        let whole = whole(header);
         let none = HeldChannels::new(header);
         let bounds = LevelBounds::new(header);
         let (_, held) = held_over(field);
         let coarse = header.level().get();
-        let coarse_cap = groove_cap_m(header.radius().value(), coarse);
-        let mut tightened = false;
         for level in every_level() {
             let n = usize::from(level.get());
             let stated = bounds.bound_m(level);
-            assert_same_bits(bounds.held_bound_m(level, &whole), stated);
+            let others = bounds.relief_omitted_m[n] + bounds.craters_omitted_m[n];
+            let through = bounds.set(level).channels_through();
+            let (caps, deepest) = caps_from(header, through.map_or(coarse, |t| t + 1));
+            // With the caps whole, the corrections bounded jointly (R09.T8.d (b2)): the most they
+            // raise a height, 1 ÷ B times the caps, or the raw incision's deepest cap and the
+            // most they lower one, 1.9 times, against the header's 1 + 1 ÷ B.
+            let joint = if caps > 0.0 {
+                num::max(
+                    CORRECTION_UP_BY_WATER * caps,
+                    deepest + CORRECTION_DOWN * caps,
+                )
+            } else {
+                0.0
+            };
+            let charge_whole = bounds.held_bound_m(level, &whole);
+            assert_same_bits(
+                charge_whole,
+                num::assert_finite(
+                    bounds.relief_omitted_m[n] + joint + bounds.craters_omitted_m[n],
+                ),
+            );
+            assert!(
+                charge_whole <= stated,
+                "{kind:?} {n}: {charge_whole} m over {stated} m"
+            );
+            assert_eq!(charge_whole < stated, caps > 0.0, "{kind:?} {n}");
             let charge = bounds.held_bound_m(level, &held);
-            assert!(charge <= stated, "{kind:?} {n}: {charge} m over {stated} m");
+            assert!(
+                charge <= charge_whole,
+                "{kind:?} {n}: {charge} m over {charge_whole} m"
+            );
             // It only rises as cells are held.
             let first = bounds.held_bound_m(level, &none);
             assert!(first <= charge, "{kind:?} {n}: {first} m over {charge} m");
-            tightened |= charge < stated;
-            let others = bounds.relief_omitted_m[n] + bounds.craters_omitted_m[n];
-            let evaluates_channels = bounds.set(level).channels_through().is_some();
+            let evaluates_channels = through.is_some();
             if level.get() >= coarse {
                 assert!(evaluates_channels, "{kind:?} {n}");
             }
             match kind {
-                // Tributaries: the finer levels' caps stay whole, and only the coarse cap, which a
-                // level that evaluates no channel omits, falls to the deepest trunk's groove.
+                // Tributaries and water: every level that leaves a channel level out is charged
+                // less than its stated bound, the finer levels' whole caps too.
                 SyntheticWorld::EarthLike => {
-                    assert_eq!(charge < stated, !evaluates_channels, "{kind:?} {n}");
+                    assert_eq!(charge < stated, caps > 0.0, "{kind:?} {n}");
                 }
-                // No tributaries: the channels omit nothing from the first level that evaluates
-                // the coarse one, the coarse level L among them, and the coarse cap is the trunk's.
+                // No tributaries and no water: the channels omit nothing from the first level
+                // that evaluates the coarse one, the coarse level L among them, and the coarse
+                // cap, the trunk's, takes 2.9 times, up and down alike.
                 SyntheticWorld::MarsLike => {
                     if evaluates_channels {
                         assert_same_bits(charge, others);
                     } else {
-                        let share = ChannelCaps::correction_factor() * held.trunk_m;
-                        assert!(held.trunk_m < coarse_cap, "{held:?}");
+                        let share = CORRECTION_UP_INLAND * held.trunk_m;
                         assert!(
                             (charge - (others + share)).abs() <= 1e-9 * stated,
                             "{kind:?} {n}: {charge} m against {} m",
@@ -601,7 +661,6 @@ fn the_held_bound_is_the_header_s_with_its_caps_whole_and_never_above_it() {
                 }
             }
         }
-        assert_eq!(tightened, !header.is_airless(), "{kind:?}");
     }
 }
 

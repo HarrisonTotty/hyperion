@@ -1638,14 +1638,15 @@ impl WorkerFields {
     /// beside [`level_table`](Self::level_table)'s stated bound (R09.T8.d (b3)): for band level n
     /// at index n, from 0 to 24, `ε_n` with the channels' share held by what the cells held
     /// certify (the crate's `LevelBounds::held_bound_m`), metres: the coarse level's cap held to
-    /// the deepest trunk groove among them, and no finer level where none carries tributaries.
+    /// the deepest trunk groove among them, no finer level where none carries tributaries, and the
+    /// levels' corrections bounded jointly, inland where none is under water (R09.T8.d (b2)).
     ///
     /// It bounds |h(n) − h(m)| for every finer level m at every point the field answers, since
-    /// every cell a query reads is held, and it is never above the table's `ε_n`, which it equals
-    /// with the header's caps whole. It is selection's charge alone: the skirts, the boxes'
-    /// widening and the floors read the table's `ε_n`, so that no bake depends on which blocks the
-    /// worker holds. It grows as blocks bring cells, the same whatever their order. `None` if no
-    /// field of `body` is held.
+    /// every cell a query reads is held, and it is below the table's `ε_n` wherever the level
+    /// leaves a channel level out, the table's elsewhere. It is selection's charge alone: the
+    /// skirts, the boxes' widening and the floors read the table's `ε_n`, so that no bake depends
+    /// on which blocks the worker holds. It grows as blocks bring cells, the same whatever their
+    /// order. `None` if no field of `body` is held.
     #[must_use]
     pub fn level_charge_m(&self, body: BodyRef) -> Option<[f64; LEVEL_TABLE_ROWS]> {
         let held = self.bodies.get(&body)?;
