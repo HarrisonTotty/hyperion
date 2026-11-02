@@ -4,8 +4,6 @@
 //! al. 2008's TiO split, a KELT-9b-like dayside, the sub-Neptunes, the `f_sed` kinds, continuity,
 //! determinism and the golden.
 
-use std::sync::OnceLock;
-
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
@@ -24,6 +22,7 @@ use crate::planetary::hooks::structure::envelope::{
     OPTICAL_DEPTH_EXPONENT, THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG,
     THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG, irradiation_temperature,
 };
+use crate::planetary::testing::network;
 use crate::substance::aloft::laws_aloft;
 use crate::substance::{Element, SubstanceId, by_key};
 use crate::units::consts::METRES_PER_AU;
@@ -588,13 +587,6 @@ fn pin(
             profile.temperature_at(Pascals::new(p)).value(),
         );
     }
-}
-
-/// The registry's network, built once for the tests (P14.T52.a: build it once, solve at a few
-/// levels).
-fn network() -> &'static Network {
-    static NETWORK: OnceLock<Network> = OnceLock::new();
-    NETWORK.get_or_init(|| Network::registry().expect("the registry's network builds"))
 }
 
 /// (`T_eq`⁴ + `T_int`⁴)^¼, K: the envelope's effective temperature.

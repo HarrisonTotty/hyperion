@@ -3,8 +3,6 @@
 //! reason, over the golden systems and the plan-14 sample; the table's Jupiter against the probe;
 //! the ice giants' methane decks (G3); the census of the bless note's lines (ignored).
 
-use std::sync::OnceLock;
-
 use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::order::assert_order_independent;
 
@@ -35,7 +33,7 @@ use crate::planetary::system::tests::{
     GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, golden_systems_afresh, sample, thin_air_sets,
 };
 use crate::planetary::system::{Body, Epoch, Part, PlanetarySystem, fate_host, migration};
-use crate::planetary::testing::{EnvelopeByHand, envelope_by_hand};
+use crate::planetary::testing::{EnvelopeByHand, envelope_by_hand, network};
 use crate::planetary::{SystemContext, generate};
 use crate::stellar::Composition;
 use crate::substance::CondensedPhase;
@@ -53,12 +51,6 @@ fn row(key: &str) -> SubstanceId {
 /// The row's key.
 fn key_of(id: SubstanceId) -> String {
     id.substance().key().as_str().to_owned()
-}
-
-/// The registry's network, built once for the tests (P14.T52.a: build it once).
-fn network() -> &'static Network {
-    static NETWORK: OnceLock<Network> = OnceLock::new();
-    NETWORK.get_or_init(|| Network::registry().expect("the registry's network builds"))
 }
 
 /// One record of a walk ([`walk`]): the body, its record, and for a present planet or member its
