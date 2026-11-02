@@ -14,7 +14,7 @@
 //! - [`explosion_site`] is that predicate on a grid record's marks, with the site the record's
 //!   epoch position moved along its velocity to the death (Design note 22's x + v T).
 //! - `recent_death_claim` is the gate: the claim plan 03's carve-out hook passes each site to.
-//!   Plan 09's P09.T35 gives it, held until generator version 26 (`CARVE_OUT_VERSION`). Under
+//!   Plan 09's P09.T35 gives it, held until generator version 27 (`CARVE_OUT_VERSION`). Under
 //!   the held arm it is `None`, the hook asks for no site, placement reads no tier of the
 //!   predicate, and no generated output depends on this module (P08.T13.b).
 //!
@@ -290,7 +290,7 @@ pub(crate) fn death_in_interval_knowing(
 /// already dead backs it out to where it exploded. The velocity is drawn only then, and a galaxy
 /// built without its kinematic tables has none, so its sites are the epoch positions.
 ///
-/// Under the claim plan 09 supplies (P09.T35, `recent_death_claim`, from generator version 26),
+/// Under the claim plan 09 supplies (P09.T35, `recent_death_claim`, from generator version 27),
 /// plan 03's carve-out hook calls this for every accepted layer-E record and passes the site to
 /// the claim; under the held arm the hook calls it for none, and nothing generated reads a site
 /// (P08.T13.b). It is a pure function of the galaxy and the record: `resolve`, `generate_cell` and
@@ -405,19 +405,22 @@ pub(crate) type RecentDeathClaim = fn(&Galaxy, &ExplosionSite, &SystemRecord) ->
 /// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
 /// [`CarveOutRules::Unclaimed`], the code of version 25 verbatim: the hook asks for no site and the
 /// grid keeps every candidate it accepts. The tests reach the new arm through a galaxy built under
-/// `GalaxyRules::every_26_hold()`. The bump to 26 deletes this hold, [`CarveOutRules`] with its
+/// `GalaxyRules::every_26_hold_with_its_retargets()` or `every_27_hold()`. Retargeted from 26 to
+/// 27 by train 26 (2026-11-02): at 26 the range query registers no catalogue class
+/// (`CLASS_SOURCE_VERSION`, P09.T37.a, at 27), so the hosts the grid gave up would reach no range
+/// reply; the two turn on together. The bump to 27 deletes this hold, [`CarveOutRules`] with its
 /// `Unclaimed` arm, `GalaxyRules::carve_out`, the `match`es in [`recent_death_claim`] and
 /// `Galaxy::build` (so `Galaxy::layer_d_kept` loses its `Option`) and the tripwire
-/// (`the_carve_out_is_held_only_until_the_26_bump`), and makes the claim the one item
+/// (`the_carve_out_is_held_only_until_the_27_bump`), and makes the claim the one item
 /// `Some(recent_death_claims)` again.
-pub(crate) const CARVE_OUT_VERSION: GeneratorVersion = GeneratorVersion::new(26);
+pub(crate) const CARVE_OUT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// Whether the grid gives the catalogue classes their hosts (the hold of [`CARVE_OUT_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum CarveOutRules {
-    /// Version 25's and before: no claim, and the grid keeps every candidate it accepts.
+    /// Version 26's and before: no claim, and the grid keeps every candidate it accepts.
     Unclaimed,
-    /// Version 26's: the core-collapse class's claim and the luminous blue variables', and layer D
+    /// Version 27's: the core-collapse class's claim and the luminous blue variables', and layer D
     /// less its ancient Type Ia (P09.T35).
     Claimed,
 }

@@ -224,7 +224,7 @@ impl Pick {
 /// thins (brainstorm, "Exact placement by thinning"). The threshold is the pick's, in its
 /// arithmetic, so `f` = 1 keeps every candidate the pick kept.
 ///
-/// In layer D, from version 26 under P09.T35's carve-out (`displaced::site::CARVE_OUT_VERSION`),
+/// In layer D, from version 27 under P09.T35's carve-out (`displaced::site::CARVE_OUT_VERSION`),
 /// `f` is also times what the field keeps of the component's layer D, 1 less its ancient Type Ia
 /// ([`Galaxy::layer_d_kept`]), in the same slice: layer D's share less `ancient_share`, with only
 /// counts moving. With plan 08's displaced classes the slice is the stay's, and the share kept of
@@ -266,7 +266,7 @@ fn in_the_field(
 /// The hook sits after the marks are drawn because a class is a deterministic test on a candidate's
 /// own marks (brainstorm, "Rare events are found by carving out their hosts, not the events"), and
 /// the cells draw conditional on not being in the class. It is asked for stellar records only
-/// (plan 13, P13.T3.c). Under the claim plan 09 gives, from generator version 26
+/// (plan 13, P13.T3.c). Under the claim plan 09 gives, from generator version 27
 /// ([`recent_death_claim`], P09.T35), it computes the
 /// [`explosion_site`](crate::galaxy::displaced::explosion_site) of every accepted layer-E record
 /// and, where the primary dies inside the interval, passes the site to the core-collapse class's

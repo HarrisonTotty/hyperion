@@ -241,9 +241,8 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 26 in force, for a test that asserts a 26 figure: the
-    /// version's rules with the holds that turn on at 26 (the galaxy's `carve_out`, P09.T35; the
-    /// stellar rules' `stripping`, P11.T1.d;
-    /// [`StellarRules::every_26_hold`]).
+    /// version's rules with the holds that turn on at 26 (none of the galaxy's since P09.T35's
+    /// `carve_out` was retargeted to 27; [`StellarRules::every_26_hold`]).
     ///
     /// A later hold at 26 joins it with nothing to edit, and "every 26 hold but one" is
     /// struct-update syntax over it.
@@ -254,16 +253,17 @@ impl GalaxyRules {
     }
 
     /// Every 26 hold with those retargeted from 26 to 27 in force too (train 26, 2026-11-01:
-    /// P09.T2.c's `field_share`, P09.T36's `feature_classes`, P11.T8.c–d's `merger_class`,
-    /// P08.T12's `displaced` and the stellar rules' `merger_mass`, P11.T4.d;
-    /// [`StellarRules::every_26_hold_with_its_retargets`]): the rules their tests, and those of the
-    /// 27 holds built over them, were measured under while they were held at 26. The 27 bump
-    /// deletes it with them.
+    /// P09.T2.c's `field_share`, P09.T35's `carve_out` (2026-11-02), P09.T36's `feature_classes`,
+    /// P11.T8.c–d's `merger_class`, P08.T12's `displaced` and the stellar rules' `merger_mass`,
+    /// P11.T4.d; [`StellarRules::every_26_hold_with_its_retargets`]): the rules their tests, and
+    /// those of the 27 holds built over them, were measured under while they were held at 26. The
+    /// 27 bump deletes it with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
         Self {
             field_share: FieldShareRules::Phi,
+            carve_out: CarveOutRules::Claimed,
             feature_classes: FeatureClassesRules::Listed,
             merger_class: MergerClassRules::Channels,
             displaced: DisplacedRules::Displaced,
@@ -405,16 +405,16 @@ mod tests {
             FieldShareRules::Phi
         );
         let carve = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).carve_out;
-        for v in [23, 24, 25] {
+        for v in [23, 24, 25, 26] {
             assert_eq!(carve(v), CarveOutRules::Unclaimed, "{v}");
         }
-        assert_eq!(carve(26), CarveOutRules::Claimed);
+        assert_eq!(carve(27), CarveOutRules::Claimed);
         assert_eq!(
             GalaxyRules::of_version(GENERATOR_VERSION).carve_out,
             CarveOutRules::Unclaimed
         );
         assert_eq!(
-            GalaxyRules::every_26_hold().carve_out,
+            GalaxyRules::every_26_hold_with_its_retargets().carve_out,
             CarveOutRules::Claimed
         );
         let classes = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).feature_classes;

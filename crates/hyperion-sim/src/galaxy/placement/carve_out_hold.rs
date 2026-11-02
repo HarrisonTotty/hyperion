@@ -158,17 +158,18 @@ fn carved(off: &Galaxy, on: &Galaxy, keys: &[CellKey]) -> Vec<(SystemRecord, Cla
     claimed
 }
 
-/// P09.T35 is held until the 25 → 26 bump: the rules in force are version 25's and before, under
+/// P09.T35 is held until the 26 → 27 bump: the rules in force are version 26's and before, under
 /// which no class claims a grid record and layer D is the budget's.
 #[test]
-fn the_carve_out_is_held_only_until_the_26_bump() {
+fn the_carve_out_is_held_only_until_the_27_bump() {
     assert!(
         GENERATOR_VERSION < CARVE_OUT_VERSION,
-        "the 25 → 26 bump puts P09.T35 on the record: the grid gives the core-collapse and \
-         luminous blue variables' classes their hosts, and layer D its ancient Type Ia. Delete \
-         `CARVE_OUT_VERSION`, `CarveOutRules` with its `Unclaimed` arm, `GalaxyRules::carve_out`, \
-         the `match`es in `recent_death_claim` and `Galaxy::build`, `Galaxy::with_rules`' refusal \
-         and this test, in the bump's own checkpoint commit, blessed at 25 (§1.6, C2)"
+        "the 26 → 27 bump puts P09.T35 on the record with P09.T37.a's class source: the grid gives \
+         the core-collapse and luminous blue variables' classes their hosts, and layer D its \
+         ancient Type Ia. Delete `CARVE_OUT_VERSION`, `CarveOutRules` with its `Unclaimed` arm, \
+         `GalaxyRules::carve_out`, the `match`es in `recent_death_claim` and `Galaxy::build`, \
+         `Galaxy::with_rules`' refusal and this test, in the bump's own checkpoint commit (§1.6, \
+         C2)"
     );
     assert_eq!(held().rules().carve_out, CarveOutRules::Unclaimed);
     assert_eq!(
@@ -343,6 +344,40 @@ fn the_classes_claim_their_hosts_from_the_grid_pinned() {
     );
     assert!(by_class.get(&Class::CoreCollapse).copied().unwrap_or(0) > 0);
     assert_eq!(digest, CLAIMED_DIGEST, "{digest:#018x}");
+}
+
+/// At the version's rules, the carve-out held until 27 with P09.T37.a's class source (train 26's
+/// retarget, 2026-11-02): each layer-E system the carve-out alone would give a class at the
+/// version's rules stays the grid's, and the range query a server builds, over the sources the
+/// galaxy's rules register (none below 27, `CatalogueClassSource::registered_in`), returns it once
+/// within a sphere of 1 ly about its epoch place. Had the carve-out been on the record at 26 with
+/// no class source, none of them would reach a range reply.
+#[test]
+fn at_the_version_s_rules_a_system_the_carve_out_would_claim_is_returned_once() {
+    use crate::galaxy::catalogue_classes::CatalogueClassSource;
+    use crate::galaxy::query::{RangeQuery, SystemSource, range_query};
+    let galaxy = held();
+    let carving = milky_way(GalaxyRules {
+        carve_out: CarveOutRules::Claimed,
+        ..GalaxyRules::of_version(GENERATOR_VERSION)
+    });
+    let claimed = carved(galaxy, &carving, &sample_cells());
+    assert!(claimed.len() > 8, "{}", claimed.len());
+    let classes = CatalogueClassSource::registered_in(galaxy);
+    assert!(classes.is_none());
+    let sources: Vec<&dyn SystemSource> = classes.iter().map(|s| s as _).collect();
+    for (record, class) in claimed.iter().take(8) {
+        let query = RangeQuery::builder(*record.epoch_position(), LightYears::new(1.0))
+            .build()
+            .expect("a query");
+        let result = range_query(galaxy, &mut NoCache::new(), &sources, &query);
+        let returned = result
+            .systems()
+            .iter()
+            .filter(|hit| hit.id() == record.id())
+            .count();
+        assert_eq!(returned, 1, "{class:?}: {:?}", record.id());
+    }
 }
 
 /// D4: the same seed twice under every 26 hold claims the same records.
