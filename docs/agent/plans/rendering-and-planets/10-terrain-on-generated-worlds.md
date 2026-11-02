@@ -2738,6 +2738,29 @@ src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-
     level part at most 10 px.
   - _Built 2026-11-01_.
 
+- **R10.T16.i Every change of the drawn ground morphs in over time** (new, 2026-11-01, the owner's
+  priority; research-terrain-seamless's brief 2, with main's rise of newly surveyed ground, the
+  budget's hold and the drafted hand-over). Records:
+  [10-terrain-on-generated-worlds/records/R10.T16.i.md](10-terrain-on-generated-worlds/records/R10.T16.i.md).
+  - **The rule.** k = max(k_CDLOD, F) after the coarse–fine holds at k = 1, but where a hold at
+    k = 0 alone covers the vertex. F is the fade of a change in progress, over a span its size on
+    screen sets: a refine falls from 1, a coarsen's finer patches rise to 1 before it swaps, both
+    mixing their heights from the parent's surface; a rebake mixes from its older bake in a spare
+    slot, and newly surveyed ground rises from the datum. Each instance in or beside a footprint
+    takes its one fade. The bands follow τ′ at most 2% a step; the budget holds the last
+    selection's splits; the hand-over draws no ground until every seen patch can be drawn; under
+    reduced motion every change cuts.
+  - **Files.** `view/terrain/timeMorph.ts`, `coarseFineHolds.ts`, `cache.ts` (`replace`,
+    `releaseRetired`), `select.ts` (`budgetHold`), `terrainPass.ts`, `session.ts`,
+    `gpu/uniforms.ts` (`fadeWord`), `shaders/terrainPatch.wgsl`, `terrainLit.wgsl`,
+    `terrainLitShade.wgsl`, `terrainSurvey.wgsl`, `terrain.wgsl`, `displays/view/useTerrainSession.ts`,
+    and the probe's per-frame layer.
+  - **Acceptance.** The probe at 3 × 41 ms, both settings: a draw-set change moves a vertex at most
+    1 px a frame on high and 2 px on low, the shading normal turns at most 2° a frame, under one pop
+    a second over 1 px or 2°, no flip-flop at the budget's margin, no hole frame (with drafts at
+    half a bake's cost too); TERRAIN TEST's views check passes its masks and coverage checks.
+  - _Built 2026-11-02_; the figures that miss are pinned as measured (the outbox's findings).
+
 ### R10.T11 The wireframe's terrain
 
 Records: [10-terrain-on-generated-worlds/records/R10.T11.md](10-terrain-on-generated-worlds/records/R10.T11.md).
