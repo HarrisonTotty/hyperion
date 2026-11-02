@@ -5979,6 +5979,18 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Digests._ `ENTRIES_DIGEST` and `CENTRE_ENTRIES_DIGEST` re-pinned (places and velocities).
   - _Test (slow)._ `verification::recent_in_range::a_listed_core_collapse_moves_on_its_remnant_s_kick_under_every_27_hold`,
     which failed on BASE at all 90 kicked places.
+- **P09.T37, the centre's living band-E yield (lane `fix-p09-recent-dead`, 2026-11-02, under
+  `list_source` (27); no output moved at 24–26).**
+  - _Cause._ `draw_star` drew a living star's age once and refused it where its band was dead:
+    the continuous component's band-E living stars (8–16.5 M☉) live only in its first some 35 Myr
+    of 150, so its class kept 123 of its 626 expected.
+  - _Fix._ From 27 a living class's attempt `k` draws its age on `centre.age` word `k`, as the
+    remnants' do (attempt 0 unchanged): a uniform age over the ages its band lives.
+  - _Lean (2026-11-02)._ The class's count weights each age by the masses alive at it; the age is
+    uniform over the ages any is, so the counts agree and the ages lean slightly old.
+  - _Test._ `centre::members::tests::a_centre_living_class_yields_its_expected_count_from_27`
+    (`CentrePlacement::class_under`, split out of `candidate_under` bit for bit), which failed
+    first at 123; now 562, every candidate of the class kept, within four standard deviations.
 - **P09.T28.d.c as built (lane `fix-p09-t28d-local-arc`, 2026-11-02, behind `KEPLER_ARC_VERSION`
   = 27; no output moved at 24–26).**
   - _Names._ `motion::spherical::{KEPLER_ARC_VERSION, KeplerArcRules::{Series, Local}}`,

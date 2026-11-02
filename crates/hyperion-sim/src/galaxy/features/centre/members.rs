@@ -823,15 +823,19 @@ fn galactic(p: &PointLy) -> GalacticPosition {
 /// its draws are read at, and its age; `None` if the draw exhausts its attempts or the class's
 /// range is empty at the drawn age.
 ///
-/// A remnant class's attempt `k` draws its age too, on word `k` of `centre.age`, from generator
-/// version 27 (P09.T37, under `list_source`, the hold of `LIST_SOURCE_VERSION`, with which the
-/// centre's members are first served): so the attempts draw a remnant's age and mass together, as
-/// its class's count integrates them, and not its mass at one age at which its class may hold no
-/// star, or none at all (a range empty at that age, which the held arm refuses). In the continuous component's first few million years only black holes are made (at 24's
-/// rules, every star of 52–100 M☉ that has died by 3.3–4.0 Myr), so a neutron star drawn at such
-/// an age exhausted its 4,096 attempts, some 2% of the component's (the debug assertion of
-/// P09.T31's and P09.T36.b's finding). Attempt 0 reads word 0, the age drawn before, so a member
-/// kept at its first attempt moves not at all. A living class still draws its age once.
+/// A class's attempt `k` draws its age too, on word `k` of `centre.age`, from generator version 27
+/// (P09.T37, under `list_source`, the hold of `LIST_SOURCE_VERSION`, with which the centre's
+/// members are first served): so the attempts draw a star's age and mass together, as its class's
+/// count integrates them, and not its mass at one age at which its class may hold no star, or none
+/// at all (a range empty at that age, which the held arm refuses). In the continuous component's
+/// first few million years only black holes are made (at 24's rules, every star of 52–100 M☉ that
+/// has died by 3.3–4.0 Myr), so a neutron star drawn at such an age exhausted its 4,096 attempts,
+/// some 2% of the component's (the debug assertion of P09.T31's and P09.T36.b's finding). Its
+/// living band-E stars (8–16.5 M☉) live only in its first some 35 Myr of 150, so the held arm,
+/// which draws a living star's age once, kept about a fifth of their 626 expected; from 27 a
+/// living class redraws its age until its band lives, a uniform age over the ages it does.
+/// Attempt 0 reads word 0, the age drawn before, so a member kept at its first attempt moves not
+/// at all.
 fn draw_star(
     galaxy: &Galaxy,
     class: &CentreClass,
@@ -869,11 +873,10 @@ fn draw_star(
         CentreClassKind::NeutronStar => ClassKind::NeutronStar,
         CentreClassKind::BlackHole => ClassKind::BlackHole,
     };
-    let ages_by_attempt = kind != ClassKind::Living
-        && match galaxy.rules().list_source {
-            ListSourceRules::Unregistered => false,
-            ListSourceRules::Registered => true,
-        };
+    let ages_by_attempt = match galaxy.rules().list_source {
+        ListSourceRules::Unregistered => false,
+        ListSourceRules::Registered => true,
+    };
     let (lo, hi) = range(age);
     if hi <= lo && !ages_by_attempt {
         return None;
@@ -1540,7 +1543,7 @@ mod tests {
     /// From generator version 27 (under `list_source`, beside the band-E draw's fix) a living class
     /// yields its expected count. The continuous component's band-E living stars (8–16.5 M☉), 626
     /// expected, live only in its first some 35 Myr of 150, and the held arm draws one age for
-    /// each and refuses it where the band is dead then, so it keeps about a quarter of them; drawn
+    /// each and refuses it where the band is dead then, so it keeps about a fifth of them; drawn
     /// age by age, every candidate of the class keeps one, and the class's members in every cell
     /// of band E are within the Poisson interval of its 626.
     #[test]
