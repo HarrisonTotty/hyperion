@@ -1,4 +1,4 @@
-//! The field's share of each component's budget (plan 09, P09.T2.c), from generator version 26
+//! The field's share of each component's budget (plan 09, P09.T2.c), from generator version 27
 //! ([`FIELD_SHARE_VERSION`]).
 //!
 //! The density fields are each population's budget: everything born in it, the features' members
@@ -22,18 +22,19 @@
 //! the fields feed reads the budget: the gas, the substellar abundance, the kinematics, the feature
 //! catalogue (whose rates φ is made from), the map, the mean masses and so the system count and
 //! the potential, and plan 15's fits. The sky's closed-form light (`sky::luminosity`, `band`,
-//! `caps`) reads the budget too: rendering plan R06's R06.T16.a, which rides 26 with this, routes
+//! `caps`) reads the budget too: rendering plan R06's R06.T16.a, which rides 27 with this, routes
 //! it through the field when it takes the features' members in.
 //!
 //! # Layer D's ancient Type Ia
 //!
-//! From the same version, under plan 09's P09.T35 hold (`displaced::site::CARVE_OUT_VERSION`),
-//! layer D also gives up the systems that exploded as a Type Ia before the supernova test's
-//! interval and left nothing ([`ancient_share`](super::catalogue_classes::type_ia::ancient_share)):
-//! each component's field keeps `1 −` its population's of its layer D
-//! ([`Galaxy::layer_d_kept`]). Placement's thinning and the expected counts read it, as they read
-//! the field's factors, in the same slice of the mark; the Type Ia class does not, since its rate
-//! is per system of the budget, the exploded included.
+//! From generator version 27, under plan 09's P09.T35 hold (`displaced::site::CARVE_OUT_VERSION`,
+//! retargeted from 26 by train 26), layer D also gives up the systems that exploded as a Type Ia
+//! before the supernova test's interval and left nothing
+//! ([`ancient_share`](super::catalogue_classes::type_ia::ancient_share)): each component's field
+//! keeps `1 −` its population's of its layer D ([`Galaxy::layer_d_kept`]). Placement's thinning
+//! and the expected counts read it, as they read the field's factors, in the same slice of the
+//! mark; the Type Ia class does not, since its rate is per system of the budget, the exploded
+//! included.
 
 use super::Galaxy;
 use super::Population;
@@ -153,7 +154,7 @@ impl FieldShare {
 }
 
 impl Galaxy {
-    /// The field's share of each component's budget, from generator version 26
+    /// The field's share of each component's budget, from generator version 27
     /// ([`FIELD_SHARE_VERSION`]); `None` under the held arm, where the field is the budget.
     #[must_use]
     pub(crate) fn field_share(&self) -> Option<&FieldShare> {
@@ -162,7 +163,8 @@ impl Galaxy {
 
     /// The field's ages of component `id`: its budget's, [`Component::ages`], under the held arm
     /// and for every component but the young disc; the young field's, `1 − φ(age)` times the
-    /// budget's renormalised, from version 26.
+    /// budget's renormalised, from version 27. The ages placed systems are drawn from, once the
+    /// thinning has kept them.
     ///
     /// [`Component::ages`]: super::fields::Component::ages
     ///
@@ -170,7 +172,7 @@ impl Galaxy {
     ///
     /// If `id` is not one of the galaxy's components.
     #[must_use]
-    pub(crate) fn field_ages(&self, id: ComponentId) -> &AgeDistribution {
+    pub fn field_ages(&self, id: ComponentId) -> &AgeDistribution {
         match self.field_share().and_then(|field| field.ages(id)) {
             Some(ages) => ages,
             None => self.fields.component(id).ages(),
@@ -178,11 +180,11 @@ impl Galaxy {
     }
 
     /// `value`, a quantity of component `id`'s budget in `band`, as the field's: itself under the
-    /// held arm, times the field's [`factor`](FieldShare::factor) from version 26.
+    /// held arm, times the field's [`factor`](FieldShare::factor) from version 27.
     ///
     /// # Panics
     ///
-    /// From version 26, if `id` is not one of the galaxy's components.
+    /// From version 27, if `id` is not one of the galaxy's components.
     #[must_use]
     pub(crate) fn field_part(&self, id: ComponentId, band: MassBand, value: f64) -> f64 {
         match self.field_share() {
@@ -192,15 +194,16 @@ impl Galaxy {
     }
 
     /// The field's share of component `id`'s systems in `band`: the share matrix's
-    /// [`component_share`](super::shares::ShareMatrix::component_share), taken to the field
-    /// ([`field_part`](Self::field_part)), and in layer D from version 26 times what the field keeps
-    /// of it ([`layer_d_kept`](Self::layer_d_kept)).
+    /// [`component_share`](super::shares::ShareMatrix::component_share), taken to the field from
+    /// version 27 (P09.T2.c), and in layer D from version 27 times what the field keeps of it, 1
+    /// less its population's ancient Type Ia (P09.T35). A layer's placed density is the sum of this
+    /// times each component's density.
     ///
     /// # Panics
     ///
     /// If `id` is not one of the galaxy's components.
     #[must_use]
-    pub(crate) fn field_component_share(&self, band: MassBand, id: ComponentId) -> f64 {
+    pub fn field_component_share(&self, band: MassBand, id: ComponentId) -> f64 {
         let share = self.shares.component_share(band, self.fields.component(id));
         let field = self.field_part(id, band, share);
         match band {
@@ -214,7 +217,7 @@ impl Galaxy {
         }
     }
 
-    /// What the field keeps of component `id`'s layer D from generator version 26: 1 less its
+    /// What the field keeps of component `id`'s layer D from generator version 27: 1 less its
     /// population's ancient Type Ia, the share of its layer D that exploded before the supernova
     /// test's interval and left nothing (plan 09, P09.T35; module documentation). In a galaxy that
     /// holds plan 08's displaced classes it is the share of the stay's slice, `1 − a ÷ stay_D`,
@@ -223,7 +226,7 @@ impl Galaxy {
     ///
     /// # Panics
     ///
-    /// From version 26, if `id` is not one of the galaxy's components.
+    /// From version 27, if `id` is not one of the galaxy's components.
     #[must_use]
     pub(crate) fn layer_d_kept(&self, id: ComponentId) -> Option<f64> {
         self.layer_d_kept.as_ref().map(|kept| kept[id.index()])

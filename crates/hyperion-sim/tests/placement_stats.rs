@@ -640,7 +640,8 @@ fn marks_draw_ages_from_the_picked_components_distribution() {
             );
             continue;
         }
-        let distribution = component.ages();
+        // The field's ages (P09.T2.c): the young disc's are its budget's times `1 − φ(age)`.
+        let distribution = galaxy.field_ages(id);
         let (lo, hi) = (distribution.min().value(), distribution.max().value());
         assert!(
             sample.iter().all(|age| (lo..=hi).contains(age)),
