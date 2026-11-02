@@ -13,10 +13,12 @@ import { PipelineTally } from "./pipelineShim";
 import {
   CAPTURE_FRAMES,
   PASS_READS_WAIT_MS,
+  SMOKE_BAKE_LIMIT_S,
   SMOKE_S,
   SMOKE_TRACE_BOUNDARIES_S,
   type SpanCapture,
   SpikeController,
+  smokeBakeLimitS,
   variantOf,
 } from "./spikeController";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
@@ -552,13 +554,49 @@ describe("the spike's run control", () => {
     ]);
   });
 
-  it("fails a smoke run that baked nothing", async () => {
-    const { controller, ends } = controllerOf({ ...LAUNCH, smoke: true });
-    controller.prepared(DESCENT);
+  it("flies a smoke's 10 s from its first worker bake, however late, then passes", async () => {
+    const run = controllerOf({ ...LAUNCH, smoke: true });
+    run.controller.prepared(DESCENT);
+    await flyBoundaries(run, SMOKE_TRACE_BOUNDARIES_S, SMOKE_S);
+    run.controller.frame(frame(SMOKE_S + 30));
+    run.controller.patch("baked");
+    run.controller.frame(frame(2 * SMOKE_S + 29.9));
     await settle();
-    controller.frame(frame(SMOKE_S));
+    expect(run.calls).not.toContain("writeResults");
+    run.clock.ms = (2 * SMOKE_S + 30) * 1000;
+    run.controller.frame(frame(2 * SMOKE_S + 30));
     await settle();
-    expect(ends).toEqual([{ status: "fail", reason: "no patch was baked in a worker" }]);
+    expect(run.ends).toEqual([{ status: "pass" }]);
+    expect(run.reports[0]?.frames.scriptTimesS.at(-1)).toBe(2 * SMOKE_S + 30);
+    // The last window runs on with the script, to the smoke's end.
+    expect(run.reports[0]?.traceWindows.at(-1)).toEqual({
+      startedMs: 6300,
+      stopRequestedMs: (2 * SMOKE_S + 30) * 1000,
+      failure: null,
+    });
+  });
+
+  it("fails a smoke run with no worker bake by the limit, saying so", async () => {
+    const run = controllerOf({ ...LAUNCH, smoke: true });
+    run.controller.prepared(DESCENT);
+    await flyBoundaries(run, SMOKE_TRACE_BOUNDARIES_S, SMOKE_BAKE_LIMIT_S - 0.1);
+    expect(run.calls).not.toContain("writeResults");
+    run.controller.frame(frame(SMOKE_BAKE_LIMIT_S));
+    await settle();
+    expect(run.ends).toEqual([
+      {
+        status: "fail",
+        reason: `no patch was baked in a worker by ${String(SMOKE_BAKE_LIMIT_S)} s of script`,
+      },
+    ]);
+  });
+
+  it("gives a software launch's smoke five times as long for its first bake", () => {
+    expect([
+      smokeBakeLimitS("default"),
+      smokeBakeLimitS("vulkan"),
+      smokeBakeLimitS("software"),
+    ]).toEqual([SMOKE_BAKE_LIMIT_S, SMOKE_BAKE_LIMIT_S, SMOKE_BAKE_LIMIT_S * 5]);
   });
 
   it("refuses a variant the setting cannot take, and records the one drawn", async () => {

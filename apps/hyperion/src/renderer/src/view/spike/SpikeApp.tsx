@@ -11,7 +11,7 @@ import { GpuCapture } from "./capture";
 import { DescentSpike, MAIN_CANVAS_SELECTOR } from "./DescentSpike";
 import { ServedDescentSpike } from "./ServedDescentSpike";
 import { SpikeHeader } from "./SpikeHeader";
-import { SpikeController, variantOf } from "./spikeController";
+import { SpikeController, smokeBakeLimitS, variantOf } from "./spikeController";
 import { SPIKE_RETRY } from "./spikeFaults";
 import { SPIKE_PASS_ROWS, spikeGpu } from "./spikeHarness";
 import {
@@ -54,6 +54,12 @@ export interface SpikeAppProps {
    * generated world's passes draw the setting's geometry with it over; none by default.
    */
   readonly geometry?: GeometryOverride | undefined;
+  /**
+   * A smoke's limit for its first worker bake, script seconds: the launch mode's
+   * (`smokeBakeLimitS`) by default, a test's own where its workers bake nothing. Read at the first
+   * render.
+   */
+  readonly smokeBakeLimitS?: number | undefined;
 }
 
 /** The run's measured engine, its control and its listeners, made once. */
@@ -67,7 +73,11 @@ interface Harness {
   readonly sizes: SpikeSizes | null;
 }
 
-function makeHarness(spike: SpikeApi, loadEngine: ViewEngineSource["load"] | undefined): Harness {
+function makeHarness(
+  spike: SpikeApi,
+  loadEngine: ViewEngineSource["load"] | undefined,
+  bakeLimitS: number,
+): Harness {
   const { launch } = spike;
   const clock = { scriptTimeS: 0 };
   // The command line refuses `--sizes on` over the test planet; the measurement is the terrain
@@ -103,6 +113,7 @@ function makeHarness(spike: SpikeApi, loadEngine: ViewEngineSource["load"] | und
       console.error(`descent spike: ${message}`, error);
     },
     ...(sizes === null ? {} : { sizes }),
+    smokeBakeLimitS: bakeLimitS,
   });
   const load = loadEngine ?? gpu.source.load;
   return {
@@ -179,9 +190,13 @@ export function SpikeApp({
   measure,
   serverUrl,
   geometry,
+  smokeBakeLimitS: bakeLimitS,
 }: SpikeAppProps) {
-  // Made once, with the engine's loader given at the first render: the run's is its launch's.
-  const [harness] = useState(() => makeHarness(spike, loadEngine));
+  // Made once, with the engine's loader and the bake limit given at the first render: the run's
+  // are its launch's.
+  const [harness] = useState(() =>
+    makeHarness(spike, loadEngine, bakeLimitS ?? smokeBakeLimitS(graphics.launchMode)),
+  );
   // The launch's geometry over the setting's (`--geometry`, plan R14), made once: a new object would
   // make the terrain session anew.
   const [geometrySettings] = useState(() =>

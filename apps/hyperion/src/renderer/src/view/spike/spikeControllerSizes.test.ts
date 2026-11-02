@@ -52,7 +52,7 @@ function settle(): Promise<void> {
 
 /**
  * Flies a smoke to its end on `controller`, a frame at its start, each boundary and its end,
- * `prepared` called once the descent is.
+ * `prepared` called once the descent is, and a patch baked, so that the smoke ends at its 10 s.
  */
 async function flySmoke(
   controller: SpikeController,
@@ -60,6 +60,7 @@ async function flySmoke(
 ): Promise<void> {
   controller.prepared(DESCENT);
   prepared();
+  controller.patch("baked");
   await settle();
   for (const scriptTimeS of [0, ...SMOKE_TRACE_BOUNDARIES_S, SMOKE_S]) {
     controller.frame({

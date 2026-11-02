@@ -129,12 +129,13 @@ export const MEASUREMENT_MARGIN_MS = 60_000;
 
 /**
  * How long a spike run may take before the main process ends it with status 3: the smoke's 10 s
- * and the descent's 20.5 minutes, each with room for building the scene and writing the results;
- * and over a generated world (R10.T14.c) 13 minutes more, its measurement's longest for one site:
- * the field's hold at its 120 s limit, then the site's bakes at their 600 s limit, and a minute's
- * margin, against some 40 s in a typical run on three workers; over a served world (R10.T15.b)
- * 21 minutes more, its field's hold at its 600 s limit, since the server computes the body's coarse
- * field before its first answer (about a minute natively at level 8, R09.T16.a).
+ * from its first worker bake, which it waits a minute of script for (the renderer's
+ * `smokeBakeLimitS`), and the descent's 20.5 minutes, each with room for building the scene and
+ * writing the results; and over a generated world (R10.T14.c) 13 minutes more, its measurement's
+ * longest for one site: the field's hold at its 120 s limit, then the site's bakes at their 600 s
+ * limit, and a minute's margin, against some 40 s in a typical run on three workers; over a served
+ * world (R10.T15.b) 21 minutes more, its field's hold at its 600 s limit, since the server computes
+ * the body's coarse field before its first answer (about a minute natively at level 8, R09.T16.a).
  *
  * @remarks
  * A site whose floors the profile refuses is measured afresh at the next candidate, each attempt's

@@ -14,7 +14,8 @@
  * A smoke run hands its report to the same results call as a full run
  * (decision-r05-trace-windows-2.md, addendum A): its windows are merged with it, the frame-span
  * check included, each window's verdict is logged, and the call answers the first failed window's
- * reason, with which the renderer fails the smoke. A smoke builds and writes no results file.
+ * reason, with which the renderer fails the smoke. A smoke builds and writes no results file: its
+ * log says how long its script flew and shows its geometry block.
  *
  * A `--sizes on` run's `sizes` block that its check refused (R10.T14.b) loses the run nothing: its
  * problems are logged, the results are written without it, and the block as the renderer sent it
@@ -29,6 +30,7 @@ import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { DescentSpikeReport, SpikeLaunch, SpikeResultsAnswer } from "../preload/api";
+import { geometrySummaryLines } from "./geometryResults";
 import { type Measured, measured, missing } from "./measured";
 import type { TraceFigures } from "./reduceTrace";
 import {
@@ -386,6 +388,27 @@ export class SpikeSession {
     return merged.figures.reason;
   }
 
+  /**
+   * A smoke's script, how long and in how many frames, its 10 s counted from its first worker bake
+   * (R05.T18), and its report's `geometry` block as a results file's summary shows it (plan R14,
+   * R14.T1.f), or that it has none, as over the test planet.
+   */
+  #logSmokeReport(report: DescentSpikeReport): void {
+    const times = report.frames.scriptTimesS;
+    this.#deps.log(
+      `descent spike: the smoke flew ${(times.at(-1) ?? 0).toFixed(1)} s of script in ${String(times.length)} frames`,
+    );
+    if (report.geometry === undefined) {
+      this.#deps.log("descent spike: the report holds no geometry block");
+      return;
+    }
+    for (const line of geometrySummaryLines(report.geometry)) {
+      if (line.length > 0) {
+        this.#deps.log(`descent spike: ${line}`);
+      }
+    }
+  }
+
   async #writeResults(
     report: DescentSpikeReport,
     rejectedSizes: RejectedSizes | null,
@@ -399,10 +422,12 @@ export class SpikeSession {
       );
     }
     if (this.#deps.launch.smoke) {
-      // A smoke's 10 s are all warm-up and it writes no file: its log holds every clock sample.
+      // A smoke's script is all warm-up and it writes no file: its log holds every clock sample,
+      // how long it flew and the geometry a file would hold.
       this.#deps.log(
         `descent spike: GPU clocks sampled ${describeClockSamples(gpuClocksOf(this.#memory))}`,
       );
+      this.#logSmokeReport(report);
       return { kind: "smoke checked", failure: this.#checkSmokeTrace(report) };
     }
     const described = await this.#run;

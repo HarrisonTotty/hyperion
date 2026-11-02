@@ -133,6 +133,8 @@ async function flySmoke(launch: SpikeLaunch): Promise<ReadonlyArray<DescentSpike
       loadEngine={() => countingRenderEngine()}
       measure={MEASURE}
       serverUrl={TEST_SERVER_URL}
+      // The scripted workers bake nothing: the smoke ends at its 10 s, its report written.
+      smokeBakeLimitS={SMOKE_S}
     />,
   );
   // The smoke's script and a second more, a step at a time, each step's work let settle.

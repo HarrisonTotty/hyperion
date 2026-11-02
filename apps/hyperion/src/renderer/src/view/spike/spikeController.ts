@@ -24,10 +24,12 @@
 
 import type {
   DescentSpikeReport,
+  GraphicsLaunchMode,
   SpikeApi,
   SpikeLaunch,
   SpikeTraceWindow,
 } from "../../../../preload/api";
+import { SOFTWARE_WAIT_FACTOR } from "../../displays/view/check/softwareTiming";
 import type { AllocationEvent } from "../engine/memory";
 import type { PassTimes, RenderEngine } from "../engine/types";
 import {
@@ -48,8 +50,28 @@ import {
 } from "./spikeHarness";
 import { TRACE_BOUNDARY_GUARD_S, traceBoundaries } from "./traceWindows";
 
-/** How long `--smoke` runs, script seconds. */
+/**
+ * How long `--smoke` runs from its first patch baked in a worker, script seconds (R05.T18): 10 s of
+ * script where one is baked before its first frame, its trace's last window running to the end.
+ */
 export const SMOKE_S = 10;
+
+/**
+ * The script time by which a smoke run's first patch must be baked in a worker on a GPU, script
+ * seconds (R05.T18, R14.T1.f's finding): a smoke with none baked by then fails there, within the
+ * main process's three minutes for a smoke.
+ */
+export const SMOKE_BAKE_LIMIT_S = 60;
+
+/**
+ * A smoke's limit for its first worker bake, script seconds: {@link SMOKE_BAKE_LIMIT_S}, and
+ * {@link SOFTWARE_WAIT_FACTOR} times as long in the check-only software mode, as the main process's
+ * watchdog is (plan R01, R01.T16). On SwiftShader a generated world's first bake lands 74 to 82 s
+ * into the script, after its 10 s (`TERRAIN TEST`, pod, high and low, 2026-11-02).
+ */
+export function smokeBakeLimitS(launchMode: GraphicsLaunchMode): number {
+  return launchMode === "software" ? SMOKE_BAKE_LIMIT_S * SOFTWARE_WAIT_FACTOR : SMOKE_BAKE_LIMIT_S;
+}
 
 /**
  * Where a smoke run cycles its trace, script seconds: three windows in its 10 s, so that the smoke
@@ -114,6 +136,8 @@ export interface SpikeControllerDeps {
    * whose block the report carries; absent, nothing is forwarded and the report is as before.
    */
   readonly sizes?: Pick<SpikeSizes, "report" | "noteAllocation">;
+  /** A smoke's limit for its first worker bake (`smokeBakeLimitS`), script seconds; absent, a GPU's. */
+  readonly smokeBakeLimitS?: number;
 }
 
 /** The terrain variant `launch`'s `--vertex-path` and `--normals` ask for (nulls left out). */
@@ -153,8 +177,11 @@ interface CaptureSpan {
 export class SpikeController {
   readonly #deps: SpikeControllerDeps;
   readonly #launch: SpikeLaunch;
+  readonly #bakeLimitS: number;
   #recorder: SpikeRecorder | null = null;
   #durationS = Infinity;
+  /** The last frame's script time, s, at which a smoke's first bake starts its 10 s. */
+  #lastScriptS = 0;
   #ended = false;
   #lastMemoryMs = Number.NEGATIVE_INFINITY;
   #measuring: Promise<void> | null = null;
@@ -176,6 +203,7 @@ export class SpikeController {
   constructor(deps: SpikeControllerDeps) {
     this.#deps = deps;
     this.#launch = deps.spike.launch;
+    this.#bakeLimitS = deps.smokeBakeLimitS ?? SMOKE_BAKE_LIMIT_S;
   }
 
   /** Whether the run has ended (its end sent or being sent). */
@@ -222,7 +250,8 @@ export class SpikeController {
       return;
     }
     this.#recorder = new SpikeRecorder(descent, this.#launch.setting, this.#deps.gpu);
-    this.#durationS = this.#launch.smoke ? SMOKE_S : descent.profile.durationS;
+    // A smoke ends `SMOKE_S` after its first bake (`patch`), or fails at the bake's limit.
+    this.#durationS = this.#launch.smoke ? this.#bakeLimitS : descent.profile.durationS;
     if (this.#deps.capture !== null) {
       const pass = descent.profile.segmentSpans().find(({ name }) => name === "low fast pass");
       // The smoke's span starts at 5 s; a full run's in the low fast pass, where demand peaks.
@@ -314,9 +343,17 @@ export class SpikeController {
     this.#recorder?.select(input);
   }
 
-  /** A patch's progress. */
+  /** A patch's progress: a smoke's first bake starts its {@link SMOKE_S}. */
   patch(event: "requested" | "baked" | "resident"): void {
-    this.#recorder?.patch(event);
+    const recorder = this.#recorder;
+    if (recorder === null) {
+      return;
+    }
+    const first = event === "baked" && recorder.bakedPatches === 0;
+    recorder.patch(event);
+    if (first && this.#launch.smoke) {
+      this.#durationS = this.#lastScriptS + SMOKE_S;
+    }
   }
 
   /** A frame of the run. */
@@ -326,6 +363,7 @@ export class SpikeController {
       return;
     }
     recorder.frame(sample);
+    this.#lastScriptS = sample.scriptTimeS;
     if (!this.#launch.smoke && sample.rafTimestampMs - this.#lastMemoryMs >= MEMORY_INTERVAL_MS) {
       this.#lastMemoryMs = sample.rafTimestampMs;
       this.#deps.spike.sampleMemory().catch((error: unknown) => {
@@ -452,7 +490,10 @@ export class SpikeController {
             ? { status: "fail", reason: failure }
             : recorder.bakedPatches > 0
               ? { status: "pass" }
-              : { status: "fail", reason: "no patch was baked in a worker" },
+              : {
+                  status: "fail",
+                  reason: `no patch was baked in a worker by ${String(this.#bakeLimitS)} s of script`,
+                },
         );
         return;
       }

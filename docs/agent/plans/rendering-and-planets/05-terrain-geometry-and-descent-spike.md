@@ -8301,3 +8301,6 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
   `TerrainView.viewport` and `ViewSelectionInput.viewport` carry it. Bit for bit at DPR 1. The
   views check's `terrainHandover` and `handoverRangeAtM` take the selection's width. The descent
   spike still selects at its canvas's device px.
+- **The smoke waits for its first worker bake (2026-11-02; lane fix-spike-smoke).** A smoke's 10 s
+  of script run from its first worker bake; one with none by `smokeBakeLimitS` (60 s on a GPU,
+  300 s in the software mode) fails there. Its log says how long it flew and shows its geometry block.

@@ -570,6 +570,64 @@ describe("a spike run's session", () => {
     );
   });
 
+  it("logs how long a smoke flew and its geometry block, since it writes no results file", async () => {
+    const { session, logs } = sessionOf(
+      (path) => Promise.resolve(smokeTrace(windowOf(path))),
+      undefined,
+      { ...LAUNCH, smoke: true },
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.cycleTrace();
+    await ops.cycleTrace();
+    await ops.stopMeasuring();
+    const geometry = {
+      settings: {
+        clusterPath: true,
+        casterDepthCull: true,
+        casterStrideCap: 8,
+        overlayDepth: "cluster",
+        litClusters: true,
+        farCascadeRate: 4,
+        figureClusters: true,
+        hullClusters: true,
+        wireClusters: true,
+      },
+      segments: [
+        {
+          segment: "orbit coast",
+          interiorPatches: { frames: 3, p50: 59, max: 61 },
+          edgePatches: { frames: 3, p50: 33, max: 33 },
+          drawnTriangles: { frames: 3, p50: 868_352, max: 880_000 },
+          litClusterTriangles: null,
+          casterTriangles: null,
+          overlayTriangles: null,
+        },
+      ],
+    } as const;
+    await ops.writeResults({ ...smokeReport(), geometry });
+    expect(logs).toContain("descent spike: the smoke flew 10.0 s of script in 600 frames");
+    expect(logs).toContain("descent spike: ## Geometry (plan R14)");
+    expect(logs.some((line) => line.startsWith("descent spike: | orbit coast | 59 (61) |"))).toBe(
+      true,
+    );
+  });
+
+  it("says a smoke's report holds no geometry block over the test planet", async () => {
+    const { session, logs } = sessionOf(
+      (path) => Promise.resolve(smokeTrace(windowOf(path))),
+      undefined,
+      { ...LAUNCH, smoke: true },
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.cycleTrace();
+    await ops.cycleTrace();
+    await ops.stopMeasuring();
+    await ops.writeResults(smokeReport());
+    expect(logs).toContain("descent spike: the report holds no geometry block");
+  });
+
   it("logs a run's clocks after the warm-up beside its results file", async () => {
     const { session, logs } = sessionOf(
       () => Promise.resolve(goodTrace()),
