@@ -65,7 +65,7 @@ import {
   fitCascades,
   gridLatticeSpacingM,
 } from "./shadows/cascades";
-import { SHADOW_PLACEHOLDER_NAME, TerrainShadows } from "./shadows/terrainShadows";
+import { CascadeReuse, SHADOW_PLACEHOLDER_NAME, TerrainShadows } from "./shadows/terrainShadows";
 import type { TerrainLighting } from "./terrainMaterial";
 import {
   cascadeHorizonTexelM,
@@ -151,11 +151,12 @@ class PlacedLane implements TerrainPool {
   /** Answers every demanded patch. */
   bakeDemand(pass: TerrainPass): void {
     for (const request of this.demand) {
-      this.#deliver(pass, request.key);
+      this.deliver(pass, request.key);
     }
   }
 
-  #deliver(pass: TerrainPass, key: PatchKey): void {
+  /** Bakes `key` and hands it to `pass`. */
+  deliver(pass: TerrainPass, key: PatchKey): void {
     const n = normalsAtlasOf(pass.layout).samplesPerSide;
     const [x, y, z] = surfacePoint(PLANET.figure, vertexDir(key, 32, 32), 0);
     const bake: BakedPatch = {
@@ -2023,10 +2024,18 @@ function layersOf(frame: TerrainViewFrame): number[] {
 }
 
 describe("the far cascades at a lower rate (plan R14, R14.T6.b)", () => {
-  it("renders cascades 2 and 3 on alternate halves of the high setting's period of 4, 4, 2, 3, 2, 3 passes over a still view", async () => {
+  // The camera a millimetre further north at each frame: within every hold's slack, and every
+  // caster's record changed, so that T6.a reuses no cascade.
+  let creep = 0;
+  const crept = (view: TerrainView): TerrainView => {
+    creep += 1;
+    return movedNorth(view, creep * 1e-3);
+  };
+
+  it("renders cascades 2 and 3 on alternate halves of the high setting's period of 4, 4, 2, 3, 2, 3 passes over a creeping view", async () => {
     const made = await streamedAt(NEAR);
     const rendered = Array.from({ length: 5 }, () =>
-      layersOf(made.pass.drawFor(PRIMARY, frameOf(NEAR, true))),
+      layersOf(made.pass.drawFor(PRIMARY, frameOf(crept(NEAR), true))),
     );
     expect([made.pass.geometry.farCascadeRate, rendered]).toEqual([
       4,
@@ -2093,7 +2102,9 @@ describe("the far cascades at a lower rate (plan R14, R14.T6.b)", () => {
     made: Made,
     views: ReadonlyArray<readonly [TerrainView, boolean]>,
   ): number[] =>
-    views.map(([view, takes]) => layersOf(made.pass.drawFor(PRIMARY, frameOf(view, takes))).length);
+    views.map(
+      ([view, takes]) => layersOf(made.pass.drawFor(PRIMARY, frameOf(crept(view), takes))).length,
+    );
   const wider: TerrainView = { ...NEAR, viewport: { widthPx: 641, heightPx: 360 } };
 
   it.each([
@@ -2165,7 +2176,8 @@ describe("the far cascades at a lower rate (plan R14, R14.T6.b)", () => {
   it("renders every cascade every frame while a caster that is not terrain casts, and at a rate of 1", async () => {
     const made = await streamedAt(NEAR);
     const remove = made.shadows.casters.add(() => []);
-    const draw = (): number => layersOf(made.pass.drawFor(PRIMARY, frameOf(NEAR, true))).length;
+    const draw = (): number =>
+      layersOf(made.pass.drawFor(PRIMARY, frameOf(crept(NEAR), true))).length;
     const withOther = [draw(), draw(), draw()];
     remove();
     const without = draw();
@@ -2196,5 +2208,291 @@ describe("the far cascades at a lower rate (plan R14, R14.T6.b)", () => {
       [Math.fround(c2.farM + c2.holdSlackM), Math.fround(c3.farM + c3.holdSlackM)],
       2,
     ]);
+  });
+});
+
+describe("the cascades re-rendered only when they change (plan R14, R14.T6.a)", () => {
+  /** A pass streamed at {@link NEAR}, every cascade due each frame (T6.b's rate 1). */
+  async function everyFrame(): Promise<Made> {
+    const made = await streamedAt(NEAR);
+    made.pass.setGeometry(EVERY_FRAME);
+    return made;
+  }
+
+  /** {@link everyFrame}'s, streamed until nothing more is asked for, so that a step adds none. */
+  async function settled(): Promise<Made> {
+    const made = await litPass();
+    stream(made, [passView(PRIMARY, NEAR)], 24);
+    made.pass.setGeometry(EVERY_FRAME);
+    return made;
+  }
+
+  /** The layers each of the primary's frames renders, at `inputs` in turn. */
+  const rendersOf = (made: Made, inputs: ReadonlyArray<TerrainViewFrameInput>): number[][] =>
+    inputs.map((input) => layersOf(made.pass.drawFor(PRIMARY, input)));
+
+  /** {@link STARLIT} with star 0 turned `turnRad` about the place's north. */
+  function sunTurned(turnRad: number): TerrainViewFrameInput {
+    const [star] = STARLIT.lights;
+    if (star === undefined) {
+      throw new Error("the test's lighting has no star");
+    }
+    const direction = add(
+      scale(SUN, Math.cos(turnRad)),
+      scale(cross(FRAME_THERE.north, SUN), Math.sin(turnRad)),
+    );
+    return {
+      ...frameOf(NEAR, true),
+      lighting: { ...STARLIT, lights: [{ ...star, direction }] },
+    };
+  }
+
+  it("renders all four at the first frame of a still camera with time paused, and none after", async () => {
+    const made = await everyFrame();
+    expect(
+      rendersOf(
+        made,
+        [0, 1, 2].map(() => frameOf(NEAR, true)),
+      ),
+    ).toEqual([[0, 1, 2, 3], [], []]);
+  });
+
+  it.each([
+    {
+      input: "the camera's place",
+      toggled: (): TerrainViewFrameInput => frameOf(movedNorth(NEAR, 1e-3), true),
+    },
+    {
+      input: "the view's axis",
+      toggled: (): TerrainViewFrameInput => frameOf(viewOver(50, 1e-3), true),
+    },
+    {
+      input: "the body's rotation",
+      toggled: (): TerrainViewFrameInput => frameOf(bodyTurned(NEAR, 1e-9), true),
+    },
+    { input: "the sun's direction", toggled: (): TerrainViewFrameInput => sunTurned(1e-6) },
+  ])(
+    "renders every cascade once again where $input changes, and none after",
+    async ({ toggled }) => {
+      const made = await everyFrame();
+      const still = frameOf(NEAR, true);
+      expect(rendersOf(made, [still, still, toggled(), toggled()])).toEqual([
+        [0, 1, 2, 3],
+        [],
+        [0, 1, 2, 3],
+        [],
+      ]);
+    },
+  );
+
+  it("reuses the interior patches' casters on the cluster path as the others', and renders them again where the camera moves", async () => {
+    const made = await clusteredPass();
+    made.pass.setGeometry(EVERY_FRAME);
+    const still = frameOf(NEAR, true);
+    const moved = frameOf(movedNorth(NEAR, 1e-3), true);
+    const rendered = rendersOf(made, [still, still, moved, moved]);
+    const clustered = cascadesOf(made.pass.drawFor(PRIMARY, moved)).clustered;
+    expect([clustered, rendered]).toEqual([true, [[0, 1, 2, 3], [], [0, 1, 2, 3], []]]);
+  });
+
+  it("renders again once where a caster setting changes, and none after", async () => {
+    const made = await everyFrame();
+    const still = frameOf(NEAR, true);
+    const before = rendersOf(made, [still, still]);
+    made.pass.setGeometry({ ...EVERY_FRAME, casterDepthCull: !EVERY_FRAME.casterDepthCull });
+    expect([before, rendersOf(made, [still, still])]).toEqual([
+      [[0, 1, 2, 3], []],
+      [[0, 1, 2, 3], []],
+    ]);
+  });
+
+  it("renders again once where a grounded contact moves its casters' hold, and none after", async () => {
+    const made = await settled();
+    const still = frameOf(NEAR, true);
+    const before = rendersOf(made, [still, still]);
+    const [x, y, z] = surfacePoint(PLANET.figure, OVER, 0);
+    const views = [passView(PRIMARY, NEAR)];
+    const anyOf = (): boolean[] => rendersOf(made, [still, still]).map((each) => each.length > 0);
+    made.pass.step({ views, grounded: [] });
+    const stepped = anyOf();
+    made.pass.step({ views, grounded: [{ positionM: { x, y, z }, radiusM: 10 }] });
+    expect([before, stepped, anyOf()]).toEqual([
+      [[0, 1, 2, 3], []],
+      [false, false],
+      [true, false],
+    ]);
+  });
+
+  it("renders every frame while a caster with no revision casts, and once more where one with a revision changes it", async () => {
+    const made = await everyFrame();
+    const still = frameOf(NEAR, true);
+    const unrevised = made.shadows.casters.add(() => []);
+    const without = rendersOf(made, [still, still]);
+    unrevised();
+    let revision = 0;
+    made.shadows.casters.add(
+      () => [],
+      () => revision,
+    );
+    const steady = rendersOf(made, [still, still]);
+    revision += 1;
+    const changed = rendersOf(made, [still, still]);
+    expect([without, steady, changed]).toEqual([
+      [
+        [0, 1, 2, 3],
+        [0, 1, 2, 3],
+      ],
+      [[0, 1, 2, 3], []],
+      [[0, 1, 2, 3], []],
+    ]);
+  });
+
+  it("renders again where another view drew into the set between, and by the way back every frame", async () => {
+    const made = await litPass();
+    const instrument = viewOver(80, 90);
+    stream(made, [passView(PRIMARY, NEAR), passView(INSTRUMENT, instrument)]);
+    made.pass.setGeometry(EVERY_FRAME);
+    const still = frameOf(NEAR, true);
+    const first = rendersOf(made, [still, still]);
+    made.pass.drawFor(INSTRUMENT, frameOf(instrument, true));
+    const after = rendersOf(made, [still, still]);
+    made.pass.setGeometry({ ...EVERY_FRAME, clusterPath: false });
+    const wayBack = rendersOf(made, [still, still]);
+    made.pass.setGeometry(EVERY_FRAME);
+    const onThePath = rendersOf(made, [still, still]);
+    expect([first, after, wayBack, onThePath]).toEqual([
+      [[0, 1, 2, 3], []],
+      [[0, 1, 2, 3], []],
+      [
+        [0, 1, 2, 3],
+        [0, 1, 2, 3],
+      ],
+      [[0, 1, 2, 3], []],
+    ]);
+  });
+
+  it("renders again where a drawn patch is baked again, and none after", async () => {
+    const made = await settled();
+    made.pass.setReducedMotion(true);
+    const still = frameOf(NEAR, true);
+    const before = rendersOf(made, [still, still]);
+    const [drawn] = made.pass.lastStep?.drawSet.patches ?? [];
+    if (drawn === undefined) {
+      throw new Error("nothing is drawn");
+    }
+    const views = [passView(PRIMARY, NEAR)];
+    const anyOf = (): boolean[] => rendersOf(made, [still, still]).map((each) => each.length > 0);
+    made.pass.step({ views, grounded: [] });
+    const stepped = anyOf();
+    made.lane().deliver(made.pass, drawn.patch.key);
+    made.pass.step({ views, grounded: [] });
+    expect([before, stepped, anyOf()]).toEqual([
+      [[0, 1, 2, 3], []],
+      [false, false],
+      [true, false],
+    ]);
+  });
+
+  it("renders every frame a fade of the drawn ground runs, its morph fields between 0 and 1, and none once it ends", async () => {
+    const made = await litPass();
+    // Streamed from far above and then low: the refines' fades begin at the first draw.
+    stream(made, [passView(PRIMARY, viewOver(5_000))]);
+    stream(made, [passView(PRIMARY, NEAR)]);
+    made.pass.setGeometry(EVERY_FRAME);
+    const rendered = Array.from({ length: 60 }, (_, n) => {
+      const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true, 100 * n));
+      const data = made.engine.writes.findLast(
+        (w) => w.buffer === `terrain instances (${PRIMARY})`,
+      )?.data;
+      const words = new Uint32Array(data?.slice().buffer ?? new ArrayBuffer(0));
+      let fading = false;
+      for (let at = 11; at < words.length; at += INSTANCE_RECORD_BYTES / 4) {
+        const own = (words[at] ?? 0) & 0xff;
+        fading ||= own > 0 && own < 255;
+      }
+      return { layers: layersOf(frame).length, fading };
+    });
+    const whileFading = rendered.filter((frame) => frame.fading);
+    expect([
+      whileFading.length > 0,
+      whileFading.every((frame) => frame.layers > 0),
+      rendered.slice(-2).map((frame) => [frame.fading, frame.layers]),
+    ]).toEqual([
+      true,
+      true,
+      [
+        [false, 0],
+        [false, 0],
+      ],
+    ]);
+  });
+});
+
+describe("the cascades' passes over a descent, with time stopped and running (plan R14, R14.T6.a)", () => {
+  /** R05's descent's 300 m/s at 60 Hz, m a frame, and the body's turn a frame: a day of 24 h. */
+  const STEP_M = 5;
+  const TURN_RAD = (2 * Math.PI) / 86_400 / 60;
+
+  /** The passes each frame renders: `frames` descending, then `frames` hovering at the bottom. */
+  async function passesOver(timeRuns: boolean, frames: number): Promise<number[]> {
+    const made = await streamedAt(NEAR);
+    made.pass.setGeometry(EVERY_FRAME);
+    const counts: number[] = [];
+    for (let n = 0; n < 2 * frames; n += 1) {
+      const descended = Math.min(n, frames - 1) * STEP_M;
+      const at = movedNorth(viewOver(50 + (frames - 1) * STEP_M - descended), descended);
+      const view = timeRuns ? bodyTurned(at, n * TURN_RAD) : at;
+      counts.push(layersOf(made.pass.drawFor(PRIMARY, frameOf(view, true))).length);
+    }
+    return counts;
+  }
+
+  it("renders every cascade every frame of the descent, and none of a hover with time stopped, but every frame with it running", async () => {
+    const stopped = await passesOver(false, 4);
+    const running = await passesOver(true, 4);
+    expect([stopped, running]).toEqual([
+      [4, 4, 4, 4, 0, 0, 0, 0],
+      [4, 4, 4, 4, 4, 4, 4, 4],
+    ]);
+  });
+});
+
+describe("a cascade's caster inputs (plan R14, R14.T6.a)", () => {
+  it("is unchanged where its words equal its last render's, one for one, and changed by any word", () => {
+    const reuse = new CascadeReuse();
+    const write = (words: number[]): void => {
+      reuse.start();
+      reuse.words(Uint32Array.from(words));
+    };
+    write([1, 2, 3]);
+    const before = reuse.unchanged(0);
+    reuse.rendered(0);
+    write([1, 2, 3]);
+    const same = reuse.unchanged(0);
+    const other = reuse.unchanged(1);
+    write([1, 2, 4]);
+    const changed = reuse.unchanged(0);
+    write([1, 2, 3, 0]);
+    const longer = reuse.unchanged(0);
+    reuse.forget();
+    write([1, 2, 3]);
+    expect([before, same, other, changed, longer, reuse.unchanged(0)]).toEqual([
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("takes an f64 as its two words, so that a change past f32's precision counts", () => {
+    const reuse = new CascadeReuse();
+    reuse.start();
+    reuse.f64(6_378_137.000_001);
+    reuse.rendered(0);
+    reuse.start();
+    reuse.f64(6_378_137.000_002);
+    expect(reuse.unchanged(0)).toBe(false);
   });
 });

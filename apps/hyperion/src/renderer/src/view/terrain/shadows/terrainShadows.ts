@@ -31,6 +31,10 @@
  *   it only where it rendered that layer last ({@link TerrainShadows.holds}): the set records the
  *   owner of each layer's last render ({@link TerrainShadows.renderCasters}), and forgets them all
  *   when it is let go, at a restore among others.
+ * - **Reuse** (plan R14, R14.T6.a; {@link CascadeReuse}): a view skips a cascade's pass where every
+ *   input of its casters is as it was at its last render of the layer, word for word, and it
+ *   rendered the layer last. A provider of other casters that gives no revision
+ *   ({@link ShadowCasters.add}) re-renders every cascade every frame.
  */
 
 import { depthLayersTexture } from "../../engine/depthLayers";
@@ -108,9 +112,27 @@ export type ShadowCasterProvider = (
   view: TerrainViewId,
 ) => ReadonlyArray<DrawItem>;
 
+/**
+ * A provider's revision (plan R14, R14.T6.a): a number that changes whenever any of its draws of
+ * any cascade would, so that a cascade whose inputs are otherwise unchanged is reused.
+ */
+export type ShadowCasterRevision = () => number;
+
+/** A provider and its revision, `null` where it gives none. */
+interface ProviderEntry {
+  readonly provider: ShadowCasterProvider;
+  readonly revision: ShadowCasterRevision | null;
+}
+
 /** The registry of the casters that are not terrain, one a terrain session (D9). */
 export class ShadowCasters {
-  #providers: ReadonlyArray<ShadowCasterProvider> = [];
+  #providers: ReadonlyArray<ProviderEntry> = [];
+  #version = 0;
+
+  /** How many times a provider was added or removed (plan R14, R14.T6.a). */
+  get version(): number {
+    return this.#version;
+  }
 
   /** How many providers it holds. */
   get size(): number {
@@ -121,13 +143,36 @@ export class ShadowCasters {
    * Adds a provider, whose draws each cascade's pass draws after the terrain's, from the next frame
    * on.
    *
+   * @param revision - Its revision (plan R14, R14.T6.a); absent, every cascade is rendered again
+   *   every frame while it is held, so that a moving craft's shadow never freezes.
    * @returns Its removal, which takes effect at once.
    */
-  add(provider: ShadowCasterProvider): () => void {
-    this.#providers = [...this.#providers, provider];
+  add(provider: ShadowCasterProvider, revision?: ShadowCasterRevision): () => void {
+    const entry: ProviderEntry = { provider, revision: revision ?? null };
+    this.#providers = [...this.#providers, entry];
+    this.#version += 1;
     return () => {
-      this.#providers = this.#providers.filter((each) => each !== provider);
+      const kept = this.#providers.filter((each) => each !== entry);
+      if (kept.length !== this.#providers.length) {
+        this.#providers = kept;
+        this.#version += 1;
+      }
     };
+  }
+
+  /**
+   * Every provider's revision now, in the order they were added (plan R14, R14.T6.a), or `null`
+   * where any gives none.
+   */
+  revisions(): number[] | null {
+    const revisions: number[] = [];
+    for (const { revision } of this.#providers) {
+      if (revision === null) {
+        return null;
+      }
+      revisions.push(revision());
+    }
+    return revisions;
   }
 
   /** Every provider's draws of cascade `index` of `view`'s `set`, in the order they were added. */
@@ -135,12 +180,95 @@ export class ShadowCasters {
     const providers = this.#providers;
     const draws: DrawItem[] = [];
     for (let n = 0; n < providers.length; n += 1) {
-      const provider = providers[n];
-      if (provider !== undefined) {
-        draws.push(...provider(set, index, view));
+      const entry = providers[n];
+      if (entry !== undefined) {
+        draws.push(...entry.provider(set, index, view));
       }
     }
     return draws;
+  }
+}
+
+/**
+ * One view's cascades' caster inputs as each was last rendered (plan R14, R14.T6.a): a frame
+ * appends a cascade's inputs as 32-bit words, between {@link CascadeReuse.start} and
+ * {@link CascadeReuse.unchanged}, and a cascade whose words equal its last render's, one for one,
+ * is reused; {@link CascadeReuse.rendered} takes them as its last render's.
+ */
+export class CascadeReuse {
+  readonly #last: Array<Uint32Array | null> = Array.from({ length: CASCADE_COUNT }, () => null);
+  #words = new Uint32Array(1024);
+  #length = 0;
+  readonly #f64 = new Float64Array(1);
+  readonly #f64Words = new Uint32Array(this.#f64.buffer);
+
+  /** Starts a cascade's inputs. */
+  start(): void {
+    this.#length = 0;
+  }
+
+  /** Appends `words`, each a 32-bit word. */
+  words(words: Uint32Array): void {
+    this.#reserve(words.length);
+    this.#words.set(words, this.#length);
+    this.#length += words.length;
+  }
+
+  /** Appends `values`' `f32` bits. */
+  f32(values: Float32Array): void {
+    this.words(new Uint32Array(values.buffer, values.byteOffset, values.length));
+  }
+
+  /** Appends a byte buffer, a multiple of 4 bytes long, as its words. */
+  bytes(bytes: Uint8Array): void {
+    this.words(new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4));
+  }
+
+  /** Appends `value`'s `f64` bits, two words. */
+  f64(value: number): void {
+    this.#f64[0] = value;
+    this.word(this.#f64Words[0] ?? 0);
+    this.word(this.#f64Words[1] ?? 0);
+  }
+
+  /** Appends one 32-bit word. */
+  word(value: number): void {
+    this.#reserve(1);
+    this.#words[this.#length] = value;
+    this.#length += 1;
+  }
+
+  /** Whether the words appended since {@link CascadeReuse.start} equal cascade `index`'s last render's. */
+  unchanged(index: CascadeIndex): boolean {
+    const last = this.#last[index] ?? null;
+    if (last === null || last.length !== this.#length) {
+      return false;
+    }
+    const words = this.#words;
+    for (let n = 0; n < last.length; n += 1) {
+      if (last[n] !== words[n]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Takes the words appended since {@link CascadeReuse.start} as cascade `index`'s last render's. */
+  rendered(index: CascadeIndex): void {
+    this.#last[index] = this.#words.slice(0, this.#length);
+  }
+
+  /** Forgets every cascade's last render: the next frame renders each. */
+  forget(): void {
+    this.#last.fill(null);
+  }
+
+  #reserve(more: number): void {
+    if (this.#length + more > this.#words.length) {
+      const grown = new Uint32Array(Math.max(2 * this.#words.length, this.#length + more));
+      grown.set(this.#words.subarray(0, this.#length));
+      this.#words = grown;
+    }
   }
 }
 
