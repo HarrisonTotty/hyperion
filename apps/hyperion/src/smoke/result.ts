@@ -110,7 +110,7 @@ export const TRANSFER_WATCHDOG_MS = 660_000;
 
 /** What sets a run's watchdog: the main process's switches. */
 export interface SmokeWatchdogInputs {
-  /** `--smoke-part`'s value: `1` to `13`, or `all`. */
+  /** `--smoke-part`'s value: `1` to `15`, or `all`. */
   readonly part: string;
   /** Whether `--smoke-captures` asks for the capture frames. */
   readonly captures: boolean;

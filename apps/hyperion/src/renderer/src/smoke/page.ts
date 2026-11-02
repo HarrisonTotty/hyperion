@@ -8,12 +8,13 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in fourteen parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * groups are in fifteen parts, each a run of its own under the harness's watchdog (perf-smoke,
  * 2026-10-13), parts 2 to 6 and 8 to 14 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
- * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, part 7 R10's
- * terrain groups, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14 R08.T15.a.2's
- * deck, and part 1 every other; with no part given the page runs them all, in its order.
+ * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, parts 7 and 15
+ * R10's terrain groups, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14
+ * R08.T15.a.2's deck, and part 1 every other; with no part given the page runs them all, in its
+ * order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
@@ -35,8 +36,9 @@
  * twins on Earth, R08.T14.f's correction alone against its twins on Earth and its specialised march, and its kernels against their twins on a Saturn-class
  * figure in part 3 after R08.T6.g's heights; and part 7 R10.T10.b's lit terrain, R10.T10.e's
  * classes' curve in the lit-body kernel, R10.T10.c's
- * survey edge, R10.T16.c's frame, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
- * engine of its own, whose device it destroys). Three groups of part 1 run only when asked:
+ * survey edge, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
+ * engine of its own, whose device it destroys), and part 15 R10.T16.c's frame alone. Three groups
+ * of part 1 run only when asked:
  * R08.T8.c's far limb's timings and, after them, R08.T11's photorealistic frame's timings
  * (`frameTiming.ts`), after the low pick, when the run lifted timestamp quantization (`gpuTiming`,
  * the hardware runs of R01.T11), and R08.T8.c's far limb captures, after R07.T10.c's eclipse
@@ -196,9 +198,10 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * catalogue, 10 R08.T7's several suns, R08.T8.e's slot
  * layers on its binary and R10.T16.g's datum over the image, 11
  * R08.T9.b's Earth and Saturn-class figure and R08.T8.c's far limb's footprint, 12 R08.T11.b's
- * face count, R08.T11.e's Earth and R08.T11.d's specialised march over the shared read), 7 R10's
- * terrain groups (R10.T10.b, T10.c, T11, T16 and T9.b), which took part 6 to 163 s at a load of 2
- * once R10.T9.b's cascades joined them (2026-10-21), and 1 every other group but R05.T12.e's and
+ * face count, R08.T11.e's Earth and R08.T11.d's specialised march over the shared read), 7 and 15
+ * R10's terrain groups (R10.T10.b, T10.c, T11, T16 and T9.b; 15 R10.T16's frame), which took part 6
+ * to 163 s at a load of 2 once R10.T9.b's cascades joined them (2026-10-21), and 1 every other
+ * group but R05.T12.e's and
  * R05.T12.c's frames, which
  * parts 4 and 6 run first, before their twins start, to even the parts out (R08.T9.b's lit
  * materials, larger, took part 1 past 150 s under load), R08.T8.b's low pick, which has no twin,
@@ -250,9 +253,11 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * Saturn-class figure's twins, the smallest, went to part 3 (67 to 126 s) (2026-10-27).
  * R08.T15.a.2's deck brought its marches' catalogue and its twins on Earth and on a Saturn-class
  * figure, which part 13 (156 s on a pod at R08.T14.d.1's gate) and part 9 (112 s) could not take
- * whole, so part 14 joined, with both (2026-10-30).
+ * whole, so part 14 joined, with both (2026-10-30). R14's levers took part 7 to 238 to 242 s of
+ * its 360 s scaled watchdog on a pod, R10.T16's frame 124 to 127 s of it, so part 15 joined, with
+ * that frame alone (2026-11-02).
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14;
+type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -288,6 +293,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 13;
     case "14":
       return 14;
+    case "15":
+      return 15;
     default:
       return null;
   }
@@ -342,7 +349,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 13 or all");
+    return failed("the part asked for is not 1 to 15 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -589,10 +596,11 @@ async function run(
     checkClassCurveSeam(engine, checks),
   );
   await group(7, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));
-  // With the captures, R14's levers' frames: R14.T1.a's here, R14.T1.d's with the cascades; under
-  // `--fixture=broken-wgsl`, R14.T1.f's fallback from a refused cull kernel too.
+  // In part 15, alone: beside R10's other terrain groups it took part 7 to 242 s of 360 s on a pod
+  // (2026-11-02). With the captures, R14's levers' frames: R14.T1.a's here, R14.T1.d's with the
+  // cascades; under `--fixture=broken-wgsl`, R14.T1.f's fallback from a refused cull kernel too.
   let images: CapturedImage[] = [];
-  await group(7, "R10.T16 the frame", async () => {
+  await group(15, "R10.T16 the frame", async () => {
     images = [...images, ...(await checkTerrainFrame(engine, checks, captures, fixture))];
   });
   await group(7, "R14.T1.b the cluster cull against its twin", () =>

@@ -2013,3 +2013,5 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     `InstrumentsFrame.geometry` carry the launch's override; `LitBodyEngine` takes
     `createComputeAsync` and `releaseCompute`.
   - Timed passes: one more a frame with mesh bodies (`body cluster cull`).
+- **fix-test-render-part7** (2026-11-02): R10.T16's frame group (`smoke/terrainFrame.ts`) runs in
+  test-render's part 15, alone (`--part=15`); R10's other terrain groups and new ones stay in part 7.

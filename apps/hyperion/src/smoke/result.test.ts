@@ -131,6 +131,9 @@ describe("readSmokeImages", () => {
 /** `scripts/testRender.sh`, which sets each run's outer limit. */
 const script = (): string => readFileSync(join(__dirname, "../../scripts/testRender.sh"), "utf8");
 
+/** The parts after the first, 2 to 15, which take neither part 1's captures nor its timings. */
+const LATER_PARTS = Array.from({ length: 14 }, (_, k) => String(k + 2));
+
 describe("smokeWatchdogMs", () => {
   const plain = {
     part: "1",
@@ -157,8 +160,8 @@ describe("smokeWatchdogMs", () => {
     }
   });
 
-  it("adds nothing for the captures to parts 2 to 13, which take none", () => {
-    for (const part of ["2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"]) {
+  it("adds nothing for the captures to parts 2 to 15, which take none", () => {
+    for (const part of LATER_PARTS) {
       expect(smokeWatchdogMs({ ...plain, part, captures: true })).toBe(180_000);
     }
   });
@@ -174,8 +177,8 @@ describe("smokeWatchdogMs", () => {
     }
   });
 
-  it("adds nothing for the GPU timings to parts 2 to 13, which take none", () => {
-    for (const part of ["2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"]) {
+  it("adds nothing for the GPU timings to parts 2 to 15, which take none", () => {
+    for (const part of LATER_PARTS) {
       expect(smokeWatchdogMs({ ...plain, part, gpuTiming: true })).toBe(180_000);
     }
   });
@@ -256,16 +259,20 @@ describe("smokeWatchdogMs", () => {
 });
 
 /**
- * Runs a copy of `scripts/testRender.sh` with `HYPERION_SMOKE_WATCHDOG_SCALE` at `scale`, in a
- * directory of its own where no Electron can be found, so that a refusal lost would launch nothing.
+ * Runs a copy of `scripts/testRender.sh` with `HYPERION_SMOKE_WATCHDOG_SCALE` at `scale` and `args`,
+ * in a directory of its own where no Electron can be found, so that a refusal lost would launch
+ * nothing.
  */
-function runScriptAtScale(scale: string): SpawnSyncReturns<string> {
+function runScriptAtScale(
+  scale: string,
+  args: ReadonlyArray<string> = [],
+): SpawnSyncReturns<string> {
   const dir = mkdtempSync(join(tmpdir(), "hyperion-test-render-script-"));
   try {
     mkdirSync(join(dir, "scripts"));
     const copy = join(dir, "scripts", "testRender.sh");
     writeFileSync(copy, script());
-    return spawnSync("bash", [copy], {
+    return spawnSync("bash", [copy, ...args], {
       env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HYPERION_SMOKE_WATCHDOG_SCALE: scale },
       encoding: "utf8",
       timeout: 30_000,
@@ -285,6 +292,22 @@ describe.runIf(process.platform !== "win32")("testRender.sh's scale", () => {
         `HYPERION_SMOKE_WATCHDOG_SCALE must be a whole number from 1 to ${SMOKE_WATCHDOG_SCALE_MAX}, not '${scale}'`,
       );
     }
+  });
+});
+
+describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
+  it("takes every part from 1 to 15 as --part= and refuses 16, before any run", () => {
+    for (const part of ["1", ...LATER_PARTS]) {
+      expect(runScriptAtScale("1", [`--part=${part}`]).stderr).not.toContain("unknown argument");
+    }
+    const sixteen = runScriptAtScale("1", ["--part=16"]);
+    expect(sixteen.status).toBe(2);
+    expect(sixteen.stderr).toContain("unknown argument --part=16");
+  });
+
+  it("runs every part from 1 to 15 when none is asked for", () => {
+    const parts = /^ {4}parts=\(([\d ]+)\)$/mu.exec(script())?.[1];
+    expect(parts).toBe(["1", ...LATER_PARTS].join(" "));
   });
 });
 
