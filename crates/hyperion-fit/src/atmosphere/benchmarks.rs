@@ -95,7 +95,7 @@ use Level::{Bottom, Top};
 /// The threads each benchmark traces on: the slots `.config/nextest.toml` reserves for it, or the
 /// fewer a run grants (`hyperion_testkit::threads::granted`). The tracer's output is the same, bit
 /// for bit, on any number of threads.
-const THREADS: usize = 4;
+const THREADS: usize = 16;
 
 /// The largest standard error a value may carry, relative to its geometry's I (Design note 10).
 const SIGMA_LIMIT: f64 = 3e-3;
@@ -739,7 +739,7 @@ fn stokes_radiances_match_natraj_2009_at_tau_one_over_a_bright_ground() {
 }
 
 #[test]
-#[ignore = "slow: Natraj and Hovenier 2012's τ 2 Rayleigh table, 20 geometries, 2.5 minutes"]
+#[ignore = "slow: Natraj and Hovenier 2012's τ 2 Rayleigh table, 20 geometries, 40 s"]
 fn stokes_radiances_match_natraj_and_hovenier_2012_at_tau_two() {
     natraj(
         "Natraj and Hovenier 2012, τ 2, μ₀ 0.5, A 0.25",
@@ -1384,7 +1384,7 @@ fn kokhanovsky_layer(layer: &KokhanovskyLayer<'_>) {
 }
 
 #[test]
-#[ignore = "slow: Kokhanovsky et al. 2010's aerosol layer, 36 geometries, two minutes"]
+#[ignore = "slow: Kokhanovsky et al. 2010's aerosol layer, 36 geometries, half a minute"]
 fn stokes_radiances_match_kokhanovsky_2010_aerosol_layer() {
     kokhanovsky_layer(&KokhanovskyLayer {
         name: "Kokhanovsky et al. 2010, aerosol",
@@ -2404,7 +2404,7 @@ fn deep_check_views_keep_away_from_the_sun() {
 
 #[test]
 #[ignore = "slow: the deep estimator on and off in a Henyey–Greenstein slab of g 0.7 and τ 6, 16 \
-            geometries at 220,000 samples each side, about 3 minutes on 4 threads"]
+            geometries at 220,000 samples each side, about 40 s on 16 threads"]
 fn the_deep_estimator_agrees_with_vroom_where_vroom_converges() {
     // R08.T12.h's check that the deep estimator is unbiased (Design note 10's agreement test): the
     // two estimators, each at its own seed so that they are independent, held to each other, each
