@@ -273,6 +273,7 @@ describe("the spike's metrics", () => {
       counts: {
         patches: { interior, edge: 2 },
         drawnTriangles,
+        litClusterTriangles: drawnTriangles - 1,
         casterTriangles: null,
         overlayTriangles,
       },
@@ -290,6 +291,7 @@ describe("the spike's metrics", () => {
           interiorPatches: { frames: 3, p50: 11, max: 12 },
           edgePatches: { frames: 3, p50: 2, max: 2 },
           drawnTriangles: { frames: 3, p50: 200, max: 300 },
+          litClusterTriangles: { frames: 3, p50: 199, max: 299 },
           casterTriangles: null,
           overlayTriangles: { frames: 2, p50: 85, max: 90 },
         },
@@ -298,6 +300,7 @@ describe("the spike's metrics", () => {
           interiorPatches: null,
           edgePatches: null,
           drawnTriangles: null,
+          litClusterTriangles: null,
           casterTriangles: null,
           overlayTriangles: null,
         },

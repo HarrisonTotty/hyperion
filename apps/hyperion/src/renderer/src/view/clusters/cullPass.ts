@@ -5,22 +5,26 @@
  *
  * @remarks
  * A pass is a shadow cascade's light-space box (T1.b–d) or a camera's frustum (T1.e: the overlay's
- * terrain depth, and from plan R14's T2 the lit pass). Each pass names the tolerance its level of
+ * terrain depth; T2.a: the lit pass, with the body's horizon, whose kept clusters the cull marks
+ * for the stable compaction rather than appending them). Each pass names the tolerance its level of
  * detail is chosen at (a cascade's texel, m), the coarsest stride it may take, and where its buckets
  * begin (`clusters/buckets.ts`). Every position is camera-relative in the frame the consumer's
  * instance origins are in (terrain's: the body's non-rotating axes, as `TerrainPass`' `#write` forms
  * them), every number formed in `f64` and narrowed once here.
  *
- * `CullPass`, 128 B: `header` (kind: 0 none, 1 cascade, 2 camera; the stride cap as log₂ of it;
- * the pass's first bucket; its first list entry) and `scalars` (the tolerance, m; then a cascade's
- * radius r, m, its far plane's distance from its centre away from the light, m, and its receivers'
- * cull, 1 on and 0 off, T1.c; or a camera's planes' count). A cascade then holds the light's axes
+ * `CullPass`, 128 B: `header` (kind: 0 none, 1 cascade, 2 camera appended, 3 camera ordered; the
+ * stride cap as log₂ of it; the pass's first bucket; its first list entry) and `scalars` (the
+ * tolerance, m; then a cascade's radius r, m, its far plane's distance from its centre away from
+ * the light, m, and its receivers' cull, 1 on and 0 off, T1.c; or a camera's planes' count, its
+ * horizon's plane distance, m, and the sine of its cone's half-angle, 0 for no horizon test). A
+ * cascade then holds the light's axes
  * x_L, y_L and z_L (towards the light), its centre less the camera in those axes, m, and two
  * `vec4f` of T1.c's receivers' cull: `receivers` (the depths receivers sample the cascade between,
  * m, and their reach nearer and farther than a caster, m) and `covered` (the next nearer cascade's
  * covered square's centre x and y and half-side, −1 for none, and the receivers' reach across the
  * light, m). A camera holds its planes in the six `vec4f` after its scalars, each its inward normal
- * and its offset, m.
+ * and its offset, m; one with a horizon holds at most five, its sixth `vec4f` the horizon's axis and
+ * the cosine of its cone's half-angle (T2.a, {@link CullHorizon}).
  *
  * `CullParams`, 144 B: the page's axes into the instances' frame by column (terrain: the body's
  * rotation), `counts` (instances, `u32` words an instance record, clusters a page, passes), the
@@ -74,7 +78,7 @@ export interface CullReceivers {
   } | null;
 }
 
-/** A pass the cull culls for (see the module's remarks). */
+/** A shadow cascade's light-space box as a pass of the cull (see the module's remarks). */
 export interface CascadeCullPass {
   readonly kind: "cascade";
   /** The light's axes x_L, y_L and z_L (towards the light) in the instances' frame. */
@@ -104,14 +108,68 @@ export interface CullPlane {
 export const MAX_CULL_PLANES = 6;
 
 /**
+ * The body's horizon as a camera pass tests a cluster's sphere against it (plan R14, R14.T2.a;
+ * Design note 4): R05's occluder, the sphere of radius R_occ about the body's centre inside every
+ * possible surface (`terrain/cull.ts`' `horizonCone`), seen from the camera at C from that centre.
+ * Its cone, from the camera tangent to the occluder, and the plane through the tangent circle bound
+ * the occluded region: a point inside the cone and beyond the plane lies behind the occluder (Cozzi
+ * and Ring 2011, the Cesium horizon-culling method, its point test in R05's `aboveHorizon`), so a
+ * sphere wholly inside both is refused. Its terms are formed in `f64` on the CPU, since |C|² − R²
+ * cannot be formed in `f32` near the ground.
+ */
+export interface CullHorizon {
+  /** The cone's axis, −C ÷ |C|, from the camera towards the body's centre, in the instances' frame. */
+  readonly axis: Vec3;
+  /** The plane through the tangent circle: its distance from the camera along the axis, H² ÷ |C|, m. */
+  readonly planeM: number;
+  /** The sine and cosine of the cone's half-angle: R_occ ÷ |C| and H ÷ |C|, H² = |C|² − R_occ². */
+  readonly sin: number;
+  readonly cos: number;
+}
+
+/**
+ * The horizon of the occluder of radius `occluderRadiusM` seen from `cameraFromCentreM`, the camera
+ * less the body's centre in the instances' frame, m; `null` at or below the occluder, where R05's
+ * test is skipped too.
+ */
+export function cullHorizonOf(
+  cameraFromCentreM: Vec3,
+  occluderRadiusM: number,
+): CullHorizon | null {
+  const c = Math.hypot(cameraFromCentreM.x, cameraFromCentreM.y, cameraFromCentreM.z);
+  const r = occluderRadiusM;
+  const horizonSq = (c - r) * (c + r);
+  if (!(horizonSq > 0 && r > 0 && Number.isFinite(c))) {
+    return null;
+  }
+  return {
+    axis: { x: -cameraFromCentreM.x / c, y: -cameraFromCentreM.y / c, z: -cameraFromCentreM.z / c },
+    planeM: horizonSq / c,
+    sin: r / c,
+    cos: Math.sqrt(horizonSq) / c,
+  };
+}
+
+/**
  * A camera's frustum as a pass of the cull (plan R14, R14.T1.e): the overlay's terrain depth, and
  * from plan R14's T2 the lit pass. A cluster is refused where its sphere lies wholly outside one of
  * the planes, the camera inside it kept.
  */
 export interface CameraCullPass {
   readonly kind: "camera";
-  /** The frustum's planes (R05's `frustumOf`: four sides and the near), at most {@link MAX_CULL_PLANES}. */
+  /**
+   * The frustum's planes (R05's `frustumOf`: four sides and the near), at most
+   * {@link MAX_CULL_PLANES}, or one fewer with a horizon.
+   */
   readonly planes: ReadonlyArray<CullPlane>;
+  /** The body's horizon, which refuses a cluster wholly behind it (T2.a), or `null` for none. */
+  readonly horizon: CullHorizon | null;
+  /**
+   * How its kept clusters are recorded: appended to its buckets in any order (a depth-only pass's,
+   * T1.e), or marked, one word a cluster, for the stable compaction to write its buckets in the draw
+   * set's order (a colour pass's, T2.a; `compact.ts`). A dispatch has at most one ordered pass.
+   */
+  readonly order: "appended" | "ordered";
   /** The tolerance its strides are chosen at, m: unread at stride 1 (plan R14's T3.c). */
   readonly toleranceM: number;
   /** The coarsest stride it may take: the overlay's depth takes 1. */
@@ -158,7 +216,7 @@ export function packCullPasses(
       return;
     }
     const place = places[n] ?? { bucketBase: 0, listBase: 0 };
-    view.setUint32(at, PASS_KIND_CODE[pass.kind], true);
+    view.setUint32(at, passKindCode(pass), true);
     view.setUint32(at + 4, Math.log2(pass.strideCap), true);
     view.setUint32(at + 8, place.bucketBase, true);
     view.setUint32(at + 12, place.listBase, true);
@@ -174,17 +232,38 @@ export function packCullPasses(
   });
 }
 
-/** A pass's kind as `clusterCull.wgsl`'s header holds it, 0 for none. */
-const PASS_KIND_CODE: Readonly<Record<CullPass["kind"], number>> = { cascade: 1, camera: 2 };
+/** A pass's kind as `clusterCull.wgsl`'s header holds it, 0 for none: a camera's by its order. */
+function passKindCode(pass: CullPass): number {
+  let code: number;
+  switch (pass.kind) {
+    case "cascade":
+      code = 1;
+      break;
+    case "camera":
+      code = pass.order === "ordered" ? 3 : 2;
+      break;
+  }
+  return code;
+}
 
 /** A camera pass's planes after its scalars: their count, then each plane as a `vec4f`. */
 function packCamera(view: DataView, at: number, pass: CameraCullPass): void {
-  if (pass.planes.length > MAX_CULL_PLANES) {
+  const most = pass.horizon === null ? MAX_CULL_PLANES : MAX_CULL_PLANES - 1;
+  if (pass.planes.length > most) {
     throw new RangeError(
-      `a camera pass has at most ${String(MAX_CULL_PLANES)} planes, not ${String(pass.planes.length)}`,
+      `a camera pass has at most ${String(most)} planes, not ${String(pass.planes.length)}`,
     );
   }
   view.setFloat32(at + 20, pass.planes.length, true);
+  const horizon = pass.horizon;
+  if (horizon !== null) {
+    view.setFloat32(at + 24, horizon.planeM, true);
+    view.setFloat32(at + 28, horizon.sin, true);
+    view.setFloat32(at + 112, horizon.axis.x, true);
+    view.setFloat32(at + 116, horizon.axis.y, true);
+    view.setFloat32(at + 120, horizon.axis.z, true);
+    view.setFloat32(at + 124, horizon.cos, true);
+  }
   pass.planes.forEach((plane, k) => {
     view.setFloat32(at + 32 + 16 * k, plane.normal.x, true);
     view.setFloat32(at + 36 + 16 * k, plane.normal.y, true);

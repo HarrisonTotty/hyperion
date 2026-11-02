@@ -6,14 +6,17 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { Vec3 } from "../../geometry/vec3";
+import { dot, type Vec3 } from "../../geometry/vec3";
 import { declaredStructLayout } from "../engine/webgpu/uniforms";
 import clusterCullWgsl from "./clusterCull.wgsl?raw";
 import {
   cameraKeeps,
   cascadeKeeps,
   CULL_ROUNDING_M,
+  cullMarksTwin,
   cullTwin,
+  horizonRefuses,
+  NO_MARK,
   RECEIVER_ROUNDING_M,
   receiversRefuse,
   strideLevel,
@@ -24,6 +27,7 @@ import {
   type CullReceivers,
   CULL_PARAMS_BYTES,
   CULL_PASS_BYTES,
+  cullHorizonOf,
   MAX_CULL_PASSES,
   packCullParams,
   packCullPasses,
@@ -34,6 +38,11 @@ import {
   clusterFlags,
   packClusterRecord,
 } from "./record";
+
+/** Fails a test whose fixture lacks what it needs. */
+function fail(): never {
+  throw new Error("the test's fixture lacks what it needs");
+}
 
 /** A struct's members as (name, offset). */
 function offsets(name: string): Array<readonly [string, number]> {
@@ -307,6 +316,8 @@ const CAMERA: CameraCullPass = {
   ],
   toleranceM: 0,
   strideCap: 1,
+  horizon: null,
+  order: "appended",
 };
 
 /** Receivers between 40 m and 200 m, reaching 3 m nearer and 5 m farther, a cover below. */
@@ -668,5 +679,186 @@ describe("the cluster cull's camera pass in the brainstorm's cases (plan R14, R1
     }
     expect(misses).toEqual([]);
     expect([keptByExact, refusedByWidened].every((count) => count > 2_000)).toBe(true);
+  });
+});
+
+/** R05's point test (`terrain/cull.ts`' `aboveHorizon`, a corner's): whether `t` from the camera is occluded. */
+function pointOccluded(cameraFromCentreM: Vec3, occluderRadiusM: number, t: Vec3): boolean {
+  const r = occluderRadiusM;
+  const c = { x: cameraFromCentreM.x / r, y: cameraFromCentreM.y / r, z: cameraFromCentreM.z / r };
+  const horizonSq = c.x * c.x + c.y * c.y + c.z * c.z - 1;
+  if (!(horizonSq > 0)) {
+    return false;
+  }
+  const x = t.x / r;
+  const y = t.y / r;
+  const z = t.z / r;
+  const vtDotVc = -(x * c.x + y * c.y + z * c.z);
+  return vtDotVc > horizonSq && (vtDotVc * vtDotVc) / (x * x + y * y + z * z) > horizonSq;
+}
+
+/** `count` points on the sphere about `centre` of radius `radius`, a Fibonacci lattice, and its centre. */
+function spherePoints(centre: Vec3, radius: number, count = 200): Vec3[] {
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const points: Vec3[] = [centre];
+  for (let k = 0; k < count; k += 1) {
+    const z = 1 - (2 * (k + 0.5)) / count;
+    const s = Math.sqrt(1 - z * z);
+    points.push({
+      x: centre.x + radius * s * Math.cos(golden * k),
+      y: centre.y + radius * s * Math.sin(golden * k),
+      z: centre.z + radius * z,
+    });
+  }
+  return points;
+}
+
+describe("the cluster cull's horizon and ordered passes (plan R14, R14.T2.a)", () => {
+  /** An Earth-sized occluder, the camera `heightM` above it on z. */
+  const R_OCC = 6_356_000;
+  const above = (heightM: number): Vec3 => ({ x: 0, y: 0, z: R_OCC + heightM });
+
+  it("packs a camera pass's horizon in its scalars and its sixth vec4f, and an ordered pass as kind 3", () => {
+    const horizon = cullHorizonOf(above(1_000), R_OCC);
+    if (horizon === null) {
+      throw new Error("a camera above the occluder has a horizon");
+    }
+    const out = new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES);
+    const lit: CameraCullPass = { ...CAMERA, horizon, order: "ordered" };
+    packCullPasses(
+      [CAMERA, lit],
+      [
+        { bucketBase: 0, listBase: 0 },
+        { bucketBase: 8, listBase: 64 },
+      ],
+      out,
+    );
+    const view = new DataView(out);
+    const at = CULL_PASS_BYTES;
+    expect([
+      view.getUint32(0, true),
+      view.getFloat32(28, true),
+      view.getUint32(at, true),
+      [24, 28, 112, 116, 120, 124].map((o) => view.getFloat32(at + o, true)),
+    ]).toEqual([
+      2,
+      0,
+      3,
+      [
+        Math.fround(horizon.planeM),
+        Math.fround(horizon.sin),
+        Math.fround(horizon.axis.x),
+        Math.fround(horizon.axis.y),
+        Math.fround(horizon.axis.z),
+        Math.fround(horizon.cos),
+      ],
+    ]);
+    // With a horizon a camera pass holds five planes at most.
+    expect(() => {
+      packCullPasses(
+        [{ ...lit, planes: [...CAMERA.planes, CAMERA.planes[0] ?? fail()] }],
+        [{ bucketBase: 0, listBase: 0 }],
+        out,
+      );
+    }).toThrow(RangeError);
+  });
+
+  it("forms its horizon from the camera's place, and none at or below the occluder", () => {
+    const horizon = cullHorizonOf(above(1_000), R_OCC);
+    const c = R_OCC + 1_000;
+    expect([
+      horizon?.axis,
+      horizon?.sin,
+      horizon?.planeM,
+      cullHorizonOf(above(0), R_OCC),
+      cullHorizonOf(above(-50), R_OCC),
+    ]).toEqual([{ x: -0, y: -0, z: -1 }, R_OCC / c, (c * c - R_OCC * R_OCC) / c, null, null]);
+  });
+
+  it("refuses at grazing altitude a cluster wholly beyond the horizon, keeps one straddling it, and tests nothing below the occluder", () => {
+    // 2 m above the occluder: the horizon some 5 km out.
+    const camera = above(2);
+    const horizon = cullHorizonOf(camera, R_OCC) ?? fail();
+    const pass: CameraCullPass = { ...CAMERA, planes: [], horizon, order: "ordered" };
+    /** A sphere at angle `angleRad` round the occluder from the camera's foot, `heightM` up. */
+    const at = (angleRad: number, heightM: number): Vec3 => ({
+      x: (R_OCC + heightM) * Math.sin(angleRad),
+      y: 0,
+      z: (R_OCC + heightM) * Math.cos(angleRad) - camera.z,
+    });
+    const horizonRad = Math.acos(R_OCC / camera.z);
+    expect([
+      // 15 km out, some 8 m lies hidden: a sphere 50 m down is, one of 10 m on the occluder is not.
+      horizonRefuses(horizon, at(3 * horizonRad, -50), 10, 0),
+      horizonRefuses(horizon, at(3 * horizonRad, 0), 10, 0),
+      horizonRefuses(horizon, at(1.01 * horizonRad, 0), 1, 0),
+      horizonRefuses(horizon, at(3 * horizonRad, 0), 200, 0),
+      cameraKeeps(pass, at(0.5, 0), 1_000, 0),
+      cameraKeeps({ ...pass, horizon: cullHorizonOf(above(-1), R_OCC) }, at(0.5, 0), 1_000, 0),
+    ]).toEqual([true, false, false, false, false, true]);
+  });
+
+  it("never refuses a sphere any of whose points R05's horizon test or the frustum leaves in sight (zero false culls)", () => {
+    const next = random(0x14_2b);
+    let refused = 0;
+    const falseCulls: string[] = [];
+    for (let n = 0; n < 4_000; n += 1) {
+      const heightM = 10 ** (1 + 5 * next());
+      const camera = above(heightM);
+      const horizon = cullHorizonOf(camera, R_OCC) ?? fail();
+      // A sphere about the horizon's distance away, in any direction, of a cluster's size.
+      const reach = Math.sqrt(heightM * (2 * R_OCC + heightM)) * (0.5 + 2 * next());
+      const d = unit(next);
+      const centre = { x: reach * d.x, y: reach * d.y, z: reach * d.z };
+      const radius = 10 ** (next() * 4);
+      const pass: CameraCullPass = { ...CAMERA, horizon, order: "ordered" };
+      if (!cameraKeeps(pass, centre, radius, 0)) {
+        refused += 1;
+        const seen = spherePoints(centre, radius).some(
+          (p) =>
+            !pointOccluded(camera, R_OCC, p) &&
+            CAMERA.planes.every((plane) => dot(plane.normal, p) + plane.offsetM >= 0),
+        );
+        if (seen) {
+          falseCulls.push(`${String(heightM)} m: ${JSON.stringify(centre)} r ${String(radius)}`);
+        }
+      }
+    }
+    expect(falseCulls).toEqual([]);
+    expect(refused).toBeGreaterThan(400);
+  });
+
+  it("marks each cluster of the ordered pass with its template or none, and appends nothing for it", () => {
+    const records = [
+      record({ x: 0, y: 0, z: -100 }, 1),
+      record({ x: 0, y: 0, z: 50 }, 1),
+      record({ x: 0, y: 0, z: -80 }, 2, "terrain-skirt"),
+    ];
+    const input = {
+      instances: [
+        { originM: { x: 0, y: 0, z: 0 }, page: 0, passMask: 0b10, unitM: 0.1 },
+        { originM: { x: 0, y: 0, z: 0 }, page: 0, passMask: 0b01, unitM: 0.1 },
+      ],
+      records: (_page: number, cluster: number) => records[cluster] ?? record(Z, 0),
+      clustersPerPage: 3,
+      rotationColumns: [X, Y, Z] as const,
+      passes: [CAMERA, { ...CAMERA, order: "ordered" as const }],
+      places: [
+        { bucketBase: 0, listBase: 0 },
+        { bucketBase: 8, listBase: 100 },
+      ],
+      templates: 8,
+      viewAxis: { x: 0, y: 0, z: -1 },
+    };
+    expect([
+      [...cullMarksTwin(input, 0)],
+      Object.fromEntries([...cullTwin(input, 0)].toSorted(([a], [b]) => a - b)),
+    ]).toEqual([
+      // Instance 0 enters the ordered pass: its block ahead kept at stride 1 (template 0), the one
+      // behind refused, its strip ahead kept (template 4); instance 1 does not enter it.
+      [0, NO_MARK, 4, NO_MARK, NO_MARK, NO_MARK],
+      // The appended pass, instance 1's alone.
+      { 0: [256], 4: [256 + 2] },
+    ]);
   });
 });

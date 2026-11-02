@@ -227,6 +227,8 @@ export interface GeometryOverride {
   readonly casterStrideCap?: 1 | 2 | 4 | 8;
   /** R14.T1.e: where the symbology's pass takes the terrain's depth. */
   readonly overlayDepth?: "redraw" | "scene-depth" | "cluster";
+  /** R14.T2.a: the lit pass's interior patches through the cluster path. */
+  readonly litClusters?: boolean;
 }
 
 declare global {
@@ -1010,15 +1012,18 @@ export interface SpikeCountFigures {
 
 /**
  * One segment's terrain geometry a frame on the main view's lit pass (plan R14, R14.T1.f;
- * `TerrainPass.counts`): its interior and edge patches, its drawn triangles, its four cascades'
- * caster triangles summed and its overlay depth's triangles, each `null` where no frame of the
- * segment had it (no cascades on low, no counters back yet).
+ * `TerrainPass.counts`): its interior and edge patches, its drawn triangles (the interior mesh's,
+ * and as the lit pass's clusters drew them, R14.T2.a), its four cascades' caster triangles summed
+ * and its overlay depth's triangles, each `null` where no frame of the segment had it (no cascades
+ * on low, no counters back yet).
  */
 export interface SpikeGeometrySegment {
   readonly segment: string;
   readonly interiorPatches: SpikeCountFigures | null;
   readonly edgePatches: SpikeCountFigures | null;
   readonly drawnTriangles: SpikeCountFigures | null;
+  /** The drawn triangles as the lit pass's cluster path drew them (plan R14, R14.T2.a). */
+  readonly litClusterTriangles: SpikeCountFigures | null;
   readonly casterTriangles: SpikeCountFigures | null;
   readonly overlayTriangles: SpikeCountFigures | null;
 }

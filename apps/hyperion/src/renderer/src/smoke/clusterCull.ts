@@ -12,11 +12,34 @@
  * entries'. The first pass culls by its box alone, the next three by their receivers' depths too
  * (R14.T1.c), the second with no cover below, and the fifth is a camera's frustum (R14.T1.e). The
  * buckets' order varies with the appends', so each is compared as a set.
+ *
+ * The sixth is the lit pass's ordered camera pass (plan R14, R14.T2.a, `R14.T2.a the stable
+ * compaction against its twin`): the camera's frustum and an occluder's horizon, its marks read back
+ * and held between the twin's exact and doubly widened marks, and the stable compaction
+ * (`clusters/compact.ts`) dispatched over the device's marks, its pass's buckets read back and
+ * held to its twin's lists byte for byte, entry by entry in the draw set's order; then once more
+ * over random marks of more instances than its scan's workgroup has threads, so that the scan's runs
+ * are several instances long. Each variant runs its own path, the default the subgroup variant
+ * where the adapter offers subgroups, so that both paths are held to the twin.
  */
 
 import type { Vec3 } from "../geometry/vec3";
 import { ClusterBuckets } from "../view/clusters/buckets";
-import { CLUSTER_CULL_KERNEL, cullTwin, type CullTwinInput } from "../view/clusters/cull";
+import {
+  CLUSTER_COMPACT,
+  COMPACT_PHASES,
+  COMPACT_TEMPLATES,
+  compactTwin,
+  compactWorkgroups,
+  packCompactParams,
+} from "../view/clusters/compact";
+import {
+  CLUSTER_CULL_KERNEL,
+  cullMarksTwin,
+  cullTwin,
+  type CullTwinInput,
+  NO_MARK,
+} from "../view/clusters/cull";
 import {
   type CameraCullPass,
   type CascadeCullPass,
@@ -24,6 +47,7 @@ import {
   type CullReceivers,
   CULL_PARAMS_BYTES,
   CULL_PASS_BYTES,
+  cullHorizonOf,
   MAX_CULL_PASSES,
   packCullParams,
   packCullPasses,
@@ -37,14 +61,24 @@ import { terrainClusterMesh } from "../view/clusters/templates";
 import { quaternionFromRows } from "../view/camera/quaternion";
 import { frustumOf } from "../view/terrain/cull";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
-import type { BufferHandle, RenderEngine } from "../view/engine/types";
+import type { BufferHandle, ComputeHandle, RenderEngine } from "../view/engine/types";
 import type { Checks } from "./harness";
 
-/** The check's instances, pages, clusters a page and passes: four cascades and a camera. */
+/**
+ * The check's instances, pages, clusters a page and passes: four cascades, a camera, and the lit
+ * pass's ordered camera (R14.T2.a), the sixth.
+ */
 const INSTANCES = 48;
 const PAGES = 12;
 const CLUSTERS = 96;
-const PASSES = 5;
+const PASSES = 6;
+
+/** The cascades' passes, the first four, and the ordered pass's index, after the camera's. */
+const CASCADES = 4;
+const ORDERED = CASCADES + 1;
+
+/** The second compaction's instances: more than its scan's 128 threads, several a thread. */
+const MANY_INSTANCES = 1_300;
 
 /** A seeded uniform generator in [0, 1) (mulberry32). */
 function random(seed: number): () => number {
@@ -111,6 +145,9 @@ function deviceBuckets(
 ): Map<number, number[]> {
   const out = new Map<number, number[]>();
   for (let pass = 0; pass < PASSES; pass += 1) {
+    if (pass === ORDERED) {
+      continue;
+    }
     const place = buckets.place(pass);
     for (let t = 0; t < templates; t += 1) {
       const bucket = place.bucketBase + t;
@@ -152,11 +189,11 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       z: Math.fround(30_000 * (next() - 0.5)),
     },
     page: n % PAGES,
-    passMask: Math.floor(next() * 32),
+    passMask: Math.floor(next() * 64),
     unitM: 0.01 + next(),
   }));
   const axes = frame(next);
-  const cascades: CascadeCullPass[] = Array.from({ length: PASSES - 1 }, (_, k) => ({
+  const cascades: CascadeCullPass[] = Array.from({ length: CASCADES }, (_, k) => ({
     kind: "cascade",
     axes,
     centreFromCameraLightM: {
@@ -185,8 +222,26 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     }).planes,
     toleranceM: 0,
     strideCap: 1,
+    horizon: null,
+    order: "appended",
   };
-  const passes: CullPass[] = [...cascades, camera];
+  // The lit pass: the same camera, ordered, with the horizon of an occluder 20 km in radius whose
+  // near side lies 3 km away, 50° off its view axis, so that its cone (60° about its axis) holds one
+  // side of the frustum and the clusters the frustum keeps beyond the occluder there are refused by
+  // it, the others kept (R14.T2.a).
+  const off = (50 * Math.PI) / 180;
+  const toCamera = {
+    x: 23_000 * (Math.cos(off) * back.x + Math.sin(off) * right.x),
+    y: 23_000 * (Math.cos(off) * back.y + Math.sin(off) * right.y),
+    z: 23_000 * (Math.cos(off) * back.z + Math.sin(off) * right.z),
+  };
+  const lit: CameraCullPass = {
+    ...camera,
+    planes: camera.planes.slice(0, 5),
+    horizon: cullHorizonOf(toCamera, 20_000),
+    order: "ordered",
+  };
+  const passes: CullPass[] = [...cascades, camera, lit];
   const viewAxis = unit(next);
   const buckets = new ClusterBuckets(
     engine,
@@ -208,6 +263,21 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     return handle;
   };
   const kernel = await engine.createComputeAsync(CLUSTER_CULL_KERNEL);
+  const compact = await engine.createComputeAsync(CLUSTER_COMPACT);
+  const marks = engine.createBuffer({
+    name: "smoke clusters marks",
+    bytes: INSTANCES * CLUSTERS * 4,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "geometry-clusters",
+  });
+  made.push(marks);
+  const tallies = engine.createBuffer({
+    name: "smoke clusters tallies",
+    bytes: MANY_INSTANCES * COMPACT_TEMPLATES * 4,
+    usage: BUFFER_USAGE.STORAGE,
+    category: "geometry-clusters",
+  });
+  made.push(tallies);
   try {
     const recordBytes = new DataView(new ArrayBuffer(records.length * CLUSTER_RECORD_BYTES));
     records.forEach((record, n) => {
@@ -256,6 +326,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
           records: buffer("smoke clusters records", recordBytes),
           lists: buckets.lists,
           args: buckets.args,
+          marks,
         },
         sampled: {},
         storage: {},
@@ -263,6 +334,15 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       [INSTANCES, 1, 1],
       "smoke cluster cull",
     );
+    const deviceMarks = new Uint32Array(await engine.readBuffer(marks, "tolerance"));
+    compactOnDevice(engine, compact, {
+      marks,
+      tallies,
+      buckets,
+      pass: ORDERED,
+      instances: INSTANCES,
+      clusters: CLUSTERS,
+    });
     const args = new Uint32Array(await engine.readBuffer(buckets.args, "tolerance"));
     const lists = new Uint32Array(await engine.readBuffer(buckets.lists, "tolerance"));
     const device = deviceBuckets(args, lists, buckets, templates.length);
@@ -293,6 +373,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     };
     const exact = cullTwin(input, 0);
     const widened = cullTwin(input, 2);
+    const ordered = await orderedCheck(engine, buckets, input, deviceMarks);
     const boxes: CullPass[] = [];
     for (const pass of passes) {
       boxes.push(pass.kind === "cascade" ? { ...pass, receivers: null } : pass);
@@ -322,7 +403,19 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
         kept > 0 &&
         filled.size === templates.length &&
         byReceivers > 0,
-      `${String(kept)} entries kept of ${String(INSTANCES * CLUSTERS * PASSES)} tested, in ${String(filled.size)} of ${String(templates.length)} templates, ${String(byReceivers)} refused by the receivers' depths; ${String(missing)} the exact twin keeps missing, ${String(extra)} past the widened twin`,
+      `${String(kept)} entries kept of ${String(INSTANCES * CLUSTERS * (PASSES - 1))} tested, in ${String(filled.size)} of ${String(templates.length)} templates, ${String(byReceivers)} refused by the receivers' depths; ${String(missing)} the exact twin keeps missing, ${String(extra)} past the widened twin`,
+    );
+    const many = await manyCheck(engine, compact, tallies, next);
+    checks.check(
+      "R14.T2.a the lit pass's marks on the device are its twin's, its horizon refusing some, and the stable compaction writes its twin's lists byte for byte, in the draw set's order",
+      ordered.missing === 0 &&
+        ordered.extra === 0 &&
+        ordered.kept > 0 &&
+        ordered.byHorizon > 0 &&
+        ordered.differing === 0 &&
+        many.differing === 0 &&
+        many.entries > 0,
+      `the lit pass: ${String(ordered.kept)} clusters marked of ${String(INSTANCES * CLUSTERS)}, ${String(ordered.byHorizon)} refused by the horizon alone; ${String(ordered.missing)} the exact twin marks missing, ${String(ordered.extra)} past the widened twin; its compaction ${String(ordered.entries)} entries, ${String(ordered.differing)} differing from the twin's; over ${String(MANY_INSTANCES)} instances of random marks ${String(many.entries)} entries, ${String(many.differing)} differing`,
     );
   } finally {
     for (const handle of made) {
@@ -330,5 +423,175 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     }
     buckets.dispose();
     engine.releaseCompute(kernel);
+    engine.releaseCompute(compact);
+  }
+}
+
+/** What the stable compaction is dispatched over: the marks, the tallies and a pass's buckets. */
+interface CompactRun {
+  readonly marks: BufferHandle;
+  readonly tallies: BufferHandle;
+  readonly buckets: ClusterBuckets;
+  readonly pass: number;
+  readonly instances: number;
+  readonly clusters: number;
+}
+
+/** Dispatches the stable compaction's count, scan and scatter over `run` (R14.T2.a). */
+function compactOnDevice(engine: RenderEngine, compact: ComputeHandle, run: CompactRun): void {
+  const place = run.buckets.place(run.pass);
+  for (const phase of COMPACT_PHASES) {
+    engine.dispatch(
+      compact,
+      {
+        uniforms: {
+          params: packCompactParams({
+            instances: run.instances,
+            clustersPerPage: run.clusters,
+            templates: COMPACT_TEMPLATES,
+            phase,
+            bucketBase: place.bucketBase,
+            listBase: place.listBase,
+            templateOffsets: run.buckets.templateOffsets,
+          }),
+        },
+        buffers: {
+          marks: run.marks,
+          tallies: run.tallies,
+          lists: run.buckets.lists,
+          args: run.buckets.args,
+        },
+        sampled: {},
+        storage: {},
+      },
+      compactWorkgroups(phase, run.instances),
+      "smoke cluster compact",
+    );
+  }
+}
+
+/** Pass `pass`'s buckets on the device, each template's entries in their list's order. */
+async function deviceLists(
+  engine: RenderEngine,
+  buckets: ClusterBuckets,
+  pass: number,
+): Promise<number[][]> {
+  const args = new Uint32Array(await engine.readBuffer(buckets.args, "tolerance"));
+  const lists = new Uint32Array(await engine.readBuffer(buckets.lists, "tolerance"));
+  const place = buckets.place(pass);
+  return Array.from({ length: COMPACT_TEMPLATES }, (_, t) => {
+    const count = args[(place.bucketBase + t) * 5 + 1] ?? 0;
+    const from = place.listBase + (buckets.templateOffsets[t] ?? 0);
+    return [...lists.subarray(from, from + count)].map((e) => (e >>> 8) * 256 + (e & 0xff));
+  });
+}
+
+/** The entries of `device` that differ from `twin`'s, place by place, and their total. */
+function listsDiffer(
+  device: ReadonlyArray<ReadonlyArray<number>>,
+  twin: ReadonlyArray<ReadonlyArray<number>>,
+): { readonly differing: number; readonly entries: number } {
+  let differing = 0;
+  let entries = 0;
+  twin.forEach((list, t) => {
+    const held = device[t] ?? [];
+    entries += held.length;
+    differing += Math.abs(held.length - list.length);
+    list.forEach((entry, k) => {
+      differing += k < held.length && held[k] !== entry ? 1 : 0;
+    });
+  });
+  return { differing, entries };
+}
+
+/**
+ * The ordered pass's marks on the device against its twin's exact and widened marks, those its
+ * horizon alone refuses, and its compaction's lists against the twin's over the device's marks.
+ */
+async function orderedCheck(
+  engine: RenderEngine,
+  buckets: ClusterBuckets,
+  input: CullTwinInput,
+  deviceMarks: Uint32Array,
+): Promise<{
+  readonly kept: number;
+  readonly missing: number;
+  readonly extra: number;
+  readonly byHorizon: number;
+  readonly differing: number;
+  readonly entries: number;
+}> {
+  const exact = cullMarksTwin(input, 0);
+  const widened = cullMarksTwin(input, 2);
+  const noHorizon = cullMarksTwin(
+    {
+      ...input,
+      passes: input.passes.map((pass) =>
+        pass?.kind === "camera" && pass.order === "ordered" ? { ...pass, horizon: null } : pass,
+      ),
+    },
+    0,
+  );
+  let kept = 0;
+  let missing = 0;
+  let extra = 0;
+  let byHorizon = 0;
+  deviceMarks.forEach((mark, at) => {
+    kept += mark === NO_MARK ? 0 : 1;
+    missing += exact[at] !== NO_MARK && mark !== exact[at] ? 1 : 0;
+    extra += mark !== NO_MARK && widened[at] !== mark ? 1 : 0;
+    byHorizon += noHorizon[at] !== NO_MARK && exact[at] === NO_MARK ? 1 : 0;
+  });
+  const twin = compactTwin(deviceMarks, INSTANCES, CLUSTERS, COMPACT_TEMPLATES);
+  return {
+    kept,
+    missing,
+    extra,
+    byHorizon,
+    ...listsDiffer(await deviceLists(engine, buckets, ORDERED), twin.lists),
+  };
+}
+
+/** The stable compaction over {@link MANY_INSTANCES} instances of random marks against its twin. */
+async function manyCheck(
+  engine: RenderEngine,
+  compact: ComputeHandle,
+  tallies: BufferHandle,
+  next: () => number,
+): Promise<{ readonly differing: number; readonly entries: number }> {
+  const { templates } = terrainClusterMesh();
+  const marksData = Uint32Array.from({ length: MANY_INSTANCES * CLUSTERS }, () =>
+    next() < 0.5 ? NO_MARK : Math.floor(next() * COMPACT_TEMPLATES),
+  );
+  const marks = engine.createBuffer({
+    name: "smoke compaction marks",
+    bytes: marksData.byteLength,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "geometry-clusters",
+  });
+  // A bucket a template with room for every cluster of every instance, whatever its shape.
+  const buckets = new ClusterBuckets(
+    engine,
+    "smoke compaction",
+    1,
+    templates,
+    templates.map(() => MANY_INSTANCES * CLUSTERS),
+  );
+  try {
+    engine.writeBuffer(marks, 0, marksData);
+    buckets.clear();
+    compactOnDevice(engine, compact, {
+      marks,
+      tallies,
+      buckets,
+      pass: 0,
+      instances: MANY_INSTANCES,
+      clusters: CLUSTERS,
+    });
+    const twin = compactTwin(marksData, MANY_INSTANCES, CLUSTERS, COMPACT_TEMPLATES);
+    return listsDiffer(await deviceLists(engine, buckets, 0), twin.lists);
+  } finally {
+    engine.releaseBuffer(marks);
+    buckets.dispose();
   }
 }

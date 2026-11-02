@@ -134,6 +134,7 @@ describe("the geometry's settings (plan R14)", () => {
         casterDepthCull: true,
         casterStrideCap: 8,
         overlayDepth: "cluster",
+        litClusters: true,
       });
     }
     expect(GEOMETRY_BEFORE_R14).toEqual({
@@ -141,6 +142,7 @@ describe("the geometry's settings (plan R14)", () => {
       casterDepthCull: false,
       casterStrideCap: 1,
       overlayDepth: "redraw",
+      litClusters: false,
     });
   });
 

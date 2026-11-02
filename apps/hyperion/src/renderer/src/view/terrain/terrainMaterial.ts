@@ -558,6 +558,73 @@ export function terrainClusterShadowMaterialSpec(
   };
 }
 
+/** terrainLitShade.wgsl's `Draw`'s last field and its end, after which a cluster form takes its base. */
+const LIT_DRAW_END = "  cascadeViewAxis : vec4f,\n}";
+
+/**
+ * A lit terrain source whose `Draw` takes a bucket's list base, `clusterBase`, after its own
+ * fields (plan R14, R14.T2.a), as the cluster vertex stage reads it (`terrainCluster.wgsl`); the
+ * shading is the lit material's to the byte.
+ *
+ * @throws Error unless the lit `Draw`'s end occurs exactly once in `source`.
+ */
+export function withClusterBase(source: string): string {
+  const parts = source.split(LIT_DRAW_END);
+  if (parts.length !== 2) {
+    throw new Error(
+      `a lit cluster form needs terrainLitShade.wgsl's Draw once, found ${String(parts.length - 1)}`,
+    );
+  }
+  return parts.join(
+    "  cascadeViewAxis : vec4f,\n  // The bucket's first entry in the lists (`clusters/buckets.ts`' `clusterBase`).\n  clusterBase : u32,\n}",
+  );
+}
+
+/** The console names of the two paths' interior patches' lit forms on the cluster path (R14.T2.a). */
+const LIT_CLUSTER_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "CLUSTER TERRAIN OFFSETS",
+  "face-differences": "TERRAIN CLUSTERS",
+};
+
+/** The console names of their emissive forms (plan R14, R14.T2.a; R08.T18.a). */
+const LIT_EMISSIVE_CLUSTER_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "CLUSTER EMISSIVE OFFSETS",
+  "face-differences": "EMISSIVE TERRAIN CLUSTERS",
+};
+
+/**
+ * The interior patches' lit material on the cluster path, or its emissive form, for a vertex path
+ * (plan R14, R14.T2.a): the interior form's bindings, uniforms, states and fragment stage, without
+ * the survey discard, its vertex stage the cluster path's (`withClusterVertex`), drawn with the
+ * terrain cluster mesh from the lit pass's buckets, its `Draw` taking `clusterBase` after the
+ * cascades' fields.
+ *
+ * @remarks
+ * Its vertex stage reads R05's storage (four on `face-differences`), the survey mask and the
+ * lists: seven at most against WebGPU's eight; its fragment stage the interior form's four.
+ */
+export function terrainLitClusterMaterialSpec(
+  path: TerrainVertexPath,
+  emissive: boolean,
+): WgslMaterialSpec {
+  const interior = emissive
+    ? terrainLitEmissiveInteriorMaterialSpec(path)
+    : terrainLitInteriorMaterialSpec(path);
+  const source = withClusterVertex(withClusterBase(interior.fragmentWgsl));
+  return {
+    ...interior,
+    name: `terrain-lit-${emissive ? "emissive-" : ""}cluster-${path}`,
+    displayName: (emissive ? LIT_EMISSIVE_CLUSTER_DISPLAY_NAMES : LIT_CLUSTER_DISPLAY_NAMES)[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...interior.uniforms, { name: "clusterBase", type: "u32" }],
+    storageBuffers: [
+      ...(interior.storageBuffers ?? []),
+      { name: "clusterLists", binding: TERRAIN_LIT_BINDINGS.clusterLists, stages: ["vertex"] },
+    ],
+  };
+}
+
 /** The console names of the two paths' cluster depths (plan R14, R14.T1.e). */
 const CLUSTER_DEPTH_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
   "baked-offsets": "CLUSTER DEPTH OFFSETS",
@@ -632,6 +699,18 @@ export const TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS: ReadonlyArray<WgslMaterial
 export const TERRAIN_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainDepthMaterialSpec("baked-offsets"),
   terrainDepthMaterialSpec("face-differences"),
+];
+
+/** Both paths' interior patches' lit forms on the cluster path (plan R14, R14.T2.a), for the catalogue. */
+export const TERRAIN_LIT_CLUSTER_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitClusterMaterialSpec("baked-offsets", false),
+  terrainLitClusterMaterialSpec("face-differences", false),
+];
+
+/** Their emissive forms (plan R14, R14.T2.a; R08.T18.a), for the catalogue. */
+export const TERRAIN_LIT_EMISSIVE_CLUSTER_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitClusterMaterialSpec("baked-offsets", true),
+  terrainLitClusterMaterialSpec("face-differences", true),
 ];
 
 /** Both paths' cluster depths (plan R14, R14.T1.e), for the catalogue, compiled for the canvas. */

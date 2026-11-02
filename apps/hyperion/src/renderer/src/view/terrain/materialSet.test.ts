@@ -40,13 +40,15 @@ async function settle(): Promise<void> {
 }
 
 /**
- * The high setting's seven, on its own path, the shadow cascades' caster (R10.T9.b), the interior
- * patches' lit form (plan R14, R14.T1.a), their cluster caster (R14.T1.b) and their cluster depth
- * (R14.T1.e) among them: what every compile below is held to.
+ * The high setting's eight, on its own path, the shadow cascades' caster (R10.T9.b), the interior
+ * patches' lit form (plan R14, R14.T1.a), their cluster caster (R14.T1.b), their cluster depth
+ * (R14.T1.e) and their lit form on the cluster path (R14.T2.a) among them: what every compile
+ * below is held to.
  */
 const HIGH = [
   `terrain-lit-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
   `terrain-lit-interior-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
+  `terrain-lit-cluster-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
   `terrain-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
   `terrain-cluster-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
   `terrain-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
@@ -98,6 +100,7 @@ describe("sessionMaterials (R10.T14.d)", () => {
     expect(sessionMaterials("high", engine.capabilities)).toEqual([
       { kind: "lit", path: "baked-offsets" },
       { kind: "lit-interior", path: "baked-offsets" },
+      { kind: "lit-cluster", path: "baked-offsets" },
       { kind: "depth", path: "baked-offsets" },
       { kind: "depth-cluster", path: "baked-offsets" },
       { kind: "shadow", path: "baked-offsets" },
@@ -113,6 +116,7 @@ describe("sessionMaterials (R10.T14.d)", () => {
     ).toEqual([
       "lit face-differences",
       "lit-interior face-differences",
+      "lit-cluster face-differences",
       "depth face-differences",
       "depth-cluster face-differences",
       "wire face-differences",
@@ -124,6 +128,7 @@ describe("sessionMaterials (R10.T14.d)", () => {
     expect(sessionMaterials("high", engine.capabilities)).toEqual([
       { kind: "lit", path: "face-differences" },
       { kind: "lit-interior", path: "face-differences" },
+      { kind: "lit-cluster", path: "face-differences" },
       { kind: "depth", path: "face-differences" },
       { kind: "depth-cluster", path: "face-differences" },
       { kind: "shadow", path: "face-differences" },
@@ -203,6 +208,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     await set.compiled;
     expect([engine.meshSpecs.map(layout), engine.live.meshes]).toEqual([
       [
+        layout(terrainMeshSpec("lit")),
         layout(terrainMeshSpec("lit")),
         layout(terrainMeshSpec("lit")),
         layout(terrainMeshSpec("lit")),

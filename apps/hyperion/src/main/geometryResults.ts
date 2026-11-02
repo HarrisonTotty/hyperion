@@ -6,7 +6,8 @@
  * @remarks
  * The block states how the pass drew its geometry, the setting's `GeometrySettings` or a launch's
  * `--geometry` over them, and for each of the descent's segments the median and the largest of its
- * frames' interior and edge patches, drawn triangles, four cascades' caster triangles summed and
+ * frames' interior and edge patches, drawn triangles (the interior mesh's, and the lit pass's
+ * clusters' as drawn, R14.T2.a), four cascades' caster triangles summed and
  * overlay-depth triangles (`TerrainPass.counts`, its cluster counters on), each `null` where no
  * frame of the segment had it. A version 6 file, R05's runs' and the native replay's
  * (`tools/gpu-replay`), holds none and reads as before; a version 7 file holds one only over a
@@ -20,6 +21,7 @@ const COUNTS = [
   "interiorPatches",
   "edgePatches",
   "drawnTriangles",
+  "litClusterTriangles",
   "casterTriangles",
   "overlayTriangles",
 ] as const;
@@ -29,6 +31,7 @@ const COUNT_HEADS: Readonly<Record<(typeof COUNTS)[number], string>> = {
   interiorPatches: "Interior patches",
   edgePatches: "Edge patches",
   drawnTriangles: "Drawn triangles",
+  litClusterTriangles: "Drawn by clusters",
   casterTriangles: "Caster triangles (4 cascades)",
   overlayTriangles: "Overlay triangles",
 };
@@ -63,13 +66,14 @@ function countFigures(value: unknown): SpikeCountFigures | null | undefined {
 
 /** `value` as the geometry's settings, every field of its kind, or `null`. */
 function settingsOf(value: unknown): SpikeGeometryReport["settings"] | null {
-  if (!isRecord(value) || Object.keys(value).length !== 4) {
+  if (!isRecord(value) || Object.keys(value).length !== 5) {
     return null;
   }
-  const { clusterPath, casterDepthCull, casterStrideCap, overlayDepth } = value;
+  const { clusterPath, casterDepthCull, casterStrideCap, overlayDepth, litClusters } = value;
   if (
     typeof clusterPath !== "boolean" ||
     typeof casterDepthCull !== "boolean" ||
+    typeof litClusters !== "boolean" ||
     (casterStrideCap !== 1 &&
       casterStrideCap !== 2 &&
       casterStrideCap !== 4 &&
@@ -78,7 +82,7 @@ function settingsOf(value: unknown): SpikeGeometryReport["settings"] | null {
   ) {
     return null;
   }
-  return { clusterPath, casterDepthCull, casterStrideCap, overlayDepth };
+  return { clusterPath, casterDepthCull, casterStrideCap, overlayDepth, litClusters };
 }
 
 /** `value` as one segment's counts, or `null`. */
@@ -91,11 +95,19 @@ function segmentOf(value: unknown): SpikeGeometrySegment | null {
     return null;
   }
   const read = COUNTS.map((name) => countFigures(value[name]));
-  const [interiorPatches, edgePatches, drawnTriangles, casterTriangles, overlayTriangles] = read;
+  const [
+    interiorPatches,
+    edgePatches,
+    drawnTriangles,
+    litClusterTriangles,
+    casterTriangles,
+    overlayTriangles,
+  ] = read;
   if (
     interiorPatches === undefined ||
     edgePatches === undefined ||
     drawnTriangles === undefined ||
+    litClusterTriangles === undefined ||
     casterTriangles === undefined ||
     overlayTriangles === undefined
   ) {
@@ -106,6 +118,7 @@ function segmentOf(value: unknown): SpikeGeometrySegment | null {
     interiorPatches,
     edgePatches,
     drawnTriangles,
+    litClusterTriangles,
     casterTriangles,
     overlayTriangles,
   };
@@ -157,12 +170,13 @@ function cell(figures: SpikeCountFigures | null): string {
 
 /** The summary's "Geometry" section of `geometry` (plan R14, R14.T1.f). */
 export function geometrySummaryLines(geometry: SpikeGeometryReport): string[] {
-  const { clusterPath, casterDepthCull, casterStrideCap, overlayDepth } = geometry.settings;
+  const { clusterPath, casterDepthCull, casterStrideCap, overlayDepth, litClusters } =
+    geometry.settings;
   return [
     "",
     "## Geometry (plan R14)",
     "",
-    `The main view's lit pass a frame by segment, median (largest): cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}.`,
+    `The main view's lit pass a frame by segment, median (largest): cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}.`,
     "",
     `| Segment | ${COUNTS.map((name) => COUNT_HEADS[name]).join(" | ")} |`,
     `| ${["---", ...COUNTS.map(() => "---")].join(" | ")} |`,

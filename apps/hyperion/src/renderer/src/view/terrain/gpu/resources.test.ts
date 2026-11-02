@@ -1335,7 +1335,7 @@ describe("the terrain's resources", () => {
     expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
   });
 
-  it("make a clustered lit layout's records, cluster mesh and each view's buckets, the cascades' and the overlay's, under geometry-clusters (R14.T1.b, T1.e)", async () => {
+  it("make a clustered lit layout's records, cluster mesh and each view's buckets, the cascades', the overlay's and the lit pass's, and its compaction's marks and tallies, under geometry-clusters (R14.T1.b, T1.e, T2.a)", async () => {
     const engine = await countingRenderEngine();
     const created: Array<readonly [string, string]> = [];
     engine.onAllocation((event) => {
@@ -1362,11 +1362,17 @@ describe("the terrain's resources", () => {
         "terrain clusters (view) lists",
         "terrain clusters (view) arguments",
         "terrain clusters (view) cull inputs",
+        "terrain clusters (view) marks",
+        "terrain clusters (view) tallies",
       ],
+    ]);
+    expect([clusters?.marks.bytes, clusters?.tallies.bytes]).toEqual([
+      slots * 96 * 4,
+      slots * 8 * 4,
     ]);
     const before = engine.live.buffers;
     resources.releaseView("view");
-    expect(before - engine.live.buffers).toBe(3);
+    expect(before - engine.live.buffers).toBe(5);
     resources.dispose();
     expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
   });

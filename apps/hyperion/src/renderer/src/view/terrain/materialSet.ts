@@ -53,6 +53,7 @@ import {
   terrainDepthMaterialSpec,
   terrainLitEmissiveInteriorMaterialSpec,
   terrainLitEmissiveMaterialSpec,
+  terrainLitClusterMaterialSpec,
   terrainLitInteriorMaterialSpec,
   terrainLitMaterialSpec,
   terrainShadowMaterialSpec,
@@ -66,14 +67,17 @@ import { terrainWireMaterialSpec, wireframeTerrainSettings } from "./terrainWire
  * plan R14, R14.T1.a), its depth material for the symbology's pass (`depth`, R10.T16.c), the
  * wireframe's (`wire`, R10.T11), the lit terrain as a caster into the high setting's shadow
  * cascades (`shadow`, R10.T9.b), its interior patches as casters on the cluster path
- * (`shadow-cluster`, plan R14, R14.T1.b), and their depth for the symbology's pass on it
- * (`depth-cluster`, plan R14, R14.T1.e).
+ * (`shadow-cluster`, plan R14, R14.T1.b), their depth for the symbology's pass on it
+ * (`depth-cluster`, plan R14, R14.T1.e), and their lit form and its emissive form on it
+ * (`lit-cluster`, `lit-emissive-cluster`, plan R14, R14.T2.a).
  */
 export type TerrainMaterialKind =
   | "lit"
   | "lit-emissive"
   | "lit-interior"
   | "lit-emissive-interior"
+  | "lit-cluster"
+  | "lit-emissive-cluster"
   | "depth"
   | "depth-cluster"
   | "wire"
@@ -138,6 +142,14 @@ export function terrainMaterialOf(
         shading: "lit",
       };
       break;
+    case "lit-cluster":
+    case "lit-emissive-cluster":
+      made = {
+        spec: terrainLitClusterMaterialSpec(path, kind === "lit-emissive-cluster"),
+        targets: ["rgba16float"],
+        shading: "lit",
+      };
+      break;
     case "depth":
       made = { spec: terrainDepthMaterialSpec(path), targets: ["canvas"], shading: "lit" };
       break;
@@ -167,7 +179,8 @@ export function terrainMaterialOf(
 
 /**
  * The materials a terrain session's passes draw with on `setting`, on a device of `limits`: the lit
- * material, its interior patches' form (plan R14, R14.T1.a), its depth material and its interior
+ * material, its interior patches' form (plan R14, R14.T1.a) and their form on the cluster path
+ * (plan R14, R14.T2.a), its depth material and its interior
  * patches' cluster depth (plan R14, R14.T1.e) on the lit layout's vertex path, on the high setting the shadow cascades' caster and its interior patches'
  * cluster caster on that path too (R10.T9.b; plan R14, R14.T1.b; the low setting has no
  * cascades), and the wireframe's on the wireframe layout's, as `terrainLayout` resolves each; none of a layout the
@@ -183,6 +196,7 @@ export function sessionMaterials(
     keys.push(
       { kind: "lit", path: lit.vertexPath },
       { kind: "lit-interior", path: lit.vertexPath },
+      { kind: "lit-cluster", path: lit.vertexPath },
       { kind: "depth", path: lit.vertexPath },
       { kind: "depth-cluster", path: lit.vertexPath },
     );

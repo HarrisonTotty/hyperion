@@ -2685,6 +2685,7 @@ describe("the schema check", () => {
         casterDepthCull: true,
         casterStrideCap: 8,
         overlayDepth: "cluster",
+        litClusters: true,
       },
       segments: [
         {
@@ -2692,6 +2693,7 @@ describe("the schema check", () => {
           interiorPatches: { frames: 3, p50: 59, max: 61 },
           edgePatches: { frames: 3, p50: 33, max: 33 },
           drawnTriangles: { frames: 3, p50: 868_352, max: 880_000 },
+          litClusterTriangles: { frames: 2, p50: 700_000, max: 712_000 },
           casterTriangles: null,
           overlayTriangles: { frames: 2, p50: 600_000.5, max: 610_001 },
         },
@@ -2730,7 +2732,7 @@ describe("the schema check", () => {
     const markdown = summaryMarkdown(results);
     expect(markdown).toContain("## Geometry (plan R14)");
     expect(markdown).toContain(
-      "| orbit coast | 59 (61) | 33 (33) | 868,352 (880,000) | — | 600,001 (610,001) |",
+      "| orbit coast | 59 (61) | 33 (33) | 868,352 (880,000) | 700,000 (712,000) | — | 600,001 (610,001) |",
     );
   });
 

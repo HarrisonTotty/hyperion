@@ -145,6 +145,7 @@ describe("the spike report's check", () => {
         casterDepthCull: false,
         casterStrideCap: 1,
         overlayDepth: "redraw",
+        litClusters: false,
       },
       segments: [
         {
@@ -152,6 +153,7 @@ describe("the spike report's check", () => {
           interiorPatches: { frames: 1, p50: 0, max: 0 },
           edgePatches: { frames: 1, p50: 40, max: 40 },
           drawnTriangles: { frames: 1, p50: 430_080, max: 430_080 },
+          litClusterTriangles: null,
           casterTriangles: null,
           overlayTriangles: null,
         },

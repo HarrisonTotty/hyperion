@@ -49,7 +49,7 @@ describe("the counting harness (plan R14, Design note 18)", () => {
     expect(high.poses[0]?.interiorPatches).toBeGreaterThan(590);
   });
 
-  it("casts on high alone, each lever's count within the one before it, and the overlay's within the interior draw", () => {
+  it("casts on high alone, each lever's count within the one before it, and the overlay's and the lit clusters' within the interior draw", () => {
     expect(low.poses.every((pose) => pose.casters.every((cast) => cast === null))).toBe(true);
     const cast = high.poses.flatMap((pose) => pose.casters.filter((each) => each !== null));
     expect(cast.length).toBeGreaterThan(0);
@@ -61,7 +61,11 @@ describe("the counting harness (plan R14, Design note 18)", () => {
       ]).toEqual([true, true, true]);
     }
     for (const pose of [...high.poses, ...low.poses]) {
-      expect(pose.overlayClusters).toBeLessThanOrEqual(pose.litInterior);
+      expect([
+        pose.overlayClusters <= pose.litInterior,
+        // T2.a's lit pass: its frustum and the horizon refuse some of the interior draw's clusters.
+        pose.litClusters > 0 && pose.litClusters < pose.litInterior,
+      ]).toEqual([true, true]);
     }
   });
 

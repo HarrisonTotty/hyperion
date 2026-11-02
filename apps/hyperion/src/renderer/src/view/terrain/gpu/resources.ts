@@ -178,8 +178,14 @@ export const CLUSTER_CASTER_PASSES = 4;
 /** The overlay's terrain depth's pass of a view's cluster buckets (plan R14, R14.T1.e), the fifth. */
 export const CLUSTER_OVERLAY_PASS = CLUSTER_CASTER_PASSES;
 
-/** The passes a view's cluster buckets hold: the cascades' and the overlay's. */
-export const CLUSTER_PASSES = CLUSTER_CASTER_PASSES + 1;
+/**
+ * The lit pass's pass of a view's cluster buckets (plan R14, R14.T2.a), the sixth: the cull's
+ * ordered camera pass, its buckets written by the stable compaction (`clusters/compact.ts`).
+ */
+export const CLUSTER_LIT_PASS = CLUSTER_OVERLAY_PASS + 1;
+
+/** The passes a view's cluster buckets hold: the cascades', the overlay's and the lit pass's. */
+export const CLUSTER_PASSES = CLUSTER_LIT_PASS + 1;
 
 /** Bytes of a slot's cluster records: its patch's 96 clusters (plan R14, R14.T1.b). */
 export const CLUSTER_RECORDS_SLOT_BYTES = TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES;
@@ -875,12 +881,16 @@ export interface TerrainViewBuffers {
 }
 
 /**
- * One view's cluster path buffers (plan R14, R14.T1.b): its buckets, one pass a shadow cascade, and
- * each interior record's cull input ({@link CULL_INPUT_BYTES}), one per slot at most.
+ * One view's cluster path buffers (plan R14, R14.T1.b): its buckets, one pass a shadow cascade, the
+ * overlay's and the lit pass's, each interior record's cull input ({@link CULL_INPUT_BYTES}), one
+ * per slot at most, and the lit pass's stable compaction's (plan R14, R14.T2.a): the cull's marks,
+ * one `u32` a cluster of every slot, and each slot's tallies, one `u32` a template.
  */
 export interface TerrainClusterBuffers {
   readonly buckets: ClusterBuckets;
   readonly cullInputs: BufferHandle;
+  readonly marks: BufferHandle;
+  readonly tallies: BufferHandle;
 }
 
 /** One view's interior patches' frame buffers (plan R14, R14.T1.a). */
@@ -1058,8 +1068,9 @@ export class TerrainResources {
   /**
    * `view`'s cluster path buffers (plan R14, R14.T1.b), made at its first call on the current
    * device: its buckets for {@link CLUSTER_PASSES} passes of terrain's templates, each with
-   * room for every cluster of its shape of every slot, named `terrain clusters (view)`, and its
-   * cull inputs; released with its other buffers. `null` on a layout made without clusters.
+   * room for every cluster of its shape of every slot, named `terrain clusters (view)`, its cull
+   * inputs, and the lit pass's marks and tallies (plan R14, R14.T2.a); released with its other
+   * buffers. `null` on a layout made without clusters.
    *
    * @throws Error once the resources are disposed.
    */
@@ -1095,6 +1106,19 @@ export class TerrainResources {
           name: `${named} cull inputs`,
           bytes: slots * CULL_INPUT_BYTES,
           usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+          category: "geometry-clusters",
+        }),
+        // COPY_SRC for the smoke harness's twin check, which reads them back (`smoke/clusterCull.ts`).
+        marks: this.#engine.createBuffer({
+          name: `${named} marks`,
+          bytes: slots * TERRAIN_CLUSTERS_PER_PAGE * 4,
+          usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+          category: "geometry-clusters",
+        }),
+        tallies: this.#engine.createBuffer({
+          name: `${named} tallies`,
+          bytes: slots * templates.length * 4,
+          usage: BUFFER_USAGE.STORAGE,
           category: "geometry-clusters",
         }),
       };
@@ -1675,6 +1699,8 @@ export class TerrainResources {
   #releaseClusters(clusters: TerrainClusterBuffers): void {
     clusters.buckets.dispose();
     this.#engine.releaseBuffer(clusters.cullInputs);
+    this.#engine.releaseBuffer(clusters.marks);
+    this.#engine.releaseBuffer(clusters.tallies);
   }
 
   #releaseCasters(casters: TerrainCasterBuffers): void {

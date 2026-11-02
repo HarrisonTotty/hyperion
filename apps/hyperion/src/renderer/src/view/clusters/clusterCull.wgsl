@@ -32,7 +32,15 @@
 //   the same allowance, so that it writes no texel any receiver reads.
 // - _A camera's frustum_ (kind 2, T1.e): the cluster's sphere against each of the pass's planes,
 //   refused where it lies wholly outside one by more than the allowance, and kept where the camera
-//   is inside it, as R05's `inFrustum` keeps a patch's sphere.
+//   is inside it, as R05's `inFrustum` keeps a patch's sphere; and, where the pass holds one
+//   (`scalars.w` above 0, T2.a), against the body's horizon (`cullPass.ts`' `CullHorizon`): refused
+//   where it lies wholly beyond the plane through the tangent circle and wholly inside the cone,
+//   a sin α − d cos α > ρ, a its distance along the cone's axis and d from it, d's square widened by
+//   HORIZON_ROUNDING of |S|² for its `f32` rounding.
+// - _An ordered camera pass_ (kind 3, T2.a, the lit pass): the camera's tests, but each cluster's
+//   template, or NO_MARK where it is refused or its instance does not enter the pass, is written to
+//   `marks`, one word a cluster of every instance, for the stable compaction to write the pass's
+//   buckets in the draw set's order (`compact.wgsl`); nothing is appended for it.
 // - _The stride_: the coarsest s = 2^l, l up to the pass's cap, with s × the unit within the pass's
 //   tolerance, in `f32` as the twin forms it; s = 1 where none is.
 // - _The bucket_: the record's shape (its flags' bits 0–3) × STRIDE_LEVELS + l, from the pass's
@@ -76,6 +84,9 @@ struct CullParams {
 const MAX_CULL_PASSES : u32 = 8u;
 const PASS_CASCADE : u32 = 1u;
 const PASS_CAMERA : u32 = 2u;
+const PASS_CAMERA_ORDERED : u32 = 3u;
+// A cluster an ordered pass refuses (`cull.ts`' NO_MARK).
+const NO_MARK : u32 = 0xffffffffu;
 const STRIDE_LEVELS : u32 = 4u;
 // The threads of a workgroup, each taking every 64th cluster of its instance's page.
 const CULL_GROUP : u32 = 64u;
@@ -85,6 +96,8 @@ const ROUNDING_FRACTION : f32 = 1e-6;
 const ROUNDING_M : f32 = 1.0;
 // The receivers' tests' least allowance, m: their lengths' ulps are the fraction's.
 const RECEIVER_ROUNDING_M : f32 = 0.01;
+// The horizon test's widening of d², per |S|² (`cull.ts`' HORIZON_ROUNDING).
+const HORIZON_ROUNDING : f32 = 1e-6;
 
 @group(0) @binding(0) var<uniform> params : CullParams;
 @group(0) @binding(1) var<uniform> passes : array<CullPass, 8>;
@@ -93,6 +106,7 @@ const RECEIVER_ROUNDING_M : f32 = 0.01;
 @group(0) @binding(4) var<storage, read> records : array<ClusterRecord>;
 @group(0) @binding(5) var<storage, read_write> lists : array<u32>;
 @group(0) @binding(6) var<storage, read_write> args : array<atomic<u32>>;
+@group(0) @binding(7) var<storage, read_write> marks : array<u32>;
 
 // A record's centre in the instances' frame, turned from its page's axes.
 fn page_to_instance(v : vec3f) -> vec3f {
@@ -153,8 +167,25 @@ fn camera_plane(cull_pass : CullPass, i : u32) -> vec4f {
   }
 }
 
+// Whether the sphere at `centre`, camera-relative, of radius `radius` lies wholly behind camera pass
+// `pass`'s horizon (see the module's head); never where the pass holds none.
+fn horizon_refuses(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool {
+  let sin_a = cull_pass.scalars.w;
+  if (sin_a <= 0.0) {
+    return false;
+  }
+  let span = dot(centre, centre);
+  let a = dot(centre, cull_pass.covered.xyz);
+  let slack = ROUNDING_FRACTION * (sqrt(span) + cull_pass.scalars.z) + ROUNDING_M;
+  if (a - radius - slack <= cull_pass.scalars.z) {
+    return false;
+  }
+  let d = sqrt(max(span - a * a, 0.0) + HORIZON_ROUNDING * span);
+  return a * sin_a - d * cull_pass.covered.w > radius + slack;
+}
+
 // Whether the sphere at `centre`, camera-relative, of radius `radius` may show in camera pass
-// `pass`'s frustum (see the module's head).
+// `pass`'s frustum, above its horizon (see the module's head).
 fn camera_keeps(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool {
   let slack = ROUNDING_FRACTION * length(centre) + ROUNDING_M;
   if (dot(centre, centre) <= (radius + slack) * (radius + slack)) {
@@ -167,7 +198,7 @@ fn camera_keeps(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool {
       return false;
     }
   }
-  return true;
+  return !horizon_refuses(cull_pass, centre, radius);
 }
 
 // Whether the sphere may draw into pass `pass` where anything reads it, by the pass's kind.
@@ -176,7 +207,7 @@ fn pass_keeps(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool {
     case PASS_CASCADE: {
       return cascade_keeps(cull_pass, centre, radius) && !receivers_refuse(cull_pass, centre, radius);
     }
-    case PASS_CAMERA: {
+    case PASS_CAMERA, PASS_CAMERA_ORDERED: {
       return camera_keeps(cull_pass, centre, radius);
     }
     default: {
@@ -232,11 +263,18 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
     let centre = origin + page_to_instance(record.centre);
     let shape = record.flags & 0xfu;
     for (var p = 0u; p < pass_count; p = p + 1u) {
-      if ((input.x & (1u << p)) == 0u) {
+      let cull_pass = passes[p];
+      let enters = (input.x & (1u << p)) != 0u;
+      if (cull_pass.header.x == PASS_CAMERA_ORDERED) {
+        var mark = NO_MARK;
+        if (enters && pass_keeps(cull_pass, centre, record.radius)) {
+          let kept = shape * STRIDE_LEVELS + stride_level(cull_pass, unit);
+          mark = select(NO_MARK, kept, kept < params.templates);
+        }
+        marks[instance * clusters + c] = mark;
         continue;
       }
-      let cull_pass = passes[p];
-      if (!pass_keeps(cull_pass, centre, record.radius)) {
+      if (!enters || !pass_keeps(cull_pass, centre, record.radius)) {
         continue;
       }
       let t = shape * STRIDE_LEVELS + stride_level(cull_pass, unit);

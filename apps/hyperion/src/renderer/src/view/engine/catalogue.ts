@@ -77,12 +77,15 @@ import { DISC_MATERIAL } from "../sky/disc";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
+import { CLUSTER_COMPACT } from "../clusters/compact";
 import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
 import { CLUSTER_STATS_KERNEL } from "../clusters/stats";
 import {
   TERRAIN_CLUSTER_DEPTH_MATERIALS,
   TERRAIN_CLUSTER_SHADOW_MATERIALS,
   TERRAIN_DEPTH_MATERIALS,
+  TERRAIN_LIT_CLUSTER_MATERIALS,
+  TERRAIN_LIT_EMISSIVE_CLUSTER_MATERIALS,
   TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS,
   TERRAIN_LIT_EMISSIVE_MATERIALS,
   TERRAIN_LIT_INTERIOR_MATERIALS,
@@ -258,6 +261,7 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     LIT_AGX_MATERIAL,
     ...TERRAIN_LIT_MATERIALS,
     ...TERRAIN_LIT_INTERIOR_MATERIALS,
+    ...TERRAIN_LIT_CLUSTER_MATERIALS,
     ...TERRAIN_DEPTH_MATERIALS,
     ...TERRAIN_CLUSTER_DEPTH_MATERIALS,
     ...TERRAIN_WIRE_MATERIALS,
@@ -269,9 +273,11 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
       targets: ["depth-only"],
     }),
   ),
-  // Plan R14's cluster path (R14.T1.b): its cull and the copy of its counters.
+  // Plan R14's cluster path (R14.T1.b): its cull, the copy of its counters and its stable
+  // compaction (R14.T2.a).
   { kind: "compute", spec: CLUSTER_CULL_KERNEL },
   { kind: "compute", spec: CLUSTER_STATS_KERNEL },
+  { kind: "compute", spec: CLUSTER_COMPACT },
 ];
 
 /**
@@ -338,9 +344,11 @@ export const THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: BODY_DISC_CELLS_EMISSIVE_KERNEL },
   // R10.T10.b's lit terrain's emissive form, one material per vertex path, and its interior
   // patches' form (plan R14, R14.T1.a).
-  ...[...TERRAIN_LIT_EMISSIVE_MATERIALS, ...TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS].map(
-    (spec): CatalogueEntry => ({ kind: "material", spec }),
-  ),
+  ...[
+    ...TERRAIN_LIT_EMISSIVE_MATERIALS,
+    ...TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS,
+    ...TERRAIN_LIT_EMISSIVE_CLUSTER_MATERIALS,
+  ].map((spec): CatalogueEntry => ({ kind: "material", spec })),
 ];
 
 /**

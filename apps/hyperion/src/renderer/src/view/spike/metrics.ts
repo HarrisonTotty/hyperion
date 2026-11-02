@@ -134,6 +134,7 @@ interface GeometryTally {
   readonly interiorPatches: number[];
   readonly edgePatches: number[];
   readonly drawnTriangles: number[];
+  readonly litClusterTriangles: number[];
   readonly casterTriangles: number[];
   readonly overlayTriangles: number[];
 }
@@ -333,6 +334,7 @@ export class SpikeMetrics {
         interiorPatches: [],
         edgePatches: [],
         drawnTriangles: [],
+        litClusterTriangles: [],
         casterTriangles: [],
         overlayTriangles: [],
       };
@@ -341,6 +343,9 @@ export class SpikeMetrics {
     tally.interiorPatches.push(counts.patches.interior);
     tally.edgePatches.push(counts.patches.edge);
     tally.drawnTriangles.push(counts.drawnTriangles);
+    if (counts.litClusterTriangles !== null) {
+      tally.litClusterTriangles.push(counts.litClusterTriangles);
+    }
     if (counts.casterTriangles !== null) {
       tally.casterTriangles.push(counts.casterTriangles.reduce((sum, n) => sum + n, 0));
     }
@@ -364,6 +369,7 @@ export class SpikeMetrics {
           interiorPatches: countFigures(tally?.interiorPatches ?? []),
           edgePatches: countFigures(tally?.edgePatches ?? []),
           drawnTriangles: countFigures(tally?.drawnTriangles ?? []),
+          litClusterTriangles: countFigures(tally?.litClusterTriangles ?? []),
           casterTriangles: countFigures(tally?.casterTriangles ?? []),
           overlayTriangles: countFigures(tally?.overlayTriangles ?? []),
         };

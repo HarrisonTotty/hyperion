@@ -96,6 +96,12 @@ export interface GeometrySettings {
    * Unread by the way back, which redraws.
    */
   readonly overlayDepth: "redraw" | "scene-depth" | "cluster";
+  /**
+   * R14.T2.a: the lit pass's interior patches drawn through the cluster path, culled to the
+   * camera's frustum and the body's horizon per cluster and compacted in the draw set's order, at
+   * stride 1, forward; `false` draws them by R14.T1.a's interior mesh. Both settings take it.
+   */
+  readonly litClusters: boolean;
 }
 
 /**
@@ -112,6 +118,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   casterDepthCull: false,
   casterStrideCap: 1,
   overlayDepth: "redraw",
+  litClusters: false,
 };
 
 /**
@@ -254,6 +261,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       casterDepthCull: true,
       casterStrideCap: 8,
       overlayDepth: "cluster",
+      litClusters: true,
     },
   },
   low: {
@@ -280,6 +288,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       casterDepthCull: true,
       casterStrideCap: 8,
       overlayDepth: "cluster",
+      litClusters: true,
     },
   },
 };

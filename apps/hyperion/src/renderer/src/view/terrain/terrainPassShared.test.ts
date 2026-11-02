@@ -1507,9 +1507,10 @@ describe("the shared pass through a loss and its materials (the batch review's S
     engine.restore();
     await ready;
     await Promise.resolve();
-    // The lit material, its interior patches' form (plan R14, R14.T1.a), its depth material and its
-    // interior patches' cluster depth (plan R14, R14.T1.e).
-    expect([engine.live.materials, pass.symbologyDepthMaterial !== null]).toEqual([4, true]);
+    // The lit material, its interior patches' form (plan R14, R14.T1.a), its depth material, its
+    // interior patches' cluster depth (plan R14, R14.T1.e) and their lit form on the cluster path
+    // (plan R14, R14.T2.a).
+    expect([engine.live.materials, pass.symbologyDepthMaterial !== null]).toEqual([5, true]);
     pass.dispose();
   });
 

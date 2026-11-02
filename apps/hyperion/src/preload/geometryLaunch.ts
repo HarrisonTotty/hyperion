@@ -4,8 +4,8 @@
  *
  * @remarks
  * The override is `<field>=<value>[,<field>=<value>…]` over the renderer's `GeometrySettings`:
- * `clusterPath` and `casterDepthCull` `true` or `false`, `casterStrideCap` 1, 2, 4 or 8, and
- * `overlayDepth` `redraw`, `scene-depth` or `cluster`. As `qualityLaunch.ts` does for the setting,
+ * `clusterPath`, `casterDepthCull` and `litClusters` `true` or `false`, `casterStrideCap` 1, 2, 4 or
+ * 8, and `overlayDepth` `redraw`, `scene-depth` or `cluster`. As `qualityLaunch.ts` does for the setting,
  * it rides in the renderer's own `argv` as an extra switch, `--hyperion-geometry=<override>`,
  * present only when the launch gave one, in the canonical form {@link geometryText} writes, and the
  * preload gives it to `HyperionApi.geometry`. Both sides of the hand-off use this module; it
@@ -20,7 +20,13 @@ export type { GeometryOverride } from "./api";
 const GEOMETRY_SWITCH = "--hyperion-geometry=";
 
 /** The override's fields in the order {@link geometryText} writes them. */
-const FIELDS = ["clusterPath", "casterDepthCull", "casterStrideCap", "overlayDepth"] as const;
+const FIELDS = [
+  "clusterPath",
+  "casterDepthCull",
+  "casterStrideCap",
+  "overlayDepth",
+  "litClusters",
+] as const;
 
 /** A field's values, as a refusal names them. */
 const VALUES: Readonly<Record<(typeof FIELDS)[number], string>> = {
@@ -28,6 +34,7 @@ const VALUES: Readonly<Record<(typeof FIELDS)[number], string>> = {
   casterDepthCull: "true or false",
   casterStrideCap: "1, 2, 4 or 8",
   overlayDepth: "redraw, scene-depth or cluster",
+  litClusters: "true or false",
 };
 
 /** The refusal of `text` as `field`'s value. */
@@ -36,7 +43,10 @@ function refused(field: (typeof FIELDS)[number], text: string): Error {
 }
 
 /** `text` as a switch's value, `true` or `false`. */
-function booleanOf(field: "clusterPath" | "casterDepthCull", text: string): boolean {
+function booleanOf(
+  field: "clusterPath" | "casterDepthCull" | "litClusters",
+  text: string,
+): boolean {
   if (text !== "true" && text !== "false") {
     throw refused(field, text);
   }
@@ -51,6 +61,7 @@ function readField(out: OverrideBeingRead, field: (typeof FIELDS)[number], text:
   switch (field) {
     case "clusterPath":
     case "casterDepthCull":
+    case "litClusters":
       out[field] = booleanOf(field, text);
       break;
     case "casterStrideCap": {

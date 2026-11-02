@@ -1303,6 +1303,7 @@ pass on the cluster path, then rasterised once into IDs and shaded once a pixel 
   - _Acceptance:_ captures byte-identical to T1's (tie pixels listed); lit triangles below T1's by
     the rebuilt harness's figure for spheres on 8 × 8-quad blocks (the research's 2–15% was boxes on
     4 × 4 clusters of 16 × 16 quads).
+  - _Built_ (geometry-clusters-2): records at the end of Risks.
 - **R14.T2.b The engine's ID target.** Size S–M, an ask of R01 (Provides, "The engine's ID target").
   - `ColourTargetFormat` gains `r32uint` (a render attachment, never blended, no mips, no
     filtering); `RenderTargetSpec.depthOf` draws a target with another's depth, loaded and stored; a
@@ -1928,3 +1929,26 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     split across pages while it fits. The units holding a root come first (the header's root
     pages, one page of about 128 kB a test mesh), then by level, coarsest first, so a level and
     every coarser one are a prefix of the pages. `cut.rs`'s `CutView::draws` is the cut's CPU twin.
+- **R14.T2.a** (geometry-clusters-2): the lit pass on the cluster path, forward.
+  - `CLUSTER_COMPACT` (`clusters/compact.ts`, `compact.wgsl`) is `bit-exact`: three dispatches of one
+    kernel by phase (count, scan, scatter), timed as `terrain cluster compact`. Its subgroup variant
+    takes the count's sums alone, since WGSL does not order a subgroup's invocations by workgroup
+    index. Twins: `compactTwin`, `scanTwin`.
+  - The cull has an ordered camera pass (kind 3) that marks one word a cluster (`marks`, binding 7).
+    `CameraCullPass` gains `horizon` and `order`. `CullHorizon` and `cullHorizonOf` give R05's
+    occluder as a sphere test: refused wholly beyond the tangent plane and inside the cone, with d²
+    widened by `HORIZON_ROUNDING`. Twin: `cullMarksTwin`.
+  - Buckets hold 6 passes a view (`CLUSTER_LIT_PASS`, the sixth), with marks and tallies a view in
+    `TerrainClusterBuffers`.
+  - `GeometrySettings.litClusters` is T2.a's lever, true on both settings and false on the way back
+    (lean, 2026-11-02: the plan names no field for T2.a). `shading` waits for T2.b–e.
+  - Materials `lit-cluster` and `lit-emissive-cluster` (`terrainLitClusterMaterialSpec`, the lit
+    `Draw` taking `clusterBase` by `withClusterBase`), in the session set and the catalogue.
+  - On the lit cluster path the overlay's redraw draws the lit pass's buckets with the cluster
+    depth: the same triangles.
+  - `TerrainGeometryCounts.litClusterTriangles`, also in the spike's geometry segments.
+  - No seamless-1 sub-patch becomes a mask: seamless-1 draws a sub-patch's own grid on its
+    ancestor's triangles, never as the ancestor's own blocks (Design note 19), so every one stays on
+    the edge path.
+  - Timed passes: 8 a lit view-frame on high (the cull, the compaction's 3 and the 4 casters), 9
+    measured; no resolve of their own.

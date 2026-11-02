@@ -235,6 +235,27 @@ function sourceOf(pass: TerrainPass, mask: CoverageMask): FrameTerrainSource {
   };
 }
 
+/** The pixels at which two frames' texels differ, and the largest difference of any channel. */
+function differingTexels(
+  a: Float32Array,
+  b: Float32Array,
+): { readonly pixels: number; readonly largest: number } {
+  let pixels = 0;
+  let largest = 0;
+  for (let p = 0; p + 3 < Math.min(a.length, b.length); p += 4) {
+    let differs = false;
+    for (let c = 0; c < 4; c += 1) {
+      const d = Math.abs((a[p + c] ?? 0) - (b[p + c] ?? 0));
+      if (d > 0 || Number.isNaN(d)) {
+        differs = true;
+        largest = Math.max(largest, Number.isNaN(d) ? Infinity : d);
+      }
+    }
+    pixels += differs ? 1 : 0;
+  }
+  return { pixels, largest };
+}
+
 /** Steps `pass` from `pose` and makes the frame, as `VIEW`'s loop and drawer do. */
 function liveFrame(pass: TerrainPass, mask: CoverageMask, pose: Pose, nowMs: number): LiveFrame {
   const base = bodyOf(pose);
@@ -581,6 +602,39 @@ export async function checkTerrainFrame(
       "R14.T1.a the interior patches' draw, without fins, skirt heads or discard, draws the frame the lit mesh draws, byte for byte",
       withRelief.done && patches.interior > 0 && new Set(digests).size === 1,
       `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: ${String(litTriangles)} lit triangles, ${(litTriangles / unleveredTriangles).toFixed(4)} of the lit mesh's ${String(unleveredTriangles)}; digests ${digests[0] ?? ""} on the cluster path, ${digests[1] ?? ""} by the way back, ${digests[2] ?? ""} on the path again`,
+    );
+
+    // R14.T2.a: the lit pass's interior patches through the cull's ordered camera pass, the
+    // body's horizon and the stable compaction, against T1.a's interior mesh, from the same
+    // selection and residents, in one run; its counters on, so that its triangles are counted.
+    relief.measureClusters(true);
+    relief.setGeometry({ ...SETTINGS.low.geometry, litClusters: false });
+    const byMesh = await reliefFrame();
+    relief.setGeometry(SETTINGS.low.geometry);
+    const byClusters = await reliefFrame();
+    let litClusterTriangles: number | null = null;
+    for (let round = 0; round < 8 && litClusterTriangles === null; round += 1) {
+      // Each frame samples the counters the last one's read answers into: one after the other.
+      // oxlint-disable-next-line no-await-in-loop
+      await reliefFrame();
+      litClusterTriangles = relief.counts(VIEW)?.litClusterTriangles ?? null;
+    }
+    relief.measureClusters(false);
+    const ties = differingTexels(byMesh, byClusters);
+    if (captures) {
+      const exposure = captureScale(byMesh, byMesh);
+      images.push(
+        captureOf("r14-t2a-frame-interior-mesh", byMesh, VIEWPORT, exposure),
+        captureOf("r14-t2a-frame-lit-clusters", byClusters, VIEWPORT, exposure),
+      );
+    }
+    checks.check(
+      "R14.T2.a the lit pass's interior patches drawn through the cull and the stable compaction draw T1.a's frame, byte for byte, with fewer lit triangles",
+      withRelief.done &&
+        ties.pixels === 0 &&
+        litClusterTriangles !== null &&
+        litClusterTriangles < litTriangles,
+      `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: lit triangles ${String(litClusterTriangles)} by clusters, ${litClusterTriangles === null ? "—" : (litClusterTriangles / litTriangles).toFixed(4)} of T1.a's ${String(litTriangles)}; digests ${bytesDigest(byMesh)} by the interior mesh, ${bytesDigest(byClusters)} by clusters; tie pixels ${String(ties.pixels)}, the largest difference ${ties.largest.toExponential(3)}`,
     );
 
     // The fallback (plan R14, Design notes 16 and 17), under `--fixture=broken-wgsl` alone: a pass

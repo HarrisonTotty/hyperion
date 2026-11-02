@@ -15,7 +15,13 @@
 import type { Vec3 } from "../../geometry/vec3";
 import type { KernelPair } from "../engine/kernels";
 import clusterCullWgsl from "./clusterCull.wgsl?raw";
-import type { CameraCullPass, CascadeCullPass, CullPass, CullPassPlace } from "./cullPass";
+import type {
+  CameraCullPass,
+  CascadeCullPass,
+  CullHorizon,
+  CullPass,
+  CullPassPlace,
+} from "./cullPass";
 import type { ClusterRecord } from "./record";
 import { CLUSTER_SHAPE_CODE } from "./record";
 import { STRIDES } from "./templates";
@@ -36,6 +42,16 @@ export const CULL_ROUNDING_M = 1;
 
 /** The receivers' tests' least widening, m (T1.c): their lengths' ulps are the fraction's. */
 export const RECEIVER_ROUNDING_M = 0.01;
+
+/**
+ * The horizon test's widening of a sphere's squared distance from the cone's axis, per square metre
+ * of its squared distance from the camera (T2.a): above the `f32` rounding of |S|² − (S·axis)², a
+ * few ulps of |S|² each (2⁻²⁴), so that the kernel never takes a sphere nearer the axis than it is.
+ */
+export const HORIZON_ROUNDING = 1e-6;
+
+/** A cluster's mark where the ordered pass refuses it, or its instance does not enter the pass. */
+export const NO_MARK = 0xffff_ffff;
 
 /** The threads of the kernel's workgroup. */
 export const CULL_WORKGROUP = 64;
@@ -154,9 +170,34 @@ export function receiversRefuse(
 }
 
 /**
+ * Whether a sphere at `centreM`, camera-relative, of radius `radiusM`, lies wholly behind
+ * `horizon`, the test narrowed by `slackScale` times the kernel's rounding allowance
+ * (`clusterCull.wgsl`'s `horizon_refuses`; T2.a): wholly beyond the plane through the tangent
+ * circle and wholly inside the cone, a·sin α − d·cos α > ρ, a its distance along the axis and d
+ * from it.
+ */
+export function horizonRefuses(
+  horizon: CullHorizon,
+  centreM: Vec3,
+  radiusM: number,
+  slackScale = 1,
+): boolean {
+  const span = centreM.x * centreM.x + centreM.y * centreM.y + centreM.z * centreM.z;
+  const { axis } = horizon;
+  const a = centreM.x * axis.x + centreM.y * axis.y + centreM.z * axis.z;
+  const slack =
+    slackScale * (CULL_ROUNDING_FRACTION * (Math.sqrt(span) + horizon.planeM) + CULL_ROUNDING_M);
+  if (a - radiusM - slack <= horizon.planeM) {
+    return false;
+  }
+  const d = Math.sqrt(Math.max(span - a * a, 0) + slackScale * HORIZON_ROUNDING * span);
+  return a * horizon.sin - d * horizon.cos > radiusM + slack;
+}
+
+/**
  * Whether a sphere at `centreM`, camera-relative, of radius `radiusM`, may show in camera pass
- * `pass`'s frustum, widened by `slackScale` times the kernel's rounding allowance
- * (`clusterCull.wgsl`'s `camera_keeps`): not wholly outside any plane, or about the camera.
+ * `pass`, widened by `slackScale` times the kernel's rounding allowance (`clusterCull.wgsl`'s
+ * `camera_keeps`): about the camera, or not wholly outside any plane nor wholly behind the horizon.
  */
 export function cameraKeeps(
   pass: CameraCullPass,
@@ -169,9 +210,12 @@ export function cameraKeeps(
   if (distanceM <= reach) {
     return true;
   }
-  return pass.planes.every(
-    ({ normal: n, offsetM }) =>
-      n.x * centreM.x + n.y * centreM.y + n.z * centreM.z + offsetM >= -reach,
+  return (
+    pass.planes.every(
+      ({ normal: n, offsetM }) =>
+        n.x * centreM.x + n.y * centreM.y + n.z * centreM.z + offsetM >= -reach,
+    ) &&
+    (pass.horizon === null || !horizonRefuses(pass.horizon, centreM, radiusM, slackScale))
   );
 }
 
@@ -221,8 +265,67 @@ export function strideLevel(
 }
 
 /**
+ * Each instance's clusters' sphere centres camera-relative in the instances' frame, as the kernel
+ * places them, with their records, for `visit`.
+ */
+function eachCluster(
+  input: CullTwinInput,
+  visit: (
+    n: number,
+    instance: CullInstance,
+    cluster: number,
+    record: ClusterRecord,
+    centre: Vec3,
+  ) => void,
+): void {
+  input.instances.forEach((instance, n) => {
+    for (let cluster = 0; cluster < input.clustersPerPage; cluster += 1) {
+      const record = input.records(instance.page, cluster);
+      const offset = turned(input.rotationColumns, record.centreM);
+      visit(n, instance, cluster, record, {
+        x: instance.originM.x + offset.x,
+        y: instance.originM.y + offset.y,
+        z: instance.originM.z + offset.z,
+      });
+    }
+  });
+}
+
+/** A record's template in `pass`, its shape's at the pass's stride for `instance`'s unit. */
+function templateOf(record: ClusterRecord, pass: CullPass, instance: CullInstance): number {
+  return CLUSTER_SHAPE_CODE[record.shape] * STRIDES.length + strideLevel(pass, instance.unitM);
+}
+
+/**
+ * The twin of one dispatch's ordered pass (T2.a): each cluster's mark, instance by instance and
+ * cluster by cluster, its template where the pass keeps it, else {@link NO_MARK}; every mark
+ * {@link NO_MARK} where the dispatch has no ordered pass.
+ */
+export function cullMarksTwin(input: CullTwinInput, slackScale = 1): Uint32Array {
+  const marks = new Uint32Array(input.instances.length * input.clustersPerPage).fill(NO_MARK);
+  const p = input.passes.findIndex((pass) => pass?.kind === "camera" && pass.order === "ordered");
+  const pass = input.passes[p] ?? null;
+  if (pass === null) {
+    return marks;
+  }
+  eachCluster(input, (n, instance, cluster, record, centre) => {
+    if (
+      (instance.passMask & (1 << p)) !== 0 &&
+      passKeeps(pass, input.viewAxis, centre, record.radiusM, slackScale)
+    ) {
+      const t = templateOf(record, pass, instance);
+      if (t < input.templates) {
+        marks[n * input.clustersPerPage + cluster] = t;
+      }
+    }
+  });
+  return marks;
+}
+
+/**
  * The twin of one dispatch: each bucket's entries, keyed by bucket, in the order a serial kernel
- * would append them (instance by instance, cluster by cluster, pass by pass).
+ * would append them (instance by instance, cluster by cluster, pass by pass). An ordered pass
+ * appends nothing: its marks are {@link cullMarksTwin}'s.
  */
 export function cullTwin(input: CullTwinInput, slackScale = 1): CullTwinBuckets {
   const buckets = new Map<number, number[]>();
@@ -238,13 +341,13 @@ export function cullTwin(input: CullTwinInput, slackScale = 1): CullTwinBuckets 
       input.passes.forEach((pass, p) => {
         if (
           pass === null ||
+          (pass.kind === "camera" && pass.order === "ordered") ||
           (instance.passMask & (1 << p)) === 0 ||
           !passKeeps(pass, input.viewAxis, centre, record.radiusM, slackScale)
         ) {
           return;
         }
-        const t =
-          CLUSTER_SHAPE_CODE[record.shape] * STRIDES.length + strideLevel(pass, instance.unitM);
+        const t = templateOf(record, pass, instance);
         if (t >= input.templates) {
           return;
         }

@@ -1601,13 +1601,14 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
   ];
 
   /**
-   * The high setting's seven, its shadow cascades' caster (R10.T9.b), its interior patches' lit form
-   * (plan R14, R14.T1.a), their cluster caster (R14.T1.b) and their cluster depth (R14.T1.e) among
-   * them.
+   * The high setting's eight, its shadow cascades' caster (R10.T9.b), its interior patches' lit form
+   * (plan R14, R14.T1.a), their cluster caster (R14.T1.b), their cluster depth (R14.T1.e) and their
+   * lit form on the cluster path (R14.T2.a) among them.
    */
   const HIGH = [
     "terrain-lit-baked-offsets",
     "terrain-lit-interior-baked-offsets",
+    "terrain-lit-cluster-baked-offsets",
     "terrain-depth-baked-offsets",
     "terrain-cluster-depth-baked-offsets",
     "terrain-shadow-baked-offsets",
@@ -1633,6 +1634,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     expect(compiled(h)).toEqual([
       "terrain-lit-face-differences",
       "terrain-lit-interior-face-differences",
+      "terrain-lit-cluster-face-differences",
       "terrain-depth-face-differences",
       "terrain-cluster-depth-face-differences",
       "terrain-wire-face-differences",
@@ -1659,14 +1661,14 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
       [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary", setting: "low" })],
     ]);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 5), drawnWith(h), h.engine.live.materials]).toEqual([
+    expect([compiled(h, 6), drawnWith(h), h.engine.live.materials]).toEqual([
       [],
       [
         "terrain-lit-face-differences",
         "terrain-depth-face-differences",
         "terrain-wire-face-differences",
       ],
-      5,
+      6,
     ]);
   });
 

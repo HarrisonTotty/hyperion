@@ -22,7 +22,9 @@
  *   triangles), and on the cluster path each of its clusters the cull's twin keeps (`cullTwin`, at
  *   its kernel's allowance), at stride 1 (T1.b), with its receivers' cull (T1.c,
  *   `cascadeCullPasses`) and at its cascade's texel up to the setting's cap (T1.d).
- * - **The lit pass**: today every patch's lit mesh (10,752); T1.a an interior patch's 8,704.
+ * - **The lit pass**: today every patch's lit mesh (10,752); T1.a an interior patch's 8,704; T2.a
+ *   the interior patches' clusters its ordered camera pass keeps at stride 1 (`cullMarksTwin`): the
+ *   view's frustum opened by the cull's margin and R05's horizon occluder (`horizonCone`).
  * - **The overlay's depth**: today the lit draws redrawn; T1.e the interior patches' clusters the
  *   camera's frustum keeps at stride 1 (opened by the overlay cull's margin), and the edge patches'
  *   draws.
@@ -37,7 +39,7 @@ import { rotate } from "../camera/quaternion";
 import { IDENTITY_ROTATION } from "../coords/rotation";
 import { SETTINGS, type QualitySetting } from "../quality/qualitySetting";
 import { vertexDir, vertexSpacing } from "../terrain/cube";
-import { frustumOf } from "../terrain/cull";
+import { frustumOf, horizonCone } from "../terrain/cull";
 import { LIT_INTERIOR_INDICES, LIT_PATCH_INDICES } from "../terrain/gpu/resources";
 import {
   COUNT_FOV_X_RAD,
@@ -54,8 +56,8 @@ import { type HeightRangeLookup, selectPatches } from "../terrain/select";
 import { type CascadeIndex } from "../terrain/shadows/cascadeShadow";
 import { type CascadeSet, fitCascades } from "../terrain/shadows/cascades";
 import { castsInto, meanRadiusM } from "../terrain/terrainPass";
-import { cullTwin, type CullInstance, type CullTwinBuckets } from "./cull";
-import type { CameraCullPass, CullPass, CullPassPlace } from "./cullPass";
+import { cullMarksTwin, cullTwin, type CullInstance, type CullTwinBuckets, NO_MARK } from "./cull";
+import { type CameraCullPass, type CullPass, type CullPassPlace, cullHorizonOf } from "./cullPass";
 import { cascadeCullPasses } from "./receivers";
 import { CLUSTER_RECORD_BYTES, type ClusterRecord } from "./record";
 import { TERRAIN_CLUSTERS_PER_PAGE, writeTerrainClusterRecords } from "./terrain";
@@ -99,9 +101,10 @@ export interface PoseTriangles {
   readonly altitudeM: number;
   readonly interiorPatches: number;
   readonly edgePatches: number;
-  /** The lit pass: today's lit mesh, and T1.a's interior draw. */
+  /** The lit pass: today's lit mesh, T1.a's interior draw, and T2.a's clusters. */
   readonly litToday: number;
   readonly litInterior: number;
+  readonly litClusters: number;
   /**
    * The casters, all four cascades, at each sun azimuth in {@link COUNT_SUN_AZIMUTHS_DEG}'s order:
    * today's, T1.b's, T1.c's and T1.d's; `null` on low and where the cascades take w = 0.
@@ -311,7 +314,40 @@ export function countClusterCell(input: ClusterCountInput): ClusterCountCell {
       planes: frustum.planes,
       toleranceM: 0,
       strideCap: 1,
+      horizon: null,
+      order: "appended",
     };
+    // The lit pass's ordered camera pass (T2.a): the frustum and R05's horizon occluder.
+    const litPass: CameraCullPass = {
+      ...overlayPass,
+      horizon: cullHorizonOf(pose.positionM, horizonCone(planet, pose.positionM).occluderRadiusM),
+      order: "ordered",
+    };
+    const marks = cullMarksTwin({
+      instances: patches.map((patch, page) => ({
+        originM: patch.fromCameraM,
+        page,
+        passMask: 1,
+        unitM: 0,
+      })),
+      records: (page, cluster) => {
+        const record = patches[page]?.records[cluster];
+        if (record === undefined) {
+          throw new Error(`no record ${String(cluster)} of page ${String(page)}`);
+        }
+        return record;
+      },
+      clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE,
+      rotationColumns: [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)],
+      passes: [litPass],
+      places: [{ bucketBase: 0, listBase: 0 }],
+      templates: TEMPLATES.length,
+      viewAxis: forward,
+    });
+    let litClusters = 0;
+    for (const mark of marks) {
+      litClusters += mark === NO_MARK ? 0 : (TEMPLATES[mark]?.triangles ?? 0);
+    }
     const overlayClusters = bucketTriangles(
       cullTwin({
         instances: patches.map((patch, page) => ({
@@ -381,6 +417,7 @@ export function countClusterCell(input: ClusterCountInput): ClusterCountCell {
       edgePatches: 0,
       litToday: (n * LIT_PATCH_INDICES) / 3,
       litInterior: (n * LIT_INTERIOR_INDICES) / 3,
+      litClusters,
       casters,
       overlayToday: (n * LIT_PATCH_INDICES) / 3,
       overlayClusters,
@@ -444,6 +481,7 @@ export interface BandFigures {
   readonly poses: number;
   readonly litToday: number;
   readonly litInterior: number;
+  readonly litClusters: number;
   /** By sun azimuth, `null` where no pose of the band cast. */
   readonly casters: ReadonlyArray<{
     readonly today: number;
@@ -454,8 +492,8 @@ export interface BandFigures {
   readonly overlayToday: number;
   readonly overlayClusters: number;
   /**
-   * A frame's total on the cluster path, the lit pass's, the casters' (the azimuths' median, each
-   * band's median over its poses) and the overlay's; and today's.
+   * A frame's total on the cluster path, the lit pass's (T2.a's), the casters' (the azimuths'
+   * median, each band's median over its poses) and the overlay's; and today's.
    */
   readonly totalToday: number;
   readonly totalClusterPath: number;
@@ -489,6 +527,7 @@ export function bandFigures(cell: ClusterCountCell): BandFigures[] {
     const castStrided = cast.length === 0 ? 0 : median(cast.map((c) => c.strided));
     const litToday = of((p) => p.litToday);
     const litInterior = of((p) => p.litInterior);
+    const litClusters = of((p) => p.litClusters);
     const overlayToday = of((p) => p.overlayToday);
     const overlayClusters = of((p) => p.overlayClusters);
     return [
@@ -497,11 +536,12 @@ export function bandFigures(cell: ClusterCountCell): BandFigures[] {
         poses: poses.length,
         litToday,
         litInterior,
+        litClusters,
         casters,
         overlayToday,
         overlayClusters,
         totalToday: litToday + castToday + overlayToday,
-        totalClusterPath: litInterior + castStrided + overlayClusters,
+        totalClusterPath: litClusters + castStrided + overlayClusters,
       },
     ];
   });
@@ -525,8 +565,8 @@ export function clusterCountsMarkdown(record: ClusterCountsRecord): string {
     `Plan R14's counting harness (Design note 18) on fixtures/level-bounds.json at generator version ${String(record.generatorVersion)}: R05's descent at its record seed every ${String(record.poseStepS)} s, one 1920 × 1080 view of 60° on each setting, the hard bound at the setting's budget, the boxes flat at ±1 m; the cascades on high at a sun ${String(COUNT_SUN_ELEVATION_DEG)}° up at ${record.sunAzimuthsDeg.join("°, ")}° from the heading, a relief of ${String(COUNT_RELIEF_M / 1000)} km. Medians a band, millions of triangles a frame. Every sample world is wholly surveyed: every patch interior, no edge patch.`,
     ...record.notes.map((note) => `- ${note}`),
     "",
-    "| World | Setting | Band | Poses | Lit | Lit, T1.a (ratio) | Casters by azimuth: today, T1.b, T1.c, T1.d | Overlay, T1.e (ratio) | Total today | Total on the path (ratio) |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| World | Setting | Band | Poses | Lit | Lit, T1.a (ratio) | Lit, T2.a (ratio to T1.a) | Casters by azimuth: today, T1.b, T1.c, T1.d | Overlay, T1.e (ratio) | Total today | Total on the path (ratio) |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const cell of record.cells) {
     for (const band of bandFigures(cell)) {
@@ -538,7 +578,7 @@ export function clusterCountsMarkdown(record: ClusterCountsRecord): string {
         )
         .join("; ");
       lines.push(
-        `| ${cell.world} | ${cell.setting} | ${band.band} | ${String(band.poses)} | ${m2(band.litToday)} | ${m2(band.litInterior)} (${r3(band.litInterior / band.litToday)}) | ${casters} | ${m2(band.overlayClusters)} (${r3(band.overlayClusters / band.overlayToday)}) | ${m2(band.totalToday)} | ${m2(band.totalClusterPath)} (${r3(band.totalClusterPath / band.totalToday)}) |`,
+        `| ${cell.world} | ${cell.setting} | ${band.band} | ${String(band.poses)} | ${m2(band.litToday)} | ${m2(band.litInterior)} (${r3(band.litInterior / band.litToday)}) | ${m2(band.litClusters)} (${r3(band.litClusters / band.litInterior)}) | ${casters} | ${m2(band.overlayClusters)} (${r3(band.overlayClusters / band.overlayToday)}) | ${m2(band.totalToday)} | ${m2(band.totalClusterPath)} (${r3(band.totalClusterPath / band.totalToday)}) |`,
       );
     }
   }

@@ -11,6 +11,7 @@ import { scale, sub, type Vec3 } from "../../geometry/vec3";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import {
   GEOMETRY_BEFORE_R14,
+  type GeometrySettings,
   SETTINGS,
   TERRAIN_SETTINGS,
   terrainSettingsFor,
@@ -1464,11 +1465,18 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
     },
   };
 
+  /** The low setting's geometry with R14.T1.a's interior mesh, the lit pass off the cluster path. */
+  const INTERIOR_MESH: GeometrySettings = { ...SETTINGS.low.geometry, litClusters: false };
+
   /**
    * A lit pass on low over `bodyLayers`, wholly surveyed, its patches baked, and its view, on an
-   * engine that fails the materials `fails` names.
+   * engine that fails the materials `fails` names, drawing `geometry` (R14.T1.a's interior mesh
+   * unless given).
    */
-  async function interiorPass(fails: (name: string) => boolean = () => false): Promise<{
+  async function interiorPass(
+    fails: (name: string) => boolean = () => false,
+    geometry: GeometrySettings = INTERIOR_MESH,
+  ): Promise<{
     readonly pass: TerrainPass;
     readonly pool: FakePool;
     readonly engine: CountingRenderEngine;
@@ -1490,6 +1498,7 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
         pools.push(made);
         return made;
       },
+      geometry,
     });
     await pass.ready();
     const pool = pools.at(-1);
@@ -1594,7 +1603,7 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
       slots,
       GEOMETRY_BEFORE_R14,
     ]);
-    pass.setGeometry(SETTINGS.low.geometry);
+    pass.setGeometry(INTERIOR_MESH);
     const again = pass.frame({ ...inputAt(view), lighting: LIGHTING });
     expect(named(again)).toEqual(named(split));
   });
