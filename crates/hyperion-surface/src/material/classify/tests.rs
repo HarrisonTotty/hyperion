@@ -24,7 +24,9 @@ use crate::cube::{Face, xyz_to_face_uv};
 use crate::field::{CoarseField, MaterialPalette, PaletteEntry, cell_at_index};
 use crate::material::PhaseLaw;
 use crate::substance_key::SubstanceKey;
-use crate::synth::test_support::{Held, SEED, king_distances, random_points_in, world};
+use crate::synth::test_support::{
+    Held, SEED, king_distances, random_cells, random_points_in, world,
+};
 use crate::synth::{BandSpectrum, STRUCTURAL_RMS_STAGNANT_LID, SpectrumShape};
 use crate::test_sizes::per_target;
 use crate::testing::{CellSite, ClimateSample, FieldBuilder, Routing, SyntheticWorld, pluto_like};
@@ -1471,5 +1473,81 @@ fn material_a_partial_ice_cell_answers_within_its_margin() {
     for d in random_points_in(cell, per_target(6, 2), &mut rng) {
         let held = material_at(&synth, &mut SynthCache::new(), xyz_to_face_uv(d)).expect("held");
         assert_eq!(held, ground(&whole, d), "{d:?}");
+    }
+}
+
+#[test]
+fn material_a_kept_site_is_the_site_made_cell_after_cell() {
+    // Every world's cells, a cube corner's and face edges' among them, each asked twice in turn and
+    // then all again in reverse, through one cache for every world: the kept facts are the made
+    // ones to the bit (their `Debug`, which prints a float's every digit and its sign), and the
+    // corner's cell, which every world's list opens with, is made afresh for each world.
+    let mut rng = Lcg::new(0x006b_6570_7420);
+    let mut cache = SynthCache::new();
+    for &w in SyntheticWorld::ALL {
+        let field = world(w);
+        let synth = Synthesiser::new(field, SEED);
+        let cells = random_cells(field.header().level().get(), 16, &mut rng);
+        for &key in cells
+            .iter()
+            .zip(&cells)
+            .flat_map(|(a, b)| [a, b])
+            .chain(cells.iter().rev())
+        {
+            let cell = field.cell(key).expect("a whole field holds every cell");
+            let made = Site::of(field, key, cell).expect("held");
+            let kept = Site::kept(&synth, &mut cache, key, cell).expect("held");
+            assert_eq!(
+                format!("{:?}", kept.facts),
+                format!("{:?}", made.facts),
+                "{w:?} {key:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn material_a_kept_site_refuses_as_the_site_made_and_keeps_only_sites_made() {
+    // Over a view holding a cell `a` with its margin and not a cell `b` beyond it, through one
+    // cache: `b` is refused as made, its refusal keeps nothing, `a` is kept across it, and a view
+    // grown by `b`'s margin answers `b` as made.
+    let field = world(SyntheticWorld::EarthLike);
+    let coarse = field.header().level().get();
+    let a = PatchKey::new(Face::PosZ, coarse, 10, 10).unwrap();
+    let b = PatchKey::new(Face::PosZ, coarse, 30, 10).unwrap();
+    let margin = |c| king_distances(c, crate::field::SYNTHESIS_MARGIN_CELLS).into_keys();
+    let small = Held {
+        inner: field,
+        held: margin(a).collect(),
+    };
+    let grown = Held {
+        inner: field,
+        held: margin(a).chain(margin(b)).collect(),
+    };
+    let facts =
+        |site: Result<Site<'_>, QueryHeightError>| site.map(|site| format!("{:?}", site.facts));
+    let (in_a, in_b) = (field.cell(a).unwrap(), field.cell(b).unwrap());
+    let mut cache = SynthCache::new();
+    let synth = Synthesiser::new(&small, SEED);
+    assert_eq!(
+        facts(Site::of(&small, b, in_b)),
+        Err(QueryHeightError::NotSurveyed(b))
+    );
+    for (key, cell) in [(a, in_a), (b, in_b), (a, in_a), (b, in_b)] {
+        assert_eq!(
+            facts(Site::kept(&synth, &mut cache, key, cell)),
+            facts(Site::of(&small, key, cell)),
+            "{key:?}"
+        );
+    }
+    let synth = Synthesiser::new(&grown, SEED);
+    for (key, cell) in [(b, in_b), (a, in_a)] {
+        let made = facts(Site::of(&grown, key, cell));
+        assert!(made.is_ok(), "{key:?} is held");
+        assert_eq!(
+            facts(Site::kept(&synth, &mut cache, key, cell)),
+            made,
+            "{key:?}"
+        );
     }
 }

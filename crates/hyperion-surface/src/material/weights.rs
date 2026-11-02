@@ -383,7 +383,7 @@ fn coarse_weights<F: FieldView>(
     let header = field.header();
     let sample = *sample;
     let (key, cell) = synth.cell_at(dir)?;
-    let site = Site::of(field, key, cell)?;
+    let site = Site::kept(synth, cache, key, cell)?;
     let omitted = Omitted::of(synth, cache, key, level)?;
     let heights = height_cases(&site.height_breaks(), sample.height_m, omitted.height_m2);
     let steepnesses = steepness_cases(header, dir, &sample, omitted.slope2);

@@ -534,7 +534,16 @@ pub(crate) enum IcePlacement {
 pub(crate) struct Site<'a> {
     header: &'a FieldHeader,
     cell: &'a SynthesisCell,
-    climate: &'a ClimateCell,
+    facts: SiteFacts,
+}
+
+/// What a [`Site`] reads of its cell's record, its climate and its neighbours: a pure function of
+/// the field's header and the cell, which a [`SynthCache`] keeps for the cell last asked
+/// ([`Site::kept`]). Made at every point, they were about 5% of a cold high draft: the Köppen
+/// offset's sort of the months twice a point, the annual precipitation and the warmest month
+/// (R10.T6.a's lever, callgrind, pod, 16 vCPU, 2026-11-02).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SiteFacts {
     entries: Entries,
     airless: bool,
     thin_aired: bool,
@@ -545,8 +554,45 @@ pub(crate) struct Site<'a> {
     warmest_sea_k: f64,
     /// Its mean precipitation, millimetres of water a Julian year.
     precipitation_mm: f64,
+    /// Köppen–Geiger's seasonal offset of the arid threshold ([`koppen_offset_mm`]), millimetres
+    /// a year, where the climate precipitates; `None` where it does not, and the ground is arid.
+    koppen_offset_mm: Option<f64>,
     /// The snow's entry, before the precipitation and the temperature are asked.
     snow_entry: Option<u8>,
+}
+
+impl SiteFacts {
+    /// The facts of `cell`, the record of `key` in `field`: its climate's and its neighbours'
+    /// reads.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] for the cell's climate or a neighbour the view does not
+    /// hold.
+    fn of<F: FieldView>(
+        field: &F,
+        key: PatchKey,
+        cell: &SynthesisCell,
+    ) -> Result<Self, QueryHeightError> {
+        let header = field.header();
+        let climate = field
+            .climate(key)
+            .ok_or(QueryHeightError::NotSurveyed(key))?;
+        let pressure = header.surface_pressure();
+        let airless = pressure <= Pascals::ZERO;
+        let precipitation_mm = annual_precipitation_mm(header, climate);
+        Ok(Self {
+            entries: Entries::of(header, cell.crust),
+            airless,
+            thin_aired: !airless && pressure < THIN_ATMOSPHERE_PRESSURE,
+            closed_basin: is_closed_basin(field, key, cell)?,
+            annual_sea_k: header.sea_level_temperature(climate).value(),
+            warmest_sea_k: warmest_month_k(header, climate),
+            precipitation_mm,
+            koppen_offset_mm: seasonal_offset_mm(header, climate, precipitation_mm),
+            snow_entry: snow_entry(header, cell),
+        })
+    }
 }
 
 impl<'a> Site<'a> {
@@ -556,29 +602,52 @@ impl<'a> Site<'a> {
     ///
     /// [`QueryHeightError::NotSurveyed`] for the cell's climate or a neighbour the view does not
     /// hold.
+    #[cfg(test)]
     pub(crate) fn of<F: FieldView>(
         field: &'a F,
         key: PatchKey,
         cell: &'a SynthesisCell,
     ) -> Result<Self, QueryHeightError> {
-        let header = field.header();
-        let climate = field
-            .climate(key)
-            .ok_or(QueryHeightError::NotSurveyed(key))?;
-        let pressure = header.surface_pressure();
-        let airless = pressure <= Pascals::ZERO;
         Ok(Self {
-            header,
+            header: field.header(),
             cell,
-            climate,
-            entries: Entries::of(header, cell.crust),
-            airless,
-            thin_aired: !airless && pressure < THIN_ATMOSPHERE_PRESSURE,
-            closed_basin: is_closed_basin(field, key, cell)?,
-            annual_sea_k: header.sea_level_temperature(climate).value(),
-            warmest_sea_k: warmest_month_k(header, climate),
-            precipitation_mm: annual_precipitation_mm(header, climate),
-            snow_entry: snow_entry(header, cell),
+            facts: SiteFacts::of(field, key, cell)?,
+        })
+    }
+
+    /// The site of `cell`, the record of `key` in `synth`'s field, its facts kept in `cache` for
+    /// the cell last asked: the tests' `Site::of`, bit for bit, its errors included, since the
+    /// facts are a pure function of the field and the cell, and only facts made are kept. They
+    /// are kept for the field the channels' memo is kept for ([`NetworkId`]), as [`IceCuts`]'
+    /// closed forms are: a cache serves one coarse pass's field, whose header and records, the
+    /// climate's among them, are fixed (only the cuts are also keyed by the ice, which a test's
+    /// two fields of one pass vary).
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] for the cell's climate or a neighbour the view does not
+    /// hold.
+    pub(crate) fn kept<F: FieldView>(
+        synth: &Synthesiser<'a, F>,
+        cache: &mut SynthCache,
+        key: PatchKey,
+        cell: &'a SynthesisCell,
+    ) -> Result<Self, QueryHeightError> {
+        let field = synth.field();
+        let kept = cache.ice_cuts_mut();
+        kept.keep(Some(synth.channels().id()));
+        let facts = match kept.site {
+            Some((held, facts)) if held == key.to_u64() => facts,
+            _ => {
+                let facts = SiteFacts::of(field, key, cell)?;
+                cache.ice_cuts_mut().site = Some((key.to_u64(), facts));
+                facts
+            }
+        };
+        Ok(Self {
+            header: field.header(),
+            cell,
+            facts,
         })
     }
 
@@ -621,17 +690,20 @@ impl<'a> Site<'a> {
                 breaks.push(h);
             }
         };
-        if let Some(e) = self.entries.crust.and_then(|e| palette.get(e)) {
-            at_temperature(self.annual_sea_k, e.transition.value());
+        let facts = &self.facts;
+        if let Some(e) = facts.entries.crust.and_then(|e| palette.get(e)) {
+            at_temperature(facts.annual_sea_k, e.transition.value());
         }
-        if self.precipitation_mm > 0.0 {
-            if let Some(e) = self.snow_entry.and_then(|e| palette.get(e)) {
-                at_temperature(self.warmest_sea_k, e.transition.value());
-            }
-            let offset = koppen_offset_mm(header, self.climate, self.precipitation_mm);
+        if facts.precipitation_mm > 0.0
+            && let Some(e) = facts.snow_entry.and_then(|e| palette.get(e))
+        {
+            at_temperature(facts.warmest_sea_k, e.transition.value());
+        }
+        // Where it precipitates.
+        if let Some(offset) = facts.koppen_offset_mm {
             let arid_k =
-                ZERO_CELSIUS_K + 0.5 * (self.precipitation_mm / KOPPEN_ARID_MULTIPLE - offset);
-            at_temperature(self.annual_sea_k, arid_k);
+                ZERO_CELSIUS_K + 0.5 * (facts.precipitation_mm / KOPPEN_ARID_MULTIPLE - offset);
+            at_temperature(facts.annual_sea_k, arid_k);
         }
         breaks.sort_by(f64::total_cmp);
         breaks.dedup_by(|a, b| a.total_cmp(b).is_eq());
@@ -651,16 +723,17 @@ impl<'a> Site<'a> {
         let header = self.header;
         let palette = header.palette();
         let cell = self.cell;
+        let facts = &self.facts;
         let lapse_k = lapse_drop_k(header, h_m);
-        let annual_k = self.annual_sea_k - lapse_k;
-        let warmest_k = self.warmest_sea_k - lapse_k;
-        let molten = self
+        let annual_k = facts.annual_sea_k - lapse_k;
+        let warmest_k = facts.warmest_sea_k - lapse_k;
+        let molten = facts
             .entries
             .crust
             .and_then(|e| palette.get(e))
             .is_some_and(|e| annual_k > e.transition.value());
-        let precipitation_mm = self.precipitation_mm;
-        let snow = self.snow_entry.filter(|&e| {
+        let precipitation_mm = facts.precipitation_mm;
+        let snow = facts.snow_entry.filter(|&e| {
             precipitation_mm > 0.0
                 && palette
                     .get(e)
@@ -673,17 +746,17 @@ impl<'a> Site<'a> {
         Facts {
             under_water: self.under_water(h_m),
             ice,
-            airless: self.airless,
-            thin_aired: self.thin_aired,
+            airless: facts.airless,
+            thin_aired: facts.thin_aired,
             molten,
             snow,
             above_cliff: steepness != Steepness::Loose,
             above_snow_shed: steepness == Steepness::Shed,
-            closed_basin: self.closed_basin,
-            arid: is_arid(header, self.climate, annual_k, precipitation_mm),
+            closed_basin: facts.closed_basin,
+            arid: arid_with(annual_k, precipitation_mm, facts.koppen_offset_mm),
             channel_floor,
             province: cell.crust == Crust::Province,
-            entries: self.entries,
+            entries: facts.entries,
         }
     }
 }
@@ -733,7 +806,7 @@ impl<'a> Point<'a> {
         let level = finest_band(field.header());
         let sample = *sample;
         let (key, cell) = synth.cell_at(dir)?;
-        let site = Site::of(field, key, cell)?;
+        let site = Site::kept(synth, cache, key, cell)?;
         let h = sample.height_m;
         let in_ice = match site.ice_placement(site.under_water(h)) {
             IcePlacement::Settled(lies) => lies,
@@ -889,8 +962,9 @@ impl IceCut {
 /// Beside them, for R10.T2's weights, each cell's omitted index at a coarser band level
 /// ([`ice_share_at`]): by packed cell key, that level and the ice code; and each cell's closed
 /// forms of what a band level leaves out (`weights::Omitted`, R09's level-keyed forms, 50 to 150 µs
-/// a call since R09.T7.h): by packed cell key and level. Each is a pure function of the field's
-/// header and the cell's record, so no answer depends on what is kept.
+/// a call since R09.T7.h): by packed cell key and level; and the facts of the site last made
+/// ([`Site::kept`]), by packed cell key. Each is a pure function of the field's header and the
+/// cell's record, so no answer depends on what is kept.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct IceCuts {
     /// The field the cuts are of, by what tells one coarse pass's field of a body and seed from
@@ -899,6 +973,9 @@ pub(crate) struct IceCuts {
     cuts: BTreeMap<(u64, u8, u8), IceCut>,
     omitted: BTreeMap<(u64, u8, u8), Vec<f64>>,
     forms: BTreeMap<(u64, u8), [f64; 2]>,
+    /// The cell a site was last made for, by packed key, and its facts ([`Site::kept`]): a
+    /// patch's points nearly all lie in one coarse cell.
+    site: Option<(u64, SiteFacts)>,
 }
 
 impl IceCuts {
@@ -910,6 +987,7 @@ impl IceCuts {
             cuts: BTreeMap::new(),
             omitted: BTreeMap::new(),
             forms: BTreeMap::new(),
+            site: None,
         }
     }
 
@@ -920,6 +998,7 @@ impl IceCuts {
             self.cuts.clear();
             self.omitted.clear();
             self.forms.clear();
+            self.site = None;
         }
     }
 }
@@ -1193,6 +1272,7 @@ fn annual_precipitation_mm(header: &FieldHeader, climate: &ClimateCell) -> f64 {
 /// Whether a point of `climate` whose annual mean temperature is `annual_k` and whose mean
 /// precipitation is `precipitation_mm` (a Julian year) is arid: it does not precipitate, or it is
 /// below Köppen–Geiger's arid threshold ([`material_at`]).
+#[cfg(test)]
 #[must_use]
 fn is_arid(
     header: &FieldHeader,
@@ -1200,12 +1280,34 @@ fn is_arid(
     annual_k: f64,
     precipitation_mm: f64,
 ) -> bool {
-    if precipitation_mm <= 0.0 {
-        return true;
-    }
-    let celsius = annual_k - ZERO_CELSIUS_K;
-    let offset = koppen_offset_mm(header, climate, precipitation_mm);
-    precipitation_mm < KOPPEN_ARID_MULTIPLE * (2.0 * celsius + offset)
+    arid_with(
+        annual_k,
+        precipitation_mm,
+        seasonal_offset_mm(header, climate, precipitation_mm),
+    )
+}
+
+/// Whether ground whose annual mean temperature is `annual_k` and whose mean precipitation is
+/// `precipitation_mm` (a Julian year) is arid, given the seasonal offset `offset_mm` that
+/// [`seasonal_offset_mm`] gives its climate: it does not precipitate (no offset), or it is below
+/// Köppen–Geiger's arid threshold ([`material_at`]).
+#[must_use]
+fn arid_with(annual_k: f64, precipitation_mm: f64, offset_mm: Option<f64>) -> bool {
+    offset_mm.is_none_or(|offset_mm| {
+        let celsius = annual_k - ZERO_CELSIUS_K;
+        precipitation_mm < KOPPEN_ARID_MULTIPLE * (2.0 * celsius + offset_mm)
+    })
+}
+
+/// [`koppen_offset_mm`] of `climate`, whose mean precipitation is `precipitation_mm` (a Julian
+/// year), where it precipitates; `None` where it does not.
+#[must_use]
+fn seasonal_offset_mm(
+    header: &FieldHeader,
+    climate: &ClimateCell,
+    precipitation_mm: f64,
+) -> Option<f64> {
+    (precipitation_mm > 0.0).then(|| koppen_offset_mm(header, climate, precipitation_mm))
 }
 
 /// Köppen–Geiger's seasonal offset of the arid threshold for `climate`, whose mean precipitation is
