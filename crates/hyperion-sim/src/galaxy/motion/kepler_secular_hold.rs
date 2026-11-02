@@ -333,7 +333,7 @@ fn the_exact_orbit_gives_the_same_seed_the_same_answers_twice_and_in_any_order()
 }
 
 /// The heap the exact orbits own: a trajectory's exact orbit, boxed; a cell's orbits, every
-/// member's with its trajectory and shell; and the galaxy's potential, once read.
+/// member's with its trajectory, shell and light; and the galaxy's potential, once read.
 #[test]
 fn the_exact_orbits_heap_is_counted() {
     let galaxy = Galaxy::from_params(Seed::new(MILKY_WAY_SEED), GalaxyParams::milky_way_like())
@@ -374,7 +374,10 @@ fn the_exact_orbits_heap_is_counted() {
     assert!(exact_orbits > 0);
     assert_eq!(
         orbits.heap_bytes(),
-        orbits.trajectories().len() * (size_of::<Trajectory>() + size_of::<[f64; 2]>())
+        orbits.trajectories().len()
+            * (size_of::<Trajectory>()
+                + size_of::<[f64; 2]>()
+                + size_of::<crate::galaxy::features::centre::CentreMemberLight>())
             + exact_orbits * size_of::<SphericalOrbit>()
     );
 }

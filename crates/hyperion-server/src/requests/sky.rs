@@ -62,6 +62,7 @@ use hyperion_protocol::{
 };
 use hyperion_sim::coords::UnitVector;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::global_list::GlobalListSource;
 use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve};
 use hyperion_sim::galaxy::query::LayerPads;
 use hyperion_sim::id::{Layer, SystemId};
@@ -71,7 +72,7 @@ use hyperion_sim::sky::band::{BandMarch, BandTexel};
 use hyperion_sim::sky::caps::{LayerCap, REAL_LIMIT_LY};
 use hyperion_sim::sky::census::{
     BuildSkyQueryError, CensusPlan, CensusTallies, Completeness, Cone, LayerTally, SkyCensus,
-    SkyQuery, SkyStar,
+    SkyQuery, SkyStar, streams_seen,
 };
 use hyperion_sim::sky::dgl::Illumination;
 use hyperion_sim::sky::disc::{HostDisc, host_discs};
@@ -85,6 +86,7 @@ use hyperion_sim::units::consts::{
 use hyperion_sim::units::{CandelasPerSquareMetre, Degrees, LightYears, Magnitudes};
 use tokio::sync::mpsc;
 
+use super::global_list::tube_refused;
 use super::universe::openable_universe;
 use super::{Replies, request_error};
 use crate::AppState;
@@ -96,7 +98,8 @@ use crate::compute::sky::{
     BulkJobs, CENSUS_JOB_SLICE, CensusInputs, CensusStep, SkyBand, SkyMembers,
 };
 use crate::compute::{
-    self, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, Listing, Priority, SkyCaps,
+    self, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, ListedTubes, Listing, Priority,
+    SkyCaps,
 };
 use crate::convert::{ConvertRequestError, mass_layer, query_time, root_cube_position, wire_time};
 use kept::SkyReplyKey;
@@ -280,8 +283,35 @@ async fn computed(
         compute::sky::plan(pool, &galaxy, &tables, asked_query, edges, token).await?;
     let plan = Arc::new(plan);
     phase("plan", started);
+    // From 27 the census takes the global list's members too, through its list and tube tables,
+    // built on the pool if no request has built them, and the centre's orbits (R06.T16.a).
+    let list = if GlobalListSource::is_registered_in(&galaxy) {
+        let held = state.global_lists.get(key).await?;
+        // The tables of the streams the census reads, built on the pool first, each once, as the
+        // range query's are (`list_for`), so that no census job builds one.
+        for number in streams_seen(&galaxy, held.list(), &plan, &query) {
+            let spec = held
+                .list()
+                .stream(number)
+                .expect("the list names its own streams");
+            state
+                .global_lists
+                .tube((&galaxy, key), spec, Priority::Bulk)
+                .await
+                .map_err(|error| tube_refused(number, &error))?;
+        }
+        let tubes = ListedTubes::new(
+            (Arc::clone(&galaxy), key),
+            held,
+            Arc::clone(&state.tube_tables),
+        );
+        Some((tubes, Arc::clone(&state.centre_orbits)))
+    } else {
+        None
+    };
+    let members = (&state.feature_cells, &state.cluster_models);
     let inputs = CensusInputs {
-        members: SkyMembers::of(&galaxy, &state.feature_cells, &state.cluster_models),
+        members: SkyMembers::of(&galaxy, members, list),
         galaxy,
         key,
         tables,

@@ -2,8 +2,8 @@
 //! between queries (plan 09, P09.T37.b: P09.T40.a's `CentreOrbitCache`).
 //!
 //! A query near the black hole reads the centre's members cell by cell and band by band, each with
-//! its trajectory ([`CentreCellOrbits`]: some 200 bytes a member, and some 640 more for its exact
-//! orbit from version 25), a pure function of the galaxy, the band and the cell. So
+//! its trajectory ([`CentreCellOrbits`]: some 230 bytes a member, the sky's census's 32 among
+//! them, and some 640 more for its exact orbit from version 25), a pure function of the galaxy, the band and the cell. So
 //! [`SharedCentreOrbitCache`] keeps them, a [`SharedByteLru`] over `(GalaxyKey, MassBand,
 //! NestedCell)` charged each cell's heap bytes, as the sim's `KeepCentreOrbits` keeps one galaxy's
 //! but within a byte budget: a warm query about the centre places and prepares none of them again.

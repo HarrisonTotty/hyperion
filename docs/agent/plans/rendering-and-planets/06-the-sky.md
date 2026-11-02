@@ -222,7 +222,12 @@ pub struct SkyContext<'a> { /* tables: &'a LuminosityTables, envelope: &'a Brigh
     noise: NoiseCache (the job's own), cells: &'a dyn SkyCellCache,
     sources: &'a [&'a dyn SkySource], modifiers: &'a dyn GasModifierSource */ }
 pub trait SkySource { fn members_seen(&self, galaxy: &Galaxy, observer: &Observer,
-    seen: ((MassBand, LightYears, LightYears), MemberPart), each: &mut dyn FnMut(&MemberRecord)); }
+    seen: ((MassBand, LightYears, LightYears), MemberPart), each: &mut dyn FnMut(SkyMember<'_>));
+    fn holds_feature_members(&self) -> bool { false } } // R06.T16.a at 27, as built
+pub enum SkyMember<'a> { Feature(&'a MemberRecord), Listed(&'a GlobalMemberRecord),
+    Centre(&'a CentreMemberLight, &'a Trajectory) }
+pub fn streams_seen(galaxy: &Galaxy, list: &GlobalList, plan: &CensusPlan, query: &SkyQuery)
+    -> Vec<StreamNumber>;
 pub fn census_members(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, plan: &CensusPlan,
     shell: (Shell, MemberPart), query: &SkyQuery, out: &mut Vec<SkyStar>) -> CensusTallies;
 pub fn takes_feature_members(galaxy: &Galaxy) -> bool; // R06.T16.a, as built
@@ -9969,3 +9974,22 @@ CensusCost)`.
     of twice 47 Tuc's density, its analogue by mass and density giving 1.24 × 10⁵ (a finding).
   - **The label.** No client change: `feature_members` leaves `not_modelled` wherever the census
     takes members; `centre_members` stays where a census meets one, until 27.
+- **R06.T16.a at 27: the global list's members (2026-11-02).**
+  - **The hook.** `SkySource` gives `SkyMember`s: a feature's, a list's (`GlobalMemberRecord`, on
+    `Drift::of_global_member`) or the centre's (`CentreMemberLight` and its cell's `Trajectory`,
+    retarded on `CellPath`, `CentrePath`'s law); `GlobalListSource` implements it.
+  - **The switch.** `GlobalListSource::is_registered_in` (`list_source`, 27), under which the halo's
+    field gives up the list's share; the server's `SkyMembers::of` takes the list's caches there.
+  - **The centre (lean, 2026-11-02).** Only its living members, each a single star at its own
+    composition: no multiplicity is ruled for its cells, and its remnants are dark. Its black hole,
+    its disruptions' victims and its recent entries are left out (findings).
+  - **Streams' tables.** `sky::census::streams_seen` names those a census reads; the sky's handler
+    builds them on the pool before the census, as `list_for` does.
+  - **The flag.** `SkySource::holds_feature_members` says which source clears
+    `feature_members_absent`; the list's does not.
+  - **Left (finding).** The catalogue classes' hosts: the grid gives them up from 26
+    (`CARVE_OUT_VERSION`), and no census source places them yet.
+  - **Cost.** `sky/census_near_sun_members/served_5.0_27`: the measurements in the lane's outbox;
+    the centre's cached cells keep 32 bytes more a member (`CentreMemberLight`).
+  - _Movers at 27._ Sky replies list the streams', dwarf cores' and centre's living members' stars,
+    with their tallies and overflow; the sky's pins move only with the field's own 27 holds.

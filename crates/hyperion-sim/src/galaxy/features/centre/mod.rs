@@ -44,7 +44,8 @@ pub use members::ExceedCentreIndexError;
 pub use path::CentrePath;
 pub use profile::{BuildCentreError, CentreProfile, SlopeBreak, TracerProfile, TracerShape};
 pub use source::{
-    CentreCellOrbits, CentreMemberSource, CentreOrbitCache, KeepCentreOrbits, NoCentreOrbitCache,
+    CentreCellOrbits, CentreMemberLight, CentreMemberSource, CentreOrbitCache, KeepCentreOrbits,
+    NoCentreOrbitCache,
 };
 
 use crate::galaxy::Galaxy;

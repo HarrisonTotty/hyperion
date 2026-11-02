@@ -28,6 +28,15 @@
 //!   its band texel once the census is final (`Completeness::radius_at`): the band's boundary,
 //!   beyond which the band holds the layer's light.
 //!
+//! From generator version 27 the global list's members join them, exactly where the range query
+//! registers the list's source (`GlobalListSource::is_registered_in`, plan 10's P10.T10.b, with
+//! plan 09's P09.T37.b), the hold under which the halo's field gives up their share: each
+//! stream's and dwarf core's member on its own line ([`Drift::of_global_member`]), and the
+//! galactic centre's on its orbit (P09.T28, the path a range row is placed on). Of the centre's
+//! members the census generates only the living stars, each single, since no multiplicity is
+//! ruled for its cells and its remnants are dark (lean, 2026-11-02); its black hole, its tidal
+//! disruptions' victims and its recent entries are not taken.
+//!
 //! # The band and the caps
 //!
 //! They read the budget, each population's whole density, the members' included (decided at
@@ -41,25 +50,32 @@
 use core::num::NonZeroU32;
 
 use crate::galaxy::Galaxy;
+use crate::galaxy::features::centre::path::CellPath;
+use crate::galaxy::features::centre::{CentreClassKind, CentreMemberLight};
 use crate::galaxy::features::members::MemberRecord;
 use crate::galaxy::features::members::source::FeatureMemberSource;
+use crate::galaxy::global_list::GlobalListSource;
+use crate::galaxy::global_list::members::GlobalMemberRecord;
 use crate::galaxy::imf::MassBand;
+use crate::galaxy::motion::Trajectory;
 use crate::math;
-use crate::observe::{Drift, Observer, retarded};
+use crate::observe::{Drift, Observer, Retardation, retarded};
+use crate::stellar::multiplicity::MultiplicityContext;
+use crate::stellar::system::SystemStars;
 use crate::units::LightYears;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
 use super::cell::{Bound, CensusTallies, Counts, SkyStar, layer_offset_bound, system_stars};
 use super::query::{CensusPlan, Completeness, Shell, SkyContext, SkyQuery, light_time};
 
-/// A source of systems beyond the grid as the sky's census reads them (R06.T16.a): each with its
-/// own composition, multiplicity and velocity, from which its stars and its line are drawn.
+/// A source of systems beyond the grid as the sky's census reads them (R06.T16.a): each a
+/// [`SkyMember`], from which its stars and its path are drawn.
 ///
 /// The census retards each member a source gives and keeps it only in its shell, so a source may
 /// give more than the shell holds, never fewer. Its order is its own, but the census's merge is
-/// total, so no answer depends on it. Plan 09's feature members are the one source until the
-/// galactic centre's and the global list's join (plan 09's P09.T29 and plan 10's P10.T10.b, from
-/// generator version 27), whose members move on orbits rather than lines.
+/// total, so no answer depends on it. Plan 09's feature members' source is one
+/// ([`FeatureMemberSource`]); the global list's, the streams', the dwarf cores' and the galactic
+/// centre's together, is the other ([`GlobalListSource`], from generator version 27).
 pub trait SkySource {
     /// Gives `each` every member of `seen`'s part of its shell whose light can reach `observer`.
     ///
@@ -72,8 +88,81 @@ pub trait SkySource {
         galaxy: &Galaxy,
         observer: &Observer,
         seen: ((MassBand, LightYears, LightYears), MemberPart),
-        each: &mut dyn FnMut(&MemberRecord),
+        each: &mut dyn FnMut(SkyMember<'_>),
     );
+
+    /// Whether it gives plan 09's feature members, so that a census whose jobs carry it has them
+    /// ([`CensusTallies::feature_members_absent`]): no, unless it says so.
+    fn holds_feature_members(&self) -> bool {
+        false
+    }
+}
+
+/// One member a [`SkySource`] gives the census: what its stars and its path are drawn from.
+///
+/// A source gives a centre member beside its own cell's trajectory, which the census retards it
+/// on and draws its stars beside.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SkyMember<'a> {
+    /// A catalogue feature's member, on its line at its cluster's motion and its own (P09.T10).
+    Feature(&'a MemberRecord),
+    /// A stream's or a dwarf core's member, on its line at its own velocity (plan 10, P10.T10.b).
+    Listed(&'a GlobalMemberRecord),
+    /// A member of the galactic centre, on its orbit (P09.T28): what its stars are drawn from and
+    /// its cell's trajectory, whose start is its record.
+    Centre(&'a CentreMemberLight, &'a Trajectory),
+}
+
+impl SkyMember<'_> {
+    /// Its plan 03 record.
+    #[must_use]
+    fn record(&self) -> &crate::galaxy::placement::SystemRecord {
+        match self {
+            Self::Feature(member) => member.record(),
+            Self::Listed(member) => member.record(),
+            Self::Centre(_, trajectory) => trajectory.start().record(),
+        }
+    }
+
+    /// Whether the census generates its stars: every member but the galactic centre's not of a
+    /// living class, which are dark (the module's documentation; lean, 2026-11-02).
+    #[must_use]
+    fn shines(&self) -> bool {
+        match self {
+            Self::Feature(_) | Self::Listed(_) => true,
+            Self::Centre(light, _) => light.kind() == Some(CentreClassKind::Living),
+        }
+    }
+
+    /// Where `observer` sees it: its retardation on its own path.
+    #[must_use]
+    fn retarded(&self, observer: &Observer) -> Retardation {
+        match self {
+            Self::Feature(member) => retarded(
+                observer,
+                &Drift::new(*member.record().epoch_position(), member.velocity()),
+            ),
+            Self::Listed(member) => retarded(observer, &Drift::of_global_member(member)),
+            Self::Centre(_, trajectory) => retarded(observer, &CellPath(trajectory)),
+        }
+    }
+
+    /// Its stars: a feature's or a list's member's own ([`MemberRecord::stars`],
+    /// [`GlobalMemberRecord::stars`]), and a centre member's single star at its composition
+    /// (lean, 2026-11-02).
+    #[must_use]
+    fn stars(&self, galaxy: &Galaxy) -> SystemStars {
+        match self {
+            Self::Feature(member) => member.stars(galaxy),
+            Self::Listed(member) => member.stars(galaxy),
+            Self::Centre(light, trajectory) => SystemStars::generate_with(
+                galaxy,
+                trajectory.start().record(),
+                light.composition(),
+                MultiplicityContext::ForcedSingle,
+            ),
+        }
+    }
 }
 
 /// One of the parts a shell's members are drawn in, so that they can be several jobs.
@@ -124,20 +213,67 @@ impl SkySource for FeatureMemberSource<'_> {
         galaxy: &Galaxy,
         observer: &Observer,
         (shell, part): ((MassBand, LightYears, LightYears), MemberPart),
-        each: &mut dyn FnMut(&MemberRecord),
+        each: &mut dyn FnMut(SkyMember<'_>),
     ) {
-        let t = observer.time();
-        let earliest = t
-            .checked_sub(light_time(shell.2.value()))
-            .expect("an observer's time less a cap's light time is on the clock");
         self.members_in_shell_over(
             galaxy,
             observer.position(),
-            (earliest, t),
+            window(observer, shell.2),
             (shell, (part.index, part.of)),
-            each,
+            &mut |member| each(SkyMember::Feature(member)),
         );
     }
+
+    fn holds_feature_members(&self) -> bool {
+        true
+    }
+}
+
+impl SkySource for GlobalListSource<'_> {
+    /// The streams' and the dwarf cores' members the source would draw for a sphere padded by
+    /// each entry's own speed bound over the light's window, then the galactic centre's whose
+    /// paths can bring them within the shell over it (its cells' plunge pads at the window's
+    /// farthest time from the epoch).
+    ///
+    /// # Panics
+    ///
+    /// As [`FeatureMemberSource`]'s.
+    fn members_seen(
+        &self,
+        galaxy: &Galaxy,
+        observer: &Observer,
+        ((band, _, outer), part): ((MassBand, LightYears, LightYears), MemberPart),
+        each: &mut dyn FnMut(SkyMember<'_>),
+    ) {
+        let (at, window) = (observer.position(), window(observer, outer));
+        let seen = ((band, outer), (part.index, part.of));
+        self.members_in_shell_over(galaxy, at, window, seen, &mut |member| {
+            each(SkyMember::Listed(member));
+        });
+        if let Some(centre) = self.centre() {
+            centre.members_in_shell_over(galaxy, at, window, seen, &mut |member, trajectory| {
+                each(SkyMember::Centre(member, trajectory));
+            });
+        }
+    }
+}
+
+/// The times from `outer`'s light time before `observer`'s time to it.
+///
+/// # Panics
+///
+/// If the earlier is off the clock, which no cap's is: an observer is within ±1,000 years of the
+/// epoch and a cap within the root cube's diagonal.
+#[must_use]
+fn window(
+    observer: &Observer,
+    outer: LightYears,
+) -> (crate::time::UniverseTime, crate::time::UniverseTime) {
+    let t = observer.time();
+    let earliest = t
+        .checked_sub(light_time(outer.value()))
+        .expect("an observer's time less a cap's light time is on the clock");
+    (earliest, t)
 }
 
 /// Whether the census takes plan 09's feature members in `galaxy`: exactly where its field gives
@@ -153,19 +289,61 @@ pub fn takes_feature_members(galaxy: &Galaxy) -> bool {
     galaxy.field_share().is_some()
 }
 
-/// The feature members' stars of `shell`, one of `plan`'s, of the members `part` holds, kept for
-/// `query`, appended to `out` (which is not cleared); their counts are returned, for the caller to
-/// add up with [`CensusTallies::add`] beside the shell's cells' (see the [module](self)
-/// documentation).
+/// The streams whose tube tables the census of `plan` for `query` reads through a
+/// [`GlobalListSource`] over `list`, `galaxy`'s global list, in list order: each layer's members
+/// out to its cap's farthest radius and its stars' offset, as [`census_members`] takes them, so
+/// that a server can build the tables before the census, once each (R06.T16.a, at 27).
+///
+/// # Panics
+///
+/// If the farthest cap's light time before the observer's time is off the clock, which no cap's
+/// is (as [`SkySource::members_seen`]'s).
+#[must_use]
+pub fn streams_seen(
+    galaxy: &Galaxy,
+    list: &crate::galaxy::global_list::GlobalList,
+    plan: &CensusPlan,
+    query: &SkyQuery,
+) -> Vec<crate::galaxy::global_list::StreamNumber> {
+    let observer = query.observer();
+    let [x, y, z] = observer.position().to_light_years_f64();
+    let from_centre = math::hypot(math::hypot(x, y), z);
+    let outer = plan
+        .caps()
+        .iter()
+        .filter(|cap| MassBand::ALL.iter().any(|band| band.layer() == cap.layer()))
+        .map(|cap| {
+            let reach = LightYears::new(from_centre + cap.radius().value());
+            cap.radius().value() + layer_offset_bound(galaxy, cap.layer(), reach).value()
+        })
+        .fold(0.0, f64::max);
+    if outer <= 0.0 {
+        return Vec::new();
+    }
+    let outer = LightYears::new(outer);
+    GlobalListSource::streams_seen(
+        galaxy,
+        list,
+        observer.position(),
+        window(observer, outer),
+        outer,
+    )
+}
+
+/// The stars of `shell`'s members beyond the grid, one of `plan`'s shells, of the members `part`
+/// holds, kept for `query`, appended to `out` (which is not cleared); their counts are returned,
+/// for the caller to add up with [`CensusTallies::add`] beside the shell's cells' (see the
+/// [module](self) documentation).
 ///
 /// Every member of the shell's layer that `ctx`'s sources give and the shell holds is generated
-/// and tallied in it: `generated` per member whose state exists at its emitted time, `accepted`
-/// per star kept. For a query with a cone, a member whose stars all lie outside the cone a plan
-/// opens its cells by is not generated. A context with no sources gives nothing, and tallies that leave the members out
-/// ([`CensusTallies::feature_members_absent`]), as its cells' do; one with them, tallies that say
-/// they are in. The stars of every shell of a plan are its members' stars, each once: a census of
-/// its shells done, merged ([`merge_shells`](super::merge_shells)), lists each where its cells'
-/// stars are listed.
+/// and tallied in it, but the centre's that do not shine: `generated` per member whose state
+/// exists at its emitted time, `accepted` per star kept. For a query with a cone, a member whose
+/// stars all lie outside the cone a plan opens its cells by is not generated. A context with no
+/// sources gives nothing; its tallies, as its cells', leave the feature members out
+/// ([`CensusTallies::feature_members_absent`]) unless a source holds them
+/// ([`SkySource::holds_feature_members`]). The stars of every shell of a plan are its members'
+/// stars, each once: a census of its shells done, merged ([`merge_shells`](super::merge_shells)),
+/// lists each where its cells' stars are listed.
 ///
 /// # Panics
 ///
@@ -246,7 +424,9 @@ pub fn census_members(
     if sources.is_empty() {
         return counts.tallies;
     }
-    counts.tallies.note_feature_members();
+    if sources.iter().any(|source| source.holds_feature_members()) {
+        counts.tallies.note_feature_members();
+    }
     let layer = shell.layer();
     let Some(band) = MassBand::ALL.into_iter().find(|band| band.layer() == layer) else {
         // The brown dwarfs: no feature holds a member of theirs.
@@ -293,21 +473,18 @@ pub fn census_members(
 fn census_member(
     galaxy: &Galaxy,
     ctx: &mut SkyContext<'_>,
-    member: &MemberRecord,
+    member: SkyMember<'_>,
     query: &SkyQuery,
     ((inner, outer, offset), complete): ((LightYears, LightYears, LightYears), &Completeness),
     counts: &mut Counts,
     out: &mut Vec<SkyStar>,
 ) {
     let record = member.record();
-    if query.exclude() == Some(record.id()) {
+    if query.exclude() == Some(record.id()) || !member.shines() {
         return;
     }
     let observer = query.observer();
-    let r = retarded(
-        observer,
-        &Drift::new(*record.epoch_position(), member.velocity()),
-    );
+    let r = member.retarded(observer);
     // Its nearest star, held at nought so that the first shell, from nought, holds a member about
     // the observer.
     let nearest = (observer
@@ -346,22 +523,30 @@ fn census_member(
 mod tests {
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{Arc, Mutex, OnceLock};
 
     use hyperion_testkit::float::bits;
+    use hyperion_testkit::order::assert_order_independent;
 
     use super::*;
     use crate::Seed;
     use crate::coords::{GalacticPosition, UnitVector};
+    use crate::galaxy::PointLy;
     use crate::galaxy::ages::FieldShareRules;
     use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord, NoFeatureCache};
+    use crate::galaxy::features::centre::members::CentrePlacement;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
+    use crate::galaxy::features::centre::{
+        CentreOrbitCache, CentrePath, KeepCentreOrbits, NoCentreOrbitCache,
+    };
     use crate::galaxy::features::cluster::ClusterModel;
     use crate::galaxy::features::members::source::KeepInteriors;
     use crate::galaxy::features::members::{FeatureInterior, local_offset};
     use crate::galaxy::features::{FeatureId, FeatureKind, FeatureProcess};
     use crate::galaxy::gas::modifiers::NoModifiers;
     use crate::galaxy::gas::noise::NoiseCache;
+    use crate::galaxy::global_list::{GlobalList, StreamNumber, TubeLookup, TubeTable};
+    use crate::galaxy::motion::EpochState;
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::CellKey;
     use crate::galaxy::query::LayerPads;
@@ -513,8 +698,17 @@ mod tests {
 
     /// The builder of a query from `at` (ly) to `cut` in `galaxy`, listing up to [`MAX_N_MAX`].
     fn query_at(galaxy: &Galaxy, at: [f64; 3], cut: f64) -> crate::sky::census::SkyQueryBuilder {
+        query_at_time(galaxy, (at, UniverseTime::EPOCH), cut)
+    }
+
+    /// [`query_at`] at `time`.
+    fn query_at_time(
+        galaxy: &Galaxy,
+        (at, time): ([f64; 3], UniverseTime),
+        cut: f64,
+    ) -> crate::sky::census::SkyQueryBuilder {
         let position = GalacticPosition::from_light_years(at).expect("in the cube");
-        let observer = Observer::new(position, UniverseTime::EPOCH).expect("on the clock");
+        let observer = Observer::new(position, time).expect("on the clock");
         SkyQuery::builder(observer, Magnitudes::new(cut))
             .pads(LayerPads::of(galaxy))
             .n_max(NonZeroU32::new(MAX_N_MAX).expect("not zero"))
@@ -571,9 +765,18 @@ mod tests {
         interiors: &KeepInteriors<'_>,
     ) -> (Vec<SkyStar>, CensusTallies) {
         let source = FeatureMemberSource::new(&NoFeatureCache, interiors);
-        let sources: [&dyn SkySource; 1] = [&source];
+        members_through(galaxy, (plan, query), parts, &[&source])
+    }
+
+    /// [`members_of`] through `sources`.
+    fn members_through(
+        galaxy: &Galaxy,
+        (plan, query): (&CensusPlan, &SkyQuery),
+        parts: NonZeroU32,
+        sources: &[&dyn SkySource],
+    ) -> (Vec<SkyStar>, CensusTallies) {
         let mut ctx = SkyContext {
-            sources: &sources,
+            sources,
             ..milky_way_dark_context()
         };
         let (mut stars, mut tallies) = (Vec::new(), None::<CensusTallies>);
@@ -789,6 +992,303 @@ mod tests {
                 .count()
                 > 5
         );
+    }
+
+    /// The fixture under every 27 hold: the range query registers the global list's source
+    /// (P10.T10.b), so the census takes the streams', the dwarf cores' and the centre's members.
+    fn list_galaxy() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| fixture(GalaxyRules::every_27_hold()))
+    }
+
+    /// A lookup of `galaxy`'s global list that builds each stream's tube table on first use and
+    /// keeps it, and notes each stream it is asked for.
+    struct Tubes<'g> {
+        galaxy: &'g Galaxy,
+        list: GlobalList,
+        kept: Mutex<BTreeMap<StreamNumber, Arc<TubeTable>>>,
+        asked: Mutex<std::collections::BTreeSet<StreamNumber>>,
+    }
+
+    impl TubeLookup for Tubes<'_> {
+        fn global_list(&self) -> &GlobalList {
+            &self.list
+        }
+
+        fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
+            self.asked.lock().expect("no job panics").insert(stream);
+            if let Some(table) = self.kept.lock().expect("no job panics").get(&stream) {
+                return Arc::clone(table);
+            }
+            // Built outside the lock, so that two streams build at once; an equal table may be
+            // built twice, and the first kept.
+            let spec = self.list.stream(stream).expect("a stream of the list");
+            let table = Arc::new(TubeTable::build(self.galaxy, spec).expect("the full potential"));
+            let mut kept = self.kept.lock().expect("no job panics");
+            Arc::clone(kept.entry(stream).or_insert(table))
+        }
+    }
+
+    /// The brute force of the centre's members for plain caps of `radius`: every living member of
+    /// every band placed within `radius` and a margin of the observer, each on its own orbit,
+    /// found at its retarded time and every star of it measured, kept within `radius`.
+    fn every_centre_member(galaxy: &Galaxy, query: &SkyQuery, radius: f64) -> Vec<SkyStar> {
+        // Far above a member's path over the light's travel, away from the black hole.
+        const MARGIN_LY: f64 = 1.0;
+        let placement = CentrePlacement::new(galaxy.centre().expect("the fixture's centre"));
+        let observer = query.observer();
+        let local = PointLy::from(observer.position());
+        let mut ctx = milky_way_dark_context();
+        let mut counts = Counts::default();
+        let mut stars = Vec::new();
+        let reach = LightYears::new(radius + MARGIN_LY);
+        for band in MassBand::ALL {
+            for cell in placement.grid().cells_touching(&local, reach) {
+                for member in placement.members_in_cell(galaxy, band, cell) {
+                    let trajectory = Trajectory::new(galaxy, EpochState::of_centre_member(&member));
+                    let light = CentreMemberLight::of(&member);
+                    let seen = SkyMember::Centre(&light, &trajectory);
+                    if !seen.shines() {
+                        continue;
+                    }
+                    let r = seen.retarded(observer);
+                    system_stars(
+                        galaxy,
+                        &mut ctx,
+                        (seen.record(), &seen.stars(galaxy), &r),
+                        query,
+                        (Bound::Ignored, &|_, d| d < radius),
+                        &mut counts,
+                        &mut stars,
+                    );
+                }
+            }
+        }
+        stars.sort_by(sky_order);
+        stars
+    }
+
+    /// The fixture's global list under every 27 hold, its tube tables built as they are read.
+    fn list_lookup() -> &'static Tubes<'static> {
+        static LOOKUP: OnceLock<Tubes<'static>> = OnceLock::new();
+        LOOKUP.get_or_init(|| Tubes {
+            galaxy: list_galaxy(),
+            list: GlobalList::build(list_galaxy()),
+            kept: Mutex::default(),
+            asked: Mutex::default(),
+        })
+    }
+
+    /// The census takes the galactic centre's members, through the global list's source, where
+    /// the range query registers it, and then each once (R06.T16.a, at 27), each property on one
+    /// build of the fixture under every 27 hold in turn:
+    ///
+    /// - the switch: the list's source unregistered under the held arm, registered under its arm;
+    /// - 60 ly from the black hole, to 2 ly at V 9, the centre's living members' stars of shells to
+    ///   1 and 2 ly, in one part or three, through orbits built for them or kept by an earlier
+    ///   census, are those of one shell, bit for bit and tally for tally, and those of a brute
+    ///   force over every member of the cells near, each on its own orbit.
+    #[test]
+    fn the_census_takes_the_centres_members_once_where_the_list_is_registered() {
+        assert!(!GlobalListSource::is_registered_in(milky_way_galaxy()));
+        let galaxy = list_galaxy();
+        assert!(GlobalListSource::is_registered_in(galaxy));
+        let lookup = list_lookup();
+        let kept = KeepCentreOrbits::new(galaxy);
+        let cold = GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache).expect("a centre");
+        let warm = GlobalListSource::new(galaxy, lookup, &kept).expect("a centre");
+        let (one, three) = (NonZeroU32::MIN, NonZeroU32::new(3).expect("not zero"));
+        let query = forced(galaxy, [60.0, 0.0, 0.0], 9.0, &[]);
+        let shelled = census_plan_with_edges(&query, caps_of(2.0), &[1]);
+        let whole = census_plan_with_edges(&query, caps_of(2.0), &[]);
+        let (stars, tallies) = members_through(galaxy, (&whole, &query), one, &[&warm]);
+        assert!(stars.len() > 10, "{} of the centre's stars", stars.len());
+        // The list's source holds no feature member, so its census alone states them absent.
+        assert!(tallies.feature_members_absent());
+        assert!(
+            stars
+                .iter()
+                .all(|s| matches!(s.system().kind(), SystemIdKind::Centre(_)))
+        );
+        for (plan, parts, source) in [
+            (&shelled, one, &cold),
+            (&shelled, three, &warm),
+            (&whole, three, &cold),
+        ] {
+            let (each, each_tallies) = members_through(galaxy, (plan, &query), parts, &[source]);
+            assert_eq!(star_bits(&each), star_bits(&stars), "{parts} parts");
+            for layer in Layer::ALL {
+                let (got, want) = (each_tallies.layer(layer), tallies.layer(layer));
+                assert_eq!(
+                    (got.generated(), got.accepted()),
+                    (want.generated(), want.accepted()),
+                    "{layer:?}, {parts} parts"
+                );
+            }
+        }
+        assert_eq!(
+            star_bits(&every_centre_member(galaxy, &query, 2.0)),
+            star_bits(&stars)
+        );
+
+        // Each job's census is the same whatever ran before it through the kept orbits.
+        let jobs: Vec<(Shell, MemberPart)> = shelled
+            .shells()
+            .flat_map(|shell| MemberPart::all(three).map(move |part| (shell, part)))
+            .collect();
+        let job = |&(shell, part): &(Shell, MemberPart)| {
+            let sources: [&dyn SkySource; 1] = [&warm];
+            let mut ctx = SkyContext {
+                sources: &sources,
+                ..milky_way_dark_context()
+            };
+            let mut out = Vec::new();
+            let tallies =
+                census_members(galaxy, &mut ctx, &shelled, (shell, part), &query, &mut out);
+            let layer = shell.layer();
+            let counts = (
+                tallies.layer(layer).generated(),
+                tallies.layer(layer).accepted(),
+            );
+            (star_bits(&out), counts)
+        };
+        assert_order_independent(&jobs, job);
+
+        // A century on, the census of the members' moving paths is the brute force's still.
+        let later = UniverseTime::from_julian_years(100).expect("on the clock");
+        let query = forced_to(
+            query_at_time(galaxy, ([60.0, 0.0, 0.0], later), 9.0)
+                .build()
+                .expect("a valid query"),
+            &[],
+        );
+        let whole = census_plan_with_edges(&query, caps_of(2.0), &[]);
+        let (later_stars, _) = members_through(galaxy, (&whole, &query), three, &[&cold]);
+        assert_ne!(
+            later_stars.len(),
+            0,
+            "a century on, no member of the centre listed"
+        );
+        assert_eq!(
+            star_bits(&every_centre_member(galaxy, &query, 2.0)),
+            star_bits(&later_stars)
+        );
+    }
+
+    /// A centre member's borrowed path is its [`CentrePath`]'s, bit for bit (R06.T16.a): for the
+    /// members of the cells about the black hole, in its Kepler regime, and 60 ly out, where they
+    /// drift, each retarded for an observer 60 ly out at the epoch and a century on is retarded
+    /// alike on both, and each path's motion is the same.
+    #[test]
+    fn a_centre_members_cell_path_is_its_centre_path() {
+        let galaxy = list_galaxy();
+        let placement = CentrePlacement::new(galaxy.centre().expect("the fixture's centre"));
+        let observers = [
+            UniverseTime::EPOCH,
+            UniverseTime::from_julian_years(100).expect("on the clock"),
+        ]
+        .map(|t| {
+            let at = GalacticPosition::from_light_years([60.0, 0.0, 0.0]).expect("in the cube");
+            Observer::new(at, t).expect("on the clock")
+        });
+        let (mut kepler, mut drift) = (0, 0);
+        for (near, radius) in [([0.0; 3], 0.05), ([60.0, 0.0, 0.0], 0.5)] {
+            let local =
+                PointLy::from(&GalacticPosition::from_light_years(near).expect("in the cube"));
+            for cell in placement
+                .grid()
+                .cells_touching(&local, LightYears::new(radius))
+            {
+                let orbits = NoCentreOrbitCache.orbits(galaxy, &placement, MassBand::B, cell);
+                for trajectory in orbits.trajectories().iter().take(20) {
+                    let SystemIdKind::Centre(id) = trajectory.start().record().id().kind() else {
+                        unreachable!("a centre member's ID")
+                    };
+                    let path = CentrePath::of(galaxy, &NoCentreOrbitCache, id).expect("resolves");
+                    let cell_path = CellPath(trajectory);
+                    let motion = crate::observe::Trajectory::motion(&cell_path);
+                    assert_eq!(motion, crate::observe::Trajectory::motion(&path));
+                    match motion {
+                        crate::observe::Motion::Followed => kepler += 1,
+                        crate::observe::Motion::Drift => drift += 1,
+                    }
+                    for observer in &observers {
+                        assert_eq!(retarded(observer, &cell_path), retarded(observer, &path));
+                    }
+                }
+            }
+        }
+        assert!(
+            kepler > 0 && drift > 0,
+            "{kepler} followed and {drift} drifting"
+        );
+    }
+
+    /// The census takes a stream's members once (R06.T16.a, at 27): a light-year from a member of
+    /// the list's first stream, to 300 ly at V 11, its members' stars of shells to 100, 200 and
+    /// 300 ly, in one part or three, are those of one shell, bit for bit, and some are listed; and
+    /// the census reads only the streams' tables [`streams_seen`] names.
+    #[test]
+    #[ignore = "slow: builds a Milky Way galaxy's list and a stream's tube table, some two minutes"]
+    fn the_census_takes_a_streams_members_once_where_the_list_is_registered() {
+        let galaxy = list_galaxy();
+        let lookup = list_lookup();
+        let source = GlobalListSource::new(galaxy, lookup, &NoCentreOrbitCache).expect("a centre");
+        let number = lookup.list.debris().streams()[0].number();
+        let middle = lookup.tube(number).locate(0.5, 0.0, 0.0);
+        let sphere = crate::galaxy::query::QuerySphere::new(
+            middle,
+            LightYears::new(500.0),
+            UniverseTime::EPOCH,
+            LightYears::ZERO,
+        )
+        .expect("a sphere");
+        let mut hits = Vec::new();
+        crate::galaxy::query::SystemSource::systems_in_sphere(
+            &source,
+            galaxy,
+            &sphere,
+            Layer::ALL
+                .into_iter()
+                .fold(crate::galaxy::query::LayerSet::EMPTY, |set, layer| {
+                    set.with(layer)
+                }),
+            &mut hits,
+        );
+        let member = hits
+            .iter()
+            .find(|hit| matches!(hit.id().kind(), SystemIdKind::Stream(_)))
+            .expect("a member within 500 ly of the stream's middle");
+        let [x, y, z] = member.position().to_light_years_f64();
+        let query = forced(galaxy, [x + 1.0, y, z], 11.0, &[]);
+        let shelled = census_plan_with_edges(&query, caps_of(300.0), &[100, 200]);
+        let whole = census_plan_with_edges(&query, caps_of(300.0), &[]);
+        let one = NonZeroU32::MIN;
+        lookup.asked.lock().expect("no job panics").clear();
+        let (stars, _) = members_through(galaxy, (&whole, &query), one, &[&source]);
+        // The census reads only the streams `streams_seen` names, which a server builds first.
+        let seen = streams_seen(galaxy, &lookup.list, &whole, &query);
+        let asked = lookup.asked.lock().expect("no job panics").clone();
+        assert!(
+            asked.iter().all(|number| seen.contains(number)),
+            "{asked:?} against {seen:?}"
+        );
+        let streamed = stars
+            .iter()
+            .filter(|s| matches!(s.system().kind(), SystemIdKind::Stream(_)))
+            .count();
+        eprintln!(
+            "stream {}: {streamed} of {} stars",
+            number.get(),
+            stars.len()
+        );
+        assert!(streamed > 0, "no stream member's star by {:?}", member.id());
+        for parts in [one, NonZeroU32::new(3).expect("not zero")] {
+            for plan in [&shelled, &whole] {
+                let (each, _) = members_through(galaxy, (plan, &query), parts, &[&source]);
+                assert_eq!(star_bits(&each), star_bits(&stars), "{parts} parts");
+            }
+        }
     }
 
     /// The listed stars of `census` within `angle` (rad) of `axis` from `observer`: its members',

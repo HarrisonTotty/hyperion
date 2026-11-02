@@ -71,6 +71,7 @@
 //! | `sky/census_near_sun_limit/*` | under twice `decision-r13-guard-trip.md` §2.3's estimate, or to the owner (R13.T1.b) | R13's Risks (not re-run) |
 //! | `sky/census_near_sun_served/*eye_5.0` | none: the full cold census at the real boundary, recorded (T17) | 2.75 × 10⁴ CPU-s on the server's galaxy, 1.41 × 10⁴ on the fixture, by the threads' CPU time on 15 workers, sampled 1 in 20 |
 //! | `sky/census_near_sun_members/served_5.0` | the first shells' within the first sky's 150 CPU-s; the whole recorded beside the grid's (T17, R06.T16.a) | 1.33 CPU-s in the first shells, 31.3 in all (C 10.1, D 13.9, E 6.9), the longest job 0.35 s, on a pod of 16 vCPU (2026-11-01, `--features testing`) |
+//! | `sky/census_near_sun_members/served_5.0_27` | as `/served_5.0`, the global list's members too, its stream tables apart (R06.T16.a at 27) | 7.95 CPU-s in the first shells, 127.5 in all (C 48.7, D 51.7, E 24.3), the longest job 2.36 s; 167 streams' tables in 4.5 s wall (223 s of jobs) first, on a pod of 64 vCPU (2026-11-02, `--features testing`) |
 //! | `sky/census_inner_disc_served/*eye_5.0` | none: the inner disc at the limit, recorded (T17), beside `decision-r13-guard-trip.md`'s 2–3 × 10⁵ | 2.42 × 10⁵ CPU-s on the server's galaxy, 1.70 × 10⁵ on the fixture, by the threads' CPU time on 15 workers, sampled 1 in 20 (2026-10-12) |
 //! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 1.26 CPU-s (rays 1.12, field 0.14), 0.22 s wall |
 //! | `sky/band_near_sun/march` | within the first sky's (T17) | 30.2 CPU-s, 2.04 s wall, ten replies, 30.2 MB |
@@ -3224,9 +3225,18 @@ mod members {
     use hyperion_sim::galaxy::gas::noise::NoiseCache;
     use hyperion_sim::galaxy::params::GalaxyParams;
     use hyperion_sim::sky::caps::SYNTHETIC_CEILING_V;
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+
+    use criterion::BenchmarkGroup;
+    use criterion::measurement::WallTime;
+    use hyperion_sim::galaxy::features::centre::KeepCentreOrbits;
+    use hyperion_sim::galaxy::global_list::{
+        GlobalList, GlobalListSource, StreamNumber, TubeLookup, TubeTable,
+    };
     use hyperion_sim::sky::census::{
         CensusPlan, CensusTallies, MemberPart, NoSkyCellCache, Shell, SkyContext, SkyQuery,
-        SkySource, census_members, census_plan, takes_feature_members,
+        SkySource, census_members, census_plan, streams_seen, takes_feature_members,
     };
     use hyperion_sim::{GeneratorVersion, Seed};
 
@@ -3273,16 +3283,84 @@ mod members {
     /// (`/proc/thread-self/schedstat`), of the first shells and of all. It is built with the sim's
     /// `testing` feature alone: `cargo bench -p hyperion-sim --bench sky --features testing --
     /// census_near_sun_members`.
+    ///
+    /// `census_near_sun_members/served_5.0_27` is the same at generator version 27, where the
+    /// census takes the global list's members too, the streams', the dwarf cores' and the
+    /// galactic centre's ([`GlobalListSource`]), its stream tables built first and timed apart.
     pub(super) fn census_near_sun_members(c: &mut Criterion) {
-        let workers = workers();
         let mut group = c.benchmark_group("sky");
         group.sample_size(10);
+        let name = format!("census_near_sun_members/served_{SYNTHETIC_CEILING_V:.1}");
+        bench_members(&mut group, &name, phi_sky, None);
+        let name = format!("census_near_sun_members/served_{SYNTHETIC_CEILING_V:.1}_27");
+        bench_members(&mut group, &name, list_sky, Some(list_tubes));
+        group.finish();
+    }
+
+    /// The fixture at generator version 27, where the range query registers the global list.
+    fn list_sky() -> &'static Sky {
+        static SKY: OnceLock<Sky> = OnceLock::new();
+        SKY.get_or_init(|| {
+            build_sky(
+                Galaxy::from_params_at_version(
+                    Seed::new(SEED),
+                    GalaxyParams::milky_way_like(),
+                    GeneratorVersion::new(27),
+                )
+                .expect("the Milky Way-like parameters are valid")
+                .with_full_potential(),
+            )
+        })
+    }
+
+    /// [`list_sky`]'s global list, its tube tables built as they are read and kept.
+    fn list_tubes() -> &'static Tubes {
+        static TUBES: OnceLock<Tubes> = OnceLock::new();
+        TUBES.get_or_init(|| Tubes {
+            list: GlobalList::build(&list_sky().galaxy),
+            kept: Mutex::default(),
+        })
+    }
+
+    /// A lookup of [`list_sky`]'s list that builds each stream's tube table once.
+    struct Tubes {
+        list: GlobalList,
+        kept: Mutex<BTreeMap<StreamNumber, Arc<TubeTable>>>,
+    }
+
+    impl TubeLookup for Tubes {
+        fn global_list(&self) -> &GlobalList {
+            &self.list
+        }
+
+        fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
+            if let Some(table) = self.kept.lock().expect("no job panics").get(&stream) {
+                return Arc::clone(table);
+            }
+            // Built outside the lock, so that the pool's jobs build their streams at once.
+            let spec = self.list.stream(stream).expect("a stream of the list");
+            let table =
+                Arc::new(TubeTable::build(&list_sky().galaxy, spec).expect("the full potential"));
+            let mut kept = self.kept.lock().expect("no job panics");
+            Arc::clone(kept.entry(stream).or_insert(table))
+        }
+    }
+
+    /// One bench of the members' census near the Sun on `sky_of`'s galaxy, through its features'
+    /// source and, if `list` is given, its global list's.
+    fn bench_members(
+        group: &mut BenchmarkGroup<'_, WallTime>,
+        name: &str,
+        sky_of: fn() -> &'static Sky,
+        list: Option<fn() -> &'static Tubes>,
+    ) {
+        let workers = workers();
         let printed = AtomicBool::new(false);
         let query: OnceCell<SkyQuery> = OnceCell::new();
-        let name = format!("census_near_sun_members/served_{SYNTHETIC_CEILING_V:.1}");
-        group.bench_function(&name, |b| {
-            let sky = phi_sky();
+        group.bench_function(name, |b| {
+            let sky = sky_of();
             let query = query.get_or_init(|| served_query(sky, SUN_LY));
+            let tubes = list.map(|list| list());
             b.iter_custom(|iters| {
                 let mut cpu = Duration::ZERO;
                 for _ in 0..iters {
@@ -3302,9 +3380,28 @@ mod members {
                         .flat_map(|shell| MemberPart::all(parts).map(move |part| (shell, part)))
                         .collect();
                     let interiors = KeepInteriors::new(&sky.galaxy);
+                    let orbits = KeepCentreOrbits::new(&sky.galaxy);
+                    if let Some(tubes) = tubes {
+                        let streams = streams_seen(&sky.galaxy, &tubes.list, &plan, query);
+                        let started = Instant::now();
+                        let (_, built) = on_pool(&streams, workers, &|&number| tubes.tube(number));
+                        if !printed.load(Ordering::Relaxed) {
+                            eprintln!(
+                                "{name}: {} streams' tables in {:.1} s ({:.1} s of jobs), apart",
+                                streams.len(),
+                                started.elapsed().as_secs_f64(),
+                                built.as_secs_f64()
+                            );
+                        }
+                    }
                     let (done, wall) = on_pool(&jobs, workers, &|&(shell, part)| {
                         let source = FeatureMemberSource::new(&NoFeatureCache, &interiors);
-                        let sources: [&dyn SkySource; 1] = [&source];
+                        let listed = tubes.map(|tubes| {
+                            GlobalListSource::new(&sky.galaxy, tubes, &orbits)
+                                .expect("the fixture's centre builds")
+                        });
+                        let mut sources: Vec<&dyn SkySource> = vec![&source];
+                        sources.extend(listed.iter().map(|listed| listed as &dyn SkySource));
                         let mut ctx = SkyContext {
                             tables: &sky.tables,
                             envelope: &sky.envelope,
@@ -3332,14 +3429,13 @@ mod members {
                         (tallies, started.elapsed(), on_cpu)
                     });
                     if !printed.swap(true, Ordering::Relaxed) {
-                        report_members(&name, &plan, &jobs, &done, wall);
+                        report_members(name, &plan, &jobs, &done, wall);
                     }
                     cpu += wall;
                 }
                 cpu
             });
         });
-        group.finish();
     }
 
     /// A member job's tallies, its wall time and its thread's CPU time where the platform gives it.

@@ -1866,9 +1866,10 @@ fn bright_retarded(
             tally.centre_members += 1;
             return None;
         }
-        // No source the census walks holds the global list's members yet (plan 10, P10.T10.b). No
-        // catalogue class is a source of the census yet (plan 09's P09.T37 merges them), and a
-        // catalogue system's broken line has no tracer (P09.T33.a). A victim's path, which ends at
+        // The global list's members reach the census through its sources, on their own lines
+        // (`census_members`, from version 27), never as a cell's records. No catalogue class is a
+        // source of the census yet, though plan 09's P09.T37 merges them into the range query at
+        // 27, and a catalogue system's broken line has no tracer here (P09.T33.a). A victim's path, which ends at
         // its disruption, is a centre member's, which no line from its record alone gives.
         Err(
             TraceMotionError::GlobalListMember(_)
@@ -2125,7 +2126,11 @@ pub fn census_cell_with_cost(
 ) -> (CensusTallies, CensusCost) {
     let mut counts = Counts::default();
     counts.tallies.layer_mut(key.layer()).cells += 1;
-    if !ctx.sources.is_empty() {
+    if ctx
+        .sources
+        .iter()
+        .any(|source| source.holds_feature_members())
+    {
         counts.tallies.note_feature_members();
     }
     debug_assert!(ctx.offsets.is_for(galaxy), "another galaxy's offset bounds");

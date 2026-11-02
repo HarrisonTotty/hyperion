@@ -192,6 +192,45 @@ impl CentrePath {
     }
 }
 
+/// A centre member's path along its cell's trajectory, borrowed: a [`CentrePath`] of a member in a
+/// cell, bit for bit, without its copy of the trajectory (rendering plan R06, R06.T16.a: the sky's
+/// census retards every member a shell's cells hold).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CellPath<'a>(pub(crate) &'a Trajectory);
+
+impl CellPath<'_> {
+    /// Its state at `t`.
+    ///
+    /// # Panics
+    ///
+    /// Never: a member in a cell is a system at every time, as [`CentrePath`] holds.
+    fn state(self, t: UniverseTime) -> MotionState {
+        match self.0.state_at(t) {
+            StateAt::Exists(state) => state,
+            StateAt::NoSuchSystem => unreachable!("a member in a cell is a system at every time"),
+        }
+    }
+}
+
+impl crate::observe::Trajectory for CellPath<'_> {
+    fn position_at(&self, t: UniverseTime) -> GalacticPosition {
+        *self.state(t).position()
+    }
+
+    fn velocity_at(&self, t: UniverseTime) -> GalacticVelocity {
+        self.state(t).velocity()
+    }
+
+    /// [`CentrePath`]'s for a member in a cell.
+    fn motion(&self) -> Motion {
+        if self.0.regime() == Regime::Kepler {
+            Motion::Followed
+        } else {
+            Motion::Drift
+        }
+    }
+}
+
 /// `id`'s trajectory among a cell's, if the cell holds it. The loss cone takes no centre member's
 /// orbit: the marks drew them clear of it (P09.T28.b.a), so every trajectory is a system's.
 fn trajectory_of(orbits: &CentreCellOrbits, id: SystemId) -> Option<&Trajectory> {

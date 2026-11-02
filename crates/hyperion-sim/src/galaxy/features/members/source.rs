@@ -462,15 +462,30 @@ fn part_of_cell(
 ) -> u32 {
     let [x, y, z] = cell.cell();
     let band = u64::try_from(band.index()).expect("a band's index is below seven");
-    let key = [
-        band,
-        u64::from(cell.level()),
-        u64::from(x),
-        u64::from(y),
-        u64::from(z),
-    ]
-    .into_iter()
-    .fold(feature.object_word(), |word, part| mix(word ^ part));
+    part_of_key(
+        &[
+            feature.object_word(),
+            band,
+            u64::from(cell.level()),
+            u64::from(x),
+            u64::from(y),
+            u64::from(z),
+        ],
+        parts,
+    )
+}
+
+/// Which of `parts` parts a cell of the sky's member census whose key is `words` falls to: the
+/// first word mixed with each of the rest in turn, a `SplitMix64` step at each ([`mix`]), modulo
+/// the parts (rendering plan R06, R06.T16.a). A function of the key alone.
+///
+/// # Panics
+///
+/// If `words` is empty.
+#[must_use]
+pub(crate) fn part_of_key(words: &[u64], parts: NonZeroU32) -> u32 {
+    let (first, rest) = words.split_first().expect("a key of at least one word");
+    let key = rest.iter().fold(*first, |word, &part| mix(word ^ part));
     u32::try_from(key % u64::from(parts.get())).expect("below a u32's parts")
 }
 
@@ -653,7 +668,11 @@ pub(crate) fn band_reach(
 /// feature's 4,096 ly reach; the margins are far above it, and above the rounding of the drift, so
 /// that no member [`hit_at`] keeps is left undrawn.
 #[must_use]
-fn member_reach(radius: LightYears, t: UniverseTime, bound: KilometresPerSecond) -> LightYears {
+pub(crate) fn member_reach(
+    radius: LightYears,
+    t: UniverseTime,
+    bound: KilometresPerSecond,
+) -> LightYears {
     /// The relative margin on the drift.
     const DRIFT_MARGIN: f64 = 1e-9;
     /// The absolute margin, ly.

@@ -46,6 +46,7 @@
 //! (P10.T3.d.b).
 
 use std::borrow::Cow;
+use std::num::NonZeroU32;
 use std::sync::OnceLock;
 
 #[cfg(doc)]
@@ -56,9 +57,9 @@ use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::features::centre::{BuildCentreError, CentreMemberSource, CentreOrbitCache};
 use crate::galaxy::features::members::local_offset;
-use crate::galaxy::features::members::source::{band_reach, hit_at};
+use crate::galaxy::features::members::source::{band_reach, hit_at, member_reach, part_of_key};
 use crate::galaxy::imf::MassBand;
-use crate::galaxy::placement::{ResolveSystemError, SystemRecord};
+use crate::galaxy::placement::{Existence, ResolveSystemError, SystemRecord};
 use crate::galaxy::query::{
     LayerCounts, LayerSet, QuerySphere, RangeQuery, SystemHit, SystemSource, UNBOUND_PAD_SPEED,
     pad_for,
@@ -104,6 +105,14 @@ pub(crate) enum ListSourceRules {
     /// [`discrete_share`](super::discrete_share).
     Registered,
 }
+
+/// The first word of a stream's tube-cell keys for the sky's member parts ([`part_of_key`]),
+/// `"stream"` in ASCII.
+const STREAM_PART_WORD: u64 = 0x0000_7374_7265_616d;
+
+/// The first word of a dwarf core's nested-cell keys for the sky's member parts
+/// ([`part_of_key`]), `"core"` in ASCII.
+const CORE_PART_WORD: u64 = 0x0000_0000_636f_7265;
 
 /// The bands from the coarsest down, the order the query walks its layers.
 const BANDS_COARSEST_FIRST: [MassBand; 5] = [
@@ -444,6 +453,120 @@ impl<'a> GlobalListSource<'a> {
             .collect()
     }
 
+    /// Each stream's and dwarf core's member of `band` that may lie within `outer` of `centre` at
+    /// some time of `window`, born by its end, given to `each` in the source's order: the list's
+    /// entries in list order, a stream's tube cells or a core's nested cells, those of the part
+    /// `part` of `parts` by their key ([`part_of_key`]), then members in index order (rendering
+    /// plan R06, R06.T16.a). Each entry is padded by its own members' speed bound over the
+    /// window's farthest time from the epoch, as a feature is, and the shells are tested at the
+    /// unbound pad. It may give a member beyond the shell, never leave one out. The centre's
+    /// members are its [`CentreMemberSource`]'s.
+    ///
+    /// # Panics
+    ///
+    /// If `outer` is not finite and positive, or `galaxy` is not the source's.
+    pub(crate) fn members_in_shell_over(
+        &self,
+        galaxy: &Galaxy,
+        centre: &GalacticPosition,
+        window: (UniverseTime, UniverseTime),
+        ((band, outer), (part, parts)): ((MassBand, LightYears), (u32, NonZeroU32)),
+        each: &mut dyn FnMut(&GlobalMemberRecord),
+    ) {
+        self.check(galaxy);
+        let to = window.1;
+        let (padded, farthest) = seen_sphere(centre, window, outer);
+        let band_word = u64::try_from(band.index()).expect("a band's index is below seven");
+        let mut give = |member: &GlobalMemberRecord| {
+            if member.record().existence_at(to) == Existence::Exists {
+                each(member);
+            }
+        };
+        let (mut members, mut core_members) = (Vec::new(), Vec::new());
+        for (kind, shell) in self.entries_near(&padded) {
+            match kind {
+                GlobalEntryKind::Stream(number) => {
+                    let tube = self.lookup.tube(number);
+                    let shares = self.shares(number);
+                    let within = member_reach(outer, farthest, tube.member_speed_bound());
+                    for cell in tube.cells_touching(centre, within) {
+                        let [a, b] = cell.across();
+                        let key = [
+                            STREAM_PART_WORD,
+                            u64::from(number.get()),
+                            u64::from(cell.along()),
+                            u64::from(a),
+                            u64::from(b),
+                            band_word,
+                        ];
+                        if part_of_key(&key, parts) != part {
+                            continue;
+                        }
+                        stream_cell_members(galaxy, &tube, shares, cell, band, &mut members);
+                        for member in &members {
+                            if in_stream_shell(&shell, member.record().epoch_position()) {
+                                give(member);
+                            }
+                        }
+                    }
+                }
+                GlobalEntryKind::DwarfCore(number) => {
+                    let Some(core) = self.core(number) else {
+                        continue;
+                    };
+                    let within = member_reach(outer, farthest, core.member_speed_bound());
+                    let local = local_offset(&core_centre(core), centre);
+                    for cell in core.grid().cells_touching(&local, within) {
+                        let [x, y, z] = cell.cell();
+                        let key = [
+                            CORE_PART_WORD,
+                            u64::from(number.get()),
+                            band_word,
+                            u64::from(cell.level()),
+                            u64::from(x),
+                            u64::from(y),
+                            u64::from(z),
+                        ];
+                        if part_of_key(&key, parts) != part {
+                            continue;
+                        }
+                        core.members_in_cell(galaxy, band, cell, &mut core_members);
+                        for (member, _) in &core_members {
+                            give(member);
+                        }
+                    }
+                }
+                GlobalEntryKind::Centre => {}
+            }
+        }
+    }
+
+    /// The streams of `list`, `galaxy`'s, whose tube tables the sky's census reads for a sphere of
+    /// `outer` about `centre` over `window` (its [`SkySource`](crate::sky::census::SkySource) walk
+    /// tests the same shells), in list order: so that a server can build them first, as
+    /// [`streams_read`](Self::streams_read) lets it for a range query (rendering plan R06,
+    /// R06.T16.a).
+    ///
+    /// # Panics
+    ///
+    /// If `outer` is not finite and positive.
+    #[must_use]
+    pub fn streams_seen(
+        galaxy: &Galaxy,
+        list: &GlobalList,
+        centre: &GalacticPosition,
+        window: (UniverseTime, UniverseTime),
+        outer: LightYears,
+    ) -> Vec<StreamNumber> {
+        let (padded, _) = seen_sphere(centre, window, outer);
+        entries_near(galaxy, list, &padded)
+            .filter_map(|(kind, _)| match kind {
+                GlobalEntryKind::Stream(number) => Some(number),
+                GlobalEntryKind::DwarfCore(_) | GlobalEntryKind::Centre => None,
+            })
+            .collect()
+    }
+
     /// Core `number`'s model, if it is played.
     #[must_use]
     fn core(&self, number: super::DwarfCoreNumber) -> Option<&DwarfCoreModel> {
@@ -582,6 +705,35 @@ impl SystemSource for GlobalListSource<'_> {
         self.check(galaxy);
         false
     }
+}
+
+/// The sphere of `outer` about `centre` at the farthest time of `window` from the epoch, padded at
+/// [`UNBOUND_PAD_SPEED`] to it, against which the sky's census tests the list's shells, and that
+/// time.
+///
+/// # Panics
+///
+/// If `outer` is not finite and positive.
+#[must_use]
+fn seen_sphere(
+    centre: &GalacticPosition,
+    (from, to): (UniverseTime, UniverseTime),
+    outer: LightYears,
+) -> (QuerySphere, UniverseTime) {
+    let farthest =
+        if from.since_epoch().as_seconds_f64().abs() > to.since_epoch().as_seconds_f64().abs() {
+            from
+        } else {
+            to
+        };
+    let padded = QuerySphere::new(
+        *centre,
+        outer,
+        farthest,
+        pad_for(farthest, UNBOUND_PAD_SPEED),
+    )
+    .expect("a shell's outer distance is finite and positive, and the pad a few light-years");
+    (padded, farthest)
 }
 
 /// The streams and the cores of `list`, `galaxy`'s, whose shells `sphere`, out to its padded

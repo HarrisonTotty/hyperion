@@ -87,6 +87,7 @@
 //! list's source holds and asks it (P09.T37.b, `GlobalListSource`).
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::coords::GalacticPosition;
@@ -102,12 +103,15 @@ use crate::time::UniverseTime;
 use crate::units::consts::{METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND, SPEED_OF_LIGHT};
 use crate::units::{GravitationalParameter, KilometresPerSecond, LightYears, Seconds};
 
+use super::super::members::source::part_of_key;
 use super::super::nested::{NestedCell, NestedLevel, box_distance};
+use super::CentreClassKind;
 use super::events::victims::{CentreVictims, TidalDisruptionVictim};
-use super::members::CentrePlacement;
+use super::members::{CentreMemberRecord, CentrePlacement};
 use super::profile::REACH;
 use super::recent::{CentrePlace, CentreRecent, TracerProfiles};
 use super::{BuildCentreError, CentreProfile, CentreTracer};
+use crate::stellar::Composition;
 
 /// The bands from the coarsest down, the order the query walks its layers.
 const BANDS_COARSEST_FIRST: [MassBand; 5] = [
@@ -117,6 +121,10 @@ const BANDS_COARSEST_FIRST: [MassBand; 5] = [
     MassBand::B,
     MassBand::A,
 ];
+
+/// The first word of a centre cell's key for the sky's member parts ([`part_of_key`]), `"centre"`
+/// in ASCII, so that its cells' parts are mixed as a feature's are.
+const CENTRE_PART_WORD: u64 = 0x0000_6365_6e74_7265;
 
 /// J kg⁻¹ in a (km/s)², the working units' specific energy in SI.
 const J_PER_KG_PER_KM2_S2: f64 =
@@ -133,8 +141,9 @@ const SPEED_MARGIN: f64 = 1e-6;
 const SHELL_MARGIN: f64 = 1e-6;
 
 /// One cell's members of one band with their trajectories (module documentation): what a
-/// [`CentreOrbitCache`] keeps, about 200 bytes a member, and from version 25 some 640 more for
-/// each member's exact orbit.
+/// [`CentreOrbitCache`] keeps, about 230 bytes a member (32 of them its light for the sky's
+/// census, [`CentreMemberLight`]), and from version 25 some 640 more for each member's exact
+/// orbit.
 ///
 /// Each member also carries the shell it never leaves: its orbit's pericentre and apocentre
 /// ([`KeplerOrbit::pericentre`](crate::galaxy::motion::KeplerOrbit::pericentre),
@@ -147,6 +156,40 @@ pub struct CentreCellOrbits {
     trajectories: Vec<Trajectory>,
     /// Per trajectory, the least and greatest distance from the black hole it ever has, ly.
     shells: Vec<[f64; 2]>,
+    /// Per trajectory, what the sky's census draws its member's stars from (rendering plan R06,
+    /// R06.T16.a).
+    lights: Vec<CentreMemberLight>,
+}
+
+/// What the sky's census reads of a centre member beyond its trajectory (rendering plan R06,
+/// R06.T16.a): its class's kind and its composition, 32 bytes kept beside its orbit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CentreMemberLight {
+    kind: Option<CentreClassKind>,
+    composition: Composition,
+}
+
+impl CentreMemberLight {
+    /// `member`'s.
+    #[must_use]
+    pub fn of(member: &CentreMemberRecord) -> Self {
+        Self {
+            kind: member.class().map(|class| class.kind),
+            composition: *member.composition(),
+        }
+    }
+
+    /// Its class's kind; `None` for the central black hole.
+    #[must_use]
+    pub const fn kind(&self) -> Option<CentreClassKind> {
+        self.kind
+    }
+
+    /// Its composition.
+    #[must_use]
+    pub const fn composition(&self) -> &Composition {
+        &self.composition
+    }
 }
 
 impl CentreCellOrbits {
@@ -159,8 +202,8 @@ impl CentreCellOrbits {
         band: MassBand,
         cell: NestedCell,
     ) -> Self {
-        let trajectories: Vec<Trajectory> = centre
-            .members_in_cell(galaxy, band, cell)
+        let members = centre.members_in_cell(galaxy, band, cell);
+        let trajectories: Vec<Trajectory> = members
             .iter()
             .map(|member| Trajectory::new(galaxy, EpochState::of_centre_member(member)))
             .collect();
@@ -168,7 +211,15 @@ impl CentreCellOrbits {
         Self {
             trajectories,
             shells,
+            lights: members.iter().map(CentreMemberLight::of).collect(),
         }
+    }
+
+    /// The members' lights, in index order, each beside its trajectory in
+    /// [`trajectories`](Self::trajectories).
+    #[must_use]
+    pub fn lights(&self) -> &[CentreMemberLight] {
+        &self.lights
     }
 
     /// The members' trajectories, in index order: each one's start holds its record and its
@@ -183,6 +234,7 @@ impl CentreCellOrbits {
     pub fn heap_bytes(&self) -> usize {
         size_of_val(&*self.trajectories)
             + size_of_val(&*self.shells)
+            + size_of_val(&*self.lights)
             + self
                 .trajectories
                 .iter()
@@ -267,7 +319,7 @@ impl CentreOrbitCache for NoCentreOrbitCache {
 /// A cache that keeps every cell it builds for one galaxy, the one it is made for.
 ///
 /// It is what a caller asking several queries of one centre passes, as the brainstorm's century
-/// query "with cached orbits" does. It grows without bound, about 200 bytes a member (840 from
+/// query "with cached orbits" does. It grows without bound, about 230 bytes a member (870 from
 /// version 25), so a
 /// long-lived caller uses plan 09's server cache (P09.T40.a) instead.
 ///
@@ -632,6 +684,60 @@ impl<'a> CentreMemberSource<'a> {
         }
     }
 
+    /// Each member of `band` that may lie within `outer` of `centre` at some time of `window`,
+    /// born by its end, with its trajectory, given to `each` in the source's order (rendering plan
+    /// R06, R06.T16.a): the cells [`cells_reaching`](Self::cells_reaching) chooses for a sphere of
+    /// `outer` at the window's farthest time from the epoch, whose pads bound every member's path
+    /// over the window, those of the part `part` of `parts` by their cell's key
+    /// ([`part_of_key`]), then members in index order, less those whose shell about the black hole
+    /// misses the sphere. It may give a member beyond the shell, never leave one out. The black
+    /// hole, the tidal disruptions' victims and the recent entries are not given.
+    ///
+    /// # Panics
+    ///
+    /// If `outer` is not finite and positive, or `galaxy` is not the source's.
+    pub(crate) fn members_in_shell_over(
+        &self,
+        galaxy: &Galaxy,
+        centre: &GalacticPosition,
+        window: (UniverseTime, UniverseTime),
+        ((band, outer), (part, parts)): ((MassBand, LightYears), (u32, NonZeroU32)),
+        each: &mut dyn FnMut(&CentreMemberLight, &Trajectory),
+    ) {
+        self.check(galaxy);
+        let (from, to) = window;
+        let farthest = if from.since_epoch().as_seconds_f64().abs()
+            > to.since_epoch().as_seconds_f64().abs()
+        {
+            from
+        } else {
+            to
+        };
+        let sphere = QuerySphere::new(*centre, outer, farthest, LightYears::ZERO)
+            .expect("a shell's outer distance is finite and positive");
+        let from_black_hole =
+            LightYears::from(centre.distance_to(&GalacticPosition::ORIGIN)).value();
+        let (near, far) = (
+            from_black_hole - outer.value(),
+            from_black_hole + outer.value(),
+        );
+        self.cells_reaching(&sphere, |cell| {
+            if part_of_key(&[CENTRE_PART_WORD, cell_key(band, cell)], parts) != part {
+                return;
+            }
+            let orbits = self.orbits.orbits(galaxy, &self.placement, band, cell);
+            let members = orbits.lights().iter().zip(orbits.trajectories());
+            for ((light, trajectory), &[least, most]) in members.zip(&orbits.shells) {
+                if near > most * (1.0 + SHELL_MARGIN) || far < least * (1.0 - SHELL_MARGIN) {
+                    continue;
+                }
+                if trajectory.start().record().existence_at(to) == Existence::Exists {
+                    each(light, trajectory);
+                }
+            }
+        });
+    }
+
     /// Calls `visit` with every owned cell that can hold a member inside `sphere` at its time
     /// (module documentation), each once, level by level from the innermost.
     fn cells_reaching(&self, sphere: &QuerySphere, mut visit: impl FnMut(NestedCell)) {
@@ -964,8 +1070,18 @@ mod tests {
         ));
         assert_eq!(kept.members(), members.len());
         assert_eq!(
+            orbits.lights(),
+            members
+                .iter()
+                .map(CentreMemberLight::of)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
             orbits.heap_bytes(),
-            members.len() * (size_of::<Trajectory>() + size_of::<[f64; 2]>())
+            members.len()
+                * (size_of::<Trajectory>()
+                    + size_of::<[f64; 2]>()
+                    + size_of::<CentreMemberLight>())
                 + orbits
                     .trajectories()
                     .iter()

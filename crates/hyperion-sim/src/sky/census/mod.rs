@@ -28,7 +28,9 @@ pub use cell::{
     cell_offset_bound, census_cell, census_cell_with_cost, census_record, flux_bound,
     star_offset_bound,
 };
-pub use features::{MemberPart, SkySource, census_members, takes_feature_members};
+pub use features::{
+    MemberPart, SkyMember, SkySource, census_members, streams_seen, takes_feature_members,
+};
 pub use merge::{SkyCensus, merge_census, merge_shells, sky_order};
 pub use query::{
     BuildSkyQueryError, CellSlab, CensusPlan, Completeness, Cone, ConeRegion, MAX_FORCED_CAP_LY,
