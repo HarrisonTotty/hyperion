@@ -22,8 +22,14 @@
  *   the body's at the datum across the edge is drawn beyond the edge and not over the survey, and
  *   its occluder sphere hides a mark 15 km under the datum beyond the edge but not over the survey;
  *   with no mask given, the line is drawn and the mark hidden on both sides;
+ * - its interior patches drawn through the cluster path (plan R14, R14.T4.c) draw the canvas the
+ *   lit mesh draws, byte for byte, from the same selection and residents in one run, with their
+ *   triangles counted;
  * - the pass made, drawn and disposed leaves the engine's allocation tally, its bytes by category,
- *   where it stood.
+ *   where it stood, but for the engine's pass timer, which its first timed pass makes for the
+ *   engine's life (the cluster path's cull is one, plan R14, R14.T4.c), and the cull kernel's
+ *   uniforms, which its record keeps while any handle of it lives, the wireframe renderer's own
+ *   among them (its hulls' cull, R14.T4.b).
  *
  * A buffer or texture beyond the device's limits, or a write outside one, raises an uncaptured
  * validation error, which the harness's main process counts against the run.
@@ -37,7 +43,8 @@ import { occluderRadius } from "../view/depth/depth";
 import type { MemoryCategory } from "../view/engine/memory";
 import type { RenderEngine } from "../view/engine/types";
 import { rotationColumns } from "../view/bodies/smoothMesh";
-import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
+import { SETTINGS, TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
+import { LIT_PATCH_INDICES } from "../view/terrain/gpu/resources";
 import { CoverageMask } from "../view/terrain/coverage";
 import { allocationTally } from "../view/terrain/gpu/allocationTally";
 import { handoverTauPx } from "../view/terrain/handover";
@@ -68,7 +75,9 @@ import {
 import { CASING_PX } from "../lib/strokes";
 import { moonLikeFixture } from "../test/moonLikeFixture";
 import { addCanvas } from "./frames";
-import { type Checks, pause } from "./harness";
+import { bytesDigest, type Checks, pause } from "./harness";
+import { isPassTimer } from "./sharedPass";
+import { CLUSTER_CULL_KERNEL } from "../view/clusters/cull";
 import { MOON_LIKE } from "./litTerrain";
 import { datumAt, OVER, type Pose, poseOver, VIEWPORT } from "./surveyEdge";
 
@@ -236,6 +245,7 @@ export async function checkWireframeTerrain(engine: RenderEngine, checks: Checks
   const canvas = engine.createView(addCanvas(), "wireframe terrain smoke");
   canvas.resize(VIEWPORT);
   let pass: TerrainPass | null = null;
+  let offTimer: (() => void) | null = null;
   try {
     field.blocks.forEach((block, n) => {
       if (n === 0) {
@@ -266,6 +276,16 @@ export async function checkWireframeTerrain(engine: RenderEngine, checks: Checks
     // A frame drawn first, so that the canvas's own targets are made before the tally is read.
     wireframe.render(canvas, base, camera, VIEWPORT);
     const before = categories.map((category) => tally.liveBytes(category));
+    let timerBytes = 0;
+    offTimer = engine.onAllocation((event) => {
+      if (
+        event.kind !== "uploaded" &&
+        event.category === "other" &&
+        (isPassTimer(event.name) || event.name.startsWith(`${CLUSTER_CULL_KERNEL.name}:`))
+      ) {
+        timerBytes += event.kind === "created" ? event.bytes : -event.bytes;
+      }
+    });
     const made = new TerrainPass({
       engine,
       setting: "low",
@@ -326,9 +346,10 @@ export async function checkWireframeTerrain(engine: RenderEngine, checks: Checks
       `draw ${String(frame.draws.length > 0)}, mask ready ${String(frame.maskReady)}, missing ${String(frame.missing)}`,
     );
     const texture = mask.texture;
-    // The wireframe's one draw (R10.T11): it has no interior patches' draw.
-    const draw = frame.draws[0];
-    if (draw === undefined || texture === null) {
+    // The wireframe's draws (R10.T11): on the cluster path its interior patches' buckets' first
+    // (plan R14, R14.T4.c), then its edge patches' draw.
+    const { draws } = frame;
+    if (draws.length === 0 || texture === null) {
       return;
     }
 
@@ -371,7 +392,7 @@ export async function checkWireframeTerrain(engine: RenderEngine, checks: Checks
     };
     const markAt = (pair: readonly [Vec3, Vec3]): { xPx: number; yPx: number } =>
       project(scale(add(pair[0], pair[1]), 0.5), pose.camera, VIEWPORT);
-    const withTerrain = await drawWith(marks, { draws: [draw], surveyed });
+    const withTerrain = await drawWith(marks, { draws, surveyed });
     const withoutTerrain = await drawWith(marks, NO_WIREFRAME_TERRAIN);
     let green = 0;
     let red = 0;
@@ -450,17 +471,53 @@ export async function checkWireframeTerrain(engine: RenderEngine, checks: Checks
       `with the mask: its line over the survey ${String(lineOverMasked)}, beyond ${String(lineBeyondMasked)}; a mark 15 km under the datum over it ${String(sunkenOverMasked)}, beyond ${String(sunkenBeyondMasked)}; with none: line ${String(lineOverBare)}, ${String(lineBeyondBare)}; mark ${String(sunkenOverBare)}, ${String(sunkenBeyondBare)}`,
     );
 
+    // R14.T4.c: the terrain with its interior patches by the lit mesh, the lever off, then through
+    // the cluster path, from the same selection and residents, in one run; its counters on, so
+    // that the path's triangles are counted.
+    made.measureClusters(true);
+    made.setGeometry({ ...SETTINGS.low.geometry, wireClusters: false });
+    const byMesh = await drawWith(base, { draws: frameAt(performance.now()).draws, surveyed });
+    made.setGeometry(SETTINGS.low.geometry);
+    const byClusters = await drawWith(base, { draws: frameAt(performance.now()).draws, surveyed });
+    let triangles: number | null = null;
+    for (let round = 0; round < 8 && triangles === null; round += 1) {
+      // Each frame samples the counters the last one's read answers into: one after the other.
+      // oxlint-disable-next-line no-await-in-loop
+      await drawWith(base, { draws: frameAt(performance.now()).draws, surveyed });
+      triangles = made.counts(VIEW)?.litClusterTriangles ?? null;
+    }
+    made.measureClusters(false);
+    const patches = made.counts(VIEW)?.patches ?? { interior: 0, edge: 0 };
+    const meshTriangles = ((patches.interior + patches.edge) * LIT_PATCH_INDICES) / 3;
+    let differing = 0;
+    for (let n = 0; n < byMesh.length; n += 1) {
+      differing += byMesh[n] === byClusters[n] ? 0 : 1;
+    }
+    checks.check(
+      "R14.T4.c the wireframe's interior patches drawn through the cluster path draw the canvas the lit mesh draws, byte for byte, with fewer triangles",
+      patches.interior > 0 &&
+        bytesDigest(byMesh) === bytesDigest(byClusters) &&
+        triangles !== null &&
+        triangles < meshTriangles,
+      `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: triangles ${String(triangles)} by clusters, ${triangles === null ? "—" : (triangles / meshTriangles).toFixed(4)} of the lit mesh's ${String(meshTriangles)}; digests ${bytesDigest(byMesh)} by the lit mesh, ${bytesDigest(byClusters)} by clusters; ${String(differing)} bytes differing`,
+    );
+
     made.dispose();
     pass = null;
-    const after = categories.map((category) => tally.liveBytes(category));
+    const after = categories.map(
+      (category) => tally.liveBytes(category) - (category === "other" ? timerBytes : 0),
+    );
     checks.check(
       "R10.T11 a wireframe pass made, drawn and disposed leaves the allocation tally where it stood",
       after.every((bytes, n) => bytes === before[n]),
-      categories
+      `${categories
         .map((category, n) => `${category} ${String(before[n])} B, then ${String(after[n])} B`)
-        .join("; "),
+        .join(
+          "; ",
+        )}; the engine's pass timer's and the cull kernel's uniforms' ${String(timerBytes)} B apart`,
     );
   } finally {
+    offTimer?.();
     pass?.dispose();
     canvas.dispose();
     wireframe.dispose();

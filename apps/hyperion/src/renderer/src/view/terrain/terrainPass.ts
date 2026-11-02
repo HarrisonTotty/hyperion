@@ -863,6 +863,12 @@ interface Device {
   litClusterMaterial: MaterialHandle | null;
   emissiveLitClusterMaterial: MaterialHandle | null;
   compactKernel: ComputeHandle | null;
+  /**
+   * The wireframe's interior patches' form on the cluster path (plan R14, R14.T4.c), made with the
+   * cull's and the compaction's kernels; `null` before, for the other shadings, and where one cannot
+   * be made, when the wireframe draws every patch by the lit mesh.
+   */
+  wireClusterMaterial: MaterialHandle | null;
   /** Each resident patch's layers' summary and request, by key string. */
   readonly residents: Map<string, Resident>;
   /** The resident patches asked for again by the rebake rule, at their last requests. */
@@ -971,6 +977,12 @@ interface ViewState {
   };
   /** The wireframe's phase records, one a drawn patch; `null` for the other shadings. */
   readonly phases: WirePhaseRecords | null;
+  /**
+   * The wireframe's interior patches' phase records on the cluster path (plan R14, R14.T4.c), one an
+   * interior record in its order, {@link ViewState.phases} then the others'; `null` for the other
+   * shadings.
+   */
+  readonly interiorPhases: WirePhaseRecords | null;
   /** Its draw, made once the material is ready on the device it was made for. */
   draw: DrawItem | null;
   drawDevice: Device | null;
@@ -1727,6 +1739,7 @@ export class TerrainPass {
       lit ? this.#readyClusters(device, path) : Promise.resolve(),
       cascades ? this.#readyClusterCasters(device, path) : Promise.resolve(),
       lit ? this.#readyLitClusters(device, "lit-cluster", path) : Promise.resolve(),
+      this.#shading === "wire" ? this.#readyWireClusters(device, path) : Promise.resolve(),
     ]);
     let material: MaterialHandle;
     try {
@@ -1767,7 +1780,8 @@ export class TerrainPass {
       | "lit-interior"
       | "lit-emissive-interior"
       | "lit-cluster"
-      | "lit-emissive-cluster",
+      | "lit-emissive-cluster"
+      | "wire-cluster",
     device: Device,
     path: TerrainLayout["vertexPath"],
   ): Promise<MaterialHandle> {
@@ -1938,6 +1952,61 @@ export class TerrainPass {
         this.#clusterRefusal ??= refusalOf(name, outcome.reason);
         console.error(
           "the terrain's lit cluster path failed: its interior patches drawn by the interior mesh",
+          outcome.reason,
+        );
+      }
+    }
+  }
+
+  /**
+   * Compiles, or takes, `device`'s wireframe interior patches' form on the cluster path (plan R14,
+   * R14.T4.c), with the cull's and the stable compaction's kernels; never rejects. Where any of
+   * the three cannot be made, none is kept, the refusal is stated
+   * ({@link TerrainPass.clusterRefusal}), and the wireframe draws every patch by the lit mesh.
+   */
+  async #readyWireClusters(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
+    // A refusal thrown at the call, as a lost device's, settles as one rejected.
+    const [material, cull, compact] = await Promise.allSettled([
+      (async () => this.#materialOf("wire-cluster", device, path))(),
+      (async () => this.#engine.createComputeAsync(this.#cullKernel))(),
+      (async () => this.#engine.createComputeAsync(CLUSTER_COMPACT))(),
+    ]);
+    const taken =
+      material.status === "fulfilled" &&
+      cull.status === "fulfilled" &&
+      compact.status === "fulfilled" &&
+      device === this.#device &&
+      !this.#disposed &&
+      device.wireClusterMaterial === null &&
+      device.cullKernel === null &&
+      device.compactKernel === null;
+    if (taken) {
+      device.wireClusterMaterial = material.value;
+      device.cullKernel = cull.value;
+      device.compactKernel = compact.value;
+      return;
+    }
+    if (material.status === "fulfilled") {
+      this.#releaseOwn(material.value);
+    }
+    for (const kernel of [cull, compact]) {
+      if (kernel.status === "fulfilled") {
+        this.#engine.releaseCompute(kernel.value);
+      }
+    }
+    for (const [outcome, name] of [
+      [material, "the wire-cluster form"],
+      [cull, this.#cullKernel.name],
+      [compact, CLUSTER_COMPACT.name],
+    ] as const) {
+      if (
+        outcome.status === "rejected" &&
+        !this.#superseded(device) &&
+        !(outcome.reason instanceof EngineUnavailable)
+      ) {
+        this.#clusterRefusal ??= refusalOf(name, outcome.reason);
+        console.error(
+          "the wireframe's cluster path failed: its patches drawn by the lit mesh",
           outcome.reason,
         );
       }
@@ -2555,6 +2624,10 @@ export class TerrainPass {
       this.#engine.releaseCompute(device.compactKernel);
       device.compactKernel = null;
     }
+    if (device.wireClusterMaterial !== null) {
+      this.#releaseOwn(device.wireClusterMaterial);
+      device.wireClusterMaterial = null;
+    }
     if (device.airless !== null) {
       this.#engine.releaseTexture(device.airless.body);
     }
@@ -2568,8 +2641,9 @@ export class TerrainPass {
         this.#terrain,
         this.#planet.figure,
         this.#shading,
-        // A lit pass's interior patches cast and give the overlay its depth on the cluster path.
-        this.#shading === "lit",
+        // A lit pass's interior patches cast and give the overlay its depth on the cluster path, and
+        // the wireframe's draw on it (plan R14, R14.T4.c).
+        this.#shading === "lit" || this.#shading === "wire",
       );
     const { layout } = made;
     const cache = new PatchCache(layout.slots);
@@ -2610,6 +2684,7 @@ export class TerrainPass {
       litClusterMaterial: null,
       emissiveLitClusterMaterial: null,
       compactKernel: null,
+      wireClusterMaterial: null,
       clusterShadowMaterial: null,
       clusterDepthMaterial: null,
       cullKernel: null,
@@ -2929,6 +3004,9 @@ export class TerrainPass {
         occluderSlopePx: new Float32Array(1),
       },
       phases: TERRAIN_SHADING_TRAITS[this.#shading].phases ? new WirePhaseRecords(slotCount) : null,
+      interiorPhases: TERRAIN_SHADING_TRAITS[this.#shading].phases
+        ? new WirePhaseRecords(slotCount)
+        : null,
       draw: null,
       drawDevice: null,
       drawnTable: null,
@@ -3369,7 +3447,7 @@ export class TerrainPass {
     readonly lit: boolean;
   } {
     const { resources, residents } = device;
-    const { instances, morph, phases, drawn: drawnIndices, interior } = state;
+    const { instances, morph, phases, interiorPhases, drawn: drawnIndices, interior } = state;
     const { cameraM } = input.view;
     const [r0, r1, r2] = input.view.rotation.rows;
     const drawSet = this.#selected?.drawSet;
@@ -3377,10 +3455,12 @@ export class TerrainPass {
     const { holds } = device.holds;
     const lit = this.#shading === "lit";
     const forms = lit ? this.#litForms(device, input) : NO_FORMS;
-    const split = this.#geometry.clusterPath && forms.interior !== null;
+    const wireSplit = this.#wireSplits(device, state);
+    const split = (this.#geometry.clusterPath && forms.interior !== null) || wireSplit;
     instances.clear();
     interior.clear();
     phases?.clear();
+    interiorPhases?.clear();
     drawnIndices.length = 0;
     state.interiorDrawn.length = 0;
     if (drawSet !== undefined) {
@@ -3411,8 +3491,9 @@ export class TerrainPass {
           within === null ? 0 : subPatchOf(patch.key, within),
         );
         (inner ? state.interiorDrawn : drawnIndices).push(n);
-        if (phases !== null && wire !== undefined) {
-          this.#pushPhase(device, phases, drawn.keyString, patch.originM, wire);
+        const phasesOf = inner ? interiorPhases : phases;
+        if (phasesOf !== null && wire !== undefined) {
+          this.#pushPhase(device, phasesOf, drawn.keyString, patch.originM, wire);
         }
       }
     }
@@ -3430,11 +3511,14 @@ export class TerrainPass {
       );
     }
     resources.writeFrame(instances, records, state.id);
-    if (lit) {
+    if (lit || wireSplit) {
       resources.writeInterior(interior, state.id);
     }
     if (phases !== null) {
       resources.writePhases(phases, state.id);
+    }
+    if (wireSplit && interiorPhases !== null) {
+      resources.writePhases(interiorPhases, state.id, "interior");
     }
     const count = instances.count + interior.count;
     if (device.material === null || count === 0) {
@@ -3451,6 +3535,8 @@ export class TerrainPass {
     rotationMat4(input.view.rotation, state.uniforms.bodyRotation);
     let draws: ReadonlyArray<DrawItem>;
     let live: CascadeSet | null = null;
+    // Whether the wireframe's interior patches drew through the cluster path (plan R14, R14.T4.c).
+    let wireLit = false;
     switch (this.#shading) {
       case "lit": {
         const made = this.#writeLit(device, state, input, cascades, forms);
@@ -3458,11 +3544,32 @@ export class TerrainPass {
         live = made.live;
         break;
       }
-      case "wire":
+      case "wire": {
         // A wireframe view's frame with no contours to draw draws nothing (R10.T11).
-        draws =
-          wire === undefined ? NO_DRAWS : [this.#writeWire(device, state, device.material, wire)];
+        if (wire === undefined) {
+          draws = NO_DRAWS;
+          break;
+        }
+        const edgeDraw = this.#writeWire(device, state, device.material, wire);
+        if (!wireSplit || interior.count === 0) {
+          draws = [edgeDraw];
+          break;
+        }
+        // The interior patches through the cull and the stable compaction at stride 1, before the
+        // edge patches' draw (plan R14, R14.T4.c; Design note 13).
+        const wireClusters = this.#wireClusterPath(device, state, edgeDraw);
+        this.#cullClusters(device, state, wireClusters, input, null);
+        const litBase = wireClusters.litBase;
+        if (litBase === null) {
+          throw new Error("the wireframe's cluster path has no draw base");
+        }
+        draws = [
+          ...wireClusters.buckets.drawItems(CLUSTER_LIT_PASS, wireClusters.mesh, litBase, 1),
+          ...(instances.count > 0 ? [edgeDraw] : []),
+        ];
+        wireLit = true;
         break;
+      }
       case "spike":
         draws = [this.#writeSpike(device, state, device.material, input)];
         break;
@@ -3507,7 +3614,124 @@ export class TerrainPass {
     }
     const patches =
       draws.length > 0 ? { interior: interior.count, edge: instances.count } : NO_PATCHES;
-    return { draws: drawn, patches, count, cast, overlayDepth, overlayPass, lit: litBase !== null };
+    return {
+      draws: drawn,
+      patches,
+      count,
+      cast,
+      overlayDepth,
+      overlayPass,
+      lit: litBase !== null || wireLit,
+    };
+  }
+
+  /**
+   * Whether view `state`'s wireframe frame on `device` draws its interior patches through the
+   * cluster path (plan R14, R14.T4.c): its geometry asks it, and its form, both kernels, the cluster
+   * mesh and records and the view's interior buffers are made, so that every interior record the
+   * frame writes apart is drawn.
+   */
+  #wireSplits(device: Device, state: ViewState): boolean {
+    const { resources } = device;
+    const view = resources.viewBuffers(state.id);
+    return (
+      this.#shading === "wire" &&
+      this.#geometry.clusterPath &&
+      this.#geometry.wireClusters &&
+      device.wireClusterMaterial !== null &&
+      device.cullKernel !== null &&
+      device.compactKernel !== null &&
+      resources.clusterMesh !== null &&
+      resources.clusterRecords !== null &&
+      view.interior !== null &&
+      view.interiorPhases !== null
+    );
+  }
+
+  /**
+   * View `state`'s wireframe interior patches' cluster path (plan R14, R14.T4.c): its buckets, the
+   * lit pass's ordered camera pass alone, and the bucket draws' shared part, the wireframe draw
+   * `beside`'s but its mesh, indirect arguments and material, with the interior records, their
+   * phases and the lists; each interior record's cull input the lit pass's bit.
+   *
+   * @throws Error where the frame splits its interior patches ({@link TerrainPass}'s `#wireSplits`)
+   *   but a part is missing.
+   */
+  #wireClusterPath(device: Device, state: ViewState, beside: DrawItem): ClusterPath {
+    const { resources } = device;
+    const view = resources.viewBuffers(state.id);
+    const buffers = resources.clusterBuffers(state.id);
+    const mesh = resources.clusterMesh;
+    const kernel = device.cullKernel;
+    const material = device.wireClusterMaterial;
+    const { interior, interiorPhases } = view;
+    if (
+      buffers === null ||
+      mesh === null ||
+      kernel === null ||
+      material === null ||
+      interior === null ||
+      interiorPhases === null
+    ) {
+      throw new Error("a wireframe view's interior patches have no cluster path");
+    }
+    const slots = resources.layout.slots.slotCount;
+    const clusters = (state.clusters ??= {
+      inputs: new Uint32Array(2 * slots),
+      passes: new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES),
+      params: new ArrayBuffer(CULL_PARAMS_BYTES),
+      casterBase: null,
+      overlayBase: null,
+      litBase: null,
+      litBeside: null,
+      device: null,
+      stats: null,
+    });
+    if (clusters.device !== device) {
+      clusters.litBase = null;
+      clusters.litBeside = null;
+      clusters.device = device;
+    }
+    if (clusters.litBeside !== beside || clusters.litBase?.material !== material) {
+      const { mesh: _mesh, indirect: _indirect, instanceCount: _count, ...shared } = beside;
+      clusters.litBase = {
+        ...shared,
+        material,
+        storageBuffers: {
+          ...beside.storageBuffers,
+          instances: interior.instances,
+          wirePhases: interiorPhases,
+          clusterLists: buffers.buckets.lists,
+        },
+      };
+      clusters.litBeside = beside;
+    }
+    const radiusM = this.#planet.figure.equatorialRadiusM;
+    const drawSet = this.#selected?.drawSet;
+    for (let record = 0; record < state.interiorDrawn.length; record += 1) {
+      const drawnIndex = state.interiorDrawn[record];
+      const patch = drawnIndex === undefined ? undefined : drawSet?.patches[drawnIndex]?.patch;
+      // A record whose patch the draw set no longer holds enters no pass.
+      clusters.inputs[2 * record] = patch === undefined ? 0 : LIT_PASS_BIT;
+      clusters.inputs[2 * record + 1] = f32Bits(
+        patch === undefined ? 0 : vertexSpacing(radiusM, patch.key.level).maxM,
+      );
+    }
+    return {
+      buckets: buffers.buckets,
+      cullInputs: buffers.cullInputs,
+      inputs: clusters.inputs,
+      mesh,
+      casterBase: null,
+      overlayBase: null,
+      depthBase: null,
+      overlay: false,
+      kernel,
+      litBase: clusters.litBase,
+      marks: buffers.marks,
+      tallies: buffers.tallies,
+      compact: device.compactKernel,
+    };
   }
 
   /**

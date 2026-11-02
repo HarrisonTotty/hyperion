@@ -1511,6 +1511,7 @@ wireframe draw needs only T1.
   note 13). _Tests:_ contours at stride 1 everywhere, a twin of `#writeWire`'s. _Acceptance:_ the
   wireframe's terrain frames byte-identical; triangles counted, and the wireframe's GPU time against
   the station-wireframe row (Design note 18).
+  - _Built_ (`r14-t4-consumers`): records at the end of Risks.
 
 ### R14.T5 Meshes: the builder, pages, producers and instances
 
@@ -2038,3 +2039,27 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     `--geometry hullClusters=`; results files without it read `false`. The drawer sets it on its
     wireframe renderer each frame.
   - Timed passes: one more a frame with a hull drawn (`hull cluster cull`).
+- **R14.T4.c** (`r14-t4-consumers`):
+  - The wireframe's layout is clustered (`TerrainPass` makes its `TerrainResources` with clusters):
+    its slots hold cluster records, and each view's buffers gain `interior` and `interiorPhases`
+    (`writePhases(…, "interior")`); a wireframe layout made without clusters is as before.
+  - Its interior patches split as the lit pass's do, culled by the lit pass's ordered camera pass
+    (frustum and horizon, `CLUSTER_LIT_PASS`) and compacted, and drawn at stride 1 by
+    `terrain-wire-cluster-<path>` (`terrainWireClusterMaterialSpec`: no survey discard, `wire_vertex`
+    through `withWireClusterVertex` and `terrainWireCluster.wgsl`) before the edge patches' lit-mesh
+    draw; `ViewState.interiorPhases`, `Device.wireClusterMaterial`, material kind `wire-cluster` in
+    the session's set. `counts()` gives the wireframe's `litClusterTriangles`.
+  - `GeometrySettings.wireClusters`, on both settings, beside `hullClusters`;
+    `--geometry wireClusters=`; results files without it read `false`.
+  - A wireframe view's buckets hold the lit pass's six passes and use the sixth.
+  - Timed passes: 4 a wireframe view-frame with interior patches (the cull and the compaction's 3).
+- **From building T4** (`r14-t4-consumers`):
+  - Each consumer has its own field beside `clusterPath`, and draws on the path only where both are
+    on (lean, 2026-11-02: Design note 17's "the same field" read as `clusterPath` and the
+    consumer's own); Design note 17's table and R12.T0's inventory are to take `figureClusters`,
+    `hullClusters` and `wireClusters`, on on both settings.
+  - The bodies pass's order is unchanged: the figures, may-discard, still draw before the terrain;
+    opaque first is T2.e's.
+  - `ClusterConsumer` holds no buffers: its records and instances come with each frame
+    (`ConsumerCull`), and `vertexWgsl` is its vertex stage over a bucket's list, not a
+    `cluster_place` function.

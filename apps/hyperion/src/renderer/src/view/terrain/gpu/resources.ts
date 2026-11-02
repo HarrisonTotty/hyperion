@@ -879,10 +879,17 @@ export interface TerrainViewBuffers {
   readonly phases: BufferHandle | null;
   /**
    * A lit layout's interior patches' instance records and `drawIndexedIndirect` arguments for it
-   * (plan R14, R14.T1.a; {@link litInteriorMeshData}), drawn before its other patches; `null` on
-   * the other layouts.
+   * (plan R14, R14.T1.a; {@link litInteriorMeshData}), and a wireframe layout's made with its
+   * clusters (R14.T4.c), drawn before its other patches; `null` on the other layouts.
    */
   readonly interior: TerrainInteriorBuffers | null;
+  /**
+   * A wireframe layout's interior patches' phase records for it on the cluster path, one an
+   * interior record in their order (plan R14, R14.T4.c), beside {@link TerrainViewBuffers.phases},
+   * which then holds the others'; `null` on the other layouts and a wireframe's made without
+   * clusters.
+   */
+  readonly interiorPhases: BufferHandle | null;
 }
 
 /**
@@ -998,9 +1005,9 @@ export class TerrainResources {
   readonly #clusterRecord = new ArrayBuffer(CLUSTER_RECORDS_SLOT_BYTES);
 
   /**
-   * @param clustered - Whether a lit layout's slots hold the cluster path's records and its views
-   *   its buckets (plan R14, R14.T1.b): the high setting's, whose interior patches cast through
-   *   it; `false` by default, when every upload is as before.
+   * @param clustered - Whether a lit or wireframe layout's slots hold the cluster path's records
+   *   and its views its buckets (plan R14, R14.T1.b; the wireframe's from R14.T4.c); `false` by
+   *   default, when every upload is as before.
    */
   constructor(
     engine: RenderEngine,
@@ -1013,7 +1020,8 @@ export class TerrainResources {
     this.#terrain = terrain;
     this.#figure = figure;
     this.#shading = shading;
-    this.#clustered = clustered && TERRAIN_SHADING_TRAITS[shading].lit;
+    this.#clustered =
+      clustered && (TERRAIN_SHADING_TRAITS[shading].lit || TERRAIN_SHADING_TRAITS[shading].phases);
     this.#planet = planetGeometry({ ...figure, pole: null }, null);
     this.#made = this.#make();
     this.#normalsScratch = this.#scratchFor(this.#made.layout);
@@ -1055,7 +1063,7 @@ export class TerrainResources {
   }
 
   /**
-   * Terrain's cluster mesh (plan R14, R14.T1.b; {@link TERRAIN_CLUSTER_MESH}), on a lit layout
+   * Terrain's cluster mesh (plan R14, R14.T1.b; {@link TERRAIN_CLUSTER_MESH}), on a lit or wireframe layout
    * made with its clusters; `null` otherwise.
    */
   get clusterMesh(): MeshHandle | null {
@@ -1064,7 +1072,7 @@ export class TerrainResources {
 
   /**
    * Each slot's cluster records, {@link CLUSTER_RECORDS_SLOT_BYTES} a slot, written at its upload
-   * (plan R14, R14.T1.b), on a lit layout made with its clusters; `null` otherwise.
+   * (plan R14, R14.T1.b), on a lit or wireframe layout made with its clusters; `null` otherwise.
    */
   get clusterRecords(): BufferHandle | null {
     return this.#made.clusterRecords;
@@ -1594,19 +1602,25 @@ export class TerrainResources {
 
   /**
    * Writes a frame's phase records into `view`'s phases buffer, one a drawn patch in its instances'
-   * order (R10.T11); nothing on a layout other than the wireframe's, or with none this frame.
+   * order (R10.T11), or with `records` `interior` into its interior patches' (plan R14,
+   * R14.T4.c); nothing on a layout other than the wireframe's, or with none this frame.
    *
    * @throws RangeError if `phases` holds more records than the buffer, whose capacity is the slot
    * count.
    */
-  writePhases(phases: WirePhaseRecords, view: string = DEFAULT_TERRAIN_VIEW): void {
+  writePhases(
+    phases: WirePhaseRecords,
+    view: string = DEFAULT_TERRAIN_VIEW,
+    records: "drawn" | "interior" = "drawn",
+  ): void {
     const made = this.#made;
     if (phases.count > made.layout.slots.slotCount) {
       throw new RangeError(
         `${phases.count} phase records exceed the ${made.layout.slots.slotCount} slots`,
       );
     }
-    const buffer = this.viewBuffers(view).phases;
+    const buffers = this.viewBuffers(view);
+    const buffer = records === "interior" ? buffers.interiorPhases : buffers.phases;
     if (buffer !== null && phases.count > 0) {
       this.#engine.writeBuffer(buffer, 0, phases.bytes());
     }
@@ -1728,6 +1742,9 @@ export class TerrainResources {
     if (buffers.interior !== null) {
       this.#engine.releaseBuffer(buffers.interior.instances);
       this.#engine.releaseBuffer(buffers.interior.indirect);
+    }
+    if (buffers.interiorPhases !== null) {
+      this.#engine.releaseBuffer(buffers.interiorPhases);
     }
   }
 
@@ -1898,8 +1915,10 @@ export class TerrainResources {
           category: "other",
         })
       : null;
+    // A wireframe layout's interior patches only on the cluster path (plan R14, R14.T4.c).
+    const wireInterior = traits.phases && this.#clustered;
     let interior: TerrainInteriorBuffers | null = null;
-    if (traits.lit) {
+    if (traits.lit || wireInterior) {
       interior = {
         instances: engine.createBuffer({
           name: named("interior instances"),
@@ -1916,7 +1935,15 @@ export class TerrainResources {
       };
       engine.writeBuffer(interior.indirect, 0, new Uint32Array([LIT_INTERIOR_INDICES, 0, 0, 0, 0]));
     }
-    return { instances, contacts, indirect, lights, phases, interior };
+    const interiorPhases = wireInterior
+      ? engine.createBuffer({
+          name: named("interior phases"),
+          bytes: layout.slots.slotCount * WIRE_PHASE_RECORD_BYTES,
+          usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+          category: "other",
+        })
+      : null;
+    return { instances, contacts, indirect, lights, phases, interior, interiorPhases };
   }
 
   #scratchFor(layout: TerrainLayout): Uint16Array {

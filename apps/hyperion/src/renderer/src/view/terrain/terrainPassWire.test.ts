@@ -15,18 +15,24 @@ import { lookAlong } from "../camera/quaternion";
 import { IDENTITY_ROTATION, type Rotation3, rotation3FromRows } from "../coords/rotation";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import type {
+  DrawItem,
   MaterialHandle,
   MeshHandle,
   RenderTargetFormat,
   WgslMaterialSpec,
 } from "../engine/types";
+import { CULL_PASS_BYTES } from "../clusters/cullPass";
 import {
+  GEOMETRY_BEFORE_R14,
+  type GeometrySettings,
   type QualitySetting,
+  SETTINGS,
   TERRAIN_SETTINGS,
   WIREFRAME_TERRAIN_TAU_PX,
 } from "../quality/qualitySetting";
 import { vertexDir } from "./cube";
 import { finestPatchSizeM, heldRadiusM, morphRampM } from "./grounded";
+import { CLUSTER_LIT_PASS } from "./gpu/resources";
 import { INSTANCE_RECORD_BYTES, WIRE_PHASE_RECORD_BYTES } from "./gpu/uniforms";
 import { type PatchKey, patchKeyString } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
@@ -34,6 +40,8 @@ import { PRIMARY_VIEW_WEIGHT } from "./priority";
 import type { PatchRequest } from "./select";
 import { PATCH_VERTICES_PER_SIDE } from "./slotLayout";
 import {
+  TERRAIN_CLUSTER_COMPACT_LABEL,
+  TERRAIN_CLUSTER_CULL_LABEL,
   TerrainPass,
   type TerrainPassView,
   type TerrainPool,
@@ -44,6 +52,7 @@ import {
 import {
   contourPhase,
   graticulePatch,
+  terrainWireClusterMaterialSpec,
   terrainWireMaterialSpec,
   wireframeTerrainSettings,
 } from "./terrainWire";
@@ -216,7 +225,12 @@ interface Made {
  * A pass over the body on `setting`, ready: the wireframe's, with the wireframe's cache as the
  * session makes it, or the lit one with the setting's own.
  */
-async function passOver(setting: QualitySetting, source: HeightSourceSetting): Promise<Made> {
+async function passOver(
+  setting: QualitySetting,
+  source: HeightSourceSetting,
+  // The R10.T11 cases draw every patch by the lit mesh, the way back of plan R14's T4.c.
+  geometry: GeometrySettings = { ...SETTINGS[setting].geometry, wireClusters: false },
+): Promise<Made> {
   const engine = new CompileRecordingEngine(
     await fakeDevice({
       maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
@@ -231,6 +245,7 @@ async function passOver(setting: QualitySetting, source: HeightSourceSetting): P
     planet: PLANET,
     source,
     ...(wire ? { terrain: wireframeTerrainSettings(setting) } : {}),
+    geometry,
     createPool: (bake) => {
       const lane = new WireLane(bake);
       lanes.push(lane);
@@ -384,9 +399,14 @@ function expectedPhases(
 }
 
 describe("the wireframe's terrain pass (R10.T11)", () => {
-  it("compiles the wireframe's material for the canvas over the lit material's mesh, and nothing more", async () => {
+  it("compiles the wireframe's material for the canvas over the lit material's mesh, and its interior patches' form on the cluster path (plan R14, R14.T4.c), and nothing more", async () => {
     const { pass, engine } = await wirePass();
     expect(engine.compiled).toEqual([
+      {
+        spec: terrainWireClusterMaterialSpec(pass.layout.vertexPath),
+        targets: ["canvas"],
+        meshes: ["terrain lit patch"],
+      },
       {
         spec: terrainWireMaterialSpec(pass.layout.vertexPath),
         targets: ["canvas"],
@@ -737,5 +757,127 @@ describe("the wireframe's annunciation and mask (R10.T11)", () => {
       made.pass.maskReadyFor(PRIMARY),
       made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).maskReady,
     ]).toEqual([true, true]);
+  });
+});
+
+/** What a test compares of draws: their meshes, materials and indirect offsets. */
+function drawShapes(draws: ReadonlyArray<DrawItem>): unknown {
+  return draws.map((d) => [d.mesh.name, d.material.name, d.indirect?.offsetBytes]);
+}
+
+describe("the wireframe's interior patches on the cluster path (plan R14, R14.T4.c)", () => {
+  /** The wireframe's pass on `setting` with its setting's geometry, the interior patches clustered. */
+  function clusteredPass(setting: QualitySetting = "low"): Promise<Made> {
+    return passOver(setting, WIRE_BODY, SETTINGS[setting].geometry);
+  }
+
+  it("draws its interior patches by the lit pass's stride-1 buckets, then its edge patches by the lit mesh", async () => {
+    const made = await clusteredPass();
+    streamed(made);
+    const frame = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE));
+    const patches = made.pass.counts(PRIMARY)?.patches;
+    expect([
+      (patches?.interior ?? 0) > 0,
+      frame.draws.map((d) => [d.mesh.name, d.material.name, d.indirect?.buffer.name]),
+    ]).toEqual([
+      true,
+      [
+        [
+          "terrain clusters",
+          "terrain-wire-cluster-face-differences",
+          `terrain clusters (${PRIMARY}) arguments`,
+        ],
+        [
+          "terrain clusters",
+          "terrain-wire-cluster-face-differences",
+          `terrain clusters (${PRIMARY}) arguments`,
+        ],
+        ...((patches?.edge ?? 0) > 0
+          ? [
+              [
+                "terrain lit patch",
+                "terrain-wire-face-differences",
+                `terrain indirect (${PRIMARY})`,
+              ],
+            ]
+          : []),
+      ],
+    ]);
+  });
+
+  it("culls them by one ordered camera pass at stride 1 and compacts them in the draw set's order", async () => {
+    const made = await clusteredPass();
+    streamed(made);
+    const before = made.engine.dispatched.length;
+    made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE));
+    const dispatched = made.engine.dispatched.slice(before);
+    const cull = dispatched.find((d) => d.pass === TERRAIN_CLUSTER_CULL_LABEL);
+    const passes = new DataView(cull?.bindings.uniforms["passes"]?.buffer ?? new ArrayBuffer(0));
+    // The lit pass is the cull's sixth: its kind 3 (ordered) and its stride cap's level 0.
+    const at = CLUSTER_LIT_PASS * CULL_PASS_BYTES;
+    expect([
+      dispatched.map((d) => d.pass),
+      [0, 1, 2, 3, 4].map((p) => passes.getUint32(p * CULL_PASS_BYTES, true)),
+      [passes.getUint32(at, true), passes.getUint32(at + 4, true)],
+    ]).toEqual([
+      [
+        TERRAIN_CLUSTER_CULL_LABEL,
+        TERRAIN_CLUSTER_COMPACT_LABEL,
+        TERRAIN_CLUSTER_COMPACT_LABEL,
+        TERRAIN_CLUSTER_COMPACT_LABEL,
+      ],
+      [0, 0, 0, 0, 0],
+      [3, 0],
+    ]);
+  });
+
+  it("binds the interior records and their own phases to its cluster draws, each phase in its record's order", async () => {
+    const made = await clusteredPass();
+    streamed(made);
+    const draw = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draws[0];
+    const bound = Object.fromEntries(
+      Object.entries(draw?.storageBuffers ?? {}).map(([name, buffer]) => [name, buffer.name]),
+    );
+    const interiorPhases = new Float32Array(
+      lastWrite(made.engine, `terrain interior phases (${PRIMARY})`),
+    );
+    expect([bound, interiorPhases.length > 0]).toEqual([
+      {
+        contacts: `terrain contacts (${PRIMARY})`,
+        heights: "terrain heights",
+        instances: `terrain interior instances (${PRIMARY})`,
+        slots: "terrain slot records",
+        surveyMask: "terrain survey-mask",
+        wirePhases: `terrain interior phases (${PRIMARY})`,
+        clusterLists: `terrain clusters (${PRIMARY}) lists`,
+      },
+      true,
+    ]);
+  });
+
+  it.each([
+    ["the lever off", { ...SETTINGS.low.geometry, wireClusters: false }],
+    ["the way back", GEOMETRY_BEFORE_R14],
+  ] as const)("draws every patch by the lit mesh with %s", async (_, geometry) => {
+    const made = await passOver("low", WIRE_BODY, geometry);
+    streamed(made);
+    const frame = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE));
+    expect(frame.draws.map((d) => [d.mesh.name, d.material.name])).toEqual([
+      ["terrain lit patch", "terrain-wire-face-differences"],
+    ]);
+  });
+
+  it("makes its cluster path again after a device restore, and draws a fresh pass's items", async () => {
+    const made = await clusteredPass();
+    streamed(made);
+    made.engine.loseDevice();
+    made.engine.restore();
+    await made.pass.ready();
+    streamed(made);
+    const restored = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draws;
+    const fresh = await clusteredPass();
+    streamed(fresh);
+    const drawn = fresh.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draws;
+    expect(drawShapes(restored)).toEqual(drawShapes(drawn));
   });
 });

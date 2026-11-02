@@ -1601,9 +1601,10 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
   ];
 
   /**
-   * The high setting's eight, its shadow cascades' caster (R10.T9.b), its interior patches' lit form
-   * (plan R14, R14.T1.a), their cluster caster (R14.T1.b), their cluster depth (R14.T1.e) and their
-   * lit form on the cluster path (R14.T2.a) among them.
+   * The high setting's nine, its shadow cascades' caster (R10.T9.b), its interior patches' lit form
+   * (plan R14, R14.T1.a), their cluster caster (R14.T1.b), their cluster depth (R14.T1.e), their
+   * lit form on the cluster path (R14.T2.a) and the wireframe's interior patches' on it (R14.T4.c)
+   * among them.
    */
   const HIGH = [
     "terrain-lit-baked-offsets",
@@ -1614,6 +1615,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     "terrain-shadow-baked-offsets",
     "terrain-cluster-shadow-baked-offsets",
     "terrain-wire-baked-offsets",
+    "terrain-wire-cluster-baked-offsets",
   ];
 
   /** What the moon's passes draw with on the high setting ({@link drawnWith}). */
@@ -1638,6 +1640,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
       "terrain-depth-face-differences",
       "terrain-cluster-depth-face-differences",
       "terrain-wire-face-differences",
+      "terrain-wire-cluster-face-differences",
     ]);
   });
 
@@ -1661,14 +1664,14 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
       [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary", setting: "low" })],
     ]);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 6), drawnWith(h), h.engine.live.materials]).toEqual([
+    expect([compiled(h, 7), drawnWith(h), h.engine.live.materials]).toEqual([
       [],
       [
         "terrain-lit-face-differences",
         "terrain-depth-face-differences",
         "terrain-wire-face-differences",
       ],
-      6,
+      7,
     ]);
   });
 

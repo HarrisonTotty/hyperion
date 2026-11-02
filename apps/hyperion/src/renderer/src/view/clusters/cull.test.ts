@@ -506,6 +506,24 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
       12: [256 * 1 + 2],
     });
   });
+
+  it("takes stride 1 in a camera pass whatever its cap and tolerance, so that the wireframe's contours stand on the stride-1 grid (R14.T4.c)", () => {
+    const records = [
+      record({ x: 0, y: 0, z: -50 }, 1),
+      record({ x: 0, y: 0, z: -60 }, 1, "terrain-skirt"),
+    ];
+    const buckets = cullTwin({
+      instances: [{ originM: { x: 0, y: 0, z: 0 }, page: 0, passMask: 0b1, unitM: 1e-6 }],
+      records: (_page, cluster) => records[cluster] ?? record(Z, 0),
+      clustersPerPage: records.length,
+      rotationColumns: [X, Y, Z],
+      passes: [{ ...CAMERA, strideCap: 8, toleranceRad: 1 }],
+      places: [{ bucketBase: 0, listBase: 0 }],
+      templates: 8,
+      viewAxis: { x: 0, y: 0, z: -1 },
+    });
+    expect([...buckets.keys()].map(strideOf)).toEqual([1, 1]);
+  });
 });
 
 /** A seeded uniform generator in [0, 1) (mulberry32). */

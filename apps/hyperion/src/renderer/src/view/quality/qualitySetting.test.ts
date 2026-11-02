@@ -140,6 +140,7 @@ describe("the geometry's settings (plan R14)", () => {
         farCascadeRate: 4,
         figureClusters: true,
         hullClusters: true,
+        wireClusters: true,
       });
     }
     expect(GEOMETRY_BEFORE_R14).toEqual({
@@ -151,6 +152,7 @@ describe("the geometry's settings (plan R14)", () => {
       farCascadeRate: 1,
       figureClusters: false,
       hullClusters: false,
+      wireClusters: false,
     });
   });
 

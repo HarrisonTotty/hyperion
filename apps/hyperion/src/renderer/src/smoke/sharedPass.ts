@@ -602,7 +602,7 @@ async function texelsOf(
  * Whether an allocation is the engine's pass timer's (`webgpu/timing.ts`): its query set and its
  * resolve and read-back pairs, made at the first timed pass and kept for the engine's life.
  */
-function isPassTimer(name: string): boolean {
+export function isPassTimer(name: string): boolean {
   return name === "pass times" || name.startsWith("pass times ");
 }
 

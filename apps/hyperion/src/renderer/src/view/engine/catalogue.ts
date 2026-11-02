@@ -97,7 +97,7 @@ import {
   TERRAIN_LIT_MATERIALS,
   TERRAIN_SHADOW_MATERIALS,
 } from "../terrain/terrainMaterial";
-import { TERRAIN_WIRE_MATERIALS } from "../terrain/terrainWire";
+import { TERRAIN_WIRE_CLUSTER_MATERIALS, TERRAIN_WIRE_MATERIALS } from "../terrain/terrainWire";
 import { HULL_CLUSTER_MATERIALS, WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
 import type {
@@ -274,6 +274,7 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     ...TERRAIN_DEPTH_MATERIALS,
     ...TERRAIN_CLUSTER_DEPTH_MATERIALS,
     ...TERRAIN_WIRE_MATERIALS,
+    ...TERRAIN_WIRE_CLUSTER_MATERIALS,
   ].map((spec): CatalogueEntry => ({ kind: "material", spec })),
   ...[...TERRAIN_SHADOW_MATERIALS, ...TERRAIN_CLUSTER_SHADOW_MATERIALS].map(
     (spec): CatalogueEntry => ({

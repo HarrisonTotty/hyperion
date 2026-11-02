@@ -40,10 +40,10 @@ async function settle(): Promise<void> {
 }
 
 /**
- * The high setting's eight, on its own path, the shadow cascades' caster (R10.T9.b), the interior
+ * The high setting's nine, on its own path, the shadow cascades' caster (R10.T9.b), the interior
  * patches' lit form (plan R14, R14.T1.a), their cluster caster (R14.T1.b), their cluster depth
- * (R14.T1.e) and their lit form on the cluster path (R14.T2.a) among them: what every compile
- * below is held to.
+ * (R14.T1.e), their lit form on the cluster path (R14.T2.a) and the wireframe's interior patches'
+ * on it (R14.T4.c) among them: what every compile below is held to.
  */
 const HIGH = [
   `terrain-lit-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
@@ -54,6 +54,7 @@ const HIGH = [
   `terrain-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
   `terrain-cluster-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
   `terrain-wire-baked-offsets canvas ${COMPILE_MESH_NAME}`,
+  `terrain-wire-cluster-baked-offsets canvas ${COMPILE_MESH_NAME}`,
 ];
 
 /**
@@ -106,6 +107,7 @@ describe("sessionMaterials (R10.T14.d)", () => {
       { kind: "shadow", path: "baked-offsets" },
       { kind: "shadow-cluster", path: "baked-offsets" },
       { kind: "wire", path: "baked-offsets" },
+      { kind: "wire-cluster", path: "baked-offsets" },
     ]);
   });
 
@@ -120,6 +122,7 @@ describe("sessionMaterials (R10.T14.d)", () => {
       "depth face-differences",
       "depth-cluster face-differences",
       "wire face-differences",
+      "wire-cluster face-differences",
     ]);
   });
 
@@ -134,6 +137,7 @@ describe("sessionMaterials (R10.T14.d)", () => {
       { kind: "shadow", path: "face-differences" },
       { kind: "shadow-cluster", path: "face-differences" },
       { kind: "wire", path: "baked-offsets" },
+      { kind: "wire-cluster", path: "baked-offsets" },
     ]);
   });
 
@@ -141,6 +145,7 @@ describe("sessionMaterials (R10.T14.d)", () => {
     const engine = await countingRenderEngine(TINY);
     expect(sessionMaterials("high", engine.capabilities)).toEqual([
       { kind: "wire", path: "face-differences" },
+      { kind: "wire-cluster", path: "face-differences" },
     ]);
   });
 
@@ -215,6 +220,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
         layout(terrainMeshSpec("lit")),
         layout(terrainMeshSpec("lit")),
         layout(terrainMeshSpec("lit")),
+        layout(terrainMeshSpec("wire")),
         layout(terrainMeshSpec("wire")),
       ],
       0,
@@ -311,7 +317,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.restore();
     await expect(overtaken).rejects.toBeInstanceOf(EngineUnavailable);
     await settle();
-    // The setting's six compiled again on the restored device, and nothing else held.
+    // The setting's nine compiled again on the restored device, and nothing else held.
     expect(engine.live.materials).toBe(HIGH.length);
   });
 

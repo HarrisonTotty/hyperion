@@ -149,6 +149,7 @@ describe("the spike report's check", () => {
         farCascadeRate: 1,
         figureClusters: false,
         hullClusters: false,
+        wireClusters: false,
       },
       segments: [
         {
@@ -167,6 +168,7 @@ describe("the spike report's check", () => {
     const {
       figureClusters: _figureClusters,
       hullClusters: _hullClusters,
+      wireClusters: _wireClusters,
       ...beforeT4
     } = geometry.settings;
     expect([

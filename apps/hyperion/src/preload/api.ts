@@ -235,6 +235,8 @@ export interface GeometryOverride {
   readonly figureClusters?: boolean;
   /** R14.T4.b: the hulls' occluder faces through the cluster path. */
   readonly hullClusters?: boolean;
+  /** R14.T4.c: the wireframe's interior patches through the cluster path. */
+  readonly wireClusters?: boolean;
 }
 
 declare global {

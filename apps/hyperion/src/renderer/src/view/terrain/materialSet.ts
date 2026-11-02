@@ -58,7 +58,11 @@ import {
   terrainLitMaterialSpec,
   terrainShadowMaterialSpec,
 } from "./terrainMaterial";
-import { terrainWireMaterialSpec, wireframeTerrainSettings } from "./terrainWire";
+import {
+  terrainWireClusterMaterialSpec,
+  terrainWireMaterialSpec,
+  wireframeTerrainSettings,
+} from "./terrainWire";
 
 /**
  * A material of the terrain session's passes: R10's lit material (`lit`), its emissive form for a
@@ -68,8 +72,9 @@ import { terrainWireMaterialSpec, wireframeTerrainSettings } from "./terrainWire
  * wireframe's (`wire`, R10.T11), the lit terrain as a caster into the high setting's shadow
  * cascades (`shadow`, R10.T9.b), its interior patches as casters on the cluster path
  * (`shadow-cluster`, plan R14, R14.T1.b), their depth for the symbology's pass on it
- * (`depth-cluster`, plan R14, R14.T1.e), and their lit form and its emissive form on it
- * (`lit-cluster`, `lit-emissive-cluster`, plan R14, R14.T2.a).
+ * (`depth-cluster`, plan R14, R14.T1.e), their lit form and its emissive form on it
+ * (`lit-cluster`, `lit-emissive-cluster`, plan R14, R14.T2.a), and the wireframe's interior patches
+ * on it (`wire-cluster`, plan R14, R14.T4.c).
  */
 export type TerrainMaterialKind =
   | "lit"
@@ -81,6 +86,7 @@ export type TerrainMaterialKind =
   | "depth"
   | "depth-cluster"
   | "wire"
+  | "wire-cluster"
   | "shadow"
   | "shadow-cluster";
 
@@ -159,6 +165,9 @@ export function terrainMaterialOf(
     case "wire":
       made = { spec: terrainWireMaterialSpec(path), targets: ["canvas"], shading: "wire" };
       break;
+    case "wire-cluster":
+      made = { spec: terrainWireClusterMaterialSpec(path), targets: ["canvas"], shading: "wire" };
+      break;
     case "shadow":
       made = {
         spec: terrainShadowMaterialSpec(path, capabilities.depthClipControl),
@@ -183,7 +192,8 @@ export function terrainMaterialOf(
  * (plan R14, R14.T2.a), its depth material and its interior
  * patches' cluster depth (plan R14, R14.T1.e) on the lit layout's vertex path, on the high setting the shadow cascades' caster and its interior patches'
  * cluster caster on that path too (R10.T9.b; plan R14, R14.T1.b; the low setting has no
- * cascades), and the wireframe's on the wireframe layout's, as `terrainLayout` resolves each; none of a layout the
+ * cascades), and the wireframe's and its interior patches' on the cluster path (plan R14,
+ * R14.T4.c) on the wireframe layout's, as `terrainLayout` resolves each; none of a layout the
  * device cannot hold (`fittedTerrainLayout`), of which no pass can be made either.
  */
 export function sessionMaterials(
@@ -209,7 +219,10 @@ export function sessionMaterials(
   }
   const wire = fittedTerrainLayout(wireframeTerrainSettings(setting), limits, "wire");
   if (wire !== null) {
-    keys.push({ kind: "wire", path: wire.vertexPath });
+    keys.push(
+      { kind: "wire", path: wire.vertexPath },
+      { kind: "wire-cluster", path: wire.vertexPath },
+    );
   }
   return keys;
 }

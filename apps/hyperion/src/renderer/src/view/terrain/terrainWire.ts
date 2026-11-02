@@ -56,7 +56,9 @@ import { datumGroundUnder } from "./grounded";
 import patchVertexWgsl from "./shaders/patchVertex.wgsl?raw";
 import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
 import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
+import terrainClusterWgsl from "./shaders/terrainCluster.wgsl?raw";
 import terrainWireWgsl from "./shaders/terrainWire.wgsl?raw";
+import terrainWireClusterWgsl from "./shaders/terrainWireCluster.wgsl?raw";
 
 /**
  * The share of the camera's height above its nadir's ground that the interval nears: 1 ÷ 20
@@ -506,6 +508,8 @@ export const TERRAIN_WIRE_BINDINGS = {
   surveyMask: 17,
   /** The view's phases, one record a drawn patch (`uniforms.ts`' `WirePhaseRecords`). */
   phases: 18,
+  /** The buckets' lists of the cluster path (plan R14, R14.T4.c), as terrainCluster.wgsl binds them. */
+  clusterLists: 22,
 } as const;
 
 /** The console names of the two paths' wireframe terrain materials. */
@@ -565,8 +569,105 @@ export function terrainWireMaterialSpec(path: TerrainVertexPath): WgslMaterialSp
   };
 }
 
+/** terrainWire.wgsl's vertex stage's head, which the cluster form calls as `wire_vertex`. */
+const WIRE_VERTEX_HEAD =
+  "@vertex\nfn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32) -> WireVertexOut {";
+
+/** {@link WIRE_VERTEX_HEAD} as a function, no longer an entry point. */
+const WIRE_VERTEX_FUNCTION = "fn wire_vertex(grid : vec3f, instance : u32) -> WireVertexOut {";
+
+/** terrainWire.wgsl's `Draw`'s last field and its end, after which the cluster form takes its base. */
+const WIRE_DRAW_END = "  occluderSlopePx : f32,\n}";
+
+/** terrainWire.wgsl's fragment stage's survey discard, which an interior patch never takes. */
+const WIRE_SURVEY_DISCARD =
+  "  if (!survey_kept_at(in.slot, in.patchUv, in.kind)) {\n    discard;\n  }\n";
+
+/** `source` with `part` replaced by `by`, which must occur exactly once. */
+function once(source: string, part: string, by: string, what: string): string {
+  const parts = source.split(part);
+  if (parts.length !== 2) {
+    throw new Error(
+      `the wireframe's cluster form needs ${what} once, found ${String(parts.length - 1)}`,
+    );
+  }
+  return parts.join(by);
+}
+
+/**
+ * A wireframe terrain source with its vertex stage taken by the cluster path (plan R14, R14.T4.c):
+ * terrainWire.wgsl's `vertexMain` renamed `wire_vertex`, a function, terrainCluster.wgsl's decode
+ * with its own entry point taken out, and `terrainWireCluster.wgsl`'s entry point, which hands it
+ * each template vertex as the lit mesh's own grid vertex and its interior record.
+ *
+ * @throws Error unless the wireframe's vertex stage occurs once in `source`, and an entry point once
+ *   in terrainCluster.wgsl.
+ */
+export function withWireClusterVertex(source: string): string {
+  const decode = terrainClusterWgsl.split("@vertex\n");
+  if (decode.length !== 2) {
+    throw new Error(
+      `the wireframe's cluster form needs terrainCluster.wgsl's entry point once, found ${String(decode.length - 1)}`,
+    );
+  }
+  const functional = once(
+    source,
+    WIRE_VERTEX_HEAD,
+    WIRE_VERTEX_FUNCTION,
+    "terrainWire.wgsl's vertex stage",
+  );
+  return `${functional}\n${decode[0] ?? ""}\n${terrainWireClusterWgsl}`;
+}
+
+/** The console names of the two paths' wireframe terrain on the cluster path (plan R14, R14.T4.c). */
+const CLUSTER_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "WIREFRAME CLUSTERS OFFSETS",
+  "face-differences": "WIREFRAME TERRAIN CLUSTERS",
+};
+
+/**
+ * The wireframe's interior patches' terrain material on the cluster path, for a vertex path (plan
+ * R14, R14.T4.c): {@link terrainWireMaterialSpec}'s states, uniforms with `clusterBase` after them,
+ * and fragment stage without its survey discard, which an interior patch, wholly surveyed, never
+ * takes, so that each fragment shades what the plain form shades; its vertex stage the cluster
+ * path's ({@link withWireClusterVertex}), drawn with the terrain cluster mesh from a bucket's list.
+ *
+ * @remarks
+ * Its vertex stage reads R05's storage (five on `baked-offsets`), the survey mask, which
+ * `lit_place` reads for the fins, the interior patches' phases and the lists: eight at most, WebGPU's
+ * limit.
+ */
+export function terrainWireClusterMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const plain = terrainWireMaterialSpec(path);
+  const withBase = once(
+    once(plain.fragmentWgsl, WIRE_SURVEY_DISCARD, "", "terrainWire.wgsl's survey discard"),
+    WIRE_DRAW_END,
+    "  occluderSlopePx : f32,\n  // The bucket's first entry in the lists (`clusters/buckets.ts`' `clusterBase`).\n  clusterBase : u32,\n}",
+    "terrainWire.wgsl's Draw",
+  );
+  const source = withWireClusterVertex(withBase);
+  return {
+    ...plain,
+    name: `terrain-wire-cluster-${path}`,
+    displayName: CLUSTER_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...plain.uniforms, { name: "clusterBase", type: "u32" }],
+    storageBuffers: [
+      ...(plain.storageBuffers ?? []),
+      { name: "clusterLists", binding: TERRAIN_WIRE_BINDINGS.clusterLists, stages: ["vertex"] },
+    ],
+  };
+}
+
 /** Both paths' wireframe terrain materials, for the catalogue. */
 export const TERRAIN_WIRE_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainWireMaterialSpec("baked-offsets"),
   terrainWireMaterialSpec("face-differences"),
+];
+
+/** Both paths' wireframe interior patches' forms on the cluster path (plan R14, R14.T4.c), for the catalogue. */
+export const TERRAIN_WIRE_CLUSTER_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainWireClusterMaterialSpec("baked-offsets"),
+  terrainWireClusterMaterialSpec("face-differences"),
 ];

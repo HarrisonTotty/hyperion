@@ -128,6 +128,13 @@ export interface GeometrySettings {
    * `false` draws each hull by its instanced draw of its faces. Both settings take it.
    */
   readonly hullClusters: boolean;
+  /**
+   * R14.T4.c: the wireframe's interior patches drawn through the cluster path at stride 1, culled
+   * to the view's frustum and the body's horizon per cluster, compacted in the draw set's order
+   * and drawn without the survey discard before the edge patches; `false` draws every patch by the
+   * lit mesh. Both settings take it.
+   */
+  readonly wireClusters: boolean;
 }
 
 /**
@@ -148,6 +155,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   farCascadeRate: 1,
   figureClusters: false,
   hullClusters: false,
+  wireClusters: false,
 };
 
 /**
@@ -316,6 +324,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       farCascadeRate: 4,
       figureClusters: true,
       hullClusters: true,
+      wireClusters: true,
     },
     decoration: true,
     scatterDensity: 1,
@@ -357,6 +366,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       farCascadeRate: 4,
       figureClusters: true,
       hullClusters: true,
+      wireClusters: true,
     },
     decoration: false,
     scatterDensity: 0,
