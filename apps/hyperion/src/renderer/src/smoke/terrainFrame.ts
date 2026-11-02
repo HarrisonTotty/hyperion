@@ -231,6 +231,7 @@ function sourceOf(pass: TerrainPass, mask: CoverageMask): FrameTerrainSource {
       return frame;
     },
     coverageMask: () => mask.texture,
+    coverageWhole: () => mask.whole,
     pass: () => pass,
   };
 }
@@ -279,7 +280,14 @@ function liveFrame(pass: TerrainPass, mask: CoverageMask, pose: Pose, nowMs: num
   const body: LitBodyInput =
     coverage === null
       ? base
-      : { ...base, surveyCoverage: { mask: coverage, rotation: IDENTITY_ROTATION } };
+      : {
+          ...base,
+          surveyCoverage: {
+            mask: coverage,
+            rotation: IDENTITY_ROTATION,
+            whole: terrain.surveyedWhole(base.id),
+          },
+        };
   const plan = planLitBodies(
     [body],
     [{ disc: sunLikeHostDisc(), centreM: add(body.centreM, scale(pose.sun, AU_M)) }],
@@ -750,6 +758,7 @@ export async function checkTerrainFrame(
         ? frame.terrain
         : {
             surveyCoverage: (body: string) => frame.terrain.surveyCoverage(body),
+            surveyedWhole: (body: string) => frame.terrain.surveyedWhole(body),
             draws: (...args: Parameters<LiveFrameTerrain["draws"]>) => frame.terrain.draws(...args),
             symbologyDepth: () => [],
             sceneDepth: () => false,

@@ -1247,6 +1247,14 @@ export class TerrainSession {
     return this.#bodies.get(body)?.mask.texture ?? null;
   }
 
+  /**
+   * Whether a wanted body's GPU coverage mask ({@link TerrainSession.coverageMask}) holds every
+   * cell surveyed (`CoverageMask.whole`); `false` without one.
+   */
+  coverageWhole(body: BodyIdHex): boolean {
+    return this.#bodies.get(body)?.mask.whole ?? false;
+  }
+
   /** A wanted body's detail seed, once held; `null` before, for a body without hooks or not wanted. */
   detailSeed(body: BodyIdHex): DetailSeedHex | null {
     const seed = this.#bodies.get(body)?.seed;

@@ -253,6 +253,7 @@ describe("the photorealistic renderer", () => {
     const asked: BodyFramePlan[] = [];
     const terrain = {
       surveyCoverage: () => null,
+      surveyedWhole: () => false,
       draws: (plan: BodyFramePlan) => {
         asked.push(plan);
         return plan.meshes.some((mesh) => mesh.role.kind === "handed-over") ? [terrainDraw] : [];
@@ -596,6 +597,7 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     const lit: BodyFramePlan[] = [];
     const terrain = {
       surveyCoverage: () => null,
+      surveyedWhole: () => false,
       draws: (plan: BodyFramePlan) => {
         lit.push(plan);
         return plan.meshes.some((mesh) => mesh.role.kind === "handed-over") ? [terrainDraw] : [];
@@ -897,7 +899,11 @@ function handedOverFrame(coverage = true): PhotorealFrame {
   };
   return {
     ...frame,
-    bodies: [coverage ? { ...body, surveyCoverage: { mask: MASK, rotation: QUARTER_TURN } } : body],
+    bodies: [
+      coverage
+        ? { ...body, surveyCoverage: { mask: MASK, rotation: QUARTER_TURN, whole: false } }
+        : body,
+    ],
   };
 }
 
@@ -1231,6 +1237,7 @@ describe("the photorealistic renderer's overlay", () => {
     });
     const terrain = {
       surveyCoverage: () => null,
+      surveyedWhole: () => false,
       draws: () => [],
       symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
       sceneDepth: () => false,
@@ -1255,6 +1262,7 @@ describe("the photorealistic renderer's overlay", () => {
     const overlay = (): FrameSubmission => ({ ...SYMBOLOGY, draws: [drawOf("lines")] });
     const terrain = (asks: boolean): FrameTerrain => ({
       surveyCoverage: () => null,
+      surveyedWhole: () => false,
       draws: () => [],
       symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
       sceneDepth: () => asks,

@@ -273,6 +273,32 @@ describe("the cell pass's jobs (R07.T8.d)", () => {
     expect([MAX_CELL_JOBS, cells.count, cells.ranges]).toEqual([2 ** 24, 0, [null]]);
   });
 
+  it("takes no jobs for a record whose draws discard every pixel, and the rest's as without it (R07.T8.h)", () => {
+    const records = recordsOf(planOf([40, 13]), 2);
+    const all = discCellJobs(records, MAX_CELL_JOBS, FRAME);
+    const large = records.findIndex((record) => record.interiorSamples === 1);
+    const small = 1 - large;
+    const kept = discCellJobs(records, MAX_CELL_JOBS, FRAME, false, false, false, new Set([large]));
+    const smallOnly = discCellJobs(
+      records.filter((_, index) => index === small),
+      MAX_CELL_JOBS,
+      FRAME,
+    );
+    expect([
+      all.ranges[large]?.kind,
+      kept.ranges[large],
+      kept.count,
+      rowsOf(kept.jobs).map(([, x, y]) => [x, y]),
+      kept.spanRows,
+    ]).toEqual([
+      "limb",
+      null,
+      smallOnly.count,
+      rowsOf(smallOnly.jobs).map(([, x, y]) => [x, y]),
+      0,
+    ]);
+  });
+
   it("refuses jobs made for another number of records", () => {
     const records = recordsOf(planOf([3.5, 13]), 2);
     expect(() => packDiscRecords(records.slice(1), discCellJobs(records))).toThrow(
@@ -915,6 +941,54 @@ function limbDrawPixels(record: DiscRecord, viewport: Viewport): Array<readonly 
   return pixels;
 }
 
+/** The limb angle of `record` at a point of `viewport`, px, rad, positive outside: `limb_angle` in f64. */
+function limbAngleOf(record: DiscRecord, viewport: Viewport): (x: number, y: number) => number {
+  const centre = toViewAxes(record.direction, CAMERA.orientation);
+  const pole = normalise(toViewAxes(record.pole, CAMERA.orientation));
+  const stretch = 1 / record.polarOverEquatorial;
+  const stretched = (x: Vec3): Vec3 => add(x, scale(pole, (stretch - 1) * dot(x, pole)));
+  const scaledCentre = stretched(centre);
+  const limb = Math.asin(record.radiusOverDistance / norm(scaledCentre));
+  return (x, y) => {
+    const ray = stretched(viewRay(x, y, CAMERA, viewport));
+    return Math.atan2(norm(cross(ray, scaledCentre)), dot(ray, scaledCentre)) - limb;
+  };
+}
+
+/**
+ * The first and last pixels of each of `spans`' non-empty spans by their corners' limb angles
+ * (`disc_pixel`'s order), divided by their gradient, px: (x, y), (x + 1, y), (x, y + 1),
+ * (x + 1, y + 1).
+ */
+function spanEnds(
+  record: DiscRecord,
+  spans: LimbSpans,
+  viewport: Viewport,
+): Array<readonly [number, number, number, number]> {
+  const angle = limbAngleOf(record, viewport);
+  const corners = (x: number, y: number): readonly [number, number, number, number] => {
+    const [c00, c10, c01, c11] = [
+      angle(x, y),
+      angle(x + 1, y),
+      angle(x, y + 1),
+      angle(x + 1, y + 1),
+    ];
+    const g = Math.hypot((c10 + c11 - c00 - c01) / 2, (c01 + c11 - c00 - c10) / 2);
+    return [c00 / g, c10 / g, c01 / g, c11 / g];
+  };
+  const out: Array<readonly [number, number, number, number]> = [];
+  for (let row = 0; row < spans.rows; row += 1) {
+    for (const span of [0, 1]) {
+      const from = spans.spans[row * 4 + 2 * span] ?? 0;
+      const to = spans.spans[row * 4 + 2 * span + 1] ?? 0;
+      if (from < to) {
+        out.push(corners(from, spans.topPx + row), corners(to - 1, spans.topPx + row));
+      }
+    }
+  }
+  return out;
+}
+
 /** Whether pixel (x, y) lies in one of its row's spans. */
 function inSpans(spans: LimbSpans, x: number, y: number): boolean {
   const row = y - spans.topPx;
@@ -1035,13 +1109,25 @@ describe("a large disc's limb through the cell pass (R07.T8.f)", () => {
     },
   );
 
-  // The spans' cost: 2.1 to 2.6 times the pixels drawn as built, most of the rest outside the limb,
-  // whose cells shade nothing.
+  // The spans' cost: 1.13 to 1.17 times the pixels drawn once trimmed (R07.T8.h), from 1.92 to 2.13
+  // before, most of the rest outside the limb, whose cells shade nothing.
   it.each(LIMB_CASES)(
-    "takes at most three times the limb draw's pixels: %s",
+    "takes at most 1.25 times the limb draw's pixels: %s",
     (_, figure, direction, distanceM, viewport) => {
       const { spans, drawn } = limbCase(figure, direction, distanceM, viewport);
-      expect(spans.pixels).toBeLessThanOrEqual(3 * drawn.length);
+      expect(spans.pixels).toBeLessThanOrEqual(1.25 * drawn.length);
+    },
+  );
+
+  it.each(LIMB_CASES)(
+    "ends no span at a pixel the limb draw surely never reads, its centre over 0.85 px outside or every corner over 0.101 px inside (R07.T8.h): %s",
+    (_, figure, direction, distanceM, viewport) => {
+      const { record, spans } = limbCase(figure, direction, distanceM, viewport);
+      const unread = spanEnds(record, spans, viewport).filter(
+        (corners) =>
+          corners.reduce((sum, c) => sum + c, 0) / 4 > 0.85 || corners.every((c) => c < -0.101),
+      );
+      expect(unread).toEqual([]);
     },
   );
 

@@ -495,6 +495,8 @@ export class CoverageMask {
   #level: number | null = null;
   /** The texels written, face then row j then column i, as {@link CoverageView.maskTexels}. */
   #texels: Uint8Array | null = null;
+  /** How many of the texels held are surveyed, counted as each is marked. */
+  #surveyed = 0;
 
   constructor(
     engine: Pick<RenderEngine, "createTexture" | "writeTexture" | "releaseTexture">,
@@ -509,13 +511,22 @@ export class CoverageMask {
     return this.#texture;
   }
 
+  /**
+   * Whether the texture holds every cell of its level surveyed, so that the draws it discards
+   * (`smoothMesh.wgsl`'s figure, `bodyDiscDraw.wgsl`'s limb) discard every pixel they shade:
+   * `false` without a texture.
+   */
+  get whole(): boolean {
+    return this.#texture !== null && this.#surveyed === this.#texels?.length;
+  }
+
   /** Adds `coverage`'s surveyed cells to the mask, making the texture first if it has none of that level. */
   update(coverage: CoverageView): void {
     const texels = this.#texelsOf(coverage.level);
     const surveyed = coverage.maskTexels();
     for (let at = 0; at < texels.length; at += 1) {
       if ((surveyed[at] ?? 0) !== 0) {
-        texels[at] = COVERAGE_MASK_SURVEYED;
+        this.#mark(texels, at);
       }
     }
     this.#write(coverage.level, texels);
@@ -551,7 +562,7 @@ export class CoverageMask {
     for (let r = 0; r + 1 < runs.length; r += 2) {
       for (let index = runs[r] ?? 0; index < (runs[r + 1] ?? 0); index += 1) {
         const cell = fieldCellAt(level, index);
-        texels[(cell.face * n + cell.j) * n + cell.i] = COVERAGE_MASK_SURVEYED;
+        this.#mark(texels, (cell.face * n + cell.j) * n + cell.i);
       }
     }
     this.#write(level, texels);
@@ -585,6 +596,15 @@ export class CoverageMask {
     this.#texture = null;
     this.#level = null;
     this.#texels = null;
+    this.#surveyed = 0;
+  }
+
+  /** Marks texel `at` of `texels` surveyed, counting it the first time. */
+  #mark(texels: Uint8Array, at: number): void {
+    if (texels[at] !== COVERAGE_MASK_SURVEYED) {
+      texels[at] = COVERAGE_MASK_SURVEYED;
+      this.#surveyed += 1;
+    }
   }
 
   /** The texels held at `level`, all unsurveyed where the mask held another level or none. */

@@ -205,6 +205,7 @@ describe("a view's photorealistic frame (R10.T10.d, T10.e)", () => {
           survey: () => null,
           drawTerrain: () => null,
           coverageMask: () => null,
+          coverageWhole: () => false,
           wirePass: () => null,
           drawWireTerrain: () => null,
           pass: (body) => {
@@ -598,6 +599,7 @@ function failingSource(
     },
     drawTerrain: () => null,
     coverageMask: () => null,
+    coverageWhole: () => false,
     pass: () => null,
     wirePass: () => null,
     drawWireTerrain: () => null,
@@ -733,6 +735,7 @@ describe("what a view's frame gives its label block and list (the batch review's
         overlayDepth: null,
       }),
       coverageMask: () => null,
+      coverageWhole: () => false,
       wirePass: () => null,
       drawWireTerrain: () => null,
       pass: () => null,
@@ -845,6 +848,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
           body === HANDED ? { coverage: null, header: moonLikeHeader(HANDED) } : null,
         drawTerrain: () => null,
         coverageMask: (body) => (body === HANDED ? MASK : null),
+        coverageWhole: () => false,
         pass: () => null,
         wirePass: (body) =>
           body === HANDED

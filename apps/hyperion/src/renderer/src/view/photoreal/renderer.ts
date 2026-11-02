@@ -135,6 +135,12 @@ export interface FrameTerrain {
    */
   surveyCoverage(body: BodyIdHex): TextureHandle | null;
   /**
+   * Whether the mask {@link FrameTerrain.surveyCoverage} gives holds every cell surveyed, so that
+   * its body's figure and limb discard every pixel and the `disc cells` pass shades none of them
+   * (R07.T8.h); `false` where it gives none.
+   */
+  surveyedWhole(body: BodyIdHex): boolean;
+  /**
    * The draws of the terrain of each body `plan` hands over (`LitRegime` `terrain`, a
    * `MeshBodyPlan` whose `role` is `handed-over`, its record its lights), opaque with depth, drawn
    * in the `bodies` pass after the mesh bodies' figures; none for a body with nothing resident.

@@ -542,7 +542,7 @@ function referencePlan(pose: Pose, mask: CoverageMask): BodyFramePlan {
     figure,
     photometry: PROVISIONAL_PHOTOMETRY,
     rotation: IDENTITY_ROTATION,
-    surveyCoverage: { mask: texture, rotation: IDENTITY_ROTATION },
+    surveyCoverage: { mask: texture, rotation: IDENTITY_ROTATION, whole: mask.whole },
     handoverReliefM:
       4 * handoverTauPx("photorealistic", "low") * limbM * pixelAngleRad(pose.camera, VIEWPORT),
     lighting: undefined,

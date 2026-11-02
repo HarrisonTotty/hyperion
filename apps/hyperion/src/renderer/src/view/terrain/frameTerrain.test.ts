@@ -403,6 +403,7 @@ function fakeSource(
     readonly draws?: ReadonlyArray<DrawItem>;
     readonly overlayDepth?: TerrainViewFrame["overlayDepth"];
     readonly overlayMode?: FrameTerrainPass["geometry"]["overlayDepth"];
+    readonly whole?: boolean;
   } = {},
 ): {
   readonly source: ViewTerrainSource;
@@ -441,6 +442,7 @@ function fakeSource(
       wanted: new Set(),
       survey: () => null,
       coverageMask: (body) => (body === BODY ? MASK : null),
+      coverageWhole: (body) => body === BODY && options.whole === true,
       wirePass: () => null,
       drawWireTerrain: () => null,
       pass: (body) => (body === BODY && options.hasPass !== false ? pass : null),
@@ -625,6 +627,17 @@ describe("a view's frame terrain (R10.T16.c)", () => {
     ]).toEqual([MASK, null, null, [VIEW]]);
   });
 
+  it("says a body's mask is whole only where it gives the mask and the session holds it whole (R07.T8.h)", () => {
+    const whole = (options: Parameters<typeof fakeSource>[0]): boolean =>
+      frameTerrain(fakeSource(options).source).surveyedWhole(BODY);
+    expect([
+      whole({ whole: true }),
+      whole({ whole: false }),
+      whole({ whole: true, ready: false }),
+      whole({ whole: true, hasPass: false }),
+    ]).toEqual([true, false, false, false]);
+  });
+
   it("keeps the annunciation of the bodies it drew, none before its draws", () => {
     const { plan, body } = handed();
     const terrain = frameTerrain(fakeSource({ annunciation: "TERRAIN: STREAMING" }).source);
@@ -722,7 +735,11 @@ describe("a view's frame terrain and the datum over the image (R10.T16.f)", () =
   /** The plan of the body handed over with the mask `terrain` gives, in its rotation, if any. */
   function handedWith(terrain: LiveFrameTerrain): ReturnType<typeof handed> {
     const mask = terrain.surveyCoverage(BODY);
-    return handed(mask === null ? {} : { surveyCoverage: { mask, rotation: ROTATION } });
+    return handed(
+      mask === null
+        ? {}
+        : { surveyCoverage: { mask, rotation: ROTATION, whole: terrain.surveyedWhole(BODY) } },
+    );
   }
 
   it("gives way on the mask the frame terrain gave the plan, in the plan's rotation, whatever the pass says after the draws", () => {
@@ -843,6 +860,7 @@ function edgeSource(
         ? { coverage: coverageOf([CELL_A, CELL_B]), header: moonLikeHeader(MOON) }
         : null,
     coverageMask: () => null,
+    coverageWhole: () => false,
     wirePass: () => null,
     drawWireTerrain: () => null,
     drawTerrain: () => null,

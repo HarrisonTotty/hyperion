@@ -239,6 +239,11 @@ export interface MeshBodyCoverage {
   readonly mask: TextureHandle;
   /** The body's rotation, body-fixed to galactic axes. */
   readonly rotation: Rotation3;
+  /**
+   * Whether the mask holds every cell surveyed (`CoverageMask.whole`), when the figure and the limb
+   * discard every pixel and the `disc cells` pass shades none of the body's (R07.T8.h).
+   */
+  readonly whole: boolean;
 }
 
 /** What the plan needs of the view. */
@@ -1997,6 +2002,10 @@ export class LitBodyRenderer {
     // As many pixels' sums as one storage binding holds; a disc past them sums its own cells.
     const fits = Math.floor(this.#engine.capabilities.maxStorageBufferBindingSize / CELL_SUM_BYTES);
     const { records } = this.#drawnPlan(plan);
+    // A body handed over under a mask of every cell surveyed reads none of its sums (R07.T8.h).
+    const discarded = new Set(
+      plan.meshes.filter(({ role }) => coverageOf(role)?.whole === true).map(({ index }) => index),
+    );
     const cells = discCellJobs(
       records,
       fits,
@@ -2004,6 +2013,7 @@ export class LitBodyRenderer {
       emissiveKernel !== null,
       airKernel !== null,
       emissiveAirKernel !== null,
+      discarded,
     );
     if (cells.count === 0) {
       this.#upload(plan);

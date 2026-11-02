@@ -76,6 +76,7 @@ const TOKENS = {
 /** A view's terrain that draws nothing and gives no mask. */
 const NO_TERRAIN = {
   surveyCoverage: () => null,
+  surveyedWhole: () => false,
   draws: () => [],
   symbologyDepth: () => [],
   sceneDepth: () => false,
@@ -213,6 +214,7 @@ describe("a photorealistic frame of the phase scene", () => {
           asked.push(body);
           return null;
         },
+        surveyedWhole: () => false,
         draws: () => [],
         symbologyDepth: () => [],
         sceneDepth: () => false,
@@ -224,6 +226,7 @@ describe("a photorealistic frame of the phase scene", () => {
   it("carries the view's terrain, which draws the bodies handed over (R10.T10.e)", async () => {
     const terrain = {
       surveyCoverage: () => null,
+      surveyedWhole: () => false,
       draws: () => [],
       symbologyDepth: () => [],
       sceneDepth: () => false,
@@ -393,19 +396,22 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
     expect(lit.filter((body) => body.surface !== undefined)).toEqual([]);
   });
 
-  it("give each body its relief and its survey's coverage mask where the view's terrain holds them, and none hands over without (R10.T10.e)", () => {
+  it("give each body its relief and its survey's coverage mask where the view's terrain holds them, whole or not, and none hands over without (R10.T10.e, R07.T8.h)", () => {
     const { scene, pose } = sliceScene();
     const mask: TextureHandle = { kind: "texture", name: "slice coverage mask" };
     const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), undefined, {
       reliefs: { reliefM: (body) => (body === FIXTURE_EARTH ? 18_000 : null) },
-      terrain: { surveyCoverage: (body) => (body === FIXTURE_EARTH ? mask : null) },
+      terrain: {
+        surveyCoverage: (body) => (body === FIXTURE_EARTH ? mask : null),
+        surveyedWhole: (body) => body === FIXTURE_EARTH,
+      },
     });
     const earth = lit.find((body) => body.id === FIXTURE_EARTH);
     const jupiter = lit.find((body) => body.id === FIXTURE_JUPITER);
-    // The mask comes with the axes it is read in, Earth's rotation.
+    // The mask comes with the axes it is read in, Earth's rotation, and whether it is whole.
     expect([earth?.handoverReliefM, earth?.surveyCoverage]).toEqual([
       18_000,
-      { mask, rotation: viewBodyOf(scene, FIXTURE_EARTH).rotation },
+      { mask, rotation: viewBodyOf(scene, FIXTURE_EARTH).rotation, whole: true },
     ]);
     expect(jupiter).not.toHaveProperty("handoverReliefM");
     expect(jupiter).not.toHaveProperty("surveyCoverage");
@@ -421,7 +427,7 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
     const { scene, pose } = sliceScene();
     const mask: TextureHandle = { kind: "texture", name: "slice coverage mask" };
     const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), undefined, {
-      terrain: { surveyCoverage: () => mask },
+      terrain: { surveyCoverage: () => mask, surveyedWhole: () => true },
     });
     expect(lit.find((body) => body.id === FIXTURE_JUPITER)).not.toHaveProperty("surveyCoverage");
   });

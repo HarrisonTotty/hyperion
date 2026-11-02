@@ -476,6 +476,32 @@ describe("the GPU coverage mask", () => {
     ]);
   });
 
+  it("is whole only while its texture holds every cell surveyed, by blocks or the store (R07.T8.h)", async () => {
+    const engine = await countingRenderEngine();
+    const mask = new CoverageMask(engine, "coverage mask");
+    const before = mask.whole;
+    mask.survey({ fieldLevel: 5, newlySurveyed: Uint32Array.from([0, fieldCellCount(5) - 1]) });
+    const lastMissing = mask.whole;
+    mask.update(storeCoverage());
+    const notYet = mask.whole;
+    mask.survey({
+      fieldLevel: 5,
+      newlySurveyed: Uint32Array.from([fieldCellCount(5) - 1, fieldCellCount(5)]),
+    });
+    const all = mask.whole;
+    mask.update(CoverageView.empty(6));
+    const otherLevel = mask.whole;
+    mask.release();
+    expect([before, lastMissing, notYet, all, otherLevel, mask.whole]).toEqual([
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+    ]);
+  });
+
   it("makes nothing at a restore where it holds no cells", async () => {
     const engine = await countingRenderEngine();
     const mask = new CoverageMask(engine, "coverage mask");

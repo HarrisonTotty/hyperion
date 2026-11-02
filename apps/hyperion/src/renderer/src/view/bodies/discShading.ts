@@ -467,8 +467,9 @@ function hullOf(a: LineInterval | null, b: LineInterval | null): LineInterval | 
  * pixels with a corner in the outer cone on either of its lines, its corners at whole x, less one
  * of the pixels wholly in the inner's, two spans at most. Every value is taken as the shader takes
  * it: the view's ray (`view_ray`) from the frame's projection, the body's axes through its rotation
- * (`to_view`). A pixel the spans miss still draws the same light: its draw sums its own cells
- * (`pixel_cells`).
+ * (`to_view`). Each span is then trimmed at its ends to the pixels the draw's own tests may read,
+ * in f64 ({@link trimLimbSpans}, R07.T8.h). A pixel the spans miss still draws the same light: its
+ * draw sums its own cells (`pixel_cells`).
  */
 export function limbSpans(record: DiscRecord, frame: DiscLimbFrame): LimbSpans | null {
   const view = limbViewOf(record, frame);
@@ -495,7 +496,6 @@ export function limbSpans(record: DiscRecord, frame: DiscLimbFrame): LimbSpans |
   const top = Math.floor(rect.topPx);
   const rows = Math.max(0, Math.ceil(rect.bottomPx) - top);
   const spans = new Int32Array(rows * 4);
-  let pixels = 0;
   let above = lineAt(top);
   for (let row = 0; row < rows; row += 1) {
     const below = lineAt(top + row + 1);
@@ -516,9 +516,9 @@ export function limbSpans(record: DiscRecord, frame: DiscLimbFrame): LimbSpans |
       }
     }
     spans.set([start, cutStart, cutEnd, end], row * 4);
-    pixels += cutStart - start + (end - cutEnd);
     above = below;
   }
+  const pixels = trimLimbSpans(spans, rows, top, view);
   return { topPx: top, spans, rows, pixels };
 }
 
@@ -541,6 +541,11 @@ interface LimbView {
   readonly lineStep: Vec3;
   /** The scaled S A of the line at y, px. */
   readonly lineStart: (yPx: number) => Vec3;
+  /**
+   * The limb angle along the line at y, px, as `limb_angle` takes it at a point x of it, rad,
+   * positive outside: the angle of S r(x) from the axis, less λ.
+   */
+  readonly angleAlong: (yPx: number) => (xPx: number) => number;
 }
 
 /**
@@ -564,16 +569,124 @@ function limbViewOf(record: DiscRecord, frame: DiscLimbFrame): LimbView {
   const scaledCentre = stretchAlong(pole, stretch, toView(record.direction));
   const reach = norm(scaledCentre);
   const stepXRad = 2 / (widthPx * p00);
+  const axis = scale(scaledCentre, 1 / reach);
+  const limbRad = Math.asin(record.radiusOverDistance / reach);
+  const lineStep = stretchAlong(pole, stretch, vec3(stepXRad, 0, 0));
+  const lineStart = (yPx: number): Vec3 =>
+    stretchAlong(pole, stretch, vec3(-1 / p00, (1 - (2 * yPx) / heightPx) / p11, -1));
   return {
-    axis: scale(scaledCentre, 1 / reach),
-    limbRad: Math.asin(record.radiusOverDistance / reach),
+    axis,
+    limbRad,
     stretch,
     stepXRad,
     stepYRad: 2 / (heightPx * p11),
-    lineStep: stretchAlong(pole, stretch, vec3(stepXRad, 0, 0)),
-    lineStart: (yPx) =>
-      stretchAlong(pole, stretch, vec3(-1 / p00, (1 - (2 * yPx) / heightPx) / p11, -1)),
+    lineStep,
+    lineStart,
+    angleAlong: (yPx) => {
+      // Componentwise, with no vector made: the trim takes thousands a frame.
+      const { x: ax, y: ay, z: az } = lineStart(yPx);
+      const { x: bx, y: by, z: bz } = lineStep;
+      const { x: ux, y: uy, z: uz } = axis;
+      return (xPx) => {
+        const sx = ax + xPx * bx;
+        const sy = ay + xPx * by;
+        const sz = az + xPx * bz;
+        const cx = sy * uz - sz * uy;
+        const cy = sz * ux - sx * uz;
+        const cz = sx * uy - sy * ux;
+        const across = Math.sqrt(cx * cx + cy * cy + cz * cz);
+        return Math.atan2(across, sx * ux + sy * uy + sz * uz) - limbRad;
+      };
+    },
   };
+}
+
+/**
+ * How far past the limb draw's own tests a pixel of its spans is kept ({@link trimLimbSpans}), px
+ * of its corners' gradient: as {@link LIMB_SPAN_MARGIN_PX}, against the `f32` shader's error in
+ * the angles, about 10⁻⁷ rad where its `atan2` and `asin` are near correctly rounded, some 10⁻⁴ px
+ * at 1080p. A pixel trimmed that the draw reads after all sums its own cells: the same light, only
+ * slower.
+ */
+const READ_MARGIN_PX = LIMB_SPAN_MARGIN_PX;
+
+/**
+ * The limb draw's (`edge_pass` 1, `disc_pixel`) test's f64 twin, by {@link READ_MARGIN_PX}: whether
+ * it surely never reads a pixel, from its corners' limb angles, rad, in `disc_pixel`'s order, (x, y),
+ * (x + 1, y), (x, y + 1) and (x + 1, y + 1): their mean over {@link OUTSIDE_PX} + m of their
+ * gradient outside the limb, or every one over {@link LIMB_OVERLAP_PX} + m of it inside.
+ */
+function limbUnread(c00: number, c10: number, c01: number, c11: number): boolean {
+  const g = Math.hypot((c10 + c11 - c00 - c01) / 2, (c01 + c11 - c00 - c10) / 2);
+  if (!(g > 0)) {
+    return false;
+  }
+  const inside = -(LIMB_OVERLAP_PX + READ_MARGIN_PX) * g;
+  return (
+    (c00 + c10 + c01 + c11) / 4 > (OUTSIDE_PX + READ_MARGIN_PX) * g ||
+    (c00 < inside && c10 < inside && c01 < inside && c11 < inside)
+  );
+}
+
+/**
+ * Trims each of a row's two limb spans (`spans`' [s₀, e₀) and [s₁, e₁), from row `top`) at both
+ * ends of the pixels the limb draw surely never reads ({@link limbUnread}), in place, and gives the
+ * pixels left (R07.T8.h).
+ *
+ * @remarks
+ * The cones' bound holds every pixel the draw reads, and about twice as many: it takes a pixel a
+ * corner of which, not its centre, lies within the bound, and the bound takes the limb's largest
+ * gradient G, not the pixel's own. Their sums were shaded and never read: those outside the limb
+ * shade nothing, but those inside it up to nine points a cell. The pixels the draw does not read
+ * lie at a span's ends, outside the limb or wholly within it, so each end is trimmed to the first
+ * pixel it may read, which leaves one run and the shader's lookup as it was. A row whose two spans
+ * met keeps the pixels within it the draw does not read, at the top and bottom of the limb.
+ */
+function trimLimbSpans(spans: Int32Array, rows: number, top: number, view: LimbView): number {
+  let pixels = 0;
+  let upper = view.angleAlong(top);
+  for (let row = 0; row < rows; row += 1) {
+    const lower = view.angleAlong(top + row + 1);
+    for (const span of [0, 1]) {
+      const at = row * 4 + 2 * span;
+      let from = spans[at] ?? 0;
+      let to = spans[at + 1] ?? 0;
+      // Inwards from each end, each step's two new corners beside the last pixel's two.
+      if (from < to) {
+        let up = upper(from);
+        let down = lower(from);
+        while (from < to) {
+          const nextUp = upper(from + 1);
+          const nextDown = lower(from + 1);
+          if (!limbUnread(up, nextUp, down, nextDown)) {
+            break;
+          }
+          from += 1;
+          up = nextUp;
+          down = nextDown;
+        }
+      }
+      if (from < to) {
+        let up = upper(to);
+        let down = lower(to);
+        while (to > from) {
+          const lastUp = upper(to - 1);
+          const lastDown = lower(to - 1);
+          if (!limbUnread(lastUp, up, lastDown, down)) {
+            break;
+          }
+          to -= 1;
+          up = lastUp;
+          down = lastDown;
+        }
+      }
+      spans[at] = from;
+      spans[at + 1] = to;
+      pixels += to - from;
+    }
+    upper = lower;
+  }
+  return pixels;
 }
 
 /**
@@ -831,6 +944,10 @@ function runsOf(
  *   air (R08.T16.b); without it they take no jobs, as without the emissive form.
  * @param emissiveAirCells - Whether its form for emission and air together is there to shade the
  *   records that carry both (R08.T18.b); without it they take no jobs.
+ * @param discarded - The records, by index, whose draws discard every pixel they would read the
+ *   sums of (R07.T8.h): a body handed over to its terrain under a coverage mask of every cell
+ *   surveyed, whose figure and limb leave all its ground to the terrain. They take no jobs; a pixel
+ *   their draws shade after all sums its own cells.
  */
 export function discCellJobs(
   records: ReadonlyArray<DiscRecord>,
@@ -839,6 +956,7 @@ export function discCellJobs(
   emissiveCells = false,
   airCells = false,
   emissiveAirCells = false,
+  discarded: ReadonlySet<number> = new Set(),
 ): DiscCellJobs {
   const most = Math.min(maxJobs, MAX_CELL_JOBS);
   // A record takes cells where the kernel of its form is made: its emission's, its air's, or both's
@@ -848,8 +966,8 @@ export function discCellJobs(
     const aired = record.air !== undefined;
     return emits && aired ? emissiveAirCells : emits ? emissiveCells : aired ? airCells : true;
   };
-  const planned = records.map((record) =>
-    formMade(record) ? plannedCellsOf(record, frame) : null,
+  const planned = records.map((record, index) =>
+    formMade(record) && !discarded.has(index) ? plannedCellsOf(record, frame) : null,
   );
   let count = 0;
   let spanRows = 0;

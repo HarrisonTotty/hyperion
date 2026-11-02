@@ -119,6 +119,10 @@ class SizedSession implements SpikeTerrainSession, SpikeSizesSession {
     return null;
   }
 
+  coverageWhole(): boolean {
+    return false;
+  }
+
   drawTerrain(): null {
     return null;
   }

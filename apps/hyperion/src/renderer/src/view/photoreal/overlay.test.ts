@@ -447,7 +447,10 @@ describe("the datums that give way over the image, from the frame's plan (R10.T1
   it("gives a body handed over with a mask its role's mask, its rotation's columns and its figure's a ÷ c", () => {
     const plan: SurveyedPlan = {
       meshes: [
-        { index: 1, role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED } } },
+        {
+          index: 1,
+          role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED, whole: false } },
+        },
       ],
       discs: [{ body: B }, { body: A }],
     };
@@ -465,10 +468,13 @@ describe("the datums that give way over the image, from the frame's plan (R10.T1
           index: 2,
           role: {
             kind: "handed-over",
-            coverage: { mask: OTHER_MASK, rotation: IDENTITY_ROTATION },
+            coverage: { mask: OTHER_MASK, rotation: IDENTITY_ROTATION, whole: false },
           },
         },
-        { index: 3, role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED } } },
+        {
+          index: 3,
+          role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED, whole: false } },
+        },
       ],
       discs: [{ body: A }, { body: B }, { body: C }],
     };
@@ -483,12 +489,15 @@ describe("the datums that give way over the image, from the frame's plan (R10.T1
   it("gives each of several bodies handed over its own mask and rotation", () => {
     const plan: SurveyedPlan = {
       meshes: [
-        { index: 0, role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED } } },
+        {
+          index: 0,
+          role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED, whole: false } },
+        },
         {
           index: 1,
           role: {
             kind: "handed-over",
-            coverage: { mask: OTHER_MASK, rotation: IDENTITY_ROTATION },
+            coverage: { mask: OTHER_MASK, rotation: IDENTITY_ROTATION, whole: false },
           },
         },
       ],

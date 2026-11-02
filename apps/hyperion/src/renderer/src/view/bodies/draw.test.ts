@@ -14,7 +14,14 @@ import { limbShareAt, phaseFactorFromTable, phaseFactorTableOf } from "../appear
 import { brdf } from "../appearance/brdf";
 import { lawFor } from "../appearance/phase";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
-import { pixelSolidAngle, type ProjectionCamera, type Viewport } from "../camera/projection";
+import {
+  NEAR_PLANE_M,
+  perspectiveReversedInfinite,
+  pixelSolidAngle,
+  type ProjectionCamera,
+  type Viewport,
+  viewRotation4,
+} from "../camera/projection";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import {
   litNeighbours,
@@ -38,9 +45,11 @@ import {
 } from "./discShading";
 import { hostAnnuli, type PlacedLight } from "../lighting/hostLights";
 import {
+  BODY_DISC_CELLS_KERNEL,
   type BodyFrameOptions,
   type BodyFramePlan,
   bodyLightSources,
+  type DiscCellFrame,
   LitBodyRenderer,
   type LitBodyInput,
   planLitBodies,
@@ -1810,16 +1819,17 @@ describe("mesh bodies (T9)", () => {
 
   /**
    * The three bodies with the planet handed over to its terrain (R10.T10.e: a relief of 2 px from
-   * here) and the moon a mesh by its overlap alone, each with its survey's mask and rotation.
+   * here) and the moon a mesh by its overlap alone, each with its survey's mask and rotation, the
+   * mask `whole` or not.
    */
-  function surveyedPlan(): BodyFramePlan {
+  function surveyedPlan(whole = false): BodyFramePlan {
     const { bodies, hosts } = sceneOfThree();
     const surveyed: LitBodyInput[] = bodies.map((body) =>
       body.id === PLANET || body.id === MOON
         ? {
             ...body,
             rotation: SURVEY_ROTATION,
-            surveyCoverage: { mask: SURVEY_MASK, rotation: SURVEY_ROTATION },
+            surveyCoverage: { mask: SURVEY_MASK, rotation: SURVEY_ROTATION, whole },
             ...(body.id === PLANET
               ? { handoverReliefM: (2 * norm(body.centreM)) / PX_PER_RAD }
               : {}),
@@ -1859,13 +1869,54 @@ describe("mesh bodies (T9)", () => {
     ).toEqual(["terrain", "mesh", "disc"]);
   });
 
+  it("shades none of the cells of a body handed over under a mask of every cell surveyed, and a promoted one's as before (R07.T8.h)", async () => {
+    const frame: DiscCellFrame = {
+      viewRotation: viewRotation4(CAMERA.orientation),
+      projection: perspectiveReversedInfinite(
+        CAMERA.fovXRad,
+        VIEWPORT.widthPx / VIEWPORT.heightPx,
+        NEAR_PLANE_M,
+      ),
+      size: VIEWPORT,
+    };
+    const shaded = async (whole: boolean): Promise<readonly [string[], number[]]> => {
+      const engine = await countingRenderEngine();
+      const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+      const plan = surveyedPlan(whole);
+      renderer.dispatchCells(plan, engine.createCompute(BODY_DISC_CELLS_KERNEL), frame);
+      const jobs = engine.writes.findLast((w) => w.buffer === "bodies:disc cell jobs")?.data;
+      const records = new Set<number>();
+      const values = jobs === undefined ? new Int32Array() : new Int32Array(jobs.buffer);
+      for (let at = 0; at < values.length; at += 4) {
+        records.add(values[at] ?? -1);
+      }
+      const discs = engine.writes.findLast((w) => w.buffer === "bodies:discs")?.data;
+      const packed = discs === undefined ? new Float32Array() : new Float32Array(discs.buffer);
+      renderer.dispose();
+      return [
+        [...records].map((index) => plan.discs[index]?.body ?? "none").toSorted(),
+        plan.discs.map((_, index) => packed[(index * DISC_ROWS + 51) * 4] ?? Number.NaN),
+      ];
+    };
+    const [partly, whole] = [await shaded(false), await shaded(true)];
+    const planet = surveyedPlan().discs.findIndex((record) => record.body === PLANET);
+    expect([partly[0].includes(PLANET ?? ""), whole[0], whole[1][planet]]).toEqual([
+      true,
+      partly[0].filter((body) => body !== PLANET),
+      -1,
+    ]);
+  });
+
   it("gives the coverage mask to a mesh body handed over, and none to one promoted (R10.T10.c)", () => {
     const plan = surveyedPlan();
     expect(plan.meshes.map((m) => [plan.discs[m.index]?.body, m.role])).toEqual(
       expect.arrayContaining([
         [
           PLANET,
-          { kind: "handed-over", coverage: { mask: SURVEY_MASK, rotation: SURVEY_ROTATION } },
+          {
+            kind: "handed-over",
+            coverage: { mask: SURVEY_MASK, rotation: SURVEY_ROTATION, whole: false },
+          },
         ],
         [MOON, { kind: "promoted" }],
       ]),
@@ -2057,6 +2108,7 @@ describe("the hand-over to terrain (R10.T10.e)", () => {
       surveyCoverage: {
         mask: { kind: "texture", name: "coverage mask" },
         rotation: rotation3FromRows([vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]),
+        whole: false,
       },
     };
     const writer = sphereFootprint(body.centreM, 6.371e6, CAMERA, VIEWPORT);

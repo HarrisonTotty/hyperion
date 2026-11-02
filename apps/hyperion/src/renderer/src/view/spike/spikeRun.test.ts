@@ -371,6 +371,10 @@ class LoggingSession implements SpikeTerrainSession {
     return null;
   }
 
+  coverageWhole(): boolean {
+    return false;
+  }
+
   drawTerrain(): null {
     return null;
   }

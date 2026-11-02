@@ -256,6 +256,8 @@ export interface FrameTerrainSource {
   drawTerrain(view: ViewId, body: BodyIdHex, input: TerrainViewFrameInput): TerrainViewFrame | null;
   /** `body`'s GPU coverage mask, or `null` (`TerrainSession.coverageMask`). */
   coverageMask(body: BodyIdHex): TextureHandle | null;
+  /** Whether `body`'s GPU coverage mask holds every cell surveyed (`TerrainSession.coverageWhole`). */
+  coverageWhole(body: BodyIdHex): boolean;
   /** `body`'s pass, or `null` (`TerrainSession.pass`). */
   pass(body: BodyIdHex): FrameTerrainPass | null;
 }
@@ -372,6 +374,14 @@ export class LiveFrameTerrain implements FrameTerrain {
     return pass !== null && pass.maskReadyFor(this.#input.view)
       ? this.#source.coverageMask(body)
       : null;
+  }
+
+  /**
+   * Whether `body`'s coverage mask, where {@link LiveFrameTerrain.surveyCoverage} gives one, holds
+   * every cell surveyed (`TerrainSession.coverageWhole`); `false` where it gives none.
+   */
+  surveyedWhole(body: BodyIdHex): boolean {
+    return this.surveyCoverage(body) !== null && this.#source.coverageWhole(body);
   }
 
   /**

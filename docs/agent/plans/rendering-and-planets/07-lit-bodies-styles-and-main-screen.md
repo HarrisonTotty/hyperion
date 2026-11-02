@@ -1577,6 +1577,10 @@ src/renderer/src/view/scenes src/renderer/src/view/lighting`.
 - **R07.T8.g The face's near-limb band, and the hoisting (c),** only if R08.T11.c leaves a high
   row over 15.67 ms. Acceptance: G10, G11, and R08.T11's QW30.
   - _As built (2026-10-27, the desktop lane): see Risks, "Deviations in R07.T8.g, as built"._
+- **R07.T8.h No jobs for sums no draw reads** (the owner's priority). The limb's spans trimmed at
+  their ends to the pixels the limb draw may read, and no jobs for a body handed over under a
+  coverage mask of every cell surveyed. Acceptance: test-render, both variants, and the atmosphere
+  run's captures byte-identical; `pnpm test`. Built (2026-11-01); see Risks, "R07.T8.h, as built".
 
 #### R07.T9 Mesh bodies
 
@@ -10097,3 +10101,13 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   display offers yet. T13.e's "Who asks a camera's limit" is superseded: the primary sends
   `camera_limit_v`. Pending: the owner's RTX and M5 runs of the deeper sky's reply and the frame's
   cost, 1080p high.
+- **R07.T8.h, as built** (2026-11-01, perf-disc-cells).
+  - `limbSpans` trims each span's ends by `limbUnread`, the limb draw's test in f64 with a 0.1 px
+    margin (`READ_MARGIN_PX`): 1.13–1.17 times the drawn pixels, from 1.92–2.13. A row whose two
+    spans met keeps its unread middle. The face band is not trimmed (9% of its jobs; 0.33 ms a
+    frame on the CPU for about four workgroups).
+  - New: `discCellJobs`' `discarded` (record indices), `MeshBodyCoverage.whole`,
+    `FrameTerrain.surveyedWhole`, `FrameTerrainSource.coverageWhole`,
+    `TerrainSession.coverageWhole` and `CoverageMask.whole`.
+  - The kernel's lever (a cell none of whose rays meets the spheroid skips its shades) has nothing
+    to skip: no cell's samples miss, and the cells with no samples (62%) shade nothing already.

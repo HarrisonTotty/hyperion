@@ -166,7 +166,7 @@ export interface LitBodiesTerrain {
   /** Their reliefs, for the hand-over. */
   readonly reliefs?: HandoverReliefSource | undefined;
   /** Their surveys' coverage masks, from the terrain the view draws. */
-  readonly terrain?: Pick<FrameTerrain, "surveyCoverage"> | undefined;
+  readonly terrain?: Pick<FrameTerrain, "surveyCoverage" | "surveyedWhole"> | undefined;
 }
 
 /** A wireframe sprite as a record at infinity. */
@@ -306,7 +306,13 @@ function litBodyOf(
     // The mask is read in the body's axes, so it is given only with its rotation.
     ...(coverage === null || body.rotation === null
       ? {}
-      : { surveyCoverage: { mask: coverage, rotation: body.rotation } }),
+      : {
+          surveyCoverage: {
+            mask: coverage,
+            rotation: body.rotation,
+            whole: terrain.terrain?.surveyedWhole(id) ?? false,
+          },
+        }),
     ...(thermal === null ? {} : { thermal }),
     lighting: frame,
   };
