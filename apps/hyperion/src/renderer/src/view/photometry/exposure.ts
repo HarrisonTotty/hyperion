@@ -36,6 +36,19 @@ export interface ExposureTriple {
 export const METER_CALIBRATION_K = 12.5;
 
 /**
+ * The incident-light meter's calibration constant C for a flat receptor, lx s ISO: 250, within
+ * ISO 2720:1974's range for a flat receptor, 240 to 400 (the value commonly used; quoted from
+ * memory, not read in the pod, ux-calls-view's findings). The `INCIDENT` meter's
+ * (ux-calls-view, item 3b).
+ *
+ * @remarks
+ * It renders a body's albedo as it is: a body of reflectance ρ lit at E, seen face-on, has the
+ * luminance ρ E ÷ π, and at EV100 = log₂(E × 100 ÷ C) a reflected meter's K gives the grey it
+ * puts at its average a reflectance of π K ÷ C = 0.157.
+ */
+export const INCIDENT_CALIBRATION_C = 250;
+
+/**
  * The lens and vignetting attenuation q of the saturation-based sensitivity: 0.65 (Filament,
  * "Exposure"; ISO 12232 takes q = 0.65 for a typical lens).
  */
@@ -200,6 +213,16 @@ export function ev100FromAverageLuminance(averageCdPerM2: number): number {
 }
 
 /**
+ * The exposure value at ISO 100 that an incident reading calls for: EV100 = log₂(E × S ÷ C) with
+ * S = 100 and C = {@link INCIDENT_CALIBRATION_C} (ISO 2720's incident-light form).
+ *
+ * @param illuminanceLx - The illuminance on the meter's flat receptor, lx, positive.
+ */
+export function ev100FromIlluminance(illuminanceLx: number): number {
+  return log2((illuminanceLx * 100) / INCIDENT_CALIBRATION_C);
+}
+
+/**
  * The scale that multiplies luminance at an exposure: 1 ÷ L_max, with L_max the saturation-based
  * maximum (N² ÷ t) × 78 ÷ (q S) = 1.2 × 2^EV100.
  *
@@ -222,12 +245,14 @@ export const NO_IMAGE_TO_METER = "NO IMAGE TO METER";
 /**
  * Each meter's own status where a drawn image holds nothing it weighs (plan R07, R07.T16.b;
  * decision-r07-t8a-meter, item 1): `NO LIT SIDE` under `LIT`, `NO DARK SIDE` under `DARK`, and
- * `STAR DISC ONLY` under `AVG`, which weighs everything but a star's disc.
+ * `STAR DISC ONLY` under `AVG`, which weighs everything but a star's disc; and `NO LIGHT` under
+ * `INCIDENT` where no host disc reaches its body (ux-calls-view, item 3b).
  */
 export const NOTHING_WEIGHED_STATUS: Readonly<Record<MeterMode, string>> = {
   average: "STAR DISC ONLY",
   lit: "NO LIT SIDE",
   dark: "NO DARK SIDE",
+  incident: "NO LIGHT",
 };
 
 /**

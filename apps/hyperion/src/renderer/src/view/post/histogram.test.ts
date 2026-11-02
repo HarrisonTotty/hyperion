@@ -26,7 +26,7 @@ import {
   type MeteredGlare,
   meteredVeil,
 } from "./histogram";
-import { METER_CLASS, meterLuma, meterWeights, type MeterMode } from "./meter";
+import { type HistogramMeter, METER_CLASS, meterLuma, meterWeights } from "./meter";
 
 /** RGBA texels of grey `luminance` and meter class `meterClass`, one per entry. */
 function texels(entries: ReadonlyArray<readonly [number, number]>): Float32Array {
@@ -97,7 +97,7 @@ describe("cpuHistogram", () => {
   });
 
   it("counts each meter's classes only, and a black pixel in bin 0", () => {
-    const expected: Readonly<Record<MeterMode, ReadonlyArray<number>>> = {
+    const expected: Readonly<Record<HistogramMeter, ReadonlyArray<number>>> = {
       average: [0, 100, 150],
       lit: [150],
       dark: [0],
@@ -187,7 +187,12 @@ function starFrame(preExposure: number, planetCdM2: number | null, star: boolean
 }
 
 /** The EV100 a frame pre-exposed as `glare` meters at under `mode`, the veil in it or not. */
-function meteredEv(rgba: Float32Array, mode: MeterMode, glare: MeteredGlare, veil = true): number {
+function meteredEv(
+  rgba: Float32Array,
+  mode: HistogramMeter,
+  glare: MeteredGlare,
+  veil = true,
+): number {
   const bins = cpuHistogram(rgba, FRAME, mode, 1, veil ? glare : undefined);
   return ev100FromAverageLuminance(meteredLuminance({ bins, preExposure: glare.preExposure }));
 }

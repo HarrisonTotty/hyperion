@@ -34,7 +34,7 @@ import {
   SMOOTHING_SPEED_EV_PER_S,
   smoothEv,
 } from "./autoExposure";
-import { METER_CLASS, type MeterMode } from "./meter";
+import { type HistogramMeter, METER_CLASS, type MeterMode } from "./meter";
 
 const SOURCE = viewId("main");
 const AUTO: ExposureControl = { kind: "auto", ev100: 0 };
@@ -52,7 +52,7 @@ function histogram(counts: ReadonlyArray<readonly [number, number]>, preExposure
 /** A histogram of texels as the GPU kernel would bin them. */
 function frameHistogram(
   texels: ReadonlyArray<readonly [number, number]>,
-  mode: MeterMode,
+  mode: HistogramMeter,
   preExposure = 1,
 ): Histogram {
   const rgba = new Float32Array(4 * texels.length);
@@ -393,7 +393,7 @@ describe("the exposure", () => {
 });
 
 /** A frame of `texels` of one meter class each, as `mode`'s kernel weighs it. */
-function frameOf(meterClass: number, mode: MeterMode, count = 64): Histogram {
+function frameOf(meterClass: number, mode: HistogramMeter, count = 64): Histogram {
   return frameHistogram(
     Array.from({ length: count }, (): readonly [number, number] => [
       binCentreLuminance(140),
@@ -1034,5 +1034,75 @@ describe("a cut's hold (fix-view-light)", () => {
     const exposure = staged(control);
     exposure.cut();
     expect(exposure.holds).toBe(false);
+  });
+});
+
+/** EV100 to two decimals. */
+function toHundredths(ev100: number | null): number | null {
+  return ev100 === null ? null : Math.round(ev100 * 100) / 100;
+}
+
+describe("the INCIDENT meter (ux-calls-view, item 3b)", () => {
+  /** The Sun at 1 au face-on, lx: R06's 133,462 (`SUN_LUX_PER_V0`'s remarks). */
+  const SUN_AT_1_AU_LX = 133_462;
+
+  it("meters the light on its receptor at EV100 log₂(E × 100 ÷ 250), 15.70 for the Sun at 1 au", () => {
+    const exposure = controller(AUTO, "incident");
+    exposure.cut();
+    const reading = exposure.step(undefined, 1 / 60, SUN_AT_1_AU_LX);
+    expect([toHundredths(exposure.meteredEv100), toHundredths(reading.ev100)]).toEqual([
+      15.7, 15.7,
+    ]);
+  });
+
+  it("takes no histogram, the frame's reading alone", () => {
+    const exposure = controller(AUTO, "incident");
+    exposure.step(histogram([[120, 10]]), 1 / 60);
+    expect(exposure.meteredEv100).toBeNull();
+  });
+
+  it("opens at its first reading at once, and holds no frame after it", () => {
+    const exposure = new AutoExposure({
+      source: SOURCE,
+      program: VIEW_CAMERA,
+      control: DEFAULT_MAN,
+      meter: "incident",
+      opensAtMeter: true,
+    });
+    exposure.noteImage(true);
+    const reading = exposure.step(undefined, 1 / 60, SUN_AT_1_AU_LX);
+    expect([reading.control.kind, toHundredths(reading.ev100), exposure.holds]).toEqual([
+      "auto",
+      15.7,
+      false,
+    ]);
+  });
+
+  it("stays acquiring, with no status and the control standing, while the scene's lighting is awaited", () => {
+    const exposure = controller(DEFAULT_MAN, "incident");
+    const seen: Metering[] = [];
+    for (let frame = 0; frame < Math.round((METER_TIMEOUT_S + 1) * 60); frame += 1) {
+      exposure.step(undefined, 1 / 60, null);
+      seen.push(exposure.metering);
+    }
+    expect([kindsOf(seen), meterStatus(exposure.metering), exposure.control]).toEqual([
+      ["acquiring"],
+      null,
+      DEFAULT_MAN,
+    ]);
+  });
+
+  it("reads NO LIGHT after 0.5 s where no disc reaches its body, inhibiting AUTO", () => {
+    const exposure = controller(AUTO, "incident");
+    const seen: Metering[] = [];
+    for (let frame = 0; frame < Math.round((METER_TIMEOUT_S + 0.2) * 60); frame += 1) {
+      exposure.step(undefined, 1 / 60, 0);
+      seen.push(exposure.metering);
+    }
+    expect([kindsOf(seen), meterStatus(exposure.metering), exposure.control]).toEqual([
+      ["acquiring", "nothing-weighed"],
+      "NO LIGHT",
+      { kind: "inhibited", ev100: 0, reason: "nothing_weighed", meter: "incident" },
+    ]);
   });
 });

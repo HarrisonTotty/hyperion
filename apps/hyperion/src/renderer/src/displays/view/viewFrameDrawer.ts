@@ -36,7 +36,7 @@ import { overlaySubmission } from "../../view/photoreal/overlay";
 import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
 import type { ViewBudget } from "../../view/budget/viewBudget";
 import type { Histogram } from "../../view/post/histogram";
-import type { MeterMode } from "../../view/post/meter";
+import type { HistogramMeter } from "../../view/post/meter";
 import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
 import type { ViewScene, ViewStar } from "../../view/scene/model";
 import { BandLayer } from "../../view/sky/band";
@@ -125,9 +125,10 @@ export interface ViewFrameInputs {
   /**
    * The operator's meter where the view is the exposure's source, whose photorealistic frames then
    * take the histogram {@link ViewFrameDrawer.takeHistogram} hands over; `null` for a view that
-   * meters nothing, an instrument (Design note 11), whose frames take none.
+   * meters nothing, an instrument (Design note 11), or whose meter reads no histogram, `INCIDENT`'s
+   * (ux-calls-view, item 3b), whose frames take none.
    */
-  readonly meter: MeterMode | null;
+  readonly meter: HistogramMeter | null;
   /**
    * Whether a photorealistic frame is presented, or held back while its exposure's cut awaits its
    * reading (`AutoExposure.holds`; fix-view-light), the scene target drawn and its histogram taken;

@@ -99,7 +99,7 @@ import {
 import { BLUE_NOISE_SIDE, blueNoiseTile } from "../post/blueNoise";
 import { type GlareSource, glareSpreadTerms } from "../post/glare";
 import { HISTOGRAM_KERNEL, type Histogram, HistogramReader } from "../post/histogram";
-import type { MeterMode } from "../post/meter";
+import type { HistogramMeter } from "../post/meter";
 import { TONEMAP_MATERIAL, TONEMAP_PASS, tonemapDraw } from "../post/tonemap";
 import { OVERLAY_SCENE_DEPTH_MATERIAL, overlaySceneDepthDraw, sizesAgree } from "./overlayDepth";
 import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
@@ -277,9 +277,10 @@ export interface PhotorealFrame {
   readonly overlay: PhotorealOverlay | null;
   /**
    * The operator's meter, whose weights the frame's histogram takes (Design note 10), or `null` for
-   * a view that is not the exposure's source, whose frame takes no histogram (Design note 11).
+   * a view that is not the exposure's source, or whose meter reads none (`INCIDENT`), whose frame
+   * takes no histogram (Design note 11).
    */
-  readonly meter: MeterMode | null;
+  readonly meter: HistogramMeter | null;
   /**
    * Whether the frame is presented: `false` draws the scene target and takes its histogram, then
    * draws nothing onto the view, which keeps the image it shows, while a cut's exposure awaits its

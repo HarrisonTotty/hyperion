@@ -10127,3 +10127,12 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - Within 1/3 stop of 4 × 4, or under one 8-bit code at black apart in luminance with the limb's
     brightest pixel at white: every twin limb pixel of the four cases. By 1/3 stop alone,
     99.15–99.74%.
+- **`INCIDENT`, a fourth meter (ux-calls-view, item 3b, the owner's delegated call, 2026-11-01).**
+  `MeterMode` adds `incident`; the histogram paths take `HistogramMeter` (`histogramMeterOf`), so
+  an `INCIDENT` frame takes no histogram. `AutoExposure.step(h, dtS, incidentLx?)` meters
+  `incidentIlluminanceLx` (`view/lighting/incident.ts`, at `incidentBodyOf`'s FRAME-else-selected
+  body) at `ev100FromIlluminance`, C = `INCIDENT_CALIBRATION_C` 250; 0 lx is `NO LIGHT`.
+  `KeptScene.startMeter` opens `BODY INSPECTION` on it until the operator chooses a meter in that
+  opening, kept apart from the display's own (`meterChoice.ts`). Leans (2026-11-01): no body to
+  read at reads `NO LIGHT`; only a shadow as wide as the body counts (`shadowsWhole`); a scene lit
+  by its sky reads `null`, not yet metered, until its sky is held; the remedy is `choose AVG`.

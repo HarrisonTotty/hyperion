@@ -37,7 +37,7 @@ import {
   type MeteredGlare,
   meteredVeil,
 } from "../view/post/histogram";
-import { METER_CLASS, type MeterMode } from "../view/post/meter";
+import { type HistogramMeter, METER_CLASS } from "../view/post/meter";
 import { type Checks, halfBits } from "./harness";
 
 /** The synthetic target's size: not a multiple of the 16 × 16 workgroup on either axis. */
@@ -168,7 +168,7 @@ async function gpuHistogram(
   engine: RenderEngine,
   kernel: ComputeHandle,
   hdr: TextureHandle,
-  mode: MeterMode,
+  mode: HistogramMeter,
   stride: 1 | 2,
   glare: HistogramGlare,
 ): Promise<Uint32Array> {

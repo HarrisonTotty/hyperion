@@ -10,9 +10,20 @@
 
 /**
  * The operator's meter: `average` (`AVG`) weighs every class but the host disc, `lit` (`LIT`) only a
- * body's lit side, `dark` (`DARK`) only its unlit side.
+ * body's lit side, `dark` (`DARK`) only its unlit side, each from the image's histogram; and
+ * `incident` (`INCIDENT`) reads the light falling on a body from the scene's host discs, with no
+ * histogram (`view/lighting/incident.ts`; ux-calls-view, item 3b, the owner's delegated call,
+ * 2026-11-01).
  */
-export type MeterMode = "average" | "lit" | "dark";
+export type MeterMode = "average" | "lit" | "dark" | "incident";
+
+/** A meter that reads the image's histogram: every {@link MeterMode} but `incident`. */
+export type HistogramMeter = Exclude<MeterMode, "incident">;
+
+/** The histogram meter `mode` is, or `null` for `incident`, whose frames take no histogram. */
+export function histogramMeterOf(mode: MeterMode): HistogramMeter | null {
+  return mode === "incident" ? null : mode;
+}
 
 /**
  * The class each opaque pass writes in the HDR target's alpha, an exact small integer.
@@ -35,7 +46,7 @@ export type MeterClass = (typeof METER_CLASS)[keyof typeof METER_CLASS];
  * enters the frame (brainstorm, "Exposure and tone mapping"); its glare's veil, which the histogram
  * weighs, does in a camera view, whole once the disc touches the frame (`histogram.wgsl`).
  */
-export function meterWeights(mode: MeterMode): readonly [number, number, number, number] {
+export function meterWeights(mode: HistogramMeter): readonly [number, number, number, number] {
   let weights: readonly [number, number, number, number];
   switch (mode) {
     case "average":

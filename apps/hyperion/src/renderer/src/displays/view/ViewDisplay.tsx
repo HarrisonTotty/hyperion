@@ -82,7 +82,7 @@ import type { StyleAvailability } from "../../view/engine/platform";
 import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import { AutoExposure, type Metering, meteringFor } from "../../view/post/autoExposure";
-import type { MeterMode } from "../../view/post/meter";
+import { histogramMeterOf, type MeterMode } from "../../view/post/meter";
 import { CameraControls, NO_OWN_SHIP } from "./CameraControls";
 import { placeLines, useCameraPlace } from "./cameraPlace";
 import { KeyLegend } from "./KeyLegend";
@@ -262,6 +262,8 @@ import {
   withGridLine,
   withSceneStarsLine,
 } from "./viewRun";
+import { incidentReadingLx } from "./incidentMeter";
+import { chooseMeter, DEFAULT_METER_CHOICE, type MeterChoice, shownMeter } from "./meterChoice";
 
 /** The shortest time between two changes of the view's readouts: 4 Hz (Design note 18). */
 const READOUT_INTERVAL_MS = 250;
@@ -902,7 +904,7 @@ function ViewStage({
     stars: [],
     sky: null,
     availability: WIREFRAME_ONLY,
-    meter: "average",
+    meter,
     onExposureChange,
     terrain,
     atmosphere,
@@ -1355,9 +1357,16 @@ function ViewStage({
       if (inputs.meter !== auto.meter) {
         auto.setMeter(inputs.meter);
       }
-      // Last frame's histogram, if one arrived, under the exposure it was taken with; the
-      // controller meters none while the view draws its wireframe, which then times the meter out.
-      const reading = auto.step(drawer?.takeHistogram(), dtS);
+      // Last frame's histogram, if one arrived, under the exposure it was taken with, or under
+      // INCIDENT this frame's light on its body (ux-calls-view, item 3b); the controller meters
+      // none while the view draws its wireframe, which then times the meter out.
+      const reading = auto.step(
+        drawer?.takeHistogram(),
+        dtS,
+        auto.meter === "incident"
+          ? incidentReadingLx(run, inputs.selection, inputs.sky?.model.response.hosts ?? null)
+          : undefined,
+      );
       if (run.source.kind === "server" && current !== null) {
         current.reportCamera(VIEW_ID, cameraKinematics(runPose(run), run.scene));
         // Here in the loop, not in the render that made the first scene: it logs.
@@ -1437,8 +1446,9 @@ function ViewStage({
           // The scene target at the render resolution times the budget's or controller's scale.
           renderScale,
           availability: inputs.availability,
-          // The exposure's source: its frames take the histogram its meter reads (Design note 11).
-          meter: auto.meter,
+          // The exposure's source: its frames take the histogram its meter reads (Design note 11),
+          // none under INCIDENT.
+          meter: histogramMeterOf(auto.meter),
           // A cut's frames are held back until its reading (fix-view-light).
           present: !auto.holds,
           // Every view's lit bodies shade and hand over by the session's (R10.T16.a).
@@ -2726,7 +2736,8 @@ function ViewPanels({
   const { scene, sceneName, keptName, knownSystem, choose, inspection, closeInspection } = host;
   const engineState = useViewEngine(engineSource);
   const [exposure, setExposure] = useState<ExposureControl>(DEFAULT_EXPOSURE);
-  const [meter, setMeter] = useState<MeterMode>("average");
+  // The operator's meter, with the opening it was chosen in (ux-calls-view, item 3b).
+  const [meterChoice, setMeterChoice] = useState<MeterChoice>(DEFAULT_METER_CHOICE);
   const [easedMoves, setEasedMoves] = useState(false);
   // The primary's readout's BASELINE (R10.T12.a; decision-r10-t12a-scope §3.1): the console's own
   // setting, 2 m as the display mounts, kept while it stays mounted, through every scene.
@@ -2785,7 +2796,17 @@ function ViewPanels({
   // Where the scene starts, kept for its identity: the interim stars are asked about its system
   // from here, above the stage that a new scene remounts, so that a scene in the same system asks
   // nothing again (Design note 19).
-  const keptStart = useMemo(() => option.make().sceneAt(0), [option]);
+  const keptScene = useMemo(() => option.make(), [option]);
+  const keptStart = useMemo(() => keptScene.sceneAt(0), [keptScene]);
+  // Each opening of the body inspection is a new scene, its camera framed afresh.
+  const opening =
+    server !== null
+      ? SERVER_SCENE_NAME
+      : option === inspection?.option
+        ? `${option.name} ${String(inspection.sequence)}`
+        : option.name;
+  const startMeter = server === null ? keptScene.startMeter : undefined;
+  const meter = shownMeter(meterChoice, opening, startMeter);
   // A kept scene of served bodies, the body inspection's, is the server's to its terrain session
   // and its atmosphere cache, which ask its bodies' records of the server; its session's fields are
   // training's, gated by the server's scratch log, never the live scene's.
@@ -2969,20 +2990,15 @@ function ViewPanels({
         )}
       </div>
       <ViewStage
-        // Each opening of the body inspection is a new scene, its camera framed afresh.
-        key={
-          server !== null
-            ? SERVER_SCENE_NAME
-            : option === inspection?.option
-              ? `${option.name} ${String(inspection.sequence)}`
-              : option.name
-        }
+        key={opening}
         source={server === null ? { kind: "kept", option } : { kind: "server", server }}
         engineState={engineState}
         exposure={exposure}
         onExposureChange={setExposure}
         meter={meter}
-        onMeterChange={setMeter}
+        onMeterChange={(chosen) => {
+          setMeterChoice((choice) => chooseMeter(choice, chosen, opening, startMeter));
+        }}
         easedMoves={easedMoves}
         onEasedMovesChange={setEasedMoves}
         slopeBaselineM={slopeBaselineM}

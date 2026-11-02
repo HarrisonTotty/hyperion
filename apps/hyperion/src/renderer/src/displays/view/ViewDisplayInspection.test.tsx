@@ -4,7 +4,7 @@
  * shown before.
  */
 import { galacticPositionFromLy } from "@hyperion/protocol";
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { toSystemBodiesModel } from "../../lib/system/bodiesWire";
@@ -12,13 +12,10 @@ import { aUniverse } from "../../test/galaxyFixtures";
 import { FIXTURE_EARTH, FIXTURE_SYSTEM, sliceBodies } from "../../test/planetaryFixture";
 import { fakeViewEngineSource } from "../../test/fakeViewEngine";
 import { answerServedField } from "../../test/servedHandoverFixtures";
-import {
-  DEFAULT_MAN_EV100,
-  ev100FromAverageLuminance,
-  exposureScale,
-} from "../../view/photometry/exposure";
-import { binCentreLuminance } from "../../view/post/histogram";
-import { METER_CLASS } from "../../view/post/meter";
+import { binaryFrame } from "../../test/binaryFrames";
+import { InThreadSkyWorker, skyPayload, skyResponse } from "../../test/skyFixtures";
+import { sunLikeHostDisc } from "../../view/lighting/hostDisc";
+import { METER_CLASS, type MeterMode } from "../../view/post/meter";
 import {
   nominalStore,
   openUniverse,
@@ -170,25 +167,77 @@ async function fieldHeldBeforeSurvey(
   return earthFieldAsks(view);
 }
 
+/**
+ * Answers the view's latest sky request with one star and a solar twin's host disc for the
+ * fixture's star (body index 0), as the server's sky brings it.
+ */
+async function skyArrivesWithSun(view: ViewDisplayHarness): Promise<void> {
+  const sky = view.socket.requestsOfKind("sky").at(-1);
+  if (sky === undefined) {
+    throw new Error("the view asks no sky");
+  }
+  const payload = skyPayload([{ direction: [0, 0, -1], distanceLy: 100, vMag: 1 }], 2, null);
+  await act(async () => {
+    view.socket.serverSendsBinary(binaryFrame(sky.id, 0, 1, [...payload]));
+    view.socket.serverResponds(sky.id, {
+      kind: "sky",
+      ...skyResponse(sky.body, payload, 1, 2),
+      hosts: [sunLikeHostDisc({ star: 0 })],
+    });
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await settle();
+}
+
+/** The primary's meter as its `EXPOSURE METER` panel names it. */
+function meterReadout(): string {
+  return within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).getByRole(
+    "status",
+    {
+      name: "METER",
+    },
+  ).textContent;
+}
+
+/** `opening` opened on `meter` in its scene's own `INCIDENT`'s place. */
+function openingOn(meter: MeterMode, opening: InspectionOpening): InspectionOpening {
+  const { option } = opening;
+  return {
+    ...opening,
+    option: { ...option, make: () => ({ ...option.make(), startMeter: meter }) },
+  };
+}
+
+/** The primary's passes submitted to `fake` once `opening`'s first frames are drawn. */
+async function primaryPassesOf(opening: InspectionOpening): Promise<string[]> {
+  const fake = timedEngineSource();
+  const view = renderViewDisplay({
+    store: await nominalStore(),
+    source: fake.source,
+    engines: fake.engines,
+    inspection: opening,
+  });
+  await settle();
+  view.advance(100);
+  await settle();
+  view.advance(300);
+  return fake.submissions.filter((each) => submittedBy(each) === "view").map((each) => each.label);
+}
+
 describe("the inspection's first frames (fix-view-light)", () => {
   it("holds its first photorealistic frame back until a reading, so that none shows at MAN's -1", async () => {
-    const fake = timedEngineSource();
-    const view = renderViewDisplay({
-      store: await nominalStore(),
-      source: fake.source,
-      engines: fake.engines,
-      inspection: earthOpening(),
-    });
-    await settle();
-    view.advance(100);
-    await settle();
-    view.advance(300);
-    const primary = fake.submissions.filter((each) => submittedBy(each) === "view");
-    const firstTonemap = primary.findIndex((each) => each.label === TONEMAP_PASS);
+    // Opened on AVG, whose reading is the image's histogram.
+    const primary = await primaryPassesOf(openingOn("average", earthOpening()));
+    const firstTonemap = primary.indexOf(TONEMAP_PASS);
     const histogramsBefore = primary
       .slice(0, firstTonemap)
-      .filter((each) => each.label === PHOTOREAL_PASS_LABELS.histogram).length;
+      .filter((label) => label === PHOTOREAL_PASS_LABELS.histogram).length;
     expect(histogramsBefore).toBeGreaterThanOrEqual(2);
+  });
+
+  it("takes no histogram on INCIDENT, its opening meter (ux-calls-view, item 3b)", async () => {
+    const primary = await primaryPassesOf(earthOpening());
+    expect(primary.includes(PHOTOREAL_PASS_LABELS.histogram)).toBe(false);
   });
 });
 
@@ -293,9 +342,10 @@ describe("VIEW's body inspection (the owner's request)", () => {
     expect(primaryLabelBlock().textContent).not.toContain("SURVEY PASS");
   });
 
-  it("opens exposed for its body, AUTO at its image's first metered value at once", async () => {
+  it("opens exposed for its body on INCIDENT, AUTO at the light falling on it at once (ux-calls-view, item 3b)", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
     const fake = fakeViewEngineSource();
-    // A sunlit disc: brighter than the display's MAN default, EV100 -1.0, by some 14 stops.
+    // A sunlit disc in the histogram, which INCIDENT does not read.
     fake.image.pixels = [{ meterClass: METER_CLASS.litBody, bin: 150, count: 200 }];
     const view = renderViewDisplay({
       store: await nominalStore(),
@@ -303,17 +353,64 @@ describe("VIEW's body inspection (the owner's request)", () => {
       engines: fake.engines,
       inspection: earthOpening(),
     });
-    const readings = await readingsOver(view, 8);
+    await openUniverse(view);
+    view.advance(600);
+    await settle();
+    // MAN's EV100 -1.0 stands while its sky's discs are awaited, and the meter says nothing yet.
+    const unlit = exposureReadout();
+    const awaited = screen.queryByText(/NO LIGHT/u);
+    await skyArrivesWithSun(view);
+    const readings = await readingsOver(view, 4);
 
-    // MAN's EV100 -1.0 stands until the first metered frame, then AUTO at the meter's reading of
-    // the frame drawn at it, at once: a walk at AUTO's 3 EV a second would be short of 0 here.
+    // Then AUTO at the incident reading at once: a solar twin at the fixture Earth's 0.985 au,
+    // 15.70 + 2 log₂(1 ÷ 0.985) = 15.75.
     const first = readings.find((reading) => reading.endsWith(" AUTO"));
     const appliedEv = Number(/^EV100 (-?\d+\.\d) AUTO$/u.exec(first ?? "")?.[1]);
-    const meteredEv = ev100FromAverageLuminance(
-      binCentreLuminance(150) / exposureScale(DEFAULT_MAN_EV100),
+    expect([unlit, awaited, meterReadout(), Math.abs(appliedEv - 15.75) <= 0.1]).toEqual([
+      "EV100 -1.0 MAN",
+      null,
+      "INCIDENT",
+      true,
+    ]);
+  });
+
+  it("keeps a meter the operator chose in it, through another scene's own choice and back (ux-calls-view, item 3b)", async () => {
+    const fake = fakeViewEngineSource();
+    const view = renderViewDisplay({
+      store: await nominalStore(),
+      source: fake.source,
+      engines: fake.engines,
+      inspection: earthOpening(),
+    });
+    // Its image drawn, its pipelines made, beside which the meter's panel stands.
+    await settle();
+    view.advance(100);
+    await readingsOver(view, 4);
+    await view.user.click(
+      within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).getByRole("button", {
+        name: "LIT",
+      }),
     );
-    expect(readings[0]).toBe("EV100 -1.0 MAN");
-    expect(Math.abs(appliedEv - meteredEv)).toBeLessThanOrEqual(0.5);
+    view.advance(300);
+    await view.user.click(sceneButton("PHASE TEST"));
+    view.advance(300);
+    // PHASE TEST drawn photorealistic, beside which its meter's panel stands, and DARK chosen there.
+    await view.user.click(screen.getByRole("button", { name: "PHOTOREALISTIC" }));
+    await settle();
+    view.advance(100);
+    await readingsOver(view, 4);
+    await view.user.click(
+      within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).getByRole("button", {
+        name: "DARK",
+      }),
+    );
+    view.advance(300);
+    const elsewhere = meterReadout();
+    await view.user.click(sceneButton("BODY INSPECTION"));
+    await settle();
+    view.advance(100);
+    await readingsOver(view, 4);
+    expect([elsewhere, meterReadout()]).toEqual(["DARK", "LIT"]);
   });
 
   it("gives the focus to the scene shown when its CLOSE goes with it", async () => {

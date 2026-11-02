@@ -33,6 +33,22 @@ function reasonOf(text: string): HTMLElement {
 }
 
 describe("MeterControl", () => {
+  it("names INCIDENT as its meter, the body inspection's opening one (ux-calls-view, item 3b)", () => {
+    render(
+      <MeterControl
+        meter="incident"
+        exposure={AUTO}
+        source={SOURCE}
+        metering={METERED}
+        onMeter={() => undefined}
+      />,
+    );
+    expect([
+      screen.getByRole("status", { name: "METER" }).textContent,
+      screen.getByRole("button", { name: "INCIDENT" }).getAttribute("aria-pressed"),
+    ]).toEqual(["INCIDENT", "true"]);
+  });
+
   it("shows the exposure with its level, the meter and the view it meters, by its name", () => {
     render(
       <MeterControl
@@ -73,7 +89,11 @@ describe("MeterControl", () => {
     expect(screen.getByRole("button", { name: "DARK" })).toHaveFocus();
     await user.keyboard(" ");
     expect(onMeter).toHaveBeenLastCalledWith("dark");
-    expect(onMeter).toHaveBeenCalledTimes(3);
+    await user.tab();
+    expect(screen.getByRole("button", { name: "INCIDENT" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onMeter).toHaveBeenLastCalledWith("incident");
+    expect(onMeter).toHaveBeenCalledTimes(4);
   });
 
   it("keeps the meters choosable while nothing is metered, saying why", async () => {
@@ -205,6 +225,7 @@ describe("MeterControl's own statuses (R07.T16.b)", () => {
     ["lit", "LIT", "NO LIT SIDE: choose AVG, or bring a sunlit body into view"],
     ["dark", "DARK", "NO DARK SIDE: choose AVG, or bring a night side into view"],
     ["average", "AVG", "STAR DISC ONLY: widen the view or turn from the star"],
+    ["incident", "INCIDENT", "NO LIGHT: choose AVG"],
   ] as const)(
     "says under %s that it weighs nothing, with what to do, in the reading's place",
     (meter, label, words) => {

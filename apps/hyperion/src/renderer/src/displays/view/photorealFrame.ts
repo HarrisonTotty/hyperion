@@ -50,7 +50,7 @@ import type {
   PhotorealFrame,
   PhotorealOverlay,
 } from "../../view/photoreal/renderer";
-import type { MeterMode } from "../../view/post/meter";
+import type { HistogramMeter } from "../../view/post/meter";
 import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
 import { sceneOrigins, type ViewScene } from "../../view/scene/model";
 import type { BandLayer } from "../../view/sky/band";
@@ -116,8 +116,11 @@ export interface PhotorealInputs {
    * or `null`.
    */
   readonly overlay: PhotorealOverlay | null;
-  /** The operator's meter where the view is the exposure's source, or `null` (no histogram). */
-  readonly meter: MeterMode | null;
+  /**
+   * The operator's meter where the view is the exposure's source and it reads the histogram, or
+   * `null` (no histogram): an instrument's, or the primary's under `INCIDENT`.
+   */
+  readonly meter: HistogramMeter | null;
   /** Whether the frame is presented (`PhotorealFrame.present`): presented where absent. */
   readonly present?: boolean | undefined;
   /**

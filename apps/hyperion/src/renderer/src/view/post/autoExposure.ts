@@ -12,6 +12,7 @@ import type { ViewId } from "../camera/state";
 import {
   controlEv100,
   ev100FromAverageLuminance,
+  ev100FromIlluminance,
   MAN_EV100_MIN,
   METER_CALIBRATION_K,
   NO_IMAGE_INHIBIT,
@@ -211,10 +212,11 @@ export const METER_STEP_MAX_S = 0.1;
  * Why a controller holds no metered value (plan R07, R07.T16.b; decision-r07-t8a-meter, item 1).
  *
  * @remarks
- * - `no-image`: no photorealistic image is drawn, or no histogram has arrived for
- *   {@link METER_TIMEOUT_S} (`NO IMAGE TO METER`).
+ * - `no-image`: no photorealistic image is drawn, or no histogram, or under `INCIDENT` no reading,
+ *   has arrived for {@link METER_TIMEOUT_S} (`NO IMAGE TO METER`).
  * - `nothing-weighed`: for that long the histograms of a drawn image weighed no pixel under
- *   `meter`, the meter in force (`NO LIT SIDE`, `NO DARK SIDE`, `STAR DISC ONLY`).
+ *   `meter`, the meter in force (`NO LIT SIDE`, `NO DARK SIDE`, `STAR DISC ONLY`), or under
+ *   `INCIDENT` no host disc reached its body (`NO LIGHT`).
  * - `acquiring`: under that long since the image came to be drawn, or since the meter changed,
  *   with no value held: the transient before the first histogram, which gets no word.
  */
@@ -228,6 +230,22 @@ export type Metering = { readonly kind: "metered"; readonly ev100: number } | Me
 
 const NO_IMAGE: MeterCause = { kind: "no-image" };
 const ACQUIRING: MeterCause = { kind: "acquiring" };
+
+/**
+ * One step's reading under the meter in force: `none` arrived (no histogram, or under `INCIDENT`
+ * no reading); under `INCIDENT`, one `pending` while the scene's lighting is awaited; one that
+ * weighs `nothing` (`LIT` with no lit body, `INCIDENT` with no light); or one `weighed`, with its
+ * EV100 and where it lies against the histogram's range.
+ */
+type MeterSample =
+  | { readonly kind: "none" }
+  | { readonly kind: "pending" }
+  | { readonly kind: "nothing-weighed" }
+  | { readonly kind: "weighed"; readonly ev100: number; readonly range: ReadingRange };
+
+const NO_SAMPLE: MeterSample = { kind: "none" };
+const PENDING_SAMPLE: MeterSample = { kind: "pending" };
+const NOTHING_WEIGHED_SAMPLE: MeterSample = { kind: "nothing-weighed" };
 
 /**
  * The metering as the panels show it beside the operator's chosen `meter`: a meter's own status is
@@ -320,8 +338,9 @@ export interface AutoExposureOptions {
 }
 
 /**
- * One photorealistic view's exposure controller: it meters each histogram as it arrives, smooths
- * the applied EV toward it, and keeps R02's `ExposureControl` through `onMetering`.
+ * One photorealistic view's exposure controller: it meters each histogram as it arrives, or under
+ * `INCIDENT` each frame's incident reading, smooths the applied EV toward it, and keeps R02's
+ * `ExposureControl` through `onMetering`.
  *
  * @remarks
  * Under `MAN` and `INHIBITED` the applied value does not move; the meter still reads, so that
@@ -353,10 +372,11 @@ export class AutoExposure {
   #control: ExposureControl;
   #meter: MeterMode;
   #targetEv: number | null = null;
-  // Since the last histogram that weighed a pixel, or since the acquiring window opened, s.
+  // Since the last reading that weighed something, or since the acquiring window opened, s.
   #unweighedS = 0;
-  // Since the last histogram of any kind, or since the acquiring window opened, s.
-  #sinceHistogramS = 0;
+  // Since the last reading of any kind, a histogram or an incident reading, or since the acquiring
+  // window opened, s.
+  #sinceReadingS = 0;
   #imageDrawn = false;
   // Whether the window since the image came to be drawn, or the meter changed, with no value held
   // is still open.
@@ -405,7 +425,7 @@ export class AutoExposure {
       metering = NO_IMAGE;
     } else if (this.#acquiring) {
       metering = ACQUIRING;
-    } else if (this.#sinceHistogramS > METER_TIMEOUT_S) {
+    } else if (this.#sinceReadingS > METER_TIMEOUT_S) {
       metering = NO_IMAGE;
     } else {
       metering = { kind: "nothing-weighed", meter: this.#meter };
@@ -505,38 +525,45 @@ export class AutoExposure {
    * Advances one frame.
    *
    * @param h - The histogram that arrived since the last step, if one did; one taken of an image
-   *   no longer drawn is not metered.
+   *   no longer drawn is not metered, nor any under `INCIDENT`.
    * @param dtS - The frame's duration, s.
+   * @param incidentLx - Under `INCIDENT`, the frame's reading (`incidentReadingLx`), lx: the
+   *   illuminance on its flat receptor, 0 where no host disc reaches its body; `null` while the
+   *   scene's lighting is awaited, which keeps the meter acquiring, with no status; absent where
+   *   none was taken. Read only while the image is drawn, as a histogram is.
    */
-  step(h: Histogram | undefined, dtS: number): ExposureReading {
+  step(h: Histogram | undefined, dtS: number, incidentLx?: number | null): ExposureReading {
     if (this.#imageDrawn && this.holds) {
       this.#heldS += Math.min(dtS, METER_STEP_MAX_S);
     }
-    const histogram = this.#imageDrawn ? h : undefined;
-    const average = histogram === undefined ? null : meteredAverage(histogram, this.#window);
-    // The range of this step's reading where it weighs a pixel: a frame below the range metered at
-    // EMPTY_FRAME_CD_M2 is at the value the exposure stops at, as good as one inside it.
-    const range =
-      histogram === undefined || average === null
-        ? null
-        : average === EMPTY_FRAME_CD_M2
-          ? "inside"
-          : readingRange(histogram);
-    if (average === null) {
-      // No histogram, or one with no pixel of a class the meter weighs (`LIT` with no lit body):
-      // the meter holds its value until the timeout, then says why it has none.
-      const countedS = Math.min(dtS, METER_STEP_MAX_S);
-      this.#unweighedS += countedS;
-      this.#sinceHistogramS = histogram === undefined ? this.#sinceHistogramS + countedS : 0;
-      if (this.#unweighedS > METER_TIMEOUT_S) {
-        this.#targetEv = null;
-        this.#acquiring = false;
+    const sample = this.#imageDrawn ? this.#sample(h, incidentLx) : NO_SAMPLE;
+    let range: ReadingRange | null = null;
+    switch (sample.kind) {
+      case "pending":
+        // The scene's lighting is awaited: the window stays open, as when the image comes to be
+        // drawn, so that the meter says nothing it would take back once the light arrives.
+        this.#openWindow();
+        break;
+      case "none":
+      case "nothing-weighed": {
+        // No reading, or one that weighs nothing (`LIT` with no lit body, `INCIDENT` with no
+        // light): the meter holds its value until the timeout, then says why it has none.
+        const countedS = Math.min(dtS, METER_STEP_MAX_S);
+        this.#unweighedS += countedS;
+        this.#sinceReadingS = sample.kind === "none" ? this.#sinceReadingS + countedS : 0;
+        if (this.#unweighedS > METER_TIMEOUT_S) {
+          this.#targetEv = null;
+          this.#acquiring = false;
+        }
+        break;
       }
-    } else {
-      this.#unweighedS = 0;
-      this.#sinceHistogramS = 0;
-      this.#acquiring = false;
-      this.#targetEv = ev100FromAverageLuminance(average);
+      case "weighed":
+        this.#unweighedS = 0;
+        this.#sinceReadingS = 0;
+        this.#acquiring = false;
+        this.#targetEv = sample.ev100;
+        range = sample.range;
+        break;
     }
     const metering = this.metering;
     const control = this.#control;
@@ -581,6 +608,40 @@ export class AutoExposure {
   }
 
   /**
+   * This step's reading under the meter in force (`MeterSample`).
+   *
+   * @remarks
+   * A histogram meter's frame below the range metered at {@link EMPTY_FRAME_CD_M2} is at the value
+   * the exposure stops at, as good as one inside it. An incident reading has no range to clip it,
+   * so it always lies inside.
+   */
+  #sample(h: Histogram | undefined, incidentLx: number | null | undefined): MeterSample {
+    if (this.#meter === "incident") {
+      if (incidentLx === undefined) {
+        return NO_SAMPLE;
+      }
+      if (incidentLx === null) {
+        return PENDING_SAMPLE;
+      }
+      return incidentLx > 0
+        ? { kind: "weighed", ev100: ev100FromIlluminance(incidentLx), range: "inside" }
+        : NOTHING_WEIGHED_SAMPLE;
+    }
+    if (h === undefined) {
+      return NO_SAMPLE;
+    }
+    const average = meteredAverage(h, this.#window);
+    if (average === null) {
+      return NOTHING_WEIGHED_SAMPLE;
+    }
+    return {
+      kind: "weighed",
+      ev100: ev100FromAverageLuminance(average),
+      range: average === EMPTY_FRAME_CD_M2 ? "inside" : readingRange(h),
+    };
+  }
+
+  /**
    * The applied EV100 a cut takes from a reading: its value where it lies inside the range, which
    * ends the cut; else its bound, never back past the applied value, since a reading taken before
    * the last snap is a looser bound of the same side.
@@ -606,7 +667,7 @@ export class AutoExposure {
   /** Opens the window in which the meter, with no value held, is `acquiring`. */
   #openWindow(): void {
     this.#unweighedS = 0;
-    this.#sinceHistogramS = 0;
+    this.#sinceReadingS = 0;
     this.#acquiring = this.#targetEv === null;
   }
 

@@ -23,7 +23,7 @@ import { packGlareTerms } from "./bloomChain";
 import { type GlareSource, glareSourcePerUnit, type GlareSpreadTerms } from "./glare";
 import GLARE_WGSL from "./glare.wgsl?raw";
 import HISTOGRAM_WGSL from "./histogram.wgsl?raw";
-import { meterLuma, meterWeights, type MeterMode } from "./meter";
+import { type HistogramMeter, meterLuma, meterWeights } from "./meter";
 
 /** The histogram's bin count. */
 export const HISTOGRAM_BINS = 256;
@@ -172,7 +172,7 @@ export function meteredVeil(glare: MeteredGlare, size: ViewSize, xPx: number, yP
 export function cpuHistogram(
   rgba: Float32Array,
   size: ViewSize,
-  mode: MeterMode,
+  mode: HistogramMeter,
   stride: 1 | 2,
   glare?: MeteredGlare,
 ): Uint32Array {
@@ -200,7 +200,7 @@ export function cpuHistogram(
  */
 export function histogramParams(
   size: ViewSize,
-  mode: MeterMode,
+  mode: HistogramMeter,
   stride: 1 | 2,
   sourceCount: number,
 ): Uint32Array {
@@ -255,7 +255,7 @@ export interface HistogramRequest {
   /** The view's HDR colour, `rgba16float` with the meter class in alpha. */
   readonly hdrColour: TextureHandle;
   readonly size: ViewSize;
-  readonly mode: MeterMode;
+  readonly mode: HistogramMeter;
   /** 1 on the high setting, 2 on the low (Design note 18). */
   readonly stride: 1 | 2;
   /** The scale the target was pre-exposed with, 1 ÷ (cd/m²). */

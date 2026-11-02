@@ -46,7 +46,7 @@ import { tonemapTexel } from "../view/post/tonemap";
 import { DEFAULT_EYE_OBSERVER } from "../view/sky/eye";
 import { AutoExposure } from "../view/post/autoExposure";
 import type { Histogram } from "../view/post/histogram";
-import { METER_CLASS, type MeterMode } from "../view/post/meter";
+import { type HistogramMeter, METER_CLASS } from "../view/post/meter";
 import { type ViewRole, viewId } from "../view/camera/state";
 import { phasePlanetDirection, phaseScene } from "../view/scenes/phaseScene";
 import { HostDiscLayer } from "../view/sky/disc";
@@ -88,7 +88,7 @@ interface Framing {
   readonly name: string;
   readonly forward: Vec3;
   readonly up: Vec3;
-  readonly meter: MeterMode;
+  readonly meter: HistogramMeter;
 }
 
 /** The crescent 30° from the Sun; looking 29.5° from the Sun puts its disc just inside the left edge. */

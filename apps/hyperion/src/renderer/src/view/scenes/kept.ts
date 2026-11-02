@@ -8,6 +8,7 @@ import {
 import { AU_M } from "../../lib/system/constants";
 import type { CameraPose } from "../camera/pose";
 import type { RenderStyle } from "../camera/state";
+import type { MeterMode } from "../post/meter";
 import type { ViewScene } from "../scene/model";
 
 /**
@@ -43,6 +44,12 @@ export interface KeptScene {
    * absent, as every other kept scene opens.
    */
   readonly startExposure?: "metered";
+  /**
+   * The meter a view of it opens on, until the operator chooses one in that opening: `incident`
+   * for `VIEW`'s body inspection (ux-calls-view, item 3b, the owner's delegated call, 2026-11-01);
+   * the display's meter as it stands where absent, as every other kept scene opens.
+   */
+  readonly startMeter?: MeterMode;
 }
 
 /** The kept scenes' system: a made-up ID, labelled as a test wherever it is shown. */
