@@ -631,12 +631,23 @@ class DrawnSurfaces {
   readonly #figure: BodyFigure;
   readonly #cam: FrameCamera;
   readonly #masks: SurveyMasks;
+  readonly #bands: ReadonlyMap<number, readonly [number, number]> | null;
   readonly #made = new Map<DrawnInstance, Float64Array>();
 
-  constructor(figure: BodyFigure, cam: FrameCamera, masks: SurveyMasks) {
+  /**
+   * @param bands - Each level's morph band to read the instances' k by, start and end metres, in
+   *   place of their own; `null` for their own.
+   */
+  constructor(
+    figure: BodyFigure,
+    cam: FrameCamera,
+    masks: SurveyMasks,
+    bands: ReadonlyMap<number, readonly [number, number]> | null = null,
+  ) {
     this.#figure = figure;
     this.#cam = cam;
     this.#masks = masks;
+    this.#bands = bands;
   }
 
   /**
@@ -677,8 +688,9 @@ class DrawnSurfaces {
       }
       const p = surfacePoint(this.#figure, vertexDir(inst.area, x, y), own);
       const d = norm(sub(vec3(p[0], p[1], p[2]), this.#cam.positionM));
-      const span = inst.endM - inst.startM;
-      const cdlod = span > 0 ? Math.min(1, Math.max(0, (d - inst.startM) / span)) : 0;
+      const [startM, endM] = this.#bands?.get(inst.held.key.level) ?? [inst.startM, inst.endM];
+      const span = endM - startM;
+      const cdlod = span > 0 ? Math.min(1, Math.max(0, (d - startM) / span)) : 0;
       const k = fadedMorph(inst.holds, inst.edgeFades, inst.cornerFades, inst.ownFade, x, y, cdlod);
       made[at] = own + k * (morph - own);
       made[at + 1] = k;
@@ -804,7 +816,9 @@ function frameLines(): number[] {
 
 /**
  * The change of the drawn ground from frame `before`'s instances to `now`'s at `tS`, both drawn
- * from camera `cam` (the frame's), over the instances of `now` whose bake or words changed: at
+ * from camera `cam` (the frame's) and by `now`'s morph bands for each level drawn now (the camera's
+ * motion and the bands' slew move the ground continuously, and are no change), over the instances
+ * of `now` whose bake or words changed: at
  * each of their measured vertices on screen, the drawn surface's move along the datum's normal and
  * its shading normal's turn against the instance over that ground before, or the datum's where
  * nothing was and camera `camBefore` saw it; `null` where nothing changed. `masks` is the run's;
@@ -821,6 +835,13 @@ function frameChangeOf(
   pops: SeamPop[],
 ): SeamFrameChange | null {
   const surfaces = new DrawnSurfaces(figure, cam, masks);
+  // The frame before's ground read by this frame's bands where a level is drawn now: the bands'
+  // slew (2% a step) moves k by itself, continuously, and is no change of the draw set.
+  const bandsNow = new Map<number, readonly [number, number]>();
+  for (const inst of now.values()) {
+    bandsNow.set(inst.held.key.level, [inst.startM, inst.endM]);
+  }
+  const thenSurfaces = new DrawnSurfaces(figure, cam, masks, bandsNow);
   const ancestors = ancestorsOf(before);
   const lines = frameLines();
   const pxPerRad = cam.viewport.widthPx / 2 / Math.tan(cam.fovXRad / 2);
@@ -860,7 +881,7 @@ function frameChangeOf(
         let then: DrawnPlace;
         if (cover !== null) {
           covered = true;
-          then = surfaces.at(cover.inst, cover.u, cover.v, datum);
+          then = thenSurfaces.at(cover.inst, cover.u, cover.v, datum);
         } else {
           // Nothing drew this ground the frame before: the reference surface did, where seen.
           const q = surfacePoint(figure, dir, 0);
@@ -895,7 +916,7 @@ function frameChangeOf(
                   movePx: px,
                   normalDeg: deg,
                   k,
-                  kBefore: surfaces.kAt(cover.inst, cover.u, cover.v),
+                  kBefore: thenSurfaces.kAt(cover.inst, cover.u, cover.v),
                 };
         }
       }
