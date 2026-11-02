@@ -34,6 +34,7 @@ import {
   drawnSurfaceKind,
   grazingTwilight,
   marchEdgesM,
+  MARCH_SHEET_NEGLIGIBLE,
   marchEvenStep,
   marchEvenSteps,
   MARCH_EDGE_LEAST_RISE,
@@ -172,6 +173,27 @@ function sumOf(shares: ReadonlyArray<number> | null): number {
 function dusk(fromLowestM: number): number {
   return fromLowestM < -38_000 ? 1 : 0;
 }
+
+/** A sheet spread over the levels between 1 and 2 km, and its top's ramp, empty, at 30 km. */
+function sheet(heightM: number): number {
+  if (heightM > 1_000 && heightM < 2_000) {
+    return 1;
+  }
+  return heightM > 29_000 ? 1e-12 : 0;
+}
+
+describe("marchEdgesM: a projected sheet's own piece (R08.T16.a.2)", () => {
+  const edges = [1_000, 2_000, 29_000, 31_000];
+
+  it("cuts a held pair at both its ends and an empty one nowhere", () => {
+    expect(MARCH_SHEET_NEGLIGIBLE).toBe(1e-9);
+    expect(marchEdgesM(edges, 50_000, { densityAt: sheet, largest: 1 })).toEqual([1_000, 2_000]);
+    // Unprojected, each pair's middle, as before.
+    expect(marchEdgesM(edges, 50_000)).toEqual([1_500, 30_000]);
+    // Above the top or at the ground, none.
+    expect(marchEdgesM([0, 2_000], 1_500, { densityAt: sheet, largest: 1 })).toEqual([]);
+  });
+});
 
 describe("depthSharedPieces: a cut side's steps by the light each piece returns (R08.T16.a.2)", () => {
   /** From orbit down to an envelope's floor: one-sided, t* at its end, 790 km long. */

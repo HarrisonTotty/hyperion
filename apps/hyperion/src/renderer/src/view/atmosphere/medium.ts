@@ -84,6 +84,14 @@ export interface TabulatedDensity {
    * new levels about the old edges. Absent, {@link layerEdgesM} takes them from the levels.
    */
   readonly edgesM?: ReadonlyArray<number>;
+  /**
+   * Set where its levels are another profile's projection onto them (`tables.ts`'s
+   * `resampledDensity`, plan R08, R08.T16.a.2): a sheet its levels would alias, spread over the
+   * levels about it. The per-frame marches cut each of its ramps that holds any of it at both its
+   * edges, not at its middle, so that the spread sheet takes a piece of its own
+   * (`marchSteps.ts`'s `marchEdgesM`).
+   */
+  readonly projected?: true;
 }
 
 /**

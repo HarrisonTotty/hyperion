@@ -389,18 +389,61 @@ export const MARCH_EDGES_MAX = 16;
  * half-width's column. Four edges a term would give each ramp a piece of its own, up to nine pieces
  * on a low ray's eight-step side.
  *
+ * A projected density (`medium.ts`'s `TabulatedDensity.projected`; plan R08, R08.T16.a.2) is cut at
+ * both ends of each pair that holds more than {@link MARCH_SHEET_NEGLIGIBLE} of its largest density
+ * instead, and at none of a pair that holds less: a sheet its levels would alias spreads over the
+ * levels about it, which its widened pair brackets, so it takes a piece of its own. Cut at the
+ * pairs' middles the hand Jupiter's decks drawn at their own columns read 9.3% (0°) and 15.7% (60°)
+ * from their march at 16 times high's samples, and at their outer ends 34% and 17%; their sedimented
+ * sheets' tops hold some 10⁻²⁷⁰ of their bases', and take no cut (2026-11-02).
+ *
  * @param edgesM - A term's layer edges, m, in `layerEdgesM`'s pairs.
+ * @param projected - A projected term's density at a height and its largest, or `null` to cut at
+ *   each pair's middle.
  */
-export function marchEdgesM(edgesM: ReadonlyArray<number>, topHeightM: number): number[] {
+export function marchEdgesM(
+  edgesM: ReadonlyArray<number>,
+  topHeightM: number,
+  projected: ProjectedDensity | null = null,
+): number[] {
   const middles: number[] = [];
+  const inside = (edge: number): void => {
+    if (edge > 0 && edge < topHeightM) {
+      middles.push(edge);
+    }
+  };
   for (let i = 0; i + 1 < edgesM.length; i += 2) {
-    const middle = 0.5 * ((edgesM[i] ?? Number.NaN) + (edgesM[i + 1] ?? Number.NaN));
-    if (middle > 0 && middle < topHeightM) {
-      middles.push(middle);
+    const lower = edgesM[i] ?? Number.NaN;
+    const upper = edgesM[i + 1] ?? Number.NaN;
+    if (projected === null) {
+      inside(0.5 * (lower + upper));
+      continue;
+    }
+    const held = Math.max(
+      projected.densityAt(lower),
+      projected.densityAt(0.5 * (lower + upper)),
+      projected.densityAt(upper),
+    );
+    if (held > MARCH_SHEET_NEGLIGIBLE * projected.largest) {
+      inside(lower);
+      inside(upper);
     }
   }
   return middles;
 }
+
+/** A projected term's density as {@link marchEdgesM} reads it: at a height, and its largest. */
+export interface ProjectedDensity {
+  readonly densityAt: (heightM: number) => number;
+  readonly largest: number;
+}
+
+/**
+ * The share of a projected term's largest density under which {@link marchEdgesM} takes a ramp to
+ * hold nothing and cuts none there: 10⁻⁹, as far below the light it could return as below the
+ * marches' `f32`.
+ */
+export const MARCH_SHEET_NEGLIGIBLE = 1e-9;
 
 /**
  * The least rise of h\* along a ray, |s (d · n)|, at which the ray march takes a layer edge's crossing

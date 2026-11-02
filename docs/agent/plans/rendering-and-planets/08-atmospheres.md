@@ -24832,3 +24832,15 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - Re-pinned: the thin and thick kernels' digests, and the disc's and the terrain's.
   - `saturn-oblate`'s routed sliced misses in `vectorGate.json` (43 of 474, all at s95) are not
     this term: the record re-blesses byte for byte with the fix (a finding, the lane's outbox).
+- **The kernels' density tables keep a sheet deck's column, as built** (R08.T16.a.2, 2026-11-02;
+  lane `r08-t16a2-chromophore-gate`). The kernels drew the hand Jupiter's envelope above its floor
+  at green τ 5.7 of its 10.2: its sedimented decks' sheets, thinner than the 1,024 levels, kept
+  1.7% (H₂O, NH₄SH) and 51% (NH₃) of their columns.
+  - `tables.ts`'s `resampledDensity`: a term whose levels' densities move its column by more than
+    `RESAMPLED_COLUMN_TOLERANCE` (1%, lean) is projected onto the levels' hat functions instead, its
+    column exact, its edges a level wider, and marked `TabulatedDensity.projected`. Among the kept
+    media only the hand Jupiter's decks and chromophore cross it; every gated medium keeps its bits.
+  - `marchSteps.ts`'s `marchEdgesM(…, projected)`: a projected term's ramps that hold more than
+    `MARCH_SHEET_NEGLIGIBLE` of its largest density are cut at both ends, so each spread sheet
+    takes a piece; the marches keep the first `MARCH_EDGES_MAX` cuts, `packLayerEdges` and the
+    twin alike.

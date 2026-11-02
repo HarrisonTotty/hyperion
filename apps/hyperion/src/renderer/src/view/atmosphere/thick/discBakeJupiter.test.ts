@@ -162,7 +162,8 @@ describe("the hand Jupiter's disc table over its deck (R08.T16.b.2, by hand)", (
           expect(Math.abs(marched.disc[c] / marched.routed[c] - 1)).toBeLessThan(0.05);
           // The step a routed giant would show at the switch, pinned as measured since the march
           // shares a cut side's steps by the light each piece returns (R08.T16.a.2): −1.8% to
-          // +1.0%, red at 90° the most (−2.4% to +29.6% before; plan R08's records of T16.b.2).
+          // +1.0%, red at 90° the most (−2.4% to +29.6% before; plan R08's records of T16.b.2);
+          // −1.2% to +1.8% on 60 radii and 16 azimuths since its decks keep their columns.
           const step = product.disc[c] / product.routed[c] - 1;
           expect(step).toBeGreaterThan(-0.05);
           expect(step).toBeLessThan(0.02);
@@ -222,7 +223,8 @@ describe("the hand Jupiter's disc table over its deck (R08.T16.b.2, by hand)", (
       () => {
         const { jupiter: item, baked: table, twins: passes } = built();
         // On the converged march's own radii and azimuths. On R08.T6.i's shares by length its red
-        // read 12% (0°) and 24% (90°) dark; it reads within 1.0% in every channel at both.
+        // read 12% (0°) and 24% (90°) dark; it reads within 1.2% in every channel at both, its
+        // decks drawn at their own columns (`tables.ts`'s `resampledDensity`).
         const marched = integratedRadianceAt(item, table, passes, phaseDeg, {
           radii: CONVERGED_COUNTS.radii,
           azimuths: CONVERGED_COUNTS.azimuths,

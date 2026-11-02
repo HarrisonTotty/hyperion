@@ -129,6 +129,7 @@ import {
   depthSharedPieces,
   drawnSurfaceKind,
   MARCH_EDGE_LEAST_RISE,
+  MARCH_EDGES_MAX,
   type MarchDepthSteps,
   marchEdgesM,
   marchEvenStep,
@@ -142,6 +143,7 @@ import {
   marchSplit,
   marchStep,
   type MarchStep,
+  type ProjectedDensity,
   skyWarpOf,
 } from "./marchSteps";
 import {
@@ -149,6 +151,7 @@ import {
   ABSORBER_PRESSURE_REFERENCE_PA,
   type AtmosphereMedium,
   checkTabulatedTops,
+  type DensityProfile,
   densityLookup,
   extinction,
   fitLeastRiseM,
@@ -290,6 +293,11 @@ interface TwinTerm {
   readonly extinction: Rgb;
   /** Its layer edges, m (`medium.ts`'s `layerEdgesM`), where the transmittance march is split. */
   readonly edgesM: ReadonlyArray<number>;
+  /**
+   * Its density projected onto its levels (`medium.ts`'s `TabulatedDensity.projected`), whose ramps
+   * the per-frame marches cut at both ends, or `null`.
+   */
+  readonly projected: ProjectedDensity | null;
   readonly phase: PhaseFunction;
   /** Its absorber slot, 0 to `ABSORBER_SLOTS` − 1, or −1 for a term that is not an absorber. */
   readonly slot: number;
@@ -305,6 +313,13 @@ interface TwinTerm {
    * null for every other term.
    */
   readonly lobe: ForwardLobe | null;
+}
+
+/** A projected density's reader for the marches' cuts (`marchSteps.ts`'s `marchEdgesM`), or `null`. */
+function projectedOf(density: DensityProfile): ProjectedDensity | null {
+  return density.kind === "tabulated" && density.projected === true
+    ? { densityAt: densityLookup(density), largest: Math.max(...density.relative) }
+    : null;
 }
 
 /**
@@ -328,6 +343,7 @@ function termsOf(medium: AtmosphereMedium): readonly TwinTerm[] {
       absorption: term.absorption,
       extinction: extinction(term),
       edgesM: layerEdgesM(term.density),
+      projected: projectedOf(term.density),
       phase: term.phase,
       slot,
       columnPerM: slots.get(i)?.columnPerM ?? 0,
@@ -2316,7 +2332,12 @@ function skyWarpOfSegment(ray: PlacedSegment, split: MarchSplit): number | null 
  * in order, as `tables.ts`'s `packLayerEdges` packs them for the kernels.
  */
 function marchEdgesOf(terms: readonly TwinTerm[], topHeightM: number): number[] {
-  return terms.flatMap((term) => marchEdgesM(term.edgesM.slice(0, EDGES_PER_TERM), topHeightM));
+  // As `tables.ts`'s `packLayerEdges`, the first MARCH_EDGES_MAX of them.
+  return terms
+    .flatMap((term) =>
+      marchEdgesM(term.edgesM.slice(0, EDGES_PER_TERM), topHeightM, term.projected),
+    )
+    .slice(0, MARCH_EDGES_MAX);
 }
 
 /**

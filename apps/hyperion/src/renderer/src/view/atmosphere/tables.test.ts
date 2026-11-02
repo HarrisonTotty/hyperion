@@ -78,6 +78,7 @@ import {
   IRRADIANCE_KERNEL,
   IRRADIANCE_SIZE,
   IRRADIANCE_THICK_KERNEL,
+  EDGES_PER_TERM,
   KERNEL_ARM_FORMAT,
   kernelMedium,
   type LayeredPlanes,
@@ -86,6 +87,7 @@ import {
   lineSlotMask,
   MAX_BANDS,
   MAX_SLICES,
+  marchEdgeCountOf,
   MAX_TERMS,
   MULTI_SCATTERING_KERNEL,
   MULTI_SCATTERING_SAMPLES,
@@ -110,6 +112,7 @@ import {
   PER_PLANET_ROW_BYTES,
   perPlanetRowOf,
   PHASE_TABLE_ENTRIES,
+  RESAMPLED_COLUMN_TOLERANCE,
   resampledDensity,
   resampledPhase,
   rowBodyOf,
@@ -124,8 +127,10 @@ import {
   withKernelArmFormat,
   withoutForwardDelta,
 } from "./tables";
+import { MARCH_EDGES_MAX } from "./marchSteps";
 import {
   kernelOpticalDepth,
+  mediumMarchEdgesM,
   MULTI_SCATTERING_KERNEL_OPTIONS,
   oblatePlanetTwin,
   type OblateTwinSizes,
@@ -1072,6 +1077,73 @@ describe("the density tables", () => {
     expect(Math.abs(columnLengthM(resampled, 100_000) / column - 1)).toBeLessThan(1e-5);
     expect(densityAt(resampled, 500)).toBe(0);
     expect(densityAt(resampled, 7_000)).toBe(0);
+  });
+
+  it("project a sheet its levels would alias onto them, keeping its column, its edges a level wider (R08.T16.a.2)", () => {
+    // A 50 m sheet at 120 km under a 400 km top, where the levels stand 0.43 km apart: by its
+    // levels' densities it would keep none of its column.
+    const sheet = tabulatedDensity(
+      Float64Array.of(0, 119_975, 120_000, 120_025, 400_000),
+      Float64Array.of(0, 0, 1, 0, 0),
+    );
+    const sampled = tabulatedDensity(
+      densityTableLevelsM(400_000),
+      densityTableLevelsM(400_000).map((h) => densityAt(sheet, h)),
+    );
+    expect(columnLengthM(sampled, 400_000)).toBeLessThan(0.1 * columnLengthM(sheet, 400_000));
+    expect(RESAMPLED_COLUMN_TOLERANCE).toBe(0.01);
+    const resampled = resampledDensity(sheet, 400_000);
+    expect(columnLengthM(resampled, 400_000) / columnLengthM(sheet, 400_000)).toBeCloseTo(1, 12);
+    expect(resampled.relative.every((d) => d >= 0 && d <= 1)).toBe(true);
+    // Its ramps' edges, widened a level further each way, hold every level it spreads over.
+    const [low, , , high] = resampled.edgesM ?? [];
+    const levels = densityTableLevelsM(400_000);
+    const held = [...levels.keys()].filter((k) => (resampled.relative[k] ?? 0) > 0);
+    expect(levels[held[0] ?? -1]).toBeGreaterThan(low ?? Number.NaN);
+    expect(levels[held.at(-1) ?? -1]).toBeLessThan(high ?? Number.NaN);
+  });
+
+  it("mark a projected density, and give the marches at most MARCH_EDGES_MAX cuts, the twin's alike", () => {
+    // Eight 20 m sheets, each with two held ramps: 32 cuts, of which the marches keep the first 16.
+    const sheets: AtmosphereMedium = {
+      ...TABULATED,
+      terms: Array.from({ length: MAX_TERMS }, (_, i) => ({
+        ...GAS,
+        name: `sheet ${i}`,
+        density: tabulatedDensity(
+          Float64Array.of(
+            0,
+            9_000 * (i + 1),
+            9_000 * (i + 1) + 2,
+            9_000 * (i + 1) + 20,
+            9_000 * (i + 1) + 22,
+            100_000,
+          ),
+          Float64Array.of(0, 0, 1, 1, 0, 0),
+        ),
+      })),
+    };
+    const kernel = kernelMedium(sheets);
+    expect(
+      kernel.terms.every((t) => t.density.kind === "tabulated" && t.density.projected === true),
+    ).toBe(true);
+    const packed = packLayerEdges(sheets);
+    expect(marchEdgeCountOf(packed)).toBe(MARCH_EDGES_MAX);
+    expect(mediumMarchEdgesM(kernel)).toHaveLength(MARCH_EDGES_MAX);
+    expect(Float32Array.from(mediumMarchEdgesM(kernel))).toEqual(
+      packed.subarray(MAX_TERMS * EDGES_PER_TERM, MAX_TERMS * EDGES_PER_TERM + MARCH_EDGES_MAX),
+    );
+  });
+
+  it("keep a profile its levels hold within 1% by their own densities", () => {
+    const profile = HAZE.density;
+    if (profile.kind !== "tabulated") {
+      throw new Error("the haze is tabulated");
+    }
+    const resampled = resampledDensity(profile, 100_000);
+    expect([...resampled.relative]).toEqual(
+      [...densityTableLevelsM(100_000)].map((h) => densityAt(profile, h)),
+    );
   });
 
   it("pack one layer a term, and zeros where a term is not tabulated", () => {

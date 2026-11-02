@@ -12,7 +12,9 @@
  * The tables take about 35 s (pod, 16 vCPU, 2026-11-02), the marches a tenth of a second. Before
  * the march shared a cut side's steps by the light each piece returns and took its crossings onto
  * their edges' levels (`marchSteps.ts`'s `depthSharedPieces` and `MARCH_EDGE_LEAST_RISE`), its red
- * read 0.36–0.61 of the march at sixteen times the steps over these rays; it reads within 4.6%.
+ * read 0.36–0.61 of the march at sixteen times the steps over these rays. Since the kernels' tables
+ * keep each deck's column (`tables.ts`'s `resampledDensity`; they drew its H₂O and NH₄SH sheets at
+ * 1.7% of it) and the marches cut a projected sheet at both its ends, it reads within 2.6%.
  */
 import { beforeAll, describe, expect, it } from "vitest";
 

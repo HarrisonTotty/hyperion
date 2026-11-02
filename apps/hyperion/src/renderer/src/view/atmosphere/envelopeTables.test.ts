@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 import { detailOf, recordInput } from "../../test/atmosphereRecords";
 import { handJupiterDetail } from "../../test/giantFixtures";
 import { absorberCurveSlots, assembleMedium } from "./assemble";
-import type { AtmosphereMedium } from "./medium";
-import type { AbsorberCurveSlots } from "./tables";
+import { type AtmosphereMedium, columnLengthM } from "./medium";
+import { type AbsorberCurveSlots, kernelMedium } from "./tables";
 import { planetTwin } from "./tablesCpu";
 import { upperMediumOf } from "./thick/deckRead";
 
@@ -28,6 +28,30 @@ function largestMultiScattering(
 }
 
 describe("a gas envelope's tables (R08.T16.a.2)", () => {
+  it("draw each of the hand Jupiter's decks above its floor at its own column, though its levels alias their sheets", () => {
+    const assembled = assembleMedium(recordInput(detailOf(handJupiterDetail())), {
+      envelopes: true,
+    });
+    if (assembled.medium === undefined || assembled.regime.kind !== "cloudDeck") {
+      throw new Error("the hand Jupiter draws a medium split at its floor");
+    }
+    const upper = upperMediumOf(assembled.medium, assembled.regime.deckAltitudeM);
+    const top = upper.topHeightM;
+    const drawn = kernelMedium(upper);
+    // By its levels' densities the kernels kept 1.7% of its H₂O and NH₄SH decks' columns and 51% of
+    // its NH₃ deck's (2026-11-02).
+    const kept = upper.terms.flatMap((term, i) => {
+      const resampled = drawn.terms[i];
+      return term.name.startsWith("aerosol:") && resampled !== undefined
+        ? [columnLengthM(resampled.density, top) / columnLengthM(term.density, top)]
+        : [];
+    });
+    expect(kept).toHaveLength(4);
+    for (const share of kept) {
+      expect(share).toBeCloseTo(1, 9);
+    }
+  }, 180_000);
+
   it("hold the hand Jupiter's multiple scattering within rgba16float above its floor, where its whole column's diverges", () => {
     const assembled = assembleMedium(recordInput(detailOf(handJupiterDetail())), {
       envelopes: true,

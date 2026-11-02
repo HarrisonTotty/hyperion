@@ -102,6 +102,7 @@ import { MARCH_EDGES_MAX, marchEdgesM } from "./marchSteps";
 import {
   type AtmosphereMedium,
   checkTabulatedTops,
+  columnLengthM,
   type DensityProfile,
   densityAt,
   layerEdgesM,
@@ -1498,9 +1499,10 @@ export function marchEdgeCountOf(packed: Float32Array): number {
  * ({@link kernelMedium}):
  * - for the transmittance kernel, term i's in `vec4f` i, the heights where its density table leaves
  *   0 and where each ramp ends, and −1 in an unused place, for {@link MAX_TERMS} terms;
- * - for the per-frame marches, each ramp as one edge at its middle height (`marchSteps.ts`'s
- *   `marchEdgesM`), the terms' in order in the next {@link MARCH_EDGES_MAX} places, −1 past them,
- *   formed in `f64` and narrowed once, and their count in the `vec4f` after them, (n, 0, 0, 0).
+ * - for the per-frame marches, each ramp as one edge at its middle height, or a projected density's
+ *   at both its ends (`marchSteps.ts`'s `marchEdgesM`), the terms' in order in the next
+ *   {@link MARCH_EDGES_MAX} places, the first of them where there are more, −1 past them, formed in
+ *   `f64` and narrowed once, and their count in the `vec4f` after them, (n, 0, 0, 0).
  *
  * @throws Error when the medium has more than {@link MAX_TERMS} terms, as {@link packMedium}.
  */
@@ -1513,12 +1515,22 @@ export function packLayerEdges(medium: AtmosphereMedium): Float32Array {
   const packed = new Float32Array(LAYER_EDGES_FLOATS).fill(NO_EDGE_M);
   const middles: number[] = [];
   for (const [i, term] of kernelMedium(medium).terms.entries()) {
-    const edges = layerEdgesM(term.density);
+    const density = term.density;
+    const edges = layerEdgesM(density);
     packed.set(edges.slice(0, EDGES_PER_TERM), i * EDGES_PER_TERM);
-    middles.push(...marchEdgesM(edges.slice(0, EDGES_PER_TERM), medium.topHeightM));
+    const projected =
+      density.kind === "tabulated" && density.projected === true
+        ? {
+            densityAt: (heightM: number): number => densityAt(density, heightM),
+            largest: Math.max(...density.relative),
+          }
+        : null;
+    middles.push(...marchEdgesM(edges.slice(0, EDGES_PER_TERM), medium.topHeightM, projected));
   }
-  packed.set(middles, MARCH_EDGES_AT);
-  packed.set([middles.length, 0, 0, 0], MARCH_EDGE_COUNT_AT);
+  // A projected term's ramps take two cuts each, so the marches keep the first MARCH_EDGES_MAX.
+  const kept = middles.slice(0, MARCH_EDGES_MAX);
+  packed.set(kept, MARCH_EDGES_AT);
+  packed.set([kept.length, 0, 0, 0], MARCH_EDGE_COUNT_AT);
   return packed;
 }
 
@@ -1545,10 +1557,30 @@ export function densityTableLevelsM(topHeightM: number): Float64Array {
 }
 
 /**
+ * The most a tabulated density's column under the medium's top may move, as a share of it, when it
+ * is resampled by its density at each level ({@link resampledDensity}) before it is projected onto
+ * the levels instead: 1%.
+ *
+ * @remarks
+ * By its levels' densities a smooth profile keeps its column within 10⁻⁵ (`tables.test.ts`, R08.T3.a's
+ * column and a haze layer), the slab Earth's ozone within 7.7 × 10⁻⁴ and the Venus-class decks'
+ * modes within 0.61% (`venus-58bar`'s second mode), which keep their levels' densities. A deck
+ * whose sedimentation lays its column in a sheet thinner than the levels' spacing is aliased: the
+ * hand Jupiter's H₂O and NH₄SH decks above its floor (`test/giantFixtures.ts`, its NH₃ deck at
+ * f_sed 368, its sheets tens of metres thick under levels 0.4–0.8 km apart) kept 1.7% of theirs, its NH₃ deck 51% and its
+ * chromophore 97.4% (2026-11-02), so the kernels drew its envelope above the floor at green τ 5.7 in
+ * place of 10.2.
+ */
+export const RESAMPLED_COLUMN_TOLERANCE = 0.01;
+
+/**
  * A tabulated density resampled onto its table's levels ({@link densityTableLevelsM}) under the
  * medium's top: its density at each level by the `tabulated` rule, as `medium.wgsl` reads the
  * table, linear in h between levels and constant beyond the last; with its layer's edges, where it
- * has any (`medium.ts`'s `layerEdgesM`), widened outward to the table's levels about them.
+ * has any (`medium.ts`'s `layerEdgesM`), widened outward to the table's levels about them. Where
+ * those densities would move its column by more than {@link RESAMPLED_COLUMN_TOLERANCE}, each
+ * level's density is the profile's projection onto the level's hat function instead,
+ * ∫ ρ φ_k dh ÷ ∫ φ_k dh, which keeps its column exactly, and its edges widen one level further.
  *
  * @remarks
  * A ramp of up to one column interval, about 115 m on a 250 K column, spreads over one to three of
@@ -1557,35 +1589,102 @@ export function densityTableLevelsM(topHeightM: number): Float64Array {
  * resampled ramp lies in the transmittance ray's piece between them and every other piece is
  * smooth. The levels alone could not give them: the first level above 0 may stand inside the old
  * ramp.
+ *
+ * The projection (plan R08, R08.T16.a.2) is a linear interpolant's whose trapezoids sum to the
+ * profile's column: the hat functions φ_k of the levels sum to 1, so Σ_k d_k ∫ φ_k = ∫ ρ, and the
+ * linear interpolant's integral is that sum. A level's density is the profile's mean over its hat,
+ * not negative and not past the profile's largest. A sheet narrower than the levels spreads over
+ * the two levels about it, half a level beyond the profile's support either side, so a projected
+ * profile's edges take the level below the lower edge's and the level above the upper edge's, and
+ * its ramps still lie within their pieces: through the hand Jupiter's sheets the transmittance
+ * kernel's 256 steps then read within 2.4% of 65,536, where they read up to 35% off within the
+ * edges' own levels (2026-11-02). The per-frame marches cut a projected ramp at both its ends
+ * ({@link TabulatedDensity.projected}).
  */
 export function resampledDensity(profile: TabulatedDensity, topHeightM: number): TabulatedDensity {
   const levels = densityTableLevelsM(topHeightM);
-  const resampled = tabulatedDensity(
+  const sampled = tabulatedDensity(
     levels,
     levels.map((h) => densityAt(profile, h)),
   );
+  const column = columnLengthM(profile, topHeightM);
+  const projected =
+    column > 0 &&
+    !(Math.abs(columnLengthM(sampled, topHeightM) / column - 1) <= RESAMPLED_COLUMN_TOLERANCE);
+  const resampled: TabulatedDensity = projected
+    ? { ...tabulatedDensity(levels, projectedDensities(profile, levels)), projected: true }
+    : sampled;
   const edges = layerEdgesM(profile);
   if (edges.length === 0) {
     // A profile that says it has none keeps saying so, whatever its new levels would show.
     return profile.edgesM === undefined ? resampled : { ...resampled, edgesM: [] };
   }
   const last = levels.length - 1;
+  const widened = projected ? 1 : 0;
   const below = (h: number): number => {
     let k = last;
     while (k > 0 && (levels[k] ?? Number.NaN) > h) {
       k -= 1;
     }
-    return levels[k] ?? Number.NaN;
+    return levels[Math.max(k - widened, 0)] ?? Number.NaN;
   };
   const above = (h: number): number => {
     let k = 0;
     while (k < last && (levels[k] ?? Number.NaN) < h) {
       k += 1;
     }
-    return levels[k] ?? Number.NaN;
+    return levels[Math.min(k + widened, last)] ?? Number.NaN;
   };
   // The edges come in pairs, each a ramp's lower and upper edge (`layerEdgesM`).
   return { ...resampled, edgesM: edges.map((h, i) => (i % 2 === 0 ? below(h) : above(h))) };
+}
+
+/**
+ * Each level's density as the profile's projection onto its hat function (plan R08, R08.T16.a.2;
+ * {@link resampledDensity}): ∫ ρ φ_k dh ÷ ∫ φ_k dh over the levels' intervals, each integral by
+ * Simpson's rule between the profile's own levels inside the interval, exact for the product of
+ * two linear functions.
+ */
+function projectedDensities(profile: TabulatedDensity, levels: Float64Array): Float64Array {
+  const sums = new Float64Array(levels.length);
+  const weights = new Float64Array(levels.length);
+  const own = profile.altitudesM;
+  let next = 0;
+  for (let k = 0; k + 1 < levels.length; k += 1) {
+    const a = levels[k] ?? Number.NaN;
+    const b = levels[k + 1] ?? Number.NaN;
+    const width = b - a;
+    weights[k] = (weights[k] ?? 0) + 0.5 * width;
+    weights[k + 1] = (weights[k + 1] ?? 0) + 0.5 * width;
+    const cuts = [a];
+    while (next < own.length && (own[next] ?? Number.NaN) <= a) {
+      next += 1;
+    }
+    while (next < own.length && (own[next] ?? Number.NaN) < b) {
+      cuts.push(own[next] ?? Number.NaN);
+      next += 1;
+    }
+    cuts.push(b);
+    let lower = 0;
+    let upper = 0;
+    for (let j = 0; j + 1 < cuts.length; j += 1) {
+      const x0 = cuts[j] ?? Number.NaN;
+      const x1 = cuts[j + 1] ?? Number.NaN;
+      const xm = 0.5 * (x0 + x1);
+      const share = (x1 - x0) / 6;
+      const r0 = densityAt(profile, x0);
+      const rm = densityAt(profile, xm);
+      const r1 = densityAt(profile, x1);
+      const t0 = (x0 - a) / width;
+      const tm = (xm - a) / width;
+      const t1 = (x1 - a) / width;
+      upper += share * (r0 * t0 + 4 * rm * tm + r1 * t1);
+      lower += share * (r0 * (1 - t0) + 4 * rm * (1 - tm) + r1 * (1 - t1));
+    }
+    sums[k] = (sums[k] ?? 0) + lower;
+    sums[k + 1] = (sums[k + 1] ?? 0) + upper;
+  }
+  return sums.map((sum, k) => sum / (weights[k] ?? Number.NaN));
 }
 
 /**
