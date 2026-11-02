@@ -31,11 +31,13 @@ struct Draw {
 // HULL_OCCLUDER_DEPTH_FRACTION).
 const DEPTH_FRACTION = 0.0000152587890625;
 
+// The position is `@invariant` (W3C WGSL), so that the hulls' cluster path (plan R14, R14.T4.b)
+// places each corner to the same bits as this draw.
 @vertex
 fn vertexMain(
   @location(0) corner: vec3f,
   @builtin(instance_index) instance: u32,
-) -> @builtin(position) vec4f {
+) -> @builtin(position) @invariant vec4f {
   // corner.x is the corner's index in its triangle: 0, 1 or 2.
   let p = corners[(u32(draw.firstTriangle) + instance) * 3u + u32(corner.x)].xyz;
   return frame.clipProjection * frame.viewRotation * vec4f(draw.offsetFromCameraM + p, 1.0);
