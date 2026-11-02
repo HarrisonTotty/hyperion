@@ -236,7 +236,7 @@ fn an_ultracompact_donor_fills_its_lobe_at_its_period() {
 
 /// Gravitational radiation drives 4U 1820−30's donor at about 10⁻⁸ M☉ yr⁻¹, its X-rays' rate (a
 /// few times 10³⁷ erg s⁻¹), and the rate falls as a steep power of the period, about −5, so that
-/// hosts past about 62 minutes lie under the floor.
+/// hosts past about 60 minutes lie under the floor.
 #[test]
 fn gravitational_radiation_drives_an_ultracompact_host() {
     let neutron_star = SolarMasses::new(1.4);
@@ -255,4 +255,25 @@ fn gravitational_radiation_drives_an_ultracompact_host() {
         "{:e}",
         rate(80.0)
     );
+}
+
+/// A cold white dwarf's ζ is its mass–radius relation's own slope: −0.275 at 4U 1820−30's 0.057 M☉
+/// and −0.21 at 0.02 M☉ (research's ruling of 2026-11-02, after van Haaften et al. 2012), and the
+/// relation's numerical slope to a part in 10⁶.
+#[test]
+fn a_cold_white_dwarf_s_zeta_is_its_relation_s_slope() {
+    let at = |mass: f64| cold_white_dwarf_zeta(SolarMasses::new(mass));
+    assert!((at(0.057) + 0.275).abs() < 0.005, "{}", at(0.057));
+    assert!((at(0.02) + 0.21).abs() < 0.01, "{}", at(0.02));
+    for mass in [0.005, 0.01, 0.02, 0.057, 0.1, 0.3] {
+        let step = 1.0e-5;
+        let radius = |m: f64| math::ln(cold_white_dwarf_radius(SolarMasses::new(m)).value());
+        let slope = (radius(mass * (1.0 + step)) - radius(mass * (1.0 - step)))
+            / (math::ln(1.0 + step) - math::ln(1.0 - step));
+        assert!(
+            (slope - at(mass)).abs() < 1e-6,
+            "{mass}: {slope} against {}",
+            at(mass)
+        );
+    }
 }

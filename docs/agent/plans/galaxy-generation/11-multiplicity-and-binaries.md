@@ -7375,11 +7375,12 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     weigh the six alone and nothing moves; the fit at 26 keeps `XrbMark::HELD`'s twenty marks.
   - _Marks_ (`XRB_SAMPLER`'s ten new ones, `@provisional`, for the refit at 27). Ultracompact: a
     period of 10^(1.5 ± 0.16) min on 10–80, a helium white dwarf filling its lobe on Eggleton's
-    cold mass–radius relation (0.057 M☉ at 11.4 min), fed by gravitational radiation (ζ = −1/3;
-    10⁻¹² M☉ yr⁻¹ near 62 min, so the floor takes about 3% of the draws), a transient below the
-    irradiated line taking a recurrence of 10^(1.0 ± 0.4) yr, its progenitor 10^(0.15 ± 0.08) M☉
-    unheld by the turn-off. Symbiotic: detached, 10^(3.0 ± 0.18) d on 200–3,000, a 1–3 M☉ giant at
-    0.5 ± 0.12 of its lobe; the scan refuses it under `SYMBIOTIC_XRB_MIN_LUMINOSITY`
+    cold mass–radius relation (0.057 M☉ at 11.4 min), fed by gravitational radiation (ζ the
+    relation's own slope, −0.275 at 0.057 M☉, after van Haaften et al. 2012; 10⁻¹² M☉ yr⁻¹ near
+    60 min, so the floor takes about 4% of the draws), a transient below the irradiated line
+    taking a recurrence of 10^(1.0 ± 0.4) yr, its progenitor 10^(0.15 ± 0.08) M☉ unheld by the
+    turn-off. Symbiotic: detached, 10^(3.0 ± 0.25) d on 150–5,000, a 1–3 M☉ giant at 0.45 ± 0.12
+    of its lobe; the scan refuses it under `SYMBIOTIC_XRB_MIN_LUMINOSITY`
     (`classify::wind_fed_luminosity`). Black-hole high-mass: the supergiant shape with Cyg X-1's
     black hole, period and donor, and the supergiants' recoil.
   - _Deviations._ The symbiotic giant is not on its own track: a first-giant-branch state at the
@@ -7402,10 +7403,9 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     neutron stars), and the high-mass side rises from 0.0032 to 0.0077. Against the census, the
     scratch marks miss widely, chi-square per degree of freedom 78 (ultracompact periods), 29
     (rates), 86 (accretor masses), 22 (symbiotic periods) and 29 (symbiotic accretor masses), all
-    inside the shared test's scratch tolerance; the refit fits them. The ultracompacts' ζ is fixed
-    at −1/3 (Eggleton's relation gives −0.28 to −0.10 there), their transience reads the hydrogen
-    disc's line (a helium disc's is higher: Lasota, Dubus and Kruk 2008), and their Eddington rate
-    takes hydrogen's 0.7 (it never binds).
+    inside the shared test's scratch tolerance; the refit fits them. The ultracompacts'
+    transience reads the hydrogen disc's line (a helium disc's is higher: Lasota, Dubus and Kruk
+    2008), and their Eddington rate takes hydrogen's 0.7 (it never binds).
   - _Movers at 27_: `xrb_class_hold::the_scan_refuses_a_host_fed_under_the_floor_under_the_arm`
     now scans version 27's table under both arms. New tests: `xrb::kinds_tests` and the slow
     `xrb_class_hold::the_catalogue_draws_the_census_s_kinds`. At 24–26 `golden_diff.py` reports

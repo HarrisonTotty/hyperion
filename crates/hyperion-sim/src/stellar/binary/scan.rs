@@ -772,18 +772,34 @@ pub(crate) fn ultracompact_donor_mass(period: Seconds, accretor_mass: SolarMasse
     SolarMasses::new(f64::midpoint(lo, hi))
 }
 
-/// The mass–radius exponent ζ = d ln R ÷ d ln M of an ultracompact host's donor: −1/3, a cold
-/// low-mass white dwarf's, R ∝ M^(−1/3).
-const ULTRACOMPACT_DONOR_ZETA: f64 = -1.0 / 3.0;
+/// The mass–radius exponent ζ = d ln R ÷ d ln M of a cold white dwarf of `mass`: the slope of
+/// [`cold_white_dwarf_radius`],
+/// `ζ = -(1/3)(u + v)/(u - v) + (2/3)[(7/3)(M/Mp)^(-2/3) + Mp/M]/B`, with `u = (M/Mch)^(-2/3)`,
+/// `v = (M/Mch)^(2/3)` and `B` the relation's second bracket, as van Haaften et al. (2012, A&A
+/// 537, A104) take an ultracompact donor's: −0.275 at 0.057 M☉ and −0.21 at 0.02 M☉, against a
+/// degenerate gas's −1/3 (research's ruling of 2026-11-02).
+#[must_use]
+fn cold_white_dwarf_zeta(mass: SolarMasses) -> f64 {
+    let (m, planet_mass) = (mass.value(), EGGLETON_PLANET_MASS.value());
+    let x = m / EGGLETON_CHANDRASEKHAR_MASS.value();
+    let (lower, upper) = (
+        math::powf_positive(x, -2.0 / 3.0),
+        math::powf_positive(x, 2.0 / 3.0),
+    );
+    let planet_term = math::powf_positive(m / planet_mass, -2.0 / 3.0);
+    let planet = 1.0 + 3.5 * planet_term + planet_mass / m;
+    -(lower + upper) / (3.0 * (lower - upper))
+        + 2.0 / 3.0 * (7.0 / 3.0 * planet_term + planet_mass / m) / planet
+}
 
-/// The rate at which gravitational radiation drives a donor of `donor` onto an accretor of
-/// `accretor` on a circular orbit of semi-major axis `separation`, M☉ yr⁻¹, the transfer
-/// conservative: −Ṁ₂ ÷ M₂ = (−J̇ ÷ J) ÷ (5/6 + ζ ÷ 2 − q), q = M₂ ÷ M₁ and ζ
-/// [`ULTRACOMPACT_DONOR_ZETA`], with J̇ ÷ J = −(32/5) G³ M₁ M₂ (M₁ + M₂) ÷ (c⁵ a⁴) (Paczyński 1967,
-/// Acta Astron. 17, 287; Rappaport, Joss and Webbink 1982, ApJ 254, 616; recalled, not read at
-/// source): about 7 × 10⁻⁹ M☉ yr⁻¹ at 11 minutes beside a 1.4 M☉ neutron star, and 10⁻¹² M☉ yr⁻¹
-/// near 62. Valid for q under 2/3, where the transfer is stable; an ultracompact host's is under
-/// 0.4.
+/// The rate at which gravitational radiation drives a cold white dwarf of `donor` onto an
+/// accretor of `accretor` on a circular orbit of semi-major axis `separation`, M☉ yr⁻¹, the
+/// transfer conservative: −Ṁ₂ ÷ M₂ = (−J̇ ÷ J) ÷ (5/6 + ζ ÷ 2 − q), q = M₂ ÷ M₁ and ζ the dwarf's
+/// own ([`cold_white_dwarf_zeta`]), with J̇ ÷ J = −(32/5) G³ M₁ M₂ (M₁ + M₂) ÷ (c⁵ a⁴) (Paczyński
+/// 1967, Acta Astron. 17, 287; Rappaport, Joss and Webbink 1982, ApJ 254, 616; recalled, not
+/// read at source): about 7 × 10⁻⁹ M☉ yr⁻¹ at 11 minutes beside a 1.4 M☉ neutron star, and
+/// 10⁻¹² M☉ yr⁻¹ near an hour. Valid for q under 2/3, where the transfer is stable; an
+/// ultracompact host's is under 0.4.
 #[must_use]
 pub(crate) fn gravitational_wave_rate(
     accretor: SolarMasses,
@@ -796,7 +812,7 @@ pub(crate) fn gravitational_wave_rate(
     let a2 = a * a;
     let loss = 32.0 / 5.0 * GM_SUN * GM_SUN * GM_SUN * m1 * m2 * (m1 + m2)
         / (c2 * c2 * SPEED_OF_LIGHT * a2 * a2);
-    let response = 5.0 / 6.0 + ULTRACOMPACT_DONOR_ZETA / 2.0 - m2 / m1;
+    let response = 5.0 / 6.0 + cold_white_dwarf_zeta(donor) / 2.0 - m2 / m1;
     debug_assert!(
         response > 0.0,
         "a stable transfer: q = {} under 2/3",
