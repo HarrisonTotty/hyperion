@@ -7410,6 +7410,17 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     now scans version 27's table under both arms. New tests: `xrb::kinds_tests` and the slow
     `xrb_class_hold::the_catalogue_draws_the_census_s_kinds`. At 24–26 `golden_diff.py` reports
     "No golden files changed".
+  - _Symbiotic X-ray binaries bounded_ (research's ruling of 2026-11-02, `fix-p11-syxb-bounds`).
+    From 27 the wind-fed giant arm of `classify` makes a symbiotic X-ray binary only of a neutron
+    star, never a black hole (none is known; Deng and Li 2024, ApJ 977, 95, predict at most one
+    in six), beside a K–M giant at `SYMBIOTIC_XRB_MAX_TEFF` = 5,000 K or cooler, under 8 M☉,
+    inside `SYMBIOTIC_XRB_MAX_FILLING` = 0.8 of its lobe (`fills_lobe_share`, the wind disc's test
+    generalised), on an orbit of `SYMBIOTIC_XRB_MAX_PERIOD` = 10⁴ d or less. The floor stays at
+    10³² erg s⁻¹, its source corrected to Yungelson, Kuranov and Postnov 2019 (MNRAS 485, 851).
+    The sampler's periods widen to 150–5,000 d (IGR J16194−2810's 192.7 d to 4U 1700+24's
+    4,391 d, Hinkle et al. 2019) and its giants' filling to 0.15–0.75, inside the bound.
+    _Finding_: about a dozen census members remain, some 15 in the Galaxy, against the models'
+    240 (Yungelson et al. 2019) or 100–1,000 (Lü et al. 2012).
   - _Deviation._ A timeline from marks has no history, so a Be star spun up by transfer is one in
     the engine's timeline alone; `classify`'s marks round trip skips such pairs.
   - _A Be star feeds a neutron star alone_ (main's ruling of 2026-11-01: the black holes' 0.145 of

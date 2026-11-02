@@ -28,8 +28,9 @@
 //!    binary; one fed by the wind of a star of [`HMXB_MIN_DONOR_MASS`] or more above
 //!    [`XRB_MIN_LUMINOSITY`] is a supergiant X-ray binary, and one fed by a lighter giant's wind
 //!    above [`SYMBIOTIC_XRB_MIN_LUMINOSITY`] a symbiotic X-ray binary, a low-mass kind (ruling
-//!    129.3); a white dwarf fed by a giant's wind above [`SYMBIOTIC_MIN_LUMINOSITY`] is a symbiotic
-//!    star, however wide the orbit (design note 7).
+//!    129.3; from 27 a neutron star beside a cool giant inside its lobe on an orbit of some years,
+//!    `xrb_class`); a white dwarf fed by a giant's wind above [`SYMBIOTIC_MIN_LUMINOSITY`] is a
+//!    symbiotic star, however wide the orbit (design note 7).
 //! 4. **One star** of the pair: a recycled radio pulsar faster than 30 ms is a millisecond pulsar
 //!    (`recycling.rs`); the helium giant under the Chandrasekhar mass that a helium and a
 //!    carbon–oxygen (or oxygen–neon) white dwarf merge into is an R Coronae Borealis star; a helium
@@ -71,7 +72,10 @@ use super::recycling::{PulsarAt, is_millisecond_pulsar, pulsar_at};
 use super::rlof::NOVA_RATE;
 use super::star::{G, Kind, Surface};
 use super::timeline::{BinaryState, BinaryTimeline, Component, SegmentKind};
-use super::xrb_class::{SPUN_UP_GAINED_SHARE, WIND_DISC_ROCHE_FILLING, XRB_MIN_TRANSFER_RATE};
+use super::xrb_class::{
+    SPUN_UP_GAINED_SHARE, SYMBIOTIC_XRB_MAX_FILLING, SYMBIOTIC_XRB_MAX_PERIOD,
+    SYMBIOTIC_XRB_MAX_TEFF, WIND_DISC_ROCHE_FILLING, XRB_MIN_TRANSFER_RATE,
+};
 
 /// The kinds of cataclysmic variable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -219,8 +223,8 @@ pub const XRB_MIN_LUMINOSITY: Watts = Watts::new(1.0e28);
 
 /// The least accretion luminosity at which a neutron star or black hole fed by the wind of a giant
 /// lighter than [`HMXB_MIN_DONOR_MASS`] is a symbiotic X-ray binary, W: 10³² erg s⁻¹, the faint end
-/// of the known systems (Yungelson et al. 2019, A&A 632, A3, table 1 and section 4.1; ruling
-/// 129.3).
+/// of the known systems (Yungelson, Kuranov and Postnov 2019, MNRAS 485, 851, table 1 and section
+/// 4.1; ruling 129.3).
 pub const SYMBIOTIC_XRB_MIN_LUMINOSITY: Watts = Watts::new(1.0e25);
 
 /// The longest orbital period of a Be/X-ray binary, days: 1,000 (provisional; ruling 129.2). The
@@ -768,8 +772,13 @@ fn pair_class(state: &BinaryState, ctx: &ClassContext<'_>) -> Option<Classified>
         if is_neutron_star_or_black_hole(cp) && massive {
             // From 27 a black hole takes a wind only through a disc (`xrb_class`).
             let needs_disc = ctx.rules.xrb_class.carves() && cp == Phase::BlackHole;
-            let disc =
-                !needs_disc || fills_for_a_wind_disc(donor, compact, orbit.semi_major_axis());
+            let disc = !needs_disc
+                || fills_lobe_share(
+                    donor,
+                    compact,
+                    orbit.semi_major_axis(),
+                    WIND_DISC_ROCHE_FILLING,
+                );
             if disc && luminosity >= XRB_MIN_LUMINOSITY.value() {
                 return Some(Classified::fed(
                     BinaryClass::HighMassXrayBinary(HmxbKind::Supergiant),
@@ -782,7 +791,14 @@ fn pair_class(state: &BinaryState, ctx: &ClassContext<'_>) -> Option<Classified>
         if !is_giant(donor.phase()) {
             continue;
         }
-        if is_neutron_star_or_black_hole(cp) && luminosity >= SYMBIOTIC_XRB_MIN_LUMINOSITY.value() {
+        // From 27 a symbiotic X-ray binary is a neutron star beside a cool giant inside its lobe on
+        // an orbit of some years (`xrb_class`): a black hole fed by a giant's wind is dormant.
+        let symbiotic = !ctx.rules.xrb_class.carves()
+            || is_symbiotic_xrb_pair(compact, donor, (orbit.semi_major_axis(), period));
+        if is_neutron_star_or_black_hole(cp)
+            && symbiotic
+            && luminosity >= SYMBIOTIC_XRB_MIN_LUMINOSITY.value()
+        {
             return Some(Classified::fed(
                 BinaryClass::LowMassXrayBinary(XrbKind::Symbiotic),
                 c,
@@ -825,17 +841,41 @@ fn is_b_main_sequence(star: &StarState, draws: &StarDraws, rules: StellarRules) 
         && rotation::fossil_field(star, draws).is_none()
 }
 
-/// Whether `donor` fills [`WIND_DISC_ROCHE_FILLING`] of its Roche lobe beside `compact` on an
-/// orbit of semi-major axis `separation` (Eggleton 1983), where its wind forms a disc about a
-/// black hole from [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION).
+/// Whether `donor` fills `share` of its Roche lobe beside `compact` on an orbit of semi-major axis
+/// `separation` (Eggleton 1983): from [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION)
+/// a massive star's wind forms a disc about a black hole at [`WIND_DISC_ROCHE_FILLING`], and a
+/// symbiotic X-ray binary's giant lies inside [`SYMBIOTIC_XRB_MAX_FILLING`].
 #[must_use]
-fn fills_for_a_wind_disc(donor: &StarState, compact: &StarState, separation: Metres) -> bool {
+fn fills_lobe_share(
+    donor: &StarState,
+    compact: &StarState,
+    separation: Metres,
+    share: f64,
+) -> bool {
     let (m_donor, m_compact) = (donor.mass().value(), compact.mass().value());
     if !(m_donor > 0.0 && m_compact > 0.0) {
         return false;
     }
     let lobe = roche_lobe_radius(m_donor / m_compact, separation).value();
-    donor.radius().value() * SOLAR_RADIUS_M >= WIND_DISC_ROCHE_FILLING * lobe
+    donor.radius().value() * SOLAR_RADIUS_M >= share * lobe
+}
+
+/// Whether the compact star `compact` beside the giant `donor` on an orbit of semi-major axis
+/// `separation` and `period` is a symbiotic X-ray binary's pair from
+/// [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION): a neutron star, a giant at
+/// [`SYMBIOTIC_XRB_MAX_TEFF`] or cooler and inside [`SYMBIOTIC_XRB_MAX_FILLING`] of its lobe, on
+/// an orbit of [`SYMBIOTIC_XRB_MAX_PERIOD`] or less (`xrb_class`). A donor under
+/// [`HMXB_MIN_DONOR_MASS`] is the arm's own.
+#[must_use]
+fn is_symbiotic_xrb_pair(
+    compact: &StarState,
+    donor: &StarState,
+    (separation, period): (Metres, Days),
+) -> bool {
+    compact.phase() == Phase::NeutronStar
+        && donor.effective_temperature() <= SYMBIOTIC_XRB_MAX_TEFF
+        && !fills_lobe_share(donor, compact, separation, SYMBIOTIC_XRB_MAX_FILLING)
+        && period <= SYMBIOTIC_XRB_MAX_PERIOD
 }
 
 /// The rate at which component `1 − d` takes `d`'s wind, M☉ yr⁻¹: [`wind_rate_onto`] on the
@@ -1604,6 +1644,57 @@ mod tests {
         let white_dwarf = star(Phase::CarbonOxygenWhiteDwarf, 0.8, 1e-2, 0.01, 0.0);
         let t = detached([white_dwarf, giant], 1_000.0, draws);
         assert!(!t.class_at(now).is_xray_binary());
+    }
+
+    /// From 27 (`xrb_class`) a symbiotic X-ray binary is a neutron star beside a cool giant inside
+    /// 0.8 of its lobe on an orbit of 10⁴ days or less: a black hole, a giant hotter than 5,000 K,
+    /// one filling 0.87 of its lobe and an orbit of 2 × 10⁴ days each make none, as each made one
+    /// under the held rules.
+    #[test]
+    fn under_the_carving_a_symbiotic_x_ray_binary_is_a_neutron_star_beside_a_cool_giant() {
+        let held = StellarRules::of_version(crate::GENERATOR_VERSION);
+        let carved = StellarRules {
+            xrb_class: crate::stellar::binary::xrb_class::XrbClassRules::Carved,
+            ..held
+        };
+        let draws = [StarDraws::median(), StarDraws::median()];
+        let params = BinaryParams::default();
+        let class = |stars: [StarState; 2], period: f64, rules: StellarRules| {
+            let now = Years::new(1.0e8);
+            let state = detached(stars, period, draws.clone()).state_at(now);
+            let ctx = ClassContext::new(
+                &Composition::SOLAR,
+                [&draws[0], &draws[1]],
+                &params,
+                ([None, None], None),
+                [None; 2],
+                rules,
+            );
+            classify(&state, &ctx)
+        };
+        let symbiotic = BinaryClass::LowMassXrayBinary(XrbKind::Symbiotic);
+        let neutron_star = star(Phase::NeutronStar, 1.4, 1e-4, 1.7e-5, 0.0);
+        let black_hole = star(Phase::BlackHole, 7.0, 0.0, 3.0e-5, 0.0);
+        // 3,860 K, 0.22 of its lobe 1,000 days out.
+        let giant = star(Phase::FirstGiantBranch, 1.5, 500.0, 50.0, 1.0e-8);
+        // 6,860 K, a giant on its blue loop.
+        let hot = star(Phase::CoreHeliumBurning, 5.0, 5_000.0, 50.0, 1.0e-8);
+        // 2,730 K, 0.87 of its lobe 1,000 days out.
+        let full = star(Phase::FirstGiantBranch, 1.5, 2_000.0, 200.0, 1.0e-8);
+        assert!(giant.effective_temperature() <= SYMBIOTIC_XRB_MAX_TEFF);
+        assert!(hot.effective_temperature() > SYMBIOTIC_XRB_MAX_TEFF);
+        assert_eq!(class([neutron_star, giant], 1_000.0, held), symbiotic);
+        assert_eq!(class([neutron_star, giant], 1_000.0, carved), symbiotic);
+        for (stars, period) in [
+            ([black_hole, giant], 1_000.0),
+            ([neutron_star, hot], 1_000.0),
+            ([neutron_star, full], 1_000.0),
+            ([neutron_star, giant], 2.0e4),
+        ] {
+            let what = (stars[0].phase(), stars[1].phase(), period);
+            assert_eq!(class(stars, period, held), symbiotic, "{what:?}");
+            assert_ne!(class(stars, period, carved), symbiotic, "{what:?}");
+        }
     }
 
     /// Design note 7: a pair too wide to interact is classified from its state, and a white dwarf

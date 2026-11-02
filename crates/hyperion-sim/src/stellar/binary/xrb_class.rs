@@ -40,10 +40,18 @@
 //!   made the black holes' share of the young disc's high-mass hosts, 0.145 against at most 0.01,
 //!   a wrong state: 62 of its 64 black holes were beside Be stars, most spun up by transfer, and
 //!   none fed by a wind filled the Roche share its disc needs.
+//! - **A symbiotic X-ray binary is a neutron star fed by a cool giant's wind.** It needs a neutron
+//!   star, never a black hole: none is known, and Deng and Li (2024, ApJ 977, 95) predict at most
+//!   one in six as many as of neutron stars, where the census held seven black holes to one; a
+//!   black hole fed by a giant's wind is a dormant pair, as Gaia BH2 is. Its giant is a K or M
+//!   giant at [`SYMBIOTIC_XRB_MAX_TEFF`] or cooler, under 8 M☉, inside
+//!   [`SYMBIOTIC_XRB_MAX_FILLING`] of its Roche lobe, on an orbit of [`SYMBIOTIC_XRB_MAX_PERIOD`]
+//!   or less (research's ruling of 2026-11-02): the census's wide pairs, at a median 7 × 10⁴ days,
+//!   and its blue-loop giants of some 5 M☉ are no symbiotic X-ray binaries.
 //!
 //! Every figure is recalled, not read at source (the science checks of 2026-11-01 reached none);
 //! the floor sits at the very faint transients' upper bound, so it may cut the faintest of them.
-//! The rules' one `match` is [`XrbClassRules::carves`], which each of the four reads in
+//! The rules' one `match` is [`XrbClassRules::carves`], which each of the rules reads in
 //! `classify` through the pair's own rules, and the X-ray binaries' scan reads for the floor
 //! through the galaxy's, so that it keeps exactly the class's entries whichever rules the class's
 //! test reads (its timelines, built from marks, take the version's). A timeline built from marks
@@ -53,7 +61,7 @@
 //! from 27.
 
 use crate::GeneratorVersion;
-use crate::units::SolarMassesPerYear;
+use crate::units::{Days, Kelvin, SolarMassesPerYear};
 
 /// The generator version whose stellar rules carve the X-ray binaries anew (P11.T5's and P11.T8.b's
 /// fix): [`XrbClassRules::Carved`].
@@ -62,7 +70,7 @@ use crate::units::SolarMassesPerYear;
 /// every generated value keeps its bits; the tests reach the new arm through
 /// `StellarRules::every_27_hold()`. The bump to 27 deletes this hold: this module's version and
 /// [`XrbClassRules`] (its constants move to `classify`), the stellar rules' `xrb_class` field,
-/// the calls of [`XrbClassRules::carves`] (`classify`'s four and the X-ray binaries' scan's) and
+/// the calls of [`XrbClassRules::carves`] (`classify`'s and the X-ray binaries' scan's) and
 /// the context's gainer masses, and the tripwire (`the_xrb_class_is_held_only_until_the_27_bump`).
 pub(crate) const XRB_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
@@ -71,11 +79,12 @@ pub(crate) const XRB_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(27)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum XrbClassRules {
     /// Versions 24–26's: every Roche-lobe overflow onto a compact star, every wind-fed black hole
-    /// above the luminosity floor, and a Be star by its own draw beside a neutron star or a black
-    /// hole.
+    /// above the luminosity floor, a Be star by its own draw beside a neutron star or a black hole,
+    /// and every compact star fed by a giant's wind above its floor a symbiotic X-ray binary.
     Held,
     /// Version 27's: the floor on the transfer rate, the spun-up Be donors, the wind-fed black
-    /// holes' disc and Be/X-ray binaries of neutron stars alone (module documentation).
+    /// holes' disc, Be/X-ray binaries of neutron stars alone and the symbiotic X-ray binaries'
+    /// bounds (module documentation).
     Carved,
 }
 
@@ -104,3 +113,18 @@ pub(crate) const SPUN_UP_GAINED_SHARE: f64 = 0.1;
 /// The least share of its Roche lobe a massive star must fill for its wind to form a disc about a
 /// black hole, from 27: 0.9 (Hirai and Mandel 2021, PASA 38, e56; recalled, provisional).
 pub(crate) const WIND_DISC_ROCHE_FILLING: f64 = 0.9;
+
+/// The hottest a symbiotic X-ray binary's giant may be from 27: 5,000 K, a K–M giant's, from its
+/// first giant branch through the asymptotic one, which leaves out the core-helium-burning giants
+/// of some 5 M☉ on their blue loops (research's ruling of 2026-11-02; the known systems' donors
+/// are K and M giants, GX 1+4's an M6 III, Hinkle et al. 2006, ApJ 641, 479).
+pub(crate) const SYMBIOTIC_XRB_MAX_TEFF: Kelvin = Kelvin::new(5_000.0);
+
+/// The largest share of its Roche lobe a symbiotic X-ray binary's giant may fill from 27: 0.8, a
+/// detached pair fed by the giant's wind (research's ruling of 2026-11-02).
+pub(crate) const SYMBIOTIC_XRB_MAX_FILLING: f64 = 0.8;
+
+/// The longest orbital period of a symbiotic X-ray binary from 27: 10⁴ days, past the longest
+/// measured, 4U 1700+24's 4,391 d (Hinkle et al. 2019, ApJ 872, 43; research's ruling of
+/// 2026-11-02).
+pub(crate) const SYMBIOTIC_XRB_MAX_PERIOD: Days = Days::new(1.0e4);

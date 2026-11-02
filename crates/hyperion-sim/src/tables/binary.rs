@@ -1503,11 +1503,13 @@ impl SamplerKey for XrbPick {
 ///   donor's progenitor of 10^(0.15 ± 0.08) M☉ on 0.9–2.3, ours, a low-mass giant whose core it
 ///   is.
 /// - **Symbiotic X-ray binaries**, marked detached and fed by their giant's wind: periods 10^(3.0
-///   ± 0.18) days on 200–3,000 (GX 1+4's 1,161 d, Hinkle et al. 2006, ApJ 641, 479); giants of
-///   10^(0.176 ± 0.07) M☉, 1.5 M☉, on 1–3; and the giant's radius 0.5 ± 0.12 of its Roche lobe's,
-///   ours, at the accreting white dwarfs' giant donors' 3,600 K (`awd`) and no larger than the red
-///   giant branch's tip there (`catalogue_classes::binary`'s 129 R☉), so that its luminosity and
-///   its Reimers wind follow.
+///   ± 0.25) days on 150–5,000, the measured ones running from IGR J16194−2810's 192.7 d to 4U
+///   1700+24's 4,391 d (Hinkle et al. 2019, ApJ 872, 43) about GX 1+4's 1,161 d (Hinkle et al.
+///   2006, ApJ 641, 479); giants of 10^(0.176 ± 0.07) M☉, 1.5 M☉, on 1–3; and the giant's radius
+///   0.45 ± 0.12 of its Roche lobe's on 0.15–0.75, ours, inside the carving's detached 0.8
+///   (`stellar::binary::xrb_class`), at the accreting white dwarfs' giant donors' 3,600 K (`awd`)
+///   and no larger than the red giant branch's tip there (`catalogue_classes::binary`'s 129 R☉),
+///   so that its luminosity and its Reimers wind follow.
 /// - **Black-hole high-mass X-ray binaries**, marked in Roche-lobe overflow as the supergiant
 ///   systems are, with their recoils and years since the supernova: Cyg X-1's black hole, 21.2 ±
 ///   2.2 M☉ on 15–30, its period, 10^(0.748 ± 0.1) days on 2–10 about its 5.6 d, and its O
@@ -1643,10 +1645,10 @@ const XRB_MARKS: [SamplerMark; 30] = [
     ),
     SamplerMark::new(
         "log_symbiotic_period_days",
-        normal_about(3.0, 0.18),
+        normal_about(3.0, 0.25),
         None,
-        // 200 and 3,000 days.
-        (2.301_030, 3.477_121),
+        // 150 and 5,000 days.
+        (2.176_091, 3.698_970),
     ),
     SamplerMark::new(
         "log_symbiotic_donor_mass",
@@ -1654,7 +1656,7 @@ const XRB_MARKS: [SamplerMark; 30] = [
         None,
         (0.0, 0.477_121),
     ),
-    SamplerMark::new("symbiotic_filling", normal_about(0.5, 0.12), None, (0.2, 0.8)),
+    SamplerMark::new("symbiotic_filling", normal_about(0.45, 0.12), None, (0.15, 0.75)),
     SamplerMark::new(
         "black_hole_high_mass_accretor_mass",
         normal_about(21.2, 2.2),

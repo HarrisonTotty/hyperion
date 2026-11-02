@@ -63,8 +63,8 @@
 //!   movers).
 //! - [`xrb_class`](StellarRules::xrb_class), at [`XRB_CLASS_VERSION`] (plan 11, P11.T5's and
 //!   P11.T8.b's fix): what `classify` counts as an X-ray binary, a floor on the transfer rate onto
-//!   a compact star, Be donors spun up by stable transfer, a wind-fed black hole's disc and Be/X
-//!   of neutron stars alone, each
+//!   a compact star, Be donors spun up by stable transfer, a wind-fed black hole's disc, Be/X of
+//!   neutron stars alone and symbiotic X-ray binaries of neutron stars beside cool giants, each
 //!   read through [`XrbClassRules::carves`] and each timeline's rules
 //!   (`stellar/rules/xrb_class_hold.rs` lists the movers).
 //! - [`awd_donors`](StellarRules::awd_donors), at [`AWD_DONORS_VERSION`] (plan 11, P11.T5's fix):

@@ -222,7 +222,7 @@ fn the_xrb_class_is_held_only_until_the_27_bump() {
     assert!(
         GENERATOR_VERSION < XRB_CLASS_VERSION,
         "the bump to 27 deletes P11.T5's and P11.T8.b's X-ray binary hold: `XRB_CLASS_VERSION`, \
-         `XrbClassRules` with its `Held` arm, `StellarRules::xrb_class`, `classify`'s four \
+         `XrbClassRules` with its `Held` arm, `StellarRules::xrb_class`, `classify`'s \
          calls of `carves` and the context's gainer masses, the X-ray binaries' scan's, this \
          module and its line in `stellar/rules.rs`"
     );

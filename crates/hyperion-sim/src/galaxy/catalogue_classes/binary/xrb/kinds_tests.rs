@@ -17,7 +17,10 @@ use crate::galaxy::catalogue_classes::{CatalogueClassCell, CatalogueEntry};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
 use crate::stellar::binary::scan::{engine_calls, scan_cell, ultracompact_donor_mass};
-use crate::stellar::binary::xrb_class::XRB_MIN_TRANSFER_RATE;
+use crate::stellar::binary::xrb_class::{
+    SYMBIOTIC_XRB_MAX_FILLING, SYMBIOTIC_XRB_MAX_PERIOD, SYMBIOTIC_XRB_MAX_TEFF,
+    XRB_MIN_TRANSFER_RATE,
+};
 use crate::stellar::binary::{
     BinaryClass, BinaryParams, HmxbKind, SYMBIOTIC_XRB_MIN_LUMINOSITY, XrbKind, classify,
     wind_fed_luminosity, xrb_line,
@@ -387,14 +390,16 @@ fn ultracompact_hosts_lie_at_10_to_80_minutes_and_fill_their_lobes() {
 }
 
 /// A symbiotic host's neutron star takes its giant's wind at or above the symbiotic X-ray binaries'
-/// floor, as `classify` reads it; the giant lies inside its Roche lobe on a period of 200–3,000
-/// days, and the pair is detached.
+/// floor, as `classify` reads it; the pair is detached on a period of 150–5,000 days, and it keeps
+/// the carving's bounds, which the class's test reads from 27: a giant at 5,000 K or cooler, inside
+/// 0.8 of its Roche lobe, on an orbit of 10⁴ days or less (`xrb_class`).
 #[test]
 fn every_symbiotic_accretor_is_at_or_above_the_floor() {
     for entry in new_entries_of(XrbHostKind::Symbiotic) {
         let (scan, binary) = (entry.scan(), entry.binary());
         let days = scan.period().value() / SECONDS_PER_DAY;
-        assert!((200.0..=3_000.0).contains(&days), "{days}");
+        assert!((150.0..=5_000.0).contains(&days), "{days}");
+        assert!(days <= SYMBIOTIC_XRB_MAX_PERIOD.value(), "{days}");
         assert_eq!(binary.accretor().phase(), Phase::NeutronStar);
         let giant = binary.donor();
         assert_eq!(giant.phase(), Phase::FirstGiantBranch);
@@ -407,7 +412,8 @@ fn every_symbiotic_accretor_is_at_or_above_the_floor() {
         )
         .value()
             / SOLAR_RADIUS_M;
-        assert!(giant.radius().value() < lobe);
+        assert!(giant.radius().value() < SYMBIOTIC_XRB_MAX_FILLING * lobe);
+        assert!(giant.effective_temperature() <= SYMBIOTIC_XRB_MAX_TEFF);
         let accretor = binary.accretor();
         let luminosity = wind_fed_luminosity(
             (accretor.mass(), accretor.radius()),
