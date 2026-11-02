@@ -15,7 +15,7 @@
 //! - Every entry is its class at every age, under one candidate in ten fails, the scan keeps
 //!   exactly the cells' entries without stepping the engine, and the cells do not depend on the
 //!   order they are generated in.
-//! - Slow: the class against the engine's own mergers at 48,000 members, an effective 1,233 (17
+//! - Slow: the class against the engine's own mergers at 48,000 members, an effective 1,236 (17
 //!   times P11.T8.c's 73), by chi-square per degree of freedom by mark under every 27 hold and
 //!   under the 26 arm, pinned as measured, with the engine's channel split and its donors' mass
 //!   ratios by kind printed.
@@ -491,7 +491,7 @@ fn the_27_cells_do_not_depend_on_order() {
     });
 }
 
-/// The engine members the slow test measures the class against: 48,000, an effective 1,233 under
+/// The engine members the slow test measures the class against: 48,000, an effective 1,236 under
 /// these weights, 17 times P11.T8.c's 3,000 (an effective 73).
 const REFERENCE_MEMBERS: usize = 48_000;
 
@@ -680,7 +680,7 @@ fn engine_reference(galaxy: &Galaxy) -> Vec<([f64; 3], f64, bool)> {
 
 /// The class against the engine under every 27 hold and under the 26 arm (P11.T8.c's missing
 /// channel): the pair's total mass, mass ratio and primary's initial mass of the engine's own
-/// mergers, 48,000 members weighted as mergers in the horizon (an effective 1,233), in the
+/// mergers, 48,000 members weighted as mergers in the horizon (an effective 1,236), in the
 /// deciles of 10,000 of the class's entries in the same place ([`catalogue`]), by chi-square per
 /// degree of freedom, pinned as measured (a miss of P15.T10.b's 3.1 is a finding); with the same
 /// against the engine's mergers the class's channels cover, the engine's shares of the class's

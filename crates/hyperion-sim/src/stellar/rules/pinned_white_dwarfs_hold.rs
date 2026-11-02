@@ -28,10 +28,11 @@
 //! the goldens `stellar/binary_timelines` (pairs 0252, 0438 and 0902 of the pinned thousand) and
 //! `sky/census_near_sun` (layer D's and E's stars without photometry, 916 and 571, fall to 914 and
 //! 560: held cores in place of white dwarfs), and this module's tests of the version's arm. Nothing
-//! moves at 24–26. Under every 27 hold two slow pins are re-pinned with this hold:
-//! `engine_channels_hold`'s chi-squares, and `heavy_donor_hold::census_of_the_heavy_donors`'s
-//! accreting white dwarfs, 4,116 to 4,106, as ten pinned primaries a pair made white dwarfs
-//! collapse to neutron stars at their pins instead.
+//! moves at 24–26. Under every 27 hold three slow pins are re-pinned with this hold:
+//! `engine_channels_hold`'s chi-squares; `heavy_donor_hold::census_of_the_heavy_donors`'s accreting
+//! white dwarfs, 4,116 to 4,106, as ten pinned primaries a pair made white dwarfs collapse to
+//! neutron stars at their pins instead; and the neutron stars of
+//! `ns_accretion_hold::census_of_the_neutron_star_accretion`, 1,132 to 1,143.
 
 use std::sync::OnceLock;
 

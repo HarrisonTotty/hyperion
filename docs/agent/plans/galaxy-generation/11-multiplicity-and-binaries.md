@@ -7426,7 +7426,7 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
 - **P11.T4's pinned white dwarfs, held at 27** (lane `fix-p11-t4-pin-white-dwarfs`, 2026-11-01;
   research-leans-26's item 2; at versions 24–26 nothing moves).
   - _The hold._ `PINNED_WHITE_DWARFS_VERSION` = 27 (`stellar/binary/pinned_white_dwarfs.rs`),
-    `StellarRules::pinned_white_dwarfs` (`PinnedWhiteDwarfRules::{Born, Held}`, one `match`,
+    `StellarRules::pinned_white_dwarfs` (`PinnedWhiteDwarfRules::{Born, Frozen}`, one `match`,
     `holds`). From 27 a pinned primary whose pin is pending (`Engine::pin_pending`) is never a white
     dwarf: `stripped_member_at`'s white-dwarf arm holds it `Frozen` as the `Ended` arm does, from
     `Remains::WhiteDwarf`'s new `core` and `core_radius`, and the pin collapses it from that mass.
@@ -7436,9 +7436,13 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   - _Lean (2026-11-01)._ A merger's product that no star of its kind can hold (`new_star`'s
     fallback to its core's white dwarf) is held by `Engine::held_product`: the kind's phase at the
     core's mass, with that white dwarf's L and R. Like the held arm's dwarf, it drops the envelope.
-  - _Measured_ (layer E's 10⁴ under every 27 hold): 63 pinned primaries miss without the arm (55
-    white dwarfs at their pin, 8 later collapses), none with it; `PIN_MISSES` is 0, and the slow
-    test now counts a pin with no record in a pair the engine ran. On this tree the old count was
-    8, not 9.
+  - _Lean (2026-11-01)._ A held core at or above M_Ch, where HPT eq. 91 has no white dwarf (the
+    12 km floor), shows the helium ZAMS star of its mass (HPT eqs. 77–78, `sse::bare_core_light`).
+  - _Measured_ (layer E's 10⁴ under every 27 hold, on P11.T10's fix): of 5,421 pinned primaries
+    63 miss without the arm (55 white dwarfs at their pin, 8 later collapses; 59 systems), none
+    with it. `PIN_MISSES` is 0 (was 63).
   - _For the bump to 27._ It moves the goldens `stellar/binary_timelines` (pairs 0252, 0438, 0902)
-    and `sky/census_near_sun` (layers D and E without photometry, 916 → 914 and 571 → 560).
+    and `sky/census_near_sun` (layers D and E without photometry, 916 → 914 and 571 → 560). Under
+    every 27 hold it re-pins `engine_channels_hold`'s χ², `heavy_donor_hold`'s census (accreting
+    white dwarfs 4,116 → 4,106: pinned primaries now neutron stars) and `ns_accretion_hold`'s (its
+    neutron stars 1,132 → 1,143; members 1,159, the pin's 1,154 already stale on P11.T10's fix).

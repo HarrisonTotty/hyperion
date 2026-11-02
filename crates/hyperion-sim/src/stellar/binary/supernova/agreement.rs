@@ -96,8 +96,9 @@ const STRIPPED_PIN: f64 = 0.02;
 const RELEASED_PIN: (f64, f64) = (0.75, 1.25);
 
 /// The pinned primaries the engine collapses other than at plan 06's death age, remnant and kick,
-/// or not at all, as measured: a finding ([`binary_kick_massive_primaries_die_as_plan_06_says`]).
-const PIN_MISSES: usize = 63;
+/// or not at all, as measured ([`binary_kick_massive_primaries_die_as_plan_06_says`]): none since
+/// P11.T4's pinned white-dwarf fix, against 63 without it.
+const PIN_MISSES: usize = 0;
 
 /// The Milky Way fixture under every 27 hold.
 fn galaxy() -> &'static Galaxy {
@@ -863,13 +864,15 @@ fn binary_kick_most_black_holes_are_unkicked() {
 /// collapse at that star's death age, with its remnant and kick; one with no record is a miss.
 ///
 /// As measured (2026-11-01, with P11.T10's fix, which records the 237 collapses of pairs the
-/// pre-test passed over) 63 of 5,421 pinned primaries are not. Each is a primary of 8.0–9.5 M☉,
-/// pinned at 29–42.5 Myr, that its pair makes a white dwarf before its pin, by a common envelope
-/// and case-BB transfer or by a merger: 55 then have no collapse at all, and 8 collapse later
-/// from the pair's merger or an accretion-induced collapse, at 45–128 Myr (system
-/// `0x81f7_b160_0000_0018` of the sample: pinned at 42.02 Myr, its merger's neutron star at
-/// 63.33 Myr). An engine fault of P11.T4's pin (`fix-p11-t4-pin-white-dwarfs`), logged as a
-/// finding and pinned here at that count.
+/// pre-test passed over) every one of 5,421 pinned primaries is, under every 27 hold
+/// ([`PIN_MISSES`]). Without P11.T4's pinned white-dwarf fix ([`PinnedWhiteDwarfRules::Frozen`]) 63
+/// are not: primaries of 8.0–9.5 M☉, pinned at 29–42.5 Myr, that their pair makes a white dwarf
+/// before their pin, by a common envelope and case-BB transfer or by a merger. 55 then have no
+/// collapse at all, and 8 collapse later from the pair's merger or an accretion-induced collapse,
+/// at 45–128 Myr (system `0x81f7_b160_0000_0018` of the sample: pinned at 42.02 Myr, its merger's
+/// neutron star at 63.33 Myr). They are 59 systems: the sample draws some cells twice.
+///
+/// [`PinnedWhiteDwarfRules::Frozen`]: crate::stellar::binary::pinned_white_dwarfs::PinnedWhiteDwarfRules::Frozen
 #[test]
 #[ignore = "slow: 10⁴ systems of layer E, their pairs run through the engine"]
 fn binary_kick_massive_primaries_die_as_plan_06_says() {
@@ -929,7 +932,7 @@ fn binary_kick_massive_primaries_die_as_plan_06_says() {
         missed.len()
     );
     assert!(collapses > 1_000, "{collapses}");
-    assert!(missed.len() <= PIN_MISSES, "{missed:?}");
+    assert_eq!(missed.len(), PIN_MISSES, "{missed:?}");
 }
 
 /// A retained remnant that keeps its companion moves at the pair's recoil: over layer E's
