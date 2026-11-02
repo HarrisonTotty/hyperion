@@ -10,7 +10,6 @@ use crate::galaxy::quad::bisect;
 use crate::math;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::premain;
-use crate::stellar::remnant::Death;
 use crate::stellar::rules::StellarRules;
 use crate::stellar::substellar;
 use crate::stellar::{Composition, StarState};
@@ -103,32 +102,33 @@ pub(crate) fn lifetime_under(
     )
 }
 
-/// The death of a star of initial mass `m0`, `composition` and `draws` under the stellar stage's
-/// `rules`: how and when it dies and what it was at its last living instant, at
-/// [`lifetime_under`]'s cost, whose lifetime is its age, bit for bit.
+/// The whole track of a star of initial mass `m0`, `composition` and `draws` under the stellar
+/// stage's `rules`: [`Track::full_with`] under the generator's options with `rules`, whose death is
+/// `track::fate_of`'s of the same arguments, bit for bit, at its cost and some 0–60% more for the
+/// segments it keeps (290–490 µs at 8.5–80 M☉, solar, median draws; release, pod, 2026-11-02).
 ///
-/// It is the death of the star's [`StarModel`](crate::stellar::system::StarModel) generated in a
-/// galaxy under `rules`, whose track's fate it is (`Track::full`'s, from a build that keeps no
-/// segment): a caller that needs the lifetime and then asks whether the death makes a supernova
-/// pays for one build, not two (plan 09, the core-collapse class's screen).
+/// It is the track of the star's [`StarModel`](crate::stellar::system::StarModel) generated in a
+/// galaxy under `rules` wherever that star dies by the clock window's end: its model's track is
+/// built to an age at or past its death, which [`Track::to_age_with`] builds whole. So a caller
+/// that asks how the star dies, and then builds its stars on the track, pays for one build, not two
+/// (plan 09, the core-collapse class's candidates and their test, P09.T37's bench).
 ///
 /// # Panics
 ///
 /// In debug builds, if `m0` lies outside [`Track`]'s range, 0.1–150 M☉.
 #[must_use]
-pub(crate) fn death_under(
+pub(crate) fn track_under(
     m0: SolarMasses,
     composition: &Composition,
     draws: &StarDraws,
     rules: StellarRules,
-) -> Death {
-    track::fate_of(
+) -> Track {
+    Track::full_with(
         m0,
         composition,
         draws,
         TrackOptions::default().with_rules(rules),
     )
-    .death
 }
 
 /// The state at `age` of a star on a main sequence without knots: [`Track::state_at`] of its

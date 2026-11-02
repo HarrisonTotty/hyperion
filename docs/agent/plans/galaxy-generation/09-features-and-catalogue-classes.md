@@ -5908,3 +5908,6 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Centre's census._ `CentreModel` keeps each level's and band's bounds by corner key
     (`members::CornerBounds`, made when first read, 370 kB, bounded by the grid);
     `CentreMemberSource` reads no cell and no list for a sphere asked for no layer.
+  - _One track._ `sse::track_under` (the whole track) replaces `death_under`; a core-collapse
+    candidate keeps it and its test builds the stars on it (`StarModel::on_track_under`,
+    `system::primary_model_on_track`).

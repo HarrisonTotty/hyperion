@@ -984,6 +984,7 @@ fn the_grid_s_runaways_and_the_class_agree_on_their_deaths_and_claims() {
                     composition,
                     draws,
                     lifetime: life,
+                    track: None,
                     age_at_epoch: record.age_at_epoch(),
                     velocity: epoch_velocity(galaxy, &record),
                     ejection: None,
@@ -1053,6 +1054,50 @@ fn the_screen_refuses_no_entry() {
     assert!(
         kept > 20 && refused > (tested - kept) / 2,
         "{tested} {refused} {kept}"
+    );
+}
+
+/// P09.T37's bench: a candidate keeps the whole track its step 3 built, whose lifetime it carries,
+/// and its test builds the primary's stars on it, the stars built again before, bit for bit: in
+/// the centre's cell and the sample cells, under every 27 hold, for every candidate the thinning
+/// keeps, of the field and of the ejected terms, each dying by the clock window's end.
+#[test]
+fn a_candidate_s_test_builds_its_stars_on_the_candidate_s_track() {
+    let galaxy = galaxy();
+    let process = CoreCollapseProcess::new(galaxy);
+    let cells: Vec<CatalogueCellKey> = sample_cells().into_iter().step_by(3).collect();
+    let (mut kept, mut ejected, mut dying) = (0_u32, 0_u32, 0_u32);
+    for cell in cells.iter().chain([&key([0, 0, 0])]) {
+        let bound = process.bound(galaxy, cell);
+        for index in 0..candidate_count(galaxy.seed(), cell, bound) {
+            let id = cell.candidate_id(index, 0).unwrap();
+            let Some(candidate) = process.candidate(galaxy, cell, id, bound) else {
+                continue;
+            };
+            let track = candidate
+                .track
+                .as_deref()
+                .expect("a candidate keeps its track");
+            assert_eq!(track.lifetime(), Some(candidate.lifetime), "{id:?}");
+            let record = candidate.record(candidate.site);
+            let end = record.age_at(ClockWindow::END).value();
+            assert!(candidate.lifetime.value() <= end, "{id:?} dies by +H");
+            let again = SystemStars::generate_with(
+                galaxy,
+                &record,
+                &candidate.composition,
+                MultiplicityContext::ForcedSingle,
+            );
+            assert_eq!(candidate.primary_stars(galaxy, &record), again, "{id:?}");
+            kept += 1;
+            ejected += u32::from(candidate.ejection.is_some());
+            dying += u32::from(RecentDeath::of(galaxy, &candidate).is_some());
+        }
+    }
+    eprintln!("{kept} candidates kept, {ejected} ejected, {dying} with a shell");
+    assert!(
+        kept > 20 && ejected > 0 && dying > 0,
+        "{kept} {ejected} {dying}"
     );
 }
 

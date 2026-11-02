@@ -469,6 +469,56 @@ impl StarModel {
         Ok(model)
     }
 
+    /// [`new_under`](Self::new_under) of a star of 0.1 M☉ or more that dies by the clock window's
+    /// end, on `track`, its whole track ([`sse::track_under`] of its track mass, `composition`,
+    /// `draws` and `rules`) built already: the model `new_under` builds, bit for bit, since the
+    /// track that builds to an age at or past the star's death is the whole track, without
+    /// building it again (plan 09, the core-collapse class's test on its candidate's track,
+    /// P09.T37's bench).
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](Self::new).
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `track` is not of the star's track mass, composition and options, or
+    /// does not end in a death by the clock window's end.
+    pub(crate) fn on_track_under(
+        m0: SolarMasses,
+        composition: Composition,
+        draws: StarDraws,
+        age_at_epoch: Years,
+        rules: StellarRules,
+        track: Arc<Track>,
+    ) -> Result<Self, BuildStarModelError> {
+        check_star_inputs(m0, age_at_epoch)?;
+        let mut model = Self {
+            initial_mass: m0,
+            composition,
+            draws,
+            age_at_epoch,
+            evolution: Evolution::Cooling,
+            remnant: None,
+            rules,
+        };
+        debug_assert!(
+            track.initial_mass() == model.track_mass()
+                && track.composition() == &model.composition
+                && track.options() == model.track_options(),
+            "a star's model is built on its own track"
+        );
+        debug_assert!(
+            track
+                .lifetime()
+                .is_some_and(|life| life.value() <= model.age_at(ClockWindow::END).value()),
+            "a model is built on a whole track only where its star dies by the window's end"
+        );
+        model.remnant = remnant_stage(&track, &model.draws, model.rules);
+        model.evolution = Evolution::Track(track);
+        Ok(model)
+    }
+
     /// A helium white dwarf of mass `m`, `age_at_epoch` since it became one, under `rules`: plan
     /// 11's naked helium star below the lightest that burns helium, a helium white dwarf from its
     /// start (`Track::helium_star`). Plan 09's hypervelocity survivors of the slow band are such
@@ -3388,6 +3438,45 @@ pub(crate) fn primary_model(
         galaxy.rules().stellar,
     )
     .expect("a grid record's primary is a star or a brown dwarf, with a finite age");
+    with_record_kick(galaxy, record, model)
+}
+
+/// [`primary_model`] of `record` at `composition` on `track`, the primary's whole track built
+/// already ([`StarModel::on_track_under`]): the same model and attempts, bit for bit, for a
+/// record whose primary is not a helium donor and dies by the clock window's end, its track not
+/// built again (plan 09, the core-collapse class's test, P09.T37's bench).
+///
+/// # Panics
+///
+/// As [`primary_model`], and in debug builds as [`StarModel::on_track_under`], or if the record's
+/// primary is a hypervelocity survivor's helium white dwarf.
+#[must_use]
+pub(crate) fn primary_model_on_track(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: Composition,
+    track: Arc<Track>,
+) -> (StarModel, u32) {
+    debug_assert!(
+        !is_helium_donor(record),
+        "a helium white dwarf has no whole track to be built on"
+    );
+    let model = StarModel::on_track_under(
+        record.primary_initial_mass(),
+        composition,
+        primary_draws(galaxy, record),
+        record.age_at_epoch(),
+        galaxy.rules().stellar,
+        track,
+    )
+    .expect("a record's primary is a star or a brown dwarf, with a finite age");
+    with_record_kick(galaxy, record, model)
+}
+
+/// `model`, `record`'s primary's, with the kick loop [`primary_model`] runs where the record
+/// constrains its kick, and the attempts it made: 1 where it constrains none.
+#[must_use]
+fn with_record_kick(galaxy: &Galaxy, record: &SystemRecord, model: StarModel) -> (StarModel, u32) {
     let Some(constraint) = record.kick_range(galaxy) else {
         return (model, 1);
     };

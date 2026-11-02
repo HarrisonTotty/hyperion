@@ -111,9 +111,13 @@
 //!   by two bounds on the test that read no star: after the site's pick, a death T at or before
 //!   the start of the interval of the longest window the field could cut at the site for either of
 //!   the system's core-collapse energies (`field_window_bound`); and at step 3, whose lifetime is
-//!   now its death's (`death_under`, the same build), a death that makes no supernova. Neither
+//!   now its death's (`track_under`, the same build), a death that makes no supernova. Neither
 //!   refuses a candidate the test keeps, so the entries are the same bit for bit; at the centre's
 //!   cell they refuse 286 of the 287 the test would, which had cost a lifetime and a star each.
+//! - **One track.** Step 3 builds the primary's whole track, its death and lifetime the same bits
+//!   as a build that keeps no segment, and the test builds the primary's stars on it: a death in
+//!   the interval is a death by the clock window's end, whose model's track is the whole track,
+//!   so a kept candidate pays for one track, not two (P09.T37's bench).
 //!
 //! So each star's deaths split between the field term, the features and the classes at its mass
 //! exactly as the model's shares do: the field drops what the classes take and the features drop
@@ -133,6 +137,7 @@
 //! [`death_in_interval`]: crate::galaxy::displaced::death_in_interval
 
 use std::cell::LazyCell;
+use std::sync::Arc;
 
 use super::grid::{CatalogueMember, ClassProcess};
 use super::ids::CatalogueCellKey;
@@ -168,9 +173,9 @@ use crate::rng::{DomainTag, Mark, ObjectKey, Stream, Threshold, tags};
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::MultiplicityContext;
-use crate::stellar::sse::death_under;
-use crate::stellar::system::{SystemStars, track_mass_of};
-use crate::time::{CLOCK_WINDOW_H, Span, UniverseTime};
+use crate::stellar::sse::{Track, track_under};
+use crate::stellar::system::{SystemStars, primary_draws, primary_model_on_track, track_mass_of};
+use crate::time::{CLOCK_WINDOW_H, ClockWindow, Span, UniverseTime};
 use crate::units::{
     Dex, HeliumExcess, KilometresPerSecond, LightYears, PerCubicLightYear, SolarMasses, Years,
 };
@@ -541,6 +546,10 @@ pub struct CoreCollapseCandidate {
     /// The primary's lifetime under the galaxy's stellar rules, which the shared test's exact tier
     /// reads rather than computing it again.
     lifetime: Years,
+    /// The primary's whole track under the galaxy's stellar rules, built for its death, which the
+    /// test builds the primary's stars on rather than building it again (P09.T37's bench); `None`
+    /// for a test's candidate on a grid record's marks.
+    track: Option<Arc<Track>>,
     age_at_epoch: Years,
     velocity: GalacticVelocity,
     ejection: Option<Ejection>,
@@ -1289,12 +1298,7 @@ impl RecentDeath {
             || draws.clone(),
             candidate.lifetime,
         )?;
-        let stars = SystemStars::generate_with(
-            galaxy,
-            record,
-            &candidate.composition,
-            MultiplicityContext::ForcedSingle,
-        );
+        let stars = candidate.primary_stars(galaxy, record);
         let site = ExplosionSite::new(candidate.site, death);
         let marks = DeathMarks::of(galaxy, &stars, &site, candidate.velocity)?;
         Some(Self { stars, site, marks })
@@ -1334,6 +1338,40 @@ impl RecentDeath {
 }
 
 impl CoreCollapseCandidate {
+    /// The stars of `record`, the candidate's primary alone:
+    /// [`SystemStars::generate_with`] under [`MultiplicityContext::ForcedSingle`], bit for bit,
+    /// the primary's model built on the candidate's whole track where it is the record's primary's
+    /// own (its initial mass and draws) and the primary dies by the clock window's end, as every
+    /// death in the interval does, so that the test builds no track again (P09.T37's bench).
+    #[must_use]
+    fn primary_stars(&self, galaxy: &Galaxy, record: &SystemRecord) -> SystemStars {
+        let end =
+            record.age_at_epoch().value() + ClockWindow::END.since_epoch().as_julian_years_f64();
+        let own = |track: &&Arc<Track>| {
+            track.lifetime().is_some_and(|life| life.value() <= end)
+                && record.primary_initial_mass() == self.mass
+                && primary_draws(galaxy, record) == self.draws
+        };
+        match self.track.as_ref().filter(own) {
+            Some(track) => {
+                let (primary, _) =
+                    primary_model_on_track(galaxy, record, self.composition, Arc::clone(track));
+                SystemStars::generate_of_primary(
+                    galaxy,
+                    record,
+                    primary,
+                    MultiplicityContext::ForcedSingle,
+                )
+            }
+            None => SystemStars::generate_with(
+                galaxy,
+                record,
+                &self.composition,
+                MultiplicityContext::ForcedSingle,
+            ),
+        }
+    }
+
     /// The candidate's record with its system at `position` at the epoch.
     #[must_use]
     fn record(&self, position: GalacticPosition) -> SystemRecord {
@@ -1353,7 +1391,7 @@ impl CoreCollapseProcess {
     /// from 27 (P09.T33.b), under [`Screening::Shared`], none where the shared test cannot keep it
     /// by bounds that cost no star: its death T past every window the field could cut at its site
     /// ([`out_of_reach`](Self::out_of_reach)), read after the site's pick, and its death no
-    /// supernova, read from the lifetime's own build ([`death_under`]). The test refuses either,
+    /// supernova, read from the lifetime's own build ([`track_under`]). The test refuses either,
     /// so the entries are the same; the candidates the class's own tests count are
     /// [`Screening::Off`]'s.
     #[must_use]
@@ -1425,12 +1463,13 @@ impl CoreCollapseProcess {
         //    08's predicate's exact tier computes it, under the galaxy's stellar rules: its
         //    death's age, from 27 refused where that death makes no supernova.
         let draws = StarDraws::for_star(seed, BodyId::new(system, 0));
-        let primary = death_under(
+        let track = track_under(
             track_mass_of(mass),
             &composition,
             &draws,
             galaxy.rules().stellar,
         );
+        let primary = track.death().expect("a whole track reaches its death");
         if screened.is_some() && SupernovaKind::of_death(&primary).is_none() {
             return None;
         }
@@ -1459,6 +1498,7 @@ impl CoreCollapseProcess {
             composition,
             draws,
             lifetime,
+            track: Some(Arc::new(track)),
             age_at_epoch,
             velocity,
             ejection: None,
@@ -1537,12 +1577,13 @@ impl CoreCollapseProcess {
         // 3. The primary's draws and lifetime, its death's age, refused where that death makes no
         //    supernova.
         let draws = StarDraws::for_star(seed, BodyId::new(system, 0));
-        let primary = death_under(
+        let track = track_under(
             track_mass_of(mass),
             &composition,
             &draws,
             galaxy.rules().stellar,
         );
+        let primary = track.death().expect("a whole track reaches its death");
         if screening == Screening::Shared && SupernovaKind::of_death(&primary).is_none() {
             return None;
         }
@@ -1586,6 +1627,7 @@ impl CoreCollapseProcess {
             composition,
             draws,
             lifetime,
+            track: Some(Arc::new(track)),
             age_at_epoch,
             velocity,
             ejection: Some(Ejection {
@@ -1828,6 +1870,7 @@ pub(crate) fn test_on_grid_marks(
         composition,
         draws,
         lifetime,
+        track: None,
         age_at_epoch: record.age_at_epoch(),
         velocity: epoch_velocity(galaxy, record),
         ejection: None,
