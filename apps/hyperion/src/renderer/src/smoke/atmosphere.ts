@@ -68,6 +68,7 @@ import {
   type AtmosphereCamera,
   type AtmosphereFrameKernels,
   atmosphereInputs,
+  type CompositeTransmittance,
   bodyOfFigure,
   createAtmosphereFrameKernels,
   curveSlotOf,
@@ -210,6 +211,7 @@ import {
   type TexelRect,
   type TextureHandle,
   type ViewSize,
+  type WgslMaterialSpec,
 } from "../view/engine/types";
 import { exposureScale } from "../view/photometry/exposure";
 import { METER_CLASS } from "../view/post/meter";
@@ -236,6 +238,7 @@ import {
   expectedLighting,
   type LightingProbeCase,
 } from "../view/appearance/litBodyProbe";
+import { rec709Luminance } from "../view/atmosphere/solar";
 import { surfaceLightingTablesOf } from "../view/atmosphere/surfaceLighting";
 import { probeSurfaceLighting } from "./litBody";
 import { attempt, handled, inOrder, type OrderedChecks } from "./ordered";
@@ -3707,6 +3710,417 @@ async function compositeAreaReadsOf(
       engine.releaseMaterial(drawn.material);
     }
   }
+}
+
+// --- The owner's priority: what lies behind the sky at the march's resolution --------------------
+
+/** {@link checkCompositeBehind}'s frames' size: twice R08.T11.d's on each axis, the limb fewer rows. */
+const BEHIND_FRAME_SIZE: ViewSize = { widthPx: 320, heightPx: 180 };
+
+/** The most a sky pixel's luminance may move between the composite's two paths, stops. */
+const BEHIND_STOPS = 1 / 3;
+
+/** The share of a frame's sky pixels the check holds within {@link BEHIND_STOPS}. */
+const BEHIND_SHARE = 0.995;
+
+/**
+ * The luminance under which two pixels are not told apart, as a share of the frame's brightest:
+ * R08's 5% metric's floor, 6 × 10⁻³ (`hillaire.ts`'s `TABLE_SIZES`).
+ */
+const BEHIND_FLOOR_SHARE = 6e-3;
+
+/** How many of the pixels beyond {@link BEHIND_STOPS} a check lists, the worst first. */
+const BEHIND_LISTED = 5;
+
+/**
+ * {@link checkCompositeBehind}'s dark sky behind the air: a band's faint light over every pixel and
+ * a star at one pixel in 61, each `draw.tint`'s (rgb the band, w the star's factor over it); with no
+ * depth, as R06's sky is drawn.
+ */
+const DARK_SKY_WGSL = `${FRAME_WGSL}
+struct Draw {
+  offsetFromCameraM : vec3f,
+  tint : vec4f,
+}
+@group(1) @binding(0) var<uniform> draw : Draw;
+
+@vertex fn vertexMain(@location(0) position : vec3f) -> @builtin(position) vec4f {
+  let viewSpace = frame.viewRotation * vec4f(position + draw.offsetFromCameraM, 1.0);
+  return frame.clipProjection * viewSpace;
+}
+
+@fragment fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
+  let p = vec2u(position.xy);
+  let star = (p.x * 7u + p.y * 13u) % 61u == 0u;
+  return vec4f(select(draw.tint.rgb, draw.tint.rgb * draw.tint.w, star), 0.0);
+}
+`;
+
+/**
+ * The dark sky's band, pre-exposed (rgb), 10⁻³ of the pre-exposure's white, and its stars' factor
+ * over it (w), 10³, a star as bright as the white: under EV 15 ({@link SMOKE_EV100}) the band stands
+ * for some 40 cd/m², far above the night sky's, so that what lies behind still shows against the
+ * limb's fainter light.
+ */
+const DARK_SKY_TINT = [1e-3, 1e-3, 1.2e-3, 1e3] as const;
+
+/** A sky's material for {@link checkCompositeBehind}: `wgsl`'s, drawn with no depth, as R06's sky is. */
+function behindSpec(name: string, wgsl: string): WgslMaterialSpec {
+  return flatSpec(name, { vertexWgsl: wgsl, fragmentWgsl: wgsl, depthWrite: false });
+}
+
+/** The Rec. 709 luminance of texel `i` of an `rgba` read-back (`solar.ts`' rec709Luminance). */
+function luminanceOf(texels: Float32Array, i: number): number {
+  return rec709Luminance([texels[4 * i] ?? 0, texels[4 * i + 1] ?? 0, texels[4 * i + 2] ?? 0]);
+}
+
+/**
+ * The owner's priority (2026-11-01): the composite that takes what lies behind its sky from above
+ * the top at the march's resolution (`AtmosphereSettings`' `march`, `compositeBehind.wgsl`) draws
+ * every frame within 1/3 stop of the composite that forms it per pixel (`per-pixel`, the way back)
+ * over at least 99.5% of its sky pixels, the rest listed. R08.T11.d's measured Earth from above its
+ * air in its frames with no surface (400 km, 10⁷ m and 10⁸ m), each at low's sizes, whose march is at
+ * half resolution, over two scenes: the patterned scene of {@link checkCompositeArea}, a light
+ * behind every sky pixel up to some 10⁴, which the composite forms per pixel nearly everywhere
+ * (`composite.wgsl`'s `behindAtMarch`), and a dark sky of a faint band and bright stars
+ * ({@link DARK_SKY_WGSL}), as a view's sky is, over which it takes the march's resolution. The scene
+ * draws the body's face with a depth where a pixel's ray meets its datum ({@link datumFaceOf},
+ * {@link faceMeshOf}), as a view draws the body, and every other pixel is sky. Each sky pixel's
+ * Rec. 709 luminance is compared, both under the 5% metric's floor counting as within.
+ */
+export async function checkCompositeBehind(engine: RenderEngine, checks: Checks): Promise<void> {
+  const kernels = await createAtmosphereFrameKernels(engine, { reads: "by slot", behind: true });
+  const [body] = AREA_BODIES;
+  const skyMesh = fullScreenMesh(engine, "composite behind sky");
+  const scenes: ReadonlyArray<{
+    readonly name: string;
+    readonly sky: DrawnMesh;
+    readonly tint: Tint;
+  }> = [
+    {
+      name: "patterned",
+      sky: {
+        mesh: skyMesh,
+        material: engine.createMaterial(behindSpec("composite behind pattern", PATTERN_WGSL)),
+      },
+      tint: [0, 0, 0, 0],
+    },
+    {
+      name: "a dark sky",
+      sky: {
+        mesh: skyMesh,
+        material: engine.createMaterial(behindSpec("composite behind dark sky", DARK_SKY_WGSL)),
+      },
+      tint: DARK_SKY_TINT,
+    },
+  ];
+  const faceMaterial = engine.createMaterial(flatSpec("composite behind face"));
+  try {
+    if (body === undefined) {
+      throw new Error("R08.T11.d's check has no body");
+    }
+    const sliced = body.body();
+    const tables = new AtmosphereTables(
+      engine,
+      body.medium,
+      tableRadiusM(sliced.figure),
+      body.curves,
+      sliced,
+    );
+    try {
+      for (const frame of body.frames.filter((each) => each.surfaceM === null)) {
+        const figure = tablesFigureOf(tables);
+        const face = datumFaceOf(
+          farLimbTimingCamera(frame.distanceM, BEHIND_FRAME_SIZE, figure),
+          figure,
+        );
+        const faceMesh = faceMeshOf(engine, face, BEHIND_FRAME_SIZE);
+        try {
+          for (const scene of scenes) {
+            const drawn = {
+              sky: scene.sky,
+              tint: scene.tint,
+              face: { mesh: faceMesh, material: faceMaterial },
+            };
+            // The harness's GPU work runs in order: each frame is read back before the next draws.
+            // oxlint-disable-next-line no-await-in-loop
+            const perPixel = await behindReadsOf(
+              engine,
+              tables,
+              kernels,
+              frame,
+              drawn,
+              "per-pixel",
+            );
+            // oxlint-disable-next-line no-await-in-loop
+            const atMarch = await behindReadsOf(engine, tables, kernels, frame, drawn, "march");
+            const apart = luminanceStopsApart(
+              perPixel.texels,
+              atMarch.texels,
+              face,
+              BEHIND_FRAME_SIZE,
+            );
+            const share = apart.pixels > 0 ? apart.within / apart.pixels : 0;
+            const listed = apart.worst
+              .map(
+                (each) =>
+                  `(${each.x}, ${each.y}) ${each.perPixel.toPrecision(3)} against ${each.atMarch.toPrecision(3)}, ${each.stops.toFixed(2)} stops`,
+              )
+              .join("; ");
+            checks.check(
+              `the owner's priority ${body.name}, ${frame.name} at low's sizes over ${scene.name}: the composite with what lies behind its sky at the march's resolution is within 1/3 stop of the per-pixel composite over at least 99.5% of its sky pixels`,
+              atMarch.formed && !perPixel.formed && share >= BEHIND_SHARE,
+              `${apart.within} of ${apart.pixels} sky pixels within 1/3 stop (${(100 * share).toFixed(2)}%), ${apart.differing} differing at all, the largest ${apart.largestStops.toFixed(2)} stops; the march's target ${atMarch.formed ? "formed" : "not formed"}, the per-pixel composite's ${perPixel.formed ? "formed" : "not formed"}${listed.length > 0 ? `; beyond: ${listed}` : ""}`,
+            );
+          }
+        } finally {
+          engine.releaseMesh(faceMesh);
+        }
+      }
+    } finally {
+      tables.dispose();
+    }
+  } finally {
+    engine.releaseMesh(skyMesh);
+    for (const scene of scenes) {
+      engine.releaseMaterial(scene.sky.material);
+    }
+    engine.releaseMaterial(faceMaterial);
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/** One composite of {@link checkCompositeBehind}, read back. */
+interface BehindReads {
+  readonly texels: Float32Array;
+  /** Whether the frame formed what lies behind its sky at the march's resolution (`levers.x`). */
+  readonly formed: boolean;
+}
+
+/** A mesh and the material it is drawn by. */
+interface DrawnMesh {
+  readonly mesh: MeshHandle;
+  readonly material: MaterialHandle;
+}
+
+/**
+ * The body's face as a view draws it, for {@link checkCompositeBehind}: a rectangle over each row's
+ * run of `face`'s pixels (`datumFaceOf`), their edges on the pixels' under the harness's
+ * projection, 10⁶ m ahead, so that each face pixel has a depth and no sky pixel does.
+ */
+function faceMeshOf(engine: RenderEngine, face: Uint8Array, size: ViewSize): MeshHandle {
+  const { widthPx, heightPx } = size;
+  const aspect = widthPx / heightPx;
+  const aheadM = 1e6;
+  const positions: number[] = [];
+  const xOf = (px: number): number => ((2 * px) / widthPx - 1) * aspect * aheadM;
+  const yOf = (py: number): number => (1 - (2 * py) / heightPx) * aheadM;
+  for (let y = 0; y < heightPx; y += 1) {
+    let x = 0;
+    while (x < widthPx) {
+      if (face[y * widthPx + x] !== 1) {
+        x += 1;
+        continue;
+      }
+      const from = x;
+      while (x < widthPx && face[y * widthPx + x] === 1) {
+        x += 1;
+      }
+      const [x0, x1, y0, y1] = [xOf(from), xOf(x), yOf(y + 1), yOf(y)];
+      positions.push(
+        ...[x0, y0, x1, y0, x1, y1, x0, y0, x1, y1, x0, y1].flatMap((v, i) =>
+          i % 2 === 1 ? [v, -aheadM] : [v],
+        ),
+      );
+    }
+  }
+  return engine.createMesh({
+    name: "composite behind face",
+    // A frame with no face draws one degenerate triangle.
+    positions: new Float32Array(positions.length > 0 ? positions : [0, 0, -1, 0, 0, -1, 0, 0, -1]),
+    indices: null,
+    topology: "triangle-list",
+    attributes: {},
+  });
+}
+
+/** A flat material's tint, `draw.tint`. */
+type Tint = readonly [number, number, number, number];
+
+/**
+ * One frame of {@link checkCompositeBehind}: `tables` over the body's face and a sky at low's sizes,
+ * its composite under `transmittance` drawn full-screen and read back.
+ */
+async function behindReadsOf(
+  engine: RenderEngine,
+  tables: AtmosphereTables,
+  kernels: AtmosphereFrameKernels,
+  frame: AreaFrame,
+  drawn: { readonly sky: DrawnMesh; readonly tint: Tint; readonly face: DrawnMesh },
+  transmittance: CompositeTransmittance,
+): Promise<BehindReads> {
+  const atmosphere = HillaireAtmosphere.over(engine, tables, twinSizes(TABLE_SIZES.low), kernels, {
+    compositeTransmittance: transmittance,
+  });
+  const targetOf = (name: string, depth: boolean): RenderTarget =>
+    engine.createRenderTarget({
+      name,
+      size: BEHIND_FRAME_SIZE,
+      format: "rgba16float",
+      mips: 1,
+      depth,
+      category: "render-targets",
+    });
+  const scene = targetOf("composite behind scene", true);
+  const output = targetOf("composite behind", false);
+  try {
+    const figure = tablesFigureOf(tables);
+    const camera = farLimbTimingCamera(frame.distanceM, BEHIND_FRAME_SIZE, figure);
+    const sun: SunState = {
+      ...limbSunToward(
+        frame.distanceM,
+        figure,
+        FAR_LIMB_TIMING_SUN_ZENITH_DEG,
+        FAR_LIMB_TIMING_SUN_AZIMUTH_DEG,
+        FAR_LIMB_TIMING_FRAME,
+      ),
+      drawsDisc: false,
+    };
+    const aspect = BEHIND_FRAME_SIZE.widthPx / BEHIND_FRAME_SIZE.heightPx;
+    scene.render(
+      frameOf(
+        "composite behind scene",
+        [
+          drawOf(drawn.face.mesh, drawn.face.material, [
+            SURFACE_GREY,
+            SURFACE_GREY,
+            SURFACE_GREY,
+            1,
+          ]),
+          drawOf(drawn.sky.mesh, drawn.sky.material, drawn.tint),
+        ],
+        aspect,
+      ),
+    );
+    const composite = atmosphere.drawFrame(camera, [sun], {
+      colour: scene.colour,
+      depth: requireDepth(scene.depth),
+      nearM: NEAR_M,
+      exposureScale: SMOKE_EXPOSURE_SCALE,
+    });
+    output.render(frameOf("composite behind", [composite], aspect));
+    return {
+      texels: halfTexels(await engine.readTexture(output.colour)),
+      formed: (composite.uniforms["levers"]?.[0] ?? 0) === 1,
+    };
+  } finally {
+    atmosphere.dispose();
+    scene.dispose();
+    output.dispose();
+  }
+}
+
+/** A pixel whose luminance moved beyond {@link BEHIND_STOPS} between the composite's two paths. */
+interface BehindPixel {
+  readonly x: number;
+  readonly y: number;
+  readonly perPixel: number;
+  readonly atMarch: number;
+  readonly stops: number;
+}
+
+/**
+ * Which pixels of `camera`'s viewport have a ray, through the pixel's centre as the composite forms
+ * it (`view.wgsl`'s `rayThrough`), that meets the datum spheroid of `figure` ahead: 1 where it does.
+ */
+function datumFaceOf(camera: AtmosphereCamera, figure: SpheroidFigure): Uint8Array {
+  const { widthPx, heightPx } = camera.viewport;
+  const tanX = Math.tan(camera.fovXRad / 2);
+  const tanY = (tanX * heightPx) / widthPx;
+  const right = rotate(camera.orientation, { x: 1, y: 0, z: 0 });
+  const up = rotate(camera.orientation, { x: 0, y: 1, z: 0 });
+  const forward = rotate(camera.orientation, { x: 0, y: 0, z: -1 });
+  // In space scaled to the sphere of the equatorial radius.
+  const a = figure.equatorialRadiusM;
+  const k = a / figure.polarRadiusM;
+  const o = { x: camera.positionM.x, y: camera.positionM.y, z: camera.positionM.z * k };
+  const face = new Uint8Array(widthPx * heightPx);
+  for (let y = 0; y < heightPx; y += 1) {
+    for (let x = 0; x < widthPx; x += 1) {
+      const nx = (2 * (x + 0.5)) / widthPx - 1;
+      const ny = 1 - (2 * (y + 0.5)) / heightPx;
+      const d = {
+        x: forward.x + nx * tanX * right.x + ny * tanY * up.x,
+        y: forward.y + nx * tanX * right.y + ny * tanY * up.y,
+        z: (forward.z + nx * tanX * right.z + ny * tanY * up.z) * k,
+      };
+      const qa = d.x * d.x + d.y * d.y + d.z * d.z;
+      const qb = o.x * d.x + o.y * d.y + o.z * d.z;
+      const qc = o.x * o.x + o.y * o.y + o.z * o.z - a * a;
+      const disc = qb * qb - qa * qc;
+      face[y * widthPx + x] = disc >= 0 && -qb - Math.sqrt(disc) > 0 ? 1 : 0;
+    }
+  }
+  return face;
+}
+
+/**
+ * How far apart two `rgba` read-backs of `size` lie by each sky pixel's Rec. 709 luminance (`face`
+ * 0), in stops: the sky pixels, those within {@link BEHIND_STOPS} (both under
+ * {@link BEHIND_FLOOR_SHARE} of the first's brightest counting as within), those that differ at
+ * all, the largest apart and the worst {@link BEHIND_LISTED} beyond it.
+ */
+function luminanceStopsApart(
+  perPixel: Float32Array,
+  atMarch: Float32Array,
+  face: Uint8Array,
+  size: ViewSize,
+): {
+  readonly pixels: number;
+  readonly within: number;
+  readonly differing: number;
+  readonly largestStops: number;
+  readonly worst: ReadonlyArray<BehindPixel>;
+} {
+  const count = size.widthPx * size.heightPx;
+  let brightest = 0;
+  for (let i = 0; i < count; i += 1) {
+    brightest = Math.max(brightest, luminanceOf(perPixel, i));
+  }
+  const floor = BEHIND_FLOOR_SHARE * brightest;
+  let pixels = 0;
+  let within = 0;
+  let differing = 0;
+  let largestStops = 0;
+  const beyond: BehindPixel[] = [];
+  for (let i = 0; i < count; i += 1) {
+    if (face[i] === 1) {
+      continue;
+    }
+    pixels += 1;
+    const a = luminanceOf(perPixel, i);
+    const b = luminanceOf(atMarch, i);
+    if (a !== b) {
+      differing += 1;
+    }
+    const stops =
+      Math.max(a, b) < floor ? 0 : Math.abs(Math.log2(Math.max(a, floor) / Math.max(b, floor)));
+    largestStops = Math.max(largestStops, stops);
+    if (stops <= BEHIND_STOPS) {
+      within += 1;
+    } else {
+      beyond.push({
+        x: i % size.widthPx,
+        y: Math.floor(i / size.widthPx),
+        perPixel: a,
+        atMarch: b,
+        stops,
+      });
+    }
+  }
+  const worst = beyond.toSorted((p, q) => q.stops - p.stops).slice(0, BEHIND_LISTED);
+  return { pixels, within, differing, largestStops, worst };
 }
 
 // --- R08.T7: several suns, and the sky through the air -------------------------------------------

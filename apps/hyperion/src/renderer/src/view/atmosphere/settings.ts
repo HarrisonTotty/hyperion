@@ -22,13 +22,19 @@
 import { MAX_BODY_LIGHTS } from "../lighting/hostLights";
 import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
 import type { QualitySetting } from "../quality/qualitySetting";
-import { type MarchBand, TABLE_SIZES, type TableSizes } from "./hillaire";
+import { type AtmosphereSettings, type MarchBand, TABLE_SIZES, type TableSizes } from "./hillaire";
 
 /**
  * The sources the sky's kernels hold, and the stars among them, `hillaire.ts`'s (where the kernels'
  * uniform is packed): exported here for R12's ladder.
  */
 export { MAX_SKY_LIGHT_SLOTS, MAX_SKY_SOURCES } from "./hillaire";
+
+/**
+ * The atmosphere's levers' types and the composite as drawn before them, `hillaire.ts`'s (where the
+ * frame takes them), exported here beside their values per setting.
+ */
+export { type AtmosphereSettings, type CompositeTransmittance, PER_PIXEL_LEVERS } from "./hillaire";
 
 /** Where aerial perspective applies: R05's `TableSizes.aerialPerspectiveScope`. */
 export type AerialPerspectiveScope = TableSizes["aerialPerspectiveScope"];
@@ -135,6 +141,20 @@ export const ATMOSPHERE_VIEW_SETTINGS: Readonly<Record<QualitySetting, Atmospher
 export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>> = {
   high: ATMOSPHERE_VIEW_SETTINGS.high.skySunCap,
   low: ATMOSPHERE_VIEW_SETTINGS.low.skySunCap,
+};
+
+/**
+ * The atmosphere's levers per setting (the owner's priority, 2026-11-01).
+ *
+ * @remarks
+ * `march` reaches a frame only where the march runs at half the output's resolution: on low, and on
+ * high once its frame-rate floor draws the air at low's sizes; at full resolution the composite's
+ * pixels are the march's texels, and it forms the term per pixel as before. On SwiftShader at low
+ * from orbit (pod, 16 vCPU) the term took 480 of the composite's 607 ms.
+ */
+export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSettings>> = {
+  high: { compositeTransmittance: "march" },
+  low: { compositeTransmittance: "march" },
 };
 
 /** The atmosphere's quality limits per setting: `SETTINGS[s].atmosphereView.qualityLimits`. */

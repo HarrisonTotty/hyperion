@@ -19,7 +19,11 @@
  * submitted before the bodies pass, while the low setting, which has no cascades, submits none in
  * their slot.
  */
-import { ATMOSPHERE_COMPOSITE_PASS, ATMOSPHERE_VIEW_PASS } from "../atmosphere/hillaire";
+import {
+  ATMOSPHERE_BEHIND_PASS,
+  ATMOSPHERE_COMPOSITE_PASS,
+  ATMOSPHERE_VIEW_PASS,
+} from "../atmosphere/hillaire";
 import { ATMOSPHERE_TABLES_PASS } from "../atmosphere/tables";
 import { DISC_CELLS_PASS } from "../bodies/draw";
 import type { QualitySetting } from "../quality/qualitySetting";
@@ -57,11 +61,13 @@ export const SKY_PASS_LABEL = "sky";
  * The labels R08's atmosphere submits its passes under (plan R08, R08.T10.b), in the order a frame
  * submits them: a body's per-planet table builds where it builds them (the atmosphere cache's, at a
  * body's arrival or a new light set, not every frame), then each body's sky view, aerial perspective
- * and ray march, and its composite over the scene, farthest body first.
+ * and ray march, what lies behind its sky at the march's resolution where it forms that (the owner's
+ * priority, 2026-11-01), and its composite over the scene, farthest body first.
  */
 export const ATMOSPHERE_PASS_LABELS: ReadonlyArray<string> = [
   ATMOSPHERE_TABLES_PASS,
   ATMOSPHERE_VIEW_PASS,
+  ATMOSPHERE_BEHIND_PASS,
   ATMOSPHERE_COMPOSITE_PASS,
 ];
 

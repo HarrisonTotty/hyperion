@@ -109,6 +109,7 @@ import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import { groundTemperatureFieldOf, type SurfaceTemperatureField } from "../view/atmosphere/thermal";
 import type { PhotometricLaw } from "../view/appearance/law";
 import {
+  ATMOSPHERE_BEHIND_PASS,
   ATMOSPHERE_COMPOSITE_PASS,
   ATMOSPHERE_VIEW_PASS,
   createAtmosphereFrameKernels,
@@ -748,9 +749,13 @@ function labelsSeen(setting: QualitySetting, frames: ReadonlyArray<TimedFrame>):
   return [...ordered, ...others];
 }
 
-/** The atmosphere's share of a frame: its view passes and its composite. */
+/**
+ * The atmosphere's share of a frame: its view passes, what lies behind its sky at the march's
+ * resolution (the owner's priority, 2026-11-01) and its composite.
+ */
 const ATMOSPHERE_LABELS: ReadonlySet<string> = new Set([
   ATMOSPHERE_VIEW_PASS,
+  ATMOSPHERE_BEHIND_PASS,
   ATMOSPHERE_COMPOSITE_PASS,
 ]);
 

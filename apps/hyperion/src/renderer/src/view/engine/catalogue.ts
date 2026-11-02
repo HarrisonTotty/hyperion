@@ -14,6 +14,7 @@ import {
   AERIAL_PERSPECTIVE_THERMAL_KERNEL,
   AERIAL_PERSPECTIVE_THICK_KERNEL,
   AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
+  COMPOSITE_BEHIND_KERNEL,
   COMPOSITE_MATERIAL,
   RAY_MARCH_BELOW_DECK_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
@@ -168,7 +169,8 @@ const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [
  * R08.T8.e in both its forms (the shared read, and by slot), since R08.T11.d each with its two entry
  * points (the centre ray's and the footprint's), the footprint's specialised for one band and no
  * layer edge, and the fill of its target outside the air's area,
- * and the composite that lays them over the terrain.
+ * and the composite that lays them over the terrain, with what lies behind its sky from above at the
+ * march's resolution (the owner's priority, 2026-11-01).
  */
 const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...[
@@ -181,6 +183,7 @@ const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     RAY_MARCH_FILL_KERNEL,
     RAY_MARCH_SPECIAL_KERNEL,
     RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+    COMPOSITE_BEHIND_KERNEL,
   ].map((spec): CatalogueEntry => ({ kind: "compute", spec })),
   { kind: "material", spec: COMPOSITE_MATERIAL },
 ];

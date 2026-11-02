@@ -15,7 +15,12 @@
  */
 
 import { TABLE_SIZES, type TableSizes } from "../atmosphere/hillaire";
-import { ATMOSPHERE_VIEW_SETTINGS, type AtmosphereViewSettings } from "../atmosphere/settings";
+import {
+  ATMOSPHERE_SETTINGS,
+  ATMOSPHERE_VIEW_SETTINGS,
+  type AtmosphereSettings,
+  type AtmosphereViewSettings,
+} from "../atmosphere/settings";
 import { DISC_ANNULI_HIGH, DISC_ANNULI_LOW } from "../lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
 import { BLOOM_LEVELS, type BloomLevels } from "../post/bloom";
@@ -146,6 +151,11 @@ export interface ViewSettings {
    * `view/atmosphere/settings.ts`).
    */
   readonly atmosphereView: AtmosphereViewSettings;
+  /**
+   * The atmosphere's frame-cost levers, each with its way back (the owner's priority, 2026-11-01;
+   * `view/atmosphere/settings.ts`).
+   */
+  readonly atmosphereLevers: AtmosphereSettings;
   /** The sky's cube, sprites, census size and re-bake cadence (R06.T13.f, Design note 22). */
   readonly sky: SkySettings;
   /**
@@ -264,6 +274,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
     },
     atmosphere: TABLE_SIZES.high,
     atmosphereView: ATMOSPHERE_VIEW_SETTINGS.high,
+    atmosphereLevers: ATMOSPHERE_SETTINGS.high,
     sky: HIGH_SKY,
     internalScaleBounds: [0.5, 1],
     budget: { photorealisticRateHz: 60, photorealisticViews: null },
@@ -293,6 +304,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
     },
     atmosphere: TABLE_SIZES.low,
     atmosphereView: ATMOSPHERE_VIEW_SETTINGS.low,
+    atmosphereLevers: ATMOSPHERE_SETTINGS.low,
     sky: LOW_SKY,
     internalScaleBounds: [0.5, 1],
     budget: { photorealisticRateHz: 30, photorealisticViews: 1 },

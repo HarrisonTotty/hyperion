@@ -53,7 +53,11 @@ const TERRAIN_FIXTURES: ReadonlyArray<ViewsCheckTerrainFixture> = [
 ];
 
 /** The composite's probes an inspection profile may draw under. */
-const COMPOSITE_PROBES: ReadonlyArray<CompositeProbeName> = ["sky-off", "transmittance-off"];
+const COMPOSITE_PROBES: ReadonlyArray<CompositeProbeName> = [
+  "sky-off",
+  "transmittance-off",
+  "per-pixel",
+];
 
 /**
  * `value` as the check's options, or `null` if it is not one: every field present and of its type,

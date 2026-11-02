@@ -36,14 +36,21 @@ import {
 } from "./earth";
 import type { AtmosphereMedium } from "./medium";
 import { gravityRatio, principalRadiiM } from "./oblate";
-import { MAX_SKY_LIGHT_SLOTS, MAX_SKY_SOURCES } from "./settings";
+import {
+  ATMOSPHERE_SETTINGS,
+  MAX_SKY_LIGHT_SLOTS,
+  MAX_SKY_SOURCES,
+  PER_PIXEL_LEVERS,
+} from "./settings";
 import {
   AERIAL_PERSPECTIVE_KERNEL,
+  ATMOSPHERE_BEHIND_PASS,
   atmosphereInputs,
   type AtmosphereCamera,
   type AtmosphereScene,
   bodyOfFigure,
   FIT_SCALE_FLOOR_M,
+  COMPOSITE_BEHIND_KERNEL,
   COMPOSITE_MATERIAL,
   compositeAreaOf,
   createAtmosphereFrameKernels,
@@ -1515,10 +1522,17 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
       ...sources,
       "shell",
       "marchArea",
+      "levers",
     ]);
-    // The composite's Draw: the offset (a vec3f), then the view's members in order, then shell and
-    // the march's area (R08.T11.d).
-    expect(vec4Members(compositeWgsl, "Draw")).toEqual([...view, ...sources, "shell", "marchArea"]);
+    // The composite's Draw: the offset (a vec3f), then the view's members in order, then shell, the
+    // march's area (R08.T11.d) and the levers (the owner's priority, 2026-11-01).
+    expect(vec4Members(compositeWgsl, "Draw")).toEqual([
+      ...view,
+      ...sources,
+      "shell",
+      "marchArea",
+      "levers",
+    ]);
     expect(viewWgsl).toContain(`const MAX_SKY_SOURCES : u32 = ${String(MAX_SKY_SOURCES)}u;`);
     expect(viewWgsl).toContain(
       `const MAX_SKY_LIGHT_SLOTS : u32 = ${String(MAX_SKY_LIGHT_SLOTS)}u;`,
@@ -2837,5 +2851,119 @@ describe("HillaireAtmosphere's march by slot (R08.T8.e, lever 5)", () => {
     expect(engine.dispatched.at(-1)?.kernel).toBe(
       `atmosphere ray march by slot (${KERNEL_ARM_FORMAT})`,
     );
+  });
+});
+
+/** The frame's dispatches of what lies behind the sky at the march's resolution. */
+function behindOf(
+  engine: Awaited<ReturnType<typeof countingRenderEngine>>,
+): ReadonlyArray<(typeof engine.dispatched)[number]> {
+  return engine.dispatched.filter((d) => d.kernel === COMPOSITE_BEHIND_KERNEL.name);
+}
+
+describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's priority)", () => {
+  /** From 10⁷ m over the equator, looking at the centre: the Earth's air inside the frame. */
+  const orbit: AtmosphereCamera = {
+    positionM: { x: 1e7, y: 0, z: 0 },
+    orientation: lookAlong({ x: -1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }),
+    fovXRad: Math.PI / 3,
+    viewport: { widthPx: 320, heightPx: 180 },
+  };
+
+  it("forms it over the march's tiles from above the top at half resolution, and has the composite read it", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      R05_EARTH_REFERENCE,
+      TABLE_SIZES.low,
+      WGS84,
+      NO_ABSORBER_CURVES,
+      null,
+      ATMOSPHERE_SETTINGS.low,
+    );
+    engine.dispatched.length = 0;
+    const draw = atmosphere.drawFrame(orbit, [NOON], SCENE);
+    const march = engine.dispatched.find((d) => d.kernel === "atmosphere ray march");
+    const behind = behindOf(engine);
+    expect({
+      dispatched: behind.map((d) => [d.pass, d.workgroups]),
+      lever: draw.uniforms["levers"]?.[0],
+      read: draw.textures["behindMarch"]?.name,
+      written: behind[0]?.bindings.storage["behindOut"]?.texture === draw.textures["behindMarch"],
+    }).toEqual({
+      dispatched: [[ATMOSPHERE_BEHIND_PASS, march?.workgroups]],
+      lever: 1,
+      read: "atmosphere behind",
+      written: true,
+    });
+  });
+
+  it.each([
+    ["per pixel, the way back", TABLE_SIZES.low, PER_PIXEL_LEVERS, orbit],
+    ["at full resolution", TABLE_SIZES.high, ATMOSPHERE_SETTINGS.high, orbit],
+    ["from inside the air", TABLE_SIZES.low, ATMOSPHERE_SETTINGS.low, CAMERA],
+  ] as const)(
+    "forms none %s, and the composite forms it per pixel",
+    async (_, sizes, levers, camera) => {
+      const engine = await countingRenderEngine();
+      const atmosphere = new HillaireAtmosphere(
+        engine,
+        R05_EARTH_REFERENCE,
+        sizes,
+        WGS84,
+        NO_ABSORBER_CURVES,
+        null,
+        levers,
+      );
+      engine.dispatched.length = 0;
+      const draw = atmosphere.drawFrame(camera, [NOON], SCENE);
+      expect({
+        dispatched: behindOf(engine).length,
+        lever: draw.uniforms["levers"]?.[0],
+        read: draw.textures["behindMarch"] === draw.textures["rayMarch"],
+      }).toEqual({ dispatched: 0, lever: 0, read: true });
+    },
+  );
+
+  it("grows its target with the view, releasing the smaller, and releases it with itself", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      R05_EARTH_REFERENCE,
+      TABLE_SIZES.low,
+      WGS84,
+      NO_ABSORBER_CURVES,
+      null,
+      ATMOSPHERE_SETTINGS.low,
+    );
+    const at = (widthPx: number, heightPx: number): AtmosphereCamera => ({
+      ...orbit,
+      viewport: { widthPx, heightPx },
+    });
+    const events: Array<readonly [string, string]> = [];
+    engine.onAllocation((event) => {
+      if (event.name === "atmosphere behind") {
+        events.push([event.kind, event.kind === "created" ? String(event.bytes) : ""]);
+      }
+    });
+    atmosphere.drawFrame(at(320, 180), [NOON], SCENE);
+    atmosphere.drawFrame(at(160, 90), [NOON], SCENE);
+    atmosphere.drawFrame(at(640, 360), [NOON], SCENE);
+    atmosphere.drawFrame(at(320, 180), [NOON], SCENE);
+    atmosphere.dispose();
+    // rgba16float, 8 B a texel, at half resolution: 160 × 90, then 320 × 180.
+    expect(events).toEqual([
+      ["created", String(160 * 90 * 8)],
+      ["destroyed", ""],
+      ["created", String(320 * 180 * 8)],
+      ["destroyed", ""],
+    ]);
+  });
+
+  it("takes the setting's levers in every view: the march's resolution on both", () => {
+    expect([SETTINGS.high.atmosphereLevers, SETTINGS.low.atmosphereLevers]).toEqual([
+      { compositeTransmittance: "march" },
+      { compositeTransmittance: "march" },
+    ]);
   });
 });

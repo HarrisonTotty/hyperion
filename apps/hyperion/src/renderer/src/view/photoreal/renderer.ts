@@ -616,8 +616,10 @@ export class PhotorealRenderer {
         engine.createComputeAsync(HISTOGRAM_KERNEL),
         engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
         // Every world with air draws by the thick read's kernels once its correction is routed
-        // (R08.T14.f), so they are made ahead of the first frame of one.
-        createAtmosphereFrameKernels(engine, { thick: CORRECTION_ROUTED }),
+        // (R08.T14.f), so they are made ahead of the first frame of one; and the kernel of what lies
+        // behind the sky at the march's resolution, which the settings' levers take (the owner's
+        // priority, 2026-11-01).
+        createAtmosphereFrameKernels(engine, { thick: CORRECTION_ROUTED, behind: true }),
       ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it.
@@ -1134,6 +1136,7 @@ export class PhotorealRenderer {
       air.tables,
       SETTINGS[setting].atmosphere,
       resources.atmosphere,
+      SETTINGS[setting].atmosphereLevers,
     );
     this.#atmospheres.set(air.id, { atmosphere, setting });
     return atmosphere;

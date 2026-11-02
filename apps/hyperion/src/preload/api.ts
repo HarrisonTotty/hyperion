@@ -1086,10 +1086,11 @@ export interface ViewsCheckLaunch {
  * A probe of the atmosphere's composite for the inspection run's frame profile (the owner's
  * priority, 2026-11-01): `sky-off` draws every sky pixel as the scene's light, with no sky branch;
  * `transmittance-off` draws the sky with no transmittance across from above the top (the per-pixel,
- * per-channel lookups over the far limb's footprint), 1 in its place. Either is a measurement's
- * picture, never a player's.
+ * per-channel lookups over the far limb's footprint), 1 in its place; `per-pixel` forms that
+ * transmittance per pixel whatever the setting, the way back's composite, the frame forming its
+ * target at the march's resolution all the same. Each is a measurement's picture, never a player's.
  */
-export type CompositeProbeName = "sky-off" | "transmittance-off";
+export type CompositeProbeName = "sky-off" | "transmittance-off" | "per-pixel";
 
 /**
  * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s

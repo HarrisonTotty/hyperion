@@ -64,7 +64,12 @@ describe("photorealisticPasses", () => {
         label: "atmosphere",
         owner: "R08",
         built: true,
-        labels: ["atmosphere tables", "atmosphere view", "atmosphere composite"],
+        labels: [
+          "atmosphere tables",
+          "atmosphere view",
+          "atmosphere behind",
+          "atmosphere composite",
+        ],
       });
       expect(labels.slice(at - 1, at + 2)).toEqual(["discs", "atmosphere", "rings"]);
     },

@@ -12,7 +12,7 @@
 #                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered | --whole]
 #                  | --atmosphere
 #                  | --inspection --universe <ID> --body <ID>
-#                    [--timing [--composite-probe sky-off|transmittance-off]]]
+#                    [--timing [--composite-probe sky-off|transmittance-off|per-pixel]]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --geometry, passed to the client, draws VIEW's terrain with those fields of its geometry over the
@@ -95,9 +95,10 @@
 # (where the adapter has timestamp-query) and each thread's busy time, GC and hottest functions.
 # A profile is not judged; the launch exits 1 when its file is not written. With no --setting it
 # makes two launches, high then low, as --terrain does. --composite-probe (the owner's priority,
-# 2026-11-01) draws that profile's atmosphere composite with its sky branch off (sky-off) or with
-# its transmittance across from above off (transmittance-off), the A/B of the composite's cost; its
-# files end -composite-<probe>, and their pictures are not a player's.
+# 2026-11-01) draws that profile's atmosphere composite with its sky branch off (sky-off), with its
+# transmittance across from above off (transmittance-off), or with that transmittance per pixel as
+# the setting's way back forms it (per-pixel), the A/B of the composite's cost; its files end
+# -composite-<probe>, and their pictures are not a player's.
 #
 # --device-pixel-ratio <N> draws a hidden run's page at a device-pixel ratio of N, 1 to 3, as a HiDPI
 # display does (the owner's Retina report, 2026-11-01): its offscreen window N times the setting's

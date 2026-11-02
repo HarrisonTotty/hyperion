@@ -86,6 +86,7 @@ import {
   checkFarLimbFootprint,
   checkLowPick,
   checkCompositeArea,
+  checkCompositeBehind,
   checkMarchArea,
   checkMarchBand,
   checkMarchOneBand,
@@ -527,6 +528,10 @@ async function run(
   // In part 8 after R08.T11.g's, over the march by slot that R08.T11.d's group compiled.
   await group(8, "R08.T16.a.2 the composite over the air's area", () =>
     checkCompositeArea(engine, checks),
+  );
+  // In part 8 after R08.T16.a.2's, over the march by slot that R08.T11.d's group compiled.
+  await group(8, "the owner's priority: what lies behind the sky at the march's resolution", () =>
+    checkCompositeBehind(engine, checks),
   );
   await group(12, "R08.T11.b the face's count on a drawn surface", () =>
     checkFaceCount(engine, checks, twins),

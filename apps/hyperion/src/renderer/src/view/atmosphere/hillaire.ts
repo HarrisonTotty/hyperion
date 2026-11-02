@@ -98,6 +98,8 @@ import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
 import belowDeckWgsl from "./shaders/belowDeck.wgsl?raw";
 import belowDeckViewWgsl from "./shaders/belowDeckView.wgsl?raw";
 import compositeWgsl from "./shaders/composite.wgsl?raw";
+import compositeBehindWgsl from "./shaders/compositeBehind.wgsl?raw";
+import compositeTransmittanceWgsl from "./shaders/compositeTransmittance.wgsl?raw";
 import farLimbWgsl from "./shaders/farLimb.wgsl?raw";
 import marchAreaWgsl from "./shaders/marchArea.wgsl?raw";
 import marchFillWgsl from "./shaders/marchFill.wgsl?raw";
@@ -404,6 +406,33 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
     polarisation: POLARISATION_TABLE_SIZE,
   },
 };
+
+/**
+ * Where the composite forms what lies behind the sky from above the top (the owner's priority,
+ * 2026-11-01): `march`, at the ray march's resolution where it runs below the output's, the
+ * transmittance across from above formed once a march texel as each channel's ln τ
+ * (`compositeBehind.wgsl`) and read bilinearly from a pixel's four candidates (`composite.wgsl`'s
+ * `behindAtMarch`) where all are sky and their τ is at most 2; or `per-pixel`, formed in the
+ * composite for each pixel, as before, the way back. Within a drawn edge's texel, past that depth
+ * and within a source's disc, it is per pixel either way.
+ */
+export type CompositeTransmittance = "march" | "per-pixel";
+
+/**
+ * The atmosphere's frame-cost levers on a setting, `SETTINGS[s].atmosphereLevers` (the owner's
+ * priority, 2026-11-01), each with the way back beside it, as R14's `GeometrySettings` keeps its
+ * own.
+ */
+export interface AtmosphereSettings {
+  /** {@link CompositeTransmittance}: `march` on both settings; `per-pixel` is the way back. */
+  readonly compositeTransmittance: CompositeTransmittance;
+}
+
+/**
+ * The composite as it was before the levers: what an atmosphere drawn outside a view takes (the
+ * smoke's checks, the descent spike), unless given its view's.
+ */
+export const PER_PIXEL_LEVERS: AtmosphereSettings = { compositeTransmittance: "per-pixel" };
 
 /**
  * The datum spheroid the atmosphere stands on: R05's `BodyFigure` (planet.ts, T7.a) has these
@@ -844,6 +873,12 @@ export const ATMOSPHERE_VIEW_PASS = "atmosphere view";
  * next of its atmosphere targets (plan R08, R08.T10.b), the spike's label for its own.
  */
 export const ATMOSPHERE_COMPOSITE_PASS = "atmosphere composite";
+
+/**
+ * The pass a frame forms what lies behind its sky from above the top in, at the march's resolution,
+ * before its composite (the owner's priority, 2026-11-01; {@link COMPOSITE_BEHIND_KERNEL}).
+ */
+export const ATMOSPHERE_BEHIND_PASS = "atmosphere behind";
 
 /** The sky-view kernel. */
 export const SKY_VIEW_KERNEL = kernel("atmosphere sky view", skyViewWgsl);
@@ -1413,11 +1448,34 @@ const VIEW_MEMBERS = [
 ] as const;
 
 /**
+ * The composite's `Draw` members after the view's, in its order: the shell, the march's area
+ * (R08.T11.d) and the composite's levers (the owner's priority, 2026-11-01).
+ */
+const COMPOSITE_MEMBERS = [...VIEW_MEMBERS, "shell", "marchArea", "levers"] as const;
+
+/**
  * The composite's WGSL: `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `view.wgsl`, `oblate.wgsl`
  * (R08.T6.f), the volume's read (`aerialRead.wgsl`, R08.T9.a), the far limb's footprint
- * (`farLimb.wgsl`, R08.T8.c), then its own.
+ * (`farLimb.wgsl`, R08.T8.c), the transmittance to space (`compositeTransmittance.wgsl`), then its
+ * own.
  */
-const COMPOSITE_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${oblateWgsl}\n${aerialReadWgsl}\n${farLimbWgsl}\n${compositeWgsl}`;
+const COMPOSITE_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${oblateWgsl}\n${aerialReadWgsl}\n${farLimbWgsl}\n${compositeTransmittanceWgsl}\n${compositeWgsl}`;
+
+/**
+ * What lies behind the sky from above the top at the march's resolution (the owner's priority,
+ * 2026-11-01; `compositeBehind.wgsl`): the composite's transmittance across from above, light slot
+ * 0's, per channel, once a sky texel of the march's area rather than once a pixel, as ln τ, which
+ * the composite reads from a pixel's four candidates ({@link CompositeTransmittance}). A frame
+ * dispatches it where its
+ * {@link AtmosphereSettings.compositeTransmittance} is `march`, the march runs below the output's
+ * resolution and the camera is above the top ({@link HillaireAtmosphere.drawFrame}).
+ */
+export const COMPOSITE_BEHIND_KERNEL: KernelPair = {
+  name: "atmosphere behind",
+  reference: `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${oblateWgsl}\n${farLimbWgsl}\n${marchAreaWgsl}\n${compositeTransmittanceWgsl}\n${compositeBehindWgsl}`,
+  subgroup: null,
+  readback: "presentation-only",
+};
 
 /** The composite: a full-screen draw of pre-exposed luminance over the terrain target. */
 export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
@@ -1425,10 +1483,7 @@ export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
   displayName: "ATMOSPHERE",
   vertexWgsl: COMPOSITE_WGSL,
   fragmentWgsl: COMPOSITE_WGSL,
-  uniforms: [...VIEW_MEMBERS, "shell", "marchArea"].map((name) => ({
-    name,
-    type: "vec4f" as const,
-  })),
+  uniforms: COMPOSITE_MEMBERS.map((name) => ({ name, type: "vec4f" as const })),
   samplers: [{ name: "linearClamp", filter: "linear", address: "clamp-to-edge", binding: 6 }],
   textures: [
     { name: "sceneColour", binding: 0 },
@@ -1447,6 +1502,8 @@ export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
     { name: "lastAbsorberPressureColumn", binding: 10, viewDimension: "2d-array" },
     // The body's figure, gravity and slicing, f32 and read by `textureLoad` (R08.T6.f).
     { name: "oblateBody", binding: 11, sampleType: "unfilterable-float" },
+    // What lies behind the sky from above at the march's resolution (the owner's priority).
+    { name: "behindMarch", binding: 12 },
   ],
   cullMode: "none",
   depthWrite: false,
@@ -1456,18 +1513,22 @@ export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
 
 /**
  * A views check's probe of the composite's cost (the owner's priority, 2026-11-01): `sky-off`, every
- * sky pixel keeping the scene's light, or `transmittance-off`, the sky drawn with no transmittance
- * across from above (`composite.wgsl`'s `transmittanceAcrossFromAbove`, 1 in its place). It is
- * check-only: an inspection profile's `--composite-probe`, never drawn on a player's launch.
+ * sky pixel keeping the scene's light; `transmittance-off`, the sky drawn with no transmittance
+ * across from above (`composite.wgsl`'s `transmittanceAcrossFromAbove`, 1 in its place); or
+ * `per-pixel`, that transmittance formed per pixel whatever the setting's
+ * {@link AtmosphereSettings.compositeTransmittance}, the way back's composite, the frame forming its
+ * target at the march's resolution all the same, so that one build's profiles tell the composite's
+ * saving apart from that pass's cost. It is check-only: an inspection profile's `--composite-probe`,
+ * never drawn on a player's launch.
  */
-export type CompositeProbe = "sky-off" | "transmittance-off";
+export type CompositeProbe = "sky-off" | "transmittance-off" | "per-pixel";
 
 /** The line of `composite.wgsl` a probe's material replaces. */
 const COMPOSITE_PROBE_LINE = "const COMPOSITE_PROBE : u32 = 0u;";
 
 /**
  * {@link COMPOSITE_MATERIAL} under `probe`: the same draw with `composite.wgsl`'s `COMPOSITE_PROBE`
- * set, 1 for `sky-off` and 2 for `transmittance-off`.
+ * set, 1 for `sky-off`, 2 for `transmittance-off` and 3 for `per-pixel`.
  *
  * @throws Error if the composite's WGSL no longer declares the probe's constant.
  */
@@ -1479,6 +1540,9 @@ export function compositeProbedMaterial(probe: CompositeProbe): WgslMaterialSpec
       break;
     case "transmittance-off":
       value = 2;
+      break;
+    case "per-pixel":
+      value = 3;
       break;
   }
   if (!COMPOSITE_WGSL.includes(COMPOSITE_PROBE_LINE)) {
@@ -1571,6 +1635,12 @@ interface FrameKernels {
    * bodies under the thermal cut compiles none of them.
    */
   readonly thermal: (thick: boolean) => ThermalKernels;
+  /**
+   * What lies behind the sky from above at the march's resolution ({@link COMPOSITE_BEHIND_KERNEL};
+   * the owner's priority, 2026-11-01): made at the first frame that takes it, where it was not made
+   * ahead ({@link FrameKernelsAhead.behind}).
+   */
+  readonly behind: () => ComputeHandle;
 }
 
 /**
@@ -1884,6 +1954,13 @@ export interface FrameKernelsAhead {
    * frame of tables that hold a thermal source.
    */
   readonly thermal?: boolean;
+  /**
+   * Whether the kernel that forms what lies behind the sky from above at the march's resolution is
+   * made too ({@link COMPOSITE_BEHIND_KERNEL}; the owner's priority, 2026-11-01): for a view, whose
+   * atmospheres take its setting's `AtmosphereSettings`. Not where absent; then made at the first
+   * frame that takes it.
+   */
+  readonly behind?: boolean;
 }
 
 /**
@@ -1968,6 +2045,8 @@ export async function createAtmosphereFrameKernels(
     ahead.thermal === true
       ? await thermalKernelsAhead(engine, reads)
       : thermalKernelsOf(engine, (pair) => pair);
+  let behind: ComputeHandle | null =
+    ahead.behind === true ? await engine.createComputeAsync(COMPOSITE_BEHIND_KERNEL) : null;
   // The fill is a reader's (the smoke's), which a view's frame never asks: made at the first ask.
   let fill: ComputeHandle | null = null;
   return {
@@ -1978,6 +2057,7 @@ export async function createAtmosphereFrameKernels(
     rayMarchFill: () => (fill ??= engine.createCompute(RAY_MARCH_FILL_KERNEL)),
     thick,
     thermal,
+    behind: () => (behind ??= engine.createCompute(COMPOSITE_BEHIND_KERNEL)),
     composite,
     triangle,
   };
@@ -2288,6 +2368,12 @@ interface FrameResources {
   rayMarch: TextureHandle | null;
   rayMarchSize: ViewSize | null;
   /**
+   * What lies behind the sky from above at the march's resolution (the owner's priority,
+   * 2026-11-01), the ray march's size and grown with it, made at the first frame that forms it.
+   */
+  behindMarch: TextureHandle | null;
+  behindMarchSize: ViewSize | null;
+  /**
    * The tile cull's kinds, one `u32` a tile of the air's area (R08.T11.d), grown with the area's
    * largest and never made smaller; the kernel arm's frames take it too.
    */
@@ -2369,6 +2455,8 @@ function createFrameResources(
     triangle: shared?.triangle ?? compositeTriangle(engine),
     rayMarch: null,
     rayMarchSize: null,
+    behindMarch: null,
+    behindMarchSize: null,
     marchTiles: null,
     marchTilesBytes: 0,
   };
@@ -2383,6 +2471,7 @@ function marchKernelsOf(engine: RenderEngine, as: (pair: KernelPair) => KernelPa
   let shared: MarchKernels | null = null;
   let slots: MarchKernels | null = null;
   let fill: ComputeHandle | null = null;
+  let behind: ComputeHandle | null = null;
   const pairOf = (
     centre: KernelPair,
     footprint: KernelPair,
@@ -2419,6 +2508,7 @@ function marchKernelsOf(engine: RenderEngine, as: (pair: KernelPair) => KernelPa
     rayMarchFill: () => (fill ??= engine.createCompute(as(RAY_MARCH_FILL_KERNEL))),
     thick: thickKernelsOf(engine, as),
     thermal: thermalKernelsOf(engine, as),
+    behind: () => (behind ??= engine.createCompute(as(COMPOSITE_BEHIND_KERNEL))),
   };
 }
 
@@ -2563,6 +2653,16 @@ export class HillaireAtmosphere {
    * whole frame over its own until asked ({@link HillaireAtmosphere.setMarchCover}).
    */
   #cover: MarchCover;
+  /**
+   * The levers it draws with (the owner's priority, 2026-11-01): its view's setting's
+   * ({@link HillaireAtmosphere.over}), or {@link PER_PIXEL_LEVERS}, as drawn before them.
+   */
+  readonly #levers: AtmosphereSettings;
+  /**
+   * Whether the latest frame formed what lies behind its sky at the march's resolution (the
+   * owner's priority), the composite's `levers.x`.
+   */
+  #behindFormed = false;
   /** The latest frame's march area (R08.T11.d), for the smoke's read ({@link HillaireAtmosphere.frameTables}). */
   #area: MarchArea | null = null;
 
@@ -2577,6 +2677,8 @@ export class HillaireAtmosphere {
    * @param gravity - The body's gravity (R08.T3.d's `bodyGravity` on `figure`), whose slicing the
    *   tables are built in and whose s the lookups take (Design note 17; R08.T6.f); none for s ≡ 1,
    *   one slice and one band. R08.T10.a gives a body's.
+   * @param levers - The frame-cost levers (the owner's priority, 2026-11-01): a view's setting's
+   *   `SETTINGS[s].atmosphereLevers`, or the composite as drawn before them.
    * @throws RangeError as `AtmosphereTables`, for a slicing the tables cannot hold among the rest,
    *   or for a march source cap that is not an integer of at least 1 (`TableSizes.marchSourceCap`).
    */
@@ -2587,11 +2689,13 @@ export class HillaireAtmosphere {
     figure: SpheroidFigure,
     curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
     gravity: BodyGravity | null = null,
+    levers: AtmosphereSettings = PER_PIXEL_LEVERS,
   ) {
     // The cap is checked where the sizes are given, not first at a frame (R08.T8.e).
     marchSourceIndices([], tables.marchSourceCap);
     this.#engine = engine;
     this.#sizes = tables;
+    this.#levers = levers;
     if (isHeld(medium)) {
       this.#ownsTables = false;
       this.#shared = medium.kernels;
@@ -2617,7 +2721,7 @@ export class HillaireAtmosphere {
     // R08.T11.d, unless asked, so that their frames are those they were checked by.
     this.#cover = this.#shared === null ? "whole frame" : "area";
     this.#uniforms = Object.fromEntries(
-      [...VIEW_MEMBERS, "shell", "marchArea"].map((name) => [name, new Float32Array(4)]),
+      COMPOSITE_MEMBERS.map((name) => [name, new Float32Array(4)]),
     );
     this.#offRestored = engine.onRestored(() => {
       this.#arm = null;
@@ -2636,7 +2740,9 @@ export class HillaireAtmosphere {
    * A view's atmosphere of one body over the atmosphere cache's per-planet tables, which it takes
    * in place of building its own and never disposes (plan R08, R08.T10.b;
    * `decision-r08-t10a-leans.md` item 3): its figure and gravity the tables' body's
-   * ({@link tablesFigureOf}), its kernels the device's shared ones.
+   * ({@link tablesFigureOf}), its kernels the device's shared ones, and its levers its view's
+   * setting's, `SETTINGS[s].atmosphereLevers` (the owner's priority, 2026-11-01), or as drawn
+   * before them where not given.
    *
    * @throws RangeError for a march source cap that is not an integer of at least 1.
    */
@@ -2645,6 +2751,7 @@ export class HillaireAtmosphere {
     tables: AtmosphereTables,
     sizes: TableSizes,
     kernels: AtmosphereFrameKernels | null,
+    levers: AtmosphereSettings = PER_PIXEL_LEVERS,
   ): HillaireAtmosphere {
     return new HillaireAtmosphere(
       engine,
@@ -2653,6 +2760,7 @@ export class HillaireAtmosphere {
       tablesFigureOf(tables),
       tables.curves,
       tables.body?.gravity ?? null,
+      levers,
     );
   }
 
@@ -2918,6 +3026,8 @@ export class HillaireAtmosphere {
         absorberPressureColumns: this.#tables.absorberPressureColumns,
         lastAbsorberPressureColumn: this.#tables.lastAbsorberPressureColumn,
         oblateBody: this.#tables.oblateBody,
+        // The march's own target where the frame formed none, which the composite then never reads.
+        behindMarch: this.#behindFormed ? (frame.behindMarch ?? rayMarch) : rayMarch,
       },
     };
   }
@@ -2988,13 +3098,15 @@ export class HillaireAtmosphere {
     // Its own frame's textures: a view makes one of these a body, and lets it go as the body leaves
     // its picture (R08.T10.b). Its kernels and composite stay, the shared ones their owner's.
     const frame = this.#frame;
-    for (const texture of [frame.skyView, frame.aerial, frame.rayMarch]) {
+    for (const texture of [frame.skyView, frame.aerial, frame.rayMarch, frame.behindMarch]) {
       if (texture !== null) {
         this.#engine.releaseTexture(texture);
       }
     }
     frame.rayMarch = null;
     frame.rayMarchSize = null;
+    frame.behindMarch = null;
+    frame.behindMarchSize = null;
     if (frame.marchTiles !== null) {
       this.#engine.releaseBuffer(frame.marchTiles);
     }
@@ -3281,6 +3393,54 @@ export class HillaireAtmosphere {
       }
       engine.dispatch(footprint, bindings, tiles, ATMOSPHERE_VIEW_PASS);
     }
+    // What lies behind the sky from above the top at the march's resolution (the owner's priority,
+    // 2026-11-01; `compositeBehind.wgsl`), over the march's tiles: where the march runs below the
+    // output's resolution, whose texels it saves, and the camera is above the top with the march's
+    // share 1, as the composite tests it (`aboveTop` and `exact.w`), so that it reads the target only
+    // where it was formed. Never beneath a deck, nor for the kernel arm, which draws no composite.
+    const camera = this.#uniforms["camera"];
+    const curvatureMember = this.#uniforms["curvature"];
+    const shellMember = this.#uniforms["shell"];
+    const formsBehind =
+      shellMember !== undefined &&
+      marchesAll &&
+      this.#levers.compositeTransmittance === "march" &&
+      sizes.rayMarchScale < 1 &&
+      beneath === null &&
+      (camera?.[3] ?? 0) * (curvatureMember?.[2] ?? 0) >= (shellMember[0] ?? Infinity) &&
+      area.tilesAcross > 0 &&
+      area.tilesDown > 0;
+    if (formsBehind) {
+      engine.dispatch(
+        kernels.behind(),
+        {
+          buffers: {},
+          sampled: {
+            sceneDepth: scene.depth,
+            transmittance: tables.transmittance,
+            absorberColumns: tables.absorberColumns,
+            absorberCurves: tables.absorberCurves,
+            absorberPressureColumns: tables.absorberPressureColumns,
+            lastAbsorberPressureColumn: tables.lastAbsorberPressureColumn,
+            oblateBody: tables.oblateBody,
+          },
+          uniforms: {
+            draw: shellMember,
+            view: viewUniforms,
+            marchArea: areaUniform,
+          },
+          storage: {
+            behindOut: { texture: this.#behindMarchTexture(view.viewport), level: 0 },
+          },
+        },
+        [area.tilesAcross, area.tilesDown, 1],
+        ATMOSPHERE_BEHIND_PASS,
+      );
+    }
+    if (deferUnread) {
+      this.#behindFormed = formsBehind;
+      this.#uniforms["levers"]?.set([formsBehind ? 1 : 0, 0, 0, 0]);
+    }
     // The rest of the target, (0, 0, 0, 1), for a reader of the whole (R08.T11.d): the frame's
     // waits for one, and the kernel arm's read-backs take it at once.
     const fill = area.whole
@@ -3403,6 +3563,40 @@ export class HillaireAtmosphere {
     );
     frame.rayMarchSize = grown;
     return frame.rayMarch;
+  }
+
+  /**
+   * The target of what lies behind the sky at the march's resolution (the owner's priority,
+   * 2026-11-01): the ray march's size, grown as it is and never made smaller.
+   */
+  #behindMarchTexture(viewport: ViewSize): TextureHandle {
+    const frame = this.#frame;
+    const fits =
+      frame.behindMarchSize !== null &&
+      frame.behindMarchSize.widthPx >= viewport.widthPx &&
+      frame.behindMarchSize.heightPx >= viewport.heightPx;
+    if (frame.behindMarch !== null && fits) {
+      return frame.behindMarch;
+    }
+    if (frame.behindMarch !== null) {
+      this.#engine.releaseTexture(frame.behindMarch);
+    }
+    const grown: ViewSize = {
+      widthPx: Math.max(viewport.widthPx, frame.behindMarchSize?.widthPx ?? 0),
+      heightPx: Math.max(viewport.heightPx, frame.behindMarchSize?.heightPx ?? 0),
+    };
+    const scale = this.#sizes.rayMarchScale;
+    frame.behindMarch = frameTexture(
+      this.#engine,
+      "atmosphere behind",
+      [
+        Math.max(1, Math.ceil(grown.widthPx * scale)),
+        Math.max(1, Math.ceil(grown.heightPx * scale)),
+      ],
+      "rgba16float",
+    );
+    frame.behindMarchSize = grown;
+    return frame.behindMarch;
   }
 
   /**

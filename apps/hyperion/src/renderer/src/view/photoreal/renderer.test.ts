@@ -48,8 +48,10 @@ import { OUTSIDE_VIEW_MARGIN_PX, type SurveyedDatumFrame } from "../wireframe/su
 import {
   AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
   AERIAL_PERSPECTIVE_KERNEL,
+  ATMOSPHERE_BEHIND_PASS,
   ATMOSPHERE_COMPOSITE_PASS,
   AtmosphereRetired,
+  COMPOSITE_BEHIND_KERNEL,
   RAY_MARCH_BELOW_DECK_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_DECK_KERNEL,
@@ -447,6 +449,31 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     renderer.dispose();
     tables.dispose();
   });
+
+  it.each([
+    ["at low's sizes, the march at half resolution", "low", 1, 1],
+    ["at high's, the march at full resolution", "high", 0, 0],
+  ] as const)(
+    "takes its setting's levers: what lies behind the sky from above at the march's resolution %s (the owner's priority)",
+    async (_, atmosphereSetting, dispatches, lever) => {
+      const { engine, view, renderer } = await preparedRenderer();
+      const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+      const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      renderer.render(view, {
+        ...frameWith([]),
+        atmosphereSetting,
+        bodies: [planet],
+        atmospheres: [airOf(planet, tables)],
+      });
+      const composite = engine.targetFrames.find((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+      expect({
+        dispatches: engine.dispatched.filter((d) => d.pass === ATMOSPHERE_BEHIND_PASS).length,
+        lever: composite?.draws[0]?.uniforms["levers"]?.[0],
+      }).toEqual({ dispatches, lever });
+      renderer.dispose();
+      tables.dispose();
+    },
+  );
 
   it("draws a far body's composite over its air's area alone, over a copy of the colour it reads (R08.T16.a.2)", async () => {
     const { engine, view, renderer } = await preparedRenderer();
@@ -948,7 +975,8 @@ async function overlayDatums(
  * for both (`withDiscEmissionAndAir`); the atmosphere's per-frame kernels, its sky view,
  * aerial perspective, its two marches' footprint entry points, each general, specialised for one band
  * and no layer edge (R08.T11.d) and for one band, edged (R08.T11.g), their centre ray's entry points
- * under R08.T11.d's tile cull (off for a view) and the march's fill; since R08.T14.c the sky view, the
+ * under R08.T11.d's tile cull (off for a view) and the march's fill, and since the owner's priority
+ * (2026-11-01) what lies behind the sky at the march's resolution; since R08.T14.c the sky view, the
  * aerial perspective and both marches' footprints,
  * general and specialised, reading the thick table (`withThickRead`), for a body whose tables hold
  * one; since R08.T18.b the sky view, the aerial perspective and both marches' footprints of each
@@ -960,7 +988,7 @@ async function overlayDatums(
  * R08.T14.d.4 the sky's irradiance over the thick table; and the sky bake's four. Each is a module constant, its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 46,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 47,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
@@ -981,6 +1009,7 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   RAY_MARCH_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   RAY_MARCH_FILL_KERNEL,
+  COMPOSITE_BEHIND_KERNEL,
   SKY_VIEW_THICK_KERNEL,
   AERIAL_PERSPECTIVE_THICK_KERNEL,
   RAY_MARCH_THICK_KERNEL,
@@ -1182,11 +1211,12 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     expect([...distinct].filter((key) => !bound.has(key))).toEqual([]);
     // Every kind of air has been met by its first body thin, by its first thick (the second pass)
     // and by its first over a deck (the third); none after adds a kernel. The thin first pass makes
-    // 20: the view's, made up front with both reads' one-band marches among them (R08.T11.g, which
-    // the slab Earth takes by slot and the deck over the shared read) and, since the correction is
-    // routed (R08.T14.d.4), the thick read's six, made ahead; and the tables' four. The thick pass
-    // makes one more, the sky's irradiance over the thick table (R08.T14.d.4), and the deck's pass
-    // its four marches, 25 in all, bounded however many bodies follow. All but twenty-one are made: the sky bake's four are the sky's, the march's fill
+    // 21: the view's, made up front with both reads' one-band marches among them (R08.T11.g, which
+    // the slab Earth takes by slot and the deck over the shared read), what lies behind the sky at
+    // the march's resolution (the owner's priority) and, since the correction is routed
+    // (R08.T14.d.4), the thick read's six, made ahead; and the tables' four. The thick pass makes
+    // one more, the sky's irradiance over the thick table (R08.T14.d.4), and the deck's pass its four
+    // marches, 26 in all, bounded however many bodies follow. All but twenty-one are made: the sky bake's four are the sky's, the march's fill
     // a reader's, which no frame asks, the tile cull's two centre ray's kernels its own cover's,
     // which a view never takes (R08.T11.d), the disc cells' emissive form a body's above the
     // thermal cut, which none of these is (R08.T18.a), their air form a body's drawn by its disc

@@ -220,7 +220,8 @@ describe("the composite's transmittance to space from above the top (R08.T8.b)",
       /toSpace = transmittanceAcrossFromAbove\(v, body, &footprint, dir, skySlotOf\(source\)\);/u.test(
         code,
       ),
-      /let centre = transmittanceFromAbove\(v, body, dir, slot\);/u.test(code),
+      // Assigned only where the centre ray is blended in (the owner's priority, 2026-11-01).
+      /centre = transmittanceFromAbove\(v, body, dir, slot\);/u.test(code),
       /vec3f\(marched\.a\)|marchedAlpha/u.test(code),
     ]).toEqual([true, true, true, false]);
   });

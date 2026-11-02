@@ -59,6 +59,13 @@
 // transmittance to space of 1, each what it read there, since outside the area every ray misses the
 // top's shell, widened, and no footprint blends (`marchArea.ts`). It reads neither the march's
 // target, which the march left as it was there, nor the footprint.
+// Changes (the owner's priority, 2026-11-01): the transmittance to space moved to
+// `compositeTransmittance.wgsl`. Where the march runs below the output's resolution, from above the
+// top, a sky pixel takes what lies behind it from the march's resolution (`behindMarch`, light slot
+// 0's across a pixel's footprint at each texel's centre, as ln tau, `compositeBehind.wgsl`), its
+// four candidates interpolated (`behindAtMarch`) where all are sky and either thin or dim behind;
+// elsewhere, and within a source's disc, it is formed per pixel as before (`AtmosphereSettings`'
+// `compositeTransmittance`, whose `per-pixel` is the way back).
 
 struct Draw {
   offsetFromCameraM : vec3f,
@@ -104,6 +111,11 @@ struct Draw {
   // The ray march's area, its texels [x, z) x [y, w) of its target (R08.T11.d; `marchArea.ts`'s
   // marchAreaTexels): every texel the march wrote this frame.
   marchArea : vec4f,
+  // The composite's levers (the owner's priority, 2026-11-01; `settings.ts`'s AtmosphereSettings):
+  // x 1 where what lies behind the sky from above the top is read at the march's resolution
+  // (`behindMarch`, which `compositeBehind.wgsl` wrote over the march's area this frame), 0 where
+  // it is formed per pixel.
+  levers : vec4f,
 }
 
 @group(1) @binding(0) var<uniform> draw : Draw;
@@ -119,15 +131,20 @@ struct Draw {
 @group(2) @binding(9) var absorberPressureColumns : texture_2d_array<f32>;
 @group(2) @binding(10) var lastAbsorberPressureColumn : texture_2d_array<f32>;
 @group(2) @binding(11) var oblateBody : texture_2d<f32>;
+// The transmittance to space from above the top at the march's resolution, light slot 0's, as each
+// channel's ln tau, tau = -ln T, at each sky texel of the march's area (`compositeBehind.wgsl`);
+// read only where `levers.x` is 1.
+@group(2) @binding(12) var behindMarch : texture_2d<f32>;
 
 const HALF_MAX : f32 = 65504.0;
 
-// The views check's probe of the composite's cost (the owner's priority, 2026-11-01; `hillaire.ts`'s
-// compositeProbedMaterial): 0, the composite as drawn, on every launch but an inspection profile's
-// `--composite-probe`, whose material sets 1, every sky pixel keeping the scene's light (no sky
-// branch), or 2, the sky drawn with no transmittance across from above, 1 in its place (neither the
-// far-limb footprint nor the sliced lookups it takes). A constant, so that the composite every
-// player draws compiles neither.
+// The views check's probe of the composite's cost (the owner's priority, 2026-11-01;
+// `hillaire.ts`'s compositeProbedMaterial): 0, the composite as drawn, on every launch but an
+// inspection profile's `--composite-probe`, whose material sets 1, every sky pixel keeping the
+// scene's light (no sky branch); 2, the sky drawn with no transmittance across from above, 1 in its
+// place (neither the far-limb footprint nor the sliced lookups it takes); or 3, that transmittance
+// formed per pixel whatever `levers.x`, the way back's composite. A constant, so that the composite
+// every player draws compiles none of them.
 const COMPOSITE_PROBE : u32 = 0u;
 
 struct VertexOut {
@@ -165,150 +182,6 @@ fn viewOf() -> AtmosphereView {
       SkySource(draw.sourceDirection5, draw.sourceWeight5, draw.sourceDisc5),
     ),
   );
-}
-
-// The sliced lookup's start at the camera (R08.T6.f; `oblate.wgsl`): its place, its ground quadric
-// and local scale height formed in f64 (`view.exact`), its height, the datum's normal under it, and
-// s and h* there.
-fn cameraLookupStart(v : AtmosphereView, body : OblateBody) -> LookupStart {
-  let n = v.up.xyz;
-  return LookupStart(
-    v.camera.xyz, oblateScaled(body, v.camera.xyz), v.exact.x, v.camera.w, n, n.z, length(n.xy),
-    v.curvature.z, v.camera.w * v.curvature.z, v.exact.z
-  );
-}
-
-// A light's transmittance to space along `dir` from the lookup's `start`, per channel: the sliced
-// lookup's (R08.T6.f; `oblate.wgsl`), the slices' optical depth, absorber columns and
-// pressure-weighted columns over s, with light slot `slot`'s curves of growth (R08.T6.c, R08.T4.d;
-// each light's own since R08.T7), exponentiated in f32, so that a disc's light is never a stored
-// half float; 0 where the ground hides space.
-fn transmittanceFrom(body : OblateBody, start : LookupStart, dir : vec3f, slot : u32) -> vec3f {
-  let ray = slicedRayOf(body, oblateBody, start, dir);
-  if (ray.shadowed) {
-    return vec3f(0.0);
-  }
-  let count = min(u32(draw.shell.y), ABSORBER_SLOTS);
-  let stored = slicedStoredOf(
-    ray, body, oblateBody, transmittance, absorberColumns, absorberPressureColumns,
-    lastAbsorberPressureColumn, count
-  );
-  let absorbed = absorberDepth(
-    absorberCurves, count, slot, u32(draw.shell.z), stored.columns, stored.pressureColumns
-  );
-  return exp(-(stored.depth + absorbed));
-}
-
-// A light's transmittance from the camera along `dir` to space, per channel
-// (`transmittanceFrom` at the camera's start): inside the air.
-fn transmittanceToSpace(v : AtmosphereView, body : OblateBody, dir : vec3f, slot : u32) -> vec3f {
-  return transmittanceFrom(body, cameraLookupStart(v, body), dir, slot);
-}
-
-// The distance along the unit `dir` from a camera above the top to the ray's entry into the top's
-// shell, the quadric (a + H / s_e, c + H / s_p) the ray march clips the air by (R08.T6.f), 0 where
-// the camera lies within it, and -1 where the ray misses it or it lies behind (R08.T8.b). As
-// `rayMarch.wgsl`'s `rayQuadric` and `quadricHits` take it: in space scaled to a sphere, its
-// constant formed in f64 (`view.exact.y`), its discriminant from Lagrange's identity beyond
-// h0 = a / 2, and its roots in the forms that do not cancel.
-fn topEntryOf(v : AtmosphereView, body : OblateBody, dir : vec3f) -> f32 {
-  let a = v.figure.x;
-  let topA = draw.shell.x * body.scales.z;
-  let radius = a + topA;
-  let scale = vec3f(1.0, 1.0, radius / (v.figure.y + draw.shell.x * body.scales.w));
-  let o = v.camera.xyz * scale;
-  let d = dir * scale;
-  let qa = dot(d, d);
-  let qb = dot(o, d);
-  let qc = v.exact.y;
-  var disc = qb * qb - qa * qc;
-  if (v.camera.w > 0.5 * a) {
-    let across = cross(o, d);
-    disc = qa * (radius * radius) - dot(across, across);
-  }
-  if (disc < 0.0) {
-    return -1.0;
-  }
-  let root = sqrt(disc);
-  let s = -(qb + select(-root, root, qb >= 0.0));
-  if (s == 0.0) {
-    return -1.0;
-  }
-  let first = s / qa;
-  let second = qc / s;
-  if (max(first, second) <= 0.0) {
-    return -1.0;
-  }
-  return max(min(first, second), 0.0);
-}
-
-// A light's transmittance to space along `dir` from a camera above the top, per channel (R08.T8.b):
-// 1 where the ray misses the air; the sliced lookup's from the camera where it lies within the
-// top's shell; and otherwise from the ray's entry into it, the camera's ray carrying nothing
-// before it, so that its transmittance to space is the table's from the entry to the top
-// (Bruneton 2017, precomputed_atmospheric_scattering's `functions.glsl`: `GetSkyRadiance` moves a
-// viewer in space to the top boundary along the view ray, 1 where the ray misses the air and 0
-// where it meets the ground, and `ComputeTransmittanceToTopAtmosphereBoundary` defines the table).
-// The entry's ground quadric Q = |S p|^2 - a^2 is the shell's, H_e (2a + H_e) + (k - k_t)(k + k_t)
-// z^2, with H_e = H / s_e, H_p = H / s_p, k_t = (a + H_e) / (c + H_p) and k - k_t =
-// (a H_p - c H_e) / (c (c + H_p)), which no difference of radii forms (Design note 18); its
-// height and normal are its datum point's, s and h* there, and, on a body of several bands, the
-// local scale height the body's table holds at that h*, since the composite declares no medium.
-fn transmittanceFromAbove(v : AtmosphereView, body : OblateBody, dir : vec3f, slot : u32) -> vec3f {
-  let entryM = topEntryOf(v, body, dir);
-  if (entryM < 0.0) {
-    return vec3f(1.0);
-  }
-  if (entryM == 0.0) {
-    return transmittanceToSpace(v, body, dir, slot);
-  }
-  let a = v.figure.x;
-  let c = v.figure.y;
-  let topA = draw.shell.x * body.scales.z;
-  let topC = draw.shell.x * body.scales.w;
-  let k = body.scales.x;
-  let kTop = (a + topA) / (c + topC);
-  let kGap = (a * topC - c * topA) / (c * (c + topC));
-  let p = v.camera.xyz + entryM * dir;
-  let quadricM2 = topA * (2.0 * a + topA) + kGap * (k + kTop) * p.z * p.z;
-  let datum = datumPointOf(body, p, quadricM2);
-  let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
-  let z = s * datum.heightM;
-  var scaleM = 0.0;
-  if (oblateBandCount(body) > 1u) {
-    scaleM = oblateScaleHeightAt(body, oblateBody, z);
-  }
-  let start = LookupStart(
-    p, oblateScaled(body, p), quadricM2, datum.heightM, datum.normal, datum.normal.z,
-    length(datum.normal.xy), s, z, scaleM
-  );
-  return transmittanceFrom(body, start, dir, slot);
-}
-
-// A light's transmittance to space from a camera above the top across the pixel's far-limb
-// footprint (R08.T8.c): `transmittanceFromAbove` along the pixel's ray `dir`, blended by w_L with
-// its mean over the footprint's nodes, the share above the top counted as 1, what lies there.
-fn transmittanceAcrossFromAbove(
-  v : AtmosphereView,
-  body : OblateBody,
-  footprint : ptr<function, FarLimbFootprint>,
-  dir : vec3f,
-  slot : u32,
-) -> vec3f {
-  let centre = transmittanceFromAbove(v, body, dir, slot);
-  let blend = (*footprint).blend;
-  if (!(blend > 0.0)) {
-    return centre;
-  }
-  var mean = vec3f((*footprint).spaceShare);
-  for (var i = 0u; i < (*footprint).count; i++) {
-    let node = farLimbNodeOf(footprint, i);
-    mean += node.z * transmittanceFromAbove(v, body, rayThrough(v, node.xy), slot);
-  }
-  if (blend >= 1.0) {
-    return mean;
-  }
-  return mix(centre, mean, blend);
 }
 
 // What lies beyond the air along `dir` from a camera beneath a cloud deck (plan R08, R08.T15.b.2;
@@ -366,6 +239,69 @@ fn rayMarched(pixel : vec2u, depth : f32) -> vec4f {
     }
   }
   return best;
+}
+
+// The most optical depth, in any channel at any of a pixel's four candidates, under which
+// `behindAtMarch` stands for the pixel's own whatever lies behind. T = e^-tau moves by e^(tau
+// delta) for a relative error delta of tau, so where tau is large the read's error grows by tau:
+// through the limb's dense rows from 400 km it stood up to 0.9 stops apart under a light 30 times
+// the air's behind them.
+const BEHIND_MOST_DEPTH : f32 = 2.0;
+
+// Past `BEHIND_MOST_DEPTH`, the share of the light scattered in front of a pixel, in each channel,
+// that what lies behind it may bring through the candidates' most transmittance for the read to
+// stand: with colour T <= 0.1 S, T off by a factor of up to 2.6 moves the pixel's light by under
+// 1/3 stop, (1 + 0.26) / (1 + 0.1) = 2^0.2.
+const BEHIND_THROUGH_SHARE : f32 = 0.1;
+
+// What lies behind a sky pixel, read from the march's resolution (the owner's priority,
+// 2026-11-01).
+struct MarchBehind {
+  behind : vec3f,
+  // Whether the read stands for the pixel's own (`behindAtMarch`); per pixel where not.
+  found : bool,
+}
+
+// What lies behind a sky pixel, its scene's light `colour` and the light `scattered` in front of
+// it, from the march's resolution (`behindMarch`, each channel's ln tau, tau = -ln T its optical
+// depth): the four texels around the pixel's centre, `rayMarched`'s candidates, interpolated
+// bilinearly, where each is a sky texel (`compositeBehind.wgsl` wrote those alone) and either their
+// tau is at most `BEHIND_MOST_DEPTH` or what lies behind is dim against the light in front
+// (`BEHIND_THROUGH_SHARE`). ln tau is linear in the tangent height through an exponential air, and
+// a tangent ray's height is near linear across the screen, where T read linearly, or a nearest
+// texel, stood stops off the pixel's own across the limb. Where a candidate is not sky, the pixel
+// lies within a texel of a drawn edge, the body's face among them, whose datum cuts the pixel's own
+// far-limb footprint (`farLimb.wgsl`'s ground piece) where no texel's can stand for it: those stood
+// up to 5 stops apart, and `found` is false, as it is past the depth with a bright light behind.
+fn behindAtMarch(pixel : vec2u, colour : vec3f, scattered : vec3f) -> MarchBehind {
+  let scale = draw.output.z;
+  let size = vec2i(ceil(draw.output.xy * scale));
+  let full = vec2u(draw.output.xy);
+  let at = (vec2f(pixel) + 0.5) * scale - 0.5;
+  let base = floor(at);
+  let f = at - base;
+  var sum = vec3f(0.0);
+  var most = vec3f(-3.4e38);
+  var least = vec3f(3.4e38);
+  for (var j = 0; j < 2; j++) {
+    for (var i = 0; i < 2; i++) {
+      let t = vec2u(clamp(vec2i(base) + vec2i(i, j), vec2i(0), size - 1));
+      let source = min(vec2u((vec2f(t) + 0.5) / scale), full - 1u);
+      if (textureLoad(sceneDepth, source, 0) != 0.0) {
+        return MarchBehind(vec3f(1.0), false);
+      }
+      let lnDepth = textureLoad(behindMarch, t, 0).rgb;
+      most = max(most, lnDepth);
+      least = min(least, lnDepth);
+      sum += select(1.0 - f.x, f.x, i == 1) * select(1.0 - f.y, f.y, j == 1) * lnDepth;
+    }
+  }
+  let thin = all(most <= vec3f(log(BEHIND_MOST_DEPTH)));
+  let dim = all(colour * exp(-exp(least)) <= BEHIND_THROUGH_SHARE * scattered);
+  if (!(thin || dim)) {
+    return MarchBehind(vec3f(1.0), false);
+  }
+  return MarchBehind(exp(-exp(sum)), true);
 }
 
 // Whether the ray march wrote what this pixel reads (R08.T11.d): its texel at full resolution, at
@@ -454,9 +390,11 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     // The source whose disc the ray falls in, the last such, whose light slot dims what lies behind
     // it; slot 0's elsewhere.
     var slotHere = 0u;
+    var inDisc = false;
     for (var k = 0u; k < count; k++) {
       if (withinDisc(dir, v.sources[k])) {
         slotHere = skySlotOf(v.sources[k]);
+        inDisc = true;
       }
     }
     var inscattered : vec3f;
@@ -472,8 +410,25 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
       if (here) {
         inscattered = rayMarched(pixel, depth).rgb;
         if (COMPOSITE_PROBE != 2u) {
-          footprint = farLimbFootprintOf(farLimbRaysOf(v), body, oblateBody, uv, v.output.xy);
-          behind = transmittanceAcrossFromAbove(v, body, &footprint, dir, slotHere);
+          // From the march's resolution where the frame formed it and the read stands for the
+          // pixel's own (the owner's priority, 2026-11-01; `behindAtMarch`): neither the footprint
+          // nor a lookup is formed for the pixel. Per pixel elsewhere, as before, and within a
+          // source's disc, whose light slot and own transmittance the disc takes. Each is a loop of
+          // at most one pass, not an `if`: on a GPU the two are the same, a branch that no thread
+          // of a group takes is skipped, but SwiftShader, the checks' software adapter, runs both
+          // sides of a branch under its lanes' mask whatever they take, and a loop only while a
+          // lane is in it; as an `if` the pod's composite paid the per-pixel term at every pixel
+          // (468 ms against 225 ms with it compiled out, at low from orbit).
+          var fromMarch = MarchBehind(vec3f(1.0), false);
+          let reads = draw.levers.x > 0.5 && COMPOSITE_PROBE != 3u && !inDisc;
+          for (var read = reads; read; read = false) {
+            fromMarch = behindAtMarch(pixel, colour, inscattered * factor);
+          }
+          behind = fromMarch.behind;
+          for (var perPixel = !fromMarch.found; perPixel; perPixel = false) {
+            footprint = farLimbFootprintOf(farLimbRaysOf(v), body, oblateBody, uv, v.output.xy);
+            behind = transmittanceAcrossFromAbove(v, body, &footprint, dir, slotHere);
+          }
         }
       }
     } else {

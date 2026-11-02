@@ -24572,3 +24572,17 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     step at the switch pinned at −2.4% to +29.6%. Its stacked decks want more steps before it routes.
   - _Left_: the sky view and aerial perspective from inside an envelope keep R05.T12.e's placement;
     the J rows near a cloud top (a finding). Pending, the owner's RTX run of a routed envelope.
+- **The composite's transmittance at the march's resolution, as built** (2026-11-02; lane
+  `perf-composite-cost`, the owner's priority; measurements in its outbox).
+  - `hillaire.ts`: `AtmosphereSettings` (`compositeTransmittance: "march" | "per-pixel"`, the way
+    back) is `SETTINGS[s].atmosphereLevers`, `march` on both (lean, 2026-11-02); `HillaireAtmosphere`
+    and `over(…, levers)` default to `PER_PIXEL_LEVERS`, and the renderer passes its setting's.
+  - `COMPOSITE_BEHIND_KERNEL` (pass `atmosphere behind`) stores each sky texel's ln τ of light slot
+    0's transmittance from above, where the march is at half resolution and the camera above the
+    top; the composite's `Draw` gains `levers` and binding 12, `behindMarch`.
+  - The read falls back per pixel within a drawn edge's texel, past τ 2 unless what lies behind is
+    under 0.1 of the light in front, and within a source's disc. Its transmittance functions are in
+    `compositeTransmittance.wgsl`; `transmittanceAcrossFromAbove` forms the centre ray only where
+    it is blended in (the same bits).
+  - Left: the lever's cost, pending the owner's Mac run (`--composite-probe per-pixel` against
+    none); SwiftShader times a shader's whole code whatever runs, so the pod cannot.
