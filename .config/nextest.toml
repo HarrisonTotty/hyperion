@@ -286,6 +286,14 @@ threads-required = 16
 filter = "package(hyperion-sim) & test(=stellar::rules::xrb_class_hold::no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind)"
 threads-required = 16
 
+# Plan 02's seed sweeps (`galaxy_sweeps`) share their seeds out in fixed parts on sixteen threads
+# of their own (`THREADS` in `tests/galaxy_sweeps.rs`), so each reserves sixteen slots natively.
+# On WebAssembly they run their parts in turn, on the one slot the wasm override gives them.
+[[profile.slow.overrides]]
+platform = 'cfg(not(target_family = "wasm"))'
+filter = "package(hyperion-sim) & binary(=galaxy_sweeps)"
+threads-required = 16
+
 # R06.T5.f's realised sky (`sky_realised`) runs its jobs on eight threads of its own too.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & (binary(=sky_census) | binary(=sky_realised))"

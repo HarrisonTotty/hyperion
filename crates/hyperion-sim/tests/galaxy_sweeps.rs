@@ -16,13 +16,37 @@ use hyperion_sim::galaxy::potential::MassModel;
 use hyperion_sim::galaxy::{PointLy, Population};
 use hyperion_sim::math;
 use hyperion_sim::units::LightYears;
+use hyperion_testkit::threads::in_shares;
 
 /// The seed of the sweep's galaxy `n` is this with `n` in its low bits.
 const SWEEP_SEED: u64 = 0x0200_5ee9_0000_0000;
 
-fn sweep() -> impl Iterator<Item = GalaxyParams> {
-    (0..10_000_u64)
-        .map(|n| GalaxyParams::from_seed(Seed::new(SWEEP_SEED | n), MassFunctionKind::default()))
+/// The parameters of the sweep's galaxy `n`.
+fn swept(n: u64) -> GalaxyParams {
+    GalaxyParams::from_seed(Seed::new(SWEEP_SEED | n), MassFunctionKind::default())
+}
+
+/// The threads a sweep's seeds are shared out on: the slots `.config/nextest.toml` reserves for
+/// each sweep, or the fewer a run grants (`hyperion_testkit::threads::granted`).
+const THREADS: usize = 16;
+
+/// The parts a sweep's seeds are shared out in, each a run of consecutive seeds.
+const PARTS: u64 = 64;
+
+/// `per_seed(n)` for each `n` of `0..seeds`, in seed order, its seeds shared out in [`PARTS`]
+/// fixed runs on [`THREADS`] threads: the same values in the same order on any number of threads,
+/// one on WebAssembly. A seed's panic is the lowest failing part's.
+fn over_seeds<T: Send>(seeds: u64, per_seed: impl Fn(u64) -> T + Sync) -> Vec<T> {
+    let parts = usize::try_from(PARTS).expect("sixty-four parts");
+    in_shares(parts, THREADS, |k| {
+        let k = u64::try_from(k).expect("a part's number fits 64 bits");
+        (seeds * k / PARTS..seeds * (k + 1) / PARTS)
+            .map(&per_seed)
+            .collect::<Vec<T>>()
+    })
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Two checks over the same 10⁴ seeds, in one test so that the parameters are built once.
@@ -72,23 +96,24 @@ fn every_getter_lies_in_its_range_and_sizes_follow_the_cube_root_over_ten_thousa
             .sum();
         sxy / sxx
     };
-    let mut thin = Vec::new();
-    let mut bulge = Vec::new();
-    let mut bar = Vec::new();
-    let mut nuclear = Vec::new();
-    for p in sweep() {
+    let points = over_seeds(10_000, |n| {
+        let p = swept(n);
         assert_params_in_ranges(&p, 9.0);
         assert_derived_consistent(&p);
         let mass = |pop| p.population_mass(pop).value();
         let thin_mass = mass(Population::YoungThinDisc) + mass(Population::OldThinDisc);
-        thin.push((thin_mass, p.thin_disc().length().value()));
-        bulge.push((mass(Population::Bulge), p.bulge().scale_x().value()));
-        bar.push((mass(Population::LongBar), p.bar().half_length().value()));
-        nuclear.push((
-            mass(Population::NuclearDisc),
-            p.nuclear_disc().length().value(),
-        ));
-    }
+        [
+            (thin_mass, p.thin_disc().length().value()),
+            (mass(Population::Bulge), p.bulge().scale_x().value()),
+            (mass(Population::LongBar), p.bar().half_length().value()),
+            (
+                mass(Population::NuclearDisc),
+                p.nuclear_disc().length().value(),
+            ),
+        ]
+    });
+    let [mut thin, mut bulge, mut bar, mut nuclear] =
+        [0, 1, 2, 3].map(|i| points.iter().map(|p| p[i]).collect::<Vec<_>>());
     for (name, points, range) in [
         ("thin", &mut thin, (7_000.0, 11_500.0)),
         ("bulge", &mut bulge, (1_700.0, 3_000.0)),
@@ -119,17 +144,15 @@ fn every_getter_lies_in_its_range_and_sizes_follow_the_cube_root_over_ten_thousa
 #[test]
 #[ignore = "slow: builds the parameters, and the σ estimator, of 10³ galaxies"]
 fn the_bulge_dispersion_over_a_thousand_seeds() {
-    let mut sigmas: Vec<f64> = (0..1_000_u64)
-        .map(|n| {
-            GalaxyParams::from_seed(
-                Seed::new(0x0206_5e00_0000_0000 | n),
-                MassFunctionKind::default(),
-            )
-            .black_hole()
-            .bulge_dispersion()
-            .value()
-        })
-        .collect();
+    let mut sigmas: Vec<f64> = over_seeds(1_000, |n| {
+        GalaxyParams::from_seed(
+            Seed::new(0x0206_5e00_0000_0000 | n),
+            MassFunctionKind::default(),
+        )
+        .black_hole()
+        .bulge_dispersion()
+        .value()
+    });
     sigmas.sort_by(f64::total_cmp);
     let inside = sigmas
         .iter()
@@ -166,10 +189,7 @@ fn the_bulge_dispersion_over_a_thousand_seeds() {
 #[test]
 #[ignore = "slow: builds the fields, and the discs' Jeans solve, of 10³ galaxies"]
 fn the_fields_over_a_thousand_seeds() {
-    let mut scales = Vec::with_capacity(1_000);
-    let mut points = Vec::with_capacity(1_000);
-    let mut bulges = Vec::with_capacity(1_000);
-    for n in 0..1_000_u64 {
+    let seeds = over_seeds(1_000, |n| {
         let seed = Seed::new(0x0207_5eed_0000_0000 | n);
         let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
         let model = MassModel::new(&params);
@@ -200,23 +220,25 @@ fn the_fields_over_a_thousand_seeds() {
                 "{seed}: component {i} meets its height to {met}"
             );
         }
-        scales.push(sub.scale());
         let column = model.vertical_force(
             sub.reference_radius(),
             LightYears::new(LIGHT_YEARS_PER_KILOPARSEC),
         );
-        points.push((
+        let point = (
             math::ln(column * params.thin_disc().height().value()),
             math::ln(sub.scale()),
-        ));
+        );
         let bulge = fields
             .components()
             .iter()
             .find(|c| c.population() == Population::Bulge)
             .expect("every galaxy has a bulge")
             .density(&PointLy::default());
-        bulges.push(bulge);
-    }
+        (sub.scale(), point, bulge)
+    });
+    let mut scales: Vec<f64> = seeds.iter().map(|s| s.0).collect();
+    let points: Vec<(f64, f64)> = seeds.iter().map(|s| s.1).collect();
+    let mut bulges: Vec<f64> = seeds.iter().map(|s| s.2).collect();
     bulges.sort_by(f64::total_cmp);
     let inside = bulges
         .iter()
@@ -332,12 +354,7 @@ fn the_fields_over_a_thousand_seeds() {
 #[ignore = "slow: builds the parameters and mass models of 4,000 galaxies"]
 fn the_rotation_curve_over_four_thousand_seeds() {
     let kpc = LIGHT_YEARS_PER_KILOPARSEC;
-    let mut sun = Vec::with_capacity(4_000);
-    let mut slopes = Vec::with_capacity(4_000);
-    let mut inner = Vec::with_capacity(4_000);
-    let mut ratios = Vec::with_capacity(4_000);
-    let mut milky_way_like = Vec::new();
-    for n in 0..4_000_u64 {
+    let seeds = over_seeds(4_000, |n| {
         let params = GalaxyParams::from_seed(
             Seed::new(0x0211_5ee9_0000_0000 | n),
             MassFunctionKind::default(),
@@ -345,18 +362,19 @@ fn the_rotation_curve_over_four_thousand_seeds() {
         let model = MassModel::new(&params);
         let v_c = |r_kpc: f64| model.v_circ_sq(LightYears::new(r_kpc * kpc)).sqrt();
         let (one, eight) = (v_c(1.0), v_c(8.0));
-        sun.push(eight);
-        slopes.push((v_c(16.0) - v_c(5.0)) / 11.0);
-        inner.push(one);
-        ratios.push(one / eight);
+        let slope = (v_c(16.0) - v_c(5.0)) / 11.0;
         let bulge_and_bar = params.population_mass(Population::Bulge).value()
             + params.population_mass(Population::LongBar).value();
         let mass_share = bulge_and_bar / params.stellar_mass().value();
         let length = params.thin_disc().length().value();
-        if (0.29..=0.50).contains(&mass_share) && (6_520.0..=10_110.0).contains(&length) {
-            milky_way_like.push(one / eight);
-        }
-    }
+        let like = (0.29..=0.50).contains(&mass_share) && (6_520.0..=10_110.0).contains(&length);
+        (eight, slope, one, one / eight, like)
+    });
+    let mut sun: Vec<f64> = seeds.iter().map(|s| s.0).collect();
+    let mut slopes: Vec<f64> = seeds.iter().map(|s| s.1).collect();
+    let mut inner: Vec<f64> = seeds.iter().map(|s| s.2).collect();
+    let mut ratios: Vec<f64> = seeds.iter().map(|s| s.3).collect();
+    let mut milky_way_like: Vec<f64> = seeds.iter().filter(|s| s.4).map(|s| s.3).collect();
     milky_way_like.sort_by(f64::total_cmp);
     for values in [&mut sun, &mut slopes, &mut inner, &mut ratios] {
         values.sort_by(f64::total_cmp);
@@ -434,10 +452,8 @@ fn the_rotation_curve_over_four_thousand_seeds() {
 #[test]
 #[ignore = "slow: builds the fields of 1,000 galaxies"]
 fn the_densities_over_a_thousand_seeds() {
-    let mut local = Vec::with_capacity(1_000);
-    let mut centres = Vec::with_capacity(1_000);
-    let mut out = [0.0; MAX_COMPONENTS];
-    for n in 0..1_000_u64 {
+    let seeds = over_seeds(1_000, |n| {
+        let mut out = [0.0; MAX_COMPONENTS];
         let params = GalaxyParams::from_seed(
             Seed::new(0x0211_de00_0000_0000 | n),
             MassFunctionKind::default(),
@@ -453,9 +469,10 @@ fn the_densities_over_a_thousand_seeds() {
             );
             sum + fields.densities(&p, &mut out)
         }) / f64::from(azimuths);
-        local.push(mean);
-        centres.push(fields.densities(&PointLy::default(), &mut out));
-    }
+        (mean, fields.densities(&PointLy::default(), &mut out))
+    });
+    let mut local: Vec<f64> = seeds.iter().map(|s| s.0).collect();
+    let mut centres: Vec<f64> = seeds.iter().map(|s| s.1).collect();
     local.sort_by(f64::total_cmp);
     centres.sort_by(f64::total_cmp);
     let inside = local
@@ -520,30 +537,40 @@ fn the_densities_over_a_thousand_seeds() {
 #[test]
 #[ignore = "slow: the centre's classes of 10³ galaxies, about 3½ minutes in the slow-test profile"]
 fn the_centre_s_feature_level_list_over_a_thousand_seeds() {
-    const SEEDS: usize = 1_000;
+    const SEEDS: u64 = 1_000;
     let (mut n, mut failing, mut failing_at_five, mut overflowing, mut capped) =
         (0_u32, 0_u32, 0_u32, 0_u32, 0_u32);
     // The worst seed: its seed, its cluster's mass, its candidates and its margins at eight and
     // five standard deviations.
     let mut worst = (0_u64, 0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
-    for (s, params) in (0_u64..).zip(sweep().take(SEEDS)) {
-        let seed = SWEEP_SEED | s;
+    // Each seed's cluster mass, candidates, margins at eight and five standard deviations, whether
+    // it fits and whether its cluster sits at the cap.
+    let forecasts = over_seeds(SEEDS, |s| {
+        let params = swept(s);
         let forecast = centre_list_forecast(&params).unwrap();
         let cluster = params.nuclear_cluster().mass().value();
-        let candidates = forecast.candidates();
-        let (at_eight, at_five) = (forecast.margin(8.0), forecast.margin(5.0));
-        if !forecast.fits() || at_five <= 0.0 {
+        let cap = NuclearClusterParams::mass_cap(params.mass_function()).value();
+        (
+            cluster,
+            forecast.candidates(),
+            [forecast.margin(8.0), forecast.margin(5.0)],
+            forecast.fits(),
+            cluster >= cap,
+        )
+    });
+    for (s, (cluster, candidates, [at_eight, at_five], fits, at_cap)) in (0_u64..).zip(forecasts) {
+        let seed = SWEEP_SEED | s;
+        if !fits || at_five <= 0.0 {
             eprintln!(
                 "seed {seed:#018x}: cluster {cluster:.4e} M_sun, {candidates:.1} candidates, \
                  margins {at_eight:.1} at eight standard deviations and {at_five:.1} at five"
             );
         }
         n += 1;
-        failing += u32::from(!forecast.fits());
+        failing += u32::from(!fits);
         failing_at_five += u32::from(at_five <= 0.0);
         overflowing += u32::from(candidates >= 65_535.0);
-        capped +=
-            u32::from(cluster >= NuclearClusterParams::mass_cap(params.mass_function()).value());
+        capped += u32::from(at_cap);
         if candidates > worst.2 {
             worst = (seed, cluster, candidates, at_eight, at_five);
         }
