@@ -1852,24 +1852,35 @@ pub const XRB_SAMPLER_27: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTabl
 /// the X-ray binaries of each kind, every population's members of the kind a record, its bands
 /// weighted by their shares of the systems, times its systems, as task `binary_xrb` weighs its
 /// six (`kind_shares`), over all nine kinds, in that task's censuses at 27 (measured for P11.T8.b's
-/// fix, 2026-11-02, with the floor at 10⁻¹² and P11.T4's pinned white dwarfs): the carving's three
-/// are 0.388 of the hosts, the high-mass side 0.0077, and black holes 0.0017 of its hosts.
+/// fix, 2026-11-02, under every 27 hold with the symbiotic X-ray binaries' bounds and the helium
+/// disc's line): the carving's three are 0.381 of the hosts, the high-mass side 0.0078, and black
+/// holes 0.0017 of its hosts. The black-hole transients' weight alone is not the census's: plan
+/// 11's design note 11 counts what is observed, so it is pinned to [`BLACK_HOLE_TRANSIENT_SHARE`]
+/// and the other kinds keep the census's ratios in the rest.
 pub const XRB_LOW_MASS_KINDS_27: [f64; 6] = [
-    0.005_442_301_575_609_467,
-    0.578_171_544_506_762_6,
-    0.001_720_810_713_084_214_4,
-    0.019_369_331_461_258_375,
-    0.375_124_185_017_997_27,
-    0.012_491_339_752_883_591,
+    0.004_885_460_559_566_987,
+    0.519_014_655_492_588_2,
+    0.001_550_711_461_735_681_6,
+    BLACK_HOLE_TRANSIENT_SHARE,
+    0.336_742_531_699_908_75,
+    0.000_911_999_675_146_566_8,
 ];
 
 /// The high-mass kinds' weights from 27, in [`XrbHostKind::HIGH_MASS`]' order, as
 /// [`XRB_LOW_MASS_KINDS_27`]'s: with them they sum to one.
 pub const XRB_HIGH_MASS_KINDS_27: [f64; 3] = [
-    0.007_613_990_555_392_584,
-    5.319_713_360_963_937e-5,
-    1.329_928_340_240_984_2e-5,
+    0.006_834_948_420_718_55,
+    4.775_415_226_834_502_5e-5,
+    1.193_853_806_708_625_6e-5,
 ];
+
+/// The black-hole transients' share of the X-ray binaries from 27: 0.13, the 1,300 of the row's
+/// 10⁴ hosts that P11.T8.b's design takes, Corral-Santana et al.'s (2016, A&A 587, A61) 1,280 ±
+/// 120, which they call a lower limit (research's ruling of 2026-11-02). The census gives 0.0196,
+/// about 190 (a finding: likely the common envelopes that survive at `α_CE λ` = 0.5, Podsiadlowski
+/// et al. 2003, MNRAS 341, 385, recalled; neither `α_CE λ` nor the kicks are touched, which would
+/// move every class after a common envelope).
+pub const BLACK_HOLE_TRANSIENT_SHARE: f64 = 0.13;
 
 /// The share rows fitted against the engine (P15.T10.b), held until generator version 27: the
 /// accreting white dwarfs' rows from task `binary_awd`'s block and the X-ray binaries' from task

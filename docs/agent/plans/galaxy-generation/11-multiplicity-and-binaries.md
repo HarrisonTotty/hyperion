@@ -7398,9 +7398,9 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     `Supergiant` (`convert/stellar.rs`), no new member. New API: `XrbHostKind::LOW_MASS_HELD`
     and `HIGH_MASS_HELD`, `XrbMark::HELD`, `XrbScanMarks::{class, is_transient}`,
     `XrayBinaries::of_table` (crate), `classify::wind_fed_luminosity` (crate).
-  - _Findings_ (2026-11-02). At 27 the black-hole transients' weight falls from the fit's 0.663 to
-    0.0194, about 190 hosts against P11.T8.b's 1,300 ± 400 (P11.T4's NS accretion grows none from
-    neutron stars), and the high-mass side rises from 0.0032 to 0.0077. Against the census, the
+  - _Findings_ (2026-11-02). At 27 the census's black-hole transients fall from the fit's 0.663 to
+    0.0196, about 190 hosts against P11.T8.b's 1,300 ± 400 (P11.T4's NS accretion grows none from
+    neutron stars), and the high-mass side rises from 0.0032 to 0.0078. Against the census, the
     scratch marks miss widely, chi-square per degree of freedom 78 (ultracompact periods), 29
     (rates), 86 (accretor masses), 22 (symbiotic periods) and 29 (symbiotic accretor masses), all
     inside the shared test's scratch tolerance; the refit fits them. The ultracompacts' Eddington
@@ -7427,6 +7427,13 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     taken as a lower bound for a carbon–oxygen disc (`classify::low_mass_xrb_line`). A cold
     ultracompact host turns transient from about 20 minutes, where the hydrogen line turned it at
     about 31. The catalogue's scan reads the line its class's test reads, the version's.
+  - _The black-hole transients pinned_ (research's ruling of 2026-11-02, plan 11's design note
+    11: counts are observed). `XRB_LOW_MASS_KINDS_27` takes the census's shares at 27 after the
+    symbiotic bounds and the helium line (s₃ = 0.381), but the black-hole transients' at
+    `BLACK_HOLE_TRANSIENT_SHARE` = 0.13, the 1,300 of the row's 10⁴ (Corral-Santana et al. 2016:
+    1,280 ± 120, a lower limit), the other kinds keeping the census's ratios in the rest. The
+    census's 0.0196, about 190, is a finding: likely the common envelopes that survive at
+    `α_CE λ` = 0.5 (Podsiadlowski et al. 2003), which is not touched, nor are the kicks.
   - _Deviation._ A timeline from marks has no history, so a Be star spun up by transfer is one in
     the engine's timeline alone; `classify`'s marks round trip skips such pairs.
   - _A Be star feeds a neutron star alone_ (main's ruling of 2026-11-01: the black holes' 0.145 of

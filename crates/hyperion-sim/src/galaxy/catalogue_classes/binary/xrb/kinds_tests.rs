@@ -142,9 +142,9 @@ fn side_share(table: &ClassSamplerTable<XrbMark, XrbPick>, kind: XrbHostKind) ->
 
 /// From 27 the class draws from version 27's table, which weighs all nine kinds: the kinds'
 /// expected hosts are their weights' shares of their side's hosts and sum to the class's total, so
-/// that no host the row counts goes undrawn, and the black holes are at most 0.01 of the young
-/// disc's high-mass hosts. Below 27 the class's table weighs the first six alone, and the
-/// carving's kinds have no hosts.
+/// that no host the row counts goes undrawn, the black holes are at most 0.01 of the young disc's
+/// high-mass hosts and the black-hole transients the observed 1,300 ± 400. Below 27 the class's
+/// table weighs the first six alone, and the carving's kinds have no hosts.
 #[test]
 fn from_27_the_class_draws_every_kind_its_row_counts() {
     let (galaxy, process) = (galaxy(), process());
@@ -181,6 +181,9 @@ fn from_27_the_class_draws_every_kind_its_row_counts() {
     }
     let black_holes = side_share(&XRB_SAMPLER_27, XrbHostKind::BlackHoleHighMass);
     println!("black holes {black_holes:.4} of the high-mass hosts");
+    // The black-hole transients are pinned to the observed 1,300, P11.T8.b's 1,300 ± 400.
+    let transients = process.expected_hosts_of(galaxy, XrbHostKind::BlackHoleTransient);
+    assert!((900.0..=1_700.0).contains(&transients), "{transients}");
     assert!(black_holes <= MAX_BLACK_HOLE_SHARE, "{black_holes}");
     let version = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
         .expect("the Milky Way fixture's gas is mostly neutral");
