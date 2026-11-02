@@ -1404,6 +1404,67 @@ fn horizon_heights_kept_for_one_field_are_never_read_for_another() {
 }
 
 #[test]
+fn horizon_margin_made_up_front_keeps_the_point_queries_heights_and_no_refusal() {
+    // Over a survey's edge, where the view refuses much of a patch's margin, and inside it, where
+    // it answers most.
+    let (w, edge, surveyed) = straddling();
+    let coarse = world(w).header().level().get();
+    let view = client(w, &surveyed, |_| code(50.0));
+    let synth = Synthesiser::new(&view, SEED);
+    let band = |level: u8| BandLevel::new(level).unwrap();
+    let (mut answered, mut refused) = (0_u32, 0_u32);
+    for key in [edge, patch_in(*surveyed.first().unwrap(), coarse + 2)] {
+        let mut cache = SynthCache::new();
+        cache.far_heights_mut().keep(synth.channels().id());
+        make_margin(&synth, &mut cache, key);
+        let (face, level) = (key.face(), key.level());
+        let grid = NearGrid::of(key);
+        let mut point = SynthCache::new();
+        for y in grid.y0..=grid.y1 {
+            for x in grid.x0..=grid.x1 {
+                if NearGrid::own(x, y).is_some() {
+                    continue;
+                }
+                let (i, j) = grid.lattice(x, y);
+                let dir = lattice_vertex_dir(face, level, i, j);
+                // Each vertex at the patch's level, and each even one at its parent's too, at the
+                // same direction to the bit.
+                let mut asked = vec![(level, i, j)];
+                if let Some(parent) = level.checked_sub(1)
+                    && i % 2 == 0
+                    && j % 2 == 0
+                {
+                    let up = lattice_vertex_dir(face, parent, i / 2, j / 2);
+                    assert_eq!(up.map(bits), dir.map(bits), "({i}, {j}) at {parent}");
+                    asked.push((parent, i / 2, j / 2));
+                }
+                for (at, i, j) in asked {
+                    let kept = cache
+                        .far_heights_mut()
+                        .heights
+                        .get(memo_key(face, at, i, j))
+                        .copied();
+                    match synth.height_m_at(&mut point, dir, band(at)) {
+                        Ok(h) => {
+                            assert_eq!(kept.map(bits), Some(bits(h)), "{key:?} ({i}, {j}) at {at}");
+                            answered += 1;
+                        }
+                        Err(QueryHeightError::NotSurveyed(_)) => {
+                            assert_eq!(kept, None, "{key:?} ({i}, {j}) at {at} is refused");
+                            refused += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        answered > 0 && refused > 0,
+        "{answered} answered, {refused} refused"
+    );
+}
+
+#[test]
 fn horizon_skipped_leaves_the_map_empty_and_the_rest_as_baked() {
     let (w, edge, surveyed) = straddling();
     let view = client(w, &surveyed, |_| code(50.0));

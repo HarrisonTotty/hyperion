@@ -116,6 +116,7 @@ use crate::cube::{
 };
 use crate::field::{FieldView, cell_index};
 use crate::geometry::vertex_spacing;
+use crate::height::HeightSample;
 use crate::memo::Table;
 use crate::num;
 use crate::patch::PATCH_VERTICES;
@@ -550,6 +551,7 @@ pub(super) fn bake_horizon<F: FieldView>(
         // The bake's own heights stand at the reference surface where it was not complete.
         refused: !complete,
     };
+    make_margin(synth, cache, key);
     // The margin's heights are the far field's ground at the patch's level: the height function's
     // at the lattice vertex, as the neighbour's own vertex there has it.
     let near = near_codes(key, &figure, heights, |i, j| {
@@ -564,6 +566,75 @@ pub(super) fn bake_horizon<F: FieldView>(
         far: pack(&far),
         refused: ground.refused,
         refused_cells: ground.refused_cells.into_iter().collect(),
+    }
+}
+
+/// Makes the heights of `key`'s near-field margin ([`NearGrid`]) that `cache` lacks, and keeps
+/// each the view answers there for the margin and the far march to read: each even vertex with its
+/// parent level's at the same point, which the march reads beyond the patch, as one pass
+/// ([`Synthesiser::height_pairs_at`]), and the others four at a time
+/// ([`Synthesiser::heights_at`]); each the point query's height bit for bit. A vertex the view
+/// refuses is not kept, so that where it is read it is asked again and names its cell as before
+/// ([`FarGround::vertex_height_m`]). Asked one by one, the margin's 2,336 heights were 15% of a
+/// cold high draft on the Earth-like world's L + 4 patch; as pairs and lanes they take 3% of the
+/// draft less (R10.T6.a's lever, callgrind, pod, 16 vCPU, 2026-11-02).
+fn make_margin<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache, key: PatchKey) {
+    let (face, level) = (key.face(), key.level());
+    let grid = NearGrid::of(key);
+    let kept = |cache: &mut SynthCache, at: u64| cache.far_heights_mut().heights.get(at).is_some();
+    // The even vertices' keys with their parent's, and the others'; each with its direction, which
+    // is the parent level's vertex's too, bit for bit (s = 2i ÷ 2n = i ÷ n exactly).
+    let (mut pairs, mut pair_dirs) = (Vec::with_capacity(grid.len()), Vec::new());
+    let (mut singles, mut single_dirs) = (Vec::with_capacity(grid.len()), Vec::new());
+    pair_dirs.reserve(grid.len());
+    single_dirs.reserve(grid.len());
+    for y in grid.y0..=grid.y1 {
+        for x in grid.x0..=grid.x1 {
+            if NearGrid::own(x, y).is_some() {
+                continue;
+            }
+            let (i, j) = grid.lattice(x, y);
+            let at = memo_key(face, level, i, j);
+            if kept(cache, at) {
+                continue;
+            }
+            let dir = lattice_vertex_dir(face, level, i, j);
+            match level.checked_sub(1) {
+                Some(parent)
+                    if i % 2 == 0
+                        && j % 2 == 0
+                        && !kept(cache, memo_key(face, parent, i / 2, j / 2)) =>
+                {
+                    pairs.push((at, memo_key(face, parent, i / 2, j / 2)));
+                    pair_dirs.push(dir);
+                }
+                _ => {
+                    singles.push(at);
+                    single_dirs.push(dir);
+                }
+            }
+        }
+    }
+    let band = |level: u8| BandLevel::new(level).expect("a patch's level is a band level");
+    let keep = |cache: &mut SynthCache, at: u64, answer: Result<HeightSample, QueryHeightError>| {
+        if let Ok(sample) = answer {
+            let kept = cache.far_heights_mut();
+            if kept.heights.len() >= FAR_HEIGHTS_HELD {
+                kept.heights.clear();
+            }
+            kept.heights.get_or_insert_with(at, || sample.height_m);
+        }
+    };
+    if let Some(parent) = level.checked_sub(1) {
+        let answers = synth.height_pairs_at(cache, &pair_dirs, band(level), band(parent));
+        for (&(at, up), (own, parent)) in pairs.iter().zip(answers) {
+            keep(cache, at, own);
+            keep(cache, up, parent);
+        }
+    }
+    let answers = synth.heights_at(cache, &single_dirs, band(level));
+    for (&at, answer) in singles.iter().zip(answers) {
+        keep(cache, at, answer);
     }
 }
 
@@ -1010,7 +1081,8 @@ struct FarGround<'s, 'a, F> {
     own: &'s PatchHeights,
     /// The cells whose four vertex heights the bake has read, by the key of their first vertex.
     cells: Vec<Option<(u64, [f64; 4])>>,
-    /// The vertices the view refused in this bake, so that each is asked once.
+    /// The vertices the view refused in this bake, so that each is asked once where it is read
+    /// (after [`make_margin`]'s batch, which keeps no refusal).
     refused_here: BTreeSet<u64>,
     /// The [`cell_index`] of the cell each refusal named, the first cell its reads lacked.
     refused_cells: BTreeSet<u32>,
