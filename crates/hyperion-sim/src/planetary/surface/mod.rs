@@ -459,10 +459,10 @@ mod tests {
     /// with its count.
     #[test]
     #[ignore = "slow: the crust steps of the 5,963 bodies the 400 sample systems' records read, \
-                about 470 s on four threads in the test profile, 1,800 s on one"]
+                about 135 s on sixteen threads in the slow-test profile, 1,800 s on one"]
     fn no_generated_cell_lacks_its_crust_s_entry() {
         let systems = crate::planetary::system::tests::whole();
-        let shares = hyperion_testkit::threads::in_shares(systems.len(), 4, |k| {
+        let shares = hyperion_testkit::threads::in_shares(systems.len(), 16, |k| {
             let (ctx, system) = &systems[k];
             let snapshot = system.snapshot_at(ctx, RECORD_TIME);
             let records = snapshot.bodies();
