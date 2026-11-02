@@ -231,6 +231,12 @@ export interface PhotorealFrame {
    * absent.
    */
   readonly atmosphereSetting?: QualitySetting | undefined;
+  /**
+   * Whether the view's frame-rate floor stands at its lowest step (`BudgetedScale.atLowestStep`),
+   * when a large disc's limb pixels take `PhotorealSettings.floorLimbSamples` cells (R07.T8.i, the
+   * owner's priority). Absent, `false`.
+   */
+  readonly floorLowest?: boolean | undefined;
   /** The exposure scale the target is pre-exposed with (`exposureScale`), 1 ÷ (cd/m²). */
   readonly exposureScale: number;
   /** R06's draws at infinity, in order: the band, then the baked cube. */
@@ -791,6 +797,7 @@ export class PhotorealRenderer {
         setting: frame.setting,
         drawsAir,
         ...(frame.previousTabled === undefined ? {} : { previousTabled: frame.previousTabled }),
+        ...(frame.floorLowest === true ? { limbSamples: settings.floorLimbSamples } : {}),
       },
       frame.previousRegimes,
     );

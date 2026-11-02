@@ -300,6 +300,12 @@ export interface BodyFrameOptions {
    * the boundary's hysteresis. Absent, none.
    */
   readonly previousTabled?: ReadonlySet<BodyIdHex>;
+  /**
+   * The cells per axis a disc of 32 px or more takes in its limb pixels (`discSamples`):
+   * `PhotorealSettings.floorLimbSamples` while the view's frame-rate floor stands at its lowest
+   * step (R07.T8.i). Absent, `LIMB_SAMPLES`.
+   */
+  readonly limbSamples?: number;
 }
 
 /** A body drawn as a mesh this frame (T9). */
@@ -635,7 +641,10 @@ function discRecordOf(
       ? rotateToBody(surface.rotation, vec3(0, 0, 1))
       : figurePole(body.figure);
   const aOverD = a / distanceM;
-  const samples = discSamples(angularDiameterPx(body.centreM, a, options.camera, options.viewport));
+  const samples = discSamples(
+    angularDiameterPx(body.centreM, a, options.camera, options.viewport),
+    options.limbSamples,
+  );
   const lights: DiscLight[] = sources.stars.map((light) => {
     const d = norm(light.toStarM);
     return {

@@ -45,6 +45,7 @@ import {
   MAX_CELL_JOBS,
   packDiscRecords,
   pixelsPerGroup,
+  rasteriseDisc,
   viewRay,
 } from "./discShading";
 import { packClassMap } from "./discSurface";
@@ -1298,6 +1299,84 @@ function bandCase(
   }
   return { record, limb, band, shaded: bandPixels(record, viewport) };
 }
+
+/**
+ * One 8-bit sRGB code at black, as a share of white: code 1 on the curve's linear segment,
+ * (1 ÷ 255) ÷ 12.92 (IEC 61966-2-1:1999, sRGB, the segment below 0.04045).
+ */
+const ONE_CODE_AT_BLACK = 1 / 255 / 12.92;
+
+/** A display colour's luminance, its BT.709 weights (ITU-R BT.709-6, item 3.2). */
+function luminanceOf(rgb: readonly [number, number, number]): number {
+  return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+}
+
+/**
+ * The share of `record`'s limb pixels (the limb draw's, `rasteriseDisc` in f64) that its limb at
+ * `limbSamples` cells per axis draws within its own cells' light, as `compareCaptures.mjs` counts a
+ * pixel within: its luminance within 1/3 stop, or under {@link ONE_CODE_AT_BLACK} of the limb's
+ * brightest pixel apart, that pixel at white; and the share within 1/3 stop alone.
+ */
+function limbWithin(
+  record: DiscRecord,
+  viewport: Viewport,
+  limbSamples: number,
+): { readonly pixels: number; readonly within: number; readonly thirdStop: number } {
+  const limbOf = (each: DiscRecord): Map<string, number> =>
+    new Map(
+      rasteriseDisc(each, CAMERA, viewport)
+        .filter((pixel) => pixel.draw === "limb")
+        .map((pixel) => [`${String(pixel.xPx)},${String(pixel.yPx)}`, luminanceOf(pixel.rgb)]),
+    );
+  const own = limbOf(record);
+  const fewer = limbOf({ ...record, limbSamples });
+  const peak = Math.max(...own.values());
+  const keys = [...new Set([...own.keys(), ...fewer.keys()])];
+  let within = 0;
+  let thirdStop = 0;
+  for (const key of keys) {
+    const a = own.get(key) ?? 0;
+    const b = fewer.get(key) ?? 0;
+    const close = (a === 0 && b === 0) || Math.abs(Math.log2(b / a)) <= 1 / 3;
+    thirdStop += close ? 1 : 0;
+    within += close || Math.abs(a - b) < ONE_CODE_AT_BLACK * peak ? 1 : 0;
+  }
+  return { pixels: keys.length, within: within / keys.length, thirdStop: thirdStop / keys.length };
+}
+
+describe("a large disc's limb at 2 × 2 cells at the frame-rate floor's lowest step (R07.T8.i)", () => {
+  it("takes the floor's cells on the limb of a disc of 32 px or more, and a smaller disc's as before", () => {
+    const { bodies, hosts } = bodiesOf([13, 40]);
+    const plan = (limbSamples?: number): ReadonlyArray<readonly [number, number]> =>
+      planLitBodies(
+        bodies,
+        hosts,
+        { ...OPTIONS, ...(limbSamples === undefined ? {} : { limbSamples }) },
+        new Map(bodies.map((b) => [b.id, "disc"])),
+      ).discs.map((record) => [record.interiorSamples, record.limbSamples]);
+    expect([plan(), plan(2)]).toEqual([
+      [
+        [4, 4],
+        [1, 4],
+      ],
+      [
+        [4, 4],
+        [1, 2],
+      ],
+    ]);
+  });
+
+  // Every pixel within in these four; within 1/3 stop alone on 99.15% to 99.74% of them, the rest
+  // slivers at a corner, each under 1.1 × 10⁻⁴ of the limb's brightest pixel.
+  it.each(LIMB_CASES)(
+    "draws the limb within 1/3 stop of its 4 × 4 cells, or under an 8-bit code at black apart, on 99.5% of its pixels or more: %s",
+    (_, figure, direction, distanceM, viewport) => {
+      const record = recordOfBody(bodyToward(figure, direction, distanceM), viewport);
+      const { pixels, within, thirdStop } = limbWithin(record, viewport, 2);
+      expect([pixels > 100, within >= 0.995, thirdStop >= 0.99]).toEqual([true, true, true]);
+    },
+  );
+});
 
 describe("a large disc's face's near-limb band through the cell pass (R07.T8.g)", () => {
   it.each(LIMB_CASES)(

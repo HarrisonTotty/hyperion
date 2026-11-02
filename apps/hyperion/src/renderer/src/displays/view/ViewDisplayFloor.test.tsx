@@ -83,4 +83,19 @@ describe("VIEW's frame-rate floor (the owner's report, 2026-11-01)", () => {
     expect(lastAir()).toBe("low");
     expect(screen.getByText(statusLine(IMAGE_DETAIL_LIMITED))).toBeTruthy();
   });
+
+  it("draws its large discs' limbs at the floor's fewer cells only once its image stands at the floor's lowest step (R07.T8.i)", async () => {
+    const render = vi.spyOn(PhotorealRenderer.prototype, "render");
+    const view = await photoreal(["timestamp-query"]);
+    const lastLowest = (): PhotorealFrame["floorLowest"] =>
+      render.mock.calls.at(-1)?.[1].floorLowest;
+    draw(view, 50, 17, 0.2);
+    const keeping = lastLowest();
+    draw(view, 200, 17, 10);
+    expect([keeping, sceneTarget(view), lastLowest()]).toEqual([
+      false,
+      { widthPx: 1280, heightPx: 720 },
+      true,
+    ]);
+  });
 });

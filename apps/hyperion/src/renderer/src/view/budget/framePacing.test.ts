@@ -232,6 +232,46 @@ describe("BudgetedScale", () => {
     expect(beside.airStepped).toBe(false);
   });
 
+  it("stands at the floor's lowest step only while its scale is held at its bounds' min, beside instruments never (R07.T8.i)", () => {
+    const floor = viewBudgets(
+      [{ id: PRIMARY, slot: "primary", style: "photorealistic" }],
+      "high",
+      1080,
+    ).get(PRIMARY);
+    const gpuBudgetMs = floor?.control?.target.gpuBudgetMs ?? 0;
+    if (floor === undefined || floor.control?.kind !== "floor") {
+      throw new Error("the primary alone on high should have its floor");
+    }
+    const lowest = floor.control.bounds[0];
+    const scale = new BudgetedScale();
+    scale.update(floor, [0.2 * gpuBudgetMs], 16.7);
+    const atFirst = scale.atLowestStep;
+    let stepped = false;
+    let frames = 0;
+    while (scale.controller?.scale !== lowest && frames < 2_000) {
+      scale.update(floor, [3 * gpuBudgetMs], 16.7);
+      stepped ||= scale.atLowestStep && scale.controller?.scale !== lowest;
+      frames += 1;
+    }
+    const atLowest = scale.atLowestStep;
+    while (scale.controller?.scale === lowest && frames < 4_000) {
+      scale.update(floor, [0.3 * gpuBudgetMs], 16.7);
+      frames += 1;
+    }
+    const beside = new BudgetedScale();
+    const one = primaryBudget("photorealistic", 1);
+    for (let frame = 0; frame < 200; frame += 1) {
+      beside.update(one, [3 * (one.control?.target.gpuBudgetMs ?? 0)], 16.7);
+    }
+    expect([atFirst, stepped, atLowest, scale.atLowestStep, beside.atLowestStep]).toEqual([
+      false,
+      false,
+      true,
+      false,
+      false,
+    ]);
+  });
+
   it("brings a floor's air back once its scale is at its max and its frames have stayed calm", () => {
     const floor = viewBudgets(
       [{ id: PRIMARY, slot: "primary", style: "photorealistic" }],

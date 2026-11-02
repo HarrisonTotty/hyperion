@@ -92,6 +92,8 @@ export interface PhotorealInputs {
   readonly setting: QualitySetting;
   /** The setting whose sizes the frame's air is drawn at (`PhotorealFrame.atmosphereSetting`). */
   readonly atmosphereSetting?: QualitySetting | undefined;
+  /** Whether its frame-rate floor stands at its lowest step (`PhotorealFrame.floorLowest`). */
+  readonly floorLowest?: boolean | undefined;
   /** The exposure scale (`exposureScale`), the target's pre-exposure. */
   readonly exposureScale: number;
   /** The frame's wireframe draw list, whose sprites are the stars. */
@@ -439,6 +441,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     role: run.camera.role,
     setting: inputs.setting,
     atmosphereSetting: inputs.atmosphereSetting,
+    floorLowest: inputs.floorLowest,
     exposureScale,
     sky: [...(band === null ? [] : [band]), ...(inputs.cube === null ? [] : [inputs.cube])],
     starSprites: [...inputs.list.sprites.map(starRecord), ...hostSprites],

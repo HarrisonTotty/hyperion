@@ -31,6 +31,7 @@ import {
   DISC_CELLS_PASS,
   type LitBodyInput,
 } from "../bodies/draw";
+import { LIMB_SAMPLES } from "../bodies/discShading";
 import { packClassMap } from "../bodies/discSurface";
 import { rotationColumns } from "../bodies/smoothMesh";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
@@ -41,7 +42,7 @@ import type { DrawItem, FrameSubmission, RenderView, TextureHandle } from "../en
 import { AU_M } from "../scenes/kept";
 import { BloomChain } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL, histogramParams, histogramWorkgroups } from "../post/histogram";
-import type { QualitySetting } from "../quality/qualitySetting";
+import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
 import { limbDistanceM, pixelAngleRad } from "../terrain/handover";
 import { OUTSIDE_VIEW_MARGIN_PX, type SurveyedDatumFrame } from "../wireframe/submit";
 import {
@@ -1717,6 +1718,40 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
     );
     const cells = engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS);
     expect([plan?.discs.map((disc) => disc.interiorSamples), cells.length]).toEqual([[1], 1]);
+    renderer.dispose();
+  });
+
+  it("takes the setting's floor cells on a large disc's limb only at the floor's lowest step, a small disc's as before (R07.T8.i)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const discs = [bodyAcross(40, 0, "0200080020000000.0403"), ...smallDiscs()];
+    const samples = (floorLowest?: boolean): number[][] =>
+      (
+        renderer.render(new RecordingView(), {
+          ...frameOfDiscs(discs),
+          ...(floorLowest === undefined ? {} : { floorLowest }),
+        })?.discs ?? []
+      ).map((disc) => [disc.interiorSamples, disc.limbSamples]);
+    const floor = SETTINGS.high.photoreal.floorLimbSamples;
+    // The plan's discs in its painter's order, the small ones first.
+    expect([samples(), samples(false), samples(true)]).toEqual([
+      [
+        [8, 8],
+        [4, 4],
+        [1, LIMB_SAMPLES],
+      ],
+      [
+        [8, 8],
+        [4, 4],
+        [1, LIMB_SAMPLES],
+      ],
+      [
+        [8, 8],
+        [4, 4],
+        [1, floor],
+      ],
+    ]);
     renderer.dispose();
   });
 

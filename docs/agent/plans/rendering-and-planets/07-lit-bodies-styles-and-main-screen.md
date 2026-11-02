@@ -1581,6 +1581,9 @@ src/renderer/src/view/scenes src/renderer/src/view/lighting`.
   their ends to the pixels the limb draw may read, and no jobs for a body handed over under a
   coverage mask of every cell surveyed. Acceptance: test-render, both variants, and the atmosphere
   run's captures byte-identical; `pnpm test`. Built (2026-11-01); see Risks, "R07.T8.h, as built".
+- **R07.T8.i The limb at 2 × 2 cells at the floor's lowest step** (the owner's priority; a lean
+  behind a setting). Acceptance: within 1/3 stop of 4 × 4 on ≥ 99.5% of limb pixels; `pnpm test`.
+  Built (2026-11-02); see Risks, "R07.T8.i, as built".
 
 #### R07.T9 Mesh bodies
 
@@ -10111,3 +10114,12 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `TerrainSession.coverageWhole` and `CoverageMask.whole`.
   - The kernel's lever (a cell none of whose rays meets the spheroid skips its shades) has nothing
     to skip: no cell's samples miss, and the cells with no samples (62%) shade nothing already.
+- **R07.T8.i, as built** (2026-11-02, perf-disc-cells).
+  - `PhotorealSettings.floorLimbSamples` (2 on both settings; 4 is the way back) is a large disc's
+    limb cells while `BudgetedScale.atLowestStep` (the floor's scale at its bounds' min) holds.
+    It reaches `planLitBodies` as `BodyFrameOptions.limbSamples` through `floorLowest` on
+    `ViewFrameInputs`, `PhotorealFrameInputs` and `PhotorealFrame`; `discSamples` takes it.
+  - The setting is a lean (lean, 2026-11-02). The low setting never steps its floor, so it never
+    takes the lean.
+  - 1/3 stop is counted as `compareCaptures.mjs` counts it, with one 8-bit code at black allowed.
+    By 1/3 stop alone it holds on 99.15–99.74% of the twin's limb pixels.

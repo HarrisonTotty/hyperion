@@ -1432,6 +1432,8 @@ function ViewStage({
           // Its air at the low setting's sizes while its frame-rate floor holds it stepped down
           // (the owner's report, 2026-11-01).
           atmosphereSetting: primaryScale.airStepped ? "low" : paced.setting,
+          // Its large discs' limbs at fewer cells while the floor holds its lowest step (R07.T8.i).
+          floorLowest: primaryScale.atLowestStep,
           // The scene target at the render resolution times the budget's or controller's scale.
           renderScale,
           availability: inputs.availability,

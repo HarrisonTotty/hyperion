@@ -190,11 +190,21 @@ export class BudgetedScale {
   #controller: ResolutionController | null = null;
   #bounds: ScaleBounds | null = null;
   #airStepped = false;
+  #lowest = false;
   #calm = 0;
 
   /** Whether the frame-rate floor has stepped the view's air to the low setting's sizes. */
   get airStepped(): boolean {
     return this.#airStepped;
+  }
+
+  /**
+   * Whether the frame-rate floor holds the view's scale at its lowest step, its bounds' min, when
+   * its large discs' limb pixels take `PhotorealSettings.floorLimbSamples` cells (R07.T8.i, the
+   * owner's priority).
+   */
+  get atLowestStep(): boolean {
+    return this.#lowest;
   }
 
   /** The controller while the budget controls the scale, else `null`. */
@@ -220,6 +230,7 @@ export class BudgetedScale {
       this.#controller = null;
       this.#bounds = null;
       this.#airStepped = false;
+      this.#lowest = false;
       return budget.renderScale;
     }
     if (
@@ -234,6 +245,7 @@ export class BudgetedScale {
     }
     const scale = this.#controller.update(gpuFramesMs, intervalMs);
     this.#stepAir(control, scale, gpuFramesMs, intervalMs);
+    this.#lowest = control.kind === "floor" && scale <= control.bounds[0];
     return scale;
   }
 

@@ -181,15 +181,18 @@ export interface DiscSamples {
  *
  * @param diameterPx - The disc's angular diameter at the centre pixel's scale
  *   (`angularDiameterPx`), px.
+ * @param limbSamples - The cells per axis a larger disc's limb pixels take: {@link LIMB_SAMPLES},
+ *   or `PhotorealSettings.floorLimbSamples` while the view's frame-rate floor stands at its lowest
+ *   step (R07.T8.i).
  */
-export function discSamples(diameterPx: number): DiscSamples {
+export function discSamples(diameterPx: number, limbSamples: number = LIMB_SAMPLES): DiscSamples {
   if (diameterPx < FINE_DISC_PX) {
     return { interior: FINE_DISC_SAMPLES, limb: FINE_DISC_SAMPLES };
   }
   if (diameterPx < SMALL_DISC_PX) {
     return { interior: SMALL_DISC_SAMPLES, limb: SMALL_DISC_SAMPLES };
   }
-  return { interior: 1, limb: LIMB_SAMPLES };
+  return { interior: 1, limb: limbSamples };
 }
 
 /** The display channels' indices, r, g, b. */

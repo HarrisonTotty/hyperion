@@ -178,6 +178,14 @@ export interface PhotorealSettings {
   readonly discAnnuli: number;
   /** The most lit neighbours that light a body by planetshine (R07 Design note 7): 2, or 1. */
   readonly planetshineSources: number;
+  /**
+   * The cells per axis a disc of 32 px or more takes in its limb pixels while a photorealistic
+   * primary's frame-rate floor stands at its lowest step (R07.T8.i, the owner's priority; a lean,
+   * 2026-11-02): 2, a quarter of `LIMB_SAMPLES`' cells, within 1/3 stop of them on at least 99.5%
+   * of the limb's pixels; `LIMB_SAMPLES` (4) is the way back. The low setting never steps its floor
+   * (`aloneScaleBounds`), so its value is never read; it is the same.
+   */
+  readonly floorLimbSamples: number;
 }
 
 /** What the per-view budget reads of a setting (R07 Design notes 14 and 18). */
@@ -255,6 +263,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       bloom: BLOOM_LEVELS.high,
       discAnnuli: DISC_ANNULI_HIGH,
       planetshineSources: PLANETSHINE_SOURCES_HIGH,
+      floorLimbSamples: 2,
     },
     geometry: {
       clusterPath: true,
@@ -282,6 +291,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       bloom: BLOOM_LEVELS.low,
       discAnnuli: DISC_ANNULI_LOW,
       planetshineSources: PLANETSHINE_SOURCES_LOW,
+      floorLimbSamples: 2,
     },
     geometry: {
       clusterPath: true,

@@ -83,6 +83,7 @@ describe("the quality settings", () => {
       bloom: { firstLevel: 1, levels: 5 },
       discAnnuli: 3,
       planetshineSources: 1,
+      floorLimbSamples: 2,
     });
   });
 
@@ -92,6 +93,7 @@ describe("the quality settings", () => {
       bloom: { firstLevel: 0, levels: 7 },
       discAnnuli: 4,
       planetshineSources: 2,
+      floorLimbSamples: 2,
     });
   });
 

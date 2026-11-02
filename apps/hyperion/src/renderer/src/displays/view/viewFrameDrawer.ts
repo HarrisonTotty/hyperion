@@ -111,6 +111,11 @@ export interface ViewFrameInputs {
    */
   readonly atmosphereSetting?: QualitySetting | undefined;
   /**
+   * Whether its frame-rate floor holds its scale at its lowest step (`BudgetedScale.atLowestStep`),
+   * when its large discs' limbs take fewer cells (R07.T8.i); `false` where absent.
+   */
+  readonly floorLowest?: boolean | undefined;
+  /**
    * Its budget's internal scale, a photorealistic frame's (`ViewBudget.renderScale`), of the render
    * resolution (`renderViewport`).
    */
@@ -653,6 +658,7 @@ export class ViewFrameDrawer {
           selectionPx,
           setting: inputs.setting,
           atmosphereSetting: inputs.atmosphereSetting,
+          floorLowest: inputs.floorLowest,
           exposureScale: exposed,
           list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
           sky,
