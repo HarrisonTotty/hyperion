@@ -107,7 +107,7 @@ use super::wind::{self, ReimersEta, WindRecipe};
 
 // Plan 11's hooks: the helium star of ruling 34.1 and a star whose mass a companion sets.
 pub(crate) use binary::{
-    CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, Remains, Structure,
+    CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, RadiusAtAge, Remains, Structure,
     bare_core_light, giant_radius_exponent, lightest_helium_star, main_sequence_lifetime,
     main_sequence_radius, main_sequence_structure, new_star_mass, pulsing_agb_helium_core,
 };
@@ -1978,6 +1978,14 @@ impl Segment {
             mass,
             fraction,
         }
+    }
+
+    /// The factor [`Segment::finish_point`] puts on the radius at coordinate `coord`, the junction's
+    /// offset where the segment's ramp has not yet reached 1, or `None` where it has.
+    #[must_use]
+    pub(crate) fn junction_radius_factor(&self, coord: f64) -> Option<f64> {
+        let ramp = build::ramp(self.ramp_coordinate(coord));
+        (ramp < 1.0).then(|| crate::math::exp10(self.junction.log_r * (1.0 - ramp)))
     }
 
     /// The coordinate and the mass at `age`: interpolated between the knots, or from the

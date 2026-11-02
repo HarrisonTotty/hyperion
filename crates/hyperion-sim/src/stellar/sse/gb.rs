@@ -884,6 +884,17 @@ impl FirstGiantBranch {
     /// L, R and core at `t` with `radius_law` for equation 46.
     #[must_use]
     fn point(&self, t: Megayears, radius_law: &RadiusLaw) -> PhasePoint {
+        let (luminosity, core_mass) = self.luminosity_and_core(t);
+        PhasePoint {
+            luminosity,
+            radius: radius_law.at(luminosity),
+            core_mass,
+        }
+    }
+
+    /// L and the core at `t`, which the current mass does not move (HPT section 7.1).
+    #[must_use]
+    fn luminosity_and_core(&self, t: Megayears) -> (SolarLuminosities, SolarMasses) {
         let tau = (t - self.t_bgb) / (self.t_hei - self.t_bgb);
         debug_assert!(
             (-1e-9..=1.0 + 1e-9).contains(&tau),
@@ -895,11 +906,60 @@ impl FirstGiantBranch {
             None => relation_core,
             Some((mc_bgb, mc_hei)) => mc_bgb + (mc_hei - mc_bgb) * tau,
         };
-        PhasePoint {
+        (luminosity, core_mass)
+    }
+
+    /// What the branch's state at `t` reads of the age alone: its luminosity, the luminosity's
+    /// powers in the radius law, and the core, which [`BranchAt::at_mass`] then reads at any current
+    /// mass (R06.T16.a's cost).
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as `FirstGiantBranch::at`.
+    #[must_use]
+    pub(crate) fn prepared(&self, t: Megayears) -> BranchAt {
+        let (luminosity, core_mass) = self.luminosity_and_core(t);
+        BranchAt {
             luminosity,
-            radius: radius_law.at(luminosity),
+            // The law's exponents follow the metallicity alone, so the star's own law gives the
+            // powers every current mass's reads.
+            powers: LuminosityPowers::new(&self.radius_law, luminosity),
             core_mass,
         }
+    }
+}
+
+/// The first giant branch's state at one age, as far as the age alone sets it
+/// ([`FirstGiantBranch::prepared`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct BranchAt {
+    luminosity: SolarLuminosities,
+    powers: LuminosityPowers,
+    core_mass: SolarMasses,
+}
+
+impl BranchAt {
+    /// [`FirstGiantBranch::at_mass`] at the age prepared for, bit for bit: the radius at the
+    /// current mass `mt` from the luminosity's powers ([`RadiusLaw::at_powers`]).
+    #[must_use]
+    pub(crate) fn at_mass(&self, mt: SolarMasses, c: &ZCoeffs) -> PhasePoint {
+        PhasePoint {
+            luminosity: self.luminosity,
+            radius: RadiusLaw::giant(mt, c).at_powers(&self.powers),
+            core_mass: self.core_mass,
+        }
+    }
+
+    /// The luminosity at the age prepared for.
+    #[must_use]
+    pub(crate) const fn luminosity(&self) -> SolarLuminosities {
+        self.luminosity
+    }
+
+    /// The core at the age prepared for.
+    #[must_use]
+    pub(crate) const fn core_mass(&self) -> SolarMasses {
+        self.core_mass
     }
 }
 

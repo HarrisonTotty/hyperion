@@ -540,8 +540,7 @@ impl Engine {
         let Member::MainSequence { helium, .. } = &self.members[i] else {
             return tau;
         };
-        let lifetime =
-            crate::stellar::sse::main_sequence_lifetime(self.ctx.coeffs(), *helium, mass);
+        let lifetime = self.main_sequence_lifetime(*helium, mass);
         if (1.0 - tau).max(0.0) * lifetime <= MAIN_SEQUENCE_END_REACHED * age.abs() {
             1.0
         } else {
@@ -583,11 +582,7 @@ impl Engine {
             };
             r.inertia[i] = moment_of_inertia(st);
             if let Member::MainSequence { helium, .. } = &self.members[i] {
-                let lifetime = crate::stellar::sse::main_sequence_lifetime(
-                    self.ctx.coeffs(),
-                    *helium,
-                    s.masses[i],
-                );
+                let lifetime = self.main_sequence_lifetime(*helium, s.masses[i]);
                 r.tau[i] = 1.0 / lifetime;
             }
         }
@@ -785,11 +780,7 @@ impl Engine {
                     }
                 }
                 Member::MainSequence { helium, .. } => {
-                    let lifetime = crate::stellar::sse::main_sequence_lifetime(
-                        self.ctx.coeffs(),
-                        *helium,
-                        s.masses[i],
-                    );
+                    let lifetime = self.main_sequence_lifetime(*helium, s.masses[i]);
                     limits.event((1.0 - s.taus[i]) * lifetime, Stop::MainSequenceEnd(i));
                     limits.length(MAIN_SEQUENCE_STEP * lifetime);
                 }

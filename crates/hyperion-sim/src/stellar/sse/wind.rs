@@ -254,12 +254,31 @@ pub(crate) fn small_envelope_mu(
     core_mass: SolarMasses,
     luminosity: SolarLuminosities,
 ) -> f64 {
-    let (m, mc, l) = (mass.value(), core_mass.value(), luminosity.value());
+    small_envelope_mu_of(mass, core_mass, small_envelope_factor(luminosity))
+}
+
+/// [`small_envelope_mu`]'s factor of the luminosity alone, min(5, max(1.2, (L ÷ L₀)^κ)), which a
+/// star whose luminosity the current mass does not move keeps at every mass.
+#[must_use]
+pub(crate) fn small_envelope_factor(luminosity: SolarLuminosities) -> f64 {
+    MU_CLAMP.1.min(
+        MU_CLAMP
+            .0
+            .max(math::powf_positive(luminosity.value() / MU_L0, MU_KAPPA)),
+    )
+}
+
+/// [`small_envelope_mu`] with its luminosity's `factor` ([`small_envelope_factor`]) given, bit for
+/// bit.
+///
+/// # Panics
+///
+/// As [`small_envelope_mu`].
+#[must_use]
+pub(crate) fn small_envelope_mu_of(mass: SolarMasses, core_mass: SolarMasses, factor: f64) -> f64 {
+    let (m, mc) = (mass.value(), core_mass.value());
     debug_assert!(m > 0.0, "μ needs a positive mass: {m}");
-    ((m - mc) / m)
-        * MU_CLAMP
-            .1
-            .min(MU_CLAMP.0.max(math::powf_positive(l / MU_L0, MU_KAPPA)))
+    ((m - mc) / m) * factor
 }
 
 /// Kudritzki and Reimers' coefficient, M☉ yr⁻¹ per (L☉ R☉ ÷ M☉): `Ṁ_R` = η × 4 × 10⁻¹³ L R ÷ M

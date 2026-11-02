@@ -89,8 +89,8 @@ use crate::units::{SolarMasses, Years};
 use super::detached::{Snapshot, orbital_momentum, semi_major_axis};
 use super::evolve::{Engine, roche_lobe};
 use super::star::{
-    G, Kind, Member, Path, Surface, cooling_origin, moment_of_inertia, moment_of_inertia_within,
-    positive,
+    G, Kind, Member, MemberRadiusAt, Path, Surface, cooling_origin, moment_of_inertia,
+    moment_of_inertia_within, positive,
 };
 use super::timeline::{Component, IaPoolChannel, PooledIaEvent, SegmentKind};
 
@@ -199,8 +199,8 @@ pub(super) struct Fed {
 }
 
 /// What the trials of one step of stable transfer share ([`Engine::trial_base`]).
-#[derive(Debug, Clone, Copy)]
-struct TrialBase {
+#[derive(Debug)]
+struct TrialBase<'e> {
     /// The orbit's angular frequency, rad yr⁻¹.
     omega: f64,
     /// The donor's and the accretor's winds, M☉ yr⁻¹.
@@ -220,6 +220,8 @@ struct TrialBase {
     disc_speed: f64,
     /// The accretor's spin at break-up, if it has one.
     break_up: Option<f64>,
+    /// The donor's radius at the step's end, for the mass each trial leaves it.
+    donor_radius: MemberRadiusAt<'e>,
 }
 
 impl Engine {
@@ -706,8 +708,7 @@ impl Engine {
                     }
                 }
                 Member::MainSequence { helium, .. } => {
-                    let lifetime =
-                        sse::main_sequence_lifetime(self.ctx.coeffs(), *helium, s.masses[i]);
+                    let lifetime = self.main_sequence_lifetime(*helium, s.masses[i]);
                     limits.event(
                         (1.0 - s.taus[i]).max(0.0) * lifetime,
                         Stop::MainSequenceEnd(i),
@@ -817,7 +818,7 @@ impl Engine {
         sd: &Structure,
         sa: &Structure,
         kd: Kind,
-    ) -> TrialBase {
+    ) -> TrialBase<'_> {
         let params = self.ctx.params();
         let a_idx = 1 - d;
         let (md, ma) = (s.masses[d], s.masses[a_idx]);
@@ -860,6 +861,7 @@ impl Engine {
             lobe_d,
             disc_speed: (G * ma * accretor_radius).sqrt(),
             break_up,
+            donor_radius: self.members[d].radius_at_age(s.age + dt),
         }
     }
 
@@ -876,7 +878,7 @@ impl Engine {
         d: usize,
         dt: f64,
         x: f64,
-        base: &TrialBase,
+        base: &TrialBase<'_>,
         sa: &Structure,
         kd: Kind,
         ka: Kind,
@@ -940,8 +942,10 @@ impl Engine {
         };
         let a2 = semi_major_axis(j, masses, 0.0);
         // Only the donor's radius: a full structure here was most of the engine's time
-        // (`benches/binary.rs`, 2026-09-25), since the rate's bisection asks for one per trial.
-        let radius = self.members[d].radius(&self.ctx, d, next.age, md2, taus[d])?;
+        // (`benches/binary.rs`, 2026-09-25), since the rate's bisection asks for one per trial;
+        // and of that, only what the trial's mass moves (R06.T16.a's cost). `next.age` is the
+        // step's end, at which `trial_base` prepared it.
+        let radius = base.donor_radius.radius(&self.ctx, d, md2, taus[d])?;
         let lobe = roche_lobe(md2, ma2, a2);
         Some((next, crate::math::ln(radius / lobe), accretion))
     }
@@ -1076,7 +1080,7 @@ impl Engine {
     fn aged_tau(&self, d: usize, tau: f64, m: f64, dt: f64) -> f64 {
         match &self.members[d] {
             Member::MainSequence { helium, .. } => {
-                (tau + dt / sse::main_sequence_lifetime(self.ctx.coeffs(), *helium, m)).min(1.0)
+                (tau + dt / self.main_sequence_lifetime(*helium, m)).min(1.0)
             }
             Member::Track { .. }
             | Member::Shaped { .. }
@@ -1104,7 +1108,8 @@ impl Engine {
     pub(super) fn rejuvenated_tau(&self, i: usize, tau: f64, m0: f64, m1: f64, dt: f64) -> f64 {
         match &self.members[i] {
             Member::MainSequence { helium, .. } => {
-                rejuvenated_tau_unheld(self.ctx.coeffs(), *helium, tau, m0, m1, dt).min(1.0)
+                let lifetime = self.main_sequence_lifetime(*helium, m1);
+                rejuvenated_tau_of_lifetime(*helium, tau, (m0, m1), dt, lifetime).min(1.0)
             }
             Member::Track { .. }
             | Member::Shaped { .. }
@@ -1436,9 +1441,27 @@ pub(super) fn rejuvenated_tau_unheld(
     m1: f64,
     dt: f64,
 ) -> f64 {
+    rejuvenated_tau_of_lifetime(
+        helium,
+        tau,
+        (m0, m1),
+        dt,
+        sse::main_sequence_lifetime(coeffs, helium, m1),
+    )
+}
+
+/// [`rejuvenated_tau_unheld`] with the main-sequence lifetime of `m1`, `lifetime` (years), given.
+#[must_use]
+fn rejuvenated_tau_of_lifetime(
+    helium: bool,
+    tau: f64,
+    (m0, m1): (f64, f64),
+    dt: f64,
+    lifetime: f64,
+) -> f64 {
     let mixed = !helium && !(0.35..=1.25).contains(&m1);
     let tau = if mixed && m1 > m0 { tau * m0 / m1 } else { tau };
-    tau + dt / sse::main_sequence_lifetime(coeffs, helium, m1)
+    tau + dt / lifetime
 }
 
 /// The Kelvin–Helmholtz timescale of a star of structure `s` and type `kind`, years (BSE

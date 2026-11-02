@@ -36,13 +36,48 @@ use super::super::agb::CHANDRASEKHAR_MSUN;
 use super::super::coeffs::ZCoeffs;
 use super::super::gb::{self, GiantBranch};
 use super::super::helium::{self, HeliumStar};
-use super::super::ms::{self, MainSequence};
+use super::super::ms::{self, MainSequence, MainSequenceRadius};
 use super::super::wind;
 use super::build::{Builder, Entry, Keep, Resolution};
-use super::model::{HeliumCore, Model, Span, early_agb_core};
+use super::model::{HeliumCore, Model, Physics, PreparedRadius, Span, early_agb_core};
 use super::{
     Coordinate, HeliumHook, HeliumTable, MAX_INITIAL_MASS, Track, TrackOptions, reimers_eta,
 };
+
+/// A track's radius at one age for a star of any mass ([`Track::radius_at_age`]).
+#[derive(Debug)]
+pub(crate) struct RadiusAtAge<'a> {
+    phys: Physics<'a>,
+    /// The segment's model at the age.
+    prepared: PreparedRadius<'a>,
+    /// The factor of the junction's offset on the radius, where the segment's ramp has not yet
+    /// reached 1.
+    junction: Option<f64>,
+}
+
+impl RadiusAtAge<'_> {
+    /// The radius, R☉, of [`Track::structure_at`]'s star at the age prepared for and `mass` (M☉),
+    /// bit for bit ([`Track::radius_at`]), without the wind, core and envelope that the structure
+    /// adds and the radius does not read.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `mass` is not positive and finite.
+    #[must_use]
+    pub(crate) fn radius(&self, mass: f64) -> f64 {
+        debug_assert!(
+            mass.is_finite() && mass > 0.0,
+            "a star has a positive mass: {mass}"
+        );
+        // `Segment::evaluate_at`'s floor and `Segment::finish_point`'s offset; the structure keeps
+        // the evaluated radius, whatever it does to the mass and the wind.
+        let mt = SolarMasses::new(mass.max(super::build::MIN_EVALUATED_MASS));
+        let radius = self.prepared.radius(&self.phys, mt);
+        self.junction
+            .map_or(radius, |factor| radius * factor)
+            .value()
+    }
+}
 
 /// k′₂ of BSE equation 35 (HPT equation 109): the envelope's share of I ÷ (M R²).
 ///
@@ -289,21 +324,38 @@ impl Track {
     /// In debug builds, as [`Track::structure_at`].
     #[must_use]
     pub(crate) fn radius_at(&self, age: f64, mass: f64) -> f64 {
-        debug_assert!(
-            mass.is_finite() && mass > 0.0,
-            "a star has a positive mass: {mass}"
-        );
+        self.radius_at_age(age).radius(mass)
+    }
+
+    /// [`Track::radius_at`] at `age` (years on the track's clock) for a star of any mass.
+    ///
+    /// What the radius reads of the age alone is read once, and then the radius at each mass
+    /// ([`RadiusAtAge::radius`]), bit for bit: the bisection of a step of stable transfer asks for
+    /// its donor's radius at the step's end at each trial's mass.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`Track::structure_at`].
+    #[must_use]
+    pub(crate) fn radius_at_age(&self, age: f64) -> RadiusAtAge<'_> {
         let age = self.checked_age(Years::new(age));
         let segment = self.segment_at(age);
         let (coord, own_mass) = segment.coordinate_and_mass(age);
         let phys = self.physics();
-        let evaluated = if segment.model.is_remnant_model() {
-            segment.evaluate_at(&phys, age, coord, own_mass)
-        } else {
-            segment.evaluate_at(&phys, age, coord, mass)
-        };
-        // `structure_of` keeps the evaluated radius, whatever it does to the mass and the wind.
-        evaluated.point.point.radius.value()
+        if segment.model.is_remnant_model() {
+            // A remnant is its own mass's whatever the binary gives it.
+            let own = segment.evaluate_at(&phys, age, coord, own_mass);
+            return RadiusAtAge {
+                phys,
+                prepared: PreparedRadius::fixed(own.point.point.radius),
+                junction: None,
+            };
+        }
+        RadiusAtAge {
+            phys,
+            prepared: segment.model.prepared_radius(coord, age),
+            junction: segment.junction_radius_factor(coord),
+        }
     }
 
     /// The structure of `segment`'s state `evaluated` at `age` and coordinate `coord` for a star
@@ -1097,8 +1149,15 @@ pub(crate) fn main_sequence_radius(c: &ZCoeffs, helium: bool, m: f64, tau: f64) 
         m > 0.0 && (0.0..=1.0 + 1e-9).contains(&tau),
         "{m} M☉ at τ = {tau}"
     );
-    let (_, point, _) = main_sequence_point(c, helium, SolarMasses::new(m), tau.clamp(0.0, 1.0));
-    point.radius.value()
+    let (mass, tau) = (SolarMasses::new(m), tau.clamp(0.0, 1.0));
+    if helium {
+        let (_, point, _) = main_sequence_point(c, helium, mass, tau);
+        return point.radius.value();
+    }
+    // The radius alone, `main_sequence_point`'s bit for bit: the luminosity's quantities were
+    // half of a hydrogen donor's read (R06.T16.a's cost).
+    let radius = MainSequenceRadius::new(mass, c);
+    radius.at(radius.t_ms() * tau).value()
 }
 
 /// The phase, point and lifetime of a main-sequence (or, with `helium`, helium main-sequence)
@@ -1488,6 +1547,82 @@ mod tests {
                 full.state_at(Years::new(age)),
                 "at {age} yr"
             );
+        }
+    }
+
+    /// R06.T16.a's cost: a track's radius at an age, prepared once and read at any mass, is the
+    /// structure's radius there bit for bit, in every phase: over tracks of 0.9 to 30 M☉ at three
+    /// metallicities and with a helium excess, and helium stars of 0.8 to 8 M☉, at 600 ages to a
+    /// little past each one's death, at masses from above the star's own down to a hair above its core, read in
+    /// both orders so that the remnant a thin envelope keeps is the same whichever mass asks first.
+    #[test]
+    fn a_tracks_radius_at_an_age_is_the_structures_at_any_mass_bit_for_bit() {
+        use std::collections::BTreeSet;
+
+        use hyperion_testkit::float::bits;
+
+        use crate::units::{Dex, HeliumExcess};
+
+        let draws = StarDraws::median();
+        let comps = [
+            solar(),
+            Composition::from_fe_h(Dex::new(-1.5), HeliumExcess::ZERO),
+            Composition::from_fe_h(Dex::new(0.3), HeliumExcess::ZERO),
+            Composition::from_fe_h(Dex::new(-1.0), HeliumExcess::new(0.1)),
+        ];
+        let mut tracks = Vec::new();
+        for comp in &comps {
+            for m in [0.9, 1.5, 2.2, 3.0, 5.0, 9.0, 16.0, 30.0] {
+                tracks.push(Track::full(SolarMasses::new(m), comp, &draws));
+            }
+            for m in [0.8, 3.0, 8.0] {
+                tracks.push(Track::helium_star_full(SolarMasses::new(m), comp, &draws));
+            }
+        }
+        let mut phases = BTreeSet::new();
+        for track in &tracks {
+            // A little past the death, into the remnant.
+            let end = track.death().expect("a full track dies").age().value() * 1.02;
+            for i in 0..=600 {
+                let age = end * f64::from(i) / 600.0;
+                let state = track.state_at(Years::new(age));
+                let (m, mc) = (state.mass().value(), state.core_mass().value());
+                let masses: Vec<f64> = [1.2 * m, m, 0.9 * m, 0.5 * m, 0.2 * m]
+                    .into_iter()
+                    .chain(
+                        (mc > 0.0)
+                            .then_some([mc + 0.5 * (m - mc), mc + 0.1 * (m - mc), mc * 1.001])
+                            .into_iter()
+                            .flatten(),
+                    )
+                    .chain((mc > 0.0).then_some(mc * (1.0 + 1e-9)))
+                    .filter(|&mass| mass > 0.0)
+                    .collect();
+                for order in [masses.clone(), masses.iter().rev().copied().collect()] {
+                    let at = track.radius_at_age(age);
+                    for &mass in &order {
+                        let structure = track.structure_at(age, mass);
+                        phases.insert(structure.state.phase());
+                        assert_eq!(
+                            bits(at.radius(mass)),
+                            bits(structure.state.radius().value()),
+                            "{:?} at {age} yr, {mass} M☉ ({:?})",
+                            track.initial_mass(),
+                            structure.state.phase()
+                        );
+                    }
+                }
+            }
+        }
+        for phase in [
+            Phase::MainSequence,
+            Phase::HertzsprungGap,
+            Phase::FirstGiantBranch,
+            Phase::CoreHeliumBurning,
+            Phase::EarlyAgb,
+            Phase::HeliumMainSequence,
+        ] {
+            assert!(phases.contains(&phase), "no {phase:?} in {phases:?}");
         }
     }
 

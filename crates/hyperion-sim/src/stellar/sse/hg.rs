@@ -113,10 +113,7 @@ impl HertzsprungGap {
     /// In debug builds, as `HertzsprungGap::at`.
     #[must_use]
     pub(crate) fn at_mass(&self, t: Megayears, mt: SolarMasses, c: &ZCoeffs) -> PhasePoint {
-        let r_ehg = match &self.ignition {
-            None => gb::RadiusLaw::giant(mt, c).at_powers(&self.l_ehg_powers),
-            Some(ignition) => ignition.at(mt, c),
-        };
+        let r_ehg = self.r_ehg_at(mt, c);
         self.point(t, r_ehg)
     }
 
@@ -130,18 +127,78 @@ impl HertzsprungGap {
     /// L, R and core at `t` with `r_ehg` for the radius at the end of the gap.
     #[must_use]
     fn point(&self, t: Megayears, r_ehg: SolarRadii) -> PhasePoint {
+        self.point_of(&self.prepared(t), r_ehg)
+    }
+
+    /// What the gap's state at `t` reads of the age alone: its τ, luminosity and core, which
+    /// [`HertzsprungGap::at_prepared`] then reads at any current mass (R06.T16.a's cost).
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as `HertzsprungGap::at`.
+    #[must_use]
+    pub(crate) fn prepared(&self, t: Megayears) -> GapAt {
         let tau = (t - self.t_ms) / (self.t_bgb - self.t_ms);
         debug_assert!(
             (-1e-9..=1.0 + 1e-9).contains(&tau),
             "the gap runs from t_MS to t_BGB, not τ = {tau}"
         );
         let l = self.l_tms.value() * math::powf_positive(self.l_ehg / self.l_tms, tau);
-        let r = self.r_tms.value() * math::powf_positive(r_ehg / self.r_tms, tau);
-        PhasePoint {
+        GapAt {
+            tau,
             luminosity: SolarLuminosities::new(l),
-            radius: SolarRadii::new(r),
             core_mass: self.mc_ehg * ((1.0 - tau) * self.rho + tau),
         }
+    }
+
+    /// [`HertzsprungGap::at_mass`] at the age `at` was prepared for, bit for bit: the radius at
+    /// the current mass `mt`, the rest of the age.
+    #[must_use]
+    pub(crate) fn at_prepared(&self, at: &GapAt, mt: SolarMasses, c: &ZCoeffs) -> PhasePoint {
+        self.point_of(at, self.r_ehg_at(mt, c))
+    }
+
+    /// The radius at the end of the gap at the current mass `mt` ([`HertzsprungGap::at_mass`]'s).
+    #[must_use]
+    fn r_ehg_at(&self, mt: SolarMasses, c: &ZCoeffs) -> SolarRadii {
+        match &self.ignition {
+            None => gb::RadiusLaw::giant(mt, c).at_powers(&self.l_ehg_powers),
+            Some(ignition) => ignition.at(mt, c),
+        }
+    }
+
+    /// L, R and core at the age of `at` with `r_ehg` for the radius at the end of the gap.
+    #[must_use]
+    fn point_of(&self, at: &GapAt, r_ehg: SolarRadii) -> PhasePoint {
+        let r = self.r_tms.value() * math::powf_positive(r_ehg / self.r_tms, at.tau);
+        PhasePoint {
+            luminosity: at.luminosity,
+            radius: SolarRadii::new(r),
+            core_mass: at.core_mass,
+        }
+    }
+}
+
+/// The Hertzsprung gap's state at one age, as far as the age alone sets it
+/// ([`HertzsprungGap::prepared`]): τ, the luminosity and the core.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct GapAt {
+    tau: f64,
+    luminosity: SolarLuminosities,
+    core_mass: SolarMasses,
+}
+
+impl GapAt {
+    /// The luminosity at the age prepared for.
+    #[must_use]
+    pub(crate) const fn luminosity(&self) -> SolarLuminosities {
+        self.luminosity
+    }
+
+    /// The core at the age prepared for.
+    #[must_use]
+    pub(crate) const fn core_mass(&self) -> SolarMasses {
+        self.core_mass
     }
 }
 

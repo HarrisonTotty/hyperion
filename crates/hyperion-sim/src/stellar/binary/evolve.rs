@@ -31,6 +31,7 @@
 //!
 //! [`engine_track_age_years`]: super::star::engine_track_age_years
 
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use crate::orbit::{Orientation, roche_lobe_radius};
@@ -42,7 +43,7 @@ use crate::stellar::remnant::{
 use crate::stellar::sse::{self, Track};
 use crate::stellar::{Phase, substellar};
 use crate::units::consts::SOLAR_RADIUS_M;
-use crate::units::{Metres, Radians, SolarMasses, Years};
+use crate::units::{Megayears, Metres, Radians, SolarMasses, Years};
 
 use super::detached::TestedOrbit;
 use super::star::{Member, Path, positive, zams_spin};
@@ -865,9 +866,243 @@ pub(super) struct Engine {
     /// Whether a common envelope is being resolved: a merger it leads to never starts another
     /// (the guard against the recursion of a held bare core, ruling 129.4c).
     pub(super) in_common_envelope: bool,
+    /// The main-sequence lifetimes read last ([`Engine::main_sequence_lifetime`]).
+    lifetimes: Lifetimes,
+    /// The members' structures evaluated last ([`Engine::structure`]).
+    structures: KeptStructures,
+}
+
+/// The main-sequence lifetimes the engine read last, by the star's kind and its mass, as
+/// [`sse::main_sequence_lifetime`] gives them at the pair's composition.
+///
+/// A lifetime is a pure function of those, and the engine asks for it again at the same mass: a
+/// detached step of a main-sequence member reads it for its rates and its limit at the step's
+/// start, at its middle, and for its τ at its end, which is the next step's start; a step of
+/// transfer for the donor's and the accretor's τ and their ends (some five reads at three masses a
+/// detached step). So each is computed once and read back, bit for bit: 1.4% of the instructions
+/// of the field census near the Sun (callgrind of 639 systems' cells, 2026-11-02, R06.T16.a's
+/// cost).
+#[derive(Debug, Default)]
+struct Lifetimes {
+    // A cell each, not one for the array, so that a read copies one entry and not all of them.
+    kept: [Cell<Option<(bool, f64, f64)>>; LIFETIMES_KEPT],
+    next: Cell<usize>,
+}
+
+/// The lifetimes [`Lifetimes`] keeps: the masses a step reads, a member's at its start, middle and
+/// end, for both members.
+const LIFETIMES_KEPT: usize = 6;
+
+impl Lifetimes {
+    /// [`sse::main_sequence_lifetime`], years, of a star of mass `m` (M☉), a helium one if
+    /// `helium`, at the composition of `coeffs`, which must be the same at every call: the one
+    /// kept, or computed and kept in place of the oldest.
+    #[must_use]
+    fn of(&self, coeffs: &sse::ZCoeffs, helium: bool, m: f64) -> f64 {
+        if let Some((_, _, lifetime)) = self
+            .kept
+            .iter()
+            .filter_map(Cell::get)
+            .find(|&(h, kept, _)| h == helium && same(kept, m))
+        {
+            // The tests read every kept lifetime against its computation afresh.
+            #[cfg(test)]
+            assert!(
+                same(sse::main_sequence_lifetime(coeffs, helium, m), lifetime),
+                "a kept lifetime is its computation's"
+            );
+            return lifetime;
+        }
+        let lifetime = sse::main_sequence_lifetime(coeffs, helium, m);
+        let next = self.next.get();
+        self.kept[next].set(Some((helium, m, lifetime)));
+        self.next.set((next + 1) % LIFETIMES_KEPT);
+        lifetime
+    }
+}
+
+/// Whether `a` and `b` are the same number: `total_cmp` is equal exactly where the bits are, so
+/// a kept value is read back only for the very arguments it was computed at, not near ones.
+#[must_use]
+fn same(a: f64, b: f64) -> bool {
+    a.total_cmp(&b).is_eq()
+}
+
+/// The members' structures the engine evaluated last, one a slot, each with what its evaluation
+/// read ([`Engine::structure`]).
+///
+/// A member's structure is a pure function of its form and of the age, mass and τ asked of it, and
+/// a step of stable transfer asks for the same ones again: the donor's after the step for its spin,
+/// both for the accretor's events and for the check for a bare core, and both again at the next
+/// step's start, some six evaluations a step of two structures (`Engine::run` spent 6% of the
+/// field census near the Sun on them, 2026-11-02). So each is evaluated once and read back, bit for
+/// bit, while the member keeps its form.
+#[derive(Debug, Default)]
+struct KeptStructures {
+    kept: [RefCell<Option<KeptStructure>>; 2],
+}
+
+/// A structure [`KeptStructures`] keeps: what its evaluation read of the member, the age, mass and
+/// τ it was asked at, and the structure.
+#[derive(Debug)]
+struct KeptStructure {
+    form: EvaluatedForm,
+    asked: [f64; 3],
+    structure: Option<sse::Structure>,
+}
+
+/// What [`Member::evaluate`] reads of a member besides the age, mass and τ it is asked at, for the
+/// forms worth keeping.
+///
+/// A kept track is held, so that no other can take its place at its address. Every field of a
+/// member is named below, so that one added must be keyed or set aside here.
+#[derive(Debug)]
+enum EvaluatedForm {
+    Track(Arc<Track>, f64),
+    Shaped(Arc<Track>, f64),
+    MainSequence(bool),
+    Cooling(f64),
+    Remnant(Phase, f64, Megayears),
+}
+
+impl EvaluatedForm {
+    /// The form of `member`, or `None` for one whose structure costs nothing to evaluate again (a
+    /// frozen star's, nothing's).
+    #[must_use]
+    fn of(member: &Member) -> Option<Self> {
+        // The mass and τ paths are the engine's record, which `Member::evaluate` does not read.
+        match member {
+            Member::Track { track, offset } => Some(Self::Track(Arc::clone(track), *offset)),
+            Member::Shaped {
+                track,
+                offset,
+                mass: _,
+            } => Some(Self::Shaped(Arc::clone(track), *offset)),
+            Member::MainSequence {
+                helium,
+                mass: _,
+                tau: _,
+            } => Some(Self::MainSequence(*helium)),
+            Member::Cooling { offset, mass: _ } => Some(Self::Cooling(*offset)),
+            Member::Remnant {
+                phase,
+                birth,
+                origin,
+                mass: _,
+            } => Some(Self::Remnant(*phase, *birth, *origin)),
+            Member::Frozen {
+                state: _,
+                core_radius: _,
+            }
+            | Member::Gone => None,
+        }
+    }
+
+    /// Whether this is the form of `member`.
+    #[must_use]
+    fn is_of(&self, member: &Member) -> bool {
+        match (self, member) {
+            (Self::Track(kept, kept_offset), Member::Track { track, offset })
+            | (
+                Self::Shaped(kept, kept_offset),
+                Member::Shaped {
+                    track,
+                    offset,
+                    mass: _,
+                },
+            ) => Arc::ptr_eq(kept, track) && same(*kept_offset, *offset),
+            (
+                Self::MainSequence(kept),
+                Member::MainSequence {
+                    helium,
+                    mass: _,
+                    tau: _,
+                },
+            ) => kept == helium,
+            (Self::Cooling(kept), Member::Cooling { offset, mass: _ }) => same(*kept, *offset),
+            (
+                Self::Remnant(kept, kept_birth, kept_origin),
+                Member::Remnant {
+                    phase,
+                    birth,
+                    origin,
+                    mass: _,
+                },
+            ) => {
+                kept == phase
+                    && same(*kept_birth, *birth)
+                    && same(kept_origin.value(), origin.value())
+            }
+            (
+                Self::Track(..)
+                | Self::Shaped(..)
+                | Self::MainSequence(_)
+                | Self::Cooling(_)
+                | Self::Remnant(..),
+                Member::Track { .. }
+                | Member::Shaped { .. }
+                | Member::MainSequence { .. }
+                | Member::Cooling { .. }
+                | Member::Frozen { .. }
+                | Member::Remnant { .. }
+                | Member::Gone,
+            ) => false,
+        }
+    }
+}
+
+impl KeptStructures {
+    /// The structure of `member`, in `slot`, at `age` (years on the engine's clock) with `mass`
+    /// (M☉) and `tau`: the one kept, or `evaluate`'s, kept in place of the slot's last.
+    #[must_use]
+    fn of(
+        &self,
+        slot: usize,
+        member: &Member,
+        (age, mass, tau): (f64, f64, f64),
+        evaluate: impl FnOnce() -> Option<sse::Structure>,
+    ) -> Option<sse::Structure> {
+        let asked = [age, mass, tau];
+        let cell = &self.kept[slot];
+        let kept = cell.take();
+        if let Some(hit) = &kept
+            && hit.asked.iter().zip(asked).all(|(&a, b)| same(a, b))
+            && hit.form.is_of(member)
+        {
+            let structure = hit.structure;
+            cell.replace(kept);
+            // The tests read every kept structure against its evaluation afresh, so that a field
+            // `Member::evaluate` came to read that the form does not key could not go unseen.
+            #[cfg(test)]
+            assert_eq!(
+                evaluate(),
+                structure,
+                "a kept structure is its evaluation's"
+            );
+            return structure;
+        }
+        let structure = evaluate();
+        cell.replace(
+            EvaluatedForm::of(member)
+                .map(|form| KeptStructure {
+                    form,
+                    asked,
+                    structure,
+                })
+                .or(kept),
+        );
+        structure
+    }
 }
 
 impl Engine {
+    /// The main-sequence lifetime, years, of a star of mass `m` (M☉), a helium one if `helium`, at
+    /// the pair's composition: [`sse::main_sequence_lifetime`]'s, bit for bit, from [`Lifetimes`].
+    #[must_use]
+    pub(super) fn main_sequence_lifetime(&self, helium: bool, m: f64) -> f64 {
+        self.lifetimes.of(self.ctx.coeffs(), helium, m)
+    }
+
     /// An engine for a pair of `members` on `orbit`, stepping from `start` (years; zero age, or
     /// where the first star has arrived on the main sequence), its first segment from zero age.
     #[must_use]
@@ -902,6 +1137,8 @@ impl Engine {
             overflow_onset: (0.0, 0.0),
             first_contact: None,
             in_common_envelope: false,
+            lifetimes: Lifetimes::default(),
+            structures: KeptStructures::default(),
         };
         for i in 0..2 {
             let (mass, tau) = engine.current(i);
@@ -998,7 +1235,8 @@ impl Engine {
         }
     }
 
-    /// Member `i`'s structure at `age` with `mass` and `tau` (see [`Member::evaluate`]).
+    /// Member `i`'s structure at `age` with `mass` and `tau` (see [`Member::evaluate`]), bit for
+    /// bit, from [`KeptStructures`].
     #[must_use]
     pub(super) fn structure(
         &self,
@@ -1007,7 +1245,10 @@ impl Engine {
         mass: f64,
         tau: f64,
     ) -> Option<sse::Structure> {
-        self.members[i].evaluate(&self.ctx, i, age, mass, tau)
+        let member = &self.members[i];
+        self.structures.of(i, member, (age, mass, tau), || {
+            member.evaluate(&self.ctx, i, age, mass, tau)
+        })
     }
 
     /// Records the segment so far, ending at `end`, and starts the next one there of the same

@@ -19,7 +19,7 @@ use crate::stellar::remnant::structure::{
 };
 use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
 use crate::stellar::remnant::{RemnantRecipe, neutron_star};
-use crate::stellar::sse::{self, ConvectiveEnvelope, Structure, Track};
+use crate::stellar::sse::{self, ConvectiveEnvelope, RadiusAtAge, Structure, Track};
 use crate::stellar::{Phase, StarState, StarStateParts, substellar};
 use crate::units::consts::{GM_SUN, SECONDS_PER_JULIAN_YEAR, SOLAR_RADIUS_M};
 use crate::units::{
@@ -450,6 +450,31 @@ impl Member {
         }
     }
 
+    /// [`Member::radius`] at `age` (years on the engine's clock) for any mass and τ.
+    ///
+    /// For a star the binary reshapes, what its radius reads of the age alone is read once
+    /// ([`Track::radius_at_age`]): a step of stable transfer asks for its donor's radius at the
+    /// step's end at each trial of its rate.
+    #[must_use]
+    pub(crate) fn radius_at_age(&self, age: f64) -> MemberRadiusAt<'_> {
+        let shaped = match self {
+            Self::Shaped { track, offset, .. } => {
+                Some(track.radius_at_age(shaped_track_age(track, age, *offset)))
+            }
+            Self::Track { .. }
+            | Self::MainSequence { .. }
+            | Self::Cooling { .. }
+            | Self::Frozen { .. }
+            | Self::Remnant { .. }
+            | Self::Gone => None,
+        };
+        MemberRadiusAt {
+            member: self,
+            age,
+            shaped,
+        }
+    }
+
     /// The member's mass at `age`, M☉, as the engine reads it: a star on its own track that has
     /// not yet arrived has its zero-age main-sequence mass ([`engine_track_age_years`]).
     #[must_use]
@@ -787,6 +812,29 @@ pub(crate) fn cooling_origin(
             ctx.composition().z_fit(),
         )
     })
+}
+
+/// A member's radius at one age for any mass and τ ([`Member::radius_at_age`]).
+#[derive(Debug)]
+pub(crate) struct MemberRadiusAt<'a> {
+    member: &'a Member,
+    /// The age, years on the engine's clock.
+    age: f64,
+    /// For a star the binary reshapes, its track's radius at the age; any other is read whole at
+    /// each mass and τ.
+    shaped: Option<RadiusAtAge<'a>>,
+}
+
+impl MemberRadiusAt<'_> {
+    /// [`Member::radius`], R☉, at the age prepared for, with `mass` (M☉) and `tau`, bit for bit,
+    /// the member being slot `slot` of `ctx`'s pair.
+    #[must_use]
+    pub(crate) fn radius(&self, ctx: &Context, slot: usize, mass: f64, tau: f64) -> Option<f64> {
+        match &self.shaped {
+            Some(at) => Some(at.radius(mass.max(1e-6))),
+            None => self.member.radius(ctx, slot, self.age, mass, tau),
+        }
+    }
 }
 
 /// The track age at which a star whose mass the binary sets (`Member::Shaped`) is read at the

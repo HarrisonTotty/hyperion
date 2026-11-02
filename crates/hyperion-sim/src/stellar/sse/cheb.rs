@@ -643,6 +643,48 @@ impl CoreHeliumBurning {
         self.point(t, &self.radii_at(mt, c))
     }
 
+    /// What the phase's state at `t` reads of the age alone, which
+    /// [`CoreHeliumBurning::at_prepared`] then reads at any current mass (R06.T16.a's cost): the
+    /// core and, before `τ_x`, the luminosity and its powers in the giant's radius law (equation
+    /// 46, whose exponents follow the metallicity alone).
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as `CoreHeliumBurning::at`.
+    #[must_use]
+    pub(crate) fn prepared(&self, t: Megayears) -> BurningAt {
+        let tau = self.tau_at(t);
+        let early = (tau < self.tau_x).then(|| {
+            let luminosity = self.luminosity_at(tau, || {
+                unreachable!("before τ_x the luminosity does not read ξ")
+            });
+            (
+                luminosity,
+                LuminosityPowers::new(&self.radii.giant, luminosity),
+            )
+        });
+        BurningAt {
+            t,
+            early,
+            core_mass: self.core_mass_at_tau(tau),
+        }
+    }
+
+    /// [`CoreHeliumBurning::at_mass`] at the age `at` was prepared for, bit for bit: before `τ_x`
+    /// the giant's radius at the current mass `mt` from the luminosity's powers
+    /// ([`RadiusLaw::at_powers`]), and from it the whole state at `mt`.
+    #[must_use]
+    pub(crate) fn at_prepared(&self, at: &BurningAt, mt: SolarMasses, c: &ZCoeffs) -> PhasePoint {
+        match &at.early {
+            Some((luminosity, powers)) => PhasePoint {
+                luminosity: *luminosity,
+                radius: RadiusLaw::giant(mt, c).at_powers(powers),
+                core_mass: at.core_mass,
+            },
+            None => self.at_mass(at.t, mt, c),
+        }
+    }
+
     /// The relative age τ at `t`, held to 0–1.
     #[must_use]
     fn tau_at(&self, t: Megayears) -> f64 {
@@ -710,6 +752,24 @@ impl CoreHeliumBurning {
             radius,
             core_mass,
         }
+    }
+}
+
+/// Core helium burning's state at one age, as far as the age alone sets it
+/// ([`CoreHeliumBurning::prepared`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct BurningAt {
+    t: Megayears,
+    /// Before `τ_x`, the luminosity and its powers in the giant's radius law.
+    early: Option<(SolarLuminosities, LuminosityPowers)>,
+    core_mass: SolarMasses,
+}
+
+impl BurningAt {
+    /// The core at the age prepared for, which the current mass does not move.
+    #[must_use]
+    pub(crate) const fn core_mass(&self) -> SolarMasses {
+        self.core_mass
     }
 }
 

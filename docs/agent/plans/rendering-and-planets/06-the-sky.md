@@ -10030,3 +10030,15 @@ CensusCost)`.
     systems pass their bound by 4 mag or more (92%), so its least extinction would prune about
     0.1%. A member's exact bound, keeping its tallies, cost as much as the generation it skipped.
     Both are findings; the members' draft is in the lane's outbox.
+- **R06.T16.a's cost: plan 11's engine and the stragglers' draws, bit for bit (perf-sky-census,
+  2026-11-02).**
+  - **The engine.** It is two thirds of the field census's instructions near the Sun. Four exact
+    cuts: memos of the main-sequence lifetimes and of `Engine::structure`, keyed by what an
+    evaluation reads; the main sequence's radius alone (`MainSequenceRadius`); and each transfer
+    step's donor radius prepared once for its bisection (`Track::radius_at_age`). The tests check
+    every memo's hits afresh.
+  - **The stragglers.** `bearing_attempt` builds the primary once and does not generate an attempt
+    whose stars weigh no more than the turn-off (`may_straggle`).
+  - **Cost.** The measurements are in the lane's outbox; no star moves.
+  - **Left (finding).** No `Member::radius` is asked twice at one mass in a step: each trial of
+    the bisection has a mass of its own.

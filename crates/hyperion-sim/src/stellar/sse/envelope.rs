@@ -81,17 +81,53 @@ pub(crate) fn perturb(
     } else {
         lc
     };
-    let radius = if mu > 0.0 && r > rc {
+    PhasePoint {
+        luminosity: SolarLuminosities::new(luminosity),
+        radius: SolarRadii::new(perturbed_radius(r, rc, mu, scale)),
+        core_mass: point.core_mass,
+    }
+}
+
+/// The radius alone of [`perturb`]'s point for a star of radius `radius`, bit for bit: the binary
+/// engine's stable transfer reads only its donor's radius at each trial of the rate (R06.T16.a's
+/// cost).
+///
+/// # Panics
+///
+/// As [`perturb`].
+#[must_use]
+pub(crate) fn perturb_radius(
+    radius: SolarRadii,
+    mt: SolarMasses,
+    mu: f64,
+    remnant: CoreRemnant,
+) -> SolarRadii {
+    if mu >= 1.0 {
+        return radius;
+    }
+    debug_assert!(
+        mt.value() > 0.0 && remnant.luminosity.value() > 0.0 && remnant.radius.value() > 0.0,
+        "the perturbation needs a mass and a remnant: {mt:?}, {remnant:?}"
+    );
+    let scale = 1.0_f64.max(2.5 / mt.value());
+    SolarRadii::new(perturbed_radius(
+        radius.value(),
+        remnant.radius.value(),
+        mu,
+        scale,
+    ))
+}
+
+/// R′ of equations 100, 102, 104 and 105 for a star of radius `r` (R☉) whose remnant's is `rc`,
+/// at an envelope measure `mu` below 1 and the scale max(1, 2.5 ÷ M) of b and c.
+#[must_use]
+fn perturbed_radius(r: f64, rc: f64, mu: f64, scale: f64) -> f64 {
+    if mu > 0.0 && r > rc {
         let q = math::ln(r / rc);
         let power = exponent(mu, 0.006 * scale) * math::powf_positive(mu, 0.1 / q);
         rc * math::powf_positive(r / rc, power)
     } else {
         rc
-    };
-    PhasePoint {
-        luminosity: SolarLuminosities::new(luminosity),
-        radius: SolarRadii::new(radius),
-        core_mass: point.core_mass,
     }
 }
 

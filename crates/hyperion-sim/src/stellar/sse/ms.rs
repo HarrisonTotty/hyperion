@@ -339,23 +339,41 @@ pub(crate) fn hydrogen(z: f64) -> f64 {
 
 /// A star of one mass on the main sequence: every mass-dependent quantity of HPT section 5.1.1,
 /// evaluated once, and luminosity and radius at any age along it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct MainSequence {
-    t_ms: f64,
-    t_hook: f64,
+    /// The radius's quantities, and the lifetimes, which the radius alone reads.
+    radius: MainSequenceRadius,
     l_zams: f64,
-    r_zams: f64,
     log_l_tms: f64,
-    log_r_tms: f64,
     alpha_l: f64,
     beta_l: f64,
     eta: f64,
     delta_l: f64,
-    alpha_r: f64,
-    beta_r: f64,
-    gamma: f64,
-    delta_r: f64,
-    r_degenerate: f64,
+}
+
+// The fields as one flat list in their order before the radius's were split out, so that a
+// track's `Debug` text, which the binary timelines' golden digest reads, is unchanged.
+impl core::fmt::Debug for MainSequence {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let r = &self.radius;
+        f.debug_struct("MainSequence")
+            .field("t_ms", &r.t_ms)
+            .field("t_hook", &r.t_hook)
+            .field("l_zams", &self.l_zams)
+            .field("r_zams", &r.r_zams)
+            .field("log_l_tms", &self.log_l_tms)
+            .field("log_r_tms", &r.log_r_tms)
+            .field("alpha_l", &self.alpha_l)
+            .field("beta_l", &self.beta_l)
+            .field("eta", &self.eta)
+            .field("delta_l", &self.delta_l)
+            .field("alpha_r", &r.alpha_r)
+            .field("beta_r", &r.beta_r)
+            .field("gamma", &r.gamma)
+            .field("delta_r", &r.delta_r)
+            .field("r_degenerate", &r.r_degenerate)
+            .finish()
+    }
 }
 
 impl MainSequence {
@@ -363,12 +381,98 @@ impl MainSequence {
     #[must_use]
     pub(crate) fn new(m: SolarMasses, c: &ZCoeffs) -> Self {
         let l_zams = zams::luminosity(m, c).value();
-        let r_zams = zams::radius(m, c).value();
         let mass = m.value();
         // Every power of the mass below shares one logarithm of it (`PositivePowers`), the same
         // bits as a `powf_positive` each: the lifetime-only build evaluates this some 120 times a
         // star (P08.T12's layer-E fates).
         let powers = PositivePowers::of(mass);
+        Self {
+            radius: MainSequenceRadius::with_powers(m, powers, c),
+            l_zams,
+            log_l_tms: math::log10(l_tms_powers(mass, powers, c).value() / l_zams),
+            alpha_l: alpha_l(mass, powers, c),
+            beta_l: beta_l(mass, powers, c),
+            eta: eta(mass, c),
+            delta_l: delta_l(mass, powers, c),
+        }
+    }
+
+    /// The main-sequence lifetime, Myr.
+    #[must_use]
+    pub(crate) const fn t_ms(&self) -> Megayears {
+        self.radius.t_ms()
+    }
+
+    /// The fractional ages τ around the hook (HPT equations 12 and 14), where the luminosity and
+    /// radius turn over before and after its dip: from `t_hook` back over eight of its widths
+    /// ε `t_hook`, for the track's samples of its maxima.
+    #[must_use]
+    pub(crate) fn hook_fractions(&self) -> [f64; 8] {
+        let (t_ms, t_hook) = (self.radius.t_ms, self.radius.t_hook);
+        [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 8.0].map(|k| (1.0 - k * HOOK_EPSILON) * t_hook / t_ms)
+    }
+
+    /// Luminosity and radius at `t` from the zero-age main sequence, 0 ≤ t ≤ `t_ms` (HPT
+    /// equations 11–15); the core mass is zero, as HPT define none on the main sequence.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `t` lies outside 0 ≤ t ≤ `t_ms` by more than rounding: past `t_ms` the
+    /// polynomials in τ extrapolate.
+    #[must_use]
+    pub(crate) fn at(&self, t: Megayears) -> PhasePoint {
+        let (tau, tau1, tau2) = self.radius.fractions(t);
+        let tau_squared = tau * tau;
+        let log_l = self.alpha_l * tau
+            // τ is 0 at the zero-age main sequence, outside `powf_positive`'s domain.
+            + self.beta_l
+                * if tau > 0.0 {
+                    math::powf_positive(tau, self.eta)
+                } else {
+                    math::powf(tau, self.eta)
+                }
+            + (self.log_l_tms - self.alpha_l - self.beta_l) * tau_squared
+            - self.delta_l * (tau1 * tau1 - tau2 * tau2);
+        PhasePoint {
+            luminosity: SolarLuminosities::new(self.l_zams * math::exp10(log_l)),
+            radius: self.radius.of_fractions(tau, tau1, tau2),
+            core_mass: SolarMasses::ZERO,
+        }
+    }
+}
+
+/// The radius alone of a star of one mass on the main sequence ([`MainSequence`]'s, bit for bit):
+/// its lifetimes and the quantities of HPT's equations 9, 13 and 24, without the luminosity's.
+///
+/// A step of the binary engine's stable transfer finds its rate by bisection, each trial reading
+/// only the donor's radius at its mass then, and a main-sequence donor's was a third of those
+/// reads (R06.T16.a's cost: the sky's census of the field near the Sun is mostly the engine).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MainSequenceRadius {
+    t_ms: f64,
+    t_hook: f64,
+    r_zams: f64,
+    log_r_tms: f64,
+    alpha_r: f64,
+    beta_r: f64,
+    gamma: f64,
+    delta_r: f64,
+    r_degenerate: f64,
+}
+
+impl MainSequenceRadius {
+    /// The radius of a star of mass `m` (0.1–100 M☉) on the main sequence at the metallicity of
+    /// `c`.
+    #[must_use]
+    pub(crate) fn new(m: SolarMasses, c: &ZCoeffs) -> Self {
+        Self::with_powers(m, PositivePowers::of(m.value()), c)
+    }
+
+    /// [`new`](Self::new) with the powers of the mass given, which [`MainSequence`] shares.
+    #[must_use]
+    fn with_powers(m: SolarMasses, powers: PositivePowers, c: &ZCoeffs) -> Self {
+        let r_zams = zams::radius(m, c).value();
+        let mass = m.value();
         let (t_hook, t_ms) = timescales_myr(mass, powers, c);
         // HPT equation 24: low-mass stars are partly degenerate (Tout et al. 1997), so the radius
         // is held above 0.0258 (1 + X)^(5/3) M^(−1/3). The floor binds only near 0.1 M☉ and is
@@ -377,14 +481,8 @@ impl MainSequence {
         Self {
             t_ms,
             t_hook,
-            l_zams,
             r_zams,
-            log_l_tms: math::log10(l_tms_powers(mass, powers, c).value() / l_zams),
             log_r_tms: math::log10(r_tms(m, c).value() / r_zams),
-            alpha_l: alpha_l(mass, powers, c),
-            beta_l: beta_l(mass, powers, c),
-            eta: eta(mass, c),
-            delta_l: delta_l(mass, powers, c),
             alpha_r: alpha_r(mass, c),
             beta_r: beta_r(mass, powers, c),
             gamma: gamma(mass, c),
@@ -399,24 +497,21 @@ impl MainSequence {
         Megayears::new(self.t_ms)
     }
 
-    /// The fractional ages τ around the hook (HPT equations 12 and 14), where the luminosity and
-    /// radius turn over before and after its dip: from `t_hook` back over eight of its widths
-    /// ε `t_hook`, for the track's samples of its maxima.
-    #[must_use]
-    pub(crate) fn hook_fractions(&self) -> [f64; 8] {
-        [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 8.0]
-            .map(|k| (1.0 - k * HOOK_EPSILON) * self.t_hook / self.t_ms)
-    }
-
-    /// Luminosity and radius at `t` from the zero-age main sequence, 0 ≤ t ≤ `t_ms` (HPT
-    /// equations 11–15); the core mass is zero, as HPT define none on the main sequence.
+    /// The radius at `t` from the zero-age main sequence, 0 ≤ t ≤ `t_ms` (HPT equations 13–15
+    /// and 24): [`MainSequence::at`]'s, bit for bit.
     ///
     /// # Panics
     ///
-    /// In debug builds, if `t` lies outside 0 ≤ t ≤ `t_ms` by more than rounding: past `t_ms` the
-    /// polynomials in τ extrapolate.
+    /// As [`MainSequence::at`].
     #[must_use]
-    pub(crate) fn at(&self, t: Megayears) -> PhasePoint {
+    pub(crate) fn at(&self, t: Megayears) -> SolarRadii {
+        let (tau, tau1, tau2) = self.fractions(t);
+        self.of_fractions(tau, tau1, tau2)
+    }
+
+    /// The fractional age τ at `t` and the hook's τ₁ and τ₂ (HPT equations 11, 12 and 14).
+    #[must_use]
+    fn fractions(&self, t: Megayears) -> (f64, f64, f64) {
         let t = t.value();
         let tau = t / self.t_ms;
         debug_assert!(
@@ -427,18 +522,13 @@ impl MainSequence {
         let tau2 = 0.0_f64.max(
             1.0_f64.min((t - (1.0 - HOOK_EPSILON) * self.t_hook) / (HOOK_EPSILON * self.t_hook)),
         );
-        let tau_squared = tau * tau;
-        let tau_cubed = tau_squared * tau;
-        let log_l = self.alpha_l * tau
-            // τ is 0 at the zero-age main sequence, outside `powf_positive`'s domain.
-            + self.beta_l
-                * if tau > 0.0 {
-                    math::powf_positive(tau, self.eta)
-                } else {
-                    math::powf(tau, self.eta)
-                }
-            + (self.log_l_tms - self.alpha_l - self.beta_l) * tau_squared
-            - self.delta_l * (tau1 * tau1 - tau2 * tau2);
+        (tau, tau1, tau2)
+    }
+
+    /// The radius at the fractions of [`fractions`](Self::fractions).
+    #[must_use]
+    fn of_fractions(&self, tau: f64, tau1: f64, tau2: f64) -> SolarRadii {
+        let tau_cubed = tau * tau * tau;
         let tau_10 = math::powi(tau, 10);
         let tau_40 = math::powi(tau_10, 4);
         let log_r = self.alpha_r * tau
@@ -446,11 +536,7 @@ impl MainSequence {
             + self.gamma * tau_40
             + (self.log_r_tms - self.alpha_r - self.beta_r - self.gamma) * tau_cubed
             - self.delta_r * (tau1 * tau1 * tau1 - tau2 * tau2 * tau2);
-        PhasePoint {
-            luminosity: SolarLuminosities::new(self.l_zams * math::exp10(log_l)),
-            radius: SolarRadii::new((self.r_zams * math::exp10(log_r)).max(self.r_degenerate)),
-            core_mass: SolarMasses::ZERO,
-        }
+        SolarRadii::new((self.r_zams * math::exp10(log_r)).max(self.r_degenerate))
     }
 }
 
@@ -491,7 +577,7 @@ mod tests {
 
     /// log₁₀ L and log₁₀ R of a main sequence at fraction τ of it.
     fn log_lr(ms: &MainSequence, tau: f64) -> [f64; 2] {
-        let point = ms.at(Megayears::new(tau * ms.t_ms));
+        let point = ms.at(Megayears::new(tau * ms.radius.t_ms));
         [
             math::log10(point.luminosity.value()),
             math::log10(point.radius.value()),
@@ -616,9 +702,9 @@ mod tests {
                 let ms = MainSequence::new(m, &c);
                 let start = ms.at(Megayears::ZERO);
                 let end = ms.at(ms.t_ms());
-                let floor = |r: f64| r.max(ms.r_degenerate);
+                let floor = |r: f64| r.max(ms.radius.r_degenerate);
                 let l0 = start.luminosity.value() / ms.l_zams;
-                let r0 = start.radius.value() / floor(ms.r_zams);
+                let r0 = start.radius.value() / floor(ms.radius.r_zams);
                 let l1 = end.luminosity / l_tms(m, &c);
                 let r1 = end.radius.value() / floor(r_tms(m, &c).value());
                 for (name, ratio) in [("L(0)", l0), ("R(0)", r0), ("L(1)", l1), ("R(1)", r1)] {
@@ -810,6 +896,35 @@ mod tests {
             let (l, r) = crate::stellar::substellar::backbone_zams_at_tenth(MetalFraction::new(z));
             hyperion_testkit::float::assert_same_bits(start.luminosity.value(), l.value());
             hyperion_testkit::float::assert_same_bits(start.radius.value(), r.value());
+        }
+    }
+    /// The radius alone is the main sequence's radius, bit for bit, at every mass and age
+    /// (R06.T16.a's cost): over the five calibration metallicities and 40 masses from 0.1 to
+    /// 100 M☉, at 41 ages from the zero-age main sequence to its end, the hook's among them.
+    #[test]
+    fn the_radius_alone_is_the_main_sequences_bit_for_bit() {
+        use hyperion_testkit::float::bits;
+
+        for z in REFERENCE_Z {
+            let c = coeffs(z);
+            for log_m in log_mass_sweep(40) {
+                let m = mass(math::exp10(log_m));
+                let ms = MainSequence::new(m, &c);
+                let radius = MainSequenceRadius::new(m, &c);
+                assert_eq!(radius, ms.radius);
+                assert_eq!(bits(radius.t_ms().value()), bits(ms.t_ms().value()));
+                let ages = (0..=40)
+                    .map(|i| f64::from(i) / 40.0)
+                    .chain(ms.hook_fractions());
+                for tau in ages {
+                    let t = ms.t_ms() * tau;
+                    assert_eq!(
+                        bits(radius.at(t).value()),
+                        bits(ms.at(t).radius.value()),
+                        "{m:?} at Z {z}, τ {tau}"
+                    );
+                }
+            }
         }
     }
 }
