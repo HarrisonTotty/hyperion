@@ -1591,7 +1591,7 @@ mod tests {
         let tables = tables_digest(&tubes, streams);
         assert_eq!(
             (streams.len(), orphans, format!("{tables:016x}")),
-            (360, 355, "3a0c68456a60d280".to_owned()),
+            (359, 354, "ad2c9cb7e4484cec".to_owned()),
             "the tables' bits at 27"
         );
         pool.shutdown().await.unwrap();
@@ -1602,13 +1602,13 @@ mod tests {
     /// The warm-up builds every stream's table of a galaxy at the Milky Way fixture's values and
     /// keeps it, so every track is `ready`, and prints what it cost. Every table is the one the
     /// warm-up built one table at a time, each share of its tracers making its own plan (at
-    /// `dbc732f`, `GENERATOR_VERSION` 24): the digest of the 261 tables' bits pins them. Then the
-    /// sim's range query, with the list's source passed in over the server's lookup, finds a
-    /// stream's member at its own place, of the `stream` origin on the wire, with the stream's
-    /// other members near it; each resolves through the list to its own record, and its stars are
-    /// its member record's. The query's answer and a wider one's are pinned by their digests, as
-    /// they were then. Below version 26 the source visits every stream (option A's hold), so the
-    /// query reads every table, which the warm-up has kept.
+    /// `dbc732f`, `GENERATOR_VERSION` 24; re-pinned at 25): the digest of the 261 tables' bits pins
+    /// them. Then the sim's range query, with the list's source passed in over the server's lookup,
+    /// finds a stream's member at its own place, of the `stream` origin on the wire, with the
+    /// stream's other members near it; each resolves through the list to its own record, and its
+    /// stars are its member record's. The query's answer and a wider one's are pinned by their
+    /// digests, as they were then. Below version 26 the source visits every stream (option A's
+    /// hold), so the query reads every table, which the warm-up has kept.
     #[tokio::test]
     #[ignore = "slow: warms every tube table of a Milky Way galaxy, some 10 CPU-minutes"]
     async fn the_warm_up_readies_every_track_and_a_range_query_finds_a_stream_s_members() {
@@ -1643,7 +1643,7 @@ mod tests {
         let tables = tables_digest(&tubes, streams);
         assert_eq!(
             (streams.len(), format!("{tables:016x}")),
-            (261, "7e4cf90f5b9aca5d".to_owned()),
+            (261, "cc695dd00aa47e9a".to_owned()),
             "the tables' bits"
         );
         let probe = SystemId::from(
@@ -1691,8 +1691,8 @@ mod tests {
         assert_eq!(
             answers,
             [
-                (1, 1, "d0ff0af90d09c807".to_owned()),
-                (2, 1, "5a38bac18da11661".to_owned())
+                (1, 1, "534a7f1ffdf8510b".to_owned()),
+                (2, 1, "c9f5e3f46eb2a737".to_owned())
             ],
             "the range queries' answers about stream {}'s member",
             number.get()
