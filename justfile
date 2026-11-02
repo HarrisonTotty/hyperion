@@ -328,6 +328,25 @@ gpu-replay-check:
     just _gpu-replay-cargo clippy --all-targets -- -D warnings
     just _gpu-replay-cargo test
 
+# `cargo <args>` on `tools/meshbuild`, the offline builder of mesh pages (R14.T5.a), in
+# `target/tools-meshbuild`: outside the workspace, as `tools/gpu-replay` is, and with a build
+# directory of its own, since its dev profile is optimised for its tests.
+[positional-arguments]
+_meshbuild-cargo command *args:
+    cargo "$1" --locked --manifest-path "{{ justfile_directory() }}/tools/meshbuild/Cargo.toml" \
+        --target-dir "{{ justfile_directory() }}/target/tools-meshbuild" "${@:2}"
+
+# rustfmt, Clippy over every target, rustdoc, then the tests: the DAG's checks on its procedural
+# test meshes and their pages' SHA-256, the byte test that the pages are the same on every
+# platform (plan R14, T5.a). About 25 s from cold, 10 s of it the 10⁶-triangle terrain (pod,
+# 16 vCPU, 2026-11-02). `ci` runs it beside the workspace's builds.
+# Format-check, lint and test tools/meshbuild.
+meshbuild-check:
+    cargo fmt --manifest-path "{{ justfile_directory() }}/tools/meshbuild/Cargo.toml" --check
+    just _meshbuild-cargo clippy --all-targets -- -D warnings
+    RUSTDOCFLAGS="-D warnings" just _meshbuild-cargo doc --no-deps
+    just _meshbuild-cargo test
+
 # The tool's test that replays the fixture on the default GPU adapter, offscreen, with no window,
 # under the heavy-test lock. `ci-slow` runs it; it fails where no adapter is found.
 # Run tools/gpu-replay's GPU test (needs an adapter).
@@ -379,19 +398,19 @@ _doc-check-for packages:
 # so that rustup installs their standard libraries.
 cross_targets := "x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc"
 
-# `_clippy` and `gpu-replay-check`'s Clippy for the other platforms (macOS and Windows, from
-# Linux): code gated to one platform (`cfg(unix)`, `target_os = "linux"`) can leave an import or a
-# helper unused on another, which only that platform's Clippy sees. Clippy never links, so the
-# dependencies that compile C for their target (alloca, under the dev-dependency criterion, and
-# gpu-replay's wayland-backend) get a stand-in compiler and archiver that write empty files, and no
-# SDK is needed: only the rustup targets. The host keeps its own compiler for the build scripts. It
-# builds in `target/cross` and `target/tools-cross`, beside the other builds, so `ci` runs it with
-# the checks beside them: about a second when nothing changed, a minute or more from cold.
+# `_clippy`, `gpu-replay-check`'s and `meshbuild-check`'s Clippy for the other platforms (macOS and
+# Windows, from Linux): code gated to one platform (`cfg(unix)`, `target_os = "linux"`) can leave an
+# import or a helper unused on another, which only that platform's Clippy sees. Clippy never links,
+# so the dependencies that compile C for their target (alloca, under the dev-dependency criterion,
+# and gpu-replay's wayland-backend) get a stand-in compiler and archiver that write empty files, and
+# no SDK is needed: only the rustup targets. The host keeps its own compiler for the build scripts.
+# It builds in `target/cross` and `target/tools-cross`, beside the other builds, so `ci` runs it
+# with the checks beside them: about a second when nothing changed, a minute or more from cold.
 # Clippy for the other platforms (macOS and Windows from Linux), with no SDK.
-cross-clippy: (_cross-clippy-for "--workspace" "gpu-replay")
+cross-clippy: (_cross-clippy-for "--workspace" "gpu-replay meshbuild")
 
-# `cross-clippy` over the workspace's `packages` (none if empty) and, if `tools` is `gpu-replay`,
-# over tools/gpu-replay.
+# `cross-clippy` over the workspace's `packages` (none if empty) and over each of the `tools` named
+# under tools/ (`gpu-replay`, `meshbuild`; none if empty).
 _cross-clippy-for packages tools:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -447,10 +466,10 @@ _cross-clippy-for packages tools:
     if [[ -n "{{ packages }}" ]]; then
         cargo clippy {{ packages }} --all-targets "${flags[@]}" --target-dir "$root/target/cross" -- -D warnings
     fi
-    if [[ "{{ tools }}" == gpu-replay ]]; then
-        cargo clippy --locked --manifest-path "$root/tools/gpu-replay/Cargo.toml" --all-targets "${flags[@]}" \
+    for tool in {{ tools }}; do
+        cargo clippy --locked --manifest-path "$root/tools/$tool/Cargo.toml" --all-targets "${flags[@]}" \
             --target-dir "$root/target/tools-cross" -- -D warnings
-    fi
+    done
 
 # oxlint, type-aware; it reads the surface module's `.d.ts`, so `gen-surface` must have run.
 _oxlint:
@@ -1272,7 +1291,7 @@ build: gen-surface
 # `ci` runs what `fmt-check check lint test fit-check gen-protocol-check test-wasm-fast` ran, and
 # `cross-clippy`, `doc-check` and smart-ci's own tests, in three phases. First, beside the builds,
 # the checks that need no cargo build directory of the worktree (formatting, `tsc`, oxlint, and the
-# relaxed-SIMD refusal, `gpu-replay-check` and `cross-clippy`, which have target directories of
+# relaxed-SIMD refusal, the tools' checks and `cross-clippy`, which have target directories of
 # their own, and `_smart-ci-test`), their output held until they finish. Second, the cargo steps
 # one after another, since they share the build directory's lock: Clippy, which compiles every
 # target as `cargo check` would, so `check`'s `cargo check` is not repeated; rustdoc
@@ -1294,7 +1313,7 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     side_log="$(mktemp)"
     vitest_log="$(mktemp)"
     trap 'rm -f "$side_log" "$vitest_log"' EXIT
-    just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused gpu-replay-check cross-clippy _smart-ci-test >"$side_log" 2>&1 &
+    just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused gpu-replay-check meshbuild-check cross-clippy _smart-ci-test >"$side_log" 2>&1 &
     side=$!
     just _vitest-all >"$vitest_log" 2>&1 &
     vitest=$!
@@ -1306,7 +1325,7 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     wait "$vitest" || vitest_status=$?
     cat "$side_log" "$vitest_log"
     if [[ "$status" -ne 0 || "$side_status" -ne 0 || "$vitest_status" -ne 0 ]]; then
-        echo "error: ci failed before the locked suites (builds, rustdoc and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-clippy and smart-ci's tests: exit $side_status; vitest: exit $vitest_status)" >&2
+        echo "error: ci failed before the locked suites (builds, rustdoc and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay, meshbuild, cross-clippy and smart-ci's tests: exit $side_status; vitest: exit $vitest_status)" >&2
         exit 1
     fi
     just _locked just _test-run _wasm-fast-run

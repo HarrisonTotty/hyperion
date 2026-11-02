@@ -1543,6 +1543,7 @@ Size L–XL, tool and client, after T4; each subtask waits on its content except
   covering a quarter of 1080p (or 10⁶ triangles over a sixteenth, 129,600 px) draws at most 2
   triangles a covered pixel, and at most 1.2 times a hand-picked uniform cut's triangles. (A
   10⁶-triangle mesh over a quarter, 518,400 px, passes 2 a pixel whatever its cut.)
+  - _Built_ (2026-11-02): records at the end of Risks.
 
 - **R14.T5.b Pages and residency.** Size M. `clusters/pageFormat.ts`, `GeometryPagePool`,
   `ClusterResidency`, the fetch-and-decode producer in a worker, `geometry-pages` and `pageBytes`.
@@ -1906,3 +1907,24 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     triangles drawn (0.1 M of 4.3 M a pose on high above 1 km).
   - The table ran on wasm whole-body fields of TERRAIN TEST's moon and the Earth-, Mars- and
     Moon-like sample worlds in place of a served world, since this tree serves none at 24.
+- **R14.T5.a** (2026-11-02):
+  - `tools/meshbuild/` is a Rust port, no meshoptimizer bound (lean, 2026-11-02): the C++ flags and
+    the version pin fall away, and no MIT notice is needed (it takes meshoptimizer's collapse
+    passes, 75° flip bound and border weight, cited, and copies no code). The byte test stands:
+    run on Linux; the owner's Mac pending; Windows NOT RUN.
+  - `just meshbuild-check` (rustfmt, Clippy, rustdoc, tests) runs in `ci`'s side phase beside
+    `gpu-replay-check` (lean, 2026-11-02: the plan has the tool outside `just ci`; inside it, the
+    owner's `just ci` on the Mac is the byte test). smart-ci has a rule for `tools/meshbuild/`;
+    `cross-clippy` and `_cross-clippy-for` take a list of tools; the tool's own `clippy.toml` is
+    held to the shared ban list by the testkit's `clippy_bans`.
+  - The page format, version 1, is in `tools/meshbuild/src/page.rs`'s documentation, which T5.b's
+    `clusters/pageFormat.ts` mirrors. The page table summarises each page before it is fetched:
+    its levels, its own and parent error spans and a sphere holding its clusters.
+  - One grid for the whole mesh (lean, 2026-11-02): 21 bits an axis about the least corner, the
+    step the least power of two spanning the largest extent (1 mm at 2 km). So a vertex two pages
+    share and a group's sphere are the same bits in each, and a leaf's error 0 excludes the
+    rounding (half a step an axis).
+  - For T5.b: a unit is the clusters one group made, or the leaves one group simplified, never
+    split across pages while it fits. The units holding a root come first (the header's root
+    pages, one page of about 128 kB a test mesh), then by level, coarsest first, so a level and
+    every coarser one are a prefix of the pages. `cut.rs`'s `CutView::draws` is the cut's CPU twin.

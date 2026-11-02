@@ -3,8 +3,9 @@
 //! Clippy takes the nearest `clippy.toml` walking up from a crate's manifest and does not merge
 //! them, so each determinism crate carries a self-contained file of its own, and a ban added to
 //! one file and forgotten in another would silently not bind there. These tests read the files as
-//! text and assert that each holds its set: the root's and every crate's ban the platform
-//! transcendentals, `mul_add` and the `algebraic_*` methods; every crate's file also bans reading
+//! text and assert that each holds its set: the root's, every crate's and those of the tools whose
+//! output is checked byte for byte ([`TOOL_FILES`]) ban the platform transcendentals, `mul_add`
+//! and the `algebraic_*` methods; every crate's file also bans reading
 //! float bits, which the root's omits on purpose (the testkit prints bits and the server compares
 //! them); and every crate other than those the root's file binds has a file of its own, so a new
 //! determinism crate cannot fall back to the root's by accident (plan R04, Design note 9).
@@ -39,6 +40,11 @@ mod native_only {
 
     /// The float-bit conversions, banned in every crate's own file so that no float is hashed.
     const FLOAT_BITS: [&str; 4] = ["to_bits", "to_le_bytes", "to_be_bytes", "to_ne_bytes"];
+
+    /// The `clippy.toml` files of the tools outside the workspace whose output is checked byte for
+    /// byte on every platform: `tools/meshbuild`'s mesh pages (plan R14, T5.a). They write float
+    /// fields little-endian, so they ban the shared list but not the float bits.
+    const TOOL_FILES: [&str; 1] = ["tools/meshbuild/clippy.toml"];
 
     /// The crates the root `clippy.toml` binds; every other crate needs a file of its own.
     const ROOT_CONFIGURED: [&str; 3] = ["hyperion-protocol", "hyperion-server", "hyperion-testkit"];
@@ -133,12 +139,18 @@ mod native_only {
             .collect()
     }
 
-    /// The root's `clippy.toml` and every crate's, as (workspace-relative path, text).
+    /// The root's `clippy.toml`, every crate's and the tools' ([`TOOL_FILES`]), as
+    /// (workspace-relative path, text).
     fn every_file() -> Vec<(String, String)> {
         let root = std::fs::read_to_string(workspace_root().join("clippy.toml"))
             .expect("the root clippy.toml is readable");
         let mut files = vec![("clippy.toml".to_owned(), root)];
         files.extend(crate_files());
+        for rel in TOOL_FILES {
+            let text = std::fs::read_to_string(workspace_root().join(rel))
+                .unwrap_or_else(|e| panic!("{rel} is readable: {e}"));
+            files.push((rel.to_owned(), text));
+        }
         files
     }
 

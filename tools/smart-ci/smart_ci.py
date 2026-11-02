@@ -111,7 +111,8 @@ RUST_READERS: List[Tuple[str, str, str, str]] = [
     # The testkit's `tests/clippy_bans.rs` holds every clippy.toml to one ban list, checks that each
     # crate has one of its own or the root's, and reads the sources of base, the surface crate and
     # the sim for the relaxed-SIMD guards and `target_feature` attributes.
-    (r"^(crates/[^/]+/)?clippy\.toml$", "hyperion-testkit", "native", "read by hyperion-testkit's clippy_bans"),
+    (r"^(crates/[^/]+/|tools/meshbuild/)?clippy\.toml$", "hyperion-testkit", "native",
+     "read by hyperion-testkit's clippy_bans"),
     (r"^crates/[^/]+/Cargo\.toml$", "hyperion-testkit", "native", "read by hyperion-testkit's clippy_bans"),
     (r"^crates/hyperion-(base|surface|sim)/.*\.rs$", "hyperion-testkit", "native",
      "read by hyperion-testkit's clippy_bans"),
@@ -217,7 +218,8 @@ CI_STEPS: Dict[str, Tuple[str, List[Tuple[str, Optional[List[str]]]]]] = {
     "_oxlint": ("as is", []),
     "_relaxed-simd-refused": ("as is", []),
     "gpu-replay-check": ("as is", [("_gpu-replay-cargo", None)]),
-    "cross-clippy": ("scoped", [("_cross-clippy-for", ["--workspace", "gpu-replay"])]),
+    "meshbuild-check": ("as is", [("_meshbuild-cargo", None)]),
+    "cross-clippy": ("scoped", [("_cross-clippy-for", ["--workspace", "gpu-replay meshbuild"])]),
     "_smart-ci-test": ("as is", []),
     "_clippy": ("scoped", [("_clippy-for", ["--workspace"])]),
     "doc-check": ("scoped", [("_doc-check-for", ["--workspace"])]),
@@ -240,7 +242,7 @@ CI_STEPS: Dict[str, Tuple[str, List[Tuple[str, Optional[List[str]]]]]] = {
 CI_PHASES: Dict[str, List[List[str]]] = {
     "setup": [["gen-surface"], ["_wasm-preflight", "wasip1", "browser"]],
     "side": [["fmt-check"], ["_typecheck-ts"], ["_oxlint"], ["_relaxed-simd-refused"], ["gpu-replay-check"],
-             ["cross-clippy"], ["_smart-ci-test"]],
+             ["meshbuild-check"], ["cross-clippy"], ["_smart-ci-test"]],
     "unlocked": [["_vitest-all"]],
     "main": [["_clippy"], ["doc-check"], ["_browser-clippy"], ["gen-protocol-check"], ["_test-build"],
              ["_fit-check-built"], ["_wasm-fast-build"]],
@@ -314,7 +316,8 @@ TIMED = ("native", "wasip1", "doctests", "browser")
 # the suites, which run under the heavy-test lock from the builds made before it. `test_smart_ci.py`
 # fails if a recipe of `ci` is in neither, or one said not to build runs cargo.
 BUILDS = {
-    "gen-surface", "_relaxed-simd-refused", "gpu-replay-check", "_gpu-replay-cargo", "cross-clippy",
+    "gen-surface", "_relaxed-simd-refused", "gpu-replay-check", "_gpu-replay-cargo", "meshbuild-check",
+    "_meshbuild-cargo", "cross-clippy",
     "_cross-clippy-for", "_clippy", "_clippy-for", "doc-check", "_doc-check-for", "_browser-clippy",
     "_browser-clippy-for", "gen-protocol-check",
     "_gen-protocol-check-for", "fit-check", "_test-build", "_test-build-for", "_wasm-fast-build", "_wasip1-build",
@@ -343,7 +346,7 @@ SELF_BUILT = {"_fit-check-built": "fit-check"}
 
 # The workspace crates whose code differs between Linux, macOS and Windows: of the crates a change
 # reaches, `_cross-clippy-for` lints these alone for the platforms the host is not (tools/gpu-replay
-# has a rule of its own). Every other crate is the same code on all three after cfg expansion, which
+# and tools/meshbuild have rules of their own). Every other crate is the same code on all three after cfg expansion, which
 # native Clippy lints. A reached crate in which the guard (`os_dependence`) finds such code is linted
 # too, and the plan runs smart-ci's own tests, which fail until it is listed here, in the same commit.
 # `just ci` keeps `cross-clippy --workspace`, so integration lints every crate on every push.
@@ -1020,6 +1023,7 @@ class Needs:
         self.surface_module: Set[str] = set()
         self.gen_protocol: Set[str] = set()
         self.gpu_replay: Set[str] = set()
+        self.meshbuild: Set[str] = set()
         self.smart_ci_tests: Set[str] = set()
         self.render: Set[str] = set()
         self.why: Dict[str, List[str]] = {}
@@ -1208,6 +1212,10 @@ def classify(path: str, deleted: bool, ws: Workspace, needs: Needs) -> None:
         needs.gpu_replay.add(path)
         needs.say(path, "tools/gpu-replay: its check and its Clippy for the other platforms")
         return
+    if path.startswith("tools/meshbuild/"):
+        needs.meshbuild.add(path)
+        needs.say(path, "tools/meshbuild: its check and its Clippy for the other platforms")
+        return
     if path.startswith("tools/smart-ci/"):
         needs.smart_ci_tests.add(path)
         needs.say(path, "smart-ci's own tests")
@@ -1259,14 +1267,17 @@ def classify(path: str, deleted: bool, ws: Workspace, needs: Needs) -> None:
         if name == "rustfmt.toml":
             for crate in ws.crates:
                 needs.add(needs.fmt, crate, path)
-            needs.say(path, "rustfmt's configuration: every crate's formatting")
+            needs.meshbuild.add(path)
+            needs.say(path, "rustfmt's configuration: every crate's formatting, and tools/meshbuild's check")
             return
         if name == "clippy.toml":
             for crate in ws.crates:
                 if not ws.own_clippy_toml(crate):
                     needs.add(needs.clippy, crate, path)
             needs.gpu_replay.add(path)
-            needs.say(path, "Clippy's configuration of the crates without one of their own, and tools/gpu-replay")
+            needs.meshbuild.add(path)
+            needs.say(path, "Clippy's configuration of the crates without one of their own, and the tools under "
+                            "tools/ that read it (gpu-replay, meshbuild)")
             return
         if name == ".pre-commit-config.yaml":
             needs.say(path, "the git hooks: nothing in `just ci` reads it, so Prettier alone")
@@ -1945,7 +1956,7 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     if groups:
         step("setup", "the WebAssembly tools", ["_wasm-preflight", *groups], ["the WebAssembly steps below"])
 
-    # Beside the builds: formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-Clippy.
+    # Beside the builds: formatting, TypeScript, the relaxed-SIMD refusal, the tools, cross-Clippy.
     if needs.fmt:
         step("side", "rustfmt: " + ", ".join(sorted(needs.fmt)), ["_rustfmt-check", ws.plain_packages(needs.fmt)],
              causes_of(needs.fmt))
@@ -1963,11 +1974,14 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         step("side", "the relaxed-SIMD refusal", ["_relaxed-simd-refused"], causes_of(needs.clippy, relaxed))
     if needs.gpu_replay:
         step("side", "tools/gpu-replay: Clippy and tests", ["gpu-replay-check"], needs.gpu_replay)
-    if cross or needs.gpu_replay:
-        names = cross + (["tools/gpu-replay"] if needs.gpu_replay else [])
+    if needs.meshbuild:
+        step("side", "tools/meshbuild: rustfmt, Clippy and tests", ["meshbuild-check"], needs.meshbuild)
+    tools = [name for name, causes in (("gpu-replay", needs.gpu_replay), ("meshbuild", needs.meshbuild)) if causes]
+    if cross or tools:
+        names = cross + [f"tools/{name}" for name in tools]
         step("side", "Clippy for the other platforms: " + ", ".join(names),
-             ["_cross-clippy-for", ws.cargo_packages(cross) if cross else "", "gpu-replay" if needs.gpu_replay else ""],
-             causes_of(needs.clippy, cross) | needs.gpu_replay)
+             ["_cross-clippy-for", ws.cargo_packages(cross) if cross else "", " ".join(tools)],
+             causes_of(needs.clippy, cross) | needs.gpu_replay | needs.meshbuild)
     if needs.smart_ci_tests:
         step("side", "smart-ci's own tests", ["_smart-ci-test"], needs.smart_ci_tests)
     if needs.render:
@@ -2516,7 +2530,7 @@ def run_build_phases(phases: Mapping[str, Sequence[Sequence[str]]], runner: Runn
         sys.stdout.flush()
     if status != 0 or side_status != 0 or unlocked_status != 0:
         print(f"error: smart-ci failed before the locked suites (builds, rustdoc and Rust checks: exit {status}; "
-              f"formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-clippy and smart-ci's tests: "
+              f"formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay, meshbuild, cross-clippy and smart-ci's tests: "
               f"exit {side_status}; vitest: exit {unlocked_status})", file=sys.stderr)
         return 1
     return 0

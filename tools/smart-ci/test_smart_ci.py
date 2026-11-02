@@ -128,6 +128,9 @@ FILES: Dict[str, str] = {
     "docs/measurements/descent-spike/2026-10-07-effect-low.json": "",
     "tools/gpu-replay/src/main.rs": "",
     "tools/gpu-replay/Cargo.toml": "",
+    "tools/meshbuild/src/main.rs": "",
+    "tools/meshbuild/Cargo.toml": "",
+    "tools/meshbuild/clippy.toml": "",
     "tools/smart-ci/smart_ci.py": "",
     "tools/electron-node/node": "",
     "tools/node-floor/check.cjs": "",
@@ -304,7 +307,7 @@ class TheRules(unittest.TestCase):
     def test_no_typescript_change_runs_no_typescript_check(self) -> None:
         for path in ("crates/hyperion-sim/src/galaxy/disc.rs", "crates/hyperion-server/src/main.rs",
                      "crates/hyperion-fit/manifests/mge.toml", "docs/frontend/ux-guidelines.md",
-                     "tools/gpu-replay/src/main.rs", ".config/nextest.toml"):
+                     "tools/gpu-replay/src/main.rs", "tools/meshbuild/src/main.rs", ".config/nextest.toml"):
             with self.subTest(path=path):
                 self.assertFalse(set(calls(plan(path))) & (TS_RECIPES | {"gen-surface"}), calls(plan(path)))
 
@@ -555,8 +558,9 @@ class TheRules(unittest.TestCase):
     def test_clippy_configurations(self) -> None:
         root = plan("clippy.toml")
         self.assertEqual(packages(root, "_clippy-for"), [PROTOCOL, SERVER, TESTKIT])
-        self.assertEqual(args(root, "_cross-clippy-for")[1], "gpu-replay")
+        self.assertEqual(args(root, "_cross-clippy-for")[1], "gpu-replay meshbuild")
         self.assertIn("gpu-replay-check", calls(root))
+        self.assertIn("meshbuild-check", calls(root))
         self.assertEqual(packages(root, "_nextest-run"), [TESTKIT])
         own = plan("crates/hyperion-sim/clippy.toml")
         self.assertEqual(packages(own, "_clippy-for"), [SIM])
@@ -565,10 +569,18 @@ class TheRules(unittest.TestCase):
         for p in (root, own):
             self.assertNotIn("_doc-check-for", calls(p))
         self.assertEqual(packages(plan("rustfmt.toml"), "_rustfmt-check"), sorted(workspace().crates))
+        self.assertIn("meshbuild-check", calls(plan("rustfmt.toml")))
+        tool = plan("tools/meshbuild/clippy.toml")
+        self.assertEqual(calls(tool)[:2], ["meshbuild-check", "_cross-clippy-for"])
+        self.assertEqual(packages(tool, "_nextest-run"), [TESTKIT])
 
     def test_tools(self) -> None:
         self.assertEqual(calls(plan("tools/gpu-replay/src/main.rs")), ["gpu-replay-check", "_cross-clippy-for"])
         self.assertEqual(args(plan("tools/gpu-replay/src/main.rs"), "_cross-clippy-for"), ["", "gpu-replay"])
+        self.assertEqual(calls(plan("tools/meshbuild/src/main.rs")), ["meshbuild-check", "_cross-clippy-for"])
+        self.assertEqual(args(plan("tools/meshbuild/Cargo.toml"), "_cross-clippy-for"), ["", "meshbuild"])
+        both = plan("tools/gpu-replay/src/main.rs", "tools/meshbuild/src/main.rs")
+        self.assertEqual(args(both, "_cross-clippy-for"), ["", "gpu-replay meshbuild"])
         self.assertEqual(calls(plan("tools/smart-ci/smart_ci.py")), ["_smart-ci-test"])
         node = plan("tools/electron-node/node")
         self.assertEqual(args(node, "_browser", 0), [
@@ -636,13 +648,14 @@ class TheRules(unittest.TestCase):
     def test_steps_keep_cis_order_and_phases(self) -> None:
         p = plan("crates/hyperion-surface/src/wasm.rs", "crates/hyperion-protocol/src/lib.rs",
                  "apps/hyperion/src/renderer/src/lib/format.ts", "tools/gpu-replay/src/main.rs",
-                 "crates/hyperion-sim/src/galaxy/disc.rs", "tools/smart-ci/smart_ci.py", "README.md")
+                 "tools/meshbuild/src/main.rs", "crates/hyperion-sim/src/galaxy/disc.rs",
+                 "tools/smart-ci/smart_ci.py", "README.md")
         order = list(smart_ci.PHASES)
         phases = [order.index(step.phase) for step in p.steps]
         self.assertEqual(phases, sorted(phases))
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "side"], [
             "_rustfmt-check", "_prettier-check", "_typecheck-ts", "_oxlint", "_relaxed-simd-refused",
-            "gpu-replay-check", "_cross-clippy-for", "_smart-ci-test"])
+            "gpu-replay-check", "meshbuild-check", "_cross-clippy-for", "_smart-ci-test"])
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "unlocked"], ["_vitest-run"])
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "main"], [
             "_clippy-for", "_doc-check-for", "_browser-clippy-for", "_gen-protocol-check-for", "_test-build-for",
@@ -2212,7 +2225,8 @@ class AgreesWithCi(unittest.TestCase):
         # Every plan of the rule tests, and one with everything at once.
         cases = [("crates/hyperion-surface/src/wasm.rs", "crates/hyperion-protocol/src/lib.rs",
                   "apps/hyperion/src/renderer/src/lib/format.ts", "tools/gpu-replay/src/main.rs", "README.md",
-                  "crates/hyperion-sim/src/tables/mge.rs", "tools/smart-ci/smart_ci.py", "clippy.toml"),
+                  "crates/hyperion-sim/src/tables/mge.rs", "tools/smart-ci/smart_ci.py", "clippy.toml",
+                  "tools/meshbuild/src/main.rs"),
                  ("docs/agent/plans/a plan.md", "tools/electron-node/node", "package.json",
                   "apps/hyperion/src/renderer/src/view/shaders/sky.wgsl"),
                  ("docs/measurements/descent-spike/2026-10-07-effect-low.json", "crates/hyperion-fit/manifests/mge.toml")]
