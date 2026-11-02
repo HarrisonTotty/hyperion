@@ -544,6 +544,10 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   `STEEPNESS_TAILS_VERSION` (rendering plan R10, R10.T6.a), at `SteepnessTailsRules::Marcum`
 ///   through `hyperion_surface::material::with_steepness_tails`, which the sim's tests have through
 ///   their dev-dependency on the surface crate's `hold-switches` feature.
+/// - a paired star's light from its pair's timeline, `BINARY_HOST_LIGHT_VERSION` (P14.T1.e), at
+///   `BinaryHostLightRules::Engine` through `with_binary_host_light`: a star of a pair the binary
+///   engine ran shines, and peaks, on its planets as the engine's state of it, where the stellar
+///   displays read it.
 ///
 /// A system or a record is read under the rules in force when it is generated, so a test
 /// generates afresh inside it; the carriers' rules are read when a system's equilibrium network is
@@ -555,6 +559,7 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// `merger_channels`) and runs inside this helper for the planetary ones.
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::context::{BinaryHostLightRules, with_binary_host_light};
     use crate::planetary::derive::atmosphere::{DesertRules, with_desert};
     use crate::planetary::derive::photometry::area_mix::{
         HazeLayerRules, IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules,
@@ -593,6 +598,7 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
     let run = move || with_desert(DesertRules::Labelled, run);
+    let run = move || with_binary_host_light(BinaryHostLightRules::Engine, run);
     let run = move || {
         use hyperion_surface::material::{SteepnessTailsRules, with_steepness_tails};
         with_steepness_tails(SteepnessTailsRules::Marcum, run)
@@ -617,6 +623,88 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
 pub(crate) fn with_every_28_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::atmosphere::{SteamDivisionRules, with_steam_division};
     with_every_27_hold(move || with_steam_division(SteamDivisionRules::Hothouse, run))
+}
+
+/// A pair's history before an age, by its worst event: the classes the binary hosts' census
+/// counts (P14.T1.e), worst first.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum PairHistory {
+    /// A common envelope that ended in the pair's coalescence.
+    CommonEnvelopeMerger,
+    /// A common envelope the pair survived, and a merger after it.
+    CommonEnvelopeThenMerger,
+    /// A common envelope the pair survived, and no merger.
+    PostCommonEnvelope,
+    /// A merger with no common envelope before it.
+    Merger,
+    /// Stable transfer, with no common envelope and no merger.
+    StableTransfer,
+    /// Contact, and nothing worse.
+    Contact,
+    /// None of these: a detached pair, or one whose only events are supernovae.
+    Detached,
+}
+
+#[cfg(test)]
+impl PairHistory {
+    /// What `timeline` holds up to `age`, Julian years since the stars' onset of collapse.
+    #[must_use]
+    pub(crate) fn of(timeline: &crate::stellar::binary::BinaryTimeline, age: Years) -> Self {
+        use crate::stellar::binary::SegmentKind;
+        let segments: Vec<SegmentKind> = timeline
+            .segments()
+            .iter()
+            .take_while(|s| s.start() <= age)
+            .map(crate::stellar::binary::Segment::kind)
+            .collect();
+        let has = |kind: SegmentKind| segments.contains(&kind);
+        let merged = segments.iter().position(|&k| k == SegmentKind::Merged);
+        let envelope = has(SegmentKind::CommonEnvelope);
+        match merged {
+            Some(m) if m > 0 && segments[m - 1] == SegmentKind::CommonEnvelope => {
+                Self::CommonEnvelopeMerger
+            }
+            Some(_) if envelope => Self::CommonEnvelopeThenMerger,
+            Some(_) => Self::Merger,
+            None if envelope => Self::PostCommonEnvelope,
+            None if segments
+                .iter()
+                .any(|k| matches!(k, SegmentKind::StableTransfer { .. })) =>
+            {
+                Self::StableTransfer
+            }
+            None if has(SegmentKind::Contact) => Self::Contact,
+            None => Self::Detached,
+        }
+    }
+}
+
+/// The first of the `n` systems of `galaxy` nearest [`SAMPLE_CENTRE_LY`] with a pair the binary
+/// engine ran whose history before the system's age at the epoch is `history` and for which
+/// `also` holds, with the pair's index among the system's pairs; `None` if no such system is
+/// among them.
+#[cfg(test)]
+pub(crate) fn first_paired_system(
+    galaxy: &Galaxy,
+    n: usize,
+    history: PairHistory,
+    also: impl Fn(&crate::stellar::system::SystemStars, usize) -> bool,
+) -> Option<(crate::stellar::system::SystemStars, usize)> {
+    use crate::stellar::system::SystemStars;
+    sample_records(galaxy, n, SampleFilter::ALL)
+        .expect("the Sun-like point's sphere holds the sample")
+        .iter()
+        .filter(|record| record.kind() != crate::galaxy::placement::SystemKind::RoguePlanet)
+        .map(|record| SystemStars::generate(galaxy, record))
+        .find_map(|stars| {
+            let age = stars.record().age_at_epoch();
+            let pair = stars
+                .pairs()
+                .iter()
+                .position(|pair| PairHistory::of(pair.timeline(), age) == history)?;
+            also(&stars, pair).then_some((stars, pair))
+        })
 }
 
 #[cfg(test)]

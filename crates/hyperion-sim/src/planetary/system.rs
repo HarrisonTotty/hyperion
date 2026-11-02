@@ -6045,9 +6045,8 @@ impl<'a> PastSky<'a> {
             return WindowAt::DARK;
         };
         let own = (orbit.semi_major_axis(), orbit.eccentricity().value());
-        let stars = self.ctx.stars();
         WindowAt::of(self.stars.iter().filter_map(|&(star, seen)| {
-            let state = stars[star].state_at(t)?;
+            let state = self.ctx.star_state_at(star, t)?;
             let (a, e) = seen.unwrap_or(own);
             Some((
                 luminosity_flux(state.luminosity(), a, e),
@@ -6792,7 +6791,9 @@ impl<'c> Epoch<'c> {
             ctx,
             t,
             under: ctx.hierarchy().map_or_else(Vec::new, members_under),
-            states: ctx.stars().iter().map(|star| star.state_at(t)).collect(),
+            states: (0..ctx.stars().len())
+                .map(|star| ctx.star_state_at(star, t))
+                .collect(),
             xuv: ctx.xuv_histories(),
             shades: None,
             small_bodies: None,
@@ -6873,7 +6874,7 @@ impl<'c> Epoch<'c> {
                     .expect("a neutron star's state is finite, with a surface"),
             );
         }
-        let peak = self.ctx.stars()[star].max_luminosity_until(self.t);
+        let peak = self.ctx.max_luminosity_until(star, self.t);
         Some(
             HostLight::new(
                 state.luminosity(),
@@ -7048,6 +7049,10 @@ impl<'c> Epoch<'c> {
 mod air;
 #[cfg(test)]
 mod audit_tests;
+#[cfg(all(test, not(target_family = "wasm")))]
+mod binary_host_census_tests;
+#[cfg(test)]
+mod binary_host_tests;
 #[cfg(test)]
 mod cap_balance_tests;
 #[cfg(all(test, not(target_family = "wasm")))]

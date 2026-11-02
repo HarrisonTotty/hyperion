@@ -944,6 +944,11 @@ Order and parallelism:
     - the strip radius of T29 is `SATELLITE_STABILITY_FRACTION` (0.49) × that tidal radius.
 
     The [α/Fe] is `None` until T1.a's closed form lands with its consumers.
+- **P14.T1.e A paired star's light from its pair's timeline** (research-binary-hosts R1, held at
+  27). The context keeps `SystemStars::pairs`, and every light read takes a paired star's state,
+  and its peak, from its pair's timeline, where `SystemStars::state_at` reads it.
+  - _Accept:_ `cargo test -p hyperion-sim --lib -- planetary::context binary_host`, and the slow
+    `the_binary_hosts_census_reads_every_paired_star_s_light_as_the_engine_s` by name.
 
 #### P14.T2 Orbit additions
 
@@ -9588,9 +9593,9 @@ it:
   X-ray and ultraviolet history. T1.a supplies both as closed forms with no draw, so no star moves;
   if plan 06 later draws an [α/Fe] of its own, the closed form becomes its mean and resource
   abundances change with a version bump.
-- **Interacting binaries.** D10 intersects the stable zones at birth and at the evaluated state.
-  Planets of systems that went through a common envelope are probably over-retained. They are rare,
-  and the golden set includes none on purpose; revisit with plan 11's author.
+- **Interacting binaries.** The golden set holds none, on purpose. From 27 the stage reads the
+  binary engine's state of each star of a pair it ran (research-binary-hosts):
+  - its light and peak luminosity (P14.T1.e, `BINARY_HOST_LIGHT_VERSION`).
 - **Plan 05's spatial view** is unit-agnostic, which the orbit map needs, and its plane follows
   `scene.frame`, so a tilted plane is a frame and not a change to `PlaneSpec` (D21, T40.b). Its
   `LocalFrame` names its axes coreward, spinward and north; on the orbit map those names hold only
@@ -34214,3 +34219,14 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     and the `planetary/systems` goldens `close_binary`, `eccentric_giant`, `filler_b`, `filler_c`,
     `hierarchical_triple`, `m_dwarf_resonant_chain`, `red_giant`, `solar_like`, `subgiant` and
     `wide_binary`; the server's `scene_systems` does not move. Measure again under every 27 hold.
+- **P14.T1.e's paired light, as built (lane `fix-binary-hosts`, 2026-11-02).** Held at 27
+  (`context::BINARY_HOST_LIGHT_VERSION`; `BinaryHostLightRules::{SingleModels, Engine}`,
+  `with_binary_host_light`, a line in `with_every_27_hold`). Nothing moves at 24, 25 or 26.
+  - _New items:_ `SystemContext::{pairs, star_state_at}` and the crate's `max_luminosity_until`;
+    `stellar::system::pair_of`, `PairTimeline::age_at` and `BinaryTimeline::max_luminosity_until`.
+  - _The readers:_ `Epoch::of`'s states, `light`'s peak and the water window's `window_at`. The
+    cometary halo, `host_clock`'s and the hot history's main-sequence ends and the XUV history still
+    read the single models (the outbox's findings).
+  - _Lean (2026-11-02):_ a star placed on a track mid-timeline peaks at the track's own largest to
+    its track age, its track life before the placement included.
+  - _For 27's bump:_ delete what `the_binary_host_light_is_held_only_until_the_27_bump` lists.

@@ -24,7 +24,8 @@ use crate::stellar::sse::{self, TrackOptions, ZCoeffs};
 use crate::stellar::{Composition, Phase, StarState, substellar};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
-    GravitationalParameter, Metres, Radians, SolarMasses, SolarMassesPerYear, Years,
+    GravitationalParameter, Metres, Radians, SolarLuminosities, SolarMasses, SolarMassesPerYear,
+    Years,
 };
 
 use super::params::BinaryParams;
@@ -717,6 +718,80 @@ impl BinaryTimeline {
         }
     }
 
+    /// The largest luminosity `component` has had up to `age`, L☉, never below its luminosity at
+    /// `age`: the peak plan 14's atmospheres read for a star of a pair the engine ran (design note
+    /// 11, P14.T1.e), as [`StarModel::max_luminosity_until`] is a single star's.
+    ///
+    /// Each segment up to `age` gives its member's largest. A star on its track gives the track's
+    /// own ([`Track::max_luminosity_until`]) at its track age at the segment's end: exact on the
+    /// track it has held from zero age, and an upper bound on one the binary placed it on later,
+    /// where it takes in the track's life before its placement too. A held star gives its held
+    /// state's, nothing gives none, and every other form its states at the segment's ends and at
+    /// each knot of its mass and τ between, its paths joined linearly between their knots.
+    ///
+    /// [`StarModel::max_luminosity_until`]: crate::stellar::system::StarModel::max_luminosity_until
+    /// [`Track::max_luminosity_until`]: crate::stellar::sse::Track::max_luminosity_until
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`state_at`](Self::state_at).
+    #[must_use]
+    pub(crate) fn max_luminosity_until(
+        &self,
+        component: Component,
+        age: Years,
+    ) -> SolarLuminosities {
+        let now = self.state_at(age).stars()[component.index()].luminosity();
+        let peak = self.max_until(
+            component,
+            age,
+            |state| state.luminosity().value(),
+            |track, at| track.max_luminosity_until(at).value(),
+        );
+        SolarLuminosities::new(peak.max(now.value()))
+    }
+
+    /// The largest of `quantity` that `component` has had over the segments up to `age`, as
+    /// [`max_luminosity_until`](Self::max_luminosity_until) reads them: `on_track` of a star's track
+    /// at its track age, and `quantity` of its states elsewhere.
+    #[must_use]
+    fn max_until(
+        &self,
+        component: Component,
+        age: Years,
+        quantity: impl Fn(&StarState) -> f64,
+        on_track: impl Fn(&sse::Track, Years) -> f64,
+    ) -> f64 {
+        let slot = component.index();
+        let age = age.value();
+        let age = if age > 0.0 { age.min(self.until) } else { 0.0 };
+        let mut peak = 0.0_f64;
+        for segment in self.segments.iter().take_while(|s| s.start <= age) {
+            let end = segment.end.min(age);
+            let member = &segment.members[slot];
+            let at = |a: f64| quantity(&member.state_at(&self.context, slot, a));
+            let largest = match member {
+                Member::Track { track, offset } => {
+                    on_track(track, Years::new((end - offset).max(0.0)))
+                }
+                Member::Frozen { state, .. } => quantity(state),
+                Member::Gone => 0.0,
+                Member::Shaped { mass, .. }
+                | Member::Cooling { mass, .. }
+                | Member::Remnant { mass, .. } => knots_between(mass, None, segment.start, end)
+                    .map(at)
+                    .fold(at(segment.start).max(at(end)), f64::max),
+                Member::MainSequence { mass, tau, .. } => {
+                    knots_between(mass, Some(tau), segment.start, end)
+                        .map(at)
+                        .fold(at(segment.start).max(at(end)), f64::max)
+                }
+            };
+            peak = peak.max(largest);
+        }
+        peak
+    }
+
     /// The age at which the pair coalesced, if it did by the age it was run to.
     #[must_use]
     pub fn merger_age(&self) -> Option<Years> {
@@ -915,6 +990,22 @@ fn is_helium_star(state: &StarState) -> bool {
         state.phase(),
         Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
     )
+}
+
+/// The ages of the knots of `first` and of `second`, if given, strictly between `start` and `end`,
+/// in no particular order.
+fn knots_between<'p>(
+    first: &'p Path,
+    second: Option<&'p Path>,
+    start: f64,
+    end: f64,
+) -> impl Iterator<Item = f64> + 'p {
+    first
+        .knots()
+        .iter()
+        .chain(second.map_or(&[][..], Path::knots))
+        .map(|knot| knot[0])
+        .filter(move |&at| start < at && at < end)
 }
 
 /// The value of a piecewise-constant path at `age`: the value recorded at the end of the step

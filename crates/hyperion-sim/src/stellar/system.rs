@@ -1849,6 +1849,26 @@ impl PairTimeline {
             .position(|&s| s == star)
             .map(PairComponent::of_index)
     }
+
+    /// The age at `t` at which the timeline is read, its inner member's age then from `stars`, the
+    /// system's models by body index, or `None` if the system is not born then or `t` lies beyond
+    /// the ages the timeline was run to.
+    #[must_use]
+    pub(crate) fn age_at(&self, stars: &[StarModel], t: UniverseTime) -> Option<Years> {
+        let age = stars[usize::from(self.stars[0].get())].age_at(t);
+        (age.value() > 0.0 && age <= self.timeline.until()).then_some(age)
+    }
+}
+
+/// The pair among `pairs` that holds star `index`, with the engine's component the star is there,
+/// if the engine ran it in one: the lookup [`SystemStars`]' paired states take, which plan 14's
+/// context shares (P14.T1.e).
+#[must_use]
+pub(crate) fn pair_of(pairs: &[PairTimeline], index: u8) -> Option<(&PairTimeline, PairComponent)> {
+    pairs.iter().find_map(|pair| {
+        let star = pair.stars.iter().copied().find(|s| s.get() == index)?;
+        pair.component_of(star).map(|c| (pair, c))
+    })
 }
 
 /// A pair's state at one clock time (plan 11, P11.T11): its node, its orbit then, and its class.
@@ -2802,10 +2822,7 @@ impl SystemStars {
         pair: &PairTimeline,
         t: UniverseTime,
     ) -> Option<(BinaryState, BinaryClass)> {
-        let age = self.stars[usize::from(pair.stars[0].get())].age_at(t);
-        if age.value() <= 0.0 || age > pair.timeline.until() {
-            return None;
-        }
+        let age = pair.age_at(&self.stars, t)?;
         Some((pair.timeline.state_at(age), pair.timeline.class_at(age)))
     }
 
@@ -2813,10 +2830,7 @@ impl SystemStars {
     /// pair and `t` lies inside that timeline.
     #[must_use]
     fn paired_state(&self, index: u8, t: UniverseTime) -> Option<PairedStar> {
-        let (pair, component) = self.pairs.iter().find_map(|pair| {
-            let star = pair.stars.iter().copied().find(|s| s.get() == index)?;
-            pair.component_of(star).map(|c| (pair, c))
-        })?;
+        let (pair, component) = pair_of(&self.pairs, index)?;
         let (state, class) = self.pair_state_at(pair, t)?;
         let own = state.stars()[component.index()];
         // A star merged into its companion, or one its own death left nothing of (a pair
