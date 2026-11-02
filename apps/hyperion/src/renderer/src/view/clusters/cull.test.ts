@@ -173,7 +173,7 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
     }).toThrow(RangeError);
   });
 
-  it("lays a pass out in 128 B and the dispatch's parameters in 144 B, as WGSL's CullPass and CullParams", () => {
+  it("lays a pass out in 128 B and the dispatch's parameters in 160 B, as WGSL's CullPass and CullParams", () => {
     expect([
       offsets("CullPass"),
       declaredStructLayout(clusterCullWgsl, "CullPass")?.sizeBytes,
@@ -205,6 +205,7 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
         ["listOffsetsHigh", 96],
         ["capacitiesLow", 112],
         ["capacitiesHigh", 128],
+        ["shapes", 144],
       ],
       CULL_PARAMS_BYTES,
     ]);
@@ -317,6 +318,7 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
         templateOffsets: [0, 10, 20, 30, 40, 45, 50, 55],
         templateCapacities: [10, 10, 10, 10, 5, 5, 5, 5],
         viewAxis: { x: 0, y: 0, z: -1 },
+        firstShape: 2,
       },
       out,
     );
@@ -326,8 +328,8 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
       [48, 52, 56, 60, 76].map(u),
       view.getFloat32(72, true),
       [80, 84, 88, 92, 96, 100, 104, 108].map(u),
-      [112, 116, 128, 140].map(u),
-    ]).toEqual([[3, 8, 96, 4, 8], -1, [0, 10, 20, 30, 40, 45, 50, 55], [10, 10, 5, 5]]);
+      [112, 116, 128, 140, 144].map(u),
+    ]).toEqual([[3, 8, 96, 4, 8], -1, [0, 10, 20, 30, 40, 45, 50, 55], [10, 10, 5, 5, 2]]);
   });
 });
 
@@ -346,7 +348,7 @@ const CAMERA: CameraCullPass = {
     { normal: { x: 0, y: Math.SQRT1_2, z: -Math.SQRT1_2 }, offsetM: 0 },
     { normal: { x: 0, y: 0, z: -1 }, offsetM: -0.5 },
   ],
-  toleranceM: 0,
+  toleranceRad: 0,
   strideCap: 1,
   horizon: null,
   order: "appended",

@@ -220,7 +220,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       fovXRad: Math.PI / 3,
       viewport: { widthPx: 1920, heightPx: 1080 },
     }).planes,
-    toleranceM: 0,
+    toleranceRad: 0,
     strideCap: 1,
     horizon: null,
     order: "appended",
@@ -312,6 +312,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
         templateOffsets: buckets.templateOffsets,
         templateCapacities: buckets.capacities,
         viewAxis,
+        firstShape: 0,
       },
       paramBytes,
     );
@@ -327,6 +328,8 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
           lists: buckets.lists,
           args: buckets.args,
           marks,
+          // No record here is a DAG's (R14.T4.b): one LOD sphere, unread.
+          lods: buffer("smoke clusters lods", new Float32Array(4)),
         },
         sampled: {},
         storage: {},

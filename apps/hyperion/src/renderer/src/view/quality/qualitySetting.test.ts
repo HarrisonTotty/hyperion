@@ -139,6 +139,7 @@ describe("the geometry's settings (plan R14)", () => {
         litClusters: true,
         farCascadeRate: 4,
         figureClusters: true,
+        hullClusters: true,
       });
     }
     expect(GEOMETRY_BEFORE_R14).toEqual({
@@ -149,6 +150,7 @@ describe("the geometry's settings (plan R14)", () => {
       litClusters: false,
       farCascadeRate: 1,
       figureClusters: false,
+      hullClusters: false,
     });
   });
 

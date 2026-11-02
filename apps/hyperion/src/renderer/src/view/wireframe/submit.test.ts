@@ -6,6 +6,7 @@ import { aCameraPose, NO_TURN } from "../../test/viewFixtures";
 import { bindingStages } from "../../test/wgslStages";
 import type {
   BufferHandle,
+  ComputeHandle,
   DrawItem,
   FrameSubmission,
   MaterialHandle,
@@ -580,6 +581,13 @@ class RecordingEngine implements WireframeEngine {
   writeBuffer(buffer: BufferHandle, _offsetBytes: number, data: ArrayBufferView): void {
     this.writes.push({ buffer: buffer.name, bytes: data.byteLength });
   }
+  releaseBuffer(_buffer: BufferHandle): void {}
+  dispatch(): void {}
+  /** A kernel the device never finishes: every hull draws instanced, as before plan R14's T4.b. */
+  createComputeAsync(): Promise<ComputeHandle> {
+    return new Promise(() => undefined);
+  }
+  releaseCompute(_kernel: ComputeHandle): void {}
   onRestored(listener: () => void): () => void {
     this.#restored = listener;
     return () => {
@@ -695,14 +703,15 @@ describe("WireframeRenderer", () => {
     const renderer = new WireframeRenderer(engine);
     engine.restore();
     renderer.dispose();
-    expect(engine.materials.length).toBe(14);
+    // Its seven and the hulls' two on the cluster path (plan R14, R14.T4.b), each time.
+    expect(engine.materials.length).toBe(18);
   });
 
   it("stops following the engine's restores once disposed", () => {
     const engine = new RecordingEngine();
     new WireframeRenderer(engine).dispose();
     engine.restore();
-    expect(engine.materials.length).toBe(7);
+    expect(engine.materials.length).toBe(9);
   });
 });
 
@@ -1193,7 +1202,7 @@ describe("WireframeRenderer over the bodies' terrain (R10.T11)", () => {
     expect(frames).toEqual([expected]);
   });
 
-  it("makes its seven materials, the datum's two among them", () => {
+  it("makes its seven materials, the datum's two among them, and the hulls' two on the cluster path", () => {
     const engine = new SpecRecordingEngine();
     new WireframeRenderer(engine).dispose();
     expect(engine.specs.map((spec) => [spec.name, spec.displayName])).toEqual([
@@ -1204,6 +1213,8 @@ describe("WireframeRenderer over the bodies' terrain (R10.T11)", () => {
       ["wireframe:starSprite", "STAR SPRITES"],
       ["wireframe:linesSurveyed", "DATUM LINES"],
       ["wireframe:occluderSphereSurveyed", "DATUM OCCLUDER"],
+      ["wireframe:occluderHullCluster", "HULL OCCLUDER CLUSTERS"],
+      ["wireframe:hullSilhouetteCluster", "SILHOUETTE CLUSTERS"],
     ]);
   });
 });

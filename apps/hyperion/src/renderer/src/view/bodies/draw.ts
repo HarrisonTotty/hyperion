@@ -71,6 +71,7 @@ import type { ClusterBuckets } from "../clusters/buckets";
 import { type ClusterConsumer, ClusterConsumerPath } from "../clusters/consumer";
 import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
 import { type CullPass, MAX_CULL_PASSES } from "../clusters/cullPass";
+import { CLUSTER_SHAPE_CODE } from "../clusters/record";
 import { smoothFigureClusterMesh } from "../clusters/templates";
 import { TERRAIN_BLOCKS, TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
 import { type GeometrySettings, type QualitySetting, SETTINGS } from "../quality/qualitySetting";
@@ -1337,6 +1338,7 @@ export const FIGURE_CLUSTER_CONSUMER: ClusterConsumer = {
   name: "bodies:figure clusters",
   templates: FIGURE_CLUSTER_MESH.templates,
   clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE,
+  firstShape: CLUSTER_SHAPE_CODE["terrain-block"],
   templateClusters: FIGURE_CLUSTER_MESH.templates.map(({ shape, stride }) =>
     stride !== 1
       ? 0
@@ -2421,7 +2423,8 @@ export class LitBodyRenderer {
           planes: frustumOf(body.mesh.camera, FIGURE_CULL_MARGIN_RAD).planes,
           horizon: null,
           order: "appended",
-          toleranceM: 0,
+          // Unread: no figure's record is a DAG's.
+          toleranceRad: 0,
           strideCap: 1,
         });
       }

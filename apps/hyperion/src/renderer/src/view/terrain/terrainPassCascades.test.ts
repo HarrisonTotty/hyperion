@@ -478,7 +478,7 @@ function parseLitPass(words: Uint32Array | Float32Array, index: number): CameraC
       normal: vec(32 + 16 * k),
       offsetM: f(44 + 16 * k),
     })),
-    toleranceM: f(16),
+    toleranceRad: f(16),
     strideCap: STRIDES[view.getUint32(at + 4, true)] ?? 1,
     horizon: f(28) > 0 ? { axis: vec(112), planeM: f(24), sin: f(28), cos: f(124) } : null,
     order: "ordered",

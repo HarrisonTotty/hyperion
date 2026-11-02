@@ -68,7 +68,7 @@ function countFigures(value: unknown): SpikeCountFigures | null | undefined {
 }
 
 /** The consumers' levers (plan R14's T4), which a file written before each lacks. */
-const CONSUMER_LEVERS = ["figureClusters"] as const;
+const CONSUMER_LEVERS = ["figureClusters", "hullClusters"] as const;
 
 /**
  * `value` as the geometry's settings at results `version`, every field of its kind, or `null`:
@@ -85,13 +85,14 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
   }
   const { clusterPath, casterDepthCull, casterStrideCap, overlayDepth, litClusters } = value;
   const farCascadeRate = version === 7 ? 1 : value["farCascadeRate"];
-  const { figureClusters = false } = value;
+  const { figureClusters = false, hullClusters = false } = value;
   if (
     (farCascadeRate !== 1 && farCascadeRate !== 2 && farCascadeRate !== 4) ||
     typeof clusterPath !== "boolean" ||
     typeof casterDepthCull !== "boolean" ||
     typeof litClusters !== "boolean" ||
     typeof figureClusters !== "boolean" ||
+    typeof hullClusters !== "boolean" ||
     (casterStrideCap !== 1 &&
       casterStrideCap !== 2 &&
       casterStrideCap !== 4 &&
@@ -108,6 +109,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     litClusters,
     farCascadeRate,
     figureClusters,
+    hullClusters,
   };
 }
 
@@ -204,12 +206,13 @@ export function geometrySummaryLines(geometry: SpikeGeometryReport): string[] {
     litClusters,
     farCascadeRate,
     figureClusters,
+    hullClusters,
   } = geometry.settings;
   return [
     "",
     "## Geometry (plan R14)",
     "",
-    `The main view's lit pass a frame by segment, median (largest): cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}.`,
+    `The main view's lit pass a frame by segment, median (largest): cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}.`,
     "",
     `| Segment | ${COUNTS.map((name) => COUNT_HEADS[name]).join(" | ")} |`,
     `| ${["---", ...COUNTS.map(() => "---")].join(" | ")} |`,

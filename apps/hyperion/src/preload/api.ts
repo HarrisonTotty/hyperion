@@ -233,6 +233,8 @@ export interface GeometryOverride {
   readonly farCascadeRate?: 1 | 2 | 4;
   /** R14.T4.a: the mesh regime's figures through the cluster path. */
   readonly figureClusters?: boolean;
+  /** R14.T4.b: the hulls' occluder faces through the cluster path. */
+  readonly hullClusters?: boolean;
 }
 
 declare global {

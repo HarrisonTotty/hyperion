@@ -19,10 +19,17 @@
  * vertex stage turns them into the lit mesh's own grid coordinates, (x₀ + lx, y₀ + ly, 0) for a
  * block and edge e's k-th vertex from the strip's start for a strip, and places them by `lit_place`
  * unchanged (`clusters/terrain.ts`, `terrainCluster.wgsl`).
+ *
+ * The mesh shape (plan R14, R14.T4.b) has one template, {@link meshTemplate}: 128 triangles drawn
+ * by index pulling, since a mesh's cluster holds its own triangles' corners or 8-bit indices in
+ * storage, which WebGPU's index formats cannot draw (plan R14's design note on the cluster format).
+ * Its mesh's vertex k is (k mod 3, ⌊k ÷ 3⌋, 0): a corner of triangle ⌊k ÷ 3⌋, which the consumer's
+ * vertex stage reads from its page, or places off the view, a degenerate triangle, past the
+ * cluster's count. So a cluster costs 384 vertex invocations however few triangles it holds.
  */
 
 import type { MeshSpec } from "../engine/types";
-import type { ClusterShape } from "./record";
+import { type ClusterShape, MESH_CLUSTER_TRIANGLES } from "./record";
 
 import { CLUSTER_QUADS, type Stride, STRIDES } from "./terrainGrid";
 
@@ -189,4 +196,38 @@ export function terrainTemplateIndex(
   stride: Stride,
 ): number {
   return (shape === "terrain-block" ? 0 : STRIDES.length) + STRIDES.indexOf(stride);
+}
+
+/** The mesh shape's one template (plan R14, R14.T4.b): 128 triangles by index pulling. */
+export function meshTemplate(): ClusterTemplate {
+  return {
+    shape: "mesh",
+    stride: 1,
+    triangles: MESH_CLUSTER_TRIANGLES,
+    firstIndex: 0,
+    indexCount: 3 * MESH_CLUSTER_TRIANGLES,
+    errorScale: 1,
+  };
+}
+
+/** The mesh shape's cluster mesh: {@link meshTemplate}'s 384 vertices, (corner, triangle, 0), in order. */
+export function meshClusterMesh(): {
+  readonly templates: readonly [ClusterTemplate];
+  readonly mesh: MeshSpec;
+} {
+  const vertices = 3 * MESH_CLUSTER_TRIANGLES;
+  const positions = new Float32Array(3 * vertices);
+  for (let k = 0; k < vertices; k += 1) {
+    positions.set([k % 3, Math.floor(k / 3), 0], 3 * k);
+  }
+  return {
+    templates: [meshTemplate()],
+    mesh: {
+      name: "mesh clusters",
+      positions,
+      indices: Uint32Array.from({ length: vertices }, (_, k) => k),
+      topology: "triangle-list",
+      attributes: {},
+    },
+  };
 }

@@ -2688,6 +2688,7 @@ describe("the schema check", () => {
         litClusters: true,
         farCascadeRate: 4,
         figureClusters: true,
+        hullClusters: true,
       },
       segments: [
         {
@@ -2734,7 +2735,7 @@ describe("the schema check", () => {
     const markdown = summaryMarkdown(results);
     expect(markdown).toContain("## Geometry (plan R14)");
     expect(markdown).toContain(
-      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters.",
+      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters.",
     );
     expect(markdown).toContain(
       "| orbit coast | 59 (61) | 33 (33) | 868,352 (880,000) | 700,000 (712,000) | — | 600,001 (610,001) |",
@@ -2764,7 +2765,10 @@ describe("the schema check", () => {
       run: runOf(),
       report: {
         ...reportOf(),
-        geometry: { settings: { ...settings, farCascadeRate: 1, figureClusters: false }, segments },
+        geometry: {
+          settings: { ...settings, farCascadeRate: 1, figureClusters: false, hullClusters: false },
+          segments,
+        },
       },
       trace: traceOf(),
       memory: MEMORY,
@@ -2784,7 +2788,7 @@ describe("the schema check", () => {
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, figureClusters: "yes" })),
     ]).toEqual([[], malformed, malformed, malformed, [], malformed]);
     expect(summaryMarkdown(results)).toContain(
-      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws.",
+      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws.",
     );
   });
 

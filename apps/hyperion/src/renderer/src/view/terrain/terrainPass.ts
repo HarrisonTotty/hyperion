@@ -86,6 +86,7 @@ import {
   packCompactParams,
 } from "../clusters/compact";
 import { CLUSTER_CULL_KERNEL, receiversRefuse } from "../clusters/cull";
+import { CLUSTER_SHAPE_CODE } from "../clusters/record";
 import {
   cullHorizonOf,
   type CameraCullPass,
@@ -4068,6 +4069,7 @@ export class TerrainPass {
         templateOffsets: buckets.templateOffsets,
         templateCapacities: buckets.capacities,
         viewAxis,
+        firstShape: CLUSTER_SHAPE_CODE["terrain-block"],
       },
       held.params,
     );
@@ -4087,6 +4089,8 @@ export class TerrainPass {
           lists: buckets.lists,
           args: buckets.args,
           marks: clusters.marks,
+          // No terrain record is a DAG's, so its records stand in for the LOD spheres, unread.
+          lods: records,
         },
         sampled: {},
         storage: {},
@@ -4160,7 +4164,7 @@ export class TerrainPass {
     return {
       kind: "camera",
       planes: frustum.planes,
-      toleranceM: 0,
+      toleranceRad: 0,
       strideCap: 1,
       horizon: cullHorizonOf(view.cameraM, occluderRadiusM),
       order: "ordered",
@@ -4181,7 +4185,7 @@ export class TerrainPass {
     return {
       kind: "camera",
       planes: frustum.planes,
-      toleranceM: 0,
+      toleranceRad: 0,
       strideCap: 1,
       horizon: null,
       order: "appended",

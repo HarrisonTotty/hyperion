@@ -71,6 +71,7 @@ import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import { ViewSceneProvider } from "./ViewSceneProvider";
 import { runPose, STAR_SOURCE, STARS_WITHOUT_POSITION, startRun, stepRun } from "./viewRun";
 import { describedText, statusLine } from "../../test/statusLine";
+import type { GeometryOverride } from "../../../../preload/api";
 
 const WIDTH_PX = 640;
 const HEIGHT_PX = 360;
@@ -114,6 +115,8 @@ function setup(
     readonly blockPx?: () => LaidOutBoxPx;
     /** The platform the client runs on (R07.T19.f): Linux's by default. */
     readonly platform?: string;
+    /** A launch's geometry override (`--geometry`, plan R14): none by default. */
+    readonly geometry?: GeometryOverride;
   } = {},
 ): Setup {
   const advanceTimers = fakeFramesAndTimeouts();
@@ -133,6 +136,7 @@ function setup(
                 <ViewDisplay
                   engineSource={source}
                   platform={options.platform}
+                  geometry={options.geometry}
                   heightWorkers={startHeightWorker}
                 />
               </Activity>
@@ -239,6 +243,12 @@ async function settle(): Promise<void> {
   });
 }
 
+/**
+ * The hulls' faces by their instanced draws, the way back (plan R14, R14.T4.b): each hull's draw
+ * carries its reference point in its offset, which the camera's tests read.
+ */
+const INSTANCED_HULLS: GeometryOverride = { hullClusters: false };
+
 /** The distance from the camera to the own ship's hull, by its occluder draw, m. */
 function hullDistanceM(frame: FrameSubmission | undefined): number {
   const hull = frame?.draws.find((draw) => draw.material.name === "wireframe:occluderHull");
@@ -254,7 +264,9 @@ function materialNames(frame: FrameSubmission | undefined): string[] {
 /** A frame's draws of hull faces, each its material and its `fill` uniform (empty for none). */
 function hullFaceDraws(frame: FrameSubmission | undefined): Array<[string, number[]]> {
   return (frame?.draws ?? [])
-    .filter((draw) => /^wireframe:(occluderHull|hullSilhouette)$/.test(draw.material.name))
+    .filter((draw) =>
+      /^wireframe:(occluderHull|hullSilhouette)(Cluster)?$/.test(draw.material.name),
+    )
     .map((draw) => [draw.material.name, [...(draw.uniforms["fill"] ?? [])]]);
 }
 
@@ -621,7 +633,7 @@ describe("the VIEW display", () => {
 
   it("flies a free camera by the keys held on its canvas", async () => {
     stubMatchMedia(true);
-    const { user, advance, lastFrame } = setup();
+    const { user, advance, lastFrame } = setup({ geometry: INSTANCED_HULLS });
     await settle();
     advance(300);
     await user.keyboard("3");
@@ -839,7 +851,7 @@ describe("the VIEW display", () => {
 
   it("stops flying when its canvas loses focus", async () => {
     stubMatchMedia(true);
-    const { user, advance, lastFrame } = setup();
+    const { user, advance, lastFrame } = setup({ geometry: INSTANCED_HULLS });
     await settle();
     advance(300);
     await user.keyboard("3");
@@ -977,7 +989,7 @@ describe("the VIEW display's interim queries", () => {
 
 describe("the VIEW display's eased moves", () => {
   it("ease a preset change when asked for", async () => {
-    const { user, advance, lastFrame } = setup();
+    const { user, advance, lastFrame } = setup({ geometry: INSTANCED_HULLS });
     await settle();
     advance(300);
     const seat = hullDistanceM(lastFrame());
@@ -989,7 +1001,7 @@ describe("the VIEW display's eased moves", () => {
 
   it("are cuts under reduced motion", async () => {
     stubMatchMedia(true);
-    const { user, advance, lastFrame } = setup();
+    const { user, advance, lastFrame } = setup({ geometry: INSTANCED_HULLS });
     await settle();
     advance(300);
     const seat = hullDistanceM(lastFrame());
@@ -1109,7 +1121,7 @@ describe("the VIEW display's server scene", () => {
   });
 
   it("draws the server's scene once it arrives, and reports its camera", async () => {
-    const view = setup();
+    const view = setup({ geometry: INSTANCED_HULLS });
     await openUniverse(view);
     await sceneArrives(view.socket);
     await settle();
@@ -1437,11 +1449,12 @@ describe("the VIEW display's symbology over the image (R07.T16.a)", () => {
     await drawPrecisionPhotoreal(view);
     const drawn = materialNames(view.lastFrame());
     const lastSphere = drawn.lastIndexOf("wireframe:occluderSphere");
-    const firstSilhouette = drawn.indexOf("wireframe:hullSilhouette");
+    // On the cluster path (plan R14, R14.T4.b): every hull's faces in one bucket draw.
+    const firstSilhouette = drawn.indexOf("wireframe:hullSilhouetteCluster");
     expect([
       view.lastFrame()?.label,
       lastSphere >= 0 && lastSphere < firstSilhouette,
-      drawn.lastIndexOf("wireframe:hullSilhouette") < drawn.indexOf("wireframe:lines"),
+      drawn.lastIndexOf("wireframe:hullSilhouetteCluster") < drawn.indexOf("wireframe:lines"),
     ]).toEqual(["symbology", true, true]);
   });
 
@@ -1456,8 +1469,9 @@ describe("the VIEW display's symbology over the image (R07.T16.a)", () => {
       wireframe: [...new Set(wireframe.map(([name]) => name))],
       overlay: [...new Set(hullFaceDraws(view.lastFrame()).map((draw) => JSON.stringify(draw)))],
     }).toEqual({
-      wireframe: ["wireframe:occluderHull"],
-      overlay: [JSON.stringify(["wireframe:hullSilhouette", surface])],
+      // On the cluster path (plan R14, R14.T4.b), its draws the buckets'.
+      wireframe: ["wireframe:occluderHullCluster"],
+      overlay: [JSON.stringify(["wireframe:hullSilhouetteCluster", surface])],
     });
   });
 

@@ -41,12 +41,26 @@
 //   template, or NO_MARK where it is refused or its instance does not enter the pass, is written to
 //   `marks`, one word a cluster of every instance, for the stable compaction to write the pass's
 //   buckets in the draw set's order (`compact.wgsl`); nothing is appended for it.
-// - _The stride_: the coarsest s = 2^l, l up to the pass's cap, with s × the unit within the pass's
-//   tolerance, in `f32` as the twin forms it; s = 1 where none is.
-// - _The bucket_: the record's shape (its flags' bits 0–3) × STRIDE_LEVELS + l, from the pass's
-//   first bucket; the entry, (instance << 8) | cluster, at its template's list offset in the pass
-//   plus the place the append took. An append past a template's capacity is dropped: none is, the
-//   lists holding every cluster of every instance once a pass.
+// - _The DAG cut_ (R14.T4.b, a record with the flags' bit 4): kept only where its own error, `f32`
+//   in its error bytes' first word, is within the pass's tolerance at its group's sphere, the
+//   record's own, and its parent's, in the second, is not at its parent group's, its `lods` entry
+//   (`clusters/record.ts`' `ClusterLod`): for a camera pass ε ≤ τ max(|S| − ρ, 0), τ the pass's
+//   tolerance in rad, the projected error ε ÷ d of `screenSpaceErrorPx` at the sphere's nearest
+//   point, so that inside a sphere only an error of 0 is within it; for a cascade ε ≤ τ, its texel.
+//   A cluster's parent test is the same arithmetic on the same bits as its parent group's own test
+//   (one origin for every page of a mesh, `tools/meshbuild`), so that the cut is consistent: of a
+//   leaf's chain of groups exactly one is drawn (Karis 2021, SIGGRAPH Advances, "A Deep Dive into
+//   Nanite Virtualized Geometry").
+// - _A record of no cluster_ (R14.T4.b): a negative radius, a page's room past its clusters, which
+//   every pass refuses.
+// - _The stride_: for a cascade the coarsest s = 2^l, l up to the pass's cap, with s × the unit
+//   within the pass's tolerance, in `f32` as the twin forms it; s = 1 where none is, for a camera
+//   pass (until T3.c) and for a DAG record.
+// - _The bucket_: the record's shape (its flags' bits 0–3) less the consumer's first shape
+//   (`shapes.x`) × STRIDE_LEVELS + l, from the pass's first bucket; the entry,
+//   (instance << 8) | cluster, at its template's list offset in the pass plus the place the append
+//   took. An append past a template's capacity is dropped: none is, the lists holding every
+//   cluster of every instance once a pass.
 
 struct ClusterRecord {
   centre : vec3f,
@@ -78,6 +92,7 @@ struct CullParams {
   listOffsetsHigh : vec4u,
   capacitiesLow : vec4u,
   capacitiesHigh : vec4u,
+  shapes : vec4u,
 }
 
 // `cullPass.ts`' MAX_CULL_PASSES, a pass's kinds and the strides' levels.
@@ -87,6 +102,8 @@ const PASS_CAMERA : u32 = 2u;
 const PASS_CAMERA_ORDERED : u32 = 3u;
 // A cluster an ordered pass refuses (`cull.ts`' NO_MARK).
 const NO_MARK : u32 = 0xffffffffu;
+// The flags' DAG-cut bit (`record.ts`' CLUSTER_FLAG_DAG).
+const CLUSTER_FLAG_DAG : u32 = 16u;
 const STRIDE_LEVELS : u32 = 4u;
 // The threads of a workgroup, each taking every 64th cluster of its instance's page.
 const CULL_GROUP : u32 = 64u;
@@ -107,6 +124,8 @@ const HORIZON_ROUNDING : f32 = 1e-6;
 @group(0) @binding(5) var<storage, read_write> lists : array<u32>;
 @group(0) @binding(6) var<storage, read_write> args : array<atomic<u32>>;
 @group(0) @binding(7) var<storage, read_write> marks : array<u32>;
+// One parent group's LOD sphere a record (`record.ts`' `ClusterLod`), read by a DAG record alone.
+@group(0) @binding(8) var<storage, read> lods : array<vec4f>;
 
 // A record's centre in the instances' frame, turned from its page's axes.
 fn page_to_instance(v : vec3f) -> vec3f {
@@ -216,6 +235,24 @@ fn pass_keeps(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool {
   }
 }
 
+// The distance from the camera to the sphere at `centre`, camera-relative, of radius `radius`: 0
+// inside it.
+fn group_distance(centre : vec3f, radius : f32) -> f32 {
+  return max(length(centre) - radius, 0.0);
+}
+
+// Whether a DAG record is drawn at the pass's tolerance (see the module's head): its own error
+// within it at its group's sphere (`centre`, `radius`), its parent's not at its parent group's.
+fn dag_drawn(cull_pass : CullPass, record : ClusterRecord, centre : vec3f, parent_centre : vec3f, parent_radius : f32) -> bool {
+  let own = bitcast<f32>(record.errors.x);
+  let parent = bitcast<f32>(record.errors.y);
+  let tolerance = cull_pass.scalars.x;
+  if (cull_pass.header.x == PASS_CASCADE) {
+    return own <= tolerance && parent > tolerance;
+  }
+  return own <= tolerance * group_distance(centre, record.radius) && parent > tolerance * group_distance(parent_centre, parent_radius);
+}
+
 // The coarsest stride's level, up to the pass's cap, whose 2^l × `unit` is within its tolerance.
 fn stride_level(cull_pass : CullPass, unit : f32) -> u32 {
   var level = 0u;
@@ -225,6 +262,13 @@ fn stride_level(cull_pass : CullPass, unit : f32) -> u32 {
     }
   }
   return level;
+}
+
+// A record's template in the pass (see the module's head): a cascade's stride for a strided one,
+// stride 1 for a camera pass's and a DAG one's.
+fn template_of(cull_pass : CullPass, shape : u32, dag : bool, unit : f32) -> u32 {
+  let level = select(stride_level(cull_pass, unit), 0u, dag || cull_pass.header.x != PASS_CASCADE);
+  return (shape - params.shapes.x) * STRIDE_LEVELS + level;
 }
 
 fn template_offset(t : u32) -> u32 {
@@ -259,26 +303,32 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
   let clusters = params.counts.z;
   let pass_count = min(params.counts.w, MAX_CULL_PASSES);
   for (var c = local.x; c < clusters; c = c + CULL_GROUP) {
-    let record = records[page * clusters + c];
+    let at = page * clusters + c;
+    let record = records[at];
     let centre = origin + page_to_instance(record.centre);
     let shape = record.flags & 0xfu;
+    let real = record.radius >= 0.0;
+    let dag = (record.flags & CLUSTER_FLAG_DAG) != 0u;
+    var parent_centre = centre;
+    var parent_radius = record.radius;
+    if (dag) {
+      let lod = lods[at];
+      parent_centre = origin + page_to_instance(lod.xyz);
+      parent_radius = lod.w;
+    }
     for (var p = 0u; p < pass_count; p = p + 1u) {
       let cull_pass = passes[p];
-      let enters = (input.x & (1u << p)) != 0u;
+      let enters = real && (input.x & (1u << p)) != 0u;
+      let keeps =
+        enters &&
+        pass_keeps(cull_pass, centre, record.radius) &&
+        (!dag || dag_drawn(cull_pass, record, centre, parent_centre, parent_radius));
+      let t = template_of(cull_pass, shape, dag, unit);
       if (cull_pass.header.x == PASS_CAMERA_ORDERED) {
-        var mark = NO_MARK;
-        if (enters && pass_keeps(cull_pass, centre, record.radius)) {
-          let kept = shape * STRIDE_LEVELS + stride_level(cull_pass, unit);
-          mark = select(NO_MARK, kept, kept < params.templates);
-        }
-        marks[instance * clusters + c] = mark;
+        marks[instance * clusters + c] = select(NO_MARK, t, keeps && t < params.templates);
         continue;
       }
-      if (!enters || !pass_keeps(cull_pass, centre, record.radius)) {
-        continue;
-      }
-      let t = shape * STRIDE_LEVELS + stride_level(cull_pass, unit);
-      if (t >= params.templates) {
+      if (!keeps || t >= params.templates) {
         continue;
       }
       let at = atomicAdd(&args[(cull_pass.header.z + t) * 5u + 1u], 1u);

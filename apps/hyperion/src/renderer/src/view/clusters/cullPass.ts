@@ -14,7 +14,7 @@
  *
  * `CullPass`, 128 B: `header` (kind: 0 none, 1 cascade, 2 camera appended, 3 camera ordered; the
  * stride cap as log₂ of it; the pass's first bucket; its first list entry) and `scalars` (the
- * tolerance, m; then a cascade's radius r, m, its far plane's distance from its centre away from
+ * tolerance, a cascade's in m, a camera's in rad (R14.T4.b); then a cascade's radius r, m, its far plane's distance from its centre away from
  * the light, m, and its receivers' cull, 1 on and 0 off, T1.c; or a camera's planes' count, its
  * horizon's plane distance, m, and the sine of its cone's half-angle, 0 for no horizon test). A
  * cascade then holds the light's axes
@@ -26,10 +26,11 @@
  * and its offset, m; one with a horizon holds at most five, its sixth `vec4f` the horizon's axis and
  * the cosine of its cone's half-angle (T2.a, {@link CullHorizon}).
  *
- * `CullParams`, 144 B: the page's axes into the instances' frame by column (terrain: the body's
+ * `CullParams`, 160 B: the page's axes into the instances' frame by column (terrain: the body's
  * rotation), `counts` (instances, `u32` words an instance record, clusters a page, passes), the
- * templates a pass has, and each template's first list entry within its pass and its capacity, by
- * template, four to a `vec4u`.
+ * templates a pass has, each template's first list entry within its pass and its capacity, by
+ * template, four to a `vec4u`, and `shapes` (the consumer's first shape's code, R14.T4.b; then
+ * zeros), by which a record's shape picks its template: (shape − first) × 4 + log₂ s.
  */
 
 import type { Vec3 } from "../../geometry/vec3";
@@ -42,7 +43,7 @@ export const MAX_CULL_PASSES = 8;
 export const CULL_PASS_BYTES = 128;
 
 /** Bytes of the dispatch's `CullParams`. */
-export const CULL_PARAMS_BYTES = 144;
+export const CULL_PARAMS_BYTES = 160;
 
 /** The most templates a pass may have: two `vec4u` of offsets and capacities. */
 export const MAX_PASS_TEMPLATES = 8;
@@ -170,9 +171,14 @@ export interface CameraCullPass {
    * set's order (a colour pass's, T2.a; `compact.ts`). A dispatch has at most one ordered pass.
    */
   readonly order: "appended" | "ordered";
-  /** The tolerance its strides are chosen at, m: unread at stride 1 (plan R14's T3.c). */
-  readonly toleranceM: number;
-  /** The coarsest stride it may take: the overlay's depth takes 1. */
+  /**
+   * Its tolerance, rad: its τ, px, over its px per radian, W ÷ (2 tan(fov_h ÷ 2)) as
+   * `screenSpaceErrorPx` takes it, at which a DAG-cut cluster is drawn where its own error,
+   * projected at its group's sphere, is within it and its parent's is not (plan R14, R14.T4.b).
+   * A camera pass takes stride 1 alone until plan R14's T3.c.
+   */
+  readonly toleranceRad: number;
+  /** The coarsest stride it may take: every camera pass takes 1 until plan R14's T3.c. */
   readonly strideCap: Stride;
 }
 
@@ -220,7 +226,7 @@ export function packCullPasses(
     view.setUint32(at + 4, Math.log2(pass.strideCap), true);
     view.setUint32(at + 8, place.bucketBase, true);
     view.setUint32(at + 12, place.listBase, true);
-    view.setFloat32(at + 16, pass.toleranceM, true);
+    view.setFloat32(at + 16, pass.kind === "cascade" ? pass.toleranceM : pass.toleranceRad, true);
     switch (pass.kind) {
       case "cascade":
         packCascade(view, at, pass);
@@ -314,6 +320,11 @@ export interface CullParams {
   readonly templateCapacities: ReadonlyArray<number>;
   /** The view axis in the instances' frame, for T1.c's receivers' cull. */
   readonly viewAxis: Vec3;
+  /**
+   * The code of the consumer's first shape (`CLUSTER_SHAPE_CODE`): 0 for terrain's and the
+   * figures', 2 for a mesh's (R14.T4.b).
+   */
+  readonly firstShape: number;
 }
 
 /**
@@ -354,4 +365,5 @@ export function packCullParams(params: CullParams, out: ArrayBuffer): void {
   templateCapacities.forEach((capacity, t) => {
     view.setUint32(112 + 4 * t, capacity, true);
   });
+  view.setUint32(144, params.firstShape, true);
 }

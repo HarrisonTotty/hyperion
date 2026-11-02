@@ -20,9 +20,17 @@
  */
 
 import { cross, norm, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
+import { type ClusterConsumer, ClusterConsumerPath } from "../clusters/consumer";
+import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
+import { CLUSTER_SHAPE_CODE } from "../clusters/record";
+import { meshClusterMesh } from "../clusters/templates";
 import { BUFFER_USAGE } from "../engine/gpuFlags";
+import { EngineUnavailable } from "../engine/resilientEngine";
+import { type GeometrySettings, SETTINGS } from "../quality/qualitySetting";
+import { frustumOf } from "../terrain/cull";
 import type {
   BufferHandle,
+  ComputeHandle,
   DrawItem,
   FrameSubmission,
   MaterialHandle,
@@ -48,13 +56,21 @@ import lineStrokeWgsl from "../shaders/lineStroke.wgsl?raw";
 import linesWgsl from "../shaders/lines.wgsl?raw";
 import linesSurveyedWgsl from "../shaders/linesSurveyed.wgsl?raw";
 import occluderWgsl from "../shaders/occluder.wgsl?raw";
+import occluderClusterWgsl from "../shaders/occluderCluster.wgsl?raw";
 import occluderSphereWgsl from "../shaders/occluderSphere.wgsl?raw";
 import occluderSphereHitWgsl from "../shaders/occluderSphereHit.wgsl?raw";
 import occluderSphereSurveyedWgsl from "../shaders/occluderSphereSurveyed.wgsl?raw";
 import starSpriteWgsl from "../shaders/starSprite.wgsl?raw";
 import toneCurveWgsl from "../shaders/toneCurve.wgsl?raw";
 import wireCoverageWgsl from "../shaders/wireCoverage.wgsl?raw";
-import type { DrawCamera, LineBatch, OccluderSphere, WireframeDrawList } from "./drawList";
+import type {
+  DrawCamera,
+  LineBatch,
+  OccluderMesh,
+  OccluderSphere,
+  WireframeDrawList,
+} from "./drawList";
+import { HULL_CLUSTERS_PER_PAGE, HULL_INSTANCE_BYTES, hullClusterFrame } from "./hullClusters";
 import type { DatumSpheroid } from "./spheroid";
 
 /**
@@ -274,6 +290,93 @@ export const WIREFRAME_MESHES: Readonly<Record<WireframeMesh, MeshSpec>> = {
     attributes: {},
   },
 };
+
+/** occluder.wgsl's instanced vertex stage's head, which the hulls' cluster forms take out. */
+const OCCLUDER_VERTEX_HEAD = "@vertex\nfn vertexMain(";
+
+/** occluder.wgsl's `Draw`'s last field and its end, after which a cluster form takes its base. */
+const OCCLUDER_DRAW_END = "  fill: vec4f,\n}";
+
+/**
+ * A hull material's form on the cluster path (plan R14, R14.T4.b): `spec`'s states, uniforms and
+ * fragment stage, its `Draw` taking `clusterBase` after its own fields, its instanced vertex stage
+ * taken out for `occluderCluster.wgsl`'s, which reads a bucket's list and the hulls' instances.
+ *
+ * @throws Error unless occluder.wgsl's vertex stage and its `Draw`'s end each occur once in `spec`.
+ */
+export function hullClusterMaterial(
+  instanced: WgslMaterialSpec,
+  displayName: string,
+): WgslMaterialSpec {
+  const source = instanced.vertexWgsl;
+  const start = source.indexOf(OCCLUDER_VERTEX_HEAD);
+  const end = start < 0 ? -1 : source.indexOf("\n}\n", start);
+  const draws = source.split(OCCLUDER_DRAW_END);
+  if (
+    start < 0 ||
+    end < 0 ||
+    source.indexOf(OCCLUDER_VERTEX_HEAD, start + 1) >= 0 ||
+    draws.length !== 2
+  ) {
+    throw new Error(
+      `a hull's cluster form needs occluder.wgsl's vertex stage and Draw once each in ${instanced.name}`,
+    );
+  }
+  const withoutVertex = source.slice(0, start) + source.slice(end + 3);
+  const withBase = withoutVertex.replace(
+    OCCLUDER_DRAW_END,
+    "  fill: vec4f,\n  // The bucket's first entry in the lists (`clusters/buckets.ts`' `clusterBase`).\n  clusterBase: u32,\n}",
+  );
+  const wgsl = `${withBase}\n${occluderClusterWgsl}`;
+  return {
+    ...instanced,
+    name: `${instanced.name}Cluster`,
+    displayName,
+    vertexWgsl: wgsl,
+    fragmentWgsl: wgsl,
+    uniforms: [...instanced.uniforms, { name: "clusterBase", type: "u32" }],
+    storageBuffers: [
+      ...(instanced.storageBuffers ?? []),
+      { name: "hullInstances", binding: 1, stages: ["vertex"] },
+      { name: "clusterLists", binding: 2, stages: ["vertex"] },
+    ],
+  };
+}
+
+/** The hulls' two materials on the cluster path (plan R14, R14.T4.b): depth alone, and filled. */
+export const HULL_CLUSTER_MATERIALS: Readonly<
+  Record<"occluderHull" | "hullSilhouette", WgslMaterialSpec>
+> = {
+  occluderHull: hullClusterMaterial(WIREFRAME_MATERIALS.occluderHull, "HULL OCCLUDER CLUSTERS"),
+  hullSilhouette: hullClusterMaterial(WIREFRAME_MATERIALS.hullSilhouette, "SILHOUETTE CLUSTERS"),
+};
+
+/** The mesh shape's cluster mesh and its one template, which the hulls' clusters draw by. */
+export const HULL_CLUSTER_MESH = meshClusterMesh();
+
+/**
+ * The hulls' occluder faces as a consumer of the cluster path (plan R14, R14.T4.b;
+ * `hullClusters.ts`): pages of {@link HULL_CLUSTERS_PER_PAGE} mesh clusters, the DAG-cut mode, one
+ * template.
+ */
+export const HULL_CLUSTER_CONSUMER: ClusterConsumer = {
+  name: "wireframe:hull clusters",
+  templates: HULL_CLUSTER_MESH.templates,
+  clustersPerPage: HULL_CLUSTERS_PER_PAGE,
+  firstShape: CLUSTER_SHAPE_CODE.mesh,
+  templateClusters: [HULL_CLUSTERS_PER_PAGE],
+  instanceBytes: HULL_INSTANCE_BYTES,
+  vertexWgsl: occluderClusterWgsl,
+};
+
+/** The hulls' cull's timed label (plan R14, R14.T4.b): one dispatch a frame with a hull drawn. */
+export const HULL_CLUSTER_CULL_LABEL = "hull cluster cull";
+
+/**
+ * How far each side of the hulls' frustum is opened for their cull, rad: past the `f32` rounding of
+ * the planes, as the terrain's overlay's is, so that no cluster that draws is refused.
+ */
+const HULL_CULL_MARGIN_RAD = 0.01;
 
 /** One draw of the packed frame, before it is bound to the engine's handles. */
 export interface PackedDraw {
@@ -554,6 +657,9 @@ function dashPhases(batch: LineBatch, camera: ProjectionCamera, viewport: Viewpo
 
 const ZERO_OFFSET = new Float32Array(3);
 
+/** A hull cluster draw's `firstTriangle`, unread: its entries name their hull and triangles. */
+const ZERO_TRIANGLE = new Float32Array(1);
+
 /**
  * How many `vec4f` rows an occluder sphere takes in {@link PackedWireframe.spheres}: 3, as
  * `occluderSphereHit.wgsl`'s `SPHERE_ROWS` reads them (R02.T19). A spheroid's axis rides in its
@@ -800,17 +906,43 @@ function centreOf(sphere: OccluderSphere): Vec3 {
 /** The smallest storage buffer made, bytes; each grows by doubling. */
 const MIN_BUFFER_BYTES = 4_096;
 
+/** Whether `material` draws a hull's faces, depth alone or filled. */
+function isHull(material: WireframeMaterial): boolean {
+  return material === "occluderHull" || material === "hullSilhouette";
+}
+
+/** The hulls' cluster path's buffers (plan R14, R14.T4.b), each grown by doubling. */
+type HullClusterBuffer = "records" | "lods" | "instances";
+
 /** What the renderer holds on the engine's device, made again after a device loss. */
 interface DeviceResources {
   readonly materials: Readonly<Record<WireframeMaterial, MaterialHandle>>;
   readonly meshes: Readonly<Record<WireframeMesh, MeshHandle>>;
   readonly buffers: Record<WireframeBuffer, BufferHandle>;
+  /**
+   * The hulls' cluster path (plan R14, R14.T4.b): its two materials, its cluster mesh, its path's
+   * buckets, its records', LOD spheres' and instances' buffers, and the cull's kernel once made,
+   * `null` before and where it could not be, when every hull draws instanced.
+   */
+  readonly hullMaterials: Readonly<Record<"occluderHull" | "hullSilhouette", MaterialHandle>>;
+  readonly hullMesh: MeshHandle;
+  readonly hullClusters: ClusterConsumerPath;
+  readonly hullBuffers: Record<HullClusterBuffer, BufferHandle>;
+  cullKernel: ComputeHandle | null;
 }
 
 /** The part of the engine the renderer uses. */
 export type WireframeEngine = Pick<
   RenderEngine,
-  "createMaterial" | "createMesh" | "createBuffer" | "writeBuffer" | "onRestored"
+  | "createMaterial"
+  | "createMesh"
+  | "createBuffer"
+  | "writeBuffer"
+  | "releaseBuffer"
+  | "dispatch"
+  | "createComputeAsync"
+  | "releaseCompute"
+  | "onRestored"
 >;
 
 /**
@@ -819,20 +951,91 @@ export type WireframeEngine = Pick<
  * @remarks
  * It makes its materials, meshes and storage buffers on construction and again after the engine
  * restores a lost device (`RenderEngine.onRestored`), and grows a buffer by doubling when a frame
- * outgrows it. The engine has no way to free a buffer, so an outgrown one is released only with the
- * engine; doubling bounds the waste to the largest frame's size.
+ * outgrows it. An outgrown frame buffer is left to the engine; doubling bounds the waste to the
+ * largest frame's size. The hulls' faces draw through the cluster path (plan R14, R14.T4.b) where
+ * its geometry asks it ({@link WireframeRenderer.setGeometry}) and the cull's kernel is made; a
+ * frame's submission must be rendered before the next frame is asked for, since its buckets, as
+ * its other buffers, are the renderer's one set.
  */
 export class WireframeRenderer {
   readonly #engine: WireframeEngine;
   #resources: DeviceResources;
+  /** How the hulls' faces are drawn (plan R14): the high setting's until set. */
+  #geometry: GeometrySettings = SETTINGS.high.geometry;
+  /** Settles once the current device's cull kernel is made, or could not be (R14.T4.b). */
+  #cullReady: Promise<boolean> = Promise.resolve(false);
+  /** The last frame's hulls on the cluster path: their clusters and triangles, or `null`. */
+  #lastHulls: { readonly clusters: number; readonly triangles: number } | null = null;
+  #disposed = false;
   readonly #unsubscribe: () => void;
 
   constructor(engine: WireframeEngine) {
     this.#engine = engine;
     this.#resources = this.#create();
+    this.#readyCull(this.#resources);
     this.#unsubscribe = engine.onRestored(() => {
       this.#resources = this.#create();
+      this.#readyCull(this.#resources);
     });
+  }
+
+  /** How it draws the hulls' faces (plan R14, R14.T4.b): the high setting's until set. */
+  get geometry(): GeometrySettings {
+    return this.#geometry;
+  }
+
+  /**
+   * Draws the hulls' faces by `geometry` from the next frame on: on the cluster path where its
+   * `clusterPath` and `hullClusters` are on (plan R14, R14.T4.b), else instanced, as before.
+   */
+  setGeometry(geometry: GeometrySettings): void {
+    this.#geometry = geometry;
+  }
+
+  /**
+   * Settles once the hulls' cluster cull's kernel is made on the current device (plan R14,
+   * R14.T4.b), `true`, or could not be, `false`; until then every hull draws instanced.
+   */
+  clustersReady(): Promise<boolean> {
+    return this.#cullReady;
+  }
+
+  /**
+   * The hulls' buckets as the last frame's cull left them (plan R14, R14.T4.b), one pass, for the
+   * counters' reduction (`clusters/stats.ts`), and that frame's clusters and faces; `null` where
+   * its hulls drew instanced.
+   */
+  get lastHullClusters(): {
+    readonly buckets: NonNullable<ClusterConsumerPath["buckets"]>;
+    readonly clusters: number;
+    readonly triangles: number;
+  } | null {
+    const buckets = this.#resources.hullClusters.buckets;
+    return this.#lastHulls === null || buckets === null ? null : { buckets, ...this.#lastHulls };
+  }
+
+  /**
+   * Compiles the cluster cull's kernel for `resources`' device (plan R14, R14.T4.b), off the frame;
+   * never rejects. Until it is made, or where it cannot be, every hull draws instanced.
+   */
+  #readyCull(resources: DeviceResources): void {
+    // A refusal thrown at the call, as a lost device's, settles as one rejected.
+    this.#cullReady = (async () => this.#engine.createComputeAsync(CLUSTER_CULL_KERNEL))().then(
+      (kernel) => {
+        if (this.#resources === resources && !this.#disposed && resources.cullKernel === null) {
+          resources.cullKernel = kernel;
+          return true;
+        }
+        this.#engine.releaseCompute(kernel);
+        return false;
+      },
+      (error: unknown) => {
+        if (!(error instanceof EngineUnavailable)) {
+          console.error("the hulls' cluster cull failed: every hull draws instanced", error);
+        }
+        return false;
+      },
+    );
   }
 
   #create(): DeviceResources {
@@ -860,7 +1063,136 @@ export class WireframeRenderer {
         corners: buffer("corners"),
         sprites: buffer("sprites"),
       },
+      hullMaterials: {
+        occluderHull: engine.createMaterial(HULL_CLUSTER_MATERIALS.occluderHull),
+        hullSilhouette: engine.createMaterial(HULL_CLUSTER_MATERIALS.hullSilhouette),
+      },
+      hullMesh: engine.createMesh(HULL_CLUSTER_MESH.mesh),
+      hullClusters: new ClusterConsumerPath(engine, HULL_CLUSTER_CONSUMER),
+      hullBuffers: {
+        records: this.#clusterBuffer("records", MIN_BUFFER_BYTES),
+        lods: this.#clusterBuffer("lods", MIN_BUFFER_BYTES),
+        instances: this.#clusterBuffer("instances", MIN_BUFFER_BYTES),
+      },
+      cullKernel: null,
     };
+  }
+
+  /** A buffer of the hulls' cluster path (plan R14, R14.T4.b): `geometry-clusters`. */
+  #clusterBuffer(name: HullClusterBuffer, bytes: number): BufferHandle {
+    return this.#engine.createBuffer({
+      name: `wireframe:hull cluster ${name}`,
+      bytes,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "geometry-clusters",
+    });
+  }
+
+  /** Writes `data` into a cluster buffer, replacing it by a doubled one if it is too small. */
+  #writeCluster(name: HullClusterBuffer, data: ArrayBuffer): BufferHandle {
+    const buffers = this.#resources.hullBuffers;
+    let handle = buffers[name];
+    if (data.byteLength > handle.bytes) {
+      let bytes = handle.bytes;
+      while (bytes < data.byteLength) {
+        bytes *= 2;
+      }
+      this.#engine.releaseBuffer(handle);
+      handle = this.#clusterBuffer(name, bytes);
+      buffers[name] = handle;
+    }
+    this.#engine.writeBuffer(handle, 0, new Uint8Array(data));
+    return handle;
+  }
+
+  /**
+   * The hulls' draws on the cluster path (plan R14, R14.T4.b), culled now, or `null` where they
+   * draw instanced: the geometry's way back, a kernel not yet made, no hull, hulls of more than one
+   * fill or kind, or a hull past a page.
+   *
+   * @remarks
+   * Every hull is one instance of the cull's one camera pass, its frustum the frame's camera's in
+   * the camera frame's axes, each side opened by {@link HULL_CULL_MARGIN_RAD}, at the finest cut
+   * (τ 0: `meshTolerancePx` is plan R14's T5), its clusters appended, and all are drawn by the
+   * pass's one bucket draw in the first hull draw's place. The faces write their own depth and one
+   * fill, so the order they draw in leaves the depth and the colour as the instanced draws leave
+   * them.
+   */
+  #hullDraw(
+    meshes: ReadonlyArray<OccluderMesh>,
+    camera: DrawCamera,
+    viewport: Viewport,
+    corners: BufferHandle,
+    uniforms: Readonly<Record<string, Float32Array>>,
+  ): DrawItem | null {
+    const resources = this.#resources;
+    const kernel = resources.cullKernel;
+    const drawn = meshes.filter((mesh) => mesh.triangles.length >= 9);
+    const fill = drawn[0]?.fill ?? null;
+    if (
+      !this.#geometry.clusterPath ||
+      !this.#geometry.hullClusters ||
+      kernel === null ||
+      drawn.length === 0 ||
+      !drawn.every((mesh) => mesh.fill === fill)
+    ) {
+      return null;
+    }
+    const frame = hullClusterFrame(drawn);
+    if (frame === null) {
+      return null;
+    }
+    const records = this.#writeCluster("records", frame.records);
+    const lods = this.#writeCluster("lods", frame.lods);
+    const instances = this.#writeCluster("instances", frame.instances);
+    const inputs = new Uint32Array(2 * frame.hulls);
+    for (let n = 0; n < frame.hulls; n += 1) {
+      inputs[2 * n] = 1;
+    }
+    resources.hullClusters.cull(
+      kernel,
+      {
+        records,
+        lods,
+        instances,
+        count: frame.hulls,
+        inputs,
+        passes: [
+          {
+            kind: "camera",
+            planes: frustumOf(
+              { orientation: camera.pose.orientation, fovXRad: camera.fovXRad, viewport },
+              HULL_CULL_MARGIN_RAD,
+            ).planes,
+            horizon: null,
+            order: "appended",
+            toleranceRad: 0,
+            strideCap: 1,
+          },
+        ],
+        rotationColumns: [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)],
+        viewAxis: vec3(0, 0, -1),
+      },
+      HULL_CLUSTER_CULL_LABEL,
+    );
+    const lists = resources.hullClusters.buckets?.lists;
+    if (lists === undefined) {
+      return null;
+    }
+    this.#lastHulls = { clusters: frame.clusters, triangles: frame.triangles };
+    const [item] = resources.hullClusters.drawItems(
+      0,
+      resources.hullMesh,
+      {
+        material: resources.hullMaterials[fill === null ? "occluderHull" : "hullSilhouette"],
+        offsetFromCameraM: ZERO_OFFSET,
+        uniforms,
+        textures: {},
+        storageBuffers: { corners, hullInstances: instances, clusterLists: lists },
+      },
+      1,
+    );
+    return item ?? null;
   }
 
   #buffer(name: WireframeBuffer, bytes: number): BufferHandle {
@@ -914,11 +1246,12 @@ export class WireframeRenderer {
       sprites: this.#write("sprites", packed.sprites),
     };
     const { materials, meshes } = this.#resources;
-    const bound: DrawItem[] = packed.draws.map((draw) => {
+    this.#lastHulls = null;
+    const bound = packed.draws.map((draw) => {
       const bufferName = MATERIAL_BUFFER[draw.material];
       const mask =
         draw.surveyedBody === undefined ? undefined : terrain.surveyed.get(draw.surveyedBody)?.mask;
-      return {
+      const item: DrawItem = {
         mesh: meshes[draw.mesh],
         material: materials[draw.material],
         offsetFromCameraM: draw.offsetFromCameraM,
@@ -927,19 +1260,37 @@ export class WireframeRenderer {
         instanceCount: draw.instanceCount,
         storageBuffers: { [bufferName]: buffers[bufferName] },
       };
+      return { material: draw.material, item };
     });
+    // The hulls' faces on the cluster path (plan R14, R14.T4.b): one bucket draw in the first hull
+    // draw's place, the others dropped.
+    const firstHull = bound.findIndex(({ material }) => isHull(material));
+    const hullUniforms = packed.draws[firstHull]?.uniforms;
+    const hullDraw =
+      hullUniforms === undefined
+        ? null
+        : this.#hullDraw(list.occluderMeshes, camera, viewport, buffers.corners, {
+            ...hullUniforms,
+            firstTriangle: ZERO_TRIANGLE,
+          });
+    const kept =
+      hullDraw === null
+        ? bound
+        : bound.flatMap((entry, index) =>
+            index === firstHull
+              ? [{ material: entry.material, item: hullDraw }]
+              : isHull(entry.material)
+                ? []
+                : [entry],
+          );
     // The occluders, then the terrain, which they hide and which hides the background, then the
     // background, then everything else in its packed order: the spheres before the hulls' faces,
     // a silhouette's included, and every line after them.
-    const isOccluder = (index: number): boolean => {
-      const material = packed.draws[index]?.material;
-      return material !== undefined && IS_OCCLUDER[material];
-    };
     const draws = [
-      ...bound.filter((_, index) => isOccluder(index)),
+      ...kept.filter(({ material }) => IS_OCCLUDER[material]).map(({ item }) => item),
       ...terrain.draws,
       ...background,
-      ...bound.filter((_, index) => !isOccluder(index)),
+      ...kept.filter(({ material }) => !IS_OCCLUDER[material]).map(({ item }) => item),
     ];
     return {
       label: WIREFRAME_PASS_LABEL,
@@ -966,8 +1317,21 @@ export class WireframeRenderer {
     view.render(this.frame(list, camera, viewport, background, terrain));
   }
 
-  /** Stops following the engine's restores; the engine owns and frees the handles. */
+  /**
+   * Stops following the engine's restores, and releases the hulls' cluster path's buffers and
+   * kernel (plan R14, R14.T4.b); the engine owns and frees its other handles.
+   */
   dispose(): void {
     this.#unsubscribe();
+    this.#disposed = true;
+    const resources = this.#resources;
+    resources.hullClusters.dispose();
+    for (const buffer of Object.values(resources.hullBuffers)) {
+      this.#engine.releaseBuffer(buffer);
+    }
+    if (resources.cullKernel !== null) {
+      this.#engine.releaseCompute(resources.cullKernel);
+      resources.cullKernel = null;
+    }
   }
 }

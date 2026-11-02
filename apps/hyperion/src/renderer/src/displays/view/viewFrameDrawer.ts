@@ -452,6 +452,11 @@ export class ViewFrameDrawer {
       this.#sized = viewport;
     }
     const camera = { pose: runPose(run), fovXRad: (run.camera.fovDeg * Math.PI) / 180 };
+    // Its hulls' faces, in both styles, by the launch's geometry or its setting's (plan R14).
+    const geometry = inputs.geometry ?? SETTINGS[inputs.setting].geometry;
+    if (this.#wireframe.geometry !== geometry) {
+      this.#wireframe.setGeometry(geometry);
+    }
     const ev100 = controlEv100(inputs.exposure);
     // The style this frame is drawn in, as near as it is known before the draw: photorealistic
     // where it may draw so and its pipelines are made (the batch review's S8).

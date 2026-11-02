@@ -17,7 +17,10 @@
  * silhouette reads `--surface-0` inside its faces and leaves the image beyond them and behind a
  * body in front, its own cased edges stay whole over it, and an edge behind a window draws as with
  * no window, in both styles (R07.T16.e). Both occluders' slope term is the list's
- * `occluderSlopePx`, a uniform that follows the stroke scale.
+ * `occluderSlopePx`, a uniform that follows the stroke scale. The hulls' faces draw on the cluster
+ * path throughout (plan R14, R14.T4.b), and every frame drawn with a hull is drawn again by the
+ * instanced draws, the way back, and on the path in one run and held byte for byte, colour and
+ * depth.
  */
 
 import "../styles.css";
@@ -47,13 +50,15 @@ import {
   viewStrokesAt,
   type WireframeDrawList,
 } from "../view/wireframe/drawList";
-import { linearColour, WireframeRenderer } from "../view/wireframe/submit";
+import { ClusterStats } from "../view/clusters/stats";
+import { GEOMETRY_BEFORE_R14, SETTINGS } from "../view/quality/qualitySetting";
+import { HULL_CLUSTER_MESH, linearColour, WireframeRenderer } from "../view/wireframe/submit";
 import { stretched } from "../view/wireframe/spheroid";
 import { type ColourTokens, readTokens } from "../spatial/paint";
 import { runPose, SCENE_OPTIONS, startRun } from "../displays/view/viewRun";
 import { aViewCraft, aViewScene, FIXTURE_SYSTEM, NO_TURN } from "../test/viewFixtures";
 import { type HullOutline, hullOutline } from "../view/scene/hull";
-import { type Checks, halfTexels, show, texel } from "./harness";
+import { bytesDigest, type Checks, halfTexels, pause, show, texel } from "./harness";
 
 /** The side of the square targets the checks draw into, px. */
 const SIDE_PX = 64;
@@ -89,6 +94,16 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   subgroup: null,
   readback: "bit-exact",
 };
+
+/** What the checks draw through: a renderer's `frame`, or one recording the frames it is asked for. */
+type Framer = Pick<WireframeRenderer, "frame">;
+
+/** A frame asked of a {@link Framer} with a hull's faces in it, which the A/B draws again. */
+interface HullFrame {
+  readonly list: WireframeDrawList;
+  readonly camera: DrawCamera;
+  readonly viewport: { readonly widthPx: number; readonly heightPx: number };
+}
 
 /** A square target with depth. */
 function squareTarget(engine: RenderEngine, name: string): RenderTarget {
@@ -157,7 +172,7 @@ const NOTHING: WireframeDrawList = emptyDrawList(viewStrokesAt(1));
  */
 async function drawSquare(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   name: string,
   list: WireframeDrawList,
   under: string | null = null,
@@ -219,7 +234,18 @@ function sameColour(seen: ReadonlyArray<number>, want: Float32Array): boolean {
 /** R02.T14.c on the run's adapter. */
 export async function checkWireframe(engine: RenderEngine, checks: Checks): Promise<void> {
   const tokens = readTokens(document.documentElement);
-  const renderer = new WireframeRenderer(engine);
+  const made = new WireframeRenderer(engine);
+  // The hulls' faces on the cluster path from the first frame (plan R14, R14.T4.b).
+  const ready = await made.clustersReady();
+  const hullFrames: HullFrame[] = [];
+  const renderer: Framer = {
+    frame: (list, camera, viewport, background, terrain) => {
+      if (list.occluderMeshes.some((mesh) => mesh.triangles.length > 0)) {
+        hullFrames.push({ list, camera, viewport });
+      }
+      return made.frame(list, camera, viewport, background, terrain);
+    },
+  };
 
   // The first frame of each kept scene, as the display draws it.
   for (const option of SCENE_OPTIONS) {
@@ -402,7 +428,116 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
   await checkSilhouette(engine, renderer, tokens, checks);
   await checkWindow(engine, renderer, tokens, checks);
   await checkStarSprite(engine, renderer, checks);
-  renderer.dispose();
+  await checkHullClusters(engine, made, ready, hullFrames, checks);
+  made.dispose();
+}
+
+/** A frame of `list` from `camera` onto a fresh target of `viewport`'s size, colour and depth. */
+async function drawFrameBytes(
+  engine: RenderEngine,
+  renderer: WireframeRenderer,
+  frame: HullFrame,
+): Promise<{ readonly colour: ArrayBuffer; readonly depth: ArrayBuffer }> {
+  const target = engine.createRenderTarget({
+    name: "R14 hull clusters",
+    size: frame.viewport,
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  try {
+    target.render(renderer.frame(frame.list, frame.camera, frame.viewport));
+    const [colour, depth] = await Promise.all([
+      engine.readTexture(target.colour),
+      engine.readTexture(target.depth ?? target.colour),
+    ]);
+    return { colour, depth };
+  } finally {
+    target.dispose();
+  }
+}
+
+/**
+ * R14.T4.b: every frame the group drew with a hull's faces, the kept scenes', the hidden-line
+ * faces', the slopes', the cased edges', the silhouettes' and the window's, drawn again by the
+ * hulls' instanced draws (the way back) and on the cluster path in one run: byte for byte, colour
+ * and depth; with the path's clusters drawn, counted by the counters' reduction, and their vertex
+ * invocations, 384 a cluster by index pulling, against the instanced draws' three a face.
+ */
+async function checkHullClusters(
+  engine: RenderEngine,
+  renderer: WireframeRenderer,
+  ready: boolean,
+  frames: ReadonlyArray<HullFrame>,
+  checks: Checks,
+): Promise<void> {
+  const differing: string[] = [];
+  let onPath = 0;
+  let faces = 0;
+  let clustersDrawn = 0;
+  let counted = 0;
+  try {
+    for (const [n, frame] of frames.entries()) {
+      renderer.setGeometry(GEOMETRY_BEFORE_R14);
+      // Each frame is drawn and read back by the way back, then on the path, before the next.
+      // oxlint-disable-next-line no-await-in-loop
+      const back = await drawFrameBytes(engine, renderer, frame);
+      renderer.setGeometry(SETTINGS.high.geometry);
+      // oxlint-disable-next-line no-await-in-loop
+      const path = await drawFrameBytes(engine, renderer, frame);
+      const drawn = renderer.lastHullClusters;
+      if (drawn !== null) {
+        onPath += 1;
+        faces += drawn.triangles;
+        // oxlint-disable-next-line no-await-in-loop
+        const answer = await hullStats(engine, drawn.buckets);
+        if (answer !== null) {
+          counted += 1;
+          clustersDrawn += answer;
+        }
+      }
+      if (
+        bytesDigest(back.colour) !== bytesDigest(path.colour) ||
+        bytesDigest(back.depth) !== bytesDigest(path.depth)
+      ) {
+        differing.push(`frame ${String(n)}`);
+      }
+    }
+  } finally {
+    renderer.setGeometry(SETTINGS.high.geometry);
+  }
+  checks.check(
+    "R14.T4.b the hulls' occluder faces drawn through the cluster path draw every hull frame the instanced draws draw, byte for byte in colour and depth",
+    ready &&
+      frames.length > 0 &&
+      onPath === frames.length &&
+      counted === onPath &&
+      differing.length === 0,
+    `cull kernel made ${String(ready)}; ${String(frames.length)} hull frames, ${String(onPath)} on the path, ${differing.length === 0 ? "every one the same" : `differing ${differing.join(", ")}`}; ${String(faces)} faces, ${String(clustersDrawn)} clusters drawn (${String(counted)} frames counted): ${String(384 * clustersDrawn)} vertex invocations by index pulling against ${String(3 * faces)} instanced`,
+  );
+}
+
+/** The clusters of the hulls' last cull, once its reduction answers, or `null`. */
+async function hullStats(
+  engine: RenderEngine,
+  buckets: NonNullable<WireframeRenderer["lastHullClusters"]>["buckets"],
+): Promise<number | null> {
+  // A ring of its own, so that its answer is this cull's.
+  const stats = new ClusterStats(engine, "smoke hull clusters");
+  try {
+    stats.sample(buckets, HULL_CLUSTER_MESH.templates, ["hulls"]);
+    let answer = stats.latest();
+    for (let round = 0; round < 100 && answer === null; round += 1) {
+      // The reduction's read answers some time after its submission.
+      // oxlint-disable-next-line no-await-in-loop
+      await pause(10);
+      answer = stats.latest();
+    }
+    return answer?.[0]?.clusters ?? null;
+  } finally {
+    stats.dispose();
+  }
 }
 
 /**
@@ -449,7 +584,7 @@ function behind(mesh: OccluderMesh): OccluderMesh {
  */
 async function checkCasedHullEdge(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   tokens: ColourTokens,
   checks: Checks,
 ): Promise<void> {
@@ -580,7 +715,7 @@ function sphereDepth(
  */
 async function checkSphereSlope(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   checks: Checks,
   strokeScale: number,
 ): Promise<void> {
@@ -672,7 +807,7 @@ function spheroidOccluderAt(
  */
 async function checkSpheroidOccluder(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   checks: Checks,
 ): Promise<void> {
   const { distanceM, equatorialRadiusM: a, polarRadiusM: c, pole } = SPHEROID_OCCLUDER;
@@ -813,7 +948,7 @@ function planeDepth(corners: ReadonlyArray<Vec3>, xPx: number, yPx: number): num
  */
 async function checkHullSlope(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   checks: Checks,
   strokeScale: number,
 ): Promise<void> {
@@ -871,7 +1006,7 @@ async function checkHullSlope(
  */
 async function checkDiagonalCasedHullEdge(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   tokens: ColourTokens,
   checks: Checks,
   strokeScale: number,
@@ -1036,7 +1171,7 @@ function silhouetteReading(
  */
 async function checkSilhouette(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   tokens: ColourTokens,
   checks: Checks,
 ): Promise<void> {
@@ -1176,7 +1311,7 @@ function windowList(hull: HullOutline, tokens: ColourTokens): WireframeDrawList 
  */
 async function checkWindow(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   tokens: ColourTokens,
   checks: Checks,
 ): Promise<void> {
@@ -1246,7 +1381,7 @@ function pixelShare(p: number, centrePx: number): number {
  */
 async function checkStarSprite(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   checks: Checks,
 ): Promise<void> {
   const sprite: StarSprite = {

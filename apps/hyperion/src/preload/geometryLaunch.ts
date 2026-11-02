@@ -4,7 +4,8 @@
  *
  * @remarks
  * The override is `<field>=<value>[,<field>=<value>…]` over the renderer's `GeometrySettings`:
- * `clusterPath`, `casterDepthCull`, `litClusters` and `figureClusters` `true` or `false`,
+ * `clusterPath`, `casterDepthCull`, `litClusters`, `figureClusters` and `hullClusters` `true` or
+ * `false`,
  * `casterStrideCap` 1, 2, 4 or 8, `overlayDepth` `redraw`, `scene-depth` or `cluster`, and
  * `farCascadeRate` 1, 2 or 4. As `qualityLaunch.ts` does for the setting, it rides in the
  * renderer's own `argv` as an extra switch, `--hyperion-geometry=<override>`, present only when the
@@ -29,6 +30,7 @@ const FIELDS = [
   "litClusters",
   "farCascadeRate",
   "figureClusters",
+  "hullClusters",
 ] as const;
 
 /** A field's values, as a refusal names them. */
@@ -40,6 +42,7 @@ const VALUES: Readonly<Record<(typeof FIELDS)[number], string>> = {
   litClusters: "true or false",
   farCascadeRate: "1, 2 or 4",
   figureClusters: "true or false",
+  hullClusters: "true or false",
 };
 
 /** The refusal of `text` as `field`'s value. */
@@ -49,7 +52,7 @@ function refused(field: (typeof FIELDS)[number], text: string): Error {
 
 /** `text` as a switch's value, `true` or `false`. */
 function booleanOf(
-  field: "clusterPath" | "casterDepthCull" | "litClusters" | "figureClusters",
+  field: "clusterPath" | "casterDepthCull" | "litClusters" | "figureClusters" | "hullClusters",
   text: string,
 ): boolean {
   if (text !== "true" && text !== "false") {
@@ -68,6 +71,7 @@ function readField(out: OverrideBeingRead, field: (typeof FIELDS)[number], text:
     case "casterDepthCull":
     case "litClusters":
     case "figureClusters":
+    case "hullClusters":
       out[field] = booleanOf(field, text);
       break;
     case "casterStrideCap": {

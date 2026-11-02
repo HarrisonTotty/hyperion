@@ -312,7 +312,7 @@ export function countClusterCell(input: ClusterCountInput): ClusterCountCell {
     const overlayPass: CameraCullPass = {
       kind: "camera",
       planes: frustum.planes,
-      toleranceM: 0,
+      toleranceRad: 0,
       strideCap: 1,
       horizon: null,
       order: "appended",

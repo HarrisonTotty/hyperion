@@ -1,6 +1,6 @@
 /**
- * The cluster cull's kernel and its TypeScript twin (plan R14, R14.T1.b and T1.c;
- * `clusterCull.wgsl`).
+ * The cluster cull's kernel and its TypeScript twin (plan R14, R14.T1.b and T1.c, the DAG cut from
+ * R14.T4.b; `clusterCull.wgsl`).
  *
  * @remarks
  * The twin decides as the kernel does, in `f64`: for each instance, each of its page's clusters and
@@ -22,7 +22,7 @@ import type {
   CullPass,
   CullPassPlace,
 } from "./cullPass";
-import type { ClusterRecord } from "./record";
+import type { ClusterLod, ClusterRecord } from "./record";
 import { CLUSTER_SHAPE_CODE } from "./record";
 import { STRIDES } from "./templates";
 
@@ -82,6 +82,10 @@ export interface CullTwinInput {
   readonly templates: number;
   /** The view axis in the instances' frame, for T1.c's receivers' cull. */
   readonly viewAxis: Vec3;
+  /** The consumer's first shape's code (`CullParams.firstShape`, R14.T4.b); 0 where absent. */
+  readonly firstShape?: number;
+  /** Each DAG record's parent group's sphere (R14.T4.b), read by a DAG record alone. */
+  readonly lods?: (page: number, cluster: number) => ClusterLod;
 }
 
 /** One bucket's entries as the twin appends them, (instance << 8) | cluster, in its order. */
@@ -244,12 +248,41 @@ export function passKeeps(
   return keeps;
 }
 
+/** The distance from the camera to the nearest point of the sphere at `c` of radius `r`: 0 inside. */
+function distance(c: Vec3, r: number): number {
+  return Math.max(Math.hypot(c.x, c.y, c.z) - r, 0);
+}
+
+/**
+ * Whether a DAG record is drawn at `pass`'s tolerance (`clusterCull.wgsl`'s `dag_drawn`; R14.T4.b):
+ * its own error within it at its group's sphere, the record's, at `centreM`, camera-relative, and
+ * its parent's not at its parent group's, at `parentCentreM` (a camera pass's errors over the
+ * distance to each sphere's nearest point, 0 inside it; a cascade's in metres).
+ */
+export function dagCutDrawn(
+  pass: CullPass,
+  errorsM: readonly [own: number, parent: number],
+  centreM: Vec3,
+  radiusM: number,
+  parentCentreM: Vec3,
+  parentRadiusM: number,
+): boolean {
+  const [own, parent] = errorsM;
+  if (pass.kind === "cascade") {
+    return own <= pass.toleranceM && parent > pass.toleranceM;
+  }
+  return (
+    own <= pass.toleranceRad * distance(centreM, radiusM) &&
+    parent > pass.toleranceRad * distance(parentCentreM, parentRadiusM)
+  );
+}
+
 /**
  * The coarsest stride's level, up to `pass`'s cap, whose 2^l × `unitM` is within its tolerance,
  * both narrowed to `f32` as the kernel holds them (`stride_level`); 0 where none is.
  */
 export function strideLevel(
-  pass: Pick<CullPass, "strideCap" | "toleranceM">,
+  pass: Pick<CascadeCullPass, "strideCap" | "toleranceM">,
   unitM: number,
 ): number {
   const unit = Math.fround(unitM);
@@ -291,9 +324,66 @@ function eachCluster(
   });
 }
 
-/** A record's template in `pass`, its shape's at the pass's stride for `instance`'s unit. */
-function templateOf(record: ClusterRecord, pass: CullPass, instance: CullInstance): number {
-  return CLUSTER_SHAPE_CODE[record.shape] * STRIDES.length + strideLevel(pass, instance.unitM);
+/**
+ * A record's template in `pass` (`template_of`): its shape's less the consumer's first at a
+ * cascade's stride for `instance`'s unit, at stride 1 for a camera pass's and a DAG record's; +∞
+ * for a shape below the first, which the kernel's unsigned arithmetic takes past every template.
+ */
+function templateOf(
+  record: ClusterRecord,
+  pass: CullPass,
+  instance: CullInstance,
+  firstShape: number,
+): number {
+  const shape = CLUSTER_SHAPE_CODE[record.shape] - firstShape;
+  const level =
+    record.mode === "dag" || pass.kind === "camera" ? 0 : strideLevel(pass, instance.unitM);
+  return shape < 0 ? Infinity : shape * STRIDES.length + level;
+}
+
+/**
+ * Whether `pass` keeps `record`, at `centreM`, camera-relative, for `instance` (see the kernel's
+ * head): a cluster at all, its instance entering the pass, its sphere kept, and a DAG record on
+ * the cut.
+ */
+function recordKept(
+  input: CullTwinInput,
+  pass: CullPass,
+  p: number,
+  instance: CullInstance,
+  cluster: number,
+  record: ClusterRecord,
+  centreM: Vec3,
+  slackScale: number,
+): boolean {
+  if (
+    !(record.radiusM >= 0) ||
+    (instance.passMask & (1 << p)) === 0 ||
+    !passKeeps(pass, input.viewAxis, centreM, record.radiusM, slackScale)
+  ) {
+    return false;
+  }
+  if (record.mode !== "dag") {
+    return true;
+  }
+  const lod = input.lods?.(instance.page, cluster);
+  if (lod === undefined) {
+    throw new Error(`the DAG record of cluster ${String(cluster)} has no LOD sphere`);
+  }
+  const offset = turned(input.rotationColumns, lod.parentCentreM);
+  const parentCentre = {
+    x: instance.originM.x + offset.x,
+    y: instance.originM.y + offset.y,
+    z: instance.originM.z + offset.z,
+  };
+  return dagCutDrawn(
+    pass,
+    record.errorsM,
+    centreM,
+    record.radiusM,
+    parentCentre,
+    lod.parentRadiusM,
+  );
 }
 
 /**
@@ -309,11 +399,8 @@ export function cullMarksTwin(input: CullTwinInput, slackScale = 1): Uint32Array
     return marks;
   }
   eachCluster(input, (n, instance, cluster, record, centre) => {
-    if (
-      (instance.passMask & (1 << p)) !== 0 &&
-      passKeeps(pass, input.viewAxis, centre, record.radiusM, slackScale)
-    ) {
-      const t = templateOf(record, pass, instance);
+    if (recordKept(input, pass, p, instance, cluster, record, centre, slackScale)) {
+      const t = templateOf(record, pass, instance, input.firstShape ?? 0);
       if (t < input.templates) {
         marks[n * input.clustersPerPage + cluster] = t;
       }
@@ -342,12 +429,11 @@ export function cullTwin(input: CullTwinInput, slackScale = 1): CullTwinBuckets 
         if (
           pass === null ||
           (pass.kind === "camera" && pass.order === "ordered") ||
-          (instance.passMask & (1 << p)) === 0 ||
-          !passKeeps(pass, input.viewAxis, centre, record.radiusM, slackScale)
+          !recordKept(input, pass, p, instance, cluster, record, centre, slackScale)
         ) {
           return;
         }
-        const t = templateOf(record, pass, instance);
+        const t = templateOf(record, pass, instance, input.firstShape ?? 0);
         if (t >= input.templates) {
           return;
         }

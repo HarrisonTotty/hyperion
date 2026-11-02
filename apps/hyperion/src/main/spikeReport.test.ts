@@ -148,6 +148,7 @@ describe("the spike report's check", () => {
         litClusters: false,
         farCascadeRate: 1,
         figureClusters: false,
+        hullClusters: false,
       },
       segments: [
         {
@@ -163,7 +164,11 @@ describe("the spike report's check", () => {
     } as const;
     const withGeometry = { ...smallReport(), geometry };
     // A report from before plan R14's T4 lacks its consumers' levers, which read as off.
-    const { figureClusters: _figureClusters, ...beforeT4 } = geometry.settings;
+    const {
+      figureClusters: _figureClusters,
+      hullClusters: _hullClusters,
+      ...beforeT4
+    } = geometry.settings;
     expect([
       readDescentSpikeReport(withGeometry),
       readDescentSpikeReport({ ...withGeometry, geometry: { ...geometry, segments: [{}] } }),

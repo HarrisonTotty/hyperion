@@ -51,6 +51,12 @@ export interface ClusterConsumer {
   readonly templates: ReadonlyArray<ClusterTemplate>;
   readonly clustersPerPage: number;
   /**
+   * The code of its first shape (`clusters/record.ts`' `CLUSTER_SHAPE_CODE`), from which its
+   * records' shapes pick their templates (`CullParams.firstShape`): 0 for the figures' blocks, 2
+   * for a mesh's.
+   */
+  readonly firstShape: number;
+  /**
    * Each template's clusters a page that may enter its bucket: its shape's clusters, or 0 for a
    * template the consumer never draws (a stride it never takes).
    */
@@ -68,6 +74,11 @@ export interface ClusterConsumer {
 export interface ConsumerCull {
   /** Its records, page by page. */
   readonly records: BufferHandle;
+  /**
+   * Its DAG records' parent groups' spheres, one a record (`ClusterLod`, R14.T4.b), or none for a
+   * consumer with no DAG record, whose records stand in for them, unread.
+   */
+  readonly lods?: BufferHandle;
   /** Its instance records, {@link ClusterConsumer.instanceBytes} each. */
   readonly instances: BufferHandle;
   readonly count: number;
@@ -149,6 +160,7 @@ export class ClusterConsumerPath {
         templateOffsets: buckets.templateOffsets,
         templateCapacities: buckets.capacities,
         viewAxis: frame.viewAxis,
+        firstShape: consumer.firstShape,
       },
       this.#params,
     );
@@ -173,6 +185,7 @@ export class ClusterConsumerPath {
           lists: buckets.lists,
           args: buckets.args,
           marks,
+          lods: frame.lods ?? frame.records,
         },
         sampled: {},
         storage: {},

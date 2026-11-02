@@ -98,7 +98,7 @@ import {
   TERRAIN_SHADOW_MATERIALS,
 } from "../terrain/terrainMaterial";
 import { TERRAIN_WIRE_MATERIALS } from "../terrain/terrainWire";
-import { WIREFRAME_MATERIALS } from "../wireframe/submit";
+import { HULL_CLUSTER_MATERIALS, WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
 import type {
   PointSplatSpec,
@@ -141,9 +141,11 @@ const TWIN_ENTRIES: ReadonlyArray<CatalogueEntry> = SUBGROUP_TWINS.map((spec) =>
  * sprites, with R10.T11's lines and occluder sphere over a body's surveyed terrain, each as
  * `WireframeRenderer` creates it.
  */
-const WIREFRAME_ENTRIES: ReadonlyArray<CatalogueEntry> = Object.values(WIREFRAME_MATERIALS).map(
-  (spec) => ({ kind: "material", spec }),
-);
+const WIREFRAME_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  ...Object.values(WIREFRAME_MATERIALS),
+  // The hulls' faces on the cluster path (plan R14, R14.T4.b).
+  ...Object.values(HULL_CLUSTER_MATERIALS),
+].map((spec) => ({ kind: "material", spec }));
 
 /**
  * R05.T12.b's per-planet atmosphere tables: transmittance and multiple scattering, since plan

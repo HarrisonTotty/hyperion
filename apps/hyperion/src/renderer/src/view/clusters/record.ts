@@ -13,7 +13,7 @@
  * | 0–11  | `centre`       | the bounding sphere's centre less the page's origin, m, `f32`          |
  * | 12–15 | `radius`       | its radius, m, `f32`, padded for the `f32` arithmetic that places it   |
  * | 16–23 | `errors`       | eight bytes read by the record's mode (below)                          |
- * | 24–27 | `templateRef`  | terrain: the block's or strip's place (below); a mesh: its first index |
+ * | 24–27 | `templateRef`  | terrain: the block's or strip's place; a mesh: its triangles (below)   |
  * | 28–31 | `flags`        | shape, mode, may-discard and material (below)                          |
  *
  * - **The strided mode** (terrain, from plan R14's T4 the smooth figure): the cluster is a block of
@@ -27,12 +27,16 @@
  *   hold (own, parent), metres, as two `f32`, and the cluster is drawn where own ≤ tolerance <
  *   parent, each projected at its group's sphere, so that a monotone DAG draws one consistent cut
  *   with no traversal (Karis 2021, SIGGRAPH Advances, "A Deep Dive into Nanite Virtualized
- *   Geometry"). Reserved: no consumer writes it in phase 1, and the cull takes every record as
- *   strided.
+ *   Geometry"). The record's sphere is its group's LOD sphere, which bounds the cluster too; the
+ *   parent group's is its {@link ClusterLod}, 16 B beside it. The hulls' occluder faces are its
+ *   first consumer (R14.T4.b), a one-level DAG of (0, +∞).
  * - **Terrain's template reference**: bits 0–7 the grid column x₀ and bits 8–15 the row y₀ of the
  *   block's or the strip's first vertex in the 65-grid, bits 16–17 a strip's edge (0 y = 0,
  *   1 x = 64, 2 y = 64, 3 x = 0, as `gpu/resources.ts` numbers them); a block's x₀ and y₀ are
  *   multiples of 8, a strip's run along its edge.
+ * - **A mesh's template reference** ({@link meshTemplateRef}): bits 0–23 the cluster's first
+ *   triangle in its page's triangles and bits 24–31 its triangle count, at most 128, as
+ *   `tools/meshbuild`'s pages write it (`page.rs`).
  * - **Flags**: bits 0–3 the shape ({@link CLUSTER_SHAPE_CODE}), bit 4 the mode (0 strided, 1 DAG
  *   cut), bit 5 whether its fragments may discard (terrain's interior clusters never do: plan R14,
  *   R14.T1.a), bit 6 whether a strided record's errors are measured, bits 8–15 the consumer's
@@ -58,7 +62,7 @@ export const CLUSTER_SHAPE_CODE: Readonly<Record<ClusterShape, number>> = {
   mesh: 2,
 };
 
-/** Bit 4 of the flags: the DAG-cut mode, reserved (see the module's remarks). */
+/** Bit 4 of the flags: the DAG-cut mode (see the module's remarks). */
 export const CLUSTER_FLAG_DAG = 1 << 4;
 
 /** Bit 5 of the flags: whether a cluster's fragments may discard. */
@@ -161,4 +165,51 @@ export function packClusterRecord(out: DataView, offsetBytes: number, record: Cl
   }
   out.setUint32(offsetBytes + 24, record.templateRef, true);
   out.setUint32(offsetBytes + 28, clusterFlags(record), true);
+}
+
+/** Bytes of one cluster's {@link ClusterLod}, as WGSL's `vec4f` lays it out. */
+export const CLUSTER_LOD_BYTES = 16;
+
+/**
+ * A DAG-cut record's parent group's LOD sphere (see the module's remarks), about the page's origin
+ * in its axes, as the record's own sphere is: the sphere its parent error is projected at.
+ */
+export interface ClusterLod {
+  readonly parentCentreM: Vec3;
+  readonly parentRadiusM: number;
+}
+
+/** Writes `lod` into `out` at `offsetBytes`, little-endian, each number narrowed once to `f32`. */
+export function packClusterLod(out: DataView, offsetBytes: number, lod: ClusterLod): void {
+  if (offsetBytes < 0 || offsetBytes + CLUSTER_LOD_BYTES > out.byteLength) {
+    throw new RangeError(
+      `a cluster's LOD sphere at ${String(offsetBytes)} B lies outside ${String(out.byteLength)} B`,
+    );
+  }
+  out.setFloat32(offsetBytes, lod.parentCentreM.x, true);
+  out.setFloat32(offsetBytes + 4, lod.parentCentreM.y, true);
+  out.setFloat32(offsetBytes + 8, lod.parentCentreM.z, true);
+  out.setFloat32(offsetBytes + 12, lod.parentRadiusM, true);
+}
+
+/** The most triangles a mesh cluster holds: 7 bits of the visibility ID (plan R14, Design note 2). */
+export const MESH_CLUSTER_TRIANGLES = 128;
+
+/**
+ * A mesh cluster's template reference (see the module's remarks): its first triangle in its
+ * page's triangles and its triangle count.
+ *
+ * @throws RangeError for a first triangle past 24 bits, or a count outside 1 to
+ *   {@link MESH_CLUSTER_TRIANGLES}.
+ */
+export function meshTemplateRef(firstTriangle: number, triangles: number): number {
+  if (!Number.isInteger(firstTriangle) || firstTriangle < 0 || firstTriangle > 0xff_ffff) {
+    throw new RangeError(`a mesh cluster's first triangle ${String(firstTriangle)} is not 24 bits`);
+  }
+  if (!Number.isInteger(triangles) || triangles < 1 || triangles > MESH_CLUSTER_TRIANGLES) {
+    throw new RangeError(
+      `a mesh cluster of ${String(triangles)} triangles is not 1 to ${String(MESH_CLUSTER_TRIANGLES)}`,
+    );
+  }
+  return (firstTriangle | (triangles << 24)) >>> 0;
 }

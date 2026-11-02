@@ -122,6 +122,12 @@ export interface GeometrySettings {
    * patch mesh. Both settings take it.
    */
   readonly figureClusters: boolean;
+  /**
+   * R14.T4.b: the hulls' occluder faces, in the wireframe and as the silhouette over the image,
+   * drawn through the cluster path as one-level DAG-cut pages, culled to the view's frustum;
+   * `false` draws each hull by its instanced draw of its faces. Both settings take it.
+   */
+  readonly hullClusters: boolean;
 }
 
 /**
@@ -141,6 +147,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   litClusters: false,
   farCascadeRate: 1,
   figureClusters: false,
+  hullClusters: false,
 };
 
 /**
@@ -308,6 +315,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       litClusters: true,
       farCascadeRate: 4,
       figureClusters: true,
+      hullClusters: true,
     },
     decoration: true,
     scatterDensity: 1,
@@ -348,6 +356,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       litClusters: true,
       farCascadeRate: 4,
       figureClusters: true,
+      hullClusters: true,
     },
     decoration: false,
     scatterDensity: 0,

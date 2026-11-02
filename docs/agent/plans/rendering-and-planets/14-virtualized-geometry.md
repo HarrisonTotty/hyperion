@@ -1505,6 +1505,7 @@ wireframe draw needs only T1.
   (own ≤ τ < parent) over random monotone DAGs selects a consistent cut. _Acceptance:_ test-render's
   hull and hidden-line frames byte-identical, against a base whose `occluder.wgsl` position is first
   made `@invariant` in a commit of its own (Design note 5).
+  - _Built_ (`r14-t4-consumers`): records at the end of Risks.
 - **R14.T4.c The wireframe's terrain on the path.** Size S. The wireframe's depth-and-contour pass
   through the buckets at stride 1, with the interior split (no discard) and the cluster cull (Design
   note 13). _Tests:_ contours at stride 1 everywhere, a twin of `#writeWire`'s. _Acceptance:_ the
@@ -2015,3 +2016,25 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - Timed passes: one more a frame with mesh bodies (`body cluster cull`).
 - **fix-test-render-part7** (2026-11-02): R10.T16's frame group (`smoke/terrainFrame.ts`) runs in
   test-render's part 15, alone (`--part=15`); R10's other terrain groups and new ones stay in part 7.
+- **R14.T4.b** (`r14-t4-consumers`):
+  - The DAG cut is live in `clusterCull.wgsl` and its twin (`cull.ts`' `dagCutDrawn`): drawn where
+    own ≤ τ max(|S| − ρ, 0) and parent > the same at the parent group's sphere, a camera pass's τ
+    now `CameraCullPass.toleranceRad` (was `toleranceM`), a cascade's still metres. `lods`
+    (binding 8, `ClusterLod`, 16 B a record) beside the records; a consumer with no DAG record
+    binds its records there, unread. A record of negative radius is no cluster.
+  - `CullParams` grows to 160 B with `firstShape` (`shapes.x`): a template is (shape − first) × 4 +
+    log₂ s, so a mesh consumer's one template is 0; `ClusterConsumer.firstShape`,
+    `ConsumerCull.lods`. Camera passes take stride 1 in the kernel whatever their cap.
+  - `record.ts`: `meshTemplateRef` (first triangle bits 0–23, count 24–31, as `tools/meshbuild`
+    writes), `ClusterLod`, `packClusterLod`, `MESH_CLUSTER_TRIANGLES`; the module doc corrected.
+    `templates.ts`: `meshTemplate()`, `meshClusterMesh()` (384 vertices, (corner, triangle, 0)).
+  - The hulls: `wireframe/hullClusters.ts` (`hullClusterFrame`, a page a hull of at most 8 clusters,
+    a one-level DAG of (0, +∞)); `WireframeRenderer` culls them in `frame()`, one camera pass at τ
+    0 (the finest cut: `meshTolerancePx` is T5's), and draws one bucket draw in the first hull
+    draw's place with `HULL_CLUSTER_MATERIALS` (`occluderCluster.wgsl`); hulls of mixed fills, or
+    past a page, draw instanced. `WireframeEngine` gains `dispatch`, `releaseBuffer`,
+    `createComputeAsync`, `releaseCompute`; `setGeometry`, `clustersReady`, `lastHullClusters`.
+  - `GeometrySettings.hullClusters`, on both settings, beside `figureClusters`;
+    `--geometry hullClusters=`; results files without it read `false`. The drawer sets it on its
+    wireframe renderer each frame.
+  - Timed passes: one more a frame with a hull drawn (`hull cluster cull`).

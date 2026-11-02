@@ -10,17 +10,18 @@ import {
 describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
   it("reads each field's values and writes them back in the fields' order", () => {
     const override = parseGeometryOverride(
-      "overlayDepth=scene-depth,figureClusters=false,casterStrideCap=4,clusterPath=true,casterDepthCull=false",
+      "overlayDepth=scene-depth,hullClusters=true,figureClusters=false,casterStrideCap=4,clusterPath=true,casterDepthCull=false",
     );
     expect([override, geometryText(override), geometryText({})]).toEqual([
       {
         overlayDepth: "scene-depth",
+        hullClusters: true,
         figureClusters: false,
         casterStrideCap: 4,
         clusterPath: true,
         casterDepthCull: false,
       },
-      "clusterPath=true,casterDepthCull=false,casterStrideCap=4,overlayDepth=scene-depth,figureClusters=false",
+      "clusterPath=true,casterDepthCull=false,casterStrideCap=4,overlayDepth=scene-depth,figureClusters=false,hullClusters=true",
       "",
     ]);
   });
