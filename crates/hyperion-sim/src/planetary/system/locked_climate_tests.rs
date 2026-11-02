@@ -12,14 +12,14 @@ use crate::substance::phase::ice_ih_melting_temperature;
 use crate::units::{Metres, Pascals};
 
 /// The sample systems the research's pilot found in the deck's domain, by their index in the
-/// sample: s243 wholly, s364 and s187 in part (at their flux and pressure tapers). The pilot's
-/// s363, 01ffcb2ba0010000, is s364 from generator version 26, whose sample places one more system
-/// before it.
-const DOMAIN_SYSTEMS: [usize; 3] = [243, 364, 187];
+/// sample: s244 wholly, s365 and s188 in part (at their flux and pressure tapers). The pilot's
+/// s243, s363 and s187 (01ffeb2d5fff0001, 01ffcb2ba0010000 and 02002b2c20020000) are s244, s365
+/// and s188 from generator version 26, whose sample places one more system before each.
+const DOMAIN_SYSTEMS: [usize; 3] = [244, 365, 188];
 
 /// The sample systems whose bodies the deck moves (the census, 2026-10-30): the pilot's three, and
 /// s59 and s102, whose published passes list no liquid water but whose earlier passes did.
-const MOVED_SYSTEMS: [usize; 5] = [59, 102, 187, 243, 364];
+const MOVED_SYSTEMS: [usize; 5] = [59, 102, 188, 244, 365];
 
 /// FNV-1a 64 of `text`'s bytes: a record's digest, so that a census of some 6,000 bodies keeps no
 /// record.
@@ -192,7 +192,7 @@ fn moved_between(a: &[CensusBody], b: &[CensusBody]) -> Vec<String> {
 
 /// The systems the deck moves, generated twice under the deck alone, give the same bits twice, and
 /// against the version's rules only their locked worlds in the deck's domain move: the pilot's
-/// three (s187, s243, s364) among them.
+/// three (s188, s244, s365) among them.
 #[test]
 fn under_every_26_hold_the_moved_systems_repeat_and_only_their_decks_move() {
     let held = with_locked_climate(LockedClimateRules::Held, || {
@@ -235,7 +235,7 @@ fn under_every_26_hold_the_moved_systems_repeat_and_only_their_decks_move() {
 /// - **No locked world's published mean is non-finite**, asserted, and the walk under the deck
 ///   alone gives the same bits twice.
 /// - Printed: the locked worlds and those in the domain, counted; each domain body under both, with
-///   its regime; the three of the research's pilot (s243, s364, s187); the golden systems' bodies
+///   its regime; the three of the research's pilot (s244, s365, s188); the golden systems' bodies
 ///   that move, whose goldens 26's bump re-blesses; each walk's time.
 #[test]
 #[ignore = "a measurement for the 26 bless, run by name: the 400 sample systems, walked twice"]

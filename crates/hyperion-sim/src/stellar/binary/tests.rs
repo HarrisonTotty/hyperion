@@ -4265,43 +4265,19 @@ fn a_pinned_merger_product_leaves_its_main_sequence_at_the_primarys_end() {
 /// The pair of record 822C72E00000008C's primary in the universe LOOK72 (seed
 /// `0xa49f_649b_ef43_4b20`, the full potential), as `SystemStars` runs it: its input, its timeline
 /// and the primary's model.
-///
-/// From generator version 26 P09.T35's carve-out gives its system to a catalogue class, so its
-/// grid ID resolves to no system; the record's parts are pinned to the bit as the grid placed it
-/// before the carve-out.
 fn look72_case_a_pair() -> (
     BinaryInput,
     BinaryTimeline,
     crate::stellar::system::StarModel,
 ) {
-    use crate::coords::{GalacticPosition, LyCell};
-    use crate::galaxy::placement::{SystemOrigin, SystemRecord};
-    use crate::galaxy::{Galaxy, Population};
+    use crate::galaxy::Galaxy;
+    use crate::galaxy::placement::resolve;
     use crate::stellar::multiplicity::{HierarchyNode, StarIndex};
     use crate::stellar::system::SystemStars;
 
     let galaxy = Galaxy::new(crate::Seed::new(0xa49f_649b_ef43_4b20)).with_full_potential();
-    let record = SystemRecord::from_parts(
-        "822c72e00000008c".parse().expect("a system ID"),
-        GalacticPosition::new(
-            LyCell::new([5684, -6712, 5]),
-            [
-                8_882_561_063_601_007.0,
-                780_258_634_554_044.9,
-                601_641_458_978_823.0,
-            ],
-        )
-        .expect("an offset inside its cell"),
-        SystemOrigin::Grid(
-            galaxy
-                .fields()
-                .component_id(0)
-                .expect("one component at least"),
-        ),
-        Population::YoungThinDisc,
-        SolarMasses::new(f64::from_bits(0x4024_f8b8_92a9_660b)),
-        Years::new(f64::from_bits(0x4177_7a7e_4e31_ed3c)),
-    );
+    let id: crate::id::SystemId = "822c72e00000008c".parse().expect("a system ID");
+    let record = resolve(&galaxy, id).expect("a grid system of LOOK72");
     let stars = SystemStars::generate(&galaxy, &record);
     let pair = stars
         .pairs()

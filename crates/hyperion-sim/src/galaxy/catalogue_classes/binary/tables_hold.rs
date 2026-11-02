@@ -587,20 +587,20 @@ const KS_LEVEL: f64 = 0.01;
 /// initial masses pass at 1% (p 0.076 and 0.058) and are no longer pinned; at 26, on its refit,
 /// the fast hosts' recurrence misses too (p 0.0071).
 const AWD_MISSES: [(AwdSide, usize, f64); 14] = [
-    (AwdSide::Fast, 0, 0.047_487_747_353_216_12),
-    (AwdSide::Fast, 1, 0.060_700_413_927_799_41),
-    (AwdSide::Fast, 2, 0.061_477_205_104_767_95),
-    (AwdSide::Fast, 3, 0.092_113_548_915_256_36),
-    (AwdSide::Fast, 4, 0.085_328_966_444_843_83),
-    (AwdSide::Fast, 7, 0.103_944_387_409_516_84),
-    (AwdSide::Slow, 0, 0.020_602_322_682_238_716),
-    (AwdSide::Slow, 1, 0.067_636_954_419_113_55),
-    (AwdSide::Slow, 2, 0.059_667_907_771_904_06),
-    (AwdSide::Slow, 3, 0.197_036_526_603_613_57),
-    (AwdSide::Slow, 4, 0.196_110_000_178_215_06),
-    (AwdSide::Slow, 5, 0.056_166_558_779_874_004),
-    (AwdSide::Slow, 6, 0.104_820_227_702_112_86),
-    (AwdSide::Slow, 7, 0.060_106_189_232_048_36),
+    (AwdSide::Fast, 0, 0.047_192_458_828_791_64),
+    (AwdSide::Fast, 1, 0.060_680_458_685_383_7),
+    (AwdSide::Fast, 2, 0.059_668_218_998_822_35),
+    (AwdSide::Fast, 3, 0.092_943_177_241_405_44),
+    (AwdSide::Fast, 4, 0.086_964_717_910_108_12),
+    (AwdSide::Fast, 7, 0.103_920_094_070_923_84),
+    (AwdSide::Slow, 0, 0.020_120_592_476_078_114),
+    (AwdSide::Slow, 1, 0.068_597_007_180_667_75),
+    (AwdSide::Slow, 2, 0.059_496_213_579_166_96),
+    (AwdSide::Slow, 3, 0.197_269_550_287_091_7),
+    (AwdSide::Slow, 4, 0.197_209_755_514_742_9),
+    (AwdSide::Slow, 5, 0.055_799_394_573_736_03),
+    (AwdSide::Slow, 6, 0.105_127_356_778_519_03),
+    (AwdSide::Slow, 7, 0.059_527_042_234_186_256),
 ];
 
 /// The fitted X-ray binaries at Milky Way parameters (slow): over ten Milky Way seeds, the
@@ -807,4 +807,4 @@ fn the_x_ray_binary_sampler_against_the_engine() {
 /// mark's place in [`XrbMark`]'s order and its distance, as measured to a millionth. The two
 /// unconditional laws' 17 ranks miss the black holes' heaviest progenitors (at generator version
 /// 25, on its refit, a tail of long periods too, which passes at 1% at 26: p 0.053).
-const XRB_MISSES: [(usize, f64); 1] = [(18, 0.111_116_051_873_198_84)];
+const XRB_MISSES: [(usize, f64); 1] = [(18, 0.105_409_999_999_999_95)];

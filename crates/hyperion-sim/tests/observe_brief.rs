@@ -15,11 +15,11 @@
 use std::sync::OnceLock;
 
 use hyperion_sim::Seed;
-use hyperion_sim::coords::{GalacticDisplacement, GalacticPosition, LyCell};
-use hyperion_sim::galaxy::placement::{CellKey, SystemOrigin, SystemRecord, generate_cell};
+use hyperion_sim::coords::{GalacticDisplacement, GalacticPosition};
+use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell, resolve};
 use hyperion_sim::galaxy::query::{SystemHit, position_at};
-use hyperion_sim::galaxy::{Galaxy, Population};
-use hyperion_sim::id::Layer;
+use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::math;
 use hyperion_sim::observe::{Drift, Observer, Trajectory, observe_hit, summary_observed};
 use hyperion_sim::stellar::binary::{Component, Segment, SegmentKind};
@@ -29,7 +29,7 @@ use hyperion_sim::stellar::system::{StarSummary, StellarBrief, SystemStars};
 use hyperion_sim::stellar::{ObjectKind, Phase};
 use hyperion_sim::time::{ClockWindow, Span, UniverseTime};
 use hyperion_sim::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
-use hyperion_sim::units::{LightYears, SolarMasses, Years};
+use hyperion_sim::units::{LightYears, Years};
 use hyperion_testkit::float::bits;
 
 /// The seed of look-72's universe, LOOK72.
@@ -68,48 +68,10 @@ fn single_star_brief(record: &SystemRecord, t: UniverseTime) -> Option<StellarBr
     SystemStars::generate_in(galaxy(), record, MultiplicityContext::ForcedSingle).brief_at(t)
 }
 
-/// `id`'s record in LOOK72, [`STRIPPED`]'s or [`CASE_A`]'s.
-///
-/// From generator version 26 P09.T35's carve-out gives both systems to catalogue classes, so their
-/// grid IDs resolve to no system. Each record is the one look-72 read, its parts pinned to the bit
-/// as the grid placed it before the carve-out, of LOOK72's first component.
+/// `id`'s record in LOOK72.
 fn record_of(id: &str) -> SystemRecord {
-    let (cell, offset_m, mass_bits, age_bits) = match id {
-        STRIPPED => (
-            [1837, -8724, 67],
-            [
-                8_550_851_464_885_654.0,
-                7_316_405_726_483_607.0,
-                5_457_894_790_300_242.0,
-            ],
-            0x4025_ed0c_7e78_8c20,
-            0x4175_acb4_96ac_f351,
-        ),
-        CASE_A => (
-            [5684, -6712, 5],
-            [
-                8_882_561_063_601_007.0,
-                780_258_634_554_044.9,
-                601_641_458_978_823.0,
-            ],
-            0x4024_f8b8_92a9_660b,
-            0x4177_7a7e_4e31_ed3c,
-        ),
-        _ => panic!("{id}: no pinned record"),
-    };
-    SystemRecord::from_parts(
-        id.parse().expect("a system ID"),
-        GalacticPosition::new(LyCell::new(cell), offset_m).expect("an offset inside its cell"),
-        SystemOrigin::Grid(
-            galaxy()
-                .fields()
-                .component_id(0)
-                .expect("one component at least"),
-        ),
-        Population::YoungThinDisc,
-        SolarMasses::new(f64::from_bits(mass_bits)),
-        Years::new(f64::from_bits(age_bits)),
-    )
+    let id: SystemId = id.parse().expect("a system ID");
+    resolve(galaxy(), id).expect("a grid system of LOOK72")
 }
 
 /// What `observer` reads of `record`'s system, whose stars are `stars`, at one emitted time: the

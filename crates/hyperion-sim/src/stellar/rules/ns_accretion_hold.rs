@@ -345,12 +345,12 @@ fn figures(census: &Census) -> CompactFigures {
 /// (2026-11-01, at generator version 25, and again at 26).
 const CENSUS_FIGURES: [CompactFigures; 2] = [
     CompactFigures {
-        members: 138,
+        members: 136,
         black_holes: 80,
         grown: 61,
         grown_by_dwarfs: 5,
         median_black_hole: 2.734_991_054_000_392_6,
-        neutron_stars: 56,
+        neutron_stars: 54,
         most_gained: 0.787_410_651_917_862_5,
     },
     CompactFigures {
