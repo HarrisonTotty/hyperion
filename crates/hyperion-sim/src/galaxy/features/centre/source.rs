@@ -63,7 +63,7 @@
 //!
 //! - **The recent entries' bound.** The centre's list's recent classes (P09.T36.b) lie inside the
 //!   centre's reach at the epoch and move on straight lines below light's speed (module
-//!   documentation of [`recent`](super::recent)), so a sphere farther from the black hole than
+//!   documentation of `recent`), so a sphere farther from the black hole than
 //!   the reach plus light's travel over |t| holds none, and the list is not read.
 //! - **The victims' bound.** A victim moves at most at the escape speed from the black hole alone,
 //!   `√(2 G M• ÷ r)`, under every cell's bound above, so before its disruption it lies within its
