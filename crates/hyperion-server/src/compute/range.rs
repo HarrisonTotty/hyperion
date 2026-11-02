@@ -45,7 +45,7 @@
 //! evicted, and the number of workers change only how long the answer takes.
 
 use std::cmp::Reverse;
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
@@ -78,6 +78,11 @@ const AHEAD_FEATURE_CELLS: usize = 2;
 /// a grid cell near the Sun takes (1,732 in 7.6 ms, lane measurements of 2026-10-30), where a
 /// round of jobs costs some tens of microseconds; fewer would cost more than they save.
 const AHEAD_GRID_CELLS: usize = 64;
+
+/// The most parts a feature cell is read ahead in ([`FeatureMemberSource::read_ahead_part`]): four.
+/// Four of the Sun-like 50 ly query's twenty feature cells hold nearly all the features whose
+/// lists it reads, some 55 ms each under every 27 hold, which kept their jobs the query's longest.
+const FEATURE_CELL_PARTS: u32 = 4;
 
 /// The grid's cell jobs for each worker: two, smaller than a feature cell's, to fill the workers
 /// the feature cells leave idle. Two to six took the Sun-like 50 ly query the same time cold, 4.6
@@ -328,8 +333,9 @@ enum Asked<T, F> {
     Lacking(Box<Lacking<F>>),
 }
 
-/// One job's feature cells, each with the last process the query reads it through.
-type FeatureShare = Vec<(FeatureCell, FeatureProcess)>;
+/// One job's feature cells, each with the last process the query reads it through and the part of
+/// its features the job reads ([`FeatureMemberSource::read_ahead_part`]).
+type FeatureShare = Vec<((FeatureCell, FeatureProcess), (u32, NonZeroU32))>;
 
 /// One job's share of the cells the query's sources read: its feature cells and its class cells.
 #[derive(Debug, Default)]
@@ -534,8 +540,13 @@ where
         let classes = lacking_class_cells(caches, served, &plan);
         // A feature cell read through more processes costs more, a whole one near the Sun some
         // 0.65 ms against 0.1 ms through the clusters alone, so they are dealt out from the
-        // fullest.
+        // fullest, each in parts, since a few hold nearly all the features whose lists are read.
         features.sort_by_key(|&(cell, last)| (Reverse(last.index()), cell));
+        let parts = feature_parts(workers);
+        let features: FeatureShare = features
+            .into_iter()
+            .flat_map(|cell| (0..parts.get()).map(move |part| (cell, (part, parts))))
+            .collect();
         let mut features = shares(workers.get(), &features).into_iter();
         let mut classes = shares(workers.get(), &classes).into_iter();
         let source_cells = std::iter::from_fn(|| match (features.next(), classes.next()) {
@@ -576,6 +587,13 @@ where
         let result = plan.finish(galaxy, &mut caches.cells.handle(key), sources, &parts, hits);
         answer(galaxy, result, reads)
     })
+}
+
+/// The parts each feature cell is read ahead in on a pool of `workers` workers: as many as the
+/// workers, to [`FEATURE_CELL_PARTS`].
+fn feature_parts(workers: NonZeroUsize) -> NonZeroU32 {
+    let workers = u32::try_from(workers.get()).unwrap_or(u32::MAX);
+    NonZeroU32::new(workers.min(FEATURE_CELL_PARTS)).expect("a pool has a worker")
 }
 
 /// The grid cells `plan` walks that `cells` lacks, in walk order, sampled ([`sampled_lacking`]):
@@ -694,8 +712,8 @@ async fn ahead(
         let job = move |_: &CancelToken| {
             let (cells, interiors) = (caches.features.handle(key), caches.interiors.handle(key));
             let source = FeatureMemberSource::new(&cells, &interiors);
-            for cell in share.features {
-                source.read_ahead(&served.galaxy, &served.query, cell);
+            for (cell, part) in share.features {
+                source.read_ahead_part(&served.galaxy, &served.query, cell, part);
             }
             caches
                 .classes

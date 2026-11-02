@@ -324,8 +324,32 @@ impl<'a> FeatureMemberSource<'a> {
         &self,
         galaxy: &Galaxy,
         query: &RangeQuery,
-        (cell, last): (FeatureCell, FeatureProcess),
+        cell: (FeatureCell, FeatureProcess),
     ) {
+        self.read_ahead_part(galaxy, query, cell, (0, NonZeroU32::MIN));
+    }
+
+    /// [`read_ahead`](Self::read_ahead) of part `part` of `parts` of the features the lookups
+    /// find in `cell` read through `last`: every `parts`th of them in the catalogue's order from
+    /// the `part`th, so that the parts between them read each feature once, and a server shares a
+    /// cell full of features among several threads (P09.T37's bench: four of the Sun-like 50 ly
+    /// query's twenty feature cells hold nearly all of its 600 features' lists, some 55 ms each).
+    /// Each part reads the cell itself, through the caches.
+    ///
+    /// # Panics
+    ///
+    /// If `part` is not below `parts`.
+    pub fn read_ahead_part(
+        &self,
+        galaxy: &Galaxy,
+        query: &RangeQuery,
+        (cell, last): (FeatureCell, FeatureProcess),
+        (part, parts): (u32, NonZeroU32),
+    ) {
+        assert!(
+            part < parts.get(),
+            "part {part} of {parts} of a cell's features"
+        );
         let sphere = widest_sphere(galaxy, query);
         let (centre, radius) = (sphere.centre(), lookup_radius(&sphere));
         let mut found = Vec::new();
@@ -337,7 +361,9 @@ impl<'a> FeatureMemberSource<'a> {
             &mut found,
         );
         let lists = lists_read(galaxy);
-        for feature in &found {
+        let first = usize::try_from(part).expect("a part below a u32 count fits in usize");
+        let step = usize::try_from(parts.get()).expect("a u32 count of parts fits in usize");
+        for feature in found.iter().skip(first).step_by(step) {
             let touches = self
                 .interiors
                 .grid_reach(galaxy, feature)
@@ -1229,8 +1255,9 @@ mod tests {
     /// [`the_member_source_finds_and_counts_what_a_scan_finds`]: under P09.T36's new arm, reading a
     /// query's feature cells ahead keeps, through the interior cache, the feature-level list of
     /// every feature its lookups find, the list [`FeatureLevelList::listed_of`] builds, so that the
-    /// census and the hits read every list held (P09.T37); and the census, bit for bit, and the
-    /// hits are those of a query read through nothing.
+    /// census and the hits read every list held (P09.T37), and reading it in parts reads each
+    /// feature once between them; and the census, bit for bit, and the hits are those of a query
+    /// read through nothing.
     fn reading_a_cell_ahead_keeps_the_list_of_every_feature_it_finds() {
         let rules = crate::galaxy::rules::GalaxyRules {
             feature_classes: FeatureClassesRules::Listed,
@@ -1269,6 +1296,34 @@ mod tests {
             listing > 0,
             "some of {} features list their recent classes",
             found.len()
+        );
+        // Read in three parts, the last first, each cell's features are read once between them:
+        // the same lists are kept, and one part alone keeps fewer.
+        let parts = NonZeroU32::new(3).unwrap();
+        let (parted, alone) = (KeepInteriors::new(galaxy), KeepInteriors::new(galaxy));
+        for cell in FeatureMemberSource::feature_cells(galaxy, &query) {
+            for part in (0..parts.get()).rev() {
+                FeatureMemberSource::new(&NoFeatureCache, &parted).read_ahead_part(
+                    galaxy,
+                    &query,
+                    cell,
+                    (part, parts),
+                );
+            }
+            FeatureMemberSource::new(&NoFeatureCache, &alone).read_ahead_part(
+                galaxy,
+                &query,
+                cell,
+                (1, parts),
+            );
+        }
+        let keys = |interiors: &KeepInteriors<'_>| -> Vec<FeatureId> {
+            interiors.lists.lock().unwrap().keys().copied().collect()
+        };
+        assert_eq!(keys(&parted), kept.keys().copied().collect::<Vec<_>>());
+        assert!(
+            keys(&alone).len() < kept.len(),
+            "a part reads some features"
         );
         let answer = |source: &FeatureMemberSource<'_>| {
             let census = source.expected_in_sphere(galaxy, &sphere);
