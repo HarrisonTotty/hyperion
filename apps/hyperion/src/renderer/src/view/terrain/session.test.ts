@@ -635,6 +635,27 @@ describe("the terrain session's coverage masks (R10.T16.a)", () => {
     ]).toEqual([null, false, [0, 255, 255, 0]]);
   });
 
+  it("says a body's mask is whole only once every cell is surveyed, by blocks and the store, and none for a body not wanted (R07.T8.h)", async () => {
+    const h = await harness();
+    h.session.noteView(PRIMARY, viewAt(5e6));
+    h.session.step();
+    const { id } = latestFieldAsk(h.socket());
+    const bulk = sendBlocks(h);
+    const cells = 6 * 4 ** 5;
+    answerBlock(workerAt(h, 0), 0, blockChange(5, [0, cells - 1]));
+    const lastMissing = h.session.coverageWhole(MOON);
+    h.socket().serverResponds(
+      id,
+      readyField(moonLikeHeader(MOON), 1, fieldCover([cells - 1, cells, 30]), bulk),
+    );
+    await settle();
+    expect([lastMissing, h.session.coverageWhole(MOON), h.session.coverageWhole(PLANET)]).toEqual([
+      false,
+      true,
+      false,
+    ]);
+  });
+
   it("adds the store's answered cells to the cells the blocks surveyed", async () => {
     const h = await harness();
     h.session.noteView(PRIMARY, viewAt(5e6));

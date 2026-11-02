@@ -548,7 +548,7 @@ interface LimbView {
    * The limb angle along the line at y, px, as `limb_angle` takes it at a point x of it, rad,
    * positive outside: the angle of S r(x) from the axis, less λ.
    */
-  readonly angleAlong: (yPx: number) => (xPx: number) => number;
+  readonly angleRadAlong: (yPx: number) => (xPx: number) => number;
 }
 
 /**
@@ -585,7 +585,7 @@ function limbViewOf(record: DiscRecord, frame: DiscLimbFrame): LimbView {
     stepYRad: 2 / (heightPx * p11),
     lineStep,
     lineStart,
-    angleAlong: (yPx) => {
+    angleRadAlong: (yPx) => {
       // Componentwise, with no vector made: the trim takes thousands a frame.
       const { x: ax, y: ay, z: az } = lineStart(yPx);
       const { x: bx, y: by, z: bz } = lineStep;
@@ -619,20 +619,23 @@ const READ_MARGIN_PX = LIMB_SPAN_MARGIN_PX;
  * (x + 1, y), (x, y + 1) and (x + 1, y + 1): their mean over {@link OUTSIDE_PX} + m of their
  * gradient outside the limb, or every one over {@link LIMB_OVERLAP_PX} + m of it inside.
  */
-function limbUnread(c00: number, c10: number, c01: number, c11: number): boolean {
-  const g = Math.hypot((c10 + c11 - c00 - c01) / 2, (c01 + c11 - c00 - c10) / 2);
-  if (!(g > 0)) {
+function limbUnread(c00Rad: number, c10Rad: number, c01Rad: number, c11Rad: number): boolean {
+  const gRadPerPx = Math.hypot(
+    (c10Rad + c11Rad - c00Rad - c01Rad) / 2,
+    (c01Rad + c11Rad - c00Rad - c10Rad) / 2,
+  );
+  if (!(gRadPerPx > 0)) {
     return false;
   }
-  const inside = -(LIMB_OVERLAP_PX + READ_MARGIN_PX) * g;
+  const insideRad = -(LIMB_OVERLAP_PX + READ_MARGIN_PX) * gRadPerPx;
   return (
-    (c00 + c10 + c01 + c11) / 4 > (OUTSIDE_PX + READ_MARGIN_PX) * g ||
-    (c00 < inside && c10 < inside && c01 < inside && c11 < inside)
+    (c00Rad + c10Rad + c01Rad + c11Rad) / 4 > (OUTSIDE_PX + READ_MARGIN_PX) * gRadPerPx ||
+    (c00Rad < insideRad && c10Rad < insideRad && c01Rad < insideRad && c11Rad < insideRad)
   );
 }
 
 /**
- * Trims each of a row's two limb spans (`spans`' [s₀, e₀) and [s₁, e₁), from row `top`) at both
+ * Trims each of a row's two limb spans (`spans`' [s₀, e₀) and [s₁, e₁), from row `topPx`) at both
  * ends of the pixels the limb draw surely never reads ({@link limbUnread}), in place, and gives the
  * pixels left (R07.T8.h).
  *
@@ -645,11 +648,11 @@ function limbUnread(c00: number, c10: number, c01: number, c11: number): boolean
  * pixel it may read, which leaves one run and the shader's lookup as it was. A row whose two spans
  * met keeps the pixels within it the draw does not read, at the top and bottom of the limb.
  */
-function trimLimbSpans(spans: Int32Array, rows: number, top: number, view: LimbView): number {
+function trimLimbSpans(spans: Int32Array, rows: number, topPx: number, view: LimbView): number {
   let pixels = 0;
-  let upper = view.angleAlong(top);
+  let upper = view.angleRadAlong(topPx);
   for (let row = 0; row < rows; row += 1) {
-    const lower = view.angleAlong(top + row + 1);
+    const lower = view.angleRadAlong(topPx + row + 1);
     for (const span of [0, 1]) {
       const at = row * 4 + 2 * span;
       let from = spans[at] ?? 0;

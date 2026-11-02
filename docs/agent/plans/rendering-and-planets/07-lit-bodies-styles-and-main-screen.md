@@ -9811,7 +9811,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - The spans hold 2.1 to 2.6 times the limb draw's pixels in the unit tests' cases. Most of the
       rest lie outside the limb, where a cell shades nothing. One workgroup takes one pixel, so 48
       of its 64 invocations idle, as in T8.d. Packing was not needed for the bound. _Since
-      R07.T8.g, a workgroup takes four 4 × 4 pixels._
+      R07.T8.g, a workgroup takes four 4 × 4 pixels._ _Since R07.T8.h, the spans are trimmed to 1.13–1.17
+      times the drawn pixels._
   - **T8.d's tests that the ruling supersedes.** Four changed, each because T8.e or T8.f takes what
     the test said it left:
     - `discCells.test.ts`: a class map's disc is now taken;
@@ -9827,6 +9828,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       from one call site in each of the four entry points (`inlinedCopies`); the spans holding every
       pixel of the limb draw (in `f64`) for a 40 px, a 300 px clipped, a 160 px f = 0.2 tilted and a
       view-filling 400 km Earth, in order and within 3 times; the limb's jobs, row 51 and span rows.
+      _Since R07.T8.h, within 1.25 times (1.13–1.17)._
     - `renderer.test.ts`: a set each in one view, and `TIMING_FRAMES_IN_FLIGHT` with three views of
       two sets each.
   - **G11 on the GPU** (`smoke/cellPass.ts`, the group "R07.T8.e–f the cell pass for every
@@ -10106,20 +10108,22 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   cost, 1080p high.
 - **R07.T8.h, as built** (2026-11-01, perf-disc-cells).
   - `limbSpans` trims each span's ends by `limbUnread`, the limb draw's test in f64 with a 0.1 px
-    margin (`READ_MARGIN_PX`): 1.13–1.17 times the drawn pixels, from 1.92–2.13. A row whose two
-    spans met keeps its unread middle. The face band is not trimmed (9% of its jobs; 0.33 ms a
-    frame on the CPU for about four workgroups).
+    margin (`READ_MARGIN_PX`): 1.13–1.17 times the drawn pixels, re-measured from 1.92–2.13.
+  - Still unread but shaded: a row's middle where its two spans met; the face band (trimming it
+    saves 9% of its jobs for 0.33 ms of CPU a frame); a small disc's rectangle corners (T8.d's
+    index); a partial mask's surveyed pixels.
   - New: `discCellJobs`' `discarded` (record indices), `MeshBodyCoverage.whole`,
     `FrameTerrain.surveyedWhole`, `FrameTerrainSource.coverageWhole`,
     `TerrainSession.coverageWhole` and `CoverageMask.whole`.
-  - The kernel's lever (a cell none of whose rays meets the spheroid skips its shades) has nothing
-    to skip: no cell's samples miss, and the cells with no samples (62%) shade nothing already.
-- **R07.T8.i, as built** (2026-11-02, perf-disc-cells).
+  - No kernel lever: `cell_samples` places points only inside the limb. The cells with none, 62% of
+    the pass's cells on the inspection's orbit window at high, already shade nothing.
+- **R07.T8.i, as built** (2026-11-02, perf-disc-cells; a lean, pending the owner's ruling).
+  - Built because the pass stayed at 17% of SwiftShader's GPU time after T8.h (the brief's 8%).
   - `PhotorealSettings.floorLimbSamples` (2 on both settings; 4 is the way back) is a large disc's
     limb cells while `BudgetedScale.atLowestStep` (the floor's scale at its bounds' min) holds.
     It reaches `planLitBodies` as `BodyFrameOptions.limbSamples` through `floorLowest` on
-    `ViewFrameInputs`, `PhotorealFrameInputs` and `PhotorealFrame`; `discSamples` takes it.
-  - The setting is a lean (lean, 2026-11-02). The low setting never steps its floor, so it never
-    takes the lean.
-  - 1/3 stop is counted as `compareCaptures.mjs` counts it, with one 8-bit code at black allowed.
-    By 1/3 stop alone it holds on 99.15–99.74% of the twin's limb pixels.
+    `ViewFrameInputs`, `PhotorealInputs` and `PhotorealFrame`; `discSamples` takes it. The low
+    setting never steps its floor, so it never takes it.
+  - Within 1/3 stop of 4 × 4, or under one 8-bit code at black apart in luminance with the limb's
+    brightest pixel at white: every twin limb pixel of the four cases. By 1/3 stop alone,
+    99.15–99.74%.
