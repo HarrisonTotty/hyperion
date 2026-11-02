@@ -10,22 +10,24 @@ use crate::stellar::binary::testing::{MergerMember, brute_force_merger_members_i
 /// thread each; on WebAssembly, which has no threads, in turn) and joined in stream order, as
 /// `tests/common/binaries.rs` draws them.
 pub(super) fn members(galaxy: &Galaxy, n: usize) -> Vec<MergerMember> {
-    members_as(galaxy, n, MergerMember::clone)
+    members_as(galaxy, n, std::convert::identity)
 }
 
-/// [`members`], each as `mark` makes it, every stream's members dropped once marked: a merger's
-/// timeline is some 90 kB natively, so the 48,000 of `engine_channels_hold` held whole came to
-/// 4.3 GB, past wasm32's 4 GiB, where the streams run in turn and so hold one stream's at a time.
+/// [`members`], each member as `read` makes it, read as its stream is drawn.
+///
+/// A merger's timeline is some 90 kB natively, so the 48,000 of `engine_channels_hold` held whole
+/// came to 4.3 GB, past wasm32's 4 GiB; read as they come, where the streams run in turn (on
+/// WebAssembly), the draw holds one stream's timelines at a time.
 pub(super) fn members_as<T: Send>(
     galaxy: &Galaxy,
     n: usize,
-    mark: impl Fn(&MergerMember) -> T + Sync,
+    read: impl Fn(MergerMember) -> T + Sync,
 ) -> Vec<T> {
     let share = n.div_ceil(16);
     let stream = |s: u64| -> Vec<T> {
         brute_force_merger_members_in(galaxy, CarvedClass::StellarMerger, share, s)
-            .iter()
-            .map(&mark)
+            .into_iter()
+            .map(&read)
             .collect()
     };
     let mut out = Vec::with_capacity(n + 16);

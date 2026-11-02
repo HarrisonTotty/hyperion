@@ -609,6 +609,19 @@ fn layer_shares(masses: impl Iterator<Item = (f64, f64)>) -> [f64; 5] {
     shares.map(|s| s / total)
 }
 
+/// An engine merger as the reference reads it: its pair just before it merged, its weight in the
+/// source horizon and its primary's initial mass.
+struct BeforeMerging {
+    /// The pair's stars' phases, in the engine's order.
+    phases: [Phase; 2],
+    /// The pair's stars' masses, M☉, in the engine's order.
+    masses_msun: [f64; 2],
+    /// Its weight as a merger in the source horizon (`MergerMember::weight`).
+    weight: f64,
+    /// The primary's initial mass, M☉.
+    primary_initial_msun: f64,
+}
+
 /// The engine's own mergers in `galaxy`, [`REFERENCE_MEMBERS`] of them with their pre-main-sequence
 /// ones left out: each one's compared marks, its weight and whether the class's channels cover it
 /// (two main-sequence stars, or an evolved donor beside a main-sequence star); with the split
@@ -617,21 +630,27 @@ fn engine_reference(galaxy: &Galaxy) -> Vec<([f64; 3], f64, bool)> {
     let mut split = [0.0_f64; 3];
     let mut by_kind: [Vec<(f64, f64)>; 5] = Default::default();
     let mut main_sequence: Vec<(f64, f64)> = Vec::new();
-    // Each member's pair just before it merged, its weight and its primary's initial mass, read as
-    // it is drawn (`members_as`), so that no member's timeline is held past its stream.
-    let before_merging = |m: &MergerMember| {
+    // Each member as it is drawn (`members_as`), so that no member's timeline is held past its
+    // stream.
+    let before_merging = |m: MergerMember| {
         let t = m.merger_age().value();
         let before = m.timeline().state_at(Years::new(t * (1.0 - 1e-9)));
-        (
-            before.stars().map(|s| s.phase()),
-            before.stars().map(|s| s.mass().value()),
-            m.weight(),
-            m.record().primary_initial_mass().value(),
-        )
+        BeforeMerging {
+            phases: before.stars().map(|s| s.phase()),
+            masses_msun: before.stars().map(|s| s.mass().value()),
+            weight: m.weight(),
+            primary_initial_msun: m.record().primary_initial_mass().value(),
+        }
     };
     let engine: Vec<([f64; 3], f64, bool)> = members_as(galaxy, REFERENCE_MEMBERS, before_merging)
         .into_iter()
-        .filter_map(|(phases, [a, b], weight, primary_initial)| {
+        .filter_map(|member| {
+            let BeforeMerging {
+                phases,
+                masses_msun: [a, b],
+                weight,
+                primary_initial_msun: primary_initial,
+            } = member;
             if phases
                 .iter()
                 .any(|p| matches!(p, Phase::Protostar | Phase::PreMainSequence))
