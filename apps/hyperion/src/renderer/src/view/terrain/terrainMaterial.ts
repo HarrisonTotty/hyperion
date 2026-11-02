@@ -625,6 +625,109 @@ export function terrainLitClusterMaterialSpec(
   };
 }
 
+/** The console names of the two paths' edge patches' lit forms on the cluster path (R14.T1.g). */
+const LIT_FIN_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "FIN TERRAIN OFFSETS",
+  "face-differences": "TERRAIN FINS",
+};
+
+/** The console names of their emissive forms (plan R14, R14.T1.g; R08.T18.a). */
+const LIT_EMISSIVE_FIN_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "FIN EMISSIVE OFFSETS",
+  "face-differences": "EMISSIVE TERRAIN FINS",
+};
+
+/**
+ * The edge patches' may-discard clusters' lit material on the cluster path, or its emissive form,
+ * for a vertex path (plan R14, R14.T1.g): the lit material's bindings, uniforms, states and
+ * fragment stage, its survey discard kept, its vertex stage the cluster path's
+ * (`withClusterVertex`), drawn with the terrain cluster mesh from the lit pass's may-discard
+ * buckets (their fins, their skirt heads, and their blocks and strips at the survey's edge), its
+ * `Draw` taking `clusterBase` after the cascades' fields.
+ *
+ * @remarks
+ * Its storage is {@link terrainLitClusterMaterialSpec}'s: seven at most in its vertex stage, and
+ * its fragment stage's four, the survey mask among them, which the discard reads.
+ */
+export function terrainLitFinMaterialSpec(
+  path: TerrainVertexPath,
+  emissive: boolean,
+): WgslMaterialSpec {
+  const plain = emissive ? terrainLitEmissiveMaterialSpec(path) : terrainLitMaterialSpec(path);
+  const source = withClusterVertex(withClusterBase(plain.fragmentWgsl));
+  return {
+    ...plain,
+    name: `terrain-lit-${emissive ? "emissive-" : ""}fin-${path}`,
+    displayName: (emissive ? LIT_EMISSIVE_FIN_DISPLAY_NAMES : LIT_FIN_DISPLAY_NAMES)[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...plain.uniforms, { name: "clusterBase", type: "u32" }],
+    storageBuffers: [
+      ...(plain.storageBuffers ?? []),
+      { name: "clusterLists", binding: TERRAIN_LIT_BINDINGS.clusterLists, stages: ["vertex"] },
+    ],
+  };
+}
+
+/** The head of a depth-only cluster form's fragment stage, after which its fin form discards. */
+const CLUSTER_FRAGMENT_HEAD = "@fragment\nfn fragmentMain(in : LitVertexOut)";
+
+/**
+ * A cluster form's source with `terrainLitShade.wgsl`'s survey discard put first in its fragment
+ * stage (plan R14, R14.T1.g), as the depth's and the caster's own (`terrainDepth.wgsl`,
+ * `terrainShadow.wgsl`) take it: for the edge patches' may-discard clusters.
+ *
+ * @throws Error unless the fragment stage's head occurs exactly once in `source`.
+ */
+export function withSurveyDiscard(source: string): string {
+  const parts = source.split(CLUSTER_FRAGMENT_HEAD);
+  const [before, after] = parts;
+  const open = after?.indexOf("{\n") ?? -1;
+  if (parts.length !== 2 || before === undefined || after === undefined || open < 0) {
+    throw new Error(
+      `a fin form needs a cluster form's fragment stage once, found ${String(parts.length - 1)}`,
+    );
+  }
+  return `${before}${CLUSTER_FRAGMENT_HEAD}${after.slice(0, open + 2)}${SURVEY_DISCARD}${after.slice(open + 2)}`;
+}
+
+/** The console names of the two paths' fin casters (plan R14, R14.T1.g). */
+const FIN_SHADOW_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "FIN SHADOWS OFFSETS",
+  "face-differences": "TERRAIN FIN SHADOWS",
+};
+
+/**
+ * The edge patches' may-discard clusters' caster into the high setting's shadow cascades on the
+ * cluster path, for a vertex path (plan R14, R14.T1.g): {@link terrainClusterShadowMaterialSpec}'s
+ * states, bias and uniforms with the caster's survey discard ({@link withSurveyDiscard}), so that
+ * the survey mask is bound to both stages.
+ */
+export function terrainFinShadowMaterialSpec(
+  path: TerrainVertexPath,
+  unclippedDepth: boolean,
+): WgslMaterialSpec {
+  const cluster = terrainClusterShadowMaterialSpec(path, unclippedDepth);
+  const source = withSurveyDiscard(cluster.fragmentWgsl);
+  return {
+    ...cluster,
+    name: `terrain-fin-shadow-${path}`,
+    displayName: FIN_SHADOW_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    storageBuffers: finStorage(cluster),
+  };
+}
+
+/** A cluster form's storage with the survey mask bound to both stages, which its fin form's discard reads. */
+function finStorage(cluster: WgslMaterialSpec): ReadonlyArray<StorageBufferSpec> {
+  return (cluster.storageBuffers ?? []).map((buffer): StorageBufferSpec =>
+    buffer.name === "surveyMask"
+      ? { name: buffer.name, binding: buffer.binding, stages: ["vertex", "fragment"] }
+      : buffer,
+  );
+}
+
 /** The console names of the two paths' cluster depths (plan R14, R14.T1.e). */
 const CLUSTER_DEPTH_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
   "baked-offsets": "CLUSTER DEPTH OFFSETS",
@@ -671,6 +774,31 @@ export function terrainClusterDepthMaterialSpec(path: TerrainVertexPath): WgslMa
   };
 }
 
+/** The console names of the two paths' fin depths (plan R14, R14.T1.g). */
+const FIN_DEPTH_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "FIN DEPTH OFFSETS",
+  "face-differences": "TERRAIN FIN DEPTH",
+};
+
+/**
+ * The edge patches' may-discard clusters' depth for the symbology's pass on the cluster path, for a
+ * vertex path (plan R14, R14.T1.g): {@link terrainClusterDepthMaterialSpec}'s states, push and
+ * uniforms with the depth material's survey discard ({@link withSurveyDiscard}), so that the survey
+ * mask is bound to both stages.
+ */
+export function terrainFinDepthMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const cluster = terrainClusterDepthMaterialSpec(path);
+  const source = withSurveyDiscard(cluster.fragmentWgsl);
+  return {
+    ...cluster,
+    name: `terrain-fin-depth-${path}`,
+    displayName: FIN_DEPTH_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    storageBuffers: finStorage(cluster),
+  };
+}
+
 /** Both paths' lit materials, for the catalogue. */
 export const TERRAIN_LIT_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainLitMaterialSpec("baked-offsets"),
@@ -713,6 +841,24 @@ export const TERRAIN_LIT_EMISSIVE_CLUSTER_MATERIALS: ReadonlyArray<WgslMaterialS
   terrainLitClusterMaterialSpec("face-differences", true),
 ];
 
+/** Both paths' edge patches' lit forms on the cluster path (plan R14, R14.T1.g), for the catalogue. */
+export const TERRAIN_LIT_FIN_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitFinMaterialSpec("baked-offsets", false),
+  terrainLitFinMaterialSpec("face-differences", false),
+];
+
+/** Their emissive forms (plan R14, R14.T1.g; R08.T18.a), for the catalogue. */
+export const TERRAIN_LIT_EMISSIVE_FIN_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitFinMaterialSpec("baked-offsets", true),
+  terrainLitFinMaterialSpec("face-differences", true),
+];
+
+/** Both paths' fin depths (plan R14, R14.T1.g), for the catalogue, compiled for the canvas. */
+export const TERRAIN_FIN_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainFinDepthMaterialSpec("baked-offsets"),
+  terrainFinDepthMaterialSpec("face-differences"),
+];
+
 /** Both paths' cluster depths (plan R14, R14.T1.e), for the catalogue, compiled for the canvas. */
 export const TERRAIN_CLUSTER_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainClusterDepthMaterialSpec("baked-offsets"),
@@ -735,6 +881,15 @@ export const TERRAIN_SHADOW_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
 export const TERRAIN_CLUSTER_SHADOW_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainClusterShadowMaterialSpec("baked-offsets", false),
   terrainClusterShadowMaterialSpec("face-differences", false),
+];
+
+/**
+ * Both paths' fin casters (plan R14, R14.T1.g), for the catalogue, compiled for `depth-only`
+ * without `unclippedDepth`, as the casters' are.
+ */
+export const TERRAIN_FIN_SHADOW_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainFinShadowMaterialSpec("baked-offsets", false),
+  terrainFinShadowMaterialSpec("face-differences", false),
 ];
 
 /**

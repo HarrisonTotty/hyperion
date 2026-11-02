@@ -49,14 +49,16 @@ function tail(source: string): string {
 }
 
 describe("the stable compaction (plan R14, R14.T2.a)", () => {
-  it("lays its parameters out in 64 B as compact.wgsl's CompactParams, and packs them there", () => {
+  it("lays its parameters out in 96 B as compact.wgsl's CompactParams, and packs them there", () => {
     const layout = declaredStructLayout(CLUSTER_COMPACT.reference, "CompactParams");
     expect([layout?.members.map((m) => [m.name, m.offsetBytes]), layout?.sizeBytes]).toEqual([
       [
         ["counts", 0],
         ["place", 16],
-        ["listOffsetsLow", 32],
-        ["listOffsetsHigh", 48],
+        ["listOffsets0", 32],
+        ["listOffsets1", 48],
+        ["listOffsets2", 64],
+        ["listOffsets3", 80],
       ],
       COMPACT_PARAMS_BYTES,
     ]);
@@ -69,7 +71,25 @@ describe("the stable compaction (plan R14, R14.T2.a)", () => {
       listBase: 1000,
       templateOffsets: [0, 10, 20, 30, 40, 50, 60, 70],
     });
-    expect([...words]).toEqual([7, 96, 8, 2, 40, 1000, 0, 0, 0, 10, 20, 30, 40, 50, 60, 70]);
+    expect([...words]).toEqual([
+      7,
+      96,
+      8,
+      2,
+      40,
+      1000,
+      0,
+      0,
+      0,
+      10,
+      20,
+      30,
+      40,
+      50,
+      60,
+      70,
+      ...Array<number>(8).fill(0),
+    ]);
     expect(() =>
       packCompactParams({
         instances: 1,

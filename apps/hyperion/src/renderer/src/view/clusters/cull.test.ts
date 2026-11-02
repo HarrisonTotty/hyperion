@@ -12,6 +12,7 @@ import clusterCullWgsl from "./clusterCull.wgsl?raw";
 import {
   cameraKeeps,
   cascadeKeeps,
+  CULL_INPUT_WHOLE,
   CULL_ROUNDING_M,
   cullMarksTwin,
   cullTwin,
@@ -39,6 +40,7 @@ import {
   clusterFlags,
   packClusterRecord,
 } from "./record";
+import { TERRAIN_DISCARD_TEMPLATES } from "./templates";
 
 /** Fails a test whose fixture lacks what it needs. */
 function fail(): never {
@@ -173,7 +175,7 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
     }).toThrow(RangeError);
   });
 
-  it("lays a pass out in 128 B and the dispatch's parameters in 160 B, as WGSL's CullPass and CullParams", () => {
+  it("lays a pass out in 128 B and the dispatch's parameters in 224 B, as WGSL's CullPass and CullParams", () => {
     expect([
       offsets("CullPass"),
       declaredStructLayout(clusterCullWgsl, "CullPass")?.sizeBytes,
@@ -201,11 +203,15 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
         ["counts", 48],
         ["viewAxis", 64],
         ["templates", 76],
-        ["listOffsetsLow", 80],
-        ["listOffsetsHigh", 96],
-        ["capacitiesLow", 112],
-        ["capacitiesHigh", 128],
-        ["shapes", 144],
+        ["listOffsets0", 80],
+        ["listOffsets1", 96],
+        ["listOffsets2", 112],
+        ["listOffsets3", 128],
+        ["capacities0", 144],
+        ["capacities1", 160],
+        ["capacities2", 176],
+        ["capacities3", 192],
+        ["shapes", 208],
       ],
       CULL_PARAMS_BYTES,
     ]);
@@ -319,6 +325,7 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
         templateCapacities: [10, 10, 10, 10, 5, 5, 5, 5],
         viewAxis: { x: 0, y: 0, z: -1 },
         firstShape: 2,
+        discardTemplates: [8, 9, 0xff, 10, 11, 0xff, 0xff, 0xff],
       },
       out,
     );
@@ -328,8 +335,13 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
       [48, 52, 56, 60, 76].map(u),
       view.getFloat32(72, true),
       [80, 84, 88, 92, 96, 100, 104, 108].map(u),
-      [112, 116, 128, 140, 144].map(u),
-    ]).toEqual([[3, 8, 96, 4, 8], -1, [0, 10, 20, 30, 40, 45, 50, 55], [10, 10, 5, 5, 2]]);
+      [144, 148, 160, 172, 208, 212, 216].map(u),
+    ]).toEqual([
+      [3, 8, 96, 4, 8],
+      -1,
+      [0, 10, 20, 30, 40, 45, 50, 55],
+      [10, 10, 5, 5, 2, 0x0aff_0908, 0xffff_ff0b],
+    ]);
   });
 });
 
@@ -523,6 +535,63 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
       viewAxis: { x: 0, y: 0, z: -1 },
     });
     expect([...buckets.keys()].map(strideOf)).toEqual([1, 1]);
+  });
+
+  it("puts a may-discard record in its shape's may-discard bucket at stride 1, a fin run and a head run in theirs (R14.T1.g)", () => {
+    const records = [
+      { ...record({ x: 0, y: 0, z: 0 }, 1), mayDiscard: true },
+      { ...record({ x: 0, y: 0, z: 0 }, 1, "terrain-skirt"), mayDiscard: true },
+      { ...record({ x: 0, y: 0, z: 0 }, 1, "terrain-fin"), mayDiscard: true },
+      record({ x: 0, y: 0, z: 0 }, 1),
+      { ...record({ x: 0, y: 0, z: 0 }, 1, "terrain-head"), mayDiscard: true },
+    ];
+    const input = {
+      instances: [{ originM: { x: 0, y: 0, z: 0 }, page: 0, passMask: 0b1, unitM: 0.02 }],
+      records: (_page: number, cluster: number) => records[cluster] ?? record(Z, 0),
+      clustersPerPage: records.length,
+      rotationColumns: [X, Y, Z] as const,
+      passes: [cascade({ strideCap: 8, toleranceM: 0.2 })],
+      places: [{ bucketBase: 0, listBase: 0 }],
+      templates: 12,
+      viewAxis: { x: 0, y: 0, z: -1 },
+    };
+    const routed = cullTwin({ ...input, discardTemplates: TERRAIN_DISCARD_TEMPLATES });
+    expect(Object.fromEntries([...routed].toSorted(([a], [b]) => a - b))).toEqual({
+      // The opaque block at the cascade's stride 8; the others at their may-discard templates.
+      3: [3],
+      8: [0],
+      9: [1],
+      10: [2],
+      11: [4],
+    });
+    // A consumer without may-discard templates draws them by their strided ones, its fin runs none.
+    const plain = cullTwin(input);
+    expect(Object.fromEntries([...plain].toSorted(([a], [b]) => a - b))).toEqual({
+      3: [0, 3],
+      7: [1],
+    });
+  });
+
+  it("keeps every cluster of a whole instance in each pass it enters, its spheres untested, and none of a pass it may not (R10.T16.i's fades)", () => {
+    const records = [record({ x: 0, y: 0, z: 5_000 }, 1), record({ x: 0, y: 0, z: 0 }, -1)];
+    const input = {
+      records: (_page: number, cluster: number) => records[cluster] ?? record(Z, 0),
+      clustersPerPage: records.length,
+      rotationColumns: [X, Y, Z] as const,
+      passes: [{ ...CAMERA }, cascade({ strideCap: 1 })],
+      places: [
+        { bucketBase: 0, listBase: 0 },
+        { bucketBase: 8, listBase: 100 },
+      ],
+      templates: 8,
+      viewAxis: { x: 0, y: 0, z: -1 },
+    };
+    const instance = { originM: { x: 0, y: 0, z: 0 }, page: 0, passMask: 0b01, unitM: 1 };
+    expect(cullTwin({ ...input, instances: [instance] }).size).toBe(0);
+    // Whole: the sphere behind the camera is kept in the pass it enters; no cluster is still none.
+    const whole = cullTwin({ ...input, instances: [{ ...instance, whole: true }] });
+    expect(Object.fromEntries(whole)).toEqual({ 0: [0] });
+    expect(CULL_INPUT_WHOLE).toBe(2 ** 31);
   });
 });
 

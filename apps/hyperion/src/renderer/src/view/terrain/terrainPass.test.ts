@@ -1725,6 +1725,8 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
 
   it("gives each drawn patch its parent's slot where the parent's horizon map is resident, and no parent otherwise", async () => {
     const { pass, pool, engine } = await passOn("low", { source: BODY });
+    // Its edge patches by the lit mesh, whose records the test reads (R14.T1.g).
+    pass.setGeometry({ ...SETTINGS.low.geometry, finClusters: false });
     pool().layers = edgeLayers();
     const view = northPole(2_000_000);
     pass.frame({ ...inputAt(view), lighting: LIGHTING });
@@ -1959,7 +1961,7 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
     pool.layersOf.set(patchKeyString(edge.key), edgeLayers());
     pool.deliver(pass, edge.key);
     const view0 = pass.drawFor(DEFAULT_TERRAIN_VIEW, { ...inputAt(view), lighting: LIGHTING });
-    expect(view0.patches).toEqual({ interior: first.drawSet.count - 1, edge: 1 });
+    expect(view0.patches).toEqual({ interior: first.drawSet.count - 1, edge: 1, fins: 0 });
   });
 
   it("draws as before the split by the way back, from the same records, and splits again on the cluster path", async () => {

@@ -31,17 +31,20 @@
  *   parent group's is its {@link ClusterLod}, 16 B beside it. The hulls' occluder faces are its
  *   first consumer (R14.T4.b), a one-level DAG of (0, +∞).
  * - **Terrain's template reference**: bits 0–7 the grid column x₀ and bits 8–15 the row y₀ of the
- *   block's or the strip's first vertex in the 65-grid, bits 16–17 a strip's edge (0 y = 0,
- *   1 x = 64, 2 y = 64, 3 x = 0, as `gpu/resources.ts` numbers them); a block's x₀ and y₀ are
- *   multiples of 8, a strip's run along its edge.
+ *   block's, the strip's or the fin cluster's first vertex in the 65-grid, bits 16–17 a strip's or
+ *   a skirt-head run's edge (0 y = 0, 1 x = 64, 2 y = 64, 3 x = 0, as `gpu/resources.ts` numbers
+ *   them), bit 18 a fin run along a row rather than a column, bit 19 a fin run rather than a
+ *   skirt-head run (R14.T1.g); a block's x₀ and y₀ are multiples of 8, a strip's and a run's run
+ *   along its edge or line.
  * - **A mesh's template reference** ({@link meshTemplateRef}): bits 0–23 the cluster's first
  *   triangle in its page's triangles and bits 24–31 its triangle count, at most 128, as
  *   `tools/meshbuild`'s pages write it (`page.rs`).
  * - **Flags**: bits 0–3 the shape ({@link CLUSTER_SHAPE_CODE}), bit 4 the mode (0 strided, 1 DAG
  *   cut), bit 5 whether its fragments may discard (terrain's interior clusters never do: plan R14,
- *   R14.T1.a), bit 6 whether a strided record's errors are measured, bits 8–15 the consumer's
- *   material. The survey discard stays the edge patches' own
- *   (plan R14's design note on the visibility buffer); no flag assumes it moves.
+ *   R14.T1.a; an edge patch's fin clusters always may, and its blocks and strips where the survey's
+ *   edge comes within half a quad of them, R14.T1.g), bit 6 whether a strided record's errors are
+ *   measured, bits 8–15 the consumer's material. A terrain cluster the survey discards wholly, or
+ *   whose fins or heads collapse, is no cluster: its radius is negative.
  */
 
 import type { Vec3 } from "../../geometry/vec3";
@@ -52,14 +55,20 @@ export const CLUSTER_RECORD_BYTES = 32;
 /** How a record's error bytes are read (see the module's remarks). */
 export type ClusterLodMode = "strided" | "dag";
 
-/** A cluster's shape: the template family it is drawn by. */
-export type ClusterShape = "terrain-block" | "terrain-skirt" | "mesh";
+/**
+ * A cluster's shape: the template family it is drawn by; `terrain-fin` an edge patch's survey fins
+ * along half a fin line, and `terrain-head` its skirt heads along half an edge (plan R14, R14.T1.g).
+ */
+export type ClusterShape =
+  "terrain-block" | "terrain-skirt" | "mesh" | "terrain-fin" | "terrain-head";
 
 /** Each shape's code in a record's flags, bits 0–3. */
 export const CLUSTER_SHAPE_CODE: Readonly<Record<ClusterShape, number>> = {
   "terrain-block": 0,
   "terrain-skirt": 1,
   mesh: 2,
+  "terrain-fin": 3,
+  "terrain-head": 4,
 };
 
 /** Bit 4 of the flags: the DAG-cut mode (see the module's remarks). */

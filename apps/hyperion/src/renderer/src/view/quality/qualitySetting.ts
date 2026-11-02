@@ -148,6 +148,14 @@ export interface GeometrySettings {
    * line removal holds (Design note 13; both leans). 0 on the way back: the finest cut.
    */
   readonly meshTolerancePx: MeshTolerancePx;
+  /**
+   * R14.T1.g: the lit pass's edge patches drawn through the cluster path beside the interior
+   * patches, in the lit pass, the casters and the overlay's depth, at stride 1: each block and strip
+   * the survey keeps whole without the survey discard, each it keeps in part, and the skirt heads
+   * (`terrain-head`) and survey fins (`terrain-fin`), with it, and each it keeps nowhere not at all;
+   * `false` draws them by the lit mesh. Read where `litClusters` is on. Both settings take it.
+   */
+  readonly finClusters: boolean;
 }
 
 /**
@@ -171,6 +179,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   wireClusters: false,
   pageBytes: 0,
   meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
+  finClusters: false,
 };
 
 /**
@@ -342,6 +351,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       wireClusters: true,
       pageBytes: 128 * 2 ** 20,
       meshTolerancePx: { camera: 1, wireframeOccluder: 0.5 },
+      finClusters: true,
     },
     decoration: true,
     scatterDensity: 1,
@@ -386,6 +396,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       wireClusters: true,
       pageBytes: 32 * 2 ** 20,
       meshTolerancePx: { camera: 2, wireframeOccluder: 0.5 },
+      finClusters: true,
     },
     decoration: false,
     scatterDensity: 0,

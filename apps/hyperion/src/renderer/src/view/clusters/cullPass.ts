@@ -26,11 +26,14 @@
  * and its offset, m; one with a horizon holds at most five, its sixth `vec4f` the horizon's axis and
  * the cosine of its cone's half-angle (T2.a, {@link CullHorizon}).
  *
- * `CullParams`, 160 B: the page's axes into the instances' frame by column (terrain: the body's
+ * `CullParams`, 224 B: the page's axes into the instances' frame by column (terrain: the body's
  * rotation), `counts` (instances, `u32` words an instance record, clusters a page, passes), the
  * templates a pass has, each template's first list entry within its pass and its capacity, by
- * template, four to a `vec4u`, and `shapes` (the consumer's first shape's code, R14.T4.b; then
- * zeros), by which a record's shape picks its template: (shape − first) × 4 + log₂ s.
+ * template, four to a `vec4u`, four `vec4u` of each, and `shapes` (the consumer's first shape's
+ * code, R14.T4.b; then its may-discard templates, a byte a shape code 0 to 7 over two words,
+ * R14.T1.g; then zero), by which a record's shape picks its template: (shape − first) × 4 + log₂ s,
+ * or, for a record that may discard, its shape's may-discard template at stride 1 where the
+ * consumer has one.
  */
 
 import type { Vec3 } from "../../geometry/vec3";
@@ -43,10 +46,22 @@ export const MAX_CULL_PASSES = 8;
 export const CULL_PASS_BYTES = 128;
 
 /** Bytes of the dispatch's `CullParams`. */
-export const CULL_PARAMS_BYTES = 160;
+export const CULL_PARAMS_BYTES = 224;
 
-/** The most templates a pass may have: two `vec4u` of offsets and capacities. */
-export const MAX_PASS_TEMPLATES = 8;
+/** The most templates a pass may have: four `vec4u` of offsets and capacities. */
+export const MAX_PASS_TEMPLATES = 16;
+
+/** A shape's may-discard template where it has none: its records take their strided template. */
+export const NO_DISCARD_TEMPLATE = 0xff;
+
+/** The shape codes a consumer's may-discard templates are given for, 0 to 7. */
+export const DISCARD_TEMPLATE_CODES = 8;
+
+/** No consumer's shape has a may-discard template: every record takes its strided template. */
+export const NO_DISCARD_TEMPLATES: ReadonlyArray<number> = Array.from(
+  { length: DISCARD_TEMPLATE_CODES },
+  () => NO_DISCARD_TEMPLATE,
+);
 
 /**
  * T1.c's receivers' cull of a cascade (plan R14, R14.T1.c; `clusters/receivers.ts`): the view
@@ -325,23 +340,39 @@ export interface CullParams {
    * figures', 2 for a mesh's (R14.T4.b).
    */
   readonly firstShape: number;
+  /**
+   * Each shape code's may-discard template, codes 0 to {@link DISCARD_TEMPLATE_CODES} − 1,
+   * {@link NO_DISCARD_TEMPLATE} where a record of it that may discard takes its strided template
+   * (plan R14, R14.T1.g): terrain's `TERRAIN_DISCARD_TEMPLATES`, {@link NO_DISCARD_TEMPLATES}
+   * elsewhere.
+   */
+  readonly discardTemplates: ReadonlyArray<number>;
 }
 
 /**
  * Packs `params` into `out` ({@link CULL_PARAMS_BYTES} bytes at least), as `clusterCull.wgsl`'s
  * `CullParams`.
  *
- * @throws RangeError for more than {@link MAX_PASS_TEMPLATES} templates, or offsets and capacities
- *   of different counts.
+ * @throws RangeError for more than {@link MAX_PASS_TEMPLATES} templates, offsets and capacities
+ *   of different counts, or may-discard templates not a byte for each of
+ *   {@link DISCARD_TEMPLATE_CODES} codes.
  */
 export function packCullParams(params: CullParams, out: ArrayBuffer): void {
-  const { templateOffsets, templateCapacities } = params;
+  const { templateOffsets, templateCapacities, discardTemplates } = params;
   if (
     templateOffsets.length > MAX_PASS_TEMPLATES ||
     templateOffsets.length !== templateCapacities.length
   ) {
     throw new RangeError(
       `${String(templateOffsets.length)} template offsets and ${String(templateCapacities.length)} capacities, at most ${String(MAX_PASS_TEMPLATES)} and as many of each`,
+    );
+  }
+  if (
+    discardTemplates.length !== DISCARD_TEMPLATE_CODES ||
+    !discardTemplates.every((t) => Number.isInteger(t) && t >= 0 && t <= NO_DISCARD_TEMPLATE)
+  ) {
+    throw new RangeError(
+      `may-discard templates ${discardTemplates.join(", ")} are not ${String(DISCARD_TEMPLATE_CODES)} bytes`,
     );
   }
   const view = new DataView(out);
@@ -363,7 +394,10 @@ export function packCullParams(params: CullParams, out: ArrayBuffer): void {
     view.setUint32(80 + 4 * t, offset, true);
   });
   templateCapacities.forEach((capacity, t) => {
-    view.setUint32(112 + 4 * t, capacity, true);
+    view.setUint32(144 + 4 * t, capacity, true);
   });
-  view.setUint32(144, params.firstShape, true);
+  view.setUint32(208, params.firstShape, true);
+  discardTemplates.forEach((template, code) => {
+    view.setUint8(212 + code, template);
+  });
 }

@@ -2692,12 +2692,14 @@ describe("the schema check", () => {
         wireClusters: true,
         pageBytes: 134_217_728,
         meshTolerancePx: { camera: 1, wireframeOccluder: 0.5 },
+        finClusters: true,
       },
       segments: [
         {
           segment: "orbit coast",
           interiorPatches: { frames: 3, p50: 59, max: 61 },
           edgePatches: { frames: 3, p50: 33, max: 33 },
+          finPatches: { frames: 3, p50: 20, max: 30 },
           drawnTriangles: { frames: 3, p50: 868_352, max: 880_000 },
           litClusterTriangles: { frames: 2, p50: 700_000, max: 712_000 },
           casterTriangles: null,
@@ -2738,10 +2740,10 @@ describe("the schema check", () => {
     const markdown = summaryMarkdown(results);
     expect(markdown).toContain("## Geometry (plan R14)");
     expect(markdown).toContain(
-      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters, the wireframe's interior patches by clusters, the mesh page pool's bytes 128 MiB, meshes cut at 1 px in the camera and 0.5 px as the wireframe's occluders.",
+      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters, the wireframe's interior patches by clusters, the mesh page pool's bytes 128 MiB, meshes cut at 1 px in the camera and 0.5 px as the wireframe's occluders, the lit pass's edge patches by clusters.",
     );
     expect(markdown).toContain(
-      "| orbit coast | 59 (61) | 33 (33) | 868,352 (880,000) | 700,000 (712,000) | — | 600,001 (610,001) |",
+      "| orbit coast | 59 (61) | 33 (33) | 20 (30) | 868,352 (880,000) | 700,000 (712,000) | — | 600,001 (610,001) |",
     );
   });
 
@@ -2758,6 +2760,7 @@ describe("the schema check", () => {
         segment: "orbit coast",
         interiorPatches: { frames: 3, p50: 59, max: 61 },
         edgePatches: { frames: 3, p50: 33, max: 33 },
+        finPatches: null,
         drawnTriangles: { frames: 3, p50: 868_352, max: 880_000 },
         litClusterTriangles: null,
         casterTriangles: null,
@@ -2777,6 +2780,7 @@ describe("the schema check", () => {
             wireClusters: false,
             pageBytes: 0,
             meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
+            finClusters: false,
           },
           segments,
         },
@@ -2811,9 +2815,36 @@ describe("the schema check", () => {
       validateResults(
         asFile(8, { ...settings, farCascadeRate: 1, meshTolerancePx: { camera: 2 } }),
       ),
-    ]).toEqual([[], malformed, malformed, malformed, [], malformed, [], malformed, [], malformed]);
+      // The edge patches' lever (R14.T1.g) likewise, and their count by clusters.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, finClusters: true })),
+      validateResults(
+        JSON.parse(
+          JSON.stringify({
+            ...results,
+            version: 8,
+            geometry: {
+              settings: { ...settings, farCascadeRate: 1 },
+              segments: segments.map(({ finPatches: _finPatches, ...before }) => before),
+            },
+          }),
+        ),
+      ),
+    ]).toEqual([
+      [],
+      malformed,
+      malformed,
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      [],
+    ]);
     expect(summaryMarkdown(results)).toContain(
-      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool, meshes cut at 0 px in the camera and 0 px as the wireframe's occluders.",
+      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool, meshes cut at 0 px in the camera and 0 px as the wireframe's occluders, the lit pass's edge patches by the lit mesh.",
     );
   });
 

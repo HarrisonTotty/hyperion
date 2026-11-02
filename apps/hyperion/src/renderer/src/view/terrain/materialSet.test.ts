@@ -40,19 +40,23 @@ async function settle(): Promise<void> {
 }
 
 /**
- * The high setting's nine, on its own path, the shadow cascades' caster (R10.T9.b), the interior
+ * The high setting's twelve, on its own path, the shadow cascades' caster (R10.T9.b), the interior
  * patches' lit form (plan R14, R14.T1.a), their cluster caster (R14.T1.b), their cluster depth
- * (R14.T1.e), their lit form on the cluster path (R14.T2.a) and the wireframe's interior patches'
- * on it (R14.T4.c) among them: what every compile below is held to.
+ * (R14.T1.e), their lit form on the cluster path (R14.T2.a), the wireframe's interior patches' on
+ * it (R14.T4.c) and the edge patches' fin forms (R14.T1.g) among them: what every compile below is
+ * held to.
  */
 const HIGH = [
   `terrain-lit-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
   `terrain-lit-interior-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
   `terrain-lit-cluster-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
+  `terrain-lit-fin-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
   `terrain-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
   `terrain-cluster-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
+  `terrain-fin-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
   `terrain-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
   `terrain-cluster-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
+  `terrain-fin-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
   `terrain-wire-baked-offsets canvas ${COMPILE_MESH_NAME}`,
   `terrain-wire-cluster-baked-offsets canvas ${COMPILE_MESH_NAME}`,
 ];
@@ -102,10 +106,13 @@ describe("sessionMaterials (R10.T14.d)", () => {
       { kind: "lit", path: "baked-offsets" },
       { kind: "lit-interior", path: "baked-offsets" },
       { kind: "lit-cluster", path: "baked-offsets" },
+      { kind: "lit-fin", path: "baked-offsets" },
       { kind: "depth", path: "baked-offsets" },
       { kind: "depth-cluster", path: "baked-offsets" },
+      { kind: "depth-fin", path: "baked-offsets" },
       { kind: "shadow", path: "baked-offsets" },
       { kind: "shadow-cluster", path: "baked-offsets" },
+      { kind: "shadow-fin", path: "baked-offsets" },
       { kind: "wire", path: "baked-offsets" },
       { kind: "wire-cluster", path: "baked-offsets" },
     ]);
@@ -119,8 +126,10 @@ describe("sessionMaterials (R10.T14.d)", () => {
       "lit face-differences",
       "lit-interior face-differences",
       "lit-cluster face-differences",
+      "lit-fin face-differences",
       "depth face-differences",
       "depth-cluster face-differences",
+      "depth-fin face-differences",
       "wire face-differences",
       "wire-cluster face-differences",
     ]);
@@ -132,10 +141,13 @@ describe("sessionMaterials (R10.T14.d)", () => {
       { kind: "lit", path: "face-differences" },
       { kind: "lit-interior", path: "face-differences" },
       { kind: "lit-cluster", path: "face-differences" },
+      { kind: "lit-fin", path: "face-differences" },
       { kind: "depth", path: "face-differences" },
       { kind: "depth-cluster", path: "face-differences" },
+      { kind: "depth-fin", path: "face-differences" },
       { kind: "shadow", path: "face-differences" },
       { kind: "shadow-cluster", path: "face-differences" },
+      { kind: "shadow-fin", path: "face-differences" },
       { kind: "wire", path: "baked-offsets" },
       { kind: "wire-cluster", path: "baked-offsets" },
     ]);
@@ -213,13 +225,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     await set.compiled;
     expect([engine.meshSpecs.map(layout), engine.live.meshes]).toEqual([
       [
-        layout(terrainMeshSpec("lit")),
-        layout(terrainMeshSpec("lit")),
-        layout(terrainMeshSpec("lit")),
-        layout(terrainMeshSpec("lit")),
-        layout(terrainMeshSpec("lit")),
-        layout(terrainMeshSpec("lit")),
-        layout(terrainMeshSpec("lit")),
+        ...Array.from({ length: 10 }, () => layout(terrainMeshSpec("lit"))),
         layout(terrainMeshSpec("wire")),
         layout(terrainMeshSpec("wire")),
       ],
@@ -317,7 +323,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.restore();
     await expect(overtaken).rejects.toBeInstanceOf(EngineUnavailable);
     await settle();
-    // The setting's nine compiled again on the restored device, and nothing else held.
+    // The setting's twelve compiled again on the restored device, and nothing else held.
     expect(engine.live.materials).toBe(HIGH.length);
   });
 

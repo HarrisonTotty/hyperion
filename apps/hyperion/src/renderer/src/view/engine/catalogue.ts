@@ -89,10 +89,14 @@ import {
   TERRAIN_CLUSTER_DEPTH_MATERIALS,
   TERRAIN_CLUSTER_SHADOW_MATERIALS,
   TERRAIN_DEPTH_MATERIALS,
+  TERRAIN_FIN_DEPTH_MATERIALS,
+  TERRAIN_FIN_SHADOW_MATERIALS,
   TERRAIN_LIT_CLUSTER_MATERIALS,
   TERRAIN_LIT_EMISSIVE_CLUSTER_MATERIALS,
+  TERRAIN_LIT_EMISSIVE_FIN_MATERIALS,
   TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS,
   TERRAIN_LIT_EMISSIVE_MATERIALS,
+  TERRAIN_LIT_FIN_MATERIALS,
   TERRAIN_LIT_INTERIOR_MATERIALS,
   TERRAIN_LIT_MATERIALS,
   TERRAIN_SHADOW_MATERIALS,
@@ -268,7 +272,8 @@ export const ATMOSPHERE_DECK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
  * pass, one per vertex path, and its interior patches' on the cluster path (plan R14, R14.T1.e),
  * R10.T11's wireframe terrain, one per vertex path, and R10.T9.b's shadow casters, one per vertex
  * path, and plan R14's cluster casters (R14.T1.b), for the cascades' `depth-only` layers, and the
- * cluster path's cull and counters.
+ * cluster path's cull and counters; and the edge patches' fin forms of the lit terrain, its depth
+ * and its caster on the cluster path (plan R14, R14.T1.g).
  */
 const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...[
@@ -277,18 +282,22 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     ...TERRAIN_LIT_MATERIALS,
     ...TERRAIN_LIT_INTERIOR_MATERIALS,
     ...TERRAIN_LIT_CLUSTER_MATERIALS,
+    ...TERRAIN_LIT_FIN_MATERIALS,
     ...TERRAIN_DEPTH_MATERIALS,
     ...TERRAIN_CLUSTER_DEPTH_MATERIALS,
+    ...TERRAIN_FIN_DEPTH_MATERIALS,
     ...TERRAIN_WIRE_MATERIALS,
     ...TERRAIN_WIRE_CLUSTER_MATERIALS,
   ].map((spec): CatalogueEntry => ({ kind: "material", spec })),
-  ...[...TERRAIN_SHADOW_MATERIALS, ...TERRAIN_CLUSTER_SHADOW_MATERIALS].map(
-    (spec): CatalogueEntry => ({
-      kind: "material",
-      spec,
-      targets: ["depth-only"],
-    }),
-  ),
+  ...[
+    ...TERRAIN_SHADOW_MATERIALS,
+    ...TERRAIN_CLUSTER_SHADOW_MATERIALS,
+    ...TERRAIN_FIN_SHADOW_MATERIALS,
+  ].map((spec): CatalogueEntry => ({
+    kind: "material",
+    spec,
+    targets: ["depth-only"],
+  })),
   // Plan R14's cluster path (R14.T1.b): its cull, the copy of its counters and its stable
   // compaction (R14.T2.a).
   { kind: "compute", spec: CLUSTER_CULL_KERNEL },
@@ -362,11 +371,12 @@ export const THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: SMOOTH_MESH_EMISSIVE_CLUSTER_MATERIAL },
   { kind: "compute", spec: BODY_DISC_CELLS_EMISSIVE_KERNEL },
   // R10.T10.b's lit terrain's emissive form, one material per vertex path, and its interior
-  // patches' form (plan R14, R14.T1.a).
+  // patches' form (plan R14, R14.T1.a), on the cluster path (T2.a) and its fin form (T1.g).
   ...[
     ...TERRAIN_LIT_EMISSIVE_MATERIALS,
     ...TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS,
     ...TERRAIN_LIT_EMISSIVE_CLUSTER_MATERIALS,
+    ...TERRAIN_LIT_EMISSIVE_FIN_MATERIALS,
   ].map((spec): CatalogueEntry => ({ kind: "material", spec })),
 ];
 

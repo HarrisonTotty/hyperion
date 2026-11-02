@@ -301,7 +301,17 @@ describe("the mesh shape's records and template (plan R14, R14.T4.b)", () => {
       positions[5],
       positions[383],
     ]).toEqual([
-      [{ shape: "mesh", stride: 1, triangles: 128, firstIndex: 0, indexCount: 384, errorScale: 1 }],
+      [
+        {
+          shape: "mesh",
+          stride: 1,
+          triangles: 128,
+          firstIndex: 0,
+          indexCount: 384,
+          errorScale: 1,
+          mayDiscard: false,
+        },
+      ],
       templates,
       384,
       [0, 0, 0],

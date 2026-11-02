@@ -426,7 +426,7 @@ function fakeSource(
   };
   const frame: TerrainViewFrame = {
     draws: options.draws ?? [DRAW],
-    patches: { interior: 0, edge: 1 },
+    patches: { interior: 0, edge: 1, fins: 0 },
     conditions: { streaming: false, detailLimited: false },
     annunciation: options.annunciation ?? null,
     fault: null,
@@ -1173,7 +1173,7 @@ function wireSource(bodies: ReadonlyMap<BodyIdHex, WireBody>): {
           ? null
           : {
               draws: [WIRE_DRAW],
-              patches: { interior: 0, edge: 1 },
+              patches: { interior: 0, edge: 1, fins: 0 },
               conditions: { streaming: false, detailLimited: false },
               annunciation: null,
               fault: null,

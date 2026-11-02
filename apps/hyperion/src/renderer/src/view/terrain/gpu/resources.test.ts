@@ -1366,9 +1366,11 @@ describe("the terrain's resources", () => {
         "terrain clusters (view) tallies",
       ],
     ]);
+    // The marks hold every cluster of a page, its fin clusters too (R14.T1.g), and the tallies the
+    // compaction's sixteen templates.
     expect([clusters?.marks.bytes, clusters?.tallies.bytes]).toEqual([
-      slots * 96 * 4,
-      slots * 8 * 4,
+      slots * 116 * 4,
+      slots * 16 * 4,
     ]);
     const before = engine.live.buffers;
     resources.releaseView("view");

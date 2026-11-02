@@ -130,7 +130,7 @@ describe("the quality settings", () => {
 });
 
 describe("the geometry's settings (plan R14)", () => {
-  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, and keeps the way back", () => {
+  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, its edge patches on the path, and keeps the way back", () => {
     for (const setting of QUALITY_SETTINGS) {
       const {
         pageBytes: _pageBytes,
@@ -147,6 +147,7 @@ describe("the geometry's settings (plan R14)", () => {
         figureClusters: true,
         hullClusters: true,
         wireClusters: true,
+        finClusters: true,
       });
     }
     expect([SETTINGS.high.geometry.pageBytes, SETTINGS.low.geometry.pageBytes]).toEqual([
@@ -164,6 +165,7 @@ describe("the geometry's settings (plan R14)", () => {
       wireClusters: false,
       pageBytes: 0,
       meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
+      finClusters: false,
     });
   });
 
@@ -184,12 +186,14 @@ describe("the geometry's settings (plan R14)", () => {
       geometryOf("high", {}),
       geometryOf("high", { farCascadeRate: 1 }),
       geometryOf("high", { pageBytes: 2 ** 20 }),
+      geometryOf("low", { finClusters: false }),
     ]).toEqual([
       { ...SETTINGS.low.geometry, clusterPath: false },
       { ...SETTINGS.high.geometry, casterStrideCap: 1, overlayDepth: "redraw" },
       SETTINGS.high.geometry,
       { ...SETTINGS.high.geometry, farCascadeRate: 1 },
       { ...SETTINGS.high.geometry, pageBytes: 2 ** 20 },
+      { ...SETTINGS.low.geometry, finClusters: false },
     ]);
   });
 });

@@ -36,6 +36,7 @@ import {
   CULL_PASS_BYTES,
   type CullPass,
   MAX_CULL_PASSES,
+  NO_DISCARD_TEMPLATES,
   packCullParams,
   packCullPasses,
 } from "./cullPass";
@@ -162,6 +163,7 @@ export class ClusterConsumerPath {
         templateCapacities: buckets.capacities,
         viewAxis: frame.viewAxis,
         firstShape: consumer.firstShape,
+        discardTemplates: NO_DISCARD_TEMPLATES,
       },
       this.#params,
     );

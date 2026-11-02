@@ -4,8 +4,8 @@
  *
  * @remarks
  * The override is `<field>=<value>[,<field>=<value>…]` over the renderer's `GeometrySettings`:
- * `clusterPath`, `casterDepthCull`, `litClusters`, `figureClusters`, `hullClusters` and
- * `wireClusters` `true` or `false`,
+ * `clusterPath`, `casterDepthCull`, `litClusters`, `figureClusters`, `hullClusters`,
+ * `wireClusters` and `finClusters` `true` or `false`,
  * `casterStrideCap` 1, 2, 4 or 8, `overlayDepth` `redraw`, `scene-depth` or `cluster`,
  * `farCascadeRate` 1, 2 or 4, `pageBytes` a whole number of bytes, and `meshTolerancePx`
  * `<camera>:<wireframe occluder>` px. As `qualityLaunch.ts` does for the setting, it rides in the
@@ -35,6 +35,7 @@ const FIELDS = [
   "wireClusters",
   "pageBytes",
   "meshTolerancePx",
+  "finClusters",
 ] as const;
 
 /** A field's values, as a refusal names them. */
@@ -50,6 +51,7 @@ const VALUES: Readonly<Record<(typeof FIELDS)[number], string>> = {
   wireClusters: "true or false",
   pageBytes: "a whole number of bytes",
   meshTolerancePx: "<camera>:<wireframe occluder> px, each a number of at least 0",
+  finClusters: "true or false",
 };
 
 /** The refusal of `text` as `field`'s value. */
@@ -65,7 +67,8 @@ function booleanOf(
     | "litClusters"
     | "figureClusters"
     | "hullClusters"
-    | "wireClusters",
+    | "wireClusters"
+    | "finClusters",
   text: string,
 ): boolean {
   if (text !== "true" && text !== "false") {
@@ -95,6 +98,7 @@ function readField(out: OverrideBeingRead, field: (typeof FIELDS)[number], text:
     case "figureClusters":
     case "hullClusters":
     case "wireClusters":
+    case "finClusters":
       out[field] = booleanOf(field, text);
       break;
     case "casterStrideCap": {

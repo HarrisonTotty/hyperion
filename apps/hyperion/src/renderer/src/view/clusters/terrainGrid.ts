@@ -21,6 +21,21 @@ export const TERRAIN_CLUSTERS_PER_PAGE = 96;
 /** Its blocks: 8 × 8, row by row from y = 0. */
 export const TERRAIN_BLOCKS = 64;
 
+/**
+ * Its fin clusters after them (plan R14, R14.T1.g): each edge's skirt heads in two runs, then each
+ * of the survey's fin lines in two, columns then rows (`clusters/terrain.ts`).
+ */
+export const TERRAIN_FIN_CLUSTERS = 20;
+
+/** Of them, the skirt-head runs, first: two an edge. */
+export const TERRAIN_HEAD_CLUSTERS = 8;
+
+/** The clusters a terrain slot's records hold: its blocks and strips, then its fin clusters. */
+export const TERRAIN_PAGE_CLUSTERS = TERRAIN_CLUSTERS_PER_PAGE + TERRAIN_FIN_CLUSTERS;
+
+/** Quads along a fin cluster's run: half a patch's side. */
+export const FIN_RUN_QUADS = 32;
+
 /** Quads along a patch's side. */
 const PATCH_QUADS = 64;
 

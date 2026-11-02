@@ -271,7 +271,7 @@ describe("the spike's metrics", () => {
     ): SpikeGeometrySample => ({
       settings,
       counts: {
-        patches: { interior, edge: 2 },
+        patches: { interior, edge: 2, fins: 0 },
         drawnTriangles,
         litClusterTriangles: drawnTriangles - 1,
         casterTriangles: null,
@@ -290,6 +290,7 @@ describe("the spike's metrics", () => {
           segment: "orbit coast",
           interiorPatches: { frames: 3, p50: 11, max: 12 },
           edgePatches: { frames: 3, p50: 2, max: 2 },
+          finPatches: { frames: 3, p50: 0, max: 0 },
           drawnTriangles: { frames: 3, p50: 200, max: 300 },
           litClusterTriangles: { frames: 3, p50: 199, max: 299 },
           casterTriangles: null,
@@ -299,6 +300,7 @@ describe("the spike's metrics", () => {
           segment: "descent arc",
           interiorPatches: null,
           edgePatches: null,
+          finPatches: null,
           drawnTriangles: null,
           litClusterTriangles: null,
           casterTriangles: null,

@@ -21,13 +21,13 @@ import compactWgsl from "./compact.wgsl?raw";
 import { NO_MARK } from "./cull";
 
 /** The most templates a compacted pass has, as `compact.wgsl`'s TEMPLATES. */
-export const COMPACT_TEMPLATES = 8;
+export const COMPACT_TEMPLATES = 16;
 
 /** The threads of the kernel's workgroup: one a cluster of a page, at most this many clusters. */
 export const COMPACT_WORKGROUP = 128;
 
 /** Bytes of the dispatch's `CompactParams`. */
-export const COMPACT_PARAMS_BYTES = 64;
+export const COMPACT_PARAMS_BYTES = 96;
 
 /** The kernel's three dispatches, by `params.counts.w`. */
 export const COMPACT_PHASES = ["count", "scan", "scatter"] as const;

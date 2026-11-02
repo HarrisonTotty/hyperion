@@ -133,6 +133,7 @@ interface SegmentTally {
 interface GeometryTally {
   readonly interiorPatches: number[];
   readonly edgePatches: number[];
+  readonly finPatches: number[];
   readonly drawnTriangles: number[];
   readonly litClusterTriangles: number[];
   readonly casterTriangles: number[];
@@ -333,6 +334,7 @@ export class SpikeMetrics {
       tally = {
         interiorPatches: [],
         edgePatches: [],
+        finPatches: [],
         drawnTriangles: [],
         litClusterTriangles: [],
         casterTriangles: [],
@@ -342,6 +344,7 @@ export class SpikeMetrics {
     }
     tally.interiorPatches.push(counts.patches.interior);
     tally.edgePatches.push(counts.patches.edge);
+    tally.finPatches.push(counts.patches.fins);
     tally.drawnTriangles.push(counts.drawnTriangles);
     if (counts.litClusterTriangles !== null) {
       tally.litClusterTriangles.push(counts.litClusterTriangles);
@@ -368,6 +371,7 @@ export class SpikeMetrics {
           segment: name,
           interiorPatches: countFigures(tally?.interiorPatches ?? []),
           edgePatches: countFigures(tally?.edgePatches ?? []),
+          finPatches: countFigures(tally?.finPatches ?? []),
           drawnTriangles: countFigures(tally?.drawnTriangles ?? []),
           litClusterTriangles: countFigures(tally?.litClusterTriangles ?? []),
           casterTriangles: countFigures(tally?.casterTriangles ?? []),

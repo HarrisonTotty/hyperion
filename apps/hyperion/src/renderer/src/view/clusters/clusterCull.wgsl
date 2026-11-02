@@ -12,8 +12,10 @@
 // - _Instances_: the consumer's own records, `counts.y` words each, its first four the origin less
 //   the camera (`vec3f`, in the frame the passes' axes are in) and the page; beside them, one
 //   `vec2u` an instance: the passes it may enter, a bit a pass (the consumer's own patch-level test,
-//   terrain's `castsInto` in `f64`), and its error unit, m, as `f32` bits (terrain's: its level's
-//   largest vertex spacing).
+//   terrain's `castsInto` in `f64`), with bit 31 set where each such pass keeps every cluster of it
+//   (terrain's instance whose heights fade from another surface, plan R10, R10.T16.i, which its
+//   records do not bound), and its error unit, m, as `f32` bits (terrain's: its level's largest
+//   vertex spacing).
 // - _A cascade's box_ (kind 1): the cluster's sphere against the light-space box of `castsInto`
 //   (`terrainPass.ts`), |v·x_L| ≤ r + ρ, |v·y_L| ≤ r + ρ, v·z_L ≥ −(far + ρ), each widened by
 //   ROUNDING_FRACTION of the camera-relative lengths and ROUNDING_M, the `f32` arithmetic's
@@ -57,7 +59,10 @@
 //   within the pass's tolerance, in `f32` as the twin forms it; s = 1 where none is, for a camera
 //   pass (until T3.c) and for a DAG record.
 // - _The bucket_: the record's shape (its flags' bits 0–3) less the consumer's first shape
-//   (`shapes.x`) × STRIDE_LEVELS + l, from the pass's first bucket; the entry,
+//   (`shapes.x`) × STRIDE_LEVELS + l, from the pass's first bucket; or, for a record that may
+//   discard (its flags' bit 5) of a shape with a may-discard template (`shapes.y` and `shapes.z`,
+//   a byte a shape code 0 to 7, NO_DISCARD_TEMPLATE for none; R14.T1.g), that template, at stride
+//   1. The entry,
 //   (instance << 8) | cluster, at its template's list offset in the pass plus the place the append
 //   took. An append past a template's capacity is dropped: none is, the lists holding every
 //   cluster of every instance once a pass.
@@ -88,10 +93,14 @@ struct CullParams {
   counts : vec4u,
   viewAxis : vec3f,
   templates : u32,
-  listOffsetsLow : vec4u,
-  listOffsetsHigh : vec4u,
-  capacitiesLow : vec4u,
-  capacitiesHigh : vec4u,
+  listOffsets0 : vec4u,
+  listOffsets1 : vec4u,
+  listOffsets2 : vec4u,
+  listOffsets3 : vec4u,
+  capacities0 : vec4u,
+  capacities1 : vec4u,
+  capacities2 : vec4u,
+  capacities3 : vec4u,
   shapes : vec4u,
 }
 
@@ -102,8 +111,13 @@ const PASS_CAMERA : u32 = 2u;
 const PASS_CAMERA_ORDERED : u32 = 3u;
 // A cluster an ordered pass refuses (`cull.ts`' NO_MARK).
 const NO_MARK : u32 = 0xffffffffu;
-// The flags' DAG-cut bit (`record.ts`' CLUSTER_FLAG_DAG).
+// The cull input's bit of an instance each pass it enters keeps whole (`cull.ts`' CULL_INPUT_WHOLE).
+const INPUT_WHOLE : u32 = 0x80000000u;
+// The flags' DAG-cut and may-discard bits (`record.ts`' CLUSTER_FLAG_DAG and
+// CLUSTER_FLAG_MAY_DISCARD), and a shape with no may-discard template (`cullPass.ts`').
 const CLUSTER_FLAG_DAG : u32 = 16u;
+const CLUSTER_FLAG_MAY_DISCARD : u32 = 32u;
+const NO_DISCARD_TEMPLATE : u32 = 0xffu;
 const STRIDE_LEVELS : u32 = 4u;
 // The threads of a workgroup, each taking every 64th cluster of its instance's page.
 const CULL_GROUP : u32 = 64u;
@@ -265,24 +279,45 @@ fn stride_level(cull_pass : CullPass, unit : f32) -> u32 {
 }
 
 // A record's template in the pass (see the module's head): a cascade's stride for a strided one,
-// stride 1 for a camera pass's and a DAG one's.
-fn template_of(cull_pass : CullPass, shape : u32, dag : bool, unit : f32) -> u32 {
+// stride 1 for a camera pass's and a DAG one's; a may-discard record's shape's may-discard
+// template where it has one.
+fn template_of(cull_pass : CullPass, shape : u32, flags : u32, unit : f32) -> u32 {
+  if ((flags & CLUSTER_FLAG_MAY_DISCARD) != 0u && shape < 8u) {
+    let word = select(params.shapes.y, params.shapes.z, shape >= 4u);
+    let discarding = (word >> (8u * (shape % 4u))) & 0xffu;
+    if (discarding != NO_DISCARD_TEMPLATE) {
+      return discarding;
+    }
+  }
+  let dag = (flags & CLUSTER_FLAG_DAG) != 0u;
   let level = select(stride_level(cull_pass, unit), 0u, dag || cull_pass.header.x != PASS_CASCADE);
   return (shape - params.shapes.x) * STRIDE_LEVELS + level;
 }
 
-fn template_offset(t : u32) -> u32 {
-  if (t < 4u) {
-    return params.listOffsetsLow[t];
+// Word `t % 4` of the `t / 4`-th of four `vec4u`, a template's of sixteen.
+fn word_of(a : vec4u, b : vec4u, c : vec4u, d : vec4u, t : u32) -> u32 {
+  switch t / 4u {
+    case 0u: {
+      return a[t % 4u];
+    }
+    case 1u: {
+      return b[t % 4u];
+    }
+    case 2u: {
+      return c[t % 4u];
+    }
+    default: {
+      return d[t % 4u];
+    }
   }
-  return params.listOffsetsHigh[t - 4u];
+}
+
+fn template_offset(t : u32) -> u32 {
+  return word_of(params.listOffsets0, params.listOffsets1, params.listOffsets2, params.listOffsets3, t);
 }
 
 fn template_capacity(t : u32) -> u32 {
-  if (t < 4u) {
-    return params.capacitiesLow[t];
-  }
-  return params.capacitiesHigh[t - 4u];
+  return word_of(params.capacities0, params.capacities1, params.capacities2, params.capacities3, t);
 }
 
 @compute @workgroup_size(64)
@@ -300,6 +335,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
   let page = instance_words[base + 3u];
   let input = cull_inputs[instance];
   let unit = bitcast<f32>(input.y);
+  let whole = (input.x & INPUT_WHOLE) != 0u;
   let clusters = params.counts.z;
   let pass_count = min(params.counts.w, MAX_CULL_PASSES);
   for (var c = local.x; c < clusters; c = c + CULL_GROUP) {
@@ -321,9 +357,9 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
       let enters = real && (input.x & (1u << p)) != 0u;
       let keeps =
         enters &&
-        pass_keeps(cull_pass, centre, record.radius) &&
+        (whole || pass_keeps(cull_pass, centre, record.radius)) &&
         (!dag || dag_drawn(cull_pass, record, centre, parent_centre, parent_radius));
-      let t = template_of(cull_pass, shape, dag, unit);
+      let t = template_of(cull_pass, shape, record.flags, unit);
       if (cull_pass.header.x == PASS_CAMERA_ORDERED) {
         marks[instance * clusters + c] = select(NO_MARK, t, keeps && t < params.templates);
         continue;

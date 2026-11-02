@@ -24,8 +24,8 @@ import { STRIDES, type ClusterTemplate } from "./templates";
 /** The words each pass's reduction writes: its clusters, its triangles and its clusters by stride. */
 export const PASS_STATS_WORDS = 2 + STRIDES.length;
 
-/** The most templates a pass's reduction reads: two `vec4u` of triangles and of strides' levels. */
-const MAX_STATS_TEMPLATES = 8;
+/** The most templates a pass's reduction reads: four `vec4u` of triangles and of strides' levels. */
+const MAX_STATS_TEMPLATES = 16;
 
 /**
  * The `bit-exact` reduction of each pass's buckets: a thread a pass, its buckets' instance counts
@@ -39,9 +39,9 @@ struct StatsParams {
   // x: the passes; y: the templates a pass has.
   counts : vec4u,
   // Each template's triangles, four to a vec4u.
-  triangles : array<vec4u, 2>,
+  triangles : array<vec4u, 4>,
   // Each template's stride's level, log2 of its stride.
-  levels : array<vec4u, 2>,
+  levels : array<vec4u, 4>,
 }
 @group(0) @binding(0) var<storage, read> args : array<u32>;
 @group(0) @binding(1) var<storage, read_write> counts : array<u32>;

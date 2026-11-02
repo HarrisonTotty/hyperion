@@ -152,12 +152,14 @@ describe("the spike report's check", () => {
         wireClusters: false,
         pageBytes: 0,
         meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
+        finClusters: false,
       },
       segments: [
         {
           segment: "orbit coast",
           interiorPatches: { frames: 1, p50: 0, max: 0 },
           edgePatches: { frames: 1, p50: 40, max: 40 },
+          finPatches: { frames: 1, p50: 0, max: 0 },
           drawnTriangles: { frames: 1, p50: 430_080, max: 430_080 },
           litClusterTriangles: null,
           casterTriangles: null,
@@ -166,14 +168,16 @@ describe("the spike report's check", () => {
       ],
     } as const;
     const withGeometry = { ...smallReport(), geometry };
-    // A report from before plan R14's T4 lacks its consumers' levers, which read as off, and the
-    // page pool's bytes (T5.b), which read as 0, and the meshes' tolerance (T5.f), 0 px.
+    // A report from before plan R14's T4 lacks its consumers' levers, which read as off, the page
+    // pool's bytes (T5.b), which read as 0, the meshes' tolerance (T5.f), 0 px, and the edge
+    // patches' lever (T1.g), off.
     const {
       figureClusters: _figureClusters,
       hullClusters: _hullClusters,
       wireClusters: _wireClusters,
       pageBytes: _pageBytes,
       meshTolerancePx: _meshTolerancePx,
+      finClusters: _finClusters,
       ...beforeT4
     } = geometry.settings;
     expect([

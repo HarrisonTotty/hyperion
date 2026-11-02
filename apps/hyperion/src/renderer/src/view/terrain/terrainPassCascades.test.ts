@@ -33,13 +33,14 @@ import { compactTwin } from "../clusters/compact";
 import {
   cascadeKeeps,
   CLUSTER_CULL_KERNEL,
+  CULL_INPUT_WHOLE,
   cullMarksTwin,
   cullTwin,
   NO_MARK,
 } from "../clusters/cull";
 import { type CameraCullPass, type CascadeCullPass, CULL_PASS_BYTES } from "../clusters/cullPass";
-import type { ClusterRecord } from "../clusters/record";
-import { TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
+import { CLUSTER_FLAG_MAY_DISCARD, type ClusterRecord } from "../clusters/record";
+import { TERRAIN_CLUSTERS_PER_PAGE, TERRAIN_PAGE_CLUSTERS } from "../clusters/terrain";
 import { STRIDES } from "../clusters/templates";
 import {
   GEOMETRY_BEFORE_R14,
@@ -51,7 +52,7 @@ import { vertexDir, vertexSpacing } from "./cube";
 import { horizonCone } from "./cull";
 import { allocationTally } from "./gpu/allocationTally";
 import { TERRAIN_SHADOW_PASS_LABEL } from "./gpu/material";
-import { normalsAtlasOf } from "./gpu/resources";
+import { LIT_PATCH_INDICES, normalsAtlasOf, TERRAIN_CLUSTER_MESH } from "./gpu/resources";
 import { INSTANCE_RECORD_BYTES } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey } from "./patchKey";
 import { type PlanetGeometry, planetGeometry, spheroidNormal, surfacePoint } from "./planet";
@@ -421,12 +422,16 @@ function f32Of(bits: number): number {
 
 /** A clustered pass's list entries a pass, from its slots. */
 function PASS_ENTRIES(made: Made): number {
-  return made.pass.layout.slots.slotCount * 4 * TERRAIN_CLUSTERS_PER_PAGE;
+  // Its blocks and strips at four strides, then each shape's may-discard template (R14.T1.g).
+  return made.pass.layout.slots.slotCount * (4 * TERRAIN_CLUSTERS_PER_PAGE + TERRAIN_PAGE_CLUSTERS);
 }
 
 /** A streamed pass at {@link NEAR} whose every bake is wholly surveyed: its patches interior. */
 async function clusteredPass(setting: "high" | "low" = "high"): Promise<Made> {
   const made = await litPass(setting);
+  // Its ground's changes cut at their first draw, so that no record's heights fade, which the cull
+  // keeps whole (R10.T16.i; R14.T1.g).
+  made.pass.setReducedMotion(true);
   made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
   // Until nothing more is asked for, so that no patch is drawn by a stand-in.
   stream(made, [passView(PRIMARY, NEAR)], 24);
@@ -553,6 +558,18 @@ function instanceOrigins(
   return out;
 }
 
+/** A pass's templates, its buckets a pass: the strided eight and the may-discard four (R14.T1.g). */
+const TEMPLATES = TERRAIN_CLUSTER_MESH.templates.length;
+
+/** A record's shape by its flags' code (`record.ts`' `CLUSTER_SHAPE_CODE`). */
+const SHAPES: ReadonlyArray<ClusterRecord["shape"]> = [
+  "terrain-block",
+  "terrain-skirt",
+  "mesh",
+  "terrain-fin",
+  "terrain-head",
+];
+
 /** Each slot's cluster records as last written, by slot and cluster. */
 function clusterRecordsOf(
   engine: CountingRenderEngine,
@@ -560,7 +577,10 @@ function clusterRecordsOf(
   const bySlot = new Map<number, DataView>();
   for (const write of engine.writes) {
     if (write.buffer === "terrain cluster records") {
-      bySlot.set(write.offsetBytes / (96 * 32), new DataView(write.data.slice().buffer));
+      bySlot.set(
+        write.offsetBytes / (TERRAIN_PAGE_CLUSTERS * 32),
+        new DataView(write.data.slice().buffer),
+      );
     }
   }
   return (page, cluster) => {
@@ -579,8 +599,8 @@ function clusterRecordsOf(
       mode: "strided",
       strideErrorBits: null,
       templateRef: view.getUint32(at + 24, true),
-      shape: (view.getUint32(at + 28, true) & 0xf) === 0 ? "terrain-block" : "terrain-skirt",
-      mayDiscard: false,
+      shape: SHAPES[view.getUint32(at + 28, true) & 0xf] ?? "terrain-block",
+      mayDiscard: (view.getUint32(at + 28, true) & CLUSTER_FLAG_MAY_DISCARD) !== 0,
       material: 0,
     };
   };
@@ -892,7 +912,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       [
         `terrain-cluster-shadow-${made.pass.layout.vertexPath}`,
         `terrain clusters (${PRIMARY}) arguments`,
-        (2 * 8 + 0) * 20,
+        (2 * TEMPLATES + 0) * 20,
         `terrain clusters (${PRIMARY}) lists`,
         `terrain interior instances (${PRIMARY})`,
         2 * PASS_ENTRIES(made),
@@ -900,7 +920,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       [
         `terrain-cluster-shadow-${made.pass.layout.vertexPath}`,
         `terrain clusters (${PRIMARY}) arguments`,
-        (2 * 8 + 4) * 20,
+        (2 * TEMPLATES + 4) * 20,
         `terrain clusters (${PRIMARY}) lists`,
         `terrain interior instances (${PRIMARY})`,
         2 * PASS_ENTRIES(made) + 4 * 64 * made.pass.layout.slots.slotCount,
@@ -924,7 +944,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     ]).toEqual([
       [8, 8, 8, 8],
       [true, true, true, true],
-      [0, 1, 2, 3, 4, 5, 6, 7].map((t) => (1 * 8 + t) * 20),
+      [0, 1, 2, 3, 4, 5, 6, 7].map((t) => (1 * TEMPLATES + t) * 20),
     ]);
   });
 
@@ -963,12 +983,12 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       [
         [
           `terrain-cluster-depth-${made.pass.layout.vertexPath}`,
-          (4 * 8 + 0) * 20,
+          (4 * TEMPLATES + 0) * 20,
           `terrain interior instances (${PRIMARY})`,
         ],
         [
           `terrain-cluster-depth-${made.pass.layout.vertexPath}`,
-          (4 * 8 + 4) * 20,
+          (4 * TEMPLATES + 4) * 20,
           `terrain interior instances (${PRIMARY})`,
         ],
       ],
@@ -1149,11 +1169,12 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     ).toEqual([null, null, null, null]);
   });
 
-  it("writes each slot's 96 cluster records at its upload, and samples its counters only when measured (R14.T1.b)", async () => {
+  it("writes each slot's 116 cluster records at its upload, its fin clusters' too (R14.T1.g), and samples its counters only when measured (R14.T1.b)", async () => {
     const made = await clusteredPass();
     const writes = made.engine.writes.filter((w) => w.buffer === "terrain cluster records");
+    const bytes = TERRAIN_PAGE_CLUSTERS * 32;
     expect(writes.length).toBeGreaterThan(0);
-    expect(writes.every((w) => w.bytes === 96 * 32 && w.offsetBytes % (96 * 32) === 0)).toBe(true);
+    expect(writes.every((w) => w.bytes === bytes && w.offsetBytes % bytes === 0)).toBe(true);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const copies = (): number =>
       made.engine.dispatched.filter((d) => d.kernel === "cluster stats reduction").length;
@@ -1194,7 +1215,9 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       made.engine.kernelPairs.filter((pair) => pair.name === "cluster cull").length > made0.kernels,
       made.engine.writes
         .slice(made0.writes)
-        .some((w) => w.buffer === "terrain cluster records" && w.bytes === 96 * 32),
+        .some(
+          (w) => w.buffer === "terrain cluster records" && w.bytes === TERRAIN_PAGE_CLUSTERS * 32,
+        ),
       ["terrain cluster records", `terrain clusters (${PRIMARY}) lists`].every((name) =>
         created.includes(name),
       ),
@@ -1287,7 +1310,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       [
         "terrain clusters",
         `terrain-lit-cluster-${path}`,
-        (8 * pass + 0) * 20,
+        (TEMPLATES * pass + 0) * 20,
         [pass * entries],
         `terrain interior instances (${PRIMARY})`,
         lists,
@@ -1295,7 +1318,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       [
         "terrain clusters",
         `terrain-lit-cluster-${path}`,
-        (8 * pass + 4) * 20,
+        (TEMPLATES * pass + 4) * 20,
         [pass * entries + blocks],
         `terrain interior instances (${PRIMARY})`,
         lists,
@@ -1506,6 +1529,180 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       null,
       0,
     ]);
+  });
+});
+
+/** The draws of a frame, or a pass, as (mesh, material, bucket, instances). */
+function named(draws: ReadonlyArray<DrawItem>): unknown[] {
+  return draws.map((draw) => [
+    draw.mesh.name,
+    draw.material.name,
+    draw.indirect === undefined ? null : draw.indirect.offsetBytes / 20,
+    draw.storageBuffers?.["instances"]?.name,
+  ]);
+}
+
+/** Of a frame's cull inputs, whether each record's is kept whole (R10.T16.i's fades). */
+function keptWhole(words: ReadonlyArray<number>): boolean[] {
+  return words.filter((_, k) => k % 2 === 0).map((word) => (word & CULL_INPUT_WHOLE) !== 0);
+}
+
+describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
+  /**
+   * A body's layers surveyed on the patch's half x < 32 alone, of a field 20 levels deep: its patches
+   * edge patches at every cell code but 0's and 6's.
+   */
+  function halfSurveyed(): TerrainLayers {
+    const surveyMask = new Uint8Array(65 * 65);
+    for (let y = 0; y <= 64; y += 1) {
+      surveyMask.fill(255, 65 * y, 65 * y + 32);
+    }
+    return { ...layers(), surveyMask, fieldLevel: 20 };
+  }
+
+  /** A streamed pass at {@link NEAR} over {@link halfSurveyed}'s layers, its fades cut. */
+  async function edgePass(given?: CountingRenderEngine, reducedMotion = true): Promise<Made> {
+    const made = await litPass("high", given);
+    made.pass.setReducedMotion(reducedMotion);
+    made.lane().layers = halfSurveyed();
+    // Until nothing more is asked for, so that no patch is drawn by a stand-in.
+    stream(made, [passView(PRIMARY, NEAR)], 24);
+    return made;
+  }
+
+  it("draws them with the interior patches from the lit pass's buckets, the may-discard ones by the fin form, and none by the lit mesh", async () => {
+    const made = await edgePass();
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const path = made.pass.layout.vertexPath;
+    const instances = `terrain interior instances (${PRIMARY})`;
+    const lit = 5 * TEMPLATES;
+    expect([frame.patches.fins > 0, frame.patches.fins === frame.patches.edge]).toEqual([
+      true,
+      true,
+    ]);
+    expect(named(frame.draws)).toEqual([
+      ["terrain clusters", `terrain-lit-cluster-${path}`, lit, instances],
+      ["terrain clusters", `terrain-lit-cluster-${path}`, lit + 4, instances],
+      ["terrain clusters", `terrain-lit-fin-${path}`, lit + 8, instances],
+      ["terrain clusters", `terrain-lit-fin-${path}`, lit + 9, instances],
+      ["terrain clusters", `terrain-lit-fin-${path}`, lit + 10, instances],
+      ["terrain clusters", `terrain-lit-fin-${path}`, lit + 11, instances],
+    ]);
+    // Counted as edge patches on the cluster path, their drawn triangles their lit mesh's.
+    const counts = made.pass.counts(PRIMARY);
+    expect([counts?.patches, counts?.drawnTriangles]).toEqual([
+      { interior: 0, edge: frame.patches.edge, fins: frame.patches.edge },
+      (frame.patches.edge * LIT_PATCH_INDICES) / 3,
+    ]);
+    // Their records in the interior patches' buffer, none in the lit mesh's.
+    expect([
+      recordsIn(made.engine, instances).length,
+      recordsIn(made.engine, `terrain instances (${PRIMARY})`).length,
+    ]).toEqual([made.pass.lastStep?.drawSet.count ?? -1, 0]);
+  });
+
+  it("casts them at stride 1 through the cull, the may-discard buckets by the fin caster", async () => {
+    const made = await edgePass();
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const path = made.pass.layout.vertexPath;
+    const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+    const units = new Set(
+      Array.from({ length: made.pass.lastStep?.drawSet.count ?? -1 }, (_, n) =>
+        f32Of(inputs[2 * n + 1] ?? 0),
+      ),
+    );
+    expect([...units]).toEqual([Math.fround(1e30)]);
+    const cascade = cascadesOf(frame).passes[1] ?? fail();
+    const clusters = cascade.draws.filter((draw) => draw.mesh.name === "terrain clusters");
+    expect(
+      clusters.map((draw) => [draw.material.name, (draw.indirect?.offsetBytes ?? 0) / 20]),
+    ).toEqual([
+      ...[0, 1, 2, 3, 4, 5, 6, 7].map((t) => [`terrain-cluster-shadow-${path}`, TEMPLATES + t]),
+      ...[8, 9, 10, 11].map((t) => [`terrain-fin-shadow-${path}`, TEMPLATES + t]),
+    ]);
+    expect(cascadesOf(frame).litMeshCasters).toEqual([0, 0, 0, 0]);
+  });
+
+  it("gives the overlay its depth of them on the cluster path, the may-discard buckets by the fin depth", async () => {
+    const made = await edgePass();
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const path = made.pass.layout.vertexPath;
+    const overlay = frame.overlayDepth ?? fail();
+    const at = 4 * TEMPLATES;
+    expect([
+      overlay.edge,
+      overlay.clusters.map((d) => [d.material.name, (d.indirect?.offsetBytes ?? 0) / 20]),
+    ]).toEqual([
+      [],
+      [
+        [`terrain-cluster-depth-${path}`, at],
+        [`terrain-cluster-depth-${path}`, at + 4],
+        [`terrain-fin-depth-${path}`, at + 8],
+        [`terrain-fin-depth-${path}`, at + 9],
+        [`terrain-fin-depth-${path}`, at + 10],
+        [`terrain-fin-depth-${path}`, at + 11],
+      ],
+    ]);
+  });
+
+  it("draws them by the lit mesh by the way back, the interior patches' path as before", async () => {
+    const made = await edgePass();
+    made.pass.setGeometry({ ...SETTINGS.high.geometry, finClusters: false });
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    expect([
+      frame.patches.fins,
+      frame.draws.map((draw) => draw.mesh.name),
+      recordsIn(made.engine, `terrain instances (${PRIMARY})`).length,
+    ]).toEqual([0, ["terrain lit patch"], made.pass.lastStep?.drawSet.count ?? -1]);
+  });
+
+  it("draws them by the lit mesh where their fin form is refused, and states the refusal", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine({
+      maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
+      maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
+    });
+    engine.failMaterials((name) => name.startsWith("terrain-lit-fin"));
+    const made = await edgePass(engine);
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    expect([
+      frame.patches.fins,
+      frame.draws.map((draw) => draw.mesh.name),
+      made.pass.clusterRefusal?.startsWith("the lit-fin form refused"),
+    ]).toEqual([0, ["terrain lit patch"], true]);
+  });
+
+  it("keeps whole in the cull each record whose heights fade from another surface, as a patch rising from the datum's (R10.T16.i)", async () => {
+    const rising = await edgePass(undefined, false);
+    rising.pass.drawFor(PRIMARY, frameOf(NEAR, true, 0));
+    const fading = wordsIn(rising.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+    const cut = await edgePass();
+    cut.pass.drawFor(PRIMARY, frameOf(NEAR, true, 0));
+    const still = wordsIn(cut.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+    expect([keptWhole(fading).some(Boolean), keptWhole(still).some(Boolean)]).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("makes its fin forms again after a restore, its first frame's items a fresh pass's (Design note 16)", async () => {
+    const shapeOf = (frame: TerrainViewFrame): unknown => ({
+      draws: frame.draws.map(drawShape),
+      casters: cascadesOf(frame).passes.map((pass) => pass.draws.map(drawShape)),
+      overlay: frame.overlayDepth?.clusters.map(drawShape) ?? null,
+    });
+    const made = await edgePass();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    made.engine.loseDevice();
+    made.engine.restore();
+    await made.pass.ready();
+    made.lane().layers = halfSurveyed();
+    stream(made, [passView(PRIMARY, NEAR)], 24);
+    const restored = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const fresh = await edgePass();
+    const freshFrame = fresh.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    expect(restored.patches.fins).toBeGreaterThan(0);
+    expect(shapeOf(restored)).toEqual(shapeOf(freshFrame));
   });
 });
 

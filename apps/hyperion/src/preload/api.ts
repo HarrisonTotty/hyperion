@@ -241,6 +241,8 @@ export interface GeometryOverride {
   readonly pageBytes?: number;
   /** R14.T5.f: a mesh's DAG-cut tolerance, px, in its camera pass and as a wireframe occluder. */
   readonly meshTolerancePx?: MeshTolerancePx;
+  /** R14.T1.g: the lit pass's edge patches through the cluster path, their fins and heads too. */
+  readonly finClusters?: boolean;
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */
@@ -1039,6 +1041,11 @@ export interface SpikeGeometrySegment {
   readonly segment: string;
   readonly interiorPatches: SpikeCountFigures | null;
   readonly edgePatches: SpikeCountFigures | null;
+  /**
+   * Of the edge patches, those the lit pass's cluster path drew (plan R14, R14.T1.g; the rest are
+   * stand-ins, or the lit mesh's where `finClusters` is off); `null` in a file written before it.
+   */
+  readonly finPatches: SpikeCountFigures | null;
   readonly drawnTriangles: SpikeCountFigures | null;
   /** The drawn triangles as the lit pass's cluster path drew them (plan R14, R14.T2.a). */
   readonly litClusterTriangles: SpikeCountFigures | null;

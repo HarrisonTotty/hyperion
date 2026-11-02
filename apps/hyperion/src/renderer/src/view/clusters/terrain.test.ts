@@ -12,11 +12,17 @@ import { vertexDir } from "../terrain/cube";
 import { litInteriorMeshData } from "../terrain/gpu/resources";
 import type { PatchKey } from "../terrain/patchKey";
 import { type BodyFigure, planetGeometry, surfacePoint } from "../terrain/planet";
-import { CLUSTER_FLAG_MEASURED, CLUSTER_RECORD_BYTES } from "./record";
+import {
+  CLUSTER_FLAG_MAY_DISCARD,
+  CLUSTER_FLAG_MEASURED,
+  CLUSTER_RECORD_BYTES,
+  CLUSTER_SHAPE_CODE,
+} from "./record";
 import {
   edgeVertex,
   TERRAIN_BLOCKS,
   TERRAIN_CLUSTERS_PER_PAGE,
+  TERRAIN_PAGE_CLUSTERS,
   terrainClusterGrid,
   terrainClusterPlace,
   type TerrainClusterSource,
@@ -90,8 +96,16 @@ describe("terrain's clusters (plan R14, R14.T1.b)", () => {
       ["terrain-skirt", 2, 8, 8],
       ["terrain-skirt", 4, 4, 4],
       ["terrain-skirt", 8, 2, 2],
+      ["terrain-block", 1, 128, 128],
+      ["terrain-skirt", 1, 16, 16],
+      ["terrain-fin", 1, 128, 128],
+      ["terrain-head", 1, 64, 64],
     ]);
-    expect(MESH.templates.map((t) => t.errorScale)).toEqual([1, 2, 4, 8, 1, 2, 4, 8]);
+    expect(MESH.templates.map((t) => t.errorScale)).toEqual([1, 2, 4, 8, 1, 2, 4, 8, 1, 1, 1, 1]);
+    expect(MESH.templates.map((t) => t.mayDiscard)).toEqual([
+      ...Array.from({ length: 8 }, () => false),
+      ...Array.from({ length: 4 }, () => true),
+    ]);
   });
 
   it("wind every block triangle anticlockwise in the grid's (x, y), as the lit mesh does, at every stride", () => {
@@ -212,8 +226,8 @@ describe("terrain's cluster records (plan R14, R14.T1.b)", () => {
     },
   );
 
-  it("write each record strided, never discarding, with (0, +∞) for its error bytes", () => {
-    const records = new DataView(new ArrayBuffer(TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES));
+  it("write each record strided, with (0, +∞) for its error bytes, and with no survey mask an interior patch's, its blocks and strips opaque and no fin cluster drawn", () => {
+    const records = new DataView(new ArrayBuffer(TERRAIN_PAGE_CLUSTERS * CLUSTER_RECORD_BYTES));
     const key = { face: 0, level: 5, i: 3, j: 4 } as const;
     const [x, y, z] = surfacePoint(WGS84_FIGURE, vertexDir(key, 32, 32), 0);
     const started = performance.now();
@@ -227,12 +241,24 @@ describe("terrain's cluster records (plan R14, R14.T1.b)", () => {
     const at = (cluster: number, word: number): number =>
       records.getUint32(cluster * 32 + 4 * word, true);
     expect([at(0, 4), at(0, 5), at(0, 7), at(TERRAIN_BLOCKS, 7)]).toEqual([0, 0x7f80_0000, 0, 1]);
+    // With no survey mask the patch is an interior one's: no fin cluster is drawn (R14.T1.g).
+    const fins = Array.from(
+      { length: TERRAIN_PAGE_CLUSTERS - TERRAIN_CLUSTERS_PER_PAGE },
+      (_, n) => TERRAIN_CLUSTERS_PER_PAGE + n,
+    );
+    expect(fins.map((c) => [records.getFloat32(c * 32 + 12, true) < 0, at(c, 7)])).toEqual(
+      fins.map((c) => [
+        true,
+        CLUSTER_SHAPE_CODE[c < TERRAIN_CLUSTERS_PER_PAGE + 8 ? "terrain-head" : "terrain-fin"] |
+          CLUSTER_FLAG_MAY_DISCARD,
+      ]),
+    );
     // A slot's records are written at its upload, some ten a second: well under a frame's time.
     expect(tookMs).toBeLessThan(50);
   });
 
   it("write a bake's measured errors into each record, marked measured (R14.T3.b)", () => {
-    const records = new DataView(new ArrayBuffer(TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES));
+    const records = new DataView(new ArrayBuffer(TERRAIN_PAGE_CLUSTERS * CLUSTER_RECORD_BYTES));
     const { source, clusterErrors } = measuredSource();
     writeTerrainClusterRecords(
       planetGeometry(WGS84_FIGURE, null),
@@ -255,7 +281,7 @@ describe("terrain's cluster records (plan R14, R14.T1.b)", () => {
   });
 
   it("refuse a bake's measured errors short of four a cluster (R14.T3.b)", () => {
-    const records = new DataView(new ArrayBuffer(TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES));
+    const records = new DataView(new ArrayBuffer(TERRAIN_PAGE_CLUSTERS * CLUSTER_RECORD_BYTES));
     const { source, clusterErrors } = measuredSource();
     expect(() => {
       writeTerrainClusterRecords(

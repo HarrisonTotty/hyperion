@@ -645,13 +645,14 @@ function stridesOf(stats: ReadonlyArray<ClusterPassStats> | null): string {
 }
 
 /**
- * The high setting's geometry at stride 1, every cascade rendered every frame: its exact levers
- * alone (plan R14, R14.T1.c).
+ * The high setting's geometry at stride 1, every cascade rendered every frame, the edge patches by
+ * their lit mesh: its exact levers alone (plan R14, R14.T1.c), R14.T1.g's checked apart.
  */
 const RECEIVERS_CULLED: GeometrySettings = {
   ...SETTINGS.high.geometry,
   casterStrideCap: 1,
   farCascadeRate: 1,
+  finClusters: false,
 };
 
 /**
@@ -1117,6 +1118,37 @@ export async function checkShadowCascades(
         culled.every((n, k) => n <= (casting[k] ?? 0)) &&
         sum(culled) < sum(casting),
       `${path}; caster triangles by cascade ${culled.join(", ")} (clusters ${clustersOf(culledStats)}), ${shareOf(culled, casting)} of the cluster path's alone, ${shareOf(culled, prior)} of before R14's; digests ${bytesDigest(shadowed)}, ${bytesDigest(shadowedBefore)} before; layers ${layers.join(", ")}, ${layers.filter((d, k) => d !== layersBefore[k]).length} of them differing where no receiver samples`,
+    );
+    // R14.T1.g: the edge patches cast through the cull beside the interior patches, their fins and
+    // skirt heads as clusters and every cluster the survey's edge comes near by the fin caster, at
+    // stride 1, against their lit mesh's casters, from the same selection and residents: the layers
+    // byte for byte without the receivers' cull, and the frame they shadow with it.
+    made.setGeometry({ ...CLUSTERS_ALONE, finClusters: true });
+    const finAlone = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const shadowedFinAlone = await texelsOf(engine, "cascades: fins alone", view, finAlone.draws);
+    const layersFinAlone =
+      target === null
+        ? ["none"]
+        : await layerDigests(engine, target.depth, target.layers, target.sizePx);
+    const finAloneStats = made.clusterStats(passView.id);
+    made.setGeometry({ ...RECEIVERS_CULLED, finClusters: true });
+    const finned = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const shadowedFins = await texelsOf(engine, "cascades: fins", view, finned.draws);
+    made.setGeometry(SETTINGS.high.geometry);
+    const withFins = casterTriangles(finAlone.cascades?.litMeshCasters ?? [], finAloneStats);
+    // The edge patches' own casters without the receivers' cull: the lit mesh's before, and after
+    // the frame's less the interior patches' clusters, the same in both.
+    const edgeBefore = (alone.cascades?.litMeshCasters ?? []).map((n) => n * LIT_PATCH_TRIANGLES);
+    const edgeAfter = withFins.map((n, k) => n - ((casting[k] ?? 0) - (edgeBefore[k] ?? 0)));
+    checks.check(
+      "R14.T1.g the edge patches cast through the cull, their fins and skirt heads as clusters, the layers and the frame they shadow the lit mesh's, byte for byte, with no more caster triangles",
+      bytesDigest(shadowedFinAlone) === bytesDigest(shadowedAlone) &&
+        layersFinAlone.join() === layersAlone.join() &&
+        bytesDigest(shadowedFins) === bytesDigest(shadowed) &&
+        finned.patches.fins > 0 &&
+        finAloneStats !== null &&
+        edgeAfter.every((n, k) => n <= (edgeBefore[k] ?? 0)),
+      `${path}; ${String(finned.patches.interior)} interior and ${String(finned.patches.edge)} edge patches, ${String(finned.patches.fins)} of them on the cluster path; caster triangles without the receivers' cull by cascade ${withFins.join(", ")} (clusters ${clustersOf(finAloneStats)}), ${casting.join(", ")} with the edge patches by the lit mesh; the edge patches' ${edgeAfter.join(", ")}, ${edgeBefore.join(", ")} by the lit mesh, ${shareOf(edgeAfter, edgeBefore)} of them; digests ${bytesDigest(shadowedFins)}, ${bytesDigest(shadowed)} by the lit mesh, alone ${bytesDigest(shadowedFinAlone)}, ${bytesDigest(shadowedAlone)}; layers alone ${layersFinAlone.join(", ")}; by the lit mesh ${layersAlone.join(", ")}`,
     );
     // R14.T1.d: the casters at their cascade's texel against T1.c's at stride 1, from the same
     // selection and residents at the same exposure, at the comparison's size: bounded, not exact.

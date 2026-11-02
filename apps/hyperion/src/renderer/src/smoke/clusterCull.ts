@@ -57,7 +57,7 @@ import {
   type ClusterRecord,
   packClusterRecord,
 } from "../view/clusters/record";
-import { terrainClusterMesh } from "../view/clusters/templates";
+import { TERRAIN_DISCARD_TEMPLATES, terrainClusterMesh } from "../view/clusters/templates";
 import { quaternionFromRows } from "../view/camera/quaternion";
 import { frustumOf } from "../view/terrain/cull";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
@@ -164,6 +164,20 @@ function deviceBuckets(
   return out;
 }
 
+/**
+ * The shape of the check's cluster `c` of a page: 64 blocks, 24 strips, then 4 fin runs and 4 head
+ * runs (plan R14, R14.T1.g), so that every template of terrain's mesh is drawn.
+ */
+function smokeShapeOf(c: number): ClusterRecord["shape"] {
+  return c < 64
+    ? "terrain-block"
+    : c < 88
+      ? "terrain-skirt"
+      : c < 92
+        ? "terrain-fin"
+        : "terrain-head";
+}
+
 /** R14.T1.b's cull on the device against its twin: see the module's remarks. */
 export async function checkClusterCull(engine: RenderEngine, checks: Checks): Promise<void> {
   const next = random(0x5eed_14);
@@ -176,8 +190,9 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       mode: "strided",
       strideErrorBits: null,
       templateRef: 0,
-      shape: n % CLUSTERS < 64 ? "terrain-block" : "terrain-skirt",
-      mayDiscard: false,
+      shape: smokeShapeOf(n % CLUSTERS),
+      // Every fin and head run, and every fifth block and strip, may discard (R14.T1.g).
+      mayDiscard: n % CLUSTERS >= 88 || n % 5 === 0,
       material: 0,
     });
   }
@@ -248,7 +263,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     "smoke clusters",
     PASSES,
     templates,
-    templates.map((t) => INSTANCES * (t.shape === "terrain-block" ? 64 : 32)),
+    templates.map(() => INSTANCES * CLUSTERS),
   );
   const made: BufferHandle[] = [];
   const buffer = (name: string, data: ArrayBufferView): BufferHandle => {
@@ -313,6 +328,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
         templateCapacities: buckets.capacities,
         viewAxis,
         firstShape: 0,
+        discardTemplates: TERRAIN_DISCARD_TEMPLATES,
       },
       paramBytes,
     );
@@ -373,6 +389,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       places,
       templates: templates.length,
       viewAxis,
+      discardTemplates: TERRAIN_DISCARD_TEMPLATES,
     };
     const exact = cullTwin(input, 0);
     const widened = cullTwin(input, 2);
@@ -400,7 +417,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       }
     }
     checks.check(
-      "R14.T1.b the cluster cull on the device keeps every cluster its twin's exact test keeps, and none its widened test refuses, its receivers' cull (R14.T1.c) on three of its passes and a camera's frustum (R14.T1.e) its fifth",
+      "R14.T1.b the cluster cull on the device keeps every cluster its twin's exact test keeps, and none its widened test refuses, its receivers' cull (R14.T1.c) on three of its passes and a camera's frustum (R14.T1.e) its fifth, each may-discard record in its shape's may-discard bucket (R14.T1.g)",
       missing === 0 &&
         extra === 0 &&
         kept > 0 &&
@@ -451,7 +468,7 @@ function compactOnDevice(engine: RenderEngine, compact: ComputeHandle, run: Comp
           params: packCompactParams({
             instances: run.instances,
             clustersPerPage: run.clusters,
-            templates: COMPACT_TEMPLATES,
+            templates: run.buckets.templateOffsets.length,
             phase,
             bucketBase: place.bucketBase,
             listBase: place.listBase,
@@ -482,7 +499,7 @@ async function deviceLists(
   const args = new Uint32Array(await engine.readBuffer(buckets.args, "tolerance"));
   const lists = new Uint32Array(await engine.readBuffer(buckets.lists, "tolerance"));
   const place = buckets.place(pass);
-  return Array.from({ length: COMPACT_TEMPLATES }, (_, t) => {
+  return Array.from({ length: buckets.templateOffsets.length }, (_, t) => {
     const count = args[(place.bucketBase + t) * 5 + 1] ?? 0;
     const from = place.listBase + (buckets.templateOffsets[t] ?? 0);
     return [...lists.subarray(from, from + count)].map((e) => (e >>> 8) * 256 + (e & 0xff));
@@ -545,7 +562,7 @@ async function orderedCheck(
     extra += mark !== NO_MARK && widened[at] !== mark ? 1 : 0;
     byHorizon += noHorizon[at] !== NO_MARK && exact[at] === NO_MARK ? 1 : 0;
   });
-  const twin = compactTwin(deviceMarks, INSTANCES, CLUSTERS, COMPACT_TEMPLATES);
+  const twin = compactTwin(deviceMarks, INSTANCES, CLUSTERS, buckets.templateOffsets.length);
   return {
     kept,
     missing,
@@ -564,7 +581,7 @@ async function manyCheck(
 ): Promise<{ readonly differing: number; readonly entries: number }> {
   const { templates } = terrainClusterMesh();
   const marksData = Uint32Array.from({ length: MANY_INSTANCES * CLUSTERS }, () =>
-    next() < 0.5 ? NO_MARK : Math.floor(next() * COMPACT_TEMPLATES),
+    next() < 0.5 ? NO_MARK : Math.floor(next() * templates.length),
   );
   const marks = engine.createBuffer({
     name: "smoke compaction marks",
@@ -591,7 +608,7 @@ async function manyCheck(
       instances: MANY_INSTANCES,
       clusters: CLUSTERS,
     });
-    const twin = compactTwin(marksData, MANY_INSTANCES, CLUSTERS, COMPACT_TEMPLATES);
+    const twin = compactTwin(marksData, MANY_INSTANCES, CLUSTERS, templates.length);
     return listsDiffer(await deviceLists(engine, buckets, 0), twin.lists);
   } finally {
     engine.releaseBuffer(marks);

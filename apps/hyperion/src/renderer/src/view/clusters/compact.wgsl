@@ -21,8 +21,10 @@
 struct CompactParams {
   counts : vec4u,
   place : vec4u,
-  listOffsetsLow : vec4u,
-  listOffsetsHigh : vec4u,
+  listOffsets0 : vec4u,
+  listOffsets1 : vec4u,
+  listOffsets2 : vec4u,
+  listOffsets3 : vec4u,
 }
 
 @group(0) @binding(0) var<uniform> params : CompactParams;
@@ -32,19 +34,30 @@ struct CompactParams {
 @group(0) @binding(4) var<storage, read_write> args : array<u32>;
 
 // `compact.ts`' COMPACT_TEMPLATES, NO_MARK and COMPACT_WORKGROUP.
-const TEMPLATES : u32 = 8u;
+const TEMPLATES : u32 = 16u;
 const NO_MARK : u32 = 0xffffffffu;
 const GROUP : u32 = 128u;
 
-var<workgroup> tally : array<atomic<u32>, 8>;
-var<workgroup> runs : array<u32, 1024>;
+var<workgroup> tally : array<atomic<u32>, 16>;
+var<workgroup> runs : array<u32, 2048>;
 var<workgroup> held : array<u32, 128>;
 
+// Template `t`'s first list entry, word `t % 4` of the `t / 4`-th offsets' `vec4u`.
 fn template_offset(t : u32) -> u32 {
-  if (t < 4u) {
-    return params.listOffsetsLow[t];
+  switch t / 4u {
+    case 0u: {
+      return params.listOffsets0[t % 4u];
+    }
+    case 1u: {
+      return params.listOffsets1[t % 4u];
+    }
+    case 2u: {
+      return params.listOffsets2[t % 4u];
+    }
+    default: {
+      return params.listOffsets3[t % 4u];
+    }
   }
-  return params.listOffsetsHigh[t - 4u];
 }
 
 // The instance's cluster `local`'s mark, NO_MARK past the page's clusters.

@@ -42,10 +42,15 @@
 
 import { PHASE_TABLE_SAMPLES } from "../../appearance/law";
 import { ClusterBuckets } from "../../clusters/buckets";
-import { CLUSTER_RECORD_BYTES } from "../../clusters/record";
+import { CLUSTER_RECORD_BYTES, type ClusterShape } from "../../clusters/record";
+import { COMPACT_TEMPLATES } from "../../clusters/compact";
 import {
+  FIN_LINES,
   TERRAIN_BLOCKS,
   TERRAIN_CLUSTERS_PER_PAGE,
+  TERRAIN_FIN_CLUSTERS,
+  TERRAIN_HEAD_CLUSTERS,
+  TERRAIN_PAGE_CLUSTERS,
   writeTerrainClusterRecords,
 } from "../../clusters/terrain";
 import { terrainClusterMesh } from "../../clusters/templates";
@@ -150,7 +155,7 @@ export const LIT_VERTEX_CODE = {
  * sixteenth, so that a coarse cell's edge has its skirt in every patch down to two levels coarser
  * than the coarse field, where a cell spans 16 quads.
  */
-export const SURVEY_FIN_LINES: ReadonlyArray<number> = [16, 32, 48];
+export const SURVEY_FIN_LINES: ReadonlyArray<number> = FIN_LINES;
 
 /** The fins' datum vertices: 65 along each fin line, columns then rows. */
 const FIN_VERTICES = 2 * SURVEY_FIN_LINES.length * PATCH_VERTICES_PER_SIDE;
@@ -187,8 +192,11 @@ export const CLUSTER_LIT_PASS = CLUSTER_OVERLAY_PASS + 1;
 /** The passes a view's cluster buckets hold: the cascades', the overlay's and the lit pass's. */
 export const CLUSTER_PASSES = CLUSTER_LIT_PASS + 1;
 
-/** Bytes of a slot's cluster records: its patch's 96 clusters (plan R14, R14.T1.b). */
-export const CLUSTER_RECORDS_SLOT_BYTES = TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES;
+/**
+ * Bytes of a slot's cluster records: its patch's 96 blocks and strips (plan R14, R14.T1.b) and its
+ * 20 fin clusters (R14.T1.g).
+ */
+export const CLUSTER_RECORDS_SLOT_BYTES = TERRAIN_PAGE_CLUSTERS * CLUSTER_RECORD_BYTES;
 
 /** Bytes of an interior record's cull input: its passes' mask and its error unit, two `u32`. */
 export const CULL_INPUT_BYTES = 8;
@@ -673,6 +681,33 @@ export function litInteriorMeshData(): {
 }
 
 /**
+ * The clusters of a terrain page of `shape` (plan R14, R14.T1.b; T1.g), a bucket's room an
+ * instance.
+ *
+ * @throws Error for the mesh shape, which no terrain page holds.
+ */
+function terrainClustersOf(shape: ClusterShape): number {
+  let clusters: number;
+  switch (shape) {
+    case "terrain-block":
+      clusters = TERRAIN_BLOCKS;
+      break;
+    case "terrain-skirt":
+      clusters = TERRAIN_CLUSTERS_PER_PAGE - TERRAIN_BLOCKS;
+      break;
+    case "terrain-fin":
+      clusters = TERRAIN_FIN_CLUSTERS - TERRAIN_HEAD_CLUSTERS;
+      break;
+    case "terrain-head":
+      clusters = TERRAIN_HEAD_CLUSTERS;
+      break;
+    case "mesh":
+      throw new Error("a terrain page holds no mesh cluster");
+  }
+  return clusters;
+}
+
+/**
  * Whether a bake draws as an interior patch (plan R14, R14.T1.a): a body's bake whose every vertex
  * is surveyed, its survey mask 255 throughout (so its `unsurveyedCells` are none), which the survey
  * discard never cuts and whose skirt heads and fins draw nothing ({@link litInteriorMeshData}).
@@ -896,7 +931,8 @@ export interface TerrainViewBuffers {
  * One view's cluster path buffers (plan R14, R14.T1.b): its buckets, one pass a shadow cascade, the
  * overlay's and the lit pass's, each interior record's cull input ({@link CULL_INPUT_BYTES}), one
  * per slot at most, and the lit pass's stable compaction's (plan R14, R14.T2.a): the cull's marks,
- * one `u32` a cluster of every slot, and each slot's tallies, one `u32` a template.
+ * one `u32` a cluster of every slot, and each slot's tallies, one `u32` a template of the
+ * compaction's `COMPACT_TEMPLATES`.
  */
 export interface TerrainClusterBuffers {
   readonly buckets: ClusterBuckets;
@@ -1101,18 +1137,17 @@ export class TerrainResources {
       const named =
         view === DEFAULT_TERRAIN_VIEW ? "terrain clusters" : `terrain clusters (${view})`;
       const { templates } = TERRAIN_CLUSTER_MESH;
+      // The wireframe draws its interior patches alone on the path (R14.T4.c), none of whose
+      // clusters may discard: its may-discard buckets (R14.T1.g) hold nothing.
+      const discarding = made.layout.shading !== "wire";
       buffers = {
         buckets: new ClusterBuckets(
           this.#engine,
           named,
           CLUSTER_PASSES,
           templates,
-          templates.map(
-            (t) =>
-              slots *
-              (t.shape === "terrain-block"
-                ? TERRAIN_BLOCKS
-                : TERRAIN_CLUSTERS_PER_PAGE - TERRAIN_BLOCKS),
+          templates.map((t) =>
+            t.mayDiscard && !discarding ? 0 : slots * terrainClustersOf(t.shape),
           ),
         ),
         cullInputs: this.#engine.createBuffer({
@@ -1124,13 +1159,13 @@ export class TerrainResources {
         // COPY_SRC for the smoke harness's twin check, which reads them back (`smoke/clusterCull.ts`).
         marks: this.#engine.createBuffer({
           name: `${named} marks`,
-          bytes: slots * TERRAIN_CLUSTERS_PER_PAGE * 4,
+          bytes: slots * TERRAIN_PAGE_CLUSTERS * 4,
           usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
           category: "geometry-clusters",
         }),
         tallies: this.#engine.createBuffer({
           name: `${named} tallies`,
-          bytes: slots * templates.length * 4,
+          bytes: slots * COMPACT_TEMPLATES * 4,
           usage: BUFFER_USAGE.STORAGE,
           category: "geometry-clusters",
         }),
@@ -1351,7 +1386,8 @@ export class TerrainResources {
    * ({@link packSurveyMask}, R10.T10.c). On the wireframe's layout (R10.T11) it writes the heights,
    * the offsets on their path, the record and the survey mask alone: the bake's normals are not
    * kept. On a clustered layout (plan R14, R14.T1.b) it writes the slot's cluster records last,
-   * from the bake's key, origin, height range and skirt depth (`clusters/terrain.ts`).
+   * from the bake's key, origin, height range and skirt depth (`clusters/terrain.ts`), each
+   * classified by the slot's survey mask (R14.T1.g).
    *
    * @returns `refused` with nothing written for a bake that no longer fits the layout: one baked
    * before a restore re-derived it ({@link TerrainResources.onRebuilt}), whose slot is past the new
@@ -1508,6 +1544,7 @@ export class TerrainResources {
           heightRangeM: patch.heightRangeM,
           skirtDepthM: patch.skirtDepthM,
           ...(patch.clusterErrors === undefined ? {} : { clusterErrors: patch.clusterErrors }),
+          ...(surveyMask === null ? {} : { surveyMask }),
         },
         new DataView(this.#clusterRecord),
         0,

@@ -85,7 +85,7 @@ import {
   compactWorkgroups,
   packCompactParams,
 } from "../clusters/compact";
-import { CLUSTER_CULL_KERNEL, receiversRefuse } from "../clusters/cull";
+import { CLUSTER_CULL_KERNEL, CULL_INPUT_WHOLE, receiversRefuse } from "../clusters/cull";
 import { CLUSTER_SHAPE_CODE } from "../clusters/record";
 import {
   cullHorizonOf,
@@ -99,7 +99,8 @@ import {
 } from "../clusters/cullPass";
 import { cascadeCullPasses } from "../clusters/receivers";
 import { type ClusterPassStats, ClusterStats } from "../clusters/stats";
-import { TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
+import { TERRAIN_PAGE_CLUSTERS } from "../clusters/terrain";
+import { TERRAIN_DISCARD_TEMPLATES } from "../clusters/templates";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type {
   ComputeHandle,
@@ -497,12 +498,23 @@ export interface TerrainFrame {
 export interface TerrainDrawnPatches {
   /** The interior patches, drawn by the lit pass's interior mesh. */
   readonly interior: number;
-  /** The others, drawn by the shading's own mesh. */
+  /** The others, drawn by the shading's own mesh, or {@link TerrainDrawnPatches.fins}. */
   readonly edge: number;
+  /**
+   * Of the others, those drawn through the lit pass's cluster path beside the interior patches
+   * (plan R14, R14.T1.g; `GeometrySettings.finClusters`), in every pass.
+   */
+  readonly fins: number;
 }
 
 /** No patches drawn. */
-const NO_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0 };
+const NO_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0, fins: 0 };
+
+/**
+ * The error unit an edge patch's record takes on the cluster path (plan R14, R14.T1.g), m: past any
+ * cascade's texel, so that its clusters cast at stride 1, as its lit mesh does.
+ */
+const FIN_ERROR_UNIT_M = 1e30;
 
 /**
  * A view's triangles at its last draw, by pass (plan R14, R14.T1.b; {@link TerrainPass.counts}):
@@ -511,7 +523,10 @@ const NO_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0 };
 export interface TerrainGeometryCounts {
   /** Its draws' patches, the interior patches' and the others'. */
   readonly patches: TerrainDrawnPatches;
-  /** Its draws' triangles: the interior patches' 8,704 each, the others' their mesh's. */
+  /**
+   * Its draws' triangles: the interior patches' 8,704 each, the others' their mesh's, those on the
+   * cluster path (plan R14, R14.T1.g) as their lit mesh's.
+   */
   readonly drawnTriangles: number;
   /**
    * On the lit pass's cluster path (plan R14, R14.T2.a) its draws' triangles as drawn: the edge
@@ -986,6 +1001,16 @@ interface Device {
   emissiveLitClusterMaterial: MaterialHandle | null;
   compactKernel: ComputeHandle | null;
   /**
+   * The edge patches' may-discard clusters' forms on the cluster path (plan R14, R14.T1.g): the lit
+   * form and its emissive form, asked for as the lit cluster forms are, their depth for the overlay,
+   * and on the high setting their caster; `null` before, for the other shadings, and where one
+   * cannot be made, when the edge patches draw by the lit mesh.
+   */
+  litFinMaterial: MaterialHandle | null;
+  emissiveLitFinMaterial: MaterialHandle | null;
+  finDepthMaterial: MaterialHandle | null;
+  finShadowMaterial: MaterialHandle | null;
+  /**
    * The wireframe's interior patches' form on the cluster path (plan R14, R14.T4.c), made with the
    * cull's and the compaction's kernels; `null` before, for the other shadings, and where one cannot
    * be made, when the wireframe draws every patch by the lit mesh.
@@ -1088,10 +1113,19 @@ interface ViewState {
   clusters: ViewClusters | null;
   /**
    * The interior patches' records this frame (plan R14, R14.T1.a), apart from {@link
-   * ViewState.instances}, which then hold the other patches', and the draw set's index of each.
+   * ViewState.instances}, which then hold the other patches', and the draw set's index of each; with
+   * them, in the draw set's order, the edge patches the cluster path draws (plan R14, R14.T1.g),
+   * whose places in it {@link ViewState.interiorFins} marks.
    */
   readonly interior: InstanceRecords;
   readonly interiorDrawn: number[];
+  readonly interiorFins: boolean[];
+  /**
+   * Of the interior records, whether each one's heights fade from another surface this frame (plan
+   * R10, R10.T16.i: a rebake's older bake, a rise's datum, a refine's or a coarsen's parent), which
+   * its slot's cluster records do not bound, so that the cull keeps it whole (`CULL_INPUT_WHOLE`).
+   */
+  readonly interiorFading: boolean[];
   /** The interior patches' draw, and the view's draw it was made beside; `null` before. */
   interiorDraw: DrawItem | null;
   interiorBeside: DrawItem | null;
@@ -1159,6 +1193,13 @@ interface ViewClusters {
    */
   litBase: BucketDrawBase | null;
   litBeside: DrawItem | null;
+  /**
+   * The may-discard buckets' draws' shared parts (plan R14, R14.T1.g): the lit pass's, the lit
+   * base with the fin form, the casters' and the overlay's depth's; `null` before.
+   */
+  finLitBase: BucketDrawBase | null;
+  finCasterBase: BucketDrawBase | null;
+  finDepthBase: BucketDrawBase | null;
   device: Device | null;
   stats: ClusterStats | null;
 }
@@ -1194,6 +1235,13 @@ interface ClusterPath {
   readonly marks: BufferHandle;
   readonly tallies: BufferHandle;
   readonly compact: ComputeHandle | null;
+  /**
+   * The may-discard buckets' draws' shared parts where the edge patches draw through the path (plan
+   * R14, R14.T1.g): the lit pass's, the casters' and the overlay's depth's; `null` where none does.
+   */
+  readonly finLitBase: BucketDrawBase | null;
+  readonly finCasterBase: BucketDrawBase | null;
+  readonly finDepthBase: BucketDrawBase | null;
 }
 
 /** The overlay's pass of the cull (plan R14, R14.T1.e), after the four cascades', and its bit. */
@@ -1230,10 +1278,12 @@ interface LitForms {
   readonly interior: MaterialHandle | null;
   /** The interior patches' form on the cluster path (plan R14, R14.T2.a), or `null`. */
   readonly cluster: MaterialHandle | null;
+  /** The edge patches' may-discard clusters' form on it (plan R14, R14.T1.g), or `null`. */
+  readonly fin: MaterialHandle | null;
 }
 
 /** No lit forms: the other shadings' frames. */
-const NO_FORMS: LitForms = { edge: null, interior: null, cluster: null };
+const NO_FORMS: LitForms = { edge: null, interior: null, cluster: null, fin: null };
 
 /** The cascades' indices, nearest first. */
 const CASCADES: readonly [CascadeIndex, CascadeIndex, CascadeIndex, CascadeIndex] = [0, 1, 2, 3];
@@ -1760,7 +1810,7 @@ export class TerrainPass {
     if (state === undefined) {
       return null;
     }
-    const { interior, edge } = state.lastPatches;
+    const { interior, edge, fins } = state.lastPatches;
     const edgeIndices = TERRAIN_SHADING_TRAITS[this.#shading].litMesh
       ? LIT_PATCH_INDICES
       : PATCH_INDICES;
@@ -1774,7 +1824,8 @@ export class TerrainPass {
       casterTriangles = [a ?? 0, b ?? 0, c ?? 0, d ?? 0];
     }
     const drawnTriangles = (interior * LIT_INTERIOR_INDICES + edge * edgeIndices) / 3;
-    const edgeTriangles = (edge * edgeIndices) / 3;
+    // The edge patches the lit mesh draws: those on the cluster path are its counts' (R14.T1.g).
+    const edgeTriangles = ((edge - fins) * edgeIndices) / 3;
     let overlayTriangles: number | null = drawnTriangles;
     if (state.lastOverlayPass !== null) {
       const overlayStats = stats?.[state.lastOverlayPass] ?? null;
@@ -1934,6 +1985,9 @@ export class TerrainPass {
       lit ? this.#readyClusters(device, path) : Promise.resolve(),
       cascades ? this.#readyClusterCasters(device, path) : Promise.resolve(),
       lit ? this.#readyLitClusters(device, "lit-cluster", path) : Promise.resolve(),
+      lit ? this.#readyFin(device, "lit-fin", path) : Promise.resolve(),
+      lit ? this.#readyFin(device, "depth-fin", path) : Promise.resolve(),
+      cascades ? this.#readyFin(device, "shadow-fin", path) : Promise.resolve(),
       this.#shading === "wire" ? this.#readyWireClusters(device, path) : Promise.resolve(),
     ]);
     let material: MaterialHandle;
@@ -1976,6 +2030,7 @@ export class TerrainPass {
       | "lit-emissive-interior"
       | "lit-cluster"
       | "lit-emissive-cluster"
+      | FinKind
       | "wire-cluster",
     device: Device,
     path: TerrainLayout["vertexPath"],
@@ -2225,6 +2280,31 @@ export class TerrainPass {
         this.#clusterRefusal ??= refusalOf("the cluster caster", error);
         console.error(
           "the terrain's cluster casters failed: its interior patches cast by the lit mesh",
+          error,
+        );
+      }
+    }
+  }
+
+  /**
+   * Compiles, or takes, `device`'s fin form of `kind` (plan R14, R14.T1.g): the edge patches'
+   * may-discard clusters' lit form or its emissive form, their depth for the overlay or their
+   * caster; never rejects. One that cannot be made is reported and its refusal stated
+   * ({@link TerrainPass.clusterRefusal}), and the edge patches draw by the lit mesh.
+   */
+  async #readyFin(device: Device, kind: FinKind, path: TerrainLayout["vertexPath"]): Promise<void> {
+    try {
+      const made = await this.#materialOf(kind, device, path);
+      if (device === this.#device && !this.#disposed && finMaterialOf(device, kind) === null) {
+        setFinMaterial(device, kind, made);
+      } else {
+        this.#releaseOwn(made);
+      }
+    } catch (error: unknown) {
+      if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
+        this.#clusterRefusal ??= refusalOf(`the ${kind} form`, error);
+        console.error(
+          "the terrain's fin clusters failed: its edge patches are drawn by the lit mesh",
           error,
         );
       }
@@ -2840,6 +2920,13 @@ export class TerrainPass {
       this.#releaseOwn(device.wireClusterMaterial);
       device.wireClusterMaterial = null;
     }
+    for (const kind of FIN_KINDS) {
+      const held = finMaterialOf(device, kind);
+      if (held !== null) {
+        this.#releaseOwn(held);
+        setFinMaterial(device, kind, null);
+      }
+    }
     if (device.airless !== null) {
       this.#engine.releaseTexture(device.airless.body);
     }
@@ -2905,6 +2992,10 @@ export class TerrainPass {
       litClusterMaterial: null,
       emissiveLitClusterMaterial: null,
       compactKernel: null,
+      litFinMaterial: null,
+      emissiveLitFinMaterial: null,
+      finDepthMaterial: null,
+      finShadowMaterial: null,
       wireClusterMaterial: null,
       clusterShadowMaterial: null,
       clusterDepthMaterial: null,
@@ -3235,6 +3326,8 @@ export class TerrainPass {
       clusters: null,
       interior: new InstanceRecords(slotCount),
       interiorDrawn: [],
+      interiorFins: [],
+      interiorFading: [],
       interiorDraw: null,
       interiorBeside: null,
       casters: null,
@@ -3815,6 +3908,14 @@ export class TerrainPass {
    * interior patches draw from the lit pass's buckets at stride 1 in their interior draw's place,
    * each cluster kept by the cull's camera frustum and the body's horizon, and written in the draw
    * set's order by the stable compaction; the edge patches' draw follows, as before.
+   *
+   * Where every pass of the frame draws them there (`GeometrySettings.finClusters`, plan R14,
+   * R14.T1.g; `#finsDrawn`), the edge patches but the stand-ins join the interior patches' records
+   * in the draw set's order, marked in {@link ViewState.interiorFins}: their opaque clusters draw
+   * from the strided buckets, their may-discard ones (the survey's edge, their skirt heads and
+   * fins) from the may-discard buckets by the fin forms, in the lit pass, the casters and the
+   * overlay's depth, and the lit mesh draws only the stand-ins. Each record whose heights fade
+   * (R10.T16.i) is marked in {@link ViewState.interiorFading}.
    */
   #write(
     device: Device,
@@ -3844,12 +3945,17 @@ export class TerrainPass {
     const wireSplit = this.#wireSplits(device, state);
     const split = (this.#geometry.clusterPath && forms.interior !== null) || wireSplit;
     const fades = this.#fadesAt(device, input.nowMs);
+    // The edge patches join the interior patches' records only where every pass draws them there.
+    const fins = lit && split && this.#finsDrawn(device, state, forms);
     instances.clear();
     interior.clear();
     phases?.clear();
     interiorPhases?.clear();
     drawnIndices.length = 0;
     state.interiorDrawn.length = 0;
+    state.interiorFins.length = 0;
+    state.interiorFading.length = 0;
+    let finCount = 0;
     if (drawSet !== undefined) {
       // `patches` holds exactly the `count` drawn patches (`DrawSetResolver`), and `holds` their
       // morph holds in the same order (`#select`).
@@ -3863,8 +3969,17 @@ export class TerrainPass {
         const o = patch.originM;
         const level = patch.key.level;
         // A stand-in, whole or seamless-1's sub-patch of its ancestor's slot, draws by the edge path
-        // in every pass: the slot's cluster records bound its whole patch alone (plan R14).
-        const inner = split && !drawn.standIn && residents.get(drawn.keyString)?.interior === true;
+        // in every pass: the slot's cluster records bound its whole patch alone (plan R14). An edge
+        // patch joins the interior patches where `fins` draws it by its records (R14.T1.g).
+        const resident = residents.get(drawn.keyString);
+        const interiorBake = resident?.interior === true;
+        const inner = split && !drawn.standIn && (interiorBake || (fins && resident !== undefined));
+        const heights = device.morph.heightWords[n] ?? 0;
+        if (inner) {
+          state.interiorFins.push(!interiorBake);
+          state.interiorFading.push(((heights >>> 8) & MIX_STEPS) !== 0);
+          finCount += interiorBake ? 0 : 1;
+        }
         (inner ? interior : instances).pushXyz(
           patch.slot,
           r0.x * o.x + r0.y * o.y + r0.z * o.z - cameraM.x,
@@ -3878,7 +3993,7 @@ export class TerrainPass {
           within === null ? 0 : subPatchOf(patch.key, within),
           fades.edges[n] ?? 0,
           fades.corners[n] ?? 0,
-          fadeWordOf(fades.own[n] ?? 0, device.morph.heightWords[n] ?? 0),
+          fadeWordOf(fades.own[n] ?? 0, heights),
         );
         (inner ? state.interiorDrawn : drawnIndices).push(n);
         const phasesOf = inner ? interiorPhases : phases;
@@ -3966,11 +4081,21 @@ export class TerrainPass {
     }
     const clusters = draws.length > 0 && lit ? this.#clusterPath(device, state, forms) : null;
     const litBase = clusters?.litBase ?? null;
+    if (finCount > 0 && litBase === null && draws.length > 0) {
+      // `#finsDrawn` holds every part the lit pass's cluster path needs: none is missing.
+      throw new Error(
+        "a lit view's edge patches joined the cluster path, which does not draw them",
+      );
+    }
     // The edge patches' draws: every draw but the interior patches'.
     const edge = draws.filter((draw) => draw.mesh !== resources.interiorMesh);
+    const finLitBase = clusters?.finLitBase ?? null;
     const drawn =
       clusters !== null && litBase !== null
-        ? [...clusters.buckets.drawItems(CLUSTER_LIT_PASS, clusters.mesh, litBase, 1), ...edge]
+        ? [
+            ...clusters.buckets.drawItems(CLUSTER_LIT_PASS, clusters.mesh, litBase, 1, finLitBase),
+            ...edge,
+          ]
         : draws;
     const cast =
       draws.length > 0 && live !== null
@@ -3987,23 +4112,42 @@ export class TerrainPass {
     // lit pass's, the interior patches' drawn triangles with their own depth (plan R14, R14.T2.a).
     const overlayBase = clusters?.overlayBase ?? null;
     const depthBase = clusters?.depthBase ?? null;
+    const finDepthBase = clusters?.finDepthBase ?? null;
     let overlayDepth: TerrainOverlayDepth | null = null;
     let overlayPass: number | null = null;
     if (clusters !== null && overlayBase !== null) {
       overlayPass = CLUSTER_OVERLAY_PASS;
       overlayDepth = {
         edge,
-        clusters: clusters.buckets.drawItems(CLUSTER_OVERLAY_PASS, clusters.mesh, overlayBase, 1),
+        clusters: clusters.buckets.drawItems(
+          CLUSTER_OVERLAY_PASS,
+          clusters.mesh,
+          overlayBase,
+          1,
+          finDepthBase,
+        ),
       };
     } else if (clusters !== null && litBase !== null && depthBase !== null) {
       overlayPass = CLUSTER_LIT_PASS;
       overlayDepth = {
         edge,
-        clusters: clusters.buckets.drawItems(CLUSTER_LIT_PASS, clusters.mesh, depthBase, 1),
+        clusters: clusters.buckets.drawItems(
+          CLUSTER_LIT_PASS,
+          clusters.mesh,
+          depthBase,
+          1,
+          finDepthBase,
+        ),
       };
     }
     const patches =
-      draws.length > 0 ? { interior: interior.count, edge: instances.count } : NO_PATCHES;
+      draws.length > 0
+        ? {
+            interior: interior.count - finCount,
+            edge: instances.count + finCount,
+            fins: finCount,
+          }
+        : NO_PATCHES;
     return {
       draws: drawn,
       patches,
@@ -4074,6 +4218,9 @@ export class TerrainPass {
       overlayBase: null,
       litBase: null,
       litBeside: null,
+      finLitBase: null,
+      finCasterBase: null,
+      finDepthBase: null,
       device: null,
       stats: null,
     });
@@ -4121,6 +4268,9 @@ export class TerrainPass {
       marks: buffers.marks,
       tallies: buffers.tallies,
       compact: device.compactKernel,
+      finLitBase: null,
+      finCasterBase: null,
+      finDepthBase: null,
     };
   }
 
@@ -4145,17 +4295,22 @@ export class TerrainPass {
       void this.#readyLitClusters(device, "lit-emissive-cluster", path).catch((error: unknown) => {
         console.error("the terrain's emissive cluster form could not be taken:", error);
       });
+      void this.#readyFin(device, "lit-emissive-fin", path).catch((error: unknown) => {
+        console.error("the terrain's emissive fin form could not be taken:", error);
+      });
     }
     return emission && device.emissiveMaterial !== null
       ? {
           edge: device.emissiveMaterial,
           interior: device.emissiveInteriorMaterial,
           cluster: device.emissiveLitClusterMaterial,
+          fin: device.emissiveLitFinMaterial,
         }
       : {
           edge: device.material,
           interior: device.interiorMaterial,
           cluster: device.litClusterMaterial,
+          fin: device.litFinMaterial,
         };
   }
 
@@ -4423,7 +4578,7 @@ export class TerrainPass {
           }
         }
         if (interior && clustered) {
-          clusters.inputs[2 * record] = (clusters.inputs[2 * record] ?? 0) | mask;
+          clusters.inputs[2 * record] = ((clusters.inputs[2 * record] ?? 0) | mask) >>> 0;
           continue;
         }
         // The interior patches' records cast as the others' do: a layer's depth is its casters'
@@ -4459,6 +4614,7 @@ export class TerrainPass {
             clusters.mesh,
             casterBase,
             this.#geometry.casterStrideCap,
+            clusters.finCasterBase,
           ),
         );
       }
@@ -4486,7 +4642,10 @@ export class TerrainPass {
    * off, the kernel not made, the layout holds no clusters or the frame has no interior records,
    * when the interior patches cast by the lit mesh and the overlay redraws every draw. Each
    * interior record's cull input is its level's largest vertex spacing, its passes none until the
-   * casters' or the overlay's mark them.
+   * casters' or the overlay's mark them. An edge patch's record on the path (plan R14, R14.T1.g)
+   * takes {@link FIN_ERROR_UNIT_M} as its unit, so that it casts at stride 1, and a record whose
+   * heights fade (R10.T16.i) `CULL_INPUT_WHOLE`, so that the cull keeps its every cluster; where
+   * the frame holds an edge patch, the may-discard buckets' draws' shared parts come too.
    */
   #clusterPath(device: Device, state: ViewState, forms: LitForms): ClusterPath | null {
     const { resources } = device;
@@ -4517,6 +4676,9 @@ export class TerrainPass {
       overlayBase: null,
       litBase: null,
       litBeside: null,
+      finLitBase: null,
+      finCasterBase: null,
+      finDepthBase: null,
       device: null,
       stats: null,
     });
@@ -4525,6 +4687,9 @@ export class TerrainPass {
       clusters.overlayBase = null;
       clusters.litBase = null;
       clusters.litBeside = null;
+      clusters.finLitBase = null;
+      clusters.finCasterBase = null;
+      clusters.finDepthBase = null;
       clusters.device = device;
     }
     const offsets = resources.field("offsets");
@@ -4554,6 +4719,8 @@ export class TerrainPass {
             };
     clusters.casterBase = baseOf(device.clusterShadowMaterial, clusters.casterBase);
     clusters.overlayBase = baseOf(device.clusterDepthMaterial, clusters.overlayBase);
+    clusters.finCasterBase = baseOf(device.finShadowMaterial, clusters.finCasterBase);
+    clusters.finDepthBase = baseOf(device.finDepthMaterial, clusters.finDepthBase);
     const overlay =
       this.#geometry.overlayDepth !== "redraw" &&
       clusters.overlayBase !== null &&
@@ -4578,16 +4745,39 @@ export class TerrainPass {
       };
       clusters.litBeside = beside;
     }
+    // The edge patches' may-discard buckets draw by the lit base with the fin form (R14.T1.g).
+    const litBase = clusters.litBase;
+    const finForm = forms.fin;
+    if (
+      litBase !== null &&
+      finForm !== null &&
+      (clusters.finLitBase?.material !== finForm ||
+        clusters.finLitBase.storageBuffers !== litBase.storageBuffers)
+    ) {
+      clusters.finLitBase = { ...litBase, material: finForm };
+    }
     const radiusM = this.#planet.figure.equatorialRadiusM;
     const drawSet = this.#selected?.drawSet;
+    let fins = false;
     for (let record = 0; record < state.interiorDrawn.length; record += 1) {
       const drawnIndex = state.interiorDrawn[record];
       const patch = drawnIndex === undefined ? undefined : drawSet?.patches[drawnIndex]?.patch;
-      // A record whose patch the draw set no longer holds enters no pass.
+      // An edge patch casts at stride 1, as by its lit mesh (R14.T1.g).
+      const fin = state.interiorFins[record] === true;
+      fins ||= fin;
+      // A record whose patch the draw set no longer holds enters no pass; one whose heights fade
+      // is kept whole by each it enters (R10.T16.i).
+      const whole = state.interiorFading[record] === true ? CULL_INPUT_WHOLE : 0;
       clusters.inputs[2 * record] =
-        patch === undefined ? 0 : (overlay ? OVERLAY_PASS_BIT : 0) | (lit ? LIT_PASS_BIT : 0);
+        patch === undefined
+          ? 0
+          : ((overlay ? OVERLAY_PASS_BIT : 0) | (lit ? LIT_PASS_BIT : 0) | whole) >>> 0;
       clusters.inputs[2 * record + 1] = f32Bits(
-        patch === undefined ? 0 : vertexSpacing(radiusM, patch.key.level).maxM,
+        patch === undefined
+          ? 0
+          : fin
+            ? FIN_ERROR_UNIT_M
+            : vertexSpacing(radiusM, patch.key.level).maxM,
       );
     }
     return {
@@ -4604,7 +4794,54 @@ export class TerrainPass {
       marks: buffers.marks,
       tallies: buffers.tallies,
       compact: device.compactKernel,
+      finLitBase: lit && fins ? clusters.finLitBase : null,
+      finCasterBase: fins ? clusters.finCasterBase : null,
+      finDepthBase: fins ? clusters.finDepthBase : null,
     };
+  }
+
+  /**
+   * Whether view `state`'s lit frame on `device` would draw its interior patches through the lit
+   * pass's cluster path with `forms` (plan R14, R14.T2.a): what `#clusterPath` and `#writeLit` need
+   * of the geometry, the forms, the kernels, the cluster depth, the mesh, the records and the view's
+   * buffers, but this frame's records and draw.
+   */
+  #litClustersReady(device: Device, state: ViewState, forms: LitForms): boolean {
+    const { resources } = device;
+    return (
+      this.#geometry.clusterPath &&
+      this.#geometry.litClusters &&
+      forms.interior !== null &&
+      forms.cluster !== null &&
+      device.cullKernel !== null &&
+      device.compactKernel !== null &&
+      device.clusterDepthMaterial !== null &&
+      resources.clusterMesh !== null &&
+      resources.clusterRecords !== null &&
+      resources.interiorMesh !== null &&
+      resources.viewBuffers(state.id).interior !== null &&
+      resources.field("heights") !== null &&
+      resources.field("survey-mask") !== null
+    );
+  }
+
+  /**
+   * Whether view `state`'s lit frame on `device` draws its edge patches through the cluster path
+   * beside the interior patches (plan R14, R14.T1.g; `GeometrySettings.finClusters`): the lit pass's
+   * interior patches draw through it ({@link TerrainPass}'s `#litClustersReady`), and every fin
+   * form a pass of the frame draws by is made, the lit form of `forms`, the overlay's depth, and,
+   * where the interior patches cast by clusters, the caster; so that each record the frame writes to
+   * the path is drawn by every pass it enters, as its lit mesh would be. Else they draw by the lit
+   * mesh.
+   */
+  #finsDrawn(device: Device, state: ViewState, forms: LitForms): boolean {
+    return (
+      this.#geometry.finClusters &&
+      this.#litClustersReady(device, state, forms) &&
+      forms.fin !== null &&
+      device.finDepthMaterial !== null &&
+      (device.clusterShadowMaterial === null || device.finShadowMaterial !== null)
+    );
   }
 
   /**
@@ -4678,12 +4915,13 @@ export class TerrainPass {
         ],
         instances: count,
         instanceWords: INSTANCE_RECORD_BYTES / 4,
-        clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE,
+        clustersPerPage: TERRAIN_PAGE_CLUSTERS,
         passes: passes.length,
         templateOffsets: buckets.templateOffsets,
         templateCapacities: buckets.capacities,
         viewAxis,
         firstShape: CLUSTER_SHAPE_CODE["terrain-block"],
+        discardTemplates: TERRAIN_DISCARD_TEMPLATES,
       },
       held.params,
     );
@@ -4736,7 +4974,7 @@ export class TerrainPass {
           uniforms: {
             params: packCompactParams({
               instances: count,
-              clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE,
+              clustersPerPage: TERRAIN_PAGE_CLUSTERS,
               templates: TERRAIN_CLUSTER_MESH.templates.length,
               phase,
               bucketBase: place.bucketBase,
@@ -5031,6 +5269,55 @@ export class TerrainPass {
       storageBuffers,
       indirect: { buffer: buffers.indirect, offsetBytes: 0 },
     };
+  }
+}
+
+/** The edge patches' fin forms (plan R14, R14.T1.g), as the session's material kinds name them. */
+type FinKind = "lit-fin" | "lit-emissive-fin" | "depth-fin" | "shadow-fin";
+
+/** Every fin form, for a device's release. */
+const FIN_KINDS: ReadonlyArray<FinKind> = [
+  "lit-fin",
+  "lit-emissive-fin",
+  "depth-fin",
+  "shadow-fin",
+];
+
+/** `device`'s fin form of `kind`, `null` before it is made. */
+function finMaterialOf(device: Device, kind: FinKind): MaterialHandle | null {
+  let material: MaterialHandle | null;
+  switch (kind) {
+    case "lit-fin":
+      material = device.litFinMaterial;
+      break;
+    case "lit-emissive-fin":
+      material = device.emissiveLitFinMaterial;
+      break;
+    case "depth-fin":
+      material = device.finDepthMaterial;
+      break;
+    case "shadow-fin":
+      material = device.finShadowMaterial;
+      break;
+  }
+  return material;
+}
+
+/** Sets `device`'s fin form of `kind`. */
+function setFinMaterial(device: Device, kind: FinKind, material: MaterialHandle | null): void {
+  switch (kind) {
+    case "lit-fin":
+      device.litFinMaterial = material;
+      break;
+    case "lit-emissive-fin":
+      device.emissiveLitFinMaterial = material;
+      break;
+    case "depth-fin":
+      device.finDepthMaterial = material;
+      break;
+    case "shadow-fin":
+      device.finShadowMaterial = material;
+      break;
   }
 }
 

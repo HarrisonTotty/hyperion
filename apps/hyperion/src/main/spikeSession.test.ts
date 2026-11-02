@@ -265,6 +265,7 @@ const GEOMETRY_SETTINGS = {
   wireClusters: true,
   pageBytes: 128 * 2 ** 20,
   meshTolerancePx: { camera: 1, wireframeOccluder: 0.5 },
+  finClusters: true,
 } as const;
 
 /** A smoke's report: 10 s of frames at 60 Hz from 1,000 ms, its trace in three windows. */
@@ -330,6 +331,7 @@ function windowOf(path: string): number {
 const UNSAMPLED = {
   interiorPatches: null,
   edgePatches: null,
+  finPatches: null,
   drawnTriangles: null,
   litClusterTriangles: null,
   casterTriangles: null,
@@ -632,6 +634,7 @@ describe("a spike run's session", () => {
           segment: "orbit coast",
           interiorPatches: { frames: 3, p50: 59, max: 61 },
           edgePatches: { frames: 3, p50: 33, max: 33 },
+          finPatches: null,
           drawnTriangles: { frames: 3, p50: 868_352, max: 880_000 },
           litClusterTriangles: null,
           casterTriangles: null,
@@ -669,6 +672,7 @@ describe("a spike run's session", () => {
           segment: "descent arc",
           interiorPatches: none,
           edgePatches: none,
+          finPatches: none,
           drawnTriangles: none,
           litClusterTriangles: null,
           casterTriangles: none,
@@ -701,6 +705,7 @@ describe("a spike run's session", () => {
         segment: "descent arc",
         interiorPatches: none,
         edgePatches: none,
+        finPatches: none,
         drawnTriangles: none,
         litClusterTriangles: null,
         casterTriangles: null,
@@ -720,6 +725,7 @@ describe("a spike run's session", () => {
         segment: "descent arc",
         interiorPatches: none,
         edgePatches: edges,
+        finPatches: none,
         drawnTriangles: edges,
         litClusterTriangles: null,
         casterTriangles: null,

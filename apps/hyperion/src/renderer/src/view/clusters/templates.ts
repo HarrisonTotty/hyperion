@@ -20,6 +20,22 @@
  * block and edge e's k-th vertex from the strip's start for a strip, and places them by `lit_place`
  * unchanged (`clusters/terrain.ts`, `terrainCluster.wgsl`).
  *
+ * Terrain's edge patches' shapes (plan R14, R14.T1.g), each {@link FIN_RUN_QUADS} quads along a
+ * line of the lit mesh's, in its order and vertex order, at stride 1 alone, p and q a quad's grid
+ * vertices along the run and p′ and q′ their datum or head vertices:
+ * - **The fin run** (`terrain-fin`), a survey fin's quads, each (p′, q′, q), (p′, q, p), (p′, q, q′)
+ *   and (p′, p, q): 128 triangles.
+ * - **The head run** (`terrain-head`), a skirt's head strip's quads, each (p″, p, q) and
+ *   (p″, q, q″): 64 triangles.
+ *
+ * Their vertices are (k, 0, 0) for a grid vertex and (k, 0, 1) for its datum or head vertex, k 0
+ * to 32.
+ *
+ * Every terrain shape has a **may-discard** template at stride 1 after the eight strided ones (the
+ * block's, the strip's, the fin run's and the head run's, {@link TERRAIN_DISCARD_TEMPLATES}), drawn
+ * by the consumer's form with the survey discard: an edge patch's clusters that the survey's edge
+ * comes near (`clusters/terrain.ts`).
+ *
  * The mesh shape (plan R14, R14.T4.b) has one template, {@link meshTemplate}: 128 triangles drawn
  * by index pulling, since a mesh's cluster holds its own triangles' corners or 8-bit indices in
  * storage, which WebGPU's index formats cannot draw (plan R14's design note on the cluster format).
@@ -29,11 +45,12 @@
  */
 
 import type { MeshSpec } from "../engine/types";
-import { type ClusterShape, MESH_CLUSTER_TRIANGLES } from "./record";
+import { NO_DISCARD_TEMPLATE } from "./cullPass";
+import { CLUSTER_SHAPE_CODE, type ClusterShape, MESH_CLUSTER_TRIANGLES } from "./record";
 
-import { CLUSTER_QUADS, type Stride, STRIDES } from "./terrainGrid";
+import { CLUSTER_QUADS, FIN_RUN_QUADS, type Stride, STRIDES } from "./terrainGrid";
 
-export { CLUSTER_QUADS, type Stride, STRIDES } from "./terrainGrid";
+export { CLUSTER_QUADS, FIN_RUN_QUADS, type Stride, STRIDES } from "./terrainGrid";
 
 /** One template: a shape at a stride, as an index range of its consumer's cluster mesh. */
 export interface ClusterTemplate {
@@ -47,7 +64,29 @@ export interface ClusterTemplate {
   readonly indexCount: number;
   /** The stride's error in the record's unit: s, the stride's quad side in the unit spacing. */
   readonly errorScale: number;
+  /**
+   * Whether its bucket holds may-discard clusters, drawn by the consumer's discarding form (plan
+   * R14, R14.T1.g; `clusters/buckets.ts`' `drawItems`).
+   */
+  readonly mayDiscard: boolean;
 }
+
+/**
+ * Terrain's may-discard template of each shape code, `record.ts`' `CLUSTER_SHAPE_CODE` 0 to 7, in
+ * {@link terrainClusterMesh}'s order (plan R14, R14.T1.g): the block's, the strip's, none for the
+ * mesh shape, the fin run's, the head run's, and none for the codes no shape has; the cull's
+ * `CullParams.discardTemplates`.
+ */
+export const TERRAIN_DISCARD_TEMPLATES: ReadonlyArray<number> = [
+  8,
+  9,
+  NO_DISCARD_TEMPLATE,
+  10,
+  11,
+  NO_DISCARD_TEMPLATE,
+  NO_DISCARD_TEMPLATE,
+  NO_DISCARD_TEMPLATE,
+];
 
 /** Vertices of a block's 9 × 9 grid in the terrain cluster mesh, (lx, ly) at 9 ly + lx. */
 const BLOCK_VERTICES = 81;
@@ -122,16 +161,103 @@ function patchStripIndices(stride: Stride): number[] {
   return indices;
 }
 
-/** Terrain's cluster mesh and its eight templates, made once. */
+/** The first of the fin run's vertices in terrain's cluster mesh: after a block's 81 and a strip's 18. */
+const FIN_FIRST_VERTEX = BLOCK_VERTICES + 2 * (CLUSTER_QUADS + 1);
+
+/** The fin run's vertices along it. */
+const FIN_RUN_VERTICES = FIN_RUN_QUADS + 1;
+
+/** Terrain's cluster mesh's index of a fin or head run's vertex at k of `kind`: 0 grid, 1 datum. */
+function finVertex(kind: 0 | 1, k: number): number {
+  return FIN_FIRST_VERTEX + kind * FIN_RUN_VERTICES + k;
+}
+
+/** A fin run's triangles, the lit mesh's fin quads' (see the module's remarks), along the run. */
+function finIndices(): number[] {
+  const indices: number[] = [];
+  for (let k = 0; k < FIN_RUN_QUADS; k += 1) {
+    const next = k + 1;
+    indices.push(
+      finVertex(1, k),
+      finVertex(1, next),
+      finVertex(0, next),
+      finVertex(1, k),
+      finVertex(0, next),
+      finVertex(0, k),
+      finVertex(1, k),
+      finVertex(0, next),
+      finVertex(1, next),
+      finVertex(1, k),
+      finVertex(0, k),
+      finVertex(0, next),
+    );
+  }
+  return indices;
+}
+
+/** A head run's triangles, the lit mesh's head quads' (see the module's remarks), along the run. */
+function headIndices(): number[] {
+  const indices: number[] = [];
+  for (let k = 0; k < FIN_RUN_QUADS; k += 1) {
+    const next = k + 1;
+    indices.push(
+      finVertex(1, k),
+      finVertex(0, k),
+      finVertex(0, next),
+      finVertex(1, k),
+      finVertex(0, next),
+      finVertex(1, next),
+    );
+  }
+  return indices;
+}
+
+/** Terrain's cluster mesh and its templates, made once. */
 export interface TerrainClusterMesh {
-  /** Blocks at strides 1, 2, 4 and 8, then strips at the same: template t is shape ⌊t ÷ 4⌋ at stride 2^(t mod 4). */
+  /**
+   * Blocks at strides 1, 2, 4 and 8, then strips at the same: template t below 8 is shape ⌊t ÷ 4⌋
+   * at stride 2^(t mod 4); terrain's then has its may-discard templates
+   * ({@link TERRAIN_DISCARD_TEMPLATES}).
+   */
   readonly templates: ReadonlyArray<ClusterTemplate>;
   readonly mesh: MeshSpec;
 }
 
-/** Terrain's cluster mesh: a block's 81 vertices, a strip's 18, and every template's indices. */
+/**
+ * Terrain's cluster mesh: a block's 81 vertices, a strip's 18 and a fin or head run's 66, the eight
+ * strided templates' indices, then the may-discard templates' at stride 1, the block's, the strip's,
+ * the fin run's and the head run's (plan R14, R14.T1.g).
+ */
 export function terrainClusterMesh(): TerrainClusterMesh {
-  return stridedClusterMesh("terrain clusters", stripIndices);
+  const strided = stridedClusterMesh("terrain clusters", stripIndices, 2 * FIN_RUN_VERTICES);
+  const positions = strided.mesh.positions;
+  for (let k = 0; k <= FIN_RUN_QUADS; k += 1) {
+    for (const kind of [0, 1] as const) {
+      positions.set([k, 0, kind], 3 * finVertex(kind, k));
+    }
+  }
+  const indices = Array.from(strided.mesh.indices ?? []);
+  const templates = [...strided.templates];
+  const discarding = (shape: ClusterShape, range: ReadonlyArray<number>): void => {
+    templates.push({
+      shape,
+      stride: 1,
+      triangles: range.length / 3,
+      firstIndex: indices.length,
+      indexCount: range.length,
+      errorScale: 1,
+      mayDiscard: true,
+    });
+    indices.push(...range);
+  };
+  discarding("terrain-block", blockIndices(1));
+  discarding("terrain-skirt", stripIndices(1));
+  discarding("terrain-fin", finIndices());
+  discarding("terrain-head", headIndices());
+  return {
+    templates,
+    mesh: { ...strided.mesh, positions, indices: Uint32Array.from(indices) },
+  };
 }
 
 /**
@@ -144,12 +270,16 @@ export function smoothFigureClusterMesh(): TerrainClusterMesh {
   return stridedClusterMesh("figure clusters", patchStripIndices);
 }
 
-/** A strided cluster mesh named `name`: the block's and the strip's vertices, its strips by `strips`. */
+/**
+ * A strided cluster mesh named `name`: the block's and the strip's vertices, its strips by `strips`,
+ * and room for `extraVertices` more after them, zeros.
+ */
 function stridedClusterMesh(
   name: string,
   strips: (stride: Stride) => number[],
+  extraVertices = 0,
 ): TerrainClusterMesh {
-  const positions = new Float32Array(3 * (BLOCK_VERTICES + 2 * (CLUSTER_QUADS + 1)));
+  const positions = new Float32Array(3 * (FIN_FIRST_VERTEX + extraVertices));
   for (let ly = 0; ly <= CLUSTER_QUADS; ly += 1) {
     for (let lx = 0; lx <= CLUSTER_QUADS; lx += 1) {
       positions.set([lx, ly, 0], 3 * (ly * (CLUSTER_QUADS + 1) + lx));
@@ -174,6 +304,7 @@ function stridedClusterMesh(
         firstIndex: indices.length,
         indexCount: range.length,
         errorScale: stride,
+        mayDiscard: false,
       });
       indices.push(...range);
     }
@@ -198,6 +329,13 @@ export function terrainTemplateIndex(
   return (shape === "terrain-block" ? 0 : STRIDES.length) + STRIDES.indexOf(stride);
 }
 
+/** The may-discard template index of a terrain `shape` in {@link terrainClusterMesh}'s order. */
+export function terrainDiscardTemplateIndex(
+  shape: "terrain-block" | "terrain-skirt" | "terrain-fin" | "terrain-head",
+): number {
+  return TERRAIN_DISCARD_TEMPLATES[CLUSTER_SHAPE_CODE[shape]] ?? NO_DISCARD_TEMPLATE;
+}
+
 /** The mesh shape's one template (plan R14, R14.T4.b): 128 triangles by index pulling. */
 export function meshTemplate(): ClusterTemplate {
   return {
@@ -207,6 +345,7 @@ export function meshTemplate(): ClusterTemplate {
     firstIndex: 0,
     indexCount: 3 * MESH_CLUSTER_TRIANGLES,
     errorScale: 1,
+    mayDiscard: false,
   };
 }
 

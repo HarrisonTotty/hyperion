@@ -1000,6 +1000,7 @@ through `lit_place`.
     | `figureClusters`  | on (T4.a)                                                                  | on                                                                         | Byte-identical figures; off the way back               |
     | `hullClusters`    | on (T4.b)                                                                  | on                                                                         | Byte-identical hull faces; off the way back            |
     | `wireClusters`    | on (T4.c)                                                                  | on                                                                         | Byte-identical wireframe terrain; off the way back     |
+    | `finClusters`     | on (T1.g)                                                                  | on                                                                         | Byte-identical edge patches; off the way back          |
     - Nothing here moves a figure the brainstorm states (τ, 720p, 30 fps, the 4 px wireframe
       tolerance): strides stay within τ′, and `TERRAIN: DETAIL LIMITED` keeps its trigger, the
       selection's budget binding; if T3.e lets a triangle budget bind beyond τ′, that raises it too.
@@ -1280,6 +1281,21 @@ the research's figures.
   `geometry-clusters` category and the catalogue entries; the way back made runnable (Design note
   17); the counters through a `bit-exact` reduction; records inline. _Acceptance:_ T1.b's.
   - _Built_ (02fea32 and this lane's two commits): records at the end of Risks.
+- **R14.T1.g The edge patches on the path: the `terrain-fin` shape.** Exact; size M, after T2.a and
+  T4.c (Design note 18's trigger: mid-survey, edge patches 465–549 of about 600 a frame).
+  - _Lever:_ the `terrain-fin` shape for an edge patch's survey fins, and `terrain-head` for its
+    skirt heads; each slot's records classified by its survey mask (opaque, may-discard or none); the edge
+    patches through the cull in the lit pass, the casters (at stride 1) and the overlay's depth,
+    their may-discard clusters by fin forms that keep the survey discard.
+    `GeometrySettings.finClusters`, `false` the way back.
+  - _Files:_ `clusters/{templates,terrain,terrainGrid,record,cullPass,clusterCull.wgsl,cull,compact,buckets,stats}.ts`,
+    `terrain/terrainPass.ts`, `terrain/terrainMaterial.ts`, `terrain/shaders/terrainCluster.wgsl`,
+    `main/geometryResults.ts`, tests.
+  - _Acceptance:_ captures byte-identical with and without the lever in both test-render variants
+    (R10.T16's frame, R10.T9.b's cascades and their layers; tie pixels listed) and on TERRAIN TEST
+    mid-survey (the owner's run); the survey edge's pixels unchanged; edge patches' lit and caster
+    triangles counted before and after, on the spike and on a served world mid-survey.
+  - _Built_ (`r14-terrain-fin`): records at the end of Risks.
 
 T1's NOT RUN: the owner's RTX 3080 and Mac runs of `just views-check --terrain --whole --hidden`,
 both settings, and `diag-frame-cost`'s profile command, before and after: fps at 1920 × 1080 and GPU
@@ -2187,3 +2203,43 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - The drawing path's tests are in `engine.test.ts`, on the fake GPU, beside `drawing.test.ts`'
     key; `resources.ts` is unchanged (its texel sizes had `r32uint`) and `memory.ts` changed in its
     docs alone.
+- **R14.T1.g** (`r14-terrain-fin`):
+  - A slot holds 116 records (`TERRAIN_PAGE_CLUSTERS`, `CLUSTER_RECORDS_SLOT_BYTES` 3,712 B): the
+    96 blocks and strips, then 8 `terrain-head` runs (shape code 4) and 12 `terrain-fin` runs (code
+    3), each of 32 quads, so that a page stays within the compaction's 128 threads.
+    `TERRAIN_CLUSTERS_PER_PAGE` stays 96.
+  - Records are classified by the survey alone (`terrainClusterSurvey`, half a quad's margin):
+    opaque, may-discard (bit 5) or none (radius −1). Fin clusters are always may-discard, and an
+    interior bake's records are unchanged.
+  - There are 12 templates, with the may-discard ones at stride 1 alone: the block, the strip, the
+    fin run (128 triangles) and the head run (64). `TERRAIN_DISCARD_TEMPLATES` gives each shape
+    code 0–7 its may-discard template, and `ClusterTemplate.mayDiscard` marks them.
+  - `CullParams` is 224 B, `discardTemplates` in `shapes.y` and `shapes.z`, and `CompactParams` is
+    96 B. The cull, the compaction and the stats take 16 templates, and `drawItems` takes a
+    `discardBase`.
+  - The lever is `GeometrySettings.finClusters`, on both settings and read only with `litClusters`,
+    with `--geometry finClusters=`; results files without it read `false`.
+  - The forms are `lit-fin`, `lit-emissive-fin`, `depth-fin` and `shadow-fin`; where one is refused
+    the edge patches draw by the lit mesh. Edge patches join `ViewState.interior`, cast at stride 1
+    (`FIN_ERROR_UNIT_M`) and are counted in `TerrainDrawnPatches.fins` (`edge` still holds them).
+  - (lean, 2026-11-02) Blocks and strips that the survey's edge comes within half a quad of may
+    discard too, not only the fins: otherwise the survey edge's pixels would move.
+  - (lean, 2026-11-02) The cull keeps every cluster of a record whose heights fade (R10.T16.i)
+    (`CULL_INPUT_WHOLE`, bit 31 of the cull input), interior or edge: its records bound the newer
+    bake alone.
+  - For T2.c–d: the may-discard templates (8–11) are the edge patches' forward draws after the
+    resolve, and their opaque blocks and strips can take IDs.
+  - (lean, 2026-11-02) The skirt heads take a shape of their own, `terrain-head`, beside Design note
+    18's `terrain-fin`, so that a head run draws 64 triangles, not a fin run's 128.
+  - Design note 2's "skirt heads and fins stay in the edge patches' own lit mesh" and its 96 records a
+    slot hold only where `finClusters` is off. Design note 17's table takes `finClusters`, on on
+    both settings, and R12.T0's inventory is to.
+  - The cascades' layers are compared byte for byte with `casterDepthCull` off. With it on they
+    differ only where no receiver samples (T1.c's rule), and the frame is byte-identical.
+  - A wireframe layout's may-discard buckets have no room, since its patches on the path are
+    interior.
+  - The spike's segments gain `finPatches`, the edge patches the cluster path drew (the rest are
+    stand-ins), with its own column in the summary. A file written before it reads `null`.
+  - Not built: the counting harness's fin rule, since its sample worlds are wholly surveyed.
+  - Pending: the owner's RTX run of TERRAIN TEST mid-survey, with `finClusters` on and off. A served
+    world's counts wait for the serve gate at generator version 25.

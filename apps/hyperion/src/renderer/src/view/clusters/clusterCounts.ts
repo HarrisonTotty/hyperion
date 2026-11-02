@@ -60,7 +60,11 @@ import { cullMarksTwin, cullTwin, type CullInstance, type CullTwinBuckets, NO_MA
 import { type CameraCullPass, type CullPass, type CullPassPlace, cullHorizonOf } from "./cullPass";
 import { cascadeCullPasses } from "./receivers";
 import { CLUSTER_RECORD_BYTES, type ClusterRecord } from "./record";
-import { TERRAIN_CLUSTERS_PER_PAGE, writeTerrainClusterRecords } from "./terrain";
+import {
+  TERRAIN_CLUSTERS_PER_PAGE,
+  TERRAIN_PAGE_CLUSTERS,
+  writeTerrainClusterRecords,
+} from "./terrain";
 import { terrainClusterMesh } from "./templates";
 
 /** The sun's elevation at the camera's nadir, degrees: the research's 30°. */
@@ -140,7 +144,8 @@ interface CountedPatch {
 function bakeOf(planet: PlanetGeometry, key: PatchKey, cameraM: Vec3): CountedPatch {
   const [ox, oy, oz] = surfacePoint(planet.figure, vertexDir(key, 32, 32), 0);
   const originM = vec3(ox, oy, oz);
-  const out = new DataView(new ArrayBuffer(TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES));
+  // Its fin clusters (R14.T1.g) are none: a wholly surveyed bake's.
+  const out = new DataView(new ArrayBuffer(TERRAIN_PAGE_CLUSTERS * CLUSTER_RECORD_BYTES));
   writeTerrainClusterRecords(
     planet,
     { key, originM, heightRangeM: [-1, 1], skirtDepthM: COUNT_SKIRT_DEPTH_M },

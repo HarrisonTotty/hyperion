@@ -24,6 +24,25 @@
  * of its height span more, for the foot's normal against its neighbours' (second order in a quad's
  * angle, at most 1/64 rad at level 0). `clusters/terrain.test.ts` holds every vertex of random
  * patches inside its clusters' spheres.
+ *
+ * **Fin clusters** (plan R14, R14.T1.g): after the strips, cluster 96 + 2 e + h for the skirt heads
+ * of half h of edge e, from the edge's first vertex, drawn by the head run's template
+ * (`terrain-head`, `clusters/templates.ts`), and 104 + 2 n + h for half h of fin line n, the
+ * columns {@link FIN_LINES} then its rows (`gpu/resources.ts`' `SURVEY_FIN_LINES`), drawn by the
+ * fin run's (`terrain-fin`). A run's sphere is the quarter patch's (f, L + 1, 2i + qi, 2j + qj)
+ * that holds it, its range widened to the datum and by h_max − h_min each way, where a head or a
+ * fin's datum end stands along its vertex's normal.
+ *
+ * **The survey** (plan R14, R14.T1.g): each record is classified by the slot's survey mask as the
+ * lit fragment's `survey_kept_at` reads it (`terrainSurvey.wgsl`; `gpu/resources.ts`'
+ * `surveyedAt`), over the cluster's footprint widened by {@link SURVEY_MARGIN_QUADS}: a block or a
+ * strip every fragment of which is kept is opaque, as an interior patch's are; one none of which is
+ * kept is no cluster (a negative radius); the rest may discard, and are drawn by the survey
+ * discard's form. A head run is no cluster where no fragment of it is kept; a fin run where its
+ * line is no cell edge of the survey's, where its datum ends collapse, or where the cells either
+ * side of it agree along it; else it may discard. The survey alone decides, never the heights,
+ * which a rebake's or a rise's fade mixes from another surface (plan R10, R10.T16.i). An interior
+ * patch's records are its blocks and strips, opaque, and no fin cluster.
  */
 
 import { type PatchKey } from "../terrain/patchKey";
@@ -36,8 +55,12 @@ import {
   CLUSTER_PAD_M,
   CLUSTER_QUADS,
   edgeVertex,
+  FIN_RUN_QUADS,
   TERRAIN_BLOCKS,
   TERRAIN_CLUSTERS_PER_PAGE,
+  TERRAIN_FIN_CLUSTERS,
+  TERRAIN_HEAD_CLUSTERS,
+  TERRAIN_PAGE_CLUSTERS,
 } from "./terrainGrid";
 
 export {
@@ -46,6 +69,9 @@ export {
   edgeVertex,
   TERRAIN_BLOCKS,
   TERRAIN_CLUSTERS_PER_PAGE,
+  TERRAIN_FIN_CLUSTERS,
+  TERRAIN_HEAD_CLUSTERS,
+  TERRAIN_PAGE_CLUSTERS,
 } from "./terrainGrid";
 
 /** Quads along a patch's side. */
@@ -56,6 +82,27 @@ const BLOCKS_PER_SIDE = PATCH_QUADS / CLUSTER_QUADS;
 
 /** A strip's further padding per metre of its height span (see the module's remarks). */
 export const STRIP_NORMAL_FRACTION = 1e-3;
+
+/**
+ * The columns and rows of a patch that carry a survey fin (R10.T10.c): `gpu/resources.ts`'
+ * `SURVEY_FIN_LINES`, made here, which that module imports.
+ */
+export const FIN_LINES: readonly [number, number, number] = [16, 32, 48];
+
+/**
+ * How far past a cluster's footprint its survey is read, quads (see the module's remarks): half a
+ * quad, past any rounding of a fragment's interpolated place (a few `f32` ulps of 64).
+ */
+export const SURVEY_MARGIN_QUADS = 0.5;
+
+/** The lit mesh's vertex codes a fin run's vertices take (`gpu/resources.ts`' `LIT_VERTEX_CODE`). */
+const LIT_GRID = 0;
+const LIT_SKIRT_HEAD = 2;
+const LIT_COLUMN_FIN = 4;
+const LIT_ROW_FIN = 5;
+
+/** Bytes of a slot's survey mask before its cell code (`gpu/resources.ts`' `SURVEY_CELL_CODE_BYTE`). */
+const SURVEY_CELL_CODE_BYTE = 65 * 65;
 
 /** Where cluster `cluster` of a terrain patch lies (see the module's remarks). */
 export interface TerrainClusterPlace {
@@ -117,6 +164,101 @@ export function terrainTemplateRef(cluster: number): number {
   return x0 | (y0 << 8) | (place.edge << 16);
 }
 
+/** A run of an edge's skirt heads (see the module's remarks). */
+export interface TerrainHeadRun {
+  readonly line: "head";
+  /** Its edge, 0 to 3, as `gpu/resources.ts` numbers them. */
+  readonly edge: number;
+  /** Its half of the edge, 0 from the edge's first vertex. */
+  readonly half: 0 | 1;
+}
+
+/** A run of a survey fin along a column (x constant) or a row (y constant). */
+export interface TerrainFinRun {
+  readonly line: "column" | "row";
+  /** The fin's column or row, one of {@link FIN_LINES}. */
+  readonly at: number;
+  /** Its half of the line, 0 from the line's first vertex. */
+  readonly half: 0 | 1;
+}
+
+/** Where fin cluster `cluster` lies: a head run or a fin run (see the module's remarks). */
+export type TerrainFinPlace = TerrainHeadRun | TerrainFinRun;
+
+/**
+ * Fin cluster `cluster`'s place, {@link TERRAIN_CLUSTERS_PER_PAGE} to
+ * {@link TERRAIN_PAGE_CLUSTERS} − 1.
+ *
+ * @throws RangeError for any other cluster.
+ */
+export function terrainFinPlace(cluster: number): TerrainFinPlace {
+  const n = cluster - TERRAIN_CLUSTERS_PER_PAGE;
+  if (!Number.isInteger(cluster) || n < 0 || n >= TERRAIN_FIN_CLUSTERS) {
+    throw new RangeError(`a terrain patch has no fin cluster ${String(cluster)}`);
+  }
+  const half = n % 2 === 0 ? 0 : 1;
+  if (n < TERRAIN_HEAD_CLUSTERS) {
+    return { line: "head", edge: Math.floor(n / 2), half };
+  }
+  const line = Math.floor((n - TERRAIN_HEAD_CLUSTERS) / 2);
+  return {
+    line: line < FIN_LINES.length ? "column" : "row",
+    at: FIN_LINES[line % FIN_LINES.length] ?? 0,
+    half,
+  };
+}
+
+/** The grid vertex k quads along fin place `place`'s run, from its first vertex. */
+function finRunVertex(place: TerrainFinPlace, k: number): readonly [number, number] {
+  const along = FIN_RUN_QUADS * place.half + k;
+  let vertex: readonly [number, number];
+  switch (place.line) {
+    case "head":
+      vertex = edgeVertex(place.edge, along);
+      break;
+    case "column":
+      vertex = [place.at, along];
+      break;
+    case "row":
+      vertex = [along, place.at];
+      break;
+  }
+  return vertex;
+}
+
+/**
+ * The record's template reference of fin cluster `cluster` (`clusters/record.ts`' remarks): its
+ * first vertex's column and row, a head run's edge, a row's bit and the fin run's bit.
+ */
+export function terrainFinTemplateRef(cluster: number): number {
+  const place = terrainFinPlace(cluster);
+  const [x0, y0] = finRunVertex(place, 0);
+  const tail =
+    place.line === "head" ? place.edge << 16 : (1 << 19) | (place.line === "row" ? 1 << 18 : 0);
+  return (x0 | (y0 << 8) | tail) >>> 0;
+}
+
+/**
+ * The lit mesh's grid coordinates and code of a fin or head run's template vertex `local`
+ * ((k, 0, kind), the terrain cluster mesh's `position`) of fin cluster `cluster`: the vertex
+ * stage's decode (`terrainCluster.wgsl`'s `terrain_fin_grid`). A grid vertex (kind 0) is the run's
+ * k-th; its datum vertex (kind 1) the lit mesh's head or fin vertex there.
+ */
+export function terrainFinGrid(
+  cluster: number,
+  local: readonly [number, number, number],
+): readonly [number, number, number] {
+  const place = terrainFinPlace(cluster);
+  const [k, , kind] = local;
+  const [x, y] = finRunVertex(place, k);
+  if (kind === 0) {
+    return [x, y, LIT_GRID];
+  }
+  const code =
+    place.line === "head" ? LIT_SKIRT_HEAD : place.line === "column" ? LIT_COLUMN_FIN : LIT_ROW_FIN;
+  return [x, y, code];
+}
+
 /**
  * The lit mesh's grid coordinates and code of a template vertex `local` ((lx, ly, code), the
  * terrain cluster mesh's `position`) of cluster `cluster`: the vertex stage's decode, which hands
@@ -150,15 +292,154 @@ export interface TerrainClusterSource {
    * records hold (0, +∞), unmeasured.
    */
   readonly clusterErrors?: Float16Array;
+  /**
+   * The slot's survey mask as its `survey-mask` field holds it (`gpu/resources.ts`'
+   * `packSurveyMask`), by which the records are classified (plan R14, R14.T1.g; see the module's
+   * remarks); absent, every block and strip is opaque and no fin cluster is drawn, an interior
+   * patch's records.
+   */
+  readonly surveyMask?: Uint8Array;
 }
 
 /**
- * Writes a terrain patch's {@link TERRAIN_CLUSTERS_PER_PAGE} records into `out` from
- * `offsetBytes`, cluster by cluster (see the module's remarks): each sphere about the bake's
- * origin, in the body-fixed axes, strided, never discarding, with the bake's measured errors where
- * it has them.
+ * How the survey keeps a cluster's fragments (see the module's remarks): every one, some, or none,
+ * where it is no cluster.
+ */
+export type ClusterSurvey = "whole" | "edge" | "none";
+
+/**
+ * Whether the survey mask `packed` ({@link TerrainClusterSource.surveyMask}) may hold the ground
+ * surveyed and unsurveyed anywhere in [x₀, x₁] × [y₀, y₁], quads from the patch's corner, as
+ * `survey_surveyed` reads it: each coarse cell meeting the rectangle at its centre vertex, or, where
+ * a cell spans a quad or less, the bilinear mask over each quad meeting it, which lies between its
+ * four corners'.
+ */
+function surveyStates(
+  packed: Uint8Array,
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number,
+): { readonly surveyed: boolean; readonly unsurveyed: boolean } {
+  const code = Math.min(packed[SURVEY_CELL_CODE_BYTE] ?? 0, 6);
+  const at = (x: number, y: number): number => (packed[y * 65 + x] ?? 0) / 255;
+  let surveyed = false;
+  let unsurveyed = false;
+  if (code === 0) {
+    const base = (f: number): number => Math.min(PATCH_QUADS - 1, Math.floor(Math.max(f, 0)));
+    for (let by = base(y0); by <= base(y1); by += 1) {
+      for (let bx = base(x0); bx <= base(x1); bx += 1) {
+        const corners = [at(bx, by), at(bx + 1, by), at(bx, by + 1), at(bx + 1, by + 1)];
+        surveyed ||= Math.max(...corners) >= 0.5;
+        unsurveyed ||= Math.min(...corners) < 0.5;
+      }
+    }
+    return { surveyed, unsurveyed };
+  }
+  const quads = 2 ** code;
+  const cells = Math.max(1, PATCH_QUADS / quads);
+  const cell = (f: number): number => Math.min(cells - 1, Math.floor(Math.max(f, 0) / quads));
+  for (let cy = cell(y0); cy <= cell(y1); cy += 1) {
+    for (let cx = cell(x0); cx <= cell(x1); cx += 1) {
+      const centre = (c: number): number => Math.min(PATCH_QUADS - 1, c * quads + quads / 2);
+      if (at(centre(cx), centre(cy)) >= 0.5) {
+        surveyed = true;
+      } else {
+        unsurveyed = true;
+      }
+    }
+  }
+  return { surveyed, unsurveyed };
+}
+
+/** A footprint's rectangle in quads, [x₀, x₁] × [y₀, y₁]. */
+type Footprint = readonly [x0: number, x1: number, y0: number, y1: number];
+
+/** The rectangle spanning grid vertices `a` and `b`, widened by {@link SURVEY_MARGIN_QUADS}. */
+function footprintOf(a: readonly [number, number], b: readonly [number, number]): Footprint {
+  const m = SURVEY_MARGIN_QUADS;
+  return [
+    Math.min(a[0], b[0]) - m,
+    Math.max(a[0], b[0]) + m,
+    Math.min(a[1], b[1]) - m,
+    Math.max(a[1], b[1]) + m,
+  ];
+}
+
+/** A skirt's footprint as its survey reads it: clamped half a quad inside the patch. */
+function skirtFootprint(footprint: Footprint): Footprint {
+  const c = (f: number): number => Math.min(PATCH_QUADS - 0.5, Math.max(0.5, f));
+  return [c(footprint[0]), c(footprint[1]), c(footprint[2]), c(footprint[3])];
+}
+
+/** How a cluster kept where the ground is surveyed (or, `inverse`, where not) is kept over `footprint`. */
+function keptOver(packed: Uint8Array, footprint: Footprint, inverse: boolean): ClusterSurvey {
+  const { surveyed, unsurveyed } = surveyStates(packed, ...footprint);
+  const kept = inverse ? unsurveyed : surveyed;
+  const cut = inverse ? surveyed : unsurveyed;
+  return !kept ? "none" : cut ? "edge" : "whole";
+}
+
+/**
+ * How the survey mask `packed` keeps cluster `cluster` of a patch (see the module's remarks), every
+ * cluster of {@link TERRAIN_PAGE_CLUSTERS}: by the survey alone, so that a fade of its heights
+ * (R10.T16.i) leaves it as it is.
+ */
+export function terrainClusterSurvey(packed: Uint8Array, cluster: number): ClusterSurvey {
+  if (cluster < TERRAIN_BLOCKS) {
+    const { bx, by } = terrainClusterPlace(cluster);
+    const x = CLUSTER_QUADS * bx;
+    const y = CLUSTER_QUADS * by;
+    return keptOver(packed, footprintOf([x, y], [x + CLUSTER_QUADS, y + CLUSTER_QUADS]), false);
+  }
+  if (cluster < TERRAIN_CLUSTERS_PER_PAGE) {
+    const { edge, strip } = terrainClusterPlace(cluster);
+    const from = edgeVertex(edge, CLUSTER_QUADS * strip);
+    const to = edgeVertex(edge, CLUSTER_QUADS * (strip + 1));
+    return keptOver(packed, skirtFootprint(footprintOf(from, to)), false);
+  }
+  const place = terrainFinPlace(cluster);
+  const from = finRunVertex(place, 0);
+  const to = finRunVertex(place, FIN_RUN_QUADS);
+  if (place.line === "head") {
+    // A head stands at max(h, 0), which a rebake's or a rise's fade mixes from another surface
+    // (R10.T16.i): only the survey decides it.
+    return keptOver(packed, skirtFootprint(footprintOf(from, to)), true) === "none"
+      ? "none"
+      : "edge";
+  }
+  const code = Math.min(packed[SURVEY_CELL_CODE_BYTE] ?? 0, 6);
+  if (code === 0 || code >= 6 || place.at % 2 ** code !== 0) {
+    return "none";
+  }
+  // Along the line the cells either side of it, row by row of cells (a column's) or column by
+  // column (a row's): a fin draws where they differ.
+  const [x0, x1, y0, y1] = footprintOf(from, to);
+  const quads = 2 ** code;
+  const cells = PATCH_QUADS / quads;
+  const cell = (f: number): number => Math.min(cells - 1, Math.floor(Math.max(f, 0) / quads));
+  const [lo, hi] = place.line === "column" ? [y0, y1] : [x0, x1];
+  for (let c = cell(lo); c <= cell(hi); c += 1) {
+    const middle = c * quads + quads / 2;
+    const side = (offset: number): boolean =>
+      place.line === "column"
+        ? surveyStates(packed, place.at + offset, place.at + offset, middle, middle).surveyed
+        : surveyStates(packed, middle, middle, place.at + offset, place.at + offset).surveyed;
+    if (side(-0.5) !== side(0.5)) {
+      return "edge";
+    }
+  }
+  return "none";
+}
+
+/**
+ * Writes a terrain patch's {@link TERRAIN_PAGE_CLUSTERS} records into `out` from `offsetBytes`,
+ * cluster by cluster (see the module's remarks): each sphere about the bake's origin, in the
+ * body-fixed axes, strided, with the bake's measured errors where it has them, opaque, may-discard
+ * or no cluster by the slot's survey (plan R14, R14.T1.g).
  *
- * @throws RangeError for measured errors that are not four a cluster.
+ * @throws RangeError for measured errors that are not four a cluster of
+ *   {@link TERRAIN_CLUSTERS_PER_PAGE}.
  */
 export function writeTerrainClusterRecords(
   planet: PlanetGeometry,
@@ -166,7 +447,7 @@ export function writeTerrainClusterRecords(
   out: DataView,
   offsetBytes: number,
 ): void {
-  const { key, originM, heightRangeM, skirtDepthM, clusterErrors } = source;
+  const { key, originM, heightRangeM, skirtDepthM, clusterErrors, surveyMask } = source;
   if (clusterErrors !== undefined && clusterErrors.length !== 4 * TERRAIN_CLUSTERS_PER_PAGE) {
     throw new RangeError(
       `a patch's measured errors are ${String(4 * TERRAIN_CLUSTERS_PER_PAGE)} half floats, not ${String(clusterErrors.length)}`,
@@ -205,9 +486,10 @@ export function writeTerrainClusterRecords(
       };
     }
     const at = 4 * cluster;
+    const survey = surveyMask === undefined ? "whole" : terrainClusterSurvey(surveyMask, cluster);
     packClusterRecord(out, offsetBytes + cluster * CLUSTER_RECORD_BYTES, {
       centreM: sphere.centreM,
-      radiusM: sphere.radiusM,
+      radiusM: survey === "none" ? -1 : sphere.radiusM,
       mode: "strided",
       strideErrorBits:
         errorBits === null
@@ -220,10 +502,52 @@ export function writeTerrainClusterRecords(
             ],
       templateRef: terrainTemplateRef(cluster),
       shape: place.shape,
-      mayDiscard: false,
+      mayDiscard: survey === "edge",
       material: 0,
     });
   }
+  // The fin clusters' spheres: their quarter patch's, from the datum's floor to its ceiling.
+  const lowest = Math.min(low, 0) - (high - low);
+  const highest = Math.max(high, 0) + (high - low);
+  for (let cluster = TERRAIN_CLUSTERS_PER_PAGE; cluster < TERRAIN_PAGE_CLUSTERS; cluster += 1) {
+    const survey = surveyMask === undefined ? "none" : terrainClusterSurvey(surveyMask, cluster);
+    const [qi, qj] = finQuarter(terrainFinPlace(cluster));
+    const quarter = patchBounds(
+      planet,
+      { face: key.face, level: key.level + 1, i: 2 * key.i + qi, j: 2 * key.j + qj },
+      [lowest, highest],
+    );
+    const centreM = {
+      x: quarter.centre.x - originM.x,
+      y: quarter.centre.y - originM.y,
+      z: quarter.centre.z - originM.z,
+    };
+    const reachM = Math.hypot(centreM.x, centreM.y, centreM.z) + quarter.radiusM;
+    const radiusM =
+      quarter.radiusM +
+      CLUSTER_PAD_M +
+      CLUSTER_PAD_FRACTION * reachM +
+      STRIP_NORMAL_FRACTION * (highest - lowest);
+    packClusterRecord(out, offsetBytes + cluster * CLUSTER_RECORD_BYTES, {
+      centreM,
+      radiusM: survey === "none" ? -1 : radiusM,
+      mode: "strided",
+      strideErrorBits: null,
+      templateRef: terrainFinTemplateRef(cluster),
+      shape: terrainFinPlace(cluster).line === "head" ? "terrain-head" : "terrain-fin",
+      mayDiscard: true,
+      material: 0,
+    });
+  }
+}
+
+/** The quarter of its patch, (qi, qj), that holds fin place `place`'s run, its line on its side. */
+function finQuarter(place: TerrainFinPlace): readonly [number, number] {
+  const [x0, y0] = finRunVertex(place, 0);
+  const [x1, y1] = finRunVertex(place, FIN_RUN_QUADS);
+  // The run's midpoint lies inside its quarter, or on the line between two, either of which holds it.
+  const quarterOf = (f: number): number => (f <= PATCH_QUADS / 2 ? 0 : 1);
+  return [quarterOf((x0 + x1) / 2), quarterOf((y0 + y1) / 2)];
 }
 
 /** The padded sphere of block (`bx`, `by`) of `key` at heights `low` to `high`, about `originM`. */

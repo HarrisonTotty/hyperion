@@ -24,6 +24,7 @@ import type {
 } from "./cullPass";
 import type { ClusterLod, ClusterRecord } from "./record";
 import { CLUSTER_SHAPE_CODE } from "./record";
+import { NO_DISCARD_TEMPLATE } from "./cullPass";
 import { STRIDES } from "./templates";
 
 /** The cull's kernel: the reference alone, `presentation-only`, its appends' order not reproducible. */
@@ -65,7 +66,20 @@ export interface CullInstance {
   readonly passMask: number;
   /** Its error unit, m. */
   readonly unitM: number;
+  /**
+   * Whether each pass it enters keeps every cluster of it, its spheres untested
+   * ({@link CULL_INPUT_WHOLE}; plan R10, R10.T16.i's fades); absent, not.
+   */
+  readonly whole?: boolean;
 }
+
+/**
+ * The bit of an instance's cull input (the passes' mask's word) by which each pass it enters keeps
+ * every cluster of it, its records' spheres untested: terrain's instance whose heights fade from
+ * another surface (plan R10, R10.T16.i; plan R14's design note on culling), which its slot's
+ * records, of its newer bake alone, do not bound.
+ */
+export const CULL_INPUT_WHOLE = 0x8000_0000;
 
 /** What one dispatch culls, as the twin takes it. */
 export interface CullTwinInput {
@@ -84,6 +98,11 @@ export interface CullTwinInput {
   readonly viewAxis: Vec3;
   /** The consumer's first shape's code (`CullParams.firstShape`, R14.T4.b); 0 where absent. */
   readonly firstShape?: number;
+  /**
+   * Each shape code's may-discard template (`CullParams.discardTemplates`, R14.T1.g); none where
+   * absent.
+   */
+  readonly discardTemplates?: ReadonlyArray<number>;
   /** Each DAG record's parent group's sphere (R14.T4.b), read by a DAG record alone. */
   readonly lods?: (page: number, cluster: number) => ClusterLod;
 }
@@ -325,7 +344,8 @@ function eachCluster(
 }
 
 /**
- * A record's template in `pass` (`template_of`): its shape's less the consumer's first at a
+ * A record's template in `pass` (`template_of`): its shape's may-discard template where it may
+ * discard and the consumer has one (R14.T1.g); else its shape's less the consumer's first at a
  * cascade's stride for `instance`'s unit, at stride 1 for a camera pass's and a DAG record's; +∞
  * for a shape below the first, which the kernel's unsigned arithmetic takes past every template.
  */
@@ -333,9 +353,14 @@ function templateOf(
   record: ClusterRecord,
   pass: CullPass,
   instance: CullInstance,
-  firstShape: number,
+  input: CullTwinInput,
 ): number {
-  const shape = CLUSTER_SHAPE_CODE[record.shape] - firstShape;
+  const code = CLUSTER_SHAPE_CODE[record.shape];
+  const discarding = record.mayDiscard ? input.discardTemplates?.[code] : undefined;
+  if (discarding !== undefined && discarding !== NO_DISCARD_TEMPLATE) {
+    return discarding;
+  }
+  const shape = code - (input.firstShape ?? 0);
   const level =
     record.mode === "dag" || pass.kind === "camera" ? 0 : strideLevel(pass, instance.unitM);
   return shape < 0 ? Infinity : shape * STRIDES.length + level;
@@ -359,7 +384,8 @@ function recordKept(
   if (
     !(record.radiusM >= 0) ||
     (instance.passMask & (1 << p)) === 0 ||
-    !passKeeps(pass, input.viewAxis, centreM, record.radiusM, slackScale)
+    (instance.whole !== true &&
+      !passKeeps(pass, input.viewAxis, centreM, record.radiusM, slackScale))
   ) {
     return false;
   }
@@ -400,7 +426,7 @@ export function cullMarksTwin(input: CullTwinInput, slackScale = 1): Uint32Array
   }
   eachCluster(input, (n, instance, cluster, record, centre) => {
     if (recordKept(input, pass, p, instance, cluster, record, centre, slackScale)) {
-      const t = templateOf(record, pass, instance, input.firstShape ?? 0);
+      const t = templateOf(record, pass, instance, input);
       if (t < input.templates) {
         marks[n * input.clustersPerPage + cluster] = t;
       }
@@ -433,7 +459,7 @@ export function cullTwin(input: CullTwinInput, slackScale = 1): CullTwinBuckets 
         ) {
           return;
         }
-        const t = templateOf(record, pass, instance, input.firstShape ?? 0);
+        const t = templateOf(record, pass, instance, input);
         if (t >= input.templates) {
           return;
         }

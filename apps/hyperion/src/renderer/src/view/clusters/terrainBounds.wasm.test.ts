@@ -27,7 +27,7 @@ import { type BodyFigure, planetGeometry, surfacePoint } from "../terrain/planet
 import { answerRequest, type HeightModule, WorkerFields } from "../terrain/workers/heightBake";
 import type { BakedPatch } from "../terrain/workers/messages";
 import { CLUSTER_RECORD_BYTES } from "./record";
-import { TERRAIN_CLUSTERS_PER_PAGE, writeTerrainClusterRecords } from "./terrain";
+import { TERRAIN_PAGE_CLUSTERS, writeTerrainClusterRecords } from "./terrain";
 
 /** The module's bytes, from the `data:` URL Vite inlines them as. */
 function wasmBytes(): Uint8Array {
@@ -297,9 +297,7 @@ describe("terrain's cluster records on R05.T4.b's golden vertices (plan R14, R14
       }
       const h0M = goldenHeightM(key, 32, 32, key.level);
       const [ox, oy, oz] = surfacePoint(WGS84_FIGURE, vertexDir(key, 32, 32), h0M);
-      const records = new DataView(
-        new ArrayBuffer(TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES),
-      );
+      const records = new DataView(new ArrayBuffer(TERRAIN_PAGE_CLUSTERS * CLUSTER_RECORD_BYTES));
       writeTerrainClusterRecords(
         planetGeometry(WGS84_FIGURE, null),
         {

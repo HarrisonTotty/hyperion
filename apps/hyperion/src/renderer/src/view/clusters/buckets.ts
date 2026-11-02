@@ -60,10 +60,15 @@ export class ClusterBuckets {
   readonly lists: BufferHandle;
   readonly args: BufferHandle;
   readonly #cleared: Uint32Array;
-  /** Each pass's draws, and the base and cap they were made with. */
+  /** Each pass's draws, and the bases and cap they were made with. */
   readonly #items = new Map<
     number,
-    { readonly base: BucketDrawBase; readonly cap: Stride; readonly items: ReadonlyArray<DrawItem> }
+    {
+      readonly base: BucketDrawBase;
+      readonly discardBase: BucketDrawBase | null;
+      readonly cap: Stride;
+      readonly items: ReadonlyArray<DrawItem>;
+    }
   >();
   #disposed = false;
 
@@ -153,36 +158,44 @@ export class ClusterBuckets {
 
   /**
    * Pass `pass`'s bucket draws of the templates at strides up to `cap`, in the templates' order:
-   * `base` with `mesh`, the bucket's arguments and its list's base as {@link CLUSTER_BASE_UNIFORM};
-   * made again where `base` or `cap` changed.
+   * `base` with `mesh`, the bucket's arguments and its list's base as {@link CLUSTER_BASE_UNIFORM},
+   * a may-discard template's with `discardBase` in place of `base`, or none where it is `null` (plan
+   * R14, R14.T1.g); made again where a base or `cap` changed.
    */
   drawItems(
     pass: number,
     mesh: MeshHandle,
     base: BucketDrawBase,
     cap: Stride,
+    discardBase: BucketDrawBase | null = null,
   ): ReadonlyArray<DrawItem> {
     const held = this.#items.get(pass);
-    if (held?.base === base && held.cap === cap && held.items[0]?.mesh === mesh) {
+    if (
+      held?.base === base &&
+      held.discardBase === discardBase &&
+      held.cap === cap &&
+      held.items[0]?.mesh === mesh
+    ) {
       return held.items;
     }
     const place = this.place(pass);
     const items: DrawItem[] = [];
     this.#templates.forEach((template, t) => {
-      if (template.stride > cap) {
+      const drawnBy = template.mayDiscard ? discardBase : base;
+      if (template.stride > cap || drawnBy === null) {
         return;
       }
       items.push({
-        ...base,
+        ...drawnBy,
         mesh,
         uniforms: {
-          ...base.uniforms,
+          ...drawnBy.uniforms,
           [CLUSTER_BASE_UNIFORM]: Float32Array.of(place.listBase + (this.templateOffsets[t] ?? 0)),
         },
         indirect: { buffer: this.args, offsetBytes: (place.bucketBase + t) * BUCKET_ARGS_BYTES },
       });
     });
-    this.#items.set(pass, { base, cap, items });
+    this.#items.set(pass, { base, discardBase, cap, items });
     return items;
   }
 

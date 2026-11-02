@@ -51,9 +51,12 @@ import {
   terrainClusterDepthMaterialSpec,
   terrainClusterShadowMaterialSpec,
   terrainDepthMaterialSpec,
+  terrainFinDepthMaterialSpec,
+  terrainFinShadowMaterialSpec,
   terrainLitEmissiveInteriorMaterialSpec,
   terrainLitEmissiveMaterialSpec,
   terrainLitClusterMaterialSpec,
+  terrainLitFinMaterialSpec,
   terrainLitInteriorMaterialSpec,
   terrainLitMaterialSpec,
   terrainShadowMaterialSpec,
@@ -73,8 +76,10 @@ import {
  * cascades (`shadow`, R10.T9.b), its interior patches as casters on the cluster path
  * (`shadow-cluster`, plan R14, R14.T1.b), their depth for the symbology's pass on it
  * (`depth-cluster`, plan R14, R14.T1.e), their lit form and its emissive form on it
- * (`lit-cluster`, `lit-emissive-cluster`, plan R14, R14.T2.a), and the wireframe's interior patches
- * on it (`wire-cluster`, plan R14, R14.T4.c).
+ * (`lit-cluster`, `lit-emissive-cluster`, plan R14, R14.T2.a), the wireframe's interior patches
+ * on it (`wire-cluster`, plan R14, R14.T4.c), and the edge patches' may-discard clusters' lit form,
+ * its emissive form, depth and caster on it (`lit-fin`, `lit-emissive-fin`, `depth-fin`,
+ * `shadow-fin`, plan R14, R14.T1.g).
  */
 export type TerrainMaterialKind =
   | "lit"
@@ -83,12 +88,16 @@ export type TerrainMaterialKind =
   | "lit-emissive-interior"
   | "lit-cluster"
   | "lit-emissive-cluster"
+  | "lit-fin"
+  | "lit-emissive-fin"
   | "depth"
   | "depth-cluster"
+  | "depth-fin"
   | "wire"
   | "wire-cluster"
   | "shadow"
-  | "shadow-cluster";
+  | "shadow-cluster"
+  | "shadow-fin";
 
 /** A material of the terrain and a vertex path it is compiled on. */
 export interface TerrainMaterialKey {
@@ -156,8 +165,19 @@ export function terrainMaterialOf(
         shading: "lit",
       };
       break;
+    case "lit-fin":
+    case "lit-emissive-fin":
+      made = {
+        spec: terrainLitFinMaterialSpec(path, kind === "lit-emissive-fin"),
+        targets: ["rgba16float"],
+        shading: "lit",
+      };
+      break;
     case "depth":
       made = { spec: terrainDepthMaterialSpec(path), targets: ["canvas"], shading: "lit" };
+      break;
+    case "depth-fin":
+      made = { spec: terrainFinDepthMaterialSpec(path), targets: ["canvas"], shading: "lit" };
       break;
     case "depth-cluster":
       made = { spec: terrainClusterDepthMaterialSpec(path), targets: ["canvas"], shading: "lit" };
@@ -182,6 +202,13 @@ export function terrainMaterialOf(
         shading: "lit",
       };
       break;
+    case "shadow-fin":
+      made = {
+        spec: terrainFinShadowMaterialSpec(path, capabilities.depthClipControl),
+        targets: ["depth-only"],
+        shading: "lit",
+      };
+      break;
   }
   return made;
 }
@@ -189,7 +216,7 @@ export function terrainMaterialOf(
 /**
  * The materials a terrain session's passes draw with on `setting`, on a device of `limits`: the lit
  * material, its interior patches' form (plan R14, R14.T1.a) and their form on the cluster path
- * (plan R14, R14.T2.a), its depth material and its interior
+ * (plan R14, R14.T2.a) with the edge patches' fin forms beside each (R14.T1.g), its depth material and its interior
  * patches' cluster depth (plan R14, R14.T1.e) on the lit layout's vertex path, on the high setting the shadow cascades' caster and its interior patches'
  * cluster caster on that path too (R10.T9.b; plan R14, R14.T1.b; the low setting has no
  * cascades), and the wireframe's and its interior patches' on the cluster path (plan R14,
@@ -207,13 +234,16 @@ export function sessionMaterials(
       { kind: "lit", path: lit.vertexPath },
       { kind: "lit-interior", path: lit.vertexPath },
       { kind: "lit-cluster", path: lit.vertexPath },
+      { kind: "lit-fin", path: lit.vertexPath },
       { kind: "depth", path: lit.vertexPath },
       { kind: "depth-cluster", path: lit.vertexPath },
+      { kind: "depth-fin", path: lit.vertexPath },
     );
     if (setting === "high") {
       keys.push(
         { kind: "shadow", path: lit.vertexPath },
         { kind: "shadow-cluster", path: lit.vertexPath },
+        { kind: "shadow-fin", path: lit.vertexPath },
       );
     }
   }

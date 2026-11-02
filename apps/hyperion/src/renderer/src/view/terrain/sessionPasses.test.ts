@@ -1027,10 +1027,12 @@ describe("each view's frame terrain through the session (R10.T16.c)", () => {
     h.session.noteView(INSTRUMENT, handing(5e6, { streamPriority: "secondary" }));
     await streamBakes(h, 2);
     const instrumentAfter = frameTerrainOf(h, INSTRUMENT, 16).draws(plan, [body]);
-    expect([primary.length, instrumentBefore.length, instrumentAfter.length]).toEqual([1, 0, 1]);
+    // Its patches by the survey's edge through the cluster path's buckets at stride 1: the blocks,
+    // the strips, and the may-discard blocks, strips, fin runs and head runs (R14.T1.g).
+    expect([primary.length, instrumentBefore.length, instrumentAfter.length]).toEqual([6, 0, 6]);
     // One pass draws both, each view through its own buffers.
     expect(instrumentAfter[0]?.storageBuffers?.["instances"]?.name).toBe(
-      `terrain instances (${INSTRUMENT})`,
+      `terrain interior instances (${INSTRUMENT})`,
     );
   });
 
@@ -1051,8 +1053,15 @@ describe("each view's frame terrain through the session (R10.T16.c)", () => {
     const { plan, body } = moonPlan();
     const terrain = frameTerrainOf(h, PRIMARY);
     terrain.draws(plan, [body]);
+    // Its patches by the survey's edge on the cluster path (R14.T1.g): the overlay's own pass's
+    // buckets by the cluster depth, the may-discard ones by the fin depth.
     expect(terrain.symbologyDepth().map((draw) => draw.material.name)).toEqual([
-      h.session.pass(MOON)?.symbologyDepthMaterial?.name,
+      "terrain-cluster-depth-baked-offsets",
+      "terrain-cluster-depth-baked-offsets",
+      "terrain-fin-depth-baked-offsets",
+      "terrain-fin-depth-baked-offsets",
+      "terrain-fin-depth-baked-offsets",
+      "terrain-fin-depth-baked-offsets",
     ]);
   });
 });
@@ -1601,26 +1610,32 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
   ];
 
   /**
-   * The high setting's nine, its shadow cascades' caster (R10.T9.b), its interior patches' lit form
-   * (plan R14, R14.T1.a), their cluster caster (R14.T1.b), their cluster depth (R14.T1.e), their
-   * lit form on the cluster path (R14.T2.a) and the wireframe's interior patches' on it (R14.T4.c)
-   * among them.
+   * The high setting's twelve, its shadow cascades' caster (R10.T9.b), its interior patches' lit
+   * form (plan R14, R14.T1.a), their cluster caster (R14.T1.b), their cluster depth (R14.T1.e),
+   * their lit form on the cluster path (R14.T2.a), the wireframe's interior patches' on it
+   * (R14.T4.c) and the edge patches' fin forms (R14.T1.g) among them.
    */
   const HIGH = [
     "terrain-lit-baked-offsets",
     "terrain-lit-interior-baked-offsets",
     "terrain-lit-cluster-baked-offsets",
+    "terrain-lit-fin-baked-offsets",
     "terrain-depth-baked-offsets",
     "terrain-cluster-depth-baked-offsets",
+    "terrain-fin-depth-baked-offsets",
     "terrain-shadow-baked-offsets",
     "terrain-cluster-shadow-baked-offsets",
+    "terrain-fin-shadow-baked-offsets",
     "terrain-wire-baked-offsets",
     "terrain-wire-cluster-baked-offsets",
   ];
 
-  /** What the moon's passes draw with on the high setting ({@link drawnWith}). */
+  /**
+   * What the moon's passes draw with on the high setting ({@link drawnWith}): its patches by the
+   * survey's edge last by the edge patches' fin form on the cluster path (R14.T1.g).
+   */
   const HIGH_DRAWN = [
-    "terrain-lit-baked-offsets",
+    "terrain-lit-fin-baked-offsets",
     "terrain-depth-baked-offsets",
     "terrain-wire-baked-offsets",
   ];
@@ -1637,8 +1652,10 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
       "terrain-lit-face-differences",
       "terrain-lit-interior-face-differences",
       "terrain-lit-cluster-face-differences",
+      "terrain-lit-fin-face-differences",
       "terrain-depth-face-differences",
       "terrain-cluster-depth-face-differences",
+      "terrain-fin-depth-face-differences",
       "terrain-wire-face-differences",
       "terrain-wire-cluster-face-differences",
     ]);
@@ -1664,14 +1681,14 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
       [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary", setting: "low" })],
     ]);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 7), drawnWith(h), h.engine.live.materials]).toEqual([
+    expect([compiled(h, 9), drawnWith(h), h.engine.live.materials]).toEqual([
       [],
       [
-        "terrain-lit-face-differences",
+        "terrain-lit-fin-face-differences",
         "terrain-depth-face-differences",
         "terrain-wire-face-differences",
       ],
-      7,
+      9,
     ]);
   });
 

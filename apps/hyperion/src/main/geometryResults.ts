@@ -6,15 +6,16 @@
  * @remarks
  * The block states how the pass drew its geometry, the setting's `GeometrySettings` or a launch's
  * `--geometry` over them, and for each of the descent's segments the median and the largest of its
- * frames' interior and edge patches, drawn triangles (the interior mesh's, and the lit pass's
+ * frames' interior and edge patches, the edge patches the cluster path drew (R14.T1.g; `null` in a
+ * file written before it), drawn triangles (the interior mesh's, and the lit pass's
  * clusters' as drawn, R14.T2.a), four cascades' caster triangles summed and
  * overlay-depth triangles (`TerrainPass.counts`, its cluster counters on), each `null` where no
  * frame of the segment had it. A version 6 file, R05's runs' and the native replay's
  * (`tools/gpu-replay`), holds none and reads as before; a version 7 or 8 file holds one only over
  * a generated world. Version 8's settings add R14.T6.b's `farCascadeRate`; version 7's, from builds
  * that rendered every cascade every frame, read as rate 1. A file written before a consumer's lever
- * (plan R14's T4) lacks its field, which reads as `false`: that run drew the consumer by its own
- * draw.
+ * (plan R14's T4), or before the edge patches' (R14.T1.g), lacks its field, which reads as
+ * `false`: that run drew the consumer, or the edge patches, by its own draw.
  */
 
 import type { SpikeCountFigures, SpikeGeometryReport, SpikeGeometrySegment } from "../preload/api";
@@ -23,6 +24,7 @@ import type { SpikeCountFigures, SpikeGeometryReport, SpikeGeometrySegment } fro
 const COUNTS = [
   "interiorPatches",
   "edgePatches",
+  "finPatches",
   "drawnTriangles",
   "litClusterTriangles",
   "casterTriangles",
@@ -33,6 +35,7 @@ const COUNTS = [
 const COUNT_HEADS: Readonly<Record<(typeof COUNTS)[number], string>> = {
   interiorPatches: "Interior patches",
   edgePatches: "Edge patches",
+  finPatches: "Edge patches by clusters",
   drawnTriangles: "Drawn triangles",
   litClusterTriangles: "Drawn by clusters",
   casterTriangles: "Caster triangles (4 cascades)",
@@ -68,9 +71,9 @@ function countFigures(value: unknown): SpikeCountFigures | null | undefined {
 }
 
 /**
- * The fields a file written before each lacks: the consumers' levers (plan R14's T4), each absent
- * one read as off, the mesh page pool's bytes (T5.b), absent read as 0, no pool, and the meshes'
- * tolerance (T5.f), absent read as 0 px, the finest cut.
+ * The fields a file written before each lacks: the consumers' levers (plan R14's T4) and the edge
+ * patches' (R14.T1.g), each absent one read as off, the mesh page pool's bytes (T5.b), absent read
+ * as 0, no pool, and the meshes' tolerance (T5.f), absent read as 0 px, the finest cut.
  */
 const LATER_FIELDS = [
   "figureClusters",
@@ -78,6 +81,7 @@ const LATER_FIELDS = [
   "wireClusters",
   "pageBytes",
   "meshTolerancePx",
+  "finClusters",
 ] as const;
 
 /** `value` as a mesh tolerance, two numbers of at least 0, px, or `null`. */
@@ -119,6 +123,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     wireClusters = false,
     pageBytes = 0,
     meshTolerancePx: tolerance = { camera: 0, wireframeOccluder: 0 },
+    finClusters = false,
   } = value;
   const meshTolerancePx = meshToleranceOf(tolerance);
   if (
@@ -131,6 +136,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     typeof wireClusters !== "boolean" ||
     !isCount(pageBytes) ||
     meshTolerancePx === null ||
+    typeof finClusters !== "boolean" ||
     (casterStrideCap !== 1 &&
       casterStrideCap !== 2 &&
       casterStrideCap !== 4 &&
@@ -151,22 +157,32 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     wireClusters,
     pageBytes,
     meshTolerancePx,
+    finClusters,
   };
 }
 
-/** `value` as one segment's counts, or `null`. */
+/**
+ * `value` as one segment's counts, or `null`: every count, but the edge patches by clusters (plan
+ * R14, R14.T1.g), which a file written before them lacks and which then reads as `null`.
+ */
 function segmentOf(value: unknown): SpikeGeometrySegment | null {
-  if (!isRecord(value) || Object.keys(value).length !== COUNTS.length + 1) {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length !== COUNTS.length + ("finPatches" in value ? 1 : 0)
+  ) {
     return null;
   }
   const segment = value["segment"];
   if (typeof segment !== "string" || segment.length === 0) {
     return null;
   }
-  const read = COUNTS.map((name) => countFigures(value[name]));
+  const read = COUNTS.map((name) =>
+    name === "finPatches" && !(name in value) ? null : countFigures(value[name]),
+  );
   const [
     interiorPatches,
     edgePatches,
+    finPatches,
     drawnTriangles,
     litClusterTriangles,
     casterTriangles,
@@ -175,6 +191,7 @@ function segmentOf(value: unknown): SpikeGeometrySegment | null {
   if (
     interiorPatches === undefined ||
     edgePatches === undefined ||
+    finPatches === undefined ||
     drawnTriangles === undefined ||
     litClusterTriangles === undefined ||
     casterTriangles === undefined ||
@@ -186,6 +203,7 @@ function segmentOf(value: unknown): SpikeGeometrySegment | null {
     segment,
     interiorPatches,
     edgePatches,
+    finPatches,
     drawnTriangles,
     litClusterTriangles,
     casterTriangles,
@@ -251,8 +269,9 @@ function settingsWords(settings: SpikeGeometryReport["settings"]): string {
     wireClusters,
     pageBytes,
     meshTolerancePx,
+    finClusters,
   } = settings;
-  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}, meshes cut at ${String(meshTolerancePx.camera)} px in the camera and ${String(meshTolerancePx.wireframeOccluder)} px as the wireframe's occluders`;
+  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}, meshes cut at ${String(meshTolerancePx.camera)} px in the camera and ${String(meshTolerancePx.wireframeOccluder)} px as the wireframe's occluders, the lit pass's edge patches by ${finClusters ? "clusters" : "the lit mesh"}`;
 }
 
 /** The summary's "Geometry" section of `geometry` (plan R14, R14.T1.f). */

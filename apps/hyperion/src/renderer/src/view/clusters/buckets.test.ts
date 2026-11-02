@@ -17,7 +17,8 @@ import {
 import { ClusterStats, PASS_STATS_WORDS, passStats } from "./stats";
 import { terrainClusterMesh } from "./templates";
 
-const { templates } = terrainClusterMesh();
+/** Terrain's eight strided templates; its may-discard ones (R14.T1.g) are their own test's. */
+const templates = terrainClusterMesh().templates.filter((t) => !t.mayDiscard);
 
 /** A terrain view's room: 10 instances, 64 blocks and 32 strips each. */
 const CAPACITIES = templates.map((t) => 10 * (t.shape === "terrain-block" ? 64 : 32));
@@ -88,6 +89,35 @@ describe("the cluster path's buckets (plan R14, R14.T1.b)", () => {
     expect(buckets.drawItems(1, mesh, BASE, 8)).toHaveLength(8);
   });
 
+  it("draws a pass's may-discard buckets by its discard base, and none without one (R14.T1.g)", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const all = terrainClusterMesh().templates;
+    const buckets = new ClusterBuckets(
+      engine,
+      "test clusters",
+      2,
+      all,
+      all.map(() => 10),
+    );
+    const mesh = engine.createMesh(terrainClusterMesh().mesh);
+    const discarding = { ...BASE, material: { kind: "material", name: "fin caster" } } as const;
+    const items = buckets.drawItems(0, mesh, BASE, 1, discarding);
+    expect(
+      items.map((item) => [
+        item.material.name,
+        (item.indirect?.offsetBytes ?? 0) / BUCKET_ARGS_BYTES,
+      ]),
+    ).toEqual([
+      ["caster", 0],
+      ["caster", 4],
+      ["fin caster", 8],
+      ["fin caster", 9],
+      ["fin caster", 10],
+      ["fin caster", 11],
+    ]);
+    expect(buckets.drawItems(0, mesh, BASE, 1)).toHaveLength(2);
+  });
+
   it("refuses capacities not one a template, and lists past an exact f32 base", async () => {
     const engine = new CountingRenderEngine(await fakeDevice());
     expect(() => new ClusterBuckets(engine, "test", 1, templates, [1])).toThrow(RangeError);
@@ -146,7 +176,7 @@ describe("the cluster path's counters (plan R14, R14.T1.b)", () => {
       dispatched?.bindings.buffers["args"],
       [...params.subarray(0, 2)],
       [...params.subarray(4, 12)],
-      [...params.subarray(12, 20)],
+      [...params.subarray(20, 28)],
       stats.latest()?.[0],
     ]).toEqual([
       "cluster stats reduction",

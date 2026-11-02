@@ -83,6 +83,7 @@ import { SurveyedCells } from "../view/terrain/surveyLookup";
 import {
   TerrainPass,
   type TerrainDrawnPatches,
+  type TerrainGeometryCounts,
   type TerrainPool,
 } from "../view/terrain/terrainPass";
 import { LIT_INTERIOR_INDICES, LIT_PATCH_INDICES } from "../view/terrain/gpu/resources";
@@ -309,6 +310,9 @@ function differingTexels(
   }
   return { pixels, largest };
 }
+
+/** No patches drawn, where a frame gave no counts. */
+const NO_DRAWN_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0, fins: 0 };
 
 /** Steps `pass` from `pose` and makes the frame, as `VIEW`'s loop and drawer do. */
 function liveFrame(pass: TerrainPass, mask: CoverageMask, pose: Pose, nowMs: number): LiveFrame {
@@ -674,7 +678,8 @@ export async function checkTerrainFrame(
     relief.measureClusters(true);
     relief.setGeometry({ ...SETTINGS.low.geometry, litClusters: false });
     const byMesh = await reliefFrame();
-    relief.setGeometry(SETTINGS.low.geometry);
+    // The edge patches by their lit mesh, as T2.a drew them (R14.T1.g is checked apart below).
+    relief.setGeometry({ ...SETTINGS.low.geometry, finClusters: false });
     const byClusters = await reliefFrame();
     let litClusterTriangles: number | null = null;
     for (let round = 0; round < 8 && litClusterTriangles === null; round += 1) {
@@ -699,6 +704,58 @@ export async function checkTerrainFrame(
         litClusterTriangles !== null &&
         litClusterTriangles < litTriangles,
       `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: lit triangles ${String(litClusterTriangles)} by clusters, ${litClusterTriangles === null ? "—" : (litClusterTriangles / litTriangles).toFixed(4)} of T1.a's ${String(litTriangles)}; digests ${bytesDigest(byMesh)} by the interior mesh, ${bytesDigest(byClusters)} by clusters; tie pixels ${String(ties.pixels)}, the largest difference ${ties.largest.toExponential(3)}`,
+    );
+
+    // R14.T1.g: the edge patches through the cull and the stable compaction beside the interior
+    // patches, their fins and skirt heads as `terrain-fin` clusters and every cluster the survey's
+    // edge comes near by the fin forms, against their lit mesh's draw, from the same selection and
+    // residents, in one run; the counters on, so that both frames' lit triangles are counted.
+    const countedFrame = async (
+      geometry: GeometrySettings,
+    ): Promise<{
+      readonly texels: Float32Array;
+      readonly counts: TerrainGeometryCounts | null;
+    }> => {
+      relief.setGeometry(geometry);
+      const texels = await reliefFrame();
+      for (let round = 0; round < 8; round += 1) {
+        // Each frame samples the counters some frames' reads answer into: the last of eight.
+        // oxlint-disable-next-line no-await-in-loop
+        await reliefFrame();
+      }
+      return { texels, counts: relief.counts(VIEW) };
+    };
+    relief.measureClusters(true);
+    const byLitMesh = await countedFrame({ ...SETTINGS.low.geometry, finClusters: false });
+    const byFins = await countedFrame(SETTINGS.low.geometry);
+    relief.measureClusters(false);
+    const finTies = differingTexels(byLitMesh.texels, byFins.texels);
+    const finPatches = byFins.counts?.patches ?? NO_DRAWN_PATCHES;
+    const meshPatches = byLitMesh.counts?.patches ?? NO_DRAWN_PATCHES;
+    const beforeTriangles = byLitMesh.counts?.litClusterTriangles ?? null;
+    const afterTriangles = byFins.counts?.litClusterTriangles ?? null;
+    // The edge patches' own: the frame's less the interior patches' clusters, the same in both.
+    const edgeBefore = (meshPatches.edge * LIT_PATCH_INDICES) / 3;
+    const edgeAfter =
+      beforeTriangles === null || afterTriangles === null
+        ? null
+        : afterTriangles - (beforeTriangles - edgeBefore);
+    if (captures) {
+      const exposure = captureScale(byLitMesh.texels, byLitMesh.texels);
+      images.push(
+        captureOf("r14-t1g-frame-lit-mesh", byLitMesh.texels, VIEWPORT, exposure),
+        captureOf("r14-t1g-frame-fin-clusters", byFins.texels, VIEWPORT, exposure),
+      );
+    }
+    checks.check(
+      "R14.T1.g the edge patches drawn through the cull, their fins and skirt heads as clusters and the survey's edge by the fin forms, draw the lit mesh's frame, byte for byte, with fewer lit triangles",
+      withRelief.done &&
+        finPatches.fins > 0 &&
+        meshPatches.fins === 0 &&
+        finTies.pixels === 0 &&
+        edgeAfter !== null &&
+        edgeAfter < edgeBefore,
+      `${String(finPatches.interior)} interior and ${String(finPatches.edge)} edge patches, ${String(finPatches.fins)} of them on the cluster path; lit triangles ${String(beforeTriangles)} with the edge patches by the lit mesh, ${String(afterTriangles)} by clusters; the edge patches' ${String(edgeBefore)} by the lit mesh, ${String(edgeAfter)} by clusters, ${edgeAfter === null ? "—" : (edgeAfter / edgeBefore).toFixed(4)} of them; digests ${bytesDigest(byLitMesh.texels)} by the lit mesh, ${bytesDigest(byFins.texels)} by clusters; tie pixels ${String(finTies.pixels)}, the largest difference ${finTies.largest.toExponential(3)}`,
     );
 
     // The fallback (plan R14, Design notes 16 and 17), under `--fixture=broken-wgsl` alone: a pass
