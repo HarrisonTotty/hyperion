@@ -69,10 +69,10 @@ const ORDINARY_SYSTEMS: usize = 6_800;
 const SLOW_SYSTEMS: usize = 68_000;
 
 /// The threads the ordinary census runs on, the slots `.config/nextest.toml` reserves for it.
-const ORDINARY_THREADS: usize = 8;
+const ORDINARY_THREADS: usize = 16;
 
 /// The threads the slow census runs on, the slots `.config/nextest.toml` reserves for it.
-const SLOW_THREADS: usize = 8;
+const SLOW_THREADS: usize = 16;
 
 /// The systems of one share of a census, in sample order.
 const SYSTEMS_PER_SHARE: usize = 20;
@@ -1352,7 +1352,7 @@ fn run(title: &str, systems: usize, threads: usize) -> Census {
 /// findings 25's and 26's holds fixed ([`FIXED_UNDER_26`]) and no envelope changing section inside
 /// the clock window.
 #[test]
-#[ignore = "slow: 10⁵ bodies of 6,800 systems, on eight threads"]
+#[ignore = "slow: 10⁵ bodies of 6,800 systems, on sixteen threads"]
 fn composition_census_reaches_every_row_or_lists_why() {
     let census = run("the ordinary census", ORDINARY_SYSTEMS, ORDINARY_THREADS);
     assert!(census.bodies >= 100_000, "{} bodies", census.bodies);
@@ -1366,7 +1366,7 @@ fn composition_census_reaches_every_row_or_lists_why() {
 /// 25's and 26's holds fixed ([`FIXED_UNDER_26`]) but the bodies [`LEFT_UNDER_26`] lists, and no
 /// envelope changing section inside the clock window.
 #[test]
-#[ignore = "slow: 10⁶ bodies of 68,000 systems, on eight threads"]
+#[ignore = "slow: 10⁶ bodies of 68,000 systems, on sixteen threads"]
 fn composition_census_over_a_million_bodies_reaches_every_row_or_lists_why() {
     let census = run("the slow census", SLOW_SYSTEMS, SLOW_THREADS);
     assert!(census.bodies >= 1_000_000, "{} bodies", census.bodies);

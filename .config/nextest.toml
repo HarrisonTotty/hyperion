@@ -391,13 +391,13 @@ filter = "package(hyperion-sim) & binary(galaxy_sweeps) & test(=the_rotation_cur
 priority = 100
 
 # P14.T33.c's four composition censuses (10⁵ bodies of 6,800 systems and 10⁶ of 68,000, each under
-# the version's rules and under every 26 hold) generate their systems on eight threads of their own
-# (`ORDINARY_THREADS` and `SLOW_THREADS` in `planetary/system/census_tests.rs`), so each takes
-# eight slots, and they start with the rotation curve: the 10⁶ censuses' slot time is the tier's
+# the version's rules and under every 26 hold) generate their systems on sixteen threads of their
+# own (`ORDINARY_THREADS` and `SLOW_THREADS` in `planetary/system/census_tests.rs`), so each takes
+# sixteen slots, and they start with the rotation curve: the 10⁶ censuses' slot time is the tier's
 # longest. They are compiled out on WebAssembly.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & test(/^planetary::system::census_tests::composition_census_/)"
-threads-required = 8
+threads-required = 16
 priority = 100
 
 # The million-system satellite check shares its cells among its own threads: it takes sixteen slots
