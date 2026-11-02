@@ -99,11 +99,12 @@ pub(super) const MAX_STEPS: u32 = 200_000;
 /// A star that has not arrived by then takes its zero-age main-sequence radius, as the engine
 /// carries it (P11.T4.i). A star below 0.1 M☉ takes the largest radius of P06.T13's cooling fits,
 /// their first. Under the 27 hold of P11.T12's fix (`wind_accretion`) a pair those tests pass over
-/// can interact too where its main-sequence star takes 10⁻⁴ M☉ of its partner's wind by then.
-/// Everything else is two single stars on an orbit that their core collapses change (BSE appendix
-/// A1, P11.T4.l): a pair this passes over at an age shows no interaction before that age and
-/// before its first supernova in a run to any later age (P11.T4.j's wording). After a collapse a
-/// later run may take the pair over where an earlier one keeps its new orbit fixed.
+/// can interact too where its main-sequence star takes 10⁻⁴ M☉ of its partner's wind by then, if
+/// the engine would run it at no age up to the universe's. Everything else is two single stars on
+/// an orbit that their core collapses change (BSE appendix A1, P11.T4.l): a pair this passes over
+/// at an age shows no interaction before that age and before its first supernova in a run to any
+/// later age (P11.T4.j's wording). After a collapse a later run may take the pair over where an
+/// earlier one keeps its new orbit fixed.
 ///
 /// # Examples
 ///
@@ -328,10 +329,12 @@ pub(super) fn first_sudden_death(members: &[Member; 2], pinned_years: Option<f64
     [primary, own(1)].into_iter().flatten().reduce(f64::min)
 }
 
-/// Whether [`evolve`] runs the pair of `input` through the engine to `until_age`: where
-/// [`can_interact`] says it can interact by then, or, under the stellar rules of P11.T10's fix, a
-/// star of it dies suddenly by then (`run_pair`'s pre-test), for the build-age tests.
-#[cfg(test)]
+/// Whether [`evolve`] runs the pair of `input` through the engine to `until_age`: where the lobe
+/// and decay tests of [`can_interact`] say it can interact by then, or, under the stellar rules of
+/// P11.T10's fix, a star of it dies suddenly by then (`run_pair`'s pre-test), for the build-age
+/// tests and for `wind_accretion`, which feeds a pair its partner's wind in closed form only where
+/// the engine runs it at no age. A pair that [`can_interact`] only by its wind (P11.T12's fix) is
+/// not run: it is `wind_accretion`'s closed form.
 #[must_use]
 pub(super) fn engine_runs(input: &BinaryInput, until_age: Years) -> bool {
     let until = until_age.value().max(0.0);

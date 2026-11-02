@@ -196,6 +196,40 @@ mod tests {
         ));
     }
 
+    /// `least` is no more than the `β_W` of any star, of every type and mass, under both rules: the
+    /// bound the wide pairs' screen reads (`wind_accretion`).
+    #[test]
+    fn the_least_wind_speed_factor_is_every_star_s_least() {
+        let kinds = [
+            Kind::LowMassMainSequence,
+            Kind::MainSequence,
+            Kind::HertzsprungGap,
+            Kind::GiantBranch,
+            Kind::CoreHeliumBurning,
+            Kind::EarlyAgb,
+            Kind::PulsingAgb,
+            Kind::HeliumMainSequence,
+            Kind::HeliumGap,
+            Kind::HeliumGiant,
+            Kind::HeliumWhiteDwarf,
+            Kind::CarbonOxygenWhiteDwarf,
+            Kind::OxygenNeonWhiteDwarf,
+            Kind::NeutronStar,
+            Kind::BlackHole,
+            Kind::Massless,
+        ];
+        for beta in [WindSpeedFactor::StarTrack, WindSpeedFactor::Fixed(0.5)] {
+            for kind in kinds {
+                for mass in [0.08, 0.5, 1.0, 1.4, 5.0, 10.0, 60.0, 120.0, 300.0] {
+                    assert!(
+                        beta.least() <= beta.of(kind, mass),
+                        "{beta:?} {kind:?} {mass}"
+                    );
+                }
+            }
+        }
+    }
+
     /// BSE section 2.1: at `β_W` = 1/8 a 1 M☉ giant of 100 R☉ blows its wind at 21.8 km s⁻¹,
     /// inside cool supergiants' observed 5–35 km s⁻¹.
     #[test]

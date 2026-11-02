@@ -265,7 +265,9 @@ fn an_agb_partner_s_wind_overflows_to_its_companion_under_the_arm() {
         .value()
         - primary.stars()[0].mass().value();
     println!(
-        "by {:.4} Gyr: {by_bondi_hoyle:.5} M_sun of the Bondi-Hoyle share, {by_overflow:.5} with          the overflow ({:.2} times); the primary lost {lost_on_the_agb:.4} M_sun from its AGB at          {:.4} Gyr; at 12 Gyr the 0.80 M_sun star is a {:?} of {:.5} M_sun",
+        "by {:.4} Gyr: {by_bondi_hoyle:.5} M_sun of the Bondi-Hoyle share, {by_overflow:.5} with \
+         the overflow ({:.2} times); the primary lost {lost_on_the_agb:.4} M_sun from its AGB at \
+         {:.4} Gyr; at 12 Gyr the 0.80 M_sun star is a {:?} of {:.5} M_sun",
         after / 1e9,
         by_overflow / by_bondi_hoyle,
         agb / 1e9,

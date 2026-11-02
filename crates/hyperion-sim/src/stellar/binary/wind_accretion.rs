@@ -56,6 +56,7 @@
 use std::sync::Arc;
 
 use crate::GeneratorVersion;
+use crate::planetary::context::UNIVERSE_AGE;
 use crate::stellar::Phase;
 use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{self, Track};
@@ -65,7 +66,8 @@ use crate::units::{SolarMasses, Years};
 use super::BinaryParams;
 use super::detached::last_living;
 use super::evolve::{
-    drawn_orbit_path, offset_for, reach_margin_years, roche_lobe, track_mass, track_reaching,
+    drawn_orbit_path, engine_runs, offset_for, reach_margin_years, roche_lobe, track_mass,
+    track_reaching,
 };
 use super::rlof::rejuvenated_tau_unheld;
 use super::star::{G, Kind, Member, Path};
@@ -139,6 +141,15 @@ impl WindAccretionRules {
 /// partner's wind for the pair to be no longer two single stars on their orbit: 10⁻⁴ (the brief's
 /// lean of 2026-11-01), under which the pair stays plan 06's own, and the cheap path cheap.
 pub(crate) const LEAST_ACCRETED_MSUN: f64 = 1.0e-4;
+
+/// The latest age, years, to which a wind-fed pair is held to be run by the engine at no age, so
+/// that its past is the same in a run to any age up to it: the universe's, [`UNIVERSE_AGE`],
+/// 13.787 Gyr, past every system's (the halo's 13 Gyr at most, `galaxy::ages::HALO_AGES`).
+const WIND_FED_HORIZON_YEARS: f64 = UNIVERSE_AGE.value();
+
+/// The `helium` flag of a hydrogen main sequence, the only one that takes a wind here: an accretor
+/// on its own track is a hydrogen main-sequence star ([`Walk::onset`]).
+const HYDROGEN: bool = false;
 
 /// The midpoint steps the walk takes between two of the partner's mass knots: the share is read
 /// at each step's middle, and the mass lost over it exactly. Two hold the accreted mass to 0.3%
@@ -263,7 +274,8 @@ struct Walk<'a> {
     a0: f64,
     e: f64,
     total0: f64,
-    steps: u32,
+    /// The steps between two of the partner's mass knots, [`STEPS_PER_INTERVAL`] but in tests.
+    steps_per_interval: u32,
     /// Whether an AGB partner's wind overflows its Roche lobe ([`WindAccretionRules::overflows`]).
     overflows: bool,
 }
@@ -287,7 +299,7 @@ impl<'a> Walk<'a> {
             a0: orbit.semi_major_axis().value() / SOLAR_RADIUS_M,
             e: orbit.eccentricity().value(),
             total0: m1 + m2,
-            steps: STEPS_PER_INTERVAL,
+            steps_per_interval: STEPS_PER_INTERVAL,
             overflows: input.rules().wind_accretion.overflows(),
         })
     }
@@ -383,9 +395,9 @@ impl<'a> Walk<'a> {
     }
 
     /// The walk's steps from `start` to `end`, years, in age order: the spans between the
-    /// partner's mass knots and phase boundaries, each cut into [`Walk::steps`] equal steps.
+    /// partner's mass knots and phase boundaries, each cut into `steps_per_interval` equal steps.
     fn steps(&self, start: f64, end: f64) -> impl Iterator<Item = (f64, f64)> + '_ {
-        let n = self.steps;
+        let n = self.steps_per_interval;
         let mut nodes = std::iter::once(start)
             .chain(self.donor.mass_breaks(start, end))
             .chain(std::iter::once(end));
@@ -459,6 +471,11 @@ impl<'a> Walk<'a> {
 /// Where the pair of `input`, whose own `members` the lobe and decay tests pass over by `until`
 /// years, becomes wind-fed under the input's rules ([`WindAccretionRules`]), if it does by then:
 /// the earlier of its two stars' onsets, the primary's first.
+///
+/// None for a pair the engine runs at some later age up to [`WIND_FED_HORIZON_YEARS`] (its lobe
+/// and decay tests, or a collapse under P11.T10's fix: [`engine_runs`]), which stays its own models
+/// here. Lean (2026-11-02): the engine gives a star on its own track no wind (`detached.rs`), so
+/// such a pair fed here would show a past that depends on the age it is run to.
 #[must_use]
 pub(super) fn onset(input: &BinaryInput, members: &[Member; 2], until: f64) -> Option<Onset> {
     if !input.rules().wind_accretion.accretes() {
@@ -480,12 +497,18 @@ pub(super) fn onset(input: &BinaryInput, members: &[Member; 2], until: f64) -> O
             })
         })
         .min_by(|a, b| a.age.total_cmp(&b.age))
+        .filter(|_| !engine_runs(input, Years::new(until.max(WIND_FED_HORIZON_YEARS))))
 }
 
 /// The timeline of the wind-fed pair of `input`, its own `members` run to `until` years, from its
 /// `onset` (see the module documentation): both stars their own, then the accretor a carried main
 /// sequence fed its share of each step, then the accretor on a track of its mass from its main
 /// sequence's end; the partner its own, and the orbit the drawn one, throughout.
+///
+/// # Panics
+///
+/// If `onset` is not [`onset`]'s for these `members`: its accretor and partner must be on their own
+/// tracks, the accretor on its main sequence at the onset's age.
 #[must_use]
 pub(super) fn wind_fed_timeline(
     input: &BinaryInput,
@@ -516,7 +539,7 @@ pub(super) fn wind_fed_timeline(
             break;
         }
         let m1 = m + walk.taken(t0, t1, m);
-        let tau1 = rejuvenated_tau_unheld(ctx.coeffs(), false, tau, m, m1, t1 - t0);
+        let tau1 = rejuvenated_tau_unheld(ctx.coeffs(), HYDROGEN, tau, m, m1, t1 - t0);
         if tau1 >= 1.0 {
             let x = ((1.0 - tau) / (tau1 - tau)).clamp(0.0, 1.0);
             let (at, at_mass) = (t0 + x * (t1 - t0), m + x * (m1 - m));
@@ -532,13 +555,13 @@ pub(super) fn wind_fed_timeline(
     // The partner's wind is over where the walk has reached its last living age.
     let partner_dead = walk.donor.lifetime().is_some();
     if main_sequence_end.is_none() && partner_dead && last >= end {
-        let at = last + (1.0 - tau) * sse::main_sequence_lifetime(ctx.coeffs(), false, m);
+        let at = last + (1.0 - tau) * sse::main_sequence_lifetime(ctx.coeffs(), HYDROGEN, m);
         mass.push(at, m);
         fractions.push(at, 1.0);
         main_sequence_end = Some((at, m));
     }
     let carried = Member::MainSequence {
-        helium: false,
+        helium: HYDROGEN,
         mass,
         tau: fractions,
     };
@@ -582,7 +605,7 @@ pub(super) fn wind_fed_timeline(
 fn after_main_sequence(ctx: &Context, i: usize, age: f64, mass: f64, until: f64) -> Member {
     let m = track_mass(SolarMasses::new(mass));
     let guess = sse::main_sequence_start(m, ctx.composition())
-        + sse::main_sequence_lifetime(ctx.coeffs(), false, mass);
+        + sse::main_sequence_lifetime(ctx.coeffs(), HYDROGEN, mass);
     let span = (until - age).max(0.0) + reach_margin_years(until);
     let (composition, draws, options) = (ctx.composition(), ctx.draws(i), ctx.track_options());
     let build = |reach: f64| Track::to_age_with(m, composition, draws, options, Years::new(reach));

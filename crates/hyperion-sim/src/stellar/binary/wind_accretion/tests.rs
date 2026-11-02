@@ -31,7 +31,7 @@ fn halo_pair_under(arm: WindAccretionRules, period_days: f64) -> BinaryInput {
 fn taken_over_the_wind(input: &BinaryInput, steps: u32) -> f64 {
     let members = own_members(input, UNTIL, None);
     let walk = Walk {
-        steps,
+        steps_per_interval: steps,
         ..Walk::of(input, &members, 1).expect("both on their own tracks")
     };
     let (start, end) = walk

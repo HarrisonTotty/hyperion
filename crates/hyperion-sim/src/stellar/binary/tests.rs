@@ -2189,19 +2189,20 @@ enum EarlierRun {
 /// `until` and to `later`. A pair that [`can_interact`] by `until`, or, under the stellar rules of
 /// P11.T10's fix, a star of which collapses by then ([`engine_runs`](super::evolve::engine_runs)),
 /// has the same history to `until` as the later run, bit for bit ([`assert_same_history`]), and
-/// the same supernova records before it ([`assert_same_records`]). One it passes over is a
-/// detached segment of its stars' own forms on the drawn orbit to its first collapse (P11.T4.l).
-/// If the pre-test passes it over at `later` too, the two runs are the same to `until`, records
-/// included, bit for bit, or, where the later run's engine takes the pair over after a collapse,
-/// to that collapse, its record included; otherwise each star on its own track is the later run's
-/// to the later run's first event (a star below 0.1 M☉ on the cooling fits takes its companion's
-/// wind in the later run).
+/// the same supernova records before it ([`assert_same_records`]), whether the engine runs it or,
+/// under P11.T12's fix, it is wind-fed in closed form. One it passes over is a detached segment of
+/// its stars' own forms on the drawn orbit to its first collapse (P11.T4.l). If the pre-test
+/// passes it over at `later` too, the two runs are the same to `until`, records included, bit for
+/// bit, or, where the later run's engine takes the pair over after a collapse, to that collapse,
+/// its record included; otherwise each star on its own track is the later run's to the later
+/// run's first event (a star below 0.1 M☉ on the cooling fits takes its companion's wind in the
+/// later run).
 fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun {
     use super::star::Member;
 
     let early = evolve_from_living_donors(input, until);
     let late = evolve_from_living_donors(input, later);
-    if super::evolve::engine_runs(input, until) {
+    if super::evolve::engine_runs(input, until) || can_interact(input, until) {
         assert!(!early.hit_segment_cap(), "{}", describe(&early));
         assert_same_history(&early, &late, until);
         assert_same_records(&early, &late, until);
@@ -2214,7 +2215,7 @@ fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun 
     let first = &early.segments()[0];
     assert_eq!(first.kind(), SegmentKind::Detached, "{}", describe(&early));
     assert_eq!(first.end(), first_collapse, "{}", describe(&early));
-    if !super::evolve::engine_runs(input, later) {
+    if !(super::evolve::engine_runs(input, later) || can_interact(input, later)) {
         // The same history to `until`, bit for bit, unless the pre-test asked again after a
         // collapse passes the pair at `later` and not at `until`: then the later run's engine
         // evolves the orbit from the collapse where the earlier keeps it fixed, and only the
@@ -2339,11 +2340,12 @@ fn one_star_left(timeline: &BinaryTimeline, segment: &Segment) -> bool {
 /// and the wide pairs are drawn on streams of their own, so that the pairs and their first ages
 /// are the sample's as before.
 fn any_age_over(n: u32, seed: u64) -> [[u32; 4]; 3] {
-    any_age_over_under(n, seed, None)
+    any_age_over_under(n, seed, None, 1.5e10)
 }
 
-/// [`any_age_over`] with each pair under `rules` where given, and otherwise the version's.
-fn any_age_over_under(n: u32, seed: u64, rules: Option<StellarRules>) -> [[u32; 4]; 3] {
+/// [`any_age_over`] with each pair under `rules` where given, and otherwise the version's, and
+/// each run to `later` years in place of 1.5 × 10¹⁰.
+fn any_age_over_under(n: u32, seed: u64, rules: Option<StellarRules>, later: f64) -> [[u32; 4]; 3] {
     let mut mix = Mix(seed);
     let mut between = Mix(seed ^ 0x0a77_1fa1_0000_0000);
     let mut wide = Mix(seed ^ 0x0a77_1fa1_0000_0001);
@@ -2369,7 +2371,7 @@ fn any_age_over_under(n: u32, seed: u64, rules: Option<StellarRules>) -> [[u32; 
             runs.push((2, age, pair));
         }
         for (kind, until, input) in runs {
-            let outcome = check_any_age(&input, Years::new(until), Years::new(1.5e10));
+            let outcome = check_any_age(&input, Years::new(until), Years::new(later));
             let slot = match outcome {
                 EarlierRun::Same => 0,
                 EarlierRun::PassedOver => 1,
@@ -2452,13 +2454,45 @@ fn a_timeline_is_the_same_whatever_age_it_is_run_to_under_the_collapses_arm() {
         ..StellarRules::of_version(crate::GENERATOR_VERSION)
     };
     let [[same, passed, collapsed, missed], _, [_, _, _, wide_missed]] =
-        any_age_over_under(60, 0x0b1e_00a9, Some(rules));
+        any_age_over_under(60, 0x0b1e_00a9, Some(rules), 1.5e10);
     let [[held_same, held_passed, held_collapsed, _], _, _] = any_age_over(60, 0x0b1e_00a9);
     assert_eq!(missed + wide_missed, 0, "interactions missed");
     assert!(
         same > held_same && same + passed + collapsed == held_same + held_passed + held_collapsed,
         "{same} run, {passed} passed over and {collapsed} through collapses, against {held_same}, \
          {held_passed} and {held_collapsed} held"
+    );
+}
+
+/// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] under 27's arm of P11.T12's fix
+/// (`wind_accretion.rs`), which feeds a pair the lobe and decay tests pass over its partner's wind
+/// in closed form: such a pair has the same history to the earlier age as the later run, and one
+/// passed over at the earlier age keeps its stars' own forms to the later run's first event, as
+/// under the held arm, each run on to the universe's age, the horizon to which the closed form
+/// holds a pair the engine runs at no age. The arm runs no pair through the engine that the held
+/// arm does not, and the sample holds a wind-fed pair.
+#[test]
+fn a_timeline_is_the_same_whatever_age_it_is_run_to_under_the_wind_accretion_arm() {
+    use crate::planetary::context::UNIVERSE_AGE;
+    use crate::stellar::binary::wind_accretion::WindAccretionRules;
+    let rules = StellarRules {
+        wind_accretion: WindAccretionRules::WindRocheLobe,
+        ..StellarRules::of_version(crate::GENERATOR_VERSION)
+    };
+    let later = UNIVERSE_AGE.value();
+    let [[same, passed, collapsed, missed], _, [_, _, _, wide_missed]] =
+        any_age_over_under(60, 0x0b1e_00a9, Some(rules), later);
+    let [[held_same, held_passed, held_collapsed, _], _, _] =
+        any_age_over_under(60, 0x0b1e_00a9, None, later);
+    println!(
+        "{same} same, {passed} passed over and {collapsed} through collapses, against \
+         {held_same}, {held_passed} and {held_collapsed} held"
+    );
+    assert_eq!(missed + wide_missed, 0, "interactions missed");
+    assert!(
+        same > held_same && same + passed + collapsed == held_same + held_passed + held_collapsed,
+        "{same} same, {passed} passed over and {collapsed} through collapses, against \
+         {held_same}, {held_passed} and {held_collapsed} held"
     );
 }
 
