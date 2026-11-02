@@ -304,6 +304,9 @@ export async function checkWireframeTerrain(engine: RenderEngine, checks: Checks
       survey,
       geometry: smokeGeometry("low"),
     });
+    // The harness compares frames drawn at different times, byte for byte: the time morph's
+    // changes cut at their first draw (R10.T16.i), as under reduced motion.
+    made.setReducedMotion(true);
     pass = made;
     await made.ready();
     // One frame of the pass's view, as `VIEW`'s loop steps it and its drawer draws it.

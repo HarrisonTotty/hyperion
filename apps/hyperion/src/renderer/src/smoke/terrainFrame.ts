@@ -529,6 +529,9 @@ export async function checkTerrainFrame(
       survey,
       ...(clusterCullKernel === undefined ? {} : { clusterCullKernel }),
     });
+    // The harness compares frames drawn at different times, byte for byte: the time morph's
+    // changes cut at their first draw (R10.T16.i), as under reduced motion.
+    pass.setReducedMotion(true);
     passes.push(pass);
     await pass.ready();
     return pass;

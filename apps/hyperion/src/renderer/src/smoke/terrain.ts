@@ -478,6 +478,9 @@ async function captureShot(
           }),
       }),
   });
+  // The harness compares frames drawn at different times, byte for byte: the time morph's
+  // changes cut at their first draw (R10.T16.i), as under reduced motion.
+  pass.setReducedMotion(true);
   let lit: LitView | null = null;
   let output: RenderTarget | null = null;
   try {

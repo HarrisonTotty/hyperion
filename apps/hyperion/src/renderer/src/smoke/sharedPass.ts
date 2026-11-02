@@ -360,6 +360,9 @@ export async function checkSharedPass(
       createPool: (bake) => pool.lane(bake),
       survey,
     });
+    // The harness compares frames drawn at different times, byte for byte: the time morph's
+    // changes cut at their first draw (R10.T16.i), as under reduced motion.
+    pass.setReducedMotion(true);
     passes.push(pass);
     return pass;
   };
@@ -1017,6 +1020,9 @@ export async function checkShadowCascades(
       shadows,
       reliefM: () => MOON_LIKE_RELIEF_M,
     });
+    // The harness compares frames drawn at different times, byte for byte: the time morph's
+    // changes cut at their first draw (R10.T16.i), as under reduced motion.
+    made.setReducedMotion(true);
     pass = made;
     await made.ready();
     const passView: TerrainPassView = {
