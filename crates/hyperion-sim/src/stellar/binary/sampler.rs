@@ -222,7 +222,7 @@ mod tests {
     }
 
     /// The X-ray binaries' marks lie in the order `XrbMark` names them, every residual is
-    /// non-decreasing and inside its limits' reach, each choice has one weight per kind of its
+    /// non-decreasing and inside its limits' reach, each choice has one weight per held kind of its
     /// side, and the weights over both sides sum to 1, the high-mass side's to 0.16; the rate's
     /// median is the line, so that a rank of ½ splits the transients from the persistent hosts.
     #[test]
@@ -248,6 +248,16 @@ mod tests {
             "log_neutron_star_progenitor_mass",
             "log_black_hole_progenitor_mass",
             "log_donor_initial_excess",
+            "log_ultracompact_period_minutes",
+            "log_ultracompact_recurrence_years",
+            "log_ultracompact_donor_initial_mass",
+            "log_symbiotic_period_days",
+            "log_symbiotic_donor_mass",
+            "symbiotic_filling",
+            "black_hole_high_mass_accretor_mass",
+            "log_black_hole_high_mass_period_days",
+            "black_hole_high_mass_donor_mass",
+            "log_black_hole_high_mass_rate",
         ];
         assert_eq!(XRB_SAMPLER.marks().len(), XrbMark::ALL.len());
         for (mark, name) in XrbMark::ALL.into_iter().zip(names) {
@@ -259,8 +269,8 @@ mod tests {
         }
         let low = XRB_SAMPLER.pick(XrbPick::LowMassKind).weights();
         let high = XRB_SAMPLER.pick(XrbPick::HighMassKind).weights();
-        assert_eq!(low.len(), XrbHostKind::LOW_MASS.len());
-        assert_eq!(high.len(), XrbHostKind::HIGH_MASS.len());
+        assert_eq!(low.len(), XrbHostKind::LOW_MASS_HELD.len());
+        assert_eq!(high.len(), XrbHostKind::HIGH_MASS_HELD.len());
         let (low_sum, high_sum) = (low.iter().sum::<f64>(), high.iter().sum::<f64>());
         assert!((low_sum + high_sum - 1.0).abs() < 1e-12);
         assert!((high_sum - 0.16).abs() < 1e-12);

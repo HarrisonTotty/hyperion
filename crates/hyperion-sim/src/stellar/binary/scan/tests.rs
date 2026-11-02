@@ -206,3 +206,53 @@ fn few_of_the_class_s_black_holes_eject_anything() {
 
 /// The share of the class's black-hole pairs that eject, as measured.
 const EJECTING_SHARE: f64 = 0.0893;
+
+/// An ultracompact host's helium white dwarf fills its Roche lobe at the mass its period gives it:
+/// about 0.057 M☉, a cold dwarf's, at 4U 1820−30's 11.4 minutes beside a 1.4 M☉ neutron star
+/// (0.06–0.08 for its donor, Rappaport, Nelson, Ma and Joss 1987, ApJ 322, 842; recalled), lighter
+/// at longer periods, and its radius the lobe's to a part in 10⁹.
+#[test]
+fn an_ultracompact_donor_fills_its_lobe_at_its_period() {
+    let neutron_star = SolarMasses::new(1.4);
+    let at = |minutes: f64| ultracompact_donor_mass(Seconds::new(minutes * 60.0), neutron_star);
+    let short = at(11.4).value();
+    assert!((0.05..=0.08).contains(&short), "{short}");
+    let mut last = f64::INFINITY;
+    for minutes in [10.0, 20.0, 40.0, 60.0, 80.0] {
+        let mass = at(minutes);
+        assert!(mass.value() < last, "{minutes}");
+        last = mass.value();
+        let period = Seconds::new(minutes * 60.0);
+        let separation = circular_separation(period, neutron_star + mass);
+        let lobe = roche_lobe_radius(mass.value() / neutron_star.value(), separation).value();
+        let radius = cold_white_dwarf_radius(mass).value() * SOLAR_RADIUS_M;
+        assert!(
+            (radius / lobe - 1.0).abs() < 1e-9,
+            "{minutes}: {radius} against {lobe}"
+        );
+    }
+    assert!((0.004..0.01).contains(&last), "{last}");
+}
+
+/// Gravitational radiation drives 4U 1820−30's donor at about 10⁻⁸ M☉ yr⁻¹, its X-rays' rate (a
+/// few times 10³⁷ erg s⁻¹), and the rate falls as a steep power of the period, about −5, so that
+/// hosts past about 62 minutes lie under the floor.
+#[test]
+fn gravitational_radiation_drives_an_ultracompact_host() {
+    let neutron_star = SolarMasses::new(1.4);
+    let rate = |minutes: f64| {
+        let period = Seconds::new(minutes * 60.0);
+        let donor = ultracompact_donor_mass(period, neutron_star);
+        let separation = circular_separation(period, neutron_star + donor);
+        gravitational_wave_rate(neutron_star, donor, separation).value()
+    };
+    let short = rate(11.4);
+    assert!((5.0e-9..2.0e-8).contains(&short), "{short:e}");
+    let slope = math::log10(rate(60.0) / rate(30.0)) / math::log10(2.0);
+    assert!((-6.0..-4.5).contains(&slope), "{slope}");
+    assert!(
+        rate(80.0) < XRB_MIN_TRANSFER_RATE.value(),
+        "{:e}",
+        rate(80.0)
+    );
+}

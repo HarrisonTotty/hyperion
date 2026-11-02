@@ -49,8 +49,8 @@
 //! test reads (its timelines, built from marks, take the version's). A timeline built from marks
 //! has no history, so a Be star spun up by transfer is one in the engine's timeline alone (a
 //! deviation: the catalogue's Be/X donors are Be stars by their own draws). The census's members
-//! each have a kind (`testing::XrbMemberKind`), the catalogue's six and the three it does not
-//! draw.
+//! each have one of the nine kinds (`testing::XrayMarks::member_kind`), which the catalogue draws
+//! from 27.
 
 use crate::GeneratorVersion;
 use crate::units::SolarMassesPerYear;

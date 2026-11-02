@@ -3267,9 +3267,13 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     `CLASS_SHARES_26`'s accreting rows rate each population from the engine, scaled to 9 × 10⁶.
   - _X-ray binaries._ `binary_xrb` (slow, revision 0) writes its own block: `XRB_SAMPLER_26`,
     read through `XrayBinaries::sampler()`, and `CLASS_SHARES_26`'s row. Its young thin disc's
-    census is 3 × 10⁶ records (`young_thin_disc_records`). Members of no `XrbHostKind`
+    census is 3 × 10⁶ records (`young_thin_disc_records`). Members of none of the held six kinds
     (ultracompact, symbiotic, a black hole beside a massive donor) count in the row and fit no
-    mark; the transients' recurrences and the supergiants' rate keep `XRB_SAMPLER`'s laws.
+    mark; the transients' recurrences and the supergiants' rate keep `XRB_SAMPLER`'s laws. From
+    `fix-p11-t8b-new-kinds` (2026-11-02) `XrbHostKind` holds all nine and version 27 draws them
+    (`XRB_SAMPLER_27`, weighted by the census's shares at 27); the task still fits the held six
+    and `XrbMark::HELD`'s twenty marks, so its block is unchanged. The refit at 27 widens
+    `kind_shares` and `XrbSampler` to the nine kinds (`XrayMarks::member_kind`) and thirty marks.
   - _For the bump:_ refit `binary_awd` and `binary_xrb` at 27, rename the `_26` items (their
     names, and the blocks' summaries, still say 26: generated) over the scratch ones and delete
     the hold (the tripwire lists it). From 26 the field gives up the class shares (P09.T2.c), so

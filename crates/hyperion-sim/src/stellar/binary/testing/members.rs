@@ -119,9 +119,12 @@ pub struct XrayMarks {
 }
 
 impl XrayMarks {
-    /// The catalogue's kind of the member ([`XrbHostKind`]), or `None` for one its kinds do not
-    /// hold: a symbiotic X-ray binary, a black hole beside a Be star or a supergiant, or a
-    /// low-mass X-ray binary whose donor is a helium star or a white dwarf, an ultracompact one.
+    /// The member's kind among the six P15.T10.b's fit at 26 fitted ([`XrbHostKind::LOW_MASS_HELD`]
+    /// and [`XrbHostKind::HIGH_MASS_HELD`]), or `None` for one they do not hold: a symbiotic X-ray
+    /// binary, a black hole beside a Be star or a supergiant, or a low-mass X-ray binary whose
+    /// donor is a helium star or a white dwarf, an ultracompact one ([`member_kind`] names them).
+    ///
+    /// [`member_kind`]: Self::member_kind
     #[must_use]
     pub const fn host_kind(&self) -> Option<XrbHostKind> {
         let black_hole = matches!(self.accretor_phase, Phase::BlackHole);
@@ -168,54 +171,23 @@ impl XrayMarks {
     }
 }
 
-/// What kind of X-ray binary a census member is (P11.T8.b's fix): one of the catalogue's six
-/// ([`XrbHostKind`]) or of the three it does not draw, so that every member has one, what the
-/// fit's kind shares sum over.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum XrbMemberKind {
-    /// One of the catalogue's kinds.
-    Host(XrbHostKind),
-    /// A neutron star or a black hole fed through its inner Lagrangian point by a white dwarf or a
-    /// helium star: an ultracompact X-ray binary.
-    Ultracompact,
-    /// A neutron star or a black hole fed by a low-mass giant's wind: a symbiotic X-ray binary.
-    Symbiotic,
-    /// A black hole beside a star of 8 M☉ or more, fed by its wind or through its inner Lagrangian
-    /// point, or beside a Be star.
-    BlackHoleHighMass,
-}
-
-impl XrbMemberKind {
-    /// Every kind: the catalogue's in [`XrbHostKind::ALL`]' order, then the three it does not draw.
-    pub const ALL: [Self; 9] = [
-        Self::Host(XrbHostKind::NeutronStarPersistent),
-        Self::Host(XrbHostKind::NeutronStarTransient),
-        Self::Host(XrbHostKind::BlackHolePersistent),
-        Self::Host(XrbHostKind::BlackHoleTransient),
-        Self::Host(XrbHostKind::BeX),
-        Self::Host(XrbHostKind::Supergiant),
-        Self::Ultracompact,
-        Self::Symbiotic,
-        Self::BlackHoleHighMass,
-    ];
-}
-
 impl XrayMarks {
-    /// The member's kind ([`XrbMemberKind`]): its catalogue kind ([`host_kind`](Self::host_kind)),
-    /// or else an ultracompact, a symbiotic or a black hole beside a massive star; `None` only for
-    /// marks whose class is not an X-ray binary's, which no member's is.
+    /// The member's kind among all nine of [`XrbHostKind`] (P11.T8.b's fix): its held kind
+    /// ([`host_kind`](Self::host_kind)), or else an ultracompact, a symbiotic or a black hole
+    /// beside a massive star; `None` only for marks whose class is not an X-ray binary's, which no
+    /// member's is.
     #[must_use]
-    pub const fn member_kind(&self) -> Option<XrbMemberKind> {
+    pub const fn member_kind(&self) -> Option<XrbHostKind> {
         if let Some(kind) = self.host_kind() {
-            return Some(XrbMemberKind::Host(kind));
+            return Some(kind);
         }
         match self.class {
-            BinaryClass::LowMassXrayBinary(XrbKind::Symbiotic) => Some(XrbMemberKind::Symbiotic),
+            BinaryClass::LowMassXrayBinary(XrbKind::Symbiotic) => Some(XrbHostKind::Symbiotic),
             BinaryClass::LowMassXrayBinary(XrbKind::Persistent | XrbKind::Transient) => {
-                Some(XrbMemberKind::Ultracompact)
+                Some(XrbHostKind::Ultracompact)
             }
             BinaryClass::HighMassXrayBinary(HmxbKind::BeX | HmxbKind::Supergiant) => {
-                Some(XrbMemberKind::BlackHoleHighMass)
+                Some(XrbHostKind::BlackHoleHighMass)
             }
             BinaryClass::None
             | BinaryClass::Algol
@@ -825,12 +797,12 @@ mod tests {
         }
     }
 
-    /// Every X-ray binary member has a kind: the catalogue's where its kinds hold it, else an
-    /// ultracompact (a white dwarf's or a helium star's matter), a symbiotic one, or a black hole
-    /// beside a massive star; marks of another class have none.
+    /// Every X-ray binary member has a kind: a held one where those hold it, else an ultracompact
+    /// (a white dwarf's or a helium star's matter), a symbiotic one, or a black hole beside a
+    /// massive star; marks of another class have none.
     #[test]
     fn every_x_ray_binary_member_has_a_kind() {
-        use XrbMemberKind::{BlackHoleHighMass, Host, Symbiotic, Ultracompact};
+        use XrbHostKind::{BlackHoleHighMass, Symbiotic, Ultracompact};
         let (ns, bh) = (Phase::NeutronStar, Phase::BlackHole);
         let lmxb = |kind| BinaryClass::LowMassXrayBinary(kind);
         let hmxb = |kind| BinaryClass::HighMassXrayBinary(kind);
@@ -839,13 +811,13 @@ mod tests {
                 lmxb(XrbKind::Persistent),
                 ns,
                 Phase::MainSequence,
-                Host(XrbHostKind::NeutronStarPersistent),
+                XrbHostKind::NeutronStarPersistent,
             ),
             (
                 lmxb(XrbKind::Transient),
                 bh,
                 Phase::FirstGiantBranch,
-                Host(XrbHostKind::BlackHoleTransient),
+                XrbHostKind::BlackHoleTransient,
             ),
             (
                 lmxb(XrbKind::Transient),
@@ -876,13 +848,13 @@ mod tests {
                 hmxb(HmxbKind::BeX),
                 ns,
                 Phase::MainSequence,
-                Host(XrbHostKind::BeX),
+                XrbHostKind::BeX,
             ),
             (
                 hmxb(HmxbKind::Supergiant),
                 ns,
                 Phase::CoreHeliumBurning,
-                Host(XrbHostKind::Supergiant),
+                XrbHostKind::Supergiant,
             ),
             (
                 hmxb(HmxbKind::BeX),
@@ -904,12 +876,9 @@ mod tests {
                 Some(kind),
                 "{class:?} {accretor:?} {donor:?}"
             );
-            if let Host(host) = kind {
-                assert_eq!(marks.host_kind(), Some(host));
-            } else {
-                assert_eq!(marks.host_kind(), None);
-            }
-            assert!(XrbMemberKind::ALL.contains(&kind));
+            let held = XrbHostKind::LOW_MASS_HELD.contains(&kind)
+                || XrbHostKind::HIGH_MASS_HELD.contains(&kind);
+            assert_eq!(marks.host_kind(), held.then_some(kind));
         }
         assert_eq!(
             xray(

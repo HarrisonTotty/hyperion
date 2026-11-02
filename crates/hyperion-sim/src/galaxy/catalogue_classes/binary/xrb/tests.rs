@@ -207,12 +207,12 @@ fn every_entry_is_its_kind_at_every_age_of_the_horizon() {
         let now = value.record().age_at_epoch();
         let timeline = value.timeline();
         assert_eq!(carved_class(timeline, now), Some(CarvedClass::XrayBinary));
-        let kind = value.scan().kind();
+        let class = value.scan().class();
         for k in 0..=16 {
             let t = start + (end - start) * f64::from(k) / 16.0;
             let at = Years::new(now.value() + t);
             let found = classify(&timeline.state_at(at), &timeline.class_context(at));
-            assert_eq!(found, kind.class(), "{:?} at {t} years", entry.id());
+            assert_eq!(found, class, "{:?} at {t} years", entry.id());
         }
     }
 }
@@ -237,7 +237,10 @@ fn the_sides_follow_their_populations() {
             kind.is_high_mass()
         );
         assert_eq!(value.record().population(), population);
-        assert_eq!(scan.recurrence().is_some(), kind.is_transient());
+        let transient = crate::stellar::binary::BinaryClass::LowMassXrayBinary(
+            crate::stellar::binary::XrbKind::Transient,
+        );
+        assert_eq!(scan.recurrence().is_some(), scan.class() == transient);
         if let Some(recoil) = scan.recoil() {
             assert!(kind.is_high_mass());
             let moved = scan.site().displacement_to(scan.position());
@@ -368,7 +371,7 @@ fn an_entry_s_stars_are_its_pair() {
         let now = stars.state_at(UniverseTime::EPOCH).unwrap();
         assert_eq!(now.stars()[0], *value.binary().accretor());
         assert_eq!(now.stars()[1], *value.binary().donor());
-        assert_eq!(now.pairs()[0].class(), value.scan().kind().class());
+        assert_eq!(now.pairs()[0].class(), value.scan().class());
         assert_eq!(now.pairs()[0].orbit(), Some(value.binary().orbit()));
         let system = system_of(galaxy, entry.id()).unwrap();
         assert_eq!(system.star_model(), None);

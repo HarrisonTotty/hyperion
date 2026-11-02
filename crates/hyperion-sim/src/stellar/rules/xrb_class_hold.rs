@@ -43,17 +43,20 @@ use crate::galaxy::imf::{BandShares, MassBand};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement;
 use crate::galaxy::rules::GalaxyRules;
-use crate::galaxy::{Galaxy, Population};
+use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::SystemId;
+use crate::math;
 use crate::rng::Seed;
 use crate::stellar::Phase;
 use crate::stellar::binary::scan::{XrbScanMarks, scan_cell};
 use crate::stellar::binary::testing::{
-    CensusPart, CensusRecords, CensusSite, ClassMember, XrayMarks, XrbMemberKind, class_census_in,
+    CensusPart, CensusRecords, CensusSite, ClassMember, XrayMarks, class_census_in,
 };
 use crate::stellar::binary::xrb_class::{SPUN_UP_GAINED_SHARE, XRB_MIN_TRANSFER_RATE};
 use crate::stellar::binary::{BinaryClass, CarvedClass, Component, HmxbKind, SegmentKind, XrbKind};
-use crate::tables::binary::XrbHostKind;
+use crate::tables::binary::{
+    ClassSamplerTable, SamplerPick, XRB_SAMPLER_27, XrbHostKind, XrbMark, XrbPick,
+};
 use crate::units::{Seconds, Years};
 
 /// The seed of the Milky Way fixture: `hyperion-fit`'s manifests', whose census found the pinned
@@ -114,7 +117,7 @@ const CITED_BLACK_HOLE_SHARE: f64 = 0.01;
 /// Be/X's orbits are the observed ones, 301 of 360 at 10–330 days).
 const PINNED_HIGH_MASS: [usize; 3] = [373, 4, 2];
 
-/// The census's members of each kind under every 27 hold, in [`XrbMemberKind::ALL`]'s order, in
+/// The census's members of each kind under every 27 hold, in [`XrbHostKind::ALL`]'s order, in
 /// the slab and in the young disc, as measured (2026-11-02, with P11.T4's pinned white dwarfs):
 /// the floor of 10⁻¹² keeps 76 of the slab's 456 ultracompacts that 10⁻¹³ kept, and 184 of its
 /// 567 members.
@@ -253,7 +256,7 @@ fn a_transfer_under_the_floor_makes_no_x_ray_binary_under_the_arm() {
     assert_eq!(held_marks.donor_phase, Phase::HeliumWhiteDwarf);
     let rate = held_marks.transfer_rate.expect("a stable transfer");
     assert!(rate < XRB_MIN_TRANSFER_RATE, "{rate:?}");
-    assert_eq!(held_marks.member_kind(), Some(XrbMemberKind::Ultracompact));
+    assert_eq!(held_marks.member_kind(), Some(XrbHostKind::Ultracompact));
     assert_eq!(pinned_marks(&carved(), UNDER_THE_FLOOR), None);
 }
 
@@ -271,7 +274,7 @@ fn a_wind_fed_black_hole_needs_a_disc_under_the_arm() {
     assert_eq!(held_marks.transfer_rate, None, "fed by a wind");
     assert_eq!(
         held_marks.member_kind(),
-        Some(XrbMemberKind::BlackHoleHighMass)
+        Some(XrbHostKind::BlackHoleHighMass)
     );
     assert_eq!(pinned_marks(&carved(), DISCLESS_BLACK_HOLE), None);
 }
@@ -288,10 +291,7 @@ fn a_b_star_spun_up_by_transfer_is_a_be_star_under_the_arm() {
     assert_eq!(marks.class, BinaryClass::HighMassXrayBinary(HmxbKind::BeX));
     assert_eq!(marks.accretor_phase, Phase::NeutronStar);
     assert_eq!(marks.donor_phase, Phase::MainSequence);
-    assert_eq!(
-        marks.member_kind(),
-        Some(XrbMemberKind::Host(XrbHostKind::BeX))
-    );
+    assert_eq!(marks.member_kind(), Some(XrbHostKind::BeX));
     // Its gain: from its mass where it first took the compact star's progenitor's matter.
     let timeline = member.timeline();
     let state = timeline.state_at(marks.age);
@@ -317,8 +317,9 @@ fn a_b_star_spun_up_by_transfer_is_a_be_star_under_the_arm() {
 }
 
 /// Under the arm and plan 15's fitted tables, which feed some low-mass hosts under the floor, the
-/// X-ray binaries' scan refuses exactly those of the held arm's hosts over 3,200 cells about the
-/// centre, and keeps exactly the cells' entries in 128 of them, none fed under the floor.
+/// X-ray binaries' scan over version 27's table refuses exactly those of the held arm's hosts over
+/// the same table in 3,200 cells about the centre, and keeps exactly the cells' entries in 128 of
+/// them, none fed under the floor; version 27's table draws the carving's kinds too.
 #[test]
 fn the_scan_refuses_a_host_fed_under_the_floor_under_the_arm() {
     let rules = held().rules();
@@ -328,7 +329,9 @@ fn the_scan_refuses_a_host_fed_under_the_floor_under_the_arm() {
     };
     let [held_fitted, arm_fitted] = [version(), carved().rules().stellar]
         .map(|stellar| held().clone().with_rules(GalaxyRules { stellar, ..fitted }));
-    let [held_process, arm_process] = [&held_fitted, &arm_fitted].map(XrayBinaries::new);
+    // The same table under both, version 27's, which draws the carving's kinds too.
+    let [held_process, arm_process] =
+        [&held_fitted, &arm_fitted].map(|g| XrayBinaries::of_table(g, &XRB_SAMPLER_27));
     let under = |h: &XrbScanMarks| h.transfer_rate().is_some_and(|r| r < XRB_MIN_TRANSFER_RATE);
     let (mut refused, mut kept) = (0_usize, 0_usize);
     for x in -20..20 {
@@ -423,12 +426,12 @@ fn census(galaxy: &Galaxy, site: CensusSite, whose: CensusRecords, records: u64)
     .collect()
 }
 
-/// The members of each kind in `marks`, in [`XrbMemberKind::ALL`]'s order.
+/// The members of each kind in `marks`, in [`XrbHostKind::ALL`]'s order.
 fn kinds(marks: &[XrayMarks]) -> [usize; 9] {
     std::array::from_fn(|k| {
         marks
             .iter()
-            .filter(|m| m.member_kind() == Some(XrbMemberKind::ALL[k]))
+            .filter(|m| m.member_kind() == Some(XrbHostKind::ALL[k]))
             .count()
     })
 }
@@ -436,10 +439,7 @@ fn kinds(marks: &[XrayMarks]) -> [usize; 9] {
 /// Whether `marks` is a low-mass X-ray binary fed through its inner Lagrangian point by a hydrogen
 /// star: a catalogue low-mass kind's.
 fn hydrogen_fed_low_mass(marks: &XrayMarks) -> bool {
-    matches!(
-        marks.member_kind(),
-        Some(XrbMemberKind::Host(kind)) if !kind.is_high_mass()
-    )
+    marks.host_kind().is_some_and(|kind| !kind.is_high_mass())
 }
 
 /// Slow: censuses of 10⁶ slab and 10⁶ young thin disc records under every 27 hold, and under every
@@ -500,7 +500,7 @@ fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
         let long: Vec<&XrayMarks> = after
             .iter()
             .filter(|m| {
-                m.member_kind() == Some(XrbMemberKind::Ultracompact)
+                m.member_kind() == Some(XrbHostKind::Ultracompact)
                     && m.period.is_none_or(|p| p >= ULTRACOMPACT_MAX_PERIOD)
             })
             .collect();
@@ -522,16 +522,16 @@ fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
             young = after;
         }
     }
-    let count = |kind: XrbMemberKind| {
+    let count = |kind: XrbHostKind| {
         young
             .iter()
             .filter(|m| m.member_kind() == Some(kind))
             .count()
     };
     let (bex, supergiant, black_holes) = (
-        count(XrbMemberKind::Host(XrbHostKind::BeX)),
-        count(XrbMemberKind::Host(XrbHostKind::Supergiant)),
-        count(XrbMemberKind::BlackHoleHighMass),
+        count(XrbHostKind::BeX),
+        count(XrbHostKind::Supergiant),
+        count(XrbHostKind::BlackHoleHighMass),
     );
     #[expect(clippy::cast_precision_loss, reason = "a census's few hundred members")]
     let (bex_share, black_hole_share) = (
@@ -551,4 +551,226 @@ fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
     assert_eq!(pinned_kinds, PINNED_KINDS);
     assert_eq!(long_ultracompacts, PINNED_LONG_ULTRACOMPACTS);
     assert_eq!([bex, supergiant, black_holes], PINNED_HIGH_MASS);
+}
+
+/// A table of version 27's marks that draws the carving's three kinds alone, so that their marks
+/// fill the catalogue's laws in the sample cells.
+static NEW_KINDS: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
+    XRB_SAMPLER_27.marks(),
+    &[
+        SamplerPick::new("low_mass_kind", &[0.0, 0.0, 0.0, 0.0, 0.5, 0.5]),
+        SamplerPick::new("high_mass_kind", &[0.0, 0.0, 0.5]),
+    ],
+);
+
+/// The census's and the catalogue's kinds over the slab, and the new kinds' marks, that miss under
+/// every 27 hold (findings): each a kind's share or a mark's name, as measured.
+const PINNED_KIND_MISSES: [&str; 0] = [];
+
+/// A new kind's mark as the catalogue's entries and the census's members give it: its name, its
+/// kind, and its value in an entry's scan marks and in a member's marks.
+type KindMark = (
+    &'static str,
+    XrbHostKind,
+    fn(&XrbScanMarks) -> f64,
+    fn(&XrayMarks) -> Option<f64>,
+);
+
+/// The new kinds' marks [`the_catalogue_draws_the_census_s_kinds`] compares: those the census holds
+/// enough members of, the black-hole high-mass hosts' two too few.
+const NEW_KIND_MARKS: [KindMark; 5] = [
+    (
+        "ultracompact period, minutes",
+        XrbHostKind::Ultracompact,
+        |s| s.period().value() / 60.0,
+        |m| m.period.map(|p| p.value() / 60.0),
+    ),
+    (
+        "ultracompact rate, log",
+        XrbHostKind::Ultracompact,
+        |s| {
+            s.transfer_rate()
+                .map_or(f64::NAN, |r| math::log10(r.value()))
+        },
+        |m| m.transfer_rate.map(|r| math::log10(r.value())),
+    ),
+    (
+        "ultracompact accretor mass",
+        XrbHostKind::Ultracompact,
+        |s| s.accretor_mass().value(),
+        |m| Some(m.accretor_mass.value()),
+    ),
+    (
+        "symbiotic period, days",
+        XrbHostKind::Symbiotic,
+        |s| s.period().value() / 86_400.0,
+        |m| m.period.map(|p| p.value() / 86_400.0),
+    ),
+    (
+        "symbiotic accretor mass",
+        XrbHostKind::Symbiotic,
+        |s| s.accretor_mass().value(),
+        |m| Some(m.accretor_mass.value()),
+    ),
+];
+
+/// The chi-square per degree of freedom of `engine`'s values binned in the deciles of `drawn`'s,
+/// ten bins of a tenth of the members each expected.
+fn decile_chi2(drawn: &mut [f64], engine: &[f64]) -> f64 {
+    assert!(
+        drawn.len() >= 10 && !engine.is_empty(),
+        "{} draws and {} members to compare",
+        drawn.len(),
+        engine.len()
+    );
+    drawn.sort_by(f64::total_cmp);
+    let edges: Vec<f64> = (1..10).map(|k| drawn[k * drawn.len() / 10]).collect();
+    let mut counts = [0_u32; 10];
+    for v in engine {
+        counts[edges.partition_point(|e| e <= v)] += 1;
+    }
+    #[expect(clippy::cast_precision_loss, reason = "a census's few hundred members")]
+    let expected = engine.len() as f64 / 10.0;
+    counts
+        .iter()
+        .map(|&c| (f64::from(c) - expected) * (f64::from(c) - expected) / expected)
+        .sum::<f64>()
+        / 9.0
+}
+
+/// The catalogue's entries of each kind in `galaxy` whose positions lie in the census's slab
+/// (`CensusSite::SOLAR_CIRCLE`'s box), in [`XrbHostKind::ALL`]'s order.
+fn slab_entries_by_kind(galaxy: &Galaxy) -> [u32; 9] {
+    let process = XrayBinaries::new(galaxy);
+    let (centre, half) = ([0.0, 26_000.0, 0.0], [12_000.0, 2_000.0, 1_500.0]);
+    let inside = |p: &PointLy| {
+        (p.x - centre[0]).abs() <= half[0]
+            && (p.y - centre[1]).abs() <= half[1]
+            && (p.z - centre[2]).abs() <= half[2]
+    };
+    let mut counts = [0_u32; 9];
+    for x in -24..24 {
+        for y in 46..55 {
+            for z in -3..3 {
+                let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, [x, y, z]).expect("a cell");
+                for entry in CatalogueClassCell::generate(galaxy, &process, key).entries() {
+                    let scan = entry.value().scan();
+                    if inside(&PointLy::from(scan.position())) {
+                        let k = XrbHostKind::ALL
+                            .iter()
+                            .position(|&each| each == scan.kind())
+                            .expect("every kind is listed");
+                        counts[k] += 1;
+                    }
+                }
+            }
+        }
+    }
+    counts
+}
+
+/// The kinds whose shares of `catalogue`'s entries and of `members` differ by more than four
+/// standard errors of their difference.
+fn kind_share_misses(catalogue: &[u32; 9], members: &[XrayMarks]) -> Vec<String> {
+    let census = kinds(members);
+    let n_cat = f64::from(catalogue.iter().sum::<u32>());
+    assert!(
+        n_cat > 0.0 && !members.is_empty(),
+        "entries and members to compare"
+    );
+    let n_cen = f64::from(u32::try_from(members.len()).expect("a census's few hundred members"));
+    let mut misses = Vec::new();
+    for (k, kind) in XrbHostKind::ALL.iter().enumerate() {
+        let c = f64::from(catalogue[k]);
+        let e = f64::from(u32::try_from(census[k]).expect("a census's few hundred members"));
+        let pooled = (c + e) / (n_cat + n_cen);
+        let error = (pooled * (1.0 - pooled) * (1.0 / n_cat + 1.0 / n_cen)).sqrt();
+        let difference = c / n_cat - e / n_cen;
+        println!("  {kind:?}: {difference:+.4} against {error:.4}");
+        if difference.abs() > 4.0 * error + 1e-12 {
+            misses.push(format!("{kind:?} share"));
+        }
+    }
+    misses
+}
+
+/// The scan marks of the entries `galaxy`'s class draws through [`NEW_KINDS`] about the centre and
+/// across the inner disc, `xrb::kinds_tests`' sample cells.
+fn new_kind_entries(galaxy: &Galaxy) -> Vec<XrbScanMarks> {
+    let process = XrayBinaries::of_table(galaxy, &NEW_KINDS);
+    (-4..4)
+        .flat_map(|x| (-4..4).flat_map(move |y| [[x, y, 0], [x, y, -1]]))
+        .chain((-12..12).flat_map(|x| (10..14).flat_map(move |y| [[x, y, 0], [x, y, -1]])))
+        .flat_map(|cell| {
+            let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, cell).expect("a cell");
+            CatalogueClassCell::generate(galaxy, &process, key)
+                .into_entries()
+                .into_iter()
+                .map(|entry| *entry.value().scan())
+        })
+        .collect()
+}
+
+/// Slow: the catalogue against the census under every 27 hold (P11.T8.b's fix). Over the slab, the
+/// catalogue's entries of each of the nine kinds against the census's members of it, by their
+/// shares, within four standard errors of their difference; and each new kind's marks, its entries
+/// drawn through version 27's marks about the centre and the inner disc, against the census's
+/// members of the kind in the slab and the young disc, binned in the deciles of the entries, by
+/// chi-square per degree of freedom under 0.97 of the members compared (`tests/binary_xrb.rs`'s
+/// scratch tolerance, which refuses only a mark whose members all fall into one tenth of the law).
+/// A miss is a finding, pinned in [`PINNED_KIND_MISSES`].
+#[test]
+#[ignore = "slow: two censuses of 10⁶ records through the binary engine"]
+fn the_catalogue_draws_the_census_s_kinds() {
+    let arm = Galaxy::from_params_with_rules(
+        Seed::new(SEED),
+        GalaxyParams::milky_way_like(),
+        GalaxyRules::every_27_hold(),
+    )
+    .expect("the Milky Way fixture builds");
+    let slab = census(
+        &arm,
+        CensusSite::SOLAR_CIRCLE,
+        CensusRecords::All,
+        CENSUS_RECORDS,
+    );
+    let young = census(
+        &arm,
+        YOUNG_SITE,
+        CensusRecords::Of(Population::YoungThinDisc),
+        CENSUS_RECORDS,
+    );
+    let catalogue = slab_entries_by_kind(&arm);
+    println!(
+        "the slab's kinds: catalogue {catalogue:?}, census {:?}",
+        kinds(&slab)
+    );
+    let mut misses = kind_share_misses(&catalogue, &slab);
+    let entries = new_kind_entries(&arm);
+    let members: Vec<&XrayMarks> = slab.iter().chain(&young).collect();
+    for (name, kind, of_entry, of_member) in NEW_KIND_MARKS {
+        let mut drawn: Vec<f64> = entries
+            .iter()
+            .filter(|s| s.kind() == kind)
+            .map(of_entry)
+            .collect();
+        let engine: Vec<f64> = members
+            .iter()
+            .filter(|m| m.member_kind() == Some(kind))
+            .filter_map(|m| of_member(m))
+            .collect();
+        let chi2 = decile_chi2(&mut drawn, &engine);
+        #[expect(clippy::cast_precision_loss, reason = "a census's few hundred members")]
+        let bound = 0.97 * engine.len() as f64;
+        println!(
+            "  {name}: {} entries, {} members, chi-square per degree of freedom {chi2:.2} \
+             against {bound:.2}",
+            drawn.len(),
+            engine.len()
+        );
+        if chi2 >= bound {
+            misses.push(name.to_owned());
+        }
+    }
+    assert_eq!(misses, PINNED_KIND_MISSES);
 }

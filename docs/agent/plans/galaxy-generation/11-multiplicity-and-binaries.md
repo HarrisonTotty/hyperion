@@ -7363,9 +7363,53 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     its lobe (Hirai and Mandel 2021). Wind-fed neutron stars keep no disc rule (deviation: their
     field takes a wind). The scan refuses a candidate fed under the floor, so it keeps exactly the
     entries at the bump.
-  - _Kinds._ The census's `XrbMemberKind` (the catalogue's six, `Ultracompact`, `Symbiotic`,
-    `BlackHoleHighMass`) gives every member one (`XrayMarks::member_kind`); the catalogue draws
-    only its six (lean: the other three's builds, marks and events are P11.T8.b work for main).
+  - _Kinds_ (`fix-p11-t8b-new-kinds`, 2026-11-02). `XrbHostKind` holds the nine kinds the census
+    counts, the held six (`LOW_MASS_HELD`, `HIGH_MASS_HELD`) then `Ultracompact`, `Symbiotic` and
+    `BlackHoleHighMass`, and `XrayMarks::member_kind` returns one (`XrbMemberKind` is gone).
+    Before the fix the row counted the three, s₃ = 0.388 of the galaxy's hosts at 27 in
+    `binary_xrb`'s censuses, and the catalogue drew their hosts as the six, over-weighted by
+    1 ÷ (1 − s₃) = 1.63. From 27 under the fitted tables (`BinaryTableRules::xrb_sampler` keyed on
+    `XrbClassRules`) the class draws from `XRB_SAMPLER_27`: `XRB_SAMPLER_26`'s marks, each kind
+    weighted by its galaxy share in those censuses (`XRB_LOW_MASS_KINDS_27`,
+    `XRB_HIGH_MASS_KINDS_27`; black holes 0.0017 of the high-mass hosts). Below 27 the tables
+    weigh the six alone and nothing moves; the fit at 26 keeps `XrbMark::HELD`'s twenty marks.
+  - _Marks_ (`XRB_SAMPLER`'s ten new ones, `@provisional`, for the refit at 27). Ultracompact: a
+    period of 10^(1.5 ± 0.16) min on 10–80, a helium white dwarf filling its lobe on Eggleton's
+    cold mass–radius relation (0.057 M☉ at 11.4 min), fed by gravitational radiation (ζ = −1/3;
+    10⁻¹² M☉ yr⁻¹ near 62 min, so the floor takes about 3% of the draws), a transient below the
+    irradiated line taking a recurrence of 10^(1.0 ± 0.4) yr, its progenitor 10^(0.15 ± 0.08) M☉
+    unheld by the turn-off. Symbiotic: detached, 10^(3.0 ± 0.18) d on 200–3,000, a 1–3 M☉ giant at
+    0.5 ± 0.12 of its lobe; the scan refuses it under `SYMBIOTIC_XRB_MIN_LUMINOSITY`
+    (`classify::wind_fed_luminosity`). Black-hole high-mass: the supergiant shape with Cyg X-1's
+    black hole, period and donor, and the supergiants' recoil.
+  - _Deviations._ The symbiotic giant is not on its own track: a first-giant-branch state at the
+    accreting white dwarfs' 3,600 K and 0.35 M☉ core, its radius held under the red giant tip's
+    129 R☉, its luminosity by Stefan–Boltzmann and its Reimers wind (η = 0.5) feeding the neutron
+    star. Black-hole high-mass hosts are always in Roche-lobe overflow at 10^(−8.5 ± 0.4) M☉ yr⁻¹,
+    with no filling mark and no wind-fed case, and their donors lie on 20–60 M☉, not the brief's
+    20–40, to hold Cyg X-1's 40.6 (Miller-Jones et al. 2021). From 27 the held six are re-weighted
+    from the 27 censuses too. The catalogue's ultracompacts are neutron stars beside helium white
+    dwarfs and its symbiotic hosts neutron stars beside first-giant-branch giants; the census's
+    hold black holes, helium stars and carbon–oxygen white dwarfs too (ultracompact, median 65
+    min against the marks' 32), and black holes (88%), core-helium-burning giants of a median
+    5.4 M☉ and periods of a median 7.3 × 10⁴ d (symbiotic): findings for a ruling. The three have
+    no events (P11.T9's); the wire takes them as `Persistent`/`Transient`, `Symbiotic` and
+    `Supergiant` (`convert/stellar.rs`), no new member. New API: `XrbHostKind::LOW_MASS_HELD`
+    and `HIGH_MASS_HELD`, `XrbMark::HELD`, `XrbScanMarks::{class, is_transient}`,
+    `XrayBinaries::of_table` (crate), `classify::wind_fed_luminosity` (crate).
+  - _Findings_ (2026-11-02). At 27 the black-hole transients' weight falls from the fit's 0.663 to
+    0.0194, about 190 hosts against P11.T8.b's 1,300 ± 400 (P11.T4's NS accretion grows none from
+    neutron stars), and the high-mass side rises from 0.0032 to 0.0077. Against the census, the
+    scratch marks miss widely, chi-square per degree of freedom 78 (ultracompact periods), 29
+    (rates), 86 (accretor masses), 22 (symbiotic periods) and 29 (symbiotic accretor masses), all
+    inside the shared test's scratch tolerance; the refit fits them. The ultracompacts' ζ is fixed
+    at −1/3 (Eggleton's relation gives −0.28 to −0.10 there), their transience reads the hydrogen
+    disc's line (a helium disc's is higher: Lasota, Dubus and Kruk 2008), and their Eddington rate
+    takes hydrogen's 0.7 (it never binds).
+  - _Movers at 27_: `xrb_class_hold::the_scan_refuses_a_host_fed_under_the_floor_under_the_arm`
+    now scans version 27's table under both arms. New tests: `xrb::kinds_tests` and the slow
+    `xrb_class_hold::the_catalogue_draws_the_census_s_kinds`. At 24–26 `golden_diff.py` reports
+    "No golden files changed".
   - _Deviation._ A timeline from marks has no history, so a Be star spun up by transfer is one in
     the engine's timeline alone; `classify`'s marks round trip skips such pairs.
   - _A Be star feeds a neutron star alone_ (main's ruling of 2026-11-01: the black holes' 0.145 of

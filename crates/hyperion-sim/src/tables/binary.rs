@@ -1162,7 +1162,9 @@ const NSM_MARKS: [SamplerMark; 5] = [
 ];
 
 /// The kinds of the X-ray binaries' class (P11.T8.b), in [`XRB_SAMPLER`]'s two choices' order:
-/// the four low-mass kinds of the old populations, then the two high-mass kinds of the young disc.
+/// the four low-mass kinds of the old populations, then the two high-mass kinds of the young disc,
+/// then the three the carving names (P11.T8.b's fix, drawn from 27 by plan 15's fitted tables): two
+/// low-mass, one high-mass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum XrbHostKind {
     /// A neutron star fed by a low-mass donor above the irradiated disc's instability line.
@@ -1177,43 +1179,74 @@ pub enum XrbHostKind {
     BeX,
     /// A neutron star fed by a supergiant filling its Roche lobe.
     Supergiant,
+    /// A neutron star fed through its inner Lagrangian point by a helium white dwarf, an
+    /// ultracompact X-ray binary, persistent or transient by its disc's instability line.
+    Ultracompact,
+    /// A neutron star fed by a low-mass giant's wind: a symbiotic X-ray binary (ruling 129.3).
+    Symbiotic,
+    /// A black hole fed by a supergiant of 20–60 M☉ filling its Roche lobe, as Cyg X-1 nearly
+    /// does.
+    BlackHoleHighMass,
 }
 
 impl XrbHostKind {
-    /// Every kind, in the choices' order.
-    pub const ALL: [Self; 6] = [
+    /// Every kind: the six of [`XRB_SAMPLER`] and P15.T10.b's fit at 26, then the carving's three.
+    pub const ALL: [Self; 9] = [
         Self::NeutronStarPersistent,
         Self::NeutronStarTransient,
         Self::BlackHolePersistent,
         Self::BlackHoleTransient,
         Self::BeX,
         Self::Supergiant,
+        Self::Ultracompact,
+        Self::Symbiotic,
+        Self::BlackHoleHighMass,
     ];
 
-    /// The low-mass kinds, in [`XrbPick::LowMassKind`]'s order.
-    pub const LOW_MASS: [Self; 4] = [
+    /// The low-mass kinds, in [`XrbPick::LowMassKind`]'s order: [`LOW_MASS_HELD`](Self::LOW_MASS_HELD)'s
+    /// four, then the ultracompact and symbiotic ones.
+    pub const LOW_MASS: [Self; 6] = [
+        Self::NeutronStarPersistent,
+        Self::NeutronStarTransient,
+        Self::BlackHolePersistent,
+        Self::BlackHoleTransient,
+        Self::Ultracompact,
+        Self::Symbiotic,
+    ];
+
+    /// The high-mass kinds, in [`XrbPick::HighMassKind`]'s order:
+    /// [`HIGH_MASS_HELD`](Self::HIGH_MASS_HELD)'s two, then the black-hole one.
+    pub const HIGH_MASS: [Self; 3] = [Self::BeX, Self::Supergiant, Self::BlackHoleHighMass];
+
+    /// The low-mass kinds [`XRB_SAMPLER`]'s choice weighs and P15.T10.b's fit at 26 fitted, the
+    /// first of [`LOW_MASS`](Self::LOW_MASS).
+    pub const LOW_MASS_HELD: [Self; 4] = [
         Self::NeutronStarPersistent,
         Self::NeutronStarTransient,
         Self::BlackHolePersistent,
         Self::BlackHoleTransient,
     ];
 
-    /// The high-mass kinds, in [`XrbPick::HighMassKind`]'s order.
-    pub const HIGH_MASS: [Self; 2] = [Self::BeX, Self::Supergiant];
+    /// The high-mass kinds [`XRB_SAMPLER`]'s choice weighs and P15.T10.b's fit at 26 fitted, the
+    /// first of [`HIGH_MASS`](Self::HIGH_MASS).
+    pub const HIGH_MASS_HELD: [Self; 2] = [Self::BeX, Self::Supergiant];
 
     /// Whether the kind is a high-mass X-ray binary's, whose hosts are the young disc's.
     #[must_use]
     pub const fn is_high_mass(self) -> bool {
         match self {
-            Self::BeX | Self::Supergiant => true,
+            Self::BeX | Self::Supergiant | Self::BlackHoleHighMass => true,
             Self::NeutronStarPersistent
             | Self::NeutronStarTransient
             | Self::BlackHolePersistent
-            | Self::BlackHoleTransient => false,
+            | Self::BlackHoleTransient
+            | Self::Ultracompact
+            | Self::Symbiotic => false,
         }
     }
 
-    /// Whether the kind is a low-mass transient's, whose outbursts recur.
+    /// Whether the kind is a low-mass transient's, whose outbursts recur: an ultracompact host is
+    /// one or not by its own rate, so the kind is not.
     #[must_use]
     pub const fn is_transient(self) -> bool {
         match self {
@@ -1221,7 +1254,10 @@ impl XrbHostKind {
             Self::NeutronStarPersistent
             | Self::BlackHolePersistent
             | Self::BeX
-            | Self::Supergiant => false,
+            | Self::Supergiant
+            | Self::Ultracompact
+            | Self::Symbiotic
+            | Self::BlackHoleHighMass => false,
         }
     }
 
@@ -1229,32 +1265,42 @@ impl XrbHostKind {
     #[must_use]
     pub const fn accretor(self) -> XrayAccretor {
         match self {
-            Self::BlackHolePersistent | Self::BlackHoleTransient => XrayAccretor::BlackHole,
+            Self::BlackHolePersistent | Self::BlackHoleTransient | Self::BlackHoleHighMass => {
+                XrayAccretor::BlackHole
+            }
             Self::NeutronStarPersistent
             | Self::NeutronStarTransient
             | Self::BeX
-            | Self::Supergiant => XrayAccretor::NeutronStar,
+            | Self::Supergiant
+            | Self::Ultracompact
+            | Self::Symbiotic => XrayAccretor::NeutronStar,
         }
     }
 
-    /// The binary class P11.T5's `classify` gives a pair of the kind.
+    /// The binary class P11.T5's `classify` gives a pair of the kind: an ultracompact host's when
+    /// it is persistent, a transient one's being its scan marks' (`XrbScanMarks::class`), since
+    /// its rate decides it.
     #[must_use]
     pub const fn class(self) -> BinaryClass {
         match self {
-            Self::NeutronStarPersistent | Self::BlackHolePersistent => {
+            Self::NeutronStarPersistent | Self::BlackHolePersistent | Self::Ultracompact => {
                 BinaryClass::LowMassXrayBinary(XrbKind::Persistent)
             }
             Self::NeutronStarTransient | Self::BlackHoleTransient => {
                 BinaryClass::LowMassXrayBinary(XrbKind::Transient)
             }
+            Self::Symbiotic => BinaryClass::LowMassXrayBinary(XrbKind::Symbiotic),
             Self::BeX => BinaryClass::HighMassXrayBinary(HmxbKind::BeX),
-            Self::Supergiant => BinaryClass::HighMassXrayBinary(HmxbKind::Supergiant),
+            Self::Supergiant | Self::BlackHoleHighMass => {
+                BinaryClass::HighMassXrayBinary(HmxbKind::Supergiant)
+            }
         }
     }
 }
 
 /// The marks of [`XRB_SAMPLER`], in its order (P11.T8.b): what an X-ray binary is now, by its
-/// kind, then its history.
+/// kind, then its history, then the marks of the three kinds the carving names (P11.T8.b's fix),
+/// drawn from 27.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum XrbMark {
     /// A neutron star accretor's mass, M☉.
@@ -1298,11 +1344,31 @@ pub enum XrbMark {
     BlackHoleProgenitor,
     /// log₁₀ of a low-mass donor's initial mass over its mass now.
     DonorInitialExcess,
+    /// log₁₀ of an ultracompact X-ray binary's orbital period, minutes.
+    UltracompactPeriod,
+    /// log₁₀ of an ultracompact transient's outburst recurrence, years.
+    UltracompactRecurrence,
+    /// log₁₀ of an ultracompact donor's initial mass, M☉: the star whose core it is.
+    UltracompactDonorInitialMass,
+    /// log₁₀ of a symbiotic X-ray binary's orbital period, days.
+    SymbioticPeriod,
+    /// log₁₀ of a symbiotic X-ray binary's giant's mass, M☉.
+    SymbioticDonorMass,
+    /// A symbiotic X-ray binary's giant's radius over its Roche lobe's.
+    SymbioticFilling,
+    /// A black-hole high-mass X-ray binary's black hole's mass, M☉.
+    BlackHoleHighMassAccretorMass,
+    /// log₁₀ of a black-hole high-mass X-ray binary's orbital period, days.
+    BlackHoleHighMassPeriod,
+    /// A black-hole high-mass X-ray binary's supergiant's mass, M☉.
+    BlackHoleHighMassDonorMass,
+    /// log₁₀ of a black-hole high-mass X-ray binary's transfer rate, M☉ yr⁻¹.
+    BlackHoleHighMassRate,
 }
 
 impl XrbMark {
     /// Every mark, in [`XRB_SAMPLER`]'s order.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 30] = [
         Self::NeutronStarMass,
         Self::BlackHoleMass,
         Self::LowMassPeriod,
@@ -1323,7 +1389,29 @@ impl XrbMark {
         Self::NeutronStarProgenitor,
         Self::BlackHoleProgenitor,
         Self::DonorInitialExcess,
+        Self::UltracompactPeriod,
+        Self::UltracompactRecurrence,
+        Self::UltracompactDonorInitialMass,
+        Self::SymbioticPeriod,
+        Self::SymbioticDonorMass,
+        Self::SymbioticFilling,
+        Self::BlackHoleHighMassAccretorMass,
+        Self::BlackHoleHighMassPeriod,
+        Self::BlackHoleHighMassDonorMass,
+        Self::BlackHoleHighMassRate,
     ];
+
+    /// The marks of the six kinds [`XrbHostKind::LOW_MASS_HELD`] and
+    /// [`XrbHostKind::HIGH_MASS_HELD`] hold, the first twenty: those P15.T10.b's fit at 26 fitted.
+    pub const HELD: [Self; 20] = {
+        let mut out = [Self::NeutronStarMass; 20];
+        let mut k = 0;
+        while k < 20 {
+            out[k] = Self::ALL[k];
+            k += 1;
+        }
+        out
+    };
 
     /// The mark's place in [`XRB_SAMPLER`]'s marks.
     #[must_use]
@@ -1357,7 +1445,7 @@ impl SamplerKey for XrbPick {
 }
 
 /// The scratch sampler of the X-ray binaries' class (P11.T8.b; Design notes 10 and 13):
-/// [`XrbMark`]'s twenty marks and [`XrbPick`]'s two kind choices.
+/// [`XrbMark`]'s thirty marks and [`XrbPick`]'s two kind choices.
 ///
 /// Hand-made from observed figures, each recalled and not read at source in this build unless its
 /// line says otherwise, and the same in every population; P15.T10.b refits it against the engine's
@@ -1401,6 +1489,32 @@ impl SamplerKey for XrbPick {
 ///   of 10^(1.48 ± 0.1) on 21–60, the ranges in which plan 06's single stars leave that remnant
 ///   at [Fe/H] −0.5 to +0.3 with median draws (measured for P11.T8.b); a low-mass donor's initial
 ///   mass 10^(0.15 ± 0.1) times its mass now, on 1–4 times.
+///
+/// The three kinds the carving names (P11.T8.b's fix) have marks of their own, `@provisional`,
+/// for P15.T10.b's refit at 27; the choices weigh the first six kinds alone, so no host of this
+/// table draws them, and version 27's table ([`XRB_SAMPLER_27`]) weighs all nine:
+///
+/// - **Ultracompact X-ray binaries**: periods 10^(1.5 ± 0.16) minutes on 10–80, median 32 (the
+///   known systems lie at 11–60 minutes: in 't Zand, Jonker and Markwardt 2007, A&A 465, 953,
+///   table 1); the donor a helium white dwarf filling its Roche lobe, its mass from the period
+///   and the cold white dwarf's mass–radius relation, and its rate driven by gravitational
+///   radiation (`stellar::binary::scan`); a transient's outbursts recurring every 10^(1.0 ± 0.4)
+///   years, ours, the few seen in outburst more than once doing so after some years; and the
+///   donor's progenitor of 10^(0.15 ± 0.08) M☉ on 0.9–2.3, ours, a low-mass giant whose core it
+///   is.
+/// - **Symbiotic X-ray binaries**, marked detached and fed by their giant's wind: periods 10^(3.0
+///   ± 0.18) days on 200–3,000 (GX 1+4's 1,161 d, Hinkle et al. 2006, ApJ 641, 479); giants of
+///   10^(0.176 ± 0.07) M☉, 1.5 M☉, on 1–3; and the giant's radius 0.5 ± 0.12 of its Roche lobe's,
+///   ours, at the accreting white dwarfs' giant donors' 3,600 K (`awd`) and no larger than the red
+///   giant branch's tip there (`catalogue_classes::binary`'s 129 R☉), so that its luminosity and
+///   its Reimers wind follow.
+/// - **Black-hole high-mass X-ray binaries**, marked in Roche-lobe overflow as the supergiant
+///   systems are, with their recoils and years since the supernova: Cyg X-1's black hole, 21.2 ±
+///   2.2 M☉ on 15–30, its period, 10^(0.748 ± 0.1) days on 2–10 about its 5.6 d, and its O
+///   supergiant, 40.6 ± 7.4 M☉ on 20–60 (Miller-Jones et al. 2021, Science 371, 1046), fed at
+///   10^(−8.5 ± 0.4) M☉ yr⁻¹, ours, about Cyg X-1's 10³⁷ erg s⁻¹.
+///
+/// Every figure is recalled, not read at source in this build.
 pub const XRB_SAMPLER: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
     &XRB_MARKS,
     &[
@@ -1437,7 +1551,7 @@ const SUPERGIANT_RECOIL_SIGMA: f64 = 33.511_152;
 
 /// [`XRB_SAMPLER`]'s marks, in [`XrbMark`]'s order.
 #[rustfmt::skip]
-const XRB_MARKS: [SamplerMark; 20] = [
+const XRB_MARKS: [SamplerMark; 30] = [
     SamplerMark::new("neutron_star_mass", normal_about(1.45, 0.15), None, (1.2, 2.2)),
     SamplerMark::new("black_hole_mass", normal_about(7.8, 1.2), None, (5.0, 15.0)),
     SamplerMark::new(
@@ -1508,6 +1622,64 @@ const XRB_MARKS: [SamplerMark; 20] = [
         (1.322_219, 1.778_151),
     ),
     SamplerMark::new("log_donor_initial_excess", normal_about(0.15, 0.1), None, (0.0, 0.6)),
+    SamplerMark::new(
+        "log_ultracompact_period_minutes",
+        normal_about(1.5, 0.16),
+        None,
+        // 10 and 80 minutes.
+        (1.0, 1.903_090),
+    ),
+    SamplerMark::new(
+        "log_ultracompact_recurrence_years",
+        normal_about(1.0, 0.4),
+        None,
+        (0.0, 2.0),
+    ),
+    SamplerMark::new(
+        "log_ultracompact_donor_initial_mass",
+        normal_about(0.15, 0.08),
+        None,
+        (-0.045_757, 0.361_728),
+    ),
+    SamplerMark::new(
+        "log_symbiotic_period_days",
+        normal_about(3.0, 0.18),
+        None,
+        // 200 and 3,000 days.
+        (2.301_030, 3.477_121),
+    ),
+    SamplerMark::new(
+        "log_symbiotic_donor_mass",
+        normal_about(0.176_091, 0.07),
+        None,
+        (0.0, 0.477_121),
+    ),
+    SamplerMark::new("symbiotic_filling", normal_about(0.5, 0.12), None, (0.2, 0.8)),
+    SamplerMark::new(
+        "black_hole_high_mass_accretor_mass",
+        normal_about(21.2, 2.2),
+        None,
+        (15.0, 30.0),
+    ),
+    SamplerMark::new(
+        "log_black_hole_high_mass_period_days",
+        normal_about(0.748_188, 0.1),
+        None,
+        // 2 and 10 days.
+        (std::f64::consts::LOG10_2, 1.0),
+    ),
+    SamplerMark::new(
+        "black_hole_high_mass_donor_mass",
+        normal_about(40.6, 7.4),
+        None,
+        (20.0, 60.0),
+    ),
+    SamplerMark::new(
+        "log_black_hole_high_mass_rate",
+        normal_about(-8.5, 0.4),
+        None,
+        (-9.5, -7.5),
+    ),
 ];
 
 /// The names of [`AwdMark`]'s marks, in its order: each accreting white dwarf sampler's.
@@ -1583,7 +1755,7 @@ pub const AWD_SLOW_SAMPLER_26: ClassSamplerTable<AwdMark, AwdPick> = ClassSample
 );
 
 /// The names of [`XrbMark`]'s marks, in its order, as [`XRB_SAMPLER`] names them.
-const XRB_MARK_NAMES: [&str; 20] = [
+const XRB_MARK_NAMES: [&str; 30] = [
     "neutron_star_mass",
     "black_hole_mass",
     "log_low_mass_period_hours",
@@ -1604,19 +1776,30 @@ const XRB_MARK_NAMES: [&str; 20] = [
     "log_neutron_star_progenitor_mass",
     "log_black_hole_progenitor_mass",
     "log_donor_initial_excess",
+    "log_ultracompact_period_minutes",
+    "log_ultracompact_recurrence_years",
+    "log_ultracompact_donor_initial_mass",
+    "log_symbiotic_period_days",
+    "log_symbiotic_donor_mass",
+    "symbiotic_filling",
+    "black_hole_high_mass_accretor_mass",
+    "log_black_hole_high_mass_period_days",
+    "black_hole_high_mass_donor_mass",
+    "log_black_hole_high_mass_rate",
 ];
 
 /// The X-ray binaries' fitted marks (P15.T10.b) from task `binary_xrb`'s block, in [`XrbMark`]'s
-/// order: each mark's residual quantiles, its median's span and nodes, and its limits. Only the
-/// low-mass donor's mass follows a condition, the period; the other marks' median rows are not
-/// read.
+/// order: each of [`XrbMark::HELD`]'s marks' residual quantiles, its median's span and nodes, and
+/// its limits, then the three new kinds' marks as [`XRB_SAMPLER`] has them, which the fit at 26
+/// did not fit. Only the low-mass donor's mass follows a condition, the period; the other marks'
+/// median rows are not read.
 const fn fitted_xrb_marks(
     residuals: &[[f64; 17]; 20],
     spans: &[(f64, f64); 20],
     medians: &[[f64; 17]; 20],
     limits: &[(f64, f64); 20],
-) -> [SamplerMark; 20] {
-    let mut out = [SamplerMark::new("", [0.0; 17], None, (0.0, 0.0)); 20];
+) -> [SamplerMark; 30] {
+    let mut out = XRB_MARKS;
     let mut k = 0;
     while k < 20 {
         let median = if k == XrbMark::LowMassDonorMass.index() {
@@ -1631,7 +1814,7 @@ const fn fitted_xrb_marks(
 }
 
 /// The X-ray binaries' fitted marks.
-const XRB_MARKS_26: [SamplerMark; 20] = fitted_xrb_marks(
+const XRB_MARKS_26: [SamplerMark; 30] = fitted_xrb_marks(
     &XRB_RESIDUALS_26,
     &XRB_MEDIAN_SPANS_26,
     &XRB_MEDIANS_26,
@@ -1649,6 +1832,42 @@ pub const XRB_SAMPLER_26: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTabl
         SamplerPick::new("high_mass_kind", &XRB_HIGH_MASS_KINDS_26),
     ],
 );
+
+/// The X-ray binaries' sampler from generator version 27 (`catalogue_classes::binary`'s hold):
+/// [`XRB_SAMPLER_26`]'s marks, and its two kind choices over all nine kinds, each kind weighted by
+/// the galaxy's share of the engine's members of it at 27 ([`XRB_LOW_MASS_KINDS_27`] and
+/// [`XRB_HIGH_MASS_KINDS_27`]), so that the kinds the class draws are those its row counts
+/// (P11.T8.b's fix). P15.T10.b's refit at 27 replaces it.
+pub const XRB_SAMPLER_27: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
+    &XRB_MARKS_26,
+    &[
+        SamplerPick::new("low_mass_kind", &XRB_LOW_MASS_KINDS_27),
+        SamplerPick::new("high_mass_kind", &XRB_HIGH_MASS_KINDS_27),
+    ],
+);
+
+/// The low-mass kinds' weights from 27, in [`XrbHostKind::LOW_MASS`]' order: the galaxy's share of
+/// the X-ray binaries of each kind, every population's members of the kind a record, its bands
+/// weighted by their shares of the systems, times its systems, as task `binary_xrb` weighs its
+/// six (`kind_shares`), over all nine kinds, in that task's censuses at 27 (measured for P11.T8.b's
+/// fix, 2026-11-02, with the floor at 10⁻¹² and P11.T4's pinned white dwarfs): the carving's three
+/// are 0.388 of the hosts, the high-mass side 0.0077, and black holes 0.0017 of its hosts.
+pub const XRB_LOW_MASS_KINDS_27: [f64; 6] = [
+    0.005_442_301_575_609_467,
+    0.578_171_544_506_762_6,
+    0.001_720_810_713_084_214_4,
+    0.019_369_331_461_258_375,
+    0.375_124_185_017_997_27,
+    0.012_491_339_752_883_591,
+];
+
+/// The high-mass kinds' weights from 27, in [`XrbHostKind::HIGH_MASS`]' order, as
+/// [`XRB_LOW_MASS_KINDS_27`]'s: with them they sum to one.
+pub const XRB_HIGH_MASS_KINDS_27: [f64; 3] = [
+    0.007_613_990_555_392_584,
+    5.319_713_360_963_937e-5,
+    1.329_928_340_240_984_2e-5,
+];
 
 /// The share rows fitted against the engine (P15.T10.b), held until generator version 27: the
 /// accreting white dwarfs' rows from task `binary_awd`'s block and the X-ray binaries' from task

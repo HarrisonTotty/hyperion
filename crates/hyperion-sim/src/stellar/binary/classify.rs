@@ -48,7 +48,7 @@
 //! them.
 
 use crate::math;
-use crate::orbit::{peters_merger_time, roche_lobe_radius};
+use crate::orbit::{Eccentricity, peters_merger_time, roche_lobe_radius};
 use crate::rng::Threshold;
 use crate::stellar::classify::{SpectralLetter, subtype_from_teff_under};
 use crate::stellar::draws::StarDraws;
@@ -62,7 +62,7 @@ use crate::units::consts::{
     GM_SUN, SECONDS_PER_JULIAN_YEAR, SOLAR_LUMINOSITY_W, SOLAR_MASS_KG, SOLAR_RADIUS_M,
 };
 use crate::units::{
-    Days, Metres, SolarLuminosities, SolarMasses, SolarMassesPerYear, Watts, Years,
+    Days, Metres, SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Watts, Years,
 };
 
 use super::awd_donors::feeds_helium;
@@ -838,27 +838,59 @@ fn fills_for_a_wind_disc(donor: &StarState, compact: &StarState, separation: Met
     donor.radius().value() * SOLAR_RADIUS_M >= WIND_DISC_ROCHE_FILLING * lobe
 }
 
-/// The rate at which component `1 − d` takes `d`'s wind, M☉ yr⁻¹: Bondi and Hoyle's share as the
-/// engine takes it (Hurley, Tout and Pols 2002, equation 6 with equation 9's wind speed), no more
-/// than [`BinaryParams::max_wind_accretion`] of the wind; zero without an orbit or a wind.
+/// The rate at which component `1 − d` takes `d`'s wind, M☉ yr⁻¹: [`wind_rate_onto`] on the
+/// pair's orbit; zero without an orbit.
 #[must_use]
 fn wind_accretion_rate(state: &BinaryState, params: &BinaryParams, d: usize) -> SolarMassesPerYear {
     let Some(orbit) = state.orbit() else {
         return SolarMassesPerYear::ZERO;
     };
     let stars = state.stars();
-    let (donor, accretor) = (&stars[d], &stars[1 - d]);
+    wind_rate_onto(
+        &stars[d],
+        stars[1 - d].mass(),
+        (orbit.semi_major_axis(), orbit.eccentricity()),
+        params,
+    )
+}
+
+/// The luminosity at which a compact star of `mass` and `radius` takes `donor`'s wind on a
+/// circular orbit of semi-major axis `separation` under `params`, as [`classify`] reads a
+/// wind-fed X-ray binary's: what a symbiotic X-ray binary's scan marks are kept at or above
+/// [`SYMBIOTIC_XRB_MIN_LUMINOSITY`] by (P11.T8.b's fix).
+#[must_use]
+pub(crate) fn wind_fed_luminosity(
+    (mass, radius): (SolarMasses, SolarRadii),
+    donor: &StarState,
+    separation: Metres,
+    params: &BinaryParams,
+) -> Watts {
+    let rate = wind_rate_onto(donor, mass, (separation, Eccentricity::CIRCULAR), params);
+    luminosity_of_accretion(mass, radius, rate)
+}
+
+/// The rate at which a star of `accretor_mass` takes `donor`'s wind on an orbit of semi-major axis
+/// and eccentricity `orbit`, M☉ yr⁻¹: Bondi and Hoyle's share as the engine takes it (Hurley, Tout
+/// and Pols 2002, equation 6 with equation 9's wind speed), no more than
+/// [`BinaryParams::max_wind_accretion`] of the wind; zero without a wind.
+#[must_use]
+fn wind_rate_onto(
+    donor: &StarState,
+    accretor_mass: SolarMasses,
+    (separation, eccentricity): (Metres, Eccentricity),
+    params: &BinaryParams,
+) -> SolarMassesPerYear {
     let wind = donor.mass_loss_rate().value();
     let (m_donor, m_accretor, radius) = (
         donor.mass().value(),
-        accretor.mass().value(),
+        accretor_mass.value(),
         donor.radius().value(),
     );
     if !(wind > 0.0 && m_donor > 0.0 && m_accretor > 0.0 && radius > 0.0) {
         return SolarMassesPerYear::ZERO;
     }
-    let separation = orbit.semi_major_axis().value() / SOLAR_RADIUS_M;
-    let ecc = orbit.eccentricity().value();
+    let separation = separation.value() / SOLAR_RADIUS_M;
+    let ecc = eccentricity.value();
     let beta = params
         .wind_speed_factor
         .of(Kind::of(donor.phase(), m_donor), m_donor);
@@ -877,12 +909,22 @@ fn wind_accretion_rate(state: &BinaryState, params: &BinaryParams, d: usize) -> 
 /// The luminosity of accretion at `rate` onto `star`: G M Ṁ ÷ R, zero for a star of no radius.
 #[must_use]
 fn accretion_luminosity(star: &StarState, rate: SolarMassesPerYear) -> Watts {
-    let r = star.radius().value() * SOLAR_RADIUS_M;
+    luminosity_of_accretion(star.mass(), star.radius(), rate)
+}
+
+/// [`accretion_luminosity`] onto a star of `mass` and `radius`.
+#[must_use]
+fn luminosity_of_accretion(
+    mass: SolarMasses,
+    radius: SolarRadii,
+    rate: SolarMassesPerYear,
+) -> Watts {
+    let r = radius.value() * SOLAR_RADIUS_M;
     let rate = rate.value();
     if !(r > 0.0 && rate > 0.0) {
         return Watts::new(0.0);
     }
-    Watts::new(GM_SUN * star.mass().value() * rate * SOLAR_MASS_KG / SECONDS_PER_JULIAN_YEAR / r)
+    Watts::new(GM_SUN * mass.value() * rate * SOLAR_MASS_KG / SECONDS_PER_JULIAN_YEAR / r)
 }
 
 /// The class one star of the pair gives it, if any.

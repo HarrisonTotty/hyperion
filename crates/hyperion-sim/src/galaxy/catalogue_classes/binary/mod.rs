@@ -36,10 +36,11 @@ mod tables_hold;
 mod xrb;
 
 use crate::GeneratorVersion;
+use crate::stellar::binary::xrb_class::XrbClassRules;
 use crate::tables::binary::{
     AWD_FAST_SAMPLER_26, AWD_SAMPLER, AWD_SLOW_SAMPLER_26, AwdMark, AwdPick, CLASS_SHARES,
-    CLASS_SHARES_26, ClassSamplerTable, ClassShareTable, XRB_SAMPLER, XRB_SAMPLER_26, XrbMark,
-    XrbPick,
+    CLASS_SHARES_26, ClassSamplerTable, ClassShareTable, XRB_SAMPLER, XRB_SAMPLER_26,
+    XRB_SAMPLER_27, XrbMark, XrbPick,
 };
 
 pub use awd::{
@@ -59,6 +60,7 @@ pub use xrb::{
     SUPERGIANT_DONOR_CORE_SHARE, SUPERGIANT_DONOR_LIFE_SHARE, XrayBinaries, XrbBinary,
     XrbCandidate, XrbComponent, XrbEntry, XrbHistory, XrbSide,
 };
+pub(crate) use xrb::{compact_radius, symbiotic_giant_state};
 
 /// The generator version from which the binary classes read plan 15's fitted tables (P15.T10.b):
 /// 27, by main's ruling of 2026-11-01, since their nova rate, black-hole transients and high-mass
@@ -76,7 +78,8 @@ pub(crate) enum BinaryTableRules {
     /// [`AWD_SAMPLER`] for both accreting white dwarf classes and [`XRB_SAMPLER`].
     Scratch,
     /// Plan 15's fitted tables (P15.T10.b): [`CLASS_SHARES_26`], a sampler a side,
-    /// [`AWD_FAST_SAMPLER_26`] and [`AWD_SLOW_SAMPLER_26`], and [`XRB_SAMPLER_26`].
+    /// [`AWD_FAST_SAMPLER_26`] and [`AWD_SLOW_SAMPLER_26`], and [`XRB_SAMPLER_26`], or under the
+    /// X-ray binaries' carving [`XRB_SAMPLER_27`].
     Fitted,
 }
 
@@ -103,12 +106,17 @@ impl BinaryTableRules {
         }
     }
 
-    /// The sampler the X-ray binaries draw from.
+    /// The sampler the X-ray binaries draw from under the carving's rules `xrb_class`: from 27
+    /// (`stellar::binary::xrb_class`) the fitted one draws all nine kinds the carving counts.
     #[must_use]
-    pub(crate) const fn xrb_sampler(self) -> &'static ClassSamplerTable<XrbMark, XrbPick> {
-        match self {
-            Self::Scratch => &XRB_SAMPLER,
-            Self::Fitted => &XRB_SAMPLER_26,
+    pub(crate) const fn xrb_sampler(
+        self,
+        xrb_class: XrbClassRules,
+    ) -> &'static ClassSamplerTable<XrbMark, XrbPick> {
+        match (self, xrb_class) {
+            (Self::Scratch, XrbClassRules::Held | XrbClassRules::Carved) => &XRB_SAMPLER,
+            (Self::Fitted, XrbClassRules::Held) => &XRB_SAMPLER_26,
+            (Self::Fitted, XrbClassRules::Carved) => &XRB_SAMPLER_27,
         }
     }
 }

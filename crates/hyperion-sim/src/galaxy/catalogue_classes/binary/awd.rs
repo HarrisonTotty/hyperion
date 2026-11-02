@@ -765,7 +765,7 @@ fn white_dwarf_state(mass: SolarMasses, rate: SolarMassesPerYear, age: Years) ->
 /// The donor of `kind` and `mass`, filling its Roche lobe of radius `lobe`, `age` old: a
 /// main-sequence star at its zero-age luminosity (plan 06's fit at `composition`), a helium white
 /// dwarf at [`HELIUM_DONOR_TEMPERATURE_K`], or a giant at [`GIANT_DONOR_TEMPERATURE_K`].
-fn donor_state(
+pub(super) fn donor_state(
     kind: AwdDonorKind,
     mass: SolarMasses,
     lobe: SolarRadii,
@@ -807,7 +807,7 @@ fn donor_state(
 
 /// The luminosity of a photosphere of `radius` at `t_eff_k` K, L☉, by Stefan–Boltzmann against
 /// the nominal Sun (IAU 2015 Resolution B3).
-fn luminosity_of(radius: SolarRadii, t_eff_k: f64) -> SolarLuminosities {
+pub(super) fn luminosity_of(radius: SolarRadii, t_eff_k: f64) -> SolarLuminosities {
     let t = t_eff_k / SOLAR_EFFECTIVE_TEMPERATURE_K;
     SolarLuminosities::new(radius.value() * radius.value() * t * t * t * t)
 }

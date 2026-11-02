@@ -128,7 +128,14 @@ fn a_galaxy_carries_the_version_s_binary_tables() {
         XrayBinaries::new(fitted()).sampler().table(),
         &XRB_SAMPLER_26
     );
-    assert_eq!(BinaryTableRules::Fitted.xrb_sampler(), &XRB_SAMPLER_26);
+    assert_eq!(
+        BinaryTableRules::Fitted.xrb_sampler(XrbClassRules::Held),
+        &XRB_SAMPLER_26
+    );
+    assert_eq!(
+        BinaryTableRules::Fitted.xrb_sampler(XrbClassRules::Carved),
+        &XRB_SAMPLER_27
+    );
     let carved = |table: &ClassShareTable, population, band| {
         table.rows().iter().fold(0.0, |sum, row| {
             sum + row.hosts_per_formed_mass(population) * row.layer_share(band)
@@ -678,7 +685,20 @@ fn xrb_pair(x: &XrayMarks, mark: XrbMark) -> Option<(f64, f64)> {
             }
         }
         XrbMark::LowMassRateExcess => only(low, x.rate_excess_dex),
-        XrbMark::NeutronStarRecurrence | XrbMark::BlackHoleRecurrence => None,
+        // The engine draws no recurrence, and the fit at 26 fits the held kinds' marks alone
+        // (`XrbMark::HELD`).
+        XrbMark::NeutronStarRecurrence
+        | XrbMark::BlackHoleRecurrence
+        | XrbMark::UltracompactPeriod
+        | XrbMark::UltracompactRecurrence
+        | XrbMark::UltracompactDonorInitialMass
+        | XrbMark::SymbioticPeriod
+        | XrbMark::SymbioticDonorMass
+        | XrbMark::SymbioticFilling
+        | XrbMark::BlackHoleHighMassAccretorMass
+        | XrbMark::BlackHoleHighMassPeriod
+        | XrbMark::BlackHoleHighMassDonorMass
+        | XrbMark::BlackHoleHighMassRate => None,
         XrbMark::BexPeriod => only(bex, log_days),
         XrbMark::BexEccentricity => only(bex, x.eccentricity.map(Eccentricity::value)),
         XrbMark::BexDonorMass => only(bex, Some(x.donor_mass.value())),
@@ -757,7 +777,7 @@ fn the_x_ray_binary_sampler_against_the_engine() {
     );
     let periods = table_draws(XrbMark::LowMassPeriod, &[]);
     let mut misses = Vec::new();
-    for (k, mark) in XrbMark::ALL.into_iter().enumerate() {
+    for (k, mark) in XrbMark::HELD.into_iter().enumerate() {
         let high_mass = XRB_SAMPLER_26.mark(mark).name().contains("bex")
             || XRB_SAMPLER_26.mark(mark).name().contains("supergiant");
         let pool = if high_mass { &young } else { &slab };

@@ -68,8 +68,6 @@ mod tests;
 
 pub use crate::stellar::multiplicity::{DRAWS_PER_ATTEMPT, MAX_REDRAWS, RedrawAttempt};
 pub(crate) use classify::is_be_donor;
-#[cfg(test)]
-pub(crate) use classify::xrb_line;
 pub use classify::{
     AGE_OF_UNIVERSE, BEX_MAX_PERIOD, BinaryClass, CarvedClass, ClassContext, CvKind,
     HMXB_MIN_DONOR_MASS, HOT_SUBDWARF_MASSES, HmxbKind, MAGNETIC_CV_SHARE, MIN_DETONATABLE_MASS,
@@ -78,6 +76,8 @@ pub use classify::{
 };
 #[cfg(test)]
 pub(crate) use classify::{nova_recurrence_period, nova_recurrence_under};
+#[cfg(test)]
+pub(crate) use classify::{wind_fed_luminosity, xrb_line};
 #[cfg(test)]
 pub(crate) use evolve::lobe_reached;
 pub use evolve::{MAX_SEGMENTS, can_interact, evolve};

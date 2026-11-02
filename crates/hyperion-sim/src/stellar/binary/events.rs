@@ -517,7 +517,8 @@ fn dwarf_nova_source(seed: Seed, entry: &AwdEntry) -> Option<Source> {
 
 /// An X-ray binary's source by its kind: a low-mass transient's outbursts, a persistent neutron
 /// star's bursts or a Be/X host's giant outbursts; `None` for a persistent black hole or a
-/// supergiant host, whose X-rays are steady.
+/// supergiant host, whose X-rays are steady, and for the carving's three kinds, an ultracompact,
+/// symbiotic or black-hole high-mass host, whose events P11.T9 registers.
 ///
 /// # Panics
 ///
@@ -581,7 +582,12 @@ fn xray_source(seed: Seed, scan: &XrbScanMarks) -> Option<Source> {
                 curve,
             })
         }
-        XrbHostKind::BlackHolePersistent | XrbHostKind::Supergiant => None,
+        // The carving's three kinds have no events until P11.T9's.
+        XrbHostKind::BlackHolePersistent
+        | XrbHostKind::Supergiant
+        | XrbHostKind::Ultracompact
+        | XrbHostKind::Symbiotic
+        | XrbHostKind::BlackHoleHighMass => None,
     }
 }
 

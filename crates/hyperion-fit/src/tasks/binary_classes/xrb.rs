@@ -137,7 +137,20 @@ pub fn xrb_pair(x: &XrayMarks, mark: XrbMark) -> Option<(f64, f64)> {
             }
         }
         XrbMark::LowMassRateExcess => only(low, x.rate_excess_dex),
-        XrbMark::NeutronStarRecurrence | XrbMark::BlackHoleRecurrence => None,
+        // The engine draws no recurrence, and the fit at 26 fits the held kinds' marks alone
+        // (`XrbMark::HELD`).
+        XrbMark::NeutronStarRecurrence
+        | XrbMark::BlackHoleRecurrence
+        | XrbMark::UltracompactPeriod
+        | XrbMark::UltracompactRecurrence
+        | XrbMark::UltracompactDonorInitialMass
+        | XrbMark::SymbioticPeriod
+        | XrbMark::SymbioticDonorMass
+        | XrbMark::SymbioticFilling
+        | XrbMark::BlackHoleHighMassAccretorMass
+        | XrbMark::BlackHoleHighMassPeriod
+        | XrbMark::BlackHoleHighMassDonorMass
+        | XrbMark::BlackHoleHighMassRate => None,
         XrbMark::BexPeriod => only(bex, log_days),
         XrbMark::BexEccentricity => only(bex, x.eccentricity.map(Eccentricity::value)),
         XrbMark::BexDonorMass => only(bex, Some(x.donor_mass.value())),
@@ -168,9 +181,10 @@ fn xray_members<'a>(members: impl IntoIterator<Item = &'a ClassMember>) -> Vec<X
         .collect()
 }
 
-/// The galaxy's shares of its X-ray binaries of each kind, in [`XrbHostKind::ALL`]'s order: every
-/// population's rate of the kind a system, its bands weighted by their shares of the systems,
-/// times its systems, over the same sum for every kind. Members of no kind are left out.
+/// The galaxy's shares of its X-ray binaries of each held kind, in [`XrbHostKind::ALL`]'s order,
+/// its first six ([`XrayMarks::host_kind`]'s): every population's rate of the kind a system, its
+/// bands weighted by their shares of the systems, times its systems, over the same sum for every
+/// kind. Members of no kind are left out.
 ///
 /// # Panics
 ///
@@ -249,7 +263,7 @@ pub fn xrb_sampler(galaxy: &Galaxy, censuses: &Censuses, params: &XrbParams) -> 
     );
     let mut sources = [MarkSource::Scratch; 20];
     let marks = std::array::from_fn(|k| {
-        let mark = XrbMark::ALL[k];
+        let mark = XrbMark::HELD[k];
         let pool = if HIGH_MASS_MARKS.contains(&mark) {
             &young
         } else {
@@ -430,7 +444,7 @@ fn xrb_acceptance(fit: &XrbFit) -> String {
     let scratch: Vec<String> = s
         .sources
         .iter()
-        .zip(XrbMark::ALL)
+        .zip(XrbMark::HELD)
         .filter(|(source, _)| **source == MarkSource::Scratch)
         .map(|(_, mark)| format!("{mark:?}"))
         .collect();

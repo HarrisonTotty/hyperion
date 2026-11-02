@@ -11,8 +11,12 @@
 //!
 //! # The two sides
 //!
-//! The low-mass kinds (a neutron star or a black hole, persistent or transient) are the old
-//! populations' and the high-mass kinds (Be/X and supergiant) the young disc's. The class's total
+//! The low-mass kinds (a neutron star or a black hole, persistent or transient, and from 27 an
+//! ultracompact or a symbiotic one) are the old populations' and the high-mass kinds (Be/X and
+//! supergiant, and from 27 a black hole beside a supergiant) the young disc's. From 27 the class
+//! draws all nine kinds the carving counts (`XRB_SAMPLER_27`), each in its share of the engine's
+//! members, so that the hosts its row counts are the hosts it draws (P11.T8.b's fix); below 27
+//! its tables weigh the first six alone. The class's total
 //! is its row's, `Σ_c r_c n_c` over every component c, with `r_c` the row's hosts per solar mass
 //! formed in c's population × the mass formed per system × its born fraction; the high-mass side
 //! takes [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER)'s high-mass share of it, 0.16, over the young thin disc's components,
@@ -34,14 +38,18 @@
 //!    (`class.xrb.site`); its kind on that side and a low-mass transient's outburst recurrence
 //!    (`class.xrb.kind`); its compact star's mass, then by kind its period, its donor's mass and its
 //!    transfer rate over the irradiated disc's instability line on its kind's side of it (a
-//!    low-mass host), its period, eccentricity and Be star (a Be/X host), or its period, its
-//!    supergiant's mass and its rate (a supergiant host) (`class.xrb.binary`); a high-mass host's
-//!    recoil from its supernova and the years since (`class.xrb.recoil`), which carried it from
-//!    its site; and its velocity at the site, plan 08's draw of its component's law, plus the
+//!    low-mass host), its period, eccentricity and Be star (a Be/X host), its period, its
+//!    supergiant's mass and its rate (a supergiant or black-hole high-mass host), its period, from
+//!    which its helium white dwarf's mass and its rate follow (an ultracompact host, a transient
+//!    by its rate taking its recurrence on `class.xrb.kind`), or its period, its giant's mass and
+//!    its giant's share of its Roche lobe (a symbiotic host) (`class.xrb.binary`); a high-mass
+//!    host's recoil from its supernova and the years since (`class.xrb.recoil`), which carried it
+//!    from its site; and its velocity at the site, plan 08's draw of its component's law, plus the
 //!    recoil, the one velocity its entry moves at (rule 6; `class.xrb.velocity`);
 //! 2. draws its orbit's orientation and phase (`class.xrb.orbit`);
 //! 3. draws its history given the present: its compact star's progenitor's initial mass, and for a
-//!    low-mass host its donor's initial mass and its age in its component's age law
+//!    low-mass host its donor's initial mass (an ultracompact host's white dwarf's progenitor's)
+//!    and its age in its component's age law
 //!    (`class.xrb.history`), raised to at least [`LIFETIME_MARGIN`] × the progenitor's lifetime; a
 //!    high-mass host's age is the progenitor's lifetime and the years since its supernova;
 //! 4. draws its \[Fe/H\] from its component's law at its site and that age, before the lifetime
@@ -67,8 +75,9 @@
 //! The candidate's marks define its [`BinaryTimeline`] without the engine
 //! ([`BinaryTimeline::from_marks`]): a detached history, then its phase across the whole source
 //! horizon, each star held at its marked state: stable transfer onto the compact star for a
-//! low-mass or supergiant host, and a detached Be star beside its neutron star for a Be/X host. The
-//! candidate is an entry if and only if [`carved_class`] of that timeline is
+//! low-mass, ultracompact, supergiant or black-hole high-mass host, a detached Be star beside its
+//! neutron star for a Be/X host, and a detached giant whose wind feeds its neutron star for a
+//! symbiotic host. The candidate is an entry if and only if [`carved_class`] of that timeline is
 //! [`CarvedClass::XrayBinary`], the one test the grid applies to an evolved pair (design note 10),
 //! and the class `classify` gives the pair at the epoch is its kind's. A Be/X donor is plan 06's
 //! Be star by its own rotation and field draws: it takes the first of [`BE_DONOR_ATTEMPTS`]
@@ -90,7 +99,9 @@ use super::super::ids::CatalogueCellKey;
 use super::super::registry::ClassId;
 use super::super::system::{CatalogueMotion, CatalogueSystem};
 use super::BinaryTableRules;
-use super::awd::LIFETIME_MARGIN;
+use super::awd::{
+    GIANT_DONOR_CORE_MASS, GIANT_DONOR_TEMPERATURE_K, LIFETIME_MARGIN, donor_state, luminosity_of,
+};
 use super::feature::{HostPlace, catalogue_share};
 use crate::coords::GalacticPosition;
 use crate::galaxy::bounds::CellBox;
@@ -115,10 +126,11 @@ use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::neutron_star::hpt_luminosity;
 use crate::stellar::remnant::structure::{black_hole_radius, neutron_star_radius};
 use crate::stellar::rules::StellarRules;
+use crate::stellar::sse::wind::REIMERS;
 use crate::stellar::sse::{Track, ZCoeffs, turn_off_mass, zams};
 use crate::stellar::system::{StarModel, SystemStars, track_mass_of};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts, lifetime};
-use crate::tables::binary::{ClassSamplerTable, XrbHostKind, XrbMark, XrbPick};
+use crate::tables::binary::{AwdDonorKind, ClassSamplerTable, XrbHostKind, XrbMark, XrbPick};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
@@ -249,7 +261,7 @@ impl XrbComponent {
 ///         assert_eq!(resolve_entry(&galaxy, &process, entry.id())?.entry(), entry);
 ///         let now = entry.value().stars(&galaxy).state_at(UniverseTime::EPOCH);
 ///         let class = now.ok_or("a host at the epoch")?.pairs()[0].class();
-///         assert_eq!(class, entry.value().scan().kind().class());
+///         assert_eq!(class, entry.value().scan().class());
 ///         found += 1;
 ///     }
 /// }
@@ -273,12 +285,26 @@ impl XrayBinaries {
     /// [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES) and
     /// [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER)'s high-mass share, or from version 27
     /// plan 15's fitted tables in their place (`CLASS_SHARES_26` and `XRB_SAMPLER_26`, the
-    /// module's hold), and the rank of the instability line in the low-mass rate's law.
+    /// module's hold, or under the carving's rules `XRB_SAMPLER_27`), and the rank of the
+    /// instability line in the low-mass rate's law.
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
+        let rules = galaxy.rules();
+        Self::of_table(
+            galaxy,
+            rules.binary_tables.xrb_sampler(rules.stellar.xrb_class),
+        )
+    }
+
+    /// The class in `galaxy` drawing from `table`, its row the galaxy's tables'.
+    #[must_use]
+    pub(crate) fn of_table(
+        galaxy: &Galaxy,
+        table: &'static ClassSamplerTable<XrbMark, XrbPick>,
+    ) -> Self {
         let tables = galaxy.rules().binary_tables;
         let row = tables.class_shares().row(CarvedClass::XrayBinary);
-        let sampler = ClassSampler::new(tables.xrb_sampler());
+        let sampler = ClassSampler::new(table);
         let formed = galaxy.mean_formed_mass().value();
         let fields = galaxy.fields();
         let rows: Vec<(ComponentId, XrbSide, f64, f64)> = fields
@@ -403,7 +429,8 @@ impl XrayBinaries {
     }
 
     /// The class's expected hosts of `kind` in the whole galaxy, before its test: its side's
-    /// expected hosts × its weight in its side's choice over the choice's sum.
+    /// expected hosts × its weight in its side's choice over the choice's sum, zero for a kind past
+    /// the choice's weights (below 27 the carving's three).
     ///
     /// # Panics
     ///
@@ -429,7 +456,8 @@ impl XrayBinaries {
             .position(|&k| k == kind)
             .expect("every kind is one of its side's");
         let sum = weights.iter().fold(0.0, |s, w| s + w);
-        self.expected_hosts_on(galaxy, side) * weights[place] / sum
+        let hosts = self.expected_hosts_on(galaxy, side);
+        weights.get(place).map_or(0.0, |w| hosts * w / sum)
     }
 
     /// [`expected_hosts_of`](Self::expected_hosts_of) every kind, in [`XrbHostKind::ALL`]'s order.
@@ -541,19 +569,20 @@ impl XrayBinaries {
         };
         let m0 = SolarMasses::new(math::exp10(sampler.draw(progenitor_mark, 0.0, &mut stream)));
         let host = scan.host();
-        let (initial_excess, drawn_age) = match (scan.recoil(), host.place()) {
+        let initial_mark = donor_initial_mark(kind);
+        let (initial_drawn, drawn_age) = match (scan.recoil(), host.place()) {
             (Some(recoil), _) => (None, recoil.since_supernova().value()),
             (None, HostPlace::Field(component)) => {
-                let excess = sampler.draw(XrbMark::DonorInitialExcess, 0.0, &mut stream);
+                let drawn = sampler.draw(initial_mark, 0.0, &mut stream);
                 let ages = galaxy.fields().component(*component).ages();
                 let unborn = 1.0 - ages.born_fraction();
                 let age = ages.quantile(unborn + (1.0 - unborn) * stream.uniform());
-                (Some(excess), age.value())
+                (Some(drawn), age.value())
             }
             (None, HostPlace::Listed(listed)) => {
-                let excess = (!kind.is_high_mass())
-                    .then(|| sampler.draw(XrbMark::DonorInitialExcess, 0.0, &mut stream));
-                (excess, listed.age_at(stream.uniform()).value())
+                let drawn =
+                    (!kind.is_high_mass()).then(|| sampler.draw(initial_mark, 0.0, &mut stream));
+                (drawn, listed.age_at(stream.uniform()).value())
             }
         };
         // 4. The composition, at the site and the drawn age; a list entry's members'.
@@ -583,11 +612,20 @@ impl XrayBinaries {
             (age, Years::new(since_formation)),
         );
         let donor_mass = binary.donor.mass();
-        let donor_initial = initial_excess
-            .map_or(donor_mass.value(), |excess| {
-                donor_mass.value() * math::exp10(excess)
-            })
-            .min(DONOR_TURN_OFF_SHARE * turn_off_mass(age, &composition).value());
+        let held = DONOR_TURN_OFF_SHARE * turn_off_mass(age, &composition).value();
+        // A white dwarf's progenitor has left its main sequence: it is not held under the
+        // turn-off.
+        let donor_initial = if let (XrbMark::UltracompactDonorInitialMass, Some(log_mass)) =
+            (initial_mark, initial_drawn)
+        {
+            math::exp10(log_mass)
+        } else {
+            initial_drawn
+                .map_or(donor_mass.value(), |excess| {
+                    donor_mass.value() * math::exp10(excess)
+                })
+                .min(held)
+        };
         let history = XrbHistory {
             primary_initial_mass: m0,
             donor_initial_mass: SolarMasses::new(
@@ -621,7 +659,7 @@ impl XrayBinaries {
         let timeline = BinaryTimeline::from_marks(marks);
         let now = history.age_at_epoch;
         if carved_class(&timeline, now) != Some(CarvedClass::XrayBinary)
-            || timeline.class_at(now) != scan.kind().class()
+            || timeline.class_at(now) != scan.class()
         {
             return None;
         }
@@ -642,6 +680,23 @@ impl XrayBinaries {
             history,
             timeline,
         })
+    }
+}
+
+/// The mark a low-mass host of `kind` draws its donor's initial mass by: an ultracompact host's
+/// donor's progenitor's mass, and every other kind's excess over its mass now.
+#[must_use]
+const fn donor_initial_mark(kind: XrbHostKind) -> XrbMark {
+    match kind {
+        XrbHostKind::Ultracompact => XrbMark::UltracompactDonorInitialMass,
+        XrbHostKind::NeutronStarPersistent
+        | XrbHostKind::NeutronStarTransient
+        | XrbHostKind::BlackHolePersistent
+        | XrbHostKind::BlackHoleTransient
+        | XrbHostKind::BeX
+        | XrbHostKind::Supergiant
+        | XrbHostKind::Symbiotic
+        | XrbHostKind::BlackHoleHighMass => XrbMark::DonorInitialExcess,
     }
 }
 
@@ -691,7 +746,8 @@ impl XrbBinary {
         &self.accretor
     }
 
-    /// The donor's marked state, component 1: filling its Roche lobe, or a Be star.
+    /// The donor's marked state, component 1: filling its Roche lobe, a Be star, or a symbiotic
+    /// host's giant inside its lobe.
     #[must_use]
     pub const fn donor(&self) -> &StarState {
         &self.donor
@@ -703,8 +759,8 @@ impl XrbBinary {
         &self.orbit
     }
 
-    /// The rate of transfer from the donor onto the compact star, M☉ yr⁻¹; `None` for a Be/X
-    /// host, which is marked detached.
+    /// The rate of transfer from the donor onto the compact star, M☉ yr⁻¹; `None` for a Be/X or a
+    /// symbiotic host, which is marked detached.
     #[must_use]
     pub const fn transfer_rate(&self) -> Option<SolarMassesPerYear> {
         self.transfer_rate
@@ -773,6 +829,25 @@ impl XrbBinary {
                 let (donor, attempt) = be_donor_state(donor_mass, composition, (system, seed), age);
                 (donor, orbit_of(donor.mass(), eccentricity), attempt)
             }
+            XrbShape::Ultracompact { donor_mass, .. } => {
+                let orbit = orbit_of(donor_mass, Eccentricity::CIRCULAR);
+                let lobe = lobe_of(donor_mass, &orbit);
+                let donor = donor_state(AwdDonorKind::Helium, donor_mass, lobe, composition, age);
+                (donor, orbit, 0)
+            }
+            XrbShape::Symbiotic {
+                donor_mass,
+                filling,
+                ..
+            } => {
+                let orbit = orbit_of(donor_mass, Eccentricity::CIRCULAR);
+                let lobe = lobe_of(donor_mass, &orbit);
+                (
+                    symbiotic_giant_state(donor_mass, (lobe, filling), age),
+                    orbit,
+                    0,
+                )
+            }
         };
         Self {
             kind,
@@ -797,8 +872,8 @@ impl XrbBinary {
 
     /// The marks of this binary for system `system` of the universe of `seed`, of `composition`,
     /// `age` old at the epoch: its phase across the source horizon about the epoch, stable
-    /// transfer from the donor or a Be/X host's detached pair, after a detached history (design
-    /// note 10).
+    /// transfer from the donor or a Be/X or symbiotic host's detached pair, after a detached
+    /// history (design note 10).
     #[must_use]
     fn marks(
         &self,
@@ -848,8 +923,9 @@ impl XrbHistory {
     }
 
     /// The donor's initial mass, M☉: a low-mass donor's drawn, a high-mass donor's its mass now;
-    /// each held under [`DONOR_TURN_OFF_SHARE`] of the turn-off mass at the system's age, and to
-    /// 0.08 M☉ and the primary's initial mass.
+    /// each held under [`DONOR_TURN_OFF_SHARE`] of the turn-off mass at the system's age but an
+    /// ultracompact host's white dwarf's progenitor's, and to 0.08 M☉ and the primary's initial
+    /// mass.
     #[must_use]
     pub const fn donor_initial_mass(&self) -> SolarMasses {
         self.donor_initial_mass
@@ -971,18 +1047,9 @@ fn compact_state(
     since_formation: Years,
     age: Years,
 ) -> StarState {
-    let recipe = RemnantRecipe::default();
-    let (phase, luminosity, radius) = match accretor {
-        XrayAccretor::NeutronStar => (
-            Phase::NeutronStar,
-            hpt_luminosity(mass, since_formation),
-            neutron_star_radius(recipe),
-        ),
-        XrayAccretor::BlackHole => (
-            Phase::BlackHole,
-            SolarLuminosities::ZERO,
-            black_hole_radius(recipe, mass),
-        ),
+    let (phase, luminosity) = match accretor {
+        XrayAccretor::NeutronStar => (Phase::NeutronStar, hpt_luminosity(mass, since_formation)),
+        XrayAccretor::BlackHole => (Phase::BlackHole, SolarLuminosities::ZERO),
     };
     StarState::new(StarStateParts {
         phase,
@@ -990,9 +1057,59 @@ fn compact_state(
         mass,
         core_mass: mass,
         luminosity,
-        radius,
+        radius: compact_radius(accretor, mass),
         mass_loss_rate: SolarMassesPerYear::ZERO,
         phase_fraction: 0.0,
+    })
+}
+
+/// The radius of a compact star of kind `accretor` and `mass`: plan 06's neutron star's, or a black
+/// hole's Schwarzschild radius, as plan 06's tracks leave them.
+#[must_use]
+pub(crate) fn compact_radius(accretor: XrayAccretor, mass: SolarMasses) -> SolarRadii {
+    let recipe = RemnantRecipe::default();
+    match accretor {
+        XrayAccretor::NeutronStar => neutron_star_radius(recipe),
+        XrayAccretor::BlackHole => black_hole_radius(recipe, mass),
+    }
+}
+
+/// Reimers' η of a symbiotic X-ray binary's giant's wind: 0.5, Hurley, Pols and Tout's (2000,
+/// MNRAS 315, 543, section 7.1), about which plan 06's stars draw theirs (`Track`'s 0.5 + 0.07 z).
+const SYMBIOTIC_GIANT_REIMERS_ETA: f64 = 0.5;
+
+/// The largest radius of a symbiotic X-ray binary's giant: 129 R☉, where its 3,600 K
+/// ([`GIANT_DONOR_TEMPERATURE_K`]) gives the red giant branch's tip, about 2,500 L☉ (L ≈ 2.3 × 10⁵
+/// Mc⁶ L☉ at a core of Mc ≈ 0.47 M☉; recalled, not read at source).
+const SYMBIOTIC_GIANT_MAX_RADIUS: SolarRadii = SolarRadii::new(129.0);
+
+/// A symbiotic X-ray binary's giant of `mass`, its radius `filling` of its Roche lobe of radius
+/// `lobe` and no more than [`SYMBIOTIC_GIANT_MAX_RADIUS`], `age` old: on its first giant branch
+/// with the accreting white dwarfs' giant donors' helium core ([`GIANT_DONOR_CORE_MASS`], held
+/// under 0.9 of its mass) and effective temperature ([`GIANT_DONOR_TEMPERATURE_K`]), its luminosity
+/// by Stefan–Boltzmann, and its wind Reimers' (Hurley, Pols and Tout 2000, equation 106, as plan
+/// 06's winds take it), η × 4 × 10⁻¹³ L R ÷ M M☉ yr⁻¹ in solar units at
+/// [`SYMBIOTIC_GIANT_REIMERS_ETA`], which feeds its neutron star as `classify` reads a symbiotic
+/// X-ray binary. A host's scan marks read the same giant (`stellar::binary::scan`).
+#[must_use]
+pub(crate) fn symbiotic_giant_state(
+    mass: SolarMasses,
+    (lobe, filling): (SolarRadii, f64),
+    age: Years,
+) -> StarState {
+    let radius = SolarRadii::new((filling * lobe.value()).min(SYMBIOTIC_GIANT_MAX_RADIUS.value()));
+    let luminosity = luminosity_of(radius, GIANT_DONOR_TEMPERATURE_K);
+    let wind =
+        SYMBIOTIC_GIANT_REIMERS_ETA * REIMERS * luminosity.value() * radius.value() / mass.value();
+    StarState::new(StarStateParts {
+        phase: Phase::FirstGiantBranch,
+        age,
+        mass,
+        core_mass: SolarMasses::new(GIANT_DONOR_CORE_MASS.value().min(0.9 * mass.value())),
+        luminosity,
+        radius,
+        mass_loss_rate: SolarMassesPerYear::new(wind),
+        phase_fraction: 0.5,
     })
 }
 
@@ -1200,5 +1317,7 @@ impl ClassProcess for XrayBinaries {
     }
 }
 
+#[cfg(test)]
+mod kinds_tests;
 #[cfg(test)]
 mod tests;

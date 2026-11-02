@@ -111,7 +111,7 @@ fn catalogue_marks(galaxy: &Galaxy) -> Vec<Marks> {
             let scan = value.scan();
             let binary = value.binary();
             Marks {
-                class: scan.kind().class(),
+                class: scan.class(),
                 black_hole: binary.accretor().phase() == Phase::BlackHole,
                 log_accretor_mass: math::log10(scan.accretor_mass().value()),
                 log_period_days: math::log10(scan.period().value() / 86_400.0),

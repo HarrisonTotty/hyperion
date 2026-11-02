@@ -264,7 +264,7 @@ pub(crate) fn small_envelope_mu(
 
 /// Kudritzki and Reimers' coefficient, M☉ yr⁻¹ per (L☉ R☉ ÷ M☉): `Ṁ_R` = η × 4 × 10⁻¹³ L R ÷ M
 /// (HPT equation 106).
-const REIMERS: f64 = 4e-13;
+pub(crate) const REIMERS: f64 = 4e-13;
 
 /// Vassiliadis and Wood's rate as HPT write it: log `Ṁ_VW` = −11.4 + 0.0125 [P₀ − 100
 /// max(M − 2.5, 0)], P₀ in days.

@@ -1842,7 +1842,10 @@ mod tests {
                         XrbHostKind::NeutronStarTransient
                         | XrbHostKind::BlackHoleTransient
                         | XrbHostKind::BlackHolePersistent
-                        | XrbHostKind::Supergiant => window(UniverseTime::EPOCH, 20_000),
+                        | XrbHostKind::Supergiant
+                        | XrbHostKind::Ultracompact
+                        | XrbHostKind::Symbiotic
+                        | XrbHostKind::BlackHoleHighMass => window(UniverseTime::EPOCH, 20_000),
                     };
                     events.clear();
                     events_in(

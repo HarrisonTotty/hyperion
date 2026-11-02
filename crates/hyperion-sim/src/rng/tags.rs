@@ -1196,7 +1196,8 @@ domain_tags! {
     CLASS_XRB_SITE: System = "class.xrb.site";
 
     /// An X-ray binary candidate's kind on its side (word 0) and, for a low-mass transient, the
-    /// rank of its outbursts' recurrence (word 1) (P11.T8.b).
+    /// rank of its outbursts' recurrence (word 1), an ultracompact host's drawn after its binary's
+    /// marks, whose rate makes it one (P11.T8.b and its fix).
     CLASS_XRB_KIND: System = "class.xrb.kind";
 
     /// A high-mass X-ray binary candidate's recoil from its supernova: word 0 the rank of its

@@ -149,7 +149,12 @@ pub(crate) fn xray_binary_scan_cell(
             }
             XrbHostKind::NeutronStarPersistent => TransientKind::XrayBurst,
             XrbHostKind::BeX => TransientKind::BeXOutburst,
-            XrbHostKind::BlackHolePersistent | XrbHostKind::Supergiant => continue,
+            // The carving's three kinds have no events until P11.T9's.
+            XrbHostKind::BlackHolePersistent
+            | XrbHostKind::Supergiant
+            | XrbHostKind::Ultracompact
+            | XrbHostKind::Symbiotic
+            | XrbHostKind::BlackHoleHighMass => continue,
         };
         let motion = CatalogueMotion::straight(*marks.position(), marks.velocity());
         let reach = kind_reach(kind, query.sensor());
