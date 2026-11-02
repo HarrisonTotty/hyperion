@@ -8,6 +8,11 @@
  * `COPY_SRC` and `TEXTURE_BINDING`, so that `readTexture` reads it and a later draw samples it
  * (`texture_depth_2d`). The adapter's own pass draws into them, in WebGPU's orientation, as a
  * view's does. Mips past the first are generated after each render.
+ *
+ * An ID target (`r32uint`, plan R14, R14.T2.b) has one mip and no post-process, and with
+ * `depthOf` draws with another target's depth in place of one of its own, loaded and stored
+ * whatever its frame's `colourLoad`, so that its draws are tested against what the other target
+ * drew; a draw that samples that depth is refused as a sample of its own would be.
  */
 
 import { TEXTURE_USAGE } from "../gpuFlags";
@@ -74,8 +79,9 @@ export function depthSpec(spec: RenderTargetSpec, size: ViewSize): TextureSpec {
 /**
  * Checks that a target of `spec` can be made at `size` on a device of `capabilities`.
  *
- * @throws Error naming the target when its format is not renderable there, or it asks for more
- * mips than the size has.
+ * @throws Error naming the target when its format is not renderable there, it asks for more mips
+ * than the size has or an `r32uint` target for more than one, or it asks for its own depth and
+ * {@link RenderTargetSpec.depthOf}'s both (plan R14, R14.T2.b).
  */
 export function assertTargetFits(
   spec: RenderTargetSpec,
@@ -84,6 +90,14 @@ export function assertTargetFits(
 ): void {
   if (spec.format === "rg11b10ufloat" && !capabilities.rg11b10Renderable) {
     throw new Error(`target ${spec.name}: the device cannot render to rg11b10ufloat`);
+  }
+  if (spec.format === "r32uint" && spec.mips !== 1) {
+    throw new Error(`target ${spec.name}: an r32uint target has one mip, not ${String(spec.mips)}`);
+  }
+  if (spec.depthOf !== undefined && spec.depth) {
+    throw new Error(
+      `target ${spec.name} draws with ${spec.depthOf.name}'s depth and asks for its own`,
+    );
   }
   const mipsAvailable = Math.floor(Math.log2(Math.max(size.widthPx, size.heightPx))) + 1;
   if (!Number.isInteger(spec.mips) || spec.mips < 1 || spec.mips > mipsAvailable) {
@@ -173,7 +187,7 @@ export class WebGpuRenderTarget implements RenderTarget {
   }
 
   get depth(): TextureHandle | null {
-    return this.#attachments.depth;
+    return this.#spec.depthOf?.depth ?? this.#attachments.depth;
   }
 
   resize(size: ViewSize): void {
@@ -187,7 +201,10 @@ export class WebGpuRenderTarget implements RenderTarget {
   /**
    * Renders `frame` into the target.
    *
-   * @throws {@link DepthSelfSample} when a draw samples this target's own depth.
+   * @throws {@link DepthSelfSample} when a draw samples the depth this target draws with, its own
+   *   or `depthOf`'s.
+   * @throws Error for an ID target's frame with post-processes, or a `depthOf` target with no
+   *   depth or of another size.
    * @throws {@link ColourSelfSample} when a draw or a post-process samples its own colour, or the
    *   frame copies it into itself.
    * @throws RangeError for a scissor outside the target.
@@ -198,7 +215,11 @@ export class WebGpuRenderTarget implements RenderTarget {
     }
     assertNoDepthSelfSample(this.name, this.depth, frame.draws);
     assertNoColourSelfSample(this.name, this.colour, frame);
-    const { size, colour, depth } = this.#attachments;
+    const { size, colour } = this.#attachments;
+    const depth = this.#depthInUse(size);
+    if (this.#spec.format === "r32uint" && frame.postProcesses.length > 0) {
+      throw new Error(`target ${this.name}: an r32uint target takes no post-process`);
+    }
     if (frame.colourFrom === colour) {
       throw new ColourSelfSample(this.name, "the frame's colour copy");
     }
@@ -213,6 +234,7 @@ export class WebGpuRenderTarget implements RenderTarget {
       colourTexture: texture,
       colourFormat: this.#spec.format,
       depth: depth === null ? null : host.gpuTextureOf(depth).createView(),
+      ...(this.#spec.depthOf === undefined ? {} : { depthLoad: "load" as const }),
       intermediates: () => this.#intermediates.at(size),
     });
     host.wroteByDraw(colour);
@@ -231,6 +253,30 @@ export class WebGpuRenderTarget implements RenderTarget {
     this.#disposed = true;
     this.#release();
     this.#host.forgetTarget(this);
+  }
+
+  /**
+   * The depth this target draws with at `size`: its own, or `depthOf`'s, which must be there and
+   * of the same size.
+   *
+   * @throws Error for a `depthOf` target with no depth or of another size.
+   */
+  #depthInUse(size: ViewSize): TextureHandle | null {
+    const other = this.#spec.depthOf;
+    if (other === undefined) {
+      return this.#attachments.depth;
+    }
+    const shared = other.depth;
+    if (shared === null) {
+      throw new Error(`target ${this.name} draws with ${other.name}'s depth, which has none`);
+    }
+    const texture = this.#host.gpuTextureOf(shared);
+    if (texture.width !== size.widthPx || texture.height !== size.heightPx) {
+      throw new Error(
+        `target ${this.name} of ${String(size.widthPx)} × ${String(size.heightPx)} draws with ${other.name}'s depth of ${String(texture.width)} × ${String(texture.height)}`,
+      );
+    }
+    return shared;
   }
 
   #attach(size: ViewSize): Attachments {

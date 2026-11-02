@@ -31,6 +31,10 @@ describe("a pipeline's key", () => {
     expect(keys.size).toBe(4);
   });
 
+  it("keeps an ID target's pipeline apart from a colour one's (plan R14, R14.T2.b)", () => {
+    expect(pipelineKey("a", "r32uint", true)).not.toBe(pipelineKey("a", "rgba16float", true));
+  });
+
   it("keeps a depth-only pipeline apart from every colour one (R10.T9.b)", () => {
     const depthOnly = pipelineKey("a", "depth-only", true);
     expect([

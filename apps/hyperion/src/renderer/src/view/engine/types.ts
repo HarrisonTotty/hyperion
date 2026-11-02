@@ -19,8 +19,14 @@ export type DepthPolicy = "reversed-z-float";
 /**
  * The colour formats a render target may have. `rgba32float` is kept out: it would double the
  * bandwidth of a bandwidth-bound GPU for no visible gain (the brainstorm's Decision "Light").
+ *
+ * @remarks
+ * `r32uint` is an ID target (plan R14, R14.T2.b; an ask of R01): a render attachment that is never
+ * blended, has no mips and is never filtered, cleared to `0xffff_ffff`, none (Design note 9), and
+ * written by a material's `u32` output; a later draw reads it as a `texture_2d<u32>` by `textureLoad` (a binding of
+ * `sampleType` `uint`). It takes the scene's depth through {@link RenderTargetSpec.depthOf}.
  */
-export type ColourTargetFormat = "rgba16float" | "rg11b10ufloat" | "rgba8unorm";
+export type ColourTargetFormat = "rgba16float" | "rg11b10ufloat" | "rgba8unorm" | "r32uint";
 
 /** A size in device pixels. */
 export interface ViewSize {
@@ -92,6 +98,13 @@ export interface RenderTargetSpec {
   readonly mips: number;
   /** Whether it has a `depth32float` of its own, with `COPY_SRC` and `TEXTURE_BINDING`. */
   readonly depth: boolean;
+  /**
+   * Drawn with another target's depth, loaded and stored, in place of a depth of its own (plan
+   * R14, R14.T2.b): an ID target tested against, and writing, the scene target's depth. The other
+   * target is of the same engine, has a depth and is this one's size at each render; `depth` is
+   * then `false`.
+   */
+  readonly depthOf?: RenderTarget;
   /** `render-targets` unless a later plan names another. */
   readonly category: MemoryCategory;
 }
@@ -100,14 +113,17 @@ export interface RenderTargetSpec {
 export interface RenderTarget {
   readonly name: string;
   readonly colour: TextureHandle;
+  /** The depth it draws with: its own, {@link RenderTargetSpec.depthOf}'s, or `null` for none. */
   readonly depth: TextureHandle | null;
   resize(size: ViewSize): void;
   /**
    * Renders into level 0; a chain of levels is one target per level.
    *
-   * @throws {@link DepthSelfSample} when a draw samples the target's own depth, and
-   * {@link ColourSelfSample} when the pass that writes its colour (the draws', or the last
-   * post-process's) samples it.
+   * @throws {@link DepthSelfSample} when a draw samples the depth the target draws with, its own
+   * or {@link RenderTargetSpec.depthOf}'s, and {@link ColourSelfSample} when the pass that writes
+   * its colour (the draws', or the last post-process's) samples it.
+   * @throws Error for an `r32uint` target's frame with post-processes, or a `depthOf` target whose
+   *   depth is gone or of another size (plan R14, R14.T2.b).
    */
   render(frame: FrameSubmission): void;
   dispose(): void;
@@ -264,7 +280,8 @@ export interface TextureBindingSpec {
   /**
    * `float` by default; `depth` for a `RenderTarget.depth` read as `texture_depth_2d` with
    * `textureLoad` (R05); `unfilterable-float` for an `rgba32float` read without
-   * `float32-filterable`.
+   * `float32-filterable`; `uint` for an ID target's `r32uint` read as `texture_2d<u32>` with
+   * `textureLoad` (plan R14, R14.T2.b), which takes no other format and no other takes it.
    */
   readonly sampleType?: "float" | "unfilterable-float" | "depth" | "uint" | "sint";
   /**
@@ -575,7 +592,13 @@ export interface RenderEngine {
    * `ResilientEngine` makes a view while there is no device too: it draws from the restore on.
    */
   createView(canvas: HTMLCanvasElement, name: string): RenderView;
-  /** An offscreen colour target with its own depth: HDR, bloom chains, stills, the harness. */
+  /**
+   * An offscreen colour target with its own depth or another's: HDR, bloom chains, stills, the
+   * harness, an ID target.
+   *
+   * @throws Error naming the target when it does not fit the device, or its
+   *   {@link RenderTargetSpec.depthOf} has no depth or is not this engine's live target's.
+   */
   createRenderTarget(spec: RenderTargetSpec): RenderTarget;
   /**
    * A depth-only target of array layers (plan R10, R10.T9.b): the terrain's shadow cascades, one

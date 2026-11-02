@@ -2161,3 +2161,29 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - The four leans stand, as edits: Design note 14's rewrites by reachability and its
     annunciation's condition, Design note 15's row, and Design note 17's table, which takes
     `litClusters` (T2.a), `figureClusters`, `hullClusters` and `wireClusters` (T4).
+- **R14.T2.b** (`r14-t4-consumers`):
+  - Built before the owner's T2-against-T3 ruling, on research-next-work-12's lean, as the brief
+    asked (lean, 2026-11-02).
+  - `ColourTargetFormat` gains `r32uint`, an ID target: one mip (more is refused), cleared each
+    frame to `0xffff_ffff`, none (`ID_NONE`, Design note 9), never blended (a blending material's
+    pipeline into an integer format is refused) and given no post-process (refused at its render).
+  - `RenderTargetSpec.depthOf` draws a target with another's depth, loaded and stored whatever the
+    frame's `colourLoad` (`FrameOutput.depthLoad`). It stays the plan's optional field beside
+    `depth`, which is then `false`, rather than a union (lean, 2026-11-02). The other's depth must
+    be there and this engine's live texture (refused at creation), and of the same size at each
+    render (refused there); `RenderTarget.depth` is the depth the target draws with, which
+    `DepthSelfSample` covers.
+  - A texture binding of `sampleType` `uint` takes an unsigned integer texture and refuses any
+    other, as `depth` does.
+  - The pipeline key already holds the target's format, so an `r32uint` pipeline is its own;
+    `prepareMaterial`'s `PreparedTarget` and `materialSet.ts`' `targets` take `r32uint` through
+    the type.
+  - `engine/idTarget.ts`: `ID_WRITE_MATERIAL` (a `u32` uniform `id`, written unblended) and
+    `ID_READ_MATERIAL` (`ids`, a `texture_2d<u32>` read by `textureLoad`, none black), in
+    `WGSL_CATALOGUE` for `r32uint` and `rgba16float`. The catalogue compiles their shaders but makes
+    no pipeline: the `r32uint` pipeline is made by their test frame, part 1's `smoke/idTarget.ts`,
+    and nothing else draws them. An ID's uniform is a `Float32Array` the engine packs as `u32`, so
+    the writer's IDs are exact to 2²⁴; T2.c's raster writes its own.
+  - The drawing path's tests are in `engine.test.ts`, on the fake GPU, beside `drawing.test.ts`'
+    key; `resources.ts` is unchanged (its texel sizes had `r32uint`) and `memory.ts` changed in its
+    docs alone.

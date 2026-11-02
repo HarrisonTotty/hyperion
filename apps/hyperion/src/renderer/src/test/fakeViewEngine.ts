@@ -107,7 +107,9 @@ export function fakeViewEngine(
     createRenderTarget: (spec: RenderTargetSpec): RenderTarget => ({
       name: spec.name,
       colour: { kind: "texture", name: `${spec.name} colour` },
-      depth: spec.depth ? { kind: "texture", name: `${spec.name} depth` } : null,
+      depth:
+        spec.depthOf?.depth ??
+        (spec.depth ? { kind: "texture", name: `${spec.name} depth` } : null),
       resize: (): void => undefined,
       render: (): void => undefined,
       dispose: (): void => undefined,

@@ -8,6 +8,7 @@ import {
   ColourSelfSample,
   DepthSelfSample,
   type DrawItem,
+  type RenderTarget,
   type RenderTargetSpec,
   type TextureHandle,
 } from "../types";
@@ -67,6 +68,16 @@ describe("a target's textures", () => {
   });
 });
 
+/** A target's surface, for a spec's `depthOf`. */
+const TARGET: RenderTarget = {
+  name: "scene",
+  colour: { kind: "texture", name: "scene:colour" },
+  depth: { kind: "texture", name: "scene:depth" },
+  resize: () => undefined,
+  render: () => undefined,
+  dispose: () => undefined,
+};
+
 describe("a target's fit", () => {
   const caps = summariseAdapter(
     new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }),
@@ -82,6 +93,18 @@ describe("a target's fit", () => {
     expect(() => {
       assertTargetFits({ ...SPEC, mips: 3 }, { widthPx: 2, heightPx: 2 }, caps);
     }).toThrow(/asks for 3 mips; 2 × 2 has 2/u);
+  });
+
+  it("refuses an r32uint target of more than one mip (plan R14, R14.T2.b)", () => {
+    expect(() => {
+      assertTargetFits({ ...SPEC, format: "r32uint", mips: 2 }, SPEC.size, caps);
+    }).toThrow("an r32uint target has one mip, not 2");
+  });
+
+  it("refuses a target drawn with another's depth that asks for its own (plan R14, R14.T2.b)", () => {
+    expect(() => {
+      assertTargetFits({ ...SPEC, format: "r32uint", mips: 1, depthOf: TARGET }, SPEC.size, caps);
+    }).toThrow("draws with scene's depth and asks for its own");
   });
 
   it("accepts the full chain", () => {

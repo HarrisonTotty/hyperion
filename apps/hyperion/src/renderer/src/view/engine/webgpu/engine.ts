@@ -428,6 +428,17 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
 
   createRenderTarget(spec: RenderTargetSpec): RenderTarget {
     this.#assertLive();
+    // A target drawn with another's depth takes it from this engine's own (plan R14, R14.T2.b):
+    // the depth's texture is this engine's and live, or its lookup throws naming why.
+    if (spec.depthOf !== undefined) {
+      const shared = spec.depthOf.depth;
+      if (shared === null) {
+        throw new Error(
+          `target ${spec.name} draws with ${spec.depthOf.name}'s depth, which has none`,
+        );
+      }
+      this.gpuTextureOf(shared);
+    }
     const target = new WebGpuRenderTarget(this, spec);
     this.#targets.add(target);
     return target;

@@ -42,6 +42,50 @@ const BUFFERS: ReadonlyArray<GPUVertexBufferLayout> = [
   { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] },
 ];
 
+describe("a material's pipeline into an ID target (plan R14, R14.T2.b)", () => {
+  it("writes r32uint with no blend", () => {
+    const descriptor = materialPipelineDescriptor(
+      SPEC,
+      { vertex: MODULE, fragment: MODULE },
+      LAYOUT,
+      BUFFERS,
+      "triangle-list",
+      "r32uint",
+      true,
+    );
+    expect([...(descriptor.fragment?.targets ?? [])]).toEqual([
+      { format: "r32uint", writeMask: 0xf },
+    ]);
+  });
+
+  it("keeps the material's reversed depth test into an ID target", () => {
+    const descriptor = materialPipelineDescriptor(
+      SPEC,
+      { vertex: MODULE, fragment: MODULE },
+      LAYOUT,
+      BUFFERS,
+      "triangle-list",
+      "r32uint",
+      true,
+    );
+    expect(descriptor.depthStencil?.depthCompare).toBe("greater-equal");
+  });
+
+  it("refuses a material that blends, which no integer target takes", () => {
+    expect(() =>
+      materialPipelineDescriptor(
+        { ...SPEC, blend: "premultiplied" },
+        { vertex: MODULE, fragment: MODULE },
+        LAYOUT,
+        BUFFERS,
+        "triangle-list",
+        "r32uint",
+        true,
+      ),
+    ).toThrow("material hull blends premultiplied into r32uint, which no blend takes");
+  });
+});
+
 describe("a material's pipeline", () => {
   it("tests reversed depth greater-or-equal, with the material's own state", () => {
     const descriptor = materialPipelineDescriptor(

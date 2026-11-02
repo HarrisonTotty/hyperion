@@ -12,6 +12,8 @@
 /**
  * What a GPU allocation is for, by the names R12.T3.a reports (R12 Design note 6).
  *
+ * - `render-targets`: the offscreen targets' colour and depth, an ID target's `r32uint` among them
+ *   (plan R14, R14.T2.b), and their post-process intermediates.
  * - `atmosphere-tables`: the per-planet transmittance and multiple-scattering tables (R05.T12.b),
  *   the medium's terms and density and phase tables that they and the per-frame kernels read
  *   (R08.T6.b), and the absorber-column table and the lights' curves of growth (R08.T6.c).

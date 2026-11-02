@@ -119,6 +119,7 @@ import { timeAtmosphereFrame } from "./frameTiming";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
+import { checkIdTarget } from "./idTarget";
 import { checkDepthLayers } from "./depthLayers";
 import { captureEclipse, checkEclipse } from "./eclipse";
 import { captureViewLight } from "./viewLight";
@@ -448,6 +449,7 @@ async function run(
   await group(1, "R10.T9.b depth layers and a comparison sampler", () =>
     checkDepthLayers(engine, checks),
   );
+  await group(1, "R14.T2.b the engine's ID target", () => checkIdTarget(engine, checks));
   await group(1, "T9.g blending, compute and the packed cube", () =>
     checkBlendComputeCube(engine, checks),
   );

@@ -9,6 +9,7 @@ import {
   INTEL_UHD_620_INFO,
 } from "../../../test/fakeGpu";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
+import { ID_NONE } from "../idTarget";
 import type { KernelPair } from "../kernels";
 import type { AllocationEvent, TextureSpec } from "../memory";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../status";
@@ -16,6 +17,7 @@ import {
   ColourSelfSample,
   type DepthLayerPass,
   DepthSelfSample,
+  type FrameSubmission,
   type DrawItem,
   Float32BlendUnavailable,
   type MaterialHandle,
@@ -23,6 +25,7 @@ import {
   type PassTimes,
   PresentationOnlyReadback,
   type RenderTarget,
+  type RenderTargetSpec,
   type TexelRect,
   type TextureHandle,
   type WgslMaterialSpec,
@@ -1480,3 +1483,191 @@ describe("the sampler cache (R10.T9.b)", () => {
     ]);
   });
 });
+
+/** An empty frame named `label`, with `draws`. */
+function frameOf(label: string, draws: ReadonlyArray<DrawItem> = []): FrameSubmission {
+  return { label, viewRotation: IDENTITY_4, projection: IDENTITY_4, draws, postProcesses: [] };
+}
+
+/** A 4 × 4 scene target of `engine` with a depth of its own, and an ID target drawn with it. */
+function idTargets(
+  engine: WebGpuRenderEngine,
+  idWidthPx = 4,
+): { readonly scene: RenderTarget; readonly ids: RenderTarget } {
+  const scene = engine.createRenderTarget({
+    name: "scene",
+    size: { widthPx: 4, heightPx: 4 },
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  const ids = engine.createRenderTarget({
+    name: "ids",
+    size: { widthPx: idWidthPx, heightPx: 4 },
+    format: "r32uint",
+    mips: 1,
+    depth: false,
+    depthOf: scene,
+    category: "render-targets",
+  });
+  return { scene, ids };
+}
+
+/** A material of `spec`'s state whose `ids` binding is `sampleType`'s. */
+function idsReader(sampleType: "uint" | "float"): WgslMaterialSpec {
+  return {
+    ...SYNC_TILED,
+    name: `reads ids as ${sampleType}`,
+    textures: [{ name: "ids", binding: 0, sampleType }],
+  };
+}
+
+describe("the engine's ID target (plan R14, R14.T2.b)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("draws an r32uint target with another target's depth, loaded and stored", async () => {
+    const { engine, gpu } = await engineOn();
+    const { scene, ids } = idTargets(engine);
+    ids.render(frameOf("ids"));
+    const [pass] = submittedAs(gpu, "ids").flatMap(renderPasses);
+    const depth = pass?.depthStencilAttachment;
+    expect([
+      ids.depth === scene.depth,
+      [depth?.depthLoadOp, depth?.depthStoreOp],
+      layerOf(depth)?.[0],
+    ]).toEqual([true, ["load", "store"], "scene:depth"]);
+  });
+
+  it("clears an ID target's colour to none each frame, 0xffff_ffff", async () => {
+    const { engine, gpu } = await engineOn();
+    const { ids } = idTargets(engine);
+    ids.render(frameOf("ids"));
+    const [pass] = submittedAs(gpu, "ids").flatMap(renderPasses);
+    expect(
+      Array.from(pass?.colorAttachments ?? [], (attachment) => [
+        attachment?.loadOp,
+        attachment?.clearValue,
+      ]),
+    ).toEqual([["clear", { r: ID_NONE, g: 0, b: 0, a: 0 }]]);
+  });
+
+  it("refuses a draw into the ID target that samples the depth it shares", async () => {
+    const { engine } = await engineOn();
+    const { scene, ids } = idTargets(engine);
+    const draw = drawItem(indexedTriangle(engine), engine.createMaterial(SYNC_TILED), {
+      tiles: scene.depth ?? scene.colour,
+    });
+    expect(() => {
+      ids.render(frameOf("ids", [draw]));
+    }).toThrow(DepthSelfSample);
+  });
+
+  it("binds an ID target's colour as a uint texture", async () => {
+    const { engine, gpu } = await engineOn();
+    const { ids } = idTargets(engine);
+    const draw = drawItem(indexedTriangle(engine), engine.createMaterial(idsReader("uint")), {
+      ids: ids.colour,
+    });
+    outTarget(engine).render(frameOf("uint", [draw]));
+    expect(pipelinesSet(gpu)).toHaveLength(1);
+  });
+
+  it("refuses an ID target's colour bound as a float", async () => {
+    const { engine } = await engineOn();
+    const { ids } = idTargets(engine);
+    const draw = drawItem(indexedTriangle(engine), engine.createMaterial(idsReader("float")), {
+      ids: ids.colour,
+    });
+    expect(() => {
+      outTarget(engine).render(frameOf("float", [draw]));
+    }).toThrow("declares ids as float, but ids:colour is r32uint");
+  });
+
+  it("refuses a float texture bound as a uint", async () => {
+    const { engine } = await engineOn();
+    const out = outTarget(engine);
+    const scene = targetOf(engine, "scene");
+    const draw = drawItem(indexedTriangle(engine), engine.createMaterial(idsReader("uint")), {
+      ids: scene.colour,
+    });
+    expect(() => {
+      out.render(frameOf("uint", [draw]));
+    }).toThrow("declares ids as uint, but scene:colour is rgba16float");
+  });
+
+  it("refuses a post-process into an ID target", async () => {
+    const { engine } = await engineOn();
+    const { ids } = idTargets(engine);
+    const postProcess = engine.createPostProcess({
+      name: "tone",
+      displayName: "TONE",
+      fragmentWgsl: "",
+      uniforms: [],
+    });
+    expect(() => {
+      ids.render({ ...frameOf("ids"), postProcesses: [{ postProcess, uniforms: {} }] });
+    }).toThrow("an r32uint target takes no post-process");
+  });
+
+  it("refuses to draw with a depth of another size", async () => {
+    const { engine } = await engineOn();
+    const { ids } = idTargets(engine, 8);
+    expect(() => {
+      ids.render(frameOf("ids"));
+    }).toThrow("ids of 8 × 4 draws with scene's depth of 4 × 4");
+  });
+
+  it("refuses a target drawn with another engine's target's depth", async () => {
+    const { engine } = await engineOn();
+    const { scene } = idTargets((await engineOn()).engine);
+    expect(() => engine.createRenderTarget(idSpec(scene))).toThrow(
+      "texture scene:depth was not made by this engine",
+    );
+  });
+
+  it("refuses a target drawn with the depth of a target that has none", async () => {
+    const { engine } = await engineOn();
+    expect(() => engine.createRenderTarget(idSpec(outTarget(engine)))).toThrow(
+      "target ids draws with out's depth, which has none",
+    );
+  });
+
+  it("refuses a target drawn with a disposed target's depth", async () => {
+    const { engine } = await engineOn();
+    const { scene } = idTargets(engine);
+    scene.dispose();
+    expect(() => engine.createRenderTarget(idSpec(scene))).toThrow(
+      "texture scene:depth was released",
+    );
+  });
+
+  it("prepares a material's pipeline into an ID target with depth, which its draws take", async () => {
+    const { engine, gpu } = await engineOn();
+    const { ids } = idTargets(engine);
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    await engine.prepareMaterial(material, [{ colour: "r32uint", depth: true }], [mesh]);
+    const made = gpu.renderPipelines.length;
+    drawEach(ids, mesh, [material], engine.createTexture(sampled("tiles", 1)));
+    expect([
+      gpu.renderPipelines.map((pipeline) => pipeline.descriptor.fragment?.targets[0]?.format),
+      gpu.renderPipelines.length - made,
+    ]).toEqual([["r32uint"], 0]);
+  });
+});
+
+/** A 4 × 4 ID target's spec, drawn with `owner`'s depth. */
+function idSpec(owner: RenderTarget): RenderTargetSpec {
+  return {
+    name: "ids",
+    size: { widthPx: 4, heightPx: 4 },
+    format: "r32uint",
+    mips: 1,
+    depth: false,
+    depthOf: owner,
+    category: "render-targets",
+  };
+}

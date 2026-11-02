@@ -103,6 +103,7 @@ import {
   MESH_OCCLUDER_MATERIAL,
   WIREFRAME_MATERIALS,
 } from "../wireframe/submit";
+import { ID_READ_MATERIAL, ID_WRITE_MATERIAL } from "./idTarget";
 import { SUBGROUP_TWINS } from "./twins";
 import type {
   PointSplatSpec,
@@ -397,9 +398,19 @@ export const DISC_EMISSIVE_AIR_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL },
 ];
 
+/**
+ * The engine's ID target's own forms (plan R14, R14.T2.b; `idTarget.ts`): the writer into
+ * `r32uint`, and the reader of a `texture_2d<u32>` into the scene's `rgba16float`.
+ */
+const ID_TARGET_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "material", spec: ID_WRITE_MATERIAL, targets: ["r32uint"] },
+  { kind: "material", spec: ID_READ_MATERIAL },
+];
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
+  ...ID_TARGET_ENTRIES,
   ...WIREFRAME_ENTRIES,
   ...ATMOSPHERE_TABLE_ENTRIES,
   ...POST_ENTRIES,

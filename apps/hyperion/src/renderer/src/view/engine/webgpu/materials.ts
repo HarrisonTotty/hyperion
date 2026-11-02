@@ -241,7 +241,11 @@ export interface MaterialModules {
  * Into `depth-only` (plan R10, R10.T9.b) the pipeline has no colour target, whatever `hasDepth`
  * says, and keeps its fragment stage, so that a material may `discard`; its depth state is the
  * material's, as into any target with depth. A material with `unclippedDepth` takes
- * `primitive.unclippedDepth`, which the engine refuses earlier without `depth-clip-control`.
+ * `primitive.unclippedDepth`, which the engine refuses earlier without `depth-clip-control`. Into
+ * an integer format (an ID target's `r32uint`, plan R14, R14.T2.b) no material blends.
+ *
+ * @throws Error naming the material and the format for a blending material into an integer
+ *   format, whose pipeline the device would refuse.
  */
 export function materialPipelineDescriptor(
   spec: WgslMaterialSpec,
@@ -254,6 +258,11 @@ export function materialPipelineDescriptor(
 ): GPURenderPipelineDescriptor {
   const blend = BLEND_STATES[spec.blend];
   const depthOnly = colourFormat === "depth-only";
+  if (blend !== undefined && colourFormat.endsWith("int")) {
+    throw new Error(
+      `material ${spec.name} blends ${spec.blend} into ${colourFormat}, which no blend takes`,
+    );
+  }
   return {
     label: spec.name,
     layout,

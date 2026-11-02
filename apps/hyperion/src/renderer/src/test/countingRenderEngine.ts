@@ -411,13 +411,15 @@ export class CountingRenderEngine implements RenderEngine {
       : null;
     // A resize remakes the target's textures, as the adapter's does: new handles, same names.
     const handles = { colour, depth };
+    const shared = spec.depthOf;
     return {
       name: spec.name,
       get colour(): TextureHandle {
         return handles.colour;
       },
+      // A target drawn with another's depth (plan R14, R14.T2.b) has that target's.
       get depth(): TextureHandle | null {
-        return handles.depth;
+        return shared?.depth ?? handles.depth;
       },
       resize: (): void => {
         handles.colour = { ...handles.colour };

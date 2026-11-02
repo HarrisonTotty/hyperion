@@ -14,6 +14,7 @@
  */
 
 import { BUFFER_USAGE } from "../gpuFlags";
+import { ID_NONE } from "../idTarget";
 import { extentOf, type TextureSpec } from "../memory";
 import {
   type BufferHandle,
@@ -51,6 +52,9 @@ import {
 
 /** The colour a pass clears to: black, opaque. */
 export const CLEAR_COLOUR: GPUColor = { r: 0, g: 0, b: 0, a: 1 };
+
+/** The value an ID target's pass clears to: none, {@link ID_NONE} (plan R14, Design note 9). */
+export const CLEAR_ID: GPUColor = { r: ID_NONE, g: 0, b: 0, a: 0 };
 
 /**
  * The load operation of a frame's draws' pass: `load` when it asks to keep what an earlier
@@ -120,6 +124,12 @@ export interface FrameOutput {
   readonly colourTexture: GPUTexture | null;
   readonly colourFormat: GPUTextureFormat;
   readonly depth: GPUTextureView | null;
+  /**
+   * `load` for a depth another output drew, which the draws' pass loads whatever the frame's
+   * `colourLoad` (a target drawn with `depthOf`'s, plan R14, R14.T2.b); the frame's load op where
+   * absent.
+   */
+  readonly depthLoad?: "load";
   /** Two `rgba16float` textures of the output's size, asked for only when there are post-processes. */
   readonly intermediates: () => readonly [GPUTexture, GPUTexture];
 }
@@ -179,9 +189,18 @@ function pipelineFor(
     pipelines.set(key, pipeline);
     return pipeline;
   }
+  // A descriptor the engine refuses (a blending material into an integer target, R14.T2.b) fails
+  // its key at once, as a compile that fails does, rather than leaving it pending.
+  let made: GPURenderPipelineDescriptor;
+  try {
+    made = descriptor();
+  } catch (error: unknown) {
+    pipelines.set(key, "failed");
+    throw error;
+  }
   pipelines.set(key, "pending");
   void device
-    .createRenderPipelineAsync(descriptor())
+    .createRenderPipelineAsync(made)
     .then((pipeline): void => {
       pipelines.set(key, pipeline);
       return undefined;
@@ -410,14 +429,20 @@ export class Drawing {
     const scene = encoder.beginRenderPass({
       label: frame.label,
       colorAttachments: [
-        { view: sceneColour, loadOp: load, storeOp: "store", clearValue: CLEAR_COLOUR },
+        {
+          view: sceneColour,
+          loadOp: load,
+          storeOp: "store",
+          // An ID target takes no post-process, so its colour is the scene's (R14.T2.b).
+          clearValue: output.colourFormat === "r32uint" ? CLEAR_ID : CLEAR_COLOUR,
+        },
       ],
       ...(output.depth === null
         ? {}
         : {
             depthStencilAttachment: {
               view: output.depth,
-              depthLoadOp: load,
+              depthLoadOp: output.depthLoad ?? load,
               depthStoreOp: "store",
               depthClearValue: 0,
             },
@@ -681,8 +706,9 @@ export class Drawing {
    * The view a texture binding takes, checked against what the layout declared.
    *
    * @throws Error naming the owner and the binding when the texture's dimension is not the one
-   * declared (`2d` by default), or a depth texture is not declared `depth`, or the reverse: the
-   * bind group would fail validation and the draw silently draw nothing.
+   * declared (`2d` by default), or a depth texture is not declared `depth`, or an unsigned integer
+   * texture (an ID target's `r32uint`, plan R14, R14.T2.b) not declared `uint`, or the reverse:
+   * the bind group would fail validation and the draw silently draw nothing.
    */
   #boundView(owner: string, binding: TextureBindingSpec, handle: TextureHandle): GPUTextureView {
     const { texture, spec } = this.#host.textureOf(handle);
@@ -694,7 +720,11 @@ export class Drawing {
       );
     }
     const depth = spec.format.startsWith("depth");
-    if (depth !== (binding.sampleType === "depth")) {
+    const unsigned = spec.format.endsWith("uint");
+    if (
+      depth !== (binding.sampleType === "depth") ||
+      unsigned !== (binding.sampleType === "uint")
+    ) {
       throw new Error(
         `${owner} declares ${binding.name} as ${binding.sampleType ?? "float"}, but ${handle.name} is ${spec.format}`,
       );
