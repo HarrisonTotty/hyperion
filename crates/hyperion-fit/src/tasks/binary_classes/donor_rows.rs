@@ -36,20 +36,28 @@ pub enum KindTarget {
 ///   Pala et al. (2020, MNRAS 494, 3799), the volume-limited sample within 150 pc;
 /// - a helium donor, an AM Canum Venaticorum star: (5 ± 3) × 10⁻⁷ pc⁻³, Carter et al. (2013,
 ///   MNRAS 429, 2143), from the SDSS spectroscopic sample;
-/// - a giant donor, a symbiotic star: 4 × 10⁵ in the Galaxy, Magrini, Corradi and Munari (2003,
-///   ASP Conf. Ser. 303, 539), from the symbiotic stars of the Local Group's galaxies scaled to
-///   the Milky Way: the top of the estimates, which run from about 3 × 10³ (Allen 1984) through
-///   3 × 10⁴ (Kenyon 1986) and 3 × 10⁵ (Munari and Renzini 1992, ApJ 397, L87); population
-///   synthesis gives 10³–10⁴ (Lü, Yungelson and Han 2006, MNRAS 372, 1389).
+/// - a giant donor, a symbiotic star: 1.0 × 10⁴ in the Galaxy, as the engine counts the wind-fed
+///   ones (the white dwarf fed by the giant's wind at 10 L☉ or more, `classify`'s
+///   `SYMBIOTIC_MIN_LUMINOSITY`; Lü et al. omit the Roche-lobe-overflow ones the engine also
+///   counts): Lü, Yungelson and Han's (2006, MNRAS 372, 1389) population synthesis of the same
+///   stars, their accretion model's 7,100 in all (table 2), of which 37 are brighter than `V_c` =
+///   12, scaled to the 52 that Belczyński et al.'s (2000, A&AS 146, 407) catalogue holds there, a
+///   sample Lü et al. (section 2.4) take as complete: 7,100 × 52 ÷ 37 ≈ 1.0 × 10⁴; their standard
+///   and accretion models together (56 of about 11,400) give 1.06 × 10⁴, and each case of table 2
+///   scaled alike gives 0.8–1.7 × 10⁴. The observational estimates run "from several thousands
+///   (Boyarchuk 1970) to about 30,000 (Kenyon 1994)", as Lü et al.'s section 3.2 quotes them, and
+///   to 3 × 10⁵ on an assumed discovery probability (Munari and Renzini 1992, ApJ 397, L87);
+///   Magrini, Corradi and Munari's (2003, ASP Conf. Ser. 303, 539) 4 × 10⁵, 0.5% of the Galaxy's
+///   red giants, counts quiescent systems too: "only a fraction of them can be observed in the
+///   'active' phase" (their section 4).
 ///
-/// Every figure is recalled, not read at source (the science check of 2026-11-01 could reach
-/// none), and the symbiotic count, over two orders of magnitude, is for the owner's ruling; the
-/// densities are taken as mid-plane densities at [`SUN_LY`], as the sim's tests take Pala et
-/// al.'s.
+/// The two densities are recalled, not read at source (the science check of 2026-11-01 could
+/// reach neither), and are taken as mid-plane densities at [`SUN_LY`], as the sim's tests take
+/// Pala et al.'s; the symbiotic count is research-leans-23's, its sources read there.
 pub const OBSERVED_DONOR_KINDS: [KindTarget; 3] = [
     KindTarget::DensityPerCubicParsec(4.8e-6),
     KindTarget::DensityPerCubicParsec(5.0e-7),
-    KindTarget::GalacticCount(4.0e5),
+    KindTarget::GalacticCount(1.0e4),
 ];
 
 /// The Sun-like point a density target is read at, light-years in the galactic frame (x along the

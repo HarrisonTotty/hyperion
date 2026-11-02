@@ -109,6 +109,8 @@ fn the_donor_kinds_rows_meet_their_cited_figures() {
     )
     .unwrap();
     let censuses = run_censuses(&galaxy, &params.census, NonZeroUsize::MIN).unwrap();
+    // The symbiotic stars at Lü, Yungelson and Han's 10⁴ (research-leans-23).
+    assert_eq!(OBSERVED_DONOR_KINDS[2], KindTarget::GalacticCount(1.0e4));
     let rows = awd_share_rows(&galaxy, &censuses, &OBSERVED_DONOR_KINDS);
     assert!(rows.scales.iter().all(Option::is_some), "{:?}", rows.scales);
     let [x, y, z] = SUN_LY;

@@ -3282,9 +3282,12 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     `binary_classes::donor_rows::awd_share_rows` scales each donor kind of both accreting classes
     to its own figure (`OBSERVED_DONOR_KINDS`), each kind's fast and slow split the engine's:
     cataclysmic variables to Pala et al. 2020's 4.8 × 10⁻⁶ pc⁻³ and AM CVn stars to Carter et al.
-    2013's 5 × 10⁻⁷ pc⁻³ at the Sun-like point, symbiotic stars to Magrini, Corradi and Munari
-    2003's 4 × 10⁵ in the Galaxy (the top of 3 × 10³–4 × 10⁵: for the owner's ruling). Every figure
-    is recalled; the science check reached no source. Landed unrun: the refit at 27 switches
+    2013's 5 × 10⁻⁷ pc⁻³ at the Sun-like point, symbiotic stars to 1.0 × 10⁴ in the Galaxy
+    (`fix-p11-symbiotic-count`, research-leans-23: Lü, Yungelson and Han 2006's accretion model,
+    7,100 × 52 ÷ 37 scaled to Belczyński et al. 2000's 52, taken as complete by Lü et al.;
+    Magrini, Corradi and Munari 2003's 4 × 10⁵, as first built, counts quiescent systems too,
+    "only a fraction" of which are active). The two densities
+    are recalled; the science check reached neither. Landed unrun: the refit at 27 switches
     `fit_awd` to it and puts its `donor_kinds` in the samplers' picks. _Finding:_ the marks every
     kind shares (the recurrence, the white dwarf's mass, the initial masses, the age) are fitted to
     members in the engine's ratio of kinds; under these rows the refit should weight them by kind.
