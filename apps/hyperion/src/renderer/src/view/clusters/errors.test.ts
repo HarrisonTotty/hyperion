@@ -18,7 +18,7 @@ import { faceDifferenceMorphF32, faceDifferencePositionF32 } from "../terrain/gp
 import type { PatchKey } from "../terrain/patchKey";
 import { type BodyFigure, planetGeometry } from "../terrain/planet";
 import { chordSagittaM } from "../terrain/select";
-import { clusterErrorM, clusterErrors, ERRORS_PER_CLUSTER } from "./errors";
+import { clusterErrorM, clusterErrors, ERRORS_PER_CLUSTER, packClusterErrors } from "./errors";
 import {
   CLUSTER_PAD_FRACTION,
   CLUSTER_PAD_M,
@@ -187,6 +187,8 @@ describe("the clusters' measured errors (plan R14, R14.T3.a)", () => {
     const bake = randomBake(MOON_LIKE_FIGURE, { face: 3, level: 6, i: 20, j: 41 }, 4, 300, true);
     const errors = clusterErrors(bake, bake.key, planetGeometry(MOON_LIKE_FIGURE, null));
     const place = gpuPlacement(bake);
+    // A bound on the reach the code takes, its vertices' and its feet's: the farthest vertex and
+    // the deepest foot's drop below it.
     let reachM = 0;
     const offsets = bake.offsets ?? new Float32Array();
     for (let n = 0; n < offsets.length; n += 3) {
@@ -195,6 +197,11 @@ describe("the clusters' measured errors (plan R14, R14.T3.a)", () => {
         Math.hypot(offsets[n] ?? 0, offsets[n + 1] ?? 0, offsets[n + 2] ?? 0),
       );
     }
+    let dropM = 0;
+    for (const h of bake.heights) {
+      dropM = Math.max(dropM, h - Math.min(h - bake.skirtDepthM, 0));
+    }
+    reachM += dropM;
     const allowanceM = CLUSTER_PAD_M + CLUSTER_PAD_FRACTION * reachM;
     for (const cluster of [0, 18, 45, 63]) {
       let finer = 0;
@@ -240,6 +247,35 @@ describe("the clusters' measured errors (plan R14, R14.T3.a)", () => {
     expect(clusterErrorM(errors, strip, 2)).toBeGreaterThanOrEqual(
       strideDistanceM(place, strip, 2, 0.5, 8),
     );
+  });
+
+  it("round up into half floats, each the least at or above its error, +∞ past the largest (R14.T3.b)", () => {
+    const next = seededRandom(9);
+    const errors = Float64Array.from({ length: 4000 }, (_, n) =>
+      n % 2 === 0 ? 1e-4 * next() : 10 ** (6 * next() - 2),
+    );
+    errors.set([0, 65_504, 65_504.5, 70_000, Infinity, Number.NaN], 0);
+    const packed = packClusterErrors(errors);
+    const bits = new Uint16Array(packed.buffer);
+    const below = new Float16Array(1);
+    const belowBits = new Uint16Array(below.buffer);
+    // Each packed error is at or above its error, and the half float below it under it.
+    const wrong = Array.from(errors).flatMap((e, n) => {
+      const p = packed[n] ?? Number.NaN;
+      belowBits[0] = Math.max((bits[n] ?? 0) - 1, 0);
+      const under = (bits[n] ?? 0) === 0 || (below[0] ?? Infinity) < e;
+      const right = Number.isNaN(e) ? p === Infinity : p >= e && under;
+      return right ? [] : [{ n, e, p }];
+    });
+    expect(wrong).toEqual([]);
+    expect(Array.from(packed.subarray(0, 6))).toEqual([
+      0,
+      65_504,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+    ]);
   });
 
   it("refuse a bake whose heights or offsets are not a patch's", () => {

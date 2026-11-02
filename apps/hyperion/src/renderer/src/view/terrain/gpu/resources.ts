@@ -814,6 +814,11 @@ export interface SlotUpload {
    */
   readonly originM?: Vec3;
   readonly heightRangeM?: readonly [number, number];
+  /**
+   * The bake's clusters' measured errors (`BakedPatch.clusterErrors`, plan R14, R14.T3.b), which a
+   * clustered layout's records hold; absent, they stay unmeasured.
+   */
+  readonly clusterErrors?: Float16Array;
 }
 
 /**
@@ -1494,6 +1499,7 @@ export class TerrainResources {
           originM: patch.originM,
           heightRangeM: patch.heightRangeM,
           skirtDepthM: patch.skirtDepthM,
+          ...(patch.clusterErrors === undefined ? {} : { clusterErrors: patch.clusterErrors }),
         },
         new DataView(this.#clusterRecord),
         0,

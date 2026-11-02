@@ -24,11 +24,9 @@
 import type { MeshSpec } from "../engine/types";
 import type { ClusterShape } from "./record";
 
-/** A template's stride: every s-th vertex of its cluster's grid. */
-export type Stride = 1 | 2 | 4 | 8;
+import { CLUSTER_QUADS, type Stride, STRIDES } from "./terrainGrid";
 
-/** The strides, finest first: a template's index within its shape is log₂ s. */
-export const STRIDES: readonly [Stride, Stride, Stride, Stride] = [1, 2, 4, 8];
+export { CLUSTER_QUADS, type Stride, STRIDES } from "./terrainGrid";
 
 /** One template: a shape at a stride, as an index range of its consumer's cluster mesh. */
 export interface ClusterTemplate {
@@ -47,9 +45,6 @@ export interface ClusterTemplate {
 /** Vertices of a block's 9 × 9 grid in the terrain cluster mesh, (lx, ly) at 9 ly + lx. */
 const BLOCK_VERTICES = 81;
 
-/** Quads along a block's or a strip's side. */
-export const CLUSTER_QUADS = 8;
-
 /** The terrain cluster mesh's index of a strip's foot at k, then of its edge vertex at k. */
 function stripFoot(k: number): number {
   return BLOCK_VERTICES + k;
@@ -59,19 +54,23 @@ function stripEdge(k: number): number {
   return BLOCK_VERTICES + CLUSTER_QUADS + 1 + k;
 }
 
+/** The terrain cluster mesh's index of a block's vertex (x, y). */
+function blockVertex(x: number, y: number): number {
+  return y * (CLUSTER_QUADS + 1) + x;
+}
+
 /** A block's triangles at `stride`, as the lit mesh's quads, row by row from y = 0. */
 function blockIndices(stride: Stride): number[] {
-  const at = (x: number, y: number): number => y * (CLUSTER_QUADS + 1) + x;
   const indices: number[] = [];
   for (let y = 0; y < CLUSTER_QUADS; y += stride) {
     for (let x = 0; x < CLUSTER_QUADS; x += stride) {
       indices.push(
-        at(x, y),
-        at(x + stride, y),
-        at(x + stride, y + stride),
-        at(x, y),
-        at(x + stride, y + stride),
-        at(x, y + stride),
+        blockVertex(x, y),
+        blockVertex(x + stride, y),
+        blockVertex(x + stride, y + stride),
+        blockVertex(x, y),
+        blockVertex(x + stride, y + stride),
+        blockVertex(x, y + stride),
       );
     }
   }

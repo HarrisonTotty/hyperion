@@ -1394,6 +1394,8 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
     worlds); a flat patch on a curved datum has e_s > 0, growing as s²; monotone; the worker's
     output equals the main thread's on the same bake.
   - _Acceptance:_ the bake's time grows by at most 2% (pod, its bench).
+  - _Built_ (`r14-t3b-worker-errors`; the errors step 0.6–1.1% of a lit bake, the lane's outbox's
+    figures): records at the end of Risks.
 - **R14.T3.c Strides in camera passes.** Size L, after seamless-2.
   - The cull picks the coarsest stride whose level's stated error plus e_s, projected at the
     cluster's distance, is within τ′ (Design note 3's τ′, unslewed); stride 1 in the forced region.
@@ -1952,3 +1954,20 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     the edge path.
   - Timed passes: 8 a lit view-frame on high (the cull, the compaction's 3 and the 4 casters), 9
     measured; no resolve of their own.
+- **R14.T3.b** (`r14-t3b-worker-errors`):
+  - Each lit bake (a body's with its weights, `terrainShadingOf`'s `lit`) comes with
+    `BakedPatch.clusterErrors?: Float16Array`: e₁, e₂, e₄, e₈, metres, rounded up
+    (`packClusterErrors`; +∞ past 65,504), four a cluster in `clusters/terrain.ts`' order. Wireframe,
+    spike and floor bakes have none. It flows `SlotUpload.clusterErrors` →
+    `TerrainClusterSource.clusterErrors` → the slot's records.
+  - For T3.c's cull: a record with flags bit 6 (`CLUSTER_FLAG_MEASURED`) holds them in its error
+    bytes, `unpack2x16float(errors.x)` = (e₁, e₂) and `.y` = (e₄, e₈), with no `enable f16`; an
+    unmeasured one keeps (0, +∞) as `f32`, bit 6 clear. `ClusterRecord` is a union on `mode`: a
+    strided record's `strideErrorBits` (or `null`), a DAG one's `errorsM`.
+  - The worker forms e_s from the module's own offsets on both paths (asked of it for every lit
+    bake, dropped on `face-differences`), not Design note 3's "own `f64` positions" on low, on the
+    datum of the new `SurfaceFields.figureM` (`WorkerFields.figure`). Its allowance takes the
+    patch's reach, vertices and feet, at least T3.a's per cluster.
+  - `clusters/terrainGrid.ts` holds `Stride`, `STRIDES`, `CLUSTER_QUADS`, the page's cluster counts,
+    `CLUSTER_PAD_*` and `edgeVertex` with no engine import (`templates.ts` and `terrain.ts`
+    re-export them): what `errors.ts` imports stays in `tsconfig.worker.json`'s list.

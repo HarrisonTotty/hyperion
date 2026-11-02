@@ -195,6 +195,9 @@ function fakeModule(
     },
     fieldChunk: (system, body, block) => take(system, body, block, false),
     fieldRelease: (system, body) => held.delete(key(system, body)),
+    // A held body's datum: the Moon's sphere.
+    figureM: (system, body) =>
+      held.has(key(system, body)) ? Float64Array.of(1_737_400, 1_737_400) : undefined,
     get heldBytes() {
       return [...held.values()].reduce((a, b) => a + b, 0);
     },
@@ -764,6 +767,43 @@ describe("a height worker's fields", () => {
     );
     expect(answer.reply).toMatchObject({ kind: "bake-unsurveyed", id: 9 });
     expect(answer.transfer).toEqual([]);
+  });
+
+  it("answers a body's lit bake as bake-failed where the module holds no datum to measure its clusters on (R14.T3.b)", () => {
+    const { module } = fakeModule({ codes: new Uint16Array(), nodesAsked: [], layersAsked: [] });
+    const lost: HeightModule = {
+      ...module,
+      createFields: () => ({ ...module.createFields(), figureM: () => undefined }),
+    };
+    const fields = new WorkerFields(lost);
+    answerRequest(
+      lost,
+      {
+        kind: "field-init",
+        id: 1,
+        body: MOON,
+        block: new ArrayBuffer(8),
+        form: "payload",
+        sigma: "skipped",
+      },
+      fields,
+    );
+    const answer = answerRequest(
+      lost,
+      {
+        kind: "bake",
+        id: 2,
+        key: { face: 2, level: 8, i: 1, j: 2 },
+        generation: 1,
+        settings: {
+          vertexPath: "face-differences",
+          normals: "mesh",
+          source: { kind: "body", body: MOON, detailSeed: "6173736d626c7900", weights: "baked" },
+        },
+      },
+      fields,
+    );
+    expect(answer.reply).toMatchObject({ kind: "bake-failed", id: 2 });
   });
 
   describe("a bake's maturity layer (R10.T1.c's client half) and horizon map (R10.T15.b)", () => {

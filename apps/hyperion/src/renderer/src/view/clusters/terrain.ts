@@ -31,29 +31,28 @@ import { patchBounds } from "../terrain/bounds";
 import type { PlanetGeometry } from "../terrain/planet";
 import type { Vec3 } from "../../geometry/vec3";
 import { CLUSTER_RECORD_BYTES, type ClusterShape, packClusterRecord } from "./record";
-import { CLUSTER_QUADS } from "./templates";
+import {
+  CLUSTER_PAD_FRACTION,
+  CLUSTER_PAD_M,
+  CLUSTER_QUADS,
+  edgeVertex,
+  TERRAIN_BLOCKS,
+  TERRAIN_CLUSTERS_PER_PAGE,
+} from "./terrainGrid";
 
-/** A terrain patch's clusters: its 64 blocks, then its 32 skirt-foot strips. */
-export const TERRAIN_CLUSTERS_PER_PAGE = 96;
-
-/** Its blocks: 8 × 8, row by row from y = 0. */
-export const TERRAIN_BLOCKS = 64;
+export {
+  CLUSTER_PAD_FRACTION,
+  CLUSTER_PAD_M,
+  edgeVertex,
+  TERRAIN_BLOCKS,
+  TERRAIN_CLUSTERS_PER_PAGE,
+} from "./terrainGrid";
 
 /** Quads along a patch's side. */
 const PATCH_QUADS = 64;
 
 /** Blocks along a patch's side, and strips along an edge. */
 const BLOCKS_PER_SIDE = PATCH_QUADS / CLUSTER_QUADS;
-
-/** The least padding of a cluster's radius, m: R05's 1 mm bound on the GPU's placement, ten times. */
-export const CLUSTER_PAD_M = 0.01;
-
-/**
- * The padding of a cluster's radius per metre of its sphere's reach from the page's origin: some
- * sixteen `f32` ulps (2⁻²⁴ each), for the narrowed offsets, the record's narrowed centre and the
- * vertex arithmetic's rounding.
- */
-export const CLUSTER_PAD_FRACTION = 1e-6;
 
 /** A strip's further padding per metre of its height span (see the module's remarks). */
 export const STRIP_NORMAL_FRACTION = 1e-3;
@@ -88,20 +87,6 @@ export function terrainClusterPlace(cluster: number): TerrainClusterPlace {
   const strip = (cluster - TERRAIN_BLOCKS) % BLOCKS_PER_SIDE;
   const [bx, by] = stripBlock(edge, strip);
   return { shape: "terrain-skirt", bx, by, edge, strip };
-}
-
-/** The grid vertex that is the `k`-th of edge `edge`, anticlockwise (`gpu/resources.ts`' own). */
-export function edgeVertex(edge: number, k: number): readonly [number, number] {
-  switch (edge) {
-    case 0:
-      return [k, 0];
-    case 1:
-      return [PATCH_QUADS, k];
-    case 2:
-      return [PATCH_QUADS - k, PATCH_QUADS];
-    default:
-      return [0, PATCH_QUADS - k];
-  }
 }
 
 /** The block a strip's feet hang from: its edge's quads 8 m to 8 m + 8 lie along that block's side. */
@@ -159,12 +144,21 @@ export interface TerrainClusterSource {
   readonly heightRangeM: readonly [number, number];
   /** The slot's skirt depth, m. */
   readonly skirtDepthM: number;
+  /**
+   * The bake's measured errors, four half floats a cluster in cluster order (`BakedPatch`'s
+   * `clusterErrors`, plan R14, R14.T3.b): written into each record, marked measured; absent, the
+   * records hold (0, +∞), unmeasured.
+   */
+  readonly clusterErrors?: Float16Array;
 }
 
 /**
  * Writes a terrain patch's {@link TERRAIN_CLUSTERS_PER_PAGE} records into `out` from
  * `offsetBytes`, cluster by cluster (see the module's remarks): each sphere about the bake's
- * origin, in the body-fixed axes, strided, never discarding.
+ * origin, in the body-fixed axes, strided, never discarding, with the bake's measured errors where
+ * it has them.
+ *
+ * @throws RangeError for measured errors that are not four a cluster.
  */
 export function writeTerrainClusterRecords(
   planet: PlanetGeometry,
@@ -172,7 +166,16 @@ export function writeTerrainClusterRecords(
   out: DataView,
   offsetBytes: number,
 ): void {
-  const { key, originM, heightRangeM, skirtDepthM } = source;
+  const { key, originM, heightRangeM, skirtDepthM, clusterErrors } = source;
+  if (clusterErrors !== undefined && clusterErrors.length !== 4 * TERRAIN_CLUSTERS_PER_PAGE) {
+    throw new RangeError(
+      `a patch's measured errors are ${String(4 * TERRAIN_CLUSTERS_PER_PAGE)} half floats, not ${String(clusterErrors.length)}`,
+    );
+  }
+  const errorBits =
+    clusterErrors === undefined
+      ? null
+      : new Uint16Array(clusterErrors.buffer, clusterErrors.byteOffset, clusterErrors.length);
   const [low, high] = heightRangeM;
   const floor = Math.min(low - skirtDepthM, 0) - (high - low);
   const blocks: Array<{ readonly centreM: Vec3; readonly radiusM: number }> = [];
@@ -201,11 +204,20 @@ export function writeTerrainClusterRecords(
         radiusM: lowered.radiusM + STRIP_NORMAL_FRACTION * (high - floor),
       };
     }
+    const at = 4 * cluster;
     packClusterRecord(out, offsetBytes + cluster * CLUSTER_RECORD_BYTES, {
       centreM: sphere.centreM,
       radiusM: sphere.radiusM,
       mode: "strided",
-      errorsM: null,
+      strideErrorBits:
+        errorBits === null
+          ? null
+          : [
+              errorBits[at] ?? 0,
+              errorBits[at + 1] ?? 0,
+              errorBits[at + 2] ?? 0,
+              errorBits[at + 3] ?? 0,
+            ],
       templateRef: terrainTemplateRef(cluster),
       shape: place.shape,
       mayDiscard: false,

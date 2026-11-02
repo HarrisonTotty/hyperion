@@ -77,7 +77,9 @@
 //!   surveyed, 0 before any and at every level where the field skips it
 //!   ([`WorkerFields::level_sigma_m`], R10.T4.b), which with the table's
 //!   hard bound makes the body's level bounds. `fieldRelease(system, body)` drops it, `true` if
-//!   one was held, and `heldBytes` is what every field holds on the heap.
+//!   one was held, and `heldBytes` is what every field holds on the heap. `figureM(system, body)`
+//!   is the held field's datum, a `Float64Array` of 2, its equatorial then its polar radius,
+//!   metres, or `undefined` where none is held (rendering plan R14, R14.T3.b).
 //! - `bake(system, body, seed, face, level, i, j, vertexPath, normals, weights, horizon,
 //!   normalsLayer, skirtM)` bakes the patch as `bakePatch` does, `weights` a `WeightsLayer`,
 //!   `horizon` a `HorizonLayer` and `normalsLayer` a `NormalsLayer`, each `Baked` (0) or
@@ -1368,6 +1370,25 @@ impl JsSurfaceFields {
     /// A `JsError` if the body's index is above 65,535.
     pub fn field_release(&mut self, system: u64, body: u32) -> Result<bool, JsError> {
         Ok(self.fields.release(body_ref(system, body)?))
+    }
+
+    /// The held field's datum: its equatorial then its polar radius, metres.
+    ///
+    /// The spheroid of revolution about the body's pole that the field's heights stand on
+    /// ([`FieldHeader::figure`](crate::field::FieldHeader::figure)), both radii finite and
+    /// positive, the polar at most the equatorial; `undefined` where no field of the body is held.
+    /// The client's height worker places a skirt's feet along its normal (rendering plan R14,
+    /// R14.T3.b).
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` if the body's index is above 65,535.
+    #[wasm_bindgen(js_name = figureM)]
+    pub fn figure_m(&self, system: u64, body: u32) -> Result<Option<Vec<f64>>, JsError> {
+        Ok(self.fields.field(body_ref(system, body)?).map(|field| {
+            let figure = field.header().figure();
+            vec![figure.equatorial_radius_m, figure.polar_radius_m]
+        }))
     }
 
     /// The bytes every field holds on the heap ([`WorkerFields::heap_bytes`]).

@@ -28,7 +28,9 @@
 import { type BodyIdHex, type DetailSeedHex, hexToU64, parseBodyId } from "@hyperion/protocol";
 
 import { patchKeyString, type Face, type PatchKey, unreachable } from "../patchKey";
+import { type BodyFigure, planetGeometry } from "../planet";
 import { vec3 } from "../../../geometry/vec3";
+import { clusterErrors, packClusterErrors } from "../../clusters/errors";
 import type {
   BakedPatch,
   BakeSettings,
@@ -289,6 +291,8 @@ export interface WasmSurfaceFields {
   /** @throws Error naming why the block was refused; the field is then as it was. */
   fieldChunk(system: bigint, body: number, block: Uint8Array): WasmFieldBlock;
   fieldRelease(system: bigint, body: number): boolean;
+  /** The held field's datum, its equatorial then its polar radius, m; `undefined` where none is held. */
+  figureM(system: bigint, body: number): Float64Array | undefined;
   readonly heldBytes: number;
   refineNormals(
     system: bigint,
@@ -664,6 +668,20 @@ export class WorkerFields {
     }
     this.#forms.delete(body);
     this.#levels.delete(body);
+  }
+
+  /**
+   * The datum of `body`'s field as the module decoded it from the field's header, which its bakes
+   * stand on; `null` where no payload field of it is held (a stand-in's reads no header).
+   */
+  figure(body: BodyIdHex): BodyFigure | null {
+    if (this.#forms.get(body) !== "payload") {
+      return null;
+    }
+    const [a, c] = this.#module.figureM(...bodyArgs(body)) ?? [];
+    return a === undefined || c === undefined
+      ? null
+      : { equatorialRadiusM: a, polarRadiusM: c, pole: null };
   }
 
   /**
@@ -1264,11 +1282,22 @@ function answerBake(
   const { key, generation, settings } = request;
   const source = settings.source;
   try {
-    const bake =
+    // The bake's own `f64` offsets on every path, which the cluster errors are formed from: the
+    // vertex path changes nothing else a bake holds (`hyperion_surface::patch::bake`). Only a lit
+    // layout holds cluster records, so only a lit bake is measured: a body's with its weights, as
+    // `terrainPass.ts`' `terrainShadingOf` makes a source's shading. The wireframe draws at stride
+    // 1 alone (plan R14's design note on the wireframe), the spike keeps today's path, and the
+    // descent's floors read heights alone.
+    const measured = source.kind === "body" && source.weights === "baked";
+    const asked: BakeSettings =
+      !measured || settings.vertexPath === "baked-offsets"
+        ? settings
+        : { ...settings, vertexPath: "baked-offsets" };
+    const baked =
       source.kind === "test-planet"
-        ? bakeKey(module, key, generation, settings, source.ridges)
-        : fields.bake(key, generation, settings, source, request.draft === true);
-    if (bake === null) {
+        ? bakeKey(module, key, generation, asked, source.ridges)
+        : fields.bake(key, generation, asked, source, request.draft === true);
+    if (baked === null) {
       return {
         reply: {
           kind: "bake-unsurveyed",
@@ -1277,6 +1306,16 @@ function answerBake(
         },
         transfer: [],
       };
+    }
+    let bake = baked;
+    if (measured) {
+      const figure = fields.figure(source.body);
+      if (figure === null) {
+        throw new Error(
+          `${patchKeyString(key)} was baked over a field whose datum the module lacks`,
+        );
+      }
+      bake = withClusterErrors(baked, settings, figure);
     }
     return { reply: { kind: "baked", id: request.id, bake }, transfer: bakeTransferables(bake) };
   } catch (error: unknown) {
@@ -1292,6 +1331,22 @@ function answerBake(
       transfer: [],
     };
   }
+}
+
+/**
+ * `baked`, made with its offsets, with its clusters' errors (plan R14, R14.T3.b): each cluster's
+ * e_s at strides 1, 2, 4 and 8 from its drawn offsets on `figure`, rounded up into half floats
+ * (`clusters/errors.ts`), and its offsets kept only where `settings` draws them.
+ */
+function withClusterErrors(
+  baked: BakedPatch,
+  settings: BakeSettings,
+  figure: BodyFigure,
+): BakedPatch {
+  const errors = packClusterErrors(clusterErrors(baked, baked.key, planetGeometry(figure, null)));
+  return settings.vertexPath === "baked-offsets"
+    ? { ...baked, clusterErrors: errors }
+    : { ...baked, offsets: null, clusterErrors: errors };
 }
 
 /**

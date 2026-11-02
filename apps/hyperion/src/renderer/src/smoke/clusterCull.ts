@@ -174,7 +174,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       centreM: { x: 4_000 * (next() - 0.5), y: 4_000 * (next() - 0.5), z: 4_000 * (next() - 0.5) },
       radiusM: 1 + 300 * next(),
       mode: "strided",
-      errorsM: null,
+      strideErrorBits: null,
       templateRef: 0,
       shape: n % CLUSTERS < 64 ? "terrain-block" : "terrain-skirt",
       mayDiscard: false,

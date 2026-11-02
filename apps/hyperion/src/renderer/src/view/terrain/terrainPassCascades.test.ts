@@ -565,7 +565,7 @@ function clusterRecordsOf(
       },
       radiusM: view.getFloat32(at + 12, true),
       mode: "strided",
-      errorsM: null,
+      strideErrorBits: null,
       templateRef: view.getUint32(at + 24, true),
       shape: (view.getUint32(at + 28, true) & 0xf) === 0 ? "terrain-block" : "terrain-skirt",
       mayDiscard: false,

@@ -33,6 +33,7 @@ import {
   packCullPasses,
 } from "./cullPass";
 import {
+  CLUSTER_FLAG_MEASURED,
   CLUSTER_RECORD_BYTES,
   type ClusterRecord,
   clusterFlags,
@@ -76,12 +77,12 @@ function record(
   centreM: Vec3,
   radiusM: number,
   shape: ClusterRecord["shape"] = "terrain-block",
-): ClusterRecord {
+): Extract<ClusterRecord, { readonly mode: "strided" }> {
   return {
     centreM,
     radiusM,
     mode: "strided",
-    errorsM: null,
+    strideErrorBits: null,
     templateRef: 0,
     shape,
     mayDiscard: false,
@@ -139,6 +140,37 @@ describe("the cluster cull's structs (plan R14, R14.T1.b)", () => {
       2,
       2 | (1 << 4),
     ]);
+  });
+
+  it("packs a measured strided record's e₁, e₂, e₄ and e₈ as four f16 in unpack2x16float's pairs, the measured bit set (R14.T3.b)", () => {
+    const out = new DataView(new ArrayBuffer(CLUSTER_RECORD_BYTES));
+    const bits = new Uint16Array(Float16Array.of(0, 1.5, 6, 24).buffer);
+    packClusterRecord(out, 0, {
+      ...record(Z, 1),
+      strideErrorBits: [bits[0] ?? 0, bits[1] ?? 0, bits[2] ?? 0, bits[3] ?? 0],
+    });
+    // Each word's low half is the finer stride's, as `unpack2x16float` takes its `.x`.
+    const pair = (word: number): readonly [number, number] => {
+      const w = out.getUint32(16 + 4 * word, true);
+      const h = new Float16Array(new Uint16Array([w & 0xffff, w >>> 16]).buffer);
+      return [h[0] ?? Number.NaN, h[1] ?? Number.NaN];
+    };
+    expect([pair(0), pair(1), out.getUint32(28, true) & CLUSTER_FLAG_MEASURED]).toEqual([
+      [0, 1.5],
+      [6, 24],
+      CLUSTER_FLAG_MEASURED,
+    ]);
+  });
+
+  it("leaves an unmeasured strided record's measured bit clear (R14.T3.b)", () => {
+    expect(clusterFlags(record(Z, 1)) & CLUSTER_FLAG_MEASURED).toBe(0);
+  });
+
+  it("refuses a measured error's bits that are not a u16 (R14.T3.b)", () => {
+    const out = new DataView(new ArrayBuffer(CLUSTER_RECORD_BYTES));
+    expect(() => {
+      packClusterRecord(out, 0, { ...record(Z, 1), strideErrorBits: [0, 0, 0, 0x1_0000] });
+    }).toThrow(RangeError);
   });
 
   it("lays a pass out in 128 B and the dispatch's parameters in 144 B, as WGSL's CullPass and CullParams", () => {

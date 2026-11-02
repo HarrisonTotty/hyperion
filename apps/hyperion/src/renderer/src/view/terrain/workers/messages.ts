@@ -61,6 +61,13 @@ export interface BakedPatch {
   /** R10's layers, for a body's patch; `null` for the test planet's, which has none. */
   readonly layers: TerrainLayers | null;
   /**
+   * Each cluster's e_s at strides 1, 2, 4 and 8, metres, rounded up, four a cluster in
+   * `clusters/terrain.ts`' order (plan R14, R14.T3.b; `clusters/errors.ts`): what a slot's cluster
+   * records hold as measured. Presentation only, never on the wire or in a golden; absent from a
+   * bake no worker measured, whose records stay unmeasured.
+   */
+  readonly clusterErrors?: Float16Array;
+  /**
    * Present where the bake drafted its normals ({@link NORMALS_BETWEEN} of them, plan R10,
    * R10.T6.a's progressive bake): each vertex's exact, and each between the vertices the mean of
    * theirs about it, the mesh's shading (R05 Design note 25's fallback), until the patch's
@@ -658,6 +665,9 @@ export function bakeTransferables(bake: BakedPatch): Transferable[] {
   const buffers: Transferable[] = [bake.heights.buffer, bake.normals.buffer];
   if (bake.offsets !== null) {
     buffers.push(bake.offsets.buffer);
+  }
+  if (bake.clusterErrors !== undefined) {
+    buffers.push(bake.clusterErrors.buffer);
   }
   if (bake.layers !== null) {
     const {

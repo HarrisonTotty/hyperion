@@ -12,13 +12,14 @@ import { vertexDir } from "../terrain/cube";
 import { litInteriorMeshData } from "../terrain/gpu/resources";
 import type { PatchKey } from "../terrain/patchKey";
 import { type BodyFigure, planetGeometry, surfacePoint } from "../terrain/planet";
-import { CLUSTER_RECORD_BYTES } from "./record";
+import { CLUSTER_FLAG_MEASURED, CLUSTER_RECORD_BYTES } from "./record";
 import {
   edgeVertex,
   TERRAIN_BLOCKS,
   TERRAIN_CLUSTERS_PER_PAGE,
   terrainClusterGrid,
   terrainClusterPlace,
+  type TerrainClusterSource,
   terrainTemplateRef,
   writeTerrainClusterRecords,
 } from "./terrain";
@@ -154,6 +155,22 @@ const MOON_LIKE_FIGURE: BodyFigure = {
   pole: null,
 };
 
+/** A level-9 patch's record source, and four measured errors a cluster. */
+function measuredSource(): {
+  readonly source: TerrainClusterSource;
+  readonly clusterErrors: Float16Array;
+} {
+  const key = { face: 3, level: 9, i: 300, j: 41 } as const;
+  const [x, y, z] = surfacePoint(WGS84_FIGURE, vertexDir(key, 32, 32), 0);
+  return {
+    source: { key, originM: { x, y, z }, heightRangeM: [0, 50], skirtDepthM: 4 },
+    clusterErrors: Float16Array.from(
+      { length: 4 * TERRAIN_CLUSTERS_PER_PAGE },
+      (_, n) => (n % 4) * (1 + Math.floor(n / 4)),
+    ),
+  };
+}
+
 describe("terrain's cluster records (plan R14, R14.T1.b)", () => {
   /** Every vertex the GPU places of a random patch, its morphs and its feet, against its clusters. */
   function worstOutside(figure: BodyFigure, key: PatchKey, seed: number): number {
@@ -212,5 +229,41 @@ describe("terrain's cluster records (plan R14, R14.T1.b)", () => {
     expect([at(0, 4), at(0, 5), at(0, 7), at(TERRAIN_BLOCKS, 7)]).toEqual([0, 0x7f80_0000, 0, 1]);
     // A slot's records are written at its upload, some ten a second: well under a frame's time.
     expect(tookMs).toBeLessThan(50);
+  });
+
+  it("write a bake's measured errors into each record, marked measured (R14.T3.b)", () => {
+    const records = new DataView(new ArrayBuffer(TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES));
+    const { source, clusterErrors } = measuredSource();
+    writeTerrainClusterRecords(
+      planetGeometry(WGS84_FIGURE, null),
+      { ...source, clusterErrors },
+      records,
+      0,
+    );
+    const bits = new Uint16Array(clusterErrors.buffer);
+    const recorded = (cluster: number): number[] =>
+      [0, 1, 2, 3].map((n) => records.getUint16(cluster * 32 + 16 + 2 * n, true));
+    const clusters = [0, 37, TERRAIN_BLOCKS, TERRAIN_CLUSTERS_PER_PAGE - 1];
+    expect(
+      clusters.map((c) => [
+        recorded(c),
+        records.getUint32(c * 32 + 28, true) & CLUSTER_FLAG_MEASURED,
+      ]),
+    ).toEqual(
+      clusters.map((c) => [Array.from(bits.subarray(4 * c, 4 * c + 4)), CLUSTER_FLAG_MEASURED]),
+    );
+  });
+
+  it("refuse a bake's measured errors short of four a cluster (R14.T3.b)", () => {
+    const records = new DataView(new ArrayBuffer(TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES));
+    const { source, clusterErrors } = measuredSource();
+    expect(() => {
+      writeTerrainClusterRecords(
+        planetGeometry(WGS84_FIGURE, null),
+        { ...source, clusterErrors: clusterErrors.subarray(4) },
+        records,
+        0,
+      );
+    }).toThrow(RangeError);
   });
 });

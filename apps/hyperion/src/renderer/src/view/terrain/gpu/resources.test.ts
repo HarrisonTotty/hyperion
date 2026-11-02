@@ -1395,6 +1395,38 @@ describe("the terrain's resources", () => {
     clustered.dispose();
   });
 
+  it("write a bake's measured cluster errors into its slot's records, and none where it has none (R14.T3.b)", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit", true);
+    const clusterErrors = Float16Array.from({ length: 4 * 96 }, (_, n) => n % 4);
+    const recordsAt = (slot: number): DataView => {
+      const write = engine.writes.findLast((w) => w.buffer === "terrain cluster records");
+      if (write === undefined) {
+        throw new Error("no cluster records were written");
+      }
+      expect(write.offsetBytes).toBe(slot * CLUSTER_RECORDS_SLOT_BYTES);
+      return new DataView(write.data.buffer, write.data.byteOffset, write.data.byteLength);
+    };
+    const bake = {
+      ...upload(2, 65, false),
+      layers: mappedLayers(),
+      originM: { x: 1, y: 2, z: 3 },
+      heightRangeM: [-5, 5] as const,
+    };
+    resources.upload({ ...bake, clusterErrors });
+    const measured = recordsAt(2);
+    expect([
+      measured.getUint16(32 + 18, true),
+      measured.getUint32(32 + 28, true) & (1 << 6),
+    ]).toEqual([new Uint16Array(clusterErrors.buffer)[4 + 1], 1 << 6]);
+    resources.upload(bake);
+    const unmeasured = recordsAt(2);
+    expect([unmeasured.getUint32(20, true), unmeasured.getUint32(28, true) & (1 << 6)]).toEqual([
+      0x7f80_0000, 0,
+    ]);
+    resources.dispose();
+  });
+
   it("refuse, writing nothing, more of a cascade's casters than the slots (R10.T9.b)", async () => {
     const engine = await countingRenderEngine();
     const resources = new TerrainResources(engine, LOW, WGS84);

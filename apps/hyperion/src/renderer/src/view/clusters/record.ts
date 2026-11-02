@@ -20,7 +20,9 @@
  *   a regular grid drawn at a stride of 1, 2, 4 or 8, and its error at stride s is a unit, the
  *   instance's (terrain: its level's largest vertex spacing, `vertexSpacing(a, L).maxM`), times
  *   the template's `errorScale`. Its error bytes hold (0, +∞) as two `f32`, unread, until measured
- *   errors fill them (plan R14, T3).
+ *   errors fill them: a record marked measured ({@link CLUSTER_FLAG_MEASURED}, plan R14, R14.T3.b)
+ *   holds its e₁, e₂, e₄ and e₈, metres, as four `f16` rounded up, in that order, so that each
+ *   `u32` is a pair `unpack2x16float` reads, the lower stride in its low half, with no `enable f16`.
  * - **The DAG-cut mode** (authored and procedural meshes, plan R14's T4 and T5): the error bytes
  *   hold (own, parent), metres, as two `f32`, and the cluster is drawn where own ≤ tolerance <
  *   parent, each projected at its group's sphere, so that a monotone DAG draws one consistent cut
@@ -33,7 +35,8 @@
  *   multiples of 8, a strip's run along its edge.
  * - **Flags**: bits 0–3 the shape ({@link CLUSTER_SHAPE_CODE}), bit 4 the mode (0 strided, 1 DAG
  *   cut), bit 5 whether its fragments may discard (terrain's interior clusters never do: plan R14,
- *   R14.T1.a), bits 8–15 the consumer's material. The survey discard stays the edge patches' own
+ *   R14.T1.a), bit 6 whether a strided record's errors are measured, bits 8–15 the consumer's
+ *   material. The survey discard stays the edge patches' own
  *   (plan R14's design note on the visibility buffer); no flag assumes it moves.
  */
 
@@ -61,22 +64,18 @@ export const CLUSTER_FLAG_DAG = 1 << 4;
 /** Bit 5 of the flags: whether a cluster's fragments may discard. */
 export const CLUSTER_FLAG_MAY_DISCARD = 1 << 5;
 
+/** Bit 6 of the flags: whether a strided record's error bytes hold its measured e_s. */
+export const CLUSTER_FLAG_MEASURED = 1 << 6;
+
 /** The bit pattern of `f32` +∞, a strided record's unread parent error. */
 const F32_INFINITY_BITS = 0x7f80_0000;
 
-/** One cluster's static record (see the module's remarks). */
-export interface ClusterRecord {
+/** What every cluster's record holds whatever its mode (see the module's remarks). */
+interface ClusterRecordBase {
   /** The bounding sphere's centre less the page's origin, in the page's axes, m. */
   readonly centreM: Vec3;
   /** Its radius, m. */
   readonly radiusM: number;
-  /** How its error bytes are read. */
-  readonly mode: ClusterLodMode;
-  /**
-   * The DAG-cut mode's (own, parent) errors, m; `null` in the strided mode, whose bytes hold
-   * (0, +∞).
-   */
-  readonly errorsM: readonly [number, number] | null;
   /** Its template reference (see the module's remarks). */
   readonly templateRef: number;
   readonly shape: ClusterShape;
@@ -85,14 +84,30 @@ export interface ClusterRecord {
   readonly material: number;
 }
 
-/** A record's flags word from its shape, mode, discard and material. */
-export function clusterFlags(
-  record: Pick<ClusterRecord, "shape" | "mode" | "mayDiscard" | "material">,
-): number {
+/** One cluster's static record, by how its error bytes are read (see the module's remarks). */
+export type ClusterRecord =
+  | (ClusterRecordBase & {
+      readonly mode: "strided";
+      /**
+       * Its measured e₁, e₂, e₄ and e₈ as the bits of half floats, rounded up when they were made
+       * (`clusters/errors.ts`' `packClusterErrors`, plan R14, R14.T3.b); `null` where unmeasured,
+       * whose bytes hold (0, +∞).
+       */
+      readonly strideErrorBits: readonly [number, number, number, number] | null;
+    })
+  | (ClusterRecordBase & {
+      readonly mode: "dag";
+      /** Its (own, parent) errors, m. */
+      readonly errorsM: readonly [number, number];
+    });
+
+/** A record's flags word from its shape, mode, discard, measured errors and material. */
+export function clusterFlags(record: ClusterRecord): number {
   return (
     CLUSTER_SHAPE_CODE[record.shape] |
     (record.mode === "dag" ? CLUSTER_FLAG_DAG : 0) |
     (record.mayDiscard ? CLUSTER_FLAG_MAY_DISCARD : 0) |
+    (record.mode === "strided" && record.strideErrorBits !== null ? CLUSTER_FLAG_MEASURED : 0) |
     ((record.material & 0xff) << 8)
   );
 }
@@ -100,8 +115,8 @@ export function clusterFlags(
 /**
  * Writes `record` into `out` at `offsetBytes`, little-endian, each number narrowed once to `f32`.
  *
- * @throws RangeError for a template reference that is not a `u32`, a material outside 0 to 255, or
- *   a record that would not fit `out`.
+ * @throws RangeError for a template reference that is not a `u32`, a material outside 0 to 255,
+ *   a measured error's bits that are not a `u16`, or a record that would not fit `out`.
  */
 export function packClusterRecord(out: DataView, offsetBytes: number, record: ClusterRecord): void {
   if (offsetBytes < 0 || offsetBytes + CLUSTER_RECORD_BYTES > out.byteLength) {
@@ -123,12 +138,26 @@ export function packClusterRecord(out: DataView, offsetBytes: number, record: Cl
   out.setFloat32(offsetBytes + 4, record.centreM.y, true);
   out.setFloat32(offsetBytes + 8, record.centreM.z, true);
   out.setFloat32(offsetBytes + 12, record.radiusM, true);
-  if (record.errorsM === null) {
-    out.setUint32(offsetBytes + 16, 0, true);
-    out.setUint32(offsetBytes + 20, F32_INFINITY_BITS, true);
-  } else {
-    out.setFloat32(offsetBytes + 16, record.errorsM[0], true);
-    out.setFloat32(offsetBytes + 20, record.errorsM[1], true);
+  switch (record.mode) {
+    case "strided": {
+      const bits = record.strideErrorBits;
+      if (bits === null) {
+        out.setUint32(offsetBytes + 16, 0, true);
+        out.setUint32(offsetBytes + 20, F32_INFINITY_BITS, true);
+        break;
+      }
+      for (const [n, b] of bits.entries()) {
+        if (!Number.isInteger(b) || b < 0 || b > 0xffff) {
+          throw new RangeError(`a measured error's bits ${String(b)} are not a u16`);
+        }
+        out.setUint16(offsetBytes + 16 + 2 * n, b, true);
+      }
+      break;
+    }
+    case "dag":
+      out.setFloat32(offsetBytes + 16, record.errorsM[0], true);
+      out.setFloat32(offsetBytes + 20, record.errorsM[1], true);
+      break;
   }
   out.setUint32(offsetBytes + 24, record.templateRef, true);
   out.setUint32(offsetBytes + 28, clusterFlags(record), true);

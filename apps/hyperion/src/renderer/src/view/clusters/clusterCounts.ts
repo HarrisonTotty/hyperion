@@ -162,7 +162,7 @@ function bakeOf(planet: PlanetGeometry, key: PatchKey, cameraM: Vec3): CountedPa
       centreM,
       radiusM: r,
       mode: "strided",
-      errorsM: null,
+      strideErrorBits: null,
       templateRef: 0,
       shape: c < 64 ? "terrain-block" : "terrain-skirt",
       mayDiscard: false,
