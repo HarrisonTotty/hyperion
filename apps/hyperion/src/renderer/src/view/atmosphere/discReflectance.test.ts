@@ -162,13 +162,16 @@ function digestOf(source: string): string {
  * steps over, and a sub-patch's vertex on its slot's surface, a whole patch's as before. The
  * figure's again by plan R14's `@invariant` clip position (R14.T4.a; `smoothMesh.wgsl`'s
  * `MeshVarying`), which holds its cluster path's vertices to this draw's bits; the arithmetic is as
- * before.
+ * before. The disc's three and the figure re-pinned by lane fix-coast-class-map's fine page
+ * (2026-11-02): `surface_at` reads a refined texel's cells, and with no page past the map's own
+ * layers every lookup and sum is as before, in the same order, a surveyed corner of no weight adding
+ * 0 to the albedo where it was skipped.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "f42c280bcdf436a"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "f42c280bcdf436a"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "52f3a5fe068cf12a"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "bc5c9ada26f0f319"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "4b4e90e1f9345407"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "4b4e90e1f9345407"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "e63df29cd61db71"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "e3c05eef9ccdb61a"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a

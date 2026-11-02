@@ -28,11 +28,18 @@
  * surveyed texel, its nodes' albedo at each of the four texels' codes (`maturityNodes.ts`) by the
  * very bilinear weights the shares take, those of the surveyed texels alone, renormalised
  * ({@link classMapAlbedoAt}); the shares stay as they are.
+ *
+ * A map may carry a fine page (lane fix-coast-class-map; R10.T15.b.2's finding; {@link ClassMapFine}):
+ * the texels whose field cells' classes it would draw apart, a coast's, refined to the field's level
+ * as tiles in the layers past the others, behind an index layer a face. The reconstruction then reads
+ * a refined texel's cells, and a texel beside one its cells nearest the point, so that a coast is
+ * drawn along the field's cells as the terrain draws it, not at one class mix a level-6 texel.
  */
 import type { ClassMapDiscSurface, DiscNormalMap, DiscSurface } from "../appearance/bodyAppearance";
 import type { PhotometricLaw } from "../appearance/law";
 import { TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { TextureSpec } from "../engine/memory";
+import { MAX_TEXTURE_ARRAY_LAYERS } from "../engine/platform";
 import type { RenderEngine, TextureHandle } from "../engine/types";
 import type { Rgb } from "../photometry/toneCurve";
 import { faceUvToXyz, stToUv, uvToSt, type Xyz, xyzToFaceUv } from "../terrain/cube";
@@ -41,7 +48,6 @@ import {
   MATURITY_NODES,
   maturityCodeRatio,
   maturityNodeAlbedo,
-  type MaturitySegment,
   maturitySegment,
 } from "../terrain/maturityNodes";
 import type { Face } from "../terrain/patchKey";
@@ -76,11 +82,18 @@ export function classMapLayers(classes: number): number {
 }
 
 /**
- * The layers a class map's texture takes: its weights' ({@link classMapLayers}), and six more, one
- * a face, where it carries its texels' maturity (R10.T1.c's client half).
+ * The layers a class map's texture takes: its weights' ({@link classMapLayers}), six more, one a
+ * face, where it carries its texels' maturity (R10.T1.c's client half), and where it carries a fine
+ * page, its index's six and its pages' ({@link classMapIndexLayer}, {@link classMapFineLayer}).
  */
-export function classMapTexelLayers(map: Pick<ClassMapTexels, "classes" | "maturity">): number {
-  return classMapLayers(map.classes) + (map.maturity === undefined ? 0 : FACES);
+export function classMapTexelLayers(
+  map: Pick<ClassMapTexels, "classes" | "maturity" | "fine">,
+): number {
+  const maturity = map.maturity !== undefined;
+  const base = classMapLayers(map.classes) + (maturity ? FACES : 0);
+  return map.fine === undefined
+    ? base
+    : base + FACES + map.fine.pages * finePageLayers(map.classes, maturity);
 }
 
 /**
@@ -97,6 +110,61 @@ export const MATURITY_HIGH_CHANNEL = 0;
 /** The texels along a layer's side for N texels along a face's: N and a gutter texel each side. */
 export function classMapSide(faceTexels: number): number {
   return faceTexels + 2;
+}
+
+/**
+ * The layer of `face`'s fine-page index in a map of `classes` classes that carries a fine page:
+ * past the weights' layers and the maturity's, face + 6 ⌈classes ÷ 4⌉ (+ 6 under a maturity), as
+ * `fine_tile` reads it in the shader.
+ */
+export function classMapIndexLayer(face: Face, classes: number, maturity: boolean): number {
+  return classMapLayers(classes) + (maturity ? FACES : 0) + face;
+}
+
+/** The layers a fine page's page takes: one for every four classes, and one for its codes. */
+function finePageLayers(classes: number, maturity: boolean): number {
+  return Math.ceil(classes / CLASSES_PER_LAYER) + (maturity ? 1 : 0);
+}
+
+/**
+ * The layer of a fine page's page `page`, its classes 4g to 4g + 3 at `group` g, or its codes at
+ * `group` ⌈classes ÷ 4⌉: past the index's six layers, page after page.
+ */
+export function classMapFineLayer(
+  page: number,
+  group: number,
+  classes: number,
+  maturity: boolean,
+): number {
+  return (
+    classMapIndexLayer(0, classes, maturity) +
+    FACES +
+    page * finePageLayers(classes, maturity) +
+    group
+  );
+}
+
+/** The tiles along a page's side: ⌊(N + 2) ÷ (r + 2)⌋, each tile r + 2 texels a side. */
+export function classMapTilesPerRow(faceTexels: number, fineSide: number): number {
+  return Math.floor(classMapSide(faceTexels) / (fineSide + 2));
+}
+
+/**
+ * The most tiles a map's fine page may hold: as many pages as fit in {@link MAX_TEXTURE_ARRAY_LAYERS}
+ * past the map's other layers, each {@link classMapTilesPerRow}² tiles.
+ */
+export function classMapFineCapacity(
+  faceTexels: number,
+  classes: number,
+  maturity: boolean,
+  fineSide: number,
+): number {
+  const base = classMapIndexLayer(0, classes, maturity) + FACES;
+  const pages = Math.max(
+    0,
+    Math.floor((MAX_TEXTURE_ARRAY_LAYERS - base) / finePageLayers(classes, maturity)),
+  );
+  return pages * classMapTilesPerRow(faceTexels, fineSide) ** 2;
 }
 
 /**
@@ -135,6 +203,58 @@ export interface ClassMapTexels {
   readonly data: Uint8Array;
   /** Its maturity's nodes (R10.T1.c's client half); absent for a map without one. */
   readonly maturity?: ClassMapMaturity;
+  /** Its fine page, its texels refined to the field's level; absent for a map without one. */
+  readonly fine?: ClassMapFine;
+}
+
+/**
+ * A class map's fine page (lane fix-coast-class-map; R10.T15.b.2's finding): the texels whose field
+ * cells' classes it would draw apart, each refined to the field's level as a tile in the layers past
+ * the map's own.
+ *
+ * @remarks
+ * Each refined texel's r × r cells, r = 2^(L − 6) of a field of level L, are a tile of (r + 2) ×
+ * (r + 2) texels: its cells at (1, 1) to (r, r), in the weights' layout (class 4g + c in channel c of
+ * its page's layer g), and a one-texel gutter of the cells about it on the face's grid of N r texels
+ * a side, as the reconstruction reads them: a refined neighbour's own cell, an unrefined
+ * neighbour's texel as it is stored, across a face's edge the neighbouring face's, and at a cube's
+ * corner nothing. Under a maturity each cell's code is in the page's last layer, as the texels'
+ * codes. Tile t is in page ⌊t ÷ T²⌋, T = {@link classMapTilesPerRow}, at ((q mod T)(r + 2),
+ * ⌊q ÷ T⌋ (r + 2)), q = t mod T². The index's layer of face f ({@link classMapIndexLayer}) holds at
+ * each refined texel t + 1, its high byte in r and its low in g, and r in b; 0 elsewhere, the gutter
+ * included, so that across a face's edge a refined neighbour counts as its texel.
+ */
+export interface ClassMapFine {
+  /** r, the field cells along a refined texel's side: 2 or 4. */
+  readonly side: number;
+  /** The tiles it holds, one a refined texel. */
+  readonly tiles: number;
+  /** Its pages: ⌈tiles ÷ T²⌉. */
+  readonly pages: number;
+}
+
+/** One refined texel as {@link packClassMap} takes it: its cells' weights and, under a maturity, codes. */
+export interface ClassMapRefinedInput {
+  readonly texel: ClassMapTexel;
+  /**
+   * Its r² cells in rising (j, i), each its weight per class, each in [0, 1] and summing to at most
+   * 1, or `null` for a cell not surveyed.
+   */
+  readonly cells: ReadonlyArray<ReadonlyArray<number> | null>;
+  /** Each cell's maturity code alike, an integer 0 to 65,535, for a map that carries a maturity. */
+  readonly codes?: ReadonlyArray<number>;
+}
+
+/** What {@link packClassMap} takes to pack a map's fine page. */
+export interface ClassMapFineInput {
+  /** r, the field cells along a texel's side: 2 or 4. */
+  readonly side: number;
+  /**
+   * The refined texels, each of a surveyed texel and at most once. Past
+   * {@link classMapFineCapacity} those whose cells stand furthest from their texel's mean are
+   * kept, by the sum over their cells and classes of |cell's weight − texel's|, ties to the earlier.
+   */
+  readonly refined: ReadonlyArray<ClassMapRefinedInput>;
 }
 
 /** What {@link packClassMap} takes to pack a map's maturity: its codes, and its nodes as it holds them. */
@@ -295,17 +415,25 @@ export function forEachGutterTexel(
  * layer, its gutter as the weights', and the map carries the nodes; the weights' bytes are as
  * without it.
  *
+ * With `fine` (lane fix-coast-class-map), its refined texels' cells go in the map's fine page, as
+ * many as {@link classMapFineCapacity} allows ({@link ClassMapFine}); the texels' own are as
+ * without it.
+ *
  * @param weightsOf - A texel's weight per class, each in [0, 1], or `null` for an unsurveyed texel.
  * @param maturity - The texels' maturity codes and the classes' nodes, for a map that carries them.
+ * @param fine - The texels refined to the field's level, for a map that carries a fine page.
  * @throws Error if N is not a positive integer, or `classes` is not 1 to {@link MAX_DISC_CLASSES},
  *   or a texel's weights are not `classes` many; with `maturity`, if its nodes are not K × 3 a
- *   class or its flags one a class, or a code is not an integer 0 to 65,535.
+ *   class or its flags one a class, or a code is not an integer 0 to 65,535; with `fine`, if r is
+ *   not 2 or 4, or a refined texel is not a surveyed face texel, is given twice, or its cells or
+ *   codes are not r² or a cell's weights not `classes` many.
  */
 export function packClassMap(
   faceTexels: number,
   classes: number,
   weightsOf: (texel: ClassMapTexel) => ReadonlyArray<number> | null,
   maturity?: ClassMapMaturityInput,
+  fine?: ClassMapFineInput,
 ): ClassMapTexels {
   if (!(Number.isInteger(faceTexels) && faceTexels > 0)) {
     throw new Error(`a class map has a positive whole number of texels a side, got ${faceTexels}`);
@@ -319,16 +447,27 @@ export function packClassMap(
   const side = classMapSide(faceTexels);
   const held: ClassMapMaturity | undefined =
     maturity === undefined ? undefined : { nodes: maturity.nodes, drawn: maturity.drawn };
+  const kept =
+    fine === undefined ? [] : keptRefined(faceTexels, classes, weightsOf, maturity, fine);
+  const page: ClassMapFine | undefined =
+    fine === undefined || kept.length === 0
+      ? undefined
+      : {
+          side: fine.side,
+          tiles: kept.length,
+          pages: Math.ceil(kept.length / classMapTilesPerRow(faceTexels, fine.side) ** 2),
+        };
+  const layers = classMapTexelLayers({
+    classes,
+    ...(held === undefined ? {} : { maturity: held }),
+    ...(page === undefined ? {} : { fine: page }),
+  });
   const map: ClassMapTexels = {
     faceTexels,
     classes,
-    data: new Uint8Array(
-      classMapTexelLayers(held === undefined ? { classes } : { classes, maturity: held }) *
-        side *
-        side *
-        CLASSES_PER_LAYER,
-    ),
+    data: new Uint8Array(layers * side * side * CLASSES_PER_LAYER),
     ...(held === undefined ? {} : { maturity: held }),
+    ...(page === undefined ? {} : { fine: page }),
   };
   for (const face of FACE_INDICES) {
     for (let j = 0; j < faceTexels; j += 1) {
@@ -364,7 +503,206 @@ export function packClassMap(
       map.data[to + 1] = map.data[of + 1] ?? 0;
     }
   });
+  if (page !== undefined) {
+    packFinePage(map, page, kept);
+  }
   return map;
+}
+
+/**
+ * The refined texels a fine page keeps, checked: all of them where they fit, and otherwise those
+ * whose cells stand furthest from their texel's mean ({@link ClassMapFineInput.refined}), in their
+ * given order.
+ *
+ * @throws Error as {@link packClassMap} does for its `fine`.
+ */
+function keptRefined(
+  faceTexels: number,
+  classes: number,
+  weightsOf: (texel: ClassMapTexel) => ReadonlyArray<number> | null,
+  maturity: ClassMapMaturityInput | undefined,
+  fine: ClassMapFineInput,
+): ReadonlyArray<ClassMapRefinedInput> {
+  const r = fine.side;
+  if (r !== 2 && r !== 4) {
+    throw new Error(`a fine page refines a texel to 2 or 4 cells a side, not ${r}`);
+  }
+  const seen = new Set<number>();
+  const scored = fine.refined.map((refined, order) => {
+    const { face, i, j } = refined.texel;
+    const own = weightsOf(refined.texel);
+    if (!(i >= 0 && i < faceTexels && j >= 0 && j < faceTexels) || own === null) {
+      throw new Error(`refined texel (${face}, ${i}, ${j}) is not a surveyed texel of the map`);
+    }
+    const key = (face * faceTexels + j) * faceTexels + i;
+    if (seen.has(key)) {
+      throw new Error(`refined texel (${face}, ${i}, ${j}) is given twice`);
+    }
+    seen.add(key);
+    if (
+      refined.cells.length !== r * r ||
+      (maturity !== undefined && refined.codes?.length !== r * r)
+    ) {
+      throw new Error(
+        `refined texel (${face}, ${i}, ${j}) has ${refined.cells.length} cells and ${refined.codes?.length ?? 0} codes, not ${r * r}`,
+      );
+    }
+    let score = 0;
+    for (const cell of refined.cells) {
+      if (cell === null) {
+        continue;
+      }
+      if (cell.length !== classes) {
+        throw new Error(
+          `a cell of refined texel (${face}, ${i}, ${j}) has ${cell.length} weights for ${classes} classes`,
+        );
+      }
+      cell.forEach((w, k) => {
+        score += Math.abs(w - (own[k] ?? 0));
+      });
+    }
+    return { refined, order, score };
+  });
+  const capacity = classMapFineCapacity(faceTexels, classes, maturity !== undefined, r);
+  if (scored.length <= capacity) {
+    return fine.refined;
+  }
+  return scored
+    .toSorted((a, b) => (b.score !== a.score ? b.score - a.score : a.order - b.order))
+    .slice(0, capacity)
+    .toSorted((a, b) => a.order - b.order)
+    .map(({ refined }) => refined);
+}
+
+/** The byte offset of the index's texel at stored (x, y) of `face`'s index layer. */
+function indexOffset(map: ClassMapTexels, face: Face, x: number, y: number): number {
+  const side = classMapSide(map.faceTexels);
+  const layer = classMapIndexLayer(face, map.classes, map.maturity !== undefined);
+  return ((layer * side + y) * side + x) * CLASSES_PER_LAYER;
+}
+
+/** The tile of the texel at stored (x, y) of `face`, −1 for none, as `fine_tile` reads it. */
+function storedTile(map: ClassMapTexels, face: Face, x: number, y: number): number {
+  if (map.fine === undefined) {
+    return -1;
+  }
+  const at = indexOffset(map, face, x, y);
+  return (map.data[at] ?? 0) * (UNORM_MAX + 1) + (map.data[at + 1] ?? 0) - 1;
+}
+
+/**
+ * The byte offset of channel 0 of a tile's texel at (x, y) of its r + 2 a side, in its page's layer
+ * `group`: its classes 4 · group to 4 · group + 3, or at group ⌈classes ÷ 4⌉ its codes.
+ */
+function tileOffset(
+  map: ClassMapTexels,
+  fine: ClassMapFine,
+  tile: number,
+  x: number,
+  y: number,
+  group: number,
+): number {
+  const side = classMapSide(map.faceTexels);
+  const perRow = classMapTilesPerRow(map.faceTexels, fine.side);
+  const q = tile % (perRow * perRow);
+  const x0 = (q % perRow) * (fine.side + 2);
+  const y0 = Math.floor(q / perRow) * (fine.side + 2);
+  const layer = classMapFineLayer(
+    Math.floor(tile / (perRow * perRow)),
+    group,
+    map.classes,
+    map.maturity !== undefined,
+  );
+  return ((layer * side + y0 + y) * side + x0 + x) * CLASSES_PER_LAYER;
+}
+
+/** The weight bytes' groups of a map of `classes` classes, the codes' group after them. */
+function weightGroups(classes: number): number {
+  return Math.ceil(classes / CLASSES_PER_LAYER);
+}
+
+/**
+ * Writes the fine page of `map`: each kept texel's tile index, its cells, and its tile's gutter
+ * from the cells about it ({@link ClassMapFine}).
+ */
+function packFinePage(
+  map: ClassMapTexels,
+  page: ClassMapFine,
+  kept: ReadonlyArray<ClassMapRefinedInput>,
+): void {
+  const r = page.side;
+  const groups = weightGroups(map.classes);
+  const coded = map.maturity !== undefined;
+  kept.forEach(({ texel, cells, codes }, tile) => {
+    const at = indexOffset(map, texel.face, texel.i + 1, texel.j + 1);
+    map.data[at] = Math.floor((tile + 1) / (UNORM_MAX + 1));
+    map.data[at + 1] = (tile + 1) % (UNORM_MAX + 1);
+    map.data[at + 2] = r;
+    cells.forEach((cell, n) => {
+      if (cell === null) {
+        return;
+      }
+      const x = (n % r) + 1;
+      const y = Math.floor(n / r) + 1;
+      weightBytes(cell).forEach((byte, k) => {
+        const group = Math.floor(k / CLASSES_PER_LAYER);
+        map.data[tileOffset(map, page, tile, x, y, group) + (k % CLASSES_PER_LAYER)] = byte;
+      });
+      if (coded) {
+        const code = codes?.[n] ?? Number.NaN;
+        if (!(Number.isInteger(code) && code >= 0 && code <= MATURITY_CODE_MAX)) {
+          throw new Error(
+            `a cell of refined texel (${texel.face}, ${texel.i}, ${texel.j}) has maturity code ${code}, not an integer 0 to ${MATURITY_CODE_MAX}`,
+          );
+        }
+        const to = tileOffset(map, page, tile, x, y, groups);
+        map.data[to] = Math.floor(code / (UNORM_MAX + 1));
+        map.data[to + 1] = code % (UNORM_MAX + 1);
+      }
+    });
+  });
+  // Each tile's gutter, after every tile's cells: the cells about it on the face's grid of N r.
+  const fineN = map.faceTexels * r;
+  const layers = groups + (coded ? 1 : 0);
+  kept.forEach(({ texel }, tile) => {
+    for (let y = 0; y <= r + 1; y += 1) {
+      for (let x = 0; x <= r + 1; x += 1) {
+        if (x > 0 && x <= r && y > 0 && y <= r) {
+          continue;
+        }
+        const from = fineCellAt(texel.face, r * texel.i + x - 1, r * texel.j + y - 1, fineN);
+        if (from === null) {
+          continue;
+        }
+        const ci = Math.floor(from.i / r);
+        const cj = Math.floor(from.j / r);
+        const source = storedTile(map, from.face, ci + 1, cj + 1);
+        for (let group = 0; group < layers; group += 1) {
+          const to = tileOffset(map, page, tile, x, y, group);
+          const of =
+            source >= 0
+              ? tileOffset(map, page, source, from.i - r * ci + 1, from.j - r * cj + 1, group)
+              : group < groups
+                ? storedOffset(map, from.face, ci + 1, cj + 1, group * CLASSES_PER_LAYER)
+                : codeOffset(map, from.face, ci + 1, cj + 1);
+          map.data.copyWithin(to, of, of + CLASSES_PER_LAYER);
+        }
+      }
+    }
+  });
+}
+
+/**
+ * The cell of a face's grid of `n` a side at (i, j), or across the face's edge where one of the two
+ * lies past it, the neighbouring face's cell there; `null` past a cube's corner, where both do.
+ */
+function fineCellAt(face: Face, i: number, j: number, n: number): ClassMapTexel | null {
+  const inI = i >= 0 && i < n;
+  const inJ = j >= 0 && j < n;
+  if (inI && inJ) {
+    return { face, i, j };
+  }
+  return inI || inJ ? acrossEdge(face, i + 1, j + 1, n) : null;
 }
 
 /**
@@ -414,7 +752,7 @@ export function surfaceShares(weights: ReadonlyArray<number>): number[] {
 /**
  * The share of each of {@link discSurfaceLaws}' laws at a body-fixed direction under a class map,
  * by the survey-masked bilinear reconstruction `surface_at` computes (R10.T10.d,
- * decision-r07-t8b).
+ * decision-r07-t8b), at the field's level in a refined texel (lane fix-coast-class-map).
  *
  * @remarks
  * With (s, t) the direction's cell coordinates on its face and n = N: where the texel holding it,
@@ -425,32 +763,34 @@ export function surfaceShares(weights: ReadonlyArray<number>): number[] {
  * point is one of the four, with a bilinear weight of at least ¼, so the sum is never 0. At a
  * surveyed texel's centre the shares are its own.
  *
+ * Under a fine page ({@link ClassMapFine}) the reconstruction reads its cells, r a texel's side:
+ * - in a refined texel, the same rule on the grid of N r cells a face, within its tile: `elsewhere`
+ *   alone where the cell holding the point is not surveyed, and otherwise the four nearest cells,
+ *   the tile's gutter's among them, those surveyed alone;
+ * - in another texel, a refined one of its four nearest stands by its cells at the point held
+ *   within their centres' span, (n r s, n r t) clamped to ½ to r − ½ of the tile, each by its
+ *   bilinear weight among them times the texel's, those surveyed alone; none of them surveyed
+ *   there, it is left out. So the two rules meet at a refined texel's edge, where each
+ *   takes half of the cell beside it and half of the texel's, and a coast is drawn along the
+ *   field's cells. Across a face's edge a refined texel counts as its own texel.
+ *
  * @param direction - Along the body-fixed axes, z the pole; it need not be unit.
  */
 export function classMapSharesAt(map: ClassMapTexels, direction: Xyz): number[] {
-  const { face, holding, i0, j0, fx, fy } = reconstructionCorners(map, direction);
+  const elsewhere = (): number[] => [1, ...Array.from({ length: map.classes }, () => 0)];
+  const terms = reconstructionTerms(map, direction);
+  if (terms === null) {
+    return elsewhere();
+  }
   const shares = Array.from({ length: map.classes + 1 }, () => 0);
   let norm = 0;
-  for (let corner = 0; corner < 4; corner += 1) {
-    const di = corner % 2;
-    const dj = Math.floor(corner / 2);
-    const i = i0 + di;
-    const j = j0 + dj;
-    const weights = storedWeights(map, face, i + 1, j + 1);
-    const surveyed = weights.some((w) => w > 0);
-    if (i === holding[0] && j === holding[1] && !surveyed) {
-      return [1, ...Array.from({ length: map.classes }, () => 0)];
-    }
-    if (!surveyed) {
-      continue;
-    }
-    const b = cornerWeight(di, dj, fx, fy);
-    surfaceShares(weights).forEach((share, m) => {
+  for (const { at, b } of terms) {
+    surfaceShares(weightsAt(map, at)).forEach((share, m) => {
       shares[m] = (shares[m] ?? 0) + b * share;
     });
     norm += b;
   }
-  return norm > 0 ? shares.map((share) => share / norm) : [1, ...shares.slice(1).map(() => 0)];
+  return norm > 0 ? shares.map((share) => share / norm) : elsewhere();
 }
 
 /**
@@ -468,6 +808,9 @@ interface ReconstructionCorners {
   /** The fractions (n s − ½ − i₀, n t − ½ − j₀). */
   readonly fx: number;
   readonly fy: number;
+  /** (n s, n t). */
+  readonly sN: number;
+  readonly tN: number;
 }
 
 /** The texels the reconstruction reads at `direction`, as `surface_at` finds them. */
@@ -484,7 +827,7 @@ function reconstructionCorners(map: ClassMapTexels, direction: Xyz): Reconstruct
   const y = tN - 0.5;
   const i0 = Math.min(Math.max(Math.floor(x), -1), n - 1);
   const j0 = Math.min(Math.max(Math.floor(y), -1), n - 1);
-  return { face, holding, i0, j0, fx: x - i0, fy: y - j0 };
+  return { face, holding, i0, j0, fx: x - i0, fy: y - j0, sN, tN };
 }
 
 /** Corner (i₀ + di, j₀ + dj)'s bilinear weight at fractions (fx, fy). */
@@ -492,14 +835,189 @@ function cornerWeight(di: number, dj: number, fx: number, fy: number): number {
   return (di === 0 ? 1 - fx : fx) * (dj === 0 ? 1 - fy : fy);
 }
 
-/** Whether stored texel (x, y) of `face` holds any weight: one byte of its classes above 0. */
-function storedSurveyed(map: ClassMapTexels, face: Face, x: number, y: number): boolean {
+/** Where a term of the reconstruction is stored: a texel of a face's layers, or a tile's. */
+type StoredAt =
+  | { readonly kind: "texel"; readonly face: Face; readonly x: number; readonly y: number }
+  | { readonly kind: "tile"; readonly tile: number; readonly x: number; readonly y: number };
+
+/** One term of the reconstruction: a stored texel that holds weight, and its weight there. */
+interface ReconstructionTerm {
+  readonly at: StoredAt;
+  readonly b: number;
+}
+
+/**
+ * The terms of the survey-masked reconstruction at `direction` ({@link classMapSharesAt}'s
+ * remarks), in the shader's order; `null` where the texel or cell holding the point holds no
+ * weight, and `elsewhere` takes it all.
+ */
+function reconstructionTerms(
+  map: ClassMapTexels,
+  direction: Xyz,
+): ReadonlyArray<ReconstructionTerm> | null {
+  const { face, holding, i0, j0, fx, fy, sN, tN } = reconstructionCorners(map, direction);
+  const { fine } = map;
+  const own = storedTile(map, face, holding[0] + 1, holding[1] + 1);
+  if (fine !== undefined && own >= 0) {
+    return cellTerms(map, fine, own, holding, sN, tN);
+  }
+  const terms: ReconstructionTerm[] = [];
+  for (let corner = 0; corner < 4; corner += 1) {
+    const di = corner % 2;
+    const dj = Math.floor(corner / 2);
+    const i = i0 + di;
+    const j = j0 + dj;
+    const surveyed = storedSurveyed(map, face, i + 1, j + 1);
+    if (i === holding[0] && j === holding[1] && !surveyed) {
+      return null;
+    }
+    if (!surveyed) {
+      continue;
+    }
+    const b = cornerWeight(di, dj, fx, fy);
+    const tile = storedTile(map, face, i + 1, j + 1);
+    if (fine !== undefined && tile >= 0) {
+      for (const term of clampedCellTerms(map, fine, tile, [i, j], sN, tN)) {
+        terms.push({ at: term.at, b: b * term.b });
+      }
+      continue;
+    }
+    terms.push({ at: { kind: "texel", face, x: i + 1, y: j + 1 }, b });
+  }
+  return terms;
+}
+
+/**
+ * The terms in refined texel `texel`, tile `tile`, at (n s, n t) = (`sN`, `tN`): the four nearest
+ * cells on the grid of N r, those surveyed, by their bilinear weights; `null` where the cell holding
+ * the point is not surveyed.
+ */
+function cellTerms(
+  map: ClassMapTexels,
+  fine: ClassMapFine,
+  tile: number,
+  texel: readonly [number, number],
+  sN: number,
+  tN: number,
+): ReadonlyArray<ReconstructionTerm> | null {
+  const r = fine.side;
+  const x = sN * r - r * texel[0];
+  const y = tN * r - r * texel[1];
+  const held = (v: number): number => Math.min(Math.max(Math.floor(v), 0), r - 1);
+  if (!surveyedAt(map, { kind: "tile", tile, x: held(x) + 1, y: held(y) + 1 })) {
+    return null;
+  }
+  const first = (v: number): number => Math.min(Math.max(Math.floor(v - 0.5), -1), r - 1);
+  const x0 = first(x);
+  const y0 = first(y);
+  const terms: ReconstructionTerm[] = [];
+  for (let corner = 0; corner < 4; corner += 1) {
+    const di = corner % 2;
+    const dj = Math.floor(corner / 2);
+    const at: StoredAt = { kind: "tile", tile, x: x0 + di + 1, y: y0 + dj + 1 };
+    if (surveyedAt(map, at)) {
+      terms.push({ at, b: cornerWeight(di, dj, x - 0.5 - x0, y - 0.5 - y0) });
+    }
+  }
+  return terms;
+}
+
+/**
+ * The terms by which refined texel `texel`, tile `tile`, stands as a corner of another texel's
+ * reconstruction at (`sN`, `tN`): its cells at the point held within their centres' span, by their
+ * bilinear weights among its own cells, those surveyed alone; none where none of them is surveyed.
+ */
+function clampedCellTerms(
+  map: ClassMapTexels,
+  fine: ClassMapFine,
+  tile: number,
+  texel: readonly [number, number],
+  sN: number,
+  tN: number,
+): ReadonlyArray<ReconstructionTerm> {
+  const r = fine.side;
+  const within = (v: number): number => Math.min(Math.max(v, 0.5), r - 0.5) - 0.5;
+  const x = within(sN * r - r * texel[0]);
+  const y = within(tN * r - r * texel[1]);
+  const x0 = Math.min(Math.floor(x), r - 2);
+  const y0 = Math.min(Math.floor(y), r - 2);
+  const terms: ReconstructionTerm[] = [];
+  for (let corner = 0; corner < 4; corner += 1) {
+    const di = corner % 2;
+    const dj = Math.floor(corner / 2);
+    const at: StoredAt = { kind: "tile", tile, x: x0 + di + 1, y: y0 + dj + 1 };
+    if (surveyedAt(map, at)) {
+      terms.push({ at, b: cornerWeight(di, dj, x - x0, y - y0) });
+    }
+  }
+  return terms;
+}
+
+/** The byte offset of class `k`'s weight where `at` is stored. */
+function storedAtOffset(map: ClassMapTexels, at: StoredAt, k: number): number {
+  let offset: number;
+  switch (at.kind) {
+    case "texel":
+      offset = storedOffset(map, at.face, at.x, at.y, k);
+      break;
+    case "tile":
+      offset =
+        tileOffset(map, fineOf(map), at.tile, at.x, at.y, Math.floor(k / CLASSES_PER_LAYER)) +
+        (k % CLASSES_PER_LAYER);
+      break;
+  }
+  return offset;
+}
+
+/**
+ * A map's fine page, which a tile's term implies.
+ *
+ * @throws Error for a map without one (a bug: no term of it names a tile).
+ */
+function fineOf(map: ClassMapTexels): ClassMapFine {
+  if (map.fine === undefined) {
+    throw new Error("a class map without a fine page has no tiles");
+  }
+  return map.fine;
+}
+
+/** The weight of each class where `at` is stored, as the shader reads it. */
+function weightsAt(map: ClassMapTexels, at: StoredAt): number[] {
+  return Array.from(
+    { length: map.classes },
+    (_, k) => (map.data[storedAtOffset(map, at, k)] ?? 0) / UNORM_MAX,
+  );
+}
+
+/** Whether `at` holds any weight: one byte of its classes above 0. */
+function surveyedAt(map: ClassMapTexels, at: StoredAt): boolean {
   for (let k = 0; k < map.classes; k += 1) {
-    if ((map.data[storedOffset(map, face, x, y, k)] ?? 0) > 0) {
+    if ((map.data[storedAtOffset(map, at, k)] ?? 0) > 0) {
       return true;
     }
   }
   return false;
+}
+
+/** Whether stored texel (x, y) of `face` holds any weight: one byte of its classes above 0. */
+function storedSurveyed(map: ClassMapTexels, face: Face, x: number, y: number): boolean {
+  return surveyedAt(map, { kind: "texel", face, x, y });
+}
+
+/** The maturity code where `at` is stored, from its two bytes, as the shader reads it. */
+function codeAt(map: ClassMapTexels, at: StoredAt): number {
+  let code: number;
+  switch (at.kind) {
+    case "texel":
+      code = storedCode(map, at.face, at.x, at.y);
+      break;
+    case "tile": {
+      const of = tileOffset(map, fineOf(map), at.tile, at.x, at.y, weightGroups(map.classes));
+      code = (map.data[of] ?? 0) * (UNORM_MAX + 1) + (map.data[of + 1] ?? 0);
+      break;
+    }
+  }
+  return code;
 }
 
 /**
@@ -508,8 +1026,8 @@ function storedSurveyed(map: ClassMapTexels, face: Face, x: number, y: number): 
  * shader: unscaled for the figure, display channels.
  *
  * @remarks
- * Over the very corners and bilinear weights b of {@link classMapSharesAt}, its surveyed texels
- * alone, a drawn class c's A is Σ b T_c(x) ÷ Σ b, T_c(x) its nodes' albedo at the corner's code
+ * Over the very terms and weights b of {@link classMapSharesAt}, its surveyed texels and cells
+ * alone, a drawn class c's A is Σ b T_c(x) ÷ Σ b, T_c(x) its nodes' albedo at the term's code
  * (`maturityNodes.ts`' segment and mix), a product form beside the shares, which stay as they are.
  * A class not drawn from its nodes, or of no share at the point (`shares[c + 1]` not above 0), is
  * `null`: its law's A, its nodes unread.
@@ -528,28 +1046,15 @@ export function classMapAlbedoAt(
   if (maturity === undefined) {
     return null;
   }
-  const { face, holding, i0, j0, fx, fy } = reconstructionCorners(map, direction);
-  const corners: Array<{ readonly b: number; readonly segment: MaturitySegment }> = [];
-  let norm = 0;
-  for (let corner = 0; corner < 4; corner += 1) {
-    const di = corner % 2;
-    const dj = Math.floor(corner / 2);
-    const i = i0 + di;
-    const j = j0 + dj;
-    const surveyed = storedSurveyed(map, face, i + 1, j + 1);
-    if (i === holding[0] && j === holding[1] && !surveyed) {
-      return null;
-    }
-    if (!surveyed) {
-      continue;
-    }
-    const b = cornerWeight(di, dj, fx, fy);
-    corners.push({
-      b,
-      segment: maturitySegment(maturityCodeRatio(storedCode(map, face, i + 1, j + 1))),
-    });
-    norm += b;
+  const terms = reconstructionTerms(map, direction);
+  if (terms === null) {
+    return null;
   }
+  const corners = terms.map(({ at, b }) => ({
+    b,
+    segment: maturitySegment(maturityCodeRatio(codeAt(map, at))),
+  }));
+  const norm = corners.reduce((sum, { b }) => sum + b, 0);
   if (!(norm > 0)) {
     return null;
   }
@@ -586,11 +1091,13 @@ export function discSurfaceLaws(surface: DiscSurface): ReadonlyArray<Photometric
  * The specification of a class map's texture: (N + 2) × (N + 2) texels a layer, the gutter
  * included, filed under `coarse-field-gpu` beside the coverage mask (R12 Design note 6's coarse
  * field's GPU copy; R10.T10.d), 418 KB at R10's 64 texels a face and 16 classes, and 523 KB with
- * the six layers of a map's maturity (R10.T1.c's client half).
+ * the six layers of a map's maturity (R10.T1.c's client half); with a fine page, 17,424 B more
+ * for each of its index's six layers and its pages' (lane fix-coast-class-map), 121 tiles a page
+ * of a level-8 field's.
  */
 export function classMapTextureSpec(
   name: string,
-  map: Pick<ClassMapTexels, "faceTexels" | "classes" | "maturity">,
+  map: Pick<ClassMapTexels, "faceTexels" | "classes" | "maturity" | "fine">,
 ): TextureSpec {
   const side = classMapSide(map.faceTexels);
   return {

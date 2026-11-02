@@ -40,6 +40,10 @@ import {
 import {
   CLASS_MAP_FORMAT,
   classMapAlbedoAt,
+  classMapFineCapacity,
+  type ClassMapFineInput,
+  classMapFineLayer,
+  classMapIndexLayer,
   type ClassMapMaturityInput,
   type ClassMapTexel,
   type ClassMapTexels,
@@ -51,6 +55,7 @@ import {
   classMapTexelLayers,
   classMapTexelOf,
   classMapTextureSpec,
+  classMapTilesPerRow,
   classWeightsAt,
   discSurfaceLaws,
   MAX_DISC_CLASSES,
@@ -1242,5 +1247,475 @@ describe("a class-map disc's record under its map's maturity (R10.T1.c)", () => 
     const before = Array.from(without.subarray(0, 4 * FIRST_NODE_ROW));
     const after = Array.from(matured.subarray(0, 4 * FIRST_NODE_ROW));
     expect(after.flatMap((value, at) => (value === before[at] ? [] : [at]))).toEqual([4 * 25 + 3]);
+  });
+});
+
+/** The cells a side of the fine page's fixtures' refined texels. */
+const R = 4;
+
+/**
+ * A two-class map of `n` texels a face, every texel class 0's alone but where `refined` gives a
+ * texel's `side` × `side` cells, each `[w, 1 − w]` from `cellOf(ci, cj)` or `null`, its own the
+ * mean of its surveyed cells'.
+ */
+function refinedMap(
+  n: number,
+  refined: ReadonlyArray<{
+    readonly texel: ClassMapTexel;
+    readonly cellOf: (ci: number, cj: number) => number | null;
+  }>,
+  side = R,
+): ClassMapTexels {
+  const inputs = refined.map(({ texel, cellOf }) => ({
+    texel,
+    cells: Array.from({ length: side * side }, (_, c) => {
+      const w = cellOf(c % side, Math.floor(c / side));
+      return w === null ? null : [w, 1 - w];
+    }),
+  }));
+  const own = (texel: ClassMapTexel): ReadonlyArray<number> => {
+    const input = inputs.find(
+      ({ texel: t }) => t.face === texel.face && t.i === texel.i && t.j === texel.j,
+    );
+    if (input === undefined) {
+      return [1, 0];
+    }
+    const surveyed = input.cells.filter((cell) => cell !== null);
+    const w = surveyed.reduce((sum, cell) => sum + (cell[0] ?? 0), 0) / surveyed.length;
+    return [w, 1 - w];
+  };
+  return packClassMap(n, 2, own, undefined, { side, refined: inputs });
+}
+
+/** The byte of class `k` (or, past the classes, the code's high byte) at (x, y) of tile `tile`. */
+function tileByte(
+  map: ClassMapTexels,
+  tile: number,
+  x: number,
+  y: number,
+  k: number,
+  maturity = false,
+): number {
+  const side = classMapSide(map.faceTexels);
+  const r = map.fine?.side ?? Number.NaN;
+  const perRow = classMapTilesPerRow(map.faceTexels, r);
+  const q = tile % (perRow * perRow);
+  const layer = classMapFineLayer(
+    Math.floor(tile / (perRow * perRow)),
+    Math.floor(k / 4),
+    map.classes,
+    maturity,
+  );
+  const x0 = (q % perRow) * (r + 2);
+  const y0 = Math.floor(q / perRow) * (r + 2);
+  return map.data[((layer * side + y0 + y) * side + x0 + x) * 4 + (k % 4)] ?? Number.NaN;
+}
+
+/** The index's three bytes at face texel (i, j): t + 1 high and low, and r. */
+function indexBytes(map: ClassMapTexels, face: Face, i: number, j: number): number[] {
+  const side = classMapSide(map.faceTexels);
+  const at = ((classMapIndexLayer(face, map.classes, false) * side + j + 1) * side + i + 1) * 4;
+  return Array.from(map.data.subarray(at, at + 3));
+}
+
+/** A face texel and its 4 × 4 cells, each class 0's, and their codes, for the refusals. */
+const FINE_TEXEL: ClassMapTexel = { face: 0, i: 0, j: 0 };
+const FINE_CELLS: ReadonlyArray<ReadonlyArray<number>> = Array.from({ length: R * R }, () => [
+  1, 0,
+]);
+const FINE_CODES: ReadonlyArray<number> = Array.from({ length: R * R }, () => 0);
+
+/** A two-class map of four texels a face, each class 0's or none, with the fine page `fine`. */
+function packFine(fine: ClassMapFineInput, surveyed = true): ClassMapTexels {
+  return packClassMap(4, 2, () => (surveyed ? [1, 0] : null), undefined, fine);
+}
+
+describe("the class map's fine page (lane fix-coast-class-map)", () => {
+  it("lays its index's six layers and its pages past the weights' and the maturity's", () => {
+    expect([
+      classMapIndexLayer(0, 2, false),
+      classMapIndexLayer(5, 2, true),
+      classMapFineLayer(0, 0, 2, false),
+      classMapFineLayer(1, 0, 2, false),
+      classMapFineLayer(1, 1, 2, true),
+    ]).toEqual([6, 17, 12, 13, 21]);
+  });
+
+  it("holds T² tiles a page, and as many pages as fit in 256 layers past the map's own", () => {
+    expect([classMapTilesPerRow(64, 4), classMapTilesPerRow(64, 2)]).toEqual([11, 16]);
+    // 256 layers less 24 for the weights, 6 for the maturity and 6 for the index, at 5 a page.
+    expect(classMapFineCapacity(64, 16, true, 4)).toBe(44 * 121);
+  });
+
+  it("takes its index's six layers and a layer a page at two classes, in its texture's size", () => {
+    const map = refinedMap(4, [{ texel: { face: 0, i: 1, j: 1 }, cellOf: () => 0 }]);
+    expect(map.fine).toEqual({ side: R, tiles: 1, pages: 1 });
+    expect(classMapTexelLayers(map)).toBe(6 + 6 + 1);
+    expect(map.data).toHaveLength(13 * 6 * 6 * 4);
+    expect(classMapTextureSpec("refined", map).size).toEqual({
+      width: 6,
+      height: 6,
+      depthOrArrayLayers: 13,
+    });
+  });
+
+  it("packs each refined texel's cells in its tile, and t + 1 and r in its face's index", () => {
+    const map = refinedMap(4, [
+      { texel: { face: 0, i: 1, j: 1 }, cellOf: (ci) => (ci === 0 ? 0 : 1) },
+      { texel: { face: 3, i: 2, j: 0 }, cellOf: (_, cj) => (cj === 3 ? null : 0.5) },
+    ]);
+    expect([indexBytes(map, 0, 1, 1), indexBytes(map, 3, 2, 0), indexBytes(map, 0, 2, 1)]).toEqual([
+      [0, 1, R],
+      [0, 2, R],
+      [0, 0, 0],
+    ]);
+    expect([
+      tileByte(map, 0, 1, 2, 0),
+      tileByte(map, 0, 2, 2, 0),
+      tileByte(map, 0, 2, 2, 1),
+    ]).toEqual([0, 255, 0]);
+    // Its texel's own as without the page: the mean of its cells, three quarters class 0.
+    expect([storedByte(map, 0, 2, 2, 0), storedByte(map, 0, 2, 2, 1)]).toEqual([191, 64]);
+    // A cell not surveyed holds no weight; the other cells their own.
+    expect([
+      tileByte(map, 1, 1, 4, 0),
+      tileByte(map, 1, 1, 4, 1),
+      tileByte(map, 1, 1, 3, 0),
+    ]).toEqual([0, 0, 128]);
+  });
+
+  it("fills a tile's gutter from the cells about it: a refined neighbour's, an unrefined texel's, across a face's edge the neighbouring face's, past a cube's corner none", () => {
+    const n = 4;
+    // Two refined texels side by side, the right one class 1's; one at face 0's corner (0, 0); and
+    // one on face 1 at its edge against face 0's +u edge, its cells each its own weight.
+    const map = refinedMap(n, [
+      { texel: { face: 0, i: 1, j: 1 }, cellOf: () => 1 },
+      { texel: { face: 0, i: 2, j: 1 }, cellOf: () => 0 },
+      { texel: { face: 0, i: 0, j: 0 }, cellOf: () => 1 },
+      { texel: { face: 1, i: 0, j: 2 }, cellOf: (ci, cj) => (1 + ci + R * cj) / 32 },
+      { texel: { face: 0, i: 3, j: 2 }, cellOf: () => 1 },
+    ]);
+    const wrong: string[] = [];
+    const expect1 = (label: string, found: number, expected: number): void => {
+      if (found !== expected) {
+        wrong.push(`${label}: ${String(found)}, not ${String(expected)}`);
+      }
+    };
+    for (let y = 1; y <= R; y += 1) {
+      // Tile 0's +u column, the next tile's first cells, class 1's; its −u column texel (0, 0, 1)'s.
+      expect1(`tile 0 (${R + 1}, ${y})`, tileByte(map, 0, R + 1, y, 1), 255);
+      expect1(`tile 0 (0, ${y})`, tileByte(map, 0, 0, y, 0), storedByte(map, 0, 1, 2, 0));
+      // Tile 4's +u column across face 0's edge: the neighbouring cell at the field's level,
+      // by R05's own neighbour, on face 1, and there tile 3's cell.
+      const across = edgeNeighbour({ face: 0, level: 4, i: n * R - 1, j: 2 * R + y - 1 }, "UMax");
+      expect1(`across (${across.face}, ${across.i}, ${across.j}) face`, across.face, 1);
+      const ci = across.i;
+      const cj = across.j - 2 * R;
+      expect1(
+        `tile 4 (${R + 1}, ${y})`,
+        tileByte(map, 4, R + 1, y, 0),
+        Math.round(((1 + ci + R * cj) / 32) * 255),
+      );
+    }
+    // At the cube's corner beside face 0's (0, 0): no cell.
+    expect1("tile 2 (0, 0) class 0", tileByte(map, 2, 0, 0, 0), 0);
+    expect1("tile 2 (0, 0) class 1", tileByte(map, 2, 0, 0, 1), 0);
+    expect(wrong).toEqual([]);
+  });
+
+  it("gives a refined texel's cell its own shares at its centre, and elsewhere alone in a cell not surveyed", () => {
+    const n = 4;
+    const map = refinedMap(n, [
+      {
+        texel: { face: 2, i: 1, j: 2 },
+        cellOf: (ci, cj) => (ci === 3 && cj === 3 ? null : (ci + R * cj) / 15),
+      },
+    ]);
+    let worst = 0;
+    let unsurveyed: number[] = [];
+    for (let cj = 0; cj < R; cj += 1) {
+      for (let ci = 0; ci < R; ci += 1) {
+        const d = directionAt(2, (1 + (ci + 0.5) / R) / n, (2 + (cj + 0.5) / R) / n);
+        const shares = classMapSharesAt(map, d);
+        if (ci === 3 && cj === 3) {
+          unsurveyed = shares;
+          continue;
+        }
+        const w = Math.round(((ci + R * cj) / 15) * 255) / 255;
+        worst = Math.max(
+          worst,
+          Math.abs((shares[1] ?? 0) - w),
+          Math.abs((shares[2] ?? 0) - (1 - w)),
+        );
+      }
+    }
+    expect(worst).toBeLessThan(1e-12);
+    expect(unsurveyed).toEqual([1, 0, 0]);
+  });
+
+  it("meets an unrefined texel at a refined texel's edge from either side, and leaves the unrefined texel's centre its own", () => {
+    // Face 0's column i = 1 refined, each texel's first column of cells class 1's and the rest class
+    // 0's, every other texel class 0's: along s the shares do not vary with t inside the face.
+    const n = 4;
+    const map = refinedMap(
+      n,
+      [0, 1, 2, 3].map((j) => ({
+        texel: { face: 0, i: 1, j },
+        cellOf: (ci: number) => (ci === 0 ? 0 : 1),
+      })),
+    );
+    const at = (s: number, t: number): number =>
+      classMapSharesAt(map, directionAt(0, s, t))[2] ?? 0;
+    const edge = 1 / n;
+    const steps: string[] = [];
+    for (const t of [0.3, 0.375, 0.42, 0.5, 0.6]) {
+      const left = at(edge - 1e-9, t);
+      const right = at(edge + 1e-9, t);
+      if (Math.abs(left - right) > 1e-6 || Math.abs(left - 0.5) > 1e-6) {
+        steps.push(`t ${String(t)}: ${String(left)} | ${String(right)}`);
+      }
+    }
+    expect(steps).toEqual([]);
+    // The unrefined texel's centre, and the refined texel's second column of cells, their own.
+    expect(at(0.5 / n, 0.4)).toBe(0);
+    expect(at((1 + 1.5 / R) / n, 0.4)).toBeCloseTo(0, 12);
+    // Inside the first column's cells, toward the unrefined texel, class 1's fades in a cell's half.
+    expect(at((1 + 0.5 / R) / n, 0.4)).toBeCloseTo(1, 12);
+  });
+
+  it("keeps the refined texels whose cells stand furthest from their texel's where more than fit", () => {
+    // Four texels a face at 16 classes with a maturity: one tile a page, 44 pages.
+    const n = 4;
+    const classes = 16;
+    const capacity = classMapFineCapacity(n, classes, true, R);
+    expect(capacity).toBe(44);
+    const texels = ([0, 1, 2, 3, 4, 5] as const).flatMap((face) =>
+      Array.from({ length: n * n }, (_, k): ClassMapTexel => ({
+        face,
+        i: k % n,
+        j: Math.floor(k / n),
+      })),
+    );
+    const weightsOf = (): number[] => Array.from({ length: classes }, (_, k) => (k === 0 ? 1 : 0));
+    // Texel k's cells part from its own by k: the first, by nothing, is left out.
+    const refined = texels.slice(0, capacity + 1).map((texel, k) => ({
+      texel,
+      cells: Array.from({ length: R * R }, () =>
+        Array.from({ length: classes }, (_, c) => (c === 0 ? 1 - k / 100 : c === 1 ? k / 100 : 0)),
+      ),
+      codes: Array.from({ length: R * R }, () => 0),
+    }));
+    const map = packClassMap(
+      n,
+      classes,
+      weightsOf,
+      maturityOf(classes, () => 0),
+      {
+        side: R,
+        refined,
+      },
+    );
+    expect(map.fine?.tiles).toBe(capacity);
+    expect(classMapTexelLayers(map)).toBe(256);
+    // The first texel unrefined, the second tile 0.
+    const index = (texel: ClassMapTexel): number => {
+      const side = classMapSide(n);
+      const at =
+        ((classMapIndexLayer(texel.face, classes, true) * side + texel.j + 1) * side +
+          texel.i +
+          1) *
+        4;
+      return (map.data[at] ?? 0) * 256 + (map.data[at + 1] ?? 0);
+    };
+    const texelAt = (k: number): ClassMapTexel => {
+      const texel = texels[k];
+      if (texel === undefined) {
+        throw new Error(`no texel ${String(k)}`);
+      }
+      return texel;
+    };
+    expect([index(texelAt(0)), index(texelAt(1)), index(texelAt(capacity))]).toEqual([
+      0,
+      1,
+      capacity,
+    ]);
+  });
+
+  it("gives a refined cell's albedo at its centre from its own code", () => {
+    const n = 4;
+    const texel: ClassMapTexel = { face: 1, i: 2, j: 1 };
+    const codes = Array.from({ length: R * R }, (_, c) => 1_000 * (c + 1));
+    const map = packClassMap(
+      n,
+      2,
+      () => [0.5, 0.5],
+      maturityOf(2, () => 30_000),
+      {
+        side: R,
+        refined: [
+          {
+            texel,
+            cells: Array.from({ length: R * R }, (_, c) => (c % 2 === 0 ? [1, 0] : [0, 1])),
+            codes,
+          },
+        ],
+      },
+    );
+    const wrong: string[] = [];
+    for (let c = 0; c < R * R; c += 1) {
+      const d = directionAt(
+        1,
+        (2 + ((c % R) + 0.5) / R) / n,
+        (1 + (Math.floor(c / R) + 0.5) / R) / n,
+      );
+      const shares = classMapSharesAt(map, d);
+      const k = c % 2;
+      const albedo = classMapAlbedoAt(map, d, shares)?.[k] ?? null;
+      const expected = maturityNodeAlbedo(
+        map.maturity?.nodes ?? new Float32Array(),
+        3 * MATURITY_NODES * k,
+        maturitySegment(maturityCodeRatio(codes[c] ?? Number.NaN)),
+      );
+      if (
+        albedo === null ||
+        albedo.some((a, ch) => Math.abs(a - (expected[ch] ?? Number.NaN)) > 1e-12)
+      ) {
+        wrong.push(`cell ${String(c)}: ${String(albedo)} against ${expected.join(", ")}`);
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it.each([
+    { name: "r other than 2 or 4", fine: { side: 3, refined: [] }, message: /2 or 4/u },
+    {
+      name: "a texel not surveyed",
+      fine: { side: R, refined: [{ texel: FINE_TEXEL, cells: FINE_CELLS }] },
+      surveyed: false,
+      message: /not a surveyed/u,
+    },
+    {
+      name: "a texel given twice",
+      fine: {
+        side: R,
+        refined: [
+          { texel: FINE_TEXEL, cells: FINE_CELLS },
+          { texel: FINE_TEXEL, cells: FINE_CELLS },
+        ],
+      },
+      message: /twice/u,
+    },
+    {
+      name: "cells not r² many",
+      fine: { side: R, refined: [{ texel: FINE_TEXEL, cells: FINE_CELLS.slice(1) }] },
+      message: /15 cells and 0 codes, not 16/u,
+    },
+    {
+      name: "a cell's weights not a class each",
+      fine: { side: R, refined: [{ texel: FINE_TEXEL, cells: [[1], ...FINE_CELLS.slice(1)] }] },
+      message: /has 1 weights for 2 classes/u,
+    },
+  ])("refuses $name", ({ fine, surveyed, message }) => {
+    expect(() => packFine(fine, surveyed)).toThrow(message);
+  });
+
+  it.each([
+    { name: "codes not r² many", codes: FINE_CODES.slice(1), message: /16 cells and 15 codes/u },
+    {
+      name: "a code past a unorm16",
+      codes: [70_000, ...FINE_CODES.slice(1)],
+      message: /maturity code 70000/u,
+    },
+  ])("refuses, under a maturity, $name", ({ codes, message }) => {
+    expect(() =>
+      packClassMap(
+        4,
+        2,
+        () => [1, 0],
+        maturityOf(2, () => 0),
+        {
+          side: R,
+          refined: [{ texel: FINE_TEXEL, cells: FINE_CELLS, codes }],
+        },
+      ),
+    ).toThrow(message);
+  });
+
+  it("carries no page for a refinement of no texel", () => {
+    expect(packFine({ side: R, refined: [] }).fine).toBeUndefined();
+  });
+
+  it("packs and reads 2 × 2 cells, a level-7 field's, each cell's own shares at its centre", () => {
+    const n = 4;
+    const map = refinedMap(
+      n,
+      [{ texel: { face: 2, i: 1, j: 2 }, cellOf: (ci, cj) => (ci + 2 * cj) / 3 }],
+      2,
+    );
+    expect(map.fine).toEqual({ side: 2, tiles: 1, pages: 1 });
+    let worst = 0;
+    for (let c = 0; c < 4; c += 1) {
+      const ci = c % 2;
+      const cj = Math.floor(c / 2);
+      const d = directionAt(2, (1 + (ci + 0.5) / 2) / n, (2 + (cj + 0.5) / 2) / n);
+      const w = Math.round(((ci + 2 * cj) / 3) * 255) / 255;
+      const shares = classMapSharesAt(map, d);
+      worst = Math.max(worst, Math.abs((shares[1] ?? 0) - w), Math.abs((shares[2] ?? 0) - (1 - w)));
+    }
+    expect(worst).toBeLessThan(1e-12);
+  });
+
+  it("meets an unrefined texel at a 2 × 2 refined texel's edge from either side", () => {
+    const n = 4;
+    const map = refinedMap(
+      n,
+      [0, 1, 2, 3].map((j) => ({
+        texel: { face: 0, i: 1, j },
+        cellOf: (ci: number) => (ci === 0 ? 0 : 1),
+      })),
+      2,
+    );
+    const at = (s: number, t: number): number =>
+      classMapSharesAt(map, directionAt(0, s, t))[2] ?? 0;
+    const steps = [0.3, 0.375, 0.42, 0.5, 0.6].flatMap((t) => {
+      const left = at(1 / n - 1e-9, t);
+      const right = at(1 / n + 1e-9, t);
+      return Math.abs(left - right) > 1e-6 || Math.abs(left - 0.5) > 1e-6
+        ? [`t ${String(t)}: ${String(left)} | ${String(right)}`]
+        : [];
+    });
+    expect(steps).toEqual([]);
+  });
+
+  it("fills a tile's gutter codes from a refined neighbour's cells and an unrefined texel's code", () => {
+    const n = 4;
+    const side = 2;
+    const cells = Array.from({ length: side * side }, () => [1, 0]);
+    const map = packClassMap(
+      n,
+      2,
+      () => [1, 0],
+      maturityOf(2, ({ i, j }) => 1_000 * (i + 1) + j),
+      {
+        side,
+        refined: [
+          { texel: { face: 0, i: 1, j: 1 }, cells, codes: [10_000, 10_001, 10_002, 10_003] },
+          { texel: { face: 0, i: 2, j: 1 }, cells, codes: [20_000, 20_001, 20_002, 20_003] },
+        ],
+      },
+    );
+    const code = (tile: number, x: number, y: number): number =>
+      tileByte(map, tile, x, y, 4, true) * 256 + tileByte(map, tile, x, y, 5, true);
+    expect([
+      // Tile 0's +u column: tile 1's first column of cells.
+      code(0, side + 1, 1),
+      code(0, side + 1, 2),
+      // Its −u column: texel (0, 1)'s own code.
+      code(0, 0, 1),
+      code(0, 0, 2),
+      // Its own cells.
+      code(0, 1, 1),
+      code(0, 2, 2),
+    ]).toEqual([20_000, 20_002, 1_001, 1_001, 10_000, 10_003]);
   });
 });

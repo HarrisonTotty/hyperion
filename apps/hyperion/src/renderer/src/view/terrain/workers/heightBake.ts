@@ -230,6 +230,14 @@ export interface WasmClassMap {
   maturity(): Uint16Array;
   /** Each class's band-0 albedo nodes, K × 3 a class, B, V, R (`ClassMapMaturityAnswer.nodes`). */
   nodes(): Float32Array;
+  /** r, the field cells along a texel's side (`ClassMapRefinementAnswer.side`). */
+  readonly fineSide: number;
+  /** The place in `texels()` of each refined texel, rising; empty where none is. */
+  refined(): Uint32Array;
+  /** Each refined texel's r² cells' weight bytes (`ClassMapRefinementAnswer.weights`). */
+  fineWeights(): Uint8Array;
+  /** Their maturity codes, empty where the header carries no maturity. */
+  fineMaturity(): Uint16Array;
   readonly complete: boolean;
   free(): void;
 }
@@ -930,8 +938,8 @@ export class WorkerFields {
    * `body`'s coarse class map for R07's disc over its field, with its detail seed (R10.T10.d,
    * `WorkerFields::class_map`), and its normal map (R10.T10.g, `WorkerFields::normal_map`), its
    * pairs rounded to half floats as a bake's are ({@link packNormals}), with the texels' maturity
-   * and the classes' nodes where the header carries a maturity (R10.T1.c's client half), copied
-   * out; `null` where no payload field of it is held (none, or a stand-in's, which holds no ground).
+   * and the classes' nodes where the header carries a maturity (R10.T1.c's client half) and the
+   * texels refined to the field's level where any is (lane fix-coast-class-map), copied out; `null` where no payload field of it is held (none, or a stand-in's, which holds no ground).
    *
    * @throws Error where the module answers a class map but no normal map, which holds where the
    *   other does (a broken module).
@@ -953,6 +961,7 @@ export class WorkerFields {
       }
       // The texels' maturity, and only with it the classes' nodes (R10.T1.c's client half).
       const codes = map.maturity();
+      const refined = map.refined();
       return {
         level: map.level,
         fieldLevel: map.fieldLevel,
@@ -967,6 +976,16 @@ export class WorkerFields {
         normalPairs: packNormals(normals.pairs()),
         normalsComplete: normals.complete,
         ...(codes.length === 0 ? {} : { maturity: { codes, nodes: map.nodes() } }),
+        ...(refined.length === 0
+          ? {}
+          : {
+              refinement: {
+                side: map.fineSide,
+                texels: refined,
+                weights: map.fineWeights(),
+                codes: map.fineMaturity(),
+              },
+            }),
       };
     } finally {
       map.free();

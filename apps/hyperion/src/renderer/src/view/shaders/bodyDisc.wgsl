@@ -94,8 +94,12 @@
 // faces' edge texels, its corners empty (R10.T10.d); class k's weight in channel k mod 4 of layer
 // face + 6 ⌊k ÷ 4⌋, read by texel (`textureLoad`) and reconstructed here (`surface_at`); where row
 // 25's w is 1, each texel's maturity code in layer face + 6 ⌈classes ÷ 4⌉, its high byte in r and
-// its low byte in g, the gutter as the weights' (`class_map_maturity`, R10.T1.c); any one texture
-// where the surface is uniform, unread.
+// its low byte in g, the gutter as the weights' (`class_map_maturity`, R10.T1.c); past those, where
+// the texture has more layers, its fine page (lane fix-coast-class-map; `discSurface.ts`'
+// `ClassMapFine`): six index layers, one a face, each refined texel's tile t + 1 in r and g and its
+// cells a side, r, in b (`fine_tile`), then the tiles' pages, each its classes' layers and under a
+// maturity its codes' layer, each tile r + 2 texels a side, its cells and a gutter of the cells about
+// it; any one texture where the surface is uniform, unread.
 @group(2) @binding(2) var class_weights : texture_2d_array<f32>;
 
 // The body's atmosphere, which `surfaceLighting.wgsl` reads (plan R08, R08.T9.b; `draw.ts`'s
@@ -213,18 +217,19 @@ fn body_of() -> Body {
 // cubeTexel.wgsl's, composed before this file (R10.T11).
 
 // One class-map texel's share of each of the disc's laws, and whether it holds any weight: each
-// class's weight at stored texel `texel` of `face`'s layers, the gutter included, scaled down to sum
-// to 1 where it sums to more, and law 0 (`elsewhere`) what they leave (`surfaceShares`).
+// class's weight at stored texel `texel`, its classes 4g to 4g + 3 in layer `layer` + `step` g (a
+// face's texel: its face and 6; a fine page's cell: its page's first layer and 1), scaled down to
+// sum to 1 where it sums to more, and law 0 (`elsewhere`) what they leave (`surfaceShares`).
 struct TexelShares {
   shares : array<f32, SURFACE_LAWS>,
   surveyed : bool,
 }
 
-fn texel_shares(texel : vec2u, face : u32, count : u32) -> TexelShares {
+fn texel_shares(texel : vec2u, layer : u32, step : u32, count : u32) -> TexelShares {
   var out : TexelShares;
   var total = 0.0;
   for (var group = 0u; group * 4u < count; group = group + 1u) {
-    let weights = textureLoad(class_weights, texel, face + 6u * group, 0);
+    let weights = textureLoad(class_weights, texel, layer + step * group, 0);
     for (var c = 0u; c < min(4u, count - group * 4u); c = c + 1u) {
       out.shares[group * 4u + c + 1u] = weights[c];
       total = total + weights[c];
@@ -244,11 +249,12 @@ fn texel_shares(texel : vec2u, face : u32, count : u32) -> TexelShares {
 const UNORM8_MAX : f32 = 255.0;
 const MATURITY_CODE_MAX : f32 = 65535.0;
 
-// The deficit ratio r = code ÷ 65,535 of the maturity code at stored texel `texel` of `face`
-// (R10.T1.c; `discSurface.ts`' `classMapMaturityLayer`): its two bytes, rebuilt exactly from the
-// channels' unorm values, high in r and low in g of layer face + 6 ⌈count ÷ 4⌉, past the weights'.
-fn class_map_maturity(texel : vec2u, face : u32, count : u32) -> f32 {
-  let bytes = textureLoad(class_weights, texel, face + 6u * ((count + 3u) / 4u), 0);
+// The deficit ratio r = code ÷ 65,535 of the maturity code at stored texel `texel` of layer `layer`
+// (R10.T1.c; `discSurface.ts`' `classMapMaturityLayer`, face + 6 ⌈count ÷ 4⌉ past the weights', or
+// a fine page's cell's in its page's last layer): its two bytes, rebuilt exactly from the channels'
+// unorm values, high in r and low in g.
+fn class_map_maturity(texel : vec2u, layer : u32) -> f32 {
+  let bytes = textureLoad(class_weights, texel, layer, 0);
   let code = round(bytes.r * UNORM8_MAX) * (UNORM8_MAX + 1.0) + round(bytes.g * UNORM8_MAX);
   return code / MATURITY_CODE_MAX;
 }
@@ -271,6 +277,112 @@ struct SurfaceAt {
   albedo : array<vec3f, SURFACE_LAWS>,
 }
 
+// A class map's layout, as `surface_at` reads it (`discSurface.ts`): its classes and their layers'
+// groups, whether it carries its texels' maturity, the first of its fine page's index layers, and
+// whether it carries a fine page (lane fix-coast-class-map; `ClassMapFine`).
+struct ClassMapLayout {
+  count : u32,
+  groups : u32,
+  maturity : bool,
+  index_layer : u32,
+  fine : bool,
+}
+
+// A refined texel's tile in the fine page: its first texel, its page's first layer and its cells
+// along a side, r; `found` false for a texel not refined.
+struct FineTile {
+  origin : vec2u,
+  layer : u32,
+  side : u32,
+  found : bool,
+}
+
+// The tile of the texel stored at `texel` of `face` (`discSurface.ts`' `storedTile`): its index
+// layer's t + 1 in r (high byte) and g (low), r in b, 0 for none, the gutter's included; tile t at
+// ((q mod T)(r + 2), ⌊q ÷ T⌋ (r + 2)) of page ⌊t ÷ T²⌋, q = t mod T², T = ⌊(N + 2) ÷ (r + 2)⌋.
+fn fine_tile(texel : vec2u, face : u32, map_layout : ClassMapLayout) -> FineTile {
+  var out : FineTile;
+  out.found = false;
+  if (!map_layout.fine) {
+    return out;
+  }
+  let index = textureLoad(class_weights, texel, map_layout.index_layer + face, 0);
+  let code = u32(round(index.r * UNORM8_MAX) * (UNORM8_MAX + 1.0) + round(index.g * UNORM8_MAX));
+  if (code == 0u) {
+    return out;
+  }
+  let tile = code - 1u;
+  out.side = u32(round(index.b * UNORM8_MAX));
+  let per_row = textureDimensions(class_weights).x / (out.side + 2u);
+  let per_page = per_row * per_row;
+  let q = tile % per_page;
+  out.origin = vec2u(q % per_row, q / per_row) * (out.side + 2u);
+  let page_layers = map_layout.groups + select(0u, 1u, map_layout.maturity);
+  out.layer = map_layout.index_layer + 6u + (tile / per_page) * page_layers;
+  out.found = true;
+  return out;
+}
+
+// The survey-masked reconstruction's running sums at a point: each law's share by its term's
+// weight, the weights' sum, and under a maturity each term's weight and code's segment, at most 16
+// terms (four corners, each a refined texel's four cells).
+struct SurfaceSums {
+  sum : array<f32, SURFACE_LAWS>,
+  norm : f32,
+  terms : u32,
+  b : array<f32, 16>,
+  segment : array<MaturitySegment, 16>,
+}
+
+// Adds the surveyed texel `one`, stored at `texel` with its code in layer `code_layer`, at the
+// weight `b`.
+fn add_term(
+  sums : ptr<function, SurfaceSums>,
+  one : TexelShares,
+  b : f32,
+  map_layout : ClassMapLayout,
+  texel : vec2u,
+  code_layer : u32,
+) {
+  for (var m = 0u; m <= map_layout.count; m = m + 1u) {
+    (*sums).sum[m] = (*sums).sum[m] + b * one.shares[m];
+  }
+  (*sums).norm = (*sums).norm + b;
+  if (map_layout.maturity) {
+    (*sums).b[(*sums).terms] = b;
+    (*sums).segment[(*sums).terms] = maturity_segment(class_map_maturity(texel, code_layer));
+  }
+  (*sums).terms = (*sums).terms + 1u;
+}
+
+// A refined texel `texel` as a corner, at the bilinear weight `b`, of another texel's
+// reconstruction at (n s, n t) = `st_n` (`discSurface.ts`' `clampedCellTerms`): its cells at the
+// point held within their centres' span, each by its bilinear weight among them times `b`, those
+// surveyed alone.
+fn add_clamped_cells(
+  sums : ptr<function, SurfaceSums>,
+  tile : FineTile,
+  texel : vec2i,
+  st_n : vec2f,
+  b : f32,
+  map_layout : ClassMapLayout,
+) {
+  let r = f32(tile.side);
+  let local = clamp(st_n * r - r * vec2f(texel), vec2f(0.5), vec2f(r - 0.5)) - 0.5;
+  let first = min(vec2u(floor(local)), vec2u(tile.side - 2u));
+  let f = local - vec2f(first);
+  for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+    let step = vec2u(corner & 1u, corner >> 1u);
+    let stored = tile.origin + first + step + vec2u(1u);
+    let one = texel_shares(stored, tile.layer, 1u, map_layout.count);
+    if (!one.surveyed) {
+      continue;
+    }
+    let w = select(1.0 - f.x, f.x, step.x == 1u) * select(1.0 - f.y, f.y, step.y == 1u);
+    add_term(sums, one, b * w, map_layout, stored, tile.layer + map_layout.groups);
+  }
+}
+
 // The share of each of the disc's laws at the point `q` (from the body's centre ÷ a): law 0's
 // alone on a uniform surface; under a class map, by the survey-masked bilinear reconstruction
 // (R10.T10.d, decision-r07-t8b; `classMapSharesAt`) at the point's cube-sphere direction (R05's
@@ -278,11 +390,14 @@ struct SurfaceAt {
 // where the texel holding it holds no weight, and otherwise the shares of the four texels whose
 // centres are nearest, the gutter's at a face's edge, by their bilinear weights, those holding
 // weight alone, renormalised. The texel holding the point is one of the four, at a bilinear weight
-// of at least ¼. Each law's A is its own (`surface_law`), but where the map carries its texels'
-// maturity (`body.maturity`, R10.T1.c; `classMapAlbedoAt`): there a class of a share above 0 drawn
-// from its nodes takes Σ b T(x) ÷ Σ b over the same surveyed corners and weights b, T(x) its nodes'
-// albedo at the corner's code (`maturity_segment`, `maturity_mix`), a zero share's class skipped
-// before any node is read.
+// of at least ¼. Under a fine page (lane fix-coast-class-map; `ClassMapFine`), in a refined texel
+// the same rule on its tile's cells, the field's, law 0 alone where the cell holding the point holds
+// no weight; and a refined texel among another's four stands by its cells at the point held within
+// their span (`add_clamped_cells`). Each law's A is its own (`surface_law`), but where the map
+// carries its texels' maturity (`body.maturity`, R10.T1.c; `classMapAlbedoAt`): there a class of a
+// share above 0 drawn from its nodes takes Σ b T(x) ÷ Σ b over the same surveyed terms and weights
+// b, T(x) its nodes' albedo at the term's code (`maturity_segment`, `maturity_mix`), a zero share's
+// class skipped before any node is read.
 fn surface_at(body : Body, q : vec3f, classes : u32) -> SurfaceAt {
   var out : SurfaceAt;
   let count = min(classes, MAX_DISC_CLASSES);
@@ -293,6 +408,12 @@ fn surface_at(body : Body, q : vec3f, classes : u32) -> SurfaceAt {
   if (classes == 0u) {
     return out;
   }
+  var map_layout : ClassMapLayout;
+  map_layout.count = count;
+  map_layout.groups = (count + 3u) / 4u;
+  map_layout.maturity = body.maturity;
+  map_layout.index_layer = 6u * map_layout.groups + select(0u, 6u, body.maturity);
+  map_layout.fine = textureNumLayers(class_weights) > map_layout.index_layer;
   let d = normalize(stretch_along(body, q));
   let p = vec3f(dot(d, body.axis_x), dot(d, body.axis_y), dot(d, body.axis_z));
   let at = cube_face_uv(p);
@@ -301,44 +422,58 @@ fn surface_at(body : Body, q : vec3f, classes : u32) -> SurfaceAt {
   let last = f32(n - 1u);
   let st_n = vec2f(uv_to_st(at.uv.x), uv_to_st(at.uv.y)) * f32(n);
   let holding = vec2i(clamp(floor(st_n), vec2f(0.0), vec2f(last)));
-  let corner_at = st_n - 0.5;
-  let first = vec2i(clamp(floor(corner_at), vec2f(-1.0), vec2f(last)));
-  let f = corner_at - vec2f(first);
-  var sum : array<f32, SURFACE_LAWS>;
-  var norm = 0.0;
-  // Each surveyed corner's bilinear weight, 0 for one not surveyed, and its code's segment of the
-  // node table, under a map's maturity.
-  var corner_b : array<f32, 4>;
-  var corner_segment : array<MaturitySegment, 4>;
-  for (var corner = 0u; corner < 4u; corner = corner + 1u) {
-    let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
-    let texel = first + step;
-    let one = texel_shares(vec2u(texel + vec2i(1)), at.face, count);
-    if (all(texel == holding) && !one.surveyed) {
+  var sums : SurfaceSums;
+  let own = fine_tile(vec2u(holding + vec2i(1)), at.face, map_layout);
+  if (own.found) {
+    // In a refined texel: its tile's cells, on the grid of N r a face.
+    let r = f32(own.side);
+    let local = st_n * r - r * vec2f(holding);
+    let held = vec2u(clamp(floor(local), vec2f(0.0), vec2f(r - 1.0)));
+    if (!texel_shares(own.origin + held + vec2u(1u), own.layer, 1u, count).surveyed) {
       return out;
     }
-    if (!one.surveyed) {
-      continue;
+    let first = vec2i(clamp(floor(local - 0.5), vec2f(-1.0), vec2f(r - 1.0)));
+    let f = local - 0.5 - vec2f(first);
+    for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+      let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
+      let stored = vec2u(vec2i(own.origin) + first + step + vec2i(1));
+      let one = texel_shares(stored, own.layer, 1u, count);
+      if (!one.surveyed) {
+        continue;
+      }
+      let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
+      add_term(&sums, one, b, map_layout, stored, own.layer + map_layout.groups);
     }
-    let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
-    for (var m = 0u; m <= count; m = m + 1u) {
-      sum[m] = sum[m] + b * one.shares[m];
-    }
-    norm = norm + b;
-    if (body.maturity) {
-      corner_b[corner] = b;
-      corner_segment[corner] = maturity_segment(
-        class_map_maturity(vec2u(texel + vec2i(1)), at.face, count)
-      );
+  } else {
+    let corner_at = st_n - 0.5;
+    let first = vec2i(clamp(floor(corner_at), vec2f(-1.0), vec2f(last)));
+    let f = corner_at - vec2f(first);
+    for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+      let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
+      let texel = first + step;
+      let stored = vec2u(texel + vec2i(1));
+      let one = texel_shares(stored, at.face, 6u, count);
+      if (all(texel == holding) && !one.surveyed) {
+        return out;
+      }
+      if (!one.surveyed) {
+        continue;
+      }
+      let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
+      let tile = fine_tile(stored, at.face, map_layout);
+      if (tile.found) {
+        add_clamped_cells(&sums, tile, texel, st_n, b, map_layout);
+        continue;
+      }
+      add_term(&sums, one, b, map_layout, stored, at.face + 6u * map_layout.groups);
     }
   }
-  if (!(norm > 0.0)) {
+  if (!(sums.norm > 0.0)) {
     return out;
   }
   for (var m = 0u; m <= count; m = m + 1u) {
-    sum[m] = sum[m] / norm;
+    out.shares[m] = sums.sum[m] / sums.norm;
   }
-  out.shares = sum;
   if (!body.maturity) {
     return out;
   }
@@ -348,16 +483,13 @@ fn surface_at(body : Body, q : vec3f, classes : u32) -> SurfaceAt {
       continue;
     }
     var albedo = vec3f(0.0);
-    for (var corner = 0u; corner < 4u; corner = corner + 1u) {
-      if (!(corner_b[corner] > 0.0)) {
-        continue;
-      }
-      let segment = corner_segment[corner];
+    for (var t = 0u; t < sums.terms; t = t + 1u) {
+      let segment = sums.segment[t];
       let lo = class_node(k, segment.node).xyz;
       let hi = class_node(k, segment.node + 1u).xyz;
-      albedo = albedo + corner_b[corner] * maturity_mix(lo, hi, segment.fraction);
+      albedo = albedo + sums.b[t] * maturity_mix(lo, hi, segment.fraction);
     }
-    out.albedo[k + 1u] = albedo / norm;
+    out.albedo[k + 1u] = albedo / sums.norm;
   }
   return out;
 }

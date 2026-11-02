@@ -363,6 +363,33 @@ export interface ClassMapAnswer {
    * absent where the body's header carries no maturity.
    */
   readonly maturity?: ClassMapMaturityAnswer;
+  /**
+   * The texels refined to the field's level (lane fix-coast-class-map; the crate's
+   * `ClassMap::refined`); absent where none is, as below the module's `REFINED_CLASS_MAP_FROM`.
+   */
+  readonly refinement?: ClassMapRefinementAnswer;
+}
+
+/**
+ * A class map's texels refined to the field's level, as a worker answers them (lane
+ * fix-coast-class-map; `src/wasm.rs`'s `ClassMapAnswer.refined`, `fineWeights` and `fineMaturity`):
+ * those whose field cells' classes the disc would draw apart, each with its cells' own readings.
+ */
+export interface ClassMapRefinementAnswer {
+  /** r, the field cells along a texel's side: 2 or 4. */
+  readonly side: number;
+  /** The place in {@link ClassMapAnswer.texels} of each refined texel, rising. */
+  readonly texels: Uint32Array;
+  /**
+   * Each refined texel's r² cells in rising (j, i), each its weight bytes over the classes as
+   * {@link ClassMapAnswer.weights}' texels; all 0 for a cell not surveyed.
+   */
+  readonly weights: Uint8Array;
+  /**
+   * Each of those cells' maturity code, one a cell in {@link ClassMapRefinementAnswer.weights}'
+   * order, 0 for a cell not surveyed; empty where the header carries no maturity.
+   */
+  readonly codes: Uint16Array;
 }
 
 /**
@@ -722,7 +749,10 @@ export function blockTransferables(block: FieldBlockAnswer | null): Transferable
       ];
 }
 
-/** The buffers a worker transfers with a class map and its normal map, its maturity's with them. */
+/**
+ * The buffers a worker transfers with a class map and its normal map, its maturity's and its
+ * refinement's with them.
+ */
 export function classMapTransferables(map: ClassMapAnswer | null): Transferable[] {
   if (map === null) {
     return [];
@@ -736,9 +766,12 @@ export function classMapTransferables(map: ClassMapAnswer | null): Transferable[
     map.normalCells.buffer,
     map.normalPairs.buffer,
   ];
-  const { maturity } = map;
+  const { maturity, refinement } = map;
   if (maturity !== undefined) {
     buffers.push(maturity.codes.buffer, maturity.nodes.buffer);
+  }
+  if (refinement !== undefined) {
+    buffers.push(refinement.texels.buffer, refinement.weights.buffer, refinement.codes.buffer);
   }
   return buffers;
 }

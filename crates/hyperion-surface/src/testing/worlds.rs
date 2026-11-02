@@ -1271,6 +1271,19 @@ pub(super) fn default_crust() -> (MaterialPalette, [Option<u8>; 4]) {
     (highlands, [None, None, Some(lid), None])
 }
 
+/// The Moon-like world's two crusts' palette and crust palette, its highlands' feldspathic lid and
+/// its maria's iron-rich basalt province, with no ice: for a field whose crusts a test places.
+#[cfg(test)]
+pub(crate) fn two_crusts() -> (MaterialPalette, [Option<u8>; 4]) {
+    let crusts = palette(vec![
+        FELDSPATHIC.entry(PaletteRole::PrimaryCrust),
+        BASALT_FE.entry(PaletteRole::Province),
+    ]);
+    let highlands = index(&crusts, &FELDSPATHIC, PaletteRole::PrimaryCrust);
+    let maria = index(&crusts, &BASALT_FE, PaletteRole::Province);
+    (crusts, [None, None, Some(highlands), Some(maria)])
+}
+
 pub(super) fn flat_builder(body_index: u16) -> FieldBuilder {
     FieldBuilder::new(Metres::new(MOON_RADIUS_M)).body(BodyRef::new(SYSTEM, body_index))
 }

@@ -171,8 +171,14 @@
 //!   texel's maturity code at band level 0, one value a texel in `texels()`' order, coded as a
 //!   bake's `maturity()`, empty where the header carries no maturity; `nodes()`, a `Float32Array`
 //!   of K × 3 a class, its albedo nodes at band level 0 as `maturityNodes` lays out one level's,
-//!   all 0 where the palette names no substance; and `complete`, `false` where some texel's
-//!   weights read a cell the field does not hold yet.
+//!   all 0 where the palette names no substance; `fineSide`, r, the field cells along a texel's
+//!   side; `refined()`, a `Uint32Array` of the place in `texels()` of each texel refined to the
+//!   field's level ([`ClassMap::refined`]), rising, empty below the switch's version
+//!   ([`REFINED_CLASS_MAP_FROM`](crate::worker::REFINED_CLASS_MAP_FROM)); `fineWeights()`, a
+//!   `Uint8Array` of r² cells a refined texel in rising (j, i), `classes` bytes each, all 0 for a
+//!   cell not surveyed; `fineMaturity()`, a `Uint16Array` of their codes alike, empty where the
+//!   header carries no maturity; and `complete`, `false` where some texel's weights read a cell the
+//!   field does not hold yet.
 //! - `normalMap(system, body, seed)` returns a `NormalMapAnswer`, the body's normal map for R07's
 //!   disc ([`WorkerFields::normal_map`], plan R10, T10.g), or `undefined` where no field of the
 //!   body is held: its `level`, the field's (5 to 8); `cells()`, a `Uint32Array` of the cell index
@@ -198,8 +204,8 @@ use crate::synth::BandLevel;
 use crate::test_planet::{Ridges, TEST_PLANET};
 use crate::worker::{
     BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, GroundAtSight, GroundProperties,
-    GroundReadout, GroundReadoutQuery, LEVEL_TABLE_ROWS, NormalMap, QueryBodyError, SeasonAnomaly,
-    SigmaSurvey, SlopeBaseline, SurveyChange, SurveyedMaterial, WorkerFields,
+    GroundReadout, GroundReadoutQuery, LEVEL_TABLE_ROWS, NormalMap, QueryBodyError, RefinedTexel,
+    SeasonAnomaly, SigmaSurvey, SlopeBaseline, SurveyChange, SurveyedMaterial, WorkerFields,
 };
 
 /// The generator version this module computes surfaces for, the crate's `generator_version`.
@@ -1944,6 +1950,60 @@ impl ClassMapAnswer {
             .classes()
             .iter()
             .flat_map(|class| class.nodes().map_or([0.0; LEVEL_NODES_STRIDE], node_values))
+            .collect()
+    }
+
+    /// The field cells along a texel's side, r ([`ClassMap::fine_side`]): 1, 2 or 4.
+    #[wasm_bindgen(getter, js_name = fineSide)]
+    #[must_use]
+    pub fn fine_side(&self) -> u32 {
+        self.map.fine_side()
+    }
+
+    /// The place in [`texels`](Self::texels) of each texel refined to the field's level
+    /// ([`ClassMap::refined`]), rising; empty where none is.
+    #[must_use]
+    pub fn refined(&self) -> Vec<u32> {
+        self.map.refined().iter().map(RefinedTexel::texel).collect()
+    }
+
+    /// Each refined texel's field cells' weight bytes over the classes, r² cells a texel in
+    /// [`refined`](Self::refined)'s order, each in rising (j, i) and `classes` bytes; all 0 for a
+    /// cell not surveyed.
+    #[wasm_bindgen(js_name = fineWeights)]
+    #[must_use]
+    pub fn fine_weights(&self) -> Vec<u8> {
+        let classes = self.map.classes().len();
+        let refined = self.map.refined();
+        let cells: usize = refined.iter().map(|r| r.cells().len()).sum();
+        let mut out = Vec::with_capacity(cells * classes);
+        for cell in refined.iter().flat_map(RefinedTexel::cells) {
+            match cell {
+                Some(cell) => out.extend_from_slice(&cell.weights()[..classes]),
+                None => out.resize(out.len() + classes, 0),
+            }
+        }
+        out
+    }
+
+    /// Each refined texel's field cells' maturity codes, r² a texel in
+    /// [`fine_weights`](Self::fine_weights)' order, 0 for a cell not surveyed; empty where the
+    /// header carries no maturity.
+    #[wasm_bindgen(js_name = fineMaturity)]
+    #[must_use]
+    pub fn fine_maturity(&self) -> Vec<u16> {
+        if self.map.texels().iter().all(|t| t.maturity().is_none()) {
+            return Vec::new();
+        }
+        self.map
+            .refined()
+            .iter()
+            .flat_map(|refined| {
+                refined
+                    .cells()
+                    .iter()
+                    .map(|cell| cell.and_then(|cell| cell.maturity()).unwrap_or(0))
+            })
             .collect()
     }
 

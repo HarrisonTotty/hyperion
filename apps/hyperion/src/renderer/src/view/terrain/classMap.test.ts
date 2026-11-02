@@ -16,6 +16,7 @@ import {
 import { packNormalMap } from "../bodies/discNormals";
 import {
   classMapMaturityLayer,
+  classMapSharesAt,
   classMapSide,
   type ClassMapTexels,
   classWeightsAt,
@@ -141,6 +142,11 @@ const TEXELS: ReadonlyArray<TexelSpec> = [
 function centreOf(face: Face, i: number, j: number): readonly [number, number, number] {
   const n = CLASS_MAP_FACE_TEXELS;
   return faceUvToXyz(face, stToUv((i + 0.5) / n), stToUv((j + 0.5) / n));
+}
+
+/** Shares, each × 255 rounded. */
+function inBytes(shares: ReadonlyArray<number>): number[] {
+  return shares.map((share) => Math.round(share * 255));
 }
 
 /** A pool whose answers the test gives, one query at a time, and whose block changes it raises. */
@@ -319,6 +325,66 @@ describe("a class map from a worker's answer", () => {
     expect(() =>
       normalMapTexelsOf({ ...answer, normalPairs: answer.normalPairs.subarray(1) }),
     ).toThrow(/3 cells has 5 pair values/u);
+  });
+
+  it("packs its refined texels' cells in the map's fine page, a cell of no weight not surveyed (lane fix-coast-class-map)", () => {
+    // TEXELS' second texel refined to its level-8 field's 4 × 4 cells: each cell one class's
+    // alone by its column, but the last, not surveyed.
+    const cells = Array.from({ length: 16 }, (_, c) =>
+      c === 15 ? [0, 0, 0] : [0, 1, 2].map((k) => (k === (c % 4) % 3 ? 255 : 0)),
+    );
+    const answer: ClassMapAnswer = {
+      ...answerOf(TEXELS),
+      refinement: {
+        side: 4,
+        texels: Uint32Array.from([1]),
+        weights: Uint8Array.from(cells.flat()),
+        codes: new Uint16Array(),
+      },
+    };
+    const map = classMapTexelsOf(answer);
+    if (map === null) {
+      throw new Error("no map");
+    }
+    expect(map.fine).toEqual({ side: 4, tiles: 1, pages: 1 });
+    const n = CLASS_MAP_FACE_TEXELS;
+    const cellCentre = (ci: number, cj: number): readonly [number, number, number] =>
+      faceUvToXyz(2, stToUv((11 + (ci + 0.5) / 4) / n), stToUv((11 + (cj + 0.5) / 4) / n));
+    expect([
+      inBytes(classMapSharesAt(map, cellCentre(0, 0))),
+      inBytes(classMapSharesAt(map, cellCentre(2, 1))),
+      inBytes(classMapSharesAt(map, cellCentre(3, 3))),
+    ]).toEqual([
+      [0, 255, 0, 0],
+      [0, 0, 0, 255],
+      [255, 0, 0, 0],
+    ]);
+    // The texel's own as without its refinement.
+    expect(classWeightsAt(map, centreOf(2, 11, 11)).map((w) => Math.round(w * 255))).toEqual([
+      100, 100, 55,
+    ]);
+  });
+
+  it.each([
+    {
+      name: "whose refined cells' weights are not 16 a texel over its classes",
+      change: { weights: new Uint8Array(15 * 3) },
+      message: /1 refined texels of 16 cells have 45 weights over 3 classes/u,
+    },
+    {
+      name: "whose refined texel is past its texels",
+      change: { texels: Uint32Array.from([4]) },
+      message: /refined texel 4 is past its 4 texels/u,
+    },
+  ])("refuses a refinement $name", ({ change, message }) => {
+    const refinement = {
+      side: 4,
+      texels: Uint32Array.from([1]),
+      weights: new Uint8Array(16 * 3).fill(85),
+      codes: new Uint16Array(),
+      ...change,
+    };
+    expect(() => classMapTexelsOf({ ...answerOf(TEXELS), refinement })).toThrow(message);
   });
 
   it("refuses an answer of more classes than a texel packs", () => {

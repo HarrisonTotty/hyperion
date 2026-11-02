@@ -11,7 +11,10 @@
  *   in part (a field finer than level 6) takes its surveyed share, its weights `weights_at` at its
  *   centre where the centre's field cell is surveyed and otherwise their mean at its surveyed
  *   cells' centres, times that share, so that `elsewhere` takes the rest of it; an unsurveyed texel
- *   is `null`, no weight ({@link classMapTexelsOf}, through R07's `packClassMap`).
+ *   is `null`, no weight ({@link classMapTexelsOf}, through R07's `packClassMap`). Where the answer
+ *   refines texels to the field's level (lane fix-coast-class-map; the crate's
+ *   `REFINED_CLASS_MAP_FROM`), a coast's or another bound's, their cells go in the map's fine page
+ *   (`ClassMapFine`), byte ÷ 255 a cell, a cell of no weight unsurveyed.
  * - **The laws** are one per class, the body's (form, entry) pairs, at most 16: the class's
  *   photometry as the worker resolves it (R10.T10.a's c A_N, its law's L(0)) on its law's row law
  *   on the body (`classRowLaw` with `elsewhere`: a Regolith class's the body's curve on a regolith
@@ -52,6 +55,8 @@ import type { PhotometricLaw } from "../appearance/law";
 import { cancelClassMapPoint, queueClassMapPoint } from "../bodies/classMapPoint";
 import { type NormalMapTexels, normalMapTexture, packNormalMap } from "../bodies/discNormals";
 import {
+  type ClassMapFineInput,
+  type ClassMapRefinedInput,
   type ClassMapTexel,
   type ClassMapTexels,
   classMapSurface,
@@ -204,7 +209,9 @@ function displayNodesOf(maturity: ClassMapMaturityAnswer, classes: number): Floa
  *
  * @throws Error for an answer at another level than {@link CLASS_MAP_LEVEL}, of more than
  *   `MAX_DISC_CLASSES` classes, or whose texels, shares, weights and maturity codes do not agree in
- *   number, or whose nodes are not K × 3 a class.
+ *   number, or whose nodes are not K × 3 a class; and for a refinement whose texel is past the
+ *   answer's or not surveyed, or given twice, whose cells a side are not 2 or 4, or whose weights or
+ *   codes are not r² cells a refined texel.
  */
 export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null {
   const classes = classCount(answer);
@@ -245,22 +252,76 @@ export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null 
     );
   };
   const { maturity } = answer;
+  const fine = fineInputOf(answer, classes);
   if (maturity === undefined) {
-    return packClassMap(n, classes, weightsOf);
+    return packClassMap(n, classes, weightsOf, undefined, fine);
   }
   if (maturity.codes.length !== count) {
     throw new Error(
       `a class map's ${String(count)} texels have ${String(maturity.codes.length)} maturity codes`,
     );
   }
-  return packClassMap(n, classes, weightsOf, {
-    codeOf: (texel) => maturity.codes[indexOf(texel) ?? -1] ?? Number.NaN,
-    nodes: displayNodesOf(maturity, classes),
-    drawn: Array.from(
-      { length: classes },
-      (_, k) => classPhotometryOf(answer.photometry, k) !== null,
-    ),
+  return packClassMap(
+    n,
+    classes,
+    weightsOf,
+    {
+      codeOf: (texel) => maturity.codes[indexOf(texel) ?? -1] ?? Number.NaN,
+      nodes: displayNodesOf(maturity, classes),
+      drawn: Array.from(
+        { length: classes },
+        (_, k) => classPhotometryOf(answer.photometry, k) !== null,
+      ),
+    },
+    fine,
+  );
+}
+
+/**
+ * An answered map's refined texels as R07's fine page takes them (lane fix-coast-class-map;
+ * `packClassMap`'s `fine`): each refined texel's r² cells, byte ÷ 255, a cell of no weight not
+ * surveyed, and their codes under a maturity; `undefined` where the answer refines none.
+ *
+ * @throws Error for a refined texel past the answer's texels, or weights or codes that are not r²
+ *   cells a refined texel.
+ */
+function fineInputOf(answer: ClassMapAnswer, classes: number): ClassMapFineInput | undefined {
+  const { refinement } = answer;
+  if (refinement === undefined || refinement.texels.length === 0) {
+    return undefined;
+  }
+  const cells = refinement.side * refinement.side;
+  const refinedCount = refinement.texels.length;
+  const coded = answer.maturity !== undefined;
+  if (
+    refinement.weights.length !== refinedCount * cells * classes ||
+    refinement.codes.length !== (coded ? refinedCount * cells : 0)
+  ) {
+    throw new Error(
+      `a class map's ${String(refinedCount)} refined texels of ${String(cells)} cells have ${String(refinement.weights.length)} weights over ${String(classes)} classes and ${String(refinement.codes.length)} codes`,
+    );
+  }
+  const refined = Array.from(refinement.texels, (t, k): ClassMapRefinedInput => {
+    const index = answer.texels[t];
+    if (index === undefined) {
+      throw new Error(
+        `a class map's refined texel ${String(t)} is past its ${String(answer.texels.length)} texels`,
+      );
+    }
+    const texel = fieldCellAt(CLASS_MAP_LEVEL, index);
+    const first = k * cells;
+    const cellWeights = Array.from({ length: cells }, (_, c) => {
+      const at = (first + c) * classes;
+      const bytes = refinement.weights.subarray(at, at + classes);
+      return bytes.some((byte) => byte > 0) ? Array.from(bytes, (byte) => byte / BYTE_MAX) : null;
+    });
+    return {
+      texel: { face: texel.face, i: texel.i, j: texel.j },
+      cells: cellWeights,
+      ...(coded ? { codes: Array.from(refinement.codes.subarray(first, first + cells)) } : {}),
+    };
   });
+  return { side: refinement.side, refined };
 }
 
 /**

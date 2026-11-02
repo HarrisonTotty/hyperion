@@ -8,8 +8,10 @@
 //! level table, the channels' share of whose lowest the cells held hold (R09.T8.d (b2)),
 //! `tests/golden/worker/terrain_test_weathered.golden` (R10.T1.c's client half;
 //! decision-r10-t1c-client-scope §3), the same scene's payloads over `TEST MOON` weathered, with its
-//! maturity's digests, and `tests/golden/worker/maturity_layer.golden` (the same ruling's §4), the
-//! maturity layer, the albedo nodes and the class map's maturity on two weathered worlds.
+//! maturity's digests, `tests/golden/worker/maturity_layer.golden` (the same ruling's §4), the
+//! maturity layer, the albedo nodes and the class map's maturity on two weathered worlds, and
+//! `tests/golden/worker/class_map.golden` (lane fix-coast-class-map), the class map over fields
+//! finer than its texels, as this version answers it and refined.
 //!
 //! The client's worker test (`apps/hyperion/.../workers/fieldsWasm.test.ts`) reads the first: it
 //! posts the blocks to the client's module, through the worker's own answers, and asks the module's
@@ -156,6 +158,22 @@
 //! - `class_map_maturity <codes> <nodes>`: the class map's (at the fixture's seed) `maturity()`
 //!   codes' digest, as the bake's codes', and its `nodes()` `Float32Array`'s.
 //!
+//! # The class map's format
+//!
+//! After the header, for each of two worlds, the Earth-like world's coast texel and the texels either
+//! side of it (`earth_coast`, level 8) and a weathered airless field of two crusts (`two_crusts`,
+//! level 7), each over a worker holding those texels' cells with their margin:
+//!
+//! - `world <name>: level <L>, classes <class>:<entry>…`;
+//! - for the map as this version answers it ([`WorkerFields::class_map`]), `default <texels> texels
+//!   complete <bool>`, then `texel <cell index> <surveyed>/<cells> <bytes> <code>`, its weight
+//!   bytes over the classes as two hexadecimal digits each and its maturity code as four, or `-`;
+//! - for the map refined, `refined <texels> texels <refined> refined complete <bool>`, its texels
+//!   alike, then for each refined texel `fine <place> <cell>…`, each cell `<bytes>/<code>` or `-`
+//!   for one not surveyed.
+//!
+//! From `REFINED_CLASS_MAP_FROM`, 27, the `default` lines are the `refined` lines' texels.
+//!
 //! # The maturity layer's format
 //!
 //! After the header, every float as `0x` and its 16 lowercase hexadecimal digits of bits, for each
@@ -193,9 +211,9 @@ use hyperion_testkit::golden::{GoldenWriter, f32_digest, f64_digest};
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::tests::{
-    MESH, TerrainFixture, WORLD, band_limit_level, cell, earth_fixture, earth_worker, face_uv,
-    fixture, lit, middle_weathered_world, probes, sight_lines, surveyed_about, terrain_fixture,
-    terrain_fixture_of, vertex_point, weathered_terrain_world,
+    MESH, TerrainFixture, WORLD, band_limit_level, cell, coast_worker, earth_fixture, earth_worker,
+    face_uv, fixture, lit, middle_weathered_world, probes, sight_lines, surveyed_about,
+    terrain_fixture, terrain_fixture_of, two_crust_worker, vertex_point, weathered_terrain_world,
 };
 use super::*;
 use crate::bake::WeightsLayer;
@@ -1054,6 +1072,98 @@ fn worker_matches_its_maturity_layer_golden() {
     golden!("worker/maturity_layer", &maturity_layer_text());
 }
 
+/// A class map's texel as the class map's golden writes it: its weight bytes over `classes` and its
+/// code.
+fn texel_words(weights: &[u8; CLASS_MAP_CLASSES], classes: usize, code: Option<u16>) -> String {
+    use std::fmt::Write as _;
+    let mut bytes = String::with_capacity(2 * classes);
+    for b in &weights[..classes] {
+        write!(bytes, "{b:02x}").expect("a string takes any write");
+    }
+    let code = code.map_or_else(|| "-".to_owned(), |c| format!("{c:04x}"));
+    format!("{bytes} {code}")
+}
+
+/// `map`'s texels, one `texel` line each.
+fn write_map_texels(out: &mut GoldenWriter, map: &ClassMap) {
+    let classes = map.classes().len();
+    for t in map.texels() {
+        out.line(&format!(
+            "texel {} {}/{} {}",
+            cell_index(t.cell()),
+            t.surveyed_cells(),
+            t.cells(),
+            texel_words(&t.weights(), classes, t.maturity())
+        ));
+    }
+}
+
+/// The class map's golden text (the module documentation's format).
+fn class_map_text() -> String {
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    let (earth, _) = coast_worker();
+    let (crusts, _) = two_crust_worker();
+    for (name, mut fields, body) in [
+        (
+            "earth_coast",
+            earth,
+            crate::synth::test_support::world(crate::testing::SyntheticWorld::EarthLike)
+                .header()
+                .body(),
+        ),
+        ("two_crusts", crusts.0, crusts.1),
+    ] {
+        let default = fields.class_map(body, SEED).expect("held");
+        let refined = fields
+            .class_map_at(body, SEED, ClassMapDetail::Refined)
+            .expect("held");
+        let classes: Vec<String> = refined
+            .classes()
+            .iter()
+            .map(|c| ground_word(c.material()))
+            .collect();
+        out.line(&format!(
+            "world {name}: level {}, classes {}",
+            refined.field_level(),
+            classes.join(" ")
+        ));
+        out.line(&format!(
+            "default {} texels complete {}",
+            default.texels().len(),
+            default.is_complete()
+        ));
+        write_map_texels(&mut out, &default);
+        out.line(&format!(
+            "refined {} texels {} refined complete {}",
+            refined.texels().len(),
+            refined.refined().len(),
+            refined.is_complete()
+        ));
+        write_map_texels(&mut out, &refined);
+        let n = refined.classes().len();
+        for r in refined.refined() {
+            let cells: Vec<String> = r
+                .cells()
+                .iter()
+                .map(|cell| {
+                    cell.map_or_else(
+                        || "-".to_owned(),
+                        |cell| texel_words(&cell.weights(), n, cell.maturity()).replace(' ', "/"),
+                    )
+                })
+                .collect();
+            out.line(&format!("fine {} {}", r.texel(), cells.join(" ")));
+        }
+    }
+    out.finish()
+}
+
+#[test]
+fn worker_matches_its_class_map_golden() {
+    golden!("worker/class_map", &class_map_text());
+}
+
 /// Block 0 of the terrain test's first payload carries the Moon-like world's header, which its
 /// `dto` lines state for the client; that those lines are the header the server sends is held by
 /// `hyperion-server`'s `requests::surface` tests (`terrain_test_golden`).
@@ -1077,7 +1187,8 @@ mod native_only {
 
     /// The files of `tests/golden/worker/`, each one a test writes and compares
     /// (decision-r10-t16-contracts §4): a stray file fails the test below, as before.
-    const WORKER_GOLDENS: [&str; 5] = [
+    const WORKER_GOLDENS: [&str; 6] = [
+        "class_map.golden",
         "earth_like.golden",
         "maturity_layer.golden",
         "moon_like.golden",

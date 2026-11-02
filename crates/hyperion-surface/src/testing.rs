@@ -44,6 +44,8 @@ pub(crate) use terrain_test::{payload_cover, terrain_test_fixture};
 pub(crate) use worlds::pluto_like;
 // R10.T1.c's tests and the bake's bench weather and vary the Moon-like world
 // (`material/maturity.rs`, `material/golden.rs`, `bake/tests.rs`, `benches/bake.rs`).
+#[cfg(test)]
+pub(crate) use worlds::two_crusts;
 pub use worlds::{
     SyntheticWorld, mars_like_without_its_epoch, moon_like_builder, moon_like_crater_params,
     synthetic_field,

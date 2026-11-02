@@ -24,7 +24,9 @@ use crate::material::{
 };
 use crate::patch::{BakeOptions, NormalScale, VertexPath};
 use crate::synth::test_support::{SEED, world};
-use crate::testing::{FieldBuilder, SyntheticWorld, moon_like_builder, moon_like_crater_params};
+use crate::testing::{
+    FieldBuilder, SyntheticWorld, moon_like_builder, moon_like_crater_params, two_crusts,
+};
 pub(super) use crate::testing::{
     TerrainTestFixture as TerrainFixture, payload_cover, terrain_test_fixture as terrain_fixture_of,
 };
@@ -2319,6 +2321,7 @@ fn worker_class_map_keeps_the_heaviest_classes_past_sixteen() {
             cells: 1,
             weights: BTreeMap::from([(m, f64::from(u8::try_from(k + 1).unwrap()))]),
             maturity: None,
+            fine: None,
         })
         .collect();
     readings.push(TexelReading {
@@ -2327,6 +2330,7 @@ fn worker_class_map_keeps_the_heaviest_classes_past_sixteen() {
         cells: 4,
         weights: BTreeMap::from([(materials[0], 4.0)]),
         maturity: None,
+        fine: None,
     });
     // Material 0 now weighs 1 + 1, the same as material 1, and the lighter by the order is left
     // out: of the two at 2, material 1, the later.
@@ -2335,6 +2339,565 @@ fn worker_class_map_keeps_the_heaviest_classes_past_sixteen() {
     assert!(kept.contains(&materials[0]));
     assert!(!kept.contains(&materials[1]));
     assert_eq!(kept, [&materials[..1], &materials[2..]].concat());
+}
+
+/// The Earth-like world's first texel on face +x along j = 32 whose 16 cells' records the
+/// classifier decides apart with some cells under water and some dry (a coast), and the first after
+/// it, two or more texels on, whose cells it decides alike.
+fn earth_coast_and_inland() -> (PatchKey, PatchKey) {
+    let field = world(SyntheticWorld::EarthLike);
+    let level = field.header().level().get();
+    let mut coast: Option<PatchKey> = None;
+    let mut cells = Vec::new();
+    for i in 0..64 {
+        let at = PatchKey::new(Face::PosX, CLASS_MAP_LEVEL, i, 32).unwrap();
+        field_cells_of(at, level, &mut cells);
+        let materials: BTreeSet<GroundMaterial> = cells
+            .iter()
+            .map(|&c| crate::material::cell_material(field, c).unwrap())
+            .collect();
+        let wet = cells
+            .iter()
+            .filter(|&&c| field.cell(c).unwrap().is_under_water())
+            .count();
+        match coast {
+            None if materials.len() > 1 && (1..cells.len()).contains(&wet) => coast = Some(at),
+            Some(found) if materials.len() == 1 && i > found.i() + 1 => return (found, at),
+            _ => {}
+        }
+    }
+    panic!("the Earth-like world's equator crosses a coast on face +x, and inland beyond it");
+}
+
+/// A worker holding `cells` of `field` surveyed, with their margin, and no σ survey, which the class
+/// map does not read: σ's survey refuses a survey whose cells' trunks' receivers it does not hold
+/// (`LevelSigma::survey`'s `expect`; lane fix-coast-class-map's finding), as three texels on the
+/// Earth-like world's equator are.
+fn worker_over(field: &CoarseField, cells: &BTreeSet<PatchKey>) -> WorkerFields {
+    let blocks = split(&encode_within(
+        field,
+        &cover(cells, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        FIXTURE_BLOCK_BYTES,
+    ));
+    let body = field.header().body();
+    let mut fields = WorkerFields::new();
+    fields.init(body, &blocks[0], SigmaSurvey::Skipped).unwrap();
+    for block in &blocks[1..] {
+        fields.chunk(body, block).unwrap();
+    }
+    fields
+}
+
+/// `weights`' bytes by material, over `classes`, the map's.
+fn bytes_by_material(
+    weights: [u8; CLASS_MAP_CLASSES],
+    classes: &[ClassMapClass],
+) -> BTreeMap<GroundMaterial, u8> {
+    classes
+        .iter()
+        .zip(weights)
+        .filter(|&(_, byte)| byte > 0)
+        .map(|(class, byte)| (class.material(), byte))
+        .collect()
+}
+
+#[test]
+fn class_looks_are_apart_past_a_third_of_a_stop_or_on_another_law() {
+    let law = PhaseLaw::Lambert;
+    let other = PhaseLaw::Regolith;
+    let a = Some(([0.1, 0.2, 0.3], law));
+    assert_eq!(bits(REFINE_CONTRAST), bits(hyperion_base::math::cbrt(2.0)));
+    let within = Some(([0.1 * 1.25, 0.2, 0.3], law));
+    let past = Some(([0.1, 0.2, 0.3 / 1.27], law));
+    assert_eq!(
+        [
+            looks_apart(a, a),
+            looks_apart(a, within),
+            looks_apart(a, past),
+            looks_apart(past, a),
+            looks_apart(a, Some(([0.1, 0.2, 0.3], other))),
+            looks_apart(a, None),
+            looks_apart(None, None),
+        ],
+        [false, false, true, true, true, true, false]
+    );
+}
+
+#[test]
+fn the_refined_class_map_waits_for_its_version() {
+    assert_eq!(
+        ClassMapDetail::of_version(GeneratorVersion::new(26)),
+        ClassMapDetail::Coarse
+    );
+    assert_eq!(
+        ClassMapDetail::of_version(REFINED_CLASS_MAP_FROM),
+        ClassMapDetail::Refined
+    );
+    // The tripwire: the bump to 27 fails it, and re-blesses `worker/class_map`, whose `default`
+    // lines then become its `refined` ones, or raises the switch to the train they ride.
+    assert!(
+        GENERATOR_VERSION < REFINED_CLASS_MAP_FROM,
+        "generator version {GENERATOR_VERSION} reaches REFINED_CLASS_MAP_FROM: re-bless \
+         `worker/class_map` and retire the switch"
+    );
+    // Over the coast, where the refined map is another: below the switch the map is the coarse one.
+    let (mut fields, _) = coast_worker();
+    let body = world(SyntheticWorld::EarthLike).header().body();
+    let default = fields.class_map(body, SEED).unwrap();
+    assert_eq!(default.refined(), []);
+    assert_eq!(
+        default,
+        fields
+            .class_map_at(body, SEED, ClassMapDetail::Coarse)
+            .unwrap()
+    );
+    assert_ne!(
+        default,
+        fields
+            .class_map_at(body, SEED, ClassMapDetail::Refined)
+            .unwrap()
+    );
+}
+
+/// Where a refined texel's texel is in its map's texels.
+fn place(refined: &RefinedTexel) -> usize {
+    usize::try_from(refined.texel()).unwrap()
+}
+
+/// The Earth-like world's coast texel ([`earth_coast_and_inland`]) and the texels either side of it
+/// along i, surveyed with their margin, and the three texels.
+pub(super) fn coast_worker() -> (WorkerFields, [PatchKey; 3]) {
+    let field = world(SyntheticWorld::EarthLike);
+    let level = field.header().level().get();
+    let (coast, _) = earth_coast_and_inland();
+    let texels = [-1_i32, 0, 1].map(|di| {
+        let i = u32::try_from(i32::try_from(coast.i()).unwrap() + di).unwrap();
+        PatchKey::new(coast.face(), CLASS_MAP_LEVEL, i, coast.j()).unwrap()
+    });
+    let mut cells = BTreeSet::new();
+    let mut each = Vec::new();
+    for texel in texels {
+        field_cells_of(texel, level, &mut each);
+        cells.extend(each.iter().copied());
+    }
+    (worker_over(field, &cells), texels)
+}
+
+/// One of the coast's order check's queries: the map at a detail, a bake over the coast, or a
+/// material at one of its cells.
+#[derive(Debug, Clone, Copy)]
+enum CoastQuery {
+    Map(ClassMapDetail),
+    Bake(PatchKey),
+    Material(FaceUv),
+}
+
+/// A [`CoastQuery`]'s answer.
+#[derive(Debug, PartialEq)]
+enum CoastAnswer {
+    Map(Result<ClassMap, QueryBodyError>),
+    Bake(Box<Result<BodyBake, QueryBodyError>>),
+    Material(Result<Option<SurveyedMaterial>, QueryBodyError>),
+}
+
+/// `q`'s answer on `body` from `fields`.
+fn ask_coast(fields: &mut WorkerFields, body: BodyRef, q: CoastQuery) -> CoastAnswer {
+    match q {
+        CoastQuery::Map(detail) => CoastAnswer::Map(fields.class_map_at(body, SEED, detail)),
+        CoastQuery::Bake(key) => CoastAnswer::Bake(Box::new(fields.bake(body, SEED, key, &MESH))),
+        CoastQuery::Material(at) => CoastAnswer::Material(fields.material(body, SEED, at)),
+    }
+}
+
+/// The refined map shares the body's caches with its coarse map, bakes and materials in any order,
+/// each answer a fresh worker's, and two refined maps agree.
+#[test]
+fn worker_refined_class_map_is_the_same_in_any_order_and_from_a_fresh_worker() {
+    let body = world(SyntheticWorld::EarthLike).header().body();
+    let (warm, texels) = coast_worker();
+    let coast = texels[1];
+    let centre = point(coast, 0.5, 0.5);
+    let queries = [
+        CoastQuery::Map(ClassMapDetail::Refined),
+        CoastQuery::Bake(PatchKey::containing(4, centre).unwrap()),
+        CoastQuery::Material(face_uv(coast, 0.3, 0.6)),
+        CoastQuery::Map(ClassMapDetail::Coarse),
+        CoastQuery::Bake(PatchKey::containing(7, centre).unwrap()),
+        CoastQuery::Material(face_uv(coast, 0.8, 0.1)),
+        CoastQuery::Map(ClassMapDetail::Refined),
+    ];
+    let warm = std::cell::RefCell::new(warm);
+    assert_order_independent(&queries, |&q| ask_coast(&mut warm.borrow_mut(), body, q));
+    let mut warm = warm.into_inner();
+    for q in queries {
+        let (mut cold, _) = coast_worker();
+        assert_eq!(
+            ask_coast(&mut warm, body, q),
+            ask_coast(&mut cold, body, q),
+            "{q:?}"
+        );
+    }
+    let refined = warm
+        .class_map_at(body, SEED, ClassMapDetail::Refined)
+        .unwrap();
+    assert_ne!(
+        refined.refined(),
+        [],
+        "the queries compared refine the coast"
+    );
+}
+
+#[test]
+fn worker_class_map_refines_a_coast_texel_to_its_cells_and_leaves_an_inland_one() {
+    let field = world(SyntheticWorld::EarthLike);
+    let level = field.header().level().get();
+    let (coast, inland) = earth_coast_and_inland();
+    let mut coast_cells = Vec::new();
+    field_cells_of(coast, level, &mut coast_cells);
+    // The coast texel surveyed but for one of its dry cells, which the refined texel leaves out.
+    let left_out = *coast_cells
+        .iter()
+        .find(|&&c| !field.cell(c).unwrap().is_under_water())
+        .unwrap();
+    let mut cells: BTreeSet<PatchKey> = coast_cells.iter().copied().collect();
+    cells.remove(&left_out);
+    cells.extend(inland.children().into_iter().flat_map(PatchKey::children));
+    let mut fields = worker_over(field, &cells);
+    let body = field.header().body();
+    let coarse = fields
+        .class_map_at(body, SEED, ClassMapDetail::Coarse)
+        .unwrap();
+    let refined = fields
+        .class_map_at(body, SEED, ClassMapDetail::Refined)
+        .unwrap();
+    assert_eq!(coarse.refined(), []);
+    assert!(refined.is_complete());
+    assert_eq!(refined.fine_side(), 4);
+    let places: Vec<PatchKey> = refined.texels().iter().map(ClassMapTexel::cell).collect();
+    let at = |texel: PatchKey| places.iter().position(|&t| t == texel).unwrap();
+    assert_eq!(
+        refined.refined().iter().map(place).collect::<Vec<_>>(),
+        [at(coast)],
+        "the coast texel alone is refined"
+    );
+    // The inland texel as the coarse map reads it: its centre's weights.
+    let inland_of = |map: &ClassMap| {
+        let texel = map.texels()[map
+            .texels()
+            .iter()
+            .position(|t| t.cell() == inland)
+            .unwrap()];
+        bytes_by_material(texel.weights(), map.classes())
+    };
+    assert_eq!(inland_of(&refined), inland_of(&coarse));
+    // Each surveyed cell of the coast its own weights at its centre, the left-out cell none, and
+    // the texel's own their mean.
+    let held = fields.field(body).unwrap().clone();
+    let synth = Synthesiser::new(&held, SEED);
+    // A refined cell's weights at its own level's band, 8 − 6 (Design note 8's rule).
+    let band = BandLevel::new(normal_map_band(level)).unwrap();
+    let fine = refined.refined()[0].cells();
+    assert_eq!(fine.len(), 16);
+    let mut sums = BTreeMap::<GroundMaterial, f64>::new();
+    for (&cell, own) in coast_cells.iter().zip(fine) {
+        if cell == left_out {
+            assert_eq!(*own, None);
+            continue;
+        }
+        let expected: BTreeMap<GroundMaterial, u8> = weights_at(
+            &synth,
+            &mut SynthCache::new(),
+            face_uv(cell, 0.5, 0.5),
+            band,
+        )
+        .unwrap()
+        .iter()
+        .collect();
+        assert_eq!(
+            bytes_by_material(own.unwrap().weights(), refined.classes()),
+            expected,
+            "cell {cell:?}"
+        );
+        for (material, byte) in expected {
+            *sums.entry(material).or_insert(0.0) += f64::from(byte);
+        }
+    }
+    let texel = refined.texels()[at(coast)];
+    assert_eq!((texel.surveyed_cells(), texel.cells()), (15, 16));
+    let mean = bytes_by_material(texel.weights(), refined.classes());
+    assert!(mean.keys().all(|material| sums.contains_key(material)));
+    for (material, sum) in &sums {
+        let byte = f64::from(mean.get(material).copied().unwrap_or(0));
+        assert!(
+            (byte - sum / 15.0).abs() < 1.0,
+            "{material:?}: byte {byte} against the mean {}",
+            sum / 15.0
+        );
+    }
+    let first = fine[0].unwrap().weights();
+    assert!(
+        fine.iter().flatten().any(|cell| cell.weights() != first),
+        "the coast's cells read apart"
+    );
+}
+
+#[test]
+fn worker_class_map_refines_both_texels_of_a_bound_along_their_edge() {
+    // Two texels side by side on face +x, each of one class by its cells' records and the two
+    // drawn apart: the bound runs along their shared edge, so each is refined, though its own
+    // cells agree.
+    let field = world(SyntheticWorld::EarthLike);
+    let level = field.header().level().get();
+    let look = |material: GroundMaterial| {
+        material.material().map(|m| {
+            let drawn = drawn_photometry(field.header(), m).unwrap();
+            (drawn.normal_albedo_bvr(), drawn.phase_law())
+        })
+    };
+    let one_class = |texel: PatchKey| {
+        let mut cells = Vec::new();
+        field_cells_of(texel, level, &mut cells);
+        let materials: BTreeSet<GroundMaterial> = cells
+            .iter()
+            .map(|&c| crate::material::cell_material(field, c).unwrap())
+            .collect();
+        (materials.len() == 1).then(|| materials.into_iter().next().unwrap())
+    };
+    let (left, right) = (0..64)
+        .flat_map(|j| (0..63).map(move |i| (i, j)))
+        .map(|(i, j)| {
+            (
+                PatchKey::new(Face::PosX, CLASS_MAP_LEVEL, i, j).unwrap(),
+                PatchKey::new(Face::PosX, CLASS_MAP_LEVEL, i + 1, j).unwrap(),
+            )
+        })
+        .find(|&(a, b)| {
+            matches!((one_class(a), one_class(b)), (Some(x), Some(y)) if looks_apart(look(x), look(y)))
+        })
+        .expect("the Earth-like world holds a bound along a texel's edge on face +x");
+    let mut cells = BTreeSet::new();
+    let mut each = Vec::new();
+    for texel in [left, right] {
+        field_cells_of(texel, level, &mut each);
+        cells.extend(each.iter().copied());
+    }
+    let mut fields = worker_over(field, &cells);
+    let body = field.header().body();
+    let refined = fields
+        .class_map_at(body, SEED, ClassMapDetail::Refined)
+        .unwrap();
+    assert_eq!(
+        refined
+            .refined()
+            .iter()
+            .map(|r| refined.texels()[place(r)].cell())
+            .collect::<Vec<_>>(),
+        [left, right]
+    );
+    // Each texel's cells of one class: its own reading, read once, for each of them.
+    for r in refined.refined() {
+        let own = refined.texels()[place(r)];
+        assert_eq!(
+            r.cells()
+                .iter()
+                .map(|cell| cell.map(|cell| cell.weights()))
+                .collect::<Vec<_>>(),
+            vec![Some(own.weights()); 16],
+            "texel {:?}",
+            own.cell()
+        );
+    }
+    // Alone, a texel of one class has nothing beside it surveyed to differ from.
+    let mut alone = BTreeSet::new();
+    field_cells_of(left, level, &mut each);
+    alone.extend(each.iter().copied());
+    let mut fields = worker_over(field, &alone);
+    assert_eq!(
+        fields
+            .class_map_at(body, SEED, ClassMapDetail::Refined)
+            .unwrap()
+            .refined(),
+        []
+    );
+}
+
+/// A weathered airless field of level 7 whose crust is the maria's province on face +y west of
+/// s = 20.5 ÷ 64, through texel (20, 20)'s cells, and over 22 ÷ 64 ≤ s < 23 ÷ 64, texel (22, 20)
+/// whole, and the highlands' lid elsewhere: so texel 20's cells are of two classes, and texels 21
+/// and 22 each of one class, apart across their shared edge.
+fn two_crust_field() -> CoarseField {
+    let (palette, crust_palette) = two_crusts();
+    FieldBuilder::new(Metres::new(3.39e6))
+        .palette(palette)
+        .crust_palette(crust_palette)
+        .maturity(0.6)
+        .weathering_rate(1.0)
+        .crust(|p| {
+            let at = crate::cube::xyz_to_face_uv(p);
+            let s = crate::cube::uv_to_st(at.u);
+            let province = at.face == Face::PosY
+                && (s < 20.5 / 64.0 || (22.0 / 64.0..23.0 / 64.0).contains(&s));
+            if province {
+                crate::field::Crust::Province
+            } else {
+                crate::field::Crust::Lid
+            }
+        })
+        .build()
+}
+
+/// The texels of [`two_crust_field`] its tests survey: (20, 20), (21, 20) and (22, 20) of face +y.
+fn two_crust_texels() -> [PatchKey; 3] {
+    [texel(20, 20), texel(21, 20), texel(22, 20)]
+}
+
+/// A worker holding [`two_crust_field`]'s three texels' cells with their margin, and its body.
+pub(super) fn two_crust_worker() -> ((WorkerFields, BodyRef), CoarseField) {
+    let field = two_crust_field();
+    let cells: BTreeSet<PatchKey> = two_crust_texels()
+        .iter()
+        .flat_map(|t| t.children())
+        .collect();
+    let body = field.header().body();
+    ((worker_over(&field, &cells), body), field)
+}
+
+#[test]
+fn worker_class_map_codes_each_refined_cell_s_maturity_or_its_texel_s() {
+    let ((mut fields, body), field) = two_crust_worker();
+    let level = field.header().level().get();
+    assert_eq!(level, CLASS_MAP_LEVEL + 1);
+    let texels = two_crust_texels();
+    let map = fields
+        .class_map_at(body, SEED, ClassMapDetail::Refined)
+        .unwrap();
+    assert!(map.is_complete());
+    assert_eq!(map.fine_side(), 2);
+    assert_eq!(
+        map.refined()
+            .iter()
+            .map(|r| map.texels()[place(r)].cell())
+            .collect::<Vec<_>>(),
+        texels,
+        "texel 20 for its cells, 21 and 22 for their shared edge"
+    );
+    let m_body = field.header().maturity().unwrap();
+    let held = fields.field(body).unwrap().clone();
+    let synth = Synthesiser::new(&held, SEED);
+    let band_0 = band(CLASS_MAP_BAND);
+    let mut children = Vec::new();
+    // Texel 20: each cell its own code at its centre, held at m_body.
+    let within = &map.refined()[0];
+    field_cells_of(texels[0], level, &mut children);
+    let own: Vec<Option<u16>> = children
+        .iter()
+        .map(|&cell| {
+            let m = maturity_at_level(
+                &synth,
+                &mut SynthCache::new(),
+                face_uv(cell, 0.5, 0.5),
+                band_0,
+            )
+            .unwrap()
+            .unwrap();
+            Some(encode_maturity(if m < m_body { m } else { m_body }, m_body))
+        })
+        .collect();
+    assert_eq!(
+        within
+            .cells()
+            .iter()
+            .map(|cell| cell.and_then(|cell| cell.maturity()))
+            .collect::<Vec<_>>(),
+        own
+    );
+    // Texels 21 and 22: each cell its texel's own weights and code.
+    for refined in &map.refined()[1..] {
+        let texel = map.texels()[place(refined)];
+        assert!(texel.maturity().is_some());
+        assert_eq!(
+            refined.cells(),
+            [Some(FineTexel {
+                weights: texel.weights(),
+                maturity: texel.maturity(),
+            }); 4],
+            "texel {:?}",
+            texel.cell()
+        );
+    }
+}
+
+#[test]
+fn worker_class_map_refines_a_coast_once_its_margin_comes() {
+    // The coast texel's cells and their margin, in blocks of 1,200 bytes past their header: with
+    // one block beside block 0 the map may lack a record its reads need, and is then incomplete;
+    // with all of them it is the map of a worker given them in one go, the coast refined.
+    let field = world(SyntheticWorld::EarthLike);
+    let level = field.header().level().get();
+    let (coast, _) = earth_coast_and_inland();
+    let mut cells = Vec::new();
+    field_cells_of(coast, level, &mut cells);
+    let cells: BTreeSet<PatchKey> = cells.into_iter().collect();
+    let blocks = split(&encode_within(
+        field,
+        &cover(&cells, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        BLOCK_HEADER_BYTES + 1_200,
+    ));
+    let body = field.header().body();
+    let full = worker_over(field, &cells)
+        .class_map_at(body, SEED, ClassMapDetail::Refined)
+        .unwrap();
+    assert!(full.is_complete());
+    assert_eq!(full.refined().len(), 1, "the coast texel refined");
+    let mut waited = false;
+    for k in 1..blocks.len() {
+        let mut fields = WorkerFields::new();
+        fields
+            .init(body, &blocks[0], SigmaSurvey::Surveyed)
+            .unwrap();
+        fields.chunk(body, &blocks[k]).unwrap();
+        let partial = fields
+            .class_map_at(body, SEED, ClassMapDetail::Refined)
+            .unwrap();
+        if partial.is_complete() {
+            continue;
+        }
+        waited = true;
+        for (n, rest) in blocks.iter().enumerate().skip(1) {
+            if n != k {
+                fields.chunk(body, rest).unwrap();
+            }
+        }
+        assert_eq!(
+            fields
+                .class_map_at(body, SEED, ClassMapDetail::Refined)
+                .unwrap(),
+            full,
+            "block {k}"
+        );
+    }
+    assert!(waited, "some block's map waits for its margin");
+}
+
+#[test]
+fn worker_class_map_refines_nothing_on_a_field_at_its_level() {
+    let f = fixture();
+    let mut fields = f.worker();
+    let refined = fields
+        .class_map_at(f.body, SEED, ClassMapDetail::Refined)
+        .unwrap();
+    assert_eq!(refined.fine_side(), 1);
+    assert_eq!(
+        refined,
+        fields
+            .class_map_at(f.body, SEED, ClassMapDetail::Coarse)
+            .unwrap(),
+        "a texel a cell has nothing to refine"
+    );
 }
 
 /// The high setting's doubled normals alone: on the face-differences path, which moves the vertices

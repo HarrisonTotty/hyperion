@@ -189,6 +189,39 @@ pub fn material_at<F: FieldView>(
     Ok(facts.decide().1)
 }
 
+/// The classifier's material over the coarse cell `key` of `field` as its record states it: the
+/// rules at the cell's own elevation ([`SynthesisCell::elevation`]), on loose ground, in the
+/// cell's ice where it lies whole there or, partial, covers more than half the cell, and on no
+/// channel's bed.
+///
+/// It reads no height. The class map asks it of each surveyed cell under a texel, to find the
+/// texels whose cells' classes the disc would draw apart: a coast, an ice edge, a crust's bound,
+/// which run along the field's cells and which one reading at a texel's centre would give a single
+/// class mix (lane fix-coast-class-map; R10.T15.b.2's finding).
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] for the cell, its climate or an edge neighbour the view does
+/// not hold.
+pub(crate) fn cell_material<F: FieldView>(
+    field: &F,
+    key: PatchKey,
+) -> Result<GroundMaterial, QueryHeightError> {
+    let cell = field.cell(key).ok_or(QueryHeightError::NotSurveyed(key))?;
+    // `Site::of`'s site, made here: the class map classes cells with no synthesiser to keep it in.
+    let site = Site {
+        header: field.header(),
+        cell,
+        facts: SiteFacts::of(field, key, cell)?,
+    };
+    let h_m = cell.elevation().value();
+    let in_ice = match site.ice_placement(site.under_water(h_m)) {
+        IcePlacement::Settled(lies) => lies,
+        IcePlacement::ByCut => cell.ice_fraction() > 0.5,
+    };
+    Ok(site.facts(h_m, Steepness::Loose, in_ice, false).decide().1)
+}
+
 /// What the classifier decides at a point ([`material_at`]): the form the ground takes, always, and
 /// the palette entry it is made of, where the palette names one.
 ///

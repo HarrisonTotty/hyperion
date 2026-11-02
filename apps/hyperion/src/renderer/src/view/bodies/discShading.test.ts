@@ -849,9 +849,18 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
 
   it("reads a texel's code from the layer past the weights' its packing writes, rebuilt exactly from its two bytes", () => {
     expect(wgslFunction(bodyDiscWgsl, "class_map_maturity")).toBe(
-      "{ let bytes = textureLoad(class_weights, texel, face + 6u * ((count + 3u) / 4u), 0); " +
+      "{ let bytes = textureLoad(class_weights, texel, layer, 0); " +
         "let code = round(bytes.r * UNORM8_MAX) * (UNORM8_MAX + 1.0) + round(bytes.g * UNORM8_MAX); " +
         "return code / MATURITY_CODE_MAX; }",
+    );
+    // A face texel's code in layer face + 6 ⌈count ÷ 4⌉, a fine page's cell's past its page's weights.
+    const surface = wgslFunction(bodyDiscWgsl, "surface_at");
+    expect(surface).toContain("map_layout.groups = (count + 3u) / 4u;");
+    expect(surface).toContain(
+      "add_term(&sums, one, b, map_layout, stored, at.face + 6u * map_layout.groups);",
+    );
+    expect(surface).toContain(
+      "add_term(&sums, one, b, map_layout, stored, own.layer + map_layout.groups);",
     );
     expect([
       wgslConstant(bodyDiscWgsl, "UNORM8_MAX"),
@@ -871,8 +880,9 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
 
   it("takes a corner's code only under the record's flag, through the nodes' library and never its own formula", () => {
     const body = wgslFunction(bodyDiscWgsl, "surface_at");
-    expect(body).toContain(
-      "if (body.maturity) { corner_b[corner] = b; corner_segment[corner] = maturity_segment( class_map_maturity(vec2u(texel + vec2i(1)), at.face, count) ); }",
+    expect(body).toContain("map_layout.maturity = body.maturity;");
+    expect(wgslFunction(bodyDiscWgsl, "add_term")).toContain(
+      "if (map_layout.maturity) { (*sums).b[(*sums).terms] = b; (*sums).segment[(*sums).terms] = maturity_segment(class_map_maturity(texel, code_layer)); }",
     );
     expect(body).toContain("maturity_mix(lo, hi, segment.fraction)");
     expect(bodyDiscWgsl).not.toMatch(/fn maturity_segment|fn maturity_mix|pow\(/u);
@@ -885,21 +895,20 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
     expect(skip).toBeGreaterThan(0);
     expect(skip).toBeLessThan(body.indexOf("class_node(k, segment.node)"));
     expect(body.indexOf("class_node(")).toBe(body.indexOf("class_node(k, segment.node)"));
-    expect(body).toContain("out.albedo[k + 1u] = albedo / norm;");
+    expect(body).toContain("out.albedo[k + 1u] = albedo / sums.norm;");
     expect(wgslFunction(bodyDiscWgsl, "class_drawn")).toBe("{ return class_node(k, 0u).w > 0.5; }");
   });
 
   it("mixes each surveyed corner's nodes j and j + 1 of its class by its segment, weighted by its bilinear weight, as the twin does", () => {
-    // The twin, `classMapAlbedoAt`: Σ b T_c(x) ÷ Σ b over the surveyed corners, T_c(x) its
+    // The twin, `classMapAlbedoAt`: Σ b T_c(x) ÷ Σ b over the surveyed terms, T_c(x) its
     // `maturityNodeAlbedo`, (1 − f) Tⱼ + f Tⱼ₊₁ of class c's nodes (its weighting against the
     // bilinear mean and an unsurveyed corner in `discSurface.test.ts`).
     expect(wgslFunction(bodyDiscWgsl, "surface_at")).toContain(
-      "for (var corner = 0u; corner < 4u; corner = corner + 1u) { " +
-        "if (!(corner_b[corner] > 0.0)) { continue; } " +
-        "let segment = corner_segment[corner]; " +
+      "for (var t = 0u; t < sums.terms; t = t + 1u) { " +
+        "let segment = sums.segment[t]; " +
         "let lo = class_node(k, segment.node).xyz; " +
         "let hi = class_node(k, segment.node + 1u).xyz; " +
-        "albedo = albedo + corner_b[corner] * maturity_mix(lo, hi, segment.fraction); }",
+        "albedo = albedo + sums.b[t] * maturity_mix(lo, hi, segment.fraction); }",
     );
     // The twin under one code everywhere: its class's nodes j and j + 1, read from the table.
     const d = [0.3, -0.5, 0.8] as const;

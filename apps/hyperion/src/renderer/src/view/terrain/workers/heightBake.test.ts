@@ -34,9 +34,15 @@ function emptyBlock(): WasmFieldBlock {
 
 /**
  * The fake module's class map: one texel of one class, wholly surveyed, with `codes` its maturity
- * (none by default) and then K × 3 nodes rising from 0.01; `free` names it in `freed`.
+ * (none by default) and then K × 3 nodes rising from 0.01; where `refined`, the texel refined to a
+ * level-7 field's 2 × 2 cells, the second not surveyed, with codes under a maturity; `free` names it
+ * in `freed`.
  */
-function oneTexelMap(freed: string[], codes: Uint16Array = new Uint16Array()): WasmClassMap {
+function oneTexelMap(
+  freed: string[],
+  codes: Uint16Array = new Uint16Array(),
+  refined = false,
+): WasmClassMap {
   return {
     level: 6,
     fieldLevel: 6,
@@ -47,6 +53,11 @@ function oneTexelMap(freed: string[], codes: Uint16Array = new Uint16Array()): W
     weights: () => Uint8Array.from([255]),
     maturity: () => codes.slice(),
     nodes: () => Float32Array.from({ length: 16 * 3 }, (_, k) => 0.01 * (k + 1)),
+    fineSide: refined ? 2 : 1,
+    refined: () => (refined ? Uint32Array.from([0]) : new Uint32Array()),
+    fineWeights: () => (refined ? Uint8Array.from([255, 0, 255, 255]) : new Uint8Array()),
+    fineMaturity: () =>
+      refined && codes.length > 0 ? Uint16Array.from([100, 0, 200, 300]) : new Uint16Array(),
     complete: true,
     free: () => {
       freed.push("class map");
@@ -158,6 +169,7 @@ function fakeBaked(codes: Uint16Array): WasmBakedTerrain {
 function fakeModule(
   bake?: FakeBake,
   classMapCodes: Uint16Array = new Uint16Array(),
+  classMapRefined = false,
 ): {
   module: HeightModule;
   held: Map<string, number>;
@@ -226,7 +238,9 @@ function fakeModule(
       if (seed === 0xffffn) {
         throw new WebAssembly.RuntimeError("unreachable");
       }
-      return held.has(key(system, body)) ? oneTexelMap(freed, classMapCodes) : undefined;
+      return held.has(key(system, body))
+        ? oneTexelMap(freed, classMapCodes, classMapRefined)
+        : undefined;
     },
     // A held body's normal map of the class map's cell; seed 0xbeef, a broken module's, none.
     normalMap: (system, body, seed) =>
@@ -262,12 +276,15 @@ function fakeModule(
  * A class-map query's answer from {@link fakeModule} holding a field, its map's maturity `codes`
  * (none by default), and what it freed.
  */
-function classMapAnswered(codes: Uint16Array = new Uint16Array()): {
+function classMapAnswered(
+  codes: Uint16Array = new Uint16Array(),
+  refined = false,
+): {
   readonly map: ClassMapAnswer;
   readonly transfer: ReadonlyArray<Transferable>;
   readonly freed: ReadonlyArray<string>;
 } {
-  const { module, freed } = fakeModule(undefined, codes);
+  const { module, freed } = fakeModule(undefined, codes, refined);
   const fields = new WorkerFields(module);
   answerRequest(
     module,
@@ -549,6 +566,30 @@ describe("a height worker's fields", () => {
         maturity.nodes[47],
       ]).toEqual([[40_000], 48, Math.fround(0.01), Math.fround(0.01 * 48)]);
       expect(transfer.slice(-2)).toEqual([maturity.codes.buffer, maturity.nodes.buffer]);
+    });
+
+    it("answers no refinement where the module's map refines no texel (lane fix-coast-class-map)", () => {
+      const { map } = classMapAnswered();
+      expect(Object.hasOwn(map, "refinement")).toBe(false);
+    });
+
+    it("answers each refined texel's cells and their codes as the module's, all transferred (lane fix-coast-class-map)", () => {
+      const { map, transfer } = classMapAnswered(Uint16Array.from([40_000]), true);
+      const { refinement } = map;
+      if (refinement === undefined) {
+        throw new Error("the map was answered without its refinement");
+      }
+      expect([
+        refinement.side,
+        [...refinement.texels],
+        [...refinement.weights],
+        [...refinement.codes],
+      ]).toEqual([2, [0], [255, 0, 255, 255], [100, 0, 200, 300]]);
+      expect(transfer.slice(-3)).toEqual([
+        refinement.texels.buffer,
+        refinement.weights.buffer,
+        refinement.codes.buffer,
+      ]);
     });
   });
 

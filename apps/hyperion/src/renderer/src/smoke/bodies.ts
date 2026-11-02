@@ -25,7 +25,12 @@ import {
   rasteriseDisc,
   viewRay,
 } from "../view/bodies/discShading";
-import { type ClassMapTexels, classMapSurface, packClassMap } from "../view/bodies/discSurface";
+import {
+  type ClassMapTexel,
+  type ClassMapTexels,
+  classMapSurface,
+  packClassMap,
+} from "../view/bodies/discSurface";
 import {
   BODY_DISC_CELLS_KERNEL,
   LitBodyRenderer,
@@ -43,6 +48,7 @@ import {
   viewRotation4,
 } from "../view/camera/projection";
 import { IDENTITY_QUATERNION } from "../view/camera/quaternion";
+import { MATURITY_NODES } from "../view/terrain/maturityNodes";
 import type { BodyFigure } from "../view/terrain/planet";
 import type { ComputeHandle, RenderEngine } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
@@ -718,6 +724,50 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
       `${String(reconstructed.expected.length)} pixels; every texel finite ${String(finite)}; worst error ${levelAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(levelAgreement.classes)}${levelAgreement.mismatches.length > 0 ? `: ${levelAgreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
     );
     await checkNormalMap(engine, renderer, checks, level, atLevel, reconstructed, made);
+    // Lane fix-coast-class-map: a map of four texels a face with a fine page, half its texels
+    // refined in a pattern that varies cell to cell, a cell of each not surveyed, read at the
+    // field's level in its refined texels and across their edges, on the GPU and in the rasteriser
+    // alike: a level-8 field's 4 × 4 cells, and a level-7 field's 2 × 2 under a maturity, whose
+    // codes the cells and the tiles' gutters carry.
+    for (const [side, matured] of [
+      [4, false],
+      [2, true],
+    ] as const) {
+      const fine = fineClassMap(side, matured);
+      const withFine = classMapSurface(
+        engine,
+        `smoke class map with a fine page of ${String(side)} cells a side`,
+        fine,
+        levelClassLaws(),
+        uniform,
+      );
+      made.push(withFine);
+      // The harness reads its targets back in order: each before the next draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const refined = await drawDisc(
+        engine,
+        renderer,
+        viewport,
+        40,
+        60,
+        TILTED_OBLATE,
+        [0, 0],
+        CAMERA,
+        null,
+        { surface: withFine, rotation: TILTED, texels: fine },
+      );
+      const fineFinite = refined.texels.every((value) => Number.isFinite(value));
+      const fineAgreement = texelAgreement(refined);
+      checks.check(
+        `fix-coast-class-map a disc under a class map with a fine page of ${String(side)} × ${String(side)} cells${matured ? " and a maturity" : ""} equals the CPU rasteriser's, every texel finite`,
+        fineFinite &&
+          fineAgreement.worst <= 1 &&
+          fineAgreement.classes &&
+          refined.expected.length > 0 &&
+          fine.fine !== undefined,
+        `${String(refined.expected.length)} pixels; ${String(fine.fine?.tiles ?? 0)} tiles; every texel finite ${String(fineFinite)}; worst error ${fineAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(fineAgreement.classes)}${fineAgreement.mismatches.length > 0 ? `: ${fineAgreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
+      );
+    }
     const results: string[] = [];
     let worst = 0;
     for (const diameterPx of [20, 40]) {
@@ -776,6 +826,58 @@ function levelClassMap(): ClassMapTexels {
     const share = i === 31 ? 0.5 : 1;
     return [w * share, (1 - w) * share];
   });
+}
+
+/**
+ * Lane fix-coast-class-map's map: four texels a face of two classes, every texel surveyed, those
+ * with i + j even refined to `r` × `r` cells, cell (ci, cj) class 0's where ci + 2 cj + face is odd
+ * mod 3 and class 1's otherwise, the last cell of each not surveyed; the others class 0 at a
+ * quarter and class 1 at the rest, their own the mean of their cells' for the refined. Where
+ * `matured`, texel (i, j)'s code is 5,000 + 7,000 i + 3,000 j and cell c's of a refined one
+ * 10,000 + 3,000 c, each class drawn from nodes rising with their maturity.
+ */
+function fineClassMap(r: 2 | 4, matured: boolean): ClassMapTexels {
+  const refined = ([0, 1, 2, 3, 4, 5] as const).flatMap((face) =>
+    Array.from({ length: 16 }, (_, k) => ({ i: k % 4, j: Math.floor(k / 4) }))
+      .filter(({ i, j }) => (i + j) % 2 === 0)
+      .map(({ i, j }) => ({
+        texel: { face, i, j },
+        cells: Array.from({ length: r * r }, (_, c) => {
+          if (c === r * r - 1) {
+            return null;
+          }
+          const w = ((c % r) + 2 * Math.floor(c / r) + face) % 3 === 1 ? 1 : 0;
+          return [w, 1 - w];
+        }),
+        codes: Array.from({ length: r * r }, (_, c) => 10_000 + 3_000 * c),
+      })),
+  );
+  const ownOf = ({ face, i, j }: ClassMapTexel): ReadonlyArray<number> => {
+    const input = refined.find(
+      ({ texel }) => texel.face === face && texel.i === i && texel.j === j,
+    );
+    if (input === undefined) {
+      return [0.25, 0.75];
+    }
+    const cells = input.cells.filter((cell) => cell !== null);
+    const w = cells.reduce((sum, cell) => sum + (cell[0] ?? 0), 0) / cells.length;
+    return [w, 1 - w];
+  };
+  const maturity = matured
+    ? {
+        codeOf: ({ i, j }: ClassMapTexel): number => 5_000 + 7_000 * i + 3_000 * j,
+        nodes: Float32Array.from(
+          { length: 3 * MATURITY_NODES * 2 },
+          (_, at) =>
+            0.05 +
+            0.04 * (Math.floor(at / 3) % MATURITY_NODES) +
+            0.3 * Math.floor(at / (3 * MATURITY_NODES)) +
+            0.01 * (at % 3),
+        ),
+        drawn: [true, true],
+      }
+    : undefined;
+  return packClassMap(4, 2, ownOf, maturity, { side: r, refined });
 }
 
 /** {@link levelClassMap}'s two classes' laws: a dark lunar class and a bright terrestrial one. */
