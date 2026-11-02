@@ -1226,6 +1226,43 @@ hundred innermost members.
       reaches generated output only through T28.b.b's swap.
     - _Built behind its hold (lane `p09-t28db`, 2026-10-30, at `GENERATOR_VERSION` 23, no output
       moved): see Risks, "P09.T28.d.b as built"._
+  - **P09.T28.d.c The exact orbit's arc from the epoch** (behind `KEPLER_ARC_VERSION` = 27; after
+    P09.T28.d.b; added 2026-11-02 on research advice, research-leans-9 §1). T28.d.b takes a state
+    from one 32-term series of dt/dη over the whole radial period. On an orbit bound only far out,
+    its apocentre 10⁴–10⁵ times its pericentre, the series must give the time near pericentre to
+    some 10⁻⁹ of a period of 10⁶–10⁹ yr, and misses the plan's bound there: 252 of 6,562 of the
+    fixture's D2 record-times at ±1,000 yr, the worst 0.052 ly off, and records outside their walk
+    pad (a broken contract).
+    - _When._ A non-circular exact orbit whose |dt| is under half its radial period (lean; the task
+      measures it) takes its state by the arc. Longer spans and the epicyclic edge keep the series.
+    - _The arc._ `t_arc(η) = ∫ from η₀ to η of dt/dη′`, with `dt/dη = r Δ |sin η| ÷ √F(r)` and
+      `r = e^(ū − Δ cos η)`, by a fixed Gauss–Legendre rule (`tables::gauss_legendre`'s 16 nodes),
+      the panel split at a turning point the arc crosses (lean; the task measures it). η solves
+      `t_arc(η) = dt` by a fixed count of safeguarded Newton steps from the series' η, inside the
+      bracket its wobble gives. The azimuth swept is `∫ L ÷ r² · dt/dη` over the same nodes, and
+      the Schwarzschild advance turns in proportion to it, as in T28.d.b.
+    - _The carrier._ `SphericalOrbit` keeps η₀ and what F reads at the epoch (r₀, the rest of Ψ
+      there, `v_r0²`, `L²`), and the state reads Ψ's table: `Galaxy::centre_potential` holds an
+      `Arc<CentrePotential>`, and each exact orbit under the arc a clone of it (lean).
+    - _Determinism._ Fixed nodes, step counts and order, and `crate::math` only; the constants
+      belong to the generator version from 27.
+    - _Tests._
+      - The plan's test under every 27 hold, every case within the bound (the ×1.6 orbit from
+        0.1 ly included, its pinned window dropped), with research's sweep from 0.1 and 0.3 ly at
+        ×1.45–2.0, tilt 0.3, at ±100 and ±1,000 yr.
+      - The fixture's Kepler-regime records in layer B within 1.5 r_h whose Δ exceeds 2, at ±100
+        and ±1,000 yr, against a direct integration (RK4 in the profile's pull at 2 × 10⁻³ local
+        dynamical times, converged against 10⁻³): every state-time within the bound, or pinned by
+        ID with its figure.
+      - T28.d.b's census C1 and the centre's source against a scan, under every 27 hold.
+      - The same state twice to the bit and in any order, and a digest named `pinned` for the
+        wasip1 suite.
+      - A bench of `state_at` on the series against the arc, in `benches/centre.rs`; the target is
+        a few µs.
+    - _The hold._ `KEPLER_ARC_VERSION` = 27, `KeplerArcRules::{Series, Local}`, a `GalaxyRules`
+      field in the every-27 list and the tripwire `the_kepler_arc_is_held_only_until_the_27_bump`
+      (decision-galaxy-25-train §1.3's pattern). Under `Series`, T28.d.b's code verbatim, no golden
+      changes; it reaches generated output only through T28.b.b's and T28.d.b's holds.
 
 #### P09.T29 The range query at the centre
 
