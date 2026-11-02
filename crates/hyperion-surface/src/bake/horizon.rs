@@ -104,7 +104,7 @@
 //! the generator version in force, and a change to it re-blesses them with no bump; nothing is
 //! drawn from a stream.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, SQRT_2, TAU};
 
 use hyperion_base::math;
@@ -116,6 +116,7 @@ use crate::cube::{
 };
 use crate::field::{FieldView, cell_index};
 use crate::geometry::vertex_spacing;
+use crate::memo::Table;
 use crate::num;
 use crate::patch::PATCH_VERTICES;
 use crate::spheroid::Spheroid;
@@ -536,9 +537,12 @@ pub(super) fn bake_horizon<F: FieldView>(
     let header = synth.field().header();
     let figure = header.figure();
     let steps = far_steps(key.level(), &figure, header.realised_relief().value());
+    let id = synth.channels().id();
+    // The cache's heights are the field's: started afresh here for another, once for the bake.
+    cache.far_heights_mut().keep(id);
     let mut ground = FarGround {
         synth,
-        id: synth.channels().id(),
+        id,
         own: heights,
         cells: vec![None; usize::try_from(CELLS_KEPT).expect("4,096 cells fit a usize")],
         refused_here: BTreeSet::new(),
@@ -604,8 +608,7 @@ fn keep_own_band(cache: &mut SynthCache, id: NetworkId, heights: &PatchHeights) 
                 j0 + u32::from(y),
             );
             kept.heights
-                .entry(at)
-                .or_insert(heights.sample(x, y).height_m);
+                .get_or_insert_with(at, || heights.sample(x, y).height_m);
         }
     }
     if let Some(parent) = key.level().checked_sub(1) {
@@ -621,7 +624,7 @@ fn keep_own_band(cache: &mut SynthCache, id: NetworkId, heights: &PatchHeights) 
                 let h = heights
                     .parent_height_m(2 * x, 2 * y)
                     .expect("a patch above level 0 carries its parent's heights");
-                kept.heights.entry(at).or_insert(h);
+                kept.heights.get_or_insert_with(at, || h);
             }
         }
     }
@@ -1058,9 +1061,8 @@ impl<F: FieldView> FarGround<'_, '_, F> {
             return own_m;
         }
         let key = memo_key(face, level, i, j);
-        let kept = cache.far_heights_mut();
-        kept.keep(self.id);
-        if let Some(&h) = kept.heights.get(&key) {
+        // The bake kept the cache's heights for this field at its start ([`bake_horizon`]).
+        if let Some(&h) = cache.far_heights_mut().heights.get(key) {
             return h;
         }
         if self.refused_here.contains(&key) {
@@ -1078,7 +1080,7 @@ impl<F: FieldView> FarGround<'_, '_, F> {
                 if kept.heights.len() >= FAR_HEIGHTS_HELD {
                     kept.heights.clear();
                 }
-                kept.heights.insert(key, height_m);
+                kept.heights.get_or_insert_with(key, || height_m);
                 height_m
             }
             Err(QueryHeightError::NotSurveyed(cell)) => {
@@ -1166,13 +1168,15 @@ fn memo_key(face: Face, level: u8, i: u32, j: u32) -> u64 {
 }
 
 /// The far field's vertex heights a [`SynthCache`] keeps (see the [module documentation](self)):
-/// by face, level and lattice vertex, for one field at a time, as the channels' part is kept
-/// ([`NetworkId`]); it starts afresh at [`FAR_HEIGHTS_HELD`]. Each is the height function's own,
-/// so no map depends on what it holds.
+/// by face, level and lattice vertex ([`memo_key`]), for one field at a time, as the channels' part
+/// is kept ([`NetworkId`]); it starts afresh at [`FAR_HEIGHTS_HELD`]. Each is the height function's
+/// own, so no map depends on what it holds. They are an open-addressed table ([`Table`]): a bake's
+/// margin and march read it some 117,000 times on the Earth-like world's L + 4 patch, for 6,331
+/// heights made.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FarHeights {
     of: Option<NetworkId>,
-    heights: BTreeMap<u64, f64>,
+    heights: Table<f64>,
 }
 
 impl FarHeights {
@@ -1181,7 +1185,7 @@ impl FarHeights {
     pub(crate) const fn new() -> Self {
         Self {
             of: None,
-            heights: BTreeMap::new(),
+            heights: Table::new(),
         }
     }
 

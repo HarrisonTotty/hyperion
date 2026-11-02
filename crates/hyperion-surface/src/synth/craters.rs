@@ -198,6 +198,7 @@ use crate::cube::{
 use crate::field::{FieldHeader, FieldView};
 use crate::geometry::{BAND_LIMIT_M, min_rate, vertex_spacing};
 use crate::height::HeightSample;
+use crate::memo::Table;
 use crate::num;
 use crate::spheroid::Spheroid;
 use crate::tags::SURFACE_CRATER;
@@ -1838,7 +1839,9 @@ impl SmallCrater {
 #[derive(Debug, Clone, Default)]
 pub struct CraterCache {
     owner: Option<(DetailSeed, Inputs)>,
-    cells: BTreeMap<u64, CellDraw>,
+    /// The cells' draws by [`cell_key`]: an open-addressed table, which a point's search reads at
+    /// some 33 cells (the Earth-like world's L + 4 patch's far field).
+    cells: Table<CellDraw>,
     counts: BTreeMap<u64, f64>,
     /// By octave, the search about the cell its last query lay in.
     searches: Vec<Option<Search>>,
@@ -2005,7 +2008,7 @@ impl CraterCache {
     pub const fn new() -> Self {
         Self {
             owner: None,
-            cells: BTreeMap::new(),
+            cells: Table::new(),
             counts: BTreeMap::new(),
             searches: Vec::new(),
             profiles: Profiles::new(),
@@ -2021,7 +2024,7 @@ impl CraterCache {
     /// Whether it holds no cell.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.cells.is_empty()
+        self.cells.len() == 0
     }
 }
 
@@ -2107,7 +2110,7 @@ impl SmallCraters {
         &self,
         octave: u8,
         cell: PatchKey,
-        cells: &'c mut BTreeMap<u64, CellDraw>,
+        cells: &'c mut Table<CellDraw>,
     ) -> &'c mut CellDraw {
         let index = usize::from(octave);
         assert!(
@@ -2120,10 +2123,10 @@ impl SmallCraters {
             "the cell is not at the octave's level"
         );
         let key = cell_key(octave, cell);
-        if cells.len() >= CACHE_CELLS && !cells.contains_key(&key) {
+        if cells.len() >= CACHE_CELLS && cells.get(key).is_none() {
             cells.clear();
         }
-        cells.entry(key).or_insert_with(|| CellDraw {
+        cells.get_or_insert_with(key, || CellDraw {
             draws: self.draw(octave, cell),
             craters: None,
         })

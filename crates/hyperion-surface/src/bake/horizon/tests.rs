@@ -1377,6 +1377,33 @@ fn horizon_names_the_cells_its_margin_alone_was_refused_for() {
 }
 
 #[test]
+fn horizon_heights_kept_for_one_field_are_never_read_for_another() {
+    // The same patches of two worlds, and of one world under two seeds, baked in turn through one
+    // cache: each map is its cold bake's, so the cache's far heights, kept for one field and seed,
+    // are started afresh for the next ([`FarHeights::keep`], once a bake).
+    let other = hyperion_base::rng::DetailSeed::new(0x0074_776f);
+    let runs = [
+        (SyntheticWorld::EarthLike, SEED),
+        (SyntheticWorld::MoonLike, SEED),
+        (SyntheticWorld::EarthLike, other),
+        (SyntheticWorld::EarthLike, SEED),
+    ];
+    let mut shared = SynthCache::new();
+    for (w, seed) in runs {
+        let field = world(w);
+        let cell = cell_at_index(field.header().level().get(), 0).unwrap();
+        let key = patch_in(cell, cell.level() + 2);
+        let view = client(w, &cells_under(field, key), |_| code(50.0));
+        let synth = Synthesiser::new(&view, seed);
+        assert_eq!(
+            horizon_of(&synth, &mut shared, key),
+            horizon_of(&synth, &mut SynthCache::new(), key),
+            "{w:?} {seed:?}"
+        );
+    }
+}
+
+#[test]
 fn horizon_skipped_leaves_the_map_empty_and_the_rest_as_baked() {
     let (w, edge, surveyed) = straddling();
     let view = client(w, &surveyed, |_| code(50.0));

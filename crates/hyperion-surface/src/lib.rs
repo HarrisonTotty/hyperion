@@ -70,6 +70,7 @@ pub mod geometry;
 pub mod ground;
 pub mod height;
 pub mod material;
+mod memo;
 pub mod noise;
 pub mod num;
 pub mod patch;
