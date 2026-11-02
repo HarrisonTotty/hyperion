@@ -95,7 +95,7 @@ pub trait FeatureInteriorCache {
     }
 
     /// `feature`'s feature-level list in `galaxy`, if it registers any class (P09.T37), which an
-    /// implementation may keep: exactly what `FeatureLevelList::listed_of` builds, `None` for a
+    /// implementation may keep: exactly what [`FeatureLevelList::listed_of`] builds, `None` for a
     /// feature that registers none. A range query's census and its hits both read it.
     fn list(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureLevelList>> {
         FeatureLevelList::listed_of(galaxy, feature).map(Arc::new)
@@ -286,7 +286,9 @@ impl<'a> FeatureMemberSource<'a> {
 
     /// Reads `cell` through `last` for `query` as its lookups read it, through the caches this
     /// source was made with, and for each feature there that they find, its grid's reach bound
-    /// and, where that grid may meet the query's sphere, its interior (P09.T40.a).
+    /// and, where that grid may meet the query's sphere, its interior (P09.T40.a); and under
+    /// P09.T36's or P11.T8.f's new arm its feature-level list (P09.T37), which the lookups read of
+    /// every feature they find.
     ///
     /// It is what a server does for each of a query's [`feature_cells`](Self::feature_cells) on
     /// several threads before the query runs, so that the query's lookups find all of it held.
@@ -334,6 +336,7 @@ impl<'a> FeatureMemberSource<'a> {
             (centre, radius),
             &mut found,
         );
+        let lists = lists_read(galaxy);
         for feature in &found {
             let touches = self
                 .interiors
@@ -341,6 +344,11 @@ impl<'a> FeatureMemberSource<'a> {
                 .is_some_and(|reach| grid_may_touch(feature, centre, reach, radius));
             if touches {
                 drop(self.interiors.interior(galaxy, feature));
+            }
+            // Every feature the lookups find has its list read, by the census and the hits: some
+            // thousand near the inner disc at 0.4 ms each (P09.T37), so they are made here too.
+            if lists == FeatureClassesRules::Listed {
+                drop(self.interiors.list(galaxy, feature));
             }
         }
     }
@@ -851,6 +859,7 @@ mod tests {
         skipping_the_grids_that_miss_the_sphere_changes_nothing();
         the_answers_do_not_depend_on_the_order_queries_are_asked_in();
         the_feature_cells_cover_every_lookup_and_reading_them_ahead_changes_nothing();
+        reading_a_cell_ahead_keeps_the_list_of_every_feature_it_finds();
         drawing_only_the_near_members_keeps_every_near_member();
         the_census_does_not_depend_on_what_is_cached();
         hits_count_in_their_band_s_layer_and_the_unborn_are_dropped();
@@ -1214,6 +1223,64 @@ mod tests {
             }
             assert_eq!(answer(&source), expected);
         }
+    }
+
+    /// Run on its one build of the fixture by
+    /// [`the_member_source_finds_and_counts_what_a_scan_finds`]: under P09.T36's new arm, reading a
+    /// query's feature cells ahead keeps, through the interior cache, the feature-level list of
+    /// every feature its lookups find, the list [`FeatureLevelList::listed_of`] builds, so that the
+    /// census and the hits read every list held (P09.T37); and the census, bit for bit, and the
+    /// hits are those of a query read through nothing.
+    fn reading_a_cell_ahead_keeps_the_list_of_every_feature_it_finds() {
+        let rules = crate::galaxy::rules::GalaxyRules {
+            feature_classes: FeatureClassesRules::Listed,
+            ..galaxy().rules()
+        };
+        let listed = galaxy().clone().with_rules(rules);
+        let galaxy = &listed;
+        let query =
+            RangeQuery::builder(*open_cluster().feature().position(), LightYears::new(12.0))
+                .build()
+                .unwrap();
+        let sphere = widest_sphere(galaxy, &query);
+        let interiors = KeepInteriors::new(galaxy);
+        let source = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+        for cell in FeatureMemberSource::feature_cells(galaxy, &query) {
+            source.read_ahead(galaxy, &query, cell);
+        }
+        let kept = interiors.lists.lock().unwrap().clone();
+        let found: Vec<FeatureRecord> = FeatureCatalogue::near(
+            galaxy,
+            sphere.centre(),
+            lookup_radius(&sphere),
+            &NoFeatureCache,
+        )
+        .collect();
+        let mut listing = 0;
+        for feature in &found {
+            let list = kept
+                .get(&feature.id())
+                .unwrap_or_else(|| panic!("{:?}'s list is read ahead", feature.id()));
+            let built = FeatureLevelList::listed_of(galaxy, feature);
+            assert_eq!(list.as_deref(), built.as_ref(), "{:?}", feature.id());
+            listing += usize::from(built.is_some());
+        }
+        assert!(
+            listing > 0,
+            "some of {} features list their recent classes",
+            found.len()
+        );
+        let answer = |source: &FeatureMemberSource<'_>| {
+            let census = source.expected_in_sphere(galaxy, &sphere);
+            let mut hits = Vec::new();
+            source.systems_in_sphere(galaxy, &sphere, all_layers(), &mut hits);
+            let bits: Vec<u64> = Layer::ALL.iter().map(|&l| bits(census.get(l))).collect();
+            (bits, hits)
+        };
+        assert_eq!(
+            answer(&source),
+            answer(&FeatureMemberSource::new(&NoFeatureCache, &NoInteriorCache))
+        );
     }
 
     /// Run on its one build of the fixture by

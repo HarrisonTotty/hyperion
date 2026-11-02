@@ -25,7 +25,9 @@
 //! `served_at_27` is the Sun-like query of 50 ly under 27's rules as `systems_in_range` serves it
 //! (`served_range_query`), with the members and the classes, on pools of 1, 4 and 8 workers, cold
 //! and warm: a cold query's class cells made across the workers ahead of its hits (P09.T37's
-//! bench).
+//! bench). It is served so with the global list too, its tables built ahead as the server builds
+//! them, and so is the query of 50 ly at the black hole; and the Sun-like query is served as the
+//! first query of a galaxy built fresh for it, which pays for the tables the galaxy makes lazily.
 //!
 //! `list_at_27` is the Sun-like query of 50 ly and of 1 ly, and the query of 50 ly at the black
 //! hole, where nothing fits, at the epoch under 27's rules with every source, the global list's
@@ -43,9 +45,9 @@ use std::time::Duration;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use hyperion_server::FeatureMembers;
 use hyperion_server::compute::{
-    CancelToken, CpuPool, GalaxyKey, Priority, RangeCaches, ServedQuery, SharedCellCache,
-    SharedCentreOrbitCache, SharedClassCellCache, SharedClusterModelCache, SharedFeatureCellCache,
-    served_range_query,
+    CancelToken, CpuPool, GalaxyKey, HeldGlobalList, ListedTubes, Priority, RangeCaches,
+    ServedQuery, SharedCellCache, SharedCentreOrbitCache, SharedClassCellCache,
+    SharedClusterModelCache, SharedFeatureCellCache, TubeTableCache, served_range_query,
 };
 use hyperion_server::config::{
     DEFAULT_CELL_CACHE_MIB, DEFAULT_CLASS_CELL_CACHE_MIB, DEFAULT_CLUSTER_MODEL_CACHE_MIB,
@@ -53,7 +55,7 @@ use hyperion_server::config::{
 };
 use hyperion_server::limits::{
     BULK_QUEUE_CAPACITY, CENTRE_ORBIT_CACHE_BYTES, INTERACTIVE_QUEUE_CAPACITY, MAX_CENSUS_LIMIT,
-    MAX_QUERY_CELLS,
+    MAX_QUERY_CELLS, TUBE_TABLE_CACHE_BYTES,
 };
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
@@ -345,8 +347,28 @@ fn galaxy_at_27() -> Galaxy {
         .with_full_potential()
 }
 
+/// `galaxy`'s global list as the server serves it to a query: the list with its models
+/// ([`HeldGlobalList`]), and the tables of the streams `queries` read built ahead, as the server
+/// builds them before a query.
+fn listed_tubes(galaxy: &Arc<Galaxy>, key: GalaxyKey, queries: &[&RangeQuery]) -> ListedTubes {
+    let list = Arc::new(HeldGlobalList::new(galaxy, GlobalList::build(galaxy)));
+    let listed = ListedTubes::new(
+        (Arc::clone(galaxy), key),
+        Arc::clone(&list),
+        Arc::new(TubeTableCache::new(TUBE_TABLE_CACHE_BYTES)),
+    );
+    for query in queries {
+        for number in GlobalListSource::streams_read(galaxy, list.list(), query) {
+            drop(listed.tube(number));
+        }
+    }
+    listed
+}
+
 /// The Sun-like 50 ly query under generator version 27's rules served on pools of 1, 4 and 8
-/// workers, cold and warm (module documentation).
+/// workers, cold and warm, without the global list and with it, and with it the black hole's 50 ly
+/// query too; and the Sun-like query as a galaxy's first, over a galaxy built fresh for it, whose
+/// lazily made tables it pays for (module documentation).
 fn served_at_27(c: &mut Criterion) {
     let version = GeneratorVersion::new(27);
     let galaxy = Arc::new(galaxy_at_27());
@@ -355,12 +377,29 @@ fn served_at_27(c: &mut Criterion) {
         .enable_all()
         .build()
         .expect("a runtime");
-    let served = ServedQuery::new(
+    let (sun, black_hole) = (
+        query_at(sun_like(), 50.0),
+        query_at(GalacticPosition::ORIGIN, 50.0),
+    );
+    let listed = listed_tubes(&galaxy, key, &[&sun, &black_hole]);
+    let unlisted = ServedQuery::new(
         Arc::clone(&galaxy),
         key,
-        query_at(sun_like(), 50.0),
+        sun.clone(),
         FeatureMembers::Served,
     );
+    let queries = [
+        ("Sun-like 50 ly", unlisted.clone()),
+        (
+            "Sun-like 50 ly with the list",
+            unlisted.clone().with_list(listed.clone()),
+        ),
+        (
+            "the black hole 50 ly with the list",
+            ServedQuery::new(Arc::clone(&galaxy), key, black_hole, FeatureMembers::Served)
+                .with_list(listed),
+        ),
+    ];
     let mut group = c.benchmark_group("served_at_27");
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(20));
@@ -372,29 +411,46 @@ fn served_at_27(c: &mut Criterion) {
         )
         .expect("the pool starts");
         let token = CancelToken::new();
-        let serve = |caches: &RangeCaches| {
+        let serve = |caches: &RangeCaches, served: &ServedQuery| {
             runtime
                 .block_on(served_range_query(
                     &pool,
                     caches,
-                    &served,
+                    served,
                     &token,
                     |_, result, _| result,
                 ))
                 .expect("the query's jobs run")
         };
-        group.bench_function(format!("Sun-like 50 ly, {workers} workers (cold)"), |b| {
-            b.iter_batched_ref(
-                range_caches,
-                |caches| serve(caches),
-                BatchSize::PerIteration,
-            );
-        });
-        let warm = range_caches();
-        drop(serve(&warm));
-        group.bench_function(format!("Sun-like 50 ly, {workers} workers (warm)"), |b| {
-            b.iter(|| serve(&warm));
-        });
+        for (name, served) in &queries {
+            group.bench_function(format!("{name}, {workers} workers (cold)"), |b| {
+                b.iter_batched_ref(
+                    range_caches,
+                    |caches| serve(caches, served),
+                    BatchSize::PerIteration,
+                );
+            });
+            let warm = range_caches();
+            drop(serve(&warm, served));
+            group.bench_function(format!("{name}, {workers} workers (warm)"), |b| {
+                b.iter(|| serve(&warm, served));
+            });
+        }
+        group.bench_function(
+            format!("Sun-like 50 ly, {workers} workers (a galaxy's first)"),
+            |b| {
+                b.iter_batched(
+                    || {
+                        let galaxy = Arc::new(galaxy_at_27());
+                        let served =
+                            ServedQuery::new(galaxy, key, sun.clone(), FeatureMembers::Served);
+                        (range_caches(), served)
+                    },
+                    |(caches, served)| serve(&caches, &served),
+                    BatchSize::PerIteration,
+                );
+            },
+        );
         runtime
             .block_on(pool.shutdown())
             .expect("the pool shuts down");

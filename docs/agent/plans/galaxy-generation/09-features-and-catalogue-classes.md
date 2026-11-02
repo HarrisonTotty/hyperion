@@ -5899,3 +5899,9 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     table (bit for bit).
   - _Test (slow)._ `verification::recent_in_range::every_listed_binary_in_a_sphere_is_returned_once_under_every_27_hold`,
     which failed first: 60 of the features' entries and 51 of the centre's inside, none returned.
+- **P09.T37's bench, the next cuts (lane `perf-range-27-b`, 2026-11-02, at 24; no output moves at
+  24–27).** Figures in the lane's outbox.
+  - _Lists kept._ The server's `SharedClusterModelCache` keeps each feature's list beside its
+    interior or bound (`list`), charged `FeatureLevelList::heap_bytes` in its own budget;
+    `FeatureLevelList::listed_of` is `pub`, and `FeatureMemberSource::read_ahead` makes the lists.
+  - _Bench._ `served_at_27` adds the global list, the black hole's 50 ly query and a galaxy's first.

@@ -547,6 +547,13 @@ impl FeatureBinaries {
         self.classes.is_empty()
     }
 
+    /// The bytes it owns on the heap: its profile's ([`ClassProfile::heap_bytes`]) and its
+    /// classes' buffer, by its capacity; the host owns nothing there.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.profile.heap_bytes() + self.classes.capacity() * size_of::<(ClassId, f64)>()
+    }
+
     /// The entry of class `class` at list index `index` and `position`, if its class's draws and
     /// test keep it ([`listed_entry`]); `None` for an index past the 13 bits of a feature's list.
     #[must_use]

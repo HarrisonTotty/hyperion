@@ -6,7 +6,9 @@
 //! by a bound from its cluster model ([`FeatureInterior::grid_reach_bound`]), builds its interior,
 //! its cluster model, class table and nested grid ([`FeatureInterior::of`]): 14–17 ms each by plan
 //! 09's Risks ("Ruling 139 as built", 139.5). A 50 ly query at the Sun-like point looks up 115
-//! features with members and builds one (measured 2026-10-30). Two queries near one another ask
+//! features with members and builds one (measured 2026-10-30). From P09.T36's version it reads
+//! every feature's feature-level list too ([`FeatureLevelList::listed_of`]), some 0.4 ms each,
+//! which the interiors' cache keeps beside each feature (P09.T37). Two queries near one another ask
 //! for the same ones, so the server keeps both:
 //! [`SharedFeatureCellCache`] is a [`SharedByteLru`] over `(GalaxyKey, FeatureCell)` and
 //! [`SharedClusterModelCache`] one over `(GalaxyKey, FeatureId)`, so that two saves of one seed
@@ -65,24 +67,79 @@ impl HeapBytes for FeatureCellContents {
 
 /// What [`SharedClusterModelCache`] holds of one feature: its interior once a query has needed
 /// it, and before that the bound on its nested grid's reach that the query tested it by
-/// ([`FeatureInterior::grid_reach_bound`]; P09.T40.a).
+/// ([`FeatureInterior::grid_reach_bound`]; P09.T40.a); and its feature-level list once a
+/// query has read it (P09.T37).
 #[derive(Debug)]
-enum HeldFeature {
+struct HeldFeature {
+    /// Its interior or its bound, if a query has asked for either.
+    model: Option<HeldModel>,
+    /// Its list ([`FeatureLevelList::listed_of`]), if a query has read it.
+    list: Option<HeldList>,
+}
+
+/// A feature's feature-level list, as a query read it.
+#[derive(Debug, Clone)]
+enum HeldList {
+    /// Its list.
+    Listed(Arc<FeatureLevelList>),
+    /// It registers no class.
+    Unlisted,
+}
+
+impl HeldList {
+    /// `list`, held: [`HeldList::Unlisted`] for `None`.
+    #[must_use]
+    fn of(list: Option<&Arc<FeatureLevelList>>) -> Self {
+        list.map_or(Self::Unlisted, |list| Self::Listed(Arc::clone(list)))
+    }
+
+    /// The list it lends: `None` for a feature that registers no class.
+    #[must_use]
+    fn lent(&self) -> Option<Arc<FeatureLevelList>> {
+        match self {
+            Self::Listed(list) => Some(Arc::clone(list)),
+            Self::Unlisted => None,
+        }
+    }
+}
+
+/// A feature's interior, or the bound on its grid's reach before it is built.
+#[derive(Debug, Clone)]
+enum HeldModel {
     /// Its interior.
     Interior(Arc<FeatureInterior>),
     /// The bound on its grid's reach, or `None` for a feature with no members.
     Reach(Option<LightYears>),
 }
 
+impl HeldFeature {
+    /// What `held` holds with its model `model` in place of its own: its list kept.
+    #[must_use]
+    fn with_model(held: Option<&Self>, model: HeldModel) -> Self {
+        Self {
+            model: Some(model),
+            list: held.and_then(|held| held.list.clone()),
+        }
+    }
+}
+
 impl HeapBytes for HeldFeature {
     /// An interior's own size, since it is lent behind an `Arc` of its own, and what it owns on the
-    /// heap: its class table's rows and profiles ([`FeatureInterior::heap_bytes`]). A bound owns
-    /// nothing.
+    /// heap: its class table's rows and profiles ([`FeatureInterior::heap_bytes`]); a bound owns
+    /// nothing. A list's own size, lent behind an `Arc` too, and what it owns on the heap
+    /// ([`FeatureLevelList::heap_bytes`]).
     fn heap_bytes(&self) -> usize {
-        match self {
-            Self::Interior(interior) => size_of::<FeatureInterior>() + interior.heap_bytes(),
-            Self::Reach(_) => 0,
-        }
+        let model = match &self.model {
+            Some(HeldModel::Interior(interior)) => {
+                size_of::<FeatureInterior>() + interior.heap_bytes()
+            }
+            Some(HeldModel::Reach(_)) | None => 0,
+        };
+        let list = match &self.list {
+            Some(HeldList::Listed(list)) => size_of::<FeatureLevelList>() + list.heap_bytes(),
+            Some(HeldList::Unlisted) | None => 0,
+        };
+        model + list
     }
 }
 
@@ -222,6 +279,11 @@ impl FeatureCellCache for FeatureCellHandle<'_> {
 /// interior: it is held by its bound's `None` once a query has tested it, and nothing is stored
 /// for it otherwise. A lookup that finds a feature's bound counts as a hit, the interior lookup
 /// that then builds it too.
+///
+/// Beside either, a feature is held with its feature-level list once a query has read it
+/// ([`FeatureInteriorCache::list`]; P09.T37), its `None` for a feature that registers none:
+/// a query's census and hits read the list of every feature they find, some thousand near the
+/// inner disc at 0.4 ms each, which were built again for every query.
 #[derive(Debug)]
 pub struct SharedClusterModelCache {
     interiors: SharedByteLru<(GalaxyKey, FeatureId), HeldFeature>,
@@ -285,20 +347,22 @@ impl SharedClusterModelCache {
         );
         galaxy.kinematics()?;
         let entry_key = (key, feature.id());
-        if let Some(held) = self.interiors.get(&entry_key) {
-            match &*held {
-                HeldFeature::Interior(interior) => return Some(Arc::clone(interior)),
-                // The bound is `None` only where the sim builds no interior.
-                HeldFeature::Reach(None) => return None,
-                HeldFeature::Reach(Some(_)) => {}
-            }
+        let held = self.interiors.get(&entry_key);
+        match held.as_ref().and_then(|held| held.model.as_ref()) {
+            Some(HeldModel::Interior(interior)) => return Some(Arc::clone(interior)),
+            // The bound is `None` only where the sim builds no interior.
+            Some(HeldModel::Reach(None)) => return None,
+            Some(HeldModel::Reach(Some(_))) | None => {}
         }
         let interior = Arc::new(FeatureInterior::of(galaxy, feature)?);
         // An interior larger than the whole budget is handed back and still lent. It replaces the
-        // feature's bound, which its grid's reach supersedes.
+        // feature's bound, which its grid's reach supersedes, and keeps its list.
         let _ = self.interiors.insert(
             entry_key,
-            Arc::new(HeldFeature::Interior(Arc::clone(&interior))),
+            Arc::new(HeldFeature::with_model(
+                held.as_deref(),
+                HeldModel::Interior(Arc::clone(&interior)),
+            )),
         );
         Some(interior)
     }
@@ -321,21 +385,63 @@ impl SharedClusterModelCache {
         );
         galaxy.kinematics()?;
         let entry_key = (key, feature.id());
-        if let Some(held) = self.interiors.get(&entry_key) {
-            return match &*held {
-                HeldFeature::Interior(interior) => Some(interior.grid().reach()),
-                HeldFeature::Reach(reach) => *reach,
-            };
+        let held = self.interiors.get(&entry_key);
+        match held.as_ref().and_then(|held| held.model.as_ref()) {
+            Some(HeldModel::Interior(interior)) => return Some(interior.grid().reach()),
+            Some(HeldModel::Reach(reach)) => return *reach,
+            None => {}
         }
         let reach = FeatureInterior::grid_reach_bound(galaxy, feature);
         // Only if nothing was stored meanwhile, so that a bound never displaces an interior another
         // job has just built.
         let _ = self.interiors.insert_if_unchanged(
             entry_key,
-            None,
-            Arc::new(HeldFeature::Reach(reach)),
+            held.as_ref(),
+            Arc::new(HeldFeature::with_model(
+                held.as_deref(),
+                HeldModel::Reach(reach),
+            )),
         );
         reach
+    }
+
+    /// `feature`'s feature-level list in `galaxy`, the galaxy `key` names: the cache's, or
+    /// built ([`FeatureLevelList::listed_of`]) and stored beside what the cache holds of the
+    /// feature; `None` for a feature that registers none, which is stored too (P09.T37).
+    ///
+    /// As [`interior`](Self::interior), a galaxy without its kinematic tables never reads the cache:
+    /// it lists nothing, and its key is its full-potential twin's.
+    fn list(
+        &self,
+        key: GalaxyKey,
+        galaxy: &Galaxy,
+        feature: &FeatureRecord,
+    ) -> Option<Arc<FeatureLevelList>> {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a cluster model cache handle lends the interiors of one galaxy, and this is another's"
+        );
+        if galaxy.kinematics().is_none() {
+            return FeatureLevelList::listed_of(galaxy, feature).map(Arc::new);
+        }
+        let entry_key = (key, feature.id());
+        let held = self.interiors.get(&entry_key);
+        if let Some(list) = held.as_ref().and_then(|held| held.list.as_ref()) {
+            return list.lent();
+        }
+        let list = FeatureLevelList::listed_of(galaxy, feature).map(Arc::new);
+        // Only if nothing was stored meanwhile, so that the list never displaces an interior or a
+        // bound another job has just stored; a list lost so is built again when next read.
+        let _ = self.interiors.insert_if_unchanged(
+            entry_key,
+            held.as_ref(),
+            Arc::new(HeldFeature {
+                model: held.as_ref().and_then(|held| held.model.clone()),
+                list: Some(HeldList::of(list.as_ref())),
+            }),
+        );
+        list
     }
 }
 
@@ -375,6 +481,15 @@ impl FeatureInteriorCache for ClusterModelHandle<'_> {
     fn grid_reach(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<LightYears> {
         self.cache.grid_reach(self.galaxy, galaxy, feature)
     }
+
+    /// Lends `feature`'s feature-level list, building it if the cache has not got it.
+    ///
+    /// # Panics
+    ///
+    /// As [`interior`](Self::interior).
+    fn list(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureLevelList>> {
+        self.cache.list(self.galaxy, galaxy, feature)
+    }
 }
 
 /// One job's view of the [`SharedClusterModelCache`]: every interior the job reads is kept for as
@@ -389,8 +504,9 @@ pub struct KeptInteriors<'a> {
     shared: ClusterModelHandle<'a>,
     kept: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureInterior>>>>,
     reaches: Mutex<BTreeMap<FeatureId, Option<LightYears>>>,
-    /// The features' lists the job reads (P09.T37), built once a job: its census and its hits read
-    /// the same, some thousand of them near the inner disc.
+    /// The features' lists the job reads (P09.T37), each read once a job from the shared cache,
+    /// or built there: its census and its hits read the same, some thousand of them near the inner
+    /// disc.
     lists: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureLevelList>>>>,
 }
 
@@ -430,7 +546,7 @@ impl FeatureInteriorCache for KeptInteriors<'_> {
             .or_insert_with(|| self.shared.grid_reach(galaxy, feature))
     }
 
-    /// Lends `feature`'s feature-level list: the job's own, built once.
+    /// Lends `feature`'s feature-level list: the job's own, or the shared cache's, kept.
     fn list(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureLevelList>> {
         self.lists
             .lock()
@@ -814,6 +930,71 @@ mod tests {
         assert_eq!(kept.grid_reach(galaxy(), &memberless), None);
         assert!(handle.interior(galaxy(), &memberless).is_none());
         assert_eq!(cache.counters().entries(), 2);
+    }
+
+    /// Under every 26 hold a feature's feature-level list is the sim's, held beside the bound
+    /// on its grid's reach and then beside its interior, charged its bytes and lent again; a
+    /// feature that lists none is held by its `None`; and a galaxy without its kinematic tables,
+    /// which lists nothing, stores nothing (P09.T37).
+    #[test]
+    fn under_every_26_hold_a_feature_s_list_is_held_beside_its_interior() {
+        use hyperion_sim::GeneratorVersion;
+        use hyperion_sim::galaxy::imf::MassFunctionKind;
+        use hyperion_sim::galaxy::params::GalaxyParams;
+        let (seed, version) = (Seed::new(SEED), GeneratorVersion::new(26));
+        let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
+        let bare = Galaxy::from_params_at_version(seed, params, version).expect("a drawn galaxy");
+        let galaxy = bare.clone().with_full_potential();
+        let key = GalaxyKey::new(SEED, version);
+        let mut near =
+            FeatureCatalogue::near(&galaxy, &sun(), LightYears::new(3_000.0), &NoFeatureCache);
+        let (feature, built) = near
+            .by_ref()
+            .find_map(|feature| {
+                let list = FeatureLevelList::listed_of(&galaxy, &feature)?;
+                FeatureInterior::of(&galaxy, &feature).map(|_| (feature, list))
+            })
+            .expect("a feature with members listing its recent classes lies near the Sun");
+        assert!(built.heap_bytes() > 0);
+        let cache = SharedClusterModelCache::new(64 << 20);
+        let handle = cache.handle(key);
+        assert!(handle.grid_reach(&galaxy, &feature).is_some());
+        let list = handle
+            .list(&galaxy, &feature)
+            .expect("the feature lists its classes");
+        assert_eq!(*list, built);
+        let listed = size_of::<FeatureLevelList>() + built.heap_bytes();
+        let counters = cache.counters();
+        assert_eq!(counters.entries(), 1, "the list is held beside the bound");
+        assert_eq!(
+            counters.bytes(),
+            size_of::<HeldFeature>() + ENTRY_OVERHEAD_BYTES + listed
+        );
+        let again = handle.list(&galaxy, &feature).expect("held");
+        assert!(Arc::ptr_eq(&list, &again), "the second ask is the cache's");
+        let interior = handle.interior(&galaxy, &feature).expect("members");
+        let kept = handle.list(&galaxy, &feature).expect("held");
+        assert!(Arc::ptr_eq(&list, &kept), "the interior keeps the list");
+        let counters = cache.counters();
+        assert_eq!(counters.entries(), 1);
+        assert_eq!(
+            counters.bytes(),
+            size_of::<HeldFeature>()
+                + ENTRY_OVERHEAD_BYTES
+                + listed
+                + size_of::<FeatureInterior>()
+                + interior.heap_bytes()
+        );
+        let unlisted = near
+            .find(|feature| FeatureLevelList::listed_of(&galaxy, feature).is_none())
+            .expect("a feature listing no recent class lies near the Sun");
+        assert!(handle.list(&galaxy, &unlisted).is_none());
+        assert!(handle.list(&galaxy, &unlisted).is_none());
+        let counters = cache.counters();
+        assert_eq!(counters.entries(), 2, "its `None` is held");
+        let empty = SharedClusterModelCache::new(64 << 20);
+        assert!(empty.handle(key).list(&bare, &feature).is_none());
+        assert_eq!(empty.counters().entries(), 0);
     }
 
     /// The features' members as the range query finds them about `feature`, through `cells` and

@@ -281,7 +281,7 @@ impl FeatureLevelList {
     /// classes (P09.T36) or plan 11's binary classes (P11.T8.f): what the range query reads
     /// (P09.T37); `None` for a feature that registers none.
     #[must_use]
-    pub(crate) fn listed_of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
+    pub fn listed_of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
         let list = Self::of(galaxy, feature);
         (!list.classes.is_empty()).then_some(list)
     }
@@ -377,6 +377,28 @@ impl FeatureLevelList {
             stars: None,
             binaries: None,
         }
+    }
+
+    /// The bytes it owns on the heap: its classes' and counts' buffers, by their capacities, each
+    /// class's profile ([`ClassProfile::heap_bytes`]), and the feature's stars and binary hosts it
+    /// keeps where it lists their classes, boxed. What a caller's byte-bounded cache charges a
+    /// list (P09.T37).
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.classes.capacity() * size_of::<ListClass>()
+            + self
+                .classes
+                .iter()
+                .map(|class| class.profile.heap_bytes())
+                .sum::<usize>()
+            + self.counts.capacity() * size_of::<u32>()
+            + self
+                .stars
+                .as_ref()
+                .map_or(0, |stars| size_of::<FeatureStars>() + stars.heap_bytes())
+            + self.binaries.as_ref().map_or(0, |binaries| {
+                size_of::<FeatureBinaries>() + binaries.heap_bytes()
+            })
     }
 
     /// Whether index 0 is a member.

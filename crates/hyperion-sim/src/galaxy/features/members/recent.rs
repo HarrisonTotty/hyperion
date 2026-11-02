@@ -362,6 +362,18 @@ impl FeatureStars {
         &self.profile
     }
 
+    /// The bytes it owns on the heap: its profile's ([`ClassProfile::heap_bytes`]) and its
+    /// candidates' buffers. What a caller's byte-bounded cache charges a list's stars (P09.T37).
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.profile.heap_bytes()
+            + [&self.core_collapses, &self.variables]
+                .into_iter()
+                .flatten()
+                .map(Candidates::heap_bytes)
+                .sum::<usize>()
+    }
+
     /// Whether it is a globular, which lists Type Ia hosts alone, with no window.
     #[must_use]
     pub(crate) fn is_globular(&self) -> bool {
@@ -882,6 +894,13 @@ impl Candidates {
     #[must_use]
     pub(crate) const fn share(&self) -> f64 {
         self.share
+    }
+
+    /// The bytes it owns on the heap: its parts' and weights' buffers, by their capacities.
+    #[must_use]
+    fn heap_bytes(&self) -> usize {
+        self.parts.capacity() * size_of::<CandidatePart>()
+            + self.weights.capacity() * size_of::<f64>()
     }
 
     /// One candidate's initial mass and age, and its part's masses, from `stream`: a mark picks
