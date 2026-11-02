@@ -29,8 +29,8 @@ pub use cell::{
     star_offset_bound,
 };
 pub use features::{
-    MemberPart, SkyMember, SkySource, census_members, streams_seen, takes_class_hosts,
-    takes_feature_members, takes_hosts_of,
+    MemberPart, SkyMember, SkySource, census_members, streams_seen, streams_seen_in,
+    takes_class_hosts, takes_feature_members, takes_hosts_of,
 };
 pub use merge::{SkyCensus, merge_census, merge_shells, sky_order};
 pub use query::{

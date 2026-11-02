@@ -102,8 +102,8 @@ use hyperion_sim::sky::limits::{
 use hyperion_sim::sky::luminosity::LuminosityTables;
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::{LightYears, Magnitudes, Years};
-use tokio::sync::mpsc;
 use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::{mpsc, watch};
 
 use super::{
     CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver,
@@ -1420,6 +1420,13 @@ struct Slice {
 /// which job held which cells, nor on their order, nor on what the cache held: the merge is total,
 /// and the tallies are sums.
 ///
+/// From generator version 27 the members' jobs read the global list's tube tables, which a sky's
+/// handler builds on the pool beside the census, its earlier steps' first (R06.T16.a's cost). A
+/// step's members' jobs wait until `tables` says its tables are built, apart from the queue, so
+/// that the cells behind them go on; a census whose members read no table is given
+/// [`TablesBuilt::all`]. Should the tables' builder go before it says so, its error ends the
+/// request, and meanwhile the jobs build what they lack themselves, to the same bits.
+///
 /// It returns once the last step is sent, or once `sink` has gone, the replies having been given
 /// up.
 ///
@@ -1435,7 +1442,7 @@ pub(crate) async fn census_in_steps(
     pool: &CpuPool,
     inputs: &CensusInputs,
     plan: &Arc<CensusPlan>,
-    steps: &[Vec<Shell>],
+    (steps, mut tables): (&[Vec<Shell>], TablesBuilt),
     slice: Duration,
     sink: mpsc::Sender<CensusStep>,
     token: &CancelToken,
@@ -1472,6 +1479,8 @@ pub(crate) async fn census_in_steps(
     let mut found: Vec<StepPart> = steps.iter().map(|_| StepPart::default()).collect();
     let mut worked = vec![[Duration::ZERO; Layer::ALL.len()]; steps.len()];
     let (mut sent, mut done, mut parts) = (0, Vec::new(), Vec::new());
+    // The members' work of the steps whose tables are not yet built, by step and order queued.
+    let mut waiting: BTreeMap<(usize, u64), Work> = BTreeMap::new();
     loop {
         // Every step whose cells, and every earlier step's, are censused is sent, in order.
         while sent < steps.len() && open[sent] == 0 {
@@ -1492,19 +1501,35 @@ pub(crate) async fn census_in_steps(
         if sent == steps.len() {
             return Ok(());
         }
+        let built = tables.steps();
+        while let Some(entry) = waiting.first_entry()
+            && entry.key().0 < built
+        {
+            let (key, work) = entry.remove_entry();
+            queued.insert(key, work);
+        }
         while outstanding.len() < window {
-            let Some(((step, _), work)) = queued.pop_first() else {
+            let Some(((step, order), work)) = queued.pop_first() else {
                 break;
             };
+            if step >= built && matches!(work, Work::Members(..)) {
+                waiting.insert((step, order), work);
+                continue;
+            }
             // The work, queued, is now a job: the step's count is unchanged.
             let job = census_job(inputs.clone(), work, abandoned.token().clone(), slice);
             let receiver = pool.submit(Priority::Bulk, token.clone(), job).await?;
             outstanding.push(async move { (step, receiver.await) });
         }
-        let (step, finished) = outstanding
-            .next()
-            .await
-            .expect("a step not yet censused has its work in jobs");
+        let finished = if waiting.is_empty() {
+            outstanding.next().await
+        } else {
+            tokio::select! {
+                finished = outstanding.next(), if !outstanding.is_empty() => finished,
+                () = tables.changed() => continue,
+            }
+        };
+        let (step, finished) = finished.expect("a step not yet censused has its work in jobs");
         let slice = finished
             .unwrap_or_else(|closed: RecvError| Err(JobError::from(closed)))?
             .ok_or(JobError::Cancelled)?;
@@ -1522,6 +1547,74 @@ pub(crate) async fn census_in_steps(
             order += 1;
         }
         found[step].absorb(stars, tallies.as_ref(), &cost);
+    }
+}
+
+/// How many of a sky's steps, from the first, have the tube tables built that their members' jobs
+/// read (R06.T16.a's cost): what [`census_in_steps`] holds each step's members' jobs back by. The
+/// count only rises.
+#[derive(Debug)]
+pub(crate) struct TablesBuilt {
+    steps: watch::Receiver<usize>,
+    /// Whether the builder has gone, its count no longer rising.
+    gone: bool,
+}
+
+impl TablesBuilt {
+    /// Every step's tables built: a census whose members read none, or whose galaxy's are held.
+    #[must_use]
+    pub(crate) fn all() -> Self {
+        Self {
+            steps: watch::channel(usize::MAX).1,
+            gone: true,
+        }
+    }
+
+    /// None yet, and the builder's side, through which it says each step's tables built.
+    #[must_use]
+    pub(crate) fn none() -> (StepTablesBuilt, Self) {
+        let (sender, steps) = watch::channel(0);
+        (StepTablesBuilt(sender), Self { steps, gone: false })
+    }
+
+    /// How many steps, from the first, have their tables built; every step once the builder has
+    /// gone, whose jobs then build what they lack themselves.
+    #[must_use]
+    fn steps(&self) -> usize {
+        if self.gone {
+            usize::MAX
+        } else {
+            *self.steps.borrow()
+        }
+    }
+
+    /// Waits until the count rises or the builder goes; never, once it has gone.
+    async fn changed(&mut self) {
+        if self.gone {
+            std::future::pending::<()>().await;
+        }
+        if self.steps.changed().await.is_err() {
+            self.gone = true;
+        }
+    }
+}
+
+/// The tube tables' builder's side of a [`TablesBuilt`]: it says a step's tables built, and the
+/// count it raises never falls. Dropped, the census takes every step's as built.
+#[derive(Debug)]
+pub(crate) struct StepTablesBuilt(watch::Sender<usize>);
+
+impl StepTablesBuilt {
+    /// Says that every step to `step` has its tables built.
+    pub(crate) fn built_through(&self, step: usize) {
+        let through = step.saturating_add(1);
+        self.0.send_if_modified(|steps| {
+            let rises = through > *steps;
+            if rises {
+                *steps = through;
+            }
+            rises
+        });
     }
 }
 
@@ -1974,6 +2067,7 @@ pub(crate) mod tests {
     use hyperion_sim::sky::census::{Completeness, census_cell, census_plan, census_plan_of};
     use hyperion_sim::time::UniverseTime;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
+    use tokio::sync::mpsc::error::TryRecvError;
     use tokio::sync::oneshot;
     use tokio::time::timeout;
 
@@ -2061,7 +2155,15 @@ pub(crate) mod tests {
         let (sink, mut sent) = mpsc::channel(steps.len());
         timeout(
             wait,
-            census_in_steps(pool, inputs, plan, steps, slice, sink, &token),
+            census_in_steps(
+                pool,
+                inputs,
+                plan,
+                (steps, TablesBuilt::all()),
+                slice,
+                sink,
+                &token,
+            ),
         )
         .await
         .expect("timed out censusing")
@@ -2533,6 +2635,150 @@ pub(crate) mod tests {
         let censused = steps_censused(&pool, &without, &plan, &steps, CENSUS_JOB_SLICE).await;
         let (_, last) = censused.last().expect("a step");
         assert!(!last.listed().iter().any(|star| is_host(&star)));
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A step's members' jobs wait for its tube tables (R06.T16.a's cost): with the tables said
+    /// built one step at a time, each step is sent only once its tables are, and no later step
+    /// before them, and each is the census whose tables were all held from the start, star for
+    /// star and tally for tally. The sky is the one inside an open cluster near the Sun at 27 of
+    /// [`the_jobs_census_takes_the_feature_members_where_the_field_gives_them_up`], whose every
+    /// shell's members are a job of the census.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one census in gated steps against the held one, and with its builder gone"
+    )]
+    async fn a_steps_members_wait_for_its_tables() {
+        let version = hyperion_sim::GeneratorVersion::new(27);
+        let galaxy = Arc::new(
+            Galaxy::from_params_at_version(
+                Seed::new(0x4d2),
+                hyperion_sim::galaxy::params::GalaxyParams::milky_way_like(),
+                version,
+            )
+            .unwrap()
+            .with_full_potential(),
+        );
+        let key = GalaxyKey::new(0x4d2, version);
+        let (features, interiors, classes) = member_caches();
+        let members = SkyMembers::of(&galaxy, (features, interiors, classes), None);
+        let cluster = hyperion_sim::galaxy::features::catalogue::FeatureCatalogue::near(
+            &galaxy,
+            sun().position(),
+            LightYears::new(1_500.0),
+            &hyperion_sim::galaxy::features::catalogue::NoFeatureCache,
+        )
+        .find(|feature| {
+            feature.kind_at(Years::ZERO)
+                == Some(hyperion_sim::galaxy::features::FeatureKind::OpenCluster)
+        })
+        .expect("an open cluster near the Sun");
+        let [x, y, z] = cluster.position().to_light_years_f64();
+        let at = GalacticPosition::from_light_years([x + 3.0, y, z]).unwrap();
+        let observer = Observer::new(at, UniverseTime::EPOCH).unwrap();
+        let caps = SkyCaps::forced(LightYears::new(12.0)).unwrap();
+        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(9.0))
+            .pads(hyperion_sim::galaxy::query::LayerPads::of(&galaxy))
+            .build()
+            .unwrap());
+        let pool = pool(3);
+        let token = CancelToken::new();
+        let (query, plan) = timeout(
+            WAIT,
+            plan(&pool, &galaxy, &tables, Arc::new(query), &[4, 8], &token),
+        )
+        .await
+        .expect("timed out planning")
+        .unwrap();
+        let plan = Arc::new(plan);
+        let inputs = CensusInputs {
+            galaxy: Arc::clone(&galaxy),
+            key,
+            tables: Arc::clone(&tables),
+            cells: Arc::new(SharedSkyCellCache::new(0)),
+            members,
+            query: Arc::clone(&query),
+        };
+        let shells: Vec<Shell> = plan.shells().collect();
+        let steps: Vec<Vec<Shell>> = shells.chunks(4).map(<[Shell]>::to_vec).collect();
+        assert!(steps.len() > 2, "{} steps", steps.len());
+        let held = steps_censused(&pool, &inputs, &plan, &steps, CENSUS_JOB_SLICE).await;
+
+        let (built, gate) = TablesBuilt::none();
+        let (sink, mut sent) = mpsc::channel(steps.len());
+        let census = census_in_steps(
+            &pool,
+            &inputs,
+            &plan,
+            (&steps, gate),
+            CENSUS_JOB_SLICE,
+            sink,
+            &token,
+        );
+        let each = async {
+            let mut gated = Vec::new();
+            for k in 0..steps.len() {
+                // Step k's tables are built: its members' jobs may run, and no later step's.
+                built.built_through(k);
+                let step = sent.recv().await.expect("a step");
+                assert_eq!(
+                    step.done.len(),
+                    steps[..=k].iter().map(Vec::len).sum::<usize>()
+                );
+                if k + 1 < steps.len() {
+                    assert_eq!(
+                        sent.try_recv().err(),
+                        Some(TryRecvError::Empty),
+                        "a step after {k} before its tables"
+                    );
+                }
+                let census = merge_step(&pool, &plan, step, query.n_max(), &token)
+                    .await
+                    .unwrap();
+                gated.push(census);
+            }
+            gated
+        };
+        let (censused, gated) = timeout(WAIT, futures_util::future::join(census, each))
+            .await
+            .expect("timed out censusing");
+        censused.unwrap();
+        assert_eq!(gated.len(), held.len());
+        for (k, (gated, (_, held))) in gated.iter().zip(&held).enumerate() {
+            assert_eq!(gated, held, "step {k}");
+            assert_eq!(bits(gated), bits(held), "step {k}");
+        }
+
+        // A builder that goes after the first step's tables leaves the rest to the jobs: every
+        // step is still sent, and is the same census.
+        let (built, gate) = TablesBuilt::none();
+        built.built_through(0);
+        drop(built);
+        let (sink, mut sent) = mpsc::channel(steps.len());
+        timeout(
+            WAIT,
+            census_in_steps(
+                &pool,
+                &inputs,
+                &plan,
+                (&steps, gate),
+                CENSUS_JOB_SLICE,
+                sink,
+                &token,
+            ),
+        )
+        .await
+        .expect("timed out censusing")
+        .unwrap();
+        for (k, (_, held)) in held.iter().enumerate() {
+            let step = sent.recv().await.expect("every step");
+            let census = merge_step(&pool, &plan, step, query.n_max(), &token)
+                .await
+                .unwrap();
+            assert_eq!(bits(&census), bits(held), "step {k}");
+        }
         pool.shutdown().await.unwrap();
     }
 

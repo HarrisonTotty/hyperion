@@ -229,6 +229,9 @@ pub enum SkyMember<'a> { Feature(&'a MemberRecord), Listed(&'a GlobalMemberRecor
 impl<L: ClassLookup> SkySource for CachedClassSource<'_, L> { /* R06.T16.a, as built */ }
 pub fn streams_seen(galaxy: &Galaxy, list: &GlobalList, plan: &CensusPlan, query: &SkyQuery)
     -> Vec<StreamNumber>;
+pub fn streams_seen_in(galaxy: &Galaxy, list: &GlobalList,
+    shells: (&CensusPlan, impl IntoIterator<Item = Shell>), query: &SkyQuery)
+    -> Vec<StreamNumber>; // R06.T16.a's cost, as built
 pub fn census_members(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, plan: &CensusPlan,
     shell: (Shell, MemberPart), query: &SkyQuery, out: &mut Vec<SkyStar>) -> CensusTallies;
 pub fn takes_feature_members(galaxy: &Galaxy) -> bool; // R06.T16.a, as built
@@ -10018,3 +10021,12 @@ CensusCost)`.
   - **Cost.** `sky/census_near_sun_members/*`: the measurements in the lane's outbox.
   - _Movers at 26._ Sky replies list the classes' hosts' stars, with their tallies and overflow; the
     sky's pins census with no sources and do not move.
+- **R06.T16.a's cost: the tables step by step, and no prune (perf-sky-census, 2026-11-02).**
+  - **The tables.** The open's warm-up already builds every table (P10.T10.b). The handler's
+    "before the census" is replaced: it builds each step's tables beside the census
+    (`streams_seen_in`, `GlobalListService::tubes`). `census_in_steps` takes the steps with a
+    `TablesBuilt` and holds a step's members' jobs until its tables are built.
+  - **Left (lean, 2026-11-02).** No prune before generating is built. The field's generated
+    systems pass their bound by 4 mag or more (92%), so its least extinction would prune about
+    0.1%. A member's exact bound, keeping its tallies, cost as much as the generation it skipped.
+    Both are findings; the members' draft is in the lane's outbox.

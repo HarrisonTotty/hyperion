@@ -695,6 +695,48 @@ impl GlobalListService {
         self.lists.tube((galaxy, key), spec, priority).await
     }
 
+    /// The tube tables of `specs`' streams in `galaxy`, the galaxy `key` names, that the cache
+    /// lacks, built a few at once at bulk priority as the warm-up builds them ([`tables_in_flight`]),
+    /// each joining a build in flight for its stream: what a sky's handler asks for a step's streams
+    /// before that step's members' jobs read them (rendering plan R06, R06.T16.a's cost).
+    ///
+    /// # Errors
+    ///
+    /// The first table that cannot be built, with its stream's number: as [`tube`](Self::tube).
+    ///
+    /// # Panics
+    ///
+    /// As [`tube`](Self::tube).
+    pub(crate) async fn tubes(
+        &self,
+        (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
+        specs: &[&StreamSpec],
+    ) -> Result<(), (StreamNumber, BuildTubeOnPoolError)> {
+        let fewest = specs
+            .iter()
+            .map(|spec| SprayParams::of_stream(galaxy, spec).tracers())
+            .min()
+            .unwrap_or_else(|| SprayParams::default().tracers());
+        let room = tables_in_flight(self.lists.pool.workers(), fewest);
+        let mut next = specs.iter();
+        let mut building = FuturesUnordered::new();
+        loop {
+            while building.len() < room {
+                let Some(&spec) = next.next() else {
+                    break;
+                };
+                building.push(async move {
+                    let built = self.lists.tube((galaxy, key), spec, Priority::Bulk).await;
+                    (spec.number(), built)
+                });
+            }
+            let Some((number, built)) = building.next().await else {
+                return Ok(());
+            };
+            built.map_err(|error| (number, error))?;
+        }
+    }
+
     /// Whether the cache holds the table of stream `number` of the galaxy `key` names, uncounted:
     /// its track's status, `ready` or `pending`.
     #[must_use]
@@ -1378,6 +1420,38 @@ mod tests {
             .expect("the warm-up's jobs run");
         assert_eq!((again.built(), again.held()), (0, 2));
         assert_eq!(service.tube_counters().evictions(), 0);
+        pool.shutdown().await.unwrap();
+    }
+
+    /// R06.T16.a's cost: `tubes` builds and keeps the tables of the streams it is given and no
+    /// other, and asked again builds none, every table then a hit.
+    #[tokio::test]
+    async fn the_tubes_given_are_built_and_kept() {
+        let cache = Arc::new(TubeTableCache::new(TUBE_TABLE_CACHE_BYTES));
+        let (service, pool) = service_on(4, &cache);
+        let list = within(service.get(key())).await.expect("the list");
+        let galaxy = within(service.lists.galaxies.get(key()))
+            .await
+            .expect("the galaxy");
+        let streams = list.list().debris().streams();
+        let specs: Vec<&StreamSpec> = streams[..3].iter().collect();
+        within(service.tubes((&galaxy, key()), &specs))
+            .await
+            .expect("the tables build");
+        assert!(
+            specs
+                .iter()
+                .all(|spec| service.is_ready(key(), spec.number()))
+        );
+        assert!(!service.is_ready(key(), streams[3].number()));
+        let (entries, misses) = (cache.counters().entries(), cache.counters().misses());
+        within(service.tubes((&galaxy, key()), &specs))
+            .await
+            .expect("the tables are held");
+        assert_eq!(
+            (cache.counters().entries(), cache.counters().misses()),
+            (entries, misses)
+        );
         pool.shutdown().await.unwrap();
     }
 

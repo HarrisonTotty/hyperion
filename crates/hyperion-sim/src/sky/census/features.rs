@@ -393,7 +393,8 @@ pub fn takes_class_hosts(galaxy: &Galaxy) -> bool {
 /// The streams whose tube tables the census of `plan` for `query` reads through a
 /// [`GlobalListSource`] over `list`, `galaxy`'s global list, in list order: each layer's members
 /// out to its cap's farthest radius and its stars' offset, as [`census_members`] takes them, so
-/// that a server can build the tables before the census, once each (R06.T16.a, at 27).
+/// that a server can build the tables before the census, once each (R06.T16.a, at 27). It is
+/// [`streams_seen_in`] of every shell of `plan`.
 ///
 /// # Panics
 ///
@@ -406,16 +407,92 @@ pub fn streams_seen(
     plan: &CensusPlan,
     query: &SkyQuery,
 ) -> Vec<crate::galaxy::global_list::StreamNumber> {
+    streams_seen_in(galaxy, list, (plan, plan.shells()), query)
+}
+
+/// The streams whose tube tables the members' census of `shells`, some of `plan`'s, reads through
+/// a [`GlobalListSource`] over `list`, `galaxy`'s global list, for `query`, in list order: each
+/// shell's members out to its outer edge and its layer's stars' offset, as [`census_members`] takes
+/// them. So a server can build the tables of a sky's first steps before their members' jobs and
+/// the rest while those run (R06.T16.a's cost, at 27).
+///
+/// The streams a census reads grow with the distance it reads out to, so those of some shells are
+/// those of the farthest of them, and the streams of a set of shells hold those of each of its
+/// shells.
+///
+/// # Panics
+///
+/// If a shell is not one of `plan`'s; if the farthest shell's light time before the observer's
+/// time is off the clock, which no cap's is (as [`SkySource::members_seen`]'s).
+///
+/// # Examples
+///
+/// A server builds a sky's tables shell by shell, nearest first, each stream once, so that its
+/// first shells' members wait for their own tables alone:
+///
+/// ```no_run
+/// use std::collections::BTreeSet;
+///
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::global_list::GlobalList;
+/// use hyperion_sim::observe::Observer;
+/// use hyperion_sim::sky::census::{
+///     SHELL_EDGES_LY, SkyQuery, census_plan_with_edges, streams_seen, streams_seen_in,
+/// };
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::{LightYears, Magnitudes};
+///
+/// let galaxy = Galaxy::new(Seed::new(7)).with_full_potential();
+/// let list = GlobalList::build(&galaxy);
+/// let at = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+/// let query = SkyQuery::builder(Observer::new(at, UniverseTime::EPOCH)?, Magnitudes::new(8.0))
+///     .build()?
+///     .with_caps_forced(LightYears::new(2_000.0))?;
+/// let caps = query.forced_caps().ok_or("forced caps")?.to_vec();
+/// let plan = census_plan_with_edges(&query, caps, &SHELL_EDGES_LY);
+/// let mut built = BTreeSet::new();
+/// for shell in plan.shells() {
+///     for number in streams_seen_in(&galaxy, &list, (&plan, [shell]), &query) {
+///         if built.insert(number) {
+///             // Build this stream's tube table before the shell's members' jobs run.
+///         }
+///     }
+/// }
+/// // Every shell's streams together are the census's.
+/// let whole: BTreeSet<_> = streams_seen(&galaxy, &list, &plan, &query).into_iter().collect();
+/// assert_eq!(built, whole);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn streams_seen_in(
+    galaxy: &Galaxy,
+    list: &crate::galaxy::global_list::GlobalList,
+    (plan, shells): (&CensusPlan, impl IntoIterator<Item = Shell>),
+    query: &SkyQuery,
+) -> Vec<crate::galaxy::global_list::StreamNumber> {
     let observer = query.observer();
     let [x, y, z] = observer.position().to_light_years_f64();
     let from_centre = math::hypot(math::hypot(x, y), z);
-    let outer = plan
-        .caps()
-        .iter()
-        .filter(|cap| MassBand::ALL.iter().any(|band| band.layer() == cap.layer()))
-        .map(|cap| {
+    let outer = shells
+        .into_iter()
+        .filter(|shell| {
+            MassBand::ALL
+                .iter()
+                .any(|band| band.layer() == shell.layer())
+        })
+        .map(|shell| {
+            let layer = shell.layer();
+            let cap = plan
+                .caps()
+                .iter()
+                .find(|cap| cap.layer() == layer)
+                .expect("a shell's layer has a cap");
+            // The offset `census_members` moves the layer's shells by, at its cap's farthest
+            // radius.
             let reach = LightYears::new(from_centre + cap.radius().value());
-            cap.radius().value() + layer_offset_bound(galaxy, cap.layer(), reach).value()
+            plan.shell_span(shell).1.value() + layer_offset_bound(galaxy, layer, reach).value()
         })
         .fold(0.0, f64::max);
     if outer <= 0.0 {
@@ -1342,7 +1419,8 @@ mod tests {
     /// The census takes a stream's members once (R06.T16.a, at 27): a light-year from a member of
     /// the list's first stream, to 300 ly at V 11, its members' stars of shells to 100, 200 and
     /// 300 ly, in one part or three, are those of one shell, bit for bit, and some are listed; and
-    /// the census reads only the streams' tables [`streams_seen`] names.
+    /// the census reads only the streams' tables [`streams_seen`] names, and each shell's members
+    /// only those [`streams_seen_in`] names for it.
     #[test]
     #[ignore = "slow: builds a Milky Way galaxy's list and a stream's tube table, some two minutes"]
     fn the_census_takes_a_streams_members_once_where_the_list_is_registered() {
@@ -1388,6 +1466,28 @@ mod tests {
             asked.iter().all(|number| seen.contains(number)),
             "{asked:?} against {seen:?}"
         );
+        // Each shell's members read only the streams `streams_seen_in` names for that shell, so
+        // that a server can build them a step at a time.
+        for shell in shelled.shells() {
+            lookup.asked.lock().expect("no job panics").clear();
+            let mut ctx = SkyContext {
+                sources: &[&source],
+                ..milky_way_dark_context()
+            };
+            let whole = (shell, MemberPart::WHOLE);
+            let mut stars = Vec::new();
+            let tallies = census_members(galaxy, &mut ctx, &shelled, whole, &query, &mut stars);
+            assert_eq!(
+                tallies.layer(shell.layer()).accepted(),
+                u64::try_from(stars.len()).expect("a count")
+            );
+            let seen = streams_seen_in(galaxy, &lookup.list, (&shelled, [shell]), &query);
+            let asked = lookup.asked.lock().expect("no job panics").clone();
+            assert!(
+                asked.iter().all(|number| seen.contains(number)),
+                "{shell:?}: {asked:?} against {seen:?}"
+            );
+        }
         let streamed = stars
             .iter()
             .filter(|s| matches!(s.system().kind(), SystemIdKind::Stream(_)))

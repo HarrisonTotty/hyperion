@@ -47,6 +47,7 @@ mod kept;
 
 pub(crate) use kept::SkyReplyCache;
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::ops::Range;
@@ -54,7 +55,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use futures_util::TryFutureExt;
-use futures_util::future::try_join;
+use futures_util::future::try_join3;
 use hyperion_protocol::{
     BandSpecDto, ConeDto, ErrorCode, EyeDto, GalacticPosition, HostDiscDto, MAX_CUT_V,
     MAX_SKY_STARS, PowerTwoDto, RequestError, ResponseBody, SkyGapDto, SkyLayerCensusDto,
@@ -62,7 +63,7 @@ use hyperion_protocol::{
 };
 use hyperion_sim::coords::UnitVector;
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::global_list::GlobalListSource;
+use hyperion_sim::galaxy::global_list::{GlobalList, GlobalListSource, StreamNumber, StreamSpec};
 use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve};
 use hyperion_sim::galaxy::query::LayerPads;
 use hyperion_sim::id::{Layer, SystemId};
@@ -71,8 +72,8 @@ use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::band::{BandMarch, BandTexel};
 use hyperion_sim::sky::caps::{LayerCap, REAL_LIMIT_LY};
 use hyperion_sim::sky::census::{
-    BuildSkyQueryError, CensusPlan, CensusTallies, Completeness, Cone, LayerTally, SkyCensus,
-    SkyQuery, SkyStar, streams_seen,
+    BuildSkyQueryError, CensusPlan, CensusTallies, Completeness, Cone, LayerTally, Shell,
+    SkyCensus, SkyQuery, SkyStar, streams_seen_in,
 };
 use hyperion_sim::sky::dgl::Illumination;
 use hyperion_sim::sky::disc::{HostDisc, host_discs};
@@ -98,8 +99,8 @@ use crate::compute::sky::{
     BulkJobs, CENSUS_JOB_SLICE, CensusInputs, CensusStep, SkyBand, SkyMembers,
 };
 use crate::compute::{
-    self, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, ListedTubes, Listing, Priority,
-    SkyCaps,
+    self, CancelToken, ComputeError, CpuPool, GalaxyKey, HeldGlobalList, JobError, ListedTubes,
+    Listing, Priority, SkyCaps,
 };
 use crate::convert::{ConvertRequestError, mass_layer, query_time, root_cube_position, wire_time};
 use kept::SkyReplyKey;
@@ -283,39 +284,26 @@ async fn computed(
         compute::sky::plan(pool, &galaxy, &tables, asked_query, edges, token).await?;
     let plan = Arc::new(plan);
     phase("plan", started);
-    // From 27 the census takes the global list's members too, through its list and tube tables,
-    // built on the pool if no request has built them, and the centre's orbits (R06.T16.a).
-    let list = if GlobalListSource::is_registered_in(&galaxy) {
-        let held = state.global_lists.get(key).await?;
-        // The tables of the streams the census reads, built on the pool first, each once, as the
-        // range query's are (`list_for`), so that no census job builds one.
-        for number in streams_seen(&galaxy, held.list(), &plan, &query) {
-            let spec = held
-                .list()
-                .stream(number)
-                .expect("the list names its own streams");
-            state
-                .global_lists
-                .tube((&galaxy, key), spec, Priority::Bulk)
-                .await
-                .map_err(|error| tube_refused(number, &error))?;
+    let steps = compute::sky::delivery_steps(&plan, state.sky_caps.delivery_order());
+    let list = sky_list(state, (&galaxy, key), (&plan, &steps), &query).await?;
+    let (built, tubes_built) = match &list {
+        Some(_) => {
+            let (sender, tubes_built) = compute::sky::TablesBuilt::none();
+            (Some(sender), tubes_built)
         }
-        let tubes = ListedTubes::new(
-            (Arc::clone(&galaxy), key),
-            held,
-            Arc::clone(&state.tube_tables),
-        );
-        Some((tubes, Arc::clone(&state.centre_orbits)))
-    } else {
-        None
+        None => (None, compute::sky::TablesBuilt::all()),
     };
+    let building = Arc::clone(&galaxy);
     let members = (
         Arc::clone(&state.feature_cells),
         Arc::clone(&state.cluster_models),
         Arc::clone(&state.class_cells),
     );
+    let read = list
+        .as_ref()
+        .map(|list| (list.tubes.clone(), Arc::clone(&state.centre_orbits)));
     let inputs = CensusInputs {
-        members: SkyMembers::of(&galaxy, members, list),
+        members: SkyMembers::of(&galaxy, members, read),
         galaxy,
         key,
         tables,
@@ -327,12 +315,19 @@ async fn computed(
         Some(system) => discs(state, key, &inputs.galaxy, system, &query, token).await?,
         None => Vec::new(),
     };
-    let steps = compute::sky::delivery_steps(&plan, state.sky_caps.delivery_order());
     // Every step's progress fits, so the census never waits for a reply to be made.
     let (sink, mut censused) = mpsc::channel(steps.len());
-    let census =
-        compute::sky::census_in_steps(pool, &inputs, &plan, &steps, CENSUS_JOB_SLICE, sink, token)
-            .map_err(RequestError::from);
+    let census = compute::sky::census_in_steps(
+        pool,
+        &inputs,
+        &plan,
+        (&steps, tubes_built),
+        CENSUS_JOB_SLICE,
+        sink,
+        token,
+    )
+    .map_err(RequestError::from);
+    let tubes = step_tables(state, (&building, key), (list.as_ref(), built), started);
     let reply = Reply {
         state,
         request,
@@ -342,8 +337,113 @@ async fn computed(
         token,
         started,
     };
-    let ((), answer) = try_join(census, reply.each(&mut censused, replies)).await?;
+    let ((), answer, ()) = try_join3(census, reply.each(&mut censused, replies), tubes).await?;
     Ok(answer)
+}
+
+/// What a sky's census reads of its galaxy's global list from generator version 27 (R06.T16.a): the
+/// list and its tables, which the members' jobs read, and the streams each delivery step's members
+/// read, whose tables [`step_tables`] builds beside the census.
+struct SkyList {
+    tubes: ListedTubes,
+    held: Arc<HeldGlobalList>,
+    by_step: Vec<Vec<StreamNumber>>,
+}
+
+/// The global list `galaxy`'s census of `plan` for `query` reads, the galaxy `key` names, with the
+/// streams each of `steps` reads ([`streams_by_step`]), the list built on the pool if no request
+/// has built it; `None` where the range query does not register the list's source.
+///
+/// # Errors
+///
+/// As [`GlobalListService::get`](crate::compute::GlobalListService::get).
+async fn sky_list(
+    state: &AppState,
+    (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
+    (plan, steps): (&CensusPlan, &[Vec<Shell>]),
+    query: &SkyQuery,
+) -> Result<Option<SkyList>, RequestError> {
+    if !GlobalListSource::is_registered_in(galaxy) {
+        return Ok(None);
+    }
+    let held = state.global_lists.get(key).await?;
+    let by_step = streams_by_step(galaxy, held.list(), (plan, steps), query);
+    let tubes = ListedTubes::new(
+        (Arc::clone(galaxy), key),
+        Arc::clone(&held),
+        Arc::clone(&state.tube_tables),
+    );
+    Ok(Some(SkyList {
+        tubes,
+        held,
+        by_step,
+    }))
+}
+
+/// Builds the tables of `list`'s streams step by step on the pool, a few at once, each once, and
+/// says each step's built through `built` (R06.T16.a's cost): beside the census, so that no
+/// census job builds one, the field's cells go on meanwhile, and a step's members' jobs start
+/// once its tables are built. Nothing where the census reads no list.
+///
+/// # Errors
+///
+/// As [`tube_refused`], for the first table that cannot be built.
+async fn step_tables(
+    state: &AppState,
+    (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
+    (list, built): (Option<&SkyList>, Option<compute::sky::StepTablesBuilt>),
+    started: Instant,
+) -> Result<(), RequestError> {
+    let (Some(list), Some(built)) = (list, built) else {
+        return Ok(());
+    };
+    for (k, numbers) in list.by_step.iter().enumerate() {
+        let specs: Vec<&StreamSpec> = numbers
+            .iter()
+            .map(|&number| {
+                list.held
+                    .list()
+                    .stream(number)
+                    .expect("the list names its own streams")
+            })
+            .collect();
+        state
+            .global_lists
+            .tubes((galaxy, key), &specs)
+            .await
+            .map_err(|(number, error)| tube_refused(number, &error))?;
+        built.built_through(k);
+        tracing::debug!(
+            step = k,
+            tables = specs.len(),
+            elapsed_ms = millis(started),
+            "sky step's tube tables built"
+        );
+    }
+    Ok(())
+}
+
+/// The streams whose tube tables the members of each of `steps`, of `plan`, read through
+/// `galaxy`'s global list `list` for `query`, each named at the first step that reads it
+/// ([`streams_seen_in`]; R06.T16.a's cost): what a sky's handler builds before each step's
+/// members' jobs.
+#[must_use]
+fn streams_by_step(
+    galaxy: &Galaxy,
+    list: &GlobalList,
+    (plan, steps): (&CensusPlan, &[Vec<Shell>]),
+    query: &SkyQuery,
+) -> Vec<Vec<StreamNumber>> {
+    let mut named = BTreeSet::new();
+    steps
+        .iter()
+        .map(|shells| {
+            streams_seen_in(galaxy, list, (plan, shells.iter().copied()), query)
+                .into_iter()
+                .filter(|&number| named.insert(number))
+                .collect()
+        })
+        .collect()
 }
 
 /// The milliseconds since `started`, for the log.
@@ -1183,6 +1283,52 @@ mod tests {
 
     /// Near the Sun's place on the solar circle, ly, as the sim's sky tests stand.
     const SUN_LY: [i32; 3] = [0, 26_000, 68];
+
+    /// R06.T16.a's cost: near the Sun at 27, to the served sky's 2,000 ly, the streams each
+    /// delivery step's members read are named at the first step that reads them, once, and every
+    /// step's together are the census's whole `streams_seen`. (A stream is seen where its
+    /// galactocentric shell meets the sky's, so near the Sun the first step names nearly all.)
+    #[test]
+    fn each_steps_streams_are_named_once_and_together_are_the_censuss() {
+        let galaxy = Galaxy::from_params_at_version(
+            Seed::new(SEED),
+            hyperion_sim::galaxy::params::GalaxyParams::milky_way_like(),
+            hyperion_sim::GeneratorVersion::new(27),
+        )
+        .unwrap()
+        .with_full_potential();
+        assert!(GlobalListSource::is_registered_in(&galaxy));
+        let list = GlobalList::build(&galaxy);
+        let caps = SkyCaps::forced(LightYears::new(2_000.0)).unwrap();
+        let at = hyperion_sim::coords::GalacticPosition::from_light_years(SUN_LY.map(f64::from))
+            .unwrap();
+        let query = caps.on(SkyQuery::builder(
+            Observer::new(at, UniverseTime::EPOCH).unwrap(),
+            Magnitudes::new(8.0),
+        )
+        .pads(LayerPads::of(&galaxy))
+        .build()
+        .unwrap());
+        let forced = query.forced_caps().expect("forced caps").to_vec();
+        let plan = hyperion_sim::sky::census::census_plan_with_edges(
+            &query,
+            forced,
+            caps.shell_edges_ly(),
+        );
+        let steps = compute::sky::delivery_steps(&plan, caps.delivery_order());
+        let by_step = streams_by_step(&galaxy, &list, (&plan, &steps), &query);
+        let named: Vec<StreamNumber> = by_step.iter().flatten().copied().collect();
+        let once: BTreeSet<StreamNumber> = named.iter().copied().collect();
+        assert_eq!(once.len(), named.len(), "a stream named twice");
+        let whole: BTreeSet<StreamNumber> =
+            hyperion_sim::sky::census::streams_seen(&galaxy, &list, &plan, &query)
+                .into_iter()
+                .collect();
+        assert_eq!(once, whole);
+        let counts: Vec<usize> = by_step.iter().map(Vec::len).collect();
+        eprintln!("streams named by step: {counts:?} of {}", whole.len());
+        assert!(!whole.is_empty(), "no stream seen near the Sun");
+    }
 
     fn request() -> SkyRequest {
         SkyRequest {
