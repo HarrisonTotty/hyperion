@@ -31,19 +31,27 @@
  *    `decision-r08-t10a-leans.md` item 7), lacks a row, holds one the fixture does not, or differs
  *    from a row's `absorber` or `rayleigh` flag.
  *
- * R08.T19's fifth row, the client's τ(550) against the record's within 1%, is held
- * (decision-bump-plan-after-22): see its tripwire below.
+ * R08.T19's fifth row holds the client's τ(550) to the record's within 1% for every mode of the
+ * protocol fixture's one surface aerosol inventory, the generated `body_detail_temperate_world`'s
+ * (`hyperion-server`'s `the_fixture_s_temperate_world_is_the_generator_s`): in-cloud, as the
+ * record's, before the coverage `assemble.ts`'s `modesOf` applies, from the mode's column mass and
+ * this client's mass extinction of its particles.
  *
  * The check grows with the registry: a row P14 appends with a flag set is checked once the fixture
  * is re-blessed.
  */
-import type { BodySurfaceDto } from "@hyperion/protocol";
+import type { AerosolTauBasisDto, BodySurfaceDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import planetary from "../../../../../../../packages/protocol/fixtures/planetary.json" with { type: "json" };
 import registry from "../../../../../../../packages/protocol/fixtures/substances.json" with { type: "json" };
+import type { AerosolMode as RecordAerosolMode } from "../../lib/system/model";
+import { detailOf } from "../../test/atmosphereRecords";
+import { TEMPERATE_WORLD_SYSTEM, temperateWorldDetail } from "../../test/planetaryFixture";
 import { crossSectionAt } from "./absorbers";
 import { committedLineSpecies } from "./absorbers/kDistribution";
+import { aerosolModeInRange, aerosolModeOptics } from "./aerosol";
+import { recordModeParticles } from "./assemble";
 import { NO_VISIBLE_ABSORPTION, PENDING_ABSORBERS } from "./absorbers/transparency";
 import { type GrainDensityRow, grainDensityKgPerM3, memberOf } from "./grainDensity";
 import { MATERIAL_FILES, type MaterialPhase, resolveMaterial } from "./materials/materials";
@@ -55,6 +63,7 @@ import {
   rayleighOf,
 } from "./rayleigh";
 import { REGISTRY_OPTICS_FLAGS } from "./registryFlags";
+import { resolveModeMaterial } from "./sizeDistribution";
 
 /**
  * A fixture row as this check reads it: its key, its molar mass, its three optics flags and its
@@ -303,7 +312,8 @@ describe("the molar masses", () => {
 
 /**
  * The wire's aerosol inventory, `BodySurfaceDto.aerosols` (P14.T24.c), by its member's name: a
- * rename in the generated type fails the type check, so that the hold cannot outlive its member.
+ * rename in the generated type fails the type check, so that the census of the fixture's
+ * inventories cannot outlive its member.
  */
 const AEROSOLS_MEMBER = "aerosols" satisfies keyof BodySurfaceDto;
 
@@ -334,41 +344,119 @@ function aerosolsMembers(value: unknown, path: string): ReadonlyArray<string> {
   return found;
 }
 
-/** What to do when the τ(550) hold's tripwire fires. */
-const TAU_550_HOLD_LIFTED =
-  "the protocol fixture now carries an aerosol inventory. If it is a generated surface's, whose " +
-  "modes carry the sim's τ(550) from generator version 24 (P14.T24.c's inventory with P14.T49.e's " +
-  "condensate extinction, decision-bump-plan-after-22), build R08.T19's fifth row in this test's " +
-  "place: the client's τ(550) for each of the fixture's modes within 1% of the record's. Otherwise " +
-  "restate the hold's condition here and record why in plan R08 (R08.T19's records in " +
-  "08-atmospheres.md)";
+/**
+ * The fixture's message whose record is the generator's, a golden body's (`hyperion-server`'s
+ * `the_fixture_s_temperate_world_is_the_generator_s`): the one message whose surface carries an
+ * aerosol inventory.
+ */
+const GENERATED_SURFACE = "body_detail_temperate_world";
 
-describe("τ(550), the record's against the client's", () => {
-  /**
-   * The hold on R08.T19's fifth row (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15;
-   * restated at generator version 24, P14.T54.b.l, 2026-10-29).
-   *
-   * @remarks
-   * P14.T54.b, from generator version 24, wires the aerosol inventory (P14.T24.c with T24.g) and
-   * the vertical structure (T24.e). Its τ(550) is computed from R08's index files through
-   * P14.T49.e's `condensate_extinction`, so that the record's τ(550) and the client's Mie agree.
-   * The hold was to end at 24, but the protocol fixture's surfaces are written by hand and carry no
-   * `aerosols` member, `BodySurfaceDto.aerosols`, so at 24 the row still has no record's inventory
-   * to read. The trigger is now that member itself: the client has no generator version, so the
-   * hold asserts what it can see, that no message of the fixture carries one, and the row is built
-   * when a message carries a generated surface's inventory.
-   *
-   * The fixture's `body_detail_jupiter` and `body_detail_hot_jupiter` envelopes are the
-   * generator's (P14.T54.b.i; hyperion-server's `the_fixture_s_envelopes_are_the_generator_s`), and
-   * their decks' modes carry the record's τ(550), but the row reads a surface's aerosol inventory,
-   * not an envelope's decks, so it does not run against them.
-   */
-  it("is held until a protocol fixture message carries a surface's aerosol inventory (restated at version 24): none does", () => {
+/** What to do when the census finds another inventory than the generated surface's. */
+const ANOTHER_INVENTORY =
+  "another protocol fixture message carries a surface's aerosol inventory. If it is a generated " +
+  "surface's, pinned by a server test as body_detail_temperate_world is, run R08.T19's fifth row " +
+  "over its modes too; otherwise its τ(550) is no record's, and the row does not read it";
+
+/** The bound on the fifth row's relative difference, the client's τ(550) against the record's. */
+const TAU_550_PARITY_TOLERANCE = 0.01;
+
+/** A mode of the generated surface's inventory with its τ(550), the record's and the client's. */
+interface ModeDepth {
+  /** Its phase and material, as `liquid H2O`. */
+  readonly name: string;
+  readonly basis: AerosolTauBasisDto | undefined;
+  readonly recordTau550: number | undefined;
+  readonly clientTau550: number | undefined;
+}
+
+/** The fixture's rows by key, for their grain densities. */
+const DENSITY_ROWS = new Map(registry.substances.map((row) => [row.key, row]));
+
+/**
+ * The client's τ(550) of a record's mode, in-cloud as the record's (its coverage, which
+ * `assemble.ts`'s `modesOf` applies, left out): its column mass times its particles' mass
+ * extinction, ⟨C_ext⟩ ÷ (ρ ⟨V⟩), from this client's optics of the particles it takes from the
+ * record (`recordModeParticles`: the index file, the size quadrature and the large-particle limit)
+ * and the fixture's grain density at the mode's phase and temperature, of the file's variant.
+ *
+ * @returns Undefined where the record leaves out the mode's sizes, column mass or temperature, the
+ *   particles are an aggregate's or outside the optics at 550 nm, or the fixture gives no density.
+ */
+function clientTau550Of(mode: RecordAerosolMode): number | undefined {
+  const { sizeDistribution: sizes, columnMassKgM2, temperatureK } = mode;
+  if (sizes.kind !== "value" || columnMassKgM2.kind !== "value" || temperatureK.kind !== "value") {
+    return undefined;
+  }
+  const particles = recordModeParticles(mode, sizes.value);
+  const row = DENSITY_ROWS.get(mode.material);
+  if (
+    particles.kind !== "distribution" ||
+    !aerosolModeInRange(particles, 550) ||
+    row === undefined
+  ) {
+    return undefined;
+  }
+  const variant = resolveModeMaterial(particles.mode).file?.variant;
+  const densityKgPerM3 = grainDensityKgPerM3(row, mode.phase, temperatureK.value, variant);
+  if (densityKgPerM3 === undefined) {
+    return undefined;
+  }
+  const optics = aerosolModeOptics(particles, 550);
+  return (
+    (columnMassKgM2.value * optics.extinctionCrossSectionM2) / (densityKgPerM3 * optics.volumeM3)
+  );
+}
+
+/**
+ * The generated surface's modes in the record's order, each with its τ(550); none where its surface
+ * carries no inventory, which the census below then reports.
+ */
+function generatedModeDepths(): ReadonlyArray<ModeDepth> {
+  const { surface } = detailOf(temperateWorldDetail(), TEMPERATE_WORLD_SYSTEM).record;
+  if (surface.state !== "ok" || surface.value.aerosols.kind !== "value") {
+    return [];
+  }
+  return surface.value.aerosols.value.modes.map((mode) => {
+    const depth = mode.opticalDepth.kind === "value" ? mode.opticalDepth.value : undefined;
+    return {
+      name: `${mode.phase} ${mode.material}`,
+      basis: depth?.basis,
+      recordTau550: depth?.tau550,
+      clientTau550: clientTau550Of(mode),
+    };
+  });
+}
+
+/** A mode's τ(550), the client's, relative to the record's, less 1. */
+function relativeDifference({ recordTau550, clientTau550 }: ModeDepth): number {
+  return (clientTau550 ?? Number.NaN) / (recordTau550 ?? Number.NaN) - 1;
+}
+
+describe("τ(550), the record's against the client's (R08.T19's fifth row)", () => {
+  const depths = generatedModeDepths();
+
+  it("finds one aerosol inventory in the fixture, the generated temperate world's", () => {
     // The instruction rides with the members found, so that a failure prints it.
     expect({
       aerosolsMembers: aerosolsMembers(planetary, "planetary.json"),
-      ifFound: TAU_550_HOLD_LIFTED,
-    }).toEqual({ aerosolsMembers: [], ifFound: TAU_550_HOLD_LIFTED });
+      ifAnother: ANOTHER_INVENTORY,
+    }).toEqual({
+      aerosolsMembers: [`planetary.json.${GENERATED_SURFACE}.body.record.surface.value.aerosols`],
+      ifAnother: ANOTHER_INVENTORY,
+    });
+  });
+
+  it("finds a water deck's mode and a sulphate layer's, each with its basis and the client's τ(550)", () => {
+    expect(
+      depths.map(({ name, basis, clientTau550 }) => [name, basis, clientTau550 !== undefined]),
+    ).toEqual([
+      ["liquid H2O", "geometric_limit", true],
+      ["liquid H2SO4", "sphere", true],
+    ]);
+  });
+
+  it.each(depths)("gives the $name the record's τ(550) within 1%", (depth) => {
+    expect(Math.abs(relativeDifference(depth))).toBeLessThanOrEqual(TAU_550_PARITY_TOLERANCE);
   });
 
   it("would find an aerosols member at any depth, null or not", () => {

@@ -4326,4 +4326,184 @@ mod tests {
             assert!(held > 0, "{message}: no deck of its own gas above 1 bar");
         }
     }
+
+    /// The shared fixture's message whose record is a golden body's, generated (plan R08,
+    /// R08.T19's fifth row), with that body's ID: the third filler's temperate wet world, at the
+    /// epoch, its air carrying a liquid water deck and a sulphate layer.
+    const FIXTURE_TEMPERATE_WORLD: (&str, &str) =
+        ("body_detail_temperate_world", "42002cb200000000.0200");
+
+    /// The shared fixture's file, which [`bless_fixture_message`] rewrites.
+    const PLANETARY_FIXTURE_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../packages/protocol/fixtures/planetary.json"
+    );
+
+    /// Writes `message` into the shared fixture's file in place of its member `name`'s object,
+    /// every other byte of the file kept: the bless arm of
+    /// [`the_fixture_s_temperate_world_is_the_generator_s`]. The message is serde's pretty form,
+    /// its keys in the types' order; Prettier then lays it out as the file's other messages are.
+    fn bless_fixture_message(name: &str, message: &hyperion_protocol::ServerMessage) {
+        let text = std::fs::read_to_string(PLANETARY_FIXTURE_PATH).expect("the fixture reads");
+        let member = format!("\n  \"{name}\": ");
+        let start = text
+            .find(&member)
+            .unwrap_or_else(|| panic!("the shared fixture has no member {name} to bless"))
+            + member.len();
+        assert!(
+            text[start..].starts_with('{'),
+            "the fixture's {name} is a message, an object"
+        );
+        let (mut depth, mut quoted, mut escaped) = (0_usize, false, false);
+        let mut end = None;
+        for (at, c) in text[start..].char_indices() {
+            if quoted {
+                match c {
+                    _ if escaped => escaped = false,
+                    '\\' => escaped = true,
+                    '"' => quoted = false,
+                    _ => {}
+                }
+                continue;
+            }
+            match c {
+                '"' => quoted = true,
+                '{' | '[' => depth += 1,
+                '}' | ']' => {
+                    depth = depth.checked_sub(1).expect("the fixture is JSON");
+                    if depth == 0 {
+                        end = Some(start + at + c.len_utf8());
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let end = end.expect("the member's object closes");
+        let pretty = serde_json::to_string_pretty(message)
+            .expect("a message serialises")
+            .replace('\n', "\n  ");
+        std::fs::write(
+            PLANETARY_FIXTURE_PATH,
+            format!("{}{pretty}{}", &text[..start], &text[end..]),
+        )
+        .expect("the fixture writes");
+    }
+
+    /// The first place where the JSON values `held` and `built` differ, as a JSON pointer below
+    /// `at` with the two values there, or `None` where they are equal.
+    fn first_difference(
+        at: &str,
+        held: &serde_json::Value,
+        built: &serde_json::Value,
+    ) -> Option<String> {
+        use serde_json::Value;
+
+        match (held, built) {
+            (Value::Object(held), Value::Object(built)) => held
+                .keys()
+                .chain(built.keys().filter(|key| !held.contains_key(*key)))
+                .find_map(|key| {
+                    let shown = |value: Option<&Value>| {
+                        value.map_or_else(|| "absent".to_owned(), Value::to_string)
+                    };
+                    let path = format!("{at}/{key}");
+                    match (held.get(key), built.get(key)) {
+                        (Some(h), Some(b)) => first_difference(&path, h, b),
+                        (h, b) => Some(format!("{path}: {} against {}", shown(h), shown(b))),
+                    }
+                }),
+            (Value::Array(h), Value::Array(b)) if h.len() == b.len() => h
+                .iter()
+                .zip(b)
+                .enumerate()
+                .find_map(|(i, (h, b))| first_difference(&format!("{at}/{i}"), h, b)),
+            _ => (held != built).then(|| format!("{at}: {held} against {built}")),
+        }
+    }
+
+    /// R08.T19's fifth row (plan R08): the shared fixture's `body_detail_temperate_world` is the
+    /// generator's, the whole message: the `full` record of a golden body at the epoch as
+    /// [`body_record`] sends it (`FIXTURE_TEMPERATE_WORLD`), so that the client's `parity.test.ts`
+    /// holds its Mie's τ(550) to the record's for each mode of a generated surface's aerosol
+    /// inventory. The body is a temperate world with liquid water, its inventory a liquid water
+    /// deck's mode and a sulphate layer's, each with its τ(550). Any change to the body's record
+    /// fails it, naming the first member that differs, until the message is re-blessed: by name,
+    /// `HYPERION_BLESS=1 cargo test -p hyperion-server --lib
+    /// the_fixture_s_temperate_world_is_the_generator_s`, or with every golden by `just bless`;
+    /// then `pnpm exec prettier --write packages/protocol/fixtures/planetary.json`. A bless that
+    /// changes no value leaves the file as it is.
+    #[test]
+    fn the_fixture_s_temperate_world_is_the_generator_s() {
+        use hyperion_protocol::{RequestId, ResponseBody, ServerMessage, UniverseIdHex};
+        use hyperion_testkit::golden::Mode;
+
+        let (name, id) = FIXTURE_TEMPERATE_WORLD;
+        let (sim, record) = GOLDEN_RECORDS
+            .iter()
+            .find(|(_, wire)| wire.id.as_str() == id)
+            .expect("the fixture's body is a golden system's");
+        let Section::Ok(surface) = sim.surface() else {
+            panic!("{id}: its surface is ok");
+        };
+        assert_eq!(
+            (
+                surface.published_state(),
+                surface.conditions().liquid_water()
+            ),
+            (SurfaceState::Temperate, true),
+            "{id}"
+        );
+        let RecordModelled::Ok(inventory) = surface.aerosols() else {
+            panic!("{id}: its aerosols are modelled");
+        };
+        let water = substance::by_key("H2O").expect("a registry row");
+        let acid = substance::by_key("H2SO4").expect("a registry row");
+        let decks: Vec<SubstanceId> = inventory
+            .decks()
+            .iter()
+            .map(AerosolDeck::condensate)
+            .collect();
+        let modes: Vec<(SubstanceId, bool)> = inventory
+            .modes()
+            .iter()
+            .map(|mode| (mode.material(), decks.contains(&mode.deck())))
+            .collect();
+        assert_eq!(
+            (decks, modes),
+            (vec![water], vec![(water, true), (acid, false)]),
+            "{id}: a water deck's mode and a sulphate layer"
+        );
+        assert!(
+            inventory
+                .modes()
+                .iter()
+                .all(|mode| mode.optical_depth().is_ok()
+                    && mode.column_mass().is_some()
+                    && mode.temperature().is_some()),
+            "{id}: every mode has its τ(550), its column mass and its temperature"
+        );
+
+        let message = ServerMessage::Response {
+            id: RequestId(33),
+            body: ResponseBody::BodyDetail(Box::new(BodyDetailDto {
+                universe: UniverseIdHex::from_u64(42),
+                time: wire_time(UniverseTime::EPOCH),
+                granted: DetailLevelDto::Full,
+                record: record.clone(),
+            })),
+        };
+        let built = serde_json::to_value(&message).expect("a message serialises");
+        let difference = first_difference("", &PLANETARY_FIXTURE[name], &built);
+        match Mode::from_env() {
+            Mode::Compare => assert!(
+                difference.is_none(),
+                "{name} is not the generator's {id} at {}: re-bless it (this test's doc)",
+                difference.unwrap_or_default()
+            ),
+            Mode::Bless if difference.is_some() => bless_fixture_message(name, &message),
+            Mode::Bless => {}
+            Mode::BlessForbidden => panic!("{name}: blessing is forbidden under CI"),
+        }
+    }
 }

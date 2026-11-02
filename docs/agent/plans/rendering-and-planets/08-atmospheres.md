@@ -6225,7 +6225,8 @@ JSON import, and fails if:
   P14.T49.b's value at 298.15 K, for display and cross-check only (`science-r08-gases-2.md` §1.4);
 - once P14.T54.b ships τ(550), with P14.T24.c's aerosols and P14.T49.e's `condensate_extinction`,
   both wired at 24 (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15), the client's
-  τ(550) for the protocol fixture's modes differs from the record's by more than 1%.
+  τ(550) for the protocol fixture's modes differs from the record's by more than 1%. _Built
+  2026-11-02_ (Risks, "R08.T19's fifth row, as built").
 - _As built, condition 6 (P14.T24.h.a, lane `p14-gate-24`, 2026-10-22;
   decision-bump-plan-after-22, "p14-gate-24's questions" G1):_ the fixture's nullable
   `rayleigh_cross_section_550nm_m2`, the sim's Rayleigh floor's σ at 550 nm, is held both ways. A
@@ -24614,3 +24615,17 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     alone; at 1.05 the route would close.
   - _Pending, the owner's RTX run_: the march's cost on edged media (two lookups and a medium read a
     cut piece's end), the slab Earth's 10⁷ m x4 row among them.
+- **R08.T19's fifth row, as built** (2026-11-02; lane `r08-t19-row5`; no generated value moves).
+  - _The message:_ `planetary.json`'s `body_detail_temperate_world`, the whole `full` record at the
+    epoch of golden body `42002cb200000000.0200` (temperate, liquid water, 5.3 bar of N₂) at
+    generator version 24. `hyperion-server`'s `the_fixture_s_temperate_world_is_the_generator_s`
+    pins it to the bit; a train that moves the body re-blesses it by name (`HYPERION_BLESS=1`, or
+    `just bless`, then Prettier).
+  - _The row_ (`parity.test.ts`): each mode's in-cloud τ(550), column mass × ⟨C_ext⟩ ÷ (ρ⟨V⟩) by
+    `aerosolModeOptics` at 550 nm on `assemble.ts`'s `recordModeParticles` (the private
+    `particlesOf`, renamed and exported) and `grainDensity.ts`, within 1% of the record's. The
+    hold's tripwire is gone; its census asserts that the message's is the fixture's only inventory.
+  - _The modes:_ the liquid H₂O deck's (log-normal, r_eff 44.2 µm, `geometric_limit`) +0.37%, the
+    worst; the liquid H₂SO₄ sulphate layer's (`sphere`) +2.8 × 10⁻⁶.
+  - `test/atmosphereRecords.ts`'s `detailOf` takes an optional system; `planetaryFixture.ts` gains
+    `temperateWorldDetail` and `TEMPERATE_WORLD_SYSTEM`; R08.T3.e's column test reads the message.

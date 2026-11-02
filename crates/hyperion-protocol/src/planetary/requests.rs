@@ -771,7 +771,7 @@ pub(crate) mod tests {
             .unwrap();
             assert_eq!(&again, wire, "{name}");
         }
-        assert_eq!(messages.len(), 15);
+        assert_eq!(messages.len(), 16);
     }
 
     #[test]

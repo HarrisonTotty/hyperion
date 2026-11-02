@@ -1174,11 +1174,14 @@ function shapeClassOf(shape: AerosolShapeDto): ShapeClass {
 const UM_PER_M = 1e6;
 
 /**
- * A mode's particles as the optics take them: an aggregate of its monomers, or a size distribution
- * of its material and shape. A distribution sent with the `aggregate` shape takes its file's
- * shape, since its sizes are no aggregate's.
+ * A record's mode's particles as the optics take them: an aggregate of its monomers, or a size
+ * distribution of its material and shape. A distribution sent with the `aggregate` shape takes its
+ * file's shape, since its sizes are no aggregate's.
  */
-function particlesOf(mode: RecordAerosolMode, sizes: RecordSizeDistribution): AerosolParticles {
+export function recordModeParticles(
+  mode: RecordAerosolMode,
+  sizes: RecordSizeDistribution,
+): AerosolParticles {
   const form = { phase: mode.phase };
   let particles: AerosolParticles;
   switch (sizes.kind) {
@@ -1287,7 +1290,7 @@ function modesOf(
       continue;
     }
     // A modelled distribution outside its optics' range is dropped under the τ rule (R08.T10.b).
-    const particles = particlesOf(mode, sizes.value);
+    const particles = recordModeParticles(mode, sizes.value);
     if (!aerosolTermInRange(particles)) {
       reasons.add(`mode:${index}`, outsideOpticsReason(mode, particles), topPa);
       continue;

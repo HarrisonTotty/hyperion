@@ -5,7 +5,7 @@
  * The generated Earth's medium with its line tables is `assembleEarth.test.ts`'s; aerosols are
  * `assembleAerosols.test.ts`'s; the router at the assembly is `assembleThick.test.ts`'s.
  */
-import type { CrustCompositionDto } from "@hyperion/protocol";
+import type { CrustCompositionDto, SystemIdHex } from "@hyperion/protocol";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import type { BodySurface } from "../../lib/system/model";
@@ -28,6 +28,8 @@ import {
   earthMassAndOrbit,
   jupiterDetail,
   lavaWorldDetail,
+  TEMPERATE_WORLD_SYSTEM,
+  temperateWorldDetail,
 } from "../../test/planetaryFixture";
 import { type GoldenStructure, goldenStructure } from "../../test/verticalStructureGolden";
 import { MAX_BODY_LIGHTS } from "../lighting/hostLights";
@@ -52,9 +54,9 @@ import { type DensityProfile, densityAt } from "./medium";
 import type { GasFractions } from "./rayleigh";
 import { type AbsorberCurveSlots, type AtmosphereBody, MAX_TERMS } from "./tables";
 
-/** The assembly of a fixture answer, lit by the Sun. */
-function assembled(answer: DetailAnswer): AssembledMedium {
-  return assembleMedium(recordInput(detailOf(answer)));
+/** The assembly of a fixture answer of `system`'s, the slice's unless given, lit by the Sun. */
+function assembled(answer: DetailAnswer, system?: SystemIdHex): AssembledMedium {
+  return assembleMedium(recordInput(detailOf(answer, system)));
 }
 
 /** An answer's crust with its melt area set. */
@@ -363,13 +365,20 @@ function drawnOf(
   return { ...result.drawn, molecularDensity };
 }
 
-/** The column an assembly's surface should take, at the drawn body's g_ref and R_ref. */
-function expectedColumn(answer: DetailAnswer, temperature: TemperatureProfile): AtmosphereColumn {
-  const surface = detailOf(answer).record.surface;
+/**
+ * The column an assembly's surface should take, at the drawn body's g_ref and R_ref, of an answer
+ * of `system`'s, the slice's unless given.
+ */
+function expectedColumn(
+  answer: DetailAnswer,
+  temperature: TemperatureProfile,
+  system?: SystemIdHex,
+): AtmosphereColumn {
+  const surface = detailOf(answer, system).record.surface;
   if (surface.state !== "ok" || surface.value.meanMolarMassGPerMol === null) {
     throw new Error("the fixture's surface has air");
   }
-  const drawn = drawnOf(assembled(answer));
+  const drawn = drawnOf(assembled(answer, system));
   return hydrostaticColumn({
     surfacePa: surface.value.surfacePressurePa,
     temperature,
@@ -394,6 +403,31 @@ describe("a body's column on its published vertical structure (R08.T3.e)", () =>
     expect([column.temperaturesK[0], column.temperaturesK.at(-1)]).toEqual([
       earth.surfaceK,
       earth.skinK,
+    ]);
+  });
+
+  it("lays the generated temperate world's column on its own structure's nodes, from its p_s and T_s", () => {
+    // The fixture's generated message (R08.T19's fifth row), whose structure is the record's own.
+    const answer = temperateWorldDetail();
+    const { surface } = detailOf(answer, TEMPERATE_WORLD_SYSTEM).record;
+    if (surface.state !== "ok" || surface.value.verticalStructure.kind !== "value") {
+      throw new Error("the generated surface carries its vertical structure");
+    }
+    const { adiabat, skinTemperatureK } = surface.value.verticalStructure.value;
+    const drawn = drawnOf(assembled(answer, TEMPERATE_WORLD_SYSTEM));
+    const column = expectedColumn(
+      answer,
+      { kind: "nodes", nodes: adiabat, skinK: skinTemperatureK },
+      TEMPERATE_WORLD_SYSTEM,
+    );
+    expect([drawn.temperature, drawn.molecularDensity]).toEqual([
+      { heightsM: column.altitudesM, temperaturesK: column.temperaturesK },
+      column.density,
+    ]);
+    expect([column.pressuresPa[0], column.temperaturesK[0], column.temperaturesK.at(-1)]).toEqual([
+      surface.value.surfacePressurePa,
+      surface.value.meanSurfaceTemperatureK,
+      skinTemperatureK,
     ]);
   });
 

@@ -38,6 +38,7 @@ type ResponseName =
   | "body_detail_contact"
   | "body_detail_lava_world"
   | "body_detail_titan"
+  | "body_detail_temperate_world"
   | "body_events_response"
   | "body_events_populated";
 
@@ -233,6 +234,20 @@ export function lavaWorldDetail(): ResponseFor<"body_detail"> {
  */
 export function titanDetail(): ResponseFor<"body_detail"> {
   return response("body_detail_titan", "body_detail");
+}
+
+/** The system of the fixture's generated temperate world, a golden system, not the slice's. */
+export const TEMPERATE_WORLD_SYSTEM = "42002cb200000000";
+
+/**
+ * A temperate wet world at the `full` level, the generator's whole record of a golden body at the
+ * epoch (plan R08, R08.T19's fifth row), which `hyperion-server`'s
+ * `the_fixture_s_temperate_world_is_the_generator_s` pins: its surface's aerosol inventory, a
+ * liquid water deck's mode and a sulphate layer's, carries the record's τ(550). Its body is of
+ * {@link TEMPERATE_WORLD_SYSTEM}.
+ */
+export function temperateWorldDetail(): ResponseFor<"body_detail"> {
+  return response("body_detail_temperate_world", "body_detail");
 }
 
 /** The slice's answer with its bodies changed by `change`, as a later generator might send it. */

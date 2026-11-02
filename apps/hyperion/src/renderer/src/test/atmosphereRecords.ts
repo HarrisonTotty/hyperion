@@ -18,6 +18,7 @@ import type {
   BulkPropertiesDto,
   FigureLawDto,
   ResponseFor,
+  SystemIdHex,
 } from "@hyperion/protocol";
 
 import { toBodyDetail } from "../lib/system/bodiesWire";
@@ -44,10 +45,12 @@ export const TEST_GROUND_ALBEDO: Rgb = [0.3, 0.3, 0.3];
 /**
  * An answer converted as the client converts a reply.
  *
+ * @param system - The system the answer's body is of: the slice's, {@link FIXTURE_SYSTEM}, unless a
+ *   test gives another, a generated body's.
  * @throws Error if the conversion faults: a builder's bug.
  */
-export function detailOf(answer: DetailAnswer): BodyDetail {
-  const result = toBodyDetail(answer, FIXTURE_SYSTEM, DESIGNATION);
+export function detailOf(answer: DetailAnswer, system: SystemIdHex = FIXTURE_SYSTEM): BodyDetail {
+  const result = toBodyDetail(answer, system, DESIGNATION);
   if (result.kind !== "ok") {
     throw new Error(`a test record does not convert: ${result.fault}`);
   }
