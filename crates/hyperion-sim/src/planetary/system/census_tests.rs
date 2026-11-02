@@ -46,6 +46,7 @@ use super::*;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
+use crate::galaxy::rules::GalaxyRules;
 use crate::planetary::chem::condense::NotFormed;
 use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
 use crate::planetary::derive::atmosphere::SNOWBALL_ICE_COVER;
@@ -56,8 +57,8 @@ use crate::planetary::hooks::aerosols::{AerosolDeck, AerosolMode};
 use crate::planetary::hooks::figures::Subsurface;
 use crate::planetary::hooks::surface::Forcing;
 use crate::planetary::record::{Modelled, RecordSection, SectionState};
-use crate::planetary::testing::{SampleFilter, sample_records};
-use crate::substance::{self, CondensedOptics, SubstanceId};
+use crate::planetary::testing::{SampleFilter, sample_records, with_every_27_hold};
+use crate::substance::{self, CondensedOptics, SubstanceId, by_key};
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
 
@@ -1576,4 +1577,229 @@ fn composition_census_s_steam_envelopes_are_a_runaway_s_under_every_28_hold() {
     eprintln!("moved by 28's hold: {moved}");
     assert_eq!(at_28.len(), at_27.len(), "28's hold moves no body's walk");
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The first `systems` systems of the census's sample under every hold of version 27, each body
+/// walked ([`audit_walk_system`]) into its share's tally with its system's rank and context, the
+/// tallies in sample order.
+///
+/// The galaxy is built under `GalaxyRules::every_27_hold`, its own and the stellar holds, and each
+/// share's systems are generated under [`with_every_27_hold`] on its own thread, since the
+/// planetary holds' switches are each thread's.
+fn tallies_under_every_27_hold<T: Default + Send>(
+    systems: usize,
+    visit: impl Fn(&mut T, usize, &SystemContext, &AuditCase<'_>) + Sync,
+) -> Vec<T> {
+    let galaxy = Galaxy::from_params_with_rules(
+        SEED,
+        GalaxyParams::milky_way_like(),
+        GalaxyRules::every_27_hold(),
+    )
+    .expect("the Milky Way's parameters build a galaxy");
+    let records = sample_records(&galaxy, systems, SampleFilter::ALL)
+        .expect("the solar circle holds the census's systems");
+    let shares = records.len().div_ceil(SYSTEMS_PER_SHARE);
+    in_shares(shares, ORDINARY_THREADS, |k| {
+        let first = k * SYSTEMS_PER_SHARE;
+        let end = records.len().min(first + SYSTEMS_PER_SHARE);
+        let mut tally = T::default();
+        with_every_27_hold(|| {
+            for (rank, record) in (first..).zip(&records[first..end]) {
+                let ctx = SystemContext::from_record(&galaxy, record);
+                let system = generate(SEED, &ctx);
+                audit_walk_system("census", &ctx, &system, &mut |case| {
+                    visit(&mut tally, rank, &ctx, case);
+                });
+            }
+        });
+        tally
+    })
+}
+
+/// "#{rank} {id} {kind}", by which the counts below name a body.
+fn named(rank: usize, case: &AuditCase<'_>) -> String {
+    format!("#{rank} {} {}", case.record.identity().id(), case.kind)
+}
+
+/// What P14.T51.m's coupled condensables would change on a surface that holds both `H2O` and
+/// `NH3` at a mean temperature at or above `nh3_h2o`'s eutectic (research-galaxy-close-out §3), by
+/// the phases its record publishes them in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum AmmoniaWater {
+    /// Liquid `NH3` beside water ice, which would lie as `nh3_h2o`.
+    LiquidBesideIce,
+    /// Liquid `NH3` beside liquid water, which would lie together as `nh3_h2o`.
+    LiquidBesideLiquid,
+    /// Both solid below `NH3`'s own melt, where a eutectic melt would turn the water ice liquid.
+    EutecticMelt,
+    /// Any other pair: both solid at or above `NH3`'s own melt (its ice lying colder than the
+    /// mean), or a supercritical member.
+    Other,
+}
+
+/// The census's count of the surfaces that hold both `H2O` and `NH3`.
+#[derive(Debug, Default)]
+struct AmmoniaWaterCount {
+    /// Bodies walked.
+    bodies: usize,
+    /// Bodies whose published condensates list `H2O`, at any temperature.
+    water: usize,
+    /// Bodies whose surface's air holds `NH3`, at any temperature.
+    airborne_ammonia: usize,
+    /// Bodies whose published condensates list `NH3`, at any temperature.
+    ammonia: usize,
+    /// Of those, the bodies that list `H2O` too.
+    both: usize,
+    /// Of those, the bodies at a mean surface temperature at or above the eutectic, by what would
+    /// change, each named.
+    movers: BTreeMap<AmmoniaWater, Vec<String>>,
+}
+
+/// The temperatures [`AmmoniaWaterCount`] reads, the registry's: `nh3_h2o`'s eutectic, its first
+/// melt, and `NH3`'s own melt, its triple point.
+#[derive(Debug, Clone, Copy)]
+struct AmmoniaWaterMelts {
+    /// `nh3_h2o`'s eutectic, below which the pair is solid.
+    eutectic: Kelvin,
+    /// `NH3`'s own melt.
+    ammonia: Kelvin,
+}
+
+impl AmmoniaWaterMelts {
+    /// The registry's.
+    fn of_registry() -> Self {
+        let eutectic = by_key("nh3_h2o")
+            .and_then(|id| id.substance().condensed())
+            .expect("nh3_h2o is a registry row with condensed columns")
+            .transition()
+            .temperature();
+        let ammonia = Gas::Ammonia
+            .substance()
+            .substance()
+            .phase_diagram()
+            .expect("NH3 has a phase diagram")
+            .triple_temperature();
+        Self { eutectic, ammonia }
+    }
+}
+
+impl AmmoniaWaterCount {
+    /// Counts `case`, of the sample's system `rank`.
+    fn add(&mut self, melts: AmmoniaWaterMelts, rank: usize, case: &AuditCase<'_>) {
+        self.bodies += 1;
+        let Some(surface) = case.surface() else {
+            return;
+        };
+        let (ammonia, water) = (Gas::Ammonia.substance(), Gas::Water.substance());
+        let phases = |id: SubstanceId| -> Vec<CondensatePhase> {
+            surface
+                .condensates()
+                .entries()
+                .iter()
+                .filter(|e| e.substance() == id)
+                .map(CondensateEntry::phase)
+                .collect()
+        };
+        let (nh3, h2o) = (phases(ammonia), phases(water));
+        self.water += usize::from(!h2o.is_empty());
+        let gases = surface.conditions().gases();
+        self.airborne_ammonia += usize::from(gases.iter().any(|&(id, _)| id == ammonia));
+        if nh3.is_empty() {
+            return;
+        }
+        self.ammonia += 1;
+        if h2o.is_empty() {
+            return;
+        }
+        self.both += 1;
+        let t_s = surface.conditions().mean_surface_temperature();
+        if t_s < melts.eutectic {
+            return;
+        }
+        let has = |of: &[CondensatePhase], phase| of.contains(&phase);
+        let kind = if has(&nh3, CondensatePhase::Liquid) {
+            if has(&h2o, CondensatePhase::Liquid) {
+                AmmoniaWater::LiquidBesideLiquid
+            } else if has(&h2o, CondensatePhase::Solid) {
+                AmmoniaWater::LiquidBesideIce
+            } else {
+                AmmoniaWater::Other
+            }
+        } else if has(&nh3, CondensatePhase::Solid)
+            && has(&h2o, CondensatePhase::Solid)
+            && t_s < melts.ammonia
+        {
+            AmmoniaWater::EutecticMelt
+        } else {
+            AmmoniaWater::Other
+        };
+        self.movers.entry(kind).or_default().push(format!(
+            "{} at {:.2} K: NH3 {nh3:?}, H2O {h2o:?}",
+            named(rank, case),
+            t_s.value()
+        ));
+    }
+
+    /// Adds `other`, a later share's.
+    fn merge(&mut self, other: Self) {
+        self.bodies += other.bodies;
+        self.water += other.water;
+        self.airborne_ammonia += other.airborne_ammonia;
+        self.ammonia += other.ammonia;
+        self.both += other.both;
+        for (kind, bodies) in other.movers {
+            self.movers.entry(kind).or_default().extend(bodies);
+        }
+    }
+
+    /// The count, with every mover named.
+    fn report(&self, melts: AmmoniaWaterMelts) -> String {
+        let mut report = format!(
+            "P14.T51.m's count under every 27 hold: {} bodies; {} list H2O at their surface and {} \
+             carry NH3 in their air; {} list NH3 at their surface, {} with H2O; eutectic {:.2} K, \
+             NH3's melt {:.2} K\n",
+            self.bodies,
+            self.water,
+            self.airborne_ammonia,
+            self.ammonia,
+            self.both,
+            melts.eutectic.value(),
+            melts.ammonia.value()
+        );
+        let line = "a string takes a line";
+        for (kind, bodies) in &self.movers {
+            writeln!(report, "  {kind:?}: {}", bodies.len()).expect(line);
+            for body in bodies {
+                writeln!(report, "    {body}").expect(line);
+            }
+        }
+        report
+    }
+}
+
+/// P14.T51.m's count (research-galaxy-close-out §3, step 1): over the ordinary census under every
+/// hold of version 27, the bodies whose surface holds both `H2O` and `NH3` at a mean surface
+/// temperature at or above `nh3_h2o`'s eutectic, 176.15 K, counted by what the coupled
+/// condensables would change ([`AmmoniaWater`]). It finds none: no surface lists `NH3`, or holds it
+/// in its air, at any temperature, so T51.m is ruled out on its count, and a body this test finds is
+/// the case for building it.
+#[test]
+#[ignore = "slow: 10⁵ bodies of 6,800 systems under every 27 hold, on sixteen threads"]
+fn composition_census_under_every_27_hold_holds_no_ammonia_beside_water_above_their_eutectic() {
+    let melts = AmmoniaWaterMelts::of_registry();
+    let start = Instant::now();
+    let mut count = AmmoniaWaterCount::default();
+    for share in tallies_under_every_27_hold(
+        ORDINARY_SYSTEMS,
+        |tally: &mut AmmoniaWaterCount, rank, _, case| tally.add(melts, rank, case),
+    ) {
+        count.merge(share);
+    }
+    let report = count.report(melts);
+    eprintln!("{report}({:.1} s)", start.elapsed().as_secs_f64());
+    assert!(count.bodies >= 100_000, "{} bodies", count.bodies);
+    assert!(
+        count.movers.is_empty(),
+        "a body holds NH3 beside H2O above their eutectic: P14.T51.m is no longer ruled out\n{report}"
+    );
 }

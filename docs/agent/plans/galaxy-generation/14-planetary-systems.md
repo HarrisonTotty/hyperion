@@ -34230,3 +34230,8 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Lean (2026-11-02):_ a star placed on a track mid-timeline peaks at the track's own largest to
     its track age, its track life before the placement included.
   - _For 27's bump:_ delete what `the_binary_host_light_is_held_only_until_the_27_bump` lists.
+- **P14.T51.m ruled out on its count (lane `p14-close-out-counts`, 2026-11-02;
+  research-galaxy-close-out §3).** Under every 27 hold no surface of the ordinary census's 104,000
+  bodies lists `NH3` or holds it in its air, so nothing would move: no `COUPLED_CONDENSABLES_VERSION`
+  is built. `census_tests::composition_census_under_every_27_hold_holds_no_ammonia_beside_water_above_their_eutectic`
+  (slow) fails on a mover, which reopens the task.
