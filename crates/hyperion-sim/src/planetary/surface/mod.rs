@@ -450,6 +450,11 @@ mod tests {
         }
     }
 
+    /// The threads [`no_generated_cell_lacks_its_crust_s_entry`] reads its systems on: the slots
+    /// `.config/nextest.toml` reserves for it, or the fewer a run grants. Its shares are one system
+    /// each, merged in order, so its result is the same on any number.
+    const CRUST_CENSUS_THREADS: usize = 16;
+
     /// No cell of a generated body's surface has a crust its palette names no entry for
     /// (R09.T10.c), which `CoarseField::new` refuses (`BuildFieldError::CrustWithoutEntry`), so
     /// that the pass would panic on it: on every body of the 400 sample systems
@@ -462,33 +467,34 @@ mod tests {
                 about 135 s on sixteen threads in the slow-test profile, 1,800 s on one"]
     fn no_generated_cell_lacks_its_crust_s_entry() {
         let systems = crate::planetary::system::tests::whole();
-        let shares = hyperion_testkit::threads::in_shares(systems.len(), 16, |k| {
-            let (ctx, system) = &systems[k];
-            let snapshot = system.snapshot_at(ctx, RECORD_TIME);
-            let records = snapshot.bodies();
-            let (mut read, mut lacking) = (0_usize, Vec::new());
-            for record in records {
-                let planet = CoarseInputs::planet_of(record).map(|index| {
-                    records
-                        .iter()
-                        .find(|r| r.index() == index)
-                        .expect("a moon's planet is a body of its system")
-                });
-                let Ok(inputs) = CoarseInputs::for_body(record, planet, ctx) else {
-                    continue;
-                };
-                let seed = system
-                    .surface_seed(record.index())
-                    .expect("a body of its system")
-                    .expect("a body with a surface has a surface seed");
-                let count = crusts_lacking_entries(seed, &inputs);
-                read += 1;
-                if count > 0 {
-                    lacking.push((record.index().body_id(ctx.id()), count));
+        let shares =
+            hyperion_testkit::threads::in_shares(systems.len(), CRUST_CENSUS_THREADS, |k| {
+                let (ctx, system) = &systems[k];
+                let snapshot = system.snapshot_at(ctx, RECORD_TIME);
+                let records = snapshot.bodies();
+                let (mut read, mut lacking) = (0_usize, Vec::new());
+                for record in records {
+                    let planet = CoarseInputs::planet_of(record).map(|index| {
+                        records
+                            .iter()
+                            .find(|r| r.index() == index)
+                            .expect("a moon's planet is a body of its system")
+                    });
+                    let Ok(inputs) = CoarseInputs::for_body(record, planet, ctx) else {
+                        continue;
+                    };
+                    let seed = system
+                        .surface_seed(record.index())
+                        .expect("a body of its system")
+                        .expect("a body with a surface has a surface seed");
+                    let count = crusts_lacking_entries(seed, &inputs);
+                    read += 1;
+                    if count > 0 {
+                        lacking.push((record.index().body_id(ctx.id()), count));
+                    }
                 }
-            }
-            (read, lacking)
-        });
+                (read, lacking)
+            });
         let read: usize = shares.iter().map(|(n, _)| n).sum();
         let lacking: Vec<_> = shares.into_iter().flat_map(|(_, l)| l).collect();
         eprintln!(
