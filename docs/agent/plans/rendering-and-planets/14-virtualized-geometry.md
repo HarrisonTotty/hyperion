@@ -2022,6 +2022,37 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   results version 8 adds it to the geometry block's settings, and a version 7 file reads as rate 1.
 - **R14.T6.b**: with T2.a's lit pass, a lit view-frame on high times 6 or 7 passes at rate 4 (2 or 3
   casters) against T2.a's 8.
+- **R14.T6.a** (built): `CascadeReuse` (`shadows/terrainShadows.ts`), one a view
+  (`ViewState.casterInputs`); `#appendSharedInputs`, `#appendCascadeCasters`, `appendCasterRecord`,
+  `Device.slotVersions` and `TerrainCascadeFrame.reused` in `terrainPass.ts`; `InstanceRecords.words`
+  and the record's `INSTANCE_*_WORD`s in `gpu/uniforms.ts`.
+- **R14.T6.a**: the inputs every cascade shares, compared once a frame and numbered
+  (`CascadeReuse.shared`): each cascade's `f32` matrices and `f64` splits, texel, depths and slack,
+  the light basis, the camera's place and view axis and the body's rotation in `f64`, the caster
+  uniforms, all nine `GeometrySettings` fields, the contacts, the providers' version and revisions.
+- **R14.T6.a**: each cascade's own: its caster records as written (on the path, each interior record
+  its cull takes, with its index and cull input), and each slot's upload version, its own and, while
+  its heights mix, the older bake's or its parent's (`PARENT_MIX_SLOT`).
+- **R14.T6.a** (lean, 2026-11-02): the snapped centre is compared as the matrices' `f32` shift the
+  casters are drawn with (a snap moves it a whole texel); `casterReachM` follows from what is.
+- **R14.T6.a** (lean, 2026-11-02): on the cluster path alone; the way back renders every cascade
+  every frame and forgets the view's inputs.
+- **R14.T6.a**: `ShadowCasters.add(provider, revision?)`, `version` and `revisions()`; with any
+  provider without one, every cascade renders every frame.
+- **R14.T6.a** (lean, 2026-11-02): T6.b's holds still refuse while any provider is held, with a
+  revision or not, until T6.c.
+- **R14.T6.a**: a reused cascade, as a held one, takes no cull pass, no pass and no lit-mesh caster
+  (0 in `litMeshCasters`); a frame that reuses some cuts no T6.b hold. Reuse needs
+  `TerrainShadows.holds`, so another view's render or a restore renders it again.
+- **R14.T6.a**: the interior casters' no-discard variant is T1.b's (`terrainClusterShadow.wgsl`).
+- **R14.T6.a**: T6.b's Vitests move the camera a millimetre a frame; the smoke's every-frame flight
+  begins on T1.d's last frame and reuses it (`- 0123 0123 0123`).
+- **R14.T6.a**: captures checked within the run: a still camera's next frame with time paused,
+  4 of 4 reused, its frame's and layers' digests the frame before's (SwiftShader, both variants).
+- **R14.T6.a** (lean, 2026-11-02): R05's descent counted by the smoke's flight at its 300 m/s, 4
+  frames and 4 hovering, rate 4: time stopped `0123 01 013 01 2 - 3 -` (13 passes), running (the
+  sun at a day's rate) `0123 01 013 01 012 01 013 01` (21). The spike's results do not count reuse.
+- **R14.T6.a**: NOT RUN: the caster passes' GPU time saved, pending the owner's RTX run.
 - **R14.T4.a** (`r14-t4-consumers`):
   - `clusters/consumer.ts`: `ClusterConsumer` (`name`, `templates`, `clustersPerPage`,
     `templateClusters`, a template's clusters a page, 0 for one never drawn, `instanceBytes`,
