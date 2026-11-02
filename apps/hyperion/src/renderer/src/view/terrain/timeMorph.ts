@@ -28,9 +28,11 @@
  *   reference surface's, newly surveyed), rises out of the datum by the same mix;
  * - a change that reverses one in progress starts from the fade it had reached.
  *
- * A refine's and a coarsen's heights also mix from the parent's own surface by the fade
- * (`PARENT_MIX_SLOT`), the datum's where the parent held the ground unsurveyed, so that a parent and
- * child that disagree (the survey's delta, its edge) change by the fade too, not at once.
+ * A refine's and a coarsen's heights also move by the parent's own surface less their morph target,
+ * by the fade (`PARENT_MIX_SLOT`), the datum's where the parent held the ground unsurveyed, so that
+ * a parent and child that disagree (the survey's delta, its edge) change by the fade too, not at
+ * once; where they agree the move is nothing, and shared vertices agree as the floor on k leaves
+ * them.
  *
  * The fades are a function of the draw set, the time and the views' cameras alone (each change's
  * span, {@link MorphSpans}): every instance touching a footprint takes the one fade, so that shared

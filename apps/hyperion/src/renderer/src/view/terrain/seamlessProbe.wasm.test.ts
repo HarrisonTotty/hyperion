@@ -671,15 +671,16 @@ class DrawnSurfaces {
       let own = surveyed ? sampleOn(heightOf(inst.held, 0), u, v) : 0;
       let morph = surveyed ? sampleOn(heightOf(inst.held, 1), u, v) : 0;
       if (inst.parentMix) {
-        // A refine's or a coarsen's mix from the parent's own surface, at the place there.
+        // A refine's or a coarsen's move by the parent's own surface less its morph target.
         const parent = inst.parent;
         if (parent !== null) {
           const [pu, pv] = parentPlaceOf(inst.quadrant, u, v);
           const p = this.#masks.surveyed(parent, pu, pv)
             ? sampleOn(heightOf(parent, 0), pu, pv)
             : 0;
-          own += inst.rebakeFade * (p - own);
-          morph += inst.rebakeFade * (p - morph);
+          const shift = inst.rebakeFade * (p - morph);
+          own += shift;
+          morph += shift;
         }
       } else if (inst.rebakeFade > 0) {
         const older = inst.older;

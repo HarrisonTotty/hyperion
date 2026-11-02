@@ -285,15 +285,18 @@ fn patchVertexOf(grid : vec3f, instance : u32) -> PatchVertex {
     morphHeightM = p.morphHeightM;
     nu = rec.nu0 + normalDifference(rec, directionDifferenceAt(rec, at));
   }
-  // A rebake's fade mixes its heights from the older bake's, a refine's or a coarsen's from the
-  // parent's own: a vertex's offset is linear in its height, along ν, on either vertex path.
+  // A rebake's fade mixes its heights from the older bake's; a refine's or a coarsen's moves both
+  // by its parent's own surface less its morph target, which the fade's floor on k leads to, so
+  // that where the bakes agree nothing moves and shared vertices still agree. A vertex's offset is
+  // linear in its height, along ν, on either vertex path.
   let rebake = rebakeOf(inst);
   if (rebake.fade > 0.0) {
     var older = vec2f(ownHeightM, morphHeightM);
     if (rebake.slot != PARENT_MIX_SLOT) {
       older = olderHeightsAt(rebake.slot, at);
     } else if (inst.parentSlot != NO_PARENT_SLOT) {
-      older = vec2f(olderHeightsAt(inst.parentSlot, parentPlaceOf(inst.parentQuadrant, at)).x);
+      let parentM = olderHeightsAt(inst.parentSlot, parentPlaceOf(inst.parentQuadrant, at)).x;
+      older = vec2f(ownHeightM, morphHeightM) + (parentM - morphHeightM);
     }
     let dOwn = rebake.fade * (older.x - ownHeightM);
     let dMorph = rebake.fade * (older.y - morphHeightM);
