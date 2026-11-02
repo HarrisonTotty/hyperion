@@ -6,11 +6,13 @@ use crate::galaxy::Galaxy;
 use crate::stellar::binary::CarvedClass;
 use crate::stellar::binary::testing::{MergerMember, brute_force_merger_members_in};
 
-/// `n` engine mergers of the stellar merger class in `galaxy`, drawn on 16 streams at once and
-/// joined in stream order, as `tests/common/binaries.rs` draws them.
+/// `n` engine mergers of the stellar merger class in `galaxy`, drawn on 16 streams at once (one
+/// thread each; on WebAssembly, which has no threads, in turn) and joined in stream order, as
+/// `tests/common/binaries.rs` draws them.
 pub(super) fn members(galaxy: &Galaxy, n: usize) -> Vec<MergerMember> {
     let share = n.div_ceil(16);
     let mut out = Vec::with_capacity(n + 16);
+    #[cfg(not(target_family = "wasm"))]
     std::thread::scope(|scope| {
         let handles: Vec<_> = (0..16_u64)
             .map(|s| {
@@ -23,6 +25,15 @@ pub(super) fn members(galaxy: &Galaxy, n: usize) -> Vec<MergerMember> {
             out.extend(handle.join().expect("a member draw finishes"));
         }
     });
+    #[cfg(target_family = "wasm")]
+    for s in 0..16_u64 {
+        out.extend(brute_force_merger_members_in(
+            galaxy,
+            CarvedClass::StellarMerger,
+            share,
+            s,
+        ));
+    }
     out.truncate(n);
     out
 }

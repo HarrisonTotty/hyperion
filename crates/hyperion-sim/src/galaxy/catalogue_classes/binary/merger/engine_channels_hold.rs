@@ -518,45 +518,49 @@ fn compared_marks(a: f64, b: f64, m1: f64) -> [f64; 3] {
 /// The compared marks and channel of the first [`CATALOGUE_ENTRIES`] entries of the class's own
 /// candidates in [`reference_cells`] in `galaxy`, past each cell's count as well as inside it:
 /// every candidate index is a draw of the same process, its site thinned on the class's
-/// intensity, its marks on streams of its own ID, and its test the class's. Drawn on 16 threads,
-/// each a run of indices across the four cells in turn, and joined in the threads' order.
+/// intensity, its marks on streams of its own ID, and its test the class's. Drawn in 16 runs, each
+/// of indices across the four cells in turn, one thread each (on WebAssembly, which has no
+/// threads, in turn), and joined in the runs' order.
 fn catalogue(galaxy: &Galaxy) -> Vec<([f64; 3], MergerChannel)> {
     let process = StellarMergers::new(galaxy);
     let cells = reference_cells();
     let per_thread = CATALOGUE_ENTRIES.div_ceil(16);
+    let run = |thread: u32| {
+        let bounds = cells.map(|key| process.bound(galaxy, &key));
+        let mut marks = Vec::with_capacity(per_thread);
+        let mut index = thread << 20;
+        while marks.len() < per_thread {
+            for (key, bound) in cells.iter().zip(bounds) {
+                let id = key.candidate_id(index, 0).expect("an index under 2^24");
+                let entry = process
+                    .candidate(galaxy, key, id, bound)
+                    .and_then(StellarMergers::test);
+                if let Some(entry) = entry {
+                    let scan = entry.scan();
+                    let (m1, m2) = (scan.primary_mass().value(), scan.secondary_mass().value());
+                    marks.push((compared_marks(m1, m2, m1), scan.channel()));
+                }
+            }
+            index += 1;
+        }
+        marks.truncate(per_thread);
+        marks
+    };
     let mut out = Vec::with_capacity(CATALOGUE_ENTRIES + 16);
+    #[cfg(not(target_family = "wasm"))]
     std::thread::scope(|scope| {
+        let run = &run;
         let handles: Vec<_> = (0..16_u32)
-            .map(|thread| {
-                let (process, cells) = (&process, &cells);
-                scope.spawn(move || {
-                    let bounds = cells.map(|key| process.bound(galaxy, &key));
-                    let mut marks = Vec::with_capacity(per_thread);
-                    let mut index = thread << 20;
-                    while marks.len() < per_thread {
-                        for (key, bound) in cells.iter().zip(bounds) {
-                            let id = key.candidate_id(index, 0).expect("an index under 2^24");
-                            let entry = process
-                                .candidate(galaxy, key, id, bound)
-                                .and_then(StellarMergers::test);
-                            if let Some(entry) = entry {
-                                let scan = entry.scan();
-                                let (m1, m2) =
-                                    (scan.primary_mass().value(), scan.secondary_mass().value());
-                                marks.push((compared_marks(m1, m2, m1), scan.channel()));
-                            }
-                        }
-                        index += 1;
-                    }
-                    marks.truncate(per_thread);
-                    marks
-                })
-            })
+            .map(|thread| scope.spawn(move || run(thread)))
             .collect();
         for handle in handles {
             out.extend(handle.join().expect("a thread's candidates finish"));
         }
     });
+    #[cfg(target_family = "wasm")]
+    for thread in 0..16_u32 {
+        out.extend(run(thread));
+    }
     out.truncate(CATALOGUE_ENTRIES);
     out
 }
