@@ -1065,15 +1065,17 @@ impl OldTally {
                 _ => {}
             }
         }
-        assert_eq!(
-            stars.pairs().len(),
-            now.pairs().len(),
-            "a state for every pair"
-        );
-        for (timeline, pair) in stars.pairs().iter().zip(now.pairs()) {
+        for pair in now.pairs() {
             match pair.class() {
                 BinaryClass::BlueStraggler => {
                     t.blue_stragglers += 1.0;
+                    // The state holds every pair and the system only those the engine ran, so the
+                    // pair's stars are found by its node.
+                    let timeline = stars
+                        .pairs()
+                        .iter()
+                        .find(|p| p.node() == pair.node())
+                        .expect("a pair of a binary class is one the engine ran");
                     let a_type = timeline.stars().iter().any(|&i| {
                         let star = &now.stars()[usize::from(i.get())];
                         star.phase() == Phase::MainSequence

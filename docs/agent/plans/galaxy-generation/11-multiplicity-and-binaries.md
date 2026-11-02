@@ -7355,8 +7355,9 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     both classes A-type stars at T_eff ≥ 7,650 K (Santucci et al. 2015, ApJ 801, 116).
     `old_populations_hold_blue_stragglers_and_hot_subdwarfs` counts the halo's so (`BlueCount`),
     against 0.6–5.5; the bulge keeps all its stragglers per horizontal-branch star. Measured
-    (2026-11-02): the halo's A-type stragglers are 0.101 per blue horizontal-branch star, a
-    finding (all of them per horizontal-branch star 0.333); the bulge's 0.243, inside.
+    (2026-11-02, each straggler matched to its pair by node): the halo's A-type stragglers are
+    0.169 per blue horizontal-branch star, a finding (all of them per horizontal-branch star
+    0.563); the bulge's 0.405, inside its 0.10–1.11; the thick disc's 0.496.
 - **P11.T5's and P11.T8.b's X-ray binaries, held at 27** (lane `fix-p11-t5-awd-helium`'s pod,
   brief `fix-p11-t8b-xrb-carving`, 2026-11-01; research-p15-t10b-rates; at 24–26 nothing moves).
   - _The hold._ `XRB_CLASS_VERSION` = 27 (`stellar/binary/xrb_class.rs`),
