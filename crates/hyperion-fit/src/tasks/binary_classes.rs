@@ -58,7 +58,9 @@ use hyperion_sim::stellar::binary::testing::{
 use hyperion_sim::tables::binary::{AWD_SAMPLER, AwdDonorKind, AwdMark, AwdPick};
 use hyperion_sim::time::LIGHT_CROSSING_L;
 
-pub use marks::{FittedMark, MIN_NODE_WEIGHT, NODES, conditional, quantile, unconditional};
+pub use marks::{
+    FittedMark, MIN_NODE_WEIGHT, MarkPoint, NODES, conditional, unconditional, weighted_quantile,
+};
 
 use crate::emit::{RustTable, TableItem};
 use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
@@ -628,10 +630,15 @@ pub fn awd_samplers(censuses: &Censuses, params: &AwdParams) -> [AwdSampler; 2] 
         AWD_CLASSES.map(|class| awd_members(censuses.slab.iter().flat_map(|c| &c.members), class));
     let pooled: Vec<(AccretingMarks, f64)> = sides.iter().flatten().copied().collect();
     let cap = params.max_log_recurrence;
-    let pairs = |members: &[(AccretingMarks, f64)], mark: AwdMark| -> Vec<(f64, f64)> {
+    let pairs = |members: &[(AccretingMarks, f64)], mark: AwdMark| -> Vec<MarkPoint> {
         members
             .iter()
             .filter_map(|(m, age)| awd_pair(m, *age, mark, cap))
+            .map(|(condition, value)| MarkPoint {
+                condition,
+                value,
+                weight: 1.0,
+            })
             .collect()
     };
     std::array::from_fn(|side| {
@@ -639,11 +646,11 @@ pub fn awd_samplers(censuses: &Censuses, params: &AwdParams) -> [AwdSampler; 2] 
         let mut sources = [MarkSource::Scratch; 11];
         let marks = std::array::from_fn(|k| {
             let mark = AwdMark::ALL[k];
-            let fit = |pairs: &[(f64, f64)]| {
+            let fit = |points: &[MarkPoint]| {
                 if mark == AwdMark::Recurrence {
-                    unconditional(&pairs.iter().map(|p| p.1).collect::<Vec<_>>())
+                    unconditional(points)
                 } else {
-                    conditional(pairs)
+                    conditional(points, params.min_members)
                 }
             };
             let mine = pairs(own, mark);

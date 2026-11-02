@@ -137,6 +137,109 @@ pub fn ks_two_sample(a: &mut [f64], b: &mut [f64]) -> KolmogorovSmirnov {
     }
 }
 
+/// Tests whether two weighted samples come from one distribution.
+///
+/// Each sample is `(value, weight)` pairs, which are sorted in place by value. D is the largest
+/// distance between the two weighted empirical distributions. Each sample's size is Kish's (1965,
+/// _Survey Sampling_) effective size, (Σw)² ÷ Σw², and the effective sample size is
+/// `n₁ n₂ ÷ (n₁ + n₂)` of the two, so that with unit weights the test is [`ks_two_sample`]'s.
+///
+/// # Panics
+///
+/// If either sample is empty, holds a NaN value, or holds a weight that is not positive and
+/// finite.
+///
+/// # Examples
+///
+/// A sample of 0.25 and 0.75, the first counted three times, is the same distribution as
+/// 0.25, 0.25, 0.25, 0.75:
+///
+/// ```
+/// use hyperion_testkit::stats::ks_two_sample_weighted;
+///
+/// let mut a = [(0.25, 3.0), (0.75, 1.0)];
+/// let mut b = [(0.25, 1.0), (0.75, 1.0), (0.25, 1.0), (0.25, 1.0)];
+/// assert!(ks_two_sample_weighted(&mut a, &mut b).statistic.abs() < 1e-15);
+/// ```
+#[must_use]
+pub fn ks_two_sample_weighted(a: &mut [(f64, f64)], b: &mut [(f64, f64)]) -> KolmogorovSmirnov {
+    assert!(
+        !a.is_empty() && !b.is_empty(),
+        "a two-sample KS test needs two samples"
+    );
+    for sample in [&*a, &*b] {
+        if let Some(i) = sample.iter().position(|(x, _)| x.is_nan()) {
+            panic!("sample {i} is NaN: a KS test needs ordered values");
+        }
+        if let Some(i) = sample
+            .iter()
+            .position(|(_, w)| !(w.is_finite() && *w > 0.0))
+        {
+            panic!("weight {i} is not positive and finite: {}", sample[i].1);
+        }
+    }
+    a.sort_by(|x, y| x.0.total_cmp(&y.0));
+    b.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let total = |s: &[(f64, f64)]| s.iter().fold(0.0, |sum, (_, w)| sum + w);
+    let (wa, wb) = (total(a), total(b));
+    let (mut seen_a, mut seen_b) = (0_usize, 0_usize);
+    let (mut below_a, mut below_b) = (0.0, 0.0);
+    let mut distance: f64 = 0.0;
+    while seen_a < a.len() && seen_b < b.len() {
+        let step = a[seen_a].0.min(b[seen_b].0);
+        while seen_a < a.len() && a[seen_a].0 <= step {
+            below_a += a[seen_a].1;
+            seen_a += 1;
+        }
+        while seen_b < b.len() && b[seen_b].0 <= step {
+            below_b += b[seen_b].1;
+            seen_b += 1;
+        }
+        distance = distance.max((below_a / wa - below_b / wb).abs());
+    }
+    let kish = |s: &[(f64, f64)], w: f64| w * w / s.iter().fold(0.0, |sum, (_, x)| sum + x * x);
+    let (na, nb) = (kish(a, wa), kish(b, wb));
+    let effective_n = na * nb / (na + nb);
+    KolmogorovSmirnov {
+        statistic: distance,
+        effective_n,
+        p_value: kolmogorov_survival(stephens_lambda(effective_n, distance)),
+    }
+}
+
+/// The distance at which a Kolmogorov–Smirnov test of effective sample size `effective_n` has
+/// p-value `level`: the inverse of the tests' p-value, Stephens's λ at which
+/// [`kolmogorov_survival`] is `level` over his factor. At 1% λ is 1.628, so for a large sample the
+/// distance is about 1.628 ÷ √n.
+///
+/// # Panics
+///
+/// If `effective_n` is not positive and finite, or `level` is not inside (0, 1).
+#[must_use]
+pub fn ks_critical_distance(effective_n: f64, level: f64) -> f64 {
+    assert!(
+        effective_n.is_finite() && effective_n > 0.0,
+        "an effective sample size is positive: {effective_n}"
+    );
+    assert!(
+        level > 0.0 && level < 1.0,
+        "a level is inside (0, 1): {level}"
+    );
+    // Q_KS falls from 1 at λ = 0 to under 10⁻¹⁰⁰ by λ = 11, so the root is bracketed; 100
+    // halvings take the bracket below a double's spacing.
+    let (mut lo, mut hi) = (0.0_f64, 11.0_f64);
+    for _ in 0..100 {
+        let mid = f64::midpoint(lo, hi);
+        if kolmogorov_survival(mid) > level {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let root = effective_n.sqrt();
+    f64::midpoint(lo, hi) / (root + 0.12 + 0.11 / root)
+}
+
 /// Panics, naming the position, if a sample holds a NaN, which has no place in an ordering.
 fn assert_no_nan(samples: &[f64]) {
     if let Some(i) = samples.iter().position(|x| x.is_nan()) {
@@ -200,6 +303,45 @@ mod tests {
             .map(|x| x * x)
             .collect();
         assert!(ks_two_sample(&mut a, &mut c).p_value < ALPHA);
+    }
+
+    /// With unit weights the weighted test is the unweighted one, bit for bit; a sample whose
+    /// weights tilt it towards its low values is told from its unweighted self, and passes
+    /// against a sample drawn from the tilted distribution; Kish's size of a weighted sample is
+    /// under its count.
+    #[test]
+    fn the_weighted_test_is_the_unweighted_one_at_unit_weights() {
+        let (a, b) = (uniform_sample(1, 20_000), uniform_sample(2, 30_000));
+        let unit = |s: &[f64]| s.iter().map(|&x| (x, 1.0)).collect::<Vec<_>>();
+        let plain = ks_two_sample(&mut a.clone(), &mut b.clone());
+        let weighted = ks_two_sample_weighted(&mut unit(&a), &mut unit(&b));
+        assert_eq!(plain.statistic.to_bits(), weighted.statistic.to_bits());
+        assert!((weighted.effective_n - plain.effective_n).abs() < 1e-6);
+        assert!((weighted.p_value - plain.p_value).abs() < 1e-12);
+        // Weights of 2 (1 − x) make a uniform sample's density 2 (1 − x), whose quantile at u is
+        // 1 − √(1 − u).
+        let mut tilted: Vec<(f64, f64)> = a.iter().map(|&x| (x, 2.0 * (1.0 - x))).collect();
+        assert!(ks_two_sample_weighted(&mut tilted.clone(), &mut unit(&b)).p_value < ALPHA);
+        let mut drawn: Vec<(f64, f64)> = uniform_sample(3, 30_000)
+            .into_iter()
+            .map(|u| (1.0 - (1.0 - u).sqrt(), 1.0))
+            .collect();
+        let ks = ks_two_sample_weighted(&mut tilted, &mut drawn);
+        assert_p_value("a tilted sample against its draws", ks.p_value, ALPHA);
+        assert!(ks.effective_n < 20_000.0 * 30_000.0 / 50_000.0);
+    }
+
+    /// The critical distance is the test's p-value inverted: at it the p-value is the level, and
+    /// at 1% for a large sample it is 1.628 ÷ √n.
+    #[test]
+    fn the_critical_distance_inverts_the_p_value() {
+        for n in [50.0, 1_000.0, 120_000.0] {
+            let d = ks_critical_distance(n, 0.01);
+            let p = kolmogorov_survival(stephens_lambda(n, d));
+            assert!((p - 0.01).abs() < 1e-9, "{n}: {p}");
+        }
+        let d = ks_critical_distance(1.0e8, 0.01);
+        assert!((d * 1.0e4 - 1.627_6).abs() < 1e-3, "{d}");
     }
 
     #[test]

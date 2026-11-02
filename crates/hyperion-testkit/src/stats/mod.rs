@@ -14,7 +14,10 @@ mod poisson;
 mod special;
 
 pub use chi_square::{ChiSquare, chi_square_gof};
-pub use ks::{KolmogorovSmirnov, kolmogorov_survival, ks_one_sample, ks_two_sample};
+pub use ks::{
+    KolmogorovSmirnov, kolmogorov_survival, ks_critical_distance, ks_one_sample, ks_two_sample,
+    ks_two_sample_weighted,
+};
 pub use poisson::{assert_poisson_count, poisson_interval, poisson_two_sided_p};
 pub use special::{normal_cdf, poisson_cdf, poisson_pmf, regularised_gamma_p, regularised_gamma_q};
 

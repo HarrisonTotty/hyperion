@@ -5,15 +5,17 @@
 //! with it (design note 10). Each mark's law in the table is a residual given by its quantiles at
 //! the 17 ranks k ÷ 16, linear between them, added to a median that follows a condition the caller
 //! supplies (an earlier mark, or a quantity derived from the marks), and held to the mark's
-//! limits. A draw takes one uniform word for its rank, so a mark's value is a monotone function of
-//! its word and a restricted draw ([`ClassSampler::draw_in_ranks`]) is an exact conditional one,
-//! as plan 11's design note 1 draws the stripped orbits. The four binary classes share it
+//! limits; a conditional mark may hold a law at each node of its median instead, mixed between
+//! the nearest two ([`ClassSampler::residual_at`], P15.T10.b's refit at 27). A draw takes one
+//! uniform word for its rank, so a mark's value is a monotone function of its word and a
+//! restricted draw ([`ClassSampler::draw_in_ranks`]) is an exact conditional one, as plan 11's
+//! design note 1 draws the stripped orbits. The four binary classes share it
 //! (P11.T8.a–d), each with its own table: the accreting white dwarfs' is
 //! [`AWD_SAMPLER`](crate::tables::binary::AWD_SAMPLER) and the X-ray binaries'
 //! [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER).
 
 use crate::rng::Stream;
-use crate::tables::binary::{ClassSamplerTable, SamplerKey};
+use crate::tables::binary::{ClassSamplerTable, MedianCurve, SamplerKey};
 
 /// A binary class's sampler over its table (P11.T8): marks by inverse transform, kinds by weight.
 ///
@@ -69,9 +71,27 @@ impl<M: SamplerKey, P: SamplerKey> ClassSampler<M, P> {
         let Some(curve) = self.table.mark(mark).median() else {
             return 0.0;
         };
-        let (first, last) = curve.span();
-        let s = ((condition - first) / (last - first)).clamp(0.0, 1.0) * 16.0;
-        interpolate(curve.nodes(), s)
+        interpolate(curve.nodes(), node_position(curve, condition))
+    }
+
+    /// The residual's quantiles at the ranks k ÷ 16 of `mark` at `condition`: the mark's one law,
+    /// or for a mark with a law at each node (P15.T10.b's refit at 27) the two nearest nodes'
+    /// laws mixed linearly, rank by rank, as the median mixes their medians. Each law is
+    /// non-decreasing, so the mixture is.
+    ///
+    /// # Panics
+    ///
+    /// If the table holds fewer marks than `M` names.
+    #[must_use]
+    pub fn residual_at(&self, mark: M, condition: f64) -> [f64; 17] {
+        let law = self.table.mark(mark);
+        match (law.node_residuals(), law.median()) {
+            (Some(rows), Some(curve)) => {
+                let (k, t) = node_step(node_position(curve, condition));
+                std::array::from_fn(|j| rows[k][j] + t * (rows[k + 1][j] - rows[k][j]))
+            }
+            (None, _) | (Some(_), None) => *law.residual(),
+        }
     }
 
     /// The value of `mark` at rank `rank` given `condition`: the median plus the residual's
@@ -83,7 +103,10 @@ impl<M: SamplerKey, P: SamplerKey> ClassSampler<M, P> {
     #[must_use]
     pub fn value_at(&self, mark: M, condition: f64, rank: f64) -> f64 {
         let law = self.table.mark(mark);
-        let residual = interpolate(law.residual(), rank.clamp(0.0, 1.0) * 16.0);
+        let residual = interpolate(
+            &self.residual_at(mark, condition),
+            rank.clamp(0.0, 1.0) * 16.0,
+        );
         let (lo, hi) = law.limits();
         (self.median(mark, condition) + residual).clamp(lo, hi)
     }
@@ -98,7 +121,7 @@ impl<M: SamplerKey, P: SamplerKey> ClassSampler<M, P> {
     /// If the table holds fewer marks than `M` names.
     #[must_use]
     pub fn rank_of(&self, mark: M, condition: f64, value: f64) -> f64 {
-        let q = self.table.mark(mark).residual();
+        let q = &self.residual_at(mark, condition);
         let r = value - self.median(mark, condition);
         if r <= q[0] {
             return 0.0;
@@ -165,16 +188,33 @@ impl<M: SamplerKey, P: SamplerKey> ClassSampler<M, P> {
     }
 }
 
-/// The value at `s` in [0, 16] of 17 nodes at the whole numbers, linear between them.
+/// Where `condition` lies along `curve`'s 17 nodes, in [0, 16]: held at the span's ends.
 #[must_use]
-fn interpolate(nodes: &[f64; 17], s: f64) -> f64 {
+fn node_position(curve: &MedianCurve, condition: f64) -> f64 {
+    let (first, last) = curve.span();
+    ((condition - first) / (last - first)).clamp(0.0, 1.0) * 16.0
+}
+
+/// The segment of 17 nodes at the whole numbers that `s` in [0, 16] lies in, 0–15, and how far
+/// along it, in [0, 1].
+#[must_use]
+fn node_step(s: f64) -> (usize, f64) {
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
         reason = "s is in [0, 16], so its floor is an index of 0–16"
     )]
     let k = (s.floor() as usize).min(15);
-    let t = s - f64::from(u32::try_from(k).expect("an index of 0–15"));
+    (
+        k,
+        s - f64::from(u32::try_from(k).expect("an index of 0–15")),
+    )
+}
+
+/// The value at `s` in [0, 16] of 17 nodes at the whole numbers, linear between them.
+#[must_use]
+fn interpolate(nodes: &[f64; 17], s: f64) -> f64 {
+    let (k, t) = node_step(s);
     nodes[k] + t * (nodes[k + 1] - nodes[k])
 }
 
@@ -350,6 +390,84 @@ mod tests {
         )],
         &[SamplerPick::new("only", &[1.0])],
     );
+
+    /// Node k's law: a uniform spread of k ÷ 16 about the median, so that the spread widens with
+    /// the condition.
+    const fn widening() -> [[f64; 17]; 17] {
+        let mut rows = [[0.0; 17]; 17];
+        let mut k = 0;
+        while k < 17 {
+            let mut j = 0;
+            while j < 17 {
+                #[expect(clippy::cast_precision_loss, reason = "indices of 0–16")]
+                let (node, rank) = (k as f64, j as f64);
+                rows[k][j] = (node / 16.0) * (rank / 8.0 - 1.0);
+                j += 1;
+            }
+            k += 1;
+        }
+        rows
+    }
+
+    /// The node laws of [`NODES`].
+    static WIDENING: [[f64; 17]; 17] = widening();
+
+    /// A mark about a median of twice its condition on 0–16, with a law at each node, its own law
+    /// a unit spread that a draw does not read.
+    static NODES: ClassSamplerTable<Only, Only> = ClassSamplerTable::new(
+        &[SamplerMark::new(
+            "widening",
+            [
+                -1.0, -0.875, -0.75, -0.625, -0.5, -0.375, -0.25, -0.125, 0.0, 0.125, 0.25, 0.375,
+                0.5, 0.625, 0.75, 0.875, 1.0,
+            ],
+            Some(MedianCurve::new(
+                0.0,
+                16.0,
+                [
+                    0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0,
+                    28.0, 30.0, 32.0,
+                ],
+            )),
+            (-100.0, 100.0),
+        )
+        .with_node_residuals(&WIDENING)],
+        &[SamplerPick::new("only", &[1.0])],
+    );
+
+    /// A mark with a law at each node takes the node's law at a node and the two nearest nodes'
+    /// laws mixed between them, held beyond the span; the rank inverts the value at every
+    /// condition; a mark of one law is drawn as before, its node laws `None`.
+    #[test]
+    fn a_mark_with_node_laws_mixes_its_nearest_two() {
+        let sampler = ClassSampler::new(&NODES);
+        // At node 4 the spread is ±0.25 about 8.
+        assert!((sampler.value_at(Only, 4.0, 0.0) - 7.75).abs() < 1e-12);
+        assert!((sampler.value_at(Only, 4.0, 1.0) - 8.25).abs() < 1e-12);
+        // Halfway from node 4 to node 5, ±0.281 25 about 9.
+        assert!((sampler.value_at(Only, 4.5, 1.0) - 9.281_25).abs() < 1e-12);
+        // Beyond the span the last node's ±1 about 32.
+        assert!((sampler.value_at(Only, 40.0, 0.0) - 31.0).abs() < 1e-12);
+        for condition in [0.0, 3.3, 8.0, 15.9] {
+            for i in 0..=32 {
+                let rank = f64::from(i) / 32.0;
+                let value = sampler.value_at(Only, condition, rank);
+                let back = sampler.rank_of(Only, condition, value);
+                // At node 0 every quantile ties at the median, which takes the lowest rank.
+                let expected = if condition == 0.0 { 0.0 } else { rank };
+                assert!(
+                    (back - expected).abs() < 1e-9,
+                    "{condition}, {rank}: {back}"
+                );
+            }
+        }
+        assert!(
+            AWD_SAMPLER
+                .marks()
+                .iter()
+                .all(|m| m.node_residuals().is_none())
+        );
+    }
 
     /// At a tie of quantiles the rank is the tie's lowest, so a split at the tied value takes the
     /// whole tie on its upper side; around it the rank is linear.

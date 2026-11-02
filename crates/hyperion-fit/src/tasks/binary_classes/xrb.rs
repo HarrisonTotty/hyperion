@@ -32,8 +32,8 @@ use hyperion_sim::tables::binary::{XRB_SAMPLER, XrbHostKind, XrbMark};
 use hyperion_sim::units::consts::SECONDS_PER_DAY;
 
 use super::{
-    CensusParams, Censuses, FINGERPRINT_SEED, FittedMark, MarkSource, RunCensusError, ShareRow,
-    census_error, conditional, run_censuses, share_rows, unconditional,
+    CensusParams, Censuses, FINGERPRINT_SEED, FittedMark, MarkPoint, MarkSource, RunCensusError,
+    ShareRow, census_error, conditional, run_censuses, share_rows, unconditional,
 };
 use crate::emit::{RustTable, TableItem};
 use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
@@ -269,15 +269,23 @@ pub fn xrb_sampler(galaxy: &Galaxy, censuses: &Censuses, params: &XrbParams) -> 
         } else {
             &slab
         };
-        let pairs: Vec<(f64, f64)> = pool.iter().filter_map(|x| xrb_pair(x, mark)).collect();
-        if pairs.len() < params.min_members {
+        let points: Vec<MarkPoint> = pool
+            .iter()
+            .filter_map(|x| xrb_pair(x, mark))
+            .map(|(condition, value)| MarkPoint {
+                condition,
+                value,
+                weight: 1.0,
+            })
+            .collect();
+        if points.len() < params.min_members {
             return FittedMark::of_scratch(XRB_SAMPLER.mark(mark));
         }
         sources[k] = MarkSource::Own;
         if mark == XrbMark::LowMassDonorMass {
-            conditional(&pairs)
+            conditional(&points, params.min_members)
         } else {
-            unconditional(&pairs.iter().map(|p| p.1).collect::<Vec<_>>())
+            unconditional(&points)
         }
     });
     let kinds = kind_shares(galaxy, censuses);

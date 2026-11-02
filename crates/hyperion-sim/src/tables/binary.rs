@@ -281,12 +281,15 @@ impl MedianCurve {
 /// k ÷ 16 and linear between them, about a median that is zero or follows a condition, the value
 /// held to its limits.
 ///
-/// The shape is narrower than one law per condition node: the residual's spread is the same at
-/// every condition, which the median shifts (plan 11's Risks, "P11.T8.a as built").
+/// A mark of one law has the same spread at every condition, which the median shifts (plan 11's
+/// Risks, "P11.T8.a as built"). A conditional mark may instead hold a law at each of its median's
+/// 17 nodes ([`with_node_residuals`](Self::with_node_residuals), P15.T10.b's refit at 27), mixed
+/// between the two nearest nodes as the median is, so that its spread follows the condition too.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SamplerMark {
     name: &'static str,
     residual: [f64; 17],
+    node_residuals: Option<&'static [[f64; 17]; 17]>,
     median: Option<MedianCurve>,
     limits: (f64, f64),
 }
@@ -304,9 +307,27 @@ impl SamplerMark {
         Self {
             name,
             residual,
+            node_residuals: None,
             median,
             limits,
         }
+    }
+
+    /// The mark with a residual law at each node of its median: `rows[k]`, the law's quantiles at
+    /// the ranks k ÷ 16 (each row non-decreasing), at node k. Its own residual stays the law of
+    /// all its members, which a draw of a mark with node laws does not read.
+    #[must_use]
+    pub const fn with_node_residuals(self, rows: &'static [[f64; 17]; 17]) -> Self {
+        Self {
+            node_residuals: Some(rows),
+            ..self
+        }
+    }
+
+    /// The residual laws at the median's 17 nodes, or `None` for a mark of one law.
+    #[must_use]
+    pub const fn node_residuals(&self) -> Option<&'static [[f64; 17]; 17]> {
+        self.node_residuals
     }
 
     /// The mark's name, in `snake_case`, with its unit.
@@ -617,6 +638,7 @@ const AWD_MARKS: [SamplerMark; 11] = [
             5.62, 5.84, 6.08, 6.34, 6.62, 6.94, 7.34, 8.0,
         ],
         median: None,
+        node_residuals: None,
         limits: (4.45, 8.0),
     },
     SamplerMark {
@@ -631,6 +653,7 @@ const AWD_MARKS: [SamplerMark; 11] = [
                 0.709_267, 0.707_022, 0.705_321,
             ],
         }),
+        node_residuals: None,
         limits: (0.55, 1.36),
     },
     SamplerMark {
@@ -645,6 +668,7 @@ const AWD_MARKS: [SamplerMark; 11] = [
                 0.612_500, 0.656_250, 0.700_000,
             ],
         }),
+        node_residuals: None,
         limits: (0.0, 1.0),
     },
     SamplerMark {
@@ -652,6 +676,7 @@ const AWD_MARKS: [SamplerMark; 11] = [
         residual: normal(0.05),
         median: Some(linear(RATE_SPAN.0, RATE_SPAN.1, 0.0, -0.7)),
         // 5.4 and 65.6 minutes.
+        node_residuals: None,
         limits: (-1.045_757, 0.038_753),
     },
     SamplerMark {
@@ -659,6 +684,7 @@ const AWD_MARKS: [SamplerMark; 11] = [
         residual: normal(0.15),
         // 600 days.
         median: Some(flat(RATE_SPAN.0, RATE_SPAN.1, 4.158_362)),
+        node_residuals: None,
         limits: (3.5, 5.0),
     },
     SamplerMark {
@@ -666,12 +692,14 @@ const AWD_MARKS: [SamplerMark; 11] = [
         residual: normal(0.03),
         // log₁₀ 0.065 + 1.25 p.
         median: Some(linear(0.0, 0.8, -1.187_087, -0.187_087)),
+        node_residuals: None,
         limits: (-1.301_030, -0.022_276),
     },
     SamplerMark {
         name: "log_helium_donor_mass",
         residual: normal(0.05),
         median: Some(linear(-1.0, 0.1, 0.0, -2.2)),
+        node_residuals: None,
         limits: (-2.301_030, -0.698_970),
     },
     SamplerMark {
@@ -679,6 +707,7 @@ const AWD_MARKS: [SamplerMark; 11] = [
         residual: normal(0.08),
         // 1.3 M☉.
         median: Some(flat(3.5, 5.0, 0.113_943)),
+        node_residuals: None,
         limits: (-0.096_910, 0.477_121),
     },
     SamplerMark {
@@ -693,6 +722,7 @@ const AWD_MARKS: [SamplerMark; 11] = [
                 0.897_627, 0.897_627, 0.897_627,
             ],
         }),
+        node_residuals: None,
         limits: (-0.022_276, 0.897_627),
     },
     SamplerMark {
@@ -707,6 +737,7 @@ const AWD_MARKS: [SamplerMark; 11] = [
                 0.198_000, 0.359_000, 0.520_000,
             ],
         }),
+        node_residuals: None,
         limits: (-1.096_910, 0.897_627),
     },
     SamplerMark {
@@ -721,6 +752,7 @@ const AWD_MARKS: [SamplerMark; 11] = [
                 8.343_402, 8.199_667, 8.055_932,
             ],
         }),
+        node_residuals: None,
         limits: (7.5, 10.12),
     },
 ];
@@ -922,12 +954,14 @@ const MERGER_MARKS: [SamplerMark; 11] = [
         name: "age_rank",
         residual: IDENTITY_RANKS,
         median: None,
+        node_residuals: None,
         limits: (0.0, 1.0),
     },
     SamplerMark {
         name: "primary_rank",
         residual: IDENTITY_RANKS,
         median: None,
+        node_residuals: None,
         limits: (0.0, 1.0),
     },
     SamplerMark {
@@ -937,6 +971,7 @@ const MERGER_MARKS: [SamplerMark; 11] = [
             0.29, 0.33, 0.38, 0.44, 0.52, 0.62, 0.76, 1.0,
         ],
         median: None,
+        node_residuals: None,
         limits: (0.06, 1.0),
     },
     SamplerMark {
@@ -946,12 +981,14 @@ const MERGER_MARKS: [SamplerMark; 11] = [
             0.093, 0.096, 0.099, 0.103, 0.108, 0.115, 0.125, 0.150,
         ],
         median: None,
+        node_residuals: None,
         limits: (0.06, 0.15),
     },
     SamplerMark {
         name: "evolved_primary_rank",
         residual: IDENTITY_RANKS,
         median: None,
+        node_residuals: None,
         limits: (0.0, 1.0),
     },
     SamplerMark {
@@ -961,6 +998,7 @@ const MERGER_MARKS: [SamplerMark; 11] = [
             0.68, 0.76, 0.83, 0.89, 0.93, 0.96, 0.98, 1.0,
         ],
         median: None,
+        node_residuals: None,
         limits: (0.05, 1.0),
     },
     SamplerMark {
@@ -970,6 +1008,7 @@ const MERGER_MARKS: [SamplerMark; 11] = [
             0.61, 0.62, 0.63, 0.64, 0.66, 0.68, 0.69, 0.70,
         ],
         median: None,
+        node_residuals: None,
         limits: (0.1, 0.7),
     },
     SamplerMark {
@@ -979,6 +1018,7 @@ const MERGER_MARKS: [SamplerMark; 11] = [
             0.76, 0.79, 0.82, 0.85, 0.88, 0.91, 0.94, 1.0,
         ],
         median: None,
+        node_residuals: None,
         limits: (0.15, 1.0),
     },
     SamplerMark {
@@ -988,6 +1028,7 @@ const MERGER_MARKS: [SamplerMark; 11] = [
             0.17, 0.18, 0.19, 0.20, 0.21, 0.22, 0.235, 0.25,
         ],
         median: None,
+        node_residuals: None,
         limits: (0.05, 0.25),
     },
     SamplerMark {
@@ -997,6 +1038,7 @@ const MERGER_MARKS: [SamplerMark; 11] = [
             0.2075, 0.225, 0.2425, 0.26, 0.2775, 0.295, 0.3125, 0.33,
         ],
         median: None,
+        node_residuals: None,
         limits: (0.05, 0.33),
     },
     SamplerMark {
@@ -1006,6 +1048,7 @@ const MERGER_MARKS: [SamplerMark; 11] = [
             0.54, 0.59, 0.64, 0.69, 0.75, 0.82, 0.89, 1.0,
         ],
         median: None,
+        node_residuals: None,
         limits: (0.05, 1.0),
     },
 ];
@@ -1132,6 +1175,7 @@ const NSM_MARKS: [SamplerMark; 5] = [
         name: "neutron_star_mass",
         residual: normal_about(1.33, 0.09),
         median: None,
+        node_residuals: None,
         limits: (1.13, 2.0),
     },
     SamplerMark {
@@ -1139,24 +1183,28 @@ const NSM_MARKS: [SamplerMark; 5] = [
         // log₁₀ 7, ±0.15 dex, on 3–20 M☉.
         residual: normal_about(0.845_098, 0.15),
         median: None,
+        node_residuals: None,
         limits: (0.477_121, 1.301_030),
     },
     SamplerMark {
         name: "neutron_star_progenitor_rank",
         residual: IDENTITY_RANKS,
         median: None,
+        node_residuals: None,
         limits: (0.0, 1.0),
     },
     SamplerMark {
         name: "black_hole_progenitor_rank",
         residual: IDENTITY_RANKS,
         median: None,
+        node_residuals: None,
         limits: (0.0, 1.0),
     },
     SamplerMark {
         name: "age_rank",
         residual: IDENTITY_RANKS,
         median: None,
+        node_residuals: None,
         limits: (0.0, 1.0),
     },
 ];
