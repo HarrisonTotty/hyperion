@@ -1058,7 +1058,7 @@ fn the_screen_refuses_no_entry() {
 }
 
 /// P09.T37's bench: a candidate keeps the whole track its step 3 built, whose lifetime it carries,
-/// and its test builds the primary's stars on it, the stars built again before, bit for bit: in
+/// the bits of a build that keeps no segment, and its test builds the primary's stars on it, the stars built again before, bit for bit: in
 /// the centre's cell and the sample cells, under every 27 hold, for every candidate the thinning
 /// keeps, of the field and of the ejected terms, each dying by the clock window's end.
 #[test]
@@ -1079,6 +1079,14 @@ fn a_candidate_s_test_builds_its_stars_on_the_candidate_s_track() {
                 .as_deref()
                 .expect("a candidate keeps its track");
             assert_eq!(track.lifetime(), Some(candidate.lifetime), "{id:?}");
+            // The exact tier reads it as the build that keeps no segment finds it.
+            let unkept = lifetime_under(
+                track_mass_of(candidate.mass),
+                &candidate.composition,
+                &candidate.draws,
+                galaxy.rules().stellar,
+            );
+            assert_same_bits(candidate.lifetime.value(), unkept.value());
             let record = candidate.record(candidate.site);
             let end = record.age_at(ClockWindow::END).value();
             assert!(candidate.lifetime.value() <= end, "{id:?} dies by +H");

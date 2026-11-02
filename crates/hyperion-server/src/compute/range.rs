@@ -54,7 +54,7 @@ use hyperion_sim::galaxy::catalogue_classes::{
 };
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::centre::CentreOrbitCache;
-use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
+use hyperion_sim::galaxy::features::members::source::{CellPart, FeatureMemberSource};
 use hyperion_sim::galaxy::global_list::{GlobalListSource, TubeLookup};
 use hyperion_sim::galaxy::placement::CellKey;
 use hyperion_sim::galaxy::query::{
@@ -335,7 +335,7 @@ enum Asked<T, F> {
 
 /// One job's feature cells, each with the last process the query reads it through and the part of
 /// its features the job reads ([`FeatureMemberSource::read_ahead_part`]).
-type FeatureShare = Vec<((FeatureCell, FeatureProcess), (u32, NonZeroU32))>;
+type FeatureShare = Vec<((FeatureCell, FeatureProcess), CellPart)>;
 
 /// One job's share of the cells the query's sources read: its feature cells and its class cells.
 #[derive(Debug, Default)]
@@ -545,7 +545,7 @@ where
         let parts = feature_parts(workers);
         let features: FeatureShare = features
             .into_iter()
-            .flat_map(|cell| (0..parts.get()).map(move |part| (cell, (part, parts))))
+            .flat_map(|cell| CellPart::all(parts).map(move |part| (cell, part)))
             .collect();
         let mut features = shares(workers.get(), &features).into_iter();
         let mut classes = shares(workers.get(), &classes).into_iter();
@@ -591,6 +591,7 @@ where
 
 /// The parts each feature cell is read ahead in on a pool of `workers` workers: as many as the
 /// workers, to [`FEATURE_CELL_PARTS`].
+#[must_use]
 fn feature_parts(workers: NonZeroUsize) -> NonZeroU32 {
     let workers = u32::try_from(workers.get()).unwrap_or(u32::MAX);
     NonZeroU32::new(workers.min(FEATURE_CELL_PARTS)).expect("a pool has a worker")
@@ -1166,6 +1167,48 @@ mod tests {
             assert!(cold.hits() > 0);
             assert_eq!(served_on(&pool, &caches, &served).await, expected, "warm");
             assert_eq!(caches.classes.counters().misses(), 0);
+            pool.shutdown().await.unwrap();
+        }
+    }
+
+    /// From 27, with the full potential, a served query reads its features' lists, of their recent
+    /// and binary classes, through the interiors' cache, each feature cell read ahead in parts, and
+    /// its answer is the sim's bit for bit, cold and warm, on one worker and on eight, through
+    /// caches that keep everything and through caches that keep nothing (P09.T37's bench).
+    #[tokio::test]
+    async fn from_27_a_served_query_reads_its_features_lists_whatever_is_cached() {
+        use hyperion_sim::GeneratorVersion;
+        use hyperion_sim::galaxy::features::catalogue::FeatureCatalogue;
+        use hyperion_sim::galaxy::features::members::FeatureLevelList;
+        let galaxy = Arc::new(galaxy_at(27).with_full_potential());
+        let key = GalaxyKey::new(SEED, GeneratorVersion::new(27));
+        let query = sun_like(0);
+        assert!(
+            FeatureCatalogue::near(&galaxy, query.centre(), query.radius(), &NoFeatureCache)
+                .any(|feature| FeatureLevelList::listed_of(&galaxy, &feature).is_some()),
+            "features about the Sun-like point list classes"
+        );
+        let source = FeatureMemberSource::new(&NoFeatureCache, &NoInteriorCache);
+        let expected = beside_the_grid(
+            &galaxy,
+            FeatureMembers::Served,
+            (&source, &NoClassCellCache),
+            None,
+            |sources, _| range_query(&galaxy, &mut NoCache::new(), sources, &query),
+        );
+        let served = ServedQuery::new(Arc::clone(&galaxy), key, query, FeatureMembers::Served);
+        for workers in [1, 8] {
+            let pool = pool(workers, INTERACTIVE_QUEUE_CAPACITY);
+            for budget in [64 << 20, 0] {
+                let caches = caches(budget);
+                for pass in ["cold", "warm"] {
+                    assert_eq!(
+                        served_on(&pool, &caches, &served).await,
+                        expected,
+                        "{pass}, {workers} workers, budgets of {budget} bytes"
+                    );
+                }
+            }
             pool.shutdown().await.unwrap();
         }
     }

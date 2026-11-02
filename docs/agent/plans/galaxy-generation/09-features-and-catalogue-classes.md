@@ -1516,7 +1516,9 @@ source and the two centre tests, built behind P10.T10.b's hold (lane `p10-list-r
 cut bit for bit (lane `perf-range-27`, 2026-11-01, no output moved): see Risks, "P09.T37's
 bench"; its 5 ms target is missed, a finding. The features' and the
 centre's recent dead placed (lane `fix-p09-recent-dead`, 2026-11-01, at 24, under P09.T36's and
-P10.T10.b's holds, no output moved at 24–25): see Risks, "P09.T37, the recent dead placed"._
+P10.T10.b's holds, no output moved at 24–25): see Risks, "P09.T37, the recent dead placed". The
+next cuts (lane `perf-range-27-b`, 2026-11-02, no output moved): see Risks, "P09.T37's bench, the
+next cuts"; the 5 ms target is still missed, a finding._
 
 #### P09.T38 Complementarity, budgets and the Milky Way's shells
 
@@ -5902,10 +5904,10 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
 - **P09.T37's bench, the next cuts (lane `perf-range-27-b`, 2026-11-02, at 24; no output moves at
   24–27).** Figures in the lane's outbox.
   - _Lists kept._ The server's `SharedClusterModelCache` keeps each feature's list beside its
-    interior or bound (`list`), charged `FeatureLevelList::heap_bytes` in its own budget;
+    interior or bound (`list`), charged `FeatureLevelList::heap_bytes` within its budget;
     `FeatureLevelList::listed_of` is `pub`, and `FeatureMemberSource::read_ahead` makes the lists.
-    `type_ia::DelayLaw` finds `ψ`'s and `Ψ`'s constants once a quadrature, bit for bit.
-    A cell is read ahead in parts (`FeatureMemberSource::read_ahead_part`; the server's
+    `type_ia::DelayLaw` finds `ψ`'s and `Ψ`'s constants once a quadrature, bit for bit. A cell is
+    read ahead in parts (`FeatureMemberSource::read_ahead_part` of a `CellPart`; the server's
     `FEATURE_CELL_PARTS`, 4).
   - _Bench._ `served_at_27` adds the global list, the black hole's 50 ly query and a galaxy's first.
   - _Centre's census._ `CentreModel` keeps each level's and band's bounds by corner key
@@ -5916,4 +5918,4 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     `system::primary_model_on_track`).
   - _Query tables._ `Galaxy::make_query_tables` builds what a query's first reading built (the
     centre's motion, the Type Ia delays, the core-collapse process, as the rules read them); the
-    server's `GalaxyCache` calls it after the headroom checks, 83 ms of a 3.5 s build at 27.
+    server's `GalaxyCache` calls it after the headroom checks, 77 ms of a 3.5 s build at 27.

@@ -98,6 +98,11 @@ pub const CENTRE_GRID_LEVELS: u8 = 12;
 /// tables lie within 10⁻⁴ of the profiles (P09.T24.b), which lie under their envelopes.
 const CUSP_MARGIN: f64 = 1e-3;
 
+/// The relative margin of a uniform cell's bound over the classes' densities at its nearest
+/// radius, 10⁻¹²: over the rounding of the densities and their sum. Every reading of a cell's
+/// bound takes it, so that their proposals agree bit for bit (P09.T37's corner bounds).
+const UNIFORM_MARGIN: f64 = 1e-12;
+
 /// Standard deviations of a Poisson count the index must spare (plan 03, Design note 6).
 const HEADROOM_SIGMAS: f64 = 8.0;
 
@@ -498,7 +503,7 @@ impl<'a> CentrePlacement<'a> {
     fn cell_proposal(&self, band: MassBand, cell: NestedCell, local: &LocalCell) -> CentreProposal {
         if local.nearest_radius() > 0.0 {
             return CentreProposal::Uniform {
-                bound: self.corner_bound(band, cell, local) * (1.0 + 1e-12),
+                bound: self.corner_bound(band, cell, local) * (1.0 + UNIFORM_MARGIN),
             };
         }
         self.proposal(band, local)
@@ -510,7 +515,7 @@ impl<'a> CentrePlacement<'a> {
         let near = cell.nearest_radius();
         if near > 0.0 {
             return CentreProposal::Uniform {
-                bound: self.bound_density(band, near) * (1.0 + 1e-12),
+                bound: self.bound_density(band, near) * (1.0 + UNIFORM_MARGIN),
             };
         }
         let classes = &self.bands[band.index()];
@@ -553,7 +558,7 @@ impl<'a> CentrePlacement<'a> {
             return MassBand::ALL.map(|band| self.proposal(band, &local).expected(&local));
         }
         MassBand::ALL.map(|band| {
-            let bound = self.corner_bound_at(band, key, &local) * (1.0 + 1e-12);
+            let bound = self.corner_bound_at(band, key, &local) * (1.0 + UNIFORM_MARGIN);
             CentreProposal::Uniform { bound }.expected(&local)
         })
     }

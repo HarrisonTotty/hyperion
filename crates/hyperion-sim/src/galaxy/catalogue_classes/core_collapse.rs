@@ -174,7 +174,7 @@ use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::sse::{Track, track_under};
-use crate::stellar::system::{SystemStars, primary_draws, primary_model_on_track, track_mass_of};
+use crate::stellar::system::{SystemStars, primary_model_on_track, track_mass_of};
 use crate::time::{CLOCK_WINDOW_H, ClockWindow, Span, UniverseTime};
 use crate::units::{
     Dex, HeliumExcess, KilometresPerSecond, LightYears, PerCubicLightYear, SolarMasses, Years,
@@ -1340,17 +1340,17 @@ impl RecentDeath {
 impl CoreCollapseCandidate {
     /// The stars of `record`, the candidate's primary alone:
     /// [`SystemStars::generate_with`] under [`MultiplicityContext::ForcedSingle`], bit for bit,
-    /// the primary's model built on the candidate's whole track where it is the record's primary's
-    /// own (its initial mass and draws) and the primary dies by the clock window's end, as every
-    /// death in the interval does, so that the test builds no track again (P09.T37's bench).
+    /// the primary's model built on the candidate's whole track where `record` is the candidate's
+    /// own ([`record`](Self::record), of its ID, initial mass and so draws) and the primary dies by
+    /// the clock window's end, as every death in the interval does, so that the test builds no
+    /// track again (P09.T37's bench).
     #[must_use]
     fn primary_stars(&self, galaxy: &Galaxy, record: &SystemRecord) -> SystemStars {
         let end =
             record.age_at_epoch().value() + ClockWindow::END.since_epoch().as_julian_years_f64();
         let own = |track: &&Arc<Track>| {
-            track.lifetime().is_some_and(|life| life.value() <= end)
-                && record.primary_initial_mass() == self.mass
-                && primary_draws(galaxy, record) == self.draws
+            record.id() == SystemId::from(self.id)
+                && track.lifetime().is_some_and(|life| life.value() <= end)
         };
         match self.track.as_ref().filter(own) {
             Some(track) => {

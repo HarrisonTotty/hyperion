@@ -197,6 +197,50 @@ impl FeatureInteriorCache for KeepInteriors<'_> {
     }
 }
 
+/// One of the parts a feature cell's features are read ahead in
+/// ([`FeatureMemberSource::read_ahead_part`]): every `parts`th of them in the catalogue's order,
+/// from the `part`th, so that the parts of a count read each feature once between them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CellPart {
+    part: u32,
+    parts: NonZeroU32,
+}
+
+impl CellPart {
+    /// The whole cell: the one part of one.
+    pub const WHOLE: Self = Self {
+        part: 0,
+        parts: NonZeroU32::MIN,
+    };
+
+    /// Part `part` of `parts`, or `None` unless `part` is below `parts`.
+    #[must_use]
+    pub const fn new(part: u32, parts: NonZeroU32) -> Option<Self> {
+        if part < parts.get() {
+            Some(Self { part, parts })
+        } else {
+            None
+        }
+    }
+
+    /// Every part of `parts`, in order.
+    pub fn all(parts: NonZeroU32) -> impl Iterator<Item = Self> {
+        (0..parts.get()).map(move |part| Self { part, parts })
+    }
+
+    /// Its index among the parts, from 0.
+    #[must_use]
+    pub const fn part(self) -> u32 {
+        self.part
+    }
+
+    /// The number of parts.
+    #[must_use]
+    pub const fn parts(self) -> NonZeroU32 {
+        self.parts
+    }
+}
+
 /// The catalogue features' members as a source of the range query (module documentation).
 ///
 /// # Examples
@@ -326,30 +370,52 @@ impl<'a> FeatureMemberSource<'a> {
         query: &RangeQuery,
         cell: (FeatureCell, FeatureProcess),
     ) {
-        self.read_ahead_part(galaxy, query, cell, (0, NonZeroU32::MIN));
+        self.read_ahead_part(galaxy, query, cell, CellPart::WHOLE);
     }
 
-    /// [`read_ahead`](Self::read_ahead) of part `part` of `parts` of the features the lookups
-    /// find in `cell` read through `last`: every `parts`th of them in the catalogue's order from
-    /// the `part`th, so that the parts between them read each feature once, and a server shares a
-    /// cell full of features among several threads (P09.T37's bench: four of the Sun-like 50 ly
-    /// query's twenty feature cells hold nearly all of its 600 features' lists, some 55 ms each).
-    /// Each part reads the cell itself, through the caches.
+    /// [`read_ahead`](Self::read_ahead) of `part` of the features the lookups find in `cell`
+    /// read through `last` ([`CellPart`]), so that a server shares a cell full of features among
+    /// several threads (P09.T37's bench: four of the Sun-like 50 ly query's twenty feature cells
+    /// hold nearly all of its 600 features' lists, some 55 ms each). Each part reads the cell
+    /// itself, through the caches.
     ///
-    /// # Panics
+    /// # Examples
     ///
-    /// If `part` is not below `parts`.
+    /// ```no_run
+    /// use std::num::NonZeroU32;
+    ///
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+    /// use hyperion_sim::galaxy::features::members::source::{
+    ///     CellPart, FeatureMemberSource, KeepInteriors,
+    /// };
+    /// use hyperion_sim::galaxy::query::RangeQuery;
+    /// use hyperion_sim::units::LightYears;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(9));
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in range");
+    /// let query = RangeQuery::builder(sun, LightYears::new(50.0)).build()?;
+    /// let interiors = KeepInteriors::new(&galaxy);
+    /// let source = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+    /// // A full cell's features in four parts, each of which may be read on a thread of its own:
+    /// // between them they read each feature once, as the whole cell read ahead would.
+    /// let parts = NonZeroU32::new(4).expect("four parts");
+    /// for cell in FeatureMemberSource::feature_cells(&galaxy, &query) {
+    ///     for part in CellPart::all(parts) {
+    ///         source.read_ahead_part(&galaxy, &query, cell, part);
+    ///     }
+    /// }
+    /// # Ok::<(), hyperion_sim::galaxy::query::BuildRangeQueryError>(())
+    /// ```
     pub fn read_ahead_part(
         &self,
         galaxy: &Galaxy,
         query: &RangeQuery,
         (cell, last): (FeatureCell, FeatureProcess),
-        (part, parts): (u32, NonZeroU32),
+        part: CellPart,
     ) {
-        assert!(
-            part < parts.get(),
-            "part {part} of {parts} of a cell's features"
-        );
         let sphere = widest_sphere(galaxy, query);
         let (centre, radius) = (sphere.centre(), lookup_radius(&sphere));
         let mut found = Vec::new();
@@ -361,9 +427,11 @@ impl<'a> FeatureMemberSource<'a> {
             &mut found,
         );
         let lists = lists_read(galaxy);
-        let first = usize::try_from(part).expect("a part below a u32 count fits in usize");
-        let step = usize::try_from(parts.get()).expect("a u32 count of parts fits in usize");
-        for feature in found.iter().skip(first).step_by(step) {
+        let (first, step) = (u64::from(part.part), u64::from(part.parts.get()));
+        let ours = (0_u64..)
+            .zip(&found)
+            .filter_map(|(index, feature)| (index % step == first).then_some(feature));
+        for feature in ours {
             let touches = self
                 .interiors
                 .grid_reach(galaxy, feature)
@@ -1292,30 +1360,21 @@ mod tests {
             assert_eq!(list.as_deref(), built.as_ref(), "{:?}", feature.id());
             listing += usize::from(built.is_some());
         }
-        assert!(
-            listing > 0,
-            "some of {} features list their recent classes",
-            found.len()
-        );
+        assert!(listing > 0, "some of {} features list classes", found.len());
         // Read in three parts, the last first, each cell's features are read once between them:
         // the same lists are kept, and one part alone keeps fewer.
         let parts = NonZeroU32::new(3).unwrap();
+        assert_eq!(CellPart::new(3, parts), None);
         let (parted, alone) = (KeepInteriors::new(galaxy), KeepInteriors::new(galaxy));
         for cell in FeatureMemberSource::feature_cells(galaxy, &query) {
-            for part in (0..parts.get()).rev() {
-                FeatureMemberSource::new(&NoFeatureCache, &parted).read_ahead_part(
-                    galaxy,
-                    &query,
-                    cell,
-                    (part, parts),
-                );
+            let in_parts: Vec<CellPart> = CellPart::all(parts).collect();
+            for &part in in_parts.iter().rev() {
+                FeatureMemberSource::new(&NoFeatureCache, &parted)
+                    .read_ahead_part(galaxy, &query, cell, part);
             }
-            FeatureMemberSource::new(&NoFeatureCache, &alone).read_ahead_part(
-                galaxy,
-                &query,
-                cell,
-                (1, parts),
-            );
+            let second = CellPart::new(1, parts).unwrap();
+            FeatureMemberSource::new(&NoFeatureCache, &alone)
+                .read_ahead_part(galaxy, &query, cell, second);
         }
         let keys = |interiors: &KeepInteriors<'_>| -> Vec<FeatureId> {
             interiors.lists.lock().unwrap().keys().copied().collect()

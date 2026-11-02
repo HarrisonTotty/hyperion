@@ -745,8 +745,8 @@ impl Galaxy {
     /// ([`centre_motion`](Self::centre_motion)), some 64 ms, which every grid record's loss-cone
     /// carve reads, so that a served query's cell jobs each waited some 55 ms on the first of them
     /// to build it (8 workers, measured 2026-11-01); and from the catalogue classes' version
-    /// (P09.T37.a), the Type Ia class's delay times ([`type_ia_delays`](Self::type_ia_delays)),
-    /// some 32 ms, and the core-collapse class's process ([`core_collapse`](Self::core_collapse)).
+    /// (P09.T37.a), the Type Ia class's delay times (`type_ia_delays`), some 32 ms, and the
+    /// core-collapse class's process (`core_collapse`).
     ///
     /// Each is built when first read in any case, and is the same bits whenever it is built, so no
     /// answer depends on whether this was called. The server calls it where it builds its

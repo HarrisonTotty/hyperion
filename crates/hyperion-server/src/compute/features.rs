@@ -356,7 +356,8 @@ impl SharedClusterModelCache {
         }
         let interior = Arc::new(FeatureInterior::of(galaxy, feature)?);
         // An interior larger than the whole budget is handed back and still lent. It replaces the
-        // feature's bound, which its grid's reach supersedes, and keeps its list.
+        // feature's bound, which its grid's reach supersedes, and keeps the list held when its
+        // build began; a list stored meanwhile is lost, and built again when next read.
         let _ = self.interiors.insert(
             entry_key,
             Arc::new(HeldFeature::with_model(
@@ -934,8 +935,9 @@ mod tests {
 
     /// Under every 26 hold a feature's feature-level list is the sim's, held beside the bound
     /// on its grid's reach and then beside its interior, charged its bytes and lent again; a
-    /// feature that lists none is held by its `None`; and a galaxy without its kinematic tables,
-    /// which lists nothing, stores nothing (P09.T37).
+    /// feature that lists none is held by its `None`; a list read before the bound is kept when
+    /// the bound is stored; and a galaxy without its kinematic tables, which lists nothing, stores
+    /// nothing (P09.T37).
     #[test]
     fn under_every_26_hold_a_feature_s_list_is_held_beside_its_interior() {
         use hyperion_sim::GeneratorVersion;
@@ -954,7 +956,7 @@ mod tests {
                 let list = FeatureLevelList::listed_of(&galaxy, &feature)?;
                 FeatureInterior::of(&galaxy, &feature).map(|_| (feature, list))
             })
-            .expect("a feature with members listing its recent classes lies near the Sun");
+            .expect("a feature with members listing classes lies near the Sun");
         assert!(built.heap_bytes() > 0);
         let cache = SharedClusterModelCache::new(64 << 20);
         let handle = cache.handle(key);
@@ -986,12 +988,31 @@ mod tests {
                 + interior.heap_bytes()
         );
         let unlisted = near
+            .by_ref()
             .find(|feature| FeatureLevelList::listed_of(&galaxy, feature).is_none())
             .expect("a feature listing no recent class lies near the Sun");
         assert!(handle.list(&galaxy, &unlisted).is_none());
         assert!(handle.list(&galaxy, &unlisted).is_none());
         let counters = cache.counters();
         assert_eq!(counters.entries(), 2, "its `None` is held");
+        // A list read first is kept when the feature's bound is stored beside it.
+        let (later, its_list) = near
+            .find_map(|feature| {
+                FeatureLevelList::listed_of(&galaxy, &feature).map(|l| (feature, l))
+            })
+            .expect("another feature listing classes lies near the Sun");
+        let first = handle.list(&galaxy, &later).expect("it lists");
+        assert_eq!(*first, its_list);
+        let before = cache.counters().bytes();
+        assert_eq!(
+            handle.grid_reach(&galaxy, &later),
+            FeatureInterior::grid_reach_bound(&galaxy, &later)
+        );
+        let counters = cache.counters();
+        assert_eq!(counters.entries(), 3, "the bound is stored beside the list");
+        assert_eq!(counters.bytes(), before, "a bound adds no bytes");
+        let kept = handle.list(&galaxy, &later).expect("held");
+        assert!(Arc::ptr_eq(&first, &kept), "the bound keeps the list");
         let empty = SharedClusterModelCache::new(64 << 20);
         assert!(empty.handle(key).list(&bare, &feature).is_none());
         assert_eq!(empty.counters().entries(), 0);

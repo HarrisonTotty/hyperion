@@ -503,7 +503,11 @@ impl StarModel {
             rules,
         };
         debug_assert!(
-            track.initial_mass() == model.track_mass()
+            track
+                .initial_mass()
+                .value()
+                .total_cmp(&model.track_mass().value())
+                .is_eq()
                 && track.composition() == &model.composition
                 && track.options() == model.track_options(),
             "a star's model is built on its own track"
