@@ -7,16 +7,19 @@
  * whose bound column is R09's stated bound ε_n (`level_bound_m`, hard in the structural octaves and
  * the channels, a 1 − 10⁻⁹ per-point quantile in the craters' and rims' terms), and σ_n, the
  * largest of R09's level-keyed `omitted_rms` at the level over the cells the field holds as
- * surveyed (`crates/hyperion-surface/src/worker.rs`' `level_sigma_m`). The pool keeps the latest of
- * each body ({@link LevelBounds}; `HeightWorkerPool.fieldBounds`), and `planetGeometry` takes them
- * for selection.
+ * surveyed (`crates/hyperion-surface/src/worker.rs`' `level_sigma_m`), and the level charge, ε_n
+ * with the channels' share held by what the cells the field holds certify (`level_charge_m`; plan
+ * R09, R09.T8.d (b3)). The pool keeps the latest of each body ({@link LevelBounds};
+ * `HeightWorkerPool.fieldBounds`), and `planetGeometry` takes them for selection.
  *
- * Selection charges a level {@link selectionBound}'s ε_n, plus R05's chord sagitta
+ * Selection charges a level {@link selectionBound}'s bound, plus R05's chord sagitta
  * (`selectionErrorM`), at each view's own τ: the high setting's 1 px, the low setting's 2 px and
- * the wireframe's 4 px alike. Under the hard rule that is the table's ε_n; under the statistical
- * rule it is min(ε_n, 4σ_n), Design note 5's candidate, R05 Design note 15's "maximum error within
- * the chunk" taken statistically. Only the error moves: culling's boxes, the skirts and the baked
- * ranges' widening keep the hard bound (`levelBoundM`), which stays the stated and tested bound.
+ * the wireframe's 4 px alike. Under the hard rule that is the level charge, the table's ε_n where
+ * none is given; under the statistical rule it is min(ε_n, 4σ_n), Design note 5's candidate, R05
+ * Design note 15's "maximum error within the chunk" taken statistically. Only the error moves:
+ * culling's boxes, the skirts, the baked ranges' widening and the descent's floors keep the table's
+ * ε_n (`levelBoundM`), which stays the stated and tested bound, so that no bake depends on which
+ * blocks a worker holds.
  *
  * {@link SELECTION_RULE} is the rule in force, the one place the switch is made. Item 30 adopts
  * the statistical rule only where, over R05's scripted descent at τ = 1 px, it selects at most two
@@ -78,22 +81,28 @@ export interface LevelBounds {
    * or the workers skip σ ({@link sigmaSurveyOf}).
    */
   readonly sigmaM: Float64Array;
+  /**
+   * The level charge by level, 25, level n at n, metres: ε_n with the channels' share held by the
+   * cells the field holds, never above the table's ε_n (`worker::level_charge_m`; R09.T8.d (b3)).
+   */
+  readonly chargeM: Float64Array;
 }
 
 /**
- * The bound selection charges a level of stated bound `hardM` and σ `sigmaM`, metres: `hardM`
- * under the hard rule; under the statistical rule min(`hardM`, 4 `sigmaM`) where σ is positive,
- * and `hardM` where it is 0 (a level that omits nothing, or ground with no σ read), as the
- * patch-demand ruling's 4e keeps it.
+ * The bound selection charges a level of stated bound `hardM`, σ `sigmaM` and level charge
+ * `chargeM`, metres: `chargeM` under the hard rule, `hardM` where no charge is given; under the
+ * statistical rule min(`hardM`, 4 `sigmaM`) where σ is positive, and `hardM` where it is 0 (a level
+ * that omits nothing, or ground with no σ read), as the patch-demand ruling's 4e keeps it.
  */
 export function selectionBound(
   hardM: number,
   sigmaM: number,
   rule: SelectionRule = SELECTION_RULE,
+  chargeM: number = hardM,
 ): number {
   switch (rule) {
     case "hard":
-      return hardM;
+      return chargeM;
     case "statistical":
       return sigmaM > 0 ? Math.min(hardM, SIGMA_MULTIPLE * sigmaM) : hardM;
   }
@@ -106,15 +115,29 @@ export function selectionBound(
  * @throws Error if it is not.
  */
 export function checkLevelSigma(sigmaM: Float64Array): void {
-  if (sigmaM.length !== LEVEL_SIGMA_LENGTH) {
+  checkByLevel(sigmaM, "σ by level");
+}
+
+/**
+ * Checks a body's level charge: {@link LEVEL_SIGMA_LENGTH} finite values, none negative.
+ *
+ * @throws Error if it is not.
+ */
+export function checkLevelCharge(chargeM: Float64Array): void {
+  checkByLevel(chargeM, "level charge");
+}
+
+/** Checks `values`, a body's `what`: one finite value of at least 0 a level. */
+function checkByLevel(values: Float64Array, what: string): void {
+  if (values.length !== LEVEL_SIGMA_LENGTH) {
     throw new Error(
-      `a body's σ by level has ${String(LEVEL_SIGMA_LENGTH)} values, got ${String(sigmaM.length)}`,
+      `a body's ${what} has ${String(LEVEL_SIGMA_LENGTH)} values, got ${String(values.length)}`,
     );
   }
-  const level = sigmaM.findIndex((x) => !(Number.isFinite(x) && x >= 0));
+  const level = values.findIndex((x) => !(Number.isFinite(x) && x >= 0));
   if (level >= 0) {
     throw new Error(
-      `a body's σ by level is finite and at least 0, got ${String(sigmaM[level])} m at level ${String(level)}`,
+      `a body's ${what} is finite and at least 0, got ${String(values[level])} m at level ${String(level)}`,
     );
   }
 }

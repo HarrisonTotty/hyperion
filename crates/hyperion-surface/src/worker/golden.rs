@@ -44,7 +44,8 @@
 //! - `level <when> <n> <bits> <bits> <bits> <bits>`, the level table's row n after the first block
 //!   (`first`) and after the last (`last`);
 //! - `level_sigma <when> <bits ×25>`, the body's σ by level ([`WorkerFields::level_sigma_m`],
-//!   R10.T4.b) after the first block and after the last, alike;
+//!   R10.T4.b) after the first block and after the last, alike, then `level_charge <when> <bits
+//!   ×25>`, its level charge ([`WorkerFields::level_charge_m`], R09.T8.d (b3)), alike;
 //! - for each bake, `patch <name> <face> <level> <i> <j> <vertex path> <normals> <weights>`, then
 //!   R10.T6.a's lines (`tests/golden/terrain_bake/`'s), then `unsurveyed <indices>` or
 //!   `unsurveyed -`;
@@ -104,7 +105,10 @@
 //!   setting's options with the weights;
 //! - `materials <runs>`: the worker's material at each vertex (x, y) in order of 65 y + x, as
 //!   [`WorkerFields::material`] answers it at the vertex's point on its face (`vertex_point`), as
-//!   runs `<code>:<entry or ->*<count>`.
+//!   runs `<code>:<entry or ->*<count>`;
+//! - the `level`, `level_sigma` and `level_charge` lines after the last block, as the Moon-like
+//!   file's, on a world wet now, whose cells held hold the channels' share (R09.T8.d (b2) and
+//!   (b3)).
 //!
 //! # The terrain test's format
 //!
@@ -281,7 +285,8 @@ fn write_horizon(out: &mut GoldenWriter, name: &str, bake: &BodyBake) {
     out.line(&format!("refused {}", indices(map.refused_cells())));
 }
 
-/// Writes the level table's rows and σ by level of `body` in `fields`, as of `when`.
+/// Writes the level table's rows, σ by level and the level charge of `body` in `fields`, as of
+/// `when`.
 fn write_levels(out: &mut GoldenWriter, when: &str, fields: &WorkerFields, body: BodyRef) {
     let table = fields.level_table(body).expect("held");
     for (n, row) in table.chunks(LEVEL_TABLE_STRIDE).enumerate() {
@@ -289,6 +294,8 @@ fn write_levels(out: &mut GoldenWriter, when: &str, fields: &WorkerFields, body:
     }
     let sigma = fields.level_sigma_m(body).expect("held");
     out.line(&format!("level_sigma {when} {}", bits_of(&sigma)));
+    let charge = fields.level_charge_m(body).expect("held");
+    out.line(&format!("level_charge {when} {}", bits_of(&charge)));
 }
 
 /// Writes `bake`'s lines, the bake named `name` of `opts`.

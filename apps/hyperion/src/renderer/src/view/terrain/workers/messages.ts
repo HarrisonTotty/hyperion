@@ -294,6 +294,12 @@ export interface FieldBlockAnswer {
    * {@link levels}' hard bound it makes the body's level bounds (`levelBounds.ts`).
    */
   readonly sigmaM: Float64Array;
+  /**
+   * The body's level charge, 25, level n at n, metres: {@link levels}' bound ε_n with the channels'
+   * share held by what the cells the field holds certify, never above it, which selection charges
+   * under the hard rule (`worker::level_charge_m`; plan R09, R09.T8.d (b3)).
+   */
+  readonly chargeM: Float64Array;
 }
 
 /**
@@ -712,6 +718,7 @@ export function blockTransferables(block: FieldBlockAnswer | null): Transferable
         block.newlyHeld.buffer,
         block.levels.buffer,
         block.sigmaM.buffer,
+        block.chargeM.buffer,
       ];
 }
 

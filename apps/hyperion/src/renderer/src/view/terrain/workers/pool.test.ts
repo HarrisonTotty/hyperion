@@ -148,6 +148,7 @@ function answerBlock(w: ScriptedHeightWorker, n: number, first: number): void {
       newlyHeld: Uint32Array.from([first, first + 3]),
       levels: new Float64Array(100).fill(first),
       sigmaM: new Float64Array(25).fill(first / 10),
+      chargeM: new Float64Array(25).fill(first / 2),
     },
   });
 }
@@ -582,6 +583,7 @@ describe("the height-worker pool", () => {
     expect(pool.fieldLevels(MOON)?.[0]).toBe(20);
     expect(pool.fieldBounds(MOON)?.table).toBe(pool.fieldLevels(MOON));
     expect(pool.fieldBounds(MOON)?.sigmaM[24]).toBe(2);
+    expect(pool.fieldBounds(MOON)?.chargeM[24]).toBe(10);
     pool.fieldRelease(MOON);
     expect(pool.fieldLevels(MOON)).toBeNull();
     expect(pool.fieldBounds(MOON)).toBeNull();

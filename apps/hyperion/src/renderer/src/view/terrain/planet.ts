@@ -1,13 +1,19 @@
 /**
  * The planet's geometry as selection reads it: its reference spheroid and the level table the
  * height workers' module hands over at run time (plan R05, T7.a, Design notes 5, 7 and 15), with
- * the body's σ by level and the bound selection charges each level under the rule in force (plan
- * R10, R10.T4.b; `levelBounds.ts`).
+ * the body's σ by level and level charge and the bound selection charges each level under the rule
+ * in force (plan R10, R10.T4.b; plan R09, R09.T8.d (b3); `levelBounds.ts`).
  */
 
 import type { Vec3 } from "../../geometry/vec3";
 import { BAND_LIMIT_M, finestLevel, type Xyz } from "./cube";
-import { checkLevelSigma, SELECTION_RULE, selectionBound, type SelectionRule } from "./levelBounds";
+import {
+  checkLevelCharge,
+  checkLevelSigma,
+  SELECTION_RULE,
+  selectionBound,
+  type SelectionRule,
+} from "./levelBounds";
 import { MAX_LEVEL } from "./patchKey";
 
 /**
@@ -48,9 +54,17 @@ export interface PlanetGeometry {
    */
   readonly sigmaM: Float64Array | null;
   /**
+   * The body's level charge by level, 25, metres: the workers' `levelChargeM()`, ε_n with the
+   * channels' share held by the cells they hold (R09.T8.d (b3)), never above {@link levels}' ε_n;
+   * `null` where none was given, as for the test planet's table alone and R07's reference
+   * spheroid.
+   */
+  readonly chargeM: Float64Array | null;
+  /**
    * The bound selection charges each level, 25, metres: {@link levels}' ε_n under
-   * {@link rule} with {@link sigmaM} (`levelBounds.ts`' `selectionBound`); `null` with no table.
-   * Culling, the skirts and the baked ranges' widening read the stated ε_n instead.
+   * {@link rule} with {@link sigmaM} and {@link chargeM} (`levelBounds.ts`' `selectionBound`);
+   * `null` with no table. Culling, the skirts, the baked ranges' widening and the descent's floors
+   * read the stated ε_n instead.
    */
   readonly selectionBoundM: Float64Array | null;
   /** The rule {@link selectionBoundM} is made under: `levelBounds.ts`' rule in force unless given. */
@@ -62,21 +76,25 @@ export const LEVEL_TABLE_STRIDE = 4;
 
 /**
  * The planet's geometry from its figure and the module's level table, or a `null` table for a
- * zero-height reference spheroid (R07 Design notes 3 and 19), with the body's σ by level where
- * the workers gave it and the selection rule (R10.T4.b).
+ * zero-height reference spheroid (R07 Design notes 3 and 19), with the body's σ by level and level
+ * charge where the workers gave them and the selection rule (R10.T4.b; R09.T8.d (b3)).
  *
  * @param sigmaM - The body's σ_n by level, 25 (`levelBounds.ts`' `LevelBounds.sigmaM`); `null`,
- *   or with no table, the selection bound is the stated one under either rule.
+ *   or with no table, the statistical rule's selection bound is the stated one.
  * @param rule - The rule the selection bound is made under; the rule in force unless a test or a
  *   count asks for another.
+ * @param chargeM - The body's level charge by level, 25 (`LevelBounds.chargeM`); `null`, or with no
+ *   table, the hard rule's selection bound is the stated one.
  * @throws Error if the figure's radii are not finite and positive with c ≤ a, the table is not
- *   {@link LEVEL_TABLE_STRIDE} × 25 finite numbers, or σ is not 25 finite values of at least 0.
+ *   {@link LEVEL_TABLE_STRIDE} × 25 finite numbers, σ is not 25 finite values of at least 0, or the
+ *   charge is not 25 finite values of at least 0, each at most the table's ε_n where one is given.
  */
 export function planetGeometry(
   figure: BodyFigure,
   levelTable: Float64Array | null,
   sigmaM: Float64Array | null = null,
   rule: SelectionRule = SELECTION_RULE,
+  chargeM: Float64Array | null = null,
 ): PlanetGeometry {
   const { equatorialRadiusM: a, polarRadiusM: c } = figure;
   if (!(Number.isFinite(a) && Number.isFinite(c) && c > 0 && c <= a)) {
@@ -91,26 +109,40 @@ export function planetGeometry(
   if (sigmaM !== null) {
     checkLevelSigma(sigmaM);
   }
+  if (chargeM !== null) {
+    checkLevelCharge(chargeM);
+    if (levelTable !== null) {
+      const level = chargeM.findIndex((x, n) => !(x <= (levelTable[LEVEL_TABLE_STRIDE * n] ?? 0)));
+      if (level >= 0) {
+        throw new Error(
+          `a body's level charge is at most its stated bound, got ${String(chargeM[level])} m over ${String(levelTable[LEVEL_TABLE_STRIDE * level])} m at level ${String(level)}`,
+        );
+      }
+    }
+  }
   return {
     figure,
     finestLevel: finestLevel(a),
     levels: levelTable,
     sigmaM,
-    selectionBoundM: levelTable === null ? null : selectionBounds(levelTable, sigmaM, rule),
+    chargeM,
+    selectionBoundM:
+      levelTable === null ? null : selectionBounds(levelTable, sigmaM, chargeM, rule),
     rule,
   };
 }
 
-/** Each level's selection bound from the table's stated ε_n and σ_n under `rule`. */
+/** Each level's selection bound from the table's stated ε_n, σ_n and the charge under `rule`. */
 function selectionBounds(
   levelTable: Float64Array,
   sigmaM: Float64Array | null,
+  chargeM: Float64Array | null,
   rule: SelectionRule,
 ): Float64Array {
   const bounds = new Float64Array(MAX_LEVEL + 1);
   for (let level = 0; level <= MAX_LEVEL; level += 1) {
     const hardM = levelTable[LEVEL_TABLE_STRIDE * level] ?? 0;
-    bounds[level] = selectionBound(hardM, sigmaM?.[level] ?? 0, rule);
+    bounds[level] = selectionBound(hardM, sigmaM?.[level] ?? 0, rule, chargeM?.[level] ?? hardM);
   }
   return bounds;
 }
@@ -135,9 +167,10 @@ export function levelBoundM(planet: PlanetGeometry, level: number): number {
 }
 
 /**
- * The bound selection charges `level`, metres: the stated ε_n ({@link levelBoundM}) under the hard
- * rule, min(ε_n, 4σ_n) under the statistical one ({@link PlanetGeometry.selectionBoundM}; R10.T4.b),
- * zero with no table. Only the error selection charges reads it; every bounding volume keeps ε_n.
+ * The bound selection charges `level`, metres: the level charge under the hard rule, the stated
+ * ε_n ({@link levelBoundM}) where none is given (R09.T8.d (b3)), min(ε_n, 4σ_n) under the
+ * statistical one ({@link PlanetGeometry.selectionBoundM}; R10.T4.b), zero with no table. Only the
+ * error selection charges reads it; every bounding volume keeps ε_n.
  *
  * @throws Error if `level` is outside the level table.
  */

@@ -157,6 +157,7 @@ import {
   pixelAngleRad,
   storeReliefSource,
 } from "./handover";
+import { SELECTION_RULE } from "./levelBounds";
 import { TerrainMaterialSet } from "./materialSet";
 import { unreachable } from "./patchKey";
 import { type BodyFigure, type BodyFixedVec3, planetGeometry } from "./planet";
@@ -1421,7 +1422,7 @@ export class TerrainSession {
     // lit one and the wireframe's alike).
     let unsettled = passes.length;
     for (const pass of passes) {
-      pass.setLevels(change.levels, change.sigmaM);
+      pass.setLevels(change.levels, change.sigmaM, change.chargeM);
       pass.fieldChanged(change, () => {
         unsettled -= 1;
         if (
@@ -1712,7 +1713,8 @@ export class TerrainSession {
         material = "wireframe's terrain material";
         break;
     }
-    // The workers' latest level bounds: the table and σ by level (R10.T4.b).
+    // The workers' latest level bounds: the table, σ by level (R10.T4.b) and the level charge
+    // (R09.T8.d (b3)).
     const bounds = this.#pool.fieldBounds(body);
     let pass: TerrainPass;
     try {
@@ -1720,7 +1722,13 @@ export class TerrainSession {
         engine: this.#engine,
         setting: first.report.setting,
         ...(terrain === null ? {} : { terrain }),
-        planet: planetGeometry(figure, bounds?.table ?? null, bounds?.sigmaM ?? null),
+        planet: planetGeometry(
+          figure,
+          bounds?.table ?? null,
+          bounds?.sigmaM ?? null,
+          SELECTION_RULE,
+          bounds?.chargeM ?? null,
+        ),
         source: {
           kind: "body",
           body,

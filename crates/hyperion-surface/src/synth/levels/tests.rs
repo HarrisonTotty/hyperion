@@ -217,7 +217,9 @@ struct Sampled {
 /// reach and their sum within [`LevelBounds::contribution_range_m`] (R09.T8.d): the octaves and the
 /// channels hard, the small craters, the rims and both together within their quantiles; and that
 /// the height as delivered stays within the range the whole field's cells certify
-/// ([`LevelBounds::held_height_range_m`], R09.T8.d (b2)), itself within the header's.
+/// ([`LevelBounds::held_height_range_m`], R09.T8.d (b2)), itself within the header's, and every
+/// difference between two levels within the coarser one's bound as they certify it, selection's
+/// charge ([`LevelBounds::held_bound_m`], R09.T8.d (b3)).
 fn sample_levels(field: &CoarseField, cells: usize, points: usize, seed: u64) -> Sampled {
     let synth = Synthesiser::new(field, SEED);
     let bounds = synth.bounds();
@@ -298,11 +300,12 @@ fn sample_levels(field: &CoarseField, cells: usize, points: usize, seed: u64) ->
             }
             for n in 0..complete {
                 let bound = bounds.bound_m(BandLevel::new(n).unwrap());
+                let charge = bounds.held_bound_m(BandLevel::new(n).unwrap(), &held);
                 for m in n + 1..=complete {
                     let gap = (heights[usize::from(n)] - heights[usize::from(m)]).abs();
                     assert!(
-                        gap <= bound,
-                        "{dir:?}: |h({n}) − h({m})| = {gap} m over the bound {bound} m"
+                        gap <= charge,
+                        "{dir:?}: |h({n}) − h({m})| = {gap} m over the held bound {charge} m"
                     );
                     if bound > 0.0 {
                         worst[usize::from(n)] = num::max(worst[usize::from(n)], gap / bound);
@@ -529,6 +532,73 @@ fn the_held_range_is_the_header_s_with_its_caps_whole_and_its_highest_always() {
             if kind == SyntheticWorld::EarthLike {
                 let others = bounds.relief_reach_m[n] + bounds.craters_reach_m[n];
                 assert_same_bits(held_low, base.0 + -others);
+            }
+        }
+        assert_eq!(tightened, !header.is_airless(), "{kind:?}");
+    }
+}
+
+#[test]
+fn the_held_bound_is_the_header_s_with_its_caps_whole_and_never_above_it() {
+    for &kind in SyntheticWorld::ALL {
+        let field = world(kind);
+        let header = field.header();
+        let whole = HeldChannels {
+            epoch: true,
+            tributaries: true,
+            trunk_m: f64::INFINITY,
+            ..HeldChannels::new(header)
+        };
+        let none = HeldChannels::new(header);
+        let bounds = LevelBounds::new(header);
+        let (_, held) = held_over(field);
+        let coarse = header.level().get();
+        let coarse_cap = groove_cap_m(header.radius().value(), coarse);
+        let mut tightened = false;
+        for level in every_level() {
+            let n = usize::from(level.get());
+            let stated = bounds.bound_m(level);
+            assert_same_bits(bounds.held_bound_m(level, &whole), stated);
+            let charge = bounds.held_bound_m(level, &held);
+            assert!(charge <= stated, "{kind:?} {n}: {charge} m over {stated} m");
+            // It only rises as cells are held.
+            let first = bounds.held_bound_m(level, &none);
+            assert!(first <= charge, "{kind:?} {n}: {first} m over {charge} m");
+            tightened |= charge < stated;
+            let others = bounds.relief_omitted_m[n] + bounds.craters_omitted_m[n];
+            let evaluates_channels = bounds.set(level).channels_through().is_some();
+            if level.get() >= coarse {
+                assert!(evaluates_channels, "{kind:?} {n}");
+            }
+            match kind {
+                // Tributaries: the finer levels' caps stay whole, and only the coarse cap, which a
+                // level that evaluates no channel omits, falls to the deepest trunk's groove.
+                SyntheticWorld::EarthLike => {
+                    assert_eq!(charge < stated, !evaluates_channels, "{kind:?} {n}");
+                }
+                // No tributaries: the channels omit nothing from the first level that evaluates
+                // the coarse one, the coarse level L among them, and the coarse cap is the trunk's.
+                SyntheticWorld::MarsLike => {
+                    if evaluates_channels {
+                        assert_same_bits(charge, others);
+                    } else {
+                        let share = ChannelCaps::correction_factor() * held.trunk_m;
+                        assert!(held.trunk_m < coarse_cap, "{held:?}");
+                        assert!(
+                            (charge - (others + share)).abs() <= 1e-9 * stated,
+                            "{kind:?} {n}: {charge} m against {} m",
+                            others + share
+                        );
+                    }
+                }
+                // Airless: no channel term to hold.
+                SyntheticWorld::MoonLike
+                | SyntheticWorld::CeresLike
+                | SyntheticWorld::Flat
+                | SyntheticWorld::OneCrater => {
+                    assert_same_bits(charge, stated);
+                    assert_same_bits(first, stated);
+                }
             }
         }
         assert_eq!(tightened, !header.is_airless(), "{kind:?}");

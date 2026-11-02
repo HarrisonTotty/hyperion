@@ -313,6 +313,76 @@ describe("the selection bound (R10.T4.b)", () => {
   });
 });
 
+describe("the level charge (R09.T8.d (b3))", () => {
+  /** The first world with the coarse levels' charge held below ε_n, as a wet world's cells hold it. */
+  function heldWorld(): { readonly world: SampleWorld; readonly chargeM: Float64Array } {
+    const world = WORLDS[0];
+    if (world === undefined) {
+      throw new Error("the fixture has no world");
+    }
+    const chargeM = Float64Array.from({ length: LEVEL_SIGMA_LENGTH }, (_, level) => {
+      const epsilon = world.table[LEVEL_TABLE_STRIDE * level] ?? Number.NaN;
+      return level < 5 ? 0.6 * epsilon : epsilon;
+    });
+    return { world, chargeM };
+  }
+
+  it("is the bound under the hard rule, and moves nothing under the statistical one", () => {
+    expect(selectionBound(100, 10, "hard", 60)).toBe(60);
+    expect(selectionBound(100, 10, "statistical", 60)).toBe(40);
+    expect(selectionBound(100, 30, "statistical", 60)).toBe(100);
+    expect(selectionBound(100, 10, "hard")).toBe(100);
+  });
+
+  it("charges selection the held bound and leaves the stated one to every bounding volume", () => {
+    const { world, chargeM } = heldWorld();
+    const held = planetGeometry(world.figure, world.table, world.sigmaM, "hard", chargeM);
+    const stated = planetOf(world, "hard");
+    const statistical = planetGeometry(
+      world.figure,
+      world.table,
+      world.sigmaM,
+      "statistical",
+      chargeM,
+    );
+    expect(held.chargeM).toBe(chargeM);
+    for (let level = 0; level <= MAX_LEVEL; level += 1) {
+      expect(selectionBoundM(held, level)).toBe(chargeM[level]);
+      expect(levelBoundM(held, level)).toBe(levelBoundM(stated, level));
+      expect(subtreeHeightRangeM(held, level)).toEqual(subtreeHeightRangeM(stated, level));
+      expect(selectionBoundM(statistical, level)).toBe(
+        selectionBoundM(planetOf(world, "statistical"), level),
+      );
+    }
+    for (let level = 0; level < held.finestLevel; level += 1) {
+      expect(selectionErrorM(held, level)).toBe(
+        (chargeM[level] ?? Number.NaN) + chordSagittaM(held, level),
+      );
+    }
+    expect(selectionBoundM(held, 0)).toBeLessThan(levelBoundM(held, 0));
+  });
+
+  it("refuses a charge of the wrong length, not finite, negative, or above the stated bound", () => {
+    const { world, chargeM } = heldWorld();
+    const charges = [
+      new Float64Array(24),
+      chargeM.map((x, n) => (n === 3 ? Number.NaN : x)),
+      chargeM.map((x, n) => (n === 3 ? -1 : x)),
+    ];
+    for (const charge of charges) {
+      expect(() => planetGeometry(world.figure, world.table, null, "hard", charge)).toThrow(
+        /level charge/,
+      );
+    }
+    const above = chargeM.map((x, n) => (n === 7 ? 1.01 * x + 1 : x));
+    expect(() => planetGeometry(world.figure, world.table, null, "hard", above)).toThrow(
+      /at most its stated bound/,
+    );
+    // With no table, nothing is charged: the charge is checked alone.
+    expect(selectionBoundM(planetGeometry(world.figure, null, null, "hard", chargeM), 0)).toBe(0);
+  });
+});
+
 describe("selection over the sample worlds' bounds (T4.a's fixture)", () => {
   it("holds six worlds whose bound and σ are positive exactly below the complete level", () => {
     expect(WORLDS.map((w) => w.name)).toEqual([

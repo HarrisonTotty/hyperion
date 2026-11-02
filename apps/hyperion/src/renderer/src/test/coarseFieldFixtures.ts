@@ -122,7 +122,7 @@ export function latestFieldAsk(socket: FakeWebSocket): {
 /**
  * What a payload's block changed in a worker's field at `fieldLevel`: the cells it surveyed anew and
  * those it brought, each as flat runs of cell indices, and a level table of no height (25 rows)
- * with no σ.
+ * with no σ and no charge.
  */
 export function blockChange(
   fieldLevel: number,
@@ -135,6 +135,7 @@ export function blockChange(
     newlyHeld: Uint32Array.from(newlyHeld),
     levels: new Float64Array(25 * 4),
     sigmaM: new Float64Array(25),
+    chargeM: new Float64Array(25),
   };
 }
 

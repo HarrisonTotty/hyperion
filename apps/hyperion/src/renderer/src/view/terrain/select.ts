@@ -352,9 +352,10 @@ export function chordSagittaM(planet: PlanetGeometry, level: number): number {
  * @remarks
  * The sagitta is what a zero-height spheroid with no level table (R07's `mesh` regime) refines on;
  * on the test planet it is under a sixth of ε_n at level 0 and under a tenth from level 1. Under
- * the hard rule the selection bound is the stated ε_n, `levelBoundM`; under the statistical one
- * min(ε_n, 4σ_n). Only this error takes it: the boxes, the skirts and the baked ranges' widening
- * read the stated ε_n.
+ * the hard rule the selection bound is the level charge, ε_n with the channels' share held by the
+ * cells the workers hold (R09.T8.d (b3)), or the stated ε_n, `levelBoundM`, where none is given;
+ * under the statistical one min(ε_n, 4σ_n). Only this error takes it: the boxes, the skirts and
+ * the baked ranges' widening read the stated ε_n.
  */
 export function selectionErrorM(planet: PlanetGeometry, level: number): number {
   if (level >= planet.finestLevel) {

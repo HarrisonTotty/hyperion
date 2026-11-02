@@ -82,6 +82,12 @@ export interface SampleWorld {
   readonly table: Float64Array;
   readonly sigmaM: Float64Array;
   /**
+   * The level charge selection reads under the hard rule (`planet.ts`' `PlanetGeometry.chargeM`;
+   * R09.T8.d (b3)); `null` from the fixture, which holds none, so that the hard rule charges the
+   * table's ε_n.
+   */
+  readonly chargeM: Float64Array | null;
+  /**
    * T4.a's per-patch maximum deviation by level, metres: its `patch_max_over_bound` × ε_n, 0 from
    * the complete level on, where nothing is omitted.
    */
@@ -107,7 +113,8 @@ function slackM(x: number): number {
  * level's and its parent's contributions can add, stretched to the datum; the stated bound; the
  * largest vertex spacing on the radius. The worker's own rows now hold the channels' share by the
  * cells it holds (R09.T8.d (b2)), which the fixture does not carry, so these rows are as wide or
- * wider. Its σ is the fixture's `sigma_m`. Levels past the complete level take its row (bound and
+ * wider. Its σ is the fixture's `sigma_m`, and it holds no level charge (R09.T8.d (b3)), so that
+ * the hard rule charges the stated bound. Levels past the complete level take its row (bound and
  * σ 0). The world is a sphere of its radius: the fixture holds no flattening.
  *
  * @throws Error for a world missing a level row up to its complete level.
@@ -161,6 +168,7 @@ export function sampleWorld(world: LevelBoundsWorld): SampleWorld {
     completeLevel: complete,
     table,
     sigmaM,
+    chargeM: null,
     patchMaxM,
     patches,
     pastBodySigma,
@@ -271,7 +279,7 @@ export interface CountCell {
 
 /** The selection's planet of `world` under `rule`. */
 function planetOf(world: SampleWorld, rule: SelectionRule): PlanetGeometry {
-  return planetGeometry(world.figure, world.table, world.sigmaM, rule);
+  return planetGeometry(world.figure, world.table, world.sigmaM, rule, world.chargeM);
 }
 
 /** What a cell is: its world, rule, style and boxes. */

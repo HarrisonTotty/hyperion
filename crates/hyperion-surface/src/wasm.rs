@@ -72,14 +72,17 @@
 //!   anew; its `newlyHeld()` the runs, laid out alike, of the cells it brought, surveyed or margin,
 //!   that the field did not hold ([`SurveyChange::held_runs`], R10.T8.b's rebake rule); its
 //!   `levelTable()` the body's level table in `levelTable(ridges)`'s layout
-//!   ([`WorkerFields::level_table`]); and its `levelSigmaM()` a `Float64Array` of 25, level n at
-//!   n, the body's `σ_n`, metres: the largest omitted RMS at the level over the cells held as
+//!   ([`WorkerFields::level_table`]); its `levelSigmaM()` a `Float64Array` of 25, level n at n,
+//!   the body's `σ_n`, metres: the largest omitted RMS at the level over the cells held as
 //!   surveyed, 0 before any and at every level where the field skips it
-//!   ([`WorkerFields::level_sigma_m`], R10.T4.b), which with the table's
-//!   hard bound makes the body's level bounds. `fieldRelease(system, body)` drops it, `true` if
-//!   one was held, and `heldBytes` is what every field holds on the heap. `figureM(system, body)`
-//!   is the held field's datum, a `Float64Array` of 2, its equatorial then its polar radius,
-//!   metres, or `undefined` where none is held (rendering plan R14, R14.T3.b).
+//!   ([`WorkerFields::level_sigma_m`], R10.T4.b), which with the table's hard bound makes the
+//!   body's level bounds; and its `levelChargeM()` a `Float64Array` of 25, level n at n, the
+//!   body's level charge, metres: the table's `ε_n` with the channels' share held by what the
+//!   cells held certify, which selection charges under the hard rule
+//!   ([`WorkerFields::level_charge_m`], R09.T8.d (b3)). `fieldRelease(system, body)` drops it,
+//!   `true` if one was held, and `heldBytes` is what every field holds on the heap.
+//!   `figureM(system, body)` is the held field's datum, a `Float64Array` of 2, its equatorial then
+//!   its polar radius, metres, or `undefined` where none is held (rendering plan R14, R14.T3.b).
 //! - `bake(system, body, seed, face, level, i, j, vertexPath, normals, weights, horizon,
 //!   normalsLayer, skirtM)` bakes the patch as `bakePatch` does, `weights` a `WeightsLayer`,
 //!   `horizon` a `HorizonLayer` and `normalsLayer` a `NormalsLayer`, each `Baked` (0) or
@@ -605,8 +608,8 @@ pub struct JsSurfaceFields {
     fields: WorkerFields,
 }
 
-/// What a block taken changed, and the body's level table and σ by level after it (see the module
-/// documentation).
+/// What a block taken changed, and the body's level table, σ by level and level charge after it
+/// (see the module documentation).
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct FieldBlock {
@@ -615,6 +618,7 @@ pub struct FieldBlock {
     held: Vec<u32>,
     table: Vec<f64>,
     sigma: [f64; LEVEL_TABLE_ROWS],
+    charge: [f64; LEVEL_TABLE_ROWS],
 }
 
 #[wasm_bindgen]
@@ -654,6 +658,13 @@ impl FieldBlock {
     #[must_use]
     pub fn level_sigma_m(&self) -> Vec<f64> {
         self.sigma.to_vec()
+    }
+
+    /// The body's level charge, 25, metres.
+    #[wasm_bindgen(js_name = levelChargeM)]
+    #[must_use]
+    pub fn level_charge_m(&self) -> Vec<f64> {
+        self.charge.to_vec()
     }
 }
 
@@ -2001,6 +2012,10 @@ impl JsSurfaceFields {
             sigma: self
                 .fields
                 .level_sigma_m(body)
+                .expect("a block taken leaves its body's field held"),
+            charge: self
+                .fields
+                .level_charge_m(body)
                 .expect("a block taken leaves its body's field held"),
         }
     }

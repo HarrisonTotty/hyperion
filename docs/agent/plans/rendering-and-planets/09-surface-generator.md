@@ -2731,7 +2731,8 @@ planetary::surface::quantise`, the slow
     by name, `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`, and the
     gate.
   - _Built 2026-10-21_ (`f547af5a`, `82e36522`). _(b2) built 2026-11-01_ for the table's lowest,
-    from the cells held (`af6ab09`, `8c64485`; the record's "(b2), as built").
+    from the cells held (`af6ab09`, `8c64485`; the record's "(b2), as built"). _(b3) built
+    2026-11-02_ for selection's charge, ε held by the cells (the record's "(b3), as built").
 
 ### R09.T9 Golden heights across targets
 

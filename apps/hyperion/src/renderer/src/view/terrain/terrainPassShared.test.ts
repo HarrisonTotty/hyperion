@@ -484,6 +484,27 @@ describe("the shared pass's level table (R10.T16.b)", () => {
     expect(made.pass.step({ views, grounded: [] }).reselected).toBe(true);
     expect(made.pass.planet.sigmaM).toEqual(doubled);
   });
+
+  it("selects again on a new level charge with the table, charging it under the hard rule, and not on the same one (R09.T8.d (b3))", async () => {
+    const inputs: SelectionInput[] = [];
+    const made = await sharedPass("high", { onSelect: (input) => inputs.push(input) });
+    const views = [passView(PRIMARY, northPole(2_000_000))];
+    expect(made.pass.step({ views, grounded: [] }).reselected).toBe(true);
+    const table = goldenLevelTable("off");
+    const charge = Float64Array.from({ length: 25 }, (_, n) => (table[4 * n] ?? 0) / 2);
+    made.pass.setLevels(table, null, charge);
+    expect(made.pass.step({ views, grounded: [] }).reselected).toBe(true);
+    const planet = inputs.at(-1)?.planet;
+    expect([planet?.chargeM, made.pass.planet.chargeM]).toEqual([charge, charge]);
+    expect(made.pass.planet.rule).toBe("hard");
+    expect(made.pass.planet.selectionBoundM).toEqual(charge);
+    expect(made.pass.planet.levels).toEqual(table);
+    made.pass.setLevels(table, null, Float64Array.from(charge));
+    expect(made.pass.step({ views, grounded: [] }).reselected).toBe(false);
+    made.pass.setLevels(table);
+    expect(made.pass.step({ views, grounded: [] }).reselected).toBe(true);
+    expect(made.pass.planet.chargeM).toBeNull();
+  });
 });
 
 describe("the shared pass's rebakes (R10.T16.b; R10 Design note 16)", () => {

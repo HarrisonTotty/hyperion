@@ -158,6 +158,8 @@ interface Fixture {
   readonly levels: Readonly<Record<"first" | "last", ReadonlyArray<string>>>;
   /** The body's σ by level after the first block and after the last, as bits (R10.T4.b). */
   readonly sigma: Readonly<Record<"first" | "last", ReadonlyArray<string>>>;
+  /** The body's level charge after the first block and after the last, as bits (R09.T8.d (b3)). */
+  readonly charge: Readonly<Record<"first" | "last", ReadonlyArray<string>>>;
   readonly records: ReadonlyArray<FixtureRecord>;
 }
 
@@ -173,6 +175,7 @@ function parseFixture(): Fixture {
   const held: string[][] = [];
   const levels: Record<"first" | "last", string[]> = { first: [], last: [] };
   const sigma: Record<"first" | "last", string[]> = { first: [], last: [] };
+  const charge: Record<"first" | "last", string[]> = { first: [], last: [] };
   const records: { head: string[]; bits: Map<string, string>; lines: Map<string, string[]> }[] = [];
   for (const line of fixture.split("\n").slice(1)) {
     const words = line.split(" ");
@@ -202,6 +205,11 @@ function parseFixture(): Fixture {
       if (when === "first" || when === "last") {
         sigma[when].push(...rest.slice(1));
       }
+    } else if (head === "level_charge") {
+      const when = rest[0];
+      if (when === "first" || when === "last") {
+        charge[when].push(...rest.slice(1));
+      }
     } else if (HEADS.has(head)) {
       records.push({ head: words, bits: new Map(), lines: new Map() });
     } else if (current !== undefined && words[1] === "=") {
@@ -210,7 +218,7 @@ function parseFixture(): Fixture {
       current.lines.set(head, rest);
     }
   }
-  return { body, seed, blocks, payloads, changes, held, levels, sigma, records };
+  return { body, seed, blocks, payloads, changes, held, levels, sigma, charge, records };
 }
 
 const FIXTURE = parseFixture();
@@ -441,7 +449,7 @@ describe("the height worker's fields on the real module", () => {
     expect(WASM_SIGMA_SURVEY.skipped).toBe(SigmaSurvey.Skipped);
   });
 
-  it("takes every block of the fixture, answering each with the native change, table and σ", () => {
+  it("takes every block of the fixture, answering each with the native change, table, σ and charge", () => {
     expect(FIXTURE.blocks.length).toBeGreaterThanOrEqual(4);
     const fields = new WorkerFields(module);
     const answers = FIXTURE.blocks.map((block, n) => {
@@ -474,6 +482,7 @@ describe("the height worker's fields on the real module", () => {
         a.block.newlyHeld.buffer,
         a.block.levels.buffer,
         a.block.sigmaM.buffer,
+        a.block.chargeM.buffer,
       ]),
     );
     expect(answers.map((a) => a.block.fieldLevel)).toEqual(FIXTURE.blocks.map(() => 6));
@@ -484,6 +493,14 @@ describe("the height worker's fields on the real module", () => {
     expect(FIXTURE.sigma.last).toHaveLength(25);
     expect(sigmas[0]).toEqual(FIXTURE.sigma.first);
     expect(sigmas.at(-1)).toEqual(FIXTURE.sigma.last);
+    // The Moon-like world is airless: its charge is the table's bound, to the bit.
+    const charges = answers.map((a) => [...a.block.chargeM].map(bitsHex));
+    expect(FIXTURE.charge.last).toHaveLength(25);
+    expect(charges[0]).toEqual(FIXTURE.charge.first);
+    expect(charges.at(-1)).toEqual(FIXTURE.charge.last);
+    expect(charges.at(-1)).toEqual(
+      Array.from({ length: 25 }, (_, n) => FIXTURE.levels.last[4 * n]),
+    );
     expect(fields.bodies).toEqual([FIXTURE.body]);
   });
 
@@ -1471,6 +1488,26 @@ describe("the height worker's fields on the real module", () => {
     direct.free();
   });
 
+  it("answers the Earth-like field's level charge as the native worker, below the stated bound where a level evaluates no channel (R09.T8.d (b3))", () => {
+    const fields = new WorkerFields(module);
+    const answers = EARTH.blocks.map((block, n) =>
+      n === 0
+        ? fields.init(EARTH.body, block, "payload", "skipped")
+        : fields.chunk(EARTH.body, block),
+    );
+    const last = answers.at(-1);
+    if (last?.kind !== "taken" || last.block === null) {
+      throw new Error("the Earth-like fixture's last block was not taken");
+    }
+    const { levels, chargeM } = last.block;
+    expect(EARTH.charge).toHaveLength(25);
+    expect([...levels].map(bitsHex)).toEqual(EARTH.levels);
+    expect([...chargeM].map(bitsHex)).toEqual(EARTH.charge);
+    const stated = (n: number): number => levels[4 * n] ?? Number.NaN;
+    expect([...chargeM].filter((charge, n) => charge < stated(n)).length).toBeGreaterThan(0);
+    expect([...chargeM].every((charge, n) => charge <= stated(n))).toBe(true);
+  });
+
   it("names at every vertex of a finest-level bake of three classes the slot of the worker's material there (R10.T12)", () => {
     const fields = new WorkerFields(module);
     const taken = EARTH.blocks.map(
@@ -1832,6 +1869,10 @@ interface EarthFixture {
   readonly weights: string;
   /** The worker's material at each vertex, in order of 65 y + x, as `<code>:<entry or ->`. */
   readonly materials: ReadonlyArray<string>;
+  /** The level table's rows after the last block, as bits (R09.T8.d (b2)). */
+  readonly levels: ReadonlyArray<string>;
+  /** The level charge after the last block, as bits (R09.T8.d (b3)). */
+  readonly charge: ReadonlyArray<string>;
 }
 
 function parseEarthFixture(): EarthFixture {
@@ -1842,6 +1883,8 @@ function parseEarthFixture(): EarthFixture {
   let weights = "";
   const blocks: ArrayBuffer[] = [];
   const materials: string[] = [];
+  const levels: string[] = [];
+  let charge: string[] = [];
   for (const line of earthFixture.split("\n").slice(1)) {
     const [head = "", ...rest] = line.split(" ");
     switch (head) {
@@ -1871,6 +1914,12 @@ function parseEarthFixture(): EarthFixture {
           materials.push(...Array.from({ length: Number(count) }, () => material));
         }
         break;
+      case "level":
+        levels.push(...rest.slice(2));
+        break;
+      case "level_charge":
+        charge = rest.slice(1);
+        break;
       default:
         break;
     }
@@ -1878,7 +1927,7 @@ function parseEarthFixture(): EarthFixture {
   if (patch === null) {
     throw new Error("the Earth-like fixture names no patch");
   }
-  return { body, seed, blocks, patch, palette, weights, materials };
+  return { body, seed, blocks, patch, palette, weights, materials, levels, charge };
 }
 
 const EARTH = parseEarthFixture();

@@ -11,11 +11,12 @@
 //! capacity and the pad friction, with the month's temperature the friction is taken at).
 //!
 //! The client's WebAssembly module wraps [`WorkerFields`] in its `SurfaceFields` export
-//! (`src/wasm.rs`) thinly: the decoding, the merge, the survey's change, the level table and σ by
+//! (`src/wasm.rs`) thinly: the decoding, the merge, the survey's change, the level table, σ by
 //! level (R10.T4.b; surveyed only where the field is started with [`SigmaSurvey::Surveyed`],
-//! R10.T4.c) and each query's synthesis are here, so that the native and wasip1 tests check
-//! them as the browser target runs them, and the client's worker test holds the module's answers
-//! to this module's on a fixture field (`tests/golden/worker/moon_like.golden`, `golden`).
+//! R10.T4.c), the level charge (R09.T8.d (b3)) and each query's synthesis are here, so that the
+//! native and wasip1 tests check them as the browser target runs them, and the client's worker test
+//! holds the module's answers to this module's on a fixture field
+//! (`tests/golden/worker/moon_like.golden`, `golden`).
 //!
 //! # A body's field
 //!
@@ -1631,6 +1632,28 @@ impl WorkerFields {
             .get(&body)
             .and_then(|held| held.sigma.as_ref())
             .map(|sigma| sigma.pending.len())
+    }
+
+    /// `body`'s level charge by level, the bound selection charges each level under the hard rule
+    /// beside [`level_table`](Self::level_table)'s stated bound (R09.T8.d (b3)): for band level n
+    /// at index n, from 0 to 24, `ε_n` with the channels' share held by what the cells held
+    /// certify (the crate's `LevelBounds::held_bound_m`), metres: the coarse level's cap held to
+    /// the deepest trunk groove among them, and no finer level where none carries tributaries.
+    ///
+    /// It bounds |h(n) − h(m)| for every finer level m at every point the field answers, since
+    /// every cell a query reads is held, and it is never above the table's `ε_n`, which it equals
+    /// with the header's caps whole. It is selection's charge alone: the skirts, the boxes'
+    /// widening and the floors read the table's `ε_n`, so that no bake depends on which blocks the
+    /// worker holds. It grows as blocks bring cells, the same whatever their order. `None` if no
+    /// field of `body` is held.
+    #[must_use]
+    pub fn level_charge_m(&self, body: BodyRef) -> Option<[f64; LEVEL_TABLE_ROWS]> {
+        let held = self.bodies.get(&body)?;
+        let mut charge = [0.0; LEVEL_TABLE_ROWS];
+        for (level, value) in (0..=MAX_LEVEL).zip(&mut charge) {
+            *value = held.bounds.held_bound_m(band(level), &held.channels);
+        }
+        Some(charge)
     }
 
     /// Bakes `key` over `body`'s field with the body's detail seed `seed` ([`bake_terrain`], no

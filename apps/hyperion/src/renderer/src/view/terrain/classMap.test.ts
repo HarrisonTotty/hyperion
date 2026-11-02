@@ -186,6 +186,7 @@ class ScriptedPool implements ClassMapPool {
         newlyHeld: Uint32Array.from(held),
         levels: new Float64Array(100),
         sigmaM: new Float64Array(25),
+        chargeM: new Float64Array(25),
       });
     }
   }

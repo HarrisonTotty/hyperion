@@ -97,6 +97,11 @@
 //!   as over a view that holds deep sea floor or a world's lowest ground, the channels add nothing
 //!   to the lowest height; over a view of highlands alone their reach stops at the sea level.
 //!
+//! The level bound's channel term is held by the first two (R09.T8.d (b3); the crate's
+//! `LevelBounds::held_bound_m`), as selection's charge alone. The bound the skirts, the boxes and
+//! the floors read stays the header's: a held bound there would make a bake's bytes depend on which
+//! blocks its worker holds.
+//!
 //! [`octave_spacing`]: super::relief::octave_spacing
 //! [`band_half_width`]: super::craters::band_half_width
 //! [`octave_bound`]: super::relief::octave_bound
@@ -283,6 +288,11 @@ impl LevelCuts {
 pub struct LevelBounds {
     sets: [LevelSet; BAND_LEVELS],
     bound_m: [f64; BAND_LEVELS],
+    /// Each level's structural octaves' share of [`bound_m`](Self::bound_m), metres.
+    relief_omitted_m: [f64; BAND_LEVELS],
+    /// Each level's craters' share of [`bound_m`](Self::bound_m), the small craters' and the
+    /// coarse rims' together at [`CRATER_BOUND_TAIL`], metres.
+    craters_omitted_m: [f64; BAND_LEVELS],
     low_m: [f64; BAND_LEVELS],
     high_m: [f64; BAND_LEVELS],
     /// Each level's structural octaves' reach, |height| at most, metres.
@@ -314,6 +324,8 @@ impl LevelBounds {
         let terms = BodyTerms::of(header, octaves);
         let ln_tail = -math::ln(CRATER_BOUND_TAIL);
         let mut bound_m = [0.0; BAND_LEVELS];
+        let mut relief_omitted_m = [0.0; BAND_LEVELS];
+        let mut craters_omitted_m = [0.0; BAND_LEVELS];
         let mut low_m = [0.0; BAND_LEVELS];
         let mut high_m = [0.0; BAND_LEVELS];
         let mut relief_reach_m = [0.0; BAND_LEVELS];
@@ -322,10 +334,10 @@ impl LevelBounds {
         for n in 0..BAND_LEVELS {
             let set = &terms.sets[n];
             terms.crater_terms(n, &mut craters);
+            relief_omitted_m[n] = terms.relief.omitted_m(set.relief);
+            craters_omitted_m[n] = poisson_tail_bound(&craters.changes, ln_tail);
             bound_m[n] = num::assert_finite(
-                terms.relief.omitted_m(set.relief)
-                    + terms.channels.omitted_m(set.channels)
-                    + poisson_tail_bound(&craters.changes, ln_tail),
+                relief_omitted_m[n] + terms.channels.omitted_m(set.channels) + craters_omitted_m[n],
             );
             let (relief_reach, (channels_low, channels_high)) = (
                 terms.relief.reach_m(set.relief),
@@ -340,6 +352,8 @@ impl LevelBounds {
         Self {
             sets: terms.sets,
             bound_m,
+            relief_omitted_m,
+            craters_omitted_m,
             low_m,
             high_m,
             relief_reach_m,
@@ -360,6 +374,27 @@ impl LevelBounds {
     #[must_use]
     pub fn bound_m(&self, level: BandLevel) -> f64 {
         self.bound_m[usize::from(level.get())]
+    }
+
+    /// The level bound at `level` over a view of the field whose cells `held` certifies, metres:
+    /// [`bound_m`](Self::bound_m) with the channels' share held as
+    /// [`held_height_range_m`](Self::held_height_range_m) holds their reach (the
+    /// [module documentation](self), "What the cells held certify"; R09.T8.d (b3)).
+    ///
+    /// It bounds |h(n) − h(m)| for every finer level m at every point a query over the view
+    /// answers, since every cell a query reads is held: the coarse level's cap is the deepest
+    /// groove a held cell's trunk can cut, and no finer level counts where no held cell carries
+    /// tributaries. It is selection's charge alone, never the skirts' or the boxes' bound. With the
+    /// header's caps whole it is [`bound_m`](Self::bound_m), bit for bit, and it is never larger.
+    /// The craters' share is the same 1 − 10⁻⁹ quantile.
+    #[must_use]
+    pub(crate) fn held_bound_m(&self, level: BandLevel, held: &HeldChannels) -> f64 {
+        let n = usize::from(level.get());
+        num::assert_finite(
+            self.relief_omitted_m[n]
+                + self.channels.held_omitted_m(self.sets[n].channels, held)
+                + self.craters_omitted_m[n],
+        )
     }
 
     /// The lowest and highest height `level`'s contributions can add to the base elevation, metres:
@@ -415,13 +450,15 @@ impl LevelBounds {
     }
 }
 
-/// What the cells a view of a field holds certify of its channels' incision (R09.T8.d (b2)).
+/// What the cells a view of a field holds certify of its channels' incision (R09.T8.d (b2) and
+/// (b3)).
 ///
 /// It holds whether any of them carries a wet epoch's incision, whether any carries tributaries,
 /// and the deepest groove any one's trunk can cut (the [module documentation](self), "What the
 /// cells held certify"). It only grows as cells are held, so the lowest it holds
-/// ([`LevelBounds::held_height_range_m`]) only falls. Holding no cell it certifies the most, but
-/// a view that holds no cell answers no query.
+/// ([`LevelBounds::held_height_range_m`]) only falls and the bound it holds
+/// ([`LevelBounds::held_bound_m`]) only rises. Holding no cell it certifies the most, but a view
+/// that holds no cell answers no query.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct HeldChannels {
     body: ChannelBody,
@@ -746,17 +783,45 @@ impl ChannelCaps {
         } else {
             self.first
         };
-        let cap_of = |k: u8| {
-            let cap = self.cap_m[usize::from(k)];
-            if k == self.first {
-                num::min(cap, held.trunk_m)
-            } else {
-                cap
-            }
-        };
+        let cap_of = |k: u8| self.held_cap_m(k, held);
         let caps: f64 = (self.first..=last).map(cap_of).sum();
         let deepest = (self.first..=last).map(cap_of).fold(0.0, num::max);
         deepest + caps / BUBBLE_MEAN_FLOOR
+    }
+
+    /// The levels `through` leaves out over a view whose cells `held` certifies:
+    /// [`omitted_m`](Self::omitted_m), held as [`held_low_m`](Self::held_low_m) holds the reach.
+    ///
+    /// The coarse level's cap, which counts only where `through` evaluates no level, is held to the
+    /// deepest groove a held cell's trunk can cut, and no finer level counts where no held cell
+    /// carries tributaries, since no query over the view evaluates one. With the header's caps
+    /// whole it is [`omitted_m`](Self::omitted_m), bit for bit.
+    #[must_use]
+    fn held_omitted_m(&self, through: Option<u8>, held: &HeldChannels) -> f64 {
+        let from = through.map_or(self.first, |t| t + 1);
+        let last = if held.tributaries {
+            self.deepest
+        } else {
+            self.first
+        };
+        if from > last {
+            return 0.0;
+        }
+        let caps: f64 = (from..=last).map(|k| self.held_cap_m(k, held)).sum();
+        Self::correction_factor() * caps
+    }
+
+    /// Level `k`'s groove cap over a view whose cells `held` certifies, metres: the coarse level's
+    /// held to the deepest groove a held cell's trunk can cut, every groove of that level being a
+    /// trunk's; a finer level's whole.
+    #[must_use]
+    fn held_cap_m(&self, k: u8, held: &HeldChannels) -> f64 {
+        let cap = self.cap_m[usize::from(k)];
+        if k == self.first {
+            num::min(cap, held.trunk_m)
+        } else {
+            cap
+        }
     }
 }
 

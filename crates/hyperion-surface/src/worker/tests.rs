@@ -722,6 +722,7 @@ fn worker_fields_start_afresh_and_release_to_nothing() {
     assert_eq!(fields.heap_bytes(), 0);
     assert_eq!(fields.level_table(f.body), None);
     assert_eq!(fields.level_sigma_m(f.body), None);
+    assert_eq!(fields.level_charge_m(f.body), None);
 }
 
 #[test]
@@ -843,6 +844,99 @@ fn worker_level_table_holds_every_baked_height_and_tightens_the_channels_on_a_we
                     "{key:?}: {h} m outside [{}, {}]",
                     row[1],
                     row[2]
+                );
+            }
+        }
+    }
+}
+
+/// R09.T8.d (b3): the level charge is the table's bound with the channels' share held by the cells
+/// held. It is the bound to the bit on an airless world after every block; on a world wet now it
+/// is never above it, below it at the levels that evaluate no channel, grows as blocks bring cells,
+/// is the same whatever their order, and bounds every difference between levels at the points the
+/// field answers, the cube corner the fixture's cell touches among them.
+#[test]
+fn worker_level_charge_is_the_table_s_bound_held_by_the_cells_held() {
+    let f = fixture();
+    let mut fields = WorkerFields::new();
+    for (ordinal, block) in f.blocks().enumerate() {
+        take(&mut fields, f.body, ordinal, block, SigmaSurvey::Skipped);
+        let table = fields.level_table(f.body).unwrap();
+        let charge = fields.level_charge_m(f.body).unwrap();
+        for (level, &c) in charge.iter().enumerate() {
+            assert_eq!(
+                bits(c),
+                bits(table[level * LEVEL_TABLE_STRIDE]),
+                "block {ordinal}, level {level}"
+            );
+        }
+    }
+    let f = earth_fixture();
+    let fields = earth_worker(&f);
+    let table = fields.level_table(f.body).unwrap();
+    let charge = fields.level_charge_m(f.body).unwrap();
+    let field = fields.field(f.body).unwrap();
+    let synth = Synthesiser::new(field, SEED);
+    for (level, &c) in (0..=MAX_LEVEL).zip(&charge) {
+        let stated = table[usize::from(level) * LEVEL_TABLE_STRIDE];
+        let evaluates_channels = synth.level_set(band(level)).channels_through().is_some();
+        assert!(c <= stated, "{level}: {c} m over {stated} m");
+        assert_eq!(
+            c < stated,
+            !evaluates_channels,
+            "{level}: {c} m, {stated} m"
+        );
+    }
+    // The same charge, bit for bit, whatever the order of the blocks after the first, and never
+    // falling as they come: the fixture's payload cut into blocks of a kibibyte.
+    let small = split(&encode_within(
+        world(SyntheticWorld::EarthLike),
+        &cover(&[earth_cell()].into_iter().collect(), |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        1024,
+    ));
+    assert!(small.len() > 2, "{} blocks", small.len());
+    let mut forward = WorkerFields::new();
+    let mut reversed = WorkerFields::new();
+    for fields in [&mut forward, &mut reversed] {
+        fields
+            .init(f.body, &small[0], SigmaSurvey::Skipped)
+            .unwrap();
+    }
+    let mut before = forward.level_charge_m(f.body).unwrap();
+    for (a, b) in small[1..].iter().zip(small[1..].iter().rev()) {
+        forward.chunk(f.body, a).unwrap();
+        reversed.chunk(f.body, b).unwrap();
+        let now = forward.level_charge_m(f.body).unwrap();
+        for (level, (then, now)) in before.iter().zip(&now).enumerate() {
+            assert!(then <= now, "{level}: {then} m, then {now} m");
+        }
+        before = now;
+    }
+    for fields in [&forward, &reversed] {
+        assert_eq!(
+            fields.level_charge_m(f.body).unwrap().map(bits),
+            charge.map(bits)
+        );
+    }
+    // Every difference between a level and a finer one, over a grid of the cell's points.
+    let complete = (0..=MAX_LEVEL)
+        .find(|&n| bits(synth.level_bound_m(band(n))) == bits(0.0))
+        .unwrap();
+    let mut cache = SynthCache::new();
+    for (x, y) in (0..=8_u8).flat_map(|y| (0..=8_u8).map(move |x| (x, y))) {
+        let dir = point(earth_cell(), f64::from(x) / 8.0, f64::from(y) / 8.0);
+        let heights: Vec<f64> = (0..=complete)
+            .map(|n| synth.height_at(&mut cache, dir, band(n)).unwrap().height_m)
+            .collect();
+        for n in 0..usize::from(complete) {
+            for m in n + 1..=usize::from(complete) {
+                let gap = (heights[n] - heights[m]).abs();
+                assert!(
+                    gap <= charge[n],
+                    "({x}, {y}): |h({n}) − h({m})| = {gap} m over the charge {} m",
+                    charge[n]
                 );
             }
         }

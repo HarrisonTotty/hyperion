@@ -277,7 +277,7 @@ export function countClusterCell(input: ClusterCountInput): ClusterCountCell {
   if (style === undefined) {
     throw new Error(`no count style for ${setting}`);
   }
-  const planet = planetGeometry(world.figure, world.table, world.sigmaM, "hard");
+  const planet = planetGeometry(world.figure, world.table, world.sigmaM, "hard", world.chargeM);
   const profile = countProfile(world);
   const radiusM = world.figure.equatorialRadiusM;
   const geometry = SETTINGS[setting].geometry;

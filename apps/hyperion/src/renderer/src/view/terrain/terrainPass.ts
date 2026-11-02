@@ -1977,19 +1977,26 @@ export class TerrainPass {
   /**
    * The body's level table as its field's latest block gives it (`FieldChange.levels`, the pool's
    * `fieldLevels`; R10.T16.b), with its σ by level (`FieldChange.sigmaM`, the pool's
-   * `fieldBounds`; R10.T4.b), which the selection bound reads under the statistical rule: selection
-   * reads its bounds from the next step on. A table and σ equal to those held, or no table,
-   * change nothing; no σ is none.
+   * `fieldBounds`; R10.T4.b), which the selection bound reads under the statistical rule, and its
+   * level charge (`FieldChange.chargeM`; R09.T8.d (b3)), which it reads under the hard rule:
+   * selection reads its bounds from the next step on. A table, σ and charge equal to those held,
+   * or no table, change nothing; no σ or charge is none.
    */
-  setLevels(levels: Float64Array | null, sigmaM: Float64Array | null = null): void {
+  setLevels(
+    levels: Float64Array | null,
+    sigmaM: Float64Array | null = null,
+    chargeM: Float64Array | null = null,
+  ): void {
     if (
       levels === null ||
       this.#disposed ||
-      (sameLevels(this.#planet.levels, levels) && sameLevels(this.#planet.sigmaM, sigmaM))
+      (sameLevels(this.#planet.levels, levels) &&
+        sameLevels(this.#planet.sigmaM, sigmaM) &&
+        sameLevels(this.#planet.chargeM, chargeM))
     ) {
       return;
     }
-    this.#planet = planetGeometry(this.#planet.figure, levels, sigmaM, this.#planet.rule);
+    this.#planet = planetGeometry(this.#planet.figure, levels, sigmaM, this.#planet.rule, chargeM);
     this.#rangesVersion += 1;
   }
 

@@ -703,9 +703,9 @@ export class HeightWorkerPool {
   }
 
   /**
-   * `body`'s level bounds, its level table ({@link fieldLevels}) with its σ by level, as its
-   * field's latest block reported them (plan R10, R10.T4.b; `levelBounds.ts`); `null` before any,
-   * or with no field kept.
+   * `body`'s level bounds, its level table ({@link fieldLevels}) with its σ by level and level
+   * charge, as its field's latest block reported them (plan R10, R10.T4.b; plan R09, R09.T8.d
+   * (b3); `levelBounds.ts`); `null` before any, or with no field kept.
    */
   fieldBounds(body: BodyIdHex): LevelBounds | null {
     return this.fields.get(body)?.bounds ?? null;
@@ -1684,7 +1684,7 @@ export class HeightWorkerPool {
       return;
     }
     field.reported = sequence + 1;
-    field.bounds = { table: block.levels, sigmaM: block.sigmaM };
+    field.bounds = { table: block.levels, sigmaM: block.sigmaM, chargeM: block.chargeM };
     const change: FieldChange = { ...block, body, sequence };
     tell(this.changeListeners, change, "field changes");
   }
