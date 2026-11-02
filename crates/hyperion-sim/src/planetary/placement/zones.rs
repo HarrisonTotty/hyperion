@@ -148,9 +148,14 @@
 //! which plan 11 draws only from P11.T2.d. Plan 11's own type admits none of those, being stable
 //! by construction.
 //!
-//! The zones are those at birth: plan 11's binary evolution is deferred, so every pair is two
-//! single stars on a fixed orbit, and design note 10's intersection with the evaluated state comes
-//! with `BinaryState`.
+//! [`stable_zones`] gives the zones at birth, which placement reads: planets form in the birth
+//! disc. Below generator version 27 they are the only zones. From it (P14.T9.d,
+//! `BINARY_HOST_ZONES_VERSION`) a zone a pair the binary engine ran bounds, a star's of the pair or
+//! the pair's own, has its limits at a later time too: Holman and Wiegert's fits on the pair's
+//! orbit and masses then, intersected with the birth limits widened as the zone's planets' orbits
+//! are, by its host's mass at birth over its mass then (design note 10's intersection, read as a
+//! condition at each time; lean, 2026-11-02). The fate transform unbinds a body at the first time
+//! its orbit leaves them.
 //!
 //! [`StarSlot`]: crate::stellar::multiplicity::StarSlot
 
@@ -167,12 +172,85 @@ use crate::planetary::architecture::{
 use crate::planetary::disc::{self, BuildDiscHostError, Disc, DiscDraws, DiscHost, Truncation};
 use crate::planetary::index::{BodyIndex, STELLAR_SUB_END};
 use crate::rng::Seed;
+use crate::stellar::binary::{BinaryState, Component as PairComponent};
 use crate::stellar::draws::UnitUniform;
 use crate::stellar::multiplicity::{HierarchyNode, NodeIndex, SlotKind, SystemHierarchy};
 use crate::stellar::premain;
 use crate::units::{
     AstronomicalUnits, Dex, Megayears, Metres, SolarLuminosities, SolarMasses, SolarRadii,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
+
+/// The generator version from which a zone a pair the binary engine ran bounds has its limits at
+/// the pair's evaluated state, and a body that leaves them is unbound (P14.T9.d; the [module
+/// documentation](self)): 27, held with the 27 train.
+///
+/// Below it [`BinaryHostZonesRules::in_force`] is [`BinaryHostZonesRules::Birth`]: a body keeps the
+/// zone of its birth whatever its pair has become since, and every figure is version 26's bit for
+/// bit. 27's bump deletes this hold, [`BinaryHostZonesRules`] with its `Birth` arm, the tests'
+/// switch and its tripwire (`the_binary_host_zones_are_held_only_until_the_27_bump`).
+pub(crate) const BINARY_HOST_ZONES_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// Whether a body is held to its zone at its pair's evaluated state (its hold,
+/// [`BINARY_HOST_ZONES_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum BinaryHostZonesRules {
+    /// Version 26's and before: the zones at birth alone.
+    Birth,
+    /// Version 27's: the zones at the evaluated state too ([`OrbitZone::limits_at`]).
+    Evaluated,
+}
+
+impl BinaryHostZonesRules {
+    /// The rules this generator version gives: the evaluated zones from
+    /// [`BINARY_HOST_ZONES_VERSION`], the birth zones below it; in the tests, the rules a test's
+    /// switch sets on its thread ([`with_binary_host_zones`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = BINARY_HOST_ZONES_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= BINARY_HOST_ZONES_VERSION {
+            Self::Evaluated
+        } else {
+            Self::Birth
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The binary hosts' zone rules a test sets on its thread, `None` for the version's.
+    static BINARY_HOST_ZONES_RULES: core::cell::Cell<Option<BinaryHostZonesRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the binary hosts' zone rules `rules` on this thread, for the tests to reach
+/// the evaluated zones ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. 27's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_binary_host_zones<R>(rules: BinaryHostZonesRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<BinaryHostZonesRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            BINARY_HOST_ZONES_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(BINARY_HOST_ZONES_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// How a pair the binary engine ran bounds a zone at its evaluated state (P14.T9.d).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum PairBound {
+    /// The zone of the pair's member `0`, which its companion bounds from outside: Holman and
+    /// Wiegert's S-type limit.
+    Star(PairComponent),
+    /// The pair's own zone, which the pair bounds from inside: their P-type limit.
+    Pair,
+}
 
 /// The coefficients of Holman and Wiegert's S-type fit, in the order of their equation 1:
 /// `a_c ÷ a_b` = 0.464 − 0.380μ − 0.631e + 0.586μe + 0.150e² − 0.198μe².
@@ -779,6 +857,68 @@ impl OrbitZone {
     #[must_use]
     pub const fn outer(&self) -> Option<Metres> {
         self.outer
+    }
+
+    /// The zone's inner and outer limits at a later time, m, from the host (P14.T9.d), where the
+    /// pair the binary engine ran bounds it as `bound` says and is in the state `state` then: the
+    /// birth limits times `widening`, the host's mass at birth over its mass then (design note
+    /// 11's a₀ M₀ ÷ M, which a body's orbit widens by), intersected with Holman and Wiegert's fit
+    /// on the pair's orbit and masses then.
+    ///
+    /// The S-type limit is a × [`holman_wiegert_s_type`] of the companion's share of the pair's
+    /// mass then and its eccentricity, the P-type limit a × [`holman_wiegert_p_type`] of the
+    /// lighter star's share; a pair with no orbit then, merged or unbound, bounds nothing, and
+    /// neither does an S-type pair whose companion has no mass. A zone whose star has no mass
+    /// closes: its outer limit is zero.
+    #[must_use]
+    pub(crate) fn limits_at(
+        &self,
+        state: &BinaryState,
+        bound: PairBound,
+        widening: f64,
+    ) -> (Option<Metres>, Option<Metres>) {
+        let inner = self.inner.map(|r| r * widening);
+        let outer = self.outer.map(|r| r * widening);
+        let Some(orbit) = state.orbit() else {
+            return (inner, outer);
+        };
+        let a = orbit.semi_major_axis().value();
+        let e = orbit.eccentricity().value();
+        let masses = state.stars().map(|star| star.mass().value());
+        match bound {
+            PairBound::Star(own) => {
+                let (host, companion) = (masses[own.index()], masses[own.other().index()]);
+                if host <= 0.0 {
+                    return (inner, Some(Metres::ZERO));
+                }
+                if companion <= 0.0 {
+                    return (inner, outer);
+                }
+                let limit = a * holman_wiegert_s_type(companion / (host + companion), e);
+                let outer = outer.map_or(limit, |r| r.value().min(limit));
+                (inner, Some(Metres::new(outer)))
+            }
+            PairBound::Pair => {
+                let total = masses[0] + masses[1];
+                if total <= 0.0 {
+                    return (inner, outer);
+                }
+                let limit = a * holman_wiegert_p_type(masses[0].min(masses[1]) / total, e);
+                let inner = inner.map_or(limit, |r| r.value().max(limit));
+                (Some(Metres::new(inner)), outer)
+            }
+        }
+    }
+
+    /// The zone with the limits `inner` and `outer` in place of its own: what
+    /// `PlanetarySystem::zones_at` gives of a zone at a later time.
+    #[must_use]
+    pub(crate) const fn with_limits(self, inner: Option<Metres>, outer: Option<Metres>) -> Self {
+        Self {
+            inner,
+            outer,
+            ..self
+        }
     }
 
     /// The zone's limits as the radii T3's disc is cut to.

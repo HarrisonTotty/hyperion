@@ -1294,10 +1294,17 @@ it lands. T30.a adapts T9's zones and T1.d's context to them.
     hosts in binaries inside 50 au have planets a quarter to a half as often as single stars of the
     same mass.
   - _Accept:_ `cargo test -p hyperion-sim planetary::placement::zones`.
-  - _Slice:_ plan 11's engine (P11.T4–T11) is deferred, so every pair is two single stars on an
-    orbit and D10's zones are the zones at birth only; the intersection with the evaluated state
-    comes with `BinaryState`. No brown-dwarf companion is drawn until P11.T2.d, so (b)'s test of one
-    runs on a hand-built hierarchy with a `StarSlot` of the brown-dwarf kind.
+  - _Slice:_ the zones are the zones at birth; from 27 P14.T9.d intersects them with the evaluated
+    state. No brown-dwarf companion is drawn until P11.T2.d, so (b)'s test of one runs on a
+    hand-built hierarchy with a `StarSlot` of the brown-dwarf kind.
+- **P14.T9.d The zones at the evaluated state** (research-binary-hosts R2, held at 27).
+  `PlanetarySystem::zones_at(ctx, t)` gives each birth zone widened by M₀ ÷ M, and for a zone a
+  pair the engine ran bounds, intersected with Holman and Wiegert's fits on the pair's state then
+  (`OrbitZone::limits_at`); the fate unbinds a body at its first crossing, scanned on the
+  timeline's knots. A star a supernova released (P11.T10) takes its planets with it, unbound
+  from the system, and its zones leave `zones_at`.
+  - _Accept:_ `cargo test -p hyperion-sim --lib -- planetary::placement::zones planetary::fate`,
+    and both `no_overlapping_orbits_in_generated_systems` tiers by name.
 
 #### P14.T10 Placement tests
 
@@ -9603,7 +9610,8 @@ it:
 - **Interacting binaries.** The golden set holds none, on purpose. From 27 the stage reads the
   binary engine's state of each star of a pair it ran (research-binary-hosts):
   - its light and peak luminosity (P14.T1.e, `BINARY_HOST_LIGHT_VERSION`);
-  - its mass, largest radius and sudden events in the fate (P14.T28.g, `BINARY_HOST_FATE_VERSION`).
+  - its mass, largest radius and sudden events in the fate (P14.T28.g, `BINARY_HOST_FATE_VERSION`);
+  - its zones at the evaluated state, and its released stars (P14.T9.d, `BINARY_HOST_ZONES_VERSION`).
 - **Plan 05's spatial view** is unit-agnostic, which the orbit map needs, and its plane follows
   `scene.frame`, so a tilted plane is a frame and not a change to `PlaneSpec` (D21, T40.b). Its
   `LocalFrame` names its axes coreward, spinward and north; on the orbit map those names hold only
@@ -34261,3 +34269,18 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Left out:_ a paired star's mass is read at its f64 age, not split as `phase_and_mass_at`
     splits a track's, and its drift breaks are its timeline's segment starts, not its paths' knots.
   - _For 27's bump:_ delete what `the_binary_host_fate_is_held_only_until_the_27_bump` lists.
+- **P14.T9.d's evaluated zones, as built (lane `fix-binary-hosts`, 2026-11-02).** Held at 27
+  (`placement::zones::BINARY_HOST_ZONES_VERSION`; `BinaryHostZonesRules::{Birth, Evaluated}`,
+  `with_binary_host_zones`, a line in `with_every_27_hold`). Nothing moves at 24, 25 or 26.
+  - _New items:_ `OrbitZone::{limits_at, with_limits}`, `PairBound`,
+    `PlanetarySystem::zones_at`, `FateHost::{mass_at, limits_at}`,
+    `hosts::evolved::first_crossing`, `BinaryTimeline::knot_ages`,
+    `SystemStars::departures` and the context's `departure`.
+  - _Leans (2026-11-02):_ design note 10's intersection is a condition at each time: the birth
+    limits widened by M₀ ÷ M, which a body's orbit widens by too, intersected with the fit on the
+    pair's state then; only a star's zone of an engine-run pair and the pair's own are evaluated.
+    A body leaving its zone is `Unbound`. A star the system stops showing (P11.T10) takes its
+    zone's bodies out `Unbound` at its departure, and a zone holding it leaves `zones_at`.
+  - _Readers:_ a departed star lights the system no more (`Epoch::companions`, the water window),
+    through `SystemContext::has_left`.
+  - _For 27's bump:_ delete what `the_binary_host_zones_are_held_only_until_the_27_bump` lists.

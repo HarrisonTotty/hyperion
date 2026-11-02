@@ -108,10 +108,11 @@ use crate::planetary::context::SystemContext;
 use crate::planetary::drift::{DriftingOrbit, EvolvingLaw, composite_excess, drift_cell};
 use crate::planetary::hosts::evolved::{
     Aftermath, Circularisation, circularised, circularised_axis, engulfment_reach, expanded,
-    expanded_axis, first_engulfment, supernova,
+    expanded_axis, first_crossing, first_engulfment, supernova,
 };
 use crate::planetary::hosts::young::Formation;
 use crate::planetary::placement::OrbitZone;
+use crate::planetary::placement::zones::{BinaryHostZonesRules, PairBound};
 use crate::planetary::record::BodyOrbit;
 use crate::stellar::Phase;
 use crate::stellar::binary::{BinaryTimeline, Component as PairComponent, SegmentKind};
@@ -470,6 +471,26 @@ pub struct FateHost<'a> {
     timelines: Vec<&'a BinaryTimeline>,
     /// The pairs' sudden events the host's bodies feel, by time ([`PairEvent`]).
     events: Vec<PairEvent>,
+    /// The zone a pair the engine ran bounds, with how ([`ZoneBound`], P14.T9.d); `None` for a
+    /// host built from its models alone, and for a zone no such pair bounds.
+    bound: Option<ZoneBound>,
+    /// The first time one of the host's stars leaves the system, a supernova having released it
+    /// (P11.T10), which unbinds the host's bodies (P14.T9.d): a star's planets go with it, and a
+    /// circumbinary planet of the broken pair is left unbound. `None` for a host built from its
+    /// models alone, and below the zones' hold at 27.
+    departure: Option<UniverseTime>,
+}
+
+/// A zone that a pair the binary engine ran bounds at its evaluated state (P14.T9.d): the zone at
+/// birth, its pair by its index in the host's timelines, how the pair bounds it, and the clock
+/// times of the pair's timeline's knots ([`BinaryTimeline::knot_ages`]), ascending, at which the
+/// zone's search looks.
+#[derive(Debug, Clone, PartialEq)]
+struct ZoneBound {
+    zone: OrbitZone,
+    pair: usize,
+    bound: PairBound,
+    knots: Vec<UniverseTime>,
 }
 
 /// A sudden event of a pair the binary engine ran, as a host's bodies feel it (P14.T28.g; the
@@ -523,6 +544,8 @@ impl<'a> FateHost<'a> {
             paired: vec![None],
             timelines: Vec::new(),
             events: Vec::new(),
+            bound: None,
+            departure: None,
         }
     }
 
@@ -552,6 +575,8 @@ impl<'a> FateHost<'a> {
             stars,
             timelines: Vec::new(),
             events: Vec::new(),
+            bound: None,
+            departure: None,
         })
     }
 
@@ -568,6 +593,16 @@ impl<'a> FateHost<'a> {
         let stars = ctx.stars();
         let mut host = Self::stars(zone.members().map(|member| &stars[usize::from(member)]))
             .expect("a zone has a component, and a system's stars are coeval");
+        match BinaryHostZonesRules::in_force() {
+            BinaryHostZonesRules::Birth => {}
+            BinaryHostZonesRules::Evaluated => {
+                host.departure = zone
+                    .members()
+                    .filter_map(|member| ctx.departure(usize::from(member)))
+                    .filter_map(|age| clock_time(host.stars[0], age))
+                    .min();
+            }
+        }
         match BinaryHostFateRules::in_force() {
             BinaryHostFateRules::SingleModels => return host,
             BinaryHostFateRules::Engine => {}
@@ -601,7 +636,88 @@ impl<'a> FateHost<'a> {
         // By time, and at one time in the order found: the pairs' depth-first order, each pair's
         // events by their kind's order in `pair_events`.
         host.events.sort_by_key(|event| event.at);
+        // A star's own zone, which its pair bounds from outside, and the pair's own zone.
+        let bound = match *host.paired.as_slice() {
+            [Some((pair, component))] => Some((pair, PairBound::Star(component))),
+            [Some((first, _)), Some((second, _))] if first == second => {
+                Some((first, PairBound::Pair))
+            }
+            _ => None,
+        };
+        host.bound = bound.and_then(|(pair, bound)| match BinaryHostZonesRules::in_force() {
+            BinaryHostZonesRules::Birth => None,
+            BinaryHostZonesRules::Evaluated => {
+                let timeline = host.timelines[pair];
+                let first = host.stars[0];
+                let mut knots: Vec<UniverseTime> = timeline
+                    .knot_ages(0.0, timeline.until().value())
+                    .into_iter()
+                    .filter_map(|age| clock_time(first, Years::new(age)))
+                    .collect();
+                knots.dedup();
+                Some(ZoneBound {
+                    zone: *zone,
+                    pair,
+                    bound,
+                    knots,
+                })
+            }
+        });
         host
+    }
+
+    /// The host's mass at `t`, M☉, as [`BodyFate::host_mass`] reads it: its stars' masses then,
+    /// a paired star's from its pair's timeline.
+    ///
+    /// # Panics
+    ///
+    /// As [`BodyFate::host_mass`], at a time before the host has formed.
+    #[must_use]
+    pub(crate) fn mass_at(&self, t: UniverseTime) -> SolarMasses {
+        self.stars.iter().zip(&self.paired).zip(self.deaths()).fold(
+            SolarMasses::ZERO,
+            |sum, ((model, paired), death)| {
+                sum + match paired {
+                    Some((pair, component)) => self.paired_mass(*pair, *component, t),
+                    None => star_mass(model, death, t),
+                }
+            },
+        )
+    }
+
+    /// The limits at `t` of `zone`, the zone at birth whose bodies the host holds, m (P14.T9.d):
+    /// its birth limits widened as its bodies' orbits are, by its mass at birth over
+    /// [`mass_at`](Self::mass_at) `t`, and where a pair the engine ran bounds it and the zones'
+    /// hold is lifted, intersected with Holman and Wiegert's fit on the pair's state then
+    /// ([`OrbitZone::limits_at`]).
+    ///
+    /// # Panics
+    ///
+    /// As [`mass_at`](Self::mass_at).
+    #[must_use]
+    pub(crate) fn limits_at(
+        &self,
+        zone: &OrbitZone,
+        t: UniverseTime,
+    ) -> (Option<Metres>, Option<Metres>) {
+        let mass = self.mass_at(t).value();
+        let widening = if mass > 0.0 {
+            zone.host_mass().value() / mass
+        } else {
+            1.0
+        };
+        let birth = (
+            zone.inner().map(|r| r * widening),
+            zone.outer().map(|r| r * widening),
+        );
+        match (BinaryHostZonesRules::in_force(), &self.bound) {
+            (BinaryHostZonesRules::Evaluated, Some(bound)) => {
+                let age = Years::new(self.pair_age(bound.pair, t));
+                let state = self.timelines[bound.pair].state_at(age);
+                zone.limits_at(&state, bound.bound, widening)
+            }
+            (BinaryHostZonesRules::Evaluated, None) | (BinaryHostZonesRules::Birth, _) => birth,
+        }
     }
 
     /// The stars, in the order given.
@@ -756,6 +872,8 @@ enum Sudden {
     Death(usize),
     /// The host's pair event of this index.
     Event(usize),
+    /// A host star's leaving the system ([`FateHost`]'s `departure`).
+    Departure,
 }
 
 /// A body's state and orbit at a time: what [`state_at`] and [`BodyFate::at`] return.
@@ -1096,6 +1214,7 @@ impl<'a> BodyFate<'a> {
                     .enumerate()
                     .map(|(k, event)| (event.at, Sudden::Event(k))),
             )
+            .chain(host.departure.map(|at| (at, Sudden::Departure)))
             .collect();
         sudden.sort_unstable();
         let mut fates: Vec<Self> = bodies
@@ -1126,6 +1245,7 @@ impl<'a> BodyFate<'a> {
     pub fn resolve_among(bodies: &[&'a FateBody], index: usize, host: &'a FateHost<'a>) -> Self {
         let body = bodies[index];
         let sudden = !host.events.is_empty()
+            || host.departure.is_some()
             || host
                 .deaths()
                 .iter()
@@ -1149,6 +1269,7 @@ impl<'a> BodyFate<'a> {
                     Generation::Primordial => {
                         deaths.iter().flatten().all(|death| death.at > *formed)
                             && host.events.iter().all(|event| event.at > *formed)
+                            && host.departure.is_none_or(|at| at > *formed)
                     }
                     Generation::Second => true,
                 }
@@ -1406,9 +1527,9 @@ impl<'a> BodyFate<'a> {
         if formed > self.known_until() {
             return;
         }
-        // A pair's event before a body forms, which only a second-generation body outlives, is
-        // none of its history.
-        if let Some((at, Sudden::Event(_))) = next
+        // A pair's event or a star's leaving before a body forms, which only a second-generation
+        // body outlives, is none of its history.
+        if let Some((at, Sudden::Event(_) | Sudden::Departure)) = next
             && at <= formed
         {
             return;
@@ -1418,11 +1539,22 @@ impl<'a> BodyFate<'a> {
             at.checked_sub(Span::new(0, 1).expect("0 s and 1 ns is a normalised span"))
                 .expect("a death after a formation is not the clock's first instant")
         });
-        if let Some(at) = self.engulfment(&segment, end, engulfment_reach(segment.mass)) {
-            self.ending = Some(BodyState::Destroyed {
+        let engulfed = self.engulfment(&segment, end, engulfment_reach(segment.mass));
+        // From P14.T9.d's hold at 27, the first time the body leaves its zone at its pair's
+        // evaluated state, if that comes before any engulfment.
+        let ending = match (engulfed, self.crossing(&segment, end)) {
+            (Some(engulfed), Some(crossed)) if crossed < engulfed => {
+                Some(BodyState::Unbound { at: crossed })
+            }
+            (Some(at), _) => Some(BodyState::Destroyed {
                 cause: DestructionCause::Engulfed,
                 at,
-            });
+            }),
+            (None, Some(at)) => Some(BodyState::Unbound { at }),
+            (None, None) => None,
+        };
+        if ending.is_some() {
+            self.ending = ending;
             return;
         }
         let Some((at, sudden)) = next else {
@@ -1430,6 +1562,10 @@ impl<'a> BodyFate<'a> {
         };
         let (aftermath, reference) = match sudden {
             Sudden::Death(star) => self.explode(&segment, at, star),
+            Sudden::Departure => {
+                self.ending = Some(BodyState::Unbound { at });
+                return;
+            }
             Sudden::Event(k) => {
                 let event = self.host.events[k];
                 match event.effect {
@@ -1619,6 +1755,75 @@ impl<'a> BodyFate<'a> {
                 None => Metres::from(model.max_radius_until(t)).value(),
             })
             .fold(0.0, f64::max)
+    }
+
+    /// The first time in `segment` up to `end` at which the body's orbit leaves its zone at its
+    /// pair's evaluated state (P14.T9.d, [`FateHost::limits_at`]), its apocentre beyond the outer
+    /// limit or its pericentre inside the inner, if any: `None` below the zones' hold at 27 and
+    /// for a zone no pair the engine ran bounds.
+    ///
+    /// The scan's points are the segment's ends and every knot of the pair's timeline between
+    /// them ([`BinaryTimeline::knot_ages`]), where the pair's orbit or its stars' masses may
+    /// turn; the first crossing is bisected to within a second ([`first_crossing`]).
+    fn crossing(&self, segment: &Segment, end: UniverseTime) -> Option<UniverseTime> {
+        match BinaryHostZonesRules::in_force() {
+            BinaryHostZonesRules::Birth => return None,
+            BinaryHostZonesRules::Evaluated => {}
+        }
+        let bound = self.host.bound.as_ref()?;
+        let mut points = vec![segment.start];
+        if end > segment.start {
+            let from = bound.knots.partition_point(|&t| t <= segment.start);
+            let to = bound.knots.partition_point(|&t| t < end);
+            points.extend_from_slice(&bound.knots[from..to.max(from)]);
+            points.push(end);
+        }
+        first_crossing(&points, |t| {
+            self.zone_clearance(segment, t).unwrap_or(f64::INFINITY)
+        })
+    }
+
+    /// How far inside its zone at its pair's evaluated state the body's orbit on `segment` lies
+    /// at `t`, m: the least of the outer limit less its apocentre and its pericentre less the inner
+    /// limit, infinite where neither is set; `None` for a zone no pair the engine ran bounds, and
+    /// a host with no mass then.
+    fn zone_clearance(&self, segment: &Segment, t: UniverseTime) -> Option<f64> {
+        let bound = self.host.bound.as_ref()?;
+        let state =
+            self.host.timelines[bound.pair].state_at(Years::new(self.host.pair_age(bound.pair, t)));
+        // Every star of a bounded zone is its pair's, so its mass is `host_mass`'s from this state,
+        // summed in the same order.
+        let mass = self
+            .host
+            .paired
+            .iter()
+            .flatten()
+            .fold(SolarMasses::ZERO, |sum, &(_, component)| {
+                sum + state.stars()[component.index()].mass()
+            });
+        if mass.value() <= 0.0 {
+            return None;
+        }
+        let widening = bound.zone.host_mass().value() / mass.value();
+        let (inner, outer) = bound.zone.limits_at(&state, bound.bound, widening);
+        let orbit = self.orbit_in(segment, t, mass);
+        let outside = outer.map_or(f64::INFINITY, |r| r.value() - orbit.apoapsis().value());
+        let inside = inner.map_or(f64::INFINITY, |r| orbit.periapsis().value() - r.value());
+        Some(outside.min(inside))
+    }
+
+    /// How far inside its zone at its pair's evaluated state the body lies at `t`, m, as the
+    /// fate's zone search reads it (P14.T9.d): `None` where the body is not present then, for a
+    /// zone no pair the engine ran bounds, and for a host built from its models alone. The census
+    /// of the binary hosts reads it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn zone_clearance_at(&self, t: UniverseTime) -> Option<f64> {
+        if self.at(t).state() != BodyState::Present {
+            return None;
+        }
+        let (segment, _) = self.segment_at(t);
+        self.zone_clearance(segment, t)
     }
 
     /// What pair event `event` leaves of the body on `segment`, with the mass the body orbits

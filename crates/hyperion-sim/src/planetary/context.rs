@@ -27,8 +27,9 @@
 //!   the hierarchy plan 11's draw gives a grid system (P11.T2.c), and the context keeps the
 //!   timeline of each pair the binary engine ran ([`SystemStars::pairs`]). Below generator version
 //!   27 each star is read as a single star; from it (P14.T1.e, `BINARY_HOST_LIGHT_VERSION`) a star of
-//!   such a pair is read from its pair's timeline wherever the stage reads its light. The zones are
-//!   the zones at birth.
+//!   such a pair is read from its pair's timeline wherever the stage reads its light. The context's
+//!   zones are the zones at birth; a system's zones at a later time read its pairs' states from 27
+//!   (P14.T9.d).
 //! - **\[α/Fe\]** is P14.T1.a's closed form of \[Fe/H\] and population ([`alpha_fe`](fn@alpha_fe)),
 //!   the two sequences' means, since plan 06 draws none of its own. A star's X-ray and
 //!   ultraviolet history is P14.T1.a's closed form too ([`XuvHistory`]).
@@ -60,6 +61,7 @@ use std::error::Error;
 use std::fmt;
 
 use super::hosts::strip::{self, Surroundings};
+use super::placement::zones::BinaryHostZonesRules;
 use super::placement::{OrbitZone, ZoneHierarchy, ZoneStar, stable_zones};
 use crate::Seed;
 use crate::galaxy::catalogue_classes::{CatalogueSystem, system_of};
@@ -678,6 +680,10 @@ pub struct SystemContext {
     /// The pairs of two stars the binary engine ran, depth first ([`SystemStars::pairs`]); none
     /// for a synthetic host and a rogue planet.
     pairs: Vec<PairTimeline>,
+    /// For each star, by body index, the system's age from which the stellar stage no longer shows
+    /// it, a supernova having released it (`SystemStars::departures`, P11.T10); empty for a
+    /// synthetic host and a rogue planet.
+    departures: Vec<Option<Years>>,
     /// The stars' hierarchy; `None` for a rogue planet, which has no star.
     hierarchy: Option<SystemHierarchy>,
     /// A rogue planet's mass, its plan 13 record's; `None` for every other host.
@@ -859,6 +865,7 @@ impl SystemContext {
             // evolved twice.
             stars: stars.stars().to_vec(),
             pairs: stars.pairs().to_vec(),
+            departures: stars.departures(),
             hierarchy: Some(hierarchy),
             rogue_planet_mass: None,
             alpha_fe: Some(alpha_fe(
@@ -885,6 +892,7 @@ impl SystemContext {
             host_kind: HostKind::RoguePlanet,
             stars: Vec::new(),
             pairs: Vec::new(),
+            departures: Vec::new(),
             hierarchy: None,
             rogue_planet_mass: Some(mass),
             composition,
@@ -927,6 +935,29 @@ impl SystemContext {
     #[must_use]
     pub fn pairs(&self) -> &[PairTimeline] {
         &self.pairs
+    }
+
+    /// The system's age, Julian years, from which the stellar stage no longer shows component
+    /// `star`, if it does not show it at the end of the ages its pairs were run to: a star a
+    /// supernova released from the system (P11.T10), whose planets go with it (P14.T9.d). `None`
+    /// for every star of a synthetic host and below version 27's stellar rules.
+    #[must_use]
+    pub(crate) fn departure(&self, star: usize) -> Option<Years> {
+        self.departures.get(star).copied().flatten()
+    }
+
+    /// Whether component `star` has left the system by `t`, a supernova having released it
+    /// (P11.T10): from generator version 27 (P14.T9.d, `BINARY_HOST_ZONES_VERSION`) once the
+    /// system's age reaches the star's [`departure`](Self::departure), after which the stage reads
+    /// no zone of it and none of its light; below 27, never.
+    #[must_use]
+    pub(crate) fn has_left(&self, star: usize, t: UniverseTime) -> bool {
+        match BinaryHostZonesRules::in_force() {
+            BinaryHostZonesRules::Birth => false,
+            BinaryHostZonesRules::Evaluated => self
+                .departure(star)
+                .is_some_and(|left| self.age_at(t) >= left),
+        }
     }
 
     /// Component `star`'s state at `t` as the planetary stage reads its light, or `None` before it
@@ -1021,8 +1052,9 @@ impl SystemContext {
     /// [`stable_zones`] of [`ZoneHierarchy::from`] the hierarchy, recomputed on each call; none
     /// for a rogue planet, which has no star.
     ///
-    /// They are the zones at birth, all the slice has: design note 10 intersects them with the
-    /// zones of the evaluated state once plan 11 evolves binaries (P11.T4).
+    /// They are the zones at birth, which placement reads; `PlanetarySystem::zones_at` gives a
+    /// system's zones at a later time, at the evaluated state of each pair the binary engine ran
+    /// from generator version 27 (P14.T9.d, design note 10).
     #[must_use]
     pub fn zones(&self) -> Vec<OrbitZone> {
         self.hierarchy.as_ref().map_or_else(Vec::new, |hierarchy| {
@@ -1206,7 +1238,9 @@ impl SystemContext {
             |bytes, star| bytes + star.heap_bytes(),
         );
         self.pairs.iter().fold(
-            stars + self.pairs.capacity() * size_of::<PairTimeline>(),
+            stars
+                + self.pairs.capacity() * size_of::<PairTimeline>()
+                + self.departures.capacity() * size_of::<Option<Years>>(),
             |bytes, pair| bytes + pair.timeline().heap_bytes(),
         )
     }
@@ -1481,6 +1515,7 @@ impl SystemContextBuilder {
             host_kind: HostKind::Stellar,
             stars: models,
             pairs: Vec::new(),
+            departures: Vec::new(),
             hierarchy: Some(hierarchy),
             rogue_planet_mass: None,
             composition,
@@ -1864,10 +1899,11 @@ mod tests {
             let held = SystemContext::from_stars(&galaxy, &stars);
             assert_eq!(held, SystemContext::from_record(&galaxy, &record));
             // Its heap is its stars' own, less the spare capacity of the stars' list, which the
-            // copy does not keep.
+            // copy does not keep, and with its stars' departures (P14.T9.d).
             let models = size_of_val(stars.stars());
+            let departures = stars.stars().len() * size_of::<Option<Years>>();
             assert!(
-                (models..=stars.heap_bytes()).contains(&held.heap_bytes()),
+                (models..=stars.heap_bytes() + departures).contains(&held.heap_bytes()),
                 "{} bytes held, the stars {}",
                 held.heap_bytes(),
                 stars.heap_bytes()

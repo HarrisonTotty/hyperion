@@ -1883,11 +1883,13 @@ fn a_companion_s_light_pushes_a_star_s_habitable_zone_out() {
 /// post-main-sequence mass loss destabilises, so the share rose with the packing. The slice does
 /// not model that instability; the bound below holds it to under 5%.
 ///
-/// The zone is the one at birth, its outer limit widened as its host's orbits are, by the
-/// host's initial mass over its mass then (design note 11's a₀ M₀ ÷ M): until plan 11's binary
-/// evolution (P11.T4) a pair's orbit does not widen as its stars lose mass (ruling 33), while
-/// their planets' orbits do, so an evolved star's planet can outgrow the zone its companion bounds
-/// at birth: 7 of this sample's 4,830 bodies at the epoch, all about hosts that have lost mass.
+/// The zone is the one at the time, [`PlanetarySystem::zones_at`]'s (P14.T9.d): the zone at birth
+/// widened as its host's orbits are, by the host's initial mass over its mass then (design note
+/// 11's a₀ M₀ ÷ M), since a pair the binary engine did not run keeps its drawn orbit as its stars
+/// lose mass (ruling 33) while their planets' orbits widen; and from 27, for a zone a pair the
+/// engine ran bounds, intersected with Holman and Wiegert's on the pair's state then. A body
+/// beyond its zone at birth has outgrown it: 7 of this sample's 4,830 at the epoch, all about
+/// hosts that have lost mass.
 ///
 /// The fast tier walks [`whole_fast`]'s chunk of the sample, and
 /// [`no_overlapping_orbits_in_generated_systems_over_the_rest_of_the_sample`] the rest
@@ -1916,7 +1918,10 @@ fn no_overlapping_orbits_in(systems: &'static [(SystemContext, PlanetarySystem)]
         let strip = ctx.strip_radius();
         for t in window() {
             let snapshot = system.snapshot_at(ctx, t);
-            for zone in system.zones() {
+            for zone in &system.zones_at(ctx, t) {
+                let birth = system
+                    .zone(zone.host())
+                    .expect("a zone at a time is one of the system's zones");
                 let mut orbits: Vec<(EarthMasses, KeplerElements)> = snapshot
                     .bodies()
                     .iter()
@@ -1941,12 +1946,18 @@ fn no_overlapping_orbits_in(systems: &'static [(SystemContext, PlanetarySystem)]
                         );
                     }
                     if let Some(outer) = zone.outer() {
-                        let widened = outer * (widening * (1.0 + 1e-12));
-                        assert!(orbit.apoapsis() <= widened, "{:?}", system.system());
-                        if t == UniverseTime::EPOCH && orbit.apoapsis() > outer {
-                            assert!(widening > 1.01, "only mass loss widens an orbit");
-                            outgrown += 1;
-                        }
+                        assert!(
+                            orbit.apoapsis() <= outer * (1.0 + 1e-12),
+                            "{:?}",
+                            system.system()
+                        );
+                    }
+                    if let Some(outer) = birth.outer()
+                        && t == UniverseTime::EPOCH
+                        && orbit.apoapsis() > outer
+                    {
+                        assert!(widening > 1.01, "only mass loss widens an orbit");
+                        outgrown += 1;
                     }
                     assert!(orbit.apoapsis() <= strip);
                     bodies += 1;

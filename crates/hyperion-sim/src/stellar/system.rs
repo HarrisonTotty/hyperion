@@ -2661,10 +2661,42 @@ impl SystemStars {
     /// wide pair releases no star plan 08 places elsewhere, and is shown as before.
     #[must_use]
     pub(crate) fn shown_at(&self, t: UniverseTime) -> Shown {
+        self.shown_at_age(self.primary().age_at(t))
+    }
+
+    /// For each star, by body index, the age of the system, Julian years, from which
+    /// [`shown_at`](Self::shown_at) no longer shows it, if it leaves the system by the ages its
+    /// pairs were run to: a star that a supernova released, whose planets go with it, as plan 14
+    /// reads them (P14.T9.d). What the system shows changes only at a disrupting supernova's age
+    /// and an outer orbit's release, so each star's is the first of those ages at which it is not
+    /// shown.
+    #[must_use]
+    pub(crate) fn departures(&self) -> Vec<Option<Years>> {
+        let mut ages: Vec<Years> = self
+            .pairs
+            .iter()
+            .filter_map(|pair| disrupting_supernova(&pair.timeline).map(SupernovaRecord::age))
+            .chain(self.releases.iter().map(|release| release.age))
+            .collect();
+        ages.sort_by(Years::total_cmp);
+        let mut departures = vec![None; self.stars.len()];
+        for age in ages {
+            let shown = self.shown_at_age(age);
+            for (index, departure) in (0_u8..).zip(&mut departures) {
+                if departure.is_none() && !shown.holds(index) {
+                    *departure = Some(age);
+                }
+            }
+        }
+        departures
+    }
+
+    /// [`shown_at`](Self::shown_at) at the primary's age `age`, Julian years.
+    #[must_use]
+    fn shown_at_age(&self, age: Years) -> Shown {
         match self.primary().rules().binary_kicks {
             BinaryKicksRules::Paired => Shown::Drawn,
             BinaryKicksRules::Alone => {
-                let age = self.primary().age_at(t);
                 // A bit for each star still held: 16 stars at most (`StarIndex`).
                 let all = (1_u32 << self.stars.len()) - 1;
                 let mut held = all;

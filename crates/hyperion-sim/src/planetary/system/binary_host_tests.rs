@@ -290,8 +290,8 @@ fn binary_host_light_leaves_an_unpaired_system_as_it_was() {
 /// Under every 27 hold the planets of merged pairs, which the engine's light leaves a dark member
 /// in their zone (`NoRemnant`, no light, no radius), derive and record whole: the first systems of
 /// the sample with a planet present in the zone of a common-envelope merger, of a merger without
-/// one and of a post-common-envelope pair, each snapshot at the epoch and walked as the audit walks
-/// it.
+/// one and of a post-common-envelope pair (whose planets the 27 fate mostly ends at the envelope),
+/// each snapshot at the epoch and walked as the audit walks it.
 #[test]
 fn binary_host_light_derives_the_planets_of_merged_pairs() {
     use super::audit_tests::audit_walk_system;
@@ -300,7 +300,7 @@ fn binary_host_light_derives_the_planets_of_merged_pairs() {
     let wanted = [
         (PairHistory::CommonEnvelopeMerger, 3),
         (PairHistory::Merger, 2),
-        (PairHistory::PostCommonEnvelope, 2),
+        (PairHistory::PostCommonEnvelope, 1),
     ];
     let mut found = [0_usize; 3];
     let records = sample_records(&galaxy, SEARCH, SampleFilter::ALL).unwrap();

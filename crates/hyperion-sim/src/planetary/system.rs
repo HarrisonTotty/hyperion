@@ -112,6 +112,7 @@ use std::sync::OnceLock;
 
 use crate::Seed;
 use crate::coords::{SystemPosition, SystemVelocity};
+use crate::galaxy::placement::Existence;
 use crate::id::{BodyId, SystemId};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
@@ -1841,10 +1842,44 @@ impl PlanetarySystem {
         self.system
     }
 
-    /// The stable zones, one per orbit host, in hierarchy order (P14.T9).
+    /// The stable zones, one per orbit host, in hierarchy order (P14.T9): the zones at birth,
+    /// which placement reads.
     #[must_use]
     pub fn zones(&self) -> &[OrbitZone] {
         &self.zones
+    }
+
+    /// The stable zones at `t`, the system's generated from `ctx`, in the order of
+    /// [`zones`](Self::zones) (P14.T9.d): each birth zone with its limits widened as its bodies'
+    /// orbits are, by its host's mass at birth over its mass then (design note 11), and from
+    /// generator version 27, for a zone a pair the binary engine ran bounds (a star's of the pair,
+    /// or the pair's own), intersected with Holman and Wiegert's fit on the pair's orbit and masses
+    /// then, which the fate transform unbinds its bodies at. From 27 too, they are the zones of the
+    /// stars the system holds at `t` (the hierarchy at `t`): a zone of a star a supernova has
+    /// released (P11.T10) is gone, its bodies with it. Before the system is born they are the
+    /// zones at birth.
+    ///
+    /// # Panics
+    ///
+    /// If `ctx` is not the context the system was generated from.
+    #[must_use]
+    pub fn zones_at(&self, ctx: &SystemContext, t: UniverseTime) -> Vec<OrbitZone> {
+        assert_eq!(
+            ctx.id(),
+            self.system,
+            "a system is queried with the context it was generated from"
+        );
+        if ctx.existence_at(t) != Existence::Exists {
+            return self.zones.clone();
+        }
+        self.zones
+            .iter()
+            .filter(|zone| !zone.members().any(|m| ctx.has_left(usize::from(m), t)))
+            .map(|zone| {
+                let (inner, outer) = fate_host(ctx, zone).limits_at(zone, t);
+                zone.with_limits(inner, outer)
+            })
+            .collect()
     }
 
     /// The orbit hosts, one per zone and in the same order.
@@ -6046,6 +6081,9 @@ impl<'a> PastSky<'a> {
         };
         let own = (orbit.semi_major_axis(), orbit.eccentricity().value());
         WindowAt::of(self.stars.iter().filter_map(|&(star, seen)| {
+            if self.ctx.has_left(star, t) {
+                return None;
+            }
             let state = self.ctx.star_state_at(star, t)?;
             let (a, e) = seen.unwrap_or(own);
             Some((
@@ -6940,8 +6978,9 @@ impl<'c> Epoch<'c> {
     fn companions(&self, zone: &OrbitZone) -> Option<Vec<Illumination>> {
         let h = stellar_hierarchy(self.ctx);
         let members = members_of(zone);
+        // A star a supernova has released lights the system no more (P14.T9.d).
         (0..self.states.len())
-            .filter(|&star| (members & (1 << star)) == 0)
+            .filter(|&star| (members & (1 << star)) == 0 && !self.ctx.has_left(star, self.t))
             .map(|star| {
                 let separation = companion_separation(h, &self.under, members, star);
                 let light = self.light(star)?;

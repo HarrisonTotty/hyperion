@@ -552,6 +552,9 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   `BinaryHostFateRules::Engine` through `with_binary_host_fate`: a planet's orbit follows the
 ///   engine's masses and radii, and the pair's common envelopes, mergers and supernovae are its
 ///   host's sudden events.
+/// - a binary host's zones at its pair's evaluated state, `BINARY_HOST_ZONES_VERSION` (P14.T9.d),
+///   at `BinaryHostZonesRules::Evaluated` through `with_binary_host_zones`: a body that leaves the
+///   zone its pair bounds then, Holman and Wiegert's on the pair's orbit, is unbound.
 ///
 /// A system or a record is read under the rules in force when it is generated, so a test
 /// generates afresh inside it; the carriers' rules are read when a system's equilibrium network is
@@ -606,6 +609,10 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || {
         use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
         with_binary_host_fate(BinaryHostFateRules::Engine, run)
+    };
+    let run = move || {
+        use crate::planetary::placement::zones::{BinaryHostZonesRules, with_binary_host_zones};
+        with_binary_host_zones(BinaryHostZonesRules::Evaluated, run)
     };
     let run = move || {
         use hyperion_surface::material::{SteepnessTailsRules, with_steepness_tails};

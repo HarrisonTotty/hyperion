@@ -816,6 +816,38 @@ impl BinaryTimeline {
         peak
     }
 
+    /// The ages strictly between `from` and `to`, Julian years, at which the pair's orbit or its
+    /// members' masses may turn, ascending and without repeats: its segments' starts and the
+    /// knots of each segment's orbit and of its members' mass and τ paths. Plan 14's zones at the
+    /// evaluated state are scanned at them (P14.T9.d).
+    #[must_use]
+    pub(crate) fn knot_ages(&self, from: f64, to: f64) -> Vec<f64> {
+        let mut ages: Vec<f64> = Vec::new();
+        for segment in &self.segments {
+            ages.push(segment.start);
+            if let Some(orbit) = &segment.orbit {
+                ages.extend(orbit.axis.knots().iter().map(|knot| knot[0]));
+                ages.extend(orbit.eccentricity.knots().iter().map(|knot| knot[0]));
+            }
+            for member in &segment.members {
+                let (first, second) = match member {
+                    Member::Shaped { mass, .. }
+                    | Member::Cooling { mass, .. }
+                    | Member::Remnant { mass, .. } => (Some(mass), None),
+                    Member::MainSequence { mass, tau, .. } => (Some(mass), Some(tau)),
+                    Member::Track { .. } | Member::Frozen { .. } | Member::Gone => (None, None),
+                };
+                if let Some(first) = first {
+                    ages.extend(knots_between(first, second, from, to));
+                }
+            }
+        }
+        ages.retain(|&age| from < age && age < to);
+        ages.sort_by(f64::total_cmp);
+        ages.dedup_by(|a, b| a.total_cmp(b).is_eq());
+        ages
+    }
+
     /// The age at which the pair coalesced, if it did by the age it was run to.
     #[must_use]
     pub fn merger_age(&self) -> Option<Years> {

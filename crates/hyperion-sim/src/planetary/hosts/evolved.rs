@@ -443,6 +443,25 @@ pub(crate) fn first_engulfment(
     None
 }
 
+/// The first time among `points`, ascending clock times, at or after which `clearance` is
+/// negative, or `None` if it is at none of them: a body's crossing of its zone's limits at its
+/// pair's evaluated state (P14.T9.d), with `clearance` its orbit's distance inside them. At the
+/// first point with a negative clearance, the bracket from the point before is bisected to within
+/// a second, as [`first_engulfment`]'s is; a first point already negative is the time itself.
+pub(crate) fn first_crossing(
+    points: &[UniverseTime],
+    mut clearance: impl FnMut(UniverseTime) -> f64,
+) -> Option<UniverseTime> {
+    let mut previous: Option<UniverseTime> = None;
+    for &point in points {
+        if clearance(point) < 0.0 {
+            return Some(previous.map_or(point, |before| bisect(before, point, &mut clearance)));
+        }
+        previous = Some(point);
+    }
+    None
+}
+
 /// The bracket's later end after halving `lo`–`hi` (clearance at `lo` not negative, at `hi`
 /// negative) to within a second.
 fn bisect(
