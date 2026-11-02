@@ -1676,8 +1676,8 @@ function formsOf(
  * and again after a device loss; buffers grow by doubling and the table by rows. Each disc is two
  * draws, its wholly covered pixels and then its limb; each run of points one draw of
  * `spriteMaterial`, an HDR twin of R02's star sprite reading `sprites` at binding 0. A mesh body is
- * one instanced draw of its figure ({@link LitBodyRenderer.meshDraws}, for the `bodies` pass) and
- * its limb's draw in the sequence. The small discs' cells, and the larger discs' limb pixels' and
+ * one instanced draw of its figure, or on the cluster path (plan R14, R14.T4.a) its buckets' draws
+ * ({@link LitBodyRenderer.meshDraws}, for the `bodies` pass), and its limb's draw in the sequence. The small discs' cells, and the larger discs' limb pixels' and
  * their faces' near-limb bands', are shaded first by the `disc cells` pass
  * ({@link LitBodyRenderer.dispatchCells}, R07.T8.d–g),
  * whose sums their draws read. A plan's

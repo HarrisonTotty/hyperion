@@ -181,7 +181,7 @@ export function writeTerrainClusterRecords(
   const blocks: Array<{ readonly centreM: Vec3; readonly radiusM: number }> = [];
   for (let n = 0; n < TERRAIN_BLOCKS; n += 1) {
     blocks.push(
-      terrainBlockSphere(
+      blockSphere(
         planet,
         key,
         n % BLOCKS_PER_SIDE,
@@ -198,7 +198,7 @@ export function writeTerrainClusterRecords(
     if (place.shape === "terrain-block") {
       sphere = blocks[cluster] ?? { centreM: { x: 0, y: 0, z: 0 }, radiusM: Infinity };
     } else {
-      const lowered = terrainBlockSphere(planet, key, place.bx, place.by, originM, floor, high);
+      const lowered = blockSphere(planet, key, place.bx, place.by, originM, floor, high);
       sphere = {
         centreM: lowered.centreM,
         radiusM: lowered.radiusM + STRIP_NORMAL_FRACTION * (high - floor),
@@ -226,13 +226,8 @@ export function writeTerrainClusterRecords(
   }
 }
 
-/**
- * The padded sphere of block (`bx`, `by`) of `key` at heights `low` to `high`, about `originM`
- * (see the module's remarks): its L + 3 descendant's `patchBounds`, padded by {@link CLUSTER_PAD_M}
- * and {@link CLUSTER_PAD_FRACTION} of its reach. The mesh regime's figure takes it at zero height
- * (plan R14, R14.T4.a; `bodies/smoothMesh.ts`).
- */
-export function terrainBlockSphere(
+/** The padded sphere of block (`bx`, `by`) of `key` at heights `low` to `high`, about `originM`. */
+function blockSphere(
   planet: PlanetGeometry,
   key: PatchKey,
   bx: number,

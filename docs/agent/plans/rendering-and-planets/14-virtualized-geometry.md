@@ -1999,9 +1999,10 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     `buckets`), its buckets made again at powers of two as instances or passes grow.
   - The figure is `bodies/draw.ts`' `FIGURE_CLUSTER_CONSUMER`: its own mesh,
     `smoothFigureClusterMesh` (terrain's blocks; strips in R05's skirt vertex order, so each
-    triangle is the instanced draw's), records written a frame by `packSmoothClusterRecords` (block
-    spheres `terrainBlockSphere` at h = 0, cached by figure and key; a strip's widened by its skirt
-    depth), may-discard, page = instance; `smoothMeshCluster.wgsl` calls `smooth_vertex` with
+    triangle is the instanced draw's), records written a frame by `packSmoothClusterRecords` (a
+    block's sphere about its 81 vertices in `f64`, padded as terrain's, cached by figure and key,
+    0.1 ms a new patch against 1 ms by 64 `patchBounds`; a strip's widened by its skirt depth),
+    may-discard, page = instance; `smoothMeshCluster.wgsl` calls `smooth_vertex` with
     `firstInstance` 0.
   - One appended camera pass a mesh body (its frustum, no horizon: selection refuses the patches
     behind it), at most 8, the rest instanced; the figure's colour is per pixel, so the buckets'
