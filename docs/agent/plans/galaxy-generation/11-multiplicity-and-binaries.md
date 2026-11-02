@@ -7403,9 +7403,8 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     neutron stars), and the high-mass side rises from 0.0032 to 0.0077. Against the census, the
     scratch marks miss widely, chi-square per degree of freedom 78 (ultracompact periods), 29
     (rates), 86 (accretor masses), 22 (symbiotic periods) and 29 (symbiotic accretor masses), all
-    inside the shared test's scratch tolerance; the refit fits them. The ultracompacts'
-    transience reads the hydrogen disc's line (a helium disc's is higher: Lasota, Dubus and Kruk
-    2008), and their Eddington rate takes hydrogen's 0.7 (it never binds).
+    inside the shared test's scratch tolerance; the refit fits them. The ultracompacts' Eddington
+    rate takes hydrogen's 0.7 (it never binds).
   - _Movers at 27_: `xrb_class_hold::the_scan_refuses_a_host_fed_under_the_floor_under_the_arm`
     now scans version 27's table under both arms. New tests: `xrb::kinds_tests` and the slow
     `xrb_class_hold::the_catalogue_draws_the_census_s_kinds`. At 24–26 `golden_diff.py` reports
@@ -7421,6 +7420,13 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     4,391 d, Hinkle et al. 2019) and its giants' filling to 0.15–0.75, inside the bound.
     _Finding_: about a dozen census members remain, some 15 in the Galaxy, against the models'
     240 (Yungelson et al. 2019) or 100–1,000 (Lü et al. 2012).
+  - _A helium disc's line_ (research's ruling of 2026-11-02). From 27 a low-mass X-ray binary fed
+    by a hydrogen-free donor, a helium star or a white dwarf, splits on its irradiated helium
+    disc's line, `helium_disc_line` = 2.4 × 10⁻¹² (P ÷ 1 min)^1.67 M☉ yr⁻¹ (Lasota, Dubus and Kruk
+    2008, equation 6 in its period form, equation 12), some 17–23 times the hydrogen disc's and
+    taken as a lower bound for a carbon–oxygen disc (`classify::low_mass_xrb_line`). A cold
+    ultracompact host turns transient from about 20 minutes, where the hydrogen line turned it at
+    about 31. The catalogue's scan reads the line its class's test reads, the version's.
   - _Deviation._ A timeline from marks has no history, so a Be star spun up by transfer is one in
     the engine's timeline alone; `classify`'s marks round trip skips such pairs.
   - _A Be star feeds a neutron star alone_ (main's ruling of 2026-11-01: the black holes' 0.145 of

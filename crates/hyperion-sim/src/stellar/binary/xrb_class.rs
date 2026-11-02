@@ -48,6 +48,10 @@
 //!   [`SYMBIOTIC_XRB_MAX_FILLING`] of its Roche lobe, on an orbit of [`SYMBIOTIC_XRB_MAX_PERIOD`]
 //!   or less (research's ruling of 2026-11-02): the census's wide pairs, at a median 7 × 10⁴ days,
 //!   and its blue-loop giants of some 5 M☉ are no symbiotic X-ray binaries.
+//! - **A helium disc's line.** A low-mass X-ray binary fed by a hydrogen-free donor, a helium star
+//!   or a white dwarf, is persistent or transient by its irradiated helium disc's instability line
+//!   ([`helium_disc_line`]), some 17–20 times the hydrogen disc's (Lasota, Dubus and Kruk 2008),
+//!   not by the hydrogen disc's (research's ruling of 2026-11-02).
 //!
 //! Every figure is recalled, not read at source (the science checks of 2026-11-01 reached none);
 //! the floor sits at the very faint transients' upper bound, so it may cut the faintest of them.
@@ -61,7 +65,8 @@
 //! from 27.
 
 use crate::GeneratorVersion;
-use crate::units::{Days, Kelvin, SolarMassesPerYear};
+use crate::math;
+use crate::units::{Days, Kelvin, Seconds, SolarMassesPerYear};
 
 /// The generator version whose stellar rules carve the X-ray binaries anew (P11.T5's and P11.T8.b's
 /// fix): [`XrbClassRules::Carved`].
@@ -83,8 +88,8 @@ pub(crate) enum XrbClassRules {
     /// and every compact star fed by a giant's wind above its floor a symbiotic X-ray binary.
     Held,
     /// Version 27's: the floor on the transfer rate, the spun-up Be donors, the wind-fed black
-    /// holes' disc, Be/X-ray binaries of neutron stars alone and the symbiotic X-ray binaries'
-    /// bounds (module documentation).
+    /// holes' disc, Be/X-ray binaries of neutron stars alone, the symbiotic X-ray binaries'
+    /// bounds and the helium disc's line (module documentation).
     Carved,
 }
 
@@ -128,3 +133,18 @@ pub(crate) const SYMBIOTIC_XRB_MAX_FILLING: f64 = 0.8;
 /// measured, 4U 1700+24's 4,391 d (Hinkle et al. 2019, ApJ 872, 43; research's ruling of
 /// 2026-11-02).
 pub(crate) const SYMBIOTIC_XRB_MAX_PERIOD: Days = Days::new(1.0e4);
+
+/// The irradiated helium disc's instability line, a low-mass X-ray binary fed by a hydrogen-free
+/// donor of orbital period `period`, from 27: 2.4 × 10⁻¹² (P ÷ 1 min)^1.67 M☉ yr⁻¹, Lasota, Dubus and
+/// Kruk's (2008, A&A 486, 523) equation 6 in its period form, their equation 12; some 17–20 times
+/// the hydrogen disc's, it is taken as a lower bound for a carbon–oxygen disc (research's ruling
+/// of 2026-11-02). A cold ultracompact host then turns transient from about 20 minutes, where the
+/// hydrogen line turns it at about 31.
+#[must_use]
+pub(crate) fn helium_disc_line(period: Seconds) -> SolarMassesPerYear {
+    let minutes = period.value() / 60.0;
+    SolarMassesPerYear::new(HELIUM_DISC_LINE_AT_A_MINUTE * math::powf_positive(minutes, 1.67))
+}
+
+/// [`helium_disc_line`] at a period of one minute, M☉ yr⁻¹: 2.4 × 10⁻¹².
+const HELIUM_DISC_LINE_AT_A_MINUTE: f64 = 2.4e-12;

@@ -74,7 +74,7 @@ use super::star::{G, Kind, Surface};
 use super::timeline::{BinaryState, BinaryTimeline, Component, SegmentKind};
 use super::xrb_class::{
     SPUN_UP_GAINED_SHARE, SYMBIOTIC_XRB_MAX_FILLING, SYMBIOTIC_XRB_MAX_PERIOD,
-    SYMBIOTIC_XRB_MAX_TEFF, WIND_DISC_ROCHE_FILLING, XRB_MIN_TRANSFER_RATE,
+    SYMBIOTIC_XRB_MAX_TEFF, WIND_DISC_ROCHE_FILLING, XRB_MIN_TRANSFER_RATE, helium_disc_line,
 };
 
 /// The kinds of cataclysmic variable.
@@ -600,7 +600,7 @@ fn transfer_class(state: &BinaryState, ctx: &ClassContext<'_>, d: usize) -> Opti
         let class = if donor.mass() >= HMXB_MIN_DONOR_MASS {
             BinaryClass::HighMassXrayBinary(HmxbKind::Supergiant)
         } else {
-            let persistent = rate >= xrb_critical_rate(accretor.mass(), disc_radius(state, a));
+            let persistent = rate >= low_mass_xrb_line(state, ctx, d);
             BinaryClass::LowMassXrayBinary(if persistent {
                 XrbKind::Persistent
             } else {
@@ -616,6 +616,25 @@ fn transfer_class(state: &BinaryState, ctx: &ClassContext<'_>, d: usize) -> Opti
             Phase::MainSequence | Phase::HertzsprungGap | Phase::FirstGiantBranch
         );
     algol.then_some(Classified::plain(BinaryClass::Algol))
+}
+
+/// The instability line a low-mass X-ray binary fed by `d` is persistent at or above, M☉ yr⁻¹: the
+/// irradiated hydrogen disc's ([`xrb_critical_rate`] at the disc's radius), and from
+/// [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION) a hydrogen-free donor's helium
+/// disc's ([`helium_disc_line`] at the orbit's period).
+#[must_use]
+fn low_mass_xrb_line(state: &BinaryState, ctx: &ClassContext<'_>, d: usize) -> SolarMassesPerYear {
+    let (donor, a) = (&state.stars()[d], 1 - d);
+    let hydrogen = || xrb_critical_rate(state.stars()[a].mass(), disc_radius(state, a));
+    match (
+        Kind::of(donor.phase(), donor.mass().value()).surface(),
+        state.orbit(),
+    ) {
+        (Surface::Helium | Surface::Carbon, Some(orbit)) if ctx.rules.xrb_class.carves() => {
+            helium_disc_line(orbit.period())
+        }
+        (Surface::Hydrogen | Surface::Helium | Surface::Carbon, _) => hydrogen(),
+    }
 }
 
 /// The kind of a cataclysmic variable whose donor `d` feeds the white dwarf at `rate`.
@@ -1695,6 +1714,77 @@ mod tests {
             assert_eq!(class(stars, period, held), symbiotic, "{what:?}");
             assert_ne!(class(stars, period, carved), symbiotic, "{what:?}");
         }
+    }
+
+    /// From 27 (`xrb_class`) a low-mass X-ray binary fed by a hydrogen-free donor splits on its
+    /// helium disc's line: a neutron star fed 10⁻¹⁰ M☉ yr⁻¹ by a helium white dwarf 25 minutes out,
+    /// above the hydrogen disc's line and under the helium disc's, is persistent under the held
+    /// rules and transient under the carving; one fed by a hydrogen star keeps the hydrogen line.
+    #[test]
+    fn under_the_carving_a_helium_disc_splits_on_its_own_line() {
+        let held = StellarRules::of_version(crate::GENERATOR_VERSION);
+        let carved = StellarRules {
+            xrb_class: crate::stellar::binary::xrb_class::XrbClassRules::Carved,
+            ..held
+        };
+        let draws = [StarDraws::median(), StarDraws::median()];
+        let params = BinaryParams::default();
+        let minutes = 25.0;
+        let period = Seconds::new(minutes * 60.0);
+        let neutron_star = star(Phase::NeutronStar, 1.4, 1e-4, 1.7e-5, 0.0);
+        let class = |donor: StarState, rules: StellarRules| {
+            let orbit = KeplerElements::from_period(
+                period,
+                GravitationalParameter::from_solar_masses(neutron_star.mass() + donor.mass()),
+                Eccentricity::CIRCULAR,
+                Orientation::new(Radians::new(0.3), Radians::new(0.0), Radians::new(0.0))
+                    .expect("an orientation"),
+                Radians::new(0.0),
+            )
+            .expect("an orbit");
+            let now = Years::new(1.0e8);
+            let marks = BinaryMarks::phase(
+                Composition::SOLAR,
+                draws.clone(),
+                now,
+                MarkedPhase {
+                    kind: SegmentKind::StableTransfer {
+                        donor: Component::Secondary,
+                    },
+                    start: Years::new(0.0),
+                    end: Years::new(2.0e8),
+                    stars: [neutron_star, donor],
+                    orbit,
+                    transfer_rate: Some(SolarMassesPerYear::new(1.0e-10)),
+                },
+            )
+            .expect("valid marks");
+            let state = BinaryTimeline::from_marks(marks).state_at(now);
+            let ctx = ClassContext::new(
+                &Composition::SOLAR,
+                [&draws[0], &draws[1]],
+                &params,
+                ([None, None], None),
+                [None; 2],
+                rules,
+            );
+            (classify(&state, &ctx), state)
+        };
+        let helium = star(Phase::HeliumWhiteDwarf, 0.02, 1e-3, 0.03, 0.0);
+        let (held_class, state) = class(helium, held);
+        let orbit = state.orbit().expect("an orbit");
+        let hydrogen_line = xrb_line(neutron_star.mass(), helium.mass(), orbit.semi_major_axis());
+        let helium_line = helium_disc_line(period);
+        println!("hydrogen line {hydrogen_line:?}, helium line {helium_line:?}");
+        assert!(hydrogen_line.value() < 1.0e-10 && 1.0e-10 < helium_line.value());
+        let ratio = helium_line.value() / hydrogen_line.value();
+        assert!((10.0..30.0).contains(&ratio), "{ratio}");
+        let persistent = BinaryClass::LowMassXrayBinary(XrbKind::Persistent);
+        let transient = BinaryClass::LowMassXrayBinary(XrbKind::Transient);
+        assert_eq!(held_class, persistent);
+        assert_eq!(class(helium, carved).0, transient);
+        let dwarf = star(Phase::MainSequence, 0.06, 1e-4, 0.08, 0.0);
+        assert_eq!(class(dwarf, carved).0, persistent);
     }
 
     /// Design note 7: a pair too wide to interact is classified from its state, and a white dwarf

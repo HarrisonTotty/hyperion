@@ -66,6 +66,7 @@ pub(crate) use nsm::nsm_marks_at;
 pub(crate) use nsm::remnant_mass_under;
 pub use nsm::{NsbhOutflow, NsmScanMarks, nsm_scan_marks, scan_nsm_cell};
 
+use crate::GENERATOR_VERSION;
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::events::{
     CycleEvent, EventSeries, LinearClock, MonotonePhase, PhaseClock, TimeWindow, octaves_to_span,
@@ -81,6 +82,7 @@ use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
 use crate::rng::{Seed, Stream, tags};
 use crate::stellar::draws::isotropic;
+use crate::stellar::rules::StellarRules;
 use crate::tables::binary::{AwdMark, XrbHostKind, XrbMark, XrbPick};
 use crate::time::{SourceHorizon, Span, UniverseTime};
 use crate::units::consts::{
@@ -98,7 +100,7 @@ use super::classify::{
 use super::light_curves::{XrayAccretor, eddington_luminosity};
 use super::params::BinaryParams;
 use super::sampler::ClassSampler;
-use super::xrb_class::XRB_MIN_TRANSFER_RATE;
+use super::xrb_class::{XRB_MIN_TRANSFER_RATE, XrbClassRules, helium_disc_line};
 
 /// The amplitude of a host's nova phase noise at its smallest octave, cycles: 0.08, ours,
 /// provisional. It is near the largest a one-cycle lattice allows (10.3 × 0.08 = 0.82 of plan
@@ -662,15 +664,26 @@ impl XrbShape {
     }
 
     /// Whether a host of this shape, beside a compact star of `accretor_mass` and fed at `rate`,
-    /// is fed below the irradiated disc's instability line ([`xrb_line`]) as `classify` splits a
-    /// low-mass X-ray binary on it: an ultracompact host's transience. `false` for every other
-    /// shape, whose kind says it.
+    /// is fed below its disc's instability line as `classify` splits a low-mass X-ray binary on
+    /// it under the carving's rules `xrb_class`: an ultracompact host's transience, by the
+    /// irradiated hydrogen disc's line ([`xrb_line`]), or from 27 by its helium disc's
+    /// ([`helium_disc_line`]). `false` for every other shape, whose kind says it.
     #[must_use]
-    fn below_the_line(&self, accretor_mass: SolarMasses, rate: Option<SolarMassesPerYear>) -> bool {
+    fn below_the_line(
+        &self,
+        accretor_mass: SolarMasses,
+        rate: Option<SolarMassesPerYear>,
+        xrb_class: XrbClassRules,
+    ) -> bool {
         match (*self, rate) {
             (Self::Ultracompact { donor_mass, .. }, Some(rate)) => {
-                let separation = circular_separation(self.period(), accretor_mass + donor_mass);
-                rate < xrb_line(accretor_mass, donor_mass, separation)
+                let line = if xrb_class.carves() {
+                    helium_disc_line(self.period())
+                } else {
+                    let separation = circular_separation(self.period(), accretor_mass + donor_mass);
+                    xrb_line(accretor_mass, donor_mass, separation)
+                };
+                rate < line
             }
             (
                 Self::LowMass { .. }
@@ -936,12 +949,16 @@ pub(crate) fn xrb_marks_at(
     {
         return None;
     }
-    // An ultracompact host is a transient by its rate, its recurrence the kind's next word.
+    // An ultracompact host is a transient by its rate against the line the class's test reads, its
+    // timeline's from marks under the version's rules, its recurrence the kind's next word.
+    let marked = StellarRules::of_version(GENERATOR_VERSION).xrb_class;
     let recurrence = recurrence.or_else(|| {
-        shape.below_the_line(accretor_mass, transfer_rate).then(|| {
-            let mark = XrbMark::UltracompactRecurrence;
-            Years::new(math::exp10(sampler.draw(mark, 0.0, &mut kind_stream)))
-        })
+        shape
+            .below_the_line(accretor_mass, transfer_rate, marked)
+            .then(|| {
+                let mark = XrbMark::UltracompactRecurrence;
+                Years::new(math::exp10(sampler.draw(mark, 0.0, &mut kind_stream)))
+            })
     });
     let recoil_marks = recoil_marks_of(kind).filter(|_| host.listed_host().is_none());
     let recoil = recoil_marks.map(|(speed_mark, since_mark)| {
