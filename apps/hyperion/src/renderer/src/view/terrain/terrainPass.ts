@@ -1476,10 +1476,11 @@ export function effectiveTauPx(tauPx: number, limitExcess: number, weight: numbe
 /**
  * The budget's hold's margin (plan R10, R10.T16.i; {@link TerrainPassOptions.budgetHoldMargin}): the
  * share of the patch budget the last selection's splits alone may take, a hand value (lean,
- * 2026-11-01), against seamless-1's finding of four level-8 patches coarsening and refining by
- * turns every 0.1 to 0.3 s on low at TERRAIN TEST's delta.
+ * 2026-11-02), against seamless-1's finding of patches coarsening and refining by turns at the
+ * budget's margin: the seamless probe's flip-flops on high at 8 workers with drafts at half fell
+ * from 3.6 a second at 5% to 0.6 at 15% and none at 30%.
  */
-export const BUDGET_HOLD_MARGIN = 0.05;
+export const BUDGET_HOLD_MARGIN = 0.15;
 
 /**
  * The most a view's morph bands' tolerance moves a step, as a fraction (plan R10, R10.T16.i; a
