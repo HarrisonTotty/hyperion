@@ -7418,8 +7418,10 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     10³² erg s⁻¹, its source corrected to Yungelson, Kuranov and Postnov 2019 (MNRAS 485, 851).
     The sampler's periods widen to 150–5,000 d (IGR J16194−2810's 192.7 d to 4U 1700+24's
     4,391 d, Hinkle et al. 2019) and its giants' filling to 0.15–0.75, inside the bound.
-    _Finding_: about a dozen census members remain, some 15 in the Galaxy, against the models'
-    240 (Yungelson et al. 2019) or 100–1,000 (Lü et al. 2012).
+    _Finding_ (measured after the chain's items 1–4): the 10⁶-record censuses keep one symbiotic
+    X-ray binary of the slab's five and one of the young disc's thirty, and `binary_xrb`'s four,
+    0.0010 of the galaxy's hosts, about 10 in the Galaxy, against the models' 240 (Yungelson et
+    al. 2019) or 100–1,000 (Lü et al. 2012); research foresaw about a dozen and 15.
   - _A helium disc's line_ (research's ruling of 2026-11-02). From 27 a low-mass X-ray binary fed
     by a hydrogen-free donor, a helium star or a white dwarf, splits on its irradiated helium
     disc's line, `helium_disc_line` = 2.4 × 10⁻¹² (P ÷ 1 min)^1.67 M☉ yr⁻¹ (Lasota, Dubus and Kruk
@@ -7447,15 +7449,16 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     `bound::tests::the_carved_record_lists_the_attempt_it_keeps`, whose pinned carved record is no
     X-ray binary under the arm.
   - _Measured_ (10⁶ slab and 10⁶ young thin disc records, every 27 hold with P11.T4's NS
-    accretion, heavy donors and pinned white dwarfs): slab members 567 → 184, its ultracompacts
-    456 → 76, all under 80 min (at 10⁻¹³ they were 456, fed 1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹,
-    38–119 min); research-leans-30 expected 75 and 181 (a finding). The floor takes three
-    substellar-donor transients of the slab and two main-sequence-donor ones of the young disc
-    (findings), and ten young-disc ultracompacts, helium stars of 0.8–4.4 M☉ feeding neutron stars
-    and black holes 81 min to 3.1 d out, are longer (a finding). Young disc 209 → 500, Be/X 19 →
-    373, supergiant neutron stars 11 → 4, black holes 56 → 2 (64 before the Be stars' rule).
-    `ns_accretion_hold`'s census: members 1,159 → 380. Before P11.T4's fixes the slab's
-    ultracompacts were 145 → 14.
+    accretion, heavy donors and pinned white dwarfs, and from 2026-11-02 the symbiotic bounds and
+    the helium disc's line): slab members 567 → 180, its ultracompacts 456 → 76, all under 80 min
+    (at 10⁻¹³ they were 456, fed 1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, 38–119 min); research-leans-30
+    expected 75 and 181 (a finding). The floor takes three substellar-donor transients of the slab
+    and two main-sequence-donor ones of the young disc (findings), and ten young-disc
+    ultracompacts, helium stars of 0.8–4.4 M☉ feeding neutron stars and black holes 81 min to 3.1
+    d out, are longer (a finding). Young disc 209 → 473, Be/X 19 → 373, supergiant neutron stars
+    11 → 4, black holes 56 → 2 (64 before the Be stars' rule), symbiotic 30 → 1.
+    `ns_accretion_hold`'s census: members 1,159 → 378; `heavy_donor_hold`'s 4,103. Before P11.T4's
+    fixes the slab's ultracompacts were 145 → 14.
   - _Movers_ (the arm forced on at 24): the golden `sky/census_near_sun`, the slow
     `tables_hold::the_x_ray_binary_sampler_against_the_engine`'s and
     `channels_hold::the_channel_sampler_against_the_engine_under_every_26_hold`'s pins, and the

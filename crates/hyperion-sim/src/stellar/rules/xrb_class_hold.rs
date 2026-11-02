@@ -120,12 +120,13 @@ const CITED_BLACK_HOLE_SHARE: f64 = 0.01;
 const PINNED_HIGH_MASS: [usize; 3] = [373, 4, 2];
 
 /// The census's members of each kind under every 27 hold, in [`XrbHostKind::ALL`]'s order, in
-/// the slab and in the young disc, as measured (2026-11-02, with P11.T4's pinned white dwarfs):
-/// the floor of 10⁻¹² keeps 76 of the slab's 456 ultracompacts that 10⁻¹³ kept, and 184 of its
-/// 567 members.
+/// the slab and in the young disc, as measured (2026-11-02, with P11.T4's pinned white dwarfs, the
+/// symbiotic X-ray binaries' bounds and the helium disc's line): the floor of 10⁻¹² keeps 76 of
+/// the slab's 456 ultracompacts that 10⁻¹³ kept, and 180 of its 567 members; the bounds keep one
+/// symbiotic X-ray binary of the slab's five and one of the young disc's thirty.
 const PINNED_KINDS: [[usize; 9]; 2] = [
-    [1, 98, 1, 2, 1, 0, 76, 5, 0],
-    [2, 14, 31, 17, 373, 4, 27, 30, 2],
+    [1, 98, 1, 2, 1, 0, 76, 1, 0],
+    [2, 14, 32, 18, 373, 4, 27, 1, 2],
 ];
 
 /// The longest period of an ultracompact member under every 27 hold: 80 minutes, the
@@ -566,8 +567,10 @@ static NEW_KINDS: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
 );
 
 /// The census's and the catalogue's kinds over the slab, and the new kinds' marks, that miss under
-/// every 27 hold (findings): each a kind's share or a mark's name, as measured.
-const PINNED_KIND_MISSES: [&str; 0] = [];
+/// every 27 hold (findings): each a kind's share or a mark's name, as measured. The black-hole
+/// transients miss by design: the catalogue draws the observed 1,300 (`BLACK_HOLE_TRANSIENT_SHARE`,
+/// plan 11's design note 11), where the census holds some 190.
+const PINNED_KIND_MISSES: [&str; 1] = ["BlackHoleTransient share"];
 
 /// A new kind's mark as the catalogue's entries and the census's members give it: its name, its
 /// kind, and its value in an entry's scan marks and in a member's marks.
