@@ -51,12 +51,13 @@ use crate::stellar::Phase;
 use crate::stellar::binary::{Component, is_millisecond_pulsar, pulsar_at};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::{
-    MARKED_ATTEMPTS, MultiplicityContext, RedrawAttempt, StarIndex,
+    MARKED_ATTEMPTS, MultiplicityContext, RedrawAttempt, StarIndex, SystemHierarchy,
+    draw_hierarchy_of_primary,
 };
 use crate::stellar::remnant::{KickMode, RemnantKind};
 use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::turn_off_mass;
-use crate::stellar::system::{RemnantFate, SystemStars};
+use crate::stellar::system::{RemnantFate, SystemStars, primary_model};
 use crate::units::consts::{METRES_PER_AU, METRES_PER_LIGHT_YEAR};
 use crate::units::{
     Dex, GravitationalParameter, KilometresPerSecond, LightYears, Metres, SolarMasses, Years,
@@ -635,8 +636,76 @@ fn mark_and_boundary(
 /// The conditional draw of a member marked `marked` with `record` and `composition`, under `ctx`:
 /// the first of its marked redraw attempts whose stars bear its mark out, or `None` for an
 /// unmarked member or a mark none bears out.
+///
+/// Each attempt is [`SystemStars::generate_at`]'s system, bit for bit, from the one primary its
+/// attempts share, built once (rendering plan R06, R06.T16.a's cost at 27: the stragglers' search
+/// was most of the members' census near the Sun). A straggler's attempt is not generated where its
+/// stars, all of them together, weigh no more than the turn-off (`may_straggle`), since then none
+/// of them can be a main-sequence star above it: the attempts found are the same.
 #[must_use]
 fn bearing_attempt(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: &Composition,
+    ctx: MultiplicityContext,
+    marked: RecycledMark,
+) -> Option<RedrawAttempt> {
+    if marked == RecycledMark::Unmarked {
+        return None;
+    }
+    let (primary, _) = primary_model(galaxy, record, *composition);
+    let turn_off = turn_off_mass(record.age_at_epoch(), composition);
+    (0..MARKED_ATTEMPTS)
+        .filter_map(RedrawAttempt::marked)
+        .find(|&n| match marked {
+            RecycledMark::Unmarked => false,
+            RecycledMark::MillisecondPulsar => recycles(
+                galaxy,
+                record,
+                &SystemStars::at_attempt(galaxy, record, &primary, ctx, n),
+            ),
+            RecycledMark::BlueStraggler => {
+                let hierarchy = draw_hierarchy_of_primary(galaxy, record, &primary, ctx, n);
+                may_straggle(&hierarchy, turn_off)
+                    && straggles(
+                        &SystemStars::at_attempt(galaxy, record, &primary, ctx, n),
+                        turn_off,
+                    )
+            }
+        })
+}
+
+/// The share of the turn-off by which a system's stars must weigh more than it before
+/// [`may_straggle`] lets its attempt be generated: far above the rounding of the binary engine's
+/// sums of the masses it moves (each step's sum rounds by some 10⁻¹⁶ of the mass).
+const STRAGGLER_MASS_MARGIN: f64 = 1e-9;
+
+/// The mass, M☉, by which [`may_straggle`] allows a system's stars more than they weigh: ten times
+/// the floor of 10⁻⁹ M☉ under which the binary engine holds a star it drains (`transfer_trial`),
+/// the one place the engine can leave a star more than it is given.
+const STRAGGLER_FLOOR_ALLOWANCE_MSUN: f64 = 1e-8;
+
+/// Whether the stars of `hierarchy` could hold a main-sequence star more massive than `turn_off`.
+///
+/// That is whether they weigh more than it together, less [`STRAGGLER_MASS_MARGIN`] of it and
+/// [`STRAGGLER_FLOOR_ALLOWANCE_MSUN`]. No star of a system is ever heavier than all of its stars at
+/// birth: a star's wind takes mass away, and the binary engine moves mass only between the two
+/// stars of a pair, a merger's product holding at most both, so a system that weighs no more
+/// cannot bear a straggler out ([`straggles`]).
+#[must_use]
+fn may_straggle(hierarchy: &SystemHierarchy, turn_off: SolarMasses) -> bool {
+    let total = hierarchy
+        .stars()
+        .iter()
+        .fold(0.0, |sum, star| sum + star.initial_mass().value());
+    total > turn_off.value() * (1.0 - STRAGGLER_MASS_MARGIN) - STRAGGLER_FLOOR_ALLOWANCE_MSUN
+}
+
+/// [`bearing_attempt`] as it was first written, each attempt generated whole from its own primary:
+/// what the tests hold it to.
+#[cfg(test)]
+#[must_use]
+fn bearing_attempt_by_generation(
     galaxy: &Galaxy,
     record: &SystemRecord,
     composition: &Composition,

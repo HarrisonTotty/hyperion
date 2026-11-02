@@ -468,3 +468,69 @@ fn a_marked_member_s_brief_is_its_stars_and_its_draw_its_id_s() {
         )
     });
 }
+
+/// A marked member's conditional draw finds the attempt it found when each attempt was generated
+/// whole from its own primary (R06.T16.a's cost at 27): for 47 Tucanae's members at its turn-off
+/// that plan 09 marks blue stragglers, and its neutron stars it marks millisecond pulsars, the
+/// attempt kept, or none, is [`bearing_attempt_by_generation`]'s, the stragglers' search passing
+/// over the attempts too light to make one.
+#[test]
+#[ignore = "slow: searches some 60 marked members' attempts twice, about two minutes"]
+fn a_marked_member_s_attempt_is_the_one_each_attempt_generated_whole_finds() {
+    let galaxy = milky_way(false);
+    let (feature, model, table) = tucanae(galaxy);
+    let shares = recycled_shares(galaxy, &model, &table);
+    let position = at(&feature, [1.0, 0.0, 0.0]);
+    let (mut stragglers, mut pulsars, mut found) = (0, 0, 0);
+    for band in MassBand::ALL {
+        for (class, _) in table.classes(band) {
+            let (n, wanted) = if is_at_the_turn_off(class) {
+                (400, RecycledMark::BlueStraggler)
+            } else if class.kind == ClassKind::NeutronStar {
+                (600, RecycledMark::MillisecondPulsar)
+            } else {
+                continue;
+            };
+            for i in 0..n {
+                let id = member_id(&feature, class.band, i);
+                let Some(member) = draw_member_marked(
+                    galaxy,
+                    &feature,
+                    &model,
+                    (class, shares),
+                    &position,
+                    id,
+                    GalacticVelocity::new([0.0; 3]),
+                ) else {
+                    continue;
+                };
+                let key = ObjectKey::from(SystemId::from(id));
+                let (marked, max_separation) =
+                    mark_and_boundary(galaxy, (&feature, &model), (class, shares), &position, key);
+                if marked != wanted {
+                    continue;
+                }
+                let ctx = MultiplicityContext::ForcedMultiple { max_separation };
+                let whole = bearing_attempt_by_generation(
+                    galaxy,
+                    member.record(),
+                    member.composition(),
+                    ctx,
+                    marked,
+                );
+                assert_eq!(member.marked_attempt(), whole, "{member:?}");
+                match marked {
+                    RecycledMark::BlueStraggler => stragglers += 1,
+                    RecycledMark::MillisecondPulsar => pulsars += 1,
+                    RecycledMark::Unmarked => {}
+                }
+                found += u32::from(whole.is_some());
+            }
+        }
+    }
+    eprintln!("{stragglers} stragglers and {pulsars} pulsars marked, {found} borne out");
+    assert!(
+        stragglers > 3 && pulsars > 3 && found > 3,
+        "{stragglers}, {pulsars}, {found}"
+    );
+}
