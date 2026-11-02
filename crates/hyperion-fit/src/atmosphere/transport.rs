@@ -3141,25 +3141,44 @@ pub(crate) mod tests {
         }
     }
 
+    /// The threads [`atmosphere_importance_is_finite_and_positive_in_every_thick_case`] builds
+    /// its media on: the slots `.config/nextest.toml` reserves for it, or the fewer a run grants.
+    const IMPORTANCE_THREADS: usize = 16;
+
     #[test]
-    #[ignore = "slow: the importance of every channel of the four other thick cases, about 100 s \
-                on one thread, most of it Venus's slant beams"]
+    #[ignore = "slow: the importance of every channel of the four other thick cases, about 16 s \
+                on sixteen threads, most of it Venus's slant beams"]
     fn atmosphere_importance_is_finite_and_positive_in_every_thick_case() {
         // Titan-class's is held by the fast test of its ground flux.
-        for name in [
+        let cases: Vec<(&str, AtmosphereCase)> = [
             "giant-deck",
             "venus-92bar",
             "venus-58bar",
             "venus-92bar-albedo",
-        ] {
-            let case =
-                AtmosphereCase::from_json(&committed_file(&format!("{name}.case.json"))).unwrap();
-            let grid = super::super::shell_grid(&case);
-            for w in 0..case.wavelengths_nm().len() {
-                let medium = Medium::new(&case, &grid, w, Estimator::ByMedium, Orders::Every);
-                assert_importance_positive(&medium, case.top_height_m(), &format!("{name} at {w}"));
-            }
-        }
+        ]
+        .into_iter()
+        .map(|name| {
+            let json = committed_file(&format!("{name}.case.json"));
+            (name, AtmosphereCase::from_json(&json).unwrap())
+        })
+        .collect();
+        let grids: Vec<_> = cases
+            .iter()
+            .map(|(_, case)| super::super::shell_grid(case))
+            .collect();
+        // Each channel's medium on its own, in the cases' and the channels' order: a failure is the
+        // first failing channel's, on any number of threads.
+        let channels: Vec<(usize, usize)> = cases
+            .iter()
+            .enumerate()
+            .flat_map(|(c, (_, case))| (0..case.wavelengths_nm().len()).map(move |w| (c, w)))
+            .collect();
+        hyperion_testkit::threads::in_shares(channels.len(), IMPORTANCE_THREADS, |j| {
+            let (c, w) = channels[j];
+            let (name, case) = &cases[c];
+            let medium = Medium::new(case, &grids[c], w, Estimator::ByMedium, Orders::Every);
+            assert_importance_positive(&medium, case.top_height_m(), &format!("{name} at {w}"));
+        });
     }
 
     #[test]

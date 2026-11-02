@@ -436,6 +436,12 @@ priority = 60
 filter = "package(hyperion-fit) & test(=atmosphere::tests::atmosphere_spheroid_with_a_equal_to_c_follows_the_spheres_paths)"
 threads-required = 16
 
+# R08.T12.h's importance over the thick cases builds their channels' media on sixteen threads
+# (`IMPORTANCE_THREADS` in `atmosphere/transport.rs`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-fit) & test(=atmosphere::transport::tests::atmosphere_importance_is_finite_and_positive_in_every_thick_case)"
+threads-required = 16
+
 # The atmosphere tracer's benchmarks (rendering plan R08, R08.T12.c) each trace on sixteen
 # threads, `atmosphere::benchmarks`'s `THREADS`.
 [[profile.slow.overrides]]
