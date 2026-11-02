@@ -50,6 +50,7 @@ use std::fmt;
 use std::sync::{Arc, OnceLock};
 
 use self::ages::FieldShareRules;
+use self::catalogue_classes::CatalogueClassSource;
 use self::catalogue_classes::core_collapse::CoreCollapseProcess;
 use self::catalogue_classes::type_ia::DelayTimeDistribution;
 use self::displaced::class_table::{ClassTable, FormTable};
@@ -738,6 +739,30 @@ impl Galaxy {
             .get_or_init(|| Box::new(CoreCollapseProcess::new(self)))
     }
 
+    /// Builds now what a range query in this galaxy would otherwise build when it first read it,
+    /// under the galaxy's rules, so that no query pays for it (P09.T37's bench): with the kinematic
+    /// tables and from the Kepler regime's version (P09.T28.b.b), the centre's motion
+    /// ([`centre_motion`](Self::centre_motion)), some 64 ms, which every grid record's loss-cone
+    /// carve reads, so that a served query's cell jobs each waited some 55 ms on the first of them
+    /// to build it (8 workers, measured 2026-11-01); and from the catalogue classes' version
+    /// (P09.T37.a), the Type Ia class's delay times ([`type_ia_delays`](Self::type_ia_delays)),
+    /// some 32 ms, and the core-collapse class's process ([`core_collapse`](Self::core_collapse)).
+    ///
+    /// Each is built when first read in any case, and is the same bits whenever it is built, so no
+    /// answer depends on whether this was called. The server calls it where it builds its
+    /// galaxies.
+    pub fn make_query_tables(&self) {
+        if self.kinematics().is_some() {
+            // Built and kept in the galaxy; the reference is not needed here.
+            let _ = self.centre_motion();
+        }
+        if CatalogueClassSource::registered_in(self).is_some() {
+            // Built and kept in the galaxy, as the motion is.
+            let _ = self.type_ia_delays();
+            let _ = self.core_collapse();
+        }
+    }
+
     /// The galactic centre's model: the nuclear cluster's profile, its four distribution
     /// functions, marks and classes, what its members are placed from (plan 09, Design note 15;
     /// P09.T29).
@@ -1177,6 +1202,53 @@ mod tests {
     use super::*;
     use crate::coords::LyCell;
     use crate::units::consts::METRES_PER_LIGHT_YEAR;
+
+    /// P09.T37's bench: a galaxy makes its query tables ahead where its rules read them, the same
+    /// values as made when first read: under every 27 hold the Type Ia delay times and the
+    /// core-collapse process, and with the kinematic tables the centre's motion; at the version's
+    /// own rules without them, the classes' where its holds register them.
+    #[test]
+    fn a_galaxy_makes_its_query_tables_where_its_rules_read_them() {
+        use self::catalogue_classes::CatalogueClassSource;
+        use self::rules::GalaxyRules;
+        let seed = Seed::new(0x0937_0000_7461_626c);
+        let made = |galaxy: &Galaxy| {
+            [
+                galaxy.centre_motion.0.get().is_some(),
+                galaxy.type_ia_delays.0.get().is_some(),
+                galaxy.core_collapse.0.get().is_some(),
+            ]
+        };
+        let bare = Galaxy::from_params_with_rules(
+            seed,
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::every_27_hold(),
+        )
+        .unwrap();
+        let full = bare.clone().with_full_potential();
+        bare.make_query_tables();
+        assert_eq!(made(&bare), [false, true, true], "no kinematic tables");
+        full.make_query_tables();
+        assert_eq!(made(&full), [true, true, true]);
+        let lazy = Galaxy::from_params_with_rules(
+            seed,
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::every_27_hold(),
+        )
+        .unwrap()
+        .with_full_potential();
+        assert_eq!(full.centre_motion(), lazy.centre_motion());
+        assert_eq!(full.type_ia_delays(), lazy.type_ia_delays());
+        assert_eq!(full.core_collapse(), lazy.core_collapse());
+        let version = Galaxy::from_params(seed, GalaxyParams::milky_way_like()).unwrap();
+        version.make_query_tables();
+        let classes = CatalogueClassSource::registered_in(&version).is_some();
+        assert_eq!(
+            made(&version),
+            [false, classes, classes],
+            "no kinematic tables"
+        );
+    }
 
     #[test]
     fn populations_are_listed_in_index_order() {

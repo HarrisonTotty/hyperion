@@ -27,7 +27,9 @@
 //! and warm: a cold query's class cells made across the workers ahead of its hits (P09.T37's
 //! bench). It is served so with the global list too, its tables built ahead as the server builds
 //! them, and so is the query of 50 ly at the black hole; and the Sun-like query is served as the
-//! first query of a galaxy built fresh for it, which pays for the tables the galaxy makes lazily.
+//! first query of a galaxy built fresh for it as the server's galaxy cache builds one, its query
+//! tables made with it (`Galaxy::make_query_tables`), so that it pays for any table still made
+//! lazily.
 //!
 //! `list_at_27` is the Sun-like query of 50 ly and of 1 ly, and the query of 50 ly at the black
 //! hole, where nothing fits, at the epoch under 27's rules with every source, the global list's
@@ -367,8 +369,8 @@ fn listed_tubes(galaxy: &Arc<Galaxy>, key: GalaxyKey, queries: &[&RangeQuery]) -
 
 /// The Sun-like 50 ly query under generator version 27's rules served on pools of 1, 4 and 8
 /// workers, cold and warm, without the global list and with it, and with it the black hole's 50 ly
-/// query too; and the Sun-like query as a galaxy's first, over a galaxy built fresh for it, whose
-/// lazily made tables it pays for (module documentation).
+/// query too; and the Sun-like query as a galaxy's first, over a galaxy built fresh for it as the
+/// server builds one (module documentation).
 fn served_at_27(c: &mut Criterion) {
     let version = GeneratorVersion::new(27);
     let galaxy = Arc::new(galaxy_at_27());
@@ -441,7 +443,10 @@ fn served_at_27(c: &mut Criterion) {
             |b| {
                 b.iter_batched(
                     || {
-                        let galaxy = Arc::new(galaxy_at_27());
+                        // As the server's galaxy cache builds it (`Galaxy::make_query_tables`).
+                        let galaxy = galaxy_at_27();
+                        galaxy.make_query_tables();
+                        let galaxy = Arc::new(galaxy);
                         let served =
                             ServedQuery::new(galaxy, key, sun.clone(), FeatureMembers::Served);
                         (range_caches(), served)

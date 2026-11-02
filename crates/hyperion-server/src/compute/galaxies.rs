@@ -258,6 +258,11 @@ async fn build_on_pool(
         let headroom = check_index_headroom(&galaxy)
             .map_err(ComputeError::from)
             .and_then(|()| check_feature_list_headroom(&galaxy).map_err(ComputeError::from));
+        // A galaxy to be played builds now what its range queries would build at their first
+        // reading, so that the first query's cell jobs do not wait on one another (P09.T37).
+        if headroom.is_ok() {
+            galaxy.make_query_tables();
+        }
         tracing::info!(
             seed = %SeedHex::from_u64(key.seed()),
             generator_version = %key.generator_version(),

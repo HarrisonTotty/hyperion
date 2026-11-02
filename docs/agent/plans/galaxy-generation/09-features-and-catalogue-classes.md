@@ -5911,3 +5911,6 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _One track._ `sse::track_under` (the whole track) replaces `death_under`; a core-collapse
     candidate keeps it and its test builds the stars on it (`StarModel::on_track_under`,
     `system::primary_model_on_track`).
+  - _Query tables._ `Galaxy::make_query_tables` builds what a query's first reading built (the
+    centre's motion, the Type Ia delays, the core-collapse process, as the rules read them); the
+    server's `GalaxyCache` calls it after the headroom checks, 83 ms of a 3.5 s build at 27.
