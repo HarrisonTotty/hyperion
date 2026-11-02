@@ -34235,3 +34235,10 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   bodies lists `NH3` or holds it in its air, so nothing would move: no `COUPLED_CONDENSABLES_VERSION`
   is built. `census_tests::composition_census_under_every_27_hold_holds_no_ammonia_beside_water_above_their_eutectic`
   (slow) fails on a mover, which reopens the task.
+- **P14.T55.b's survival count (lane `p14-close-out-counts`, 2026-11-02;
+  research-galaxy-close-out §4).** Under every 27 hold no body under 0.1 M⊕ is above 2,000 K at its
+  mean, but five are at their warmest zone (read as the source's dayside surface; lean, 2026-11-02)
+  in systems past 1 Gyr, each hot since its host left the main sequence
+  (`census_tests::HOT_SMALL_SURVIVORS`, pinned by the slow
+  `composition_census_under_every_27_hold_publishes_five_hot_small_bodies_past_1_gyr`). So
+  P14.T55.b.a, their evaporation held at 28, is briefed, not built.

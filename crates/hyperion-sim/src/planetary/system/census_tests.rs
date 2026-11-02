@@ -1803,3 +1803,146 @@ fn composition_census_under_every_27_hold_holds_no_ammonia_beside_water_above_th
         "a body holds NH3 beside H2O above their eutectic: P14.T51.m is no longer ruled out\n{report}"
     );
 }
+
+/// The mass under which Perez-Becker and Chiang find a rocky planet above
+/// [`EVAPORATING_SURFACE`] gone: 0.1 M⊕. "Rocky planets with masses < 0.1 `M_Earth` … and surface
+/// temperatures > 2000 K are found to disintegrate entirely in < 10 Gyr" (Perez-Becker and Chiang
+/// 2013, MNRAS 433, 2294; arXiv:1302.2147, abstract, as decision-triton-and-e101 reads it).
+const EVAPORATING_MASS: EarthMasses = EarthMasses::new(0.1);
+
+/// The surface temperature above which Perez-Becker and Chiang find a rocky planet under
+/// [`EVAPORATING_MASS`] gone: 2,000 K ([`EVAPORATING_MASS`]'s source).
+const EVAPORATING_SURFACE: Kelvin = Kelvin::new(2_000.0);
+
+/// The edges of P14.T55.b's system-age bins (research-galaxy-close-out §4), in Gyr: under 1, 1–10
+/// and over 10.
+const SURVIVOR_AGE_EDGES_GYR: [f64; 2] = [1.0, 10.0];
+
+/// The bodies under [`EVAPORATING_MASS`] whose warmest zone is above [`EVAPORATING_SURFACE`] in a
+/// system at least 1 Gyr old that the census publishes present under every 27 hold, by their
+/// system's rank and their ID; none is above it at its mean. Each is hot by its hosts' light alone,
+/// as under every 26 hold, since its host left the main sequence: four moons of a 21 M⊕ planet at
+/// 1,012 S⊕ about a 1.23 M☉ star on its first giant branch, at 5.90 Gyr, at 2,008–2,045 K; and a
+/// belt member of 2.8 × 10⁻⁵ M⊕ at 1,407 S⊕ about a core-helium-burning 2.1 M☉ star, at 1.05 Gyr,
+/// at 2,214 K. P14.T55.b.a's evaporation is to remove them.
+const HOT_SMALL_SURVIVORS: [(usize, &str); 5] = [
+    (835, "42006cadffc00004.0201"),
+    (835, "42006cadffc00004.0202"),
+    (835, "42006cadffc00004.0203"),
+    (835, "42006cadffc00004.0204"),
+    (2_299, "41ffacb600000006.e101"),
+];
+
+/// The census's count of the present bodies under [`EVAPORATING_MASS`] whose surface is above
+/// [`EVAPORATING_SURFACE`].
+#[derive(Debug, Default)]
+struct SurvivorCount {
+    /// Bodies walked.
+    bodies: usize,
+    /// The hot small bodies by the temperature read ("mean" or "warmest zone"), their system's
+    /// age bin (an index into [`SURVIVOR_AGE_EDGES_GYR`]'s three bins) and their kind.
+    by_age: BTreeMap<(&'static str, usize, &'static str), usize>,
+    /// Those of them in a system at least 1 Gyr old, by the temperature read: each one's system's
+    /// rank, its ID and its line.
+    old: BTreeMap<&'static str, Vec<(usize, String, String)>>,
+}
+
+/// P14.T55.b's survival count (research-galaxy-close-out §4): over the ordinary census under every
+/// hold of version 27, the present bodies under 0.1 M⊕ whose surface is above 2,000 K, by their
+/// system's age, under 1, 1–10 and over 10 Gyr, the surface read at its mean temperature (the
+/// record's, or its derivation's where its surface is not `Ok`) and at its warmest zone, its
+/// dayside's, nearer the surface temperature of their locked planet (the lane's lean, 2026-11-02:
+/// their KIC 1255b's, about 2,100 K as recalled, not re-read, is its substellar temperature). None
+/// is above it at its mean, and
+/// the five [`HOT_SMALL_SURVIVORS`] are at their warmest zone past 1 Gyr: bodies that would have
+/// evaporated, pinned until P14.T55.b.a removes them.
+#[test]
+#[ignore = "slow: 10⁵ bodies of 6,800 systems under every 27 hold, on sixteen threads"]
+fn composition_census_under_every_27_hold_publishes_five_hot_small_bodies_past_1_gyr() {
+    let start = Instant::now();
+    let mut count = SurvivorCount::default();
+    for share in tallies_under_every_27_hold(
+        ORDINARY_SYSTEMS,
+        |tally: &mut SurvivorCount, rank, ctx, case| {
+            tally.bodies += 1;
+            let mass = case
+                .record
+                .mass()
+                .ok()
+                .copied()
+                .unwrap_or(case.derived.mass());
+            if mass >= EVAPORATING_MASS {
+                return;
+            }
+            let conditions = case.surface().map(Surface::conditions);
+            let mean = conditions.map_or(
+                case.derived.surface_temperature(),
+                SurfaceConditions::mean_surface_temperature,
+            );
+            let warmest = conditions.map_or(mean, |c| c.climate_range().1);
+            let age_gyr = ctx.age_at_epoch().value() / 1e9;
+            let bin = SURVIVOR_AGE_EDGES_GYR
+                .iter()
+                .filter(|&&edge| age_gyr >= edge)
+                .count();
+            for (read, t) in [("mean", mean), ("warmest zone", warmest)] {
+                if t <= EVAPORATING_SURFACE {
+                    continue;
+                }
+                *tally.by_age.entry((read, bin, case.kind)).or_default() += 1;
+                if bin > 0 {
+                    tally.old.entry(read).or_default().push((
+                        rank,
+                        case.record.identity().id().to_string(),
+                        format!(
+                            "{} of {:.3e} M⊕ at {:.0} K, {age_gyr:.2} Gyr",
+                            named(rank, case),
+                            mass.value(),
+                            t.value()
+                        ),
+                    ));
+                }
+            }
+        },
+    ) {
+        count.bodies += share.bodies;
+        for (key, n) in share.by_age {
+            *count.by_age.entry(key).or_default() += n;
+        }
+        for (read, bodies) in share.old {
+            count.old.entry(read).or_default().extend(bodies);
+        }
+    }
+    let line = "a string takes a line";
+    let bins = ["< 1 Gyr", "1–10 Gyr", "> 10 Gyr"];
+    let mut report = format!(
+        "P14.T55.b's survivors under every 27 hold: {} bodies; under {} M⊕ above {} K\n",
+        count.bodies,
+        EVAPORATING_MASS.value(),
+        EVAPORATING_SURFACE.value()
+    );
+    for ((read, bin, kind), n) in &count.by_age {
+        writeln!(report, "  by its {read}: {} {kind}: {n}", bins[*bin]).expect(line);
+    }
+    for (read, bodies) in &count.old {
+        writeln!(report, "  past 1 Gyr by its {read}: {}", bodies.len()).expect(line);
+        for (_, _, body) in bodies {
+            writeln!(report, "    {body}").expect(line);
+        }
+    }
+    eprintln!("{report}({:.1} s)", start.elapsed().as_secs_f64());
+    assert!(count.bodies >= 100_000, "{} bodies", count.bodies);
+    assert!(
+        !count.old.contains_key("mean"),
+        "a body under 0.1 M⊕ is published above 2,000 K at its mean past 1 Gyr\n{report}"
+    );
+    let mut survivors: Vec<(usize, &str)> = count
+        .old
+        .get("warmest zone")
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .map(|(rank, id, _)| (*rank, id.as_str()))
+        .collect();
+    survivors.sort_unstable();
+    assert_eq!(survivors, HOT_SMALL_SURVIVORS, "{report}");
+}
