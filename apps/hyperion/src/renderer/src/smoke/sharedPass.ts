@@ -35,7 +35,11 @@
  * (T1–T1.d), and the far cascades at a rate of 4 against every frame over four frames flown at
  * R05's descent's 300 m/s under a setting sun (T6.b): the passes each frame renders, every
  * surface of every frame's far maps held within a texel, the frame within a third of a stop at
- * 99.5% of its terrain texels, and its acne unchanged; its caster triangles by frame logged.
+ * 99.5% of its terrain texels, and its acne unchanged; its caster triangles by frame logged. And the
+ * cascades re-rendered only when they change (T6.a): a still camera's next frame with time paused
+ * renders none, its frame and layers the frame before's byte for byte; and the passes each frame
+ * renders over that flight and a hover at its end, with time stopped and running: the near cascades
+ * every frame of the flight, and hovering with time stopped none, each far one at most once more.
  */
 
 import { withTemplateCurve } from "../view/appearance/phase";
@@ -665,6 +669,9 @@ const EVERY_FRAME: GeometrySettings = { ...SETTINGS.high.geometry, farCascadeRat
 const FLIGHT_FRAMES = 4;
 const FLIGHT_STEP_M = 300 / 60;
 
+/** R14.T6.a's time running: the sun's turn a frame at 60 Hz under a day of 24 h, rad. */
+const DAY_STEP_RAD = (2 * Math.PI) / 86_400 / 60;
+
 /**
  * How far the flight's last frame at a rate of 4 may stand from every frame's in the acne's measures
  * (plan R14, R14.T6.b), the share of its terrain's texels darker than at w = 0 and its mean lit
@@ -861,9 +868,14 @@ function heldWithinTexel(
   return { compared, found };
 }
 
-/** Each frame's rendered layers, as digits, frame by frame: "0123 01" for 4 and then 2. */
+/** Whether every frame rendered the two near cascades. */
+function nearEvery(frames: ReadonlyArray<ReadonlyArray<number>>): boolean {
+  return frames.every((frame) => frame.includes(0) && frame.includes(1));
+}
+
+/** Each frame's rendered layers, as digits, frame by frame: "0123 01 -" for 4, 2 and none. */
 function layersAt(frames: ReadonlyArray<ReadonlyArray<number>>): string {
-  return frames.map((each) => each.join("")).join(" ");
+  return frames.map((each) => (each.length === 0 ? "-" : each.join(""))).join(" ");
 }
 
 /** `draws` with their cascades' weight w at 0, so that they sample none. */
@@ -1076,6 +1088,23 @@ export async function checkShadowCascades(
         seen.darker > 0 &&
         seen.brighter <= NEVER_BRIGHTER,
       `${path}; finite ${String(finite)}; terrain ${String(seen.terrain)} texels, ${String(seen.darker)} darker under the cascades, the most brighter ${seen.brighter.toExponential(2)} (at most ${String(NEVER_BRIGHTER)}); digests ${bytesDigest(shadowed)} shadowed, ${bytesDigest(open)} at w = 0, layers ${layers.join(", ")}`,
+    );
+    // R14.T6.a: the same frame again, of a still camera with time paused: no cascade rendered,
+    // and the frame and the layers the frame before's, byte for byte.
+    const again = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const shadowedAgain = await texelsOf(engine, "cascades: reused", view, again.draws);
+    const layersAgain =
+      target === null
+        ? ["none"]
+        : await layerDigests(engine, target.depth, target.layers, target.sizePx);
+    const reusedAgain = again.cascades?.reused ?? [];
+    checks.check(
+      "R14.T6.a a still camera's next frame with time paused renders none of the 4 cascades, and shadows the frame and keeps the layers of the frame before, byte for byte",
+      again.cascades?.passes.length === 0 &&
+        reusedAgain.every(Boolean) &&
+        bytesDigest(shadowedAgain) === bytesDigest(shadowed) &&
+        layersAgain.join() === layers.join(),
+      `${path}; passes ${String(again.cascades?.passes.length)}, reused ${reusedAgain.map((each) => (each ? 1 : 0)).join("")}; digests ${bytesDigest(shadowedAgain)}, ${bytesDigest(shadowed)} the frame before; layers ${layersAgain.join(", ")}`,
     );
     // Each read waits on the device, and so on the counters' read of the frame before it.
     const culledStats = made.clusterStats(passView.id);
@@ -1291,7 +1320,8 @@ export async function checkShadowCascades(
       `${triangles.join(", ")} (${String(sum(triangles))})`;
     checks.check(
       "R14.T6.b the far cascades at a rate of 4 render 4, 2, 3 and 2 passes over the descent's speed and a setting sun, hold every surface of every frame's far maps within one of their texels, and shadow the frame within a third of a stop of every frame's at 99.5% of its terrain texels, its acne unchanged",
-      layersAt(everyFrame.layers) === "0123 0123 0123 0123" &&
+      // The every-frame flight's first frame is T1.d's last again, which it reuses (T6.a).
+      layersAt(everyFrame.layers) === "- 0123 0123 0123" &&
         layersAt(atFour.layers) === "0123 01 013 01" &&
         layersAt(atFourMaps.layers) === "0123 01 013 01" &&
         within.every(({ compared }) => compared > FAR_MAP_COMPARED_LEAST) &&
@@ -1301,6 +1331,38 @@ export async function checkShadowCascades(
         Math.abs(acneAtFour.darker - acneEvery.darker) <= ACNE_SHARE_TOLERANCE &&
         Math.abs(acneAtFour.litMean - acneEvery.litMean) <= ACNE_SHARE_TOLERANCE,
       `${path}; layers by frame ${layersAt(atFour.layers)} at 4, ${layersAt(everyFrame.layers)} every frame; the camera ${String(FLIGHT_STEP_M)} m a frame, the sun ${(stepRad * 1e6).toFixed(1)} µrad a frame; far maps held within a texel: cascade 2 ${String(within[0]?.found)} of ${String(within[0]?.compared)} texels, cascade 3 ${String(within[1]?.found)} of ${String(within[1]?.compared)}; caster triangles by frame ${trianglesOf(atFour.triangles)} at 4, ${trianglesOf(everyFrame.triangles)} every frame; ${String(edges.terrain)} terrain texels, ${String(edges.differing)} differing, ${(100 * edgeShare).toFixed(2)}% within a third of a stop, the largest ${edges.largestStops.toFixed(3)} stops; darker than at w = 0 ${String(acneAtFour.darkerTexels)} texels at 4 and ${String(acneEvery.darkerTexels)} every frame, mean lit fraction ${acneAtFour.litMean.toFixed(6)} and ${acneEvery.litMean.toFixed(6)}; digests ${bytesDigest(everyShadowed)}, ${bytesDigest(fourShadowed)}`,
+    );
+    // R14.T6.a: the passes each frame renders at the setting's geometry over the same flight and
+    // then as many frames hovering at its end, with time stopped (the sun still) and running (the
+    // sun setting at a day's rate).
+    const passesOver = (sunStepRad: number): number[][] => {
+      made.setGeometry(SETTINGS.high.geometry);
+      const flown: number[][] = [];
+      for (let k = 0; k < 2 * FLIGHT_FRAMES; k += 1) {
+        const at = viewFrom(
+          along(view.cameraM, 1, ahead, FLIGHT_STEP_M * Math.min(k, FLIGHT_FRAMES - 1)),
+          CASCADES_DEPRESSION_DEG,
+          CASCADES_HEADING_DEG,
+        );
+        const sun = lighting(CASCADES_SUN_RAD - k * sunStepRad);
+        const drawn = made.drawFor(passView.id, frameInput(at, sun, true, performance.now()));
+        flown.push((drawn.cascades?.passes ?? []).map((each) => each.layer));
+      }
+      return flown;
+    };
+    const stopped = passesOver(0);
+    const running = passesOver(DAY_STEP_RAD);
+    // Hovering with time stopped, a far cascade the flight's last frames held renders once, at its
+    // turn (T6.b), and then none.
+    const hovered = stopped.slice(FLIGHT_FRAMES).flat();
+    checks.check(
+      "R14.T6.a over the descent's speed the near cascades render every frame, time stopped or running; hovering with time stopped they render no more, each far one at most once more, and the last frame none",
+      nearEvery(stopped.slice(0, FLIGHT_FRAMES)) &&
+        nearEvery(running) &&
+        hovered.every((layer) => layer >= 2) &&
+        new Set(hovered).size === hovered.length &&
+        stopped.at(-1)?.length === 0,
+      `${path}; layers by frame, flown then hovering: time stopped ${layersAt(stopped)} (${String(sum(stopped.map((each) => each.length)))} passes); running ${layersAt(running)} (${String(sum(running.map((each) => each.length)))}); the sun ${(DAY_STEP_RAD * 1e6).toFixed(2)} µrad a frame`,
     );
     if (captures) {
       const scale = captureScale(everyShadowed);
