@@ -140,9 +140,10 @@ impl CellCache for KeepCells {
 /// The digest (`f64_digest`) of the Kepler regime's positions in the D2 test: each Kepler-regime
 /// record's cell and offsets at −1,000, −100, +100 and +1,000 yr, in walk order. Blessed natively
 /// on x86-64; the wasip1 suite compares it. Re-pinned by name for P09.T28.d.b's exact orbit (it was
-/// `0xdc2a_4657_d88c_161e` on the two-body law), and again in `MGE_BOXY`'s potential (P15.T3.c; it
-/// was `0xce83_b24f_e65c_7554`).
-const MOVED_POSITIONS_DIGEST: u64 = 0xcd72_f9db_7c8d_d35d;
+/// `0xdc2a_4657_d88c_161e` on the two-body law), again in `MGE_BOXY`'s potential (P15.T3.c; it
+/// was `0xce83_b24f_e65c_7554`), and at generator version 26, with its counts (it was
+/// `0xcd72_f9db_7c8d_d35d`, of 3,286 records inside, 9,381 outside and 13,144 record-times).
+const MOVED_POSITIONS_DIGEST: u64 = 0x57e7_bc54_4f65_c17b;
 
 /// D2: the Kepler regime moves the fixture's grid records inside the influence radius onto their
 /// orbits, bit for bit [`position_velocity_at`]'s, and leaves every record outside it on its
@@ -212,7 +213,7 @@ fn the_kepler_regime_moves_records_inside_the_radius_and_no_others_pinned() {
         "{inside} records inside the radius, {outside} outside; {moved} record-times moved off \
          their straight lines, the farthest by {farthest:.4} ly"
     );
-    assert_eq!((inside, outside, moved), (3_286, 9_381, 13_144));
+    assert_eq!((inside, outside, moved), (3_303, 9_425, 13_212));
     assert_eq!(
         f64_digest(&positions),
         MOVED_POSITIONS_DIGEST,

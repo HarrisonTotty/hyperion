@@ -1029,9 +1029,11 @@ fn core_collapses_over_seeds_under_every_26_hold() {
                 )
             },
         );
+        // The field share is held at 27 from train 26's retarget: the census reads it with the
+        // version's other rules, as it was measured under every 26 hold.
         let off = GalaxyRules {
             field_share: FieldShareRules::None,
-            ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
+            ..GalaxyRules::every_26_hold_with_its_retargets()
         };
         let budget = Galaxy::from_params_with_rules(Seed::new(seed), params.clone(), off)
             .unwrap()
@@ -1039,7 +1041,7 @@ fn core_collapses_over_seeds_under_every_26_hold() {
         let field = Galaxy::from_params_with_rules(
             Seed::new(seed),
             params,
-            GalaxyRules::of_version(crate::GENERATOR_VERSION),
+            GalaxyRules::every_26_hold_with_its_retargets(),
         )
         .unwrap()
         .with_full_potential();

@@ -1689,7 +1689,9 @@ mod tests {
                 .map(Magnitudes::value)
         };
         let brightest = one(f64::NAN, &Composition::SOLAR, at(1e9)).expect("shines");
-        assert!(brightest < -12.0, "{brightest}");
+        // −10.14 from generator version 26, whose winds enforce the Humphreys–Davidson limit
+        // (P06.T42.b); brighter than −12 until 26.
+        assert!(brightest < -10.0, "{brightest}");
         let helium_rich = Composition::from_fe_h(Dex::ZERO, HeliumExcess::new(0.05));
         for (m, comp) in [
             (-1.0, Composition::SOLAR),

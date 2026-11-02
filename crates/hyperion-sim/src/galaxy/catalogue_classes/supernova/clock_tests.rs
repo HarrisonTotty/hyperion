@@ -913,14 +913,15 @@ fn the_laws_the_draw_and_the_window_are_pinned() {
         let drawn = laws.map(|law| bits(drawn_energy(&galaxy, some_system(k), law).foes()));
         assert_eq!(drawn, pinned, "system {k}");
     }
-    // The solar site's W_eff, 3.181 × 10⁵ yr, and the interval's start on the clock.
+    // The solar site's W_eff, 3.180 × 10⁵ yr from generator version 26 (3.181 × 10⁵ until 26),
+    // and the interval's start on the clock.
     let marks = plain_marks(UniverseTime::EPOCH, 300.0);
     let site = solar_site(UniverseTime::EPOCH);
     let w = effective_window(&galaxy, &site, &marks, Surroundings::Field);
-    assert_eq!(bits(w.duration().value()), 0x4113_6acd_c366_1d17);
+    assert_eq!(bits(w.duration().value()), 0x4113_6958_e398_e27a);
     let interval = SupernovaInterval::of_window(w.duration());
     assert_eq!(
         interval.start(),
-        UniverseTime::new(-18_343_657_851_197, 380_859_375).unwrap()
+        UniverseTime::new(-18_340_716_097_284, 425_781_250).unwrap()
     );
 }

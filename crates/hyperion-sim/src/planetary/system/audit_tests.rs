@@ -73,7 +73,7 @@ use crate::units::{Kelvin, Kilograms, Metres, Pascals, WattsPerSquareMetre};
 pub(super) type AuditSet = (&'static str, Seed, SystemContext);
 
 /// Design-k §0's set C ([module](self)): the first 60 sample systems, the 15 golden systems and
-/// LOOK72's 30 ([`look72_audit_contexts`]).
+/// LOOK72's 29 ([`look72_audit_contexts`]).
 fn census_sets() -> Vec<AuditSet> {
     sets_of(60)
 }
@@ -1245,7 +1245,7 @@ fn assert_hothouses(
 fn under_every_24_hold_no_record_shows_a_must_fix_item() {
     let census = census();
     assert!(census.0.len() > 1_500, "{} bodies", census.0.len());
-    let what = "the census set (the first 60, the goldens, LOOK72's 30)";
+    let what = "the census set (the first 60, the goldens, LOOK72's 29)";
     assert_must_fix(what, census);
     assert_hothouses(
         what,
@@ -1257,14 +1257,14 @@ fn under_every_24_hold_no_record_shows_a_must_fix_item() {
     );
 }
 
-/// The same over design-k §0's set A ([`audit_sets`]: the 400, the goldens, LOOK72's 30), a
+/// The same over design-k §0's set A ([`audit_sets`]: the 400, the goldens, LOOK72's 29), a
 /// measurement for the bless note; [`DEEPEST_ICE_V_FLOOR`] is stated by name.
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
 fn under_every_24_hold_no_record_shows_a_must_fix_item_over_the_audit_set() {
     let census = audit_set_census();
     assert!(census.0.len() > 6_000, "{} bodies", census.0.len());
-    assert_must_fix("the audit set (the 400, the goldens, LOOK72's 30)", census);
+    assert_must_fix("the audit set (the 400, the goldens, LOOK72's 29)", census);
 }
 
 /// M1 (a) judges a runaway beyond the maximum-greenhouse limit by its total heating
@@ -1330,7 +1330,7 @@ fn under_every_24_hold_m1_s_six_hothouses_hold_over_the_audit_set() {
     eprintln!("M1 (c)'s hothouses:\n  {}", stated.join("\n  "));
     assert_eq!(faults, Vec::<&str>::new(), "M1 over the audit set");
     assert_hothouses(
-        "the audit set (the 400, the goldens, LOOK72's 30)",
+        "the audit set (the 400, the goldens, LOOK72's 29)",
         bodies,
         &AUDIT_SET_HOTHOUSES,
     );

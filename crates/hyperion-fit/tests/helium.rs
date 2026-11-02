@@ -227,9 +227,10 @@ fn the_reduced_grid_holds_every_set_and_is_the_provenances() {
     assert_eq!(ys.iter().filter(|&&y| (y - 0.4).abs() < 1e-12).count(), 7);
 }
 
-/// Under the committed table at any ΔY, and under the fitted table at ΔY = 0, the builder's track
-/// is the generator's, `Track::full`'s, bit for bit, over a spread of masses, metallicities and
-/// ages.
+/// Under the table the tracks read, `helium_26` from generator version 26 (the committed identity
+/// until 26), at any ΔY, and under the committed identity and the fit at ΔY = 0, the builder's
+/// track is the generator's, `Track::full`'s, bit for bit, over a spread of masses, metallicities
+/// and ages.
 #[test]
 fn the_builder_is_the_generators_track_where_the_table_cannot_act() {
     let (fitted, _, _) = production_fit();
@@ -237,7 +238,7 @@ fn the_builder_is_the_generators_track_where_the_table_cannot_act() {
     for &(m, fe_h) in &IDENTITY_PROBES {
         for (delta_y, table) in [
             (0.0, CandidateHeliumTable::COMMITTED),
-            (0.1, CandidateHeliumTable::COMMITTED),
+            (0.1, committed_fit()),
             (0.0, fitted.table),
         ] {
             let composition = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::new(delta_y));

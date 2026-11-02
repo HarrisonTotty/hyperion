@@ -649,13 +649,32 @@ fn a_hundred_thousand_systems_live_and_die_in_order() {
 /// mass-loss integrator stepped towards the envelope's loss without end, a knot at each pass, until
 /// the machine ran out of memory. Each star's fate is found, and the companion dies when its
 /// envelope is gone, its carbon–oxygen core inside its helium core.
+///
+/// From generator version 26 P09.T35's carve-out thins layer D by its ancient Type Ia, and the
+/// record's candidate is thinned; its record is the one the regression read, its parts pinned to
+/// the bit as version 25 placed it (3.285 M☉, 2.866 Gyr, the old thin disc).
 #[test]
 fn a_companion_stripped_by_its_wind_on_the_early_agb_has_a_fate() {
+    use hyperion_sim::coords::LyCell;
     use hyperion_sim::stellar::remnant::{DeathKind, Stripping};
 
     let galaxy = milky_way();
-    let id = hyperion_sim::id::SystemId::from_raw(0x61f8_5aa8_0000_0001).expect("a grid ID");
-    let record = hyperion_sim::galaxy::placement::resolve(&galaxy, id).expect("it resolves");
+    let record = SystemRecord::from_parts(
+        hyperion_sim::id::SystemId::from_raw(0x61f8_5aa8_0000_0001).expect("a grid ID"),
+        GalacticPosition::new(
+            LyCell::new([-1021, 27_324, 54]),
+            [
+                6_564_349_899_121_583.0,
+                5_215_533_313_902_101.0,
+                1_425_662_474_118_662.8,
+            ],
+        )
+        .expect("an offset inside its cell"),
+        SystemOrigin::Grid(galaxy.fields().component_id(3).expect("the old thin disc")),
+        Population::OldThinDisc,
+        SolarMasses::new(f64::from_bits(0x400a_47df_a32d_4269)),
+        Years::new(f64::from_bits(0x41e5_5b23_e08d_cb8b)),
+    );
     let stars = SystemStars::generate(&galaxy, &record);
     assert_eq!(stars.star_count(), 3);
     let deaths: Vec<_> = stars

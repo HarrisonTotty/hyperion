@@ -1382,9 +1382,9 @@ mod tests {
     /// listing on body 1 over its span (kind, onset since the epoch and duration, s), and the light
     /// its first event makes a third of the way through, and the first two of its events that run
     /// together a second into the later's (L, R, `M_V`, or −99 for none, and the spin offset).
-    /// Blessed natively on x86-64; nothing on the record reads it before 26, so it pins the
-    /// composition's form and its sum's order until the bump turns it into goldens.
-    const ASSEMBLY_DIGEST: u64 = 0xb36f_5e94_68a7_a8e7;
+    /// Blessed natively on x86-64, and re-blessed at the 26 bump, from which a star's summary
+    /// carries its events (P06.T28.g): it pins the composition's form and its sum's order.
+    const ASSEMBLY_DIGEST: u64 = 0xaf56_dd98_16da_6aa9;
 
     /// The assembly's listing order and composed light are pinned by their bits
     /// ([`ASSEMBLY_DIGEST`]): a rewrite of the sum's order or form changes them.

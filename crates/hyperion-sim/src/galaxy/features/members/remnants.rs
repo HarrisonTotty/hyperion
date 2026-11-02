@@ -623,6 +623,7 @@ mod tests {
     use hyperion_testkit::order::assert_order_independent;
 
     use super::*;
+    use crate::Seed;
     use crate::coords::{GalacticPosition, GalacticVelocity};
     use crate::galaxy::features::FeatureProcess;
     use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord};
@@ -636,7 +637,6 @@ mod tests {
     use crate::id::{FeatureMemberId, MemberSlot};
     use crate::stellar::fates::STRIPPED_WINDOW;
     use crate::stellar::remnant::KickMode;
-    use crate::{GENERATOR_VERSION, Seed};
 
     /// The fixture's most massive globular's white-dwarf ceiling under 26's rules, 6.2958 M☉.
     const MASSIVE_CEILING: f64 = f64::from_bits(0x4019_2ef3_3333_3333);
@@ -771,7 +771,8 @@ mod tests {
     fn the_ceiling_and_the_members_do_not_depend_on_what_was_asked_first() {
         let galaxy = galaxy();
         let [_, (feature, shared, table)] = clusters(galaxy);
-        let version = StellarRules::of_version(GENERATOR_VERSION);
+        // Other rules than the fixture's, the version's: 27's.
+        let version = StellarRules::every_27_hold();
         assert_ne!(version, galaxy.rules().stellar);
         let floor_under_version = shared.co_core_floor(version);
         assert_same_bits(

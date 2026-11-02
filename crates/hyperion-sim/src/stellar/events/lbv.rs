@@ -1438,7 +1438,10 @@ mod tests {
     /// luminous blue variables of T31's sampler (band E of the young thin disc at Milky Way
     /// values, at their own masses, compositions and draws), each built ten years past its window
     /// so that its track holds it: the eruptions listed over the bins about each window number the
-    /// rate integral, Σ rate × window, within a Poisson interval.
+    /// rate integral within a Poisson interval. From generator version 26 a star erupts only while
+    /// it is a luminous blue variable (P06.T42.b), so the integral is the thinned rate's,
+    /// [`RateModel::rate`] at the midpoints of ten-year steps across the window, not the constant
+    /// times the window (44,418 eruptions against its 45,891).
     #[test]
     #[ignore = "slow: about 1,400 massive tracks, and 10⁴ series over their windows"]
     fn the_mean_count_over_10_000_stars_matches_the_rate_integral() {
@@ -1483,6 +1486,15 @@ mod tests {
                 .as_seconds_f64();
             shortest = shortest.min(length / YEAR);
             longest = longest.max(length / YEAR);
+            let step = 10.0 * YEAR;
+            let (mut thinned, mut from) = (0.0, 0.0);
+            while from < length {
+                let width = step.min(length - from);
+                let mid = Span::from_seconds_f64(from + 0.5 * width).unwrap();
+                let at = model.start().checked_add(mid).unwrap();
+                thinned += model.rate(at).value() * width;
+                from += width;
+            }
             for k in 0..SERIES {
                 let sr = EventSeries::new(
                     Seed::new(seed),
@@ -1494,7 +1506,7 @@ mod tests {
                     .into(),
                 );
                 counted += u64::try_from(list(&model, &sr, around(&model)).len()).unwrap();
-                expected += eruption_rate().value() * length;
+                expected += thinned;
             }
             lbvs += 1;
         }

@@ -4063,6 +4063,14 @@ mod tests {
             .unwrap_or_else(|error| panic!("{message}: {error}"))
     }
 
+    /// Whether `mode` covers the whole sky or, a hot envelope's dayside-cut mode from generator
+    /// version 26 (P14.T52.h), none of it.
+    fn covers_all_or_none(mode: &AerosolModeDto) -> bool {
+        [0.0_f64, 1.0]
+            .iter()
+            .any(|whole| mode.coverage.to_bits() == whole.to_bits())
+    }
+
     /// Asserts that the wire's envelope `sent` is `held`'s, of the giant `name`, member by member
     /// against the record's getters, each value to the bit, and that its modes split into `decks`
     /// and `hazes` by the decks they name; returns the counts of its deck modes and hazes.
@@ -4126,7 +4134,9 @@ mod tests {
             );
         }
         // The split: every deck mode names one of `condensate_decks`, every haze none, each of
-        // the record's modes in exactly one list, the deck modes first, each over the whole sky.
+        // the record's modes in exactly one list, the deck modes first, each over the whole sky
+        // but, from generator version 26, a hot envelope's deep-deck mode that its dayside cut
+        // leaves none of (P14.T52.h), which covers none.
         let listed = |deck: &Option<String>| {
             sent.condensate_decks
                 .iter()
@@ -4142,12 +4152,7 @@ mod tests {
             &joined,
             &mut counts,
         );
-        assert!(
-            joined
-                .iter()
-                .all(|mode| mode.coverage.to_bits() == 1.0_f64.to_bits()),
-            "{name}"
-        );
+        assert!(joined.iter().all(covers_all_or_none), "{name}");
         assert_decks_sent(name, atmosphere.decks(), &sent.condensate_decks);
         assert_absorbers_sent(name, atmosphere.absorbers(), &sent.absorbers);
         assert_eq!(
@@ -4176,11 +4181,12 @@ mod tests {
     /// adiabat's nodes, the composition, μ, `c_p` ÷ R and the hazes' τ), `supercritical` `null`,
     /// its modes split between `decks` and `hazes` by the decks they name (each deck mode naming
     /// one of `condensate_decks`, every haze none, each mode in exactly one list, every one over
-    /// the whole sky), its decks, absorbers and condensables not formed with their reasons. A
-    /// Jupiter-like and a hot giant, the shared fixture's, built by hand through the record's own
-    /// chain: the Jupiter with an ammonia deck and the modes that name it under a lit sky's haze;
-    /// the hot Jupiter with its alkalis among its absorbers, silicate decks below its photosphere
-    /// and no ammonia deck.
+    /// the whole sky or, from generator version 26, a hot envelope's dayside-cut mode over none),
+    /// its decks, absorbers and condensables not formed with their reasons. A Jupiter-like and a
+    /// hot giant, the shared fixture's, built by hand through the record's own chain: the Jupiter
+    /// with an ammonia deck and the modes that name it under a lit sky's haze; the hot Jupiter
+    /// with its alkalis among its absorbers, silicate decks below its photosphere and no ammonia
+    /// deck.
     #[test]
     fn an_envelope_is_sent_as_the_record_holds_it() {
         let deck_of = |envelope: &BodyEnvelopeDto, key: &str| {
@@ -4243,7 +4249,8 @@ mod tests {
     /// the envelope's chain fails it until the fixture is refreshed from [`envelope`]'s output for
     /// the same inputs (`serde_json::to_string_pretty` of it, pasted).
     ///
-    /// The values are the generator's under the rules in force, generator version 25's: from
+    /// The values are the generator's under the rules in force, generator version 26's (refreshed
+    /// at its bump, the decks' grain sizes and τ moving in their last bits): from
     /// P14.T54.b.l's bump the read densities (P14.T49.n) give the liquid refractory deck modes
     /// (Fe, `CaTiO3`, `Al2O3`, `Mg2SiO4`, `MgSiO3`) their grain density and so their size, where
     /// at 23 they had none (their optics are still not modelled).

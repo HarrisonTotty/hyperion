@@ -662,8 +662,8 @@ mod tests {
             "the fixture",
             &model.victims().victims().iter().collect::<Vec<_>>(),
         );
-        // As measured: a median of 5.74 × 10³⁶ erg/s, and 35 of 5,524 tails in the old bracket
-        // (the research lane's figures).
+        // As measured: a median of 5.74 × 10³⁶ erg/s, and 35 of 5,523 tails in the old bracket
+        // (the research lane's figures; 5,524 tails until generator version 26).
         let swept: Vec<CentreVictims> = swept_victims().map(|(_, v)| v).collect();
         let (count, median, inside) = report(
             "200 seeds",
@@ -672,7 +672,7 @@ mod tests {
                 .flat_map(CentreVictims::victims)
                 .collect::<Vec<_>>(),
         );
-        assert_eq!(count, 5_524);
+        assert_eq!(count, 5_523);
         assert!((median / 5.74e36 - 1.0).abs() < 5e-3, "{median:e} erg/s");
         assert_eq!(inside, 35);
     }

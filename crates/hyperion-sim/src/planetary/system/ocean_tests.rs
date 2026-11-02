@@ -484,9 +484,9 @@ fn every_solid_body_publishes_its_ocean_over_the_sample() {
     census.assert_holds();
 }
 
-/// P14.T51.g.b's census over LOOK72: the systems of its three named
-/// oceans (`LOOK72_OCEANS`) and the 27 of the triage's 62 bodies (`look72_audit_contexts`; the
-/// census once listed 21 of them), as the golden systems', with the three by name: the
+/// P14.T51.g.b's census over LOOK72: the systems of its three named oceans (`LOOK72_OCEANS`) and
+/// the 26 of the triage's 62 bodies it holds (`look72_audit_contexts`; the census once listed 21
+/// of them), as the golden systems', with the three by name: the
 /// prototype's 020e56ef60080002.0c01 and 420e5bbe00800024.0306 on ice V, and
 /// 420e5bbe00800032.0701 keeping its whole hydrosphere on rock (count (xiii); decision-p14-t51g
 /// Q9).

@@ -29,8 +29,9 @@ const PONTI_LIMIT_ERG_S: f64 = 1e36;
 /// The digest (`f64_digest`) of the `centre_luminosity` golden's values, in the golden's order.
 /// Blessed natively on x86-64; the wasip1 suite runs the test that pins it. A later change that
 /// moves the centre's luminosity re-pins it by name (decision-galaxy-25-train §1.3): re-pinned in
-/// `MGE_BOXY`'s potential (P15.T3.c; it was `0xacdc_f23d_013f_d38e`).
-const HOT_FLOW_DIGEST: u64 = 0x178e_a6fa_bfab_be18;
+/// `MGE_BOXY`'s potential (P15.T3.c; it was `0xacdc_f23d_013f_d38e`), and at generator version 26
+/// (it was `0x178e_a6fa_bfab_be18` at 25).
+const HOT_FLOW_DIGEST: u64 = 0x42eb_a5b9_1d6f_710d;
 
 /// The digest of the hot flow's law where the golden does not reach it: `radiative_efficiency`
 /// inside each of its three ranges and above the switch to η, and a tail whose peak is below the

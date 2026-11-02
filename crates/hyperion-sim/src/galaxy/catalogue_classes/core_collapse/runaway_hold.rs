@@ -922,7 +922,8 @@ fn every_ejected_entry_is_its_term_s_and_the_shared_test_s() {
         }
     }
     eprintln!("{ejected} ejected entries and {field} in the field");
-    assert!(ejected > 20 && field > 2, "{ejected} {field}");
+    // 15 and 12 at generator version 26.
+    assert!(ejected > 10 && field > 2, "{ejected} {field}");
 }
 
 /// Complementarity, on the grid's own runaways and walkaways: each layer-E grid record of a
@@ -1064,26 +1065,27 @@ fn entry_bits<'a>(
 }
 
 /// The held arm's bound over the inner disc's cell (0, 12, 0) under every 26 hold, and the first
-/// two entries' marks of the sample cells, as measured (2026-11-01, at generator version 25).
+/// two entries' marks of the sample cells, as measured (2026-11-01, at generator version 25, and
+/// re-measured at 26).
 const HELD_PIN: (u64, [[u64; 7]; 2]) = (
-    0x3e6d_88cf_3a1e_9c26,
+    0x3e6d_1195_161f_c41c,
     [
         [
             0x402c_e0d9_4d04_2f86,
             0x416c_2c58_ff47_ac65,
             0x3fc0_fac1_1ea3_b3df,
-            0xc118_1ffe_e434_2686,
-            0xc109_022d_2f31_d7d6,
-            0x410a_cd7b_3405_27cd,
+            0xc118_1c56_6cda_c18c,
+            0xc108_f879_0b48_f285,
+            0x410a_c2fe_0b4f_9c80,
             0x0000_0000_0000_0000,
         ],
         [
             0x402e_5e2e_c3cc_6733,
             0x416c_35b3_7288_343d,
             0x3f73_020e_10dd_be60,
-            0x40d2_d699_8d94_4c58,
-            0xc0f9_d6af_97ff_2149,
-            0xc0df_e4e1_2af1_0f75,
+            0x40d2_ccf0_b8dd_bc9a,
+            0xc0f9_d467_cda9_9e23,
+            0xc0df_e847_3d2c_1653,
             0x0000_0000_0000_0000,
         ],
     ],

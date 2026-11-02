@@ -836,7 +836,8 @@ fn a_kept_class_cell_changes_no_answer_whatever_was_asked_before() {
 /// The X-ray binaries' layers follow the binary tables' hold (P15.T10.b at 27): layer E alone under
 /// the scratch tables, D and E under the fitted ones, whose progenitors reach down to 3.2 M☉; and
 /// under every 27 hold the fixture's first cells hold one of layer D, the entry that layer E alone
-/// left out of the census.
+/// left out of the census: in its first eight cells from generator version 26, whose refitted
+/// tables place it in the eighth (the first three until 26).
 #[test]
 fn the_x_ray_binaries_layers_follow_the_binary_tables_hold() {
     use crate::galaxy::catalogue_classes::binary::BinaryTableRules;
@@ -858,7 +859,7 @@ fn the_x_ray_binaries_layers_follow_the_binary_tables_hold() {
         GalaxyRules::of_version(crate::GENERATOR_VERSION).binary_tables,
         BinaryTableRules::Scratch
     );
-    let hosts = first_hosts(at_27(), ClassId::XRAY_BINARY, 3);
+    let hosts = first_hosts(at_27(), ClassId::XRAY_BINARY, 8);
     assert!(
         hosts
             .iter()

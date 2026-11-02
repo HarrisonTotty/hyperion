@@ -6068,8 +6068,8 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
 ///   bit, as every one does (test 1 for round 2; decision-p14-t54a-passes, main's G2).
 /// - **The guards**, as main restated them on C2's escalation (G2): the moons whose state differs
 ///   between the rounds, with the oscillations, at most 1% of the moons; the regular moons in round
-///   2 at most 1% of the regular moons; and the round-2 count pinned at its measured 153 (151 at
-///   23).
+///   2 at most 1% of the regular moons; and the round-2 count pinned at its measured 155 from 26
+///   (153 at 24 and 25, 151 at 23).
 #[test]
 fn a_moon_s_law_is_held_after_at_most_two_rounds() {
     moon_laws_are_held_after_at_most_two_rounds(&whole()[..150]);
@@ -6231,7 +6231,8 @@ fn moon_laws_are_held_after_at_most_two_rounds(systems: &[(SystemContext, Planet
     // with no oscillation, whose round 2 gives round 1's law to the bit. Main accepted round 2 as
     // built and re-based the guard (on C2's escalation): the flips and oscillations at most 1% of
     // the moons, and the regular moons taking round 2 at most 1% of the regular moons. The count is
-    // pinned at its measured value: 153 of 426 from 24 (151 at 23).
+    // pinned at its measured value: 155 of 431 from 26, whose first 150 systems are its galaxy's
+    // (153 of 426 at 24 and 25, 151 at 23).
     assert!(
         100 * regular_second <= regular,
         "{regular_second} of {regular} regular moons"
@@ -6241,7 +6242,7 @@ fn moon_laws_are_held_after_at_most_two_rounds(systems: &[(SystemContext, Planet
         "{flips_or_oscillations} of {moons} moons flip or oscillate"
     );
     assert!(
-        second.len() <= 153 && repeated == second.len(),
+        second.len() <= 155 && repeated == second.len(),
         "{} of {moons} took round 2, {repeated} repeating round 1's law",
         second.len()
     );
@@ -7153,16 +7154,22 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
 }
 
 /// The pinned bodies of P14.T51.l's record ([`SECANT_OTHER_CROSSINGS`], [`SECANT_PARTIALS_ONLY`])
-/// whose passes converge under both roots from generator version 25, where with its holds they
-/// ended in brackets, in the walk's order: the first five by P14.T53.b part 3, and
-/// 02003b2d1ffe0001.0200, whose bracket held several jumps, by P14.T53.e's present state.
-const SECANT_PINNED_CONVERGED: [&str; 6] = [
+/// whose passes converge under both roots, where with its holds they ended in brackets, in the
+/// walk's order. From generator version 25 five by P14.T53.b part 3 (01ffeb2c5ffe0000.0400,
+/// 01ffdb2c1fff0001.0900 and .0b00, 01ffdb2c60020000.0100 and 01ffeb2d1ffc0000.0600), and
+/// 02003b2d1ffe0001.0200, whose bracket held several jumps, by P14.T53.e's present state; from 26
+/// 01ffeb2cdffd0000.0a02, and `close_binary`'s `.0800` and `.e501`, which the CO₂ cap's energy
+/// balance moves (P14.T53.h).
+const SECANT_PINNED_CONVERGED: [&str; 9] = [
     "01ffeb2c5ffe0000.0400",
     "01ffdb2c1fff0001.0900",
     "01ffdb2c1fff0001.0b00",
+    "01ffeb2cdffd0000.0a02",
     "01ffdb2c60020000.0100",
     "01ffeb2d1ffc0000.0600",
     "02003b2d1ffe0001.0200",
+    "close_binary.0800",
+    "close_binary.e501",
 ];
 
 /// P14.T51.l's pinned bodies end at crossings, not only at their pinned bits (research's condition
@@ -7172,7 +7179,7 @@ const SECANT_PINNED_CONVERGED: [&str; 6] = [
 /// bracketed, and every bracket round whose published end is the body's albedo stopped at a
 /// crossing of the diagonal: its two ends' g on opposite sides within 2⁻³² in albedo
 /// (`Crossing::is_valid`); but [`SECANT_PINNED_CONVERGED`]'s, which converge under both from
-/// generator version 25 (P14.T53.b part 3 and P14.T53.e). It moves no output.
+/// generator version 25 (P14.T53.b part 3 and P14.T53.e) or 26. It moves no output.
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -10278,18 +10285,29 @@ const LOOK72_TRIAGED: [&str; 62] = [
     "020e56ef20080006.0400",
 ];
 
+/// The systems of LOOK72's lists that its grid no longer holds: from 26 the carve-out gives the
+/// 106 K runaway's layer-E system, 820e6ee00000008d, to a catalogue class (P09.T35).
+const LOOK72_CLAIMED: [&str; 1] = ["820e6ee00000008d"];
+
+/// Whether LOOK72's galaxy holds `body`'s system (not one of [`LOOK72_CLAIMED`]).
+fn look72_holds(body: &str) -> bool {
+    !LOOK72_CLAIMED.iter().any(|system| body.starts_with(system))
+}
+
 /// LOOK72's galaxy, as the server builds it, once per process.
 pub(super) fn look72_galaxy() -> &'static crate::galaxy::Galaxy {
     static GALAXY: OnceLock<crate::galaxy::Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| crate::galaxy::Galaxy::new(Seed::new(LOOK72)).with_full_potential())
 }
 
-/// The contexts of the systems of [`LOOK72_TRIAGED`]'s bodies, each once, in ID order.
+/// The contexts of the systems of [`LOOK72_TRIAGED`]'s bodies that the galaxy holds (all but
+/// [`LOOK72_CLAIMED`]'s), each once, in ID order: 26 systems.
 fn look72_triaged_contexts() -> Vec<SystemContext> {
     let galaxy = look72_galaxy();
     let ids: std::collections::BTreeSet<&str> = LOOK72_TRIAGED
         .iter()
         .map(|id| id.split_once('.').expect("a body ID").0)
+        .filter(|id| !LOOK72_CLAIMED.contains(id))
         .collect();
     ids.into_iter()
         .map(|id| {
@@ -10312,14 +10330,15 @@ pub(super) const LOOK72_OCEANS: [&str; 3] = [
 ];
 
 /// The contexts of LOOK72's systems every 24 census reads (P14.T54.b.k; design-k §0's sets): the
-/// 27 systems of [`LOOK72_TRIAGED`]'s bodies ([`look72_triaged_contexts`]) and those of
-/// [`LOOK72_OCEANS`], each once, in ID order: 30 systems.
+/// 26 systems of [`LOOK72_TRIAGED`]'s bodies that the galaxy holds ([`look72_triaged_contexts`])
+/// and those of [`LOOK72_OCEANS`], each once, in ID order: 29 systems.
 pub(super) fn look72_audit_contexts() -> Vec<SystemContext> {
     let galaxy = look72_galaxy();
     let ids: std::collections::BTreeSet<&str> = LOOK72_TRIAGED
         .iter()
         .chain(&LOOK72_OCEANS)
         .map(|id| id.split_once('.').expect("a body ID").0)
+        .filter(|id| !LOOK72_CLAIMED.contains(id))
         .collect();
     ids.into_iter()
         .map(|id| {
@@ -10520,7 +10539,7 @@ fn under_every_24_hold_look72_s_triaged_bodies_are_stated() {
     }
     eprintln!("MISSING {missing:?}");
     eprintln!(
-        "MOVERS (batch, any gas above its isochore with fraction >= THIN_ENVELOPE_FRACTION) over all {} bodies of the 27 systems:",
+        "MOVERS (batch, any gas above its isochore with fraction >= THIN_ENVELOPE_FRACTION) over all {} bodies of the 26 systems:",
         batch.len()
     );
     for (id, row) in &batch {
@@ -10637,7 +10656,7 @@ impl FloorBody {
 
 /// P14.T24.i's follow-up's census (decision-t24i-airless-state D1.4): every present planet, member
 /// and moon with a surface at the epoch ([`census_walk`]) of the first 60 sample systems, the 15
-/// golden systems and the 27 systems of LOOK72's 62 triaged bodies ([`look72_triaged_contexts`]),
+/// golden systems and the 26 systems of LOOK72's 62 triaged bodies ([`look72_triaged_contexts`]),
 /// each system generated and derived afresh, body by body in order. Built once a process, for the
 /// tests that read it. Its twin with every 24 hold but the unlit mean's went with the holds at the
 /// 23 → 24 bump.
@@ -10710,9 +10729,10 @@ fn under_every_24_hold_no_surface_lies_below_its_night_floor() {
         .iter()
         .copied()
         .filter(|id| {
-            !bodies
-                .iter()
-                .any(|b| b.label.starts_with("look72") && b.id == *id)
+            look72_holds(id)
+                && !bodies
+                    .iter()
+                    .any(|b| b.label.starts_with("look72") && b.id == *id)
         })
         .collect();
     assert_eq!(missing, Vec::<&str>::new(), "LOOK72's triaged bodies");
@@ -11770,7 +11790,7 @@ impl PresentBody {
 
 /// P14.T53.b part 1's census (decision-absurd-states-24 R3–R4): every present planet, member and
 /// moon with a surface at the epoch ([`census_walk`]) of the first 60 sample systems, the 15
-/// golden systems and the 27 systems of LOOK72's 62 triaged bodies ([`look72_triaged_contexts`]),
+/// golden systems and the 26 systems of LOOK72's 62 triaged bodies ([`look72_triaged_contexts`]),
 /// the floor census's set ([`floor_census`]), each system generated and derived afresh, each
 /// runaway outside the present runaway limit with its solves' counts ([`PresentBody::resolved`]),
 /// body by body; with the solves without the deck and as a hothouse that generating and walking
@@ -12076,11 +12096,6 @@ fn under_every_24_hold_a_re_solve_keeps_what_was_traced_before_it() {
 /// luminosity (a runaway ratio of 1.51 then, 0.0029 now).
 pub(crate) const ITEM_33_WORLD: &str = "02000b2ca0000001.1100";
 
-/// LOOK72's 106 K runaway (decision-absurd-states-24 R4.1, item 1): at 23 a `RunawayGreenhouse`
-/// at 106.5 K under 5.33 bar, mostly O₂, its present runaway ratio 0.0405 and its
-/// maximum-greenhouse ratio 0.1152.
-const LOOK72_106_K_RUNAWAY: &str = "820e6ee00000008d.0900";
-
 /// The census's hothouse between the limits (decision-t53b-arm-c §1): about a 2,456 K substellar
 /// host, its runaway ratio 61.9 at the peak and 0.547 now, its maximum-greenhouse ratio 2.11 now;
 /// under P14.T53.a's batch a `RunawayGreenhouse` under Venus's deck and 414.8 bar of carbon
@@ -12115,10 +12130,8 @@ pub(super) const CLOSURE_HOTHOUSE_BODY: &str = "01ffeb2c5fff0000.0100";
 /// - every body whose water is a runaway's and which is not one, a runaway at the hosts' peak,
 ///   publishes a present climate's state by rules 5–7 from generator version 25 (P14.T53.e),
 ///   `Snowball` or `Temperate`, whatever its insolation class, so that a dry desert inside the
-///   runaway limit now is `Temperate` by rule 7; LOOK72's 106 K runaway ([`LOOK72_106_K_RUNAWAY`])
-///   is a `Snowball` whose
-///   water, kept beyond its escape's capacity from generator version 25, lies as its ice
-///   (P14.T53.b part 3; decision-p14-t53b-part3 §12 (0900));
+///   runaway limit now is `Temperate` by rule 7 (LOOK72's 106 K runaway, a `Snowball` whose water
+///   lay as its ice at 25, P14.T53.b part 3, is no system from 26: [`LOOK72_CLAIMED`]);
 /// - decision-pre-23-review item 33's world ([`ITEM_33_WORLD`]) is not a runaway;
 /// - the census's five decked runaways ([`DECKED_FIVE`]) lie inside the present limit, each stated
 ///   with its present ratio, `T_s`, Bond albedo and `p_s`: three solved without the deck, and
@@ -12251,22 +12264,8 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
             runaway_waters += 1;
         }
     }
-    let runaway_106_k: Vec<&PresentBody> = census
-        .present
-        .iter()
-        .filter(|b| b.label.starts_with("look72") && b.id == LOOK72_106_K_RUNAWAY)
-        .collect();
-    assert_eq!(runaway_106_k.len(), 1, "{LOOK72_106_K_RUNAWAY}");
-    for now in runaway_106_k {
-        eprintln!(
-            "LOOK72's 106 K runaway {}: {}; its water {}",
-            now.label,
-            now.line(),
-            now.water_line()
-        );
-        assert_eq!(now.state, SurfaceState::Snowball);
-        assert_eq!(now.water_state, SurfaceState::Snowball);
-    }
+    // LOOK72's 106 K runaway was a `Snowball` whose water lay as its ice at 25; from 26 its system
+    // is a catalogue class's ([`LOOK72_CLAIMED`]).
     let item_33: Vec<&PresentBody> = census
         .present
         .iter()
@@ -13044,7 +13043,7 @@ fn under_every_24_hold_look72_s_snowballs_keep_their_surfaces() {
 
 /// P14.T53.b part 2's census, a measurement for the record (decision-absurd-states-24 R2.3), run
 /// by name over part 1's census set ([`present_census`]'s: the first 60 sample systems, the
-/// golden systems and the 27 systems of LOOK72's triaged bodies), each generated afresh: every
+/// golden systems and the 26 systems of LOOK72's triaged bodies), each generated afresh: every
 /// body whose surface a supercritical envelope hides, by
 /// name, substance, `T_s` ÷ `T_c` and share of its mass; those beyond 2.5 `T_c`, past the line's
 /// checked range, with their margins; the near misses, a column of 10⁻⁴ to 10⁻³ of the mass; and
@@ -13438,7 +13437,7 @@ fn print_part_three_groups(on: &[SteamBody]) {
 }
 
 /// P14.T53.b part 3's census and boarding test (decision-p14-t53b-part3 §8–§9), run by name over
-/// part 1's census set (the first 60 sample systems, the golden systems and the 27 systems of
+/// part 1's census set (the first 60 sample systems, the golden systems and the 26 systems of
 /// LOOK72's triaged bodies), each generated afresh, part 3 in force from generator version 25: its
 /// groups, every steam envelope, the supercritical reservoirs under an `Ok` surface, the four
 /// Jeans-retaining ice-bulk planets' water, and the walk's passes. It asserts the boarding items it
@@ -13496,25 +13495,9 @@ fn part_three_s_census_is_stated() {
             "{at}"
         );
     }
-    // decision-p14-t53b-part3 §12 (0900): LOOK72's 106 K past runaway keeps water beyond its
-    // escape's capacity, as ice alone, a `Snowball`.
-    let runaway_106_k: Vec<&SteamBody> = on
-        .iter()
-        .filter(|a| a.label.starts_with("look72") && a.id == LOOK72_106_K_RUNAWAY)
-        .collect();
-    assert_eq!(runaway_106_k.len(), 1, "{LOOK72_106_K_RUNAWAY}");
-    for a in runaway_106_k {
-        let at = format!("{}: {}", a.label, a.line());
-        assert_eq!(a.published, SurfaceState::Snowball, "{at}");
-        assert!(a.kept_water.is_some_and(|kept| kept > 0.0), "{at}");
-        assert!(
-            !a.water_entries.is_empty()
-                && a.water_entries
-                    .iter()
-                    .all(|(phase, _)| *phase == CondensatePhase::Solid),
-            "{at}"
-        );
-    }
+    // decision-p14-t53b-part3 §12 (0900): LOOK72's 106 K past runaway kept water beyond its
+    // escape's capacity, as ice alone, a `Snowball`, at 25; from 26 its system is a catalogue
+    // class's ([`LOOK72_CLAIMED`]).
     let methane = on
         .iter()
         .find(|a| a.id == SUPERCRITICAL_METHANE_BODY)

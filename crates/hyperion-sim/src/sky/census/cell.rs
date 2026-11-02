@@ -2569,7 +2569,15 @@ mod tests {
         );
         let query = query_beside(&record, 6.0);
         let (every, listed) = measured(&record, &query);
-        assert!(every.iter().all(|s| s.star() != StarIndex::PRIMARY));
+        // From generator version 26 a white dwarf shines in V (A4's photometry, P06.T43.b): the
+        // primary is measured, too faint to list.
+        assert!(
+            every
+                .iter()
+                .filter(|s| s.star() == StarIndex::PRIMARY)
+                .all(|s| s.v().value() > 6.0),
+            "{every:?}"
+        );
         assert!(!listed.is_empty(), "{record:?}");
         assert!(listed.iter().all(|s| s.star() != StarIndex::PRIMARY));
         let kept: Vec<SkyStar> = every.into_iter().filter(|s| s.v().value() <= 6.0).collect();
@@ -2585,7 +2593,8 @@ mod tests {
             &mut tally,
             &mut out,
         );
-        assert!(tally.layer(Layer::D).without_photometry() >= 1);
+        // The white dwarf, cooled some 0.6 Gyr, has its V from 26 (it had none until 26).
+        assert_eq!(tally.layer(Layer::D).without_photometry(), 0);
         assert_eq!(
             tally.layer(Layer::D).accepted(),
             u64::try_from(out.len()).expect("few")
@@ -2809,11 +2818,13 @@ mod tests {
 
     #[test]
     fn the_observers_own_system_is_absent() {
+        // A star the census lists at 11 mag from 20 ly: from generator version 26 a white dwarf
+        // has a V too (A4's photometry, P06.T43.b), and the first such is too faint there.
         let record = find_system(Layer::C, SUN, Clone::clone, |_, state| {
             state
                 .stars()
                 .iter()
-                .any(|s| absolute_v_of_state(s).is_some())
+                .any(|s| absolute_v_of_state(s).is_some_and(|v| v.value() < 9.0))
         });
         let query = query_beside(&record, 11.0);
         let (every, _) = measured(&record, &query);
@@ -3608,7 +3619,9 @@ mod tests {
 
     /// What the ruling gives a record whose every pair is answered `verdict`, by a reading apart
     /// from [`StarBounds`]': each star of each attempt by its own bound, or by its pair's verdict,
-    /// the primary at every attempt and again after the last where the fallback is listed.
+    /// the primary at every attempt and again after the last where the fallback is listed. From
+    /// generator version 26 a white dwarf has a V (P06.T43.b), which plan 11's pair light does not
+    /// hold, so a star of a `Remnants` or `Bright` pair takes the white dwarfs' brightest too.
     fn ruled_light(
         record: &SystemRecord,
         composition: &Composition,
@@ -3647,11 +3660,13 @@ mod tests {
                     .pairs()
                     .iter()
                     .any(|p| p.stars().iter().any(|s| usize::from(s.get()) == i));
+                let dwarf = WHITE_DWARF_BRIGHTEST_V;
                 take(match (paired, verdict) {
                     (false, _) | (true, PairLight::Detached | PairLight::Unchanged) => own,
-                    (true, PairLight::Remnants) => None,
+                    (true, PairLight::Remnants) => Some(dwarf),
                     (true, PairLight::Bright(m)) => {
-                        Some(own.map_or(m, |o| if o.value() < m.value() { o } else { m }))
+                        let m = own.map_or(m, |o| if o.value() < m.value() { o } else { m });
+                        Some(if dwarf.value() < m.value() { dwarf } else { m })
                     }
                 });
             }
@@ -3693,7 +3708,8 @@ mod tests {
     /// Every verdict plan 11's pairs can take leaves each star the light the ruling gives it
     /// (`decision-p11-t16-hierarchy-bound.md` §§5–6), on synthetic answers for the verdicts that
     /// P11.T17.c brings: `Detached` and `Unchanged` each star's own bound, `Remnants` nothing,
-    /// `Bright(M)` the brighter of each star's own and M, and none an unbounded record. The
+    /// `Bright(M)` the brighter of each star's own and M, and none an unbounded record; from
+    /// generator version 26 the last two each with the white dwarfs' brightest ([`ruled_light`]). The
     /// records are a triple of D near the Sun whose first attempt holds one pair the engine may
     /// run and a star of none, and a binary of C. Each star's mass and η are the generator's, bit
     /// for bit.
@@ -4015,6 +4031,11 @@ mod tests {
         pairs: PairTally,
         /// The least of M<sub>V</sub> less its bound over the stars checked star by star, mag.
         least_margin: f64,
+        /// White dwarfs fainter than the luminosity tables' faintest magnitude that a pair made
+        /// of a star its verdict leaves its own model: from generator version 26 a white dwarf
+        /// shines (P06.T43.b), and plan 11's pair light holds nothing fainter than M<sub>V</sub>
+        /// 20.45, so its bound says it cannot (a finding, counted, not asserted).
+        faint_white_dwarfs: u64,
     }
 
     impl RealisedCheck {
@@ -4025,6 +4046,7 @@ mod tests {
             self.unbounded += other.unbounded;
             self.pairs.add(&other.pairs);
             self.least_margin = self.least_margin.min(other.least_margin);
+            self.faint_white_dwarfs += other.faint_white_dwarfs;
         }
     }
 
@@ -4087,16 +4109,22 @@ mod tests {
                         listed.mass().value(),
                         stars.stars()[i].initial_mass().value(),
                     );
-                    let bound = listed
-                        .brightest(phase, &composition, ages)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "{}: shines at M_V {} where its bound, {:?}, says it cannot",
-                                what(),
-                                m_v.value(),
-                                listed.light()
-                            )
-                        });
+                    let bound = listed.brightest(phase, &composition, ages);
+                    if bound.is_none()
+                        && is_white_dwarf(star.phase())
+                        && m_v.value() > crate::sky::luminosity::FAINTEST_MAGNITUDE
+                    {
+                        check.faint_white_dwarfs += 1;
+                        continue;
+                    }
+                    let bound = bound.unwrap_or_else(|| {
+                        panic!(
+                            "{}: shines at M_V {} where its bound, {:?}, says it cannot",
+                            what(),
+                            m_v.value(),
+                            listed.light()
+                        )
+                    });
                     let margin = m_v.value() - bound.value();
                     assert!(
                         margin >= 0.0,

@@ -221,7 +221,9 @@ fn the_young_field_is_the_young_disc_and_the_nuclear_disc() {
 /// No draw of a star's moves its window, which the class's thinning on attempt 0 rests on (the
 /// module documentation's lean): Reimers η at ±1.5σ and ±3σ, and every draw of a real star at its
 /// first four attempts, give the median's window bit for bit, from 36.5 to 150 M☉ and from
-/// \[Fe/H\] −2.4, where the Nieuwenhuijzen–de Jager wind falls toward Reimers's, to +0.2.
+/// \[Fe/H\] −2.4, where the Nieuwenhuijzen–de Jager wind falls toward Reimers's, to +0.2. From
+/// generator version 26, whose winds enforce the Humphreys–Davidson limit, 38 M☉ at −1 and 42 M☉
+/// at −0.5 have no window; 42 and 45 M☉ stand in for them.
 #[test]
 fn no_draw_moves_a_window() {
     let star = BodyId::new(
@@ -234,8 +236,8 @@ fn no_draw_moves_a_window() {
         (38.0, -2.0),
         (40.0, -1.5),
         (60.0, -2.0),
-        (38.0, -1.0),
-        (42.0, -0.5),
+        (42.0, -1.0),
+        (45.0, -0.5),
         (60.0, -1.0),
         (60.0, 0.0),
         (90.0, -0.25),
@@ -538,7 +540,9 @@ fn the_class_and_the_grid_agree_on_sampled_candidates() {
         agreed += 1;
     }
     eprintln!("{agreed} candidates agree, {hosts} with a window");
-    assert!(agreed > 100 && hosts > 8, "{agreed} {hosts}");
+    // 113 and 6 at generator version 26, whose windows the enforced Humphreys–Davidson limit
+    // makes fewer and shorter.
+    assert!(agreed > 100 && hosts > 4, "{agreed} {hosts}");
 }
 
 /// No host is both a core-collapse entry and a luminous blue variable: the class's test on the

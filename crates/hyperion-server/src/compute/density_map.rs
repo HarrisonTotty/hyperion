@@ -1348,7 +1348,7 @@ mod tests {
     /// The remnants maps under every 27 hold, face-on and edge-on, are the bits they were before
     /// the edge-on view shared its work along a column (lane `perf-remnants-map`, 2026-11-01): the
     /// digests are BASE's, the tree the work started from (at generator version 25, measured again
-    /// there).
+    /// there), re-pinned at 26, whose refitted tables every version reads.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn under_every_27_hold_the_remnants_maps_are_the_pinned_ones() {
         let moved = moved(
@@ -1358,12 +1358,12 @@ mod tests {
                 (
                     MapView::FaceOn,
                     MapPopulation::LayerERemnants,
-                    [0xb352_dc5b_16f2_f63d, 0x8da8_e802_03b7_f995],
+                    [0x4462_b64f_8617_956d, 0xd06d_7221_e8fa_f5f5],
                 ),
                 (
                     MapView::EdgeOn,
                     MapPopulation::LayerERemnants,
-                    [0xb417_dc61_e2c7_9dbd, 0x3f9c_c086_38c6_ceed],
+                    [0x0246_5a06_79c1_0295, 0xc6a2_f3e0_233c_f84d],
                 ),
             ],
         )
@@ -1373,7 +1373,7 @@ mod tests {
 
     /// Every other map is unchanged at 24 to 27 by the remnants map's work: each population's
     /// digests, both views, are BASE's (lane `perf-remnants-map`, 2026-11-01; at generator version
-    /// 25, measured again there).
+    /// 25, measured again there), re-pinned at 26, whose refitted tables every version reads.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn the_other_maps_are_the_pinned_ones_at_24_to_27() {
         let all_and_young = |pinned: [[u64; 2]; 4]| -> Vec<Pinned> {
@@ -1390,10 +1390,10 @@ mod tests {
         };
         // Below 27 no galaxy holds a displaced class, so 25's and 26's maps are 24's.
         let below_27 = [
-            [0x31c9_7d61_e64d_0d29, 0x64fa_9e3d_d5db_a22d],
-            [0xef3d_9fe4_612e_40d5, 0x6b9f_b6d2_2aed_b53d],
-            [0x9cc0_3969_99c8_6885, 0x9f8b_ed84_611e_ac25],
-            [0x7698_b992_5b61_51d5, 0x7b13_ef19_25b8_be6d],
+            [0x28fe_6e26_a1f8_9459, 0x38de_73f1_0602_7e29],
+            [0x5cf9_55c1_1e72_5bb5, 0x3e53_0f4f_1938_81ad],
+            [0xc47b_e078_1812_156d, 0xa490_3c53_7e32_c7ed],
+            [0x6100_71ec_88ba_0635, 0xb229_d6bf_983c_12dd],
         ];
         let at_24 = all_and_young(below_27);
         let at_25 = all_and_young(below_27);
@@ -1403,8 +1403,8 @@ mod tests {
         // classes moved it at 26 before they rode 27, and every system's, which 27's other holds
         // move too, as measured (2026-11-01).
         let at_27 = all_and_young([
-            [0xe64a_f372_df48_2ddd, 0x05e8_768c_a2ea_34f1],
-            [0x253d_7c22_02f3_779d, 0xd828_d4ce_b8f0_b8bd],
+            [0x67ee_098e_33c7_e281, 0x93af_5b4a_58a3_a369],
+            [0x7983_a2b3_48a4_17ad, 0x0a05_9b07_aaea_486d],
             below_27[2],
             below_27[3],
         ]);

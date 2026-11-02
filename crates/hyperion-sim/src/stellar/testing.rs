@@ -993,7 +993,9 @@ mod tests {
             t.get("Wolf-Rayet stars"),
             (500.0, 8_000.0),
         );
-        checks.within("LBVs", t.get("LBVs"), (100.0, 2_000.0));
+        // A finding from generator version 26, pinned provisionally: under the enforced
+        // Humphreys–Davidson limit the windows are fewer and shorter (P06.T42.b).
+        checks.pinned("LBVs", t.get("LBVs"), (100.0, 2_000.0), 49.06);
         checks.within(
             "classical Cepheids",
             t.get("classical Cepheids"),
@@ -1460,8 +1462,11 @@ mod tests {
         }
         assert!(included > 0);
         let eruptions = lbvs * ERUPTIONS_PER_YEAR * 2.0 * CLOCK_WINDOW_H.as_julian_years_f64();
-        checks.within("LBVs", lbvs, (100.0, 2_000.0));
-        checks.within("giant eruptions in ±H", eruptions, (15.0, 60.0));
+        // Findings from generator version 26, pinned provisionally: under the enforced
+        // Humphreys–Davidson limit the windows are fewer and shorter (P06.T42.b), and the rate is
+        // not retuned alone, since the ejecta's mass law must move with it (design note 14).
+        checks.pinned("LBVs", lbvs, (100.0, 2_000.0), 49.06);
+        checks.pinned("giant eruptions in ±H", eruptions, (15.0, 60.0), 8.18);
         checks.finish();
     }
 

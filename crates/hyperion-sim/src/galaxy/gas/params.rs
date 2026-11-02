@@ -901,8 +901,9 @@ mod tests {
     /// drawn galaxy reaches it only with the thin disc's length scatter at least
     /// [`LEAST_FAILING_THIN_SCATTER`] above its mass's length, 4.7 times its 0.05 dex σ, while every
     /// uniform draw above sits at its end; with no scatter the same corner keeps 0.32 of its gas
-    /// neutral, and over 2,000 drawn galaxies the least is 0.529 (`tests/gas_statistics.rs`).
-    const LEAST_DRAWN_CORNER_SHARE: f64 = -0.0631;
+    /// neutral, and over 2,000 drawn galaxies the least is 0.529 (`tests/gas_statistics.rs`). The
+    /// share is −0.0625 from generator version 26 (−0.0631 until 26).
+    const LEAST_DRAWN_CORNER_SHARE: f64 = -0.0625;
 
     /// The least thin-disc length scatter, dex, at which a drawn galaxy at the corner of
     /// [`LEAST_DRAWN_CORNER_SHARE`] would leave its neutral layer nothing without the clamp.

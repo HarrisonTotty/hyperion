@@ -435,10 +435,12 @@ mod tests {
     }
 
     /// The plan's figures, as §3.5 item 1 of issue #20's brief corrects them, at the Milky Way
-    /// fixture's mass: 0.2068 expected in ±H and 27.31 in the source horizon, each equation 27
-    /// times the span, and ±H's inside the corrected window 0.06–0.21.
+    /// fixture's mass: 0.2067 expected in ±H and 27.30 in the source horizon, each equation 27
+    /// times the span, and ±H's inside the corrected window 0.06–0.21. From generator version 26
+    /// the fixture's black hole, which its bulge's dispersion gives, is 4.303 × 10⁶ M☉, moved by 26's
+    /// train; until 26 the figures were 0.2068, 27.31 and 0.1059 a bin.
     #[test]
-    fn the_milky_way_expects_0_2068_in_the_clock_window_and_27_31_in_the_horizon() {
+    fn the_milky_way_expects_0_2067_in_the_clock_window_and_27_30_in_the_horizon() {
         let mass = milky_way_mass();
         let model = TidalDisruptionModel::new(SEED, mass).unwrap();
         assert_eq!(model.black_hole_mass(), mass);
@@ -453,14 +455,14 @@ mod tests {
             (in_horizon / (per_year * 264_144.0) - 1.0).abs() < 1e-12,
             "{in_horizon}"
         );
-        assert!((in_clock - 0.2068).abs() < 5e-5, "{in_clock} in ±H");
+        assert!((in_clock - 0.2067).abs() < 5e-5, "{in_clock} in ±H");
         assert!(
-            (in_horizon - 27.31).abs() < 5e-3,
+            (in_horizon - 27.30).abs() < 5e-3,
             "{in_horizon} in the horizon"
         );
         assert!((0.06..=0.21).contains(&in_clock), "{in_clock}");
         let per_bin = model.listed_rate().value() * BIN;
-        assert!((per_bin - 0.1059).abs() < 5e-5, "{per_bin} a bin");
+        assert!((per_bin - 0.1058).abs() < 5e-5, "{per_bin} a bin");
         eprintln!(
             "the fixture's black hole, {:.6e} M☉: {per_year:.6e} a year, {in_clock:.5} in ±H, \
              {in_horizon:.4} in the horizon, {per_bin:.5} a bin",

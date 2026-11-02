@@ -260,9 +260,9 @@ fn the_same_seed_twice_gives_the_same_classes() {
 /// The digest (`f64_digest`) of the new arm's layer-D and layer-E densities at the D2 test's 400
 /// points, then its classes' counts in both layers, in class order. Blessed natively on x86-64;
 /// the wasip1 suite compares it (D5). It is a 26-arm figure on plan 15's provisional form table,
-/// re-pinned by name when the production table lands; re-pinned at generator version 25, whose
-/// layers D and E move.
-const DISPLACED_DENSITIES_DIGEST: u64 = 0xb8ac_0e70_3792_e096;
+/// re-pinned by name when the production table lands; re-pinned at generator versions 25 and 26,
+/// whose layers D and E move.
+const DISPLACED_DENSITIES_DIGEST: u64 = 0x4615_5273_32ef_919a;
 
 /// D2 under every 26 hold: the classes move layers D and E, and nothing else. Against the field
 /// under every other 26 hold ([`field_only`]), at 400 points over the cube layers A to C and the

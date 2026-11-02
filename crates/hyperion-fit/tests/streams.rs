@@ -58,8 +58,9 @@ fn the_27_multiplier_is_the_fit_s() {
     assert!((0.5..=4.5).contains(&ORPHAN_STREAMS_PER_GLOBULAR_27));
 }
 
-/// P15.T11.b's fitted multiplier, as its production run gave it.
-const FITTED: f64 = 2.048_842_063_164_735_7;
+/// P15.T11.b's fitted multiplier, as its production run gives it at generator version 26 (it was
+/// 2.048 842 063 164 735 7 at 25).
+const FITTED: f64 = 2.054_113_715_866_966;
 
 /// The smoke run goes end to end through the command line on one thread and on three, into a
 /// temporary directory, and writes the same table both times, in the header grammar, declaring

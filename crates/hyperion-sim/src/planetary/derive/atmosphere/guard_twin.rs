@@ -1044,7 +1044,11 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_
 /// arm alone, and inside 26's helper
 /// (`the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new_arm`). The
 /// helper's arms read P14.T54.b.l's own-residual stop and Aitken's step, which move
-/// 42002cb20001885b.0100's by under 10⁻⁹ of themselves.
+/// 42002cb20001885b.0100's by under 10⁻⁹ of themselves. From generator version 26 those are the
+/// version's rules, and the helper sets back only P14.T24.h.b's four holds
+/// ([`with_scattering_held`]), which 26 holds too (retargeted to 27), so each rule's two rows are
+/// one: 42002cb20001885b.0100's under the hold and under the new arm alone are re-pinned to the
+/// helper's.
 const MOLTEN_BY_NAME: [(&str, [(f64, f64); 4]); 3] = [
     (
         "42002cb2000188e8.0100",
@@ -1067,9 +1071,9 @@ const MOLTEN_BY_NAME: [(&str, [(f64, f64); 4]); 3] = [
     (
         "42002cb20001885b.0100",
         [
-            (1_428.081_981_432_391_3, 3_220.335_346_626_598),
             (1_428.081_981_703_512_6, 3_220.335_346_668_595_3),
-            (1_394.0, 3_166.681_417_939_504_6),
+            (1_428.081_981_703_512_6, 3_220.335_346_668_595_3),
+            (1_394.0, 3_166.681_417_976_950_3),
             (1_394.0, 3_166.681_417_976_950_3),
         ],
     ),

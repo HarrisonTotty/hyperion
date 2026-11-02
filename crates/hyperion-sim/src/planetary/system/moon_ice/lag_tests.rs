@@ -341,7 +341,7 @@ fn lag_census(sets: &[(&str, Seed, &SystemContext)]) -> LagCensus {
     census
 }
 
-/// P14.T56.g over the golden systems and LOOK72's 30 (`look72_audit_contexts`)
+/// P14.T56.g over the golden systems and LOOK72's 29 (`look72_audit_contexts`)
 /// (decision-p14-t56g §4, §8 (d); P14.T54.b.k): every lagged record is rock, `Mercury`'s where
 /// airless, under a lid that is not `H2O`; no airless record shows ice above the melting point at
 /// T0; the verdict is the retention arm's, a member's its T0's; `subgiant` 0101, `red_giant` 0503

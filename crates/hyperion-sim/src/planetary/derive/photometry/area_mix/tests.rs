@@ -1407,9 +1407,11 @@ fn under_compression_the_area_mix_s_sea_reads_its_layer_s_density() {
 
 /// P14.T49.n's compression, from 24: the area mix's sea record is the one the palette's liquid
 /// entry reads (`liquid_properties_at_pressure`), so that the Bond albedo's liquid and the
-/// palette's read one `ρ_l`(T, p) at one state (W4). On the record, `close_binary`'s `.0700`, a
-/// sea under 32.8 bar at 273.1 K (the partition's record test's body; at 23 `.0800`, a steam
-/// world's sea under 213 bar, took more than 2%): the palette's liquid entry's grain density and
+/// palette's read one `ρ_l`(T, p) at one state (W4). On the record, `m_dwarf_resonant_chain`'s
+/// `.0200`, a sea under 30.7 bar at 273.15 K (the partition's record test's body from 26; until 26
+/// `close_binary`'s `.0700`, a sea under 32.8 bar at 273.1 K, which from 26 holds none, and at 23
+/// its `.0800`, a steam world's sea under 213 bar, took more than 2%): the palette's liquid entry's
+/// grain density and
 /// the area mix's record at the entry's temperature under the record's surface pressure are the
 /// same bits, and so is the whole record, more than 0.1% above the saturated liquid's, version
 /// 23's. Each reader keeps its own temperature, the area mix
@@ -1430,30 +1432,30 @@ fn under_compression_the_area_mix_s_sea_reads_the_palette_s_density() {
     use crate::substance::CondensedPhase;
 
     let water = id("H2O");
-    // tests/planetary_golden.rs's `SYSTEMS_SEED` and close_binary's pinned ID.
+    // tests/planetary_golden.rs's `SYSTEMS_SEED` and m_dwarf_resonant_chain's pinned ID.
     let galaxy = Galaxy::from_params(
         Seed::new(0x5eed_0000_0014_0032),
         GalaxyParams::milky_way_like(),
     )
     .expect("the Milky Way fixture's gas is mostly neutral");
-    let system = SystemId::from_raw(0x4200_2cb2_0000_0009).expect("a pinned ID is well formed");
+    let system = SystemId::from_raw(0x0200_2b2c_a000_0000).expect("a pinned ID is well formed");
     let ctx = SystemContext::for_system(&galaxy, system).expect("a pinned ID names a system");
     let on_the_record = || {
         let snapshot = generate(galaxy.seed(), &ctx).snapshot_at(&ctx, RECORD_TIME);
         let record = snapshot
             .bodies()
             .iter()
-            .find(|record| record.index().get() == 0x0700)
-            .expect("close_binary holds its .0700");
-        let surface = record.surface().ok().expect(".0700 has a surface");
+            .find(|record| record.index().get() == 0x0200)
+            .expect("m_dwarf_resonant_chain holds its .0200");
+        let surface = record.surface().ok().expect(".0200 has a surface");
         let pressure = surface.conditions().surface_pressure();
-        let inputs = CoarseInputs::for_body(record, None, &ctx).expect(".0700 reads its inputs");
+        let inputs = CoarseInputs::for_body(record, None, &ctx).expect(".0200 reads its inputs");
         let entry = inputs
             .palette()
             .entries()
             .iter()
             .find(|e| e.role == PaletteRole::Liquid && e.substance.as_str() == "H2O")
-            .expect(".0700's palette holds its sea")
+            .expect(".0200's palette holds its sea")
             .clone();
         let sea = entry.liquid.expect("a sea carries its record");
         let area_mix = liquid_record(water, sea.temperature, pressure)
@@ -1477,7 +1479,7 @@ fn under_compression_the_area_mix_s_sea_reads_the_palette_s_density() {
     assert_same_bits(grain, law);
     assert!(grain > 1.001 * saturated, "{grain} against {saturated}");
     eprintln!(
-        "close_binary .0700 under {:.4} bar: the palette's sea at {:.3} K and the area mix's \
+        "m_dwarf_resonant_chain .0200 under {:.4} bar: the palette's sea at {:.3} K and the area mix's \
          record there, ρ {saturated:.4} saturated → {grain:.4} kg m⁻³",
         pressure.value() / 1e5,
         sea.temperature.value()

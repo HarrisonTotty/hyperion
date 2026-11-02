@@ -870,15 +870,19 @@ mod tests {
         }
         // Across the age at which the closed form first fails: a neutron star and a white dwarf
         // 1,000 au apart are `Detached` at 10 Myr, before the primary may have collapsed, and
-        // `Unchanged` over a window to 1 Gyr, read from the tables, which hold no departing star
-        // of the pair and its own stars living at the window's start.
+        // looser over a window to 1 Gyr, read from the tables. Until generator version 26 that
+        // was `Unchanged`, the tables holding no departing star of the pair; from 26 the tables
+        // refitted under 26's rules hold one in its bins, and the window is `Bright` at −6.23.
         let years = |s: f64, e: f64| Years::new(s)..=Years::new(e);
         let (a, b) = (SolarMasses::new(10.0), SolarMasses::new(8.0));
         let p = Metres::new(1.0e3 * AU_M);
         let narrow = pair_light_bound(a, b, p, &Composition::SOLAR, years(1.0e7, 1.0e7));
         let wide = pair_light_bound(a, b, p, &Composition::SOLAR, years(1.0e7, 1.0e9));
         assert_eq!(narrow, Some(PairLight::Detached));
-        assert_eq!(wide, Some(PairLight::Unchanged));
+        assert!(
+            matches!(wide, Some(PairLight::Bright(m)) if (m.value() + 6.23).abs() < 1e-9),
+            "{wide:?}"
+        );
         assert!(looseness(wide) >= looseness(narrow));
         println!("verdicts over the outer windows: {seen:?} ({VERDICTS:?})");
         assert!(

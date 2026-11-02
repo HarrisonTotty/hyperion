@@ -2280,14 +2280,17 @@ fn under_compression_a_carbon_dioxide_sea_and_its_ocean_weight_read_one_density(
 
 /// P14.T49.n's record test over a golden system: from 24 a sea takes its compressed water, its
 /// palette's liquid entry the registry's law at its record's temperature and the surface pressure,
-/// to the bit, above the saturated liquid's there, version 23's. `close_binary`'s `.0700` holds the
-/// golden systems' most compressed sea at 24, at 273.1 K under 32.8 bar, about 0.17% above the
-/// saturated liquid. At 23 its `.0800`, a steam world whose water sea lay under 213 bar at about
-/// 583 K, took about 4% (decision-p14-t54a-water-consistency's figures, 225 bar and 596 K, a sea of
-/// 0.419 against 0.406 compressed, are an earlier record's); from 24 the escape leaves it a carbon
-/// dioxide `Snowball` with no sea.
+/// to the bit, above the saturated liquid's there, version 23's. `m_dwarf_resonant_chain`'s `.0200`
+/// holds the golden systems' most compressed sea from 26, at 273.15 K under 30.7 bar, 0.16% above
+/// the saturated liquid. Until 26 the
+/// test read `close_binary`'s `.0700`, the most compressed at 24, at 273.1 K under 32.8 bar, about
+/// 0.17% above the saturated liquid, which from 26 the CO₂ cap's energy balance (P14.T53.h) leaves
+/// a CO₂ `Snowball` with no sea. At 23 `close_binary`'s `.0800`, a steam world whose water sea lay
+/// under 213 bar at about 583 K, took about 4% (decision-p14-t54a-water-consistency's figures,
+/// 225 bar and 596 K, a sea of 0.419 against 0.406 compressed, are an earlier record's); from 24 the
+/// escape leaves it a carbon dioxide `Snowball` with no sea.
 #[test]
-fn close_binary_s_sea_reads_its_compressed_water() {
+fn the_most_compressed_golden_sea_reads_its_compressed_water() {
     use hyperion_surface::field::PaletteRole;
 
     use crate::Seed;
@@ -2297,13 +2300,13 @@ fn close_binary_s_sea_reads_its_compressed_water() {
     use crate::planetary::context::SystemContext;
     use crate::planetary::surface::{CoarseInputs, RECORD_TIME};
     use crate::planetary::system::generate;
-    // tests/planetary_golden.rs's `SYSTEMS_SEED` and close_binary's pinned ID.
+    // tests/planetary_golden.rs's `SYSTEMS_SEED` and m_dwarf_resonant_chain's pinned ID.
     let galaxy = Galaxy::from_params(
         Seed::new(0x5eed_0000_0014_0032),
         GalaxyParams::milky_way_like(),
     )
     .expect("the Milky Way fixture's gas is mostly neutral");
-    let system = SystemId::from_raw(0x4200_2cb2_0000_0009).expect("a pinned ID is well formed");
+    let system = SystemId::from_raw(0x0200_2b2c_a000_0000).expect("a pinned ID is well formed");
     let ctx = SystemContext::for_system(&galaxy, system).expect("a pinned ID names a system");
     let water = id("H2O");
     let read = || {
@@ -2311,22 +2314,22 @@ fn close_binary_s_sea_reads_its_compressed_water() {
         let record = snapshot
             .bodies()
             .iter()
-            .find(|record| record.index().get() == 0x0700)
-            .expect("close_binary holds its .0700");
-        let surface = record.surface().ok().expect(".0700 has a surface");
+            .find(|record| record.index().get() == 0x0200)
+            .expect("m_dwarf_resonant_chain holds its .0200");
+        let surface = record.surface().ok().expect(".0200 has a surface");
         let sea = *surface
             .condensates()
             .entry(water, CondensatePhase::Liquid)
-            .expect(".0700 holds a water sea");
+            .expect(".0200 holds a water sea");
         let conditions = surface.conditions();
         let pressure = conditions.surface_pressure();
-        let inputs = CoarseInputs::for_body(record, None, &ctx).expect(".0700 reads its inputs");
+        let inputs = CoarseInputs::for_body(record, None, &ctx).expect(".0200 reads its inputs");
         let entry = inputs
             .palette()
             .entries()
             .iter()
             .find(|e| e.role == PaletteRole::Liquid && e.substance.as_str() == "H2O")
-            .expect(".0700's palette holds its sea");
+            .expect(".0200's palette holds its sea");
         let t = entry
             .liquid
             .as_ref()
@@ -2349,7 +2352,7 @@ fn close_binary_s_sea_reads_its_compressed_water() {
         .unwrap();
     let relative = grain / saturated.value() - 1.0;
     eprintln!(
-        "close_binary .0700: {:.4} bar, T_s {:.3} K; the sea's layer density {rho:.3} kg m⁻³, \
+        "m_dwarf_resonant_chain .0200: {:.4} bar, T_s {:.3} K; the sea's layer density {rho:.3} kg m⁻³, \
          area {:.6}; the palette's {palette:?}, {relative:+.4} above the saturated {:.3} kg m⁻³",
         moved_pressure.value() / 1e5,
         moved_mean.value(),

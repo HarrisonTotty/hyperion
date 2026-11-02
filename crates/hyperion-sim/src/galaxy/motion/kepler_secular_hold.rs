@@ -107,8 +107,9 @@ fn member(p: PointLy, velocity: [f64; 3]) -> EpochState {
 /// offsets that the exact orbit moves, at −1,000, −100, +100 and +1,000 yr, in walk order. Blessed
 /// natively on x86-64; the wasip1 suite compares it. Re-pinned by name, with its counts, in
 /// `MGE_BOXY`'s potential (P15.T3.c; it was `0x5a3e_f8cd_0176_dd6d`, of 3,281 records and 13,124
-/// record-times).
-const EXACT_POSITIONS_DIGEST: u64 = 0xea8a_e8e2_d8ea_ee1e;
+/// record-times), and at generator version 26 (it was `0xea8a_e8e2_d8ea_ee1e`, of 3,279 and
+/// 13,116).
+const EXACT_POSITIONS_DIGEST: u64 = 0x6511_054f_8c58_03dd;
 
 /// D2: the exact orbit moves the fixture's Kepler-regime grid records bound in the centre's
 /// potential off their two-body orbits ([`position_at_two_body`]), bit for bit their trajectories'
@@ -170,7 +171,7 @@ fn the_exact_orbit_moves_bound_kepler_regime_records_and_no_others_pinned() {
     );
     assert_eq!(
         (laws.get("spherical").copied(), moved),
-        (Some(3_279), 13_116),
+        (Some(3_296), 13_184),
         "pin the counts as measured"
     );
     assert_eq!(

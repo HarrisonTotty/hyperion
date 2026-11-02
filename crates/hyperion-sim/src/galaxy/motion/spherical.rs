@@ -1390,8 +1390,8 @@ mod tests {
 
     /// The digest of [`the_epoch_comes_back_to_the_bit_and_the_orbit_is_pinned`]'s values, blessed
     /// natively on x86-64. Re-pinned by name in `MGE_BOXY`'s potential (P15.T3.c; it was
-    /// `0x0244_8142_1b85_dfb4`).
-    const PINNED_DIGEST: u64 = 0xccea_0168_ca38_9fbe;
+    /// `0x0244_8142_1b85_dfb4`), and at generator version 26 (it was `0xccea_0168_ca38_9fbe`).
+    const PINNED_DIGEST: u64 = 0xb037_aac9_5363_e107;
 
     /// The fixed step counts converge: over a stress set from 10⁻³ to 100 ly, eccentricities to
     /// 0.999 and orbits unbound about the mass inside, every turning point is reached well within

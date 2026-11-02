@@ -1180,8 +1180,10 @@ mod tests {
     /// 224 km/s, solar metallicity), each neutron-star bin lies within 0.03 of `w + (1 − w) ×` the
     /// truncated DM25 share of the bin (the `w` term in the first bin only), `w` the measured
     /// low-mode share of neutron stars, which lies below a quarter of `v_c` bar a Maxwellian tail
-    /// of about 10⁻²⁵; and the black holes' first bin holds 0.78–0.88. The research's scratch 0.20, 0.10,
-    /// 0.155, … are withdrawn (ruling 120.2).
+    /// of about 10⁻²⁵; and the black holes' first bin holds 0.76–0.88 (0.78–0.88 until generator
+    /// version 26; from 26, under the enforced Humphreys–Davidson limit, which leaves fewer black
+    /// holes a complete fallback, it holds 0.774). The research's scratch 0.20, 0.10, 0.155, … are
+    /// withdrawn (ruling 120.2).
     #[test]
     fn the_band_averaged_shares_at_milky_way_values() {
         let ((ns, w), (bh, _)) = (
@@ -1201,7 +1203,7 @@ mod tests {
             );
         }
         assert!(
-            (0.78..=0.88).contains(&bh[0]),
+            (0.76..=0.88).contains(&bh[0]),
             "black holes' first bin {}",
             bh[0]
         );
