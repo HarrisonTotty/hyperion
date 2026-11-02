@@ -9,7 +9,8 @@
  * findings on it mended: the session's compile waited for, the exposure's lock verified, a cell
  * dark on one side counted, not dropped, and every cell kept in the record.
  *
- * For each look of {@link HANDOVER_LOOKS}, on the launch's setting:
+ * For each look of `deps.looks` (all of {@link HANDOVER_LOOKS}, or the one `--look` names), on the
+ * launch's setting:
  *
  * 1. `VIEW` is put on the look's check-only kept scene (`handoverScenes.ts`), the primary alone and
  *    photorealistic, and the run waits for the look's fresh terrain session to compile its

@@ -60,12 +60,12 @@ const COMPOSITE_PROBES: ReadonlyArray<CompositeProbeName> = [
   "per-pixel",
 ];
 
-/** The hand-over check's looks a launch may name (`HandoverLookName`). */
-const HANDOVER_LOOK_NAMES: ReadonlyArray<HandoverLookName> = [
+/** The hand-over check's looks, in the order a run takes them, which `--look` may name one of. */
+export const HANDOVER_LOOK_NAMES = [
   "handover-30",
   "handover-90",
   "handover-terminator",
-];
+] as const satisfies ReadonlyArray<HandoverLookName>;
 
 /**
  * `value` as the check's options, or `null` if it is not one: {@link readLaunchBase}'s, with the one

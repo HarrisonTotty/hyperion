@@ -119,7 +119,7 @@ import {
   isUniverseId,
   type SpikeLaunch,
 } from "../preload/spikeLaunch";
-import type { ViewsCheckLaunch } from "../preload/viewsCheckLaunch";
+import { HANDOVER_LOOK_NAMES, type ViewsCheckLaunch } from "../preload/viewsCheckLaunch";
 
 /** The variable giving the address of the server to link to, for `--address`. */
 export const ENV_SERVER_ADDR = "HYPERION_SERVER_ADDR";
@@ -374,7 +374,7 @@ export function buildCommand(version: string): Command {
       new Option(
         "--look <NAME>",
         "the hand-over check's one look, in place of all three (R10.T15.b.2): a launch a look",
-      ).choices(["handover-30", "handover-90", "handover-terminator"]),
+      ).choices(HANDOVER_LOOK_NAMES),
     )
     .addOption(
       new Option(
@@ -724,16 +724,9 @@ function compositeProbeOf(
 function lookOf(
   options: Readonly<Record<string, unknown>>,
 ): { readonly look: HandoverLookName } | Record<string, never> {
-  const look = HANDOVER_LOOKS_NAMED.find((each) => each === options["look"]);
+  const look = HANDOVER_LOOK_NAMES.find((each) => each === options["look"]);
   return look === undefined ? {} : { look };
 }
-
-/** The looks `--look` may name. */
-const HANDOVER_LOOKS_NAMED: ReadonlyArray<HandoverLookName> = [
-  "handover-30",
-  "handover-90",
-  "handover-terminator",
-];
 
 /** The served world `--universe` and `--body` name where both are given, else nothing. */
 function servedOf(

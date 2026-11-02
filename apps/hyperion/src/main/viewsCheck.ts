@@ -797,13 +797,15 @@ export class ViewsCheckSession {
   async writeHandoverResults(record: HandoverCheckRecord): Promise<SpikeResultsPaths> {
     const run = await this.#run;
     const dir = this.#deps.capturesDir;
-    const { served } = this.#deps.launch;
+    const { served, look } = this.#deps.launch;
     const results = buildHandoverCheckResults({
       run: {
         ...run,
         fixture: this.#deps.launch.fixture,
         // The served world a `--universe --body` launch named (plan R10, R10.T15.b).
         ...(served === undefined ? {} : { served }),
+        // The one look a `--look` launch asked (R10.T15.b.2).
+        ...(look === undefined ? {} : { look }),
         window: this.#deps.windowSize(),
         captures:
           dir === null

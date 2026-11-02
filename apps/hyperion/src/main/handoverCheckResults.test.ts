@@ -342,6 +342,18 @@ describe("the hand-over check's results", () => {
     );
   });
 
+  it("pass a --look run whose one look ran, and fail one that ran another (R10.T15.b.2)", () => {
+    const one = HANDOVER_RECORD.looks.slice(1, 2);
+    const asked = input({ ...HANDOVER_RECORD, looks: one });
+    expect(
+      buildHandoverCheckResults({ ...asked, run: { ...asked.run, look: "handover-90" } }).findings
+        .looks.reasons,
+    ).toEqual([]);
+    expect(failuresOf({ ...asked, run: { ...asked.run, look: "handover-terminator" } })).toBe(
+      "the looks ran handover-90, where handover-terminator is asked",
+    );
+  });
+
   it("fail a run that met an engine fault", () => {
     const given = input({
       ...HANDOVER_RECORD,
@@ -483,7 +495,7 @@ describe("the hand-over check's files", () => {
     const { json } = await writeHandoverResults("/out", buildHandoverCheckResults(input()), files);
     expect(JSON.parse(written.get(json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.handover-results",
-      version: 2,
+      version: 3,
       overall: "pass",
       rangeM: 1.5419e7,
     });
@@ -530,6 +542,20 @@ describe("the hand-over check's files", () => {
     expect(written.get(markdown)).toContain(
       "- **Served world:** body `0200080020000000.0300` of universe `000000000000002a`, as the server serves it, in TERRAIN TEST's place",
     );
+  });
+
+  it("are named for a --look run's look, its run block and summary naming it (R10.T15.b.2)", async () => {
+    const { files, written } = inMemory();
+    const served = { universe: "000000000000002a", body: "0200080020000000.0300" };
+    const given = input({ ...HANDOVER_RECORD, looks: HANDOVER_RECORD.looks.slice(0, 1) });
+    const { json, markdown } = await writeHandoverResults(
+      "/out",
+      buildHandoverCheckResults({ ...given, run: { ...given.run, served, look: "handover-30" } }),
+      files,
+    );
+    expect(json).toBe("/out/2026-10-21-effect-high-handover-served-handover-30.json");
+    expect(JSON.parse(written.get(json) ?? "null")).toMatchObject({ run: { look: "handover-30" } });
+    expect(written.get(markdown)).toContain("- **Look:** `handover-30` alone (`--look`)");
   });
 
   it("keep TERRAIN TEST's run block, and its summary, as before the option (R10.T1.c)", () => {
