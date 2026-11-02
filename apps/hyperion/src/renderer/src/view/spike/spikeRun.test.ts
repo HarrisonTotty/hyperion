@@ -333,6 +333,8 @@ class LoggingSession implements SpikeTerrainSession {
   readonly wanted: ReadonlySet<BodyIdHex> = new Set();
   readonly classMaps = { classMapOf: () => null };
   readonly reliefs = { reliefM: () => null };
+  /** Its passes' geometry: their setting's. */
+  readonly geometry = null;
   steps = 0;
   /** How far the passes' camera is tilted at each step, so that a later step selects again. */
   tiltRad = 0;

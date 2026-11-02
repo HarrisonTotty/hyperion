@@ -1,8 +1,9 @@
 /**
  * The smoke page's geometry override (`just test-render --geometry=<field>=<value>[,…]`, plan R14,
  * Design note 17): the fields the harness's main process read and checked from
- * `--smoke-geometry=`, each in the page's query as `geometry-<field>`, which the page's lit terrain
- * passes draw with over their setting's geometry, so that a run of the terrain's groups shows each
+ * `--smoke-geometry=`, each in the page's query as `geometry-<field>`, which the page's lit and
+ * wireframe terrain passes, its mesh bodies' figures and its hulls (plan R14's T4) draw with over
+ * their setting's geometry, so that a run of the terrain's groups shows each
  * lever, the way back among them (`clusterPath=false`), from one build. The checks that draw a
  * frame both ways set each side's geometry themselves.
  */

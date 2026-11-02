@@ -43,7 +43,7 @@ import type { DrawItem, FrameSubmission, RenderView, TextureHandle } from "../en
 import { AU_M } from "../scenes/kept";
 import { BloomChain } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL, histogramParams, histogramWorkgroups } from "../post/histogram";
-import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
+import { GEOMETRY_BEFORE_R14, type QualitySetting, SETTINGS } from "../quality/qualitySetting";
 import { limbDistanceM, pixelAngleRad } from "../terrain/handover";
 import { OUTSIDE_VIEW_MARGIN_PX, type SurveyedDatumFrame } from "../wireframe/submit";
 import {
@@ -239,6 +239,48 @@ describe("the photorealistic renderer", () => {
     ]);
     renderer.dispose();
   });
+
+  it.each([
+    [
+      "the frame's geometry with the figures' lever off",
+      { ...SETTINGS.high.geometry, figureClusters: false },
+    ],
+    ["the way back", GEOMETRY_BEFORE_R14],
+    [
+      "the cluster path off, the figures' lever on",
+      { ...SETTINGS.high.geometry, clusterPath: false },
+    ],
+  ] as const)(
+    "draws a mesh body's figure by its instanced draw with %s (plan R14, R14.T4.a)",
+    async (_, geometry) => {
+      const engine = await countingRenderEngine();
+      const renderer = new PhotorealRenderer(engine, "test view");
+      const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+      await renderer.prepare(VIEWPORT, "high", "eye", camera);
+      const frame = frameWith([]);
+      const [planet] = frame.bodies;
+      if (planet === undefined) {
+        throw new Error("no body");
+      }
+      const writer = sphereFootprint(
+        planet.centreM,
+        planet.figure.equatorialRadiusM,
+        camera,
+        VIEWPORT,
+      );
+      renderer.render(new RecordingView(), {
+        ...frame,
+        geometry,
+        depthWriters: writer === null ? [] : [writer],
+      });
+      expect(
+        engine.targetFrames
+          .find((f) => f.label === PHOTOREAL_PASS_LABELS.bodies)
+          ?.draws.map((draw) => draw.material.name),
+      ).toEqual(["bodies:smoothMesh"]);
+      renderer.dispose();
+    },
+  );
 
   it("draws a body handed over as a mesh, and its terrain after its figure in the bodies pass where the frame has one (R10.T10.e)", async () => {
     const engine = await countingRenderEngine();

@@ -44,7 +44,7 @@ import type { StyleAvailability } from "../engine/platform";
 import type { RenderEngine, RenderView } from "../engine/types";
 import type { ExposureControl } from "../photometry/exposure";
 import type { PhotorealStatus } from "../photoreal/renderer";
-import type { QualitySetting } from "../quality/qualitySetting";
+import type { GeometrySettings, QualitySetting } from "../quality/qualitySetting";
 import type { ViewTerrainSession } from "../terrain/frameTerrain";
 import type { PoseIntervals } from "../terrain/poseInterval";
 import type { TerrainSession } from "../terrain/session";
@@ -85,6 +85,11 @@ export interface SpikeSessionFrame {
   readonly tokens: ColourTokens;
   readonly selection: CameraTarget | null;
   readonly setting: QualitySetting;
+  /**
+   * How it draws its geometry (plan R14): its session's, a launch's `--geometry` over the setting's;
+   * `undefined`, the setting's.
+   */
+  readonly geometry: GeometrySettings | undefined;
   /** The frame's monotonic time, ms. */
   readonly nowMs: number;
   /** The holder through which the views at one pose state one contour interval; absent, its own. */
@@ -193,6 +198,7 @@ export class SpikeSessionView {
       selection: frame.selection,
       style: frame.run.camera.style,
       setting: frame.setting,
+      geometry: frame.geometry,
       renderScale: 1,
       availability: BOTH_STYLES,
       meter: null,

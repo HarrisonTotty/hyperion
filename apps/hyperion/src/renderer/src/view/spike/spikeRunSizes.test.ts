@@ -82,6 +82,8 @@ class SizedSession implements SpikeTerrainSession, SpikeSizesSession {
   readonly wanted: ReadonlySet<BodyIdHex> = new Set();
   readonly classMaps = { classMapOf: () => null };
   readonly reliefs = { reliefM: () => null };
+  /** Its passes' geometry: their setting's. */
+  readonly geometry = null;
   readonly workerCount = 1;
   steps = 0;
   /** Whether the step steps the wireframe pass too, so that a test can tell the passes apart. */

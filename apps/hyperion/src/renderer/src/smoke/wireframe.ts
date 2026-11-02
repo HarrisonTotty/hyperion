@@ -58,6 +58,7 @@ import { type ColourTokens, readTokens } from "../spatial/paint";
 import { runPose, SCENE_OPTIONS, startRun } from "../displays/view/viewRun";
 import { aViewCraft, aViewScene, FIXTURE_SYSTEM, NO_TURN } from "../test/viewFixtures";
 import { type HullOutline, hullOutline } from "../view/scene/hull";
+import { smokeGeometry } from "./geometry";
 import { bytesDigest, type Checks, halfTexels, pause, show, texel } from "./harness";
 
 /** The side of the square targets the checks draw into, px. */
@@ -235,7 +236,9 @@ function sameColour(seen: ReadonlyArray<number>, want: Float32Array): boolean {
 export async function checkWireframe(engine: RenderEngine, checks: Checks): Promise<void> {
   const tokens = readTokens(document.documentElement);
   const made = new WireframeRenderer(engine);
-  // The hulls' faces on the cluster path from the first frame (plan R14, R14.T4.b).
+  // The hulls' faces as the page's geometry draws them, on the cluster path by default, from the
+  // first frame (plan R14, R14.T4.b).
+  made.setGeometry(smokeGeometry("high"));
   const ready = await made.clustersReady();
   const hullFrames: HullFrame[] = [];
   const renderer: Framer = {
@@ -484,12 +487,14 @@ async function checkHullClusters(
       // oxlint-disable-next-line no-await-in-loop
       const back = await drawFrameBytes(engine, renderer, frame);
       renderer.setGeometry(SETTINGS.high.geometry);
+      // On the path, read back before the counters' sample reads its buckets.
       // oxlint-disable-next-line no-await-in-loop
       const path = await drawFrameBytes(engine, renderer, frame);
       const drawn = renderer.lastHullClusters;
       if (drawn !== null) {
         onPath += 1;
         faces += drawn.triangles;
+        // Its counters answer before the next frame's cull writes the buckets again.
         // oxlint-disable-next-line no-await-in-loop
         const answer = await hullStats(engine, drawn.buckets);
         if (answer !== null) {
@@ -505,7 +510,7 @@ async function checkHullClusters(
       }
     }
   } finally {
-    renderer.setGeometry(SETTINGS.high.geometry);
+    renderer.setGeometry(smokeGeometry("high"));
   }
   checks.check(
     "R14.T4.b the hulls' occluder faces drawn through the cluster path draw every hull frame the instanced draws draw, byte for byte in colour and depth",

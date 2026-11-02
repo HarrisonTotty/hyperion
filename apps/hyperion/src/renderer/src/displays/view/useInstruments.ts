@@ -229,7 +229,7 @@ export interface InstrumentsFrame {
    * How each instrument draws its geometry (plan R14, Design note 17): a launch's `--geometry` over
    * the setting's; the setting's where absent.
    */
-  readonly geometry?: GeometrySettings | undefined;
+  readonly geometry: GeometrySettings | undefined;
   /** The primary view's exposure, which each instrument draws at. */
   readonly exposure: ExposureControl;
   /**

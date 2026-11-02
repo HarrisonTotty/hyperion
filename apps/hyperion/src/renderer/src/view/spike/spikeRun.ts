@@ -63,6 +63,7 @@ import { controlEv100 } from "../photometry/exposure";
 import {
   type GeometrySettings,
   type QualitySetting,
+  SETTINGS,
   TERRAIN_SETTINGS,
   terrainSettingsFor,
   type TerrainVariant,
@@ -520,7 +521,7 @@ export interface SpikeTerrainPass
  * stand-in): its main view's, its step, and its passes.
  */
 export interface SpikeTerrainSession
-  extends SpikeViewSession, Pick<TerrainSession, "step" | "failComputation"> {
+  extends SpikeViewSession, Pick<TerrainSession, "step" | "failComputation" | "geometry"> {
   pass(body: BodyIdHex): SpikeTerrainPass | null;
   wirePass(body: BodyIdHex): SpikeTerrainPass | null;
 }
@@ -814,12 +815,20 @@ export class SpikeRun {
         }
         this.#main = { ...main, second };
       }
-      const orbit = new WireframeRenderer(engine);
+      // The instruments' hulls drawn by the session's geometry, its launch's `--geometry` over its
+      // setting's (plan R14, R14.T4.b).
+      const geometry = body?.session.geometry ?? SETTINGS[options.setting].geometry;
+      const instrument = (): WireframeRenderer => {
+        const made = new WireframeRenderer(engine);
+        made.setGeometry(geometry);
+        return made;
+      };
+      const orbit = instrument();
       undo.push(() => {
         orbit.dispose();
       });
       const drawsCraft = this.#main.kind === "body" && this.#main.second !== null;
-      this.#instruments = { orbit, craft: drawsCraft ? null : new WireframeRenderer(engine) };
+      this.#instruments = { orbit, craft: drawsCraft ? null : instrument() };
     } catch (error: unknown) {
       for (const release of undo.toReversed()) {
         release();
@@ -1138,6 +1147,7 @@ export class SpikeRun {
       tokens: input.tokens,
       selection: input.selection,
       setting: main.setting,
+      geometry: session.geometry ?? undefined,
       nowMs: input.nowMs,
     });
     // What it draws now, in the style it last drew in (S8), for the step below.
@@ -1156,6 +1166,7 @@ export class SpikeRun {
             tokens: input.tokens,
             selection: input.selection,
             setting: main.setting,
+            geometry: session.geometry ?? undefined,
             nowMs: input.nowMs,
           });
     if (second !== null && secondInputs !== null) {

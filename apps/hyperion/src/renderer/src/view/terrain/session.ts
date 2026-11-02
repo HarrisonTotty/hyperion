@@ -984,6 +984,14 @@ export class TerrainSession {
     return this.#materials.startedAtMs;
   }
 
+  /**
+   * How its passes draw their geometry (plan R14): a launch's override over its setting's, or `null`
+   * for the setting's; the views that draw beside its passes take the same (`ViewFrameInputs`).
+   */
+  get geometry(): GeometrySettings | null {
+    return this.#geometry;
+  }
+
   /** The bodies with a terrain pass: each handed over since its field was last taken (R10.T16.b). */
   get passBodies(): ReadonlySet<BodyIdHex> {
     return new Set(this.#passes.keys());

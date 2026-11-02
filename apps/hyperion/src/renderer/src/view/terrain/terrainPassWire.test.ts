@@ -5,7 +5,7 @@
  * annunciation and mask.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { PRIMARY_VIEW_ID } from "../../displays/view/viewNames";
 import { type Vec3, vec3 } from "../../geometry/vec3";
@@ -332,8 +332,11 @@ function lastWrite(engine: CountingRenderEngine, name: string): ArrayBuffer {
 }
 
 /** The slots of the instance records last written for the primary, in order. */
-function instanceSlots(engine: CountingRenderEngine): number[] {
-  const u = new Uint32Array(lastWrite(engine, `terrain instances (${PRIMARY})`));
+function instanceSlots(
+  engine: CountingRenderEngine,
+  buffer = `terrain instances (${PRIMARY})`,
+): number[] {
+  const u = new Uint32Array(lastWrite(engine, buffer));
   const slots: number[] = [];
   for (let n = 0; n < u.length / (INSTANCE_RECORD_BYTES / 4); n += 1) {
     slots.push(u[n * WORDS + 3] ?? -1);
@@ -342,8 +345,11 @@ function instanceSlots(engine: CountingRenderEngine): number[] {
 }
 
 /** The phase records last written for the primary, twelve `f32` each, in order. */
-function phaseRecords(engine: CountingRenderEngine): number[][] {
-  const f = new Float32Array(lastWrite(engine, `terrain phases (${PRIMARY})`));
+function phaseRecords(
+  engine: CountingRenderEngine,
+  buffer = `terrain phases (${PRIMARY})`,
+): number[][] {
+  const f = new Float32Array(lastWrite(engine, buffer));
   const words = WIRE_PHASE_RECORD_BYTES / 4;
   const records: number[][] = [];
   for (let n = 0; n < f.length / words; n += 1) {
@@ -380,11 +386,12 @@ function expectedPhases(
   made: Made,
   wire: TerrainWireFrameInput,
   at: ReadonlyMap<string, { readonly originM: Vec3; readonly originHeightM: number }> = new Map(),
+  instances = `terrain instances (${PRIMARY})`,
 ): number[][] {
   const drawn = new Map(
     (made.pass.lastStep?.drawSet.patches ?? []).map((patch) => [patch.patch.slot, patch]),
   );
-  return instanceSlots(made.engine).map((slot) => {
+  return instanceSlots(made.engine, instances).map((slot) => {
     const patch = drawn.get(slot);
     if (patch === undefined) {
       return [];
@@ -831,7 +838,78 @@ describe("the wireframe's interior patches on the cluster path (plan R14, R14.T4
     ]);
   });
 
-  it("binds the interior records and their own phases to its cluster draws, each phase in its record's order", async () => {
+  it("writes the interior patches' phases in their records' order, and the edge patches' in theirs", async () => {
+    const made = await clusteredPass();
+    streamed(made);
+    made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE));
+    const interior = `terrain interior instances (${PRIMARY})`;
+    const records = phaseRecords(made.engine, `terrain interior phases (${PRIMARY})`);
+    expect([records.length > 1, records, phaseRecords(made.engine)]).toEqual([
+      true,
+      expectedPhases(made, WIRE, new Map(), interior),
+      expectedPhases(made, WIRE),
+    ]);
+  });
+
+  it("makes no GPU object after warm-up, frame after frame", async () => {
+    const made = await clusteredPass();
+    streamed(made);
+    made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE));
+    made.engine.resetCounts();
+    for (let n = 1; n < 20; n += 1) {
+      made.pass.step({ views: [passView(VIEW)], grounded: [] });
+      made.pass.drawFor(PRIMARY, frameOf(VIEW, { ...WIRE, intervalM: n % 2 === 0 ? 200 : 500 }));
+    }
+    const { buffers, textures, meshes, materials } = made.engine.counts;
+    expect([buffers, textures, meshes, materials]).toEqual([0, 0, 0, 0]);
+  });
+
+  it("draws every patch by the lit mesh, compacting nothing, and states the refusal where its form is refused", async () => {
+    const engine = new CompileRecordingEngine(
+      await fakeDevice({
+        maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
+        maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
+      }),
+    );
+    engine.failMaterials((name) => name.startsWith("terrain-wire-cluster"));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const lanes: WireLane[] = [];
+    const pass = new TerrainPass({
+      engine,
+      setting: "low",
+      planet: PLANET,
+      source: WIRE_BODY,
+      terrain: wireframeTerrainSettings("low"),
+      geometry: SETTINGS.low.geometry,
+      createPool: (bake) => {
+        const lane = new WireLane(bake);
+        lanes.push(lane);
+        return lane;
+      },
+    });
+    await pass.ready();
+    const made: Made = {
+      pass,
+      engine,
+      lane: () => {
+        const lane = lanes.at(-1);
+        if (lane === undefined) {
+          throw new Error("no lane was taken");
+        }
+        return lane;
+      },
+    };
+    streamed(made);
+    const frame = pass.drawFor(PRIMARY, frameOf(VIEW, WIRE));
+    expect([
+      frame.draws.map((d) => [d.mesh.name, d.material.name]),
+      engine.dispatched.filter((d) => d.pass === TERRAIN_CLUSTER_COMPACT_LABEL).length,
+      pass.clusterRefusal?.includes("wire-cluster") === true,
+      errors.mock.calls.length > 0,
+    ]).toEqual([[["terrain lit patch", "terrain-wire-face-differences"]], 0, true, true]);
+  });
+
+  it("binds the interior records and their own phases to its cluster draws", async () => {
     const made = await clusteredPass();
     streamed(made);
     const draw = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE)).draws[0];

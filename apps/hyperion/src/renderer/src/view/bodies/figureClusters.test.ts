@@ -12,7 +12,7 @@ import { add, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aHostDisc } from "../../test/litFixtures";
 import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
-import { type ProjectionCamera, type Viewport } from "../camera/projection";
+import type { ProjectionCamera, Viewport } from "../camera/projection";
 import type { DrawItem } from "../engine/types";
 import { IDENTITY_QUATERNION, lookAlong } from "../camera/quaternion";
 import {
@@ -241,7 +241,15 @@ describe("the lit bodies' renderer on the figures' cluster path (plan R14, R14.T
     renderer.dispose();
   });
 
-  it("draws each figure instanced on the way back, and until its kernel is made", async () => {
+  it.each([
+    ["before its kernel is made", null],
+    ["on the way back", GEOMETRY_BEFORE_R14],
+    ["with the figures' lever off", { ...SETTINGS.high.geometry, figureClusters: false }],
+    [
+      "with the cluster path off, the figures' lever on",
+      { ...SETTINGS.high.geometry, clusterPath: false },
+    ],
+  ] as const)("draws each figure instanced, culling nothing, %s", async (_, geometry) => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
     const [, plan] = plans()[0] ?? [];
@@ -249,19 +257,16 @@ describe("the lit bodies' renderer on the figures' cluster path (plan R14, R14.T
       throw new Error("no plan");
     }
     const patches = plan.meshes[0]?.mesh.patches.length ?? 0;
-    // Before the kernel's compile settles.
-    const before = renderer.meshDraws(plan);
-    await renderer.clustersReady();
-    renderer.setGeometry(GEOMETRY_BEFORE_R14);
-    const back = renderer.meshDraws(plan);
-    renderer.setGeometry({ ...SETTINGS.high.geometry, figureClusters: false });
-    const off = renderer.meshDraws(plan);
-    for (const draws of [before, back, off]) {
-      expect(draws.map((d) => [d.material.name, d.instanceCount, d.indirect])).toEqual([
-        ["bodies:smoothMesh", patches, undefined],
-      ]);
+    if (geometry !== null) {
+      // Its kernel made, and the geometry asked.
+      await renderer.clustersReady();
+      renderer.setGeometry(geometry);
     }
-    expect(engine.dispatched.filter((d) => d.pass === FIGURE_CLUSTER_CULL_LABEL)).toEqual([]);
+    const draws = renderer.meshDraws(plan);
+    expect([
+      draws.map((d) => [d.material.name, d.instanceCount, d.indirect]),
+      engine.dispatched.filter((d) => d.pass === FIGURE_CLUSTER_CULL_LABEL).length,
+    ]).toEqual([[["bodies:smoothMesh", patches, undefined]], 0]);
     renderer.dispose();
   });
 

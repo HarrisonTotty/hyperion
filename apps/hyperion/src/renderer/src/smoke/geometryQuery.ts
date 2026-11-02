@@ -15,6 +15,9 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
   const clusterPath = flag("clusterPath");
   const casterDepthCull = flag("casterDepthCull");
   const litClusters = flag("litClusters");
+  const figureClusters = flag("figureClusters");
+  const hullClusters = flag("hullClusters");
+  const wireClusters = flag("wireClusters");
   const cap = parameters.get("geometry-casterStrideCap");
   const casterStrideCap =
     cap === "1" ? 1 : cap === "2" ? 2 : cap === "4" ? 4 : cap === "8" ? 8 : undefined;
@@ -30,5 +33,8 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     ...(overlayDepth === undefined ? {} : { overlayDepth }),
     ...(litClusters === undefined ? {} : { litClusters }),
     ...(farCascadeRate === undefined ? {} : { farCascadeRate }),
+    ...(figureClusters === undefined ? {} : { figureClusters }),
+    ...(hullClusters === undefined ? {} : { hullClusters }),
+    ...(wireClusters === undefined ? {} : { wireClusters }),
   };
 }

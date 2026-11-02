@@ -298,11 +298,13 @@ const OCCLUDER_VERTEX_HEAD = "@vertex\nfn vertexMain(";
 const OCCLUDER_DRAW_END = "  fill: vec4f,\n}";
 
 /**
- * A hull material's form on the cluster path (plan R14, R14.T4.b): `spec`'s states, uniforms and
- * fragment stage, its `Draw` taking `clusterBase` after its own fields, its instanced vertex stage
- * taken out for `occluderCluster.wgsl`'s, which reads a bucket's list and the hulls' instances.
+ * A hull material's form on the cluster path (plan R14, R14.T4.b): `instanced`'s states, uniforms
+ * and fragment stage, its `Draw` taking `clusterBase` after its own fields, its instanced vertex
+ * stage taken out for `occluderCluster.wgsl`'s, which reads a bucket's list and the hulls'
+ * instances.
  *
- * @throws Error unless occluder.wgsl's vertex stage and its `Draw`'s end each occur once in `spec`.
+ * @throws Error unless occluder.wgsl's vertex stage and its `Draw`'s end each occur once in
+ *   `instanced`.
  */
 export function hullClusterMaterial(
   instanced: WgslMaterialSpec,

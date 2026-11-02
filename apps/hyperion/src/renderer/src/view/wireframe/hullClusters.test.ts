@@ -171,37 +171,48 @@ describe("the wireframe renderer's hulls on the cluster path (plan R14, R14.T4.b
     renderer.dispose();
   });
 
-  it("draws each hull instanced on the way back, for hulls of two fills, and until its kernel is made", async () => {
+  it.each([
+    ["before its kernel is made", null],
+    ["on the way back", GEOMETRY_BEFORE_R14],
+    ["with the hulls' lever off", { ...SETTINGS.high.geometry, hullClusters: false }],
+    [
+      "with the cluster path off, the hulls' lever on",
+      { ...SETTINGS.high.geometry, clusterPath: false },
+    ],
+  ] as const)("draws each hull instanced, culling nothing, %s", async (_, geometry) => {
     const engine = await countingRenderEngine();
     const renderer = new WireframeRenderer(engine);
     const list = listOf([hullAt("a", [0, 0, -40], null), hullAt("b", [5, 0, -60], null)]);
     const faces = (list.occluderMeshes[0]?.triangles.length ?? 0) / 9;
-    const instanced = [
-      ["wireframe:occluderHull", "wireframe:triangle", faces, undefined],
-      ["wireframe:occluderHull", "wireframe:triangle", faces, undefined],
-    ];
-    const before = renderer.frame(list, CAMERA, VIEWPORT);
-    await renderer.clustersReady();
-    renderer.setGeometry(GEOMETRY_BEFORE_R14);
-    const back = renderer.frame(list, CAMERA, VIEWPORT);
-    renderer.setGeometry({ ...SETTINGS.high.geometry, hullClusters: false });
-    const off = renderer.frame(list, CAMERA, VIEWPORT);
-    renderer.setGeometry(SETTINGS.high.geometry);
-    const mixed = renderer.frame(
-      listOf([hullAt("a", [0, 0, -40], null), hullAt("b", [5, 0, -60], "#101418")]),
-      CAMERA,
-      VIEWPORT,
-    );
-    expect([before, back, off].map((f) => drawShapes(f.draws))).toEqual([
-      instanced,
-      instanced,
-      instanced,
+    if (geometry !== null) {
+      // Its kernel made, and the geometry asked.
+      await renderer.clustersReady();
+      renderer.setGeometry(geometry);
+    }
+    const frame = renderer.frame(list, CAMERA, VIEWPORT);
+    expect([
+      drawShapes(frame.draws),
+      engine.dispatched.filter((d) => d.pass === HULL_CLUSTER_CULL_LABEL).length,
+    ]).toEqual([
+      [
+        ["wireframe:occluderHull", "wireframe:triangle", faces, undefined],
+        ["wireframe:occluderHull", "wireframe:triangle", faces, undefined],
+      ],
+      0,
     ]);
-    expect(drawShapes(mixed.draws)).toEqual([
-      instanced[0],
+    renderer.dispose();
+  });
+
+  it("draws hulls of two fills instanced, the depth's and the silhouette's", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new WireframeRenderer(engine);
+    await renderer.clustersReady();
+    const list = listOf([hullAt("a", [0, 0, -40], null), hullAt("b", [5, 0, -60], "#101418")]);
+    const faces = (list.occluderMeshes[0]?.triangles.length ?? 0) / 9;
+    expect(drawShapes(renderer.frame(list, CAMERA, VIEWPORT).draws)).toEqual([
+      ["wireframe:occluderHull", "wireframe:triangle", faces, undefined],
       ["wireframe:hullSilhouette", "wireframe:triangle", faces, undefined],
     ]);
-    expect(engine.dispatched.filter((d) => d.pass === HULL_CLUSTER_CULL_LABEL)).toEqual([]);
     renderer.dispose();
   });
 

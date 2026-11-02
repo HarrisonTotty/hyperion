@@ -76,6 +76,7 @@ import { CASING_PX } from "../lib/strokes";
 import { moonLikeFixture } from "../test/moonLikeFixture";
 import { addCanvas } from "./frames";
 import { bytesDigest, type Checks, pause } from "./harness";
+import { smokeGeometry } from "./geometry";
 import { isPassTimer } from "./sharedPass";
 import { CLUSTER_CULL_KERNEL } from "../view/clusters/cull";
 import { MOON_LIKE } from "./litTerrain";
@@ -301,6 +302,7 @@ export async function checkWireframeTerrain(engine: RenderEngine, checks: Checks
       },
       createPool: (bake) => pool.lane(bake),
       survey,
+      geometry: smokeGeometry("low"),
     });
     pass = made;
     await made.ready();
@@ -479,6 +481,7 @@ export async function checkWireframeTerrain(engine: RenderEngine, checks: Checks
     const byMesh = await drawWith(base, { draws: frameAt(performance.now()).draws, surveyed });
     made.setGeometry(SETTINGS.low.geometry);
     const byClusters = await drawWith(base, { draws: frameAt(performance.now()).draws, surveyed });
+    made.setGeometry(smokeGeometry("low"));
     let triangles: number | null = null;
     for (let round = 0; round < 8 && triangles === null; round += 1) {
       // Each frame samples the counters the last one's read answers into: one after the other.

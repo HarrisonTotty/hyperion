@@ -61,6 +61,7 @@ import { addCanvas } from "./frames";
 import { ClusterStats } from "../view/clusters/stats";
 import { GEOMETRY_BEFORE_R14, SETTINGS } from "../view/quality/qualitySetting";
 import { PATCH_INDICES } from "../view/terrain/gpu/resources";
+import { smokeGeometry } from "./geometry";
 import { bytesDigest, type Checks, halfTexels, halfUlpsApart, pause } from "./harness";
 
 const EXPOSURE = 1e-4;
@@ -259,6 +260,8 @@ function planOfOne(
 /** T9: the mesh regime on the GPU. */
 export async function checkMeshBodies(engine: RenderEngine, checks: Checks): Promise<void> {
   const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+  // The figures as the page's geometry draws them (plan R14, R14.T4.a).
+  renderer.setGeometry(smokeGeometry("high"));
   try {
     await checkPromoted(engine, renderer, checks);
     await checkPromotedCells(engine, renderer, checks);
@@ -441,9 +444,11 @@ async function checkFigureClusters(
       // oxlint-disable-next-line no-await-in-loop
       const back = await drawFigureFrame(engine, renderer, plan, camera, size);
       renderer.setGeometry(SETTINGS.high.geometry);
+      // On the path, read back before the counters' sample reads its buckets.
       // oxlint-disable-next-line no-await-in-loop
       const path = await drawFigureFrame(engine, renderer, plan, camera, size);
       clusterDraws += renderer.meshDraws(plan).length;
+      // Its counters answer before the next frame's cull writes the buckets again.
       // oxlint-disable-next-line no-await-in-loop
       const answer = await figureStats(engine, renderer, plan);
       const colourSame = bytesDigest(back.colour) === bytesDigest(path.colour);
@@ -462,7 +467,7 @@ async function checkFigureClusters(
       }
     }
   } finally {
-    renderer.setGeometry(SETTINGS.high.geometry);
+    renderer.setGeometry(smokeGeometry("high"));
   }
   checks.check(
     "R14.T4.a the mesh regime's figures drawn through the cluster path draw the frames their instanced draws draw, byte for byte in colour and depth, with no more triangles",

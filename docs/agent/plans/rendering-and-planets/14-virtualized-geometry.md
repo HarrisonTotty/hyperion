@@ -2053,6 +2053,9 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     `--geometry wireClusters=`; results files without it read `false`.
   - A wireframe view's buckets hold the lit pass's six passes and use the sixth.
   - Timed passes: 4 a wireframe view-frame with interior patches (the cull and the compaction's 3).
+  - R10.T11's tally check (`smoke/wireframeTerrain.ts`) counts apart the engine's pass timer and
+    the cull kernel's uniforms, which the wireframe renderer's own handle of the kernel keeps.
+  - Not built: the counting harness's wireframe rule (Design note 18), left for a later subtask.
 - **From building T4** (`r14-t4-consumers`):
   - Each consumer has its own field beside `clusterPath`, and draws on the path only where both are
     on (lean, 2026-11-02: Design note 17's "the same field" read as `clusterPath` and the
@@ -2063,3 +2066,6 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - `ClusterConsumer` holds no buffers: its records and instances come with each frame
     (`ConsumerCull`), and `vertexWgsl` is its vertex stage over a bucket's list, not a
     `cluster_place` function.
+  - The smoke page's `--geometry` reaches every T4 consumer (`smoke/geometryQuery.ts`); the spike's
+    view and instruments take its session's geometry (`TerrainSession.geometry`), and
+    `ViewFrameInputs.geometry` and `InstrumentsFrame.geometry` are required keys.

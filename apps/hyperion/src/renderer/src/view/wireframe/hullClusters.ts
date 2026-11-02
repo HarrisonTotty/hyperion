@@ -22,8 +22,8 @@
  *   bits, its page, and its first triangle in the frame's `corners` and its triangle count.
  */
 
+import type { Vec3 } from "../../geometry/vec3";
 import {
-  type ClusterLod,
   CLUSTER_LOD_BYTES,
   CLUSTER_RECORD_BYTES,
   MESH_CLUSTER_TRIANGLES,
@@ -100,8 +100,8 @@ export function hullClusterFrame(meshes: ReadonlyArray<OccluderMesh>): HullClust
       }
       const sphere = cornersSphere(mesh.triangles, first, count);
       packClusterRecord(recordView, record, {
-        centreM: sphere.parentCentreM,
-        radiusM: sphere.parentRadiusM,
+        centreM: sphere.centreM,
+        radiusM: sphere.radiusM,
         mode: "dag",
         errorsM: [0, Infinity],
         templateRef: meshTemplateRef(first, count),
@@ -109,7 +109,11 @@ export function hullClusterFrame(meshes: ReadonlyArray<OccluderMesh>): HullClust
         mayDiscard: false,
         material: 0,
       });
-      packClusterLod(lodView, lod, sphere);
+      // One level: its parent group's sphere is its own, never projected against +∞.
+      packClusterLod(lodView, lod, {
+        parentCentreM: sphere.centreM,
+        parentRadiusM: sphere.radiusM,
+      });
       clusters += 1;
     }
     firstTriangle += triangles;
@@ -122,7 +126,11 @@ export function hullClusterFrame(meshes: ReadonlyArray<OccluderMesh>): HullClust
  * `first`: about the middle of their corners' box, its radius the farthest corner (see the
  * module's remarks).
  */
-function cornersSphere(corners: Float32Array, first: number, count: number): ClusterLod {
+function cornersSphere(
+  corners: Float32Array,
+  first: number,
+  count: number,
+): { readonly centreM: Vec3; readonly radiusM: number } {
   const low = [Infinity, Infinity, Infinity];
   const high = [-Infinity, -Infinity, -Infinity];
   for (let n = 9 * first; n < 9 * (first + count); n += 3) {
@@ -146,7 +154,7 @@ function cornersSphere(corners: Float32Array, first: number, count: number): Clu
   }
   const reachM = Math.hypot(cx ?? 0, cy ?? 0, cz ?? 0) + radiusM;
   return {
-    parentCentreM: { x: cx ?? 0, y: cy ?? 0, z: cz ?? 0 },
-    parentRadiusM: radiusM + CLUSTER_PAD_M + CLUSTER_PAD_FRACTION * reachM,
+    centreM: { x: cx ?? 0, y: cy ?? 0, z: cz ?? 0 },
+    radiusM: radiusM + CLUSTER_PAD_M + CLUSTER_PAD_FRACTION * reachM,
   };
 }

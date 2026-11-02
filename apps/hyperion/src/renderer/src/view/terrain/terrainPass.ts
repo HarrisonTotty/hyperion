@@ -945,7 +945,11 @@ interface ViewState {
    * own, the lit pass's by the redraw, or `null` for the redraw of its draws.
    */
   lastOverlayPass: number | null;
-  /** Whether its last frame drew its interior patches through the lit pass (plan R14, R14.T2.a). */
+  /**
+   * Whether its last frame drew its interior patches through the lit pass's camera pass on the
+   * cluster path (plan R14, R14.T2.a), the wireframe's alike (R14.T4.c), whose counts then hold its
+   * clusters' triangles.
+   */
   lastLit: boolean;
   /** Its cluster path's state (plan R14), made at its first frame on it. */
   clusters: ViewClusters | null;
@@ -1017,7 +1021,8 @@ interface ViewClusters {
   /**
    * The lit pass's bucket draws' shared part (plan R14, R14.T2.a): the interior draw's but its mesh,
    * indirect arguments and material, with the lists, and the interior draw and the form it was made
-   * from; `null` before.
+   * from; `null` before. On a wireframe pass the same camera pass's (`CLUSTER_LIT_PASS`), the
+   * wireframe draw's (R14.T4.c).
    */
   litBase: BucketDrawBase | null;
   litBeside: DrawItem | null;
@@ -3559,12 +3564,12 @@ export class TerrainPass {
         // edge patches' draw (plan R14, R14.T4.c; Design note 13).
         const wireClusters = this.#wireClusterPath(device, state, edgeDraw);
         this.#cullClusters(device, state, wireClusters, input, null);
-        const litBase = wireClusters.litBase;
-        if (litBase === null) {
+        const wireBase = wireClusters.litBase;
+        if (wireBase === null) {
           throw new Error("the wireframe's cluster path has no draw base");
         }
         draws = [
-          ...wireClusters.buckets.drawItems(CLUSTER_LIT_PASS, wireClusters.mesh, litBase, 1),
+          ...wireClusters.buckets.drawItems(CLUSTER_LIT_PASS, wireClusters.mesh, wireBase, 1),
           ...(instances.count > 0 ? [edgeDraw] : []),
         ];
         wireLit = true;

@@ -112,7 +112,7 @@ export interface ViewFrameInputs {
    * How its geometry is drawn (plan R14, Design note 17): a launch's `--geometry` over its
    * setting's, which its mesh bodies' figures take (R14.T4.a); the setting's where absent.
    */
-  readonly geometry?: GeometrySettings | undefined;
+  readonly geometry: GeometrySettings | undefined;
   /**
    * The setting whose sizes its photorealistic frame's air is drawn at: the low setting's while
    * its frame-rate floor has stepped it down (`BudgetedScale.airStepped`; the owner's report,

@@ -6,7 +6,8 @@
  * @remarks
  * Terrain registers through `TerrainPass`, whose slots are its pages; every other consumer holds a
  * {@link ClusterConsumerPath} of its own: from R14.T4.a the mesh regime's figure, its strided
- * templates at stride 1 and its records written a frame (`bodies/smoothMesh.ts`).
+ * templates at stride 1 and its records written a frame (`bodies/smoothMesh.ts`), and from R14.T4.b
+ * the hulls' occluder faces, the mesh template in the DAG-cut mode (`wireframe/hullClusters.ts`).
  *
  * - **Instances**: a consumer's instance record begins with its origin less the camera, three
  *   `f32` in the frame the passes are in, and its page, a `u32` (the cull's instance words), and
