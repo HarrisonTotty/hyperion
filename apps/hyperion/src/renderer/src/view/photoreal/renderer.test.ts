@@ -1,3 +1,4 @@
+import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
 import { describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
@@ -228,7 +229,12 @@ describe("the photorealistic renderer", () => {
     ]);
     expect(passes.slice(0, 3)).toEqual([
       [SKY_PASS_LABEL, "clear", ["sky:starSpriteHdr"]],
-      [PHOTOREAL_PASS_LABELS.bodies, "load", ["bodies:smoothMesh"]],
+      // The figure on the cluster path (plan R14, R14.T4.a): its stride-1 blocks' and strips' buckets.
+      [
+        PHOTOREAL_PASS_LABELS.bodies,
+        "load",
+        ["bodies:smoothMeshCluster", "bodies:smoothMeshCluster"],
+      ],
       [PHOTOREAL_PASS_LABELS.discs, "load", ["bodies:discLimb"]],
     ]);
     renderer.dispose();
@@ -272,7 +278,7 @@ describe("the photorealistic renderer", () => {
     // Without a terrain the body is drawn as a mesh body is.
     const bare = renderer.render(new RecordingView(), { ...frame, bodies });
     expect(bare?.regimes.get(bodies[0]?.id ?? "")).toBe("terrain");
-    expect(bodiesPass(0)).toEqual(["bodies:smoothMesh"]);
+    expect(bodiesPass(0)).toEqual(["bodies:smoothMeshCluster", "bodies:smoothMeshCluster"]);
     const from = engine.targetFrames.length;
     const plan = renderer.render(new RecordingView(), {
       ...frame,
@@ -281,7 +287,11 @@ describe("the photorealistic renderer", () => {
       terrain,
     });
     expect(asked).toEqual([plan]);
-    expect(bodiesPass(from)).toEqual(["bodies:smoothMesh", "terrain-lit-baked-offsets"]);
+    expect(bodiesPass(from)).toEqual([
+      "bodies:smoothMeshCluster",
+      "bodies:smoothMeshCluster",
+      "terrain-lit-baked-offsets",
+    ]);
     renderer.dispose();
   });
 
@@ -584,7 +594,7 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     ]);
     const bodies = passes.findIndex(([label]) => label === PHOTOREAL_PASS_LABELS.bodies);
     const composite = passes.findIndex(([label]) => label === ATMOSPHERE_COMPOSITE_PASS);
-    expect(passes[bodies]?.[1]).toContain("bodies:smoothMesh");
+    expect(passes[bodies]?.[1]).toContain("bodies:smoothMeshCluster");
     expect(bodies).toBeGreaterThanOrEqual(0);
     expect(bodies).toBeLessThan(composite);
     renderer.dispose();
@@ -985,7 +995,9 @@ async function overlayDatums(
  * (`withDeckRead`), for a body whose tables hold one; since R08.T15.b.2 the sky view, the aerial
  * perspective and the march beneath a deck (`belowDeckKernel`), for a camera under a deck over a
  * surface; its per-planet tables' four, and since
- * R08.T14.d.4 the sky's irradiance over the thick table; and the sky bake's four. Each is a module constant, its WGSL fixed text with no value of a medium, a body or a
+ * R08.T14.d.4 the sky's irradiance over the thick table; since plan R14's T4.a the cluster cull, the
+ * mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; and the sky bake's
+ * four. Each is a module constant, its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
  * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 47,
@@ -1036,6 +1048,7 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   SLOT_DEPTHS_KERNEL,
   IRRADIANCE_KERNEL,
   IRRADIANCE_THICK_KERNEL,
+  CLUSTER_CULL_KERNEL,
   ...BAKE_KERNELS,
 ];
 

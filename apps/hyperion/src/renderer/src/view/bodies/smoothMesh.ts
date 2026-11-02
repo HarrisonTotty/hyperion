@@ -42,7 +42,24 @@ import {
   rotateToBodyFixed,
   rotation3FromRows,
 } from "../coords/rotation";
+import {
+  CLUSTER_FLAG_MAY_DISCARD,
+  CLUSTER_RECORD_BYTES,
+  CLUSTER_SHAPE_CODE,
+} from "../clusters/record";
+import {
+  CLUSTER_PAD_FRACTION,
+  CLUSTER_PAD_M,
+  STRIP_NORMAL_FRACTION,
+  TERRAIN_BLOCKS,
+  TERRAIN_CLUSTERS_PER_PAGE,
+  terrainBlockSphere,
+  terrainClusterPlace,
+  terrainTemplateRef,
+} from "../clusters/terrain";
 import type { QualitySetting } from "../quality/qualitySetting";
+import { patchBounds } from "../terrain/bounds";
+import type { FrustumCamera } from "../terrain/cull";
 import { stToUv } from "../terrain/cube";
 import { patchMeshData } from "../terrain/gpu/resources";
 import {
@@ -53,7 +70,7 @@ import {
   SLOT_RECORD_BYTES,
   writeSlotRecord,
 } from "../terrain/gpu/uniforms";
-import type { PatchKey } from "../terrain/patchKey";
+import { MAX_LEVEL, type PatchKey } from "../terrain/patchKey";
 import { type BodyFigure, planetGeometry, type PlanetGeometry } from "../terrain/planet";
 import { chordSagittaM, selectPatches, type ViewSelectionInput } from "../terrain/select";
 import { effectiveTauPx, morphRangeM } from "../terrain/terrainPass";
@@ -100,6 +117,11 @@ export interface SmoothMesh {
    * than its tolerance inside the limb.
    */
   readonly limited: boolean;
+  /**
+   * The camera it was selected for, its orientation along the galactic axes its origins are in,
+   * whose frustum its cluster path culls to (plan R14, R14.T4.a).
+   */
+  readonly camera: FrustumCamera;
 }
 
 /**
@@ -241,7 +263,14 @@ export function smoothMeshOf(
         2 * chordSagittaM(planet, Math.max(key.level - 1, 0)) + 2 ** -20 * norm(originFromCameraM),
     });
   }
-  return { body: id, axes, figure, patches, limited: selection.limited };
+  return {
+    body: id,
+    axes,
+    figure,
+    patches,
+    limited: selection.limited,
+    camera: { orientation: camera.orientation, fovXRad: camera.fovXRad, viewport },
+  };
 }
 
 /** The records of a frame's smooth figures, for one draw each. */
@@ -280,6 +309,121 @@ export function packSmoothMeshes(meshes: ReadonlyArray<SmoothMesh>): SmoothMeshR
     firstInstance,
     count,
   };
+}
+
+/** Words of one cluster record, as `clusters/record.ts` lays it out. */
+const RECORD_WORDS = CLUSTER_RECORD_BYTES / 4;
+
+/** The bit pattern of `f32` +∞: a strided record's unread parent error. */
+const F32_INFINITY_BITS = 0x7f80_0000;
+
+/**
+ * Each of a patch's clusters' template reference and flags word: terrain's blocks and strips
+ * (`clusters/terrain.ts`), strided, whose fragments may discard (plan R14, R14.T4.a: the figure's
+ * `disc_pixel` and survey discards), material 0.
+ */
+const SMOOTH_CLUSTER_WORDS: ReadonlyArray<readonly [templateRef: number, flags: number]> =
+  Array.from({ length: TERRAIN_CLUSTERS_PER_PAGE }, (_, cluster) => [
+    terrainTemplateRef(cluster),
+    CLUSTER_SHAPE_CODE[terrainClusterPlace(cluster).shape] | CLUSTER_FLAG_MAY_DISCARD,
+  ]);
+
+/**
+ * Each patch's 64 blocks' spheres, by figure and key, about the patch origin M d₀ along the axes
+ * the figure is built in: centre x, y, z and radius, m, four a block. A figure's patches change
+ * only with its selection, so a frame reuses those it drew before.
+ */
+const BLOCK_SPHERES = new Map<string, Float64Array>();
+const BLOCK_SPHERES_MAX = 2048;
+
+/** A patch's blocks' spheres, about its origin (see {@link BLOCK_SPHERES}), made once. */
+function blockSpheresOf(figure: BodyFigure, patch: SmoothPatch): Float64Array {
+  const { key } = patch;
+  const id = `${String(figure.equatorialRadiusM)} ${String(figure.polarRadiusM)} ${String(key.face)} ${String(key.level)} ${String(key.i)} ${String(key.j)}`;
+  let spheres = BLOCK_SPHERES.get(id);
+  if (spheres !== undefined) {
+    return spheres;
+  }
+  if (BLOCK_SPHERES.size >= BLOCK_SPHERES_MAX) {
+    BLOCK_SPHERES.clear();
+  }
+  const planet = smoothFigureOf(figure);
+  const originM = spheroidAt(figure, centreDirection(patch.terms));
+  spheres = new Float64Array(4 * TERRAIN_BLOCKS);
+  // Past the deepest key a block takes its patch's own sphere (plan R14's design note on the
+  // cluster format), padded as a block's is.
+  const whole = key.level + 3 > MAX_LEVEL ? patchSphere(planet, key, originM) : null;
+  for (let n = 0; n < TERRAIN_BLOCKS; n += 1) {
+    const sphere =
+      whole ?? terrainBlockSphere(planet, key, n % 8, Math.floor(n / 8), originM, 0, 0);
+    spheres.set([sphere.centreM.x, sphere.centreM.y, sphere.centreM.z, sphere.radiusM], 4 * n);
+  }
+  BLOCK_SPHERES.set(id, spheres);
+  return spheres;
+}
+
+/** A patch's own sphere at zero height about `originM`, padded as a block's is. */
+function patchSphere(
+  planet: PlanetGeometry,
+  key: PatchKey,
+  originM: Vec3,
+): { readonly centreM: Vec3; readonly radiusM: number } {
+  const bounds = patchBounds(planet, key, [0, 0]);
+  const centreM = sub(bounds.centre, originM);
+  const reachM = norm(centreM) + bounds.radiusM;
+  return { centreM, radiusM: bounds.radiusM + CLUSTER_PAD_M + CLUSTER_PAD_FRACTION * reachM };
+}
+
+/**
+ * The cluster records of a frame's smooth figures (plan R14, R14.T4.a): each patch's
+ * {@link TERRAIN_CLUSTERS_PER_PAGE}, patch by patch in {@link packSmoothMeshes}' order, so that a
+ * patch's page is its instance; strided, may-discard, unmeasured.
+ *
+ * @remarks
+ * A block's sphere is terrain's, its L + 3 descendant's bounds at zero height
+ * (`clusters/terrain.ts`' `terrainBlockSphere`), conservative over its vertices and their morph
+ * targets, each a mean of two of its own, and so over every triangle and every morph between; a
+ * strip's is its block's widened by the patch's skirt depth and {@link STRIP_NORMAL_FRACTION} of
+ * it, since a foot hangs that far from its morphed edge vertex along the spheroid's normal. Each
+ * centre is about the patch origin, turned from the figure's axes into the galactic axes the
+ * instances' origins are in, in `f64`, and narrowed once, so that the cull takes no rotation.
+ */
+export function packSmoothClusterRecords(meshes: ReadonlyArray<SmoothMesh>): ArrayBuffer {
+  const count = meshes.reduce((sum, mesh) => sum + mesh.patches.length, 0);
+  const out = new ArrayBuffer(
+    Math.max(count, 1) * TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES,
+  );
+  const floats = new Float32Array(out);
+  const words = new Uint32Array(out);
+  let page = 0;
+  for (const mesh of meshes) {
+    const [r0, r1, r2] = mesh.axes.rows;
+    for (const patch of mesh.patches) {
+      const spheres = blockSpheresOf(mesh.figure, patch);
+      const skirtM = patch.skirtDepthM * (1 + STRIP_NORMAL_FRACTION);
+      for (let cluster = 0; cluster < TERRAIN_CLUSTERS_PER_PAGE; cluster += 1) {
+        const place = terrainClusterPlace(cluster);
+        const block = place.bx + 8 * place.by;
+        const x = spheres[4 * block] ?? 0;
+        const y = spheres[4 * block + 1] ?? 0;
+        const z = spheres[4 * block + 2] ?? 0;
+        const radiusM =
+          (spheres[4 * block + 3] ?? Infinity) + (place.shape === "terrain-skirt" ? skirtM : 0);
+        const at = (page * TERRAIN_CLUSTERS_PER_PAGE + cluster) * RECORD_WORDS;
+        floats[at] = r0.x * x + r0.y * y + r0.z * z;
+        floats[at + 1] = r1.x * x + r1.y * y + r1.z * z;
+        floats[at + 2] = r2.x * x + r2.y * y + r2.z * z;
+        floats[at + 3] = radiusM;
+        words[at + 4] = 0;
+        words[at + 5] = F32_INFINITY_BITS;
+        const [templateRef, flags] = SMOOTH_CLUSTER_WORDS[cluster] ?? [0, 0];
+        words[at + 6] = templateRef;
+        words[at + 7] = flags;
+      }
+      page += 1;
+    }
+  }
+  return out;
 }
 
 /**

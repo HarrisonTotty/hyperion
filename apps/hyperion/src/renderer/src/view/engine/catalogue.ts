@@ -54,8 +54,12 @@ import {
   BODY_DISC_EMISSIVE_AIR_MATERIALS,
   BODY_DISC_EMISSIVE_MATERIALS,
   BODY_DISC_MATERIALS,
+  SMOOTH_MESH_AIR_CLUSTER_MATERIAL,
   SMOOTH_MESH_AIR_MATERIAL,
+  SMOOTH_MESH_CLUSTER_MATERIAL,
+  SMOOTH_MESH_EMISSIVE_AIR_CLUSTER_MATERIAL,
   SMOOTH_MESH_EMISSIVE_AIR_MATERIAL,
+  SMOOTH_MESH_EMISSIVE_CLUSTER_MATERIAL,
   SMOOTH_MESH_EMISSIVE_MATERIAL,
   SMOOTH_MESH_MATERIAL,
 } from "../bodies/draw";
@@ -326,8 +330,10 @@ const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   // R07.T8.a's disc regime: its wholly covered pixels and its limb, one source.
   { kind: "material", spec: BODY_DISC_MATERIALS.interior },
   { kind: "material", spec: BODY_DISC_MATERIALS.limb },
-  // R07.T9's mesh regime: a body's smooth figure on R05's patches, shaded as the disc is.
+  // R07.T9's mesh regime: a body's smooth figure on R05's patches, shaded as the disc is, and its
+  // form on the cluster path (plan R14, R14.T4.a).
   { kind: "material", spec: SMOOTH_MESH_MATERIAL },
+  { kind: "material", spec: SMOOTH_MESH_CLUSTER_MATERIAL },
   // R07.T8.d's cell pass: the small discs' cells shaded in parallel for both regimes' draws.
   { kind: "compute", spec: BODY_DISC_CELLS_KERNEL },
 ];
@@ -344,6 +350,7 @@ export const THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: BODY_DISC_EMISSIVE_MATERIALS.interior },
   { kind: "material", spec: BODY_DISC_EMISSIVE_MATERIALS.limb },
   { kind: "material", spec: SMOOTH_MESH_EMISSIVE_MATERIAL },
+  { kind: "material", spec: SMOOTH_MESH_EMISSIVE_CLUSTER_MATERIAL },
   { kind: "compute", spec: BODY_DISC_CELLS_EMISSIVE_KERNEL },
   // R10.T10.b's lit terrain's emissive form, one material per vertex path, and its interior
   // patches' form (plan R14, R14.T1.a).
@@ -364,6 +371,7 @@ export const DISC_AIR_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: BODY_DISC_AIR_MATERIALS.interior },
   { kind: "material", spec: BODY_DISC_AIR_MATERIALS.limb },
   { kind: "material", spec: SMOOTH_MESH_AIR_MATERIAL },
+  { kind: "material", spec: SMOOTH_MESH_AIR_CLUSTER_MATERIAL },
   { kind: "compute", spec: BODY_DISC_CELLS_AIR_KERNEL },
 ];
 
@@ -377,6 +385,7 @@ export const DISC_EMISSIVE_AIR_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: BODY_DISC_EMISSIVE_AIR_MATERIALS.interior },
   { kind: "material", spec: BODY_DISC_EMISSIVE_AIR_MATERIALS.limb },
   { kind: "material", spec: SMOOTH_MESH_EMISSIVE_AIR_MATERIAL },
+  { kind: "material", spec: SMOOTH_MESH_EMISSIVE_AIR_CLUSTER_MATERIAL },
   { kind: "compute", spec: BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL },
 ];
 

@@ -137,6 +137,7 @@ import { renderViewport } from "../../view/photoreal/internalScale";
 import { decorationStatement } from "../../view/surface/decoration/decorationSetting";
 import type { GeometryOverride } from "../../../../preload/api";
 import {
+  type GeometrySettings,
   geometryOf,
   QUALITY_NAMES,
   type QualitySetting,
@@ -474,6 +475,11 @@ interface ViewStageProps {
   readonly universe: UniverseIdHex | null;
   /** The quality setting the views are budgeted at, and drawn at. */
   readonly setting: QualitySetting;
+  /**
+   * How the views draw their geometry (plan R14, Design note 17): a launch's `--geometry` over the
+   * setting's, as the terrain session's passes take it; `undefined`, the setting's.
+   */
+  readonly geometry: GeometrySettings | undefined;
   /** The platform's primary modifier, whose chord with the arrows steps the rate (R07.T19.f). */
   readonly modifier: PrimaryModifier;
   /**
@@ -508,6 +514,8 @@ interface BudgetInputs {
   readonly timer: GpuTimer;
   /** The quality setting every view draws at (R07.T17). */
   readonly setting: QualitySetting;
+  /** How every view draws its geometry (plan R14): a launch's override, or the setting's. */
+  readonly geometry: GeometrySettings | undefined;
   /** Draws the instruments in a frame the primary draws. */
   readonly instruments: (frame: InstrumentsFrame) => void;
 }
@@ -844,6 +852,7 @@ function ViewStage({
   countLine,
   universe,
   setting,
+  geometry,
   modifier,
   terrain,
   atmosphere,
@@ -1152,11 +1161,18 @@ function ViewStage({
     budgets,
     timer: graphics.timer,
     setting,
+    geometry,
     instruments: instruments.frame,
   });
   useLayoutEffect(() => {
-    budgetRef.current = { budgets, timer: graphics.timer, setting, instruments: instruments.frame };
-  }, [budgets, graphics.timer, setting, instruments.frame]);
+    budgetRef.current = {
+      budgets,
+      timer: graphics.timer,
+      setting,
+      geometry,
+      instruments: instruments.frame,
+    };
+  }, [budgets, graphics.timer, setting, geometry, instruments.frame]);
 
   // The view's camera is reported to the server's scene while the stage draws it (R03.T14).
   const removeCamera = server?.removeCamera ?? null;
@@ -1451,6 +1467,7 @@ function ViewStage({
           selection: inputs.selection,
           style: primaryBudget.style,
           setting: paced.setting,
+          geometry: paced.geometry,
           // Its air at the low setting's sizes while its frame-rate floor holds it stepped down
           // (the owner's report, 2026-11-01).
           atmosphereSetting: primaryScale.airStepped ? "low" : paced.setting,
@@ -1549,6 +1566,7 @@ function ViewStage({
         primary: runRef.current,
         budgets: paced.budgets,
         setting: paced.setting,
+        geometry: paced.geometry,
         // The primary's applied exposure, and its hold, so that no instrument shows a cut's new
         // scene at the exposure from before it (fix-view-light).
         exposure: reading.control,
@@ -3041,6 +3059,7 @@ function ViewPanels({
         countLine={interim.countLine}
         universe={universe}
         setting={setting}
+        geometry={terrainGeometry}
         modifier={primaryModifierOf(platform)}
         terrain={terrain}
         atmosphere={atmosphere}

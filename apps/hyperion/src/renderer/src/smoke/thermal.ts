@@ -204,6 +204,10 @@ function keepingSums(engine: RenderEngine): {
       sums = bindings.buffers["cell_sums"] ?? sums;
       engine.dispatch(kernel, bindings, workgroups, pass);
     },
+    createComputeAsync: (...args) => engine.createComputeAsync(...args),
+    releaseCompute: (...args) => {
+      engine.releaseCompute(...args);
+    },
     onRestored: (...args) => engine.onRestored(...args),
     get capabilities() {
       return engine.capabilities;

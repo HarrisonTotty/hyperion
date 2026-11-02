@@ -147,6 +147,7 @@ describe("the spike report's check", () => {
         overlayDepth: "redraw",
         litClusters: false,
         farCascadeRate: 1,
+        figureClusters: false,
       },
       segments: [
         {
@@ -161,11 +162,18 @@ describe("the spike report's check", () => {
       ],
     } as const;
     const withGeometry = { ...smallReport(), geometry };
+    // A report from before plan R14's T4 lacks its consumers' levers, which read as off.
+    const { figureClusters: _figureClusters, ...beforeT4 } = geometry.settings;
     expect([
       readDescentSpikeReport(withGeometry),
       readDescentSpikeReport({ ...withGeometry, geometry: { ...geometry, segments: [{}] } }),
       readDescentSpikeReport({ ...withGeometry, geometry: { settings: geometry.settings } }),
-    ]).toEqual([withGeometry, null, null]);
+      readDescentSpikeReport({ ...withGeometry, geometry: { ...geometry, settings: beforeT4 } }),
+      readDescentSpikeReport({
+        ...withGeometry,
+        geometry: { ...geometry, settings: { ...geometry.settings, unknown: true } },
+      }),
+    ]).toEqual([withGeometry, null, null, withGeometry, null]);
   });
 
   it("passes a report with well-formed measured sizes through unchanged (R10.T14.b)", () => {

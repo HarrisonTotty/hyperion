@@ -37,7 +37,11 @@ import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/re
 import type { ViewBudget } from "../../view/budget/viewBudget";
 import type { Histogram } from "../../view/post/histogram";
 import type { HistogramMeter } from "../../view/post/meter";
-import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
+import {
+  type GeometrySettings,
+  type QualitySetting,
+  SETTINGS,
+} from "../../view/quality/qualitySetting";
 import type { ViewScene, ViewStar } from "../../view/scene/model";
 import { BandLayer } from "../../view/sky/band";
 import type { BakedCube } from "../../view/sky/bake";
@@ -104,6 +108,11 @@ export interface ViewFrameInputs {
    * photorealistic frame's forms, and the render resolution its scale is a fraction of.
    */
   readonly setting: QualitySetting;
+  /**
+   * How its geometry is drawn (plan R14, Design note 17): a launch's `--geometry` over its
+   * setting's, which its mesh bodies' figures take (R14.T4.a); the setting's where absent.
+   */
+  readonly geometry?: GeometrySettings | undefined;
   /**
    * The setting whose sizes its photorealistic frame's air is drawn at: the low setting's while
    * its frame-rate floor has stepped it down (`BudgetedScale.airStepped`; the owner's report,
@@ -671,6 +680,7 @@ export class ViewFrameDrawer {
           presentedPx: viewport,
           selectionPx,
           setting: inputs.setting,
+          geometry: inputs.geometry,
           atmosphereSetting: inputs.atmosphereSetting,
           floorLowest: inputs.floorLowest,
           exposureScale: exposed,

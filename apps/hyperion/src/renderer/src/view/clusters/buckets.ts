@@ -40,9 +40,15 @@ export const CLUSTER_BASE_UNIFORM = "clusterBase";
 /** The parts of a bucket draw its consumer gives: all but its mesh, indirect arguments and base. */
 export type BucketDrawBase = Omit<DrawItem, "mesh" | "indirect" | "instanceCount">;
 
+/** The part of the engine the buckets use. */
+export type ClusterBucketsEngine = Pick<
+  RenderEngine,
+  "createBuffer" | "writeBuffer" | "releaseBuffer"
+>;
+
 /** A view's buckets for `passes` passes of a consumer's templates (see the module's remarks). */
 export class ClusterBuckets {
-  readonly #engine: RenderEngine;
+  readonly #engine: ClusterBucketsEngine;
   readonly #templates: ReadonlyArray<ClusterTemplate>;
   /** Each template's first list entry within a pass. */
   readonly templateOffsets: ReadonlyArray<number>;
@@ -67,7 +73,7 @@ export class ClusterBuckets {
    * @throws RangeError for capacities not one a template, or lists past {@link MAX_LIST_ENTRIES}.
    */
   constructor(
-    engine: RenderEngine,
+    engine: ClusterBucketsEngine,
     name: string,
     passes: number,
     templates: ReadonlyArray<ClusterTemplate>,

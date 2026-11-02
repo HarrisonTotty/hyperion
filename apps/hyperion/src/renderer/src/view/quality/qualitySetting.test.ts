@@ -138,6 +138,7 @@ describe("the geometry's settings (plan R14)", () => {
         overlayDepth: "cluster",
         litClusters: true,
         farCascadeRate: 4,
+        figureClusters: true,
       });
     }
     expect(GEOMETRY_BEFORE_R14).toEqual({
@@ -147,6 +148,7 @@ describe("the geometry's settings (plan R14)", () => {
       overlayDepth: "redraw",
       litClusters: false,
       farCascadeRate: 1,
+      figureClusters: false,
     });
   });
 

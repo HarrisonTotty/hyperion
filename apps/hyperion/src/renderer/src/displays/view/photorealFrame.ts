@@ -51,7 +51,11 @@ import type {
   PhotorealOverlay,
 } from "../../view/photoreal/renderer";
 import type { HistogramMeter } from "../../view/post/meter";
-import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
+import {
+  type GeometrySettings,
+  type QualitySetting,
+  SETTINGS,
+} from "../../view/quality/qualitySetting";
 import { sceneOrigins, type ViewScene } from "../../view/scene/model";
 import type { BandLayer } from "../../view/sky/band";
 import type { ClassMapSource } from "../../view/terrain/classMap";
@@ -90,6 +94,8 @@ export interface PhotorealInputs {
    */
   readonly selectionPx?: Viewport | undefined;
   readonly setting: QualitySetting;
+  /** How its geometry is drawn (`PhotorealFrame.geometry`, plan R14); the setting's where absent. */
+  readonly geometry?: GeometrySettings | undefined;
   /** The setting whose sizes the frame's air is drawn at (`PhotorealFrame.atmosphereSetting`). */
   readonly atmosphereSetting?: QualitySetting | undefined;
   /** Whether its frame-rate floor stands at its lowest step (`PhotorealFrame.floorLowest`). */
@@ -443,6 +449,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     selectionPx: inputs.selectionPx,
     role: run.camera.role,
     setting: inputs.setting,
+    geometry: inputs.geometry,
     atmosphereSetting: inputs.atmosphereSetting,
     floorLowest: inputs.floorLowest,
     exposureScale,

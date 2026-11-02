@@ -67,9 +67,17 @@ import type { BodyIdHex } from "@hyperion/protocol";
 import { norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { DiscSurface } from "../appearance/bodyAppearance";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
-import type { QualitySetting } from "../quality/qualitySetting";
+import type { ClusterBuckets } from "../clusters/buckets";
+import { type ClusterConsumer, ClusterConsumerPath } from "../clusters/consumer";
+import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
+import { type CullPass, MAX_CULL_PASSES } from "../clusters/cullPass";
+import { smoothFigureClusterMesh } from "../clusters/templates";
+import { TERRAIN_BLOCKS, TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
+import { type GeometrySettings, type QualitySetting, SETTINGS } from "../quality/qualitySetting";
 import { coverageMaskTextureSpec } from "../terrain/coverage";
+import { frustumOf } from "../terrain/cull";
 import { patchMeshData } from "../terrain/gpu/resources";
+import { INSTANCE_RECORD_BYTES } from "../terrain/gpu/uniforms";
 import {
   type HandoverSphere,
   handOverRegimes,
@@ -134,6 +142,7 @@ import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
 import bodyDiscCellsWgsl from "../shaders/bodyDiscCells.wgsl?raw";
 import bodyDiscDrawWgsl from "../shaders/bodyDiscDraw.wgsl?raw";
 import smoothMeshWgsl from "../shaders/smoothMesh.wgsl?raw";
+import smoothMeshClusterWgsl from "../shaders/smoothMeshCluster.wgsl?raw";
 import { sphereOutsideView, sphereScreenRect, WIREFRAME_MESHES } from "../wireframe/submit";
 import {
   type DiscCellJobs,
@@ -169,6 +178,7 @@ import {
   DISC_LIMB_DEPTHS,
   type LimbDepths,
   limbDepths,
+  packSmoothClusterRecords,
   packSmoothMeshes,
   rotationColumns,
   type SmoothMesh,
@@ -1244,6 +1254,110 @@ export const SMOOTH_MESH_EMISSIVE_AIR_MATERIAL: WgslMaterialSpec = (() => {
   };
 })();
 
+/** smoothMesh.wgsl's vertex stage's head, which the figure's cluster path calls as `smooth_vertex`. */
+const FIGURE_VERTEX_HEAD =
+  "@vertex\nfn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32) -> MeshVarying {";
+
+/** {@link FIGURE_VERTEX_HEAD} as a function, no longer an entry point. */
+const FIGURE_VERTEX_FUNCTION = "fn smooth_vertex(grid : vec3f, instance : u32) -> MeshVarying {";
+
+/** smoothMesh.wgsl's `Draw`'s last field and its end, after which the cluster path takes its base. */
+const FIGURE_DRAW_END = "  coverageAxes : mat4x4f,\n}";
+
+/**
+ * A form of the mesh regime's figure on the cluster path (plan R14, R14.T4.a): `spec`'s bindings,
+ * uniforms, states and fragment stage, its `Draw` taking `clusterBase` after its own fields, its
+ * vertex stage renamed `smooth_vertex`, a function, which `smoothMeshCluster.wgsl`'s entry point
+ * hands each template vertex as R05's patch mesh's own and its instance, read from a bucket's list;
+ * every placement as the instanced draw's.
+ *
+ * @throws Error unless the figure's vertex stage and its `Draw`'s end each occur once in `spec`.
+ */
+export function figureClusterMaterial(
+  spec: WgslMaterialSpec,
+  displayName: string,
+): WgslMaterialSpec {
+  const heads = spec.vertexWgsl.split(FIGURE_VERTEX_HEAD);
+  const draws = heads.join(FIGURE_VERTEX_FUNCTION).split(FIGURE_DRAW_END);
+  if (heads.length !== 2 || draws.length !== 2) {
+    throw new Error(
+      `a figure's cluster form needs smoothMesh.wgsl's vertex stage and Draw once each, found ${String(heads.length - 1)} and ${String(draws.length - 1)}`,
+    );
+  }
+  const source = `${draws.join(
+    "  coverageAxes : mat4x4f,\n  // The bucket's first entry in the lists (`clusters/buckets.ts`' `clusterBase`).\n  clusterBase : u32,\n}",
+  )}\n${smoothMeshClusterWgsl}`;
+  return {
+    ...spec,
+    name: `${spec.name}Cluster`,
+    displayName,
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...spec.uniforms, { name: "clusterBase", type: "u32" }],
+    storageBuffers: [
+      ...(spec.storageBuffers ?? []),
+      { name: "clusterLists", binding: 22, stages: ["vertex"] },
+    ],
+  };
+}
+
+/** The mesh regime's figure's material on the cluster path (plan R14, R14.T4.a). */
+export const SMOOTH_MESH_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_MATERIAL,
+  "BODY MESH CLUSTERS",
+);
+
+/** Its emissive form on the cluster path (plan R14, R14.T4.a; R08.T18.a). */
+export const SMOOTH_MESH_EMISSIVE_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_EMISSIVE_MATERIAL,
+  "EMISSIVE MESH CLUSTERS",
+);
+
+/** Its air form on the cluster path (plan R14, R14.T4.a; R08.T16.b). */
+export const SMOOTH_MESH_AIR_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_AIR_MATERIAL,
+  "ATMOSPHERIC MESH CLUSTERS",
+);
+
+/** Its form for emission and air together on the cluster path (plan R14, R14.T4.a; R08.T18.b). */
+export const SMOOTH_MESH_EMISSIVE_AIR_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_EMISSIVE_AIR_MATERIAL,
+  "GLOWING MESH CLUSTERS",
+);
+
+/** The figure's cluster mesh and its templates (plan R14, R14.T4.a). */
+export const FIGURE_CLUSTER_MESH = smoothFigureClusterMesh();
+
+/**
+ * The mesh regime's figure as a consumer of the cluster path (plan R14, R14.T4.a): a patch's 64
+ * blocks and 32 skirt strips, drawn at stride 1 alone, R05's instance records
+ * (`packSmoothMeshes`), each patch its own page (`packSmoothClusterRecords`).
+ */
+export const FIGURE_CLUSTER_CONSUMER: ClusterConsumer = {
+  name: "bodies:figure clusters",
+  templates: FIGURE_CLUSTER_MESH.templates,
+  clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE,
+  templateClusters: FIGURE_CLUSTER_MESH.templates.map(({ shape, stride }) =>
+    stride !== 1
+      ? 0
+      : shape === "terrain-block"
+        ? TERRAIN_BLOCKS
+        : TERRAIN_CLUSTERS_PER_PAGE - TERRAIN_BLOCKS,
+  ),
+  instanceBytes: INSTANCE_RECORD_BYTES,
+  vertexWgsl: smoothMeshClusterWgsl,
+};
+
+/** The figures' cull's timed label (plan R14, R14.T4.a): one dispatch a frame of mesh bodies. */
+export const FIGURE_CLUSTER_CULL_LABEL = "body cluster cull";
+
+/**
+ * How far each side of a figure's frustum is opened for its cull, rad: past the `f32` rounding of
+ * the planes, as the terrain's overlay's is (`terrainPass.ts`), so that no cluster that draws is
+ * refused.
+ */
+const FIGURE_CULL_MARGIN_RAD = 0.01;
+
 /**
  * The `disc cells` pass's label (R07.T8.d), between R06's sky and the mesh bodies' figures, which
  * read its sums as the `discs` pass does (`PHOTOREAL_PASS_LABELS.discCells`).
@@ -1365,6 +1479,8 @@ export type LitBodyEngine = Pick<
   | "releaseBuffer"
   | "releaseTexture"
   | "dispatch"
+  | "createComputeAsync"
+  | "releaseCompute"
   | "onRestored"
   | "capabilities"
   | "prepareMaterial"
@@ -1400,6 +1516,16 @@ interface DeviceResources {
   /** The mesh regime's material and R05's 65 × 65 patch with skirts (T9). */
   readonly mesh: MaterialHandle;
   readonly patch: MeshHandle;
+  /**
+   * The figures' cluster path (plan R14, R14.T4.a): its material, its cluster mesh, its path's
+   * buckets, the frame's records, and the cull's kernel once compiled, `null` before and where it
+   * could not be, when every figure draws instanced.
+   */
+  readonly meshCluster: MaterialHandle;
+  readonly clusterMesh: MeshHandle;
+  readonly clusters: ClusterConsumerPath;
+  clusterRecords: BufferHandle;
+  cullKernel: ComputeHandle | null;
   /** The frame's smooth figures' slot and instance records. */
   slots: BufferHandle;
   instances: BufferHandle;
@@ -1433,6 +1559,8 @@ interface FormMaterials {
   readonly interior: MaterialHandle;
   readonly limb: MaterialHandle;
   readonly mesh: MaterialHandle;
+  /** The mesh's form on the cluster path (plan R14, R14.T4.a). */
+  readonly meshCluster: MaterialHandle;
   ready: boolean;
   /** Settles once their pipelines are prepared, or could not be. */
   prepared: Promise<void>;
@@ -1452,6 +1580,7 @@ const FORM_SPECS: Readonly<
       readonly interior: WgslMaterialSpec;
       readonly limb: WgslMaterialSpec;
       readonly mesh: WgslMaterialSpec;
+      readonly meshCluster: WgslMaterialSpec;
       readonly what: string;
     }
   >
@@ -1460,18 +1589,21 @@ const FORM_SPECS: Readonly<
     interior: BODY_DISC_EMISSIVE_MATERIALS.interior,
     limb: BODY_DISC_EMISSIVE_MATERIALS.limb,
     mesh: SMOOTH_MESH_EMISSIVE_MATERIAL,
+    meshCluster: SMOOTH_MESH_EMISSIVE_CLUSTER_MATERIAL,
     what: "the emissive forms of the lit bodies",
   },
   air: {
     interior: BODY_DISC_AIR_MATERIALS.interior,
     limb: BODY_DISC_AIR_MATERIALS.limb,
     mesh: SMOOTH_MESH_AIR_MATERIAL,
+    meshCluster: SMOOTH_MESH_AIR_CLUSTER_MATERIAL,
     what: "the air forms of the lit bodies",
   },
   emissiveAir: {
     interior: BODY_DISC_EMISSIVE_AIR_MATERIALS.interior,
     limb: BODY_DISC_EMISSIVE_AIR_MATERIALS.limb,
     mesh: SMOOTH_MESH_EMISSIVE_AIR_MATERIAL,
+    meshCluster: SMOOTH_MESH_EMISSIVE_AIR_CLUSTER_MATERIAL,
     what: "the emissive forms with air of the lit bodies",
   },
 };
@@ -1522,8 +1654,8 @@ function withoutAir(record: DiscRecord): DiscRecord {
 function formsOf(
   record: DiscRecord,
   drawn: DrawnPlan,
-  plain: Pick<FormMaterials, "interior" | "limb" | "mesh">,
-): Pick<FormMaterials, "interior" | "limb" | "mesh"> {
+  plain: Pick<FormMaterials, "interior" | "limb" | "mesh" | "meshCluster">,
+): Pick<FormMaterials, "interior" | "limb" | "mesh" | "meshCluster"> {
   if (record.air !== undefined && record.emission !== undefined && drawn.emissiveAir !== null) {
     return drawn.emissiveAir;
   }
@@ -1564,6 +1696,17 @@ export class LitBodyRenderer {
     null;
   /** The plan whose records were last drawn, as they are drawn (R08.T18.a). */
   #drawn: DrawnPlan | null = null;
+  /**
+   * The plan whose figures were last culled on the cluster path (plan R14, R14.T4.a), and each
+   * culled mesh's pass, by its index in the plan's meshes.
+   */
+  #culled: { readonly plan: BodyFramePlan; readonly passes: ReadonlyMap<number, number> } | null =
+    null;
+  /** How the figures' geometry is drawn (plan R14): the setting's, or a launch's override. */
+  #geometry: GeometrySettings = SETTINGS.high.geometry;
+  /** Settles once the current device's cull kernel is made, or could not be (R14.T4.a). */
+  #cullReady: Promise<boolean> = Promise.resolve(false);
+  #disposed = false;
   readonly #unsubscribe: () => void;
 
   constructor(engine: LitBodyEngine, spriteMaterial: WgslMaterialSpec) {
@@ -1577,7 +1720,22 @@ export class LitBodyRenderer {
       this.#tableLaws = [];
       this.#written = null;
       this.#drawn = null;
+      this.#culled = null;
     });
+  }
+
+  /** How it draws the figures' geometry (plan R14, R14.T4.a): the high setting's until set. */
+  get geometry(): GeometrySettings {
+    return this.#geometry;
+  }
+
+  /**
+   * Draws the figures' geometry by `geometry` from the next plan on: on the cluster path where its
+   * `clusterPath` and `figureClusters` are on (plan R14, R14.T4.a), else instanced, as before.
+   */
+  setGeometry(geometry: GeometrySettings): void {
+    this.#geometry = geometry;
+    this.#culled = null;
   }
 
   /**
@@ -1593,9 +1751,11 @@ export class LitBodyRenderer {
     const scene = [{ colour: HDR_COLOUR_FORMAT, depth: true }] as const;
     const prepared: ReadonlyArray<readonly [MaterialHandle, MeshHandle]> = [
       [resources.mesh, resources.patch],
+      [resources.meshCluster, resources.clusterMesh],
       [resources.interior, resources.quad],
       [resources.limb, resources.quad],
     ];
+    this.#readyCull(resources);
     for (const [material, mesh] of prepared) {
       void this.#engine.prepareMaterial(material, scene, [mesh]).catch((error: unknown) => {
         // A loss meanwhile is no failure: the restore makes and prepares them again.
@@ -1604,6 +1764,47 @@ export class LitBodyRenderer {
         }
       });
     }
+  }
+
+  /**
+   * Compiles the cluster cull's kernel for `resources`' device (plan R14, R14.T4.a), off the frame;
+   * never rejects. Until it is made, or where it cannot be, every figure draws instanced.
+   */
+  #readyCull(resources: DeviceResources): void {
+    // A refusal thrown at the call, as a lost device's, settles as one rejected.
+    this.#cullReady = (async () => this.#engine.createComputeAsync(CLUSTER_CULL_KERNEL))().then(
+      (kernel) => {
+        if (this.#resources === resources && !this.#disposed && resources.cullKernel === null) {
+          resources.cullKernel = kernel;
+          return true;
+        }
+        this.#engine.releaseCompute(kernel);
+        return false;
+      },
+      (error: unknown) => {
+        if (!(error instanceof EngineUnavailable)) {
+          console.error("the figures' cluster cull failed: every figure draws instanced", error);
+        }
+        return false;
+      },
+    );
+  }
+
+  /**
+   * Settles once the figures' cluster cull's kernel is made on the current device (plan R14,
+   * R14.T4.a), `true`, or could not be, `false`; until then every figure draws instanced.
+   */
+  clustersReady(): Promise<boolean> {
+    return this.#cullReady;
+  }
+
+  /**
+   * The figures' buckets as the last cull left them (plan R14, R14.T4.a), a pass a culled body in
+   * the plan's order, for the counters' reduction (`clusters/stats.ts`' `ClusterStats.sample`);
+   * `null` before the first.
+   */
+  get figureBuckets(): ClusterBuckets | null {
+    return this.#resources.clusters.buckets;
   }
 
   #create(): DeviceResources {
@@ -1637,6 +1838,11 @@ export class LitBodyRenderer {
         topology: "triangle-list",
         attributes: {},
       }),
+      meshCluster: engine.createMaterial(SMOOTH_MESH_CLUSTER_MATERIAL),
+      clusterMesh: engine.createMesh(FIGURE_CLUSTER_MESH.mesh),
+      clusters: new ClusterConsumerPath(engine, FIGURE_CLUSTER_CONSUMER),
+      clusterRecords: this.#clusterBuffer("bodies:figure cluster records", MIN_BUFFER_BYTES),
+      cullKernel: null,
       slots: this.#buffer("bodies:mesh slots", MIN_BUFFER_BYTES),
       instances: this.#buffer("bodies:mesh instances", MIN_BUFFER_BYTES),
       cellJobs: this.#buffer("bodies:disc cell jobs", MIN_BUFFER_BYTES),
@@ -1673,9 +1879,11 @@ export class LitBodyRenderer {
     const interior = engine.createMaterial(specs.interior);
     const limb = engine.createMaterial(specs.limb);
     const mesh = engine.createMaterial(specs.mesh);
+    const meshCluster = engine.createMaterial(specs.meshCluster);
     const scene = [{ colour: HDR_COLOUR_FORMAT, depth: true }] as const;
     const prepared: ReadonlyArray<readonly [MaterialHandle, MeshHandle]> = [
       [mesh, resources.patch],
+      [meshCluster, resources.clusterMesh],
       [interior, resources.quad],
       [limb, resources.quad],
     ];
@@ -1683,6 +1891,7 @@ export class LitBodyRenderer {
       interior,
       limb,
       mesh,
+      meshCluster,
       ready: false,
       prepared: Promise.resolve(),
     };
@@ -1819,6 +2028,16 @@ export class LitBodyRenderer {
       bytes,
       usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
       category: "other",
+    });
+  }
+
+  /** A buffer of the cluster path's (plan R14): `geometry-clusters`. */
+  #clusterBuffer(name: string, bytes: number): BufferHandle {
+    return this.#engine.createBuffer({
+      name,
+      bytes,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "geometry-clusters",
     });
   }
 
@@ -2084,14 +2303,18 @@ export class LitBodyRenderer {
   }
 
   /**
-   * The draws of a plan's mesh bodies, one instanced draw of its figure each, for the `bodies`
-   * pass: opaque, with depth, before the painter's sequence (Design note 8).
+   * The draws of a plan's mesh bodies, for the `bodies` pass: opaque, with depth, before the
+   * painter's sequence (Design note 8). Each figure is one instanced draw, or on the cluster path
+   * (plan R14, R14.T4.a) the draws of its pass's stride-1 buckets, one a template, its clusters
+   * kept by the cull's frustum ({@link LitBodyRenderer.cullFigures}).
    */
   meshDraws(plan: BodyFramePlan): DrawItem[] {
     const firstInstance = this.#upload(plan);
     const resources = this.#resources;
     const drawn = this.#drawnPlan(plan);
     const { records } = drawn;
+    const passes = this.cullFigures(plan);
+    const lists = resources.clusters.buckets?.lists;
     return plan.meshes.flatMap((body, i) => {
       const record = records[body.index];
       if (record === undefined) {
@@ -2105,31 +2328,136 @@ export class LitBodyRenderer {
         return [];
       }
       const coverage = coverageOf(body.role);
+      const forms = formsOf(record, drawn, resources);
+      const pass = passes.get(i);
+      const uniforms = {
+        disc: new Float32Array([body.index]),
+        // A bucket's entry names its instance in the frame's records.
+        firstInstance: new Float32Array([pass === undefined ? first : 0]),
+        bodyRotation: rotationColumns(body.mesh.axes),
+        coverageAxes: rotationColumns(coverage?.rotation ?? IDENTITY_ROTATION),
+      };
+      const textures = {
+        ...this.#recordTextures(record),
+        coverageMask: coverage?.mask ?? resources.noCoverage,
+      };
+      const storageBuffers = {
+        discs: resources.discs,
+        slots: resources.slots,
+        instances: resources.instances,
+        cellSums: resources.cellSums,
+      };
+      if (pass !== undefined && lists !== undefined) {
+        return resources.clusters.drawItems(
+          pass,
+          resources.clusterMesh,
+          {
+            material: forms.meshCluster,
+            offsetFromCameraM: new Float32Array(3),
+            uniforms,
+            textures,
+            storageBuffers: { ...storageBuffers, clusterLists: lists },
+          },
+          1,
+        );
+      }
       return [
         {
           mesh: resources.patch,
-          material: formsOf(record, drawn, resources).mesh,
+          material: forms.mesh,
           offsetFromCameraM: new Float32Array(3),
-          uniforms: {
-            disc: new Float32Array([body.index]),
-            firstInstance: new Float32Array([first]),
-            bodyRotation: rotationColumns(body.mesh.axes),
-            coverageAxes: rotationColumns(coverage?.rotation ?? IDENTITY_ROTATION),
-          },
-          textures: {
-            ...this.#recordTextures(record),
-            coverageMask: coverage?.mask ?? resources.noCoverage,
-          },
-          storageBuffers: {
-            discs: resources.discs,
-            slots: resources.slots,
-            instances: resources.instances,
-            cellSums: resources.cellSums,
-          },
+          uniforms,
+          textures,
+          storageBuffers,
           instanceCount: body.mesh.patches.length,
         },
       ];
     });
+  }
+
+  /**
+   * Culls a plan's figures' clusters into their buckets on the cluster path (plan R14, R14.T4.a),
+   * once a plan, and returns each culled mesh's pass by its index in the plan's meshes; none where
+   * the geometry keeps the instanced draw or the cull's kernel is not made.
+   *
+   * @remarks
+   * Each mesh body with patches, up to the cull's {@link MAX_CULL_PASSES}, is a camera pass of its
+   * own, its frustum its figure's camera's, each side opened by {@link FIGURE_CULL_MARGIN_RAD}, no
+   * horizon (selection's own refuses its patches behind it), at stride 1, its clusters appended:
+   * every fragment of a figure's pixel shades the same colour from the pixel's own rays, and the
+   * depth test keeps the nearest, so the buckets' order leaves the image as the instanced draw's.
+   * Each instance enters its body's pass alone. A body past the passes draws instanced. The
+   * dispatch is submitted at the call, before the `bodies` pass that draws the buckets.
+   */
+  cullFigures(plan: BodyFramePlan): ReadonlyMap<number, number> {
+    if (this.#culled?.plan === plan) {
+      return this.#culled.passes;
+    }
+    const resources = this.#resources;
+    const geometry = this.#geometry;
+    const kernel = resources.cullKernel;
+    const passes = new Map<number, number>();
+    this.#culled = { plan, passes };
+    if (!geometry.clusterPath || !geometry.figureClusters || kernel === null) {
+      return passes;
+    }
+    this.#upload(plan);
+    const count = plan.meshes.reduce((sum, body) => sum + body.mesh.patches.length, 0);
+    if (count === 0) {
+      return passes;
+    }
+    const inputs = new Uint32Array(2 * count);
+    const cullPasses: CullPass[] = [];
+    let instance = 0;
+    plan.meshes.forEach((body, i) => {
+      const patches = body.mesh.patches.length;
+      if (patches > 0 && cullPasses.length < MAX_CULL_PASSES) {
+        passes.set(i, cullPasses.length);
+        for (let n = instance; n < instance + patches; n += 1) {
+          inputs[2 * n] = 1 << cullPasses.length;
+        }
+        cullPasses.push({
+          kind: "camera",
+          planes: frustumOf(body.mesh.camera, FIGURE_CULL_MARGIN_RAD).planes,
+          horizon: null,
+          order: "appended",
+          toleranceM: 0,
+          strideCap: 1,
+        });
+      }
+      instance += patches;
+    });
+    const records = new Float32Array(packSmoothClusterRecords(plan.meshes.map(({ mesh }) => mesh)));
+    resources.clusterRecords = this.#writeClusterRecords(resources.clusterRecords, records);
+    resources.clusters.cull(
+      kernel,
+      {
+        records: resources.clusterRecords,
+        instances: resources.instances,
+        count,
+        inputs,
+        passes: cullPasses,
+        rotationColumns: [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)],
+        viewAxis: vec3(0, 0, -1),
+      },
+      FIGURE_CLUSTER_CULL_LABEL,
+    );
+    return passes;
+  }
+
+  /** Writes the figures' cluster records, replacing the buffer by a doubled one if it is too small. */
+  #writeClusterRecords(handle: BufferHandle, data: Float32Array): BufferHandle {
+    let target = handle;
+    if (data.byteLength > handle.bytes) {
+      let size = handle.bytes;
+      while (size < data.byteLength) {
+        size *= 2;
+      }
+      this.#engine.releaseBuffer(handle);
+      target = this.#clusterBuffer(handle.name, size);
+    }
+    this.#engine.writeBuffer(target, 0, data);
+    return target;
   }
 
   /** A run of points' one instanced draw, from the run's own buffer. */
@@ -2214,8 +2542,15 @@ export class LitBodyRenderer {
    */
   dispose(): void {
     this.#unsubscribe();
+    this.#disposed = true;
     const resources = this.#resources;
+    resources.clusters.dispose();
+    if (resources.cullKernel !== null) {
+      this.#engine.releaseCompute(resources.cullKernel);
+      resources.cullKernel = null;
+    }
     const buffers = [
+      resources.clusterRecords,
       resources.discs,
       ...resources.sprites,
       resources.slots,

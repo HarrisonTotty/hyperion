@@ -12,7 +12,9 @@
  * frame of the segment had it. A version 6 file, R05's runs' and the native replay's
  * (`tools/gpu-replay`), holds none and reads as before; a version 7 or 8 file holds one only over
  * a generated world. Version 8's settings add R14.T6.b's `farCascadeRate`; version 7's, from builds
- * that rendered every cascade every frame, read as rate 1.
+ * that rendered every cascade every frame, read as rate 1. A file written before a consumer's lever
+ * (plan R14's T4) lacks its field, which reads as `false`: that run drew the consumer by its own
+ * draw.
  */
 
 import type { SpikeCountFigures, SpikeGeometryReport, SpikeGeometrySegment } from "../preload/api";
@@ -65,21 +67,31 @@ function countFigures(value: unknown): SpikeCountFigures | null | undefined {
     : undefined;
 }
 
+/** The consumers' levers (plan R14's T4), which a file written before each lacks. */
+const CONSUMER_LEVERS = ["figureClusters"] as const;
+
 /**
  * `value` as the geometry's settings at results `version`, every field of its kind, or `null`:
- * version 8's six fields, or version 7's five, its far cascades read at rate 1.
+ * version 8's six fields, or version 7's five, its far cascades read at rate 1, and the consumers'
+ * levers it holds, each absent one read as off.
  */
 function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settings"] | null {
-  if (!isRecord(value) || Object.keys(value).length !== (version === 7 ? 5 : 6)) {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const levers = CONSUMER_LEVERS.filter((lever) => lever in value).length;
+  if (Object.keys(value).length !== (version === 7 ? 5 : 6) + levers) {
     return null;
   }
   const { clusterPath, casterDepthCull, casterStrideCap, overlayDepth, litClusters } = value;
   const farCascadeRate = version === 7 ? 1 : value["farCascadeRate"];
+  const { figureClusters = false } = value;
   if (
     (farCascadeRate !== 1 && farCascadeRate !== 2 && farCascadeRate !== 4) ||
     typeof clusterPath !== "boolean" ||
     typeof casterDepthCull !== "boolean" ||
     typeof litClusters !== "boolean" ||
+    typeof figureClusters !== "boolean" ||
     (casterStrideCap !== 1 &&
       casterStrideCap !== 2 &&
       casterStrideCap !== 4 &&
@@ -95,6 +107,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     overlayDepth,
     litClusters,
     farCascadeRate,
+    figureClusters,
   };
 }
 
@@ -190,12 +203,13 @@ export function geometrySummaryLines(geometry: SpikeGeometryReport): string[] {
     overlayDepth,
     litClusters,
     farCascadeRate,
+    figureClusters,
   } = geometry.settings;
   return [
     "",
     "## Geometry (plan R14)",
     "",
-    `The main view's lit pass a frame by segment, median (largest): cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}.`,
+    `The main view's lit pass a frame by segment, median (largest): cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}.`,
     "",
     `| Segment | ${COUNTS.map((name) => COUNT_HEADS[name]).join(" | ")} |`,
     `| ${["---", ...COUNTS.map(() => "---")].join(" | ")} |`,

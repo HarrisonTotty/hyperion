@@ -94,6 +94,27 @@ function stripIndices(stride: Stride): number[] {
   return indices;
 }
 
+/**
+ * A strip's triangles at `stride` as R05's patch mesh's skirts (`gpu/resources.ts`'
+ * `patchMeshData`): each quad under edge vertices p then q is (p, p′, q′) and (p, q′, q), the lit
+ * mesh's feet's triangles in the same winding, each begun at its edge vertex.
+ */
+function patchStripIndices(stride: Stride): number[] {
+  const indices: number[] = [];
+  for (let k = 0; k < CLUSTER_QUADS; k += stride) {
+    const next = k + stride;
+    indices.push(
+      stripEdge(k),
+      stripFoot(k),
+      stripFoot(next),
+      stripEdge(k),
+      stripFoot(next),
+      stripEdge(next),
+    );
+  }
+  return indices;
+}
+
 /** Terrain's cluster mesh and its eight templates, made once. */
 export interface TerrainClusterMesh {
   /** Blocks at strides 1, 2, 4 and 8, then strips at the same: template t is shape ⌊t ÷ 4⌋ at stride 2^(t mod 4). */
@@ -103,6 +124,24 @@ export interface TerrainClusterMesh {
 
 /** Terrain's cluster mesh: a block's 81 vertices, a strip's 18, and every template's indices. */
 export function terrainClusterMesh(): TerrainClusterMesh {
+  return stridedClusterMesh("terrain clusters", stripIndices);
+}
+
+/**
+ * The mesh regime's figure's cluster mesh (plan R14, R14.T4.a; `bodies/smoothMesh.ts`): terrain's
+ * vertices and blocks, its strips R05's patch mesh's skirts in that mesh's vertex order
+ * ({@link patchStripIndices}), so that each template triangle is the figure's instanced draw's own,
+ * vertex for vertex.
+ */
+export function smoothFigureClusterMesh(): TerrainClusterMesh {
+  return stridedClusterMesh("figure clusters", patchStripIndices);
+}
+
+/** A strided cluster mesh named `name`: the block's and the strip's vertices, its strips by `strips`. */
+function stridedClusterMesh(
+  name: string,
+  strips: (stride: Stride) => number[],
+): TerrainClusterMesh {
   const positions = new Float32Array(3 * (BLOCK_VERTICES + 2 * (CLUSTER_QUADS + 1)));
   for (let ly = 0; ly <= CLUSTER_QUADS; ly += 1) {
     for (let lx = 0; lx <= CLUSTER_QUADS; lx += 1) {
@@ -117,7 +156,7 @@ export function terrainClusterMesh(): TerrainClusterMesh {
   const templates: ClusterTemplate[] = [];
   for (const [shape, of] of [
     ["terrain-block", blockIndices],
-    ["terrain-skirt", stripIndices],
+    ["terrain-skirt", strips],
   ] as const) {
     for (const stride of STRIDES) {
       const range = of(stride);
@@ -135,7 +174,7 @@ export function terrainClusterMesh(): TerrainClusterMesh {
   return {
     templates,
     mesh: {
-      name: "terrain clusters",
+      name,
       positions,
       indices: Uint32Array.from(indices),
       topology: "triangle-list",

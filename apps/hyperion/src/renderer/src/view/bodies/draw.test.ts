@@ -54,6 +54,7 @@ import {
   type LitBodyInput,
   planLitBodies,
   pointFlux,
+  SMOOTH_MESH_CLUSTER_MATERIAL,
   SMOOTH_MESH_MATERIAL,
   BODY_DISC_MATERIALS,
 } from "./draw";
@@ -1638,6 +1639,8 @@ describe("the renderer", () => {
         "bodies:no coverage",
         // R08.T16.b's disc table of zeros, bound where a record carries no air.
         "bodies:no disc table",
+        // Plan R14's figures' cluster records (R14.T4.a); their buckets are made at a first cull.
+        "bodies:figure cluster records",
       ].toSorted(),
     );
   });
@@ -1650,8 +1653,8 @@ describe("the renderer", () => {
     renderer.draws(plan);
     const materials = engine.counts.materials;
     engine.restore();
-    // The disc's two, the sprite's and the mesh regime's.
-    expect(engine.counts.materials).toBe(materials + 4);
+    // The disc's two, the sprite's and the mesh regime's, instanced and on the cluster path.
+    expect(engine.counts.materials).toBe(materials + 5);
     const writes = engine.writes.length;
     renderer.draws(plan);
     expect(engine.textureWritten.filter((w) => w.texture === "bodies:phase table")).toHaveLength(2);
@@ -2007,7 +2010,7 @@ describe("mesh bodies (T9)", () => {
     renderer.dispose();
   });
 
-  it("prepares its three regime materials for the scene target as it is made, and after a restore (R10.T14.d)", async () => {
+  it("prepares its regime materials for the scene target as it is made, and after a restore (R10.T14.d; plan R14, R14.T4.a)", async () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
     const made = [...engine.prepares];
@@ -2016,6 +2019,7 @@ describe("mesh bodies (T9)", () => {
     const targets = [{ colour: "rgba16float", depth: true }];
     const prepared = [
       { name: SMOOTH_MESH_MATERIAL.name, targets, meshes: ["bodies:smooth patch"] },
+      { name: SMOOTH_MESH_CLUSTER_MATERIAL.name, targets, meshes: ["figure clusters"] },
       { name: BODY_DISC_MATERIALS.interior.name, targets, meshes: ["bodies:quad"] },
       { name: BODY_DISC_MATERIALS.limb.name, targets, meshes: ["bodies:quad"] },
     ];

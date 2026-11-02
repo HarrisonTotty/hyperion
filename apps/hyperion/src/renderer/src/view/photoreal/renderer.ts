@@ -102,7 +102,7 @@ import { HISTOGRAM_KERNEL, type Histogram, HistogramReader } from "../post/histo
 import type { HistogramMeter } from "../post/meter";
 import { TONEMAP_MATERIAL, TONEMAP_PASS, tonemapDraw } from "../post/tonemap";
 import { OVERLAY_SCENE_DEPTH_MATERIAL, overlaySceneDepthDraw, sizesAgree } from "./overlayDepth";
-import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
+import { type GeometrySettings, type QualitySetting, SETTINGS } from "../quality/qualitySetting";
 import { HDR_COLOUR_FORMAT } from "../photometry/toneCurve";
 import { DEFAULT_EYE_OBSERVER } from "../sky/eye";
 import { toHalfArray } from "../sky/half";
@@ -224,6 +224,11 @@ export interface PhotorealFrame {
   readonly selectionPx?: Viewport | undefined;
   readonly role: ViewRole;
   readonly setting: QualitySetting;
+  /**
+   * How the frame's geometry is drawn (plan R14): a launch's `--geometry` over its setting's, which
+   * the mesh bodies' figures take (R14.T4.a); {@link setting}'s where absent.
+   */
+  readonly geometry?: GeometrySettings | undefined;
   /**
    * The setting whose sizes the frame's air is drawn at (`TABLE_SIZES`' sky view, aerial
    * perspective and ray march): the low setting's while the view's frame-rate floor has stepped it
@@ -768,6 +773,10 @@ export class PhotorealRenderer {
     }
     this.#follow(resources, frame);
     const { camera, viewport } = frame;
+    const geometry = frame.geometry ?? SETTINGS[frame.setting].geometry;
+    if (this.#bodies.geometry !== geometry) {
+      this.#bodies.setGeometry(geometry);
+    }
     // The setting's forms of the histogram, the eclipse term and planetshine (Design note 18).
     const settings = SETTINGS[frame.setting].photoreal;
     const projection = perspectiveReversedInfinite(

@@ -231,6 +231,8 @@ export interface GeometryOverride {
   readonly litClusters?: boolean;
   /** R14.T6.b: the frames between re-renders of the far shadow cascades; 1 renders all four. */
   readonly farCascadeRate?: 1 | 2 | 4;
+  /** R14.T4.a: the mesh regime's figures through the cluster path. */
+  readonly figureClusters?: boolean;
 }
 
 declare global {

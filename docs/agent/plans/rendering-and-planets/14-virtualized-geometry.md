@@ -1496,6 +1496,7 @@ wireframe draw needs only T1.
   (`src/renderer/src/smoke/meshBodies.ts`) byte-identical, against a base whose `smoothMesh.wgsl`
   position is first made `@invariant` in a commit of its own (Design note 5); draws counted against
   today's (expected: one a stride-1 template bucket).
+  - _Built_ (`r14-t4-consumers`): records at the end of Risks.
 - **R14.T4.b The generic mesh template, with the hull occluders.** Size S–M. `meshTemplate()`, a
   128-triangle cluster drawn by index pulling, and the DAG-cut mode's draw on a one-level DAG: the
   hull occluder faces (`occluder.wgsl`'s `corners`) as one page, depth-only in the wireframe and as
@@ -1991,3 +1992,23 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   results version 8 adds it to the geometry block's settings, and a version 7 file reads as rate 1.
 - **R14.T6.b**: with T2.a's lit pass, a lit view-frame on high times 6 or 7 passes at rate 4 (2 or 3
   casters) against T2.a's 8.
+- **R14.T4.a** (`r14-t4-consumers`):
+  - `clusters/consumer.ts`: `ClusterConsumer` (`name`, `templates`, `clustersPerPage`,
+    `templateClusters`, a template's clusters a page, 0 for one never drawn, `instanceBytes`,
+    `vertexWgsl`) and `ClusterConsumerPath` (`cull(kernel, ConsumerCull, label)`, `drawItems`,
+    `buckets`), its buckets made again at powers of two as instances or passes grow.
+  - The figure is `bodies/draw.ts`' `FIGURE_CLUSTER_CONSUMER`: its own mesh,
+    `smoothFigureClusterMesh` (terrain's blocks; strips in R05's skirt vertex order, so each
+    triangle is the instanced draw's), records written a frame by `packSmoothClusterRecords` (block
+    spheres `terrainBlockSphere` at h = 0, cached by figure and key; a strip's widened by its skirt
+    depth), may-discard, page = instance; `smoothMeshCluster.wgsl` calls `smooth_vertex` with
+    `firstInstance` 0.
+  - One appended camera pass a mesh body (its frustum, no horizon: selection refuses the patches
+    behind it), at most 8, the rest instanced; the figure's colour is per pixel, so the buckets'
+    order leaves the image. Two draws a figure (blocks' and strips' buckets), not one.
+  - `GeometrySettings.figureClusters`, on both settings; `--geometry figureClusters=`; results files
+    without it read it `false`. `SmoothMesh.camera`; `LitBodyRenderer.setGeometry`, `cullFigures`,
+    `clustersReady`, `figureBuckets`; `PhotorealFrame.geometry`, `ViewFrameInputs.geometry` and
+    `InstrumentsFrame.geometry` carry the launch's override; `LitBodyEngine` takes
+    `createComputeAsync` and `releaseCompute`.
+  - Timed passes: one more a frame with mesh bodies (`body cluster cull`).

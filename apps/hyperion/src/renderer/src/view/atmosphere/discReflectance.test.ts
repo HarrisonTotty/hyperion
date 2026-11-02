@@ -432,8 +432,10 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
     await renderer.prepareEmissive();
     const plan = planOf(groundFieldOf(magmaOceanSurface()), 0.048, 90, 96, true);
     expect(plan.regimes.get(plan.discs[0]?.body ?? "0200080020000000.0300")).toBe("mesh");
+    // On the cluster path (plan R14, R14.T4.a): its stride-1 blocks' and strips' buckets.
     expect(renderer.meshDraws(plan).map((draw) => draw.material.name)).toEqual([
-      "bodies:smoothMeshEmissive",
+      "bodies:smoothMeshEmissiveCluster",
+      "bodies:smoothMeshEmissiveCluster",
     ]);
     expect(renderer.draws(plan).map((draw) => draw.material.name)).toEqual([
       "bodies:discLimbEmissive",
@@ -485,6 +487,10 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
       },
       dispatch: (...args) => {
         engine.dispatch(...args);
+      },
+      createComputeAsync: (...args) => engine.createComputeAsync(...args),
+      releaseCompute: (...args) => {
+        engine.releaseCompute(...args);
       },
       onRestored: (...args) => engine.onRestored(...args),
       get capabilities() {

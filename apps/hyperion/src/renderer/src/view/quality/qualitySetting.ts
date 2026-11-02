@@ -116,6 +116,12 @@ export interface GeometrySettings {
    * setting draws no cascades).
    */
   readonly farCascadeRate: FarCascadeRate;
+  /**
+   * R14.T4.a: the mesh regime's figures drawn through the cluster path, each patch's clusters culled
+   * to its view's frustum, at stride 1; `false` draws each figure by its instanced draw of R05's
+   * patch mesh. Both settings take it.
+   */
+  readonly figureClusters: boolean;
 }
 
 /**
@@ -134,6 +140,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   overlayDepth: "redraw",
   litClusters: false,
   farCascadeRate: 1,
+  figureClusters: false,
 };
 
 /**
@@ -300,6 +307,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       overlayDepth: "cluster",
       litClusters: true,
       farCascadeRate: 4,
+      figureClusters: true,
     },
     decoration: true,
     scatterDensity: 1,
@@ -339,6 +347,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       overlayDepth: "cluster",
       litClusters: true,
       farCascadeRate: 4,
+      figureClusters: true,
     },
     decoration: false,
     scatterDensity: 0,

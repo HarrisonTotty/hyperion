@@ -50,7 +50,7 @@ import { useGraphicsStatus } from "../../view/engine/status";
 import type { RenderView } from "../../view/engine/types";
 import type { ExposureControl } from "../../view/photometry/exposure";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
-import type { QualitySetting } from "../../view/quality/qualitySetting";
+import type { GeometrySettings, QualitySetting } from "../../view/quality/qualitySetting";
 import { cameraKinematics } from "../../view/scene/fromServer";
 import type { ViewStar } from "../../view/scene/model";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
@@ -225,6 +225,11 @@ export interface InstrumentsFrame {
   readonly budgets: ReadonlyMap<ViewId, ViewBudget>;
   /** The quality setting `VIEW` is given, at which each instrument draws (R07.T17). */
   readonly setting: QualitySetting;
+  /**
+   * How each instrument draws its geometry (plan R14, Design note 17): a launch's `--geometry` over
+   * the setting's; the setting's where absent.
+   */
+  readonly geometry?: GeometrySettings | undefined;
   /** The primary view's exposure, which each instrument draws at. */
   readonly exposure: ExposureControl;
   /**
@@ -815,6 +820,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           selection: inputs.selection,
           style: budget.style,
           setting: each.setting,
+          geometry: each.geometry,
           renderScale: budget.renderScale,
           availability: inputs.availability,
           // The primary is the exposure's source: an instrument meters nothing (Design note 11).
