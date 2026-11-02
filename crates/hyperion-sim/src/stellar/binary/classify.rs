@@ -620,20 +620,19 @@ fn transfer_class(state: &BinaryState, ctx: &ClassContext<'_>, d: usize) -> Opti
 
 /// The instability line a low-mass X-ray binary fed by `d` is persistent at or above, M☉ yr⁻¹: the
 /// irradiated hydrogen disc's ([`xrb_critical_rate`] at the disc's radius), and from
-/// [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION) a hydrogen-free donor's helium
-/// disc's ([`helium_disc_line`] at the orbit's period).
+/// [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION) a white-dwarf donor's helium (or
+/// carbon–oxygen) disc's ([`helium_disc_line`] at the orbit's period). A helium star keeps the
+/// hydrogen line: the helium line's period form builds in an ultracompact disc, whose donor is
+/// far lighter than its accretor, and at a helium star's periods of hours to days it would stand
+/// 50–80 times the hydrogen line (the science check of 2026-11-02).
 #[must_use]
 fn low_mass_xrb_line(state: &BinaryState, ctx: &ClassContext<'_>, d: usize) -> SolarMassesPerYear {
     let (donor, a) = (&state.stars()[d], 1 - d);
-    let hydrogen = || xrb_critical_rate(state.stars()[a].mass(), disc_radius(state, a));
-    match (
-        Kind::of(donor.phase(), donor.mass().value()).surface(),
-        state.orbit(),
-    ) {
-        (Surface::Helium | Surface::Carbon, Some(orbit)) if ctx.rules.xrb_class.carves() => {
+    match state.orbit() {
+        Some(orbit) if ctx.rules.xrb_class.carves() && is_white_dwarf(donor.phase()) => {
             helium_disc_line(orbit.period())
         }
-        (Surface::Hydrogen | Surface::Helium | Surface::Carbon, _) => hydrogen(),
+        Some(_) | None => xrb_critical_rate(state.stars()[a].mass(), disc_radius(state, a)),
     }
 }
 
@@ -860,10 +859,11 @@ fn is_b_main_sequence(star: &StarState, draws: &StarDraws, rules: StellarRules) 
         && rotation::fossil_field(star, draws).is_none()
 }
 
-/// Whether `donor` fills `share` of its Roche lobe beside `compact` on an orbit of semi-major axis
-/// `separation` (Eggleton 1983): from [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION)
-/// a massive star's wind forms a disc about a black hole at [`WIND_DISC_ROCHE_FILLING`], and a
-/// symbiotic X-ray binary's giant lies inside [`SYMBIOTIC_XRB_MAX_FILLING`].
+/// Whether `donor` fills `share`, of 0–1, of its Roche lobe beside `compact` on an orbit of
+/// semi-major axis `separation` (Eggleton 1983): from
+/// [`XRB_CLASS_VERSION`](super::xrb_class::XRB_CLASS_VERSION) a massive star's wind forms a disc
+/// about a black hole at [`WIND_DISC_ROCHE_FILLING`], and a symbiotic X-ray binary's giant lies
+/// inside [`SYMBIOTIC_XRB_MAX_FILLING`].
 #[must_use]
 fn fills_lobe_share(
     donor: &StarState,
@@ -1716,10 +1716,11 @@ mod tests {
         }
     }
 
-    /// From 27 (`xrb_class`) a low-mass X-ray binary fed by a hydrogen-free donor splits on its
-    /// helium disc's line: a neutron star fed 10⁻¹⁰ M☉ yr⁻¹ by a helium white dwarf 25 minutes out,
-    /// above the hydrogen disc's line and under the helium disc's, is persistent under the held
-    /// rules and transient under the carving; one fed by a hydrogen star keeps the hydrogen line.
+    /// From 27 (`xrb_class`) a low-mass X-ray binary fed by a white dwarf splits on its helium disc's
+    /// line: a neutron star fed 10⁻¹⁰ M☉ yr⁻¹ by a helium white dwarf 25 minutes out, above the
+    /// hydrogen disc's line and under the helium disc's, is persistent under the held rules and
+    /// transient under the carving; one fed by a hydrogen star or a helium star keeps the hydrogen
+    /// line.
     #[test]
     fn under_the_carving_a_helium_disc_splits_on_its_own_line() {
         let held = StellarRules::of_version(crate::GENERATOR_VERSION);
@@ -1784,6 +1785,8 @@ mod tests {
         assert_eq!(held_class, persistent);
         assert_eq!(class(helium, carved).0, transient);
         let dwarf = star(Phase::MainSequence, 0.06, 1e-4, 0.08, 0.0);
+        let helium_star = star(Phase::HeliumMainSequence, 0.06, 1e-2, 0.08, 0.0);
+        assert_eq!(class(helium_star, carved).0, persistent);
         assert_eq!(class(dwarf, carved).0, persistent);
     }
 

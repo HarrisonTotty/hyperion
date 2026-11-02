@@ -669,7 +669,7 @@ impl XrbShape {
     /// irradiated hydrogen disc's line ([`xrb_line`]), or from 27 by its helium disc's
     /// ([`helium_disc_line`]). `false` for every other shape, whose kind says it.
     #[must_use]
-    fn below_the_line(
+    pub(crate) fn below_the_line(
         &self,
         accretor_mass: SolarMasses,
         rate: Option<SolarMassesPerYear>,
@@ -790,7 +790,8 @@ pub(crate) fn ultracompact_donor_mass(period: Seconds, accretor_mass: SolarMasse
 /// `ζ = -(1/3)(u + v)/(u - v) + (2/3)[(7/3)(M/Mp)^(-2/3) + Mp/M]/B`, with `u = (M/Mch)^(-2/3)`,
 /// `v = (M/Mch)^(2/3)` and `B` the relation's second bracket, as van Haaften et al. (2012, A&A
 /// 537, A104) take an ultracompact donor's: −0.275 at 0.057 M☉ and −0.21 at 0.02 M☉, against a
-/// degenerate gas's −1/3 (research's ruling of 2026-11-02).
+/// degenerate gas's −1/3 (research's ruling of 2026-11-02). Valid below the Chandrasekhar mass,
+/// where the relation's first bracket vanishes; an ultracompact donor is under 0.45 M☉.
 #[must_use]
 fn cold_white_dwarf_zeta(mass: SolarMasses) -> f64 {
     let (m, planet_mass) = (mass.value(), EGGLETON_PLANET_MASS.value());
@@ -811,8 +812,8 @@ fn cold_white_dwarf_zeta(mass: SolarMasses) -> f64 {
 /// own ([`cold_white_dwarf_zeta`]), with J̇ ÷ J = −(32/5) G³ M₁ M₂ (M₁ + M₂) ÷ (c⁵ a⁴) (Paczyński
 /// 1967, Acta Astron. 17, 287; Rappaport, Joss and Webbink 1982, ApJ 254, 616; recalled, not
 /// read at source): about 7 × 10⁻⁹ M☉ yr⁻¹ at 11 minutes beside a 1.4 M☉ neutron star, and
-/// 10⁻¹² M☉ yr⁻¹ near an hour. Valid for q under 2/3, where the transfer is stable; an
-/// ultracompact host's is under 0.4.
+/// 10⁻¹² M☉ yr⁻¹ near an hour. Valid for q under 5/6 + ζ ÷ 2, where the transfer is stable: 0.70 at
+/// 0.057 M☉ and 0.63 at 0.3 M☉, where an ultracompact host's q is under 0.4.
 #[must_use]
 pub(crate) fn gravitational_wave_rate(
     accretor: SolarMasses,
@@ -828,7 +829,7 @@ pub(crate) fn gravitational_wave_rate(
     let response = 5.0 / 6.0 + cold_white_dwarf_zeta(donor) / 2.0 - m2 / m1;
     debug_assert!(
         response > 0.0,
-        "a stable transfer: q = {} under 2/3",
+        "a stable transfer: q = {} under 5/6 + zeta/2",
         m2 / m1
     );
     SolarMassesPerYear::new(m2 * loss / response * SECONDS_PER_JULIAN_YEAR)

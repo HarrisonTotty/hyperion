@@ -978,9 +978,9 @@ const GIANTS_AND_HB_OF_OBJECTS: (f64, f64) = (0.003, 0.03);
 /// counts it ([`BlueCount`]): the inner halo's 1.5–2.0 per blue horizontal-branch star at |Z| ≈ 5
 /// kpc, both classes A-type stars at [`BLUE_STAR_MIN_TEFF_K`] or hotter (Santucci et al. 2015,
 /// ApJ 801, 116; Preston and Sneden's 2000 figure of about 4, AJ 120, 1014, is the local halo's),
-/// taken on 0.6–5.5 (research's ruling of 2026-11-02); and the bulge's 0.29–0.37 of all its
-/// stragglers per horizontal-branch star (Clarkson et al. 2011, ApJ 735, 37; recalled, not checked
-/// against the paper), taken within a factor of three either way.
+/// taken on 0.6–5.5 (research's ruling of 2026-11-02; recalled here, not read at source); and the
+/// bulge's 0.29–0.37 of all its stragglers per horizontal-branch star (Clarkson et al. 2011, ApJ
+/// 735, 37; recalled, not checked against the paper), taken within a factor of three either way.
 const BLUE_STRAGGLERS_PER_HB: [(Population, BlueCount, f64, f64); 2] = [
     (Population::Halo, BlueCount::AType, 0.6, 5.5),
     (Population::Bulge, BlueCount::All, 0.29 / 3.0, 0.37 * 3.0),
@@ -997,7 +997,7 @@ enum BlueCount {
 }
 
 /// The least effective temperature of an A-type blue straggler and of a blue horizontal-branch
-/// star as Santucci et al. (2015) count them, K: 7,650.
+/// star as Santucci et al. (2015) count them, K: 7,650 (recalled, not read at source).
 const BLUE_STAR_MIN_TEFF_K: f64 = 7_650.0;
 
 /// The widest blue stragglers per horizontal-branch star that is not absurd: a population of
@@ -1065,6 +1065,11 @@ impl OldTally {
                 _ => {}
             }
         }
+        assert_eq!(
+            stars.pairs().len(),
+            now.pairs().len(),
+            "a state for every pair"
+        );
         for (timeline, pair) in stars.pairs().iter().zip(now.pairs()) {
             match pair.class() {
                 BinaryClass::BlueStraggler => {

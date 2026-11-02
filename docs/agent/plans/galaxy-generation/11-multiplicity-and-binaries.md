@@ -7431,12 +7431,17 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     0.0010 of the galaxy's hosts, about 10 in the Galaxy, against the models' 240 (Yungelson et
     al. 2019) or 100–1,000 (Lü et al. 2012); research foresaw about a dozen and 15.
   - _A helium disc's line_ (research's ruling of 2026-11-02). From 27 a low-mass X-ray binary fed
-    by a hydrogen-free donor, a helium star or a white dwarf, splits on its irradiated helium
-    disc's line, `helium_disc_line` = 2.4 × 10⁻¹² (P ÷ 1 min)^1.67 M☉ yr⁻¹ (Lasota, Dubus and Kruk
-    2008, equation 6 in its period form, equation 12), some 17–23 times the hydrogen disc's and
-    taken as a lower bound for a carbon–oxygen disc (`classify::low_mass_xrb_line`). A cold
-    ultracompact host turns transient from about 20 minutes, where the hydrogen line turned it at
-    about 31. The catalogue's scan reads the line its class's test reads, the version's.
+    by a white dwarf, of helium or of carbon and oxygen, splits on its irradiated helium disc's
+    line, `helium_disc_line` = 2.4 × 10⁻¹² (P ÷ 1 min)^1.67 M☉ yr⁻¹ (Lasota, Dubus and Kruk 2008,
+    equation 6 in its period form, equation 12), some 22–24 times the hydrogen disc's beside a 1.4
+    M☉ neutron star and taken as a lower bound for a carbon–oxygen disc
+    (`classify::low_mass_xrb_line`). _Deviation_ (the science check of 2026-11-02): a helium star
+    keeps the hydrogen line, since the period form builds in an ultracompact disc and would stand
+    50–80 times the hydrogen line at a helium star's periods of hours to days. A cold ultracompact
+    host turns transient from about 20 minutes, where the hydrogen line turned it at about 32.
+    The catalogue's scan reads the line its class's test reads, the version's; under every 27
+    hold the catalogue's ultracompact transients, and their recurrences, still follow the
+    hydrogen line until the bump (movers then, `kinds_tests` checks both arms).
   - _The black-hole transients pinned_ (research's ruling of 2026-11-02, plan 11's design note
     11: counts are observed). `XRB_LOW_MASS_KINDS_27` takes the census's shares at 27 after the
     symbiotic bounds and the helium line (s₃ = 0.381), but the black-hole transients' at

@@ -1504,12 +1504,12 @@ impl SamplerKey for XrbPick {
 ///   is.
 /// - **Symbiotic X-ray binaries**, marked detached and fed by their giant's wind: periods 10^(3.0
 ///   ± 0.25) days on 150–5,000, the measured ones running from IGR J16194−2810's 192.7 d to 4U
-///   1700+24's 4,391 d (Hinkle et al. 2019, ApJ 872, 43) about GX 1+4's 1,161 d (Hinkle et al.
-///   2006, ApJ 641, 479); giants of 10^(0.176 ± 0.07) M☉, 1.5 M☉, on 1–3; and the giant's radius
-///   0.45 ± 0.12 of its Roche lobe's on 0.15–0.75, ours, inside the carving's detached 0.8
-///   (`stellar::binary::xrb_class`), at the accreting white dwarfs' giant donors' 3,600 K (`awd`)
-///   and no larger than the red giant branch's tip there (`catalogue_classes::binary`'s 129 R☉),
-///   so that its luminosity and its Reimers wind follow.
+///   1700+24's 4,391 d (Hinkle et al. 2019, ApJ 872, 43; research's ruling of 2026-11-02) about
+///   GX 1+4's 1,161 d (Hinkle et al. 2006, ApJ 641, 479); giants of 10^(0.176 ± 0.07) M☉, 1.5
+///   M☉, on 1–3; and the giant's radius 0.45 ± 0.12 of its Roche lobe's on 0.15–0.75, ours,
+///   inside the carving's detached 0.8 (`stellar::binary::xrb_class`), at the accreting white
+///   dwarfs' giant donors' 3,600 K (`awd`) and no larger than the red giant branch's tip there
+///   (`catalogue_classes::binary`'s 129 R☉), so that its luminosity and its Reimers wind follow.
 /// - **Black-hole high-mass X-ray binaries**, marked in Roche-lobe overflow as the supergiant
 ///   systems are, with their recoils and years since the supernova: Cyg X-1's black hole, 21.2 ±
 ///   2.2 M☉ on 15–30, its period, 10^(0.748 ± 0.1) days on 2–10 about its 5.6 d, and its O
@@ -1875,11 +1875,11 @@ pub const XRB_HIGH_MASS_KINDS_27: [f64; 3] = [
 ];
 
 /// The black-hole transients' share of the X-ray binaries from 27: 0.13, the 1,300 of the row's
-/// 10⁴ hosts that P11.T8.b's design takes, Corral-Santana et al.'s (2016, A&A 587, A61) 1,280 ±
-/// 120, which they call a lower limit (research's ruling of 2026-11-02). The census gives 0.0196,
-/// about 190 (a finding: likely the common envelopes that survive at `α_CE λ` = 0.5, Podsiadlowski
-/// et al. 2003, MNRAS 341, 385, recalled; neither `α_CE λ` nor the kicks are touched, which would
-/// move every class after a common envelope).
+/// 10⁴ hosts that P11.T8.b's design takes, Corral-Santana et al.'s (2016, A&A 587, A61; recalled,
+/// not read at source) 1,280 ± 120, which they call a lower limit (research's ruling of
+/// 2026-11-02). The census gives 0.0196, about 190 (a finding: likely the common envelopes that
+/// survive at `α_CE λ` = 0.5, Podsiadlowski et al. 2003, MNRAS 341, 385, recalled; neither
+/// `α_CE λ` nor the kicks are touched, which would move every class after a common envelope).
 pub const BLACK_HOLE_TRANSIENT_SHARE: f64 = 0.13;
 
 /// The share rows fitted against the engine (P15.T10.b), held until generator version 27: the

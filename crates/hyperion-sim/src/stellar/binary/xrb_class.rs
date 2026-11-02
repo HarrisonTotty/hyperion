@@ -43,15 +43,20 @@
 //! - **A symbiotic X-ray binary is a neutron star fed by a cool giant's wind.** It needs a neutron
 //!   star, never a black hole: none is known, and Deng and Li (2024, ApJ 977, 95) predict at most
 //!   one in six as many as of neutron stars, where the census held seven black holes to one; a
-//!   black hole fed by a giant's wind is a dormant pair, as Gaia BH2 is. Its giant is a K or M
+//!   black hole fed by a giant's wind is a dormant pair, as Gaia BH2 is (El-Badry et al. 2023,
+//!   MNRAS 521, 4323; recalled). Its giant is a K or M
 //!   giant at [`SYMBIOTIC_XRB_MAX_TEFF`] or cooler, under 8 M☉, inside
 //!   [`SYMBIOTIC_XRB_MAX_FILLING`] of its Roche lobe, on an orbit of [`SYMBIOTIC_XRB_MAX_PERIOD`]
 //!   or less (research's ruling of 2026-11-02): the census's wide pairs, at a median 7 × 10⁴ days,
 //!   and its blue-loop giants of some 5 M☉ are no symbiotic X-ray binaries.
-//! - **A helium disc's line.** A low-mass X-ray binary fed by a hydrogen-free donor, a helium star
-//!   or a white dwarf, is persistent or transient by its irradiated helium disc's instability line
-//!   ([`helium_disc_line`]), some 17–20 times the hydrogen disc's (Lasota, Dubus and Kruk 2008),
-//!   not by the hydrogen disc's (research's ruling of 2026-11-02).
+//! - **A helium disc's line.** A low-mass X-ray binary fed by a white dwarf, of helium or of carbon
+//!   and oxygen, is persistent or transient by its irradiated helium disc's instability line
+//!   ([`helium_disc_line`]), some 22–24 times the hydrogen disc's beside a 1.4 M☉ neutron star and
+//!   17 beside a 7 M☉ black hole (Lasota, Dubus and Kruk 2008), not by the hydrogen disc's
+//!   (research's ruling of 2026-11-02). A helium star keeps the hydrogen line: the helium line's
+//!   period form holds for an ultracompact disc alone (the science check of 2026-11-02). The
+//!   X-ray binaries' scan reads the line its class's test reads, through the generator version's
+//!   rules, which classify a timeline built from marks.
 //!
 //! Every figure is recalled, not read at source (the science checks of 2026-11-01 reached none);
 //! the floor sits at the very faint transients' upper bound, so it may cut the faintest of them.
@@ -134,12 +139,13 @@ pub(crate) const SYMBIOTIC_XRB_MAX_FILLING: f64 = 0.8;
 /// 2026-11-02).
 pub(crate) const SYMBIOTIC_XRB_MAX_PERIOD: Days = Days::new(1.0e4);
 
-/// The irradiated helium disc's instability line, a low-mass X-ray binary fed by a hydrogen-free
-/// donor of orbital period `period`, from 27: 2.4 × 10⁻¹² (P ÷ 1 min)^1.67 M☉ yr⁻¹, Lasota, Dubus and
-/// Kruk's (2008, A&A 486, 523) equation 6 in its period form, their equation 12; some 17–20 times
-/// the hydrogen disc's, it is taken as a lower bound for a carbon–oxygen disc (research's ruling
-/// of 2026-11-02). A cold ultracompact host then turns transient from about 20 minutes, where the
-/// hydrogen line turns it at about 31.
+/// The irradiated helium disc's instability line, a low-mass X-ray binary fed by a white dwarf of
+/// orbital period `period`, from 27: 2.4 × 10⁻¹² (P ÷ 1 min)^1.67 M☉ yr⁻¹, Lasota, Dubus and Kruk's
+/// (2008, A&A 486, 523) equation 6 in its period form, their equation 12 (recalled, not read at
+/// source), valid for an ultracompact orbit of some 10–80 minutes, whose donor is far lighter than
+/// its accretor; some 22–24 times the hydrogen disc's beside a 1.4 M☉ neutron star, it is taken as
+/// a lower bound for a carbon–oxygen disc (research's ruling of 2026-11-02). A cold ultracompact
+/// host then turns transient from about 20 minutes, where the hydrogen line turns it at about 32.
 #[must_use]
 pub(crate) fn helium_disc_line(period: Seconds) -> SolarMassesPerYear {
     let minutes = period.value() / 60.0;
