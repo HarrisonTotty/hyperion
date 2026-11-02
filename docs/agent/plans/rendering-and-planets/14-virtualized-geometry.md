@@ -1379,6 +1379,8 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
   by band and setting, under both rules of Design note 3 (the level's stated bound plus e_s, and the
   measured per-patch deviation plus e_s). It decides T3.c's gain before T3.b starts. _Acceptance:_
   the table, both settings and both worlds, in the lane's outbox, with the harness that made it.
+  - _Built_ (`r14-t3a-error-histogram`; `clusters/errors.ts` with T3.b's brute-force test): records
+    at the end of Risks.
 - **R14.T3.b The worker's error output.** Size M, after `perf-terrain-bakes`.
   - `clusterErrors` in the height worker after each bake, in `f64` from the drawn 3D offsets of both
     channels (Design note 3: on high the bake's `BakedOffsets`, on low its own `f64` positions): e_s
@@ -1885,3 +1887,22 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - The bounds test uses the Earth-like and Moon-like worker fixtures; Mars-like has no field
     fixture.
   - Timed passes: 5 a lit view-frame on high (the cull and four casters), 6 measured, no resolve.
+- **R14.T3.a** (`r14-t3a-error-histogram`; its table and harness in the lane's outbox):
+  - `clusters/errors.ts`' `clusterErrors(bake: ClusterErrorBake, key, planet): Float64Array` lands
+    ahead of T3.b, as Provides sketches it: e_s of all 96 clusters at `ERRORS_PER_CLUSTER` (4) ×
+    cluster + log₂ s, metres, e₁ = 0, monotone; `clusterErrorM` reads one. T3.b calls it unchanged.
+  - e_s holds the GPU's `f32` placement as the records' spheres pad for it (`CLUSTER_PAD_M` +
+    `CLUSTER_PAD_FRACTION` × the cluster's reach) and, on a strip, twice the largest bend of a foot
+    whose height crosses the skirt depth between k = 0 and 1, so T3.b's brute force
+    (`errors.wasm.test.ts` over `test/strideOracle.ts`) holds e_s ≥ the drawn distance with no slack.
+  - It bounds one k across a cluster (Design note 3); `morphFactor` gives each vertex its own, so
+    inside a stride-s triangle the drawn error can pass e_s by about Δk |q₁ − q₀|: T3.c's drawn-error
+    test is where it shows.
+  - The verdict: within τ′ the stated rule removes 96.4–97.8% of the kept lit triangles on every
+    world, setting and band, the measured 97.1–97.8% (stride 8's ceiling is 97.8%), so T3.c builds
+    the stated rule; the budget binds at 113–117 of 124 poses, and the stated bound is 3–240 times
+    the bakes' measured deviation. The rules part only with strides held to τ (T3.e's ruling).
+  - T3.c's "lit triangles as T3.a predicts" reads the table: about 2.2% of the kept clusters' lit
+    triangles drawn (0.1 M of 4.3 M a pose on high above 1 km).
+  - The table ran on wasm whole-body fields of TERRAIN TEST's moon and the Earth-, Mars- and
+    Moon-like sample worlds in place of a served world, since this tree serves none at 24.
