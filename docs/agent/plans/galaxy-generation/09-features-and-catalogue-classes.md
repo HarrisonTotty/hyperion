@@ -5855,8 +5855,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Finding._ P09.T36.b's "a handful (1–20)" now fails at 25; the range check went, 25 is pinned.
   - _Centre binaries._ P11.T8.f's share `position`, so they move under `feature_binaries` (27);
     pinned by `centre::binaries::tests::the_centre_s_binary_entries_are_pinned`.
-  - _Lean (2026-11-01)._ A listed death's remnant stays on its progenitor's line, no natal kick,
-    as `Drift::of_member` reads it; the class's core collapse takes its kick (P09.T33.a).
+  - _Lean (2026-11-01; overturned 2026-11-02, "…the listed dead kicked")._ A listed death's
+    remnant stays on its progenitor's line, no natal kick, as `Drift::of_member` reads it.
   - _Tests (slow)._ `verification::recent_in_range::every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold`
     and `…_under_every_27_hold`. They failed on BASE (117 entries inside, none returned), so
     `feature_classes` may not switch on without this lane; held to 27, the 26 test checks none lists.
@@ -5919,3 +5919,24 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Query tables._ `Galaxy::make_query_tables` builds what a query's first reading built (the
     centre's motion, the Type Ia delays, the core-collapse process, as the rules read them); the
     server's `GalaxyCache` calls it after the headroom checks, 77 ms of a 3.5 s build at 27.
+- **P09.T37, the listed dead kicked (lane `fix-p09-recent-dead`, 2026-11-02, under
+  `feature_classes` and `list_source` (27); no output moved at 24–26).**
+  - _Motion._ research-leans-31 (median 283 kyr, 169 km/s): a listed core collapse, a feature's or
+    the centre's, moves on `CatalogueMotion::broken(site, T, bulk, bulk + kick)`, the kick its
+    own `ForcedSingle` stars' `natal_kick()` (`members::recent::ListedDeath`); its member's epoch
+    place and velocity are the motion's (`RecentEntry::motion`, `CentreRecentEntry::motion`).
+  - _Shell._ Its `SupernovaEntry` takes the kick (`with_remnant`): `RecentEntry::supernova`.
+  - _By ID._ `Drift::of_record_in` reads `members::listed_death_motion` (`Drift::broken`),
+    `CentrePath` a `Law::Broken`; the server's `SystemLine::at` reads `velocity_at(t)`.
+  - _Pads._ A remnant lies within `LIFETIME_REACH` of its candidate's line: the features' lists
+    are looked up about the sphere grown by it (`lists_lookup_radius`; interiors as before), the
+    centre's within `REACH` plus it; a core collapse's candidate is tested so, then its own line.
+  - _Lean (2026-11-02)._ The census counts a core collapse by its candidate's place, as the
+    classes count by cell: every list within 4,096 ly would add some 2,400 expected candidates
+    to layer E at the Sun, past a 50 ly query's 4,096 limit.
+  - _Lean (2026-11-02)._ `LIFETIME_REACH` bounds a remnant's travel from its site; from its
+    candidate's line a kick against the bulk could take it up to twice that. Largest seen:
+    2,710 ly (381 kept within 4,147 ly of the inner disc).
+  - _Digests._ `ENTRIES_DIGEST` and `CENTRE_ENTRIES_DIGEST` re-pinned (places and velocities).
+  - _Test (slow)._ `verification::recent_in_range::a_listed_core_collapse_moves_on_its_remnant_s_kick_under_every_27_hold`,
+    which failed on BASE at all 90 kicked places.

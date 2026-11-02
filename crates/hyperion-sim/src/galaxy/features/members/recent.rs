@@ -55,6 +55,12 @@
 //! `class.type_ia.progenitor` and `class.type_ia.leftover` for a Type Ia), so the registry gains
 //! no tag. The velocity is the feature's bulk motion, as [`MemberRecord`]'s is less its internal
 //! part, and a list is defined, as the cells are, only in a galaxy with its kinematic tables.
+//!
+//! A core collapse's remnant leaves that line at its death, at the bulk motion plus the natal
+//! kick of its own stars ([`SystemStars::natal_kick`], `ForcedSingle`), on the class's broken line
+//! ([`CatalogueMotion::broken`]), and its shell's entry takes the kick as the class's does
+//! ([`SupernovaEntry::with_remnant`]): its member's place and velocity at the epoch are the
+//! remnant's once it has died (fix-p09-recent-kicks; research-leans-31, `RecentEntry::motion`).
 
 use std::sync::OnceLock;
 
@@ -63,13 +69,14 @@ use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::Population;
 use crate::galaxy::ages::AgeDistribution;
-use crate::galaxy::catalogue_classes::ClassId;
 use crate::galaxy::catalogue_classes::core_collapse::feature_runaway;
 use crate::galaxy::catalogue_classes::lbv::{NODES, horizon_window, host_ages, may_host};
 use crate::galaxy::catalogue_classes::supernova::{
-    BubbleInterior, DeathMarks, SupernovaInterval, Surroundings, claimed_window, claims,
+    BubbleInterior, DeathMarks, SupernovaEntry, SupernovaInterval, Surroundings, claimed_window,
+    claims,
 };
 use crate::galaxy::catalogue_classes::type_ia::{DelayTimeDistribution, IaLeftover, IaProgenitor};
+use crate::galaxy::catalogue_classes::{CatalogueMotion, ClassId};
 #[cfg(doc)]
 use crate::galaxy::displaced::death_in_interval;
 use crate::galaxy::displaced::marks::LifetimeBracket;
@@ -91,8 +98,11 @@ use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::system::{SystemStars, primary_draws, primary_eta};
 use crate::tables::lbv::LBV_SAMPLER;
+use crate::time::UniverseTime;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
-use crate::units::{Dex, HeliumExcess, LightYears, Seconds, SolarMasses, Years};
+use crate::units::{
+    Dex, HeliumExcess, KilometresPerSecond, LightYears, Seconds, SolarMasses, Years,
+};
 
 use super::MemberRecord;
 use super::level_list::ListClass;
@@ -589,19 +599,34 @@ impl FeatureStars {
                         member: self.member(record, range),
                         site: None,
                         window: None,
+                        motion: CatalogueMotion::straight(*record.epoch_position(), self.velocity),
+                        supernova: None,
                     });
                 }
                 // From 27 a runaway's death is the class's, in the field (P09.T33.b).
                 if self.runaway(galaxy, &record) {
                     return None;
                 }
-                let (claim, site) =
+                let death =
                     self.core_collapse(galaxy, &record, &self.composition, self.velocity)?;
+                // The remnant where its kick takes it (fix-p09-recent-kicks): the member's epoch
+                // place and velocity are its broken line's.
+                let at = death.motion.position_at(UniverseTime::EPOCH);
+                let kicked = self.record(
+                    record.id(),
+                    &at,
+                    record.primary_initial_mass(),
+                    record.age_at_epoch(),
+                );
                 Some(RecentEntry {
                     class,
-                    member: self.member(record, range),
-                    site: Some(site),
-                    window: Some(claim),
+                    member: self
+                        .member(kicked, range)
+                        .moving_at(death.motion.velocity_at(UniverseTime::EPOCH)),
+                    site: Some(death.site),
+                    window: Some(*death.supernova.window()),
+                    motion: death.motion,
+                    supernova: Some(death.supernova),
                 })
             }
             RecentClass::TypeIa => self.type_ia(galaxy, index, position),
@@ -659,6 +684,8 @@ impl FeatureStars {
             member: self.member(record, (mass, mass)),
             site: Some(site),
             window,
+            motion: CatalogueMotion::straight(*record.epoch_position(), self.velocity),
+            supernova: None,
         })
     }
 
@@ -677,8 +704,8 @@ impl FeatureStars {
         })
     }
 
-    /// The core collapses' test on `record`, of composition `composition` moving at `velocity`: the
-    /// window its death's shell is cut to and the site, if the one shared test keeps it.
+    /// The core collapses' test on `record`, of composition `composition` moving at `velocity`: its
+    /// death ([`ListedDeath`]), if the one shared test keeps it.
     #[must_use]
     fn core_collapse(
         &self,
@@ -686,7 +713,7 @@ impl FeatureStars {
         record: &SystemRecord,
         composition: &Composition,
         velocity: GalacticVelocity,
-    ) -> Option<(ShellWindow, ExplosionSite)> {
+    ) -> Option<ListedDeath> {
         let death = death_in_interval_under(
             record.primary_initial_mass(),
             composition,
@@ -706,7 +733,7 @@ impl FeatureStars {
         let surroundings = self.surroundings(galaxy, &site, Surroundings::Field);
         let window = claimed_window(galaxy, &site, &marks, surroundings)?;
         debug_assert!(claims(galaxy, &site, &marks, surroundings));
-        Some((window, site))
+        Some(ListedDeath::of(&stars, site, (marks, window), velocity))
     }
 }
 
@@ -979,14 +1006,55 @@ pub(crate) fn claimed_by(
     .then_some(Claim::Listed(RecentClass::LuminousBlueVariable))
 }
 
-/// One recent entry of a feature's list: its class, its member, and for a death its site and the
-/// window of its shell.
+/// A listed core collapse's death (P09.T36; fix-p09-recent-kicks): its site, its shell's entry,
+/// whose compact remnant takes the natal kick of its own stars as the class's entries' does
+/// (`SupernovaEntry::with_remnant`), and how it moves: its progenitor's line through the site,
+/// broken there at its death, from where the remnant moves at the progenitor's velocity plus the
+/// kick, as the class's [`CatalogueMotion::broken`] has it (research-leans-31).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ListedDeath {
+    pub(crate) site: ExplosionSite,
+    pub(crate) supernova: SupernovaEntry,
+    pub(crate) motion: CatalogueMotion,
+}
+
+impl ListedDeath {
+    /// The death of `stars`'s primary at `site`, whose marks are `marks` and whose shell the test
+    /// cut to `window`, for a system moving at `velocity` before it.
+    #[must_use]
+    pub(crate) fn of(
+        stars: &SystemStars,
+        site: ExplosionSite,
+        (marks, window): (DeathMarks, ShellWindow),
+        velocity: GalacticVelocity,
+    ) -> Self {
+        let death = site.death();
+        let kick = stars.natal_kick();
+        let remnant = kick.map_or(velocity, |kick| {
+            velocity + GalacticVelocity::new(kick.velocity())
+        });
+        let kick_speed = kick.map_or(KilometresPerSecond::ZERO, |kick| {
+            KilometresPerSecond::from(kick.speed())
+        });
+        Self {
+            site,
+            supernova: SupernovaEntry::new(stars.record().id(), death, marks.kind(), window)
+                .with_remnant(kick_speed, stars.primary().neutron_star()),
+            motion: CatalogueMotion::broken(*site.position(), death, velocity, remnant),
+        }
+    }
+}
+
+/// One recent entry of a feature's list: its class, its member, for a death its site and the
+/// window of its shell, how it moves, and for a core collapse its shell's entry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecentEntry {
     class: RecentClass,
     member: MemberRecord,
     site: Option<ExplosionSite>,
     window: Option<ShellWindow>,
+    motion: CatalogueMotion,
+    supernova: Option<SupernovaEntry>,
 }
 
 impl RecentEntry {
@@ -1013,6 +1081,21 @@ impl RecentEntry {
     #[must_use]
     pub const fn window(&self) -> Option<&ShellWindow> {
         self.window.as_ref()
+    }
+
+    /// How it moves: a core collapse on its progenitor's line broken at its death, where its
+    /// remnant takes its natal kick (fix-p09-recent-kicks); any other entry on one straight line
+    /// at its feature's bulk motion.
+    #[must_use]
+    pub const fn motion(&self) -> &CatalogueMotion {
+        &self.motion
+    }
+
+    /// Its shell's entry, for a core collapse: its explosion, its kind, its window and its
+    /// remnant's kick, which the remnant's offset, its bow shock and its nebula read.
+    #[must_use]
+    pub const fn supernova(&self) -> Option<&SupernovaEntry> {
+        self.supernova.as_ref()
     }
 }
 

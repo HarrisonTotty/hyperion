@@ -34,6 +34,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::ages::SubDisc;
 use crate::galaxy::catalogue_classes::binary::feature::is_listed_binary;
 use crate::galaxy::catalogue_classes::source::member_layers;
+use crate::galaxy::catalogue_classes::supernova::SupernovaEntry;
 use crate::galaxy::catalogue_classes::{CatalogueClassSource, CatalogueMotion, ClassId};
 use crate::galaxy::displaced::ExplosionSite;
 use crate::galaxy::features::catalogue::{
@@ -88,21 +89,33 @@ const MANY_ENTRIES: usize = 3;
 /// The old open clusters walked for one with entries.
 const OLD_CLUSTERS_WALKED: usize = 2_000;
 
-/// One recent entry as the brute force sees it: its record and its line.
+/// One recent entry as the brute force sees it: its record and its line, a core collapse's broken
+/// at its death (fix-p09-recent-kicks).
 #[derive(Debug, Clone, Copy)]
 struct Listed {
     record: SystemRecord,
     velocity: GalacticVelocity,
+    broken: Option<CatalogueMotion>,
 }
 
 impl Listed {
-    /// Where it is at `t`: its epoch position moved straight along its velocity.
+    /// Where it is at `t`: its epoch position moved straight along its velocity, or a core
+    /// collapse's place on its broken line.
     fn at(&self, t: UniverseTime) -> GalacticPosition {
+        if let Some(motion) = &self.broken {
+            return motion.position_at(t);
+        }
         if t == UniverseTime::EPOCH {
             *self.record.epoch_position()
         } else {
             moved(self.record.epoch_position(), self.velocity, t)
         }
+    }
+
+    /// Its velocity at `t`: a core collapse's remnant's from its death on.
+    fn velocity_at(&self, t: UniverseTime) -> GalacticVelocity {
+        self.broken
+            .map_or(self.velocity, |motion| motion.velocity_at(t))
     }
 
     /// Whether it exists at `t` and lies inside the sphere of `radius` about `centre` then.
@@ -142,11 +155,16 @@ fn feature_entries(
         .filter(|entry| kind.holds(entry.class()))
         .filter_map(|entry| {
             let member = list.member(galaxy, entry.index())?;
+            let broken = (entry.class() == ClassId::CORE_COLLAPSE)
+                .then(|| list.recent_entry(galaxy, entry.index()))
+                .flatten()
+                .map(|death| *death.motion());
             Some((
                 member.record().id(),
                 Listed {
                     record: *member.record(),
                     velocity: member.velocity(),
+                    broken,
                 },
             ))
         })
@@ -164,20 +182,23 @@ fn centre_entries(galaxy: &Galaxy, kind: Kind) -> BTreeMap<SystemId, Listed> {
         .entries()
         .filter(|entry| kind.holds(entry.class()))
         .filter_map(|entry| {
-            let member = match RecentClass::of(entry.class()) {
-                Some(class) => *recent.entry(galaxy, model, class, entry.index())?.member(),
-                None => {
+            let (member, broken) = if let Some(class) = RecentClass::of(entry.class()) {
+                let recent = recent.entry(galaxy, model, class, entry.index())?;
+                let broken = (class == RecentClass::CoreCollapse).then_some(*recent.motion());
+                (*recent.member(), broken)
+            } else {
+                let (_, member) =
                     recent
                         .binaries()
-                        .entry(galaxy, model, entry.class(), entry.index())?
-                        .1
-                }
+                        .entry(galaxy, model, entry.class(), entry.index())?;
+                (member, None)
             };
             Some((
                 member.record().id(),
                 Listed {
                     record: *member.record(),
                     velocity: member.velocity(),
+                    broken,
                 },
             ))
         })
@@ -217,6 +238,22 @@ fn is_list_slot(galaxy: &Galaxy, id: SystemId, kind: Kind) -> bool {
     }
 }
 
+/// The entry of `kind` that `id`, a list's slot ([`is_list_slot`]), names, if its list keeps it.
+fn listed_entry(galaxy: &Galaxy, id: SystemId, kind: Kind) -> Option<Listed> {
+    match id.kind() {
+        SystemIdKind::FeatureMember(member) => {
+            let feature = FeatureCatalogue::resolve(galaxy, member.feature().into())?;
+            feature_entries(galaxy, &feature, kind).remove(&id)
+        }
+        SystemIdKind::Centre(_) => centre_entries(galaxy, kind).remove(&id),
+        SystemIdKind::Grid(_)
+        | SystemIdKind::Stream(_)
+        | SystemIdKind::DwarfCore(_)
+        | SystemIdKind::Pinned(_)
+        | SystemIdKind::Catalogue(_) => None,
+    }
+}
+
 /// What a placement by ID reads, as the server's `convert::system_motion` reads it: the features'
 /// interiors and the centre's orbits, the ones the sources read.
 #[derive(Clone, Copy)]
@@ -238,7 +275,7 @@ fn placed_by_id(
     match record.id().kind() {
         SystemIdKind::FeatureMember(_) => {
             let line = Drift::of_record_in(galaxy, reads.interiors, record).ok()?;
-            Some((line.position_at(t), line.velocity()))
+            Some((line.position_at(t), line.velocity_at(t)))
         }
         SystemIdKind::Centre(id) => {
             match CentrePath::of(galaxy, reads.orbits, id).ok()?.state_at(t) {
@@ -337,7 +374,7 @@ fn check_sphere(
             let placed = placed_by_id(galaxy, reads, hit.record(), t);
             let agrees = placed.is_some_and(|(position, velocity)| {
                 let off = hit.position().distance_to(&position).value();
-                velocity == entry.velocity
+                velocity == entry.velocity_at(t)
                     && match hit.id().kind() {
                         SystemIdKind::Centre(_) => position == *hit.position(),
                         _ => off <= LINE_ROUNDING_M,
@@ -351,7 +388,17 @@ fn check_sphere(
                 ));
             }
         } else if is_list_slot(galaxy, hit.id(), kind) {
-            faults.push(format!("{:?}: a list's slot no list keeps", hit.id()));
+            // A remnant kicked in from a list past the scan's margin (fix-p09-recent-kicks) is
+            // one its list keeps, where its line has it.
+            let kept = listed_entry(galaxy, hit.id(), kind);
+            if kept
+                .is_none_or(|entry| &entry.record != hit.record() || &entry.at(t) != hit.position())
+            {
+                faults.push(format!(
+                    "{:?}: a list's slot no list keeps there, its entry {kept:?}",
+                    hit.id()
+                ));
+            }
         }
     }
     let mut inside = 0;
@@ -810,6 +857,42 @@ fn kicked_at(
     Some(CatalogueMotion::broken(*site.position(), site.death(), velocity, remnant).position_at(t))
 }
 
+/// Panics unless `supernova`, the listed shell of the core collapse `record` of `composition`,
+/// takes the natal kick of its own stars (`ForcedSingle`) as a class's entry's does
+/// (`SupernovaEntry::with_remnant`), so that its remnant's offset, its bow shock and its nebula
+/// read it (fix-p09-recent-kicks).
+fn assert_the_shell_takes_its_kick(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: &Composition,
+    supernova: &SupernovaEntry,
+) {
+    let stars = SystemStars::generate_with(
+        galaxy,
+        record,
+        composition,
+        MultiplicityContext::ForcedSingle,
+    );
+    let kick = stars
+        .natal_kick()
+        .map_or(KilometresPerSecond::ZERO, |kick| {
+            KilometresPerSecond::from(kick.speed())
+        });
+    let kicked = SupernovaEntry::new(
+        record.id(),
+        supernova.explosion(),
+        supernova.kind(),
+        *supernova.window(),
+    )
+    .with_remnant(kick, stars.primary().neutron_star());
+    assert_eq!(
+        supernova,
+        &kicked,
+        "{:?}: its shell takes its kick",
+        record.id()
+    );
+}
+
 /// The features' and the centre's listed core collapses that have died by the epoch or by +H and
 /// take a kick, each with its time and its kicked place then (`kicked_at`), in `galaxy`, of the
 /// features `asked`.
@@ -830,6 +913,12 @@ fn kicked_entries(
                 continue;
             };
             let member = entry.member();
+            assert_the_shell_takes_its_kick(
+                galaxy,
+                member.record(),
+                member.composition(),
+                entry.supernova().expect("a listed core collapse's shell"),
+            );
             for t in times {
                 if let Some(at) = kicked_at(
                     galaxy,
@@ -866,6 +955,12 @@ fn kicked_entries(
             continue;
         };
         let site = kept.site().expect("a core collapse's site");
+        assert_the_shell_takes_its_kick(
+            galaxy,
+            kept.member().record(),
+            &centre_composition(),
+            kept.supernova().expect("a listed core collapse's shell"),
+        );
         for t in times {
             if let Some(at) = kicked_at(
                 galaxy,
@@ -884,7 +979,7 @@ fn kicked_entries(
 /// collapse, a feature's or the centre's, is where its remnant's kick takes it, its site plus its
 /// progenitor's velocity and its own stars' natal kick times the time since, as the class's
 /// entries move: a query of half a light-year about that place, at the epoch or at +H, returns it
-/// there once, and its placement by ID puts it there too.
+/// there once, and its placement by ID puts it there too; and its shell takes that kick.
 #[test]
 #[ignore = "slow: four features' and the centre's listed core collapses, queried where their kicks \
             take them, under every 27 hold"]

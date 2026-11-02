@@ -82,7 +82,9 @@ pub use headroom::{
     CLASS_ACCEPTANCE_FLOOR, CentreListForecast, ExceedFeatureListError, centre_list_forecast,
     check_feature_list_headroom,
 };
-pub use level_list::{FeatureLevelList, ListClass, ListEntry, ListIndex, MemberZero};
+pub use level_list::{
+    FeatureLevelList, ListClass, ListEntry, ListIndex, MemberZero, listed_death_motion,
+};
 pub use placement::{FeatureInterior, resolve_member};
 pub use source::{FeatureInteriorCache, FeatureMemberSource, KeepInteriors, NoInteriorCache};
 
@@ -218,6 +220,13 @@ impl MemberRecord {
             max_separation: None,
             recycled: RecycledMark::Unmarked,
         }
+    }
+
+    /// The same member moving at `velocity`: a listed core collapse's at the epoch, its remnant's
+    /// once it has died (fix-p09-recent-kicks).
+    #[must_use]
+    pub(crate) const fn moving_at(self, velocity: GalacticVelocity) -> Self {
+        Self { velocity, ..self }
     }
 
     /// Its recycled-object mark.

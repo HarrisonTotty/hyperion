@@ -6,8 +6,9 @@ use std::fmt;
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity, LyCell};
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::CatalogueMotion;
 use crate::galaxy::features::members::{
-    FeatureInteriorCache, MemberRecord, NoInteriorCache, resolve_member,
+    FeatureInteriorCache, MemberRecord, NoInteriorCache, listed_death_motion, resolve_member,
 };
 use crate::galaxy::global_list::members::GlobalMemberRecord;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
@@ -226,10 +227,18 @@ pub trait Trajectory {
 /// let moved = start.distance_to(&later).value();
 /// assert!((moved - hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR).abs() < 1.0);
 /// ```
+///
+/// A listed core collapse of a feature's list (plan 09, P09.T36; fix-p09-recent-kicks) moves on
+/// its progenitor's line broken at its death, where its remnant takes its natal kick, as a
+/// catalogue class's entry does: its drift holds that [`CatalogueMotion`] and reads it at every
+/// time ([`Drift::broken`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Drift {
     epoch_position: GalacticPosition,
     velocity: GalacticVelocity,
+    /// A listed core collapse's line broken at its death, which the drift reads in place of the
+    /// straight one.
+    broken: Option<CatalogueMotion>,
 }
 
 impl Drift {
@@ -239,6 +248,19 @@ impl Drift {
         Self {
             epoch_position,
             velocity,
+            broken: None,
+        }
+    }
+
+    /// The two lines of `motion`, broken at its instant: a listed core collapse's, its progenitor's
+    /// before its death and its remnant's after it (fix-p09-recent-kicks). Its epoch position and
+    /// velocity are the motion's at the epoch.
+    #[must_use]
+    pub fn broken(motion: CatalogueMotion) -> Self {
+        Self {
+            epoch_position: motion.position_at(UniverseTime::EPOCH),
+            velocity: motion.velocity_at(UniverseTime::EPOCH),
+            broken: Some(motion),
         }
     }
 
@@ -326,6 +348,10 @@ impl Drift {
                 let SystemIdKind::FeatureMember(id) = record.id().kind() else {
                     unreachable!("a feature member's record is built with a member ID")
                 };
+                // A listed core collapse moves on its broken line (fix-p09-recent-kicks).
+                if let Some(motion) = listed_death_motion(galaxy, id) {
+                    return Ok(Self::broken(motion));
+                }
                 resolve_member(galaxy, interiors, id)
                     .expect("a feature member's record resolves in the galaxy that placed it")
                     .velocity()
@@ -380,7 +406,8 @@ impl Drift {
         &self.epoch_position
     }
 
-    /// The constant velocity.
+    /// The velocity at the epoch: a straight line's at every time ([`Trajectory::velocity_at`]
+    /// reads a broken one's).
     #[must_use]
     pub const fn velocity(&self) -> GalacticVelocity {
         self.velocity
@@ -403,6 +430,9 @@ impl Trajectory for Drift {
         &self,
         t: UniverseTime,
     ) -> (GalacticPosition, GalacticDisplacement) {
+        if let Some(motion) = &self.broken {
+            return (motion.position_at(t), GalacticDisplacement::default());
+        }
         drift(
             &self.epoch_position,
             [0.0; 3],
@@ -416,8 +446,10 @@ impl Trajectory for Drift {
         )
     }
 
-    fn velocity_at(&self, _t: UniverseTime) -> GalacticVelocity {
-        self.velocity
+    fn velocity_at(&self, t: UniverseTime) -> GalacticVelocity {
+        self.broken
+            .as_ref()
+            .map_or(self.velocity, |motion| motion.velocity_at(t))
     }
 }
 

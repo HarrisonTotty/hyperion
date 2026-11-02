@@ -29,7 +29,11 @@
 //!   share of its tracer's profile in the shell about the black hole that holds the sphere, in the
 //!   layer its primaries are of. Each candidate is placed first, its draws up to its velocity, and
 //!   only one whose straight line lies inside the sphere at its time is asked its class's test, a
-//!   lifetime and a star. The list and the places are built once a source, when a sphere first
+//!   lifetime and a star. A core collapse leaves that line at its death for its remnant's, at its
+//!   velocity plus its natal kick (fix-p09-recent-kicks), so its candidate is asked where its line
+//!   lies within `LIFETIME_REACH` of the sphere, and a kept entry is tested on its broken line
+//!   ([`CentrePath`](super::CentrePath)'s); the census counts it by its candidate's place, as a
+//!   feature's list does. The list and the places are built once a source, when a sphere first
 //!   needs them. Below the hold's version no list is read.
 //!
 //! # Which cells
@@ -65,8 +69,10 @@
 //!
 //! - **The recent entries' bound.** The centre's list's recent classes (P09.T36.b) lie inside the
 //!   centre's reach at the epoch and move on straight lines below light's speed (module
-//!   documentation of `recent`), so a sphere farther from the black hole than
-//!   the reach plus light's travel over |t| holds none, and the list is not read.
+//!   documentation of `recent`), a core collapse's remnant within `LIFETIME_REACH` of its line,
+//!   which bounds its travel from its site over its entry's lifetime (`DeathMarks::of`'s cap), so
+//!   a sphere farther from the black hole than the reach, that and light's travel over |t| holds
+//!   none, and the list is not read.
 //! - **The victims' bound.** A victim moves at most at the escape speed from the black hole alone,
 //!   `√(2 G M• ÷ r)`, under every cell's bound above, so before its disruption it lies within its
 //!   pericentre plus the radial plunge about `G M•` over the span to it: a reach of its own, which
@@ -93,8 +99,9 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::coords::GalacticPosition;
+use crate::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
-use crate::galaxy::features::members::recent::moved;
+use crate::galaxy::features::members::recent::{FeatureClassesRules, RecentClass, moved};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::motion::{CentreMotion, EpochState, Regime, SpeedBound, StateAt, Trajectory};
 use crate::galaxy::placement::{Existence, SystemRecord};
@@ -529,7 +536,14 @@ impl<'a> CentreMemberSource<'a> {
         let t = sphere.time();
         let light =
             KilometresPerSecond::new(SPEED_OF_LIGHT / METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND);
-        if from_black_hole.value() - sphere.radius().value() > (REACH + pad_for(t, light)).value() {
+        // A core collapse's remnant lies within `dead` of its candidate's line (fix-p09-recent-kicks).
+        let dead = match self.galaxy.rules().feature_classes {
+            FeatureClassesRules::Unlisted => LightYears::ZERO,
+            FeatureClassesRules::Listed => LIFETIME_REACH,
+        };
+        if from_black_hole.value() - sphere.radius().value()
+            > (REACH + dead + pad_for(t, light)).value()
+        {
             return;
         }
         let Some(list) = self.recent() else {
@@ -553,14 +567,17 @@ impl<'a> CentreMemberSource<'a> {
             );
             (places, binaries)
         });
-        let inside = |position: &GalacticPosition, velocity| {
+        let within = |at: GalacticPosition, reach: LightYears| {
+            let distance = LightYears::from(sphere.centre().distance_to(&at));
+            (distance.value() <= (sphere.radius() + reach).value()).then_some((at, distance))
+        };
+        let inside = |position: &GalacticPosition, velocity, reach| {
             let at = if t == UniverseTime::EPOCH {
                 *position
             } else {
                 moved(position, velocity, t)
             };
-            let distance = LightYears::from(sphere.centre().distance_to(&at));
-            (distance.value() <= sphere.radius().value()).then_some((at, distance))
+            within(at, reach)
         };
         let mut push = |record: &SystemRecord, (at, distance)| {
             if record.existence_at(t) == Existence::Exists && layers.contains(record.layer()) {
@@ -571,7 +588,17 @@ impl<'a> CentreMemberSource<'a> {
             if !layers.contains(place.class().layer()) {
                 continue;
             }
-            if let Some(hit) = inside(place.position(), place.velocity())
+            if place.class() == RecentClass::CoreCollapse {
+                // Its candidate's line within the remnant's reach of the sphere, then its own.
+                if inside(place.position(), place.velocity(), dead).is_some()
+                    && let Some(entry) = place.kept(self.galaxy)
+                    && let Some(hit) = within(entry.motion().position_at(t), LightYears::ZERO)
+                {
+                    push(entry.member().record(), hit);
+                }
+                continue;
+            }
+            if let Some(hit) = inside(place.position(), place.velocity(), LightYears::ZERO)
                 && let Some(entry) = place.kept(self.galaxy)
             {
                 push(entry.member().record(), hit);
@@ -585,7 +612,7 @@ impl<'a> CentreMemberSource<'a> {
             if !possible.iter().any(|layer| layers.contains(layer)) {
                 continue;
             }
-            if let Some(hit) = inside(place.position(), place.velocity())
+            if let Some(hit) = inside(place.position(), place.velocity(), LightYears::ZERO)
                 && let Some((_, member)) = place.kept(self.galaxy)
             {
                 push(member.record(), hit);

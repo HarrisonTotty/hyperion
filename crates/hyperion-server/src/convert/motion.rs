@@ -260,7 +260,7 @@ impl SystemLine {
                 position_at(galaxy, record, t),
                 epoch_velocity(galaxy, record),
             )),
-            Self::Line(_, line) => Ok((line.position_at(t), line.velocity())),
+            Self::Line(_, line) => Ok((line.position_at(t), line.velocity_at(t))),
             Self::Listed(member) => Ok((member.position_at(t), member.velocity())),
             Self::Centre(path) => match path.state_at(t) {
                 StateAt::Exists(state) => Ok((*state.position(), state.velocity())),

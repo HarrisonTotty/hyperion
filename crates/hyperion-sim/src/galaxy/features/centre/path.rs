@@ -13,11 +13,13 @@
 //! - **A tidal disruption's victim** (P09.T30.b), on its parabola up to its disruption, and no
 //!   system after it.
 //! - **A recent entry of the centre's list** (P09.T36.b), on the straight line its site lies on,
-//!   at its velocity, as a feature's members drift (lean, 2026-11-01): no source places the
-//!   centre's recent entries yet, and the lane that places them owns their law.
+//!   at its velocity, as a feature's members drift (lean, 2026-11-01), but a core collapse, on its
+//!   progenitor's line broken at its death, where its remnant takes its natal kick, as the
+//!   class's entries move (fix-p09-recent-kicks; [`CatalogueMotion::broken`]).
 
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::CatalogueMotion;
 use crate::galaxy::features::members::source::drifted_at;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::motion::{MotionState, Regime, StateAt, Trajectory};
@@ -29,7 +31,7 @@ use crate::units::Seconds;
 
 use super::events::victims::{CentreVictims, TidalDisruptionVictim};
 use super::members::CentrePlacement;
-use super::recent::recent_member;
+use super::recent::recent_listed;
 use super::{CentreCellOrbits, CentreOrbitCache};
 
 /// How one member of the galactic centre moves, as the centre's source places it (module
@@ -74,6 +76,8 @@ enum Law {
     Victim(Box<TidalDisruptionVictim>),
     /// A recent entry of the list, drifting at its velocity.
     Straight(GalacticVelocity),
+    /// A recent core collapse of the list, on its broken line.
+    Broken(CatalogueMotion),
 }
 
 impl CentrePath {
@@ -110,11 +114,11 @@ impl CentrePath {
                         law: Law::Victim(Box::new(victim)),
                     });
                 }
-                let member =
-                    recent_member(galaxy, model, index).ok_or(ResolveSystemError::NoSuchSystem)?;
+                let (member, broken) =
+                    recent_listed(galaxy, model, index).ok_or(ResolveSystemError::NoSuchSystem)?;
                 Ok(Self {
                     record: *member.record(),
-                    law: Law::Straight(member.velocity()),
+                    law: broken.map_or(Law::Straight(member.velocity()), Law::Broken),
                 })
             }
             MemberSlot::InCell {
@@ -168,6 +172,10 @@ impl CentrePath {
                     *velocity,
                 ))
             }
+            Law::Broken(motion) => StateAt::Exists(MotionState::new(
+                motion.position_at(t),
+                motion.velocity_at(t),
+            )),
         }
     }
 
@@ -257,7 +265,7 @@ impl crate::observe::Trajectory for CentrePath {
         match &self.law {
             Law::Cell(trajectory) if trajectory.regime() == Regime::Kepler => Motion::Followed,
             Law::Victim(_) => Motion::Followed,
-            Law::Cell(_) | Law::AtRest(_) | Law::Straight(_) => Motion::Drift,
+            Law::Cell(_) | Law::AtRest(_) | Law::Straight(_) | Law::Broken(_) => Motion::Drift,
         }
     }
 }

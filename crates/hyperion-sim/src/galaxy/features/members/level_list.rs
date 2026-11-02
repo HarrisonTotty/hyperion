@@ -49,9 +49,9 @@ use crate::galaxy::catalogue_classes::binary::feature::{
     FeatureBinaries, ListedBinary, is_listed_binary,
 };
 use crate::galaxy::catalogue_classes::source::member_layers;
-use crate::galaxy::catalogue_classes::{ClassId, FEATURE_LEVEL_LIST_ORDER};
+use crate::galaxy::catalogue_classes::{CatalogueMotion, ClassId, FEATURE_LEVEL_LIST_ORDER};
 use crate::galaxy::query::{LayerCounts, LayerSet};
-use crate::id::{CentreMemberId, MemberSlot, SystemId, SystemIdKind};
+use crate::id::{CentreMemberId, FeatureMemberId, MemberSlot, SystemId, SystemIdKind};
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::stellar::system::SystemStars;
@@ -607,6 +607,24 @@ impl FeatureLevelList {
         self.entries()
             .filter_map(move |entry| self.recent_entry(galaxy, entry.index()))
     }
+}
+
+/// How the feature-level member `id` moves if it is a listed core collapse (plan 09, P09.T36):
+/// its progenitor's line broken at its death, where its remnant takes its natal kick
+/// (fix-p09-recent-kicks; [`RecentEntry::motion`]); `None` for any other member, a cell's, a list
+/// entry of another class, or one its class's test refuses.
+#[must_use]
+pub fn listed_death_motion(galaxy: &Galaxy, id: FeatureMemberId) -> Option<CatalogueMotion> {
+    let MemberSlot::FeatureLevel { index } = id.slot() else {
+        return None;
+    };
+    let feature = FeatureCatalogue::resolve(galaxy, id.feature().into())?;
+    let list = FeatureLevelList::of(galaxy, &feature);
+    if list.entry(index)?.class() != ClassId::CORE_COLLAPSE {
+        return None;
+    }
+    list.recent_entry(galaxy, index)
+        .map(|entry| *entry.motion())
 }
 
 /// The stars of the listed binary member `system` (P11.T8.f): its feature's list's entry's, its

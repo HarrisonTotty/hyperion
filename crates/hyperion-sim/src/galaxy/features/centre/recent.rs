@@ -49,15 +49,16 @@
 use std::num::NonZeroU16;
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
+use crate::galaxy::catalogue_classes::CatalogueMotion;
 use crate::galaxy::catalogue_classes::lbv::{horizon_window, may_host};
 use crate::galaxy::catalogue_classes::supernova::{
-    DeathMarks, SupernovaInterval, Surroundings, claimed_window,
+    DeathMarks, SupernovaEntry, SupernovaInterval, Surroundings, claimed_window,
 };
 use crate::galaxy::catalogue_classes::type_ia::{DelayTimeDistribution, IaLeftover, IaProgenitor};
 use crate::galaxy::displaced::{ExplosionSite, death_in_interval_under};
 use crate::galaxy::features::interior::{ClassProfile, ProfileShape};
 use crate::galaxy::features::members::recent::{
-    Candidates, FeatureClassesRules, RecentClass, moved, uniform_ages,
+    Candidates, FeatureClassesRules, ListedDeath, RecentClass, moved, uniform_ages,
 };
 use crate::galaxy::features::members::{FeatureLevelList, ListClass, ListIndex, MemberZero};
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
@@ -72,6 +73,7 @@ use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::system::{SystemStars, primary_draws, primary_eta};
+use crate::time::UniverseTime;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{LightYears, SolarMasses, Years};
 
@@ -393,11 +395,23 @@ impl CentrePlace {
                 );
                 let (claim, death) =
                     claim_at_centre(galaxy, &record, &centre_composition(), member.velocity())?;
-                (claim == class).then_some(CentreRecentEntry {
-                    class,
-                    member,
-                    death,
-                })
+                if claim != class {
+                    return None;
+                }
+                let Some(death) = death else {
+                    return Some(CentreRecentEntry {
+                        class,
+                        member,
+                        death: None,
+                        motion: CatalogueMotion::straight(position, member.velocity()),
+                        supernova: None,
+                    });
+                };
+                Some(CentreRecentEntry::kicked(
+                    (class, system, class_of),
+                    (mass, age),
+                    &death,
+                ))
             }
             RecentClass::TypeIa => {
                 let delays = DelayTimeDistribution::of_feature(
@@ -447,6 +461,8 @@ impl CentrePlace {
                     class,
                     member,
                     death: Some((site, window)),
+                    motion: CatalogueMotion::straight(position, member.velocity()),
+                    supernova: None,
                 })
             }
         }
@@ -532,6 +548,18 @@ pub(crate) fn recent_member(
     model: &CentreModel,
     index: u16,
 ) -> Option<CentreMemberRecord> {
+    recent_listed(galaxy, model, index).map(|(member, _)| member)
+}
+
+/// [`recent_member`] with a core collapse's broken line ([`CentreRecentEntry::motion`]), on which
+/// the centre's source places it (fix-p09-recent-kicks); `None` beside any other member, which
+/// drifts at its velocity.
+#[must_use]
+pub(crate) fn recent_listed(
+    galaxy: &Galaxy,
+    model: &CentreModel,
+    index: u16,
+) -> Option<(CentreMemberRecord, Option<CatalogueMotion>)> {
     if galaxy.rules().feature_classes == FeatureClassesRules::Unlisted
         && galaxy.rules().feature_binaries == FeatureBinariesRules::Unlisted
     {
@@ -543,31 +571,66 @@ pub(crate) fn recent_member(
     let recent = CentreRecent::new(galaxy, model, victims);
     let entry = recent.list(galaxy).entry(index)?;
     match RecentClass::of(entry.class()) {
-        Some(class) => recent
-            .entry(galaxy, model, class, index)
-            .map(|entry| entry.member),
+        Some(class) => recent.entry(galaxy, model, class, index).map(|entry| {
+            let broken = (entry.class == RecentClass::CoreCollapse).then_some(entry.motion);
+            (entry.member, broken)
+        }),
         None => recent
             .binaries
             .entry(galaxy, model, entry.class(), index)
-            .map(|(_, member)| member),
+            .map(|(_, member)| (member, None)),
     }
 }
 
-/// One recent entry of the centre's list: its class, its member, and for a death its site and the
-/// window of its shell.
+/// One recent entry of the centre's list: its class, its member, for a death its site and the
+/// window of its shell, how it moves, and for a core collapse its shell's entry.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CentreRecentEntry {
     class: RecentClass,
     member: CentreMemberRecord,
     death: Option<(ExplosionSite, ShellWindow)>,
+    motion: CatalogueMotion,
+    supernova: Option<SupernovaEntry>,
+}
+
+impl CentreRecentEntry {
+    /// The core collapse `system` of `class`, its member of `class_of`, whose primary's initial
+    /// mass is `mass` and age `age`, where its `death` leaves it: its remnant where its kick takes
+    /// it (fix-p09-recent-kicks), its member's epoch place and velocity its broken line's.
+    #[must_use]
+    fn kicked(
+        (class, system, class_of): (RecentClass, SystemId, CentreClass),
+        (mass, age): (SolarMasses, Years),
+        death: &ListedDeath,
+    ) -> Self {
+        let after = death.motion.velocity_at(UniverseTime::EPOCH);
+        let member = CentreMemberRecord::from_parts(
+            record(
+                system,
+                death.motion.position_at(UniverseTime::EPOCH),
+                mass,
+                age,
+            ),
+            class_of,
+            centre_composition(),
+            after.metres_per_second().map(|c| c / 1e3),
+        );
+        Self {
+            class,
+            member,
+            death: Some((death.site, *death.supernova.window())),
+            motion: death.motion,
+            supernova: Some(death.supernova),
+        }
+    }
 }
 
 #[cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "the range query reads an entry's member alone (P09.T37); its tests read its class, \
-                  site and window"
+        reason = "the range query reads an entry's member and motion alone (P09.T37); its tests \
+                  read its class, site, window and shell"
     )
 )]
 impl CentreRecentEntry {
@@ -594,6 +657,21 @@ impl CentreRecentEntry {
     pub(crate) fn window(&self) -> Option<&ShellWindow> {
         self.death.as_ref().map(|(_, window)| window)
     }
+
+    /// How it moves: a core collapse on its progenitor's line broken at its death, where its
+    /// remnant takes its natal kick (fix-p09-recent-kicks); any other entry on one straight line at
+    /// its velocity.
+    #[must_use]
+    pub(crate) const fn motion(&self) -> &CatalogueMotion {
+        &self.motion
+    }
+
+    /// Its shell's entry, for a core collapse: its explosion, its kind, its window and its
+    /// remnant's kick, which the remnant's offset, its bow shock and its nebula read.
+    #[must_use]
+    pub(crate) const fn supernova(&self) -> Option<&SupernovaEntry> {
+        self.supernova.as_ref()
+    }
 }
 
 /// The centre's young classes' claim on the member `record`, of composition `composition` moving
@@ -613,14 +691,14 @@ pub(crate) fn claimed_at_centre(
     claim_at_centre(galaxy, record, composition, velocity).map(|(class, _)| class)
 }
 
-/// [`claimed_at_centre`] with the core collapse's site and window.
+/// [`claimed_at_centre`] with the core collapse's death ([`ListedDeath`]).
 #[must_use]
 fn claim_at_centre(
     galaxy: &Galaxy,
     record: &SystemRecord,
     composition: &Composition,
     velocity: GalacticVelocity,
-) -> Option<(RecentClass, Option<(ExplosionSite, ShellWindow)>)> {
+) -> Option<(RecentClass, Option<ListedDeath>)> {
     let stars = || {
         SystemStars::generate_with(
             galaxy,
@@ -638,10 +716,15 @@ fn claim_at_centre(
         galaxy.rules().stellar,
     ) {
         let site = ExplosionSite::new(moved(record.epoch_position(), velocity, death), death);
-        if let Some(window) = DeathMarks::of(galaxy, &stars(), &site, velocity)
-            .and_then(|marks| claimed_window(galaxy, &site, &marks, Surroundings::Field))
+        let stars = stars();
+        if let Some((marks, window)) =
+            DeathMarks::of(galaxy, &stars, &site, velocity).and_then(|marks| {
+                claimed_window(galaxy, &site, &marks, Surroundings::Field)
+                    .map(|window| (marks, window))
+            })
         {
-            return Some((RecentClass::CoreCollapse, Some((site, window))));
+            let death = ListedDeath::of(&stars, site, (marks, window), velocity);
+            return Some((RecentClass::CoreCollapse, Some(death)));
         }
     }
     (may_host(record.primary_initial_mass(), record.age_at_epoch())
