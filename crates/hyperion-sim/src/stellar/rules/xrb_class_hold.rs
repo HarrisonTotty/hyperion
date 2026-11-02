@@ -54,7 +54,7 @@ use crate::stellar::binary::testing::{
 use crate::stellar::binary::xrb_class::{SPUN_UP_GAINED_SHARE, XRB_MIN_TRANSFER_RATE};
 use crate::stellar::binary::{BinaryClass, CarvedClass, Component, HmxbKind, SegmentKind, XrbKind};
 use crate::tables::binary::XrbHostKind;
-use crate::units::Years;
+use crate::units::{Seconds, Years};
 
 /// The seed of the Milky Way fixture: `hyperion-fit`'s manifests', whose census found the pinned
 /// systems.
@@ -114,11 +114,34 @@ const CITED_BLACK_HOLE_SHARE: f64 = 0.01;
 /// Be/X's orbits are the observed ones, 301 of 360 at 10–330 days).
 const PINNED_HIGH_MASS: [usize; 3] = [373, 5, 2];
 
+/// The census's members of each kind under every 27 hold, in [`XrbMemberKind::ALL`]'s order, in
+/// the slab and in the young disc, as measured (2026-11-02): the floor of 10⁻¹² keeps 76 of the
+/// slab's 456 ultracompacts that 10⁻¹³ kept, and 182 of its 565 members.
+const PINNED_KINDS: [[usize; 9]; 2] = [
+    [1, 91, 1, 2, 1, 0, 76, 10, 0],
+    [2, 14, 31, 17, 373, 5, 27, 72, 2],
+];
+
+/// The longest period of an ultracompact member under every 27 hold: 80 minutes, the
+/// ultracompact X-ray binaries' bound (in 't Zand, Jonker and Markwardt 2007, A&A 465, 953;
+/// recalled), which the floor alone keeps in the slab (research-leans-30 §4).
+const ULTRACOMPACT_MAX_PERIOD: Seconds = Seconds::new(80.0 * 60.0);
+
+/// The ultracompact members at [`ULTRACOMPACT_MAX_PERIOD`] or longer under every 27 hold, in the
+/// slab and in the young disc, as measured: none of the slab's, and one of the young disc's, a
+/// neutron star fed 7.2 × 10⁻⁸ M☉ yr⁻¹ through its inner Lagrangian point by a 2.0 M☉ helium
+/// star in its Hertzsprung gap 81 minutes out (a finding: kinded ultracompact by its helium donor,
+/// not by its period).
+const PINNED_LONG_ULTRACOMPACTS: [usize; 2] = [0, 1];
+
 /// The hydrogen-fed low-mass X-ray binaries the floor takes under every 27 hold, in the slab and
-/// in the young disc, as measured: none of the slab's, and one of the young disc's, a neutron star
-/// beside a 1.77 M☉ main-sequence star 13 hours out fed 5.5 × 10⁻¹⁶ M☉ yr⁻¹ (a finding: P11.T4's
-/// heavy donors leave a main-sequence donor barely in contact).
-const PINNED_FLOORED_HYDROGEN: [usize; 2] = [0, 1];
+/// in the young disc, as measured: three of the slab's, neutron-star transients beside substellar
+/// donors of 0.012–0.014 M☉ 1.8–2.0 hours out fed 5.6–9.0 × 10⁻¹³ M☉ yr⁻¹ (a finding: the floor
+/// of 10⁻¹² takes the faintest of the very faint transients), and two of the young disc's,
+/// neutron stars beside 1.8–1.9 M☉ main-sequence stars 13–15 hours out fed 5.5 × 10⁻¹³ and
+/// 5.5 × 10⁻¹⁶ M☉ yr⁻¹ (a finding: P11.T4's heavy donors leave a main-sequence donor barely in
+/// contact).
+const PINNED_FLOORED_HYDROGEN: [usize; 2] = [3, 2];
 
 /// The version's rules.
 fn version() -> StellarRules {
@@ -419,9 +442,10 @@ fn hydrogen_fed_low_mass(marks: &XrayMarks) -> bool {
 
 /// Slow: censuses of 10⁶ slab and 10⁶ young thin disc records under every 27 hold, and under every
 /// 27 hold but this one. Under the arm no member is fed through its inner Lagrangian point under
-/// the floor and every member has a kind; the hydrogen-fed low-mass X-ray binaries the floor takes,
-/// and the young disc's Be/X share of its neutron-star high-mass hosts and its black holes'
-/// share of its high-mass hosts are pinned as measured, against their cited figures.
+/// the floor and every member has a kind; the members of each kind, the ultracompact ones at 80
+/// minutes or longer, the hydrogen-fed low-mass X-ray binaries the floor takes, and the young
+/// disc's Be/X share of its neutron-star high-mass hosts and its black holes' share of its
+/// high-mass hosts are pinned as measured, against their cited figures.
 #[test]
 #[ignore = "slow: four censuses of 10⁶ records through the binary engine"]
 fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
@@ -452,6 +476,8 @@ fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
     ];
     let mut young = Vec::new();
     let mut floored = Vec::new();
+    let mut pinned_kinds = Vec::new();
+    let mut long_ultracompacts = Vec::new();
     for (name, site, whose) in sites {
         let [before, after] = [&held, &arm].map(|g| census(g, site, whose, CENSUS_RECORDS));
         println!(
@@ -469,17 +495,27 @@ fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
                 assert!(rate >= XRB_MIN_TRANSFER_RATE, "fed under the floor: {m:?}");
             }
         }
+        let long: Vec<&XrayMarks> = after
+            .iter()
+            .filter(|m| {
+                m.member_kind() == Some(XrbMemberKind::Ultracompact)
+                    && m.period.is_none_or(|p| p >= ULTRACOMPACT_MAX_PERIOD)
+            })
+            .collect();
+        println!("{name}: ultracompacts at 80 minutes or longer {long:?}");
+        long_ultracompacts.push(long.len());
+        pinned_kinds.push(kinds(&after));
         // The hydrogen-fed low-mass X-ray binaries the floor takes, fed under it.
-        floored.push(
-            before
-                .iter()
-                .filter(|m| {
-                    hydrogen_fed_low_mass(m)
-                        && m.transfer_rate
-                            .is_some_and(|rate| rate < XRB_MIN_TRANSFER_RATE)
-                })
-                .count(),
-        );
+        let under: Vec<&XrayMarks> = before
+            .iter()
+            .filter(|m| {
+                hydrogen_fed_low_mass(m)
+                    && m.transfer_rate
+                        .is_some_and(|rate| rate < XRB_MIN_TRANSFER_RATE)
+            })
+            .collect();
+        println!("{name}: hydrogen-fed members under the floor {under:?}");
+        floored.push(under.len());
         if whose == CensusRecords::Of(Population::YoungThinDisc) {
             young = after;
         }
@@ -510,5 +546,7 @@ fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
         "hydrogen-fed low-mass X-ray binaries under the floor, slab and young disc: {floored:?}"
     );
     assert_eq!(floored, PINNED_FLOORED_HYDROGEN);
+    assert_eq!(pinned_kinds, PINNED_KINDS);
+    assert_eq!(long_ultracompacts, PINNED_LONG_ULTRACOMPACTS);
     assert_eq!([bex, supergiant, black_holes], PINNED_HIGH_MASS);
 }

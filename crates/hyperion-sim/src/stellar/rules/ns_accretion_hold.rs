@@ -368,11 +368,11 @@ const CENSUS_FIGURES: [CompactFigures; 2] = [
 /// under every 27 hold. Under the version's most of the black holes were born neutron stars that
 /// stable transfer grew past `MAX_NEUTRON_STAR_MASS`. Under every 27 hold:
 ///
-/// - none of the black holes not fed by a white dwarf or a substellar object was born a neutron
-///   star, against the brief's 5%; those fed by one, the relics of a donor ground down, which the
-///   carving's ultracompact floor is to remove (`fix-p11-t8b-xrb-carving`), are pinned as measured
-///   (a finding). At generator version 25 before P11.T4's heavy donors the one was a neutron star
-///   born at 1.861 M☉ that a 1.46 M☉ main-sequence donor fed for 7 Gyr, grinding itself down to
+/// - none of the black holes was born a neutron star at generator version 24, against the brief's
+///   5%: the carving's floor (`XRB_CLASS_VERSION`, 10⁻¹² M☉ yr⁻¹) takes the relics of a donor
+///   ground down, fed by white dwarfs at 1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, that its first floor of
+///   10⁻¹³ left. At generator version 25 before P11.T4's heavy donors one was a neutron star born
+///   at 1.861 M☉ that a 1.46 M☉ main-sequence donor fed for 7 Gyr, grinding itself down to
 ///   0.068 M☉: 0.139 M☉ gained at the arm's tenth carries it past `MAX_NEUTRON_STAR_MASS` (a lean
 ///   of land-pod's, 2026-11-01, for research); at 26 there is none;
 /// - no neutron star in a low-mass X-ray binary has gained more than [`MOST_GAINED`];

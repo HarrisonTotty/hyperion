@@ -7356,8 +7356,8 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     through each timeline's rules by `classify`'s three rules and through the galaxy's by the X-ray
     binaries' scan.
   - _From 27_ (each recalled, provisional): Roche-lobe overflow onto a compact star is an X-ray
-    binary only at `XRB_MIN_TRANSFER_RATE` = 10⁻¹³ M☉ yr⁻¹ or more (about 10³³ erg s⁻¹; King and
-    Wijnands 2006); a main-sequence B star without a fossil field that gained
+    binary only at `XRB_MIN_TRANSFER_RATE` = 10⁻¹² M☉ yr⁻¹ or more (about 10³⁴ erg s⁻¹
+    time-averaged; King and Wijnands 2006; research-leans-30 §4, over 10⁻¹³ as first built); a main-sequence B star without a fossil field that gained
     `SPUN_UP_GAINED_SHARE` = 0.1 of its mass in stable transfer is a Be star (Packet 1981); a
     wind-fed black hole beside a massive star needs it to fill `WIND_DISC_ROCHE_FILLING` = 0.9 of
     its lobe (Hirai and Mandel 2021). Wind-fed neutron stars keep no disc rule (deviation: their
@@ -7379,10 +7379,14 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     `bound::tests::the_carved_record_lists_the_attempt_it_keeps`, whose pinned carved record is no
     X-ray binary under the arm.
   - _Measured_ (10⁶ slab and 10⁶ young thin disc records, every 27 hold with P11.T4's NS
-    accretion and heavy donors): slab members 565 → 565, the 456 ultracompacts all fed just above
-    the floor (1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, 38–119 min: a finding); young disc 252 → 544,
-    Be/X 19 → 373, supergiant neutron stars 12 → 5, black holes 56 → 2 (64 before the Be stars'
-    rule). Before P11.T4's fixes the slab's ultracompacts were 145 → 14.
+    accretion and heavy donors): slab members 565 → 182, its ultracompacts 456 → 76, all under
+    80 min (at 10⁻¹³ they were 456, fed 1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, 38–119 min);
+    research-leans-30 expected 75 and 181 (a finding). The floor takes three substellar-donor
+    transients of the slab and two main-sequence-donor ones of the young disc (findings), and one
+    young-disc ultracompact, a 2.0 M☉ helium star feeding a neutron star 81 min out, is longer
+    (a finding). Young disc 252 → 543, Be/X 19 → 373, supergiant neutron stars 12 → 5, black
+    holes 56 → 2 (64 before the Be stars' rule). `ns_accretion_hold`'s census: members 1,154 →
+    375, black holes 15 → 7. Before P11.T4's fixes the slab's ultracompacts were 145 → 14.
   - _Movers_ (the arm forced on at 24): the golden `sky/census_near_sun`, the slow
     `tables_hold::the_x_ray_binary_sampler_against_the_engine`'s and
     `channels_hold::the_channel_sampler_against_the_engine_under_every_26_hold`'s pins, and the

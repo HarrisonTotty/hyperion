@@ -13,9 +13,11 @@
 //! From 27:
 //!
 //! - **A floor.** Roche-lobe overflow onto a compact star is an X-ray binary only at
-//!   [`XRB_MIN_TRANSFER_RATE`] or more, about 10³³ erg s⁻¹ onto a neutron star: the time-averaged
-//!   rate of the very faint X-ray transients, the faintest X-ray binaries known (King and Wijnands
-//!   2006, MNRAS 366, L31; Wijnands et al. 2006, A&A 449, 1117). Below it a neutron star beside a
+//!   [`XRB_MIN_TRANSFER_RATE`] or more, about 10³⁴ erg s⁻¹ time-averaged onto a neutron star: the
+//!   time-averaged rate of the very faint X-ray transients, the faintest X-ray binaries known (King
+//!   and Wijnands 2006, MNRAS 366, L31; Wijnands et al. 2006, A&A 449, 1117; research-leans-30
+//!   §4, which keeps 75 of the census's ultracompacts, all under 80 minutes, so that no bound on
+//!   the period is needed). Below it a neutron star beside a
 //!   white dwarf is a radio pulsar, its companion's matter blown away (radio ejection, Burderi et
 //!   al. 2001, ApJ 560, L71), not a catalogued X-ray binary.
 //! - **Be donors spun up.** A main-sequence B star without a fossil field that has gained
@@ -89,10 +91,10 @@ impl XrbClassRules {
 }
 
 /// The least rate of Roche-lobe overflow onto a neutron star or a black hole at which the pair is an
-/// X-ray binary from 27, M☉ yr⁻¹: 10⁻¹³, about 10³³ erg s⁻¹ onto a 1.4 M☉ neutron star of 12 km
-/// (G M Ṁ ÷ R), the very faint X-ray transients' time-averaged rate (King and Wijnands 2006,
-/// MNRAS 366, L31; recalled).
-pub(crate) const XRB_MIN_TRANSFER_RATE: SolarMassesPerYear = SolarMassesPerYear::new(1.0e-13);
+/// X-ray binary from 27, M☉ yr⁻¹: 10⁻¹², about 10³⁴ erg s⁻¹ time-averaged onto a 1.4 M☉ neutron
+/// star of 12 km (G M Ṁ ÷ R), the very faint X-ray transients' time-averaged rate (King and
+/// Wijnands 2006, MNRAS 366, L31; recalled; research-leans-30 §4).
+pub(crate) const XRB_MIN_TRANSFER_RATE: SolarMassesPerYear = SolarMassesPerYear::new(1.0e-12);
 
 /// The least share of its mass a main-sequence B star must have gained in stable transfer to rotate
 /// at the Be threshold from 27: 0.1, what spins an accretor to its critical speed (Packet 1981,
