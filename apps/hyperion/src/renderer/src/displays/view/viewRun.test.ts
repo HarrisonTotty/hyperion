@@ -493,6 +493,16 @@ describe("the label block", () => {
     expect(labelStatements(run, null)).toEqual(["ROTATION: NOT YET MODELLED"]);
   });
 
+  it("adds DECORATION ON after the terrain annunciation only where it is asked (R11.T1)", () => {
+    const run = startRun(unrotated(frameChangeScene()));
+    expect(labelStatements(run, "TERRAIN: STREAMING", true)).toEqual([
+      "ROTATION: NOT YET MODELLED",
+      "TERRAIN: STREAMING",
+      "DECORATION ON",
+    ]);
+    expect(labelStatements(run, null, false)).toEqual(["ROTATION: NOT YET MODELLED"]);
+  });
+
   // The not-resolved fixtures below are hand-built: no server sends a radius beside a withheld
   // rotation today, since the rotation is withheld with the bulk (rotation-not-resolved).
 

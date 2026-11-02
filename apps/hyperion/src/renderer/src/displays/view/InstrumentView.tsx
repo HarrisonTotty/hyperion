@@ -10,6 +10,7 @@ import type { ExposureControl } from "../../view/photometry/exposure";
 import { styleName } from "../../view/photoreal/style";
 import { cameraSceneOf } from "../../view/scene/model";
 import { SKY_PENDING } from "../../view/sky/label";
+import { DECORATION_ON } from "../../view/surface/decoration/decorationSetting";
 import type { Instrument } from "./useInstruments";
 import type { SkyLineReading } from "./useViewSky";
 import type { DragKind } from "./useViewDrag";
@@ -190,9 +191,17 @@ export function InstrumentView({
     run === null
       ? []
       : [
-          // Its own terrain annunciation, of the bodies its frame hands over (R10.T16.c).
-          ...labelStatements(run, terrainStatementOf(shown?.terrain ?? null, faults)).filter(
-            (statement) => statement === positionsStatement(run) || statement === shown?.terrain,
+          // Its own terrain annunciation, of the bodies its frame hands over (R10.T16.c), and its
+          // `DECORATION ON` (R11.T1), its survey line standing on a page that may be closed.
+          ...labelStatements(
+            run,
+            terrainStatementOf(shown?.terrain ?? null, faults),
+            shown?.decoration === true,
+          ).filter(
+            (statement) =>
+              statement === positionsStatement(run) ||
+              statement === shown?.terrain ||
+              statement === DECORATION_ON,
           ),
           // Drawn at its own budget's style, not the primary's.
           ...instrumentPhotorealStatements(

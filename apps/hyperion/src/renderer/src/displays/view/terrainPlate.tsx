@@ -62,7 +62,11 @@ export function terrainLowerParts(
   const tallest =
     lines.header === null
       ? null
-      : tallestTerrainLines(lines.header, GROUND_READOUT_OPTIONS.padWidthM);
+      : tallestTerrainLines(
+          lines.header,
+          GROUND_READOUT_OPTIONS.padWidthM,
+          lines.decorationSetting,
+        );
   const parts = surveyParts(model.survey, tallest);
   if (model.datum !== null) {
     parts.push({

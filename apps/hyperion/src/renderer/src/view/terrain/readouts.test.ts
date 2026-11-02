@@ -57,6 +57,7 @@ import {
   SLOPE_UNCERTAINTY_CH,
   STALE_MARK_CH,
   surveyLines,
+  surveyReadingStands,
   tallestTerrainLines,
   TEMPERATURE_FIELD_CH,
   type TerrainLabelInput,
@@ -670,6 +671,77 @@ function figureOf(line: ReadoutLine): ReadoutSegment {
   }
   return figure;
 }
+
+describe("the survey line's DECORATION ON (plan R11, R11.T1)", () => {
+  it("follows the values after a middle dot while the view drew decoration", () => {
+    const coverage = coverageOf(77);
+    const lines = surveyLines(aSurvey({ coverage }), NO_READOUT_UNITS, undefined, true).lines;
+    expect(lines.map(readoutLineText)).toEqual([
+      `SURVEY COVERAGE ${formatCoverage(coverage)} · FINEST 2.0 m · DECORATION ON`,
+    ]);
+  });
+
+  it("stands on a stale survey's line without an S of its own", () => {
+    const coverage = coverageOf(77);
+    const lines = surveyLines(
+      aSurvey({ coverage, stale: true }),
+      NO_READOUT_UNITS,
+      undefined,
+      true,
+    );
+    expect(readoutLineText(lineOf(lines.lines, "SURVEY COVERAGE"))).toBe(
+      `SURVEY COVERAGE ${formatCoverage(coverage)} S · FINEST 2.0 m S · DECORATION ON`,
+    );
+  });
+
+  it("is absent while nothing decorated was drawn", () => {
+    expect(surveyShown(aSurvey())).toEqual([
+      [`SURVEY COVERAGE ${formatCoverage(coverageOf(77))} · FINEST 2.0 m`, "reading"],
+    ]);
+  });
+
+  it("never stands on a state in the line's place, which leaves it to the label block", () => {
+    const lines = surveyLines(null, NO_READOUT_UNITS, undefined, true).lines;
+    expect(lines.map(readoutLineText)).toEqual(["SURVEY COVERAGE: PENDING"]);
+    const model = terrainLabelModel(
+      {
+        survey: null,
+        readout: null,
+        faults: [],
+        slantFromCamera: false,
+        padWidthM: 1,
+        decoration: true,
+      },
+      NO_READOUT_UNITS,
+    );
+    expect(surveyReadingStands(model)).toBe(false);
+  });
+
+  it("is carried from the model's input", () => {
+    const model = terrainLabelModel(
+      {
+        survey: aSurvey(),
+        readout: null,
+        faults: [],
+        slantFromCamera: false,
+        padWidthM: 1,
+        decoration: true,
+      },
+      NO_READOUT_UNITS,
+    );
+    expect(surveyReadingStands(model)).toBe(true);
+    expect(
+      readoutLineText(lineOf(model.survey, "SURVEY COVERAGE")).endsWith(" · DECORATION ON"),
+    ).toBe(true);
+  });
+
+  it("is held in the survey line's tallest form on a setting that may draw it, and only there", () => {
+    const decorated = surveyLines(aSurvey({ stale: true }), NO_READOUT_UNITS, undefined, true);
+    const line = lineOf(decorated.lines, "SURVEY COVERAGE");
+    expect(widerThan(line, tallestTerrainLines(HEADER, 1, true).survey)).toEqual([]);
+    expect(widerThan(line, tallestTerrainLines(HEADER, 1).survey)).not.toEqual([]);
+  });
+});
 
 describe("the DATUM line", () => {
   it("reads the reference spheroid's two radii to 0.1 km, the unit on both", () => {

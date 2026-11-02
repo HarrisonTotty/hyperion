@@ -402,6 +402,7 @@ function fakeSource(
     readonly hasPass?: boolean;
     readonly draws?: ReadonlyArray<DrawItem>;
     readonly overlayDepth?: TerrainViewFrame["overlayDepth"];
+    readonly decorated?: boolean;
     readonly overlayMode?: FrameTerrainPass["geometry"]["overlayDepth"];
     readonly whole?: boolean;
   } = {},
@@ -434,6 +435,7 @@ function fakeSource(
     maskReady: true,
     cascades: null,
     overlayDepth: options.overlayDepth ?? null,
+    decorated: options.decorated ?? false,
   };
   return {
     drawn,
@@ -644,6 +646,25 @@ describe("a view's frame terrain (R10.T16.c)", () => {
     const before = terrain.annunciation;
     terrain.draws(plan, [body]);
     expect([before, terrain.annunciation]).toEqual([null, "TERRAIN: STREAMING"]);
+  });
+
+  it("says it drew decoration only where a body's draws carried it (R11.T1)", () => {
+    const decoratedOf = (options: Parameters<typeof fakeSource>[0]): [boolean, boolean] => {
+      const { plan, body } = handed();
+      const terrain = frameTerrain(fakeSource(options).source);
+      const before = terrain.decorated;
+      terrain.draws(plan, [body]);
+      return [before, terrain.decorated];
+    };
+    expect([
+      decoratedOf({}),
+      decoratedOf({ decorated: true }),
+      decoratedOf({ decorated: true, draws: [] }),
+    ]).toEqual([
+      [false, false],
+      [false, true],
+      [false, false],
+    ]);
   });
 
   it("takes STREAMING before DETAIL LIMITED over its bodies", () => {
@@ -1161,6 +1182,7 @@ function wireSource(bodies: ReadonlyMap<BodyIdHex, WireBody>): {
               maskReady: true,
               cascades: null,
               overlayDepth: null,
+              decorated: false,
               ...each.frame,
             };
       },

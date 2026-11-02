@@ -56,6 +56,7 @@ import { rotationRows } from "../camera/quaternion";
 import { relativeToCamera } from "../coords/relative";
 import { rotateToBodyFixed } from "../coords/rotation";
 import { sceneOrigins, type ViewBody, type ViewScene } from "../scene/model";
+import { DECORATION_ON } from "../surface/decoration/decorationSetting";
 import { isTerrainFault } from "./annunciation";
 import type { FieldFailure } from "./coarseFieldStore";
 import type { CoverageView } from "./coverage";
@@ -831,14 +832,19 @@ export interface SurveyLines {
  *   the line's values, each stale with its `S` while the survey is (`TerrainSurvey.stale`: the link
  *   down, or a failure standing), `SURVEY COVERAGE NONE S` included; and any failure's state on a
  *   line of its own after it. A status takes no `S`.
+ * - While the view drew decoration, `DECORATION ON` follows the values after a middle dot (the
+ *   guide's survey line; plan R11, R11.T1, Design note 2), steady, never stale: it states the
+ *   picture drawn, not the server's data. A state in the line's place takes none.
  *
  * @param remedy - What the two failed states end with: `VIEW`'s `reopen VIEW to retry` unless
  *   given.
+ * @param decoration - Whether the view's last frame drew decoration; not unless given.
  */
 export function surveyLines(
   survey: TerrainSurvey | null,
   units: ReadoutUnits,
   remedy: string = RETRY,
+  decoration = false,
 ): SurveyLines {
   if (survey === null) {
     return { lines: [status("survey", SURVEY_PENDING, "text")], units };
@@ -875,11 +881,25 @@ export function surveyLines(
       ],
     ];
   }
+  if (decoration) {
+    segments = [...segments, DECORATION_SEGMENT];
+  }
   const lines: ReadoutLine[] = [reading("SURVEY COVERAGE", segments)];
   if (standing.failure !== null) {
     lines.push(failureLine(standing.failure, remedy));
   }
   return { lines, units: { ...units, finest } };
+}
+
+/** The survey line's `DECORATION ON` part (plan R11, R11.T1), the console's own text. */
+const DECORATION_SEGMENT: ReadoutSegment = [consoleText(DECORATION_ON)];
+
+/**
+ * Whether a view's terrain lines stand their survey line as a reading, after which `DECORATION ON`
+ * stands (plan R11, R11.T1): not while a state stands in its place.
+ */
+export function surveyReadingStands(model: TerrainLabelModel): boolean {
+  return model.survey.some((line) => line.kind === "reading");
 }
 
 /** Kilometres from metres, to 0.1 km, digits grouped from five: `6378.1`, `12,742.0`. */
@@ -1220,6 +1240,11 @@ export interface TerrainLabelInput {
    * asked, by default.
    */
   readonly sightGap?: SightGap | undefined;
+  /**
+   * Whether the view's last frame drew decoration, which the survey line then states after its
+   * values (`surveyLines`' `decoration`; plan R11, R11.T1); not by default.
+   */
+  readonly decoration?: boolean | undefined;
 }
 
 /** A view's terrain lines, in the label block's order, and the units they kept. */
@@ -1261,7 +1286,7 @@ export function terrainLabelModel(
       units,
     };
   }
-  const survey = surveyLines(input.survey, units, input.remedy);
+  const survey = surveyLines(input.survey, units, input.remedy, input.decoration === true);
   const header = input.survey?.header ?? null;
   const { readout, sightGap } = input;
   if (header === null || !readoutMayStand(input.survey, input.faults)) {
@@ -1323,7 +1348,7 @@ function longestOf(names: ReadonlyArray<string>): string | null {
 
 /** A view's terrain lines in their tallest forms, by which its lower plate's room is reckoned. */
 export interface TallestTerrainLines {
-  /** The survey line with both its values, stale. */
+  /** The survey line with both its values, stale, and `DECORATION ON` where it may stand. */
   readonly survey: ReadoutLine;
   /** `DATUM` as a spheroid with its `SEA LEVEL`, stale. */
   readonly datum: ReadoutLine;
@@ -1352,18 +1377,24 @@ export interface TallestTerrainLines {
  *   happens to show.
  * - `SLOPE` takes the longest `BASELINE`, 100 m ({@link LONGEST_BASELINE_M}), so that the room
  *   holds whichever the `STYLE` panel's selector sets (R10.T12.a).
+ * - The survey line takes `DECORATION ON` on a setting that may draw it (plan R11, R11.T1), so that
+ *   the room never comes and goes as a body's detail sets are drawn.
  *
  * @param padWidthM - The width of the pad the capacity is asked under, m (`ReadoutContext`).
+ * @param decoration - Whether the view's setting may draw decoration (`ViewSettings.decoration`);
+ *   not unless given.
  */
 export function tallestTerrainLines(
   header: SurfaceHeaderDto,
   padWidthM: number,
+  decoration = false,
 ): TallestTerrainLines {
   const stale = true;
   const tone = toneOf(stale);
   const survey = reading("SURVEY COVERAGE", [
     [field("ABOVE 99.9 %", COVERAGE_FIELD_CH, tone), mark(stale)],
     [consoleText("FINEST "), field("36,000 km", RESOLUTION_FIELD_CH, tone), mark(stale)],
+    ...(decoration ? [DECORATION_SEGMENT] : []),
   ]);
   const datum = reading("DATUM", [
     spheroidFigure(header.equatorial_radius_m, header.polar_radius_m, stale),

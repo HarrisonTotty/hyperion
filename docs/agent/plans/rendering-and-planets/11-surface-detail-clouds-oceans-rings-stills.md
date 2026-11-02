@@ -222,9 +222,11 @@ pure module as its reference.
 - In `src/preload/api.ts`, additions to `HyperionApi`: `saveStill(png, label)`, `listStills()`,
   `readStill(id)`; in `src/main/stills.ts`, their handlers, writing under
   `app.getPath("userData")/stills/`.
-- In R02's `ViewLabelBlock`: the `DECORATION ON` annunciation, whose nomenclature R02 drafts, and
-  `STILLS SUSPENDED` in the still control; in R05's `ViewSettings` and `SETTINGS`: the entries of
-  Design note 18.
+- The `DECORATION ON` annunciation, whose nomenclature R02 drafts, after the survey line's middle
+  dot (`view/terrain/readouts.ts`' `surveyLines`, on R10.T12's lower plate, where the guide places
+  it), or among `displays/view/viewRun.ts`' `labelStatements` where no survey line stands
+  (re-validated 2026-11-02); `STILLS SUSPENDED` in the still control; in R05's `ViewSettings` and
+  `SETTINGS`: the entries of Design note 18.
 - For R12: the pass labels of Design note 18, each for one of R12's `BudgetRow`s; R01
   `MemoryCategory` names on every allocation (`clouds`, `ocean`, `rings`, `scatter`, `stills`); and
   Design note 18's quality limits for R12.T7's audit.
@@ -367,7 +369,10 @@ ambiguous, the design note that reads it is named.
 - **R10:** `MaterialClass`, `Material` and `material_at` (the rock site's class, the scatter filter,
   `SeaIce` and `Seabed` for the ocean); `ground_at`, the authoritative ground the rocks stand on;
   `ClassWeights`; `TerrainLayers` and `BakeHook`, whose `extra: Vec<ExtraLayer>` carries this
-  plan's rock list in the same bake and cache; the shader hooks `terrain_decoration` and
+  plan's rock list in the same bake and cache; the shader hooks `terrain_decoration(p, normal)`,
+  returning a `TerrainDecoration` (`albedo` a factor per channel, and `normal`;
+  `terrain/shaders/terrainLit.wgsl`, whose `p`, ÷ a in `f32`, cannot key the lattice, so T2.b
+  passes the fragment's slot and patch place; re-validated 2026-11-02), and
   `terrain_shadow_factor(p) -> f32` (the direct sun's lit fraction, into which cloud shadows
   multiply, R10's Design note 11); `terrain_sky_factor(p) -> vec3f`, 1 by
   default, a factor on R08's `atmosphere_sky_irradiance` at the ground, into which the clouds'
@@ -845,6 +850,16 @@ ambiguous, the design note that reads it is named.
       seed also count. The seed keys every hash with the entry, so two worlds of one substance differ
       and every console sees one world the same. At draw time the patch's own wind orients the
       ripples (T2.a).
+    - **The names as built** (re-validated 2026-11-02). The albedos are `PaletteEntry`'s
+      `normal_albedo_bvr` (`field/palette.rs`), reaching the client per slot as the bake's
+      `TerrainLayers.photometry`; the span is `FormRow::normal_albedo_v()`
+      (`material/properties.rs`), V only, per form and family, `None` where unsourced, and the
+      worker's alone; `FeO_T` is `feo_mass_fraction`; the maturity is the bake's `TerrainMaturity`
+      codes and per-slot nodes, which already carry R10.T1.d's law (`weathered_entry_bvr`); the
+      family is `PaletteEntry.mechanics`, which `PaletteEntryDto` does not carry; the pressure and
+      age are `SurfaceHeaderDto`'s `surface_pressure_pa` and `surface_age_gyr`, the seed
+      `ViewBody.detailSeed`; no client value carries the gravity. `Seabed`, the ocean's, takes no
+      family.
 
     The families are the lean, which the re-validation may refine, and each mapping's figures are
     researched and cited by T2.c (the Figures rule). The sets obey Design note 3: they are zero-mean
@@ -884,11 +899,13 @@ Rust files are under `crates/hyperion-surface/src/` and client files under
 Add the ladder entries of Design note 18 as fields of R05's `ViewSettings`, with their high and low
 values in `SETTINGS` (`view/quality/qualitySetting.ts`) (`decoration`, `scatterDensity`,
 `clouds`, `cloudShadows`, `oceanComponents`, `oceanRefraction`, `whitecaps`, `rings`,
-`ringShadowOnBody`), and the `DECORATION ON` annunciation to
-R02's `ViewLabelBlock` beside the setting and the survey coverage, in `--text` on its plate, steady,
-shown while any decoration is drawn. Nothing is drawn yet, so it never shows.
+`ringShadowOnBody`), and the `DECORATION ON` annunciation after the survey line's middle dot
+(`view/terrain/readouts.ts`' `surveyLines`; the guide's survey line), or among the label block's
+statements (`displays/view/viewRun.ts`' `labelStatements`) where no survey line stands, in `--text`
+on its plate, steady, shown while any decoration is drawn. Nothing is drawn yet, so it never shows.
 
-Files: R05's `view/quality/qualitySetting.ts`, R02's `ViewLabelBlock`,
+Files: R05's `view/quality/qualitySetting.ts`, `readouts.ts` and `viewRun.ts` (re-validated
+2026-11-02: R02's `ViewLabelBlock` lost the survey line to R10.T12's lower plate),
 `surface/decoration/decorationSetting.ts`, tests. Tests: the annunciation follows what is drawn, not
 the setting alone; the low setting's defaults are Design note 18's, with no decoration of any kind;
 the label is text in the DOM, not canvas. Acceptance: `pnpm test`, `just ci`.
@@ -1608,3 +1625,14 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
     R_MC 0.04243 and 0.04235), against main's 9.85% at 2 × 10⁶. The table's 0.0429 sits about
     0.0005 high, within its stated 0.002, so the 10% bound holds against the table's column but not
     against a converged run. T7.c's octave fit and R12's audit should read it as about 10%.
+- **R11.T1, as built (2026-11-02).**
+  - `ViewSettings` extends `R11Ladder` (`surface/decoration/decorationSetting.ts`, with
+    `CloudRendering`, `RingRendering`, `DECORATION_ON`, `decorationAllowed(ladder, frame)` and
+    `decorationStatement(drawn, surveyReading)`); the values stand in `SETTINGS`.
+  - What was drawn travels `TerrainViewFrame.decorated` → `LiveFrameTerrain.decorated` →
+    `ViewFrameDrawn.decoration`; every pass sets `false` until T2.b sets the first.
+  - Where the label stands (lean, 2026-11-02, the guide's survey line): after the primary's survey
+    line's middle dot (`surveyLines`' `decoration`, `TerrainLabelInput.decoration`; the line's
+    tallest form holds it on high), else among `labelStatements` (its third argument) where that
+    line is a state or gives way for room; an instrument's in its label block, its survey line
+    standing on a `GROUND` page that may be closed.

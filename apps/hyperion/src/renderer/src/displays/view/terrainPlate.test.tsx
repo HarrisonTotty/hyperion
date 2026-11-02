@@ -69,6 +69,7 @@ function linesOf(input: Partial<TerrainLabelInput> = {}): TerrainLines {
     model,
     header: full.survey?.header ?? null,
     readout: model.readout.length > 0 ? full.readout : null,
+    decorationSetting: false,
   };
 }
 

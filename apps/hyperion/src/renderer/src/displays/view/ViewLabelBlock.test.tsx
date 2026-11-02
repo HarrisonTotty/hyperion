@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import STYLES from "../../styles.css?raw";
 import { statusLine } from "../../test/statusLine";
+import { DECORATION_ON } from "../../view/surface/decoration/decorationSetting";
 import { TERRAIN_NOT_AVAILABLE } from "../../view/terrain/annunciation";
 import { ViewLabelBlock, type ViewLabelBlockProps } from "./ViewLabelBlock";
 import type { UpperRoom } from "./viewRoom";
@@ -40,6 +41,21 @@ describe("the view's label block", () => {
     expect(line.className).toBe("view-label__statement");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryAllByRole("status").some((s) => s.contains(line))).toBe(false);
+  });
+
+  it("states DECORATION ON as steady text in the DOM, on its plate, never in the canvas (R11.T1)", () => {
+    render(
+      <ViewLabelBlock
+        lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
+        statements={[DECORATION_ON]}
+        countLine={null}
+        faults={[]}
+      />,
+    );
+    const line = screen.getByText(statusLine(DECORATION_ON));
+    expect(line.className).toBe("view-label__statement");
+    expect(line.closest("canvas")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("sets ATMOSPHERE REJECTED among the statements as every request's REJECTED (R08.T10.b)", () => {

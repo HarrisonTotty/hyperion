@@ -613,6 +613,11 @@ export interface TerrainViewFrame {
    * redraws each of {@link TerrainViewFrame.draws} with the depth material.
    */
   readonly overlayDepth: TerrainOverlayDepth | null;
+  /**
+   * Whether its draws carry decoration (plan R11, R11.T1; Design note 2), for the view's
+   * `DECORATION ON`: what was drawn, not what the setting allows; none is drawn yet.
+   */
+  readonly decorated: boolean;
 }
 
 /**
@@ -2190,6 +2195,7 @@ export class TerrainPass {
         maskReady: false,
         cascades: null,
         overlayDepth: null,
+        decorated: false,
       };
     }
     const { selection, drawSet } = selected;
@@ -2233,6 +2239,7 @@ export class TerrainPass {
         !missing && !refused && (draws.length > 0 || count === 0) && !this.#seesCodeZeroOpen(mask),
       cascades: set === null ? null : { set, received: state.farPlan?.received ?? set, ...cast },
       overlayDepth,
+      decorated: false,
     };
   }
 

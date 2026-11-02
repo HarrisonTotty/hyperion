@@ -91,6 +91,7 @@ import {
   terrainSceneFixture,
 } from "../../view/scenes/terrainScene";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
+import { DECORATION_ON } from "../../view/surface/decoration/decorationSetting";
 import { type SurveyEdgeNote, surveyEdgeNote } from "../../view/terrain/surveyEdge";
 import {
   CONTOUR_FIELD_CH,
@@ -856,14 +857,18 @@ export const ROTATION_NOT_RESOLVED = "ROTATION: NOT RESOLVED";
  * @remarks
  * {@link ROTATION_NOT_RESOLVED} stands directly after {@link ROTATION_NOT_MODELLED} where both
  * hold, from two bodies, as the guide's "Data states" places a `NOT RESOLVED` note after its
- * `NOT YET MODELLED` one, and both before the terrain annunciation.
+ * `NOT YET MODELLED` one, and both before the terrain annunciation. `DECORATION ON` stands after
+ * the terrain's annunciation where the view drew decoration and no survey line of its states it
+ * (plan R11, R11.T1; `decorationStatement`).
  *
  * @param terrain - The view's debounced terrain annunciation (plan R05, T9), or `null` while
  *   neither condition holds or the view draws no terrain.
+ * @param decoration - Whether `DECORATION ON` stands among the statements; not unless given.
  */
 export function labelStatements(
   run: ViewRun,
   terrain: TerrainAnnunciation | null = null,
+  decoration = false,
 ): ReadonlyArray<string> {
   const statements: string[] = [];
   const positions = positionsStatement(run);
@@ -881,6 +886,9 @@ export function labelStatements(
   }
   if (terrain !== null) {
     statements.push(terrain);
+  }
+  if (decoration) {
+    statements.push(DECORATION_ON);
   }
   return statements;
 }

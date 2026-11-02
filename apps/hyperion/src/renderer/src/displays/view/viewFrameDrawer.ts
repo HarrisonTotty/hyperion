@@ -199,6 +199,12 @@ export interface ViewFrameDrawn {
    */
   readonly terrain: TerrainAnnunciation | null;
   /**
+   * Whether the frame drew any decoration on the bodies it hands over (`LiveFrameTerrain.decorated`;
+   * plan R11, R11.T1), for the view's `DECORATION ON`: what was drawn, never the setting alone, and
+   * never in the wireframe.
+   */
+  readonly decoration: boolean;
+  /**
    * The contour interval the frame's wireframe terrain is drawn at, m, for the view's label block's
    * `CONTOUR INTERVAL` line (plan R10, R10.T11); `null` for a frame that draws no contours.
    */
@@ -504,6 +510,7 @@ export class ViewFrameDrawer {
     const exposed = exposureScale(ev100);
     let drawn = false;
     let terrain: TerrainAnnunciation | null = null;
+    let decoration = false;
     if (triesPhotoreal) {
       const photoreal = this.#drawPhotoreal(
         inputs,
@@ -516,6 +523,7 @@ export class ViewFrameDrawer {
       );
       drawn = photoreal.drawn;
       terrain = photoreal.terrain;
+      decoration = photoreal.decorated;
     }
     let contourIntervalM: number | null = null;
     if (drawn) {
@@ -559,6 +567,7 @@ export class ViewFrameDrawer {
       drawnStyle: drawn ? "photorealistic" : "wireframe",
       sceneStars,
       terrain,
+      decoration,
       contourIntervalM,
       surveyEdges: list.surveyEdges,
       lineOfSight: list.lineOfSight,
@@ -611,7 +620,11 @@ export class ViewFrameDrawer {
     list: ReturnType<typeof buildWireframeDrawList>,
     cube: BakedCube | null,
     exposed: number,
-  ): { readonly drawn: boolean; readonly terrain: TerrainAnnunciation | null } {
+  ): {
+    readonly drawn: boolean;
+    readonly terrain: TerrainAnnunciation | null;
+    readonly decorated: boolean;
+  } {
     const { sky, run } = inputs;
     const { presentedPx: viewport, selectionPx } = sizes;
     const airView = inputs.atmosphere?.view;
@@ -695,13 +708,17 @@ export class ViewFrameDrawer {
         }),
       );
       if (plan === null) {
-        return { drawn: false, terrain: null };
+        return { drawn: false, terrain: null, decorated: false };
       }
       this.#regimes = plan.regimes;
       this.#tabled = plan.tabled;
       this.#sources = plan.sources;
       this.#frameFailed = false;
-      return { drawn: true, terrain: terrain?.annunciation ?? null };
+      return {
+        drawn: true,
+        terrain: terrain?.annunciation ?? null,
+        decorated: terrain?.decorated ?? false,
+      };
     } catch (error: unknown) {
       // A creation refused between a device loss and its restore: this frame draws the
       // wireframe, and the next tries again; said once until a frame draws or a restore.
@@ -709,7 +726,7 @@ export class ViewFrameDrawer {
         console.error(`the photorealistic frame of ${this.#name} could not be drawn:`, error);
         this.#frameFailed = true;
       }
-      return { drawn: false, terrain: null };
+      return { drawn: false, terrain: null, decorated: false };
     }
   }
 

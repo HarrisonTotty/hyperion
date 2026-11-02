@@ -733,6 +733,7 @@ describe("what a view's frame gives its label block and list (the batch review's
         maskReady: false,
         cascades: null,
         overlayDepth: null,
+        decorated: false,
       }),
       coverageMask: () => null,
       coverageWhole: () => false,
@@ -877,6 +878,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
             maskReady: true,
             cascades: null,
             overlayDepth: null,
+            decorated: false,
           };
         },
         // Never faulted here: the drawer's guards are R10.T16.e's own tests'.

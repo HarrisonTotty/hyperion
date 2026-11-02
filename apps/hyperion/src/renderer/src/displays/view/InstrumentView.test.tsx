@@ -1111,6 +1111,7 @@ function renderInstrument(
       sceneStars: false,
       photoreal: "ready",
       terrain: null,
+      decoration: false,
       surveyEdges: [],
       contourIntervalM: null,
       atmosphere: {

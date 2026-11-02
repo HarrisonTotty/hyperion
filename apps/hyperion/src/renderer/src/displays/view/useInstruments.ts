@@ -125,6 +125,12 @@ export interface InstrumentShown {
    */
   readonly terrain: TerrainAnnunciation | null;
   /**
+   * Whether its last frame drew decoration (`ViewFrameDrawn.decoration`; plan R11, R11.T1), which
+   * its label block states as `DECORATION ON`: its survey line stands on its `GROUND` page, which
+   * may be closed.
+   */
+  readonly decoration: boolean;
+  /**
    * The survey edges its last frame marked, for its list's notes (plan R10, R10.T16.c;
    * decision-r10-t16-review §1); none before it draws.
    */
@@ -388,6 +394,8 @@ interface SlotLoop {
   sceneStars: boolean;
   /** The terrain's annunciation of its last frame drawn (R10.T16.c). */
   terrain: TerrainAnnunciation | null;
+  /** Whether its last frame drawn drew decoration (plan R11, R11.T1). */
+  decoration: boolean;
   /** The survey edges its last frame drawn marked (R10.T16.c). */
   surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
   /** The terrain session it last told what it drew, which forgets it when it goes; or `null`. */
@@ -456,6 +464,7 @@ function useSlotDrawer(
         drawnStyle: "wireframe",
         sceneStars: false,
         terrain: null,
+        decoration: false,
         surveyEdges: [],
         reportedTo: null,
         contourIntervalM: null,
@@ -626,6 +635,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
             sceneStars: false,
             photoreal: "idle",
             terrain: null,
+            decoration: false,
             surveyEdges: [],
             contourIntervalM: null,
             atmosphere: NO_ATMOSPHERE_SHOWN,
@@ -835,6 +845,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         const drawn = loop.drawer.draw(frameInputs);
         loop.atmosphere = drawn?.atmosphere ?? null;
         loop.terrain = drawn?.terrain ?? null;
+        loop.decoration = drawn?.decoration ?? false;
         loop.contourIntervalM = drawn?.contourIntervalM ?? null;
         if (drawn !== null) {
           // A frame held back leaves the slot showing the last one presented, with its marks.
@@ -876,6 +887,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
             sceneStars: loop.sceneStars,
             photoreal: loop.drawer.photorealStatus,
             terrain: loop.terrain,
+            decoration: loop.decoration,
             surveyEdges: loop.surveyEdges,
             contourIntervalM: loop.contourIntervalM,
             atmosphere:

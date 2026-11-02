@@ -348,6 +348,7 @@ export class LiveFrameTerrain implements FrameTerrain {
   readonly #source: FrameTerrainSource;
   readonly #input: LiveFrameTerrainInput;
   #annunciation: TerrainAnnunciation | null = null;
+  #decorated = false;
   #depth: DrawItem[] = [];
   #sceneDepth = false;
 
@@ -362,6 +363,14 @@ export class LiveFrameTerrain implements FrameTerrain {
    */
   get annunciation(): TerrainAnnunciation | null {
     return this.#annunciation;
+  }
+
+  /**
+   * Whether any body's draws this view's last {@link LiveFrameTerrain.draws} made carry decoration
+   * (`TerrainViewFrame.decorated`; plan R11, R11.T1), for its `DECORATION ON`; `false` before.
+   */
+  get decorated(): boolean {
+    return this.#decorated;
   }
 
   /**
@@ -409,6 +418,7 @@ export class LiveFrameTerrain implements FrameTerrain {
     // Whether every body drawn lets the symbology take the scene's depth (plan R14, R14.T1.e).
     let sceneDepth = true;
     let annunciation: TerrainAnnunciation | null = null;
+    let decorated = false;
     const handed: Array<{
       readonly record: DiscRecord;
       readonly figure: BodyFigure;
@@ -448,6 +458,7 @@ export class LiveFrameTerrain implements FrameTerrain {
       if (frame.draws.length === 0) {
         continue;
       }
+      decorated ||= frame.decorated;
       draws.push(...frame.draws);
       const pass = this.#source.pass(record.body);
       sceneDepth &&= pass?.geometry.overlayDepth === "scene-depth";
@@ -471,6 +482,7 @@ export class LiveFrameTerrain implements FrameTerrain {
       }
     }
     this.#annunciation = annunciation;
+    this.#decorated = decorated;
     this.#depth = depth;
     this.#sceneDepth = sceneDepth && depth.length > 0;
     return draws;

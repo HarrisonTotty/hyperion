@@ -134,6 +134,7 @@ import {
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
 import { type DrawnSky, primarySkyPlace, type SkyLineReading, useViewSky } from "./useViewSky";
 import { renderViewport } from "../../view/photoreal/internalScale";
+import { decorationStatement } from "../../view/surface/decoration/decorationSetting";
 import type { GeometryOverride } from "../../../../preload/api";
 import {
   geometryOf,
@@ -188,6 +189,7 @@ import {
 } from "./ViewMarkLabels";
 import { styleName } from "../../view/photoreal/style";
 import { isTerrainFault, type TerrainAnnunciation } from "../../view/terrain/annunciation";
+import { surveyReadingStands } from "../../view/terrain/readouts";
 import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import type { TerrainSession } from "../../view/terrain/session";
 import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
@@ -623,6 +625,11 @@ interface Published {
    */
   readonly terrain: TerrainAnnunciation | null;
   /**
+   * Whether its last frame drew decoration (`ViewFrameDrawn.decoration`; plan R11, R11.T1), which
+   * its survey line states as `DECORATION ON`, or its label block where that line does not stand.
+   */
+  readonly decoration: boolean;
+  /**
    * The survey edges its last frame marked, for its list's notes (plan R10, R10.T16.c;
    * decision-r10-t16-review §1).
    */
@@ -860,6 +867,7 @@ function ViewStage({
     sceneStars: false,
     photoreal: "idle",
     terrain: null,
+    decoration: false,
     surveyEdges: NO_SURVEY_EDGES,
     contourIntervalM: null,
     atmosphere: NO_ATMOSPHERE_SHOWN,
@@ -1059,7 +1067,10 @@ function ViewStage({
   // The primary's terrain lines (R10.T12): its survey line, DATUM and readout, from the loop's
   // latest publish, on the lower plate; the tripod and the list's note only while the plate states
   // the readout (decision-r10-view-block-room §3).
-  const terrainLines = useTerrainLines(ground, faults);
+  const terrainLines = useTerrainLines(ground, faults, undefined, {
+    drawn: shown.decoration,
+    setting: SETTINGS[setting].decoration,
+  });
   const lowerParts = terrainLowerParts(terrainLines);
   const readoutAnswer = standingReadout(terrainLines, room.readout);
   const sightPoint = readoutAnswer === null ? undefined : lineOfSightPointOf(readoutAnswer);
@@ -1269,6 +1280,8 @@ function ViewStage({
     let grants: ReadonlyMap<BodyIdHex, DetailLevelDto> = new Map();
     // The terrain's annunciation of the last frame drawn (R10.T16.c), for the label block.
     let terrainAnnunciation: TerrainAnnunciation | null = null;
+    // Whether the last frame drawn drew decoration (plan R11, R11.T1), for `DECORATION ON`.
+    let decorationDrawn = false;
     // The survey edges the last frame drawn marked, for the list's notes (R10.T16.c).
     let surveyEdges = NO_SURVEY_EDGES;
     // The guard of the terrain session's step (the batch review's S5; R10.T16.e): a failure said
@@ -1493,6 +1506,7 @@ function ViewStage({
           imageLimited =
             imageDrawn && (renderScale < primaryBudget.renderScale || primaryScale.airStepped);
           terrainAnnunciation = drawn.terrain;
+          decorationDrawn = drawn.decoration;
           surveyEdges = drawn.surveyEdges;
           contourIntervalM = drawn.contourIntervalM;
           atmosphereReport = drawn.atmosphere;
@@ -1563,6 +1577,7 @@ function ViewStage({
           sceneStars,
           photoreal: drawer?.photorealStatus ?? "idle",
           terrain: terrainAnnunciation,
+          decoration: decorationDrawn,
           surveyEdges,
           contourIntervalM,
           atmosphere:
@@ -1848,7 +1863,17 @@ function ViewStage({
   // room's copy of it stand alike, and kept while the scene is (the owner's request, 2026-11-01).
   const primaryFolds = useReasonFolds();
   const primaryStatements: ReadonlyArray<LabelStatement> = [
-    ...labelStatements(shown.run, primaryTerrain),
+    // `DECORATION ON` among the statements only where the survey line cannot state it (R11.T1).
+    ...labelStatements(
+      shown.run,
+      primaryTerrain,
+      decorationStatement(
+        shown.decoration,
+        terrainLines !== null &&
+          surveyReadingStands(terrainLines.model) &&
+          room.survey === "stands",
+      ) === "statement",
+    ),
     // After the terrain's annunciation, its own drawing's as this is (the owner's report).
     ...(shown.imageLimited ? [IMAGE_DETAIL_LIMITED] : []),
     ...sceneStatements,

@@ -28,6 +28,7 @@ import { HIGH_SKY, LOW_SKY, type SkySettings } from "../sky/setting";
 import type { GeometryOverride } from "../../../../preload/api";
 import type { Stride } from "../clusters/templates";
 import type { FarCascadeRate } from "../terrain/shadows/cascades";
+import type { R11Ladder } from "../surface/decoration/decorationSetting";
 import type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 
 /** The view's quality setting: `high` on the recommended specification, `low` on the UHD 620. */
@@ -140,8 +141,11 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
  *
  * @remarks
  * Later plans add fields here and their values to {@link SETTINGS} (see the module's remarks).
+ * Plan R11's ladder entries are its fields directly ({@link R11Ladder}: `decoration`,
+ * `scatterDensity`, `clouds`, `cloudShadows`, `oceanComponents`, `oceanRefraction`, `whitecaps`,
+ * `rings` and `ringShadowOnBody`; R11.T1, Design note 18), as R12's `SettingSnapshot` reads them.
  */
-export interface ViewSettings {
+export interface ViewSettings extends R11Ladder {
   /** The terrain's settings (R05). */
   readonly terrain: TerrainSettings;
   /** The atmosphere's table sizes and sample counts (R05.T12.c, Design note 16; R08 widens them). */
@@ -260,7 +264,11 @@ const LOW_CACHE_BYTES = 64 * MIB;
  * 18). The low setting's photorealistic style takes its histogram at a stride of 2, blooms over 5
  * levels from quarter resolution, eclipses with 3 annuli and lights each body by planetshine from
  * one neighbour, against 1, 7 levels from full resolution, 4 annuli and two neighbours (R07 Design
- * note 18, R07.T17).
+ * note 18, R07.T17). R11's ladder entries are Design note 18's (high; low): decoration on and off,
+ * the decorative scatter's density 1 and 0, the clouds' volume and layer with and without their
+ * shadows on the terrain, 32 and 8 Gerstner components with and without refraction and whitecaps,
+ * and the rings' particles and annulus with and without their shadow on the body, so that the low
+ * setting draws no decoration of any kind (R11.T1).
  */
 export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
   high: {
@@ -293,6 +301,15 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       litClusters: true,
       farCascadeRate: 4,
     },
+    decoration: true,
+    scatterDensity: 1,
+    clouds: "volume",
+    cloudShadows: true,
+    oceanComponents: 32,
+    oceanRefraction: true,
+    whitecaps: true,
+    rings: "particles",
+    ringShadowOnBody: true,
   },
   low: {
     terrain: {
@@ -323,6 +340,15 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       litClusters: true,
       farCascadeRate: 4,
     },
+    decoration: false,
+    scatterDensity: 0,
+    clouds: "layer",
+    cloudShadows: false,
+    oceanComponents: 8,
+    oceanRefraction: false,
+    whitecaps: false,
+    rings: "annulus",
+    ringShadowOnBody: false,
   },
 };
 

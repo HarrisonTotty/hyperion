@@ -98,6 +98,25 @@ function rejected(refusal: boolean): FieldFailure {
 }
 
 describe("the survey line on the lower plate (R10.T12; the guide's survey line)", () => {
+  it("sets DECORATION ON as a part of its own after FINEST's middle dot, text in the DOM (R11.T1)", () => {
+    const [line] = surveyLines(aSurvey(), NO_READOUT_UNITS, undefined, true).lines;
+    if (line === undefined) {
+      throw new Error("the survey has no line");
+    }
+    renderLine(line);
+    const shown = [...parts().childNodes].map((node) =>
+      node instanceof HTMLElement ? `${node.className}: ${visibleText(node)}` : node.textContent,
+    );
+    expect(shown).toEqual([
+      `view-label__part: ${formatCoverage(coverageOf(77))} ·`,
+      " ",
+      "view-label__part: FINEST 2.0 m ·",
+      " ",
+      "view-label__part: DECORATION ON",
+    ]);
+    expect(screen.getByText("DECORATION ON").closest("canvas")).toBeNull();
+  });
+
   it("sets the survey line as a reading in a list of the label block's lines", () => {
     renderLine(surveyLineOf(aSurvey()));
     const term = screen.getByRole("term");

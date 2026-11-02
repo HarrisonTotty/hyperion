@@ -46,6 +46,7 @@ function instrumentOn(run: ViewRun): GroundPageInstrument {
     sceneStars: false,
     photoreal: "idle",
     terrain: null,
+    decoration: false,
     surveyEdges: [],
     contourIntervalM: null,
     atmosphere: NO_ATMOSPHERE_SHOWN,

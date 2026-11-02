@@ -18,7 +18,26 @@ export interface TerrainLines {
   readonly header: SurfaceHeaderDto | null;
   /** The readout's answer the lines read while the readout stands, else `null`. */
   readonly readout: SurfaceGroundReadout | null;
+  /**
+   * Whether the view's setting may draw decoration (`ViewSettings.decoration`), by which the survey
+   * line's tallest form takes `DECORATION ON` (plan R11, R11.T1).
+   */
+  readonly decorationSetting: boolean;
 }
+
+/** What a view's terrain lines state of its decoration (plan R11, R11.T1). */
+export interface TerrainLinesDecoration {
+  /**
+   * Whether its last frame drew decoration (`ViewFrameDrawn.decoration`), which its survey line
+   * then states after its values while it stands.
+   */
+  readonly drawn: boolean;
+  /** Whether its setting may draw decoration (`ViewSettings.decoration`). */
+  readonly setting: boolean;
+}
+
+/** No decoration drawn, on a setting that draws none. */
+const NO_DECORATION: TerrainLinesDecoration = { drawn: false, setting: false };
 
 /**
  * The readout's answer the primary's plate states, by which its tripod and its list's note stand
@@ -70,11 +89,14 @@ const NOTHING_HELD: HeldUnits = {
  * @param remedy - What the survey line's two failed states end with (`TerrainLabelInput.remedy`):
  *   `VIEW`'s `reopen VIEW to retry` unless given, the descent spike's `relaunch to retry` on the
  *   spike (plan R10, R10.T14.c).
+ * @param decoration - What the view drew of its decoration and its setting allows (plan R11,
+ *   R11.T1); none unless given.
  */
 export function useTerrainLines(
   snapshot: GroundSnapshot | null,
   faults: ReadonlyArray<string>,
   remedy?: string,
+  decoration: TerrainLinesDecoration = NO_DECORATION,
 ): TerrainLines | null {
   const [held, setHeld] = useState<HeldUnits>(NOTHING_HELD);
   if (snapshot === null) {
@@ -98,6 +120,7 @@ export function useTerrainLines(
       surfaceUnset: snapshot.surfaceUnset,
       remedy,
       sightGap: snapshot.sightGap,
+      decoration: decoration.drawn,
     },
     before,
   );
@@ -108,5 +131,6 @@ export function useTerrainLines(
     model,
     header: snapshot.survey?.header ?? null,
     readout: model.readout.length > 0 ? snapshot.readout : null,
+    decorationSetting: decoration.setting,
   };
 }
