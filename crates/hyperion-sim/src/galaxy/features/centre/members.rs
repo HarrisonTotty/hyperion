@@ -639,19 +639,11 @@ impl<'a> CentrePlacement<'a> {
         proposal: &CentreProposal,
         local: &LocalCell,
     ) -> Option<CentreMemberRecord> {
-        let id = self.member_id(band, cell, index);
-        let system = SystemId::from(id);
+        let (class, p) = self.class_under(galaxy, (band, cell, index), proposal, local)?;
+        let system = SystemId::from(self.member_id(band, cell, index));
         let key = ObjectKey::from(system);
         let seed = galaxy.seed();
-        let mut position = Stream::open(seed, tags::MEMBER_POSITION, key);
-        let u = [0; 3].map(|_| position.uniform());
-        let (p, bound) = proposal.place(local, u)?;
         let r = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt();
-        let mark = Stream::open(seed, tags::MEMBER_ACCEPT, key).mark();
-        let mut weights = Vec::with_capacity(self.bands[band.index()].len());
-        self.densities(band, [p.x, p.y, p.z], &mut weights);
-        let picked = pick(mark, &weights, bound)?;
-        let class = self.bands[band.index()][picked].class;
         let df = self.model.distribution(class.tracer);
         let profile = self.model.profile();
         let at = [p.x, p.y, p.z];
@@ -692,6 +684,28 @@ impl<'a> CentrePlacement<'a> {
             return None;
         }
         Some(member)
+    }
+
+    /// The class candidate `index` of `band` in `cell` is of and its place, or `None` where its
+    /// proposal or its acceptance mark refuses it: [`candidate_under`](Self::candidate_under)'s
+    /// first draws.
+    fn class_under(
+        &self,
+        galaxy: &Galaxy,
+        (band, cell, index): (MassBand, NestedCell, u16),
+        proposal: &CentreProposal,
+        local: &LocalCell,
+    ) -> Option<(CentreClass, PointLy)> {
+        let key = ObjectKey::from(SystemId::from(self.member_id(band, cell, index)));
+        let seed = galaxy.seed();
+        let mut position = Stream::open(seed, tags::MEMBER_POSITION, key);
+        let u = [0; 3].map(|_| position.uniform());
+        let (p, bound) = proposal.place(local, u)?;
+        let mark = Stream::open(seed, tags::MEMBER_ACCEPT, key).mark();
+        let mut weights = Vec::with_capacity(self.bands[band.index()].len());
+        self.densities(band, [p.x, p.y, p.z], &mut weights);
+        let picked = pick(mark, &weights, bound)?;
+        Some((self.bands[band.index()][picked].class, p))
     }
 
     /// Every accepted member of `band` in `cell`, in index order.
@@ -1520,6 +1534,74 @@ mod tests {
         assert_eq!(
             draw_star(held, &class, first, escape),
             draw_star(&registered, &class, first, escape)
+        );
+    }
+
+    /// From generator version 27 (under `list_source`, beside the band-E draw's fix) a living class
+    /// yields its expected count. The continuous component's band-E living stars (8–16.5 M☉), 626
+    /// expected, live only in its first some 35 Myr of 150, and the held arm draws one age for
+    /// each and refuses it where the band is dead then, so it keeps about a quarter of them; drawn
+    /// age by age, every candidate of the class keeps one, and the class's members in every cell
+    /// of band E are within the Poisson interval of its 626.
+    #[test]
+    fn a_centre_living_class_yields_its_expected_count_from_27() {
+        /// The two-sided Poisson interval's half-width, in standard deviations.
+        const Z: f64 = 4.0;
+        let held = milky_way_galaxy();
+        assert_eq!(held.rules().list_source, ListSourceRules::Unregistered);
+        let registered = Galaxy::from_params_with_rules(
+            held.seed(),
+            GalaxyParams::milky_way_like(),
+            crate::galaxy::rules::GalaxyRules {
+                list_source: ListSourceRules::Registered,
+                ..held.rules()
+            },
+        )
+        .expect("the fixture builds");
+        let model = milky_way_centre();
+        let class = *model
+            .classes()
+            .classes()
+            .iter()
+            .find(|c| {
+                c.band == MassBand::E && c.component == 3 && c.kind == CentreClassKind::Living
+            })
+            .expect("the continuous component's living band-E class");
+        assert_eq!(class.expected.round(), 626.0, "{class:?}");
+        let placement = CentrePlacement::new(model);
+        // The class's members in every cell, each candidate drawn whole only where it picks the
+        // class (the other classes' remnants take most of the time).
+        let count = |galaxy: &Galaxy| -> usize {
+            let mut n = 0;
+            for cell in placement.grid().owned_cells() {
+                let local = placement.grid().local_cell(cell);
+                let proposal = placement.proposal(MassBand::E, &local);
+                let first = placement.member_id(MassBand::E, cell, 0);
+                for index in 0..count_from_mean(galaxy, first, proposal.expected(&local)) {
+                    let at = (MassBand::E, cell, index);
+                    if placement
+                        .class_under(galaxy, at, &proposal, &local)
+                        .is_some_and(|(picked, _)| picked == class)
+                        && placement
+                            .candidate_under(galaxy, MassBand::E, cell, index, &proposal, &local)
+                            .is_some()
+                    {
+                        n += 1;
+                    }
+                }
+            }
+            n
+        };
+        let (kept, yielded) = (count(held), count(&registered));
+        eprintln!(
+            "{:.1} expected: {kept} kept by the held arm, {yielded} from 27",
+            class.expected
+        );
+        let off = (f64::from(u32::try_from(yielded).unwrap()) - class.expected).abs();
+        assert!(
+            off <= Z * class.expected.sqrt(),
+            "{yielded} members against {:.1} expected",
+            class.expected
         );
     }
 
