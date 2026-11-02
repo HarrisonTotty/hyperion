@@ -46,8 +46,9 @@ const SEED: u64 = 0x0b17_0010_5eed_0001;
 /// The seed of the massive systems' stream, the agreement tests'.
 const RECORDS_SEED: u64 = 0x0b17_0010_5eed_000b;
 
-/// The massive systems the pins are among.
-const RECORDS: u32 = 80;
+/// The massive systems the pins are among: 80 at 24, and at generator version 25 as many as reach
+/// [`OUTER_PAIR`]'s, the stream drawing each record from its place in it.
+const RECORDS: u32 = 286;
 
 /// A pair of 19.69 and 19.64 M☉ whose primary's supernova at 10.47 Myr unbinds it and releases
 /// its companion on the main sequence (found by search, 2026-11-01: the first such pair of two
@@ -58,10 +59,12 @@ const RELEASED: usize = 24;
 /// unbinds at 9.07 Myr (the first such).
 const BY_THE_COMPANION: usize = 53;
 
-/// A quadruple `((0, 1), (2, 3))` of a 31.2 M☉ primary whose outer pair the supernova of its star
-/// 2 unbinds at 36.0 Myr, releasing its star 3 of 13.6 M☉, and whose inner pair stays (the
-/// first such).
-const OUTER_PAIR: usize = 72;
+/// A quadruple `((0, 1), (2, 3))` of a 23.8 M☉ primary whose outer pair the supernova of its star
+/// 2 unbinds at 22.4 Myr, releasing its star 3, a black hole of 3.72 M☉ at the epoch, and whose
+/// inner pair of two black holes stays (the first such at generator version 25). At 24 it was the
+/// 73rd system, a 31.2 M☉ primary's; at 25 its inner pair's secondary unbinds that pair at
+/// 11.2 Myr, and the arm shows the primary alone.
+const OUTER_PAIR: usize = 285;
 
 /// The system's age at which every pinned system is whole: 5 Myr, before each one's first
 /// supernova.
