@@ -14,7 +14,10 @@
  * 1. the readout, to `NOT AVAILABLE: no room for GROUND AT LINE OF SIGHT at this window size`;
  * 2. the survey line's values and `DATUM`, to one line naming what is held back;
  * 3. the upper plate's lines before `STARS`, which scroll with their position and total, keeping
- *    `FRAME` to `CAMERA` in view at their first position;
+ *    `FRAME` to `CAMERA` in view at their first position, and beside `INSTRUMENT 1` standing alone
+ *    whole, `INSTRUMENT 2` as its stub at the most, on a stage under
+ *    {@link COLUMNS_BELOW_HEIGHT_REM} tall, as at the floor, below them down to one
+ *    ({@link besideLastStep});
  * 4. the open instruments, which are held so that the plates take the stage's full width.
  *
  * Where even that does not hold them, the scroll shrinks to one line (5), and then the whole upper
@@ -313,6 +316,24 @@ export interface ViewRoom {
    * decided afresh, as no statement coming and going is.
    */
   readonly basis: StageRoom | null;
+}
+
+/**
+ * The furthest step the plates beside the standing slots `slots` may take before the slots are held
+ * for them (step 4): 5, the upper plate's lines scrolling below `FRAME`–`CAMERA` down to one, while
+ * `INSTRUMENT 1` stands whole and `INSTRUMENT 2` does not (closed, held, or its stub) on a stage
+ * under {@link COLUMNS_BELOW_HEIGHT_REM} tall, as at the floor; 3, `FRAME`–`CAMERA` in view,
+ * otherwise (the owner's delegated call, 2026-11-02; lane `view-body-3-and-plates`, as the UX
+ * review research-leans-31 keeps it, for one instrument). At 1280 × 720 the plates beside a slot
+ * stood by step 3 with 20 px to spare, so that a wrapped `SCENE` bar or one more statement row held
+ * `INSTRUMENT 1`.
+ */
+export function besideLastStep(
+  stage: StageRoom,
+  slots: readonly [SlotStanding, SlotStanding],
+): PlateStep {
+  const floor = stage.heightPx < COLUMNS_BELOW_HEIGHT_REM * stage.remPx;
+  return floor && slots[0] === "stands" && slots[1] !== "stands" ? 5 : 3;
 }
 
 /** Whether two stages are one: the same size to half a pixel, at the same interface scale. */
@@ -799,11 +820,12 @@ function cappedAt(
  *
  * @remarks
  * First the slots by their own room ({@link SlotStanding}); then, beside those that stand, the
- * plates at the least step up to 3 that holds them; where none does, every open slot is held (step
+ * plates at the least step up to {@link besideLastStep}'s that holds them, 3 or, beside
+ * `INSTRUMENT 1` alone under 40 rem tall, 5; where none does, every open slot is held (step
  * 4) and the plates take the full width, at any step. With no slot standing, on a stage that fits
  * them, the plates stand in columns ({@link PlateArrangement}), each decided in the stage's whole
  * height (R10.T12.c). Slots held for the plates return once the
- * plates beside them would stand at step 3 or less with a line to spare. Last, wherever they stand,
+ * plates beside them would stand by that step with a line to spare. Last, wherever they stand,
  * the cap ({@link PLATES_COVER_CAP}): past half the picture, the cap's steps give way in their order
  * ({@link CapStep}). Before the stage or the plates are measured, nothing gives way.
  *
@@ -869,7 +891,7 @@ export function viewRoom(input: RoomInput, decidedBefore: ViewRoom | null): View
       gapPx,
       sparePx,
       previousStep,
-      3,
+      besideLastStep(stage, ownSlots),
     );
     if (besideStanding !== null) {
       return decided(ownSlots, false, besideStanding, "stacked", beside);
@@ -895,7 +917,8 @@ export function viewRoom(input: RoomInput, decidedBefore: ViewRoom | null): View
  * Whether the stage has room to open one more slot beside those that stand, as `room` has them:
  * its width, the height the slots that stand take (a stub as its stub, a held slot as nothing)
  * with the new slot taken to be as tall as those that stand, and the plates beside a slot standing
- * by step 3; `true` before the stage is laid out (decision-r10-view-block-room §3, `roomForSlot`).
+ * by {@link besideLastStep}'s step; `true` before the stage is laid out (decision-r10-view-block-room
+ * §3, `roomForSlot`).
  */
 export function roomToOpen(input: RoomInput, room: ViewRoom): boolean {
   const { stage } = input;
@@ -926,8 +949,20 @@ export function roomToOpen(input: RoomInput, room: ViewRoom): boolean {
     return true;
   }
   const roomPx = stage.heightPx - 2 * STAGE_INSET_REM * remPx;
+  // The slots as they would stand with one more open: `INSTRUMENT 1` where it is closed, else
+  // `INSTRUMENT 2` taken to stand whole, so that no slot is offered that would then be held.
+  const [first, second] = room.ownSlots;
+  const opened: readonly [SlotStanding, SlotStanding] =
+    first === "closed" ? ["stands", second] : [first, "stands"];
   return (
-    platesAt(beside, roomPx, PLATE_GAP_REM * remPx, LINE_SPARE_REM * remPx, room.step, 3) !== null
+    platesAt(
+      beside,
+      roomPx,
+      PLATE_GAP_REM * remPx,
+      LINE_SPARE_REM * remPx,
+      room.step,
+      besideLastStep(stage, opened),
+    ) !== null
   );
 }
 

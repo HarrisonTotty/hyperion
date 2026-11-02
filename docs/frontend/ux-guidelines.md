@@ -830,7 +830,10 @@ Four classes, shared by the whole ship:
     3. the upper plate's lines before `STARS`, which scroll as a readout does, with their position
        and total beneath them (`1-6 of 11`), keeping those from `FRAME` to `CAMERA` in view at
        their first position;
-    4. the open instruments, which are held (below).
+    4. the open instruments, which are held (below). On a picture under 40 rem tall, as at the
+       floor, before step 4 holds `INSTRUMENT 1`, the upper plate's lines scroll down to one beside
+       it, `FRAME` first, so that one instrument opens at 1280 × 720; `INSTRUMENT 2` stands as its
+       stub.
 
     A part of the lower plate, reckoned at its tallest, whose widest unbroken run is wider than the
     plate gives way with every part before it in the list, whatever the heights. In columns the

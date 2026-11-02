@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  besideLastStep,
   columnsFit,
   INSTRUMENT_SLOT_REM,
   leastStepOf,
@@ -21,12 +22,14 @@ import {
   lowerYieldLine,
   type PlateArrangement,
   type PlateMeasures,
+  type PlateStep,
   PLATES_COVER_CAP,
   type RoomInput,
   roomToOpen,
   sameRoom,
   sameStage,
   type SlotRoomInput,
+  type SlotStanding,
   slotWidthFits,
   type StageRoom,
   STUB_HEIGHT_REM,
@@ -548,7 +551,8 @@ describe("VIEW's room: the plates in columns (R10.T12.c)", () => {
   });
 
   it("stands the plates in columns once the slots are held for them", () => {
-    const room = roomAt(530, { ...COLUMNS, slots: [OPEN, CLOSED], beside: BESIDE });
+    // Beside the slot, even its lines scrolled to one, the plates take 566 px of 514.
+    const room = roomAt(530, { ...COLUMNS, slots: [OPEN, CLOSED], beside: besideWith(900) });
     expect([room.heldForPlates, room.arrangement, room.readout]).toEqual([
       true,
       "columns",
@@ -598,8 +602,14 @@ describe("VIEW's room: the slots held for the plates (step 4, R10.T12.b)", () =>
     expect(roomAt(560, ONE_OPEN).upper).toEqual({ kind: "middle", heightPx: 260, lines: 6 });
   });
 
-  it("holds the open slots where step 3 beside them does not hold the plates", () => {
-    const room = roomAt(530, ONE_OPEN);
+  /**
+   * On a stage 40 rem tall or more, where the plates beside a slot go no further than step 3: the
+   * plates beside it 900 px whole, by step 3 802 px of the stage, and the stage 700 px.
+   */
+  const TALL_HELD: Partial<RoomInput> = { slots: [OPEN, CLOSED], beside: besideWith(900) };
+
+  it("holds the open slots where step 3 beside them does not hold the plates, on a stage 40 rem tall or more", () => {
+    const room = roomAt(700, TALL_HELD);
     expect([room.slots, room.ownSlots, room.heldForPlates]).toEqual([
       ["held", "closed"],
       ["stands", "closed"],
@@ -608,28 +618,74 @@ describe("VIEW's room: the slots held for the plates (step 4, R10.T12.b)", () =>
   });
 
   it("decides the plates at the stage's full width once the slots are held for them", () => {
-    // Beside the slot they would scroll; at the full width the readout's giving way holds them.
-    const room = roomAt(530, ONE_OPEN);
-    expect([room.step, room.readout, room.upper]).toEqual([1, "yields", { kind: "whole" }]);
+    // Beside the slot they would scroll past FRAME–CAMERA; at the full width they stand whole.
+    const room = roomAt(700, TALL_HELD);
+    expect([room.step, room.readout, room.upper]).toEqual([0, "stands", { kind: "whole" }]);
   });
 
   it("returns the slots held for the plates only once the plates beside them stand with a line to spare", () => {
-    // At 530 px the plates beside the slot stand by step 3 from 628 px whole, with a line to spare
-    // from 610.5 px.
-    const held = roomAt(530, ONE_OPEN);
+    // At 700 px the plates beside the slot stand by step 3 from 798 px whole, with a line to spare
+    // from 780.5 px.
+    const held = roomAt(700, TALL_HELD);
     expect([
-      roomAt(530, { ...ONE_OPEN, beside: besideWith(610.6) }, held).heldForPlates,
-      roomAt(530, { ...ONE_OPEN, beside: besideWith(610.5) }, held).heldForPlates,
+      roomAt(700, { ...TALL_HELD, beside: besideWith(780.6) }, held).heldForPlates,
+      roomAt(700, { ...TALL_HELD, beside: besideWith(780.5) }, held).heldForPlates,
     ]).toEqual([true, false]);
   });
 
   it("stands the slot beside those same plates where it was not held for them before", () => {
-    expect(roomAt(530, { ...ONE_OPEN, beside: besideWith(610.6) }).heldForPlates).toBe(false);
+    expect(roomAt(700, { ...TALL_HELD, beside: besideWith(780.6) }).heldForPlates).toBe(false);
   });
 
   it("returns the slots held for the plates at once on a resize to a stage that holds them", () => {
-    // At 545 px the plates beside the slot stand in 526 of 529 px, not with a line to spare.
-    expect(roomAt(545, ONE_OPEN, roomAt(530, ONE_OPEN)).heldForPlates).toBe(false);
+    // At 803 px the plates beside the slot stand in 786 of 787 px, not with a line to spare.
+    expect(roomAt(803, TALL_HELD, roomAt(700, TALL_HELD)).heldForPlates).toBe(false);
+  });
+
+  it("stands the slot under 40 rem tall where only the lines below FRAME–CAMERA scrolling beside it hold the plates (step 5)", () => {
+    // At 530 px step 3 beside the slot takes 526 px of 514; five lines in view, 466.
+    const room = roomAt(530, ONE_OPEN);
+    expect([room.slots, room.heldForPlates, room.step, room.upper]).toEqual([
+      ["stands", "closed"],
+      false,
+      5,
+      { kind: "middle", heightPx: 200, lines: 5 },
+    ]);
+  });
+
+  it("holds the slot under 40 rem tall where even one line in view beside it does not hold the plates", () => {
+    const room = roomAt(530, { ...ONE_OPEN, beside: besideWith(900) });
+    expect([room.slots, room.heldForPlates]).toEqual([["held", "closed"], true]);
+  });
+
+  it.each<readonly [string, StageRoom, readonly [SlotStanding, SlotStanding], PlateStep]>([
+    ["INSTRUMENT 1 alone, the floor's 51 × 33.5 rem", stageOf(536, 816), ["stands", "closed"], 5],
+    ["INSTRUMENT 1 and INSTRUMENT 2's stub, the floor's", stageOf(536, 816), ["stands", "stub"], 5],
+    ["INSTRUMENT 1 and INSTRUMENT 2 held, the floor's", stageOf(536, 816), ["stands", "held"], 5],
+    ["both whole, the floor's", stageOf(536, 816), ["stands", "stands"], 3],
+    ["INSTRUMENT 2 alone, the floor's", stageOf(536, 816), ["closed", "stands"], 3],
+    ["INSTRUMENT 1 alone, 39.9 rem tall", stageOf(638.4, 1280), ["stands", "closed"], 5],
+    ["INSTRUMENT 1 alone, 40 rem tall", stageOf(640, 1280), ["stands", "closed"], 3],
+    [
+      "INSTRUMENT 1 alone, 1920 × 1080's at 125%",
+      stageOf(847.5, 1340, 20),
+      ["stands", "closed"],
+      3,
+    ],
+  ])("lets the plates beside %s go as far as step %s", (_, stage, slots, step) => {
+    expect(besideLastStep(stage, slots)).toBe(step);
+  });
+
+  it("keeps INSTRUMENT 2 standing alone to step 3 beside it under 40 rem tall (the UX review's one instrument)", () => {
+    const room = roomAt(530, { slots: [CLOSED, OPEN], beside: BESIDE });
+    expect([room.slots, room.heldForPlates]).toEqual([["closed", "held"], true]);
+  });
+
+  it("keeps both slots standing whole to step 3 beside them under 40 rem tall", () => {
+    // At 600 px, 37.5 rem, both stand whole by their own room; by step 3 the plates beside them
+    // take 602 px, by step 5 382.
+    const room = roomAt(600, { slots: [OPEN, OPEN], beside: besideWith(700) });
+    expect([room.ownSlots, room.heldForPlates]).toEqual([["stands", "stands"], true]);
   });
 
   it("stands the plates whole beside the slots before they are measured there", () => {
@@ -847,11 +903,18 @@ describe("VIEW's room to open a slot (R10.T12.b)", () => {
     expect([room.slots, roomToOpen(input, room)]).toEqual([["stands", "stub"], true]);
   });
 
-  it("offers none where the plates beside a slot would not stand by step 3", () => {
+  it("offers none where the plates beside a slot would not stand by step 3, on a stage 40 rem tall or more", () => {
+    expect([
+      canOpen(700, { full: FULL, beside: besideWith(900) }),
+      canOpen(803, { full: FULL, beside: besideWith(900) }),
+    ]).toEqual([false, true]);
+  });
+
+  it("offers room under 40 rem tall where the plates beside a slot stand by step 5", () => {
     expect([
       canOpen(530, { full: FULL, beside: BESIDE }),
-      canOpen(560, { full: FULL, beside: BESIDE }),
-    ]).toEqual([false, true]);
+      canOpen(530, { full: FULL, beside: besideWith(900) }),
+    ]).toEqual([true, false]);
   });
 });
 
@@ -1087,6 +1150,78 @@ describe("VIEW's room: the plates' cover capped at half the picture (the owner's
       sameRoom(room, { ...room, cover: { ...cover, capped: "survey" } }),
       sameRoom(room, { ...room }),
     ]).toEqual([false, false, true]);
+  });
+});
+
+/**
+ * `TERRAIN TEST`'s plates beside a slot at 1280 × 720, 232 px wide, as the pod's captures lay them
+ * out (2026-11-02): the upper plate's ten lines before `STARS`, `TIME` and `POSITION` on two rows
+ * each, 378 px scrolled
+ * to `FRAME`–`CAMERA` and its position line; `extraPx` more for a statement more; the lower plate
+ * given way to its one yield line, 96 px, its readout's and survey line's runs past the plate.
+ */
+function floorBeside(extraPx = 0): PlateMeasures {
+  const lines = [19, 38, 19, 19, 19, 38, 19, 19, 19, 19];
+  const shellPx = 378 - 114 + extraPx;
+  const wholePx = shellPx + 228 - 18;
+  return {
+    upper: {
+      wholePx,
+      middleLinesPx: lines,
+      pinnedLines: 5,
+      bodyPx: wholePx - 22,
+      positionPx: 18,
+      widthPx: 232,
+    },
+    lower: {
+      wholePx: 400,
+      readoutYieldedPx: 150,
+      surveyYieldedPx: 96,
+      passing: ["survey", "readout"],
+      wholeWidthPx: 232,
+      readoutYieldedWidthPx: 232,
+      surveyYieldedWidthPx: 232,
+    },
+  };
+}
+
+describe("VIEW's room: a slot beside the plates at the floor (the owner's delegated call, 2026-11-02)", () => {
+  /** `INSTRUMENT 1` open on an 816 px stage `heightPx` tall, its plates {@link floorBeside}'s. */
+  const besideAt = (heightPx: number, extraPx = 0): ViewRoom =>
+    viewRoom(
+      inputOn(stageOf(heightPx, 816), {
+        slots: [OPEN, CLOSED],
+        beside: floorBeside(extraPx),
+        full: { upper: floorUpper(444), lower: FLOOR_LOWER },
+        columns: true,
+      }),
+      null,
+    );
+
+  it.each<readonly [string, number, number, number]>([
+    ["the plain run's 518 px stage, FRAME–CAMERA in view", 518, 0, 5],
+    ["the SCENE bar wrapped, 482 px, one line fewer", 482, 0, 4],
+    ["a statement more on two rows, 42 px, at 518 px", 518, 42, 3],
+    ["both, the lines scrolled to one", 482, 42, 1],
+  ])("stands INSTRUMENT 1 with %s", (_, heightPx, extraPx, lines) => {
+    const room = besideAt(heightPx, extraPx);
+    expect([
+      room.slots,
+      room.heldForPlates,
+      room.upper.kind === "middle" && room.upper.lines,
+    ]).toEqual([["stands", "closed"], false, lines]);
+  });
+  it("stands INSTRUMENT 2 as its stub beside INSTRUMENT 1 at the floor, the plates by step 5", () => {
+    const room = viewRoom(
+      inputOn(stageOf(518, 816), {
+        slots: [OPEN, OPEN],
+        beside: floorBeside(42),
+        full: { upper: floorUpper(444), lower: FLOOR_LOWER },
+        columns: true,
+      }),
+      null,
+    );
+    expect([room.slots, room.heldForPlates, room.step]).toEqual([["stands", "stub"], false, 5]);
   });
 });
 
