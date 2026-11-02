@@ -28,15 +28,20 @@
  *   reference surface's, newly surveyed), rises out of the datum by the same mix;
  * - a change that reverses one in progress starts from the fade it had reached.
  *
- * The fades are a function of the draw set and the time alone: every instance touching a footprint
- * takes the one fade, so that shared vertices agree. The clock is the views' draws'
+ * A refine's and a coarsen's heights also mix from the parent's own surface by the fade
+ * (`PARENT_MIX_SLOT`), the datum's where the parent held the ground unsurveyed, so that a parent and
+ * child that disagree (the survey's delta, its edge) change by the fade too, not at once.
+ *
+ * The fades are a function of the draw set, the time and the views' cameras alone (each change's
+ * span, {@link MorphSpans}): every instance touching a footprint takes the one fade, so that shared
+ * vertices agree. The clock is the views' draws'
  * (`TerrainViewFrameInput.nowMs`): a transition starts at the first draw after the step that made
  * it.
  */
 
 import type { CachedPatch, DrawnPatch, DrawSet } from "./cache";
 import type { FadeFootprint } from "./coarseFineHolds";
-import { DATUM_SLOT, fadeWord, MAX_SUB_PATCH_LEVELS } from "./gpu/uniforms";
+import { DATUM_SLOT, fadeWord, MAX_SUB_PATCH_LEVELS, PARENT_MIX_SLOT } from "./gpu/uniforms";
 import { childKeys, type PatchKey, patchKeyString } from "./patchKey";
 
 /**
@@ -201,6 +206,7 @@ function within(inner: PatchKey, outer: PatchKey): boolean {
 export class TimeMorph {
   readonly #spanMs: number;
   readonly #spans: MorphSpans | null;
+  readonly #parentMix: boolean;
   readonly #set: PresentedSet;
   /** The transitions in progress, by their area's `patchKeyString`. */
   #transitions = new Map<string, Transition>();
@@ -227,10 +233,18 @@ export class TimeMorph {
    * @param spanMs - The time a change morphs in over at least, ms; {@link MORPH_IN_MS} by default.
    * @param spans - The pixels each change moves the ground by, which lengthen its span; with none,
    *   every change takes `spanMs`.
+   * @param parentMix - Whether a refine's and a coarsen's heights mix from the parent's surface
+   *   ({@link TimeMorph.heightWords}); off for the wireframe's, whose contours mix no surfaces.
    */
-  constructor(capacity: number, spanMs = MORPH_IN_MS, spans: MorphSpans | null = null) {
+  constructor(
+    capacity: number,
+    spanMs = MORPH_IN_MS,
+    spans: MorphSpans | null = null,
+    parentMix = true,
+  ) {
     this.#spanMs = spanMs;
     this.#spans = spans;
+    this.#parentMix = parentMix;
     this.#heightWords = new Uint32Array(capacity);
     this.#set = {
       count: 0,
@@ -293,8 +307,9 @@ export class TimeMorph {
       this.#rebakes.delete(keyString);
       this.#rebakeWords.delete(keyString);
     }
-    if (oldSlot === null || oldSlot >= DATUM_SLOT) {
-      // No slot was spare, or the record cannot name it (`DATUM_SLOT` and past): swapped at once.
+    if (oldSlot === null || oldSlot >= PARENT_MIX_SLOT) {
+      // No slot was spare, or the record cannot name it (`PARENT_MIX_SLOT` and past): swapped at
+      // once.
       if (oldSlot !== null) {
         this.#released.push(oldSlot);
       }
@@ -314,7 +329,8 @@ export class TimeMorph {
   /**
    * Each presented instance's heights' fade at the last {@link TimeMorph.footprintsAt}, in the
    * presented order: `fadeWord`'s bits 8 to 31, the fade towards its patch's older bake and that
-   * bake's slot, or towards the datum (`DATUM_SLOT`) where it rises; 0 with neither.
+   * bake's slot, towards the datum (`DATUM_SLOT`) where it rises, or towards its parent's surface
+   * (`PARENT_MIX_SLOT`) in a refine's or a coarsen's footprint; 0 with none.
    */
   get heightWords(): Uint32Array {
     return this.#heightWords;
@@ -781,6 +797,8 @@ export class TimeMorph {
     }
     const out: FadeFootprint[] = [];
     const rises = new Map<string, number>();
+    // The refines' and coarsens' footprints, whose heights mix from the parent's surface.
+    const mixes = new Map<string, number>();
     for (const [areaString, transition] of this.#transitions) {
       this.#advance(transition, nowMs, cut);
       const fade = fadeOf(transition);
@@ -795,14 +813,27 @@ export class TimeMorph {
       }
       for (const area of transition.footprints) {
         out.push({ area, fade });
+        if (this.#parentMix) {
+          const areaKey = patchKeyString(area);
+          mixes.set(areaKey, Math.max(mixes.get(areaKey) ?? 0, Math.round(fade * 255)));
+        }
       }
     }
     const words = this.#heightWords;
     const set = this.#set;
     for (let n = 0; n < set.count; n += 1) {
       const rebake = this.#rebakeWords.get(set.patches[n]?.keyString ?? "") ?? 0;
-      const rise = rises.get(this.#areas[n] ?? "") ?? 0;
-      words[n] = rebake !== 0 ? rebake : rise === 0 ? 0 : fadeWord(0, rise, DATUM_SLOT);
+      const area = this.#areas[n] ?? "";
+      const rise = rises.get(area) ?? 0;
+      const mix = mixes.get(area) ?? 0;
+      words[n] =
+        rebake !== 0
+          ? rebake
+          : rise !== 0
+            ? fadeWord(0, rise, DATUM_SLOT)
+            : mix !== 0
+              ? fadeWord(0, mix, PARENT_MIX_SLOT)
+              : 0;
     }
     return out;
   }

@@ -103,6 +103,14 @@ export const MAX_FADE_SLOT = 0xffff;
 export const DATUM_SLOT = MAX_FADE_SLOT;
 
 /**
+ * The slot a refine's or a coarsen's fade names as the surface it mixes from ({@link fadeWord};
+ * plan R10, R10.T16.i): the instance's parent (its `parentSlot`), at its place there by its
+ * quadrant, the datum where the parent held it unsurveyed (`shaders/terrainPatch.wgsl`'s
+ * `PARENT_MIX_SLOT`). A rebake's older slot is always below it.
+ */
+export const PARENT_MIX_SLOT = MAX_FADE_SLOT - 1;
+
+/**
  * The instance record's word of its own fade and its rebake's (plan R10, R10.T16.i): bits 0 to 7
  * its own fade's byte (`coarseFineHolds.ts`' `fadeByte`), 8 to 15 the fade of its rebake, from the
  * bake in slot `oldSlot` (bits 16 to 31) to the slot's own, 0 with none. A fading rebake's instance

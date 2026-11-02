@@ -173,16 +173,16 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a
   // sub-patch's vertex on its slot's surface, a whole patch's as before; and its fades' floor on k
-  // and its rebakes' and rises' mix of heights, normals and maturity (R10.T16.i), which with no fade
-  // are k and the newer bake, bit for bit.
+  // and its rebakes', rises', refines' and coarsens' mix of heights, normals and maturity
+  // (R10.T16.i), which with no fade are k and the newer bake, bit for bit.
   ...[
-    ["terrain-lit-baked-offsets", "c1393c9c8a5fd29a"],
-    ["terrain-lit-face-differences", "4cbaaff847ac46b"],
+    ["terrain-lit-baked-offsets", "e3aa235fa4256f7e"],
+    ["terrain-lit-face-differences", "b6162310eb183ebf"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "81b7802204c65032"],
-    ["terrain-depth-face-differences", "90d5ec0b306ff353"],
-    ["terrain-shadow-baked-offsets", "13c31819bfeec092"],
-    ["terrain-shadow-face-differences", "2a241eba591513f3"],
+    ["terrain-depth-baked-offsets", "6eedd2574e753fcd"],
+    ["terrain-depth-face-differences", "6acbfb03de4091a0"],
+    ["terrain-shadow-baked-offsets", "135f9b5aa269b31"],
+    ["terrain-shadow-face-differences", "411d39e2296d0cd4"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const spec = [
       ...TERRAIN_LIT_MATERIALS,

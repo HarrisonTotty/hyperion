@@ -32,6 +32,7 @@ import { vertexDir } from "./cube";
 import { packSurveyMask, surveyCellCode, surveyedAt } from "./gpu/resources";
 import {
   DATUM_SLOT,
+  PARENT_MIX_SLOT,
   INSTANCE_RECORD_BYTES,
   MAX_SUB_PATCH_LEVELS,
   NO_PARENT_SLOT,
@@ -493,6 +494,8 @@ interface DrawnInstance {
   readonly older: Held | null;
   /** Whether it rises out of the datum (its older slot the datum's, fading). */
   readonly rises: boolean;
+  /** Whether a refine's or a coarsen's fade mixes its heights from its parent's (`PARENT_MIX_SLOT`). */
+  readonly parentMix: boolean;
 }
 
 /** The primary view's drawn instances in `engine`'s latest record writes, by area, read by slot. */
@@ -544,8 +547,12 @@ function instancesOf(
         cornerFades: word(10),
         ownFade: fades & 0xff,
         rebakeFade,
-        older: rebakeFade > 0 && olderSlot !== DATUM_SLOT ? (slots.get(olderSlot) ?? null) : null,
+        older:
+          rebakeFade > 0 && olderSlot !== DATUM_SLOT && olderSlot !== PARENT_MIX_SLOT
+            ? (slots.get(olderSlot) ?? null)
+            : null,
         rises: olderSlot === DATUM_SLOT && rebakeFade > 0,
+        parentMix: olderSlot === PARENT_MIX_SLOT && rebakeFade > 0,
       });
     }
   }
@@ -574,6 +581,11 @@ class SurveyMasks {
 /** `held`'s own height (`which` 0) or morph target (1) at its vertex (x, y). */
 function heightOf(held: Held, which: 0 | 1): (x: number, y: number) => number {
   return (x, y) => held.bake.heights[2 * (y * SIDE + x) + which] ?? 0;
+}
+
+/** The place (u, v) of a patch's quads in its parent's, by its quadrant there (`parentPlaceOf`). */
+function parentPlaceOf(quadrant: number, u: number, v: number): readonly [number, number] {
+  return [((quadrant & 1) * QUADS + u) / 2, (((quadrant >> 1) & 1) * QUADS + v) / 2];
 }
 
 /** `a` mixed to `b` by `t`, normalised. */
@@ -646,7 +658,18 @@ class DrawnSurfaces {
       const surveyed = this.#masks.surveyed(inst.held, u, v);
       let own = surveyed ? sampleOn(heightOf(inst.held, 0), u, v) : 0;
       let morph = surveyed ? sampleOn(heightOf(inst.held, 1), u, v) : 0;
-      if (inst.rebakeFade > 0) {
+      if (inst.parentMix) {
+        // A refine's or a coarsen's mix from the parent's own surface, at the place there.
+        const parent = inst.parent;
+        if (parent !== null) {
+          const [pu, pv] = parentPlaceOf(inst.quadrant, u, v);
+          const p = this.#masks.surveyed(parent, pu, pv)
+            ? sampleOn(heightOf(parent, 0), pu, pv)
+            : 0;
+          own += inst.rebakeFade * (p - own);
+          morph += inst.rebakeFade * (p - morph);
+        }
+      } else if (inst.rebakeFade > 0) {
         const older = inst.older;
         const drawn = older !== null && this.#masks.surveyed(older, u, v);
         own += inst.rebakeFade * ((drawn ? sampleOn(heightOf(older, 0), u, v) : 0) - own);
@@ -682,7 +705,13 @@ class DrawnSurfaces {
       return { h, normal: datum, surveyed: false };
     }
     let normal = morphedNormal(inst.held, inst, su, sv, k);
-    if (normal !== null && inst.rebakeFade > 0) {
+    if (normal !== null && inst.parentMix) {
+      // The parent's tile by k already; the datum's where the parent held the ground unsurveyed.
+      const [pu, pv] = parentPlaceOf(inst.quadrant, su, sv);
+      if (inst.parent === null || !this.#masks.surveyed(inst.parent, pu, pv)) {
+        normal = mixed(normal, datum, inst.rebakeFade);
+      }
+    } else if (normal !== null && inst.rebakeFade > 0) {
       const older =
         inst.older !== null && this.#masks.surveyed(inst.older, su, sv)
           ? morphedNormal(inst.older, inst, su, sv, k)

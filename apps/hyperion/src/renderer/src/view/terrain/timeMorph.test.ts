@@ -5,7 +5,7 @@ import { selectionOf } from "../../test/terrainFixtures";
 import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { childKeys, type PatchKey, patchKeyString, rootKey } from "./patchKey";
 import { slotLayout } from "./slotLayout";
-import { DATUM_SLOT } from "./gpu/uniforms";
+import { DATUM_SLOT, fadeWord, PARENT_MIX_SLOT } from "./gpu/uniforms";
 import { MORPH_IN_MS, MORPH_MAX_MS, MORPH_MS_PER_PX, TimeMorph } from "./timeMorph";
 
 /** A cache of `slots` slots holding `keys`. */
@@ -399,13 +399,42 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     const cut = footprints(morph, 1_000);
     const due = morph.swapDue;
     morph.footprintsAt(1_000, true);
+    // The coarsen's finer patches stand at its end, on their parent's surface, until it swaps.
     expect([
       cut.length > 0,
       due,
       morph.swapDue,
       morph.heightWords[0],
       morph.takeReleased(),
-    ]).toEqual([true, false, true, 0, [7]]);
+    ]).toEqual([true, false, true, fadeWord(0, 255, PARENT_MIX_SLOT), [7]]);
+  });
+
+  it("mixes a refine's heights from its parent's surface by its fade, and none on the wireframe's", () => {
+    const [first] = CHILDREN;
+    const wordAt = (parentMix: boolean): ReadonlyArray<number | undefined> => {
+      const cache = cacheWith([ROOT]);
+      const resolver = new DrawSetResolver(cache);
+      const morph = new TimeMorph(32, MORPH_IN_MS, null, parentMix);
+      morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+      morph.footprintsAt(0);
+      cache.insert({
+        key: first,
+        generation: 1,
+        originM: vec3(0, 0, 0),
+        heightRangeM: [0, 0],
+        boundingRadiusM: 1,
+      });
+      const drawn = morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+      const n = drawn.patches.findIndex((p) => p.keyString === patchKeyString(first));
+      morph.footprintsAt(1_000);
+      const start = morph.heightWords[n];
+      morph.footprintsAt(1_000 + MORPH_IN_MS / 2);
+      return [start, morph.heightWords[n]];
+    };
+    expect([wordAt(true), wordAt(false)]).toEqual([
+      [fadeWord(0, 255, PARENT_MIX_SLOT), fadeWord(0, 128, PARENT_MIX_SLOT)],
+      [0, 0],
+    ]);
   });
 
   it("swaps a coarsen at once, counted, where its finer patches have left the cache", () => {

@@ -64,9 +64,14 @@ fn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {
     normal = shadingNormalAt(in.slot, in.parent, in.patchUv, in.morph);
     if (in.rebakeFade > 0.0) {
       // A rebake's normal fades from the older bake's tile (R10.T16.i), or from the datum's where
-      // the reference surface stood.
+      // the reference surface stood; a refine's or a coarsen's takes the parent's tile by the morph
+      // factor already, and fades from the datum's where the parent held the ground unsurveyed.
       var older = datum;
-      if (older_drawn_at(in.rebakeSlot, in.patchUv)) {
+      if (in.rebakeSlot == PARENT_MIX_SLOT) {
+        if (parent_drawn_at(in.parent, in.patchUv)) {
+          older = normal;
+        }
+      } else if (older_drawn_at(in.rebakeSlot, in.patchUv)) {
         older = shadingNormalAt(in.rebakeSlot, in.parent, in.patchUv, in.morph);
       }
       normal = normalize(mix(normal, older, in.rebakeFade));

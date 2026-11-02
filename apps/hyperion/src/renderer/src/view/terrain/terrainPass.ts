@@ -2841,7 +2841,12 @@ export class TerrainPass {
       cache,
       resolver: new DrawSetResolver(cache),
       holds: new CoarseFineHolds(layout.slots.slotCount),
-      morph: new TimeMorph(layout.slots.slotCount, this.#morphInMs, this.#morphSpans),
+      morph: new TimeMorph(
+        layout.slots.slotCount,
+        this.#morphInMs,
+        this.#morphSpans,
+        this.#shading !== "wire",
+      ),
       fades: new TransitionFades(layout.slots.slotCount),
       fadesAtMs: null,
       firstDrawn: false,

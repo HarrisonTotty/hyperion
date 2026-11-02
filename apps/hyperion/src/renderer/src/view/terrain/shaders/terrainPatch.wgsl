@@ -200,6 +200,12 @@ fn surfaceHeightsAt(slot : u32, at : vec2f) -> vec2f {
 // 0 everywhere (R10.T16.i).
 const DATUM_SLOT : u32 = 0xffffu;
 
+// The slot a refine's or a coarsen's fade names (uniforms.ts' `PARENT_MIX_SLOT`; R10.T16.i): the
+// instance's parent, its heights read at the instance's place in it (`parentPlaceOf`) and held at
+// the datum where the parent's survey held it unsurveyed, so that a change between two bakes that
+// disagree (the survey's delta, its edge) fades from the parent's drawn surface.
+const PARENT_MIX_SLOT : u32 = 0xfffeu;
+
 // The rebake an instance fades from (plan R10, R10.T16.i; uniforms.ts' `fadeWord`): the slot of
 // the older bake (bits 16 to 31 of `sub.w`), or `DATUM_SLOT` for ground rising out of the reference
 // surface, and the fade of its heights, normals and maturity towards it (bits 8 to 15), 0 with
@@ -207,6 +213,13 @@ const DATUM_SLOT : u32 = 0xffffu;
 struct Rebake {
   slot : u32,
   fade : f32,
+}
+
+// The place `at` of a patch's grid in its parent's grid, quads, by the patch's quadrant there
+// (bits 0 and 1 of `quadrant`): (q × 64 + at) ÷ 2.
+fn parentPlaceOf(quadrant : u32, at : vec2f) -> vec2f {
+  let q = vec2f(f32(quadrant & 1u), f32((quadrant >> 1u) & 1u));
+  return (q * 64.0 + at) * 0.5;
 }
 
 fn rebakeOf(inst : Instance) -> Rebake {
@@ -272,11 +285,16 @@ fn patchVertexOf(grid : vec3f, instance : u32) -> PatchVertex {
     morphHeightM = p.morphHeightM;
     nu = rec.nu0 + normalDifference(rec, directionDifferenceAt(rec, at));
   }
-  // A rebake's fade mixes its heights from the older bake's: a vertex's offset is linear in its
-  // height, along ν, on either vertex path.
+  // A rebake's fade mixes its heights from the older bake's, a refine's or a coarsen's from the
+  // parent's own: a vertex's offset is linear in its height, along ν, on either vertex path.
   let rebake = rebakeOf(inst);
   if (rebake.fade > 0.0) {
-    let older = olderHeightsAt(rebake.slot, at);
+    var older = vec2f(ownHeightM, morphHeightM);
+    if (rebake.slot != PARENT_MIX_SLOT) {
+      older = olderHeightsAt(rebake.slot, at);
+    } else if (inst.parentSlot != NO_PARENT_SLOT) {
+      older = vec2f(olderHeightsAt(inst.parentSlot, parentPlaceOf(inst.parentQuadrant, at)).x);
+    }
     let dOwn = rebake.fade * (older.x - ownHeightM);
     let dMorph = rebake.fade * (older.y - morphHeightM);
     own = own + dOwn * nu;

@@ -133,9 +133,15 @@ fn olderHeightsAt(slot : u32, at : vec2f) -> vec2f {
 }
 
 // Whether the older bake of a rebake's fade drew the place `patch_uv` ((x, y) ÷ 64) of its slot:
-// not the datum, and surveyed there.
+// not the datum nor a refine's parent (`PARENT_MIX_SLOT`), and surveyed there.
 fn older_drawn_at(slot : u32, patch_uv : vec2f) -> bool {
-  return slot != DATUM_SLOT && survey_surveyed(slot, patch_uv * 64.0);
+  return slot != DATUM_SLOT && slot != PARENT_MIX_SLOT && survey_surveyed(slot, patch_uv * 64.0);
+}
+
+// Whether the parent `parent` (its slot and the patch's quadrant in it) drew the place `patch_uv`
+// of the patch: resident, and surveyed there (a refine's or a coarsen's fade; R10.T16.i).
+fn parent_drawn_at(parent : vec2u, patch_uv : vec2f) -> bool {
+  return parent.x != NO_PARENT_SLOT && survey_surveyed(parent.x, parentPlaceOf(parent.y, patch_uv * 64.0));
 }
 
 // Where a vertex of the lit mesh stands (R10.T10.c): its grid vertex's (`patchVertexOf`), moved
