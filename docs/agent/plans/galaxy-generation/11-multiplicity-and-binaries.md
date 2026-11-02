@@ -7382,11 +7382,12 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     accretion and heavy donors): slab members 565 → 182, its ultracompacts 456 → 76, all under
     80 min (at 10⁻¹³ they were 456, fed 1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, 38–119 min);
     research-leans-30 expected 75 and 181 (a finding). The floor takes three substellar-donor
-    transients of the slab and two main-sequence-donor ones of the young disc (findings), and one
-    young-disc ultracompact, a 2.0 M☉ helium star feeding a neutron star 81 min out, is longer
-    (a finding). Young disc 252 → 543, Be/X 19 → 373, supergiant neutron stars 12 → 5, black
-    holes 56 → 2 (64 before the Be stars' rule). `ns_accretion_hold`'s census: members 1,154 →
-    375, black holes 15 → 7. Before P11.T4's fixes the slab's ultracompacts were 145 → 14.
+    transients of the slab and two main-sequence-donor ones of the young disc (findings), and ten
+    young-disc ultracompacts, helium stars of 0.8–4.4 M☉ feeding neutron stars and black holes 81
+    min to 3.1 d out, are longer (a finding). Young disc 252 → 543, Be/X 19 → 373, supergiant
+    neutron stars 12 → 5, black holes 56 → 2 (64 before the Be stars' rule). `ns_accretion_hold`'s
+    census: members 1,154 → 375, black holes 15 → 7. Before P11.T4's fixes the slab's
+    ultracompacts were 145 → 14.
   - _Movers_ (the arm forced on at 24): the golden `sky/census_near_sun`, the slow
     `tables_hold::the_x_ray_binary_sampler_against_the_engine`'s and
     `channels_hold::the_channel_sampler_against_the_engine_under_every_26_hold`'s pins, and the

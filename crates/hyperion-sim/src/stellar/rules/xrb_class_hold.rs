@@ -128,11 +128,12 @@ const PINNED_KINDS: [[usize; 9]; 2] = [
 const ULTRACOMPACT_MAX_PERIOD: Seconds = Seconds::new(80.0 * 60.0);
 
 /// The ultracompact members at [`ULTRACOMPACT_MAX_PERIOD`] or longer under every 27 hold, in the
-/// slab and in the young disc, as measured: none of the slab's, and one of the young disc's, a
-/// neutron star fed 7.2 × 10⁻⁸ M☉ yr⁻¹ through its inner Lagrangian point by a 2.0 M☉ helium
-/// star in its Hertzsprung gap 81 minutes out (a finding: kinded ultracompact by its helium donor,
-/// not by its period).
-const PINNED_LONG_ULTRACOMPACTS: [usize; 2] = [0, 1];
+/// slab and in the young disc, as measured: none of the slab's, and ten of the young disc's, seven
+/// neutron stars and three black holes fed through their inner Lagrangian points by helium stars
+/// of 0.8–4.4 M☉, on their main sequence or in their Hertzsprung gap, 81 minutes to 3.1 days out
+/// at 9 × 10⁻¹² to 10⁻³ M☉ yr⁻¹ (a finding: kinded ultracompact by their helium donors, not by
+/// their periods).
+const PINNED_LONG_ULTRACOMPACTS: [usize; 2] = [0, 10];
 
 /// The hydrogen-fed low-mass X-ray binaries the floor takes under every 27 hold, in the slab and
 /// in the young disc, as measured: three of the slab's, neutron-star transients beside substellar
