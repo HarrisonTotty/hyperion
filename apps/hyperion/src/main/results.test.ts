@@ -2335,7 +2335,7 @@ describe("the schema check", () => {
     const v1: unknown = JSON.parse(
       JSON.stringify({ ...results, version: 1, memory: { samples: MEMORY, ...peaks } }),
     );
-    expect(validateResults(v1)).toEqual(["version is not 6 or 7", "memory.series is missing"]);
+    expect(validateResults(v1)).toEqual(["version is not 6 or 7 or 8", "memory.series is missing"]);
   });
 
   it.each<readonly [string, Readonly<Record<string, unknown>>, string]>([
@@ -2672,13 +2672,13 @@ describe("the schema check", () => {
 
   it("refuses version 5", () => {
     const results = twoWindowResults();
-    expect(RESULTS_VERSION).toBe(7);
+    expect(RESULTS_VERSION).toBe(8);
     expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 5 })))).toEqual([
-      "version is not 6 or 7",
+      "version is not 6 or 7 or 8",
     ]);
   });
 
-  it("reads a version 6 file, which holds no geometry, and a version 7 file's geometry block (plan R14, R14.T1.f)", () => {
+  it("reads a version 6 file, which holds no geometry, and a version 8 file's geometry block (plan R14, R14.T1.f)", () => {
     const geometry = {
       settings: {
         clusterPath: true,
@@ -2686,6 +2686,7 @@ describe("the schema check", () => {
         casterStrideCap: 8,
         overlayDepth: "cluster",
         litClusters: true,
+        farCascadeRate: 4,
       },
       segments: [
         {
@@ -2722,17 +2723,64 @@ describe("the schema check", () => {
         ),
       ),
     ]).toEqual([
-      7,
+      8,
       geometry,
       [],
       [],
-      ["geometry is a version 7 file's, not this version's"],
+      ["geometry is a version 7 or 8 file's, not this version's"],
       ["geometry is not the settings and each segment's counts, every figure of its kind"],
     ]);
     const markdown = summaryMarkdown(results);
     expect(markdown).toContain("## Geometry (plan R14)");
     expect(markdown).toContain(
+      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames.",
+    );
+    expect(markdown).toContain(
       "| orbit coast | 59 (61) | 33 (33) | 868,352 (880,000) | 700,000 (712,000) | — | 600,001 (610,001) |",
+    );
+  });
+
+  it("reads a version 7 file's geometry, its five settings, and refuses five settings in a version 8 file or six in a version 7 (plan R14, R14.T6.b)", () => {
+    const settings = {
+      clusterPath: true,
+      casterDepthCull: true,
+      casterStrideCap: 8,
+      overlayDepth: "cluster",
+      litClusters: true,
+    } as const;
+    const segments = [
+      {
+        segment: "orbit coast",
+        interiorPatches: { frames: 3, p50: 59, max: 61 },
+        edgePatches: { frames: 3, p50: 33, max: 33 },
+        drawnTriangles: { frames: 3, p50: 868_352, max: 880_000 },
+        litClusterTriangles: null,
+        casterTriangles: null,
+        overlayTriangles: null,
+      },
+    ];
+    const results = buildResults({
+      run: runOf(),
+      report: {
+        ...reportOf(),
+        geometry: { settings: { ...settings, farCascadeRate: 1 }, segments },
+      },
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    const asFile = (version: number, fields: object): unknown =>
+      JSON.parse(JSON.stringify({ ...results, version, geometry: { settings: fields, segments } }));
+    const malformed = [
+      "geometry is not the settings and each segment's counts, every figure of its kind",
+    ];
+    expect([
+      validateResults(asFile(7, settings)),
+      validateResults(asFile(8, settings)),
+      validateResults(asFile(7, { ...settings, farCascadeRate: 1 })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 3 })),
+    ]).toEqual([[], malformed, malformed, malformed]);
+    expect(summaryMarkdown(results)).toContain(
+      "the lit pass's interior patches by clusters, far cascades every frame.",
     );
   });
 

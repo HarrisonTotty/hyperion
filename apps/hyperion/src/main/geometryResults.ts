@@ -1,7 +1,7 @@
 /**
- * The terrain's geometry in the descent spike's results file (plan R14, R14.T1.f; results version
- * 7): the renderer's `geometry` block, a generated world's main view's lit pass by segment, read
- * from the report, checked in the file and summarised.
+ * The terrain's geometry in the descent spike's results file (plan R14, R14.T1.f; results versions
+ * 7 and 8): the renderer's `geometry` block, a generated world's main view's lit pass by segment,
+ * read from the report, checked in the file and summarised.
  *
  * @remarks
  * The block states how the pass drew its geometry, the setting's `GeometrySettings` or a launch's
@@ -10,8 +10,9 @@
  * clusters' as drawn, R14.T2.a), four cascades' caster triangles summed and
  * overlay-depth triangles (`TerrainPass.counts`, its cluster counters on), each `null` where no
  * frame of the segment had it. A version 6 file, R05's runs' and the native replay's
- * (`tools/gpu-replay`), holds none and reads as before; a version 7 file holds one only over a
- * generated world.
+ * (`tools/gpu-replay`), holds none and reads as before; a version 7 or 8 file holds one only over
+ * a generated world. Version 8's settings add R14.T6.b's `farCascadeRate`; version 7's, from builds
+ * that rendered every cascade every frame, read as rate 1.
  */
 
 import type { SpikeCountFigures, SpikeGeometryReport, SpikeGeometrySegment } from "../preload/api";
@@ -64,13 +65,18 @@ function countFigures(value: unknown): SpikeCountFigures | null | undefined {
     : undefined;
 }
 
-/** `value` as the geometry's settings, every field of its kind, or `null`. */
-function settingsOf(value: unknown): SpikeGeometryReport["settings"] | null {
-  if (!isRecord(value) || Object.keys(value).length !== 5) {
+/**
+ * `value` as the geometry's settings at results `version`, every field of its kind, or `null`:
+ * version 8's six fields, or version 7's five, its far cascades read at rate 1.
+ */
+function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settings"] | null {
+  if (!isRecord(value) || Object.keys(value).length !== (version === 7 ? 5 : 6)) {
     return null;
   }
   const { clusterPath, casterDepthCull, casterStrideCap, overlayDepth, litClusters } = value;
+  const farCascadeRate = version === 7 ? 1 : value["farCascadeRate"];
   if (
+    (farCascadeRate !== 1 && farCascadeRate !== 2 && farCascadeRate !== 4) ||
     typeof clusterPath !== "boolean" ||
     typeof casterDepthCull !== "boolean" ||
     typeof litClusters !== "boolean" ||
@@ -82,7 +88,14 @@ function settingsOf(value: unknown): SpikeGeometryReport["settings"] | null {
   ) {
     return null;
   }
-  return { clusterPath, casterDepthCull, casterStrideCap, overlayDepth, litClusters };
+  return {
+    clusterPath,
+    casterDepthCull,
+    casterStrideCap,
+    overlayDepth,
+    litClusters,
+    farCascadeRate,
+  };
 }
 
 /** `value` as one segment's counts, or `null`. */
@@ -125,14 +138,14 @@ function segmentOf(value: unknown): SpikeGeometrySegment | null {
 }
 
 /**
- * `value` as the renderer's `geometry` block (the report's or the file's), or `null` where it is
- * not one: exactly its fields, every figure of its kind.
+ * `value` as the renderer's `geometry` block (the report's, or a file's at results `version`), or
+ * `null` where it is not one: exactly its fields, every figure of its kind.
  */
-export function readGeometryReport(value: unknown): SpikeGeometryReport | null {
+export function readGeometryReport(value: unknown, version: 7 | 8 = 8): SpikeGeometryReport | null {
   if (!isRecord(value) || Object.keys(value).length !== 2) {
     return null;
   }
-  const settings = settingsOf(value["settings"]);
+  const settings = settingsOf(value["settings"], version);
   const segments = value["segments"];
   if (settings === null || !Array.isArray(segments)) {
     return null;
@@ -144,16 +157,16 @@ export function readGeometryReport(value: unknown): SpikeGeometryReport | null {
 
 /**
  * The problems of a results file's `geometry` block at `version` (`validateResults`): none where a
- * version 7 file holds a well-formed one or none, or a version 6 file none.
+ * version 7 or 8 file holds a well-formed one of its version or none, or a version 6 file none.
  */
 export function geometryResultsProblems(value: unknown, version: unknown): string[] {
   if (value === undefined) {
     return [];
   }
-  if (version !== 7) {
-    return ["geometry is a version 7 file's, not this version's"];
+  if (version !== 7 && version !== 8) {
+    return ["geometry is a version 7 or 8 file's, not this version's"];
   }
-  return readGeometryReport(value) === null
+  return readGeometryReport(value, version) === null
     ? ["geometry is not the settings and each segment's counts, every figure of its kind"]
     : [];
 }
@@ -170,13 +183,19 @@ function cell(figures: SpikeCountFigures | null): string {
 
 /** The summary's "Geometry" section of `geometry` (plan R14, R14.T1.f). */
 export function geometrySummaryLines(geometry: SpikeGeometryReport): string[] {
-  const { clusterPath, casterDepthCull, casterStrideCap, overlayDepth, litClusters } =
-    geometry.settings;
+  const {
+    clusterPath,
+    casterDepthCull,
+    casterStrideCap,
+    overlayDepth,
+    litClusters,
+    farCascadeRate,
+  } = geometry.settings;
   return [
     "",
     "## Geometry (plan R14)",
     "",
-    `The main view's lit pass a frame by segment, median (largest): cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}.`,
+    `The main view's lit pass a frame by segment, median (largest): cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}.`,
     "",
     `| Segment | ${COUNTS.map((name) => COUNT_HEADS[name]).join(" | ")} |`,
     `| ${["---", ...COUNTS.map(() => "---")].join(" | ")} |`,

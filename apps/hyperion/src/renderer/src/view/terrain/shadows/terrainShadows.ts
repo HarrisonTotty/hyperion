@@ -26,12 +26,18 @@
  *   (decision-r10-t9b-penumbra), so their shadow begins where the horizon map's share m reaches 0,
  *   and min(m, c′) is m across the penumbra; non-terrain casters' shadows, which the map does not
  *   see, are short by about half a penumbra, ρL (4.7 cm at 10 m).
+ * - **The layers' last owner** (plan R14, R14.T6.b): every view's passes clear and draw the layers
+ *   they name and leave the rest, so a view that holds a far cascade from an earlier frame samples
+ *   it only where it rendered that layer last ({@link TerrainShadows.holds}): the set records the
+ *   owner of each layer's last render ({@link TerrainShadows.renderCasters}), and forgets them all
+ *   when it is let go, at a restore among others.
  */
 
 import { depthLayersTexture } from "../../engine/depthLayers";
 import { TEXTURE_USAGE } from "../../engine/gpuFlags";
 import { type MemoryCategory, textureBytes, type TextureSpec } from "../../engine/memory";
 import type {
+  DepthLayerPass,
   DepthLayersSpec,
   DepthLayerTarget,
   DrawItem,
@@ -161,6 +167,8 @@ export class TerrainShadows {
   #target: DepthLayerTarget | null = null;
   #placeholder: TextureHandle | null = null;
   #disposed = false;
+  /** Each layer's last render's owner, `null` before any on the current set (R14.T6.b). */
+  readonly #owners: Array<object | null> = Array.from({ length: CASCADE_COUNT }, () => null);
 
   constructor(engine: TerrainShadowsEngine, options: TerrainShadowsOptions) {
     this.#engine = engine;
@@ -214,6 +222,34 @@ export class TerrainShadows {
     return this.#placeholder;
   }
 
+  /**
+   * Renders a view's caster passes into the set ({@link DepthLayerTarget.render}, under `name`),
+   * and records `owner` as the last to render each layer they name (plan R14, R14.T6.b); nothing
+   * where the set does not live.
+   *
+   * @param owner - What holds the view's cascades between frames, compared by identity.
+   * @throws as {@link DepthLayerTarget.render} does, before any layer's owner is recorded.
+   */
+  renderCasters(owner: object, name: string, passes: ReadonlyArray<DepthLayerPass>): void {
+    const target = this.#target;
+    if (target === null) {
+      return;
+    }
+    target.render(name, passes);
+    for (const pass of passes) {
+      this.#owners[pass.layer] = owner;
+    }
+  }
+
+  /**
+   * Whether layer `layer` of the set still holds what `owner` last rendered into it through
+   * {@link TerrainShadows.renderCasters} (plan R14, R14.T6.b): `owner` rendered it last, and the
+   * set has not been let go since.
+   */
+  holds(owner: object, layer: CascadeIndex): boolean {
+    return this.#target !== null && this.#owners[layer] === owner;
+  }
+
   /** The GPU bytes it holds, by category: the set under `shadows`, the placeholder under `other`. */
   bytesByCategory(): ReadonlyMap<MemoryCategory, number> {
     const bytes = new Map<MemoryCategory, number>();
@@ -246,6 +282,7 @@ export class TerrainShadows {
     const placeholder = this.#placeholder;
     this.#target = null;
     this.#placeholder = null;
+    this.#owners.fill(null);
     try {
       target?.dispose();
     } finally {

@@ -229,6 +229,8 @@ export interface GeometryOverride {
   readonly overlayDepth?: "redraw" | "scene-depth" | "cluster";
   /** R14.T2.a: the lit pass's interior patches through the cluster path. */
   readonly litClusters?: boolean;
+  /** R14.T6.b: the frames between re-renders of the far shadow cascades; 1 renders all four. */
+  readonly farCascadeRate?: 1 | 2 | 4;
 }
 
 declare global {
@@ -996,7 +998,7 @@ export interface DescentSpikeReport {
   readonly sizes?: SpikeSizesReport;
   /**
    * The main view's terrain geometry a frame by segment over a generated world (plan R14, R14.T1.f;
-   * results version 7): absent over the test planet, whose spike shading has no cluster path.
+   * results version 8): absent over the test planet, whose spike shading has no cluster path.
    */
   readonly geometry?: SpikeGeometryReport;
 }

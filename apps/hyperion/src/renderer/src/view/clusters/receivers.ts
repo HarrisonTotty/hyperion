@@ -26,6 +26,11 @@
  * no receiver reads a texel it writes: the layers differ only where no receiver samples, and the
  * image not at all. The rule is exact under the premise, as `castsInto` is; non-terrain casters do
  * not take it.
+ *
+ * A far cascade that a later frame may hold (plan R14, R14.T6.b; `Cascade.holdSlackM` σ above 0)
+ * has its far end widened by σ, and refuses nothing as covered below: its frames' receivers stand
+ * up to σ off in view depth from its own frame's (`holdsFarCascade` holds it no longer), and the
+ * cascade below may be rendered again, or held from another frame in other light axes, meanwhile.
  */
 
 import type { Vec3 } from "../../geometry/vec3";
@@ -58,14 +63,15 @@ export function cascadeCullReceivers(
   const marginM = 2 * cascade.normalOffsetM + RECEIVER_READ_TEXELS * cascade.texelM;
   const reachM = set.casterReachM;
   const below = index === 0 ? undefined : set.cascades[index - 1];
+  const slackM = cascade.holdSlackM;
   return {
-    depthM: [below?.fadeStartM ?? 0, cascade.farM],
+    depthM: [below?.fadeStartM ?? 0, cascade.farM + slackM],
     reachM: [
       reachM * Math.max(0, lightOnViewAxis) + marginM,
       reachM * Math.max(0, -lightOnViewAxis) + marginM,
     ],
     coveredBelow:
-      below === undefined
+      below === undefined || slackM > 0
         ? null
         : {
             centreM: [below.centreFromCameraLightM.x, below.centreFromCameraLightM.y],

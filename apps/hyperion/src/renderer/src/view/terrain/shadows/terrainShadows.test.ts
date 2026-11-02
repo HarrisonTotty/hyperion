@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { countingRenderEngine } from "../../../test/countingRenderEngine";
 import { viewId } from "../../camera/state";
 import { IDENTITY_ROTATION } from "../../coords/rotation";
-import type { DrawItem, MaterialHandle, MeshHandle } from "../../engine/types";
+import type { DepthLayerPass, DrawItem, MaterialHandle, MeshHandle } from "../../engine/types";
 import { allocationTally } from "../gpu/allocationTally";
 import { CASCADE_BYTES, type CascadeSet, fitCascades } from "./cascades";
 import {
@@ -30,6 +30,17 @@ function casterDraw(offsetM: number): DrawItem {
     offsetFromCameraM: Float32Array.of(offsetM, 0, 0),
     uniforms: {},
     textures: {},
+  };
+}
+
+/** A caster pass into `layer` that draws nothing. */
+function layerPass(layer: number): DepthLayerPass {
+  return {
+    label: "casters",
+    layer,
+    viewRotation: new Float32Array(16),
+    projection: new Float32Array(16),
+    draws: [],
   };
 }
 
@@ -126,6 +137,58 @@ describe("the session's set of cascades (R10.T9.b)", () => {
       engine.counts.depthLayerTargets,
       tally.liveBytes("shadows"),
     ]).toEqual([false, SHADOW_PLACEHOLDER_NAME, false, 2, CASCADE_BYTES]);
+  });
+
+  it("renders nothing and records no owner before the set is made (R14.T6.b)", async () => {
+    const engine = await countingRenderEngine();
+    const shadows = new TerrainShadows(engine, { cascades: true });
+    const owner = {};
+    shadows.renderCasters(owner, "first", [layerPass(0)]);
+    expect([shadows.holds(owner, 0), engine.depthLayerRenders.length]).toEqual([false, 0]);
+  });
+
+  it("holds each layer for the owner that rendered it last, and for no other (R14.T6.b)", async () => {
+    const engine = await countingRenderEngine();
+    const shadows = new TerrainShadows(engine, { cascades: true });
+    const first = {};
+    const second = {};
+    shadows.cascadeTarget();
+    shadows.renderCasters(first, "first", ([0, 1, 2, 3] as const).map(layerPass));
+    shadows.renderCasters(second, "second", [layerPass(2)]);
+    expect([
+      engine.depthLayerRenders.map(({ owner, passes }) => [owner, passes.length]),
+      ([0, 1, 2, 3] as const).map((layer) => [
+        shadows.holds(first, layer),
+        shadows.holds(second, layer),
+      ]),
+    ]).toEqual([
+      [
+        ["first", 4],
+        ["second", 1],
+      ],
+      [
+        [true, false],
+        [true, false],
+        [false, true],
+        [true, false],
+      ],
+    ]);
+  });
+
+  it("forgets every layer's owner at a restore and at its release (R14.T6.b)", async () => {
+    const engine = await countingRenderEngine();
+    const shadows = new TerrainShadows(engine, { cascades: true });
+    const owner = {};
+    shadows.cascadeTarget();
+    shadows.renderCasters(owner, "first", [layerPass(0)]);
+    engine.loseDevice();
+    engine.restore();
+    shadows.cascadeTarget();
+    const restored = shadows.holds(owner, 0);
+    shadows.renderCasters(owner, "first", [layerPass(1)]);
+    const again = shadows.holds(owner, 1);
+    shadows.dispose();
+    expect([restored, again, shadows.holds(owner, 1)]).toEqual([false, true, false]);
   });
 
   it("releases a living set and placeholder at a restore that took no handle", async () => {

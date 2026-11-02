@@ -146,6 +146,7 @@ describe("the spike report's check", () => {
         casterStrideCap: 1,
         overlayDepth: "redraw",
         litClusters: false,
+        farCascadeRate: 1,
       },
       segments: [
         {

@@ -802,11 +802,13 @@ describe("the geometry override (plan R14, Design note 17)", () => {
         "--terrain",
         "--geometry=casterStrideCap=1,overlayDepth=redraw,casterDepthCull=false",
       ]).geometry,
+      parse(["--descent-spike", "--geometry", "farCascadeRate=1"]).geometry,
       parse(["--descent-spike"]).geometry,
       parse(["--views-check"]).geometry,
     ]).toEqual([
       { clusterPath: false },
       { casterStrideCap: 1, overlayDepth: "redraw", casterDepthCull: false },
+      { farCascadeRate: 1 },
       undefined,
       undefined,
     ]);

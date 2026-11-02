@@ -114,12 +114,16 @@ export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
  * Version 7 (plan R14, R14.T1.f) adds the `geometry` block over a generated world, its main view's
  * lit pass's geometry settings and counts by segment (`geometryResults.ts`); a version 6 file, R05's
  * recorded runs' and the native replay's, which holds none, is still read
- * ({@link RESULTS_VERSIONS_READ}).
+ * ({@link RESULTS_VERSIONS_READ}). Version 8 (plan R14, R14.T6.b) adds `farCascadeRate` to the
+ * geometry block's settings; a version 7 file's, without it, reads as rate 1.
  */
-export const RESULTS_VERSION = 7;
+export const RESULTS_VERSION = 8;
 
-/** The versions {@link validateResults} reads: version 7's, and version 6's without its geometry. */
-export const RESULTS_VERSIONS_READ: ReadonlyArray<number> = [6, RESULTS_VERSION];
+/**
+ * The versions {@link validateResults} reads: version 8's, version 7's with its geometry's four
+ * settings, and version 6's without its geometry.
+ */
+export const RESULTS_VERSIONS_READ: ReadonlyArray<number> = [6, 7, RESULTS_VERSION];
 
 /**
  * The largest file the repository accepts as added, bytes: pre-commit's `check-added-large-files`
@@ -878,7 +882,7 @@ export interface PassFigures {
 /** The results file of one run. */
 export interface DescentResults {
   readonly schema: typeof RESULTS_SCHEMA;
-  readonly version: 6 | typeof RESULTS_VERSION;
+  readonly version: 6 | 7 | typeof RESULTS_VERSION;
   readonly run: {
     readonly startedAt: string;
     readonly machine: RecordedMachine;
@@ -1014,7 +1018,9 @@ export interface DescentResults {
   readonly sizes?: SizesResults;
   /**
    * A generated world's main view's lit pass's geometry by segment (plan R14, R14.T1.f;
-   * `geometryResults.ts`): version 7's, absent over the test planet and from every version 6 file.
+   * `geometryResults.ts`): version 7's and 8's, absent over the test planet and from every version
+   * 6 file. A version 7 file's settings lack `farCascadeRate`: read them through
+   * `readGeometryReport` at the file's version, which takes them at rate 1.
    */
   readonly geometry?: SpikeGeometryReport;
 }
@@ -1921,7 +1927,7 @@ export function validateResults(value: unknown): string[] {
   if (value["sizes"] !== undefined) {
     problems.push(...sizesResultsProblems(value["sizes"]));
   }
-  // A generated world's geometry (plan R14), in a version 7 file alone.
+  // A generated world's geometry (plan R14), in a version 7 or 8 file alone.
   problems.push(...geometryResultsProblems(value["geometry"], value["version"]));
   // A whole-run null column without a reason is found by both checks.
   return [...new Set(problems)];

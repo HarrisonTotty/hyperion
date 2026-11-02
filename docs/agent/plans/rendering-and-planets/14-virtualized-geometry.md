@@ -987,6 +987,7 @@ through `lit_place`.
     | `occlusion`       | `hzb` (after T3.d)                                                         | `hzb` (after T3.d; the UHD 620's run may turn it off)                      | Exact                                                |
     | `pageBytes`       | 128 MiB                                                                    | 32 MiB                                                                     | Within the memory ceilings                           |
     | `meshTolerancePx` | camera 1, wireframe occluder half the stroke width (lean)                  | camera 2, the same occluder rule (lean)                                    | A mesh's DAG cut within τ; hidden-line removal holds |
+    | `farCascadeRate`  | 4 (lean, T6.b)                                                             | 4 (no cascades on low)                                                     | Far cascades' edges within a texel; 1 the way back   |
     - Nothing here moves a figure the brainstorm states (τ, 720p, 30 fps, the 4 px wireframe
       tolerance): strides stay within τ′, and `TERRAIN: DETAIL LIMITED` keeps its trigger, the
       selection's budget binding; if T3.e lets a triangle budget bind beyond τ′, that raises it too.
@@ -1971,3 +1972,22 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - `clusters/terrainGrid.ts` holds `Stride`, `STRIDES`, `CLUSTER_QUADS`, the page's cluster counts,
     `CLUSTER_PAD_*` and `edgeVertex` with no engine import (`templates.ts` and `terrain.ts`
     re-export them): what `errors.ts` imports stays in `tsconfig.worker.json`'s list.
+- **R14.T6.b** (built): `GeometrySettings.farCascadeRate` (1 | 2 | 4; 4 on both settings, 1 in
+  `GEOMETRY_BEFORE_R14`); `FarCascadeHolds` (`plan`, `commit`, `cut`), `Cascade.holdSlackM` and
+  `CascadeInput.farCascadeRate` in `shadows/cascades.ts`; `TerrainShadows.renderCasters` and `holds`.
+- **R14.T6.b**: `TerrainCascadeFrame.passes` holds only the layers rendered; T6.a's skips compose
+  with `FarCascadePlan.rendered` (wired in `#cascadesFor`, `#writeLit`, `#drawCasters`).
+- **R14.T6.b** (lean, 2026-11-02): a held cascade is formed again from its own basis and centre with
+  the body's rotation now, not its frame's `lightFromCamera` translated, which misses by ω R Δt.
+- **R14.T6.b** (lean, 2026-11-02): at a rate above 1, cascades 2 and 3 are fitted 1/16 wider, held
+  while the sun turns ≤ 1/32 of its disc, and their T1.c cull drops its cover below.
+- **R14.T6.b** (lean, 2026-11-02): any `ShadowCasters` provider renders all four every frame, until
+  T6.a or T6.c. Pending: the owner's RTX run, caster passes timed at rates 1 and 4.
+- **R14.T6.b**: a held map keeps its frame's draw set and caster morph, so T6.a's draw-set inputs do
+  not cut a hold; non-terrain receivers sample `TerrainCascadeFrame.received`, not `set`.
+- **R14.T6.b**: "within one texel" is measured on layers 2–3 read back (T1.c off in both runs), with
+  T1.d's ⅓-stop rule on the frame beside it (`sharedPass.ts`).
+- **R14.T6.b**: `GeometryOverride.farCascadeRate` (1, 2 or 4) on `--geometry` and the smoke page;
+  results version 8 adds it to the geometry block's settings, and a version 7 file reads as rate 1.
+- **R14.T6.b**: with T2.a's lit pass, a lit view-frame on high times 6 or 7 passes at rate 4 (2 or 3
+  casters) against T2.a's 8.

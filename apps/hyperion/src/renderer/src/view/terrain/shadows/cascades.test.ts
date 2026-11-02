@@ -32,9 +32,19 @@ import {
   cascadeWeight,
   casterReachM,
   discTopDirection,
+  FAR_CASCADE_COVER_TEXELS,
+  FAR_CASCADE_HOLD_MARGIN,
+  FAR_CASCADE_SUN_SHARE,
+  farCascadeDue,
+  type FarCascadeFrame,
+  FarCascadeHolds,
+  type FarCascadeRate,
   fitCascades,
   gridLatticeSpacingM,
   halfDiagonalTanSquared,
+  type HeldCascade,
+  heldCascadeFor,
+  holdsFarCascade,
   lightBasis,
   NORMAL_OFFSET_TEXELS,
   POLE_FALLBACK_RAD,
@@ -1404,5 +1414,325 @@ describe("degenerate ground", () => {
     expect(fitCascades(baseInput({ heightAboveGroundM: -5 }))).toEqual(
       fitCascades(baseInput({ heightAboveGroundM: 0 })),
     );
+  });
+});
+
+/** The camera's forward, its −z, from its orientation in the body-fixed axes. */
+function forwardOf(q: Quaternion): Vec3 {
+  const [r0, r1, r2] = rotationRows(q);
+  return normalise({ x: -r0.z, y: -r1.z, z: -r2.z });
+}
+
+/** The Sun's angular radius from 1 au, rad (IAU 2015 B3's nominal radius, IAU 2012 B2's au). */
+const SUN_RHO_RAD = Math.asin(6.957e8 / 1.495978707e11);
+
+/** `input`'s frame for the holds: its fit, the Sun's ρ, every layer kept, holds allowed. */
+function farFrame(
+  input: CascadeInput,
+  overrides: Partial<Omit<FarCascadeFrame, "input" | "set">> = {},
+): FarCascadeFrame {
+  return {
+    input,
+    set: fitCascades(input),
+    sunAngularRadiusRad: SUN_RHO_RAD,
+    depthCull: true,
+    holdable: true,
+    kept: () => true,
+    ...overrides,
+  };
+}
+
+/** Cascade `index` of `input`'s fit as its frame rendered it. */
+function heldOf(input: CascadeInput, index: 2 | 3, depthCull = true): HeldCascade {
+  const set = fitCascades(input);
+  return {
+    cascade: set.cascades[index],
+    basis: set.basis,
+    cameraBodyFixedM: input.cameraBodyFixedM,
+    viewAxisBodyFixed: forwardOf(input.orientationBodyFixed),
+    depthCull,
+  };
+}
+
+/** The base input at a rate of 4, with `overrides`. */
+function atFour(overrides: Partial<CascadeInput> = {}): CascadeInput {
+  return baseInput({ farCascadeRate: 4, ...overrides });
+}
+
+/** The base input's camera `moveM` along its view's horizontal, its orientation kept. */
+function slid(input: CascadeInput, moveM: number): CascadeInput {
+  const up = normalise(input.cameraBodyFixedM);
+  const forward = forwardOf(input.orientationBodyFixed);
+  const ahead = normalise(sub(forward, scale(up, dot(forward, up))));
+  return { ...input, cameraBodyFixedM: add(input.cameraBodyFixedM, scale(ahead, moveM)) };
+}
+
+/** The base input's camera turned `turnRad` about the vertical through it. */
+function turnedAbout(input: CascadeInput, turnRad: number): CascadeInput {
+  const up = normalise(input.cameraBodyFixedM);
+  const turn = quaternionFromAxisAngle(up, turnRad);
+  const forward = rotateToBody(rotationOf(turn), forwardOf(input.orientationBodyFixed));
+  return { ...input, orientationBodyFixed: lookAlong(forward, up) };
+}
+
+/** The cascades due at each of the first eight frames after a cut, at `rate`. */
+function dueAt(rate: FarCascadeRate): number[][] {
+  return Array.from({ length: 8 }, (_, frame) =>
+    ([0, 1, 2, 3] as const).filter((index) => farCascadeDue(index, frame, rate)),
+  );
+}
+
+/** How many cascades each plan of `frames` renders, each committed in turn. */
+function renderedCounts(holds: FarCascadeHolds, frames: ReadonlyArray<FarCascadeFrame>): number[] {
+  return frames.map((frame) => {
+    const plan = holds.plan(frame);
+    holds.commit(plan);
+    return plan.rendered.filter(Boolean).length;
+  });
+}
+
+describe("the far cascades at a lower rate (plan R14, R14.T6.b)", () => {
+  it("are due on alternate halves of the period, the near two every frame", () => {
+    expect([dueAt(1)[5], dueAt(2), dueAt(4)]).toEqual([
+      [0, 1, 2, 3],
+      [
+        [0, 1, 2],
+        [0, 1, 3],
+        [0, 1, 2],
+        [0, 1, 3],
+        [0, 1, 2],
+        [0, 1, 3],
+        [0, 1, 2],
+        [0, 1, 3],
+      ],
+      [
+        [0, 1, 2],
+        [0, 1],
+        [0, 1, 3],
+        [0, 1],
+        [0, 1, 2],
+        [0, 1],
+        [0, 1, 3],
+        [0, 1],
+      ],
+    ]);
+  });
+
+  it("fit at rate 1 as without a rate, bit for bit, and the far two a sixteenth wider at 4, with that slack", () => {
+    const without = fitCascades(baseInput());
+    const four = fitCascades(atFour());
+    const unpadded = without.cascades.map((c) => c.radiusM);
+    expect(fitCascades(baseInput({ farCascadeRate: 1 }))).toEqual(without);
+    expect([
+      without.cascades.map((c) => c.holdSlackM),
+      four.cascades.slice(0, 2),
+      four.splitsM,
+      four.cascades.map((c) => c.radiusM),
+      four.cascades.map((c) => c.holdSlackM),
+      four.cascades.map((c) => c.texelM),
+      four.cascades.map((c) => c.normalOffsetM),
+    ]).toEqual([
+      [0, 0, 0, 0],
+      without.cascades.slice(0, 2),
+      without.splitsM,
+      unpadded.map((r, i) => (i < 2 ? r : r + FAR_CASCADE_HOLD_MARGIN * r)),
+      unpadded.map((r, i) => (i < 2 ? 0 : FAR_CASCADE_HOLD_MARGIN * r)),
+      four.cascades.map((c) => (2 * c.radiusM) / CASCADE_SIZE_PX),
+      four.cascades.map((c) => NORMAL_OFFSET_TEXELS * c.texelM),
+    ]);
+  });
+
+  it("hold for a still view under a still sun, and not where they were fitted at rate 1, with no slack", () => {
+    const frame = farFrame(atFour());
+    expect([
+      holdsFarCascade(heldOf(atFour(), 2), frame, 2),
+      holdsFarCascade(heldOf(atFour(), 3), frame, 3),
+      holdsFarCascade(heldOf(baseInput(), 2), frame, 2),
+    ]).toEqual([true, true, false]);
+  });
+
+  it("hold while the sun turns by up to a thirty-second of its disc, and not beyond", () => {
+    const sun = sunOver(BASE_UP, 10 * RAD);
+    const axis = normalise(cross(sun, BASE_UP));
+    const limitRad = FAR_CASCADE_SUN_SHARE * 2 * SUN_RHO_RAD;
+    const held = heldOf(atFour(), 3);
+    const at = (turnRad: number): boolean =>
+      holdsFarCascade(
+        held,
+        farFrame(
+          atFour({
+            sunDirectionBodyFixed: rotateToBody(
+              rotationOf(quaternionFromAxisAngle(axis, turnRad)),
+              sun,
+            ),
+          }),
+        ),
+        3,
+      );
+    expect([at(0.98 * limitRad), at(1.02 * limitRad), at(-0.98 * limitRad)]).toEqual([
+      true,
+      false,
+      true,
+    ]);
+  });
+
+  it("hold while the view's slice stays inside the held map less its four texels, and not beyond", () => {
+    const input = atFour();
+    const held = heldOf(input, 2, false);
+    const cascade = held.cascade;
+    const roomM = cascade.holdSlackM - FAR_CASCADE_COVER_TEXELS * cascade.texelM;
+    const at = (moveM: number): boolean => holdsFarCascade(held, farFrame(slid(input, moveM)), 2);
+    // Snapping puts the held centre up to half a texel's diagonal off the slice's.
+    expect([at(roomM - cascade.texelM), at(roomM + cascade.texelM), at(-roomM / 2)]).toEqual([
+      true,
+      false,
+      true,
+    ]);
+  });
+
+  it("hold, where the casters took the receivers' cull, only while the receivers' view depths move within the slack", () => {
+    const input = atFour();
+    const fitted = fitCascades(input).cascades[3];
+    const t2 = halfDiagonalTanSquared(input.fovXRad, input.aspect);
+    const slice = sliceSphere(fitted.nearM, fitted.farM, t2);
+    // A turn of the view about the vertical moves the slice's centre by about z cos 20° per
+    // radian, and a receiver's depth by up to C₄ √(1 + t²) cos 20°: between the two bounds, the
+    // slice stays inside the held map while the receivers' depths move beyond the slack.
+    const horizontal = Math.cos(20 * RAD);
+    const coverRad =
+      (fitted.holdSlackM - (FAR_CASCADE_COVER_TEXELS + 1) * fitted.texelM) /
+      (slice.distanceM * horizontal);
+    const cullRad = fitted.holdSlackM / (fitted.farM * Math.sqrt(1 + t2) * horizontal);
+    const turnRad = (coverRad + cullRad) / 2;
+    const frame = farFrame(turnedAbout(input, turnRad));
+    expect([
+      cullRad < coverRad,
+      holdsFarCascade(heldOf(input, 3, false), frame, 3),
+      holdsFarCascade(heldOf(input, 3, true), frame, 3),
+      holdsFarCascade(heldOf(input, 3, true), farFrame(turnedAbout(input, cullRad / 2)), 3),
+    ]).toEqual([true, true, false, true]);
+  });
+
+  it("sample a held map where its own frame drew each body-fixed place, the camera moved and the body turned since, to f32 rounding", () => {
+    const next = generator(0x7e6b_0001);
+    const before = atFour();
+    const held = heldOf(before, 2);
+    const kept = held.cascade;
+    for (let k = 0; k < 10; k += 1) {
+      const rotation = rotationOf(randomQuaternion(next));
+      const now = { ...slid(before, 20 * next() - 10), rotation };
+      const fitted = fitCascades(now).cascades[2];
+      const received = heldCascadeFor(held, fitted, now.cameraBodyFixedM, rotation);
+      expect([received.farM, received.fadeStartM, received.normalOffsetM, received.texelM]).toEqual(
+        [fitted.farM, fitted.fadeStartM, kept.normalOffsetM, kept.texelM],
+      );
+      for (let n = 0; n < 8; n += 1) {
+        const place = add(kept.centreBodyFixedM, scale(randomUnit(next), kept.radiusM * next()));
+        const was = apply(
+          kept.lightFromCamera,
+          rotateToBody(before.rotation, sub(place, before.cameraBodyFixedM)),
+        );
+        const is = apply(
+          received.lightFromCamera,
+          rotateToBody(rotation, sub(place, now.cameraBodyFixedM)),
+        );
+        // f32 entries, as the body's rotation's own test: a hundredth of a texel is 1e-5.
+        expect(Math.abs(is.x - was.x)).toBeLessThan(5e-6);
+        expect(Math.abs(is.y - was.y)).toBeLessThan(5e-6);
+        expect(Math.abs(is.z - was.z)).toBeLessThan(5e-6);
+      }
+    }
+  });
+
+  it("render 4, 2, 3, 2, 3 cascades over a still view at 4, receiving each held one as its frame drew it", () => {
+    const holds = new FarCascadeHolds();
+    const frame = farFrame(atFour());
+    const plans = Array.from({ length: 5 }, () => {
+      const plan = holds.plan(frame);
+      holds.commit(plan);
+      return plan;
+    });
+    const second = plans[1];
+    expect([
+      plans.map((plan) => plan.rendered),
+      plans[0]?.received === frame.set,
+      second?.received.cascades.slice(0, 2),
+      second?.received.cascades[2] === frame.set.cascades[2],
+      second?.received.cascades[2].lightFromCamera,
+    ]).toEqual([
+      [
+        [true, true, true, true],
+        [true, true, false, false],
+        [true, true, false, true],
+        [true, true, false, false],
+        [true, true, true, false],
+      ],
+      true,
+      frame.set.cascades.slice(0, 2),
+      false,
+      frame.set.cascades[2].lightFromCamera,
+    ]);
+  });
+
+  it("render all four at every frame of rate 1, receiving the fit's own set", () => {
+    const one = farFrame(baseInput({ farCascadeRate: 1 }));
+    const holds = new FarCascadeHolds();
+    expect([renderedCounts(holds, [one, one, one]), holds.plan(one).received === one.set]).toEqual([
+      [4, 4, 4],
+      true,
+    ]);
+  });
+
+  /** Holds that have rendered two still frames at a rate of 4. */
+  const holding = (): FarCascadeHolds => {
+    const holds = new FarCascadeHolds();
+    renderedCounts(holds, [farFrame(atFour()), farFrame(atFour())]);
+    return holds;
+  };
+
+  it("render all four after a cut, and hold again the frame after", () => {
+    const holds = holding();
+    holds.cut();
+    expect(renderedCounts(holds, [farFrame(atFour()), farFrame(atFour())])).toEqual([4, 2]);
+  });
+
+  it.each([
+    {
+      change: "the aspect",
+      frame: (): FarCascadeFrame => farFrame(atFour({ aspect: 4 / 3 })),
+      next: 2,
+    },
+    {
+      change: "the field of view",
+      frame: (): FarCascadeFrame => farFrame(atFour({ fovXRad: 50 * RAD })),
+      next: 2,
+    },
+    // At a rate of 2 cascade 3 is due at the frame after.
+    {
+      change: "the rate",
+      frame: (): FarCascadeFrame => farFrame(atFour({ farCascadeRate: 2 })),
+      next: 3,
+    },
+    {
+      change: "the receivers' cull",
+      frame: (): FarCascadeFrame => farFrame(atFour(), { depthCull: false }),
+      next: 2,
+    },
+  ])(
+    "render all four at a change of $change, and hold again the frame after",
+    ({ frame, next }) => {
+      const changed = frame();
+      expect(renderedCounts(holding(), [changed, changed])).toEqual([4, next]);
+    },
+  );
+
+  it("render a far cascade whose layer no longer holds this view's render", () => {
+    expect(
+      renderedCounts(holding(), [farFrame(atFour(), { kept: (index) => index !== 3 })]),
+    ).toEqual([3]);
+  });
+
+  it("render all four in a frame that may not hold", () => {
+    expect(renderedCounts(holding(), [farFrame(atFour(), { holdable: false })])).toEqual([4]);
   });
 });

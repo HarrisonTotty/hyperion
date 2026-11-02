@@ -7,34 +7,12 @@
  * frame both ways set each side's geometry themselves.
  */
 
-import type { GeometryOverride } from "../../../preload/api";
 import {
   geometryOf,
   type GeometrySettings,
   type QualitySetting,
 } from "../view/quality/qualitySetting";
-
-/** The query's `geometry-<field>` values as an override, each read as its field's values are. */
-function queryOverride(parameters: URLSearchParams): GeometryOverride {
-  const flag = (name: string): boolean | undefined => {
-    const value = parameters.get(`geometry-${name}`);
-    return value === "true" ? true : value === "false" ? false : undefined;
-  };
-  const clusterPath = flag("clusterPath");
-  const casterDepthCull = flag("casterDepthCull");
-  const cap = parameters.get("geometry-casterStrideCap");
-  const casterStrideCap =
-    cap === "1" ? 1 : cap === "2" ? 2 : cap === "4" ? 4 : cap === "8" ? 8 : undefined;
-  const depth = parameters.get("geometry-overlayDepth");
-  const overlayDepth =
-    depth === "redraw" || depth === "scene-depth" || depth === "cluster" ? depth : undefined;
-  return {
-    ...(clusterPath === undefined ? {} : { clusterPath }),
-    ...(casterDepthCull === undefined ? {} : { casterDepthCull }),
-    ...(casterStrideCap === undefined ? {} : { casterStrideCap }),
-    ...(overlayDepth === undefined ? {} : { overlayDepth }),
-  };
-}
+import { queryOverride } from "./geometryQuery";
 
 /** The page's override, read once from its query. */
 const OVERRIDE = queryOverride(new URLSearchParams(window.location.search));

@@ -31,7 +31,11 @@
  * draw at w = 0 at some (the cascades shadow something the horizon map does not: 585 of 2,108
  * terrain texels on SwiftShader with the cascades fitted to the disc's centre, before
  * decision-r10-t9b-penumbra's fit to its top edge, which leaves only where the two disagree) and
- * nowhere brighter, since the minimum never brightens.
+ * nowhere brighter, since the minimum never brightens. Then plan R14's levers against the way back
+ * (T1–T1.d), and the far cascades at a rate of 4 against every frame over four frames flown at
+ * R05's descent's 300 m/s under a setting sun (T6.b): the passes each frame renders, every
+ * surface of every frame's far maps held within a texel, the frame within a third of a stop at
+ * 99.5% of its terrain texels, and its acne unchanged; its caster triangles by frame logged.
  */
 
 import { withTemplateCurve } from "../view/appearance/phase";
@@ -57,7 +61,11 @@ import { vertexDir } from "../view/terrain/cube";
 import { allocationTally } from "../view/terrain/gpu/allocationTally";
 import type { PatchKey } from "../view/terrain/patchKey";
 import { planetGeometry, spheroidNormal, surfacePoint } from "../view/terrain/planet";
-import { CASCADE_BYTES, CASCADE_MEMORY_CATEGORY } from "../view/terrain/shadows/cascades";
+import {
+  CASCADE_BYTES,
+  CASCADE_MEMORY_CATEGORY,
+  FAR_CASCADE_SUN_SHARE,
+} from "../view/terrain/shadows/cascades";
 import { TerrainShadows } from "../view/terrain/shadows/terrainShadows";
 import { SurveyedCells } from "../view/terrain/surveyLookup";
 import type { TerrainLighting } from "../view/terrain/terrainMaterial";
@@ -71,7 +79,14 @@ import { HeightWorkerPool } from "../view/terrain/workers/pool";
 import { moonLikeFixture } from "../test/moonLikeFixture";
 import type { CapturedImage } from "./atmosphere";
 import { bytesDigest, type Checks, halfTexels, pause, projection } from "./harness";
-import { captureOf, captureScale, maskOf, stopsApart } from "./leverCaptures";
+import {
+  captureOf,
+  captureScale,
+  isTerrain,
+  luminanceAt,
+  maskOf,
+  stopsApart,
+} from "./leverCaptures";
 import { MOON_LIKE } from "./litTerrain";
 import { smokeGeometry } from "./geometry";
 
@@ -625,8 +640,44 @@ function stridesOf(stats: ReadonlyArray<ClusterPassStats> | null): string {
   return (stats ?? []).map((each) => each.byStride.join("/")).join(", ");
 }
 
-/** The high setting's geometry at stride 1: its exact levers alone (plan R14, R14.T1.c). */
-const RECEIVERS_CULLED: GeometrySettings = { ...SETTINGS.high.geometry, casterStrideCap: 1 };
+/**
+ * The high setting's geometry at stride 1, every cascade rendered every frame: its exact levers
+ * alone (plan R14, R14.T1.c).
+ */
+const RECEIVERS_CULLED: GeometrySettings = {
+  ...SETTINGS.high.geometry,
+  casterStrideCap: 1,
+  farCascadeRate: 1,
+};
+
+/**
+ * The high setting's geometry with every cascade rendered every frame (plan R14, R14.T6.b): T1.d's
+ * casters at their texel alone, and the far cascades' every-frame flight.
+ */
+const EVERY_FRAME: GeometrySettings = { ...SETTINGS.high.geometry, farCascadeRate: 1 };
+
+/** R14.T6.b's flight: its frames, and the camera's step a frame, m: 300 m/s at 60 Hz. */
+const FLIGHT_FRAMES = 4;
+const FLIGHT_STEP_M = 300 / 60;
+
+/**
+ * How far the flight's last frame at a rate of 4 may stand from every frame's in the acne's measures
+ * (plan R14, R14.T6.b), the share of its terrain's texels darker than at w = 0 and its mean lit
+ * fraction: 2.5 × 10⁻⁴, some ten of the comparison's 39,379 terrain texels, against the 6 and 7 the
+ * cascades darken there at 4 and every frame (both variants, SwiftShader, 2026-11-02).
+ */
+const ACNE_SHARE_TOLERANCE = 2.5e-4;
+
+/**
+ * The share of every frame's drawn far-map texels the held maps must hold within a texel, and the
+ * fewest that must be compared, for each of cascades 2 and 3 (plan R14, R14.T6.b): 99.995% and more
+ * held, of 0.96 to 2.2 million compared (both variants, SwiftShader, 2026-11-02).
+ */
+const FAR_MAP_WITHIN_SHARE = 0.999;
+const FAR_MAP_COMPARED_LEAST = 100_000;
+
+/** How long a flight's frame may wait for its cluster counters to come back, ms. */
+const STATS_TIMEOUT_MS = 2_000;
 
 /** The cluster path alone, at stride 1 and without the receivers' cull (plan R14, R14.T1.b). */
 const CLUSTERS_ALONE: GeometrySettings = {
@@ -665,6 +716,17 @@ async function layerDigests(
   layers: number,
   sizePx: number,
 ): Promise<string[]> {
+  const indices = Array.from({ length: layers }, (_, layer) => layer);
+  return (await layerBits(engine, depth, indices, sizePx)).map((bits) => bytesDigest(bits));
+}
+
+/** Layers `layers` of `depth`, of `sizePx`² texels, each read back as its bits, row by row. */
+async function layerBits(
+  engine: RenderEngine,
+  depth: TextureHandle,
+  layers: ReadonlyArray<number>,
+  sizePx: number,
+): Promise<ArrayBuffer[]> {
   const kernel = engine.createCompute(LAYER_COPY_KERNEL);
   const bits = engine.createBuffer({
     name: "smoke cascade layer bits",
@@ -673,8 +735,8 @@ async function layerDigests(
     category: "other",
   });
   try {
-    const digests: string[] = [];
-    for (let layer = 0; layer < layers; layer += 1) {
+    const read: ArrayBuffer[] = [];
+    for (const layer of layers) {
       engine.dispatch(
         kernel,
         {
@@ -687,13 +749,160 @@ async function layerDigests(
       );
       // One layer read at a time, so that the buffer is reused.
       // oxlint-disable-next-line no-await-in-loop
-      digests.push(bytesDigest(await engine.readBuffer(bits)));
+      read.push(await engine.readBuffer(bits));
     }
-    return digests;
+    return read;
   } finally {
     engine.releaseBuffer(bits);
     engine.releaseCompute(kernel);
   }
+}
+
+/** A cascade's map as the frame's receivers sample it: its `lightFromCamera` and its depths. */
+interface FarMap {
+  readonly light: Float32Array;
+  readonly depth: Float32Array;
+}
+
+/** A column-major affine 4 × 4's inverse applied to (c, 1), in `f64`. */
+function unprojected(m: Float32Array, c: Xyz): Xyz {
+  const at = (i: number): number => m[i] ?? Number.NaN;
+  const [a, b, d, e, f, g, h, k, l] = [
+    at(0),
+    at(4),
+    at(8),
+    at(1),
+    at(5),
+    at(9),
+    at(2),
+    at(6),
+    at(10),
+  ];
+  const x = c.x - at(12);
+  const y = c.y - at(13);
+  const z = c.z - at(14);
+  const det = a * (f * l - g * k) - b * (e * l - g * h) + d * (e * k - f * h);
+  return {
+    x: ((f * l - g * k) * x - (b * l - d * k) * y + (b * g - d * f) * z) / det,
+    y: (-(e * l - g * h) * x + (a * l - d * h) * y - (a * g - d * e) * z) / det,
+    z: ((e * k - f * h) * x - (a * k - b * h) * y + (a * f - b * e) * z) / det,
+  };
+}
+
+/** A column-major 4 × 4 applied to (p, 1), in `f64`. */
+function projected(m: Float32Array, p: Xyz): Xyz {
+  const at = (i: number): number => m[i] ?? Number.NaN;
+  return {
+    x: at(0) * p.x + at(4) * p.y + at(8) * p.z + at(12),
+    y: at(1) * p.x + at(5) * p.y + at(9) * p.z + at(13),
+    z: at(2) * p.x + at(6) * p.y + at(10) * p.z + at(14),
+  };
+}
+
+/** The length of row `k` of a column-major 4 × 4's upper 3 × 3. */
+function rowLength(m: Float32Array, k: number): number {
+  return Math.hypot(m[k] ?? 0, m[k + 4] ?? 0, m[k + 8] ?? 0);
+}
+
+/**
+ * How many of `fresh`'s drawn texels `held` holds within one of its texels (plan R14, R14.T6.b):
+ * each drawn texel's surface point, through `fresh`'s matrix back to the camera's frame and through
+ * `held`'s into its map, lies within the depths of the 3 × 3 texels about it there, widened by one
+ * texel's world size in depth. So every edge `fresh` draws, a caster's against what lies behind it,
+ * stands in `held` within a texel, across the light and along it. Texels within two of `held`'s
+ * edge are not compared, nor a caster pancaked onto `fresh`'s near plane by `unclippedDepth`
+ * (depth 1), whose place is not held: each map's near plane stands apart, and a receiver behind
+ * it is shadowed in both.
+ */
+function heldWithinTexel(
+  fresh: FarMap,
+  held: FarMap,
+  sizePx: number,
+): { readonly compared: number; readonly found: number } {
+  // One held texel, 2r ÷ N, in the held map's depth units, 1 ÷ its span.
+  const slack = (2 / (sizePx * rowLength(held.light, 0))) * rowLength(held.light, 2);
+  let compared = 0;
+  let found = 0;
+  for (let j = 0; j < sizePx; j += 1) {
+    for (let i = 0; i < sizePx; i += 1) {
+      const depth = fresh.depth[j * sizePx + i] ?? 0;
+      if (!(depth > 0 && depth < 1)) {
+        continue;
+      }
+      const point = unprojected(fresh.light, {
+        x: (2 * (i + 0.5)) / sizePx - 1,
+        y: 1 - (2 * (j + 0.5)) / sizePx,
+        z: depth,
+      });
+      const there = projected(held.light, point);
+      const hi = Math.round((0.5 + 0.5 * there.x) * sizePx - 0.5);
+      const hj = Math.round((0.5 - 0.5 * there.y) * sizePx - 0.5);
+      if (hi < 2 || hj < 2 || hi > sizePx - 3 || hj > sizePx - 3) {
+        continue;
+      }
+      compared += 1;
+      let low = Infinity;
+      let high = -Infinity;
+      for (let dj = -1; dj <= 1; dj += 1) {
+        for (let di = -1; di <= 1; di += 1) {
+          const near = held.depth[(hj + dj) * sizePx + hi + di] ?? 0;
+          low = Math.min(low, near);
+          high = Math.max(high, near);
+        }
+      }
+      found += there.z >= low - slack && there.z <= high + slack ? 1 : 0;
+    }
+  }
+  return { compared, found };
+}
+
+/** Each frame's rendered layers, as digits, frame by frame: "0123 01" for 4 and then 2. */
+function layersAt(frames: ReadonlyArray<ReadonlyArray<number>>): string {
+  return frames.map((each) => each.join("")).join(" ");
+}
+
+/** `draws` with their cascades' weight w at 0, so that they sample none. */
+function atNoWeight(draws: ReadonlyArray<DrawItem>): DrawItem[] {
+  return draws.map((draw) => {
+    const axis = draw.uniforms["cascadeViewAxis"] ?? new Float32Array(4);
+    return {
+      ...draw,
+      uniforms: {
+        ...draw.uniforms,
+        cascadeViewAxis: Float32Array.of(axis[0] ?? 0, axis[1] ?? 0, axis[2] ?? 0, 0),
+      },
+    };
+  });
+}
+
+/**
+ * The cascades' darkening of a frame against the same draws at w = 0, over its terrain by
+ * luminance (plan R14, R14.T6.b): the share of its terrain's texels darker by more than
+ * {@link NEVER_BRIGHTER}, and its terrain's mean lit fraction, each texel's luminance over w = 0's,
+ * at most 1.
+ */
+function shadowShare(
+  shadowed: Float32Array,
+  open: Float32Array,
+): { readonly darker: number; readonly darkerTexels: number; readonly litMean: number } {
+  let terrain = 0;
+  let darker = 0;
+  let lit = 0;
+  for (let p = 0; p < Math.floor(open.length / 4); p += 1) {
+    if (!isTerrain(open, p)) {
+      continue;
+    }
+    terrain += 1;
+    const unlit = luminanceAt(open, p);
+    const ratio = unlit > 0 ? Math.min(1, luminanceAt(shadowed, p) / unlit) : 1;
+    darker += ratio < 1 - NEVER_BRIGHTER ? 1 : 0;
+    lit += ratio;
+  }
+  return {
+    darker: darker / Math.max(1, terrain),
+    darkerTexels: darker,
+    litMean: lit / Math.max(1, terrain),
+  };
 }
 
 /**
@@ -844,18 +1053,7 @@ export async function checkShadowCascades(
     }
     // The receiver's read as drawn, then the same draws at w = 0, before any other draws the set.
     const shadowed = await texelsOf(engine, "cascades: shadowed", view, frame.draws);
-    const unshadowed: DrawItem[] = [];
-    for (const draw of frame.draws) {
-      const axis = draw.uniforms["cascadeViewAxis"] ?? new Float32Array(4);
-      unshadowed.push({
-        ...draw,
-        uniforms: {
-          ...draw.uniforms,
-          cascadeViewAxis: Float32Array.of(axis[0] ?? 0, axis[1] ?? 0, axis[2] ?? 0, 0),
-        },
-      });
-    }
-    const open = await texelsOf(engine, "cascades: w = 0", view, unshadowed);
+    const open = await texelsOf(engine, "cascades: w = 0", view, atNoWeight(frame.draws));
     const finite = shadowed.every(Number.isFinite) && open.every(Number.isFinite);
     const seen = againstUnshadowed(shadowed, open);
     const target = shadows.target;
@@ -919,7 +1117,7 @@ export async function checkShadowCascades(
     const exact = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
     const exactTexels = await texelsOf(engine, "cascades: stride 1", view, exact.draws, COMPARISON);
     const exactStats = made.clusterStats(passView.id);
-    made.setGeometry(SETTINGS.high.geometry);
+    made.setGeometry(EVERY_FRAME);
     const strided = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
     const stridedTexels = await texelsOf(
       engine,
@@ -954,6 +1152,123 @@ export async function checkShadowCascades(
         captureOf("r14-t1d-casters-stride-1", exactTexels, COMPARISON, scale),
         captureOf("r14-t1d-casters-at-texel", stridedTexels, COMPARISON, scale),
         maskOf("r14-t1d-terrain-mask", exactTexels, COMPARISON),
+      );
+    }
+    // R14.T6.b: the far cascades at the high setting's rate of 4 against every frame, over the same
+    // frames from the same selection and residents: the camera flown west at R05's descent's
+    // 300 m/s, and the sun setting a quarter of the holds' share of its disc a frame, so that the
+    // last frame samples cascade 2 as the first drew it, 15 m back under a sun three quarters of the
+    // share higher, and cascade 3 as the third did. Its frame at the comparison's size, with T1.c's
+    // cull as the setting has it; and its far maps against every frame's, texel by texel, with the
+    // cull off in both, which otherwise leaves the layers apart where no receiver samples them.
+    const star = light.lights[0];
+    const discRad =
+      star === undefined ? 0 : 2 * Math.asin(Math.min(1, star.radius / star.distance));
+    const stepRad = (FAR_CASCADE_SUN_SHARE * discRad) / 4;
+    const { east, north } = frameOverCentre();
+    const headingRad = (CASCADES_HEADING_DEG * Math.PI) / 180;
+    const ahead = along(north, Math.cos(headingRad), east, Math.sin(headingRad));
+    const fly = async (
+      geometry: GeometrySettings,
+      read: "frame" | "far maps",
+    ): Promise<{
+      readonly layers: number[][];
+      readonly triangles: number[];
+      readonly shadowed: Float32Array | null;
+      readonly open: Float32Array | null;
+      readonly far: readonly [FarMap, FarMap] | null;
+    }> => {
+      made.setGeometry(geometry);
+      const flownLayers: number[][] = [];
+      const triangles: number[] = [];
+      let at = view;
+      let lastDraws: ReadonlyArray<DrawItem> = [];
+      for (let k = 0; k < FLIGHT_FRAMES; k += 1) {
+        at = viewFrom(
+          along(view.cameraM, 1, ahead, FLIGHT_STEP_M * k),
+          CASCADES_DEPRESSION_DEG,
+          CASCADES_HEADING_DEG,
+        );
+        const sampled = made.clusterStats(passView.id);
+        const flown = made.drawFor(
+          passView.id,
+          frameInput(at, lighting(CASCADES_SUN_RAD - k * stepRad), true, performance.now()),
+        );
+        flownLayers.push((flown.cascades?.passes ?? []).map((each) => each.layer));
+        // The frame's own counters, read back before the next frame.
+        // oxlint-disable-next-line no-await-in-loop
+        await until(() => made.clusterStats(passView.id) !== sampled, STATS_TIMEOUT_MS);
+        const stats = made.clusterStats(passView.id);
+        triangles.push(sum(casterTriangles(flown.cascades?.litMeshCasters ?? [], stats)));
+        lastDraws = flown.draws;
+      }
+      const name = `cascades: flown at ${String(geometry.farCascadeRate)}`;
+      if (read === "frame") {
+        // The receiver's read as drawn, and then at w = 0, before the next frame writes its fields.
+        return {
+          layers: flownLayers,
+          triangles,
+          shadowed: await texelsOf(engine, name, at, lastDraws, COMPARISON),
+          open: await texelsOf(engine, `${name}, w = 0`, at, atNoWeight(lastDraws), COMPARISON),
+          far: null,
+        };
+      }
+      const uniforms = lastDraws.at(-1)?.uniforms ?? {};
+      const bits =
+        target === null ? [] : await layerBits(engine, target.depth, [2, 3], target.sizePx);
+      const mapOf = (n: 0 | 1): FarMap => ({
+        light: Float32Array.from(uniforms[`cascadeLight${String(n + 2)}`] ?? []),
+        depth: new Float32Array(bits[n] ?? new ArrayBuffer(0)),
+      });
+      return {
+        layers: flownLayers,
+        triangles,
+        shadowed: null,
+        open: null,
+        far: [mapOf(0), mapOf(1)],
+      };
+    };
+    const everyFrame = await fly(EVERY_FRAME, "frame");
+    const atFour = await fly(SETTINGS.high.geometry, "frame");
+    const everyFrameMaps = await fly({ ...EVERY_FRAME, casterDepthCull: false }, "far maps");
+    const atFourMaps = await fly({ ...SETTINGS.high.geometry, casterDepthCull: false }, "far maps");
+    made.setGeometry(SETTINGS.high.geometry);
+    const everyShadowed = everyFrame.shadowed ?? new Float32Array(0);
+    const fourShadowed = atFour.shadowed ?? new Float32Array(0);
+    const edges = stopsApart(everyShadowed, fourShadowed);
+    const edgeShare = edges.within / Math.max(1, edges.terrain);
+    const acneEvery = shadowShare(everyShadowed, everyFrame.open ?? new Float32Array(0));
+    const acneAtFour = shadowShare(fourShadowed, atFour.open ?? new Float32Array(0));
+    const cascadeSize = shadows.target?.sizePx ?? 0;
+    const within = ([0, 1] as const).map((n) => {
+      const fresh = everyFrameMaps.far?.[n];
+      const kept = atFourMaps.far?.[n];
+      return fresh === undefined || kept === undefined
+        ? { compared: 0, found: 0 }
+        : heldWithinTexel(fresh, kept, cascadeSize);
+    });
+    const withinShare = within.map(({ compared, found }) => found / Math.max(1, compared));
+    const trianglesOf = (triangles: ReadonlyArray<number>): string =>
+      `${triangles.join(", ")} (${String(sum(triangles))})`;
+    checks.check(
+      "R14.T6.b the far cascades at a rate of 4 render 4, 2, 3 and 2 passes over the descent's speed and a setting sun, hold every surface of every frame's far maps within one of their texels, and shadow the frame within a third of a stop of every frame's at 99.5% of its terrain texels, its acne unchanged",
+      layersAt(everyFrame.layers) === "0123 0123 0123 0123" &&
+        layersAt(atFour.layers) === "0123 01 013 01" &&
+        layersAt(atFourMaps.layers) === "0123 01 013 01" &&
+        within.every(({ compared }) => compared > FAR_MAP_COMPARED_LEAST) &&
+        withinShare.every((each) => each >= FAR_MAP_WITHIN_SHARE) &&
+        edges.terrain > 0.3 * COMPARISON.widthPx * COMPARISON.heightPx &&
+        edgeShare >= 0.995 &&
+        Math.abs(acneAtFour.darker - acneEvery.darker) <= ACNE_SHARE_TOLERANCE &&
+        Math.abs(acneAtFour.litMean - acneEvery.litMean) <= ACNE_SHARE_TOLERANCE,
+      `${path}; layers by frame ${layersAt(atFour.layers)} at 4, ${layersAt(everyFrame.layers)} every frame; the camera ${String(FLIGHT_STEP_M)} m a frame, the sun ${(stepRad * 1e6).toFixed(1)} µrad a frame; far maps held within a texel: cascade 2 ${String(within[0]?.found)} of ${String(within[0]?.compared)} texels, cascade 3 ${String(within[1]?.found)} of ${String(within[1]?.compared)}; caster triangles by frame ${trianglesOf(atFour.triangles)} at 4, ${trianglesOf(everyFrame.triangles)} every frame; ${String(edges.terrain)} terrain texels, ${String(edges.differing)} differing, ${(100 * edgeShare).toFixed(2)}% within a third of a stop, the largest ${edges.largestStops.toFixed(3)} stops; darker than at w = 0 ${String(acneAtFour.darkerTexels)} texels at 4 and ${String(acneEvery.darkerTexels)} every frame, mean lit fraction ${acneAtFour.litMean.toFixed(6)} and ${acneEvery.litMean.toFixed(6)}; digests ${bytesDigest(everyShadowed)}, ${bytesDigest(fourShadowed)}`,
+    );
+    if (captures) {
+      const scale = captureScale(everyShadowed);
+      images.push(
+        captureOf("r14-t6b-every-frame", everyShadowed, COMPARISON, scale),
+        captureOf("r14-t6b-far-at-4", fourShadowed, COMPARISON, scale),
+        maskOf("r14-t6b-terrain-mask", everyShadowed, COMPARISON),
       );
     }
     made.dispose();

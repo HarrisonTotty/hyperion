@@ -203,7 +203,14 @@ import {
   type CascadeUniforms,
   packCascadeUniforms,
 } from "./shadows/cascadeShadow";
-import { type CascadeSet, discTopDirection, fitCascades } from "./shadows/cascades";
+import {
+  type CascadeInput,
+  type CascadeSet,
+  discTopDirection,
+  FarCascadeHolds,
+  type FarCascadePlan,
+  fitCascades,
+} from "./shadows/cascades";
 import { TerrainShadows } from "./shadows/terrainShadows";
 import { SHADOW_CASCADES_TEXTURE, type TerrainLighting } from "./terrainMaterial";
 import { CONTOUR_PX, contourPhase, type GraticulePatch, graticulePatch } from "./terrainWire";
@@ -435,10 +442,19 @@ export interface TerrainCascadeFrame {
   /** The view's four cascades this frame (R10.T9.a's `fitCascades`), with their weight w. */
   readonly set: CascadeSet;
   /**
-   * The caster passes rendered into the set this frame, one a cascade, nearest first, each the
-   * terrain's draw of the view's records in that cascade (where it has any) and then the other
+   * The cascades the frame's receivers sample (plan R14, R14.T6.b): `set`, with each far cascade it
+   * holds from an earlier frame as that frame drew it (`heldCascadeFor`); a receiver that is not
+   * the terrain's samples the layers through these, not through `set`.
+   */
+  readonly received: CascadeSet;
+  /**
+   * The caster passes rendered into the set this frame, one a cascade rendered, nearest first, each
+   * the terrain's draw of the view's records in that cascade (where it has any) and then the other
    * casters' ({@link TerrainShadows.casters}); none at w = 0, before the caster material is
-   * compiled, or with no draw of the view's terrain, when the lit draw samples nothing.
+   * compiled, or with no draw of the view's terrain, when the lit draw samples nothing. A far
+   * cascade the frame holds from an earlier one has none (plan R14, R14.T6.b;
+   * `GeometrySettings.farCascadeRate`), so that at a rate of 4 a held view's frames render 4, 2, 3,
+   * 2, 3… passes.
    */
   readonly passes: ReadonlyArray<DepthLayerPass>;
   /**
@@ -900,6 +916,13 @@ interface ViewState {
    * cascades (decision-r10-t9b-design D6(d)).
    */
   centres: readonly [Vec3, Vec3, Vec3, Vec3] | null;
+  /**
+   * Its far cascades' holds (plan R14, R14.T6.b), cut wherever its centres are dropped, at a change
+   * of the geometry settings and after a frame that renders no cascades; and this frame's plan of
+   * them, `null` in a frame without cascades.
+   */
+  readonly farHolds: FarCascadeHolds;
+  farPlan: FarCascadePlan | null;
   /** The draw set's index of each of this frame's instance records, in their order (R10.T9.b). */
   readonly drawn: number[];
   /** Its last frame's patches and casters, for its counts (plan R14; {@link TerrainPass.counts}). */
@@ -1058,6 +1081,14 @@ const NO_FORMS: LitForms = { edge: null, interior: null, cluster: null };
 
 /** The cascades' indices, nearest first. */
 const CASCADES: readonly [CascadeIndex, CascadeIndex, CascadeIndex, CascadeIndex] = [0, 1, 2, 3];
+
+/** Every cascade rendered, as a frame without a plan of its far cascades renders them. */
+const ALL_CASCADES_RENDERED: readonly [boolean, boolean, boolean, boolean] = [
+  true,
+  true,
+  true,
+  true,
+];
 
 /**
  * The horizon map's texel at the camera's nadir, m, as the cascades' weight compares cascade 1's
@@ -1481,6 +1512,10 @@ export class TerrainPass {
    */
   setGeometry(geometry: GeometrySettings): void {
     this.#geometry = geometry;
+    // A change of the settings is a cut of the far cascades' holds (plan R14, R14.T6.b).
+    for (const state of this.#views.values()) {
+      state.farHolds.cut();
+    }
   }
 
   /**
@@ -2126,9 +2161,10 @@ export class TerrainPass {
    * @remarks
    * Where the view's body takes its shadow cascades on the high setting
    * ({@link TerrainFrameInput.takesCascades}; R10.T9.b), it fits them, and where their weight is
-   * above 0 and its draw is made it renders their four caster passes into the one set before it
-   * returns: render this view's draw, in the bodies pass that follows, before another view's
-   * `drawFor` draws its own cascades into the set.
+   * above 0 and its draw is made it renders their caster passes into the one set before it
+   * returns, all four or, where it holds a far cascade from an earlier frame (plan R14, R14.T6.b),
+   * those it does not hold: render this view's draw, in the bodies pass that follows, before
+   * another view's `drawFor` draws its own cascades into the set.
    *
    * @throws RangeError if more contacts are given than the contact buffer holds.
    */
@@ -2140,6 +2176,8 @@ export class TerrainPass {
       if (state !== undefined) {
         // This pass took no cascades of the view this frame (decision-r10-t9b-design D6(d)).
         state.centres = null;
+        state.farHolds.cut();
+        state.farPlan = null;
       }
       return {
         draws: NO_DRAWS,
@@ -2174,6 +2212,10 @@ export class TerrainPass {
           count > 0),
     };
     const annunciation = state.debounce.update(conditions, input.nowMs);
+    if (cast.passes.length === 0) {
+      // A frame that renders no cascades is a cut of the far cascades' holds (plan R14, R14.T6.b).
+      state.farHolds.cut();
+    }
     state.lastPatches = patches;
     state.lastCasters = set === null ? null : cast;
     state.lastOverlayPass = overlayPass;
@@ -2189,7 +2231,7 @@ export class TerrainPass {
       // A draw a loss refused at its making withholds the mask, whatever it would have drawn.
       maskReady:
         !missing && !refused && (draws.length > 0 || count === 0) && !this.#seesCodeZeroOpen(mask),
-      cascades: set === null ? null : { set, ...cast },
+      cascades: set === null ? null : { set, received: state.farPlan?.received ?? set, ...cast },
       overlayDepth,
     };
   }
@@ -2221,6 +2263,7 @@ export class TerrainPass {
   #cascadesFor(state: ViewState, input: TerrainViewFrameInput): CascadeSet | null {
     const previous = state.centres;
     state.centres = null;
+    state.farPlan = null;
     const star = input.lighting?.lights[0];
     if (
       this.#shading !== "lit" ||
@@ -2244,10 +2287,12 @@ export class TerrainPass {
     const relief = this.#reliefM();
     const camera = rotateToBodyFixed(rotation, cameraM);
     const planet = this.#planet;
+    const geometry = this.#geometry;
+    let fit: CascadeInput;
     let set: CascadeSet;
     try {
       const under = heldGroundUnder(planet.figure, this.#heights)(camera);
-      set = fitCascades({
+      fit = {
         cameraBodyFixedM: camera,
         orientationBodyFixed: multiply(conjugate(quaternionFromRows(rotation.rows)), orientation),
         rotation,
@@ -2261,7 +2306,10 @@ export class TerrainPass {
         horizonTexelM: cascadeHorizonTexelM(planet, state.morph, under.heightM),
         depthClipControl: this.#engine.capabilities.depthClipControl,
         ...(previous === null ? {} : { previousCentresBodyFixedM: previous }),
-      });
+        // Unread by the way back, as every lever (plan R14, R14.T6.b).
+        farCascadeRate: geometry.clusterPath ? geometry.farCascadeRate : 1,
+      };
+      set = fitCascades(fit);
     } catch (error: unknown) {
       // The fit refuses what it cannot fit, a camera not finite, say: no cascades this frame.
       if (error instanceof RangeError) {
@@ -2276,6 +2324,16 @@ export class TerrainPass {
       c2.centreBodyFixedM,
       c3.centreBodyFixedM,
     ];
+    const shadows = this.#shadows;
+    const owner = state.farHolds;
+    state.farPlan = owner.plan({
+      input: fit,
+      set,
+      sunAngularRadiusRad: rhoRad,
+      depthCull: geometry.casterDepthCull,
+      holdable: shadows.casters.size === 0,
+      kept: (index) => shadows.holds(owner, index),
+    });
     return set;
   }
 
@@ -2837,6 +2895,8 @@ export class TerrainPass {
       litUniforms: { bodyRotation, cameraBodyFixedM, atlas, ...cascadeUniforms() },
       casterUniforms: { bodyRotation, cameraBodyFixedM, atlas },
       centres: null,
+      farHolds: new FarCascadeHolds(),
+      farPlan: null,
       drawn: [],
       lastPatches: NO_PATCHES,
       lastCasters: null,
@@ -3567,7 +3627,12 @@ export class TerrainPass {
       shadows.cascadeTarget() !== null
         ? cascades
         : null;
-    packCascadeUniforms(live, viewAxisOf(input.view.orientation), state.litUniforms);
+    // The receivers sample each far cascade the frame holds as its own frame drew it (R14.T6.b).
+    packCascadeUniforms(
+      live === null ? null : (state.farPlan?.received ?? live),
+      viewAxisOf(input.view.orientation),
+      state.litUniforms,
+    );
     if (table === null || atmosphere === null || material === null) {
       return { draws: NO_DRAWS, live: null };
     }
@@ -3628,7 +3693,7 @@ export class TerrainPass {
 
   /**
    * Draws view `state`'s casters into each of `set`'s cascades (plan R10, R10.T9.b;
-   * decision-r10-t9b-design D4), one pass a cascade, and returns the passes.
+   * decision-r10-t9b-design D4), one pass a cascade rendered, and returns the passes.
    *
    * @remarks
    * Each cascade's casters are the view's own records this frame whose patch's bounding sphere (the
@@ -3639,9 +3704,9 @@ export class TerrainPass {
    * cascade and drawn with a direct instance count, through the caster material, the lit mesh and
    * the view's storage and `Draw` values. Each pass, into the cascade's layer with its light
    * rotation and projection, draws the terrain's draws, where it has casters, and then the other
-   * casters' ({@link TerrainShadows.casters}); every pass is drawn, clearing its layer, so that no
-   * other view's casts remain in it. The set renders them under the view's name, each a submission
-   * of its own, before this returns.
+   * casters' ({@link TerrainShadows.casters}); every rendered pass is drawn, clearing its layer,
+   * so that no other view's casts remain in it. The set renders them under the view's name, each a
+   * submission of its own, before this returns.
    *
    * On the cluster path (plan R14, R14.T1.b; `GeometrySettings.clusterPath`), the interior
    * patches' records cast from the interior draw's own buffer: each takes, as its cull input, the
@@ -3662,6 +3727,10 @@ export class TerrainPass {
    * into each cascade at the coarsest stride s, up to the cap, with s times its level's largest
    * vertex spacing within the cascade's texel, every cluster of the patch at the one stride, so
    * that no crack opens inside it; the skirts close the rest. The lit image moves by that bound.
+   *
+   * A far cascade the view's plan holds (plan R14, R14.T6.b; {@link FarCascadeHolds}) takes no
+   * caster, no cull pass and no pass, and keeps its layer; the set records the view as each drawn
+   * layer's owner, and the plan is committed.
    */
   #drawCasters(
     device: Device,
@@ -3695,6 +3764,9 @@ export class TerrainPass {
     }
     // The interior patches cast through the cluster path where its caster is made.
     const clustered = clusters !== null && clusters.casterBase !== null;
+    // A far cascade the frame holds casts nothing and is not drawn (plan R14, R14.T6.b).
+    const plan = state.farPlan;
+    const rendered = plan?.rendered ?? ALL_CASCADES_RENDERED;
     // Each patch's centre less the camera, body-fixed, in `f64`, as the fit placed the cascades.
     const camera = rotateToBodyFixed(input.view.rotation, input.view.cameraM);
     // T1.c's receivers' cull of each patch, in the same body-fixed frame: a stand-in's sub-patch is
@@ -3719,6 +3791,7 @@ export class TerrainPass {
           const culled = entry?.standIn === true ? null : receivers;
           for (const index of CASCADES) {
             if (
+              rendered[index] &&
               castsInto(set, index, fromCamera, patch.boundingRadiusM) &&
               (culled === null ||
                 !receiversRefuse(culled[index], viewAxis, fromCamera, patch.boundingRadiusM))
@@ -3750,7 +3823,7 @@ export class TerrainPass {
     }
     const items = casters.items;
     const casterBase = clustered ? clusters.casterBase : null;
-    const passes = CASCADES.map((index): DepthLayerPass => {
+    const passes = CASCADES.filter((index) => rendered[index]).map((index): DepthLayerPass => {
       const records = casters.records[index];
       resources.writeCasters(state.id, index, records);
       const cascade = set.cascades[index];
@@ -3775,7 +3848,10 @@ export class TerrainPass {
         draws: [...terrain, ...others],
       };
     });
-    target.render(state.id, passes);
+    shadows.renderCasters(state.farHolds, state.id, passes);
+    if (plan !== null) {
+      state.farHolds.commit(plan);
+    }
     const [a, b, c, d] = casters.records;
     return { passes, litMeshCasters: [a.count, b.count, c.count, d.count], clustered };
   }
@@ -3945,6 +4021,8 @@ export class TerrainPass {
     });
     const viewAxis = viewAxisOf(input.view.orientation);
     const { casterStrideCap, casterDepthCull } = this.#geometry;
+    // A far cascade the frame holds takes no pass (plan R14, R14.T6.b).
+    const rendered = state.farPlan?.rendered ?? ALL_CASCADES_RENDERED;
     const cascades: ReadonlyArray<CullPass | null> =
       set === null
         ? [null, null, null, null]
@@ -3954,7 +4032,7 @@ export class TerrainPass {
             viewAxis,
             casterStrideCap,
             casterDepthCull,
-          );
+          ).map((pass, index) => (rendered[index] === true ? pass : null));
     const passes: Array<CullPass | null> = [
       ...cascades,
       clusters.overlay ? this.#overlayCullPass(input) : null,

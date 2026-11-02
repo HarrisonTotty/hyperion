@@ -70,6 +70,12 @@
  *   subtends about 2.0° and its penumbra there is about 34 cm, four texels. The filter does not
  *   follow ρ (decision-r10-t9b-penumbra): beyond some 38 m the penumbra is the horizon map's, which
  *   the top-edge fit leaves whole.
+ * - **The far cascades' rate** (plan R14, R14.T6.b; {@link FarCascadeHolds}): at a rate above 1,
+ *   cascades 2 and 3 are re-rendered every second or fourth frame, on alternate halves of the
+ *   period, and held between while the sun turns less than {@link FAR_CASCADE_SUN_SHARE} of its
+ *   disc and the view's slice stays inside the held map. A held map is body-fixed, so its receiver
+ *   takes its own frame's light matrices formed again in `f64` for the camera's displacement since
+ *   and the body's rotation now ({@link heldCascadeFor}), narrowed once.
  */
 
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3 } from "../../../geometry/vec3";
@@ -224,6 +230,53 @@ export const CASCADE_DEPTH_BIAS: CascadeDepthBias = {
   slopeScale: 1,
   clamp: 0,
 };
+
+/**
+ * The far cascades' rate (plan R14, R14.T6.b), frames: at 2 or 4, cascades 2 and 3 (nearest first
+ * from 0) are re-rendered every second or fourth frame, on alternate halves of the period, and
+ * held between ({@link FarCascadeHolds}); at 1 all four are rendered every frame, the way back.
+ */
+export type FarCascadeRate = 1 | 2 | 4;
+
+/** The first of the cascades a rate above 1 holds: cascade 2, so that 2 and 3 are held. */
+const FIRST_FAR_CASCADE = 2;
+
+/**
+ * The share of its slice's sphere's radius a far cascade is fitted beyond it at a rate above 1,
+ * and so the slack its holds allow (plan R14, R14.T6.b): 1/16, a lean.
+ *
+ * @remarks
+ * Cascade 2's sphere at h ≤ 100 m is 332 m in radius for a 60°, 16:9 view (its slice 261–501 m of
+ * the 2 km range), so its slack is 20.7 m: R05's descent's 300 m/s, 5 m a frame at 60 Hz, holds it
+ * the three frames a rate of 4 asks with the {@link FAR_CASCADE_COVER_TEXELS} beside them. Its
+ * texel, normal offset and depth range grow by the same 6.25%.
+ */
+export const FAR_CASCADE_HOLD_MARGIN = 1 / 16;
+
+/**
+ * The share of its disc's angular diameter, 2ρ, the fitted sun may turn through in the body-fixed
+ * axes since a far cascade was rendered and still hold it (plan R14, R14.T6.b): 1/32, a lean.
+ *
+ * @remarks
+ * A caster D along the light from its receiver moves its shadow by D times the turn, so for the
+ * Sun's 9.30 mrad disc (0.533°, this module's remarks) the share's 0.29 mrad moves the shadow of a
+ * caster within the cascade's diameter, 2,048 texels, by at most 0.60 texel. The sun turns about
+ * 1.2 µrad a frame on an Earth at 1 s/s and 60 Hz (its rotation's 7.292115 × 10⁻⁵ rad/s, IERS
+ * Conventions 2010, Table 1.1) and about 72 µrad on `TERRAIN TEST` at 60 s/s (the grid's 0.074
+ * texel a frame, this module's remarks), so a rate of 4's three frames held stay inside it on
+ * both, the second at 75% of it. A terrain caster farther along the light, up to the caster reach,
+ * moves its shadow further, by the same share of its penumbra: as the fit is to the disc's top
+ * edge, the lag moves the cascades' edge at most 1/32 of the way into the horizon map's penumbra,
+ * where the direct light is m ≤ 1/32 of full, or back into its umbra.
+ */
+export const FAR_CASCADE_SUN_SHARE = 1 / 32;
+
+/**
+ * The texels a held cascade's map must reach beyond the view's slice's sphere now (plan R14,
+ * R14.T6.b): 4, the filter's footprint of 2 (`cascadeShadow.wgsl`'s `CASCADE_FOOTPRINT_TEXELS`),
+ * the normal offset's {@link NORMAL_OFFSET_TEXELS} and half a texel of snapping.
+ */
+export const FAR_CASCADE_COVER_TEXELS = 4;
 
 /** Throws a {@link RangeError} naming `name` unless `value` is finite. */
 function requireFinite(name: string, value: number): void {
@@ -733,6 +786,12 @@ export interface CascadeInput {
    * the grid's sub-texel phase, which snapping exists to hide.
    */
   readonly previousCentresBodyFixedM?: readonly [Vec3, Vec3, Vec3, Vec3];
+  /**
+   * The far cascades' rate (plan R14, R14.T6.b; {@link FarCascadeHolds}); 1 by default. Above 1,
+   * cascades 2 and 3 are fitted {@link FAR_CASCADE_HOLD_MARGIN} beyond their slices and carry that
+   * as their {@link Cascade.holdSlackM}, so that a frame after theirs may sample them.
+   */
+  readonly farCascadeRate?: FarCascadeRate;
 }
 
 /** One cascade: its slice, its sphere, its texel and its light matrices. */
@@ -760,6 +819,13 @@ export interface Cascade {
   readonly depthNearM: number;
   /** The far plane's distance away from the sun from the centre, m: r. */
   readonly depthFarM: number;
+  /**
+   * σ, how far its receivers may move along the view axis between its render and a later frame
+   * that samples it, m (plan R14, R14.T6.b): {@link FAR_CASCADE_HOLD_MARGIN} of its slice's sphere's
+   * radius for cascades 2 and 3 at a rate above 1, which are fitted that far beyond their slices;
+   * 0 for a cascade rendered every frame. T1.c's receivers' cull widens its depths by it.
+   */
+  readonly holdSlackM: number;
   /** The caster pass's view rotation: non-rotating axes to the light's, translation zero. */
   readonly viewRotation: Float32Array;
   /** The caster pass's projection: reversed orthographic, its translation the centre's offset. */
@@ -895,8 +961,11 @@ function splitAt(splitsM: Float64Array, index: number): number {
  * rotation, which enters only the view rotation. Δh is the larger of the relief range and the
  * caster height. Every use of the sun here (the light's axes, the elevation, the caster reach and
  * the near plane) takes {@link CascadeInput.sunDirectionBodyFixed} as given, which the pass raises
- * to the disc's top edge ({@link discTopDirection}). The outputs depend on the inputs alone,
- * whatever the order of calls.
+ * to the disc's top edge ({@link discTopDirection}). At a far-cascade rate above 1
+ * ({@link CascadeInput.farCascadeRate}), cascades 2 and 3 take {@link FAR_CASCADE_HOLD_MARGIN}
+ * more radius, and their texels, normal offsets and depths follow it; at 1 the fit is the one
+ * before plan R14's T6.b, bit for bit. The outputs depend on the inputs alone, whatever the order
+ * of calls.
  *
  * @throws RangeError for a non-finite input other than an infinite far plane; a sun or datum
  * normal of zero length; a field of view outside (0, π); an aspect, near plane, body radius or
@@ -916,11 +985,16 @@ export function fitCascades(input: CascadeInput): CascadeSet {
   const camera = input.cameraBodyFixedM;
   const forward = viewAxis(input.orientationBodyFixed);
   const origins = input.previousCentresBodyFixedM ?? latticeOrigins(camera, splitsM, t2);
+  const held = (input.farCascadeRate ?? 1) > 1;
 
   const fit = (index: CascadeIndex): Cascade => {
     const nearM = splitAt(splitsM, index);
     const farM = splitAt(splitsM, index + 1);
-    const { distanceM, radiusM } = sliceSphere(nearM, farM, t2);
+    const slice = sliceSphere(nearM, farM, t2);
+    const { distanceM } = slice;
+    const holdSlackM =
+      held && index >= FIRST_FAR_CASCADE ? FAR_CASCADE_HOLD_MARGIN * slice.radiusM : 0;
+    const radiusM = slice.radiusM + holdSlackM;
     const texelM = (2 * radiusM) / CASCADE_SIZE_PX;
     const origin = origins[index];
     // c − P: the unsnapped centre from its origin, body-fixed, small where P is the last frame's.
@@ -958,6 +1032,7 @@ export function fitCascades(input: CascadeInput): CascadeSet {
       normalOffsetM: NORMAL_OFFSET_TEXELS * texelM,
       depthNearM,
       depthFarM: radiusM,
+      holdSlackM,
       viewRotation: Float32Array.from(matrices.viewRotation),
       projection: Float32Array.from(matrices.projection),
       lightFromCamera: Float32Array.from(matrices.lightFromCamera),
@@ -976,4 +1051,316 @@ export function fitCascades(input: CascadeInput): CascadeSet {
     basis,
     cascades,
   };
+}
+
+/**
+ * Whether cascade `index` is due to be rendered at a view's `frame`-th frame since its last cut, at
+ * `rate` (plan R14, R14.T6.b): the near two every frame, cascade 2 at frames 0, `rate`, 2 `rate`…
+ * and cascade 3 half a period after it, so that at 4 the frames render 4, 2, 3, 2, 3… cascades
+ * where every hold keeps.
+ *
+ * @param frame - The view's frames since its last cut, 0 or more.
+ */
+export function farCascadeDue(index: CascadeIndex, frame: number, rate: FarCascadeRate): boolean {
+  if (rate === 1 || index < FIRST_FAR_CASCADE) {
+    return true;
+  }
+  return frame % rate === (index === FIRST_FAR_CASCADE ? 0 : rate / 2);
+}
+
+/** A far cascade as its frame rendered it (plan R14, R14.T6.b), for the frames that hold it. */
+export interface HeldCascade {
+  /** The cascade as that frame's fit gave it and its pass drew it. */
+  readonly cascade: Cascade;
+  /** That frame's light axes, body-fixed. */
+  readonly basis: LightBasis;
+  /** That frame's camera less the body's centre, body-fixed, m (`f64`). */
+  readonly cameraBodyFixedM: Vec3;
+  /** That frame's view axis, body-fixed, unit. */
+  readonly viewAxisBodyFixed: Vec3;
+  /** Whether its casters took T1.c's receivers' cull (`GeometrySettings.casterDepthCull`). */
+  readonly depthCull: boolean;
+}
+
+/** One frame of a view's far cascades, as {@link FarCascadeHolds} plans it (plan R14, R14.T6.b). */
+export interface FarCascadeFrame {
+  /** The frame's fit's input, its {@link CascadeInput.farCascadeRate} the rate. */
+  readonly input: CascadeInput;
+  /** {@link fitCascades} of `input`. */
+  readonly set: CascadeSet;
+  /** ρ, star 0's angular radius, rad, 0 or more. */
+  readonly sunAngularRadiusRad: number;
+  /** Whether the frame's casters take T1.c's receivers' cull (`GeometrySettings.casterDepthCull`). */
+  readonly depthCull: boolean;
+  /**
+   * Whether it may keep a held cascade at all: not where casters that are not terrain cast, whose
+   * moves a held cascade would not show (a lean).
+   */
+  readonly holdable: boolean;
+  /**
+   * Whether layer `index` still holds what this view last rendered into it: no other view or pass
+   * has rendered it since, nor was the set made again (`TerrainShadows.holds`).
+   */
+  readonly kept: (index: CascadeIndex) => boolean;
+}
+
+/** What one frame of a view does with its cascades (plan R14, R14.T6.b). */
+export interface FarCascadePlan {
+  /**
+   * The set its receivers sample: the fit's, each held cascade formed again for this frame
+   * ({@link heldCascadeFor}); the fit's own where it holds none.
+   */
+  readonly received: CascadeSet;
+  /** Whether each cascade is rendered this frame, nearest first: the near two always. */
+  readonly rendered: readonly [boolean, boolean, boolean, boolean];
+  /** The frame it was planned for. */
+  readonly frame: FarCascadeFrame;
+}
+
+/** The angle between two unit vectors, rad, by atan2 so that it keeps its precision near 0. */
+function angleBetween(a: Vec3, b: Vec3): number {
+  return Math.atan2(norm(cross(a, b)), dot(a, b));
+}
+
+/**
+ * Whether `held`, cascade `index` as an earlier frame rendered it, may be sampled in `frame`
+ * instead of rendered again (plan R14, R14.T6.b): where it was fitted with a slack
+ * ({@link Cascade.holdSlackM}), and
+ *
+ * - the fitted sun has turned from its frame's by at most {@link FAR_CASCADE_SUN_SHARE} of the
+ *   disc's angular diameter 2ρ;
+ * - the view's slice's sphere now, centred on the view axis and unsnapped ({@link sliceSphere}),
+ *   lies inside the held sphere less {@link FAR_CASCADE_COVER_TEXELS} of its texels, so that every
+ *   receiver of the slice, with its offset and footprint, falls inside the held map, as inside the
+ *   map it would be rendered into now;
+ * - where its casters took T1.c's receivers' cull, its receivers' view depths have moved by at most
+ *   its slack: |ΔC| + ρ |Δv| + |ΔC₍ᵢ₊₁₎| ≤ σ, ΔC the camera's displacement since, Δv its view
+ *   axis's, ρ = C₍ᵢ₊₁₎ √(1 + t²) the farthest a receiver that samples the cascade stands from the
+ *   camera, and ΔC₍ᵢ₊₁₎ the slice's far end's change. A receiver at R moves in view depth by
+ *   (R − C)·Δv + ΔC·v, so the cull, its depths widened by σ, refuses no caster a receiver now reads.
+ *
+ * @remarks
+ * Everything is body-fixed and `f64`. The held map is a body-fixed picture of its frame's casters
+ * under its frame's sun, which neither the camera's motion nor the body's rotation moves: only the
+ * sun's turn, the casters' morph with the camera's distance, and the draw set's changes since,
+ * each bounded, differ from the map rendered now.
+ */
+export function holdsFarCascade(
+  held: HeldCascade,
+  frame: FarCascadeFrame,
+  index: CascadeIndex,
+): boolean {
+  const kept = held.cascade;
+  if (!(kept.holdSlackM > 0)) {
+    return false;
+  }
+  const { input, set } = frame;
+  if (
+    !(
+      angleBetween(held.basis.z, set.basis.z) <=
+      FAR_CASCADE_SUN_SHARE * 2 * frame.sunAngularRadiusRad
+    )
+  ) {
+    return false;
+  }
+  const fitted = set.cascades[index];
+  const t2 = halfDiagonalTanSquared(input.fovXRad, input.aspect);
+  const slice = sliceSphere(fitted.nearM, fitted.farM, t2);
+  const forward = viewAxis(input.orientationBodyFixed);
+  const centre = add(input.cameraBodyFixedM, scale(forward, slice.distanceM));
+  const offM = norm(sub(centre, kept.centreBodyFixedM));
+  if (!(offM + slice.radiusM + FAR_CASCADE_COVER_TEXELS * kept.texelM <= kept.radiusM)) {
+    return false;
+  }
+  if (!held.depthCull) {
+    return true;
+  }
+  const movedM = norm(sub(input.cameraBodyFixedM, held.cameraBodyFixedM));
+  const turned = norm(sub(forward, held.viewAxisBodyFixed));
+  const driftM =
+    movedM + fitted.farM * Math.sqrt(1 + t2) * turned + Math.abs(fitted.farM - kept.farM);
+  return driftM <= kept.holdSlackM;
+}
+
+/**
+ * `held`, an earlier frame's cascade, as this frame's receivers sample it (plan R14, R14.T6.b):
+ * its own light axes, sphere, texel, normal offset and depths, its snapped centre less the camera
+ * translated by the camera's displacement since in `f64`, its matrices formed again in `f64` with
+ * the body's rotation now and narrowed once ({@link cascadeMatricesF64}), and this frame's split
+ * ends and fade start from `fitted`, the fit's own cascade, so that the receivers choose it by d as
+ * they choose the others.
+ *
+ * @remarks
+ * The held map holds x_L·(X − P) of each body-fixed caster X, x_L and P its frame's axis and
+ * centre, through its frame's matrices and rotation. Formed again, a receiver X drawn now at
+ * R (X − C), R the rotation now and C the camera, maps to x_L·(X − C) − x_L·(P − C), the same
+ * place, whatever the body has turned through since. Its own frame's `lightFromCamera`, which holds
+ * that frame's rotation, translated by the camera's displacement in the non-rotating axes would
+ * place it off by the body's turn since, some ω R Δt for a camera that keeps its place on the
+ * ground (31 m on an Earth across four frames at 60 Hz).
+ *
+ * @param cameraBodyFixedM - The camera less the body's centre now, body-fixed, m (`f64`).
+ * @param rotation - The body's rotation now, body-fixed into its non-rotating axes.
+ */
+export function heldCascadeFor(
+  held: HeldCascade,
+  fitted: Cascade,
+  cameraBodyFixedM: Vec3,
+  rotation: Rotation3,
+): Cascade {
+  const kept = held.cascade;
+  const moved = sub(cameraBodyFixedM, held.cameraBodyFixedM);
+  const o = kept.centreFromCameraLightM;
+  const centreFromCameraLightM = {
+    x: o.x - dot(moved, held.basis.x),
+    y: o.y - dot(moved, held.basis.y),
+    z: o.z - dot(moved, held.basis.z),
+  };
+  const matrices = cascadeMatricesF64(
+    held.basis,
+    rotation,
+    centreFromCameraLightM,
+    kept.radiusM,
+    kept.depthNearM,
+    kept.depthFarM,
+  );
+  return {
+    ...kept,
+    nearM: fitted.nearM,
+    farM: fitted.farM,
+    fadeStartM: fitted.fadeStartM,
+    centreFromCameraLightM,
+    viewRotation: Float32Array.from(matrices.viewRotation),
+    projection: Float32Array.from(matrices.projection),
+    lightFromCamera: Float32Array.from(matrices.lightFromCamera),
+  };
+}
+
+/** What a hold's frames must share, any change of which is a cut (plan R14, R14.T6.b). */
+interface FarCascadeKey {
+  readonly rate: FarCascadeRate;
+  readonly fovXRad: number;
+  readonly aspect: number;
+  readonly nearM: number;
+  readonly farM: number;
+  readonly depthClipControl: boolean;
+  readonly depthCull: boolean;
+}
+
+/** `frame`'s {@link FarCascadeKey}. */
+function keyOf(frame: FarCascadeFrame): FarCascadeKey {
+  const { input } = frame;
+  return {
+    rate: input.farCascadeRate ?? 1,
+    fovXRad: input.fovXRad,
+    aspect: input.aspect,
+    nearM: input.nearM ?? NEAR_PLANE_M,
+    farM: input.farM ?? Infinity,
+    depthClipControl: input.depthClipControl,
+    depthCull: frame.depthCull,
+  };
+}
+
+/** Whether two keys agree in every field. */
+function sameKey(a: FarCascadeKey, b: FarCascadeKey): boolean {
+  return (
+    a.rate === b.rate &&
+    a.fovXRad === b.fovXRad &&
+    a.aspect === b.aspect &&
+    a.nearM === b.nearM &&
+    a.farM === b.farM &&
+    a.depthClipControl === b.depthClipControl &&
+    a.depthCull === b.depthCull
+  );
+}
+
+/** Every cascade rendered: a frame that holds none. */
+const ALL_RENDERED: readonly [boolean, boolean, boolean, boolean] = [true, true, true, true];
+
+/**
+ * One view's far cascades at a lower rate (plan R14, R14.T6.b; Design note 12): which of its
+ * cascades a frame renders, which it holds from an earlier frame, and the set its receivers sample.
+ *
+ * @remarks
+ * A frame renders cascades 0 and 1, and each far cascade where it is due ({@link farCascadeDue}),
+ * holds none, its layer no longer holds this view's render, the frame may not hold
+ * ({@link FarCascadeFrame.holdable}), or {@link holdsFarCascade} refuses its hold; it holds the
+ * rest, and its receivers sample them as {@link heldCascadeFor} forms them. Its caller renders
+ * the cascades {@link FarCascadePlan.rendered} names and then {@link FarCascadeHolds.commit}s the
+ * plan, or cuts. A cut drops both holds and restarts the period, so that the next frame renders all
+ * four: the caller cuts at a restore, a view new to its pass, a hand-over, a change of the
+ * geometry settings and any frame that renders no cascades; a change of the rate, the field of
+ * view, the aspect, the near or far plane, `depth-clip-control` or the receivers' cull cuts by
+ * itself, so a resize cuts where it changes the aspect, and one that keeps it holds, as the fit
+ * does not depend on the resolution. At rate 1 every frame renders all four and receives the fit's
+ * own set.
+ */
+export class FarCascadeHolds {
+  /** The frames committed since the last cut. */
+  #frame = 0;
+  /** Cascades 2 and 3 as last rendered since the last cut, or `null`. */
+  #held: [HeldCascade | null, HeldCascade | null] = [null, null];
+  /** The last committed frame's key, `null` after a cut. */
+  #key: FarCascadeKey | null = null;
+
+  /** Drops both holds and restarts the period: the next frame renders all four cascades. */
+  cut(): void {
+    this.#frame = 0;
+    this.#held = [null, null];
+    this.#key = null;
+  }
+
+  /** `frame`'s plan; a frame whose key differs from the last committed frame's cuts first. */
+  plan(frame: FarCascadeFrame): FarCascadePlan {
+    const key = this.#key;
+    if (key !== null && !sameKey(key, keyOf(frame))) {
+      this.cut();
+    }
+    const rate = frame.input.farCascadeRate ?? 1;
+    const { set } = frame;
+    const [c0, c1, c2, c3] = set.cascades;
+    const receive = (index: 2 | 3, fitted: Cascade): Cascade | null => {
+      const held = this.#held[index - FIRST_FAR_CASCADE] ?? null;
+      if (
+        held === null ||
+        !frame.holdable ||
+        farCascadeDue(index, this.#frame, rate) ||
+        !frame.kept(index) ||
+        !holdsFarCascade(held, frame, index)
+      ) {
+        return null;
+      }
+      return heldCascadeFor(held, fitted, frame.input.cameraBodyFixedM, frame.input.rotation);
+    };
+    const held2 = receive(2, c2);
+    const held3 = receive(3, c3);
+    if (held2 === null && held3 === null) {
+      return { received: set, rendered: ALL_RENDERED, frame };
+    }
+    return {
+      received: { ...set, cascades: [c0, c1, held2 ?? c2, held3 ?? c3] },
+      rendered: [true, true, held2 === null, held3 === null],
+      frame,
+    };
+  }
+
+  /** Takes the far cascades `plan` rendered as held, and counts its frame. */
+  commit(plan: FarCascadePlan): void {
+    const { frame, rendered } = plan;
+    const { input, set } = frame;
+    const viewAxisBodyFixed = viewAxis(input.orientationBodyFixed);
+    for (const index of [2, 3] as const) {
+      if (rendered[index]) {
+        this.#held[index - FIRST_FAR_CASCADE] = {
+          cascade: set.cascades[index],
+          basis: set.basis,
+          cameraBodyFixedM: input.cameraBodyFixedM,
+          viewAxisBodyFixed,
+          depthCull: frame.depthCull,
+        };
+      }
+    }
+    this.#key = keyOf(frame);
+    this.#frame += 1;
+  }
 }

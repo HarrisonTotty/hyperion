@@ -293,4 +293,44 @@ describe("T1.c's receivers' cull (plan R14, R14.T1.c)", () => {
       null,
     ]);
   });
+
+  it("widens a far cascade a later frame may hold by its slack, and takes no cover below for it (R14.T6.b)", () => {
+    const up = normalise({ x: 0.3, y: -0.5, z: 0.8 });
+    const forward = normalise(cross(up, { x: 0, y: 0, z: 1 }));
+    const input = {
+      cameraBodyFixedM: scale(up, 1_737_402),
+      orientationBodyFixed: lookAlong(add(forward, scale(up, -0.3)), up),
+      rotation: rotation3FromRows(rotationRows(quaternionFromAxisAngle(up, 0.4))),
+      fovXRad: 60 * RAD,
+      aspect: 16 / 9,
+      heightAboveGroundM: 2,
+      sunDirectionBodyFixed: add(forward, scale(up, 0.4)),
+      datumNormalBodyFixed: up,
+      bodyRadiusM: 1_737_400,
+      reliefRangeM: 14_900,
+      horizonTexelM: 1,
+      depthClipControl: true,
+    };
+    const every = fitCascades(input);
+    const held = fitCascades({ ...input, farCascadeRate: 4 });
+    const s = dot(normalise(input.sunDirectionBodyFixed), forward);
+    const of = (set: CascadeSet): CullReceivers[] =>
+      ([0, 1, 2, 3] as const).map((index) => cascadeCullReceivers(set, index, s));
+    const [e0, e1, e2, e3] = of(every);
+    const [h0, h1, h2, h3] = of(held);
+    const [, , c2, c3] = held.cascades;
+    expect([h0, h1, h2?.coveredBelow, h3?.coveredBelow, h2?.depthM, h3?.depthM]).toEqual([
+      e0,
+      e1,
+      null,
+      null,
+      [held.cascades[1].fadeStartM, c2.farM + c2.holdSlackM],
+      [c2.fadeStartM, c3.farM + c3.holdSlackM],
+    ]);
+    expect([e2?.coveredBelow === null, e3?.coveredBelow === null, c2.holdSlackM > 0]).toEqual([
+      false,
+      false,
+      true,
+    ]);
+  });
 });

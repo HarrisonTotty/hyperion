@@ -5,11 +5,11 @@
  * @remarks
  * The override is `<field>=<value>[,<field>=<value>…]` over the renderer's `GeometrySettings`:
  * `clusterPath`, `casterDepthCull` and `litClusters` `true` or `false`, `casterStrideCap` 1, 2, 4 or
- * 8, and `overlayDepth` `redraw`, `scene-depth` or `cluster`. As `qualityLaunch.ts` does for the setting,
- * it rides in the renderer's own `argv` as an extra switch, `--hyperion-geometry=<override>`,
- * present only when the launch gave one, in the canonical form {@link geometryText} writes, and the
- * preload gives it to `HyperionApi.geometry`. Both sides of the hand-off use this module; it
- * imports types only, so it is safe in either bundle.
+ * 8, `overlayDepth` `redraw`, `scene-depth` or `cluster`, and `farCascadeRate` 1, 2 or 4. As
+ * `qualityLaunch.ts` does for the setting, it rides in the renderer's own `argv` as an extra
+ * switch, `--hyperion-geometry=<override>`, present only when the launch gave one, in the canonical
+ * form {@link geometryText} writes, and the preload gives it to `HyperionApi.geometry`. Both sides
+ * of the hand-off use this module; it imports types only, so it is safe in either bundle.
  */
 
 import type { GeometryOverride } from "./api";
@@ -26,6 +26,7 @@ const FIELDS = [
   "casterStrideCap",
   "overlayDepth",
   "litClusters",
+  "farCascadeRate",
 ] as const;
 
 /** A field's values, as a refusal names them. */
@@ -35,6 +36,7 @@ const VALUES: Readonly<Record<(typeof FIELDS)[number], string>> = {
   casterStrideCap: "1, 2, 4 or 8",
   overlayDepth: "redraw, scene-depth or cluster",
   litClusters: "true or false",
+  farCascadeRate: "1, 2 or 4",
 };
 
 /** The refusal of `text` as `field`'s value. */
@@ -78,6 +80,14 @@ function readField(out: OverrideBeingRead, field: (typeof FIELDS)[number], text:
       }
       out.overlayDepth = text;
       break;
+    case "farCascadeRate": {
+      const rate = text === "1" ? 1 : text === "2" ? 2 : text === "4" ? 4 : null;
+      if (rate === null) {
+        throw refused(field, text);
+      }
+      out.farCascadeRate = rate;
+      break;
+    }
   }
 }
 

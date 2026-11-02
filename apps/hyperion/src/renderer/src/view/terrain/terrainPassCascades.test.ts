@@ -4,7 +4,9 @@
  * placeholder before, the lit draw made again as the bound texture changes, each view's four caster
  * passes of its own records, culled by the cascade's light-space box and the caster reach, the
  * view's snapped centres carried and dropped, the horizon texel from the view's morph bands, the
- * other casters' draws, and no pass at w = 0, over a scripted pool and R01's counting engine.
+ * other casters' draws, and no pass at w = 0, over a scripted pool and R01's counting engine; and
+ * the far cascades at a lower rate (plan R14, R14.T6.b): held between their frames, sampled as their
+ * own frames drew them, and rendered again at every cut.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -14,9 +16,15 @@ import { add, cross, dot, norm, normalise, scale, sub, type Vec3 } from "../../g
 import { type CountingRenderEngine, countingRenderEngine } from "../../test/countingRenderEngine";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { lawFor } from "../appearance/phase";
-import { lookAlong } from "../camera/quaternion";
+import {
+  lookAlong,
+  multiply,
+  quaternionFromAxisAngle,
+  quaternionFromRows,
+  rotationRows,
+} from "../camera/quaternion";
 import type { ViewId } from "../camera/state";
-import { IDENTITY_ROTATION } from "../coords/rotation";
+import { IDENTITY_ROTATION, rotateToBody, rotation3FromRows } from "../coords/rotation";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { DepthLayerPass, DrawItem, MaterialHandle, MeshHandle } from "../engine/types";
@@ -438,6 +446,7 @@ const CLUSTERS_ALONE: GeometrySettings = {
   casterStrideCap: 1,
   overlayDepth: "redraw",
   litClusters: false,
+  farCascadeRate: 1,
 };
 
 /** A draw as the names of what it draws with: the item a fresh pass's would be. */
@@ -475,6 +484,9 @@ function parseLitPass(words: Uint32Array | Float32Array, index: number): CameraC
     order: "ordered",
   };
 }
+
+/** The high setting's geometry with every cascade rendered every frame (plan R14, R14.T6.b). */
+const EVERY_FRAME: GeometrySettings = { ...SETTINGS.high.geometry, farCascadeRate: 1 };
 
 /** The cull's passes, as `packCullPasses` laid them out, back as the twin takes them. */
 function parsePasses(words: Uint32Array | Float32Array): CascadeCullPass[] {
@@ -1115,6 +1127,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
 
   it("packs each cascade's receivers into the cull's passes: the depths they sample it at and the cover below (R14.T1.c)", async () => {
     const made = await clusteredPass();
+    made.pass.setGeometry(EVERY_FRAME);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
     const passes = parsePasses(dispatch?.bindings.uniforms["passes"] ?? new Uint32Array());
@@ -1438,6 +1451,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
 
   it("appends the other casters' draws after the terrain's in each pass, until they are removed", async () => {
     const made = await streamedAt(NEAR);
+    made.pass.setGeometry(EVERY_FRAME);
     const asked: Array<readonly [number, string]> = [];
     const other: DrawItem = {
       mesh: { kind: "mesh", name: "craft" } satisfies MeshHandle,
@@ -1778,3 +1792,212 @@ function angleRad(a: Vec3, b: Vec3): number {
 function fail(): never {
   throw new Error("a pass is missing");
 }
+
+/** `view` with its camera `moveM` north along the ground, its orientation kept. */
+function movedNorth(view: TerrainView, moveM: number): TerrainView {
+  return { ...view, cameraM: add(view.cameraM, scale(FRAME_THERE.north, moveM)) };
+}
+
+/** `view`, body-fixed as given, with the body turned `turnRad` about its pole. */
+function bodyTurned(view: TerrainView, turnRad: number): TerrainView {
+  const rows = rotationRows(quaternionFromAxisAngle({ x: 0, y: 0, z: 1 }, turnRad));
+  const rotation = rotation3FromRows(rows);
+  return {
+    ...view,
+    rotation,
+    cameraM: rotateToBody(rotation, view.cameraM),
+    orientation: multiply(quaternionFromRows(rows), view.orientation),
+  };
+}
+
+/** A column-major 4 × 4 applied to (p, 1), in `f64`: clip x, y and depth. */
+function applied(m: ArrayLike<number>, p: Vec3): Vec3 {
+  const at = (i: number): number => m[i] ?? Number.NaN;
+  return {
+    x: at(0) * p.x + at(4) * p.y + at(8) * p.z + at(12),
+    y: at(1) * p.x + at(5) * p.y + at(9) * p.z + at(13),
+    z: at(2) * p.x + at(6) * p.y + at(10) * p.z + at(14),
+  };
+}
+
+/** The layers a frame's caster passes render, nearest first; none for a frame without cascades. */
+function layersOf(frame: TerrainViewFrame): number[] {
+  return (frame.cascades?.passes ?? []).map((each) => each.layer);
+}
+
+describe("the far cascades at a lower rate (plan R14, R14.T6.b)", () => {
+  it("renders cascades 2 and 3 on alternate halves of the high setting's period of 4, 4, 2, 3, 2, 3 passes over a still view", async () => {
+    const made = await streamedAt(NEAR);
+    const rendered = Array.from({ length: 5 }, () =>
+      layersOf(made.pass.drawFor(PRIMARY, frameOf(NEAR, true))),
+    );
+    expect([made.pass.geometry.farCascadeRate, rendered]).toEqual([
+      4,
+      [
+        [0, 1, 2, 3],
+        [0, 1],
+        [0, 1, 3],
+        [0, 1],
+        [0, 1, 2],
+      ],
+    ]);
+  });
+
+  it("samples a held cascade as its own frame drew it, each body-fixed place at its map's same point after the camera moves and the body turns", async () => {
+    const made = await streamedAt(NEAR);
+    const first = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    // The Draw's fields are written again in place each frame.
+    const drawnLight = Float32Array.from(drawOf(first).uniforms["cascadeLight2"] ?? []);
+    const held = cascadesOf(first).set.cascades[2];
+    const later = bodyTurned(movedNorth(NEAR, 3), 2e-5);
+    const second = made.pass.drawFor(PRIMARY, frameOf(later, true));
+    const sampled = drawOf(second).uniforms["cascadeLight2"] ?? new Float32Array(16);
+    const fresh = cascadesOf(second).set.cascades[2].lightFromCamera;
+    const cameraBefore = NEAR.cameraM;
+    const cameraNow = movedNorth(NEAR, 3).cameraM;
+    const places = [
+      { x: 0, y: 0, z: 0 },
+      { x: 120, y: -40, z: 25 },
+      { x: -200, y: 90, z: -60 },
+    ].map((offset) => add(held.centreBodyFixedM, offset));
+    const apart = (light: ArrayLike<number>): number =>
+      Math.max(
+        ...places.map((place) => {
+          const was = applied(drawnLight, sub(place, cameraBefore));
+          const is = applied(light, rotateToBody(later.rotation, sub(place, cameraNow)));
+          return Math.max(Math.abs(is.x - was.x), Math.abs(is.y - was.y), Math.abs(is.z - was.z));
+        }),
+      );
+    // A hundredth of a texel is 10⁻⁵ in clip units; the fit's own cascade 2 now stands texels off.
+    expect([
+      layersOf(second),
+      apart(sampled) < 1e-5,
+      apart(fresh) > 1e-3,
+      [...cascadesOf(second).received.cascades[2].lightFromCamera],
+    ]).toEqual([[0, 1], true, true, [...sampled]]);
+  });
+
+  it("renders a held far cascade again once the camera moves beyond its slack, and holds the other", async () => {
+    const made = await streamedAt(NEAR);
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const near = layersOf(made.pass.drawFor(PRIMARY, frameOf(movedNorth(NEAR, 5), true)));
+    made.pass.setGeometry(SETTINGS.high.geometry);
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    // Beyond cascade 2's 20.7 m at 50 m up, within cascade 3's 84 m.
+    const far = layersOf(made.pass.drawFor(PRIMARY, frameOf(movedNorth(NEAR, 30), true)));
+    expect([near, far]).toEqual([
+      [0, 1],
+      [0, 1, 2],
+    ]);
+  });
+
+  /** The passes each of the primary's frames renders, drawn at `views` in turn. */
+  const passCounts = (
+    made: Made,
+    views: ReadonlyArray<readonly [TerrainView, boolean]>,
+  ): number[] =>
+    views.map(([view, takes]) => layersOf(made.pass.drawFor(PRIMARY, frameOf(view, takes))).length);
+  const wider: TerrainView = { ...NEAR, viewport: { widthPx: 641, heightPx: 360 } };
+
+  it.each([
+    {
+      cut: "a change of the geometry settings",
+      between: (made: Made): void => {
+        made.pass.setGeometry(SETTINGS.high.geometry);
+      },
+      after: [[NEAR, true]] as const,
+      expected: [4],
+    },
+    { cut: "a resize", between: (): void => {}, after: [[wider, true]] as const, expected: [4] },
+    {
+      cut: "a frame without the cascades",
+      between: (): void => {},
+      after: [
+        [NEAR, false],
+        [NEAR, true],
+      ] as const,
+      expected: [0, 4],
+    },
+  ])("renders all four again after $cut", async ({ between, after, expected }) => {
+    const made = await streamedAt(NEAR);
+    const before = passCounts(made, [
+      [NEAR, true],
+      [NEAR, true],
+    ]);
+    between(made);
+    expect([before, passCounts(made, after)]).toEqual([[4, 2], expected]);
+  });
+
+  it("renders all four again after a restore", async () => {
+    const made = await streamedAt(NEAR);
+    const before = passCounts(made, [
+      [NEAR, true],
+      [NEAR, true],
+    ]);
+    made.engine.loseDevice();
+    made.engine.restore();
+    await made.pass.ready();
+    stream(made, [passView(PRIMARY, NEAR)]);
+    expect([before, passCounts(made, [[NEAR, true]])]).toEqual([[4, 2], [4]]);
+  });
+
+  it("renders all four every frame by the way back, whatever its rate", async () => {
+    const made = await streamedAt(NEAR);
+    made.pass.setGeometry({ ...SETTINGS.high.geometry, clusterPath: false });
+    expect(
+      passCounts(made, [
+        [NEAR, true],
+        [NEAR, true],
+        [NEAR, true],
+      ]),
+    ).toEqual([4, 4, 4]);
+  });
+
+  it("renders every cascade at each view's frame where two views draw into the one set", async () => {
+    const made = await litPass();
+    const primary = viewOver(50, 0);
+    const instrument = viewOver(80, 90);
+    stream(made, [passView(PRIMARY, primary), passView(INSTRUMENT, instrument)]);
+    const rendered = Array.from({ length: 3 }, () => [
+      layersOf(made.pass.drawFor(PRIMARY, frameOf(primary, true))),
+      layersOf(made.pass.drawFor(INSTRUMENT, frameOf(instrument, true))),
+    ]);
+    expect(rendered.flat()).toEqual(Array.from({ length: 6 }, () => [0, 1, 2, 3]));
+  });
+
+  it("renders every cascade every frame while a caster that is not terrain casts, and at a rate of 1", async () => {
+    const made = await streamedAt(NEAR);
+    const remove = made.shadows.casters.add(() => []);
+    const draw = (): number => layersOf(made.pass.drawFor(PRIMARY, frameOf(NEAR, true))).length;
+    const withOther = [draw(), draw(), draw()];
+    remove();
+    const without = draw();
+    made.pass.setGeometry(EVERY_FRAME);
+    const everyFrame = [draw(), draw(), draw()];
+    expect([withOther, without, everyFrame]).toEqual([[4, 4, 4], 2, [4, 4, 4]]);
+  });
+
+  it("culls no cluster into a held cascade, and widens the far two's receivers by their slack with no cover below (R14.T1.c)", async () => {
+    const made = await clusteredPass();
+    const lastCull = (): CascadeCullPass[] =>
+      parsePasses(
+        made.engine.dispatched.findLast((d) => d.kernel === "cluster cull")?.bindings.uniforms[
+          "passes"
+        ] ?? new Uint32Array(),
+      );
+    const first = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const rendered = lastCull();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const held = lastCull();
+    const [, , c2, c3] = cascadesOf(first).set.cascades;
+    expect([
+      rendered.map((pass) => pass.receivers?.coveredBelow === null),
+      rendered.slice(2).map((pass) => pass.receivers?.depthM[1]),
+      held.length,
+    ]).toEqual([
+      [true, false, true, true],
+      [Math.fround(c2.farM + c2.holdSlackM), Math.fround(c3.farM + c3.holdSlackM)],
+      2,
+    ]);
+  });
+});

@@ -129,7 +129,7 @@ describe("the quality settings", () => {
 });
 
 describe("the geometry's settings (plan R14)", () => {
-  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, and keeps the way back", () => {
+  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, and keeps the way back", () => {
     for (const setting of QUALITY_SETTINGS) {
       expect(SETTINGS[setting].geometry).toEqual({
         clusterPath: true,
@@ -137,6 +137,7 @@ describe("the geometry's settings (plan R14)", () => {
         casterStrideCap: 8,
         overlayDepth: "cluster",
         litClusters: true,
+        farCascadeRate: 4,
       });
     }
     expect(GEOMETRY_BEFORE_R14).toEqual({
@@ -145,6 +146,7 @@ describe("the geometry's settings (plan R14)", () => {
       casterStrideCap: 1,
       overlayDepth: "redraw",
       litClusters: false,
+      farCascadeRate: 1,
     });
   });
 
@@ -154,10 +156,12 @@ describe("the geometry's settings (plan R14)", () => {
       geometryOf("low", { clusterPath: false }),
       geometryOf("high", { casterStrideCap: 1, overlayDepth: "redraw" }),
       geometryOf("high", {}),
+      geometryOf("high", { farCascadeRate: 1 }),
     ]).toEqual([
       { ...SETTINGS.low.geometry, clusterPath: false },
       { ...SETTINGS.high.geometry, casterStrideCap: 1, overlayDepth: "redraw" },
       SETTINGS.high.geometry,
+      { ...SETTINGS.high.geometry, farCascadeRate: 1 },
     ]);
   });
 });

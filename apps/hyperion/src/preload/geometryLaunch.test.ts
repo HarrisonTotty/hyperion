@@ -24,6 +24,25 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     ]);
   });
 
+  it("reads and writes the far cascades' rate, last in the fields' order (R14.T6.b)", () => {
+    const override = parseGeometryOverride("farCascadeRate=1,clusterPath=true");
+    expect([
+      override,
+      geometryText(override),
+      ["1", "2", "4"].map((rate) => parseGeometryOverride(`farCascadeRate=${rate}`)),
+    ]).toEqual([
+      { farCascadeRate: 1, clusterPath: true },
+      "clusterPath=true,farCascadeRate=1",
+      [{ farCascadeRate: 1 }, { farCascadeRate: 2 }, { farCascadeRate: 4 }],
+    ]);
+  });
+
+  it("refuses a far cascades' rate other than 1, 2 or 4 (R14.T6.b)", () => {
+    for (const text of ["farCascadeRate=3", "farCascadeRate=8", "farCascadeRate=0"]) {
+      expect(() => parseGeometryOverride(text)).toThrow("farCascadeRate is 1, 2 or 4");
+    }
+  });
+
   it("carries an override through the renderer's argv, and none where the launch gave none", () => {
     const override = { clusterPath: false } as const;
     expect([

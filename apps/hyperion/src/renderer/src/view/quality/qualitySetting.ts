@@ -22,6 +22,7 @@ import { BLOOM_LEVELS, type BloomLevels } from "../post/bloom";
 import { HIGH_SKY, LOW_SKY, type SkySettings } from "../sky/setting";
 import type { GeometryOverride } from "../../../../preload/api";
 import type { Stride } from "../clusters/templates";
+import type { FarCascadeRate } from "../terrain/shadows/cascades";
 import type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 
 /** The view's quality setting: `high` on the recommended specification, `low` on the UHD 620. */
@@ -102,6 +103,13 @@ export interface GeometrySettings {
    * stride 1, forward; `false` draws them by R14.T1.a's interior mesh. Both settings take it.
    */
   readonly litClusters: boolean;
+  /**
+   * R14.T6.b: the frames between re-renders of the far shadow cascades, 2 and 3 of 0 to 3, which
+   * are held between while the sun and the view's slice stay within their holds' bounds
+   * (`FarCascadeHolds`); 1 renders all four every frame. 4 on both settings, a lean (the low
+   * setting draws no cascades).
+   */
+  readonly farCascadeRate: FarCascadeRate;
 }
 
 /**
@@ -119,6 +127,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   casterStrideCap: 1,
   overlayDepth: "redraw",
   litClusters: false,
+  farCascadeRate: 1,
 };
 
 /**
@@ -271,6 +280,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       casterStrideCap: 8,
       overlayDepth: "cluster",
       litClusters: true,
+      farCascadeRate: 4,
     },
   },
   low: {
@@ -299,6 +309,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       casterStrideCap: 8,
       overlayDepth: "cluster",
       litClusters: true,
+      farCascadeRate: 4,
     },
   },
 };
