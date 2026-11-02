@@ -26,6 +26,8 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     depth === "redraw" || depth === "scene-depth" || depth === "cluster" ? depth : undefined;
   const rate = parameters.get("geometry-farCascadeRate");
   const farCascadeRate = rate === "1" ? 1 : rate === "2" ? 2 : rate === "4" ? 4 : undefined;
+  const pool = parameters.get("geometry-pageBytes");
+  const pageBytes = pool !== null && /^\d+$/.test(pool) ? Number(pool) : undefined;
   return {
     ...(clusterPath === undefined ? {} : { clusterPath }),
     ...(casterDepthCull === undefined ? {} : { casterDepthCull }),
@@ -36,5 +38,6 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     ...(figureClusters === undefined ? {} : { figureClusters }),
     ...(hullClusters === undefined ? {} : { hullClusters }),
     ...(wireClusters === undefined ? {} : { wireClusters }),
+    ...(pageBytes === undefined || !Number.isSafeInteger(pageBytes) ? {} : { pageBytes }),
   };
 }

@@ -46,6 +46,22 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     }
   });
 
+  it("reads and writes the mesh page pool's bytes, last in the fields' order (R14.T5.b)", () => {
+    const override = parseGeometryOverride("pageBytes=33554432,wireClusters=true");
+    expect([override, geometryText(override), parseGeometryOverride("pageBytes=0")]).toEqual([
+      { pageBytes: 33_554_432, wireClusters: true },
+      "wireClusters=true,pageBytes=33554432",
+      { pageBytes: 0 },
+    ]);
+  });
+
+  it.each(["pageBytes=32MiB", "pageBytes=-1", "pageBytes=1.5", "pageBytes="])(
+    "refuses %s, the page pool's bytes a whole number (R14.T5.b)",
+    (text) => {
+      expect(() => parseGeometryOverride(text)).toThrow("pageBytes is a whole number of bytes");
+    },
+  );
+
   it("carries an override through the renderer's argv, and none where the launch gave none", () => {
     const override = { clusterPath: false } as const;
     expect([

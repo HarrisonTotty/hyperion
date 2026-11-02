@@ -5,17 +5,19 @@
 mod common;
 
 use common::{
-    assert_cuts_watertight, assert_group_borders_kept, assert_monotone_and_nested, build_twice,
-    open_points, sha256, summary,
+    assert_cuts_watertight, assert_group_borders_kept, assert_group_table,
+    assert_monotone_and_nested, assert_root_pages, build_twice, open_points, sha256, summary,
 };
 use meshbuild::SourceMesh;
-use meshbuild::procedural::{icosphere, terrain, torus_knot};
+use meshbuild::procedural::TestMesh;
 
 fn check(name: &str, source: &SourceMesh, expected_sha256: &str) {
     let built = build_twice(source);
     eprintln!("{name}: {}", summary(&built));
     let open = open_points(&built.file);
     assert_monotone_and_nested(&built.file);
+    assert_group_table(&built.file);
+    assert_root_pages(&built.file);
     assert_group_borders_kept(&built.file, &open);
     assert_cuts_watertight(&built.file, &open, 48, 24);
     assert_eq!(
@@ -27,7 +29,7 @@ fn check(name: &str, source: &SourceMesh, expected_sha256: &str) {
 
 #[test]
 fn an_icosphere_with_noise_builds_a_closed_watertight_monotone_dag_of_pinned_bytes() {
-    let source = icosphere(6, 10.0, 0.05, 11);
+    let source = TestMesh::Icosphere.source();
     assert!(
         open_points(&build_twice(&source).file).is_empty(),
         "a closed mesh has no boundary"
@@ -35,7 +37,7 @@ fn an_icosphere_with_noise_builds_a_closed_watertight_monotone_dag_of_pinned_byt
     check(
         "icosphere",
         &source,
-        "b1ed9b957c51bb7f1a1edd27d408fb2bab83c085d0e2eb440443183965274df6",
+        "c3c366d48325247707d5cb2eb4aa31177fd508e55fa81c68229ec86316ffbec2",
     );
 }
 
@@ -43,8 +45,8 @@ fn an_icosphere_with_noise_builds_a_closed_watertight_monotone_dag_of_pinned_byt
 fn a_torus_knot_with_uv_seams_builds_a_watertight_monotone_dag_of_pinned_bytes() {
     check(
         "torus knot",
-        &torus_knot(2, 3, 512, 48, 4.0, 0.6),
-        "b6d000cc9c6fbce743979d1ca6e5b1a4e30914d14cee60117745147ddb06f787",
+        &TestMesh::TorusKnot.source(),
+        "05ec4ce530e1df080214ad928c527c04d4dd52a24d05520f656fabb935668265",
     );
 }
 
@@ -52,7 +54,7 @@ fn a_torus_knot_with_uv_seams_builds_a_watertight_monotone_dag_of_pinned_bytes()
 fn a_terrain_patch_with_an_open_boundary_builds_a_watertight_monotone_dag_of_pinned_bytes() {
     check(
         "terrain",
-        &terrain(160, 120, 1.0, 12.0, 5),
-        "a0c7225fff2f01d8ceee400d5c307d32e39e03241fb1d12ce8ac87a66befb7aa",
+        &TestMesh::Terrain.source(),
+        "2d49bb07d29002da826c27e273dc70035c5ecf8c79965b303ef3bd4ead5d9ae2",
     );
 }

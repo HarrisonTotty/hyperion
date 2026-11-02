@@ -135,6 +135,12 @@ export interface GeometrySettings {
    * lit mesh. Both settings take it.
    */
   readonly wireClusters: boolean;
+  /**
+   * R14.T5.b: the mesh page pool's bytes, its pages and their records together, category
+   * `geometry-pages`: 128 MiB high and 32 MiB low (Design note 15's leans), 10% of it for the
+   * meshes' pinned roots. 0 on the way back, which has no pool.
+   */
+  readonly pageBytes: number;
 }
 
 /**
@@ -156,6 +162,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   figureClusters: false,
   hullClusters: false,
   wireClusters: false,
+  pageBytes: 0,
 };
 
 /**
@@ -325,6 +332,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       figureClusters: true,
       hullClusters: true,
       wireClusters: true,
+      pageBytes: 128 * 2 ** 20,
     },
     decoration: true,
     scatterDensity: 1,
@@ -367,6 +375,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       figureClusters: true,
       hullClusters: true,
       wireClusters: true,
+      pageBytes: 32 * 2 ** 20,
     },
     decoration: false,
     scatterDensity: 0,

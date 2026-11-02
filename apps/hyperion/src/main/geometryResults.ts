@@ -67,25 +67,33 @@ function countFigures(value: unknown): SpikeCountFigures | null | undefined {
     : undefined;
 }
 
-/** The consumers' levers (plan R14's T4), which a file written before each lacks. */
-const CONSUMER_LEVERS = ["figureClusters", "hullClusters", "wireClusters"] as const;
+/**
+ * The fields a file written before each lacks: the consumers' levers (plan R14's T4), each absent
+ * one read as off, and the mesh page pool's bytes (T5.b), absent read as 0, no pool.
+ */
+const LATER_FIELDS = ["figureClusters", "hullClusters", "wireClusters", "pageBytes"] as const;
 
 /**
  * `value` as the geometry's settings at results `version`, every field of its kind, or `null`:
- * version 8's six fields, or version 7's five, its far cascades read at rate 1, and the consumers'
- * levers it holds, each absent one read as off.
+ * version 8's six fields, or version 7's five, its far cascades read at rate 1, and the later
+ * fields it holds ({@link LATER_FIELDS}).
  */
 function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settings"] | null {
   if (!isRecord(value)) {
     return null;
   }
-  const levers = CONSUMER_LEVERS.filter((lever) => lever in value).length;
-  if (Object.keys(value).length !== (version === 7 ? 5 : 6) + levers) {
+  const later = LATER_FIELDS.filter((field) => field in value).length;
+  if (Object.keys(value).length !== (version === 7 ? 5 : 6) + later) {
     return null;
   }
   const { clusterPath, casterDepthCull, casterStrideCap, overlayDepth, litClusters } = value;
   const farCascadeRate = version === 7 ? 1 : value["farCascadeRate"];
-  const { figureClusters = false, hullClusters = false, wireClusters = false } = value;
+  const {
+    figureClusters = false,
+    hullClusters = false,
+    wireClusters = false,
+    pageBytes = 0,
+  } = value;
   if (
     (farCascadeRate !== 1 && farCascadeRate !== 2 && farCascadeRate !== 4) ||
     typeof clusterPath !== "boolean" ||
@@ -94,6 +102,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     typeof figureClusters !== "boolean" ||
     typeof hullClusters !== "boolean" ||
     typeof wireClusters !== "boolean" ||
+    !isCount(pageBytes) ||
     (casterStrideCap !== 1 &&
       casterStrideCap !== 2 &&
       casterStrideCap !== 4 &&
@@ -112,6 +121,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     figureClusters,
     hullClusters,
     wireClusters,
+    pageBytes,
   };
 }
 
@@ -210,8 +220,9 @@ function settingsWords(settings: SpikeGeometryReport["settings"]): string {
     figureClusters,
     hullClusters,
     wireClusters,
+    pageBytes,
   } = settings;
-  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}`;
+  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}`;
 }
 
 /** The summary's "Geometry" section of `geometry` (plan R14, R14.T1.f). */

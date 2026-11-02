@@ -1925,7 +1925,7 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     `cross-clippy` and `_cross-clippy-for` take a list of tools; the tool's own `clippy.toml` is
     held to the shared ban list by the testkit's `clippy_bans`.
   - The page format, version 1, is in `tools/meshbuild/src/page.rs`'s documentation, which T5.b's
-    `clusters/pageFormat.ts` mirrors. The page table summarises each page before it is fetched:
+    `clusters/pageFormat.ts` mirrors (version 2 from T5.b). The page table summarises each page before it is fetched:
     its levels, its own and parent error spans and a sphere holding its clusters.
   - One grid for the whole mesh (lean, 2026-11-02): 21 bits an axis about the least corner, the
     step the least power of two spanning the largest extent (1 mm at 2 km). So a vertex two pages
@@ -1933,7 +1933,7 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     rounding (half a step an axis).
   - For T5.b: a unit is the clusters one group made, or the leaves one group simplified, never
     split across pages while it fits. The units holding a root come first (the header's root
-    pages, one page of about 128 kB a test mesh), then by level, coarsest first, so a level and
+    pages, one page of about 128 kB a test mesh until T5.b's root pages), then by level, coarsest first, so a level and
     every coarser one are a prefix of the pages. `cut.rs`'s `CutView::draws` is the cut's CPU twin.
 - **R14.T2.a** (geometry-clusters-2): the lit pass on the cluster path, forward.
   - `CLUSTER_COMPACT` (`clusters/compact.ts`, `compact.wgsl`) is `bit-exact`: three dispatches of one
@@ -2069,3 +2069,52 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - The smoke page's `--geometry` reaches every T4 consumer (`smoke/geometryQuery.ts`); the spike's
     view and instruments take its session's geometry (`TerrainSession.geometry`), and
     `ViewFrameInputs.geometry` and `InstrumentsFrame.geometry` are required keys.
+- **R14.T5.b** (`r14-t4-consumers`):
+  - The mesh format is version 2 (`page.rs`, `clusters/pageFormat.ts`): after the page table a
+    group table, 16 B a group (the first entry and count in the page list of the pages holding its
+    children, then its parents), and the page list, a `u32` page each (header word 7, its entries).
+    A group opens only once all its children's pages are resident, which no page says before it is
+    fetched. Both readers refuse a run past the list, a page past the mesh's, or a run not
+    ascending. The four SHA-256 pins moved: the owner's Mac byte test takes the new ones.
+  - Root pages hold root units alone, at most `ROOT_PAGE_BYTES` (16 KiB; a larger root unit alone
+    in a page of up to 128 KiB): the test meshes' roots are one page of 1.1–1.6 kB (T5.a's about
+    128 kB), so low's 10% holds 148 meshes' roots and high's 595 (lean, 2026-11-02).
+  - `GeometryPagePool(engine, poolBytes | PagePoolLayout)` (`clusters/pages.ts`; Provides'
+    `pageBytes` argument dropped, the slot sizes being the format's): root slots of 16 KiB within
+    10% and page slots of 128 KiB, each with its 128 records and LOD spheres, all three buffers
+    within `pageBytes` (148 + 220 slots low, 595 + 880 high), category `geometry-pages`. A slot is
+    its records' page, which a cull instance names; its bytes start at `pageSlotOffsetBytes`.
+    `addMesh`, `removeMesh`, `insert(mesh, page)` (Provides' `insert(page)`: a page's index is its
+    mesh's), `retain(drawn, forced)`, `canDraw`, `residentPages`, `pressure()`.
+  - The record rewrites (lean, 2026-11-02; Design note 14's text is to take it): a group is open
+    once its children's and parents' pages are resident and every cluster it made is reachable; a
+    cluster is reachable if it is a root or its consuming group is open; a reachable cluster whose
+    generating group is not open has its own error written 0, and one not reachable its parent
+    error 0. The note's rules alone overlap in a DAG: pages 0–4 of the three-level DAG draw R1 and
+    L0–L3 over the same strip. An eviction takes every page its leaving strands with it; a victim
+    that would strand a pinned page is passed over.
+  - `ClusterResidency<K>`, `ResidencyAnswer` and `MeshResidency` (`clusters/residency.ts`):
+    `load(url)` reads the index and pins the roots, refused where no root slot is free; `unload`;
+    `request(key, priority, pin = "drawn")`; `update()` pins the frame's wanted resident pages,
+    stores arrivals the most wanted first, and fetches up to `MESH_FETCHES_IN_FLIGHT` (8) and no
+    more than the unpinned page slots; `answer` names the nearest resident page whose clusters draw
+    in a missing one's place.
+  - The demand, `meshPageDemand(index, nearestM, τ, scale)`: the pages whose greatest parent error
+    passes τ × the instance's nearest distance, scored by that projection (taken at least 1 mm
+    away), the roots +∞. It is page-granular, finer than Design note 14's per level; visibility
+    and motion wait for T5.d.
+  - The producer: `meshPage.worker.ts` over `MeshFileReader` (`meshPageWork.ts`),
+    `createWorkerMeshPageProducer` and `InThreadMeshPageProducer` (`meshPageProducer.ts`). The
+    worker holds each loaded mesh's file whole until it is unloaded (lean, 2026-11-02: Design note
+    15's "None" is read as the pool's). No view starts it yet.
+  - `GeometrySettings.pageBytes`: 128 MiB high, 32 MiB low, 0 in `GEOMETRY_BEFORE_R14`, which has
+    no pool; `--geometry pageBytes=<bytes>`, the smoke page, and results version 8, where a file
+    without it reads 0.
+  - The acceptance: `test/meshFlyby.test.ts` over `test/meshPages.ts`' three-level DAG, and by hand
+    `scripts/meshFlyby.mjs` over `tools/meshbuild`'s procedural meshes, which the tool now builds
+    from `procedural:<name>`: 100 instances for 300 frames at both settings' bytes and in a 4 MiB
+    pool, with no hole, overlap or crack (the lane's outbox has the record).
+  - Not built: the annunciation's wording and place (its condition is `pressure().rootsRefused`;
+    it waits for the first view that draws meshes); `meshTolerancePx`; `just mesh-pages` and
+    bundled pages (nothing draws a mesh until T5.e); the restore test (no device record owns a
+    pool yet: it comes with the pool's first owner).

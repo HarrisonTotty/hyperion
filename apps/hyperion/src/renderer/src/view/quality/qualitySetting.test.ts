@@ -129,9 +129,10 @@ describe("the quality settings", () => {
 });
 
 describe("the geometry's settings (plan R14)", () => {
-  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, and keeps the way back", () => {
+  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, and keeps the way back", () => {
     for (const setting of QUALITY_SETTINGS) {
-      expect(SETTINGS[setting].geometry).toEqual({
+      const { pageBytes: _pageBytes, ...levers } = SETTINGS[setting].geometry;
+      expect(levers).toEqual({
         clusterPath: true,
         casterDepthCull: true,
         casterStrideCap: 8,
@@ -143,6 +144,9 @@ describe("the geometry's settings (plan R14)", () => {
         wireClusters: true,
       });
     }
+    expect([SETTINGS.high.geometry.pageBytes, SETTINGS.low.geometry.pageBytes]).toEqual([
+      134_217_728, 33_554_432,
+    ]);
     expect(GEOMETRY_BEFORE_R14).toEqual({
       clusterPath: false,
       casterDepthCull: false,
@@ -153,6 +157,7 @@ describe("the geometry's settings (plan R14)", () => {
       figureClusters: false,
       hullClusters: false,
       wireClusters: false,
+      pageBytes: 0,
     });
   });
 
@@ -163,11 +168,13 @@ describe("the geometry's settings (plan R14)", () => {
       geometryOf("high", { casterStrideCap: 1, overlayDepth: "redraw" }),
       geometryOf("high", {}),
       geometryOf("high", { farCascadeRate: 1 }),
+      geometryOf("high", { pageBytes: 2 ** 20 }),
     ]).toEqual([
       { ...SETTINGS.low.geometry, clusterPath: false },
       { ...SETTINGS.high.geometry, casterStrideCap: 1, overlayDepth: "redraw" },
       SETTINGS.high.geometry,
       { ...SETTINGS.high.geometry, farCascadeRate: 1 },
+      { ...SETTINGS.high.geometry, pageBytes: 2 ** 20 },
     ]);
   });
 });

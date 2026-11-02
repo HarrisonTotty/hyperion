@@ -29,6 +29,8 @@ fn a_million_triangle_terrain_draws_under_two_triangles_a_covered_pixel_at_one_p
     let file = &built.file;
     let open = open_points(file);
     assert_monotone_and_nested(file);
+    common::assert_group_table(file);
+    common::assert_root_pages(file);
     assert_group_borders_kept(file, &open);
     assert_cuts_watertight(file, &open, 12, 3);
 
@@ -73,7 +75,7 @@ fn a_million_triangle_terrain_draws_under_two_triangles_a_covered_pixel_at_one_p
     assert!(ratio <= 1.2, "{ratio} times the uniform cut");
     assert_eq!(
         sha256(&built.bytes),
-        "352714bec1a9313946b130dcb7e1677246536a6801214b24e6c60627a650aaf6",
+        "efc08f57060e016c385ba852b9c17239facc5b575e8a03be1f0ae27c9acad15f",
         "the 10⁶-triangle terrain's pages moved"
     );
 }

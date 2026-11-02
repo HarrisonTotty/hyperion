@@ -13,6 +13,49 @@ use crate::geometry::{F3, add, cross, length, scale, sub};
 use crate::mesh::SourceMesh;
 use crate::num::{f64_of, f64_of_count, i64_of_integral, ix, u32_of};
 
+/// The test meshes the builder's tests pin (plan R14, T5.a) and the client's residency flies over
+/// (T5.b), each at the size its test builds it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum TestMesh {
+    /// An icosphere of 81,920 triangles, 10 m, with 5% relief.
+    Icosphere,
+    /// A (2, 3) torus knot of 49,152 triangles, its UVs seamed.
+    TorusKnot,
+    /// A terrain patch of 160 × 120 one-metre quads, its boundary open.
+    Terrain,
+}
+
+impl TestMesh {
+    /// Every test mesh, in this order.
+    pub const ALL: [Self; 3] = [Self::Icosphere, Self::TorusKnot, Self::Terrain];
+
+    /// Its name: `icosphere`, `torus-knot` or `terrain`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Icosphere => "icosphere",
+            Self::TorusKnot => "torus-knot",
+            Self::Terrain => "terrain",
+        }
+    }
+
+    /// The test mesh named `name`, or `None`.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|mesh| mesh.name() == name)
+    }
+
+    /// Its source mesh.
+    #[must_use]
+    pub fn source(self) -> SourceMesh {
+        match self {
+            Self::Icosphere => icosphere(6, 10.0, 0.05, 11),
+            Self::TorusKnot => torus_knot(2, 3, 512, 48, 4.0, 0.6),
+            Self::Terrain => terrain(160, 120, 1.0, 12.0, 5),
+        }
+    }
+}
+
 /// A terrain patch: `columns` × `rows` quads of `spacing_m`, each split on its (0, 0)–(1, 1)
 /// diagonal, its heights eight octaves of noise of `amplitude_m`, the first octave's wavelength
 /// half the shorter side; UVs span [0, 1] over the patch, with no seam.
@@ -281,6 +324,14 @@ mod tests {
             2 * 64 * 8
         );
         assert_eq!(terrain(10, 4, 1.0, 1.0, 1).triangles().len(), 80);
+    }
+
+    #[test]
+    fn each_test_mesh_is_found_by_its_name() {
+        for mesh in TestMesh::ALL {
+            assert_eq!(TestMesh::from_name(mesh.name()), Some(mesh));
+        }
+        assert_eq!(TestMesh::from_name("teapot"), None);
     }
 
     #[test]

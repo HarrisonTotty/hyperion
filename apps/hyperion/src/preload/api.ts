@@ -237,6 +237,8 @@ export interface GeometryOverride {
   readonly hullClusters?: boolean;
   /** R14.T4.c: the wireframe's interior patches through the cluster path. */
   readonly wireClusters?: boolean;
+  /** R14.T5.b: the mesh page pool's bytes, 0 for none. */
+  readonly pageBytes?: number;
 }
 
 declare global {

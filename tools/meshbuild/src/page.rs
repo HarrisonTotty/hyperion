@@ -1,17 +1,22 @@
-//! The mesh page format (plan R14's `MeshPage`, version 1), its writer and its reader.
+//! The mesh page format (plan R14's `MeshPage`, version 2), its writer and its reader.
 //!
-//! A mesh file is a header, a page table and the pages, each page starting on 16 bytes and holding
-//! at most [`MAX_PAGE_CLUSTERS`] clusters in at most [`MAX_PAGE_BYTES`], so that the client's page
-//! pool can keep fixed slots. Everything is little-endian.
+//! A mesh file is a header, a page table, a group table and the pages, each page starting on 16
+//! bytes and holding at most [`MAX_PAGE_CLUSTERS`] clusters in at most [`MAX_PAGE_BYTES`], so that
+//! the client's page pool can keep fixed slots. Everything is little-endian.
 //!
 //! **The mesh file**: the header, [`MESH_HEADER_BYTES`]: the magic `HMSH`, the version, the page
 //! count, the cluster count, the group count, the DAG's levels, the root pages (the first so many
-//! pages hold every root cluster, which residency pins) and 0. Then the page table, an entry of
-//! [`PAGE_ENTRY_BYTES`] a page, which says what a page holds before it is fetched: its offset and
-//! length; its clusters; its levels, the finest (bits 0–15) and the coarsest (bits 16–31); the
-//! span of its clusters' own errors and of their parent errors, m, four `f32` (least own, greatest
-//! own, least parent, greatest parent); and a sphere about the page's origin holding its clusters'
-//! own spheres, four `f32`. Then the pages.
+//! pages hold every root cluster, which residency pins) and the page list's entries. Then the
+//! page table, an entry of [`PAGE_ENTRY_BYTES`] a page, which says what a page holds before it is
+//! fetched: its offset and length; its clusters; its levels, the finest (bits 0–15) and the
+//! coarsest (bits 16–31); the span of its clusters' own errors and of their parent errors, m, four
+//! `f32` (least own, greatest own, least parent, greatest parent); and a sphere about the page's
+//! origin holding its clusters' own spheres, four `f32`. Then the group table, [`GROUP_ENTRY_BYTES`] a group, in the DAG's
+//! order: the first entry and the count in the page list of the pages holding the clusters the
+//! group simplified, then of those holding the clusters it made; then the page list, a `u32` page
+//! index an entry, each group's two runs ascending. Residency reads it to open a group only once
+//! all the pages of its children are resident, before any of them is fetched (version 2, plan R14,
+//! T5.b). Then the pages, from the first 16 bytes after the page list.
 //!
 //! **A page**: a header of [`PAGE_HEADER_BYTES`], then five sections, each starting on 16 bytes,
 //! at the offsets the header gives:
@@ -19,7 +24,7 @@
 //! | Bytes | Header field                                                                    |
 //! | ----- | ------------------------------------------------------------------------------- |
 //! | 0–3   | the magic `HMPG`                                                                |
-//! | 4–7   | the version, 1                                                                  |
+//! | 4–7   | the version, 2                                                                  |
 //! | 8–11  | the page's index in its mesh                                                    |
 //! | 12–23 | its clusters, vertices and triangles                                            |
 //! | 24–27 | its bytes                                                                       |
@@ -56,7 +61,9 @@
 //! **Packing**: each cluster belongs to a unit: the clusters one group made, or, for leaves, the
 //! leaves one group simplified. A unit is never split across pages while it fits one, so that
 //! what one group's replacement brings in or takes out arrives and leaves together. The units
-//! holding a root come first, then the rest by level, coarsest first, so that "a level and every
+//! holding a root come first, in root pages of their own of at most [`ROOT_PAGE_BYTES`] (a unit
+//! larger than that alone in a page of up to [`MAX_PAGE_BYTES`]), which residency pins in small
+//! slots (plan R14, T5.b); then the rest by level, coarsest first, so that "a level and every
 //! coarser one" is a prefix of the pages.
 
 use thiserror::Error;
@@ -71,12 +78,16 @@ use crate::sphere::{Sphere, enclosing_spheres};
 pub const MESH_MAGIC: u32 = u32::from_le_bytes(*b"HMSH");
 /// `HMPG`, a page's magic.
 pub const PAGE_MAGIC: u32 = u32::from_le_bytes(*b"HMPG");
-/// The format's version.
-pub const FORMAT_VERSION: u32 = 1;
+/// The format's version: 2 adds the group table (plan R14, T5.b).
+pub const FORMAT_VERSION: u32 = 2;
 /// The mesh file's header.
 pub const MESH_HEADER_BYTES: usize = 32;
 /// A page table entry.
 pub const PAGE_ENTRY_BYTES: usize = 48;
+/// A group table entry.
+pub const GROUP_ENTRY_BYTES: usize = 16;
+/// A page list entry: a page's index.
+pub const PAGE_LIST_ENTRY_BYTES: usize = 4;
 /// A page's header.
 pub const PAGE_HEADER_BYTES: usize = 96;
 /// A cluster's record, as the client's `CLUSTER_RECORD_BYTES`.
@@ -93,6 +104,10 @@ pub const TRIANGLE_BYTES: usize = 4;
 pub const MAX_PAGE_CLUSTERS: usize = 128;
 /// The most bytes a page holds: Nanite's streaming page (Karis 2021).
 pub const MAX_PAGE_BYTES: usize = 128 * 1024;
+/// The most bytes a root page holds, where its units fit (plan R14, T5.b): a pool pins every
+/// resident mesh's roots, in slots of this size, so that the 10% of a 32 MiB pool it may pin holds
+/// some 150 meshes' roots, each slot with its records, rather than some twenty-five full pages.
+pub const ROOT_PAGE_BYTES: usize = 16 * 1024;
 /// The cluster table's group where there is none.
 pub const NO_GROUP: u32 = u32::MAX;
 /// The flags of every mesh cluster: the client's `CLUSTER_SHAPE_CODE.mesh` (2) and
@@ -132,6 +147,12 @@ pub enum ReadMeshError {
         /// What was wrong.
         what: &'static str,
     },
+    /// A group's runs pass the page list, or are not ascending pages of the mesh.
+    #[error("group {group}'s pages are not an ascending run of the mesh's pages")]
+    BadGroupTable {
+        /// The group.
+        group: usize,
+    },
 }
 
 /// One cluster's place in its page, before serialising.
@@ -156,12 +177,18 @@ pub fn write_mesh(dag: &Dag) -> Result<Vec<u8>, WriteMeshError> {
                 .any(|p| dag.clusters()[ix(p.cluster)].consuming_group().is_none())
         })
         .map_or(0, |last| last + 1);
+    let (group_table, page_list) = group_pages(dag, &pages);
     let bodies: Vec<Vec<u8>> = pages
         .iter()
         .enumerate()
         .map(|(i, page)| write_page(dag, u32_of(i), page))
         .collect();
-    let table_end = align16(MESH_HEADER_BYTES + PAGE_ENTRY_BYTES * pages.len());
+    let table_end = align16(
+        MESH_HEADER_BYTES
+            + PAGE_ENTRY_BYTES * pages.len()
+            + GROUP_ENTRY_BYTES * dag.groups().len()
+            + PAGE_LIST_ENTRY_BYTES * page_list.len(),
+    );
     let total = bodies
         .iter()
         .fold(table_end, |end, body| align16(end) + body.len());
@@ -177,7 +204,7 @@ pub fn write_mesh(dag: &Dag) -> Result<Vec<u8>, WriteMeshError> {
         u32_of(dag.groups().len()),
         dag.levels(),
         u32_of(root_pages),
-        0,
+        u32_of(page_list.len()),
     ] {
         put_u32(&mut out, v);
     }
@@ -188,12 +215,40 @@ pub fn write_mesh(dag: &Dag) -> Result<Vec<u8>, WriteMeshError> {
         put_page_summary(&mut out, dag, page);
         offset = align16(offset + body.len());
     }
+    for v in group_table.into_iter().chain(page_list) {
+        put_u32(&mut out, v);
+    }
     for body in &bodies {
         pad16(&mut out);
         out.extend_from_slice(body);
     }
     debug_assert_eq!(out.len(), total, "the file's parts add up to its size");
     Ok(out)
+}
+
+/// The group table's words, four a group, and its page list: for each group, the pages holding
+/// the clusters it simplified and then those holding the clusters it made, each ascending.
+fn group_pages(dag: &Dag, pages: &[Vec<Placed>]) -> (Vec<u32>, Vec<u32>) {
+    let mut page_of = vec![0; dag.clusters().len()];
+    for (i, page) in pages.iter().enumerate() {
+        for p in page {
+            page_of[ix(p.cluster)] = u32_of(i);
+        }
+    }
+    let mut table = Vec::with_capacity(4 * dag.groups().len());
+    let mut list = Vec::new();
+    let mut held = Vec::new();
+    for group in dag.groups() {
+        for clusters in [group.inputs(), group.outputs()] {
+            held.clear();
+            held.extend(clusters.iter().map(|&c| page_of[ix(c)]));
+            held.sort_unstable();
+            held.dedup();
+            table.extend([u32_of(list.len()), u32_of(held.len())]);
+            list.extend_from_slice(&held);
+        }
+    }
+    (table, list)
 }
 
 /// A page table entry's summary of `page`: its clusters, levels, error spans and sphere.
@@ -247,8 +302,9 @@ fn page_bytes(clusters: usize, vertices: usize, triangles: usize) -> usize {
 /// cluster).
 type UnitKey = (std::cmp::Reverse<u32>, u8, u32);
 
-/// The clusters by page (see the module's documentation).
-fn pack(dag: &Dag) -> Vec<Vec<Placed>> {
+/// The clusters by unit (see the module's documentation): the units holding a root first, then
+/// the rest by level, coarsest first.
+fn units(dag: &Dag) -> Vec<Vec<u32>> {
     let clusters = dag.clusters();
     let mut keyed: Vec<(UnitKey, u32)> = clusters
         .iter()
@@ -274,18 +330,56 @@ fn pack(dag: &Dag) -> Vec<Vec<Placed>> {
             last = Some(unit);
         }
     }
-    let holds_root = |unit: &Vec<u32>| {
-        unit.iter()
-            .any(|&c| clusters[ix(c)].consuming_group().is_none())
-    };
-    units.sort_by_key(|unit| !holds_root(unit));
+    units.sort_by_key(|unit| !holds_root(dag, unit));
+    units
+}
+
+/// Whether `unit` holds a root.
+fn holds_root(dag: &Dag, unit: &[u32]) -> bool {
+    unit.iter()
+        .any(|&c| dag.clusters()[ix(c)].consuming_group().is_none())
+}
+
+/// Which pages [`pack`] is filling: the root pages, then the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Packing {
+    Roots,
+    Rest,
+}
+
+impl Packing {
+    /// The most bytes a page of this phase holds.
+    const fn limit(self) -> usize {
+        match self {
+            Self::Roots => ROOT_PAGE_BYTES,
+            Self::Rest => MAX_PAGE_BYTES,
+        }
+    }
+}
+
+/// The clusters by page (see the module's documentation).
+fn pack(dag: &Dag) -> Vec<Vec<Placed>> {
+    let clusters = dag.clusters();
     let mut pages: Vec<Vec<Placed>> = Vec::new();
     let mut page: Vec<Placed> = Vec::new();
     let (mut vertices, mut triangles) = (0, 0);
-    let fits = |n: usize, v: usize, t: usize| {
-        n <= MAX_PAGE_CLUSTERS && page_bytes(n, v, t) <= MAX_PAGE_BYTES
+    let mut close = |page: &mut Vec<Placed>, vertices: &mut usize, triangles: &mut usize| {
+        if !page.is_empty() {
+            pages.push(std::mem::take(page));
+            (*vertices, *triangles) = (0, 0);
+        }
     };
-    for unit in units {
+    // The root pages', then, from the first unit holding no root, the rest's.
+    let mut phase = Packing::Roots;
+    let fits = |limit: usize, n: usize, v: usize, t: usize| {
+        n <= MAX_PAGE_CLUSTERS && page_bytes(n, v, t) <= limit
+    };
+    for unit in units(dag) {
+        if phase == Packing::Roots && !holds_root(dag, &unit) {
+            // The roots end their page: no other unit shares a root page.
+            close(&mut page, &mut vertices, &mut triangles);
+            phase = Packing::Rest;
+        }
         let placed: Vec<Placed> = unit
             .iter()
             .map(|&c| {
@@ -301,29 +395,36 @@ fn pack(dag: &Dag) -> Vec<Vec<Placed>> {
         let (uv, ut) = placed.iter().fold((0, 0), |(v, t), p| {
             (v + p.vertices.len(), t + p.triangles.len())
         });
-        if !page.is_empty() && !fits(page.len() + placed.len(), vertices + uv, triangles + ut) {
-            pages.push(std::mem::take(&mut page));
-            (vertices, triangles) = (0, 0);
+        // A root unit past a root page's bound takes a page of its own, up to a page's bound.
+        let unit_limit = if phase == Packing::Roots && !fits(phase.limit(), placed.len(), uv, ut) {
+            close(&mut page, &mut vertices, &mut triangles);
+            Packing::Rest.limit()
+        } else {
+            phase.limit()
+        };
+        if !fits(
+            unit_limit,
+            page.len() + placed.len(),
+            vertices + uv,
+            triangles + ut,
+        ) {
+            close(&mut page, &mut vertices, &mut triangles);
         }
         for p in placed {
-            if !page.is_empty()
-                && !fits(
-                    page.len() + 1,
-                    vertices + p.vertices.len(),
-                    triangles + p.triangles.len(),
-                )
-            {
-                pages.push(std::mem::take(&mut page));
-                (vertices, triangles) = (0, 0);
+            if !fits(
+                unit_limit,
+                page.len() + 1,
+                vertices + p.vertices.len(),
+                triangles + p.triangles.len(),
+            ) {
+                close(&mut page, &mut vertices, &mut triangles);
             }
             vertices += p.vertices.len();
             triangles += p.triangles.len();
             page.push(p);
         }
     }
-    if !page.is_empty() {
-        pages.push(page);
-    }
+    close(&mut page, &mut vertices, &mut triangles);
     pages
 }
 
@@ -437,6 +538,7 @@ pub struct MeshFile {
     group_count: u32,
     levels: u32,
     root_pages: u32,
+    groups: Vec<GroupPages>,
     pages: Vec<Page>,
 }
 
@@ -463,6 +565,33 @@ impl MeshFile {
     #[must_use]
     pub fn pages(&self) -> &[Page] {
         &self.pages
+    }
+
+    /// Its group table, in the DAG's order.
+    #[must_use]
+    pub fn groups(&self) -> &[GroupPages] {
+        &self.groups
+    }
+}
+
+/// A group's entry in the group table: the pages holding its children and its parents.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct GroupPages {
+    children: Vec<u32>,
+    parents: Vec<u32>,
+}
+
+impl GroupPages {
+    /// The pages holding the clusters it simplified, ascending.
+    #[must_use]
+    pub fn children(&self) -> &[u32] {
+        &self.children
+    }
+
+    /// The pages holding the clusters it made, ascending.
+    #[must_use]
+    pub fn parents(&self) -> &[u32] {
+        &self.parents
     }
 }
 
@@ -712,7 +841,9 @@ impl Reader<'_> {
 ///
 /// # Errors
 ///
-/// [`ReadMeshError`] if the bytes are truncated or not this format's.
+/// [`ReadMeshError::Truncated`] or [`ReadMeshError::NotThisFormat`] if the bytes are truncated or
+/// not this format's, and [`ReadMeshError::BadGroupTable`] if a group's pages pass the page list
+/// or are not ascending pages of the mesh.
 pub fn read_mesh(bytes: &[u8]) -> Result<MeshFile, ReadMeshError> {
     let r = Reader { bytes };
     if r.u32(0)? != MESH_MAGIC {
@@ -747,10 +878,41 @@ pub fn read_mesh(bytes: &[u8]) -> Result<MeshFile, ReadMeshError> {
         page.bounds = r.sphere(at + 32)?;
         pages.push(page);
     }
+    let group_count = r.u32(16)?;
+    let entries = ix(r.u32(28)?);
+    let table = MESH_HEADER_BYTES + PAGE_ENTRY_BYTES * page_count;
+    let list = table + GROUP_ENTRY_BYTES * ix(group_count);
+    // The page list's last word, so that a truncated list is refused before a run reads it.
+    if entries > 0 {
+        r.u32(list + PAGE_LIST_ENTRY_BYTES * (entries - 1))?;
+    }
+    let mut groups = Vec::with_capacity(ix(group_count).min(bytes.len() / GROUP_ENTRY_BYTES));
+    for g in 0..ix(group_count) {
+        let at = table + GROUP_ENTRY_BYTES * g;
+        let run = |first: u32, count: u32| -> Result<Vec<u32>, ReadMeshError> {
+            let (first, count) = (ix(first), ix(count));
+            if first.checked_add(count).is_none_or(|end| end > entries) {
+                return Err(ReadMeshError::BadGroupTable { group: g });
+            }
+            let held = (0..count)
+                .map(|k| r.u32(list + PAGE_LIST_ENTRY_BYTES * (first + k)))
+                .collect::<Result<Vec<u32>, _>>()?;
+            let ascending = held.windows(2).all(|w| w[0] < w[1]);
+            if !ascending || held.iter().any(|&p| ix(p) >= page_count) {
+                return Err(ReadMeshError::BadGroupTable { group: g });
+            }
+            Ok(held)
+        };
+        groups.push(GroupPages {
+            children: run(r.u32(at)?, r.u32(at + 4)?)?,
+            parents: run(r.u32(at + 8)?, r.u32(at + 12)?)?,
+        });
+    }
     Ok(MeshFile {
-        group_count: r.u32(16)?,
+        group_count,
         levels: r.u32(20)?,
         root_pages: r.u32(24)?,
+        groups,
         pages,
     })
 }
@@ -907,6 +1069,26 @@ mod tests {
     }
 
     #[test]
+    fn the_group_table_names_the_pages_of_each_groups_children_and_parents() {
+        let file = read_mesh(&small()).unwrap();
+        let held = |pick: fn(&PageCluster) -> Option<u32>, g: u32| -> Vec<u32> {
+            (0..u32_of(file.pages().len()))
+                .filter(|&i| {
+                    file.pages()[ix(i)]
+                        .clusters()
+                        .iter()
+                        .any(|c| pick(c) == Some(g))
+                })
+                .collect()
+        };
+        assert_eq!(file.groups().len(), ix(file.group_count()));
+        for (g, entry) in (0..).zip(file.groups()) {
+            assert_eq!(entry.children(), held(PageCluster::consuming_group, g));
+            assert_eq!(entry.parents(), held(PageCluster::generating_group, g));
+        }
+    }
+
+    #[test]
     fn a_truncated_or_foreign_file_is_refused() {
         let bytes = small();
         assert_eq!(
@@ -922,12 +1104,42 @@ mod tests {
             })
         );
         let mut later = bytes;
-        later[4] = 2;
+        later[4] = 3;
         assert_eq!(
             read_mesh(&later),
             Err(ReadMeshError::NotThisFormat {
                 what: "the mesh version"
             })
         );
+    }
+
+    #[test]
+    fn a_group_table_past_its_list_or_out_of_order_is_refused() {
+        let bytes = small();
+        let file = read_mesh(&bytes).unwrap();
+        let pages = file.pages().len();
+        let table = MESH_HEADER_BYTES + PAGE_ENTRY_BYTES * pages;
+        let list = table + GROUP_ENTRY_BYTES * file.groups().len();
+        let with = |at: usize, v: u32| {
+            let mut changed = bytes.clone();
+            changed[at..at + 4].copy_from_slice(&v.to_le_bytes());
+            read_mesh(&changed)
+        };
+        let bad = Err(ReadMeshError::BadGroupTable { group: 0 });
+        assert_eq!(with(table + 4, u32::MAX), bad, "a run past the list");
+        assert_eq!(with(list, u32_of(pages)), bad, "a page past the mesh's");
+        assert_eq!(
+            with(MESH_HEADER_BYTES - 4, u32::MAX),
+            Err(ReadMeshError::Truncated {
+                at: list + PAGE_LIST_ENTRY_BYTES * ix(u32::MAX),
+                len: bytes.len()
+            }),
+            "a list past the file"
+        );
+        let mut descending = bytes.clone();
+        for (at, v) in [(table + 4, 2_u32), (list, 1), (list + 4, 0)] {
+            descending[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        assert_eq!(read_mesh(&descending), bad, "a run descending");
     }
 }

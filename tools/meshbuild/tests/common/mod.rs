@@ -1,10 +1,12 @@
 //! The DAG's checks, on the pages as read back: what the client will draw.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use meshbuild::cut::{CutView, cut, in_uniform_cut};
-use meshbuild::page::{self, MAX_PAGE_BYTES, MAX_PAGE_CLUSTERS, MeshFile, PageCluster, PageVertex};
+use meshbuild::page::{
+    self, MAX_PAGE_BYTES, MAX_PAGE_CLUSTERS, MeshFile, PageCluster, PageVertex, ROOT_PAGE_BYTES,
+};
 use meshbuild::sphere::Sphere;
 use meshbuild::{MAX_CLUSTER_TRIANGLES, MAX_CLUSTER_VERTICES, SourceMesh, build};
 use sha2::{Digest, Sha256};
@@ -222,6 +224,76 @@ pub fn assert_monotone_and_nested(file: &MeshFile) {
             !roots || i < root_pages,
             "a root on page {i}, beyond the {root_pages} root pages"
         );
+    }
+}
+
+/// Checks the group table: each group's entry names exactly the pages holding the clusters it
+/// simplified and those holding the clusters it made (plan R14, T5.b).
+pub fn assert_group_table(file: &MeshFile) {
+    assert_eq!(
+        file.groups().len(),
+        usize::try_from(file.group_count()).unwrap()
+    );
+    let held = |pick: fn(&PageCluster) -> Option<u32>, g: u32| -> Vec<u32> {
+        (0_u32..)
+            .zip(file.pages())
+            .filter(|(_, p)| p.clusters().iter().any(|c| pick(c) == Some(g)))
+            .map(|(i, _)| i)
+            .collect()
+    };
+    for (g, entry) in (0_u32..).zip(file.groups()) {
+        assert_eq!(
+            entry.children(),
+            held(PageCluster::consuming_group, g),
+            "group {g}'s children"
+        );
+        assert_eq!(
+            entry.parents(),
+            held(PageCluster::generating_group, g),
+            "group {g}'s parents"
+        );
+    }
+}
+
+/// Checks the root pages (plan R14, T5.b): each within `ROOT_PAGE_BYTES` unless it holds one unit
+/// alone, and every unit on one holding a root.
+pub fn assert_root_pages(file: &MeshFile) {
+    // A cluster's unit as `page.rs` packs it: the group that made it, else the group it was
+    // simplified in, else itself.
+    let unit = |page: usize, k: usize, c: &PageCluster| match (
+        c.generating_group(),
+        c.consuming_group(),
+    ) {
+        (Some(g), _) => (0, g, 0, 0),
+        (None, Some(g)) => (1, g, 0, 0),
+        (None, None) => (2, 0, page, k),
+    };
+    let mut rooted: BTreeMap<(u8, u32, usize, usize), bool> = BTreeMap::new();
+    for (page, p) in file.pages().iter().enumerate() {
+        for (k, c) in p.clusters().iter().enumerate() {
+            *rooted.entry(unit(page, k, c)).or_default() |= c.consuming_group().is_none();
+        }
+    }
+    let root_pages = usize::try_from(file.root_pages()).unwrap();
+    for (page, p) in file.pages().iter().enumerate().take(root_pages) {
+        let units: BTreeSet<_> = p
+            .clusters()
+            .iter()
+            .enumerate()
+            .map(|(k, c)| unit(page, k, c))
+            .collect();
+        assert!(
+            usize::try_from(p.bytes()).unwrap() <= ROOT_PAGE_BYTES || units.len() == 1,
+            "root page {page} of {} bytes holds {} units",
+            p.bytes(),
+            units.len()
+        );
+        for u in &units {
+            assert!(
+                rooted[u],
+                "root page {page} holds a unit with no root, {u:?}"
+            );
+        }
     }
 }
 

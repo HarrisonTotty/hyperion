@@ -17,6 +17,8 @@
     "src/renderer/src/view/terrain/cube.ts",
     "src/renderer/src/view/clusters/errors.ts",
     "src/renderer/src/view/clusters/terrainGrid.ts",
+    "src/renderer/src/view/clusters/pageFormat.ts",
+    "src/renderer/src/view/clusters/meshPageWork.ts",
     "src/renderer/src/view/spike/surfaceQuery.ts",
     "src/renderer/src/view/quality/terrainKinds.ts",
     "src/renderer/src/geometry/vec3.ts",
