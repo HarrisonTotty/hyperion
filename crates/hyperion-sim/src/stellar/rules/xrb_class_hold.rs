@@ -106,20 +106,21 @@ const CITED_BLACK_HOLE_SHARE: f64 = 0.01;
 /// The young disc's high-mass hosts under every 27 hold, as measured: Be/X and supergiant neutron
 /// stars and black holes. Black holes are 0.005 of all, within [`CITED_BLACK_HOLE_SHARE`], since
 /// a Be star beside one makes no X-ray binary (main's ruling of 2026-11-01: before that rule 62
-/// of the 64 black holes, 0.145 of all, were beside Be stars). Be/X are 0.987 of the neutron stars'
+/// of the 64 black holes, 0.145 of all, were beside Be stars). Be/X are 0.989 of the neutron stars'
 /// against [`CITED_BEX_SHARE`] (a finding: the census counts every neutron star beside a Be star,
 /// quiescent or not, where the catalogued share is of those seen; the Be/X phase outlasts the
 /// supergiant one some 10–100 times, so the Galaxy hides thousands of quiescent Be/X beside its
 /// tens of supergiant systems, Meurs and van den Heuvel 1989, A&A 226, 88, recalled; the spun-up
 /// Be/X's orbits are the observed ones, 301 of 360 at 10–330 days).
-const PINNED_HIGH_MASS: [usize; 3] = [373, 5, 2];
+const PINNED_HIGH_MASS: [usize; 3] = [373, 4, 2];
 
 /// The census's members of each kind under every 27 hold, in [`XrbMemberKind::ALL`]'s order, in
-/// the slab and in the young disc, as measured (2026-11-02): the floor of 10⁻¹² keeps 76 of the
-/// slab's 456 ultracompacts that 10⁻¹³ kept, and 182 of its 565 members.
+/// the slab and in the young disc, as measured (2026-11-02, with P11.T4's pinned white dwarfs):
+/// the floor of 10⁻¹² keeps 76 of the slab's 456 ultracompacts that 10⁻¹³ kept, and 184 of its
+/// 567 members.
 const PINNED_KINDS: [[usize; 9]; 2] = [
-    [1, 91, 1, 2, 1, 0, 76, 10, 0],
-    [2, 14, 31, 17, 373, 5, 27, 72, 2],
+    [1, 98, 1, 2, 1, 0, 76, 5, 0],
+    [2, 14, 31, 17, 373, 4, 27, 30, 2],
 ];
 
 /// The longest period of an ultracompact member under every 27 hold: 80 minutes, the

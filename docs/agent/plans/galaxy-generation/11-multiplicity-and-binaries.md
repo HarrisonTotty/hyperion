@@ -7372,21 +7372,21 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     the young disc's high-mass hosts a wrong state). 62 of the 64 were beside Be stars, most spun
     up by transfer, and no wind-fed black hole filled 0.9 of its lobe (0.03–0.3). From 27 a Be star
     beside a black hole makes no X-ray binary (Zhang, Li and Wang 2004; MWC 656's 10³¹ erg s⁻¹):
-    black holes 2 of 380, 0.005. Be/X stay 0.987 of the neutron stars' against 0.65, pinned: the
+    black holes 2 of 379, 0.005. Be/X stay 0.989 of the neutron stars' against 0.65, pinned: the
     census counts quiescent Be/X too, which the catalogued share under-sees (the share's
     denominator; the Be/X phase outlasts the supergiant one 10–100 times, recalled). Its movers at
     the bump add `carve::tests::a_carved_first_attempt_is_redrawn` and
     `bound::tests::the_carved_record_lists_the_attempt_it_keeps`, whose pinned carved record is no
     X-ray binary under the arm.
   - _Measured_ (10⁶ slab and 10⁶ young thin disc records, every 27 hold with P11.T4's NS
-    accretion and heavy donors): slab members 565 → 182, its ultracompacts 456 → 76, all under
-    80 min (at 10⁻¹³ they were 456, fed 1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, 38–119 min);
-    research-leans-30 expected 75 and 181 (a finding). The floor takes three substellar-donor
-    transients of the slab and two main-sequence-donor ones of the young disc (findings), and ten
-    young-disc ultracompacts, helium stars of 0.8–4.4 M☉ feeding neutron stars and black holes 81
-    min to 3.1 d out, are longer (a finding). Young disc 252 → 543, Be/X 19 → 373, supergiant
-    neutron stars 12 → 5, black holes 56 → 2 (64 before the Be stars' rule). `ns_accretion_hold`'s
-    census: members 1,154 → 375, black holes 15 → 7. Before P11.T4's fixes the slab's
+    accretion, heavy donors and pinned white dwarfs): slab members 567 → 184, its ultracompacts
+    456 → 76, all under 80 min (at 10⁻¹³ they were 456, fed 1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹,
+    38–119 min); research-leans-30 expected 75 and 181 (a finding). The floor takes three
+    substellar-donor transients of the slab and two main-sequence-donor ones of the young disc
+    (findings), and ten young-disc ultracompacts, helium stars of 0.8–4.4 M☉ feeding neutron stars
+    and black holes 81 min to 3.1 d out, are longer (a finding). Young disc 209 → 500, Be/X 19 →
+    373, supergiant neutron stars 11 → 4, black holes 56 → 2 (64 before the Be stars' rule).
+    `ns_accretion_hold`'s census: members 1,159 → 380. Before P11.T4's fixes the slab's
     ultracompacts were 145 → 14.
   - _Movers_ (the arm forced on at 24): the golden `sky/census_near_sun`, the slow
     `tables_hold::the_x_ray_binary_sampler_against_the_engine`'s and
