@@ -35,14 +35,15 @@ import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../ge
 import {
   NEAR_PLANE_M,
   type ProjectionCamera,
-  project,
-  toViewAxes,
+  projector,
   type Viewport,
+  viewAxesBy,
 } from "../camera/projection";
 import { rotationRows } from "../camera/quaternion";
 import { GROUND_PULL_PX } from "../depth/groundPull";
 import { narrow } from "../coords/narrow";
 import { type Rotation3, rotateToBody, rotateToBodyFixed } from "../coords/rotation";
+import { frustumOf } from "../wireframe/cull";
 import { type ScreenPx, type ScreenSegment, segmentDistancePx } from "../wireframe/symbology";
 import { type CoverageView, type SurveyEdge, surveyEdges } from "./coverage";
 import { faceUvToXyz, stToUv, unitDir } from "./cube";
@@ -104,12 +105,22 @@ export const SIGHT_SAMPLES = 32;
 export const SIGHT_TOLERANCE_M = 1;
 
 /**
- * The samples a tick's foot's line of sight is marched in (plan R10, R10.T16.c), from beyond its
- * stroke's footprint out to where it enters the ground's highest shell, each a fixed ratio farther
- * from the foot than the last: a ridge 300 m before a foot 7 km out, as on TERRAIN TEST's 248 s
- * look, is sampled some 30 m apart.
+ * The most samples a tick's foot's line of sight is marched in (plan R10, R10.T16.c), from beyond
+ * its stroke's footprint out to where it enters the ground's highest shell, each at least a fixed
+ * ratio farther from the foot than the last: a ridge 300 m before a foot 7 km out, as on TERRAIN
+ * TEST's 248 s look, is sampled at most some 30 m apart, and farther where the ground stands well
+ * below the line of sight ({@link TICK_SIGHT_SLOPE}).
  */
 export const TICK_SIGHT_SAMPLES = 48;
+
+/**
+ * How steeply the drawn ground may rise along a tick's line of sight for its march to step past it
+ * (plan R10, R10.T16.c): 1, 45°. A sample that the ground stands a margin below, the tolerance
+ * beyond it, is followed by one that margin farther on, where it is longer than the samples' least
+ * ratio, so that open ground is marched in a few samples; ground steeper than 45° for that stretch
+ * may be stepped past (lean, 2026-11-02).
+ */
+export const TICK_SIGHT_SLOPE = 1;
 
 /**
  * The golden-section steps that read the crest about the highest sample of a tick's line of sight
@@ -135,8 +146,27 @@ export interface SurveyEdgeGround {
    * view holds none, the datum there.
    */
   readonly heightAtM: (direction: Vec3) => number | null;
-  /** The highest the drawn ground stands above the datum, m. */
+  /**
+   * The highest the drawn ground stands above the datum, m: the view's rim
+   * ({@link SurveyEdgeView.heightAtM}) too, which the mark leaves pieces off the view by.
+   */
   readonly ceilingM: number;
+  /**
+   * What the view's rim ({@link SurveyEdgeView.heightAtM}) is read from, where the mark may keep
+   * it from frame to frame (R10.T16.c's cost); absent where it may not.
+   */
+  readonly rimSource?: SurveyEdgeRimSource;
+}
+
+/**
+ * The source a view's rim is read from, and its revision (`ResidentHeightsView.rimRevision`): the
+ * mark keeps the rim it reads at each place along a side and reads it again only once the
+ * revision moves, so the rim must depend on nothing else.
+ */
+export interface SurveyEdgeRimSource {
+  /** The source, by identity: a pass's resident heights. */
+  readonly key: object;
+  readonly revision: number;
 }
 
 /** A body's survey as a view draws its edge. */
@@ -159,6 +189,34 @@ export interface SurveyEdgeView {
    * from the note's range; absent where the view draws none, as the wireframe until R10.T11.
    */
   readonly ground?: SurveyEdgeGround;
+}
+
+/** The most rim heights the mark keeps for one source: past it, every one kept is let go. */
+const RIM_KEPT_PER_SOURCE = 65_536;
+
+/** The rim heights a source's mark keeps, by side and place along it, at its revision. */
+interface KeptRims {
+  readonly revision: number;
+  readonly sides: WeakMap<DirectedSide, Map<number, number | null>>;
+  /** How many it keeps, over every side. */
+  count: number;
+}
+
+/** The rim heights each source's mark keeps. */
+const rimsKept = new WeakMap<object, KeptRims>();
+
+/** The rim heights kept for `source` at its revision, afresh past the cap; `null` with no source. */
+function keptRims(source: SurveyEdgeRimSource | undefined): KeptRims | null {
+  if (source === undefined) {
+    return null;
+  }
+  const kept = rimsKept.get(source.key);
+  if (kept !== undefined && kept.revision === source.revision && kept.count < RIM_KEPT_PER_SOURCE) {
+    return kept;
+  }
+  const fresh: KeptRims = { revision: source.revision, sides: new WeakMap(), count: 0 };
+  rimsKept.set(source.key, fresh);
+  return fresh;
 }
 
 /** What the mark needs of the view beyond its camera. */
@@ -440,7 +498,10 @@ function onViewport(
  * guide's: at its foot's depth, or where that lies beyond the plane through the foot parallel to
  * the datum's tangent plane there, towards nearer ground, on that plane, which its line is pulled
  * to. A piece in the view is halved too where its middle stands more than
- * {@link SURVEY_EDGE_SAG_PX} off its chord there. Only the ticks within a tick's length of the
+ * {@link SURVEY_EDGE_SAG_PX} off its chord there. Where the view's drawn ground gives its
+ * highest, a piece both of whose ends are seen and whose chord, lifted that high and widened by a
+ * tick's length and the stroke's, lies wholly off the view is not drawn: it would draw nothing in
+ * the view, and its length on the view carries the run's ticks on as before. Only the ticks within a tick's length of the
  * view are placed. A tick any of which would come within
  * {@link SURVEY_EDGE_TICK_CLEARANCE_REM} of the line-of-sight mark's ticks, segment to segment on
  * the view, is left out, and so is one whose foot nearer drawn ground hides
@@ -459,18 +520,45 @@ export function surveyEdgeMark(
   const a = figure.equatorialRadiusM;
   const c = figure.polarRadiusM;
   const cameraBodyFixedM = rotateToBodyFixed(rotation, scale(centreM, -1));
-  // The spheroid's point of unit direction d is M d (R05's), its normal M⁻¹ d normalised.
-  const groundAt = (d: Vec3): Vec3 => {
+  // The camera's view axes and projection, each taken once for the frame's many points.
+  const inView = viewAxesBy(camera.orientation);
+  const projectOf = projector(camera, viewport);
+  // The spheroid's point of unit direction d is M d (R05's), its normal M⁻¹ d normalised; the rim
+  // over it `rimM`.
+  const groundAt = (d: Vec3, rimM: number | null): Vec3 => {
     const datum = vec3(a * d.x, a * d.y, c * d.z);
-    const height = Math.max(view.heightAtM(d) ?? 0, 0);
+    const height = Math.max(rimM ?? 0, 0);
     return height > 0
       ? add(datum, scale(normalise(vec3(d.x / a, d.y / a, d.z / c)), height))
       : datum;
   };
+  // The rim at `place` of `side`, of direction `d` (a place t in [0, 1] along it, or −1 − t for
+  // the point just across it that its tick points to): kept from an earlier frame where its
+  // source's revision stands.
+  const kept = keptRims(view.ground?.rimSource);
+  const rimAt = (side: DirectedSide, place: number, d: Vec3): number | null => {
+    if (kept === null) {
+      return view.heightAtM(d);
+    }
+    let byPlace = kept.sides.get(side);
+    if (byPlace === undefined) {
+      byPlace = new Map();
+      kept.sides.set(side, byPlace);
+    }
+    const known = byPlace.get(place);
+    if (known !== undefined) {
+      return known;
+    }
+    const rimM = view.heightAtM(d);
+    byPlace.set(place, rimM);
+    kept.count += 1;
+    return rimM;
+  };
   const fromCamera = (p: Vec3): Vec3 => add(centreM, rotateToBody(rotation, p));
-  const depthOf = (fromCameraM: Vec3): number => -toViewAxes(fromCameraM, camera.orientation).z;
+  const depthOf = (fromCameraM: Vec3): number => -inView(fromCameraM).z;
   const pointAt = (side: DirectedSide, t: number): EdgePoint => {
-    const ground = groundAt(sideDirection(side, t, cells));
+    const d = sideDirection(side, t, cells);
+    const ground = groundAt(d, rimAt(side, t, d));
     const fromCameraM = fromCamera(ground);
     return {
       t,
@@ -482,10 +570,11 @@ export function surveyEdgeMark(
   // A hundredth of a cell into the unsurveyed side of `side` at `t`, from the camera.
   const outwardAt = (side: DirectedSide, t: number): Vec3 => {
     const d = sideDirection(side, t, cells);
-    return fromCamera(groundAt(normalise(add(d, scale(sub(side.outward, d), 0.01)))));
+    const across = normalise(add(d, scale(sub(side.outward, d), 0.01)));
+    return fromCamera(groundAt(across, rimAt(side, -1 - t, across)));
   };
   const screenOf = (fromCameraM: Vec3): ScreenPx => {
-    const { xPx, yPx } = project(fromCameraM, camera, viewport);
+    const { xPx, yPx } = projectOf(fromCameraM);
     return { xPx, yPx };
   };
   const line: number[] = [];
@@ -497,6 +586,28 @@ export function surveyEdgeMark(
   const [right, up] = cameraAxes(camera);
   const s = 1 / Math.tan(camera.fovXRad / 2);
   const aspect = viewport.widthPx / viewport.heightPx;
+  const datumAt = (d: Vec3): Vec3 => vec3(a * d.x, a * d.y, c * d.z);
+  // The highest the rim can stand over the datum, m: the drawn ground's highest, or unknown.
+  const rimTopM = view.ground?.ceilingM ?? Infinity;
+  // How far about the view a piece may lie and still draw a tick or its cased stroke in it, px.
+  const marginPx = SURVEY_EDGE_TICK_REM * options.remPx + 2 * options.lineWidthPx;
+  const pixelRad = 2 / (s * viewport.widthPx);
+  // Whether the piece of a side between the body-fixed datum points `p` and `q` may show: the
+  // sphere about its chord holding the side's curve between them, lifted up to the rim's highest,
+  // and the margin at its distance, meets the view.
+  const inFrustum = frustumOf(camera, viewport);
+  const mayShow = (p: Vec3, q: Vec3): boolean => {
+    if (!Number.isFinite(rimTopM)) {
+      return true;
+    }
+    const halfM = norm(sub(q, p)) / 2;
+    const pieceCentreM = fromCamera(scale(add(p, q), 0.5));
+    // The curve bulges from its chord by its sagitta, half² ÷ 2R, R at least c ÷ 2 on a figure
+    // no flatter than a ≤ 2c, and strays from the arc it nearly follows by far less than a
+    // hundredth of the half-chord.
+    const reachM = 1.01 * halfM + (halfM * halfM) / c + rimTopM;
+    return inFrustum(pieceCentreM, reachM + marginPx * pixelRad * (norm(pieceCentreM) + reachM));
+  };
   const rangeFrom = options.rangeFromM ?? vec3(0, 0, 0);
   // Each drawn segment's nearest point inside the view, from the camera, with its range.
   const nearest: Array<{ readonly rangeM: number; readonly pointM: Vec3 }> = [];
@@ -510,12 +621,7 @@ export function surveyEdgeMark(
 
   // The least range over the part of the segment from `pM` to `qM` inside the view.
   const measure = (pM: Vec3, qM: Vec3): void => {
-    const inside = insideView(
-      toViewAxes(pM, camera.orientation),
-      toViewAxes(qM, camera.orientation),
-      s,
-      aspect,
-    );
+    const inside = insideView(inView(pM), inView(qM), s, aspect);
     if (inside === null) {
       return;
     }
@@ -543,7 +649,7 @@ export function surveyEdgeMark(
     const placed = onViewport(p, q, viewport, tickPx);
     if (placed !== null) {
       // The line's normal on the view, towards the unsurveyed side of the piece's side.
-      const outward = project(outwardAt(side, reference.t), camera, viewport);
+      const outward = projectOf(outwardAt(side, reference.t));
       const at = screenOf(reference.fromCameraM);
       let nx = -dy / lengthPx;
       let ny = dx / lengthPx;
@@ -655,15 +761,7 @@ export function surveyEdgeMark(
     const qM = q.wM < NEAR_PLANE_M ? cut() : q.fromCameraM;
     const ps = screenOf(pM);
     const qs = screenOf(qM);
-    if (
-      splits < MAX_SPLITS &&
-      insideView(
-        toViewAxes(pM, camera.orientation),
-        toViewAxes(qM, camera.orientation),
-        s,
-        aspect,
-      ) !== null
-    ) {
+    if (splits < MAX_SPLITS && insideView(inView(pM), inView(qM), s, aspect) !== null) {
       const mid = pointAt(side, (p.t + q.t) / 2);
       const sags =
         p.wM >= NEAR_PLANE_M &&
@@ -701,10 +799,22 @@ export function surveyEdgeMark(
           ? Math.min(SURVEY_EDGE_MAX_PIECES, Math.max(1, Math.ceil(span() / SURVEY_EDGE_PIECE_PX)))
           : SURVEY_EDGE_MAX_PIECES;
       let p = first;
+      let fromDatumM = datumAt(sideDirection(side, 0, cells));
       for (let k = 1; k <= pieces; k += 1) {
+        const toDatumM = datumAt(sideDirection(side, k / pieces, cells));
         const q = k === pieces ? last : pointAt(side, k / pieces);
-        piece(side, p, q, 0);
+        if (seen(p) && seen(q) && !mayShow(fromDatumM, toDatumM)) {
+          // Wholly off the view, its rim at the ground's highest and a tick's length about it, it
+          // draws nothing there and is not drawn, but carries the run's ticks on by its length on
+          // the view, as a drawn piece does (R10.T16.c's cost).
+          const ps = screenOf(p.fromCameraM);
+          const qs = screenOf(q.fromCameraM);
+          along += Math.hypot(qs.xPx - ps.xPx, qs.yPx - ps.yPx);
+        } else {
+          piece(side, p, q, 0);
+        }
         p = q;
+        fromDatumM = toDatumM;
       }
     }
   }
@@ -812,8 +922,9 @@ export function groundHidesPoint(
  * Whether nearer drawn ground hides a tick's foot from the camera (plan R10, R10.T16.c).
  *
  * @remarks
- * The foot's line of sight is marched in {@link TICK_SIGHT_SAMPLES} from beyond the ground its
- * line's centre is pulled over, `GROUND_PULL_PX` of the datum's depth slope before the foot, where
+ * The foot's line of sight is marched in at most {@link TICK_SIGHT_SAMPLES}, farther apart where
+ * the ground stands well below it ({@link TICK_SIGHT_SLOPE}), from beyond the ground its line's
+ * centre is pulled over, `GROUND_PULL_PX` of the datum's depth slope before the foot, where
  * the resident heights' coarse copy of a wholly surveyed bake differs most from the rim's, out to
  * where it enters the shell of the ground's highest, short of the camera, and the highest sample's
  * crest is read in {@link TICK_SIGHT_REFINEMENTS} steps between its neighbours: a point is hidden
@@ -884,30 +995,43 @@ export function groundHidesTick(
     return ((ground.heightAtM(direction) ?? 0) - heightM) / (fromCameraM * pixelRad);
   };
   const ratio = (toM / fromM) ** (1 / (TICK_SIGHT_SAMPLES - 1));
+  // The highest sample, and its neighbours either side, which bound its crest.
   let bestPx = -Infinity;
-  let bestM = fromM;
+  let lowM = fromM;
+  let highM = toM;
+  let beforeM = fromM;
+  let bestIsLast = false;
   let deltaM = fromM;
-  for (let k = 0; k < TICK_SIGHT_SAMPLES; k += 1) {
+  for (let k = 0; k < TICK_SIGHT_SAMPLES && deltaM <= toM; k += 1) {
     const px = aboveSightPx(deltaM);
     if (px > tolerancePx) {
       return true;
     }
+    if (bestIsLast) {
+      highM = deltaM;
+      bestIsLast = false;
+    }
     if (px > bestPx) {
       bestPx = px;
-      bestM = deltaM;
+      lowM = beforeM;
+      highM = toM;
+      bestIsLast = true;
     }
-    deltaM *= ratio;
+    beforeM = deltaM;
+    // Past the ratio's step, and as far as the ground stands below the line of sight beyond the
+    // tolerance there: ground rising no more steeply than TICK_SIGHT_SLOPE, against a tolerance
+    // shrinking towards the camera at its pixels' angle, meets it no sooner.
+    const marginM = (tolerancePx - px) * (rangeM - deltaM) * pixelRad;
+    deltaM += Math.max(deltaM * (ratio - 1), marginM / (TICK_SIGHT_SLOPE + tolerancePx * pixelRad));
   }
   if (!(bestPx > 0)) {
     return false;
   }
   // The highest sample's crest between its neighbours, by golden section, so that a ridge narrower
   // than the samples' spacing is read at its top.
-  let low = Math.max(fromM, bestM / ratio);
-  let high = Math.min(toM, bestM * ratio);
   const golden = (Math.sqrt(5) - 1) / 2;
-  let x1 = high - golden * (high - low);
-  let x2 = low + golden * (high - low);
+  let x1 = highM - golden * (highM - lowM);
+  let x2 = lowM + golden * (highM - lowM);
   let f1 = aboveSightPx(x1);
   let f2 = aboveSightPx(x2);
   for (let step = 0; step < TICK_SIGHT_REFINEMENTS; step += 1) {
@@ -915,16 +1039,16 @@ export function groundHidesTick(
       return true;
     }
     if (f1 > f2) {
-      high = x2;
+      highM = x2;
       x2 = x1;
       f2 = f1;
-      x1 = high - golden * (high - low);
+      x1 = highM - golden * (highM - lowM);
       f1 = aboveSightPx(x1);
     } else {
-      low = x1;
+      lowM = x1;
       x1 = x2;
       f1 = f2;
-      x2 = low + golden * (high - low);
+      x2 = lowM + golden * (highM - lowM);
       f2 = aboveSightPx(x2);
     }
   }

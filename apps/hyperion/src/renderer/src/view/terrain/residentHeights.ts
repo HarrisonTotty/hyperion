@@ -41,6 +41,7 @@ import {
   FACES,
   parsePatchKeyString,
   type PatchKey,
+  patchIndex,
   patchKeyIndex,
   unreachable,
 } from "./patchKey";
@@ -111,6 +112,11 @@ export interface ResidentHeightsView {
   groundHeightAtM(direction: Vec3): number | null;
   /** The highest any resident bake stands above the datum, m; 0 with none, or none above it. */
   readonly ceilingM: number;
+  /**
+   * The rim's revision (R10.T16.c's cost): it moves whenever a bake whose survey mask holds the
+   * edge comes or goes, and only then, so that a rim read under one revision stands while it does.
+   */
+  readonly rimRevision: number;
 }
 
 /** How a bake's 65 × 65 mask stands. */
@@ -236,26 +242,39 @@ function facePlaces(direction: Vec3): FacePlace[] {
   return places;
 }
 
-/** The patch columns (or rows) of `n` along a face holding `s`, its neighbour too on its side. */
-function columnsAt(s: number, n: number): number[] {
+/**
+ * The `k`th patch column (or row) of `n` along a face holding `s`, k from 0: its own, then its
+ * neighbour on its side where it lies within {@link BOUNDARY_QUADS} of it; −1 past them. Read by
+ * index, so that a lookup builds no array of columns (R10.T16.c's cost).
+ */
+function columnAt(s: number, n: number, k: number): number {
   const at = s * n;
   const i = Math.min(n - 1, Math.floor(at));
+  if (k === 0) {
+    return i;
+  }
   const fraction = (at - i) * QUADS;
-  const columns = [i];
-  if (fraction <= BOUNDARY_QUADS && i > 0) {
-    columns.push(i - 1);
+  const below = fraction <= BOUNDARY_QUADS && i > 0;
+  const above = fraction >= QUADS - BOUNDARY_QUADS && i < n - 1;
+  if (k === 1) {
+    return below ? i - 1 : above ? i + 1 : -1;
   }
-  if (fraction >= QUADS - BOUNDARY_QUADS && i < n - 1) {
-    columns.push(i + 1);
-  }
-  return columns;
+  return k === 2 && below && above ? i + 1 : -1;
+}
+
+/** One level's held bakes, as the lookups read them. */
+interface HeldLevel {
+  /** The level's patches along a face's side. */
+  readonly n: number;
+  /** Its bakes, by `patchKeyIndex`. */
+  readonly bakes: ReadonlyMap<number, HeldBake>;
 }
 
 /** Held bakes by level, then by `patchKeyIndex`, read finest first. */
 class LevelIndex {
   readonly #levels = new Map<number, Map<number, HeldBake>>();
   /** The levels held, finest first. */
-  #order: number[] = [];
+  #ordered: ReadonlyArray<HeldLevel> = [];
 
   /** How many bakes it holds. */
   get size(): number {
@@ -277,7 +296,7 @@ class LevelIndex {
     if (level === undefined) {
       level = new Map();
       this.#levels.set(held.key.level, level);
-      this.#order = [...this.#levels.keys()].toSorted((a, b) => b - a);
+      this.#reorder();
     }
     level.set(patchKeyIndex(held.key), held);
   }
@@ -289,28 +308,35 @@ class LevelIndex {
     }
     if (level.size === 0) {
       this.#levels.delete(key.level);
-      this.#order = this.#order.filter((each) => each !== key.level);
+      this.#reorder();
     }
     return true;
   }
 
   clear(): void {
     this.#levels.clear();
-    this.#order = [];
+    this.#reorder();
+  }
+
+  /** Orders the levels held, finest first. */
+  #reorder(): void {
+    this.#ordered = [...this.#levels.keys()]
+      .toSorted((a, b) => b - a)
+      .flatMap((level) => {
+        const bakes = this.#levels.get(level);
+        return bakes === undefined ? [] : [{ n: 2 ** level, bakes }];
+      });
   }
 
   /** The finest held bake over any of `places`, with its point in it, or `null`. */
   finest(places: ReadonlyArray<FacePlace>): Found | null {
-    for (const levelNumber of this.#order) {
-      const level = this.#levels.get(levelNumber);
-      if (level === undefined) {
-        continue;
-      }
-      const n = 2 ** levelNumber;
+    for (const { n, bakes } of this.#ordered) {
       for (const { face, s, t } of places) {
-        for (const i of columnsAt(s, n)) {
-          for (const j of columnsAt(t, n)) {
-            const held = level.get(patchKeyIndex({ face, level: levelNumber, i, j }));
+        for (let a = 0; columnAt(s, n, a) >= 0; a += 1) {
+          const i = columnAt(s, n, a);
+          for (let b = 0; columnAt(t, n, b) >= 0; b += 1) {
+            const j = columnAt(t, n, b);
+            const held = bakes.get(patchIndex(face, i, j));
             if (held !== undefined) {
               return {
                 held,
@@ -333,6 +359,11 @@ export class ResidentHeights implements ResidentHeightsView {
   /** The held bakes whose survey mask holds the edge. */
   readonly #edges = new LevelIndex();
   #ceilingM: number | null = 0;
+  #rimRevision = 0;
+
+  get rimRevision(): number {
+    return this.#rimRevision;
+  }
 
   /** The bytes the copies hold, for R10.T14's memory line. */
   get bytes(): number {
@@ -396,8 +427,9 @@ export class ResidentHeights implements ResidentHeightsView {
     this.#all.set(held);
     if (standing === "edge") {
       this.#edges.set(held);
-    } else {
-      this.#edges.delete(bake.key);
+      this.#rimRevision += 1;
+    } else if (this.#edges.delete(bake.key)) {
+      this.#rimRevision += 1;
     }
     this.#ceilingM = null;
   }
@@ -408,7 +440,9 @@ export class ResidentHeights implements ResidentHeightsView {
     if (key === null || !this.#all.delete(key)) {
       return;
     }
-    this.#edges.delete(key);
+    if (this.#edges.delete(key)) {
+      this.#rimRevision += 1;
+    }
     this.#ceilingM = null;
   }
 
@@ -417,6 +451,7 @@ export class ResidentHeights implements ResidentHeightsView {
     this.#all.clear();
     this.#edges.clear();
     this.#ceilingM = 0;
+    this.#rimRevision += 1;
   }
 
   rimHeightAtM(direction: Vec3): number | null {

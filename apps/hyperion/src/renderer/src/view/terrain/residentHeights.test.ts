@@ -79,6 +79,17 @@ const WEST_HALF = (x: number): boolean => x < 32;
 const EVERY = (): boolean => true;
 const NONE = (): boolean => false;
 
+/** The revision's move over `change`, from a pass holding `held`. */
+function moveOf(held: ReadonlyArray<BakedPatch>, change: (h: ResidentHeights) => void): number {
+  const heights = new ResidentHeights();
+  for (const bake of held) {
+    heights.take(bake);
+  }
+  const before = heights.rimRevision;
+  change(heights);
+  return heights.rimRevision - before;
+}
+
 describe("the survey edge's rim from the resident bakes (R10.T16.c)", () => {
   it("stands at a bake's height where its mask holds the edge, bilinear between its vertices", () => {
     const heights = new ResidentHeights();
@@ -152,6 +163,33 @@ describe("the drawn ground under a line of sight (R10.T16.c)", () => {
 });
 
 describe("what the resident heights keep (R10.T16.c)", () => {
+  describe("moves its rim revision whenever a bake holding the edge comes or goes, and only then", () => {
+    const edge = bakeOf(KEY, () => 10, WEST_HALF);
+    const surveyed = bakeOf(KEY, () => 10, EVERY);
+    const other = { ...KEY, i: 11 };
+
+    it("moves as an edge bake comes, and as one is baked again", () => {
+      expect([moveOf([], (h) => h.take(edge)), moveOf([edge], (h) => h.take(edge))]).toEqual([
+        1, 1,
+      ]);
+    });
+
+    it("moves as an edge bake gives way to one that holds no edge, is forgotten, or all are", () => {
+      expect([
+        moveOf([edge], (h) => h.take(surveyed)),
+        moveOf([edge], (h) => h.forget(patchKeyString(KEY))),
+        moveOf([edge], (h) => h.clear()),
+      ]).toEqual([1, 1, 1]);
+    });
+
+    it("stands as bakes that hold no edge come and go", () => {
+      expect([
+        moveOf([edge], (h) => h.take(bakeOf(other, () => 5, EVERY))),
+        moveOf([edge, bakeOf(other, () => 5, NONE)], (h) => h.forget(patchKeyString(other))),
+      ]).toEqual([0, 0]);
+    });
+  });
+
   it("keeps an edge bake whole, a surveyed one on a coarse grid and a bare one not at all", () => {
     const heights = new ResidentHeights();
     heights.take(bakeOf(KEY, () => 1, WEST_HALF));

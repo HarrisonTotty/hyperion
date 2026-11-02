@@ -589,6 +589,7 @@ export function surveyEdgeViewsOf(
             ground: {
               heightAtM: (direction: Vec3) => heights.groundHeightAtM(direction),
               ceilingM: heights.ceilingM,
+              rimSource: { key: heights, revision: heights.rimRevision },
             },
           }
         : {}),

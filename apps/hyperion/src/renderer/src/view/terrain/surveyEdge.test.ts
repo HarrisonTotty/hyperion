@@ -14,9 +14,11 @@ import {
   SURVEY_EDGE_NOTE,
   SURVEY_EDGE_TICK_REM,
   SURVEY_EDGE_TICK_SPACING_REM,
+  TICK_SIGHT_SAMPLES,
   surveyEdgeMark,
   surveyEdgeNote,
   surveyEdgeNoteName,
+  type SurveyEdgeMark,
   type SurveyEdgeOptions,
   type SurveyEdgeView,
 } from "./surveyEdge";
@@ -498,6 +500,57 @@ describe("the drawn ground between the camera and a tick's foot (R10.T16.c)", ()
     },
   );
 
+  it("marches open ground seen steeply in under a third of its most samples", () => {
+    // The camera 5 km over the pole, the foot 10 km away along the surface, over the datum.
+    const steepCameraM = vec3(0, 0, RADIUS_M + 5_000);
+    const nearFootM = scale(normalise(vec3(10_000 / RADIUS_M, 0, 1)), RADIUS_M);
+    let samples = 0;
+    const flat = {
+      heightAtM: (): number => {
+        samples += 1;
+        return 0;
+      },
+      ceilingM: 1_000,
+    };
+    const hidden = groundHidesTick(steepCameraM, nearFootM, FIGURE, flat, PIXEL_RAD, TOLERANCE_PX);
+    expect([hidden, samples < TICK_SIGHT_SAMPLES / 3]).toEqual([false, true]);
+  });
+
+  it("finds a ridge rising at 40° from open ground seen steeply, its top over the tolerance", () => {
+    // The camera 5 km over the pole, the foot 10 km away along the surface; 2 km before the foot a
+    // plateau 300 m long stands 1.5 px above the line of sight, its flanks falling at 40° to the
+    // datum.
+    const steepCameraM = vec3(0, 0, RADIUS_M + 5_000);
+    const nearFootM = scale(normalise(vec3(10_000 / RADIUS_M, 0, 1)), RADIUS_M);
+    const back = sub(steepCameraM, nearFootM);
+    const alongOfPoint = (q: Vec3): number => Math.atan2(Math.hypot(q.x, q.y), q.z) * RADIUS_M;
+    // The line of sight's height over the datum and a pixel there at 8 km from the pole.
+    let lowT = 0;
+    let highT = 1;
+    for (let step = 0; step < 60; step += 1) {
+      const mid = (lowT + highT) / 2;
+      if (alongOfPoint(add(nearFootM, scale(back, mid))) > 8_000) {
+        lowT = mid;
+      } else {
+        highT = mid;
+      }
+    }
+    const crestPoint = add(nearFootM, scale(back, lowT));
+    const topM =
+      norm(crestPoint) - RADIUS_M + 1.5 * norm(sub(steepCameraM, crestPoint)) * PIXEL_RAD;
+    const flank = Math.tan((40 * Math.PI) / 180);
+    const plateau = {
+      heightAtM: (d: Vec3): number => {
+        const offM = Math.max(0, Math.abs(alongOfPoint(d) - 8_000) - 150);
+        return Math.max(0, topM - offM * flank);
+      },
+      ceilingM: topM,
+    };
+    expect(groundHidesTick(steepCameraM, nearFootM, FIGURE, plateau, PIXEL_RAD, TOLERANCE_PX)).toBe(
+      true,
+    );
+  });
+
   it("reads no ground within its line's footprint before the foot", () => {
     // A wall 100 m high from 19.8 km to the foot: within a pixel of the datum's depth slope, 330 m.
     const wall = {
@@ -585,6 +638,189 @@ describe("the survey edge's note counts only the points the operator can see (R1
 function ticksOf(mark: { readonly ticks: Float32Array }): number {
   return mark.ticks.length / 6;
 }
+
+/** The segments of a packed line any of whose points falls in the view, as `segmentsOf` gives them. */
+function inViewOf(packed: Float32Array, camera: ProjectionCamera): Array<readonly [Vec3, Vec3]> {
+  return segmentsOf(packed).filter(([a, b]) =>
+    Array.from({ length: 33 }, (_, k) => k / 32).some((u) => {
+      const at = project(add(a, scale(sub(b, a), u)), camera, VIEWPORT);
+      return (
+        at.inFront &&
+        at.xPx >= 0 &&
+        at.xPx <= VIEWPORT.widthPx &&
+        at.yPx >= 0 &&
+        at.yPx <= VIEWPORT.heightPx
+      );
+    }),
+  );
+}
+
+describe("the survey edge's pieces off the view (R10.T16.c)", () => {
+  // 200 km over the cell near its south-west corner through a field 30 km across: its south and
+  // west sides cross the view, its north and east sides lie off it, and its border is one run.
+  const corner = cellPoint(0, 16.15, 16.15);
+  const cornerM = scale(corner, RADIUS_M + 200_000);
+  const view: SurveyEdgeView = {
+    body: "test",
+    coverage: surveyed([0, 16, 16]),
+    figure: { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M },
+    rotation: IDENTITY_ROTATION,
+    centreM: scale(cornerM, -1),
+    heightAtM: () => null,
+  };
+  const camera = { orientation: lookAlong(scale(corner, -1), vec3(0, 0, 1)), fovXRad: 0.15 };
+  // The datum, the rim nowhere above it.
+  const flat = { heightAtM: () => 0, ceilingM: 0 };
+  /** The mark of the view, over `ground` where given. */
+  const markOf = (ground: typeof flat | null): SurveyEdgeMark =>
+    surveyEdgeMark(ground === null ? view : { ...view, ground }, camera, VIEWPORT, OPTIONS);
+
+  it("draws fewer segments, over ground whose highest it knows", () => {
+    expect(markOf(flat).line.length).toBeLessThan(markOf(null).line.length);
+  });
+
+  it("draws in the view each segment it draws with every piece drawn", () => {
+    const shown = inViewOf(markOf(flat).line, camera);
+    expect([shown.length > 0, shown]).toEqual([true, inViewOf(markOf(null).line, camera)]);
+  });
+
+  it("places the same ticks, their spacing carried on over the pieces it does not draw", () => {
+    expect([markOf(flat).ticks.length > 0, [...markOf(flat).ticks]]).toEqual([
+      true,
+      [...markOf(null).ticks],
+    ]);
+  });
+
+  it("gives the same range to the edge's nearest point in the view", () => {
+    expect(markOf(flat).nearestRangeM).toBe(markOf(null).nearestRangeM);
+  });
+
+  it("draws in the view each segment of a rim raised to the ground's highest, as it comes in", () => {
+    // 3 km over the datum 0.8 of a cell south of the cell, looking north across its south side,
+    // the rim 1.5 km up, 3.3° below the horizontal where its datum stands 5.5° below: as the view
+    // pitches from 10° up to 2° down, its bottom edge 10.8° below its axis passes between them.
+    const up = cellPoint(0, 16.5, 15.2);
+    const cameraM = scale(up, RADIUS_M + 3_000);
+    const north = normalise(sub(cellPoint(0, 16.5, 15.21), up));
+    const raised: SurveyEdgeView = {
+      body: "test",
+      coverage: surveyed([0, 16, 16]),
+      figure: { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M },
+      rotation: IDENTITY_ROTATION,
+      centreM: scale(cameraM, -1),
+      heightAtM: () => 1_500,
+    };
+    const ground = { heightAtM: () => 1_500, ceilingM: 1_500 };
+    const differ = Array.from({ length: 48 }, (_, k) => ((k * 0.25 - 10) * Math.PI) / 180).filter(
+      (pitch) => {
+        const forward = sub(scale(north, Math.cos(pitch)), scale(up, Math.sin(pitch)));
+        const pitched = { orientation: lookAlong(forward, up), fovXRad: 0.5 };
+        const culled = surveyEdgeMark({ ...raised, ground }, pitched, VIEWPORT, OPTIONS);
+        const whole = surveyEdgeMark(raised, pitched, VIEWPORT, OPTIONS);
+        return (
+          JSON.stringify(inViewOf(culled.line, pitched)) !==
+          JSON.stringify(inViewOf(whole.line, pitched))
+        );
+      },
+    );
+    expect(differ).toEqual([]);
+  });
+
+  it("places each tick of a side just past the view's edge whose tick reaches into it", () => {
+    // 200 km over unsurveyed ground east of the cell through a field 30 km across, looking down,
+    // stepped west 100 m at a time, so that the cell's east side comes in across the view's left
+    // edge, its ticks pointing east, into the view, first.
+    const ticksDiffer = Array.from({ length: 60 }, (_, k) => 17.0 + 0.32 - k * 0.002).filter(
+      (a) => {
+        const up = cellPoint(0, a, 16.5);
+        const cameraM = scale(up, RADIUS_M + 200_000);
+        const east: SurveyEdgeView = {
+          body: "test",
+          coverage: surveyed([0, 16, 16]),
+          figure: { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M },
+          rotation: IDENTITY_ROTATION,
+          centreM: scale(cameraM, -1),
+          heightAtM: () => null,
+        };
+        const down = { orientation: lookAlong(scale(up, -1), vec3(0, 0, 1)), fovXRad: 0.15 };
+        const culled = surveyEdgeMark({ ...east, ground: flat }, down, VIEWPORT, OPTIONS);
+        const whole = surveyEdgeMark(east, down, VIEWPORT, OPTIONS);
+        return JSON.stringify([...culled.ticks]) !== JSON.stringify([...whole.ticks]);
+      },
+    );
+    expect(ticksDiffer).toEqual([]);
+  });
+});
+
+describe("the survey edge's rim kept from frame to frame (R10.T16.c)", () => {
+  const { view, camera } = viewOf(surveyed([0, 16, 16]), 200_000);
+  /** The view reading its rim from `key` at `revision`, and how many times it read it. */
+  const counting = (
+    key: object,
+    revision: number,
+  ): { readonly view: SurveyEdgeView; readonly reads: () => number } => {
+    let reads = 0;
+    return {
+      view: {
+        ...view,
+        heightAtM: () => {
+          reads += 1;
+          return 500;
+        },
+        ground: { heightAtM: () => 0, ceilingM: 500, rimSource: { key, revision } },
+      },
+      reads: () => reads,
+    };
+  };
+
+  it("reads the rim again at no place while its source's revision stands", () => {
+    const key = {};
+    surveyEdgeMark(counting(key, 1).view, camera, VIEWPORT, OPTIONS);
+    const again = counting(key, 1);
+    surveyEdgeMark(again.view, camera, VIEWPORT, OPTIONS);
+    expect(again.reads()).toBe(0);
+  });
+
+  it("reads it again at every place once the revision moves", () => {
+    const key = {};
+    const first = counting(key, 1);
+    surveyEdgeMark(first.view, camera, VIEWPORT, OPTIONS);
+    const moved = counting(key, 2);
+    surveyEdgeMark(moved.view, camera, VIEWPORT, OPTIONS);
+    expect(moved.reads()).toBe(first.reads());
+  });
+
+  it("draws from the kept rim the mark it draws from the rim read afresh", () => {
+    const key = {};
+    surveyEdgeMark(counting(key, 1).view, camera, VIEWPORT, OPTIONS);
+    const fresh = {
+      ...view,
+      heightAtM: () => 500,
+      ground: { heightAtM: () => 0, ceilingM: 500 },
+    };
+    expect(surveyEdgeMark(counting(key, 1).view, camera, VIEWPORT, OPTIONS)).toEqual(
+      surveyEdgeMark(fresh, camera, VIEWPORT, OPTIONS),
+    );
+  });
+
+  it("keeps two sources' rims apart over one coverage", () => {
+    const at = (key: object, rimM: number): SurveyEdgeMark =>
+      surveyEdgeMark(
+        {
+          ...view,
+          heightAtM: () => rimM,
+          ground: { heightAtM: () => 0, ceilingM: 900, rimSource: { key, revision: 1 } },
+        },
+        camera,
+        VIEWPORT,
+        OPTIONS,
+      );
+    const first = {};
+    const second = {};
+    at(first, 500);
+    expect(at(second, 900).line).not.toEqual(at(first, 500).line);
+  });
+});
 
 describe("the survey edge's pieces over a bump in its rim (R10.T16.c)", () => {
   // A bump in the rim at the middle of the cell's side at t = 16, a Gaussian 1 km wide along it.

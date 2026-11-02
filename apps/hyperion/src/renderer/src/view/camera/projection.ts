@@ -126,13 +126,21 @@ export interface Projected {
 
 /** `v`, relative to the camera along its frame's axes, in the camera's view axes. */
 export function toViewAxes(v: Vec3, orientation: Quaternion): Vec3 {
+  return viewAxesBy(orientation)(v);
+}
+
+/**
+ * {@link toViewAxes} for one orientation, its rotation taken once, for the many points of a mark
+ * (R10.T16.c's cost): the same sums, so the same values.
+ */
+export function viewAxesBy(orientation: Quaternion): (v: Vec3) => Vec3 {
   const [r0, r1, r2] = rotationRows(orientation);
   // Rᵀ · v: the dot products of v with R's columns.
-  return {
+  return (v) => ({
     x: r0.x * v.x + r1.x * v.y + r2.x * v.z,
     y: r0.y * v.x + r1.y * v.y + r2.y * v.z,
     z: r0.z * v.x + r1.z * v.y + r2.z * v.z,
-  };
+  });
 }
 
 /**

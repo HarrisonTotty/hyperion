@@ -835,6 +835,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
     rimHeightAtM: () => null,
     groundHeightAtM: () => null,
     ceilingM: 0,
+    rimRevision: 0,
   };
 
   /**

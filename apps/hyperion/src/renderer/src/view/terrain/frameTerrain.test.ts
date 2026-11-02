@@ -1086,6 +1086,19 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
     expect(allNear([...onA, ...onB], 0)).toBe(true);
   });
 
+  it("keeps the rim the view draws by its lit pass's heights, at their rim revision", () => {
+    const heights = new ResidentHeights();
+    const [edge] = surveyEdgeViewsOf(
+      edgeSource(heights),
+      VIEW,
+      SCENE,
+      DRAW_CAMERA,
+      VIEWPORT,
+      "photorealistic",
+    );
+    expect(edge?.ground?.rimSource).toEqual({ key: heights, revision: heights.rimRevision });
+  });
+
   it("hides points behind the drawn ground in a wireframe view only where its wireframe pass takes it", () => {
     const ground = (wireViews: ReadonlySet<string>): boolean =>
       surveyEdgeViewsOf(bothPasses(wireViews), VIEW, SCENE, DRAW_CAMERA, VIEWPORT, "wireframe")[0]
