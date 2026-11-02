@@ -37,7 +37,7 @@ use crate::galaxy::catalogue_classes::supernova::SupernovaInterval;
 use crate::galaxy::displaced::class_table::{ClassKey, hypervelocity_class};
 use crate::galaxy::displaced::hold::displaced;
 use crate::galaxy::displaced::survivors::{
-    DonorKind, LaunchDirection, LaunchSampler, SurvivorBand, SurvivorFlight,
+    DonorKind, HypervelocityRules, LaunchDirection, LaunchSampler, SurvivorBand, SurvivorFlight,
 };
 use crate::galaxy::displaced::{DisplacedKind, PlacementClass};
 use crate::galaxy::imf::MassBand;
@@ -240,11 +240,17 @@ fn every_exempt_class_is_padded_with_the_survivors_weight() {
     assert!(exempt.len() > 1, "{exempt:?}");
 }
 
-/// The survivors' weight is read when the class table is built, so a galaxy refuses to change it.
+/// The survivors' weight is read when the class table is built, so a galaxy refuses to change it:
+/// the rules asked differ from the galaxy's in the weight alone, since `with_rules` refuses the
+/// other holds read at a build first (P10.T3.d.b's halo share among them).
 #[test]
 #[should_panic(expected = "the hypervelocity survivors' weight is read when")]
 fn with_rules_refuses_to_change_the_survivors_weight() {
-    let _ = weighted().clone().with_rules(GalaxyRules::every_26_hold());
+    let galaxy = weighted();
+    let _ = galaxy.clone().with_rules(GalaxyRules {
+        hypervelocity: HypervelocityRules::Unweighted,
+        ..galaxy.rules()
+    });
 }
 
 /// `n` survivors at `at`, their marks drawn for consecutive candidates of the layer-D cell holding
