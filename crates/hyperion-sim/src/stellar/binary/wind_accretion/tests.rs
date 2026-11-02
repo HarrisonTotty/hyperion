@@ -5,9 +5,11 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::stellar::binary::evolve::{Engine, LiveOrbit, arrival, own_members};
+use crate::stellar::binary::evolve::{
+    Engine, LiveOrbit, arrival, can_interact_with_tracks, evolve_with_tracks, own_members,
+};
 use crate::stellar::binary::tests::pair;
-use crate::stellar::binary::{BinaryState, evolve};
+use crate::stellar::binary::{BinaryState, can_interact, evolve};
 
 /// The age the brief's halo pair is run to, years: 12 Gyr.
 const UNTIL: f64 = 1.2e10;
@@ -189,4 +191,52 @@ fn the_closed_form_takes_what_the_engine_takes() {
         (by_closed / by_engine - 1.0).abs() < 0.1,
         "{by_closed} against {by_engine}"
     );
+}
+
+/// The closed form reads the same on any build of the stars' tracks: under 27's arm, over the halo
+/// pair's periods from 10³ to 3 × 10⁴ days and ages from 10 to 13.5 Gyr, [`can_interact`] (tracks
+/// built to the age) is [`can_interact_with_tracks`] on full tracks, as `evolve`'s pinned primary
+/// and plan 06's `SystemStars` give them, and `evolve` is `evolve_with_tracks` on them, state for
+/// state to the age, bit for bit.
+#[test]
+fn the_closed_form_reads_the_same_on_any_build_of_the_tracks() {
+    let mut fed = 0;
+    for days in [1.0e3, 3.0e3, 1.0e4, 3.0e4] {
+        let input = halo_pair_under(WindAccretionRules::WindRocheLobe, days);
+        let full = || -> [Option<Arc<Track>>; 2] {
+            core::array::from_fn(|i| {
+                let m = track_mass(input.masses()[i]);
+                Some(Arc::new(Track::full(
+                    m,
+                    input.composition(),
+                    &input.draws()[i],
+                )))
+            })
+        };
+        for until in [1.0e10, 1.13e10, 1.14e10, 1.15e10, 1.2e10, 1.35e10] {
+            let age = Years::new(until);
+            let interacts = can_interact(&input, age);
+            assert_eq!(
+                interacts,
+                can_interact_with_tracks(&input, age, full()),
+                "{days} d at {until} yr"
+            );
+            let (own, given) = (evolve(&input, age), evolve_with_tracks(&input, age, full()));
+            assert_eq!(
+                own.segments().len(),
+                given.segments().len(),
+                "{days} d at {until} yr"
+            );
+            for k in 0..=64 {
+                let at = Years::new(until * f64::from(k) / 64.0);
+                assert_eq!(
+                    own.state_at(at),
+                    given.state_at(at),
+                    "{days} d at {until} yr"
+                );
+            }
+            fed += usize::from(interacts);
+        }
+    }
+    assert!(fed > 4, "{fed} runs wind-fed");
 }

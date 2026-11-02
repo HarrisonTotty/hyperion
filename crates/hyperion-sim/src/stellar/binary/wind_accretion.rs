@@ -66,7 +66,7 @@ use crate::units::{SolarMasses, Years};
 use super::BinaryParams;
 use super::detached::last_living;
 use super::evolve::{
-    drawn_orbit_path, engine_runs, offset_for, reach_margin_years, roche_lobe, track_mass,
+    drawn_orbit_path, offset_for, reach_margin_years, roche_lobe, runs_or_collapses_by, track_mass,
     track_reaching,
 };
 use super::rlof::rejuvenated_tau_unheld;
@@ -142,8 +142,9 @@ impl WindAccretionRules {
 /// lean of 2026-11-01), under which the pair stays plan 06's own, and the cheap path cheap.
 pub(crate) const LEAST_ACCRETED_MSUN: f64 = 1.0e-4;
 
-/// The latest age, years, to which a wind-fed pair is held to be run by the engine at no age, so
-/// that its past is the same in a run to any age up to it: the universe's, [`UNIVERSE_AGE`],
+/// The latest age, years, to which a wind-fed pair is held to be passed over by the lobe and decay
+/// tests with no star of it dying suddenly, so that the engine runs it at no age and its past is
+/// the same in a run to any age up to it: the universe's, [`UNIVERSE_AGE`],
 /// 13.787 Gyr, past every system's (the halo's 13 Gyr at most, `galaxy::ages::HALO_AGES`).
 const WIND_FED_HORIZON_YEARS: f64 = UNIVERSE_AGE.value();
 
@@ -472,10 +473,11 @@ impl<'a> Walk<'a> {
 /// years, becomes wind-fed under the input's rules ([`WindAccretionRules`]), if it does by then:
 /// the earlier of its two stars' onsets, the primary's first.
 ///
-/// None for a pair the engine runs at some later age up to [`WIND_FED_HORIZON_YEARS`] (its lobe
-/// and decay tests, or a collapse under P11.T10's fix: [`engine_runs`]), which stays its own models
-/// here. Lean (2026-11-02): the engine gives a star on its own track no wind (`detached.rs`), so
-/// such a pair fed here would show a past that depends on the age it is run to.
+/// None for a pair that its lobe and decay tests send to the engine at some later age up to
+/// [`WIND_FED_HORIZON_YEARS`], or a star of which dies suddenly by then ([`runs_or_collapses_by`]),
+/// which stays its own models here. Lean (2026-11-02): the engine gives a star on its own track no
+/// wind (`detached.rs`), so such a pair fed here would show a past that depends on the age it is
+/// run to; and the closed form records no supernova, whether P11.T10's fix runs the pair or not.
 #[must_use]
 pub(super) fn onset(input: &BinaryInput, members: &[Member; 2], until: f64) -> Option<Onset> {
     if !input.rules().wind_accretion.accretes() {
@@ -497,7 +499,7 @@ pub(super) fn onset(input: &BinaryInput, members: &[Member; 2], until: f64) -> O
             })
         })
         .min_by(|a, b| a.age.total_cmp(&b.age))
-        .filter(|_| !engine_runs(input, Years::new(until.max(WIND_FED_HORIZON_YEARS))))
+        .filter(|_| !runs_or_collapses_by(input, Years::new(until.max(WIND_FED_HORIZON_YEARS))))
 }
 
 /// The timeline of the wind-fed pair of `input`, its own `members` run to `until` years, from its
@@ -541,7 +543,12 @@ pub(super) fn wind_fed_timeline(
         let m1 = m + walk.taken(t0, t1, m);
         let tau1 = rejuvenated_tau_unheld(ctx.coeffs(), HYDROGEN, tau, m, m1, t1 - t0);
         if tau1 >= 1.0 {
-            let x = ((1.0 - tau) / (tau1 - tau)).clamp(0.0, 1.0);
+            // τ advanced over the step: no 0 ÷ 0 where it was 1 at the step's start.
+            let x = if tau1 > tau {
+                ((1.0 - tau) / (tau1 - tau)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             let (at, at_mass) = (t0 + x * (t1 - t0), m + x * (m1 - m));
             mass.push(at, at_mass);
             fractions.push(at, 1.0);

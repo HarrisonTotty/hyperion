@@ -13,6 +13,13 @@
 //! - The cheap path: a pair of main-sequence stars, and one too wide to take 10⁻⁴ M☉, are their
 //!   own models under the arm, segment for segment.
 //!
+//! The closed form's numerics are tested in `stellar/binary/wind_accretion/tests.rs`, and its past
+//! at any age under the arm in `stellar/binary/tests.rs`
+//! (`a_timeline_is_the_same_whatever_age_it_is_run_to_under_the_wind_accretion_arm`).
+//!
+//! The movers under the arm, found by turning it on at the version over the workspace's fast
+//! tests (2026-11-02), are listed in plan 11's records.
+//!
 //! [`WIND_ACCRETION_VERSION`]: crate::stellar::binary::wind_accretion::WIND_ACCRETION_VERSION
 
 use super::*;

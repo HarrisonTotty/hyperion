@@ -2470,7 +2470,7 @@ fn a_timeline_is_the_same_whatever_age_it_is_run_to_under_the_collapses_arm() {
 /// passed over at the earlier age keeps its stars' own forms to the later run's first event, as
 /// under the held arm, each run on to the universe's age, the horizon to which the closed form
 /// holds a pair the engine runs at no age. The arm runs no pair through the engine that the held
-/// arm does not, and the sample holds a wind-fed pair.
+/// arm does not, and the brief's wind-fed halo pairs have the same history to each earlier age.
 #[test]
 fn a_timeline_is_the_same_whatever_age_it_is_run_to_under_the_wind_accretion_arm() {
     use crate::planetary::context::UNIVERSE_AGE;
@@ -2490,10 +2490,28 @@ fn a_timeline_is_the_same_whatever_age_it_is_run_to_under_the_wind_accretion_arm
     );
     assert_eq!(missed + wide_missed, 0, "interactions missed");
     assert!(
-        same > held_same && same + passed + collapsed == held_same + held_passed + held_collapsed,
+        same >= held_same && same + passed + collapsed == held_same + held_passed + held_collapsed,
         "{same} same, {passed} passed over and {collapsed} through collapses, against \
          {held_same}, {held_passed} and {held_collapsed} held"
     );
+    // The sample's pairs are rarely wind-fed, so the brief's halo pairs are checked too: 0.85 and
+    // 0.80 M☉ at Z = 0.0003, at 10³–10⁴ days, run to ages from 11.5 to 13 Gyr.
+    let mut fed = 0;
+    for days in [1.0e3, 3.0e3, 1.0e4] {
+        let input = pair(0.85, 0.80, days, 0.0, 0.0003).with_rules(rules);
+        for until in [1.15e10, 1.2e10, 1.3e10] {
+            let until = Years::new(until);
+            if can_interact(&input, until) {
+                assert_eq!(
+                    check_any_age(&input, until, Years::new(later)),
+                    EarlierRun::Same,
+                    "{days} d at {until:?}"
+                );
+                fed += 1;
+            }
+        }
+    }
+    assert!(fed >= 6, "{fed} halo runs wind-fed");
 }
 
 /// A star's own sudden death runs its pair, the primary's at its pin where design note 16 pins

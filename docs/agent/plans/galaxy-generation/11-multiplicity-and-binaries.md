@@ -1863,7 +1863,7 @@ Files: `crates/hyperion-sim/tests/binaries_statistical.rs`.
 Acceptance: `just test-slow` passes; `just ci` stays green.
 
 _As built (lane `p11-t12`, 2026-11-01; tests only, nothing generated moves): see Risks, "P11.T12,
-as built"._
+as built". Its fix, the wide pairs' wind held at 27: see Risks, "P11.T12's fix"._
 
 ### P11.T13 Protocol and server
 
@@ -7446,3 +7446,30 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     every 27 hold it re-pins `engine_channels_hold`'s χ², `heavy_donor_hold`'s census (accreting
     white dwarfs 4,116 → 4,106: pinned primaries now neutron stars) and `ns_accretion_hold`'s (its
     neutron stars 1,132 → 1,143; members 1,159, the pin's 1,154 already stale on P11.T10's fix).
+- **P11.T12's fix: a wide pair's main-sequence star takes its partner's wind, held at 27** (lanes
+  `fix-wide-wind-accretion` and `fix-wide-wind-accretion-2`, 2026-11-02; research-leans-29 §2 and
+  research-leans-30 §2; nothing moves at 24–26).
+  - _The hold._ `WIND_ACCRETION_VERSION` = 27 (`stellar/binary/wind_accretion.rs`),
+    `StellarRules::wind_accretion` (`WindAccretionRules::{OwnTracks, WindRocheLobe}`, and a
+    test-only `BondiHoyle`), read at `wind_accretion::onset` by `can_interact`,
+    `can_interact_with_tracks` and `run_pair`'s pass-over; the brief's gate adds `fitted_tables_hold`.
+  - _From 27._ A pair the lobe and decay tests pass over is walked over its partner's own track
+    (two midpoint steps between mass knots): its main-sequence star takes BSE eq. 6's share, or,
+    beside an AGB partner, the larger WRLOF share (Abate et al. 2013, at most 0.5; recalled). From
+    10⁻⁴ M☉ the pair is wind-fed: the accretor carried and rejuvenated, then a track of its mass.
+  - _Leans (2026-11-01/02)._ One accretor, on its main sequence only; the drawn orbit shown; the
+    grown accretor's lobe not tested; WRLOF held at its peak past R_d ÷ R_L ≈ 1.62 and read at the
+    semi-major axis; no pair fed whose lobe and decay tests send it to the engine, or a star of
+    which dies suddenly, by the universe's age (`evolve::runs_or_collapses_by`).
+  - _Movers_ (the arm forced on at 24): the goldens `sky/census_near_sun`, `sky/band_face_row`,
+    `stellar/binary_timelines` and `stellar/summaries`; the fitted `sky_binary_light_c` and `_d`;
+    `cell::tests::the_star_bound_holds_for_some_realised_systems` (until those refit),
+    `light::tests::detached_generated_pairs_are_passed_over`, and, to restate on a pair still
+    passed over, `a_wide_pair_is_still_passed_over`, `the_pre_test_reads_the_periastron` and
+    `classify::tests::a_wide_white_dwarf_beside_a_giant_is_symbiotic`; the hold's own tests.
+  - _For the bump to 27._ Delete `OwnTracks`, the field, `onset`'s and the gate's reads and the
+    tripwire; keep `BondiHoyle` only for the engine comparison. Refit the pair-light and reach
+    tables, and give `pair_light_bound`'s `Detached` the wind's reach.
+  - _Acceptance:_ the lib tests `wind_accretion` and `whatever_age_it_is_run_to`; slow,
+    `old_populations_hold_blue_stragglers_and_hot_subdwarfs` (the halo still short of its window:
+    a finding).

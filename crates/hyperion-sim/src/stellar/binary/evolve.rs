@@ -100,11 +100,11 @@ pub(super) const MAX_STEPS: u32 = 200_000;
 /// carries it (P11.T4.i). A star below 0.1 M☉ takes the largest radius of P06.T13's cooling fits,
 /// their first. Under the 27 hold of P11.T12's fix (`wind_accretion`) a pair those tests pass over
 /// can interact too where its main-sequence star takes 10⁻⁴ M☉ of its partner's wind by then, if
-/// the engine would run it at no age up to the universe's. Everything else is two single stars on
-/// an orbit that their core collapses change (BSE appendix A1, P11.T4.l): a pair this passes over
-/// at an age shows no interaction before that age and before its first supernova in a run to any
-/// later age (P11.T4.j's wording). After a collapse a later run may take the pair over where an
-/// earlier one keeps its new orbit fixed.
+/// those tests pass it over, and neither star dies suddenly, up to the universe's age. Everything
+/// else is two single stars on an orbit that their core collapses change (BSE appendix A1,
+/// P11.T4.l): a pair this passes over at an age shows no interaction before that age and before
+/// its first supernova in a run to any later age (P11.T4.j's wording). After a collapse a later
+/// run may take the pair over where an earlier one keeps its new orbit fixed.
 ///
 /// # Examples
 ///
@@ -332,9 +332,9 @@ pub(super) fn first_sudden_death(members: &[Member; 2], pinned_years: Option<f64
 /// Whether [`evolve`] runs the pair of `input` through the engine to `until_age`: where the lobe
 /// and decay tests of [`can_interact`] say it can interact by then, or, under the stellar rules of
 /// P11.T10's fix, a star of it dies suddenly by then (`run_pair`'s pre-test), for the build-age
-/// tests and for `wind_accretion`, which feeds a pair its partner's wind in closed form only where
-/// the engine runs it at no age. A pair that [`can_interact`] only by its wind (P11.T12's fix) is
-/// not run: it is `wind_accretion`'s closed form.
+/// tests. A pair that [`can_interact`] only by its wind (P11.T12's fix) is not run: it is
+/// `wind_accretion`'s closed form.
+#[cfg(test)]
 #[must_use]
 pub(super) fn engine_runs(input: &BinaryInput, until_age: Years) -> bool {
     let until = until_age.value().max(0.0);
@@ -345,6 +345,19 @@ pub(super) fn engine_runs(input: &BinaryInput, until_age: Years) -> bool {
             .rules()
             .collapses
             .runs_pair(first_sudden_death(&members, pinned), until)
+}
+
+/// Whether the lobe and decay tests of [`can_interact`] say the pair of `input` can interact by
+/// `until_age`, or a star of it dies suddenly by then whatever the stellar rules (the primary at
+/// its pin where design note 16 pins it): the pairs `wind_accretion`'s closed form, which records
+/// no supernova, leaves their own models, so that none the engine runs at a later age is fed there.
+#[must_use]
+pub(super) fn runs_or_collapses_by(input: &BinaryInput, until_age: Years) -> bool {
+    let until = until_age.value().max(0.0);
+    let members = own_members(input, until, None);
+    let pinned = pinned_death(input, None).map(|p| p.pin.death.age().value());
+    interacts(input, &members, until)
+        || first_sudden_death(&members, pinned).is_some_and(|age| age <= until)
 }
 
 /// The drawn orbit of `input` at every age: a passed-over pair's, two single stars on their orbit.
