@@ -539,8 +539,8 @@ fn the_lists_hold_their_expected_hosts() {
 const MEMBER_STREAMS: u64 = 16;
 
 /// `n` of the engine's prior members of `class` near the solar circle, drawn on
-/// [`MEMBER_STREAMS`] threads from the cells that `cells` keeps, which they share, and joined in
-/// stream order.
+/// [`MEMBER_STREAMS`] streams at once (one thread each; on WebAssembly, which has no threads, in
+/// turn) from the cells that `cells` keeps, which they share, and joined in stream order.
 fn engine_members(
     cells: &MemberCells,
     class: CarvedClass,
@@ -548,6 +548,7 @@ fn engine_members(
 ) -> Vec<crate::stellar::binary::testing::ClassMember> {
     let share = n.div_ceil(16);
     let mut members = Vec::with_capacity(n + 16);
+    #[cfg(not(target_family = "wasm"))]
     std::thread::scope(|scope| {
         let handles: Vec<_> = (0..MEMBER_STREAMS)
             .map(|s| scope.spawn(move || cells.members_in(class, share, s)))
@@ -556,16 +557,22 @@ fn engine_members(
             members.extend(handle.join().expect("a member draw finishes"));
         }
     });
+    #[cfg(target_family = "wasm")]
+    for s in 0..MEMBER_STREAMS {
+        members.extend(cells.members_in(class, share, s));
+    }
     members.truncate(n);
     members
 }
 
 /// `n` of the engine's stellar mergers near the solar circle, each with its weight, drawn on
-/// [`MEMBER_STREAMS`] threads.
+/// [`MEMBER_STREAMS`] streams at once (one thread each; on WebAssembly, in turn) and joined in
+/// stream order.
 fn engine_mergers(galaxy: &Galaxy, n: usize) -> Vec<(f64, f64, f64, f64)> {
     use crate::stellar::binary::testing::brute_force_merger_members_in;
     let share = n.div_ceil(16);
     let mut members = Vec::with_capacity(n + 16);
+    #[cfg(not(target_family = "wasm"))]
     std::thread::scope(|scope| {
         let handles: Vec<_> = (0..MEMBER_STREAMS)
             .map(|s| {
@@ -578,6 +585,15 @@ fn engine_mergers(galaxy: &Galaxy, n: usize) -> Vec<(f64, f64, f64, f64)> {
             members.extend(handle.join().expect("a merger draw finishes"));
         }
     });
+    #[cfg(target_family = "wasm")]
+    for s in 0..MEMBER_STREAMS {
+        members.extend(brute_force_merger_members_in(
+            galaxy,
+            CarvedClass::StellarMerger,
+            share,
+            s,
+        ));
+    }
     members.truncate(n);
     members
         .iter()
