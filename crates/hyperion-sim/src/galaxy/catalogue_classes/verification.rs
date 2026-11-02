@@ -5,8 +5,8 @@
 //! - [`complementarity`]: 10⁵ mark sets about the shared test's interval and across the clock
 //!   window, each held by exactly one of the grid and the catalogue, the predicate's reject path
 //!   forced; and the grid's own cells, claimed or kept, through the production hook.
-//! - [`budgets`]: field, members and catalogue systems against each population's budget in twelve
-//!   test volumes, the centre's left out.
+//! - [`budgets`]: field, members and catalogue systems against each population's budget in
+//!   thirteen test volumes, the centre's among them.
 //! - [`shells`]: the distinct shells of every source at the epoch, over seeds, by phase and size.
 //! - [`recent_in_range`]: every recent entry of the features' and the centre's lists (P09.T36)
 //!   inside a range query's sphere returned once by the sources the server registers (P09.T37).
@@ -25,6 +25,9 @@ use std::sync::{Arc, Mutex};
 use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::{
+    CatalogueCellKey, CatalogueClassCellCache, ClassCellSystems,
+};
 use crate::galaxy::global_list::{GlobalList, StreamNumber, TubeLookup, TubeTable};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{CellCache, CellKey, SystemRecord, generate_cell};
@@ -98,6 +101,26 @@ impl CellCache for KeepCells {
             generate_cell(galaxy, key, &mut systems);
             systems
         }))
+    }
+}
+
+/// A class-cell cache that keeps every cell's systems it makes, for one galaxy: queries about the
+/// centre share their class cells, whose cold systems cost seconds.
+#[derive(Debug, Default)]
+struct KeepClassCells(Mutex<BTreeMap<CatalogueCellKey, Arc<ClassCellSystems>>>);
+
+impl CatalogueClassCellCache for KeepClassCells {
+    fn systems(
+        &self,
+        _galaxy: &Galaxy,
+        key: CatalogueCellKey,
+        make: &mut dyn FnMut() -> ClassCellSystems,
+    ) -> Arc<ClassCellSystems> {
+        let mut kept = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Arc::clone(kept.entry(key).or_insert_with(|| Arc::new(make())))
     }
 }
 

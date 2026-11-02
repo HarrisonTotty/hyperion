@@ -21,18 +21,15 @@
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
 
 use hyperion_testkit::float::bits;
 use hyperion_testkit::order::assert_order_independent;
 
-use super::{KeepCells, Tubes, milky_way};
+use super::{KeepCells, KeepClassCells, Tubes, milky_way};
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::ages::SubDisc;
-use crate::galaxy::catalogue_classes::{
-    CatalogueCellKey, CatalogueClassCellCache, CatalogueClassSource, ClassCellSystems,
-};
+use crate::galaxy::catalogue_classes::CatalogueClassSource;
 use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord, NoFeatureCache};
 use crate::galaxy::features::centre::events::victims::victim_count;
 use crate::galaxy::features::centre::members::resolve_centre_member_with;
@@ -78,26 +75,6 @@ const MANY_ENTRIES: usize = 3;
 
 /// The old open clusters walked for one with entries.
 const OLD_CLUSTERS_WALKED: usize = 2_000;
-
-/// A class-cell cache that keeps every cell's systems it makes, for one galaxy: the spheres about
-/// the centre share their class cells, whose cold systems cost seconds.
-#[derive(Debug, Default)]
-struct KeepClassCells(Mutex<BTreeMap<CatalogueCellKey, Arc<ClassCellSystems>>>);
-
-impl CatalogueClassCellCache for KeepClassCells {
-    fn systems(
-        &self,
-        _galaxy: &Galaxy,
-        key: CatalogueCellKey,
-        make: &mut dyn FnMut() -> ClassCellSystems,
-    ) -> Arc<ClassCellSystems> {
-        let mut kept = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        Arc::clone(kept.entry(key).or_insert_with(|| Arc::new(make())))
-    }
-}
 
 /// One recent entry as the brute force sees it: its record and its line.
 #[derive(Debug, Clone, Copy)]

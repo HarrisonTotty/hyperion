@@ -1,13 +1,17 @@
 //! P09.T38's budgets, part two: sampled counts of the field, the features' members and the
-//! catalogue's systems against each population's budget, layer by layer, in twelve test volumes,
-//! the centre's left out (P09.T6 holds the closed forms; this samples them).
+//! catalogue's systems against each population's budget, layer by layer, in twelve test volumes
+//! and the galactic centre's (P09.T6 holds the closed forms; this samples them).
 //!
 //! The budget is the grid as it places a population's systems with no field share and no
 //! carve-out (`FieldShareRules::None`, `CarveOutRules::Unclaimed`), every other 27 hold kept, the
 //! displaced classes among them: the galaxy `B`. The galaxy under every 27 hold, `T`, keeps a
 //! subset of `B`'s records bit for bit (P09.T2.c), and the features' members and the catalogue
 //! classes' systems (`FeatureMemberSource`, `CatalogueClassSource`, as the server registers them)
-//! must stand in for the rest. In each volume and layer the range query counts, by population,
+//! must stand in for the rest. The global list's source is registered beside them, as the server
+//! registers it from 27 (P10.T10.b with P09.T37.b), and its members are counted apart: the
+//! centre's, the nuclear cluster's, lie outside every population's budget (plan 02, Design note
+//! 15), and the streams' and the dwarf cores' stand in for the halo's discrete share, which both
+//! galaxies give up (P10.T3.d.b). In each volume and layer the range query counts, by population,
 //! `T`'s field `F`, its members `M` and its catalogue systems `C` against `B`'s `N`, in three
 //! parts, each against its own error:
 //!
@@ -28,9 +32,12 @@
 //!   squared, summed: estimated from the volume, and so checked only where the volume holds many
 //!   features; a volume without one has no estimate of what it misses.
 //!
-//! The Type Ia class's systems, which no grid record gives up, are counted beside them. The
-//! centre's volume waits on p10-list-registration, which registers the centre's members in the
-//! range query (P09.T37.b): it is not run.
+//! The Type Ia class's systems, which no grid record gives up, are counted beside them.
+//!
+//! The centre's volume, about the black hole, is sized by the query's own census, the cluster's
+//! members with the rest, not by the budget's, since the cluster outnumbers the field there by
+//! orders, and down to a twentieth of a light-year. Its cells are walked under every 27 hold, where
+//! a remnant class draws its age with each attempt (P09.T37's fix of the centre's band-E draw).
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
@@ -38,21 +45,24 @@ use std::num::NonZeroU32;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, normal_cdf};
 use hyperion_testkit::threads::in_shares;
 
-use super::milky_way;
+use super::{KeepCells, KeepClassCells, Tubes, milky_way};
 use crate::coords::GalacticPosition;
 use crate::galaxy::ages::{FieldShareRules, SubDisc};
-use crate::galaxy::catalogue_classes::{CatalogueClassSource, ClassId, NoClassCellCache};
+use crate::galaxy::catalogue_classes::{CatalogueClassSource, ClassId};
 use crate::galaxy::displaced::PlacementClass;
 use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
+use crate::galaxy::features::centre::KeepCentreOrbits;
 use crate::galaxy::features::ids::{FeatureProcess, PackedFeature};
-use crate::galaxy::features::members::{FeatureMemberSource, NoInteriorCache};
+use crate::galaxy::features::members::{FeatureMemberSource, KeepInteriors};
+use crate::galaxy::global_list::GlobalListSource;
 use crate::galaxy::placement::{
-    CandidateOutcome, CellKey, NoCache, SystemOrigin, SystemRecord, catalogue_claims,
-    evaluate_candidate, layer_spec,
+    CandidateOutcome, CellKey, SystemOrigin, SystemRecord, catalogue_claims, evaluate_candidate,
+    layer_spec,
 };
 use crate::galaxy::query::{
-    MassFloor, RangeQuery, SubstellarRequest, SystemHit, SystemSource, expected_counts, range_query,
+    MassFloor, RangePlan, RangeQuery, SubstellarRequest, SystemHit, SystemSource, expected_counts,
+    range_query,
 };
 use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, POPULATIONS, Population};
@@ -75,6 +85,14 @@ const LAYERS: [(Layer, MassFloor, f64); 5] = [
 
 /// The radii a volume is held to, light-years.
 const RADII_LY: (f64, f64) = (5.0, 3_000.0);
+
+/// The radii the centre's volume is held to, light-years: its census reaches a layer's aim well
+/// inside 5 ly for the finer layers.
+const CENTRE_RADII_LY: (f64, f64) = (0.05, 3_000.0);
+
+/// The steps the centre's volume's radius is refined in: each rescales it by the cube root of the
+/// aim over the census, which a cusp's counts, rising as r^1.7, approach in a few.
+const CENTRE_RADIUS_STEPS: u32 = 8;
 
 /// The fixed test volumes, by name and centre (light-years, galactic): the Sun's place, the Sun's
 /// radius a quarter turn on, the inner and outer discs, the thick disc and the halo above the Sun,
@@ -122,6 +140,10 @@ struct Counts {
     /// The share of `B`'s field records the field share takes, summed: what the members and the
     /// binary classes stand in for.
     replaced_mean: f64,
+    /// `T`'s centre's members, the nuclear cluster's, outside every budget.
+    centre: u64,
+    /// `T`'s streams' and dwarf cores' members, which stand in for the halo's discrete share.
+    listed: u64,
 }
 
 impl Counts {
@@ -140,6 +162,8 @@ impl Counts {
         self.claimed += other.claimed;
         self.claimed_displaced += other.claimed_displaced;
         self.replaced_mean += other.replaced_mean;
+        self.centre += other.centre;
+        self.listed += other.listed;
     }
 }
 
@@ -194,20 +218,71 @@ impl StandsIn {
     }
 }
 
-/// One volume's counts about `centre` in `on` (`T`) against `budget` (`B`).
-fn volume(on: &Galaxy, budget: &Galaxy, centre: &GalacticPosition) -> Volume {
-    let members = FeatureMemberSource::new(&NoFeatureCache, &NoInteriorCache);
-    let cells = NoClassCellCache;
+/// The radius about the centre at which `on`'s query with `sources` expects `aim` systems of
+/// `layer` by its own census, admitting every layer down to `floor`, held to [`CENTRE_RADII_LY`]
+/// (module documentation).
+fn centre_radius_for(
+    on: &Galaxy,
+    sources: &[&dyn SystemSource],
+    centre: &GalacticPosition,
+    (layer, floor, aim): (Layer, MassFloor, f64),
+) -> f64 {
+    let mut radius = 100.0;
+    for _ in 0..CENTRE_RADIUS_STEPS {
+        let plan = RangePlan::new(on, sources, &query(centre, radius, floor));
+        let expected = plan.census().expected().get(layer).max(1e-12);
+        radius = (radius * math::cbrt(aim / expected)).clamp(CENTRE_RADII_LY.0, CENTRE_RADII_LY.1);
+    }
+    radius
+}
+
+/// How a volume's radius is chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sizing {
+    /// By the budget's expected counts ([`radius_for`]).
+    Budget,
+    /// By the query's own census ([`centre_radius_for`]): the centre's.
+    Census,
+}
+
+/// One volume's counts about `centre` in `on` (`T`) against `budget` (`B`), its radii chosen by
+/// `sizing`, the global list read through `tubes`.
+fn volume(
+    (on, budget): (&Galaxy, &Galaxy),
+    (centre, sizing): (&GalacticPosition, Sizing),
+    tubes: &Tubes<'_>,
+) -> Volume {
+    // Each volume's queries, one a layer, share what they generate: the cells about the centre
+    // take minutes cold under every 27 hold (pod, 16 vCPU).
+    let interiors = KeepInteriors::new(on);
+    let members = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+    let cells = KeepClassCells::default();
     let classes = CatalogueClassSource::registered_in(on)
         .expect("every 27 hold registers it")
         .with_cells(&cells);
-    let sources: [&dyn SystemSource; 2] = [&members, &classes];
+    assert!(
+        GlobalListSource::is_registered_in(on),
+        "every 27 hold registers it"
+    );
+    let orbits = KeepCentreOrbits::new(on);
+    let listed = GlobalListSource::new(on, tubes, &orbits).expect("the fixture's centre builds");
+    let sources: [&dyn SystemSource; 3] = [&members, &listed, &classes];
+    let (mut on_cells, mut budget_cells) = (KeepCells::default(), KeepCells::default());
     let mut counts = Volume::new();
     for (layer, floor, aim) in LAYERS {
-        let radius = radius_for(budget, centre, layer, aim);
+        let radius = match sizing {
+            Sizing::Budget => radius_for(budget, centre, layer, aim),
+            Sizing::Census => centre_radius_for(on, &sources, centre, (layer, floor, aim)),
+        };
         let q = query(centre, radius, floor);
-        let sampled = range_query(on, &mut NoCache::new(), &sources, &q);
-        let reference = range_query(budget, &mut NoCache::new(), &[], &q);
+        let sampled = range_query(on, &mut on_cells, &sources, &q);
+        let reference = range_query(budget, &mut budget_cells, &[], &q);
+        eprintln!(
+            "{centre:?}, layer {}: {radius:.3} ly, {} systems and the budget's {}",
+            layer.letter(),
+            sampled.systems().len(),
+            reference.systems().len()
+        );
         assert_eq!(
             sampled.census().complete_down_to(),
             Some(layer),
@@ -237,9 +312,8 @@ fn volume(on: &Galaxy, budget: &Galaxy, centre: &GalacticPosition) -> Volume {
                     StandsIn::Thinned => c.binary_classes += 1,
                     StandsIn::Nothing => c.type_ia += 1,
                 },
-                SystemOrigin::CentreMember { .. } | SystemOrigin::GlobalListMember { .. } => {
-                    panic!("{:?}: no such source is registered", hit.id())
-                }
+                SystemOrigin::CentreMember { .. } => c.centre += 1,
+                SystemOrigin::GlobalListMember { .. } => c.listed += 1,
             }
         }
         for ((population, _), n) in per_feature {
@@ -321,20 +395,21 @@ fn count_budget(
     );
 }
 
-/// The twelve test volumes' centres in `galaxy`: [`FIXED`]'s, then an arm's ridge at the Sun's
-/// radius, and the nursery, the oldest sub-disc's open cluster and the globular nearest the Sun's
-/// place.
-fn volumes(galaxy: &Galaxy) -> Vec<(String, GalacticPosition)> {
+/// The thirteen test volumes' centres in `galaxy`, each with its sizing: [`FIXED`]'s, then an
+/// arm's ridge at the Sun's radius, and the nursery, the oldest sub-disc's open cluster and the
+/// globular nearest the Sun's place, each by the budget, and the galactic centre by its census.
+fn volumes(galaxy: &Galaxy) -> Vec<(String, GalacticPosition, Sizing)> {
     let place = |at: [f64; 3]| GalacticPosition::from_light_years(at).expect("in the cube");
     let sun = place(FIXED[0].1);
-    let mut out: Vec<(String, GalacticPosition)> = FIXED
+    let mut out: Vec<(String, GalacticPosition, Sizing)> = FIXED
         .iter()
-        .map(|&(name, at)| (name.to_owned(), place(at)))
+        .map(|&(name, at)| (name.to_owned(), place(at), Sizing::Budget))
         .collect();
     let (sin, cos) = math::sin_cos(galaxy.fields().arms().ridge_azimuth(26_000.0, 0));
     out.push((
         "an arm's ridge at the Sun's radius".to_owned(),
         place([26_000.0 * cos, 26_000.0 * sin, 0.0]),
+        Sizing::Budget,
     ));
     for (name, process) in [
         ("the nursery nearest the Sun", FeatureProcess::Nursery),
@@ -353,8 +428,13 @@ fn volumes(galaxy: &Galaxy) -> Vec<(String, GalacticPosition)> {
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .expect("the process has features");
-        out.push((name.to_owned(), nearest.1));
+        out.push((name.to_owned(), nearest.1, Sizing::Budget));
     }
+    out.push((
+        "the galactic centre".to_owned(),
+        GalacticPosition::ORIGIN,
+        Sizing::Census,
+    ));
     out
 }
 
@@ -380,14 +460,40 @@ fn shown(z: Option<(f64, f64)>) -> String {
     z.map_or_else(|| "-".to_owned(), |(z, _)| format!("{z:.2}"))
 }
 
-/// P09.T38's budgets, part two, under every 27 hold (module documentation): in each of the twelve
-/// volumes, each layer and each population, the field against the budget's records it keeps; and
-/// where the volume holds many features, the members and the binary classes against the share
-/// the field share takes (α = 10⁻³ over every test); the carve-out's claims and the classes'
-/// systems that stand in for them, printed. The centre's volume is not run: its members are
-/// registered by p10-list-registration.
+/// Each population's counts summed over the volumes, printed.
+fn print_totals(totals: &BTreeMap<Population, Counts>) {
+    for (population, t) in totals {
+        eprintln!(
+            "{}: budget {}, field {} (mean {:.1}), members {} of {} features, carved classes {}, \
+             binary classes {}, Type Ia {}, thinned {} (the field share's {:.1}), claimed {} ({} \
+             displaced), the centre's members {}, the streams' and cores' {}",
+            population.name(),
+            t.budget,
+            t.field,
+            t.field_mean,
+            t.members,
+            t.features,
+            t.carved_classes,
+            t.binary_classes,
+            t.type_ia,
+            t.thinned,
+            t.replaced_mean,
+            t.claimed,
+            t.claimed_displaced,
+            t.centre,
+            t.listed
+        );
+    }
+}
+
+/// P09.T38's budgets, part two, under every 27 hold (module documentation): in each of the
+/// thirteen volumes, the centre's among them, each layer and each population, the field against
+/// the budget's records it keeps; and where the volume holds many features, the members and the
+/// binary classes against the share the field share takes (α = 10⁻³ over every test); the
+/// carve-out's claims and the classes' systems that stand in for them, and the global list's
+/// members, printed.
 #[test]
-#[ignore = "slow: twelve volumes' range queries under every 27 hold and the budget (one on wasm)"]
+#[ignore = "slow: thirteen volumes' range queries under every 27 hold and the budget (one on wasm)"]
 fn the_field_members_and_catalogue_hold_each_population_s_budget() {
     let on = milky_way(GalaxyRules::every_27_hold());
     let budget = milky_way(GalaxyRules {
@@ -396,7 +502,8 @@ fn the_field_members_and_catalogue_hold_each_population_s_budget() {
         ..GalaxyRules::every_27_hold()
     });
     let volumes = volumes(&on);
-    assert_eq!(volumes.len(), 12);
+    assert_eq!(volumes.len(), 13);
+    let tubes = Tubes::new(&on);
     // wasm32-wasip1 has no threads: the Sun's place alone there, whose census takes minutes on one.
     let volumes = if cfg!(target_family = "wasm") {
         &volumes[..1]
@@ -404,17 +511,18 @@ fn the_field_members_and_catalogue_hold_each_population_s_budget() {
         &volumes[..]
     };
     let counted = in_shares(volumes.len(), SHARES, |k| {
-        volume(&on, &budget, &volumes[k].1)
+        volume((&on, &budget), (&volumes[k].1, volumes[k].2), &tubes)
     });
     let tests = 2 * counted.iter().map(BTreeMap::len).sum::<usize>();
     let alpha = ALPHA / f64::from(u32::try_from(tests).unwrap());
     let n = real;
     let mut totals: BTreeMap<Population, Counts> = BTreeMap::new();
-    for ((name, _), counts) in volumes.iter().zip(&counted) {
+    for ((name, _, _), counts) in volumes.iter().zip(&counted) {
         eprintln!("{name}:");
         eprintln!(
             "| layer | population | budget | field | its mean | members | features | carved \
-             classes | binary classes | Type Ia | thinned | claimed | field z | features z |"
+             classes | binary classes | Type Ia | thinned | claimed | centre | listed | field z | \
+             features z |"
         );
         let (mut claimed, mut displaced, mut carved) = (0, 0, 0);
         for (&(layer, population), c) in counts {
@@ -425,7 +533,7 @@ fn the_field_members_and_catalogue_hold_each_population_s_budget() {
                 n(c.member_squares + c.binary_classes) + c.replaced_mean,
             );
             eprintln!(
-                "| {} | {} | {} | {} | {:.1} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} | {:.1} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
                 layer.letter(),
                 population.name(),
                 c.budget,
@@ -438,6 +546,8 @@ fn the_field_members_and_catalogue_hold_each_population_s_budget() {
                 c.type_ia,
                 c.thinned,
                 c.claimed,
+                c.centre,
+                c.listed,
                 shown(field),
                 shown(features)
             );
@@ -461,26 +571,7 @@ fn the_field_members_and_catalogue_hold_each_population_s_budget() {
              collapses' and the variables' systems {carved}"
         );
     }
-    for (population, t) in &totals {
-        eprintln!(
-            "{}: budget {}, field {} (mean {:.1}), members {} of {} features, carved classes {}, \
-             binary classes {}, Type Ia {}, thinned {} (the field share's {:.1}), claimed {} ({} \
-             displaced)",
-            population.name(),
-            t.budget,
-            t.field,
-            t.field_mean,
-            t.members,
-            t.features,
-            t.carved_classes,
-            t.binary_classes,
-            t.type_ia,
-            t.thinned,
-            t.replaced_mean,
-            t.claimed,
-            t.claimed_displaced
-        );
-    }
+    print_totals(&totals);
     for population in POPULATIONS {
         assert!(
             cfg!(target_family = "wasm") || totals.contains_key(&population),
