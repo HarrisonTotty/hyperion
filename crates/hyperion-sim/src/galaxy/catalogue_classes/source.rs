@@ -524,7 +524,10 @@ const E: LayerSet = LayerSet::EMPTY.with(Layer::E);
 /// accretors of earlier transfer that grew past the core-collapse mass; a neutron-star merger's E;
 /// and a stellar merger's any (P11.T8). A test holds every generated member to its set.
 #[must_use]
-fn member_layers(class: ClassId, tables: BinaryTableRules) -> Option<&'static [LayerSet]> {
+pub(crate) fn member_layers(
+    class: ClassId,
+    tables: BinaryTableRules,
+) -> Option<&'static [LayerSet]> {
     const D: LayerSet = LayerSet::EMPTY.with(Layer::D);
     const SURVIVOR: LayerSet = LayerSet::EMPTY
         .with(Layer::A)

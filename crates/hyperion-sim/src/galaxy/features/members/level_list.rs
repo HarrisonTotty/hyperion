@@ -43,13 +43,14 @@
 
 use std::num::NonZeroU16;
 
-use crate::coords::{GalacticDisplacement, GalacticPosition};
+use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::binary::feature::{
     FeatureBinaries, ListedBinary, is_listed_binary,
 };
+use crate::galaxy::catalogue_classes::source::member_layers;
 use crate::galaxy::catalogue_classes::{ClassId, FEATURE_LEVEL_LIST_ORDER};
-use crate::galaxy::query::LayerCounts;
+use crate::galaxy::query::{LayerCounts, LayerSet};
 use crate::id::{CentreMemberId, MemberSlot, SystemId, SystemIdKind};
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
@@ -276,29 +277,13 @@ impl FeatureLevelList {
         }
     }
 
-    /// The list of `feature`'s recent classes alone (P09.T36), without plan 11's binary classes
-    /// after them, or `None` for a feature that registers none: what the range query reads
-    /// (P09.T37). Its recent entries are [`of`](Self::of)'s, index for index, since the recent
-    /// classes come first in the list order and the counts are clamped in that order, so the
-    /// classes after them move none of theirs.
+    /// The list of `feature` ([`of`](Self::of)) if it registers any class, plan 09's recent
+    /// classes (P09.T36) or plan 11's binary classes (P11.T8.f): what the range query reads
+    /// (P09.T37); `None` for a feature that registers none.
     #[must_use]
-    pub(crate) fn recent_of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
-        let stars = FeatureStars::listing(galaxy, feature)?;
-        let classes = stars.list_classes(galaxy);
-        if classes.is_empty() {
-            return None;
-        }
-        Some(Self {
-            stars: Some(Box::new(stars)),
-            ..Self::with_classes(
-                galaxy,
-                feature.id().object_word(),
-                feature.position(),
-                MemberZero::Absent,
-                ListIndex::Feature,
-                classes,
-            )
-        })
+    pub(crate) fn listed_of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
+        let list = Self::of(galaxy, feature);
+        (!list.classes.is_empty()).then_some(list)
     }
 
     /// The list keyed by the feature word `word` about `centre`, with or without member zero,
@@ -527,39 +512,58 @@ impl FeatureLevelList {
             .filter_map(move |entry| self.binary_entry(galaxy, entry.index()))
     }
 
-    /// The stars of a catalogue feature whose list registers its recent classes (P09.T36), which
-    /// draw their entries: `None` for any other list, the galactic centre's among them.
+    /// The velocity a catalogue feature's entries move at, its bulk motion, which its recent
+    /// classes' and plan 11's binary classes' members share (P09.T37): `None` for a list of
+    /// neither, the galactic centre's among them.
     #[must_use]
-    pub(crate) fn recent_stars(&self) -> Option<&FeatureStars> {
-        self.stars.as_deref()
+    pub(crate) fn entries_velocity(&self) -> Option<GalacticVelocity> {
+        self.stars
+            .as_deref()
+            .map(FeatureStars::velocity)
+            .or_else(|| self.binaries.as_deref().map(|b| b.host().velocity()))
     }
 
-    /// The census's share of a catalogue feature's recent classes in the ball of `radius` about
-    /// `centre` at the epoch, added to `counts` by the layer each class's primaries are of
-    /// ([`RecentClass::layer`]; P09.T37): each class's expected candidates times the share of its
-    /// profile between `d − radius` and `d + radius` from the feature's centre, `d` the ball's
-    /// distance from it, a shell that holds the ball, so the count errs high, as
-    /// [`SystemSource`](crate::galaxy::query::SystemSource)'s contract allows. Nothing for a list
-    /// that registers no recent class. Classes in list order.
-    pub(crate) fn add_recent_expected_within(
+    /// The layers the census counts the entries of `class`, one of the list's, in (P09.T37): a
+    /// recent class's its primaries' ([`RecentClass::layer`]), one of plan 11's its catalogue
+    /// class's (the class source's `member_layers`), none for another class.
+    #[must_use]
+    pub(crate) fn class_layers(galaxy: &Galaxy, class: ClassId) -> LayerSet {
+        match RecentClass::of(class) {
+            Some(recent) => LayerSet::EMPTY.with(recent.layer()),
+            None => member_layers(class, galaxy.rules().binary_tables)
+                .and_then(|sets| sets.first().copied())
+                .unwrap_or(LayerSet::EMPTY),
+        }
+    }
+
+    /// The census's share of a catalogue feature's listed classes in the ball of `radius` about
+    /// `centre` at the epoch, added to `counts` in each layer [`class_layers`](Self::class_layers)
+    /// gives its class (P09.T37): each class's expected candidates times the share of its profile
+    /// between `d − radius` and `d + radius` from the feature's centre, `d` the ball's distance from
+    /// it, a shell that holds the ball, so the count errs high, as
+    /// [`SystemSource`](crate::galaxy::query::SystemSource)'s contract allows. Nothing for the
+    /// galactic centre's list, whose entries draw their own places. Classes in list order.
+    pub(crate) fn add_expected_within(
         &self,
-        centre: &GalacticPosition,
-        radius: LightYears,
+        galaxy: &Galaxy,
+        (centre, radius): (&GalacticPosition, LightYears),
         counts: &mut LayerCounts,
     ) {
-        if self.stars.is_none() {
+        if self.entries_velocity().is_none() {
             return;
         }
         let distance = LightYears::from(self.centre.distance_to(centre)).value();
         let radius = radius.value();
         for class in &self.classes {
-            let Some(recent) = RecentClass::of(class.class) else {
+            let layers = Self::class_layers(galaxy, class.class);
+            if layers.is_empty() {
                 continue;
-            };
+            }
             let share = class.profile.cumulative(distance + radius)
                 - class.profile.cumulative(distance - radius);
-            let layer = recent.layer();
-            counts.set(layer, counts.get(layer) + class.expected * share.max(0.0));
+            for layer in layers.iter() {
+                counts.set(layer, counts.get(layer) + class.expected * share.max(0.0));
+            }
         }
     }
 

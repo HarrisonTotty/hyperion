@@ -23,20 +23,22 @@
 //!
 //! - **The lists** (P09.T37). Under P09.T36's hold (`FEATURE_CLASSES_VERSION`) a feature's
 //!   feature-level list holds its recent classes, the recently dead and the luminous blue
-//!   variables its band-E cells give up, and an association, which has no nested grid, holds them
-//!   nowhere else. Each feature whose reach touches the sphere adds to the census each recent
-//!   class's expected candidates times the share of its profile in the shell about the feature's
-//!   centre that holds the sphere (`FeatureLevelList::add_recent_expected_within`), in the layer
-//!   its primaries are of. The list holds the recent classes alone, as the interior cache lends it
-//!   ([`FeatureInteriorCache::recent_list`]), so a query's census and hits build it once. An entry moves on one straight line, through its epoch position at the
-//!   feature's bulk velocity, on which its site lies at its death (P09.T36), before its death and
-//!   after it. `member_speed_bound` does not cover the lists, so a list has a pad of its own: its
-//!   entries lie within the feature's reach of its centre at the epoch and move at the bulk speed,
-//!   below [`UNBOUND_PAD_SPEED`], so the features looked up for the hits hold every list that can
-//!   reach the sphere. Each candidate's line is tested against the sphere before its class's test,
-//!   a lifetime and a star, is asked, and a kept entry is a hit as a member is
+//!   variables its band-E cells give up, and from 27 under P11.T8.f's (`FEATURE_BINARIES_VERSION`)
+//!   plan 11's binary classes after them, whose hosts the catalogue's classes give up; an
+//!   association, which has no nested grid, holds its members nowhere else. Each feature whose
+//!   reach touches the sphere adds to the census each listed class's expected candidates times the
+//!   share of its profile in the shell about the feature's centre that holds the sphere
+//!   (`FeatureLevelList::add_expected_within`), in each layer its members can be of. The interior
+//!   cache lends the list ([`FeatureInteriorCache::list`]), so a query's census and hits build it
+//!   once. An entry moves on one straight line, through its epoch position at the feature's bulk
+//!   velocity, on which a death's site lies (P09.T36), before its death and after it.
+//!   `member_speed_bound` does not cover the lists, so a list has a pad of its own: its entries lie
+//!   within the feature's reach of its centre at the epoch and move at the bulk speed, below
+//!   [`UNBOUND_PAD_SPEED`], so the features looked up for the hits hold every list that can reach
+//!   the sphere. Each candidate's line is tested against the sphere before its class's draws and
+//!   test are asked, and a kept entry is a hit as a member is
 //!   ([`SystemOrigin::FeatureMember`](crate::galaxy::placement::SystemOrigin::FeatureMember)), its
-//!   ID resolved by [`resolve_member`](super::resolve_member). Below the hold's version no list
+//!   ID resolved by [`resolve_member`](super::resolve_member). Below both holds' versions no list
 //!   is read, bit for bit.
 //!
 //! The census and the hits are two calls of the query, so a caller that passes a keeping
@@ -70,8 +72,9 @@ use super::super::interior::LocalCell;
 use super::super::nested::{NestedCell, box_distance};
 use super::level_list::FeatureLevelList;
 use super::placement::FeatureInterior;
-use super::recent::{FeatureClassesRules, RecentClass};
+use super::recent::FeatureClassesRules;
 use super::{MemberRecord, local_offset};
+use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 
 /// Where a caller keeps feature interiors between queries (P09.T23).
 ///
@@ -91,15 +94,11 @@ pub trait FeatureInteriorCache {
         FeatureInterior::grid_reach_bound(galaxy, feature)
     }
 
-    /// The list of `feature`'s recent classes in `galaxy` (P09.T37), which an implementation may
-    /// keep: exactly what `FeatureLevelList::recent_of` builds, `None` for a feature that registers
-    /// none. A range query's census and its hits both read it.
-    fn recent_list(
-        &self,
-        galaxy: &Galaxy,
-        feature: &FeatureRecord,
-    ) -> Option<Arc<FeatureLevelList>> {
-        FeatureLevelList::recent_of(galaxy, feature).map(Arc::new)
+    /// `feature`'s feature-level list in `galaxy`, if it registers any class (P09.T37), which an
+    /// implementation may keep: exactly what `FeatureLevelList::listed_of` builds, `None` for a
+    /// feature that registers none. A range query's census and its hits both read it.
+    fn list(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureLevelList>> {
+        FeatureLevelList::listed_of(galaxy, feature).map(Arc::new)
     }
 }
 
@@ -187,17 +186,13 @@ impl FeatureInteriorCache for KeepInteriors<'_> {
     }
 
     /// The list it keeps, or the list built and kept.
-    fn recent_list(
-        &self,
-        galaxy: &Galaxy,
-        feature: &FeatureRecord,
-    ) -> Option<Arc<FeatureLevelList>> {
+    fn list(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureLevelList>> {
         self.check(galaxy);
         self.lists
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(feature.id())
-            .or_insert_with(|| FeatureLevelList::recent_of(galaxy, feature).map(Arc::new))
+            .or_insert_with(|| FeatureLevelList::listed_of(galaxy, feature).map(Arc::new))
             .clone()
     }
 }
@@ -523,13 +518,13 @@ impl SystemSource for FeatureMemberSource<'_> {
     fn expected_in_sphere(&self, galaxy: &Galaxy, sphere: &QuerySphere) -> LayerCounts {
         let mut counts = LayerCounts::ZERO;
         let radius = sphere.radius();
-        let lists = galaxy.rules().feature_classes;
+        let lists = lists_read(galaxy);
         let mut cells = Vec::new();
         for (feature, interior) in self.near(galaxy, sphere.centre(), radius, lists) {
             if lists == FeatureClassesRules::Listed
-                && let Some(list) = self.interiors.recent_list(galaxy, &feature)
+                && let Some(list) = self.interiors.list(galaxy, &feature)
             {
-                list.add_recent_expected_within(sphere.centre(), radius, &mut counts);
+                list.add_expected_within(galaxy, (sphere.centre(), radius), &mut counts);
             }
             let Some(interior) = interior else {
                 continue;
@@ -564,13 +559,13 @@ impl SystemSource for FeatureMemberSource<'_> {
         // builds), so a member that can reach the sphere by `t` lies in a feature whose reach
         // touches it padded so.
         let padded = lookup_radius(sphere);
-        let lists = galaxy.rules().feature_classes;
+        let lists = lists_read(galaxy);
         let mut members = Vec::new();
         for (feature, interior) in self.near(galaxy, sphere.centre(), padded, lists) {
             if lists == FeatureClassesRules::Listed
-                && let Some(list) = self.interiors.recent_list(galaxy, &feature)
+                && let Some(list) = self.interiors.list(galaxy, &feature)
             {
-                recent_hits(galaxy, (&feature, &list), sphere, layers, out);
+                list_hits(galaxy, (&feature, &list), sphere, layers, out);
             }
             let Some(interior) = interior else {
                 continue;
@@ -741,24 +736,42 @@ fn drifted_from(
         .expect("a member moving under 3,000 km/s over the clock window stays addressable")
 }
 
-/// The hits in `sphere` among `layers` of `feature`'s recent entries, its `list` (module
-/// documentation, "The lists"), appended to `out` in index order.
+/// Whether the features' lists are read in `galaxy` (module documentation, "The lists"): under the
+/// new arm of P09.T36's hold or of P11.T8.f's, as [`FeatureClassesRules::Listed`], whose features'
+/// lists may hold an entry; [`FeatureClassesRules::Unlisted`] below both, where none does.
+#[must_use]
+fn lists_read(galaxy: &Galaxy) -> FeatureClassesRules {
+    match (
+        galaxy.rules().feature_classes,
+        galaxy.rules().feature_binaries,
+    ) {
+        (FeatureClassesRules::Unlisted, FeatureBinariesRules::Unlisted) => {
+            FeatureClassesRules::Unlisted
+        }
+        (FeatureClassesRules::Listed, _) | (_, FeatureBinariesRules::Listed) => {
+            FeatureClassesRules::Listed
+        }
+    }
+}
+
+/// The hits in `sphere` among `layers` of `feature`'s listed entries, its `list`'s, of its recent
+/// and of plan 11's binary classes (module documentation, "The lists"), appended to `out` in index
+/// order.
 ///
 /// # Panics
 ///
 /// In debug builds, if the feature's bulk speed is not below [`UNBOUND_PAD_SPEED`], which the
 /// features' lookup assumes, or an entry's member is not on its candidate's line.
-fn recent_hits(
+fn list_hits(
     galaxy: &Galaxy,
     (feature, list): (&FeatureRecord, &FeatureLevelList),
     sphere: &QuerySphere,
     layers: LayerSet,
     out: &mut Vec<SystemHit>,
 ) {
-    let Some(stars) = list.recent_stars() else {
+    let Some(velocity) = list.entries_velocity() else {
         return;
     };
-    let velocity = stars.velocity();
     let speed = KilometresPerSecond::from(velocity.speed());
     debug_assert!(
         speed.value() < UNBOUND_PAD_SPEED.value(),
@@ -772,20 +785,17 @@ fn recent_hits(
     }
     let elapsed = Seconds::new(sphere.time().since_epoch().as_seconds_f64());
     for entry in list.entries() {
-        let Some(class) = RecentClass::of(entry.class()) else {
-            continue;
-        };
-        if !layers.contains(class.layer()) {
+        let possible = FeatureLevelList::class_layers(galaxy, entry.class());
+        if !possible.iter().any(|layer| layers.contains(layer)) {
             continue;
         }
         let at = drifted_from(entry.position(), velocity, sphere.time(), elapsed);
         if LightYears::from(sphere.centre().distance_to(&at)).value() > sphere.radius().value() {
             continue;
         }
-        let Some(recent) = list.recent_entry(galaxy, entry.index()) else {
+        let Some(member) = list.member(galaxy, entry.index()) else {
             continue;
         };
-        let member = recent.member();
         debug_assert!(
             member.record().epoch_position() == entry.position() && member.velocity() == velocity,
             "{:?}: an entry's member moves on its candidate's line",

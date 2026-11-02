@@ -286,13 +286,17 @@ impl FeatureStars {
         let formed = SolarMasses::new(born.value() * survival);
         let band_e = formed.value() / galaxy.mean_formed_mass().value()
             * galaxy.shares().share(MassBand::E, population);
+        // Tabulated now, so that its list's classes, plan 11's among them, share one table
+        // (`ClassProfile::tabulated`; P09.T37: a range query reads some thousand lists near the
+        // inner disc).
         let profile = ClassProfile::new(
             ProfileShape::Plummer {
                 scale: half_mass / PLUMMER_HALF_MASS_RATIO,
             },
             feature.reach().value(),
             1.0,
-        );
+        )
+        .tabulated();
         let mut stars = Self {
             feature: *feature,
             population,
@@ -475,15 +479,9 @@ impl FeatureStars {
     /// its profile.
     #[must_use]
     pub(crate) fn list_classes(&self, galaxy: &Galaxy) -> Vec<ListClass> {
-        let classes = self.classes(galaxy);
-        // One table for every class, made once (`ClassProfile::tabulated`).
-        let profile = match classes.as_slice() {
-            [] | [_] => self.profile.clone(),
-            [_, _, ..] => self.profile.clone().tabulated(),
-        };
-        classes
+        self.classes(galaxy)
             .into_iter()
-            .map(|(class, expected)| ListClass::new(class.class(), expected, profile.clone()))
+            .map(|(class, expected)| ListClass::new(class.class(), expected, self.profile.clone()))
             .collect()
     }
 

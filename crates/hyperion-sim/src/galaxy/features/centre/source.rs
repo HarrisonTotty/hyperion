@@ -23,7 +23,9 @@
 //!   below) misses the sphere.
 //! - **The recent entries** (P09.T37). After the victims, under P09.T36's hold
 //!   (`FEATURE_CLASSES_VERSION`), the list holds the recently dead and the luminous blue variables
-//!   that the band-E cells give up. The census adds each class's expected candidates times the
+//!   that the band-E cells give up, and from 27 under P11.T8.f's (`FEATURE_BINARIES_VERSION`)
+//!   plan 11's binary classes after them, which are placed the same way, each counted in the
+//!   layers its class's members can be of. The census adds each class's expected candidates times the
 //!   share of its tracer's profile in the shell about the black hole that holds the sphere, in the
 //!   layer its primaries are of. Each candidate is placed first, its draws up to its velocity, and
 //!   only one whose straight line lies inside the sphere at its time is asked its class's test, a
@@ -106,11 +108,13 @@ use crate::units::{GravitationalParameter, KilometresPerSecond, LightYears, Seco
 use super::super::members::source::part_of_key;
 use super::super::nested::{NestedCell, NestedLevel, box_distance};
 use super::CentreClassKind;
+use super::binaries::CentreBinaryPlace;
 use super::events::victims::{CentreVictims, TidalDisruptionVictim};
 use super::members::{CentreMemberRecord, CentrePlacement};
 use super::profile::REACH;
 use super::recent::{CentrePlace, CentreRecent, TracerProfiles};
 use super::{BuildCentreError, CentreProfile, CentreTracer};
+use crate::galaxy::catalogue_classes::source::member_layers;
 use crate::stellar::Composition;
 
 /// The bands from the coarsest down, the order the query walks its layers.
@@ -445,7 +449,8 @@ pub struct CentreMemberSource<'a> {
 struct RecentList {
     recent: CentreRecent,
     profiles: TracerProfiles,
-    places: OnceLock<Vec<CentrePlace>>,
+    /// The recent classes' places and plan 11's binary classes' (P11.T8.f).
+    places: OnceLock<(Vec<CentrePlace>, Vec<CentreBinaryPlace>)>,
 }
 
 impl std::fmt::Debug for CentreMemberSource<'_> {
@@ -496,10 +501,12 @@ impl<'a> CentreMemberSource<'a> {
             .get_or_init(|| {
                 let model = self.placement.model();
                 let recent = CentreRecent::new(self.galaxy, model, self.victims.count());
-                (!recent.expected().is_empty()).then(|| RecentList {
-                    recent,
-                    profiles: TracerProfiles::of(model),
-                    places: OnceLock::new(),
+                (!recent.expected().is_empty() || !recent.binaries().is_empty()).then(|| {
+                    RecentList {
+                        recent,
+                        profiles: TracerProfiles::of(model),
+                        places: OnceLock::new(),
+                    }
                 })
             })
             .as_ref()
@@ -528,35 +535,60 @@ impl<'a> CentreMemberSource<'a> {
         let Some(list) = self.recent() else {
             return;
         };
-        let places = list.places.get_or_init(|| {
-            let places = list.recent.places(self.galaxy, self.placement.model());
+        let (places, binaries) = list.places.get_or_init(|| {
+            let model = self.placement.model();
+            let places = list.recent.places(self.galaxy, model);
+            let binaries = list.recent.binaries().places(
+                self.galaxy,
+                model,
+                (&list.recent.list(self.galaxy), &list.profiles),
+            );
             debug_assert!(
                 places
                     .iter()
-                    .all(|p| p.velocity().speed().value() < SPEED_OF_LIGHT),
-                "the centre's recent entries move below light's speed"
+                    .map(CentrePlace::velocity)
+                    .chain(binaries.iter().map(CentreBinaryPlace::velocity))
+                    .all(|v| v.speed().value() < SPEED_OF_LIGHT),
+                "the centre's listed entries move below light's speed"
             );
-            places
+            (places, binaries)
         });
+        let inside = |position: &GalacticPosition, velocity| {
+            let at = if t == UniverseTime::EPOCH {
+                *position
+            } else {
+                moved(position, velocity, t)
+            };
+            let distance = LightYears::from(sphere.centre().distance_to(&at));
+            (distance.value() <= sphere.radius().value()).then_some((at, distance))
+        };
+        let mut push = |record: &SystemRecord, (at, distance)| {
+            if record.existence_at(t) == Existence::Exists && layers.contains(record.layer()) {
+                out.push(SystemHit::new(*record, at, distance));
+            }
+        };
         for place in places {
             if !layers.contains(place.class().layer()) {
                 continue;
             }
-            let at = if t == UniverseTime::EPOCH {
-                *place.position()
-            } else {
-                moved(place.position(), place.velocity(), t)
-            };
-            let distance = LightYears::from(sphere.centre().distance_to(&at));
-            if distance.value() > sphere.radius().value() {
+            if let Some(hit) = inside(place.position(), place.velocity())
+                && let Some(entry) = place.kept(self.galaxy)
+            {
+                push(entry.member().record(), hit);
+            }
+        }
+        let tables = self.galaxy.rules().binary_tables;
+        for place in binaries {
+            let possible = member_layers(place.class(), tables)
+                .and_then(|sets| sets.first().copied())
+                .unwrap_or(LayerSet::EMPTY);
+            if !possible.iter().any(|layer| layers.contains(layer)) {
                 continue;
             }
-            let Some(entry) = place.kept(self.galaxy) else {
-                continue;
-            };
-            let record = entry.member().record();
-            if record.existence_at(t) == Existence::Exists && layers.contains(record.layer()) {
-                out.push(SystemHit::new(*record, at, distance));
+            if let Some(hit) = inside(place.position(), place.velocity())
+                && let Some((_, member)) = place.kept(self.galaxy)
+            {
+                push(member.record(), hit);
             }
         }
     }
@@ -852,6 +884,12 @@ impl SystemSource for CentreMemberSource<'_> {
             && let Some(list) = self.recent()
         {
             list.recent.add_expected_within(
+                &list.profiles,
+                (from_black_hole, sphere.radius()),
+                &mut counts,
+            );
+            list.recent.binaries().add_expected_within(
+                galaxy,
                 &list.profiles,
                 (from_black_hole, sphere.radius()),
                 &mut counts,

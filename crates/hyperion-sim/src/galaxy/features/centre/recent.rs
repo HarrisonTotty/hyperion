@@ -155,7 +155,6 @@ impl CentreRecent {
     }
 
     /// The centre's hosts of plan 11's binary classes (P11.T8.f).
-    #[cfg(test)]
     #[must_use]
     pub(crate) const fn binaries(&self) -> &CentreBinaries {
         &self.binaries
@@ -267,21 +266,12 @@ impl CentreRecent {
         (distance, radius): (LightYears, LightYears),
         counts: &mut LayerCounts,
     ) {
-        let (distance, radius) = (distance.value(), radius.value());
-        let reach = REACH.value();
         for (class, parts) in &self.classes {
             let layer = class.layer();
             for part in parts {
-                let profile =
-                    profiles.of_tracer(age_components()[usize::from(part.component)].tracer);
-                let whole = profile.fraction_within(reach);
-                let (inner, outer) = ((distance - radius).max(0.0), (distance + radius).min(reach));
-                if outer <= inner {
-                    continue;
-                }
-                let share =
-                    (profile.fraction_within(outer) - profile.fraction_within(inner)) / whole;
-                counts.set(layer, counts.get(layer) + part.expected * share.max(0.0));
+                let tracer = age_components()[usize::from(part.component)].tracer;
+                let share = profiles.shell_share(tracer, (distance, radius));
+                counts.set(layer, counts.get(layer) + part.expected * share);
             }
         }
     }
@@ -320,6 +310,27 @@ impl TracerProfiles {
             .position(|&t| t == tracer)
             .expect("one of the four tracers");
         &self.0[index]
+    }
+
+    /// The share of `tracer`'s profile inside the reach that lies between `distance − radius` and
+    /// `distance + radius` from the black hole: of an entry placed on it ([`position_on`]), the
+    /// odds it lies in that shell.
+    #[must_use]
+    pub(crate) fn shell_share(
+        &self,
+        tracer: CentreTracer,
+        (distance, radius): (LightYears, LightYears),
+    ) -> f64 {
+        let (distance, radius) = (distance.value(), radius.value());
+        let reach = REACH.value();
+        let profile = self.of_tracer(tracer);
+        let (inner, outer) = ((distance - radius).max(0.0), (distance + radius).min(reach));
+        if outer <= inner {
+            return 0.0;
+        }
+        ((profile.fraction_within(outer) - profile.fraction_within(inner))
+            / profile.fraction_within(reach))
+        .max(0.0)
     }
 }
 
@@ -687,7 +698,9 @@ pub(super) fn centre_class(model: &CentreModel, component: u8) -> Option<CentreC
 }
 
 /// An entry's local position, ly about the black hole: its radius at a uniform's quantile of its
-/// component's tracer's profile inside the centre's reach ([`position_on`]), on `member.position`.
+/// component's tracer's profile inside the centre's reach ([`position_on`]), on `member.position`,
+/// its profile built afresh.
+#[cfg(test)]
 #[must_use]
 pub(super) fn position(
     model: &CentreModel,

@@ -389,8 +389,8 @@ pub struct KeptInteriors<'a> {
     shared: ClusterModelHandle<'a>,
     kept: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureInterior>>>>,
     reaches: Mutex<BTreeMap<FeatureId, Option<LightYears>>>,
-    /// The lists of the features' recent classes the job reads (P09.T37), built once a job: its
-    /// census and its hits read the same, some thousand of them near the inner disc.
+    /// The features' lists the job reads (P09.T37), built once a job: its census and its hits read
+    /// the same, some thousand of them near the inner disc.
     lists: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureLevelList>>>>,
 }
 
@@ -430,17 +430,13 @@ impl FeatureInteriorCache for KeptInteriors<'_> {
             .or_insert_with(|| self.shared.grid_reach(galaxy, feature))
     }
 
-    /// Lends the list of `feature`'s recent classes: the job's own, built once.
-    fn recent_list(
-        &self,
-        galaxy: &Galaxy,
-        feature: &FeatureRecord,
-    ) -> Option<Arc<FeatureLevelList>> {
+    /// Lends `feature`'s feature-level list: the job's own, built once.
+    fn list(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureLevelList>> {
         self.lists
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .entry(feature.id())
-            .or_insert_with(|| self.shared.recent_list(galaxy, feature))
+            .or_insert_with(|| self.shared.list(galaxy, feature))
             .clone()
     }
 }

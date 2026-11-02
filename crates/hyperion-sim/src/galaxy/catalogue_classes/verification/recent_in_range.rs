@@ -16,6 +16,9 @@
 //! 10's P10.T10.b): a feature's on its member's line, to the rounding plan 03's drift and the
 //! line's differ by, and a centre entry on its `CentrePath`, bit for bit, both at its velocity.
 //!
+//! From 27 the lists hold plan 11's binary classes after them (P11.T8.f), whose hosts the catalogue's
+//! classes give up; they are asked the same way, each entry of a layer the census admits.
+//!
 //! Each sphere's entries are found by brute force: every feature whose reach comes within 100 ly of
 //! the sphere, far beyond any feature's motion over the clock window, and its whole list.
 
@@ -29,7 +32,9 @@ use super::{KeepCells, KeepClassCells, Tubes, milky_way};
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::ages::SubDisc;
-use crate::galaxy::catalogue_classes::CatalogueClassSource;
+use crate::galaxy::catalogue_classes::binary::feature::is_listed_binary;
+use crate::galaxy::catalogue_classes::source::member_layers;
+use crate::galaxy::catalogue_classes::{CatalogueClassSource, ClassId};
 use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord, NoFeatureCache};
 use crate::galaxy::features::centre::events::victims::victim_count;
 use crate::galaxy::features::centre::members::resolve_centre_member_with;
@@ -100,35 +105,36 @@ impl Listed {
     }
 }
 
-/// `feature`'s recent entries in `galaxy`, by ID.
-fn feature_entries(galaxy: &Galaxy, feature: &FeatureRecord) -> BTreeMap<SystemId, Listed> {
-    FeatureLevelList::of(galaxy, feature)
-        .recent_entries(galaxy)
-        .map(|entry| {
-            let member = entry.member();
-            (
-                member.record().id(),
-                Listed {
-                    record: *member.record(),
-                    velocity: member.velocity(),
-                },
-            )
-        })
-        .collect()
+/// Which entries of a list a test asks about: plan 09's recent classes (P09.T36), or plan 11's
+/// binary classes after them (P11.T8.f, from 27).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Recent,
+    Binary,
 }
 
-/// The centre's recent entries in `galaxy`, by ID: none where it lists no class.
-fn centre_entries(galaxy: &Galaxy) -> BTreeMap<SystemId, Listed> {
-    let model = galaxy.centre().expect("the Milky Way's centre builds");
-    let victims = victim_count(galaxy).expect("the Milky Way's black hole has its disruptions");
-    let recent = CentreRecent::new(galaxy, model, victims);
-    recent
-        .list(galaxy)
-        .entries()
+impl Kind {
+    /// Whether `class`, a list's class, is of this kind.
+    fn holds(self, class: ClassId) -> bool {
+        match self {
+            Self::Recent => RecentClass::of(class).is_some(),
+            Self::Binary => is_listed_binary(class),
+        }
+    }
+}
+
+/// `feature`'s entries of `kind` in `galaxy` that their classes keep, by ID: each the member its
+/// ID resolves to.
+fn feature_entries(
+    galaxy: &Galaxy,
+    feature: &FeatureRecord,
+    kind: Kind,
+) -> BTreeMap<SystemId, Listed> {
+    let list = FeatureLevelList::of(galaxy, feature);
+    list.entries()
+        .filter(|entry| kind.holds(entry.class()))
         .filter_map(|entry| {
-            let class = RecentClass::of(entry.class())?;
-            let kept = recent.entry(galaxy, model, class, entry.index())?;
-            let member = kept.member();
+            let member = list.member(galaxy, entry.index())?;
             Some((
                 member.record().id(),
                 Listed {
@@ -140,9 +146,40 @@ fn centre_entries(galaxy: &Galaxy) -> BTreeMap<SystemId, Listed> {
         .collect()
 }
 
-/// Whether `id` names an entry of a recent class on a list, a catalogue feature's or the centre's:
-/// a feature-level index past the centre's black hole and its victims, of a recent class.
-fn is_recent_slot(galaxy: &Galaxy, id: SystemId) -> bool {
+/// The centre's entries of `kind` in `galaxy` that their classes keep, by ID: none where it lists
+/// no class.
+fn centre_entries(galaxy: &Galaxy, kind: Kind) -> BTreeMap<SystemId, Listed> {
+    let model = galaxy.centre().expect("the Milky Way's centre builds");
+    let victims = victim_count(galaxy).expect("the Milky Way's black hole has its disruptions");
+    let recent = CentreRecent::new(galaxy, model, victims);
+    recent
+        .list(galaxy)
+        .entries()
+        .filter(|entry| kind.holds(entry.class()))
+        .filter_map(|entry| {
+            let member = match RecentClass::of(entry.class()) {
+                Some(class) => *recent.entry(galaxy, model, class, entry.index())?.member(),
+                None => {
+                    recent
+                        .binaries()
+                        .entry(galaxy, model, entry.class(), entry.index())?
+                        .1
+                }
+            };
+            Some((
+                member.record().id(),
+                Listed {
+                    record: *member.record(),
+                    velocity: member.velocity(),
+                },
+            ))
+        })
+        .collect()
+}
+
+/// Whether `id` names an entry of `kind` on a list, a catalogue feature's or the centre's: a
+/// feature-level index past the centre's black hole and its victims, of a class of `kind`.
+fn is_list_slot(galaxy: &Galaxy, id: SystemId, kind: Kind) -> bool {
     match id.kind() {
         SystemIdKind::FeatureMember(member) => {
             let MemberSlot::FeatureLevel { index } = member.slot() else {
@@ -151,7 +188,7 @@ fn is_recent_slot(galaxy: &Galaxy, id: SystemId) -> bool {
             FeatureCatalogue::resolve(galaxy, member.feature().into()).is_some_and(|feature| {
                 FeatureLevelList::of(galaxy, &feature)
                     .entry(index)
-                    .is_some_and(|entry| RecentClass::of(entry.class()).is_some())
+                    .is_some_and(|entry| kind.holds(entry.class()))
             })
         }
         SystemIdKind::Centre(member) => {
@@ -163,7 +200,7 @@ fn is_recent_slot(galaxy: &Galaxy, id: SystemId) -> bool {
             CentreRecent::new(galaxy, model, victims)
                 .list(galaxy)
                 .entry(index)
-                .is_some_and(|entry| RecentClass::of(entry.class()).is_some())
+                .is_some_and(|entry| kind.holds(entry.class()))
         }
         SystemIdKind::Grid(_)
         | SystemIdKind::Stream(_)
@@ -242,13 +279,21 @@ fn with_served<R>(galaxy: &Galaxy, run: impl FnOnce(&[&dyn SystemSource], Reads<
     run(&sources, reads)
 }
 
-/// A query of the sphere of `radius` about `centre` at `t`, down to layer D, where every recent
-/// entry's primary lies (a core collapse's and a variable's in E, a Type Ia's in D).
-fn query(centre: &GalacticPosition, radius: LightYears, t: UniverseTime) -> RangeQuery {
+/// A query of the sphere of `radius` about `centre` at `t`, down to the floor `kind`'s entries need:
+/// layer D for the recent classes, whose primaries lie in it or in E (a core collapse's and a
+/// variable's in E, a Type Ia's in D), layer A for plan 11's, a stellar merger's in any.
+///
+/// Plan 11's take the server's limit, 20,000, so that a sphere of a feature's reach admits its
+/// coarse layers alone; an entry of a layer the census leaves out is not asked for.
+fn query(centre: &GalacticPosition, radius: LightYears, t: UniverseTime, kind: Kind) -> RangeQuery {
+    let (floor, limit) = match kind {
+        Kind::Recent => (MassFloor::LayerD, 1 << 20),
+        Kind::Binary => (MassFloor::LayerA, 20_000),
+    };
     RangeQuery::builder(*centre, radius)
         .time(t)
-        .mass_floor(MassFloor::LayerD)
-        .limit(NonZeroU32::new(1 << 20).expect("non-zero"))
+        .mass_floor(floor)
+        .limit(NonZeroU32::new(limit).expect("non-zero"))
         .build()
         .expect("a sphere in the cube within the clock window")
 }
@@ -258,14 +303,15 @@ fn query(centre: &GalacticPosition, radius: LightYears, t: UniverseTime) -> Rang
 /// by ID ([`placed_by_id`]) puts elsewhere or moving otherwise, as text.
 fn check_sphere(
     (galaxy, cells, reads): (&Galaxy, &mut KeepCells, Reads<'_>),
-    sources: &[&dyn SystemSource],
+    (sources, kind): (&[&dyn SystemSource], Kind),
     listed: &BTreeMap<SystemId, Listed>,
     (centre, radius, t): (&GalacticPosition, LightYears, UniverseTime),
 ) -> (usize, Vec<String>) {
-    let q = query(centre, radius, t);
+    let q = query(centre, radius, t, kind);
     let result = range_query(galaxy, cells, sources, &q);
+    let admitted = result.census().layers();
     assert!(
-        result.census().layers().contains(Layer::D),
+        admitted.contains(Layer::D),
         "{radius:?} at {t:?}: the census admits layers D and E"
     );
     let mut seen: BTreeMap<SystemId, usize> = BTreeMap::new();
@@ -297,14 +343,15 @@ fn check_sphere(
                     hit.position()
                 ));
             }
-        } else if is_recent_slot(galaxy, hit.id()) {
-            faults.push(format!("{:?}: a recent slot no list keeps", hit.id()));
+        } else if is_list_slot(galaxy, hit.id(), kind) {
+            faults.push(format!("{:?}: a list's slot no list keeps", hit.id()));
         }
     }
     let mut inside = 0;
     for (id, entry) in listed {
         let returned = seen.get(id).copied().unwrap_or(0);
-        let want = usize::from(entry.inside(centre, radius, t));
+        let want =
+            usize::from(entry.inside(centre, radius, t) && admitted.contains(entry.record.layer()));
         inside += want;
         if returned != want {
             faults.push(format!(
@@ -319,12 +366,25 @@ fn check_sphere(
     (inside, faults)
 }
 
+/// The layers the census counts the entries of `class`, a list's class, in: a recent class's its
+/// primaries' ([`RecentClass::layer`]), one of plan 11's its catalogue class's
+/// (`catalogue_classes::source::member_layers`).
+fn class_layers(galaxy: &Galaxy, class: ClassId) -> LayerSet {
+    match RecentClass::of(class) {
+        Some(recent) => LayerSet::EMPTY.with(recent.layer()),
+        None => member_layers(class, galaxy.rules().binary_tables)
+            .and_then(|sets| sets.first().copied())
+            .expect("a listed class has its members' layers"),
+    }
+}
+
 /// The entries of every feature whose reach comes within [`SCAN_MARGIN_LY`] of the sphere of
 /// `radius` about `centre`, by ID.
 fn entries_near(
     galaxy: &Galaxy,
     centre: &GalacticPosition,
     radius: LightYears,
+    kind: Kind,
 ) -> BTreeMap<SystemId, Listed> {
     FeatureCatalogue::near(
         galaxy,
@@ -332,19 +392,19 @@ fn entries_near(
         LightYears::new(radius.value() + SCAN_MARGIN_LY),
         &NoFeatureCache,
     )
-    .flat_map(|feature| feature_entries(galaxy, &feature))
+    .flat_map(|feature| feature_entries(galaxy, &feature, kind))
     .collect()
 }
 
-/// The features asked in `galaxy`: of each kind of nursery, a star-forming region, a young bound
-/// cluster and an association, and of the youngest sub-disc's old open clusters, the first of
-/// those walked that lists [`MANY_ENTRIES`] entries, or else the one that lists the most, if any
-/// lists one.
-fn features_asked(galaxy: &Galaxy) -> Vec<FeatureRecord> {
+/// The features asked in `galaxy` about entries of `kind`: of each kind of nursery, a star-forming
+/// region, a young bound cluster and an association, and of the youngest sub-disc's old open
+/// clusters (and for plan 11's classes of the globulars), the first of those walked that lists
+/// [`MANY_ENTRIES`] entries, or else the one that lists the most, if any lists one.
+fn features_asked(galaxy: &Galaxy, kind: Kind) -> Vec<FeatureRecord> {
     let pick = |walked: &mut dyn Iterator<Item = FeatureRecord>| {
         let mut best: Option<(usize, FeatureRecord)> = None;
         for feature in walked {
-            let n = feature_entries(galaxy, &feature).len();
+            let n = feature_entries(galaxy, &feature, kind).len();
             if n >= MANY_ENTRIES {
                 return Some(feature);
             }
@@ -370,6 +430,12 @@ fn features_asked(galaxy: &Galaxy) -> Vec<FeatureRecord> {
         &mut FeatureCatalogue::walk_process(galaxy, FeatureProcess::OldOpenCluster(SubDisc::First))
             .take(OLD_CLUSTERS_WALKED),
     ));
+    if kind == Kind::Binary {
+        asked.extend(pick(&mut FeatureCatalogue::walk_process(
+            galaxy,
+            FeatureProcess::Globular,
+        )));
+    }
     asked
 }
 
@@ -407,16 +473,16 @@ fn spheres_about(
 /// spheres, and the faults.
 fn features_in_range(
     (galaxy, reads): (&Galaxy, Reads<'_>),
-    sources: &[&dyn SystemSource],
+    (sources, kind): (&[&dyn SystemSource], Kind),
     asked: &[FeatureRecord],
 ) -> (usize, Vec<String>) {
     assert!(asked.len() >= 3, "the nurseries of each kind list entries");
     let (mut inside, mut faults) = (0, Vec::new());
     let mut cells = KeepCells::default();
     for feature in asked {
-        let own = feature_entries(galaxy, feature);
+        let own = feature_entries(galaxy, feature, kind);
         eprintln!(
-            "{:?}, {:?}: {} recent entries",
+            "{:?}, {:?}: {} {kind:?} entries",
             feature.id(),
             feature.kind_at(Years::ZERO),
             own.len()
@@ -432,12 +498,14 @@ fn features_in_range(
         let census = sources[0].expected_in_sphere(galaxy, &whole);
         let mut listed = LayerCounts::ZERO;
         for class in registered_classes(galaxy, feature) {
-            if let Some(recent) = RecentClass::of(class.class()) {
-                let layer = recent.layer();
+            if !kind.holds(class.class()) {
+                continue;
+            }
+            for layer in class_layers(galaxy, class.class()).iter() {
                 listed.set(layer, listed.get(layer) + class.expected());
             }
         }
-        for layer in [Layer::D, Layer::E] {
+        for layer in Layer::ALL {
             assert!(
                 census.get(layer) >= listed.get(layer),
                 "{:?}, {layer:?}: the census {census:?} holds the list's {listed:?}",
@@ -447,10 +515,10 @@ fn features_in_range(
         for years in TIMES_YR {
             let t = UniverseTime::from_julian_years(years).expect("in the clock window");
             for (centre, radius) in spheres_about(feature.position(), &own, t) {
-                let listed = entries_near(galaxy, &centre, radius);
+                let listed = entries_near(galaxy, &centre, radius, kind);
                 let (n, mut found) = check_sphere(
                     (galaxy, &mut cells, reads),
-                    sources,
+                    (sources, kind),
                     &listed,
                     (&centre, radius, t),
                 );
@@ -466,14 +534,18 @@ fn features_in_range(
 /// `galaxy` with `sources`.
 fn admitting_radius(
     galaxy: &Galaxy,
-    sources: &[&dyn SystemSource],
+    (sources, kind): (&[&dyn SystemSource], Kind),
     centre: &GalacticPosition,
     start: f64,
     t: UniverseTime,
 ) -> LightYears {
     let mut radius = start;
     for _ in 0..24 {
-        let plan = RangePlan::new(galaxy, sources, &query(centre, LightYears::new(radius), t));
+        let plan = RangePlan::new(
+            galaxy,
+            sources,
+            &query(centre, LightYears::new(radius), t, kind),
+        );
         if plan.census().layers().contains(Layer::D) {
             return LightYears::new(radius);
         }
@@ -486,16 +558,16 @@ fn admitting_radius(
 /// and about the black hole and the first [`ENTRY_SPHERES`] entries at the clock window's ends.
 fn centre_in_range(
     (galaxy, reads): (&Galaxy, Reads<'_>),
-    sources: &[&dyn SystemSource],
+    (sources, kind): (&[&dyn SystemSource], Kind),
 ) -> (usize, Vec<String>) {
-    let listed = centre_entries(galaxy);
-    eprintln!("the centre: {} recent entries", listed.len());
+    let listed = centre_entries(galaxy, kind);
+    eprintln!("the centre: {} {kind:?} entries", listed.len());
     assert!(
         !listed.is_empty(),
-        "the Milky Way's centre lists its recent dead"
+        "the Milky Way's centre lists {kind:?} entries"
     );
     let model = galaxy.centre().expect("the Milky Way's centre builds");
-    for (id, entry) in &listed {
+    for (id, entry) in listed.iter().take(40) {
         eprintln!(
             "  {id:?}: {:?}, {:.4} ly from the black hole, {:.0} km/s",
             entry.record.layer(),
@@ -517,17 +589,17 @@ fn centre_in_range(
     for years in TIMES_YR {
         let t = UniverseTime::from_julian_years(years).expect("in the clock window");
         let mut spheres = vec![GalacticPosition::ORIGIN];
-        let about = if years == 0 {
-            listed.len()
-        } else {
-            ENTRY_SPHERES
+        let about = match (kind, years) {
+            (Kind::Recent, 0) => listed.len(),
+            (Kind::Binary, 0) => 4 * ENTRY_SPHERES,
+            _ => ENTRY_SPHERES,
         };
         spheres.extend(listed.values().take(about).map(|entry| entry.at(t)));
         for centre in spheres {
-            let radius = admitting_radius(galaxy, sources, &centre, 1.0, t);
+            let radius = admitting_radius(galaxy, (sources, kind), &centre, 1.0, t);
             let (n, mut found) = check_sphere(
                 (galaxy, &mut cells, reads),
-                sources,
+                (sources, kind),
                 &listed,
                 (&centre, radius, t),
             );
@@ -613,19 +685,20 @@ fn assert_no_faults(what: &str, inside: usize, faults: &[String]) {
 fn every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold() {
     with_every_26_hold_with_its_retargets(|| {
         let galaxy = milky_way(GalaxyRules::every_26_hold_with_its_retargets());
-        let asked = features_asked(&galaxy);
+        let asked = features_asked(&galaxy, Kind::Recent);
         if galaxy.rules().feature_classes == FeatureClassesRules::Unlisted {
             assert_eq!(asked, Vec::new(), "no feature lists a recent class");
             return;
         }
         with_served(&galaxy, |sources, reads| {
             assert_eq!(sources.len(), 1, "at 26 the features' members alone");
-            let (inside, faults) = features_in_range((&galaxy, reads), sources, &asked);
+            let (inside, faults) =
+                features_in_range((&galaxy, reads), (sources, Kind::Recent), &asked);
             assert_no_faults("the features under every 26 hold", inside, &faults);
         });
         let interiors = KeepInteriors::new(&galaxy);
         for feature in &asked {
-            for (id, entry) in feature_entries(&galaxy, feature) {
+            for (id, entry) in feature_entries(&galaxy, feature, Kind::Recent) {
                 let SystemIdKind::FeatureMember(member) = id.kind() else {
                     panic!("{id:?}: a feature's entry carries a member ID");
                 };
@@ -653,12 +726,55 @@ fn every_recent_entry_in_a_sphere_is_returned_once_under_every_27_hold() {
                 3,
                 "at 27 the members, the list and the classes"
             );
-            let features = features_in_range((&galaxy, reads), sources, &features_asked(&galaxy));
-            let centre = centre_in_range((&galaxy, reads), sources);
-            the_centre_s_source_is_order_independent((&galaxy, reads), &centre_entries(&galaxy));
+            let features = features_in_range(
+                (&galaxy, reads),
+                (sources, Kind::Recent),
+                &features_asked(&galaxy, Kind::Recent),
+            );
+            let centre = centre_in_range((&galaxy, reads), (sources, Kind::Recent));
+            the_centre_s_source_is_order_independent(
+                (&galaxy, reads),
+                &centre_entries(&galaxy, Kind::Recent),
+            );
             report("the centre under every 27 hold", centre.0, &centre.1);
             assert_no_faults("the features under every 27 hold", features.0, &features.1);
             assert_no_faults("the centre under every 27 hold", centre.0, &centre.1);
+        });
+    });
+}
+
+/// Every 27 hold: plan 11's binary classes on the features' and the centre's lists (P11.T8.f),
+/// which the catalogue's classes give up, are returned as the recent dead are, through every source
+/// the server registers, each placed by its ID where it was returned (P09.T37's placement of the
+/// listed binaries).
+#[test]
+#[ignore = "slow: range queries about the binary entries of four features' lists, a globular's and \
+            the centre's at three times under every 27 hold"]
+fn every_listed_binary_in_a_sphere_is_returned_once_under_every_27_hold() {
+    with_every_27_hold(|| {
+        let galaxy = milky_way(GalaxyRules::every_27_hold());
+        with_served(&galaxy, |sources, reads| {
+            let features = features_in_range(
+                (&galaxy, reads),
+                (sources, Kind::Binary),
+                &features_asked(&galaxy, Kind::Binary),
+            );
+            let centre = centre_in_range((&galaxy, reads), (sources, Kind::Binary));
+            report(
+                "the centre's binaries under every 27 hold",
+                centre.0,
+                &centre.1,
+            );
+            assert_no_faults(
+                "the features' binaries under every 27 hold",
+                features.0,
+                &features.1,
+            );
+            assert_no_faults(
+                "the centre's binaries under every 27 hold",
+                centre.0,
+                &centre.1,
+            );
         });
     });
 }

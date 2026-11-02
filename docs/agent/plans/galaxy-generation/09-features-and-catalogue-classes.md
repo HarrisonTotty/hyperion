@@ -5858,7 +5858,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Tests (slow)._ `verification::recent_in_range::every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold`
     and `…_under_every_27_hold`. They failed on BASE (117 entries inside, none returned), so
     `feature_classes` may not switch on without this lane; held to 27, the 26 test checks none lists.
-  - _Finding._ Plan 11's listed binaries (P11.T8.f, 27) on the same lists have no source either.
+  - _Plan 11's listed binaries_ (P11.T8.f, 27) on the same lists: placed later ("…plan 11's listed
+    binaries placed").
 - **P09.T37, the centre's band-E draw (lane `fix-p09-recent-dead`, 2026-11-01, under
   `list_source` (27); no output moved at 24–26).**
   - _Cause._ `draw_star` drew a member's age once; at 24's rules every star of 52–100 M☉ dead by
@@ -5885,3 +5886,16 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     runaways, so a cell keeping it would count it twice.
   - _Test._ `features::members::recent::tests::the_cells_and_the_list_are_complementary_under_every_27_hold`,
     which failed on BASE at `SystemId(0xe04de000f0000001)`: 308 runaway candidates, 20 mark sets.
+- **P09.T37, plan 11's listed binaries placed (lane `fix-p09-recent-dead`, 2026-11-02, under
+  `feature_binaries` (27); no output moved at 24–26).**
+  - _Features._ `FeatureMemberSource` reads a feature's whole list (`FeatureLevelList::listed_of`,
+    lent by `FeatureInteriorCache::list`, which replaces `recent_list`) under either list hold;
+    its census (`add_expected_within`, renamed) counts a binary class in each layer of its
+    `catalogue_classes::source::member_layers` set (now crate-visible), its hits read
+    `FeatureLevelList::member`.
+  - _Centre._ `CentreBinaries::{place, places, add_expected_within}` and
+    `CentreBinaryPlace::kept`; `entry` is `place` then `kept`, bit for bit.
+  - _Profiles._ `FeatureStars::of` tabulates its profile, so all of a list's classes share one
+    table (bit for bit).
+  - _Test (slow)._ `verification::recent_in_range::every_listed_binary_in_a_sphere_is_returned_once_under_every_27_hold`,
+    which failed first: 60 of the features' entries and 51 of the centre's inside, none returned.
