@@ -1048,6 +1048,44 @@ fn worker_level_sigma_is_the_largest_omitted_rms_over_the_surveyed_cells() {
     }
 }
 
+/// R10.T4.b: a block may survey a cell whose σ reads a cell a later block brings (its margin, its
+/// trunk's receiver), as the Earth-like world's coast in the fixture's small blocks does. σ's survey
+/// then waits for that block rather than refusing the block, and once every block is in it is the
+/// largest `omitted_rms` over the surveyed cells, bit for bit, in either order of the later blocks.
+#[test]
+fn worker_level_sigma_waits_for_the_cells_a_later_block_brings() {
+    let field = world(SyntheticWorld::EarthLike);
+    let body = field.header().body();
+    let (cells, _) = coast_cells();
+    let blocks = split(&encode_within(
+        field,
+        &cover(&cells, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        FIXTURE_BLOCK_BYTES,
+    ));
+    assert!(blocks.len() > 2, "the survey spans blocks");
+    for reversed in [false, true] {
+        let mut fields = WorkerFields::new();
+        fields
+            .init(body, &blocks[0], SigmaSurvey::Surveyed)
+            .unwrap();
+        let mut later: Vec<&Vec<u8>> = blocks[1..].iter().collect();
+        if reversed {
+            later.reverse();
+        }
+        for block in later {
+            fields.chunk(body, block).unwrap();
+        }
+        let held = fields.field(body).unwrap().clone();
+        assert_eq!(
+            fields.level_sigma_m(body).unwrap().map(bits),
+            largest_omitted_rms(&held, &cells).map(bits),
+            "the later blocks reversed: {reversed}"
+        );
+    }
+}
+
 /// The worker reads no σ where a level's bound is zero; on a world with air, channels and their
 /// epoch's valleys, as on the airless one, `omitted_rms` is zero there too, so σ is its largest at
 /// every level, bit for bit.
@@ -2369,10 +2407,7 @@ fn earth_coast_and_inland() -> (PatchKey, PatchKey) {
     panic!("the Earth-like world's equator crosses a coast on face +x, and inland beyond it");
 }
 
-/// A worker holding `cells` of `field` surveyed, with their margin, and no σ survey, which the class
-/// map does not read: σ's survey refuses a survey whose cells' trunks' receivers it does not hold
-/// (`LevelSigma::survey`'s `expect`; lane fix-coast-class-map's finding), as three texels on the
-/// Earth-like world's equator are.
+/// A worker holding `cells` of `field` surveyed, with their margin, its σ surveyed.
 fn worker_over(field: &CoarseField, cells: &BTreeSet<PatchKey>) -> WorkerFields {
     let blocks = split(&encode_within(
         field,
@@ -2383,7 +2418,9 @@ fn worker_over(field: &CoarseField, cells: &BTreeSet<PatchKey>) -> WorkerFields 
     ));
     let body = field.header().body();
     let mut fields = WorkerFields::new();
-    fields.init(body, &blocks[0], SigmaSurvey::Skipped).unwrap();
+    fields
+        .init(body, &blocks[0], SigmaSurvey::Surveyed)
+        .unwrap();
     for block in &blocks[1..] {
         fields.chunk(body, block).unwrap();
     }
@@ -2469,8 +2506,16 @@ fn place(refined: &RefinedTexel) -> usize {
 /// The Earth-like world's coast texel ([`earth_coast_and_inland`]) and the texels either side of it
 /// along i, surveyed with their margin, and the three texels.
 pub(super) fn coast_worker() -> (WorkerFields, [PatchKey; 3]) {
-    let field = world(SyntheticWorld::EarthLike);
-    let level = field.header().level().get();
+    let (cells, texels) = coast_cells();
+    (
+        worker_over(world(SyntheticWorld::EarthLike), &cells),
+        texels,
+    )
+}
+
+/// The cells of [`coast_worker`]'s three texels, and the texels.
+fn coast_cells() -> (BTreeSet<PatchKey>, [PatchKey; 3]) {
+    let level = world(SyntheticWorld::EarthLike).header().level().get();
     let (coast, _) = earth_coast_and_inland();
     let texels = [-1_i32, 0, 1].map(|di| {
         let i = u32::try_from(i32::try_from(coast.i()).unwrap() + di).unwrap();
@@ -2482,7 +2527,7 @@ pub(super) fn coast_worker() -> (WorkerFields, [PatchKey; 3]) {
         field_cells_of(texel, level, &mut each);
         cells.extend(each.iter().copied());
     }
-    (worker_over(field, &cells), texels)
+    (cells, texels)
 }
 
 /// One of the coast's order check's queries: the map at a detail, a bake over the coast, or a
