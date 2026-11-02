@@ -159,12 +159,15 @@ function digestOf(source: string): string {
  * its eighth table is a one-texel stub, `belowDeckHeld` false, and every lookup's arithmetic is as
  * before, so that their pixels hold. The mesh regime's figure and the terrain's re-pinned by the
  * seamless lane's sub-patches (2026-11-01): the instance record's `sub`, which the figure's struct
- * steps over, and a sub-patch's vertex on its slot's surface, a whole patch's as before.
+ * steps over, and a sub-patch's vertex on its slot's surface, a whole patch's as before. The
+ * figure's again by plan R14's `@invariant` clip position (R14.T4.a; `smoothMesh.wgsl`'s
+ * `MeshVarying`), which holds its cluster path's vertices to this draw's bits; the arithmetic is as
+ * before.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "f42c280bcdf436a"],
   ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "f42c280bcdf436a"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "1aa4f99eab8663c4"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "52f3a5fe068cf12a"],
   ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "bc5c9ada26f0f319"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.

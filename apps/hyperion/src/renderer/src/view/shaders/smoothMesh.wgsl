@@ -70,7 +70,9 @@ struct PatchInstance {
 @group(2) @binding(13) var coverage_mask : texture_2d_array<f32>;
 
 struct MeshVarying {
-  @builtin(position) position : vec4f,
+  // `@invariant` (W3C WGSL), so that the figure's cluster path (plan R14, R14.T4.a) places each
+  // vertex to the same bits as this draw.
+  @builtin(position) @invariant position : vec4f,
 }
 
 // The vertex's offset from its patch origin on the spheroid, body-fixed metres: R05's formula at
