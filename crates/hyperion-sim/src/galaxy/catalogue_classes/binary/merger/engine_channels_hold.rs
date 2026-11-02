@@ -741,19 +741,19 @@ fn the_engine_channels_against_the_engine_under_every_27_hold() {
 /// hold took P15.T11.b's orphan streams, whose galaxy draws this reference, and again once it took
 /// P11.T4's neutron-star accretion and P11.T6's Type Ia explosion together, and P11.T4's heavy
 /// donors; at an effective 73 the 26 arm read 14.2, 12.1 and 16.0, `channels_hold`'s pins; at
-/// generator version 25, measured again), all over P15.T10.b's 3.1: a finding, for P15.T10.b's
-/// fit. The dynamical channel takes the mass ratio's from 171 to 66 (170 to 61 at 24); the masses' stay high, the engine holding 13%
-/// of its primaries in layers D and E against the class's 1.3% and (at 24) its giant-branch donors
-/// heavier (median 1.69 M☉) than the class's at the turn-off.
+/// generator version 25, measured again), all over P15.T10.b's 3.1: a finding, for P15.T10.b's fit.
+/// The dynamical channel takes the mass ratio's from 167 to 68 (170 to 61 at 24); the masses' stay
+/// high, the engine holding 13% of its primaries in layers D and E against the class's 1.3% and (at
+/// 24) its giant-branch donors heavier (median 1.69 M☉) than the class's at the turn-off.
 const PINNED_CHI_SQUARE: [[f64; 3]; 2] = [
     [
-        209.685_829_507_384_54,
-        66.018_167_378_926_39,
-        309.844_914_298_476_2,
+        214.125_299_548_683_64,
+        68.196_568_091_053_56,
+        311.814_346_742_384_1,
     ],
     [
-        180.726_441_199_643_7,
-        171.029_693_612_656_76,
-        287.849_998_170_355_3,
+        181.769_622_301_138_58,
+        167.119_344_219_085_38,
+        287.219_943_465_994_4,
     ],
 ];

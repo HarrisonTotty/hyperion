@@ -119,7 +119,7 @@ fn the_neutron_star_accretion_is_held_only_until_the_27_bump() {
 const PINNED_FIGURES: [(f64, f64); 3] = [
     (1.811_174_601_094_979, 2.608_411_194_021_577_3),
     (1.387_548_786_842_689_2, 1.483_859_458_716_522_6),
-    (1.387_548_786_842_689_2, 1.483_859_458_716_522_6),
+    (1.392_630_776_597_363_3, 1.474_443_345_641_417_2),
 ];
 
 /// Under the held arm the pinned pair's neutron star takes the donor's first transfer whole and
@@ -354,13 +354,13 @@ const CENSUS_FIGURES: [CompactFigures; 2] = [
         most_gained: 0.786_283_605_608_198_8,
     },
     CompactFigures {
-        members: 31,
-        black_holes: 3,
-        grown: 1,
-        grown_by_dwarfs: 1,
-        median_black_hole: 3.384_460_342_173_085_2,
-        neutron_stars: 28,
-        most_gained: 0.118_139_154_635_990_67,
+        members: 411,
+        black_holes: 12,
+        grown: 2,
+        grown_by_dwarfs: 2,
+        median_black_hole: 2.810_847_362_212_409_3,
+        neutron_stars: 399,
+        most_gained: 0.156_648_260_868_635_04,
     },
 ];
 
@@ -371,10 +371,10 @@ const CENSUS_FIGURES: [CompactFigures; 2] = [
 /// - none of the black holes not fed by a white dwarf or a substellar object was born a neutron
 ///   star, against the brief's 5%; those fed by one, the relics of a donor ground down, which the
 ///   carving's ultracompact floor is to remove (`fix-p11-t8b-xrb-carving`), are pinned as measured
-///   (a finding). At generator version 25 the one is a neutron star born at 1.861 M☉ that a
-///   1.46 M☉ main-sequence donor fed for 7 Gyr, grinding itself down to 0.068 M☉: 0.139 M☉
-///   gained at the arm's tenth carries it past `MAX_NEUTRON_STAR_MASS` (a lean of land-pod's,
-///   2026-11-01, for research);
+///   (a finding). At generator version 25 before P11.T4's heavy donors the one was a neutron star
+///   born at 1.861 M☉ that a 1.46 M☉ main-sequence donor fed for 7 Gyr, grinding itself down to
+///   0.068 M☉: 0.139 M☉ gained at the arm's tenth carries it past `MAX_NEUTRON_STAR_MASS` (a lean
+///   of land-pod's, 2026-11-01, for research);
 /// - no neutron star in a low-mass X-ray binary has gained more than [`MOST_GAINED`];
 /// - the black holes' median mass in the low-mass X-ray binaries is pinned as measured, under the
 ///   brief's 5 M☉ (a finding): most are fallback black holes of 2–4 M☉ (plan 06's Mandel and

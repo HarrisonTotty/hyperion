@@ -145,11 +145,11 @@ fn while_heavier(timeline: &BinaryTimeline) -> (f64, f64) {
 }
 
 /// The pinned pair's least rate while its donor is the heavier and how long that lasts, under the
-/// held arm, the arm alone and every 27 hold, as measured (2026-11-01).
+/// held arm, the arm alone and every 27 hold, as measured (2026-11-01, at generator version 25).
 const PINNED_FIGURES: [(f64, f64); 3] = [
-    (4.405_438_444_327_729e-11, 3_393_438_634.484_977),
-    (4.389_759_460_751_92e-7, 1_239_823.888_691_885_6),
-    (4.389_759_460_751_92e-7, 1_239_823.888_691_885_6),
+    (4.405_438_444_327_729e-11, 3_380_337_007.177_530_3),
+    (4.389_759_460_751_92e-7, 1_244_629.241_081_902),
+    (4.389_759_460_751_92e-7, 1_244_629.241_081_902),
 ];
 
 /// The brief's pair: under the held arm its donor, heavier than the white dwarf for 3.4 Gyr,
@@ -357,21 +357,21 @@ fn figures(census: &Census) -> CvFigures {
 }
 
 /// The census's figures under the version's rules and under every 27 hold, as measured
-/// (2026-11-01).
+/// (2026-11-01, at generator version 25).
 const CENSUS_FIGURES: [CvFigures; 2] = [
     CvFigures {
-        members: 3_599,
-        variables: 1_396,
-        heavy: 787,
-        below_gap: 432,
-        above_six_hours: 843,
+        members: 3_642,
+        variables: 1_404,
+        heavy: 832,
+        below_gap: 436,
+        above_six_hours: 848,
     },
     CvFigures {
-        members: 4_115,
-        variables: 2_700,
-        heavy: 55,
-        below_gap: 2_320,
-        above_six_hours: 98,
+        members: 4_120,
+        variables: 2_656,
+        heavy: 47,
+        below_gap: 2_298,
+        above_six_hours: 80,
     },
 ];
 
