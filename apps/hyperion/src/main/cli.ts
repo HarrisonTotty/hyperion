@@ -82,7 +82,7 @@
  * the body opened in `VIEW` through the orbit map's `VIEW BODY` and its photorealistic inspection
  * captured; it needs both, and is refused without `--views-check` and beside `--terrain` or
  * `--atmosphere`. With `--timing` too (the owner's report, 2026-11-01) the inspection run profiles
- * its frame from orbit and closed in, per pass and per thread, into
+ * its frame from orbit, closed in and low over the ground, per pass and per thread, into
  * `target/views-check/timing/`; `--timing` is refused without `--inspection`.
  *
  * `--device-pixel-ratio <N>` draws a hidden check's page at a device-pixel ratio of N, 1 to 3, as a
@@ -361,7 +361,7 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option(
         "--timing",
-        "the inspection run's frame profile (the owner's report): per pass and per thread, from orbit and close in",
+        "the inspection run's frame profile (the owner's report): per pass and per thread, from orbit, close in and low",
       ),
     )
     .addOption(

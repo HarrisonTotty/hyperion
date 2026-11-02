@@ -1955,9 +1955,10 @@ export interface AtmosphereCheckRecord {
 
 /**
  * The inspection run's profiled windows (the owner's report, 2026-11-01): from orbit, as the first
- * capture is taken, and closed in, as the close capture is.
+ * capture is taken, closed in, as the close capture is, and low over the ground, where the shadow
+ * cascades draw (main's ask, 2026-11-01).
  */
-export type InspectionTimingWindowName = "orbit" | "close";
+export type InspectionTimingWindowName = "orbit" | "close" | "low";
 
 /** One pass label's GPU time in a profiled window. */
 export interface InspectionTimingPass {

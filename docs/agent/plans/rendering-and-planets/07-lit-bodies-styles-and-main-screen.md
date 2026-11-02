@@ -10084,3 +10084,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   unless both phases' primary scale held one value, the same in each, and neither stated
   `IMAGE: DETAIL LIMITED`. The atmosphere run's captures record `primaryScale` and `airSetting`
   (results version 5; `AtmosphereCheckDeps.setting`).
+- **The inspection profile's low window (main's ask, 2026-11-01; lane fix-retina-frame).** With
+  `--timing`, after the close window the camera closes in to `LOW_HEIGHT_M` (4 km) above the ground
+  at its line of sight (`slantRangeM` of `SLANT RANGE FROM CAMERA`) and a third window, `low`
+  (`InspectionTimingWindowName`), is measured there, where the cascades' weight is above 0 and
+  `terrain shadows` draws on high. The timing file's shape is unchanged (version 1). Pending: the
+  owner's Mac profile, for R14.T6.b's gain.

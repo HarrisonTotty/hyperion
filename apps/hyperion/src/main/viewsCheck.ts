@@ -31,10 +31,10 @@
  * An `--inspection` launch (the owner's request, 2026-11-01) opens a served body from `SYSTEM` in
  * `VIEW`'s body inspection and captures it: no phases and no record, every writer refused; it ends
  * with 1 unless its capture was saved. With `--timing` (the owner's report, 2026-11-01) it also
- * profiles a window of frames from orbit and another closed in, each a trace with V8's CPU profiler
- * (`inspectionTiming.ts`), and writes them through a writer of its own, under
- * `target/views-check/timing/`; it then ends with 1 unless that file was written too. The profile's
- * channels are refused on every other launch.
+ * profiles a window of frames from orbit, another closed in and a third low over the ground, each a
+ * trace with V8's CPU profiler (`inspectionTiming.ts`), and writes them through a writer of its
+ * own, under `target/views-check/timing/`; it then ends with 1 unless that file was written too.
+ * The profile's channels are refused on every other launch.
  */
 
 import type { ContentTracing, IpcMainInvokeEvent, TraceConfig } from "electron";

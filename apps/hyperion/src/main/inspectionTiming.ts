@@ -1,9 +1,10 @@
 /**
  * The inspection run's frame profile (`--views-check --inspection --timing`; the owner's report,
  * 2026-11-01: "Viewing a planet with terrain and atmosphere enabled drops my mac to 1 fps or
- * lower"): where a frame of `VIEW`'s body inspection goes, from orbit and closed in, per pass on
- * the GPU and per thread on the CPU, written under `target/views-check/timing/` for the owner to
- * run on their own machine, hidden.
+ * lower"): where a frame of `VIEW`'s body inspection goes, from orbit, closed in and low over the
+ * ground (main's ask, where the shadow cascades draw), per pass on the GPU and per thread on the
+ * CPU, written under `target/views-check/timing/` for the owner to run on their own machine,
+ * hidden.
  *
  * @remarks
  * Each window is the renderer's and a trace's. The renderer gives its views probe's figures

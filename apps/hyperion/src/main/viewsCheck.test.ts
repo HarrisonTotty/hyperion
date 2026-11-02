@@ -1294,6 +1294,13 @@ describe("the views check's handlers", () => {
     expect(calls).toEqual(["start profile orbit", "end profile orbit", "write timing"]);
   });
 
+  it("take the low window over the ground, where the cascades draw (main's ask)", async () => {
+    const { call, calls } = handlers("inspection", true);
+    await call(VIEWS_CHECK_CHANNELS.startProfile, true, "low");
+    await call(VIEWS_CHECK_CHANNELS.endProfile, true, "low", SPAN);
+    expect(calls).toEqual(["start profile low", "end profile low"]);
+  });
+
   it.each([
     ["an inspection launch without --timing", "inspection", false],
     ["an atmosphere launch", "atmosphere", true],

@@ -33,6 +33,10 @@
  *    until it stands {@link CLOSE_ALTITUDE_SHARE} of the body's radius above it (at least
  *    {@link CLOSE_ALTITUDE_MIN_M}); once the terrain has streamed, its ground is read, `AUTO` has
  *    settled and a few frames are drawn, it is captured as `inspection-<system>-<index>-close`.
+ * 6. With the frame profile alone, the camera closes in on by the same holds to
+ *    {@link LOW_HEIGHT_M} above the ground at its line of sight (`SLANT RANGE FROM CAMERA`), where
+ *    the shadow cascades draw, and once the terrain has streamed and `AUTO` has settled its third
+ *    window is measured.
  *
  * The run fails where a step does not take effect within its wait, where `VIEW BODY` is held back
  * (with its reason), where the primary's label block shows a fault line as it is captured, or as
@@ -41,9 +45,10 @@
  * in a capture's frames or a window's ({@link LitBodyDraws}).
  *
  * With the frame profile (`--timing`; the owner's report, 2026-11-01) a window of frames is
- * measured as the first capture is taken, from orbit, and another as the close capture is
- * (`inspectionProfile.ts`), each once `LIGHTING: PENDING` is waited out, its record holding the
- * label block's statements as it ended, and the main process writes them once the run has passed.
+ * measured as the first capture is taken, from orbit, another as the close capture is, and a
+ * third low over the ground (`inspectionProfile.ts`), each once `LIGHTING: PENDING` is waited out,
+ * its record holding the label block's statements as it ended, and the main process writes them
+ * once the run has passed.
  */
 
 import {
@@ -58,7 +63,11 @@ import {
   type UniverseTime,
 } from "@hyperion/protocol";
 
-import type { ServedWorldNames, ViewsCheckApi } from "../../../../../preload/api";
+import type {
+  InspectionTimingWindowName,
+  ServedWorldNames,
+  ViewsCheckApi,
+} from "../../../../../preload/api";
 import { vec3 } from "../../../geometry/vec3";
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
 import { MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
@@ -139,6 +148,15 @@ export const CLOSE_ALTITUDE_MIN_M = 30_000;
 
 /** How near its goal a hold leaves the camera before the run stops, as a share of its height. */
 export const CLOSE_TOLERANCE = 0.2;
+
+/**
+ * How high above the ground at its line of sight the camera closes in to for the frame profile's
+ * low window, m (main's ask, 2026-11-01; R14.T6.b): 4 km, `TERRAIN TEST`'s lowest
+ * (`TERRAIN_LOWEST_ALTITUDE_M`), where R10.T9.b's cascades shade `TEST MOON`'s craters. From orbit
+ * and at {@link CLOSE_ALTITUDE_SHARE} of the radius their weight is 0 (`cascadeWeight`: cascade 1's
+ * texel no finer than the horizon map's), so this window is the one that times `terrain shadows`.
+ */
+export const LOW_HEIGHT_M = 4_000;
 
 /** The instant the system is opened at: the epoch, within every universe's clock window. */
 const EPOCH: UniverseTime = { seconds: 0, nanos: 0 };
@@ -280,6 +298,28 @@ export function positionRangeM(positionLine: string | null): number | null {
   return digits === undefined || perUnit === undefined
     ? null
     : Number(digits.replaceAll(",", "")) * perUnit;
+}
+
+/** Metres in each of the slant range's units (`formatSurfaceRange`'s). */
+const SLANT_METRES_PER_UNIT: Readonly<Record<string, number>> = { m: 1, ...METRES_PER_UNIT };
+
+/**
+ * The camera's height above the ground at its line of sight as the lower plate's `SLANT RANGE FROM
+ * CAMERA` line reads it (`4.12 km ± 0.03 km`, `~4.0 km` grazing), m, or `null` where it reads
+ * none: the inspection's camera looks at the body's centre, so its line of sight is its nadir.
+ */
+export function slantRangeM(lines: ReadonlyArray<string>): number | null {
+  for (const line of lines) {
+    const match = /^SLANT RANGE(?: FROM CAMERA)? ~?([\d,]+(?:\.\d+)?) (m|km|Mm|Gm|AU)\b/u.exec(
+      line,
+    );
+    const digits = match?.[1];
+    const perUnit = match?.[2] === undefined ? undefined : SLANT_METRES_PER_UNIT[match[2]];
+    if (digits !== undefined && perUnit !== undefined) {
+      return Number(digits.replaceAll(",", "")) * perUnit;
+    }
+  }
+  return null;
 }
 
 /**
@@ -565,7 +605,7 @@ async function inspect(
     return fromMs;
   };
   /** Measures the profile's window `name`, lit, and fails where its frames drew no lit body. */
-  const measured = async (name: "orbit" | "close", what: string): Promise<void> => {
+  const measured = async (name: InspectionTimingWindowName, what: string): Promise<void> => {
     const profile = deps.profile;
     if (profile === null) {
       return;
@@ -672,16 +712,22 @@ async function inspect(
     );
     await setRate(wanted);
   };
-  /** Closes in by holds of `W`, or of `S` past the goal, until within the tolerance. */
-  const closeIn = async (left: number): Promise<void> => {
-    const remainingM = range() - goalM;
-    if (Math.abs(remainingM) <= CLOSE_TOLERANCE * altitudeM) {
+  /**
+   * Closes in by holds of `W`, or of `S` past the goal, until what `remaining` reads of the goal is
+   * within `toleranceM`, at most `left` holds; `missed` says where it stood when it gave up.
+   */
+  const closeIn = async (
+    remaining: () => number,
+    toleranceM: number,
+    missed: () => string,
+    left: number,
+  ): Promise<void> => {
+    const remainingM = remaining();
+    if (Math.abs(remainingM) <= toleranceM) {
       return;
     }
     if (left === 0) {
-      throw new Error(
-        `views check: the camera did not close to ${String(Math.round(goalM / 1000))} km from the centre in ${String(timing.closeHolds)} holds (at ${String(Math.round(range() / 1000))} km)`,
-      );
+      throw new Error(`views check: ${missed()} in ${String(timing.closeHolds)} holds`);
     }
     await setRate(closeRateStep(Math.abs(remainingM)));
     const key = remainingM > 0 ? "w" : "s";
@@ -695,9 +741,15 @@ async function inspect(
       target.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }));
     }
     await framesDrawn(timing.coastFrames, 1000 * timing.coastFrames * MAX_FREE_STEP_S);
-    await closeIn(left - 1);
+    await closeIn(remaining, toleranceM, missed, left - 1);
   };
-  await closeIn(timing.closeHolds);
+  await closeIn(
+    () => range() - goalM,
+    CLOSE_TOLERANCE * altitudeM,
+    () =>
+      `the camera did not close to ${String(Math.round(goalM / 1000))} km from the centre (at ${String(Math.round(range() / 1000))} km)`,
+    timing.closeHolds,
+  );
   await grounded.until(
     "the terrain did not stream once the camera closed in",
     () =>
@@ -717,6 +769,31 @@ async function inspect(
   stopped();
   await deps.api.capture(`${label}-close`);
   await measured("close", "the close window");
+  // 6. With the frame profile, low over the same ground, where the cascades draw (main's ask).
+  if (deps.profile !== null) {
+    const aboveGround = (): number => {
+      const lines = ground();
+      const heightM = slantRangeM(lines);
+      if (heightM === null) {
+        throw new Error(`views check: the lower plate reads no slant range (${lines.join("; ")})`);
+      }
+      return heightM;
+    };
+    await closeIn(
+      () => aboveGround() - LOW_HEIGHT_M,
+      CLOSE_TOLERANCE * LOW_HEIGHT_M,
+      () =>
+        `the camera did not close to ${String(LOW_HEIGHT_M / 1000)} km above the ground (at ${String(Math.round(aboveGround()))} m)`,
+      timing.closeHolds,
+    );
+    await grounded.until(
+      "the terrain did not stream once the camera stood low over the ground",
+      () => !plate().statements.includes("TERRAIN: STREAMING"),
+      () => plate().statements.join("; "),
+    );
+    await settle();
+    await measured("low", "the low window");
+  }
   return { ...orbit, closeGround };
 }
 

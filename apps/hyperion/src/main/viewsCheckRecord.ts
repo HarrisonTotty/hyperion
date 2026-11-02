@@ -1216,7 +1216,7 @@ export function readAtmosphereCheckRecord(value: unknown): AtmosphereCheckRecord
 }
 
 /** The inspection run's profiled windows (the owner's report, 2026-11-01). */
-const TIMING_WINDOWS: ReadonlyArray<InspectionTimingWindowName> = ["orbit", "close"];
+const TIMING_WINDOWS: ReadonlyArray<InspectionTimingWindowName> = ["orbit", "close", "low"];
 
 /** `value` as a profiled window's name, or `null`. */
 export function readTimingWindowName(value: unknown): InspectionTimingWindowName | null {

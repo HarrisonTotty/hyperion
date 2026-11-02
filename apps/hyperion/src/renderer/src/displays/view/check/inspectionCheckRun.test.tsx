@@ -5,6 +5,7 @@ import type { InspectionTimingWindow, SpikeEnd } from "../../../../../preload/ap
 import { freeRateMPerS, MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
 import type { DrawItem, FrameSubmission } from "../../../view/engine/types";
 import { LIGHTING_NOT_RECEIVED, LIGHTING_PENDING } from "../../../view/lighting/hostLights";
+import { TERRAIN_LOWEST_ALTITUDE_M } from "../../../view/scenes/terrainScene";
 import {
   closeRateStep,
   drawsLitBody,
@@ -13,9 +14,11 @@ import {
   inspectionGround,
   inspectionLighting,
   LitBodyDraws,
+  LOW_HEIGHT_M,
   positionRangeM,
   recordInspectionCheck,
   runInspectionCheck,
+  slantRangeM,
 } from "./inspectionCheckRun";
 
 /** A profiled window, as the frame profile measured it. */
@@ -315,6 +318,22 @@ describe("the inspection run's reading of the ground and the camera's range", ()
         positionRangeM,
       ),
     ).toEqual([6.69e6, 1e6, 87_000, null, null]);
+  });
+
+  it("reads the camera's height above the ground from the slant range, resolved or grazing", () => {
+    expect(
+      [
+        ["ELEVATION 1,204 ± 40 m", "SLANT RANGE FROM CAMERA 4.12 km ± 0.03 km"],
+        ["SLANT RANGE FROM CAMERA ~4.0 km GRAZING"],
+        ["SLANT RANGE 1,250 m"],
+        ["SLANT RANGE FROM CAMERA —"],
+        ["NOT SURVEYED"],
+      ].map(slantRangeM),
+    ).toEqual([4_120, 4_000, 1_250, null, null]);
+  });
+
+  it("times its low window at TERRAIN TEST's lowest, where the cascades draw (main's ask)", () => {
+    expect(LOW_HEIGHT_M).toBe(TERRAIN_LOWEST_ALTITUDE_M);
   });
 
   it("closes in by holds whose one camera step flies at most half of what is left", () => {

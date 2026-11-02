@@ -86,7 +86,8 @@
 # when a step does not take effect, VIEW BODY is held back, or a fault line stands on a capture.
 #
 # --inspection --timing profiles the inspection's frame too (the owner's report, 2026-11-01): from
-# orbit, as the first capture is taken, and closed in, as the close capture is, each window 30 of
+# orbit, as the first capture is taken, closed in, as the close capture is, and 4 km above the
+# ground, where the shadow cascades draw (main's ask, 2026-11-01), each window 30 of
 # the primary's draws or what 30 s gives, a trace with V8's CPU profiler on every thread around it.
 # It writes <date>-<machine>-<setting>-inspection-timing.json and .md under
 # target/views-check/timing/: the frame's intervals, the main thread's time, the GPU's by pass

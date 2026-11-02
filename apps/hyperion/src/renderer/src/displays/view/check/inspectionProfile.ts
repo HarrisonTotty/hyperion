@@ -1,8 +1,9 @@
 /**
  * The inspection run's frame profile (`--views-check --inspection --timing`; the owner's report,
  * 2026-11-01: a planet with terrain and atmosphere drew at 1 fps or lower): a window of the
- * primary's draws measured from orbit and another closed in, each a trace in the main process and
- * the views probe's figures here, written by the main process under `target/views-check/timing/`.
+ * primary's draws measured from orbit, another closed in and a third low over the ground, where the
+ * shadow cascades draw (main's ask), each a trace in the main process and the views probe's figures
+ * here, written by the main process under `target/views-check/timing/`.
  *
  * @remarks
  * A window takes {@link InspectionProfileTiming.draws} of the primary's draws, or what it has drawn
