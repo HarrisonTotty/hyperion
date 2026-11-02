@@ -548,6 +548,10 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   `BinaryHostLightRules::Engine` through `with_binary_host_light`: a star of a pair the binary
 ///   engine ran shines, and peaks, on its planets as the engine's state of it, where the stellar
 ///   displays read it.
+/// - a paired star's X-ray and ultraviolet history as the engine leaves it,
+///   `BINARY_HOST_XUV_VERSION` (P14.T1.f), at `BinaryHostXuvRules::Engine` through
+///   `with_binary_host_xuv`: a star merged away shines no more, and an accretor or a merger's
+///   product shines from its first interaction as a main-sequence star of its new mass.
 /// - a paired star's fate from its pair's timeline, `BINARY_HOST_FATE_VERSION` (P14.T28.g), at
 ///   `BinaryHostFateRules::Engine` through `with_binary_host_fate`: a planet's orbit follows the
 ///   engine's masses and radii, and the pair's common envelopes, mergers and supernovae are its
@@ -606,6 +610,10 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
     let run = move || with_desert(DesertRules::Labelled, run);
     let run = move || with_binary_host_light(BinaryHostLightRules::Engine, run);
+    let run = move || {
+        use crate::planetary::context::{BinaryHostXuvRules, with_binary_host_xuv};
+        with_binary_host_xuv(BinaryHostXuvRules::Engine, run)
+    };
     let run = move || {
         use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
         with_binary_host_fate(BinaryHostFateRules::Engine, run)

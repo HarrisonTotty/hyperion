@@ -77,7 +77,7 @@ use crate::id::{SystemId, SystemIdKind};
 use crate::math;
 use crate::observe::stars_of;
 use crate::orbit::{BuildOrbitError, Eccentricity, OpenOrbit};
-use crate::stellar::binary::Component as PairComponent;
+use crate::stellar::binary::{Component as PairComponent, SegmentKind};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::{
     LOG_PERIOD_MAX, LOG_PERIOD_MIN, MIN_COMPANION_MASS, MIN_SUBSTELLAR_COMPANION_MASS,
@@ -87,7 +87,7 @@ use crate::stellar::sse::{self, ZCoeffs, zams};
 use crate::stellar::system::{
     MAX_STAR_MASS, PairTimeline, StarModel, SystemStars, draw_metallicity, pair_of,
 };
-use crate::stellar::{Composition, StarState, substellar};
+use crate::stellar::{Composition, Phase, StarState, substellar};
 use crate::time::{CLOCK_WINDOW_H, UniverseTime};
 use crate::units::consts::{GM_SUN, METRES_PER_KILOPARSEC, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{
@@ -310,6 +310,22 @@ pub const XUV_SATURATION_BLENDS: [(SolarMasses, SolarMasses); 2] = [
 pub struct XuvHistory {
     saturated: Watts,
     saturation_time: Years,
+    /// From generator version 27 (P14.T1.f), what the binary engine made of the star later: from
+    /// an age on it shines as another closed form, or not at all; `None` for a single star's.
+    later: Option<XuvLater>,
+}
+
+/// The closed form a star of a pair the binary engine ran shines as from an age on (P14.T1.f):
+/// a star merged away shines no more, and a star the binary leaves on the main sequence at a new
+/// mass, an accretor or a merger's product, shines as a star of that mass.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+struct XuvLater {
+    /// The age from which it shines so, Julian years.
+    since: Years,
+    /// Its saturated X-ray and ultraviolet luminosity then: zero for a star merged away.
+    saturated: Watts,
+    /// Its saturation time then.
+    saturation_time: Years,
 }
 
 impl XuvHistory {
@@ -327,6 +343,22 @@ impl XuvHistory {
         Self {
             saturated: Watts::new(saturated),
             saturation_time: saturation_time(initial_mass),
+            later: None,
+        }
+    }
+
+    /// This history until `since`, and `then`'s closed form after it (P14.T1.f): the energy
+    /// delivered by an age is this one's to `since` and `then`'s from `since` on, so that it never
+    /// falls; `then`'s own later change, if it has one, is not taken.
+    #[must_use]
+    const fn then_from(self, since: Years, then: Self) -> Self {
+        Self {
+            later: Some(XuvLater {
+                since,
+                saturated: then.saturated,
+                saturation_time: then.saturation_time,
+            }),
+            ..self
         }
     }
 
@@ -335,6 +367,7 @@ impl XuvHistory {
     pub const DARK: Self = Self {
         saturated: Watts::ZERO,
         saturation_time: XUV_SATURATION_FGK,
+        later: None,
     };
 
     /// The X-ray and ultraviolet luminosity while saturated.
@@ -350,34 +383,33 @@ impl XuvHistory {
     }
 
     /// The X-ray and ultraviolet luminosity at `age`: the saturated level until the saturation
-    /// time, then falling as (t ÷ `t_sat`)^−1.5; zero before birth.
+    /// time, then falling as (t ÷ `t_sat`)^−1.5; zero before birth. From generator version 27 a
+    /// star of a pair the binary engine ran shines after its pair changed it as the star it became
+    /// (P14.T1.f), its age counted from its birth still.
     #[must_use]
     pub fn luminosity(&self, age: Years) -> Watts {
-        let (t, t_sat) = (age.value(), self.saturation_time.value());
-        if t.is_nan() || t <= 0.0 {
-            return Watts::ZERO;
-        }
-        if t <= t_sat {
-            self.saturated
-        } else {
-            Watts::new(self.saturated.value() * math::powf(t / t_sat, -XUV_DECAY_INDEX))
+        match self.later {
+            Some(later) if age > later.since => {
+                closed_form_luminosity(later.saturated, later.saturation_time, age)
+            }
+            Some(_) | None => closed_form_luminosity(self.saturated, self.saturation_time, age),
         }
     }
 
-    /// The X-ray and ultraviolet energy the star has emitted by `age`, as a duration at the
-    /// saturated level, seconds: t while saturated, and `t_sat` (3 − 2 √(`t_sat` ÷ t)) after, the
-    /// integral of the t^−1.5 decline, which tends to 3 `t_sat`.
+    /// The X-ray and ultraviolet energy the star has emitted by `age`, J: the saturated level
+    /// times [`saturated_seconds`] of its saturation time, and from generator version 27, after
+    /// its pair changed it (P14.T1.f), this to the change and the later closed form's from it.
     #[must_use]
-    fn saturated_seconds(&self, age: Years) -> f64 {
-        let (t, t_sat) = (age.value(), self.saturation_time.value());
-        let years = if t.is_nan() || t <= 0.0 {
-            0.0
-        } else if t <= t_sat {
-            t
-        } else {
-            t_sat * (3.0 - 2.0 * (t_sat / t).sqrt())
-        };
-        years * SECONDS_PER_JULIAN_YEAR
+    fn emitted(&self, age: Years) -> f64 {
+        match self.later {
+            Some(later) if age > later.since => {
+                let before = saturated_seconds(later.since, self.saturation_time);
+                let after = saturated_seconds(age, later.saturation_time)
+                    - saturated_seconds(later.since, later.saturation_time);
+                self.saturated.value() * before + later.saturated.value() * after
+            }
+            Some(_) | None => self.saturated.value() * saturated_seconds(age, self.saturation_time),
+        }
     }
 
     /// The X-ray and ultraviolet energy per unit area that a body on an orbit of semi-major axis
@@ -399,7 +431,7 @@ impl XuvHistory {
             return JoulesPerSquareMetre::ZERO;
         }
         let area = 4.0 * core::f64::consts::PI * a * a * (1.0 - eccentricity * eccentricity).sqrt();
-        JoulesPerSquareMetre::new(self.saturated.value() * self.saturated_seconds(age) / area)
+        JoulesPerSquareMetre::new(self.emitted(age) / area)
     }
 
     /// The X-ray and ultraviolet flux that a body on an orbit of semi-major axis
@@ -443,6 +475,37 @@ impl XuvHistory {
         let area = 4.0 * core::f64::consts::PI * a * a * (1.0 - eccentricity * eccentricity).sqrt();
         WattsPerSquareMetre::new(self.luminosity(age).value() / area)
     }
+}
+
+/// The X-ray and ultraviolet luminosity at `age` of a closed form saturated at `saturated` until
+/// `saturation_time` ([`XuvHistory::luminosity`]).
+#[must_use]
+fn closed_form_luminosity(saturated: Watts, saturation_time: Years, age: Years) -> Watts {
+    let (t, t_sat) = (age.value(), saturation_time.value());
+    if t.is_nan() || t <= 0.0 {
+        return Watts::ZERO;
+    }
+    if t <= t_sat {
+        saturated
+    } else {
+        Watts::new(saturated.value() * math::powf(t / t_sat, -XUV_DECAY_INDEX))
+    }
+}
+
+/// The X-ray and ultraviolet energy a closed form of saturation time `saturation_time` has emitted
+/// by `age`, as a duration at its saturated level, seconds: t while saturated, and `t_sat` (3 − 2
+/// √(`t_sat` ÷ t)) after, the integral of the t^−1.5 decline, which tends to 3 `t_sat`.
+#[must_use]
+fn saturated_seconds(age: Years, saturation_time: Years) -> f64 {
+    let (t, t_sat) = (age.value(), saturation_time.value());
+    let years = if t.is_nan() || t <= 0.0 {
+        0.0
+    } else if t <= t_sat {
+        t
+    } else {
+        t_sat * (3.0 - 2.0 * (t_sat / t).sqrt())
+    };
+    years * SECONDS_PER_JULIAN_YEAR
 }
 
 /// The saturation time of a star of initial mass `mass` (ruling 122.2): [`XUV_SATURATION_M`] up
@@ -620,6 +683,66 @@ thread_local! {
     /// The paired stars' light rules a test sets on its thread, `None` for the version's.
     static BINARY_HOST_LIGHT_RULES: core::cell::Cell<Option<BinaryHostLightRules>> =
         const { core::cell::Cell::new(None) };
+}
+
+/// The generator version from which a star of a pair the binary engine ran has the X-ray and
+/// ultraviolet history of what the engine made of it (P14.T1.f): 27, held with the 27 train.
+///
+/// Below it [`BinaryHostXuvRules::in_force`] is [`BinaryHostXuvRules::SingleModels`]: every star's
+/// history is its own single star's closed form, and every figure is version 26's bit for bit.
+/// 27's bump deletes this hold, [`BinaryHostXuvRules`] with its `SingleModels` arm, the tests'
+/// switch and its tripwire (`the_binary_host_xuv_is_held_only_until_the_27_bump`).
+pub(crate) const BINARY_HOST_XUV_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// Where a paired star's X-ray and ultraviolet history comes from (its hold,
+/// [`BINARY_HOST_XUV_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum BinaryHostXuvRules {
+    /// Version 26's and before: every star's own closed form.
+    SingleModels,
+    /// Version 27's: what the binary engine made of it ([`SystemContext::xuv_histories`]).
+    Engine,
+}
+
+impl BinaryHostXuvRules {
+    /// The rules this generator version gives: the engine's from [`BINARY_HOST_XUV_VERSION`], the
+    /// single models' below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_binary_host_xuv`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = BINARY_HOST_XUV_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= BINARY_HOST_XUV_VERSION {
+            Self::Engine
+        } else {
+            Self::SingleModels
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The paired stars' XUV rules a test sets on its thread, `None` for the version's.
+    static BINARY_HOST_XUV_RULES: core::cell::Cell<Option<BinaryHostXuvRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the paired stars' XUV rules `rules` on this thread, for the tests to reach
+/// the engine's histories ahead of the bump; the version's rules are set back after, a panic in
+/// `run` included. 27's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_binary_host_xuv<R>(rules: BinaryHostXuvRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<BinaryHostXuvRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            BINARY_HOST_XUV_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(BINARY_HOST_XUV_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
 }
 
 /// `run`'s result with the paired stars' light rules `rules` on this thread, for the tests to
@@ -1156,17 +1279,70 @@ impl SystemContext {
     /// The X-ray and ultraviolet history of every component, in body order: [`xuv_history`]
     /// of each; none for a rogue planet.
     ///
+    /// From generator version 27 (P14.T1.f, `BINARY_HOST_XUV_VERSION`) a star of a pair the binary
+    /// engine ran follows what the engine made of it: merged into its companion, it shines no more
+    /// from the merger; left on the main sequence at another mass by the pair's first interaction,
+    /// an accretor or a merger's product, it shines from that interaction's start as a star of
+    /// that mass ([`XuvHistory::new`] of it and its zero-age luminosity), its age counted from its
+    /// birth (lean, 2026-11-02). A stripped or evolved star keeps its own closed form.
+    ///
     /// [`xuv_history`]: Self::xuv_history
     #[must_use]
     pub fn xuv_histories(&self) -> Vec<XuvHistory> {
-        self.hierarchy
+        let histories = self
+            .hierarchy
             .iter()
             .flat_map(SystemHierarchy::stars)
             .zip(self.zone_stars())
             .map(|(slot, zone_star)| {
                 XuvHistory::new(slot.initial_mass(), zone_star.zams_luminosity)
-            })
-            .collect()
+            });
+        match BinaryHostXuvRules::in_force() {
+            BinaryHostXuvRules::SingleModels => histories.collect(),
+            BinaryHostXuvRules::Engine => histories
+                .enumerate()
+                .map(|(star, history)| self.engine_xuv(star, history))
+                .collect(),
+        }
+    }
+
+    /// Star `star`'s X-ray and ultraviolet history `history` as the binary engine leaves it
+    /// ([`xuv_histories`](Self::xuv_histories), P14.T1.f): `history` itself for a star of no pair
+    /// the engine ran.
+    #[must_use]
+    fn engine_xuv(&self, star: usize, history: XuvHistory) -> XuvHistory {
+        let Some((pair, component)) = u8::try_from(star)
+            .ok()
+            .and_then(|index| pair_of(&self.pairs, index))
+        else {
+            return history;
+        };
+        let timeline = pair.timeline();
+        let segments = timeline.segments();
+        let gone = timeline.state_at(timeline.until()).stars()[component.index()].phase()
+            == Phase::NoRemnant;
+        if gone && let Some(merger) = timeline.merger_age() {
+            return history.then_from(merger, XuvHistory::DARK);
+        }
+        let Some(first) = segments
+            .iter()
+            .position(|segment| segment.kind() != SegmentKind::Detached)
+        else {
+            return history;
+        };
+        // The star the first interaction leaves: at the next detached segment's start, or at the
+        // coalescence's.
+        let left = segments[first + 1..]
+            .iter()
+            .find(|segment| matches!(segment.kind(), SegmentKind::Detached | SegmentKind::Merged))
+            .map_or(timeline.until(), crate::stellar::binary::Segment::start);
+        let after = timeline.state_at(left).stars()[component.index()];
+        if after.phase() != Phase::MainSequence || after.mass() < sse::MIN_INITIAL_MASS {
+            return history;
+        }
+        let coeffs = ZCoeffs::new(self.composition.z_fit());
+        let then = XuvHistory::new(after.mass(), zams::luminosity(after.mass(), &coeffs));
+        history.then_from(segments[first].start(), then)
     }
 
     /// The system's age at the epoch, Julian years: negative for a system that forms during play.

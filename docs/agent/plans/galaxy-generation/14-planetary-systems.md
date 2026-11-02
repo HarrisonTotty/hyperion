@@ -949,6 +949,11 @@ Order and parallelism:
   and its peak, from its pair's timeline, where `SystemStars::state_at` reads it.
   - _Accept:_ `cargo test -p hyperion-sim --lib -- planetary::context binary_host`, and the slow
     `the_binary_hosts_census_reads_every_paired_star_as_the_engine_does` by name.
+- **P14.T1.f A paired star's X-ray and ultraviolet history as the engine leaves it** (main's rider
+  to research-binary-hosts, held at 27). A star merged away shines no more from its merger; an
+  accretor or a merger's product left on the main sequence shines from its pair's first
+  interaction as a star of its new mass.
+  - _Accept:_ `cargo test -p hyperion-sim --lib -- binary_host_xuv`.
 
 #### P14.T2 Orbit additions
 
@@ -9610,6 +9615,7 @@ it:
 - **Interacting binaries.** The golden set holds none, on purpose. From 27 the stage reads the
   binary engine's state of each star of a pair it ran (research-binary-hosts):
   - its light and peak luminosity (P14.T1.e, `BINARY_HOST_LIGHT_VERSION`);
+  - its X-ray and ultraviolet history (P14.T1.f, `BINARY_HOST_XUV_VERSION`);
   - its mass, largest radius and sudden events in the fate (P14.T28.g, `BINARY_HOST_FATE_VERSION`);
   - its zones at the evaluated state, and its released stars (P14.T9.d, `BINARY_HOST_ZONES_VERSION`).
 - **Plan 05's spatial view** is unit-agnostic, which the orbit map needs, and its plane follows
@@ -34284,3 +34290,12 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Readers:_ a departed star lights the system no more (`Epoch::companions`, the water window),
     through `SystemContext::has_left`.
   - _For 27's bump:_ delete what `the_binary_host_zones_are_held_only_until_the_27_bump` lists.
+- **P14.T1.f's paired XUV, as built (lane `fix-binary-hosts`, 2026-11-02).** Held at 27
+  (`context::BINARY_HOST_XUV_VERSION`; `BinaryHostXuvRules::{SingleModels, Engine}`,
+  `with_binary_host_xuv`, a line in `with_every_27_hold`). Nothing moves at 24, 25 or 26.
+  - _Changed:_ `XuvHistory` gains a later closed form from an age on (`then_from`), and its
+    energy is this one's to the change and the later one's after, so it never falls;
+    `SystemContext::xuv_histories` gives the engine's under the hold.
+  - _Leans (2026-11-02):_ the later star's age is counted from its birth; its saturated phase,
+    which `saturated_flux` and `saturation_time` read, stays its birth star's; a stripped or
+    evolved star keeps its own closed form.

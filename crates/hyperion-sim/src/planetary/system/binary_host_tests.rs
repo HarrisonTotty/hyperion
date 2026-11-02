@@ -9,6 +9,7 @@ use super::*;
 use crate::GENERATOR_VERSION;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
+use crate::planetary::context::XuvHistory;
 use crate::planetary::context::{
     BINARY_HOST_LIGHT_VERSION, BinaryHostLightRules, with_binary_host_light,
 };
@@ -347,4 +348,171 @@ fn binary_host_light_derives_the_planets_of_merged_pairs() {
         wanted.map(|(_, n)| n),
         "the sample's first {SEARCH} systems hold too few merged pairs with planets"
     );
+}
+
+/// The paired stars' X-ray and ultraviolet histories are held until the 26 → 27 bump: the rules
+/// in force are the single models', the tests' switch and 27's helper reach the engine's, and
+/// 26's and 25's helpers do not.
+#[test]
+fn the_binary_host_xuv_is_held_only_until_the_27_bump() {
+    use crate::planetary::context::{
+        BINARY_HOST_XUV_VERSION, BinaryHostXuvRules, with_binary_host_xuv,
+    };
+    assert!(
+        GENERATOR_VERSION < BINARY_HOST_XUV_VERSION,
+        "the 26 → 27 bump gives a paired star the X-ray and ultraviolet history of what the engine \
+         made of it: delete `BINARY_HOST_XUV_VERSION`, `BinaryHostXuvRules` with its \
+         `SingleModels` arm and its match in `SystemContext::xuv_histories`, the tests' \
+         `with_binary_host_xuv`, its switch in `with_every_27_hold` (and the helper, if no other 27 \
+         hold is left), and this test; restate the tests held below 27"
+    );
+    assert_eq!(
+        BinaryHostXuvRules::in_force(),
+        BinaryHostXuvRules::SingleModels
+    );
+    assert_eq!(
+        with_binary_host_xuv(BinaryHostXuvRules::Engine, BinaryHostXuvRules::in_force),
+        BinaryHostXuvRules::Engine
+    );
+    assert_eq!(
+        with_every_27_hold(BinaryHostXuvRules::in_force),
+        BinaryHostXuvRules::Engine
+    );
+    assert_eq!(
+        with_every_27_hold(|| {
+            with_binary_host_xuv(
+                BinaryHostXuvRules::SingleModels,
+                BinaryHostXuvRules::in_force,
+            )
+        }),
+        BinaryHostXuvRules::SingleModels
+    );
+}
+
+/// A star its companion swallowed in a common envelope emits no X-rays or ultraviolet after the
+/// merger under the engine's rules: its luminosity is zero and the energy it delivered stays at
+/// what it was then, its own closed form's, where the single models keep it shining.
+#[test]
+fn binary_host_xuv_of_a_star_merged_away_ends_at_the_merger() {
+    use crate::planetary::context::{BinaryHostXuvRules, with_binary_host_xuv};
+    let galaxy = galaxy();
+    let (stars, k) = first_paired_system(
+        &galaxy,
+        SEARCH,
+        PairHistory::CommonEnvelopeMerger,
+        |stars, k| {
+            let pair = &stars.pairs()[k];
+            let timeline = pair.timeline();
+            timeline
+                .state_at(timeline.until())
+                .stars()
+                .iter()
+                .any(|star| star.phase() == Phase::NoRemnant)
+        },
+    )
+    .expect("a common-envelope merger among the sample's first systems");
+    let ctx = SystemContext::from_stars(&galaxy, &stars);
+    let pair = &ctx.pairs()[k];
+    let timeline = pair.timeline();
+    let end = timeline.state_at(timeline.until());
+    let component = (0..2)
+        .find(|&c| end.stars()[c].phase() == Phase::NoRemnant)
+        .unwrap();
+    let gone = usize::from(pair.stars()[component].get());
+    let merger = timeline.merger_age().unwrap();
+    let [single, engine] = [BinaryHostXuvRules::SingleModels, BinaryHostXuvRules::Engine]
+        .map(|rules| with_binary_host_xuv(rules, || ctx.xuv_history(gone)));
+    let au = Metres::from(AstronomicalUnits::new(1.0));
+    let later = Years::new(merger.value() * 1.5);
+    assert_same_bits(engine.luminosity(later).value(), 0.0);
+    assert!(single.luminosity(later).value() > 0.0);
+    assert_same_bits(
+        engine.fluence(later, au, 0.0).value(),
+        single.fluence(merger, au, 0.0).value(),
+    );
+    let before = Years::new(merger.value() * 0.5);
+    assert_same_bits(
+        engine.fluence(before, au, 0.0).value(),
+        single.fluence(before, au, 0.0).value(),
+    );
+}
+
+/// A merger on the main sequence, a blue straggler, shines in X-rays and ultraviolet from its
+/// pair's first interaction as a main-sequence star of its new mass under the engine's rules, the
+/// energy it has delivered never falling.
+#[test]
+fn binary_host_xuv_of_a_main_sequence_merger_is_its_product_s() {
+    use crate::planetary::context::{BinaryHostXuvRules, with_binary_host_xuv};
+    use crate::stellar::binary::SegmentKind;
+    let galaxy = galaxy();
+    let t = UniverseTime::EPOCH;
+    let (stars, k) = first_paired_system(&galaxy, SEARCH, PairHistory::Merger, |stars, k| {
+        let pair = &stars.pairs()[k];
+        let timeline = pair.timeline();
+        timeline
+            .segments()
+            .iter()
+            .find(|s| s.kind() == SegmentKind::Merged)
+            .is_some_and(|merged| {
+                timeline
+                    .state_at(merged.start())
+                    .stars()
+                    .iter()
+                    .any(|star| star.phase() == Phase::MainSequence)
+            })
+    })
+    .expect("a main-sequence merger among the sample's first systems");
+    let ctx = SystemContext::from_stars(&galaxy, &stars);
+    let pair = &ctx.pairs()[k];
+    let timeline = pair.timeline();
+    let merged = timeline
+        .segments()
+        .iter()
+        .find(|s| s.kind() == SegmentKind::Merged)
+        .unwrap();
+    let product = (0..2)
+        .find(|&c| timeline.state_at(merged.start()).stars()[c].phase() == Phase::MainSequence)
+        .unwrap();
+    let star = usize::from(pair.stars()[product].get());
+    let mass = timeline.state_at(merged.start()).stars()[product].mass();
+    let engine = with_binary_host_xuv(BinaryHostXuvRules::Engine, || ctx.xuv_history(star));
+    let coeffs = crate::stellar::sse::ZCoeffs::new(ctx.composition().z_fit());
+    let own = XuvHistory::new(mass, crate::stellar::sse::zams::luminosity(mass, &coeffs));
+    let age = ctx.age_at(t);
+    assert_same_bits(engine.luminosity(age).value(), own.luminosity(age).value());
+    let au = Metres::from(AstronomicalUnits::new(1.0));
+    let fluences: Vec<f64> = (1..=60)
+        .map(|i| {
+            engine
+                .fluence(Years::new(age.value() * f64::from(i) / 50.0), au, 0.0)
+                .value()
+        })
+        .collect();
+    assert!(fluences.windows(2).all(|w| w[0] <= w[1]), "{fluences:?}");
+}
+
+/// A star of no pair the engine ran keeps its own X-ray and ultraviolet history under the engine's
+/// rules, bit for bit.
+#[test]
+fn binary_host_xuv_leaves_an_unpaired_star_as_it_was() {
+    use crate::planetary::context::{BinaryHostXuvRules, with_binary_host_xuv};
+    let galaxy = galaxy();
+    let records = sample_records(&galaxy, 200, SampleFilter::ALL).unwrap();
+    let mut checked = 0;
+    for record in &records {
+        let stars = SystemStars::generate(&galaxy, record);
+        let ctx = SystemContext::from_stars(&galaxy, &stars);
+        let [single, engine] = [BinaryHostXuvRules::SingleModels, BinaryHostXuvRules::Engine]
+            .map(|rules| with_binary_host_xuv(rules, || ctx.xuv_histories()));
+        for (star, (a, b)) in single.iter().zip(&engine).enumerate() {
+            let paired = u8::try_from(star)
+                .ok()
+                .and_then(|index| crate::stellar::system::pair_of(ctx.pairs(), index));
+            if paired.is_none() {
+                assert_eq!(a, b, "{:?} star {star}", ctx.id());
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 150, "{checked} unpaired stars");
 }
