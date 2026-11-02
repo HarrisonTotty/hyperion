@@ -3964,22 +3964,28 @@ mod tests {
         assert_traces_agree(&sphere, &same, 1e-9);
     }
 
+    /// The threads [`atmosphere_spheroid_with_a_equal_to_c_follows_the_spheres_paths`] traces
+    /// on: the slots `.config/nextest.toml` reserves for it, or the fewer a run grants. Its
+    /// traces are the same, bit for bit, on any number.
+    const SPHEROID_THREADS: usize = 16;
+
     #[test]
-    #[ignore = "slow: 10⁵ samples of each source over a sphere and a spheroid, and 5 × 10⁴ over another two; about 3 minutes on 4 threads"]
+    #[ignore = "slow: 10⁵ samples of each source over a sphere and a spheroid, and 5 × 10⁴ over another two; about a minute on 16 threads"]
     fn atmosphere_spheroid_with_a_equal_to_c_follows_the_spheres_paths() {
+        let threads = hyperion_testkit::threads::granted(SPHEROID_THREADS);
         // The fast test's comparison over 10⁵ paths a source, so that rare paths (grazing,
         // reflected many times, rouletted) are held to the sphere's too.
         let sphere = trace(
             &case::tests::sample_case(),
             Polarisation::Scalar,
             100_000,
-            4,
+            threads,
         );
         let spheroid = trace(
             &sample_case_as_a_spheroid(0),
             Polarisation::Scalar,
             100_000,
-            4,
+            threads,
         );
         for g in sphere.geometries() {
             let (radiance, error) = (g.radiance()[0], g.standard_error()[0]);
@@ -3997,13 +4003,17 @@ mod tests {
         // 40,000 samples, from a pilot at 10 other seeds: at R08.T12.d's 1,500 the ratio of a σ at
         // N to half its σ at N ÷ 4 scattered by 13% over them at worst (the view from orbit at
         // 550 nm), by 6.3% at 16,000 and by 2.7% here.
-        let [sphere, sphere_quarter] =
-            trace_and_quarter(&case::tests::sample_case(), Polarisation::Scalar, 40_000, 4);
+        let [sphere, sphere_quarter] = trace_and_quarter(
+            &case::tests::sample_case(),
+            Polarisation::Scalar,
+            40_000,
+            threads,
+        );
         let [independent, independent_quarter] = trace_and_quarter(
             &sample_case_as_a_spheroid(1),
             Polarisation::Scalar,
             40_000,
-            4,
+            threads,
         );
         let mut agreement = Agreement::new("a = c on independent draws", 8);
         for (((what, x, sx), (_, _, qx)), ((_, y, sy), (_, _, qy))) in stochastic_values(&sphere)

@@ -430,6 +430,12 @@ priority = 60
 filter = "package(hyperion-sim) & binary(gas_statistics) & test(=the_neutral_disc_holds_most_of_the_gas_over_2000_galaxies)"
 priority = 60
 
+# R08.T12.g's spheroid at a = c traces on sixteen threads (`SPHEROID_THREADS` in
+# `atmosphere/mod.rs`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-fit) & test(=atmosphere::tests::atmosphere_spheroid_with_a_equal_to_c_follows_the_spheres_paths)"
+threads-required = 16
+
 # The atmosphere tracer's benchmarks (rendering plan R08, R08.T12.c) each trace on sixteen
 # threads, `atmosphere::benchmarks`'s `THREADS`.
 [[profile.slow.overrides]]
