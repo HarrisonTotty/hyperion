@@ -7,7 +7,7 @@ import {
 } from "@hyperion/protocol";
 import { type ReactNode, useId, useState } from "react";
 
-import { AlertList, type AlertSort } from "../../components/AlertList";
+import { AlertList, type AlertSort, alertText, sortAlerts } from "../../components/AlertList";
 import { RequestStatus } from "../../components/RequestStatus";
 import { StaleSlot } from "../../components/StaleSlot";
 import { StatusLine } from "../../components/StatusLine";
@@ -54,14 +54,21 @@ const LISTS: ReadonlyArray<{ readonly list: ChartList; readonly label: string }>
 export const NO_OBSERVER = "NO OBSERVER: choose OBSERVED on the LOCAL CHART";
 
 /**
- * The most unacknowledged alerts the `ALERTS` choice's count writes in full; more read `999+`, in
- * the same four places (lean, 2026-11-01: the wire bounds no subscription's contacts).
+ * The most unacknowledged alerts the `ALERTS` choice's count writes in its four places; more are
+ * the guide's Overflow, `****` in `--status-caution` (lean, 2026-11-01: the wire bounds no
+ * subscription's contacts).
  */
-const ALERT_COUNT_MAX = 999;
+const ALERT_COUNT_MAX = 9999;
+
+/** The newest of the unacknowledged alerts `unacknowledged`, in words; `null` with none. */
+function newestAlertText(unacknowledged: ReadonlyArray<ContactDto>): string | null {
+  const [newest] = sortAlerts(unacknowledged, "time");
+  return newest === undefined ? null : alertText(newest);
+}
 
 /** The `ALERTS` choice's count of unacknowledged alerts, in the place kept for it. */
 function alertCountFigure(count: number): string {
-  return count > ALERT_COUNT_MAX ? `${formatNumber(ALERT_COUNT_MAX, 0)}+` : formatNumber(count, 0);
+  return count > ALERT_COUNT_MAX ? "****" : formatNumber(count, 0);
 }
 
 /**
@@ -172,7 +179,9 @@ interface SystemsPanelProps {
  * unacknowledged, the `ALERTS` choice carries their count after its name, `ALERTS 2`, named
  * `ALERTS, 2 unacknowledged`, so that an Advisory arriving while another list shows is seen: in a
  * place kept for it with its stale slot, empty with none, so that the choice never changes width,
- * and stale with the list's rows (ux-calls-data's ruling 5).
+ * and stale with the list's rows (ux-calls-data's ruling 5). While another list shows, the newest
+ * unacknowledged alert is said in a live region of the panel's, as the alert list says it while it
+ * shows, so that its arrival is heard too.
  */
 export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps) {
   const titleId = useId();
@@ -192,8 +201,10 @@ export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps)
   const activeAlert = alerts.contacts.find((contact) => contact.contact === activeContact) ?? null;
   const activeHost = activeAlert?.level === "resolved" ? activeAlert.host : null;
   // Counted as the server last confirmed them, so an acknowledgement in flight still counts.
-  const unacknowledged = alerts.contacts.filter((contact) => !contact.acknowledged).length;
+  const unacknowledgedAlerts = alerts.contacts.filter((contact) => !contact.acknowledged);
+  const unacknowledged = unacknowledgedAlerts.length;
   const alertsStale = alerts.status.kind === "stale";
+  const overflow = unacknowledged > ALERT_COUNT_MAX && !alertsStale;
   // A selection made on the chart shows the list it is in, so that it is shown in both places: the
   // operator's selection, which stays while the chart's two answers arrive apart.
   const selectionKey = chart.selection === null ? null : selectionMarkId(chart.selection);
@@ -362,7 +373,13 @@ export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps)
                     alertsStale ? "systems-panel__alert-count stale" : "systems-panel__alert-count"
                   }
                 >
-                  <span className="systems-panel__alert-figure">
+                  <span
+                    className={
+                      overflow
+                        ? "systems-panel__alert-figure systems-panel__alert-figure--overflow"
+                        : "systems-panel__alert-figure"
+                    }
+                  >
                     {unacknowledged > 0 ? alertCountFigure(unacknowledged) : ""}
                   </span>
                   <StaleSlot stale={alertsStale && unacknowledged > 0} />
@@ -372,6 +389,10 @@ export function SystemsPanel({ chart, alerts, onOpenSystem }: SystemsPanelProps)
           ))}
         </fieldset>
       </div>
+      {/* The alert list says its newest alert itself while it shows. */}
+      <output className="visually-hidden">
+        {list === "alerts" ? "" : (newestAlertText(unacknowledgedAlerts) ?? "")}
+      </output>
       {list === "alerts" ? (
         <AlertListPart
           alerts={alerts}

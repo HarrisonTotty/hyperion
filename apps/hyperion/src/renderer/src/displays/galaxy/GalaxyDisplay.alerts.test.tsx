@@ -7,6 +7,7 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { alertText } from "../../components/AlertList";
 import { UniverseProvider } from "../../components/UniverseProvider";
 import { aBearingContact, alertsNotification, aResolvedContact } from "../../test/alertFixtures";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
@@ -312,16 +313,31 @@ describe("the ALERTS choice's count of unacknowledged alerts (ux-calls-data's ru
     expect(alertsChoice()).toHaveAccessibleName("ALERTS, 1 unacknowledged");
   });
 
-  it("writes a count past 999 as 999+ in the same place, its name keeping the count", async () => {
+  it("writes a count past its four places as the guide's Overflow, its name keeping the count", async () => {
     const { user, socket } = await renderCharted();
     await observeWith(
       user,
       socket,
-      Array.from({ length: 1000 }, (_, index) => aBearingContact({ contact: index + 1 })),
+      Array.from({ length: 10_000 }, (_, index) => aBearingContact({ contact: index + 1 })),
     );
 
-    expect(alertsChoice()).toHaveAccessibleName("ALERTS, 1000 unacknowledged");
-    expect(alertsChoice()).toHaveTextContent(/^ALERTS999\+$/u);
+    expect(alertsChoice()).toHaveAccessibleName("ALERTS, 10,000 unacknowledged");
+    expect(alertsChoice()).toHaveTextContent(/^ALERTS\*\*\*\*$/u);
+    expect(within(alertsChoice()).getByText("****")).toHaveClass(
+      "systems-panel__alert-figure--overflow",
+    );
+  });
+
+  it("says a pushed alert's text in a live region while SYSTEMS shows", async () => {
+    const { user, socket } = await renderCharted();
+    await observeWith(user, socket, []);
+    const nova = aResolvedContact([1, 0, 0]);
+
+    await server(() => {
+      socket.serverNotifies(1, alertsNotification(1, [nova]));
+    });
+
+    expect(within(systemsPanel()).getByText(alertText(nova)).closest("output")).not.toBeNull();
   });
 
   it("goes stale with the list's rows when the link is lost", async () => {

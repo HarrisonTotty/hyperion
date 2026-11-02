@@ -3048,19 +3048,23 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 /*
  * The `ALERTS` choice's count of unacknowledged alerts after its name, `ALERTS 2` (ux-calls-data's
  * ruling 5): B612 Mono's tabular figures, untracked so that `ch` sizes them, in a place kept for
- * four, `999+`, and the stale slot after it, both empty with none, so that the choice never
- * changes width.
+ * four figures and the stale slot straight after them, `9999 S`, set from its left, so that the
+ * count stands one space after the name and its `S` after the count, and empty with none, so that
+ * the choice never changes width.
  */
 .systems-panel__alert-count {
+  display: inline-block;
+  width: 6ch;
   margin-left: 1ch;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
+  text-align: left;
 }
 
-.systems-panel__alert-figure {
-  display: inline-block;
-  width: 4ch;
+/* A count past its four places, the guide's Overflow. */
+.systems-panel__alert-figure--overflow {
+  color: var(--status-caution);
 }
 
 .system-list__class {
