@@ -5876,3 +5876,12 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Sources._ `GlobalListSource` beside the members and the classes, as the server registers it;
     the centre's and the streams' and cores' members are counted apart and printed, not tested.
   - _Figures._ In the lane's outbox.
+- **P09.T37, the runaway claim (lane `fix-p09-recent-dead`, 2026-11-02, under `runaway_deaths`
+  (27); no output moved).**
+  - _Claim._ `members::recent::claimed_by` gives `Claim::{Listed(RecentClass), Runaway}`: a core
+    collapse whose member's own ejection marks make it a runaway (`FeatureStars::runaway`, which
+    `entry` reads too) is the class's runaway terms', so the cells give it up and the list drops it.
+  - _Lean (2026-11-02)._ The cells keep giving it up: P09.T33.b's terms take the whole budget's
+    runaways, so a cell keeping it would count it twice.
+  - _Test._ `features::members::recent::tests::the_cells_and_the_list_are_complementary_under_every_27_hold`,
+    which failed on BASE at `SystemId(0xe04de000f0000001)`: 308 runaway candidates, 20 mark sets.

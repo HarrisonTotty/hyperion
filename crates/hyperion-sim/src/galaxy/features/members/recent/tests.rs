@@ -430,14 +430,20 @@ fn checked_claim(
     stars: &FeatureStars,
     record: &SystemRecord,
     (composition, velocity): (&Composition, GalacticVelocity),
-) -> Option<RecentClass> {
+) -> Option<Claim> {
     let claim = claimed_by(galaxy, stars, record, composition, velocity);
-    if let Some(class) = claim {
+    // A runaway's death is a core collapse's, which the list's candidates hold before it drops it.
+    let class = match claim {
+        Some(Claim::Listed(class)) => Some(class),
+        Some(Claim::Runaway) => Some(RecentClass::CoreCollapse),
+        None => None,
+    };
+    if let Some(class) = class {
         assert!(
             stars
                 .candidates(class)
                 .is_some_and(|c| c.contains(record.primary_initial_mass(), record.age_at_epoch())),
-            "{class:?} claims {:?}, outside its candidates",
+            "{claim:?} claims {:?}, outside its candidates",
             record.id()
         );
     }
@@ -489,21 +495,45 @@ fn the_cells_and_the_list_are_complementary_under_every_27_hold() {
     complementary_over_ten_thousand_members(&off, &on);
 }
 
-/// Whether `record`, a core-collapse candidate of `feature`'s list in `galaxy`, is a runaway whose
-/// death the list leaves to the field's class: from 27 a runaway dies some 1,900 ly from its
-/// birth cluster, and the list drops it whatever its claim (P09.T33.b's `feature_runaway`).
-fn dies_in_the_field(galaxy: &Galaxy, feature: &FeatureRecord, record: &SystemRecord) -> bool {
-    feature.component().is_some_and(|component| {
-        feature_runaway(
-            galaxy,
-            component,
-            record.primary_initial_mass(),
-            ObjectKey::from(record.id()),
-        )
-    })
+/// The features' complementarity of
+/// Each core collapse's and variable's candidate on `feature`'s list in `galaxy`, its stars
+/// `stars`, kept as its class exactly where [`claimed_by`] gives that class, counted into `lists`
+/// by class and verdict; a runaway's death, which [`claimed_by`] gives the class's runaway terms
+/// (from 27), kept by no list. The runaways' candidates.
+fn list_against_its_claims(
+    galaxy: &Galaxy,
+    (feature, stars): (&FeatureRecord, &FeatureStars),
+    lists: &mut BTreeMap<(RecentClass, bool), u32>,
+) -> u32 {
+    let mut runaways = 0;
+    for entry in FeatureLevelList::of(galaxy, feature).entries() {
+        // From 27 the lists hold plan 11's binary classes too (P11.T8.f), which no recent class's
+        // claim reads.
+        let Some(class) = RecentClass::of(entry.class()) else {
+            continue;
+        };
+        if class == RecentClass::TypeIa {
+            continue;
+        }
+        let (record, _) = stars
+            .candidate(galaxy, class, entry.index(), entry.position())
+            .unwrap();
+        let kept = stars
+            .entry(galaxy, class, entry.index(), entry.position())
+            .is_some();
+        let claimed = checked_claim(galaxy, stars, &record, (&stars.composition, stars.velocity));
+        assert_eq!(
+            kept,
+            claimed == Some(Claim::Listed(class)),
+            "{:?}",
+            record.id()
+        );
+        runaways += u32::from(claimed == Some(Claim::Runaway));
+        *lists.entry((class, kept)).or_insert(0_u32) += 1;
+    }
+    runaways
 }
 
-/// The features' complementarity of
 /// [`the_cells_and_the_list_are_complementary_over_ten_thousand_members`], in `on` against `off`,
 /// its held arm.
 fn complementary_over_ten_thousand_members(off: &Galaxy, on: &Galaxy) {
@@ -511,6 +541,7 @@ fn complementary_over_ten_thousand_members(off: &Galaxy, on: &Galaxy) {
     let mut lcg = Lcg::new(0x0936_0000);
     let (mut members, mut sets) = (0_u32, 0_u32);
     let (mut cells, mut lists, mut claims) = (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
+    let mut runaways = 0_u32;
     for feature in FeatureCatalogue::walk_process(on, FeatureProcess::Nursery) {
         if members == MEMBERS && sets == MEMBERS {
             break;
@@ -524,32 +555,7 @@ fn complementary_over_ten_thousand_members(off: &Galaxy, on: &Galaxy) {
         let claim = |record: &SystemRecord, composition: &Composition, velocity| {
             checked_claim(on, &stars, record, (composition, velocity))
         };
-        for entry in FeatureLevelList::of(on, &feature).entries() {
-            // From 27 the lists hold plan 11's binary classes too (P11.T8.f), which no recent
-            // class's claim reads.
-            let Some(class) = RecentClass::of(entry.class()) else {
-                continue;
-            };
-            if class == RecentClass::TypeIa {
-                continue;
-            }
-            let (record, _) = stars
-                .candidate(on, class, entry.index(), entry.position())
-                .unwrap();
-            let kept = stars
-                .entry(on, class, entry.index(), entry.position())
-                .is_some();
-            let claimed = claim(&record, &stars.composition, stars.velocity);
-            let runaway =
-                class == RecentClass::CoreCollapse && dies_in_the_field(on, &feature, &record);
-            assert_eq!(
-                kept,
-                claimed == Some(class) && !runaway,
-                "{:?}",
-                record.id()
-            );
-            *lists.entry((class, kept)).or_insert(0_u32) += 1;
-        }
+        runaways += list_against_its_claims(on, (&feature, &stars), &mut lists);
         // Mark sets on indices past any list's, so that each is its own.
         let (lo, hi) = (MassBand::E.lo(), MassBand::E.hi());
         for index in 4_096..4_096 + 16 {
@@ -598,16 +604,24 @@ fn complementary_over_ten_thousand_members(off: &Galaxy, on: &Galaxy) {
         }
     }
     eprintln!(
-        "the cells' members by claim {cells:?}; the lists' candidates kept {lists:?}; the mark \
-         sets by claim {claims:?}"
+        "the cells' members by claim {cells:?}; the lists' candidates kept {lists:?}, {runaways} \
+         of them runaways; the mark sets by claim {claims:?}"
     );
     assert_eq!((members, sets), (MEMBERS, MEMBERS));
     for class in [RecentClass::CoreCollapse, RecentClass::LuminousBlueVariable] {
         assert!(
-            claims.get(&Some(class)).is_some_and(|&n| n > 0),
+            claims
+                .get(&Some(Claim::Listed(class)))
+                .is_some_and(|&n| n > 0),
             "{class:?}"
         );
     }
+    // From 27 the class's runaway terms hold some of the lists' candidates' deaths (P09.T33.b).
+    assert_eq!(
+        runaways > 0,
+        crate::galaxy::catalogue_classes::core_collapse::ejecting_table(on).is_some(),
+        "{runaways} runaways"
+    );
     assert!(cells.keys().any(Option::is_some));
 }
 

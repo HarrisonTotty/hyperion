@@ -44,6 +44,9 @@
 //! each band-E member is asked `claimed_by`, the same test on its own marks, and a member it
 //! claims resolves to "no such system", so that a recent death or a variable is the list's or the
 //! cells' and never both (P09.T38's complementarity; plan 03's carve-out, P09.T35's for the grid).
+//! From 27 a death the claim finds a runaway's ([`Claim::Runaway`]) is neither's: the
+//! core-collapse class's runaway terms hold it, in the field, so the cells give it up and the list
+//! drops it (P09.T37's fix of the claim, which named it the list's).
 //!
 //! # The draws
 //!
@@ -570,7 +573,7 @@ impl FeatureStars {
                 let (record, range) = self.candidate(galaxy, class, index, position)?;
                 if class == RecentClass::LuminousBlueVariable {
                     return (claimed_by(galaxy, self, &record, &self.composition, self.velocity)
-                        == Some(RecentClass::LuminousBlueVariable))
+                        == Some(Claim::Listed(RecentClass::LuminousBlueVariable)))
                     .then(|| RecentEntry {
                         class,
                         member: self.member(record, range),
@@ -579,14 +582,7 @@ impl FeatureStars {
                     });
                 }
                 // From 27 a runaway's death is the class's, in the field (P09.T33.b).
-                if self.feature.component().is_some_and(|component| {
-                    feature_runaway(
-                        galaxy,
-                        component,
-                        record.primary_initial_mass(),
-                        ObjectKey::from(record.id()),
-                    )
-                }) {
+                if self.runaway(galaxy, &record) {
                     return None;
                 }
                 let (claim, site) =
@@ -653,6 +649,21 @@ impl FeatureStars {
             member: self.member(record, (mass, mass)),
             site: Some(site),
             window,
+        })
+    }
+
+    /// Whether the member `record` is a runaway whose death is the core-collapse class's, by its
+    /// own ejection marks ([`feature_runaway`] on its member ID's key): never below 27 or in a
+    /// feature with no component.
+    #[must_use]
+    fn runaway(&self, galaxy: &Galaxy, record: &SystemRecord) -> bool {
+        self.feature.component().is_some_and(|component| {
+            feature_runaway(
+                galaxy,
+                component,
+                record.primary_initial_mass(),
+                ObjectKey::from(record.id()),
+            )
         })
     }
 
@@ -898,13 +909,27 @@ impl Candidates {
     }
 }
 
-/// Which recent class of `stars`'s feature claims the member `record`, of composition
-/// `composition` moving at `velocity` (module documentation): the core collapses if the one
-/// shared test keeps its death's shell, the luminous blue variables if its window overlaps the
-/// source horizon and the core collapses do not claim it; a globular's members none.
+/// What claims a band-E member of a catalogue feature ([`claimed_by`]), which its cells then give
+/// up: exactly one side holds each mark set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum Claim {
+    /// One of the feature's recent classes, on its list.
+    Listed(RecentClass),
+    /// From generator version 27, a runaway's death: its own ejection marks put it out of its
+    /// feature before it dies ([`feature_runaway`]), so the core-collapse class's runaway terms
+    /// hold it, in the field at the whole budget, and neither the cells nor the list (P09.T33.b's
+    /// deaths by kind; research-leans-21).
+    Runaway,
+}
+
+/// What claims the member `record` of `stars`'s feature, of composition `composition` moving at
+/// `velocity` (module documentation): the core collapses if the one shared test keeps its death's
+/// shell, or from 27 the class's runaway terms if its ejection marks make it a runaway; else the
+/// luminous blue variables if its window overlaps the source horizon; a globular's members none.
 ///
 /// The cells ask it of each band-E member and the list of each candidate, on their own marks, so
-/// the two halves agree on every mark set.
+/// the cells give up what the list or the runaway terms hold, and the list holds its classes'
+/// alone: each mark set is one side's.
 #[must_use]
 pub(crate) fn claimed_by(
     galaxy: &Galaxy,
@@ -912,7 +937,7 @@ pub(crate) fn claimed_by(
     record: &SystemRecord,
     composition: &Composition,
     velocity: GalacticVelocity,
-) -> Option<RecentClass> {
+) -> Option<Claim> {
     if stars.is_globular() {
         return None;
     }
@@ -920,7 +945,11 @@ pub(crate) fn claimed_by(
         .core_collapse(galaxy, record, composition, velocity)
         .is_some()
     {
-        return Some(RecentClass::CoreCollapse);
+        return Some(if stars.runaway(galaxy, record) {
+            Claim::Runaway
+        } else {
+            Claim::Listed(RecentClass::CoreCollapse)
+        });
     }
     (may_host(record.primary_initial_mass(), record.age_at_epoch())
         && horizon_window(&SystemStars::generate_with(
@@ -930,7 +959,7 @@ pub(crate) fn claimed_by(
             MultiplicityContext::ForcedSingle,
         ))
         .is_some())
-    .then_some(RecentClass::LuminousBlueVariable)
+    .then_some(Claim::Listed(RecentClass::LuminousBlueVariable))
 }
 
 /// One recent entry of a feature's list: its class, its member, and for a death its site and the
