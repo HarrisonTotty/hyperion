@@ -993,11 +993,12 @@ browser_crates := "hyperion-base hyperion-surface hyperion-testkit"
 
 # The cargo selection that `_browser`'s native lists are built and listed from by default:
 # `browser_crates` with the features `--workspace` gives them (the fitting crate asks for the sim's
-# `testing`, which asks for the surface crate's), so that the lists link the libraries of these
-# crates that the test build made. The surface crate's test executables are still built again:
-# outside `--workspace`, the dependencies of its dev-dependency Criterion resolve with fewer
-# features. `_smart-ci-test` holds it to the workspace's.
-browser_native := "-p hyperion-base -p hyperion-surface -p hyperion-testkit --features hyperion-surface/testing"
+# `testing`, which asks for the surface crate's, and the sim's tests for its `hold-switches`), so
+# that the lists link the libraries of these crates that the test build made. The surface crate's
+# test executables are still built again: outside `--workspace`, the dependencies of its
+# dev-dependency Criterion resolve with fewer features. `_smart-ci-test` holds it to the
+# workspace's.
+browser_native := "-p hyperion-base -p hyperion-surface -p hyperion-testkit --features hyperion-surface/hold-switches,hyperion-surface/testing"
 
 # How long one runner call may run on the browser target, in seconds (a test binary, or a part of one,
 # `browser_split`): wasm-bindgen-test's Node mode has no timeout of its own. The runner's `timeout` is
