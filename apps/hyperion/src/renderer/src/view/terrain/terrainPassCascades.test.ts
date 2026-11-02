@@ -53,7 +53,17 @@ import { horizonCone } from "./cull";
 import { allocationTally } from "./gpu/allocationTally";
 import { TERRAIN_SHADOW_PASS_LABEL } from "./gpu/material";
 import { LIT_PATCH_INDICES, normalsAtlasOf, TERRAIN_CLUSTER_MESH } from "./gpu/resources";
-import { INSTANCE_RECORD_BYTES } from "./gpu/uniforms";
+import {
+  DATUM_SLOT,
+  fadeWord,
+  INSTANCE_FADES_WORD,
+  INSTANCE_PARENT_SLOT_WORD,
+  INSTANCE_RECORD_BYTES,
+  INSTANCE_SLOT_WORD,
+  mixStep,
+  NO_PARENT_SLOT,
+  PARENT_MIX_SLOT,
+} from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey } from "./patchKey";
 import { type PlanetGeometry, planetGeometry, spheroidNormal, surfacePoint } from "./planet";
 import type { PatchRequest } from "./select";
@@ -68,6 +78,7 @@ import {
 import { CascadeReuse, SHADOW_PLACEHOLDER_NAME, TerrainShadows } from "./shadows/terrainShadows";
 import type { TerrainLighting } from "./terrainMaterial";
 import {
+  appendCasterRecord,
   cascadeHorizonTexelM,
   castsInto,
   meanRadiusM,
@@ -1624,6 +1635,26 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
     expect(cascadesOf(frame).litMeshCasters).toEqual([0, 0, 0, 0]);
   });
 
+  it("reuses their casters, the fin caster's among them, on a still camera, and renders them once again where the fins' lever turns (R14.T6.a)", async () => {
+    const made = await edgePass();
+    made.pass.setGeometry(EVERY_FRAME);
+    const still = frameOf(NEAR, true);
+    const first = cascadesOf(made.pass.drawFor(PRIMARY, still));
+    const finned = first.passes.some((pass) =>
+      pass.draws.some((draw) => draw.material.name.startsWith("terrain-fin-shadow")),
+    );
+    const layersNow = (): number[] => layersOf(made.pass.drawFor(PRIMARY, still));
+    const again = layersNow();
+    made.pass.setGeometry({ ...EVERY_FRAME, finClusters: false });
+    expect([finned, first.passes.length, again, layersNow(), layersNow()]).toEqual([
+      true,
+      4,
+      [],
+      [0, 1, 2, 3],
+      [],
+    ]);
+  });
+
   it("gives the overlay its depth of them on the cluster path, the may-discard buckets by the fin depth", async () => {
     const made = await edgePass();
     const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
@@ -2196,7 +2227,8 @@ describe("the far cascades at a lower rate (plan R14, R14.T6.b)", () => {
       );
     const first = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const rendered = lastCull();
-    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    // A millimetre on, so that the near two are not reused (R14.T6.a).
+    made.pass.drawFor(PRIMARY, frameOf(movedNorth(NEAR, 1e-3), true));
     const held = lastCull();
     const [, , c2, c3] = cascadesOf(first).set.cascades;
     expect([
@@ -2295,11 +2327,45 @@ describe("the cascades re-rendered only when they change (plan R14, R14.T6.a)", 
     expect([clustered, rendered]).toEqual([true, [[0, 1, 2, 3], [], [0, 1, 2, 3], []]]);
   });
 
-  it("renders again once where a caster setting changes, and none after", async () => {
+  it("culls no cluster into a reused cascade", async () => {
+    const made = await clusteredPass();
+    made.pass.setGeometry(EVERY_FRAME);
+    const culled = (): number =>
+      parsePasses(
+        made.engine.dispatched.findLast((d) => d.kernel === "cluster cull")?.bindings.uniforms[
+          "passes"
+        ] ?? new Uint32Array(),
+      ).length;
+    const still = frameOf(NEAR, true);
+    made.pass.drawFor(PRIMARY, still);
+    const first = culled();
+    const dispatches = made.engine.dispatched.length;
+    made.pass.drawFor(PRIMARY, still);
+    expect([first, made.engine.dispatched.length > dispatches, culled()]).toEqual([4, true, 0]);
+  });
+
+  it("counts none of a reused cascade's lit-mesh casters", async () => {
+    const made = await everyFrame();
+    const still = frameOf(NEAR, true);
+    const first = cascadesOf(made.pass.drawFor(PRIMARY, still)).litMeshCasters;
+    const again = cascadesOf(made.pass.drawFor(PRIMARY, still)).litMeshCasters;
+    expect([first.every((count) => count > 0), again]).toEqual([true, [0, 0, 0, 0]]);
+  });
+
+  it.each([
+    {
+      setting: "casterDepthCull",
+      toggled: { ...EVERY_FRAME, casterDepthCull: !EVERY_FRAME.casterDepthCull },
+    },
+    {
+      setting: "casterStrideCap",
+      toggled: { ...EVERY_FRAME, casterStrideCap: EVERY_FRAME.casterStrideCap === 1 ? 2 : 1 },
+    },
+  ] as const)("renders again once where $setting changes, and none after", async ({ toggled }) => {
     const made = await everyFrame();
     const still = frameOf(NEAR, true);
     const before = rendersOf(made, [still, still]);
-    made.pass.setGeometry({ ...EVERY_FRAME, casterDepthCull: !EVERY_FRAME.casterDepthCull });
+    made.pass.setGeometry(toggled);
     expect([before, rendersOf(made, [still, still])]).toEqual([
       [[0, 1, 2, 3], []],
       [[0, 1, 2, 3], []],
@@ -2406,7 +2472,7 @@ describe("the cascades re-rendered only when they change (plan R14, R14.T6.a)", 
       )?.data;
       const words = new Uint32Array(data?.slice().buffer ?? new ArrayBuffer(0));
       let fading = false;
-      for (let at = 11; at < words.length; at += INSTANCE_RECORD_BYTES / 4) {
+      for (let at = INSTANCE_FADES_WORD; at < words.length; at += INSTANCE_RECORD_BYTES / 4) {
         const own = (words[at] ?? 0) & 0xff;
         fading ||= own > 0 && own < 255;
       }
@@ -2457,6 +2523,28 @@ describe("the cascades' passes over a descent, with time stopped and running (pl
   });
 });
 
+/**
+ * The slots of 0 to 3 whose upload re-renders the cascade of a record in slot 1 with `parent` and
+ * `fades` (plan R14, R14.T6.a; `appendCasterRecord`).
+ */
+function slotsRead(parent: number, fades: number): number[] {
+  return [0, 1, 2, 3].filter((slot) => {
+    const words = new Uint32Array(INSTANCE_RECORD_BYTES / 4);
+    words[INSTANCE_SLOT_WORD] = 1;
+    words[INSTANCE_PARENT_SLOT_WORD] = parent;
+    words[INSTANCE_FADES_WORD] = fades;
+    const versions = new Uint32Array(4);
+    const reuse = new CascadeReuse();
+    reuse.start();
+    appendCasterRecord(reuse, words, 0, versions);
+    reuse.rendered(0);
+    versions[slot] = 1;
+    reuse.start();
+    appendCasterRecord(reuse, words, 0, versions);
+    return !reuse.unchanged(0);
+  });
+}
+
 describe("a cascade's caster inputs (plan R14, R14.T6.a)", () => {
   it("is unchanged where its words equal its last render's, one for one, and changed by any word", () => {
     const reuse = new CascadeReuse();
@@ -2484,6 +2572,36 @@ describe("a cascade's caster inputs (plan R14, R14.T6.a)", () => {
       false,
       false,
     ]);
+  });
+
+  it("numbers the inputs the cascades share anew where they change, and as before where they do not", () => {
+    const reuse = new CascadeReuse();
+    const shared = (word: number): number => {
+      reuse.start();
+      reuse.word(word);
+      return reuse.shared();
+    };
+    const first = shared(7);
+    const same = shared(7);
+    const changed = shared(8);
+    const back = shared(7);
+    expect([same === first, changed === first, back === first, back === changed]).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("re-renders a record's cascade where a slot its caster reads is uploaded again: its own, and while its heights mix the older bake's or its parent's", () => {
+    const half = mixStep(0.5);
+    expect([
+      slotsRead(2, fadeWord(128, 0, 0)),
+      slotsRead(2, fadeWord(0, half, 3)),
+      slotsRead(2, fadeWord(0, half, PARENT_MIX_SLOT)),
+      slotsRead(NO_PARENT_SLOT, fadeWord(0, half, PARENT_MIX_SLOT)),
+      slotsRead(2, fadeWord(0, half, DATUM_SLOT)),
+    ]).toEqual([[1], [1, 3], [1, 2], [1], [1]]);
   });
 
   it("takes an f64 as its two words, so that a change past f32's precision counts", () => {

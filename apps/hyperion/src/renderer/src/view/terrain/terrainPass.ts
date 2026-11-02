@@ -157,11 +157,16 @@ import {
 } from "./gpu/resources";
 import {
   ContactRecords,
+  DATUM_SLOT,
   fadeWord,
+  INSTANCE_FADES_WORD,
+  INSTANCE_PARENT_SLOT_WORD,
   INSTANCE_RECORD_BYTES,
+  INSTANCE_SLOT_WORD,
   MIX_STEPS,
   InstanceRecords,
   NO_PARENT_SLOT,
+  PARENT_MIX_SLOT,
   parentQuadrant,
   subPatchOf,
   WirePhaseRecords,
@@ -1281,16 +1286,45 @@ const OVERLAY_CULL_MARGIN_RAD = 0.01;
 /** A frame's caster passes and their counts, as {@link TerrainPass}'s `#drawCasters` drew them. */
 type CasterFrame = Pick<TerrainCascadeFrame, "passes" | "litMeshCasters" | "clustered" | "reused">;
 
-/** An instance record's 32-bit words, and the word of its slot (`gpu/uniforms.ts`' layout). */
+/** An instance record's 32-bit words. */
 const INSTANCE_WORDS = INSTANCE_RECORD_BYTES / 4;
-const SLOT_WORD = 3;
 
-/** The overlay's depths, by their word in a cascade's caster inputs (plan R14, R14.T6.a). */
-const OVERLAY_DEPTHS: ReadonlyArray<GeometrySettings["overlayDepth"]> = [
-  "redraw",
-  "scene-depth",
-  "cluster",
-];
+/** The overlay's depths, by their word in the cascades' caster inputs (plan R14, R14.T6.a). */
+const OVERLAY_DEPTH_WORD = {
+  redraw: 0,
+  "scene-depth": 1,
+  cluster: 2,
+} as const satisfies Record<GeometrySettings["overlayDepth"], number>;
+
+/**
+ * Appends instance record `record` of `words` to `reuse`, as a cascade's caster input (plan R14,
+ * R14.T6.a): its words as written, and the upload version, by `slotVersions`, of each slot its
+ * caster reads: its own, and while its heights mix ({@link fadeWord}) the older bake's or, for a
+ * refine's or a coarsen's ({@link PARENT_MIX_SLOT}), its parent's.
+ */
+export function appendCasterRecord(
+  reuse: CascadeReuse,
+  words: Uint32Array,
+  record: number,
+  slotVersions: Uint32Array,
+): void {
+  const base = record * INSTANCE_WORDS;
+  reuse.words(words, base, base + INSTANCE_WORDS);
+  reuse.word(slotVersions[words[base + INSTANCE_SLOT_WORD] ?? 0] ?? 0);
+  const fades = words[base + INSTANCE_FADES_WORD] ?? 0;
+  if (((fades >>> 8) & MIX_STEPS) === 0) {
+    return;
+  }
+  const older = fades >>> 20;
+  if (older === PARENT_MIX_SLOT) {
+    const parent = words[base + INSTANCE_PARENT_SLOT_WORD] ?? NO_PARENT_SLOT;
+    if (parent !== NO_PARENT_SLOT) {
+      reuse.word(slotVersions[parent] ?? 0);
+    }
+  } else if (older !== DATUM_SLOT) {
+    reuse.word(slotVersions[older] ?? 0);
+  }
+}
 
 /** No cascade reused (plan R14, R14.T6.a). */
 const NONE_REUSED: readonly [boolean, boolean, boolean, boolean] = [false, false, false, false];
@@ -4548,7 +4582,9 @@ export class TerrainPass {
    *
    * A far cascade the view's plan holds (plan R14, R14.T6.b; {@link FarCascadeHolds}) takes no
    * caster, no cull pass and no pass, and keeps its layer; the set records the view as each drawn
-   * layer's owner, and the plan is committed.
+   * layer's owner, and the plan is committed. So does a cascade the view reuses (R14.T6.a;
+   * {@link CascadeReuse}): every input of its casters as at its last render of the layer, which it
+   * rendered last, on the cluster path.
    */
   #drawCasters(
     device: Device,
@@ -4636,96 +4672,97 @@ export class TerrainPass {
       casters.device = device;
       casters.material = material;
     }
-    if (clusters !== null && (clustered || clusters.overlay || clusters.litBase !== null)) {
-      this.#cullClusters(device, state, clusters, input, clustered ? set : null);
-    }
-    const items = casters.items;
-    const casterBase = clustered ? clusters.casterBase : null;
     // A cascade whose casters' inputs are all as at the view's last render of its layer, which it
     // rendered last, keeps its layer (plan R14, R14.T6.a); on the cluster path, as every R14 lever.
     const revisions = shadows.casters.revisions();
     const reuse = state.casterInputs;
     const reused: [boolean, boolean, boolean, boolean] = [false, false, false, false];
-    if (!this.#geometry.clusterPath) {
+    if (this.#geometry.clusterPath) {
+      reuse.start();
+      this.#appendSharedInputs(reuse, state, input, set, camera, viewAxis, revisions);
+      const shared = reuse.shared();
+      for (const index of CASCADES) {
+        if (!rendered[index]) {
+          continue;
+        }
+        reuse.start();
+        reuse.word(shared);
+        this.#appendCascadeCasters(reuse, device, state, index, clustered ? clusters : null);
+        if (revisions !== null && shadows.holds(state.farHolds, index) && reuse.unchanged(index)) {
+          reused[index] = true;
+        } else {
+          reuse.rendered(index);
+        }
+      }
+    } else {
       // The way back renders every cascade it draws, and the next frame on the path renders it too.
       reuse.forget();
     }
-    for (const index of CASCADES) {
-      if (!rendered[index] || !this.#geometry.clusterPath) {
-        continue;
-      }
-      reuse.start();
-      this.#appendCasterInputs(
-        reuse,
-        device,
-        state,
-        input,
-        set,
-        index,
-        camera,
-        viewAxis,
-        revisions,
-      );
-      if (clustered) {
-        this.#appendClusterCasters(reuse, device, state, clusters, index);
-      }
-      if (revisions !== null && shadows.holds(state.farHolds, index) && reuse.unchanged(index)) {
-        reused[index] = true;
-      } else {
-        reuse.rendered(index);
+    // A reused cascade, as a held one, takes no cull pass and no pass.
+    const dueOf = (index: CascadeIndex): boolean => rendered[index] && !reused[index];
+    const due: readonly [boolean, boolean, boolean, boolean] = [
+      dueOf(0),
+      dueOf(1),
+      dueOf(2),
+      dueOf(3),
+    ];
+    if (clustered && reused.includes(true)) {
+      const kept = due.reduce((bits, on, index) => (on ? bits : bits & ~(1 << index)), ~0);
+      for (let record = 0; record < state.interior.count; record += 1) {
+        clusters.inputs[2 * record] = (clusters.inputs[2 * record] ?? 0) & kept;
       }
     }
-    const passes = CASCADES.filter((index) => rendered[index] && !reused[index]).map(
-      (index): DepthLayerPass => {
-        const records = casters.records[index];
-        resources.writeCasters(state.id, index, records);
-        const cascade = set.cascades[index];
-        const others = shadows.casters.draws(set, index, state.id);
-        const count = records.count;
-        const terrain: DrawItem[] = count > 0 ? [{ ...items[index], instanceCount: count }] : [];
-        if (clusters !== null && casterBase !== null) {
-          terrain.push(
-            ...clusters.buckets.drawItems(
-              index,
-              clusters.mesh,
-              casterBase,
-              this.#geometry.casterStrideCap,
-              clusters.finCasterBase,
-            ),
-          );
-        }
-        return {
-          label: TERRAIN_SHADOW_PASS_LABEL,
-          layer: index,
-          viewRotation: cascade.viewRotation,
-          projection: cascade.projection,
-          draws: [...terrain, ...others],
-        };
-      },
-    );
+    if (clusters !== null && (clustered || clusters.overlay || clusters.litBase !== null)) {
+      this.#cullClusters(device, state, clusters, input, clustered ? set : null, due);
+    }
+    const items = casters.items;
+    const casterBase = clustered ? clusters.casterBase : null;
+    const passes = CASCADES.filter((index) => due[index]).map((index): DepthLayerPass => {
+      const records = casters.records[index];
+      resources.writeCasters(state.id, index, records);
+      const cascade = set.cascades[index];
+      const others = shadows.casters.draws(set, index, state.id);
+      const count = records.count;
+      const terrain: DrawItem[] = count > 0 ? [{ ...items[index], instanceCount: count }] : [];
+      if (clusters !== null && casterBase !== null) {
+        terrain.push(
+          ...clusters.buckets.drawItems(
+            index,
+            clusters.mesh,
+            casterBase,
+            this.#geometry.casterStrideCap,
+            clusters.finCasterBase,
+          ),
+        );
+      }
+      return {
+        label: TERRAIN_SHADOW_PASS_LABEL,
+        layer: index,
+        viewRotation: cascade.viewRotation,
+        projection: cascade.projection,
+        draws: [...terrain, ...others],
+      };
+    });
     shadows.renderCasters(state.farHolds, state.id, passes);
     if (plan !== null) {
       state.farHolds.commit(plan);
     }
-    const [a, b, c, d] = casters.records;
-    return { passes, litMeshCasters: [a.count, b.count, c.count, d.count], clustered, reused };
+    const drawn = (index: CascadeIndex): number => (due[index] ? casters.records[index].count : 0);
+    return { passes, litMeshCasters: [drawn(0), drawn(1), drawn(2), drawn(3)], clustered, reused };
   }
 
   /**
-   * Appends cascade `index`'s caster inputs this frame to `reuse` (plan R14, R14.T6.a), compared
-   * word for word with its last render's: every cascade's matrices, splits and reach and the
-   * light basis (T1.c's cull of each reads its nearer one's), the caster uniforms, the body's
-   * rotation and the camera's place and view axis in `f64`, the geometry settings, the contacts,
-   * the other casters (their registry's version and revisions), and each of the cascade's lit-mesh
-   * caster records as written, morph bands, holds and fades included, with its slot's version.
+   * Appends the caster inputs every cascade of view `state`'s frame shares to `reuse` (plan R14,
+   * R14.T6.a): every cascade's matrices, splits, reach and slack and the light basis (T1.c's cull
+   * of each reads its nearer one's), the caster uniforms, the body's rotation and the camera's place
+   * and view axis in `f64`, the geometry settings, the contacts, and the other casters (their
+   * registry's version and each one's revision).
    */
-  #appendCasterInputs(
+  #appendSharedInputs(
     reuse: CascadeReuse,
-    device: Device,
     state: ViewState,
     input: TerrainViewFrameInput,
     set: CascadeSet,
-    index: CascadeIndex,
     camera: Vec3,
     viewAxis: Vec3,
     revisions: ReadonlyArray<number> | null,
@@ -4733,25 +4770,24 @@ export class TerrainPass {
     for (const cascade of set.cascades) {
       reuse.f32(cascade.viewRotation);
       reuse.f32(cascade.projection);
-      for (const value of [
-        cascade.nearM,
-        cascade.farM,
-        cascade.fadeStartM,
-        cascade.radiusM,
-        cascade.texelM,
-        cascade.depthNearM,
-        cascade.depthFarM,
-        cascade.holdSlackM,
-      ]) {
-        reuse.f64(value);
-      }
+      reuse.f64(cascade.nearM);
+      reuse.f64(cascade.farM);
+      reuse.f64(cascade.fadeStartM);
+      reuse.f64(cascade.radiusM);
+      reuse.f64(cascade.texelM);
+      reuse.f64(cascade.depthNearM);
+      reuse.f64(cascade.depthFarM);
+      reuse.f64(cascade.holdSlackM);
     }
+    reuse.xyz(set.basis.x);
+    reuse.xyz(set.basis.y);
+    reuse.xyz(set.basis.z);
+    reuse.xyz(camera);
+    reuse.xyz(viewAxis);
     const [r0, r1, r2] = input.view.rotation.rows;
-    for (const axis of [set.basis.x, set.basis.y, set.basis.z, camera, viewAxis, r0, r1, r2]) {
-      reuse.f64(axis.x);
-      reuse.f64(axis.y);
-      reuse.f64(axis.z);
-    }
+    reuse.xyz(r0);
+    reuse.xyz(r1);
+    reuse.xyz(r2);
     const uniforms = state.casterUniforms;
     reuse.f32(uniforms.bodyRotation);
     reuse.f32(uniforms.cameraBodyFixedM);
@@ -4759,58 +4795,58 @@ export class TerrainPass {
     const geometry = this.#geometry;
     reuse.word(geometry.casterStrideCap);
     reuse.word(geometry.farCascadeRate);
-    reuse.word(OVERLAY_DEPTHS.indexOf(geometry.overlayDepth));
-    for (const on of [
-      geometry.clusterPath,
-      geometry.casterDepthCull,
-      geometry.litClusters,
-      geometry.figureClusters,
-      geometry.hullClusters,
-      geometry.wireClusters,
-    ]) {
-      reuse.word(on ? 1 : 0);
-    }
+    reuse.word(OVERLAY_DEPTH_WORD[geometry.overlayDepth]);
+    reuse.word(geometry.clusterPath ? 1 : 0);
+    reuse.word(geometry.casterDepthCull ? 1 : 0);
+    reuse.word(geometry.litClusters ? 1 : 0);
+    reuse.word(geometry.figureClusters ? 1 : 0);
+    reuse.word(geometry.hullClusters ? 1 : 0);
+    reuse.word(geometry.wireClusters ? 1 : 0);
+    reuse.word(geometry.finClusters ? 1 : 0);
+    reuse.f64(geometry.pageBytes);
+    reuse.f64(geometry.meshTolerancePx.camera);
+    reuse.f64(geometry.meshTolerancePx.wireframeOccluder);
     reuse.bytes(state.contacts.bytes());
-    // The other casters: which there are, and each one's revision.
     reuse.word(this.#shadows?.casters.version ?? 0);
     for (const revision of revisions ?? []) {
       reuse.f64(revision);
     }
-    const records = state.casters?.records[index];
-    if (records === undefined) {
-      return;
-    }
-    const words = new Uint32Array(records.buffer, 0, records.count * INSTANCE_WORDS);
-    reuse.words(words);
-    for (let record = 0; record < records.count; record += 1) {
-      reuse.word(device.slotVersions[words[record * INSTANCE_WORDS + SLOT_WORD] ?? 0] ?? 0);
-    }
   }
 
   /**
-   * Appends cascade `index`'s interior casters on the cluster path to `reuse` (plan R14,
-   * R14.T6.a): each interior record the cascade's cull takes, as written, its cull input and its
-   * slot's version.
+   * Appends cascade `index`'s casters this frame to `reuse` (plan R14, R14.T6.a): each of its
+   * lit-mesh caster records ({@link appendCasterRecord}), and on `clusters`' path each interior
+   * record its cull takes, by its index, with its cull input; each list after its count.
    */
-  #appendClusterCasters(
+  #appendCascadeCasters(
     reuse: CascadeReuse,
     device: Device,
     state: ViewState,
-    clusters: ClusterPath,
     index: CascadeIndex,
+    clusters: ClusterPath | null,
   ): void {
-    const interior = state.interior;
-    const words = new Uint32Array(interior.buffer, 0, interior.count * INSTANCE_WORDS);
-    const bit = 1 << index;
-    for (let record = 0; record < interior.count; record += 1) {
-      if (((clusters.inputs[2 * record] ?? 0) & bit) === 0) {
-        continue;
+    const versions = device.slotVersions;
+    const records = state.casters?.records[index];
+    reuse.word(records?.count ?? 0);
+    if (records !== undefined) {
+      const words = records.words;
+      for (let record = 0; record < records.count; record += 1) {
+        appendCasterRecord(reuse, words, record, versions);
       }
-      const base = record * INSTANCE_WORDS;
-      reuse.word(record);
-      reuse.words(words.subarray(base, base + INSTANCE_WORDS));
-      reuse.word(clusters.inputs[2 * record + 1] ?? 0);
-      reuse.word(device.slotVersions[words[base + SLOT_WORD] ?? 0] ?? 0);
+    }
+    if (clusters === null) {
+      return;
+    }
+    const interior = state.interior;
+    const words = interior.words;
+    const bit = 1 << index;
+    reuse.word(interior.count);
+    for (let record = 0; record < interior.count; record += 1) {
+      if (((clusters.inputs[2 * record] ?? 0) & bit) !== 0) {
+        reuse.word(record);
+        appendCasterRecord(reuse, words, record, versions);
+        reuse.word(clusters.inputs[2 * record + 1] ?? 0);
+      }
     }
   }
 
@@ -5034,6 +5070,8 @@ export class TerrainPass {
    * overlay's; and, behind the measurement switch, samples the buckets' counts.
    *
    * @param set - The cascades the frame casts into on the cluster path, or `null` for none.
+   * @param due - The cascades of `set` the frame renders: by default those the view's plan does
+   *   not hold (plan R14, R14.T6.b), and less those it reuses (R14.T6.a).
    */
   #cullClusters(
     device: Device,
@@ -5041,6 +5079,7 @@ export class TerrainPass {
     clusters: ClusterPath,
     input: TerrainViewFrameInput,
     set: CascadeSet | null,
+    due: ReadonlyArray<boolean> = state.farPlan?.rendered ?? ALL_CASCADES_RENDERED,
   ): void {
     const { resources } = device;
     const held = state.clusters;
@@ -5060,8 +5099,7 @@ export class TerrainPass {
     });
     const viewAxis = viewAxisOf(input.view.orientation);
     const { casterStrideCap, casterDepthCull } = this.#geometry;
-    // A far cascade the frame holds takes no pass (plan R14, R14.T6.b).
-    const rendered = state.farPlan?.rendered ?? ALL_CASCADES_RENDERED;
+    // A far cascade the frame holds (plan R14, R14.T6.b), or one it reuses (R14.T6.a), takes none.
     const cascades: ReadonlyArray<CullPass | null> =
       set === null
         ? [null, null, null, null]
@@ -5071,7 +5109,7 @@ export class TerrainPass {
             viewAxis,
             casterStrideCap,
             casterDepthCull,
-          ).map((pass, index) => (rendered[index] === true ? pass : null));
+          ).map((pass, index) => (due[index] === true ? pass : null));
     const passes: Array<CullPass | null> = [
       ...cascades,
       clusters.overlay ? this.#overlayCullPass(input) : null,

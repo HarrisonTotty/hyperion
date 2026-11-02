@@ -189,39 +189,73 @@ export class ShadowCasters {
   }
 }
 
+/** A signature's words, `length` of them in use; `length` −1 for none yet. */
+interface Signature {
+  words: Uint32Array;
+  length: number;
+}
+
+/** The signature slot of the inputs every cascade of a frame shares ({@link CascadeReuse.shared}). */
+const SHARED_SIGNATURE = CASCADE_COUNT;
+
 /**
  * One view's cascades' caster inputs as each was last rendered (plan R14, R14.T6.a): a frame
- * appends a cascade's inputs as 32-bit words, between {@link CascadeReuse.start} and
- * {@link CascadeReuse.unchanged}, and a cascade whose words equal its last render's, one for one,
- * is reused; {@link CascadeReuse.rendered} takes them as its last render's.
+ * appends the inputs every cascade shares as 32-bit words, between {@link CascadeReuse.start} and
+ * {@link CascadeReuse.shared}, which numbers them; then each cascade's, that number first, between
+ * {@link CascadeReuse.start} and {@link CascadeReuse.unchanged}. A cascade whose words equal its
+ * last render's, one for one, is reused; {@link CascadeReuse.rendered} takes them as its last
+ * render's. Each signature is kept in place, so that a frame allocates nothing once its sizes have
+ * been seen.
  */
 export class CascadeReuse {
-  readonly #last: Array<Uint32Array | null> = Array.from({ length: CASCADE_COUNT }, () => null);
+  readonly #last: Signature[] = Array.from({ length: CASCADE_COUNT + 1 }, () => ({
+    words: new Uint32Array(0),
+    length: -1,
+  }));
   #words = new Uint32Array(1024);
   #length = 0;
+  #generation = 0;
   readonly #f64 = new Float64Array(1);
   readonly #f64Words = new Uint32Array(this.#f64.buffer);
+  readonly #f32 = new Float32Array(1);
+  readonly #f32Word = new Uint32Array(this.#f32.buffer);
 
-  /** Starts a cascade's inputs. */
+  /** Starts a signature. */
   start(): void {
     this.#length = 0;
   }
 
-  /** Appends `words`, each a 32-bit word. */
-  words(words: Uint32Array): void {
-    this.#reserve(words.length);
-    this.#words.set(words, this.#length);
-    this.#length += words.length;
+  /** Appends `words[from]` to `words[to − 1]`, each a 32-bit word. */
+  words(words: Uint32Array, from = 0, to = words.length): void {
+    this.#reserve(to - from);
+    const into = this.#words;
+    let at = this.#length;
+    for (let n = from; n < to; n += 1) {
+      into[at] = words[n] ?? 0;
+      at += 1;
+    }
+    this.#length = at;
   }
 
-  /** Appends `values`' `f32` bits. */
+  /** Appends `values`' `f32` bits, a word each. */
   f32(values: Float32Array): void {
-    this.words(new Uint32Array(values.buffer, values.byteOffset, values.length));
+    for (const value of values) {
+      this.#f32[0] = value;
+      this.word(this.#f32Word[0] ?? 0);
+    }
   }
 
-  /** Appends a byte buffer, a multiple of 4 bytes long, as its words. */
+  /** Appends a byte buffer, a multiple of 4 bytes long, a word each 4 bytes, little-endian. */
   bytes(bytes: Uint8Array): void {
-    this.words(new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4));
+    for (let n = 0; n + 3 < bytes.length; n += 4) {
+      this.word(
+        ((bytes[n] ?? 0) |
+          ((bytes[n + 1] ?? 0) << 8) |
+          ((bytes[n + 2] ?? 0) << 16) |
+          ((bytes[n + 3] ?? 0) << 24)) >>>
+          0,
+      );
+    }
   }
 
   /** Appends `value`'s `f64` bits, two words. */
@@ -231,6 +265,13 @@ export class CascadeReuse {
     this.word(this.#f64Words[1] ?? 0);
   }
 
+  /** Appends `x`, `y` and `z` in `f64`, six words. */
+  xyz(v: { readonly x: number; readonly y: number; readonly z: number }): void {
+    this.f64(v.x);
+    this.f64(v.y);
+    this.f64(v.z);
+  }
+
   /** Appends one 32-bit word. */
   word(value: number): void {
     this.#reserve(1);
@@ -238,29 +279,66 @@ export class CascadeReuse {
     this.#length += 1;
   }
 
+  /**
+   * Ends the inputs every cascade of the frame shares and returns their number, the first word of
+   * each cascade's: the same as the last frame's where they are, word for word, and a new one
+   * where they are not, so that a cascade's number is its last render's only where none of them
+   * changed since.
+   */
+  shared(): number {
+    if (!this.#same(SHARED_SIGNATURE)) {
+      this.#take(SHARED_SIGNATURE);
+      this.#generation = (this.#generation + 1) >>> 0;
+    }
+    return this.#generation;
+  }
+
   /** Whether the words appended since {@link CascadeReuse.start} equal cascade `index`'s last render's. */
   unchanged(index: CascadeIndex): boolean {
-    const last = this.#last[index] ?? null;
-    if (last === null || last.length !== this.#length) {
+    return this.#same(index);
+  }
+
+  /** Takes the words appended since {@link CascadeReuse.start} as cascade `index`'s last render's. */
+  rendered(index: CascadeIndex): void {
+    this.#take(index);
+  }
+
+  /** Forgets every cascade's last render: the next frame renders each. */
+  forget(): void {
+    for (const last of this.#last) {
+      last.length = -1;
+    }
+  }
+
+  #same(slot: number): boolean {
+    const last = this.#last[slot];
+    if (last?.length !== this.#length) {
       return false;
     }
     const words = this.#words;
-    for (let n = 0; n < last.length; n += 1) {
-      if (last[n] !== words[n]) {
+    const kept = last.words;
+    for (let n = 0; n < this.#length; n += 1) {
+      if (kept[n] !== words[n]) {
         return false;
       }
     }
     return true;
   }
 
-  /** Takes the words appended since {@link CascadeReuse.start} as cascade `index`'s last render's. */
-  rendered(index: CascadeIndex): void {
-    this.#last[index] = this.#words.slice(0, this.#length);
-  }
-
-  /** Forgets every cascade's last render: the next frame renders each. */
-  forget(): void {
-    this.#last.fill(null);
+  #take(slot: number): void {
+    const last = this.#last[slot];
+    if (last === undefined) {
+      return;
+    }
+    if (last.words.length < this.#length) {
+      last.words = new Uint32Array(this.#words.length);
+    }
+    const words = this.#words;
+    const kept = last.words;
+    for (let n = 0; n < this.#length; n += 1) {
+      kept[n] = words[n] ?? 0;
+    }
+    last.length = this.#length;
   }
 
   #reserve(more: number): void {

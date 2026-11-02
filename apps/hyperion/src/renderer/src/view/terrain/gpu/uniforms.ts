@@ -64,6 +64,13 @@ export const SLOT_RECORD_BYTES = 112;
  */
 export const INSTANCE_RECORD_BYTES = 48;
 
+/** The instance record's 32-bit words a reader takes by index (the struct above): its `slot`. */
+export const INSTANCE_SLOT_WORD = 3;
+/** Its `parentSlot`. */
+export const INSTANCE_PARENT_SLOT_WORD = 6;
+/** Its `sub.w`, the fades' word ({@link fadeWord}). */
+export const INSTANCE_FADES_WORD = 11;
+
 /**
  * The most levels a sub-patch instance lies below the patch whose slot it draws
  * ({@link subPatchWord}): its (i, j) take 13 bits each.
@@ -398,6 +405,14 @@ export class InstanceRecords {
   }
 
   /** Records this frame. */
+  /**
+   * Its records' 32-bit words, read only: the whole capacity's, of which the first
+   * {@link InstanceRecords.count} × 12 are this frame's (plan R14, R14.T6.a).
+   */
+  get words(): Uint32Array {
+    return this.#u32;
+  }
+
   get count(): number {
     return this.#count;
   }
