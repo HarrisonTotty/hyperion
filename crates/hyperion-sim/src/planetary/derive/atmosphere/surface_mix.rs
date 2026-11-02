@@ -84,6 +84,7 @@ use crate::planetary::hooks::surface::{
     ColdProfile, OceanWeight, SurfaceConditions, SurfaceInputs, night_floor,
     published_surface_pressure, rotates,
 };
+use crate::planetary::moons::tides::MoonSurfaceHeatRules;
 use crate::substance::{SubstanceId, ice_ih_density};
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{
@@ -1088,13 +1089,29 @@ fn pass_haze(air: &Atmosphere, inputs: &AtmosphereInputs) -> f64 {
 /// fluxes) its recorded refinement. The exobase, a gas envelope's heated temperature, the magma
 /// ocean's solidus, the hottest host's cap and the climate body's own `T_eq` and heat flow do not
 /// read it.
+///
+/// From generator version 27 (`MOON_SURFACE_HEAT_VERSION`, P14.T55.j) a moon, whose context holds
+/// its tide, takes that refinement in its tides' own form: the larger of its floor and
+/// (`T_eq`⁴ + F ÷ σ)^¼ ([`MoonSurfaceHeatRules::lit_surface`]), the surface its shell's top reads,
+/// at the context's F, its whole heat flow. A moon whose F is not positive, a planet and a member
+/// keep the max above to the bit. The floor's `ε_r` and the lit surface's unit emissivity are both
+/// lower bounds on a grey regolith's (`T_CMB`⁴ + (`T_eq`⁴ + F ÷ σ) ÷ `ε_r`)^¼, and the floor wins
+/// only below `T_eq` = (1 ÷ `ε_r` − 1)^¼ (F ÷ σ)^¼, where it lies at most `ε_r`^−¼ − 1 = 1.29%
+/// above the lit balance (lean, 2026-11-02).
 #[must_use]
 pub(super) fn airless_mean(equilibrium: Kelvin, surface: &PassSurface<'_>) -> Kelvin {
-    let floor = night_floor(heat_flow(surface));
-    if floor.value() > equilibrium.value() {
+    let heat_flow = heat_flow(surface);
+    let floor = night_floor(heat_flow);
+    let lit = match surface.climate {
+        PassClimate::Spun(spun) if spun.context.tide().is_some() => {
+            MoonSurfaceHeatRules::in_force().lit_surface(equilibrium, heat_flow)
+        }
+        PassClimate::Spun(_) | PassClimate::Given(_) => equilibrium,
+    };
+    if floor.value() > lit.value() {
         floor
     } else {
-        equilibrium
+        lit
     }
 }
 

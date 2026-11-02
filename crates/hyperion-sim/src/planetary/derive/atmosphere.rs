@@ -61,7 +61,10 @@
 //!
 //! The irradiation this module reads is the equilibrium temperature from the hosts' light alone;
 //! a giant's internal heat enters only its gas envelope's temperature, so that the two can be
-//! told apart (ruling 112.7).
+//! told apart (ruling 112.7). A solid body's heat flow holds its surface at its night's floor
+//! (P14.T24.i), and from generator version 27 a moon's surface also radiates it beside its
+//! sunlight, σ `T_s`⁴ = σ `T_eq`⁴ + F, as its tides read it (P14.T55.j, behind
+//! `MOON_SURFACE_HEAT_VERSION`): the record's `T_eq` stays the light's.
 
 mod escaping;
 mod present;
@@ -3337,12 +3340,12 @@ fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
 /// hottest host's. The greenhouse's constants are the rules' in force
 /// ([`GreenhouseConstants::in_force`]): P14.T57.a's fits to version 23, P14.T53.a's from 24.
 ///
-/// `base` is the body's airless mean (`surface_mix::airless_mean`), the larger of `T_eq` and its
-/// night floor from generator version 24, on both paths (P14.T24.i's follow-up,
-/// decision-t24i-airless-state D1.3): the steps start at it, the grey surface is `base`
-/// (1 + ¾τ)^¼, and what reads the temperature argument (N₂'s collision factor, the batch's H₂
-/// term, the ceiling's `T_rest`) reads it, the air's density standing at its temperature, of which
-/// the floored mean is the better value.
+/// `base` is the body's airless mean (`surface_mix::airless_mean`), the larger of `T_eq` (from 27 a
+/// moon's (`T_eq`⁴ + F ÷ σ)^¼, P14.T55.j) and its night floor from generator version 24, on both
+/// paths (P14.T24.i's follow-up, decision-t24i-airless-state D1.3): the steps start at it, the grey
+/// surface is `base` (1 + ¾τ)^¼, and what reads the temperature argument (N₂'s collision factor,
+/// the batch's H₂ term, the ceiling's `T_rest`) reads it, the air's density standing at its
+/// temperature, of which the floored mean is the better value.
 ///
 /// `steps` is [`GREENHOUSE_STEPS`] for every solve whose state is taken. Only the weathering
 /// thermostat's trials ([`escaping::weathering_thermostat`]) pass fewer,

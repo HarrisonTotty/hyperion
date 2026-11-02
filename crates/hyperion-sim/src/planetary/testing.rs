@@ -511,6 +511,9 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// - a moon's surface that radiates its internal heat, `SURFACE_HEAT_VERSION` (P14.T55.j), at
 ///   `SurfaceHeatRules::Radiated` through `with_surface_heat`: its tides' shell read at
 ///   σ `T_s`⁴ = σ `T_eq`⁴ + F.
+/// - a moon's air and record that read that surface, `MOON_SURFACE_HEAT_VERSION` (P14.T55.j, the
+///   record's side), at `MoonSurfaceHeatRules::Radiated` through `with_moon_surface_heat`: its
+///   air's base the larger of its night's floor and (`T_eq`⁴ + F ÷ σ)^¼.
 /// - a gas envelope's own Bond albedo, `ENVELOPE_BOND_VERSION` (P14.T24.h.b part 5), at
 ///   `EnvelopeBondRules::Own` through `with_envelope_bond`: its column's above its floor, in place
 ///   of T51.b's class table, with part 6's chromophore at the disc's column, the haze above a
@@ -568,7 +571,8 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
         EccentricityDampingRules, with_eccentricity_damping,
     };
     use crate::planetary::moons::tides::{
-        PorousCoreRules, SurfaceHeatRules, with_porous_core, with_surface_heat,
+        MoonSurfaceHeatRules, PorousCoreRules, SurfaceHeatRules, with_moon_surface_heat,
+        with_porous_core, with_surface_heat,
     };
     use crate::planetary::surface::steps::climate::{
         OrbitExtrapolationRules, with_orbit_extrapolation,
@@ -581,6 +585,7 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_porous_core(PorousCoreRules::Porous, run);
     let run = move || with_eccentricity_damping(EccentricityDampingRules::Damped, run);
     let run = move || with_surface_heat(SurfaceHeatRules::Radiated, run);
+    let run = move || with_moon_surface_heat(MoonSurfaceHeatRules::Radiated, run);
     let run = move || with_envelope_bond(EnvelopeBondRules::Own, run);
     let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
     let run = move || with_minor_clouds(MinorCloudsRules::OwnShare, run);

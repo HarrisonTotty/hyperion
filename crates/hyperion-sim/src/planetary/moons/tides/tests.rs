@@ -1754,6 +1754,85 @@ fn the_surface_heat_is_held_only_until_the_27_bump() {
     assert_eq!(SurfaceHeatRules::in_force(), Held);
 }
 
+/// P14.T55.j's record side's hold: 26's bump leaves it, 27's deletes it; the tests' switch and 27's
+/// helper reach the radiated air, and 26's and 25's helpers do not.
+#[test]
+fn the_moon_surface_heat_is_held_only_until_the_27_bump() {
+    use MoonSurfaceHeatRules::{Held, Radiated};
+    assert!(
+        crate::GENERATOR_VERSION < MOON_SURFACE_HEAT_VERSION,
+        "the 26 → 27 bump makes a moon's air and record read its surface's internal heat \
+         (P14.T55.j): delete `MOON_SURFACE_HEAT_VERSION`, `MoonSurfaceHeatRules` with its `Held` \
+         arm (`airless_mean` then reads `radiating_surface_temperature`), the tests' \
+         `with_moon_surface_heat`, its switch in `with_every_27_hold`, and this test; re-bless the \
+         movers plan 14's record of P14.T55.j lists"
+    );
+    assert_eq!(MoonSurfaceHeatRules::in_force(), Held);
+    assert_eq!(
+        with_moon_surface_heat(Radiated, MoonSurfaceHeatRules::in_force),
+        Radiated
+    );
+    assert_eq!(with_every_27_hold(MoonSurfaceHeatRules::in_force), Radiated);
+    assert_eq!(
+        with_every_27_hold(|| with_moon_surface_heat(Held, MoonSurfaceHeatRules::in_force)),
+        Held
+    );
+    // The tides' own hold and this one are apart: each switch leaves the other's rules.
+    assert_eq!(
+        with_every_27_hold(|| with_moon_surface_heat(Held, SurfaceHeatRules::in_force)),
+        SurfaceHeatRules::Radiated
+    );
+    assert_eq!(
+        with_every_27_hold(|| with_surface_heat(
+            SurfaceHeatRules::Held,
+            MoonSurfaceHeatRules::in_force
+        )),
+        Radiated
+    );
+    assert_eq!(MoonSurfaceHeatRules::in_force(), Held);
+}
+
+/// P14.T55.j's record side: under every 27 hold the surface a moon's air starts from, before its
+/// night's floor, is its tides' own: Io's, heated at its measured elements, lies on its tides'
+/// balance to 10⁻¹² and rises within its 7 K; held, it is the equilibrium temperature to the bit,
+/// and so is a surface with no heat flow under either rule.
+#[test]
+fn under_every_27_hold_io_s_air_starts_from_its_tides_surface() {
+    let io = moon("Io");
+    let t_eq = Kelvin::new(io.surface);
+    let (tides, _, surface) = with_every_27_hold(|| {
+        with_radiating_surface(&io.inputs(), |inputs| {
+            MoonTides::with_ocean(inputs, &io.solutes(false))
+        })
+    });
+    assert_eq!(tides.branch(), TidalBranch::Heated);
+    let f = tides.heat_flow();
+    let lit = with_every_27_hold(|| MoonSurfaceHeatRules::in_force().lit_surface(t_eq, f));
+    let rise = lit.value() - io.surface;
+    eprintln!(
+        "Io under every 27 hold: its air from {:.4} K at {:.4} W m⁻² (+{rise:.4} K), its tides' \
+         surface {:.4} K",
+        lit.value(),
+        f.value(),
+        surface.value()
+    );
+    assert!(
+        (lit.value() - surface.value()).abs() <= 1e-12 * surface.value(),
+        "{lit:?} against {surface:?}"
+    );
+    assert!(rise > 0.0 && rise < 7.0, "{rise} K");
+    let held = crate::planetary::testing::with_every_26_hold_with_its_retargets(|| {
+        MoonSurfaceHeatRules::in_force().lit_surface(t_eq, f)
+    });
+    assert_same_bits(held.value(), io.surface);
+    for rules in [MoonSurfaceHeatRules::Held, MoonSurfaceHeatRules::Radiated] {
+        for none in [0.0, -1.0, f64::NAN] {
+            let lit = rules.lit_surface(t_eq, WattsPerSquareMetre::new(none));
+            assert_same_bits(lit.value(), io.surface);
+        }
+    }
+}
+
 /// P14.T55.j: under every 27 hold a moon on each branch radiates its surface heat, its measured
 /// surface read as its equilibrium temperature: the Moon cold, Enceladus on its porous core's ocean
 /// and Io heated, each with σ `T_s`⁴ − σ `T_eq`⁴ = F, its tides' whole heat flow, to 10⁻⁹. Recorded:

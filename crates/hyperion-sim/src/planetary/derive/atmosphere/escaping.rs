@@ -45,7 +45,8 @@
 //!    the air keeps its carbon dioxide until P14.T54.b carries the CO and its O₂ (recorded).
 //! 7. **The greenhouse**: P14.T53.a's broadened form, from the body's base temperature, the
 //!    airless mean (`surface_mix::airless_mean`: the larger of `T_eq` and the night floor;
-//!    P14.T24.i's follow-up, decision-t24i-airless-state D1.3), which the ice-held volatiles of
+//!    P14.T24.i's follow-up, decision-t24i-airless-state D1.3; from 27 a moon's
+//!    (`T_eq`⁴ + F ÷ σ)^¼ in place of `T_eq`, P14.T55.j), which the ice-held volatiles of
 //!    step 2 read too, their vapour held at their ice's own temperature (P14.T53.c). Under 100 Pa
 //!    of its partial pressures the body is airless at that base, or `Tenuous` there where its
 //!    column reaches the tenuous floor, its gases listed (P14.T53.c); from generator version 26,
@@ -1118,8 +1119,9 @@ struct Body<'a> {
     exobase: Kelvin,
     /// Its base temperature, `T_base`: the airless mean over the pass's surface
     /// (`surface_mix::airless_mean`; P14.T24.i's follow-up, decision-t24i-airless-state D1.3),
-    /// the larger of `T_eq` and the night floor. The greenhouse starts from it, an airless body
-    /// publishes at it, and the ice-held stand-in reads it.
+    /// the larger of `T_eq` and the night floor (from 27 a moon's (`T_eq`⁴ + F ÷ σ)^¼ in place of
+    /// `T_eq`, P14.T55.j). The greenhouse starts from it, an airless body publishes at it, and the
+    /// ice-held stand-in reads it.
     base: Kelvin,
     retention: Retention,
     held: IceHeld,

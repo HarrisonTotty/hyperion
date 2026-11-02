@@ -34187,3 +34187,30 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   takes the deck away; a `MagmaOcean`'s label stands (§5, "ahead of `MagmaOcean`").
   - _Left at 26 and 27:_ 24 and 30 such bodies over the 10⁵ census, and one `MagmaOcean`
     (`composition_census_s_steam_envelopes_are_a_runaway_s_under_every_28_hold`).
+- **P14.T55.j's record side, as built (lane `fix-heated-moon-surface`, 2026-11-02).** Held at 27
+  (`moons::tides::MOON_SURFACE_HEAT_VERSION`; `MoonSurfaceHeatRules::{Held, Radiated}` with
+  `lit_surface`, `with_moon_surface_heat`, a line in `with_every_27_hold`; tripwire
+  `the_moon_surface_heat_is_held_only_until_the_27_bump`). Nothing moves at 24, 25 or 26.
+  - _The reader:_ `surface_mix::airless_mean`, every pass's base: for a moon (its context holds a
+    tide) max(night floor, (`T_eq`⁴ + F ÷ σ)^¼) at the context's F, so its air's `T_s`, state and
+    record's surface conditions read it; the record's `T_eq` stays the light's.
+    `PassContext::tide` is read outside the tests now. It replaces the surface heat's lean that the
+    air, the surface state and the record's surface conditions read `T_eq`.
+  - _Leans (2026-11-02):_ moons only; the floor kept as the lower bound (it binds below
+    `T_eq` = (1 ÷ ε_r − 1)^¼ (F ÷ σ)^¼, at most 1.29% over); F the context's (`F_nt` plus the tidal
+    flux). The stand-in (`derive_regular_moon`, the table moons, Io among them, the damping census)
+    reads no heat flow and is unchanged, so Io's 7 K is checked on `lit_surface` at its tides' F.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::moons::tides` and
+    `planetary::system::tests::under_every_27_hold_a_young_heated_moon`; the censuses
+    `planetary::system::tests::under_every_27_hold_no_moon_at` with `--ignored` (slow).
+  - _For 27's bump:_ delete what the tripwire lists; restate
+    `a_moon_s_published_conditions_read_its_planet_s_orbit` (a moon's τ is read at its base, not
+    its `T_eq`), `the_secant_root_s_pinned_bodies_end_at_crossings`,
+    `under_the_batch_the_photometry_states_the_derivation_s_albedo` (a moon's airless mean is its
+    radiated base), and drop the held arms of `under_every_27_hold_io_s_air_starts_from_its_tides_surface`,
+    `under_every_27_hold_a_young_heated_moon_publishes_the_surface_its_heat_and_light_give` and
+    `heated_moon_census` (`published_surfaces`'s rules, `held_base`, the held tallies).
+    Re-bless (measured with the hold alone on 24's rules) `planetary/surface_conditions_published`
+    and the `planetary/systems` goldens `close_binary`, `eccentric_giant`, `filler_b`, `filler_c`,
+    `hierarchical_triple`, `m_dwarf_resonant_chain`, `red_giant`, `solar_like`, `subgiant` and
+    `wide_binary`; the server's `scene_systems` does not move. Measure again under every 27 hold.

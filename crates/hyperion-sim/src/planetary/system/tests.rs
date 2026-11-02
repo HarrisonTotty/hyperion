@@ -14130,3 +14130,320 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_are_stated() {
          whose state moved (decision-p14-t53a-thick-co2 §11.1)"
     );
 }
+
+// P14.T55.j's record side: a moon's air and record read its surface's internal heat, held at 27
+// (`MOON_SURFACE_HEAT_VERSION`).
+
+/// What P14.T55.j's record-side tests read of a body's published surface.
+#[derive(Debug, Clone, Copy)]
+struct PublishedSurface {
+    index: BodyIndex,
+    kind: BodyKind,
+    state: SurfaceState,
+    /// Whether its conditions hold liquid water, its condensates list water ice, and its figures
+    /// hold a subsurface ocean.
+    water: [bool; 3],
+    /// Its mean surface temperature, K.
+    mean: f64,
+    /// Its climate's range, coldest and warmest, K.
+    range: (f64, f64),
+    /// Its record's equilibrium temperature, K.
+    equilibrium: f64,
+    /// The heat flow its published pass read, its surface's basis's, else its figures', W m⁻².
+    heat_flow: f64,
+    /// Whether its surface carries the basis its published pass read.
+    based: bool,
+}
+
+impl PublishedSurface {
+    /// The surface its air starts from under P14.T55.j's rule: the larger of its night's floor and
+    /// (`T_eq`⁴ + F ÷ σ)^¼ at the heat flow its published pass read.
+    fn radiated_base(&self) -> f64 {
+        let (lit, floor) = self.lit_and_floor();
+        if floor > lit { floor } else { lit }
+    }
+
+    /// (`T_eq`⁴ + F ÷ σ)^¼ and its night's floor at the heat flow its published pass read, K.
+    fn lit_and_floor(&self) -> (f64, f64) {
+        use crate::planetary::hooks::surface::night_floor;
+        use crate::planetary::moons::tides::radiating_surface_temperature;
+        let f = WattsPerSquareMetre::new(self.heat_flow);
+        (
+            radiating_surface_temperature(Kelvin::new(self.equilibrium), f).value(),
+            night_floor(f).value(),
+        )
+    }
+
+    /// The surface its air starts from under P14.T24.i's rule alone: the larger of its night's
+    /// floor and `T_eq`.
+    fn held_base(&self) -> f64 {
+        let floor =
+            crate::planetary::hooks::surface::night_floor(WattsPerSquareMetre::new(self.heat_flow))
+                .value();
+        if floor > self.equilibrium {
+            floor
+        } else {
+            self.equilibrium
+        }
+    }
+
+    /// (F ÷ σ)^¼, the least surface at which it radiates its heat flow alone.
+    fn heat_alone(&self) -> f64 {
+        crate::math::powf(
+            self.heat_flow.max(0.0) / crate::units::consts::STEFAN_BOLTZMANN,
+            0.25,
+        )
+    }
+}
+
+/// The published surfaces of `ctx`'s system's bodies at the epoch, generated afresh under every 27
+/// hold with P14.T55.j's record side's rules `rules`.
+fn published_surfaces(
+    ctx: &SystemContext,
+    rules: crate::planetary::moons::tides::MoonSurfaceHeatRules,
+) -> Vec<PublishedSurface> {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::hooks::figures::Subsurface;
+    use crate::planetary::moons::tides::with_moon_surface_heat;
+    use crate::planetary::testing::with_every_27_hold;
+    with_every_27_hold(|| {
+        with_moon_surface_heat(rules, || {
+            let system = generate(SEED, ctx);
+            system
+                .bodies()
+                .iter()
+                .filter_map(|body| {
+                    let record = system
+                        .body_at(ctx, body.index(), UniverseTime::EPOCH)
+                        .unwrap();
+                    let (Section::Ok(surface), Section::Ok(bulk)) =
+                        (record.surface(), record.bulk())
+                    else {
+                        return None;
+                    };
+                    let water = Gas::Water.substance();
+                    let condensates = surface.condensates();
+                    let heat_flow = surface
+                        .basis()
+                        .map_or_else(|| surface.figures().heat_flow(), |basis| basis.heat_flow);
+                    Some(PublishedSurface {
+                        index: body.index(),
+                        kind: body.kind(),
+                        state: surface.state(),
+                        water: [
+                            surface.conditions().liquid_water(),
+                            condensates.entry(water, CondensatePhase::Solid).is_some(),
+                            matches!(surface.figures().subsurface_ocean(), Subsurface::Ocean(_)),
+                        ],
+                        mean: surface.conditions().mean_surface_temperature().value(),
+                        range: (
+                            surface.conditions().climate_range().0.value(),
+                            surface.conditions().climate_range().1.value(),
+                        ),
+                        equilibrium: bulk.equilibrium_temperature().value(),
+                        heat_flow: heat_flow.value(),
+                        based: surface.basis().is_some(),
+                    })
+                })
+                .collect()
+        })
+    })
+}
+
+/// P14.T55.j's record side, its failing-first case: a 10 Myr Sun's young moon heated to 570 W m⁻²
+/// on its record, at 283 K from its sunlight, published its night's floor of 321 K, the heat
+/// radiated alone, where its tides read (`T_eq`⁴ + F ÷ σ)^¼ = 358 K. Under every 27 hold its
+/// airless record publishes that surface, to the bit; with the record side held, the floor's. Its
+/// system's other bodies with a surface, none a moon, publish the same bits on both arms. Recorded:
+/// its climate's range on each arm.
+#[test]
+fn under_every_27_hold_a_young_heated_moon_publishes_the_surface_its_heat_and_light_give() {
+    use crate::planetary::moons::tides::MoonSurfaceHeatRules::{Held, Radiated};
+    let ctx = synthetic_star(
+        id(50_744),
+        SolarMasses::new(1.0),
+        Dex::ZERO,
+        Years::new(1e7),
+    )
+    .unwrap();
+    let (all_held, all_radiated) = (
+        published_surfaces(&ctx, Held),
+        published_surfaces(&ctx, Radiated),
+    );
+    let heated = |surfaces: &[PublishedSurface]| {
+        *surfaces
+            .iter()
+            .find(|body| body.index.body_id(ctx.id()).to_string() == "42002cb20000c638.0201")
+            .expect("the 10 Myr system's heated moon has a surface")
+    };
+    let (held, radiated) = (heated(&all_held), heated(&all_radiated));
+    let mut others = 0_u32;
+    for (before, after) in all_held.iter().zip(&all_radiated) {
+        assert_eq!(before.index, after.index);
+        if !matches!(after.kind, BodyKind::Moon(_)) {
+            assert_eq!(before.state, after.state, "{after:?}");
+            assert_same_bits(before.mean, after.mean);
+            others += 1;
+        }
+    }
+    assert!(others > 0, "the system has a planet with a surface");
+    eprintln!(
+        "held {held:?}\nradiated {radiated:?}\nits climate's range, held {:?} K, radiated {:?} K",
+        held.range, radiated.range
+    );
+    for moon in [&held, &radiated] {
+        assert!(moon.based, "{moon:?}");
+        assert_eq!(moon.state, SurfaceState::Airless, "{moon:?}");
+        assert!(moon.heat_flow > 500.0, "{moon:?}");
+    }
+    assert_same_bits(held.mean, held.held_base());
+    assert_same_bits(radiated.mean, radiated.radiated_base());
+    assert!(radiated.mean >= radiated.heat_alone(), "{radiated:?}");
+    assert!(
+        radiated.mean - held.mean > 30.0,
+        "{} K against {} K",
+        radiated.mean,
+        held.mean
+    );
+}
+
+/// P14.T55.j's record side's census (its acceptance) at the age `age`, the `k`th of its three:
+/// the moons of synthetic Suns' systems of that age, at least 5,000 with a published surface,
+/// generated under every 27 hold with the record side held and then radiated. Radiated, no moon
+/// publishes a surface below (F ÷ σ)^¼, and an airless one whose published pass read its basis
+/// publishes max(floor, (`T_eq`⁴ + F ÷ σ)^¼) to the bit; held, max(floor, `T_eq`) to the bit.
+/// Recorded: the moons whose published state, liquid water, water ice or subsurface ocean change,
+/// the largest rise, on each arm the moons with an air whose published mean lies below their base
+/// (a Snowball's below its `T_eq`, as at 24), and the heated moons whose floor binds, at `ε_r`,
+/// over their lit balance. Returned: the moons at least 1 K warmer.
+fn heated_moon_census(k: u32, age: Years) -> u32 {
+    use crate::planetary::moons::tides::MoonSurfaceHeatRules::{Held, Radiated};
+    const MOONS: usize = 5_000;
+    let (mut moons, mut based, mut heated, mut warmer) = (0_usize, 0_u32, 0_u32, 0_u32);
+    let (mut changed, mut under, mut floored) = ([0_u32; 4], [0_u32; 2], 0_u32);
+    let mut lines = Vec::new();
+    let mut largest = None::<(f64, String)>;
+    let mut i = 0_u32;
+    while moons < MOONS {
+        let ctx = synthetic_star(
+            id(60_000 * (k + 1) + i),
+            SolarMasses::new(1.0),
+            Dex::ZERO,
+            age,
+        )
+        .unwrap();
+        i += 1;
+        let moons_of = |surfaces: Vec<PublishedSurface>| -> Vec<PublishedSurface> {
+            surfaces
+                .into_iter()
+                .filter(|body| matches!(body.kind, BodyKind::Moon(_)))
+                .collect()
+        };
+        let (held, radiated) = (
+            moons_of(published_surfaces(&ctx, Held)),
+            moons_of(published_surfaces(&ctx, Radiated)),
+        );
+        assert_eq!(held.len(), radiated.len(), "{:?}", ctx.id());
+        for (before, after) in held.iter().zip(&radiated) {
+            assert_eq!(before.index, after.index);
+            let name = after.index.body_id(ctx.id()).to_string();
+            moons += 1;
+            based += u32::from(after.based);
+            heated += u32::from(after.heat_flow >= 1.0);
+            assert!(
+                after.mean >= after.heat_alone() * (1.0 - 1e-12),
+                "{name}: {after:?} below its heat alone, {} K",
+                after.heat_alone()
+            );
+            if after.based && after.state == SurfaceState::Airless {
+                assert_same_bits(after.mean, after.radiated_base());
+            }
+            if before.based && before.state == SurfaceState::Airless {
+                assert_same_bits(before.mean, before.held_base());
+            }
+            // An air's published mean is its passes' greenhouse and partition at the base, not
+            // the base itself: counted under each arm, not asserted.
+            under[0] += u32::from(before.based && before.mean < before.held_base());
+            under[1] += u32::from(after.based && after.mean < after.radiated_base());
+            // Where the floor binds, at `ε_r`, the published base is not the lit balance.
+            let (lit, floor) = after.lit_and_floor();
+            floored += u32::from(after.heat_flow > 0.0 && floor > lit);
+            let rise = after.mean - before.mean;
+            warmer += u32::from(rise >= 1.0);
+            if largest.as_ref().is_none_or(|(most, _)| rise > *most) {
+                largest = Some((rise, format!("{name} {before:?} → {after:?}")));
+            }
+            let moved = [
+                before.state != after.state,
+                before.water[0] != after.water[0],
+                before.water[1] != after.water[1],
+                before.water[2] != after.water[2],
+            ];
+            for (count, moved) in changed.iter_mut().zip(moved) {
+                *count += u32::from(moved);
+            }
+            if moved.iter().any(|&m| m) {
+                lines.push(format!(
+                    "  {name}: {:?} → {:?}, liquid {} → {}, ice {} → {}, ocean {} → {}, \
+                     {:.2} → {:.2} K at {:.4} W m⁻² (T_eq {:.2} K)",
+                    before.state,
+                    after.state,
+                    before.water[0],
+                    after.water[0],
+                    before.water[1],
+                    after.water[1],
+                    before.water[2],
+                    after.water[2],
+                    before.mean,
+                    after.mean,
+                    after.heat_flow,
+                    after.equilibrium
+                ));
+            }
+        }
+    }
+    eprintln!(
+        "age {:e} yr: {i} systems, {moons} moons with a surface ({based} on their basis, \
+         {heated} at 1 W m⁻² or more); {warmer} at least 1 K warmer; changed: state {}, liquid \
+         water {}, water ice {}, ocean {}; with an air below its base, held {} and radiated {}; \
+         {floored} on their floor; the largest rise {largest:?}",
+        age.value(),
+        changed[0],
+        changed[1],
+        changed[2],
+        changed[3],
+        under[0],
+        under[1]
+    );
+    for line in &lines {
+        eprintln!("{line}");
+    }
+    warmer
+}
+
+/// [`heated_moon_census`] at 10 Myr, where the young heated tail is largest.
+#[test]
+#[ignore = "slow: 5,000 moons' records twice under every 27 hold, about 190 s in the slow-test \
+            profile on a pod"]
+fn under_every_27_hold_no_moon_at_10_myr_publishes_a_surface_below_its_heat_and_light() {
+    assert!(heated_moon_census(0, Years::new(1e7)) > 0, "no moon warmed");
+}
+
+/// [`heated_moon_census`] at 100 Myr.
+#[test]
+#[ignore = "slow: 5,000 moons' records twice under every 27 hold, about 190 s in the slow-test \
+            profile on a pod"]
+fn under_every_27_hold_no_moon_at_100_myr_publishes_a_surface_below_its_heat_and_light() {
+    assert!(heated_moon_census(1, Years::new(1e8)) > 0, "no moon warmed");
+}
+
+/// [`heated_moon_census`] at the Sun's age.
+#[test]
+#[ignore = "slow: 5,000 moons' records twice under every 27 hold, about 190 s in the slow-test \
+            profile on a pod"]
+fn under_every_27_hold_no_moon_at_the_sun_s_age_publishes_a_surface_below_its_heat_and_light() {
+    assert!(
+        heated_moon_census(2, Years::new(4.57e9)) > 0,
+        "no moon warmed"
+    );
+}
