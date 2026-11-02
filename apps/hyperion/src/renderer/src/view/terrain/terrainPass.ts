@@ -1636,6 +1636,7 @@ export class TerrainPass {
         this.#screenPx(keyString, this.#device.residents.get(keyString)?.sizes.morphM ?? 0),
       risePx: (keyString) =>
         this.#screenPx(keyString, this.#device.residents.get(keyString)?.sizes.reliefM ?? 0),
+      changePx: (keyString, changeM) => this.#screenPx(keyString, changeM),
     };
     this.#lookaheadClockMs = options.lookaheadClockMs ?? null;
     this.#reliefM = options.reliefM ?? ((): number | null => null);
@@ -2958,7 +2959,7 @@ export class TerrainPass {
     if (rebake) {
       const older = device.residents.get(keyString)?.sizes;
       const changeM = older === undefined ? sizes.reliefM : coarseChangeM(older, sizes);
-      device.morph.rebake(keyString, retired, this.#screenPx(keyString, changeM));
+      device.morph.rebake(keyString, retired, changeM);
       this.#releaseRetired(device);
     }
     let upload: ReturnType<TerrainResources["upload"]>;
@@ -3090,6 +3091,10 @@ export class TerrainPass {
     device.givenUp.delete(keyString);
     device.graticules.delete(keyString);
     this.#heights.forget(keyString);
+    // A rebake fading from the older bake ends with its patch: a bake of the key stored again takes
+    // no stale older slot.
+    device.morph.forget(keyString);
+    this.#releaseRetired(device);
     if (device.rebakes.delete(keyString)) {
       this.#demandDirty = true;
     }

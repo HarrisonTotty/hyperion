@@ -6,7 +6,7 @@ import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { childKeys, type PatchKey, patchKeyString, rootKey } from "./patchKey";
 import { slotLayout } from "./slotLayout";
 import { DATUM_SLOT } from "./gpu/uniforms";
-import { fadeAt, MORPH_IN_MS, MORPH_MAX_MS, MORPH_MS_PER_PX, TimeMorph } from "./timeMorph";
+import { MORPH_IN_MS, MORPH_MAX_MS, MORPH_MS_PER_PX, TimeMorph } from "./timeMorph";
 
 /** A cache of `slots` slots holding `keys`. */
 function cacheWith(keys: ReadonlyArray<PatchKey>, slots = 32): PatchCache {
@@ -42,14 +42,53 @@ function footprints(morph: TimeMorph, nowMs: number): Array<[string, number]> {
 }
 
 describe("the drawn ground's changes over time (R10.T16.i)", () => {
-  it("fades by smoothstep from where it starts, and stays at its start until its first draw", () => {
-    expect([
-      fadeAt(1, 0, null, 500, 400),
-      fadeAt(1, 0, 100, 100, 400),
-      fadeAt(1, 0, 100, 300, 400),
-      fadeAt(1, 0, 100, 500, 400),
-      fadeAt(0.25, 1, 0, 1_000, 400),
-    ]).toEqual([1, 1, 0.5, 0, 1]);
+  it("fades by smoothstep from its first draw, and stays at its start until then", () => {
+    const cache = cacheWith([ROOT]);
+    const resolver = new DrawSetResolver(cache);
+    const morph = new TimeMorph(32);
+    morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+    morph.footprintsAt(0);
+    const [first] = CHILDREN;
+    cache.insert({
+      key: first,
+      generation: 1,
+      originM: vec3(0, 0, 0),
+      heightRangeM: [0, 0],
+      boundingRadiusM: 1,
+    });
+    morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+    const fades = [1_000, 1_000, 1_000 + MORPH_IN_MS / 4, 1_000 + MORPH_IN_MS / 2].map(
+      (ms) => footprints(morph, ms)[0]?.[1],
+    );
+    expect(fades).toEqual([1, 1, 1 - 0.25 * 0.25 * (3 - 0.5), 0.5]);
+  });
+
+  it("slows a change in progress as the pixels it moves the ground grow", () => {
+    const cache = cacheWith([ROOT]);
+    const resolver = new DrawSetResolver(cache);
+    let px = 0;
+    const morph = new TimeMorph(32, MORPH_IN_MS, {
+      morphPx: () => px,
+      risePx: () => 0,
+      changePx: () => 0,
+    });
+    morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+    morph.footprintsAt(0);
+    const [first] = CHILDREN;
+    cache.insert({
+      key: first,
+      generation: 1,
+      originM: vec3(0, 0, 0),
+      heightRangeM: [0, 0],
+      boundingRadiusM: 1,
+    });
+    morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+    footprints(morph, 1_000);
+    // A quarter of the least span at it, then the camera closes in: the rest at twice the span.
+    footprints(morph, 1_000 + MORPH_IN_MS / 4);
+    px = (2 * MORPH_IN_MS) / MORPH_MS_PER_PX;
+    const [[, fade] = ["", -1]] = footprints(morph, 1_000 + MORPH_IN_MS / 4 + MORPH_IN_MS / 2);
+    expect(fade).toBeCloseTo(0.5, 12);
   });
 
   it("starts a refine at 1 over the finer patch's area at its first draw, and ends it at 0", () => {
@@ -296,7 +335,11 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     const cache = cacheWith([ROOT]);
     const resolver = new DrawSetResolver(cache);
     // A refine moving the ground 40 px, and a rebake 1,000 px, past the longest span.
-    const morph = new TimeMorph(32, MORPH_IN_MS, { morphPx: () => 40, risePx: () => 0 });
+    const morph = new TimeMorph(32, MORPH_IN_MS, {
+      morphPx: () => 40,
+      risePx: () => 0,
+      changePx: (_, changeM) => changeM,
+    });
     morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
     morph.footprintsAt(0);
     cache.insert({
@@ -332,6 +375,17 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
       1,
       [DATUM_SLOT],
     ]);
+  });
+
+  it("ends a rebake's fade with its patch, giving up its older slot", () => {
+    const cache = cacheWith([ROOT]);
+    const resolver = new DrawSetResolver(cache);
+    const morph = new TimeMorph(32);
+    morph.present(resolver.resolve(selectionOf([ROOT])), cache, unseen);
+    morph.rebake(patchKeyString(ROOT), 7);
+    morph.forget(patchKeyString(ROOT));
+    morph.footprintsAt(1_000);
+    expect([morph.heightWords[0], morph.takeReleased(), morph.active]).toEqual([0, [7], false]);
   });
 
   it("swaps a coarsen at once, counted, where its finer patches have left the cache", () => {
