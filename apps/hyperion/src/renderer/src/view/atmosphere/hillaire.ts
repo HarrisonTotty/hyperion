@@ -1252,14 +1252,11 @@ export function withThermalSource(pair: KernelPair): KernelPair {
  * `thick/deckRead.ts`): each source's light on the bare ground, where the ray meets the kernels'
  * datum with nothing drawn, is `deckRead.wgsl`'s `deckGroundAt` in place of the Lambertian
  * max(μ₀, 0) A ÷ π, its own transmittance to the ground passed to it for a source the bake did not
- * carry; and since R08.T16.a.2 a segment that ends on the datum takes `deckFloorSplit`'s placement,
- * from the camera over an envelope's floor. Each is one line and stands once in each march.
+ * carry. Each is one line and stands once in each march. Since R08.T16.a.2's shares by the light
+ * each piece returns (`rayMarch.wgsl`'s `rayMarchDepthShares`) a segment onto an envelope's floor
+ * keeps R05.T12.e's placement, as one onto a surface's deck does.
  */
 const DECK_READ: ReadonlyArray<readonly [string, string]> = [
-  [
-    "let split = marchSplit(tStart, tEnd, nearest, samples, shell.x <= 0.0 && depth > 0.0);",
-    "let split = deckFloorSplit(marchSplit(tStart, tEnd, nearest, samples, shell.x <= 0.0 && depth > 0.0), hitsGround && ground.x <= tEnd);",
-  ],
   [
     "luminance += viewThroughputOf(&march, slot) * source.weight.rgb * toSun",
     "luminance += viewThroughputOf(&march, slot) * source.weight.rgb",
@@ -1272,9 +1269,8 @@ const DECK_READ: ReadonlyArray<readonly [string, string]> = [
 
 /**
  * `pair`, a thick ray march's ({@link withThickRead}), reading a cloud deck as its ground (plan
- * R08, R08.T15.a.2; Design note 9; `thick/deckRead.ts`): the bare ground's light is the deck's, and
- * a segment onto an envelope's floor is stepped from the camera ({@link DECK_READ}), its table bound
- * at `deckTable` beside the thick table. Every other line is the thick kernel's own, so that a body
+ * R08, R08.T15.a.2; Design note 9; `thick/deckRead.ts`): the bare ground's light is the deck's
+ * ({@link DECK_READ}), its table bound at `deckTable` beside the thick table. Every other line is the thick kernel's own, so that a body
  * with no deck keeps its kernels to the byte.
  *
  * @throws Error naming the kernel when its sources hold a rewritten line other than once, or it

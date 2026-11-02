@@ -33,6 +33,13 @@ describeMarchGate({
   // 0.49657. Since R08.T11.b the drawn surfaces add to the rays over `LOW_TWIN_WORST` two from
   // 10⁷ m on the ground, which low marches at its 16 as it does the disc's same rays from 400 km
   // (5.97% and 3.78%, the same segments); high's figures and named misses hold (2026-10-27).
+  // Since R08.T16.a.2 (2026-11-02) the ray march shares a cut side's steps by the light each piece
+  // returns (`marchSteps.ts`'s `depthSharedPieces`): high's march ordinary worst 1.59% → 0.87% at
+  // one source and 1.11% → 1.16% at six, its named misses held; low's 5.97% → 4.11% and 2.60% →
+  // 3.81%. Over the low bounds the disc's and the drawn surface's rays at ground zenith 60° and 80°
+  // under the sun 80°/0° fall away, and the past family's from 50 km at view zenith 97.251°, sun
+  // 90°/180° (18.91%), and at six sources the disc's and drawn surface's at 80°, sun 95°/180°
+  // (3.81%), come in.
   record: {
     highMisses: [
       [
@@ -48,7 +55,7 @@ describeMarchGate({
     high: [
       {
         kernel: {
-          march: 0.01589,
+          march: 0.00868,
           marchTwilight: 0.06275,
           sky: 0.01188,
           skyTwilight: 0.06439,
@@ -64,7 +71,7 @@ describeMarchGate({
       },
       {
         kernel: {
-          march: 0.01109,
+          march: 0.01165,
           marchTwilight: 0.00963,
           sky: 0.0012,
           skyTwilight: 0.01124,
@@ -82,7 +89,7 @@ describeMarchGate({
     low: [
       {
         kernel: {
-          march: 0.0597,
+          march: 0.04109,
           marchTwilight: 0.28556,
           sky: 0.05435,
           skyTwilight: 0.28562,
@@ -98,7 +105,7 @@ describeMarchGate({
       },
       {
         kernel: {
-          march: 0.02603,
+          march: 0.03807,
           marchTwilight: 0.06909,
           sky: 0.00368,
           skyTwilight: 0.04765,
@@ -115,8 +122,6 @@ describeMarchGate({
     ],
     overLow: [
       [
-        "disc, ground zenith 60°, sun 80°/0°: 5.97%",
-        "disc, ground zenith 80°, sun 80°/0°: 3.78%",
         "limb, 0.1 H, sun 90°/0°: 28.56%",
         "limb, 0.3 H, sun 30°/180°: 4.11%",
         "limb, 1 H, sun 30°/180°: 4.10%",
@@ -125,11 +130,15 @@ describeMarchGate({
         "night limb, 101 km, 0.1 H, sun 90°/0°: 28.56%",
         "night limb, 101 km, 0.1 H, sun 95°/180°: 27.51%",
         "night limb, 101 km, 0.3 H, sun 95°/180°: 24.12%",
-        "drawn, 1e7 m, ground zenith 60°, on the ground, sun 80°/0°: 5.97%",
-        "drawn, 1e7 m, ground zenith 80°, on the ground, sun 80°/0°: 3.78%",
         "band, 50000 m, view zenith 97.008°, sun 90°/180°: 18.27%",
+        "past, 50000 m, view zenith 97.251°, sun 90°/180°: 18.91%",
       ],
-      ["limb, 0.3 H, sun 30°/180°: 3.95%", "limb, 1 H, sun 30°/180°: 4.12%"],
+      [
+        "disc, ground zenith 80°, sun 95°/180°: 3.81%",
+        "limb, 0.3 H, sun 30°/180°: 3.95%",
+        "limb, 1 H, sun 30°/180°: 4.12%",
+        "drawn, 1e7 m, ground zenith 80°, on the ground, sun 95°/180°: 3.81%",
+      ],
     ],
   },
 });

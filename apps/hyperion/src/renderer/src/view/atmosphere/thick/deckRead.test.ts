@@ -246,7 +246,6 @@ describe("the deck table's shape (R08.T15.a.2)", () => {
     expect(floorWords(envelope)).toEqual([1, 1, 1, 1]);
     // Every other word is the surface's deck's.
     expect(otherWords(envelope)).toEqual(otherWords(ground));
-    expect(deckReadConstant("DECK_FLOOR_WORD")).toBe(DECK_FLOOR_WORD);
   });
 
   it("refuses a table off the grid, of other slots, or not finite", () => {

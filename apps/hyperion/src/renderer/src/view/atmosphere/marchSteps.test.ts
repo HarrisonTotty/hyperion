@@ -29,12 +29,17 @@ import {
 } from "../../test/atmosphereGate";
 import { RAY_MARCH_KERNEL, SKY_VIEW_KERNEL, TABLE_SIZES } from "./hillaire";
 import {
+  depthSharedPieces,
   DRAWN_SURFACE_BAND_M,
   drawnSurfaceKind,
   grazingTwilight,
   marchEdgesM,
   marchEvenStep,
   marchEvenSteps,
+  MARCH_EDGE_LEAST_RISE,
+  MARCH_PIECE_DEPTH_CAP,
+  MARCH_PIECE_SHADE,
+  MARCH_PIECE_TURN,
   marchPieces,
   marchPiecesSteps,
   type MarchDepthSteps,
@@ -45,7 +50,6 @@ import {
   type MarchStep,
   SKY_WARP_COSINE,
   skyWarpOf,
-  towardCameraSplit,
 } from "./marchSteps";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
@@ -141,28 +145,134 @@ describe("marchSplit and marchStep", () => {
     expect(toGround[31]?.dtM).toBeCloseTo(100_000 / 32 ** 2, 6);
   });
 
-  it("place a segment onto an envelope's floor from the camera, its count and sides unchanged (R08.T16.a.2)", () => {
-    // From orbit down to the floor: one-sided, t* at its end.
-    const toFloor = marchSplit(300_000, 1_090_000, 1_200_000, 36, false);
-    const placed = towardCameraSplit(toFloor);
-    expect(placed).toEqual({ ...toFloor, beforeTowardStart: true });
-    const steps = Array.from({ length: 36 }, (_, i) => marchStep(placed, i));
-    expect(steps[0]?.dtM).toBeCloseTo(790_000 / 36 ** 2, 6);
-    expect(steps[35]?.dtM).toBeCloseTo((71 * 790_000) / 36 ** 2, 6);
-    // Its pieces likewise, each from its end nearer the camera.
-    const pieces = marchPiecesSteps(marchPieces(placed, [-38_000]));
-    const boundaries = boundariesOf(pieces);
-    const cloud = pieces.filter(({ tM }) => tM > 1_090_000 - 38_000);
-    expect(cloud[0]?.dtM ?? Number.NaN).toBeLessThan(cloud.at(-1)?.dtM ?? Number.NaN);
-    expect(isBoundary(boundaries, 1_090_000 - 38_000)).toBe(true);
-    // A segment with no side before t* has nothing to turn.
-    const upward = marchSplit(0, 5_000, -1, 20, true);
-    expect(towardCameraSplit(upward)).toEqual(upward);
-  });
-
   it("refuse fewer than 2 steps", () => {
     expect(() => marchSplit(0, 1, 0, 1, false)).toThrow(RangeError);
     expect(() => marchSplit(0, 1, 0, 2.5, false)).toThrow(RangeError);
+  });
+});
+
+/** A side the first source lights unattenuated. */
+const lit = (): number => 1;
+/** The gas's extinction above the cloud's top and the cloud's within it, m⁻¹. */
+const extinction = (fromLowestM: number): number =>
+  fromLowestM < -38_000 ? 0.1 / 752_000 : 10 / 38_000;
+/** τ 0.1 of gas above the cloud and τ 10 within it, read back along the ray from each place. */
+const gasOverCloud = (fromLowestM: number): number =>
+  fromLowestM <= -38_000
+    ? (0.1 * (fromLowestM + 790_000)) / 752_000
+    : 0.1 + (10 * (fromLowestM + 38_000)) / 38_000;
+
+/** A segment's pieces' steps in all, on one side. */
+function sumOf(shares: ReadonlyArray<number> | null): number {
+  return (shares ?? []).reduce((total, n) => total + n, 0);
+}
+
+/** The cloud of {@link gasOverCloud} in the ground's shadow, the gas above it lit. */
+function dusk(fromLowestM: number): number {
+  return fromLowestM < -38_000 ? 1 : 0;
+}
+
+describe("depthSharedPieces: a cut side's steps by the light each piece returns (R08.T16.a.2)", () => {
+  /** From orbit down to an envelope's floor: one-sided, t* at its end, 790 km long. */
+  const toFloor = marchSplit(300_000, 1_090_000, 1_200_000, 36, false);
+  /** Its cloud's 38 km above the floor, a piece of its own. */
+  const cloud = marchPieces(toFloor, [-38_000]);
+  it("gives the cloud 20 of 36 steps where R08.T6.i's root length gave it 7, the side's count kept", () => {
+    // Weights ½ D ÷ ΣD + ½ √L ÷ Σ√L: the cloud's drop e^−0.1 (1 − e^−10) of 0.99996 and its root
+    // length 0.1835 of the side's, 0.5442 in all; 1 + round(34 × 0.4558) = 16 for the gas.
+    expect(cloud.before).toEqual([29, 7]);
+    const shared = depthSharedPieces(
+      cloud,
+      (fromLowestM, back) => {
+        expect(back).toBe(true);
+        return gasOverCloud(fromLowestM);
+      },
+      lit,
+      extinction,
+    );
+    expect(shared.before).toEqual([16, 20]);
+    expect(shared.after).toBeNull();
+    // The gas toward its lower end, the cloud's lit top; the cloud toward its top, not its floor.
+    expect(shared.beforeTowardStart).toEqual([false, true]);
+    expect(shared.afterTowardStart).toBeNull();
+    expect({ ...shared, before: cloud.before, beforeTowardStart: null }).toEqual(cloud);
+    const steps = marchPiecesSteps(shared);
+    expect(steps).toHaveLength(36);
+    expect(isBoundary(boundariesOf(steps), 1_090_000 - 38_000)).toBe(true);
+  });
+
+  it("turns a piece toward its other end only where that end is 100 times the brighter", () => {
+    expect(MARCH_PIECE_TURN).toBe(100);
+    // A cloud of τ 4 (e^4, 55 times) keeps R05.T12.e's placement toward its floor; of τ 5 (148
+    // times) its steps turn toward its top.
+    const cloudOf = (tau: number) => (fromLowestM: number) =>
+      fromLowestM <= -38_000
+        ? gasOverCloud(fromLowestM)
+        : 0.1 + (tau * (fromLowestM + 38_000)) / 38_000;
+    expect(depthSharedPieces(cloud, cloudOf(4), lit, extinction).beforeTowardStart).toEqual([
+      false,
+      false,
+    ]);
+    expect(depthSharedPieces(cloud, cloudOf(5), lit, extinction).beforeTowardStart).toEqual([
+      false,
+      true,
+    ]);
+  });
+
+  it("gives a cloud in the ground's shadow its steps back to the lit gas above it", () => {
+    // The gas's drop at a light of ε + ½ (1 + 0), the cloud's at ε (MARCH_PIECE_SHADE): 0.843 of
+    // the drops to the gas, and with its root length 0.830 of the weight, 1 + round(34 × 0.830).
+    expect(MARCH_PIECE_SHADE).toBe(0.01);
+    expect(depthSharedPieces(cloud, gasOverCloud, dusk, extinction).before).toEqual([29, 7]);
+    // A light the same over the side moves nothing.
+    expect(depthSharedPieces(cloud, gasOverCloud, () => 0, extinction).before).toEqual([16, 20]);
+  });
+
+  it("keeps R08.T6.i's shares on a side with no depth, and on a side that is not cut", () => {
+    expect(depthSharedPieces(cloud, () => 0, lit, extinction)).toEqual(cloud);
+    const uncut = marchPieces(toFloor, []);
+    expect(depthSharedPieces(uncut, gasOverCloud, lit, extinction)).toEqual(uncut);
+  });
+
+  it("reads a depth that is not a number, and one past it, at the cap of 64", () => {
+    const ending = (end: number) => (fromLowestM: number) =>
+      fromLowestM < 0 ? gasOverCloud(fromLowestM) : end;
+    const capped = depthSharedPieces(cloud, ending(Number.NaN), lit, extinction);
+    const past = depthSharedPieces(cloud, ending(2 * MARCH_PIECE_DEPTH_CAP), lit, extinction);
+    const atCap = depthSharedPieces(cloud, ending(MARCH_PIECE_DEPTH_CAP), lit, extinction);
+    expect(MARCH_PIECE_DEPTH_CAP).toBe(64);
+    expect([capped.before, past.before]).toEqual([atCap.before, atCap.before]);
+    expect(sumOf(atCap.before)).toBe(36);
+  });
+
+  it("shares each side of a two-sided segment within its own count, the side after t* read on along the ray", () => {
+    // From orbit through a limb, a deck crossed on each side of t*.
+    const orbit = marchSplit(300_000, 2_600_000, 1_450_000, 32, false);
+    const pieces = marchPieces(orbit, [-60_000, 60_000]);
+    const seen: boolean[] = [];
+    // τ 6 within 60 km of t*, nothing beyond it, from each place to the top along its side.
+    const shared = depthSharedPieces(
+      pieces,
+      (fromLowestM, back) => {
+        seen.push(back);
+        return Math.abs(fromLowestM) < 60_000 ? 6 * (1 - Math.abs(fromLowestM) / 60_000) : 0;
+      },
+      lit,
+      // A deck within 60 km of t*, clear gas beyond it.
+      (fromLowestM) => (Math.abs(fromLowestM) <= 60_000 ? 1 / 60_000 : 1e-9),
+    );
+    expect(seen.filter((back) => back)).toHaveLength(3);
+    expect(seen.filter((back) => !back)).toHaveLength(3);
+    expect([sumOf(shared.before), sumOf(shared.after)]).toEqual([
+      orbit.stepsBefore,
+      orbit.stepsAfter,
+    ]);
+    // The deck's pieces, t*'s neighbours, take more than their root length gave them.
+    expect(shared.before?.[1] ?? 0).toBeGreaterThan(pieces.before?.[1] ?? 0);
+    expect(shared.after?.[0] ?? 0).toBeGreaterThan(pieces.after?.[0] ?? 0);
+    // Each deck piece toward its end nearer the camera's view, e^6 the brighter: the side before t*
+    // turned toward the deck's edge, its start, and the side after it toward t*, as it was.
+    expect([shared.beforeTowardStart?.[1], shared.afterTowardStart?.[0]]).toEqual([true, true]);
   });
 });
 
@@ -487,13 +597,13 @@ describe("the kernels' WGSL", () => {
       /fn rayMarchStepOf\([^)]*\) -> MarchStep \{\s*if \(evenSky\) \{\s*return marchEvenStep\(split, i, warp\);\s*\}\s*return marchStep\(split, i\);/,
     );
     expect(rayMarchWgsl).toMatch(
-      /fn rayMarchWalkStepOf\([^)]*\) -> MarchStep \{\s*if \(evenSky\) \{\s*return marchWalkEvenStep\(walk, i\);\s*\}\s*return marchWalkStep\(walk, i\);/,
+      /fn rayMarchWalkStepOf\([^)]*\) -> MarchStep \{\s*if \(evenSky\) \{\s*return marchWalkEvenStep\(walk, i\);\s*\}\s*return rayMarchWalkStep\(walk, placement, i\);/,
     );
     expect(rayMarchWgsl).toMatch(
       /for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(&march, ray, body, rayMarchStepOf\(split, i, evenSky, warp\), lobes\);/,
     );
     expect(rayMarchWgsl).toMatch(
-      /if \(evenSky\) \{\s*marchWalkEvenReady\(&walk, warp\);\s*\} else \{\s*marchWalkReady\(&walk\);\s*\}\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(&march, ray, body, rayMarchWalkStepOf\(&walk, i, evenSky\), lobes\);/,
+      /if \(evenSky\) \{\s*marchWalkEvenReady\(&walk, warp\);\s*\} else \{\s*marchWalkReady\(&walk\);\s*rayMarchDepthShares\(&walk, &placement, ray, body\);\s*\}\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(&march, ray, body, rayMarchWalkStepOf\(&walk, &placement, i, evenSky\), lobes\);/,
     );
     // The sky view and the multiple-scattering kernel keep R05.T12.e's placement.
     for (const wgsl of [skyViewWgsl, multiScatteringWgsl]) {
@@ -549,8 +659,27 @@ describe("the kernels' WGSL", () => {
       );
       expect(wgsl).toMatch(/var walk : MarchWalk;\s*marchWalkStart\(&walk, split\);/);
       expect(wgsl).toMatch(
-        /marchWalkReady\(&walk\);\s*(\}\s*)?for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?(marchWalkStep\(&walk, i\)|rayMarchWalkStepOf\(&walk, i, evenSky\))(, lobes)?\);/,
+        /marchWalkReady\(&walk\);\s*(rayMarchDepthShares\(&walk, &placement, ray, body\);\s*)?(\}\s*)?for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?(marchWalkStep\(&walk, i\)|rayMarchWalkStepOf\(&walk, &placement, i, evenSky\))(, lobes)?\);/,
       );
+    }
+    // Only the ray march shares a cut side's steps by the light each piece returns, and takes its
+    // crossings onto their edges' levels (R08.T16.a.2).
+    expect(rayMarchWgsl).toMatch(
+      /marchWalkReady\(&walk\);\s*rayMarchDepthShares\(&walk, &placement, ray, body\);/,
+    );
+    expect(rayMarchWgsl).toMatch(
+      /marchWalkCross\(walk, rayMarchEdgeLevel\(ray, body, lowestM, crossed\[j\], edgeM\)\);/,
+    );
+    expect(rayMarchWgsl).toContain(
+      `const MARCH_PIECE_DEPTH_CAP : f32 = ${MARCH_PIECE_DEPTH_CAP.toFixed(1)};`,
+    );
+    expect(rayMarchWgsl).toContain(`const MARCH_EDGE_LEAST_RISE : f32 = ${MARCH_EDGE_LEAST_RISE};`);
+    expect(rayMarchWgsl).toContain(
+      `const MARCH_PIECE_TURN : f32 = ${MARCH_PIECE_TURN.toFixed(1)};`,
+    );
+    expect(rayMarchWgsl).toContain(`const MARCH_PIECE_SHADE : f32 = ${MARCH_PIECE_SHADE};`);
+    for (const wgsl of [skyViewWgsl, multiScatteringWgsl]) {
+      expect(wgsl).not.toMatch(/rayMarchDepthShares|rayMarchEdgeLevel/);
     }
     expect(skyViewWgsl).toMatch(/marchWalkCrossSphere\(/);
     expect(multiScatteringWgsl).toMatch(/marchWalkCrossSphere\(/);

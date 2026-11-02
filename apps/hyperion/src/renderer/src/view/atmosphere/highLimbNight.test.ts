@@ -33,6 +33,7 @@ import {
   mediumMarchEdgesM,
   piecedSteps,
   planetTwin,
+  sphereShareReads,
   tableSources,
   type TwinRay,
   type TwinSources,
@@ -126,6 +127,7 @@ type Kernel = "sky view" | "march";
  */
 function pixelOf(medium: AtmosphereMedium, sources: TwinSources, kernel: Kernel) {
   const edges = mediumMarchEdgesM(medium);
+  const shares = sphereShareReads(medium, sources, GATE_SPHERE);
   return (ray: GateRay, placement: Placement, n: number, rule: MarchDepthSteps | null): Rgb3 => {
     const twinRay: TwinRay = {
       originM: ray.o,
@@ -150,6 +152,8 @@ function pixelOf(medium: AtmosphereMedium, sources: TwinSources, kernel: Kernel)
             : n,
           edges,
           GATE_SPHERE,
+          // The ray march shares a cut side's steps by the light each piece returns (R08.T16.a.2).
+          kernel === "march" ? shares : null,
         );
         break;
       case "even":

@@ -185,17 +185,6 @@ export function marchSplit(
 }
 
 /**
- * `split` with its side before t* placed toward the camera wherever it has one (plan R08,
- * R08.T16.a.2; `deckRead.wgsl`'s `deckFloorSplit`): the ray march's segment onto an envelope's
- * floor, which lies under τ(550) 10 of the upper medium, so that the ray's light is gathered within
- * its first optical depths, where R05.T12.e's placement toward t* leaves its coarsest steps
- * (`thick/deckRead.ts`, "An envelope's floor").
- */
-export function towardCameraSplit(split: MarchSplit): MarchSplit {
-  return { ...split, beforeTowardStart: split.beforeTowardStart || split.beforeM > 0 };
-}
-
-/**
  * Step `i` of a split segment, counted from t_start. A side of length L and n steps placed toward
  * an end a has its boundaries at a ∓ L (k ÷ n)², k = 0…n, so its step k from a has its midpoint at
  * a ∓ L (k² + k + ½) ÷ n² and the length L (2k + 1) ÷ n².
@@ -414,6 +403,23 @@ export function marchEdgesM(edgesM: ReadonlyArray<number>, topHeightM: number): 
 }
 
 /**
+ * The least rise of h\* along a ray, |s (d · n)|, at which the ray march takes a layer edge's crossing
+ * onto the edge's own level h\* = e (plan R08, R08.T16.a.2; `rayMarch.wgsl`'s
+ * `MARCH_EDGE_LEAST_RISE`): 0.05, a ray within about 3° of the level there keeping its shell's root,
+ * whose Newton step would be long and whose two crossings lie close about a tangent point.
+ *
+ * @remarks
+ * An oblate body's edge e is the shell (a + e ÷ s_e, c + e ÷ s_p), which stands at h\* = e at the
+ * equator and the poles alone: between them s(φ) is not the shell's, and on the hand Jupiter's
+ * figure (Δs 16.7% pole to equator) its 178 km NH₃ edge stands about 1 km off its level at 45°,
+ * as thick as the deck's sheet above it. The ray march's crossings take one Newton step of h\* along
+ * the ray onto the level, which leaves their error at the metre: the hand Jupiter's disc at
+ * mid-latitudes read 0.75–0.85 of its converged march on the shells' crossings, within 2% on the
+ * level's (2026-11-02).
+ */
+export const MARCH_EDGE_LEAST_RISE = 0.05;
+
+/**
  * A split segment cut into pieces where it crosses the marches' layer edges (plan R08, R08.T6.i):
  * `common.wgsl`'s `MarchWalk` once made ready.
  */
@@ -432,6 +438,14 @@ export interface MarchPieces {
   readonly after: ReadonlyArray<number> | null;
   /** How many of its sides cross an edge but have more pieces than steps, 0 to 2. */
   readonly crowded: number;
+  /**
+   * Whether each piece of the side before t* is placed toward its end nearer the segment's start,
+   * in order along the ray (plan R08, R08.T16.a.2; {@link depthSharedPieces}), or `null` where the
+   * side places them as R08.T6.i does: toward t*, or toward the camera on a camera side.
+   */
+  readonly beforeTowardStart: ReadonlyArray<boolean> | null;
+  /** The same for the side after t*, `null` where each is placed toward t*. */
+  readonly afterTowardStart: ReadonlyArray<boolean> | null;
 }
 
 /**
@@ -463,11 +477,21 @@ function sideShares(
     total += root;
     from = to;
   }
+  return sharesOf(roots, total, steps);
+}
+
+/**
+ * `steps` among pieces by their weights (`rayMarch.wgsl`'s `marchSharesOf`): one a piece and the rest
+ * in proportion to each piece's weight, each piece's count rounding its end's share of the rest, the
+ * last the rest. `total` is the weights' sum, above 0.
+ */
+function sharesOf(weights: ReadonlyArray<number>, total: number, steps: number): number[] {
+  const pieces = weights.length;
   const rest = steps - pieces;
   let spent = 0;
   let cumulative = 0;
-  return roots.map((root, p) => {
-    cumulative += root;
+  return weights.map((weight, p) => {
+    cumulative += weight;
     // floor(x + 0.5), as the WGSL rounds.
     const share = p + 1 < pieces ? Math.floor((rest * cumulative) / total + 0.5) : rest;
     const taken = 1 + share - spent;
@@ -524,7 +548,192 @@ export function marchPieces(
   const crowded =
     (crossingsBefore > 0 && before === null ? 1 : 0) +
     (crossingsAfter > 0 && after === null ? 1 : 0);
-  return { split, fromLowestM, crossingsBefore, before, after, crowded };
+  return {
+    split,
+    fromLowestM,
+    crossingsBefore,
+    before,
+    after,
+    crowded,
+    beforeTowardStart: null,
+    afterTowardStart: null,
+  };
+}
+
+/**
+ * The most green optical depth a piece's end is read at by {@link depthSharedPieces}, from it to the
+ * top: 64, under the 87.3 at which `f32`'s e^−τ leaves its normal range (2⁻¹²⁶), so that the
+ * kernel's −ln of the lookup's transmittance stays finite; light from beyond it is e^−64 of the
+ * source's. `rayMarch.wgsl`'s `MARCH_PIECE_DEPTH_CAP`.
+ */
+export const MARCH_PIECE_DEPTH_CAP = 64;
+
+/**
+ * The green optical depth, absorbers included, from the point `fromLowestM` from t* to the top, read
+ * back along the ray (`back`, on the side before t*) or on along it (on the side after it), as the
+ * ray march's count reads a depth (plan R08, R08.T16.a.2; `rayMarch.wgsl`'s `rayMarchDepthAlong`).
+ */
+export type PieceDepthAt = (fromLowestM: number, back: boolean) => number;
+
+/**
+ * The march's first source's light at the point `fromLowestM` from t*, in [0, 1]: its green
+ * transmittance there, absorbers included, 0 where the ground shadows it, 1 where no source is drawn
+ * (plan R08, R08.T16.a.2; `rayMarch.wgsl`'s `rayMarchPieceAt`).
+ */
+export type PieceLightAt = (fromLowestM: number) => number;
+
+/**
+ * The medium's green extinction at the point `fromLowestM` from t*, m⁻¹, at its h* as the march's
+ * steps read the medium (plan R08, R08.T16.a.2; `rayMarch.wgsl`'s `rayMarchPieceAt`).
+ */
+export type PieceExtinctionAt = (fromLowestM: number) => number;
+
+/**
+ * How much brighter a piece's other end must be than the end its placement is fine at before
+ * {@link depthSharedPieces} turns it there: 100. A thick deck under a low sun is brighter at its top
+ * than at its floor by some e^10 (`giant-deck`'s envelope at μ₀ cos 85°), and R05.T12.e's
+ * placement toward t* holds the troposphere's few-fold step between its ground and its top under
+ * the sun at the horizon, which R05.T12.e's gate measures (2.3–3.2% when turned).
+ */
+export const MARCH_PIECE_TURN = 100;
+
+/**
+ * What a shadowed piece's light counts for in {@link depthSharedPieces}' weights, against 1 for a
+ * piece the first source lights unattenuated: 0.01, so that a ray wholly in the night keeps its
+ * shares by depth, which its lit neighbours' approach as the light fails, with no step between.
+ */
+export const MARCH_PIECE_SHADE = 0.01;
+
+/**
+ * `pieces` with each side that is cut into pieces sharing its steps among them by the light each can
+ * return along the view, and each placed toward its brighter end (plan R08, R08.T16.a.2;
+ * `rayMarch.wgsl`'s `rayMarchDepthShares`).
+ *
+ * - **Shares**: one a piece, the rest in proportion to the weight ½ D_p ÷ ΣD + ½ √L_p ÷ Σ√L, each
+ *   piece's count rounding its end's share of the rest, the last the rest, so that the side keeps
+ *   its count. D_p = e^−c_p (1 − e^−τ_p) (ε + l̄_p) is the piece's lit drop in the side's view
+ *   transmittance from the side's start (the segment's start before t*, t* after it): τ_p its green
+ *   optical depth along the ray, the difference of `depthAt` at its ends, each held to
+ *   {@link MARCH_PIECE_DEPTH_CAP} (a value that is not a number reads the cap, as the kernel's
+ *   `select` reads it) and the difference to at least 0; c_p the side's τ before it; l̄_p the mean of
+ *   `lightAt` at its ends, ε {@link MARCH_PIECE_SHADE}. The other half is R08.T6.i's share by the
+ *   square root of each piece's length L_p.
+ * - **Placement**: each piece's steps placed quadratically as R05.T12.e places them, toward t* (or
+ *   toward the camera on a camera side), unless its other end's b = σ e^−c (ε + l) is more than
+ *   {@link MARCH_PIECE_TURN} times this end's, when they are placed toward the other: σ
+ *   `extinctionPerMAt` there, c the side's τ to it and l its light.
+ *
+ * A side not cut, or whose drops sum to 0, keeps R08.T6.i's shares and placement.
+ *
+ * @remarks
+ * R08.T6.i's shares by length, placed toward t*, gave the thin decks stacked above the hand
+ * Jupiter's envelope floor a few steps of a long ray, and its routed march at the high setting's 36
+ * read 12% (0°) and 24% (90°) dark in red against its march at 32 times them. The decks are sheets:
+ * its NH₃ deck's τ(550) of 1.2 lies within 2 km of its 178 km base, at the lower end of an 18 km
+ * piece that took 3 steps. Measured on the twin (2026-11-02):
+ *
+ * - by τ_p alone, the brief's lean, the hand Jupiter's disc read 0.92 and 0.85 in red, the nadir's
+ *   deep gas under the decks (τ 4 of its 5.6) took 19 of 36 steps, and `giant-deck`'s envelope disc
+ *   read 28% off at its edge;
+ * - by the unlit drop, half by length, the Jupiter read within 2.1% in every channel, but the slab
+ *   Earth's twilight disc (ground zenith 80°, the sun 5° under its horizon) missed R05.T12.e's 2%,
+ *   its steps in the troposphere's shadow, and a thick deck under a low sun (`giant-deck`'s envelope
+ *   at μ₀ cos 85°) took its fine steps at its floor, away from its lit top: lit, placed toward t*,
+ *   4.9% off;
+ * - lit, and turned toward each piece's brighter end, the slab Earth's grazing disc under a sun at
+ *   the horizon missed it (2.3–3.2%), its troposphere's fine steps turned from the ground;
+ * - lit, turned only toward an end 100 times the brighter, the measures of `marchSheets.test.ts`,
+ *   `thick/discBakeJupiter.test.ts`, `reference/envelopeMarch.test.ts` and `test/marchGate.ts`.
+ */
+export function depthSharedPieces(
+  pieces: MarchPieces,
+  depthAt: PieceDepthAt,
+  lightAt: PieceLightAt,
+  extinctionPerMAt: PieceExtinctionAt,
+): MarchPieces {
+  const { split, fromLowestM, crossingsBefore } = pieces;
+  const capped = (t: number, back: boolean): number => {
+    const depth = depthAt(t, back);
+    return depth < MARCH_PIECE_DEPTH_CAP ? depth : MARCH_PIECE_DEPTH_CAP;
+  };
+  const reshared = (
+    shares: ReadonlyArray<number> | null,
+    bounds: ReadonlyArray<number>,
+    back: boolean,
+    placedTowardStart: boolean,
+  ): { readonly shares: ReadonlyArray<number>; readonly towardStart: boolean[] } | null => {
+    if (shares === null) {
+      return null;
+    }
+    const drops: number[] = [];
+    const roots: number[] = [];
+    const brightness: number[] = [];
+    let dropTotal = 0;
+    let rootTotal = 0;
+    let before = 0;
+    let near = capped(bounds[0] ?? Number.NaN, back);
+    let nearLight = lightAt(bounds[0] ?? Number.NaN);
+    brightness.push(extinctionPerMAt(bounds[0] ?? Number.NaN) * (MARCH_PIECE_SHADE + nearLight));
+    for (let p = 0; p < shares.length; p += 1) {
+      const far = capped(bounds[p + 1] ?? Number.NaN, back);
+      const farLight = lightAt(bounds[p + 1] ?? Number.NaN);
+      const depth = Math.max(back ? far - near : near - far, 0);
+      const light = MARCH_PIECE_SHADE + 0.5 * (nearLight + farLight);
+      const drop = Math.exp(-before) * (1 - Math.exp(-depth)) * light;
+      const root = Math.sqrt((bounds[p + 1] ?? Number.NaN) - (bounds[p] ?? Number.NaN));
+      drops.push(drop);
+      roots.push(root);
+      dropTotal += drop;
+      rootTotal += root;
+      before += depth;
+      brightness.push(
+        extinctionPerMAt(bounds[p + 1] ?? Number.NaN) *
+          Math.exp(-before) *
+          (MARCH_PIECE_SHADE + farLight),
+      );
+      near = far;
+      nearLight = farLight;
+    }
+    if (!(dropTotal > 0)) {
+      return null;
+    }
+    let total = 0;
+    const weights = drops.map((drop, p) => {
+      const weight = (0.5 * drop) / dropTotal + (0.5 * (roots[p] ?? Number.NaN)) / rootTotal;
+      total += weight;
+      return weight;
+    });
+    const steps = shares.reduce((sum, n) => sum + n, 0);
+    return {
+      shares: sharesOf(weights, total, steps),
+      towardStart: shares.map((_, p) => {
+        const start = brightness[p] ?? Number.NaN;
+        const end = brightness[p + 1] ?? Number.NaN;
+        return placedTowardStart
+          ? !(end > MARCH_PIECE_TURN * start)
+          : start > MARCH_PIECE_TURN * end;
+      }),
+    };
+  };
+  const before = reshared(
+    pieces.before,
+    [-split.beforeM, ...fromLowestM.slice(0, crossingsBefore), 0],
+    true,
+    split.beforeTowardStart,
+  );
+  const after = reshared(
+    pieces.after,
+    [0, ...fromLowestM.slice(crossingsBefore), split.afterM],
+    false,
+    true,
+  );
+  return {
+    ...pieces,
+    before: before?.shares ?? pieces.before,
+    after: after?.shares ?? pieces.after,
+    beforeTowardStart: before?.towardStart ?? null,
+    afterTowardStart: after?.towardStart ?? null,
+  };
 }
 
 /**
@@ -542,13 +751,15 @@ export function marchPiecesSteps(pieces: MarchPieces): MarchStep[] {
     first: number,
     startM: number,
     endM: number,
-    towardLow: boolean,
+    towardStart: boolean,
+    placed: ReadonlyArray<boolean> | null,
   ): void => {
     const count = shares.length - 1;
     for (const [p, n] of shares.entries()) {
       const lowM = p === 0 ? startM : (fromLowestM[first + p - 1] ?? Number.NaN);
       const highM = p < count ? (fromLowestM[first + p] ?? Number.NaN) : endM;
       const unitM = (highM - lowM) / (n * n);
+      const towardLow = placed?.[p] ?? towardStart;
       for (let j = 0; j < n; j += 1) {
         const k = towardLow ? j : n - 1 - j;
         const fromLowest = towardLow
@@ -563,14 +774,14 @@ export function marchPiecesSteps(pieces: MarchPieces): MarchStep[] {
       steps.push(marchStep(split, i));
     }
   } else {
-    cut(pieces.before, 0, -split.beforeM, 0, split.beforeTowardStart);
+    cut(pieces.before, 0, -split.beforeM, 0, split.beforeTowardStart, pieces.beforeTowardStart);
   }
   if (pieces.after === null) {
     for (let i = split.stepsBefore; i < split.stepsBefore + split.stepsAfter; i += 1) {
       steps.push(marchStep(split, i));
     }
   } else {
-    cut(pieces.after, crossingsBefore, 0, split.afterM, true);
+    cut(pieces.after, crossingsBefore, 0, split.afterM, true, pieces.afterTowardStart);
   }
   return steps;
 }

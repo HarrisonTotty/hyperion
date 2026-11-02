@@ -22,7 +22,8 @@
 // past the table's light slots reads rho - rho_ss and G times the kernels' own transmittance in place
 // of beta rho and G_beta, and the last slot's D, as the thick read takes the last slot's J. Every
 // texel's fourth word is 0 but each layer's first texel's, 1 where the deck lies over an envelope's
-// floor (`deckFloorSplit`).
+// floor (`thick/deckRead.ts`'s DECK_FLOOR_WORD), which no kernel reads since R08.T16.a.2's shares by
+// the light each piece returns (`rayMarch.wgsl`'s rayMarchDepthShares).
 @group(0) @binding(25) var deckTable : texture_2d_array<u32>;
 
 const DECK_TABLE_MODES : u32 = 8u;
@@ -36,23 +37,6 @@ const DECK_CELL_SINGLE : u32 = 24u;
 const DECK_CELL_SINGLE_BEAM : u32 = 25u;
 const DECK_TABLE_WIDTH : u32 = 208u;
 const DECK_PHASE_ROW : u32 = 46u;
-// The floor's word of each layer's first texel: 1 over an envelope's floor, 0 over a surface's.
-const DECK_FLOOR_WORD : u32 = 3u;
-
-// The ray march's split of a segment that ends on the deck, `onFloor` (plan R08, R08.T16.a.2;
-// `thick/deckRead.ts`, "An envelope's floor"; `marchSteps.ts`'s towardCameraSplit): over an
-// envelope's floor the side before t* is stepped from the camera, as a camera side is, since the
-// tau(550) 10 above the floor puts the ray's light within its first optical depths; over a surface's
-// deck, R05.T12.e's placement as it was. The flag is uniform over the frame.
-fn deckFloorSplit(split : MarchSplit, onFloor : bool) -> MarchSplit {
-  var placed = split;
-  let envelope = textureLoad(deckTable, vec2u(0u, 0u), 0u, 0)[DECK_FLOOR_WORD] == 1u;
-  if (onFloor && envelope && split.beforeM > 0.0) {
-    placed.beforeTowardStart = true;
-  }
-  return placed;
-}
-
 // Texel (x, y) of `layer`: its three f32 values.
 fn deckTexel(layer : u32, x : u32, y : u32) -> vec3f {
   return bitcast<vec3f>(textureLoad(deckTable, vec2u(x, y), layer, 0).xyz);

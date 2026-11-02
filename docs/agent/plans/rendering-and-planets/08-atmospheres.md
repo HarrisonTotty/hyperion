@@ -6119,8 +6119,9 @@ Acceptance: `pnpm test`.
   _T16.a.1 built 2026-10-31_ (Risks, "Deviations in T16.a.1, as built"). _The volatile decks'
   optics, T16.a.2's blocker, built 2026-10-31_ (Risks, "The volatile decks' optics, as built").
   _T16.a.2 built 2026-11-01; its gate passes and its route is open over `giant-deck`'s envelope
-  range since its floor's march, 2026-11-01_ (Risks, "Deviations in T16.a.2, as built" and "The
-  envelope's disc edge, as built").
+  range since its floor's march, 2026-11-01; its march by piece depth built 2026-11-02_ (Risks,
+  "Deviations in T16.a.2, as built", "The envelope's disc edge, as built" and "The march by piece
+  depth, as built").
 
 - **R08.T16.b `DiscReflectanceTable`.** `discReflectance.ts` bakes it spectrally from the medium
   and tables, one layer a latitude band (Design note 17), reading R08.T14.f's thick table, the
@@ -24586,3 +24587,30 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     it is blended in (the same bits).
   - Left: the lever's cost, pending the owner's Mac run (`--composite-probe per-pixel` against
     none); SwiftShader times a shader's whole code whatever runs, so the pod cannot.
+- **The march by piece depth, as built** (R08.T16.a.2, 2026-11-02; lane `r08-t16a2-march-pieces`;
+  its figures in the lane's outbox). Renderer only; no generated value moves.
+  - _The rule_ (lean, 2026-11-02; `marchSteps.ts`'s `depthSharedPieces`, `rayMarch.wgsl`'s
+    `rayMarchDepthShares`): every ray-march segment but the warped sky's shares each cut side's
+    steps half by each piece's lit drop in the view's transmittance (the depths `rayMarchDepthAlong`
+    reads at the pieces' ends, the first source's light there) and half by R08.T6.i's √length.
+    Each piece keeps R05.T12.e's placement toward t* unless its other end is `MARCH_PIECE_TURN`
+    (100) times the brighter. Shares by τ alone, the brief's lean, measured short; not built.
+  - _Crossings_: on an oblate body each edge's crossing takes one Newton step onto its level h\* = e
+    (`rayMarchEdgeLevel`, `MARCH_EDGE_LEAST_RISE`); `MarchGeometry`'s `gravitySpheroid` gains
+    `gravity`.
+  - _The floor's lever is gone_: `deckFloorSplit`, `DECK_READ`'s split line, `towardCameraSplit`
+    and the twin's `towardCamera` (`rayPieces`, `piecedSteps`). `PackedDeckTable.floor` and
+    `DECK_FLOOR_WORD` stay packed and no kernel reads them.
+  - _The twin's API_: `piecedSteps(…, shares: MarchShareReads | null)`, `sphereShareReads`,
+    `MarchPieces.beforeTowardStart`/`afterTowardStart`. R05.T12.e's gate (`test/marchGate.ts`) and
+    `highLimbNight.test.ts` march the kernel's rule with them.
+  - _Re-recorded_: the slab Earth's march gate figures, `caseGate.json`'s slab values,
+    `vectorGate.json` (every tally's passes and misses held; values moved on the slab Earth,
+    `titan-class` and `giant-deck`'s envelope variants), the ray march kernels' digests, and
+    `discBakeJupiter.test.ts`'s step at the switch.
+  - _The haze gate's disc-p60/r_ (lean, 2026-11-02; a question to main): `HAZE_GATE_MISSES` 1.074,
+    its `HAZE_GATE_EXCEPTIONS` bound 1.05 → 1.08 by ruling (1)'s rounding. The routed march now
+    meets its own 16× within 0.03% there (0.24% under it before), so the miss is the bins' red
+    alone; at 1.05 the route would close.
+  - _Pending, the owner's RTX run_: the march's cost on edged media (two lookups and a medium read a
+    cut piece's end), the slab Earth's 10⁷ m x4 row among them.

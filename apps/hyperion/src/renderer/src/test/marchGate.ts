@@ -45,6 +45,7 @@ import {
   piecedSteps,
   type PlanetTwin,
   rayMarchSunReadOf,
+  sphereShareReads,
   tableSources,
   type TwinRay,
   type TwinRaySource,
@@ -146,7 +147,8 @@ const marchedAsSky = (ray: GateRay): boolean => kernelOf(ray) === "skyView" || s
  * camera), or even steps, each cut at the medium's layer edges as the kernels cut them; the gate's
  * lit ground through the ray's transmittance, each source's light on it. Under the kernel's rule the
  * bare ground's and the thin sky's count is scaled by its optical depth where the scheme gives a rule (R08.T8.e;
- * `gateMarchSamples`), read through the twin's own transmittance.
+ * `gateMarchSamples`), read through the twin's own transmittance, and since R08.T16.a.2 each cut
+ * side shares its steps by the light each piece returns, read through the same.
  *
  * Since R08.T8.e (lever 5, `decision-r08-t8-leans.md` §10 and §13, point 7) both schemes, `kernel`
  * and `even`, take the ray march's read of each source's light and the lit ground's, `slotSources`
@@ -160,6 +162,7 @@ function pixelOf(
   count: SourceCount,
 ) {
   const edges = mediumMarchEdgesM(medium);
+  const shares = sphereShareReads(medium, sources, GATE_SPHERE);
   return (ray: GateRay, placement: Placement, n: number, rule: MarchDepthSteps | null): Rgb3 => {
     const lights = lightsOf(ray, count);
     const read = placement === "placed" ? sources : slotSources;
@@ -184,6 +187,7 @@ function pixelOf(
           gateMarchSamples(ray, n, rule, edges.length, sources.sunTransmittance),
           edges,
           GATE_SPHERE,
+          shares,
         );
         break;
       case "even":

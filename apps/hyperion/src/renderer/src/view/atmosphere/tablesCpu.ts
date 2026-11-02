@@ -126,7 +126,9 @@ import {
   type ThickTableKind,
 } from "./thick/read";
 import {
+  depthSharedPieces,
   drawnSurfaceKind,
+  MARCH_EDGE_LEAST_RISE,
   type MarchDepthSteps,
   marchEdgesM,
   marchEvenStep,
@@ -141,7 +143,6 @@ import {
   marchStep,
   type MarchStep,
   skyWarpOf,
-  towardCameraSplit,
 } from "./marchSteps";
 import {
   ABSORBER_PRESSURE_FLOOR_PA,
@@ -2203,6 +2204,11 @@ export type MarchGeometry =
        */
       readonly equatorialShellScale: number;
       readonly polarShellScale: number;
+      /**
+       * The body's gravity, which gives s along the ray, or `null` where the ray march's crossings
+       * stay on the shells (plan R08, R08.T16.a.2; {@link crossingsFromLowestM}).
+       */
+      readonly gravity: BodyGravity | null;
     };
 
 /**
@@ -2306,7 +2312,10 @@ function quadricRootsM(o: Vec3, d: Vec3, a: number, c: number): readonly [number
  * each edge's sphere (`shellCrossingsM`, as `skyView.wgsl` and `multiScattering.wgsl` find them,
  * from the ray's height at its origin and zenith cosine there); on the datum spheroid, each edge
  * e's shell quadric, the spheroid (a + e, c + e), as `rayMarch.wgsl` finds them, and as it clips the
- * ray at the top's (a + H, c + H).
+ * ray at the top's (a + H, c + H). On an oblate body's shells through h\* with its gravity, each root
+ * then takes one Newton step onto the edge's level h\* = s h = e along the ray, t − (s h − e) ÷
+ * (s (d · n)) at its geodetic height h, normal n and s, where |s (d · n)| reaches
+ * {@link MARCH_EDGE_LEAST_RISE} (R08.T16.a.2; `rayMarch.wgsl`'s `rayMarchEdgeLevel`).
  */
 function crossingsFromLowestM(
   ray: TwinSegment,
@@ -2339,6 +2348,11 @@ function crossingsFromLowestM(
           a + edgeM * geometry.equatorialShellScale,
           c + edgeM * geometry.polarShellScale,
         );
+        const gravity = geometry.gravity;
+        if (roots !== null && gravity !== null) {
+          const level = (t: number): number => edgeLevelM(o, d, geometry.figure, gravity, edgeM, t);
+          roots = [level(roots[0]), level(roots[1])];
+        }
         break;
       }
     }
@@ -2350,6 +2364,26 @@ function crossingsFromLowestM(
 }
 
 /**
+ * A ray's crossing `tM` of an edge's shell taken onto the edge's level h\* = s h = `edgeM` by one
+ * Newton step along it (plan R08, R08.T16.a.2; {@link crossingsFromLowestM}), or kept where the ray
+ * rises or falls there at less than {@link MARCH_EDGE_LEAST_RISE} of s.
+ */
+function edgeLevelM(
+  o: Vec3,
+  d: Vec3,
+  figure: SpheroidFigure,
+  gravity: BodyGravity,
+  edgeM: number,
+  tM: number,
+): number {
+  const geodetic = geodeticOf(add(o, scale(d, tM)), figure);
+  const s = gravityRatio(gravity, geodetic.latitudeRad);
+  const n = geodetic.normal;
+  const rise = s * (d.x * n.x + d.y * n.y + d.z * n.z);
+  return Math.abs(rise) >= MARCH_EDGE_LEAST_RISE ? tM - (s * geodetic.heightM - edgeM) / rise : tM;
+}
+
+/**
  * A per-frame march's segment as the kernels cut it since R08.T6.i (plan R08;
  * `decision-r08-t6d-findings.md` §1): R05.T12.e's split ({@link placedSteps}'), each side cut into
  * pieces where the ray crosses one of `edgesM` (`marchSteps.ts`'s `marchPieces`), on the sphere or
@@ -2358,8 +2392,6 @@ function crossingsFromLowestM(
  *
  * @param samples - The steps, an integer of at least 2.
  * @param edgesM - The marches' layer edges, m ({@link mediumMarchEdgesM}).
- * @param towardCamera - Whether the side before t* is placed toward the camera, as the ray march
- *   places a segment onto an envelope's floor (`marchSteps.ts`'s `towardCameraSplit`, R08.T16.a.2).
  * @throws RangeError from `marchSplit` for fewer than 2 steps.
  */
 export function rayPieces(
@@ -2367,21 +2399,43 @@ export function rayPieces(
   samples: number,
   edgesM: ReadonlyArray<number>,
   geometry: MarchGeometry,
-  towardCamera = false,
 ): MarchPieces {
   const o = ray.originM;
   const d = ray.direction;
   const nearestM = -(o.x * d.x + o.y * d.y + o.z * d.z);
-  const placed = marchSplit(ray.tStartM, ray.tEndM, nearestM, samples, ray.fromCamera);
-  const split = towardCamera ? towardCameraSplit(placed) : placed;
+  const split = marchSplit(ray.tStartM, ray.tEndM, nearestM, samples, ray.fromCamera);
   return marchPieces(split, crossingsFromLowestM(ray, split.lowestM, edgesM, geometry));
+}
+
+/**
+ * A place's green optical depth, absorbers included, along a unit direction to the top, as the ray
+ * march's count reads it (`rayMarch.wgsl`'s `rayMarchDepthAlong`; R08.T8.e).
+ */
+export type DepthAlong = (placeM: Vec3, direction: Vec3) => number;
+
+/**
+ * What the ray march shares and places a cut side's steps by (plan R08, R08.T16.a.2;
+ * `marchSteps.ts`'s `depthSharedPieces`; `rayMarch.wgsl`'s `rayMarchPieceAt`): a place's green
+ * depth along a direction ({@link DepthAlong}) and the light from a unit direction at a place, its
+ * green transmittance, absorbers included, 0 where the ground shadows it, each through the count's
+ * read; and the medium's green extinction at a place, m⁻¹, at its height as the march's steps read
+ * the medium.
+ */
+export interface MarchShareReads {
+  readonly depthAlong: DepthAlong;
+  readonly lightAlong: DepthAlong;
+  readonly extinctionPerMAt: (placeM: Vec3) => number;
 }
 
 /**
  * A per-frame march's steps as the kernels place them since R08.T6.i: {@link rayPieces}' segment,
  * stepped piece by piece (`marchSteps.ts`'s `marchPiecesSteps`); the ray march's two-sided sky
  * segments, inside the air or outside it, under the sun-aware warp by their sun over the same pieces
- * (`marchEvenSteps`, R08.T8); with `towardCamera`, as {@link rayPieces} takes it.
+ * (`marchEvenSteps`, R08.T8). With `shares`, every other segment as the ray march shares its
+ * steps since R08.T16.a.2: each side cut into pieces by the light each piece can return along the
+ * view and placed toward each piece's far brighter end, its depths, the light of the ray's sun
+ * (its first source, as the sky's warp takes it) and the medium's extinction read at the pieces'
+ * ends (`marchSteps.ts`'s `depthSharedPieces`), the light 1 where the ray has no source.
  *
  * @throws RangeError as {@link rayPieces}, and for a two-sided sky segment given without its sun.
  */
@@ -2390,14 +2444,31 @@ export function piecedSteps(
   samples: number,
   edgesM: ReadonlyArray<number>,
   geometry: MarchGeometry,
-  towardCamera = false,
+  shares: MarchShareReads | null = null,
 ): MarchStep[] {
-  const pieces = rayPieces(ray, samples, edgesM, geometry, towardCamera);
+  const pieces = rayPieces(ray, samples, edgesM, geometry);
   const warp = skyWarpOfSegment(ray, pieces.split);
   if (warp !== null) {
     return marchEvenSteps(pieces.split, pieces.fromLowestM, warp);
   }
-  return marchPiecesSteps(pieces);
+  if (shares === null) {
+    return marchPiecesSteps(pieces);
+  }
+  const o = ray.originM;
+  const d = ray.direction;
+  const back = { x: -d.x, y: -d.y, z: -d.z };
+  const lowestM = pieces.split.lowestM;
+  // The march's first source, as the sky's warp takes it (`skyWarpOfSegment`).
+  const first = ray.sources?.length === 0 ? undefined : ray.sun;
+  const placeAt = (fromLowestM: number): Vec3 => add(o, scale(d, lowestM + fromLowestM));
+  return marchPiecesSteps(
+    depthSharedPieces(
+      pieces,
+      (fromLowestM, toward) => shares.depthAlong(placeAt(fromLowestM), toward ? back : d),
+      (fromLowestM) => (first === undefined ? 1 : shares.lightAlong(placeAt(fromLowestM), first)),
+      (fromLowestM) => shares.extinctionPerMAt(placeAt(fromLowestM)),
+    ),
+  );
 }
 
 /**
@@ -4112,11 +4183,18 @@ function rayMarchTexelInto(
   }
   const samples = marchSamplesOf(kind, depthG, context.samples, edgesM.length, depthSteps);
   const marcher = new Marcher(terms, pressureBarOf, reads, geometry, ray);
-  // A segment onto an envelope's floor is stepped from the camera (R08.T16.a.2), as
-  // `deckRead.wgsl`'s `deckFloorSplit` steps it.
-  const onFloor = datumHitM !== null && datumHitM <= ray.tEndM;
-  const towardCamera = onFloor && context.deck?.table.floor === "envelope";
-  for (const { tM, dtM } of piecedSteps(ray, samples, edgesM, geometry, towardCamera)) {
+  // Each side cut into pieces shares its steps by the light each piece can return (R08.T16.a.2),
+  // its depths and its first source's light read as the count reads its depth.
+  const local = new Float64Array(SAMPLE_FLOATS);
+  const shares: MarchShareReads = {
+    depthAlong,
+    lightAlong: (placeM, direction) => lightGOf(countReads, geometry, placeM, direction),
+    extinctionPerMAt: (placeM) => {
+      sampleInto(terms, pressureBarOf, null, marchHeightOf(reads, geometry, placeM), local);
+      return local[4] ?? Number.NaN;
+    },
+  };
+  for (const { tM, dtM } of piecedSteps(ray, samples, edgesM, geometry, shares)) {
     marcher.step(tM, dtM);
   }
   const luminance = marcher.luminance;
@@ -4271,9 +4349,87 @@ function lightDepthGOf(
 }
 
 /**
+ * The light green transmittance from a unit direction at a place as the ray march shares its steps
+ * by it (plan R08, R08.T16.a.2; `rayMarch.wgsl`'s `rayMarchPieceAt`): light slot 0's, absorbers
+ * included, 0 where the ground shadows it, through the sliced lookup from the place's own geodetic
+ * datum point on an oblate body, and on a sphere's tables at the place's height and cosine as the
+ * march's steps take them, its ground's shadow {@link Marcher}'s.
+ */
+function lightGOf(
+  reads: MarchReads,
+  geometry: MarchGeometry,
+  placeM: Vec3,
+  direction: Vec3,
+): number {
+  const out: TwinRgb = [0, 0, 0];
+  if (reads.kind === "oblate") {
+    const reader = reads.reader;
+    const bodyPlaceM = inBodyAxes(reads.frame, placeM, true);
+    const lit = reader.sunInto(
+      bodyPlaceM,
+      geodeticOf(bodyPlaceM, reader.figure),
+      inBodyAxes(reads.frame, direction, false),
+      0,
+      out,
+      [0, 0, 0],
+    );
+    return lit ? out[1] : 0;
+  }
+  return sphereLitG(reads.sources, geometry, placeM, direction);
+}
+
+/**
+ * A place's height as the ray march's steps read the medium at it ({@link Marcher}'s `step`): on an
+ * oblate body h\* = s h of its geodetic height, s at its latitude; on a sphere or the datum spheroid
+ * its height along the radius above it.
+ */
+function marchHeightOf(reads: MarchReads, geometry: MarchGeometry, placeM: Vec3): number {
+  if (reads.kind === "oblate") {
+    const reader = reads.reader;
+    const geodetic = geodeticOf(inBodyAxes(reads.frame, placeM, true), reader.figure);
+    return gravityRatio(reader.gravity, geodetic.latitudeRad) * geodetic.heightM;
+  }
+  const { x: px, y: py, z: pz } = placeM;
+  const rP = Math.sqrt(px * px + py * py + pz * pz);
+  let heightM: number;
+  switch (geometry.kind) {
+    case "sphere":
+      heightM = rP - geometry.bottomRadiusM;
+      break;
+    case "spheroid":
+    case "gravitySpheroid": {
+      const a2 = geometry.figure.equatorialRadiusM ** 2;
+      const c2 = geometry.figure.polarRadiusM ** 2;
+      heightM =
+        rP - 1 / Math.sqrt((px * px + py * py) / (rP * rP * a2) + (pz * pz) / (rP * rP * c2));
+      break;
+    }
+  }
+  return heightM;
+}
+
+/** {@link lightGOf} on a sphere's tables, its ground's shadow on the tables' sphere. */
+function sphereLitG(
+  sources: TwinSources,
+  geometry: MarchGeometry,
+  placeM: Vec3,
+  direction: Vec3,
+): number {
+  const out: TwinRgb = [0, 0, 0];
+  const { heightM, mu } = sphereLightInto(
+    sources.sunTransmittance,
+    geometry,
+    placeM,
+    direction,
+    out,
+  );
+  return groundShadows(sources.bottomRadiusM, heightM, mu) ? 0 : out[1];
+}
+
+/**
  * The transmittance into `out` from a place along a unit direction through a sphere's table read
  * (light slot 0), at the place's height and its cosine against the normal as the march's steps take
- * them on `geometry` ({@link Marcher}'s `step`).
+ * them on `geometry` ({@link Marcher}'s `step`), which it returns.
  */
 function sphereLightInto(
   transmittanceAt: TwinSources["sunTransmittance"],
@@ -4281,7 +4437,7 @@ function sphereLightInto(
   placeM: Vec3,
   direction: Vec3,
   out: TwinRgb,
-): void {
+): { readonly heightM: number; readonly mu: number } {
   const { x: px, y: py, z: pz } = placeM;
   const rP = Math.sqrt(px * px + py * py + pz * pz);
   let heightM: number;
@@ -4311,6 +4467,7 @@ function sphereLightInto(
     (direction.x * gx + direction.y * gy + direction.z * gz) /
     Math.sqrt(gx * gx + gy * gy + gz * gz);
   transmittanceAt(heightM, mu, out, 0);
+  return { heightM, mu };
 }
 
 /**
@@ -4420,6 +4577,35 @@ export function sphereSkyDepthG(
     sphereLightInto(transmittanceAt, geometry, placeM, direction, out);
     return -log(out[1]);
   }, ray);
+}
+
+/**
+ * What the ray march shares and places a cut side's steps by on a sphere's tables (plan R08,
+ * R08.T16.a.2; {@link MarchShareReads}), `sources` read at light slot 0, at each place's height and
+ * cosine on `geometry` as {@link rayMarchTexelTwin} takes them, and `medium` at its height:
+ * R05.T12.e's gate's march (`test/marchGate.ts`; {@link piecedSteps}).
+ */
+export function sphereShareReads(
+  medium: AtmosphereMedium,
+  sources: TwinSources,
+  geometry: MarchGeometry,
+): MarchShareReads {
+  const terms = termsOf(medium);
+  const pressureBarOf = pressureBarLookup(medium);
+  const local = new Float64Array(SAMPLE_FLOATS);
+  const reads: MarchReads = { kind: "sphere", sources };
+  return {
+    depthAlong: (placeM, direction) => {
+      const out: TwinRgb = [0, 0, 0];
+      sphereLightInto(sources.sunTransmittance, geometry, placeM, direction, out);
+      return -log(out[1]);
+    },
+    lightAlong: (placeM, direction) => sphereLitG(sources, geometry, placeM, direction),
+    extinctionPerMAt: (placeM) => {
+      sampleInto(terms, pressureBarOf, null, marchHeightOf(reads, geometry, placeM), local);
+      return local[4] ?? Number.NaN;
+    },
+  };
 }
 
 /**
@@ -6854,6 +7040,7 @@ function oblateRayMarchContext(
       figure: view.figure,
       equatorialShellScale,
       polarShellScale,
+      gravity: planet.body.gravity,
     },
     view,
     samples: Math.max(Math.floor(settings.rayMarchSamples), 2),

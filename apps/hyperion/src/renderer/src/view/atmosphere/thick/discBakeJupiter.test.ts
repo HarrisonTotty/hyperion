@@ -18,6 +18,7 @@ import {
   type DiscAirCase,
   fullPassTwins,
   type FullPassTwins,
+  type IntegratedRadiance,
   integratedRadianceAt,
 } from "../../../test/discAirCases";
 import { handJupiterDetail } from "../../../test/giantFixtures";
@@ -38,6 +39,9 @@ const SLOW = slowTests();
 
 /** The limit of each, ms: some ten times its run on a pod. */
 const LIMIT_MS = 1_800_000;
+
+/** The routed passes' converged march: sixteen times high's samples, on 60 radii and 16 azimuths. */
+const CONVERGED_COUNTS = { marchScale: 16, radii: 60, azimuths: 16 } as const;
 
 /** The hand Jupiter's upper medium over its deck, as a disc air case, its deck's bands baked. */
 function jupiterOverItsDeck(): DiscAirCase {
@@ -107,28 +111,52 @@ describe("the hand Jupiter's disc table over its deck (R08.T16.b.2, by hand)", (
     LIMIT_MS,
   );
 
+  /** The routed passes' march at sixteen times high's samples, on 60 radii and 16 azimuths. */
+  const convergedAt = new Map<number, IntegratedRadiance>();
+  const converged = (phaseDeg: number): IntegratedRadiance => {
+    const { jupiter: item, baked: table, twins: passes } = built();
+    let at = convergedAt.get(phaseDeg);
+    if (at === undefined) {
+      // Sixteen: within 0.2% of thirty-two times the samples in every channel at both phases.
+      at = integratedRadianceAt(item, table, passes, phaseDeg, CONVERGED_COUNTS);
+      convergedAt.set(phaseDeg, at);
+    }
+    return at;
+  };
+
   for (const phaseDeg of [0, 90]) {
     it.skipIf(!SLOW)(
       `agrees with the routed march to 5% from 10⁹ m at a phase of ${phaseDeg}°, converged at sixteen times the high setting's samples; the product's own counts as measured`,
       () => {
         const { jupiter: item, baked: table, twins: passes } = built();
-        // Sixteen, since the march steps a ray onto the floor from the camera (R08.T16.a.2): at
-        // eight its red reads 4–8% dark, at sixteen and thirty-two within 0.5% of each other.
-        const converged = integratedRadianceAt(item, table, passes, phaseDeg, {
-          marchScale: 16,
-          radii: 60,
-          azimuths: 16,
-        });
+        const marched = converged(phaseDeg);
         const product = integratedRadianceAt(item, table, passes, phaseDeg);
         for (const c of [0, 1, 2] as const) {
-          expect(Math.abs(converged.disc[c] / converged.routed[c] - 1)).toBeLessThan(0.05);
-          // At the high setting's 36 samples the march under-resolves the decks above the floor,
-          // its red 8–18% dark since it steps a ray onto the floor from the camera (15–27% before,
-          // R08.T16.a.2): pinned as measured (−2.4% to +29.6%, red at 90° the most), the step a
-          // routed giant would show at the switch (plan R08's records of T16.b.2 and T16.a.2).
+          expect(Math.abs(marched.disc[c] / marched.routed[c] - 1)).toBeLessThan(0.05);
+          // The step a routed giant would show at the switch, pinned as measured since the march
+          // shares a cut side's steps by the light each piece returns (R08.T16.a.2): −1.8% to
+          // +1.0%, red at 90° the most (−2.4% to +29.6% before; plan R08's records of T16.b.2).
           const step = product.disc[c] / product.routed[c] - 1;
           expect(step).toBeGreaterThan(-0.05);
-          expect(step).toBeLessThan(0.3);
+          expect(step).toBeLessThan(0.02);
+        }
+      },
+      LIMIT_MS,
+    );
+
+    it.skipIf(!SLOW)(
+      `marches its routed passes at the high setting's 36 samples within 5% of sixteen times them from 10⁹ m at a phase of ${phaseDeg}°, in every channel (R08.T16.a.2)`,
+      () => {
+        const { jupiter: item, baked: table, twins: passes } = built();
+        // On the converged march's own radii and azimuths. On R08.T6.i's shares by length its red
+        // read 12% (0°) and 24% (90°) dark; it reads within 1.0% in every channel at both.
+        const marched = integratedRadianceAt(item, table, passes, phaseDeg, {
+          radii: CONVERGED_COUNTS.radii,
+          azimuths: CONVERGED_COUNTS.azimuths,
+        });
+        const reference = converged(phaseDeg);
+        for (const c of [0, 1, 2] as const) {
+          expect(Math.abs(marched.routed[c] / reference.routed[c] - 1)).toBeLessThan(0.05);
         }
       },
       LIMIT_MS,

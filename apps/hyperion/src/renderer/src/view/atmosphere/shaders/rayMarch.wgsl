@@ -127,6 +127,19 @@
 // 3080 the tile cull's two dispatches cost 0.4-1.0 ms from 400 km and 1e7 m, and it is a cover of
 // its own, off. This module holds the march and declares its bindings; the entry points declare
 // the area's.
+//
+// Changes (plan R08, R08.T16.a.2): every segment but a two-sided sky segment's warped walk shares
+// each side's steps among its pieces by the light each can return along the view, half by its drop
+// in the view's transmittance lit by the first source and half by the square root of its length,
+// R08.T6.i's share, at the same count, and places each piece as R05.T12.e does unless its other end
+// is far the brighter (`rayMarchDepthShares`, `rayMarchWalkStep`; `marchSteps.ts`'s
+// depthSharedPieces): each piece's ends read once a ray, the depth `rayMarchDepthAlong` reads, the
+// source's light and the medium's extinction (`rayMarchPieceAt`). Each crossing of an edge's shell is
+// taken onto the edge's own level h* = e by a Newton step (`rayMarchEdgeLevel`). The sheet decks
+// stacked above a gas envelope's floor took a few steps of a long ray, their tau at their pieces'
+// ends, and the hand Jupiter's routed march at the high setting's 36 read 12-24% dark in red against
+// its own at 32 times them; it reads within 1% in every channel, and a segment onto an envelope's
+// floor keeps R05.T12.e's placement again.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -247,12 +260,68 @@ fn rayMarchStepOf(split : MarchSplit, i : u32, evenSky : bool, warp : f32) -> Ma
 
 // Step `i` of a segment cut at the medium's layer edges as the ray march steps it (R08.T8): a
 // two-sided sky segment's warped walk (made ready by `marchWalkEvenReady`, which holds its warp),
-// every other segment's R08.T6.i walk (`marchWalkReady`).
-fn rayMarchWalkStepOf(walk : ptr<function, MarchWalk>, i : u32, evenSky : bool) -> MarchStep {
+// every other segment's R08.T6.i walk (`marchWalkReady`), shared and placed since R08.T16.a.2 by the
+// light each piece returns (`rayMarchDepthShares`, `rayMarchWalkStep`).
+fn rayMarchWalkStepOf(
+  walk : ptr<function, MarchWalk>,
+  placement : ptr<function, RayMarchPlacement>,
+  i : u32,
+  evenSky : bool,
+) -> MarchStep {
   if (evenSky) {
     return marchWalkEvenStep(walk, i);
   }
-  return marchWalkStep(walk, i);
+  return rayMarchWalkStep(walk, placement, i);
+}
+
+// A place on the ray `fromLowestM` from the split's lowest point `lowestM`: its body-fixed position
+// and its ground quadric, about t* beyond h0 = a / 2 and from the camera within it, formed as a
+// step's are (`rayMarchStep`; plan R08, R08.T16.a.2).
+struct RayPlace {
+  p : vec3f,
+  quadricM2 : f32,
+}
+
+fn rayMarchPlaceAt(ray : MarchRay, lowestM : f32, fromLowestM : f32) -> RayPlace {
+  let tM = lowestM + fromLowestM;
+  let groundQ = ray.groundQ;
+  var bigQ : f32;
+  if (ray.far) {
+    let fromStar = fromLowestM + ray.lowestFromStar;
+    bigQ = groundQ.qa * fromStar * fromStar + ray.qStar;
+  } else {
+    bigQ = tM * (groundQ.qa * tM + 2.0 * groundQ.qb) + groundQ.qc;
+  }
+  return RayPlace(ray.origin + tM * ray.dir, bigQ);
+}
+
+// The least rise of h* along the ray, |s (d . n)|, at which a crossing is taken onto its edge's
+// level (plan R08, R08.T16.a.2; `marchSteps.ts`'s MARCH_EDGE_LEAST_RISE): a ray within about 3
+// degrees of the level there keeps its shell's root.
+const MARCH_EDGE_LEAST_RISE : f32 = 0.05;
+
+// A crossing `fromLowestM` from t_low of the shell of the march edge `edgeM`, taken onto the edge's
+// own level h* = s h = e by one Newton step along the ray (plan R08, R08.T16.a.2; `tablesCpu.ts`'s
+// edgeLevelM): fromLowestM - (s h - e) / (s (d . n)), at the place's height h on the datum, its
+// normal n there and s at its latitude, as a step reads them; kept where |s (d . n)| is under
+// MARCH_EDGE_LEAST_RISE. The shell stands at h* = e at the equator and the poles alone; between
+// them it stands off the level by up to about 1 km at 45 degrees on Jupiter's figure, as thick as a
+// sheet deck's tau above its base.
+fn rayMarchEdgeLevel(
+  ray : MarchRay,
+  body : OblateBody,
+  lowestM : f32,
+  fromLowestM : f32,
+  edgeM : f32,
+) -> f32 {
+  let place = rayMarchPlaceAt(ray, lowestM, fromLowestM);
+  let datum = datumPointOf(body, place.p, place.quadricM2);
+  let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
+  let rise = s * dot(ray.dir, datum.normal);
+  if (!(abs(rise) >= MARCH_EDGE_LEAST_RISE)) {
+    return fromLowestM;
+  }
+  return fromLowestM - (s * datum.heightM - edgeM) / rise;
 }
 
 // Adds to the walk where the ray crosses the shell of the march edge `edgeM` above the datum in h*
@@ -266,18 +335,22 @@ fn rayMarchWalkStepOf(walk : ptr<function, MarchWalk>, i : u32, evenSky : bool) 
 // it they stand about the quadric's own closest approach t*_e, at -/+ sqrt(disc) / qa with disc
 // from Lagrange's identity, t*_e taken from the ground's t* as t_o - t* is (`nearestFromStar`, with
 // k_e), so that each lies from t_low without a difference of large distances, as the steps do.
+// Since R08.T16.a.2 each is taken onto the edge's level (`rayMarchEdgeLevel`).
 fn marchWalkCrossShell(
   walk : ptr<function, MarchWalk>,
   ray : MarchRay,
+  body : OblateBody,
   nearestFromStar : f32,
   acrossZ : f32,
   edgeM : f32,
 ) {
+  let lowestM = (*walk).split.lowestM;
   let a = ray.a;
   let c = ray.c;
   let edgeA = edgeM * ray.equatorialShellScale;
   let edgeC = edgeM * ray.polarShellScale;
   let kE = (a + edgeA) / (c + edgeC);
+  var crossed : vec2f;
   if (ray.far) {
     let q = rayQuadric(ray.origin, ray.dir, kE, a + edgeA, 0.0, true);
     if (q.disc < 0.0) {
@@ -287,22 +360,21 @@ fn marchWalkCrossShell(
     let edgeNearestFromStar = (kE - 1.0) * (kE + 1.0) * ray.dir.z * acrossZ / q.qa;
     // t*_e from t_low: (t*_e - t_o) + (t_o - t*) - (t_low - t*).
     let centre = (nearestFromStar - edgeNearestFromStar) - ray.lowestFromStar;
-    marchWalkCross(walk, centre - halfChord);
-    marchWalkCross(walk, centre + halfChord);
-    return;
+    crossed = vec2f(centre - halfChord, centre + halfChord);
+  } else {
+    let k = a / c;
+    let kGap = (c * edgeA - a * edgeC) / (c * (c + edgeC));
+    let z2 = ray.origin.z * ray.origin.z;
+    let qc = (view.exact.x + kGap * (kE + k) * z2) - edgeA * (2.0 * a + edgeA);
+    let q = rayQuadric(ray.origin, ray.dir, kE, a + edgeA, qc, false);
+    if (q.disc < 0.0) {
+      return;
+    }
+    crossed = quadricHits(q) - vec2f(lowestM);
   }
-  let k = a / c;
-  let kGap = (c * edgeA - a * edgeC) / (c * (c + edgeC));
-  let z2 = ray.origin.z * ray.origin.z;
-  let qc = (view.exact.x + kGap * (kE + k) * z2) - edgeA * (2.0 * a + edgeA);
-  let q = rayQuadric(ray.origin, ray.dir, kE, a + edgeA, qc, false);
-  if (q.disc < 0.0) {
-    return;
+  for (var j = 0u; j < 2u; j++) {
+    marchWalkCross(walk, rayMarchEdgeLevel(ray, body, lowestM, crossed[j], edgeM));
   }
-  let hits = quadricHits(q);
-  let lowestM = (*walk).split.lowestM;
-  marchWalkCross(walk, hits.x - lowestM);
-  marchWalkCross(walk, hits.y - lowestM);
 }
 
 // The green optical depth, absorbers included, along the unit body-fixed `d` from the place `p` to
@@ -315,6 +387,303 @@ fn rayMarchDepthAlong(body : OblateBody, p : vec3f, bigQ : f32, d : vec3f) -> f3
   let local = sampleMediumAt(s * datum.heightM);
   let start = sampleStartOf(body, p, bigQ, datum.heightM, datum.normal, datum.normal, s, local);
   return -log(sourceLightAt(body, start, d, 0u).toSun.g);
+}
+
+// The most green optical depth a piece's end is read at, from it to the top (plan R08, R08.T16.a.2;
+// `marchSteps.ts`'s MARCH_PIECE_DEPTH_CAP): under the 87.3 at which f32's exp(-tau) leaves its
+// normal range, so that -log of the lookup's transmittance stays finite.
+const MARCH_PIECE_DEPTH_CAP : f32 = 64.0;
+
+// What the march shares and places a cut side's steps by at the place `fromLowestM` from the split's
+// lowest point `lowestM` (plan R08, R08.T16.a.2; `tablesCpu.ts`'s MarchShareReads), read from the
+// place's own datum point as a step reads it (`rayMarchStep`): x, the green optical depth from it to
+// the top along the unit `d` (`rayMarchDepthAlong`'s), held to MARCH_PIECE_DEPTH_CAP, a value that
+// is not a number reading the cap; y, the march's first source's light there, its green
+// transmittance under light slot 0's curves, 0 where the ground shadows it, 1 where no source is
+// drawn; z, the medium's green extinction at its h*, m^-1. The two lookups share one call site, so
+// that the kernel inlines it once: SwiftShader's LLVM refused the ray march with a second
+// ("Local variable exceeds stack size limit").
+fn rayMarchPieceAt(
+  ray : MarchRay,
+  body : OblateBody,
+  lowestM : f32,
+  fromLowestM : f32,
+  d : vec3f,
+) -> vec3f {
+  let place = rayMarchPlaceAt(ray, lowestM, fromLowestM);
+  let datum = datumPointOf(body, place.p, place.quadricM2);
+  let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
+  let local = sampleMediumAt(s * datum.heightM);
+  let start = sampleStartOf(
+    body, place.p, place.quadricM2, datum.heightM, datum.normal, datum.normal, s, local
+  );
+  // The view's depth, then the first source's light where one is drawn.
+  var looked = vec2f(0.0, 1.0);
+  let lookups = select(1u, 2u, viewSourceCount() > 0u);
+  for (var k = 0u; k < lookups; k++) {
+    let light = sourceLightAt(body, start, select(d, view.sources[0].direction.xyz, k == 1u), 0u);
+    if (k == 0u) {
+      looked.x = -log(light.toSun.g);
+    } else {
+      looked.y = light.lit * light.toSun.g;
+    }
+  }
+  let depth = select(MARCH_PIECE_DEPTH_CAP, looked.x, looked.x < MARCH_PIECE_DEPTH_CAP);
+  return vec3f(depth, looked.y, local.extinction.g);
+}
+
+// How much brighter a piece's other end must be than the end its placement is fine at before it is
+// turned there (`marchSteps.ts`'s MARCH_PIECE_TURN), and what a shadowed piece's light counts for
+// (MARCH_PIECE_SHADE).
+const MARCH_PIECE_TURN : f32 = 100.0;
+const MARCH_PIECE_SHADE : f32 = 0.01;
+
+// `steps` among `pieces` pieces by the weights in shares[at + p], `total` their sum, above 0, each
+// piece's into shares[at + p] (plan R08, R08.T16.a.2; `marchSteps.ts`'s sharesOf): one a piece, and
+// the rest by the weights, rounded at each piece's end, the last the rest, as `common.wgsl`'s
+// marchSideShares shares by root length.
+fn marchSharesOf(walk : ptr<function, MarchWalk>, at : u32, pieces : u32, steps : u32, total : f32) {
+  let rest = steps - pieces;
+  var spent = 0u;
+  var cumulative = 0.0;
+  for (var p = 0u; p < pieces; p++) {
+    cumulative += (*walk).shares[at + p];
+    var share = rest;
+    if (p + 1u < pieces) {
+      share = u32(floor(f32(rest) * cumulative / total + 0.5));
+    }
+    (*walk).shares[at + p] = f32(1u + share - spent);
+    spent = share;
+  }
+}
+
+// One side of a walk made ready (`marchWalkReady`) that is cut into pieces, its `pieces` pieces'
+// shares at shares[at + p], from `startM` to `endM` from t* through the crossings from `first`, its
+// depths read back along the ray (`back`, the side before t*) or on along it: shares its `steps`
+// by the light each piece can return along the view and places each toward its far brighter end
+// (plan R08, R08.T16.a.2; `marchSteps.ts`'s depthSharedPieces). Each piece's weight is
+// 1/2 D_p / sum D + 1/2 sqrt(L_p) / sum sqrt(L), D_p = exp(-c_p) (1 - exp(-tau_p)) (eps + l_p) its
+// lit drop in the side's view transmittance from the side's start, tau_p the difference of the
+// depths at its ends, at least 0, c_p the side's tau before it, l_p the mean of its ends' light, eps
+// MARCH_PIECE_SHADE, L_p its length; one a piece and the rest by the weights, rounded at each
+// piece's end (`marchSharesOf`). Each piece is placed as R05.T12.e places it, `towardStart` (toward
+// its end nearer the segment's start) or not, unless its other end's b = sigma exp(-c) (eps + l) is
+// more than MARCH_PIECE_TURN times this end's, each into `placement`'s bit of its shares' index.
+// False where the drops sum to 0, its shares then the drops.
+fn rayMarchSideByDepth(
+  walk : ptr<function, MarchWalk>,
+  placement : ptr<function, RayMarchPlacement>,
+  ray : MarchRay,
+  body : OblateBody,
+  first : u32,
+  pieces : u32,
+  startM : f32,
+  endM : f32,
+  steps : u32,
+  at : u32,
+  back : bool,
+  towardStart : bool,
+) -> bool {
+  let lowestM = (*walk).split.lowestM;
+  let d = select(ray.dir, -ray.dir, back);
+  var dropTotal = 0.0;
+  var rootTotal = 0.0;
+  var before = 0.0;
+  var near = 0.0;
+  var nearLight = 0.0;
+  var nearBright = 0.0;
+  var pieceStartM = startM;
+  // The side's start, then each piece's end, one read a pass (one call site, as rayMarchPieceAt's).
+  for (var q = 0u; q <= pieces; q++) {
+    var pieceEndM = endM;
+    if (q == 0u) {
+      pieceEndM = startM;
+    } else if (q < pieces) {
+      pieceEndM = (*walk).fromLowestM[first + q - 1u];
+    }
+    let end = rayMarchPieceAt(ray, body, lowestM, pieceEndM, d);
+    if (q == 0u) {
+      near = end.x;
+      nearLight = end.y;
+      nearBright = end.z * (MARCH_PIECE_SHADE + end.y);
+      continue;
+    }
+    let p = q - 1u;
+    let depth = max(select(near - end.x, end.x - near, back), 0.0);
+    let drop = exp(-before) * (1.0 - exp(-depth)) * (MARCH_PIECE_SHADE + 0.5 * (nearLight + end.y));
+    (*walk).shares[at + p] = drop;
+    dropTotal += drop;
+    rootTotal += sqrt(pieceEndM - pieceStartM);
+    before += depth;
+    let farBright = end.z * exp(-before) * (MARCH_PIECE_SHADE + end.y);
+    var toward = towardStart;
+    if (towardStart) {
+      toward = !(farBright > MARCH_PIECE_TURN * nearBright);
+    } else {
+      toward = nearBright > MARCH_PIECE_TURN * farBright;
+    }
+    let bit = 1u << ((at + p) % 32u);
+    let word = (at + p) / 32u;
+    if (toward) {
+      (*placement).towardStart[word] |= bit;
+    } else {
+      (*placement).towardStart[word] &= ~bit;
+    }
+    near = end.x;
+    nearLight = end.y;
+    nearBright = farBright;
+    pieceStartM = pieceEndM;
+  }
+  if (!(dropTotal > 0.0)) {
+    return false;
+  }
+  var total = 0.0;
+  pieceStartM = startM;
+  for (var p = 0u; p < pieces; p++) {
+    var pieceEndM = endM;
+    if (p + 1u < pieces) {
+      pieceEndM = (*walk).fromLowestM[first + p];
+    }
+    let weight = 0.5 * (*walk).shares[at + p] / dropTotal
+      + 0.5 * sqrt(pieceEndM - pieceStartM) / rootTotal;
+    (*walk).shares[at + p] = weight;
+    total += weight;
+    pieceStartM = pieceEndM;
+  }
+  marchSharesOf(walk, at, pieces, steps, total);
+  return true;
+}
+
+// Each piece's placement of the ray march's walk (plan R08, R08.T16.a.2): bit k % 32 of word k / 32
+// set where the walk's piece k (its shares' index) is placed toward its end nearer the segment's
+// start, and whether each side's pieces take these (`rayMarchDepthShares`) or the walk's own,
+// R05.T12.e's.
+struct RayMarchPlacement {
+  towardStart : vec2u,
+  ownBefore : bool,
+  ownAfter : bool,
+}
+
+// Each side of a walk made ready (`marchWalkReady`) that is cut into pieces shares its steps among
+// them by the light each can return along the view and places each toward its far brighter end
+// (`rayMarchSideByDepth`; plan R08, R08.T16.a.2), at the side's count; a side whose drops sum to 0
+// keeps R08.T6.i's shares, made again, and the walk's placement. The walk's first piece is entered
+// again. `marchSteps.ts`'s depthSharedPieces is its twin.
+fn rayMarchDepthShares(
+  walk : ptr<function, MarchWalk>,
+  placement : ptr<function, RayMarchPlacement>,
+  ray : MarchRay,
+  body : OblateBody,
+) {
+  let split = (*walk).split;
+  let before = (*walk).crossingsBefore;
+  let crossings = (*walk).crossings;
+  (*placement).towardStart = vec2u(0u);
+  (*placement).ownBefore = false;
+  (*placement).ownAfter = false;
+  // The side before t*, then the side after it, through one call site each.
+  for (var side = 0u; side < 2u; side++) {
+    let back = side == 0u;
+    if (!select((*walk).piecedAfter, (*walk).piecedBefore, back)) {
+      continue;
+    }
+    var first = 0u;
+    var count = before;
+    var startM = -split.beforeM;
+    var endM = 0.0;
+    var steps = split.stepsBefore;
+    var at = 0u;
+    var towardStart = split.beforeTowardStart;
+    if (!back) {
+      first = before;
+      count = crossings - before;
+      startM = 0.0;
+      endM = split.afterM;
+      steps = split.stepsAfter;
+      at = (*walk).firstAfter;
+      towardStart = true;
+    }
+    let own = rayMarchSideByDepth(
+      walk, placement, ray, body, first, count + 1u, startM, endM, steps, at, back, towardStart
+    );
+    if (back) {
+      (*placement).ownBefore = own;
+    } else {
+      (*placement).ownAfter = own;
+    }
+    if (!own) {
+      marchSideShares(walk, first, count, startM, endM, steps, at);
+    }
+  }
+  (*walk).piece = 0u;
+  (*walk).taken = 0u;
+  if ((*walk).piecedBefore) {
+    rayMarchWalkEnter(walk, placement, 0u, true);
+  }
+}
+
+// Enters piece `piece` of the ray march's walk on the side before t* or after it, as `common.wgsl`'s
+// marchWalkEnter enters it, then places it as `placement` holds where its side takes its own: its
+// anchor its end nearer the segment's start, lowM, or its other, highM, each taken as
+// marchWalkEnter takes them (plan R08, R08.T16.a.2).
+fn rayMarchWalkEnter(
+  walk : ptr<function, MarchWalk>,
+  placement : ptr<function, RayMarchPlacement>,
+  piece : u32,
+  before : bool,
+) {
+  marchWalkEnter(walk, piece, before);
+  if (!select((*placement).ownAfter, (*placement).ownBefore, before)) {
+    return;
+  }
+  let toward = (((*placement).towardStart[piece / 32u] >> (piece % 32u)) & 1u) == 1u;
+  if (toward == (*walk).towardLow) {
+    return;
+  }
+  let split = (*walk).split;
+  var lowM : f32;
+  var highM : f32;
+  if (before) {
+    lowM = -split.beforeM;
+    if (piece > 0u) {
+      lowM = (*walk).fromLowestM[piece - 1u];
+    }
+    highM = 0.0;
+    if (piece < (*walk).crossingsBefore) {
+      highM = (*walk).fromLowestM[piece];
+    }
+  } else {
+    let at = (*walk).crossingsBefore + piece - (*walk).firstAfter;
+    lowM = 0.0;
+    if (at > (*walk).crossingsBefore) {
+      lowM = (*walk).fromLowestM[at - 1u];
+    }
+    highM = split.afterM;
+    if (at < (*walk).crossings) {
+      highM = (*walk).fromLowestM[at];
+    }
+  }
+  (*walk).towardLow = toward;
+  (*walk).anchorM = select(highM, lowM, toward);
+}
+
+// Step `i` of the ray march's walk cut at its layer edges, the steps taken in order from 0
+// (plan R08, R08.T16.a.2): `common.wgsl`'s marchWalkStep, each piece of a side that takes its own
+// placement entered by `rayMarchWalkEnter` as the walk reaches it.
+fn rayMarchWalkStep(
+  walk : ptr<function, MarchWalk>,
+  placement : ptr<function, RayMarchPlacement>,
+  i : u32,
+) -> MarchStep {
+  let before = i < (*walk).split.stepsBefore;
+  if ((before && (*placement).ownBefore) || (!before && (*placement).ownAfter)) {
+    if (!before && (*walk).piece < (*walk).firstAfter) {
+      rayMarchWalkEnter(walk, placement, (*walk).firstAfter, false);
+    } else if (f32((*walk).taken) >= (*walk).pieceSteps) {
+      rayMarchWalkEnter(walk, placement, (*walk).piece + 1u, before);
+    }
+  }
+  return marchWalkStep(walk, i);
 }
 
 // The ray march's count for one ray (plan R08, R08.T8.e, lever 3 of `decision-r08-t8-leans.md`
@@ -484,17 +853,19 @@ fn marchRay(uv : vec2f, depth : f32) -> vec4f {
   } else {
     var walk : MarchWalk;
     marchWalkStart(&walk, split);
+    var placement = RayMarchPlacement(vec2u(0u), false, false);
     for (var e = 0u; e < edgeCount; e++) {
       let edgeM = layerEdges.middles[e / 4u][e % 4u];
-      marchWalkCrossShell(&walk, ray, nearestFromStar, acrossZ, edgeM);
+      marchWalkCrossShell(&walk, ray, body, nearestFromStar, acrossZ, edgeM);
     }
     if (evenSky) {
       marchWalkEvenReady(&walk, warp);
     } else {
       marchWalkReady(&walk);
+      rayMarchDepthShares(&walk, &placement, ray, body);
     }
     for (var i = 0u; i < samples; i++) {
-      rayMarchStep(&march, ray, body, rayMarchWalkStepOf(&walk, i, evenSky), lobes);
+      rayMarchStep(&march, ray, body, rayMarchWalkStepOf(&walk, &placement, i, evenSky), lobes);
     }
   }
   var luminance = march.luminance;

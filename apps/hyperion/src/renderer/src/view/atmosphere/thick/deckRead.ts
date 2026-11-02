@@ -63,21 +63,18 @@
  *
  * **An envelope's floor** (R08.T16.a.2; {@link PackedDeckTable.floor}). Above an envelope's floor
  * lies τ(550) 10 of the upper medium by its rule (`regime.ts`'s `envelopeFloorM`), so a ray from
- * above onto the floor gathers its light within the first optical depth or two of its own path,
- * the cloud tops a low sun lights. R05.T12.e's placement steps its segment toward its lowest point,
- * the floor, and leaves its coarsest steps where the light lies: on `giant-deck` split at its
- * envelope floor, the NH₃ deck's τ 10 above the floor took seven of the march's 36 steps, the first
- * 10.1 km and τ(544) 1.9 deep, and the march read the disc at μ₀ cos 85° in red at 0.855 of the
- * reference, 0.938 at 64 times the steps (scratch probe, pod, 16 vCPU, 2026-11-01). So the ray
- * march over an envelope's floor steps the side of such a ray before its lowest point from the
- * camera (`marchSteps.ts`'s `towardCameraSplit`, the camera side's placement; `deckRead.wgsl`'s
- * `deckFloorSplit`): at the setting's count it reads that disc at 0.931, within 0.8% of its march
- * at 16 times the steps at every disc and limb view of the case (`reference/envelopeMarch.test.ts`),
- * where the floor's placement missed by 8.9%. Over the hand Jupiter's stacked decks it takes the
- * routed march's red at the setting's count from 17–31% under its converged value to 12–24%
- * (phases 0° and 90° from 10⁹ m); that march converges only at 16 times the steps
- * (`thick/discBakeJupiter.test.ts`). A deck over a surface keeps R05.T12.e's placement, its upper
- * medium the air above the deck's top.
+ * above onto the floor gathers its light within the first optical depth or two of its own path. On
+ * R08.T6.i's shares by length, R05.T12.e's placement toward the floor left its coarsest steps there
+ * (`giant-deck` split at its envelope floor: its NH₃ deck's τ 10 took 7 of the march's 36 steps,
+ * the first τ(544) 1.9 deep, and the disc at μ₀ cos 85° read 8.9% under its march at 16 times the
+ * steps), and the march stepped such a ray from the camera for a while (2026-11-01). Since the
+ * march shares a side's steps by the light each piece returns (`marchSteps.ts`'s
+ * `depthSharedPieces`, `rayMarch.wgsl`'s `rayMarchDepthShares`), every floor keeps R05.T12.e's
+ * placement: the case's disc and limb views read within 0.91% of that march
+ * (`reference/envelopeMarch.test.ts`), and the hand Jupiter's routed march within 5% of its own at
+ * 16 times the steps (`thick/discBakeJupiter.test.ts`), whose sheet decks lie at their pieces'
+ * lower ends, where the camera's placement leaves its coarsest steps. The floor's word stays
+ * packed and no kernel reads it.
  *
  * **Below the deck** (R08.T15.b.2; {@link packBelowDeckTable}). Under a deck over a surface the
  * kernels read `deck.ts`'s `BelowDeckTable`, the whole column's plane-parallel field at the deck's
@@ -197,7 +194,8 @@ export interface PackedDeckTable {
   readonly diffuseModes: number;
   /**
    * The split's floor (`deck.ts`'s `DeckTables.floor`), held in every layer's
-   * {@link DECK_FLOOR_WORD}: an envelope's, whose rays onto it the ray march steps from the camera.
+   * {@link DECK_FLOOR_WORD}: an envelope's or a surface's, which no kernel reads since R08.T16.a.2
+   * (the module's remarks, "An envelope's floor").
    */
   readonly floor: DeckFloor;
   /** Four words a texel, row-major in each layer, layer after layer. */

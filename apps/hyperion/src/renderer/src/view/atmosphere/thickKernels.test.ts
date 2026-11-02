@@ -100,32 +100,35 @@ function digestOf(pair: KernelPair): string {
 
 /**
  * The thin kernels' sources as they stood before R08.T14.c (e8b5c6f3), by digest: the thick read
- * is made beside them, and leaves each to the byte (main's ruling on the variants, 2026-10-27).
+ * is made beside them, and leaves each to the byte (main's ruling on the variants, 2026-10-27). The
+ * ray march's are R08.T16.a.2's, whose shares by the light each piece returns and crossings on their
+ * edges' levels moved `rayMarch.wgsl` (2026-11-02).
  */
 const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
   [SKY_VIEW_KERNEL, "3041f0a7e55328c4"],
   [AERIAL_PERSPECTIVE_KERNEL, "21a417584d1b1791"],
-  [RAY_MARCH_KERNEL, "9bf89a1fa995e8a3"],
-  [RAY_MARCH_SLOTS_KERNEL, "25c2ee4c4dd2e21f"],
-  [RAY_MARCH_CENTRE_KERNEL, "403cb2484fb9ab4f"],
-  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "aa25911b102bb013"],
-  [RAY_MARCH_SPECIAL_KERNEL, "6138c6f9bc1f0b73"],
-  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "e6d546ee780e86af"],
+  [RAY_MARCH_KERNEL, "c2fa3ed66807646f"],
+  [RAY_MARCH_SLOTS_KERNEL, "3d60cca41e4fb8cb"],
+  [RAY_MARCH_CENTRE_KERNEL, "357cec9cbe848003"],
+  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "f3debd004e4681c7"],
+  [RAY_MARCH_SPECIAL_KERNEL, "6b33ee6bc9e56cfd"],
+  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "338a26c381659631"],
   [RAY_MARCH_FILL_KERNEL, "c4ece515222b45bc"],
 ];
 
 /**
  * The thick kernels' sources by digest, as R08.T14.d.4's thick read made them (they stood before
- * R08.T15.a.2 at 1e949d8e, and that read moved them): the deck read is made beside them, and leaves
- * each to the byte, so that a body with no deck draws as before.
+ * R08.T15.a.2 at 1e949d8e, and that read moved them), the ray march's as R08.T16.a.2's march moved
+ * them: the deck read is made beside them, and leaves each to the byte, so that a body with no deck
+ * draws as before.
  */
 const THICK_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
   [SKY_VIEW_THICK_KERNEL, "8d9564b785fc26f6"],
   [AERIAL_PERSPECTIVE_THICK_KERNEL, "12be428ef12a5a5"],
-  [RAY_MARCH_THICK_KERNEL, "68e7d61da49a840f"],
-  [RAY_MARCH_SLOTS_THICK_KERNEL, "ad23b833c968de3d"],
-  [RAY_MARCH_THICK_SPECIAL_KERNEL, "2e46a5ebcb4a7ebf"],
-  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "16f56a67b8dd79ad"],
+  [RAY_MARCH_THICK_KERNEL, "7facd9d043f44003"],
+  [RAY_MARCH_SLOTS_THICK_KERNEL, "204a8ec5a70a5eb1"],
+  [RAY_MARCH_THICK_SPECIAL_KERNEL, "77586ff70557ff49"],
+  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "a274d6ed7208326b"],
 ];
 
 /** Each thick kernel beside the thin one it is made from. */
@@ -275,10 +278,6 @@ const GROUND_LIGHT = "luminance += viewThroughputOf(&march, slot) * source.weigh
 const DECK_GROUND_LIGHT = "luminance += viewThroughputOf(&march, slot) * source.weight.rgb";
 const ALBEDO = "* max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW;";
 const DECK = "* deckGroundAt(body, s, datum.normal, dir, source.direction.xyz, slot, toSun);";
-const SPLIT =
-  "let split = marchSplit(tStart, tEnd, nearest, samples, shell.x <= 0.0 && depth > 0.0);";
-const FLOOR_SPLIT =
-  "let split = deckFloorSplit(marchSplit(tStart, tEnd, nearest, samples, shell.x <= 0.0 && depth > 0.0), hitsGround && ground.x <= tEnd);";
 
 describe("the deck read's kernels (R08.T15.a.2)", () => {
   it.each(THICK_DIGESTS.map(([pair, digest]) => [pair.name, pair, digest] as const))(
@@ -292,14 +291,13 @@ describe("the deck read's kernels (R08.T15.a.2)", () => {
     ["the ray march", RAY_MARCH_THICK_KERNEL, RAY_MARCH_DECK_KERNEL],
     ["the ray march by slot", RAY_MARCH_SLOTS_THICK_KERNEL, RAY_MARCH_SLOTS_DECK_KERNEL],
   ] as const)(
-    "makes %s's deck form from its thick one, differing only at the bare ground's light and the split onto it, with the read appended",
+    "makes %s's deck form from its thick one, differing only at the bare ground's light, with the read appended",
     (_name, thick, deck) => {
       expect(deck.name).toBe(`${thick.name}, over a deck`);
       const appended = `\n${deckReadWgsl}`;
       expect(deck.reference.endsWith(appended)).toBe(true);
       const head = deck.reference.slice(0, -appended.length);
       expect(linesDiffering(thick.reference, head)).toEqual([
-        [SPLIT, FLOOR_SPLIT],
         [GROUND_LIGHT, DECK_GROUND_LIGHT],
         [ALBEDO, DECK],
       ]);
