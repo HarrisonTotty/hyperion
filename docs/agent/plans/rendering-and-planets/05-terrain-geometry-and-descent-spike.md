@@ -8303,4 +8303,6 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
   spike still selects at its canvas's device px.
 - **The smoke waits for its first worker bake (2026-11-02; lane fix-spike-smoke).** A smoke's 10 s
   of script run from its first worker bake; one with none by `smokeBakeLimitS` (60 s on a GPU,
-  300 s in the software mode) fails there. Its log says how long it flew and shows its geometry block.
+  300 s in the software mode) fails there. Its log says how long it flew and shows its geometry block,
+  or, where no segment drew a patch, the settings and "No segment sampled drawn terrain"
+  (`geometrySmokeLines`): TEST MOON's surveyed cells come into view only below about 275 km.

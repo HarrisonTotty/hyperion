@@ -198,8 +198,8 @@ function cell(figures: SpikeCountFigures | null): string {
   return figures === null ? "—" : `${whole(figures.p50)} (${whole(figures.max)})`;
 }
 
-/** The summary's "Geometry" section of `geometry` (plan R14, R14.T1.f). */
-export function geometrySummaryLines(geometry: SpikeGeometryReport): string[] {
+/** How the pass drew its geometry, in the summary's words, its levers in their order. */
+function settingsWords(settings: SpikeGeometryReport["settings"]): string {
   const {
     clusterPath,
     casterDepthCull,
@@ -210,12 +210,17 @@ export function geometrySummaryLines(geometry: SpikeGeometryReport): string[] {
     figureClusters,
     hullClusters,
     wireClusters,
-  } = geometry.settings;
+  } = settings;
+  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}`;
+}
+
+/** The summary's "Geometry" section of `geometry` (plan R14, R14.T1.f). */
+export function geometrySummaryLines(geometry: SpikeGeometryReport): string[] {
   return [
     "",
     "## Geometry (plan R14)",
     "",
-    `The main view's lit pass a frame by segment, median (largest): cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}.`,
+    `The main view's lit pass a frame by segment, median (largest): ${settingsWords(geometry.settings)}.`,
     "",
     `| Segment | ${COUNTS.map((name) => COUNT_HEADS[name]).join(" | ")} |`,
     `| ${["---", ...COUNTS.map(() => "---")].join(" | ")} |`,
@@ -223,5 +228,38 @@ export function geometrySummaryLines(geometry: SpikeGeometryReport): string[] {
       (segment) =>
         `| ${segment.segment} | ${COUNTS.map((name) => cell(segment[name])).join(" | ")} |`,
     ),
+  ];
+}
+
+/** Whether a frame of `segment` drew a terrain patch. */
+function drewTerrain(segment: SpikeGeometrySegment): boolean {
+  return (segment.interiorPatches?.max ?? 0) + (segment.edgePatches?.max ?? 0) > 0;
+}
+
+/**
+ * A smoke's log of its `geometry` block (R05.T18; plan R14, R14.T1.f), which it writes in no file:
+ * the summary's section where a segment sampled drawn terrain; where none did, the settings and
+ * that no segment sampled drawn terrain, with the frames each segment had, rather than a table of
+ * zeros that no draw measured.
+ *
+ * @remarks
+ * A smoke over TEST MOON on SwiftShader ends 85 to 95 s into its script, early in the descent arc,
+ * where its lit pass selects no patch: the pass is made at about 82 s, once its photorealistic
+ * pipelines are, and selects patches from about 275 km up, 416 s into the script, where the
+ * fixture's surveyed cells come into view; its ground elsewhere is bare, never drawn (R10 Design
+ * note 12; pod, 2026-11-02).
+ */
+export function geometrySmokeLines(geometry: SpikeGeometryReport): string[] {
+  if (geometry.segments.some(drewTerrain)) {
+    return geometrySummaryLines(geometry).filter((line) => line.length > 0);
+  }
+  const sampled = geometry.segments.flatMap(({ segment, interiorPatches }) =>
+    interiorPatches === null ? [] : [`${segment} ${whole(interiorPatches.frames)}`],
+  );
+  return [
+    `Geometry (plan R14): ${settingsWords(geometry.settings)}.`,
+    sampled.length === 0
+      ? "No segment sampled drawn terrain: no frame had the lit pass's counts."
+      : `No segment sampled drawn terrain: the lit pass drew no patch in its frames (${sampled.join(", ")})${sampled.length < geometry.segments.length ? ", and the other segments had none" : ""}.`,
   ];
 }

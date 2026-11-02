@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   DescentSpikeReport,
+  SpikeGeometryReport,
   SpikeLaunch,
   SpikeResultsAnswer,
   SpikeResultsPaths,
@@ -251,6 +252,19 @@ function pathsOf(answer: SpikeResultsAnswer): SpikeResultsPaths {
   return answer.paths;
 }
 
+/** A generated world's geometry settings, every lever on (plan R14). */
+const GEOMETRY_SETTINGS = {
+  clusterPath: true,
+  casterDepthCull: true,
+  casterStrideCap: 8,
+  overlayDepth: "cluster",
+  litClusters: true,
+  farCascadeRate: 4,
+  figureClusters: true,
+  hullClusters: true,
+  wireClusters: true,
+} as const;
+
 /** A smoke's report: 10 s of frames at 60 Hz from 1,000 ms, its trace in three windows. */
 function smokeReport(): DescentSpikeReport {
   const scriptStartMs = 1000;
@@ -308,6 +322,34 @@ function smokeTrace(k: number, skew = false): TraceFigures {
 /** The window index of a smoke's window file. */
 function windowOf(path: string): number {
   return [0, 1, 2].findIndex((k) => path.endsWith(traceWindowFileName(k)));
+}
+
+/** A segment of the geometry block that no frame sampled. */
+const UNSAMPLED = {
+  interiorPatches: null,
+  edgePatches: null,
+  drawnTriangles: null,
+  litClusterTriangles: null,
+  casterTriangles: null,
+  overlayTriangles: null,
+} as const;
+
+/** The log of a smoke whose report carries a geometry block of `segments`, every lever on. */
+async function smokeGeometryLogs(
+  segments: SpikeGeometryReport["segments"],
+): Promise<ReadonlyArray<string>> {
+  const { session, logs } = sessionOf(
+    (path) => Promise.resolve(smokeTrace(windowOf(path))),
+    undefined,
+    { ...LAUNCH, smoke: true },
+  );
+  const ops = session.operations();
+  await ops.startMeasuring();
+  await ops.cycleTrace();
+  await ops.cycleTrace();
+  await ops.stopMeasuring();
+  await ops.writeResults({ ...smokeReport(), geometry: { settings: GEOMETRY_SETTINGS, segments } });
+  return logs;
 }
 
 describe("a spike run's session", () => {
@@ -582,17 +624,7 @@ describe("a spike run's session", () => {
     await ops.cycleTrace();
     await ops.stopMeasuring();
     const geometry = {
-      settings: {
-        clusterPath: true,
-        casterDepthCull: true,
-        casterStrideCap: 8,
-        overlayDepth: "cluster",
-        litClusters: true,
-        farCascadeRate: 4,
-        figureClusters: true,
-        hullClusters: true,
-        wireClusters: true,
-      },
+      settings: GEOMETRY_SETTINGS,
       segments: [
         {
           segment: "orbit coast",
@@ -611,6 +643,91 @@ describe("a spike run's session", () => {
     expect(logs.some((line) => line.startsWith("descent spike: | orbit coast | 59 (61) |"))).toBe(
       true,
     );
+  });
+
+  it("says no segment sampled drawn terrain where a smoke's lit pass drew no patch, printing no zeros", async () => {
+    const { session, logs } = sessionOf(
+      (path) => Promise.resolve(smokeTrace(windowOf(path))),
+      undefined,
+      { ...LAUNCH, smoke: true },
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.cycleTrace();
+    await ops.cycleTrace();
+    await ops.stopMeasuring();
+    const none = { frames: 1130, p50: 0, max: 0 };
+    // The software smoke's block over TEST MOON (2026-11-02): no lit pass in the orbit coast, and
+    // one that selects no patch early in the descent arc.
+    const geometry = {
+      settings: GEOMETRY_SETTINGS,
+      segments: [
+        { segment: "orbit coast", ...UNSAMPLED },
+        {
+          segment: "descent arc",
+          interiorPatches: none,
+          edgePatches: none,
+          drawnTriangles: none,
+          litClusterTriangles: null,
+          casterTriangles: none,
+          overlayTriangles: none,
+        },
+        { segment: "approach and flare", ...UNSAMPLED },
+      ],
+    };
+    await ops.writeResults({ ...smokeReport(), geometry });
+    expect(logs).toContainEqual(
+      expect.stringMatching(/^descent spike: Geometry \(plan R14\): cluster path on, /u),
+    );
+    expect(logs).toContain(
+      "descent spike: No segment sampled drawn terrain: the lit pass drew no patch in its frames (descent arc 1,130), and the other segments had none.",
+    );
+    expect(logs.filter((line) => line.includes("|") || line.includes("0 (0)"))).toEqual([]);
+  });
+
+  it("says no frame had the lit pass's counts where none of a smoke's segments sampled one", async () => {
+    const logs = await smokeGeometryLogs([{ segment: "orbit coast", ...UNSAMPLED }]);
+    expect(logs).toContain(
+      "descent spike: No segment sampled drawn terrain: no frame had the lit pass's counts.",
+    );
+  });
+
+  it("names no other segments where every segment of a smoke's block had frames of none drawn", async () => {
+    const none = { frames: 4, p50: 0, max: 0 };
+    const logs = await smokeGeometryLogs([
+      {
+        segment: "descent arc",
+        interiorPatches: none,
+        edgePatches: none,
+        drawnTriangles: none,
+        litClusterTriangles: null,
+        casterTriangles: null,
+        overlayTriangles: null,
+      },
+    ]);
+    expect(logs).toContain(
+      "descent spike: No segment sampled drawn terrain: the lit pass drew no patch in its frames (descent arc 4).",
+    );
+  });
+
+  it("shows a smoke's geometry table where a segment drew edge patches alone", async () => {
+    const edges = { frames: 4, p50: 12, max: 20 };
+    const none = { frames: 4, p50: 0, max: 0 };
+    const logs = await smokeGeometryLogs([
+      {
+        segment: "descent arc",
+        interiorPatches: none,
+        edgePatches: edges,
+        drawnTriangles: edges,
+        litClusterTriangles: null,
+        casterTriangles: null,
+        overlayTriangles: null,
+      },
+    ]);
+    expect(logs).toContain("descent spike: ## Geometry (plan R14)");
+    expect(
+      logs.some((line) => line.startsWith("descent spike: | descent arc | 0 (0) | 12 (20) |")),
+    ).toBe(true);
   });
 
   it("says a smoke's report holds no geometry block over the test planet", async () => {

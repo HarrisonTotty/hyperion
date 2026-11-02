@@ -30,7 +30,7 @@ import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { DescentSpikeReport, SpikeLaunch, SpikeResultsAnswer } from "../preload/api";
-import { geometrySummaryLines } from "./geometryResults";
+import { geometrySmokeLines } from "./geometryResults";
 import { type Measured, measured, missing } from "./measured";
 import type { TraceFigures } from "./reduceTrace";
 import {
@@ -390,8 +390,9 @@ export class SpikeSession {
 
   /**
    * A smoke's script, how long and in how many frames, its 10 s counted from its first worker bake
-   * (R05.T18), and its report's `geometry` block as a results file's summary shows it (plan R14,
-   * R14.T1.f), or that it has none, as over the test planet.
+   * (R05.T18), and its report's `geometry` block (plan R14, R14.T1.f): as a results file's summary
+   * shows it, or that no segment sampled drawn terrain ({@link geometrySmokeLines}), or that it has
+   * none, as over the test planet.
    */
   #logSmokeReport(report: DescentSpikeReport): void {
     const times = report.frames.scriptTimesS;
@@ -402,10 +403,8 @@ export class SpikeSession {
       this.#deps.log("descent spike: the report holds no geometry block");
       return;
     }
-    for (const line of geometrySummaryLines(report.geometry)) {
-      if (line.length > 0) {
-        this.#deps.log(`descent spike: ${line}`);
-      }
+    for (const line of geometrySmokeLines(report.geometry)) {
+      this.#deps.log(`descent spike: ${line}`);
     }
   }
 
