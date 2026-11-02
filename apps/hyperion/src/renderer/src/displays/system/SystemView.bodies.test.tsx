@@ -24,6 +24,7 @@ import { FakeResizeObserver } from "../../test/FakeResizeObserver";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   anUnknownHabitabilityLimit,
+  anUnknownSurfaceState,
   crustResources,
   EARTH_HABITABILITY,
   earthDetail,
@@ -836,6 +837,35 @@ describe("SystemView's body readout", () => {
     expect(reading("SURFACE PRESSURE")).toBe("NONE");
     expect(reading("MOLE FRACTION")).toBe("NONE");
     expect(reading("EXOSPHERE")).toBe("NOT YET MODELLED");
+  });
+
+  it("reads a dry temperate world's state as DESERT, its other rows as a temperate one's", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface((surface) => ({ ...surface, state: "desert" })),
+    );
+
+    expect(reading("SURFACE")).toBe("DESERT");
+    expect(reading("T SURF")).toBe("288 K");
+    expect(reading("SURFACE PRESSURE")).toBe("101 kPa");
+    expect(terms("ATMOSPHERE")).toHaveLength(0);
+  });
+
+  it("reads a surface state this build does not know as the em dash", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface((surface) => ({ ...surface, state: anUnknownSurfaceState() })),
+    );
+
+    expect(reading("SURFACE")).toBe("—");
+    expect(within(readingOf("SURFACE")).getByText("—")).toHaveClass("readout__missing");
+    expect(reading("SURFACE PRESSURE")).toBe("101 kPa");
   });
 
   it("reads e101's empty air over its melt as the em dash, and its silicate vapour as NOT YET MODELLED", async () => {

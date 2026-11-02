@@ -853,8 +853,8 @@ fn choose(inputs: &PhotometryInputs) -> PhaseTemplate {
             SurfaceMaterial::Rock => PhaseTemplate::Mercury,
             SurfaceMaterial::Ice => PhaseTemplate::AirlessIce,
         },
-        SurfaceState::Temperate if thin => PhaseTemplate::Mars,
-        SurfaceState::Temperate => PhaseTemplate::Earth,
+        SurfaceState::Temperate | SurfaceState::Desert if thin => PhaseTemplate::Mars,
+        SurfaceState::Temperate | SurfaceState::Desert => PhaseTemplate::Earth,
     }
 }
 

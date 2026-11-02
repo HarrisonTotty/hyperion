@@ -1463,6 +1463,7 @@ impl<'a> Body<'a> {
             | SurfaceState::MagmaOcean
             | SurfaceState::Airless
             | SurfaceState::Temperate
+            | SurfaceState::Desert
             | SurfaceState::Snowball
             | SurfaceState::Tenuous
             | SurfaceState::SteamEnvelope => (state, OxygenOutcome::NONE),
@@ -1949,7 +1950,7 @@ pub(super) fn state_and_greenhouse(
     // no water, which the weathering thermostat then skips (`Solver::airborne_carbon`).
     let dry = match state {
         SurfaceState::RunawayGreenhouse => true,
-        SurfaceState::Temperate => air.water <= 0.0,
+        SurfaceState::Temperate | SurfaceState::Desert => air.water <= 0.0,
         // No division is a steam envelope, which only `finish` publishes (P14.T53.b part 3).
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
@@ -2054,13 +2055,16 @@ fn present_state(
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Snowball
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => state,
     };
     match published {
         PublishedState::Hothouse => match present {
-            SurfaceState::Temperate | SurfaceState::Snowball => SurfaceState::RunawayGreenhouse,
+            SurfaceState::Temperate | SurfaceState::Desert | SurfaceState::Snowball => {
+                SurfaceState::RunawayGreenhouse
+            }
             SurfaceState::GasEnvelope
             | SurfaceState::MagmaOcean
             | SurfaceState::Airless
@@ -2070,7 +2074,10 @@ fn present_state(
         },
         PublishedState::Climate => match (present, carried) {
             (
-                SurfaceState::RunawayGreenhouse | SurfaceState::Temperate | SurfaceState::Snowball,
+                SurfaceState::RunawayGreenhouse
+                | SurfaceState::Temperate
+                | SurfaceState::Desert
+                | SurfaceState::Snowball,
                 Some(carried),
             ) => carried.state(),
             (
@@ -2079,6 +2086,7 @@ fn present_state(
                 | SurfaceState::Airless
                 | SurfaceState::RunawayGreenhouse
                 | SurfaceState::Temperate
+                | SurfaceState::Desert
                 | SurfaceState::Snowball
                 | SurfaceState::Tenuous
                 | SurfaceState::SteamEnvelope,

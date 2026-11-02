@@ -15,5 +15,9 @@
  * luminosity: a world inside the runaway limit at its hosts' peak alone is `Temperate` or
  * `Snowball` with its water lost, and a dry world between the limits whose surface would, without
  * Venus's deck, be too hot for liquid water at its surface pressure is `RunawayGreenhouse`.
+ *
+ * It grows (galaxy plan 04's growing enums, named so before any build sent `desert`, its first
+ * new string): a later generator version may add a state, as 27 adds `desert`, with no bump, and
+ * a client that does not know it reads it as Missing (lean, 2026-11-01).
  */
-export type SurfaceStateDto = "magma_ocean" | "airless" | "runaway_greenhouse" | "temperate" | "snowball" | "steam_envelope" | "tenuous";
+export type SurfaceStateDto = "magma_ocean" | "airless" | "runaway_greenhouse" | "temperate" | "snowball" | "steam_envelope" | "tenuous" | "desert";

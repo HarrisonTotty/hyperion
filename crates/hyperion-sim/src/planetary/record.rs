@@ -45,7 +45,7 @@ use crate::orbit::KeplerElements;
 use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, BeltSite};
 use crate::planetary::chem::envelope_abundances::EnvelopeAbundances;
 use crate::planetary::chem::partition::Condensates;
-use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState, desert_label};
 use crate::planetary::derive::figure::BodyFigure;
 use crate::planetary::derive::photometry::BodyPhotometry;
 use crate::planetary::derive::{DerivedBody, MassFractions, PlanetClass};
@@ -629,6 +629,9 @@ impl BulkProperties {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Surface {
     state: SurfaceState,
+    /// The state it publishes, its label: [`state`](Self::state) but for a desert's, derived from
+    /// the state and the condensates as it is built ([`published_state`](Self::published_state)).
+    published: SurfaceState,
     material: SurfaceMaterial,
     climate: ClimateRegime,
     conditions: SurfaceConditions,
@@ -686,7 +689,9 @@ impl Surface {
     /// figures' liquids and ices read; `None` for the gas-envelope state and the steam-envelope
     /// state (P14.T53.b part 3), which have no surface on the record, and for conditions without
     /// their climate regime, which the batch's second stage gives
-    /// ([`SurfaceConditions::with_climate`]).
+    /// ([`SurfaceConditions::with_climate`]). It publishes `state`, or from generator version 27 a
+    /// desert's label for a `Temperate` one whose condensates list no liquid water
+    /// ([`published_state`](Self::published_state)).
     #[must_use]
     pub(crate) fn new(
         state: SurfaceState,
@@ -700,6 +705,7 @@ impl Surface {
         }
         Some(Self {
             state,
+            published: desert_label(state, &condensates),
             material,
             climate: conditions.climate_regime()?,
             conditions,
@@ -723,6 +729,17 @@ impl Surface {
             state,
             SurfaceState::GasEnvelope | SurfaceState::SteamEnvelope
         )
+    }
+
+    /// The surface publishing its own state, its label set aside, for the tests to compare a
+    /// labelled surface with its hold's.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn unlabelled(&self) -> Self {
+        Self {
+            published: self.state,
+            ..self.clone()
+        }
     }
 
     /// The surface with what its conditions and condensates were built on, `basis` (rule (f)).
@@ -802,10 +819,20 @@ impl Surface {
     }
 
     /// The surface state (P14.T13.c), never [`SurfaceState::GasEnvelope`] or
-    /// [`SurfaceState::SteamEnvelope`].
+    /// [`SurfaceState::SteamEnvelope`], nor [`SurfaceState::Desert`], a label
+    /// ([`published_state`](Self::published_state)): what every hook reads.
     #[must_use]
     pub const fn state(&self) -> SurfaceState {
         self.state
+    }
+
+    /// The state the record publishes, the wire's: [`state`](Self::state), but from generator
+    /// version 27, behind its hold, [`SurfaceState::Desert`] for a `Temperate` surface whose
+    /// [`condensates`](Self::condensates) list no liquid water (ux-calls-data's ruling 9). A label,
+    /// as a steam envelope's is: no hook and no figure reads it.
+    #[must_use]
+    pub const fn published_state(&self) -> SurfaceState {
+        self.published
     }
 
     /// The body's surface material, rock or ice (P14.T13.c): its bulk's, of its mass fractions

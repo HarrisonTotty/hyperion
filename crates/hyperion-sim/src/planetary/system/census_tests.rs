@@ -437,7 +437,10 @@ impl Census {
             SurfaceState::Tenuous if conditions.gases().is_empty() => {
                 self.found("a Tenuous air with no gas", line);
             }
-            SurfaceState::Temperate | SurfaceState::Snowball | SurfaceState::RunawayGreenhouse
+            SurfaceState::Temperate
+            | SurfaceState::Desert
+            | SurfaceState::Snowball
+            | SurfaceState::RunawayGreenhouse
                 if p_s < airless =>
             {
                 self.found("a Temperate, Snowball or runaway air below 100 Pa", line);
@@ -456,6 +459,7 @@ impl Census {
             | SurfaceState::Airless
             | SurfaceState::RunawayGreenhouse
             | SurfaceState::Temperate
+            | SurfaceState::Desert
             | SurfaceState::Snowball
             | SurfaceState::Tenuous
             | SurfaceState::SteamEnvelope => {}

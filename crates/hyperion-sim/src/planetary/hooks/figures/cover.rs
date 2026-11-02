@@ -268,7 +268,7 @@ pub(crate) struct SurfaceWaterInputs {
 #[must_use]
 pub(crate) fn surface_water_of(inputs: &SurfaceWaterInputs) -> KilogramsPerSquareMetre {
     let holds = match inputs.state {
-        SurfaceState::Temperate | SurfaceState::Snowball => true,
+        SurfaceState::Temperate | SurfaceState::Desert | SurfaceState::Snowball => true,
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
@@ -627,6 +627,7 @@ pub fn under_ice_ocean(
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => return false,
     }
@@ -650,6 +651,7 @@ pub const fn ice_temperature(state: SurfaceState) -> Kelvin {
         | SurfaceState::MagmaOcean
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Snowball
         | SurfaceState::SteamEnvelope => PERENNIAL_ICE_TEMPERATURE,
     }
@@ -669,6 +671,7 @@ pub fn ice_threshold(state: SurfaceState) -> Kelvin {
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => ice_temperature(state),
     }
@@ -744,6 +747,7 @@ pub(crate) fn ice_fraction_over(inputs: &IceInputs<'_>, cold: f64) -> f64 {
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => {}
     }

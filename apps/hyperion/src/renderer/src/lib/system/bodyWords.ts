@@ -21,11 +21,10 @@ import type {
   RedoxClassDto,
   RingKindDto,
   RingMaterialDto,
-  SurfaceStateDto,
 } from "@hyperion/protocol";
 
 import { substanceName } from "../substances";
-import type { BodyKind, BodyState, HabitabilityLimit, Section } from "./model";
+import type { BodyKind, BodyState, HabitabilityLimit, Section, SurfaceState } from "./model";
 
 /** A section that stands in place of its values: withheld, or not computed. */
 export type SectionStandIn = Extract<Section<unknown>["state"], "not_resolved" | "not_modelled">;
@@ -170,18 +169,21 @@ export function envelopeLabel(supercritical: string | null): string {
 
 /**
  * The state of a body's surface (plan 14, P14.T13.c, on the wire by P14.T35.e), in words:
- * `TEMPERATE`, `MAGMA OCEAN`, `RUNAWAY GREENHOUSE`.
+ * `TEMPERATE`, `MAGMA OCEAN`, `RUNAWAY GREENHOUSE`; `null` for a state this build does not know,
+ * which its reading shows Missing.
  *
  * @remarks
- * Signed off with P14.T43.b's `SURFACE` rows (signoff-11, item 21). Two are reserved, produced by
- * no rule yet. `SUPERCRITICAL H2O` is the wire's `steam_envelope` (P14.T53.b): water above its
- * critical point with no interface, named by its formula, never by "steam", a common name for it
- * (the guide's Voice and nomenclature). `TENUOUS ATMOSPHERE` is `tenuous` (P14.T53.c), a thin or
- * transient atmosphere as Pluto's, the literature's term for it: never "air", since the console has
- * one name for a body's gas, `ATMOSPHERE`, and `TENUOUS` alone would not say what is tenuous.
+ * Signed off with P14.T43.b's `SURFACE` rows (signoff-11, item 21). `SUPERCRITICAL H2O` is the
+ * wire's `steam_envelope` (P14.T53.b): water above its critical point with no interface, named by
+ * its formula, never by "steam", a common name for it (the guide's Voice and nomenclature).
+ * `TENUOUS ATMOSPHERE` is `tenuous` (P14.T53.c), a thin or transient atmosphere as Pluto's, the
+ * literature's term for it: never "air", since the console has one name for a body's gas,
+ * `ATMOSPHERE`, and `TENUOUS` alone would not say what is tenuous. `DESERT` is `desert`, from
+ * generator version 27 a `temperate` body with no liquid H2O at its surface, as Mars is, a label
+ * whose sections are `temperate`'s (ux-calls-data's ruling 9).
  */
-export function surfaceStateLabel(state: SurfaceStateDto): string {
-  let label: string;
+export function surfaceStateLabel(state: SurfaceState): string | null {
+  let label: string | null;
   switch (state) {
     case "magma_ocean":
       label = "MAGMA OCEAN";
@@ -203,6 +205,12 @@ export function surfaceStateLabel(state: SurfaceStateDto): string {
       break;
     case "tenuous":
       label = "TENUOUS ATMOSPHERE";
+      break;
+    case "desert":
+      label = "DESERT";
+      break;
+    case "unknown":
+      label = null;
       break;
   }
   return label;

@@ -476,7 +476,7 @@ fn pass_water_cover(
     climate: &ClimateSpan,
 ) -> WaterCover {
     let holds = match water_state {
-        SurfaceState::Temperate | SurfaceState::Snowball => true,
+        SurfaceState::Temperate | SurfaceState::Desert | SurfaceState::Snowball => true,
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
@@ -952,6 +952,7 @@ pub(super) fn area_mixed(
         SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Snowball
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => surface_and_cloud(air, inputs, surface, (shade, haze)),
@@ -967,6 +968,7 @@ pub(super) fn area_mixed(
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Snowball
         | SurfaceState::Tenuous => RunawayDeck::Kept,
     };
@@ -1157,6 +1159,7 @@ fn floored(
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Snowball
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => true,

@@ -45,6 +45,91 @@ use super::{Atmosphere, Gas, RunawayDeck, SurfaceState, water_saturation_tempera
 use crate::planetary::chem::partition::{CondensatePhase, Condensates};
 use crate::planetary::hooks::figures::published_ice_cover_of;
 use crate::units::{Kelvin, Pascals};
+use crate::{GENERATOR_VERSION, GeneratorVersion};
+
+/// The generator version from which the record labels a `Temperate` surface with no liquid water
+/// [`SurfaceState::Desert`]: 27, the first open planetary bump (ux-calls-data's ruling 9, the
+/// owner's delegated call of 2026-11-01).
+///
+/// It is the label's one hold. Below it [`DesertRules::in_force`] is [`DesertRules::Held`]: the
+/// record's surface publishes its state as it stands ([`desert_label`]), and every record is
+/// version 24's, 25's and 26's bit for bit. 27's bump deletes this hold, [`DesertRules`] with its
+/// `Held` arm, the tests' switch and its tripwire (`the_desert_label_is_held_only_until_the_27_bump`).
+pub(crate) const DESERT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// Whether the record labels a dry `Temperate` surface a desert (its hold, [`DESERT_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum DesertRules {
+    /// Version 26's and before: a `Temperate` surface is published `Temperate`, dry or wet.
+    Held,
+    /// Version 27's: one whose published condensates list no liquid water is published `Desert`.
+    Labelled,
+}
+
+impl DesertRules {
+    /// The rules this generator version gives: the label from [`DESERT_VERSION`], none below it;
+    /// in the tests, the rules a test's switch sets on its thread ([`with_desert`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = DESERT_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= DESERT_VERSION {
+            Self::Labelled
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The desert label's rules a test sets on its thread, `None` for the version's.
+    static DESERT_RULES: core::cell::Cell<Option<DesertRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the desert label's rules `rules` on this thread, for the tests to reach
+/// version 27's ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. 27's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_desert<R>(rules: DesertRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<DesertRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            DESERT_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(DESERT_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// The state a record's surface in `state` publishes, its published condensates `condensates`:
+/// [`SurfaceState::Desert`] for a `Temperate` one that lists no liquid water, from generator
+/// version 27 ([`DESERT_VERSION`]), and `state` otherwise and under the hold.
+///
+/// A label, as `SteamEnvelope`'s is: the record's surface keeps `state` as its own
+/// ([`Surface::state`](crate::planetary::record::Surface::state)), which every hook reads,
+/// habitability's included, and derives the label from it as it is built
+/// ([`Surface::published_state`](crate::planetary::record::Surface::published_state)), so no
+/// figure moves. Rule 7's `Temperate` holds hot seas below the boiling curve and deserts alike, and
+/// the console names the one without a sea for what it is: Mars, and the dry worlds of 400–650 K
+/// whose water was lost at their hosts' peak (research-leans-12 §2).
+#[must_use]
+pub(crate) fn desert_label(state: SurfaceState, condensates: &Condensates) -> SurfaceState {
+    if state == SurfaceState::Temperate
+        && DesertRules::in_force() == DesertRules::Labelled
+        && condensates
+            .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+            .is_none()
+    {
+        SurfaceState::Desert
+    } else {
+        state
+    }
+}
 
 /// The share of the surface its published ices must cover for rule 5 to publish
 /// [`SurfaceState::Snowball`]: 0.5, the share poleward of 30° latitude in both hemispheres
@@ -176,6 +261,7 @@ pub(crate) fn published_label(
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => state,
     }
@@ -230,7 +316,10 @@ pub(crate) fn state_to_carry(
             }
         }
         (
-            SurfaceState::RunawayGreenhouse | SurfaceState::Temperate | SurfaceState::Snowball,
+            SurfaceState::RunawayGreenhouse
+            | SurfaceState::Temperate
+            | SurfaceState::Desert
+            | SurfaceState::Snowball,
             RunawayDeck::Kept | RunawayDeck::Deckless,
         ) => present_climate_state(&figures()),
         (
@@ -284,6 +373,119 @@ mod tests {
         assert_eq!(state_of(&eyeball), SurfaceState::Temperate);
         assert_eq!(state_of(&frozen), SurfaceState::Snowball);
         assert_eq!(state_of(&turning), SurfaceState::Snowball);
+    }
+
+    /// The desert label is held until the 26 → 27 bump: the rules in force are version 26's, which
+    /// publish a dry `Temperate` surface as it stands; the tests' switch and 27's helper reach the
+    /// label, and 26's helper does not.
+    #[test]
+    fn the_desert_label_is_held_only_until_the_27_bump() {
+        assert!(
+            GENERATOR_VERSION < DESERT_VERSION,
+            "the 26 → 27 bump puts the desert label on the record (ux-calls-data's ruling 9): \
+             delete `DESERT_VERSION`, `DesertRules` with its `Held` arm in `desert_label`, the \
+             tests' `with_desert`, its switch in `with_every_27_hold` and this test; no golden \
+             pins the label yet, so add a record's published state to one"
+        );
+        assert_eq!(DesertRules::in_force(), DesertRules::Held);
+        assert_eq!(
+            with_desert(DesertRules::Labelled, DesertRules::in_force),
+            DesertRules::Labelled
+        );
+        assert_eq!(
+            crate::planetary::testing::with_every_27_hold(DesertRules::in_force),
+            DesertRules::Labelled
+        );
+        assert_eq!(
+            crate::planetary::testing::with_every_26_hold_with_its_retargets(DesertRules::in_force),
+            DesertRules::Held
+        );
+        assert_eq!(DesertRules::in_force(), DesertRules::Held);
+    }
+
+    /// Published condensates holding an Earth-like sea: a 10 MPa column of water, about a
+    /// kilometre of it, over a climate of 280–300 K about 290 K at Earth's gravity, with no basins.
+    fn a_sea() -> Condensates {
+        use crate::planetary::chem::partition::{
+            ClimateSpan, ColumnInventory, Cover, CrustWater, Ground, WaterCover, partition,
+        };
+        use crate::units::{
+            KilogramsPerCubicMetre, KilogramsPerSquareMetre, MetresPerSecondSquared,
+        };
+        let climate =
+            ClimateSpan::new(Kelvin::new(280.0), Kelvin::new(290.0), Kelvin::new(300.0)).unwrap();
+        let water = Gas::Water.substance();
+        let inventory = ColumnInventory::new([(water, Pascals::new(1e7))]).unwrap();
+        let ground = Ground::without_basins(MetresPerSecondSquared::new(9.81));
+        let solved = partition(&climate, &ground, &inventory);
+        let reservoir = solved
+            .condensate(water)
+            .map_or(0.0, |c| c.reservoir().value());
+        let published = solved.publish(&Cover {
+            cold_area: &|_| 0.0,
+            state: SurfaceState::Temperate,
+            water: WaterCover {
+                surface_water: KilogramsPerSquareMetre::new(reservoir),
+                potential_ocean: 0.0,
+                ice_fraction: 0.0,
+                ice_density: KilogramsPerCubicMetre::new(917.0),
+                crust_water: CrustWater::Unlisted,
+            },
+        });
+        assert!(
+            published.entry(water, CondensatePhase::Liquid).is_some(),
+            "{published:?} lists a sea"
+        );
+        published
+    }
+
+    /// From 27 a `Temperate` surface whose condensates list no liquid water publishes `Desert`, and
+    /// one with a sea `Temperate`; no other state takes the label, dry or wet, and under the hold a
+    /// dry one publishes `Temperate`.
+    #[test]
+    fn only_a_dry_temperate_surface_is_published_a_desert() {
+        let (dry, sea) = (Condensates::default(), a_sea());
+        let at_27 = |state, condensates: &Condensates| {
+            with_desert(DesertRules::Labelled, || desert_label(state, condensates))
+        };
+        assert_eq!(at_27(SurfaceState::Temperate, &dry), SurfaceState::Desert);
+        assert_eq!(
+            at_27(SurfaceState::Temperate, &sea),
+            SurfaceState::Temperate
+        );
+        for state in [
+            SurfaceState::GasEnvelope,
+            SurfaceState::MagmaOcean,
+            SurfaceState::Airless,
+            SurfaceState::RunawayGreenhouse,
+            SurfaceState::Snowball,
+            SurfaceState::Tenuous,
+            SurfaceState::SteamEnvelope,
+        ] {
+            for condensates in [&dry, &sea] {
+                assert_eq!(at_27(state, condensates), state, "{state:?}");
+            }
+        }
+        assert_eq!(
+            desert_label(SurfaceState::Temperate, &dry),
+            SurfaceState::Temperate,
+            "under the hold"
+        );
+    }
+
+    /// A dry world at 550 K under 100 bar, below water's saturation temperature there (584 K), is
+    /// rule 7's `Temperate` and from 27 is published a desert; under 10 bar, above it (453 K), it is
+    /// rule 6's `RunawayGreenhouse`, which the label leaves.
+    #[test]
+    fn a_dry_550_k_world_is_a_desert_under_100_bar_and_a_runaway_under_10() {
+        let published = |p_s: f64| {
+            let state = state_of(&figures(0.0, false, 550.0, p_s));
+            with_desert(DesertRules::Labelled, || {
+                desert_label(state, &Condensates::default())
+            })
+        };
+        assert_eq!(published(1e7), SurfaceState::Desert);
+        assert_eq!(published(1e6), SurfaceState::RunawayGreenhouse);
     }
 
     /// The published label labels a locked `Snowball` with an open sea and no ice (a two-state

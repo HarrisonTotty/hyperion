@@ -20,6 +20,7 @@ import {
   type ResponseBody,
   type ResponseFor,
   type ResourceAbundancesDto,
+  type SurfaceStateDto,
 } from "@hyperion/protocol";
 
 import fixture from "../../../../../../packages/protocol/fixtures/planetary.json" with { type: "json" };
@@ -176,6 +177,13 @@ export function anUnknownHabitabilityLimit(name = "tidal_heating"): Habitability
   // The decoder's own trust at the wire, made where the test plays a newer server.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   return name as HabitabilityLimitDto;
+}
+
+/** A surface state this build does not know, typed as the decoder types it. */
+export function anUnknownSurfaceState(name = "steam_world"): SurfaceStateDto {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as SurfaceStateDto;
 }
 
 /** The slice's Earth at the `mass_and_orbit` level. */

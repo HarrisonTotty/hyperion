@@ -684,7 +684,7 @@ fn surface_water_as_built(
     outgassing: f64,
 ) -> KilogramsPerSquareMetre {
     let holds = match atmosphere.state() {
-        SurfaceState::Temperate | SurfaceState::Snowball => true,
+        SurfaceState::Temperate | SurfaceState::Desert | SurfaceState::Snowball => true,
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless

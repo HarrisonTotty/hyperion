@@ -1779,6 +1779,7 @@ fn surface_pressure_of(state: SurfaceState, pressure: Pascals) -> Pascals {
         | SurfaceState::MagmaOcean
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Snowball
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => pressure,

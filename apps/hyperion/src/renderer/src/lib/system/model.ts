@@ -990,6 +990,13 @@ export interface Biosphere {
 export type SilicateVapour = never;
 
 /**
+ * A surface state as the display reads it: the wire's, or `unknown` for one this build does not
+ * know, since the list grows without a protocol bump (galaxy plan 04's growing enums), as 27's
+ * `desert` does.
+ */
+export type SurfaceState = SurfaceStateDto | "unknown";
+
+/**
  * A body's surface section (the protocol's `BodySurfaceDto`, plan 14's P14.T35.e): its state and
  * material, its surface conditions and climate regime, its global figures, and the members of later
  * tasks.
@@ -1000,7 +1007,7 @@ export type SilicateVapour = never;
  * as none.
  */
 export interface BodySurface {
-  readonly state: SurfaceStateDto;
+  readonly state: SurfaceState;
   readonly material: SurfaceMaterialDto;
   readonly meanSurfaceTemperatureK: number;
   /** T(0°) − T(90°): negative where the poles are the warmer. */

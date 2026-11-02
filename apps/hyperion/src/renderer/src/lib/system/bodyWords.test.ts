@@ -3,7 +3,6 @@ import type {
   DestructionCauseDto,
   HabitabilityClassDto,
   RedoxClassDto,
-  SurfaceStateDto,
 } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
@@ -16,7 +15,7 @@ import {
   redoxClassLabel,
   surfaceStateLabel,
 } from "./bodyWords";
-import type { HabitabilityLimit } from "./model";
+import type { HabitabilityLimit, SurfaceState } from "./model";
 
 describe("envelopeLabel", () => {
   // An H₂/He envelope's null, the steam envelope's water, other condensables' formulas and a name
@@ -33,8 +32,8 @@ describe("envelopeLabel", () => {
 });
 
 describe("surfaceStateLabel", () => {
-  // Every surface state the wire carries, the two no rule produces yet included.
-  it.each<readonly [SurfaceStateDto, string]>([
+  // Every surface state the wire carries, and one this build does not know, which reads Missing.
+  it.each<readonly [SurfaceState, string | null]>([
     ["magma_ocean", "MAGMA OCEAN"],
     ["airless", "AIRLESS"],
     ["runaway_greenhouse", "RUNAWAY GREENHOUSE"],
@@ -42,6 +41,8 @@ describe("surfaceStateLabel", () => {
     ["snowball", "SNOWBALL"],
     ["steam_envelope", "SUPERCRITICAL H2O"],
     ["tenuous", "TENUOUS ATMOSPHERE"],
+    ["desert", "DESERT"],
+    ["unknown", null],
   ])("names %s as %s", (state, word) => {
     expect(surfaceStateLabel(state)).toBe(word);
   });

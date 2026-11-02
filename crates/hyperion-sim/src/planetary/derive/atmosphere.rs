@@ -80,8 +80,11 @@ pub(crate) use escaping::{
     LineSwitchRules, MeltOxygenRules, Thermostat, ThermostatCounts, WaterPhase, settled_log,
     water_phase, with_line_switch, with_melt_oxygen, with_resolve_check, with_thermostat,
 };
+#[cfg(test)]
+pub(crate) use present::{DesertRules, with_desert};
 pub(crate) use present::{
-    PresentClimate, PresentFigures, Rotation, published_ice_cover, published_label, state_to_carry,
+    PresentClimate, PresentFigures, Rotation, desert_label, published_ice_cover, published_label,
+    state_to_carry,
 };
 #[cfg(test)]
 pub(crate) use present::{SNOWBALL_ICE_COVER, present_climate_state};
@@ -2258,6 +2261,19 @@ pub enum SurfaceState {
     /// record's surface never holds this state. Its figure's datum is the liquid-like fluid's top.
     /// Another condensable's supercritical envelope keeps its state.
     SteamEnvelope,
+    /// A [`Temperate`](Self::Temperate) world whose published condensates list no liquid water:
+    /// neither iced over half its surface nor too hot for a sea, with no liquid H₂O at its
+    /// surface, a cold or warm desert such as Mars, or a hot one whose water was lost at its hosts'
+    /// brightest (ux-calls-data's ruling 9; research-leans-12 §2).
+    ///
+    /// Produced from generator version 27 alone, behind its hold (`DESERT_VERSION`), as a label on
+    /// the record's surface
+    /// ([`Surface::published_state`](crate::planetary::record::Surface::published_state)) and
+    /// nowhere else: [`Atmosphere::state`] and [`Atmosphere::published_state`] stay `Temperate`, and
+    /// so do the record surface's [`state`](crate::planetary::record::Surface::state) and every
+    /// pass, hook (habitability's included) and figure, which read those. Every branch of the
+    /// state groups it with `Temperate`, so that none would read it otherwise.
+    Desert,
 }
 
 /// Whether a published [`SurfaceState::RunawayGreenhouse`] keeps Venus's sulphuric acid deck
@@ -2337,7 +2353,7 @@ impl SurfaceState {
                 SurfaceMaterial::Ice => 0.35,
             },
             Self::RunawayGreenhouse | Self::SteamEnvelope => 0.76,
-            Self::Temperate => 0.294,
+            Self::Temperate | Self::Desert => 0.294,
             Self::Snowball => 0.50,
         })
     }
@@ -2349,7 +2365,7 @@ impl SurfaceState {
     pub const fn cloud_fraction(self) -> f64 {
         match self {
             Self::GasEnvelope | Self::RunawayGreenhouse | Self::SteamEnvelope => 1.0,
-            Self::Temperate => 0.67,
+            Self::Temperate | Self::Desert => 0.67,
             Self::MagmaOcean | Self::Airless | Self::Snowball | Self::Tenuous => 0.0,
         }
     }

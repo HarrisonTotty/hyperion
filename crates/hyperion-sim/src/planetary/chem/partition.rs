@@ -2378,6 +2378,7 @@ fn ice_line(
         | SurfaceState::MagmaOcean
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Snowball
         | SurfaceState::SteamEnvelope => Kelvin::new(under_air),
     }

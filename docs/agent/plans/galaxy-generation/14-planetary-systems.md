@@ -32874,6 +32874,14 @@ gas's μ }`. Every rule reads the trimmed 10-mbar gas:
   - For 25's bump: the tripwire's list, the `SurfaceStateDto` and guide rows, and the goldens it
     moves (`planetary/systems/close_binary`, `m_dwarf_resonant_chain`, `solar_like`,
     `planetary/surface_conditions_published`).
+  - _The `DESERT` label (lane `alerts-count-and-desert`, 2026-11-01; ux-calls-data's ruling 9),_
+    held at 27: `DESERT_VERSION`, `DesertRules`, `with_desert` (in `with_every_27_hold`), tripwire
+    `the_desert_label_is_held_only_until_the_27_bump`; nothing moves at 24.
+  - `SurfaceState::Desert` labels the record's surface alone: `desert_label` after
+    `published_label`, read by `Surface::published_state()`, the wire's. `Surface::state()`,
+    `Atmosphere::state()` and `published_state()` keep `Temperate` (lean, 2026-11-01).
+  - `SurfaceStateDto` is named growing (plan 04's list), `desert` its first new string, with no
+    bump; the client reads an unknown state as Missing (lean, 2026-11-01).
 - **Deviations in P14.T31.c, as built (2026-10-30).** Held at 25 over all five kinds:
   `STORM_EVENTS_VERSION`, `StormEventsRules`, the tests' `with_storm_events` (in
   `with_every_25_hold`) and the tripwire `the_body_events_are_held_only_until_the_25_bump`. Below

@@ -564,6 +564,7 @@ fn holds_water(air: &Atmosphere, water: Kilograms, radius: Metres) -> bool {
         SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Snowball
         | SurfaceState::Tenuous => true,
     };

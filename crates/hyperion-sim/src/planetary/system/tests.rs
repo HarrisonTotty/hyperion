@@ -8480,7 +8480,9 @@ impl Census {
                     ));
                 }
             }
-            SurfaceState::Temperate if ice >= 0.5 => self.iced.push(line.clone()),
+            SurfaceState::Temperate | SurfaceState::Desert if ice >= 0.5 => {
+                self.iced.push(line.clone());
+            }
             SurfaceState::MagmaOcean if p <= 0.0 => self.dry_melts.push(line.clone()),
             SurfaceState::RunawayGreenhouse => {
                 if case.runaway_now < 1.0 {
@@ -8509,6 +8511,7 @@ impl Census {
                 }
             }
             SurfaceState::Temperate
+            | SurfaceState::Desert
             | SurfaceState::MagmaOcean
             | SurfaceState::Airless
             | SurfaceState::GasEnvelope
@@ -8519,12 +8522,13 @@ impl Census {
         // albedo of the other branch.
         let start = match state {
             SurfaceState::Snowball if t_s > 273.15 => Some(0.50),
-            SurfaceState::Temperate if ice >= 0.5 => Some(0.294),
+            SurfaceState::Temperate | SurfaceState::Desert if ice >= 0.5 => Some(0.294),
             SurfaceState::RunawayGreenhouse => {
                 Some(SurfaceState::MagmaOcean.albedo(surface.material()).value())
             }
             SurfaceState::Snowball
             | SurfaceState::Temperate
+            | SurfaceState::Desert
             | SurfaceState::MagmaOcean
             | SurfaceState::Airless
             | SurfaceState::GasEnvelope
@@ -11406,6 +11410,7 @@ fn under_every_24_hold_an_airless_record_lists_no_gas_and_a_tenuous_one_its_air(
                 | SurfaceState::RunawayGreenhouse
                 | SurfaceState::SteamEnvelope
                 | SurfaceState::Temperate
+                | SurfaceState::Desert
                 | SurfaceState::Snowball => {}
             }
         });

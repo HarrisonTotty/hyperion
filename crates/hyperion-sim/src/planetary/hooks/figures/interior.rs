@@ -644,7 +644,7 @@ pub fn tectonic_regime(inputs: &RegimeInputs) -> TectonicRegime {
         return TectonicRegime::StagnantLid;
     }
     let holds_water = match inputs.state {
-        SurfaceState::Temperate | SurfaceState::Snowball => true,
+        SurfaceState::Temperate | SurfaceState::Desert | SurfaceState::Snowball => true,
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless

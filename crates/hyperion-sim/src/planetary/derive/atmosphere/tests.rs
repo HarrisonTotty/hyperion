@@ -6520,6 +6520,23 @@ fn earth_venus_and_mars_keep_their_states() {
     }
 }
 
+/// Under every 27 hold Mars and Earth stay `Temperate`, published so by their atmospheres too, the
+/// desert label being the record surface's alone; Mars's pass lists no liquid water, the
+/// condensates' fact its record's label reads, and Earth's lists its sea (ux-calls-data's ruling
+/// 9). The label on a record is `only_a_dry_temperate_surface_is_published_a_desert`'s.
+#[test]
+fn under_every_27_hold_mars_lists_no_sea_and_earth_does_both_temperate() {
+    use crate::planetary::derive::solar::{found, solar_system};
+    use crate::planetary::testing::with_every_27_hold;
+    let at_27 = with_every_27_hold(solar_system);
+    for (name, liquid) in [("Mars", false), ("Earth", true)] {
+        let air = found(&at_27, name).atmosphere();
+        assert_eq!(air.state(), SurfaceState::Temperate, "{name}");
+        assert_eq!(air.published_state(), SurfaceState::Temperate, "{name}");
+        assert_eq!(air.lists_liquid_water(), liquid, "{name}");
+    }
+}
+
 /// P14.T53.e's wiring in one pass (`escaping::present_state`): a pass that reads a state its
 /// previous pass carried publishes it in place of its climate's class, while its division, the
 /// insolation class's, keeps its carbon, its water's state and every step's greenhouse inputs. A

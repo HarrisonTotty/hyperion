@@ -67,6 +67,10 @@ use crate::surface::ClimateModelDto;
 /// luminosity: a world inside the runaway limit at its hosts' peak alone is `Temperate` or
 /// `Snowball` with its water lost, and a dry world between the limits whose surface would, without
 /// Venus's deck, be too hot for liquid water at its surface pressure is `RunawayGreenhouse`.
+///
+/// It grows (galaxy plan 04's growing enums, named so before any build sent `desert`, its first
+/// new string): a later generator version may add a state, as 27 adds `desert`, with no bump, and
+/// a client that does not know it reads it as Missing (lean, 2026-11-01).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -101,7 +105,8 @@ pub enum SurfaceStateDto {
     /// lost and its carbon airborne (P14.T53.b part 1). A world here can be ice-covered, on the
     /// cold side of the ice-albedo bistability (decision-pre-23-review item 26). From 24 a dry
     /// world here whose surface would, without Venus's deck, be too hot for liquid water at its
-    /// surface pressure is sent as `runaway_greenhouse` instead (P14.T53.b part 1 (c)).
+    /// surface pressure is sent as `runaway_greenhouse` instead (P14.T53.b part 1 (c)). From 27 one
+    /// whose condensates list no liquid water, as Mars's list none, is sent as `desert` instead.
     Temperate,
     /// Beyond the maximum-greenhouse limit now, where a carbon-dioxide and water greenhouse cannot
     /// hold the surface above freezing (Kopparapu et al. 2013), as on Titan. From generator
@@ -124,6 +129,12 @@ pub enum SurfaceStateDto {
     /// pressure and gases are its air's. An air below the floor is `airless`, with no gas listed.
     /// Its aerosols are absent, not modelled at version 24 (P14.T55.n), never the empty inventory.
     Tenuous,
+    /// A `temperate` world whose surface condensates list no liquid water: neither iced over half
+    /// its surface nor too hot for a sea, with no liquid H₂O at its surface, a cold or warm desert
+    /// such as Mars, or a hot one whose water was lost at its hosts' brightest. From generator
+    /// version 27, a label only: every figure of the body is the `temperate` one's, and its
+    /// sections are a `temperate` body's (ux-calls-data's ruling 9).
+    Desert,
 }
 
 /// What a surface is made of, rock or ice, by the body's water fraction (plan 14's
@@ -2743,6 +2754,7 @@ pub(crate) mod tests {
             (SurfaceStateDto::Snowball, "snowball"),
             (SurfaceStateDto::SteamEnvelope, "steam_envelope"),
             (SurfaceStateDto::Tenuous, "tenuous"),
+            (SurfaceStateDto::Desert, "desert"),
         ]);
     }
 

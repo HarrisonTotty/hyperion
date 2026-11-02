@@ -1172,7 +1172,7 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
     let figures = surface.figures();
     let regime = surface.climate_regime();
     BodySurfaceDto {
-        state: surface_state(surface.state()),
+        state: surface_state(surface.published_state()),
         material: match surface.material() {
             SurfaceMaterial::Rock => SurfaceMaterialDto::Rock,
             SurfaceMaterial::Ice => SurfaceMaterialDto::Ice,
@@ -1229,12 +1229,14 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
     }
 }
 
-/// A surface state as the wire names it.
+/// A surface state as the wire names it: the record surface's published one, so a desert's label
+/// from generator version 27 ([`Surface::published_state`]).
 ///
 /// # Panics
 ///
 /// For [`SurfaceState::GasEnvelope`] and [`SurfaceState::SteamEnvelope`], which a record's surface
-/// never holds: [`Surface`] refuses them, since an envelope body's surface section is not applicable
+/// never holds nor publishes, its label being its state's or a desert's: [`Surface`] refuses them,
+/// since an envelope body's surface section is not applicable
 /// (decision-p14-t35e-wire §2; P14.T53.b part 3).
 #[must_use]
 fn surface_state(state: SurfaceState) -> SurfaceStateDto {
@@ -1245,6 +1247,7 @@ fn surface_state(state: SurfaceState) -> SurfaceStateDto {
         SurfaceState::Temperate => SurfaceStateDto::Temperate,
         SurfaceState::Snowball => SurfaceStateDto::Snowball,
         SurfaceState::Tenuous => SurfaceStateDto::Tenuous,
+        SurfaceState::Desert => SurfaceStateDto::Desert,
         SurfaceState::GasEnvelope => {
             unreachable!("a record's surface is never in the gas-envelope state")
         }

@@ -57,6 +57,7 @@ import {
   type SubsurfaceOceanDto,
   type SurfaceCondensateDto,
   type SurfaceModifiersDto,
+  type SurfaceStateDto,
   type SystemBodiesDto,
   type SystemIdHex,
   type SystemPlaneDto,
@@ -111,6 +112,7 @@ import type {
   SubsurfaceOcean,
   SurfaceCondensate,
   SurfaceModifiers,
+  SurfaceState,
   SystemBodies,
   SystemBody,
   SystemBodyFigure,
@@ -1639,7 +1641,7 @@ function toSurface(surface: BodySurfaceDto): BodySurface {
     "global figures unusable",
   );
   return {
-    state: surface.state,
+    state: toSurfaceState(surface.state),
     material: surface.material,
     meanSurfaceTemperatureK: surface.mean_surface_temperature_k,
     equatorPoleContrastK: surface.equator_pole_contrast_k,
@@ -1742,6 +1744,24 @@ function toEnvelope(envelope: BodyEnvelopeDto): BodyEnvelope {
     },
     hazeTau550: envelope.haze_tau_550,
   };
+}
+
+/** Every surface state this build knows, so that one it does not reads `unknown`. */
+const SURFACE_STATES: Readonly<Record<SurfaceStateDto, true>> = {
+  magma_ocean: true,
+  airless: true,
+  runaway_greenhouse: true,
+  temperate: true,
+  snowball: true,
+  steam_envelope: true,
+  tenuous: true,
+  desert: true,
+};
+
+// The states grow without a protocol bump (galaxy plan 04's growing enums), and the decoder trusts
+// the generated types, so a newer server's string arrives typed as one this build knows.
+function toSurfaceState(wire: SurfaceStateDto): SurfaceState {
+  return Object.hasOwn(SURFACE_STATES, wire) ? wire : "unknown";
 }
 
 /** Every habitability limit this build knows, so that one it does not reads `unknown`. */

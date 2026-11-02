@@ -2469,6 +2469,7 @@ impl PassBody<'_> {
                 | SurfaceState::RunawayGreenhouse
                 | SurfaceState::SteamEnvelope
                 | SurfaceState::Temperate
+                | SurfaceState::Desert
                 | SurfaceState::Snowball => air.surface_pressure().unwrap_or(Pascals::ZERO),
             };
             let reads = deck::reads_open_water(&record.spin, record.radius, stellar_flux, pressure);

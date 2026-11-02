@@ -184,7 +184,10 @@ fn verdict_of(case: &AuditCase<'_>) -> Option<SurfaceState> {
     match (surface.state(), air.runaway_deck()) {
         (SurfaceState::RunawayGreenhouse, RunawayDeck::Kept) if !liquid_water => return None,
         (
-            SurfaceState::RunawayGreenhouse | SurfaceState::Temperate | SurfaceState::Snowball,
+            SurfaceState::RunawayGreenhouse
+            | SurfaceState::Temperate
+            | SurfaceState::Desert
+            | SurfaceState::Snowball,
             RunawayDeck::Kept | RunawayDeck::Deckless,
         ) => {}
         (

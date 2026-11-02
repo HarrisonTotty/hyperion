@@ -255,6 +255,7 @@ pub(crate) fn header_pressure(inputs: &CoarseInputs) -> Pascals {
         | SurfaceState::MagmaOcean
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Snowball
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => {

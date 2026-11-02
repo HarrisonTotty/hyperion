@@ -1678,6 +1678,7 @@ fn under_every_24_hold_t53c_s_thin_airs_are_stated() {
             | SurfaceState::MagmaOcean
             | SurfaceState::RunawayGreenhouse
             | SurfaceState::Temperate
+            | SurfaceState::Desert
             | SurfaceState::Snowball
             | SurfaceState::SteamEnvelope => {}
         }

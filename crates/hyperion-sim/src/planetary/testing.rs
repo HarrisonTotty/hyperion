@@ -474,6 +474,9 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// - the haze layer, `HAZE_LAYER_VERSION` (P14.T24.h.b), at `HazeLayerRules::Absorbing` through
 ///   `with_haze_layer`: a hazy air's haze an absorbing layer over the rest of its disc, its
 ///   absorption the anti-greenhouse.
+/// - the record's desert label, `DESERT_VERSION` (ux-calls-data's ruling 9), at
+///   `DesertRules::Labelled` through `with_desert`: a `Temperate` surface whose published
+///   condensates list no liquid water published `Desert`, a label no hook or figure reads.
 ///
 /// A system or a record is read under the rules in force when it is generated, so a test
 /// generates afresh inside it; the carriers' rules are read when a system's equilibrium network is
@@ -485,6 +488,7 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// `merger_channels`) and runs inside this helper for the planetary ones.
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::derive::atmosphere::{DesertRules, with_desert};
     use crate::planetary::derive::photometry::area_mix::{
         HazeLayerRules, IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules,
         RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
@@ -519,6 +523,7 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
+    let run = move || with_desert(DesertRules::Labelled, run);
     with_minor_oxides(MinorOxidesRules::Chondritic, run)
 }
 

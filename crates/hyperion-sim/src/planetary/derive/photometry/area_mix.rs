@@ -2220,7 +2220,7 @@ pub(crate) fn cloud_share_of_state(state: SurfaceState) -> f64 {
         SurfaceState::RunawayGreenhouse
         | SurfaceState::GasEnvelope
         | SurfaceState::SteamEnvelope => SurfaceState::RunawayGreenhouse.cloud_fraction(),
-        SurfaceState::Temperate | SurfaceState::Snowball => {
+        SurfaceState::Temperate | SurfaceState::Desert | SurfaceState::Snowball => {
             SurfaceState::Temperate.cloud_fraction()
         }
         SurfaceState::Airless | SurfaceState::MagmaOcean | SurfaceState::Tenuous => 0.0,
@@ -2403,7 +2403,7 @@ pub(crate) fn cloud_fraction(
         (SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope, RunawayDeck::Deckless) => {
             minor_cloud_fraction(SurfaceState::Temperate, partition, shade)
         }
-        (SurfaceState::Temperate | SurfaceState::Snowball, _) => {
+        (SurfaceState::Temperate | SurfaceState::Desert | SurfaceState::Snowball, _) => {
             minor_cloud_fraction(state, partition, shade)
         }
         (SurfaceState::Airless | SurfaceState::MagmaOcean | SurfaceState::Tenuous, _) => 0.0,
@@ -2435,7 +2435,9 @@ pub(crate) fn cloud_albedo((state, deck): (SurfaceState, RunawayDeck), shade: &H
                 .value()
         }
         (SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope, RunawayDeck::Deckless)
-        | (SurfaceState::Temperate | SurfaceState::Snowball, _) => shade.water_cloud,
+        | (SurfaceState::Temperate | SurfaceState::Desert | SurfaceState::Snowball, _) => {
+            shade.water_cloud
+        }
         (
             SurfaceState::GasEnvelope
             | SurfaceState::Airless

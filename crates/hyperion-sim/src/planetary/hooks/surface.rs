@@ -2063,6 +2063,7 @@ impl Surface {
             SurfaceState::MagmaOcean
             | SurfaceState::RunawayGreenhouse
             | SurfaceState::Temperate
+            | SurfaceState::Desert
             | SurfaceState::Snowball => (false, false),
         };
         let (column, fractions) = StepColumn {
@@ -2221,6 +2222,7 @@ pub(crate) fn published_surface_pressure(air: &Atmosphere) -> Pascals {
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::SteamEnvelope
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Snowball
         | SurfaceState::Tenuous => air.surface_pressure().unwrap_or(Pascals::ZERO),
     }

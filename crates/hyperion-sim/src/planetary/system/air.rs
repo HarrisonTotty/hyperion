@@ -139,6 +139,7 @@ pub(crate) fn record_aerosols(
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate
+        | SurfaceState::Desert
         | SurfaceState::Snowball => {}
     }
     let profile = match structure {

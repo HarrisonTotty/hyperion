@@ -651,9 +651,11 @@ function surfaceRows(surface: BodySurface): ReactNode {
   // the cover's lists, so they are not the whole cover and never read as it.
   const coverModelled = surface.condensates.kind !== "not_modelled";
   const notModelled = value(sectionStateLabel("not_modelled"));
+  // A state this build does not know, from a newer server, reads Missing (plan 04's growing enums).
+  const state = surfaceStateLabel(surface.state);
   return (
     <>
-      <ReadoutRow label="SURFACE" shown={value(surfaceStateLabel(surface.state))} wide />
+      <ReadoutRow label="SURFACE" shown={state === null ? MISSING : value(state)} wide />
       <ReadoutRow
         label="T SURF"
         shown={value(formatTemperatureK(surface.meanSurfaceTemperatureK), "K")}

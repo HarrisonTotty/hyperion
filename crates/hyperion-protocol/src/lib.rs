@@ -182,9 +182,9 @@ pub use universe::{
 ///
 /// An enum that galaxy plan 04's reserved list names as growing (`MassLayer`, `Population`,
 /// `LayerStatus`, `Unit`, `ErrorCode`, plan 09's `SystemOriginWire`, `CatalogueClassWire` and
-/// `MemberClassWire`, and plan 14's `PopulationDto` and `HabitabilityLimitDto`) takes a new string
-/// without a bump, as `MassLayer` took
-/// `brown_dwarf` and `rogue_planet` and `Unit` takes `per_cm3`, `k_per_cm3` and `mag` for the gas
+/// `MemberClassWire`, and plan 14's `PopulationDto`, `HabitabilityLimitDto` and `SurfaceStateDto`)
+/// takes a new string without a bump, as `MassLayer` took `brown_dwarf` and `rogue_planet` and
+/// `Unit` takes `per_cm3`, `k_per_cm3` and `mag` for the gas
 /// parameters (galaxy plan 07, P07.T10.b): every string a build already sends keeps its bytes and
 /// its meaning, and a client that does not know the new one misreads nothing (one built before
 /// P07.T10.b leaves the value's cells empty, one built since shows it Missing). Every other enum

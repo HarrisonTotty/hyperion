@@ -109,7 +109,7 @@ fn table_assessments() -> [(&'static str, HabitabilityInputs, HabitabilityAssess
 }
 
 /// The table's Earth, Mars and Venus under the rules at generator version 25 and under every 26
-/// hold (`with_every_26_hold`), each printed with its surface pressure: Earth `Temperate` with no
+/// hold (`with_every_26_hold_with_its_retargets`), each printed with its surface pressure: Earth `Temperate` with no
 /// limit, Mars a frozen `Marginal` desert, below water's triple point exactly where its pressure
 /// is, and Venus a dry `Hostile` runaway.
 #[test]
@@ -995,6 +995,105 @@ fn every_body_short_of_temperate_names_a_limit() {
         unexplained.len(),
         &unexplained[..unexplained.len().min(20)]
     );
+}
+
+/// The desert label moves no habitability (ux-calls-data's ruling 9): under every 27 hold, over
+/// the FGK hosts' bodies at the epoch ([`for_each_fgk_host`]), each body's hooks, its assessment
+/// among them, are the same with the label as under its hold, and so is its record's surface but
+/// for what it publishes, `Desert` exactly where its state is `Temperate` with no liquid water
+/// listed. The sample's first Earth-like world (a water sea at 275–305 K) is published `Temperate`
+/// and its first cold thin one as Mars is (below 273 K under 1 kPa) `Desert`. It holds no dry
+/// `Temperate` as hot as 500 K (a dry 550 K world's label is
+/// `a_dry_550_k_world_is_a_desert_under_100_bar_and_a_runaway_under_10`'s), so its hottest desert
+/// is printed with the counts.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "slow: every body of the FGK hosts among 6,800 systems, labelled and held"]
+fn the_desert_label_moves_no_habitability_over_the_fgk_hosts() {
+    use crate::planetary::derive::atmosphere::{DesertRules, Gas, SurfaceState, with_desert};
+    use crate::planetary::testing::with_every_27_hold;
+    let (mut surfaces, mut deserts) = (0_usize, 0_usize);
+    let (mut earth, mut cold) = (None, None);
+    let mut hottest: Option<(crate::id::BodyId, f64, f64)> = None;
+    with_every_27_hold(|| {
+        for_each_fgk_host(|ctx, labelled| {
+            let unlabelled = with_desert(DesertRules::Held, || generate(SEED, ctx));
+            for body in labelled.bodies() {
+                let index = body.index();
+                let name = index.body_id(ctx.id());
+                let read = |system: &PlanetarySystem| {
+                    let record = system.body_at(ctx, index, UniverseTime::EPOCH).unwrap();
+                    let hooks = system.hooks_at(ctx, index, UniverseTime::EPOCH).unwrap();
+                    (record, hooks)
+                };
+                let (record, hooks) = read(labelled);
+                let (held_record, held_hooks) =
+                    with_desert(DesertRules::Held, || read(&unlabelled));
+                assert_eq!(
+                    hooks, held_hooks,
+                    "{name}: its hooks, its assessment among them"
+                );
+                let (Section::Ok(surface), Section::Ok(held_surface)) =
+                    (record.surface(), held_record.surface())
+                else {
+                    assert_eq!(record.surface(), held_record.surface(), "{name}");
+                    continue;
+                };
+                surfaces += 1;
+                let state = surface.state();
+                assert_eq!(
+                    held_surface.published_state(),
+                    state,
+                    "{name} under the hold"
+                );
+                assert_eq!(
+                    &surface.unlabelled(),
+                    held_surface,
+                    "{name}: all but its label"
+                );
+                let liquid = surface
+                    .condensates()
+                    .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+                    .is_some();
+                let desert = state == SurfaceState::Temperate && !liquid;
+                assert_eq!(
+                    surface.published_state(),
+                    if desert { SurfaceState::Desert } else { state },
+                    "{name}"
+                );
+                deserts += usize::from(desert);
+                let t = surface.conditions().mean_surface_temperature().value();
+                let p = surface.conditions().surface_pressure().value();
+                let first = |slot: &mut Option<_>, found: bool| {
+                    if found && slot.is_none() {
+                        *slot = Some((name, surface.published_state(), t, p));
+                    }
+                };
+                first(
+                    &mut earth,
+                    state == SurfaceState::Temperate && liquid && (275.0..=305.0).contains(&t),
+                );
+                if desert && hottest.is_none_or(|(.., hot, _)| t > hot) {
+                    hottest = Some((name, t, p));
+                }
+                first(&mut cold, desert && t < 273.0 && p < 1e3);
+            }
+        });
+    });
+    eprintln!(
+        "{surfaces} surfaces of the FGK hosts' bodies, {deserts} published Desert; the first \
+         Earth-like {earth:?}, cold thin {cold:?} (name, published, K, Pa); the hottest desert \
+         {hottest:?} (name, K, Pa)"
+    );
+    assert!(surfaces > 1_000, "{surfaces}");
+    for (world, found, state) in [
+        ("Earth-like", earth, SurfaceState::Temperate),
+        ("cold thin", cold, SurfaceState::Desert),
+    ] {
+        let (name, published, ..) =
+            found.unwrap_or_else(|| panic!("the sample holds a {world} world"));
+        assert_eq!(published, state, "{name}, the first {world} world");
+    }
 }
 
 /// The composition census's ordinary systems, whose FGK hosts the share reads.

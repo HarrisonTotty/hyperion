@@ -25,6 +25,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   anUnknownHabitabilityLimit,
+  anUnknownSurfaceState,
   crustResources,
   earthContact,
   earthDetail,
@@ -582,6 +583,15 @@ describe("toBodyDetail", () => {
         },
       },
     });
+  });
+
+  it("reads a surface state this build does not know as unknown, and a desert as one", () => {
+    const stateOf = (state: BodySurfaceDto["state"]) =>
+      okSection(recordOf(earthWithSurface({ ...earthSurface(), state })).surface).state;
+
+    expect(stateOf(anUnknownSurfaceState())).toBe("unknown");
+    expect(stateOf("desert")).toBe("desert");
+    expect(stateOf("temperate")).toBe("temperate");
   });
 
   it("reads a habitability limit this build does not know as unknown, and the rest as they are", () => {

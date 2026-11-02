@@ -553,7 +553,7 @@ const fn runaway(state: SurfaceState) -> bool {
 #[must_use]
 const fn under_air(state: SurfaceState) -> bool {
     match state {
-        SurfaceState::Temperate | SurfaceState::Snowball => true,
+        SurfaceState::Temperate | SurfaceState::Desert | SurfaceState::Snowball => true,
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
