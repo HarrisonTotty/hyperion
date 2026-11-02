@@ -1866,11 +1866,10 @@ fn bright_retarded(
             tally.centre_members += 1;
             return None;
         }
-        // The global list's members reach the census through its sources, on their own lines
-        // (`census_members`, from version 27), never as a cell's records. No catalogue class is a
-        // source of the census yet, though plan 09's P09.T37 merges them into the range query at
-        // 27, and a catalogue system's broken line has no tracer here (P09.T33.a). A victim's path, which ends at
-        // its disruption, is a centre member's, which no line from its record alone gives.
+        // The global list's members and the catalogue classes' hosts reach the census through
+        // its sources, on their own lines (`census_members`, from version 27 and from the
+        // carve-out), never as a cell's records. A victim's path, which ends at its disruption, is
+        // a centre member's, which no line from its record alone gives.
         Err(
             TraceMotionError::GlobalListMember(_)
             | TraceMotionError::CatalogueMotionNotTraced(_)

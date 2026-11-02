@@ -37,6 +37,13 @@
 //! ruled for its cells and its remnants are dark (lean, 2026-11-02); its black hole, its tidal
 //! disruptions' victims and its recent entries are not taken.
 //!
+//! From plan 09's P09.T35 the grid gives the catalogue classes their hosts, and the census takes
+//! them exactly there ([`takes_class_hosts`], the carve-out's hold): every host of every class the
+//! production lookup has, through its [`CachedClassSource`], each on its broken line
+//! ([`CatalogueMotion`](crate::galaxy::catalogue_classes::CatalogueMotion)) with its class's own
+//! stars and multiplicity ([`CatalogueSystem::stars`]), and seen only where it exists at its
+//! emitted time, a further member of an entry from its entry's break, as the range query lists it.
+//!
 //! # The band and the caps
 //!
 //! They read the budget, each population's whole density, the members' included (decided at
@@ -50,6 +57,8 @@
 use core::num::NonZeroU32;
 
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::{CachedClassSource, CatalogueSystem, ClassLookup};
+use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::features::centre::path::CellPath;
 use crate::galaxy::features::centre::{CentreClassKind, CentreMemberLight};
 use crate::galaxy::features::members::MemberRecord;
@@ -58,10 +67,13 @@ use crate::galaxy::global_list::GlobalListSource;
 use crate::galaxy::global_list::members::GlobalMemberRecord;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::motion::Trajectory;
+use crate::galaxy::placement::Existence;
+use crate::id::SystemIdKind;
 use crate::math;
 use crate::observe::{Drift, Observer, Retardation, retarded};
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::system::SystemStars;
+use crate::time::UniverseTime;
 use crate::units::LightYears;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
@@ -75,7 +87,8 @@ use super::query::{CensusPlan, Completeness, Shell, SkyContext, SkyQuery, light_
 /// give more than the shell holds, never fewer. Its order is its own, but the census's merge is
 /// total, so no answer depends on it. Plan 09's feature members' source is one
 /// ([`FeatureMemberSource`]); the global list's, the streams', the dwarf cores' and the galactic
-/// centre's together, is the other ([`GlobalListSource`], from generator version 27).
+/// centre's together, is another ([`GlobalListSource`], from generator version 27); and the
+/// catalogue classes' hosts are the third ([`CachedClassSource`], from the carve-out).
 pub trait SkySource {
     /// Gives `each` every member of `seen`'s part of its shell whose light can reach `observer`.
     ///
@@ -111,6 +124,8 @@ pub enum SkyMember<'a> {
     /// A member of the galactic centre, on its orbit (P09.T28): what its stars are drawn from and
     /// its cell's trajectory, whose start is its record.
     Centre(&'a CentreMemberLight, &'a Trajectory),
+    /// A catalogue class's host, on its broken line, with its class's stars (plan 09, P09.T37.a).
+    Class(&'a CatalogueSystem),
 }
 
 impl SkyMember<'_> {
@@ -121,6 +136,7 @@ impl SkyMember<'_> {
             Self::Feature(member) => member.record(),
             Self::Listed(member) => member.record(),
             Self::Centre(_, trajectory) => trajectory.start().record(),
+            Self::Class(system) => system.record(),
         }
     }
 
@@ -129,8 +145,29 @@ impl SkyMember<'_> {
     #[must_use]
     fn shines(&self) -> bool {
         match self {
-            Self::Feature(_) | Self::Listed(_) => true,
+            Self::Feature(_) | Self::Listed(_) | Self::Class(_) => true,
             Self::Centre(light, _) => light.kind() == Some(CentreClassKind::Living),
+        }
+    }
+
+    /// Whether it is seen in light emitted at `emitted`: a class host where it exists then, and a
+    /// further member of its entry from its entry's break, as the range query lists it
+    /// (`catalogue_classes::source`'s hits); every other member, whose stars say when they exist.
+    #[must_use]
+    fn shown_at(&self, emitted: UniverseTime) -> bool {
+        match self {
+            Self::Feature(_) | Self::Listed(_) | Self::Centre(..) => true,
+            Self::Class(system) => {
+                let record = system.record();
+                let SystemIdKind::Catalogue(id) = record.id().kind() else {
+                    unreachable!("a catalogue system's record carries its 111 ID");
+                };
+                let broken = id.member() == 0 || emitted >= system.motion().at();
+                match record.existence_at(emitted) {
+                    Existence::NoSystemYet => false,
+                    Existence::Exists => broken,
+                }
+            }
         }
     }
 
@@ -144,23 +181,26 @@ impl SkyMember<'_> {
             ),
             Self::Listed(member) => retarded(observer, &Drift::of_global_member(member)),
             Self::Centre(_, trajectory) => retarded(observer, &CellPath(trajectory)),
+            Self::Class(system) => retarded(observer, system.motion()),
         }
     }
 
     /// Its stars: a feature's or a list's member's own ([`MemberRecord::stars`],
-    /// [`GlobalMemberRecord::stars`]), and a centre member's single star at its composition
-    /// (lean, 2026-11-02).
+    /// [`GlobalMemberRecord::stars`]), a centre member's single star at its composition (lean,
+    /// 2026-11-02), and a class host's as its class models them ([`CatalogueSystem::stars`]), or
+    /// `None` for a host its class gives no stars.
     #[must_use]
-    fn stars(&self, galaxy: &Galaxy) -> SystemStars {
+    fn stars(&self, galaxy: &Galaxy) -> Option<SystemStars> {
         match self {
-            Self::Feature(member) => member.stars(galaxy),
-            Self::Listed(member) => member.stars(galaxy),
-            Self::Centre(light, trajectory) => SystemStars::generate_with(
+            Self::Feature(member) => Some(member.stars(galaxy)),
+            Self::Listed(member) => Some(member.stars(galaxy)),
+            Self::Centre(light, trajectory) => Some(SystemStars::generate_with(
                 galaxy,
                 trajectory.start().record(),
                 light.composition(),
                 MultiplicityContext::ForcedSingle,
-            ),
+            )),
+            Self::Class(system) => system.stars(galaxy),
         }
     }
 }
@@ -258,6 +298,31 @@ impl SkySource for GlobalListSource<'_> {
     }
 }
 
+impl<L: ClassLookup> SkySource for CachedClassSource<'_, L> {
+    /// The hosts of the band's layer whose broken lines can bring them between `inner` and `outer`
+    /// over the light's window, from the class cells the range query's hits would read for a
+    /// sphere of `outer` at the window's farthest time from the epoch.
+    ///
+    /// # Panics
+    ///
+    /// As [`FeatureMemberSource`]'s.
+    fn members_seen(
+        &self,
+        galaxy: &Galaxy,
+        observer: &Observer,
+        ((band, inner, outer), part): ((MassBand, LightYears, LightYears), MemberPart),
+        each: &mut dyn FnMut(SkyMember<'_>),
+    ) {
+        self.members_in_shell_over(
+            galaxy,
+            observer.position(),
+            window(observer, outer),
+            ((band.layer(), inner, outer), (part.index, part.of)),
+            &mut |system| each(SkyMember::Class(system)),
+        );
+    }
+}
+
 /// The times from `outer`'s light time before `observer`'s time to it.
 ///
 /// # Panics
@@ -287,6 +352,23 @@ fn window(
 #[must_use]
 pub fn takes_feature_members(galaxy: &Galaxy) -> bool {
     galaxy.field_share().is_some()
+}
+
+/// Whether the census takes the catalogue classes' hosts in `galaxy`: exactly where its grid gives
+/// them up, under plan 09's carve-out (P09.T35, the galaxy rules' `carve_out`), whatever generator
+/// version holds it, so that a host is never counted twice nor lost from the sky.
+///
+/// A server gives a census the classes' source ([`CachedClassSource`]) where this holds. The
+/// range query registers the same source only from its own hold
+/// ([`registered_in`](crate::galaxy::catalogue_classes::CatalogueClassSource::registered_in),
+/// P09.T37.a), so between the two a host is in the sky and not in a range reply. No version of
+/// its own: the carve-out's hold's tripwire covers both.
+#[must_use]
+pub fn takes_class_hosts(galaxy: &Galaxy) -> bool {
+    match galaxy.rules().carve_out {
+        CarveOutRules::Unclaimed => false,
+        CarveOutRules::Claimed => true,
+    }
 }
 
 /// The streams whose tube tables the census of `plan` for `query` reads through a
@@ -336,8 +418,9 @@ pub fn streams_seen(
 /// [module](self) documentation).
 ///
 /// Every member of the shell's layer that `ctx`'s sources give and the shell holds is generated
-/// and tallied in it, but the centre's that do not shine: `generated` per member whose state
-/// exists at its emitted time, `accepted` per star kept. For a query with a cone, a member whose
+/// and tallied in it, but the centre's that do not shine and the class hosts not shown at their
+/// emitted time or given no stars by their class: `generated` per member whose state exists at
+/// its emitted time, `accepted` per star kept. For a query with a cone, a member whose
 /// stars all lie outside the cone a plan opens its cells by is not generated. A context with no
 /// sources gives nothing; its tallies, as its cells', leave the feature members out
 /// ([`CensusTallies::feature_members_absent`]) unless a source holds them
@@ -504,8 +587,13 @@ fn census_member(
             return;
         }
     }
+    if !member.shown_at(r.emitted()) {
+        return;
+    }
     let layer = record.layer();
-    let stars = member.stars(galaxy);
+    let Some(stars) = member.stars(galaxy) else {
+        return;
+    };
     system_stars(
         galaxy,
         ctx,
@@ -533,6 +621,10 @@ mod tests {
     use crate::coords::{GalacticPosition, UnitVector};
     use crate::galaxy::PointLy;
     use crate::galaxy::ages::FieldShareRules;
+    use crate::galaxy::catalogue_classes::{
+        CatalogueCellKey, CatalogueClassCellCache, CatalogueClassSource, ClassCellSystems, ClassId,
+        ClassVisitor, NoClassCellCache, ProductionClasses, system_of,
+    };
     use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord, NoFeatureCache};
     use crate::galaxy::features::centre::members::CentrePlacement;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
@@ -549,7 +641,7 @@ mod tests {
     use crate::galaxy::motion::EpochState;
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::CellKey;
-    use crate::galaxy::query::LayerPads;
+    use crate::galaxy::query::{LayerPads, LayerSet, QuerySphere, SystemHit, SystemSource};
     use crate::galaxy::rules::GalaxyRules;
     use crate::id::{Layer, SystemId, SystemIdKind};
     use crate::sky::caps::{CAPPED_LAYERS, LayerCap};
@@ -1055,7 +1147,11 @@ mod tests {
                     system_stars(
                         galaxy,
                         &mut ctx,
-                        (seen.record(), &seen.stars(galaxy), &r),
+                        (
+                            seen.record(),
+                            &seen.stars(galaxy).expect("a centre member has stars"),
+                            &r,
+                        ),
                         query,
                         (Bound::Ignored, &|_, d| d < radius),
                         &mut counts,
@@ -1289,6 +1385,295 @@ mod tests {
                 assert_eq!(star_bits(&each), star_bits(&stars), "{parts} parts");
             }
         }
+    }
+
+    /// A class-cell cache that keeps every cell's systems it makes, for one galaxy, each made
+    /// outside its lock, so that a census's jobs make theirs at once; an equal cell may be made
+    /// twice, and the first kept.
+    #[derive(Default)]
+    struct KeepClassCells(Mutex<BTreeMap<CatalogueCellKey, Arc<ClassCellSystems>>>);
+
+    impl CatalogueClassCellCache for KeepClassCells {
+        fn systems(
+            &self,
+            _galaxy: &Galaxy,
+            key: CatalogueCellKey,
+            make: &mut dyn FnMut() -> ClassCellSystems,
+        ) -> Arc<ClassCellSystems> {
+            if let Some(systems) = self.0.lock().expect("no job panics").get(&key) {
+                return Arc::clone(systems);
+            }
+            let fresh = Arc::new(make());
+            let mut kept = self.0.lock().expect("no job panics");
+            Arc::clone(kept.entry(key).or_insert(fresh))
+        }
+    }
+
+    /// Every layer, as a range query asks for them.
+    fn every_layer() -> LayerSet {
+        Layer::ALL.into_iter().fold(LayerSet::EMPTY, LayerSet::with)
+    }
+
+    /// One class of the production lookup.
+    #[derive(Debug, Clone, Copy)]
+    struct Only(ClassId);
+
+    impl ClassLookup for Only {
+        fn visit_class<V: ClassVisitor>(
+            &self,
+            galaxy: &Galaxy,
+            class: ClassId,
+            visitor: V,
+        ) -> Option<V::Output> {
+            if class == self.0 {
+                ProductionClasses.visit_class(galaxy, class, visitor)
+            } else {
+                None
+            }
+        }
+    }
+
+    /// The luminous blue variable the range query returns nearest the Sun in `galaxy`: 7,772 ly
+    /// from it, under every 26 hold and every 27 (surveyed 2026-11-02).
+    fn nearest_lbv(galaxy: &Galaxy) -> SystemHit {
+        let sun = GalacticPosition::from_light_years(SUN_LY).expect("in the cube");
+        let sphere = QuerySphere::new(
+            sun,
+            LightYears::new(12_000.0),
+            UniverseTime::EPOCH,
+            LightYears::ZERO,
+        )
+        .expect("a sphere");
+        let mut hits = Vec::new();
+        CatalogueClassSource::with_lookup(Only(ClassId::LUMINOUS_BLUE_VARIABLE)).systems_in_sphere(
+            galaxy,
+            &sphere,
+            every_layer(),
+            &mut hits,
+        );
+        hits.into_iter()
+            .min_by(|a, b| a.distance().value().total_cmp(&b.distance().value()))
+            .expect("a luminous blue variable within 12,000 ly of the Sun")
+    }
+
+    /// The brute force of the classes' hosts for plain caps of `radius`: every host the range
+    /// query returns within `radius`, its layers' farthest star offset and a margin of the
+    /// observer at its time, each retarded on its own line and kept where it is shown then and its
+    /// nearest possible star lies within `radius`, as the census's shells together hold it, every
+    /// star of it measured and kept within `radius`; with their tallies.
+    fn every_class_host(
+        galaxy: &Galaxy,
+        query: &SkyQuery,
+        radius: f64,
+    ) -> (Vec<SkyStar>, CensusTallies) {
+        // Far above a host's drift over the light's travel.
+        const MARGIN_LY: f64 = 10.0;
+        let observer = query.observer();
+        let [x, y, z] = observer.position().to_light_years_f64();
+        let reach = LightYears::new(math::hypot(math::hypot(x, y), z) + radius);
+        // A host whose star is within `radius` may lie as far beyond it as its layer's offset:
+        // some 300 ly in layer E near the Sun.
+        let farthest_offset = MassBand::ALL
+            .iter()
+            .map(|band| layer_offset_bound(galaxy, band.layer(), reach).value())
+            .fold(0.0, f64::max);
+        let sphere = QuerySphere::new(
+            *observer.position(),
+            LightYears::new(radius + farthest_offset + MARGIN_LY),
+            observer.time(),
+            LightYears::ZERO,
+        )
+        .expect("a sphere");
+        let mut hits = Vec::new();
+        CatalogueClassSource::new().systems_in_sphere(galaxy, &sphere, every_layer(), &mut hits);
+        let mut ctx = milky_way_dark_context();
+        let mut counts = Counts::default();
+        let mut stars = Vec::new();
+        for hit in &hits {
+            let SystemIdKind::Catalogue(id) = hit.id().kind() else {
+                unreachable!("the classes' source returns class hosts")
+            };
+            let system = system_of(galaxy, id).expect("a host the query returns resolves");
+            let host = SkyMember::Class(&system);
+            let r = host.retarded(observer);
+            let offset = layer_offset_bound(galaxy, system.record().layer(), reach).value();
+            let nearest = (observer
+                .position()
+                .distance_to(r.apparent_position())
+                .value()
+                / METRES_PER_LIGHT_YEAR
+                - offset)
+                .max(0.0);
+            if nearest >= radius || !host.shown_at(r.emitted()) {
+                continue;
+            }
+            let Some(own) = host.stars(galaxy) else {
+                continue;
+            };
+            system_stars(
+                galaxy,
+                &mut ctx,
+                (system.record(), &own, &r),
+                query,
+                (Bound::Ignored, &|_, d| d < radius),
+                &mut counts,
+                &mut stars,
+            );
+        }
+        stars.sort_by(sky_order);
+        (stars, counts.tallies)
+    }
+
+    /// Each layer's members generated and stars accepted.
+    fn generated_and_accepted(tallies: &CensusTallies) -> Vec<(u64, u64)> {
+        Layer::ALL
+            .iter()
+            .map(|&layer| {
+                let tally = tallies.layer(layer);
+                (tally.generated(), tally.accepted())
+            })
+            .collect()
+    }
+
+    /// The classes' hosts' census of `query` in `galaxy` to caps of `radius`, in one shell and one
+    /// part through `cells`, its stars and tallies, checked to be the brute force's
+    /// ([`every_class_host`]) and the census through each of `others`, of the shells to its edges
+    /// and `radius`, in its parts, through its cells, bit for bit and tally for tally.
+    fn checked_class_census(
+        galaxy: &Galaxy,
+        (query, radius): (&SkyQuery, f64),
+        cells: &dyn CatalogueClassCellCache,
+        others: &[(&[u32], NonZeroU32, &dyn CatalogueClassCellCache)],
+    ) -> (Vec<SkyStar>, CensusTallies) {
+        let whole = census_plan_with_edges(query, caps_of(radius), &[]);
+        let source = CatalogueClassSource::new().with_cells(cells);
+        let (stars, tallies) =
+            members_through(galaxy, (&whole, query), NonZeroU32::MIN, &[&source]);
+        let (brute, brute_tallies) = every_class_host(galaxy, query, radius);
+        assert_eq!(star_bits(&brute), star_bits(&stars));
+        assert_eq!(
+            generated_and_accepted(&brute_tallies),
+            generated_and_accepted(&tallies)
+        );
+        for &(edges, parts, cells) in others {
+            let plan = census_plan_with_edges(query, caps_of(radius), edges);
+            let source = CatalogueClassSource::new().with_cells(cells);
+            let (each, each_tallies) = members_through(galaxy, (&plan, query), parts, &[&source]);
+            assert_eq!(
+                star_bits(&each),
+                star_bits(&stars),
+                "{edges:?}, {parts} parts"
+            );
+            assert_eq!(
+                generated_and_accepted(&each_tallies),
+                generated_and_accepted(&tallies),
+                "{edges:?}, {parts} parts"
+            );
+        }
+        (stars, tallies)
+    }
+
+    /// The census takes the catalogue classes' hosts exactly where the grid gives them up, and
+    /// then each host the range query returns within its shells once (R06.T16.a, from the
+    /// carve-out), each property on one build of the fixture at each version from the switch, 26
+    /// and 27:
+    ///
+    /// - the switch: no hosts under the carve-out's held arm, every other 26 hold given, and hosts
+    ///   under its arm;
+    /// - from the Sun to 400 ly at V 11, the hosts' stars of one shell are those of a brute force
+    ///   over every host the range query returns, each on its own line, every star measured (the
+    ///   accreting white dwarfs' and a stellar merger's, some hundred), and those of shells to 200
+    ///   and 400 ly, in one part or three, through class cells made for the census, kept by an
+    ///   earlier one or not kept, bit for bit and tally for tally;
+    /// - 30 ly from the luminous blue variable nearest the Sun, to 100 ly, it is listed, and the
+    ///   same holds of shells to 50 and 100 ly in three parts;
+    /// - at 27, each job's census is the same whatever ran before it through the kept cells, and a
+    ///   century on the census of the hosts' moving lines is the brute force's still.
+    #[test]
+    fn the_census_takes_each_class_host_once_where_the_grid_gives_them_up() {
+        assert!(!takes_class_hosts(milky_way_galaxy()));
+        let held = Galaxy::from_params_with_rules(
+            Seed::new(SEED),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules {
+                carve_out: CarveOutRules::Unclaimed,
+                ..GalaxyRules::every_26_hold_with_its_retargets()
+            },
+        )
+        .expect("the fixture builds");
+        assert!(!takes_class_hosts(&held));
+        let (one, three) = (NonZeroU32::MIN, NonZeroU32::new(3).expect("not zero"));
+        for galaxy in [phi_galaxy(), list_galaxy()] {
+            assert!(takes_class_hosts(galaxy));
+            let query = forced(galaxy, SUN_LY, 11.0, &[]);
+            let warm = KeepClassCells::default();
+            let (stars, tallies) = checked_class_census(
+                galaxy,
+                (&query, 400.0),
+                &warm,
+                &[
+                    (&[200], one, &KeepClassCells::default()),
+                    (&[200], three, &warm),
+                    (&[], three, &NoClassCellCache),
+                ],
+            );
+            let hosts: u64 = generated_and_accepted(&tallies).iter().map(|c| c.0).sum();
+            assert!(hosts > 10, "{hosts} hosts within 400 ly of the Sun");
+            assert!(!stars.is_empty(), "no host's star brighter than V 11");
+            // The classes' source holds no feature member, so its census alone states them absent.
+            assert!(tallies.feature_members_absent());
+            assert!(
+                stars
+                    .iter()
+                    .all(|s| matches!(s.system().kind(), SystemIdKind::Catalogue(_)))
+            );
+
+            // The brightest of the hosts the grid gives up is in the sky.
+            let lbv = nearest_lbv(galaxy);
+            let [x, y, z] = lbv.position().to_light_years_f64();
+            let query = forced(galaxy, [x, y, z + 30.0], 11.0, &[]);
+            let cells = KeepClassCells::default();
+            let (stars, _) =
+                checked_class_census(galaxy, (&query, 100.0), &cells, &[(&[50], three, &cells)]);
+            assert!(
+                stars.iter().any(|s| s.system() == lbv.id()),
+                "the luminous blue variable {:?} is not listed from 30 ly",
+                lbv.id()
+            );
+        }
+
+        // Each job's census is the same whatever ran before it through the kept cells.
+        let galaxy = list_galaxy();
+        let query = forced(galaxy, SUN_LY, 11.0, &[]);
+        let shelled = census_plan_with_edges(&query, caps_of(400.0), &[200]);
+        let warm = KeepClassCells::default();
+        let jobs: Vec<(Shell, MemberPart)> = shelled
+            .shells()
+            .flat_map(|shell| MemberPart::all(three).map(move |part| (shell, part)))
+            .collect();
+        let job = |&(shell, part): &(Shell, MemberPart)| {
+            let source = CatalogueClassSource::new().with_cells(&warm);
+            let sources: [&dyn SkySource; 1] = [&source];
+            let mut ctx = SkyContext {
+                sources: &sources,
+                ..milky_way_dark_context()
+            };
+            let mut out = Vec::new();
+            let tallies =
+                census_members(galaxy, &mut ctx, &shelled, (shell, part), &query, &mut out);
+            (star_bits(&out), generated_and_accepted(&tallies))
+        };
+        assert_order_independent(&jobs, job);
+
+        // A century on, the census of the hosts' moving lines is the brute force's still.
+        let later = UniverseTime::from_julian_years(100).expect("on the clock");
+        let query = forced_to(
+            query_at_time(galaxy, (SUN_LY, later), 11.0)
+                .build()
+                .expect("a valid query"),
+            &[],
+        );
+        checked_class_census(galaxy, (&query, 400.0), &warm, &[]);
     }
 
     /// The listed stars of `census` within `angle` (rad) of `axis` from `observer`: its members',

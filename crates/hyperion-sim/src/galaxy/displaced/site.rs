@@ -409,8 +409,9 @@ pub(crate) type RecentDeathClaim = fn(&Galaxy, &ExplosionSite, &SystemRecord) ->
 /// 27 by train 26 (2026-11-02): at 26 the range query registers no catalogue class
 /// (`CLASS_SOURCE_VERSION`, P09.T37.a, at 27), so the hosts the grid gave up would reach no range
 /// reply; the two turn on together. The bump to 27 deletes this hold, [`CarveOutRules`] with its
-/// `Unclaimed` arm, `GalaxyRules::carve_out`, the `match`es in [`recent_death_claim`] and
-/// `Galaxy::build` (so `Galaxy::layer_d_kept` loses its `Option`) and the tripwire
+/// `Unclaimed` arm, `GalaxyRules::carve_out`, the `match`es in [`recent_death_claim`],
+/// `Galaxy::build` (so `Galaxy::layer_d_kept` loses its `Option`) and the sky's
+/// `takes_class_hosts` (which then always holds; rendering plan R06, R06.T16.a) and the tripwire
 /// (`the_carve_out_is_held_only_until_the_27_bump`), and makes the claim the one item
 /// `Some(recent_death_claims)` again.
 pub(crate) const CARVE_OUT_VERSION: GeneratorVersion = GeneratorVersion::new(27);

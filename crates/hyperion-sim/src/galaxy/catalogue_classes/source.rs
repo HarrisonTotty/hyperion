@@ -60,6 +60,7 @@
 #[cfg(test)]
 mod tests;
 
+use core::num::NonZeroU32;
 use std::sync::Arc;
 
 use super::binary::BinaryTableRules;
@@ -72,12 +73,14 @@ use super::{
 use crate::GeneratorVersion;
 use crate::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
 use crate::galaxy::Galaxy;
+use crate::galaxy::features::members::source::part_of_key;
 use crate::galaxy::placement::{Existence, SystemRecord};
 use crate::galaxy::query::{
     LayerCounts, LayerSet, PAD_SPEED, QuerySphere, RangeQuery, SystemHit, SystemSource, pad_for,
     widest_sphere,
 };
 use crate::id::{CatalogueSystemId, Layer, SystemIdKind};
+use crate::math;
 use crate::time::UniverseTime;
 use crate::units::LightYears;
 
@@ -92,6 +95,10 @@ use crate::units::LightYears;
 /// the `match` in [`CatalogueClassSource::registered_in`] (which then always gives the source) and
 /// the tripwire (`the_class_source_is_held_only_until_the_27_bump`).
 pub(crate) const CLASS_SOURCE_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// The first word of a class cell's key for the sky's member parts ([`part_of_key`]), `"class"` in
+/// ASCII.
+const CLASS_PART_WORD: u64 = 0x0000_0063_6c61_7373;
 
 /// Whether the range query registers the catalogue classes beside the grid (the hold of
 /// [`CLASS_SOURCE_VERSION`]).
@@ -293,6 +300,53 @@ impl<L: ClassLookup> CachedClassSource<'_, L> {
                 .source
                 .lookup
                 .visit_class(galaxy, run[0].class(), visit);
+        }
+    }
+
+    /// Each class host of `layer` that may lie between `inner` and `outer` of `centre` at some
+    /// time of `window`, existing by its end, given to `each` in the source's order: the classes
+    /// in [`ALL_CLASSES`] order, then the cells its hits would read for the sphere of `outer`
+    /// about `centre` at the window's farthest time from the epoch, those of the part `part` of
+    /// `parts` by their key ([`part_of_key`]), then each cell's systems in the hits' order
+    /// (rendering plan R06, R06.T16.a). A placed class's candidate is built only if its place,
+    /// padded by the farthest its hosts drift over the window, reaches the shell; a further
+    /// member of an entry is given only once its entry's break is past by the window's end; and a
+    /// host's broken line over the window must come within `outer` and reach out to `inner`. It
+    /// may give a host beyond the shell, never leave one out.
+    ///
+    /// # Panics
+    ///
+    /// If `outer` is not finite and positive.
+    pub(crate) fn members_in_shell_over(
+        &self,
+        galaxy: &Galaxy,
+        centre: &GalacticPosition,
+        window: (UniverseTime, UniverseTime),
+        ((layer, inner, outer), part): ((Layer, LightYears, LightYears), (u32, NonZeroU32)),
+        each: &mut dyn FnMut(&CatalogueSystem),
+    ) {
+        let (from, to) = window;
+        let farthest = if from.since_epoch().as_seconds_f64().abs()
+            > to.since_epoch().as_seconds_f64().abs()
+        {
+            from
+        } else {
+            to
+        };
+        let sphere = QuerySphere::new(*centre, outer, farthest, LightYears::ZERO)
+            .expect("a shell's outer distance is finite and positive");
+        for class in ALL_CLASSES {
+            let visit = ShellHosts {
+                galaxy,
+                sphere: &sphere,
+                window,
+                shell: (layer, inner),
+                part,
+                cells: self.cells,
+                each: &mut *each,
+            };
+            // A class without a process has no hosts to give.
+            let _ = self.source.lookup.visit_class(galaxy, class, visit);
         }
     }
 }
@@ -751,6 +805,146 @@ fn hit_cells<P: ClassProcess>(process: &P, sphere: &QuerySphere) -> Vec<Catalogu
     } else {
         cells_in_sphere(class, sphere).collect()
     }
+}
+
+/// [`CachedClassSource::members_in_shell_over`]'s visit of one class: its hosts of the shell's
+/// layer that may lie in the shell over `window`, given to `each`, its cells' systems read through
+/// `cells`.
+struct ShellHosts<'a> {
+    galaxy: &'a Galaxy,
+    sphere: &'a QuerySphere,
+    window: (UniverseTime, UniverseTime),
+    /// The shell's layer and inner distance; its outer is the sphere's radius.
+    shell: (Layer, LightYears),
+    /// The part of the cells given, and of how many.
+    part: (u32, NonZeroU32),
+    cells: &'a dyn CatalogueClassCellCache,
+    each: &'a mut dyn FnMut(&CatalogueSystem),
+}
+
+impl ClassVisitor for ShellHosts<'_> {
+    type Output = ();
+
+    fn visit<P: ClassProcess>(self, process: &P) {
+        let Self {
+            galaxy,
+            sphere,
+            window,
+            shell: (layer, inner),
+            part: (part, parts),
+            cells,
+            each,
+        } = self;
+        if !may_be_asked(galaxy, process.class(), LayerSet::EMPTY.with(layer)) {
+            return;
+        }
+        let reach = place_reach(sphere);
+        // The farthest a placed class's host drifts from its place over the window, with
+        // `place_reach`'s margins.
+        let drift = reach.value() - sphere.radius().value();
+        let span = (inner, sphere.radius());
+        let mut offer = |system: &CatalogueSystem| {
+            if seen_in_shell(system, layer, sphere.centre(), window, span) {
+                each(system);
+            }
+        };
+        for key in hit_cells(process, sphere) {
+            if part_of_key(&[CLASS_PART_WORD, key.word()], parts) != part {
+                continue;
+            }
+            let systems = cells.systems(galaxy, key, &mut || {
+                ClassCellSystems::of(galaxy, process, key)
+            });
+            for &(index, place) in systems.places() {
+                let d = LightYears::from(sphere.centre().distance_to(&place)).value();
+                // Its hosts stay within `drift` of the place, so none from here meets the shell.
+                if d > reach.value() || d + drift < inner.value() {
+                    continue;
+                }
+                let id = key
+                    .candidate_id(index, 0)
+                    .expect("a cell's count is held under 2^24, so its candidates have IDs");
+                for system in entry_systems(galaxy, process, id) {
+                    offer(&system);
+                }
+            }
+            for system in systems.members() {
+                offer(system);
+            }
+        }
+    }
+}
+
+/// Whether `system` may be of `layer` and between `inner` and `outer` of `centre` at some time of
+/// `window`: of the layer, existing by the window's end and, a further member of its entry, past
+/// its entry's break by then; and its broken line over the window, the straight runs between the
+/// window's ends and the break within it, coming within `outer` of `centre` and reaching out to
+/// `inner`, each with a margin over the rounding.
+fn seen_in_shell(
+    system: &CatalogueSystem,
+    layer: Layer,
+    centre: &GalacticPosition,
+    (from, to): (UniverseTime, UniverseTime),
+    (inner, outer): (LightYears, LightYears),
+) -> bool {
+    /// The margin on each distance, ly: far above the rounding of a point of the root cube about
+    /// a line's ends, some 10⁻¹¹ ly.
+    const MARGIN_LY: f64 = 1e-6;
+    let record = system.record();
+    if record.layer() != layer {
+        return false;
+    }
+    match record.existence_at(to) {
+        Existence::NoSystemYet => return false,
+        Existence::Exists => {}
+    }
+    let SystemIdKind::Catalogue(id) = record.id().kind() else {
+        unreachable!("a catalogue system's record carries its 111 ID");
+    };
+    let at = system.motion().at();
+    if id.member() > 0 && to < at {
+        return false;
+    }
+    let c = centre.to_light_years_f64();
+    let corners = if from < at && at < to {
+        vec![from, at, to]
+    } else {
+        vec![from, to]
+    };
+    let points: Vec<[f64; 3]> = corners
+        .iter()
+        .map(|&t| system.position_at(t).to_light_years_f64())
+        .collect();
+    // Each run's distance from the centre is convex along it, so its farthest is at an end.
+    let farthest = points
+        .iter()
+        .map(|&p| length(core::array::from_fn(|k| p[k] - c[k])))
+        .fold(0.0, f64::max);
+    let nearest = points
+        .windows(2)
+        .map(|run| distance_to_run(c, run[0], run[1]))
+        .fold(f64::INFINITY, f64::min);
+    nearest <= outer.value() + MARGIN_LY && farthest + MARGIN_LY >= inner.value()
+}
+
+/// The distance from `c` to the straight run from `a` to `b`, all in light-years.
+#[must_use]
+fn distance_to_run(c: [f64; 3], a: [f64; 3], b: [f64; 3]) -> f64 {
+    let ab: [f64; 3] = core::array::from_fn(|k| b[k] - a[k]);
+    let ac: [f64; 3] = core::array::from_fn(|k| c[k] - a[k]);
+    let along = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+    let s = if along > 0.0 {
+        ((ac[0] * ab[0] + ac[1] * ab[1] + ac[2] * ab[2]) / along).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    length(core::array::from_fn(|k| ac[k] - s * ab[k]))
+}
+
+/// The length of `v`.
+#[must_use]
+fn length(v: [f64; 3]) -> f64 {
+    math::hypot(math::hypot(v[0], v[1]), v[2])
 }
 
 /// [`CatalogueClassSource::cells_read`]'s visit of one class: the cells its hits in `layers` about
