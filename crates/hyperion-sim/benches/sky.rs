@@ -70,8 +70,8 @@
 //! | `sky/census_near_sun_ceiling/*` | under twice the feasibility study's estimate, or to the owner (R13.T1) | R13's Risks (not re-run) |
 //! | `sky/census_near_sun_limit/*` | under twice `decision-r13-guard-trip.md` §2.3's estimate, or to the owner (R13.T1.b) | R13's Risks (not re-run) |
 //! | `sky/census_near_sun_served/*eye_5.0` | none: the full cold census at the real boundary, recorded (T17) | 2.75 × 10⁴ CPU-s on the server's galaxy, 1.41 × 10⁴ on the fixture, by the threads' CPU time on 15 workers, sampled 1 in 20 |
-//! | `sky/census_near_sun_members/served_5.0` | the first shells' within the first sky's 150 CPU-s; the whole recorded beside the grid's (T17, R06.T16.a) | 1.33 CPU-s in the first shells, 31.3 in all (C 10.1, D 13.9, E 6.9), the longest job 0.35 s, on a pod of 16 vCPU (2026-11-01, `--features testing`) |
-//! | `sky/census_near_sun_members/served_5.0_27` | as `/served_5.0`, the global list's members too, its stream tables apart (R06.T16.a at 27) | 7.95 CPU-s in the first shells, 127.5 in all (C 48.7, D 51.7, E 24.3), the longest job 2.36 s; 167 streams' tables in 4.5 s wall (223 s of jobs) first, on a pod of 64 vCPU (2026-11-02, `--features testing`) |
+//! | `sky/census_near_sun_members/served_5.0` | the first shells' within the first sky's 150 CPU-s; the whole recorded beside the grid's (T17, R06.T16.a) | 3.41 CPU-s in the first shells, 72.1 in all (C 21.7, D 31.7, E 17.6), the longest job 0.89 s, the classes' hosts among them (56.1 without), on a pod of 64 vCPU (2026-11-02, `--features testing`) |
+//! | `sky/census_near_sun_members/served_5.0_27` | as `/served_5.0`, the global list's members too, its stream tables apart (R06.T16.a at 27) | 8.72 CPU-s in the first shells, 146.5 in all (C 55.9, D 61.9, E 25.4), the longest job 3.51 s, the classes' hosts among them (126.4 without); 167 streams' tables in 3.7 s wall (183 s of jobs) first, on a pod of 64 vCPU (2026-11-02, `--features testing`) |
 //! | `sky/census_inner_disc_served/*eye_5.0` | none: the inner disc at the limit, recorded (T17), beside `decision-r13-guard-trip.md`'s 2–3 × 10⁵ | 2.42 × 10⁵ CPU-s on the server's galaxy, 1.70 × 10⁵ on the fixture, by the threads' CPU time on 15 workers, sampled 1 in 20 (2026-10-12) |
 //! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 1.26 CPU-s (rays 1.12, field 0.14), 0.22 s wall |
 //! | `sky/band_near_sun/march` | within the first sky's (T17) | 30.2 CPU-s, 2.04 s wall, ten replies, 30.2 MB |
@@ -3219,6 +3219,9 @@ mod members {
 
     use criterion::Criterion;
     use hyperion_sim::galaxy::Galaxy;
+    use hyperion_sim::galaxy::catalogue_classes::{
+        CatalogueCellKey, CatalogueClassCellCache, CatalogueClassSource, ClassCellSystems,
+    };
     use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
     use hyperion_sim::galaxy::features::members::source::{FeatureMemberSource, KeepInteriors};
     use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
@@ -3236,7 +3239,8 @@ mod members {
     };
     use hyperion_sim::sky::census::{
         CensusPlan, CensusTallies, MemberPart, NoSkyCellCache, Shell, SkyContext, SkyQuery,
-        SkySource, census_members, census_plan, streams_seen, takes_feature_members,
+        SkySource, census_members, census_plan, streams_seen, takes_class_hosts,
+        takes_feature_members,
     };
     use hyperion_sim::{GeneratorVersion, Seed};
 
@@ -3287,6 +3291,8 @@ mod members {
     /// `census_near_sun_members/served_5.0_27` is the same at generator version 27, where the
     /// census takes the global list's members too, the streams', the dwarf cores' and the
     /// galactic centre's ([`GlobalListSource`]), its stream tables built first and timed apart.
+    /// Both take the catalogue classes' hosts where the grid gives them up ([`takes_class_hosts`],
+    /// from the carve-out at 26), their class cells made for the census and kept for its jobs.
     pub(super) fn census_near_sun_members(c: &mut Criterion) {
         let mut group = c.benchmark_group("sky");
         group.sample_size(10);
@@ -3346,8 +3352,30 @@ mod members {
         }
     }
 
+    /// A class-cell cache that keeps every cell's systems the census's jobs make, each made outside
+    /// its lock; an equal cell may be made twice, and the first kept.
+    #[derive(Default)]
+    struct KeepClassCells(Mutex<BTreeMap<CatalogueCellKey, Arc<ClassCellSystems>>>);
+
+    impl CatalogueClassCellCache for KeepClassCells {
+        fn systems(
+            &self,
+            _galaxy: &Galaxy,
+            key: CatalogueCellKey,
+            make: &mut dyn FnMut() -> ClassCellSystems,
+        ) -> Arc<ClassCellSystems> {
+            if let Some(systems) = self.0.lock().expect("no job panics").get(&key) {
+                return Arc::clone(systems);
+            }
+            let fresh = Arc::new(make());
+            let mut kept = self.0.lock().expect("no job panics");
+            Arc::clone(kept.entry(key).or_insert(fresh))
+        }
+    }
+
     /// One bench of the members' census near the Sun on `sky_of`'s galaxy, through its features'
-    /// source and, if `list` is given, its global list's.
+    /// source, its classes' where its grid gives their hosts up and, if `list` is given, its global
+    /// list's.
     fn bench_members(
         group: &mut BenchmarkGroup<'_, WallTime>,
         name: &str,
@@ -3380,6 +3408,7 @@ mod members {
                         .flat_map(|shell| MemberPart::all(parts).map(move |part| (shell, part)))
                         .collect();
                     let interiors = KeepInteriors::new(&sky.galaxy);
+                    let class_cells = KeepClassCells::default();
                     let orbits = KeepCentreOrbits::new(&sky.galaxy);
                     if let Some(tubes) = tubes {
                         let streams = streams_seen(&sky.galaxy, &tubes.list, &plan, query);
@@ -3400,7 +3429,10 @@ mod members {
                             GlobalListSource::new(&sky.galaxy, tubes, &orbits)
                                 .expect("the fixture's centre builds")
                         });
+                        let classes = takes_class_hosts(&sky.galaxy)
+                            .then(|| CatalogueClassSource::new().with_cells(&class_cells));
                         let mut sources: Vec<&dyn SkySource> = vec![&source];
+                        sources.extend(classes.iter().map(|classes| classes as &dyn SkySource));
                         sources.extend(listed.iter().map(|listed| listed as &dyn SkySource));
                         let mut ctx = SkyContext {
                             tables: &sky.tables,
@@ -3452,7 +3484,7 @@ mod members {
         let (mut first_wall, mut first_cpu, mut all_cpu) =
             (Duration::ZERO, Duration::ZERO, Duration::ZERO);
         let mut longest = Duration::ZERO;
-        eprintln!("{name}: the feature members near the Sun at the served sky's caps");
+        eprintln!("{name}: the members beyond the grid near the Sun at the served sky's caps");
         for cap in plan.caps() {
             let layer = cap.layer();
             let (mut generated, mut accepted, mut ran, mut on_cpu) =

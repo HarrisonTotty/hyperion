@@ -225,12 +225,14 @@ pub trait SkySource { fn members_seen(&self, galaxy: &Galaxy, observer: &Observe
     seen: ((MassBand, LightYears, LightYears), MemberPart), each: &mut dyn FnMut(SkyMember<'_>));
     fn holds_feature_members(&self) -> bool { false } } // R06.T16.a at 27, as built
 pub enum SkyMember<'a> { Feature(&'a MemberRecord), Listed(&'a GlobalMemberRecord),
-    Centre(&'a CentreMemberLight, &'a Trajectory) }
+    Centre(&'a CentreMemberLight, &'a Trajectory), Class(&'a CatalogueSystem) }
+impl<L: ClassLookup> SkySource for CachedClassSource<'_, L> { /* R06.T16.a, as built */ }
 pub fn streams_seen(galaxy: &Galaxy, list: &GlobalList, plan: &CensusPlan, query: &SkyQuery)
     -> Vec<StreamNumber>;
 pub fn census_members(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, plan: &CensusPlan,
     shell: (Shell, MemberPart), query: &SkyQuery, out: &mut Vec<SkyStar>) -> CensusTallies;
 pub fn takes_feature_members(galaxy: &Galaxy) -> bool; // R06.T16.a, as built
+pub fn takes_class_hosts(galaxy: &Galaxy) -> bool; // R06.T16.a, as built
 pub struct CensusPlan { /* caps: Vec<LayerCap>, cells: Vec<CellKey> (canonical order) */ }
 pub fn census_plan(galaxy: &Galaxy, tables: &LuminosityTables, envelope: &BrightnessEnvelope,
     query: &SkyQuery, cache: &mut NoiseCache) -> CensusPlan;
@@ -9993,3 +9995,20 @@ CensusCost)`.
     the centre's cached cells keep 32 bytes more a member (`CentreMemberLight`).
   - _Movers at 27._ Sky replies list the streams', dwarf cores' and centre's living members' stars,
     with their tallies and overflow; the sky's pins move only with the field's own 27 holds.
+- **R06.T16.a: the catalogue classes' hosts (2026-11-02).**
+  - **The switch.** `sky::census::takes_class_hosts`, the carve-out's hold (`CARVE_OUT_VERSION`,
+    26), under which the grid gives the hosts up; the server's `SkyMembers::of` takes its class
+    cells there. The range query registers the classes only at 27, so at 26 a host is in the sky
+    and in no range reply (finding).
+  - **The source.** `CachedClassSource` is a `SkySource` (`SkyMember::Class`): every class of the
+    production lookup, on its broken line, with its class's own stars and multiplicity, seen where
+    it exists at its emitted time and a further member from its entry's break, as `push_hit` lists.
+  - **The walk.** The hits' cells about the shell's sphere at the window's farthest time, in parts
+    by cell key; a placed class's candidate built only where its place, padded by its drift, meets
+    the shell; each host's broken line over the window tested against the shell.
+  - **The test.** Every host the range query returns within the shells is in the census once, at 26
+    and 27: from the Sun to 400 ly (some hundred, mostly accreting white dwarfs), and 30 ly from the
+    nearest luminous blue variable, which is listed.
+  - **Cost.** `sky/census_near_sun_members/*`: the measurements in the lane's outbox.
+  - _Movers at 26._ Sky replies list the classes' hosts' stars, with their tallies and overflow; the
+    sky's pins census with no sources and do not move.

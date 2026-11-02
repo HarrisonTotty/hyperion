@@ -309,7 +309,11 @@ async fn computed(
     } else {
         None
     };
-    let members = (&state.feature_cells, &state.cluster_models);
+    let members = (
+        &state.feature_cells,
+        &state.cluster_models,
+        &state.class_cells,
+    );
     let inputs = CensusInputs {
         members: SkyMembers::of(&galaxy, members, list),
         galaxy,
