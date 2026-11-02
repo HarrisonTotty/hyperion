@@ -21,7 +21,9 @@
 
 When this plan is done a generated world, drawn in the photorealistic style, has everything the
 brainstorm's step 9 lists. The ground carries GPU decoration below the 2 m band limit, and the view
-says when it is on. Rocks 0.4 m across or more, which covers every rock 0.2 m tall, are
+says when it is on. Every texture it draws is generated for the world it lies on, from that world's
+own substances, forms and conditions, so no two worlds share one and the client ships no texture
+image (Design note 21, the owner's ruling of 2026-11-01). Rocks 0.4 m across or more, which covers every rock 0.2 m tall, are
 authoritative: `hyperion-surface` places them by hash in cells per size octave, from Golombek and
 Rapp's rock size–frequency law with an abundance set by the surface's type and age, with analytic
 shapes that the same crate answers contact queries against, bit for bit on native and both
@@ -49,6 +51,8 @@ In scope:
 - GPU decoration on terrain (normal detail, colour variation, sand ripples, crater scars, and the
   triplanar detail textures with their repetition hiding, which R10 hands over as decoration in its
   Design note 9), its setting and its `DECORATION ON` label.
+- The detail textures generated for each world from its own materials and conditions, with no
+  texture authored or shipped (Design note 21).
 - `hyperion_surface::scatter`: rock abundance, placement, shapes and the contact query; its goldens
   on three targets; its generator-version bump.
 - Rocks in the client: baked with patches through R10's `BakeHook`, instanced, drawn under the rule
@@ -182,9 +186,10 @@ pure module as its reference.
 - `surface/decoration/`: `decorationSetting.ts` (the ladder entries and whether decoration is
   drawn), `decorationLattice.ts` (the integer lattice hash the WGSL mirrors), `decoration.wgsl` and
   `detailTextures.wgsl` (triplanar, or biplanar on the low end, with two-scale repetition hiding),
-  both behind R10's `terrain_decoration` hook; `DECORATION_BAND_LIMIT_M`, R05's `BAND_LIMIT_M` read
-  through R05's `bandLimitM()` in `view/terrain/planet.ts`, over the wasm export `band_limit_m()`
-  (R05.T5, T7.a), and never redefined.
+  `detailTextureBake.ts` and `detailTextureBake.wgsl` (the world's generated detail sets, Design
+  note 21), all behind R10's `terrain_decoration` hook; `DECORATION_BAND_LIMIT_M`, R05's
+  `BAND_LIMIT_M` read through R05's `bandLimitM()` in `view/terrain/planet.ts`, over the wasm export
+  `band_limit_m()` (R05.T5, T7.a), and never redefined.
 - `surface/scatter/`: `rockLayer.ts` (the `ExtraLayer` it fills through R10's `BakeHook`),
   `rockMesh.ts` (`tessellateRock(rock, level)`, `chordalBound(rock, level)`), `rockSelection.ts`
   (`rocksToDraw(patches, bodies, setting, style)`, `couldTouch(body, path)`,
@@ -788,11 +793,12 @@ ambiguous, the design note that reads it is named.
     (`particles`; `annulus`) and `ringShadowOnBody` (on; off). The pass labels, each mapped to one
     of R12's `BudgetRow`s: `decoration` (inside R10's terrain pass, timed as its increment),
     `rocks`, `scatter`, `clouds`, `cloudShadow`, `ocean`, `rings` and `still`. Every GPU allocation
-    names an R01 `MemoryCategory`: `clouds` (noise volumes, the τ texture, the transmittance map),
-    `ocean`, `rings` (the profile and the shadowing table), `scatter` and `stills` (tiles and the
-    accumulation target). The quality limits for R12.T7's audit: the budget's rows above for each
-    pass on each GPU, 16 MB for the low clouds and 10–20 MB for the volume, and the tile sizes of
-    Design note 17; R12 records a miss as a finding.
+    names an R01 `MemoryCategory`: `decoration` (the world's generated detail sets, Design note
+    21), `clouds` (noise volumes, the τ texture, the transmittance map), `ocean`, `rings` (the
+    profile and the shadowing table), `scatter` and `stills` (tiles and the accumulation target).
+    The quality limits for R12.T7's audit: the budget's rows above for each pass on each GPU, 16 MB
+    for the low clouds and 10–20 MB for the volume, and the tile sizes of Design note 17; R12
+    records a miss as a finding.
 
 19. **Motion.** Clouds move with the simulation's wind and waves with its time: that is the world
     moving, which guide item 8's reduced-motion rule does not stop ("the world cannot be frozen").
@@ -816,11 +822,49 @@ ambiguous, the design note that reads it is named.
     about 1 m on legs spaced under 2 m arrives, a hazard console must show the ground below 2 m, or
     a fresh-crater class is placed at landing sites.
 
+21. **Every texture is generated for its world (the owner, 2026-11-01).** The owner ruled that
+    HYPERION generates nearly everything, textures and materials included, so that each world looks
+    as its own conditions make it. Its materials already are generated: a form of one of the body's
+    palette substances, resolved by the server (R10). This plan adds no texture image: every texture
+    its passes sample is generated in the client for the body it is drawn on, and none is authored
+    or shipped. The detail textures are one generated set (a tileable height-derived normal and an
+    albedo variation, with mips) for each material the body's field names, a form and its palette
+    entry, made by a compute pass from three inputs:
+    - **The form**, which picks the generator's family. The lean: fractured and jointed for
+      `Bedrock`; vesicular or flow-banded for `VolcanicRock`, by the entry's mechanics family; graded
+      grains for `Regolith`, `Soil`, `Sand` and `Dust`, at each form's grain size; laminae for
+      `Sediment` and `OrganicSediment`; crystalline and sintered for `Snow`, `Frost` and `Glacier`;
+      ridged and rafted plates for `SeaIce`; desiccation polygons for `Evaporite`; a cracked,
+      cooling skin for `Melt`.
+    - **The entry's own values.** Its B, V and R albedos give the colour variation's hue axis, and
+      its albedo span gives the amplitude. Its `FeO_T` and the ground's maturity, through R10's
+      space-weathering law, darken and redden an airless body's exposed grains.
+    - **The body's conditions.** Its pressure class decides the grains' shapes: airless ground is
+      impact-gardened and its rocks rounded by micrometeorites, while under air the wind sorts and
+      rounds them. Its gravity, its surface age (the scars' and weathering's density) and its surface
+      seed also count. The seed keys every hash with the entry, so two worlds of one substance differ
+      and every console sees one world the same. At draw time the patch's own wind orients the
+      ripples (T2.a).
+
+    The families are the lean, which the re-validation may refine, and each mapping's figures are
+    researched and cited by T2.c (the Figures rule). The sets obey Design note 3: they are zero-mean
+    about the class albedo and the baked normal, never geometry, keyed by the integer lattice, and
+    not bit-identical across GPUs. They are decoration, so the low setting generates none, and a rock
+    on low is shaded by its material alone. On high, rocks (T4) sample their site entry's `Bedrock`
+    set and pebbles (T6) their ground's. A body's sets are generated when its first finest-level
+    patch is baked, spread over frames within the frame budget so that an arrival drops no frame, and
+    freed with the body. Until a set is ready its ground draws undecorated, and `DECORATION ON`
+    shows only once a set is drawn. Their memory is the `decoration` category, sized by T2.c against
+    the budget's memory table. The clouds' noises (T7.c), the ocean's wave spectrum (T8) and the
+    ring's shadowing table and profile (T9) are generated already, so every texture this plan
+    samples is the world's own. An authored image in any of these passes is a finding, and T2.c's
+    scan fails on one.
+
 ## Tasks
 
-T1 comes first. T2 needs T1. T3's subtasks run in order; T4 and T6 follow T3. T5 is a record and can
-land at any time. T7, T8 and T9 are independent of the rocks and of each other and can run beside
-them after T1. T10 follows T2, T4, T6 and T7–T9, since a still wants every pass; T10.a can start at
+T1 comes first. T2 needs T1, and T2.c follows T2.a. T3's subtasks run in order; T4 and T6 follow
+T3. T5 is a record and can land at any time. T7, T8 and T9 are independent of the rocks and of each
+other and can run beside them after T1. T10 follows T2, T4, T6 and T7–T9, since a still wants every pass; T10.a can start at
 once except for its decoration-fade test, which waits for T2. T11 closes. Before T1 starts, the plan
 is re-validated against the code as built (`revalidate-plan`): R01's, R02's and R05's for T1, T2 and
 T10, and R09's and R10's before T3, since their names are what T3 and T4 call. Every task that adds
@@ -873,8 +917,34 @@ the label is text in the DOM, not canvas. Acceptance: `pnpm test`, `just ci`.
   every texel finite; the low setting's pipeline contains no decoration code. Bench: GPU time added
   to the terrain pass on the high setting, at 1080p on the development machine and, by the owner,
   at 720p on the UHD 620.
+- **R11.T2.c Generated for the world.** Follows T2.a. T2.b may land first and sample the sets once
+  they exist. The work, in `detailTextureBake.ts` and `detailTextureBake.wgsl` (Design note 21):
+  - For each material the body's field names, a compute pass generates the material's detail set
+    from its form's family, its entry's values and the body's conditions, keyed by the surface seed
+    and the entry.
+  - The sets are generated when the body's first finest-level patch is baked, spread over frames,
+    and freed with the body. High setting only.
+  - `detailTextures.wgsl` samples them.
+  - Each mapping's figures are researched and cited first.
 
-Files: `surface/decoration/*`, R10's terrain material shader, R01's `WGSL_CATALOGUE`, tests.
+  Tests:
+  - The same body gives byte-equal sets in two runs on SwiftShader, through R01's smoke harness.
+  - Two bodies that differ only in their seed, their pressure class, or one entry's albedo,
+    `FeO_T` or maturity give sets that differ.
+  - Every set is zero-mean about its class albedo to 10⁻³, and its normals are unit length.
+  - The low setting creates no generator pipeline.
+  - A source scan in Vitest finds no image file imported under `view/` and none loaded by this
+    plan's passes.
+
+  Bench: each material's generation time, a body's sets' memory and the longest frame during an
+  arrival. These are measured on the development machine and the owner's Mac, and by the owner on
+  the UHD 620.
+
+  By hand: a mature lunar basalt plain, a dusty Mars and an icy Europa, seen from 2 m, read as
+  three different grounds, and two basalt worlds of different ages read differently.
+
+Files: `surface/decoration/*`, R10's terrain material shader, R01's `WGSL_CATALOGUE` and
+`MemoryCategory`, tests.
 Acceptance: `pnpm test`, `just ci`, `just test-render`, and by hand: from 2 m above a sandy slope,
 ripples and scars read as ground, and turn off with the setting.
 

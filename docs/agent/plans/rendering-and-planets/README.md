@@ -88,7 +88,7 @@ nothing else waits on Phase C except R12's main-screen run.
 | RM7       | R13     | Sequenced after RM3, beside RM4 (numbered so that RM4–RM6 keep theirs; R13.T2 is RM3's interim). The sky affordable in full: every star within the census's real boundary, set by a ceiling V_P and at most 2,000 ly, is the galaxy's own, and the distant field is synthetic stars drawn from the generated galaxy's own tables, world-anchored, consistent with the band and labelled; a camera's sky to V 10     |
 | RM4       | R08     | Every atmosphere plan 14 gives a body, computed from its composition, seen from the ground, from orbit and across the system, thick ones checked against a path tracer                                                                                                                                                                                                                                              |
 | RM5       | R09–R10 | Generated worlds: the server's coarse field, surveyed coverage, the shared height function on three targets; surveyed terrain drawn in both styles with authoritative materials, horizon-map shadows and readouts that state their uncertainty                                                                                                                                                                      |
-| RM6       | R11–R12 | Decoration, authoritative rocks, clouds, oceans with glint, rings close to, still images; the budget measured on both GPUs, the ladder adjusted and every low setting audited                                                                                                                                                                                                                                       |
+| RM6       | R11–R12 | Decoration with every texture generated for its world, authoritative rocks, clouds, oceans with glint, rings close to, still images; the budget measured on both GPUs, the ladder adjusted and every low setting audited                                                                                                                                                                                            |
 | RM8       | R14     | Added 2026-11-01 at the owner's request, beside RM6. One GPU-driven cluster path for every 3D model, terrain first and Apple Silicon first: clusters culled and chosen by projected error on the GPU for every pass and drawn by indirect buckets, a visibility buffer, measured-error strides and occlusion, mesh pages streamed into one pool; heights, selection and the collision ground unchanged              |
 
 RM8 is done when R14's Verification holds with the owner's Mac and RTX figures recorded, or when the
@@ -197,6 +197,12 @@ The galaxy roadmap's
 [Conventions every plan follows](../galaxy-generation/README.md#conventions-every-plan-follows) bind
 these plans: the ten-section plan layout, the records as built, the code shape, the generator
 version, the tests and the Figures rule. Only what differs is stated here.
+
+- **Generated content** (the owner, 2026-11-01). HYPERION generates nearly everything, textures
+  and materials included, from each world's own conditions; no texture is authored or shipped
+  (R11's Design note 21; the brainstorm's Materials section). An authored asset, an image, a mesh or
+  a hand-set material, is an exception its plan names with its reason and the owner rules on. Craft
+  art for R14.T5 and any later vegetation or biosphere plan inherit the rule.
 
 - **Records as built** follow the galaxy roadmap's
   [Records as built](../galaxy-generation/README.md#records-as-built): inline in Risks until a plan

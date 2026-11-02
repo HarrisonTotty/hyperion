@@ -1605,6 +1605,15 @@ Kept brief, because it is the least uncertain part and the most easily changed:
 - **Triplanar projection** for rock and detail textures, blended by the surface normal, which avoids
   the UV distortion any spherical parameterisation produces. Biplanar is the cheaper variant if three
   samples per fragment costs too much on the Intel part.
+- **Every texture is generated for its world.** No texture is authored or shipped. Each world's
+  detail textures are generated in the client from its own materials, each a form and its
+  substance's values, and from its conditions: its air or none, its gravity, its surface's age and
+  weathering, and its seed. So a basalt Moon, a dusty Mars and an icy Europa each look as their own
+  conditions make them, and two worlds of one substance still differ. Like the rest of the
+  decoration, they are zero-mean about the authoritative albedo. An authored asset anywhere, an
+  image, a mesh or a hand-set material, is an exception its plan names with its reason and the owner
+  rules on. _Ruled by the owner on 2026-11-01 ("procedurally generate nearly everything, including
+  textures and materials"); plan R11, Design note 21._
 - **Repetition hidden** by blending two scales with a per-patch rotation and offset, which is two
   samples rather than the four or more that stochastic approaches need.
 - **Instanced scatter** from hashed cells, filtered by biome and slope, with the instance count falling
