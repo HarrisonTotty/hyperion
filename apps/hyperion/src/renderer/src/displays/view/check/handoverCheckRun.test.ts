@@ -5,6 +5,7 @@ import {
   HANDOVER_CHECK_TIMING,
   type HandoverCheckEnding,
   handoverCheckTimingFor,
+  handoverLooksFor,
   LookDeadline,
   parseExposureReading,
   recordHandoverCheck,
@@ -61,6 +62,22 @@ describe("a look's deadline (R10.T15.b.2)", () => {
     const deadline = new LookDeadline({ overrunMs: 300_000, overrunFrom: "stall" }, 1_000, 270);
     expect(deadline.passed(301_000, 0)).toBe(false);
     expect(deadline.passed(301_001, 0)).toBe(true);
+  });
+});
+
+describe("the looks a launch makes (R10.T15.b.2)", () => {
+  it("are all three in order without --look", () => {
+    expect(handoverLooksFor(undefined).map((look) => look.name)).toEqual([
+      "handover-30",
+      "handover-90",
+      "handover-terminator",
+    ]);
+  });
+
+  it("are the one --look names", () => {
+    for (const name of ["handover-30", "handover-90", "handover-terminator"] as const) {
+      expect(handoverLooksFor(name).map((look) => look.name)).toEqual([name]);
+    }
   });
 });
 

@@ -144,6 +144,21 @@ describe("the views check's launch switch", () => {
     expect(readViewsCheckLaunch({ ...LAUNCH, compositeProbe: "sky-off" })).toBeNull();
   });
 
+  it("carries the hand-over check's one look, on a hand-over check alone (R10.T15.b.2)", () => {
+    const launch: ViewsCheckLaunch = {
+      ...LAUNCH,
+      run: "handover",
+      served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+      look: "handover-90",
+    };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    const fixtureLook: ViewsCheckLaunch = { ...LAUNCH, run: "handover", look: "handover-30" };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(fixtureLook)])).toEqual(fixtureLook);
+    expect(readViewsCheckLaunch({ ...launch, look: "handover-45" })).toBeNull();
+    expect(readViewsCheckLaunch({ ...LAUNCH, run: "terrain", look: "handover-30" })).toBeNull();
+    expect(readViewsCheckLaunch({ ...LAUNCH, look: "handover-30" })).toBeNull();
+  });
+
   it("is absent on any other launch", () => {
     expect(viewsCheckLaunchFromArgv(["--hyperion-server-url=ws://127.0.0.1:7878/ws"])).toBeNull();
   });

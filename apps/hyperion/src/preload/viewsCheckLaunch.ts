@@ -11,6 +11,7 @@
 
 import type {
   CompositeProbeName,
+  HandoverLookName,
   ViewsCheckLaunch,
   ViewsCheckRunKind,
   ViewsCheckTerrainFixture,
@@ -59,8 +60,28 @@ const COMPOSITE_PROBES: ReadonlyArray<CompositeProbeName> = [
   "per-pixel",
 ];
 
+/** The hand-over check's looks a launch may name (`HandoverLookName`). */
+const HANDOVER_LOOK_NAMES: ReadonlyArray<HandoverLookName> = [
+  "handover-30",
+  "handover-90",
+  "handover-terminator",
+];
+
 /**
- * `value` as the check's options, or `null` if it is not one: every field present and of its type,
+ * `value` as the check's options, or `null` if it is not one: {@link readLaunchBase}'s, with the one
+ * look (`look`) a hand-over check alone may name (R10.T15.b.2's runs).
+ */
+export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
+  const base = readLaunchBase(value);
+  if (base === null || !isRecord(value) || value["look"] === undefined) {
+    return base;
+  }
+  const look = HANDOVER_LOOK_NAMES.find((each) => each === value["look"]);
+  return look !== undefined && base.run === "handover" ? { ...base, look } : null;
+}
+
+/**
+ * `value` as the check's options but its look, or `null` if it is not one: every field present and of its type,
  * and the weathered fixture on a terrain run or its hand-over check alone (T20's run and the
  * atmosphere run, plan R08, R08.T10.b, serve no field, so their launches name `TERRAIN TEST`'s, the
  * default); a served world (plan R10, R10.T15.b), its universe's and body's IDs, only on a
@@ -71,7 +92,7 @@ const COMPOSITE_PROBES: ReadonlyArray<CompositeProbeName> = [
  * 2026-11-01); and the composite's probe (`compositeProbe`, the owner's priority, 2026-11-01) on
  * that profile alone.
  */
-export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
+function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
   if (!isRecord(value)) {
     return null;
   }

@@ -47,6 +47,11 @@
 # is not the default. Each launch is given 20 minutes more, above the client's 15 for reading the
 # served world and its looks' fields. The files are named <date>-<machine>-<setting>-handover-served.
 #
+# --terrain --handover --look <NAME> runs that one look (handover-30, handover-90 or
+# handover-terminator) in place of all three (R10.T15.b.2's runs): in the software mode a served look
+# at the high setting takes over an hour, so that three in one launch pass its watchdog, and a
+# launch a look keeps each within it and the runs resumable by look. The script passes it through.
+#
 # --terrain --weathered, with or without --handover, serves the run TEST MOON weathered's field in
 # TERRAIN TEST's place (plan R10, R10.T1.c; decision-r10-t1c-client-scope §3): the same moon on a
 # 1 Gyr surface, its young craters ringed by haloes of fresh regolith. The files are named

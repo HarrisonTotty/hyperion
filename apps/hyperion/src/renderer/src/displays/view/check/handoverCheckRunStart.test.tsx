@@ -5,7 +5,7 @@ import {
   type HandoverCheckDeps,
   runHandoverCheck,
 } from "./handoverCheckRun";
-import { HANDOVER_APPROACH } from "./handoverGeometry";
+import { HANDOVER_APPROACH, HANDOVER_LOOKS } from "./handoverGeometry";
 import { HandoverScenes, terrainTestHandoverWorld } from "./handoverScenes";
 import { STOPPED } from "./viewsCheckRun";
 
@@ -57,6 +57,7 @@ function deps(signal: AbortSignal): HandoverCheckDeps {
       faults: () => [],
     },
     scenes: new HandoverScenes(terrainTestHandoverWorld(), HANDOVER_APPROACH.full, 9e6),
+    looks: HANDOVER_LOOKS,
     setting: "low",
     document,
     timing: { ...HANDOVER_CHECK_TIMING, waitMs: 1_000, pollMs: 1 },

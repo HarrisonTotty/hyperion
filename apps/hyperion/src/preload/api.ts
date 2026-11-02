@@ -1086,6 +1086,12 @@ export interface ViewsCheckLaunch {
    * other launch, whose composite is drawn as on a player's.
    */
   readonly compositeProbe?: CompositeProbeName;
+  /**
+   * The one look a `--terrain --handover` launch runs (`--look`; R10.T15.b.2's runs), absent for all
+   * three in order: a served look on SwiftShader at the high setting takes over an hour, so that
+   * three in one launch pass its watchdog, and a look a launch makes each run resumable by look.
+   */
+  readonly look?: HandoverLookName;
 }
 
 /**

@@ -71,7 +71,9 @@
  * `--handover`, since the whole body has no survey edge to hand over across. With `--universe <ID>` and `--body <ID>` (plan
  * R10, R10.T15.b) the hand-over check's looks are made on that body as the server serves it, in
  * `TERRAIN TEST`'s place: both or neither, on `--terrain --handover` alone, never with
- * `--weathered`. With `--atmosphere` instead (plan R08,
+ * `--weathered`. `--look <NAME>` (R10.T15.b.2) runs the hand-over check's one look of that name
+ * (`handover-30`, `handover-90` or `handover-terminator`) in place of all three, a launch a look; it
+ * is refused without `--handover`. With `--atmosphere` instead (plan R08,
  * R08.T10.b) it runs the atmosphere run on `ATMOSPHERE TEST`, at its `--setting`: the primary
  * photorealistic, its atmosphere media awaited, the moonlit night captured from the seat, then a
  * scripted free-camera flight to a few radii of each air fixture, each captured. `--atmosphere` is
@@ -105,6 +107,7 @@ import { Command, InvalidArgumentError, Option } from "commander";
 import type {
   CompositeProbeName,
   GeometryOverride,
+  HandoverLookName,
   QualitySettingName,
   ServedWorldNames,
 } from "../preload/api";
@@ -369,6 +372,12 @@ export function buildCommand(version: string): Command {
     )
     .addOption(
       new Option(
+        "--look <NAME>",
+        "the hand-over check's one look, in place of all three (R10.T15.b.2): a launch a look",
+      ).choices(["handover-30", "handover-90", "handover-terminator"]),
+    )
+    .addOption(
+      new Option(
         "--timing",
         "the inspection run's frame profile (the owner's report): per pass and per thread, from orbit, close in and low",
       ),
@@ -520,6 +529,9 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   }
   if (options["compositeProbe"] !== undefined && options["timing"] !== true) {
     command.error("error: --composite-probe is an option of --timing, which was not given");
+  }
+  if (options["look"] !== undefined && options["handover"] !== true) {
+    command.error("error: --look is an option of --handover, which was not given");
   }
   if (options["viewsCheck"] === true) {
     // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
@@ -693,6 +705,8 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     ...(options["timing"] === true ? { timing: true } : {}),
     // Refused without `--timing` before this is reached; commander has checked its choices.
     ...compositeProbeOf(options),
+    // Refused without `--handover` before this is reached; commander holds it to the three names.
+    ...lookOf(options),
   };
 }
 
@@ -705,6 +719,21 @@ function compositeProbeOf(
     ? { compositeProbe: probe }
     : {};
 }
+
+/** The one look `--look` names, where it names one of the hand-over check's, else nothing. */
+function lookOf(
+  options: Readonly<Record<string, unknown>>,
+): { readonly look: HandoverLookName } | Record<string, never> {
+  const look = HANDOVER_LOOKS_NAMED.find((each) => each === options["look"]);
+  return look === undefined ? {} : { look };
+}
+
+/** The looks `--look` may name. */
+const HANDOVER_LOOKS_NAMED: ReadonlyArray<HandoverLookName> = [
+  "handover-30",
+  "handover-90",
+  "handover-terminator",
+];
 
 /** The served world `--universe` and `--body` name where both are given, else nothing. */
 function servedOf(

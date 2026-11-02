@@ -47,6 +47,7 @@ import type {
   HandoverComparisonRecord,
   HandoverExposureRecord,
   HandoverFrameRecord,
+  HandoverLookName,
   HandoverLookRecord,
   HandoverRegime,
   HandoverSwitchName,
@@ -233,6 +234,15 @@ export class LookDeadline {
   }
 }
 
+/**
+ * The looks a launch's run makes: all of {@link HANDOVER_LOOKS} in order, or the one `name` names
+ * (`--look`; R10.T15.b.2's runs: a served look on SwiftShader at the high setting takes over an
+ * hour, so that a launch a look keeps each within its watchdog and the runs resumable by look).
+ */
+export function handoverLooksFor(name: HandoverLookName | undefined): ReadonlyArray<HandoverLook> {
+  return name === undefined ? HANDOVER_LOOKS : HANDOVER_LOOKS.filter((look) => look.name === name);
+}
+
 /** What the hand-over check drives and reads. */
 export interface HandoverCheckDeps {
   readonly api: Pick<ViewsCheckApi, "capture">;
@@ -249,6 +259,8 @@ export interface HandoverCheckDeps {
   >;
   /** The looks' scenes, which `VIEW` offers, and the world they are made on. */
   readonly scenes: HandoverScenes;
+  /** The looks the run makes, in order: all of {@link HANDOVER_LOOKS}, or the one `--look` names. */
+  readonly looks: ReadonlyArray<HandoverLook>;
   readonly setting: QualitySettingName;
   readonly document: Document;
   readonly timing: HandoverCheckTiming;
@@ -643,10 +655,10 @@ export async function runHandoverCheck(deps: HandoverCheckDeps): Promise<Handove
     };
   };
 
-  /** Runs `HANDOVER_LOOKS[index]` and each after it, each on the page the one before left. */
+  /** Runs `deps.looks[index]` and each after it, each on the page the one before left. */
   const runFrom = async (index: number): Promise<HandoverLookRecord[]> => {
     stopped();
-    const look = HANDOVER_LOOKS[index];
+    const look = deps.looks[index];
     if (look === undefined) {
       return [];
     }

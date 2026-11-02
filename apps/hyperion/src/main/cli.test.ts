@@ -626,6 +626,44 @@ describe("the several-views check's options", () => {
     });
   });
 
+  it("takes --look, the hand-over check's one look (R10.T15.b.2)", () => {
+    expect(
+      parse([
+        "--views-check",
+        "--terrain",
+        "--handover",
+        "--universe",
+        UNIVERSE,
+        "--body",
+        BODY,
+        "--look",
+        "handover-terminator",
+      ]).viewsCheck,
+    ).toEqual({
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "handover",
+      fixture: "terrain-test",
+      served: { universe: UNIVERSE, body: BODY },
+      look: "handover-terminator",
+    });
+  });
+
+  it("refuses --look without --handover", () => {
+    const error = refusal(["--views-check", "--terrain", "--look", "handover-30"]);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      "error: --look is an option of --handover, which was not given",
+    ]);
+  });
+
+  it("refuses a look the hand-over check does not make", () => {
+    const error = refusal(["--views-check", "--terrain", "--handover", "--look", "handover-45"]);
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain("handover-45");
+  });
+
   it("takes --timing, the inspection run's frame profile (the owner's report)", () => {
     expect(
       parse(["--views-check", "--inspection", "--universe", UNIVERSE, "--body", BODY, "--timing"])
