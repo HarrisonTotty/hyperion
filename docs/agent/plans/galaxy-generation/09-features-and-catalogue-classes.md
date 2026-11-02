@@ -5904,6 +5904,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Lists kept._ The server's `SharedClusterModelCache` keeps each feature's list beside its
     interior or bound (`list`), charged `FeatureLevelList::heap_bytes` in its own budget;
     `FeatureLevelList::listed_of` is `pub`, and `FeatureMemberSource::read_ahead` makes the lists.
+    `type_ia::DelayLaw` finds `ψ`'s and `Ψ`'s constants once a quadrature, bit for bit.
   - _Bench._ `served_at_27` adds the global list, the black hole's 50 ly query and a galaxy's first.
   - _Centre's census._ `CentreModel` keeps each level's and band's bounds by corner key
     (`members::CornerBounds`, made when first read, 370 kB, bounded by the grid);

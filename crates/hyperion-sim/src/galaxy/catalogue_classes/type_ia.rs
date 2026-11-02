@@ -223,6 +223,49 @@ impl LifetimeTable {
     }
 }
 
+/// The closed forms `ψ` and `Ψ` with their constants found once: the amplitude
+/// ([`DelayTimeDistribution::amplitude_per_year_per_solar_mass`]) and `(MIN_DELAY ÷ Gyr)^(β + 1)`,
+/// each the bits the closed forms find for themselves, for a caller that reads them at many delays.
+/// A quadrature of `ψ` over a feature's ages had found the amplitude's two powers at each of its
+/// 2,048 nodes, two thirds of its cost and a third of a feature's recent list, which a range query
+/// near the inner disc reads of some thousand features (P09.T37's bench).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DelayLaw {
+    amplitude: f64,
+    floor_power: f64,
+}
+
+impl DelayLaw {
+    /// The law's constants.
+    #[must_use]
+    fn new() -> Self {
+        Self {
+            amplitude: DelayTimeDistribution::amplitude_per_year_per_solar_mass(),
+            floor_power: math::powf(MIN_DELAY.value() / YEARS_PER_GIGAYEAR, DELAY_SLOPE + 1.0),
+        }
+    }
+
+    /// `ψ` at a delay of `t` years ([`DelayTimeDistribution::rate_per_year_per_solar_mass`]).
+    #[must_use]
+    fn rate(self, t: f64) -> f64 {
+        if !(t >= MIN_DELAY.value() && t <= HUBBLE_TIME.value()) {
+            return 0.0;
+        }
+        self.amplitude * math::powf(t / YEARS_PER_GIGAYEAR, DELAY_SLOPE)
+    }
+
+    /// `Ψ` at a delay of `delay` years ([`DelayTimeDistribution::cumulative_per_solar_mass`]).
+    #[must_use]
+    fn cumulative(self, delay: f64) -> f64 {
+        let t = delay.clamp(MIN_DELAY.value(), HUBBLE_TIME.value());
+        let s = DELAY_SLOPE + 1.0;
+        self.amplitude
+            * YEARS_PER_GIGAYEAR
+            * (math::powf(t / YEARS_PER_GIGAYEAR, s) - self.floor_power)
+            / s
+    }
+}
+
 /// One component's part of the rate.
 #[derive(Debug, Clone, PartialEq)]
 struct ComponentRate {
@@ -241,10 +284,10 @@ impl ComponentRate {
     #[must_use]
     fn new(population: Population, systems: f64, ages: AgeDistribution) -> Self {
         let before = before_interval();
-        let psi = |a: f64| DelayTimeDistribution::rate_per_year_per_solar_mass(Years::new(a));
-        let mean_rate = expectation(&ages, MIN_DELAY, psi);
+        let law = DelayLaw::new();
+        let mean_rate = expectation(&ages, MIN_DELAY, |a| law.rate(a));
         let exploded = expectation(&ages, Years::new(MIN_DELAY.value() + before), |a| {
-            DelayTimeDistribution::cumulative_per_solar_mass(Years::new(a - before))
+            law.cumulative(a - before)
         });
         Self {
             population,
@@ -271,24 +314,14 @@ impl DelayTimeDistribution {
     /// [`MIN_DELAY`] and after [`HUBBLE_TIME`].
     #[must_use]
     pub fn rate_per_year_per_solar_mass(delay: Years) -> f64 {
-        let t = delay.value();
-        if !(t >= MIN_DELAY.value() && t <= HUBBLE_TIME.value()) {
-            return 0.0;
-        }
-        Self::amplitude_per_year_per_solar_mass() * math::powf(t / YEARS_PER_GIGAYEAR, DELAY_SLOPE)
+        DelayLaw::new().rate(delay.value())
     }
 
     /// `Ψ(delay)`: Type Ia per solar mass formed with a delay at most `delay`, in closed form; the
     /// yield at the Hubble time.
     #[must_use]
     pub fn cumulative_per_solar_mass(delay: Years) -> f64 {
-        let t = delay.value().clamp(MIN_DELAY.value(), HUBBLE_TIME.value());
-        let s = DELAY_SLOPE + 1.0;
-        let lo = MIN_DELAY.value() / YEARS_PER_GIGAYEAR;
-        Self::amplitude_per_year_per_solar_mass()
-            * YEARS_PER_GIGAYEAR
-            * (math::powf(t / YEARS_PER_GIGAYEAR, s) - math::powf(lo, s))
-            / s
+        DelayLaw::new().cumulative(delay.value())
     }
 
     /// The share of Type Ia whose delay is at most `delay`: 18.6% under 0.1 Gyr, 61.7% under 1.
@@ -398,9 +431,8 @@ impl DelayTimeDistribution {
     /// formed at the epoch of systems of those ages, a component's `mean_rate` (P09.T36).
     #[must_use]
     pub(crate) fn mean_rate_over(ages: &AgeDistribution) -> f64 {
-        expectation(ages, MIN_DELAY, |a| {
-            Self::rate_per_year_per_solar_mass(Years::new(a))
-        })
+        let law = DelayLaw::new();
+        expectation(ages, MIN_DELAY, |a| law.rate(a))
     }
 
     /// The galaxy's Type Ia rate at the epoch, per year.
@@ -935,12 +967,13 @@ fn draw_delay(stream: &mut Stream, ages: &AgeDistribution) -> Option<f64> {
         return None;
     }
     let lowest = ages.min().value().max(MIN_DELAY.value());
-    let peak = DelayTimeDistribution::rate_per_year_per_solar_mass(Years::new(lowest));
+    let law = DelayLaw::new();
+    let peak = law.rate(lowest);
     for _ in 0..DELAY_ATTEMPTS {
         let u = stream.uniform();
         let accept = stream.mark();
         let delay = ages.quantile(u0 + (1.0 - u0) * u).value().max(lowest);
-        let psi = DelayTimeDistribution::rate_per_year_per_solar_mass(Years::new(delay));
+        let psi = law.rate(delay);
         if accept.is_below(Threshold::from_ratio(psi.min(peak), peak)) {
             return Some(delay);
         }
@@ -1094,6 +1127,32 @@ mod tests {
     use crate::galaxy::POPULATIONS;
     use crate::galaxy::params::GalaxyParams;
     use crate::rng::{Mark, ObjectKey, tags};
+
+    /// P09.T37's bench: the delay law with its constants found once gives the closed forms' bits,
+    /// as they were when each delay found its own constants, below the floor, across it and past
+    /// the Hubble time.
+    #[test]
+    fn the_delay_law_found_once_is_the_closed_forms_bit_for_bit() {
+        let law = DelayLaw::new();
+        let s = DELAY_SLOPE + 1.0;
+        let lo = MIN_DELAY.value() / YEARS_PER_GIGAYEAR;
+        for k in 0..=2_000_u32 {
+            let t = math::powf(10.0, 6.0 + 4.5 * f64::from(k) / 2_000.0);
+            let rate = if t >= MIN_DELAY.value() && t <= HUBBLE_TIME.value() {
+                DelayTimeDistribution::amplitude_per_year_per_solar_mass()
+                    * math::powf(t / YEARS_PER_GIGAYEAR, DELAY_SLOPE)
+            } else {
+                0.0
+            };
+            assert_same_bits(law.rate(t), rate);
+            let c = t.clamp(MIN_DELAY.value(), HUBBLE_TIME.value());
+            let cumulative = DelayTimeDistribution::amplitude_per_year_per_solar_mass()
+                * YEARS_PER_GIGAYEAR
+                * (math::powf(c / YEARS_PER_GIGAYEAR, s) - math::powf(lo, s))
+                / s;
+            assert_same_bits(law.cumulative(t), cumulative);
+        }
+    }
 
     fn milky_way() -> Galaxy {
         Galaxy::from_params(Seed::new(0x0918_0001), GalaxyParams::milky_way_like()).unwrap()
