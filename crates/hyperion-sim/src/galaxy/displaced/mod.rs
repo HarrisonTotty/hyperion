@@ -53,7 +53,8 @@ pub(crate) use site::{death_in_interval_knowing, death_in_interval_under};
 use crate::GeneratorVersion;
 
 /// The generator version from which plan 08's displaced classes are placed: the hold of P08.T12
-/// (decision-galaxy-25-train §1; version 26, S2, with plan 15's production form table).
+/// (decision-galaxy-25-train §1; version 27, retargeted from 26 by train 26's frozen list, with
+/// plan 15's production form table).
 ///
 /// It is the hold of one call site, the galaxy's build (`Galaxy::from_params` and its builders),
 /// which matches [`DisplacedRules`] once (E4′ of decision-stellar-holds, lean of 2026-10-31): the

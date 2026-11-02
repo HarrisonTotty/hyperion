@@ -633,7 +633,7 @@ impl CoreCollapseProcess {
         let held: Vec<YoungComponent> = fields
             .component_ids()
             .filter_map(|id| {
-                // The field's share and ages: the budget's until P09.T2.c's version 26.
+                // The field's share and ages: the budget's until P09.T2.c's version 27.
                 let share = galaxy.field_component_share(MassBand::E, id);
                 let ages = galaxy.field_ages(id);
                 let rate = ages.max_pdf_between(floor, RECENT_DEATH_AGES);

@@ -459,7 +459,7 @@ impl LbvProcess {
         let components = fields
             .component_ids()
             .filter_map(|id| {
-                // The field's share and ages: the budget's until P09.T2.c's version 26.
+                // The field's share and ages: the budget's until P09.T2.c's version 27.
                 let share = galaxy.field_component_share(MassBand::E, id);
                 let rate = galaxy
                     .field_ages(id)

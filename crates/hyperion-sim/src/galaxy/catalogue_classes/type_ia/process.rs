@@ -277,7 +277,7 @@ impl TypeIaProcess {
     /// few 10¹⁴ s.
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
-        // The field's rates and ages: the budget's until P09.T2.c's version 26.
+        // The field's rates and ages: the budget's until P09.T2.c's version 27.
         let delays = Arc::clone(galaxy.type_ia_delays());
         let interval = SupernovaInterval::of_cap(galaxy.window_caps(), ShellEnvironment::TypeIa);
         let years = interval.length().as_julian_years_f64();

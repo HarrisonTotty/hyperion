@@ -45,7 +45,7 @@
 //! # What it leaves out
 //!
 //! - **Plan 09's other classes** on the centre's list, its recently dead and its luminous blue
-//!   variables (P09.T36.b, held until generator version 26), join the entries at their bound
+//!   variables (P09.T36.b, held until generator version 27), join the entries at their bound
 //!   ([`CentreListForecast::recent`]): every window at its ceiling, whatever the galaxy's rules, so
 //!   that a centre the check passes keeps its room when they register. They are candidates, about
 //!   600 at Milky Way values and 1,531 at Chabrier's cap, of whom the classes' test keeps a

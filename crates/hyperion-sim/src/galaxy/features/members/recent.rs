@@ -1,6 +1,6 @@
 //! The recently dead and the luminous blue variables among a catalogue feature's members, on its
 //! feature-level list (plan 09, P09.T36.a; the globulars' Type Ia of P09.T36.b; the luminous blue
-//! variables' feature half, P09.T43), from generator version 26 (`FEATURE_CLASSES_VERSION`).
+//! variables' feature half, P09.T43), from generator version 27 (`FEATURE_CLASSES_VERSION`).
 //!
 //! # The classes
 //!

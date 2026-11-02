@@ -35,7 +35,7 @@
 //!
 //! This task registers no class: the classes' tasks register theirs in [`registered_classes`],
 //! P09.T36 the recently dead and the luminous blue variables of a catalogue feature
-//! ([`recent`](super::recent)), held until generator version 26. The first class of the order, the
+//! ([`recent`](super::recent)), held until generator version 27. The first class of the order, the
 //! tidal disruptions' victims (P09.T30.b), is the galactic centre's alone and is listed by the
 //! centre itself, at indices 1 upward after its black hole
 //! ([`events::victims`](crate::galaxy::features::centre::events::victims)), so a class listed on

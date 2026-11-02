@@ -489,8 +489,8 @@ pub fn white_dwarf_bolometric_correction_v(teff: Kelvin, log_g: Dex) -> Option<M
 /// });
 /// let m_v = white_dwarf_absolute_magnitude_v(&dwarf).ok_or("on the grid")?;
 /// assert!((m_v.value() - 12.18).abs() < 0.02);
-/// // The version's rules give it none until the 26 bump.
-/// assert_eq!(absolute_magnitude_v(&dwarf), None);
+/// // And the star's own absolute magnitude is it, from generator version 26.
+/// assert_eq!(absolute_magnitude_v(&dwarf), Some(m_v));
 /// # Ok::<(), &str>(())
 /// ```
 #[must_use]

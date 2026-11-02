@@ -29,19 +29,17 @@
 //! - **\[α/Fe\]** is P14.T1.a's closed form of \[Fe/H\] and population ([`alpha_fe`](fn@alpha_fe)),
 //!   the two sequences' means, since plan 06 draws none of its own. A star's X-ray and
 //!   ultraviolet history is P14.T1.a's closed form too ([`XuvHistory`]).
-//! - **The sphere of influence** is the galactic tidal radius alone,
+//! - **The sphere of influence** was the galactic tidal radius alone,
 //!   [`PotentialTables::tidal_radius`](crate::galaxy::potential::PotentialTables::tidal_radius) of
-//!   the system's mass at its epoch position, until P14.T29's hold lifts at generator version 26
-//!   ([`strip`]). Under it a grid system takes the pericentre rule of P09.T28.c in the central
-//!   black hole's Kepler regime, and a feature member the smaller of that and its cluster's
-//!   radius.
-//! - **The encounter environment** is `None` until the same hold lifts; under it a feature member
-//!   takes its cluster's at its place.
-//! - **Every host is [`HostKind::Stellar`]** below generator version 26: plan 13 places the
-//!   free-floating brown dwarfs and rogue planets, and P14.T27.a gives a brown dwarf its context
-//!   from 26 ([`hosts::substellar`](super::hosts::substellar), behind its hold), as
-//!   [`HostKind::BrownDwarf`], and P14.T27.b a rogue planet its own from 26, behind a hold of its
-//!   own, as [`HostKind::RoguePlanet`].
+//!   the system's mass at its epoch position, until generator version 26 (P14.T29, [`strip`]).
+//!   From 26 a grid system takes the pericentre rule of P09.T28.c in the central black hole's
+//!   Kepler regime, and a feature member the smaller of that and its cluster's radius.
+//! - **The encounter environment** was `None` until 26 too; from it a feature member takes its
+//!   cluster's at its place.
+//! - **Every host was [`HostKind::Stellar`]** below generator version 26: plan 13 places the
+//!   free-floating brown dwarfs and rogue planets, and from 26 P14.T27.a gives a brown dwarf its
+//!   context ([`hosts::substellar`](super::hosts::substellar)), as [`HostKind::BrownDwarf`], and
+//!   P14.T27.b a rogue planet its own, as [`HostKind::RoguePlanet`].
 //!
 //! # A rogue planet's context
 //!
@@ -1036,8 +1034,8 @@ impl SystemContext {
     /// [`encounter_environment`](Self::encounter_environment) the smaller of that and its
     /// encounter cut ([`strip`]).
     ///
-    /// The encounter cut is held until generator version 26 (P14.T29): until then an environment
-    /// a synthetic host was given is carried but not applied, and no real system has one.
+    /// The encounter cut applies from generator version 26 (P14.T29): before it an environment a
+    /// synthetic host was given was carried but not applied, and no real system had one.
     #[must_use]
     pub fn strip_radius(&self) -> Metres {
         strip::strip_radius(self)

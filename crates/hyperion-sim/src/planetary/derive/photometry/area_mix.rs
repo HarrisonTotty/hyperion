@@ -2916,11 +2916,12 @@ pub(crate) fn step_anti_greenhouse(
     anti_greenhouse_share(haze_absorbed(haze, shade), absorbed_share)
 }
 
-/// `run`'s result with P14.T24.h.b's holds at 26 set back to their held arms on this thread.
+/// `run`'s result with P14.T24.h.b's holds, at 27 from 26's retarget, set back to their held arms
+/// on this thread.
 ///
 /// The four are the minor clouds, the sediment, the adding rule and the haze layer, set back for a
-/// test that pins another hold's figures inside `with_every_26_hold` as they stood before them;
-/// each set back after, a panic in `run` included. 26's bump deletes it with them.
+/// test that pins another hold's figures inside 27's helper as they stood before them; each set
+/// back after, a panic in `run` included. 27's bump deletes it with them.
 #[cfg(test)]
 pub(crate) fn with_scattering_held<R>(run: impl FnOnce() -> R) -> R {
     with_minor_clouds(MinorCloudsRules::WaterShare, || {

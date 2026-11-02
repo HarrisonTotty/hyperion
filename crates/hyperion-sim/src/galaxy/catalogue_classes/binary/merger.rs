@@ -27,7 +27,7 @@
 //!   the fractional age 0.1 Σ Mᵢ τᵢ ÷ M on its own track, rejuvenated as the engine's product is,
 //!   so that a pair the engine merges and an entry agree.
 //!
-//! # The engine's channels, from 26
+//! # The engine's channels, from 27
 //!
 //! From [`MERGER_CLASS_VERSION`] (research-leans-13 §2(c): the engine merges only some contact
 //! pairs on the main sequence, and the progenitors seen are mostly evolved, as M31-LRN-2015's and

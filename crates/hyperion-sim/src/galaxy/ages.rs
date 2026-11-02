@@ -155,7 +155,7 @@ impl SubDisc {
 ///
 /// The young disc's constructor takes it, so that plan 09 changed no caller: the galaxy's density
 /// fields, its budget, take [`FeatureShare::None`], and the field placement thins to from
-/// generator version 26 takes [`FeatureShare::Phi`] (plan 09, P09.T2.c; `FIELD_SHARE_VERSION`).
+/// generator version 27 takes [`FeatureShare::Phi`] (plan 09, P09.T2.c; `FIELD_SHARE_VERSION`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FeatureShare {
     /// φ = 0 at every age: every young star is a field star.
