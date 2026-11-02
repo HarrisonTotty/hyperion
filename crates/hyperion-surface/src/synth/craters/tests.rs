@@ -2665,9 +2665,13 @@ fn assert_crater_lanes_are_each_point_s<const N: usize>(seed: u64, rounds: usize
                 u8::try_from(rng.next_below(20)).expect("an octave")
             };
             let lanes = craters.at_lanes(&dirs, level, through, &mut kept);
-            for (dir, got) in dirs.iter().zip(lanes) {
+            let heights = craters.height_m_lanes(&dirs, level, through, &mut kept);
+            for ((dir, got), height_m) in dirs.iter().zip(lanes).zip(heights) {
                 let alone = craters.at(*dir, level, through, &mut CraterCache::new());
                 let context = format!("{kind:?}, round {round}, {level:?}, through {through}");
+                // The walk without gradients is each point's height alone.
+                let alone_m = craters.height_m_at(*dir, level, through, &mut CraterCache::new());
+                assert_eq!(bits(height_m), bits(alone_m), "{context}");
                 assert_eq!(bits(got.height_m), bits(alone.height_m), "{context}");
                 assert_eq!(
                     got.gradient.map(bits),

@@ -2395,7 +2395,13 @@ fn assert_lanes_are_the_point_walk_s<const N: usize>(seed: u64, rounds: usize) {
             let parent = (through > first && round % 3 != 0).then(|| through - 1);
             let lanes =
                 relief.at_in_style_lanes(header, &dirs, through, parent, &styles, &mut lattice);
+            let heights =
+                relief.height_m_in_style_lanes(header, &dirs, through, &styles, &mut lattice);
             for (l, (own, up)) in lanes.iter().enumerate() {
+                // The walk without gradients is each point's height alone.
+                let alone = &mut LatticeCache::new();
+                let point_m = relief.height_m_in_style(header, dirs[l], through, &styles[l], alone);
+                assert_same_bits(heights[l], point_m);
                 let alone = &mut LatticeCache::new();
                 let point = relief.at_in_style(header, dirs[l], through, &styles[l], alone);
                 let context = format!("{kind:?}, round {round}, lane {l}, through {through}");

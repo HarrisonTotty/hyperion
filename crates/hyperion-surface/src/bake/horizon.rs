@@ -116,7 +116,6 @@ use crate::cube::{
 };
 use crate::field::{FieldView, cell_index};
 use crate::geometry::vertex_spacing;
-use crate::height::HeightSample;
 use crate::memo::Table;
 use crate::num;
 use crate::patch::PATCH_VERTICES;
@@ -557,7 +556,9 @@ pub(super) fn bake_horizon<F: FieldView>(
     let near = near_codes(key, &figure, heights, |i, j| {
         ground.vertex_height_m(cache, key.face(), key.level(), i, j)
     });
-    let far = far_codes(&mut ground, cache, key, &figure, &steps);
+    let samples = far_samples(key, &steps);
+    make_far(&ground, cache, &samples);
+    let far = far_codes(&mut ground, cache, key, &figure, &steps, &samples);
     if complete {
         keep_own_band(cache, ground.id, heights);
     }
@@ -572,12 +573,13 @@ pub(super) fn bake_horizon<F: FieldView>(
 /// Makes the heights of `key`'s near-field margin ([`NearGrid`]) that `cache` lacks, and keeps
 /// each the view answers there for the margin and the far march to read: each even vertex with its
 /// parent level's at the same point, which the march reads beyond the patch, as one pass
-/// ([`Synthesiser::height_pairs_at`]), and the others four at a time
-/// ([`Synthesiser::heights_at`]); each the point query's height bit for bit. A vertex the view
+/// ([`Synthesiser::height_pairs_at`]), and the others four at a time without gradients
+/// ([`Synthesiser::heights_m_at`]); each the point query's height bit for bit. A vertex the view
 /// refuses is not kept, so that where it is read it is asked again and names its cell as before
 /// ([`FarGround::vertex_height_m`]). Asked one by one, the margin's 2,336 heights were 15% of a
-/// cold high draft on the Earth-like world's L + 4 patch; as pairs and lanes they take 3% of the
-/// draft less (R10.T6.a's lever, callgrind, pod, 16 vCPU, 2026-11-02).
+/// cold high draft on the Earth-like world's L + 4 patch; as pairs they took 3.8% of the draft
+/// less, and the others in lanes without gradients 3.7% less again (R10.T6.a's lever, callgrind,
+/// pod, 16 vCPU, 2026-11-02).
 fn make_margin<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache, key: PatchKey) {
     let (face, level) = (key.face(), key.level());
     let grid = NearGrid::of(key);
@@ -615,27 +617,105 @@ fn make_margin<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
             }
         }
     }
-    let band = |level: u8| BandLevel::new(level).expect("a patch's level is a band level");
-    let keep = |cache: &mut SynthCache, at: u64, answer: Result<HeightSample, QueryHeightError>| {
-        if let Ok(sample) = answer {
-            let kept = cache.far_heights_mut();
-            if kept.heights.len() >= FAR_HEIGHTS_HELD {
-                kept.heights.clear();
-            }
-            kept.heights.get_or_insert_with(at, || sample.height_m);
-        }
-    };
     if let Some(parent) = level.checked_sub(1) {
         let answers = synth.height_pairs_at(cache, &pair_dirs, band(level), band(parent));
         for (&(at, up), (own, parent)) in pairs.iter().zip(answers) {
-            keep(cache, at, own);
-            keep(cache, up, parent);
+            keep_answer(cache, at, own.map(|sample| sample.height_m));
+            keep_answer(cache, up, parent.map(|sample| sample.height_m));
         }
     }
-    let answers = synth.heights_at(cache, &single_dirs, band(level));
+    let answers = synth.heights_m_at(cache, &single_dirs, band(level));
     for (&at, answer) in singles.iter().zip(answers) {
-        keep(cache, at, answer);
+        keep_answer(cache, at, answer);
     }
+}
+
+/// Makes the vertex heights the far march will read at `samples` (its samples' cells,
+/// [`far_samples`]) that neither the bake nor `cache` holds, nor the bake has had refused
+/// (`ground`'s), and keeps each the view answers for the march to read: level by level, row by
+/// row, four at a time ([`Synthesiser::heights_m_at`]), each the point query's height bit for bit.
+/// The march's samples, and so the vertices it reads, are fixed by the patch and its steps alone,
+/// whatever the heights. A vertex the view refuses is not kept, so that where the march reads it,
+/// it is asked again and names its cell as before ([`FarGround::vertex_height_m`]). On the
+/// Earth-like world's L + 4 patch the march's 3,450 reads cost about 103 M instructions of a cold
+/// high draft as point queries and 86 M made up front in lanes; with each sample's cell made once
+/// ([`far_samples`]), the draft takes 1.4% less (R10.T6.a's lever, callgrind, pod, 16 vCPU,
+/// 2026-11-02).
+fn make_far<F: FieldView>(
+    ground: &FarGround<'_, '_, F>,
+    cache: &mut SynthCache,
+    samples: &[SampleCell],
+) {
+    // The cells the samples lie in, each once, and the vertices to make, each once: by level,
+    // face and row, then along it, so that a batch's lanes are neighbours.
+    let mut cells = Table::<()>::new();
+    let mut asked = Table::<()>::new();
+    let mut reads: Vec<(u8, u8, u32, u32)> = Vec::new();
+    for sample in samples {
+        let SampleCell {
+            face, level, i, j, ..
+        } = *sample;
+        // A cell or a vertex is new where holding it grows its table: one probe each.
+        let held = cells.len();
+        cells.get_or_insert_with(memo_key(face, level, i, j), || ());
+        if cells.len() == held {
+            continue;
+        }
+        for (vi, vj) in [(i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)] {
+            // A vertex neighbouring cells share is met up to four times: the ones listed are
+            // looked up first, and only a vertex to make is held, which took less than holding
+            // every vertex met (1.4 M instructions of the L + 4 patch's cold draft) or listing
+            // each every time and deduplicating after (2.7 M).
+            let at = memo_key(face, level, vi, vj);
+            if asked.get(at).is_some()
+                || ground.own_height_m(face, level, vi, vj).is_some()
+                || ground.refused_here.contains(&at)
+                || cache.far_heights_mut().heights.get(at).is_some()
+            {
+                continue;
+            }
+            asked.get_or_insert_with(at, || ());
+            reads.push((level, face.index(), vj, vi));
+        }
+    }
+    reads.sort_unstable();
+    for batch in reads.chunk_by(|a, b| a.0 == b.0) {
+        let level = batch[0].0;
+        let dirs: Vec<[f64; 3]> = batch
+            .iter()
+            .map(|&(_, face, j, i)| lattice_vertex_dir(Face::ALL[usize::from(face)], level, i, j))
+            .collect();
+        let answers = ground.synth.heights_m_at(cache, &dirs, band(level));
+        for (&(_, face, j, i), answer) in batch.iter().zip(answers) {
+            keep_answer(
+                cache,
+                memo_key(Face::ALL[usize::from(face)], level, i, j),
+                answer,
+            );
+        }
+    }
+}
+
+/// `answer`, the height of the vertex whose memo key is `at`, kept in `cache`'s far heights where
+/// the view gave one; nothing where it refused.
+fn keep_answer(cache: &mut SynthCache, at: u64, answer: Result<f64, QueryHeightError>) {
+    if let Ok(height_m) = answer {
+        let kept = cache.far_heights_mut();
+        if kept.heights.len() >= FAR_HEIGHTS_HELD {
+            kept.heights.clear();
+        }
+        kept.heights.get_or_insert_with(at, || height_m);
+    }
+}
+
+/// `level` as a band level.
+///
+/// # Panics
+///
+/// If `level` is above the quadtree's deepest, which no patch's or far step's is.
+#[must_use]
+fn band(level: u8) -> BandLevel {
+    BandLevel::new(level).expect("a patch's or a far step's level is a band level")
 }
 
 /// The vertices within this many of a patch's edge, at its level and its parent's, that its
@@ -1009,7 +1089,8 @@ pub(super) fn far_steps(level: u8, figure: &Spheroid, relief_m: f64) -> Vec<FarS
 }
 
 /// The far field's codes, [`AZIMUTHS`] a point, point by point, row by row (see the
-/// [module documentation](self)).
+/// [module documentation](self)), its samples' cells `samples`: [`far_samples`] of `key` and
+/// `steps`, in their order.
 #[must_use]
 fn far_codes<F: FieldView>(
     ground: &mut FarGround<'_, '_, F>,
@@ -1017,48 +1098,130 @@ fn far_codes<F: FieldView>(
     key: PatchKey,
     figure: &Spheroid,
     steps: &[FarStep],
+    samples: &[SampleCell],
 ) -> Vec<i16> {
-    let face = key.face();
-    let quads = f64::from(PATCH_QUADS << key.level());
+    debug_assert_eq!(
+        samples.len(),
+        FAR_SIDE * FAR_SIDE * AZIMUTHS * steps.len(),
+        "a cell for every step of every ray"
+    );
     let mut codes = vec![NO_HORIZON; FAR_SIDE * FAR_SIDE * AZIMUTHS];
-    for row in 0..=FAR_STRIDE {
-        for column in 0..=FAR_STRIDE {
-            let (vx, vy) = (column * FAR_STRIDE, row * FAR_STRIDE);
-            // The point on the patch's level's vertex lattice, at its own height.
-            let gi = key.i() * PATCH_QUADS + u32::from(vx);
-            let gj = key.j() * PATCH_QUADS + u32::from(vy);
-            let at = key.vertex_dir(vx, vy);
-            let own_m = ground.own.sample(vx, vy).height_m;
-            let observer = figure.surface_point(at, own_m);
-            let up = figure.normal(at);
-            let tangents = grid_tangents(face, at, f64::from(gi) / quads, f64::from(gj) / quads);
-            let point = usize::from(row) * FAR_SIDE + usize::from(column);
-            for (k, &[dx, dy]) in AZIMUTH_STEPS.iter().enumerate() {
-                let along = unit_dir(add(
-                    scale(tangents[0], f64::from(dx)),
-                    scale(tangents[1], f64::from(dy)),
-                ));
-                let mut best: Option<(f64, f64)> = None;
-                for step in steps {
-                    // A unit vector to a few parts in 10¹⁶, `at` and `along` being unit and
-                    // normal: the datum's point and normal take it as it is.
-                    let dir = add(scale(at, step.cos), scale(along, step.sin));
-                    let height_m = ground.height_m(cache, dir, step.level);
-                    let rel = sub(figure.surface_point(dir, height_m), observer);
-                    let sample = (dot(rel, up), dot(rel, rel));
-                    if best.is_none_or(|best| higher(sample, best)) {
-                        best = Some(sample);
-                    }
+    let mut cells = samples.iter();
+    for (point, rays) in far_rays(key).enumerate() {
+        // The point on the patch's level's vertex lattice, at its own height.
+        let own_m = ground.own.sample(rays.vx, rays.vy).height_m;
+        let observer = figure.surface_point(rays.at, own_m);
+        let up = figure.normal(rays.at);
+        for (k, along) in rays.along.into_iter().enumerate() {
+            let mut best: Option<(f64, f64)> = None;
+            for step in steps {
+                let dir = march_dir(rays.at, along, step);
+                let cell = cells
+                    .next()
+                    .expect("a sample's cell for every step of every ray");
+                let height_m = ground.height_m(cache, cell);
+                let rel = sub(figure.surface_point(dir, height_m), observer);
+                let sample = (dot(rel, up), dot(rel, rel));
+                if best.is_none_or(|best| higher(sample, best)) {
+                    best = Some(sample);
                 }
-                if let Some((rise, squared)) = best {
-                    let run = num::max(squared - rise * rise, 0.0).sqrt();
-                    codes[point * AZIMUTHS + k] =
-                        encode_horizon(Radians::new(math::atan2(rise, run)));
-                }
+            }
+            if let Some((rise, squared)) = best {
+                let run = num::max(squared - rise * rise, 0.0).sqrt();
+                codes[point * AZIMUTHS + k] = encode_horizon(Radians::new(math::atan2(rise, run)));
             }
         }
     }
     codes
+}
+
+/// A far-field point of a patch, and the unit directions its march leaves along.
+struct FarRays {
+    /// The point's vertex of the patch, every [`FAR_STRIDE`]th.
+    vx: u8,
+    vy: u8,
+    /// Its unit direction.
+    at: [f64; 3],
+    /// The unit tangent along each azimuth's grid direction there, by [`AZIMUTH_STEPS`]' index.
+    along: [[f64; 3]; AZIMUTHS],
+}
+
+/// `key`'s far-field points and their rays, row by row ([`far_codes`]' order).
+fn far_rays(key: PatchKey) -> impl Iterator<Item = FarRays> {
+    let face = key.face();
+    let quads = f64::from(PATCH_QUADS << key.level());
+    (0..=FAR_STRIDE)
+        .flat_map(|row| (0..=FAR_STRIDE).map(move |column| (column, row)))
+        .map(move |(column, row)| {
+            let (vx, vy) = (column * FAR_STRIDE, row * FAR_STRIDE);
+            let gi = key.i() * PATCH_QUADS + u32::from(vx);
+            let gj = key.j() * PATCH_QUADS + u32::from(vy);
+            let at = key.vertex_dir(vx, vy);
+            let tangents = grid_tangents(face, at, f64::from(gi) / quads, f64::from(gj) / quads);
+            let along = AZIMUTH_STEPS.map(|[dx, dy]| {
+                unit_dir(add(
+                    scale(tangents[0], f64::from(dx)),
+                    scale(tangents[1], f64::from(dy)),
+                ))
+            });
+            FarRays { vx, vy, at, along }
+        })
+}
+
+/// The unit direction of `step` of the march from `at` along `along`: a unit vector to a few
+/// parts in 10¹⁶, `at` and `along` being unit and normal, which the datum's point and normal take
+/// as it is.
+#[must_use]
+fn march_dir(at: [f64; 3], along: [f64; 3], step: &FarStep) -> [f64; 3] {
+    add(scale(at, step.cos), scale(along, step.sin))
+}
+
+/// The cell of a far sample's level's vertex lattice holding its direction, on the face that
+/// holds it: the cell's first vertex (`i`, `j`), and the direction's fractions of the way across
+/// it, `fx` and `fy`, in the cell coordinates (s, t).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SampleCell {
+    face: Face,
+    level: u8,
+    i: u32,
+    j: u32,
+    fx: f64,
+    fy: f64,
+}
+
+/// The cell of each sample of `key`'s far march along `steps`, in the march's order: point by
+/// point ([`far_rays`]), azimuth by azimuth, step by step. Made once a bake, for the reads made up
+/// front ([`make_far`]) and the march ([`far_codes`]).
+#[must_use]
+fn far_samples(key: PatchKey, steps: &[FarStep]) -> Vec<SampleCell> {
+    let mut samples = Vec::with_capacity(FAR_SIDE * FAR_SIDE * AZIMUTHS * steps.len());
+    for rays in far_rays(key) {
+        for along in rays.along {
+            samples.extend(
+                steps
+                    .iter()
+                    .map(|step| sample_cell(march_dir(rays.at, along, step), step.level)),
+            );
+        }
+    }
+    samples
+}
+
+/// The [`SampleCell`] of `level`'s vertex lattice holding the unit direction `dir`.
+#[must_use]
+fn sample_cell(dir: [f64; 3], level: u8) -> SampleCell {
+    let FaceUv { face, u, v } = xyz_to_face_uv(dir);
+    let quads = PATCH_QUADS << level;
+    let (i, fx) = lattice_cell(uv_to_st(u), quads);
+    let (j, fy) = lattice_cell(uv_to_st(v), quads);
+    SampleCell {
+        face,
+        level,
+        i,
+        j,
+        fx,
+        fy,
+    }
 }
 
 /// Whether the sample (v, d²), its height v above the observer's horizontal and its squared
@@ -1082,7 +1245,7 @@ struct FarGround<'s, 'a, F> {
     /// The cells whose four vertex heights the bake has read, by the key of their first vertex.
     cells: Vec<Option<(u64, [f64; 4])>>,
     /// The vertices the view refused in this bake, so that each is asked once where it is read
-    /// (after [`make_margin`]'s batch, which keeps no refusal).
+    /// (after [`make_margin`]'s and [`make_far`]'s batches, which keep no refusal).
     refused_here: BTreeSet<u64>,
     /// The [`cell_index`] of the cell each refusal named, the first cell its reads lacked.
     refused_cells: BTreeSet<u32>,
@@ -1091,14 +1254,18 @@ struct FarGround<'s, 'a, F> {
 }
 
 impl<F: FieldView> FarGround<'_, '_, F> {
-    /// The height at the unit direction `dir`, metres above the datum along its normal: the
-    /// bilinear interpolation of the four vertex heights of `level` about it, on the face that
-    /// holds it, in the cell coordinates (s, t).
-    fn height_m(&mut self, cache: &mut SynthCache, dir: [f64; 3], level: u8) -> f64 {
-        let FaceUv { face, u, v } = xyz_to_face_uv(dir);
-        let quads = PATCH_QUADS << level;
-        let (i, fx) = lattice_cell(uv_to_st(u), quads);
-        let (j, fy) = lattice_cell(uv_to_st(v), quads);
+    /// The height at a sample whose cell is `cell` ([`sample_cell`]), metres above the datum along
+    /// its normal: the bilinear interpolation of the four vertex heights of its level about it, on
+    /// the face that holds it, in the cell coordinates (s, t).
+    fn height_m(&mut self, cache: &mut SynthCache, cell: &SampleCell) -> f64 {
+        let SampleCell {
+            face,
+            level,
+            i,
+            j,
+            fx,
+            fy,
+        } = *cell;
         let key = memo_key(face, level, i, j);
         let slot = usize::try_from((key ^ (key >> 28) ^ (key >> 56)) % CELLS_KEPT)
             .expect("a slot index is below the kept cells");

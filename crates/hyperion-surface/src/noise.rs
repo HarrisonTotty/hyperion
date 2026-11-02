@@ -659,6 +659,31 @@ pub(crate) fn gradient_noise_lanes<const N: usize>(
     octave: &Octave,
     cache: &mut LatticeCache,
 ) -> ([f64; N], [[f64; N]; 3]) {
+    noise_lanes::<N, true>(points, octave, cache)
+}
+
+/// [`gradient_noise_lanes`]' values alone, each lane's [`noise_value`]'s bit for bit: the same
+/// operations on the same values, the gradients left out (a far field's heights read none).
+///
+/// # Panics
+///
+/// As [`gradient_noise`], at any lane.
+#[must_use]
+pub(crate) fn noise_value_lanes<const N: usize>(
+    points: &[[f64; N]; 3],
+    octave: &Octave,
+    cache: &mut LatticeCache,
+) -> [f64; N] {
+    noise_lanes::<N, false>(points, octave, cache).0
+}
+
+/// [`gradient_noise_lanes`], its gradients made only where `GRADIENT` asks for them (zero
+/// otherwise): the values' operations are the same either way.
+fn noise_lanes<const N: usize, const GRADIENT: bool>(
+    points: &[[f64; N]; 3],
+    octave: &Octave,
+    cache: &mut LatticeCache,
+) -> ([f64; N], [[f64; N]; 3]) {
     assert!(
         points.iter().flatten().all(|c| c.is_finite()),
         "a noise point must be finite, got {points:?}"
@@ -712,14 +737,19 @@ pub(crate) fn gradient_noise_lanes<const N: usize>(
         for (l, value) in value.iter_mut().enumerate() {
             let [g0, g1, g2] = [0, 1, 2].map(|a| towards[a][l]);
             let [w0, w1, w2] = [0, 1, 2].map(|a| weights[a][l]);
-            let [s0, s1, s2] = [0, 1, 2].map(|a| slopes[a][l]);
             let dot = g0 * offsets[0][l] + g1 * offsets[1][l] + g2 * offsets[2][l];
             let weight = w0 * w1 * w2;
             *value += weight * dot;
-            grad[0][l] += s0 * w1 * w2 * dot + weight * g0;
-            grad[1][l] += w0 * s1 * w2 * dot + weight * g1;
-            grad[2][l] += w0 * w1 * s2 * dot + weight * g2;
+            if GRADIENT {
+                let [s0, s1, s2] = [0, 1, 2].map(|a| slopes[a][l]);
+                grad[0][l] += s0 * w1 * w2 * dot + weight * g0;
+                grad[1][l] += w0 * s1 * w2 * dot + weight * g1;
+                grad[2][l] += w0 * w1 * s2 * dot + weight * g2;
+            }
         }
+    }
+    if !GRADIENT {
+        return (value, [[0.0; N]; 3]);
     }
     let to_body: [[f64; N]; 3] = std::array::from_fn(|n| {
         std::array::from_fn(|l| {
@@ -735,6 +765,7 @@ pub(crate) fn gradient_noise_lanes<const N: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hyperion_testkit::float::bits;
     use hyperion_testkit::lcg::Lcg;
     use hyperion_testkit::order::assert_order_independent;
     use std::cell::RefCell;
@@ -851,6 +882,37 @@ mod tests {
                     "{p:?} axis {axis}: {numeric} vs {}",
                     grad[axis]
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn the_lanes_are_each_point_s_noise_bit_for_bit() {
+        // Four points near one another and four far apart, through an octave rotated and offset,
+        // from a cache covering some of them and from none: each lane's value and gradient are
+        // `gradient_noise`'s at its point, and the values alone `noise_value`'s.
+        let o = octave(4, 25.0);
+        let mut rng = Lcg::new(0x6c61_6e65);
+        let centre = [2_000.0, -3_000.0, 1_500.0];
+        let mut warm = LatticeCache::new();
+        warm.cover(&o, centre, 60.0);
+        for round in 0..400 {
+            let spread = if round % 2 == 0 { 50.0 } else { 5.0e4 };
+            let points: [[f64; 3]; 4] = std::array::from_fn(|_| {
+                let d = random_point(&mut rng, spread);
+                [centre[0] + d[0], centre[1] + d[1], centre[2] + d[2]]
+            });
+            let axes: [[f64; 4]; 3] = std::array::from_fn(|a| points.map(|p| p[a]));
+            for cache in [&mut warm, &mut LatticeCache::new()] {
+                let (values, gradients) = gradient_noise_lanes(&axes, &o, cache);
+                let alone = noise_value_lanes(&axes, &o, cache);
+                for (l, &p) in points.iter().enumerate() {
+                    let (value, gradient) = gradient_noise(p, &o, &mut LatticeCache::new());
+                    assert_eq!(bits(values[l]), bits(value), "{p:?}");
+                    assert_eq!(gradients.map(|g| bits(g[l])), gradient.map(bits), "{p:?}");
+                    let value_m = noise_value(p, &o, &mut LatticeCache::new());
+                    assert_eq!(bits(alone[l]), bits(value_m), "{p:?}");
+                }
             }
         }
     }

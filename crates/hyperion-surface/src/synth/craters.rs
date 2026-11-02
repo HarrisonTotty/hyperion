@@ -2436,6 +2436,42 @@ impl SmallCraters {
         cache: &mut CraterCache,
     ) -> [HeightSample; L] {
         let figure = self.octaves.inputs.figure;
+        let (heights, gradients) = self.lanes_walk::<L, true>(dirs, level, through, cache);
+        std::array::from_fn(|l| HeightSample {
+            height_m: num::assert_finite(heights[l]),
+            gradient: direction_gradient(&figure, dirs[l], gradients[l]).map(num::assert_finite),
+        })
+    }
+
+    /// [`height_m_at`](Self::height_m_at) at `L` unit directions at once, each lane's height bit
+    /// for bit that function's at its direction: [`at_lanes`](Self::at_lanes)' walk, its shared
+    /// searches, draws and profiles, no gradient made.
+    ///
+    /// # Panics
+    ///
+    /// As [`at`](Self::at), at any lane.
+    pub(crate) fn height_m_lanes<const L: usize>(
+        &self,
+        dirs: &[[f64; 3]; L],
+        level: BandLevel,
+        through: u8,
+        cache: &mut CraterCache,
+    ) -> [f64; L] {
+        let (heights, _) = self.lanes_walk::<L, false>(dirs, level, through, cache);
+        heights.map(num::assert_finite)
+    }
+
+    /// [`at_lanes`](Self::at_lanes)' heights and gradients as functions of the spheroid point, the
+    /// gradients made only where `GRADIENT` asks for them (zero otherwise), the heights'
+    /// operations the same either way.
+    fn lanes_walk<const L: usize, const GRADIENT: bool>(
+        &self,
+        dirs: &[[f64; 3]; L],
+        level: BandLevel,
+        through: u8,
+        cache: &mut CraterCache,
+    ) -> ([f64; L], [[f64; 3]; L]) {
+        let figure = self.octaves.inputs.figure;
         let band = band_half_width(&figure, level);
         let mut heights = [0.0; L];
         let mut gradients = [[0.0; 3]; L];
@@ -2502,7 +2538,7 @@ impl SmallCraters {
                                     let rim_m = 0.5 * crater.shape.diameter().value();
                                     let (h, slope) = profile.height_and_slope(distance / rim_m);
                                     heights[l] += h;
-                                    if distance > 0.0 {
+                                    if GRADIENT && distance > 0.0 {
                                         let along = slope / (rim_m * distance);
                                         for (g, d) in gradients[l].iter_mut().zip(delta) {
                                             *g += along * d;
@@ -2518,10 +2554,7 @@ impl SmallCraters {
                 }
             }
         }
-        std::array::from_fn(|l| HeightSample {
-            height_m: num::assert_finite(heights[l]),
-            gradient: direction_gradient(&figure, dirs[l], gradients[l]).map(num::assert_finite),
-        })
+        (heights, gradients)
     }
 }
 

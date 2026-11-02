@@ -329,15 +329,9 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         dir: [f64; 3],
         level: BandLevel,
     ) -> Result<f64, QueryHeightError> {
-        let field = self.field;
-        let header = field.header();
-        let set = self.parts.bounds.set(level);
-        let (base, relief) = match set.relief_through() {
-            Some(through) if self.parts.relief.evaluates(through) => {
-                let (base, style) = match cache.controls.memo_for(self.parts.channels.id()) {
-                    Some(memo) => relief::base_m_and_style(field, dir, memo)?,
-                    None => relief::base_m_and_style(field, dir, &mut interp::Fresh)?,
-                };
+        let header = self.field.header();
+        let (base, relief) = match self.base_m_before_relief(cache, dir, level)? {
+            (base, Some((through, style))) => {
                 let relief = self.parts.relief.height_m_in_style(
                     header,
                     dir,
@@ -347,16 +341,10 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
                 );
                 (base, relief)
             }
-            Some(_) | None => (interp::base_elevation_m(field, dir)?, 0.0),
+            (base, None) => (base, 0.0),
         };
-        let channels = match set.channels_through() {
-            Some(through) => self
-                .parts
-                .channels
-                .incision_height_m_at(field, dir, through, cache)?,
-            None => 0.0,
-        };
-        let craters = match set.craters_through() {
+        // The small craters read no cell, so they are made before the channels' reads.
+        let craters = match self.parts.bounds.set(level).craters_through() {
             Some(through) => {
                 self.parts
                     .craters
@@ -364,18 +352,71 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
             }
             None => 0.0,
         };
+        self.height_m_after_relief(cache, dir, level, (base, relief, craters))
+    }
+
+    /// [`height_m_at`](Self::height_m_at)'s first stage: the base elevation, and the relief's last
+    /// octave and style where the level evaluates an octave.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] naming the first cell the base elevation reads that the
+    /// view does not hold.
+    fn base_m_before_relief(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+    ) -> Result<(f64, Option<(u8, relief::StyleSample)>), QueryHeightError> {
+        let field = self.field;
+        Ok(match self.parts.bounds.set(level).relief_through() {
+            Some(through) if self.parts.relief.evaluates(through) => {
+                let (base, style) = match cache.controls.memo_for(self.parts.channels.id()) {
+                    Some(memo) => relief::base_m_and_style(field, dir, memo)?,
+                    None => relief::base_m_and_style(field, dir, &mut interp::Fresh)?,
+                };
+                (base, Some((through, style)))
+            }
+            Some(_) | None => (interp::base_elevation_m(field, dir)?, None),
+        })
+    }
+
+    /// [`height_m_at`](Self::height_m_at)'s last stages, from the base elevation's, the relief's
+    /// and the small craters' heights at `dir`, metres: the channels' and the coarse rims' heights,
+    /// the sum in the point query's order and the channels' floor.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] naming the first cell the channels, the rims or the floor
+    /// read that the view does not hold, in that order.
+    fn height_m_after_relief(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+        (base_m, relief_m, craters_m): (f64, f64, f64),
+    ) -> Result<f64, QueryHeightError> {
+        let field = self.field;
+        let header = field.header();
+        let channels = match self.parts.bounds.set(level).channels_through() {
+            Some(through) => self
+                .parts
+                .channels
+                .incision_height_m_at(field, dir, through, cache)?,
+            None => 0.0,
+        };
         let rims = self.parts.rims.height_m_at(field, dir, level)?;
         // `finish`'s sum and the channels' floor, on the heights alone.
-        let mut height = base;
-        for part in [relief, channels, craters, rims] {
+        let mut height = base_m;
+        for part in [relief_m, channels, craters_m, rims] {
             height += part;
         }
         let sea = header.sea_level().value();
         if height < sea && channels < 0.0 {
             let (_, record) = self.cell_at(dir)?;
             if !record.is_under_water() && !record.epoch_incision.is_epoch() {
-                let mut without = base;
-                for part in [relief, craters, rims] {
+                let mut without = base_m;
+                for part in [relief_m, craters_m, rims] {
                     without += part;
                 }
                 height = if without >= sea { sea } else { without };
@@ -851,6 +892,85 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
                 let parts =
                     self.after_craters(cache, *dir, level, (before.base, relief, craters))?;
                 self.finish(cache, *dir, &parts)
+            }));
+        }
+    }
+
+    /// [`height_m_at`](Self::height_m_at) at each of `dirs`, in their order, each the point
+    /// query's height bit for bit, its error included: the structural octaves and the small
+    /// craters made [`LANES`] points at a time without gradients, every other stage the point
+    /// query's own, point by point, as [`heights_at`](Self::heights_at) makes them with theirs.
+    /// Every answer is made, an error's followers too. On a cold high draft's near-field margin
+    /// (the Earth-like world's L + 4 patch) its 1,752 points took 9.3k instructions a point fewer
+    /// than `heights_at`'s (R10.T6.a's lever, callgrind, pod, 16 vCPU, 2026-11-02).
+    ///
+    /// # Panics
+    ///
+    /// As [`height_at`](Self::height_at).
+    pub(crate) fn heights_m_at(
+        &self,
+        cache: &mut SynthCache,
+        dirs: &[[f64; 3]],
+        level: BandLevel,
+    ) -> Vec<Result<f64, QueryHeightError>> {
+        let mut out = Vec::with_capacity(dirs.len());
+        let chunks = dirs.as_chunks::<LANES>();
+        for lanes in chunks.0 {
+            self.heights_m_lanes(cache, lanes, level, &mut out);
+        }
+        for dir in chunks.1 {
+            self.heights_m_lanes(cache, &[*dir], level, &mut out);
+        }
+        out
+    }
+
+    /// [`heights_m_at`](Self::heights_m_at) at `N` points, appended to `out`.
+    fn heights_m_lanes<const N: usize>(
+        &self,
+        cache: &mut SynthCache,
+        dirs: &[[f64; 3]; N],
+        level: BandLevel,
+        out: &mut Vec<Result<f64, QueryHeightError>>,
+    ) {
+        let before = dirs.map(|dir| self.base_m_before_relief(cache, dir, level));
+        let asks = before
+            .each_ref()
+            .map(|b| b.as_ref().ok().and_then(|&(_, relief)| relief));
+        // One level, so every lane that asks the octaves asks the same; a lane that asks none, or
+        // was refused, takes the first asking lane's place in the walk, its heights dropped.
+        let reliefs = match asks.iter().find_map(|&ask| ask) {
+            Some((through, first_style)) => {
+                debug_assert!(
+                    asks.iter().flatten().all(|&(t, _)| t == through),
+                    "a level's points ask the same octaves"
+                );
+                let first = asks.iter().position(Option::is_some).expect("a lane asks");
+                let lane_dirs: [[f64; 3]; N] =
+                    std::array::from_fn(|l| dirs[if asks[l].is_some() { l } else { first }]);
+                let styles: [relief::StyleSample; N] =
+                    asks.map(|ask| ask.map_or(first_style, |(_, style)| style));
+                let walked = self.parts.relief.height_m_in_style_lanes(
+                    self.field.header(),
+                    &lane_dirs,
+                    through,
+                    &styles,
+                    cache.lattice_mut(),
+                );
+                std::array::from_fn(|l| if asks[l].is_some() { walked[l] } else { 0.0 })
+            }
+            None => [0.0; N],
+        };
+        let craters = match self.parts.bounds.set(level).craters_through() {
+            Some(through) => {
+                self.parts
+                    .craters
+                    .height_m_lanes(dirs, level, through, &mut cache.craters)
+            }
+            None => [0.0; N],
+        };
+        for (l, (dir, before)) in dirs.iter().zip(before).enumerate() {
+            out.push(before.and_then(|(base, _)| {
+                self.height_m_after_relief(cache, *dir, level, (base, reliefs[l], craters[l]))
             }));
         }
     }

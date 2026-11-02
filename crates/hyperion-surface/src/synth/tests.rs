@@ -311,10 +311,11 @@ fn a_height_pair_is_its_two_point_queries_bit_for_bit() {
 
 #[test]
 fn rows_of_heights_and_pairs_are_their_point_queries_bit_for_bit() {
-    // The batches a bake asks (`heights_at`, `height_pairs_at`), their octaves walked several
-    // points at a time, answer each point as its point query and its pair do, bit for bit, at every
-    // level, through a bake's memo and a fresh cache; and over a view holding one cell with its
-    // margin, where a batch mixes refused points with answered ones.
+    // The batches a bake asks (`heights_at`, `heights_m_at`, `height_pairs_at`), their octaves and
+    // small craters walked several points at a time, answer each point as its point query and its
+    // pair do, bit for bit, at every level, through a bake's memo and a fresh cache; and over a
+    // view holding one cell with its margin, where a batch mixes refused points with answered
+    // ones.
     for (k, &kind) in SyntheticWorld::ALL.iter().enumerate() {
         let field = world(kind);
         let synth = Synthesiser::new(field, SEED);
@@ -350,6 +351,11 @@ fn rows_of_heights_and_pairs_are_their_point_queries_bit_for_bit() {
                             "{kind:?} {level:?}"
                         );
                     }
+                    let heights = view.heights_m_at(cache, &dirs, level);
+                    for (dir, got) in dirs.iter().zip(heights) {
+                        let expected = view.height_m_at(&mut SynthCache::new(), *dir, level);
+                        assert_eq!(got.map(bits), expected.map(bits), "{kind:?} {level:?}");
+                    }
                 }
                 let rows = part.heights_at(&mut SynthCache::new(), &dirs, level);
                 for (dir, got) in dirs.iter().zip(rows) {
@@ -364,6 +370,11 @@ fn rows_of_heights_and_pairs_are_their_point_queries_bit_for_bit() {
                         expected.map(sample_bits),
                         "part {kind:?} {level:?}"
                     );
+                }
+                let heights = part.heights_m_at(&mut SynthCache::new(), &dirs, level);
+                for (dir, got) in dirs.iter().zip(heights) {
+                    let expected = part.height_m_at(&mut SynthCache::new(), *dir, level);
+                    assert_eq!(got.map(bits), expected.map(bits), "part {kind:?} {level:?}");
                 }
                 let Some(up) = n.checked_sub(1) else {
                     continue;

@@ -1465,6 +1465,107 @@ fn horizon_margin_made_up_front_keeps_the_point_queries_heights_and_no_refusal()
 }
 
 #[test]
+fn horizon_from_a_cache_that_fills_while_the_far_reads_are_made_is_a_cold_bake_s() {
+    // A cache holding all but a few of the far heights it keeps, at vertices no bake here reads, so
+    // that it starts afresh while the march's reads are made up front and kept, after the margin's:
+    // what the clear drops is asked again, and the map is a cold bake's.
+    let (w, _, surveyed) = straddling();
+    let coarse = world(w).header().level().get();
+    let view = client(w, &surveyed, |_| code(50.0));
+    let synth = Synthesiser::new(&view, SEED);
+    let key = patch_in(*surveyed.first().unwrap(), coarse + 2);
+    // Room for the margin's heights and a few of the march's.
+    let mut margin = SynthCache::new();
+    margin.far_heights_mut().keep(synth.channels().id());
+    make_margin(&synth, &mut margin, key);
+    let room = margin.far_heights_mut().len() + 100;
+    let mut full = SynthCache::new();
+    let kept = full.far_heights_mut();
+    kept.keep(synth.channels().id());
+    for n in 0..u32::try_from(FAR_HEIGHTS_HELD - room).unwrap() {
+        kept.heights
+            .get_or_insert_with(memo_key(Face::NegZ, 23, n, 0), || 1.0);
+    }
+    assert_eq!(
+        horizon_of(&synth, &mut full, key),
+        horizon_of(&synth, &mut SynthCache::new(), key)
+    );
+    assert!(
+        full.far_heights_mut().len() < FAR_HEIGHTS_HELD - room,
+        "the cache started afresh"
+    );
+}
+
+#[test]
+fn horizon_far_reads_made_up_front_keep_the_point_queries_heights_and_no_refusal() {
+    // The far march's reads made up front alone, before any march, over a survey's edge, where the
+    // view refuses much of the far field, and inside it: every vertex the march will read that is
+    // not the patch's own is kept with the point query's height where the view answers it, and not
+    // kept where it refuses, so that the march asks it and names its cell.
+    let (w, edge, surveyed) = straddling();
+    let coarse = world(w).header().level().get();
+    let view = client(w, &surveyed, |_| code(50.0));
+    let synth = Synthesiser::new(&view, SEED);
+    let whole = Synthesiser::new(world(w), SEED);
+    let header = view.header();
+    let (mut answered, mut refused) = (0_u32, 0_u32);
+    for key in [edge, patch_in(*surveyed.first().unwrap(), coarse + 2)] {
+        // The patch's own heights, which only name the vertices the march does not ask.
+        let own = whole.bake_patch(&mut SynthCache::new(), key).unwrap();
+        let ground = FarGround {
+            synth: &synth,
+            id: synth.channels().id(),
+            own: &own,
+            cells: vec![None; usize::try_from(CELLS_KEPT).unwrap()],
+            refused_here: BTreeSet::new(),
+            refused_cells: BTreeSet::new(),
+            refused: false,
+        };
+        let steps = far_steps(
+            key.level(),
+            &header.figure(),
+            header.realised_relief().value(),
+        );
+        let samples = far_samples(key, &steps);
+        let mut cache = SynthCache::new();
+        cache.far_heights_mut().keep(ground.id);
+        make_far(&ground, &mut cache, &samples);
+        let mut point = SynthCache::new();
+        let mut seen = BTreeSet::new();
+        for cell in &samples {
+            let corners = [
+                (cell.i, cell.j),
+                (cell.i + 1, cell.j),
+                (cell.i, cell.j + 1),
+                (cell.i + 1, cell.j + 1),
+            ];
+            for (i, j) in corners {
+                let at = memo_key(cell.face, cell.level, i, j);
+                if !seen.insert(at) || ground.own_height_m(cell.face, cell.level, i, j).is_some() {
+                    continue;
+                }
+                let kept = cache.far_heights_mut().heights.get(at).copied();
+                let dir = lattice_vertex_dir(cell.face, cell.level, i, j);
+                match synth.height_m_at(&mut point, dir, BandLevel::new(cell.level).unwrap()) {
+                    Ok(h) => {
+                        assert_eq!(kept.map(bits), Some(bits(h)), "{key:?} {at:x}");
+                        answered += 1;
+                    }
+                    Err(QueryHeightError::NotSurveyed(_)) => {
+                        assert_eq!(kept, None, "{key:?} {at:x} is refused");
+                        refused += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        answered > 0 && refused > 0,
+        "{answered} answered, {refused} refused"
+    );
+}
+
+#[test]
 fn horizon_skipped_leaves_the_map_empty_and_the_rest_as_baked() {
     let (w, edge, surveyed) = straddling();
     let view = client(w, &surveyed, |_| code(50.0));
