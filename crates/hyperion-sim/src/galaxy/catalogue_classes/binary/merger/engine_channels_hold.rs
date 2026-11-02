@@ -28,7 +28,7 @@
 
 use std::sync::OnceLock;
 
-use super::reference::{decile_chi_square, members};
+use super::reference::{decile_chi_square, members_as};
 use super::*;
 use crate::GENERATOR_VERSION;
 use crate::Seed;
@@ -39,6 +39,7 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::stellar::binary::BinaryInput;
 use crate::stellar::binary::class_merger::{donor_onset_merger, onset_segment_kinds};
 use crate::stellar::binary::scan::{engine_calls, scan_merger_cell};
+use crate::stellar::binary::testing::MergerMember;
 use crate::tables::binary::{MERGER_SAMPLER, MergerChannel, MergerMark, MergerPick};
 use crate::time::{CLOCK_WINDOW_H, SourceHorizon};
 
@@ -616,38 +617,46 @@ fn engine_reference(galaxy: &Galaxy) -> Vec<([f64; 3], f64, bool)> {
     let mut split = [0.0_f64; 3];
     let mut by_kind: [Vec<(f64, f64)>; 5] = Default::default();
     let mut main_sequence: Vec<(f64, f64)> = Vec::new();
-    let engine: Vec<([f64; 3], f64, bool)> = members(galaxy, REFERENCE_MEMBERS)
-        .iter()
-        .filter_map(|m| {
-            let t = m.merger_age().value();
-            let before = m.timeline().state_at(Years::new(t * (1.0 - 1e-9)));
-            let phases = before.stars().map(|s| s.phase());
+    // Each member's pair just before it merged, its weight and its primary's initial mass, read as
+    // it is drawn (`members_as`), so that no member's timeline is held past its stream.
+    let before_merging = |m: &MergerMember| {
+        let t = m.merger_age().value();
+        let before = m.timeline().state_at(Years::new(t * (1.0 - 1e-9)));
+        (
+            before.stars().map(|s| s.phase()),
+            before.stars().map(|s| s.mass().value()),
+            m.weight(),
+            m.record().primary_initial_mass().value(),
+        )
+    };
+    let engine: Vec<([f64; 3], f64, bool)> = members_as(galaxy, REFERENCE_MEMBERS, before_merging)
+        .into_iter()
+        .filter_map(|(phases, [a, b], weight, primary_initial)| {
             if phases
                 .iter()
                 .any(|p| matches!(p, Phase::Protostar | Phase::PreMainSequence))
             {
                 return None;
             }
-            let [a, b] = before.stars().map(|s| s.mass().value());
             let heavier = phases[usize::from(b > a)];
             let lighter = phases[usize::from(b <= a)];
             let q = a.min(b) / a.max(b);
             let covered = if phases.iter().all(|p| *p == Phase::MainSequence) {
-                split[0] += m.weight();
-                main_sequence.push((q, m.weight()));
+                split[0] += weight;
+                main_sequence.push((q, weight));
                 true
             } else if let Some(k) = EVOLVED.iter().position(|&p| p == heavier)
                 && lighter == Phase::MainSequence
             {
-                split[1] += m.weight();
-                by_kind[k].push((q, m.weight()));
+                split[1] += weight;
+                by_kind[k].push((q, weight));
                 true
             } else {
-                split[2] += m.weight();
+                split[2] += weight;
                 false
             };
-            let marks = compared_marks(a, b, m.record().primary_initial_mass().value());
-            Some((marks, m.weight(), covered))
+            let marks = compared_marks(a, b, primary_initial);
+            Some((marks, weight, covered))
         })
         .collect();
     let total: f64 = split.iter().sum();

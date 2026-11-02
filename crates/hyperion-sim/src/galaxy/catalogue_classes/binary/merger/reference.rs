@@ -10,16 +10,30 @@ use crate::stellar::binary::testing::{MergerMember, brute_force_merger_members_i
 /// thread each; on WebAssembly, which has no threads, in turn) and joined in stream order, as
 /// `tests/common/binaries.rs` draws them.
 pub(super) fn members(galaxy: &Galaxy, n: usize) -> Vec<MergerMember> {
+    members_as(galaxy, n, MergerMember::clone)
+}
+
+/// [`members`], each as `mark` makes it, every stream's members dropped once marked: a merger's
+/// timeline is some 90 kB natively, so the 48,000 of `engine_channels_hold` held whole came to
+/// 4.3 GB, past wasm32's 4 GiB, where the streams run in turn and so hold one stream's at a time.
+pub(super) fn members_as<T: Send>(
+    galaxy: &Galaxy,
+    n: usize,
+    mark: impl Fn(&MergerMember) -> T + Sync,
+) -> Vec<T> {
     let share = n.div_ceil(16);
+    let stream = |s: u64| -> Vec<T> {
+        brute_force_merger_members_in(galaxy, CarvedClass::StellarMerger, share, s)
+            .iter()
+            .map(&mark)
+            .collect()
+    };
     let mut out = Vec::with_capacity(n + 16);
     #[cfg(not(target_family = "wasm"))]
     std::thread::scope(|scope| {
+        let stream = &stream;
         let handles: Vec<_> = (0..16_u64)
-            .map(|s| {
-                scope.spawn(move || {
-                    brute_force_merger_members_in(galaxy, CarvedClass::StellarMerger, share, s)
-                })
-            })
+            .map(|s| scope.spawn(move || stream(s)))
             .collect();
         for handle in handles {
             out.extend(handle.join().expect("a member draw finishes"));
@@ -27,12 +41,7 @@ pub(super) fn members(galaxy: &Galaxy, n: usize) -> Vec<MergerMember> {
     });
     #[cfg(target_family = "wasm")]
     for s in 0..16_u64 {
-        out.extend(brute_force_merger_members_in(
-            galaxy,
-            CarvedClass::StellarMerger,
-            share,
-            s,
-        ));
+        out.extend(stream(s));
     }
     out.truncate(n);
     out
