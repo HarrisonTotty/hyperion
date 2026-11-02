@@ -89,9 +89,11 @@
 //! arc crosses. η solves `t_arc(η) = dt` by `ARC_STEPS` = 3 quadratures, the first at the series'
 //! root and each after a safeguarded Newton step, in the bracket the series' wobble gives, cut to
 //! a radial period on the epoch's side; the state is placed as the series' is, the advance turned
-//! in proportion to `ψ_arc`. Longer spans and orbits nearer a circle keep the series, which is the
-//! more exact there, and so does a solve that rounding leaves non-finite or off its root by some
-//! 10⁻⁶ of the span (`ARC_RESIDUAL`), which no tested one is. The integrand is smooth through a turning point,
+//! in proportion to `ψ_arc`; a solve those leave off its root by some 10⁻⁶ of the span
+//! (`ARC_RESIDUAL`), as on a few orbits bound only some 10⁵ ly out, takes five more
+//! (`ARC_MORE_STEPS`). Longer spans and orbits nearer a circle keep the series, which is the more
+//! exact there, and so does a solve still off, or left non-finite by rounding, which no tested one
+//! is. The integrand is smooth through a turning point,
 //! where F's simple root meets sin η's; beside one, where F's rounding outweighs the limit's
 //! truncation (`ARC_FLOOR`), it is its limit there, `√(2 r Δ ÷ |F′|)`, which no node's rounding
 //! can then make large. It is analytic only
@@ -223,8 +225,8 @@ const ARC_SPAN: f64 = 0.5;
 const ARC_LEAST_RANGE: f64 = 0.03;
 
 /// The share of the span, and its millionth of the radial period, by which `t_arc` at the arc's
-/// root may miss the span before the series answers instead, 10⁻⁶: some 3,000 times the solve's
-/// worst over its stress set, so that only a root the bracket missed reaches it.
+/// root may miss the span before the solve takes [`ARC_MORE_STEPS`] more, and then the series
+/// answers instead, 10⁻⁶: some 3,000 times the solve's worst over its stress set.
 const ARC_RESIDUAL: f64 = 1e-6;
 
 /// The quadratures of the arc's solve at a time, a fixed count: the first at the series' anomaly,
@@ -233,6 +235,13 @@ const ARC_RESIDUAL: f64 = 1e-6;
 /// (`the_arc_s_fixed_step_count_converges`), and against the direct integration the arc's worst
 /// is the same as after four, to 3 digits; two leave 1.5 tenths.
 const ARC_STEPS: u32 = 3;
+
+/// The further quadratures, a fixed count, of a solve that [`ARC_STEPS`] leave off its root by more
+/// than [`ARC_RESIDUAL`] allows, before the series answers instead: on an orbit bound only some
+/// 10⁵ ly out the series' root is a poor start, and of the census's 342,553 rogue planets' orbits
+/// on the arc three needed more, the worst six in all
+/// (`the_arc_solves_a_barely_bound_orbit_with_more_steps`).
+const ARC_MORE_STEPS: u32 = 5;
 
 /// F's share of the size of its terms at or below which F is taken to be rounding, so that
 /// `dt ÷ dη` is its limit at the turning point beside it, `√(2 r Δ ÷ |F′|)`: about √ε, where the
@@ -1108,19 +1117,24 @@ impl SphericalOrbit {
     }
 
     /// The state `dt` s from the epoch by the arc from the epoch (module documentation, "The arc
-    /// from the epoch"), by `steps` ([`ARC_STEPS`]) quadratures, m and m s⁻¹; `None`, for the
-    /// series to answer instead, if rounding leaves it not finite or its root off by more than
-    /// [`ARC_RESIDUAL`] allows, which no tested orbit does.
+    /// from the epoch"), by `steps` ([`ARC_STEPS`]) quadratures, and [`ARC_MORE_STEPS`] more if
+    /// they leave its root off by more than [`ARC_RESIDUAL`] allows, m and m s⁻¹; `None`, for the
+    /// series to answer instead, if those leave it off too or rounding leaves it not finite, which
+    /// no tested orbit does.
     #[must_use]
     fn arc_state(&self, arc: &EpochArc, dt: f64, steps: u32) -> Option<([f64; 3], [f64; 3])> {
-        let root = self.arc_root(arc, dt, steps);
         // A root off by far more than the solve's measured noise, some 3 × 10⁻¹⁰ of the span
         // (`the_arc_s_fixed_step_count_converges`), and than η's own rounding, some 10⁻¹⁶ rad,
-        // which outweighs it a second from the epoch, was not bracketed.
-        let miss = (root.integrals[0] - dt).abs();
+        // which outweighs it a second from the epoch, is not yet solved.
         let allowed = ARC_RESIDUAL * (dt.abs() + 1e-6 * TAU * self.time[0]);
-        if miss.is_nan() || miss > allowed {
-            return None;
+        let solved = |root: &ArcRoot| (root.integrals[0] - dt).abs() <= allowed;
+        let mut root = self.arc_root(arc, dt, steps);
+        if !solved(&root) {
+            // The same solve run on: its first `steps` quadratures are the same.
+            root = self.arc_root(arc, dt, steps + ARC_MORE_STEPS);
+            if !solved(&root) {
+                return None;
+            }
         }
         let state = self.placed(root.at.r, root.at.sin, root.at.rate, root.integrals[1]);
         state
@@ -2292,6 +2306,53 @@ pub(super) mod tests {
         }
         println!("the worst of the law as taken: {worst:.3} millionths of the bound");
         assert!(worst < 400.0, "{worst} millionths");
+    }
+
+    /// A barely bound orbit (P09.T28.d.c): the Milky Way fixture's rogue planet
+    /// `0xd00020003fff0ae4`, 2 ly out under every 27 hold and bound only at 8.3 × 10⁵ ly, a radial
+    /// period of 4 × 10⁹ yr, whose solve a century on [`ARC_STEPS`] leave 10⁻⁴ of the span off its
+    /// root, from a poor start in the series: the [`ARC_MORE_STEPS`] more solve it, so that its
+    /// state is the arc's and not the series', out of phase by some 0.08 ly there.
+    #[test]
+    fn the_arc_solves_a_barely_bound_orbit_with_more_steps() {
+        let galaxy = Galaxy::from_params_with_rules(
+            Seed::new(0x0928_b0a0_0000_0001),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::every_27_hold(),
+        )
+        .expect("the Milky Way fixture builds under every 27 hold")
+        .with_full_potential();
+        let id = SystemId::from_raw(0xd000_2000_3fff_0ae4).expect("a grid system's ID");
+        let record =
+            crate::galaxy::placement::resolve(&galaxy, id).expect("the rogue planet resolves");
+        let trajectory = Trajectory::new(&galaxy, EpochState::of_grid_record(&galaxy, &record));
+        let exact = trajectory.exact_orbit().expect("on an exact orbit");
+        let arc = exact.arc.as_ref().expect("on the arc");
+        assert!(
+            exact.apocentre().value() > 1e5,
+            "{} ly",
+            exact.apocentre().value()
+        );
+        let dt = 100.0 * YEAR;
+        let period = exact.radial_period().value();
+        let allowed = ARC_RESIDUAL * (dt + 1e-6 * period);
+        let miss = |steps: u32| (exact.arc_root(arc, dt, steps).integrals[0] - dt).abs();
+        println!(
+            "a century on, the root off by {:.2e} of the span after {ARC_STEPS} quadratures and \
+             {:.2e} after {}",
+            miss(ARC_STEPS) / dt,
+            miss(ARC_STEPS + ARC_MORE_STEPS) / dt,
+            ARC_STEPS + ARC_MORE_STEPS
+        );
+        assert!(miss(ARC_STEPS) > allowed && miss(ARC_STEPS + ARC_MORE_STEPS) < 1e-12 * dt);
+        let state = exact.state_si(dt);
+        assert_eq!(
+            Some(state),
+            exact.arc_state(arc, dt, ARC_STEPS),
+            "the arc's, by more steps"
+        );
+        let apart = distance(state.0, exact.series_state(dt).0) / METRES_PER_LIGHT_YEAR;
+        assert!(apart > 1e-2, "{apart} ly from the series'");
     }
 
     /// Near a circle (P09.T28.d.c): on orbits of Δ from 2 × 10⁻⁵ to 0.3 at 0.1, 1 and 5 ly, their

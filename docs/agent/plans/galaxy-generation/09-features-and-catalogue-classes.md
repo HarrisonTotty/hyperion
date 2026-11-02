@@ -5996,8 +5996,10 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Lean: the arc from Δ 0.03 (`ARC_LEAST_RANGE`)._ Nearer a circle F is too small beside its
     terms for nodes near a turning point, and the series is the more exact, so the orbit keeps it
     (`the_arc_meets_the_plan_s_bound_near_a_circle`).
-  - _The solve._ The wobble's bracket is cut to a radial period on the epoch's side; a state that
-    rounds non-finite, or a root off by more than `ARC_RESIDUAL` allows, takes the series.
+  - _The solve._ The wobble's bracket is cut to a radial period on the epoch's side; a root
+    off by more than `ARC_RESIDUAL` allows after three quadratures takes five more
+    (`ARC_MORE_STEPS`; three of the census's rogue planets, bound only some 6 × 10⁵ ly out); one
+    still off, or a state that rounds non-finite, takes the series.
   - _For the 27 bump._ It re-blesses `galaxy/motion/centre_motion.golden`
     (`centre_motion_figures_are_pinned`) and the slow `galaxy/motion/regime.golden`
     (`regime_records_near_the_centre_are_pinned`), both 25's re-blesses too; no other golden of
