@@ -489,6 +489,20 @@ fn the_cells_and_the_list_are_complementary_under_every_27_hold() {
     complementary_over_ten_thousand_members(&off, &on);
 }
 
+/// Whether `record`, a core-collapse candidate of `feature`'s list in `galaxy`, is a runaway whose
+/// death the list leaves to the field's class: from 27 a runaway dies some 1,900 ly from its
+/// birth cluster, and the list drops it whatever its claim (P09.T33.b's `feature_runaway`).
+fn dies_in_the_field(galaxy: &Galaxy, feature: &FeatureRecord, record: &SystemRecord) -> bool {
+    feature.component().is_some_and(|component| {
+        feature_runaway(
+            galaxy,
+            component,
+            record.primary_initial_mass(),
+            ObjectKey::from(record.id()),
+        )
+    })
+}
+
 /// The features' complementarity of
 /// [`the_cells_and_the_list_are_complementary_over_ten_thousand_members`], in `on` against `off`,
 /// its held arm.
@@ -526,7 +540,14 @@ fn complementary_over_ten_thousand_members(off: &Galaxy, on: &Galaxy) {
                 .entry(on, class, entry.index(), entry.position())
                 .is_some();
             let claimed = claim(&record, &stars.composition, stars.velocity);
-            assert_eq!(kept, claimed == Some(class), "{:?}", record.id());
+            let runaway =
+                class == RecentClass::CoreCollapse && dies_in_the_field(on, &feature, &record);
+            assert_eq!(
+                kept,
+                claimed == Some(class) && !runaway,
+                "{:?}",
+                record.id()
+            );
             *lists.entry((class, kept)).or_insert(0_u32) += 1;
         }
         // Mark sets on indices past any list's, so that each is its own.
