@@ -38,12 +38,6 @@
 //!   reach tables fitted from the engine's runs keep the version's rules until the bump refits
 //!   them, and the range brief's gate refuses them under another arm
 //!   (`stellar/rules/merger_mass_hold.rs` lists the movers).
-//! - [`ns_accretion`](StellarRules::ns_accretion), at [`NS_ACCRETION_VERSION`] (plan 11, P11.T4's
-//!   fix): what a neutron star keeps of a companion's stable Roche-lobe overflow, all of it up to
-//!   the Eddington rate below it, a share from it, read at one choke point, `Engine::accretion`,
-//!   through the engine's input's rules. The pair-light and reach tables keep the version's rules
-//!   until the bump refits them, as for the merger mass (`stellar/rules/ns_accretion_hold.rs`
-//!   lists the movers).
 //! - [`binary_kicks`](StellarRules::binary_kicks), at [`BINARY_KICKS_VERSION`] (plan 11, P11.T10):
 //!   whether a system that a supernova has unbound goes on showing the star it released, both
 //!   stars of the drawn hierarchy below it, from it only the stars it still holds, chosen at one
@@ -110,7 +104,6 @@ use crate::stellar::binary::collapses::{COLLAPSES_VERSION, CollapseRules};
 use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
 use crate::stellar::binary::heavy_donor::{HEAVY_DONOR_VERSION, HeavyDonorRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
-use crate::stellar::binary::ns_accretion::{NS_ACCRETION_VERSION, NsAccretionRules};
 use crate::stellar::binary::pinned_white_dwarfs::{
     PINNED_WHITE_DWARFS_VERSION, PinnedWhiteDwarfRules,
 };
@@ -130,9 +123,6 @@ pub(crate) struct StellarRules {
     /// What a dynamically transferring main-sequence pair's merger keeps in the binary engine,
     /// the hold of [`MERGER_MASS_VERSION`].
     pub(crate) merger_mass: MergerMassRules,
-    /// What a neutron star keeps of a companion's stable Roche-lobe overflow in the binary engine,
-    /// the hold of [`NS_ACCRETION_VERSION`].
-    pub(crate) ns_accretion: NsAccretionRules,
     /// Whether a system that a supernova has unbound goes on showing the star it released, the
     /// hold of [`BINARY_KICKS_VERSION`].
     pub(crate) binary_kicks: BinaryKicksRules,
@@ -170,11 +160,6 @@ impl StellarRules {
                 MergerMassRules::Pair
             } else {
                 MergerMassRules::ThermalLimit
-            },
-            ns_accretion: if version.get() >= NS_ACCRETION_VERSION.get() {
-                NsAccretionRules::Efficiency
-            } else {
-                NsAccretionRules::Eddington
             },
             binary_kicks: if version.get() >= BINARY_KICKS_VERSION.get() {
                 BinaryKicksRules::Alone
@@ -234,9 +219,9 @@ impl StellarRules {
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// those that turn on at 27 (P11.T4's `ns_accretion`, `heavy_donor`, `pinned_white_dwarfs` and
-    /// `dwarf_limit`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and `xrb_class`, P11.T10's
-    /// `binary_kicks` and `collapses`, and P11.T12's `wind_accretion`).
+    /// those that turn on at 27 (P11.T4's `heavy_donor`, `pinned_white_dwarfs` and `dwarf_limit`,
+    /// P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and `xrb_class`, P11.T10's `binary_kicks`
+    /// and `collapses`, and P11.T12's `wind_accretion`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.

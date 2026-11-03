@@ -791,7 +791,6 @@ fn gate(
     let stars = attempt.stars();
     let stellar = galaxy.rules().stellar;
     let tables_hold = stellar.merger_mass.fitted_tables_hold()
-        && stellar.ns_accretion.fitted_tables_hold()
         && stellar.heavy_donor.fitted_tables_hold()
         && stellar.collapses.fitted_tables_hold()
         && stellar.wind_accretion.fitted_tables_hold()

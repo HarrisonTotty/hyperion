@@ -34,8 +34,8 @@
 //!   fed by any other donor takes the thermally limited share (BSE `evolv2.f` 1476–1479);
 //!   degenerate accretors take what the Eddington limit allows (equations 67 and 68, X the accreted
 //!   matter's hydrogen fraction), which is on by default (ruling 132.1, where BSE's table 3 has it
-//!   off); from generator version 27 a neutron star keeps only a share of it
-//!   ([`ns_accretion`](super::ns_accretion), P11.T4's fix). What is not accreted leaves with the
+//!   off); a neutron star keeps only a share of it ([`ns_accretion`](super::ns_accretion),
+//!   P11.T4's fix). What is not accreted leaves with the
 //!   donor's specific orbital angular momentum, a (M₁ + M₂) = constant for it (section 2.6), or
 //!   with the accretor's for novae and super-Eddington loss, as the published code has it. The
 //!   donor's transferred spin returns to the orbit and the accretor's spin grows by the specific
@@ -88,6 +88,7 @@ use crate::units::{SolarMasses, Years};
 
 use super::detached::{Snapshot, orbital_momentum, semi_major_axis};
 use super::evolve::{Engine, roche_lobe};
+use super::ns_accretion::NS_ACCRETION_EFFICIENCY;
 use super::star::{
     G, Kind, Member, MemberRadiusAt, Path, Surface, cooling_origin, moment_of_inertia,
     moment_of_inertia_within, positive,
@@ -1041,15 +1042,13 @@ impl Engine {
                     swells: false,
                 }
             }
-            // What a neutron star keeps is P11.T4's hold's (`ns_accretion`).
-            Kind::NeutronStar => {
-                let (share, from_accretor) = self.ctx.rules().ns_accretion.accreted(eddington);
-                Accretion {
-                    share,
-                    from_accretor,
-                    swells: false,
-                }
-            }
+            // A neutron star keeps a share of it, below its Eddington rate (P11.T4's fix,
+            // `ns_accretion`).
+            Kind::NeutronStar => Accretion {
+                share: eddington(NS_ACCRETION_EFFICIENCY).0,
+                from_accretor: true,
+                swells: false,
+            },
             Kind::GiantBranch | Kind::EarlyAgb | Kind::PulsingAgb => Accretion {
                 share: 1.0,
                 from_accretor: false,
