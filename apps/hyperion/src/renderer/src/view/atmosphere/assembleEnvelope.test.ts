@@ -418,10 +418,16 @@ describe("the protocol fixture's hot Jupiter (generator version 26's record)", (
     expect(drawnOf("hotJupiter").drawn.envelope.dropped).toEqual([]);
   });
 
-  it("shows no stand-in's label for its liquid Fe, whose top the cut puts at 1 bar", () => {
-    const { result } = drawnOf("hotJupiter");
-    // Measured 2026-11-03: 25's record labelled it, its top then at 0.0188 bar.
-    expect(result.reasons).not.toContain(
+  it("shows the stand-in's label for its liquid Fe, under the gas alone at its 1-bar top", () => {
+    // materials.ts's depth rule: its top lies above the floor, so under less than τ 10. The decks
+    // above it, Cr's and MnS's, cover none of the sky, and a mode's term takes its τ over the whole
+    // sky (`modesOf`), so no mode's τ lies above it. 25's record labelled it too, its top then at
+    // 0.0188 bar.
+    const fe = modeOf("hotJupiter", "Fe");
+    const { drawn, result } = drawnOf("hotJupiter");
+    expect(fe.topPa).toBeLessThan(drawn.envelope.floorPa);
+    expect(modesAbove(envelopeOf(ANSWERS.hotJupiter()).aerosols.modes, fe.topPa)).toBe(0);
+    expect(result.reasons).toContain(
       "no liquid Fe on file: metallic Fe films at room temperature stands in, a named analogue",
     );
   });
