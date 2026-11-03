@@ -16,6 +16,7 @@
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
+import { type Vec3, vec3 } from "../../geometry/vec3";
 import type { ElementSize } from "../../lib/useElementSize";
 import type { AtmosphereViewReport } from "../../view/atmosphere/AtmosphereCache";
 import type { BodyLightSources } from "../../view/bodies/draw";
@@ -24,6 +25,7 @@ import type { LitRegime } from "../../view/bodies/regime";
 import type { CameraPose } from "../../view/camera/pose";
 import type { CameraTarget, RenderStyle } from "../../view/camera/state";
 import type { StyleAvailability } from "../../view/engine/platform";
+import { relativeToCamera } from "../../view/coords/relative";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import type { RenderEngine, RenderView, ViewSize } from "../../view/engine/types";
 import { controlEv100, type ExposureControl, exposureScale } from "../../view/photometry/exposure";
@@ -42,7 +44,7 @@ import {
   type QualitySetting,
   SETTINGS,
 } from "../../view/quality/qualitySetting";
-import type { ViewScene, ViewStar } from "../../view/scene/model";
+import { sceneOrigins, type ViewScene, type ViewStar } from "../../view/scene/model";
 import { BandLayer } from "../../view/sky/band";
 import type { BakedCube } from "../../view/sky/bake";
 import { skyCubeCacheOf } from "../../view/sky/cache";
@@ -257,6 +259,8 @@ export function presentedViewport(size: ElementSize): ViewSize {
  * is not laid out, when it draws nothing.
  *
  * @param regimes - Its drawer's last photorealistic plan's regimes ({@link ViewFrameDrawer.regimes}).
+ * @param regimesFromM - The centres from the camera of the bodies they hand over, when they were
+ *   planned ({@link ViewFrameDrawer.regimesFromM}), or `null` where they are not known.
  * @param streamPriority - Its budget's terrain streaming priority (`ViewBudget.streamPriority`).
  * @param drawnStyle - The style its last frame was drawn in ({@link ViewFrameDrawn.drawnStyle}), by
  *   which the session's passes take the views that hand a body over (the batch review's S8).
@@ -266,6 +270,7 @@ export function terrainReportOf(
   regimes: ReadonlyMap<BodyIdHex, LitRegime>,
   streamPriority: ViewBudget["streamPriority"],
   drawnStyle: RenderStyle,
+  regimesFromM: ReadonlyMap<BodyIdHex, Vec3> | null = null,
 ): TerrainViewReport | null {
   const { run, size } = inputs;
   if (size === null) {
@@ -283,6 +288,7 @@ export function terrainReportOf(
     setting: inputs.setting,
     streamPriority,
     regimes,
+    regimesFromM,
   };
 }
 
@@ -357,6 +363,7 @@ export class ViewFrameDrawer {
   /** The contour interval the view's wireframe terrain last held, its hysteresis's (R10.T11). */
   #contourIntervalM: number | null = null;
   #regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
+  #regimesFromM: ReadonlyMap<BodyIdHex, Vec3> = new Map();
   /** The bodies the last photorealistic plan drew by their disc tables (R08.T16.b), its hysteresis's. */
   #tabled: ReadonlySet<BodyIdHex> = new Set();
   /**
@@ -422,6 +429,15 @@ export class ViewFrameDrawer {
    */
   get regimes(): ReadonlyMap<BodyIdHex, LitRegime> {
     return this.#regimes;
+  }
+
+  /**
+   * Each body {@link ViewFrameDrawer.regimes} hand over (their `terrain`), its centre from the
+   * camera when they were planned, m along the galactic axes (plan R10, R10.T16.b's report; the
+   * owner's Mac A/B); none before such a frame.
+   */
+  get regimesFromM(): ReadonlyMap<BodyIdHex, Vec3> {
+    return this.#regimesFromM;
   }
 
   /**
@@ -728,6 +744,17 @@ export class ViewFrameDrawer {
         return { drawn: false, terrain: null, decorated: false };
       }
       this.#regimes = plan.regimes;
+      const origins = sceneOrigins(run.scene);
+      const fromCamera = new Map<BodyIdHex, Vec3>();
+      for (const [body, regime] of plan.regimes) {
+        if (regime === "terrain") {
+          fromCamera.set(
+            body,
+            relativeToCamera({ kind: "body", body, m: vec3(0, 0, 0) }, camera.pose, origins),
+          );
+        }
+      }
+      this.#regimesFromM = fromCamera;
       this.#tabled = plan.tabled;
       this.#sources = plan.sources;
       this.#frameFailed = false;

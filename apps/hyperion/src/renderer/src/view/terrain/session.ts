@@ -131,7 +131,13 @@ import { EngineUnavailable } from "../engine/resilientEngine";
 import type { RenderEngine, TextureHandle } from "../engine/types";
 import { isLitBody } from "../lighting/retarded";
 import type { GeometrySettings, QualitySetting, TerrainSettings } from "../quality/qualitySetting";
-import { cameraSceneOf, type ViewBody, type ViewCraft, type ViewScene } from "../scene/model";
+import {
+  cameraSceneOf,
+  sceneOrigins,
+  type ViewBody,
+  type ViewCraft,
+  type ViewScene,
+} from "../scene/model";
 import {
   TERRAIN_COMPUTATION_FAILED,
   TERRAIN_NOT_AVAILABLE,
@@ -324,6 +330,13 @@ export interface TerrainViewReport {
    */
   readonly regimes: ReadonlyMap<BodyIdHex, LitRegime>;
   /**
+   * The centres from the camera of the bodies {@link TerrainViewReport.regimes} hand over, when they
+   * were planned, m along the galactic axes (`ViewFrameDrawer.regimesFromM`): a body is handed
+   * over at the report's own pose only where its centre stands near where it stood then
+   * ({@link regimeHolds}); absent or `null`, the regimes stand as they are.
+   */
+  readonly regimesFromM?: ReadonlyMap<BodyIdHex, Vec3> | null;
+  /**
    * The body whose terrain readout the view states, its `FRAME` body (plan R10, R10.T12; the
    * `PRIMARY` view's alone, decision-r10-t12-leans §3), or `null` or absent with none: wanted as the
    * view's local body is, so that its survey is asked wherever the camera is, and the view shows the
@@ -360,6 +373,38 @@ export interface TerrainSurvey {
    * afresh.
    */
   readonly stale: boolean;
+}
+
+/**
+ * The share of a body's distance from the camera, when its view's regimes were planned, by which
+ * its centre may have moved from the camera since for its regime to stand at the report's pose (plan
+ * R10, R10.T16.b; the owner's Mac A/B, lean 2026-11-03): a tenth. A view reports its last plan's
+ * regimes with its camera now, before the frame plans again; across a cut, as TERRAIN TEST's loop
+ * from 4 km over the ground to 80,000 km out, the last plan's `terrain` regime held for the far
+ * camera, the pass selected for a view whose frame drew no terrain, and the views check read a
+ * handed-over frame with none. An ordinary frame moves the camera thousandths of it at most.
+ */
+export const REGIME_HOLD_SHARE = 0.1;
+
+/**
+ * Whether `report`'s regime for `body` stands at its pose: the body's centre from the camera
+ * within {@link REGIME_HOLD_SHARE} of its distance of where it stood when the regimes were planned,
+ * or that not known.
+ */
+export function regimeHolds(
+  report: Pick<TerrainViewReport, "pose" | "regimesFromM" | "scene">,
+  body: Pick<ViewBody, "id">,
+): boolean {
+  const then = report.regimesFromM?.get(body.id);
+  if (then === undefined) {
+    return true;
+  }
+  const now = relativeToCamera(
+    { kind: "body", body: body.id, m: vec3(0, 0, 0) },
+    report.pose,
+    sceneOrigins(report.scene),
+  );
+  return norm(sub(now, then)) <= REGIME_HOLD_SHARE * norm(then);
 }
 
 /** A session's memory report (R10.T14; R12 Design note 6's line for the coarse field). */
@@ -1793,7 +1838,7 @@ export class TerrainSession {
           continue;
         }
         const seen = report.scene.bodies.find((each) => each.id === body);
-        if (seen === undefined || seen.rotation === null) {
+        if (seen === undefined || seen.rotation === null || !regimeHolds(report, seen)) {
           continue;
         }
         const views = handing.get(body) ?? [];

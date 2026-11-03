@@ -1507,6 +1507,7 @@ function ViewStage({
                 drawer.regimes,
                 primaryBudget.streamPriority,
                 drawnStyle,
+                drawer.regimesFromM,
               );
         if (session !== null && report !== null) {
           // Its FRAME body, whose terrain readout it states, is wanted wherever the camera is

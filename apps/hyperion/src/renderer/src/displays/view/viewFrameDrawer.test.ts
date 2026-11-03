@@ -270,6 +270,7 @@ describe("a view's hand-over at its frame's internal scale (R10.T10.g)", () => {
     renderScale: number,
     reliefTau: number,
     ratio = 1,
+    planned: (drawer: ViewFrameDrawer, run: ViewRun) => void = () => undefined,
   ): Promise<string[]> {
     const run = phaseRun(true);
     const inputs: ViewFrameInputs = {
@@ -299,9 +300,30 @@ describe("a view's hand-over at its frame's internal scale (R10.T10.g)", () => {
     const handed = [...drawer.regimes].flatMap(([id, regime]) =>
       regime === "terrain" ? [id] : [],
     );
+    planned(drawer, run);
     drawer.dispose();
     return handed;
   }
+
+  it("keeps each body it hands over's centre from the camera at its plan (the owner's Mac A/B)", async () => {
+    let from: ReadonlyArray<readonly [string, number[]]> = [];
+    let expected: ReadonlyArray<readonly [string, number[]]> = [];
+    const handed = await handedOver("high", 1, 1.5, 1, (drawer, run) => {
+      from = [...drawer.regimesFromM].map(([id, m]) => [id, [m.x, m.y, m.z]] as const);
+      expected = [...drawer.regimes].flatMap(([id, regime]) => {
+        if (regime !== "terrain") {
+          return [];
+        }
+        const m = relativeToCamera(
+          { kind: "body", body: id, m: vec3(0, 0, 0) },
+          runPose(run),
+          sceneOrigins(run.scene),
+        );
+        return [[id, [m.x, m.y, m.z]] as const];
+      });
+    });
+    expect([handed.length > 0, from]).toEqual([true, expected]);
+  });
 
   it.each(["high", "low"] as const)(
     "hands the same bodies over at an internal scale of 0.5 as at 1 on %s, a relief of 1.5 τ",
@@ -409,6 +431,7 @@ describe("what a view drew, for the terrain session (R10.T16.a)", () => {
       setting: "low",
       streamPriority: "secondary",
       regimes,
+      regimesFromM: null,
     });
   });
 

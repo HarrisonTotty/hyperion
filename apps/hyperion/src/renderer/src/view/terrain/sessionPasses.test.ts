@@ -53,7 +53,8 @@ import {
   WIREFRAME_TERRAIN_TAU_PX,
 } from "../quality/qualitySetting";
 import { AU_M } from "../scenes/kept";
-import type { ViewBody, ViewScene } from "../scene/model";
+import { relativeToCamera } from "../coords/relative";
+import { sceneOrigins, type ViewBody, type ViewScene } from "../scene/model";
 import { stepTerrainSession } from "../../displays/view/useTerrainSession";
 import type { LitRegime } from "../bodies/regime";
 import {
@@ -73,6 +74,8 @@ import { CASCADE_BYTES, casterReachM } from "./shadows/cascades";
 import { SHADOW_PLACEHOLDER, SHADOW_PLACEHOLDER_NAME } from "./shadows/terrainShadows";
 import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import {
+  REGIME_HOLD_SHARE,
+  regimeHolds,
   sceneContacts,
   TerrainSession,
   terrainPassViewOf,
@@ -464,6 +467,50 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
     await answerField(h);
     h.session.step();
     expect([[...h.session.passBodies], [...h.session.wirePassBodies]]).toEqual([[], [MOON]]);
+  });
+
+  it.each([
+    { regimes: "where they were planned", farther: 1, handed: [MOON] },
+    {
+      regimes: "across a cut, the camera 20 times as far when they were planned",
+      farther: 20,
+      handed: [],
+    },
+  ])("hands a body over by its view's last regimes $regimes", async ({ farther, handed }) => {
+    const h = await harness();
+    const report = handing(5e6);
+    const now = relativeToCamera(
+      { kind: "body", body: MOON, m: vec3(0, 0, 0) },
+      report.pose,
+      sceneOrigins(report.scene),
+    );
+    h.session.noteView(PRIMARY, {
+      ...report,
+      regimesFromM: new Map([[MOON, scale(now, farther)]]),
+    });
+    h.session.step();
+    await answerField(h);
+    h.session.step();
+    expect([...h.session.passBodies]).toEqual(handed);
+  });
+
+  it("holds a regime where the body's centre moved a tenth of its distance from the camera, and no further", () => {
+    const report = handing(5e6);
+    const now = relativeToCamera(
+      { kind: "body", body: MOON, m: vec3(0, 0, 0) },
+      report.pose,
+      sceneOrigins(report.scene),
+    );
+    const at = (share: number): boolean =>
+      regimeHolds(
+        { ...report, regimesFromM: new Map([[MOON, scale(now, 1 / (1 - share))]]) },
+        sceneMoon(SCENE),
+      );
+    expect([
+      regimeHolds({ ...report, regimesFromM: null }, sceneMoon(SCENE)),
+      at(REGIME_HOLD_SHARE * 0.99),
+      at(REGIME_HOLD_SHARE * 1.01),
+    ]).toEqual([true, true, false]);
   });
 
   it("hands nothing over of a body whose rotation is not known", async () => {

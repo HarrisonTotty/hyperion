@@ -874,6 +874,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
                   loop.drawer.regimes,
                   budget.streamPriority,
                   drawn.drawnStyle,
+                  loop.drawer.regimesFromM,
                 );
           if (session !== null && report !== null) {
             // Its FRAME body, whose readout its page states, is wanted wherever its camera is
