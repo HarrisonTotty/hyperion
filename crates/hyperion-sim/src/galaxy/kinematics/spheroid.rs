@@ -139,6 +139,14 @@ fn grid_point(i: usize) -> f64 {
     math::exp(LN_FIRST + STEP * f64::from(u8::try_from(i).expect("below 64")))
 }
 
+/// The grid's last point, ly: the farthest radius and height at which a spheroid's table reads the
+/// potential. The grid is fixed in light-years, so it is the same in every galaxy.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn last_grid_point_ly() -> f64 {
+    grid_point(JEANS_POINTS - 1)
+}
+
 /// The cell of the grid holding `x > 0` and the position in it, clamped to the grid.
 fn cell(x: f64) -> (usize, f64) {
     let u = if x > 0.0 {

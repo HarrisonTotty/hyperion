@@ -24,6 +24,9 @@ pub mod sigma;
 pub mod spherical;
 mod tables;
 
+#[cfg(test)]
+mod reach_tests;
+
 use std::error::Error;
 use std::fmt;
 

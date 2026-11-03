@@ -172,6 +172,22 @@ pub fn asymmetric_drift(
     )
 }
 
+/// The farthest radius, ly, at which `disc`'s table reads the potential, its last radius, and a
+/// bound on the farthest height, the top of the vertical integral's tail (the last of
+/// [`TAIL_EDGES`] times the table's top height; its quadrature's nodes lie inside it), as
+/// [`DiscKinematics::new`] and [`vertical_dispersion_sq`] place them, whose arithmetic it repeats.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn potential_reach_ly(disc: &ExponentialDisc) -> (f64, f64) {
+    let height_step = TOP_HEIGHTS * disc.profile().effective_height().value()
+        / f64::from(disc_heights_minus_one());
+    let top = height_step * index_f64(DISC_HEIGHTS - 1);
+    (
+        radius(disc.length().value(), DISC_RADII - 1),
+        TAIL_EDGES[TAIL_EDGES.len() - 1] * top,
+    )
+}
+
 /// `σ²(z_j) = (1 ÷ n(z_j)) ∫_{z_j}^∞ n K_z dz` at `heights` (ly, ascending from 0), for the
 /// profile `n = exp(−exponent)` and the force `k_z` (km/s)² per ly: the vertical Jeans equation's
 /// dispersion on a profile it did not shape.
