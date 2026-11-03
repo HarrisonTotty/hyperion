@@ -80,9 +80,6 @@ fn abundances(
     ResourceAbundances::derive(&inputs, draws)
 }
 
-/// Both rules of the ratios' hold.
-const RULES: [ResourceRatiosRules; 2] = [ResourceRatiosRules::Held, ResourceRatiosRules::Ratios];
-
 /// Jupiter's gas at 1 bar by mole fraction: H₂ 0.862, He 0.1359 (von Zahn, Hunten and Lehmacher
 /// 1998, via the life brainstorm's "Gas-giant fuel"), and CH₄ 0.0021 (the rest), with no
 /// condensate above its decks.
@@ -118,7 +115,7 @@ fn draws() -> Vec<ResourceDraws> {
 
 /// [P14.T26] Every fraction lies within 0–1 and they sum to at most 1, to rounding, over every
 /// layer, metallicities from the halo's to the most metal-rich disc's, both sides of the snow line
-/// and seeded and extreme draws, under both rules of the ratios' hold.
+/// and seeded and extreme draws.
 #[test]
 fn the_fractions_lie_within_zero_and_one_and_sum_to_at_most_one() {
     let gas = jupiter_gas();
@@ -129,147 +126,54 @@ fn the_fractions_lie_within_zero_and_one_and_sum_to_at_most_one() {
         OuterLayer::Gas(&gas),
     ];
     let mut checked = 0_u32;
-    for rules in RULES {
-        with_resource_ratios(rules, || {
-            for (of, side) in [
-                (earth(), SnowLineSide::Inside),
-                (icy(), SnowLineSide::Beyond),
-            ] {
-                for (fe_h, alpha_fe) in [(-2.5, 0.4), (-1.0, 0.3), (0.0, 0.0), (0.5, -0.1)] {
-                    let bulk = bulk_of(of, fe_h, alpha_fe);
-                    for layer in layers {
-                        for age in [Years::new(1e7), NOW, Years::new(12e9)] {
-                            for d in &draws() {
-                                let a = abundances(&bulk, side, layer, age, d);
-                                for (resource, x) in a.iter() {
-                                    assert!(
-                                        (0.0..=1.0).contains(&x),
-                                        "{rules:?}: {resource:?} = {x} on {layer:?}, [Fe/H] {fe_h}"
-                                    );
-                                }
-                                assert!(
-                                    a.total() <= 1.0 + 1e-12,
-                                    "{rules:?}: {} on {layer:?}",
-                                    a.total()
-                                );
-                                checked += 1;
-                            }
+    for (of, side) in [
+        (earth(), SnowLineSide::Inside),
+        (icy(), SnowLineSide::Beyond),
+    ] {
+        for (fe_h, alpha_fe) in [(-2.5, 0.4), (-1.0, 0.3), (0.0, 0.0), (0.5, -0.1)] {
+            let bulk = bulk_of(of, fe_h, alpha_fe);
+            for layer in layers {
+                for age in [Years::new(1e7), NOW, Years::new(12e9)] {
+                    for d in &draws() {
+                        let a = abundances(&bulk, side, layer, age, d);
+                        for (resource, x) in a.iter() {
+                            assert!(
+                                (0.0..=1.0).contains(&x),
+                                "{resource:?} = {x} on {layer:?}, [Fe/H] {fe_h}"
+                            );
                         }
+                        assert!(a.total() <= 1.0 + 1e-12, "{} on {layer:?}", a.total());
+                        checked += 1;
                     }
                 }
             }
-        });
+        }
     }
     assert!(checked > 2_000, "{checked}");
 }
 
-/// [P14.T26] Below 27 (the ratios' hold), at fixed composition and ranks, the iron group scales
-/// with 10^\[Fe/H\]: on a differentiated body's crust and an undifferentiated body's bulk, at the
-/// median ranks, whose fractions are the mean's, while the metals fill less than the layer's
-/// solids (an Earth's undifferentiated bulk, a third iron, reaches them above \[Fe/H\] +0.3 at
-/// \[α/Fe\] +0.2). From 27 \[Fe/H\] moves no fraction
-/// (`under_27_the_metallicity_moves_no_fraction_at_fixed_ratios`).
-#[test]
-fn the_iron_group_scales_with_ten_to_the_metallicity_at_fixed_composition() {
-    with_resource_ratios(ResourceRatiosRules::Held, || {
-        for layer in [OuterLayer::SilicateCrust, OuterLayer::Bulk] {
-            let iron = |fe_h: f64| {
-                let bulk = bulk_of(earth(), fe_h, 0.0);
-                abundances(
-                    &bulk,
-                    SnowLineSide::Inside,
-                    layer,
-                    NOW,
-                    &ResourceDraws::MEDIAN,
-                )
-                .fraction(Resource::IronGroup)
-            };
-            let solar = iron(0.0);
-            assert!(solar > 0.01, "{layer:?}: {solar}");
-            for fe_h in [-2.0, -1.0, -0.5, 0.3] {
-                let ratio = iron(fe_h) / solar;
-                let expected = math::exp10(fe_h);
-                assert!(
-                    (ratio / expected - 1.0).abs() < 1e-12,
-                    "{layer:?} at [Fe/H] {fe_h}: {ratio} against {expected}"
-                );
-            }
-        }
-    });
-}
-
 /// [P14.T26] The radioactives' ²³⁸U share halves over 4.5 Gyr, 2^(−4.5 ÷ 4.47) by its half-life:
 /// at the median ranks exactly as its decay, and at seeded ranks within a part in 10⁵, where the
-/// odds' denominator and the sum's division move with the radioactives' own tiny share; under both
-/// rules of the ratios' hold.
+/// odds' denominator and the sum's division move with the radioactives' own tiny share.
 #[test]
 fn the_radioactives_uranium_238_share_halves_over_four_and_a_half_gigayears() {
     let bulk = bulk_of(earth(), 0.0, 0.0);
     let expected = math::exp(-4.5e9 / RadiogenicIsotope::Uranium238.mean_life().value());
     assert!((expected - 0.5).abs() < 0.005, "{expected}");
-    for rules in RULES {
-        with_resource_ratios(rules, || {
-            for layer in [OuterLayer::SilicateCrust, OuterLayer::Bulk] {
-                for (d, tolerance) in [(ResourceDraws::MEDIAN, 1e-12), (draws()[0], 1e-5)] {
-                    let uranium = |age: f64| {
-                        abundances(&bulk, SnowLineSide::Inside, layer, Years::new(age), &d)
-                            .radioactive(RadiogenicIsotope::Uranium238)
-                    };
-                    let ratio = uranium(6e9) / uranium(1.5e9);
-                    assert!(
-                        (ratio / expected - 1.0).abs() < tolerance,
-                        "{rules:?} on {layer:?}: {ratio} against {expected}"
-                    );
-                    assert!(
-                        (ratio - 0.5).abs() < 0.005,
-                        "{rules:?} on {layer:?}: {ratio}"
-                    );
-                }
-            }
-        });
-    }
-}
-
-/// [P14.T26] Below 27 (the ratios' hold), a metal-poor halo planet, \[Fe/H\] −1.5 and \[α/Fe\]
-/// +0.35, is poorer in every metal group than its disc twin of solar abundances, of the same
-/// composition and at the same ranks, and richer in silicates: at the median ranks and the seeded
-/// ones. The bounds test's constructed ranks are left out: at seven σ every resource's odds
-/// saturate, and the division by their sum then evens them out. From 27 it is poorer per kilogram
-/// in its non-α metals alone (`under_27_a_halo_twin_s_crust_is_poorer_only_in_its_non_alpha_metals`).
-#[test]
-fn a_metal_poor_halo_planet_is_poorer_in_every_metal_than_its_disc_twin() {
-    with_resource_ratios(ResourceRatiosRules::Held, || {
-        let metals = [
-            Resource::IronGroup,
-            Resource::LightLithophiles,
-            Resource::RareEarths,
-            Resource::PlatinumGroup,
-            Resource::Radioactives,
-        ];
-        for (of, side) in [
-            (earth(), SnowLineSide::Inside),
-            (icy(), SnowLineSide::Beyond),
-        ] {
-            let (halo, disc) = (bulk_of(of, -1.5, 0.35), bulk_of(of, 0.0, 0.0));
-            for layer in [OuterLayer::SilicateCrust, OuterLayer::Bulk] {
-                for d in draws().iter().take(48).chain([&ResourceDraws::MEDIAN]) {
-                    let poor = abundances(&halo, side, layer, NOW, d);
-                    let rich = abundances(&disc, side, layer, NOW, d);
-                    for metal in metals {
-                        assert!(
-                            poor.fraction(metal) < rich.fraction(metal),
-                            "{metal:?} on {layer:?}: {} against {}",
-                            poor.fraction(metal),
-                            rich.fraction(metal)
-                        );
-                    }
-                    assert!(
-                        poor.fraction(Resource::Silicates) > rich.fraction(Resource::Silicates)
-                    );
-                }
-            }
+    for layer in [OuterLayer::SilicateCrust, OuterLayer::Bulk] {
+        for (d, tolerance) in [(ResourceDraws::MEDIAN, 1e-12), (draws()[0], 1e-5)] {
+            let uranium = |age: f64| {
+                abundances(&bulk, SnowLineSide::Inside, layer, Years::new(age), &d)
+                    .radioactive(RadiogenicIsotope::Uranium238)
+            };
+            let ratio = uranium(6e9) / uranium(1.5e9);
+            assert!(
+                (ratio / expected - 1.0).abs() < tolerance,
+                "{layer:?}: {ratio} against {expected}"
+            );
+            assert!((ratio - 0.5).abs() < 0.005, "{layer:?}: {ratio}");
         }
-    });
+    }
 }
 
 /// Differentiation takes the platinum group into the core: an undifferentiated body's bulk holds
@@ -299,38 +203,41 @@ fn the_platinum_group_is_rich_in_a_bulk_and_poor_in_a_crust() {
     assert!(undifferentiated > 100.0 * crust);
 }
 
-/// Below 27 (the ratios' hold), a crust's composition at solar abundances is the bulk silicate
-/// Earth's, less what the list does not count: its iron group 6.8%, its light lithophiles 28%,
-/// its rare earths 28 ppm (CI's 10.0 × 23,500 ÷ 8,500), its silicates the rest. From 27 its iron
-/// is its own mantle's (`under_27_a_mars_s_crust_holds_twice_an_earth_s_iron`).
+/// A crust's composition at solar abundances is the bulk silicate Earth's, less what the list does
+/// not count, but for its iron: its light lithophiles 28%, its rare earths 28 ppm (CI's 10.0 ×
+/// 23,500 ÷ 8,500), its iron group its own mantle's iron beside the bulk silicate Earth's V, Cr,
+/// Mn, Co and Ni (`under_27_a_mars_s_crust_holds_twice_an_earth_s_iron`), its silicates the rest.
 #[test]
 fn a_crust_at_solar_abundances_is_the_bulk_silicate_earth() {
-    with_resource_ratios(ResourceRatiosRules::Held, || {
-        let bulk = bulk_of(earth(), 0.0, 0.0);
-        let crust = abundances(
-            &bulk,
-            SnowLineSide::Inside,
-            OuterLayer::SilicateCrust,
-            NOW,
-            &ResourceDraws::MEDIAN,
-        );
-        let rock = 1.0
-            - bulk.fractions().water()
-                / (bulk.fractions().iron() + bulk.fractions().rock() + bulk.fractions().water());
-        let per_rock = |resource| crust.fraction(resource) / rock;
-        assert!((per_rock(Resource::IronGroup) - 0.068_42).abs() < 1e-4);
-        assert!((per_rock(Resource::LightLithophiles) - 0.281).abs() < 1e-3);
-        assert!((per_rock(Resource::RareEarths) - 27.67e-6).abs() < 0.01e-6);
-        // ²³⁸U is the bulk silicate Earth's at the present age.
-        let uranium = crust.radioactive(RadiogenicIsotope::Uranium238) / rock;
-        assert!(
-            (uranium / RadiogenicIsotope::Uranium238.bulk_silicate_earth_mass_fraction() - 1.0)
-                .abs()
-                < 1e-12
-        );
-        assert_eq!(crust.fraction(Resource::Hydrocarbons), 0.0);
-        assert_eq!(crust.fraction(Resource::Helium3), 0.0);
-    });
+    let bulk = bulk_of(earth(), 0.0, 0.0);
+    let crust = abundances(
+        &bulk,
+        SnowLineSide::Inside,
+        OuterLayer::SilicateCrust,
+        NOW,
+        &ResourceDraws::MEDIAN,
+    );
+    let rock = 1.0
+        - bulk.fractions().water()
+            / (bulk.fractions().iron() + bulk.fractions().rock() + bulk.fractions().water());
+    let per_rock = |resource| crust.fraction(resource) / rock;
+    let feo = mantle_iron_oxide_mass_fraction(
+        core_share(&bulk.fractions()),
+        solar_magnesium_to_silicon(),
+        Dex::ZERO,
+    );
+    let iron = feo / iron_oxide_per_iron() + BULK_SILICATE_EARTH_IRON_TRACES;
+    assert!((per_rock(Resource::IronGroup) / iron - 1.0).abs() < 1e-12);
+    assert!((per_rock(Resource::LightLithophiles) - 0.281).abs() < 1e-3);
+    assert!((per_rock(Resource::RareEarths) - 27.67e-6).abs() < 0.01e-6);
+    // ²³⁸U is the bulk silicate Earth's at the present age.
+    let uranium = crust.radioactive(RadiogenicIsotope::Uranium238) / rock;
+    assert!(
+        (uranium / RadiogenicIsotope::Uranium238.bulk_silicate_earth_mass_fraction() - 1.0).abs()
+            < 1e-12
+    );
+    assert_eq!(crust.fraction(Resource::Hydrocarbons), 0.0);
+    assert_eq!(crust.fraction(Resource::Helium3), 0.0);
 }
 
 /// An ice shell holds no metal, and an icy body's ices carry its carbon dioxide and ammonia, and
@@ -552,39 +459,6 @@ fn the_ranks_are_the_stream_s_first_eleven_words() {
     assert!(u64::try_from(RESOURCES).unwrap() < RESOURCE_WORDS);
 }
 
-/// P14.T26's ratios are held until the 26 → 27 bump: the rules in force are the metallicity's
-/// scale, the tests' switch and 27's helper reach the ratios, and 26's helper does not.
-#[test]
-fn the_resource_ratios_are_held_only_until_the_27_bump() {
-    use crate::planetary::testing::with_every_27_hold;
-    assert!(
-        GENERATOR_VERSION < RESOURCE_RATIOS_VERSION,
-        "the 26 → 27 bump puts P14.T26's ratios in a body's resources: delete \
-         `RESOURCE_RATIOS_VERSION`, `ResourceRatiosRules` with its `Held` arm, its match in \
-         `solid_mean`, `held_metals`, the tests' `with_resource_ratios`, its switch in \
-         `with_every_27_hold` (and the helper, if no other 27 hold is left), `RULES` and this \
-         test; restate or delete the tests held below 27, and re-bless `planetary/resources`, as \
-         plan 14's record of P14.T26's ratios lists"
-    );
-    assert_eq!(ResourceRatiosRules::in_force(), ResourceRatiosRules::Held);
-    assert_eq!(
-        with_resource_ratios(ResourceRatiosRules::Ratios, ResourceRatiosRules::in_force),
-        ResourceRatiosRules::Ratios
-    );
-    assert_eq!(
-        with_every_27_hold(ResourceRatiosRules::in_force),
-        ResourceRatiosRules::Ratios
-    );
-    assert_eq!(ResourceRatiosRules::in_force(), ResourceRatiosRules::Held);
-    assert_eq!(
-        with_every_27_hold(|| {
-            with_resource_ratios(ResourceRatiosRules::Held, ResourceRatiosRules::in_force)
-        }),
-        ResourceRatiosRules::Held
-    );
-    assert_eq!(ResourceRatiosRules::in_force(), ResourceRatiosRules::Held);
-}
-
 /// `a`'s fractions and radioactive isotopes are `b`'s, each to the bit.
 #[track_caller]
 fn assert_same_abundances(a: &ResourceAbundances, b: &ResourceAbundances) {
@@ -632,8 +506,7 @@ fn under_27_the_metallicity_moves_no_fraction_at_fixed_ratios() {
 }
 
 /// [P14.T26's ratios] Under every 27 hold, an undifferentiated body's iron group is its own
-/// metal's, its iron over its solids times `METAL`'s iron-group share, at \[Fe/H\] −1 as at 0: below
-/// 27 a halo body reports a tenth of the iron its own mass fractions hold.
+/// metal's, its iron over its solids times `METAL`'s iron-group share, at \[Fe/H\] −1 as at 0.
 #[test]
 fn under_27_a_bulk_s_iron_group_is_its_own_iron() {
     use crate::planetary::testing::with_every_27_hold;
@@ -662,7 +535,7 @@ fn under_27_a_bulk_s_iron_group_is_its_own_iron() {
 /// against its disc twin's at 0 and 0, of the same composition and host ratios and at the median
 /// ranks: its platinum group, rare earths, ⁴⁰K and iron group less its own mantle's iron are
 /// 10^(−0.3) of the disc twin's, its uranium and thorium the same, and its light lithophiles,
-/// nine tenths α elements, 0.97 of them, where below 27 they were a quarter. It restates the plan's
+/// nine tenths α elements, 0.97 of them. It restates the plan's
 /// "a metal-poor halo planet is poorer in every metal than its disc twin" (lean, 2026-11-01).
 #[test]
 fn under_27_a_halo_twin_s_crust_is_poorer_only_in_its_non_alpha_metals() {
@@ -726,11 +599,6 @@ fn under_27_a_halo_twin_s_crust_is_poorer_only_in_its_non_alpha_metals() {
         }
         let lithophiles = ratio(&|a| a.fraction(Resource::LightLithophiles));
         assert!((0.96..0.97).contains(&lithophiles), "{lithophiles}");
-        let held = with_resource_ratios(ResourceRatiosRules::Held, || {
-            crust(&halo).fraction(Resource::LightLithophiles)
-                / crust(&disc).fraction(Resource::LightLithophiles)
-        });
-        assert!((0.24..0.26).contains(&held), "{held}");
     });
 }
 
@@ -773,7 +641,7 @@ fn under_27_a_halo_twin_drawn_about_its_host_keeps_iron_in_its_crust() {
 /// [P14.T26's ratios] Under every 27 hold a silicate crust's iron is its own mantle's `FeO`'s:
 /// about a solar host, a Mars's core share (0.204) gives its crust 12.3 wt% Fe, near twice an
 /// Earth's (0.325) 6.26, the bulk silicate Earth's (McDonough and Sun 1995), its iron group less
-/// the bulk silicate Earth's other iron-peak metals; below 27 both were the bulk silicate Earth's.
+/// the bulk silicate Earth's other iron-peak metals.
 #[test]
 fn under_27_a_mars_s_crust_holds_twice_an_earth_s_iron() {
     use crate::planetary::testing::with_every_27_hold;
@@ -796,9 +664,6 @@ fn under_27_a_mars_s_crust_holds_twice_an_earth_s_iron() {
         assert!((earth / bse - 1.0).abs() < 0.005, "{earth} against {bse}");
         assert!((1.9..2.0).contains(&(mars / earth)), "{}", mars / earth);
     });
-    let held = with_resource_ratios(ResourceRatiosRules::Held, || (iron(0.204), iron(0.325)));
-    let bse = BULK_SILICATE_EARTH_IRON_GROUP[3];
-    assert!((held.0 / bse - 1.0).abs() < 1e-12 && (held.1 / bse - 1.0).abs() < 1e-12);
 }
 
 /// Under every 27 hold the light lithophiles' odds form moves them by under 2% and the fill cap

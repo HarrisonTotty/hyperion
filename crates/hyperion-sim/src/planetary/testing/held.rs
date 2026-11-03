@@ -34,7 +34,6 @@ use crate::planetary::derive::photometry::area_mix::{
 use crate::planetary::derive::photometry::envelope_bond::{EnvelopeBondRules, with_envelope_bond};
 use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
 use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
-use crate::planetary::hooks::resources::{ResourceRatiosRules, with_resource_ratios};
 use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
 use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
 use crate::planetary::hosts::strip::{StripRules, with_stripping};
@@ -106,7 +105,6 @@ held_rules! {
     orbit_extrapolation: OrbitExtrapolationRules =
         OrbitExtrapolationRules::in_force => with_orbit_extrapolation,
     carriers: CarriersRules = CarriersRules::in_force => with_carriers,
-    resource_ratios: ResourceRatiosRules = ResourceRatiosRules::in_force => with_resource_ratios,
     porous_core: PorousCoreRules = PorousCoreRules::in_force => with_porous_core,
     eccentricity_damping: EccentricityDampingRules =
         EccentricityDampingRules::in_force => with_eccentricity_damping,
