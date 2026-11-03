@@ -25,6 +25,7 @@ import type {
   HandoverTexelRecord,
   InspectionGpuCall,
   InspectionTimingBytes,
+  InspectionTimingMarchCensus,
   InspectionTimingMemory,
   InspectionTimingPass,
   InspectionTimingRecord,
@@ -1365,6 +1366,37 @@ function gpuCalls(value: unknown): ReadonlyArray<InspectionGpuCall> | null | und
 }
 
 /**
+ * A window's march census (plan R08, R08.T8.d), or `undefined` where `value` is not one: its
+ * kernel's name, the texels by node rays 0 to 10, and its counts, whole numbers, no more limb tiles
+ * than tiles and no fewer lanes' rays than rays.
+ */
+function timingCensus(value: unknown): InspectionTimingMarchCensus | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const { kernel, wholeMeans, centresInAir, tiles, limbTiles, rays, laneRays } = value;
+  const texelsByNodes = numbers(value["texelsByNodes"]);
+  return typeof kernel !== "string" ||
+    kernel.length === 0 ||
+    texelsByNodes === null ||
+    texelsByNodes.length !== 11 ||
+    !texelsByNodes.every(isCount) ||
+    !isCount(wholeMeans) ||
+    !isCount(centresInAir) ||
+    !isCount(tiles) ||
+    !isCount(limbTiles) ||
+    limbTiles > tiles ||
+    !isCount(rays) ||
+    !isCount(laneRays) ||
+    laneRays < rays
+    ? undefined
+    : { kernel, texelsByNodes, wholeMeans, centresInAir, tiles, limbTiles, rays, laneRays };
+}
+
+/**
  * One profiled window (the owner's report): its name, an end not before its start, and its times,
  * each pass's as many as the frames timed in full, each label once, and its WebGPU calls or `null`.
  */
@@ -1383,6 +1415,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
   const statements = strings(value["statements"]);
   const memory = timingMemory(value["memory"]);
   const calls = gpuCalls(value["gpuCalls"]);
+  const marchCensus = timingCensus(value["marchCensus"]);
   const { startMs, endMs, untimedFrames, position, marchSamples } = value;
   if (
     name === null ||
@@ -1404,7 +1437,8 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     !isCount(marchSamples) ||
     marchSamples === 0 ||
     !isTextOrNull(position) ||
-    statements === null
+    statements === null ||
+    marchCensus === undefined
   ) {
     return null;
   }
@@ -1425,6 +1459,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     marchSamples,
     position,
     statements,
+    marchCensus,
   };
 }
 

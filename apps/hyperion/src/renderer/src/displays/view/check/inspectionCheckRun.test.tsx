@@ -46,6 +46,7 @@ const WINDOW: InspectionTimingWindow = {
   marchSamples: 36,
   position: null,
   statements: [],
+  marchCensus: null,
 };
 
 /** A body the launch names. */

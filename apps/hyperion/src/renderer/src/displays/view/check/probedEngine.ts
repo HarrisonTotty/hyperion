@@ -11,7 +11,9 @@
  * render's submission and each target made, through the same probe. A depth-layer target's render
  * (plan R10, R10.T9.b) notes its CPU time as `<owner>:shadows`'s, its owner the view it names: one
  * target serves every view. An inspection profile's `--composite-probe` (the owner's priority,
- * 2026-11-01) is the one change it makes: the atmosphere's composite made under the probe.
+ * 2026-11-01) and `--march-probe` (plan R08, R08.T8.d) are the changes it makes: the atmosphere's
+ * composite, or its march, made under the probe. It also takes the march's far-limb census beside a
+ * march's dispatch when asked ({@link ProbedEngine.marchCensus}), a dispatch of its own after it.
  */
 
 import type {
@@ -25,6 +27,15 @@ import {
   type CompositeProbe,
   compositeProbedMaterial,
 } from "../../../view/atmosphere/hillaire";
+import {
+  MARCH_CENSUS_BUFFER,
+  MARCH_CENSUS_KERNEL,
+  type MarchCensus,
+  marchCensusBindingsOf,
+  marchCensusOf,
+  type MarchProbe,
+  marchProbedKernel,
+} from "../../../view/atmosphere/marchProbe";
 import type { KernelPair } from "../../../view/engine/kernels";
 import type { GraphicsFault } from "../../../view/engine/status";
 import type {
@@ -225,22 +236,111 @@ export class ProbedEngine implements RenderEngine {
   readonly #probe: EngineProbe;
   readonly #nowMs: () => number;
   readonly #compositeProbe: CompositeProbe | null;
+  readonly #marchProbe: MarchProbe | null;
+  /** The censuses asked for and not yet taken, each settled by the next march's census. */
+  #censusesAsked: Array<{
+    readonly resolve: (census: MarchCensus) => void;
+    readonly reject: (cause: unknown) => void;
+  }> = [];
 
   /**
    * @param compositeProbe - The inspection profile's probe of the atmosphere's composite
    *   (`--composite-probe`; the owner's priority, 2026-11-01): each composite made through this
    *   engine is made under it ({@link compositeProbedMaterial}); `null`, the default, as drawn.
+   * @param marchProbe - The inspection profile's probe of the atmosphere's march (`--march-probe`;
+   *   plan R08, R08.T8.d): each of the march's kernels made through this engine is made under it
+   *   ({@link marchProbedKernel}); `null`, the default, as drawn.
    */
   constructor(
     inner: RenderEngine,
     probe: EngineProbe,
     nowMs: () => number,
     compositeProbe: CompositeProbe | null = null,
+    marchProbe: MarchProbe | null = null,
   ) {
     this.#inner = inner;
     this.#probe = probe;
     this.#nowMs = nowMs;
     this.#compositeProbe = compositeProbe;
+    this.#marchProbe = marchProbe;
+  }
+
+  /**
+   * The far limb's census of the next march dispatched through this engine over an area
+   * ({@link marchCensusBindingsOf}), taken by a dispatch of its own after it and read back
+   * (`marchCensus.wgsl`; plan R08, R08.T8.d): check-only, for the inspection profile, which asks
+   * once a window has been measured. It waits for that march however long it takes, until
+   * `signal` aborts: the ask is then withdrawn and the promise never settles, so that the caller
+   * bounds the wait and no census is taken later in a window it times.
+   *
+   * @throws Error, as a rejection, as the census's dispatch or its read-back fails.
+   */
+  marchCensus(signal: AbortSignal): Promise<MarchCensus> {
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) {
+        return;
+      }
+      const asked = { resolve, reject };
+      this.#censusesAsked.push(asked);
+      signal.addEventListener(
+        "abort",
+        () => {
+          this.#censusesAsked = this.#censusesAsked.filter((each) => each !== asked);
+        },
+        { once: true },
+      );
+    });
+  }
+
+  /** `pair`, or the march's under the launch's probe where it is one of the march's and one is set. */
+  #kernelOf(pair: KernelPair): KernelPair {
+    return this.#marchProbe === null ? pair : marchProbedKernel(pair, this.#marchProbe);
+  }
+
+  /**
+   * The census asked for beside the dispatch of `kernel` over `workgroups` with `bindings`, where
+   * it is a march's over an area: its kernel and buffer made for it, released once it is read.
+   */
+  #takeCensus(
+    kernel: string,
+    bindings: ComputeBindings,
+    workgroups: readonly [number, number, number],
+  ): void {
+    const bound = marchCensusBindingsOf(kernel, bindings);
+    if (bound === null) {
+      return;
+    }
+    const inner = this.#inner;
+    const buffer = inner.createBuffer({
+      name: MARCH_CENSUS_KERNEL.name,
+      ...MARCH_CENSUS_BUFFER,
+      category: "other",
+    });
+    const asked = this.#censusesAsked;
+    this.#censusesAsked = [];
+    let counter: ComputeHandle | null = null;
+    let read: Promise<MarchCensus>;
+    try {
+      counter = inner.createCompute(MARCH_CENSUS_KERNEL);
+      inner.writeBuffer(buffer, 0, new Uint32Array(MARCH_CENSUS_BUFFER.bytes / 4));
+      inner.dispatch(counter, bound(buffer), workgroups, MARCH_CENSUS_KERNEL.name);
+      read = inner
+        .readBuffer(buffer)
+        .then((bytes) => marchCensusOf(kernel, new Uint32Array(bytes)));
+    } catch (error: unknown) {
+      read = Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    // Released once read, so that nothing the dispatch holds goes before it has run.
+    const made = counter;
+    const released = read.finally(() => {
+      inner.releaseBuffer(buffer);
+      if (made !== null) {
+        inner.releaseCompute(made);
+      }
+    });
+    for (const { resolve, reject } of asked) {
+      void released.then(resolve, reject);
+    }
   }
 
   /** `spec`, or the composite's under the launch's probe where it is the composite and one is set. */
@@ -318,11 +418,11 @@ export class ProbedEngine implements RenderEngine {
   }
 
   createCompute(pair: KernelPair): ComputeHandle {
-    return this.#inner.createCompute(pair);
+    return this.#inner.createCompute(this.#kernelOf(pair));
   }
 
   createComputeAsync(pair: KernelPair): Promise<ComputeHandle> {
-    return this.#inner.createComputeAsync(pair);
+    return this.#inner.createComputeAsync(this.#kernelOf(pair));
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
@@ -396,6 +496,9 @@ export class ProbedEngine implements RenderEngine {
       Array.isArray(workgroups) ? workgroups[0] * workgroups[1] * workgroups[2] : null,
       pass,
     );
+    if (this.#censusesAsked.length > 0 && !("buffer" in workgroups)) {
+      this.#takeCensus(kernel.name, bindings, workgroups);
+    }
   }
 
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {

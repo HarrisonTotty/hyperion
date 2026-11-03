@@ -30,10 +30,12 @@ import type { TraceConfig } from "electron";
 import type {
   CompositeProbeName,
   InspectionGpuCall,
+  InspectionTimingMarchCensus,
   InspectionTimingMemory,
   InspectionTimingRecord,
   InspectionTimingWindow,
   InspectionTimingWindowName,
+  MarchProbeName,
   ServedWorldNames,
   SpikePassTimer,
   ViewsCheckCanvas,
@@ -47,8 +49,11 @@ import type { ViewsCheckRunInput } from "./viewsCheckResults";
 /** The file's schema name. */
 export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing";
 
-/** The schema's version; bumped with any change to the file's shape. */
-export const INSPECTION_TIMING_VERSION = 1;
+/**
+ * The schema's version; bumped with any change to the file's shape: 2 since each window's march
+ * census and the run's march probe (plan R08, R08.T8.d).
+ */
+export const INSPECTION_TIMING_VERSION = 2;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -705,6 +710,8 @@ export interface InspectionTimingWindowResults {
   readonly memory: InspectionTimingMemory;
   /** Its WebGPU calls a draw (`--count-gpu-calls`; plan R14), or `null` where none were counted. */
   readonly gpuCalls: GpuCallFigures | null;
+  /** The far limb's census of the march the frame after the window dispatched, or `null`. */
+  readonly marchCensus: InspectionTimingMarchCensus | null;
   /** The window's trace, reduced, or why it is missing. */
   readonly trace: Measured<ProfileTraceFigures>;
   /** The renderer's own times, as it measured them. */
@@ -736,6 +743,11 @@ export interface InspectionTimingResults {
      * 2026-11-01), or `null`, the composite as a player's is drawn.
      */
     readonly compositeProbe: CompositeProbeName | null;
+    /**
+     * The march's probe the profile drew under (`--march-probe`; plan R08, R08.T8.d), or `null`,
+     * the march as a player's is drawn.
+     */
+    readonly marchProbe: MarchProbeName | null;
   };
   readonly windows: ReadonlyArray<InspectionTimingWindowResults>;
 }
@@ -746,6 +758,8 @@ export interface InspectionTimingInput {
   readonly served: ServedWorldNames | null;
   /** The composite's probe the launch drew under, or `null` (`ViewsCheckLaunch.compositeProbe`). */
   readonly compositeProbe: CompositeProbeName | null;
+  /** The march's probe the launch drew under, or `null` (`ViewsCheckLaunch.marchProbe`). */
+  readonly marchProbe: MarchProbeName | null;
   readonly record: InspectionTimingRecord;
   /** Each window's reduced trace, by name; a window without one is recorded as missing. */
   readonly traces: ReadonlyMap<InspectionTimingWindowName, Measured<ProfileTraceFigures>>;
@@ -819,6 +833,7 @@ function windowResults(
     terrainShareOfGpu: gpu.meanMs === null || !(gpu.meanMs > 0) ? null : terrainMeanMs / gpu.meanMs,
     memory: window.memory,
     gpuCalls: window.gpuCalls === null ? null : gpuCallFigures(window.gpuCalls, draws),
+    marchCensus: window.marchCensus,
     trace: trace ?? missing("no trace was recorded over the window"),
     samples: {
       intervalsMs: window.intervalsMs,
@@ -851,6 +866,7 @@ export function buildInspectionTimingResults(
       served: input.served,
       timer: record.timer,
       compositeProbe: input.compositeProbe,
+      marchProbe: input.marchProbe,
     },
     windows: record.windows.map((window) => windowResults(window, input.traces.get(window.name))),
   };
@@ -965,6 +981,25 @@ function gpuCallsMarkdown(calls: GpuCallFigures | null): string[] {
   ];
 }
 
+/**
+ * A window's march census as lines of the summary (plan R08, R08.T8.d): the texels by their
+ * footprints' node rays, the limb's tiles, and the rays against the lanes' rays, each tile's texels
+ * waiting on its slowest; nothing where none was taken.
+ */
+function censusMarkdown(census: InspectionTimingMarchCensus | null): string[] {
+  if (census === null) {
+    return [];
+  }
+  const counted = census.texelsByNodes.flatMap((texels, nodes) =>
+    texels > 0 ? [`${String(nodes)}: ${String(texels)}`] : [],
+  );
+  const waiting = census.rays > 0 ? (census.laneRays / census.rays).toFixed(2) : "—";
+  return [
+    `The march's far limb, the frame after the window (\`${cell(census.kernel)}\`): texels by node rays ${counted.length === 0 ? "—" : counted.join(", ")}; ${String(census.wholeMeans)} at w_L 1, with no centre ray; ${String(census.centresInAir)} centre rays in the air; ${String(census.limbTiles)} of ${String(census.tiles)} tiles hold a node ray; ${String(census.rays)} rays in the air, ${String(census.laneRays)} as each tile waits on its slowest texel (${waiting} times).`,
+    "",
+  ];
+}
+
 /** A window's part of the summary. */
 function windowMarkdown(window: InspectionTimingWindowResults): string[] {
   const trace = window.trace;
@@ -1007,6 +1042,7 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
           `The atmosphere's ray march takes ${String(window.marchSamples)} samples a ray here; its time a texel a step is a workgroup's over its ${String(MARCH_WORKGROUP_TEXELS)} texels and those samples.`,
         ]),
     "",
+    ...censusMarkdown(window.marchCensus),
     `The terrain's passes (\`bodies\`, \`terrain shadows\`, \`symbology\`) take ${window.terrainShareOfGpu === null ? "—" : `${(100 * window.terrainShareOfGpu).toFixed(1)}%`} of the GPU's time; the rest is the sky, the discs, the atmosphere and the post-processing.`,
     "",
     "### Uploads and allocations",
@@ -1055,7 +1091,7 @@ export function inspectionTimingMarkdown(results: InspectionTimingResults): stri
     `- **Body:** ${run.served === null ? "—" : `\`${run.served.body}\` of universe \`${run.served.universe}\``}`,
     `- **Machine:** ${cell(run.machine.cpu)}, ${String(run.machine.logicalCores)} threads; GPU ${cell(gpu)}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}${run.marchProbe === null ? "" : `; march probe ${run.marchProbe}, not the picture a player sees`}`,
     "- **A profile, not a measurement:** nothing is judged; a hidden run's frames are never presented, and the machine may be shared.",
     "",
     ...results.windows.flatMap(windowMarkdown),
@@ -1077,8 +1113,8 @@ const NODE_FILES: ResultsFiles = {
 
 /**
  * Writes the timing file and its summary into `dir` as
- * `<date>-<machine>-<setting>-inspection-timing.json` and `.md` (with `-composite-<probe>` after
- * it for a probed run), adding `-2`, `-3` and so on where a run of the same name is there, and warns of a file over the repository's limit for added files.
+ * `<date>-<machine>-<setting>-inspection-timing.json` and `.md` (with `-composite-<probe>` and
+ * `-march-<probe>` after it for a probed run), adding `-2`, `-3` and so on where a run of the same name is there, and warns of a file over the repository's limit for added files.
  *
  * @throws Error if the day's names are used up.
  */
@@ -1089,7 +1125,8 @@ export async function writeInspectionTimingResults(
 ): Promise<{ readonly json: string; readonly markdown: string }> {
   await files.mkdir(dir);
   const probe = results.run.compositeProbe;
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}`;
+  const march = results.run.marchProbe;
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${String(i + 1)}`,
   );

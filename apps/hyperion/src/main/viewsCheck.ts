@@ -747,6 +747,7 @@ export class ViewsCheckSession {
       run: { ...run, window: this.#deps.windowSize() },
       served: this.#deps.launch.served ?? null,
       compositeProbe: this.#deps.launch.compositeProbe ?? null,
+      marchProbe: this.#deps.launch.marchProbe ?? null,
       record,
       traces: this.#profiles,
     });

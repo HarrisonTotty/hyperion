@@ -100,6 +100,9 @@
  * for an A/B of the composite's cost; it is refused without `--timing`. With `--count-gpu-calls`
  * too (plan R14, the owner's Mac) that profile counts every WebGPU call each window makes, by kind
  * and by pass, at a little of the main thread's time; it is refused without `--timing`.
+ * With `--march-probe centre` too (plan R08, R08.T8.d) that profile marches every texel's centre
+ * ray alone, with no far-limb footprint, for an A/B of the footprint's node rays; it is refused
+ * without `--timing`, and may stand beside `--composite-probe`.
  *
  * `--hyperion-gpu-timing`, R01's measurement switch, which lifts the timestamps' quantization on
  * every backend but safe mode's (read from Chromium's command line, `GPU_TIMING_SWITCH`), also has a
@@ -122,6 +125,7 @@ import { Command, InvalidArgumentError, Option } from "commander";
 import type {
   CompositeProbeName,
   GeometryOverride,
+  MarchProbeName,
   HandoverLookName,
   QualitySettingName,
   ServedWorldNames,
@@ -443,6 +447,12 @@ export function buildCommand(version: string): Command {
         "the frame profile's count of every WebGPU call, by kind and by pass (plan R14)",
       ),
     )
+    .addOption(
+      new Option(
+        "--march-probe <PROBE>",
+        "the frame profile's march probe (R08.T8.d): every texel's centre ray alone, no far-limb footprint",
+      ).choices(["centre"]),
+    )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
     .addOption(
@@ -587,6 +597,9 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   }
   if (options["countGpuCalls"] === true && options["timing"] !== true) {
     command.error("error: --count-gpu-calls is an option of --timing, which was not given");
+  }
+  if (options["marchProbe"] !== undefined && options["timing"] !== true) {
+    command.error("error: --march-probe is an option of --timing, which was not given");
   }
   if (options["look"] !== undefined && options["handover"] !== true) {
     command.error("error: --look is an option of --handover, which was not given");
@@ -787,6 +800,8 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     ...compositeProbeOf(options),
     // Refused without `--timing` before this is reached.
     ...(options["countGpuCalls"] === true ? { countGpuCalls: true } : {}),
+    // Refused without `--timing` before this is reached; commander has checked its choices.
+    ...marchProbeOf(options),
     // Refused without `--handover` before this is reached; commander holds it to the three names.
     ...lookOf(options),
     // The terrain run's alone; any other run takes the switch for its timestamps only.
@@ -805,6 +820,13 @@ function compositeProbeOf(
     probe === "surface-grey"
     ? { compositeProbe: probe }
     : {};
+}
+
+/** The march's probe `--march-probe` names where it is given, else nothing (plan R08, R08.T8.d). */
+function marchProbeOf(
+  options: Readonly<Record<string, unknown>>,
+): { readonly marchProbe: MarchProbeName } | Record<string, never> {
+  return options["marchProbe"] === "centre" ? { marchProbe: "centre" } : {};
 }
 
 /** The one look `--look` names, where it names one of the hand-over check's, else nothing. */

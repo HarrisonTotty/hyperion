@@ -28,6 +28,7 @@ import type {
   ViewsCheckViewRecord,
 } from "../../../../../preload/api";
 import type { CompositeProbe } from "../../../view/atmosphere/hillaire";
+import type { MarchCensus, MarchProbe } from "../../../view/atmosphere/marchProbe";
 import type { GpuTimer, GraphicsFault } from "../../../view/engine/status";
 import type {
   FrameSubmission,
@@ -167,6 +168,10 @@ export class ViewsProbe implements EngineProbe {
   readonly #preparations: PreparationCount = { seen: 0, inFlight: 0, lastSettledAtMs: null };
   /** The probe its engines make the atmosphere's composite under, or `null` (as drawn). */
   readonly #compositeProbe: CompositeProbe | null;
+  /** The probe its engines make the atmosphere's march under, or `null` (as drawn). */
+  readonly #marchProbe: MarchProbe | null;
+  /** The latest engine it made, which a census is asked of ({@link ViewsProbe.marchCensus}). */
+  #engine: ProbedEngine | null = null;
 
   /**
    * @param inner - Where the engines come from: R01's by default.
@@ -174,14 +179,18 @@ export class ViewsProbe implements EngineProbe {
    * @param compositeProbe - The inspection profile's probe of the atmosphere's composite
    *   (`--composite-probe`; the owner's priority, 2026-11-01), which every engine's composite is
    *   made under ({@link ProbedEngine}); `null`, the default, as drawn.
+   * @param marchProbe - The inspection profile's probe of the atmosphere's march (`--march-probe`;
+   *   plan R08, R08.T8.d), which every engine's march is made under; `null`, the default, as drawn.
    */
   constructor(
     inner: ViewEngineSource = DEFAULT_ENGINE_SOURCE,
     nowMs: () => number = () => performance.now(),
     compositeProbe: CompositeProbe | null = null,
+    marchProbe: MarchProbe | null = null,
   ) {
     this.#nowMs = nowMs;
     this.#compositeProbe = compositeProbe;
+    this.#marchProbe = marchProbe;
     this.source = {
       requestAdapter: inner.requestAdapter,
       load: async (outcome, status) => this.#attach(await inner.load(outcome, status)),
@@ -235,6 +244,15 @@ export class ViewsProbe implements EngineProbe {
     if (frameMs !== null && pass !== undefined) {
       this.#frameAt(frameMs).dispatches.push({ pass, kernel, workgroups });
     }
+  }
+
+  /**
+   * The far limb's census of the next march its latest engine dispatches over an area (plan R08,
+   * R08.T8.d; {@link ProbedEngine.marchCensus}), or `null` before it has made one; withdrawn as
+   * `signal` aborts.
+   */
+  marchCensus(signal: AbortSignal): Promise<MarchCensus> | null {
+    return this.#engine?.marchCensus(signal) ?? null;
   }
 
   submitted(owner: string, frame: FrameSubmission): void {
@@ -579,7 +597,15 @@ export class ViewsProbe implements EngineProbe {
       this.#generation += 1;
       this.#restoresAtMs.push(this.#nowMs());
     });
-    return new ProbedEngine(engine, this, this.#nowMs, this.#compositeProbe);
+    const probed = new ProbedEngine(
+      engine,
+      this,
+      this.#nowMs,
+      this.#compositeProbe,
+      this.#marchProbe,
+    );
+    this.#engine = probed;
+    return probed;
   }
 
   #key(resolve: number): string {

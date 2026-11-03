@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { InspectionTimingRecord } from "../preload/api";
+import type { InspectionTimingMarchCensus, InspectionTimingRecord } from "../preload/api";
 import {
   buildInspectionTimingResults,
   gpuCallKind,
@@ -148,6 +148,21 @@ describe("the frame profile's trace (the owner's report)", () => {
   });
 });
 
+/**
+ * A march's census (R08.T8.d): 1,000 texels, 900 of them its centre ray alone, 60 with 2 nodes and
+ * 40 with 10, 30 of those at w_L 1; 4 of 20 tiles hold a node ray.
+ */
+const CENSUS: InspectionTimingMarchCensus = {
+  kernel: "atmosphere ray march",
+  texelsByNodes: [900, 0, 60, 0, 0, 0, 0, 0, 0, 0, 40],
+  wholeMeans: 30,
+  centresInAir: 600,
+  tiles: 20,
+  limbTiles: 4,
+  rays: 1_150,
+  laneRays: 2_300,
+};
+
 /** A record of one window: two frames, the atmosphere's view pass and the tone map. */
 const RECORD: InspectionTimingRecord = {
   timer: "quantized",
@@ -188,6 +203,7 @@ const RECORD: InspectionTimingRecord = {
       marchSamples: 36,
       position: "6.69 Mm 023° -12°",
       statements: ["ATMOSPHERE: APPROXIMATE", "TERRAIN: STREAMING"],
+      marchCensus: CENSUS,
     },
   ],
 };
@@ -198,6 +214,7 @@ const RECORD: InspectionTimingRecord = {
  */
 function results(
   compositeProbe: InspectionTimingResults["run"]["compositeProbe"] = null,
+  marchProbe: InspectionTimingResults["run"]["marchProbe"] = null,
 ): InspectionTimingResults {
   return buildInspectionTimingResults({
     run: {
@@ -226,6 +243,7 @@ function results(
     },
     served: { universe: "9ada16dcbdbd080a", body: "41ffecb200000002.0400" },
     compositeProbe,
+    marchProbe,
     record: RECORD,
     traces: new Map([
       [
@@ -255,6 +273,30 @@ describe("the frame profile's timing file (the owner's report)", () => {
       readInspectionTimingRecord({ ...RECORD, windows: [...RECORD.windows, ...RECORD.windows] }),
     ).toBeNull();
     expect(readInspectionTimingRecord({ ...RECORD, timer: "sometimes" })).toBeNull();
+  });
+
+  it("takes a window's march census only whole, or none (R08.T8.d)", () => {
+    const [window] = RECORD.windows;
+    if (window === undefined) {
+      throw new Error("the record holds a window");
+    }
+    const withCensus = (marchCensus: unknown): unknown => ({
+      ...RECORD,
+      windows: [{ ...window, marchCensus }],
+    });
+    expect(readInspectionTimingRecord(withCensus(null))?.windows[0]?.marchCensus).toBeNull();
+    expect(
+      [
+        { ...CENSUS, texelsByNodes: CENSUS.texelsByNodes.slice(1) },
+        { ...CENSUS, limbTiles: 21 },
+        { ...CENSUS, laneRays: 1_000 },
+        { ...CENSUS, rays: 0.5 },
+        { ...CENSUS, kernel: "" },
+      ].map((census) => readInspectionTimingRecord(withCensus(census))),
+    ).toEqual([null, null, null, null, null]);
+    expect(
+      readInspectionTimingRecord({ ...RECORD, windows: [{ ...window, marchCensus: undefined }] }),
+    ).toBeNull();
   });
 
   it("summarises each window's frames, its passes the dearest first with their share", () => {
@@ -365,6 +407,12 @@ describe("the frame profile's timing file (the owner's report)", () => {
     expect(markdown).toContain("- **Statements:** ATMOSPHERE: APPROXIMATE · TERRAIN: STREAMING");
   });
 
+  it("writes each window's march census: its texels by node rays and the tiles that wait (R08.T8.d)", () => {
+    expect(inspectionTimingMarkdown(results())).toContain(
+      "The march's far limb, the frame after the window (`atmosphere ray march`): texels by node rays 0: 900, 2: 60, 10: 40; 30 at w_L 1, with no centre ray; 600 centre rays in the air; 4 of 20 tiles hold a node ray; 1150 rays in the air, 2300 as each tile waits on its slowest texel (2.00 times).",
+    );
+  });
+
   it("names its files for the day, the machine and the setting, numbering a second run", async () => {
     const written = new Map<string, string>();
     const files = {
@@ -383,8 +431,8 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 1,
-      run: { compositeProbe: null },
+      version: 2,
+      run: { compositeProbe: null, marchProbe: null },
     });
   });
 
@@ -410,6 +458,34 @@ describe("the frame profile's timing file (the owner's report)", () => {
       json: "/timing/2026-11-01-pod-low-inspection-timing-composite-transmittance-off.json",
       launch:
         "- **Launch:** linux, software mode, setting low, window hidden 1280 × 720 DIP at a device-pixel ratio of 1; pass timer quantized; composite probe transmittance-off, not the picture a player sees",
+      plain: false,
+    });
+  });
+
+  it("names and states a run drawn under the march's probe (R08.T8.d)", async () => {
+    const written = new Map<string, string>();
+    const files = {
+      mkdir: () => Promise.resolve(),
+      exists: (path: string) => Promise.resolve(written.has(path)),
+      writeFile: (path: string, text: string) => {
+        written.set(path, text);
+        return Promise.resolve();
+      },
+    };
+    const probed = results("per-pixel", "centre");
+    const paths = await writeInspectionTimingResults("/timing", probed, files);
+    expect({
+      json: paths.json,
+      launch: inspectionTimingMarkdown(probed)
+        .split("\n")
+        .find((line) => line.startsWith("- **Launch:**"))
+        ?.endsWith(
+          "; composite probe per-pixel, not the picture a player sees; march probe centre, not the picture a player sees",
+        ),
+      plain: inspectionTimingMarkdown(results()).includes("march probe"),
+    }).toEqual({
+      json: "/timing/2026-11-01-pod-low-inspection-timing-composite-per-pixel-march-centre.json",
+      launch: true,
       plain: false,
     });
   });

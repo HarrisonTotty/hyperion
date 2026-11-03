@@ -131,11 +131,12 @@ function checkProbesOf(
   // An inspection profile's `--count-gpu-calls` counts its engine's device's calls (plan R14).
   const calls = launch.countGpuCalls === true ? new GpuCallCounter() : null;
   // An inspection profile's `--composite-probe` makes VIEW's composite under it (the owner's
-  // priority, 2026-11-01).
+  // priority, 2026-11-01), and its `--march-probe` VIEW's march (plan R08, R08.T8.d).
   const views = new ViewsProbe(
     calls === null ? undefined : countedEngineSource(calls),
     undefined,
     launch.compositeProbe ?? null,
+    launch.marchProbe ?? null,
   );
   // A `--weathered` launch's probe serves `TEST MOON` weathered's field in TERRAIN TEST's place.
   const terrainProbe = (checkScenes: ReadonlyArray<SceneOption>): TerrainProbe =>

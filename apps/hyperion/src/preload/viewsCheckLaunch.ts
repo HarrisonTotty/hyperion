@@ -12,6 +12,7 @@
 import type {
   CompositeProbeName,
   HandoverLookName,
+  MarchProbeName,
   ViewsCheckLaunch,
   ViewsCheckRunKind,
   ViewsCheckTerrainFixture,
@@ -20,6 +21,7 @@ import { readServedWorldNames } from "./spikeLaunch";
 
 export type {
   CompositeProbeName,
+  MarchProbeName,
   ViewsCheckLaunch,
   ViewsCheckRunKind,
   ViewsCheckTerrainFixture,
@@ -60,6 +62,9 @@ const COMPOSITE_PROBES: ReadonlyArray<CompositeProbeName> = [
   "per-pixel",
   "surface-grey",
 ];
+
+/** The march's probes an inspection profile may draw under (plan R08, R08.T8.d). */
+const MARCH_PROBES: ReadonlyArray<MarchProbeName> = ["centre"];
 
 /** The hand-over check's looks, in the order a run takes them, which `--look` may name one of. */
 export const HANDOVER_LOOK_NAMES = [
@@ -113,19 +118,21 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
  * request, 2026-11-01), which serves no field either; the whole body's field (plan R10,
  * R10.T14.c), its file's path, on a terrain run alone and exactly when its fixture is the whole
  * body's; the frame profile (`timing`, `true`) on the inspection run alone (the owner's report,
- * 2026-11-01); and the composite's probe (`compositeProbe`, the owner's priority, 2026-11-01) on
- * that profile alone.
+ * 2026-11-01); and the composite's probe (`compositeProbe`, the owner's priority, 2026-11-01) and
+ * the march's (`marchProbe`, plan R08, R08.T8.d) on that profile alone.
  */
 function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { setting, smoke, out, served, wholeField, timing, compositeProbe } = value;
+  const { setting, smoke, out, served, wholeField, timing, compositeProbe, marchProbe } = value;
   const run = RUN_KINDS.find((each) => each === value["run"]) ?? null;
   const fixture = TERRAIN_FIXTURES.find((each) => each === value["fixture"]) ?? null;
   const probe = COMPOSITE_PROBES.find((each) => each === compositeProbe) ?? null;
+  const march = MARCH_PROBES.find((each) => each === marchProbe) ?? null;
   if (
     (compositeProbe !== undefined && probe === null) ||
+    (marchProbe !== undefined && march === null) ||
     (setting !== "high" && setting !== "low") ||
     typeof smoke !== "boolean" ||
     !(out === null || (typeof out === "string" && out.length > 0)) ||
@@ -142,13 +149,14 @@ function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
       served === undefined &&
       timing === undefined &&
       probe === null &&
+      march === null &&
       typeof wholeField === "string" &&
       wholeField.length > 0
       ? { setting, smoke, out, run, fixture, wholeField }
       : null;
   }
   if (served === undefined) {
-    return run === "inspection" || timing !== undefined || probe !== null
+    return run === "inspection" || timing !== undefined || probe !== null || march !== null
       ? null
       : { setting, smoke, out, run, fixture };
   }
@@ -161,14 +169,24 @@ function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
     return null;
   }
   if (timing === undefined) {
-    return probe === null ? { setting, smoke, out, run, fixture, served: names } : null;
+    return probe === null && march === null
+      ? { setting, smoke, out, run, fixture, served: names }
+      : null;
   }
   if (timing !== true || run !== "inspection") {
     return null;
   }
-  return probe === null
-    ? { setting, smoke, out, run, fixture, served: names, timing }
-    : { setting, smoke, out, run, fixture, served: names, timing, compositeProbe: probe };
+  return {
+    setting,
+    smoke,
+    out,
+    run,
+    fixture,
+    served: names,
+    timing,
+    ...(probe === null ? {} : { compositeProbe: probe }),
+    ...(march === null ? {} : { marchProbe: march }),
+  };
 }
 
 /**

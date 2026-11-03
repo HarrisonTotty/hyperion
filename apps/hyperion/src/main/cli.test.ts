@@ -812,6 +812,60 @@ describe("the several-views check's options", () => {
     ]);
   });
 
+  it("takes --march-probe centre, beside --composite-probe or alone (R08.T8.d)", () => {
+    const profile = [
+      "--views-check",
+      "--inspection",
+      "--universe",
+      UNIVERSE,
+      "--body",
+      BODY,
+      "--timing",
+      "--march-probe",
+      "centre",
+    ];
+    expect(parse([...profile, "--count-gpu-calls"]).viewsCheck).toMatchObject({
+      countGpuCalls: true,
+      marchProbe: "centre",
+    });
+    expect([
+      parse(profile).viewsCheck,
+      parse([...profile, "--composite-probe", "per-pixel"]).viewsCheck,
+    ]).toEqual([
+      {
+        setting: "high",
+        smoke: false,
+        out: null,
+        run: "inspection",
+        fixture: "terrain-test",
+        served: { universe: UNIVERSE, body: BODY },
+        timing: true,
+        marchProbe: "centre",
+      },
+      {
+        setting: "high",
+        smoke: false,
+        out: null,
+        run: "inspection",
+        fixture: "terrain-test",
+        served: { universe: UNIVERSE, body: BODY },
+        timing: true,
+        compositeProbe: "per-pixel",
+        marchProbe: "centre",
+      },
+    ]);
+  });
+
+  it("refuses --march-probe without the frame profile, or naming no probe (R08.T8.d)", () => {
+    const inspection = ["--views-check", "--inspection", "--universe", UNIVERSE, "--body", BODY];
+    const error = refusal([...inspection, "--march-probe", "centre"]);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      "error: --march-probe is an option of --timing, which was not given",
+    ]);
+    expect(refusal([...inspection, "--timing", "--march-probe", "nodes"]).exitCode).toBe(1);
+  });
+
   it("refuses a --composite-probe that names no probe", () => {
     const error = refusal([
       "--views-check",

@@ -164,6 +164,26 @@ describe("the views check's launch switch", () => {
     expect(readViewsCheckLaunch({ ...LAUNCH, countGpuCalls: true })).toBeNull();
   });
 
+  it("carries the frame profile's march probe, beside a composite probe or alone, on that profile alone (R08.T8.d)", () => {
+    const profile: ViewsCheckLaunch = {
+      ...LAUNCH,
+      run: "inspection",
+      served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+      timing: true,
+    };
+    for (const launch of [
+      { ...profile, marchProbe: "centre" },
+      { ...profile, compositeProbe: "per-pixel", marchProbe: "centre" },
+      { ...profile, countGpuCalls: true, marchProbe: "centre" },
+    ] as const) {
+      expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    }
+    expect(readViewsCheckLaunch({ ...profile, marchProbe: "nodes" })).toBeNull();
+    const { timing: _, ...inspection } = profile;
+    expect(readViewsCheckLaunch({ ...inspection, marchProbe: "centre" })).toBeNull();
+    expect(readViewsCheckLaunch({ ...LAUNCH, marchProbe: "centre" })).toBeNull();
+  });
+
   it("carries the hand-over check's one look, on a hand-over check alone (R10.T15.b.2)", () => {
     const launch: ViewsCheckLaunch = {
       ...LAUNCH,

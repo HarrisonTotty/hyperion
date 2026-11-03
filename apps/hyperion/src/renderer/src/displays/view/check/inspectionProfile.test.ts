@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ViewsCheckWindow } from "../../../../../preload/api";
 import { TABLE_SIZES } from "../../../view/atmosphere/hillaire";
+import type { MarchCensus } from "../../../view/atmosphere/marchProbe";
 import { IMAGE_DETAIL_LIMITED } from "../../../view/budget/viewBudget";
 import { SOFTWARE_WAIT_FACTOR, inspectionProfileTimingOf } from "./softwareTiming";
 import {
@@ -38,18 +39,37 @@ function figures(startMs: number, endMs: number): WindowFigures {
   };
 }
 
-/** A profiler over fakes, the clock moving by each wait, the primary drawing every `drawMs`. */
+/** A march's census as the views probe would read it back (R08.T8.d). */
+const CENSUS: MarchCensus = {
+  kernel: "atmosphere ray march",
+  texelsByNodes: [60, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2],
+  wholeMeans: 1,
+  centresInAir: 40,
+  tiles: 1,
+  limbTiles: 1,
+  rays: 63,
+  laneRays: 704,
+};
+
+/**
+ * A profiler over fakes, the clock moving by each wait, the primary drawing every `drawMs`, its
+ * calls counted by `counter` where given, and each census asked of the probe answered by `census`
+ * (none by default: no engine made) and its signals kept.
+ */
 function profiler(
   drawMs: number,
   untimedUntilMs = Number.NEGATIVE_INFINITY,
   counter: InspectionProfileDeps["calls"] = null,
+  census: () => Promise<MarchCensus> | null = () => null,
 ): {
   readonly profile: InspectionProfiler;
   readonly calls: string[];
   readonly marked: ViewsCheckWindow[];
+  readonly signals: AbortSignal[];
 } {
   const calls: string[] = [];
   const marked: ViewsCheckWindow[] = [];
+  const signals: AbortSignal[] = [];
   let nowMs = 1_000;
   const deps: InspectionProfileDeps = {
     api: {
@@ -85,6 +105,10 @@ function profiler(
         uploads: [{ name: "view star sprites", count: 3, bytes: 96 }],
       }),
       timer: () => "quantized",
+      marchCensus: (signal) => {
+        signals.push(signal);
+        return census();
+      },
     },
     markWindow: (span) => {
       marked.push(span);
@@ -99,7 +123,7 @@ function profiler(
     timing: INSPECTION_PROFILE_TIMING,
     calls: counter,
   };
-  return { profile: new InspectionProfiler(deps), calls, marked };
+  return { profile: new InspectionProfiler(deps), calls, marked, signals };
 }
 
 /** A plate as the window ends. */
@@ -192,6 +216,36 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       TABLE_SIZES.low.rayMarchSamples,
       TABLE_SIZES.high.rayMarchSamples,
     ]);
+  });
+
+  it("records the march's census the frame after the window, its ask then withdrawn (R08.T8.d)", async () => {
+    const { profile, signals } = profiler(100, Number.NEGATIVE_INFINITY, null, () =>
+      Promise.resolve(CENSUS),
+    );
+    await profile.measure("orbit", PLATE);
+    expect([profile.windows[0]?.marchCensus, signals.map((signal) => signal.aborted)]).toEqual([
+      CENSUS,
+      [true],
+    ]);
+  });
+
+  it("records no census where none is taken within its settle, or where it fails", async () => {
+    const never = profiler(100, Number.NEGATIVE_INFINITY, null, () => new Promise(() => undefined));
+    await never.profile.measure("orbit", PLATE);
+    const failed = profiler(100, Number.NEGATIVE_INFINITY, null, () =>
+      Promise.reject(new Error("the census's read-back failed")),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await failed.profile.measure("close", PLATE);
+    const none = profiler(100);
+    await none.profile.measure("orbit", PLATE);
+    expect([
+      never.profile.windows[0]?.marchCensus,
+      never.signals.map((signal) => signal.aborted),
+      failed.profile.windows[0]?.marchCensus,
+      warn.mock.calls.length,
+      none.profile.windows[0]?.marchCensus,
+    ]).toEqual([null, [true], null, 1, null]);
   });
 
   it("writes every window measured, in order, with the pass timer's kind", async () => {

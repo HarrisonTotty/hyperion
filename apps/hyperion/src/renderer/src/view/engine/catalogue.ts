@@ -46,6 +46,7 @@ import {
   SKY_VIEW_THICK_KERNEL,
   SKY_VIEW_THICK_THERMAL_KERNEL,
 } from "../atmosphere/hillaire";
+import { MARCH_CENSUS_KERNEL } from "../atmosphere/marchProbe";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
 import {
   BODY_DISC_AIR_MATERIALS,
@@ -203,6 +204,8 @@ const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     RAY_MARCH_SPECIAL_KERNEL,
     RAY_MARCH_SLOTS_SPECIAL_KERNEL,
     COMPOSITE_BEHIND_KERNEL,
+    // The inspection profile's census of the march's far limb (R08.T8.d), check-only.
+    MARCH_CENSUS_KERNEL,
   ].map((spec): CatalogueEntry => ({ kind: "compute", spec })),
   { kind: "material", spec: COMPOSITE_MATERIAL },
 ];

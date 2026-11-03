@@ -14,6 +14,7 @@
  */
 
 import type {
+  InspectionTimingMarchCensus,
   InspectionTimingRecord,
   InspectionTimingWindow,
   InspectionTimingWindowName,
@@ -59,7 +60,7 @@ export interface InspectionProfileDeps {
   readonly api: Pick<ViewsCheckApi, "startProfile" | "endProfile" | "writeTimingResults">;
   readonly views: Pick<
     ViewsProbe,
-    "drawTimes" | "window" | "passTimes" | "memoryTraffic" | "timer"
+    "drawTimes" | "window" | "passTimes" | "memoryTraffic" | "timer" | "marchCensus"
   >;
   /** Marks a window in the trace as a `performance.measure` span. */
   readonly markWindow: (window: ViewsCheckWindow) => void;
@@ -160,6 +161,7 @@ export class InspectionProfiler {
       { name: PRIMARY_VIEW_NAME, style: "photorealistic" },
     ]);
     const primary = figures.views[0];
+    const census = await this.#censusAfter(name);
     this.#windows.push({
       name,
       startMs,
@@ -180,7 +182,45 @@ export class InspectionProfiler {
           .rayMarchSamples,
       position: said.position,
       statements: said.statements,
+      marchCensus: census,
     });
+  }
+
+  /**
+   * The far limb's census of the march the frame after window `name` dispatches (plan R08,
+   * R08.T8.d; `ViewsProbe.marchCensus`), outside the window's frames, or `null` where none is
+   * taken within {@link InspectionProfileTiming.settleMs}: no march dispatched, or its census
+   * failed, which is said.
+   */
+  async #censusAfter(
+    name: InspectionTimingWindowName,
+  ): Promise<InspectionTimingMarchCensus | null> {
+    const { sleep, nowMs, timing } = this.#deps;
+    const stop = new AbortController();
+    const asked = this.#deps.views.marchCensus(stop.signal);
+    if (asked === null) {
+      return null;
+    }
+    const taken = asked.catch((error: unknown) => {
+      console.warn(`views check: the march's census after ${name} failed:`, error);
+      return null;
+    });
+    const startMs = nowMs();
+    let waiting = true;
+    const timedOut = async (): Promise<null> => {
+      if (!waiting || nowMs() - startMs >= timing.settleMs) {
+        return null;
+      }
+      await sleep(timing.pollMs);
+      return timedOut();
+    };
+    try {
+      return await Promise.race([taken, timedOut()]);
+    } finally {
+      waiting = false;
+      // A census not taken is withdrawn, so that none is taken inside a later window.
+      stop.abort();
+    }
   }
 
   /** The profile's record of the windows measured. */

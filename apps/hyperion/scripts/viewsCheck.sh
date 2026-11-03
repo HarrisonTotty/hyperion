@@ -14,7 +14,7 @@
 #                  | --atmosphere
 #                  | --inspection --universe <ID> --body <ID>
 #                    [--timing [--composite-probe sky-off|transmittance-off|per-pixel|surface-grey]
-#                              [--count-gpu-calls]]]
+#                              [--count-gpu-calls] [--march-probe centre]]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --geometry, passed to the client, draws VIEW's terrain with those fields of its geometry over the
@@ -121,6 +121,10 @@
 # (draws, dispatches, setPipeline, setBindGroup, writeBuffer and its bytes, bind groups and views
 # made, passes, submissions) and by pass label, a draw of the primary, in the same files; its
 # frame times then carry the counter's own cost.
+# --march-probe centre (plan R08, R08.T8.d) marches every texel's centre ray alone, with no far-limb
+# footprint, the A/B of the footprint's node rays; its files end -march-centre. Each window also
+# records the far limb's census of the march the frame after it: the texels by node rays and the
+# tiles that hold one.
 #
 # --device-pixel-ratio <N> draws a hidden run's page at a device-pixel ratio of N, 1 to 3, as a HiDPI
 # display does (the owner's Retina report, 2026-11-01): its offscreen window N times the setting's

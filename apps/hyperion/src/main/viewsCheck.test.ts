@@ -657,6 +657,7 @@ describe("the inspection run's frame profile (the owner's report)", () => {
         marchSamples: 36,
         position: "28.9 Mm 268° +49°",
         statements: ["ATMOSPHERE: APPROXIMATE"],
+        marchCensus: null,
       },
     ],
   };

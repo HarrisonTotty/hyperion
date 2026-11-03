@@ -1142,6 +1142,12 @@ export interface ViewsCheckLaunch {
    */
   readonly countGpuCalls?: true;
   /**
+   * The frame profile's probe of the atmosphere's march (`--march-probe`; plan R08, R08.T8.d):
+   * present only on an `--inspection --timing` launch that asks for it, whose `VIEW` then makes its
+   * march under it ({@link MarchProbeName}); absent on every other launch.
+   */
+  readonly marchProbe?: MarchProbeName;
+  /**
    * The one look a `--terrain --handover` launch runs (`--look`; R10.T15.b.2's runs), absent for all
    * three in order: a served look on SwiftShader at the high setting takes over an hour, so that
    * three in one launch pass its watchdog, and a look a launch makes each run resumable by look.
@@ -1168,6 +1174,14 @@ export interface ViewsCheckLaunch {
  * player's.
  */
 export type CompositeProbeName = "sky-off" | "transmittance-off" | "per-pixel" | "surface-grey";
+
+/**
+ * A probe of the atmosphere's march for the inspection run's frame profile (plan R08, R08.T8.d; the
+ * owner's Mac): `centre` marches every texel's centre ray alone, with no far-limb footprint formed
+ * or marched, so that a profile tells the footprint's node rays apart from the rest of the march.
+ * A measurement's picture, never a player's: the limb from orbit then flickers as before R08.T8.c.
+ */
+export type MarchProbeName = "centre";
 
 /**
  * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s
@@ -2213,6 +2227,32 @@ export interface InspectionTimingWindow {
   readonly position: string | null;
   /** The primary's statements as the window ended (`ATMOSPHERE: APPROXIMATE`, `TERRAIN: …`). */
   readonly statements: ReadonlyArray<string>;
+  /**
+   * The far limb's census of the march the frame after the window dispatched (plan R08, R08.T8.d),
+   * or `null` where none was taken: no march, or none within the window's settling time.
+   */
+  readonly marchCensus: InspectionTimingMarchCensus | null;
+}
+
+/**
+ * A march's far-limb census (plan R08, R08.T8.d; `view/atmosphere/marchProbe.ts`'s `MarchCensus`):
+ * what each texel of its area marches as the footprint's entry point marches it, counted.
+ */
+export interface InspectionTimingMarchCensus {
+  /** The march's kernel the census was taken beside. */
+  readonly kernel: string;
+  /** The texels on the target by their footprints' node rays, 0 to 10. */
+  readonly texelsByNodes: ReadonlyArray<number>;
+  /** The texels whose footprint's blend is 1, which march no centre ray. */
+  readonly wholeMeans: number;
+  /** The texels whose centre ray meets the top's shell. */
+  readonly centresInAir: number;
+  /** The area's tiles of 8 × 8 texels, the march's workgroups, and those holding a node ray. */
+  readonly tiles: number;
+  readonly limbTiles: number;
+  /** The rays that meet the shell, and the same as each tile's lanes wait on its slowest texel. */
+  readonly rays: number;
+  readonly laneRays: number;
 }
 
 /** What the inspection run's renderer reports of its frame profile, for its timing file. */
