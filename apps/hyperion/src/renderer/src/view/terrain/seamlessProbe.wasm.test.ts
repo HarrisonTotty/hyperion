@@ -31,9 +31,11 @@ import {
 import { CLUSTER_RECORD_BYTES, type ClusterRecord } from "../clusters/record";
 import { TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
 import {
+  clusterStrideBandsM,
   EDGE_BANDS,
   edgeBandOfHalf,
   largestStrideErrorsM,
+  NO_STRIDE_BAND,
   STRIDE_BAND_FRACTION,
   type StrideBandsM,
   type StrideErrorsM,
@@ -866,10 +868,13 @@ interface StrideFrame {
   /**
    * The lit triangles they would draw by the rule with no band and no edge shared, at each block's
    * own e_s (Design note 3's rule as T3.a counted it), and at its patch's largest: research-leans-35's
-   * own and lean rows, which bound the shared bands' share from below and above.
+   * own and lean rows, which bound the shared bands' share from below and above; and by the shared
+   * bands themselves, each block's band as the cull forms it but with no band's width, no cap and
+   * no forced region (the ruling's shared row, as research-leans-35 counted it).
    */
   readonly litTrianglesOwn: number;
   readonly litTrianglesPatch: number;
+  readonly litTrianglesShared: number;
 }
 
 /** Whether any of bands `then` moved by a quarter of its width or more in `now`. */
@@ -960,6 +965,7 @@ class StrideFrames {
     };
     let litTrianglesOwn = 0;
     let litTrianglesPatch = 0;
+    let litTrianglesShared = 0;
     const pxPerRad = cam.viewport.widthPx / 2 / Math.tan(cam.fovXRad / 2);
     const pass = { strideCap: 8 } as const;
     let strided = 0;
@@ -1030,6 +1036,16 @@ class StrideFrames {
           litTrianglesOwn += BLOCK_TRIANGLES / (1 << bareLevel(statedM, ownErrors, nearestM)) ** 2;
           litTrianglesPatch +=
             BLOCK_TRIANGLES / (1 << bareLevel(statedM, patchErrors, nearestM)) ** 2;
+          const shared = clusterStrideBandsM(inst.strideScale, own, inst.edgeBandsM, block);
+          let sharedLevel = 0;
+          while (sharedLevel < 3) {
+            const band = shared[sharedLevel] ?? NO_STRIDE_BAND;
+            if (!(band > 0) || band > nearestM) {
+              break;
+            }
+            sharedLevel += 1;
+          }
+          litTrianglesShared += BLOCK_TRIANGLES / (1 << sharedLevel) ** 2;
         }
       }
       const was = this.#before.get(inst.held.bake);
@@ -1148,6 +1164,7 @@ class StrideFrames {
       litTrianglesAtStride1,
       litTrianglesOwn,
       litTrianglesPatch,
+      litTrianglesShared,
     });
   }
 }
@@ -1168,6 +1185,7 @@ interface StrideSummary {
   readonly litTriangleShare: number;
   readonly litTriangleShareOwn: number;
   readonly litTriangleSharePatch: number;
+  readonly litTriangleShareShared: number;
 }
 
 /** A run's stride figures (plan R14, R14.T3.c): its frames' largest move and turn, and its lit triangles. */
@@ -1176,6 +1194,7 @@ function strideSummaryOf(frames: ReadonlyArray<StrideFrame>): StrideSummary {
   const at1 = frames.reduce((sum, f) => sum + f.litTrianglesAtStride1, 0);
   const own = frames.reduce((sum, f) => sum + f.litTrianglesOwn, 0);
   const patch = frames.reduce((sum, f) => sum + f.litTrianglesPatch, 0);
+  const shared = frames.reduce((sum, f) => sum + f.litTrianglesShared, 0);
   return {
     frames: frames.length,
     framesStrided: frames.filter((f) => f.strided > 0).length,
@@ -1188,6 +1207,7 @@ function strideSummaryOf(frames: ReadonlyArray<StrideFrame>): StrideSummary {
     litTriangleShare: at1 > 0 ? lit / at1 : 1,
     litTriangleShareOwn: at1 > 0 ? own / at1 : 1,
     litTriangleSharePatch: at1 > 0 ? patch / at1 : 1,
+    litTriangleShareShared: at1 > 0 ? shared / at1 : 1,
   };
 }
 

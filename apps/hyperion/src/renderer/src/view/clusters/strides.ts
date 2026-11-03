@@ -18,11 +18,12 @@
  *   coarse one's level j, over each coarse block's stretch, the coarse–fine holds kept), or of its
  *   block and the level's largest e_s where the neighbour is not a measured whole patch
  *   (`terrain/strideEdges.ts`). A block's band is the largest need of it, the blocks on its sides
- *   and its edges' shared bands along it ({@link clusterStrideBandsM}), and a cluster takes stride
- *   2^m at (1 + β) times it. Inside a block a vertex's band is its block's, and on a block's side
- *   the smaller of its two blocks' ({@link vertexStrideBandM}): at most each band of the blocks that
- *   drop it, so that each draws it wholly moved, and at least the needs of the blocks holding it.
- *   So every vertex two clusters draw is placed alike by both, whichever patch each is of.
+ *   and its edges' shared bands along it ({@link clusterStrideBandsM}), none where any of them is,
+ *   and a cluster takes stride 2^m at (1 + β) times it. Inside a block a vertex's band is its
+ *   block's of its parts that are not none, and on a block's side the smaller of its two blocks'
+ *   ({@link vertexStrideBandM}): at most the band of each block that drops it, so that each draws it
+ *   wholly moved, and at least the need of each block holding it. So every vertex two clusters draw
+ *   is placed alike by both, whichever patch each is of.
  * - **Why a block's band inside it** (as built, 2026-11-03; the ruling gave each vertex the largest
  *   need of the blocks holding it): e_s bounds a block's stride-s mesh with one k across it (Design
  *   note 3). A vertex the block keeps but that moves at its own block's need, while a neighbour's
@@ -31,7 +32,11 @@
  *   held at stride 4 whose level-2 vertices had moved to stride 8's chords (e₄ 15.1 m, e₈ 23.0 m,
  *   26.1 m drawn). At its block's band a vertex moves only as its block is about to drop it, as
  *   under the view's ladder, at no cost to the cull's strides. A block's side still moves at the
- *   smaller band of its two blocks, and a patch's edge at the larger need of its blocks.
+ *   smaller band of its two blocks, and a patch's edge at the larger need of its blocks. An edge's
+ *   none (beside a finer patch at level 2, or two levels apart) holds its block at a finer stride
+ *   but not the vertices inside it: held, they would all move at once as the finer patch left
+ *   (4.1 px on the seamless probe's low setting), so there they move at their block's other parts'
+ *   band and the block's mesh mixes its strides, as under the ruling.
  * - **The records.** The blocks' errors reach the vertex stage in their slot's record and the
  *   edges' bands in the instance's, as half floats of kilometres rounded up
  *   ({@link edgeBandHalf}).
@@ -156,17 +161,6 @@ export function sharedStrideBandM(a: number, b: number): number {
   return a > 0 && b > 0 ? Math.max(a, b) : NO_STRIDE_BAND;
 }
 
-/**
- * The band of a vertex two clusters of bands `a` and `b` hold: the smaller, where the first of them
- * drops it, or the one that drops it at all; none where neither does.
- */
-export function heldStrideBandM(a: number, b: number): number {
-  if (a > 0 && b > 0) {
-    return Math.min(a, b);
-  }
-  return a > 0 ? a : b > 0 ? b : NO_STRIDE_BAND;
-}
-
 /** Bands `a` and `b` shared, stride by stride ({@link sharedStrideBandM}). */
 export function sharedStrideBandsM(a: StrideBandsM, b: StrideBandsM): StrideBandsM {
   return [
@@ -248,10 +242,42 @@ export function heldEdgeBandsM(bandsM: StrideEdgeBandsM): Float64Array {
 }
 
 /**
+ * Block (bx, by)'s band towards stride 2^(level + 1) as the vertices inside it take it, m (see the
+ * module's remarks): its band ({@link clusterStrideBandsM}) of its parts that are not none, so that
+ * an edge that holds the block at a finer stride holds no vertex inside it; none where its own need
+ * is (`terrainStrides.wgsl`'s `stride_block_band`).
+ */
+function blockVertexBandM(
+  scale: StrideScale,
+  clusterErrors: ArrayLike<number>,
+  edgeBandsM: StrideEdgeBandsM,
+  bx: number,
+  by: number,
+  level: number,
+): number {
+  const need = (block: number): number =>
+    strideNeedM(scale, blockErrorM(clusterErrors, block, level));
+  const edgeBand = (edge: number, t: number): number =>
+    edgeBandsM[edgeBandIndex(edge, t, level)] ?? NO_STRIDE_BAND;
+  const block = 8 * by + bx;
+  const own = need(block);
+  if (!(own > 0)) {
+    return NO_STRIDE_BAND;
+  }
+  const parts = [
+    bx > 0 ? need(block - 1) : edgeBand(0, by),
+    bx < 7 ? need(block + 1) : edgeBand(1, by),
+    by > 0 ? need(block - 8) : edgeBand(2, bx),
+    by < 7 ? need(block + 8) : edgeBand(3, bx),
+  ];
+  return parts.reduce((band, part) => (part > 0 ? Math.max(band, part) : band), own);
+}
+
+/**
  * The band, m, of a patch's grid vertex (x, y) at morph level `level` (below 3; see the module's
- * remarks): on a patch's edge (not a corner, which is level 3) its edge's shared band there, on a
- * block's side the smaller of its two blocks' bands ({@link heldStrideBandM}), else its block's
- * (`terrainStrides.wgsl`'s `stride_band`).
+ * remarks): on a patch's edge (not a corner, which is level 3) its edge's shared band there; on a
+ * block's side the smaller of its two blocks' bands as their vertices take them, none where either
+ * block's need is; else its block's (`terrainStrides.wgsl`'s `stride_band`).
  */
 export function vertexStrideBandM(
   scale: StrideScale,
@@ -266,18 +292,22 @@ export function vertexStrideBandM(
     const t = Math.floor((edge < 2 ? y : x) / 8);
     return edgeBandsM[edgeBandIndex(edge, t, level)] ?? NO_STRIDE_BAND;
   }
-  const cluster = (bx: number, by: number): number =>
-    clusterStrideBandsM(scale, clusterErrors, edgeBandsM, 8 * by + bx)[level] ?? NO_STRIDE_BAND;
+  const band = (bx: number, by: number): number =>
+    blockVertexBandM(scale, clusterErrors, edgeBandsM, bx, by, level);
   const bx = Math.floor(x / 8);
   const by = Math.floor(y / 8);
-  const band = cluster(bx, by);
+  const side = (ax: number, ay: number): number => {
+    const a = band(ax, ay);
+    const b = band(bx, by);
+    return a > 0 && b > 0 ? Math.min(a, b) : NO_STRIDE_BAND;
+  };
   if (x % 8 === 0) {
-    return heldStrideBandM(band, cluster(bx - 1, by));
+    return side(bx - 1, by);
   }
   if (y % 8 === 0) {
-    return heldStrideBandM(band, cluster(bx, by - 1));
+    return side(bx, by - 1);
   }
-  return band;
+  return band(bx, by);
 }
 
 /**

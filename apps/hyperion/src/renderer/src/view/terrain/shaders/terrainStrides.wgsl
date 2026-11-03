@@ -90,20 +90,6 @@ fn stride_need(inst : Instance, block : u32, level : u32) -> f32 {
   return inst.strides.x + e * inst.strides.y;
 }
 
-// Bands `a` and `b` shared: the larger, none where either is none (`strides.ts`' `sharedStrideBandM`).
-fn stride_shared(a : f32, b : f32) -> f32 {
-  return select(-1.0, max(a, b), a > 0.0 && b > 0.0);
-}
-
-// The band of a vertex two clusters of bands `a` and `b` hold: the smaller, or the one's that drops
-// it at all (`strides.ts`' `heldStrideBandM`).
-fn stride_held(a : f32, b : f32) -> f32 {
-  if (a > 0.0 && b > 0.0) {
-    return min(a, b);
-  }
-  return select(select(-1.0, b, b > 0.0), a, a > 0.0);
-}
-
 // The shared band of `inst`'s patch edge `edge` at its block `t` (`strides.ts`' `edgeBandIndex`), a
 // half float of kilometres.
 fn stride_edge_band(inst : Instance, edge : u32, t : u32, level : u32) -> f32 {
@@ -112,33 +98,47 @@ fn stride_edge_band(inst : Instance, edge : u32, t : u32, level : u32) -> f32 {
   return select(-1.0, km * 1000.0, km > 0.0);
 }
 
-// The band of `inst`'s block (bx, by) (`strides.ts`' `clusterStrideBandsM`, `clusterCull.wgsl`'s
-// `cluster_bands`): the largest need of it and the blocks on its sides, and of its patch's edges'
-// shared bands along it.
+// The larger of band `a` and part `b`, `a` where `b` is none.
+fn stride_part(a : f32, b : f32) -> f32 {
+  return select(a, max(a, b), b > 0.0);
+}
+
+// The band of `inst`'s block (bx, by) as the vertices inside it take it (`strides.ts`'
+// `blockVertexBandM`): the largest need of it and the blocks on its sides, and of its patch's
+// edges' shared bands along it, of those not none; none where its own need is.
 fn stride_block_band(inst : Instance, bx : u32, by : u32, level : u32) -> f32 {
   let block = 8u * by + bx;
   var band = stride_need(inst, block, level);
+  if (band <= 0.0) {
+    return -1.0;
+  }
   if (bx > 0u) {
-    band = stride_shared(band, stride_need(inst, block - 1u, level));
+    band = stride_part(band, stride_need(inst, block - 1u, level));
   } else {
-    band = stride_shared(band, stride_edge_band(inst, 0u, by, level));
+    band = stride_part(band, stride_edge_band(inst, 0u, by, level));
   }
   if (bx < 7u) {
-    band = stride_shared(band, stride_need(inst, block + 1u, level));
+    band = stride_part(band, stride_need(inst, block + 1u, level));
   } else {
-    band = stride_shared(band, stride_edge_band(inst, 1u, by, level));
+    band = stride_part(band, stride_edge_band(inst, 1u, by, level));
   }
   if (by > 0u) {
-    band = stride_shared(band, stride_need(inst, block - 8u, level));
+    band = stride_part(band, stride_need(inst, block - 8u, level));
   } else {
-    band = stride_shared(band, stride_edge_band(inst, 2u, bx, level));
+    band = stride_part(band, stride_edge_band(inst, 2u, bx, level));
   }
   if (by < 7u) {
-    band = stride_shared(band, stride_need(inst, block + 8u, level));
+    band = stride_part(band, stride_need(inst, block + 8u, level));
   } else {
-    band = stride_shared(band, stride_edge_band(inst, 3u, bx, level));
+    band = stride_part(band, stride_edge_band(inst, 3u, bx, level));
   }
   return band;
+}
+
+// The band of a block's side between `a` and `b`, the bands of its two blocks: the smaller, none
+// where either is.
+fn stride_side_band(a : f32, b : f32) -> f32 {
+  return select(-1.0, min(a, b), a > 0.0 && b > 0.0);
 }
 
 // The band of `inst`'s grid vertex (x, y) at morph level `level` (`strides.ts`' `vertexStrideBandM`):
@@ -153,10 +153,10 @@ fn stride_band(inst : Instance, x : u32, y : u32, level : u32) -> f32 {
   let by = y / 8u;
   let band = stride_block_band(inst, bx, by, level);
   if (x % 8u == 0u) {
-    return stride_held(band, stride_block_band(inst, bx - 1u, by, level));
+    return stride_side_band(band, stride_block_band(inst, bx - 1u, by, level));
   }
   if (y % 8u == 0u) {
-    return stride_held(band, stride_block_band(inst, bx, by - 1u, level));
+    return stride_side_band(band, stride_block_band(inst, bx, by - 1u, level));
   }
   return band;
 }

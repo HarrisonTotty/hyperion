@@ -451,7 +451,7 @@ describe("the cull's camera strides", () => {
     ]);
   });
 
-  it("gives a cluster the largest need of it, its neighbours and its edges, a vertex inside it its band and one on its side the smaller of its two blocks' bands", () => {
+  it("gives a cluster the largest need of it, its neighbours and its edges, none where one is, a vertex inside it that band of its parts not none, and one on its side the smaller of its two blocks'", () => {
     // Needs 10 + 2e: block 0's 12, 14, 16, block 1's 20, 12 and none, block 8's 10, 30, 12; the
     // other blocks unmeasured. Edge x = 0's first block 11, 50, 13; edge y = 0's 15, 13, 40.
     const scale: StrideScale = { statedM: 10, perErrorM: 2 };
@@ -475,8 +475,8 @@ describe("the cull's camera strides", () => {
       [NO_STRIDE_BAND, NO_STRIDE_BAND, NO_STRIDE_BAND],
       [NO_STRIDE_BAND, NO_STRIDE_BAND, NO_STRIDE_BAND],
     ]);
-    // Block 1's band at stride 2 is its own and block 0's 20 (block 2 and 9 unmeasured: none), and
-    // block 8's at stride 4 none (blocks 9 and 16 unmeasured).
+    // Block 1's band at stride 2 is none (blocks 2 and 9 unmeasured), its vertices' its own and block
+    // 0's 20; block 8's at stride 4 its own 30 for its vertices, block 0's 50; block 2 is none.
     expect([
       vertexStrideBandM(scale, errors, edges, 3, 5, 0),
       vertexStrideBandM(scale, errors, edges, 8, 3, 0),
@@ -485,7 +485,8 @@ describe("the cull's camera strides", () => {
       vertexStrideBandM(scale, errors, edges, 3, 0, 2),
       vertexStrideBandM(scale, errors, edges, 64, 3, 0),
       vertexStrideBandM(scale, errors, edges, 9, 3, 0),
-    ]).toEqual([20, 20, 50, 11, 40, NO_STRIDE_BAND, NO_STRIDE_BAND]);
+      vertexStrideBandM(scale, errors, edges, 17, 3, 0),
+    ]).toEqual([20, 20, 30, 11, 40, NO_STRIDE_BAND, 20, NO_STRIDE_BAND]);
   });
 
   it("holds an edge's band in a half float of kilometres rounded up, none and +∞ as they are", () => {
