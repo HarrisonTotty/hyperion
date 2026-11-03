@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { DescentSpikeReport, SpikeApi, SpikeEnd, SpikeLaunch } from "../../../../preload/api";
+import type {
+  DescentSpikeReport,
+  SpikeApi,
+  SpikeEnd,
+  SpikeLaunch,
+  SpikeReportPart,
+} from "../../../../preload/api";
 import { TEST_SPIKE_LAUNCH } from "../../test/stubHyperionApi";
 import { goldenLevelTable } from "../../test/terrainFixtures";
 import type { PassTimes } from "../engine/types";
@@ -12,6 +18,8 @@ import { PassReads } from "./passReads";
 import { PipelineTally } from "./pipelineShim";
 import {
   CAPTURE_FRAMES,
+  PART_INTERVAL_S,
+  PART_SETTLE_S,
   PASS_READS_WAIT_MS,
   SMOKE_BAKE_LIMIT_S,
   SMOKE_S,
@@ -43,6 +51,8 @@ function fakeSpike(launch: SpikeLaunch): {
   readonly calls: string[];
   readonly ends: SpikeEnd[];
   readonly reports: DescentSpikeReport[];
+  /** The parts of the report handed over as the run flew (R14's Mac measurements). */
+  readonly parts: SpikeReportPart[];
   /** How the next cycles answer, in order; a cycle beyond them resolves. */
   readonly cycles: Array<() => Promise<void>>;
   readonly results: { smokeFailure: string | null; checkTrace: boolean };
@@ -50,6 +60,7 @@ function fakeSpike(launch: SpikeLaunch): {
   const calls: string[] = [];
   const ends: SpikeEnd[] = [];
   const reports: DescentSpikeReport[] = [];
+  const parts: SpikeReportPart[] = [];
   const cycles: Array<() => Promise<void>> = [];
   const results: { smokeFailure: string | null; checkTrace: boolean } = {
     smokeFailure: null,
@@ -88,6 +99,10 @@ function fakeSpike(launch: SpikeLaunch): {
           : null;
       return Promise.resolve({ kind: "smoke checked", failure: results.smokeFailure ?? renderer });
     },
+    writePart: (part) => {
+      parts.push(part);
+      return Promise.resolve();
+    },
     writeCapture: () => {
       calls.push("writeCapture");
       return Promise.resolve("/capture");
@@ -98,7 +113,7 @@ function fakeSpike(launch: SpikeLaunch): {
       return Promise.resolve();
     },
   };
-  return { spike, calls, ends, reports, cycles, results };
+  return { spike, calls, ends, reports, parts, cycles, results };
 }
 
 /** A capture that records what the controller asks of it. */
@@ -324,6 +339,61 @@ describe("the spike's run control", () => {
     expect(reports[0]?.canvas).toEqual({ widthPx: 1280, heightPx: 720 });
     expect(reports[0]?.terrain).toEqual({ vertexPath: "face-differences", normals: "mesh" });
     expect(controller.ended).toBe(true);
+  });
+
+  it("hands the main process its settled frames every few seconds and after each segment's end, in order (R14's Mac measurements)", async () => {
+    const { controller, parts, reports, resolves } = controllerOf(LAUNCH);
+    controller.prepared(DESCENT);
+    await settle();
+    const endS = DESCENT.profile.durationS;
+    for (let t = 0; t <= endS; t += 1) {
+      resolves.value += 1;
+      controller.frame(frame(t));
+      if (t % 60 === 0) {
+        // oxlint-disable-next-line no-await-in-loop
+        await settle();
+      }
+    }
+    await settle();
+    const ends = DESCENT.profile
+      .segmentSpans()
+      .map((span) => span.endS)
+      .filter((e) => e < endS - PART_SETTLE_S);
+    const through = parts.map((part) => part.throughS);
+    const gaps = through.slice(1).map((t, i) => t - (through[i] ?? 0));
+    const handed = parts.flatMap((part) => part.report.frames.scriptTimesS);
+    expect({
+      follow: parts.every(
+        (part, i) =>
+          i === 0 ||
+          part.fromFrame ===
+            (parts[i - 1]?.fromFrame ?? 0) + (parts[i - 1]?.report.frames.scriptTimesS.length ?? 0),
+      ),
+      settled: parts.every((part) =>
+        part.report.frames.scriptTimesS.every((t) => t < part.throughS),
+      ),
+      longestGapS: Math.max(...gaps),
+      segmentsFollowed: ends.every((e) => through.some((t) => t >= e && t < e + 1)),
+      frames: handed,
+      geometry: parts.some((part) => part.report.geometry !== undefined),
+    }).toEqual({
+      follow: true,
+      settled: true,
+      longestGapS: PART_INTERVAL_S,
+      segmentsFollowed: true,
+      frames: reports[0]?.frames.scriptTimesS.filter((t) => t < (through.at(-1) ?? 0)),
+      geometry: false,
+    });
+  });
+
+  it("hands a smoke's frames to no part, since it writes no results", async () => {
+    const smoke = controllerOf({ ...LAUNCH, smoke: true });
+    smoke.controller.prepared(DESCENT);
+    await settle();
+    for (let t = 0; t <= 30; t += 1) {
+      smoke.controller.frame(frame(t));
+    }
+    expect(smoke.parts).toEqual([]);
   });
 
   it("reports where script time starts, the guard, and a window that no boundary cut", async () => {

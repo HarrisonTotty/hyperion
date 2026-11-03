@@ -82,6 +82,7 @@ function fakeSpike(launch: SpikeLaunch): {
       reports.push(report);
       return Promise.resolve({ kind: "smoke checked", failure: null });
     },
+    writePart: () => Promise.resolve(),
     writeCapture: () => Promise.resolve("/capture"),
     end: (outcome) => {
       ends.push(outcome);

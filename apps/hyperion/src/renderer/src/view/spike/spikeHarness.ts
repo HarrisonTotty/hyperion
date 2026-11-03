@@ -31,6 +31,7 @@ import {
   type PatchEvent,
   SpikeMetrics,
   type SpikeMetricsReport,
+  type SpikeReportExtras,
 } from "./metrics";
 import { PassReads, trackPassReads } from "./passReads";
 import { PipelineTally, shimPipelines, wrapGpu } from "./pipelineShim";
@@ -334,17 +335,38 @@ export class SpikeRecorder {
 
   /** The run's report for the results file, less what the run's control adds. */
   report(canvas: DescentSpikeReport["canvas"]): SpikeMetricsReport {
+    return this.#metrics.report(this.#extras(canvas));
+  }
+
+  /**
+   * The run's report with its frames from `fromFrame` alone, those whose script time is before
+   * `throughS`, less what the run's control adds and the geometry block (R14's Mac measurements):
+   * a part for the main process, and the frames it holds up to (`toFrame`).
+   */
+  reportPart(
+    canvas: DescentSpikeReport["canvas"],
+    fromFrame: number,
+    throughS: number,
+  ): { readonly report: SpikeMetricsReport; readonly toFrame: number } {
+    const toFrame = Math.max(fromFrame, this.#metrics.framesBefore(throughS));
+    return {
+      report: this.#metrics.reportPart(this.#extras(canvas), fromFrame, toFrame),
+      toFrame,
+    };
+  }
+
+  #extras(canvas: DescentSpikeReport["canvas"]): SpikeReportExtras {
     const latePipelines: SpikeLatePipeline[] = this.#tally.late().map((creation) => ({
       label: creation.label.length > 0 ? creation.label : "(unlabelled)",
       kind: creation.kind,
       async: creation.async,
       scriptTimeS: creation.scriptTimeS,
     }));
-    return this.#metrics.report({
+    return {
       inFlightResolves: this.#reads.inFlight(),
       latePipelines,
       adapterPeakBytes: this.#peakBytes,
       canvas,
-    });
+    };
   }
 }

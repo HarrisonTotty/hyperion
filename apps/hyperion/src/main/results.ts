@@ -3167,15 +3167,32 @@ export async function freeResultsName(
 }
 
 /**
- * Writes a results file and its summary into `dir` as `<date>-<machine>-<setting>.json` and
- * `.md`, adding `-2`, `-3` and so on when a run of the same day, machine and setting is there. A
- * profiled run's are `<date>-<machine>-<setting>-profiled.json` and `.md`, numbered the same way.
+ * The name a spike run's files are given before a repeat's `-2` or a stopped run's `-partial`:
+ * `<date>-<machine>-<setting>`, with `-profiled` for a run whose trace recorded V8's profiler.
+ */
+export function resultsStem(run: {
+  readonly startedAt: Date;
+  readonly machine: Pick<MachineDescription, "name">;
+  readonly setting: SpikeSetting;
+  readonly profiled: boolean;
+}): string {
+  return `${run.startedAt.toISOString().slice(0, 10)}-${run.machine.name}-${run.setting}${run.profiled ? "-profiled" : ""}`;
+}
+
+/**
+ * Writes a results file and its summary into `dir` as `<name>.json` and `.md`: by default
+ * `<date>-<machine>-<setting>` ({@link resultsStem}), with `-2`, `-3` and so on added when a run of
+ * the same day, machine and setting, or a stopped run's finished segments, is there
+ * ({@link freeResultsName}); a profiled run's `<date>-<machine>-<setting>-profiled`, numbered the
+ * same way.
  *
  * @remarks
  * A file that Prettier would format to more than {@link ADDED_FILE_LIMIT_BYTES} is still written
  * in full, with a warning that names its size: the series is never thinned or split
  * (decision-r05-results-size.md). Such a run is a finding.
  *
+ * @param name - The name to write under, taken already: a run's, chosen as it started, or its
+ *   finished segments' (`<name>-partial`, R14's Mac measurements).
  * @returns The paths written.
  * @throws Error if the results do not match their schema, naming each problem, or if the day's
  * names are used up.
@@ -3184,24 +3201,20 @@ export async function writeResults(
   dir: string,
   results: DescentResults,
   files: ResultsFiles = NODE_RESULTS_FILES,
+  name: string | null = null,
 ): Promise<{ readonly json: string; readonly markdown: string }> {
   const problems = validateResults(results);
   if (problems.length > 0) {
     throw new Error(`the results do not match their schema: ${problems.join("; ")}`);
   }
   await files.mkdir(dir);
-  const profiled = results.run.trace.value?.profiled === true ? "-profiled" : "";
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}${profiled}`;
-  const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
-    i === 0 ? stem : `${stem}-${i + 1}`,
-  );
-  const taken = await Promise.all(
-    candidates.map((candidate) => files.exists(join(dir, `${candidate}.json`))),
-  );
-  const name = candidates[taken.indexOf(false)];
-  if (name === undefined) {
-    throw new Error(`${dir} already holds ${MAX_RUNS_A_DAY} runs named ${stem}`);
-  }
+  const stem = resultsStem({
+    startedAt: new Date(results.run.startedAt),
+    machine: results.run.machine,
+    setting: results.run.setting,
+    profiled: results.run.trace.value?.profiled === true,
+  });
+  name ??= await freeResultsName(dir, stem, files);
   const json = join(dir, `${name}.json`);
   const markdown = join(dir, `${name}.md`);
   const text = `${JSON.stringify(results, null, 2)}\n`;

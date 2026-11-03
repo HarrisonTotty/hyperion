@@ -80,6 +80,21 @@ export function smokeBakeLimitS(launchMode: GraphicsLaunchMode): number {
  */
 export const SMOKE_TRACE_BOUNDARIES_S: ReadonlyArray<number> = [3, 6];
 
+/**
+ * How often a full run hands the main process the frames it has settled, script seconds, from
+ * which the finished segments' results are written (R14's Mac measurements): a part this short
+ * is copied across in well under a millisecond, where the whole report at a segment's end took
+ * 45 to 70 ms (pod, 16 vCPU), a hitch inside the measured frames.
+ */
+export const PART_INTERVAL_S = 10;
+
+/**
+ * How long a frame waits before it is handed over, script seconds: its pass times' reads end
+ * within a few frames, so that a part's frames are as complete as the whole report's. A part is
+ * handed over this long after each segment's end too, so that the segment's results follow it.
+ */
+export const PART_SETTLE_S = 2;
+
 /** How many frames a capture spans (T15.a's fixed span). */
 export const CAPTURE_FRAMES = 120;
 
@@ -199,6 +214,13 @@ export class SpikeController {
   #cycled: Promise<void> = Promise.resolve();
   /** Why the trace ended before the run, or `null`. */
   #traceEnded: string | null = null;
+  /** The frames handed to the main process so far, and when the next part is due, script s. */
+  #partFrom = 0;
+  #nextPartS = PART_INTERVAL_S;
+  /** The segments' ends, script s, and the next whose part is still due. */
+  #segmentEndsS: ReadonlyArray<number> = [];
+  #nextSegment = 0;
+  #partRefused = false;
 
   constructor(deps: SpikeControllerDeps) {
     this.#deps = deps;
@@ -250,6 +272,7 @@ export class SpikeController {
       return;
     }
     this.#recorder = new SpikeRecorder(descent, this.#launch.setting, this.#deps.gpu);
+    this.#segmentEndsS = descent.profile.segmentSpans().map(({ endS }) => endS);
     // A smoke ends `SMOKE_S` after its first bake (`patch`), or fails at the bake's limit.
     this.#durationS = this.#launch.smoke ? this.#bakeLimitS : descent.profile.durationS;
     if (this.#deps.capture !== null) {
@@ -372,9 +395,57 @@ export class SpikeController {
     }
     this.#captureFrame(sample.scriptTimeS);
     this.#traceFrame(sample.scriptTimeS);
+    this.#partFrame(recorder, sample);
     if (sample.scriptTimeS >= this.#durationS) {
       void this.#finish(recorder, sample.scriptStartMs);
     }
+  }
+
+  /**
+   * Hands the main process the frames settled since the last part, every {@link PART_INTERVAL_S}
+   * and {@link PART_SETTLE_S} after each segment's end, on a full run before its end (R14's Mac
+   * measurements); a smoke writes no results, and the end's report holds every frame.
+   */
+  #partFrame(recorder: SpikeRecorder, sample: ControllerFrame): void {
+    const nowS = sample.scriptTimeS;
+    if (this.#launch.smoke || nowS >= this.#durationS) {
+      return;
+    }
+    let segmentDue = false;
+    while ((this.#segmentEndsS[this.#nextSegment] ?? Infinity) + PART_SETTLE_S <= nowS) {
+      this.#nextSegment += 1;
+      segmentDue = true;
+    }
+    if (!segmentDue && nowS < this.#nextPartS) {
+      return;
+    }
+    this.#nextPartS = nowS + PART_INTERVAL_S;
+    const throughS = nowS - PART_SETTLE_S;
+    const fromFrame = this.#partFrom;
+    const { report, toFrame } = recorder.reportPart(this.#deps.canvas(), fromFrame, throughS);
+    this.#partFrom = toFrame;
+    const terrain = this.#terrain;
+    this.#deps.spike
+      .writePart({
+        fromFrame,
+        throughS,
+        report: {
+          ...report,
+          scriptStartMs: sample.scriptStartMs,
+          traceWindows: [],
+          traceGuardS: TRACE_BOUNDARY_GUARD_S,
+          ...(terrain === null
+            ? {}
+            : { terrain: { vertexPath: terrain.vertexPath, normals: terrain.normals } }),
+        },
+      })
+      .catch((error: unknown) => {
+        // The finished segments are a stopped run's keepsake: the run goes on without them.
+        if (!this.#partRefused) {
+          this.#partRefused = true;
+          this.#deps.log("a part of the report was refused; no later segment is written", error);
+        }
+      });
   }
 
   /** Ends the run as failed, once. */

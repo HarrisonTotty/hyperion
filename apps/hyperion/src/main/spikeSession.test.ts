@@ -4,6 +4,7 @@ import type {
   DescentSpikeReport,
   SpikeGeometryReport,
   SpikeLaunch,
+  SpikeReportPart,
   SpikeResultsAnswer,
   SpikeResultsPaths,
 } from "../preload/api";
@@ -895,6 +896,69 @@ describe("a spike run's session", () => {
     session.operations().end(0, null);
     expect(exits).toEqual([1, 0]);
     expect(session.ended).toBe(true);
+  });
+});
+
+describe("a spike run's finished segments (R14's Mac measurements)", () => {
+  /** A session whose finished segments' sink records what it was given. */
+  function partialSession(launch: SpikeLaunch = LAUNCH): ReturnType<typeof depsOf> & {
+    readonly session: SpikeSession;
+    readonly names: string[];
+    readonly added: SpikeReportPart[];
+    readonly closes: boolean[];
+  } {
+    const trace = fakeTrace();
+    const made = depsOf(
+      trace,
+      () => Promise.reject(new Error("bad")),
+      () => Promise.resolve(4096),
+      launch,
+    );
+    const names: string[] = [];
+    const added: SpikeReportPart[] = [];
+    const closes: boolean[] = [];
+    const session = new SpikeSession({
+      ...made.deps,
+      partials: (start) => {
+        names.push(start.name);
+        return {
+          add: (each) => {
+            added.push(each);
+          },
+          close: (written) => {
+            closes.push(written);
+            return Promise.resolve();
+          },
+        };
+      },
+    });
+    return { ...made, session, names, added, closes };
+  }
+
+  it("go to the sink as the run flies, under the name its results take, and are removed once those are written", async () => {
+    const { session, written, names, added, closes } = partialSession();
+    // A stopped run's finished segments hold the day's first name, which no later run takes.
+    written.set("/out/2026-10-03-devbox-low-partial.json", "{}");
+    const ops = session.operations();
+    await ops.startMeasuring();
+    const part: SpikeReportPart = { fromFrame: 0, throughS: 10, report: smallReport() };
+    await ops.writePart(part);
+    await ops.stopMeasuring();
+    const paths = pathsOf(await ops.writeResults(smallReport()));
+    expect([names, added, paths.json, closes]).toEqual([
+      ["2026-10-03-devbox-low-2"],
+      [part],
+      "/out/2026-10-03-devbox-low-2.json",
+      [true],
+    ]);
+  });
+
+  it("are none on a smoke, which writes no results", async () => {
+    const { session, names } = partialSession({ ...LAUNCH, smoke: true });
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.writePart({ fromFrame: 0, throughS: 10, report: smallReport() });
+    expect(names).toEqual([]);
   });
 });
 

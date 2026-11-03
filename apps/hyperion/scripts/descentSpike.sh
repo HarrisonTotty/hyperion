@@ -41,6 +41,12 @@
 # version 25) the server answers every generated body's field not modelled, and the spike says so
 # and ends failed.
 #
+# A full run writes the results of its segments finished so far as each segment ends, as
+# <name>-partial.json and .md beside where its results go, so that a run stopped part-way keeps
+# them; its results, written under the same name as it ends, take their place (R14's Mac
+# measurements). Their trace is missing, read only as the run ends, so their frame figures are
+# requestAnimationFrame's, and they hold no memory series and no geometry or sizes block.
+#
 # --companion-load <threads> runs that many busy threads beside the run, standing in for the
 # server's arrival work (Design note 20). --cold-cache starts with an empty Chromium GPU shader
 # cache; otherwise the cache kept from the last run (in target/descent-spike/gpu-cache) is copied

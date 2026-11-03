@@ -167,6 +167,11 @@ export interface SpikeApi {
    * process checks its trace's windows against the report and answers whether one failed (T14.i).
    */
   writeResults(report: DescentSpikeReport): Promise<SpikeResultsAnswer>;
+  /**
+   * Hands the main process a part of the report as the run flies, from which the results of the
+   * segments finished so far are written as each ends (R14's Mac measurements).
+   */
+  writePart(part: SpikeReportPart): Promise<void>;
   /** Writes a GPU capture (T15.a) as `capture.json` and `capture.bin` into `--capture`'s directory. */
   writeCapture(capture: { readonly json: string; readonly bin: Uint8Array }): Promise<string>;
   /** Ends the run, and the app with it. */
@@ -261,6 +266,21 @@ declare global {
 
 /** Which of Design note 21's GPU rows a pass counts towards. */
 export type SpikePassRow = "terrain" | "atmosphere" | "other";
+
+/**
+ * A part of the descent spike's report, handed to the main process as the run flies, so that each
+ * segment's results are written as it ends and a run stopped part-way keeps its finished segments
+ * (R14's Mac measurements): the report's frames from `fromFrame` on, those that began before
+ * `throughS` of the script, and the rest of the report as it stands, but for the geometry and the
+ * sizes blocks, which only the whole report carries.
+ */
+export interface SpikeReportPart {
+  /** The run's frames handed over before the part's first frame. */
+  readonly fromFrame: number;
+  /** Script time, s, before which every frame of the run is in this part or those before it. */
+  readonly throughS: number;
+  readonly report: DescentSpikeReport;
+}
 
 /** The state of R01's pass timer over a run (`PassTimes.timer`). */
 export type SpikePassTimer = "full" | "quantized" | "absent";

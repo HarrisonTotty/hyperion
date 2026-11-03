@@ -37,14 +37,18 @@ import {
   buildResults,
   describeClocks,
   describeClockSamples,
+  freeResultsName,
   gpuClocksOf,
   type MemorySample,
+  NODE_PARTIAL_FILES,
   type ResultsFiles,
+  resultsStem,
   type RunDescription,
   writeResults,
 } from "./results";
 import type { LoadReading } from "./sizesResults";
 import type { SpikeHandlerDeps, SpikeTraceState, TraceWindowStop } from "./spike";
+import { runWithTerrain, type SpikePartialsSink, type SpikePartialsStart } from "./spikePartials";
 import type { RejectedSizes, SpikeCaptureFiles } from "./spikeReport";
 import {
   mergeTraceWindows,
@@ -95,6 +99,12 @@ export interface SpikeSessionDeps {
   readonly load?: { start(): void; stop(): Measured<ReadonlyArray<LoadReading>> };
   /** The results file's directory (`--out`, or `docs/measurements/descent-spike/`). */
   readonly outDir: string;
+  /**
+   * Where a full run's finished segments are written as each ends, so that a run stopped part-way
+   * keeps them (R14's Mac measurements): a worker thread's (`workerPartials`) in a run; absent,
+   * none are written.
+   */
+  readonly partials?: (start: SpikePartialsStart) => SpikePartialsSink;
   readonly exit: (code: number) => void;
   readonly log: (line: string) => void;
   /** The file operations, Node's by default. */
@@ -179,6 +189,9 @@ export class SpikeSession {
   #load: Measured<ReadonlyArray<LoadReading>> | null = null;
   /** The renderer's last private-memory reading, bytes. */
   #rendererBytes: number | null = null;
+  /** The results' name a full run with finished segments takes as it starts, and their sink. */
+  #name: string | null = null;
+  #partials: SpikePartialsSink | null = null;
   #ended = false;
 
   /** Whether the renderer has ended the run (`end`). */
@@ -208,6 +221,11 @@ export class SpikeSession {
         this.#rendererBytes = bytes;
       },
       writeResults: (report, rejectedSizes) => this.#writeResults(report, rejectedSizes ?? null),
+      writePart: (part) => {
+        // A smoke's, or a run's whose sink is not given, is let go: it writes no finished segments.
+        this.#partials?.add(part);
+        return Promise.resolve();
+      },
       writeCapture: (capture) => this.#writeCapture(capture),
       end: (code, reason) => {
         this.#ended = true;
@@ -224,7 +242,19 @@ export class SpikeSession {
       throw new Error("the spike is already measuring");
     }
     this.#run = this.#deps.describe();
-    await this.#run;
+    const run = await this.#run;
+    const partials = this.#deps.partials;
+    if (!this.#deps.launch.smoke && partials !== undefined && this.#partials === null) {
+      // The name the finished segments and the results share, free of either as the run starts.
+      const stem = resultsStem({ ...run, profiled: this.#deps.trace.settings.profiled });
+      const name = await freeResultsName(
+        this.#deps.outDir,
+        stem,
+        this.#files.results ?? NODE_PARTIAL_FILES,
+      );
+      this.#name = name;
+      this.#partials = partials({ outDir: this.#deps.outDir, name, run });
+    }
     this.#windows = [];
     await this.#deps.trace.start();
     this.#deps.memory.start();
@@ -429,19 +459,8 @@ export class SpikeSession {
       this.#logSmokeReport(report);
       return { kind: "smoke checked", failure: this.#checkSmokeTrace(report) };
     }
-    const described = await this.#run;
     // The terrain variant the renderer drew with, beside the flags that asked for it.
-    const run =
-      report.terrain === undefined
-        ? described
-        : {
-            ...described,
-            options: {
-              ...described.options,
-              terrainVertexPath: report.terrain.vertexPath,
-              terrainNormals: report.terrain.normals,
-            },
-          };
+    const run = runWithTerrain(await this.#run, report);
     const load = this.#load;
     const results = buildResults({
       run,
@@ -454,8 +473,10 @@ export class SpikeSession {
     this.#deps.log(
       `descent spike: GPU clocks ${clocks.value === null ? `— (${clocks.reason})` : describeClocks(clocks.value, results.memory.series.tMs, report.warmupS)}`,
     );
-    const paths = await writeResults(this.#deps.outDir, results, this.#files.results);
+    const paths = await writeResults(this.#deps.outDir, results, this.#files.results, this.#name);
     this.#deps.log(`descent spike: results in ${paths.json}`);
+    // The results stand: the finished segments' files, once every part is written, are removed.
+    await this.#partials?.close(true);
     if (rejectedSizes !== null) {
       const rejected = rejectedSizesPath(paths.json);
       await this.#files.writeFile(

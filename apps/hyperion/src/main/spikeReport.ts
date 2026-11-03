@@ -8,6 +8,7 @@ import type {
   DescentSpikeReport,
   SpikeLatePipeline,
   SpikePassSeries,
+  SpikeReportPart,
   SpikeSegmentSpan,
   SpikeStreamingSegment,
   SpikeTraceWindow,
@@ -192,6 +193,29 @@ export function readSpikeReport(value: unknown): SpikeReportReading | null {
     report,
     rejectedSizes: problems.length === 0 ? null : { block: given, problems },
   };
+}
+
+/**
+ * `value` as a part of the renderer's report (R14's Mac measurements), or `null` if it is not one:
+ * a count of the frames before it, a finite script time, and a report ({@link readDescentSpikeReport})
+ * that carries neither the geometry block nor the sizes block, which only the whole report does.
+ */
+export function readSpikeReportPart(value: unknown): SpikeReportPart | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { fromFrame, throughS } = value;
+  const report = readDescentSpikeReport(value["report"]);
+  return typeof fromFrame === "number" &&
+    Number.isInteger(fromFrame) &&
+    fromFrame >= 0 &&
+    typeof throughS === "number" &&
+    Number.isFinite(throughS) &&
+    report !== null &&
+    report.geometry === undefined &&
+    report.sizes === undefined
+    ? { fromFrame, throughS, report }
+    : null;
 }
 
 /**

@@ -521,6 +521,7 @@ describe("the spike's IPC handlers", () => {
       writeResults: vi.fn<SpikeHandlerDeps<FakeEvent>["writeResults"]>(() =>
         Promise.resolve({ kind: "written", paths: { json: "a.json", markdown: "a.md" } }),
       ),
+      writePart: vi.fn<SpikeHandlerDeps<FakeEvent>["writePart"]>(() => Promise.resolve()),
       writeCapture: vi.fn<SpikeHandlerDeps<FakeEvent>["writeCapture"]>(() =>
         Promise.resolve("/capture"),
       ),
@@ -560,8 +561,12 @@ describe("the spike's IPC handlers", () => {
     await expect(call(SPIKE_CHANNELS.writeResults, OWN, { frames: 1 })).rejects.toThrow(/report/);
     await expect(call(SPIKE_CHANNELS.writeCapture, OWN, { json: 1 })).rejects.toThrow(/capture/);
     await expect(call(SPIKE_CHANNELS.end, OWN, { status: "fail" })).rejects.toThrow(/end/);
+    await expect(
+      call(SPIKE_CHANNELS.writePart, OWN, { fromFrame: 0, throughS: 1, report: { frames: 1 } }),
+    ).rejects.toThrow(/part of a report/);
     expect(deps.rendererMemory).not.toHaveBeenCalled();
     expect(deps.writeResults).not.toHaveBeenCalled();
+    expect(deps.writePart).not.toHaveBeenCalled();
     expect(deps.end).not.toHaveBeenCalled();
   });
 
@@ -574,8 +579,11 @@ describe("the spike's IPC handlers", () => {
       kind: "written",
       paths: { json: "a.json", markdown: "a.md" },
     });
+    const part = { fromFrame: 0, throughS: 61, report: smallReport() };
+    await call(SPIKE_CHANNELS.writePart, OWN, part);
     await call(SPIKE_CHANNELS.stopTrace, OWN);
     await call(SPIKE_CHANNELS.end, OWN, { status: "fail", reason: "no bake" });
+    expect(deps.writePart).toHaveBeenCalledExactlyOnceWith(part);
     expect(deps.startMeasuring).toHaveBeenCalledOnce();
     expect(deps.cycleTrace).toHaveBeenCalledOnce();
     expect(deps.stopMeasuring).toHaveBeenCalledOnce();

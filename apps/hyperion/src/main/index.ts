@@ -66,6 +66,7 @@ import {
   SpikeTrace,
   spikeWatchdogMs,
 } from "./spike";
+import { workerPartials } from "./spikePartialsWorker";
 import { SpikeSession } from "./spikeSession";
 import {
   INSPECTION_TIMING_DIR,
@@ -374,6 +375,8 @@ function startSpikeSession(
         }
       : {}),
     outDir: launch.out ?? resolve(process.cwd(), spikeResultsDir(null, graphics.launchMode)),
+    // On a worker thread, so that building them never holds this thread (R14's Mac measurements).
+    partials: (start) => workerPartials(start, logLine),
     exit: (code) => {
       app.exit(code);
     },

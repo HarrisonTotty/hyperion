@@ -441,6 +441,23 @@ describe("a results file", () => {
     expect(second.json).toBe("/runs/2026-10-02-devbox-low-2.json");
   });
 
+  it("takes no name a stopped run's finished segments hold, and writes under a name given (R14's Mac measurements)", async () => {
+    const files = memoryFiles();
+    files.written.set("/runs/2026-10-02-devbox-low-partial.json", "{}");
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    const free = await writeResults("/runs", results, files);
+    const named = await writeResults("/runs", results, files, "2026-10-02-devbox-low-7-partial");
+    expect([free.json, named.markdown]).toEqual([
+      "/runs/2026-10-02-devbox-low-2.json",
+      "/runs/2026-10-02-devbox-low-7-partial.md",
+    ]);
+  });
+
   it("reads frames from presentation times by segment, after the warm-up, against T", () => {
     const results = buildResults({
       run: runOf(),

@@ -36,6 +36,7 @@ function fakeSpike(ends: SpikeEnd[], launch: Partial<SpikeLaunch> = {}): SpikeAp
     stopTrace: () => Promise.resolve(),
     sampleMemory: () => Promise.resolve(),
     writeResults: () => Promise.resolve({ kind: "smoke checked", failure: null }),
+    writePart: () => Promise.resolve(),
     writeCapture: () => Promise.resolve("c"),
     end: (outcome) => {
       ends.push(outcome);

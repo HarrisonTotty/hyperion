@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { DescentSpikeReport } from "../preload/api";
 import { sizesReportOf } from "./fixtures/sizesReport";
 import { smallReport } from "./fixtures/spikeReport";
-import { readDescentSpikeReport, readSpikeCapture, readSpikeReport } from "./spikeReport";
+import {
+  readDescentSpikeReport,
+  readSpikeCapture,
+  readSpikeReport,
+  readSpikeReportPart,
+} from "./spikeReport";
 
 describe("the spike report's check", () => {
   it("passes a valid report through unchanged", () => {
@@ -229,6 +234,24 @@ describe("the spike report's check", () => {
 
   it("still refuses a report whose other parts are malformed, whatever its sizes", () => {
     expect(readSpikeReport({ ...smallReport(), uploadBytes: -1, sizes: null })).toBeNull();
+  });
+});
+
+describe("a report's part's check (R14's Mac measurements)", () => {
+  it("passes a part through unchanged, and refuses one with no count before it, a report or a time", () => {
+    const part = { fromFrame: 120, throughS: 61.5, report: smallReport() };
+    expect([
+      readSpikeReportPart(structuredClone(part)),
+      readSpikeReportPart({ ...part, fromFrame: -1 }),
+      readSpikeReportPart({ ...part, fromFrame: 1.5 }),
+      readSpikeReportPart({ ...part, throughS: Number.NaN }),
+      readSpikeReportPart({ ...part, report: { frames: 1 } }),
+    ]).toEqual([part, null, null, null, null]);
+  });
+
+  it("refuses a part with the sizes block, which only the whole report carries", () => {
+    const report = { ...smallReport(), sizes: sizesReportOf() };
+    expect(readSpikeReportPart({ fromFrame: 0, throughS: 1, report })).toBeNull();
   });
 });
 

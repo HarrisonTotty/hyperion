@@ -314,3 +314,65 @@ describe("the spike's metrics", () => {
     expect(planet.report(EXTRA).geometry).toBeUndefined();
   });
 });
+
+describe("the spike's report in parts (R14's Mac measurements)", () => {
+  /** Five frames over the two segments, numbering resolves 1 to 7, with times for some. */
+  function flown(): SpikeMetrics {
+    const metrics = new SpikeMetrics({ ...OPTIONS, firstEngineFrame: 0 });
+    for (const [engineFrame, scriptTimeS] of [
+      [1, 0],
+      [3, 1],
+      [4, 2],
+      [6, 3],
+      [7, 3.5],
+    ] as const) {
+      metrics.frame(sample(engineFrame, scriptTimeS));
+    }
+    metrics.passTimes(times(1, [["terrain", 1e6]]));
+    metrics.passTimes(times(3, [["terrain", 2e6]]));
+    // A label first timed in the fourth frame.
+    metrics.passTimes(times(5, [["atmosphere view", 3e5]]));
+    return metrics;
+  }
+
+  it("counts the frames before a script time", () => {
+    const metrics = flown();
+    expect([0, 1, 2.5, 3.5, 9].map((s) => metrics.framesBefore(s))).toEqual([0, 1, 3, 4, 5]);
+  });
+
+  it("gives each frame's figures in a part as the whole report gives them", () => {
+    const metrics = flown();
+    const inFlight = { ...EXTRA, inFlightResolves: [6] };
+    const whole = metrics.report(inFlight).frames;
+    const parts = [
+      metrics.reportPart(inFlight, 0, 2),
+      metrics.reportPart(inFlight, 2, 3),
+      metrics.reportPart(inFlight, 3, 5),
+    ].map((part) => part.frames);
+    const joined = (key: Exclude<keyof typeof whole, "passes">): ReadonlyArray<number> =>
+      parts.flatMap((frames) => frames[key]);
+    expect([
+      joined("scriptTimesS"),
+      joined("missingResolves"),
+      joined("inFlightResolves"),
+      whole.passes.map(({ label }) => [
+        label,
+        parts.flatMap((frames) => frames.passes.find((each) => each.label === label)?.gpuMs ?? []),
+      ]),
+    ]).toEqual([
+      whole.scriptTimesS,
+      whole.missingResolves,
+      whole.inFlightResolves,
+      whole.passes.map(({ label, gpuMs }) => [label, gpuMs]),
+    ]);
+  });
+
+  it("leaves the geometry block to the whole report", () => {
+    const metrics = new SpikeMetrics(OPTIONS);
+    metrics.frame(sample(1, 0, { geometry: { settings: SETTINGS.low.geometry, counts: null } }));
+    expect([
+      metrics.report(EXTRA).geometry === undefined,
+      metrics.reportPart(EXTRA, 0, 1).geometry,
+    ]).toEqual([false, undefined]);
+  });
+});

@@ -12,7 +12,13 @@
 
 import type { IpcMainInvokeEvent, TraceConfig } from "electron";
 
-import type { DescentSpikeReport, SpikeEnd, SpikeLaunch, SpikeResultsAnswer } from "../preload/api";
+import type {
+  DescentSpikeReport,
+  SpikeEnd,
+  SpikeLaunch,
+  SpikeReportPart,
+  SpikeResultsAnswer,
+} from "../preload/api";
 
 import { SOFTWARE_WAIT_FACTOR } from "./graphics/softwareMode";
 import {
@@ -27,6 +33,7 @@ import {
   type RejectedSizes,
   readSpikeCapture,
   readSpikeReport,
+  readSpikeReportPart,
   type SpikeCaptureFiles,
 } from "./spikeReport";
 import type { TraceFormat, TraceSettings } from "./traceWindows";
@@ -450,6 +457,7 @@ export const SPIKE_CHANNELS = {
   stopTrace: "hyperion:spike:stop-trace",
   memory: "hyperion:spike:memory",
   writeResults: "hyperion:spike:write-results",
+  writePart: "hyperion:spike:write-part",
   writeCapture: "hyperion:spike:write-capture",
   end: "hyperion:spike:end",
 } as const;
@@ -483,6 +491,11 @@ export interface SpikeHandlerDeps<E = IpcMainInvokeEvent> {
     report: DescentSpikeReport,
     rejectedSizes?: RejectedSizes,
   ) => Promise<SpikeResultsAnswer>;
+  /**
+   * Takes a checked part of the report as the run flies, from which the finished segments are
+   * written (R14's Mac measurements).
+   */
+  readonly writePart: (part: SpikeReportPart) => Promise<void>;
   /** Writes a checked capture, returning its directory. */
   readonly writeCapture: (capture: SpikeCaptureFiles) => Promise<string>;
   /** Ends the run with an exit status, and a reason for a failure. */
@@ -541,6 +554,13 @@ export function registerSpikeHandlers<E>(deps: SpikeHandlerDeps<E>): void {
     return rejectedSizes === null
       ? deps.writeResults(report)
       : deps.writeResults(report, rejectedSizes);
+  });
+  guarded(SPIKE_CHANNELS.writePart, async ([value]) => {
+    const part = readSpikeReportPart(value);
+    if (part === null) {
+      throw new SpikeCallRefused(`${SPIKE_CHANNELS.writePart} refused: not a part of a report`);
+    }
+    await deps.writePart(part);
   });
   guarded(SPIKE_CHANNELS.writeCapture, async ([value]) => {
     const capture = readSpikeCapture(value);
