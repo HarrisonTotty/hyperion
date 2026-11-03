@@ -122,6 +122,7 @@ import {
   kernelMedium,
   MULTI_SCATTERING_KERNEL,
   SLOT_DEPTHS_KERNEL,
+  SOURCE_TRANSMITTANCE_KERNEL,
   TRANSMITTANCE_KERNEL,
 } from "../atmosphere/tables";
 import type { KernelPair } from "../engine/kernels";
@@ -691,6 +692,32 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     vi.useRealTimers();
   });
 
+  it("lights a body with air through its sources' table, the setting's lever (R08.T9.b)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    const bound = [
+      ...engine.targetFrames.flatMap((frame) =>
+        frame.draws.flatMap((draw) => draw.textures["atmosphereSourceTable"] ?? []),
+      ),
+      ...engine.dispatched.flatMap((d) => d.bindings.sampled["atmosphere_source_table"] ?? []),
+    ];
+    const table = tables.sourceTransmittance();
+    // The frame's other lit body has no air, and binds the airless defaults.
+    expect({
+      table: bound.includes(table),
+      perFragment: bound.some((texture) => texture.name.endsWith("per fragment")),
+      built: engine.dispatched.some((d) => d.kernel === SOURCE_TRANSMITTANCE_KERNEL.name),
+    }).toEqual({ table: true, perFragment: false, built: true });
+    renderer.dispose();
+    tables.dispose();
+  });
+
   it("draws a far body's composite over its air's area alone, over a copy of the colour it reads (R08.T16.a.2)", async () => {
     const { engine, view, renderer } = await preparedRenderer();
     // Some 8 px across the test's 64 px view.
@@ -1204,12 +1231,14 @@ async function overlayDatums(
  * perspective and the march beneath a deck (`belowDeckKernel`), for a camera under a deck over a
  * surface, and both deck marches' footprints in their thermal forms, for a self-luminous body over
  * a deck; its per-planet tables' four, and since
- * R08.T14.d.4 the sky's irradiance over the thick table; since plan R14's T4.a the cluster cull, the
- * mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; since R14.T3.d the
- * depth pyramid's, made with the renderer; and the sky bake's four. Each is a module constant, its WGSL fixed text with no value of a medium, a body or a
+ * R08.T14.d.4 the sky's irradiance over the thick table; since R08.T9.b's lever the sources'
+ * transmittance, which the lit passes read on both settings; since plan R14's T4.a the cluster cull,
+ * the mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; since R14.T3.d
+ * the depth pyramid's, made with the renderer; and the sky bake's four. Each is a module constant,
+ * its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 68,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 69,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
@@ -1265,6 +1294,7 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   SLOT_DEPTHS_KERNEL,
   IRRADIANCE_KERNEL,
   IRRADIANCE_THICK_KERNEL,
+  SOURCE_TRANSMITTANCE_KERNEL,
   CLUSTER_CULL_KERNEL,
   ...BAKE_KERNELS,
 ];
@@ -1449,9 +1479,10 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // 21: the view's, made up front with both reads' one-band marches among them (R08.T11.g, which
     // the slab Earth takes by slot and the deck over the shared read), what lies behind the sky at
     // the march's resolution (the owner's priority) and, since the correction is routed
-    // (R08.T14.d.4), the thick read's six, made ahead; and the tables' four. The thick pass makes
+    // (R08.T14.d.4), the thick read's six, made ahead; and the tables' five, the sources'
+    // transmittance among them (R08.T9.b's lever). The thick pass makes
     // one more, the sky's irradiance over the thick table (R08.T14.d.4), and the deck's pass its four
-    // marches, 26 in all, bounded however many bodies follow. All but twenty-three are made: the sky bake's four are the sky's, the march's fill
+    // marches, 27 in all, bounded however many bodies follow. All but twenty-three are made: the sky bake's four are the sky's, the march's fill
     // a reader's, which no frame asks, the tile cull's two centre ray's kernels its own cover's,
     // which a view takes only under a setting's `tiles` (R08.T11.d, R08.T8.d), the disc cells' emissive form a body's above the
     // thermal cut, which none of these is (R08.T18.a), their air form a body's drawn by its disc

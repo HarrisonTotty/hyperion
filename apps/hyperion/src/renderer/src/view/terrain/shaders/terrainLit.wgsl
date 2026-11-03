@@ -122,6 +122,8 @@
 @group(2) @binding(15) var atmosphere_irradiance : texture_2d_array<f32>;
 // The table below a cloud deck over a surface (R08.T15.b.2), or a one-texel stub, past the shadows'.
 @group(2) @binding(21) var atmosphere_below_deck : texture_2d_array<f32>;
+// The sources' transmittance table (R08.T9.b's lever), or a one-texel stub, past the cluster lists'.
+@group(2) @binding(23) var atmosphere_source_table : texture_2d_array<f32>;
 
 // A palette's slots (`hyperion_surface`'s `MAX_CLASSES`), and the laws a texel shades with: law 0
 // and one per slot.

@@ -259,8 +259,9 @@ describe("the lit terrain's material (R10.T10.b)", () => {
       ["surveyMask", "vertex fragment"],
     ]);
     const textures = differences.textures ?? [];
-    // R08's surface lighting's eight tables, the table below a deck at 21 (R08.T15.b.2).
-    expect(textures.map((t) => t.binding)).toEqual([4, 7, 9, 10, 11, 12, 13, 14, 15, 21, 19]);
+    // R08's surface lighting's nine tables, the table below a deck at 21 (R08.T15.b.2) and the
+    // sources' table at 23 (R08.T9.b's lever).
+    expect(textures.map((t) => t.binding)).toEqual([4, 7, 9, 10, 11, 12, 13, 14, 15, 21, 23, 19]);
     expect(differences.samplers.map((s) => s.binding)).toEqual([20]);
     for (const [name, binding] of [
       ["class_layers", TERRAIN_LIT_BINDINGS.classLayers],
@@ -268,6 +269,7 @@ describe("the lit terrain's material (R10.T10.b)", () => {
       ["terrain_lights", TERRAIN_LIT_BINDINGS.terrainLights],
       ["atmosphere_body", TERRAIN_LIT_BINDINGS.atmosphere],
       ["atmosphere_below_deck", TERRAIN_LIT_BINDINGS.belowDeck],
+      ["atmosphere_source_table", TERRAIN_LIT_BINDINGS.sourceTable],
       ["horizon_map", TERRAIN_LIT_BINDINGS.horizonMap],
       ["survey_mask", TERRAIN_LIT_BINDINGS.surveyMask],
       ["shadow_cascades", TERRAIN_LIT_BINDINGS.shadowCascades],

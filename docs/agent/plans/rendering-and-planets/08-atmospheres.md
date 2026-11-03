@@ -24910,3 +24910,22 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     `TERRAIN: NOT YET MODELLED` at generator 24).
   - _Pending, the owner's Mac A/B_ (high, each lever on and off) and the RTX QW, with T8.d's one
     ulp on hardware.
+- **R08.T9.b's lit-fragment lever, as built** (2026-11-03; lane perf-lit-fragment; no generated
+  value moves). The pod's figures are in the lane's outbox, `measurements.md`.
+  - `AtmosphereSettings.sourceTransmittance`: `table` on both settings, `per-fragment` the way back.
+    `photoreal/renderer.ts` hands it to `surfaceLightingTablesOf(tables, lever)`, `per-fragment` by
+    default, so that the smoke's readers draw as before.
+  - `SurfaceLightingTables.sourceTransmittance`, a ninth table: the disc's group 2 binding 17, the
+    terrain's 23 (`TERRAIN_LIT_BINDINGS.sourceTable`), the lit-body probe's group 0 binding 13.
+  - `AtmosphereTables.sourceTransmittance()` is built at its first read after each build, as the
+    irradiance is, not once a frame as the brief had it (nothing of a frame enters it):
+    `SOURCE_TRANSMITTANCE_SIZE` 128 × 32 `rgba16float`, a layer a band and light slot, by
+    `SOURCE_TRANSMITTANCE_KERNEL` (in VIEW's fixed set, one more). `perFragmentSourceTransmittance`
+    is its one-texel stub.
+  - The table takes no azimuth (its rays stand at π ÷ 4) and the reference sphere's ground shadow. A
+    body of several bands takes a source within 0.1 of the horizon's cosine per fragment (lean,
+    2026-11-03).
+  - The exact cuts: a star's direct term is formed only where its eclipse and shadow factors leave a
+    channel lit. `--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment` is an
+    option of `--inspection --timing`.
+  - _Pending, the owner's Mac run_: the A/B, its command in the outbox's `gate.txt`.

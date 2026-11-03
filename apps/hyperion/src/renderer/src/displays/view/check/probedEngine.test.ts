@@ -279,6 +279,7 @@ describe("a probed engine's lit probe (R08.T9.b's measurement)", () => {
     ["transmittance-one", "1"],
     ["planetshine-centre", "2"],
     ["no-annuli", "3"],
+    ["per-fragment", "4"],
   ] as const)("makes every lit material and kernel under %s", async (probe, value) => {
     expect(await madeWith(probe)).toEqual([
       ["bodies:disc", value, value],

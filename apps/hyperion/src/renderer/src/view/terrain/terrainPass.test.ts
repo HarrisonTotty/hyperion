@@ -1602,6 +1602,7 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
       "atmosphereBody",
       "atmosphereIrradiance",
       "atmosphereLastAbsorberPressureColumn",
+      "atmosphereSourceTable",
       "atmosphereTransmittance",
       "normals",
       "phaseFactorTable",

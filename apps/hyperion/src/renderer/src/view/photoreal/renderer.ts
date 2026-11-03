@@ -40,6 +40,7 @@ import {
   createAtmosphereFrameKernels,
   geodeticOf,
   HillaireAtmosphere,
+  type SourceTransmittance,
   type SunState,
   tablesFigureOf,
 } from "../atmosphere/hillaire";
@@ -442,12 +443,14 @@ function radPerPx(camera: ProjectionCamera, viewport: Viewport): number {
 
 /**
  * The frame's lit bodies with their atmospheres' tables, through which each one's surface is lit
- * (plan R08, R08.T9.b's `surfaceLighting.wgsl`; R08.T10.b), and their disc tables where the tables
- * hold one (R08.T16.b), by which a body is drawn beyond the 10⁹ m boundary.
+ * (plan R08, R08.T9.b's `surfaceLighting.wgsl`; R08.T10.b), each source's transmittance to it
+ * taken the setting's way (`sourceTransmittance`, R08.T9.b's lever), and their disc tables where
+ * the tables hold one (R08.T16.b), by which a body is drawn beyond the 10⁹ m boundary.
  */
 function withAtmospheres(
   bodies: ReadonlyArray<LitBodyInput>,
   atmospheres: ReadonlyArray<FrameAtmosphere>,
+  sourceTransmittance: SourceTransmittance,
 ): ReadonlyArray<LitBodyInput> {
   if (atmospheres.length === 0) {
     return bodies;
@@ -461,7 +464,7 @@ function withAtmospheres(
     const air = discAirOf(own);
     return {
       ...body,
-      atmosphere: surfaceLightingTablesOf(own),
+      atmosphere: surfaceLightingTablesOf(own, sourceTransmittance),
       ...(air === null ? {} : { air }),
     };
   });
@@ -874,7 +877,11 @@ export class PhotorealRenderer {
     // Each body whose air is drawn lights its surface through it, and is drawn with depth, so that
     // its composite lays the air over its ground (R08.T10.b).
     const atmospheres = frame.atmospheres ?? [];
-    const bodies = withAtmospheres(frame.bodies, atmospheres);
+    const bodies = withAtmospheres(
+      frame.bodies,
+      atmospheres,
+      SETTINGS[frame.setting].atmosphereLevers.sourceTransmittance,
+    );
     const shellRadiiM = new Map(atmospheres.map((each) => [each.id, airShellRadiusM(each.tables)]));
     // A body given its disc table is drawn by it beyond the boundary once the air forms are
     // prepared, their making begun at the first such body (R08.T16.b).

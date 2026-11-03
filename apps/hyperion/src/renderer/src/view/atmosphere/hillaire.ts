@@ -459,6 +459,17 @@ export type ViewMarchCover = Exclude<MarchCover, "whole frame">;
 export type LimbRays = "per-texel" | "packed";
 
 /**
+ * Where a lit pass takes each source's transmittance through the air to a lit point (plan R08,
+ * R08.T9.b's lever): `table`, from a table formed once after each build of the tables by height
+ * and zenith cosine for each latitude band and light slot, each texel the sliced lookup itself
+ * (`AtmosphereTables.sourceTransmittance`, `sourceTransmittance.wgsl`), read bilinearly in its
+ * optical depth; or `per-fragment`, the sliced lookup at each lit fragment, a star's once and a
+ * planetshine source's at each of its three nodes, the way back. The table takes no azimuth: its
+ * rays stand at π ÷ 4 from north, and the ground's shadow is the reference sphere's.
+ */
+export type SourceTransmittance = "table" | "per-fragment";
+
+/**
  * The atmosphere's levers on a setting, `SETTINGS[s].atmosphereLevers` (the owner's priority,
  * 2026-11-01), each with the way back beside it, as R14's `GeometrySettings` keeps its own.
  */
@@ -471,19 +482,25 @@ export interface AtmosphereSettings {
   readonly marchCover: ViewMarchCover;
   /** {@link LimbRays} (R08.T8.d): `packed` on both settings; `per-texel` is the way back. */
   readonly limbRays: LimbRays;
+  /**
+   * {@link SourceTransmittance} (R08.T9.b's lever): `table` on both settings; `per-fragment` is the
+   * way back. The lit passes take it (`photoreal/renderer.ts`); the composite reads none.
+   */
+  readonly sourceTransmittance: SourceTransmittance;
 }
 
 /**
  * The composite with its transmittance behind the sky per pixel, as before the cost levers, its
- * surfaces dimmed per channel (R08.T9.c), and a view's march over the air's area per texel: what an
- * atmosphere drawn outside a view takes (the smoke's checks, the descent spike), unless given its
- * view's.
+ * surfaces dimmed per channel (R08.T9.c), a view's march over the air's area per texel, and each
+ * source's transmittance to a lit point per fragment: what an atmosphere drawn outside a view takes
+ * (the smoke's checks, the descent spike), unless given its view's.
  */
 export const PER_PIXEL_LEVERS: AtmosphereSettings = {
   compositeTransmittance: "per-pixel",
   surfaceTransmittance: "channels",
   marchCover: "area",
   limbRays: "per-texel",
+  sourceTransmittance: "per-fragment",
 };
 
 /**

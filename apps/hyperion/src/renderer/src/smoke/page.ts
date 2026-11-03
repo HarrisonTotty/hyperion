@@ -115,12 +115,14 @@ import {
   checkSurfaceLightingBelowDeck,
   checkSurfaceLightingSaturn,
   checkSurfaceLightingThickEarth,
+  checkSourceTableEarth,
+  checkSourceTableSaturn,
   checkUnreadEarth,
   checkUnreadGiant,
   timeFarLimb,
 } from "./atmosphere";
 import { checkAtmosphereFrame } from "./atmosphereFrame";
-import { checkCellPassEveryRecord } from "./cellPass";
+import { checkCellPassEveryRecord, checkSourceTableFrames } from "./cellPass";
 import { checkDiscAir, checkJupiterDiscAir } from "./discAir";
 import { checkThermalDiscs } from "./thermal";
 import { captureDatum, checkDatumFrame } from "./datumFrame";
@@ -583,6 +585,15 @@ async function run(
   );
   await group(11, "R08.T9.b surface lighting on a Saturn-class figure", () =>
     checkSurfaceLightingSaturn(engine, checks, twins),
+  );
+  await group(11, "R08.T9.b's lever: the sources' table on Earth", () =>
+    checkSourceTableEarth(engine, checks),
+  );
+  await group(11, "R08.T9.b's lever: the sources' table on a Saturn-class figure", () =>
+    checkSourceTableSaturn(engine, checks),
+  );
+  await group(11, "R08.T9.b's lever: bodies drawn with the sources' table", () =>
+    checkSourceTableFrames(engine, checks),
   );
   await group(9, "R08.T8.a the march band", () => checkMarchBand(engine, checks, twins));
   // In part 13 after the thick read's catalogue; the Saturn-class figure's in part 3, for the

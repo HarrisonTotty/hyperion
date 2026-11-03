@@ -8588,6 +8588,187 @@ export async function checkSurfaceLightingSaturn(
   await checkSurfaceLighting(engine, checks, twins, surfaceSaturn());
 }
 
+// --- R08.T9.b's lever: the sources' table ----------------------------------------------------------
+
+/** The share of lit points the sources' table holds within 1/3 stop (the lever's acceptance). */
+const SOURCE_TABLE_HELD_SHARE = 0.995;
+
+/**
+ * The sources' table's points on one body (R08.T9.b's lever): a star's transmittance at its
+ * heights, seven latitudes, six azimuths all round and 21 zenith cosines crowded towards the
+ * horizon and 2° below it, at each light slot the body's tables hold (two at most); and a wide
+ * source's at four cosines and two angular radii, slot 0's.
+ */
+function sourceTableCases(heightsM: ReadonlyArray<number>, slots: number): LightingProbeCase[] {
+  const latitudes = [0, 15, 35, 50, 60, 75, 89].map((deg) => deg * DEGREE_RAD);
+  const azimuths = [0, 45, 90, 150, 210, 300].map((deg) => deg * DEGREE_RAD);
+  const cosines = [
+    1, 0.8, 0.6, 0.4, 0.3, 0.2, 0.15, 0.1, 0.07, 0.05, 0.03, 0.02, 0.01, 0.005, 0.002, 0, -0.002,
+    -0.005, -0.01, -0.02, -0.035,
+  ];
+  const cases: LightingProbeCase[] = [];
+  for (const altitudeM of heightsM) {
+    for (const latitudeRad of latitudes) {
+      for (const azimuthRad of azimuths) {
+        for (const mu of cosines) {
+          for (let curve = 0; curve < Math.min(slots, 2); curve += 1) {
+            cases.push({
+              kind: "atmosphere",
+              lookup: "sun",
+              altitudeM,
+              mu,
+              latitudeRad,
+              azimuthRad,
+              angularRadiusRad: 0,
+              curve,
+            });
+          }
+        }
+        for (const mu of [0.6, 0.1, 0.03, 0.01]) {
+          for (const angularRadiusRad of [0.05, 9.8 * DEGREE_RAD]) {
+            cases.push({
+              kind: "atmosphere",
+              lookup: "source",
+              altitudeM,
+              mu,
+              latitudeRad,
+              azimuthRad,
+              angularRadiusRad,
+              curve: 0,
+            });
+          }
+        }
+      }
+    }
+  }
+  return cases;
+}
+
+/**
+ * How the sources' table's reads stand against the lookups per fragment: the lit points (where
+ * either way leaves light in some channel), the share of them within 1/3 stop in every channel (a
+ * channel both ways leave dark agreeing), and the worst ratio, in stops, with its point.
+ */
+function sourceTableAgreement(
+  perFragment: Float32Array,
+  table: Float32Array,
+  cases: ReadonlyArray<LightingProbeCase>,
+): {
+  readonly lit: number;
+  readonly held: number;
+  readonly worstStops: number;
+  readonly at: string;
+  readonly missed: string;
+} {
+  let lit = 0;
+  let held = 0;
+  let worstStops = 0;
+  let at = "none";
+  const misses = new Map<string, number>();
+  const missedAt = (key: string): void => {
+    misses.set(key, (misses.get(key) ?? 0) + 1);
+  };
+  cases.forEach((probe, i) => {
+    const want = [0, 1, 2].map((c) => perFragment[i * 4 + c] ?? Number.NaN);
+    const got = [0, 1, 2].map((c) => table[i * 4 + c] ?? Number.NaN);
+    if (!want.some((value) => value > 0) && !got.some((value) => value > 0)) {
+      return;
+    }
+    lit += 1;
+    let stops = 0;
+    for (const c of [0, 1, 2]) {
+      const w = want[c] ?? Number.NaN;
+      const g = got[c] ?? Number.NaN;
+      if (w === 0 && g === 0) {
+        continue;
+      }
+      const ratio = g / w;
+      stops = Math.max(
+        stops,
+        ratio > 0 && Number.isFinite(ratio) ? Math.abs(Math.log2(ratio)) : Number.POSITIVE_INFINITY,
+      );
+    }
+    if (stops <= 1 / 3) {
+      held += 1;
+    } else if (probe.kind === "atmosphere") {
+      missedAt(`${probe.lookup} μ ${String(probe.mu)}`);
+      missedAt(`${probe.lookup} ${String(probe.altitudeM)} m`);
+      missedAt(`${probe.lookup} ${(probe.latitudeRad / DEGREE_RAD).toFixed(0)}°`);
+      missedAt(`${probe.lookup} azimuth ${(probe.azimuthRad / DEGREE_RAD).toFixed(0)}°`);
+    }
+    if (stops > worstStops) {
+      worstStops = stops;
+      const p = probe.kind === "atmosphere" ? probe : null;
+      at =
+        p === null
+          ? `point ${String(i)}`
+          : `the ${p.lookup} at ${String(p.altitudeM)} m, latitude ${(p.latitudeRad / DEGREE_RAD).toFixed(0)}°, azimuth ${(p.azimuthRad / DEGREE_RAD).toFixed(0)}°, μ ${String(p.mu)}, slot ${String(p.curve)}: ${got.map((v) => v.toPrecision(4)).join(", ")} against ${want.map((v) => v.toPrecision(4)).join(", ")}`;
+    }
+  });
+  const missed = [...misses.entries()].map(([key, count]) => `${key} ${String(count)}`).join(", ");
+  return { lit, held, worstStops, at, missed };
+}
+
+/**
+ * R08.T9.b's lever on one body: `surfaceLighting.wgsl`'s star and wide-source lookups through the
+ * lit-body probe with the body's stored tables bound, the sources' table bound
+ * (`AtmosphereSettings.sourceTransmittance`'s `table`) against its stub (`per-fragment`, the sliced
+ * lookup), at {@link sourceTableCases}' points; at least {@link SOURCE_TABLE_HELD_SHARE} of the lit
+ * points within 1/3 stop in every channel.
+ */
+async function checkSourceTable(
+  engine: RenderEngine,
+  checks: Checks,
+  surface: SurfaceBody,
+  heightsM: ReadonlyArray<number>,
+): Promise<void> {
+  const tables = new AtmosphereTables(
+    engine,
+    surface.medium,
+    tableRadiusM(surface.body.figure),
+    surface.curves,
+    surface.body,
+  );
+  try {
+    const cases = sourceTableCases(heightsM, tables.layersPerBand);
+    const perFragment = await probeSurfaceLighting(engine, cases, surfaceLightingTablesOf(tables));
+    const table = await probeSurfaceLighting(
+      engine,
+      cases,
+      surfaceLightingTablesOf(tables, "table"),
+    );
+    const { lit, held, worstStops, at, missed } = sourceTableAgreement(perFragment, table, cases);
+    const share = lit > 0 ? held / lit : 0;
+    checks.check(
+      `R08.T9.b's lever on ${surface.name}: the sources' table's reads within 1/3 stop of the lookups per fragment at ${String(SOURCE_TABLE_HELD_SHARE * 100)}% or more of the lit points`,
+      lit > 0 && share >= SOURCE_TABLE_HELD_SHARE,
+      `${String(held)} of ${String(lit)} lit points of ${String(cases.length)} (${(share * 100).toFixed(2)}%) within 1/3 stop; worst ${worstStops.toFixed(3)} stops, ${at}; the misses by cosine, height, latitude and azimuth: ${missed}`,
+    );
+  } finally {
+    tables.dispose();
+  }
+}
+
+/** R08.T9.b's lever on Earth ({@link surfaceEarth}; `checkSourceTable`), to 30 km. */
+export async function checkSourceTableEarth(engine: RenderEngine, checks: Checks): Promise<void> {
+  await checkSourceTable(
+    engine,
+    checks,
+    surfaceEarth(),
+    [0, 50, 300, 1_000, 2_000, 5_000, 10_000, 30_000],
+  );
+}
+
+/** R08.T9.b's lever on the Saturn-class figure ({@link surfaceSaturn}; `checkSourceTable`). */
+export async function checkSourceTableSaturn(engine: RenderEngine, checks: Checks): Promise<void> {
+  await checkSourceTable(
+    engine,
+    checks,
+    surfaceSaturn(),
+    [0, 1_000, 10_000, 50_000, 150_000, 300_000],
+  );
+}
+
 // --- R05.T12.c: the comparison captures ----------------------------------------------------------
 
 /** One image the page hands the harness's main process to save, as `result.ts`'s `SmokeImage`. */

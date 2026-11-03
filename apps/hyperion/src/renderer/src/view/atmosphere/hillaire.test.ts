@@ -3037,7 +3037,7 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
     ]);
   });
 
-  it("takes the setting's levers in every view: the march's resolution, the channels, and the march's cover and limb rays on both (R08.T8.d)", () => {
+  it("takes the setting's levers in every view: the march's resolution, the channels, the march's cover and limb rays, and the sources' table on both (R08.T8.d, R08.T9.b)", () => {
     expect([SETTINGS.high.atmosphereLevers, SETTINGS.low.atmosphereLevers]).toEqual([
       ATMOSPHERE_SETTINGS.high,
       ATMOSPHERE_SETTINGS.low,
@@ -3048,12 +3048,14 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
         surfaceTransmittance: "channels",
         marchCover: "area",
         limbRays: "packed",
+        sourceTransmittance: "table",
       },
       low: {
         compositeTransmittance: "march",
         surfaceTransmittance: "channels",
         marchCover: "area",
         limbRays: "packed",
+        sourceTransmittance: "table",
       },
     });
   });

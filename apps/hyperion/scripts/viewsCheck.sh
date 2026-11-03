@@ -16,7 +16,7 @@
 #                    [--timing [--composite-probe sky-off|transmittance-off|per-pixel|surface-grey]
 #                              [--count-gpu-calls] [--march-probe centre]
 #                              [--march-cover area|tiles] [--limb-rays per-texel|packed]
-#                              [--lit-probe transmittance-one|planetshine-centre|no-annuli]]]
+#                              [--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment]]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --geometry, passed to the client, draws VIEW's terrain with those fields of its geometry over the
@@ -132,9 +132,10 @@
 # files end -cover-<cover> and -limb-<rays>.
 # --lit-probe (plan R08, R08.T9.b's measurement) makes that profile's lit materials and kernels
 # with every source's transmittance through the air 1 (transmittance-one), with a planetshine
-# source's at its disc's centre node alone (planetshine-centre), or with the eclipse term's annuli
-# none (no-annuli), the A/B of the lit fragment's cost; its files end -lit-<probe>, and their
-# pictures are not a player's.
+# source's at its disc's centre node alone (planetshine-centre), with the eclipse term's annuli
+# none (no-annuli), or with each source's transmittance per fragment whatever the setting's
+# sources' table, the lever's way back (per-fragment), the A/B of the lit fragment's cost; its
+# files end -lit-<probe>, and the first three's pictures are not a player's.
 #
 # --device-pixel-ratio <N> draws a hidden run's page at a device-pixel ratio of N, 1 to 3, as a HiDPI
 # display does (the owner's Retina report, 2026-11-01): its offscreen window N times the setting's

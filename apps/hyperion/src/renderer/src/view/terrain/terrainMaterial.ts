@@ -140,6 +140,8 @@ export const TERRAIN_LIT_BINDINGS = {
   belowDeck: 21,
   /** The cluster path's bucket lists, which its terrain vertex stage reads (plan R14, R14.T1.b). */
   clusterLists: 22,
+  /** The sources' transmittance table, R08's surface lighting's ninth (R08.T9.b's lever). */
+  sourceTable: 23,
 } as const;
 
 /**
@@ -246,7 +248,7 @@ export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpe
     textures: [
       { name: "normals", binding: b.normals, viewDimension: "2d-array" },
       { name: "phaseFactorTable", binding: b.phaseFactorTable, sampleType: "unfilterable-float" },
-      ...surfaceLightingTextures(b.atmosphere, b.belowDeck),
+      ...surfaceLightingTextures(b.atmosphere, b.belowDeck, b.sourceTable),
       {
         name: SHADOW_CASCADES_TEXTURE,
         binding: b.shadowCascades,

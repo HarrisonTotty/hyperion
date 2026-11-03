@@ -13,7 +13,11 @@
 //   - `atmosphere_irradiance : texture_2d_array<f32>`, the sky's irradiance, one layer a latitude
 //     band and light slot (`irradiance.wgsl`);
 //   - `atmosphere_below_deck : texture_2d_array<f32>`, the table below a cloud deck over a surface
-//     (plan R08, R08.T15.b.2; `belowDeck.wgsl`), or a one-texel stub where the body has none.
+//     (plan R08, R08.T15.b.2; `belowDeck.wgsl`), or a one-texel stub where the body has none;
+//   - `atmosphere_source_table : texture_2d_array<f32>`, the sources' transmittance by height and
+//     cosine, one layer a latitude band and light slot (`sourceTransmittance.wgsl`; R08.T9.b's
+//     lever, `AtmosphereSettings.sourceTransmittance`'s `table`), or a one-texel stub, through
+//     which each source's transmittance is the sliced lookup per fragment, as before the lever.
 // A body without an atmosphere binds one-texel tables of zeros, whose body table's a of 0 says so:
 // the sun's transmittance is then 1 and the sky's irradiance 0, as R07's stubs were.
 //
@@ -54,8 +58,10 @@ const SOURCE_AT_ZENITH : f32 = 1e-6;
 // The inspection profile's probe of the lit passes' cost (`surfaceLighting.ts`' `litProbedWgsl`,
 // R08.T9.b's measurement): 0, the lookups as drawn, on every launch but a `--lit-probe` profile's,
 // whose materials and kernels set 1, every source's transmittance 1 with no lookup; 2, a
-// planetshine source's at its centre node alone; or 3, the eclipse term with no annuli
-// (`bodyDisc.wgsl`'s and `terrainLit.wgsl`'s), every star unhidden. Never a player's picture.
+// planetshine source's at its centre node alone; 3, the eclipse term with no annuli
+// (`bodyDisc.wgsl`'s and `terrainLit.wgsl`'s), every star unhidden; or 4, each source's
+// transmittance per fragment though the sources' table is bound (`atmosphereTabled`), the lever's
+// way back in the same build. Never a player's picture but under 4, the way back's.
 const LIT_PROBE : u32 = 0u;
 
 // Whether the bound body has an atmosphere: a body table whose equatorial radius is above 0.
@@ -142,13 +148,9 @@ fn atmosphereSlot(body : OblateBody, curve : u32) -> u32 {
   return min(curve, oblateLayersPerBand(body) - 1u);
 }
 
-// The transmittance from the lit point to space along the unit `d` under light slot `curve`'s
-// curves of growth, exponentiated in f32; 0 where the ground hides space.
-fn atmosphereTransmittanceAlong(body : OblateBody, place : SurfacePlace, d : vec3f, curve : u32) -> vec3f {
-  let ray = slicedRayOf(body, atmosphere_body, place.start, d);
-  if (ray.shadowed) {
-    return vec3f(0.0);
-  }
+// The optical depth along a sliced ray to space under light slot `curve`'s curves of growth: its
+// stored depth over s and the absorbers' by the curves, whether or not the ground hides space.
+fn atmosphereDepthOf(body : OblateBody, ray : SlicedRay, curve : u32) -> vec3f {
   let absorbers = oblateAbsorbersOf(atmosphere_body);
   let stored = slicedStoredOf(
     ray, body, atmosphere_body, atmosphere_transmittance, atmosphere_absorber_columns,
@@ -158,14 +160,77 @@ fn atmosphereTransmittanceAlong(body : OblateBody, place : SurfacePlace, d : vec
     atmosphere_absorber_curves, absorbers.x, atmosphereSlot(body, curve), absorbers.y,
     stored.columns, stored.pressureColumns
   );
-  return exp(-(stored.depth + absorbed));
+  return stored.depth + absorbed;
+}
+
+// The transmittance from the lit point to space along the unit `d` under light slot `curve`'s
+// curves of growth, exponentiated in f32; 0 where the ground hides space.
+fn atmosphereTransmittanceAlong(body : OblateBody, place : SurfacePlace, d : vec3f, curve : u32) -> vec3f {
+  let ray = slicedRayOf(body, atmosphere_body, place.start, d);
+  if (ray.shadowed) {
+    return vec3f(0.0);
+  }
+  return exp(-atmosphereDepthOf(body, ray, curve));
+}
+
+// Whether the bound sources' table holds the transmittance (R08.T9.b's lever): any table but the
+// one-texel stub, through which each lookup is the sliced lookup per fragment, as under the lit
+// probe's `per-fragment` form.
+fn atmosphereTabled() -> bool {
+  return LIT_PROBE != 4u && textureDimensions(atmosphere_source_table).x > 1u;
+}
+
+// Within this of the horizon's zenith cosine a body of several bands takes a source's transmittance
+// per fragment, though its table is bound (lean, 2026-11-03): the table's rays stand at one azimuth
+// (`sourceTransmittance.wgsl`), and on the Saturn-class figure (5 slices, 4 bands) its reads missed
+// 1/3 stop at 581 of 6,890 lit points, every one within 0.05 of the horizon, the azimuth's split
+// of a grazing path across the bands the most of it; on Earth's one band it held 99.96% of them.
+const SOURCE_TABLE_HORIZON_COSINE : f32 = 0.1;
+
+// Whether a source at zenith cosine `mu` from h* `scaled_height_m` takes the bound sources' table:
+// on a body of one band always, on one of several unless it lies within
+// SOURCE_TABLE_HORIZON_COSINE of the horizon of the reference sphere R_ref.
+fn atmosphereTableHolds(body : OblateBody, scaled_height_m : f32, mu : f32) -> bool {
+  if (oblateBandCount(body) == 1u) {
+    return true;
+  }
+  let bottom = body.figure.z;
+  let z = max(scaled_height_m, 0.0);
+  let horizon = -sqrt(shellAboveGround(bottom, z)) / (bottom + z);
+  return mu - horizon >= SOURCE_TABLE_HORIZON_COSINE;
+}
+
+// A source's transmittance from the bound sources' table (`sourceTransmittance.wgsl`): its optical
+// depth at the point's h* = s h above the tables' datum (`above_deck_m`, held to [0, top]) and the
+// source's cosine `mu` on the reference sphere's axes, linear in ln s between the bands about the
+// point's s as the sky's irradiance is (`bandTableAt`), at light slot `curve`, exponentiated in f32;
+// 0 where the reference sphere's ground hides the source.
+fn atmosphereTabledTransmittance(
+  body : OblateBody,
+  s : f32,
+  above_deck_m : f32,
+  mu : f32,
+  curve : u32,
+) -> vec3f {
+  let bottom = body.figure.z;
+  let top = body.counts.w;
+  let z = clamp(s * above_deck_m, 0.0, top);
+  if (groundHitFromHeight(bottom, z, mu)) {
+    return vec3f(0.0);
+  }
+  let unit = transmittanceUnitAt(bottom, top, z, clamp(mu, -1.0, 1.0));
+  return exp(-bandTableAt(
+    body, atmosphere_body, atmosphere_source_table, unit, s, atmosphereSlot(body, curve)
+  ));
 }
 
 // A source's transmittance from a lit point `altitude_m` above the datum at geodetic latitude
 // `latitude_rad`, the source at zenith cosine `mu_sun` against the datum's normal and azimuth
 // `sun_azimuth_rad` from local north towards east, under light slot `curve`'s curves of growth: the
-// sliced lookup along the source's centre (a star's disc is under about 1°; Design note 7), 0 where
-// the ground hides it; 1 with no atmosphere.
+// sliced lookup along the source's centre (a star's disc is under about 1°; Design note 7), or the
+// sources' table where one is bound (`atmosphereTabledTransmittance`), 0 where the ground hides it;
+// 1 with no atmosphere. Each way is a loop of at most one pass, not an `if`, as the composite's
+// reads are (`composite.wgsl`): SwiftShader runs both sides of a branch under its lanes' mask.
 fn atmosphere_sun_transmittance(
   altitude_m : f32,
   mu_sun : f32,
@@ -183,10 +248,19 @@ fn atmosphere_sun_transmittance(
       atmosphere_below_deck, body, atmosphere_body, below.y, below.x, mu_sun, curve
     ).sun;
   }
-  let place = atmosphereSurfacePlace(body, atmosphereAboveDeck(altitude_m, below.y), latitude_rad);
-  return atmosphereTransmittanceAlong(
-    body, place, atmosphereDirection(place, mu_sun, sun_azimuth_rad), curve
-  );
+  let aboveDeck = atmosphereAboveDeck(altitude_m, below.y);
+  let tabled = atmosphereTabled() && atmosphereTableHolds(body, below.y * aboveDeck, mu_sun);
+  var transmitted = vec3f(0.0);
+  for (var read = tabled; read; read = false) {
+    transmitted = atmosphereTabledTransmittance(body, below.y, aboveDeck, mu_sun, curve);
+  }
+  for (var direct = !tabled; direct; direct = false) {
+    let place = atmosphereSurfacePlace(body, aboveDeck, latitude_rad);
+    transmitted = atmosphereTransmittanceAlong(
+      body, place, atmosphereDirection(place, mu_sun, sun_azimuth_rad), curve
+    );
+  }
+  return transmitted;
 }
 
 // The sky's diffuse irradiance on a horizontal surface `altitude_m` above the datum at geodetic
@@ -225,10 +299,10 @@ fn atmosphere_sky_irradiance(
 // kind over its disc of angular radius `angular_radius_rad`, three nodes along the disc's vertical
 // diameter, at the centre and ±(√2 ÷ 2) ρ from it in zenith angle, weighted ¼, ½ and ¼ times each
 // node's zenith cosine, exact for a uniform disc to degree 5; each node the sliced lookup along it,
-// a node below the local horizon dropped. It is the irradiance-weighted mean transmittance of the
-// disc's part above the horizon, Σ w μ T ÷ Σ w μ, which multiplies the caller's own irradiance
-// factor of the source, and the centre's lookup as ρ → 0. 0 where no node is up; 1 with no
-// atmosphere.
+// a node below the local horizon dropped, or each from the sources' table where one is bound. It is
+// the irradiance-weighted mean transmittance of the disc's part above the horizon, Σ w μ T ÷ Σ w μ,
+// which multiplies the caller's own irradiance factor of the source, and the centre's lookup as
+// ρ → 0. 0 where no node is up; 1 with no atmosphere.
 fn atmosphere_source_transmittance(
   altitude_m : f32,
   mu_centre : f32,
@@ -242,7 +316,9 @@ fn atmosphere_source_transmittance(
     return vec3f(1.0);
   }
   let below = atmosphereBelowDeckPlace(body, altitude_m, latitude_rad);
-  let place = atmosphereSurfacePlace(body, atmosphereAboveDeck(altitude_m, below.y), latitude_rad);
+  let aboveDeck = atmosphereAboveDeck(altitude_m, below.y);
+  let place = atmosphereSurfacePlace(body, aboveDeck, latitude_rad);
+  let tabled = atmosphereTabled();
   let centre = atmosphereDirection(place, mu_centre, azimuth_rad);
   let n = place.start.normal;
   // The disc's vertical diameter: the unit direction across the centre towards the zenith.
@@ -273,7 +349,15 @@ fn atmosphere_source_transmittance(
         atmosphere_below_deck, body, atmosphere_body, below.y, below.x, mu, curve
       ).sun;
     } else {
-      sum += w * atmosphereTransmittanceAlong(body, place, nodes[k], curve);
+      var transmitted = vec3f(0.0);
+      let held = tabled && atmosphereTableHolds(body, below.y * aboveDeck, mu);
+      for (var read = held; read; read = false) {
+        transmitted = atmosphereTabledTransmittance(body, below.y, aboveDeck, mu, curve);
+      }
+      for (var direct = !held; direct; direct = false) {
+        transmitted = atmosphereTransmittanceAlong(body, place, nodes[k], curve);
+      }
+      sum += w * transmitted;
     }
     total += w;
   }

@@ -1212,10 +1212,12 @@ export interface AtmosphereLeversOverride {
  * A probe of the lit passes for the inspection run's frame profile (plan R08, R08.T9.b's
  * measurement): `transmittance-one` takes every source's transmittance through the air as 1, with
  * no lookup; `planetshine-centre` takes a planetshine source's at its disc's centre node alone, one
- * lookup in place of three; `no-annuli` forms the eclipse term with no annuli, every star unhidden.
- * Each is a measurement's picture, never a player's.
+ * lookup in place of three; `no-annuli` forms the eclipse term with no annuli, every star unhidden;
+ * `per-fragment` takes each source's transmittance per fragment whatever the setting's sources'
+ * table, the lever's way back. Each but the last is a measurement's picture, never a player's.
  */
-export type LitProbeName = "transmittance-one" | "planetshine-centre" | "no-annuli";
+export type LitProbeName =
+  "transmittance-one" | "planetshine-centre" | "no-annuli" | "per-fragment";
 
 /**
  * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s

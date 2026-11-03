@@ -133,11 +133,14 @@ interface CellCase {
   readonly twin: boolean;
 }
 
-/** A case's plan: its bodies lit by a Sun 1 au away, 80° off the line of sight, a gibbous phase. */
-function planOf(item: CellCase): BodyFramePlan {
+/**
+ * A case's plan: its bodies lit by a Sun 1 au away, `sunDeg` off the line of sight (80° by default,
+ * a gibbous phase).
+ */
+function planOf(item: CellCase, sunDeg = 80): BodyFramePlan {
   const { viewport } = item;
   const pxPerRad = viewport.widthPx / (2 * Math.tan(CAMERA.fovXRad / 2));
-  const towards = vec3(Math.sin(80 * RAD_PER_DEG), 0, Math.cos(80 * RAD_PER_DEG));
+  const towards = vec3(Math.sin(sunDeg * RAD_PER_DEG), 0, Math.cos(sunDeg * RAD_PER_DEG));
   const bodies = item.bodies.map((spec): LitBodyInput => {
     const distanceM = EARTH.equatorialRadiusM / Math.sin(spec.diameterPx / 2 / pxPerRad);
     const [rightPx, downPx] = spec.offsetPx;
@@ -576,5 +579,124 @@ export async function checkCellPassEveryRecord(
     if (weights !== null) {
       engine.releaseTexture(weights.weights);
     }
+  }
+}
+
+/** The share of a frame's lit pixels the sources' table holds within 1/3 stop (R08.T9.b's lever). */
+const SOURCE_TABLE_HELD_SHARE = 0.995;
+
+/**
+ * R08.T9.b's lever on drawn bodies: R05's Earth's air on a 13 px disc, a 96 px mesh body and a
+ * 220 px disc, each at a gibbous (80°), a quarter (90°) and a crescent (150°) phase of the Sun,
+ * drawn in-fragment with the sources' table bound (`AtmosphereSettings.sourceTransmittance`'s
+ * `table`) and with its stub (`per-fragment`); at least {@link SOURCE_TABLE_HELD_SHARE} of the
+ * pixels either draw's meter class says the Sun lights within 1/3 stop in every channel (a channel
+ * both leave dark agreeing), the classes equal.
+ */
+export async function checkSourceTableFrames(engine: RenderEngine, checks: Checks): Promise<void> {
+  const kept = keepingSums(engine);
+  const renderer = new LitBodyRenderer(kept.engine, WIREFRAME_MATERIALS.starSprite);
+  let tables: AtmosphereTables | null = null;
+  try {
+    tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_MEAN_RADIUS_M);
+    const kernel = await engine.createComputeAsync(BODY_DISC_CELLS_KERNEL);
+    const ways = {
+      perFragment: surfaceLightingTablesOf(tables),
+      table: surfaceLightingTablesOf(tables, "table"),
+    };
+    const casesWith = (atmosphere: SurfaceLightingTables): ReadonlyArray<CellCase> => [
+      {
+        name: "a 13 px air body as a disc",
+        viewport: { widthPx: 48, heightPx: 48 },
+        bodies: one({ diameterPx: 13, atmosphere, mesh: false, samples: [4, 4] }),
+        twin: false,
+      },
+      {
+        name: "a 96 px air body in the mesh regime",
+        viewport: { widthPx: 128, heightPx: 112 },
+        bodies: one({ diameterPx: 96, atmosphere, mesh: true, samples: [1, 4] }),
+        twin: false,
+      },
+      {
+        name: "a 220 px air body as a disc",
+        viewport: { widthPx: 256, heightPx: 256 },
+        bodies: one({ diameterPx: 220, atmosphere, mesh: false, samples: [1, 4] }),
+        twin: false,
+      },
+    ];
+    const perFragmentCases = casesWith(ways.perFragment);
+    const tableCases = casesWith(ways.table);
+    let lit = 0;
+    let held = 0;
+    let classes = true;
+    let worstStops = 0;
+    const results: string[] = [];
+    for (const [i, item] of perFragmentCases.entries()) {
+      const tabled = tableCases[i];
+      if (tabled === undefined) {
+        throw new Error("each case is drawn both ways");
+      }
+      for (const sunDeg of [80, 90, 120, 150]) {
+        const draw = (drawn: CellCase) =>
+          drawPlan(
+            engine,
+            renderer,
+            kept.sums,
+            planOf(drawn, sunDeg),
+            drawn.viewport,
+            kernel,
+            "in-fragment",
+          );
+        // The harness reads its targets back in order.
+        // oxlint-disable-next-line no-await-in-loop
+        const want = halfTexels((await draw(item)).bytes);
+        // oxlint-disable-next-line no-await-in-loop
+        const got = halfTexels((await draw(tabled)).bytes);
+        let caseLit = 0;
+        let caseHeld = 0;
+        for (let at = 0; at < want.length; at += 4) {
+          const wantClass = want[at + 3];
+          const gotClass = got[at + 3];
+          classes &&= wantClass === gotClass;
+          if (wantClass !== METER_CLASS.litBody && gotClass !== METER_CLASS.litBody) {
+            continue;
+          }
+          caseLit += 1;
+          let stops = 0;
+          for (const c of [0, 1, 2]) {
+            const w = want[at + c] ?? Number.NaN;
+            const g = got[at + c] ?? Number.NaN;
+            if (w === 0 && g === 0) {
+              continue;
+            }
+            const ratio = g / w;
+            stops = Math.max(
+              stops,
+              ratio > 0 && Number.isFinite(ratio)
+                ? Math.abs(Math.log2(ratio))
+                : Number.POSITIVE_INFINITY,
+            );
+          }
+          worstStops = Math.max(worstStops, stops);
+          if (stops <= 1 / 3) {
+            caseHeld += 1;
+          }
+        }
+        lit += caseLit;
+        held += caseHeld;
+        results.push(
+          `${item.name} at ${String(sunDeg)}°: ${String(caseHeld)} of ${String(caseLit)} lit pixels`,
+        );
+      }
+    }
+    const share = lit > 0 ? held / lit : 0;
+    checks.check(
+      `R08.T9.b's lever: bodies drawn with the sources' table within 1/3 stop of their draws per fragment on ${String(SOURCE_TABLE_HELD_SHARE * 100)}% or more of their lit pixels, their classes equal`,
+      lit > 0 && share >= SOURCE_TABLE_HELD_SHARE && classes,
+      `${String(held)} of ${String(lit)} lit pixels (${(share * 100).toFixed(2)}%) within 1/3 stop, worst ${worstStops.toFixed(3)} stops; classes equal ${String(classes)}; ${results.join("; ")}`,
+    );
+  } finally {
+    renderer.dispose();
+    tables?.dispose();
   }
 }

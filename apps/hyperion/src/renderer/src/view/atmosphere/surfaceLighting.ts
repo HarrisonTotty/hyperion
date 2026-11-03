@@ -21,6 +21,7 @@ import commonWgsl from "./shaders/common.wgsl?raw";
 import belowDeckWgsl from "./shaders/belowDeck.wgsl?raw";
 import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import surfaceLightingWgsl from "./shaders/surfaceLighting.wgsl?raw";
+import type { SourceTransmittance } from "./hillaire";
 import type { AtmosphereTables } from "./tables";
 
 /**
@@ -34,19 +35,22 @@ export const SURFACE_LIGHTING_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${oblat
 /**
  * A views check's probe of the lit passes' cost (R08.T9.b's measurement): `transmittance-one`,
  * every source's transmittance through the air 1, with no lookup; `planetshine-centre`, a
- * planetshine source's at its disc's centre node alone, one lookup in place of three; or
- * `no-annuli`, the eclipse term with no annuli, every star unhidden. It is check-only: an
- * inspection profile's `--lit-probe`, never drawn on a player's launch.
+ * planetshine source's at its disc's centre node alone, one lookup in place of three;
+ * `no-annuli`, the eclipse term with no annuli, every star unhidden; or `per-fragment`, each
+ * source's transmittance per fragment whatever the setting's `AtmosphereSettings.sourceTransmittance`
+ * (the sources' table built and bound all the same), the lever's way back, so that one build's
+ * profiles tell the table's saving apart. It is check-only: an inspection profile's `--lit-probe`,
+ * never drawn on a player's launch.
  */
-export type LitProbe = "transmittance-one" | "planetshine-centre" | "no-annuli";
+export type LitProbe = "transmittance-one" | "planetshine-centre" | "no-annuli" | "per-fragment";
 
 /** The line of `surfaceLighting.wgsl` a probe's module replaces. */
 const LIT_PROBE_LINE = "const LIT_PROBE : u32 = 0u;";
 
 /**
  * `wgsl` under `probe`: `surfaceLighting.wgsl`'s `LIT_PROBE` set, 1 for `transmittance-one`, 2 for
- * `planetshine-centre` and 3 for `no-annuli`, where `wgsl` composes {@link SURFACE_LIGHTING_WGSL};
- * any other module as it is.
+ * `planetshine-centre`, 3 for `no-annuli` and 4 for `per-fragment`, where `wgsl` composes
+ * {@link SURFACE_LIGHTING_WGSL}; any other module as it is.
  */
 export function litProbedWgsl(wgsl: string, probe: LitProbe): string {
   let value: number;
@@ -59,6 +63,9 @@ export function litProbedWgsl(wgsl: string, probe: LitProbe): string {
       break;
     case "no-annuli":
       value = 3;
+      break;
+    case "per-fragment":
+      value = 4;
       break;
   }
   return wgsl.replace(LIT_PROBE_LINE, `const LIT_PROBE : u32 = ${String(value)}u;`);
@@ -82,16 +89,30 @@ export interface SurfaceLightingTables {
    * `belowDeckLighting`), or a one-texel stub, which the lookups read as no deck.
    */
   readonly belowDeck: TextureHandle;
+  /**
+   * The sources' transmittance by height and cosine, one layer a band and light slot
+   * (`AtmosphereTables.sourceTransmittance`; R08.T9.b's lever, {@link SourceTransmittance}'s
+   * `table`), or a one-texel stub, through which each source's lookup is the sliced lookup per
+   * fragment.
+   */
+  readonly sourceTransmittance: TextureHandle;
 }
 
 /**
  * A planet's tables as a lit pass binds them, the sky's irradiance built if the tables' last build
- * has not built it (`AtmosphereTables.irradiance`). A device restore makes them anew, so a caller
- * takes them each frame rather than keeping them (`AtmosphereTables`' remarks).
+ * has not built it (`AtmosphereTables.irradiance`), and the sources' transmittance likewise where
+ * `sourceTransmittance` is `table` (R08.T9.b's lever), else its one-texel stub. A device restore
+ * makes them anew, so a caller takes them each frame rather than keeping them (`AtmosphereTables`'
+ * remarks).
  *
- * @throws `EngineUnavailable` when the irradiance has to be built while the engine has no device.
+ * @param sourceTransmittance - The lever's way: `per-fragment` by default, as every lit pass took
+ *   it before the lever, so that a reader outside a view (the smoke's) draws as before.
+ * @throws `EngineUnavailable` when a table has to be built while the engine has no device.
  */
-export function surfaceLightingTablesOf(tables: AtmosphereTables): SurfaceLightingTables {
+export function surfaceLightingTablesOf(
+  tables: AtmosphereTables,
+  sourceTransmittance: SourceTransmittance = "per-fragment",
+): SurfaceLightingTables {
   return {
     body: tables.oblateBody,
     transmittance: tables.transmittance,
@@ -101,6 +122,10 @@ export function surfaceLightingTablesOf(tables: AtmosphereTables): SurfaceLighti
     absorberCurves: tables.absorberCurves,
     irradiance: tables.irradiance(),
     belowDeck: tables.belowDeckLighting,
+    sourceTransmittance:
+      sourceTransmittance === "table"
+        ? tables.sourceTransmittance()
+        : tables.perFragmentSourceTransmittance,
   };
 }
 
@@ -135,6 +160,11 @@ const NAMES: Readonly<
   },
   irradiance: { draw: "atmosphereIrradiance", wgsl: "atmosphere_irradiance", array: true },
   belowDeck: { draw: "atmosphereBelowDeck", wgsl: "atmosphere_below_deck", array: true },
+  sourceTransmittance: {
+    draw: "atmosphereSourceTable",
+    wgsl: "atmosphere_source_table",
+    array: true,
+  },
 };
 
 /** The tables in the order their bindings take. */
@@ -147,27 +177,40 @@ const ORDER: ReadonlyArray<keyof SurfaceLightingTables> = [
   "absorberCurves",
   "irradiance",
   "belowDeck",
+  "sourceTransmittance",
 ];
 
-/** How many bindings the tables take: eight, the table below a deck's since R08.T15.b.2. */
+/**
+ * How many bindings the tables take: nine, the table below a deck's since R08.T15.b.2 and the
+ * sources' table's since R08.T9.b's lever.
+ */
 export const SURFACE_LIGHTING_BINDINGS = ORDER.length;
 
 /**
  * The tables' entries in a material's layout from binding `first` on, in
  * `surfaceLighting.wgsl`'s order (the body's table, the four transmittance tables, the curves, the
- * irradiance), and the table below a deck (R08.T15.b.2) at `belowDeckBinding`, each read by
- * `textureLoad`, so `unfilterable-float`, the arrays `2d-array`.
+ * irradiance), the table below a deck (R08.T15.b.2) at `belowDeckBinding` and the sources' table
+ * (R08.T9.b's lever) at `sourceTableBinding`, each read by `textureLoad`, so `unfilterable-float`,
+ * the arrays `2d-array`.
  *
  * @param belowDeckBinding - The table below a deck's binding: the next after the seven by default,
  *   or a pass's own where that one is taken.
+ * @param sourceTableBinding - The sources' table's binding: the next after the table below a deck's
+ *   by default, or a pass's own where that one is taken.
  */
 export function surfaceLightingTextures(
   first: number,
-  belowDeckBinding: number = first + SURFACE_LIGHTING_BINDINGS - 1,
+  belowDeckBinding: number = first + SURFACE_LIGHTING_BINDINGS - 2,
+  sourceTableBinding: number = belowDeckBinding + 1,
 ): ReadonlyArray<TextureBindingSpec> {
   return ORDER.map((key, i) => {
     const { draw, array } = NAMES[key];
-    const binding = key === "belowDeck" ? belowDeckBinding : first + i;
+    const binding =
+      key === "belowDeck"
+        ? belowDeckBinding
+        : key === "sourceTransmittance"
+          ? sourceTableBinding
+          : first + i;
     return array
       ? {
           name: draw,
@@ -222,6 +265,7 @@ export function createAirlessTables(
     absorberCurves: texture,
     irradiance: texture,
     belowDeck: texture,
+    sourceTransmittance: texture,
   };
 }
 

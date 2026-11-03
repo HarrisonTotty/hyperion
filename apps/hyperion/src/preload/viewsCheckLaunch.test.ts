@@ -223,7 +223,12 @@ describe("the views check's launch switch", () => {
       served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
       timing: true,
     };
-    for (const litProbe of ["transmittance-one", "planetshine-centre", "no-annuli"] as const) {
+    for (const litProbe of [
+      "transmittance-one",
+      "planetshine-centre",
+      "no-annuli",
+      "per-fragment",
+    ] as const) {
       const launch: ViewsCheckLaunch = { ...profile, litProbe };
       expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
     }

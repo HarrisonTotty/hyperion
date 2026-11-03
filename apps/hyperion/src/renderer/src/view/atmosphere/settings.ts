@@ -167,6 +167,15 @@ export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>> = {
  * at the floor's low sizes and 16% less on low; `per-texel` is the way back. `area` stays the
  * march's cover on both: under the packed limb the tile cull was within 5% of it either way there,
  * so the owner's Mac decides it.
+ *
+ * `table` (plan R08, R08.T9.b's lever) takes each source's transmittance to a lit point from the
+ * sources' table on both settings, a body of several bands per fragment within 0.1 of the
+ * horizon's cosine; `per-fragment` is the way back, which an inspection profile's `--lit-probe
+ * per-fragment` draws in the same build. On SwiftShader at low from orbit (pod, 16 vCPU) the
+ * sliced lookups were 57–66% of the bodies pass and 72–74% of the disc cells (every source's
+ * transmittance 1 against as drawn). The smoke holds the table's reads within 1/3 stop of the
+ * lookups per fragment at 99.96% of Earth's lit points and all of the Saturn-class figure's, and
+ * every lit pixel of R05's Earth's air bodies drawn both ways.
  */
 export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSettings>> = {
   high: {
@@ -174,12 +183,14 @@ export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSett
     surfaceTransmittance: "channels",
     marchCover: "area",
     limbRays: "packed",
+    sourceTransmittance: "table",
   },
   low: {
     compositeTransmittance: "march",
     surfaceTransmittance: "channels",
     marchCover: "area",
     limbRays: "packed",
+    sourceTransmittance: "table",
   },
 };
 

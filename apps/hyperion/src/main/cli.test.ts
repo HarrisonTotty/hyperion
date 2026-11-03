@@ -921,7 +921,7 @@ describe("the several-views check's options", () => {
     expect(error.exitCode).toBe(1);
   });
 
-  it.each(["transmittance-one", "planetshine-centre", "no-annuli"] as const)(
+  it.each(["transmittance-one", "planetshine-centre", "no-annuli", "per-fragment"] as const)(
     "takes --lit-probe %s, the frame profile's probe of the lit passes (R08.T9.b)",
     (probe) => {
       expect(

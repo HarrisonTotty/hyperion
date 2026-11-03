@@ -585,6 +585,7 @@ function airTables(name: string): SurfaceLightingTables {
     absorberCurves: texture(`${name} air absorber curves`),
     irradiance: texture(`${name} air irradiance`),
     belowDeck: texture(`${name} air below deck`),
+    sourceTransmittance: texture(`${name} air sources' transmittance`),
   };
 }
 

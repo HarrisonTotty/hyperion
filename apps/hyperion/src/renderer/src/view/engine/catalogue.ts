@@ -76,6 +76,7 @@ import {
   IRRADIANCE_THICK_KERNEL,
   MULTI_SCATTERING_KERNEL,
   SLOT_DEPTHS_KERNEL,
+  SOURCE_TRANSMITTANCE_KERNEL,
   TRANSMITTANCE_KERNEL,
 } from "../atmosphere/tables";
 import type { KernelPair } from "./kernels";
@@ -168,15 +169,17 @@ const WIREFRAME_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 
 /**
  * R05.T12.b's per-planet atmosphere tables: transmittance and multiple scattering, since plan
- * R08's R08.T9.b the sky's irradiance (`irradiance.wgsl`), and since R08.T8.e each light slot's
- * optical depth (`slotDepths.wgsl`). R08's `surfaceLighting.wgsl`, a library, is catalogued inside
- * the lit-body probe and the disc materials, which compose it.
+ * R08's R08.T9.b the sky's irradiance (`irradiance.wgsl`), since R08.T8.e each light slot's
+ * optical depth (`slotDepths.wgsl`), and since R08.T9.b's lever the sources' transmittance
+ * (`sourceTransmittance.wgsl`). R08's `surfaceLighting.wgsl`, a library, is catalogued inside the
+ * lit-body probe, the disc materials and the sources' kernel, which compose it.
  */
 const ATMOSPHERE_TABLE_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   TRANSMITTANCE_KERNEL,
   MULTI_SCATTERING_KERNEL,
   IRRADIANCE_KERNEL,
   SLOT_DEPTHS_KERNEL,
+  SOURCE_TRANSMITTANCE_KERNEL,
 ].map((spec) => ({ kind: "compute", spec }));
 
 /** R07's post-processing kernels and passes (plan R07, T12–T15). */

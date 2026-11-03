@@ -119,6 +119,8 @@ import {
   SHARED_TABLE_CURVE_SLOT,
   SLOT_DEPTHS_KERNEL,
   slotDepthsRefusal,
+  SOURCE_TRANSMITTANCE_KERNEL,
+  SOURCE_TRANSMITTANCE_SIZE,
   tablesPlanOf,
   TERMS_BUFFER_BYTES,
   TRANSMITTANCE_KERNEL,
@@ -519,6 +521,77 @@ describe("AtmosphereTables", () => {
     expect(engine.dispatched.at(-1)?.kernel).toBe("atmosphere multiple scattering");
     expect(tables.irradiance()).not.toBe(irradiance);
     expect(engine.dispatched.at(-1)?.kernel).toBe("atmosphere irradiance");
+  });
+
+  it("builds the sources' transmittance over the slices' tables once a build, at its first read after it (R08.T9.b's lever)", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    const before = engine.textureSpecs.length;
+    const stub = tables.perFragmentSourceTransmittance;
+    expect(tables.perFragmentSourceTransmittance).toBe(stub);
+    expect(engine.textureSpecs.slice(before).map((spec) => [spec.name, spec.size])).toEqual([
+      ["atmosphere: sources' transmittance per fragment", { width: 1, height: 1 }],
+    ]);
+    // The stub builds nothing; the table's first read builds one layer a band and light slot.
+    expect(engine.counts.dispatches).toBe(2);
+    const table = tables.sourceTransmittance();
+    expect(tables.sourceTransmittance()).toBe(table);
+    const build = engine.dispatched.at(-1);
+    expect([
+      engine.counts.dispatches,
+      build?.kernel,
+      build?.bindings.sampled["atmosphere_transmittance"],
+      build?.bindings.sampled["atmosphere_body"],
+      build?.bindings.storage["sourceTableOut"]?.texture,
+      build?.workgroups,
+      Array.from(build?.bindings.uniforms["sourceTableBuild"] ?? []),
+      build === undefined ? [] : boundNames(build.bindings),
+      engine.textureSpecs.find((spec) => spec.name === table.name)?.format,
+    ]).toEqual([
+      3,
+      SOURCE_TRANSMITTANCE_KERNEL.name,
+      tables.transmittance,
+      tables.oblateBody,
+      table,
+      [SOURCE_TRANSMITTANCE_SIZE.widthTexels / 8, SOURCE_TRANSMITTANCE_SIZE.heightTexels / 8, 1],
+      [0, 0, Math.fround(tables.plan.bands[0]?.latitudeRad ?? Number.NaN), 0],
+      [...kernelBindings(SOURCE_TRANSMITTANCE_KERNEL.reference).keys()].toSorted(),
+      "rgba16float",
+    ]);
+    // A build leaves it to be built again at the next read; a restore makes it anew.
+    tables.setMedium(HILLAIRE_REFERENCE, R);
+    tables.sourceTransmittance();
+    expect(engine.dispatched.at(-1)?.kernel).toBe(SOURCE_TRANSMITTANCE_KERNEL.name);
+    engine.restore();
+    expect(tables.sourceTransmittance()).not.toBe(table);
+    expect(tables.perFragmentSourceTransmittance).not.toBe(stub);
+  });
+
+  it("builds each band and light slot's layer of the sources' transmittance at the band's latitude (R08.T9.b's lever)", async () => {
+    const engine = await countingRenderEngine();
+    const medium = saturnClassMedium();
+    const tables = new AtmosphereTables(
+      engine,
+      medium,
+      tableRadiusM(SATURN_SPHEROID),
+      NO_ABSORBER_CURVES,
+      saturnBody(),
+    );
+    engine.dispatched.length = 0;
+    const table = tables.sourceTransmittance();
+    const builds = engine.dispatched.filter((d) => d.kernel === SOURCE_TRANSMITTANCE_KERNEL.name);
+    expect([
+      builds.map((d) => Array.from(d.bindings.uniforms["sourceTableBuild"] ?? [])),
+      engine.textureSpecs.find((spec) => spec.name === table.name)?.size,
+    ]).toEqual([
+      tables.plan.bands.map((band, b) => [b, 0, Math.fround(band.latitudeRad), 0]),
+      [
+        SOURCE_TRANSMITTANCE_SIZE.widthTexels,
+        SOURCE_TRANSMITTANCE_SIZE.heightTexels,
+        tables.plan.bands.length,
+      ],
+    ]);
+    tables.dispose();
   });
 
   it("rebuilds in place when the medium or the radius changes", async () => {

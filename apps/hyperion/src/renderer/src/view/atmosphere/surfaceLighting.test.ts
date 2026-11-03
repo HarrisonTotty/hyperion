@@ -677,10 +677,14 @@ describe("the surface lighting's WGSL (R08.T9.b)", () => {
     ).toBeLessThan(code.indexOf("if (irradiance <= 0.0) { continue; }"));
   });
 
-  it("binds the body's tables to the disc materials and the mesh at group 2 bindings 6 to 12, and the table below a deck at 16", () => {
-    const expected = surfaceLightingTextures(6, 16);
-    expect(expected.map(({ binding }) => binding)).toEqual([6, 7, 8, 9, 10, 11, 12, 16]);
-    expect(surfaceLightingTextures(6).at(-1)?.binding).toBe(13);
+  it("binds the body's tables to the disc materials and the mesh at group 2 bindings 6 to 12, the table below a deck at 16 and the sources' table at 17", () => {
+    const expected = surfaceLightingTextures(6, 16, 17);
+    expect(expected.map(({ binding }) => binding)).toEqual([6, 7, 8, 9, 10, 11, 12, 16, 17]);
+    expect(
+      surfaceLightingTextures(6)
+        .slice(-2)
+        .map(({ binding }) => binding),
+    ).toEqual([13, 14]);
     for (const spec of [
       BODY_DISC_MATERIALS.interior,
       BODY_DISC_MATERIALS.limb,
@@ -688,14 +692,16 @@ describe("the surface lighting's WGSL (R08.T9.b)", () => {
     ]) {
       // The class map's normal map (plan R10, R10.T10.g) follows the tables, at binding 14, and
       // the mesh's coverage mask (R10.T10.c) it, at binding 13; the table below a deck
-      // (R08.T15.b.2) takes 16, past the disc's table at 15.
-      expect(spec.textures?.slice(2, 10)).toEqual(expected);
-      expect(spec.textures?.[10]?.binding).toBe(14);
+      // (R08.T15.b.2) takes 16, past the disc's table at 15, and the sources' table (R08.T9.b's
+      // lever) 17.
+      expect(spec.textures?.slice(2, 11)).toEqual(expected);
+      expect(spec.textures?.[11]?.binding).toBe(14);
     }
-    expect(SMOOTH_MESH_MATERIAL.textures?.slice(10).map(({ binding }) => binding)).toEqual([
+    expect(SMOOTH_MESH_MATERIAL.textures?.slice(11).map(({ binding }) => binding)).toEqual([
       14, 13,
     ]);
     expect(bodyDiscWgsl).toMatch(/@group\(2\) @binding\(16\) var atmosphere_below_deck :/u);
+    expect(bodyDiscWgsl).toMatch(/@group\(2\) @binding\(17\) var atmosphere_source_table :/u);
     for (const [i, name] of [
       "atmosphere_body",
       "atmosphere_transmittance",

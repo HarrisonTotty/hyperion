@@ -117,6 +117,9 @@
 // The table below a cloud deck over a surface (R08.T15.b.2), or a one-texel stub, past the mesh's
 // coverage mask (13), the normal map (14) and the disc's table (15).
 @group(2) @binding(16) var atmosphere_below_deck : texture_2d_array<f32>;
+// The sources' transmittance table (R08.T9.b's lever), or a one-texel stub: past the table below a
+// deck.
+@group(2) @binding(17) var atmosphere_source_table : texture_2d_array<f32>;
 
 // The class map's normal map (plan R10, R10.T10.g; `discNormals.ts`): the class map's layout at the
 // field's level, N = 2ᴸ texels a face's side, 32 to 256, (N + 2) × (N + 2) texels a layer, one layer

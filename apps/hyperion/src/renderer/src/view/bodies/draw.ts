@@ -1017,6 +1017,12 @@ const SURFACE_NORMALS_BINDING = 14;
 const BELOW_DECK_BINDING = 16;
 
 /**
+ * The group 2 binding of the sources' transmittance table (`bodyDisc.wgsl`'s
+ * `atmosphere_source_table`, R08.T9.b's lever), past the table below a deck.
+ */
+const SOURCE_TABLE_BINDING = 17;
+
+/**
  * The disc's textures: the frame's phase table, its class map (any texture where uniform), its
  * body's atmosphere tables at bindings 6 to 12 (plan R08, R08.T9.b), the one-texel defaults for a
  * body without one, and its class map's normal map at binding 14 (plan R10, R10.T10.g), any
@@ -1025,7 +1031,7 @@ const BELOW_DECK_BINDING = 16;
 const DISC_TEXTURES: ReadonlyArray<TextureBindingSpec> = [
   { name: "phaseFactorTable", binding: 1, sampleType: "unfilterable-float" },
   { name: "classWeights", binding: 2, viewDimension: "2d-array" },
-  ...surfaceLightingTextures(ATMOSPHERE_FIRST_BINDING, BELOW_DECK_BINDING),
+  ...surfaceLightingTextures(ATMOSPHERE_FIRST_BINDING, BELOW_DECK_BINDING, SOURCE_TABLE_BINDING),
   { name: "surfaceNormals", binding: SURFACE_NORMALS_BINDING, viewDimension: "2d-array" },
 ];
 

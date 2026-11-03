@@ -135,9 +135,11 @@ import mediumWgsl from "./shaders/medium.wgsl?raw";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import slotDepthsWgsl from "./shaders/slotDepths.wgsl?raw";
+import sourceTransmittanceWgsl from "./shaders/sourceTransmittance.wgsl?raw";
 import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
 import transmittanceWgsl from "./shaders/transmittance.wgsl?raw";
 import { log, sin } from "../../lib/pinnedMath";
+import { SURFACE_LIGHTING_WGSL } from "./surfaceLighting";
 
 /**
  * The most terms a medium may have: `MAX_TERMS` in `common.wgsl`, the length of the kernels'
@@ -165,6 +167,16 @@ export const MULTI_SCATTERING_SIZE: TableSize = { widthTexels: 32, heightTexels:
  * and on, so that a haze's kilometre-scale falloff lies across rows rather than within the first.
  */
 export const IRRADIANCE_SIZE: TableSize = { widthTexels: 64, heightTexels: 16 };
+
+/**
+ * The sources' transmittance table's size (plan R08, R08.T9.b's lever; `sourceTransmittance.wgsl`):
+ * 128 in the zenith cosine by 32 in height, half the transmittance tables' {@link TRANSMITTANCE_SIZE}
+ * on each axis, on their axes (Bruneton 2017's), a layer 32 KB at `rgba16float`.
+ */
+export const SOURCE_TRANSMITTANCE_SIZE: TableSize = { widthTexels: 128, heightTexels: 32 };
+
+/** The sources' transmittance table's workgroup, 8 × 8 texels (`sourceTransmittance.wgsl`). */
+const SOURCE_TRANSMITTANCE_WORKGROUP = 8;
 
 /**
  * The most κ slices a body's transmittance tables hold, one layer each (plan R08, Design note 17;
@@ -861,6 +873,18 @@ export const IRRADIANCE_KERNEL: KernelPair = {
   reference: `${preciseTrigWgsl}\n${commonWgsl}\n${mediumWgsl}\n${scatteringWgsl}\n${irradianceWgsl}`,
   subgroup: null,
   readback: "presentation-only",
+};
+
+/**
+ * The sources' transmittance kernel (plan R08, R08.T9.b's lever): R08's surface lighting
+ * (`surfaceLighting.ts`' `SURFACE_LIGHTING_WGSL`), then `sourceTransmittance.wgsl`, each texel the
+ * sliced lookup a lit pass takes per fragment without the lever.
+ */
+export const SOURCE_TRANSMITTANCE_KERNEL: KernelPair = {
+  name: "atmosphere sources' transmittance",
+  reference: `${SURFACE_LIGHTING_WGSL}\n${sourceTransmittanceWgsl}`,
+  subgroup: null,
+  readback: "bit-exact",
 };
 
 /**
@@ -2131,6 +2155,11 @@ const OBLATE_BODY_FORMAT: GPUTextureFormat = "rgba32float";
  * A layer is 16 KB.
  */
 const IRRADIANCE_FORMAT: GPUTextureFormat = "rgba32float";
+/**
+ * The sources' transmittance table's format (R08.T9.b's lever): optical depth in half floats, as the
+ * transmittance tables store theirs, the transmittance's relative error at most 2⁻¹¹ τ.
+ */
+const SOURCE_TRANSMITTANCE_FORMAT: GPUTextureFormat = "rgba16float";
 
 /** A 2D array texture of 2D layers the tables made and upload, with the shape it was made at. */
 interface PlanesTexture {
@@ -2455,6 +2484,17 @@ export class AtmosphereTables {
   #irradianceKernel: ComputeHandle | null = null;
   /** The sky-irradiance kernel reading the thick table, made at its first build (R08.T14.d.4). */
   #irradianceThickKernel: ComputeHandle | null = null;
+  /**
+   * The sources' transmittance (R08.T9.b's lever), made at its first build and again for a medium of
+   * another layer count; `null` until a lit pass asks for it.
+   */
+  #sourceTable: LayeredTexture | null = null;
+  /** Whether the sources' transmittance holds the last build's ({@link sourceTransmittance}). */
+  #sourceTableBuilt = false;
+  /** The sources' transmittance kernel, made at the table's first build on a device. */
+  #sourceTableKernel: ComputeHandle | null = null;
+  /** The one-texel table a lit pass binds where it takes each lookup per fragment. */
+  #sourceStub: TextureHandle | null = null;
   /** The slot-depth kernel, made at the first build on a device that takes the layers (R08.T8.e). */
   #slotDepthsKernel: ComputeHandle | null = null;
   /** The kernel arm's slot-depth kernel, made at the first arm that takes the layers. */
@@ -2554,6 +2594,10 @@ export class AtmosphereTables {
       this.#armKernels = null;
       this.#irradianceKernel = null;
       this.#irradianceThickKernel = null;
+      // The lost device's handles are gone: the table and its stub are made again at their reads.
+      this.#sourceTable = null;
+      this.#sourceTableKernel = null;
+      this.#sourceStub = null;
       this.#slotDepthsKernel = null;
       this.#armSlotDepthsKernel = null;
       this.#key = null;
@@ -2675,6 +2719,51 @@ export class AtmosphereTables {
       this.#irradianceBuilt = true;
     }
     return this.#resources.irradiance.texture;
+  }
+
+  /**
+   * Each source's optical depth from a lit point to space by height and zenith cosine,
+   * `rgba16float` at {@link SOURCE_TRANSMITTANCE_SIZE} (plan R08, R08.T9.b's lever): a 2D array of
+   * the irradiance's layers, band b's light slot k at layer b × {@link AtmosphereTables.layersPerBand}
+   * + k, each texel the sliced lookup from the band's latitude (`sourceTransmittance.wgsl`), which
+   * the lit passes read in its place where their setting's `sourceTransmittance` is `table`.
+   *
+   * @remarks
+   * Built at the first call after each build of the tables, from them, as the irradiance is, so that
+   * tables whose air lights no surface through it never pay for it; a new handle after a restore or
+   * a medium of another layer count.
+   *
+   * @throws `EngineUnavailable` when it has to build while the engine has no device (a loss); the
+   *   first call after the restore builds it.
+   */
+  sourceTransmittance(): TextureHandle {
+    if (this.#sourceTable === null || !this.#sourceTableBuilt) {
+      this.#dispatchSourceTable();
+      this.#sourceTableBuilt = true;
+    }
+    if (this.#sourceTable === null) {
+      throw new Error("the sources' transmittance was not made by its build");
+    }
+    return this.#sourceTable.texture;
+  }
+
+  /**
+   * What a lit pass binds as the sources' table where it takes each source's transmittance per
+   * fragment (`surfaceLighting.wgsl`'s `atmosphereTabled`): a one-texel stub, made at its first read.
+   *
+   * @throws `EngineUnavailable` when the stub has to be made while the engine has no device.
+   */
+  get perFragmentSourceTransmittance(): TextureHandle {
+    this.#sourceStub ??= this.#engine.createTexture({
+      name: "atmosphere: sources' transmittance per fragment",
+      size: { width: 1, height: 1 },
+      dimension: "2d",
+      format: SOURCE_TRANSMITTANCE_FORMAT,
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING,
+      category: "atmosphere-tables",
+    });
+    return this.#sourceStub;
   }
 
   /** The body's table ({@link packOblateBody}), `rgba32float`, which the per-frame kernels read. */
@@ -3344,6 +3433,7 @@ export class AtmosphereTables {
     this.#row = row;
     this.#key = null;
     this.#irradianceBuilt = false;
+    this.#sourceTableBuilt = false;
     // A thick table, a correction and a deck belong to the medium they were baked for (R08.T14.c,
     // R08.T14.f, R08.T15.a.2), as does the disc's table (R08.T16.b).
     this.#releaseThick();
@@ -3737,6 +3827,73 @@ export class AtmosphereTables {
   }
 
   /**
+   * Builds the sources' transmittance for the medium and body the tables follow (R08.T9.b's lever):
+   * band by band and light slot by slot, the kernel into layer band × light slots + k of the table,
+   * over the slices' stored tables with light slot k's curves, as a lit pass reads them per fragment.
+   * The table is made first where it has another layer count.
+   */
+  #dispatchSourceTable(): void {
+    const engine = this.#engine;
+    const r = this.#resources;
+    const slots = multiScatteringLayersOf(this.#medium, this.#curves);
+    const bands = this.#plan.bands;
+    const layers = bands.length * slots;
+    const held = this.#sourceTable;
+    if (held === null || held.layers !== layers) {
+      // Made before the old one goes, so that a loss while making it leaves no released handle.
+      const made = createBandLayers(
+        engine,
+        "atmosphere sources' transmittance",
+        SOURCE_TRANSMITTANCE_SIZE,
+        layers,
+        SOURCE_TRANSMITTANCE_FORMAT,
+      );
+      if (held !== null) {
+        engine.releaseTexture(held.texture);
+      }
+      this.#sourceTable = made;
+    }
+    const table = this.#sourceTable;
+    if (table === null) {
+      throw new Error("the sources' transmittance was not made");
+    }
+    const kernel = (this.#sourceTableKernel ??= engine.createCompute(SOURCE_TRANSMITTANCE_KERNEL));
+    const unread = r.slices.transmittance;
+    const counts: [number, number, number] = [
+      Math.ceil(SOURCE_TRANSMITTANCE_SIZE.widthTexels / SOURCE_TRANSMITTANCE_WORKGROUP),
+      Math.ceil(SOURCE_TRANSMITTANCE_SIZE.heightTexels / SOURCE_TRANSMITTANCE_WORKGROUP),
+      1,
+    ];
+    for (const [b, band] of bands.entries()) {
+      for (let slot = 0; slot < slots; slot += 1) {
+        engine.dispatch(
+          kernel,
+          {
+            uniforms: {
+              sourceTableBuild: Float32Array.of(b * slots + slot, slot, band.latitudeRad, 0),
+            },
+            buffers: {},
+            sampled: {
+              atmosphere_body: r.oblateBody,
+              atmosphere_transmittance: r.slices.transmittance,
+              atmosphere_absorber_columns: r.slices.absorberColumns,
+              atmosphere_absorber_pressure_columns: r.slices.absorberPressureColumns,
+              atmosphere_last_absorber_pressure_column: r.slices.lastAbsorberPressureColumn,
+              atmosphere_absorber_curves: r.absorberCurves.texture,
+              atmosphere_irradiance: unread,
+              atmosphere_below_deck: unread,
+              atmosphere_source_table: unread,
+            },
+            storage: { sourceTableOut: { texture: table.texture, level: 0 } },
+          },
+          counts,
+          ATMOSPHERE_TABLES_PASS,
+        );
+      }
+    }
+  }
+
+  /**
    * Stops following the engine's restores and releases the buffer and the textures it holds, so
    * that the atmosphere cache's eviction frees a body's per-planet memory (plan R08, R08.T10.b;
    * `decision-r08-t10a-leans.md` item 10). Called again, it does nothing. The kernels have no
@@ -3756,6 +3913,14 @@ export class AtmosphereTables {
     if (this.#belowStub !== null) {
       this.#engine.releaseTexture(this.#belowStub);
       this.#belowStub = null;
+    }
+    if (this.#sourceTable !== null) {
+      this.#engine.releaseTexture(this.#sourceTable.texture);
+      this.#sourceTable = null;
+    }
+    if (this.#sourceStub !== null) {
+      this.#engine.releaseTexture(this.#sourceStub);
+      this.#sourceStub = null;
     }
     releaseResources(this.#engine, this.#resources);
   }

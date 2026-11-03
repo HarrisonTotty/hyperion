@@ -408,6 +408,7 @@ struct LightingCase {
 @group(0) @binding(10) var atmosphere_absorber_curves : texture_2d<f32>;
 @group(0) @binding(11) var atmosphere_irradiance : texture_2d_array<f32>;
 @group(0) @binding(12) var atmosphere_below_deck : texture_2d_array<f32>;
+@group(0) @binding(13) var atmosphere_source_table : texture_2d_array<f32>;
 
 fn run_lighting(index : u32) {
   let c = lighting_cases[index];

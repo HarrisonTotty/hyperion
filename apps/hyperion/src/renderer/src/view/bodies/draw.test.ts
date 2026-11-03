@@ -1641,6 +1641,7 @@ describe("the renderer", () => {
       absorberCurves: air("curves"),
       irradiance: air("irradiance"),
       belowDeck: air("below deck"),
+      sourceTransmittance: air("sources' transmittance"),
     };
     const plain = planOf();
     const first = plain.discs[0];
@@ -1679,6 +1680,7 @@ describe("the renderer", () => {
       absorberCurves: table,
       irradiance: table,
       belowDeck: table,
+      sourceTransmittance: table,
     };
     const regimes = new Map([[body.id, "disc" as const]]);
     const [withAir] = planLitBodies(

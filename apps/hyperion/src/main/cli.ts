@@ -106,10 +106,12 @@
  * `--march-cover area|tiles` and `--limb-rays per-texel|packed` (plan R08, R08.T8.d) draw that
  * profile's atmospheres with that lever over its setting's, for the A/B of each lever on and off
  * on one build; each is refused without `--timing`.
- * With `--lit-probe transmittance-one|planetshine-centre|no-annuli` too (plan R08, R08.T9.b's
- * measurement) that profile makes the lit materials and kernels under the probe, every source's
- * transmittance through the air 1, a planetshine source's at its centre node alone, or the eclipse
- * term with no annuli, for an A/B of the lit fragment's cost; it is refused without `--timing`.
+ * With `--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment` too (plan R08,
+ * R08.T9.b's measurement) that profile makes the lit materials and kernels under the probe, every
+ * source's transmittance through the air 1, a planetshine source's at its centre node alone, the
+ * eclipse term with no annuli, or each source's transmittance per fragment whatever the setting's
+ * sources' table (its way back), for an A/B of the lit fragment's cost; it is refused without
+ * `--timing`.
  *
  * `--hyperion-gpu-timing`, R01's measurement switch, which lifts the timestamps' quantization on
  * every backend but safe mode's (read from Chromium's command line, `GPU_TIMING_SWITCH`), also has a
@@ -481,7 +483,7 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option(
         "--lit-probe <PROBE>",
-        "the frame profile's lit-pass probe (R08.T9.b): every source's transmittance 1, planetshine at its centre node, or no eclipse annuli",
+        "the frame profile's lit-pass probe (R08.T9.b): every source's transmittance 1, planetshine at its centre node, no eclipse annuli, or the sources' transmittance per fragment",
       ).choices(LIT_PROBE_NAMES),
     )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
