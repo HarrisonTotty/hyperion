@@ -2722,7 +2722,7 @@ describe("the cascades re-rendered only when they change (plan R14, R14.T6.a)", 
     made.pass.setGeometry(EVERY_FRAME);
     const culled = (): number =>
       parsePasses(
-        made.engine.dispatched.findLast((d) => d.kernel === "cluster cull")?.bindings.uniforms[
+        made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL)?.bindings.uniforms[
           "passes"
         ] ?? new Uint32Array(),
       ).length;
