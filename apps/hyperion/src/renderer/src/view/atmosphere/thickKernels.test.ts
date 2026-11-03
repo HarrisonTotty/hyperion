@@ -120,18 +120,20 @@ function digestOf(pair: KernelPair): string {
  * (its fill's too) R08.T9.c's, which stores their transmittance per channel in a second texture
  * (2026-11-02). All but the fill's re-pinned by the fitted lookup's least rise (`oblate.wgsl`'s
  * `oblateLeastRiseOf`, 2026-11-03), which only a body of several bands reaches: a body of one band
- * returns before the fit, its every lookup as before.
+ * returns before the fit, its every lookup as before. Every march's (its fill's too) re-pinned by
+ * fix-disc-air-rows, whose shared `marchArea.wgsl` gives a half-resolution texel's centre ray the
+ * farthest depth about it (2026-11-03).
  */
 const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
   [SKY_VIEW_KERNEL, "a1d12c8aae1e4f3b"],
   [AERIAL_PERSPECTIVE_KERNEL, "aa69ad50f1c34e8"],
-  [RAY_MARCH_KERNEL, "6a9800a21d378eb0"],
-  [RAY_MARCH_SLOTS_KERNEL, "8032737ffed35a36"],
-  [RAY_MARCH_CENTRE_KERNEL, "ae2d8b520613be94"],
-  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "84578ddd3f5859c6"],
-  [RAY_MARCH_SPECIAL_KERNEL, "200a9b665894183e"],
-  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "1c456c9cf9027dac"],
-  [RAY_MARCH_FILL_KERNEL, "f2a36f005c4cf5bd"],
+  [RAY_MARCH_KERNEL, "ff15d0e363afd630"],
+  [RAY_MARCH_SLOTS_KERNEL, "419c78da2322133c"],
+  [RAY_MARCH_CENTRE_KERNEL, "beacbb9851c87a8e"],
+  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "c62c1287851a5d8a"],
+  [RAY_MARCH_SPECIAL_KERNEL, "1ddfa742596c8c9c"],
+  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "1a4574b7ae78fab8"],
+  [RAY_MARCH_FILL_KERNEL, "fdc424b1001af7c6"],
 ];
 
 /**
@@ -139,15 +141,16 @@ const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
  * R08.T15.a.2 at 1e949d8e, and that read moved them), the ray march's as R08.T16.a.2's march moved
  * them, and the aerial perspective's and the marches' as R08.T9.c's second texture moved them: the
  * deck read is made beside them, and leaves each to the byte, so that a body with no deck draws as
- * before. Each re-pinned by the fitted lookup's least rise, as {@link THIN_DIGESTS}.
+ * before. Each re-pinned by the fitted lookup's least rise, as {@link THIN_DIGESTS}, and the
+ * marches' by fix-disc-air-rows' centre depth.
  */
 const THICK_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
   [SKY_VIEW_THICK_KERNEL, "b6e4733b0245a48f"],
   [AERIAL_PERSPECTIVE_THICK_KERNEL, "d0ae89988654ddaa"],
-  [RAY_MARCH_THICK_KERNEL, "a172446a7add3592"],
-  [RAY_MARCH_SLOTS_THICK_KERNEL, "2154e79c6c072c46"],
-  [RAY_MARCH_THICK_SPECIAL_KERNEL, "fe85153d1914a420"],
-  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "ee253a47dd4dd150"],
+  [RAY_MARCH_THICK_KERNEL, "c56f3926a1ca0122"],
+  [RAY_MARCH_SLOTS_THICK_KERNEL, "706cc37ec39ec35c"],
+  [RAY_MARCH_THICK_SPECIAL_KERNEL, "72cc0fa12c85e416"],
+  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "ef57a83cd217b620"],
 ];
 
 /** Each thick kernel beside the thin one it is made from. */

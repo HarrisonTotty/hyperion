@@ -4846,6 +4846,7 @@ export function rayMarchTwin(
       shells,
       (u, v, depthHere) =>
         rayMarchRayTwin(planet.medium, view, u, v, depthHere, settings, planet.deck !== undefined),
+      (u, v) => marchTexelDepthAtUv(depthAt, fullW, fullH, u, v, settings.rayMarchScale),
       (u, v) => depthAtUv(depthAt, fullW, fullH, u, v),
       { x, y, widthTexels: w, heightTexels: h },
       out,
@@ -4919,6 +4920,7 @@ export function rayMarchTargetTexelsTwin(
     farLimbShellsOf(planet, view),
     (u, v, depthHere) =>
       rayMarchRayTwin(planet.medium, view, u, v, depthHere, settings, planet.deck !== undefined),
+    () => depth,
     () => depth,
     targetTexelOf(view, settings, x, y),
     out,
@@ -5385,23 +5387,75 @@ function depthAtUv(
 }
 
 /**
+ * How much farther than a half-resolution march texel's own pixel one about its centre ray may
+ * stand and count as the same surface, a share of the distance: a tenth (fix-disc-air-rows; a lean
+ * of pod-looks, 2026-11-03), wide of a sphere's change of depth across a pixel at its limb, some 2%
+ * on a disc 240 px across, and narrow of another body, a craft or a ridge drawn in front, which
+ * keeps its own pixel's depth as before. `marchArea.wgsl`'s `MARCH_SAME_SURFACE_SHARE`.
+ */
+export const MARCH_SAME_SURFACE_SHARE = 0.1;
+
+/**
+ * The scene's reversed-Z depth a march texel's centre ray through (`u`, `v`) ends on, as the kernel
+ * takes it (`marchArea.wgsl`'s `marchTexelDepthOf`; fix-disc-air-rows): at full resolution the
+ * depth of the pixel holding the ray's point ({@link depthAtUv}); at half, 0 where that pixel is
+ * sky, else the farthest of the four pixels whose centres stand about the ray's point that lie
+ * within {@link MARCH_SAME_SURFACE_SHARE} of its distance, so that no texel over a drawn body ends
+ * its ray in the air above its ground.
+ *
+ * @param depthAt - The scene's depth at a full-resolution pixel, 0 where nothing is drawn.
+ * @param marchScale - The march's scale of the output: `TableSizes.rayMarchScale`.
+ */
+export function marchTexelDepthAtUv(
+  depthAt: (xPx: number, yPx: number) => number,
+  fullW: number,
+  fullH: number,
+  u: number,
+  v: number,
+  marchScale: number,
+): number {
+  const depth = depthAtUv(depthAt, fullW, fullH, u, v);
+  if (marchScale >= 1 || !(depth > 0)) {
+    return depth;
+  }
+  const baseX = Math.floor(u * fullW - 0.5);
+  const baseY = Math.floor(v * fullH - 0.5);
+  let farthest = depth;
+  for (let j = 0; j < 2; j += 1) {
+    for (let i = 0; i < 2; i += 1) {
+      const d = depthAt(
+        Math.min(Math.max(baseX + i, 0), fullW - 1),
+        Math.min(Math.max(baseY + j, 0), fullH - 1),
+      );
+      // Reversed-Z depth is near ÷ distance: within the share, d (1 + share) is at least the own.
+      if (d > 0 && d < farthest && d * (1 + MARCH_SAME_SURFACE_SHARE) >= depth) {
+        farthest = d;
+      }
+    }
+  }
+  return farthest;
+}
+
+/**
  * One texel of a ray-march target into `out` as the kernel draws it (R08.T8.c), both targets'
- * {@link MARCHED_TEXEL_FLOATS} (R08.T9.c): its centre ray's texel, and with `shells` (the camera
- * above the top) its footprint's mean blended in by w_L, the space share counted as (0, 0, 0, 1)
- * and (1, 1, 1, 1), what the kernel writes for a ray that misses the air; each ray at the scene's
+ * {@link MARCHED_TEXEL_FLOATS} (R08.T9.c): its centre ray's texel, at the depth `centreDepthAt`
+ * gives it ({@link marchTexelDepthAtUv}, fix-disc-air-rows), and with `shells` (the camera above
+ * the top) its footprint's mean blended in by w_L, the space share counted as (0, 0, 0, 1) and
+ * (1, 1, 1, 1), what the kernel writes for a ray that misses the air; each node at the scene's
  * depth under its own point (`depthAt`).
  */
 function marchTargetTexelInto(
   context: RayMarchContext,
   shells: FarLimbShells | null,
   rayAt: (u: number, v: number, depth: number) => RayMarchRay | null,
+  centreDepthAt: (u: number, v: number) => number,
   depthAt: (u: number, v: number) => number,
   texel: TargetTexel,
   out: Float64Array,
 ): void {
   const uc = (texel.x + 0.5) / texel.widthTexels;
   const vc = (texel.y + 0.5) / texel.heightTexels;
-  rayMarchTexelInto(context, rayAt(uc, vc, depthAt(uc, vc)), out);
+  rayMarchTexelInto(context, rayAt(uc, vc, centreDepthAt(uc, vc)), out);
   const footprint = shells === null ? null : farLimbFootprintTwin(shells, context.view, texel);
   if (footprint === null || !(footprint.blend > 0)) {
     return;
@@ -7343,6 +7397,7 @@ export function oblateRayMarchTwin(
       context,
       shells,
       (u, v, depthHere) => oblateRayMarchRayTwin(planet, view, u, v, depthHere, settings),
+      (u, v) => marchTexelDepthAtUv(depthAt, fullW, fullH, u, v, settings.rayMarchScale),
       (u, v) => depthAtUv(depthAt, fullW, fullH, u, v),
       { x, y, widthTexels: w, heightTexels: h },
       out,
@@ -7387,6 +7442,7 @@ export function oblateRayMarchTargetTexelsTwin(
     oblateRayMarchContext(planet, view, settings),
     oblateFarLimbShellsOf(planet, view),
     (u, v, depthHere) => oblateRayMarchRayTwin(planet, view, u, v, depthHere, settings),
+    () => depth,
     () => depth,
     targetTexelOf(view, settings, x, y),
     out,

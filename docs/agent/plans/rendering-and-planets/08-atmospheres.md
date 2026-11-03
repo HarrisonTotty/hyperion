@@ -24860,3 +24860,19 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - _Left_: the turn is a step in a texel's light (to 3% here) as a piece's ratio crosses 100. A
     turn blended over its ratio would take it away, and re-record every gate whose pieces stand
     near it.
+- **fix-disc-air-rows, as built** (2026-11-03; lane `pod-looks`; R08.T8.b's half-resolution
+  march; renderer only, no generated value moves).
+  - Cause: a half-resolution texel's centre ray passes through the corner of four pixels, and the
+    march ended it at the one pixel `floor(uv × full)`. Over R05's smooth mesh, whose chords stand
+    inside the datum, that pixel could stand nearer than the ray's own ground, so the ray stopped
+    in the air: dark rows or columns along the mesh's quads. Bisected on SwiftShader at low's
+    targets: a full-resolution march is clean, and a nearest-texel composite keeps the rows.
+  - Fix: `marchArea.wgsl`'s `marchTexelDepthOf` (twin `tablesCpu.ts`' `marchTexelDepthAtUv`) in
+    the footprint, centre and below-deck kernels. At half resolution over a surface the ray takes
+    the farthest of the four pixels about it within `MARCH_SAME_SURFACE_SHARE` (0.1 of the
+    distance, lean 2026-11-03) of its own pixel. Full resolution, the sky and the far limb's nodes
+    are unchanged.
+  - Tests: `marchDepth.test.ts` (it failed first) and smoke part 12's `checkMarchOverBody`, R05's
+    Earth from 1.6 radii at low's targets. On it BASE's kernels leave 2,419 channels off their
+    ground; the fix leaves none.
+  - Pending, the owner's RTX run: `just views-check --hidden --atmosphere`, both settings.

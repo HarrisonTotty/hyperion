@@ -96,6 +96,7 @@ import {
   checkMarchArea,
   checkMarchBand,
   checkMarchOneBand,
+  checkMarchOverBody,
   checkMarchSpecialised,
   checkCorrectionFrameTwinsEarth,
   checkRoutedTwins,
@@ -668,6 +669,11 @@ async function run(
   // march by slot, so that neither part's GPU process compiles both reads' marches.
   await group(12, "R08.T11.d the specialised march over the shared read", () =>
     checkMarchSpecialised(engine, checks, summary.fallback),
+  );
+  // fix-disc-air-rows: low's half-resolution march over a body drawn with its own depth, R05's
+  // Earth's shared read as the specialised march's, in the same part.
+  await group(12, "fix-disc-air-rows the half-resolution march over a drawn body", () =>
+    checkMarchOverBody(engine, checks),
   );
   // R08.T18.b's thermal forms of the per-frame kernels, compiled and held to their twins, in part 12,
   // the lightest (54 s at 03e12ec's tree).

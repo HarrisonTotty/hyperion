@@ -53,7 +53,7 @@ import {
   type Vec3,
 } from "../geometry/vec3";
 import { DEFAULT_FOV_DEG } from "../view/camera/projection";
-import { quaternion, quaternionFromRows, rotate } from "../view/camera/quaternion";
+import { lookAlong, quaternion, quaternionFromRows, rotate } from "../view/camera/quaternion";
 import { hydrostaticColumn } from "../view/atmosphere/column";
 import {
   EARTH_REFERENCE,
@@ -169,6 +169,7 @@ import {
   rayMarchTargetTexelTwin,
   rayMarchTargetTexelsTwin,
   rayMarchTexelTwin,
+  rayMarchTwin,
   skyViewRayTwin,
   slotDepthTablesTwin,
   surfaceLightingTwin,
@@ -3603,6 +3604,183 @@ export async function checkMarchOneBand(
   } finally {
     engine.releaseMaterial(kernels.composite);
     engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/** fix-disc-air-rows' frame: low's march at half resolution over it, 96 × 54 texels. */
+const BODY_FRAME_SIZE: ViewSize = { widthPx: 192, heightPx: 108 };
+
+/** Its body's sphere, m: R05's Earth on a sphere of 6,371 km, the twin's own figure. */
+const BODY_FRAME_RADIUS_M = 6_371_000;
+
+/** The view-space depth of the harness's ray through (`xPx`, `yPx`) to the body's near side, m. */
+function bodyDepthAlong(camera: AtmosphereCamera, xPx: number, yPx: number): number | null {
+  const { widthPx, heightPx } = camera.viewport;
+  const aspect = widthPx / heightPx;
+  const nx = ((2 * xPx) / widthPx - 1) * aspect;
+  const ny = 1 - (2 * yPx) / heightPx;
+  const right = rotate(camera.orientation, { x: 1, y: 0, z: 0 });
+  const up = rotate(camera.orientation, { x: 0, y: 1, z: 0 });
+  const forward = rotate(camera.orientation, { x: 0, y: 0, z: -1 });
+  const w = {
+    x: forward.x + nx * right.x + ny * up.x,
+    y: forward.y + nx * right.y + ny * up.y,
+    z: forward.z + nx * right.z + ny * up.z,
+  };
+  const o = camera.positionM;
+  const a = w.x * w.x + w.y * w.y + w.z * w.z;
+  const b = o.x * w.x + o.y * w.y + o.z * w.z;
+  const c = o.x * o.x + o.y * o.y + o.z * o.z - BODY_FRAME_RADIUS_M * BODY_FRAME_RADIUS_M;
+  const disc = b * b - a * c;
+  return disc >= 0 ? (-b - Math.sqrt(disc)) / a : null;
+}
+
+/**
+ * The body as a view draws it with depth for its air: a quad over each pixel it covers, at the
+ * view-space depth of the sphere under the pixel's centre, so that each pixel holds the sphere's own
+ * depth there and no sky pixel holds any.
+ */
+function bodyMeshOf(engine: RenderEngine, camera: AtmosphereCamera): MeshHandle {
+  const { widthPx, heightPx } = camera.viewport;
+  const aspect = widthPx / heightPx;
+  const positions: number[] = [];
+  for (let y = 0; y < heightPx; y += 1) {
+    for (let x = 0; x < widthPx; x += 1) {
+      const z = bodyDepthAlong(camera, x + 0.5, y + 0.5);
+      if (z === null) {
+        continue;
+      }
+      const [x0, x1] = [x, x + 1].map((px) => ((2 * px) / widthPx - 1) * aspect * z);
+      const [y0, y1] = [y + 1, y].map((py) => (1 - (2 * py) / heightPx) * z);
+      if (x0 === undefined || x1 === undefined || y0 === undefined || y1 === undefined) {
+        continue;
+      }
+      positions.push(x0, y0, -z, x1, y0, -z, x1, y1, -z, x0, y0, -z, x1, y1, -z, x0, y1, -z);
+    }
+  }
+  return engine.createMesh({
+    name: "march over a body",
+    positions: new Float32Array(positions),
+    indices: null,
+    topology: "triangle-list",
+    attributes: {},
+  });
+}
+
+/**
+ * fix-disc-air-rows: low's half-resolution march over a body drawn with depth, R05's Earth on a
+ * sphere seen from 1.6 radii, its disc some 86 px across, each pixel at the sphere's own depth.
+ * Each texel's centre ray passes through the corner of four pixels; one pixel's depth nearer than
+ * the ray's own ground ended it in the air above the body, in rows and columns of dark texels
+ * (pod-looks' captures, 2026-11-03). Held: the march's both targets against their twin over the
+ * GPU's tables (R08.T6.b's bound), and every texel over the body, its footprint not blending,
+ * against the twin's texel whose ray ends on the ground, past the body, to the same bound.
+ */
+export async function checkMarchOverBody(engine: RenderEngine, checks: Checks): Promise<void> {
+  const figure = sphereFigure(BODY_FRAME_RADIUS_M);
+  const sizes = twinSizes(TABLE_SIZES.low);
+  const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, sizes, figure);
+  const positionM = { x: 1.6 * BODY_FRAME_RADIUS_M, y: 0, z: 0.1 * BODY_FRAME_RADIUS_M };
+  const camera: AtmosphereCamera = {
+    positionM,
+    orientation: lookAlong(
+      { x: -positionM.x, y: 0.2 * BODY_FRAME_RADIUS_M, z: -positionM.z },
+      { x: 0, y: 0, z: 1 },
+    ),
+    fovXRad: 2 * Math.atan(BODY_FRAME_SIZE.widthPx / BODY_FRAME_SIZE.heightPx),
+    viewport: BODY_FRAME_SIZE,
+  };
+  const sun: SunState = {
+    directionBodyFixed: { x: 0.5, y: 0.5, z: Math.SQRT1_2 },
+    illuminanceLx: SUN_ILLUMINANCE_LX,
+    angularRadiusRad: SUN_ANGULAR_RADIUS_RAD,
+    drawsDisc: false,
+  };
+  const mesh = bodyMeshOf(engine, camera);
+  const material = engine.createMaterial(flatSpec("march over a body"));
+  try {
+    const planet = await planetOf(engine, atmosphere, R05_EARTH_REFERENCE, figure);
+    if (planet.kind !== "sphere") {
+      throw new Error("the body's twin is a sphere's");
+    }
+    await drawComposite(
+      engine,
+      atmosphere,
+      camera,
+      [sun],
+      {
+        label: "march over a body",
+        surface: () => drawOf(mesh, material, [SURFACE_GREY, SURFACE_GREY, SURFACE_GREY, 1]),
+        preExposure: SMOKE_EXPOSURE_SCALE,
+      },
+      () => Promise.resolve(null),
+    );
+    const gpu = await readFrameOutputs(engine, atmosphere);
+    const view = frameViewOf(atmosphere, camera, [sun], figure);
+    const depthAt = (x: number, y: number): number => {
+      const z = bodyDepthAlong(camera, x + 0.5, y + 0.5);
+      return z === null ? 0 : NEAR_M / z;
+    };
+    const matched = rayMarchTwin(planet.twin, view, sizes, depthAt);
+    // A depth past the body, on which each ray over it ends at its ground.
+    const past = NEAR_M / (10 * norm(positionM));
+    const grounded = rayMarchTwin(planet.twin, view, sizes, (x, y) =>
+      depthAt(x, y) > 0 ? past : 0,
+    );
+    const shells = farLimbShellsOf(planet.twin, view);
+    const { widthTexels: w, heightTexels: h } = matched;
+    const { widthPx: fullW, heightPx: fullH } = BODY_FRAME_SIZE;
+    // The grounded twin over the body's texels, the GPU's own elsewhere, so that the bound reads
+    // those alone.
+    const overBody = Float64Array.from(gpu.rayMarch);
+    let over = 0;
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const u = (x + 0.5) / w;
+        const v = (y + 0.5) / h;
+        const own = depthAt(
+          Math.min(Math.floor(u * fullW), fullW - 1),
+          Math.min(Math.floor(v * fullH), fullH - 1),
+        );
+        const footprint =
+          shells === null
+            ? null
+            : farLimbFootprintTwin(shells, view, { x, y, widthTexels: w, heightTexels: h });
+        if (
+          !(own > 0) ||
+          bodyDepthAlong(camera, u * fullW, v * fullH) === null ||
+          (footprint !== null && footprint.blend > 0)
+        ) {
+          continue;
+        }
+        over += 1;
+        const at = (y * w + x) * 4;
+        overBody.set(grounded.texels.subarray(at, at + 4), at);
+      }
+    }
+    const label =
+      "fix-disc-air-rows R05's Earth from 1.6 radii, low's half-resolution march over its disc";
+    recordAgreement(checks, `${label}: the ray march`, twinAgreement(gpu.rayMarch, matched, true));
+    const transmittance = twinAgreement(
+      gpu.rayMarchTransmittance,
+      { ...matched, texels: matched.transmittance },
+      true,
+    );
+    checks.check(
+      `R08.T9.c ${label}: the ray march's transmittance per channel agrees with the CPU twin to 10⁻³`,
+      transmittance.worst <= 1 && transmittance.above > 0,
+      `worst ${transmittance.at}; ${String(transmittance.above)} channels above 10⁻⁶ of the largest, ${String(transmittance.over)} over the bound`,
+    );
+    const grounding = twinAgreement(gpu.rayMarch, { ...matched, texels: overBody }, true);
+    checks.check(
+      `${label}: every texel over the body ends its ray on its ground, as the twin's past the body does, to 10⁻³`,
+      over > 1_000 && grounding.worst <= 1,
+      `${String(over)} texels over the body; worst ${grounding.at}, ${String(grounding.over)} channels over the bound`,
+    );
+  } finally {
+    atmosphere.dispose();
+    engine.releaseMesh(mesh);
+    engine.releaseMaterial(material);
   }
 }
 

@@ -35,8 +35,8 @@ fn main(
   }
   let uv = (vec2f(texel) + 0.5) / vec2f(size);
   let full = vec2u(view.output.xy);
-  let depthTexel = min(vec2u(uv * vec2f(full)), full - 1u);
-  let depth = textureLoad(sceneDepth, depthTexel, 0);
+  // Never nearer than the ray's own point at half resolution (fix-disc-air-rows).
+  let depth = marchTexelDepthOf(sceneDepth, uv, view.output.z, full);
   if (!(depth > 0.0)) {
     belowDeckMarchNone(texel);
     return;

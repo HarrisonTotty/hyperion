@@ -27,6 +27,38 @@ struct MarchArea {
   bound : vec4f,
 }
 
+// How much farther than a half-resolution texel's own pixel one about its centre ray may stand and
+// count as the same surface, a share of the distance (`tablesCpu.ts`'s MARCH_SAME_SURFACE_SHARE).
+const MARCH_SAME_SURFACE_SHARE : f32 = 0.1;
+
+// The scene's reversed-Z depth a march texel's centre ray through `uv` ends on (fix-disc-air-rows):
+// at full resolution its own pixel's, the one holding the ray's point; at half, where the ray
+// passes between four pixels' centres, 0 where its own pixel is sky, else the farthest of the four
+// that stand within MARCH_SAME_SURFACE_SHARE of its own pixel's distance. A drawn body recedes from
+// the camera across its disc, so that one pixel's depth stood nearer than the ray's own ground and
+// ended the march in the air above it, in rows and columns of the march's tiles; on a surface
+// convex towards the camera the farthest of the four stands at or beyond the ray's own point.
+fn marchTexelDepthOf(depths : texture_depth_2d, uv : vec2f, scale : f32, full : vec2u) -> f32 {
+  let at = uv * vec2f(full);
+  let depth = textureLoad(depths, min(vec2u(at), full - 1u), 0);
+  if (scale >= 1.0 || !(depth > 0.0)) {
+    return depth;
+  }
+  let base = vec2i(floor(at - 0.5));
+  var farthest = depth;
+  for (var j = 0; j < 2; j++) {
+    for (var i = 0; i < 2; i++) {
+      let p = vec2u(clamp(base + vec2i(i, j), vec2i(0), vec2i(full) - 1));
+      let d = textureLoad(depths, p, 0);
+      // Reversed-Z depth is near ÷ distance: within the share, d (1 + share) is at least the own.
+      if (d > 0.0 && d < farthest && d * (1.0 + MARCH_SAME_SURFACE_SHARE) >= depth) {
+        farthest = d;
+      }
+    }
+  }
+  return farthest;
+}
+
 // The texel of the invocation at `local` in the workgroup at `group` of the dispatch over `area`.
 fn marchTexelOf(area : MarchArea, group : vec2u, local : vec2u) -> vec2u {
   return (vec2u(area.tiles.xy) + group) * MARCH_TILE_TEXELS + local;
