@@ -518,10 +518,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   `STEEPNESS_TAILS_VERSION` (rendering plan R10, R10.T6.a), at `SteepnessTailsRules::Marcum`
 ///   through `hyperion_surface::material::with_steepness_tails`, which the sim's tests have through
 ///   their dev-dependency on the surface crate's `hold-switches` feature.
-/// - the rest of a paired star's history from its pair's timeline, `BINARY_HOST_HISTORY_VERSION`
-///   (P14.T1.g), at `BinaryHostHistoryRules::Engine` through `with_binary_host_history`: the
-///   cometary halo's light, mass, mass loss and deaths, the habitability clock's and the moons'
-///   hot history's main-sequence ends, and the pulsar host's spin-down light.
 /// - a paired star's fate from its pair's timeline, `BINARY_HOST_FATE_VERSION` (P14.T28.g), at
 ///   `BinaryHostFateRules::Engine` through `with_binary_host_fate`: a planet's orbit follows the
 ///   engine's masses and radii, and the pair's common envelopes, mergers and supernovae are its
@@ -552,10 +548,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    let run = move || {
-        use crate::planetary::context::{BinaryHostHistoryRules, with_binary_host_history};
-        with_binary_host_history(BinaryHostHistoryRules::Engine, run)
-    };
     let run = move || {
         use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
         with_binary_host_fate(BinaryHostFateRules::Engine, run)

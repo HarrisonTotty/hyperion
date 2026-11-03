@@ -640,72 +640,6 @@ impl fmt::Display for BuildEncounterEnvironmentError {
 
 impl Error for BuildEncounterEnvironmentError {}
 
-/// The generator version from which the planetary stage reads the rest of a paired star's history
-/// from its pair's timeline (P14.T1.g): its light, mass, radius, mass loss and death for the
-/// cometary halo, its main-sequence clock and end for the habitability assessment and the moons'
-/// hot history, and its pulsar's spin-down light; 27, held with the 27 train.
-///
-/// Below it [`BinaryHostHistoryRules::in_force`] is [`BinaryHostHistoryRules::SingleModels`]:
-/// those readers read each star's own single-star model, and every figure is version 26's bit for
-/// bit. 27's bump deletes this hold, [`BinaryHostHistoryRules`] with its `SingleModels` arm, the
-/// tests' switch and its tripwire (`the_binary_host_history_is_held_only_until_the_27_bump`).
-pub(crate) const BINARY_HOST_HISTORY_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Where the halo's, the clocks' and the pulsar's readers read a paired star (its hold,
-/// [`BINARY_HOST_HISTORY_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum BinaryHostHistoryRules {
-    /// Version 26's and before: every star's own single-star model.
-    SingleModels,
-    /// Version 27's: a star of a pair the engine ran from its pair's timeline
-    /// ([`SystemContext::history_pair_at`]).
-    Engine,
-}
-
-impl BinaryHostHistoryRules {
-    /// The rules this generator version gives: the engine's from
-    /// [`BINARY_HOST_HISTORY_VERSION`], the single models' below it; in the tests, the rules a
-    /// test's switch sets on its thread ([`with_binary_host_history`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = BINARY_HOST_HISTORY_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= BINARY_HOST_HISTORY_VERSION {
-            Self::Engine
-        } else {
-            Self::SingleModels
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The paired stars' history rules a test sets on its thread, `None` for the version's.
-    static BINARY_HOST_HISTORY_RULES: core::cell::Cell<Option<BinaryHostHistoryRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the paired stars' history rules `rules` on this thread, for the tests to
-/// reach the engine's readings ahead of the bump; the version's rules are set back after, a panic
-/// in `run` included. 27's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_binary_host_history<R>(
-    rules: BinaryHostHistoryRules,
-    run: impl FnOnce() -> R,
-) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<BinaryHostHistoryRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            BINARY_HOST_HISTORY_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(BINARY_HOST_HISTORY_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
 /// The generator version from which the planetary stage's generation reads what a star of a pair
 /// the binary engine ran leaves, and when it dies, from its pair's timeline (P14.T1.h): the
 /// neutron stars second-generation planets form about, the white dwarf a debris disc and its
@@ -1165,20 +1099,16 @@ impl SystemContext {
     }
 
     /// Component `star`'s pair, its component there and the age at `t` its timeline is read at,
-    /// where from generator version 27 (P14.T1.g, [`BINARY_HOST_HISTORY_VERSION`]) the cometary
-    /// halo, the habitability clock, the moons' hot history and the pulsar host read the star from
-    /// the engine: if the engine ran it in a pair whose timeline holds `t`; `None` otherwise, and
-    /// for every star below 27, whose readers read its own model.
+    /// where the cometary halo, the habitability clock, the moons' hot history and the pulsar host
+    /// read the star from the engine (P14.T1.g, from generator version 27): if the engine ran it in
+    /// a pair whose timeline holds `t`; `None` otherwise, whose readers read its own model.
     #[must_use]
     pub(crate) fn history_pair_at(
         &self,
         star: usize,
         t: UniverseTime,
     ) -> Option<(&PairTimeline, PairComponent, Years)> {
-        match BinaryHostHistoryRules::in_force() {
-            BinaryHostHistoryRules::SingleModels => None,
-            BinaryHostHistoryRules::Engine => self.paired_at(star, t),
-        }
+        self.paired_at(star, t)
     }
 
     /// Component `star`'s state at `t` as the cometary halo reads it (P14.T1.g): from its pair's

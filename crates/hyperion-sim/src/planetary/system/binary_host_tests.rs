@@ -422,54 +422,11 @@ fn binary_host_xuv_leaves_an_unpaired_star_as_it_was() {
     assert!(checked > 150, "{checked} unpaired stars");
 }
 
-/// The rest of the paired stars' histories is held until the 26 → 27 bump: the rules in force are
-/// the single models', the tests' switch and 27's helper reach the engine's, and 26's and 25's
-/// helpers do not.
-#[test]
-fn the_binary_host_history_is_held_only_until_the_27_bump() {
-    use crate::planetary::context::{
-        BINARY_HOST_HISTORY_VERSION, BinaryHostHistoryRules, with_binary_host_history,
-    };
-    assert!(
-        GENERATOR_VERSION < BINARY_HOST_HISTORY_VERSION,
-        "the 26 → 27 bump reads the rest of a paired star's history from its pair's timeline: \
-         delete `BINARY_HOST_HISTORY_VERSION`, `BinaryHostHistoryRules` with its `SingleModels` \
-         arm and its match in `SystemContext::history_pair_at`, the tests' \
-         `with_binary_host_history`, its switch in `with_every_27_hold` (and the helper, if no \
-         other 27 hold is left), and this test; restate the tests held below 27"
-    );
-    assert_eq!(
-        BinaryHostHistoryRules::in_force(),
-        BinaryHostHistoryRules::SingleModels
-    );
-    assert_eq!(
-        with_binary_host_history(
-            BinaryHostHistoryRules::Engine,
-            BinaryHostHistoryRules::in_force
-        ),
-        BinaryHostHistoryRules::Engine
-    );
-    assert_eq!(
-        with_every_27_hold(BinaryHostHistoryRules::in_force),
-        BinaryHostHistoryRules::Engine
-    );
-    assert_eq!(
-        with_every_27_hold(|| {
-            with_binary_host_history(
-                BinaryHostHistoryRules::SingleModels,
-                BinaryHostHistoryRules::in_force,
-            )
-        }),
-        BinaryHostHistoryRules::SingleModels
-    );
-}
-
-/// Under the engine's history rules every star of a pair the engine ran reads, for the halo and
-/// the pulsar host, as the stellar stage has it: its state as `SystemStars::state_at`'s and its
-/// pulsar as its summary's, bit for bit; under the single models every star reads as its model.
+/// Every star of a pair the engine ran reads, for the halo and the pulsar host, as the stellar
+/// stage has it: its state as `SystemStars::state_at`'s and its pulsar as its summary's, bit for
+/// bit.
 #[test]
 fn binary_host_history_reads_every_paired_star_as_the_stellar_stage_does() {
-    use crate::planetary::context::{BinaryHostHistoryRules, with_binary_host_history};
     use crate::stellar::system::RemnantDetail;
     let galaxy = galaxy();
     let records = sample_records(&galaxy, 600, SampleFilter::ALL).unwrap();
@@ -490,19 +447,13 @@ fn binary_host_history_reads_every_paired_star_as_the_stellar_stage_does() {
                     Some(RemnantDetail::NeutronStar(pulsar)) => Some(pulsar),
                     Some(RemnantDetail::BlackHole(_)) | None => None,
                 };
-                with_binary_host_history(BinaryHostHistoryRules::Engine, || {
-                    assert_eq!(
-                        ctx.history_state_at(star, t),
-                        Some(*state),
-                        "{:?}",
-                        record.id()
-                    );
-                    assert_eq!(ctx.pulsar_at(star, t), pulsar, "{:?}", record.id());
-                });
-                with_binary_host_history(BinaryHostHistoryRules::SingleModels, || {
-                    assert_eq!(ctx.history_state_at(star, t), ctx.stars()[star].state_at(t));
-                    assert_eq!(ctx.pulsar_at(star, t), ctx.stars()[star].pulsar_at(t));
-                });
+                assert_eq!(
+                    ctx.history_state_at(star, t),
+                    Some(*state),
+                    "{:?}",
+                    record.id()
+                );
+                assert_eq!(ctx.pulsar_at(star, t), pulsar, "{:?}", record.id());
             }
             paired += 1;
         }
@@ -510,13 +461,11 @@ fn binary_host_history_reads_every_paired_star_as_the_stellar_stage_does() {
     assert!(paired >= 30, "{paired} paired systems' times checked");
 }
 
-/// A merger on the main sequence, a blue straggler, keeps its own main-sequence clock under the
-/// engine's history rules: its time left and its effective age add up to the main-sequence
+/// A merger on the main sequence, a blue straggler, keeps its own main-sequence clock: its time left and its effective age add up to the main-sequence
 /// lifetime of the product's mass at the merger, within the 1% its winds since move it (Hurley,
 /// Pols and Tout 2000, §5.1's `t_MS`), and not to its progenitor's, which its single model reads.
 #[test]
 fn binary_host_history_s_clock_of_a_main_sequence_merger_is_its_product_s() {
-    use crate::planetary::context::{BinaryHostHistoryRules, with_binary_host_history};
     use crate::stellar::binary::SegmentKind;
     let galaxy = galaxy();
     let t = UniverseTime::EPOCH;
@@ -546,11 +495,11 @@ fn binary_host_history_s_clock_of_a_main_sequence_merger_is_its_product_s() {
         .unwrap();
     let product = timeline.state_at(merged.start()).stars()[component.index()].mass();
     let state = timeline.state_at(age).stars()[component.index()];
-    let left = with_binary_host_history(BinaryHostHistoryRules::Engine, || {
+    let left = {
         let star = usize::from(pair.stars()[component.index()].get());
         let (_, _, at) = ctx.history_pair_at(star, t).unwrap();
         timeline.main_sequence_left(component, at).unwrap()
-    });
+    };
     let coeffs = crate::stellar::sse::ZCoeffs::new(ctx.composition().z_fit());
     let lifetime = crate::stellar::sse::main_sequence_lifetime(&coeffs, false, product.value());
     let sum = left.value() + state.age().value();
@@ -611,11 +560,11 @@ fn binary_host_history_s_main_sequence_end_is_where_its_timeline_leaves_it() {
     assert!(checked >= 2, "{checked} main-sequence ends checked");
 }
 
-/// A system the binary engine ran no pair of generates and reads the same records, its cometary
-/// halo and its habitability among them, under both history rules, bit for bit.
+/// A system the binary engine ran no pair of reads every star's history, its cometary halo's and
+/// its habitability clock's among them, as its own single-star model's: no star has a pair's
+/// history to read, at the epoch and at the clock window's ends.
 #[test]
 fn binary_host_history_leaves_an_unpaired_system_as_it_was() {
-    use crate::planetary::context::{BinaryHostHistoryRules, with_binary_host_history};
     let galaxy = galaxy();
     let records = sample_records(&galaxy, 200, SampleFilter::ALL).unwrap();
     let contexts: Vec<SystemContext> = records
@@ -627,40 +576,28 @@ fn binary_host_history_leaves_an_unpaired_system_as_it_was() {
         .collect();
     assert_eq!(contexts.len(), 3);
     for ctx in &contexts {
-        let read = |rules| {
-            with_binary_host_history(rules, || {
-                let system = generate_planets(SEED, ctx);
-                let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
-                let hooks: Vec<_> = snapshot
-                    .bodies()
-                    .iter()
-                    .map(|r| {
-                        system
-                            .hooks_at(ctx, r.index(), UniverseTime::EPOCH)
-                            .unwrap()
-                            .map(|h| format!("{:?}", h.habitability()))
-                    })
-                    .collect();
-                (snapshot, hooks)
-            })
-        };
-        assert_eq!(
-            read(BinaryHostHistoryRules::SingleModels),
-            read(BinaryHostHistoryRules::Engine),
-            "{:?}",
-            ctx.id()
-        );
+        for t in [ClockWindow::START, UniverseTime::EPOCH, ClockWindow::END] {
+            for (star, model) in ctx.stars().iter().enumerate() {
+                assert!(ctx.history_pair_at(star, t).is_none(), "{:?}", ctx.id());
+                assert_eq!(
+                    ctx.history_state_at(star, t),
+                    model.state_at(t),
+                    "{:?}",
+                    ctx.id()
+                );
+                assert_eq!(ctx.pulsar_at(star, t), model.pulsar_at(t), "{:?}", ctx.id());
+            }
+        }
     }
 }
 
 /// A star of a pair the engine ran that its pair has left on its own track, its state its single
-/// model's, reads as its model does under the engine's history rules, to the bit: the habitability
+/// model's, reads as its model does, to the bit: the habitability
 /// clock before and on its main sequence, the hot history's end and luminosity past it, a
 /// remnant's included, the halo's mass-loss rate, and, for a star its pair leaves alone to the end
 /// of its timeline, its death, whether by then or after it.
 #[test]
 fn binary_host_history_reads_a_star_its_pair_left_alone_as_its_model() {
-    use crate::planetary::context::{BinaryHostHistoryRules, with_binary_host_history};
     let galaxy = galaxy();
     let records = sample_records(&galaxy, 4_000, SampleFilter::ALL).unwrap();
     let (mut clocks, mut ends, mut rates, mut deaths) = (0, 0, 0, 0);
@@ -691,25 +628,23 @@ fn binary_host_history_reads_a_star_its_pair_left_alone_as_its_model() {
                     if model.state_at(t) != Some(state) {
                         continue;
                     }
-                    with_binary_host_history(BinaryHostHistoryRules::Engine, || {
-                        assert_same_bits(
-                            fastest_mass_loss_rate_in(&ctx, index, t).value(),
-                            fastest_mass_loss_rate(model, t).value(),
+                    assert_same_bits(
+                        fastest_mass_loss_rate_in(&ctx, index, t).value(),
+                        fastest_mass_loss_rate(model, t).value(),
+                    );
+                    rates += 1;
+                    let alone = PairHistory::of(timeline, until) == PairHistory::Detached
+                        && model.state_at(ClockWindow::END)
+                            == Some(timeline.state_at(until).stars()[k]);
+                    if alone {
+                        assert_eq!(
+                            first_death_in(&ctx, &[index], t),
+                            first_death(&[model]),
+                            "{:?}",
+                            record.id()
                         );
-                        rates += 1;
-                        let alone = PairHistory::of(timeline, until) == PairHistory::Detached
-                            && model.state_at(ClockWindow::END)
-                                == Some(timeline.state_at(until).stars()[k]);
-                        if alone {
-                            assert_eq!(
-                                first_death_in(&ctx, &[index], t),
-                                first_death(&[model]),
-                                "{:?}",
-                                record.id()
-                            );
-                            deaths += 1;
-                        }
-                    });
+                        deaths += 1;
+                    }
                     match state.phase() {
                         Phase::Protostar | Phase::PreMainSequence | Phase::MainSequence => {
                             let own = track.main_sequence_ends().map(|end| {
@@ -756,10 +691,9 @@ fn binary_host_history_reads_a_star_its_pair_left_alone_as_its_model() {
 }
 
 /// A star of a pair the engine ran that explodes there has an infinite halo mass-loss rate from
-/// its explosion under the engine's history rules, and a finite one before it.
+/// its explosion, and a finite one before it.
 #[test]
 fn binary_host_history_s_rate_is_infinite_from_a_paired_explosion() {
-    use crate::planetary::context::{BinaryHostHistoryRules, with_binary_host_history};
     let galaxy = galaxy();
     let records = sample_records(&galaxy, SEARCH, SampleFilter::ALL).unwrap();
     let mut checked = 0;
@@ -778,11 +712,9 @@ fn binary_host_history_s_rate_is_infinite_from_a_paired_explosion() {
         let [before, after] = [0.5, 1.0 + 1e-6].map(|share| {
             time_at_age(Years::new(sn.age().value() * share), model.age_at_epoch()).unwrap()
         });
-        with_binary_host_history(BinaryHostHistoryRules::Engine, || {
-            let rate = |at| fastest_mass_loss_rate_in(&ctx, star, at).value();
-            assert!(rate(before).is_finite(), "{:?}", ctx.id());
-            assert_eq!(rate(after), f64::INFINITY, "{:?}", ctx.id());
-        });
+        let rate = |at| fastest_mass_loss_rate_in(&ctx, star, at).value();
+        assert!(rate(before).is_finite(), "{:?}", ctx.id());
+        assert_eq!(rate(after), f64::INFINITY, "{:?}", ctx.id());
         checked += 1;
         if checked >= 3 {
             break;
