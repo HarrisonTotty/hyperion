@@ -214,14 +214,14 @@ pub(crate) const ZONE_EDGE_TOLERANCE: f64 = 1e-9;
 /// The fit smooths a ragged boundary, so a planet on it is marginal either way. Placed on it, as
 /// a law reaching inside the limit had it, a planet was unbound by any outward drift of the pair's
 /// fit before a common envelope, 10⁻⁶–10⁻² of it as a donor's wind shifts the pair's mass ratio.
-/// Placed 3% inside, it stays through every drift short of the fit's own accuracy, and one past it
-/// still unbinds it. The disc stays cut at the fit, and the fate, `zones_at` and the census read
+/// Placed 3% inside the zone, it stays through every drift short of the fit's own accuracy, and
+/// one past it still unbinds it. The disc stays cut at the fit, and the fate, `zones_at` and the census read
 /// the fit itself, so every present body lies inside its zone by the fit.
 pub(crate) const P_TYPE_PLACEMENT_MARGIN: f64 = 0.03;
 
-/// The generator version from which placement keeps a planet [`P_TYPE_PLACEMENT_MARGIN`] inside
-/// its zone's P-type inner limit (P14.T9.d, research-leans-37 §1): 28, held with the 28 train
-/// (27's list froze before it).
+/// The generator version from which placement keeps a planet's periapsis
+/// [`P_TYPE_PLACEMENT_MARGIN`] outside its zone's P-type inner limit, inside the zone (P14.T9.d,
+/// research-leans-37 §1): 28, held with the 28 train (27's list froze before it).
 ///
 /// Below it [`ZonePlacementMarginRules::in_force`] is [`ZonePlacementMarginRules::OnTheLimit`]: a
 /// planet whose law lies inside the limit is placed on it, and every figure is version 27's bit for
@@ -236,7 +236,7 @@ pub(crate) const ZONE_PLACEMENT_MARGIN_VERSION: GeneratorVersion = GeneratorVers
 pub(crate) enum ZonePlacementMarginRules {
     /// Version 27's and before: on the limit.
     OnTheLimit,
-    /// Version 28's: [`P_TYPE_PLACEMENT_MARGIN`] inside it.
+    /// Version 28's: [`P_TYPE_PLACEMENT_MARGIN`] outside it, inside the zone.
     Margin,
 }
 
