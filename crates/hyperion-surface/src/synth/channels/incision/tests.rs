@@ -784,8 +784,29 @@ fn no_trunk_cuts_deeper_than_its_cell_s_bound_and_a_cell_without_tributaries_hea
                 None => assert_eq!(bits(bound), bits(0.0), "{c:?}: no trunk, bound {bound} m"),
                 Some(trunk) => {
                     if let Some(groove) = Groove::of(&trunk, radius_m) {
-                        let Depth::Constant(depth) = groove.depth else {
-                            panic!("{c:?}: a trunk's groove has one depth all along it");
+                        // From generator version 25 a world dry now's trunk is graded over its
+                        // second chord to its receiver's depth (R09.T6.h), and from 26 a world wet
+                        // now's valley too, held between its channel's floor and the level's cap
+                        // (R09.T6.i): its own cell's depth is its first chord's, and the rest lies
+                        // in the receiver's cell.
+                        let depth = match groove.depth {
+                            Depth::Constant(depth) => depth,
+                            Depth::Graded { from_m, .. } => from_m,
+                            Depth::GradedValley {
+                                from_m,
+                                floor_m,
+                                cap_m,
+                                ..
+                            } => {
+                                if from_m <= floor_m {
+                                    floor_m
+                                } else if from_m >= cap_m {
+                                    cap_m
+                                } else {
+                                    from_m
+                                }
+                            }
+                            Depth::Tributary { .. } => panic!("{c:?}: a trunk's groove"),
                         };
                         assert!(depth <= bound, "{c:?}: {depth} m over {bound} m");
                         trunks += 1;
@@ -804,8 +825,11 @@ fn no_trunk_cuts_deeper_than_its_cell_s_bound_and_a_cell_without_tributaries_hea
             }
         }
         assert!(trunks > 100, "{trunks} trunks");
+        // More than two fifths: at generator versions 25 and 26 the Earth-like world's are 561 of
+        // 1,249 (56 of 128 on the browser target's sample), more than half at 24, and the
+        // Mars-like world's 3,281 of 4,091.
         assert!(
-            exact * 2 > trunks,
+            exact * 5 > trunks * 2,
             "{exact} of {trunks} trunks at their bound"
         );
         // A world dry now's trunks cut their epoch's valleys as they are, and none of its cells
