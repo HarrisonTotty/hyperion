@@ -172,6 +172,20 @@ export const HANDOVER_APPROACH: {
   halo: { ratePerS: 0.05, startRatio: 3, closestRatio: 0.065, holdS: 12, endRatio: 1.25 },
 };
 
+/**
+ * The line a launch's looks are flown along: the halo's for its look (`--look handover-halo`),
+ * which closes on past the hand-over to its crater resolved; else a smoke's or a full run's.
+ */
+export function handoverApproachFor(
+  look: HandoverLookName | undefined,
+  smoke: boolean,
+): HandoverApproach {
+  if (look === "handover-halo") {
+    return HANDOVER_APPROACH.halo;
+  }
+  return smoke ? HANDOVER_APPROACH.smoke : HANDOVER_APPROACH.full;
+}
+
 /** How long the approach closes, s. */
 function closingS(approach: HandoverApproach): number {
   return Math.log(approach.startRatio / approach.closestRatio) / approach.ratePerS;

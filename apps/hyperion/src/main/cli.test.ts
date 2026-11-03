@@ -664,6 +664,24 @@ describe("the several-views check's options", () => {
     });
   });
 
+  it("refuses --look handover-halo on a served world, whose crater it does not name", () => {
+    const error = refusal([
+      "--views-check",
+      "--terrain",
+      "--handover",
+      "--universe",
+      UNIVERSE,
+      "--body",
+      BODY,
+      "--look",
+      "handover-halo",
+    ]);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      "error: --look handover-halo centres a crater of TERRAIN TEST's moon, not a served world's",
+    ]);
+  });
+
   it("refuses --look without --handover", () => {
     const error = refusal(["--views-check", "--terrain", "--look", "handover-30"]);
     expect([error.exitCode, error.message]).toEqual([

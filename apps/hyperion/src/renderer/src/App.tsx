@@ -15,7 +15,7 @@ import {
 import { ViewDisplay } from "./displays/view/ViewDisplay";
 import { type CheckedRun, ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
 import { placedAtmosphere } from "./displays/view/check/atmospherePlaces";
-import { HANDOVER_APPROACH } from "./displays/view/check/handoverGeometry";
+import { handoverApproachFor } from "./displays/view/check/handoverGeometry";
 import {
   handoverRangeAtM,
   HandoverScenes,
@@ -171,16 +171,9 @@ function checkProbesOf(
         { widthPx: windowPx, heightPx: windowPx },
         window.devicePixelRatio,
       );
-      // The halo's look closes on past the hand-over to its crater resolved (R10.T1.c).
-      const approach =
-        launch.look === "handover-halo"
-          ? HANDOVER_APPROACH.halo
-          : launch.smoke
-            ? HANDOVER_APPROACH.smoke
-            : HANDOVER_APPROACH.full;
       const scenes = new HandoverScenes(
         world,
-        approach,
+        handoverApproachFor(launch.look, launch.smoke),
         handoverRangeAtM(world, launch.setting, selection.widthPx).rangeM,
       );
       run = { kind: "handover", terrain: terrainProbe(scenes.sceneOptions), scenes };

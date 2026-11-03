@@ -17,7 +17,6 @@ import type {
   HandoverComparisonRecord,
   HandoverExposureRecord,
   HandoverFrameRecord,
-  HandoverLookName,
   HandoverLookRecord,
   HandoverOwnMeans,
   HandoverRegime,
@@ -59,6 +58,7 @@ import type {
   ViewsCheckViewName,
   ViewsCheckViewRecord,
 } from "../preload/api";
+import { NAMED_HANDOVER_LOOK_NAMES } from "../preload/viewsCheckLaunch";
 import { HANDOVER_LOOK_RULES, HANDOVER_SWITCH_REGIMES } from "./handoverCheckResults";
 
 type Rec = Readonly<Record<string, unknown>>;
@@ -791,13 +791,6 @@ function isNonNegative(value: unknown): value is number {
   return isFiniteNumber(value) && value >= 0;
 }
 
-const HANDOVER_LOOK_NAMES: ReadonlyArray<HandoverLookName> = [
-  "handover-30",
-  "handover-90",
-  "handover-terminator",
-  "handover-halo",
-];
-
 const HANDOVER_REGIMES: ReadonlyArray<HandoverRegime> = ["disc", "figure", "terrain", "none"];
 
 const HANDOVER_SWITCHES: ReadonlyArray<HandoverSwitchName> = [
@@ -964,7 +957,7 @@ function handoverLook(value: unknown): HandoverLookRecord | null {
   if (!isRecord(value) || !isRecord(value["switchesS"])) {
     return null;
   }
-  const name = HANDOVER_LOOK_NAMES.find((each) => each === value["name"]) ?? null;
+  const name = NAMED_HANDOVER_LOOK_NAMES.find((each) => each === value["name"]) ?? null;
   const nominal = handoverAngles(value["nominal"]);
   const atRange = handoverAngles(value["atRange"]);
   const exposure = handoverExposure(value["exposure"]);

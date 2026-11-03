@@ -14,6 +14,7 @@ import {
   datumPointM,
   HALO_CRATER_CENTRE,
   HANDOVER_APPROACH,
+  handoverApproachFor,
   HANDOVER_HALO_LOOK,
   HANDOVER_LOOKS,
   type HandoverLook,
@@ -95,6 +96,20 @@ describe("the hand-over check's looks", () => {
       Math.round(heightM / 1e3),
       Math.round(8_104 / (heightM * radPerPx)),
     ]).toEqual([HANDOVER_APPROACH.full, 997, 266, 30]);
+  });
+
+  it("flies a launch's looks along the halo's line for its look alone, else the run's", () => {
+    expect([
+      handoverApproachFor("handover-halo", false),
+      handoverApproachFor("handover-halo", true),
+      handoverApproachFor("handover-30", false),
+      handoverApproachFor(undefined, true),
+    ]).toEqual([
+      HANDOVER_APPROACH.halo,
+      HANDOVER_APPROACH.halo,
+      HANDOVER_APPROACH.full,
+      HANDOVER_APPROACH.smoke,
+    ]);
   });
 
   it("sees the halo's crater from straight above, the star 15° from its normal, at every range", () => {

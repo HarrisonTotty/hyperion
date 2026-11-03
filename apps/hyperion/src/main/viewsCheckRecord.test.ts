@@ -279,6 +279,16 @@ describe("the hand-over check's record (R10.T10.g)", () => {
     expect(readHandoverCheckRecord(structuredClone(HANDOVER_RECORD))).toEqual(HANDOVER_RECORD);
   });
 
+  it("is read back with the halo's look, recorded, and refused judged or under another scene (R10.T1.c)", () => {
+    const halo = passingLook("handover-halo", "HAND-OVER HALO", false);
+    const record = { ...HANDOVER_RECORD, looks: [halo] };
+    expect([
+      readHandoverCheckRecord(structuredClone(record)),
+      readHandoverCheckRecord({ ...record, looks: [{ ...halo, judged: true }] }),
+      readHandoverCheckRecord({ ...record, looks: [{ ...halo, scene: "HAND-OVER 30°" }] }),
+    ]).toEqual([record, null, null]);
+  });
+
   it("is read back with a look that was not locked and compared nothing", () => {
     const look = {
       ...passingLook("handover-90", "HAND-OVER 90°", true),

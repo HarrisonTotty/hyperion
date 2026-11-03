@@ -6,7 +6,7 @@ import type {
   HandoverLookRecord,
   HandoverTexelRecord,
 } from "../preload/api";
-import { HANDOVER_RECORD } from "./fixtures/handoverRecord";
+import { HANDOVER_RECORD, passingLook } from "./fixtures/handoverRecord";
 import {
   buildHandoverCheckResults,
   HANDOVER_BOUND_STOPS,
@@ -352,6 +352,34 @@ describe("the hand-over check's results", () => {
     expect(failuresOf({ ...asked, run: { ...asked.run, look: "handover-terminator" } })).toBe(
       "the looks ran handover-90, where handover-terminator is asked",
     );
+  });
+
+  it("record a --look handover-halo run's cells over 1/3 stop without judging them (R10.T1.c)", () => {
+    const halo: HandoverLookRecord = {
+      ...passingLook("handover-halo", "HAND-OVER HALO", false),
+      comparisons: passingLook("handover-halo", "HAND-OVER HALO", false).comparisons.map(
+        (each, i) =>
+          i === 0
+            ? withTexel({
+                texel: 20_000,
+                sharedPixels: 4,
+                meanBefore: 0.01,
+                meanAfter: 0.02,
+                muFloored: false,
+              })(each)
+            : each,
+      ),
+    };
+    const given = input({ ...HANDOVER_RECORD, looks: [halo] });
+    const results = buildHandoverCheckResults({
+      ...given,
+      run: { ...given.run, look: "handover-halo" },
+    });
+    expect([
+      results.overall,
+      results.looks[0]?.comparisons[0]?.verdict,
+      results.looks[0]?.comparisons[0]?.texelsOver,
+    ]).toEqual(["pass", "recorded", 1]);
   });
 
   it("fail a run that met an engine fault", () => {

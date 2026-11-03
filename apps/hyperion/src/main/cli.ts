@@ -548,6 +548,11 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   if (options["look"] !== undefined && options["handover"] !== true) {
     command.error("error: --look is an option of --handover, which was not given");
   }
+  if (options["look"] === "handover-halo" && options["universe"] !== undefined) {
+    command.error(
+      "error: --look handover-halo centres a crater of TERRAIN TEST's moon, not a served world's",
+    );
+  }
   if (options["viewsCheck"] === true) {
     // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
     if (options["descentSpike"] === true) {

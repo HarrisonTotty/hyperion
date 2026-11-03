@@ -180,6 +180,17 @@ describe("the views check's launch switch", () => {
     ]).toEqual([null, null, null]);
   });
 
+  it("carries the halo's look on a hand-over check of the weathered fixture (R10.T1.c)", () => {
+    const halo: ViewsCheckLaunch = {
+      ...LAUNCH,
+      run: "handover",
+      fixture: "terrain-test-weathered",
+      look: "handover-halo",
+    };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(halo)])).toEqual(halo);
+    expect(readViewsCheckLaunch({ ...LAUNCH, run: "terrain", look: "handover-halo" })).toBeNull();
+  });
+
   it("is absent on any other launch", () => {
     expect(viewsCheckLaunchFromArgv(["--hyperion-server-url=ws://127.0.0.1:7878/ws"])).toBeNull();
   });
