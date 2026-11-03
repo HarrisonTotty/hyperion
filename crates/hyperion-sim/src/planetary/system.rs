@@ -155,7 +155,9 @@ use crate::planetary::derive::{
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
 use crate::planetary::drift::{DriftingOrbit, drift_cell};
 use crate::planetary::error::ResolveBodyError;
-use crate::planetary::fate::{BodyFate, BodyState, FateAt, FateBody, FateHost, ScatterDraws};
+use crate::planetary::fate::{
+    BodyFate, BodyState, DestructionCause, FateAt, FateBody, FateHost, ScatterDraws,
+};
 use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::halo::{
     ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
@@ -417,6 +419,24 @@ struct MoonPart {
     orbit: KeplerElements,
 }
 
+impl MoonPart {
+    /// The moon's state at `t`, in the system of `ctx`, whose parent's state then is `parent` and
+    /// whose history is `fate` ([`moon_state`]), with the time its rock evaporates along that
+    /// history, if it does (P14.T55.b.a, [`BodyFate::moon_evaporation`]).
+    #[must_use]
+    fn state_at(
+        &self,
+        parent: BodyState,
+        fate: &BodyFate<'_>,
+        ctx: &SystemContext,
+        t: UniverseTime,
+    ) -> (BodyState, Option<UniverseTime>) {
+        let evaporated = fate.moon_evaporation(self.satellite.mass());
+        let state = moon_state(parent, &self.satellite, ctx.age_at_epoch(), t, evaporated);
+        (state, evaporated)
+    }
+}
+
 /// A belt member's primordial state: the member, its belt and what the fate transform reads.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct MemberPart {
@@ -451,7 +471,8 @@ impl Body {
         )
         .expect("a placed planet's mass and its density are positive")
         .with_circularisation(circularisation)
-        .with_scatter_draws(ScatterDraws::Stream { seed, body: id });
+        .with_scatter_draws(ScatterDraws::Stream { seed, body: id })
+        .evaporating();
         Self {
             index: placed.index(),
             host: zone.host(),
@@ -479,7 +500,8 @@ impl Body {
             member.mass(),
             belt.composition().member_density(),
         )
-        .expect("a member's mass and density are positive");
+        .expect("a member's mass and density are positive")
+        .evaporating();
         Self {
             index: member.index(),
             host: belt.host(),
@@ -2480,7 +2502,8 @@ impl PlanetarySystem {
         };
         let zone = self.zone_of(primary);
         let host = fate_host(ctx, zone);
-        let fate = self.fate_of(primary, &host).at(t);
+        let history = self.fate_of(primary, &host);
+        let fate = history.at(t);
         let Some(centre) = fate
             .trajectory()
             .map(|trajectory| epoch.position(zone, trajectory))
@@ -2490,9 +2513,11 @@ impl PlanetarySystem {
         Ok(match &body.part {
             Part::Planet(_) | Part::Member(_) | Part::Ring(_) => Some(centre),
             Part::Moon(moon) => {
-                match moon_state(fate.state(), &moon.satellite, ctx.age_at_epoch(), t) {
+                let (state, evaporated) = moon.state_at(fate.state(), &history, ctx, t);
+                match state {
                     BodyState::Present => {
-                        let (orbit, _) = moon_trajectory(ctx, moon, t, fate.changes_at());
+                        let (orbit, _) =
+                            moon_trajectory(ctx, moon, t, (fate.changes_at(), evaporated));
                         Some(centre.translated(orbit.relative_state_at(t).0))
                     }
                     BodyState::NotYetFormed
@@ -2546,7 +2571,8 @@ impl PlanetarySystem {
         };
         let zone = self.zone_of(primary);
         let host = fate_host(ctx, zone);
-        let fate = self.fate_of(primary, &host).at(t);
+        let history = self.fate_of(primary, &host);
+        let fate = history.at(t);
         let trajectory = fate
             .trajectory()
             .expect("a body with a position has its primary's orbit then");
@@ -2554,7 +2580,8 @@ impl PlanetarySystem {
         let velocity = match &body.part {
             Part::Planet(_) | Part::Member(_) | Part::Ring(_) => centre,
             Part::Moon(moon) => {
-                let (orbit, _) = moon_trajectory(ctx, moon, t, fate.changes_at());
+                let evaporated = history.moon_evaporation(moon.satellite.mass());
+                let (orbit, _) = moon_trajectory(ctx, moon, t, (fate.changes_at(), evaporated));
                 centre + orbit.relative_state_at(t).1
             }
         };
@@ -2681,7 +2708,7 @@ impl PlanetarySystem {
             Part::Moon(moon) => {
                 let label = label::label(self, index).expect("every body of a system has a label");
                 let record = self.satellite_record(&epoch, &cosines, body, label, &now, &fate);
-                let state = moon_state(now.state, &moon.satellite, ctx.age_at_epoch(), t);
+                let (state, _) = moon.state_at(now.state, &fate, ctx, t);
                 let present = state == BodyState::Present && now.position.is_some();
                 let derived = if present {
                     let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
@@ -3392,7 +3419,7 @@ impl PlanetarySystem {
         (now, fate): (&ParentNow, &BodyFate<'_>),
     ) -> Option<HeldMoonLaw> {
         let (ctx, t) = (epoch.ctx, epoch.t);
-        let state = moon_state(now.state, &moon.satellite, ctx.age_at_epoch(), t);
+        let (state, _) = moon.state_at(now.state, fate, ctx, t);
         if state != BodyState::Present || now.position.is_none() {
             return None;
         }
@@ -4267,9 +4294,9 @@ impl PlanetarySystem {
         fate: &BodyFate<'_>,
     ) -> BodyRecord {
         let (t, ctx) = (epoch.t, epoch.ctx);
-        let state = match &body.part {
-            Part::Moon(moon) => moon_state(parent.state, &moon.satellite, ctx.age_at_epoch(), t),
-            Part::Ring(_) => parent.state,
+        let (state, evaporated) = match &body.part {
+            Part::Moon(moon) => moon.state_at(parent.state, fate, ctx, t),
+            Part::Ring(_) => (parent.state, None),
             Part::Planet(_) | Part::Member(_) => unreachable!("a satellite is a moon or a ring"),
         };
         let identity =
@@ -4294,7 +4321,8 @@ impl PlanetarySystem {
                 .rotation(Section::NotApplicable),
             (Part::Moon(moon), true, Some(centre)) => {
                 let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
-                let (trajectory, valid_until) = moon_trajectory(ctx, moon, t, parent.changes_at);
+                let (trajectory, valid_until) =
+                    moon_trajectory(ctx, moon, t, (parent.changes_at, evaporated));
                 let now = MoonNow {
                     body,
                     moon,
@@ -6576,27 +6604,46 @@ pub(crate) fn with_first_stage_recomputed<R>(run: impl FnOnce() -> R) -> R {
 }
 
 /// The state at `t` of the moon `satellite`, in a system aged `age_at_epoch` at the epoch, whose
-/// parent's state then is `parent`: its parent's, unless a giant-impact moon has receded past its
-/// stability limit and been lost first (P14.T18).
+/// parent's state then is `parent` and whose own rock has evaporated by `evaporated`, if it does
+/// ([`BodyFate::moon_evaporation`], P14.T55.b.a): its parent's, unless a giant-impact moon has
+/// receded past its stability limit and been lost first (P14.T18), or its rock evaporated first.
 #[must_use]
 fn moon_state(
     parent: BodyState,
     satellite: &Satellite,
     age_at_epoch: Years,
     t: UniverseTime,
+    evaporated: Option<UniverseTime>,
 ) -> BodyState {
-    match (parent, satellite.moon()) {
+    let state = match (parent, satellite.moon()) {
         (BodyState::Present, SatelliteMoon::GiantImpact(moon)) => moon.state_at(age_at_epoch, t),
         (BodyState::Present, SatelliteMoon::Regular(_) | SatelliteMoon::Captured(_)) => {
             BodyState::Present
         }
         (other, _) => other,
+    };
+    let Some(at) = evaporated.filter(|&at| t >= at) else {
+        return state;
+    };
+    let first = match state {
+        BodyState::NotYetFormed => false,
+        BodyState::Present => true,
+        BodyState::Destroyed { at: ended, .. } | BodyState::Unbound { at: ended } => ended > at,
+    };
+    if first {
+        BodyState::Destroyed {
+            cause: DestructionCause::Evaporated,
+            at,
+        }
+    } else {
+        state
     }
 }
 
 /// How the present moon `moon` moves about its planet at `t`, and the time its record holds until,
-/// inside the clock window: its planet's next change `parent_changes`, its loss, or for a
-/// receding giant-impact moon the end of its drift cell (P14.T45.a).
+/// inside the clock window: its planet's next change `parent_changes`, its loss, its rock's
+/// evaporation `evaporated` (P14.T55.b.a), or for a receding giant-impact moon the end of its drift
+/// cell (P14.T45.a).
 ///
 /// A receding moon's phase is anchored at the epoch, held between the system's birth and the
 /// moon's loss, where its elements are its own then.
@@ -6605,12 +6652,15 @@ fn moon_trajectory(
     ctx: &SystemContext,
     moon: &MoonPart,
     t: UniverseTime,
-    parent_changes: Option<UniverseTime>,
+    (parent_changes, evaporated): (Option<UniverseTime>, Option<UniverseTime>),
 ) -> (DriftingOrbit, Option<UniverseTime>) {
     let within = |time: UniverseTime| ClockWindow::contains(time).then_some(time);
     let age_at_epoch = ctx.age_at_epoch();
     let lost = moon_lost_at(&moon.satellite, age_at_epoch).filter(|&lost| lost > t);
-    let next = earliest(parent_changes, lost);
+    let next = earliest(
+        earliest(parent_changes, lost),
+        evaporated.filter(|&at| at > t),
+    );
     if let SatelliteMoon::GiantImpact(impact) = moon.satellite.moon() {
         let birth = time_at_age(Years::new(0.0), age_at_epoch)
             .expect("a system's birth, under 14 Gyr ago, is a time of the clock")

@@ -363,16 +363,18 @@ impl PlanetarySystem {
         let body = self.body(index).ok_or(ResolveBodyError::NoSuchBody)?;
         Ok(match &body.part {
             Part::Ring(_) => (state == BodyState::Present).then_some(at_rest),
-            Part::Moon(moon) => match moon_state(state, &moon.satellite, ctx.age_at_epoch(), t) {
-                BodyState::Present => {
-                    let (trajectory, _) = moon_trajectory(ctx, moon, t, None);
-                    let (position, velocity) = trajectory.relative_state_at(t);
-                    Some((SystemPosition::ORIGIN.translated(position), velocity))
+            Part::Moon(moon) => {
+                match moon_state(state, &moon.satellite, ctx.age_at_epoch(), t, None) {
+                    BodyState::Present => {
+                        let (trajectory, _) = moon_trajectory(ctx, moon, t, (None, None));
+                        let (position, velocity) = trajectory.relative_state_at(t);
+                        Some((SystemPosition::ORIGIN.translated(position), velocity))
+                    }
+                    BodyState::NotYetFormed
+                    | BodyState::Destroyed { .. }
+                    | BodyState::Unbound { .. } => None,
                 }
-                BodyState::NotYetFormed
-                | BodyState::Destroyed { .. }
-                | BodyState::Unbound { .. } => None,
-            },
+            }
             Part::Planet(_) | Part::Member(_) => {
                 unreachable!("a rogue planet's bodies are its moons and rings")
             }
@@ -494,7 +496,7 @@ impl PlanetarySystem {
     ) -> BodyRecord {
         let parent = object_state(ctx, t);
         let state = match &body.part {
-            Part::Moon(moon) => moon_state(parent, &moon.satellite, ctx.age_at_epoch(), t),
+            Part::Moon(moon) => moon_state(parent, &moon.satellite, ctx.age_at_epoch(), t, None),
             Part::Ring(_) => parent,
             Part::Planet(_) | Part::Member(_) => {
                 unreachable!("a rogue planet's bodies are its moons and rings")
@@ -520,7 +522,7 @@ impl PlanetarySystem {
                 .figure(Section::NotApplicable)
                 .rotation(Section::NotApplicable),
             (Part::Moon(moon), BodyState::Present) => {
-                let (trajectory, valid_until) = moon_trajectory(ctx, moon, t, None);
+                let (trajectory, valid_until) = moon_trajectory(ctx, moon, t, (None, None));
                 builder
                     .orbit(Section::Ok(
                         BodyOrbit::new(*trajectory.elements(), valid_until)

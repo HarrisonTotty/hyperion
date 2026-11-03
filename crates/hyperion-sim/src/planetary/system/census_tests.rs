@@ -1823,13 +1823,24 @@ const SURVIVOR_AGE_EDGES_GYR: [f64; 2] = [1.0, 10.0];
 /// as under every 26 hold, since its host left the main sequence: four moons of a 21 M⊕ planet at
 /// 1,012 S⊕ about a 1.23 M☉ star on its first giant branch, at 5.90 Gyr, at 2,008–2,045 K; and a
 /// belt member of 2.8 × 10⁻⁵ M⊕ at 1,407 S⊕ about a core-helium-burning 2.1 M☉ star, at 1.05 Gyr,
-/// at 2,214 K. P14.T55.b.a's evaporation is to remove them.
+/// at 2,214 K. P14.T55.b.a's evaporation removes them under every 28 hold, each on its host's main
+/// sequence.
 const HOT_SMALL_SURVIVORS: [(usize, &str); 5] = [
     (835, "42006cadffc00004.0201"),
     (835, "42006cadffc00004.0202"),
     (835, "42006cadffc00004.0203"),
     (835, "42006cadffc00004.0204"),
     (2_299, "41ffacb600000006.e101"),
+];
+
+/// The bodies under [`EVAPORATING_MASS`] above [`EVAPORATING_SURFACE`] at their mean, and so at
+/// their warmest zone, in a system at least 1 Gyr old that the census publishes present under
+/// every 27 hold since P14.T1.e's paired light: two captured moons of 5 × 10⁻¹² and 10⁻¹⁰ M⊕ of a
+/// 2.8 M⊕ planet at 0.049 au about the accretor of a pair, grown from 0.90 to 1.53 M☉ and now at
+/// 10 L☉, at 2,184 K, at 2.49 Gyr. P14.T55.b.a's evaporation removes them under every 28 hold.
+const PAIRED_LIGHT_SURVIVORS: [(usize, &str); 2] = [
+    (6_630, "4200aca9ffc00001.0501"),
+    (6_630, "4200aca9ffc00001.0502"),
 ];
 
 /// The census's count of the present bodies under [`EVAPORATING_MASS`] whose surface is above
@@ -1846,102 +1857,336 @@ struct SurvivorCount {
     old: BTreeMap<&'static str, Vec<(usize, String, String)>>,
 }
 
+impl SurvivorCount {
+    /// Counts the present body of `case`, of the system of rank `rank` and context `ctx`, if it is
+    /// under [`EVAPORATING_MASS`] and above [`EVAPORATING_SURFACE`] at its mean or its warmest
+    /// zone.
+    fn add(&mut self, rank: usize, ctx: &SystemContext, case: &AuditCase<'_>) {
+        self.bodies += 1;
+        let mass = case
+            .record
+            .mass()
+            .ok()
+            .copied()
+            .unwrap_or(case.derived.mass());
+        if mass >= EVAPORATING_MASS {
+            return;
+        }
+        let conditions = case.surface().map(Surface::conditions);
+        let mean = conditions.map_or(
+            case.derived.surface_temperature(),
+            SurfaceConditions::mean_surface_temperature,
+        );
+        let warmest = conditions.map_or(mean, |c| c.climate_range().1);
+        let age_gyr = ctx.age_at_epoch().value() / 1e9;
+        let bin = age_bin(age_gyr);
+        for (read, t) in [("mean", mean), ("warmest zone", warmest)] {
+            if t <= EVAPORATING_SURFACE {
+                continue;
+            }
+            *self.by_age.entry((read, bin, case.kind)).or_default() += 1;
+            if bin > 0 {
+                self.old.entry(read).or_default().push((
+                    rank,
+                    case.record.identity().id().to_string(),
+                    format!(
+                        "{} of {:.3e} M⊕ at {:.0} K, {age_gyr:.2} Gyr",
+                        named(rank, case),
+                        mass.value(),
+                        t.value()
+                    ),
+                ));
+            }
+        }
+    }
+
+    /// Adds `share`'s counts.
+    fn merge(&mut self, share: Self) {
+        self.bodies += share.bodies;
+        for (key, n) in share.by_age {
+            *self.by_age.entry(key).or_default() += n;
+        }
+        for (read, bodies) in share.old {
+            self.old.entry(read).or_default().extend(bodies);
+        }
+    }
+
+    /// The count's report, under every hold of `version`.
+    fn report(&self, version: u16) -> String {
+        let line = "a string takes a line";
+        let mut report = format!(
+            "P14.T55.b's survivors under every {version} hold: {} bodies; under {} M⊕ above {} K\n",
+            self.bodies,
+            EVAPORATING_MASS.value(),
+            EVAPORATING_SURFACE.value()
+        );
+        for ((read, bin, kind), n) in &self.by_age {
+            writeln!(report, "  by its {read}: {} {kind}: {n}", AGE_BINS[*bin]).expect(line);
+        }
+        for (read, bodies) in &self.old {
+            writeln!(report, "  past 1 Gyr by its {read}: {}", bodies.len()).expect(line);
+            for (_, _, body) in bodies {
+                writeln!(report, "    {body}").expect(line);
+            }
+        }
+        report
+    }
+
+    /// The bodies past 1 Gyr above [`EVAPORATING_SURFACE`] at their warmest zone, by their
+    /// system's rank and their ID, in order.
+    fn old_at_their_warmest(&self) -> Vec<(usize, &str)> {
+        let mut survivors: Vec<(usize, &str)> = self
+            .old
+            .get("warmest zone")
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .map(|(rank, id, _)| (*rank, id.as_str()))
+            .collect();
+        survivors.sort_unstable();
+        survivors
+    }
+}
+
+/// The names of the age bins of [`SURVIVOR_AGE_EDGES_GYR`].
+const AGE_BINS: [&str; 3] = ["< 1 Gyr", "1–10 Gyr", "> 10 Gyr"];
+
+/// The bin of [`SURVIVOR_AGE_EDGES_GYR`] a system `age_gyr` old falls in.
+fn age_bin(age_gyr: f64) -> usize {
+    SURVIVOR_AGE_EDGES_GYR
+        .iter()
+        .filter(|&&edge| age_gyr >= edge)
+        .count()
+}
+
 /// P14.T55.b's survival count (research-galaxy-close-out §4): over the ordinary census under every
 /// hold of version 27, the present bodies under 0.1 M⊕ whose surface is above 2,000 K, by their
 /// system's age, under 1, 1–10 and over 10 Gyr, the surface read at its mean temperature (the
-/// record's, or its derivation's where its surface is not `Ok`) and at its warmest zone, its
-/// dayside's, nearer the surface temperature of their locked planet (the lane's lean, 2026-11-02:
-/// their KIC 1255b's, about 2,100 K as recalled, not re-read, is its substellar temperature). None
-/// is above it at its mean, and
-/// the five [`HOT_SMALL_SURVIVORS`] are at their warmest zone past 1 Gyr: bodies that would have
-/// evaporated, pinned until P14.T55.b.a removes them.
+/// record's, or its derivation's where its surface is not `Ok`) and at its warmest zone. The two
+/// [`PAIRED_LIGHT_SURVIVORS`] are above it at their mean, and they and the five
+/// [`HOT_SMALL_SURVIVORS`] at their warmest zone past 1 Gyr: bodies that would have evaporated,
+/// pinned under 27's rules, which P14.T55.b.a removes at 28
+/// ([`composition_census_under_every_28_hold_publishes_no_hot_small_body_past_its_evaporation`]).
 #[test]
 #[ignore = "slow: 10⁵ bodies of 6,800 systems under every 27 hold, on sixteen threads"]
-fn composition_census_under_every_27_hold_publishes_five_hot_small_bodies_past_1_gyr() {
+fn composition_census_under_every_27_hold_publishes_seven_hot_small_bodies_past_1_gyr() {
     let start = Instant::now();
     let mut count = SurvivorCount::default();
     for share in tallies_under_every_27_hold(
         ORDINARY_SYSTEMS,
-        |tally: &mut SurvivorCount, rank, ctx, case| {
-            tally.bodies += 1;
-            let mass = case
-                .record
-                .mass()
-                .ok()
-                .copied()
-                .unwrap_or(case.derived.mass());
-            if mass >= EVAPORATING_MASS {
-                return;
-            }
-            let conditions = case.surface().map(Surface::conditions);
-            let mean = conditions.map_or(
-                case.derived.surface_temperature(),
-                SurfaceConditions::mean_surface_temperature,
-            );
-            let warmest = conditions.map_or(mean, |c| c.climate_range().1);
-            let age_gyr = ctx.age_at_epoch().value() / 1e9;
-            let bin = SURVIVOR_AGE_EDGES_GYR
-                .iter()
-                .filter(|&&edge| age_gyr >= edge)
-                .count();
-            for (read, t) in [("mean", mean), ("warmest zone", warmest)] {
-                if t <= EVAPORATING_SURFACE {
-                    continue;
-                }
-                *tally.by_age.entry((read, bin, case.kind)).or_default() += 1;
-                if bin > 0 {
-                    tally.old.entry(read).or_default().push((
-                        rank,
-                        case.record.identity().id().to_string(),
-                        format!(
-                            "{} of {:.3e} M⊕ at {:.0} K, {age_gyr:.2} Gyr",
-                            named(rank, case),
-                            mass.value(),
-                            t.value()
-                        ),
-                    ));
-                }
-            }
-        },
+        |tally: &mut SurvivorCount, rank, ctx, case| tally.add(rank, ctx, case),
     ) {
-        count.bodies += share.bodies;
-        for (key, n) in share.by_age {
-            *count.by_age.entry(key).or_default() += n;
-        }
-        for (read, bodies) in share.old {
-            count.old.entry(read).or_default().extend(bodies);
-        }
+        count.merge(share);
     }
-    let line = "a string takes a line";
-    let bins = ["< 1 Gyr", "1–10 Gyr", "> 10 Gyr"];
-    let mut report = format!(
-        "P14.T55.b's survivors under every 27 hold: {} bodies; under {} M⊕ above {} K\n",
-        count.bodies,
-        EVAPORATING_MASS.value(),
-        EVAPORATING_SURFACE.value()
-    );
-    for ((read, bin, kind), n) in &count.by_age {
-        writeln!(report, "  by its {read}: {} {kind}: {n}", bins[*bin]).expect(line);
-    }
-    for (read, bodies) in &count.old {
-        writeln!(report, "  past 1 Gyr by its {read}: {}", bodies.len()).expect(line);
-        for (_, _, body) in bodies {
-            writeln!(report, "    {body}").expect(line);
-        }
-    }
+    let report = count.report(27);
     eprintln!("{report}({:.1} s)", start.elapsed().as_secs_f64());
     assert!(count.bodies >= 100_000, "{} bodies", count.bodies);
-    assert!(
-        !count.old.contains_key("mean"),
-        "a body under 0.1 M⊕ is published above 2,000 K at its mean past 1 Gyr\n{report}"
-    );
-    let mut survivors: Vec<(usize, &str)> = count
+    let mut at_their_mean: Vec<(usize, &str)> = count
         .old
-        .get("warmest zone")
+        .get("mean")
         .map_or(&[][..], Vec::as_slice)
         .iter()
         .map(|(rank, id, _)| (*rank, id.as_str()))
         .collect();
+    at_their_mean.sort_unstable();
+    assert_eq!(at_their_mean, PAIRED_LIGHT_SURVIVORS, "{report}");
+    let mut survivors: Vec<(usize, &str)> = HOT_SMALL_SURVIVORS
+        .into_iter()
+        .chain(PAIRED_LIGHT_SURVIVORS)
+        .collect();
     survivors.sort_unstable();
-    assert_eq!(survivors, HOT_SMALL_SURVIVORS, "{report}");
+    assert_eq!(count.old_at_their_warmest(), survivors, "{report}");
+}
+
+/// [`tallies_under_every_27_hold`]'s shares under every hold of version 28 instead
+/// ([`with_every_28_hold`](crate::planetary::testing::with_every_28_hold)), each system visited
+/// whole: the galaxy's rules are 27's, since no hold of the galaxy's is at 28.
+fn tallies_under_every_28_hold<T: Default + Send>(
+    systems: usize,
+    visit: impl Fn(&mut T, usize, &SystemContext, &PlanetarySystem) + Sync,
+) -> Vec<T> {
+    let galaxy = Galaxy::from_params_with_rules(
+        SEED,
+        GalaxyParams::milky_way_like(),
+        GalaxyRules::every_27_hold(),
+    )
+    .expect("the Milky Way's parameters build a galaxy");
+    let records = sample_records(&galaxy, systems, SampleFilter::ALL)
+        .expect("the solar circle holds the census's systems");
+    let shares = records.len().div_ceil(SYSTEMS_PER_SHARE);
+    in_shares(shares, ORDINARY_THREADS, |k| {
+        let first = k * SYSTEMS_PER_SHARE;
+        let end = records.len().min(first + SYSTEMS_PER_SHARE);
+        let mut tally = T::default();
+        crate::planetary::testing::with_every_28_hold(|| {
+            for (rank, record) in (first..).zip(&records[first..end]) {
+                let ctx = SystemContext::from_record(&galaxy, record);
+                let system = generate(SEED, &ctx);
+                visit(&mut tally, rank, &ctx, &system);
+            }
+        });
+        tally
+    })
+}
+
+/// The census's count of the bodies P14.T55.b.a's evaporation has taken by the epoch, beside the
+/// hot small bodies it publishes present ([`SurvivorCount`]).
+#[derive(Debug, Default)]
+struct EvaporationCount {
+    /// The present hot small bodies.
+    survivors: SurvivorCount,
+    /// The bodies `Destroyed { Evaporated }` at the epoch, by their system's age bin (an index
+    /// into [`AGE_BINS`]) and their kind.
+    by_age: BTreeMap<(usize, &'static str), usize>,
+    /// Each of them: its system's rank, its ID, whether some star of its zone had left its main
+    /// sequence when it went, and its line.
+    taken: Vec<(usize, String, bool, String)>,
+}
+
+impl EvaporationCount {
+    /// Counts the bodies of `system`, of rank `rank` and context `ctx`, that its records publish
+    /// `Destroyed { Evaporated }` at the epoch: a planet's or a member's history's ending, and a
+    /// moon's state as its record reads it ([`moon_state`] on its planet's history,
+    /// [`BodyFate::moon_evaporation`]).
+    fn add(&mut self, rank: usize, ctx: &SystemContext, system: &PlanetarySystem) {
+        let t = UniverseTime::EPOCH;
+        let hosts: Vec<FateHost<'_>> = system
+            .zones
+            .iter()
+            .map(|zone| fate_host(ctx, zone))
+            .collect();
+        let fates = system.fates(&hosts);
+        let fate_of = |index: BodyIndex| {
+            system
+                .bodies
+                .iter()
+                .zip(&fates)
+                .find(|(body, _)| body.index == index)
+                .and_then(|(_, fate)| fate.as_ref())
+        };
+        let age_gyr = ctx.age_at_epoch().value() / 1e9;
+        for body in &system.bodies {
+            let (kind, state) = match &body.part {
+                Part::Planet(_) | Part::Member(_) => {
+                    let fate = fate_of(body.index).expect("a planet or member has a history");
+                    let kind = if matches!(body.part, Part::Planet(_)) {
+                        "planets"
+                    } else {
+                        "members"
+                    };
+                    (kind, fate.at(t).state())
+                }
+                Part::Moon(moon) => {
+                    let OrbitHost::Body(parent) = body.host else {
+                        unreachable!("a moon orbits a body")
+                    };
+                    let Some(fate) = fate_of(parent) else {
+                        continue;
+                    };
+                    let evaporated = fate.moon_evaporation(moon.satellite.mass());
+                    let state = moon_state(
+                        fate.at(t).state(),
+                        &moon.satellite,
+                        ctx.age_at_epoch(),
+                        t,
+                        evaporated,
+                    );
+                    ("moons", state)
+                }
+                Part::Ring(_) => continue,
+            };
+            let BodyState::Destroyed {
+                cause: DestructionCause::Evaporated,
+                at,
+            } = state
+            else {
+                continue;
+            };
+            *self.by_age.entry((age_bin(age_gyr), kind)).or_default() += 1;
+            let evolved = system.zone_of(body).members().any(|member| {
+                ctx.history_state_at(usize::from(member), at)
+                    .is_some_and(|state| past_main_sequence(state.phase()))
+            });
+            let gone_gyr = ctx.age_at(at).value() / 1e9;
+            self.taken.push((
+                rank,
+                body.index.body_id(system.system).to_string(),
+                evolved,
+                format!(
+                    "#{rank} {} {kind} of {:.3e} M⊕, gone at {gone_gyr:.3} Gyr of {age_gyr:.2}{}",
+                    body.index.body_id(system.system),
+                    body.mass().value(),
+                    if evolved { ", its host evolved" } else { "" }
+                ),
+            ));
+        }
+    }
+
+    /// Adds `share`'s counts.
+    fn merge(&mut self, share: Self) {
+        self.survivors.merge(share.survivors);
+        for (key, n) in share.by_age {
+            *self.by_age.entry(key).or_default() += n;
+        }
+        self.taken.extend(share.taken);
+    }
+}
+
+/// P14.T55.b.a's twin of
+/// [`composition_census_under_every_27_hold_publishes_seven_hot_small_bodies_past_1_gyr`]: over the
+/// ordinary census under every hold of version 28, no body under 0.1 M⊕ is published above
+/// 2,000 K past 1 Gyr, at its mean or at its warmest zone, and each of the five
+/// [`HOT_SMALL_SURVIVORS`] and the two [`PAIRED_LIGHT_SURVIVORS`] is `Destroyed { Evaporated }`.
+/// Each goes while every star of its zone is on its main sequence: the five, at the source's
+/// substellar zero-albedo temperature, about 1,600–1,900 K there, where a rock of
+/// 10⁻⁷–3 × 10⁻⁵ M⊕ is gone within a few hundred million years; the two once their accretor has
+/// brightened. The bodies evaporated by the epoch are counted by their system's age, the young
+/// systems' `e101`-class bodies among them.
+#[test]
+#[ignore = "slow: 10⁵ bodies of 6,800 systems under every 28 hold, on sixteen threads"]
+fn composition_census_under_every_28_hold_publishes_no_hot_small_body_past_its_evaporation() {
+    let start = Instant::now();
+    let mut count = EvaporationCount::default();
+    for share in tallies_under_every_28_hold(
+        ORDINARY_SYSTEMS,
+        |tally: &mut EvaporationCount, rank, ctx, system| {
+            audit_walk_system("census", ctx, system, &mut |case| {
+                tally.survivors.add(rank, ctx, case);
+            });
+            tally.add(rank, ctx, system);
+        },
+    ) {
+        count.merge(share);
+    }
+    count.taken.sort_unstable();
+    let line = "a string takes a line";
+    let mut report = count.survivors.report(28);
+    writeln!(report, "  evaporated by the epoch: {}", count.taken.len()).expect(line);
+    for ((bin, kind), n) in &count.by_age {
+        writeln!(report, "    {} {kind}: {n}", AGE_BINS[*bin]).expect(line);
+    }
+    for (_, _, _, body) in &count.taken {
+        writeln!(report, "    {body}").expect(line);
+    }
+    eprintln!("{report}({:.1} s)", start.elapsed().as_secs_f64());
+    // The census's 10⁵ bodies, each walked present or counted evaporated.
+    let bodies = count.survivors.bodies + count.taken.len();
+    assert!(bodies >= 100_000, "{bodies} bodies");
+    assert!(
+        count.survivors.old.is_empty(),
+        "a body under 0.1 M⊕ is published above 2,000 K past 1 Gyr under every 28 hold\n{report}"
+    );
+    for (rank, id) in HOT_SMALL_SURVIVORS
+        .into_iter()
+        .chain(PAIRED_LIGHT_SURVIVORS)
+    {
+        let taken = count
+            .taken
+            .iter()
+            .find(|(r, i, ..)| *r == rank && i == id)
+            .unwrap_or_else(|| panic!("#{rank} {id} is not evaporated\n{report}"));
+        assert!(
+            !taken.2,
+            "#{rank} {id} went once its host evolved, not on its main sequence\n{report}"
+        );
+    }
 }

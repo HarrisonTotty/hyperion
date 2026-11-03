@@ -44,6 +44,12 @@
 //!    This is the one step in which a body's history depends on another's; pairs that come
 //!    within 2√3 Hill radii under slow mass loss stay as they are (ruling 71.2), since their
 //!    instability takes up to gigayears.
+//! 6. From generator version 28 (P14.T55.b.a, `evaporation`), in each segment, the first time
+//!    a rocky body below 10⁻³ M⊕ ([`Evaporation::Rock`]) has lost its whole radius to its rock's
+//!    free-streaming vapour in its hosts' light, integrated along its history from its
+//!    formation: the body is `Destroyed { Evaporated }` then, if that comes before any engulfment
+//!    or crossing. A moon, which has no history of its own, is followed along its planet's
+//!    (`BodyFate::moon_evaporation`).
 //!
 //! [`BodyFate::at`] then reads the history at any time, so every query of one body agrees with
 //! every other, whatever their order: the history depends on the host's bodies and the host alone,
@@ -106,6 +112,7 @@ use crate::id::BodyId;
 use crate::orbit::KeplerElements;
 use crate::planetary::context::SystemContext;
 use crate::planetary::drift::{DriftingOrbit, EvolvingLaw, composite_excess, drift_cell};
+use crate::planetary::fate::evaporation::{EvaporationRules, FREE_STREAMING_MASS};
 use crate::planetary::hosts::evolved::{
     Aftermath, Circularisation, circularised, circularised_axis, engulfment_reach, expanded,
     expanded_axis, first_crossing, first_engulfment, supernova,
@@ -121,7 +128,8 @@ use crate::stellar::system::{StarModel, pair_of};
 use crate::time::{ClockWindow, SourceHorizon, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{
-    EarthMasses, GravitationalParameter, KilogramsPerCubicMetre, Metres, SolarMasses, Years,
+    EarthMasses, GravitationalParameter, KilogramsPerCubicMetre, Metres, SolarLuminosities,
+    SolarMasses, Years,
 };
 
 /// A body's state at a time: a prefix of not yet formed → present → destroyed or unbound
@@ -177,6 +185,10 @@ pub enum DestructionCause {
     /// and merged into it (P14.T28.c's scattering step, ruling 71): the heavier's Safronov number
     /// was under 1, too small to eject it (Ford and Rasio 2008; `scatter`).
     Collided,
+    /// The body's rock evaporated in its hosts' light: a planet, a moon or a belt member below
+    /// 10⁻³ M⊕ whose rock's free-streaming vapour took its whole radius (Perez-Becker and Chiang
+    /// 2013, MNRAS 433, 2294; P14.T55.b.a, `evaporation`), from generator version 28.
+    Evaporated,
 }
 
 /// A [`FateBody`] could not be built from the values given.
@@ -241,9 +253,20 @@ pub enum Generation {
     Second,
 }
 
+/// Whether the fate transform follows a body's rock evaporating in its hosts' light (P14.T55.b.a,
+/// `evaporation`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Evaporation {
+    /// It does not: a body built by hand, as in a test, and a belt's stand-in, which is no body.
+    Ignored,
+    /// It does, from generator version 28: a planet or a belt member, which evaporates below
+    /// 10⁻³ M⊕ as its rock's free-streaming vapour takes its radius.
+    Rock,
+}
+
 /// What the fate transform reads of a body: its formation, its primordial orbit, its mass, its
-/// bulk density, how its orbit circularises, the draws of the ejections it survives, and its
-/// generation.
+/// bulk density, how its orbit circularises, the draws of the ejections it survives, its
+/// generation, and whether its rock evaporates.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FateBody {
     formation: Formation,
@@ -253,6 +276,7 @@ pub struct FateBody {
     circularisation: Circularisation,
     scatter: ScatterDraws,
     generation: Generation,
+    evaporation: Evaporation,
 }
 
 impl FateBody {
@@ -289,6 +313,7 @@ impl FateBody {
             circularisation: Circularisation::NONE,
             scatter: ScatterDraws::Median,
             generation: Generation::Primordial,
+            evaporation: Evaporation::Ignored,
         })
     }
 
@@ -306,6 +331,22 @@ impl FateBody {
     #[must_use]
     pub const fn generation(&self) -> Generation {
         self.generation
+    }
+
+    /// The same body as one whose rock evaporates in its hosts' light ([`Evaporation::Rock`],
+    /// P14.T55.b.a), as the generator gives every planet and belt member.
+    #[must_use]
+    pub const fn evaporating(self) -> Self {
+        Self {
+            evaporation: Evaporation::Rock,
+            ..self
+        }
+    }
+
+    /// Whether the fate transform follows its rock evaporating.
+    #[must_use]
+    pub const fn evaporation(&self) -> Evaporation {
+        self.evaporation
     }
 
     /// The same body, circularising as `circularisation` says (P14.T8.e).
@@ -1032,6 +1073,24 @@ pub struct BodyFate<'a> {
     ending: Option<BodyState>,
     /// How many ejections the body has survived so far, which picks the words of its next draw.
     recoils: u64,
+    /// How much of its radius it has lost to evaporation so far, and to when (P14.T55.b.a).
+    evaporated: Evaporated,
+}
+
+/// What the evaporation step reads of a body (P14.T55.b.a): its mass and the bulk density of its
+/// evaporating rock.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Evaporating {
+    mass: EarthMasses,
+    density: KilogramsPerCubicMetre,
+}
+
+/// A body's evaporation so far (P14.T55.b.a): the radius it has lost, m, and the time it has been
+/// followed to, `None` before it is.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct Evaporated {
+    radius_lost_m: f64,
+    until: Option<UniverseTime>,
 }
 
 impl<'a> BodyFate<'a> {
@@ -1207,6 +1266,7 @@ impl<'a> BodyFate<'a> {
             segments: Vec::new(),
             ending: None,
             recoils: 0,
+            evaporated: Evaporated::default(),
         };
         if let Some(formed) = formed_at {
             let (reference, circularises) = match body.generation {
@@ -1478,6 +1538,17 @@ impl<'a> BodyFate<'a> {
             (None, Some(at)) => Some(BodyState::Unbound { at }),
             (None, None) => None,
         };
+        // From P14.T55.b.a's hold at 28, the time its rock has evaporated, if that comes first.
+        let ending = match (ending, self.evaporation_in(&segment, end)) {
+            (Some(ending), Some(at)) if ending.ended_at().is_some_and(|ended| ended <= at) => {
+                Some(ending)
+            }
+            (_, Some(at)) => Some(BodyState::Destroyed {
+                cause: DestructionCause::Evaporated,
+                at,
+            }),
+            (ending, None) => ending,
+        };
         if ending.is_some() {
             self.ending = ending;
             return;
@@ -1544,6 +1615,187 @@ impl<'a> BodyFate<'a> {
             })
             .flatten()
             .unwrap_or(ClockWindow::END)
+    }
+
+    /// The first time in `segment` up to `end` by which the body has lost its whole radius to its
+    /// rock's free-streaming vapour, followed on from where its last segment left it
+    /// ([`evaporate`](Self::evaporate)): `None` below the hold at 28, for a body the transform does
+    /// not follow ([`Evaporation::Ignored`]), and for one from 10⁻³ M⊕.
+    fn evaporation_in(&mut self, segment: &Segment, end: UniverseTime) -> Option<UniverseTime> {
+        match (EvaporationRules::in_force(), self.body.evaporation) {
+            (EvaporationRules::Evaporated, Evaporation::Rock)
+                if segment.mass < FREE_STREAMING_MASS =>
+            {
+                let body = Evaporating {
+                    mass: segment.mass,
+                    density: self.body.density,
+                };
+                let mut so_far = self.evaporated;
+                let at = self.evaporate(segment, end, body, &mut so_far);
+                self.evaporated = so_far;
+                at
+            }
+            (EvaporationRules::Evaporated, Evaporation::Rock | Evaporation::Ignored)
+            | (EvaporationRules::Kept, _) => None,
+        }
+    }
+
+    /// The first time in `segment` from the end of `so_far` up to `end` by which `body` has lost
+    /// its whole radius to its rock's free-streaming vapour, the radius lost before it counted
+    /// (P14.T55.b.a, [`evaporation::first_loss`]): `None` if it has not by then, with the radius
+    /// lost added to `so_far`, which is followed to `end` either way.
+    ///
+    /// The rate is [`evaporation::radius_rate`] at the substellar temperature of the segment's
+    /// orbit about the host's light at each time ([`substellar_temperature`](Self::substellar_temperature)),
+    /// between the segment's break points ([`BodyFate::breaks`]). Its bound at a time t is the rate
+    /// at the hosts' brightest by t (each star's light at the stretch's start or its peak by t,
+    /// whichever is more, [`StarModel::max_luminosity_until`]) on the orbit's least axis and its
+    /// largest eccentricity in the stretch: the segment's base axis at `end`, about the most mass
+    /// the host can hold then, and its eccentricity at the start, since circularisation only
+    /// shrinks both.
+    fn evaporate(
+        &self,
+        segment: &Segment,
+        end: UniverseTime,
+        body: Evaporating,
+        so_far: &mut Evaporated,
+    ) -> Option<UniverseTime> {
+        let from = so_far
+            .until
+            .map_or(segment.start, |until| until.max(segment.start));
+        so_far.until = Some(end.max(from));
+        if end <= from {
+            return None;
+        }
+        let left = evaporation::radius_of(body.mass, body.density) - so_far.radius_lost_m;
+        let breaks = || {
+            let mut breaks = self.breaks(segment, end);
+            breaks.retain(|&at| at > from);
+            breaks
+        };
+        let lit_from: Vec<f64> = (0..self.host.stars.len())
+            .map(|k| self.member_luminosity(k, from).value())
+            .collect();
+        let least_axis = Metres::new(
+            self.base_axis(segment, end).value() * segment.reference.value()
+                / self.mass_cap(from, end).value(),
+        );
+        let eccentricity = self.base_orbit(segment, from).eccentricity().value();
+        let bound = |t: UniverseTime| {
+            let brightest = lit_from.iter().enumerate().fold(0.0, |sum, (k, &lit)| {
+                sum + lit.max(self.member_peak_luminosity(k, t).value())
+            });
+            evaporation::radius_rate(
+                evaporation::substellar_temperature(
+                    SolarLuminosities::new(brightest),
+                    least_axis,
+                    eccentricity,
+                ),
+                body.density,
+            )
+        };
+        let rate = |t: UniverseTime| {
+            evaporation::radius_rate(self.substellar_temperature(segment, t), body.density)
+        };
+        match evaporation::first_loss(from, end, breaks, left, bound, rate) {
+            evaporation::Loss::Gone(at) => Some(at),
+            evaporation::Loss::Part(lost) => {
+                so_far.radius_lost_m += lost;
+                None
+            }
+        }
+    }
+
+    /// The substellar zero-albedo temperature at `t` of the body on `segment` about its host's
+    /// light then, K ([`evaporation::substellar_temperature`]).
+    fn substellar_temperature(&self, segment: &Segment, t: UniverseTime) -> f64 {
+        let orbit = self.orbit_in(segment, t, self.host_mass(t));
+        let light = (0..self.host.stars.len()).fold(SolarLuminosities::ZERO, |sum, k| {
+            sum + self.member_luminosity(k, t)
+        });
+        evaporation::substellar_temperature(
+            light,
+            orbit.semi_major_axis(),
+            orbit.eccentricity().value(),
+        )
+    }
+
+    /// The luminosity of host star `k` at `t`, L☉: its pair's timeline's for a star the engine ran
+    /// in a pair, as its mass is ([`BodyFate::member_mass`]), and otherwise its model's; none
+    /// before it forms.
+    fn member_luminosity(&self, k: usize, t: UniverseTime) -> SolarLuminosities {
+        match self.host.paired[k] {
+            Some((pair, component)) => {
+                let age = Years::new(self.host.pair_age(pair, t));
+                self.host.timelines[pair].state_at(age).stars()[component.index()].luminosity()
+            }
+            None => self.host.stars[k]
+                .state_at(t)
+                .map_or(SolarLuminosities::ZERO, |state| state.luminosity()),
+        }
+    }
+
+    /// The largest luminosity host star `k` has had by `t`, L☉, read as
+    /// [`member_luminosity`](Self::member_luminosity) reads its light.
+    fn member_peak_luminosity(&self, k: usize, t: UniverseTime) -> SolarLuminosities {
+        match self.host.paired[k] {
+            Some((pair, component)) => {
+                let age = Years::new(self.host.pair_age(pair, t));
+                self.host.timelines[pair].max_luminosity_until(component, age)
+            }
+            None => self.host.stars[k].max_luminosity_until(t),
+        }
+    }
+
+    /// The most mass the host can hold from `from` to `end`, M☉: each single star's mass at
+    /// `from`, which only falls, and each star of a pair the engine ran at the largest its pair's
+    /// timeline gives it by `end` (`BinaryTimeline::max_mass_until`), an accretor's included.
+    fn mass_cap(&self, from: UniverseTime, end: UniverseTime) -> SolarMasses {
+        (0..self.host.stars.len()).fold(SolarMasses::ZERO, |cap, k| {
+            cap + match self.host.paired[k] {
+                Some((pair, component)) => {
+                    let age = Years::new(self.host.pair_age(pair, end));
+                    self.host.timelines[pair].max_mass_until(component, age)
+                }
+                None => self.member_mass(k, from),
+            }
+        })
+    }
+
+    /// When the moon of mass `mass` of this planet has lost its whole radius to its rock's
+    /// free-streaming vapour (P14.T55.b.a): its planet's history's evaporation step
+    /// ([`evaporate`](Self::evaporate)) on the moon's own mass, its rock at
+    /// [`evaporation::MOON_EVAPORATING_ROCK_DENSITY`], along each of its planet's segments from
+    /// its formation to its ending, since a moon is as far from its hosts as its planet. `None`
+    /// below the hold at 28, for a moon from 10⁻³ M⊕, and for one that outlasts its planet's
+    /// history.
+    #[must_use]
+    pub(crate) fn moon_evaporation(&self, mass: EarthMasses) -> Option<UniverseTime> {
+        match EvaporationRules::in_force() {
+            EvaporationRules::Kept => return None,
+            EvaporationRules::Evaporated => {}
+        }
+        if mass >= FREE_STREAMING_MASS || self.formed_at? > self.known_until() {
+            return None;
+        }
+        let body = Evaporating {
+            mass,
+            density: evaporation::MOON_EVAPORATING_ROCK_DENSITY,
+        };
+        let last = self
+            .ending
+            .and_then(|ending| ending.ended_at())
+            .unwrap_or_else(|| self.known_until());
+        let one_nanosecond = Span::new(0, 1).expect("0 s and 1 ns is a normalised span");
+        let mut so_far = Evaporated::default();
+        self.segments.iter().enumerate().find_map(|(k, segment)| {
+            let end = self.segments.get(k + 1).map_or(last, |next| {
+                next.start
+                    .checked_sub(one_nanosecond)
+                    .expect("a segment after the first starts after the clock's first instant")
+            });
+            self.evaporate(segment, end.min(last), body, &mut so_far)
+        })
     }
 
     /// The first time in `segment` up to `end` at which the body is engulfed, if any.
@@ -1923,6 +2175,7 @@ impl BodyFate<'_> {
     }
 }
 
+pub(crate) mod evaporation;
 mod scatter;
 
 #[cfg(test)]

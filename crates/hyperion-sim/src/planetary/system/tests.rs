@@ -2962,7 +2962,7 @@ fn a_receding_moon_s_record_before_the_window_is_cut_at_its_planet_s_change() {
             let Part::Moon(moon) = &body.part else {
                 continue;
             };
-            let (alone, until) = moon_trajectory(ctx, moon, t, None);
+            let (alone, until) = moon_trajectory(ctx, moon, t, (None, None));
             let (Some(drift), Some(until)) = (alone.drift(), until) else {
                 continue;
             };
@@ -2971,7 +2971,7 @@ fn a_receding_moon_s_record_before_the_window_is_cut_at_its_planet_s_change() {
             if change >= until {
                 continue;
             }
-            let (cut, cut_until) = moon_trajectory(ctx, moon, t, Some(change));
+            let (cut, cut_until) = moon_trajectory(ctx, moon, t, (Some(change), None));
             assert_eq!(cut_until, Some(change), "{:?}", body.index);
             assert!(cut.drift().is_some(), "{:?}", body.index);
             checked += 1;

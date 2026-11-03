@@ -245,11 +245,13 @@ impl Lifetime {
 enum Presence {
     /// A planet or a belt member.
     Primary(Lifetime),
-    /// A moon, of its planet's lifetime, in a system `age_at_epoch` old at the epoch.
+    /// A moon, of its planet's lifetime, in a system `age_at_epoch` old at the epoch, whose rock
+    /// has evaporated by `evaporated` if it does (P14.T55.b.a).
     Moon {
         planet: Lifetime,
         satellite: Satellite,
         age_at_epoch: Years,
+        evaporated: Option<UniverseTime>,
     },
 }
 
@@ -263,7 +265,8 @@ impl Presence {
                 planet,
                 satellite,
                 age_at_epoch,
-            } => moon_state(planet.state_at(t), satellite, *age_at_epoch, t),
+                evaporated,
+            } => moon_state(planet.state_at(t), satellite, *age_at_epoch, t, *evaporated),
         };
         state == BodyState::Present
     }
@@ -656,10 +659,18 @@ impl PlanetarySystem {
                         .find(|(at, _)| *at == parent)
                         .map(|(_, lifetime)| *lifetime)
                         .expect("a satellite's parent comes before it in index order");
+                    let evaporated = self
+                        .bodies
+                        .iter()
+                        .zip(&fates)
+                        .find(|(planet, _)| planet.index == parent)
+                        .and_then(|(_, fate)| fate.as_ref())
+                        .and_then(|fate| fate.moon_evaporation(moon.satellite.mass()));
                     Presence::Moon {
                         planet,
                         satellite: moon.satellite,
                         age_at_epoch: ctx.age_at_epoch(),
+                        evaporated,
                     }
                 }
                 Part::Ring(_) => continue,

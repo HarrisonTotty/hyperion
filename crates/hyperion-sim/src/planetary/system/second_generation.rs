@@ -67,7 +67,8 @@ impl Body {
         .expect("a placed body's mass and its density are positive")
         .with_circularisation(Circularisation::NONE)
         .with_scatter_draws(ScatterDraws::Stream { seed, body: id })
-        .second_generation();
+        .second_generation()
+        .evaporating();
         Self {
             index: placed.index(),
             host: zone.host(),

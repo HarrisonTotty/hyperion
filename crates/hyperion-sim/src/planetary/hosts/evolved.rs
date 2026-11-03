@@ -463,8 +463,9 @@ pub(crate) fn first_crossing(
 }
 
 /// The bracket's later end after halving `lo`–`hi` (clearance at `lo` not negative, at `hi`
-/// negative) to within a second.
-fn bisect(
+/// negative) to within a second, in at most [`ENGULFMENT_BISECTION_STEPS`] halvings; the fate
+/// transform's evaporation bisects its time so too (P14.T55.b.a).
+pub(crate) fn bisect(
     mut lo: UniverseTime,
     mut hi: UniverseTime,
     clearance: &mut impl FnMut(UniverseTime) -> f64,

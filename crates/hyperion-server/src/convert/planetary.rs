@@ -1845,6 +1845,7 @@ fn body_state(state: BodyState) -> BodyStateDto {
                 DestructionCause::Engulfed => DestructionCauseDto::Engulfed,
                 DestructionCause::TidallyDisrupted => DestructionCauseDto::TidallyDisrupted,
                 DestructionCause::Collided => DestructionCauseDto::Collided,
+                DestructionCause::Evaporated => DestructionCauseDto::Evaporated,
             },
             at: wire_time(at),
         },
@@ -4511,5 +4512,18 @@ mod tests {
             Mode::Bless => {}
             Mode::BlessForbidden => panic!("{name}: blessing is forbidden under CI"),
         }
+    }
+
+    /// A body whose rock evaporated (P14.T55.b.a, from generator version 28) is sent as
+    /// `evaporated`, the cause's own string.
+    #[test]
+    fn an_evaporated_body_is_sent_by_its_cause() {
+        let state = body_state(BodyState::Destroyed {
+            cause: DestructionCause::Evaporated,
+            at: UniverseTime::EPOCH,
+        });
+        let sent = serde_json::to_value(state).expect("a state serialises");
+        assert_eq!(sent["type"], json!("destroyed"));
+        assert_eq!(sent["cause"], json!("evaporated"));
     }
 }

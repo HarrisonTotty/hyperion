@@ -496,6 +496,10 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   `BINARY_HOST_REMNANTS_VERSION` (P14.T1.h), at `BinaryHostRemnantsRules::Engine` through
 ///   `with_binary_host_remnants`: the neutron stars second-generation planets form about, the
 ///   white dwarf a debris disc reads, and the first death that ends a protoplanetary disc.
+/// - a small hot rocky body's evaporation, `EVAPORATION_VERSION` (P14.T55.b.a), at
+///   `EvaporationRules::Evaporated` through `with_evaporation`: a planet, a moon or a belt member
+///   below 10⁻³ M⊕ is `Destroyed { Evaporated }` once its rock's free-streaming vapour has taken
+///   its radius.
 ///
 /// A system or a record is read under the rules in force when it is generated, so a test
 /// generates afresh inside it. A later hold at 28 adds its switch here, and 28's bump deletes it
@@ -504,6 +508,10 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
 pub(crate) fn with_every_28_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::context::{BinaryHostRemnantsRules, with_binary_host_remnants};
     use crate::planetary::derive::atmosphere::{SteamDivisionRules, with_steam_division};
+    let run = move || {
+        use crate::planetary::fate::evaporation::{EvaporationRules, with_evaporation};
+        with_evaporation(EvaporationRules::Evaporated, run)
+    };
     let run = move || with_binary_host_remnants(BinaryHostRemnantsRules::Engine, run);
     with_every_27_hold(move || with_steam_division(SteamDivisionRules::Hothouse, run))
 }

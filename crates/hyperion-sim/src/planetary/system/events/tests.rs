@@ -381,6 +381,7 @@ fn a_moon_s_presence_is_its_record_s() {
                 planet,
                 satellite,
                 age_at_epoch,
+                ..
             } = presence
             else {
                 continue;

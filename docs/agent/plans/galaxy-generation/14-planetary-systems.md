@@ -34274,7 +34274,7 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   mean, but five are at their warmest zone (read as the source's dayside surface; lean, 2026-11-02)
   in systems past 1 Gyr, each hot since its host left the main sequence
   (`census_tests::HOT_SMALL_SURVIVORS`, pinned by the slow
-  `composition_census_under_every_27_hold_publishes_five_hot_small_bodies_past_1_gyr`). So
+  `composition_census_under_every_27_hold_publishes_seven_hot_small_bodies_past_1_gyr`). So
   P14.T55.b.a, their evaporation held at 28, is briefed, not built.
 - **P14.T28.g's paired fate, as built (lane `fix-binary-hosts`, 2026-11-02).** Held at 27
   (`fate::BINARY_HOST_FATE_VERSION`; `BinaryHostFateRules::{SingleModels, Engine}`,
@@ -34354,3 +34354,24 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     read as rounding (lean, 2026-11-03: kept, the rule as ruled, 10⁻⁹ its only easing).
   - _For 27's bump:_ `no_overlapping_orbits_in` checks bodies against `zones_at` to 10⁻¹², and a
     body the fate keeps may lie up to 10⁻⁹ past an evaluated limit.
+- **P14.T55.b.a's evaporation, as built (lane `p14-t55ba-evaporation`, 2026-11-03).** Held at 28
+  (`fate::evaporation::EVAPORATION_VERSION`; `EvaporationRules::{Kept, Evaporated}`,
+  `with_evaporation`, a line in `with_every_28_hold` and in `HeldRules`). Nothing moves at 24 to 27.
+  - _New items:_ `DestructionCause::Evaporated` and `DestructionCauseDto::Evaporated`
+    (`evaporated`; `DestructionCauseDto` is now one of plan 04's growing enums, and the client
+    reads an unknown cause Missing); `fate::Evaporation::{Ignored, Rock}` with
+    `FateBody::evaporating`, which the generator gives every planet and belt member;
+    `BodyFate::moon_evaporation`; `BinaryTimeline::max_mass_until`; `hosts::evolved::bisect` is
+    `pub(crate)`; `moon_state` and `moon_trajectory` take the moon's evaporation time.
+  - _Paths:_ planets and belt members by a step in `BodyFate::live_to`, segment by segment; moons
+    by `moon_evaporation` along their planet's history; a belt's stand-in is `Ignored`.
+  - _Leans (2026-11-03):_ the rate is Perez-Becker and Chiang's free stream (eq. 28) below
+    10⁻³ M⊕ only, heavier bodies keeping their mass; the temperature is their eq. 6, the
+    substellar zero-albedo one on the orbit-averaged light, not the warmest zone; a moon's rock at
+    3,300 kg m⁻³; an evaporated body's record keeps the mass it formed with.
+  - _Deviation:_ the five `HOT_SMALL_SURVIVORS` and the two `PAIRED_LIGHT_SURVIVORS` (moons hot by
+    an accretor's light since P14.T1.e, which broke the 27 pin before this lane; the 27 count is
+    renamed `…_publishes_seven_hot_small_bodies_past_1_gyr`) evaporate while their hosts are on
+    the main sequence, not after it, as the slow
+    `composition_census_under_every_28_hold_publishes_no_hot_small_body_past_its_evaporation`
+    pins.

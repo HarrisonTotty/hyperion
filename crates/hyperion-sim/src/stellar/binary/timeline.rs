@@ -796,6 +796,27 @@ impl BinaryTimeline {
         SolarRadii::new(peak.max(now.value()))
     }
 
+    /// The largest mass `component` has had up to `age`, M☉, never below its mass at `age`: what
+    /// plan 14's evaporation bounds a host's mass by for a star of a pair the engine ran
+    /// (P14.T55.b.a), read over the segments as [`max_luminosity_until`](Self::max_luminosity_until)
+    /// reads the luminosity, a star on its track at its track's initial mass, which its winds only
+    /// lower.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`state_at`](Self::state_at).
+    #[must_use]
+    pub(crate) fn max_mass_until(&self, component: Component, age: Years) -> SolarMasses {
+        let now = self.state_at(age).stars()[component.index()].mass();
+        let peak = self.max_until(
+            component,
+            age,
+            |state| state.mass().value(),
+            |track, _| track.initial_mass().value(),
+        );
+        SolarMasses::new(peak.max(now.value()))
+    }
+
     /// The largest of `quantity` that `component` has had over the segments up to `age`, as
     /// [`max_luminosity_until`](Self::max_luminosity_until) reads them: `on_track` of a star's track
     /// at its track age, and `quantity` of its states elsewhere.
