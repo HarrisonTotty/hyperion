@@ -34,12 +34,16 @@ const KINDS: Readonly<Record<TerrainMaterialKind, true>> = {
   "lit-emissive-interior": true,
   "lit-cluster": true,
   "lit-emissive-cluster": true,
+  "lit-fin": true,
+  "lit-emissive-fin": true,
   depth: true,
   "depth-cluster": true,
+  "depth-fin": true,
   wire: true,
   "wire-cluster": true,
   shadow: true,
   "shadow-cluster": true,
+  "shadow-fin": true,
 };
 /** The kinds of {@link KINDS}. */
 const TERRAIN_MATERIAL_KINDS = Object.keys(KINDS).filter(
