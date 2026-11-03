@@ -42,6 +42,12 @@ export interface AtmosphereCacheInput {
   readonly requests: AtmosphereRequests | null;
   /** Starts one optics worker, stable in identity: `startOpticsWorker` in the app. */
   readonly createWorker: () => OpticsWorkerLike;
+  /**
+   * The machine's performance cores' threads with a third of its efficiency cores',
+   * `HyperionApi.performanceThreads`, which the default count reads (`defaultOpticsWorkers`);
+   * `null` where absent.
+   */
+  readonly performanceThreads?: number | null | undefined;
 }
 
 /** The cache the hook holds, outside React, so that its making is an effect's and renders it. */
@@ -75,7 +81,7 @@ class CacheHolder {
  * and its tables released, when any changes or the caller unmounts.
  */
 export function useAtmosphereCache(input: AtmosphereCacheInput): AtmosphereCache | null {
-  const { engineState, requests, createWorker } = input;
+  const { engineState, requests, createWorker, performanceThreads = null } = input;
   const engine = engineState.kind === "ready" ? engineState.engine : null;
   const [holder] = useState(() => new CacheHolder());
   const cache = useSyncExternalStore(holder.subscribe, holder.get);
@@ -86,7 +92,7 @@ export function useAtmosphereCache(input: AtmosphereCacheInput): AtmosphereCache
     const made = new AtmosphereCache({
       requests: requests ?? KEPT_SCENE_REQUESTS,
       builder: new OpticsWorkerPool({
-        workers: defaultOpticsWorkers(navigator.hardwareConcurrency),
+        workers: defaultOpticsWorkers(navigator.hardwareConcurrency, performanceThreads),
         createWorker,
       }),
       tables: atmosphereTablesOn(engine),
@@ -96,7 +102,7 @@ export function useAtmosphereCache(input: AtmosphereCacheInput): AtmosphereCache
       holder.set(null);
       made.dispose();
     };
-  }, [engine, requests, createWorker, holder]);
+  }, [engine, requests, createWorker, performanceThreads, holder]);
   return cache;
 }
 

@@ -24781,3 +24781,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     of 384, `saturn-oblate` 43 of 474, so "with the slicing" fails). Every other item passes.
   - _Pending, the owner's_ (the outbox's `not-run.md`): the by-eye list on both GPUs, the timed
     views check, the benchmarks, the RTX twin rows, `just ci` and the rest of `just test-slow`.
+- **The optics workers by performance cores (lean, 2026-11-03; lane fix-session-load-spike).**
+  `defaultOpticsWorkers(threads, performanceThreads)` is clamp(⌊(P + ⌊E ÷ 3⌋) ÷ 2⌋, 1, 4) where
+  macOS gives `HyperionApi.performanceThreads`, as R05.T18's leans count the height workers: 3 on an
+  M5, where it was 4. Elsewhere unchanged. `useAtmosphereCache` takes `performanceThreads` from
+  `ViewDisplay`.

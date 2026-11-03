@@ -381,7 +381,8 @@ interface ViewDisplayProps {
   /**
    * The machine's performance cores' threads with a third of its efficiency cores',
    * `window.hyperion.performanceThreads`, which the terrain session's default worker count reads
-   * (plan R10, R10.T6.a); none by default.
+   * (plan R10, R10.T6.a), and the atmosphere cache's optics workers' (`defaultOpticsWorkers`); none
+   * by default.
    */
   readonly performanceThreads?: number | null | undefined;
   /**
@@ -2910,6 +2911,7 @@ function ViewPanels({
     engineState,
     requests: server === null && served === null ? null : share.atmosphere,
     createWorker: opticsWorkers,
+    performanceThreads,
   });
   // The inspection's survey as it ended, held for the opening it was sent at; `null` while it is out.
   const survey = inspection?.survey ?? null;

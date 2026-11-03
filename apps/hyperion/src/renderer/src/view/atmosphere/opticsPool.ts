@@ -112,20 +112,36 @@ const MOST_OPTICS_WORKERS = 4;
 /**
  * The default number of optics workers: clamp(⌊threads ÷ 2⌋, 1, 4)
  * (`decision-r08-t4d-kdist-chain.md` §15, ruling 3: four shares on the UHD 620 host's four cores
- * and eight threads, about three to four times faster; accepted as the lane's L1).
+ * and eight threads, about three to four times faster; accepted as the lane's L1); or, where the OS
+ * tells performance cores from efficiency cores (Apple silicon's, `HyperionApi.performanceThreads`),
+ * clamp(⌊(P + ⌊E ÷ 3⌋) ÷ 2⌋, 1, 4) of its P performance and E efficiency threads, as the height
+ * workers count them (a lean, 2026-11-03).
  *
  * @remarks
  * The workers are idle but at a body's arrival, so they may take half the machine's threads for
- * those seconds; the height workers' ⌊threads ÷ 4⌋ (`defaultHeightWorkers`) stay the steady
- * budget. A thread count the browser does not report as a finite number takes the least, one.
+ * those seconds; the height workers (`defaultHeightWorkers`) stay the steady budget. An Apple chip's
+ * efficiency cores, which `hardwareConcurrency` counts with the rest, run an optics share far
+ * slower, so they count at a third there too: an M5's four and six give three where its ten threads
+ * gave four, beside its four height workers at the same arrival; an M1's four and four two; an M1
+ * Pro's eight and two four. A thread count the browser does not report as a finite number takes
+ * the least, one.
  *
  * @param hardwareConcurrency - The machine's logical processors, `navigator.hardwareConcurrency`.
+ * @param performanceThreads - Its performance cores' threads with a third of its efficiency
+ *   cores', `HyperionApi.performanceThreads`, or `null` where its OS tells none apart.
  */
-export function defaultOpticsWorkers(hardwareConcurrency: number): number {
-  if (!Number.isFinite(hardwareConcurrency)) {
+export function defaultOpticsWorkers(
+  hardwareConcurrency: number,
+  performanceThreads: number | null = null,
+): number {
+  const threads =
+    performanceThreads !== null && Number.isInteger(performanceThreads) && performanceThreads >= 1
+      ? performanceThreads
+      : hardwareConcurrency;
+  if (!Number.isFinite(threads)) {
     return 1;
   }
-  return Math.min(MOST_OPTICS_WORKERS, Math.max(1, Math.floor(hardwareConcurrency / 2)));
+  return Math.min(MOST_OPTICS_WORKERS, Math.max(1, Math.floor(threads / 2)));
 }
 
 /**

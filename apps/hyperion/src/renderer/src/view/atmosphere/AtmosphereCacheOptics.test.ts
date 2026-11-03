@@ -613,6 +613,23 @@ describe("the optics-worker pool", () => {
   ])("runs clamp(⌊%d threads ÷ 2⌋, 1, 4) = %d workers by default", (threads, workers) => {
     expect(defaultOpticsWorkers(threads)).toBe(workers);
   });
+
+  it("counts an Apple chip's performance threads, its efficiency cores at a third, not its threads", () => {
+    // An M5's 4 and 6 (performance threads 6 of 10 threads), an M1's 4 and 4 (5 of 8), an M1 Pro's
+    // 8 and 2 (8 of 10), and a chip of 1 and 2 (1 of 3).
+    expect(
+      [
+        [10, 6],
+        [8, 5],
+        [10, 8],
+        [3, 1],
+      ].map(([threads, performance]) => defaultOpticsWorkers(threads ?? 0, performance ?? null)),
+    ).toEqual([3, 2, 4, 1]);
+    // Where the OS tells none apart, or gives no whole number, the threads count as before.
+    expect([null, 0, 2.5, Number.NaN].map((p) => defaultOpticsWorkers(10, p))).toEqual([
+      4, 4, 4, 4,
+    ]);
+  });
 });
 
 /** A bake's tables for `ask`, one a band it asks, on the bake's grid. */
