@@ -1,16 +1,16 @@
-//! The hold on what the engine's classes count as an X-ray binary (plan 11, P11.T5's and P11.T8.b's
-//! fix, at [`XRB_CLASS_VERSION`]; research-p15-t10b-rates).
+//! What the engine's classes count as an X-ray binary (plan 11, P11.T5's and P11.T8.b's fix;
+//! research-p15-t10b-rates).
 //!
-//! As built, `classify` makes any Roche-lobe overflow onto a neutron star or a black hole an X-ray
-//! binary, in quiescence too; a black hole beside a massive star an X-ray binary wherever the
-//! star's wind gives it 10³⁵ erg s⁻¹ by Bondi and Hoyle's capture; and a Be/X-ray binary's donor a
+//! As first built, `classify` made any Roche-lobe overflow onto a neutron star or a black hole an
+//! X-ray binary, in quiescence too; a black hole beside a massive star an X-ray binary wherever the
+//! star's wind gave it 10³⁵ erg s⁻¹ by Bondi and Hoyle's capture; and a Be/X-ray binary's donor a
 //! Be star by its own single-star rotation draw alone. research-p15-t10b-rates found, in the fit's
 //! census: 1,607 of the slab's 2,212 members neutron stars and black holes fed by white dwarfs or
 //! helium stars at a median 4.8 × 10⁻¹⁶ M☉ yr⁻¹, 89% of them under 10⁻¹³; 420 of the young thin
 //! disc's 552 high-mass hosts black holes fed by a wind; and Be/X hosts 55 of its 132
 //! neutron-star high-mass hosts.
 //!
-//! From 27:
+//! So:
 //!
 //! - **A floor.** Roche-lobe overflow onto a compact star is an X-ray binary only at
 //!   [`XRB_MIN_TRANSFER_RATE`] or more, about 10³⁴ erg s⁻¹ time-averaged onto a neutron star: the
@@ -55,59 +55,18 @@
 //!   17 beside a 7 M☉ black hole (Lasota, Dubus and Kruk 2008), not by the hydrogen disc's
 //!   (research's ruling of 2026-11-02). A helium star keeps the hydrogen line: the helium line's
 //!   period form holds for an ultracompact disc alone (the science check of 2026-11-02). The
-//!   X-ray binaries' scan reads the line its class's test reads, through the generator version's
-//!   rules, which classify a timeline built from marks.
+//!   X-ray binaries' scan reads the line its class's test reads.
 //!
 //! Every figure is recalled, not read at source (the science checks of 2026-11-01 reached none);
 //! the floor sits at the very faint transients' upper bound, so it may cut the faintest of them.
-//! The rules' one `match` is [`XrbClassRules::carves`], which each of the rules reads in
-//! `classify` through the pair's own rules, and the X-ray binaries' scan reads for the floor
-//! through the galaxy's, so that it keeps exactly the class's entries whichever rules the class's
-//! test reads (its timelines, built from marks, take the version's). A timeline built from marks
+//! `classify` reads each of the rules, and the X-ray binaries' scan reads the floor, so that it
+//! keeps exactly the class's entries. A timeline built from marks
 //! has no history, so a Be star spun up by transfer is one in the engine's timeline alone (a
 //! deviation: the catalogue's Be/X donors are Be stars by their own draws). The census's members
-//! each have one of the nine kinds (`testing::XrayMarks::member_kind`), which the catalogue draws
-//! from 27.
+//! each have one of the nine kinds (`testing::XrayMarks::member_kind`), which the catalogue draws.
 
-use crate::GeneratorVersion;
 use crate::math;
 use crate::units::{Days, Kelvin, Seconds, SolarMassesPerYear};
-
-/// The generator version whose stellar rules carve the X-ray binaries anew (P11.T5's and P11.T8.b's
-/// fix): [`XrbClassRules::Carved`].
-///
-/// Below it every pair takes the held arm, [`XrbClassRules::Held`], today's code verbatim, so
-/// every generated value keeps its bits; the tests reach the new arm through
-/// `StellarRules::every_27_hold()`. The bump to 27 deletes this hold: this module's version and
-/// [`XrbClassRules`] (its constants move to `classify`), the stellar rules' `xrb_class` field,
-/// the calls of [`XrbClassRules::carves`] (`classify`'s and the X-ray binaries' scan's) and
-/// the context's gainer masses, and the tripwire (`the_xrb_class_is_held_only_until_the_27_bump`).
-pub(crate) const XRB_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether the engine's classes carve the X-ray binaries anew (the stellar rules' `xrb_class`
-/// field, the hold of [`XRB_CLASS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum XrbClassRules {
-    /// Versions 24–26's: every Roche-lobe overflow onto a compact star, every wind-fed black hole
-    /// above the luminosity floor, a Be star by its own draw beside a neutron star or a black hole,
-    /// and every compact star fed by a giant's wind above its floor a symbiotic X-ray binary.
-    Held,
-    /// Version 27's: the floor on the transfer rate, the spun-up Be donors, the wind-fed black
-    /// holes' disc, Be/X-ray binaries of neutron stars alone, the symbiotic X-ray binaries'
-    /// bounds and the helium disc's line (module documentation).
-    Carved,
-}
-
-impl XrbClassRules {
-    /// Whether the rules carve anew: the hold's one `match`.
-    #[must_use]
-    pub(crate) const fn carves(self) -> bool {
-        match self {
-            Self::Held => false,
-            Self::Carved => true,
-        }
-    }
-}
 
 /// The least rate of Roche-lobe overflow onto a neutron star or a black hole at which the pair is an
 /// X-ray binary from 27, M☉ yr⁻¹: 10⁻¹², about 10³⁴ erg s⁻¹ time-averaged onto a 1.4 M☉ neutron

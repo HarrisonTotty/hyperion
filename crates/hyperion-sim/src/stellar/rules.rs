@@ -38,12 +38,6 @@
 //!   reach tables fitted from the engine's runs keep the version's rules until the bump refits
 //!   them, and the range brief's gate refuses them under another arm
 //!   (`stellar/rules/merger_mass_hold.rs` lists the movers).
-//! - [`xrb_class`](StellarRules::xrb_class), at [`XRB_CLASS_VERSION`] (plan 11, P11.T5's and
-//!   P11.T8.b's fix): what `classify` counts as an X-ray binary, a floor on the transfer rate onto
-//!   a compact star, Be donors spun up by stable transfer, a wind-fed black hole's disc, Be/X of
-//!   neutron stars alone and symbiotic X-ray binaries of neutron stars beside cool giants, each
-//!   read through [`XrbClassRules::carves`] and each timeline's rules
-//!   (`stellar/rules/xrb_class_hold.rs` lists the movers).
 //! - [`pinned_white_dwarfs`](StellarRules::pinned_white_dwarfs), at
 //!   [`PINNED_WHITE_DWARFS_VERSION`] (plan 11, P11.T4's fix): whether a pinned primary, its pin
 //!   pending, that its binary would make a white dwarf is born one below it or held at its core's
@@ -79,7 +73,6 @@ use crate::stellar::binary::pinned_white_dwarfs::{
     PINNED_WHITE_DWARFS_VERSION, PinnedWhiteDwarfRules,
 };
 use crate::stellar::binary::wind_accretion::{WIND_ACCRETION_VERSION, WindAccretionRules};
-use crate::stellar::binary::xrb_class::{XRB_CLASS_VERSION, XrbClassRules};
 use crate::stellar::remnant::KickRankRules;
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -93,8 +86,6 @@ pub(crate) struct StellarRules {
     /// What a dynamically transferring main-sequence pair's merger keeps in the binary engine,
     /// the hold of [`MERGER_MASS_VERSION`].
     pub(crate) merger_mass: MergerMassRules,
-    /// What `classify` counts as an X-ray binary, the hold of [`XRB_CLASS_VERSION`].
-    pub(crate) xrb_class: XrbClassRules,
     /// Whether a pinned primary, its pin pending, that its binary would make a white dwarf is
     /// held until its pin, the hold of [`PINNED_WHITE_DWARFS_VERSION`].
     pub(crate) pinned_white_dwarfs: PinnedWhiteDwarfRules,
@@ -118,11 +109,6 @@ impl StellarRules {
                 MergerMassRules::Pair
             } else {
                 MergerMassRules::ThermalLimit
-            },
-            xrb_class: if version.get() >= XRB_CLASS_VERSION.get() {
-                XrbClassRules::Carved
-            } else {
-                XrbClassRules::Held
             },
             pinned_white_dwarfs: if version.get() >= PINNED_WHITE_DWARFS_VERSION.get() {
                 PinnedWhiteDwarfRules::Frozen
@@ -158,7 +144,7 @@ impl StellarRules {
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
     /// those that turn on at 27 (P11.T4's `pinned_white_dwarfs` and `dwarf_limit`, P11.T4.d's
-    /// `merger_mass`, P11.T5's `xrb_class`, and P11.T12's `wind_accretion`).
+    /// `merger_mass`, and P11.T12's `wind_accretion`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.

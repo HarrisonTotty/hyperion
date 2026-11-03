@@ -66,7 +66,6 @@ pub(crate) use nsm::nsm_marks_at;
 pub(crate) use nsm::remnant_mass_under;
 pub use nsm::{NsbhOutflow, NsmScanMarks, nsm_scan_marks, scan_nsm_cell};
 
-use crate::GENERATOR_VERSION;
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::events::{
     CycleEvent, EventSeries, LinearClock, MonotonePhase, PhaseClock, TimeWindow, octaves_to_span,
@@ -82,7 +81,6 @@ use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
 use crate::rng::{Seed, Stream, tags};
 use crate::stellar::draws::isotropic;
-use crate::stellar::rules::StellarRules;
 use crate::tables::binary::{AwdMark, XrbHostKind, XrbMark, XrbPick};
 use crate::time::{SourceHorizon, Span, UniverseTime};
 use crate::units::consts::{
@@ -100,7 +98,7 @@ use super::classify::{
 use super::light_curves::{XrayAccretor, eddington_luminosity};
 use super::params::BinaryParams;
 use super::sampler::ClassSampler;
-use super::xrb_class::{XRB_MIN_TRANSFER_RATE, XrbClassRules, helium_disc_line};
+use super::xrb_class::{XRB_MIN_TRANSFER_RATE, helium_disc_line};
 
 /// The amplitude of a host's nova phase noise at its smallest octave, cycles: 0.08, ours,
 /// provisional. It is near the largest a one-cycle lattice allows (10.3 × 0.08 = 0.82 of plan
@@ -663,28 +661,14 @@ impl XrbShape {
         }
     }
 
-    /// Whether a host of this shape, beside a compact star of `accretor_mass` and fed at `rate`,
-    /// is fed below its disc's instability line as `classify` splits a low-mass X-ray binary on
-    /// it under the carving's rules `xrb_class`: an ultracompact host's transience, by the
-    /// irradiated hydrogen disc's line ([`xrb_line`]), or from 27 by its helium disc's
-    /// ([`helium_disc_line`]). `false` for every other shape, whose kind says it.
+    /// Whether a host of this shape, fed at `rate`, is fed below its disc's instability line as
+    /// `classify` splits a low-mass X-ray binary on it: an ultracompact host's transience, by its
+    /// helium disc's line ([`helium_disc_line`], P11.T5's fix). `false` for every other shape,
+    /// whose kind says it.
     #[must_use]
-    pub(crate) fn below_the_line(
-        &self,
-        accretor_mass: SolarMasses,
-        rate: Option<SolarMassesPerYear>,
-        xrb_class: XrbClassRules,
-    ) -> bool {
+    pub(crate) fn below_the_line(&self, rate: Option<SolarMassesPerYear>) -> bool {
         match (*self, rate) {
-            (Self::Ultracompact { donor_mass, .. }, Some(rate)) => {
-                let line = if xrb_class.carves() {
-                    helium_disc_line(self.period())
-                } else {
-                    let separation = circular_separation(self.period(), accretor_mass + donor_mass);
-                    xrb_line(accretor_mass, donor_mass, separation)
-                };
-                rate < line
-            }
+            (Self::Ultracompact { .. }, Some(rate)) => rate < helium_disc_line(self.period()),
             (
                 Self::LowMass { .. }
                 | Self::BeX { .. }
@@ -936,10 +920,8 @@ pub(crate) fn xrb_marks_at(
         &mut stream,
     );
     let transfer_rate = shape.transfer_rate(kind.accretor(), accretor_mass);
-    // From 27 the class's test refuses a pair fed under the floor (`xrb_class`).
-    if galaxy.rules().stellar.xrb_class.carves()
-        && transfer_rate.is_some_and(|rate| rate < XRB_MIN_TRANSFER_RATE)
-    {
+    // The class's test refuses a pair fed under the floor (`xrb_class`).
+    if transfer_rate.is_some_and(|rate| rate < XRB_MIN_TRANSFER_RATE) {
         return None;
     }
     // In every version it refuses a symbiotic host whose neutron star takes its giant's wind
@@ -951,15 +933,12 @@ pub(crate) fn xrb_marks_at(
         return None;
     }
     // An ultracompact host is a transient by its rate against the line the class's test reads, its
-    // timeline's from marks under the version's rules, its recurrence the kind's next word.
-    let marked = StellarRules::of_version(GENERATOR_VERSION).xrb_class;
+    // recurrence the kind's next word.
     let recurrence = recurrence.or_else(|| {
-        shape
-            .below_the_line(accretor_mass, transfer_rate, marked)
-            .then(|| {
-                let mark = XrbMark::UltracompactRecurrence;
-                Years::new(math::exp10(sampler.draw(mark, 0.0, &mut kind_stream)))
-            })
+        shape.below_the_line(transfer_rate).then(|| {
+            let mark = XrbMark::UltracompactRecurrence;
+            Years::new(math::exp10(sampler.draw(mark, 0.0, &mut kind_stream)))
+        })
     });
     let recoil_marks = recoil_marks_of(kind).filter(|_| host.listed_host().is_none());
     let recoil = recoil_marks.map(|(speed_mark, since_mark)| {

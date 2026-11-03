@@ -19,11 +19,11 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::stellar::binary::scan::{engine_calls, scan_cell, ultracompact_donor_mass};
 use crate::stellar::binary::xrb_class::{
     SYMBIOTIC_XRB_MAX_FILLING, SYMBIOTIC_XRB_MAX_PERIOD, SYMBIOTIC_XRB_MAX_TEFF,
-    XRB_MIN_TRANSFER_RATE, XrbClassRules, helium_disc_line,
+    XRB_MIN_TRANSFER_RATE, helium_disc_line,
 };
 use crate::stellar::binary::{
     BinaryClass, BinaryParams, ClassContext, HmxbKind, SYMBIOTIC_XRB_MIN_LUMINOSITY, XrbKind,
-    classify, wind_fed_luminosity, xrb_line,
+    classify, wind_fed_luminosity,
 };
 use crate::tables::binary::{SamplerPick, XRB_SAMPLER, XRB_SAMPLER_27};
 use crate::time::SourceHorizon;
@@ -409,19 +409,8 @@ fn ultracompact_hosts_lie_at_10_to_80_minutes_and_fill_their_lobes() {
         assert!((donor.radius().value() / lobe - 1.0).abs() < 1e-12);
         let rate = scan.transfer_rate().expect("a host in stable transfer");
         assert!(rate >= XRB_MIN_TRANSFER_RATE, "{rate:?}");
-        // The line its class's test reads, under the version's rules (a timeline from marks).
-        let line = if StellarRules::of_version(GENERATOR_VERSION)
-            .xrb_class
-            .carves()
-        {
-            helium_disc_line(scan.period())
-        } else {
-            xrb_line(
-                scan.accretor_mass(),
-                donor.mass(),
-                binary.orbit().semi_major_axis(),
-            )
-        };
+        // The line its class's test reads (a timeline from marks): its helium disc's.
+        let line = helium_disc_line(scan.period());
         assert_eq!(
             scan.is_transient(),
             rate < line,
@@ -436,46 +425,32 @@ fn ultracompact_hosts_lie_at_10_to_80_minutes_and_fill_their_lobes() {
     }
 }
 
-/// An ultracompact host's transience, as its scan draws it, is `classify`'s under either arm of the
-/// carving (`xrb_class`): the hydrogen disc's line under the held rules and the helium disc's under
-/// the carving, so that the scan and the class's test keep agreeing at the bump.
+/// An ultracompact host's transience, as its scan draws it, is `classify`'s, by the helium disc's
+/// line (`xrb_class`), so that the scan and the class's test agree.
 #[test]
-fn an_ultracompact_host_s_transience_is_classify_s_under_both_arms() {
+fn an_ultracompact_host_s_transience_is_classify_s() {
     let version = StellarRules::of_version(GENERATOR_VERSION);
     let transient = BinaryClass::LowMassXrayBinary(XrbKind::Transient);
-    let mut flips = 0_usize;
+    let mut transients = 0_usize;
     for entry in new_entries_of(XrbHostKind::Ultracompact) {
         let (scan, timeline) = (entry.scan(), entry.timeline());
         let now = entry.record().age_at_epoch();
         let state = timeline.state_at(now);
         let base = timeline.context();
-        let mut by_arm = [false; 2];
-        for (arm, xrb_class) in [XrbClassRules::Held, XrbClassRules::Carved]
-            .into_iter()
-            .enumerate()
-        {
-            let rules = StellarRules {
-                xrb_class,
-                ..version
-            };
-            let ctx = ClassContext::new(
-                base.composition(),
-                [base.draws(0), base.draws(1)],
-                base.params(),
-                ([None, None], None),
-                [None; 2],
-                rules,
-            );
-            let below =
-                scan.shape()
-                    .below_the_line(scan.accretor_mass(), scan.transfer_rate(), xrb_class);
-            assert_eq!(below, classify(&state, &ctx) == transient, "{xrb_class:?}");
-            by_arm[arm] = below;
-        }
-        flips += usize::from(by_arm[0] != by_arm[1]);
+        let ctx = ClassContext::new(
+            base.composition(),
+            [base.draws(0), base.draws(1)],
+            base.params(),
+            ([None, None], None),
+            [None; 2],
+            version,
+        );
+        let below = scan.shape().below_the_line(scan.transfer_rate());
+        assert_eq!(below, classify(&state, &ctx) == transient);
+        transients += usize::from(below);
     }
-    println!("ultracompact hosts the helium line turns transient: {flips}");
-    assert!(flips > 0);
+    println!("ultracompact hosts the helium line turns transient: {transients}");
+    assert!(transients > 0);
 }
 
 /// A symbiotic host's neutron star takes its giant's wind at or above the symbiotic X-ray binaries'

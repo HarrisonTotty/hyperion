@@ -1,41 +1,26 @@
-//! The tests of P11.T5's and P11.T8.b's fix, [`XRB_CLASS_VERSION`]: what `classify` counts as an
-//! X-ray binary, a floor on the rate of Roche-lobe overflow onto a compact star, Be donors spun up
-//! by stable transfer and a disc for a wind-fed black hole, only under the rules that turn it on,
-//! read through [`XrbClassRules::carves`] and each timeline's rules.
+//! The tests of P11.T5's and P11.T8.b's fix: what `classify` counts as an X-ray binary, a floor on
+//! the rate of Roche-lobe overflow onto a compact star, Be donors spun up by stable transfer and a
+//! disc for a wind-fed black hole (`stellar::binary::xrb_class`). Its hold is deleted (the 27
+//! fold); these are its tests of the new arm, which the bump re-pins by name.
 //!
-//! - The version's rules keep the held arm, and the tripwire holds it only until the bump.
-//! - Under the arm alone four pinned grid systems move, one a rule, found by censuses of 3 × 10⁵
-//!   slab and 3 × 10⁵ young thin disc records: a neutron star fed 3.5 × 10⁻¹³ M☉ yr⁻¹ by a
-//!   helium white dwarf is no X-ray binary (from generator version 25); a 24.5 M☉ star's wind
-//!   feeding a black hole 30 days out, far inside its Roche lobe, makes none; a 12.3 M☉
-//!   main-sequence star that gained mass from its neutron star's progenitor is a Be star, its pair
-//!   a Be/X-ray binary; and a Be star beside a black hole makes none.
-//! - The catalogue: under the arm and plan 15's fitted tables the scan refuses the candidates its
-//!   sampler feeds under the floor, which the class's test will refuse at the bump, and keeps
-//!   exactly the cells' entries; and a pair's classes at its ages do not depend on the order they
-//!   are asked in.
-//! - Slow: censuses of 10⁶ slab and 10⁶ young thin disc records under every 27 hold and under
-//!   every 27 hold but this one: no member is fed under the floor, every member has a kind, the
-//!   hydrogen-fed low-mass X-ray binaries it takes are pinned, and the young disc's Be/X share of its neutron-star
-//!   high-mass hosts and its black holes' share of its high-mass hosts against their cited
-//!   figures, pinned as measured.
-//!
-//! The movers under the arm, found by turning it on at the version (and back off), over the sim's,
-//! the server's and the fitting crate's tests and the slow tests of the binaries, the catalogue
-//! and the sky: the golden `sky/census_near_sun` (the grid's carve near the Sun) and, slow,
-//! `tables_hold::the_x_ray_binary_sampler_against_the_engine`'s pinned misses (its Be/X members)
-//! and `merger::channels_hold::the_channel_sampler_against_the_engine_under_every_26_hold`'s (the
-//! grid redraws other systems); `carve::tests::a_carved_first_attempt_is_redrawn` and
-//! `multiplicity::bound::tests::the_carved_record_lists_the_attempt_it_keeps`, whose pinned
-//! record's first attempt is no X-ray binary under the arm (with the Be stars' rule); and this
-//! module's tests of the version's arm (2026-11-01). Nothing moves at 24–26.
+//! - Four pinned grid systems, one a rule, found by censuses of 3 × 10⁵ slab and 3 × 10⁵ young thin
+//!   disc records: a neutron star fed 3.5 × 10⁻¹³ M☉ yr⁻¹ by a helium white dwarf is no X-ray
+//!   binary (from generator version 25); a 24.5 M☉ star's wind feeding a black hole 30 days out,
+//!   far inside its Roche lobe, makes none; a 12.3 M☉ main-sequence star that gained mass from its
+//!   neutron star's progenitor is a Be star, its pair a Be/X-ray binary; and a Be star beside a
+//!   black hole makes none.
+//! - The catalogue: under plan 15's fitted tables the scan keeps no candidate its sampler feeds
+//!   under the floor, and keeps exactly the cells' entries; and a pair's classes at its ages do not
+//!   depend on the order they are asked in.
+//! - Slow: censuses of 10⁶ slab and 10⁶ young thin disc records under every 27 hold: no member is
+//!   fed under the floor, every member has a kind, and the young disc's Be/X share of its
+//!   neutron-star high-mass hosts and its black holes' share of its high-mass hosts against their
+//!   cited figures, pinned as measured.
 
 use std::sync::OnceLock;
 
 use hyperion_testkit::order::assert_order_independent;
 
-use super::*;
-use crate::GENERATOR_VERSION;
 use crate::galaxy::catalogue_classes::binary::{BinaryTableRules, XrayBinaries};
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId};
 use crate::galaxy::imf::{BandShares, MassBand};
@@ -53,7 +38,7 @@ use crate::stellar::binary::testing::{
     CensusPart, CensusRecords, CensusSite, ClassMember, XrayMarks, class_census_in,
 };
 use crate::stellar::binary::xrb_class::{SPUN_UP_GAINED_SHARE, XRB_MIN_TRANSFER_RATE};
-use crate::stellar::binary::{BinaryClass, CarvedClass, Component, HmxbKind, SegmentKind, XrbKind};
+use crate::stellar::binary::{BinaryClass, CarvedClass, Component, HmxbKind, SegmentKind};
 use crate::tables::binary::{
     ClassSamplerTable, SamplerPick, XRB_SAMPLER_27, XrbHostKind, XrbMark, XrbPick,
 };
@@ -142,38 +127,12 @@ const ULTRACOMPACT_MAX_PERIOD: Seconds = Seconds::new(80.0 * 60.0);
 /// their periods).
 const PINNED_LONG_ULTRACOMPACTS: [usize; 2] = [0, 10];
 
-/// The hydrogen-fed low-mass X-ray binaries the floor takes under every 27 hold, in the slab and
-/// in the young disc, as measured: three of the slab's, neutron-star transients beside substellar
-/// donors of 0.012–0.014 M☉ 1.8–2.0 hours out fed 5.6–9.0 × 10⁻¹³ M☉ yr⁻¹ (a finding: the floor
-/// of 10⁻¹² takes the faintest of the very faint transients), and two of the young disc's,
-/// neutron stars beside 1.8–1.9 M☉ main-sequence stars 13–15 hours out fed 5.5 × 10⁻¹³ and
-/// 5.5 × 10⁻¹⁶ M☉ yr⁻¹ (a finding: P11.T4's heavy donors leave a main-sequence donor barely in
-/// contact).
-const PINNED_FLOORED_HYDROGEN: [usize; 2] = [3, 2];
-
-/// The version's rules.
-fn version() -> StellarRules {
-    StellarRules::of_version(GENERATOR_VERSION)
-}
-
 /// The Milky Way fixture, under the version's rules.
-fn held() -> &'static Galaxy {
+fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
         Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
             .expect("the Milky Way fixture builds")
-    })
-}
-
-/// The fixture under the version's rules with this hold's arm on alone.
-fn carved() -> Galaxy {
-    let rules = held().rules();
-    held().clone().with_rules(GalaxyRules {
-        stellar: StellarRules {
-            xrb_class: XrbClassRules::Carved,
-            ..version()
-        },
-        ..rules
     })
 }
 
@@ -216,79 +175,25 @@ fn pinned_marks(galaxy: &Galaxy, id: u64) -> Option<XrayMarks> {
     pinned(galaxy, id).map(|m| *m.xray().expect("an X-ray binary's marks"))
 }
 
-/// The version's rules keep the held arm, every version below 27 does and 27 carves anew. The
-/// tripwire: the bump to 27 deletes this hold.
+/// A neutron star fed by a helium white dwarf under the floor is no X-ray binary (under the held
+/// arm it was a low-mass transient fed 3.5 × 10⁻¹³ M☉ yr⁻¹, from generator version 25).
 #[test]
-fn the_xrb_class_is_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < XRB_CLASS_VERSION,
-        "the bump to 27 deletes P11.T5's and P11.T8.b's X-ray binary hold: `XRB_CLASS_VERSION`, \
-         `XrbClassRules` with its `Held` arm, `StellarRules::xrb_class`, `classify`'s \
-         calls of `carves` and the context's gainer masses, the X-ray binaries' scan's, this \
-         module and its line in `stellar/rules.rs`"
-    );
-    assert_eq!(version().xrb_class, XrbClassRules::Held);
-    let at = |v: u32| StellarRules::of_version(crate::GeneratorVersion::new(v)).xrb_class;
-    for v in [GENERATOR_VERSION.get(), 25, 26] {
-        assert_eq!(at(v), XrbClassRules::Held, "version {v}");
-    }
-    assert_eq!(at(27), XrbClassRules::Carved);
-    assert_eq!(
-        StellarRules::every_27_hold().xrb_class,
-        XrbClassRules::Carved
-    );
-    assert_eq!(
-        GalaxyRules::every_27_hold().stellar.xrb_class,
-        XrbClassRules::Carved
-    );
-    assert!(!XrbClassRules::Held.carves());
-    assert!(XrbClassRules::Carved.carves());
+fn a_transfer_under_the_floor_makes_no_x_ray_binary() {
+    assert_eq!(pinned_marks(galaxy(), UNDER_THE_FLOOR), None);
 }
 
-/// Under the arm alone a neutron star fed by a helium white dwarf under the floor is no X-ray
-/// binary: under the held arm it is a low-mass transient fed 3.5 × 10⁻¹³ M☉ yr⁻¹.
+/// A black hole fed by a massive star's wind far inside its Roche lobe is no X-ray binary (under
+/// the held arm it was a supergiant one).
 #[test]
-fn a_transfer_under_the_floor_makes_no_x_ray_binary_under_the_arm() {
-    let held_marks = pinned_marks(held(), UNDER_THE_FLOOR).expect("an X-ray binary held");
-    println!("{held_marks:?}");
-    assert_eq!(
-        held_marks.class,
-        BinaryClass::LowMassXrayBinary(XrbKind::Transient)
-    );
-    assert_eq!(held_marks.accretor_phase, Phase::NeutronStar);
-    assert_eq!(held_marks.donor_phase, Phase::HeliumWhiteDwarf);
-    let rate = held_marks.transfer_rate.expect("a stable transfer");
-    assert!(rate < XRB_MIN_TRANSFER_RATE, "{rate:?}");
-    assert_eq!(held_marks.member_kind(), Some(XrbHostKind::Ultracompact));
-    assert_eq!(pinned_marks(&carved(), UNDER_THE_FLOOR), None);
+fn a_wind_fed_black_hole_needs_a_disc() {
+    assert_eq!(pinned_marks(galaxy(), DISCLESS_BLACK_HOLE), None);
 }
 
-/// Under the arm alone a black hole fed by a massive star's wind far inside its Roche lobe is no
-/// X-ray binary: under the held arm it is a supergiant one.
+/// A B star that gained mass in stable transfer is a Be star, its pair with a neutron star a
+/// Be/X-ray binary (under the held arm its own draw made it none, and the pair no X-ray binary).
 #[test]
-fn a_wind_fed_black_hole_needs_a_disc_under_the_arm() {
-    let held_marks = pinned_marks(held(), DISCLESS_BLACK_HOLE).expect("an X-ray binary held");
-    println!("{held_marks:?}");
-    assert_eq!(
-        held_marks.class,
-        BinaryClass::HighMassXrayBinary(HmxbKind::Supergiant)
-    );
-    assert_eq!(held_marks.accretor_phase, Phase::BlackHole);
-    assert_eq!(held_marks.transfer_rate, None, "fed by a wind");
-    assert_eq!(
-        held_marks.member_kind(),
-        Some(XrbHostKind::BlackHoleHighMass)
-    );
-    assert_eq!(pinned_marks(&carved(), DISCLESS_BLACK_HOLE), None);
-}
-
-/// Under the arm alone a B star that gained mass in stable transfer is a Be star, its pair with a
-/// neutron star a Be/X-ray binary; under the held arm its own draw makes it none, and the pair no
-/// X-ray binary.
-#[test]
-fn a_b_star_spun_up_by_transfer_is_a_be_star_under_the_arm() {
-    assert_eq!(pinned_marks(held(), SPUN_UP_BE_STAR), None);
-    let member = pinned(&carved(), SPUN_UP_BE_STAR).expect("an X-ray binary under the arm");
+fn a_b_star_spun_up_by_transfer_is_a_be_star() {
+    let member = pinned(galaxy(), SPUN_UP_BE_STAR).expect("an X-ray binary");
     let marks = *member.xray().expect("its marks");
     println!("{marks:?}");
     assert_eq!(marks.class, BinaryClass::HighMassXrayBinary(HmxbKind::BeX));
@@ -319,64 +224,54 @@ fn a_b_star_spun_up_by_transfer_is_a_be_star_under_the_arm() {
     );
 }
 
-/// Under the arm and plan 15's fitted tables, which feed some low-mass hosts under the floor, the
-/// X-ray binaries' scan over version 27's table refuses exactly those of the held arm's hosts over
-/// the same table in 3,200 cells about the centre, and keeps exactly the cells' entries in 128 of
-/// them, none fed under the floor; version 27's table draws the carving's kinds too.
+/// Under plan 15's fitted tables, which feed some low-mass hosts under the floor, the X-ray
+/// binaries' scan over version 27's table keeps none fed under the floor in 3,200 cells about the
+/// centre, and keeps exactly the cells' entries in 128 of them; version 27's table draws the
+/// carving's kinds too.
 #[test]
-fn the_scan_refuses_a_host_fed_under_the_floor_under_the_arm() {
-    let rules = held().rules();
-    let fitted = GalaxyRules {
+fn the_scan_refuses_a_host_fed_under_the_floor() {
+    let rules = galaxy().rules();
+    let fitted = galaxy().clone().with_rules(GalaxyRules {
         binary_tables: BinaryTableRules::Fitted,
         ..rules
-    };
-    let [held_fitted, arm_fitted] = [version(), carved().rules().stellar]
-        .map(|stellar| held().clone().with_rules(GalaxyRules { stellar, ..fitted }));
-    // The same table under both, version 27's, which draws the carving's kinds too.
-    let [held_process, arm_process] =
-        [&held_fitted, &arm_fitted].map(|g| XrayBinaries::of_table(g, &XRB_SAMPLER_27));
+    });
+    let process = XrayBinaries::of_table(&fitted, &XRB_SAMPLER_27);
     let under = |h: &XrbScanMarks| h.transfer_rate().is_some_and(|r| r < XRB_MIN_TRANSFER_RATE);
-    let (mut refused, mut kept) = (0_usize, 0_usize);
+    let mut kept = 0_usize;
     for x in -20..20 {
         for y in -20..20 {
             for z in [-1, 0] {
                 let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, [x, y, z]).expect("a cell");
-                let (mut before, mut after) = (Vec::new(), Vec::new());
-                scan_cell(&held_fitted, &held_process, key, &mut before);
-                scan_cell(&arm_fitted, &arm_process, key, &mut after);
-                let expected: Vec<&XrbScanMarks> = before.iter().filter(|h| !under(h)).collect();
-                assert_eq!(after.iter().collect::<Vec<_>>(), expected, "{key:?}");
-                refused += before.len() - after.len();
-                kept += after.len();
+                let mut hosts = Vec::new();
+                scan_cell(&fitted, &process, key, &mut hosts);
+                assert!(!hosts.iter().any(under), "{key:?}");
+                kept += hosts.len();
                 if (-4..4).contains(&x) && (-4..4).contains(&y) {
                     let entries =
-                        CatalogueClassCell::generate(&arm_fitted, &arm_process, key).into_entries();
+                        CatalogueClassCell::generate(&fitted, &process, key).into_entries();
                     let scanned: Vec<_> = entries.iter().map(|e| e.value().scan()).collect();
-                    assert_eq!(after.iter().collect::<Vec<_>>(), scanned, "{key:?}");
+                    assert_eq!(hosts.iter().collect::<Vec<_>>(), scanned, "{key:?}");
                 }
             }
         }
     }
-    println!("{kept} hosts kept under the arm, {refused} fed under the floor refused");
-    assert!(
-        refused > 0,
-        "the fitted tables feed some hosts under the floor"
-    );
+    println!("{kept} hosts kept");
+    assert!(kept > 0, "the cells keep hosts");
 }
 
-/// Under the arm alone a Be star beside a black hole makes no X-ray binary: the pinned 19.3 M☉ star,
-/// spun up by its transfer, is a Be star but feeds no neutron star, and its wind, far inside its
-/// Roche lobe, makes the hole no disc.
+/// A Be star beside a black hole makes no X-ray binary: the pinned 19.3 M☉ star, spun up by its
+/// transfer, is a Be star but feeds no neutron star, and its wind, far inside its Roche lobe, makes
+/// the hole no disc.
 #[test]
-fn a_be_star_beside_a_black_hole_makes_no_x_ray_binary_under_the_arm() {
-    assert_eq!(pinned_marks(&carved(), BLACK_HOLE_BESIDE_A_BE_STAR), None);
+fn a_be_star_beside_a_black_hole_makes_no_x_ray_binary() {
+    assert_eq!(pinned_marks(galaxy(), BLACK_HOLE_BESIDE_A_BE_STAR), None);
 }
 
-/// Under the arm a pair's classes at its segments' ages do not depend on the order they are asked
-/// in: the pinned Be/X-ray binary's, whose context reads its history.
+/// A pair's classes at its segments' ages do not depend on the order they are asked in: the pinned
+/// Be/X-ray binary's, whose context reads its history.
 #[test]
-fn a_pair_s_classes_under_the_arm_do_not_depend_on_their_order() {
-    let member = pinned(&carved(), SPUN_UP_BE_STAR).expect("an X-ray binary under the arm");
+fn a_pair_s_classes_do_not_depend_on_their_order() {
+    let member = pinned(galaxy(), SPUN_UP_BE_STAR).expect("an X-ray binary");
     let timeline = member.timeline();
     let ages: Vec<Years> = timeline
         .segments()
@@ -439,38 +334,20 @@ fn kinds(marks: &[XrayMarks]) -> [usize; 9] {
     })
 }
 
-/// Whether `marks` is a low-mass X-ray binary fed through its inner Lagrangian point by a hydrogen
-/// star: a catalogue low-mass kind's.
-fn hydrogen_fed_low_mass(marks: &XrayMarks) -> bool {
-    marks.host_kind().is_some_and(|kind| !kind.is_high_mass())
-}
-
-/// Slow: censuses of 10⁶ slab and 10⁶ young thin disc records under every 27 hold, and under every
-/// 27 hold but this one. Under the arm no member is fed through its inner Lagrangian point under
-/// the floor and every member has a kind; the members of each kind, the ultracompact ones at 80
-/// minutes or longer, the hydrogen-fed low-mass X-ray binaries the floor takes, and the young
-/// disc's Be/X share of its neutron-star high-mass hosts and its black holes' share of its
-/// high-mass hosts are pinned as measured, against their cited figures.
+/// Slow: censuses of 10⁶ slab and 10⁶ young thin disc records under every 27 hold. No member is
+/// fed through its inner Lagrangian point under the floor and every member has a kind; the members
+/// of each kind, the ultracompact ones at 80 minutes or longer, and the young disc's Be/X share of
+/// its neutron-star high-mass hosts and its black holes' share of its high-mass hosts are pinned as
+/// measured, against their cited figures.
 #[test]
-#[ignore = "slow: four censuses of 10⁶ records through the binary engine"]
+#[ignore = "slow: two censuses of 10⁶ records through the binary engine"]
 fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
-    // Built under each, since the displaced classes' table, from 26, is built under the galaxy's
-    // stellar rules.
-    let every_27 = GalaxyRules::every_27_hold();
-    let [held, arm] = [
-        GalaxyRules {
-            stellar: StellarRules {
-                xrb_class: XrbClassRules::Held,
-                ..every_27.stellar
-            },
-            ..every_27
-        },
-        every_27,
-    ]
-    .map(|rules| {
-        Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
-            .expect("the Milky Way fixture builds")
-    });
+    let arm = Galaxy::from_params_with_rules(
+        Seed::new(SEED),
+        GalaxyParams::milky_way_like(),
+        GalaxyRules::every_27_hold(),
+    )
+    .expect("the Milky Way fixture builds");
     let sites = [
         ("slab", CensusSite::SOLAR_CIRCLE, CensusRecords::All),
         (
@@ -480,18 +357,14 @@ fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
         ),
     ];
     let mut young = Vec::new();
-    let mut floored = Vec::new();
     let mut pinned_kinds = Vec::new();
     let mut long_ultracompacts = Vec::new();
     for (name, site, whose) in sites {
-        let [before, after] = [&held, &arm].map(|g| census(g, site, whose, CENSUS_RECORDS));
+        let after = census(&arm, site, whose, CENSUS_RECORDS);
         println!(
-            "{name}: {} members held, {} under the arm; kinds (the catalogue's six, then \
-             ultracompact, symbiotic, black hole beside a massive star) {:?} held, {:?} under \
-             the arm",
-            before.len(),
+            "{name}: {} members; kinds (the catalogue's six, then ultracompact, symbiotic, black \
+             hole beside a massive star) {:?}",
             after.len(),
-            kinds(&before),
             kinds(&after)
         );
         for m in &after {
@@ -510,17 +383,6 @@ fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
         println!("{name}: ultracompacts at 80 minutes or longer {long:?}");
         long_ultracompacts.push(long.len());
         pinned_kinds.push(kinds(&after));
-        // The hydrogen-fed low-mass X-ray binaries the floor takes, fed under it.
-        let under: Vec<&XrayMarks> = before
-            .iter()
-            .filter(|m| {
-                hydrogen_fed_low_mass(m)
-                    && m.transfer_rate
-                        .is_some_and(|rate| rate < XRB_MIN_TRANSFER_RATE)
-            })
-            .collect();
-        println!("{name}: hydrogen-fed members under the floor {under:?}");
-        floored.push(under.len());
         if whose == CensusRecords::Of(Population::YoungThinDisc) {
             young = after;
         }
@@ -547,10 +409,6 @@ fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
          stars' against Liu et al.'s {CITED_BEX_SHARE}, black holes {black_hole_share:.3} \
          against at most {CITED_BLACK_HOLE_SHARE}"
     );
-    println!(
-        "hydrogen-fed low-mass X-ray binaries under the floor, slab and young disc: {floored:?}"
-    );
-    assert_eq!(floored, PINNED_FLOORED_HYDROGEN);
     assert_eq!(pinned_kinds, PINNED_KINDS);
     assert_eq!(long_ultracompacts, PINNED_LONG_ULTRACOMPACTS);
     assert_eq!([bex, supergiant, black_holes], PINNED_HIGH_MASS);

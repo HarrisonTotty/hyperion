@@ -197,12 +197,12 @@ const CENSUS_FIGURES: CompactFigures = CompactFigures {
 /// stars that stable transfer grew past `MAX_NEUTRON_STAR_MASS`. Under every 27 hold:
 ///
 /// - none of the black holes was born a neutron star at generator version 24, against the brief's
-///   5%: the carving's floor (`XRB_CLASS_VERSION`, 10⁻¹² M☉ yr⁻¹) takes the relics of a donor
-///   ground down, fed by white dwarfs at 1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, that its first floor of
-///   10⁻¹³ left. At generator version 25 before P11.T4's heavy donors one was a neutron star born
-///   at 1.861 M☉ that a 1.46 M☉ main-sequence donor fed for 7 Gyr, grinding itself down to
-///   0.068 M☉: 0.139 M☉ gained at the arm's tenth carries it past `MAX_NEUTRON_STAR_MASS` (a lean
-///   of land-pod's, 2026-11-01, for research); at 26 there is none;
+///   5%: the carving's floor (`xrb_class::XRB_MIN_TRANSFER_RATE`, 10⁻¹² M☉ yr⁻¹) takes the relics of
+///   a donor ground down, fed by white dwarfs at 1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, that its first
+///   floor of 10⁻¹³ left. At generator version 25 before P11.T4's heavy donors one was a neutron
+///   star born at 1.861 M☉ that a 1.46 M☉ main-sequence donor fed for 7 Gyr, grinding itself down
+///   to 0.068 M☉: 0.139 M☉ gained at the arm's tenth carries it past `MAX_NEUTRON_STAR_MASS` (a
+///   lean of land-pod's, 2026-11-01, for research); at 26 there is none;
 /// - no neutron star in a low-mass X-ray binary has gained more than [`MOST_GAINED`];
 /// - the black holes' median mass in the low-mass X-ray binaries is pinned as measured, under the
 ///   brief's 5 M☉ (a finding): most are fallback black holes of 2–4 M☉ (plan 06's Mandel and
