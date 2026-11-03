@@ -2343,3 +2343,19 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   all. A new kind added to `sessionMaterials` takes its place in that order. `compiled` still
   settles once all of the setting's have, so the views check's phases, which wait for it, start
   later. Pending: the owner's Mac re-run.
+- **R14.T1, the owner's Mac runs** (`fix-mac-profiling`):
+  - The pass timer's "reading the pass times failed: [object DOMException]" errors were the reads
+    in flight at the terrain run's forced loss (15 on the RTX's high runs, 47–64 on the Mac). They
+    are now dropped silently (`PassTimer.deviceLost()`, or an `AbortError`). Any other failed read
+    drops its resolve's times and warns once, by the error's name and message (`failedReads`).
+  - `--hyperion-gpu-timing` on `just views-check --terrain` gives each phase's `gpuPasses` (results
+    schema 4): every pass label's p50, p95, max and mean, and its share of the frame's GPU time,
+    with a "GPU time by pass" table in the summary; a run without it reads `null`. On the Mac the
+    switch lifts no quantization (timer `quantized`).
+  - A terrain run writes its finished phases as each ends, as `<name>-partial.json` and `.md`
+    (schema `hyperion.views-check.terrain-phases` 1, unjudged). A full spike run writes its finished
+    segments' results 2 s after each segment ends (`<name>-partial`, `run.trace` missing, the frame
+    figures rAF's, with no memory, geometry or sizes block), on a worker thread. The results take
+    the same name and remove these files; a stopped run leaves them behind.
+  - Pending: the owner's Mac runs, for GPU per pass, whole or stopped: `just descent-spike --hidden`
+    and `just views-check --terrain --whole --hidden --setting high --hyperion-gpu-timing`.

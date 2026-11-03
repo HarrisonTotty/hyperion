@@ -217,7 +217,7 @@ export class SpikeController {
   /** The frames handed to the main process so far, and when the next part is due, script s. */
   #partFrom = 0;
   #nextPartS = PART_INTERVAL_S;
-  /** The segments' ends, script s, and the next whose part is still due. */
+  /** The segments' ends, script s, the next whose part is still due, and whether one was refused. */
   #segmentEndsS: ReadonlyArray<number> = [];
   #nextSegment = 0;
   #partRefused = false;
@@ -408,7 +408,8 @@ export class SpikeController {
    */
   #partFrame(recorder: SpikeRecorder, sample: ControllerFrame): void {
     const nowS = sample.scriptTimeS;
-    if (this.#launch.smoke || nowS >= this.#durationS) {
+    // After a refused part no later one could follow those before it.
+    if (this.#launch.smoke || this.#partRefused || nowS >= this.#durationS) {
       return;
     }
     let segmentDue = false;

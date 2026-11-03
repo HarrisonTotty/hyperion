@@ -4,7 +4,7 @@ import { VIEWS_CHECK_CHANNELS } from "../main/viewsCheck";
 import { ATMOSPHERE_RECORD } from "../main/fixtures/atmosphereRecord";
 import { HANDOVER_RECORD } from "../main/fixtures/handoverRecord";
 import { TERRAIN_RECORD } from "../main/fixtures/terrainRecord";
-import type { ViewsCheckRecord } from "./api";
+import type { TerrainCheckPhaseUpdate, ViewsCheckRecord } from "./api";
 import { VIEWS_CHECK_CHANNEL_NAMES, viewsCheckApi, viewsCheckMember } from "./viewsCheckApi";
 import { type ViewsCheckLaunch, viewsCheckSwitch } from "./viewsCheckLaunch";
 
@@ -162,6 +162,25 @@ describe("the preload's views-check functions", () => {
   it("refuses a hand-over results answer of the wrong shape", async () => {
     const api = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
     await expect(api.writeHandoverResults(HANDOVER_RECORD)).rejects.toThrow(/hand-over results/);
+  });
+
+  it("send a terrain run's phase as it ends on its own channel, and refuse an answer that names no files (R14's Mac measurements)", async () => {
+    const [phase] = TERRAIN_RECORD.phases;
+    if (phase === undefined) {
+      throw new Error("the fixture has no first phase");
+    }
+    const update: TerrainCheckPhaseUpdate = { timer: "quantized", devicePixelRatio: 2, phase };
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>(() =>
+      Promise.resolve({ json: "a-partial.json", markdown: "a-partial.md" }),
+    );
+    const api = viewsCheckApi({ ...LAUNCH, run: "terrain" }, { invoke });
+    expect(await api.writeTerrainPhase(update)).toEqual({
+      json: "a-partial.json",
+      markdown: "a-partial.md",
+    });
+    expect(invoke.mock.calls).toEqual([[VIEWS_CHECK_CHANNEL_NAMES.writeTerrainPhase, update]]);
+    const refused = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
+    await expect(refused.writeTerrainPhase(update)).rejects.toThrow(/terrain phases/);
   });
 
   it("refuses a terrain results answer of the wrong shape", async () => {

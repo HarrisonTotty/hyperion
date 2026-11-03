@@ -243,7 +243,7 @@ export class PassTimer {
     // An `AbortError` is WebGPU's for a mapping cut short by the device's loss, or by the buffer's
     // unmapping or destruction, which only the engine's disposal does (`mapAsync`'s map failure);
     // it may reach the read before the loss reaches the engine.
-    if (this.#disposed || this.#lost || (error instanceof Error && error.name === "AbortError")) {
+    if (this.#disposed || this.#lost || errorParts(error)?.name === "AbortError") {
       return;
     }
     this.#failedReads += 1;
@@ -317,9 +317,26 @@ export class PassTimer {
 }
 
 /**
+ * An error's name and message, or `null` for a value with neither: an `Error`'s, or those of an
+ * object that carries both, as a `DOMException` does whether or not its engine makes it an `Error`.
+ */
+function errorParts(error: unknown): { readonly name: string; readonly message: string } | null {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message };
+  }
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+  const name: unknown = Reflect.get(error, "name");
+  const message: unknown = Reflect.get(error, "message");
+  return typeof name === "string" && typeof message === "string" ? { name, message } : null;
+}
+
+/**
  * An error as one line, its name and message: the error itself, logged, reaches the main process's
  * log as `[object DOMException]`.
  */
 function errorText(error: unknown): string {
-  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  const parts = errorParts(error);
+  return parts === null ? String(error) : `${parts.name}: ${parts.message}`;
 }

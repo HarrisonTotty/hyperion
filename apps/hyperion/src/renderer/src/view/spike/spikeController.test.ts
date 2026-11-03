@@ -386,6 +386,21 @@ describe("the spike's run control", () => {
     });
   });
 
+  it("hands over no part after one the main process refused, since none could follow it", async () => {
+    const run = controllerOf(LAUNCH);
+    const writePart = vi
+      .spyOn(run.spike, "writePart")
+      .mockRejectedValueOnce(new Error("refused: not a part of a report"));
+    run.controller.prepared(DESCENT);
+    await settle();
+    for (let t = 0; t <= 40; t += 1) {
+      run.controller.frame(frame(t));
+      // oxlint-disable-next-line no-await-in-loop
+      await settle();
+    }
+    expect(writePart).toHaveBeenCalledOnce();
+  });
+
   it("hands a smoke's frames to no part, since it writes no results", async () => {
     const smoke = controllerOf({ ...LAUNCH, smoke: true });
     smoke.controller.prepared(DESCENT);

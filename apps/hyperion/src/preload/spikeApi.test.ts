@@ -53,14 +53,17 @@ describe("the preload's spike functions", () => {
       ),
     );
     const api = spikeApi(LAUNCH, { invoke, privateKib: () => Promise.resolve(2.5) });
+    const part = { fromFrame: 0, throughS: 61, report: smallReport() };
     await api.startTrace();
     await api.cycleTrace();
     await api.sampleMemory();
+    await api.writePart(part);
     await api.end({ status: "pass" });
     expect(invoke.mock.calls).toEqual([
       [SPIKE_CHANNEL_NAMES.startTrace],
       [SPIKE_CHANNEL_NAMES.cycleTrace],
       [SPIKE_CHANNEL_NAMES.memory, 2560],
+      [SPIKE_CHANNEL_NAMES.writePart, part],
       [SPIKE_CHANNEL_NAMES.end, { status: "pass" }],
     ]);
     expect(api.launch).toBe(LAUNCH);

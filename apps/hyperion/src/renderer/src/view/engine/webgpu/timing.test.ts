@@ -79,6 +79,11 @@ function invalidBuffer(): DOMException {
   return new DOMException("the buffer is invalid", "OperationError");
 }
 
+/** A failure that is no `Error` but carries a name and a message, as a `DOMException` does. */
+function plainError(): unknown {
+  return { name: "OperationError", message: "mapping range too large" };
+}
+
 /** A mapping cut short by its device's loss, as WebGPU's is. */
 function deviceLost(): DOMException {
   return new DOMException("the device was lost", "AbortError");
@@ -284,6 +289,19 @@ describe("the pass timer's failed reads", () => {
       "a resolve's pass times could not be read, and are dropped, as are any later read's that fails: OperationError: the buffer is invalid",
     );
     expect([listener.mock.calls, vi.mocked(console.error).mock.calls]).toEqual([[], []]);
+  });
+
+  it("name an error that is no Error by its name and message, as a DOMException of any engine", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const timer = new PassTimer(timerDevice([0n, 10n], "failing", plainError), "quantized");
+    timer.writesFor("cockpit");
+    timer.resolve(recordingEncoder())?.();
+    await vi.waitFor(() => {
+      expect(timer.failedReads).toBe(1);
+    });
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(
+      "a resolve's pass times could not be read, and are dropped, as are any later read's that fails: OperationError: mapping range too large",
+    );
   });
 
   it("are no failure, and no warning, where the device's loss cut them short", async () => {
