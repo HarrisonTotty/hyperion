@@ -37,7 +37,6 @@ use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_daysi
 use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
 use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
 use crate::planetary::hosts::strip::{StripRules, with_stripping};
-use crate::planetary::moons::eccentricity::{EccentricityDampingRules, with_eccentricity_damping};
 use crate::planetary::moons::tides::{
     MoonSurfaceHeatRules, SurfaceHeatRules, with_moon_surface_heat, with_surface_heat,
 };
@@ -104,8 +103,6 @@ held_rules! {
     orbit_extrapolation: OrbitExtrapolationRules =
         OrbitExtrapolationRules::in_force => with_orbit_extrapolation,
     carriers: CarriersRules = CarriersRules::in_force => with_carriers,
-    eccentricity_damping: EccentricityDampingRules =
-        EccentricityDampingRules::in_force => with_eccentricity_damping,
     surface_heat: SurfaceHeatRules = SurfaceHeatRules::in_force => with_surface_heat,
     moon_surface_heat: MoonSurfaceHeatRules =
         MoonSurfaceHeatRules::in_force => with_moon_surface_heat,

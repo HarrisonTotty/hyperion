@@ -121,8 +121,8 @@ use crate::planetary::hooks::figures::{
 };
 use crate::planetary::hooks::ocean::OceanSolutes;
 use crate::planetary::moons::eccentricity::{
-    BudgetResponse, EccentricityDampingRules, ResonantOrbit, budget_tidal_response, damping_time,
-    forced_scale, free_eccentricity, resonance_budget,
+    BudgetResponse, ResonantOrbit, budget_tidal_response, damping_time, forced_scale,
+    free_eccentricity, resonance_budget,
 };
 #[cfg(test)]
 use crate::planetary::moons::tides::{BalanceEnd, radiating_balance};
@@ -852,8 +852,8 @@ fn unforced(free: f64, placed: f64) -> f64 {
 /// pericentre and whose total mass tides let survive, as moons: what does not fit is dropped from
 /// the outside in.
 ///
-/// From P14.T55.j.a's hold ([`EccentricityDampingRules`]) a moon keeps a forced eccentricity only
-/// in a resonance that holds among the moons kept: one whose 2:1 snap failed, or whose partner is
+/// A moon keeps a forced eccentricity only in a resonance that holds among the moons kept
+/// (P14.T55.j.a): one whose 2:1 snap failed, or whose partner is
 /// dropped here, takes its free one ([`RegularMoon::unforced_eccentricity`]), its axis as placed.
 /// A smaller eccentricity only eases the floor and the bound, so no moon kept or dropped changes.
 #[must_use]
@@ -868,7 +868,6 @@ fn keep_inside(parent: &MoonParent, placed: &[(Placed, MoonDraws)]) -> Vec<Regul
             moon.a.value() * (1.0 + moon.e) < bound && total <= limit
         })
         .count();
-    let damped = EccentricityDampingRules::in_force() == EccentricityDampingRules::Damped;
     let resonant = |i: usize| {
         placed[i].0.resonance == Resonance::TwoToOneWithInner
             || placed[..kept]
@@ -878,10 +877,10 @@ fn keep_inside(parent: &MoonParent, placed: &[(Placed, MoonDraws)]) -> Vec<Regul
     (0..kept)
         .map(|i| {
             let (moon, draws) = placed[i];
-            let e = if damped && !resonant(i) {
-                unforced(draws.eccentricity, moon.e)
-            } else {
+            let e = if resonant(i) {
                 moon.e
+            } else {
+                unforced(draws.eccentricity, moon.e)
             };
             RegularMoon {
                 ordinal: moon_ordinal(i),
@@ -3299,12 +3298,27 @@ mod tests {
             if let Some(first) = system.moons().first() {
                 assert_eq!(first.resonance(), Resonance::None);
                 // 3–8 planetary radii, the range shifted out (keeping its 8 : 3) where the
-                // pericentre would fall inside the fluid Roche limit.
+                // pericentre at its placed e would fall inside the fluid Roche limit. A first moon
+                // out of a 2:1 pair may have been placed at a forced e it no longer keeps
+                // (P14.T55.j.a), no larger than its free one or the forced range's top: the
+                // range's bottom is read at its e, and its top at that.
                 let r = p.radius().value();
                 let e = first.orbit().eccentricity().value();
+                let paired = system
+                    .moons()
+                    .get(1)
+                    .is_some_and(|next| next.resonance() == Resonance::TwoToOneWithInner);
+                let placed = if paired {
+                    e
+                } else {
+                    first.free_eccentricity.max(FORCED_ECCENTRICITY.1)
+                };
                 let roche = p.roche_limit_fluid(PLACEMENT_DENSITY).value();
-                let lo = (3.0 * r).max(roche / (1.0 - e));
-                let hi = (8.0 * r).max(lo * 8.0 / 3.0);
+                let bracket = |e: f64| {
+                    let lo = (3.0 * r).max(roche / (1.0 - e));
+                    (lo, (8.0 * r).max(lo * 8.0 / 3.0))
+                };
+                let (lo, hi) = (bracket(e).0, bracket(placed).1);
                 let a = first.orbit().semi_major_axis().value();
                 assert!(
                     (lo * (1.0 - 1e-6)..hi * (1.0 + 1e-6)).contains(&a),
@@ -3447,7 +3461,9 @@ mod tests {
 
     /// The tidal limit of P14.T15 drops moons from the outside in: under a limit between the
     /// unlimited system's partial sums, the moons kept are exactly its innermost ones whose
-    /// running total fits, and the drawn total is untouched.
+    /// running total fits, and the drawn total is untouched; the outermost kept, whose 2:1
+    /// partner may be dropped, may lose its forced eccentricity to its free one (P14.T55.j.a), its
+    /// orbit otherwise the same.
     #[test]
     fn the_moon_mass_limit_drops_moons_from_the_outside_in() {
         let (mut cut, mut kept_some) = (0u32, 0u32);
@@ -3466,7 +3482,11 @@ mod tests {
             .unwrap();
             let system = regular_moons(Seed::new(4), &limited);
             let n = system.moons().len();
-            assert_eq!(system.moons(), &free.moons()[..n]);
+            assert_eq!(system.moons()[..n - 1], free.moons()[..n - 1]);
+            let (last, was) = (system.moons()[n - 1], free.moons()[n - 1]);
+            let e = |moon: &RegularMoon| moon.orbit().eccentricity().value();
+            assert!(e(&last) <= e(&was), "{last:?} against {was:?}");
+            assert_eq!(last.with_eccentricity(e(&was)), was);
             assert!(system.total_mass() <= limit);
             assert!(n < free.moons().len());
             let next: f64 = free.moons()[..=n].iter().map(|m| m.mass().value()).sum();
@@ -5454,45 +5474,27 @@ mod tests {
         assert!(branches[1] > 0, "{branches:?}");
     }
 
-    /// P14.T55.j.a's step 1: under its rule a generated moon keeps a forced eccentricity only in
-    /// a 2:1 pair among the moons kept, and every other moon its free one, so that
-    /// its eccentricity falls or stays; the moons kept, their axes, angles and resonances are the
-    /// drawn system's to the bit.
+    /// P14.T55.j.a's step 1: a generated moon keeps a forced eccentricity only in a 2:1 pair
+    /// among the moons kept, and every other moon at most its free one.
     #[test]
     fn a_forced_eccentricity_holds_only_in_a_resonance_that_holds() {
-        use crate::planetary::moons::eccentricity::{
-            EccentricityDampingRules, with_eccentricity_damping,
-        };
-        let (mut moons, mut freed) = (0_u32, 0_u32);
+        let (mut moons, mut forced) = (0_u32, 0_u32);
         for p in giants(40) {
-            let held = regular_moons(Seed::new(14), &p);
-            let damped = with_eccentricity_damping(EccentricityDampingRules::Damped, || {
-                regular_moons(Seed::new(14), &p)
-            });
-            assert_eq!(held.moons().len(), damped.moons().len());
-            let pairs = resonant_pairs(damped.moons());
-            for (i, (a, b)) in held.moons().iter().zip(damped.moons()).enumerate() {
-                let (x, y) = (a.orbit(), b.orbit());
-                assert_eq!((a.ordinal(), a.resonance()), (b.ordinal(), b.resonance()));
-                assert_same_bits(x.semi_major_axis().value(), y.semi_major_axis().value());
-                assert_eq!(x.orientation(), y.orientation());
-                assert_same_bits(
-                    x.mean_anomaly_at_epoch().value(),
-                    y.mean_anomaly_at_epoch().value(),
-                );
-                let (e0, e) = (x.eccentricity().value(), y.eccentricity().value());
+            let system = regular_moons(Seed::new(14), &p);
+            let pairs = resonant_pairs(system.moons());
+            for (i, moon) in system.moons().iter().enumerate() {
+                let e = moon.orbit().eccentricity().value();
                 if pairs.iter().any(|&inner| inner == i || inner + 1 == i) {
-                    assert_same_bits(e0, e);
+                    forced += u32::from(e > moon.free_eccentricity);
                 } else {
-                    assert!(e <= e0 && e <= b.free_eccentricity, "{e} {e0} {b:?}");
-                    freed += u32::from(e < e0);
+                    assert!(e <= moon.free_eccentricity, "{e} {moon:?}");
                 }
                 moons += 1;
             }
         }
-        eprintln!("{freed} of {moons} generated regular moons freed of a forced eccentricity");
+        eprintln!("{forced} of {moons} generated regular moons at a forced eccentricity");
         assert!(moons > 500, "{moons}");
-        assert!(freed > 0, "{freed}");
+        assert!(forced > 0, "{forced}");
     }
 
     /// A damped orbit keeps the moon's axis, angles, mean anomaly at the epoch and period to the
@@ -5611,14 +5613,14 @@ mod tests {
 
     /// One moon of P14.T55.j.a's census: its giant, what decided its eccentricity, its
     /// tides, heat and flux derived afresh on its damped orbit, and, where the census read them,
-    /// its drawn eccentricity's tides and the eccentricity.
+    /// its tides and its eccentricity as kept, before its damping at its age.
     struct CensusMoon {
         giant: usize,
         at: DampedMoon,
         own: MoonTides,
         heat: Watts,
         flux: WattsPerSquareMetre,
-        drawn: Option<(MoonTides, f64)>,
+        kept: Option<(MoonTides, f64)>,
     }
 
     /// One 2:1 pair of P14.T55.j.a's census that holds: its giant, and its moons' places in the
@@ -5631,16 +5633,16 @@ mod tests {
 
     /// P14.T55.j.a's census of `count` generated regular moons, at least, under every 27 hold
     /// with P14.T56.e's porous core, about `giants` in turn, at their eccentricities at the age
-    /// `age`, each derived afresh on its damped orbit and, where `drawn`, on its drawn one: the
+    /// `age`, each derived afresh on its damped orbit and, where `kept`, on its orbit as kept: the
     /// moons, the pairs that hold, and per giant the pairs found.
     fn damping_census(
         giants: &[CensusGiant],
         age: Years,
         count: usize,
-        drawn: bool,
+        kept: bool,
     ) -> (Vec<CensusMoon>, Vec<CensusPair>, Vec<u32>) {
         use crate::planetary::moons::tides::SurfaceHeatRules;
-        damping_census_under(giants, (age, SurfaceHeatRules::Radiated), count, drawn)
+        damping_census_under(giants, (age, SurfaceHeatRules::Radiated), count, kept)
     }
 
     /// [`damping_census`] with the surface heat's rules `surface` (P14.T55.j) in place of every 27
@@ -5649,11 +5651,8 @@ mod tests {
         giants: &[CensusGiant],
         (age, surface): (Years, crate::planetary::moons::tides::SurfaceHeatRules),
         count: usize,
-        drawn: bool,
+        kept: bool,
     ) -> (Vec<CensusMoon>, Vec<CensusPair>, Vec<u32>) {
-        use crate::planetary::moons::eccentricity::{
-            EccentricityDampingRules, with_eccentricity_damping,
-        };
         use crate::planetary::moons::tides::with_surface_heat;
         use crate::planetary::testing::with_every_27_hold;
         let (mut moons, mut pairs) = (Vec::with_capacity(count + 6), Vec::new());
@@ -5664,10 +5663,6 @@ mod tests {
                     for (g, giant) in giants.iter().enumerate() {
                         let slot = giant.parent.id().body_index().to_be_bytes()[0];
                         let p = renamed(&giant.parent, i, slot);
-                        let held =
-                            with_eccentricity_damping(EccentricityDampingRules::Held, || {
-                                regular_moons(Seed::new(12), &p)
-                            });
                         let system_moons = regular_moons(Seed::new(12), &p);
                         let mut tides = RegularTides {
                             nursery: giant.nursery,
@@ -5708,7 +5703,8 @@ mod tests {
                             )
                             .unwrap()
                         };
-                        for (k, (at, before)) in damped.iter().zip(held.moons()).enumerate() {
+                        for (k, (at, before)) in damped.iter().zip(system_moons.moons()).enumerate()
+                        {
                             let own = derive(&at.moon, k);
                             moons.push(CensusMoon {
                                 giant: g,
@@ -5716,7 +5712,7 @@ mod tests {
                                 own: own.tides(),
                                 heat: own.tidal_heating(),
                                 flux: own.heat_flux(),
-                                drawn: drawn.then(|| {
+                                kept: kept.then(|| {
                                     (
                                         derive(before, k).tides(),
                                         before.orbit().eccentricity().value(),
@@ -5871,7 +5867,8 @@ mod tests {
     /// Recorded: the moons damped and circularised, the pairs that hold and those with B ≤ 0, at
     /// their budget and under the k₂ ÷ Q ceiling, per giant (research-leans-20: about 30% of a
     /// gas giant's pairs, half an ice giant's; about 9% with B ≤ 0), the counts at 10 and 1 W m⁻²
-    /// or more, the largest flux, and the ocean branch's size against the drawn eccentricities'.
+    /// or more, the largest flux, and the ocean branch's size against the eccentricities' as kept,
+    /// before their damping.
     /// A fresh derivation on a damped orbit, whose insolation reads its eccentricity, is not its
     /// model, which was derived on the orbit as placed: the largest ratio of a fresh pair's heat to
     /// its budget and the smallest of a fresh free moon's damping time to the age are held within
@@ -5890,14 +5887,14 @@ mod tests {
         let damped = moons
             .iter()
             .filter(|m| {
-                m.drawn
+                m.kept
                     .is_some_and(|(_, e0)| m.at.moon.orbit().eccentricity().value() < e0)
             })
             .count();
-        let drawn_ocean = moons
+        let kept_ocean = moons
             .iter()
             .filter(|m| {
-                m.drawn
+                m.kept
                     .is_some_and(|(t, _)| t.branch() == TidalBranch::Ocean)
             })
             .count();
@@ -5912,7 +5909,7 @@ mod tests {
                 .count()
         });
         eprintln!(
-            "{lines}  {damped} damped; {drawn_ocean} on the ocean branch at the drawn e. Derived \
+            "{lines}  {damped} damped; {kept_ocean} on the ocean branch at the e as kept. Derived \
              afresh on the damped orbits: {flipped} moons on another branch than their model's, a \
              pair's heat at most {fresh_ratio:.6} of its budget, a free moon's damping time at \
              least {fresh_tau:.6} of the age"

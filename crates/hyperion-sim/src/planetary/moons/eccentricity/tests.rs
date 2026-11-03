@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::planetary::derive::solar::SOLAR_AGE;
-use crate::planetary::testing::with_every_27_hold;
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 
 /// Saturn's and Jupiter's GM, km³ s⁻² (JPL's "Planet GM values", SAT441 and JUP365, read
@@ -67,36 +66,6 @@ fn locking(planet: (f64, f64), inner: &Measured) -> f64 {
         &inner.orbit(),
         age(),
     )
-}
-
-/// P14.T55.j.a's hold: 26's bump leaves it, 27's deletes it; the tests' switch and 27's helper
-/// reach the damping, and 26's helper does not.
-#[test]
-fn the_eccentricity_damping_is_held_only_until_the_27_bump() {
-    use EccentricityDampingRules::{Damped, Held};
-    assert!(
-        crate::GENERATOR_VERSION < ECCENTRICITY_DAMPING_VERSION,
-        "the 26 → 27 bump damps a regular moon's eccentricity to its age (P14.T55.j.a): delete \
-         `ECCENTRICITY_DAMPING_VERSION`, `EccentricityDampingRules` with its `Held` arms in \
-         `keep_inside` and `parent_at_epoch`, the tests' `with_eccentricity_damping`, its switch \
-         in `with_every_27_hold`, and this test; re-bless the movers plan 14's record of \
-         P14.T55.j.a lists"
-    );
-    assert_eq!(EccentricityDampingRules::in_force(), Held);
-    assert_eq!(
-        with_eccentricity_damping(Damped, EccentricityDampingRules::in_force),
-        Damped
-    );
-    assert_eq!(
-        with_every_27_hold(EccentricityDampingRules::in_force),
-        Damped
-    );
-    assert_eq!(EccentricityDampingRules::in_force(), Held);
-    assert_eq!(
-        with_every_27_hold(|| with_eccentricity_damping(Held, EccentricityDampingRules::in_force)),
-        Held
-    );
-    assert_eq!(EccentricityDampingRules::in_force(), Held);
 }
 
 /// The budget of a pair at a fixed Q is Meyer and Wisdom's (2007, Icarus 188, 535; from memory):

@@ -188,7 +188,6 @@ use crate::planetary::hosts::young::{Formation, FormationDraws};
 use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
 use crate::planetary::label::{self, BodyLabel};
 use crate::planetary::laplace::{LaplaceFrame, LaplaceFrameParts, hydrostatic_j2};
-use crate::planetary::moons::eccentricity::EccentricityDampingRules;
 use crate::planetary::moons::regular::{
     DampingMemo, ICY_MOON_ICE_FRACTION, RegularTides, hosts_regular_moons, moon_radius,
     regular_ice_fraction,
@@ -1423,12 +1422,11 @@ fn parent_time(ctx: &SystemContext) -> UniverseTime {
 /// which for a giant, whose envelope its passes never read their record through, is its record
 /// passes' to the bit (`an_envelope_body_s_passes_over_its_record_are_its_stand_in_s`).
 ///
-/// From P14.T55.j.a's hold at 27 ([`EccentricityDampingRules`]) a planet with regular moons
-/// ([`hosts_regular_moons`]) also gives their tides ([`RegularTides`]): the nursery its record's
-/// moons form in ([`nursery`](PlanetarySystem::nursery)'s, at its formation distance), the sky of
-/// this derivation and its class's Love number, at its time, by which its satellites damp their
-/// eccentricities before any moon's orbit is read. `None` below 27, and where one cannot be
-/// built.
+/// A planet with regular moons ([`hosts_regular_moons`]) also gives their tides ([`RegularTides`],
+/// P14.T55.j.a): the nursery its record's moons form in ([`nursery`](PlanetarySystem::nursery)'s,
+/// at its formation distance), the sky of this derivation and its class's Love number, at its
+/// time, by which its satellites damp their eccentricities before any moon's orbit is read; `None`
+/// where one cannot be built.
 #[must_use]
 fn parent_at_epoch(
     seed: Seed,
@@ -1482,8 +1480,7 @@ fn parent_at_epoch(
             };
             let bulk = DerivedBulk::from(&derived);
             let parent = moon_parent(body, (id, kind), &bulk, &placed, host_mass)?;
-            let damped = EccentricityDampingRules::in_force() == EccentricityDampingRules::Damped;
-            let tides = (damped && hosts_regular_moons(&parent))
+            let tides = hosts_regular_moons(&parent)
                 .then(|| {
                     Some(RegularTides {
                         nursery: MoonNursery::new(

@@ -50,83 +50,10 @@
 //! grows as 1 ÷ t, so in a system younger than some 300 Myr a gas giant's heavy, close inner moons
 //! keep their drawn e and run hot on the heated branch, paid for by the budget (the heated
 //! branch's Im k₂ is P14.T55.j's).
-//!
-//! # The hold
-//!
-//! The rule is P14.T55.j.a's, behind `ECCENTRICITY_DAMPING_VERSION` = 27. Below it every regular
-//! moon keeps its drawn eccentricity, to the bit.
 
 use crate::math;
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{Kilograms, Metres, Seconds, Watts};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-/// The generator version from which a regular moon's eccentricity is the one its tides and its
-/// resonance leave it at its system's age (P14.T55.j.a): 27, with P14.T56.e's porous core, whose
-/// heat at a held eccentricity it bounds.
-///
-/// It is P14.T55.j.a's one hold. Below it [`EccentricityDampingRules::in_force`] is
-/// [`EccentricityDampingRules::Held`]: every regular moon keeps the eccentricity drawn for it, a
-/// forced one included where its resonance does not hold, and every figure is version 24's, 25's
-/// and 26's bit for bit. 27's bump deletes this hold, [`EccentricityDampingRules`] with its `Held`
-/// arm, the tests' switch and its tripwire
-/// (`the_eccentricity_damping_is_held_only_until_the_27_bump`).
-pub(crate) const ECCENTRICITY_DAMPING_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether a regular moon's eccentricity is damped to its age (its hold,
-/// [`ECCENTRICITY_DAMPING_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum EccentricityDampingRules {
-    /// Version 26's and before: the drawn eccentricity, forced or free (P14.T17.a).
-    Held,
-    /// Version 27's: a forced eccentricity only in a resonance that holds, at its budget, and a
-    /// free one at its age (see the [module](self) documentation).
-    Damped,
-}
-
-impl EccentricityDampingRules {
-    /// The rules this generator version gives: the damping from [`ECCENTRICITY_DAMPING_VERSION`],
-    /// the drawn eccentricity below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_eccentricity_damping`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = ECCENTRICITY_DAMPING_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= ECCENTRICITY_DAMPING_VERSION {
-            Self::Damped
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The damping's rules a test sets on its thread, `None` for the version's.
-    static ECCENTRICITY_DAMPING_RULES: core::cell::Cell<Option<EccentricityDampingRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the damping's rules `rules` on this thread, for the tests to reach
-/// P14.T55.j.a ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 27's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_eccentricity_damping<R>(
-    rules: EccentricityDampingRules,
-    run: impl FnOnce() -> R,
-) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<EccentricityDampingRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            ECCENTRICITY_DAMPING_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(ECCENTRICITY_DAMPING_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The ratio to the drawn eccentricity of the low end of [`free_eccentricity`]'s bracket:
 /// 10⁻³, where the forcing Φ ∝ e² is 10⁻⁶ of the drawn one's, so the moon's Im k₂ is its

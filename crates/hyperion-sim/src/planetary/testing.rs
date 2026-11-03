@@ -499,10 +499,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// - the equilibrium network's further carriers, `CARRIERS_VERSION` (P14.T52.e), at
 ///   `CarriersRules::Carried` through `with_carriers`: the registry's rows from 115 on, which the
 ///   network carries, P and Cl solved.
-/// - a regular moon's eccentricity at its age, `ECCENTRICITY_DAMPING_VERSION` (P14.T55.j.a), at
-///   `EccentricityDampingRules::Damped` through `with_eccentricity_damping`: a forced
-///   eccentricity only in a resonance that holds, at its budget, and a free one damped by its
-///   moon's own heat.
 /// - a moon's surface that radiates its internal heat, `SURFACE_HEAT_VERSION` (P14.T55.j), at
 ///   `SurfaceHeatRules::Radiated` through `with_surface_heat`: its tides' shell read at
 ///   σ `T_s`⁴ = σ `T_eq`⁴ + F.
@@ -579,9 +575,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::photometry::envelope_bond::{
         EnvelopeBondRules, with_envelope_bond,
     };
-    use crate::planetary::moons::eccentricity::{
-        EccentricityDampingRules, with_eccentricity_damping,
-    };
     use crate::planetary::moons::tides::{
         MoonSurfaceHeatRules, SurfaceHeatRules, with_moon_surface_heat, with_surface_heat,
     };
@@ -591,7 +584,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::substance::{CarriersRules, with_carriers};
     let run = move || with_orbit_extrapolation(OrbitExtrapolationRules::ReducedRank, run);
     let run = move || with_carriers(CarriersRules::Carried, run);
-    let run = move || with_eccentricity_damping(EccentricityDampingRules::Damped, run);
     let run = move || with_surface_heat(SurfaceHeatRules::Radiated, run);
     let run = move || with_moon_surface_heat(MoonSurfaceHeatRules::Radiated, run);
     let run = move || with_envelope_bond(EnvelopeBondRules::Own, run);

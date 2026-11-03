@@ -216,59 +216,40 @@ fn generate_satellites_is_each_planet_s_children_in_generate() {
 }
 
 /// P14.T55.j.a: under every 27 hold, a planet's satellites alone still equal its children in
-/// `generate`, and the system's regular moons are its drawn system's, at eccentricities no larger;
-/// each moon's record at the epoch reads its satellite's eccentricity to the bit, the one its
-/// positions, events and tides read. Recorded: the moons damped and circularised.
+/// `generate`, and each regular moon's record at the epoch reads its satellite's damped
+/// eccentricity to the bit, the one its positions, events and tides read. Recorded: the moons
+/// circularised.
 #[test]
 fn under_every_27_hold_a_regular_moon_s_record_reads_its_damped_eccentricity() {
-    use crate::planetary::moons::eccentricity::{
-        EccentricityDampingRules, with_eccentricity_damping,
-    };
     use crate::planetary::satellites::SatelliteMoon;
     use crate::planetary::testing::with_every_27_hold;
     let contexts = sample_contexts(150, Seed::new(0x5a7e_1117), SampleFilter::ALL).unwrap();
-    let (mut moons, mut damped, mut circular) = (0_u32, 0_u32, 0_u32);
+    let (mut moons, mut circular) = (0_u32, 0_u32);
     with_every_27_hold(|| {
         for ctx in &contexts {
             let system = generate(SEED, ctx);
-            let drawn =
-                with_eccentricity_damping(EccentricityDampingRules::Held, || generate(SEED, ctx));
             for planet in system.planets() {
                 let found = system.satellites_of(planet.index());
                 let belt = system.nearest_belt(planet.index());
                 assert_eq!(generate_satellites(SEED, ctx, planet, belt), found);
-                let before = drawn.satellites_of(planet.index());
-                let regular = |found: &Satellites| -> Vec<(BodyIndex, KeplerElements)> {
-                    found
-                        .moons()
-                        .iter()
-                        .filter_map(|moon| match moon.moon() {
-                            SatelliteMoon::Regular(regular) => {
-                                Some((moon.index(), *regular.orbit()))
-                            }
-                            SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => None,
-                        })
-                        .collect()
-                };
-                let (now, then) = (regular(&found), regular(&before));
-                assert_eq!(now.len(), then.len(), "{:?}", planet.index());
-                for ((index, orbit), (was, drawn)) in now.iter().zip(&then) {
-                    assert_eq!(index, was);
-                    let (e, e0) = (orbit.eccentricity().value(), drawn.eccentricity().value());
-                    assert!(e <= e0, "{index:?}: {e} against {e0}");
-                    let record = system.body_at(ctx, *index, UniverseTime::EPOCH).unwrap();
+                let regular = found.moons().iter().filter_map(|moon| match moon.moon() {
+                    SatelliteMoon::Regular(regular) => Some((moon.index(), *regular.orbit())),
+                    SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => None,
+                });
+                for (index, orbit) in regular {
+                    let e = orbit.eccentricity().value();
+                    let record = system.body_at(ctx, index, UniverseTime::EPOCH).unwrap();
                     if let Section::Ok(read) = record.orbit() {
                         assert_same_bits(read.elements().eccentricity().value(), e);
                     }
                     moons += 1;
-                    damped += u32::from(e < e0);
                     circular += u32::from(e == 0.0);
                 }
             }
         }
     });
-    eprintln!("{moons} regular moons under every 27 hold: {damped} damped, {circular} circular");
-    assert!(moons > 20 && damped > 0, "{moons} {damped}");
+    eprintln!("{moons} regular moons under every 27 hold: {circular} circular");
+    assert!(moons > 20, "{moons}");
 }
 
 /// P14.T30.a with ruling 95.1: a belt member's satellites alone equal its children in `generate`,
