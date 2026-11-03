@@ -8797,6 +8797,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
       - P14.T33.c follows.
 - **P14.T54.c The 24 → 25 bump** (S1; decision-bump-plan-after-22 §2.2, decision-galaxy-25-train).
   - _Built_ 2026-10-31 (lane train-25): Risks, "P14.T54.c, version 25 as built".
+- **P14.T54.c The 25 → 26 bump** (train 26's frozen list).
+  - _Built_ 2026-11-02 (lane train-26): Risks, "P14.T54.c, version 26 as built".
 
 #### P14.T55 Later composition (unscheduled)
 
@@ -34142,3 +34144,27 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     shell's edge, settles on the jump at the bracket's end that radiates more than its heat: the
     cold branch at the edge (2 of 5,000 at 100 Myr, at 166 and 173 K). It replaces the fixed
     count's lean.
+- **P14.T54.c, version 26 as built** (2026-11-02, lane train-26, on round 9's `53790ff8`). Every
+  26 hold of the frozen list but those retargeted below is deleted in its own commit (the first 43
+  carried as one), a held arm kept as its tests' oracle where the fold says so;
+  `with_every_26_hold` and `GalaxyRules`' and `StellarRules`' `every_26_hold` are gone.
+  - _Retargeted to 27_ (rule A, before the bump): `FIELD_SHARE_VERSION` (P09.T2.c) with the
+    server's `FEATURE_MEMBERS_FROM`, `FEATURE_CLASSES_VERSION` (P09.T36), `CARVE_OUT_VERSION`
+    (P09.T35: P09.T37.a's `CLASS_SOURCE_VERSION` is 27, so at 26 the hosts the grid gave up would
+    reach no range reply), and the holds that came after the list froze: `DISPLACED_VERSION`,
+    `MERGER_CLASS_VERSION`, `MERGER_MASS_VERSION`, `ICY_REGOLITH_VERSION`, `MINOR_CLOUDS_VERSION`,
+    `ORGANIC_SEDIMENT_VERSION`, `RAYLEIGH_ADDING_VERSION` and `HAZE_LAYER_VERSION`. The tests'
+    `every_26_hold_with_its_retargets` (galaxy, stellar, planetary) go at 27's bump.
+  - _Round 9's replays, folded:_ with the enforced Humphreys–Davidson limit `HD_FREE_MASSES`,
+    `hd_free_mass` and their two premise sweeps go (P08.T12 at 27's tripwire), and `table_fate`
+    and `death_in_interval_knowing` lose their stellar rules.
+  - _Refitted at 26:_ `stellar_fates_high`, `lifetime_bracket`, `lbv`, `sky_envelope`,
+    `sky_phase_envelope`, `stripping` (its helium axis too), `kick_rank`, `kick_defaults`,
+    `cluster_retention`, `binary_reach`, `binary_pair_light_c/d/e`, `sky_binary_light_c/d/e`,
+    `displaced_forms`, `binary_awd`, `binary_xrb` and `streams`; `sky_binary_light_e` raises its cell
+    25 to 10⁵ systems. `sky_envelope` run again on `53790ff8` gives the same table; it is refitted
+    again once R06.T16.a's helium nodes are on the base.
+  - _`ERUPTIONS_PER_YEAR` not retuned (lean, 2026-11-02):_ the ejecta's mass law must move with it
+    (design note 14); the LBV census is pinned as it stands.
+  - _Left after 26:_ the two slow censuses near the black hole fail as after 25; P11.T10's three
+    figures fail as at 25; the pre-test passes over 13 probe pairs (pinned).

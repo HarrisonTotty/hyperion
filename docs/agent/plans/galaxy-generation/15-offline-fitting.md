@@ -3329,3 +3329,6 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
 - **T6.e's neutron-star height, restated** (research p15-t6-forms, 2026-10-31): the forms' height
   within 5% of the histograms' own (132–139 pc at 26,000 ly). The 110–130 pc window is a finding
   until it is sourced (ruling 137.6).
+- **`displaced_forms` fitted to the production orbits at 26 (lane train-26, 2026-11-01).** The
+  run (19,260,016 orbits) was made on train 26's tree before its bump, not 25's, whose GalaxyScales
+  probes are 26's to the bit; `displaced_forms` is revision 3 and not provisional.
