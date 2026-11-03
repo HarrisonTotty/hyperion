@@ -205,7 +205,9 @@ fn sample_records(galaxy: &Galaxy, seed: u64, n: usize) -> Vec<SystemRecord> {
 
 /// Over `n` random systems at the epoch, both ends of the window, a random time in it and 200,000
 /// years before it: the exact, main-sequence and paired routes' briefs are the full system's, the
-/// summary's primary, bit for bit, with the first attempt's star count; the table's have its kind
+/// summary's primary, bit for bit, with the first attempt's star count while the system shows
+/// every drawn star, and the count it shows once a supernova has unbound part of it (P11.T10,
+/// where the system's own brief counts fewer stars than it drew); the table's have its kind
 /// and class exactly, and a luminosity and temperature inside their stated error (ruling 90.4).
 /// Every route is taken. Returns the table rows.
 fn check_briefs(seed: u64, n: usize) -> usize {
@@ -266,7 +268,11 @@ fn check_briefs(seed: u64, n: usize) -> usize {
             );
             assert_eq!(
                 fitted.map(|b| b.star_count()),
-                exact.map(|_| first),
+                exact.map(|b| if b.star_count() < stars.star_count() {
+                    b.star_count()
+                } else {
+                    first
+                }),
                 "{record:?} at {t}"
             );
         }

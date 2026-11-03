@@ -24,6 +24,7 @@ use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::GENERATOR_VERSION;
 use crate::coords::SystemVelocity;
 use crate::events::{EventSeries, tags as event_tags};
 use crate::galaxy::displaced::PlacementClass;
@@ -75,7 +76,6 @@ use crate::units::{
     Dex, HeliumExcess, Kelvin, KilometresPerSecond, Magnitudes, MetresPerSecond, SolarLuminosities,
     SolarMasses, SolarRadii, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// The composition every star of the grid system `record` shares: \[Fe/H\] drawn from its density
 /// component's distribution at its epoch position and age, and no helium excess.
@@ -1726,41 +1726,6 @@ pub fn object_kind(
 /// Risks, "Deviations in P11.T7, as built").
 pub(crate) const GRID_ATTEMPT: RedrawAttempt = RedrawAttempt::FIRST;
 
-/// The generator version from which a system that a supernova has unbound shows only the stars it
-/// still holds (plan 11, P11.T10): [`SystemStars::summary_at`], [`SystemStars::state_at`] and
-/// [`SystemStars::brief_at`] take [`BinaryKicksRules::Alone`].
-///
-/// Below it every system takes the held arm, [`BinaryKicksRules::Paired`], the code of version 24
-/// verbatim, so every generated value keeps its bits; the tests reach the new arm through
-/// `StellarRules::every_27_hold()`. The bump to 27 deletes this hold: this constant with
-/// [`BinaryKicksRules`], the stellar rules' `binary_kicks` field, [`SystemStars::shown_at`]'s
-/// match on it and the range brief's, `stellar/rules/binary_kicks_hold.rs` with its tripwire
-/// (`the_released_stars_are_held_only_until_the_27_bump`), and re-pins the movers that module
-/// lists.
-pub(crate) const BINARY_KICKS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// What a system shows of a pair that a supernova has unbound (the stellar rules' `binary_kicks`
-/// field, the hold of [`BINARY_KICKS_VERSION`]).
-///
-/// A supernova that unbinds a pair releases the other star at most at its orbital speed and the
-/// remnant at its kick (Tauris and Takens 1998, A&A 330, 1047; recalled, not read at source), the
-/// new orbit and the speeds the engine keeps being Hurley, Tout and Pols's (2002) appendix A1's at
-/// the explosion. A released star of 2.5 M☉ or
-/// more is plan 08's independent object, a walkaway or the supernova-released share of the
-/// runaways ([`RunawayModel`](crate::galaxy::displaced::runaway::RunawayModel)), placed elsewhere;
-/// lighter ones are left out, "under 1% of the dwarfs" (brainstorm, "Displaced objects: kicks and
-/// runaways"). A grid system that went on showing it would count it twice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum BinaryKicksRules {
-    /// Version 26's and before: every star of the drawn hierarchy is shown at every time, a pair
-    /// the engine unbound as its two stars.
-    Paired,
-    /// Version 27's: from a supernova that unbinds the pair holding the primary, the system is its
-    /// primary alone; from one that unbinds another pair, it is what is left without that pair's
-    /// two stars (P11.T10; [`SystemStars::shown_at`]).
-    Alone,
-}
-
 /// What a system shows at one time ([`SystemStars::shown_at`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Shown {
@@ -2627,10 +2592,10 @@ impl SystemStars {
             .and_then(|pair| pair.timeline.recoil())
     }
 
-    /// What the system shows at `t` (plan 11, P11.T10, under [`BINARY_KICKS_VERSION`]).
+    /// What the system shows at `t` (plan 11, P11.T10).
     ///
-    /// Under the held arm, and while no supernova has unbound one of its pairs by the primary's
-    /// age then, it is the drawn hierarchy ([`Shown::Drawn`]). From the first supernova that
+    /// While no supernova has unbound one of its pairs by the primary's age then, it is the drawn
+    /// hierarchy ([`Shown::Drawn`]). From the first supernova that
     /// unbinds the pair holding the primary ([`disrupting_supernova`]) it is the primary alone, its
     /// remnant where the primary exploded, whatever else the hierarchy holds: the released star
     /// leaves at up to its orbital speed, above an outer companion's by the square root of the
@@ -2651,10 +2616,17 @@ impl SystemStars {
     /// on the primary's inner chain that it holds ([`Shown::Part`] for three stars or more; the
     /// primary alone if none).
     ///
-    /// The released star is plan 08's independent object where it is of 2.5 M☉ or more, and left
-    /// out where it is lighter ([`BinaryKicksRules`]); the remnant a companion leaves is not, a
-    /// death the catalogue does not list (design note 16). A white dwarf's birth that unbinds a
-    /// wide pair releases no star plan 08 places elsewhere, and is shown as before.
+    /// A supernova that unbinds a pair releases the other star at most at its orbital speed and
+    /// the remnant at its kick (Tauris and Takens 1998, A&A 330, 1047; recalled, not read at
+    /// source), the new orbit and the speeds the engine keeps being Hurley, Tout and Pols's (2002)
+    /// appendix A1's at the explosion. The released star is plan 08's independent object where it
+    /// is of 2.5 M☉ or more, a walkaway or the supernova-released share of the runaways
+    /// ([`RunawayModel`](crate::galaxy::displaced::runaway::RunawayModel)), placed elsewhere, and
+    /// left out where it is lighter, "under 1% of the dwarfs" (brainstorm, "Displaced objects:
+    /// kicks and runaways"): a grid system that went on showing it would count it twice. The
+    /// remnant a companion leaves is not, a death the catalogue does not list (design note 16). A
+    /// white dwarf's birth that unbinds a wide pair releases no star plan 08 places elsewhere, and
+    /// is shown as before.
     #[must_use]
     pub(crate) fn shown_at(&self, t: UniverseTime) -> Shown {
         self.shown_at_age(self.primary().age_at(t))
@@ -2690,56 +2662,50 @@ impl SystemStars {
     /// [`shown_at`](Self::shown_at) at the primary's age `age`, Julian years.
     #[must_use]
     fn shown_at_age(&self, age: Years) -> Shown {
-        match self.primary().rules().binary_kicks {
-            BinaryKicksRules::Paired => Shown::Drawn,
-            BinaryKicksRules::Alone => {
-                // A bit for each star still held: 16 stars at most (`StarIndex`).
-                let all = (1_u32 << self.stars.len()) - 1;
-                let mut held = all;
-                for pair in &self.pairs {
-                    let Some(sn) = disrupting_supernova(&pair.timeline) else {
-                        continue;
-                    };
-                    if sn.age() > age {
-                        continue;
-                    }
-                    if pair.stars.contains(&StarIndex::PRIMARY) {
-                        return Shown::Alone;
-                    }
-                    for star in pair.stars {
-                        held &= !(1_u32 << star.get());
-                    }
-                }
-                for release in self.releases.iter().filter(|r| r.age <= age) {
-                    held &= !self.released_by(release);
-                }
-                if held == all {
-                    return Shown::Drawn;
-                }
-                let primary_pair = self.hierarchy.pairs().find_map(|(node, _)| {
-                    let HierarchyNode::Pair { inner, outer, .. } = *self.hierarchy.node(node)
-                    else {
-                        unreachable!("pairs are pairs");
-                    };
-                    matches!(
-                        (*self.hierarchy.node(inner), *self.hierarchy.node(outer)),
-                        (HierarchyNode::Star(a), HierarchyNode::Star(b))
-                            if a == StarIndex::PRIMARY && b.get() == 1
-                    )
-                    .then_some(node)
-                });
-                match primary_pair {
-                    Some(node) if held == 0b11 => return Shown::Pair(node),
-                    Some(_) | None => {}
-                }
-                // Only an outer orbit's release leaves a part of three stars or more, or one beside
-                // a star the shown hierarchy cannot hold.
-                if self.releases.is_empty() {
-                    return Shown::Alone;
-                }
-                self.shown_part(held)
+        // A bit for each star still held: 16 stars at most (`StarIndex`).
+        let all = (1_u32 << self.stars.len()) - 1;
+        let mut held = all;
+        for pair in &self.pairs {
+            let Some(sn) = disrupting_supernova(&pair.timeline) else {
+                continue;
+            };
+            if sn.age() > age {
+                continue;
+            }
+            if pair.stars.contains(&StarIndex::PRIMARY) {
+                return Shown::Alone;
+            }
+            for star in pair.stars {
+                held &= !(1_u32 << star.get());
             }
         }
+        for release in self.releases.iter().filter(|r| r.age <= age) {
+            held &= !self.released_by(release);
+        }
+        if held == all {
+            return Shown::Drawn;
+        }
+        let primary_pair = self.hierarchy.pairs().find_map(|(node, _)| {
+            let HierarchyNode::Pair { inner, outer, .. } = *self.hierarchy.node(node) else {
+                unreachable!("pairs are pairs");
+            };
+            matches!(
+                (*self.hierarchy.node(inner), *self.hierarchy.node(outer)),
+                (HierarchyNode::Star(a), HierarchyNode::Star(b))
+                    if a == StarIndex::PRIMARY && b.get() == 1
+            )
+            .then_some(node)
+        });
+        match primary_pair {
+            Some(node) if held == 0b11 => return Shown::Pair(node),
+            Some(_) | None => {}
+        }
+        // Only an outer orbit's release leaves a part of three stars or more, or one beside
+        // a star the shown hierarchy cannot hold.
+        if self.releases.is_empty() {
+            return Shown::Alone;
+        }
+        self.shown_part(held)
     }
 
     /// The stars, a bit for each, that the outer orbit `release` unbinds takes from the system

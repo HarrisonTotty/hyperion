@@ -12,9 +12,9 @@
 //! stars in the system's first redraw attempt (attempt 0 of P11.T16's
 //! [`hierarchy_bound`](crate::stellar::multiplicity::hierarchy_bound)) can change its stars or be
 //! carved: then the generator keeps that attempt and the binary engine reaches no state of the
-//! primary. For a grid system that is every such pair of the attempt, since a carved one would have
-//! the system redrawn (P11.T7) and the primary might be in another pair at the attempt kept; for a
-//! system the grid does not redraw, a feature member, only the pair the primary is in. A pair
+//! primary. That is every such pair of the attempt: a supernova that unbinds any pair changes what
+//! the system shows (P11.T10), and for a grid system a carved one would have the system redrawn
+//! (P11.T7) and the primary might be in another pair at the attempt kept. A pair
 //! passes where plan 11's census bound
 //! ([`pair_light_bound`](crate::stellar::binary::pair_light_bound)) calls it `Detached` over the
 //! window's ages and at most one of its stars may have left its main sequence by their end. A
@@ -50,8 +50,8 @@
 //! certified system keeps that attempt, so its count is the kept one; for the grid
 //! systems that [`SystemStars::generate`] redraws because a pair fell into a carved class (P11.T7,
 //! about 10⁻⁴ of them, every one on the paired route) it is the first attempt's, which may differ
-//! from the kept attempt's (plan 11's Risks, "Deviations in P11.T7, as built"). From version 27 a
-//! system that a supernova has unbound, always on the paired route, counts the stars it shows then
+//! from the kept attempt's (plan 11's Risks, "Deviations in P11.T7, as built"). A system that a
+//! supernova has unbound, always on the paired route, counts the stars it shows then
 //! (`SystemStars::shown_at`, P11.T10). The composition and
 //! the primary's draws are the ones [`SystemStars::generate`] reads, from the same streams; a
 //! main-sequence primary reads η alone, the one draw its state and class depend on.
@@ -70,14 +70,11 @@ use crate::id::{BodyId, SystemIdKind};
 use crate::math;
 use crate::rng::Mark;
 use crate::stellar::Composition;
-use crate::stellar::binary::carve::redraws;
 use crate::stellar::binary::pair_keeps_own_models;
 use crate::stellar::classify::ClassExtras;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts, UnitUniform};
 use crate::stellar::fates::{FateRoute, FittedFate, FittedFates, stripped_mark_matters};
-use crate::stellar::multiplicity::{
-    KeptPrimary, MultiplicityContext, StarIndex, drawn_single, first_attempt,
-};
+use crate::stellar::multiplicity::{KeptPrimary, MultiplicityContext, drawn_single, first_attempt};
 use crate::stellar::remnant::NeutronStar;
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::wd_spectral::white_dwarf_type;
@@ -86,8 +83,8 @@ use crate::stellar::sse::{
     MAX_INITIAL_MASS, MIN_INITIAL_MASS, RemnantModel, Track, TrackOptions, remnant_of,
 };
 use crate::stellar::system::{
-    BinaryKicksRules, GRID_ATTEMPT, Pulses, Shown, StarModel, StarStreams, StellarBrief,
-    SystemStars, draw_metallicity, grid_multiplicity, primary_draws, primary_eta, primary_model,
+    GRID_ATTEMPT, Pulses, Shown, StarModel, StarStreams, StellarBrief, SystemStars,
+    draw_metallicity, grid_multiplicity, primary_draws, primary_eta, primary_model,
     primary_rotation_draws,
 };
 use crate::stellar::{Phase, StarState};
@@ -642,9 +639,9 @@ impl BriefModel {
                     (self.star_count, model.rules()),
                 )
             }),
-            // From version 27 a system a supernova has unbound counts the stars it shows then
-            // (P11.T10). No other route reaches one: the gate checks every pair under that arm,
-            // and a pair with a supernova keeps no own models.
+            // A system a supernova has unbound counts the stars it shows then (P11.T10). No other
+            // route reaches one: the gate checks every pair, and a pair with a supernova keeps no
+            // own models.
             Primary::Paired(stars) => stars.brief_at(t).map(|brief| match stars.shown_at(t) {
                 Shown::Drawn => brief.with_star_count(self.star_count),
                 Shown::Pair(_) | Shown::Part { .. } | Shown::Alone => brief,
@@ -747,13 +744,12 @@ struct Gate {
 /// [`draw_star_count`](crate::stellar::multiplicity::draw_star_count)). Otherwise its first
 /// attempt is drawn once ([`first_attempt`]), for its count, which is `draw_star_count`'s, and for
 /// its pairs of two stars, read over the system's ages from the window's start to its end, the last
-/// its age at +H, to which `SystemStars` runs its pairs: each pair that could reach the primary must
-/// leave its stars their own models and fall into no carved class ([`pair_keeps_own_models`]).
-/// For a grid system that is every pair, since any carved one would have the system redrawn and
-/// the primary might be in another pair at the attempt kept; then the generator keeps attempt 0,
-/// whose count it is. For a system the grid does not redraw it is the pair the primary is in, if
-/// any. The test of each pair holds at every age up to the window's end, so a time before the
-/// window, as the tests ask, is certified too.
+/// its age at +H, to which `SystemStars` runs its pairs: each pair must leave its stars their own
+/// models and fall into no carved class ([`pair_keeps_own_models`]), since a supernova that unbinds
+/// any pair changes what the system shows (P11.T10), and for a grid system any carved one would
+/// have the system redrawn and the primary might be in another pair at the attempt kept; then the
+/// generator keeps attempt 0, whose count it is. The test of each pair holds at every age up to the
+/// window's end, so a time before the window, as the tests ask, is certified too.
 ///
 /// It is conservative, not exact: a refused system takes the paired route, which is right
 /// whatever its pairs did. The tests check that every certified primary is its own model at
@@ -787,26 +783,20 @@ fn gate(
     let age_at_epoch = record.age_at_epoch();
     let ages = Years::new(age_at(age_at_epoch, ClockWindow::START))
         ..=Years::new(age_at(age_at_epoch, ClockWindow::END));
-    let redrawn = redraws(galaxy, record, ctx);
     let stars = attempt.stars();
     let stellar = galaxy.rules().stellar;
     let tables_hold = stellar.merger_mass.fitted_tables_hold()
         && stellar.collapses.fitted_tables_hold()
         && stellar.wind_accretion.fitted_tables_hold()
         && stellar.dwarf_limit.fitted_tables_hold();
-    // From version 27 a supernova that unbinds any pair changes what the system shows (P11.T10),
-    // so every pair is checked, as for a system the grid redraws.
-    let every_pair = redrawn || stellar.binary_kicks == BinaryKicksRules::Alone;
-    let certified = attempt
-        .pairs()
-        .iter()
-        .filter(|pair| every_pair || pair.stars().contains(&StarIndex::PRIMARY))
-        .all(|pair| {
-            let [a, b] = pair
-                .stars()
-                .map(|star| stars[usize::from(star.get())].initial_mass());
-            tables_hold && pair_keeps_own_models(a, b, pair.periastron(), composition, ages.clone())
-        });
+    // A supernova that unbinds any pair changes what the system shows (P11.T10), so every pair is
+    // checked, as for a system the grid redraws.
+    let certified = attempt.pairs().iter().all(|pair| {
+        let [a, b] = pair
+            .stars()
+            .map(|star| stars[usize::from(star.get())].initial_mass());
+        tables_hold && pair_keeps_own_models(a, b, pair.periastron(), composition, ages.clone())
+    });
     Gate {
         star_count: attempt.hierarchy().star_count(),
         certified,
@@ -1118,8 +1108,10 @@ mod tests {
     }
 
     /// The exact, main-sequence and paired routes give the full system's brief bit for bit at
-    /// times across the window (the paired one with the first attempt's count), the table's its
-    /// kind and class with its luminosity near its stated error, and every route is taken.
+    /// times across the window (the paired one with the first attempt's count while the system
+    /// shows every drawn star, and the stars it shows once a supernova has unbound part of it,
+    /// P11.T10), the table's its kind and class with its luminosity near its stated error, and
+    /// every route is taken.
     #[test]
     fn every_route_is_the_full_systems_brief() {
         let galaxy = Galaxy::new(Seed::new(0x6272_6965));
@@ -1158,7 +1150,10 @@ mod tests {
                     model.brief_at(years(y)),
                     stars
                         .brief_at(years(y))
-                        .map(|b| b.with_star_count(model.star_count())),
+                        .map(|b| match stars.shown_at(years(y)) {
+                            Shown::Drawn => b.with_star_count(model.star_count()),
+                            Shown::Pair(_) | Shown::Part { .. } | Shown::Alone => b,
+                        }),
                 );
                 assert_eq!(a, b, "{record:?} at {y} yr");
                 if let (Some(a), Some(b)) = (a, b) {

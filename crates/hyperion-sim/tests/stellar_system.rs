@@ -311,7 +311,8 @@ fn companions_move_no_primary() {
 /// Each companion is its hierarchy slot's star (P11.T2.c): the slot's initial mass, the draws of
 /// its own body at attempt 0, the system's composition and the record's age; the summary covers
 /// every star by body index and carries the hierarchy while the system exists, and the brief
-/// counts the stars.
+/// counts the stars. A system a supernova has unbound part of shows the stars it still holds
+/// (P11.T10): a part of the drawn stars, the primary first, on a hierarchy of their own.
 #[test]
 fn every_companion_is_its_slots_star_with_the_systems_composition_and_age() {
     let galaxy = milky_way();
@@ -346,15 +347,22 @@ fn every_companion_is_its_slots_star_with_the_systems_composition_and_age() {
             let summary = stars.summary_at(UniverseTime::EPOCH);
             match summary.existence() {
                 SystemExistence::Exists => {
-                    assert_eq!(summary.hierarchy(), Some(hierarchy));
                     let bodies: Vec<BodyId> =
                         summary.stars().iter().map(StarSummary::body).collect();
                     let slots: Vec<BodyId> = hierarchy.stars().iter().map(StarSlot::body).collect();
-                    assert_eq!(bodies, slots);
+                    if bodies.len() == slots.len() {
+                        assert_eq!(summary.hierarchy(), Some(hierarchy));
+                        assert_eq!(bodies, slots);
+                    } else {
+                        let shown = summary.hierarchy().expect("a system that exists");
+                        assert_eq!(usize::from(shown.star_count()), bodies.len());
+                        assert_eq!(bodies.first(), slots.first());
+                        assert!(bodies.iter().all(|body| slots.contains(body)));
+                    }
                     let brief = stars
                         .brief_at(UniverseTime::EPOCH)
                         .expect("a system that exists");
-                    assert_eq!(brief.star_count(), stars.star_count());
+                    assert_eq!(usize::from(brief.star_count()), bodies.len());
                 }
                 SystemExistence::NotYetBorn => {
                     assert_eq!(summary.hierarchy(), None);
@@ -754,10 +762,12 @@ fn a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star() {
         }
     }
     assert!(checked > 200, "{checked}");
+    // The primary's collapse unbinds its pair, so at the epoch the system shows the primary's
+    // remnant alone (P11.T10).
     let state = stars
         .state_at(UniverseTime::EPOCH)
         .expect("the system exists");
-    assert_eq!(state.stars().len(), 4);
+    assert_eq!(state.stars().len(), 1);
     let mut w = GoldenWriter::new();
     w.header(GENERATOR_VERSION.get());
     w.u64_hex("system", id.raw());

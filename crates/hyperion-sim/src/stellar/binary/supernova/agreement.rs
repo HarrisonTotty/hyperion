@@ -18,9 +18,9 @@
 //!
 //! The tests, each its figure:
 //!
-//! - [`binary_kick_no_system_shows_a_released_star_under_every_27_hold`]: under the held arm every
-//!   system a supernova has unbound, a pair of it or an outer orbit (P11.T10's fix), still shows
-//!   the star it released (step 1's count, the double count); under the arm none does.
+//! - [`binary_kick_no_system_shows_a_released_star_under_every_27_hold`]: no system a supernova has
+//!   unbound, a pair of it or an outer orbit (P11.T10's fix), shows the star it released (under
+//!   P11.T10's held arm, deleted, every one did: step 1's count, the double count).
 //! - [`binary_kick_the_stripped_share_is_stripped_share`]: the primaries the engine strips, against
 //!   the mean of `binarity::stripped_share`.
 //! - [`binary_kick_the_low_mode_is_a_fifth_of_neutron_stars_and_keeps_its_companions`].
@@ -61,10 +61,8 @@ use crate::stellar::multiplicity::{
     HierarchyNode, MultiplicityContext, StarIndex, stripped_mark_min_mass,
 };
 use crate::stellar::remnant::{KickMode, NatalKick, RemnantKind};
-use crate::stellar::rules::StellarRules;
 use crate::stellar::system::{
-    BinaryKicksRules, OuterRelease, PairTimeline, SystemStars, clock_time_of_death,
-    disrupting_supernova, stars_under,
+    OuterRelease, PairTimeline, SystemStars, clock_time_of_death, disrupting_supernova, stars_under,
 };
 use crate::time::UniverseTime;
 use crate::units::{KilometresPerSecond, SolarMasses, Years};
@@ -111,24 +109,6 @@ fn galaxy() -> &'static Galaxy {
         )
         .expect("the Milky Way fixture builds under every 27 hold")
     })
-}
-
-/// The Milky Way fixture under every 27 hold but P11.T10's, built under them, since its displaced
-/// classes' table reads the stellar rules.
-fn held() -> Galaxy {
-    let rules = GalaxyRules::every_27_hold();
-    Galaxy::from_params_with_rules(
-        Seed::new(SEED),
-        GalaxyParams::milky_way_like(),
-        GalaxyRules {
-            stellar: StellarRules {
-                binary_kicks: BinaryKicksRules::Paired,
-                ..rules.stellar
-            },
-            ..rules
-        },
-    )
-    .expect("the Milky Way fixture builds under every 27 hold")
 }
 
 /// The prior-sampled massive systems of `galaxy`.
@@ -691,32 +671,25 @@ fn runaway_model_rates(galaxy: &Galaxy) -> [f64; 3] {
     })
 }
 
-/// No system shows a star a supernova released, under every 27 hold, over both samples; under
-/// P11.T10's held arm every one of them does (step 1's count). As measured (2026-11-01, with
-/// P11.T10's fix) a supernova has unbound a pair or an outer orbit of 5,482 of the massive systems
-/// by the epoch (2,684 the primary's pair, 2,819 an outer orbit) and of 2,553 of layer E's (716
-/// and 1,819).
+/// No system shows a star a supernova released, under every 27 hold, over both samples (under
+/// P11.T10's held arm, deleted, every one of them did: step 1's count). As measured (2026-11-01,
+/// with P11.T10's fix) a supernova has unbound a pair or an outer orbit of 5,482 of the massive
+/// systems by the epoch (2,684 the primary's pair, 2,819 an outer orbit) and of 2,553 of layer E's
+/// (716 and 1,819).
 #[test]
-#[ignore = "slow: 2 × 10⁴ massive systems, their pairs run through the engine, under both arms"]
+#[ignore = "slow: 10⁴ massive systems and 10⁴ of layer E, their pairs run through the engine"]
 fn binary_kick_no_system_shows_a_released_star_under_every_27_hold() {
-    let held = held();
     for (name, records) in [
         ("massive", massive(galaxy())),
         ("layer E", layer_e(galaxy())),
     ] {
         let alone = census_of(galaxy(), &records);
-        let shown = census_of(&held, &records);
         println!(
             "{name}: {} systems a supernova has unbound by the epoch ({} the primary's pair, {} an \
-             outer orbit); showing a released star: {} under the held arm, {} under every 27 hold",
-            alone.unbound, alone.primary_pairs, alone.outer_orbits, shown.showing, alone.showing
+             outer orbit); showing a released star: {}",
+            alone.unbound, alone.primary_pairs, alone.outer_orbits, alone.showing
         );
         assert_eq!(alone.showing, 0, "{name}");
-        assert_eq!(shown.unbound, alone.unbound, "{name}");
-        assert_eq!(
-            shown.showing, shown.unbound,
-            "{name}: the held arm shows every one"
-        );
         assert!(alone.unbound > 400, "{name}: {}", alone.unbound);
     }
 }
@@ -786,8 +759,8 @@ fn binary_kick_most_double_neutron_stars_are_nearly_circular() {
 /// `RunawayModel`'s supernova-released share, the closure of the two, and most of them under
 /// 30 km/s.
 ///
-/// Under every 27 hold a system stops showing the stars a supernova releases (P11.T10's
-/// `binary_kicks`), and plan 08 places walkaways and runaways in their stead, so the two rates
+/// A system stops showing the stars a supernova releases (P11.T10, `SystemStars::shown_at`), and
+/// plan 08 places walkaways and runaways in their stead, so the two rates
 /// must agree or the galaxy gains or loses those stars. A star is counted once, at the supernova
 /// after which the system no longer shows it, if it is living then: the companion a pair's
 /// supernova unbinds, the member of an outer orbit the supernova of a pair below it unbinds, or

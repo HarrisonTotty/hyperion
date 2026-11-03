@@ -29,7 +29,7 @@ use crate::stellar::brief::{BriefModel, BriefRoute};
 use crate::stellar::multiplicity::{RedrawAttempt, draw_hierarchy_of_composition, draw_star_count};
 use crate::stellar::sse::{Track, TrackOptions, lifetime_under};
 use crate::stellar::system::{
-    KICK_LOOP_CAP, StarModel, SystemStars, draw_metallicity, first_attempt_models,
+    KICK_LOOP_CAP, Shown, StarModel, SystemStars, draw_metallicity, first_attempt_models,
     grid_multiplicity, primary_draws, primary_kept_stripped_mark, primary_model,
 };
 use crate::time::UniverseTime;
@@ -218,7 +218,8 @@ fn a_retained_record_s_kick_lies_in_its_bin() {
 /// Every reader of a constrained record's primary sees the star the kick loop keeps (P08.T12.c):
 /// for retained records and displaced remnants of layer E, `SystemStars`' primary is
 /// `primary_model`'s, the range brief's is that star's brief (with the first attempt's count on
-/// the paired route), the lens masses' primary is it, and plan 11's hierarchy reads its stripped
+/// the paired route while the system shows every drawn star, and the stars it shows once a
+/// supernova has unbound part of it, P11.T10), the lens masses' primary is it, and plan 11's hierarchy reads its stripped
 /// mark. The kept attempt is not the record's own for some of them, and its stripped mark not the
 /// record's own for a few, so the test bites. The brief and the system's stars are the same in any
 /// order of reading.
@@ -269,7 +270,10 @@ fn every_reader_of_a_constrained_primary_sees_the_kept_attempt() {
         ] {
             assert_eq!(
                 brief.brief_at(t),
-                stars.brief_at(t).map(|b| b.with_star_count(count)),
+                stars.brief_at(t).map(|b| match stars.shown_at(t) {
+                    Shown::Drawn => b.with_star_count(count),
+                    Shown::Pair(_) | Shown::Part { .. } | Shown::Alone => b,
+                }),
                 "{:?} at {t:?}",
                 record.id()
             );

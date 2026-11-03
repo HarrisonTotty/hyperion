@@ -33,7 +33,7 @@ use crate::stellar::binary::{BinaryInput, Component, Segment, SegmentKind, can_i
 use crate::stellar::brief::BriefModel;
 use crate::stellar::multiplicity::{HierarchyNode, NodeIndex, StarIndex};
 use crate::stellar::system::{
-    BinaryKicksRules, PairTimeline, Shown, SystemStars, clock_time_of_death, disrupting_supernova,
+    PairTimeline, Shown, SystemStars, clock_time_of_death, disrupting_supernova,
 };
 use crate::time::UniverseTime;
 use crate::units::Years;
@@ -74,14 +74,12 @@ fn the_collapses_are_held_only_until_the_27_bump() {
     );
 }
 
-/// The version's rules with this hold's arm on, and P11.T10's `binary_kicks`, without which no
-/// system shows what an outer orbit's unbinding releases.
+/// The version's rules with this hold's arm on.
 fn applied_rules() -> GalaxyRules {
     let version = GalaxyRules::of_version(GENERATOR_VERSION);
     GalaxyRules {
         stellar: StellarRules {
             collapses: CollapseRules::Applied,
-            binary_kicks: BinaryKicksRules::Alone,
             ..version.stellar
         },
         ..version
