@@ -25,9 +25,9 @@
 //!
 //! - **Binary evolution.** A real system's stars are [`SystemStars`]' primary and companions, with
 //!   the hierarchy plan 11's draw gives a grid system (P11.T2.c), and the context keeps the
-//!   timeline of each pair the binary engine ran ([`SystemStars::pairs`]). Below generator version
-//!   27 each star is read as a single star; from it (P14.T1.e, `BINARY_HOST_LIGHT_VERSION`) a star of
-//!   such a pair is read from its pair's timeline wherever the stage reads its light. The context's
+//!   timeline of each pair the binary engine ran ([`SystemStars::pairs`]). A star of such a pair is
+//!   read from its pair's timeline wherever the stage reads its light (P14.T1.e, from generator
+//!   version 27). The context's
 //!   zones are the zones at birth; a system's zones at a later time read its pairs' states from 27
 //!   (P14.T9.d).
 //! - **\[α/Fe\]** is P14.T1.a's closed form of \[Fe/H\] and population ([`alpha_fe`](fn@alpha_fe)),
@@ -640,52 +640,6 @@ impl fmt::Display for BuildEncounterEnvironmentError {
 
 impl Error for BuildEncounterEnvironmentError {}
 
-/// The generator version from which the planetary stage reads a star of a pair the binary engine
-/// ran from its pair's timeline (P14.T1.e): 27, held with the 27 train.
-///
-/// Below it [`BinaryHostLightRules::in_force`] is [`BinaryHostLightRules::SingleModels`]: every
-/// star's light is its own single-star model's, as `SystemStars` keeps it, so that a giant's
-/// companion it swallowed in a common envelope still shines on its planets, and every figure is
-/// version 26's bit for bit. 27's bump deletes this hold, [`BinaryHostLightRules`] with its
-/// `SingleModels` arm, the tests' switch and its tripwire
-/// (`the_binary_host_light_is_held_only_until_the_27_bump`).
-pub(crate) const BINARY_HOST_LIGHT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Where the planetary stage reads a paired star's light (its hold, [`BINARY_HOST_LIGHT_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum BinaryHostLightRules {
-    /// Version 26's and before: every star's own single-star model.
-    SingleModels,
-    /// Version 27's: a star of a pair the engine ran from its pair's timeline, where
-    /// [`SystemStars::state_at`] reads it (plan 11, design note 6).
-    Engine,
-}
-
-impl BinaryHostLightRules {
-    /// The rules this generator version gives: the engine's from [`BINARY_HOST_LIGHT_VERSION`],
-    /// the single models' below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_binary_host_light`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = BINARY_HOST_LIGHT_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= BINARY_HOST_LIGHT_VERSION {
-            Self::Engine
-        } else {
-            Self::SingleModels
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The paired stars' light rules a test sets on its thread, `None` for the version's.
-    static BINARY_HOST_LIGHT_RULES: core::cell::Cell<Option<BinaryHostLightRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
 /// The generator version from which the planetary stage reads the rest of a paired star's history
 /// from its pair's timeline (P14.T1.g): its light, mass, radius, mass loss and death for the
 /// cometary halo, its main-sequence clock and end for the habitability assessment and the moons'
@@ -905,22 +859,6 @@ pub(crate) fn with_binary_host_xuv<R>(rules: BinaryHostXuvRules, run: impl FnOnc
         }
     }
     let _restore = Restore(BINARY_HOST_XUV_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// `run`'s result with the paired stars' light rules `rules` on this thread, for the tests to
-/// reach the engine's light ahead of the bump; the version's rules are set back after, a panic in
-/// `run` included. 27's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_binary_host_light<R>(rules: BinaryHostLightRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<BinaryHostLightRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            BINARY_HOST_LIGHT_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(BINARY_HOST_LIGHT_RULES.with(|cell| cell.replace(Some(rules))));
     run()
 }
 
@@ -1249,12 +1187,12 @@ impl SystemContext {
     /// Component `star`'s state at `t` as the planetary stage reads its light, or `None` before it
     /// forms.
     ///
-    /// From generator version 27 (P14.T1.e), a star of a pair the engine ran is its component of
+    /// From generator version 27 (P14.T1.e) a star of a pair the engine ran is its component of
     /// the pair's state then ([`BinaryTimeline::state_at`](crate::stellar::binary::BinaryTimeline::state_at)),
     /// where [`SystemStars::state_at`] reads it: a star merged into its companion is plan 06's
     /// `NoRemnant`, with no light and no mass, and a merger's product or a stripped star is the
-    /// engine's. Every other star, every star below version 27, and a paired star at a time past
-    /// the ages its timeline was run to (+H), is its own model's ([`StarModel::state_at`]).
+    /// engine's. Every other star, and a paired star at a time past the ages its timeline was run
+    /// to (+H), is its own model's ([`StarModel::state_at`]).
     ///
     /// # Panics
     ///
@@ -1263,15 +1201,10 @@ impl SystemContext {
     #[must_use]
     pub(crate) fn star_state_at(&self, star: usize, t: UniverseTime) -> Option<StarState> {
         let model = &self.stars[star];
-        match BinaryHostLightRules::in_force() {
-            BinaryHostLightRules::SingleModels => model.state_at(t),
-            BinaryHostLightRules::Engine => self.paired_at(star, t).map_or_else(
-                || model.state_at(t),
-                |(pair, component, age)| {
-                    Some(pair.timeline().state_at(age).stars()[component.index()])
-                },
-            ),
-        }
+        self.paired_at(star, t).map_or_else(
+            || model.state_at(t),
+            |(pair, component, age)| Some(pair.timeline().state_at(age).stars()[component.index()]),
+        )
     }
 
     /// The largest luminosity component `star` has had up to `t`, L☉, as
@@ -1285,13 +1218,10 @@ impl SystemContext {
     #[must_use]
     pub(crate) fn max_luminosity_until(&self, star: usize, t: UniverseTime) -> SolarLuminosities {
         let model = &self.stars[star];
-        match BinaryHostLightRules::in_force() {
-            BinaryHostLightRules::SingleModels => model.max_luminosity_until(t),
-            BinaryHostLightRules::Engine => self.paired_at(star, t).map_or_else(
-                || model.max_luminosity_until(t),
-                |(pair, component, age)| pair.timeline().max_luminosity_until(component, age),
-            ),
-        }
+        self.paired_at(star, t).map_or_else(
+            || model.max_luminosity_until(t),
+            |(pair, component, age)| pair.timeline().max_luminosity_until(component, age),
+        )
     }
 
     /// Component `star`'s pair, its component there and the age at `t` its timeline is read at,

@@ -518,10 +518,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   `STEEPNESS_TAILS_VERSION` (rendering plan R10, R10.T6.a), at `SteepnessTailsRules::Marcum`
 ///   through `hyperion_surface::material::with_steepness_tails`, which the sim's tests have through
 ///   their dev-dependency on the surface crate's `hold-switches` feature.
-/// - a paired star's light from its pair's timeline, `BINARY_HOST_LIGHT_VERSION` (P14.T1.e), at
-///   `BinaryHostLightRules::Engine` through `with_binary_host_light`: a star of a pair the binary
-///   engine ran shines, and peaks, on its planets as the engine's state of it, where the stellar
-///   displays read it.
 /// - a paired star's X-ray and ultraviolet history as the engine leaves it,
 ///   `BINARY_HOST_XUV_VERSION` (P14.T1.f), at `BinaryHostXuvRules::Engine` through
 ///   `with_binary_host_xuv`: a star merged away shines no more, and an accretor or a merger's
@@ -548,7 +544,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// `merger_channels`) and runs inside this helper for the planetary ones.
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::context::{BinaryHostLightRules, with_binary_host_light};
     use crate::planetary::derive::photometry::area_mix::{
         HazeLayerRules, IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules,
         RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
@@ -561,7 +556,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    let run = move || with_binary_host_light(BinaryHostLightRules::Engine, run);
     let run = move || {
         use crate::planetary::context::{BinaryHostXuvRules, with_binary_host_xuv};
         with_binary_host_xuv(BinaryHostXuvRules::Engine, run)

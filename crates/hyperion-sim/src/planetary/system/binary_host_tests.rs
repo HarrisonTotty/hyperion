@@ -1,6 +1,6 @@
 //! The planets of binary-evolved hosts (research-binary-hosts §3): P14.T1.e's light of a paired
-//! star from its pair's timeline (`BINARY_HOST_LIGHT_VERSION`), against real systems of the
-//! sample whose pairs the binary engine ran.
+//! star from its pair's timeline, against real systems of the sample whose pairs the binary engine
+//! ran.
 
 use hyperion_testkit::float::assert_same_bits;
 
@@ -10,9 +10,6 @@ use crate::GENERATOR_VERSION;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::planetary::context::XuvHistory;
-use crate::planetary::context::{
-    BINARY_HOST_LIGHT_VERSION, BinaryHostLightRules, with_binary_host_light,
-};
 use crate::planetary::fate::DestructionCause;
 use crate::planetary::testing::{
     PairHistory, SampleFilter, first_paired_system, sample_records, synthetic_binary,
@@ -62,45 +59,9 @@ fn engine_states(stars: &SystemStars, t: UniverseTime) -> Option<Vec<StarState>>
     (state.stars().len() == stars.stars().len()).then(|| state.stars().to_vec())
 }
 
-/// The paired stars' light is held until the 26 → 27 bump: the rules in force are the single
-/// models', the tests' switch and 27's helper reach the engine's, and 26's and 25's helpers do not.
-#[test]
-fn the_binary_host_light_is_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < BINARY_HOST_LIGHT_VERSION,
-        "the 26 → 27 bump reads a paired star's light from its pair's timeline: delete \
-         `BINARY_HOST_LIGHT_VERSION`, `BinaryHostLightRules` with its `SingleModels` arm and its \
-         matches in `SystemContext::star_state_at` and `max_luminosity_until`, the tests' \
-         `with_binary_host_light`, its switch in `with_every_27_hold` (and the helper, if no other \
-         27 hold is left), and this test; restate the tests held below 27"
-    );
-    assert_eq!(
-        BinaryHostLightRules::in_force(),
-        BinaryHostLightRules::SingleModels
-    );
-    assert_eq!(
-        with_binary_host_light(BinaryHostLightRules::Engine, BinaryHostLightRules::in_force),
-        BinaryHostLightRules::Engine
-    );
-    assert_eq!(
-        with_every_27_hold(BinaryHostLightRules::in_force),
-        BinaryHostLightRules::Engine
-    );
-    assert_eq!(
-        with_every_27_hold(|| {
-            with_binary_host_light(
-                BinaryHostLightRules::SingleModels,
-                BinaryHostLightRules::in_force,
-            )
-        }),
-        BinaryHostLightRules::SingleModels
-    );
-}
-
-/// Under the engine's rules every star of a pair the engine ran reads, at the epoch and at the
-/// clock window's ends, as the stellar stage's `SystemStars::state_at` has it, bit for bit, and its
-/// peak luminosity is no less than its luminosity then; under the single models every star reads
-/// as its own model.
+/// Every star of a pair the engine ran reads, at the epoch and at the clock window's ends, as the
+/// stellar stage's `SystemStars::state_at` has it, bit for bit, and its peak luminosity is no less
+/// than its luminosity then.
 #[test]
 fn binary_host_light_reads_every_paired_star_as_the_stellar_stage_does() {
     let galaxy = galaxy();
@@ -117,28 +78,19 @@ fn binary_host_light_reads_every_paired_star_as_the_stellar_stage_does() {
                 continue;
             };
             for (star, state) in engine.iter().enumerate() {
-                with_binary_host_light(BinaryHostLightRules::Engine, || {
-                    assert_eq!(
-                        ctx.star_state_at(star, t),
-                        Some(*state),
-                        "{:?}",
-                        record.id()
-                    );
-                    let peak = ctx.max_luminosity_until(star, t).value();
-                    assert!(
-                        peak >= state.luminosity().value(),
-                        "{:?} star {star}: a peak of {peak} below {} L_sun",
-                        record.id(),
-                        state.luminosity().value()
-                    );
-                });
-                with_binary_host_light(BinaryHostLightRules::SingleModels, || {
-                    assert_eq!(ctx.star_state_at(star, t), ctx.stars()[star].state_at(t));
-                    assert_eq!(
-                        ctx.max_luminosity_until(star, t),
-                        ctx.stars()[star].max_luminosity_until(t)
-                    );
-                });
+                assert_eq!(
+                    ctx.star_state_at(star, t),
+                    Some(*state),
+                    "{:?}",
+                    record.id()
+                );
+                let peak = ctx.max_luminosity_until(star, t).value();
+                assert!(
+                    peak >= state.luminosity().value(),
+                    "{:?} star {star}: a peak of {peak} below {} L_sun",
+                    record.id(),
+                    state.luminosity().value()
+                );
             }
             paired += 1;
         }
@@ -147,8 +99,8 @@ fn binary_host_light_reads_every_paired_star_as_the_stellar_stage_does() {
 }
 
 /// A giant that swallowed its companion in a common envelope and left a white dwarf lights its
-/// pair's zone with the white dwarf alone under the engine's rules, where the single models still
-/// shine the companion on it.
+/// pair's zone with the white dwarf alone, where the companion's own single-star model still
+/// shines.
 #[test]
 fn binary_host_light_of_a_common_envelope_merger_is_its_white_dwarf_s_alone() {
     let galaxy = galaxy();
@@ -185,31 +137,22 @@ fn binary_host_light_of_a_common_envelope_merger_is_its_white_dwarf_s_alone() {
         .expect("the merger left a white dwarf");
     let gone = *members.iter().find(|&&s| s != dwarf).unwrap();
     assert_eq!(engine[gone].phase(), Phase::NoRemnant);
-    let lit = with_binary_host_light(BinaryHostLightRules::Engine, || {
-        Epoch::of(&ctx, t).luminosity(&zone).unwrap()
-    });
+    let lit = Epoch::of(&ctx, t).luminosity(&zone).unwrap();
     assert_same_bits(lit.value(), engine[dwarf].luminosity().value());
-    with_binary_host_light(BinaryHostLightRules::Engine, || {
-        let gone = ctx.star_state_at(gone, t).unwrap();
-        assert_same_bits(gone.luminosity().value(), 0.0);
-        assert_same_bits(gone.mass().value(), 0.0);
-    });
-    let single = with_binary_host_light(BinaryHostLightRules::SingleModels, || {
-        Epoch::of(&ctx, t).luminosity(&zone).unwrap()
-    });
+    let merged = ctx.star_state_at(gone, t).unwrap();
+    assert_same_bits(merged.luminosity().value(), 0.0);
+    assert_same_bits(merged.mass().value(), 0.0);
     let companion = ctx.stars()[gone].state_at(t).unwrap().luminosity();
     assert!(
-        single.value() >= companion.value() && companion.value() > 0.0,
-        "{:?}: the single models light the zone with {} L_sun, the companion {} L_sun",
+        companion.value() > 0.0,
+        "{:?}: the companion's own model shines {} L_sun",
         ctx.id(),
-        single.value(),
         companion.value()
     );
 }
 
 /// A pair that merged without a common envelope into a main-sequence star, a blue straggler,
-/// lights its pair's zone with the product alone under the engine's rules, and its peak is the
-/// product's own at least.
+/// lights its pair's zone with the product alone, and its peak is the product's own at least.
 #[test]
 fn binary_host_light_of_a_main_sequence_merger_is_its_product_s() {
     let galaxy = galaxy();
@@ -235,20 +178,19 @@ fn binary_host_light_of_a_main_sequence_merger_is_its_product_s() {
         .unwrap();
     let other = *members.iter().find(|&&s| s != product).unwrap();
     assert_eq!(engine[other].phase(), Phase::NoRemnant);
-    with_binary_host_light(BinaryHostLightRules::Engine, || {
-        let lit = Epoch::of(&ctx, t).luminosity(&zone).unwrap();
-        assert_same_bits(lit.value(), engine[product].luminosity().value());
-        let light = Epoch::of(&ctx, t).light(product).unwrap();
-        assert_same_bits(
-            light.luminosity().value(),
-            engine[product].luminosity().value(),
-        );
-        assert!(ctx.max_luminosity_until(product, t) >= engine[product].luminosity());
-    });
+    let lit = Epoch::of(&ctx, t).luminosity(&zone).unwrap();
+    assert_same_bits(lit.value(), engine[product].luminosity().value());
+    let light = Epoch::of(&ctx, t).light(product).unwrap();
+    assert_same_bits(
+        light.luminosity().value(),
+        engine[product].luminosity().value(),
+    );
+    assert!(ctx.max_luminosity_until(product, t) >= engine[product].luminosity());
 }
 
 /// A system the binary engine ran no pair of, a synthetic binary and a single star among them,
-/// generates and reads the same records under both light rules, bit for bit.
+/// reads every star's light as its own single-star model's, bit for bit, at the epoch and at the
+/// clock window's ends.
 #[test]
 fn binary_host_light_leaves_an_unpaired_system_as_it_was() {
     let galaxy = galaxy();
@@ -276,17 +218,22 @@ fn binary_host_light_leaves_an_unpaired_system_as_it_was() {
     assert!(contexts.len() >= 3);
     for ctx in &contexts {
         assert_eq!(ctx.pairs(), &[]);
-        let snapshot = |rules| {
-            with_binary_host_light(rules, || {
-                generate_planets(SEED, ctx).snapshot_at(ctx, UniverseTime::EPOCH)
-            })
-        };
-        assert_eq!(
-            snapshot(BinaryHostLightRules::SingleModels),
-            snapshot(BinaryHostLightRules::Engine),
-            "{:?}",
-            ctx.id()
-        );
+        for t in [ClockWindow::START, UniverseTime::EPOCH, ClockWindow::END] {
+            for (star, model) in ctx.stars().iter().enumerate() {
+                assert_eq!(
+                    ctx.star_state_at(star, t),
+                    model.state_at(t),
+                    "{:?}",
+                    ctx.id()
+                );
+                assert_eq!(
+                    ctx.max_luminosity_until(star, t),
+                    model.max_luminosity_until(t),
+                    "{:?}",
+                    ctx.id()
+                );
+            }
+        }
     }
 }
 

@@ -27,8 +27,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{Existence, SystemKind, SystemRecord};
 use crate::planetary::context::{
-    BinaryHostHistoryRules, BinaryHostLightRules, BinaryHostXuvRules, with_binary_host_history,
-    with_binary_host_light, with_binary_host_xuv,
+    BinaryHostHistoryRules, BinaryHostXuvRules, with_binary_host_history, with_binary_host_xuv,
 };
 use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
 use crate::planetary::placement::zones::{
@@ -364,8 +363,7 @@ fn held<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_binary_host_zones(BinaryHostZonesRules::Birth, run);
     let run = move || with_binary_host_fate(BinaryHostFateRules::SingleModels, run);
     let run = move || with_binary_host_xuv(BinaryHostXuvRules::SingleModels, run);
-    let run = move || with_binary_host_history(BinaryHostHistoryRules::SingleModels, run);
-    with_binary_host_light(BinaryHostLightRules::SingleModels, run)
+    with_binary_host_history(BinaryHostHistoryRules::SingleModels, run)
 }
 
 /// The census before and after the binary hosts' holds at 27. After them, every present planet's
@@ -397,8 +395,7 @@ fn the_binary_hosts_census_reads_every_paired_star_as_the_engine_does() {
     );
     let held = before.total();
     assert!(
-        held.light_off > 0
-            && held.mass_off > 0
+        held.mass_off > 0
             && held.enveloped > 0
             && held.massless > 0
             && held.outside > 0
