@@ -731,17 +731,6 @@ impl Surface {
         )
     }
 
-    /// The surface publishing its own state, its label set aside, for the tests to compare a
-    /// labelled surface with its hold's.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn unlabelled(&self) -> Self {
-        Self {
-            published: self.state,
-            ..self.clone()
-        }
-    }
-
     /// The surface with what its conditions and condensates were built on, `basis` (rule (f)).
     #[must_use]
     pub(crate) fn with_basis(self, basis: SurfaceBasis) -> Self {

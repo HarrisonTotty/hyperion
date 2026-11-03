@@ -4018,6 +4018,21 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
     assert!(checked > 0);
 }
 
+/// Pins `record`'s published state, its desert label included (ux-calls-data's ruling 9), as the
+/// body `name`'s.
+fn pin_published_state(
+    w: &mut hyperion_testkit::golden::GoldenWriter,
+    name: &str,
+    record: &BodyRecord,
+) {
+    if let Section::Ok(surface) = record.surface() {
+        w.line(&format!(
+            "{name}_published_state = {:?}",
+            surface.published_state()
+        ));
+    }
+}
+
 /// The surface conditions and global figures `hooks_at` publishes, the records' surface sections,
 /// pinned over the sample's first systems (P14.T24.a, T24.b, T48.e): what `SeasonalSpin::of` and
 /// the bulk sections feed the derivation reaches every contrast's bits, and the heat flow the
@@ -4068,6 +4083,8 @@ fn the_published_surface_conditions_are_pinned() {
             w.f64(&format!("{name}_stellar_flux"), c.stellar_flux().value());
             w.line(&format!("{name}_radiation = {:?}", c.radiation()));
             w.line(&format!("{name}_liquid_water = {}", c.liquid_water()));
+            let record = system.body_at(ctx, body.index(), t).unwrap();
+            pin_published_state(&mut w, &name, &record);
             hooks::surface::regime::tests::pin_regime(&mut w, &name, c.climate_regime());
             let Section::Ok(f) = hooks.figures() else {
                 panic!("{name} has conditions but no figures");

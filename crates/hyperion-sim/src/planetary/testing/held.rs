@@ -23,8 +23,8 @@ use crate::planetary::context::{
     with_binary_host_xuv,
 };
 use crate::planetary::derive::atmosphere::{
-    DesertRules, LineSwitchRules, MeltOxygenRules, SteamDivisionRules, with_desert,
-    with_line_switch, with_melt_oxygen, with_steam_division,
+    LineSwitchRules, MeltOxygenRules, SteamDivisionRules, with_line_switch, with_melt_oxygen,
+    with_steam_division,
 };
 use crate::planetary::derive::photometry::area_mix::{
     HazeLayerRules, IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules, RayleighAddingRules,
@@ -94,7 +94,6 @@ held_rules! {
     haze_layer: HazeLayerRules = HazeLayerRules::in_force => with_haze_layer,
     locked_climate: LockedClimateRules = LockedClimateRules::in_force => with_locked_climate,
     carriers: CarriersRules = CarriersRules::in_force => with_carriers,
-    desert: DesertRules = DesertRules::in_force => with_desert,
     steepness_tails: SteepnessTailsRules = steepness_tails_in_force => with_steepness_tails,
     steam_division: SteamDivisionRules =
         SteamDivisionRules::in_force => with_steam_division,

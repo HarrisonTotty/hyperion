@@ -514,9 +514,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// - the haze layer, `HAZE_LAYER_VERSION` (P14.T24.h.b), at `HazeLayerRules::Absorbing` through
 ///   `with_haze_layer`: a hazy air's haze an absorbing layer over the rest of its disc, its
 ///   absorption the anti-greenhouse.
-/// - the record's desert label, `DESERT_VERSION` (ux-calls-data's ruling 9), at
-///   `DesertRules::Labelled` through `with_desert`: a `Temperate` surface whose published
-///   condensates list no liquid water published `Desert`, a label no hook or figure reads.
 /// - the class weights' steepness tails by Marcum's Q₁, the surface crate's
 ///   `STEEPNESS_TAILS_VERSION` (rendering plan R10, R10.T6.a), at `SteepnessTailsRules::Marcum`
 ///   through `hyperion_surface::material::with_steepness_tails`, which the sim's tests have through
@@ -552,7 +549,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::context::{BinaryHostLightRules, with_binary_host_light};
-    use crate::planetary::derive::atmosphere::{DesertRules, with_desert};
     use crate::planetary::derive::photometry::area_mix::{
         HazeLayerRules, IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules,
         RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
@@ -565,7 +561,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    let run = move || with_desert(DesertRules::Labelled, run);
     let run = move || with_binary_host_light(BinaryHostLightRules::Engine, run);
     let run = move || {
         use crate::planetary::context::{BinaryHostXuvRules, with_binary_host_xuv};

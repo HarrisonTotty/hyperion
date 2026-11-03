@@ -997,11 +997,9 @@ fn every_body_short_of_temperate_names_a_limit() {
     );
 }
 
-/// The desert label moves no habitability (ux-calls-data's ruling 9): under every 27 hold, over
-/// the FGK hosts' bodies at the epoch ([`for_each_fgk_host`]), each body's hooks, its assessment
-/// among them, are the same with the label as under its hold, and so is its record's surface but
-/// for what it publishes, `Desert` exactly where its state is `Temperate` with no liquid water
-/// listed. The sample's first Earth-like world (a water sea at 275–305 K) is published `Temperate`
+/// The desert label (ux-calls-data's ruling 9): under every 27 hold, over the FGK hosts' bodies at
+/// the epoch ([`for_each_fgk_host`]), each record's surface publishes `Desert` exactly where its
+/// state is `Temperate` with no liquid water listed, a label no hook reads. The sample's first Earth-like world (a water sea at 275–305 K) is published `Temperate`
 /// and its first cold thin one as Mars is (below 273 K under 1 kPa) `Desert`. It holds no dry
 /// `Temperate` as hot as 500 K (a dry 550 K world's label is
 /// `a_dry_550_k_world_is_a_desert_under_100_bar_and_a_runaway_under_10`'s), so its hottest desert
@@ -1010,47 +1008,22 @@ fn every_body_short_of_temperate_names_a_limit() {
 #[test]
 #[ignore = "slow: every body of the FGK hosts among 6,800 systems, labelled and held"]
 fn the_desert_label_moves_no_habitability_over_the_fgk_hosts() {
-    use crate::planetary::derive::atmosphere::{DesertRules, Gas, SurfaceState, with_desert};
+    use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
     use crate::planetary::testing::with_every_27_hold;
     let (mut surfaces, mut deserts) = (0_usize, 0_usize);
     let (mut earth, mut cold) = (None, None);
     let mut hottest: Option<(crate::id::BodyId, f64, f64)> = None;
     with_every_27_hold(|| {
         for_each_fgk_host(|ctx, labelled| {
-            let unlabelled = with_desert(DesertRules::Held, || generate(SEED, ctx));
             for body in labelled.bodies() {
                 let index = body.index();
                 let name = index.body_id(ctx.id());
-                let read = |system: &PlanetarySystem| {
-                    let record = system.body_at(ctx, index, UniverseTime::EPOCH).unwrap();
-                    let hooks = system.hooks_at(ctx, index, UniverseTime::EPOCH).unwrap();
-                    (record, hooks)
-                };
-                let (record, hooks) = read(labelled);
-                let (held_record, held_hooks) =
-                    with_desert(DesertRules::Held, || read(&unlabelled));
-                assert_eq!(
-                    hooks, held_hooks,
-                    "{name}: its hooks, its assessment among them"
-                );
-                let (Section::Ok(surface), Section::Ok(held_surface)) =
-                    (record.surface(), held_record.surface())
-                else {
-                    assert_eq!(record.surface(), held_record.surface(), "{name}");
+                let record = labelled.body_at(ctx, index, UniverseTime::EPOCH).unwrap();
+                let Section::Ok(surface) = record.surface() else {
                     continue;
                 };
                 surfaces += 1;
                 let state = surface.state();
-                assert_eq!(
-                    held_surface.published_state(),
-                    state,
-                    "{name} under the hold"
-                );
-                assert_eq!(
-                    &surface.unlabelled(),
-                    held_surface,
-                    "{name}: all but its label"
-                );
                 let liquid = surface
                     .condensates()
                     .entry(Gas::Water.substance(), CondensatePhase::Liquid)

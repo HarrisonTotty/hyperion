@@ -83,8 +83,6 @@ pub(crate) use escaping::{
     LineSwitchRules, MeltOxygenRules, Thermostat, ThermostatCounts, WaterPhase, settled_log,
     water_phase, with_line_switch, with_melt_oxygen, with_resolve_check, with_thermostat,
 };
-#[cfg(test)]
-pub(crate) use present::{DesertRules, with_desert};
 pub(crate) use present::{
     PresentClimate, PresentFigures, Rotation, desert_label, published_ice_cover, published_label,
     state_to_carry,
@@ -2269,8 +2267,7 @@ pub enum SurfaceState {
     /// surface, a cold or warm desert such as Mars, or a hot one whose water was lost at its hosts'
     /// brightest (ux-calls-data's ruling 9; research-leans-12 §2).
     ///
-    /// Produced from generator version 27 alone, behind its hold (`DESERT_VERSION`), as a label on
-    /// the record's surface
+    /// Produced from generator version 27, as a label on the record's surface
     /// ([`Surface::published_state`](crate::planetary::record::Surface::published_state)) and
     /// nowhere else: [`Atmosphere::state`] and [`Atmosphere::published_state`] stay `Temperate`, and
     /// so do the record surface's [`state`](crate::planetary::record::Surface::state) and every
