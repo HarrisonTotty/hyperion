@@ -1855,6 +1855,8 @@ pub(crate) struct ChannelCache {
     network: NetworkMemo,
     /// Per coarse cell, its deepest evaluated level and the deepest within two king moves.
     deepest: BTreeMap<u64, (u8, u8)>,
+    /// Per coarse cell, its deepest evaluated level alone.
+    deepest_of: BTreeMap<u64, u8>,
     /// Per cell of any level, the index in `lists` of the grooves of that level that may reach it.
     groove_index: BTreeMap<u64, usize>,
     /// The groove lists, in the order they were built (an order no result reads).
@@ -1888,6 +1890,7 @@ impl ChannelCache {
             id: None,
             network: NetworkMemo::new(),
             deepest: BTreeMap::new(),
+            deepest_of: BTreeMap::new(),
             groove_index: BTreeMap::new(),
             lists: Vec::new(),
             recent_list: [None; LEVELS],
@@ -2005,8 +2008,20 @@ impl<F: FieldView> Incision<'_, F> {
     /// The deepest level whose grooves are evaluated below the coarse cell `coarse`: the deepest
     /// level its continuous cut weights above zero anywhere in it ([`super::Continuity::deepest`],
     /// its corners'; R09.T6.i), never past the deepest a cell of the body can reach
-    /// ([`deepest_possible_level`]).
+    /// ([`deepest_possible_level`]). It reads the cells within one king move of `coarse`, where
+    /// [`deepest`](Self::deepest) reads three.
     fn deepest_of(&mut self, coarse: PatchKey) -> Result<u8, ReadCellError> {
+        let key = coarse.to_u64();
+        if let Some(&own) = self.cache.deepest_of.get(&key) {
+            return Ok(own);
+        }
+        let own = self.deepest_of_uncached(coarse)?;
+        self.cache.deepest_of.insert(key, own);
+        Ok(own)
+    }
+
+    /// [`deepest_of`](Self::deepest_of), not memoised.
+    fn deepest_of_uncached(&mut self, coarse: PatchKey) -> Result<u8, ReadCellError> {
         let body = self.channels.body();
         let record = read(self.field, coarse)?;
         let first = self.first();
@@ -2153,11 +2168,11 @@ impl<F: FieldView> Incision<'_, F> {
         let radius_m = self.channels.radius.value();
         let mut list = Vec::new();
         for around in two_moves(cell) {
-            if level > first {
-                let (own, _) = self.deepest(ancestor(around, first))?;
-                if level > own {
-                    continue;
-                }
+            // The level its own coarse cell evaluates alone: the deepest about that cell would
+            // read two king moves farther, past the margin from a point on a surveyed cell's far
+            // edge (R09.T6.i).
+            if level > first && level > self.deepest_of(ancestor(around, first))? {
+                continue;
             }
             let Some(segment) = self.segment(around)? else {
                 continue;
