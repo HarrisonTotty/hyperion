@@ -38,6 +38,7 @@ import {
   viewsCheckTimingOf,
 } from "./softwareTiming";
 import { recordTerrainCheck, runTerrainCheck, TERRAIN_CHECK_TIMING } from "./terrainCheckRun";
+import type { InspectionClusters } from "./inspectionClusters";
 import type { TerrainProbe } from "./terrainProbe";
 import { recordViewsCheck, runViewsCheck, STOPPED, VIEWS_CHECK_TIMING } from "./viewsCheckRun";
 import type { ViewsProbe } from "./viewsProbe";
@@ -64,6 +65,8 @@ export type CheckedRun =
        * (plan R14), whose frame profile counts each window's; `null` on any other.
        */
       readonly calls: GpuCallCounter | null;
+      /** Its watch of `VIEW`'s terrain session, for its frame profile's cluster counters (R14). */
+      readonly clusters: InspectionClusters;
     }
   | { readonly kind: "terrain"; readonly terrain: TerrainProbe }
   | {
@@ -205,6 +208,7 @@ export function ViewsCheckRunner({
                 setting: api.launch.setting,
                 timing: inspectionProfileTimingOf(INSPECTION_PROFILE_TIMING, launchMode),
                 calls: run.calls,
+                clusters: () => run.clusters.counts(served?.body ?? null),
               })
             : null;
         ended = recordInspectionCheck(

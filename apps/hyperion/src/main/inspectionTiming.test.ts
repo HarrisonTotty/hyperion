@@ -12,6 +12,7 @@ import {
   profileFigures,
   summariseTimes,
   writeInspectionTimingResults,
+  TERRAIN_PASS_LABELS,
 } from "./inspectionTiming";
 import { measured } from "./measured";
 import { readInspectionTimingRecord } from "./viewsCheckRecord";
@@ -200,6 +201,12 @@ const RECORD: InspectionTimingRecord = {
         { label: "bodies", call: "queue.writeBuffer", count: 2, bytes: 4_096 },
         { label: "atmosphere view", call: "device.createBindGroup", count: 4, bytes: 0 },
       ],
+      clusters: {
+        passes: [
+          { label: "lit", clusters: 900, triangles: 100_000 },
+          { label: "lit late", clusters: 40, triangles: 5_000 },
+        ],
+      },
       marchSamples: 36,
       position: "6.69 Mm 023° -12°",
       statements: ["ATMOSPHERE: APPROXIMATE", "TERRAIN: STREAMING"],
@@ -390,6 +397,55 @@ describe("the frame profile's timing file (the owner's report)", () => {
     expect(readInspectionTimingRecord({ ...RECORD, windows: repeated })).toBeNull();
   });
 
+  it("takes a window's cluster counters, or none, and refuses them malformed (plan R14, R14.T3.d)", () => {
+    const [window] = RECORD.windows;
+    if (window === undefined) {
+      throw new Error("the record has a window");
+    }
+    const withClusters = (clusters: unknown): unknown => ({
+      ...RECORD,
+      windows: [{ ...window, clusters }],
+    });
+    expect([
+      readInspectionTimingRecord(withClusters(null))?.windows[0]?.clusters,
+      readInspectionTimingRecord(
+        withClusters({ passes: [{ label: "lit", clusters: -1, triangles: 0 }] }),
+      ),
+      readInspectionTimingRecord(
+        withClusters({
+          passes: [
+            { label: "lit", clusters: 1, triangles: 2 },
+            { label: "lit", clusters: 1, triangles: 2 },
+          ],
+        }),
+      ),
+      readInspectionTimingRecord(withClusters(undefined)),
+      results().windows[0]?.clusters,
+    ]).toEqual([null, null, null, null, window.clusters]);
+    expect(inspectionTimingMarkdown(results())).toContain(
+      "- **Clusters** (the terrain's cluster counters as the window ended, by pass): lit 900 (100000 triangles), lit late 40 (5000 triangles)",
+    );
+  });
+
+  it("counts the terrain's two rasters, its pyramid and its cluster dispatches in its share (plan R14, R14.T3.d)", () => {
+    expect(
+      [
+        "bodies",
+        "bodies late",
+        "depth pyramid",
+        "depth pyramid #2",
+        "terrain cluster cull",
+        "terrain cluster cull #2",
+        "terrain cluster compact #3",
+        "terrain shadows #4",
+        "symbology",
+        "bodies 2",
+        "discs",
+        "atmosphere view",
+      ].map((label) => TERRAIN_PASS_LABELS.test(label)),
+    ).toEqual([true, true, true, true, true, true, true, true, true, false, false, false]);
+  });
+
   it("summarises no times as none", () => {
     expect(summariseTimes([])).toEqual({
       count: 0,
@@ -435,7 +491,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 3,
+      version: 4,
       run: { compositeProbe: null, marchProbe: null, atmosphereLevers: null, litProbe: null },
     });
   });

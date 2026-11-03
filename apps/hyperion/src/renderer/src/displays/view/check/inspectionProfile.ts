@@ -15,6 +15,7 @@
 
 import type {
   InspectionTimingMarchCensus,
+  InspectionTimingClusters,
   InspectionTimingRecord,
   InspectionTimingWindow,
   InspectionTimingWindowName,
@@ -76,6 +77,11 @@ export interface InspectionProfileDeps {
    * each window is the window's, or `null` on a launch that does not count them.
    */
   readonly calls: Pick<GpuCallCounter, "begin" | "take"> | null;
+  /**
+   * The primary's terrain's cluster counters (plan R14), switched on by the call, so that the one
+   * at a window's start has them read back by its end; `null` where none have come back.
+   */
+  readonly clusters: () => InspectionTimingClusters | null;
 }
 
 /** What the primary's label block says as a window ends. */
@@ -110,6 +116,8 @@ export class InspectionProfiler {
   async measure(name: InspectionTimingWindowName, plate: () => ProfiledPlate): Promise<void> {
     const { api, views, timing } = this.#deps;
     await api.startProfile(name);
+    // The terrain's counters on from the window's start, read back by its end (plan R14).
+    this.#deps.clusters();
     const startMs = this.#deps.nowMs();
     this.#deps.calls?.begin();
     const done = (): boolean =>
@@ -176,6 +184,7 @@ export class InspectionProfiler {
       untimedFrames: figures.untimedFrames,
       memory: views.memoryTraffic(startMs, endMs),
       gpuCalls,
+      clusters: this.#deps.clusters(),
       // The floor's air at the low setting's sizes while it stands stepped (the owner's report).
       marchSamples:
         TABLE_SIZES[said.statements.includes(IMAGE_DETAIL_LIMITED) ? "low" : this.#deps.setting]

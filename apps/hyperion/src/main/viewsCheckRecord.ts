@@ -26,6 +26,7 @@ import type {
   InspectionGpuCall,
   InspectionTimingBytes,
   InspectionTimingMarchCensus,
+  InspectionTimingClusters,
   InspectionTimingMemory,
   InspectionTimingPass,
   InspectionTimingRecord,
@@ -1350,6 +1351,17 @@ function gpuCall(value: unknown): InspectionGpuCall | null {
     : null;
 }
 
+/** `value` as one pass's cluster counters (plan R14), or `null`. */
+function clusterPass(value: unknown): InspectionTimingClusters["passes"][number] | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { label, clusters, triangles } = value;
+  return typeof label === "string" && isCount(clusters) && isCount(triangles)
+    ? { label, clusters, triangles }
+    : null;
+}
+
 /**
  * A window's WebGPU calls (plan R14), each label's call once, or `null` for a window that did not
  * count them; `undefined` where the value is neither.
@@ -1397,8 +1409,23 @@ function timingCensus(value: unknown): InspectionTimingMarchCensus | null | unde
 }
 
 /**
+ * `value` as a window's cluster counters (plan R14): `null` where it has none; `undefined` where it
+ * is neither, each pass's label once.
+ */
+function timingClusters(value: unknown): InspectionTimingClusters | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  const passes = isRecord(value) ? listOf(value["passes"], clusterPass) : null;
+  return passes === null || new Set(passes.map((pass) => pass.label)).size !== passes.length
+    ? undefined
+    : { passes };
+}
+
+/**
  * One profiled window (the owner's report): its name, an end not before its start, and its times,
- * each pass's as many as the frames timed in full, each label once, and its WebGPU calls or `null`.
+ * each pass's as many as the frames timed in full, each label once, its WebGPU calls or `null`, and
+ * its cluster counters or `null`.
  */
 function timingWindow(value: unknown): InspectionTimingWindow | null {
   if (!isRecord(value)) {
@@ -1416,6 +1443,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
   const memory = timingMemory(value["memory"]);
   const calls = gpuCalls(value["gpuCalls"]);
   const marchCensus = timingCensus(value["marchCensus"]);
+  const clusters = timingClusters(value["clusters"]);
   const { startMs, endMs, untimedFrames, position, marchSamples } = value;
   if (
     name === null ||
@@ -1434,6 +1462,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     !isCount(untimedFrames) ||
     memory === null ||
     calls === undefined ||
+    clusters === undefined ||
     !isCount(marchSamples) ||
     marchSamples === 0 ||
     !isTextOrNull(position) ||
@@ -1456,6 +1485,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     untimedFrames,
     memory,
     gpuCalls: calls,
+    clusters,
     marchSamples,
     position,
     statements,

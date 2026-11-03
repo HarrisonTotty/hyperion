@@ -25,6 +25,7 @@ import {
 } from "./displays/view/check/handoverScenes";
 import { readServedHandoverWorld } from "./displays/view/check/servedHandover";
 import { terrainProbeOptions } from "./displays/view/check/terrainCheckRun";
+import { InspectionClusters } from "./displays/view/check/inspectionClusters";
 import { TerrainProbe } from "./displays/view/check/terrainProbe";
 import { ViewsProbe } from "./displays/view/check/viewsProbe";
 import { wholeLookSceneOptions } from "./displays/view/check/wholeLooks";
@@ -101,6 +102,11 @@ interface CheckedView {
   readonly engineSource: ViewEngineSource;
   readonly terrain: TerrainSeam | null;
   readonly sceneOptions: ReadonlyArray<SceneOption> | undefined;
+  /**
+   * The watch of `VIEW`'s terrain session: the terrain run's seam's, or the inspection run's for its
+   * frame profile's cluster counters (plan R14); `undefined` for none.
+   */
+  readonly watchTerrain: ((session: TerrainSession) => () => void) | undefined;
 }
 
 /**
@@ -165,7 +171,13 @@ function checkProbesOf(
       };
       break;
     case "inspection":
-      run = { kind: "inspection", requests, served: launch.served ?? null, calls };
+      run = {
+        kind: "inspection",
+        requests,
+        served: launch.served ?? null,
+        calls,
+        clusters: new InspectionClusters(),
+      };
       break;
     case "terrain":
       // A `--whole` launch's looks at the whole body (plan R10, R10.T14.c), offered after the kept
@@ -203,15 +215,29 @@ function checkProbesOf(
 function checkedViewOf(probes: CheckProbes): CheckedView {
   const { run } = probes;
   // T20's run, the atmosphere run (R08.T10.b) and the inspection run draw through the views probe
-  // alone.
-  if (run.kind === "several-views" || run.kind === "inspection") {
-    return { engineSource: probes.views.source, terrain: null, sceneOptions: undefined };
+  // alone; the inspection run watches the terrain session for its profile's counters (plan R14).
+  if (run.kind === "several-views") {
+    return {
+      engineSource: probes.views.source,
+      terrain: null,
+      sceneOptions: undefined,
+      watchTerrain: undefined,
+    };
+  }
+  if (run.kind === "inspection") {
+    return {
+      engineSource: probes.views.source,
+      terrain: null,
+      sceneOptions: undefined,
+      watchTerrain: run.clusters.watchTerrain,
+    };
   }
   if (run.kind === "atmosphere") {
     return {
       engineSource: probes.views.source,
       terrain: null,
       sceneOptions: run.placed?.sceneOptions,
+      watchTerrain: undefined,
     };
   }
   const { terrain } = run;
@@ -219,6 +245,7 @@ function checkedViewOf(probes: CheckProbes): CheckedView {
     engineSource: terrain.source,
     terrain: { heightWorkers: terrain.heightWorkers, watchTerrain: terrain.watchTerrain },
     sceneOptions: terrain.sceneOptions,
+    watchTerrain: terrain.watchTerrain,
   };
 }
 
@@ -249,7 +276,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
           engineSource={inputs.checkedView?.engineSource}
           heightWorkers={inputs.checkedView?.terrain?.heightWorkers}
           sceneOptions={inputs.checkedView?.sceneOptions}
-          watchTerrain={inputs.checkedView?.terrain?.watchTerrain}
+          watchTerrain={inputs.checkedView?.watchTerrain}
           setting={inputs.setting}
           platform={inputs.platform}
           performanceThreads={inputs.performanceThreads}

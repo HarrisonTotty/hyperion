@@ -32,6 +32,7 @@ import type {
   CompositeProbeName,
   InspectionGpuCall,
   InspectionTimingMarchCensus,
+  InspectionTimingClusters,
   InspectionTimingMemory,
   InspectionTimingRecord,
   InspectionTimingWindow,
@@ -54,9 +55,9 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
 /**
  * The schema's version; bumped with any change to the file's shape: 2 since each window's march
  * census, the run's march probe and its levers over the setting's (plan R08, R08.T8.d), 3 since the
- * run's lit probe (R08.T9.b).
+ * run's lit probe (R08.T9.b), 4 since each window's terrain cluster counters (plan R14, R14.T3.d).
  */
-export const INSPECTION_TIMING_VERSION = 3;
+export const INSPECTION_TIMING_VERSION = 4;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -715,6 +716,8 @@ export interface InspectionTimingWindowResults {
   readonly gpuCalls: GpuCallFigures | null;
   /** The far limb's census of the march the frame after the window dispatched, or `null`. */
   readonly marchCensus: InspectionTimingMarchCensus | null;
+  /** The primary's terrain's cluster counters as the window ended (plan R14), or `null`. */
+  readonly clusters: InspectionTimingClusters | null;
   /** The window's trace, reduced, or why it is missing. */
   readonly trace: Measured<ProfileTraceFigures>;
   /** The renderer's own times, as it measured them. */
@@ -784,11 +787,14 @@ export interface InspectionTimingInput {
 
 /**
  * The pass labels whose passes draw the terrain (`photoreal/passes.ts`' order): the bodies pass,
- * which draws the mesh bodies' figures and the terrain handed over after them; the shadow
- * cascades' caster passes, numbered from the second; and the symbology's canvas pass, which draws
- * the terrain's depth before its marks. The renderer's labels, repeated here across the bundles.
+ * which draws the mesh bodies' figures and the terrain handed over after them, and its late raster
+ * with the depth pyramid it is culled against (plan R14, R14.T3.d); the cluster path's cull and
+ * compaction, early and late under one label each; the shadow cascades' caster passes; and the
+ * symbology's canvas pass, which draws the terrain's depth before its marks; each numbered from the
+ * second where a frame repeats it. The renderer's labels, repeated here across the bundles.
  */
-export const TERRAIN_PASS_LABELS = /^(?:bodies|terrain shadows(?: #\d+)?|symbology)$/u;
+export const TERRAIN_PASS_LABELS =
+  /^(?:bodies(?: late)?|depth pyramid|terrain cluster (?:cull|compact)|terrain shadows|symbology)(?: #\d+)?$/u;
 
 /** One window's figures from the renderer's record and its trace. */
 function windowResults(
@@ -851,6 +857,7 @@ function windowResults(
     memory: window.memory,
     gpuCalls: window.gpuCalls === null ? null : gpuCallFigures(window.gpuCalls, draws),
     marchCensus: window.marchCensus,
+    clusters: window.clusters,
     trace: trace ?? missing("no trace was recorded over the window"),
     samples: {
       intervalsMs: window.intervalsMs,
@@ -1062,7 +1069,9 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
         ]),
     "",
     ...censusMarkdown(window.marchCensus),
-    `The terrain's passes (\`bodies\`, \`terrain shadows\`, \`symbology\`) take ${window.terrainShareOfGpu === null ? "—" : `${(100 * window.terrainShareOfGpu).toFixed(1)}%`} of the GPU's time; the rest is the sky, the discs, the atmosphere and the post-processing.`,
+    `The terrain's passes (\`bodies\` and \`bodies late\`, \`depth pyramid\`, the \`terrain cluster\` dispatches, \`terrain shadows\`, \`symbology\`) take ${window.terrainShareOfGpu === null ? "—" : `${(100 * window.terrainShareOfGpu).toFixed(1)}%`} of the GPU's time; the rest is the sky, the discs, the atmosphere and the post-processing.`,
+    "",
+    `- **Clusters** (the terrain's cluster counters as the window ended, by pass): ${window.clusters === null ? "—" : cell(window.clusters.passes.map((pass) => `${pass.label} ${String(pass.clusters)} (${String(pass.triangles)} triangles)`).join(", "))}`,
     "",
     "### Uploads and allocations",
     "",

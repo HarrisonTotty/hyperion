@@ -43,6 +43,7 @@ const WINDOW: InspectionTimingWindow = {
     uploads: [],
   },
   gpuCalls: null,
+  clusters: null,
   marchSamples: 36,
   position: null,
   statements: [],

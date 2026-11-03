@@ -2160,6 +2160,20 @@ export interface AtmosphereCheckRecord {
  */
 export type InspectionTimingWindowName = "orbit" | "close" | "low";
 
+/**
+ * The primary's terrain's cluster counters as a profiled window ended (plan R14, R14.T1.b; with
+ * R14.T3.d's two rasters, the lit pass's two passes), of the inspected body's lit pass: each pass of
+ * the cull by its name (`lit`, `lit late`, `overlay depth`, the cascades'), its clusters and triangles
+ * drawn.
+ */
+export interface InspectionTimingClusters {
+  readonly passes: ReadonlyArray<{
+    readonly label: string;
+    readonly clusters: number;
+    readonly triangles: number;
+  }>;
+}
+
 /** One pass label's GPU time in a profiled window. */
 export interface InspectionTimingPass {
   /**
@@ -2252,6 +2266,11 @@ export interface InspectionTimingWindow {
    * or `null` on a launch that did not count them.
    */
   readonly gpuCalls: ReadonlyArray<InspectionGpuCall> | null;
+  /**
+   * The primary's terrain's cluster counters as the window ended (plan R14), or `null` where its
+   * body has no lit pass or none came back.
+   */
+  readonly clusters: InspectionTimingClusters | null;
   /**
    * The samples a ray of the atmosphere's march takes at the sizes its air was drawn at
    * (`TableSizes.rayMarchSamples`: the setting's, or the low setting's while `IMAGE: DETAIL LIMITED`

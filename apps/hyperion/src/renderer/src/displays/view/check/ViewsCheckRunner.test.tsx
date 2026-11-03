@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViewsCheckApi } from "../../../../../preload/api";
 import { HANDOVER_APPROACH } from "./handoverGeometry";
 import { HandoverScenes, terrainTestHandoverWorld } from "./handoverScenes";
+import { InspectionClusters } from "./inspectionClusters";
 import { TerrainProbe } from "./terrainProbe";
 import { ViewsCheckRunner } from "./ViewsCheckRunner";
 import { ViewsProbe } from "./viewsProbe";
@@ -143,7 +144,13 @@ describe("ViewsCheckRunner", () => {
       <ViewsCheckRunner
         api={api}
         probe={new ViewsProbe()}
-        run={{ kind: "inspection", requests, served: null, calls: null }}
+        run={{
+          kind: "inspection",
+          requests,
+          served: null,
+          calls: null,
+          clusters: new InspectionClusters(),
+        }}
         launchMode="vulkan"
         openSystem={() => undefined}
       />,

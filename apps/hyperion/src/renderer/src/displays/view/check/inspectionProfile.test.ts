@@ -66,10 +66,12 @@ function profiler(
   readonly calls: string[];
   readonly marked: ViewsCheckWindow[];
   readonly signals: AbortSignal[];
+  readonly clusterReads: number[];
 } {
   const calls: string[] = [];
   const marked: ViewsCheckWindow[] = [];
   const signals: AbortSignal[] = [];
+  const clusterReads: number[] = [];
   let nowMs = 1_000;
   const deps: InspectionProfileDeps = {
     api: {
@@ -122,8 +124,13 @@ function profiler(
     setting: "high",
     timing: INSPECTION_PROFILE_TIMING,
     calls: counter,
+    // The counters as read: one more cluster each read, so that a window's are its end's.
+    clusters: () => {
+      clusterReads.push(nowMs);
+      return { passes: [{ label: "lit", clusters: clusterReads.length, triangles: 896 }] };
+    },
   };
-  return { profile: new InspectionProfiler(deps), calls, marked, signals };
+  return { profile: new InspectionProfiler(deps), calls, marked, signals, clusterReads };
 }
 
 /** A plate as the window ends. */
@@ -205,6 +212,15 @@ describe("the inspection run's frame profile (the owner's report)", () => {
     expect([calls, profile.windows]).toEqual([
       ["start orbit at 1000", "end orbit 1000–4000 at 4000"],
       [],
+    ]);
+  });
+
+  it("switches the terrain's cluster counters on at a window's start and records them at its end (plan R14, R14.T3.d)", async () => {
+    const { profile, clusterReads } = profiler(100);
+    await profile.measure("orbit", PLATE);
+    expect([clusterReads, profile.windows[0]?.clusters]).toEqual([
+      [1_000, 4_250],
+      { passes: [{ label: "lit", clusters: 2, triangles: 896 }] },
     ]);
   });
 
