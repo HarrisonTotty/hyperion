@@ -448,6 +448,41 @@ describe("the photorealistic renderer", () => {
     renderer.dispose();
   });
 
+  it("drops the two-pass occlusion's visibility at a change of internal scale and after a restore (R14.T3.d)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const given: Array<boolean | undefined> = [];
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: (_plan, _bodies, occlusion) => {
+        given.push(occlusion?.fresh);
+        return [drawOfName("early")];
+      },
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+    };
+    const geometry = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
+    // Drawn at an internal scale of 1.5, its presented size kept, then again after a restore at it.
+    const scaled = { widthPx: VIEWPORT.widthPx * 1.5, heightPx: VIEWPORT.heightPx * 1.5 };
+    const render = (viewport: typeof VIEWPORT): void => {
+      renderer.render(new RecordingView(), { ...frameWith([]), viewport, geometry, terrain });
+    };
+    render(VIEWPORT);
+    render(VIEWPORT);
+    render(scaled);
+    render(scaled);
+    engine.restore();
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    render(scaled);
+    render(scaled);
+    expect(given).toEqual([true, false, true, false, true, false]);
+    renderer.dispose();
+  });
+
   it("lights each body by planetshine from two neighbours on the high setting and one on the low", async () => {
     const engine = await countingRenderEngine();
     const view = new RecordingView();
