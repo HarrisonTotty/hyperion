@@ -34180,3 +34180,10 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
 - **P14.T33.a (iii) as built** (lane galaxy-close-26, 2026-11-03, at 26; no output moves).
   `planetary::testing::sample_rogue_records(galaxy, n)` returns a `Result`, `TooFewSystems` past
   `MAX_SAMPLE_CELLS` cells; `benches/planetary.rs`'s `rogue_1000` times (iii).
+- **P14.T53.b part 3's B5, a steam envelope over a `Temperate` (lane `fix-steam-envelope-division`,
+  2026-11-03).** Held at 28 (`STEAM_DIVISION_VERSION`, `SteamDivisionRules`, `with_steam_division`;
+  the first 28 hold, so `planetary::testing::with_every_28_hold` is new). `solved_as_a_hothouse`
+  also admits a first solve labelled `SteamEnvelope` over `Temperate` or `Snowball`, and (b) then
+  takes the deck away; a `MagmaOcean`'s label stands (§5, "ahead of `MagmaOcean`").
+  - _Left at 26 and 27:_ 24 and 30 such bodies over the 10⁵ census, and one `MagmaOcean`
+    (`composition_census_s_steam_envelopes_are_a_runaway_s_under_every_28_hold`).

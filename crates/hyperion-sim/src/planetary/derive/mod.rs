@@ -2193,9 +2193,11 @@ impl PassBody<'_> {
     ///
     /// Beside it, a published `Temperate` that is a hothouse between the limits (a dry one at or
     /// above water's saturation temperature at its surface pressure, [`solved_as_a_hothouse`];
-    /// P14.T53.b part 1 (c), decision-t53b-arm-c) is solved once more, every pass a
-    /// `RunawayGreenhouse` under Venus's deck ([`PublishedState::Hothouse`]), and that solve
-    /// takes (b)'s test: below the cycling temperature it is solved a third time without the deck.
+    /// P14.T53.b part 1 (c), decision-t53b-arm-c), and from generator version 28 a first solve
+    /// labelled a steam envelope over a `Temperate` or a `Snowball` (part 3's B5), is solved once
+    /// more, every pass a `RunawayGreenhouse` under Venus's deck ([`PublishedState::Hothouse`]),
+    /// and that solve takes (b)'s test: below the cycling temperature it is solved a third time
+    /// without the deck.
     /// That is at most two solves more, each reading only the solve before's temperature, its
     /// state and deck fixed within it, and none judges (c) again: no feedback, and nothing returns
     /// to `Temperate`.

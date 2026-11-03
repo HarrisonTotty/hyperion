@@ -30,6 +30,142 @@ const WATER_WORLDS: [(&str, &str); 3] = [
     ("02000b2d9ffe0000", "0700"),
 ];
 
+/// Three steam envelopes of the 10⁵ census published over a state that is not a runaway's at 26 and
+/// under every 27 hold, against P14.T53.b part 3's B5 (decision-p14-t53b-part3 §8), each its
+/// system's ID and its body's index: the 400 sample's hottest 24 `Snowball` and an H₂-led icy
+/// world, both beyond the maximum-greenhouse limit, and research-census-25 §4's #522, a dry
+/// hothouse between the limits that keeps its water. Each ends its passes at a context jump on a
+/// pass solved under the `Temperate` its previous pass carried, whose own figures are a runaway's.
+const OFF_A_RUNAWAY_S_STATE: [(&str, &str); 3] = [
+    ("01fffb2d60000000", "0600"),
+    ("02000b2be0010000", "0400"),
+    ("01ffeb2b60000000", "0200"),
+];
+
+/// The census's systems that reach [`OFF_A_RUNAWAY_S_STATE`]'s (its sample's first 600, in order).
+const OFF_A_RUNAWAY_S_STATE_SYSTEMS: usize = 600;
+
+/// One body's published state, the state its published solve was solved under, its water's and
+/// its runaway's deck, its mean surface temperature, K, and its record's surface section.
+type SteamDivision = (
+    SurfaceState,
+    SurfaceState,
+    SurfaceState,
+    crate::planetary::derive::atmosphere::RunawayDeck,
+    f64,
+    crate::planetary::record::SectionState,
+);
+
+/// [`OFF_A_RUNAWAY_S_STATE`]'s bodies under the rules in force, each generated afresh, in order.
+fn off_a_runaway_s_state() -> Vec<(String, SteamDivision)> {
+    use crate::galaxy::Galaxy;
+    use crate::galaxy::params::GalaxyParams;
+    use crate::planetary::SystemContext;
+    use crate::planetary::record::RecordSection;
+    use crate::planetary::testing::{SampleFilter, sample_records};
+    let galaxy = Galaxy::from_params(SEED, GalaxyParams::milky_way_like())
+        .expect("the Milky Way's parameters build a galaxy");
+    let records = sample_records(&galaxy, OFF_A_RUNAWAY_S_STATE_SYSTEMS, SampleFilter::ALL)
+        .expect("the solar circle holds the census's systems");
+    let mut found = Vec::new();
+    for (system, index) in OFF_A_RUNAWAY_S_STATE {
+        let id = format!("{system}.{index}");
+        let ctx = records
+            .iter()
+            .map(|record| SystemContext::from_record(&galaxy, record))
+            .find(|ctx| ctx.id().to_string() == system)
+            .unwrap_or_else(|| panic!("{system} is in the census's first systems"));
+        let set: [AuditSet; 1] = [("census", SEED, ctx)];
+        audit_walk(&set, &mut |case| {
+            if case.record.identity().id().to_string() == id {
+                let air = case.derived.atmosphere();
+                found.push((
+                    id.clone(),
+                    (
+                        air.published_state(),
+                        air.state(),
+                        air.water_state(),
+                        air.runaway_deck(),
+                        air.surface_temperature().value(),
+                        case.record.section_state(RecordSection::Surface),
+                    ),
+                ));
+            }
+        });
+    }
+    assert_eq!(found.len(), OFF_A_RUNAWAY_S_STATE.len(), "{found:?}");
+    found
+}
+
+/// From generator version 28 (`STEAM_DIVISION_VERSION`, P14.T53.b part 3's B5), a first solve
+/// labelled a steam envelope over a state that is not a runaway's is solved again as a hothouse,
+/// so that each steam envelope of [`OFF_A_RUNAWAY_S_STATE`] is a runaway's, with no surface
+/// section and its water's state the division's: its decked solve condenses a sea, so (b) takes the
+/// deck away, and the deckless runaway's climate is its first solve's within 10⁻⁹. At 26 each is
+/// published as it stands, over its `Temperate`.
+#[test]
+fn from_28_a_steam_envelope_over_a_temperate_pass_is_solved_as_a_runaway() {
+    use crate::planetary::derive::atmosphere::{
+        RunawayDeck, SteamDivisionRules, with_steam_division,
+    };
+    use crate::planetary::record::SectionState;
+    let held = off_a_runaway_s_state();
+    let at_28 = with_steam_division(SteamDivisionRules::Hothouse, off_a_runaway_s_state);
+    for ((id, before), (_, after)) in held.iter().zip(&at_28) {
+        eprintln!("{id}: at 26 {before:?}; at 28 {after:?}");
+        assert_eq!(
+            (before.0, before.1, before.3),
+            (
+                SurfaceState::SteamEnvelope,
+                SurfaceState::Temperate,
+                RunawayDeck::Kept
+            ),
+            "{id}: the finding at 26"
+        );
+        assert_eq!(
+            (after.0, after.1, after.2, after.3),
+            (
+                SurfaceState::SteamEnvelope,
+                SurfaceState::RunawayGreenhouse,
+                before.2,
+                RunawayDeck::Deckless
+            ),
+            "{id}: {after:?}"
+        );
+        assert_ne!(after.5, SectionState::Ok, "{id}: {after:?}");
+        assert!((after.4 / before.4 - 1.0).abs() < 1e-9, "{id}: {after:?}");
+    }
+}
+
+/// P14.T53.b part 3's B5 fix is held until the 27 → 28 bump: the rules in force are version 27's
+/// and before, and 28's helper reaches the hothouse.
+#[test]
+fn the_steam_division_is_held_only_until_the_28_bump() {
+    use crate::planetary::derive::atmosphere::{STEAM_DIVISION_VERSION, SteamDivisionRules};
+    use crate::planetary::testing::{with_every_27_hold, with_every_28_hold};
+    use crate::{GENERATOR_VERSION, GeneratorVersion};
+    assert!(
+        GENERATOR_VERSION < STEAM_DIVISION_VERSION,
+        "the 27 → 28 bump puts P14.T53.b part 3's B5 fix on the record (decision-p14-t53b-part3 \
+         §8): delete `STEAM_DIVISION_VERSION`, `SteamDivisionRules` with its `Label` arm and the \
+         guard that reads it in `solved_as_a_hothouse`, the tests' `with_steam_division`, its \
+         switch in `with_every_28_hold` (and the helper, if no other 28 hold is left), the 26 arm \
+         of `from_28_a_steam_envelope_over_a_temperate_pass_is_solved_as_a_runaway`, the 26 and \
+         27 censuses of `composition_census_s_steam_envelopes_are_a_runaway_s_under_every_28_hold` \
+         and this test"
+    );
+    assert_eq!(STEAM_DIVISION_VERSION, GeneratorVersion::new(28));
+    assert_eq!(SteamDivisionRules::in_force(), SteamDivisionRules::Label);
+    assert_eq!(
+        with_every_27_hold(SteamDivisionRules::in_force),
+        SteamDivisionRules::Label
+    );
+    assert_eq!(
+        with_every_28_hold(SteamDivisionRules::in_force),
+        SteamDivisionRules::Hothouse
+    );
+}
+
 /// FNV-1a 64 of `text`'s bytes: a record's digest, so that a census keeps no record.
 fn digest(text: &str) -> u64 {
     text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, b| {

@@ -595,6 +595,25 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     with_minor_oxides(MinorOxidesRules::Chondritic, run)
 }
 
+/// `run`'s result with every landed hold at generator version 28 in force on this thread, those
+/// at 27 among them ([`with_every_27_hold`]), for a test that asserts a 28 figure; each switch sets
+/// its rules back as it returns, a panic in `run` included.
+///
+/// The holds at 28:
+///
+/// - a first solve labelled a steam envelope over a state that is not a runaway's, solved once
+///   more as a hothouse, `STEAM_DIVISION_VERSION` (P14.T53.b part 3's B5), at
+///   `SteamDivisionRules::Hothouse` through `with_steam_division`.
+///
+/// A system or a record is read under the rules in force when it is generated, so a test
+/// generates afresh inside it. A later hold at 28 adds its switch here, and 28's bump deletes it
+/// with its holds.
+#[cfg(test)]
+pub(crate) fn with_every_28_hold<R>(run: impl FnOnce() -> R) -> R {
+    use crate::planetary::derive::atmosphere::{SteamDivisionRules, with_steam_division};
+    with_every_27_hold(move || with_steam_division(SteamDivisionRules::Hothouse, run))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
