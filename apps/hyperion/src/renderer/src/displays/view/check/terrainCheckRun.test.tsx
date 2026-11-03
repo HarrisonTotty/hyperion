@@ -422,6 +422,7 @@ function fakeProbe(
         frameGpuMs: [],
         patchesDrawn: [],
         patchesSelected: [],
+        cachePressure: { draws: 0, firstScriptS: null },
         trianglesDrawn: [],
         casterTriangles: [],
         bakes: { posted: 0, baked: 0, refused: 0 },

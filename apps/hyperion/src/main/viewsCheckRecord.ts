@@ -31,6 +31,7 @@ import type {
   InspectionTimingWindow,
   InspectionTimingWindowName,
   TerrainCheckBytes,
+  TerrainCheckCachePressure,
   TerrainCheckFault,
   TerrainCheckLossRecord,
   TerrainCheckMemory,
@@ -315,6 +316,25 @@ function memoryOf(value: unknown): TerrainCheckMemory | null {
     : null;
 }
 
+/**
+ * `value` as a phase's draws at which the patch cache's pins passed its slots (plan R10,
+ * R10.T16.i): `null` where absent, as in a record written before them, or `null`; `undefined` if
+ * it is neither nor one.
+ */
+function cachePressureOf(value: unknown): TerrainCheckCachePressure | null | undefined {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const { draws } = value;
+  const firstScriptS = finiteOrNull(value["firstScriptS"]);
+  return isCount(draws) && firstScriptS !== undefined && (draws > 0 || firstScriptS === null)
+    ? { draws, firstScriptS }
+    : undefined;
+}
+
 function terrainView(value: unknown): TerrainCheckViewRecord | null {
   if (!isRecord(value)) {
     return null;
@@ -397,6 +417,7 @@ function terrainPhase(value: unknown): TerrainCheckPhaseRecord | null {
   const frameGpuMs = numbers(value["frameGpuMs"]);
   const patchesDrawn = numbers(value["patchesDrawn"]);
   const patchesSelected = numbers(value["patchesSelected"]);
+  const cachePressure = cachePressureOf(value["cachePressure"]);
   const trianglesDrawn = numbers(value["trianglesDrawn"]);
   const casterTriangles = numbers(value["casterTriangles"]);
   const bakes = value["bakes"];
@@ -415,6 +436,8 @@ function terrainPhase(value: unknown): TerrainCheckPhaseRecord | null {
     !patchesDrawn.every(isCount) ||
     patchesSelected === null ||
     !patchesSelected.every(isCount) ||
+    cachePressure === undefined ||
+    (cachePressure !== null && cachePressure.draws > patchesDrawn.length) ||
     trianglesDrawn === null ||
     !trianglesDrawn.every(isCount) ||
     casterTriangles === null ||
@@ -450,6 +473,7 @@ function terrainPhase(value: unknown): TerrainCheckPhaseRecord | null {
     frameGpuMs,
     patchesDrawn,
     patchesSelected,
+    cachePressure,
     trianglesDrawn,
     casterTriangles,
     bakes: { posted: bakes["posted"], baked: bakes["baked"], refused: bakes["refused"] },

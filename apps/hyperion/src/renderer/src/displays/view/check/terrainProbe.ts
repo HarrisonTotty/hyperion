@@ -117,6 +117,11 @@ export interface WatchedPass {
   } | null;
   /** The selection budget, half the cache's slots (`TerrainPass.maxPatches`). */
   readonly maxPatches: number;
+  /**
+   * Whether its cache's pins passed the slots at its last step, or it refused an arrival since
+   * (`TerrainPass.cachePressure`; plan R10, R10.T16.i).
+   */
+  readonly cachePressure: { readonly exceeded: boolean };
   seesPatch(id: string): boolean;
   /**
    * The view's triangles at its last draw (plan R14, R14.T1.b; `TerrainPass.counts`); absent on a
@@ -358,6 +363,8 @@ interface TerrainFrame {
   patches: number | null;
   /** The patches its selection held then (`Selection.patches`). */
   selected: number | null;
+  /** Whether the pass's cache's pins then passed its slots or refused an arrival (R10.T16.i). */
+  pressure: boolean | null;
   /** Its triangles then, the lit draws' and the casters' (`null` where not known; plan R14). */
   triangles: number | null;
   casterTriangles: number | null;
@@ -911,6 +918,7 @@ export class TerrainProbe {
     const casterTriangles = inWindow.flatMap((frame) =>
       frame.casterTriangles === null ? [] : [frame.casterTriangles],
     );
+    const pressed = inWindow.filter((frame) => frame.pressure === true);
     return {
       name,
       startMs: start.atMs,
@@ -923,6 +931,7 @@ export class TerrainProbe {
       frameGpuMs: window.frameGpuMs,
       patchesDrawn,
       patchesSelected,
+      cachePressure: { draws: pressed.length, firstScriptS: pressed[0]?.scriptS ?? null },
       trianglesDrawn,
       casterTriangles,
       bakes: {
@@ -972,6 +981,7 @@ export class TerrainProbe {
       if (pass !== null && owner === `${view}:hdr` && view === "view") {
         seen.patches = pass.lastStep?.drawSet.count ?? 0;
         seen.selected = pass.lastStep?.selection.patches.size ?? 0;
+        seen.pressure = pass.cachePressure.exceeded;
         // The run measures: the cluster path's counters are read back from here on (plan R14).
         pass.measureClusters?.(true);
         const counts = pass.counts?.(view) ?? null;
@@ -1022,6 +1032,7 @@ export class TerrainProbe {
       views: new Map(),
       patches: null,
       selected: null,
+      pressure: null,
       triangles: null,
       casterTriangles: null,
     };

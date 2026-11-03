@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   TerrainCheckFault,
+  TerrainCheckPhaseRecord,
   TerrainCheckRecord,
   TerrainCheckViewRecord,
   TerrainWholeRecord,
@@ -535,12 +536,19 @@ const WHOLE: TerrainWholeRecord = {
   })),
 };
 
-/** {@link TERRAIN_RECORD} as a whole-body run's, its readings `whole` and its mask whole. */
-function wholeInput(whole: TerrainWholeRecord = WHOLE): TerrainCheckInput {
+/**
+ * {@link TERRAIN_RECORD} as a whole-body run's, its readings `whole`, its mask whole and each phase
+ * changed by `change`.
+ */
+function wholeInput(
+  whole: TerrainWholeRecord = WHOLE,
+  change: (phase: TerrainCheckPhaseRecord) => Partial<TerrainCheckPhaseRecord> = () => ({}),
+): TerrainCheckInput {
   return input({
     run: { ...input().run, fixture: "terrain-test-whole" },
     record: {
       ...TERRAIN_RECORD,
+      phases: TERRAIN_RECORD.phases.map((phase) => ({ ...phase, ...change(phase) })),
       loss: {
         ...TERRAIN_RECORD.loss,
         masks: { ...TERRAIN_RECORD.loss.masks, end: 24_576, expected: 24_576 },
@@ -573,16 +581,55 @@ describe("the whole-body run's results (R10.T14.c)", () => {
     ]);
   });
 
+  it("pass a run whose draws pass even twice the selection's budget with the cache's pins within its slots, and record by how much and how often (R10.T16.i)", () => {
+    const results = buildTerrainCheckResults(
+      wholeInput({ ...WHOLE, selectionBudget: 58 }, () => ({ patchesDrawn: [40, 130, 61] })),
+    );
+    const whole = results.findings.whole;
+    expect([whole?.verdict, whole?.reasons]).toEqual(["pass", []]);
+    expect([
+      whole?.mostPatchesDrawn,
+      whole?.drawnOverBudgetShare,
+      whole?.cachePressureDraws,
+    ]).toEqual([130, 2 / 3, 0]);
+    expect(terrainCheckMarkdown(results)).toContain(
+      "at most 55 patches selected of the selection's 58 and 130 drawn (72 over the budget, in 66.7% of draws); the cache's pins past its slots at 0 draws;",
+    );
+  });
+
+  it("fail a run at whose draws the cache's pins passed its slots, naming the phase and its first such draw (R10.T16.i)", () => {
+    const results = buildTerrainCheckResults(
+      wholeInput(WHOLE, (phase) =>
+        phase.name === "terrain-photoreal-wireframe"
+          ? { cachePressure: { draws: 2, firstScriptS: 41.25 } }
+          : {},
+      ),
+    );
+    const whole = results.findings.whole;
+    expect([whole?.verdict, results.overall, whole?.cachePressureDraws]).toEqual([
+      "fail",
+      "fail",
+      2,
+    ]);
+    expect(whole?.reasons).toEqual([
+      "terrain-photoreal-wireframe: the patch cache's pins passed its slots or it refused an arrival at 2 of 3 draws, the first at 41.25 s of the script",
+    ]);
+  });
+
+  it("read null for the cache's pins from a record written before them, judging none (R10.T16.i)", () => {
+    const results = buildTerrainCheckResults(wholeInput(WHOLE, () => ({ cachePressure: null })));
+    const whole = results.findings.whole;
+    expect([whole?.verdict, whole?.cachePressureDraws]).toEqual(["pass", null]);
+    expect(results.phases.map((phase) => phase.cachePressure)).toEqual([null, null, null]);
+    expect(terrainCheckMarkdown(results)).toContain("the cache's pins not read;");
+  });
+
   it.each([
     [{ heldCells: 48 }, "the coverage held 48 of 24576 cells as the first phase ended"],
     [{ notSurveyedSamples: 3 }, "NOT SURVEYED read in 3 of 400 samples"],
     [{ surveyEdgeSamples: 2 }, "a SURVEY EDGE named in 2 of 400 samples"],
     [{ textSamples: 0 }, "the page's text was never sampled"],
     [{ selectionBudget: 54 }, "55 patches selected at once, over the selection's budget of 54"],
-    [
-      { selectionBudget: 30 },
-      "61 patches drawn at once, over twice the selection's budget, 60, the cache's slots",
-    ],
     [{ selectionBudget: null }, "no lit pass's selection budget was read"],
   ] as const)("fail on %j", (change, reason) => {
     const results = buildTerrainCheckResults(wholeInput({ ...WHOLE, ...change }));
@@ -798,7 +845,7 @@ describe("the terrain run's summary and its files", () => {
     expect(smoke.markdown).toBe("/out/2026-10-19-effect-high-terrain-smoke.md");
     expect(JSON.parse(written.get(first.json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.terrain-results",
-      version: 4,
+      version: 5,
       overall: "pass",
       findings: { terrainFaults: { verdict: "pass", reasons: [], record: [] } },
     });

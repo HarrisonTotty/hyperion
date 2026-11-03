@@ -1416,6 +1416,19 @@ export interface TerrainCheckViewRecord {
   readonly nonFiniteTexels: number;
 }
 
+/**
+ * A phase's primary draws at which `TEST MOON`'s patch cache's pins passed its slots, or it had
+ * refused an arrival (`CachePressure.exceeded`; plan R10, R10.T16.i; research-leans-35 §2): the
+ * draw set's held coarsens pin the slots beside the selection's, and where the pins fill them,
+ * refinement stalls.
+ */
+export interface TerrainCheckCachePressure {
+  /** Those draws, among the ones `patchesDrawn` counts. */
+  readonly draws: number;
+  /** The script's time at the first, s; `null` for none, or before the stage told any. */
+  readonly firstScriptS: number | null;
+}
+
 /** What the renderer measured over one phase of the terrain run. */
 export interface TerrainCheckPhaseRecord {
   readonly name: TerrainCheckPhaseName;
@@ -1440,6 +1453,8 @@ export interface TerrainCheckPhaseRecord {
    * holds a coarsen's finer patches until its fade ends (plan R10, R10.T16.i), so it may draw more.
    */
   readonly patchesSelected: ReadonlyArray<number>;
+  /** The draws its cache's pins passed its slots at; `null` in a record written before them. */
+  readonly cachePressure: TerrainCheckCachePressure | null;
   /**
    * The terrain's triangles at those draws (plan R14, R14.T1.b; `TerrainPass.counts`): the lit
    * draws', and the shadow cascades' casters', every cascade's, at those draws that drew cascades
@@ -1723,8 +1738,8 @@ export interface TerrainWholeRecord {
   /**
    * The setting's patch cache budget, bytes (`TerrainSettings.cacheBytes`, R10.T14.b), recorded
    * beside the cache's peak; and the lit pass's selection budget, half its cache's slots
-   * (`TerrainPass.maxPatches`), as the first phase ended, which no selection may pass, nor a draw
-   * the cache's slots, or `null` with no pass then.
+   * (`TerrainPass.maxPatches`), as the first phase ended, which no selection may pass, or `null`
+   * with no pass then.
    */
   readonly cacheBytes: number;
   readonly selectionBudget: number | null;

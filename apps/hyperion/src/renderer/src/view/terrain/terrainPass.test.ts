@@ -516,6 +516,24 @@ describe("the terrain pass", () => {
     expect((await passOn("low")).pass.maxPatches).toBe(648);
   });
 
+  it("reads its cache's pins against the slots, which its drawn patches hold within them (R10.T16.i)", async () => {
+    const { pass, pool } = await passOn("low");
+    const view = northPole(1_000_000);
+    pass.frame(inputAt(view));
+    pool().bakeDemand(pass);
+    const frame = pass.frame(inputAt(view, 16));
+    const pressure = pass.cachePressure;
+    // A stand-in draws its parts as instances of one resident patch.
+    const drawn = new Set(
+      frame.drawSet.patches.slice(0, frame.drawSet.count).map((each) => each.keyString),
+    );
+    expect(drawn.size).toBeGreaterThan(0);
+    expect([pressure.exceeded, pressure.forced + pressure.drawn >= drawn.size]).toEqual([
+      false,
+      true,
+    ]);
+  });
+
   it("selects no more patches than its budget, and says the budget bound", async () => {
     // At BUDGET_VIEW the demand is baked until it empties, every frame's selection counted.
     const { maxPatches, sizes, frame } = await streamedUnderBudget();

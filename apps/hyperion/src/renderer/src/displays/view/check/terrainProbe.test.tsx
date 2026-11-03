@@ -108,11 +108,12 @@ function frame(label: string, materials: ReadonlyArray<string> = []): FrameSubmi
 
 /**
  * A session stand-in whose pass draws for the views in `handing`, `patches` patches, a drawn patch
- * in the view of each of `handing` but those in `blind`.
+ * in the view of each of `handing` but those in `blind`, its cache's pins past its slots while
+ * `patches.pressed` says.
  */
 function watchedSession(
   handing: Set<string>,
-  patches: { count: number; measured?: boolean },
+  patches: { count: number; measured?: boolean; pressed?: boolean },
   blind: ReadonlySet<string> = new Set(),
 ): WatchedSession {
   return {
@@ -131,6 +132,7 @@ function watchedSession(
         },
       },
       maxPatches: 604,
+      cachePressure: { exceeded: patches.pressed === true },
       seesPatch: (id) => handing.has(id) && !blind.has(id),
       // Its interior patches' triangles, and its casters' once it draws 15 (plan R14).
       counts: () => ({
@@ -312,6 +314,7 @@ describe("the longest time between frames through a compile (R10.T14.d)", () => 
 /** A probe over a views probe whose animation frames the test runs by hand on `page`'s clock. */
 async function probedPage(page: FakePage): Promise<{
   readonly probe: TerrainProbe;
+  readonly engine: RenderEngine;
   readonly primary: ReturnType<RenderEngine["createView"]>;
   readonly timed: ReturnType<typeof timedEngineSource>;
   readonly stop: () => void;
@@ -327,7 +330,7 @@ async function probedPage(page: FakePage): Promise<{
   views.installFrameClock(page);
   const stop = probe.start();
   const primary = engine.createView(document.createElement("canvas"), "view");
-  return { probe, primary, timed, stop };
+  return { probe, engine, primary, timed, stop };
 }
 
 describe("the terrain probe's GPU time by pass (R14's Mac measurements)", () => {
@@ -555,6 +558,7 @@ describe("the terrain probe (R10.T16.d)", () => {
     });
     expect(record.patchesDrawn).toEqual([0, 12, 12, 15, 15, 15]);
     expect(record.patchesSelected).toEqual([0, 9, 9, 12, 12, 12]);
+    expect(record.cachePressure).toEqual({ draws: 0, firstScriptS: null });
     expect([record.trianglesDrawn, record.casterTriangles, patches.measured]).toEqual([
       [0, 12, 12, 15, 15, 15].map((n) => 8_704 * n),
       [10, 10, 10],
@@ -571,6 +575,48 @@ describe("the terrain probe (R10.T16.d)", () => {
       workersLive: 0,
       sessionGpuBytes: 24_576,
     });
+    stop();
+  });
+
+  it("counts the primary's draws at which the pass's cache's pins passed its slots, with the script's time at the first (R10.T16.i)", async () => {
+    const page = new FakePage();
+    const { probe, engine, stop } = await probedPage(page);
+    const patches: { count: number; pressed?: boolean } = { count: 12 };
+    probe.watchTerrain(watchedSession(new Set(["view"]), patches));
+    const target = engine.createRenderTarget({
+      name: "view:hdr",
+      size: { widthPx: 8, heightPx: 4 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    const start = probe.mark();
+    for (const [atMs, scriptS, pressed] of [
+      [100, 41, false],
+      [116, 41.25, true],
+      [133, 41.5, true],
+      [150, 41.75, false],
+    ] as const) {
+      probe.fixture.notePlayed?.(scriptS);
+      patches.pressed = pressed;
+      page.frame(atMs, () => {
+        target.render(frame("discs"));
+      });
+    }
+    page.nowMs = 166;
+    const record = probe.phase(
+      "terrain-alone",
+      start,
+      probe.mark(),
+      [{ name: "view", style: "photorealistic" }],
+      null,
+      false,
+    );
+    expect([record.patchesDrawn, record.cachePressure]).toEqual([
+      [12, 12, 12, 12],
+      { draws: 2, firstScriptS: 41.25 },
+    ]);
     stop();
   });
 

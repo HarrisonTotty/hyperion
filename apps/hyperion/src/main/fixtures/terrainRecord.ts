@@ -89,6 +89,7 @@ function phase(
     frameGpuMs: [2.5, 2.6],
     patchesDrawn: [40, 52, 61],
     patchesSelected: [40, 50, 55],
+    cachePressure: { draws: 0, firstScriptS: null },
     trianglesDrawn: [348_160, 452_608, 530_944],
     casterTriangles: [903_168, 1_032_192],
     bakes: { posted: 300, baked: 296, refused: 1 },

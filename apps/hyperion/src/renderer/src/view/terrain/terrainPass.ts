@@ -143,7 +143,13 @@ import {
   type TerrainFault,
 } from "./annunciation";
 import { distanceToBoxM, relativeBounds } from "./bounds";
-import { type CacheInsert, type DrawSet, DrawSetResolver, PatchCache } from "./cache";
+import {
+  type CacheInsert,
+  type CachePressure,
+  type DrawSet,
+  DrawSetResolver,
+  PatchCache,
+} from "./cache";
 import { CoarseFineHolds, TransitionFades } from "./coarseFineHolds";
 import { frustumOf, horizonCone, inFrustum } from "./cull";
 import { vertexSpacing } from "./cube";
@@ -1988,6 +1994,15 @@ export class TerrainPass {
   /** The selection budget: half the cache's slots (decision-r05-patch-demand.md, 4b). */
   get maxPatches(): number {
     return Math.floor(this.layout.slots.slotCount / 2);
+  }
+
+  /**
+   * The current device's patch cache's pins against its slots ({@link PatchCache.pressure}): where
+   * the selection, its ancestors and the draw set's held coarsens pin every slot, an arrival is
+   * refused and refinement stalls (plan R10, R10.T16.i; the views check judges the whole body by it).
+   */
+  get cachePressure(): CachePressure {
+    return this.#device.cache.pressure();
   }
 
   /** How the pass shades its patches ({@link terrainShadingOf}). */

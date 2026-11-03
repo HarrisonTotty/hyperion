@@ -53,6 +53,7 @@ import type {
   InspectionTimingPass,
   SpikePassTimer,
   TerrainCheckBytes,
+  TerrainCheckCachePressure,
   TerrainCheckFault,
   TerrainCheckMemory,
   TerrainCheckPhaseName,
@@ -91,9 +92,11 @@ export const TERRAIN_CHECK_SCHEMA = "hyperion.views-check.terrain-results";
  * The schema's version; bumped with any change to the file's shape (2: R10.T16.e's
  * `terrainFaults`; 3: R10.T14.d's `noStall`, each view's `longestGapEndScriptS`, the `sessions`,
  * the `opening`, the `span` and the `phaseWindows`; 4: each phase's `gpuPasses`, R14's Mac
- * measurements, which a file of an earlier version lacks and reads as `null`).
+ * measurements; 5: each phase's `cachePressure` and the whole finding's `cachePressureDraws` and
+ * `drawnOverBudgetShare`, R10.T16.i's pins. A file of an earlier version lacks each and reads it as
+ * `null`).
  */
-export const TERRAIN_CHECK_VERSION = 4;
+export const TERRAIN_CHECK_VERSION = 5;
 
 /**
  * The longest from a view's hand-over to its first terrain draw, ms: the lit material compiles and
@@ -305,6 +308,11 @@ export interface TerrainPhaseFigures {
     readonly max: number;
     readonly last: number;
   } | null;
+  /**
+   * Those draws at which the patch cache's pins passed its slots or it had refused an arrival
+   * (plan R10, R10.T16.i); `null` from a record written before them.
+   */
+  readonly cachePressure: TerrainCheckCachePressure | null;
   /**
    * The terrain's triangles a primary draw (plan R14, R14.T1.b): its lit draws', and its shadow
    * cascades' casters', each over the draws that counted them; `null` where none did.
@@ -528,6 +536,7 @@ function phaseFigures(record: TerrainCheckPhaseRecord, setting: SpikeSetting): T
             max: patches.reduce((most, count) => Math.max(most, count), 0),
             last,
           },
+    cachePressure: record.cachePressure,
     triangles: countStats(record.trianglesDrawn),
     casterTriangles: countStats(record.casterTriangles),
     bakes: record.bakes,
@@ -833,6 +842,17 @@ export interface TerrainWholeFinding extends TerrainFinding {
   readonly peakCacheBytes: number;
   readonly mostPatchesSelected: number;
   readonly mostPatchesDrawn: number;
+  /**
+   * The share of the primary's draws over the phases that drew more patches than the selection's
+   * budget, its held coarsens' (R10.T16.i; recorded, not judged); `null` with no budget or no draw.
+   */
+  readonly drawnOverBudgetShare: number | null;
+  /**
+   * The primary's draws over the phases at which the patch cache's pins passed its slots or it had
+   * refused an arrival (R10.T16.i), which fail the finding; `null` where no phase's record held
+   * them (one written before them).
+   */
+  readonly cachePressureDraws: number | null;
   /** The most the height workers held of the field as a phase ended, bytes (recorded). */
   readonly workerFieldBytes: number;
 }
@@ -842,10 +862,14 @@ export interface TerrainWholeFinding extends TerrainFinding {
  * field held as the first phase ended and in the coverage mask at the loss phase's end, so that no
  * reference sphere draws past the terrain; no off-survey state read and no survey edge named;
  * every look read, settled, its disc drawn with no pixel of the sky's and nothing lit beyond its
- * limb, every texel finite; and no selection of more patches than the lit pass's selection budget,
- * half its cache's slots (R10.T14's sizes), nor a draw of more than the slots: the time morph holds
- * a coarsen's finer patches until its fade ends (R10.T16.i), and its draw passes the selection's. The cache's GPU bytes are recorded beside its nominal
- * budget, not judged: the setting fixes its allocation, the patch's and the whole body's alike.
+ * limb, every texel finite; no selection of more patches than the lit pass's selection budget,
+ * half its cache's slots (R10.T14's sizes); and no primary draw at which the cache's pins passed its
+ * slots or it had refused an arrival (R10.T16.i; research-leans-35 §2). The time morph holds a
+ * coarsen's finer patches until its fade ends, so a draw may pass the selection's budget, but every
+ * drawn patch is resident, so none can pass the slots: those held coarsens spend the cache's other
+ * half, and are judged by its pins. How far the draws pass the budget, and how often, is recorded
+ * beside them, not judged. The cache's GPU bytes are recorded beside its nominal budget, not
+ * judged: the setting fixes its allocation, the patch's and the whole body's alike.
  */
 function wholeFinding(whole: TerrainWholeRecord, record: TerrainCheckRecord): TerrainWholeFinding {
   const reasons: string[] = [];
@@ -914,20 +938,26 @@ function wholeFinding(whole: TerrainWholeRecord, record: TerrainCheckRecord): Te
     0,
     ...record.phases.flatMap((phase) => phase.patchesSelected),
   );
-  const mostPatchesDrawn = Math.max(0, ...record.phases.flatMap((phase) => phase.patchesDrawn));
-  if (whole.selectionBudget === null) {
+  const patchesDrawn = record.phases.flatMap((phase) => phase.patchesDrawn);
+  const mostPatchesDrawn = Math.max(0, ...patchesDrawn);
+  const budget = whole.selectionBudget;
+  if (budget === null) {
     reasons.push("no lit pass's selection budget was read");
-  } else {
-    if (mostPatchesSelected > whole.selectionBudget) {
-      reasons.push(
-        `${String(mostPatchesSelected)} patches selected at once, over the selection's budget of ${String(whole.selectionBudget)}`,
-      );
+  } else if (mostPatchesSelected > budget) {
+    reasons.push(
+      `${String(mostPatchesSelected)} patches selected at once, over the selection's budget of ${String(budget)}`,
+    );
+  }
+  let cachePressureDraws: number | null = null;
+  for (const phase of record.phases) {
+    const pressure = phase.cachePressure;
+    if (pressure === null) {
+      continue;
     }
-    // The time morph holds a coarsen's finer patches until its fade ends (R10.T16.i): a draw may
-    // pass the selection's budget, but not the cache's slots, twice it.
-    if (mostPatchesDrawn > 2 * whole.selectionBudget) {
+    cachePressureDraws = (cachePressureDraws ?? 0) + pressure.draws;
+    if (pressure.draws > 0) {
       reasons.push(
-        `${String(mostPatchesDrawn)} patches drawn at once, over twice the selection's budget, ${String(2 * whole.selectionBudget)}, the cache's slots`,
+        `${phase.name}: the patch cache's pins passed its slots or it refused an arrival at ${String(pressure.draws)} of ${String(phase.patchesDrawn.length)} draws, the first at ${pressure.firstScriptS?.toFixed(2) ?? "—"} s of the script`,
       );
     }
   }
@@ -941,6 +971,11 @@ function wholeFinding(whole: TerrainWholeRecord, record: TerrainCheckRecord): Te
     peakCacheBytes,
     mostPatchesSelected,
     mostPatchesDrawn,
+    drawnOverBudgetShare:
+      budget === null || patchesDrawn.length === 0
+        ? null
+        : patchesDrawn.filter((count) => count > budget).length / patchesDrawn.length,
+    cachePressureDraws,
     workerFieldBytes,
   };
 }
@@ -1112,7 +1147,16 @@ function wholeRow(whole: TerrainWholeFinding): string {
     record.decodeMs === null
       ? "never held whole"
       : `held whole ${record.decodeMs.toFixed(0)} ms after its first ask, the longest time between animation frames meanwhile ${record.decodeLongestFrameGapMs?.toFixed(0) ?? "—"} ms`;
-  return `| The whole body held and drawn (every cell held, no off-survey state, no sky in its disc, the selection within its budget) | ${whole.verdict} | ${String(record.heldCells)} of ${String(record.cells)} cells held; ${String(record.notSurveyedSamples)} NOT SURVEYED and ${String(record.surveyEdgeSamples)} SURVEY EDGE of ${String(record.textSamples)} samples; the field ${decode}; looks: ${looks}; the patch cache's peak ${String(whole.peakCacheBytes)} B (its budget ${String(record.cacheBytes)} B), at most ${String(whole.mostPatchesSelected)} patches selected of the selection's ${String(record.selectionBudget ?? "—")} and ${String(whole.mostPatchesDrawn)} drawn; the height workers' field ${String(whole.workerFieldBytes)} B${reasonsText(whole)} |`;
+  const budget = record.selectionBudget;
+  const overBudget =
+    budget === null
+      ? ""
+      : ` (${String(Math.max(0, whole.mostPatchesDrawn - budget))} over the budget, in ${shareText(whole.drawnOverBudgetShare)} of draws)`;
+  const pins =
+    whole.cachePressureDraws === null
+      ? "not read"
+      : `past its slots at ${String(whole.cachePressureDraws)} draws`;
+  return `| The whole body held and drawn (every cell held, no off-survey state, no sky in its disc, the selection within its budget, the cache's pins within its slots) | ${whole.verdict} | ${String(record.heldCells)} of ${String(record.cells)} cells held; ${String(record.notSurveyedSamples)} NOT SURVEYED and ${String(record.surveyEdgeSamples)} SURVEY EDGE of ${String(record.textSamples)} samples; the field ${decode}; looks: ${looks}; the patch cache's peak ${String(whole.peakCacheBytes)} B (its budget ${String(record.cacheBytes)} B), at most ${String(whole.mostPatchesSelected)} patches selected of the selection's ${String(budget ?? "—")} and ${String(whole.mostPatchesDrawn)} drawn${overBudget}; the cache's pins ${pins}; the height workers' field ${String(whole.workerFieldBytes)} B${reasonsText(whole)} |`;
 }
 
 /** A figure's text, or its reason in brackets. */
@@ -1196,11 +1240,11 @@ function phaseLines(phases: ReadonlyArray<TerrainPhaseFigures>): ReadonlyArray<s
     "",
     "Durations as p50 / p95 / max ms.",
     "",
-    "| Phase | Held | Window (s) | Script (s) | Animation frames | Main thread | GPU frame | Patches drawn (mean, max) | Bakes (a second) | Field posts (init, chunk) | Asks, blocks |",
+    "| Phase | Held | Window (s) | Script (s) | Animation frames | Main thread | GPU frame | Patches drawn (mean, max; at the cache's pins past its slots) | Bakes (a second) | Field posts (init, chunk) | Asks, blocks |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...phases.map(
       (phase) =>
-        `| ${phase.name} | ${phase.held ? "yes" : "NO"} | ${phase.windowS.toFixed(1)} | ${phase.script.startS.toFixed(1)} → ${phase.script.endS.toFixed(1)} | ${durations(phase.animationFrames)} | ${durations(phase.mainThreadMs)} | ${durations(phase.frameGpuMs)} | ${phase.patchesDrawn === null ? "—" : `${phase.patchesDrawn.mean.toFixed(1)}, ${String(phase.patchesDrawn.max)}`} | ${String(phase.bakes.baked)} (${phase.bakedPerS.toFixed(1)}) | ${String(phase.fieldPosts.inits)}, ${String(phase.fieldPosts.chunks)} | ${String(phase.fieldAsks)}, ${String(phase.blocksSent)} |`,
+        `| ${phase.name} | ${phase.held ? "yes" : "NO"} | ${phase.windowS.toFixed(1)} | ${phase.script.startS.toFixed(1)} → ${phase.script.endS.toFixed(1)} | ${durations(phase.animationFrames)} | ${durations(phase.mainThreadMs)} | ${durations(phase.frameGpuMs)} | ${phase.patchesDrawn === null ? "—" : `${phase.patchesDrawn.mean.toFixed(1)}, ${String(phase.patchesDrawn.max)}; ${String(phase.cachePressure?.draws ?? "—")}`} | ${String(phase.bakes.baked)} (${phase.bakedPerS.toFixed(1)}) | ${String(phase.fieldPosts.inits)}, ${String(phase.fieldPosts.chunks)} | ${String(phase.fieldAsks)}, ${String(phase.blocksSent)} |`,
     ),
     "",
     "## Triangles a frame (plan R14)",

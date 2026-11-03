@@ -200,6 +200,27 @@ describe("the terrain run's record (R10.T16.d)", () => {
     expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
   });
 
+  it("is read back with each phase's draws at which the cache's pins passed its slots (R10.T16.i)", () => {
+    const record = {
+      ...TERRAIN_RECORD,
+      phases: TERRAIN_RECORD.phases.map((phase) => ({
+        ...phase,
+        cachePressure: { draws: 2, firstScriptS: 41.25 },
+      })),
+    };
+    expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
+  it("reads null for the cache's pins of a record written before them (R10.T16.i)", () => {
+    const older = {
+      ...TERRAIN_RECORD,
+      phases: TERRAIN_RECORD.phases.map(({ cachePressure: _pressure, ...phase }) => phase),
+    };
+    expect(
+      readTerrainCheckRecord(structuredClone(older))?.phases.map((phase) => phase.cachePressure),
+    ).toEqual([null, null, null]);
+  });
+
   it("is read back with no hand-over range and an undestroyed device", () => {
     const record = {
       ...TERRAIN_RECORD,
@@ -217,6 +238,11 @@ describe("the terrain run's record (R10.T16.d)", () => {
     [["phases", 0, "views", 0, "firstTerrainMs"], "soon"],
     [["phases", 0, "patchesDrawn"], [1.5]],
     [["phases", 0, "patchesSelected"], [-1]],
+    [["phases", 0, "cachePressure"], 2],
+    [["phases", 0, "cachePressure", "draws"], -1],
+    [["phases", 0, "cachePressure"], { draws: 4, firstScriptS: 41.25 }],
+    [["phases", 0, "cachePressure", "firstScriptS"], 3],
+    [["phases", 0, "cachePressure", "firstScriptS"], "late"],
     [["phases", 0, "trianglesDrawn"], [-1]],
     [["phases", 0, "casterTriangles"], null],
     [["phases", 0, "bakes", "baked"], null],
