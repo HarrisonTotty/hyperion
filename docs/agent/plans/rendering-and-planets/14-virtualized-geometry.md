@@ -2371,6 +2371,15 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   inside it. `--compile-budget <n|unlimited>` on a spike or a check sets it, `unlimited` as before
   (`preload/compileBudgetLaunch.ts`, `HyperionApi.compileBudget`, `LoadEngineOptions.compileBudget`,
   `CreateWebGpuEngine`'s fourth argument). Pending: the owner's Mac re-run.
+- **R14, the frame's WebGPU calls** (`perf-frame-encoding`, the owner's Mac):
+  - `--count-gpu-calls`, an option of `views-check --inspection --timing`, gives each window's
+    `gpuCalls` (by pass label and `<object>.<method>`, with the writes' bytes) in the timing JSON,
+    and a "WebGPU calls (counted)" section a draw of the primary in its summary; `null` without it.
+  - Exact cuts, no switch: a pass sets its pipeline, `@group(2)` and vertex and index buffers only
+    where a draw changes them (`drawing.ts`' `BoundState`); a dispatch keeps its layouts, views and
+    bind groups (`compute.ts`' `DispatchObjects`, over the draw path's `BindGroupCache`); a
+    submission's pass-time resolve ends its own command buffer, with no `pass times` encoder.
+  - Pending: the owner's Mac re-profile, `views-check --inspection --timing --hidden` (gate.txt).
 - **R14, the WGSL digest pins** (`tool-pin-digests`, 2026-11-03): `just pin-digests` rewrites the
   `<NAME>_DIGESTS` tables' hex strings in `discReflectance.test.ts` and `thickKernels.test.ts` from
   the kernels' sources, and `--check` only compares. Run it after moving a kernel, or after resolving

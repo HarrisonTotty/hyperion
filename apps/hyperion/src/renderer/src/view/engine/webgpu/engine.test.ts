@@ -405,6 +405,21 @@ describe("the engine's pass times", () => {
     ]).toEqual([0, 1, 2, [1, 2]]);
   });
 
+  it("resolve a frame's times at its own command buffer's end, one submission a frame (plan R14)", async () => {
+    const { engine, gpu } = await engineOn(["timestamp-query"]);
+    const submitted = vi.spyOn(gpu.queue, "submit");
+    renderEmptyFrame(engine, "frame");
+    const buffers = submitted.mock.calls.flatMap(([each]) => Array.from(each));
+    const [only] = buffers;
+    const ops = only instanceof FakeCommandBuffer ? only.commands.map(({ op }) => op) : [];
+    expect([buffers.length, only?.label, ops.slice(-2)]).toEqual([
+      1,
+      "frame",
+      ["resolveQuerySet", "copyBufferToBuffer"],
+    ]);
+    expect(gpu.encoders.map(({ label }) => label)).not.toContain("pass times");
+  });
+
   it("stay at frame 0 without timestamp-query (R07.T19)", async () => {
     const { engine } = await engineOn();
     renderEmptyFrame(engine, "frame");

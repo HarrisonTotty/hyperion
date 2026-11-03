@@ -129,6 +129,12 @@ export function samplerKey(spec: Pick<SamplerSpec, "filter" | "address" | "compa
   return `${spec.filter}:${spec.address}:${spec.compare ?? "none"}`;
 }
 
+/** A submission that resolves the passes timed so far: a frame's, a splat's, a mip chain's. */
+const ALWAYS = (): boolean => true;
+
+/** A submission that resolves nothing: a readback's, a copy's, the rounding probe's. */
+const NEVER = (): boolean => false;
+
 /** A caught value as an `Error`, keeping it as the cause when it is not one. */
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error), { cause: error });
@@ -295,19 +301,25 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
 
   generateMips(texture: TextureHandle): void {
     const { texture: gpuTexture, spec } = this.#resources.textureOf(texture);
-    this.#submit(`${spec.name} mips`, (encoder) => {
-      const writes = this.#timer.writesFor(`${spec.name} mips`);
-      this.#mips.encode(encoder, gpuTexture, spec.mips, writes);
-    });
-    this.#resolveTimes();
+    this.#submit(
+      `${spec.name} mips`,
+      (encoder) => {
+        const writes = this.#timer.writesFor(`${spec.name} mips`);
+        this.#mips.encode(encoder, gpuTexture, spec.mips, writes);
+      },
+      ALWAYS,
+    );
   }
 
   /** Draws `frame` into `output` in the adapter's own passes, timed, and submits them. */
   renderFrame(frame: FrameSubmission, output: FrameOutput): void {
-    this.#submit(frame.label, (encoder) => {
-      this.#drawing.encodeFrame(encoder, frame, output, (label) => this.#timer.writesFor(label));
-    });
-    this.#resolveTimes();
+    this.#submit(
+      frame.label,
+      (encoder) => {
+        this.#drawing.encodeFrame(encoder, frame, output, (label) => this.#timer.writesFor(label));
+      },
+      ALWAYS,
+    );
   }
 
   /**
@@ -321,14 +333,15 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
    * half filled the query set resolves at once, as a bake's dispatches do.
    */
   renderDepthLayer(label: string, pass: DepthLayerPass, output: DepthLayerOutput): void {
-    this.#submit(label, (encoder) => {
-      this.#drawing.encodeDepthLayer(encoder, pass, output, (timed) =>
-        this.#timer.writesFor(timed),
-      );
-    });
-    if (this.#timer.mark() >= PASSES_PER_FRAME / 2) {
-      this.#resolveTimes();
-    }
+    this.#submit(
+      label,
+      (encoder) => {
+        this.#drawing.encodeDepthLayer(encoder, pass, output, (timed) =>
+          this.#timer.writesFor(timed),
+        );
+      },
+      () => this.#timer.mark() >= PASSES_PER_FRAME / 2,
+    );
   }
 
   forgetDepthLayers(target: DepthLayerTarget): void {
@@ -789,13 +802,16 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         const { texture, spec: targetSpec } = this.#resources.textureOf(target);
         const { buffer, spec: pointsSpec } = this.#resources.bufferOf(points);
         assertSplatInputs(spec, targetSpec, pointsSpec);
-        this.#submit(spec.name, (encoder) => {
-          const writes = this.#timer.writesFor(spec.name);
-          encodeSplat(this.device, encoder, pipeline, texture, buffer, count, spec.name, writes);
-        });
+        this.#submit(
+          spec.name,
+          (encoder) => {
+            const writes = this.#timer.writesFor(spec.name);
+            encodeSplat(this.device, encoder, pipeline, texture, buffer, count, spec.name, writes);
+          },
+          ALWAYS,
+        );
         // A splat adds to what the target holds, so it keeps the target's writer.
         this.#writers.wrotePart(target, null);
-        this.#resolveTimes();
       },
       dispose: (): void => {
         disposed = true;
@@ -829,19 +845,20 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
             offsetBytes: workgroups.offsetBytes,
           }
         : { kind: "direct", counts: workgroups };
-    this.#submit(pass, (encoder) => {
-      const timestampWrites = this.#timer.writesFor(pass);
-      encodeDispatch(this.#dispatchObjects, encoder, record, resources, counts, {
-        label: pass,
-        ...(timestampWrites === undefined ? {} : { timestampWrites }),
-      });
-    });
     // Dispatch times wait for the next frame's resolve, unless a bake of many dispatches between
     // frames has half filled the query set: then they resolve now, so that the frame's own passes
     // still find room.
-    if (this.#timer.mark() >= PASSES_PER_FRAME / 2) {
-      this.#resolveTimes();
-    }
+    this.#submit(
+      pass,
+      (encoder) => {
+        const timestampWrites = this.#timer.writesFor(pass);
+        encodeDispatch(this.#dispatchObjects, encoder, record, resources, counts, {
+          label: pass,
+          ...(timestampWrites === undefined ? {} : { timestampWrites }),
+        });
+      },
+      () => this.#timer.mark() >= PASSES_PER_FRAME / 2,
+    );
     // Only what the kernel may write is recorded: a binding declared `read` (a `read` storage
     // texture, a `read` storage buffer) keeps the writer it had (Design note 16).
     for (const [name, handle] of Object.entries(bindings.buffers)) {
@@ -1044,13 +1061,22 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   }
 
   /**
-   * Encodes and submits one command buffer.
+   * Encodes and submits one command buffer, ending it with the resolve of the passes timed so far
+   * where `resolves` says so once it is encoded, and reads their times once it is submitted.
    *
    * @remarks
    * When the encoding throws, nothing is submitted, so the passes it timed are forgotten: their
-   * timestamps would otherwise be resolved and reported unwritten.
+   * timestamps would otherwise be resolved and reported unwritten. The resolve is the command
+   * buffer's last commands, after every pass it times, rather than a command buffer and a
+   * submission of its own after it (plan R14, the owner's Mac): the queue runs them in the same
+   * order, and the times are the same; the resolve takes the same number, and is read at the same
+   * point, as before.
    */
-  #submit(label: string, encode: (encoder: GPUCommandEncoder) => void): void {
+  #submit(
+    label: string,
+    encode: (encoder: GPUCommandEncoder) => void,
+    resolves: () => boolean = NEVER,
+  ): void {
     const mark = this.#timer.mark();
     const encoder = this.device.createCommandEncoder({ label });
     let encoded = false;
@@ -1062,17 +1088,9 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         this.#timer.rollBack(mark);
       }
     }
+    const read = resolves() ? this.#timer.resolve(encoder) : null;
     this.device.queue.submit([encoder.finish()]);
-  }
-
-  /** Resolves the frame's timestamps, when any pass was timed, in a submission of their own. */
-  #resolveTimes(): void {
-    const encoder = this.device.createCommandEncoder({ label: "pass times" });
-    const read = this.#timer.resolve(encoder);
-    if (read !== null) {
-      this.device.queue.submit([encoder.finish()]);
-      read();
-    }
+    read?.();
   }
 
   #assertLive(): void {
