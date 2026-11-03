@@ -70,6 +70,7 @@ import { linearColour, type SurveyedDatumFrame, type WireframeTerrain } from "..
 import type { TerrainAnnunciation } from "./annunciation";
 import { datumGroundUnder } from "./grounded";
 import type { BodyFigure } from "./planet";
+import type { DrawnGroundView } from "./drawnGround";
 import type { ResidentHeightsView } from "./residentHeights";
 import type { TerrainSurvey } from "./session";
 import type { SurveyEdgeView } from "./surveyEdge";
@@ -241,6 +242,11 @@ export interface FrameTerrainPass {
   readonly geometry: Pick<GeometrySettings, "overlayDepth">;
   /** The resident bakes' heights (`TerrainPass.heights`). */
   readonly heights: ResidentHeightsView;
+  /**
+   * The ground view `view` drew at its last frame (`TerrainPass.drawnGround`; R10.T16.c after
+   * R10.T16.i), its heights as the shader mixed them; absent on a fake that draws none.
+   */
+  drawnGround?(view: string): DrawnGroundView | null;
   /** The views its last step took (`TerrainPass.viewIds`). */
   readonly viewIds: ReadonlySet<string>;
   /**
@@ -571,6 +577,8 @@ export function surveyEdgeViewsOf(
     const heights = pass?.heights ?? null;
     // A faulted pass keeps its last step's views but draws nothing: the view draws the figure.
     const drawsGround = pass !== null && !pass.faulted && pass.viewIds.has(view);
+    // The ground as the view drew it, where its pass gives it; the resident bakes' own elsewhere.
+    const drawn = drawsGround ? (pass.drawnGround?.(view) ?? null) : null;
     views.push({
       body: body.id,
       coverage,
@@ -582,14 +590,18 @@ export function surveyEdgeViewsOf(
       centreM,
       heightAtM:
         drawsGround && heights !== null
-          ? (direction) => heights.rimHeightAtM(direction)
+          ? (direction) => drawn?.rimHeightAtM(direction) ?? heights.rimHeightAtM(direction)
           : NO_HEIGHT,
       ...(drawsGround && heights !== null
         ? {
             ground: {
-              heightAtM: (direction: Vec3) => heights.groundHeightAtM(direction),
+              heightAtM: (direction: Vec3) =>
+                drawn?.groundHeightAtM(direction) ?? heights.groundHeightAtM(direction),
               ceilingM: heights.ceilingM,
-              rimSource: { key: heights, revision: heights.rimRevision },
+              rimSource:
+                drawn === null
+                  ? { key: heights, revision: heights.rimRevision }
+                  : { key: drawn, revision: drawn.revision },
             },
           }
         : {}),

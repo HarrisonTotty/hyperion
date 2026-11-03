@@ -195,8 +195,11 @@ describe("what the resident heights keep (R10.T16.c)", () => {
     heights.take(bakeOf(KEY, () => 1, WEST_HALF));
     heights.take(bakeOf({ ...KEY, i: 11 }, () => 1, EVERY));
     heights.take(bakeOf({ ...KEY, i: 12 }, () => 1, NONE));
-    // 65 × 65 f32 and the 4,228 B packed mask; 17 × 17 f32; nothing.
-    expect([heights.bytes, heights.edgeBakes]).toEqual([65 * 65 * 4 + 4_228 + 17 * 17 * 4, 1]);
+    // Own and morph 65 × 65 f32 and the 4,228 B packed mask; own and morph 17 × 17 f32; nothing.
+    expect([heights.bytes, heights.edgeBakes]).toEqual([
+      2 * 65 * 65 * 4 + 4_228 + 2 * 17 * 17 * 4,
+      1,
+    ]);
   });
 
   describe("three bakes held, at 250 m, 900 m and 5,000 m, the last surveying nothing", () => {

@@ -208,6 +208,7 @@ import { joinDemand } from "./priority";
 import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionTolerance";
 import { PATCH_VERTICES_PER_SIDE, TERRAIN_SHADING_TRAITS, type TerrainShading } from "./slotLayout";
 import { ResidentHeights, type ResidentHeightsView } from "./residentHeights";
+import { DrawnGround, type DrawnGroundView } from "./drawnGround";
 import { type TerrainMaterialSource, terrainMaterialOf } from "./materialSet";
 import {
   type CascadeIndex,
@@ -1153,6 +1154,11 @@ interface ViewState {
    * its slot's cluster records do not bound, so that the cull keeps it whole (`CULL_INPUT_WHOLE`).
    */
   readonly interiorFading: boolean[];
+  /**
+   * The ground it drew at its last frame (plan R10, R10.T16.c after R10.T16.i), its instances as
+   * the shader mixes their heights, which the survey edge's rim and ticks read.
+   */
+  readonly drawnGround: DrawnGround;
   /** The interior patches' draw, and the view's draw it was made beside; `null` before. */
   interiorDraw: DrawItem | null;
   interiorBeside: DrawItem | null;
@@ -2060,6 +2066,14 @@ export class TerrainPass {
    */
   get heights(): ResidentHeightsView {
     return this.#heights;
+  }
+
+  /**
+   * The ground view `id` drew at its last frame (plan R10, R10.T16.c after R10.T16.i), its heights
+   * as the shader mixed them, or `null` before its first.
+   */
+  drawnGround(id: TerrainViewId): DrawnGroundView | null {
+    return this.#views.get(id)?.drawnGround ?? null;
   }
 
   /**
@@ -3442,6 +3456,7 @@ export class TerrainPass {
       interiorDrawn: [],
       interiorFins: [],
       interiorFading: [],
+      drawnGround: new DrawnGround(this.#heights, this.#planet.figure),
       interiorDraw: null,
       interiorBeside: null,
       casters: null,
@@ -4080,6 +4095,8 @@ export class TerrainPass {
     state.interiorFins.length = 0;
     state.interiorFading.length = 0;
     let finCount = 0;
+    const drawnGround = state.drawnGround;
+    drawnGround.begin();
     if (drawSet !== undefined) {
       // `patches` holds exactly the `count` drawn patches (`DrawSetResolver`), and `holds` their
       // morph holds in the same order (`#select`).
@@ -4099,6 +4116,19 @@ export class TerrainPass {
         const interiorBake = resident?.interior === true;
         const inner = split && !drawn.standIn && (interiorBake || (fins && resident !== undefined));
         const heights = device.morph.heightWords[n] ?? 0;
+        const parentSlot = this.#parentSlotOf(device, patch.key);
+        const fadesWord = fadeWordOf(fades.own[n] ?? 0, heights);
+        drawnGround.push({
+          key: patch.key,
+          area: within ?? patch.key,
+          morphStartM: morph[2 * level] ?? 0,
+          morphEndM: morph[2 * level + 1] ?? 0,
+          hasParent: parentSlot !== NO_PARENT_SLOT,
+          holds: holds[n] ?? 0,
+          edgeFades: fades.edges[n] ?? 0,
+          cornerFades: fades.corners[n] ?? 0,
+          fades: fadesWord,
+        });
         if (inner) {
           state.interiorFins.push(!interiorBake);
           state.interiorFading.push(((heights >>> 8) & MIX_STEPS) !== 0);
@@ -4111,13 +4141,13 @@ export class TerrainPass {
           r2.x * o.x + r2.y * o.y + r2.z * o.z - cameraM.z,
           morph[2 * level] ?? 0,
           morph[2 * level + 1] ?? 0,
-          this.#parentSlotOf(device, patch.key),
+          parentSlot,
           parentQuadrant(patch.key),
           holds[n] ?? 0,
           within === null ? 0 : subPatchOf(patch.key, within),
           fades.edges[n] ?? 0,
           fades.corners[n] ?? 0,
-          fadeWordOf(fades.own[n] ?? 0, heights),
+          fadesWord,
         );
         (inner ? state.interiorDrawn : drawnIndices).push(n);
         const phasesOf = inner ? interiorPhases : phases;
@@ -4126,6 +4156,7 @@ export class TerrainPass {
         }
       }
     }
+    drawnGround.end(cameraM, input.view.rotation.rows);
     const records = state.contacts;
     records.clear();
     const patchM = finestPatchSizeM(this.#planet);

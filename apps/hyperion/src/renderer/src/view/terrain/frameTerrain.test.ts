@@ -72,6 +72,7 @@ import {
 } from "./frameTerrain";
 import { handoverTauPx, limbDistanceM, pixelAngleRad } from "./handover";
 import type { PatchKey } from "./patchKey";
+import type { DrawnGroundView } from "./drawnGround";
 import { ResidentHeights } from "./residentHeights";
 import { surveyEdgeMark } from "./surveyEdge";
 import {
@@ -1097,6 +1098,44 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
       "photorealistic",
     );
     expect(edge?.ground?.rimSource).toEqual({ key: heights, revision: heights.rimRevision });
+  });
+
+  /** A view's drawn ground standing at 700 m wherever it is read, at revision 3. */
+  const DRAWN: DrawnGroundView = {
+    rimHeightAtM: () => 700,
+    groundHeightAtM: () => 700,
+    revision: 3,
+  };
+
+  /** `litAt500`'s source, its lit pass giving {@link DRAWN} as the ground `VIEW` drew. */
+  function drawnAt700(): ViewTerrainSource {
+    const source = litAt500();
+    return {
+      ...source,
+      pass: (body) => {
+        const pass = source.pass(body);
+        return pass === null
+          ? null
+          : { ...pass, drawnGround: (view) => (view === VIEW ? DRAWN : null) };
+      },
+    };
+  }
+
+  it("stands the rim on the ground the view drew where its pass gives it, not on its bakes' own (R10.T16.i)", () => {
+    const { onA } = rimHeights("photorealistic", VIEW, drawnAt700());
+    expect(allNear(onA, 700)).toBe(true);
+  });
+
+  it("keeps the rim the view draws by its drawn ground's revision where its pass gives one", () => {
+    const [edge] = surveyEdgeViewsOf(
+      drawnAt700(),
+      VIEW,
+      SCENE,
+      DRAW_CAMERA,
+      VIEWPORT,
+      "photorealistic",
+    );
+    expect(edge?.ground?.rimSource).toEqual({ key: DRAWN, revision: 3 });
   });
 
   it("hides points behind the drawn ground in a wireframe view only where its wireframe pass takes it", () => {

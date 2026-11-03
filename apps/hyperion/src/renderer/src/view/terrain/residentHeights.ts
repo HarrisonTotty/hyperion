@@ -21,14 +21,16 @@
  *   over the direction, the drawn ground: on its surveyed ground its own-level height, on its
  *   unsurveyed ground the datum, which the reference surface draws there (Design note 12). An edge
  *   bake reads its whole heights and its mask (`surveyedAt`, the discard's twin); a bake wholly
- *   surveyed a 17 × 17 grid of every fourth vertex's height (1,156 B), so that the copy of a
- *   cache's few hundred to thousand resident patches stays near a megabyte rather than the cache's
- *   heights again (7 to 22 MB a pass); a bake surveying nothing holds nothing, its ground the
- *   datum. A ridge narrower than four quads of a wholly surveyed patch is so missed: its patches
- *   are drawn where a quad is about a pixel (Design note 7), so a point it hides by a few pixels
- *   may count as seen.
- * - The morph to the parent's heights is not followed: the rim and the ground are each bake's own
- *   level's, off the drawn ground by at most its selection error, under τ pixels.
+ *   surveyed a 17 × 17 grid of every fourth vertex's height (1,156 B) and as many of its morph
+ *   targets, so that the copy of a cache's few hundred to thousand resident patches stays near two
+ *   megabytes rather than the cache's heights again (7 to 22 MB a pass); a bake surveying nothing
+ *   holds nothing, its ground the datum. A ridge narrower than four quads of a wholly surveyed
+ *   patch is so missed: its patches are drawn where a quad is about a pixel (Design note 7), so a
+ *   point it hides by a few pixels may count as seen.
+ * - The morph to the parent's heights is not followed here: the rim and the ground are each
+ *   bake's own level's, off the drawn ground by at most its selection error, under τ pixels, once
+ *   its transitions settle. Each bake keeps its morph targets on the same grid, which the view's
+ *   drawn ground (`drawnGround.ts`) reads as it follows the shader's mix while they run.
  * - Only a body's bakes are kept (their `layers`); R05's test planet keeps none.
  */
 
@@ -69,7 +71,23 @@ const FACE_EDGE_FRACTION = 1e-12;
 const SURVEYED = 255;
 
 /** How a bake's survey mask stands: every vertex surveyed, none, or both kinds (the edge). */
-type SurveyStanding = "surveyed" | "bare" | "edge";
+export type SurveyStanding = "surveyed" | "bare" | "edge";
+
+/**
+ * A resident bake's heights as the drawn ground's twin reads them (plan R10, R10.T16.c after
+ * R10.T16.i; `drawnGround.ts`), at (x, y) in quads of its patch: an edge bake's at every vertex, a
+ * surveyed one's on its coarse grid, a bare one's the datum's.
+ */
+export interface ResidentBake {
+  /** How its survey mask stands: some vertices surveyed and some not (the edge), all, or none. */
+  readonly standing: SurveyStanding;
+  /** Its own-level height, m: bilinear between its held vertices. */
+  readonly ownAtM: (x: number, y: number) => number;
+  /** Its morph target, the parent level's surface at its vertices, m, likewise. */
+  readonly morphAtM: (x: number, y: number) => number;
+  /** Whether its survey mask holds the place surveyed (the discard's twin, `surveyedAt`). */
+  readonly surveyedAt: (x: number, y: number) => boolean;
+}
 
 /** What is kept of one resident bake. */
 interface HeldBake {
@@ -77,6 +95,8 @@ interface HeldBake {
   readonly standing: SurveyStanding;
   /** Its own-level heights, m: 65 × 65 for an edge bake, 17 × 17 for a surveyed one; none bare. */
   readonly heights: Float32Array | null;
+  /** Its morph targets, m, on the same grid as {@link HeldBake.heights}. */
+  readonly morph: Float32Array | null;
   /** An edge bake's packed survey mask with its cell code (`packSurveyMask`); otherwise `null`. */
   readonly mask: Uint8Array | null;
   /** Its baked heights' highest, m above the datum. */
@@ -84,7 +104,7 @@ interface HeldBake {
 }
 
 /** A direction's place on a face: its cell coordinates (s, t), each in [0, 1]. */
-interface FacePlace {
+export interface FacePlace {
   readonly face: Face;
   readonly s: number;
   readonly t: number;
@@ -136,22 +156,25 @@ function standingOf(mask: Uint8Array): SurveyStanding {
   return surveyed ? "surveyed" : "bare";
 }
 
-/** A bake's own-level heights, 65 × 65, from its interleaved own and morph heights. */
-function ownHeights(bake: BakedPatch): Float32Array {
+/**
+ * A bake's own-level heights (`which` 0) or morph targets (1), 65 × 65, from its interleaved own
+ * and morph heights.
+ */
+function ownHeights(bake: BakedPatch, which: 0 | 1 = 0): Float32Array {
   const out = new Float32Array(PATCH_VERTICES_PER_SIDE * PATCH_VERTICES_PER_SIDE);
   for (let n = 0; n < out.length; n += 1) {
-    out[n] = bake.heights[2 * n] ?? 0;
+    out[n] = bake.heights[2 * n + which] ?? 0;
   }
   return out;
 }
 
-/** Every fourth vertex's own-level height, 17 × 17. */
-function coarseHeights(bake: BakedPatch): Float32Array {
+/** Every fourth vertex's own-level height (`which` 0) or morph target (1), 17 × 17. */
+function coarseHeights(bake: BakedPatch, which: 0 | 1 = 0): Float32Array {
   const out = new Float32Array(COARSE_SIDE * COARSE_SIDE);
   for (let b = 0; b < COARSE_SIDE; b += 1) {
     for (let a = 0; a < COARSE_SIDE; a += 1) {
       const vertex = COARSE_HEIGHT_STRIDE * b * PATCH_VERTICES_PER_SIDE + COARSE_HEIGHT_STRIDE * a;
-      out[b * COARSE_SIDE + a] = bake.heights[2 * vertex] ?? 0;
+      out[b * COARSE_SIDE + a] = bake.heights[2 * vertex + which] ?? 0;
     }
   }
   return out;
@@ -163,21 +186,36 @@ function bilinear(grid: Float32Array, side: number, x: number, y: number): numbe
   const y0 = Math.min(side - 2, Math.max(0, Math.floor(y)));
   const tx = Math.min(1, Math.max(0, x - x0));
   const ty = Math.min(1, Math.max(0, y - y0));
+  if (tx === 0 && ty === 0) {
+    // At a vertex, as the drawn ground's twin reads its triangles' corners.
+    return grid[y0 * side + x0] ?? 0;
+  }
   const at = (a: number, b: number): number => grid[b * side + a] ?? 0;
   const low = at(x0, y0) + tx * (at(x0 + 1, y0) - at(x0, y0));
   const high = at(x0, y0 + 1) + tx * (at(x0 + 1, y0 + 1) - at(x0, y0 + 1));
   return low + ty * (high - low);
 }
 
-/** A held bake's own-level height at (x, y) in quads of its patch. */
-function heightOf(held: HeldBake, x: number, y: number): number {
-  const heights = held.heights;
-  if (heights === null) {
+/** A held bake's own-level height at (x, y) in quads of its patch, or its morph target's. */
+function heightOf(held: HeldBake, x: number, y: number, grid = held.heights): number {
+  if (grid === null) {
     return 0;
   }
   return held.standing === "edge"
-    ? bilinear(heights, PATCH_VERTICES_PER_SIDE, x, y)
-    : bilinear(heights, COARSE_SIDE, x / COARSE_HEIGHT_STRIDE, y / COARSE_HEIGHT_STRIDE);
+    ? bilinear(grid, PATCH_VERTICES_PER_SIDE, x, y)
+    : bilinear(grid, COARSE_SIDE, x / COARSE_HEIGHT_STRIDE, y / COARSE_HEIGHT_STRIDE);
+}
+
+/** `held` as the drawn ground's twin reads it. */
+function residentBakeOf(held: HeldBake): ResidentBake {
+  return {
+    standing: held.standing,
+    ownAtM: (x, y) => heightOf(held, x, y),
+    morphAtM: (x, y) => heightOf(held, x, y, held.morph),
+    surveyedAt: (x, y) =>
+      held.standing === "surveyed" ||
+      (held.standing === "edge" && held.mask !== null && surveyedAt(held.mask, x, y)),
+  };
 }
 
 /** The axis component, signed outward, that a face's points have largest (`faceUvToXyz`'s). */
@@ -222,7 +260,7 @@ function uvOn(face: Face, x: number, y: number, z: number): readonly [number, nu
  * The faces `direction` lies on, with its cell coordinates on each: its own, and on a face's edge
  * or a cube's corner the faces across it.
  */
-function facePlaces(direction: Vec3): FacePlace[] {
+export function facePlaces(direction: Vec3): FacePlace[] {
   const { x, y, z } = direction;
   const largest = Math.max(Math.abs(x), Math.abs(y), Math.abs(z));
   if (!(largest > 0)) {
@@ -247,7 +285,7 @@ function facePlaces(direction: Vec3): FacePlace[] {
  * neighbour on its side where it lies within {@link BOUNDARY_QUADS} of it; −1 past them. Read by
  * index, so that a lookup builds no array of columns (R10.T16.c's cost).
  */
-function columnAt(s: number, n: number, k: number): number {
+export function columnAt(s: number, n: number, k: number): number {
   const at = s * n;
   const i = Math.min(n - 1, Math.floor(at));
   if (k === 0) {
@@ -299,6 +337,11 @@ class LevelIndex {
       this.#reorder();
     }
     level.set(patchKeyIndex(held.key), held);
+  }
+
+  /** The bake held for `key`, if one is. */
+  get(key: PatchKey): HeldBake | undefined {
+    return this.#levels.get(key.level)?.get(patchKeyIndex(key));
   }
 
   delete(key: PatchKey): boolean {
@@ -360,6 +403,8 @@ export class ResidentHeights implements ResidentHeightsView {
   readonly #edges = new LevelIndex();
   #ceilingM: number | null = 0;
   #rimRevision = 0;
+  /** Each held bake as the drawn ground's twin reads it, made at its first reading. */
+  readonly #bakes = new WeakMap<HeldBake, ResidentBake>();
 
   get rimRevision(): number {
     return this.#rimRevision;
@@ -369,7 +414,10 @@ export class ResidentHeights implements ResidentHeightsView {
   get bytes(): number {
     let bytes = 0;
     for (const held of this.#all.bakes()) {
-      bytes += (held.heights?.byteLength ?? 0) + (held.mask?.byteLength ?? 0);
+      bytes +=
+        (held.heights?.byteLength ?? 0) +
+        (held.morph?.byteLength ?? 0) +
+        (held.mask?.byteLength ?? 0);
     }
     return bytes;
   }
@@ -404,6 +452,7 @@ export class ResidentHeights implements ResidentHeightsView {
           key: bake.key,
           standing,
           heights: ownHeights(bake),
+          morph: ownHeights(bake, 1),
           mask: packSurveyMask(
             layers.surveyMask,
             surveyCellCode(bake.key.level, layers.fieldLevel),
@@ -416,12 +465,13 @@ export class ResidentHeights implements ResidentHeightsView {
           key: bake.key,
           standing,
           heights: coarseHeights(bake),
+          morph: coarseHeights(bake, 1),
           mask: null,
           topM: bake.heightRangeM[1],
         };
         break;
       case "bare":
-        held = { key: bake.key, standing, heights: null, mask: null, topM: 0 };
+        held = { key: bake.key, standing, heights: null, morph: null, mask: null, topM: 0 };
         break;
     }
     this.#all.set(held);
@@ -452,6 +502,20 @@ export class ResidentHeights implements ResidentHeightsView {
     this.#edges.clear();
     this.#ceilingM = 0;
     this.#rimRevision += 1;
+  }
+
+  /** The resident bake of `key` as the drawn ground's twin reads it, or `null` with none. */
+  bakeAt(key: PatchKey): ResidentBake | null {
+    const held = this.#all.get(key);
+    if (held === undefined) {
+      return null;
+    }
+    let bake = this.#bakes.get(held);
+    if (bake === undefined) {
+      bake = residentBakeOf(held);
+      this.#bakes.set(held, bake);
+    }
+    return bake;
   }
 
   rimHeightAtM(direction: Vec3): number | null {
