@@ -2029,7 +2029,8 @@ fn tallies_under_every_28_hold<T: Default + Send>(
 }
 
 /// The census's count of the bodies P14.T55.b.a's evaporation has taken by the epoch, beside the
-/// hot small bodies it publishes present ([`SurvivorCount`]).
+/// hot small bodies it publishes present ([`SurvivorCount`]), and of the belts whose named members
+/// it has all taken.
 #[derive(Debug, Default)]
 struct EvaporationCount {
     /// The present hot small bodies.
@@ -2064,6 +2065,21 @@ impl EvaporationCount {
                 .and_then(|(_, fate)| fate.as_ref())
         };
         let age_gyr = ctx.age_at_epoch().value() / 1e9;
+        // A belt whose named members have all evaporated ends with the last of them.
+        for (belt, zone) in system.belts.iter().filter_map(|belt| {
+            system
+                .zones
+                .iter()
+                .position(|zone| zone.host() == belt.host())
+                .map(|k| (belt, k))
+        }) {
+            let ended = system
+                .belt_evaporation(belt, &hosts[zone], t)
+                .and_then(|evaporation| evaporation.ended);
+            if ended.is_some_and(|at| at <= t) {
+                *self.by_age.entry((age_bin(age_gyr), "belts")).or_default() += 1;
+            }
+        }
         for body in &system.bodies {
             let (kind, state) = match &body.part {
                 Part::Planet(_) | Part::Member(_) => {

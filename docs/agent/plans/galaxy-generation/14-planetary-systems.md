@@ -34384,3 +34384,14 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     `ZONE_EDGE_TOLERANCE` read the fit as before.
   - _For 28's bump:_ delete what `the_zone_placement_margin_is_held_only_until_the_28_bump` lists.
     The census's third run (every 28 hold) and its `on_the_limit` check stay.
+- **P14.T55.b.a's follow-up, belts and the mass left, as built (lane `p14-t55ba-evaporation`,
+  2026-11-03).** Under the same hold (`EVAPORATION_VERSION`), nothing moving at 24 to 27.
+  - _New items:_ `PlanetarySystem::belt_evaporation` with `BeltEvaporation`;
+    `BeltMember::placed_body_at`; `BodyFate::moon_mass_at`, `MoonPart::mass_at`,
+    `Body::satellite_mass_at`; `evaporation::{LossPart, lost_by, mass_left}`; `first_loss`
+    records its parts.
+  - _Readers:_ `FateAt::mass` (and so a planet's and a member's derivation and record), a moon's
+    record's mass, `belt_record`.
+  - _Leans (2026-11-03):_ a belt loses its named members' share of mass lost (the gone ones' and
+    the rest's losses) from its mass and its dust's shine, and with none left ends at the last one's
+    evaporation; a moon's bulk is still read at its formed mass, its record's mass alone moving.

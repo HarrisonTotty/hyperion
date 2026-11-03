@@ -902,8 +902,9 @@ impl FateAt {
     }
 
     /// The body's mass at the time, M⊕: its own, plus that of every neighbour that collided with
-    /// it and merged into it by then (ruling 71). A body not yet formed has its own mass, and a
-    /// body gone the mass it had when it went.
+    /// it and merged into it by then (ruling 71), less, from generator version 28, what its rock
+    /// has evaporated by then (P14.T55.b.a). A body not yet formed has its own mass, and a body
+    /// gone the mass it had when it went, an evaporated one the mass it formed with.
     #[must_use]
     pub const fn mass(&self) -> EarthMasses {
         self.mass
@@ -1085,12 +1086,15 @@ struct Evaporating {
     density: KilogramsPerCubicMetre,
 }
 
-/// A body's evaporation so far (P14.T55.b.a): the radius it has lost, m, and the time it has been
-/// followed to, `None` before it is.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// A body's evaporation so far (P14.T55.b.a): the radius it has lost, m, the time it has been
+/// followed to, `None` before it is, and the parts of its history the step integrated, in time
+/// order, each part's `before` counted from its formation, from which the radius it has lost by
+/// any time is read ([`evaporation::lost_by`]).
+#[derive(Debug, Clone, PartialEq, Default)]
 struct Evaporated {
     radius_lost_m: f64,
     until: Option<UniverseTime>,
+    parts: Vec<evaporation::LossPart>,
 }
 
 impl<'a> BodyFate<'a> {
@@ -1346,8 +1350,24 @@ impl<'a> BodyFate<'a> {
             // Before `START` a moon's drifting record holds until its planet's change there too,
             // as `holds_until` states a cell's end there (RM1 validation, 2026-10-02).
             changes_at: next.filter(|&next| t < ClockWindow::START || ClockWindow::contains(next)),
-            mass: segment.mass,
+            mass: self.mass_in(segment, t),
         }
+    }
+
+    /// The body's mass at `t` on `segment`, a time it is present, M⊕: the segment's, less what its
+    /// rock has evaporated by then from generator version 28 (P14.T55.b.a), its radius
+    /// R(t) = R₀ − ∫ rate dt ([`evaporation::mass_left`]), and the segment's alone where nothing
+    /// has.
+    #[must_use]
+    fn mass_in(&self, segment: &Segment, t: UniverseTime) -> EarthMasses {
+        if self.evaporated.parts.is_empty() {
+            return segment.mass;
+        }
+        let density = self.body.density;
+        let lost = evaporation::lost_by(&self.evaporated.parts, t, |at| {
+            evaporation::radius_rate(self.substellar_temperature(segment, at), density)
+        });
+        evaporation::mass_left(segment.mass, density, lost)
     }
 
     /// The body's orbit at `t`, [`BodyFate::at`]'s bit for bit, without the trajectory and the
@@ -1630,7 +1650,7 @@ impl<'a> BodyFate<'a> {
                     mass: segment.mass,
                     density: self.body.density,
                 };
-                let mut so_far = self.evaporated;
+                let mut so_far = core::mem::take(&mut self.evaporated);
                 let at = self.evaporate(segment, end, body, &mut so_far);
                 self.evaporated = so_far;
                 at
@@ -1697,7 +1717,13 @@ impl<'a> BodyFate<'a> {
         let rate = |t: UniverseTime| {
             evaporation::radius_rate(self.substellar_temperature(segment, t), body.density)
         };
-        match evaporation::first_loss(from, end, breaks, left, bound, rate) {
+        let (base, first) = (so_far.radius_lost_m, so_far.parts.len());
+        let outcome =
+            evaporation::first_loss(from, end, breaks, left, (bound, rate), &mut so_far.parts);
+        for part in &mut so_far.parts[first..] {
+            part.before += base;
+        }
+        match outcome {
             evaporation::Loss::Gone(at) => Some(at),
             evaporation::Loss::Part(lost) => {
                 so_far.radius_lost_m += lost;
@@ -1771,6 +1797,34 @@ impl<'a> BodyFate<'a> {
     /// history.
     #[must_use]
     pub(crate) fn moon_evaporation(&self, mass: EarthMasses) -> Option<UniverseTime> {
+        self.moon_history(mass).and_then(|(gone, _)| gone)
+    }
+
+    /// The mass at `t` of the present moon of mass `mass` of this planet, M⊕: `mass`, less what
+    /// its rock has evaporated by then from generator version 28 (P14.T55.b.a), along its planet's
+    /// history as [`moon_evaporation`](Self::moon_evaporation) follows it, its radius
+    /// R(t) = R₀ − ∫ rate dt ([`evaporation::mass_left`]).
+    #[must_use]
+    pub(crate) fn moon_mass_at(&self, mass: EarthMasses, t: UniverseTime) -> EarthMasses {
+        let Some((_, evaporated)) = self.moon_history(mass) else {
+            return mass;
+        };
+        if evaporated.parts.is_empty() || self.formed_at.is_none_or(|formed| t < formed) {
+            return mass;
+        }
+        let (segment, _) = self.segment_at(t);
+        let density = evaporation::MOON_EVAPORATING_ROCK_DENSITY;
+        let lost = evaporation::lost_by(&evaporated.parts, t, |at| {
+            evaporation::radius_rate(self.substellar_temperature(segment, at), density)
+        });
+        evaporation::mass_left(mass, density, lost)
+    }
+
+    /// The evaporation of the moon of mass `mass` of this planet along its history (P14.T55.b.a):
+    /// when its rock is gone, if it goes, and what it has evaporated; `None` where the step does
+    /// not follow it.
+    #[must_use]
+    fn moon_history(&self, mass: EarthMasses) -> Option<(Option<UniverseTime>, Evaporated)> {
         match EvaporationRules::in_force() {
             EvaporationRules::Kept => return None,
             EvaporationRules::Evaporated => {}
@@ -1788,14 +1842,15 @@ impl<'a> BodyFate<'a> {
             .unwrap_or_else(|| self.known_until());
         let one_nanosecond = Span::new(0, 1).expect("0 s and 1 ns is a normalised span");
         let mut so_far = Evaporated::default();
-        self.segments.iter().enumerate().find_map(|(k, segment)| {
+        let gone = self.segments.iter().enumerate().find_map(|(k, segment)| {
             let end = self.segments.get(k + 1).map_or(last, |next| {
                 next.start
                     .checked_sub(one_nanosecond)
                     .expect("a segment after the first starts after the clock's first instant")
             });
             self.evaporate(segment, end.min(last), body, &mut so_far)
-        })
+        });
+        Some((gone, so_far))
     }
 
     /// The first time in `segment` up to `end` at which the body is engulfed, if any.

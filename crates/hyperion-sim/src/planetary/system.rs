@@ -155,6 +155,7 @@ use crate::planetary::derive::{
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
 use crate::planetary::drift::{DriftingOrbit, drift_cell};
 use crate::planetary::error::ResolveBodyError;
+use crate::planetary::fate::evaporation::EvaporationRules;
 use crate::planetary::fate::{
     BodyFate, BodyState, DestructionCause, FateAt, FateBody, FateHost, ScatterDraws,
 };
@@ -435,6 +436,29 @@ impl MoonPart {
         let state = moon_state(parent, &self.satellite, ctx.age_at_epoch(), t, evaporated);
         (state, evaporated)
     }
+
+    /// The moon's mass at `t`, in `state` then, along its planet's history `fate`: from
+    /// generator version 28 (P14.T55.b.a), a present moon's less what its rock has evaporated by
+    /// then ([`BodyFate::moon_mass_at`]); its own otherwise.
+    #[must_use]
+    fn mass_at(&self, fate: &BodyFate<'_>, state: BodyState, t: UniverseTime) -> EarthMasses {
+        match state {
+            BodyState::Present => fate.moon_mass_at(self.satellite.mass(), t),
+            BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {
+                self.satellite.mass()
+            }
+        }
+    }
+}
+
+/// What its named members' evaporation has taken of a belt by a time (P14.T55.b.a,
+/// `PlanetarySystem::belt_evaporation`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BeltEvaporation {
+    /// The share of its members' mass evaporated, which its mass and its dust's shine lose.
+    share: f64,
+    /// When the last of its members evaporated, if none is left.
+    ended: Option<UniverseTime>,
 }
 
 /// A belt member's primordial state: the member, its belt and what the fate transform reads.
@@ -585,6 +609,22 @@ impl Body {
         match &self.part {
             Part::Planet(planet) => Some(&planet.placed),
             Part::Moon(_) | Part::Ring(_) | Part::Member(_) => None,
+        }
+    }
+
+    /// A satellite's mass at `t`, in `state` then, along its planet's history `fate`: a moon's
+    /// ([`MoonPart::mass_at`], less what its rock has evaporated from generator version 28), and
+    /// a ring's own.
+    #[must_use]
+    fn satellite_mass_at(
+        &self,
+        fate: &BodyFate<'_>,
+        state: BodyState,
+        t: UniverseTime,
+    ) -> EarthMasses {
+        match &self.part {
+            Part::Moon(moon) => moon.mass_at(fate, state, t),
+            Part::Ring(_) | Part::Planet(_) | Part::Member(_) => self.mass(),
         }
     }
 
@@ -4253,7 +4293,7 @@ impl PlanetarySystem {
     fn placed_now(body: &Body, orbit: &KeplerElements, mass: EarthMasses) -> PlacedBody {
         let placed = match &body.part {
             Part::Planet(planet) => planet.placed_body(mass),
-            Part::Member(member) => member.member.placed_body(),
+            Part::Member(member) => member.member.placed_body_at(mass),
             Part::Moon(_) | Part::Ring(_) => unreachable!("a satellite is derived by its own rule"),
         };
         with_record_bulk(body, &placed.with_orbit_now(*orbit))
@@ -4303,7 +4343,7 @@ impl PlanetarySystem {
             BodyIdentity::new(self.system, body.index, body.kind(), Some(body.host), state)
                 .with_label(label);
         let builder = BodyRecord::builder(identity)
-            .mass(Section::Ok(body.mass()))
+            .mass(Section::Ok(body.satellite_mass_at(fate, state, t)))
             .moons(Section::NotApplicable)
             .rings(Section::NotApplicable)
             .envelope(Section::NotApplicable);
@@ -4818,12 +4858,29 @@ impl PlanetarySystem {
         .expect("a belt's mass and its members' density are positive");
         let host = fate_host(ctx, zone);
         let at = BodyFate::resolve(&proxy, &host).at(epoch.t);
+        // From P14.T55.b.a's hold at 28, what its named members' evaporation has taken of it.
+        let evaporated = match at.state() {
+            BodyState::Present => self.belt_evaporation(belt, &host, epoch.t),
+            BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {
+                None
+            }
+        };
+        let state = match evaporated {
+            Some(BeltEvaporation {
+                ended: Some(at), ..
+            }) => BodyState::Destroyed {
+                cause: DestructionCause::Evaporated,
+                at,
+            },
+            Some(_) | None => at.state(),
+        };
+        let kept = |value: f64| evaporated.map_or(value, |e| value * (1.0 - e.share));
         let identity = BodyIdentity::new(
             self.system,
             belt.index(),
             BodyKind::Belt(belt.kind()),
             Some(belt.host()),
-            at.state(),
+            state,
         )
         .with_label(label);
         let age = ctx.age_at(epoch.t);
@@ -4838,14 +4895,16 @@ impl PlanetarySystem {
             .photometry(Section::NotApplicable)
             .figure(Section::NotApplicable)
             .rotation(Section::NotApplicable);
-        let builder = match (at.state(), at.orbit()) {
+        let builder = match (state, at.orbit()) {
             (BodyState::Present, Some(now)) => {
                 let expansion = now.semi_major_axis().value() / middle.value();
                 let luminosity = epoch.luminosity(zone);
-                let shine = luminosity.map_or(0.0, |l| belt.fractional_luminosity(age, l));
+                let shine = luminosity.map_or(0.0, |l| kept(belt.fractional_luminosity(age, l)));
                 let members = belt.members().iter().map(BeltMember::index).collect();
                 builder
-                    .mass(Section::Ok(belt.mass_at(age)))
+                    .mass(Section::Ok(EarthMasses::new(kept(
+                        belt.mass_at(age).value(),
+                    ))))
                     .population(Section::Ok(Population::Belt(BeltRecord::new(
                         belt, expansion, shine, members,
                     ))))
@@ -4857,6 +4916,67 @@ impl PlanetarySystem {
         builder
             .build()
             .expect("a generated record withholds no section and has a known kind")
+    }
+
+    /// What its named members' evaporation has taken of `belt`, whose host is `host`, by `t`
+    /// (P14.T55.b.a): the share of its members' mass their rock has lost, those gone and what the
+    /// rest have lost, which stands for the belt's own, since its cascade's smaller bodies go
+    /// before them about the same light (lean, 2026-11-03); and, where none is left and the last
+    /// to go evaporated, when. `None` below the hold at 28 and for a belt with no named member.
+    #[must_use]
+    fn belt_evaporation(
+        &self,
+        belt: &Belt,
+        host: &FateHost<'_>,
+        t: UniverseTime,
+    ) -> Option<BeltEvaporation> {
+        match EvaporationRules::in_force() {
+            EvaporationRules::Kept => return None,
+            EvaporationRules::Evaporated => {}
+        }
+        let (mut formed, mut lost, mut left) = (0.0, 0.0, 0_usize);
+        let mut latest: Option<BodyState> = None;
+        for body in &self.bodies {
+            let Part::Member(member) = &body.part else {
+                continue;
+            };
+            if member.belt != belt.index() {
+                continue;
+            }
+            let at = BodyFate::resolve(&member.fate, host).at(t);
+            let mass = member.fate.mass().value();
+            formed += mass;
+            let state = at.state();
+            match state {
+                BodyState::Present => {
+                    left += 1;
+                    lost += mass - at.mass().value();
+                }
+                BodyState::NotYetFormed => left += 1,
+                BodyState::Destroyed {
+                    cause: DestructionCause::Evaporated,
+                    ..
+                } => lost += mass,
+                BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {}
+            }
+            if state.ended_at() > latest.and_then(|latest| latest.ended_at()) {
+                latest = Some(state);
+            }
+        }
+        if formed <= 0.0 {
+            return None;
+        }
+        let ended = match latest {
+            Some(BodyState::Destroyed {
+                cause: DestructionCause::Evaporated,
+                at,
+            }) if left == 0 => Some(at),
+            Some(_) | None => None,
+        };
+        Some(BeltEvaporation {
+            share: lost / formed,
+            ended,
+        })
     }
 
     /// The record of the halo `halo` at the epoch's time, labelled `label` (P14.T21.d,
@@ -7310,6 +7430,8 @@ mod census_tests;
 pub(crate) mod cold_trap_tests;
 mod discs;
 pub(crate) mod envelope;
+#[cfg(test)]
+mod evaporation_tests;
 pub(crate) mod events;
 #[cfg(test)]
 mod exposed_ice_tests;

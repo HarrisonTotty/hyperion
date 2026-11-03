@@ -45,6 +45,17 @@
 //! its hosts are bright, as once a host has left its main sequence. [`first_loss`] integrates the
 //! radius lost, interval by interval between the history's break points, by an adaptive
 //! Gauss–Legendre rule, and bisects the interval it is lost in to the second.
+//!
+//! # What is left
+//!
+//! While it evaporates a body is present with the mass its radius has left,
+//! R(t) = R₀ − ∫ rate dt ([`mass_left`]), read from the parts [`first_loss`] integrated
+//! ([`lost_by`]): a planet or a member through the fate's mass, which its derivation and record
+//! read, and a moon in its record's mass, its bulk read at the mass it formed with (lean,
+//! 2026-11-03). A belt loses the share of its named members' mass they have lost, those gone and
+//! the rest's losses, from its mass and its dust's shine, since its cascade's smaller bodies about
+//! the same light go before them (lean, 2026-11-03); with none left it ends, `Destroyed
+//! { Evaporated }`, when the last of them went (`PlanetarySystem::belt_evaporation`).
 
 use crate::planetary::hosts::evolved::bisect;
 use crate::tables::gauss_legendre::{GL16_NODES, GL16_WEIGHTS};
@@ -217,6 +228,52 @@ pub(crate) fn radius_of(mass: EarthMasses, density: KilogramsPerCubicMetre) -> f
     math::cbrt(3.0 * volume / (4.0 * core::f64::consts::PI))
 }
 
+/// A part of a stretch of a body's history that [`first_loss`] integrated, by which the radius
+/// lost by any time in it is found again ([`lost_by`]): from `start` to `end`, after `before`, m,
+/// was lost, taking `taken`, m.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LossPart {
+    pub(crate) start: UniverseTime,
+    pub(crate) end: UniverseTime,
+    pub(crate) before: f64,
+    pub(crate) taken: f64,
+}
+
+/// The radius lost by `t`, m, of a history whose integrated parts are `parts`, in time order, at
+/// `rate` (m s⁻¹, at a time) over the part that holds `t`: what the parts before it took, and the
+/// 16-point rule from its start to `t`, as [`first_loss`] bisects it; none before the first part,
+/// whose stretch took none that counts.
+#[must_use]
+pub(crate) fn lost_by(
+    parts: &[LossPart],
+    t: UniverseTime,
+    rate: impl Fn(UniverseTime) -> f64,
+) -> f64 {
+    let after = parts.partition_point(|part| part.start <= t);
+    let Some(part) = after.checked_sub(1).map(|k| &parts[k]) else {
+        return 0.0;
+    };
+    if t < part.end {
+        part.before + rule(part.start, t, &rate)
+    } else {
+        part.before + part.taken
+    }
+}
+
+/// The mass, M⊕, of a body that formed with `mass` at `density` and has lost `lost`, m, of its
+/// radius: `mass` (1 − `lost` ÷ R₀)³, its rock's sphere shrunk (PBC13's eq. 28 at a radius that
+/// falls; the [module documentation](self)). Never quite none, at a radius left of 2⁻⁵² of its own,
+/// since a body present has some.
+#[must_use]
+pub(crate) fn mass_left(
+    mass: EarthMasses,
+    density: KilogramsPerCubicMetre,
+    lost: f64,
+) -> EarthMasses {
+    let share = (1.0 - lost / radius_of(mass, density)).max(f64::EPSILON);
+    EarthMasses::new(mass.value() * share * share * share)
+}
+
 /// How much of its radius a body loses in a stretch of its history ([`first_loss`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Loss {
@@ -240,7 +297,8 @@ pub(crate) enum Loss {
 /// otherwise halved where the rule on its halves differs from it on the whole by more than that
 /// share, up to [`MAX_DEPTH`] times, into parts no shorter than [`SHORTEST_PART_S`] and at most
 /// [`MAX_PARTS`] of them, in time order; in the part where the radius lost reaches `left`, the
-/// time is bisected to the second, its later end returned.
+/// time is bisected to the second, its later end returned. Each part integrated is added to
+/// `parts`, in time order, its `before` counted from `from`.
 ///
 /// # Panics
 ///
@@ -251,8 +309,8 @@ pub(crate) fn first_loss(
     to: UniverseTime,
     breaks: impl FnOnce() -> Vec<UniverseTime>,
     left: f64,
-    bound: impl Fn(UniverseTime) -> f64,
-    rate: impl Fn(UniverseTime) -> f64,
+    (bound, rate): (impl Fn(UniverseTime) -> f64, impl Fn(UniverseTime) -> f64),
+    parts: &mut Vec<LossPart>,
 ) -> Loss {
     if left <= 0.0 {
         return Loss::Gone(from);
@@ -275,7 +333,7 @@ pub(crate) fn first_loss(
     let mut lost = 0.0;
     let mut a = first.checked_sub(1).map_or(from, |k| points[k]);
     for &b in &points[first..] {
-        if let Some(at) = integrate(a, b, left, tolerance, &rate, &mut lost) {
+        if let Some(at) = integrate((a, b), left, tolerance, &rate, (&mut lost, parts)) {
             return Loss::Gone(at);
         }
         a = b;
@@ -284,48 +342,59 @@ pub(crate) fn first_loss(
 }
 
 /// Adds to `lost` the radius lost at `rate` over `a`–`b`, by [`first_loss`]'s adaptive rule at
-/// `tolerance` m per second of the interval, and returns the time by which it reaches `left`, if
-/// it does inside it.
+/// `tolerance` m per second of the interval, and each part it integrates to `parts`, and returns
+/// the time by which it reaches `left`, if it does inside it.
 fn integrate(
-    a: UniverseTime,
-    b: UniverseTime,
+    (a, b): (UniverseTime, UniverseTime),
     left: f64,
     tolerance: f64,
     rate: &impl Fn(UniverseTime) -> f64,
-    lost: &mut f64,
+    (lost, parts): (&mut f64, &mut Vec<LossPart>),
 ) -> Option<UniverseTime> {
     if b <= a {
         return None;
     }
     // Intervals still to integrate, the latest at the bottom, with their rule's value and depth.
     let mut stack = vec![(a, b, rule(a, b, rate), 0_u32)];
-    let mut parts = 1;
+    let mut cut = 1;
     while let Some((lo, hi, whole, depth)) = stack.pop() {
         let allowed = tolerance * seconds_between(lo, hi);
         // A part that takes less than its share of the tolerance, and not the radius left, is
         // taken whole: most of a hot history's are.
         if whole.abs() <= allowed && *lost + whole < left {
+            parts.push(LossPart {
+                start: lo,
+                end: hi,
+                before: *lost,
+                taken: whole,
+            });
             *lost += whole;
             continue;
         }
         let mid = midpoint(lo, hi);
         let (first, second) = (rule(lo, mid, rate), rule(mid, hi, rate));
         let halvable = depth < MAX_DEPTH
-            && parts < MAX_PARTS
+            && cut < MAX_PARTS
             && seconds_between(lo, hi) >= 2.0 * SHORTEST_PART_S;
         if (first + second - whole).abs() > allowed && halvable {
-            parts += 1;
+            cut += 1;
             stack.push((mid, hi, second, depth + 1));
             stack.push((lo, mid, first, depth + 1));
             continue;
         }
-        for (start, end, part) in [(lo, mid, first), (mid, hi, second)] {
-            if *lost + part >= left {
+        for (start, end, taken) in [(lo, mid, first), (mid, hi, second)] {
+            parts.push(LossPart {
+                start,
+                end,
+                before: *lost,
+                taken,
+            });
+            if *lost + taken >= left {
                 let before = *lost;
                 let mut clearance = |t: UniverseTime| left - before - rule(start, t, rate);
                 return Some(bisect(start, end, &mut clearance));
             }
-            *lost += part;
+            *lost += taken;
         }
     }
     None

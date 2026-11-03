@@ -878,8 +878,19 @@ impl BeltMember {
     /// Never: a member's mass and semi-major axis are positive by construction.
     #[must_use]
     pub fn placed_body(&self) -> PlacedBody {
+        self.placed_body_at(self.mass)
+    }
+
+    /// The member as [`placed_body`](Self::placed_body) gives it, at the mass `mass` its history
+    /// leaves it: from generator version 28, what its rock has not evaporated (P14.T55.b.a).
+    ///
+    /// # Panics
+    ///
+    /// If `mass` is not finite and positive.
+    #[must_use]
+    pub(crate) fn placed_body_at(&self, mass: EarthMasses) -> PlacedBody {
         PlacedBody::new(
-            self.mass,
+            mass,
             self.orbit,
             self.orbit.semi_major_axis(),
             self.radius_rank,
