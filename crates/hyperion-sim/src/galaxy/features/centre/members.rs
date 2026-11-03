@@ -1029,7 +1029,7 @@ mod tests {
     use super::*;
     use crate::GENERATOR_VERSION;
     use crate::galaxy::features::centre::testing::{milky_way_centre, milky_way_galaxy};
-    use crate::galaxy::imf::MassFunctionKind;
+    use crate::galaxy::imf::{MassFunction, MassFunctionKind};
     use crate::galaxy::params::{GalaxyParams, GalaxyParamsBuilder};
     use crate::galaxy::placement::resolve;
     use crate::id::SystemIdKind;
@@ -1606,6 +1606,151 @@ mod tests {
             "{yielded} members against {:.1} expected",
             class.expected
         );
+    }
+
+    /// The masses of `class` at `age`: its whole range below the turn-off, if living, or at it and
+    /// above, if dead (empty where the turn-off leaves none).
+    fn class_masses_at(class: &CentreClass, age: f64) -> (f64, f64) {
+        let m_to = turn_off_mass(Years::new(age.max(1e4)), &centre_composition()).value();
+        let (lo, hi) = (
+            class.initial_mass_range.0.value(),
+            class.initial_mass_range.1.value(),
+        );
+        match class.kind {
+            CentreClassKind::Living => (lo, hi.min(m_to)),
+            CentreClassKind::WhiteDwarf
+            | CentreClassKind::NeutronStar
+            | CentreClassKind::BlackHole => (lo.max(m_to), hi),
+        }
+    }
+
+    /// The mean of `of(age, masses)` over `class`'s count's integrand on `imf`: its component's
+    /// ages by composite Gauss–Legendre over 256 parts, each age weighted by the initial mass
+    /// function over the class's masses there ([`class_masses_at`]).
+    fn integrand_mean(
+        imf: &dyn MassFunction,
+        class: &CentreClass,
+        of: &dyn Fn(f64, (f64, f64)) -> f64,
+    ) -> f64 {
+        use crate::tables::gauss_legendre::{GL4_NODES, GL4_WEIGHTS};
+        const PARTS: u32 = 256;
+        let component = age_components()[usize::from(class.component)];
+        let (a, b) = (component.youngest.value(), component.oldest.value());
+        let half = 0.5 * (b - a) / f64::from(PARTS);
+        let (mut sum, mut weight) = (0.0, 0.0);
+        for k in 0..PARTS {
+            let mid = a + half * (2.0 * f64::from(k) + 1.0);
+            for (&x, &w) in GL4_NODES.iter().zip(&GL4_WEIGHTS) {
+                let age = mid + half * x;
+                let (lo, hi) = class_masses_at(class, age);
+                if hi > lo {
+                    let n = imf.integral(lo, hi);
+                    sum += w * n * of(age, (lo, hi));
+                    weight += w * n;
+                }
+            }
+        }
+        sum / weight
+    }
+
+    /// The mean of `values` and its standard error.
+    fn mean_and_error(values: &[f64]) -> (f64, f64) {
+        let n = f64::from(u32::try_from(values.len()).unwrap());
+        let mean = values.iter().sum::<f64>() / n;
+        let variance = values.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / (n - 1.0);
+        (mean, (variance / n).sqrt())
+    }
+
+    /// fix-p09-centre-joint-draw (research-leans-33): under every 27 hold a class's kept stars
+    /// are its count's mix of ages and masses. The count integrates, over its component's ages,
+    /// the initial mass function over the masses of the class at each age, so an age weighs as
+    /// many stars as are of the class then: the continuous component's band-E living stars
+    /// (8–16.5 M☉), alive only in its first some 35 Myr, and the 150–500 Myr component's band-D
+    /// white dwarfs, whose progenitors die from 4.5 M☉ to 2.7 M☉ over it. Each class's 8,192
+    /// draws' mean age, and the living class's share above 12 M☉, are the integrand's
+    /// ([`integrand_mean`]) within four standard deviations.
+    #[test]
+    fn a_centre_class_s_draws_are_its_count_s_mix_of_ages_and_masses_from_27() {
+        /// The bound, in standard deviations of the draws' mean.
+        const Z: f64 = 4.0;
+        let held = milky_way_galaxy();
+        let on = Galaxy::from_params_with_rules(
+            held.seed(),
+            GalaxyParams::milky_way_like(),
+            crate::galaxy::rules::GalaxyRules::every_27_hold(),
+        )
+        .expect("the fixture builds");
+        let model = milky_way_centre();
+        let class_of = |component: u8, band: MassBand, kind: CentreClassKind| {
+            *model
+                .classes()
+                .classes()
+                .iter()
+                .find(|c| c.band == band && c.component == component && c.kind == kind)
+                .expect("the class")
+        };
+        let placement = CentrePlacement::new(model);
+        let cell = placement
+            .grid()
+            .owned_cells()
+            .next()
+            .expect("an owned cell");
+        let escape = model.profile().cluster_escape_speed(2.0).value();
+        let stars_of = |class: &CentreClass| -> Vec<(f64, f64)> {
+            (0..8_192)
+                .map(|index| {
+                    let system = SystemId::from(placement.member_id(MassBand::E, cell, index));
+                    let (mass, _, age) = draw_star(&on, class, system, escape).expect("a star");
+                    (mass, age.value())
+                })
+                .collect()
+        };
+        let imf = on.mass_function();
+        let living = class_of(3, MassBand::E, CentreClassKind::Living);
+        let living_stars = stars_of(&living);
+        let white_dwarfs = class_of(2, MassBand::D, CentreClassKind::WhiteDwarf);
+        let mut faults = Vec::new();
+        for (name, class, stars) in [
+            ("band-E living", &living, living_stars.clone()),
+            (
+                "band-D white dwarfs",
+                &white_dwarfs,
+                stars_of(&white_dwarfs),
+            ),
+        ] {
+            let ages: Vec<f64> = stars.iter().map(|&(_, age)| age).collect();
+            let (mean, error) = mean_and_error(&ages);
+            let want = integrand_mean(imf, class, &|age, _| age);
+            eprintln!(
+                "{name}: mean age {:.3} Myr, the count's {:.3} (± {:.3})",
+                mean / 1e6,
+                want / 1e6,
+                error / 1e6
+            );
+            if (mean - want).abs() > Z * error {
+                faults.push(format!("{name}: mean age {mean:.4e} yr against {want:.4e}"));
+            }
+        }
+        let above: Vec<f64> = living_stars
+            .iter()
+            .map(|&(mass, _)| if mass > 12.0 { 1.0 } else { 0.0 })
+            .collect();
+        let (share, _) = mean_and_error(&above);
+        let want = integrand_mean(imf, &living, &|_, (lo, hi)| {
+            if hi <= 12.0 {
+                0.0
+            } else {
+                imf.integral(lo.max(12.0), hi) / imf.integral(lo, hi)
+            }
+        });
+        let error = (want * (1.0 - want) / 8_192.0).sqrt();
+        eprintln!("band-E living: {share:.4} above 12 M_sun, the count's {want:.4} (± {error:.4})");
+        if (share - want).abs() > Z * error {
+            faults.push(format!(
+                "band-E living: {share:.4} above 12 M_sun against {want:.4}"
+            ));
+        }
+        assert!(faults.is_empty(), "{faults:#?}");
     }
 
     #[test]
