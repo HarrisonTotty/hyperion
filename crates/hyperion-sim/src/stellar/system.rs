@@ -391,6 +391,21 @@ impl RemnantStage {
     }
 }
 
+/// The natal kick of a star of track mass `m0` and composition `comp` that died as `fate` says,
+/// with its `draws`, under `rules`: the remnant stage's ([`RemnantStage::new`]), so the kick a
+/// model built on the same track gives ([`StarModel::natal_kick`]) where no kick loop redraws it,
+/// bit for bit; read without building the star (P09.T37's cold cost: a listed core collapse's
+/// bound from its kick).
+#[must_use]
+pub(crate) fn natal_kick_of(
+    fate: &sse::Fate,
+    draws: &StarDraws,
+    (m0, comp): (SolarMasses, &Composition),
+    rules: StellarRules,
+) -> Option<NatalKick> {
+    RemnantStage::new(fate.death, fate.remnant, draws, (m0, comp), rules).natal_kick
+}
+
 /// The remnant stage of a star whose `track` has reached its death, from its `draws`, or `None`
 /// if the track has not: the death and remnant that `track` gives the remnant draws
 /// (`star.remnant.*`), and the natal kick from `star.stripped` and `star.kick.*` under `rules`.

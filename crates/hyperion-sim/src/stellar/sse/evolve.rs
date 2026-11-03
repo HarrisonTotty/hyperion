@@ -102,31 +102,6 @@ pub(crate) fn lifetime_under(
     )
 }
 
-/// [`lifetime_under`] of a star that dies by the age `age_max`, bit for bit, or `None` for one
-/// that does not, which its build learns without building the rest of its life
-/// (`track::fate_to_age`): what a test that asks only whether a star dies by a time reads.
-///
-/// # Panics
-///
-/// In debug builds, if `m0` lies outside [`Track`]'s range, 0.1–150 M☉.
-#[must_use]
-pub(crate) fn lifetime_by_under(
-    m0: SolarMasses,
-    composition: &Composition,
-    draws: &StarDraws,
-    rules: StellarRules,
-    age_max: Years,
-) -> Option<Years> {
-    track::fate_to_age(
-        m0,
-        composition,
-        draws,
-        TrackOptions::default().with_rules(rules),
-        age_max,
-    )
-    .map(|fate| fate.death.age())
-}
-
 /// The whole track of a star of initial mass `m0`, `composition` and `draws` under the stellar
 /// stage's `rules`: [`Track::full_with`] under the generator's options with `rules`, whose death is
 /// `track::fate_of`'s of the same arguments, bit for bit, at its cost and some 0–60% more for the

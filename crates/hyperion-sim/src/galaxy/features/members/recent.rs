@@ -79,7 +79,9 @@ use crate::galaxy::catalogue_classes::{CatalogueMotion, ClassId};
 #[cfg(doc)]
 use crate::galaxy::displaced::death_in_interval;
 use crate::galaxy::displaced::marks::LifetimeBracket;
-use crate::galaxy::displaced::{ExplosionSite, death_in_interval_by_end, death_in_interval_under};
+use crate::galaxy::displaced::{
+    ExplosionSite, death_and_kick_by_end, death_in_interval_under, outside_interval,
+};
 use crate::galaxy::features::catalogue::{FeatureMarks, FeatureRecord, bulk_velocity};
 use crate::galaxy::features::cluster::PLUMMER_HALF_MASS_RATIO;
 use crate::galaxy::features::ids::PackedFeature;
@@ -95,6 +97,7 @@ use crate::id::{FeatureMemberId, Layer, MemberSlot, SystemId};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
+use crate::stellar::remnant::NatalKick;
 use crate::stellar::system::{SystemStars, primary_draws, primary_eta};
 use crate::tables::lbv::LBV_SAMPLER;
 use crate::time::UniverseTime;
@@ -724,7 +727,18 @@ impl FeatureStars {
         if self.runaway(galaxy, &record) {
             return None;
         }
-        let death = death_in_interval_by_end(
+        // A death the envelope's bracket puts outside the interval is the exact tier's verdict too,
+        // found without the star's track (`displaced::envelope`).
+        if galaxy
+            .lifetime_envelope()
+            .bracket(record.primary_initial_mass(), &self.composition, || {
+                primary_draws(galaxy, &record)
+            })
+            .is_some_and(|bracket| outside_interval(record.age_at_epoch(), bracket))
+        {
+            return None;
+        }
+        let (death, kick) = death_and_kick_by_end(
             record.primary_initial_mass(),
             &self.composition,
             primary_eta(galaxy, &record),
@@ -736,7 +750,35 @@ impl FeatureStars {
             record,
             range,
             death,
+            kick,
         })
+    }
+
+    /// The broken line of the core-collapse candidate `index` placed at `position`, whose death and
+    /// kick its first steps found ([`core_collapse_death`](Self::core_collapse_death)): its site
+    /// and its remnant's line as the rest of its test makes them ([`ListedDeath::of`]), bit for
+    /// bit, without that test (P09.T37's cold cost: a far feature's dead placed before they are
+    /// asked the rest); `None` for an index past the list's 13 bits.
+    #[must_use]
+    pub(crate) fn core_collapse_line(
+        &self,
+        galaxy: &Galaxy,
+        (index, position): (u16, &GalacticPosition),
+        (death, kick): (UniverseTime, Option<NatalKick>),
+    ) -> Option<CatalogueMotion> {
+        let (draws, _) = self.core_collapse_draws(galaxy, index)?;
+        let record = self.record(
+            draws.id(),
+            position,
+            draws.primary_initial_mass(),
+            draws.age_at_epoch(),
+        );
+        let velocity = self.velocity;
+        let site = moved(record.epoch_position(), velocity, death);
+        let remnant = kick.map_or(velocity, |kick| {
+            velocity + GalacticVelocity::new(kick.velocity())
+        });
+        Some(CatalogueMotion::broken(site, death, velocity, remnant))
     }
 
     /// The core collapse whose candidate's `death` its first steps found, placed at `position`: the
@@ -1105,6 +1147,8 @@ pub(crate) struct CandidateDeath {
     record: SystemRecord,
     range: (SolarMasses, SolarMasses),
     death: UniverseTime,
+    /// Its remnant's natal kick, as its stars give it (`death_and_kick_by_end`).
+    kick: Option<NatalKick>,
 }
 
 impl CandidateDeath {
@@ -1115,12 +1159,13 @@ impl CandidateDeath {
     pub(crate) const fn of(
         record: SystemRecord,
         range: (SolarMasses, SolarMasses),
-        death: UniverseTime,
+        (death, kick): (UniverseTime, Option<NatalKick>),
     ) -> Self {
         Self {
             record,
             range,
             death,
+            kick,
         }
     }
 
@@ -1128,6 +1173,12 @@ impl CandidateDeath {
     #[must_use]
     pub(crate) const fn death(&self) -> UniverseTime {
         self.death
+    }
+
+    /// Its remnant's natal kick, if it takes one.
+    #[must_use]
+    pub(crate) const fn kick(&self) -> Option<NatalKick> {
+        self.kick
     }
 }
 

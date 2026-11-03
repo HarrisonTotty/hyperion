@@ -235,6 +235,7 @@ pub struct Galaxy {
     companions: CompanionsCell,
     type_ia_delays: TypeIaDelaysCell,
     core_collapse: CoreCollapseCell,
+    lifetime_envelope: LifetimeEnvelopeCell,
     /// The field's share of each component's budget, from generator version 26 (P09.T2.c); none
     /// under the held arm, where the field is the budget.
     field_share: Option<Box<FieldShare>>,
@@ -540,6 +541,7 @@ impl Galaxy {
             companions: CompanionsCell::default(),
             type_ia_delays: TypeIaDelaysCell::default(),
             core_collapse: CoreCollapseCell::default(),
+            lifetime_envelope: LifetimeEnvelopeCell::default(),
             field_share,
             layer_d_kept: None,
             rules,
@@ -590,6 +592,7 @@ impl Galaxy {
             // The core-collapse process reads the classes, so the field galaxy's, were it read,
             // is not this galaxy's.
             core_collapse: CoreCollapseCell::default(),
+            lifetime_envelope: LifetimeEnvelopeCell::default(),
             ..self
         })
     }
@@ -696,6 +699,17 @@ impl Galaxy {
                  P09.T28.b.a's sweep",
             )
         })
+    }
+
+    /// The band-E single stars' lifetimes over initial mass and metallicity under the galaxy's
+    /// stellar rules ([`LifetimeEnvelope`](displaced::envelope::LifetimeEnvelope)), which a listed
+    /// core collapse's death test reads before its track (P09.T37's cold cost): made when first
+    /// read, each metallicity's column too (some 30 ms), and kept.
+    #[must_use]
+    pub(crate) fn lifetime_envelope(&self) -> &displaced::envelope::LifetimeEnvelope {
+        self.lifetime_envelope
+            .0
+            .get_or_init(|| displaced::envelope::LifetimeEnvelope::new(self.rules.stellar))
     }
 
     /// The stellar companions of systems drawn from the galaxy's mass function
@@ -1144,6 +1158,33 @@ impl PartialEq for CompanionsCell {
 impl fmt::Debug for CompanionsCell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("CompanionsCell")
+    }
+}
+
+/// [`Galaxy::lifetime_envelope`]'s value, made when first read, as [`CentreMotionCell`] is, its
+/// columns when first read.
+#[derive(Default)]
+struct LifetimeEnvelopeCell(OnceLock<displaced::envelope::LifetimeEnvelope>);
+
+/// A fresh cell: what it holds is made again on the clone's first read, the same bits.
+impl Clone for LifetimeEnvelopeCell {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+/// Equal always, as [`CentreMotionCell`]: the envelope is a pure function of the galaxy's stellar
+/// rules, which the galaxy's equality compares.
+impl PartialEq for LifetimeEnvelopeCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for LifetimeEnvelopeCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("LifetimeEnvelopeCell")
     }
 }
 

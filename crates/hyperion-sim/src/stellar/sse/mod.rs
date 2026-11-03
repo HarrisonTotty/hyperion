@@ -43,7 +43,7 @@ mod helium;
 mod evolve;
 mod track;
 pub use evolve::{evolve, lifetime, main_sequence_state, turn_off_mass};
-pub(crate) use evolve::{lifetime_by_under, lifetime_under, track_under};
+pub(crate) use evolve::{lifetime_under, track_under};
 #[cfg(test)]
 pub(crate) use track::post_agb_ionising_years;
 pub(crate) use track::{

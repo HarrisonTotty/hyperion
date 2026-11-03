@@ -34,6 +34,7 @@
 pub mod binarity;
 pub mod bound;
 pub mod class_table;
+pub(crate) mod envelope;
 pub mod fields;
 pub mod forms;
 pub mod kick_bins;
@@ -47,7 +48,7 @@ pub use fields::{DisplacedClass, DisplacedFields, DisplacedForm};
 pub use scales::GalaxyScales;
 pub use site::{ExplosionSite, death_in_interval, explosion_site};
 pub(crate) use site::{
-    death_in_interval_by_end, death_in_interval_knowing, death_in_interval_under,
+    death_and_kick_by_end, death_in_interval_knowing, death_in_interval_under, outside_interval,
 };
 
 /// Whether layers D and E hold plan 08's displaced classes (P08.T12, on the record from generator

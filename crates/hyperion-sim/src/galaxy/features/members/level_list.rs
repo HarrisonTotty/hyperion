@@ -59,7 +59,9 @@ use crate::galaxy::snr::ShellEnvironment;
 use crate::id::{CentreMemberId, FeatureMemberId, MemberSlot, SystemId, SystemIdKind};
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
-use crate::stellar::system::SystemStars;
+use crate::stellar::Composition;
+use crate::stellar::remnant::NatalKick;
+use crate::stellar::system::{SystemStars, primary_draws};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, UniverseTime};
 use crate::units::LightYears;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
@@ -302,8 +304,48 @@ enum DeathsStars {
 pub(crate) struct DeathCandidate {
     index: u16,
     bound: LightYears,
-    told: OnceLock<Option<(UniverseTime, LightYears)>>,
+    told: OnceLock<Option<Told>>,
+    placed: OnceLock<Option<Box<Placed>>>,
     kept: OnceLock<Option<Box<KeptDeath>>>,
+}
+
+/// A candidate whose death and kick are told, placed: its candidate's place at the epoch and its
+/// broken line, before the rest of its test is asked.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Placed {
+    candidate: GalacticPosition,
+    motion: CatalogueMotion,
+}
+
+impl Placed {
+    /// Its candidate's place at the epoch.
+    #[must_use]
+    pub(crate) const fn candidate(&self) -> &GalacticPosition {
+        &self.candidate
+    }
+
+    /// Its broken line, which its remnant leaves its candidate's on.
+    #[must_use]
+    pub(crate) const fn motion(&self) -> &CatalogueMotion {
+        &self.motion
+    }
+}
+
+/// A candidate's death's time and its remnant's kick, which its runaway's and its death's tests
+/// keep, with the bound they give: its kick's travel since its death by +H.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Told {
+    death: UniverseTime,
+    kick: Option<NatalKick>,
+    bound: LightYears,
+}
+
+impl Told {
+    /// How far from its candidate's line its remnant lies by +H, with margins over the rounding.
+    #[must_use]
+    pub(crate) const fn bound(&self) -> LightYears {
+        self.bound
+    }
 }
 
 /// Two candidates are the same if their index and bound are: what each step finds is a function
@@ -340,8 +382,9 @@ impl KeptDeaths {
                 let (record, _) = stars.core_collapse_draws(galaxy, index)?;
                 Some(DeathCandidate {
                     index,
-                    bound: bound_before_death(galaxy, &record, bulk),
+                    bound: bound_before_death(galaxy, (&record, stars.composition()), bulk),
                     told: OnceLock::new(),
+                    placed: OnceLock::new(),
                     kept: OnceLock::new(),
                 })
             })
@@ -398,14 +441,10 @@ impl KeptDeaths {
         }
     }
 
-    /// `candidate`'s death's time, if its runaway's and its death's tests keep it, with the bound
-    /// that gives: found when first asked, and kept.
+    /// `candidate`'s death's time and kick, if its runaway's and its death's tests keep it, with the
+    /// bound they give, its kick's `|k| dt` by +H: found when first asked, and kept.
     #[must_use]
-    pub(crate) fn told(
-        &self,
-        galaxy: &Galaxy,
-        candidate: &DeathCandidate,
-    ) -> Option<(UniverseTime, LightYears)> {
+    pub(crate) fn told(&self, galaxy: &Galaxy, candidate: &DeathCandidate) -> Option<Told> {
         *candidate.told.get_or_init(|| {
             let death = self.with_stars(galaxy, |stars| {
                 let (record, range) = stars.core_collapse_draws(galaxy, candidate.index)?;
@@ -415,9 +454,51 @@ impl KeptDeaths {
                 .checked_since(death.death())
                 .expect("two clock times are a span apart")
                 .as_julian_years_f64();
-            let bulk = self.velocity.speed().value() / SPEED_OF_LIGHT;
-            Some((death.death(), death_bound(dt, bulk)))
+            // c = 1 ly a year.
+            let kick = death
+                .kick()
+                .map_or(0.0, |kick| kick.speed().value() / SPEED_OF_LIGHT);
+            let travel = (kick * dt.max(0.0) * (1.0 + 1e-9) + 1e-6)
+                .min(super::source::LISTED_DEATH_REACH.value());
+            Some(Told {
+                death: death.death(),
+                kick: death.kick(),
+                bound: LightYears::new(travel),
+            })
         })
+    }
+
+    /// `candidate` placed, its death and kick told ([`told`](Self::told)): its candidate's place and
+    /// its broken line, made when first asked, and kept.
+    #[must_use]
+    pub(crate) fn placed<'c>(
+        &self,
+        galaxy: &Galaxy,
+        candidate: &'c DeathCandidate,
+    ) -> Option<&'c Placed> {
+        candidate
+            .placed
+            .get_or_init(|| {
+                let told = self.told(galaxy, candidate)?;
+                self.with_stars(galaxy, |stars| {
+                    let position = list_position(
+                        (self.seed, self.word, &self.centre),
+                        ClassId::CORE_COLLAPSE,
+                        stars.profile(),
+                        u32::from(candidate.index) - 1,
+                    );
+                    let motion = stars.core_collapse_line(
+                        galaxy,
+                        (candidate.index, &position),
+                        (told.death, told.kick),
+                    )?;
+                    Some(Box::new(Placed {
+                        candidate: position,
+                        motion,
+                    }))
+                })
+            })
+            .as_deref()
     }
 
     /// `candidate`'s death that the class's test keeps, placed: found when first asked, after its
@@ -436,22 +517,22 @@ impl KeptDeaths {
         candidate
             .kept
             .get_or_init(|| {
-                let (death, bound) = self.told(galaxy, candidate)?;
-                let (position, entry) = self.with_stars(galaxy, |stars| {
-                    let position = list_position(
-                        (self.seed, self.word, &self.centre),
-                        ClassId::CORE_COLLAPSE,
-                        stars.profile(),
-                        u32::from(candidate.index) - 1,
-                    );
+                let told = self.told(galaxy, candidate)?;
+                let bound = told.bound;
+                let placed = *self.placed(galaxy, candidate)?;
+                let position = placed.candidate;
+                let entry = self.with_stars(galaxy, |stars| {
                     let (record, range) = stars.core_collapse_draws(galaxy, candidate.index)?;
-                    let death = CandidateDeath::of(record, range, death);
-                    Some((
-                        position,
-                        stars.core_collapse_entry(galaxy, &position, &death)?,
-                    ))
+                    let death = CandidateDeath::of(record, range, (told.death, told.kick));
+                    stars.core_collapse_entry(galaxy, &position, &death)
                 })?;
                 let motion = *entry.motion();
+                debug_assert_eq!(
+                    motion,
+                    placed.motion,
+                    "{:?}: a death's line is the one its place gave",
+                    entry.member().record().id()
+                );
                 if cfg!(debug_assertions) {
                     let end = clock_end();
                     let line = CatalogueMotion::straight(position, self.velocity).position_at(end);
@@ -472,12 +553,15 @@ impl KeptDeaths {
             .as_deref()
     }
 
-    /// The bytes it owns on the heap: its candidates' buffer by its capacity, and a kept death's
-    /// box for each, room for what their steps find: what a caller's byte-bounded cache charges
-    /// it. Its stars are its list's, or made again.
+    /// The bytes it owns on the heap: its candidates' buffer by its capacity, each with its death's
+    /// time and kick in place: what a caller's byte-bounded cache charges it. The place and the
+    /// kept death a candidate's later steps box are not charged: only a candidate whose bound
+    /// reached a query's sphere has them, some thousand of the inner disc's 35,000 (P09.T37's
+    /// cold cost), and a charge for each candidate's would take the cache's whole budget there.
+    /// Its stars are its list's, or made again.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
-        self.candidates.capacity() * (size_of::<DeathCandidate>() + size_of::<KeptDeath>())
+        self.candidates.capacity() * size_of::<DeathCandidate>()
     }
 }
 
@@ -564,11 +648,17 @@ pub(crate) fn death_bound(dt: f64, b: f64) -> LightYears {
 const KICK_CEILING_KM_S: f64 = 1_000.0;
 
 /// The bound on a core-collapse candidate's remnant's distance from its candidate's line by +H,
-/// from its draws, `record`, before its death is known: its earliest death by the shared lifetime
-/// bracket of its initial mass, or else the interval's longest reach back, the galaxy's longest
-/// window cap and L + 2H, whichever comes later; its feature's bulk speed `speed` ly a year.
+/// from its draws, `record`, of `composition`, before its death is known: its earliest death by
+/// the lifetime envelope of its mass and metallicity (`displaced::envelope`), or else by the
+/// shared lifetime bracket of its mass, or else the interval's longest reach back, the galaxy's
+/// longest window cap and L + 2H, whichever comes later; its feature's bulk speed `speed` ly a
+/// year.
 #[must_use]
-fn bound_before_death(galaxy: &Galaxy, record: &SystemRecord, speed: f64) -> LightYears {
+fn bound_before_death(
+    galaxy: &Galaxy,
+    (record, composition): (&SystemRecord, &Composition),
+    speed: f64,
+) -> LightYears {
     let caps = galaxy.window_caps();
     let longest = caps
         .cap(ShellEnvironment::Field)
@@ -576,11 +666,15 @@ fn bound_before_death(galaxy: &Galaxy, record: &SystemRecord, speed: f64) -> Lig
         .max(caps.cap(ShellEnvironment::Bubble).value());
     let h = CLOCK_WINDOW_H.as_julian_years_f64();
     let cap = longest + LIGHT_CROSSING_L.as_julian_years_f64() + 2.0 * h;
-    let dt = LifetimeBracket::shared()
-        .bracket(record.primary_initial_mass())
-        .map_or(cap, |(least, _)| {
-            (h + record.age_at_epoch().value() - least.value()).min(cap)
-        });
+    let m0 = record.primary_initial_mass();
+    let least = galaxy
+        .lifetime_envelope()
+        .bracket(m0, composition, || primary_draws(galaxy, record))
+        .or_else(|| LifetimeBracket::shared().bracket(m0))
+        .map(|(least, _)| least);
+    let dt = least.map_or(cap, |least| {
+        (h + record.age_at_epoch().value() - least.value()).min(cap)
+    });
     death_bound(dt, speed)
 }
 

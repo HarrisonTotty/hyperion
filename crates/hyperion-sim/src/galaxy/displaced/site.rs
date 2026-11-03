@@ -88,9 +88,11 @@ use crate::stellar::Composition;
 use crate::stellar::brief::{DEAD_MARGIN_FLOOR, STATED_FACTOR};
 use crate::stellar::draws::{StandardNormal, StarDraws};
 use crate::stellar::fates::{FittedFate, FittedFates, STRIPPED_WINDOW, stripped_mark_matters};
+use crate::stellar::remnant::NatalKick;
 use crate::stellar::rules::StellarRules;
-use crate::stellar::sse::{MIN_INITIAL_MASS, lifetime_by_under, lifetime_under};
+use crate::stellar::sse::{MIN_INITIAL_MASS, TrackOptions, fate_to_age, lifetime_under};
 use crate::stellar::system::SystemStars;
+use crate::stellar::system::natal_kick_of;
 use crate::stellar::system::{
     clock_time_of_death, draw_metallicity, primary_draws, primary_eta, track_mass_of,
 };
@@ -246,33 +248,46 @@ pub(crate) fn death_in_interval_under(
 }
 
 /// [`death_in_interval_under`], bit for bit, its exact tier's build stopped where the star outlives
-/// the interval's end, +H, which the verdict needs no further (`lifetime_by_under`): a star alive
-/// then dies after the interval (P09.T37's cold cost: a far feature's core collapses).
+/// the interval's end, +H, which the verdict needs no further (`fate_to_age`), with the natal kick
+/// of a death it finds: bit for bit the kick of the star's model built on the same track
+/// ([`natal_kick_of`]), read from the exact tier's build, which every death in the interval comes
+/// from, without building the star (P09.T37's cold cost).
 ///
 /// # Panics
 ///
 /// As [`death_in_interval`] does.
 #[must_use]
-pub(crate) fn death_in_interval_by_end(
+pub(crate) fn death_and_kick_by_end(
     m0: SolarMasses,
     composition: &Composition,
     eta: StandardNormal,
     age_at_epoch: Years,
     draws: impl FnOnce() -> StarDraws,
     rules: StellarRules,
-) -> Option<UniverseTime> {
+) -> Option<(UniverseTime, Option<NatalKick>)> {
     // A year past +H's age, so that a death at +H itself is built to; a star the build finds
     // alive then has its death past the interval, which no finite age stands for.
     let age_max = Years::new(age_at_epoch.value() + CLOCK_WINDOW_H.as_julian_years_f64() + 1.0);
-    decide(
+    let kick = std::cell::Cell::new(None);
+    let death = decide(
         m0,
         age_at_epoch,
         &given_marks(composition, eta, draws),
         |m, composition, draws| {
-            lifetime_by_under(m, composition, draws, rules, age_max)
-                .unwrap_or(Years::new(f64::INFINITY))
+            let options = TrackOptions::default().with_rules(rules);
+            match fate_to_age(m, composition, draws, options, age_max) {
+                Some(fate) => {
+                    kick.set(Some(natal_kick_of(&fate, draws, (m, composition), rules)));
+                    fate.death.age()
+                }
+                None => Years::new(f64::INFINITY),
+            }
         },
-    )
+    )?;
+    let kick = kick
+        .get()
+        .expect("a death in the interval is the exact tier's, whose build reached it");
+    Some((death, kick))
 }
 
 /// [`death_in_interval_under`] of a primary whose lifetime under its rules is known, `lifetime`:
@@ -642,6 +657,14 @@ fn outside(start: UniverseTime, age_at_epoch: Years, (least, greatest): (Years, 
             Some(t) => t > INTERVAL_END,
             None => least.value() > age_at_epoch.value(),
         }
+}
+
+/// Whether a death at any age in `bracket`, years, of a star `age_at_epoch` old at the epoch,
+/// falls outside the interval (−(`W_cap` + L + H), +H]: the cheap tiers' test, which a tighter
+/// bracket than theirs may be put to (`envelope::LifetimeEnvelope`, P09.T37's cold cost).
+#[must_use]
+pub(crate) fn outside_interval(age_at_epoch: Years, bracket: (Years, Years)) -> bool {
+    outside(interval_start(), age_at_epoch, bracket)
 }
 
 /// The interval's start, −(`W_cap` + L + H), which it excludes: 134,534,593,094,400 s before the
@@ -1059,8 +1082,9 @@ mod tests {
         soundness(10_000);
     }
 
-    /// `death_in_interval_by_end`, whose exact tier stops its build at +H, gives
-    /// `death_in_interval_under`'s verdict bit for bit (P09.T37's cold cost): over band-E masses
+    /// `death_and_kick_by_end`, whose exact tier stops its build at +H, gives
+    /// `death_in_interval_under`'s verdict bit for bit (P09.T37's cold cost), and its kick is the
+    /// star's model's (`SystemStars::natal_kick`, a single star's): over band-E masses
     /// of 8–60 M☉ at two metallicities, under the version's rules and every 27 hold's, at ages
     /// from 5 Myr short of each star's death to 5 Myr past it, its own draws each.
     #[test]
@@ -1089,7 +1113,7 @@ mod tests {
                             || draws.clone(),
                             rules,
                         );
-                        let by_end = death_in_interval_by_end(
+                        let by_end = death_and_kick_by_end(
                             m0,
                             &composition,
                             draws.eta(),
@@ -1097,7 +1121,22 @@ mod tests {
                             || draws.clone(),
                             rules,
                         );
-                        assert_eq!(by_end, under, "{m0:?} at {age:?}, Fe/H {fe_h}");
+                        assert_eq!(
+                            by_end.map(|(t, _)| t),
+                            under,
+                            "{m0:?} at {age:?}, Fe/H {fe_h}"
+                        );
+                        if let Some((_, kick)) = by_end {
+                            let model = crate::stellar::system::StarModel::new_under(
+                                m0,
+                                composition,
+                                draws.clone(),
+                                age,
+                                rules,
+                            )
+                            .unwrap();
+                            assert_eq!(kick, model.natal_kick(), "{m0:?} at {age:?}, Fe/H {fe_h}");
+                        }
                         if under.is_some() {
                             inside += 1;
                         } else {

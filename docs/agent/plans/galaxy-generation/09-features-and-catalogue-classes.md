@@ -6022,6 +6022,17 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Lifetimes._ `displaced::death_in_interval_by_end` stops the exact tier's build at +H
     (`track::fate_to_age`), bit for bit (`a_death_found_by_the_interval_s_end_is_the_death_bit_for_bit`).
   - _Figures._ In the lane's outbox; the 3× target is missed (a finding).
+- **P09.T37, the kicks' cold cost, second pass (lane `fix-p09-recent-dead`, 2026-11-03, under
+  `feature_classes` (26); no output moved at 24–27).**
+  - _Envelope._ `displaced::envelope::LifetimeEnvelope`, held with the galaxy: band-E median-draw
+    lifetimes over 97 masses × 31 [Fe/H] columns, each made when first read; bilinear in ln τ,
+    widened by 3%, four times the worst error over 2 × 10⁴ random stars (0.69%).
+  - _Order._ A candidate's death test asks the envelope first, its bound before death reads it,
+    and its exact tier (`death_and_kick_by_end`) gives the remnant's kick too, bit for bit
+    (`stellar::system::natal_kick_of`), so a told death's bound is its own `|k| dt`.
+  - _Placed._ A told death's place and broken line are tested before its stars are made.
+  - _Charge._ A far feature's dead are charged their candidates; their few boxed steps are not.
+  - _Figures._ In the lane's outbox: the Sun-like target met, the inner disc's missed.
 - **P09.T28.d.c as built (lane `fix-p09-t28d-local-arc`, 2026-11-02, behind `KEPLER_ARC_VERSION`
   = 27; no output moved at 24–26).**
   - _Names._ `motion::spherical::{KEPLER_ARC_VERSION, KeplerArcRules::{Series, Local}}`,

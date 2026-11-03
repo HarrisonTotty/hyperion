@@ -1130,7 +1130,16 @@ fn death_hits<'a>(
         .map_or(&[][..], KeptDeaths::candidates);
     candidates.iter().filter_map(move |candidate| {
         let kept = kept?;
-        if !reaches(candidate.bound()) || !reaches(kept.told(galaxy, candidate)?.1) {
+        if !reaches(candidate.bound()) || !reaches(kept.told(galaxy, candidate)?.bound()) {
+            return None;
+        }
+        // Placed, it is pre-tested on its candidate's line and its remnant on its own before the
+        // rest of its test is asked, which no place outside the sphere needs.
+        let placed = kept.placed(galaxy, candidate)?;
+        let at = placed.motion().position_at(t);
+        if !listed_death_may_reach(galaxy, placed.candidate(), velocity, sphere)
+            || LightYears::from(sphere.centre().distance_to(&at)).value() > sphere.radius().value()
+        {
             return None;
         }
         let death = kept.kept(galaxy, candidate)?;
