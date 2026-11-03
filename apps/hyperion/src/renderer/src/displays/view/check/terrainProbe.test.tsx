@@ -659,6 +659,7 @@ describe("the terrain probe (R10.T16.d)", () => {
       probe.mark(),
       [{ name: "view", style: "photorealistic" }],
       null,
+      false,
     );
     stop();
     expect(record.views[0]?.terrainGaps).toBe(gaps);
