@@ -41,9 +41,8 @@
 //! [`KeplerOrbit`]: through [`Trajectory::new`], which [`position_velocity_at`] and the centre's
 //! source read. The Kepler orbit still sets the bounds read off it (the loss cone's verdict,
 //! P09.T28.c's radius, P09.T29's shells and pads), which hold the exact orbit too. From version 27
-//! (P09.T28.d.c, behind `KEPLER_ARC_VERSION`) an exact orbit not near a circle takes its state
-//! within half a radial period of the epoch by the arc from the epoch ([`spherical`]'s "The arc
-//! from the epoch").
+//! (P09.T28.d.c) an exact orbit not near a circle takes its state within half a radial period of
+//! the epoch by the arc from the epoch ([`spherical`]'s "The arc from the epoch").
 //!
 //! # The range query near the black hole (P09.T29)
 //!
@@ -107,7 +106,7 @@ use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
-use self::spherical::{CentrePotential, KeplerArcRules, SphericalOrbit};
+use self::spherical::{CentrePotential, SphericalOrbit};
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::features::centre::members::CentreMemberRecord;
 use crate::galaxy::features::centre::{BuildCentreError, CentreProfile, LossCone};
@@ -1311,19 +1310,12 @@ enum Law {
 
 impl Trajectory {
     /// The trajectory of `start` in `galaxy`, under its regime's law as the galaxy's rules take it
-    /// (as [`position_velocity_at`]): from generator version 25,
-    /// [`in_potential`](Self::in_potential) in the galaxy's centre's potential (P09.T28.d.b), and
-    /// [`in_potential_by_arc`](Self::in_potential_by_arc) from version 27 (`KEPLER_ARC_VERSION`,
-    /// P09.T28.d.c).
+    /// (as [`position_velocity_at`]): [`in_potential_by_arc`](Self::in_potential_by_arc) in the
+    /// galaxy's centre's potential (P09.T28.d.b, the exact orbit by the arc from the epoch from
+    /// version 27, P09.T28.d.c).
     #[must_use]
     pub fn new(galaxy: &Galaxy, start: EpochState) -> Self {
-        let motion = galaxy.centre_motion();
-        match galaxy.rules().kepler_arc {
-            KeplerArcRules::Series => Self::in_potential(motion, galaxy.centre_potential(), start),
-            KeplerArcRules::Local => {
-                Self::in_potential_by_arc(motion, galaxy.centre_potential(), start)
-            }
-        }
+        Self::in_potential_by_arc(galaxy.centre_motion(), galaxy.centre_potential(), start)
     }
 
     /// The trajectory of `start` about a galaxy's centre whose motion is `motion`

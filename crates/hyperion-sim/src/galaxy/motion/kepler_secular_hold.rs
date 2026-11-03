@@ -452,8 +452,8 @@ fn sort(hits: &mut [SystemHit]) {
 /// source chooses its cells by P09.T29's pads and skips members by their Kepler orbits' shells,
 /// and its hits equal a brute-force scan of every member within 0.2 ly on its exact orbit, for
 /// spheres within 0.1 ly of the black hole a decade either way, as P09.T29's fast test does under
-/// the two-body law: under every 25 hold, the series, and under every 27 hold, the arc from the
-/// epoch (P09.T28.d.c).
+/// the two-body law: under the version's rules and under every 27 hold, the exact orbit taking its
+/// state near the epoch by the arc from the epoch (P09.T28.d.c) under both.
 #[test]
 fn the_centre_s_source_finds_what_a_scan_finds_on_the_exact_orbits() {
     for rules in [
@@ -481,8 +481,7 @@ fn the_centre_s_source_finds_what_a_scan_finds_under(rules: GalaxyRules) {
         .filter(|m| law_of(&Trajectory::new(&galaxy, **m)) == "spherical")
         .count();
     println!(
-        "{:?}: {} members within 0.2 ly, {exact} on exact orbits",
-        rules.kepler_arc,
+        "{} members within 0.2 ly, {exact} on exact orbits",
         members.len()
     );
     assert!(exact * 2 > members.len(), "{exact} of {}", members.len());
@@ -535,8 +534,9 @@ fn the_centre_s_source_finds_what_a_scan_finds_under(rules: GalaxyRules) {
 /// by law, the movers by count, the largest move, every mover finite, no record outside the exact
 /// law moved, every record within the walk's pad and its Kepler orbit's shell, and no placed record
 /// carved out (the loss cone's verdict reads the Kepler orbit, so the carve-outs are
-/// P09.T28.b.b's). Under the version's rules, the series, and under every 27 hold, the arc from the
-/// epoch (P09.T28.d.c), in the three galaxies built under those rules.
+/// P09.T28.b.b's). Under the version's rules and under every 27 hold, in the three galaxies built
+/// under those rules, the exact orbit taking its state near the epoch by the arc from the epoch
+/// (P09.T28.d.c) under both.
 #[test]
 #[ignore = "slow: generates the grid's central cells of every layer for three galaxies twice, \
             some minutes"]

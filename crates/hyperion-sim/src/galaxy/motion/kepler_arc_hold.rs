@@ -1,14 +1,14 @@
-//! The tests of P09.T28.d.c's hold, [`KEPLER_ARC_VERSION`] (decision-galaxy-25-train §1.3's
-//! pattern): its tripwire; and, under every 27 hold against the same rules with the series alone
-//! (`kepler_arc` held), the arc from the epoch moving the Kepler-regime records on exact orbits and
-//! no others, each within the walk's pad and its Kepler orbit's shell (D2); the grid's wide orbits
-//! against a direct integration; and the same seed twice and in any order (D4). The centre's source
-//! against a scan and the census C1 run under every 27 hold beside every 25 hold in
-//! `kepler_secular_hold.rs`.
+//! The tests of the exact orbit's arc from the epoch, from generator version 27 (plan 09,
+//! P09.T28.d.c), under every 27 hold against the series alone: the arc from the epoch moving the
+//! Kepler-regime records on exact orbits and no others, each within the walk's pad and its Kepler
+//! orbit's shell (D2); the grid's wide orbits against a direct integration; and the same seed twice
+//! and in any order (D4). The centre's source against a scan and the census C1 run under every 27
+//! hold beside the version's rules in `kepler_secular_hold.rs`.
 //!
-//! The bit-identity of the version in force is held by the goldens, as for P09.T28.d.b's hold: below
-//! 27 no galaxy builds an exact orbit with the arc, which the tripwire checks. The bump to 27
-//! deletes the tripwire and the held arm, and these become tests of the version's own galaxy.
+//! The version's positions near the centre are pinned by the goldens and by D2's digest. Where a
+//! test needs the state the series alone would give a record, it computes it directly
+//! ([`Trajectory::in_potential`], the exact orbit from the series at every time, which the arc
+//! keeps beyond half a radial period and nearer a circle).
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -18,9 +18,7 @@ use hyperion_testkit::order::assert_order_independent;
 
 use super::kepler_regime_hold::{apart, records_within, years};
 use super::spherical::tests::{distance, integrate, profile_pull, turned};
-use super::spherical::{KEPLER_ARC_VERSION, KeplerArcRules};
 use super::*;
-use crate::GENERATOR_VERSION;
 use crate::galaxy::query::{position_at, walk_pad};
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::{Layer, SystemId};
@@ -37,14 +35,6 @@ const TIMES: [i64; 4] = [-1_000, -100, 100, 1_000];
 /// The relative margin of the shell test, P09.T29's (`SHELL_MARGIN`).
 const SHELL: f64 = 1e-6;
 
-/// Every 27 hold but this one: the exact orbit by the series alone.
-fn series_rules() -> GalaxyRules {
-    GalaxyRules {
-        kepler_arc: KeplerArcRules::Series,
-        ..GalaxyRules::every_27_hold()
-    }
-}
-
 /// The fixture with its kinematic tables, so that its grid systems move, built under every 27
 /// hold, the holds read when a galaxy is built among them: the arc from the epoch.
 fn arc() -> &'static Galaxy {
@@ -60,10 +50,18 @@ fn arc() -> &'static Galaxy {
     })
 }
 
-/// [`arc`]'s galaxy under [`series_rules`].
-fn series() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| arc().clone().with_rules(series_rules()))
+/// `start`'s state at `t` in `galaxy` by the series alone, the arc's oracle:
+/// [`Trajectory::in_potential`]'s.
+fn by_the_series(galaxy: &Galaxy, start: EpochState, t: UniverseTime) -> StateAt {
+    Trajectory::in_potential(galaxy.centre_motion(), galaxy.centre_potential(), start).state_at(t)
+}
+
+/// A grid record's position at `t` in `galaxy` by the series alone ([`by_the_series`]).
+fn position_by_the_series(galaxy: &Galaxy, start: EpochState, t: UniverseTime) -> GalacticPosition {
+    match by_the_series(galaxy, start, t) {
+        StateAt::Exists(state) => *state.position(),
+        StateAt::NoSuchSystem => unreachable!("the cells hold no carved-out record"),
+    }
 }
 
 /// Whether `trajectory` follows an exact orbit and takes its states near the epoch by the arc.
@@ -95,56 +93,6 @@ fn within_bounds(
     padded && shelled
 }
 
-/// P09.T28.d.c is held until the 26 → 27 bump: the rules in force are version 26's and before,
-/// under which an exact orbit takes its state from the series at every time, and no galaxy's
-/// trajectory takes the arc, however its records move.
-#[test]
-fn the_kepler_arc_is_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < KEPLER_ARC_VERSION,
-        "the 26 → 27 bump puts P09.T28.d.c on the record: a non-circular exact orbit's state \
-         within half a radial period of the epoch by the arc from the epoch \
-         (`SphericalOrbit::by_arc`, through `Trajectory::new`). Delete `KEPLER_ARC_VERSION`, \
-         `KeplerArcRules` with its `Series` arm, `GalaxyRules::kepler_arc`, the `match` on it and \
-         this test, in the bump's own checkpoint commit"
-    );
-    let galaxy = Galaxy::from_params(Seed::new(MILKY_WAY_SEED), GalaxyParams::milky_way_like())
-        .expect("the Milky Way fixture builds");
-    assert_eq!(galaxy.rules().kepler_arc, KeplerArcRules::Series);
-    assert_eq!(
-        GalaxyRules::of_version(GENERATOR_VERSION).kepler_arc,
-        KeplerArcRules::Series
-    );
-    assert_eq!(
-        GalaxyRules::every_26_hold_with_its_retargets().kepler_arc,
-        KeplerArcRules::Series
-    );
-    assert_eq!(
-        GalaxyRules::every_27_hold().kepler_arc,
-        KeplerArcRules::Local
-    );
-    // Under the held arm, an exact orbit at 26 takes the series alone.
-    let start = member(PointLy::new(0.3, 0.1, 0.0), [-2e5, 6e5, 1e5]);
-    for rules in [
-        GalaxyRules::of_version(GENERATOR_VERSION),
-        GalaxyRules::every_26_hold_with_its_retargets(),
-    ] {
-        let held = Galaxy::from_params_with_rules(
-            Seed::new(MILKY_WAY_SEED),
-            GalaxyParams::milky_way_like(),
-            rules,
-        )
-        .expect("the Milky Way fixture builds");
-        let trajectory = Trajectory::new(&held, start);
-        assert!(trajectory.exact_orbit().is_some());
-        assert!(!on_the_arc(&trajectory));
-        assert_eq!(
-            trajectory,
-            Trajectory::in_potential(held.centre_motion(), held.centre_potential(), start)
-        );
-    }
-}
-
 /// A centre member at `p` ly moving at `velocity` m/s, whose velocity is its own.
 fn member(p: PointLy, velocity: [f64; 3]) -> EpochState {
     use crate::galaxy::Population;
@@ -173,19 +121,18 @@ fn member(p: PointLy, velocity: [f64; 3]) -> EpochState {
 const ARC_POSITIONS_DIGEST: u64 = 0x0921_95a6_2b91_b2fa;
 
 /// D2 under every 27 hold: the arc from the epoch moves the fixture's Kepler-regime grid records
-/// on exact orbits off the series' positions, bit for bit their trajectories' states, and leaves
-/// every record outside the regime, every one on a Kepler orbit or a near-circular exact one, and
-/// every record at the epoch where the series puts it; no record is made or lost, since the loss
-/// cone's verdict reads the Kepler orbit; and every record on an exact orbit lies within the walk's
-/// pad and its Kepler orbit's shell. Layer B within 1.5 influence radii, at ±100 and ±1,000 yr, as
-/// P09.T28.d.b's D2. Named `pinned` for the WebAssembly suite's filter: the counts and a digest of
-/// the positions are pinned, as blessed natively.
+/// on exact orbits off the series' positions ([`position_by_the_series`]), bit for bit their
+/// trajectories' states, and leaves every record outside the regime, every one on a Kepler orbit or
+/// a near-circular exact one, and every record at the epoch where the series puts it; and every
+/// record on an exact orbit lies within the walk's pad and its Kepler orbit's shell. Layer B within
+/// 1.5 influence radii, at ±100 and ±1,000 yr, as P09.T28.d.b's D2. Named `pinned` for the
+/// WebAssembly suite's filter: the counts and a digest of the positions are pinned, as blessed
+/// natively.
 #[test]
 fn the_arc_moves_records_on_exact_orbits_and_no_others_pinned() {
-    let (series, arc) = (series(), arc());
-    let edge = series.centre_motion().influence_radius().value();
-    let records = records_within(series, Layer::B, 1.5 * edge);
-    assert_eq!(records, records_within(arc, Layer::B, 1.5 * edge));
+    let arc = arc();
+    let edge = arc.centre_motion().influence_radius().value();
+    let records = records_within(arc, Layer::B, 1.5 * edge);
     let mut laws: BTreeMap<&str, u32> = BTreeMap::new();
     let (mut moved, mut farthest, mut positions) = (0_u32, 0.0_f64, Vec::new());
     for record in &records {
@@ -204,7 +151,10 @@ fn the_arc_moves_records_on_exact_orbits_and_no_others_pinned() {
         *laws.entry(law).or_default() += 1;
         for y in TIMES {
             let t = years(y);
-            let (a, b) = (position_at(series, record, t), position_at(arc, record, t));
+            let (a, b) = (
+                position_by_the_series(arc, start, t),
+                position_at(arc, record, t),
+            );
             if law == "arc" {
                 let StateAt::Exists(state) = trajectory.state_at(t) else {
                     unreachable!("an exact orbit exists at every time")
@@ -255,7 +205,7 @@ fn the_arc_moves_records_on_exact_orbits_and_no_others_pinned() {
 /// them over it (research-leans-9's 252 of 6,562 at ±1,000 yr).
 #[test]
 fn the_arc_meets_the_plan_s_bound_on_the_grid_s_wide_orbits() {
-    let (series, arc) = (series(), arc());
+    let arc = arc();
     let motion = arc.centre_motion();
     let pull = profile_pull(motion.profile());
     let edge = motion.influence_radius().value();
@@ -292,8 +242,8 @@ fn the_arc_meets_the_plan_s_bound_on_the_grid_s_wide_orbits() {
                 (orbit.position, orbit.velocity),
                 swept * exact.relativistic_advance_rad() / exact.apsidal_angle_rad(),
             );
-            let error = |galaxy: &Galaxy| {
-                let StateAt::Exists(state) = position_velocity_at(galaxy, &start, t) else {
+            let error = |at: StateAt| {
+                let StateAt::Exists(state) = at else {
                     unreachable!("an exact orbit exists at every time")
                 };
                 let got = GalacticPosition::ORIGIN
@@ -301,7 +251,10 @@ fn the_arc_meets_the_plan_s_bound_on_the_grid_s_wide_orbits() {
                     .metres();
                 distance(got, reference) / bound
             };
-            let (by_arc, by_series) = (error(arc), error(series));
+            let (by_arc, by_series) = (
+                error(position_velocity_at(arc, &start, t)),
+                error(by_the_series(arc, start, t)),
+            );
             state_times += 1;
             series_over += u32::from(by_series > 1.0);
             worst_series = f64::max(worst_series, by_series);

@@ -81,7 +81,7 @@
 //!
 //! # The arc from the epoch (P09.T28.d.c, from version 27)
 //!
-//! Under `KeplerArcRules::Local` ([`SphericalOrbit::by_arc`]) an orbit of Δ at least 0.03
+//! On the arc ([`SphericalOrbit::by_arc`]) an orbit of Δ at least 0.03
 //! (`ARC_LEAST_RANGE`, lean) takes its state at |dt| under half its radial period (`ARC_SPAN`)
 //! from the epoch itself: `t_arc(η) = ∫ dt ÷ dη′` and `ψ_arc(η) = ∫ L ÷ r² · dt ÷ dη′` from η₀ to
 //! η, with `dt ÷ dη = r Δ |sin η| ÷ √F(r)` read from Ψ's table at each node, by the 16-node
@@ -142,14 +142,13 @@
 //! functions, so the table, each orbit's coefficients and every state are the same bits on every
 //! platform. The knots, nodes, terms, step counts and the threshold, and the form of every
 //! expression here, belong to the generator version from 25, when the hold is lifted; the arc's
-//! rule, span, step count, floor and panels, and its η₀, from 27 (`KEPLER_ARC_VERSION`).
+//! rule, span, step count, floor and panels, and its η₀, from 27.
 
 use std::f64::consts::{PI, TAU};
 use std::fmt;
 use std::sync::Arc;
 
 use super::{CentreMotion, KeplerOrbit, cross, dot, length};
-use crate::GeneratorVersion;
 use crate::coords::{GalacticDisplacement, GalacticVelocity};
 use crate::galaxy::consts::G;
 use crate::galaxy::potential::spherical::SphericalMass;
@@ -210,7 +209,7 @@ const ANOMALY_BISECTIONS: u32 = 5;
 pub(crate) const NEAR_CIRCULAR: f64 = 1e-5;
 
 /// The span from the epoch, a share of the radial period, under which an orbit takes its state by
-/// the arc under [`KeplerArcRules::Local`] ("The arc from the epoch"), ½ (lean): to 0.499 of a
+/// the arc ([`SphericalOrbit::by_arc`]; "The arc from the epoch"), ½ (lean): to 0.499 of a
 /// period the arc errs as little as the series.
 const ARC_SPAN: f64 = 0.5;
 
@@ -253,37 +252,6 @@ const ARC_MORE_STEPS: u32 = 5;
 /// and the limit at every node missed the plan's bound by up to 3,000 times at Δ under 3 × 10⁻⁴
 /// (`the_arc_meets_the_plan_s_bound_near_a_circle`), which is why such an orbit keeps the series.
 const ARC_FLOOR: f64 = 1e-8;
-
-/// The generator version from which an exact orbit not near a circle takes its state within half a
-/// radial period of the epoch by the arc from the epoch (plan 09, P09.T28.d.c; "The arc from the
-/// epoch"): 27, the galaxy-side member of the train after 26's.
-///
-/// It is the hold of one call site, a `match` on [`KeplerArcRules`] read from the galaxy's rules:
-/// [`Trajectory::new`](super::Trajectory::new), under [`KEPLER_SECULAR_VERSION`]'s new arm, which
-/// [`position_velocity_at`](super::position_velocity_at) and the centre's source read. Its term
-/// reaches generated output only through [`KEPLER_REGIME_VERSION`]'s and
-/// [`KEPLER_SECULAR_VERSION`]'s swaps.
-///
-/// Below it every galaxy takes the held arm, [`KeplerArcRules::Series`], P09.T28.d.b's code
-/// verbatim, so every position keeps its bits; the tests reach the new arm through
-/// `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold, [`KeplerArcRules`] with its
-/// `Series` arm, the galaxy's `kepler_arc` field and its tripwire
-/// (`the_kepler_arc_is_held_only_until_the_27_bump`).
-///
-/// [`KEPLER_REGIME_VERSION`]: super::KEPLER_REGIME_VERSION
-/// [`KEPLER_SECULAR_VERSION`]: super::KEPLER_SECULAR_VERSION
-pub(crate) const KEPLER_ARC_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// How an exact orbit takes its state (the hold of [`KEPLER_ARC_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum KeplerArcRules {
-    /// Version 26's and before: from the series over the whole radial period at every time
-    /// ([`SphericalOrbit::new`]).
-    Series,
-    /// Version 27's: an orbit of Δ at least 0.03 within half a radial period of its epoch by the arc
-    /// from the epoch, the series beyond and nearer a circle ([`SphericalOrbit::by_arc`]).
-    Local,
-}
 
 /// The centre's potential Ψ as the exact orbit reads it (module documentation): the black hole's
 /// `G M_bh ÷ r` and the rest tabulated, built once from a galaxy's [`CentreMotion`].
@@ -700,8 +668,8 @@ pub struct SphericalOrbit {
     epoch: [f64; 2],
     /// δ, the Schwarzschild advance a radial period, rad.
     advance: f64,
-    /// What the arc from the epoch reads, for a non-circular orbit under
-    /// [`KeplerArcRules::Local`] ([`by_arc`](Self::by_arc)); `None` under the series alone.
+    /// What the arc from the epoch reads, for a non-circular orbit prepared by
+    /// [`by_arc`](Self::by_arc); `None` under the series alone.
     arc: Option<EpochArc>,
 }
 
@@ -1802,17 +1770,18 @@ pub(super) mod tests {
 
     /// A centre member's error against the direct integration from `kepler`'s state `years` from
     /// the epoch, in tenths of its tidal radius at pericentre for a solar mass, the plan's bound:
-    /// under each of `galaxies`' laws, and the two-body law's; with the orbit's Δ, or `None` if the
-    /// state is not bound in Ψ. The reference is Newtonian, turned by the Schwarzschild advance the
+    /// by the series alone ([`Trajectory::in_potential`]), under `galaxy`'s law, the arc from the
+    /// epoch, and by the two-body law; with the orbit's Δ, or `None` if the state is not bound in
+    /// Ψ. The reference is Newtonian, turned by the Schwarzschild advance the
     /// law adds on top (P09.T28.d.a tested its step Newtonian too), and held to a hundredth of the
     /// bound by its own convergence.
     fn errors_against_the_reference(
-        galaxies: [&Galaxy; 2],
+        galaxy: &Galaxy,
         pull: &dyn Fn(f64) -> f64,
         kepler: &KeplerOrbit,
         years: i64,
     ) -> Option<(f64, [f64; 3])> {
-        let motion = galaxies[0].centre_motion();
+        let motion = galaxy.centre_motion();
         let start = EpochState::new(member_at(kepler.position()), kepler.velocity())
             .expect("a finite state");
         let orbit = motion.kepler_orbit(&start).expect("an orbit");
@@ -1820,7 +1789,8 @@ pub(super) mod tests {
             * motion
                 .tidal_radius_at_pericentre(&orbit, SolarMasses::new(1.0))
                 .value();
-        let exact = Trajectory::new(galaxies[0], start).exact_orbit()?.clone();
+        let series = Trajectory::in_potential(motion, galaxy.centre_potential(), start);
+        let exact = series.exact_orbit()?.clone();
         let t = UniverseTime::from_julian_years(years).expect("in the clock window");
         let span = t.since_epoch().as_seconds_f64();
         let (truth, _) = integrate(pull, orbit.position, orbit.velocity, span, 2e-3);
@@ -1838,8 +1808,8 @@ pub(super) mod tests {
             (orbit.position, orbit.velocity),
             swept * exact.advance / exact.apsidal_angle_rad(),
         );
-        let error = |galaxy: &Galaxy| {
-            let StateAt::Exists(state) = position_velocity_at(galaxy, &start, t) else {
+        let error = |at: StateAt| {
+            let StateAt::Exists(state) = at else {
                 panic!("outside the loss cone")
             };
             let got = GalacticPosition::ORIGIN
@@ -1850,7 +1820,11 @@ pub(super) mod tests {
         let two_body = distance(orbit.propagate(Seconds::new(span)).position, finer) / bound;
         Some((
             exact.log_range,
-            [error(galaxies[0]), error(galaxies[1]), two_body],
+            [
+                error(series.state_at(t)),
+                error(position_velocity_at(galaxy, &start, t)),
+                two_body,
+            ],
         ))
     }
 
@@ -1862,8 +1836,8 @@ pub(super) mod tests {
     /// pericentre for a solar mass (P09.T28.c), the plan's bound, where the two-body law misses it
     /// on every eccentric orbit:
     ///
-    /// - under the version's rules, the series, on every orbit but one from 0.1 ly at 1.6 times the
-    ///   circular speed, bound only at 1.7 × 10⁴ ly, which misses by some 173 tenths in
+    /// - by the series alone, computed directly, on every orbit but one from 0.1 ly at 1.6 times
+    ///   the circular speed, bound only at 1.7 × 10⁴ ly, which misses by some 173 tenths in
     ///   `MGE_BOXY`'s potential (P15.T3.c; some 22 before it), half the two-body law's 345 (a
     ///   finding, pinned as it stands: research-leans-9);
     /// - under every 27 hold, the arc from the epoch, on every orbit, that one included, and on
@@ -1872,20 +1846,13 @@ pub(super) mod tests {
     #[test]
     fn the_exact_orbit_meets_the_plan_s_bound_against_a_direct_integration() {
         let seed = Seed::new(0x0928_d0b0_0000_0002);
-        let series = Galaxy::from_params_with_rules(
-            seed,
-            GalaxyParams::milky_way_like(),
-            GalaxyRules::of_version(crate::GENERATOR_VERSION),
-        )
-        .expect("the Milky Way fixture builds");
         let arc = Galaxy::from_params_with_rules(
             seed,
             GalaxyParams::milky_way_like(),
             GalaxyRules::every_27_hold(),
         )
         .expect("the Milky Way fixture builds under every 27 hold");
-        let motion = series.centre_motion();
-        assert_eq!(motion, arc.centre_motion(), "the same centre under either");
+        let motion = arc.centre_motion();
         let pull = profile_pull(motion.profile());
         let (mut widest, mut arc_worst) = (0.0_f64, 0.0_f64);
         for r in [0.1, 1.0, 5.0] {
@@ -1893,11 +1860,10 @@ pub(super) mod tests {
             for (factor, tilt) in BOUND_CASES {
                 for years in [-1_000, 1_000] {
                     let kepler = orbit_at(motion, r, factor, tilt);
-                    let (log_range, errors) =
-                        errors_against_the_reference([&series, &arc], &pull, &kepler, years)
-                            .unwrap_or_else(|| {
-                                panic!("{r} ly, ×{factor} at {tilt}: not the exact orbit")
-                            });
+                    let (log_range, errors) = errors_against_the_reference(
+                        &arc, &pull, &kepler, years,
+                    )
+                    .unwrap_or_else(|| panic!("{r} ly, ×{factor} at {tilt}: not the exact orbit"));
                     println!(
                         "r {r} ly, ×{factor} at {tilt} rad (Δ {log_range:.2e}), {years} yr: \
                          series {:.2e}, arc {:.2e}, two-body {:.3e}",
@@ -1929,7 +1895,7 @@ pub(super) mod tests {
                 for years in [-1_000, -100, 100, 1_000] {
                     let kepler = orbit_at(motion, r, factor, 0.3);
                     let Some((log_range, errors)) =
-                        errors_against_the_reference([&series, &arc], &pull, &kepler, years)
+                        errors_against_the_reference(&arc, &pull, &kepler, years)
                     else {
                         continue;
                     };
