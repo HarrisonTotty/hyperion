@@ -30,7 +30,8 @@ import {
   type TextureHandle,
   type WgslMaterialSpec,
 } from "../types";
-import { pipelineOutputs, samplerKey, WebGpuRenderEngine } from "./engine";
+import { samplerKey, WebGpuRenderEngine } from "./engine";
+import { pipelineOutputs } from "./pipelineOutputs";
 
 /** An engine over a fake device with `features`. */
 async function engineOn(features: ReadonlyArray<GPUFeatureName> = []): Promise<{
@@ -1656,6 +1657,84 @@ describe("the engine's ID target (plan R14, R14.T2.b)", () => {
       gpu.renderPipelines.map((pipeline) => pipeline.descriptor.fragment?.targets[0]?.format),
       gpu.renderPipelines.length - made,
     ]).toEqual([["r32uint"], 0]);
+  });
+});
+
+/** A material with no resources writing `type` at `@location(0)`. */
+function writerOf(name: string, type: "vec4f" | "u32"): WgslMaterialSpec {
+  return {
+    ...SYNC_TILED,
+    name,
+    textures: [],
+    fragmentWgsl: `@fragment fn fragmentMain() -> @location(0) ${type} { return ${type}(); }`,
+  };
+}
+
+describe("a material's output against its target's format (plan R14, R14.T2.b's finding)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("refuses to prepare a vec4f output into an r32uint target, making no pipeline", async () => {
+    const { engine, gpu } = await engineOn();
+    const material = engine.createMaterial(writerOf("colours", "vec4f"));
+    const made = gpu.renderPipelines.length;
+    await expect(
+      engine.prepareMaterial(
+        material,
+        [{ colour: "r32uint", depth: true }],
+        [indexedTriangle(engine)],
+      ),
+    ).rejects.toThrow("material colours writes vec4f at @location(0), but r32uint takes u32");
+    expect(gpu.renderPipelines.length - made).toBe(0);
+  });
+
+  it("refuses to prepare a u32 output into an rgba16float target", async () => {
+    const { engine } = await engineOn();
+    const material = engine.createMaterial(writerOf("ids", "u32"));
+    await expect(
+      engine.prepareMaterial(material, ["rgba16float"], [indexedTriangle(engine)]),
+    ).rejects.toThrow("material ids writes u32 at @location(0), but rgba16float takes vec4f");
+  });
+
+  it("prepares a u32 output into r32uint and a vec4f output into rgba16float", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const made = gpu.renderPipelines.length;
+    await engine.prepareMaterial(
+      engine.createMaterial(writerOf("ids", "u32")),
+      [{ colour: "r32uint", depth: true }],
+      [mesh],
+    );
+    await engine.prepareMaterial(
+      engine.createMaterial(writerOf("colours", "vec4f")),
+      [{ colour: "rgba16float", depth: true }],
+      [mesh],
+    );
+    expect(
+      gpu.renderPipelines
+        .slice(made)
+        .map((pipeline) => pipeline.descriptor.fragment?.targets[0]?.format),
+    ).toEqual(["r32uint", "rgba16float"]);
+  });
+
+  it("refuses a vec4f output compiled for r32uint with no mesh, as the catalogue compiles it", async () => {
+    const { engine } = await engineOn();
+    await expect(
+      engine.createMaterialAsync(writerOf("colours", "vec4f"), ["r32uint"]),
+    ).rejects.toThrow("material colours writes vec4f at @location(0), but r32uint takes u32");
+  });
+
+  it("refuses a draw of a vec4f output into an ID target", async () => {
+    const { engine } = await engineOn();
+    const { ids } = idTargets(engine);
+    const draw = drawItem(
+      indexedTriangle(engine),
+      engine.createMaterial(writerOf("colours", "vec4f")),
+    );
+    expect(() => {
+      ids.render(frameOf("ids", [draw]));
+    }).toThrow("material colours writes vec4f at @location(0), but r32uint takes u32");
   });
 });
 

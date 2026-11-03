@@ -14,14 +14,37 @@ import {
   fakeDevice,
 } from "../../test/countingRenderEngine";
 import { EngineUnavailable } from "../engine/resilientEngine";
+import { assertOutputsFit } from "../engine/webgpu/materials";
+import { pipelineOutputs } from "../engine/webgpu/pipelineOutputs";
 import type { MaterialHandle, MeshHandle, MeshSpec } from "../engine/types";
 import { terrainMeshSpec } from "./gpu/resources";
 import {
   COMPILE_MESH_NAME,
   sessionMaterials,
+  type TerrainMaterialKind,
   TerrainMaterialSet,
   terrainMaterialOf,
 } from "./materialSet";
+
+/** Every kind of terrain material, each as a key, so that a kind left out fails to compile. */
+const KINDS: Readonly<Record<TerrainMaterialKind, true>> = {
+  lit: true,
+  "lit-emissive": true,
+  "lit-interior": true,
+  "lit-emissive-interior": true,
+  "lit-cluster": true,
+  "lit-emissive-cluster": true,
+  depth: true,
+  "depth-cluster": true,
+  wire: true,
+  "wire-cluster": true,
+  shadow: true,
+  "shadow-cluster": true,
+};
+/** The kinds of {@link KINDS}. */
+const TERRAIN_MATERIAL_KINDS = Object.keys(KINDS).filter(
+  (kind): kind is TerrainMaterialKind => kind in KINDS,
+);
 
 /** Each compile asked of `engine` from the `from`-th, as `name targets meshes`. */
 function compiles(engine: CountingRenderEngine, from = 0): string[] {
@@ -200,6 +223,26 @@ describe("terrainMaterialOf (R10.T14.d)", () => {
       ["terrain-lit-interior-baked-offsets", ["rgba16float"], "lit"],
       ["terrain-lit-emissive-interior-baked-offsets", ["rgba16float"], "lit"],
     ]);
+  });
+
+  it("writes into each of its targets an output the target's format takes (plan R14, R14.T2.b's finding)", () => {
+    const refused: string[] = [];
+    for (const kind of TERRAIN_MATERIAL_KINDS) {
+      for (const path of ["face-differences", "baked-offsets"] as const) {
+        const { spec, targets } = terrainMaterialOf(kind, path, { depthClipControl: true });
+        try {
+          assertOutputsFit(
+            spec,
+            targets
+              .flatMap((target) => pipelineOutputs(target, "bgra8unorm"))
+              .map(([format]) => format),
+          );
+        } catch (error: unknown) {
+          refused.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+    expect(refused).toEqual([]);
   });
 
   it("makes the caster unclipped exactly where the device offers depth-clip-control (R10.T9.b)", () => {

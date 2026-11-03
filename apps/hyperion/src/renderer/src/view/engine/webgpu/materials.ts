@@ -10,6 +10,7 @@
  */
 
 import { COLOUR_WRITE_ALL } from "../gpuFlags";
+import { assertFragmentOutputFits } from "./fragmentOutput";
 import {
   POST_PROCESS_BINDINGS,
   type SamplerSpec,
@@ -81,6 +82,25 @@ export function samplerBindingType(spec: SamplerSpec): GPUSamplerBindingType {
  * `DepthLayerTarget` (plan R10, R10.T9.b), which always has depth.
  */
 export type PipelineColour = GPUTextureFormat | "depth-only";
+
+/**
+ * Checks that `spec`'s fragment output is one each colour format of `formats` takes, before any
+ * pipeline of it is made, or where none is (plan R14, R14.T2.b's finding); `depth-only` has no
+ * colour target, and takes any output.
+ *
+ * @throws Error naming the material, the format and the two types, as
+ *   {@link assertFragmentOutputFits} does.
+ */
+export function assertOutputsFit(
+  spec: WgslMaterialSpec,
+  formats: ReadonlyArray<PipelineColour>,
+): void {
+  for (const format of formats) {
+    if (format !== "depth-only") {
+      assertFragmentOutputFits(spec, ENTRY_POINTS.fragment, format);
+    }
+  }
+}
 
 /** What a specification binds in `@group(2)`. */
 export interface ResourceBindings {
@@ -242,10 +262,12 @@ export interface MaterialModules {
  * says, and keeps its fragment stage, so that a material may `discard`; its depth state is the
  * material's, as into any target with depth. A material with `unclippedDepth` takes
  * `primitive.unclippedDepth`, which the engine refuses earlier without `depth-clip-control`. Into
- * an integer format (an ID target's `r32uint`, plan R14, R14.T2.b) no material blends.
+ * an integer format (an ID target's `r32uint`, plan R14, R14.T2.b) no material blends, and into
+ * any colour format the fragment's output must be one the format takes ({@link assertOutputsFit}).
  *
  * @throws Error naming the material and the format for a blending material into an integer
- *   format, whose pipeline the device would refuse.
+ *   format, or naming the material, the format and the two types for a fragment output the format
+ *   does not take, whose pipeline the device would refuse.
  */
 export function materialPipelineDescriptor(
   spec: WgslMaterialSpec,
@@ -263,6 +285,7 @@ export function materialPipelineDescriptor(
       `material ${spec.name} blends ${spec.blend} into ${colourFormat}, which no blend takes`,
     );
   }
+  assertOutputsFit(spec, [colourFormat]);
   return {
     label: spec.name,
     layout,

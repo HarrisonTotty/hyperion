@@ -80,15 +80,16 @@ import {
 import { KernelCache } from "./kernelCache";
 import { resolveKernelResources } from "./kernelResources";
 import {
+  assertOutputsFit,
   FULL_SCREEN_WGSL,
   materialBindings,
   type MaterialModules,
-  type PipelineColour,
   postProcessBindings,
   samplerDescriptor,
 } from "./materials";
 import { MeshRecord } from "./meshes";
 import { MipGenerator } from "./mipmaps";
+import { pipelineOutputs } from "./pipelineOutputs";
 import {
   assertSplatInputs,
   assertSplatSupported,
@@ -114,35 +115,7 @@ import {
 import { WebGpuRenderTarget } from "./target";
 import { PASSES_PER_FRAME, PassTimer } from "./timing";
 import { assertDrawStruct, OFFSET_MEMBER, uniformLayout } from "./uniforms";
-import { srgbViewFormat, WebGpuView } from "./view";
-
-/**
- * The colour formats, with or without depth, a material's pipelines are made for ahead of its
- * draws, for one of `createMaterialAsync`'s targets or `prepareMaterial`'s (a colour format with
- * its depth or without it alone, R10.T14.d; `depth-only`, a depth-layer target's passes, with
- * depth and no colour, R10.T9.b).
- */
-export function pipelineOutputs(
-  target: PreparedTarget,
-  preferredCanvas: GPUTextureFormat,
-): Array<readonly [PipelineColour, boolean]> {
-  if (typeof target === "object") {
-    return [[target.colour, target.depth]];
-  }
-  if (target === "canvas") {
-    return [[srgbViewFormat(preferredCanvas), true]];
-  }
-  if (target === "canvas-in-pass") {
-    return [[preferredCanvas, true]];
-  }
-  if (target === "depth-only") {
-    return [["depth-only", true]];
-  }
-  return [
-    [target, true],
-    [target, false],
-  ];
-}
+import { WebGpuView } from "./view";
 
 /**
  * The engine's sampler cache's key of `spec`: its filter, its address mode and its comparison
@@ -497,7 +470,12 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
    * @remarks
    * A canvas target is the preferred canvas format's sRGB view with depth, `canvas-in-pass` the
    * format itself with depth (R07.T15's pass, which encodes); a colour target is made both with and
-   * without depth, since a target may have either.
+   * without depth, since a target may have either. A fragment output a target's format does not
+   * take is refused by name for each target, with `meshes` or none, as the catalogue's compile
+   * makes it (plan R14, R14.T2.b's finding).
+   *
+   * @throws Error, as a rejection, naming the material, the format and the two types for a fragment
+   *   output a target's format does not take ({@link assertOutputsFit}).
    */
   async createMaterialAsync(
     spec: WgslMaterialSpec,
@@ -513,6 +491,10 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     }
     const preferred = navigator.gpu.getPreferredCanvasFormat();
     const outputs = targets.flatMap((target) => pipelineOutputs(target, preferred));
+    assertOutputsFit(
+      spec,
+      outputs.map(([format]) => format),
+    );
     await Promise.all(
       meshes.flatMap((mesh) =>
         outputs.map(([format, hasDepth]) =>
@@ -538,6 +520,10 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     }
     const preferred = navigator.gpu.getPreferredCanvasFormat();
     const outputs = targets.flatMap((target) => pipelineOutputs(target, preferred));
+    assertOutputsFit(
+      record.spec,
+      outputs.map(([format]) => format),
+    );
     await Promise.all(
       records.flatMap((mesh) =>
         outputs.map(([format, hasDepth]) =>

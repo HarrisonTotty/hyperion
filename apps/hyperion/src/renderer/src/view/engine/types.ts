@@ -629,8 +629,10 @@ export interface RenderEngine {
    * A pipeline depends on the mesh's vertex layout as well; a mesh not named here has its pipeline
    * made asynchronously at its first draw, which is left out until it is ready.
    *
-   * @throws Error, as a rejection, naming the material and the compiler's messages; or naming the
-   *   material and `depth-clip-control`, as {@link RenderEngine.createMaterial} throws it.
+   * @throws Error, as a rejection, naming the material and the compiler's messages; naming the
+   *   material and `depth-clip-control`, as {@link RenderEngine.createMaterial} throws it; or naming
+   *   the material, a target's format and the two types, for a fragment output the format does not
+   *   take, `meshes` or none (plan R14, R14.T2.b's finding).
    */
   createMaterialAsync(
     spec: WgslMaterialSpec,
@@ -652,7 +654,9 @@ export interface RenderEngine {
    * compile, already reported, is not prepared.
    *
    * @throws Error, as a rejection, where a pipeline could not be made, or the material or a mesh
-   *   was released; a draw then makes the pipeline itself.
+   *   was released; a draw then makes the pipeline itself. A fragment output a target's format
+   *   does not take is refused by name, the material, the format and the two types (plan R14,
+   *   R14.T2.b's finding), and again by a draw that would make the pipeline.
    */
   prepareMaterial(
     material: MaterialHandle,

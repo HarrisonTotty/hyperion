@@ -2203,6 +2203,17 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - The drawing path's tests are in `engine.test.ts`, on the fake GPU, beside `drawing.test.ts`'
     key; `resources.ts` is unchanged (its texel sizes had `r32uint`) and `memory.ts` changed in its
     docs alone.
+  - Its finding, fixed (`fix-material-target-format`): a material's `fragmentMain` output at
+    `@location(0)`, read from its WGSL's text (`webgpu/fragmentOutput.ts`; WebGPU has no
+    reflection), must be one the target's format takes (WebGPU §10.3.4: sample type, component
+    count, a `vec4` to blend, and an output where colour is written). `assertOutputsFit`
+    (`webgpu/materials.ts`) refuses a mismatch by name, the material, the format (the engine is
+    given formats, not targets) and the two types, at `prepareMaterial`, at `createMaterialAsync`
+    (meshes or none, so the catalogue's compile checks it) and at the pipeline's descriptor, which
+    a draw reaches while its pipeline is unmade (an async material's first draw throws, later ones
+    skip it). A source the reader cannot read is left to the device; every catalogue material
+    reads. `pipelineOutputs` moved from `webgpu/engine.ts` to `webgpu/pipelineOutputs.ts`, which
+    tests outside the adapter may import.
 - **R14.T1.g** (`r14-terrain-fin`):
   - A slot holds 116 records (`TERRAIN_PAGE_CLUSTERS`, `CLUSTER_RECORDS_SLOT_BYTES` 3,712 B): the
     96 blocks and strips, then 8 `terrain-head` runs (shape code 4) and 12 `terrain-fin` runs (code
