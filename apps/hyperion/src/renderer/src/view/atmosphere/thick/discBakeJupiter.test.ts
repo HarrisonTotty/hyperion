@@ -1,7 +1,9 @@
 /**
  * The hand Jupiter's disc table over its envelope's deck (plan R08, R08.T16.b.2), by hand under
  * `HYPERION_SLOW_TESTS=1`: its upper medium on its floor's level surface, J and the deck's table
- * T15's split bakes at the floor, against the routed full passes' twins from 10⁹ m.
+ * T15's split bakes at the floor, against the routed full passes' twins from 10⁹ m, and across the
+ * 10⁹ m boundary's hysteresis with the full passes' black disc on the medium's own datum, below the
+ * deck's (research-rm4-rm5-close-out §1.3).
  *
  * @remarks
  * The deck's preparation and its three bands' bakes take about 80 s on a pod, and the table's and
@@ -23,7 +25,9 @@ import {
 } from "../../../test/discAirCases";
 import { handJupiterDetail } from "../../../test/giantFixtures";
 import { absorberCurveSlots, assembleMedium } from "../assemble";
+import { GAS_GIANT_FULL_PASS_BOUNDARY_M } from "../../bodies/regime";
 import { DISC_LAYER_BYTES, discTableBytes, discTableHalves } from "../discTable";
+import type { SpheroidFigure } from "../oblate";
 import { thickBakeBands, thickBakeLights } from "./bake";
 import { bakeDeck, prepareDeck } from "./deck";
 import { deckDatumOf, upperMediumOf } from "./deckRead";
@@ -43,8 +47,11 @@ const LIMIT_MS = 1_800_000;
 /** The routed passes' converged march: sixteen times high's samples, on 60 radii and 16 azimuths. */
 const CONVERGED_COUNTS = { marchScale: 16, radii: 60, azimuths: 16 } as const;
 
-/** The hand Jupiter's upper medium over its deck, as a disc air case, its deck's bands baked. */
-function jupiterOverItsDeck(): DiscAirCase {
+/**
+ * The hand Jupiter's upper medium over its deck, as a disc air case, its deck's bands baked, and its
+ * medium's own datum, the column's base, on which a routed envelope's full passes draw its disc.
+ */
+function jupiterOverItsDeck(): { readonly item: DiscAirCase; readonly datum: SpheroidFigure } {
   const assembled = assembleMedium(recordInput(detailOf(handJupiterDetail())), { envelopes: true });
   const { medium, drawn } = assembled;
   if (medium === undefined || drawn.envelope === undefined) {
@@ -60,7 +67,7 @@ function jupiterOverItsDeck(): DiscAirCase {
     bottomRadiusM: drawn.bottomRadiusM,
   };
   const deck = thickBakeBands(body).map((_, band) => bakeDeck(prepared, body, band));
-  return {
+  const item: DiscAirCase = {
     name: "the hand Jupiter over its deck",
     medium: upperMediumOf(medium, floorM),
     sources: drawn.sources,
@@ -71,17 +78,31 @@ function jupiterOverItsDeck(): DiscAirCase {
     },
     deck,
   };
+  return { item, datum: drawn.body.figure };
 }
+
+/** Where the switch's full passes are read, m: the 10⁹ m boundary (`regime.ts`). */
+const FULL_PASSES_AT_M = GAS_GIANT_FULL_PASS_BOUNDARY_M;
+
+/**
+ * Where the switch's table is read, m: 1.15 × 10⁹ m, past the boundary's hysteresis
+ * (`REGIME_HYSTERESIS`, a table from 1.1 × 10⁹ m), as smoke part 9's hand Jupiter stands.
+ */
+const TABLE_AT_M = 1.15e9;
+
+/** T16.b.2's bound on the table against the routed march from 10⁹ m: 3.6%. */
+const SWITCH_BOUND = 0.036;
 
 describe("the hand Jupiter's disc table over its deck (R08.T16.b.2, by hand)", () => {
   let jupiter: DiscAirCase | undefined;
+  let datum: SpheroidFigure | undefined;
   let baked: BakedDiscAir | undefined;
   let twins: FullPassTwins | undefined;
   beforeAll(() => {
     if (!SLOW) {
       return;
     }
-    jupiter = jupiterOverItsDeck();
+    ({ item: jupiter, datum } = jupiterOverItsDeck());
     baked = bakedDiscAir(jupiter);
     twins = fullPassTwins(jupiter, baked);
   }, LIMIT_MS);
@@ -89,11 +110,17 @@ describe("the hand Jupiter's disc table over its deck (R08.T16.b.2, by hand)", (
     readonly jupiter: DiscAirCase;
     readonly baked: BakedDiscAir;
     readonly twins: FullPassTwins;
+    readonly datum: SpheroidFigure;
   } => {
-    if (jupiter === undefined || baked === undefined || twins === undefined) {
+    if (
+      jupiter === undefined ||
+      baked === undefined ||
+      twins === undefined ||
+      datum === undefined
+    ) {
       throw new Error("the hand Jupiter's table is baked before the tests");
     }
-    return { jupiter, baked, twins };
+    return { jupiter, baked, twins, datum };
   };
 
   it.skipIf(!SLOW)(
@@ -139,6 +166,52 @@ describe("the hand Jupiter's disc table over its deck (R08.T16.b.2, by hand)", (
           const step = product.disc[c] / product.routed[c] - 1;
           expect(step).toBeGreaterThan(-0.05);
           expect(step).toBeLessThan(0.02);
+        }
+      },
+      LIMIT_MS,
+    );
+
+    it.skipIf(!SLOW)(
+      `loses no deck light at the switch at a phase of ${phaseDeg}°: its full passes at 1.0 × 10⁹ m, their black disc on the medium's own datum below the deck's, read as with nothing drawn, and their mean radiance within T16.b.2's 3.6% of its table's at 1.15 × 10⁹ m (research-rm4-rm5-close-out §1.3)`,
+      () => {
+        const { jupiter: item, baked: table, twins: passes, datum: below } = built();
+        const nothingDrawn = integratedRadianceAt(
+          item,
+          table,
+          passes,
+          phaseDeg,
+          {},
+          {
+            distanceM: FULL_PASSES_AT_M,
+          },
+        );
+        const onDatum = integratedRadianceAt(
+          item,
+          table,
+          passes,
+          phaseDeg,
+          {},
+          {
+            distanceM: FULL_PASSES_AT_M,
+            routedDisc: below,
+          },
+        );
+        const far = integratedRadianceAt(
+          item,
+          table,
+          passes,
+          phaseDeg,
+          {},
+          {
+            distanceM: TABLE_AT_M,
+          },
+        );
+        expect(below.equatorialRadiusM).toBeLessThan(item.body.figure.equatorialRadiusM);
+        expect(onDatum.routed).toEqual(nothingDrawn.routed);
+        for (const c of [0, 1, 2] as const) {
+          const step =
+            far.disc[c] / far.solidAngleSr / (onDatum.routed[c] / onDatum.solidAngleSr) - 1;
+          expect(Math.abs(step)).toBeLessThan(SWITCH_BOUND);
         }
       },
       LIMIT_MS,

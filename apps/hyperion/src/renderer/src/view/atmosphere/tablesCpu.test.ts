@@ -133,6 +133,7 @@ import {
   type RayMarchSettings,
   rayMarchRayTwin,
   rayMarchTexelTwin,
+  rayMarchTexelsTwin,
   rayMarchTwin,
   rayPieces,
   skyViewRayTwin,
@@ -1248,6 +1249,71 @@ describe("the per-frame twins' steps", () => {
     }
     expect(off).toEqual([]);
     expect([grounds > 0, skies > 0]).toEqual([true, true]);
+  });
+
+  // R08.T16.b.2: over a deck the ground is read wherever the ray reaches the datum before a drawn
+  // surface, so that a disc drawn below the deck's datum never hides the deck.
+  it("read a deck through a surface drawn beyond the datum's hit as with nothing drawn, from above the air, and with no deck leave that surface's ground unread", () => {
+    const orbit = twinView(equatorCamera(WGS84, 400_000), sunAt(30), WGS84, 0.1);
+    const settings = { ...TABLE_SIZES.high, rayMarchSamples: 24, marchDepthSteps: null };
+    const pattern = patternedDeckTables(
+      [{ gravityRatio: 1, latitudeRad: 0, bottomRadiusM: R1, coefficientFactor: 1 }],
+      kernelMedium(R05_EARTH_REFERENCE),
+      1,
+      1_000,
+    );
+    const lit = { ...earth, deck: packDeckTable(pattern.map((band) => withSlotsOf(band, 0.01))) };
+    const off: string[] = [];
+    let compared = 0;
+    for (let y = 0; y < 32; y += 4) {
+      for (let x = 0; x < 64; x += 8) {
+        const bare = rayMarchRayTwin(
+          R05_EARTH_REFERENCE,
+          orbit,
+          (x + 0.5) / 64,
+          (y + 0.5) / 32,
+          0,
+          settings,
+        );
+        if (bare?.bareGroundM === null || bare?.bareGroundM === undefined) {
+          continue;
+        }
+        // A disc 5 km below the deck's datum, as a routed envelope's stands on its column's base.
+        const below = rayMarchRayAlongTwin(
+          R05_EARTH_REFERENCE,
+          orbit,
+          orbit.cameraM,
+          bare.ray.direction,
+          bare.bareGroundM + 5_000,
+        );
+        if (below === null) {
+          off.push(`texel (${x}, ${y})'s ray to the drawn disc`);
+          continue;
+        }
+        const nothingDrawn = rayMarchTexelsTwin(lit, orbit, settings, bare);
+        const overDisc = rayMarchTexelsTwin(lit, orbit, settings, below);
+        const noDeck = rayMarchTexelTwin(earth, orbit, settings, below);
+        if (
+          ![0, 1, 2, 3].every(
+            (c) =>
+              overDisc.light[c] === nothingDrawn.light[c] &&
+              overDisc.transmittance[c] === nothingDrawn.transmittance[c],
+          )
+        ) {
+          off.push(`texel (${x}, ${y}) over the deck`);
+        }
+        // With no deck the march ends at the datum and lets the drawn disc's own light through.
+        if (
+          !(noDeck[3] > 0) ||
+          ([0, 1, 2] as const).some((c) => !(noDeck[c] < nothingDrawn.light[c]))
+        ) {
+          off.push(`texel (${x}, ${y}) with no deck`);
+        }
+        compared += 1;
+      }
+    }
+    expect(off).toEqual([]);
+    expect(compared).toBeGreaterThan(0);
   });
 
   // R08.T8.e: high's count by a segment's optical depth (`marchSteps.ts`'s `marchSamplesOf`), and

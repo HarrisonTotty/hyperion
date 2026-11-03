@@ -61,8 +61,8 @@
  * **A cloud deck** ({@link TwinOptions.deck}, R08.T15.a.2; `thick/deckRead.ts`): the twin draws the
  * deck's upper medium alone (`upperMediumOf`), its ground the split, on the deck's datum
  * (`deckDatumOf`, a sphere's radius raised by the split), with the deck's J above it and the
- * correction over it as its thick table, and where a ray from orbit meets the deck, nothing drawn
- * there, the march reads the deck's own tables in place of the bare ground's albedo, as the kernels
+ * correction over it as its thick table, and where a ray from orbit meets the deck before anything
+ * drawn, the march reads the deck's own tables in place of the bare ground's albedo, as the kernels
  * over a deck do (`hillaire.ts`'s `withDeckRead`). The observers stand where the case puts them, on
  * its own datum. The deck's bake is made on the case's own body (`twinBakeBody`), whose split
  * `thick/deck.ts`'s `prepareDeck` takes.

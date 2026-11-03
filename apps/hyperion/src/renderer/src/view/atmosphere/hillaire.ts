@@ -1299,7 +1299,7 @@ export function withThermalSource(
 /**
  * The deck read's rewrites of a thick ray march's bare ground (plan R08, R08.T15.a.2;
  * `thick/deckRead.ts`): each source's light on the bare ground, where the ray meets the kernels'
- * datum with nothing drawn, is `deckRead.wgsl`'s `deckGroundAt` in place of the Lambertian
+ * datum before any drawn surface ({@link DECK_GROUND}), is `deckRead.wgsl`'s `deckGroundAt` in place of the Lambertian
  * max(μ₀, 0) A ÷ π, its own transmittance to the ground passed to it for a source the bake did not
  * carry. Each is one line and stands once in each march. Since R08.T16.a.2's shares by the light
  * each piece returns (`rayMarch.wgsl`'s `rayMarchDepthShares`) a segment onto an envelope's floor
@@ -1317,27 +1317,44 @@ const DECK_READ: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /**
+ * The deck read's rewrite of where a thick ray march meets its bare ground (plan R08, R08.T16.b.2;
+ * research-rm4-rm5-close-out §1.3): over a deck, wherever the ray reaches the kernels' datum, the
+ * deck's, before any drawn surface, not only where nothing is drawn, so that a disc drawn below the
+ * deck's datum (a routed envelope's on its column's base, a surface beneath its deck) never hides
+ * the deck the march reads there. It stands twice in each march: the deck's light, and the
+ * transmittance to what lies beyond, 0 there. A drawn surface at or beyond the datum's hit takes
+ * the bare ground's count already (R08.T11.b), so from above the air the march to it is the one to
+ * the bare ground.
+ */
+const DECK_GROUND: readonly [string, string] = [
+  "if (depth == 0.0 && hitsGround && ground.x <= tEnd) {",
+  "if (hitsGround && ground.x <= tEnd) {",
+];
+
+/**
  * `pair`, a thick ray march's ({@link withThickRead}), reading a cloud deck as its ground (plan
  * R08, R08.T15.a.2; Design note 9; `thick/deckRead.ts`): the bare ground's light is the deck's
- * ({@link DECK_READ}), its table bound at `deckTable` beside the thick table. Every other line is the thick kernel's own, so that a body
- * with no deck keeps its kernels to the byte.
+ * ({@link DECK_READ}), read wherever the ray reaches the deck's datum before a drawn surface
+ * ({@link DECK_GROUND}, R08.T16.b.2), its table bound at `deckTable` beside the thick table. Every
+ * other line is the thick kernel's own, so that a body with no deck keeps its kernels to the byte.
  *
- * @throws Error naming the kernel when its sources hold a rewritten line other than once, or it
- *   does not read the thick table.
+ * @throws Error naming the kernel when its sources hold a rewritten line other than once (the bare
+ *   ground's test other than twice), or it does not read the thick table.
  */
 export function withDeckRead(pair: KernelPair): KernelPair {
   const rewrite = (wgsl: string): string => {
     if (!wgsl.includes("fn thickSourceAt(")) {
       throw new Error(`kernel ${pair.name} reads no thick table, which a deck's march stands on`);
     }
-    const code = DECK_READ.reduce((text, [general, deck]) => {
+    const replaced = (text: string, [general, deck]: readonly [string, string], places: number) => {
       const count = text.split(general).length - 1;
-      if (count !== 1) {
-        throw new Error(`kernel ${pair.name} holds ${count} places for: ${general}, not 1`);
+      if (count !== places) {
+        throw new Error(`kernel ${pair.name} holds ${count} places for: ${general}, not ${places}`);
       }
-      return text.replace(general, deck);
-    }, wgsl);
-    return `${code}\n${deckReadWgsl}`;
+      return text.replaceAll(general, deck);
+    };
+    const code = DECK_READ.reduce((text, rewritten) => replaced(text, rewritten, 1), wgsl);
+    return `${replaced(code, DECK_GROUND, 2)}\n${deckReadWgsl}`;
   };
   return {
     ...pair,

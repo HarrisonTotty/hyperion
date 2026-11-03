@@ -295,6 +295,8 @@ const GROUND_LIGHT = "luminance += viewThroughputOf(&march, slot) * source.weigh
 const DECK_GROUND_LIGHT = "luminance += viewThroughputOf(&march, slot) * source.weight.rgb";
 const ALBEDO = "* max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW;";
 const DECK = "* deckGroundAt(body, s, datum.normal, dir, source.direction.xyz, slot, toSun);";
+const BARE_GROUND = "if (depth == 0.0 && hitsGround && ground.x <= tEnd) {";
+const DECK_DATUM = "if (hitsGround && ground.x <= tEnd) {";
 
 describe("the deck read's kernels (R08.T15.a.2)", () => {
   it.each(THICK_DIGESTS.map(([pair, digest]) => [pair.name, pair, digest] as const))(
@@ -308,15 +310,17 @@ describe("the deck read's kernels (R08.T15.a.2)", () => {
     ["the ray march", RAY_MARCH_THICK_KERNEL, RAY_MARCH_DECK_KERNEL],
     ["the ray march by slot", RAY_MARCH_SLOTS_THICK_KERNEL, RAY_MARCH_SLOTS_DECK_KERNEL],
   ] as const)(
-    "makes %s's deck form from its thick one, differing only at the bare ground's light, with the read appended",
+    "makes %s's deck form from its thick one, differing only at the bare ground's light and where it is read, the datum's hit before anything drawn (R08.T16.b.2), with the read appended",
     (_name, thick, deck) => {
       expect(deck.name).toBe(`${thick.name}, over a deck`);
       const appended = `\n${deckReadWgsl}`;
       expect(deck.reference.endsWith(appended)).toBe(true);
       const head = deck.reference.slice(0, -appended.length);
       expect(linesDiffering(thick.reference, head)).toEqual([
+        [BARE_GROUND, DECK_DATUM],
         [GROUND_LIGHT, DECK_GROUND_LIGHT],
         [ALBEDO, DECK],
+        [BARE_GROUND, DECK_DATUM],
       ]);
       expect([...kernelBindings(deck.reference).keys()]).toEqual([
         ...kernelBindings(thick.reference).keys(),

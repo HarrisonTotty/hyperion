@@ -4303,13 +4303,21 @@ function rayMarchTexelInto(
   const t = marcher.throughput;
   let meanTransmittance = (t[0] + t[1] + t[2]) / 3;
   let transmittance: TwinRgb = [t[0], t[1], t[2]];
-  if (bareGroundM !== null) {
+  // Over a deck the ground is read wherever the ray reaches the datum before a drawn surface, as
+  // `hillaire.ts`'s deck forms read it (R08.T16.b.2); elsewhere only with nothing drawn.
+  const readGroundM =
+    context.deck === null
+      ? bareGroundM
+      : datumHitM !== null && datumHitM <= ray.tEndM
+        ? datumHitM
+        : null;
+  if (readGroundM !== null) {
     const o = ray.originM;
     const d = ray.direction;
     const groundM = {
-      x: o.x + bareGroundM * d.x,
-      y: o.y + bareGroundM * d.y,
-      z: o.z + bareGroundM * d.z,
+      x: o.x + readGroundM * d.x,
+      y: o.y + readGroundM * d.y,
+      z: o.z + readGroundM * d.z,
     };
     const toSun: TwinRgb = [0, 0, 0];
     // Each source's light on it, weighted as the sky is, through its own slot's throughput (R08.T7).

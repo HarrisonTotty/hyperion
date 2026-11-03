@@ -6,8 +6,9 @@
  * for `thick/discBake.test.ts` and `thick/discBakeSaturn.test.ts`.
  *
  * @remarks
- * - **The view.** The camera stands 10⁹ m from the centre over the equator, the pole up the image,
- *   the sun at the phase angle in the equatorial plane at 1 au, of illuminance 1 lx in each channel.
+ * - **The view.** The camera stands 10⁹ m from the centre over the equator (or as far as
+ *   {@link DiscAirView.distanceM} puts it), the pole up the image, the sun at the phase angle in the
+ *   equatorial plane at 1 au, of illuminance 1 lx in each channel.
  * - **The ground** is a Lambertian law of the medium's ground albedo on both sides, its surface
  *   lighting through the air (`surfaceLightingTwin` over the twin's tables).
  * - **The quadrature** runs over the image plane in the coordinates that make the datum's outline a
@@ -28,7 +29,7 @@ import type { DiscAir } from "../view/atmosphere/discReflectance";
 import type { DiscReflectanceTable } from "../view/atmosphere/discTable";
 import { tableRadiusM, TABLE_SIZES } from "../view/atmosphere/hillaire";
 import type { AtmosphereMedium } from "../view/atmosphere/medium";
-import { gravityRatio } from "../view/atmosphere/oblate";
+import { gravityRatio, type SpheroidFigure } from "../view/atmosphere/oblate";
 import { keptBakeLightsOf } from "../view/atmosphere/opticsMessages";
 import { R06_SOLAR_BAKE_SPECTRUM } from "../view/atmosphere/earth";
 import {
@@ -233,8 +234,23 @@ function marchSizesOf(scale: number): typeof TABLE_SIZES.high {
 }
 
 /**
+ * Where {@link integratedRadianceAt} looks from and what its routed full passes draw (plan R08,
+ * R08.T16.b.2; research-rm4-rm5-close-out §1.3).
+ */
+export interface DiscAirView {
+  /** The camera's distance from the centre, m: {@link DISC_AIR_DISTANCE_M} if absent. */
+  readonly distanceM?: number;
+  /**
+   * The figure the routed full passes' black disc stands on beneath a deck, its depth ending their
+   * march where the ray meets it (a routed envelope's on its medium's datum, below the deck's);
+   * absent, nothing is drawn there, as T16.b.2 marched it.
+   */
+  readonly routedDisc?: SpheroidFigure;
+}
+
+/**
  * The integrated radiance of a case's disc drawn by its table and of its full passes from 10⁹ m at
- * the phase angle `phaseDeg` (the module's remarks).
+ * the phase angle `phaseDeg` (the module's remarks), or from where `view` puts the camera.
  */
 export function integratedRadianceAt(
   item: DiscAirCase,
@@ -242,19 +258,20 @@ export function integratedRadianceAt(
   twins: FullPassTwins,
   phaseDeg: number,
   counts: IntegrationCounts = {},
+  view: DiscAirView = {},
 ): IntegratedRadiance {
   const sizes = marchSizesOf(counts.marchScale ?? 1);
   const figure = item.body.figure;
   const a = figure.equatorialRadiusM;
   const c = figure.polarRadiusM;
-  const D = DISC_AIR_DISTANCE_M;
+  const D = view.distanceM ?? DISC_AIR_DISTANCE_M;
   const alpha = (phaseDeg * Math.PI) / 180;
   // The view's axes are the galactic ones (the camera's identity), the camera at the origin looking
   // down −z at the centre, the pole along +y; the body-fixed axes (z, x, y) of them.
   const sun = vec3(Math.sin(alpha), 0, Math.cos(alpha));
   const camera: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
   const cameraM = vec3(D, 0, 0);
-  const view = twinView(
+  const twin = twinView(
     {
       positionM: cameraM,
       orientation: quaternionFromRows([vec3(0, 0, 1), vec3(1, 0, 0), vec3(0, 1, 0)]),
@@ -335,20 +352,28 @@ export function integratedRadianceAt(
       const d = bodyFixed(ray);
       const hit = datumHit(cameraM, d, a, c);
       const tSurfaceM = hit ?? Number.POSITIVE_INFINITY;
-      // Over a deck the march's ground is the deck, nothing drawn on it, so that it reads the
-      // deck's light there and its transmittance to it is 0 (R08.T16.b.2).
-      const routedSurfaceM = item.deck === undefined ? tSurfaceM : Number.POSITIVE_INFINITY;
+      // Over a deck the march's ground is the deck, nothing drawn on it, or the black disc drawn
+      // below it, so that it reads the deck's light there and its transmittance to it is 0
+      // (R08.T16.b.2).
+      const below = view.routedDisc;
+      const routedSurfaceM =
+        item.deck === undefined
+          ? tSurfaceM
+          : below === undefined
+            ? Number.POSITIVE_INFINITY
+            : (datumHit(cameraM, d, below.equatorialRadiusM, below.polarRadiusM) ??
+              Number.POSITIVE_INFINITY);
       const routed = oblateRayMarchTexelTwin(
         twins.routed,
-        view,
+        twin,
         sizes,
-        oblateRayMarchRayAlongTwin(twins.routed, view, cameraM, d, routedSurfaceM),
+        oblateRayMarchRayAlongTwin(twins.routed, twin, cameraM, d, routedSurfaceM),
       );
       const unrouted = oblateRayMarchTexelTwin(
         twins.unrouted,
-        view,
+        twin,
         sizes,
-        oblateRayMarchRayAlongTwin(twins.unrouted, view, cameraM, d, tSurfaceM),
+        oblateRayMarchRayAlongTwin(twins.unrouted, twin, cameraM, d, tSurfaceM),
       );
       let ground: Rgb = [0, 0, 0];
       let disc: Rgb = [0, 0, 0];

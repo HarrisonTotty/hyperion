@@ -87,9 +87,10 @@
  *   (`thick/deckRead.ts`), its own tables holding a patterned deck on both light slots with the
  *   correction over it (the smoke's `withDeckTable`: the read's cost, not a bake's values), so that
  *   the march reads the deck at its bare ground (`hillaire.ts`'s `withDeckRead`); (A)'s
- *   combinations, whose drawn body hides the deck (the deck read runs only where nothing is
- *   drawn), and (B)'s, the atmosphere alone over an empty scene, where every ray of the march that
- *   meets the ground reads it.
+ *   combinations, whose drawn body stands on the deck's datum, where the march reads the deck
+ *   wherever it reaches the datum before the drawn surface (R08.T16.b.2: across the disc but at
+ *   its figure's vertices, the depth's rounding), and (B)'s, the atmosphere alone over an empty
+ *   scene, where every ray of the march that meets the ground reads it.
  *
  * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10;
  * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
@@ -2564,7 +2565,7 @@ function deckMeasuredMedium(
   const deck = tables.deckPacked;
   return {
     medium: { ...measured, name: DECK_EARTH_NAME, id: EARTH_IDS.deck, medium, tables, figure },
-    about: `its tables (its own, beside (A)'s) hold the upper medium over a cloud deck ${(DECK_SPLIT_M / 1_000).toFixed(0)} km up on the deck's datum and the smoke's patterned deck (R08.T15.a.2's smoke-only override; nothing routes a deck): ${deck?.bands ?? 0} band and ${deck?.slots ?? 0} light slots, the deck table ${tables.deckBytes.toLocaleString("en-GB")} B and the J above it ${tables.thickBytes.toLocaleString("en-GB")} B, the row's ${tables.rowBytes.toLocaleString("en-GB")} B in all; the sky view and the aerial perspective read the J above, and the march the deck at its bare ground where nothing is drawn (withDeckRead)`,
+    about: `its tables (its own, beside (A)'s) hold the upper medium over a cloud deck ${(DECK_SPLIT_M / 1_000).toFixed(0)} km up on the deck's datum and the smoke's patterned deck (R08.T15.a.2's smoke-only override; nothing routes a deck): ${deck?.bands ?? 0} band and ${deck?.slots ?? 0} light slots, the deck table ${tables.deckBytes.toLocaleString("en-GB")} B and the J above it ${tables.thickBytes.toLocaleString("en-GB")} B, the row's ${tables.rowBytes.toLocaleString("en-GB")} B in all; the sky view and the aerial perspective read the J above, and the march the deck wherever it reaches the datum before a drawn surface (withDeckRead)`,
   };
 }
 
