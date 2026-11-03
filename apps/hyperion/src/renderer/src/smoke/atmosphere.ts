@@ -2428,6 +2428,70 @@ export async function checkDeckFrameTwins(
 }
 
 /**
+ * R05's Earth's air without its ozone, whose tent's kink at 40 km the 10⁻³ bound does not allow.
+ *
+ * @throws Error where R05's Earth holds no term named `ozone`, so that the check never draws the tent.
+ */
+function earthWithoutOzone(): AtmosphereMedium {
+  const terms = R05_EARTH_REFERENCE.terms.filter((term) => term.name !== "ozone");
+  if (terms.length === R05_EARTH_REFERENCE.terms.length) {
+    throw new Error("R05's Earth holds no ozone term to leave out");
+  }
+  return { ...R05_EARTH_REFERENCE, name: "earth (R05) without its ozone", terms };
+}
+
+/**
+ * R08.T15.b.2: the deck's marches' thermal forms (`hillaire.ts`'s `RAY_MARCH_DECK_THERMAL_KERNEL`
+ * and its form by slot), with the thick read's thermal sky view and aerial perspective, held to
+ * their CPU twin over the GPU's own per-planet tables, the same packed deck table and the same
+ * thermal source, at 3,000 K, to 10⁻³ above 10⁻⁶ of the largest (R08.T6.b's bound), over a deck
+ * 3 km up: R05's Earth's air without its ozone, its continental aerosol absorbing and so emitting,
+ * by the shared read, and the measured Earth's air, its ozone under the Sun's curves, by slot; from
+ * 400 km with the sun 20° up ahead and 3° down, where the deck's beam is 0 and the air's own light
+ * is most of each frame's, on high. In part 14 after the deck's catalogue, which compiles the
+ * marches.
+ *
+ * @remarks
+ * Not R05's Earth itself: its ozone's tent falls linearly to 0 at 40 km, a kink in emission the
+ * bound does not allow at the limb ({@link checkThermalFrameTwins}' remarks).
+ */
+export async function checkDeckThermalFrameTwins(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  const air = earthWithoutOzone();
+  // The deck's forward lobe by day and its sky-lit radiance by night: its backward lobe reads no
+  // code of the thermal forms the forward one does not.
+  const frames = DECK_TWIN_FRAMES.filter((frame) => frame.name !== "400 km, the sun 30° up behind");
+  if (frames.length !== DECK_TWIN_FRAMES.length - 1) {
+    throw new Error("the deck's frames hold no backward frame to leave out");
+  }
+  await checkThickTwinBodies(engine, checks, twins, [
+    {
+      name: "R05's Earth's air without its ozone over a deck at 3,000 K",
+      table: { kind: "deck", deckAltitudeM: EARTH_DECK_ALTITUDE_M, floor: "ground" },
+      medium: upperMediumOf(air, EARTH_DECK_ALTITUDE_M),
+      curves: NO_ABSORBER_CURVES,
+      figure: deckDatumOf(WGS84, EARTH_GRAVITY, EARTH_DECK_ALTITUDE_M),
+      gravity: EARTH_GRAVITY,
+      frames,
+      thermal: HOT_COLUMN,
+    },
+    {
+      name: "the measured Earth's air over a deck at 3,000 K",
+      table: { kind: "deck", deckAltitudeM: EARTH_DECK_ALTITUDE_M, floor: "ground" },
+      medium: upperMediumOf(EARTH_REFERENCE, EARTH_DECK_ALTITUDE_M),
+      curves: EARTH_REFERENCE_CURVES,
+      figure: deckDatumOf(WGS84, EARTH_GRAVITY, EARTH_DECK_ALTITUDE_M),
+      gravity: EARTH_GRAVITY,
+      frames,
+      thermal: HOT_COLUMN,
+    },
+  ]);
+}
+
+/**
  * R08.T15.b.2's frames beneath a deck, each camera's height above the deck's datum, the kernels'
  * (its true height the split's 3 km less): from 1 km up with the sun 20° up and a surface 60 km
  * ahead (the march's, beyond the volume's reach), from 1 km with the sun 60° up and a surface 5 km

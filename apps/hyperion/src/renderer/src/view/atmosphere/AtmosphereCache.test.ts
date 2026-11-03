@@ -52,6 +52,7 @@ import { builtOfCase } from "../scenes/atmosphereScene";
 import { ANNUNCIATION_CLEAR_MS, ANNUNCIATION_ONSET_MS } from "../terrain/annunciation";
 import { type AssembledMedium, assembleMedium, mediumTableRadiusM } from "./assemble";
 import { groundTemperatureFieldOf } from "./thermal";
+import type { MediumTemperature } from "./thermalSource";
 import {
   ATMOSPHERE_CACHE_BYTES,
   AtmosphereCache,
@@ -61,6 +62,7 @@ import {
   type AtmosphereView,
   type AtmosphereViewReport,
   type BuiltAtmosphere,
+  DECK_THERMAL_REASON,
   type KeptBodyAtmosphere,
   PendingLineHold,
   POLARISATION_REASON,
@@ -99,7 +101,11 @@ import {
   MARS_CASE,
   referenceCaseBakeLights,
 } from "./reference/cases";
-import { titanClassReferenceCase } from "./reference/thickCases";
+import {
+  thickReferenceCases,
+  titanClassReferenceCase,
+  venusDeckCover,
+} from "./reference/thickCases";
 import { type AtmosphereBody, kernelMedium, perPlanetRowOf, tablesPlanOf } from "./tables";
 import { DISC_LAYER_VALUES, type DiscReflectanceTable } from "./discTable";
 import { type MsSourceTable, thickBakeBands } from "./thick/bake";
@@ -109,10 +115,17 @@ import { keptColumnOf, sphereBakeBody } from "./thick/keptBake";
 import {
   type AtmosphereRegime,
   type BodyCover,
+  classifyRegime,
   envelopeFloorM,
   THICK_REASON,
 } from "./thick/regime";
-import { correctionRouted, LOW_SUN_REASON, LOW_SUN_SINE, TWILIGHT_REASON } from "./thick/routing";
+import {
+  correctionRouted,
+  DECK_LOWEST_SUN_SINE,
+  LOW_SUN_REASON,
+  LOW_SUN_SINE,
+  TWILIGHT_REASON,
+} from "./thick/routing";
 import { channelSource, type SpectralColumn } from "./thick/spectralColumn";
 
 /** A build the scripted builder holds, landed by the test. */
@@ -1548,7 +1561,7 @@ describe("a cloud deck's bake (R08.T15.a.2)", () => {
     ]).toEqual([{ kind: "cloudDeck", deckAltitudeM: 5_000 }, 0, 0, R05_EARTH_REFERENCE]);
   });
 
-  it("asks none under the product's route, which routes no deck while no deck gate passes, keeping APPROXIMATE with its reason (R08.T15.b.2)", () => {
+  it("asks none under the product's route for R05's Earth, which lies within neither floor's range, keeping APPROXIMATE with its reason (R08.T15.b.2)", () => {
     const h = harness(undefined, "product");
     const report = note(
       h,
@@ -1764,6 +1777,108 @@ describe("a cloud deck's bake (R08.T15.a.2)", () => {
     note(h, body, 1, null);
     expect([during, tables.decks.at(-1) === decks]).toEqual([0, true]);
   });
+});
+
+/**
+ * `TEST VENUS`'s setting (R08.T15.b.2): its case under the deck's cover it is drawn under, at
+ * `temperature` where given, and its split's altitude.
+ */
+function venusSetting(temperature?: MediumTemperature): {
+  readonly setting: KeptBodyAtmosphere;
+  readonly splitM: number;
+} {
+  const referenceCase = thickReferenceCases()["venus-92bar"];
+  const cover = venusDeckCover(referenceCase.medium);
+  const built = builtOfCase(referenceCase, "venus-92bar");
+  const regime = classifyRegime(referenceCase.medium, cover);
+  return {
+    setting: {
+      kind: "medium",
+      built: temperature === undefined ? built : { ...built, temperature },
+      labels: [],
+      cover,
+    },
+    splitM: regime.kind === "cloudDeck" ? regime.deckAltitudeM : Number.NaN,
+  };
+}
+
+/** The deck's bake landed: the patterned deck over a surface on the tables' plan. */
+async function landVenusDeck(h: Harness, splitM: number): Promise<void> {
+  const tables = madeAt(h, 0);
+  const decks = patternedDeckTables(tables.plan.bands, tables.built.medium, 1, splitM, true);
+  latestDeck(h).settle({ kind: "baked", tables: decks, correction: null });
+  await microtasks();
+}
+
+describe("the product's route through a Venus-class deck (R08.T15.b.2)", () => {
+  it("asks TEST VENUS's deck's bake over its ground at the deck's top, and no thick bake nor correction, COMPUTING until it lands, then nothing", async () => {
+    const h = harness(undefined, "product", "product");
+    const { setting, splitM } = venusSetting();
+    const asked = keptFrame(h, [[A, setting, undefined]]);
+    const split = latestDeck(h).ask.split;
+    await landVenusDeck(h, splitM);
+    const landed = keptFrame(h, [[A, setting, undefined]]);
+    expect([
+      split,
+      h.builder.bakes.length,
+      h.builder.corrections.length,
+      asked.labels,
+      [landed.labels, [...landed.reasons]],
+    ]).toEqual([{ altitudeM: splitM, floor: "ground" }, 0, 0, ["atmosphereComputing"], [[], []]]);
+  }, 180_000);
+
+  it("says a low sun beneath the deck is past its range, under giant-deck's lowest passing sun, 10° up, and nothing of it above the deck", async () => {
+    const h = harness(undefined, "product", "product");
+    const { setting, splitM } = venusSetting();
+    keptFrame(h, [[A, setting, undefined]]);
+    await landVenusDeck(h, splitM);
+    const at = (heightM: number, lightElevationSine: number): AtmosphereViewReport =>
+      keptFrame(h, [[A, setting, { heightM, lightElevationSine }]]);
+    const low = at(2_000, 0.1);
+    expect([
+      [low.labels, [...low.reasons]],
+      at(2_000, 0).reasons.get(A),
+      at(2_000, DECK_LOWEST_SUN_SINE).reasons.get(A),
+      at(2_000, 0.5).reasons.get(A),
+      at(splitM + 1_000, 0.1).reasons.get(A),
+      at(2_000, -0.05).reasons.get(A),
+    ]).toEqual([
+      [["atmosphereApproximate"], [[A, [LOW_SUN_REASON]]]],
+      [LOW_SUN_REASON],
+      undefined,
+      undefined,
+      undefined,
+      [TWILIGHT_REASON],
+    ]);
+  }, 180_000);
+
+  it("routes a hotter Venus-class world, at 1,000 K, through its deck, its tables taking the column's temperature above the split, and keeps its APPROXIMATE once the deck lands, its deck baking no thermal light", async () => {
+    const h = harness(undefined, "product", "product");
+    // A test's profile, not fitted to Venus: only its peak at the ground decides the cut.
+    const hot: MediumTemperature = {
+      heightsM: Float64Array.of(0, 100_000),
+      temperaturesK: Float64Array.of(1_000, 230),
+    };
+    const { setting, splitM } = venusSetting(hot);
+    const asked = keptFrame(h, [[A, setting, undefined]]);
+    const temperature = madeAt(h, 0).built.temperature;
+    const split = latestDeck(h).ask.split;
+    await landVenusDeck(h, splitM);
+    const landed = keptFrame(h, [[A, setting, undefined]]);
+    expect([
+      split,
+      temperature?.heightsM[0],
+      temperature?.temperaturesK[0],
+      asked.labels,
+      [landed.labels, [...landed.reasons]],
+    ]).toEqual([
+      { altitudeM: splitM, floor: "ground" },
+      0,
+      expect.closeTo(1_000 - (770 * splitM) / 100_000, 9),
+      ["atmosphereComputing"],
+      [["atmosphereApproximate"], [[A, [DECK_THERMAL_REASON]]]],
+    ]);
+  }, 180_000);
 });
 
 /**

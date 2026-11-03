@@ -6063,7 +6063,9 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       R08.T12.b's flux sanity; and the routing of `cloudDeck` worlds, under
       `decision-r08-t11-frame.md`'s blocker, as at R08.T14.d. _Built 2026-11-01, `giant-deck`
       below the split after its re-trace; the gates recorded, no deck routed, the owner's runs
-      pending_ (Risks, "Deviations in T15.b.2, as built").
+      pending_ (Risks, "Deviations in T15.b.2, as built"). _Routed 2026-11-02: a Venus-class
+      deck over a surface opens on its gates, the thermal forms read a deck; the RTX frame a close
+      item_ (Risks, "T15.b.2's route, as built").
 
   By hand, the Venus-class surface and a descent through its deck are recorded here.
 
@@ -24293,6 +24295,40 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - _By hand_: `just views-check --software --atmosphere`, high and low, pass with no fault line.
     `TEST VENUS` draws `ATMOSPHERE: APPROXIMATE` by the thin method, as nothing routes. The tour
     has no descent through its deck. Its looks and frame times are pending: the owner's RTX run.
+- **T15.b.2's route, as built** (2026-11-02; lane `open-venus-deck-route`; main's ruling of
+  2026-11-02, research-rm4-rm5-close-out §1.1: a route opens on its gate, the RTX frame an item on
+  RM4's close list; what later tasks consume).
+  - `deckGatePasses` takes Titan's rule: no image misses, and every image holding a value not
+    refused passes. An image refused throughout is passed over and drawn unlabelled, where the
+    haze's gate passes over images by their sun and labels them. `deckRouteRangeOf` now takes two
+    arguments, the envelope's tallies and the surface's (a list of gates, all of which must pass).
+  - `DECK_ROUTE_RANGE.ground` is `SURFACE_DECK_ROUTE_RANGE` (both Venus-class cases' channels),
+    opened on `ABOVE_DECK_GATE_TALLIES` (`giant-deck` above its split, `deck.routed`) and
+    `SURFACE_DECK_GATE_TALLIES` (`deck.venusClass`), each held to the file. Images refused
+    throughout in both Venus cases: `ground-s0`, `-s30`, `-s60`, `-s80`, the disc's five, `aerial`.
+  - Not a condition of the route: R08.T12.b's flux sanity, 0.049 and 0.064 of the top at `flux-lsfr`
+    against 2–4%, as before recorded and not asserted.
+  - The low sun beneath a deck (lean, 2026-11-02): a camera under a routed deck over a surface, its
+    light under `DECK_LOWEST_SUN_SINE` (sin 10°, `giant-deck`'s s80 below its split) and at or above
+    the horizontal, reads `LOW_SUN_REASON`; `HeldBody.surfaceDeckSplitM` carries the split.
+  - `ATMOSPHERE TEST` draws `TEST VENUS` and `TEST VENUS 5.80 MPa` under their deck's cover
+    (`thickCases.ts`'s `venusDeckCover`, `thickCaseCovers`; `FixtureCase.cover`), so both route.
+    `thickCasesReplyOf` takes the covers as a second argument.
+  - The thermal forms over a deck: `RAY_MARCH_DECK_THERMAL_KERNEL` and its form by slot,
+    `withThermalSource(pair, "emitted")`: emission alone, the step's shares the deck form's, since a
+    deck's bake holds no scattered thermal light. With the scattered read too, SwiftShader's GPU
+    process segfaulted compiling it (`exit_code=139`, about 300 s). The thermal source is at binding
+    26 where the kernel holds 25 (the deck's table). `FrameKernels.thermal` takes a `ThermalRead`,
+    `thin`, `thick` or `deck`. VIEW's bound is 49. Smoke part 14 holds both to their twin
+    (`checkDeckThermalFrameTwins`).
+  - A self-luminous body's deck keeps `atmosphereApproximate` with `DECK_THERMAL_REASON` once its
+    bake lands (lean, 2026-11-02; its words await the owner's UX sign-off): the deck's bake carries no
+    thermal light, and the kernels beneath a deck draw no emission. Both are left undone.
+  - _By hand_: `just views-check --software --atmosphere`, high and low, pass with no fault line,
+    engine fault or console error; the software tour's captures stand short of their range, so
+    `TEST VENUS`'s look is not judged there. Pending, the owner's runs: the routed frame on the RTX
+    3080 (an RM4 close item), the Venus-class surface and a descent through its deck by hand, and
+    the UHD 620 bake.
 - **Deviations in T16.a.2, as built** (2026-11-01; lane `r08-t16a2`; what T16.b.2 and the re-trace's
   landing consume; measurements in the lane's outbox).
   - _The route_ (`thick/routing.ts`): `ENVELOPE_GATE_TALLIES`, held to `vectorGate.json`'s

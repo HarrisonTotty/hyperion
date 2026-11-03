@@ -390,6 +390,26 @@ describe("ATMOSPHERE TEST's media", () => {
     expect(first?.every((setting, i) => setting === later?.[i])).toBe(true);
   });
 
+  it("draws each thick body under its case's cover, the Venus-class two's deck, and every other air body under a clear sky (R08.T15.b.2)", async () => {
+    const scene = await loadedScene();
+    const covers = ATMOSPHERE_FIXTURES.filter(({ caseName }) => caseName !== "hand-jupiter").map(
+      ({ designation, caseName }) => {
+        const setting = bodyNamed(scene, designation).atmosphere;
+        const cover = setting?.kind === "medium" ? setting.cover : undefined;
+        const given = Object.entries(THICK).find(([name]) => name === caseName)?.[1];
+        return [designation, cover === undefined ? null : cover === given?.cover];
+      },
+    );
+    expect(covers).toEqual(
+      ATMOSPHERE_FIXTURES.filter(({ caseName }) => caseName !== "hand-jupiter").map(
+        ({ designation, caseName }) => [
+          designation,
+          caseName === "venus-92bar" || caseName === "venus-58bar" ? true : null,
+        ],
+      ),
+    );
+  });
+
   it("gives TEST JUPITER the hand Jupiter's record, built by the cache as a server body's reply", async () => {
     const scene = await loadedScene();
     const jupiter = bodyNamed(scene, "TEST JUPITER");

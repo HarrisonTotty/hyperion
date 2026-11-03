@@ -23,18 +23,21 @@ import venus58barCase from "./venus-58bar.case.json" with { type: "json" };
 import venus92barCase from "./venus-92bar.case.json" with { type: "json" };
 import sampleCounts from "./sampleCounts.json" with { type: "json" };
 import { ATMOSPHERE_FIXTURES, builtFigureOf, builtOfCase } from "../../scenes/atmosphereScene";
-import { SATURN_OBLATE_REFERENCE } from "./cases";
+import { EARTH_CASE, SATURN_OBLATE_REFERENCE } from "./cases";
 import { angleBetweenDeg, LEAST_SUN_DISTANCE_DEG } from "./geometries";
 import {
   GIANT_DECK,
   THICK_CASE_NAMES,
   THICK_CASE_SIGNIFICANT_FIGURES,
+  thickCaseCovers,
   thickReferenceCases,
   VENUS_DECK,
+  venusDeckCover,
   VENUS_DECK_MODES,
   venusDeckPressurePa,
 } from "./thickCases";
 import { thickCasesReplyOf } from "./thickCasesMessages";
+import { classifyRegime } from "../thick/regime";
 
 /** Each case's own counts, from its pilot (`decision-r08-t12b-scope.md`, ruling 8). */
 const COUNTS: Readonly<Record<string, SampleCounts>> = sampleCounts;
@@ -210,7 +213,7 @@ describe("ATMOSPHERE TEST's thick bodies", () => {
     "reach the render thread whole through the worker's structured clone",
     { timeout: BUILD_MS },
     () => {
-      const reply = thickCasesReplyOf(thickReferenceCases);
+      const reply = thickCasesReplyOf(thickReferenceCases, thickCaseCovers);
       expect([reply.kind, structuredClone(reply)]).toEqual(["built", reply]);
     },
   );
@@ -219,7 +222,7 @@ describe("ATMOSPHERE TEST's thick bodies", () => {
     "are drawn on their cases' own spheres, shaded as their cases' grounds",
     { timeout: BUILD_MS },
     () => {
-      const reply = thickCasesReplyOf(thickReferenceCases);
+      const reply = thickCasesReplyOf(thickReferenceCases, thickCaseCovers);
       if (reply.kind !== "built") {
         throw new Error(`the thick cases were not built: ${reply.message}`);
       }
@@ -235,4 +238,35 @@ describe("ATMOSPHERE TEST's thick bodies", () => {
       expect(drawn).toEqual(restated);
     },
   );
+
+  it(
+    "draws the Venus-class bodies under their deck's cover, split at its top, and the others under a clear sky (R08.T15.b.2)",
+    { timeout: BUILD_MS },
+    () => {
+      const reply = thickCasesReplyOf(thickReferenceCases, thickCaseCovers);
+      if (reply.kind !== "built") {
+        throw new Error(`the thick cases were not built: ${reply.message}`);
+      }
+      const drawn = THICK_CASE_NAMES.map((name) => {
+        const { medium, cover } = reply.cases[name];
+        return [name, cover === undefined ? null : classifyRegime(medium, cover).kind];
+      });
+      const venus = reply.cases["venus-92bar"].cover?.decks[0];
+      expect([drawn, venus?.opticalDepth550]).toEqual([
+        [
+          ["venus-92bar", "cloudDeck"],
+          ["venus-58bar", "cloudDeck"],
+          ["titan-class", null],
+          ["giant-deck", null],
+        ],
+        expect.closeTo(0.99 * VENUS_DECK.opticalDepth550, 12),
+      ]);
+    },
+  );
+
+  it("refuses a deck's cover for a medium without the deck's tabulated modes", () => {
+    expect(() => venusDeckCover(EARTH_CASE.medium)).toThrow(
+      /no tabulated deck mode aerosol:H2SO4/u,
+    );
+  });
 });

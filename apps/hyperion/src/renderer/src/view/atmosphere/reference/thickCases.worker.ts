@@ -8,15 +8,16 @@
  * `new Worker(new URL("../atmosphere/reference/thickCases.worker.ts", import.meta.url),
  * { type: "module" })`. It builds the cases as it starts and posts one `ThickCasesReply`
  * (`thickCasesReplyOf`), each case's medium, figure, curves and sources with their buffers
- * transferred, or `failed` with the build's message; the render thread then ends it.
+ * transferred, and the Venus-class cases' covers (`thickCaseCovers`, R08.T15.b.2), or `failed` with
+ * the build's message; the render thread then ends it.
  *
  * It is typed with the worker's library, not the DOM's (`tsconfig.worker.json`), whose list holds
  * its whole import graph, free of the engine and the DOM.
  */
 
 import { transferablesOf } from "../opticsMessages";
-import { thickReferenceCases } from "./thickCases";
+import { thickCaseCovers, thickReferenceCases } from "./thickCases";
 import { thickCasesReplyOf } from "./thickCasesMessages";
 
-const reply = thickCasesReplyOf(thickReferenceCases);
+const reply = thickCasesReplyOf(thickReferenceCases, thickCaseCovers);
 postMessage(reply, transferablesOf(reply));

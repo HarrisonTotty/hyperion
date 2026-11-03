@@ -1,10 +1,10 @@
 /**
  * The thick bake's router (plan R08, R08.T14.c, R08.T14.d.4 and R08.T15.b.2; Design note 9's
  * routing): a `thickScattering` world routed within the range its passing gates cover, a Titan-class
- * haze's opened by `titan-class`'s gate alone, its verdict passing with its named exceptions, a `cloudDeck`
- * world by its floor's range, none yet, a gas envelope's opened by `giant-deck`'s envelope variant
- * alone once its recorded verdict passes (R08.T16.a.2), and the polarisation correction asked of
- * every world with air once routed.
+ * haze's opened by `titan-class`'s gate alone, its verdict passing with its named exceptions, a
+ * `cloudDeck` world by its floor's range, a deck over a surface's opened by the Venus-class cases'
+ * gates and a gas envelope's by `giant-deck`'s envelope variant alone once its recorded verdict
+ * passes (R08.T16.a.2), and the polarisation correction asked of every world with air once routed.
  */
 import { describe, expect, it } from "vitest";
 
@@ -14,7 +14,12 @@ import { handJupiterDetail } from "../../../test/giantFixtures";
 import { assembleMedium } from "../assemble";
 import { R05_EARTH_REFERENCE } from "../earth";
 import * as cases from "../reference/cases";
-import { giantDeckReferenceCase, titanClassReferenceCase } from "../reference/thickCases";
+import {
+  giantDeckReferenceCase,
+  thickReferenceCases,
+  titanClassReferenceCase,
+  venusDeckCover,
+} from "../reference/thickCases";
 import committedGate from "../reference/vectorGate.json" with { type: "json" };
 import type { AtmosphereMedium } from "../medium";
 import { HORIZON_SUN_COSINE } from "./bake";
@@ -28,9 +33,11 @@ import {
   regimeChannels,
 } from "./regime";
 import {
+  ABOVE_DECK_GATE_TALLIES,
   bakedAsHaze,
   CORRECTION_ROUTED,
   correctionRouted,
+  DECK_LOWEST_SUN_SINE,
   DECK_ROUTE_RANGE,
   deckGatePasses,
   deckRouted,
@@ -47,6 +54,8 @@ import {
   HAZE_UNJUDGED_IMAGES,
   hazeGatePasses,
   LOW_SUN_SINE,
+  SURFACE_DECK_GATE_TALLIES,
+  SURFACE_DECK_ROUTE_RANGE,
   THICK_ROUTE_RANGE,
   THICK_ROUTE_RANGES,
   thickBakeRouted,
@@ -187,12 +196,12 @@ describe("deckRouted (R08.T15.b.2)", () => {
   };
   const both: DeckRouteRange = { ground: open, envelope: open };
 
-  it("routes no deck over a surface in the product, and an envelope only within giant-deck's range", () => {
+  it("routes a deck over a surface in the product within the Venus-class cases' range and an envelope within giant-deck's, Earth's air within neither", () => {
     expect([
       DECK_ROUTE_RANGE,
       REGIMES.flatMap((regime) => [deckRouted(regime, air, false), deckRouted(regime, air, true)]),
     ]).toEqual([
-      { ground: null, envelope: ENVELOPE_ROUTE_RANGE },
+      { ground: SURFACE_DECK_ROUTE_RANGE, envelope: ENVELOPE_ROUTE_RANGE },
       [false, false, false, false, false, false],
     ]);
   });
@@ -284,17 +293,13 @@ describe("the envelope's gate (R08.T16.a.2)", () => {
   it("opens the route on the recorded verdict, every image passing (R08.T16.a.2's floor placement)", () => {
     expect([
       deckGatePasses(ENVELOPE_GATE_TALLIES),
-      deckRouteRangeOf(ENVELOPE_GATE_TALLIES),
-      DECK_ROUTE_RANGE,
-    ]).toEqual([
-      true,
-      { ground: null, envelope: ENVELOPE_ROUTE_RANGE },
-      deckRouteRangeOf(ENVELOPE_GATE_TALLIES),
-    ]);
+      deckRouteRangeOf(ENVELOPE_GATE_TALLIES, []),
+      DECK_ROUTE_RANGE?.envelope,
+    ]).toEqual([true, { ground: null, envelope: ENVELOPE_ROUTE_RANGE }, ENVELOPE_ROUTE_RANGE]);
   });
 
   it("opens the envelope's route alone on a recorded pass, and routes giant-deck at its envelope floor", () => {
-    const opened = deckRouteRangeOf(passing);
+    const opened = deckRouteRangeOf(passing, []);
     const { medium, regime } = giant();
     expect([
       opened,
@@ -309,18 +314,24 @@ describe("the envelope's gate (R08.T16.a.2)", () => {
     ]);
   }, 180_000);
 
-  it("keeps it closed where an image misses, as the limb's 0.80–0.85 would, or is refused throughout", () => {
+  it("keeps it closed where an image misses, as the limb's 0.80–0.85 would, or every image is refused, and passes over one image refused throughout (Titan's rule, R08.T15.b.2)", () => {
     const missing = passing.map((image) =>
       image.image === "limb" ? tallied(image, 13, 2, 0) : image,
     );
     const refused = passing.map((image) =>
       image.image === "disc-p85" ? tallied(image, 0, 0, 3) : image,
     );
-    expect([deckGatePasses(missing), deckGatePasses(refused), deckGatePasses([])]).toEqual([
-      false,
-      false,
-      false,
-    ]);
+    const allRefused = passing.map((image) => tallied(image, 0, 0, image.comparisons));
+    const refusedMissing = missing.map((image) =>
+      image.image === "disc-p85" ? tallied(image, 0, 0, 3) : image,
+    );
+    expect([
+      deckGatePasses(missing),
+      deckGatePasses(refused),
+      deckGatePasses(allRefused),
+      deckGatePasses(refusedMissing),
+      deckGatePasses([]),
+    ]).toEqual([false, true, false, false, false]);
   });
 
   it.each(BOUNDS)(
@@ -353,6 +364,128 @@ describe("the envelope's gate (R08.T16.a.2)", () => {
       regimeChannels(upper).map((c) => c.opticalDepth * (1 - c.singleScatteringAlbedo) > 0.05),
     ]).toEqual(["cloudDeck", false, [true, true, true]]);
   }, 180_000);
+});
+
+/** The Venus-class cases, and the regime each routes under its deck's cover, how its gate reads it. */
+function venusCases(): ReadonlyArray<{
+  readonly name: string;
+  readonly medium: AtmosphereMedium;
+  readonly regime: AtmosphereRegime;
+}> {
+  const built = thickReferenceCases();
+  return (["venus-92bar", "venus-58bar"] as const).map((name) => {
+    const { medium } = built[name];
+    return { name, medium, regime: classifyRegime(medium, venusDeckCover(medium)) };
+  });
+}
+
+/** An image's tallies as `vectorGate.json` records them: `[image, comparisons, passes, misses, refusals, …]`. */
+function talliesOf(images: ReadonlyArray<ReadonlyArray<unknown>>): ReadonlyArray<GateImageTally> {
+  return images.map(([image, comparisons, passes, misses, refusals]) => ({
+    image: String(image),
+    comparisons: Number(comparisons),
+    passes: Number(passes),
+    misses: Number(misses),
+    refusals: Number(refusals),
+  }));
+}
+
+describe("the Venus-class cases' deck gate (R08.T15.b.2)", () => {
+  const recorded = committedGate.deck.venusClass.cases;
+
+  it("holds the recorded verdicts to vectorGate.json's deck.venusClass, case by case and image by image", () => {
+    expect(SURFACE_DECK_GATE_TALLIES).toEqual({
+      "venus-92bar": talliesOf(recorded["venus-92bar"].routed.images),
+      "venus-58bar": talliesOf(recorded["venus-58bar"].routed.images),
+    });
+  });
+
+  it("holds giant-deck's verdict above its split to vectorGate.json's deck.routed, image by image", () => {
+    expect(ABOVE_DECK_GATE_TALLIES).toEqual(talliesOf(committedGate.deck.routed.images));
+  });
+
+  it("keeps a deck over a surface closed where the gate above a deck misses, both of R08.T15's gates opening it", () => {
+    const missing = ABOVE_DECK_GATE_TALLIES.map((image) =>
+      image.image === "limb" ? tallied(image, 14, 1, 0) : image,
+    );
+    const venus = Object.values(SURFACE_DECK_GATE_TALLIES);
+    expect([
+      deckRouteRangeOf(ENVELOPE_GATE_TALLIES, [ABOVE_DECK_GATE_TALLIES, ...venus])?.ground,
+      deckRouteRangeOf(ENVELOPE_GATE_TALLIES, [missing, ...venus])?.ground,
+    ]).toEqual([SURFACE_DECK_ROUTE_RANGE, null]);
+  });
+
+  it("opens a deck over a surface on both verdicts, passing over the images each refuses throughout", () => {
+    const refusedThroughout = Object.values(SURFACE_DECK_GATE_TALLIES).map((tallies) =>
+      tallies.filter((image) => image.refusals === image.comparisons).map((image) => image.image),
+    );
+    const wholly = [
+      "ground-s0",
+      "ground-s30",
+      "ground-s60",
+      "ground-s80",
+      "disc-p0",
+      "disc-p30",
+      "disc-p60",
+      "disc-p75",
+      "disc-p85",
+      "aerial",
+    ];
+    expect([
+      Object.values(SURFACE_DECK_GATE_TALLIES).map(deckGatePasses),
+      refusedThroughout,
+      DECK_ROUTE_RANGE?.ground,
+    ]).toEqual([[true, true], [wholly, wholly], SURFACE_DECK_ROUTE_RANGE]);
+  });
+
+  it("routes venus-92bar and venus-58bar through their deck over the ground, and neither where either case's gate misses", () => {
+    const [first, second] = Object.values(SURFACE_DECK_GATE_TALLIES);
+    const missing = (first ?? []).map((image) =>
+      image.image === "limb" ? tallied(image, image.passes - 1, 1, image.refusals) : image,
+    );
+    const closed = deckRouteRangeOf(ENVELOPE_GATE_TALLIES, [missing, second ?? []]);
+    expect(
+      venusCases().map(({ name, medium, regime }) => [
+        name,
+        regime.kind,
+        deckRouted(regime, medium, false),
+        deckRouted(regime, medium, true),
+        deckRouted(regime, medium, false, closed),
+      ]),
+    ).toEqual([
+      ["venus-92bar", "cloudDeck", true, false, false],
+      ["venus-58bar", "cloudDeck", true, false, false],
+    ]);
+  }, 180_000);
+
+  it("leaves giant-deck below its split, whose recorded s90 misses, and titan-class's haze out of the range", () => {
+    const below = talliesOf(committedGate.deck.routedBelow.routed.images);
+    expect([
+      deckGatePasses(below),
+      below.find((image) => image.image === "ground-s90")?.misses,
+      withinRouteRange(giantDeckReferenceCase().medium, SURFACE_DECK_ROUTE_RANGE),
+      withinRouteRange(titan().medium, SURFACE_DECK_ROUTE_RANGE),
+    ]).toEqual([false, 42, false, false]);
+  }, 180_000);
+
+  it.each(BOUNDS)(
+    "sets the surface deck's %s at the Venus-class cases' extreme, rounded outward at its third figure",
+    (key, side, read) => {
+      const channels = venusCases().flatMap(({ medium }) => regimeChannels(medium));
+      expect(outwardSteps(SURFACE_DECK_ROUTE_RANGE[key], channels.map(read), side)).toEqual([
+        expect.toSatisfy((steps: number) => steps >= 0 && steps < 1),
+      ]);
+    },
+    180_000,
+  );
+
+  it("labels a low sun beneath the deck from giant-deck's lowest passing sun, s80, 10° up", () => {
+    const below = talliesOf(committedGate.deck.routedBelow.routed.images);
+    expect([
+      DECK_LOWEST_SUN_SINE,
+      below.find((image) => image.image === "ground-s80")?.passes,
+    ]).toEqual([expect.closeTo(Math.cos((80 * Math.PI) / 180), 15), 63]);
+  });
 });
 
 /** `titan-class`, and the regime it routes under a clear sky, how its gate reads it. */

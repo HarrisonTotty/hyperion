@@ -62,6 +62,7 @@ import { type AtmosphereMedium, columnLengthM, type MediumTerm } from "../medium
 import { tableRadiusM } from "../oblate";
 import type { GasFractions } from "../rayleigh";
 import { molecularTerm } from "../rayleigh";
+import type { BodyCover } from "../thick/regime";
 import { absorberSourceOf, type SpectralSource } from "../thick/spectralColumn";
 import {
   type ReferenceCase,
@@ -327,6 +328,45 @@ export function venusModeParticles(deckMode: VenusDeckMode): AerosolParticles {
   };
 }
 
+/**
+ * A Venus-class medium's deck as a body's cover gives it (R08.T15.b.2): its τ(550), each mode's
+ * share of {@link VENUS_DECK}'s 34.5 (34.155), under a cloud fraction of 1, over its modes' span on
+ * the ground, each from the level below where its tabulated density first rises from 0 to the one
+ * above where it last falls to it, so that `classifyRegime` splits the medium at the deck's top over
+ * the ground (lean, 2026-11-01, as `giant-deck`'s): the cover the Venus-class gate reads the cases
+ * under (`vectorGate.test.ts`), and `ATMOSPHERE TEST` draws `TEST VENUS` and `TEST VENUS 5.80 MPa`
+ * under.
+ *
+ * @throws Error for a medium without the deck's modes as tabulated terms.
+ */
+export function venusDeckCover(medium: AtmosphereMedium): BodyCover {
+  let baseAltitudeM = Number.POSITIVE_INFINITY;
+  let topAltitudeM = 0;
+  for (const deckMode of VENUS_DECK_MODES) {
+    const term = medium.terms.find((t) => t.name === deckMode.name);
+    if (term?.density.kind !== "tabulated") {
+      throw new Error(`${medium.name} has no tabulated deck mode ${deckMode.name}`);
+    }
+    const { altitudesM, relative } = term.density;
+    const first = relative.findIndex((d) => d > 0);
+    const last = relative.findLastIndex((d) => d > 0);
+    baseAltitudeM = Math.min(baseAltitudeM, altitudesM[Math.max(first - 1, 0)] ?? Number.NaN);
+    topAltitudeM = Math.max(
+      topAltitudeM,
+      altitudesM[Math.min(last + 1, altitudesM.length - 1)] ?? Number.NaN,
+    );
+  }
+  const opticalDepth550 = VENUS_DECK_MODES.reduce(
+    (sum, deckMode) => sum + deckMode.share * VENUS_DECK.opticalDepth550,
+    0,
+  );
+  return {
+    cloudFraction: 1,
+    decks: [{ opticalDepth550, baseAltitudeM, topAltitudeM }],
+    envelope: false,
+  };
+}
+
 /** The pressure at a deck fraction u, Pa: p_base (p_top ÷ p_base)^u. */
 export function venusDeckPressurePa(u: number): number {
   return VENUS_DECK.basePa * pow(VENUS_DECK.topPa / VENUS_DECK.basePa, u);
@@ -576,6 +616,21 @@ export interface ThickReferenceCases {
   readonly "venus-58bar": ReferenceCase;
   readonly "titan-class": ReferenceCase;
   readonly "giant-deck": ReferenceCase;
+}
+
+/** The cover each thick case's body is drawn under, by case name; absent, a clear sky. */
+export type ThickCaseCovers = Readonly<Partial<Record<keyof ThickReferenceCases, BodyCover>>>;
+
+/**
+ * The covers `ATMOSPHERE TEST` draws the thick cases' bodies under (R08.T15.b.2): each Venus-class
+ * case's deck ({@link venusDeckCover}), so that the router splits it at the deck's top and routes it
+ * through its deck as its gate reads it; the others a clear sky, as before.
+ */
+export function thickCaseCovers(cases: ThickReferenceCases): ThickCaseCovers {
+  return {
+    "venus-92bar": venusDeckCover(cases["venus-92bar"].medium),
+    "venus-58bar": venusDeckCover(cases["venus-58bar"].medium),
+  };
 }
 
 /** The names of the thick cases, in the order their files are listed. */

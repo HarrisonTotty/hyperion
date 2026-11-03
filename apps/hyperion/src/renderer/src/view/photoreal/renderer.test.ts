@@ -57,12 +57,14 @@ import {
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_DECK_KERNEL,
   RAY_MARCH_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_DECK_THERMAL_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
   RAY_MARCH_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_DECK_KERNEL,
   RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
   RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   AERIAL_PERSPECTIVE_THERMAL_KERNEL,
@@ -1036,13 +1038,14 @@ async function overlayDatums(
  * both marches' footprints, general and specialised, reading a cloud deck at their ground
  * (`withDeckRead`), for a body whose tables hold one; since R08.T15.b.2 the sky view, the aerial
  * perspective and the march beneath a deck (`belowDeckKernel`), for a camera under a deck over a
- * surface; its per-planet tables' four, and since
+ * surface, and both deck marches' footprints in their thermal forms, for a self-luminous body over
+ * a deck; its per-planet tables' four, and since
  * R08.T14.d.4 the sky's irradiance over the thick table; since plan R14's T4.a the cluster cull, the
  * mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; and the sky bake's
  * four. Each is a module constant, its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 47,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 49,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
@@ -1082,6 +1085,8 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   RAY_MARCH_SLOTS_DECK_KERNEL,
   RAY_MARCH_DECK_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_DECK_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL,
   SKY_VIEW_BELOW_DECK_KERNEL,
   AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
   RAY_MARCH_BELOW_DECK_KERNEL,
@@ -1271,20 +1276,20 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // the march's resolution (the owner's priority) and, since the correction is routed
     // (R08.T14.d.4), the thick read's six, made ahead; and the tables' four. The thick pass makes
     // one more, the sky's irradiance over the thick table (R08.T14.d.4), and the deck's pass its four
-    // marches, 26 in all, bounded however many bodies follow. All but twenty-one are made: the sky bake's four are the sky's, the march's fill
+    // marches, 26 in all, bounded however many bodies follow. All but twenty-three are made: the sky bake's four are the sky's, the march's fill
     // a reader's, which no frame asks, the tile cull's two centre ray's kernels its own cover's,
     // which a view never takes (R08.T11.d), the disc cells' emissive form a body's above the
     // thermal cut, which none of these is (R08.T18.a), their air form a body's drawn by its disc
     // table, which none of these has (R08.T16.b), and their form for both and the per-frame
-    // kernels' eight thermal forms a glowing or self-luminous body's, which none of these is
-    // (R08.T18.b), and the three beneath a deck a camera's under one, which none of these frames is
-    // (R08.T15.b.2).
+    // kernels' ten thermal forms (two over a deck, R08.T15.b.2) a glowing or self-luminous body's,
+    // which none of these is (R08.T18.b), and the three beneath a deck a camera's under one, which
+    // none of these frames is (R08.T15.b.2).
     expect([held[kinds.length - 1], held[2 * kinds.length - 1]]).toEqual([
-      VIEW_KERNELS.length - BAKE_KERNELS.length - 17 - 1 - 4,
-      VIEW_KERNELS.length - BAKE_KERNELS.length - 17 - 4,
+      VIEW_KERNELS.length - BAKE_KERNELS.length - 19 - 1 - 4,
+      VIEW_KERNELS.length - BAKE_KERNELS.length - 19 - 4,
     ]);
     expect(new Set(held.slice(3 * kinds.length - 1))).toEqual(new Set([held.at(-1)]));
-    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 17);
+    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 19);
     // Each body's tables made their own handles all the while.
     expect(engine.counts.kernels).toBeGreaterThan(2 * airs.length);
     renderer.dispose();

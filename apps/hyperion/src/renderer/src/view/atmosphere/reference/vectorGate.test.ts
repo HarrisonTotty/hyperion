@@ -183,8 +183,7 @@ import {
   GIANT_DECK,
   thickReferenceCases,
   titanClassReferenceCase,
-  VENUS_DECK,
-  VENUS_DECK_MODES,
+  venusDeckCover,
 } from "./thickCases";
 import titanClassReference from "./titan-class.reference.json" with { type: "json" };
 import { twinBakeBody, type TwinOptions } from "./twin";
@@ -1189,48 +1188,9 @@ const VENUS_REFERENCES: Readonly<Record<VenusCaseName, ReferenceFile>> = {
   "venus-58bar": venus58Reference,
 };
 
-/**
- * The Venus-class deck's span over the case's ground, m: its modes' lowest base and highest top,
- * each where its tabulated density first rises from 0 and last falls to it.
- */
-function venusDeckSpanM(referenceCase: ReferenceCase): readonly [number, number] {
-  let baseM = Number.POSITIVE_INFINITY;
-  let topM = 0;
-  for (const deckMode of VENUS_DECK_MODES) {
-    const term = referenceCase.medium.terms.find((t) => t.name === deckMode.name);
-    if (term?.density.kind !== "tabulated") {
-      throw new Error(`${referenceCase.name} has its tabulated deck mode ${deckMode.name}`);
-    }
-    const { altitudesM, relative } = term.density;
-    const first = relative.findIndex((d) => d > 0);
-    const last = relative.findLastIndex((d) => d > 0);
-    baseM = Math.min(baseM, altitudesM[Math.max(first - 1, 0)] ?? Number.NaN);
-    topM = Math.max(topM, altitudesM[Math.min(last + 1, altitudesM.length - 1)] ?? Number.NaN);
-  }
-  return [baseM, topM];
-}
-
-/**
- * A Venus-class case's cover: its deck of τ(550) 34.155 (`thickCases.ts`'s `VENUS_DECK` over its
- * modes' shares) under a cloud fraction of 1, over the deck's span, so that `classifyRegime` splits
- * the medium at the deck's top over the ground (lean, 2026-11-01, as `giant-deck`'s).
- */
-function venusCover(referenceCase: ReferenceCase): BodyCover {
-  const [baseAltitudeM, topAltitudeM] = venusDeckSpanM(referenceCase);
-  const opticalDepth550 = VENUS_DECK_MODES.reduce(
-    (sum, deckMode) => sum + deckMode.share * VENUS_DECK.opticalDepth550,
-    0,
-  );
-  return {
-    cloudFraction: 1,
-    decks: [{ opticalDepth550, baseAltitudeM, topAltitudeM }],
-    envelope: false,
-  };
-}
-
-/** The split `classifyRegime` gives a Venus-class case under {@link venusCover}. */
+/** The split `classifyRegime` gives a Venus-class case under its deck's cover. */
 function venusSplit(referenceCase: ReferenceCase): DeckSplit {
-  const regime = classifyRegime(referenceCase.medium, venusCover(referenceCase));
+  const regime = classifyRegime(referenceCase.medium, venusDeckCover(referenceCase.medium));
   if (regime.kind !== "cloudDeck") {
     throw new Error(`${referenceCase.name} routes ${regime.kind}, not cloudDeck`);
   }
@@ -1313,7 +1273,7 @@ function venusSectionOf(
     radiance: "scalar",
     route:
       "the deck's cloudDeck split (classifyRegime under its cover), the uncorrected twin: above the split the upper medium over the deck (R08.T15.a.2), below it the table below the deck (R08.T15.b.2)",
-    cover: venusCover(referenceCase),
+    cover: venusDeckCover(referenceCase.medium),
     split: figures.split,
     floorAltitudeM: recorded(figures.floorAltitudeM),
     aboveTheSplit: names(false),

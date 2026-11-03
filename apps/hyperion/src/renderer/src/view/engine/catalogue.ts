@@ -20,12 +20,14 @@ import {
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_DECK_KERNEL,
   RAY_MARCH_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_DECK_THERMAL_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
   RAY_MARCH_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_DECK_KERNEL,
   RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
   RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
@@ -250,16 +252,19 @@ export const ATMOSPHERE_THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 
 /**
  * R08.T15.a.2's ray marches over a cloud deck (`hillaire.ts`'s `withDeckRead`), both reads'
- * footprints, each with its form specialised for one band and no layer edge, and R08.T15.b.2's
- * kernels beneath a deck (`hillaire.ts`'s `belowDeckKernel`): the sky view, the aerial perspective
- * and the march. The smoke page compiles them in a part of their own (`smoke/page.ts`), beside the
- * deck's twins.
+ * footprints, each with its form specialised for one band and no layer edge, and their thermal
+ * forms (`withThermalSource`, R08.T15.b.2's route), made only for a self-luminous body over a deck;
+ * and R08.T15.b.2's kernels beneath a deck (`hillaire.ts`'s `belowDeckKernel`): the sky view, the
+ * aerial perspective and the march. The smoke page compiles them in a part of their own
+ * (`smoke/page.ts`), beside the deck's twins.
  */
 export const ATMOSPHERE_DECK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   RAY_MARCH_DECK_KERNEL,
   RAY_MARCH_SLOTS_DECK_KERNEL,
   RAY_MARCH_DECK_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_DECK_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL,
   SKY_VIEW_BELOW_DECK_KERNEL,
   AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
   RAY_MARCH_BELOW_DECK_KERNEL,

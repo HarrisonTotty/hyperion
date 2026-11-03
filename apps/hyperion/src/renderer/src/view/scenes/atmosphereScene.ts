@@ -34,7 +34,10 @@
  *   of their own (`reference/thickCases.worker.ts`; {@link loadThickCases}), off the render thread;
  *   and `TEST JUPITER`'s record from a lazy import of `test/giantFixtures.ts`, which the
  *   atmosphere cache builds in its optics workers, as it builds a server body's reply (its setting
- *   `record`, `ATMOSPHERE: PENDING` until it lands, about 8 s of k-tables and optics).
+ *   `record`, `ATMOSPHERE: PENDING` until it lands, about 8 s of k-tables and optics). The two
+ *   Venus-class bodies take their deck's cover from the worker (`thickCases.ts`'s
+ *   `thickCaseCovers`, R08.T15.b.2), so that the router splits each at its deck's top and routes it
+ *   through its deck; every other body stands under a clear sky.
  *   Each air body is stated `loading` (`ATMOSPHERE: PENDING`) until its load lands, then its case's
  *   medium, built once and held, since the atmosphere cache compares a kept medium by identity. A
  *   failed load is logged once and states each of its air bodies `failed`, item 6's failure, which
@@ -626,7 +629,10 @@ const MEDIA_FAILED: AtmosphereFixtureMedia = { kind: "failed" };
 /** A kept medium's labels: none of the scene's own; the cache adds the router's where it applies. */
 const NO_LABELS: ReadonlyArray<never> = Object.freeze([]);
 
-/** The held media of the air fixtures of `load`, each built from its case by `caseNamed`. */
+/**
+ * The held media of the air fixtures of `load`, each built from its case by `caseNamed`, under its
+ * case's cover where it has one (R08.T15.b.2: the Venus-class cases' decks), held with it.
+ */
 function heldMedia(
   load: AtmosphereFixtureLoad,
   caseNamed: (name: AtmosphereFixtureCase) => FixtureCase,
@@ -636,10 +642,17 @@ function heldMedia(
     if (fixtureLoadOf(fixture.caseName) !== load) {
       continue;
     }
-    const built = builtOfCase(caseNamed(fixture.caseName), fixture.caseName);
+    const fixtureCase = caseNamed(fixture.caseName);
+    const built = builtOfCase(fixtureCase, fixture.caseName);
+    const { cover } = fixtureCase;
     media.set(fixture.id, {
       figure: builtFigureOf(built),
-      setting: { kind: "medium", built, labels: NO_LABELS },
+      setting: {
+        kind: "medium",
+        built,
+        labels: NO_LABELS,
+        ...(cover === undefined ? {} : { cover }),
+      },
     });
   }
   return media;

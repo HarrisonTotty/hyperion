@@ -98,6 +98,7 @@ import {
   checkThermalFrameTwins,
   checkBelowDeckFrameTwins,
   checkDeckFrameTwins,
+  checkDeckThermalFrameTwins,
   checkThickFrameTwinsEarth,
   checkThickFrameTwinsSaturn,
   checkThickMarchSpecialised,
@@ -659,6 +660,10 @@ async function run(
   // In part 14 after the deck's catalogue, whose marches it draws by.
   await group(14, "R08.T15.a.2 the deck's march against its twins", () =>
     checkDeckFrameTwins(engine, checks, twins),
+  );
+  // In part 14 after the deck's catalogue, which compiles its marches' thermal forms.
+  await group(14, "R08.T15.b.2 the deck's thermal march against its twins", () =>
+    checkDeckThermalFrameTwins(engine, checks, twins),
   );
   await group(14, "R08.T15.b.2 the kernels beneath a deck against their twins", () =>
     checkBelowDeckFrameTwins(engine, checks),

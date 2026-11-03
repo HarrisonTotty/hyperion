@@ -12,7 +12,9 @@
  * passing deck gates cover ({@link DECK_ROUTE_RANGE}, R08.T15.b.2): a gas envelope's, open on
  * `giant-deck`'s envelope variant alone, whose recorded verdict passes since the march steps a ray
  * onto an envelope's floor from the camera ({@link ENVELOPE_GATE_TALLIES}, R08.T16.a.2); a deck over
- * a surface's, none yet. Tests route by injection (`AtmosphereCache`'s `routes`).
+ * a surface's, open on R08.T15's two gates, `giant-deck`'s above its split and the Venus-class
+ * cases' ({@link ABOVE_DECK_GATE_TALLIES}, {@link SURFACE_DECK_GATE_TALLIES}). Tests route by
+ * injection (`AtmosphereCache`'s `routes`).
  *
  * And whether it asks a world's polarisation correction (R08.T14.f; Design note 10): turned on with
  * the route ({@link CORRECTION_ROUTED}), for thin worlds and routed thick worlds alone (main, with
@@ -118,8 +120,8 @@ export function thickBakeRouted(
  * `null` where that floor routes nothing:
  *
  * - `ground`, a deck over a surface (Venus-class), over the whole medium's channels, once both of
- *   R08.T15's gates pass: above the deck, T15.a.2's `giant-deck`, and below it, T15.b.2's
- *   Venus-class cases;
+ *   R08.T15's gates pass: above the deck, T15.a.2's `giant-deck`, and the Venus-class cases above
+ *   and below it, T15.b.2's ({@link SURFACE_DECK_GATE_TALLIES});
  * - `envelope`, a gas envelope split at its floor, which has no view from below, over the channels
  *   of its medium above the floor, the only part drawn (R08.T16.a.2; below it the deck bakes to
  *   τ 1,000 over a black floor), on `giant-deck`'s envelope variant alone
@@ -160,13 +162,88 @@ export const ENVELOPE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
 ];
 
 /**
- * Whether a deck gate's recorded tallies pass (R08.T16.a.2; lean, 2026-11-01): every image passes
- * somewhere and none misses, so that a route opens only on passes (research-leans-16, item 5,
- * condition 2), and a gate whose limb misses, or is refused throughout, keeps it closed.
+ * Whether a deck gate's recorded tallies pass (R08.T16.a.2; R08.T15.b.2, Titan's rule, main's ruling
+ * of 2026-11-02): no image misses, and every image that holds a value not refused passes, so that a
+ * route opens only on passes (research-leans-16, item 5, condition 2). An image refused throughout
+ * is passed over, its gate's record naming it; a gate that misses anywhere, or is refused
+ * throughout, keeps it closed.
  */
 export function deckGatePasses(tallies: ReadonlyArray<GateImageTally>): boolean {
-  return tallies.length > 0 && tallies.every((image) => image.passes > 0 && image.misses === 0);
+  const judged = tallies.filter((image) => image.refusals < image.comparisons);
+  return (
+    judged.length > 0 &&
+    tallies.every((image) => image.misses === 0) &&
+    judged.every((image) => image.passes > 0)
+  );
 }
+
+/**
+ * `giant-deck`'s recorded verdict by image above its split (R08.T15.a.2): `vectorGate.json`'s
+ * `deck.routed.images`, the upper medium over the deck, through the route a deck takes against the
+ * vector I, held to the file by the test. All 30 of its values pass, the limb at 10 H in red the
+ * closest, 0.79 of the gate's edge: the gate above a deck that a deck over a surface routes on with
+ * {@link SURFACE_DECK_GATE_TALLIES} below it (R08.T15.b.2, the plan's "once both gates pass").
+ */
+export const ABOVE_DECK_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
+  { image: "disc-p0", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "disc-p30", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "disc-p60", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "disc-p75", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "disc-p85", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "limb", comparisons: 15, passes: 15, misses: 0, refusals: 0 },
+];
+
+/**
+ * The Venus-class cases' recorded verdicts by image through their deck (R08.T15.b.2):
+ * `vectorGate.json`'s `deck.venusClass.cases.<case>.routed.images`, each case split at its deck's
+ * top over its ground, the uncorrected twin against the scalar I, held to the file by the test.
+ * `venus-92bar` passes 70 of its 360 values and `venus-58bar` 69, and neither misses one: their
+ * night under the deck (s95), one value at the horizon's sun (s90) and the limb above the top. Every
+ * value of `ground-s0`, `ground-s30`, `ground-s60`, `ground-s80`, the disc's five images and
+ * `aerial` is refused, noise past the references' σ at their 1,024 samples, so that
+ * {@link deckGatePasses} passes those images over, drawn unlabelled by day once the deck routes
+ * (main's ruling of 2026-11-02, research-rm4-rm5-close-out §1.1), where the haze's gate passes over
+ * images by their sun and labels them ({@link HAZE_UNJUDGED_IMAGES}). The analytic path reads worse
+ * on the same values (a probe of 2026-11-02, not kept): it misses 63 and 43 of the night's (its
+ * twilight's light where the references read none), and `venus-92bar`'s ground's flux beneath the
+ * deck at the probe's sun (`flux-lsfr`) is 9 × 10⁻⁵ of the reference's in red, 2 × 10⁻⁶ in green
+ * and 3 × 10⁻¹⁹ in blue, where the route's reads −1.5%, −0.8% and +19.9% of them (`venus-92bar`) and −2.0%, +3.1%
+ * and +5.1% (`venus-58bar`), every one refused.
+ */
+export const SURFACE_DECK_GATE_TALLIES: Readonly<
+  Record<"venus-92bar" | "venus-58bar", ReadonlyArray<GateImageTally>>
+> = {
+  "venus-92bar": [
+    { image: "ground-s0", comparisons: 12, passes: 0, misses: 0, refusals: 12 },
+    { image: "ground-s30", comparisons: 60, passes: 0, misses: 0, refusals: 60 },
+    { image: "ground-s60", comparisons: 60, passes: 0, misses: 0, refusals: 60 },
+    { image: "ground-s80", comparisons: 63, passes: 0, misses: 0, refusals: 63 },
+    { image: "ground-s90", comparisons: 63, passes: 1, misses: 0, refusals: 62 },
+    { image: "ground-s95", comparisons: 63, passes: 63, misses: 0, refusals: 0 },
+    { image: "disc-p0", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+    { image: "disc-p30", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+    { image: "disc-p60", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+    { image: "disc-p75", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+    { image: "disc-p85", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+    { image: "limb", comparisons: 15, passes: 6, misses: 0, refusals: 9 },
+    { image: "aerial", comparisons: 9, passes: 0, misses: 0, refusals: 9 },
+  ],
+  "venus-58bar": [
+    { image: "ground-s0", comparisons: 12, passes: 0, misses: 0, refusals: 12 },
+    { image: "ground-s30", comparisons: 60, passes: 0, misses: 0, refusals: 60 },
+    { image: "ground-s60", comparisons: 60, passes: 0, misses: 0, refusals: 60 },
+    { image: "ground-s80", comparisons: 63, passes: 0, misses: 0, refusals: 63 },
+    { image: "ground-s90", comparisons: 63, passes: 1, misses: 0, refusals: 62 },
+    { image: "ground-s95", comparisons: 63, passes: 62, misses: 0, refusals: 1 },
+    { image: "disc-p0", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+    { image: "disc-p30", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+    { image: "disc-p60", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+    { image: "disc-p75", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+    { image: "disc-p85", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+    { image: "limb", comparisons: 15, passes: 6, misses: 0, refusals: 9 },
+    { image: "aerial", comparisons: 9, passes: 0, misses: 0, refusals: 9 },
+  ],
+};
 
 /**
  * `titan-class`'s recorded verdict by image through its route (R08.T14.d.4): `vectorGate.json`'s
@@ -274,10 +351,10 @@ export const HAZE_UNJUDGED_IMAGES: ReadonlyArray<string> = [
 ];
 
 /**
- * Whether a haze gate's recorded verdict passes (R08.T14.d.4; main's ruling of 2026-11-01): the
- * deck's rule ({@link deckGatePasses}) over the images it judges (all but
- * {@link HAZE_UNJUDGED_IMAGES}), every image passing somewhere, and every miss there one of
- * `exceptions` within its bound. `misses` must account for every judged image's tally of misses,
+ * Whether a haze gate's recorded verdict passes (R08.T14.d.4; main's ruling of 2026-11-01): over the
+ * images it judges (all but {@link HAZE_UNJUDGED_IMAGES}, which a haze labels), every image passing
+ * somewhere, refused throughout or not (where {@link deckGatePasses} passes an image refused
+ * throughout over), and every miss there one of `exceptions` within its bound. `misses` must account for every judged image's tally of misses,
  * so that a miss the list leaves out closes the route.
  *
  * @param misses - The verdict's misses ({@link HAZE_GATE_MISSES}); those on the images it does not
@@ -393,30 +470,60 @@ export const ENVELOPE_ROUTE_RANGE: ThickRouteRange = {
 };
 
 /**
- * The deck routes `tallies`, an envelope gate's recorded verdict, open (R08.T16.a.2): the envelope's
- * `range` where the gate passes ({@link deckGatePasses}), and `null`, none, where it does not; a
- * deck over a surface routes on no gate yet (lean, 2026-11-01, R08.T15.b.2's: once both of
- * R08.T15's gates pass, as the plan says).
+ * The range a deck over a surface routes over once the Venus-class cases' gates pass (R08.T15.b.2;
+ * lean, 2026-11-02): the channels of both cases' whole media, the range their gates cover, as
+ * {@link HAZE_ROUTE_RANGE} is `titan-class`'s.
+ *
+ * @remarks
+ * Each bound is the cases' extreme, rounded outward at its third figure (the test holds them to the
+ * cases): τ to 76.70 (`venus-92bar`'s blue, its Rayleigh the most of it), ω̄ from 0.9987
+ * (`venus-58bar`'s blue), ḡ to 0.6660 (`venus-58bar`'s red), the ground to 0.15, τ ḡ to 26.58
+ * (`venus-58bar`'s green) and τ (1 − ω̄) to 0.07805 (either case's blue, the same SO₂ and deck
+ * absorber in both). Out of it
+ * stand `giant-deck`'s NH₃ ice (ḡ 0.71–0.73 over a black ground), whose own gate below its split
+ * misses 42 of its values at the horizon's sun, and `titan-class`'s haze (ḡ to 0.73).
+ */
+export const SURFACE_DECK_ROUTE_RANGE: ThickRouteRange = {
+  mostOpticalDepth: 76.8,
+  leastSingleScatteringAlbedo: 0.998,
+  mostAsymmetry: 0.667,
+  mostGroundAlbedo: 0.15,
+  mostForwardDepth: 26.6,
+  mostAbsorbedDepth: 0.0781,
+};
+
+/**
+ * The deck routes the recorded verdicts open (R08.T16.a.2, R08.T15.b.2): each floor's range where its
+ * gates pass ({@link deckGatePasses}), an envelope's {@link ENVELOPE_ROUTE_RANGE} on `envelope`, an
+ * envelope gate's, and a surface's {@link SURFACE_DECK_ROUTE_RANGE} on every one of `surface`, the
+ * gate above a deck and the Venus-class cases' below and above it; `null` for a floor whose gates do
+ * not pass, and `null`, none, where neither does.
  */
 export function deckRouteRangeOf(
-  tallies: ReadonlyArray<GateImageTally>,
-  range: ThickRouteRange = ENVELOPE_ROUTE_RANGE,
+  envelope: ReadonlyArray<GateImageTally>,
+  surface: ReadonlyArray<ReadonlyArray<GateImageTally>>,
 ): DeckRouteRange | null {
-  return deckGatePasses(tallies) ? { ground: null, envelope: range } : null;
+  const ground =
+    surface.length > 0 && surface.every(deckGatePasses) ? SURFACE_DECK_ROUTE_RANGE : null;
+  const opened = deckGatePasses(envelope) ? ENVELOPE_ROUTE_RANGE : null;
+  return ground === null && opened === null ? null : { ground, envelope: opened };
 }
 
 /**
  * The range the cloud-deck split's passing gates cover (R08.T15.b.2, R08.T16.a.2): a gas
  * envelope's, {@link ENVELOPE_ROUTE_RANGE}, since `giant-deck`'s envelope variant passes
- * ({@link ENVELOPE_GATE_TALLIES}); a deck over a surface's, none. The Venus-class cases' scalar gate
- * refuses nearly every value below the deck at their references' 1,024 samples, and `giant-deck`
- * below its split misses 42 of its twilight values (s90, its plane-parallel table dark there), so a
- * deck over a surface stays drawn by the analytic term under `ATMOSPHERE: APPROXIMATE`, its deck's
- * bake unasked. Neither the hand nor the generated Jupiter lies within the envelope's range (its
- * chromophore absorbs), so neither routes on it. A routed envelope's frame waits on the owner's RTX
- * run against `decision-r08-t11-frame.md`'s 16.67 ms.
+ * ({@link ENVELOPE_GATE_TALLIES}); a deck over a surface's, {@link SURFACE_DECK_ROUTE_RANGE}, since
+ * R08.T15's gates both pass, `giant-deck`'s above its split ({@link ABOVE_DECK_GATE_TALLIES}) and the
+ * Venus-class cases' with their refused images passed over ({@link SURFACE_DECK_GATE_TALLIES}). A camera beneath a routed deck over a surface reads its low
+ * sun as past the gates' range ({@link DECK_LOWEST_SUN_SINE}). Neither the hand nor the generated
+ * Jupiter lies within the envelope's range (its chromophore absorbs), so neither routes on it. A
+ * routed deck's frame waits on the owner's RTX run against `decision-r08-t11-frame.md`'s 16.67 ms,
+ * an item on RM4's close list, not a condition of the route (main's ruling of 2026-11-02).
  */
-export const DECK_ROUTE_RANGE: DeckRouteRange | null = deckRouteRangeOf(ENVELOPE_GATE_TALLIES);
+export const DECK_ROUTE_RANGE: DeckRouteRange | null = deckRouteRangeOf(ENVELOPE_GATE_TALLIES, [
+  ABOVE_DECK_GATE_TALLIES,
+  ...Object.values(SURFACE_DECK_GATE_TALLIES),
+]);
 
 /**
  * Whether a body routed `regime` takes its deck's bake (Design note 9's split; the atmosphere
@@ -478,12 +585,23 @@ export const LOW_SUN_SINE = 0.35;
 /**
  * Why a body baked as a haze carries `atmosphereApproximate` where its brightest light stands at
  * most {@link LOW_SUN_SINE} over the camera's local horizontal and at or above it, the camera in
- * its air (R08.T14.d.4; main's ruling of 2026-11-01), as player text in {@link TWILIGHT_REASON}'s
- * form; below the horizontal, {@link TWILIGHT_REASON} stands (lean, 2026-11-01). Its words await
- * the owner's UX sign-off.
+ * its air (R08.T14.d.4; main's ruling of 2026-11-01), and a camera beneath a routed deck over a
+ * surface where it stands under {@link DECK_LOWEST_SUN_SINE} (R08.T15.b.2), as player text in
+ * {@link TWILIGHT_REASON}'s form; below the horizontal, {@link TWILIGHT_REASON} stands (lean,
+ * 2026-11-01). Its words await the owner's UX sign-off, the deck's case among them.
  */
 export const LOW_SUN_REASON =
   "multiple scattering: computed beyond its checked range, the brightest star low over the local horizontal";
+
+/**
+ * The sine of the lowest sun the deck gates pass beneath a deck over a surface (R08.T15.b.2; lean,
+ * 2026-11-02): `giant-deck`'s s80, 10° over the horizon, sin 10° = cos 80°, whose 63 values below
+ * its split pass where its s90's 42 miss (the plane-parallel table dark at a horizon's sun); the
+ * Venus-class cases refuse every value of s80. A camera beneath a routed deck over a surface whose
+ * brightest light stands under it and at or above the horizontal reads {@link LOW_SUN_REASON}, as a
+ * haze's low sun does.
+ */
+export const DECK_LOWEST_SUN_SINE = 0.17364817766693033;
 
 /**
  * Whether the product asks a world with air its polarisation correction (plan R08, R08.T14.f): on

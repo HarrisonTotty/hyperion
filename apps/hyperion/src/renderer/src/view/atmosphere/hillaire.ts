@@ -1226,17 +1226,43 @@ const THERMAL_SOURCE: ReadonlyArray<{
 /** The last three of {@link THERMAL_SOURCE}: each kernel's step holds one of them. */
 const THERMAL_STEP_REWRITES = 3;
 
+/** The binding `thermalSource.wgsl` declares its buffer at. */
+const THERMAL_SOURCE_BINDING = "@group(0) @binding(25) var<storage, read> thermalSource";
+
+/**
+ * `thermalSource.wgsl` with its buffer at binding 26, for a kernel whose own sources hold binding 25
+ * (a deck's march, its table; R08.T15.b.2), so that every other thermal form keeps its bytes.
+ */
+const THERMAL_SOURCE_OVER_DECK_WGSL = thermalSourceWgsl.replace(
+  THERMAL_SOURCE_BINDING,
+  "@group(0) @binding(26) var<storage, read> thermalSource",
+);
+
+/**
+ * The thermal light a kernel's thermal form draws ({@link withThermalSource}): the medium's emission
+ * and the scattered thermal light a thick bake holds, or its emission alone (R08.T15.b.2: a deck's
+ * march, whose bake holds none).
+ */
+export type ThermalLight = "emitted and scattered" | "emitted";
+
 /**
  * `pair`, a per-frame kernel (the sky view, the aerial perspective or a ray march, of the thin read
- * or the thick), drawing the medium's own light (plan R08, R08.T18.b; `thermalSource.ts`): the
- * rewrites of {@link THERMAL_SOURCE} and `thermalSource.wgsl` appended, its buffer at
- * `thermalSource` beside the kernel's own bindings. Every other line is the kernel's own, so that a
- * body below the thermal cut draws by the kernel as it was to the byte.
+ * or the thick, or a thick march over a deck), drawing the medium's own light (plan R08, R08.T18.b;
+ * `thermalSource.ts`): the rewrites of {@link THERMAL_SOURCE} and `thermalSource.wgsl` appended,
+ * its buffer at `thermalSource` beside the kernel's own bindings, at binding 25, or 26 where the
+ * kernel's own hold 25 (R08.T15.b.2: a deck's march, its table). Every other line is the kernel's
+ * own, so that a body below the thermal cut draws by the kernel as it was to the byte.
  *
+ * @param light - `emitted` leaves the step's shares as they are, reading no scattered thermal light
+ *   (R08.T15.b.2): a deck's bake holds none, and on SwiftShader the deck's march with the read as
+ *   well crashed its GPU process as it compiled (`exit_code=139` after some 300 s, pod, 2026-11-02).
  * @throws Error naming the kernel when its sources hold a rewritten line more or fewer times than
  *   {@link THERMAL_SOURCE} allows, or no step's or more than one.
  */
-export function withThermalSource(pair: KernelPair): KernelPair {
+export function withThermalSource(
+  pair: KernelPair,
+  light: ThermalLight = "emitted and scattered",
+): KernelPair {
   const rewrite = (wgsl: string): string => {
     let steps = 0;
     const code = THERMAL_SOURCE.reduce((text, { general, thermal, least, most }, i) => {
@@ -1248,13 +1274,19 @@ export function withThermalSource(pair: KernelPair): KernelPair {
       }
       if (i >= THERMAL_SOURCE.length - THERMAL_STEP_REWRITES) {
         steps += count;
+        if (light === "emitted") {
+          return text;
+        }
       }
       return text.replaceAll(general, thermal);
     }, wgsl);
     if (steps !== 1) {
       throw new Error(`kernel ${pair.name} holds ${steps} steps' shares, not 1`);
     }
-    return `${code}\n${thermalSourceWgsl}`;
+    const source = wgsl.includes("@group(0) @binding(25) ")
+      ? THERMAL_SOURCE_OVER_DECK_WGSL
+      : thermalSourceWgsl;
+    return `${code}\n${source}`;
   };
   return {
     ...pair,
@@ -1369,6 +1401,16 @@ export const RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL = withThermalSource(RAY_MARCH_
 export const RAY_MARCH_DECK_KERNEL = withDeckRead(RAY_MARCH_THICK_KERNEL);
 /** {@link RAY_MARCH_SLOTS_THICK_KERNEL} over a cloud deck (R08.T15.a.2). */
 export const RAY_MARCH_SLOTS_DECK_KERNEL = withDeckRead(RAY_MARCH_SLOTS_THICK_KERNEL);
+/**
+ * {@link RAY_MARCH_DECK_KERNEL} drawing the medium's emission ({@link withThermalSource}, `emitted`;
+ * R08.T18.b over R08.T15.b.2's deck route), so that a self-luminous body over a deck reads its deck.
+ */
+export const RAY_MARCH_DECK_THERMAL_KERNEL = withThermalSource(RAY_MARCH_DECK_KERNEL, "emitted");
+/** {@link RAY_MARCH_SLOTS_DECK_KERNEL} likewise (R08.T15.b.2). */
+export const RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL = withThermalSource(
+  RAY_MARCH_SLOTS_DECK_KERNEL,
+  "emitted",
+);
 /** {@link RAY_MARCH_DECK_KERNEL} specialised for one band and no layer edge (R08.T15.a.2). */
 export const RAY_MARCH_DECK_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_DECK_KERNEL);
 /** {@link RAY_MARCH_SLOTS_DECK_KERNEL} specialised likewise (R08.T15.a.2). */
@@ -1649,13 +1691,12 @@ interface FrameKernels {
    */
   readonly thick: () => ThickKernels;
   /**
-   * The kernels' thermal forms ({@link withThermalSource}; plan R08, R08.T18.b), of the thin read
-   * (`false`) or the thick (`true`), for a body whose tables hold a thermal source
-   * ({@link AtmosphereTables.thermalSource}): made at the first frame of such tables where they were
-   * not made ahead ({@link FrameKernelsAhead.thermal}), as the thick kernels are, so that a view of
-   * bodies under the thermal cut compiles none of them.
+   * The kernels' thermal forms ({@link withThermalSource}; plan R08, R08.T18.b), of `read`, for a
+   * body whose tables hold a thermal source ({@link AtmosphereTables.thermalSource}): made at the
+   * first frame of such tables where they were not made ahead ({@link FrameKernelsAhead.thermal}),
+   * as the thick kernels are, so that a view of bodies under the thermal cut compiles none of them.
    */
-  readonly thermal: (thick: boolean) => ThermalKernels;
+  readonly thermal: (read: ThermalRead) => ThermalKernels;
   /**
    * What lies behind the sky from above at the march's resolution ({@link COMPOSITE_BEHIND_KERNEL};
    * the owner's priority, 2026-11-01): made at the first frame that takes it, where it was not made
@@ -1676,6 +1717,12 @@ interface ThermalKernels {
   readonly rayMarchSlots: () => ComputeHandle;
 }
 
+/**
+ * The read whose thermal forms a self-luminous body's frame takes (R08.T18.b): the thin, the thick,
+ * or the thick over a cloud deck, whose marches read the deck at their ground (R08.T15.b.2).
+ */
+type ThermalRead = "thin" | "thick" | "deck";
+
 /** The thermal forms of one read's kernels. */
 interface ThermalPairs {
   readonly skyView: KernelPair;
@@ -1684,8 +1731,11 @@ interface ThermalPairs {
   readonly rayMarchSlots: KernelPair;
 }
 
-/** The thin read's and the thick read's thermal forms. */
-const THERMAL_PAIRS: { readonly thin: ThermalPairs; readonly thick: ThermalPairs } = {
+/**
+ * Each read's thermal forms: over a deck the thick read's sky view and aerial perspective, which read
+ * no deck, beside the deck's marches (R08.T15.b.2).
+ */
+const THERMAL_PAIRS: Readonly<Record<ThermalRead, ThermalPairs>> = {
   thin: {
     skyView: SKY_VIEW_THERMAL_KERNEL,
     aerial: AERIAL_PERSPECTIVE_THERMAL_KERNEL,
@@ -1698,6 +1748,12 @@ const THERMAL_PAIRS: { readonly thin: ThermalPairs; readonly thick: ThermalPairs
     rayMarch: RAY_MARCH_THICK_THERMAL_KERNEL,
     rayMarchSlots: RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL,
   },
+  deck: {
+    skyView: SKY_VIEW_THICK_THERMAL_KERNEL,
+    aerial: AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
+    rayMarch: RAY_MARCH_DECK_THERMAL_KERNEL,
+    rayMarchSlots: RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL,
+  },
 };
 
 /**
@@ -1707,14 +1763,14 @@ const THERMAL_PAIRS: { readonly thin: ThermalPairs; readonly thick: ThermalPairs
 function thermalKernelsOf(
   engine: RenderEngine,
   as: (pair: KernelPair) => KernelPair,
-): (thick: boolean) => ThermalKernels {
-  const made = new Map<boolean, ThermalKernels>();
-  return (thick) => {
-    const held = made.get(thick);
+): (read: ThermalRead) => ThermalKernels {
+  const made = new Map<ThermalRead, ThermalKernels>();
+  return (read) => {
+    const held = made.get(read);
     if (held !== undefined) {
       return held;
     }
-    const pairs = thick ? THERMAL_PAIRS.thick : THERMAL_PAIRS.thin;
+    const pairs = THERMAL_PAIRS[read];
     let shared: ComputeHandle | null = null;
     let slots: ComputeHandle | null = null;
     const kernels: ThermalKernels = {
@@ -1723,7 +1779,7 @@ function thermalKernelsOf(
       rayMarch: () => (shared ??= engine.createCompute(as(pairs.rayMarch))),
       rayMarchSlots: () => (slots ??= engine.createCompute(as(pairs.rayMarchSlots))),
     };
-    made.set(thick, kernels);
+    made.set(read, kernels);
     return kernels;
   };
 }
@@ -1731,12 +1787,13 @@ function thermalKernelsOf(
 /**
  * The thermal forms made up front by `createComputeAsync` ({@link FrameKernelsAhead.thermal}): the
  * thin read's and the thick read's, each march as `reads` asks; a read not asked is made at its
- * first frame.
+ * first frame, and the marches over a deck at theirs, beside the thick read's sky view and aerial
+ * perspective (R08.T15.b.2).
  */
 async function thermalKernelsAhead(
   engine: RenderEngine,
   reads: MarchReads,
-): Promise<(thick: boolean) => ThermalKernels> {
+): Promise<(read: ThermalRead) => ThermalKernels> {
   const ahead = async (pairs: ThermalPairs): Promise<ThermalKernels> => {
     const [skyView, aerial, shared, slots] = await Promise.all([
       engine.createComputeAsync(pairs.skyView),
@@ -1756,7 +1813,29 @@ async function thermalKernelsAhead(
     };
   };
   const [thin, thick] = await Promise.all([ahead(THERMAL_PAIRS.thin), ahead(THERMAL_PAIRS.thick)]);
-  return (isThick) => (isThick ? thick : thin);
+  let deckShared: ComputeHandle | null = null;
+  let deckSlots: ComputeHandle | null = null;
+  const deck: ThermalKernels = {
+    skyView: thick.skyView,
+    aerial: thick.aerial,
+    rayMarch: () => (deckShared ??= engine.createCompute(THERMAL_PAIRS.deck.rayMarch)),
+    rayMarchSlots: () => (deckSlots ??= engine.createCompute(THERMAL_PAIRS.deck.rayMarchSlots)),
+  };
+  return (read) => {
+    let kernels: ThermalKernels;
+    switch (read) {
+      case "thin":
+        kernels = thin;
+        break;
+      case "thick":
+        kernels = thick;
+        break;
+      case "deck":
+        kernels = deck;
+        break;
+    }
+    return kernels;
+  };
 }
 
 /**
@@ -3316,14 +3395,18 @@ export class HillaireAtmosphere {
     const perFrameMedium = packMediumUniform(medium, inputs.radiusM - inputs.heightM, 1);
     // A body whose tables hold the thick table draws by the kernels that read it (R08.T14.c).
     const thickTable = tables.thickTable;
-    // A self-luminous body draws by the kernels' thermal forms, of its read (R08.T18.b), and makes
-    // none of the others.
-    const thermalSource = tables.thermalSource;
-    const thermal = thermalSource === null ? null : kernels.thermal(thickTable !== null);
-    const thick = thickTable === null || thermal !== null ? null : kernels.thick();
     // A body whose tables hold a deck table marches by the kernels that read it at the ground
     // (R08.T15.a.2), beside the thick table that holds its J above the deck.
     const deckTable = tables.deckTable;
+    // A self-luminous body draws by the kernels' thermal forms of its read (R08.T18.b), whose marches
+    // over a deck read it (R08.T15.b.2), and makes none of the others.
+    const thermalSource = tables.thermalSource;
+    let read: ThermalRead = "thin";
+    if (thickTable !== null) {
+      read = deckTable === null ? "thick" : "deck";
+    }
+    const thermal = thermalSource === null ? null : kernels.thermal(read);
+    const thick = thickTable === null || thermal !== null ? null : kernels.thick();
     // A camera beneath a deck over a surface, under the tables' datum, the deck's, draws by the
     // kernels that read the table below it in place of every other (R08.T15.b.2).
     const belowDeckTable = tables.belowDeckTable;

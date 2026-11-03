@@ -5,6 +5,7 @@ import {
   saturnBody,
   saturnClassMedium,
   SATURN_SPHEROID,
+  venusClassMedium,
 } from "../../test/atmosphereFixtures";
 import { wgslFunctions, wgslReached } from "../../test/atmosphereWgsl";
 import { boundNames, countingRenderEngine } from "../../test/countingRenderEngine";
@@ -18,11 +19,17 @@ import { WGSL_CATALOGUE } from "../engine/catalogue";
 import type { KernelPair } from "../engine/kernels";
 import { kernelBindings } from "../engine/webgpu/compute";
 import { fnv1a64 } from "../terrain/workers/f32Digest";
-import { R05_EARTH_REFERENCE, referenceSunIlluminanceLx } from "./earth";
+import {
+  EARTH_REFERENCE,
+  EARTH_REFERENCE_CURVES,
+  R05_EARTH_REFERENCE,
+  referenceSunIlluminanceLx,
+} from "./earth";
 import {
   AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
   AERIAL_PERSPECTIVE_KERNEL,
   AERIAL_PERSPECTIVE_THICK_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
   type AtmosphereCamera,
   type AtmosphereScene,
   createAtmosphereFrameKernels,
@@ -31,11 +38,13 @@ import {
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_DECK_KERNEL,
   RAY_MARCH_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_DECK_THERMAL_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_DECK_KERNEL,
   RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_THICK_KERNEL,
@@ -43,9 +52,11 @@ import {
   RAY_MARCH_SPECIAL_KERNEL,
   RAY_MARCH_THICK_KERNEL,
   RAY_MARCH_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_THERMAL_KERNEL,
   SKY_VIEW_BELOW_DECK_KERNEL,
   SKY_VIEW_KERNEL,
   SKY_VIEW_THICK_KERNEL,
+  SKY_VIEW_THICK_THERMAL_KERNEL,
   type SpheroidFigure,
   type SunState,
   TABLE_SIZES,
@@ -55,8 +66,11 @@ import {
   withThickRead,
 } from "./hillaire";
 import deckReadWgsl from "./shaders/deckRead.wgsl?raw";
+import thermalSourceWgsl from "./shaders/thermalSource.wgsl?raw";
 import { AtmosphereTables, kernelMedium } from "./tables";
 import { upperMediumOf } from "./thick/deckRead";
+import { classifyRegime } from "./thick/regime";
+import { type MediumTemperature, selfLuminousOf } from "./thermalSource";
 
 /** WGS 84 (NIMA TR8350.2): a = 6,378,137 m, f = 1 ÷ 298.257223563. */
 const WGS84: SpheroidFigure = {
@@ -573,6 +587,162 @@ describe("HillaireAtmosphere beneath a deck (R08.T15.b.2)", () => {
       expect.arrayContaining([SKY_VIEW_THICK_KERNEL.name, AERIAL_PERSPECTIVE_THICK_KERNEL.name]),
     );
     expect(drawn(NEAR).some((name) => name.includes("beneath a deck"))).toBe(false);
+  });
+});
+
+/** Each deck march's thermal form beside the deck form it is made from (R08.T15.b.2). */
+const DECK_THERMAL_PAIRS: ReadonlyArray<readonly [string, KernelPair, KernelPair]> = [
+  ["the ray march", RAY_MARCH_DECK_KERNEL, RAY_MARCH_DECK_THERMAL_KERNEL],
+  ["the ray march by slot", RAY_MARCH_SLOTS_DECK_KERNEL, RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL],
+];
+
+describe("the deck's marches' thermal forms (R08.T15.b.2)", () => {
+  it.each(DECK_THERMAL_PAIRS)(
+    "makes %s's from its deck form, its thermal source at binding 26 beside the deck's table at 25",
+    (_name, deck, thermal) => {
+      const bindings = kernelBindings(thermal.reference);
+      expect([
+        thermal.name,
+        thermal.reference.endsWith(
+          `\n${thermalSourceWgsl.replace("@binding(25)", "@binding(26)")}`,
+        ),
+        [...bindings.keys()],
+        bindings.get("deckTable")?.binding,
+        bindings.get("thermalSource")?.binding,
+        unreachedBindings(thermal.reference),
+      ]).toEqual([
+        `${deck.name}, thermal`,
+        true,
+        [...kernelBindings(deck.reference).keys(), "thermalSource"],
+        25,
+        26,
+        [],
+      ]);
+    },
+  );
+
+  it("leaves every other thermal form's source at binding 25", () => {
+    expect(
+      kernelBindings(RAY_MARCH_THICK_THERMAL_KERNEL.reference).get("thermalSource"),
+    ).toMatchObject({ group: 0, binding: 25 });
+  });
+
+  it("is catalogued beside the deck's marches", () => {
+    const names = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "compute" ? [entry.spec.name] : [],
+    );
+    expect(names).toEqual(
+      expect.arrayContaining(DECK_THERMAL_PAIRS.map(([, , thermal]) => thermal.name)),
+    );
+  });
+});
+
+/** Venus's solar irradiance, W m⁻²: 2,601.3 (NASA's Venus Fact Sheet). */
+const VENUS_SOLAR_IRRADIANCE_W_M2 = 2_601.3;
+
+/**
+ * A Venus-class column's temperature, hottest at its ground, `groundK`, falling linearly to 230 K at
+ * 100 km: a test's profile, not fitted to Venus, of which only the peak at the ground decides the
+ * cut.
+ */
+function venusClassTemperature(groundK: number): MediumTemperature {
+  return { heightsM: Float64Array.of(0, 100_000), temperaturesK: Float64Array.of(groundK, 230) };
+}
+
+describe("HillaireAtmosphere over a deck, self-luminous (R08.T15.b.2)", () => {
+  const venus = venusClassMedium();
+
+  it("takes a Venus-class world at 1,000 K for self-luminous, and the Venus-class fixture at its 730 K not", () => {
+    expect(
+      [730, 1_000].map((groundK) =>
+        selfLuminousOf(venus.medium, venusClassTemperature(groundK), VENUS_SOLAR_IRRADIANCE_W_M2),
+      ),
+    ).toEqual([false, true]);
+  });
+
+  it.each([
+    ["made at its first frame", {}],
+    ["made ahead", { thick: true, thermal: true }],
+  ] as const)(
+    "draws a Venus-class world at 1,000 K over its deck by the deck's thermal march under every cover, its sky by the thick read's thermal forms, the kernels %s",
+    async (_made, ahead) => {
+      const engine = await countingRenderEngine();
+      const kernels = await createAtmosphereFrameKernels(engine, ahead);
+      const deckCover = {
+        cloudFraction: 1,
+        decks: [{ opticalDepth550: 30, baseAltitudeM: 45_000, topAltitudeM: 73_000 }],
+        envelope: false,
+      };
+      const regime = classifyRegime(venus.medium, deckCover);
+      const splitM = regime.kind === "cloudDeck" ? regime.deckAltitudeM : Number.NaN;
+      const upper = upperMediumOf(venus.medium, splitM);
+      const tables = new AtmosphereTables(engine, upper, venus.radiusM + splitM);
+      tables.setDeckTables(patternedDeckTables(tables.plan.bands, kernelMedium(upper), 1, splitM));
+      tables.setThermalSource(venusClassTemperature(1_000));
+      const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+      const camera: AtmosphereCamera = {
+        ...NEAR,
+        positionM: { x: venus.radiusM + splitM + 2_000, y: 0, z: 0 },
+      };
+      const march = RAY_MARCH_DECK_THERMAL_KERNEL;
+      for (const cover of ["area", "whole frame", "tiles"] as const) {
+        view.setMarchCover(cover);
+        engine.dispatched.length = 0;
+        view.drawFrame(camera, [NOON], SCENE);
+        const atmosphere = engine.dispatched.filter((d) => d.kernel.startsWith("atmosphere "));
+        const names = atmosphere.map((d) => d.kernel);
+        const marched = atmosphere.find((d) => d.kernel === march.name);
+        expect([
+          names.filter((name) => name.startsWith("atmosphere ray march")),
+          names,
+          names.includes(SKY_VIEW_THICK_KERNEL.name),
+          boundNames(marched?.bindings ?? { buffers: {}, sampled: {}, uniforms: {}, storage: {} }),
+        ]).toEqual([
+          [march.name],
+          expect.arrayContaining([
+            SKY_VIEW_THICK_THERMAL_KERNEL.name,
+            AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL.name,
+          ]),
+          false,
+          [...kernelBindings(march.reference).keys()].toSorted(),
+        ]);
+      }
+    },
+  );
+
+  it("draws the measured Earth's air over a deck at 3,000 K, whose ozone's curves give it slot layers, by the deck's thermal march by slot", async () => {
+    const engine = await countingRenderEngine();
+    const kernels = await createAtmosphereFrameKernels(engine);
+    const upper = upperMediumOf(EARTH_REFERENCE, DECK_ALTITUDE_M);
+    const tables = new AtmosphereTables(
+      engine,
+      upper,
+      tableRadiusM(WGS84),
+      EARTH_REFERENCE_CURVES,
+      earthBody(),
+    );
+    tables.setDeckTables(
+      patternedDeckTables(
+        tables.plan.bands,
+        kernelMedium(upper),
+        EARTH_REFERENCE_CURVES.length,
+        DECK_ALTITUDE_M,
+      ),
+    );
+    tables.setThermalSource({
+      heightsM: Float64Array.of(0, 1e6),
+      temperaturesK: Float64Array.of(3_000, 3_000),
+    });
+    const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+    engine.dispatched.length = 0;
+    view.drawFrame(NEAR, [NOON], SCENE);
+    const marches = engine.dispatched
+      .map((d) => d.kernel)
+      .filter((name) => name.startsWith("atmosphere ray march"));
+    expect([tables.slotDepths === null, marches]).toEqual([
+      false,
+      [RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL.name],
+    ]);
   });
 });
 
