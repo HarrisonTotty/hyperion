@@ -51,6 +51,13 @@ const SOURCE_NODE_WEIGHTS = array<f32, 3>(0.25, 0.5, 0.25);
 // diameter along north.
 const SOURCE_AT_ZENITH : f32 = 1e-6;
 
+// The inspection profile's probe of the lit passes' cost (`surfaceLighting.ts`' `litProbedWgsl`,
+// R08.T9.b's measurement): 0, the lookups as drawn, on every launch but a `--lit-probe` profile's,
+// whose materials and kernels set 1, every source's transmittance 1 with no lookup; 2, a
+// planetshine source's at its centre node alone; or 3, the eclipse term with no annuli
+// (`bodyDisc.wgsl`'s and `terrainLit.wgsl`'s), every star unhidden. Never a player's picture.
+const LIT_PROBE : u32 = 0u;
+
 // Whether the bound body has an atmosphere: a body table whose equatorial radius is above 0.
 fn atmosphereHasAir(body : OblateBody) -> bool {
   return body.figure.x > 0.0;
@@ -167,7 +174,7 @@ fn atmosphere_sun_transmittance(
   curve : u32,
 ) -> vec3f {
   let body = oblateBodyOf(atmosphere_body);
-  if (!atmosphereHasAir(body)) {
+  if (!atmosphereHasAir(body) || LIT_PROBE == 1u) {
     return vec3f(1.0);
   }
   let below = atmosphereBelowDeckPlace(body, altitude_m, latitude_rad);
@@ -231,7 +238,7 @@ fn atmosphere_source_transmittance(
   curve : u32,
 ) -> vec3f {
   let body = oblateBodyOf(atmosphere_body);
-  if (!atmosphereHasAir(body)) {
+  if (!atmosphereHasAir(body) || LIT_PROBE == 1u) {
     return vec3f(1.0);
   }
   let below = atmosphereBelowDeckPlace(body, altitude_m, latitude_rad);
@@ -255,7 +262,8 @@ fn atmosphere_source_transmittance(
   var total = 0.0;
   for (var k = 0u; k < 3u; k++) {
     let mu = dot(nodes[k], n);
-    if (!(mu > 0.0)) {
+    // The centre node alone under the probe's planetshine form.
+    if (!(mu > 0.0) || (LIT_PROBE == 2u && k != 1u)) {
       continue;
     }
     let w = SOURCE_NODE_WEIGHTS[k] * mu;

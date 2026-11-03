@@ -216,6 +216,31 @@ describe("the views check's launch switch", () => {
     ).toBeNull();
   });
 
+  it("carries the frame profile's lit probe, beside the other probes and levers or alone, on that profile alone (R08.T9.b)", () => {
+    const profile: ViewsCheckLaunch = {
+      ...LAUNCH,
+      run: "inspection",
+      served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+      timing: true,
+    };
+    for (const litProbe of ["transmittance-one", "planetshine-centre", "no-annuli"] as const) {
+      const launch: ViewsCheckLaunch = { ...profile, litProbe };
+      expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    }
+    const all: ViewsCheckLaunch = {
+      ...profile,
+      compositeProbe: "sky-off",
+      marchProbe: "centre",
+      atmosphereLevers: { limbRays: "packed" },
+      litProbe: "no-annuli",
+    };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(all)])).toEqual(all);
+    expect(readViewsCheckLaunch({ ...profile, litProbe: "sky-off" })).toBeNull();
+    const { timing: _, ...inspection } = profile;
+    expect(readViewsCheckLaunch({ ...inspection, litProbe: "no-annuli" })).toBeNull();
+    expect(readViewsCheckLaunch({ ...LAUNCH, litProbe: "no-annuli" })).toBeNull();
+  });
+
   it("carries the hand-over check's one look, on a hand-over check alone (R10.T15.b.2)", () => {
     const launch: ViewsCheckLaunch = {
       ...LAUNCH,

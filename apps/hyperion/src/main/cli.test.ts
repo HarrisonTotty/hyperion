@@ -921,6 +921,60 @@ describe("the several-views check's options", () => {
     expect(error.exitCode).toBe(1);
   });
 
+  it.each(["transmittance-one", "planetshine-centre", "no-annuli"] as const)(
+    "takes --lit-probe %s, the frame profile's probe of the lit passes (R08.T9.b)",
+    (probe) => {
+      expect(
+        parse([
+          "--views-check",
+          "--inspection",
+          "--universe",
+          UNIVERSE,
+          "--body",
+          BODY,
+          "--timing",
+          "--lit-probe",
+          probe,
+        ]).viewsCheck,
+      ).toEqual({
+        setting: "high",
+        smoke: false,
+        out: null,
+        run: "inspection",
+        fixture: "terrain-test",
+        served: { universe: UNIVERSE, body: BODY },
+        timing: true,
+        litProbe: probe,
+      });
+    },
+  );
+
+  it.each([
+    [["--views-check", "--inspection", "--universe", UNIVERSE, "--body", BODY]],
+    [["--lit-probe", "no-annuli"]],
+  ] as const)("refuses --lit-probe without the frame profile after %j", (args) => {
+    const error = refusal([...args, "--lit-probe", "no-annuli"]);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      "error: --lit-probe is an option of --timing, which was not given",
+    ]);
+  });
+
+  it("refuses a --lit-probe that names no probe", () => {
+    const error = refusal([
+      "--views-check",
+      "--inspection",
+      "--universe",
+      UNIVERSE,
+      "--body",
+      BODY,
+      "--timing",
+      "--lit-probe",
+      "sky-off",
+    ]);
+    expect(error.exitCode).toBe(1);
+  });
+
   it.each([
     [
       ["--views-check", "--timing"],

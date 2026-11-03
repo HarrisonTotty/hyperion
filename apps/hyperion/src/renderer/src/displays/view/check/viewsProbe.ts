@@ -29,6 +29,7 @@ import type {
 } from "../../../../../preload/api";
 import type { CompositeProbe } from "../../../view/atmosphere/hillaire";
 import type { MarchCensus, MarchProbe } from "../../../view/atmosphere/marchProbe";
+import type { LitProbe } from "../../../view/atmosphere/surfaceLighting";
 import type { GpuTimer, GraphicsFault } from "../../../view/engine/status";
 import type {
   FrameSubmission,
@@ -170,6 +171,8 @@ export class ViewsProbe implements EngineProbe {
   readonly #compositeProbe: CompositeProbe | null;
   /** The probe its engines make the atmosphere's march under, or `null` (as drawn). */
   readonly #marchProbe: MarchProbe | null;
+  /** The probe its engines make the lit materials and kernels under, or `null` (as drawn). */
+  readonly #litProbe: LitProbe | null;
   /** The latest engine it made, which a census is asked of ({@link ViewsProbe.marchCensus}). */
   #engine: ProbedEngine | null = null;
 
@@ -181,16 +184,21 @@ export class ViewsProbe implements EngineProbe {
    *   made under ({@link ProbedEngine}); `null`, the default, as drawn.
    * @param marchProbe - The inspection profile's probe of the atmosphere's march (`--march-probe`;
    *   plan R08, R08.T8.d), which every engine's march is made under; `null`, the default, as drawn.
+   * @param litProbe - The inspection profile's probe of the lit passes (`--lit-probe`; R08.T9.b's
+   *   measurement), which every engine's lit materials and kernels are made under
+   *   ({@link ProbedEngine}); `null`, the default, as drawn.
    */
   constructor(
     inner: ViewEngineSource = DEFAULT_ENGINE_SOURCE,
     nowMs: () => number = () => performance.now(),
     compositeProbe: CompositeProbe | null = null,
     marchProbe: MarchProbe | null = null,
+    litProbe: LitProbe | null = null,
   ) {
     this.#nowMs = nowMs;
     this.#compositeProbe = compositeProbe;
     this.#marchProbe = marchProbe;
+    this.#litProbe = litProbe;
     this.source = {
       requestAdapter: inner.requestAdapter,
       load: async (outcome, status) => this.#attach(await inner.load(outcome, status)),
@@ -603,6 +611,7 @@ export class ViewsProbe implements EngineProbe {
       this.#nowMs,
       this.#compositeProbe,
       this.#marchProbe,
+      this.#litProbe,
     );
     this.#engine = probed;
     return probed;

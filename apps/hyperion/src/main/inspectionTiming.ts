@@ -37,6 +37,7 @@ import type {
   InspectionTimingWindow,
   InspectionTimingWindowName,
   MarchProbeName,
+  LitProbeName,
   ServedWorldNames,
   SpikePassTimer,
   ViewsCheckCanvas,
@@ -52,9 +53,10 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
 
 /**
  * The schema's version; bumped with any change to the file's shape: 2 since each window's march
- * census, the run's march probe and its levers over the setting's (plan R08, R08.T8.d).
+ * census, the run's march probe and its levers over the setting's (plan R08, R08.T8.d), 3 since the
+ * run's lit probe (R08.T9.b).
  */
-export const INSPECTION_TIMING_VERSION = 2;
+export const INSPECTION_TIMING_VERSION = 3;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -754,6 +756,11 @@ export interface InspectionTimingResults {
      * `--limb-rays`; plan R08, R08.T8.d), or `null`, the setting's own.
      */
     readonly atmosphereLevers: AtmosphereLeversOverride | null;
+    /**
+     * The lit passes' probe the profile drew under (`--lit-probe`; plan R08, R08.T9.b's
+     * measurement), or `null`, the surfaces lit as a player's are.
+     */
+    readonly litProbe: LitProbeName | null;
   };
   readonly windows: ReadonlyArray<InspectionTimingWindowResults>;
 }
@@ -768,6 +775,8 @@ export interface InspectionTimingInput {
   readonly marchProbe: MarchProbeName | null;
   /** The levers the launch drew with over its setting's, or `null` (`ViewsCheckLaunch.atmosphereLevers`). */
   readonly atmosphereLevers: AtmosphereLeversOverride | null;
+  /** The lit passes' probe the launch drew under, or `null` (`ViewsCheckLaunch.litProbe`). */
+  readonly litProbe: LitProbeName | null;
   readonly record: InspectionTimingRecord;
   /** Each window's reduced trace, by name; a window without one is recorded as missing. */
   readonly traces: ReadonlyMap<InspectionTimingWindowName, Measured<ProfileTraceFigures>>;
@@ -876,6 +885,7 @@ export function buildInspectionTimingResults(
       compositeProbe: input.compositeProbe,
       marchProbe: input.marchProbe,
       atmosphereLevers: input.atmosphereLevers,
+      litProbe: input.litProbe,
     },
     windows: record.windows.map((window) => windowResults(window, input.traces.get(window.name))),
   };
@@ -1112,7 +1122,7 @@ export function inspectionTimingMarkdown(results: InspectionTimingResults): stri
     `- **Body:** ${run.served === null ? "—" : `\`${run.served.body}\` of universe \`${run.served.universe}\``}`,
     `- **Machine:** ${cell(run.machine.cpu)}, ${String(run.machine.logicalCores)} threads; GPU ${cell(gpu)}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}${run.marchProbe === null ? "" : `; march probe ${run.marchProbe}, not the picture a player sees`}${leversText(run.atmosphereLevers)}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}${run.marchProbe === null ? "" : `; march probe ${run.marchProbe}, not the picture a player sees`}${leversText(run.atmosphereLevers)}${run.litProbe === null ? "" : `; lit probe ${run.litProbe}, not the picture a player sees`}`,
     "- **A profile, not a measurement:** nothing is judged; a hidden run's frames are never presented, and the machine may be shared.",
     "",
     ...results.windows.flatMap(windowMarkdown),
@@ -1135,8 +1145,10 @@ const NODE_FILES: ResultsFiles = {
 /**
  * Writes the timing file and its summary into `dir` as
  * `<date>-<machine>-<setting>-inspection-timing.json` and `.md` (with `-composite-<probe>` and
- * `-march-<probe>` after it for a probed run, and `-cover-<cover>` and `-limb-<rays>` for one drawn
- * with a lever over its setting's), adding `-2`, `-3` and so on where a run of the same name is there, and warns of a file over the repository's limit for added files.
+ * `-march-<probe>` after it for a probed run, `-cover-<cover>` and `-limb-<rays>` for one drawn
+ * with a lever over its setting's, and `-lit-<probe>` for one drawn under the lit probe), adding
+ * `-2`, `-3` and so on where a run of the same name is there, and warns of a file over the
+ * repository's limit for added files.
  *
  * @throws Error if the day's names are used up.
  */
@@ -1149,7 +1161,8 @@ export async function writeInspectionTimingResults(
   const probe = results.run.compositeProbe;
   const march = results.run.marchProbe;
   const levers = results.run.atmosphereLevers;
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}${levers?.marchCover === undefined ? "" : `-cover-${levers.marchCover}`}${levers?.limbRays === undefined ? "" : `-limb-${levers.limbRays}`}`;
+  const lit = results.run.litProbe;
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}${levers?.marchCover === undefined ? "" : `-cover-${levers.marchCover}`}${levers?.limbRays === undefined ? "" : `-limb-${levers.limbRays}`}${lit === null ? "" : `-lit-${lit}`}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${String(i + 1)}`,
   );

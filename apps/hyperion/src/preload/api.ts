@@ -1155,6 +1155,13 @@ export interface ViewsCheckLaunch {
    */
   readonly atmosphereLevers?: AtmosphereLeversOverride;
   /**
+   * The frame profile's probe of the lit passes (`--lit-probe`; plan R08, R08.T9.b's measurement):
+   * present only on an `--inspection --timing` launch that asks for it, whose `VIEW` then makes its
+   * lit materials and kernels under it ({@link LitProbeName}); absent on every other launch, whose
+   * surfaces are lit as on a player's.
+   */
+  readonly litProbe?: LitProbeName;
+  /**
    * The one look a `--terrain --handover` launch runs (`--look`; R10.T15.b.2's runs), absent for all
    * three in order: a served look on SwiftShader at the high setting takes over an hour, so that
    * three in one launch pass its watchdog, and a look a launch makes each run resumable by look.
@@ -1200,6 +1207,15 @@ export interface AtmosphereLeversOverride {
   readonly marchCover?: "area" | "tiles";
   readonly limbRays?: "per-texel" | "packed";
 }
+
+/**
+ * A probe of the lit passes for the inspection run's frame profile (plan R08, R08.T9.b's
+ * measurement): `transmittance-one` takes every source's transmittance through the air as 1, with
+ * no lookup; `planetshine-centre` takes a planetshine source's at its disc's centre node alone, one
+ * lookup in place of three; `no-annuli` forms the eclipse term with no annuli, every star unhidden.
+ * Each is a measurement's picture, never a player's.
+ */
+export type LitProbeName = "transmittance-one" | "planetshine-centre" | "no-annuli";
 
 /**
  * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s

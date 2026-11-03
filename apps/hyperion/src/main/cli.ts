@@ -106,6 +106,10 @@
  * `--march-cover area|tiles` and `--limb-rays per-texel|packed` (plan R08, R08.T8.d) draw that
  * profile's atmospheres with that lever over its setting's, for the A/B of each lever on and off
  * on one build; each is refused without `--timing`.
+ * With `--lit-probe transmittance-one|planetshine-centre|no-annuli` too (plan R08, R08.T9.b's
+ * measurement) that profile makes the lit materials and kernels under the probe, every source's
+ * transmittance through the air 1, a planetshine source's at its centre node alone, or the eclipse
+ * term with no annuli, for an A/B of the lit fragment's cost; it is refused without `--timing`.
  *
  * `--hyperion-gpu-timing`, R01's measurement switch, which lifts the timestamps' quantization on
  * every backend but safe mode's (read from Chromium's command line, `GPU_TIMING_SWITCH`), also has a
@@ -131,6 +135,7 @@ import type {
   GeometryOverride,
   MarchProbeName,
   HandoverLookName,
+  LitProbeName,
   QualitySettingName,
   ServedWorldNames,
 } from "../preload/api";
@@ -144,7 +149,11 @@ import {
   isUniverseId,
   type SpikeLaunch,
 } from "../preload/spikeLaunch";
-import { NAMED_HANDOVER_LOOK_NAMES, type ViewsCheckLaunch } from "../preload/viewsCheckLaunch";
+import {
+  LIT_PROBE_NAMES,
+  NAMED_HANDOVER_LOOK_NAMES,
+  type ViewsCheckLaunch,
+} from "../preload/viewsCheckLaunch";
 
 /** The variable giving the address of the server to link to, for `--address`. */
 export const ENV_SERVER_ADDR = "HYPERION_SERVER_ADDR";
@@ -469,6 +478,12 @@ export function buildCommand(version: string): Command {
         "the frame profile's march probe (R08.T8.d): every texel's centre ray alone, no far-limb footprint",
       ).choices(["centre"]),
     )
+    .addOption(
+      new Option(
+        "--lit-probe <PROBE>",
+        "the frame profile's lit-pass probe (R08.T9.b): every source's transmittance 1, planetshine at its centre node, or no eclipse annuli",
+      ).choices(LIT_PROBE_NAMES),
+    )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
     .addOption(
@@ -624,6 +639,9 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
     if (options[option] !== undefined && options["timing"] !== true) {
       command.error(`error: ${flag} is an option of --timing, which was not given`);
     }
+  }
+  if (options["litProbe"] !== undefined && options["timing"] !== true) {
+    command.error("error: --lit-probe is an option of --timing, which was not given");
   }
   if (options["look"] !== undefined && options["handover"] !== true) {
     command.error("error: --look is an option of --handover, which was not given");
@@ -827,6 +845,7 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     // Refused without `--timing` before this is reached; commander has checked its choices.
     ...marchProbeOf(options),
     ...atmosphereLeversOf(options),
+    ...litProbeOf(options),
     // Refused without `--handover` before this is reached; commander holds it to the three names.
     ...lookOf(options),
     // The terrain run's alone; any other run takes the switch for its timestamps only.
@@ -868,6 +887,14 @@ function atmosphereLeversOf(
     ...(rays === "per-texel" || rays === "packed" ? { limbRays: rays } : {}),
   };
   return Object.keys(levers).length === 0 ? {} : { atmosphereLevers: levers };
+}
+
+/** The lit passes' probe `--lit-probe` names where it is given, else nothing. */
+function litProbeOf(
+  options: Readonly<Record<string, unknown>>,
+): { readonly litProbe: LitProbeName } | Record<string, never> {
+  const probe = LIT_PROBE_NAMES.find((each) => each === options["litProbe"]);
+  return probe === undefined ? {} : { litProbe: probe };
 }
 
 /** The one look `--look` names, where it names one of the hand-over check's, else nothing. */

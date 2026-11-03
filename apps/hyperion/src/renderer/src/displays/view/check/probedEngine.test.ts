@@ -11,6 +11,8 @@ import {
   SKY_VIEW_KERNEL,
 } from "../../../view/atmosphere/hillaire";
 import { MARCH_CENSUS_KERNEL } from "../../../view/atmosphere/marchProbe";
+import { type LitProbe, litProbedWgsl } from "../../../view/atmosphere/surfaceLighting";
+import { BODY_DISC_CELLS_KERNEL, BODY_DISC_MATERIALS } from "../../../view/bodies/draw";
 import type {
   ComputeBindings,
   DepthLayerPass,
@@ -233,5 +235,61 @@ describe("a probed engine's march probe and census (plan R08, R08.T8.d)", () => 
     stop.abort();
     engine.dispatch(engine.createCompute(RAY_MARCH_KERNEL), marchBindings(engine), [1, 1, 1]);
     expect(dispatched.mock.calls.map(([kernel]) => kernel.name)).toEqual([RAY_MARCH_KERNEL.name]);
+  });
+});
+
+/** The `LIT_PROBE` of `wgsl`, or `none` where it composes no surface lighting. */
+function litProbeOf(wgsl: string): string {
+  return /const LIT_PROBE : u32 = (\d)u;/u.exec(wgsl)?.[1] ?? "none";
+}
+
+describe("a probed engine's lit probe (R08.T9.b's measurement)", () => {
+  /** Each material's and kernel's `LIT_PROBE` as made through `engine`, by name, in order. */
+  async function madeWith(
+    probe: LitProbe | null,
+  ): Promise<ReadonlyArray<readonly [string, string, string]>> {
+    const device = await new FakeAdapter({ info: SWIFTSHADER_INFO, features: [] }).requestDevice();
+    const inner = new FakeRenderEngine(device);
+    const materials = vi.spyOn(inner, "createMaterial");
+    const kernels = vi.spyOn(inner, "createCompute");
+    const engine = new ProbedEngine(inner, recordingProbe(), () => 0, null, null, probe);
+    engine.createMaterial(BODY_DISC_MATERIALS.interior);
+    await engine.createMaterialAsync(COMPOSITE_MATERIAL, ["rgba16float"]);
+    await engine.createComputeAsync(BODY_DISC_CELLS_KERNEL);
+    return [
+      ...materials.mock.calls.map(
+        ([spec]) =>
+          [spec.name, litProbeOf(spec.vertexWgsl), litProbeOf(spec.fragmentWgsl)] as const,
+      ),
+      ...kernels.mock.calls.map(
+        ([pair]) => [pair.name, litProbeOf(pair.reference), String(pair.subgroup)] as const,
+      ),
+    ];
+  }
+
+  it("makes every lit module as drawn without a probe", async () => {
+    expect(await madeWith(null)).toEqual([
+      ["bodies:disc", "0", "0"],
+      ["atmosphere composite", "none", "none"],
+      ["BODY DISC CELLS", "0", "null"],
+    ]);
+  });
+
+  it.each([
+    ["transmittance-one", "1"],
+    ["planetshine-centre", "2"],
+    ["no-annuli", "3"],
+  ] as const)("makes every lit material and kernel under %s", async (probe, value) => {
+    expect(await madeWith(probe)).toEqual([
+      ["bodies:disc", value, value],
+      ["atmosphere composite", "none", "none"],
+      ["BODY DISC CELLS", value, "null"],
+    ]);
+  });
+
+  it("leaves a module without the surface's lighting as it is", () => {
+    expect(litProbedWgsl(COMPOSITE_MATERIAL.fragmentWgsl, "transmittance-one")).toBe(
+      COMPOSITE_MATERIAL.fragmentWgsl,
+    );
   });
 });

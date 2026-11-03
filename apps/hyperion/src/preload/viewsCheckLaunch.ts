@@ -13,6 +13,7 @@ import type {
   AtmosphereLeversOverride,
   CompositeProbeName,
   HandoverLookName,
+  LitProbeName,
   MarchProbeName,
   ViewsCheckLaunch,
   ViewsCheckRunKind,
@@ -23,6 +24,7 @@ import { readServedWorldNames } from "./spikeLaunch";
 export type {
   AtmosphereLeversOverride,
   CompositeProbeName,
+  LitProbeName,
   MarchProbeName,
   ViewsCheckLaunch,
   ViewsCheckRunKind,
@@ -91,6 +93,13 @@ export function readAtmosphereLevers(value: unknown): AtmosphereLeversOverride |
   };
 }
 
+/** The lit passes' probes an inspection profile may draw under (R08.T9.b's measurement). */
+export const LIT_PROBE_NAMES = [
+  "transmittance-one",
+  "planetshine-centre",
+  "no-annuli",
+] as const satisfies ReadonlyArray<LitProbeName>;
+
 /** The hand-over check's looks, in the order a run takes them, which `--look` may name one of. */
 export const HANDOVER_LOOK_NAMES = [
   "handover-30",
@@ -110,8 +119,10 @@ export const NAMED_HANDOVER_LOOK_NAMES = [
 /**
  * `value` as the check's options, or `null` if it is not one: {@link readLaunchBase}'s, with the one
  * look (`look`) a hand-over check alone may name (R10.T15.b.2's runs), the GPU time by pass
- * (`passTimes`, `true`) a terrain run alone may record (R14's Mac measurements), and the count of
- * WebGPU calls (`countGpuCalls`, `true`) an inspection profile alone may make (plan R14).
+ * (`passTimes`, `true`) a terrain run alone may record (R14's Mac measurements), the count of
+ * WebGPU calls (`countGpuCalls`, `true`) an inspection profile alone may make (plan R14), and the
+ * lit passes' probe (`litProbe`, R08.T9.b's measurement) an inspection's frame profile alone may
+ * draw under.
  */
 export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   const base = readLaunchBase(value);
@@ -125,8 +136,13 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   if (countGpuCalls !== undefined && (countGpuCalls !== true || base.timing !== true)) {
     return null;
   }
+  const litProbe = LIT_PROBE_NAMES.find((each) => each === value["litProbe"]);
+  if (value["litProbe"] !== undefined && (litProbe === undefined || base.timing !== true)) {
+    return null;
+  }
   const counted: ViewsCheckLaunch = countGpuCalls === true ? { ...base, countGpuCalls } : base;
-  const timed: ViewsCheckLaunch = passTimes === true ? { ...counted, passTimes } : counted;
+  const probed: ViewsCheckLaunch = litProbe === undefined ? counted : { ...counted, litProbe };
+  const timed: ViewsCheckLaunch = passTimes === true ? { ...probed, passTimes } : probed;
   if (value["look"] === undefined) {
     return timed;
   }

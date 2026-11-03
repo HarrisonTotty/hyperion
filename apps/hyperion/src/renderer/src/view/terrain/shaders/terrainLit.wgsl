@@ -709,7 +709,8 @@ fn shade_terrain(
   }
   let counts = terrain_row(0u);
   let misc = terrain_row(2u);
-  let annulus_count = u32(counts.w);
+  // No annuli under the lit probe's eclipse form (`surfaceLighting.wgsl`'s `LIT_PROBE`).
+  let annulus_count = select(u32(counts.w), 0u, LIT_PROBE == 3u);
   var sets = class_sets(in, reference);
   // The texel's mean A, for R08's sky light on the Lambert share's flat term: each set's by its
   // weight.

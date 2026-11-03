@@ -742,7 +742,8 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   let mu_datum = dot(normal, -ray);
   let counts = disc_row(3u);
   let misc = disc_row(5u);
-  let annulus_count = u32(misc.y);
+  // No annuli under the lit probe's eclipse form (`surfaceLighting.wgsl`'s `LIT_PROBE`).
+  let annulus_count = select(u32(misc.y), 0u, LIT_PROBE == 3u);
   let laws = min(u32(misc.w), MAX_DISC_CLASSES) + 1u;
   var out : Shaded;
   out.radiance = vec3f(0.0);

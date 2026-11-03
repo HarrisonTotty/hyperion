@@ -31,6 +31,39 @@ import type { AtmosphereTables } from "./tables";
  */
 export const SURFACE_LIGHTING_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${oblateWgsl}\n${belowDeckWgsl}\n${surfaceLightingWgsl}\n`;
 
+/**
+ * A views check's probe of the lit passes' cost (R08.T9.b's measurement): `transmittance-one`,
+ * every source's transmittance through the air 1, with no lookup; `planetshine-centre`, a
+ * planetshine source's at its disc's centre node alone, one lookup in place of three; or
+ * `no-annuli`, the eclipse term with no annuli, every star unhidden. It is check-only: an
+ * inspection profile's `--lit-probe`, never drawn on a player's launch.
+ */
+export type LitProbe = "transmittance-one" | "planetshine-centre" | "no-annuli";
+
+/** The line of `surfaceLighting.wgsl` a probe's module replaces. */
+const LIT_PROBE_LINE = "const LIT_PROBE : u32 = 0u;";
+
+/**
+ * `wgsl` under `probe`: `surfaceLighting.wgsl`'s `LIT_PROBE` set, 1 for `transmittance-one`, 2 for
+ * `planetshine-centre` and 3 for `no-annuli`, where `wgsl` composes {@link SURFACE_LIGHTING_WGSL};
+ * any other module as it is.
+ */
+export function litProbedWgsl(wgsl: string, probe: LitProbe): string {
+  let value: number;
+  switch (probe) {
+    case "transmittance-one":
+      value = 1;
+      break;
+    case "planetshine-centre":
+      value = 2;
+      break;
+    case "no-annuli":
+      value = 3;
+      break;
+  }
+  return wgsl.replace(LIT_PROBE_LINE, `const LIT_PROBE : u32 = ${String(value)}u;`);
+}
+
 /** A body's atmosphere tables as a lit pass binds them (`surfaceLighting.wgsl`'s head). */
 export interface SurfaceLightingTables {
   /** The body's table (`tables.ts`'s `packOblateBody`), `rgba32float`. */

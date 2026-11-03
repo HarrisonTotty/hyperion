@@ -11,8 +11,9 @@
  * render's submission and each target made, through the same probe. A depth-layer target's render
  * (plan R10, R10.T9.b) notes its CPU time as `<owner>:shadows`'s, its owner the view it names: one
  * target serves every view. An inspection profile's `--composite-probe` (the owner's priority,
- * 2026-11-01) and `--march-probe` (plan R08, R08.T8.d) are the changes it makes: the atmosphere's
- * composite, or its march, made under the probe. It also takes the march's far-limb census beside a
+ * 2026-11-01), `--march-probe` (plan R08, R08.T8.d) and `--lit-probe` (R08.T9.b's measurement) are
+ * the changes it makes: the atmosphere's composite, or its march, made under the probe, and every
+ * lit material and kernel under the lit one. It also takes the march's far-limb census beside a
  * march's dispatch when asked ({@link ProbedEngine.marchCensus}), a dispatch of its own after it.
  */
 
@@ -36,6 +37,7 @@ import {
   type MarchProbe,
   marchProbedKernel,
 } from "../../../view/atmosphere/marchProbe";
+import { type LitProbe, litProbedWgsl } from "../../../view/atmosphere/surfaceLighting";
 import type { KernelPair } from "../../../view/engine/kernels";
 import type { GraphicsFault } from "../../../view/engine/status";
 import type {
@@ -237,6 +239,7 @@ export class ProbedEngine implements RenderEngine {
   readonly #nowMs: () => number;
   readonly #compositeProbe: CompositeProbe | null;
   readonly #marchProbe: MarchProbe | null;
+  readonly #litProbe: LitProbe | null;
   /** The censuses asked for and not yet taken, each settled by the next march's census. */
   #censusesAsked: Array<{
     readonly resolve: (census: MarchCensus) => void;
@@ -252,6 +255,9 @@ export class ProbedEngine implements RenderEngine {
    * @param marchProbe - The inspection profile's probe of the atmosphere's march (`--march-probe`;
    *   plan R08, R08.T8.d): each of the march's kernels made through this engine is made under it
    *   ({@link marchProbedKernel}); `null`, the default, as drawn.
+   * @param litProbe - The inspection profile's probe of the lit passes (`--lit-probe`; R08.T9.b's
+   *   measurement): each material and kernel made through this engine that reads the surface's
+   *   lighting is made under it ({@link litProbedWgsl}); `null`, the default, as drawn.
    */
   constructor(
     inner: RenderEngine,
@@ -259,12 +265,14 @@ export class ProbedEngine implements RenderEngine {
     nowMs: () => number,
     compositeProbe: CompositeProbe | null = null,
     marchProbe: MarchProbe | null = null,
+    litProbe: LitProbe | null = null,
   ) {
     this.#inner = inner;
     this.#probe = probe;
     this.#nowMs = nowMs;
     this.#compositeProbe = compositeProbe;
     this.#marchProbe = marchProbe;
+    this.#litProbe = litProbe;
   }
 
   /**
@@ -295,11 +303,6 @@ export class ProbedEngine implements RenderEngine {
       this.#censusesAsked.push(asked);
       signal.addEventListener("abort", withdraw, { once: true });
     });
-  }
-
-  /** `pair`, or the march's under the launch's probe where it is one of the march's and one is set. */
-  #kernelOf(pair: KernelPair): KernelPair {
-    return this.#marchProbe === null ? pair : marchProbedKernel(pair, this.#marchProbe);
   }
 
   /**
@@ -351,11 +354,39 @@ export class ProbedEngine implements RenderEngine {
     }
   }
 
-  /** `spec`, or the composite's under the launch's probe where it is the composite and one is set. */
+  /**
+   * `spec`, the composite's under the launch's composite probe where it is the composite and one is
+   * set, its modules under the launch's lit probe where one is set.
+   */
   #materialOf(spec: WgslMaterialSpec): WgslMaterialSpec {
-    return this.#compositeProbe !== null && spec.name === COMPOSITE_MATERIAL.name
-      ? compositeProbedMaterial(this.#compositeProbe)
-      : spec;
+    const material =
+      this.#compositeProbe !== null && spec.name === COMPOSITE_MATERIAL.name
+        ? compositeProbedMaterial(this.#compositeProbe)
+        : spec;
+    const lit = this.#litProbe;
+    return lit === null
+      ? material
+      : {
+          ...material,
+          vertexWgsl: litProbedWgsl(material.vertexWgsl, lit),
+          fragmentWgsl: litProbedWgsl(material.fragmentWgsl, lit),
+        };
+  }
+
+  /**
+   * `pair`, the march's under the launch's march probe where it is one of the march's and one is
+   * set, its two paths' modules under the launch's lit probe where one is set.
+   */
+  #kernelOf(pair: KernelPair): KernelPair {
+    const kernel = this.#marchProbe === null ? pair : marchProbedKernel(pair, this.#marchProbe);
+    const lit = this.#litProbe;
+    return lit === null
+      ? kernel
+      : {
+          ...kernel,
+          reference: litProbedWgsl(kernel.reference, lit),
+          subgroup: kernel.subgroup === null ? null : litProbedWgsl(kernel.subgroup, lit),
+        };
   }
 
   get capabilities(): RenderEngine["capabilities"] {

@@ -210,12 +210,13 @@ const RECORD: InspectionTimingRecord = {
 
 /**
  * The timing file of {@link RECORD}, its trace a main thread busy 1,500 ms, drawn under
- * `compositeProbe`.
+ * `compositeProbe`, `marchProbe`, `atmosphereLevers` and `litProbe`.
  */
 function results(
   compositeProbe: InspectionTimingResults["run"]["compositeProbe"] = null,
   marchProbe: InspectionTimingResults["run"]["marchProbe"] = null,
   atmosphereLevers: InspectionTimingResults["run"]["atmosphereLevers"] = null,
+  litProbe: InspectionTimingResults["run"]["litProbe"] = null,
 ): InspectionTimingResults {
   return buildInspectionTimingResults({
     run: {
@@ -246,6 +247,7 @@ function results(
     compositeProbe,
     marchProbe,
     atmosphereLevers,
+    litProbe,
     record: RECORD,
     traces: new Map([
       [
@@ -433,8 +435,8 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 2,
-      run: { compositeProbe: null, marchProbe: null, atmosphereLevers: null },
+      version: 3,
+      run: { compositeProbe: null, marchProbe: null, atmosphereLevers: null, litProbe: null },
     });
   });
 
@@ -513,6 +515,34 @@ describe("the frame profile's timing file (the owner's report)", () => {
       plain: inspectionTimingMarkdown(results()).includes("march probe"),
     }).toEqual({
       json: "/timing/2026-11-01-pod-low-inspection-timing-composite-per-pixel-march-centre.json",
+      launch: true,
+      plain: false,
+    });
+  });
+
+  it("names and states a run drawn under a lit probe (R08.T9.b)", async () => {
+    const written = new Map<string, string>();
+    const files = {
+      mkdir: () => Promise.resolve(),
+      exists: (path: string) => Promise.resolve(written.has(path)),
+      writeFile: (path: string, text: string) => {
+        written.set(path, text);
+        return Promise.resolve();
+      },
+    };
+    const probed = results(null, null, { limbRays: "packed" }, "transmittance-one");
+    const paths = await writeInspectionTimingResults("/timing", probed, files);
+    expect({
+      json: paths.json,
+      launch: inspectionTimingMarkdown(probed)
+        .split("\n")
+        .find((line) => line.startsWith("- **Launch:**"))
+        ?.endsWith(
+          "; atmosphere levers limb rays packed over the setting's; lit probe transmittance-one, not the picture a player sees",
+        ),
+      plain: inspectionTimingMarkdown(results()).includes("lit probe"),
+    }).toEqual({
+      json: "/timing/2026-11-01-pod-low-inspection-timing-limb-packed-lit-transmittance-one.json",
       launch: true,
       plain: false,
     });

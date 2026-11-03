@@ -749,6 +749,7 @@ export class ViewsCheckSession {
       compositeProbe: this.#deps.launch.compositeProbe ?? null,
       marchProbe: this.#deps.launch.marchProbe ?? null,
       atmosphereLevers: this.#deps.launch.atmosphereLevers ?? null,
+      litProbe: this.#deps.launch.litProbe ?? null,
       record,
       traces: this.#profiles,
     });
