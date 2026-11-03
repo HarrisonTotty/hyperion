@@ -45,10 +45,10 @@ use crate::planetary::record::{
     BodyIdentity, BodyKind, BodyRecord, DebrisDiscRecord, DiscGap, DiscRecord, Population, Section,
 };
 use crate::stellar::remnant::RemnantKind;
-use crate::time::{ClockWindow, UniverseTime};
+use crate::time::UniverseTime;
 use crate::units::{EarthMasses, Metres, Years};
 
-use super::{Epoch, Part, PlanetarySystem, earliest, fate_host, first_death, time_at_age};
+use super::{Epoch, Part, PlanetarySystem, earliest, fate_host, time_at_age};
 
 /// The belt slot of the protoplanetary disc: `Belt(0)`, slot `0xE0` (design note 3), which no
 /// belt takes ([`FIRST_BELT_SLOT`](crate::planetary::belts::FIRST_BELT_SLOT) is 1).
@@ -86,6 +86,8 @@ impl ProtoplanetaryDisc {
 pub struct WhiteDwarfSystem {
     host: OrbitHost,
     star: u8,
+    /// Its star's age at its birth, Julian years: its death's.
+    death: Years,
     born: UniverseTime,
     marks: WhiteDwarfMarks,
 }
@@ -127,11 +129,7 @@ impl WhiteDwarfSystem {
     #[must_use]
     fn debris_state(&self, ctx: &SystemContext, t: UniverseTime) -> BodyState {
         let model = &ctx.stars()[usize::from(self.star)];
-        let death = model
-            .death()
-            .expect("a marked white dwarf has a death")
-            .age()
-            .value();
+        let death = self.death.value();
         let until = self.marks.disc_until().map_or(0.0, Years::value);
         let end = time_at_age(Years::new(death + until), model.age_at_epoch());
         if t < self.born {
@@ -229,21 +227,20 @@ impl PlanetarySystem {
     /// its birth, or `None` if it has none by the end of the clock window.
     #[must_use]
     fn white_dwarf_of(&self, seed: Seed, ctx: &SystemContext) -> Option<WhiteDwarfSystem> {
-        let (zone, star) = self.zones.iter().find_map(|zone| {
+        // From 27 a paired star's white dwarf is its pair's history's (P14.T1.h).
+        let (zone, star, death) = self.zones.iter().find_map(|zone| {
             let mut members = zone.members();
             let star = members.next()?;
-            let model = &ctx.stars()[usize::from(star)];
-            let white_dwarf = members.next().is_none()
-                && model
-                    .remnant()
-                    .is_some_and(|remnant| remnant.kind() == RemnantKind::WhiteDwarf)
-                && model.remnant_age_at(ClockWindow::END).is_some();
-            white_dwarf.then_some((zone, star))
+            if members.next().is_some() {
+                return None;
+            }
+            let ended = ctx
+                .remnant_by_end(usize::from(star))
+                .filter(|ended| ended.remnant.kind() == RemnantKind::WhiteDwarf)?;
+            Some((zone, star, ended.born))
         })?;
         let model = &ctx.stars()[usize::from(star)];
-        let birth = model
-            .death()
-            .and_then(|death| time_at_age(death.age(), model.age_at_epoch()))
+        let birth = time_at_age(death, model.age_at_epoch())
             .expect("a white dwarf by the window's end has a death on the clock");
         let host = zone.host();
         let hosts: Vec<FateHost<'_>> = self.zones.iter().map(|zone| fate_host(ctx, zone)).collect();
@@ -270,6 +267,7 @@ impl PlanetarySystem {
         Some(WhiteDwarfSystem {
             host,
             star,
+            death,
             born: birth,
             marks: WhiteDwarfMarks::decide(
                 &WhiteDwarfDraws::for_system(seed, self.system),
@@ -375,16 +373,23 @@ impl PlanetarySystem {
             .and_then(|host| host.disc.profile())
             .map(DiscProfile::lifetime)
             .expect("a disc body's host has a disc");
-        let host = fate_host(epoch.ctx, zone);
-        let stars = host.members();
+        let ctx = epoch.ctx;
         // As the fate transform reads a formation's host age (`clock_time`): the first star's age
         // at the epoch, every star's.
-        let age_at_epoch = stars[0].age_at_epoch();
+        let first = zone.members().next().expect("a zone has a component");
+        let age_at_epoch = ctx.stars()[usize::from(first)].age_at_epoch();
         let born = time_at_age(Years::new(0.0), age_at_epoch);
-        let end = earliest(
-            time_at_age(Years::from(lifetime), age_at_epoch),
-            first_death(stars),
-        );
+        // The first death among the zone's stars, a paired star's its pair's history's from 27
+        // (P14.T1.h), in the arithmetic of the fate transform's clock deaths.
+        let died = zone
+            .members()
+            .filter_map(|member| {
+                let star = usize::from(member);
+                let death = ctx.death_age(star)?;
+                time_at_age(death, ctx.stars()[star].age_at_epoch())
+            })
+            .min();
+        let end = earliest(time_at_age(Years::from(lifetime), age_at_epoch), died);
         if born.is_none_or(|born| t < born) {
             BodyState::NotYetFormed
         } else if let Some(at) = end.filter(|&end| t >= end) {

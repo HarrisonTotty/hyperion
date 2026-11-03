@@ -923,17 +923,29 @@ impl BinaryTimeline {
 
     /// The age, Julian years, at which `component` first has no living star, a remnant or
     /// nothing, by the age the binary was run to: its death as plan 14's cometary halo reads it
-    /// (P14.T1.g), found as [`main_sequence_end_before`](Self::main_sequence_end_before) finds a
-    /// main sequence's end.
+    /// (P14.T1.g), [`first_age_where`](Self::first_age_where) of it.
     #[must_use]
     pub(crate) fn first_death_age(&self, component: Component) -> Option<Years> {
-        let slot = component.index();
-        let dead = |at: f64| {
-            let phase = self.member_state_at(slot, at).phase();
+        self.first_age_where(component, |phase| {
             phase.is_remnant() || phase == Phase::NoRemnant
-        };
+        })
+    }
+
+    /// The first age, Julian years, by the age the binary was run to at which `component`'s phase
+    /// passes `test`, if it ever does: found as
+    /// [`main_sequence_end_before`](Self::main_sequence_end_before) finds a main sequence's end,
+    /// between the samples its phase is read at and by [`TRANSITION_STEPS`] halvings. Plan 14
+    /// reads a star's death (P14.T1.g) and the birth of the remnant it ends as (P14.T1.h) so.
+    #[must_use]
+    pub(crate) fn first_age_where(
+        &self,
+        component: Component,
+        test: impl Fn(Phase) -> bool,
+    ) -> Option<Years> {
+        let slot = component.index();
+        let passes = |at: f64| test(self.member_state_at(slot, at).phase());
         let samples = self.phase_samples(slot, self.until);
-        let first = samples.iter().position(|&at| dead(at))?;
+        let first = samples.iter().position(|&at| passes(at))?;
         let Some(previous) = first.checked_sub(1) else {
             return Some(Years::new(samples[first]));
         };
@@ -943,7 +955,7 @@ impl BinaryTimeline {
             if mid <= before || mid >= after {
                 break;
             }
-            if dead(mid) {
+            if passes(mid) {
                 after = mid;
             } else {
                 before = mid;

@@ -3749,7 +3749,7 @@ fn own_death_in_window(star: &StarModel) -> Option<(UniverseTime, DeathKind)> {
 
 /// The kind of remnant a star in `phase` is, or `None` for a living star.
 #[must_use]
-const fn remnant_kind(phase: Phase) -> Option<RemnantKind> {
+pub(crate) const fn remnant_kind(phase: Phase) -> Option<RemnantKind> {
     match phase {
         Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => {
             Some(RemnantKind::WhiteDwarf)

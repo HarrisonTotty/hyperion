@@ -1,7 +1,9 @@
 //! A neutron star's second-generation planets as bodies of its system (plan 14, design note 11,
 //! P14.T28.e), [`generate`](super::generate)'s step 10, from generator version 26.
 //!
-//! Each single-star zone whose star is a neutron star by the end of the clock window, and whose
+//! Each single-star zone whose star is a neutron star by the end of the clock window (from
+//! generator version 27, for a star of a pair the binary engine ran and changed, by its pair's
+//! history: [`SystemContext::remnant_by_end`], P14.T1.h), and whose
 //! host has a primordial disc for the derivation's snow line to read, draws its system on
 //! `planet.secondgen` ([`place_second_generation`]), in the second-generation slots from `0xC0`,
 //! zone by zone. Each body is a planet ([`Body::is_second_generation`]): its own radius, volatile
@@ -32,7 +34,6 @@ use crate::planetary::hosts::young::{Formation, FormationDraws};
 use crate::planetary::index::BodySlot;
 use crate::planetary::placement::{OrbitHost, OrbitZone, PlacedPlanet};
 use crate::stellar::remnant::RemnantKind;
-use crate::time::ClockWindow;
 use crate::units::{Megayears, Years};
 
 use super::{
@@ -106,24 +107,23 @@ impl PlanetarySystem {
             let OrbitHost::Star(star) = zone.host() else {
                 continue;
             };
-            let model = &ctx.stars()[usize::from(star)];
-            let Some(remnant) = model
-                .remnant()
-                .filter(|remnant| remnant.kind() == RemnantKind::NeutronStar)
+            // From 27 a paired star's neutron star is its pair's history's (P14.T1.h).
+            let Some(ended) = ctx
+                .remnant_by_end(usize::from(star))
+                .filter(|ended| ended.remnant.kind() == RemnantKind::NeutronStar)
             else {
                 continue;
             };
-            if model.remnant_age_at(ClockWindow::END).is_none() || host.disc.profile().is_none() {
+            if host.disc.profile().is_none() {
                 continue;
             }
-            let death = model.death().expect("a neutron star's star has died");
             let formed_at =
-                Megayears::from(Years::new(death.age().value())) + SECOND_GENERATION_DELAY;
+                Megayears::from(Years::new(ended.born.value())) + SECOND_GENERATION_DELAY;
             let placed = place_second_generation(
                 seed,
                 self.system,
                 zone.host_number(),
-                remnant.mass(),
+                ended.remnant.mass(),
                 slot,
             );
             for planet in &placed {

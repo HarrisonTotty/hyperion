@@ -18,8 +18,9 @@ use hyperion_surface::material::{
 
 use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
 use crate::planetary::context::{
-    BinaryHostHistoryRules, BinaryHostLightRules, BinaryHostXuvRules, with_binary_host_history,
-    with_binary_host_light, with_binary_host_xuv,
+    BinaryHostHistoryRules, BinaryHostLightRules, BinaryHostRemnantsRules, BinaryHostXuvRules,
+    with_binary_host_history, with_binary_host_light, with_binary_host_remnants,
+    with_binary_host_xuv,
 };
 use crate::planetary::derive::atmosphere::{
     DesertRules, LineSwitchRules, MeltOxygenRules, SteamDivisionRules, with_desert,
@@ -129,6 +130,8 @@ held_rules! {
     binary_host_fate: BinaryHostFateRules = BinaryHostFateRules::in_force => with_binary_host_fate,
     binary_host_zones: BinaryHostZonesRules =
         BinaryHostZonesRules::in_force => with_binary_host_zones,
+    binary_host_remnants: BinaryHostRemnantsRules =
+        BinaryHostRemnantsRules::in_force => with_binary_host_remnants,
 }
 
 /// `share(0)` to `share(shares − 1)` on at most `hyperion_testkit::threads::granted(reserved)`

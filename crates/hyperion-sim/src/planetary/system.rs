@@ -128,7 +128,9 @@ use crate::planetary::chem::escape::{EnvelopeHelium, host_helium_per_hydrogen};
 use crate::planetary::chem::inventory::{ElementInventory, Reservoir};
 use crate::planetary::chem::partition::{CondensatePhase, Condensates, CrustWater, Partition};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
-use crate::planetary::context::{HostKind, SystemContext, XuvHistory};
+use crate::planetary::context::{
+    HostKind, OWN_DEATH_SHARE, SystemContext, XuvHistory, at_own_death,
+};
 use crate::planetary::derive::atmosphere::{
     Atmosphere, Gas, NoMaturity, PassWeathered, PresentFigures, Rotation, SurfaceMaterial,
     SurfaceState, VolatileDraws, WeatheringCase, has_surface_section, published_label,
@@ -6774,12 +6776,6 @@ fn fastest_mass_loss_rate_in(
     })
 }
 
-/// How near its model's own death age, as a share of it, a pair's supernova of a star stands for
-/// that death: 10⁻⁹, the stellar stage's rule for a death the engine pins to the model's
-/// (`SystemStars`' paired state, design note 16 of plan 11), which an engine landing an ulp short
-/// of the age keeps.
-const OWN_DEATH_SHARE: f64 = 1e-9;
-
 /// The age, Julian years, at which the supernova `sn` of the star `model` of a pair the engine ran
 /// explodes it, as the planetary stage reads it (P14.T1.g): its model's own sudden death's where
 /// the pair explodes the star there ([`OWN_DEATH_SHARE`]), so that a star its pair left alone
@@ -6865,7 +6861,9 @@ fn tpagb_rate(age_t_years: f64, state: impl Fn(f64) -> Option<StarState>) -> Sol
     }
 }
 
-/// The earliest death among `stars` as a time, if any dies and it is representable.
+/// The earliest death among `stars` as a time, if any dies and it is representable: the single
+/// models' reading, which the tests hold the paired readings to.
+#[cfg(test)]
 #[must_use]
 fn first_death(stars: &[&StarModel]) -> Option<UniverseTime> {
     stars
@@ -6918,10 +6916,7 @@ fn paired_death_age(
             .is_some_and(|track| track.state_at(until) == end);
         return alone.then(own).flatten();
     };
-    Some(match own() {
-        Some(own) if (age.value() - own.value()).abs() <= OWN_DEATH_SHARE * own.value() => own,
-        Some(_) | None => age,
-    })
+    Some(at_own_death(model, age))
 }
 
 /// The stars the bodies of `zone` orbit, as the fate transform reads them: its component alone,

@@ -13,10 +13,12 @@ use crate::planetary::context::XuvHistory;
 use crate::planetary::context::{
     BINARY_HOST_LIGHT_VERSION, BinaryHostLightRules, with_binary_host_light,
 };
+use crate::planetary::fate::DestructionCause;
 use crate::planetary::testing::{
     PairHistory, SampleFilter, first_paired_system, sample_records, synthetic_binary,
     with_every_27_hold,
 };
+use crate::stellar::remnant::RemnantKind;
 use crate::stellar::system::{PairTimeline, SystemStars};
 use crate::time::ClockWindow;
 use crate::units::AstronomicalUnits;
@@ -930,4 +932,316 @@ fn binary_host_history_s_death_of_a_star_merged_away_is_at_its_merger() {
         "{:?}",
         stars.record().id()
     );
+}
+
+/// The paired stars' remnants in the generation are held until the 26 → 27 bump: the rules in
+/// force are the single models', the tests' switch and 27's helper reach the engine's, and 26's
+/// and 25's helpers do not.
+#[test]
+fn the_binary_host_remnants_are_held_only_until_the_27_bump() {
+    use crate::planetary::context::{
+        BINARY_HOST_REMNANTS_VERSION, BinaryHostRemnantsRules, with_binary_host_remnants,
+    };
+    assert!(
+        GENERATOR_VERSION < BINARY_HOST_REMNANTS_VERSION,
+        "the 26 → 27 bump reads a paired star's remnant and death from its pair's timeline in the \
+         generation: delete `BINARY_HOST_REMNANTS_VERSION`, `BinaryHostRemnantsRules` with its \
+         `SingleModels` arm and its match in `SystemContext::remnants_pair`, the tests' \
+         `with_binary_host_remnants`, its switch in `with_every_27_hold` (and the helper, if no \
+         other 27 hold is left), its line in `HeldRules`, and this test; restate the tests held \
+         below 27"
+    );
+    assert_eq!(
+        BinaryHostRemnantsRules::in_force(),
+        BinaryHostRemnantsRules::SingleModels
+    );
+    assert_eq!(
+        with_binary_host_remnants(
+            BinaryHostRemnantsRules::Engine,
+            BinaryHostRemnantsRules::in_force
+        ),
+        BinaryHostRemnantsRules::Engine
+    );
+    assert_eq!(
+        with_every_27_hold(BinaryHostRemnantsRules::in_force),
+        BinaryHostRemnantsRules::Engine
+    );
+    assert_eq!(
+        with_every_27_hold(|| {
+            with_binary_host_remnants(
+                BinaryHostRemnantsRules::SingleModels,
+                BinaryHostRemnantsRules::in_force,
+            )
+        }),
+        BinaryHostRemnantsRules::SingleModels
+    );
+}
+
+/// Under the engine's remnant rules a star of a pair the engine ran that its pair leaves as its own
+/// model to +H reads its model's remnant, birth and death, to the bit; one its pair changed reads
+/// the remnant its timeline leaves it at +H, born at the first age it is that kind (at its model's
+/// death where the two agree), at its mass then; under the single models every star reads as its
+/// model.
+#[test]
+fn binary_host_remnants_read_a_star_its_pair_left_alone_as_its_model() {
+    use crate::planetary::context::{
+        BinaryHostRemnantsRules, at_own_death, with_binary_host_remnants,
+    };
+    use crate::stellar::system::remnant_kind;
+    let galaxy = galaxy();
+    let records = sample_records(&galaxy, 4_000, SampleFilter::ALL).unwrap();
+    let (mut alone, mut changed) = (0, 0);
+    for record in &records {
+        let stars = SystemStars::generate(&galaxy, record);
+        if stars.pairs().is_empty() {
+            continue;
+        }
+        let ctx = SystemContext::from_stars(&galaxy, &stars);
+        for pair in ctx.pairs() {
+            let timeline = pair.timeline();
+            for (k, star) in pair.stars().iter().enumerate() {
+                let index = usize::from(star.get());
+                let model = &ctx.stars()[index];
+                let [single, engine] = [
+                    BinaryHostRemnantsRules::SingleModels,
+                    BinaryHostRemnantsRules::Engine,
+                ]
+                .map(|rules| {
+                    with_binary_host_remnants(rules, || {
+                        (ctx.remnant_by_end(index), ctx.death_age(index))
+                    })
+                });
+                let own = model.remnant_age_at(ClockWindow::END).and_then(|_| {
+                    let remnant = model.remnant().filter(|r| r.kind() != RemnantKind::None)?;
+                    Some((remnant, model.death()?.age()))
+                });
+                assert_eq!(
+                    single.0.map(|r| (r.remnant, r.born)),
+                    own,
+                    "{:?}",
+                    record.id()
+                );
+                assert_eq!(single.1, model.death().map(|d| d.age()));
+                let end = timeline.state_at(timeline.until()).stars()[k];
+                if model.state_at(ClockWindow::END) == Some(end) {
+                    assert_eq!(engine, single, "{:?} star {index}", record.id());
+                    alone += 1;
+                    continue;
+                }
+                let kind = remnant_kind(end.phase()).filter(|&kind| kind != RemnantKind::None);
+                assert_eq!(
+                    engine.0.map(|r| r.remnant.kind()),
+                    kind,
+                    "{:?}",
+                    record.id()
+                );
+                if let Some(ended) = engine.0 {
+                    let component = crate::stellar::binary::Component::of_index(k);
+                    let raw = timeline
+                        .first_age_where(component, |phase| remnant_kind(phase) == kind)
+                        .unwrap();
+                    assert_eq!(ended.born, at_own_death(model, raw));
+                    let born = timeline.state_at(raw).stars()[k];
+                    assert_eq!(remnant_kind(born.phase()), kind);
+                    assert_same_bits(ended.remnant.mass().value(), born.mass().value());
+                    if raw.value() > 0.0 {
+                        let before = timeline
+                            .state_at(Years::new(raw.value().next_down()))
+                            .stars()[k];
+                        assert_ne!(remnant_kind(before.phase()), kind, "{:?}", record.id());
+                    }
+                }
+                changed += 1;
+            }
+        }
+    }
+    assert!(
+        alone >= 100 && changed >= 20,
+        "{alone} left alone, {changed} changed"
+    );
+}
+
+/// A star its companion swallows in a common envelope leaves no remnant under the engine's
+/// remnant rules, and dies at or before its merger, where its single model leaves its own remnant
+/// at its own death.
+#[test]
+fn binary_host_remnants_of_a_star_merged_away_are_none() {
+    use crate::planetary::context::{BinaryHostRemnantsRules, with_binary_host_remnants};
+    // The pair's component that the merger leaves nothing of, whose own model dies by +H.
+    let swallowed = |stars: &SystemStars, k: usize| {
+        let pair = &stars.pairs()[k];
+        let timeline = pair.timeline();
+        let end = timeline.state_at(timeline.until());
+        (0..2).find(|&c| {
+            end.stars()[c].phase() == Phase::NoRemnant
+                && stars.stars()[usize::from(pair.stars()[c].get())]
+                    .remnant_age_at(ClockWindow::END)
+                    .is_some()
+        })
+    };
+    let galaxy = galaxy();
+    let (stars, k) = first_paired_system(
+        &galaxy,
+        SEARCH,
+        PairHistory::CommonEnvelopeMerger,
+        |stars, k| swallowed(stars, k).is_some(),
+    )
+    .expect("a common-envelope merger whose swallowed star's model dies by +H");
+    let component = swallowed(&stars, k).unwrap();
+    let ctx = SystemContext::from_stars(&galaxy, &stars);
+    let pair = &ctx.pairs()[k];
+    let star = usize::from(pair.stars()[component].get());
+    let (remnant, death) = with_binary_host_remnants(BinaryHostRemnantsRules::Engine, || {
+        (ctx.remnant_by_end(star), ctx.death_age(star))
+    });
+    assert_eq!(remnant, None, "{:?}", ctx.id());
+    let (death, merger) = (death.unwrap(), pair.timeline().merger_age().unwrap());
+    assert!(
+        death <= merger,
+        "{:?}: dead at {death:?}, merged at {merger:?}",
+        ctx.id()
+    );
+    let single = with_binary_host_remnants(BinaryHostRemnantsRules::SingleModels, || {
+        ctx.remnant_by_end(star)
+    });
+    assert!(single.is_some(), "{:?}", ctx.id());
+}
+
+/// The generation's readers follow the context's remnants and deaths under both remnant rules:
+/// over the sample's paired systems, a few its pairs leave alone and every one whose remnants the
+/// rules read apart, a white dwarf system's birth is its white dwarf's (`remnant_by_end`), and a
+/// protoplanetary disc ends at the earlier of its lifetime and its stars' first death
+/// (`death_age`); under the single models those are the models' own deaths. Second-generation
+/// planets, 9 in 500,000 systems at 27, are rarer than the sample.
+#[test]
+fn binary_host_remnants_drive_the_discs_as_their_readers_say() {
+    use crate::planetary::context::{BinaryHostRemnantsRules, with_binary_host_remnants};
+    let galaxy = galaxy();
+    let records = sample_records(&galaxy, SEARCH, SampleFilter::ALL).unwrap();
+    let t = ClockWindow::END;
+    let (mut checked, mut apart) = (0, 0);
+    for record in &records {
+        let stars = SystemStars::generate(&galaxy, record);
+        if stars.pairs().is_empty() {
+            continue;
+        }
+        let ctx = SystemContext::from_stars(&galaxy, &stars);
+        let read = |rules| {
+            with_binary_host_remnants(rules, || {
+                (0..ctx.stars().len())
+                    .map(|star| (ctx.remnant_by_end(star), ctx.death_age(star)))
+                    .collect::<Vec<_>>()
+            })
+        };
+        let differs =
+            read(BinaryHostRemnantsRules::SingleModels) != read(BinaryHostRemnantsRules::Engine);
+        if !differs && checked >= 6 {
+            continue;
+        }
+        for rules in [
+            BinaryHostRemnantsRules::SingleModels,
+            BinaryHostRemnantsRules::Engine,
+        ] {
+            with_every_27_hold(|| {
+                with_binary_host_remnants(rules, || {
+                    let system = generate(SEED, &ctx);
+                    if let Some(wd) = system.white_dwarf() {
+                        let OrbitHost::Star(n) = wd.host() else {
+                            panic!("a white dwarf system's host is a star");
+                        };
+                        let star = usize::from(n);
+                        let ended = ctx.remnant_by_end(star).unwrap();
+                        assert_eq!(ended.remnant.kind(), RemnantKind::WhiteDwarf);
+                        let age_at_epoch = ctx.stars()[star].age_at_epoch();
+                        assert_eq!(Some(wd.born()), time_at_age(ended.born, age_at_epoch));
+                        if rules == BinaryHostRemnantsRules::SingleModels {
+                            let death = ctx.stars()[star].death().unwrap().age();
+                            assert_eq!(Some(wd.born()), time_at_age(death, age_at_epoch));
+                        }
+                    }
+                    if let Some(disc) = system.protoplanetary_disc() {
+                        let zone = system.zone(disc.host()).unwrap();
+                        let lifetime = system
+                            .host(disc.host())
+                            .and_then(|host| host.disc().profile())
+                            .unwrap()
+                            .lifetime();
+                        let first = usize::from(zone.members().next().unwrap());
+                        let age_at_epoch = ctx.stars()[first].age_at_epoch();
+                        let died = zone
+                            .members()
+                            .filter_map(|m| {
+                                let star = usize::from(m);
+                                time_at_age(ctx.death_age(star)?, ctx.stars()[star].age_at_epoch())
+                            })
+                            .min();
+                        if rules == BinaryHostRemnantsRules::SingleModels {
+                            let models: Vec<&StarModel> = zone
+                                .members()
+                                .map(|m| &ctx.stars()[usize::from(m)])
+                                .collect();
+                            assert_eq!(died, first_death(&models));
+                        }
+                        let end = earliest(time_at_age(Years::from(lifetime), age_at_epoch), died);
+                        let state =
+                            system.protoplanetary_state(&Epoch::new(&system, &ctx, t), *disc, t);
+                        match end.filter(|&end| t >= end) {
+                            Some(at) => assert_eq!(
+                                state,
+                                BodyState::Destroyed {
+                                    cause: DestructionCause::Dispersed,
+                                    at
+                                },
+                                "{:?}",
+                                ctx.id()
+                            ),
+                            None => assert_ne!(state, BodyState::NotYetFormed),
+                        }
+                    }
+                });
+            });
+        }
+        checked += 1;
+        apart += usize::from(differs);
+        if apart >= 3 && checked >= 12 {
+            break;
+        }
+    }
+    assert!(
+        apart >= 1,
+        "{apart} of {checked} systems' remnants read apart"
+    );
+}
+
+/// A system the binary engine ran no pair of generates whole (`generate`, its disc bodies
+/// included) and reads the same records under both remnant rules, bit for bit: its stars have no
+/// pair to read, so this pins only that nothing else of the generation moves.
+#[test]
+fn binary_host_remnants_leave_an_unpaired_system_as_it_was() {
+    use crate::planetary::context::{BinaryHostRemnantsRules, with_binary_host_remnants};
+    let galaxy = galaxy();
+    let records = sample_records(&galaxy, 200, SampleFilter::ALL).unwrap();
+    let contexts: Vec<SystemContext> = records
+        .iter()
+        .map(|record| SystemStars::generate(&galaxy, record))
+        .filter(|stars| stars.pairs().is_empty())
+        .map(|stars| SystemContext::from_stars(&galaxy, &stars))
+        .take(3)
+        .collect();
+    assert_eq!(contexts.len(), 3);
+    for ctx in &contexts {
+        let read = |rules| {
+            with_every_27_hold(|| {
+                with_binary_host_remnants(rules, || {
+                    generate(SEED, ctx).snapshot_at(ctx, UniverseTime::EPOCH)
+                })
+            })
+        };
+        assert_eq!(
+            read(BinaryHostRemnantsRules::SingleModels),
+            read(BinaryHostRemnantsRules::Engine),
+            "{:?}",
+            ctx.id()
+        );
+    }
 }

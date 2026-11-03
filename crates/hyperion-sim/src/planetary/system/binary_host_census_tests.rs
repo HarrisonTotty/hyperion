@@ -27,8 +27,9 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{Existence, SystemKind, SystemRecord};
 use crate::planetary::context::{
-    BinaryHostHistoryRules, BinaryHostLightRules, BinaryHostXuvRules, with_binary_host_history,
-    with_binary_host_light, with_binary_host_xuv,
+    BinaryHostHistoryRules, BinaryHostLightRules, BinaryHostRemnantsRules, BinaryHostXuvRules,
+    with_binary_host_history, with_binary_host_light, with_binary_host_remnants,
+    with_binary_host_xuv,
 };
 use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
 use crate::planetary::placement::zones::{BinaryHostZonesRules, PairBound, with_binary_host_zones};
@@ -361,6 +362,7 @@ fn held<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_binary_host_fate(BinaryHostFateRules::SingleModels, run);
     let run = move || with_binary_host_xuv(BinaryHostXuvRules::SingleModels, run);
     let run = move || with_binary_host_history(BinaryHostHistoryRules::SingleModels, run);
+    let run = move || with_binary_host_remnants(BinaryHostRemnantsRules::SingleModels, run);
     with_binary_host_light(BinaryHostLightRules::SingleModels, run)
 }
 

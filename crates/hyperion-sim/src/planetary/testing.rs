@@ -563,6 +563,10 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   (P14.T1.g), at `BinaryHostHistoryRules::Engine` through `with_binary_host_history`: the
 ///   cometary halo's light, mass, mass loss and deaths, the habitability clock's and the moons'
 ///   hot history's main-sequence ends, and the pulsar host's spin-down light.
+/// - a paired star's remnant and death from its pair's timeline in the generation,
+///   `BINARY_HOST_REMNANTS_VERSION` (P14.T1.h), at `BinaryHostRemnantsRules::Engine` through
+///   `with_binary_host_remnants`: the neutron stars second-generation planets form about, the
+///   white dwarf a debris disc reads, and the first death that ends a protoplanetary disc.
 /// - a paired star's fate from its pair's timeline, `BINARY_HOST_FATE_VERSION` (P14.T28.g), at
 ///   `BinaryHostFateRules::Engine` through `with_binary_host_fate`: a planet's orbit follows the
 ///   engine's masses and radii, and the pair's common envelopes, mergers and supernovae are its
@@ -628,6 +632,10 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || {
         use crate::planetary::context::{BinaryHostHistoryRules, with_binary_host_history};
         with_binary_host_history(BinaryHostHistoryRules::Engine, run)
+    };
+    let run = move || {
+        use crate::planetary::context::{BinaryHostRemnantsRules, with_binary_host_remnants};
+        with_binary_host_remnants(BinaryHostRemnantsRules::Engine, run)
     };
     let run = move || {
         use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};

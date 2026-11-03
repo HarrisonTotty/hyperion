@@ -83,13 +83,13 @@ use crate::stellar::multiplicity::{
     LOG_PERIOD_MAX, LOG_PERIOD_MIN, MIN_COMPANION_MASS, MIN_SUBSTELLAR_COMPANION_MASS,
     MultiplicityModel, SlotKind, SystemHierarchy, TIDAL_CUT_SHARE,
 };
-use crate::stellar::remnant::PulsarState;
+use crate::stellar::remnant::{CompactRemnant, PulsarState, RemnantKind};
 use crate::stellar::sse::{self, ZCoeffs, zams};
 use crate::stellar::system::{
-    MAX_STAR_MASS, PairTimeline, StarModel, SystemStars, draw_metallicity, pair_of,
+    MAX_STAR_MASS, PairTimeline, StarModel, SystemStars, draw_metallicity, pair_of, remnant_kind,
 };
 use crate::stellar::{Composition, Phase, StarState, substellar};
-use crate::time::{CLOCK_WINDOW_H, UniverseTime};
+use crate::time::{CLOCK_WINDOW_H, ClockWindow, UniverseTime};
 use crate::units::consts::{GM_SUN, METRES_PER_KILOPARSEC, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{
     Days, Dex, HeliumExcess, JoulesPerSquareMetre, KilometresPerSecond, Metres, PerCubicLightYear,
@@ -752,6 +752,102 @@ pub(crate) fn with_binary_host_history<R>(
     run()
 }
 
+/// The generator version from which the planetary stage's generation reads what a star of a pair
+/// the binary engine ran leaves, and when it dies, from its pair's timeline (P14.T1.h): the
+/// neutron stars second-generation planets form about, the white dwarf a debris disc and its
+/// pollution mark read, and the first death that ends a protoplanetary disc; 27, held with the 27
+/// train.
+///
+/// Below it [`BinaryHostRemnantsRules::in_force`] is [`BinaryHostRemnantsRules::SingleModels`]:
+/// each star leaves its own single-star model's remnant at its model's death, and every figure is
+/// version 26's bit for bit. 27's bump deletes this hold, [`BinaryHostRemnantsRules`] with its
+/// `SingleModels` arm, the tests' switch, its line in the tests' `HeldRules` and its tripwire
+/// (`the_binary_host_remnants_are_held_only_until_the_27_bump`).
+pub(crate) const BINARY_HOST_REMNANTS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// Where the generation reads a paired star's remnant and death (its hold,
+/// [`BINARY_HOST_REMNANTS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum BinaryHostRemnantsRules {
+    /// Version 26's and before: every star's own single-star model.
+    SingleModels,
+    /// Version 27's: a star its pair changed from its pair's timeline
+    /// ([`SystemContext::remnant_by_end`], [`SystemContext::death_age`]).
+    Engine,
+}
+
+impl BinaryHostRemnantsRules {
+    /// The rules this generator version gives: the engine's from
+    /// [`BINARY_HOST_REMNANTS_VERSION`], the single models' below it; in the tests, the rules a
+    /// test's switch sets on its thread ([`with_binary_host_remnants`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = BINARY_HOST_REMNANTS_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= BINARY_HOST_REMNANTS_VERSION {
+            Self::Engine
+        } else {
+            Self::SingleModels
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The paired stars' remnant rules a test sets on its thread, `None` for the version's.
+    static BINARY_HOST_REMNANTS_RULES: core::cell::Cell<Option<BinaryHostRemnantsRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the paired stars' remnant rules `rules` on this thread, for the tests to
+/// reach the engine's remnants ahead of the bump; the version's rules are set back after, a panic
+/// in `run` included. 27's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_binary_host_remnants<R>(
+    rules: BinaryHostRemnantsRules,
+    run: impl FnOnce() -> R,
+) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<BinaryHostRemnantsRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            BINARY_HOST_REMNANTS_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(BINARY_HOST_REMNANTS_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// How near its model's own death age, as a share of it, an age of a paired star's death or
+/// explosion on its pair's timeline stands for that death: 10⁻⁹, the stellar stage's rule for a
+/// death the engine pins to the model's (`SystemStars`' paired state, design note 16 of plan 11),
+/// which an engine landing an ulp short of the age keeps (P14.T1.g, T1.h).
+pub(crate) const OWN_DEATH_SHARE: f64 = 1e-9;
+
+/// `age`, Julian years, a death or a remnant's birth on the pair's timeline of the star `model`,
+/// at its model's own death age where the two agree within [`OWN_DEATH_SHARE`], and `age`
+/// otherwise: so that a death the engine lands an ulp off its model's reads the model's, as every
+/// paired reader of the planetary stage takes it (P14.T1.g, T1.h).
+#[must_use]
+pub(crate) fn at_own_death(model: &StarModel, age: Years) -> Years {
+    match model.death().map(|death| death.age()) {
+        Some(own) if (age.value() - own.value()).abs() <= OWN_DEATH_SHARE * own.value() => own,
+        Some(_) | None => age,
+    }
+}
+
+/// The remnant a star leaves by the end of the clock window and when it is born, as the planetary
+/// stage's generation reads them ([`SystemContext::remnant_by_end`], P14.T1.h).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct StarRemnant {
+    /// The remnant: its kind and its mass at its birth.
+    pub(crate) remnant: CompactRemnant,
+    /// Its birth, the star's age then, Julian years.
+    pub(crate) born: Years,
+}
+
 /// The generator version from which a star of a pair the binary engine ran has the X-ray and
 /// ultraviolet history of what the engine made of it (P14.T1.f): 27, held with the 27 train.
 ///
@@ -1260,6 +1356,81 @@ impl SystemContext {
                     .map(|p| *p.state())
             })
             .flatten()
+    }
+
+    /// Component `star`'s pair, its component there and its state at its timeline's end, where
+    /// from generator version 27 (P14.T1.h, [`BINARY_HOST_REMNANTS_VERSION`]) the generation reads
+    /// what the star leaves from its pair's timeline: if the engine ran it in a pair that changed
+    /// it, its state at the timeline's end (+H) not its own model's then. `None` for a star its
+    /// pair left alone, which reads its model's remnant and death to the bit, for every other star,
+    /// and below 27.
+    #[must_use]
+    fn remnants_pair(&self, star: usize) -> Option<(&PairTimeline, PairComponent, StarState)> {
+        match BinaryHostRemnantsRules::in_force() {
+            BinaryHostRemnantsRules::SingleModels => return None,
+            BinaryHostRemnantsRules::Engine => {}
+        }
+        let (pair, component) = pair_of(&self.pairs, u8::try_from(star).ok()?)?;
+        let timeline = pair.timeline();
+        let end = timeline.state_at(timeline.until()).stars()[component.index()];
+        (self.stars[star].state_at(ClockWindow::END) != Some(end)).then_some((pair, component, end))
+    }
+
+    /// The remnant component `star` is by the end of the clock window (+H), with its birth, as
+    /// the planetary stage's generation reads it (P14.T1.h): its own model's
+    /// ([`StarModel::remnant`] at its death) where it dies by then; from generator version 27,
+    /// for a star of a pair the engine ran and changed, the remnant its pair's timeline leaves it
+    /// at +H, born at the first age it is that kind of remnant
+    /// ([`BinaryTimeline::first_age_where`](crate::stellar::binary::BinaryTimeline::first_age_where)),
+    /// at its mass then, its birth at its model's own death where the two agree ([`at_own_death`]).
+    /// `None` for a star alive at +H and for one that leaves nothing, merged away or destroyed.
+    ///
+    /// # Panics
+    ///
+    /// If `star` is not a component of the system.
+    #[must_use]
+    pub(crate) fn remnant_by_end(&self, star: usize) -> Option<StarRemnant> {
+        let model = &self.stars[star];
+        let Some((pair, component, end)) = self.remnants_pair(star) else {
+            model.remnant_age_at(ClockWindow::END)?;
+            return Some(StarRemnant {
+                remnant: model
+                    .remnant()
+                    .filter(|remnant| remnant.kind() != RemnantKind::None)?,
+                born: model.death()?.age(),
+            });
+        };
+        let timeline = pair.timeline();
+        let kind = remnant_kind(end.phase()).filter(|&kind| kind != RemnantKind::None)?;
+        let born =
+            timeline.first_age_where(component, |phase| remnant_kind(phase) == Some(kind))?;
+        let mass = timeline.state_at(born).stars()[component.index()].mass();
+        Some(StarRemnant {
+            remnant: CompactRemnant::new(kind, mass),
+            born: at_own_death(model, born),
+        })
+    }
+
+    /// The age, Julian years, at which component `star` dies, as the planetary stage's generation
+    /// reads it (P14.T1.h): its model's death ([`StarModel::death`]); from generator version 27,
+    /// for a star of a pair the engine ran and changed, the first age its pair's timeline leaves it
+    /// no living star, if it does by +H
+    /// ([`BinaryTimeline::first_death_age`](crate::stellar::binary::BinaryTimeline::first_death_age)),
+    /// at its model's own death where the two agree ([`at_own_death`]).
+    ///
+    /// # Panics
+    ///
+    /// If `star` is not a component of the system.
+    #[must_use]
+    pub(crate) fn death_age(&self, star: usize) -> Option<Years> {
+        let model = &self.stars[star];
+        match self.remnants_pair(star) {
+            None => model.death().map(|death| death.age()),
+            Some((pair, component, _)) => pair
+                .timeline()
+                .first_death_age(component)
+                .map(|age| at_own_death(model, age)),
+        }
     }
 
     /// Component `star`'s pair, its component there and the age at `t` its timeline is read at, if
