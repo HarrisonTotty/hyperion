@@ -1467,12 +1467,14 @@ mod tests {
     }
 
     /// P09.T37, under `list_source`: from 27 a remnant class's attempts draw its age with its
-    /// mass. At 24's rules the continuous component makes only black holes in its first few
-    /// million years, so a neutron star whose first age falls there keeps none of its attempts at
-    /// that age (the held arm exhausts its 4,096, a debug assertion); drawn age by age it is kept
-    /// at a later attempt and another age, and a member kept at its first attempt, at an age by
-    /// which its class's every mass has died, is the held arm's bit for bit: there the joint draw
-    /// (fix-p09-centre-joint-draw) draws its mass over the range the held arm does.
+    /// mass. The continuous component's stars dead in its first few million years leave black
+    /// holes, or neutron stars mostly kicked past the cluster's escape speed, so a neutron star
+    /// whose first age falls there may keep none of its attempts at that age (at 24's rules,
+    /// where only black holes were made, the held arm exhausted its 4,096, a debug assertion);
+    /// drawn age by age it is kept at a later attempt and another age, and a member kept at its
+    /// first attempt, at an age by which its class's every mass has died, is the held arm's bit
+    /// for bit: there the joint draw (fix-p09-centre-joint-draw) draws its mass over the range
+    /// the held arm does.
     #[test]
     fn a_centre_remnant_draws_its_age_with_each_attempt_from_27() {
         let held = milky_way_galaxy();
@@ -1533,12 +1535,15 @@ mod tests {
             })
         };
         let member = |index: u16| SystemId::from(placement.member_id(MassBand::E, cell, index));
-        let system = (0..MemberSlot::INDEX_LIMIT)
-            .map(member)
-            .find(|&s| (3.4e6..3.9e6).contains(&first_age(s).value()))
-            .expect("a first age at 3.4-3.9 Myr");
+        // At 26's rules (measured 2026-11-03) two of the cell's 1,100 members whose first age lies
+        // in the component's first 20 Myr keep no neutron star in their first 64 attempts: member
+        // 334 at 6.48 Myr (56 black holes and 8 neutron stars kicked out) and member 2,579 at 4.52
+        // Myr (61 and 3). At 24's rules the first member whose first age lay at 3.4–3.9 Myr kept
+        // none.
+        let system = member(334);
         let age = first_age(system);
-        assert!(!keeps_any(system, age), "only black holes at {age:?}");
+        assert!((6.4e6..6.5e6).contains(&age.value()), "{age:?}");
+        assert!(!keeps_any(system, age), "a neutron star kept at {age:?}");
         let (mass, attempt, drawn) =
             draw_star(&registered, &class, system, escape).expect("kept at another age");
         eprintln!(
