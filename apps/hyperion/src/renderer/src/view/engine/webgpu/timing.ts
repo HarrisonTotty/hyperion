@@ -46,12 +46,13 @@ export const PASSES_PER_FRAME = 64;
 /**
  * Resolve and staging pairs at most: resolves whose times may be in flight at once. Each view's
  * and target's render resolves its own, the bloom chain one per level, and a mapping settles a
- * frame or more later. A photorealistic `VIEW` frame resolves 15 times, so its heaviest frame, a
- * photorealistic primary with two photorealistic instruments, 45; this holds three such frames
- * (R07.T19, decision-r07-t19 item 1: 64, or three such frames if more). The pairs are made as
- * they are needed, 2 KiB each.
+ * frame or more later. A photorealistic `VIEW` frame resolves 15 times, 17 with its bodies pass and
+ * the terrain's late raster (plan R14, R14.T3.d), so its heaviest frame, a photorealistic primary
+ * with two photorealistic instruments, 51; this holds three such frames (R07.T19,
+ * decision-r07-t19 item 1: 64, or three such frames if more). The pairs are made as they are
+ * needed, 2 KiB each.
  */
-export const TIMING_FRAMES_IN_FLIGHT = 135;
+export const TIMING_FRAMES_IN_FLIGHT = 153;
 
 /** Bytes of one pair's buffers: every query of a frame, 8 bytes each. */
 const RESOLVE_BYTES = PASSES_PER_FRAME * 2 * 8;

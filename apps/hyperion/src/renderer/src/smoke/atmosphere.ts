@@ -9846,7 +9846,7 @@ const FAR_LIMB_TIMED_ROUNDS = 60;
 
 /**
  * The timed rounds between two waits for the GPU: 10, 50 frames, so that the timer's resolves in
- * flight stay well under its `TIMING_FRAMES_IN_FLIGHT` (135), past which it drops a frame's times.
+ * flight stay well under its `TIMING_FRAMES_IN_FLIGHT` (153), past which it drops a frame's times.
  */
 const FAR_LIMB_FENCE_ROUNDS = 10;
 

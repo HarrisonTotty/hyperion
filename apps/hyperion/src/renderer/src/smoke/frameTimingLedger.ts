@@ -39,7 +39,7 @@ export interface TimedForm {
  * The timings' form: 10 warm-up frames and 30 timed a combination a sweep, 60 timed over the two
  * sweeps, each frame drawn once frame n − 3's resolves have arrived, so that two frames stay queued
  * on the GPU and the resolves in flight stay a few frames' (a photorealistic frame makes about a
- * dozen), far under the timer's 135 (`TIMING_FRAMES_IN_FLIGHT`); a frame's resolves waited for
+ * dozen), far under the timer's 153 (`TIMING_FRAMES_IN_FLIGHT`); a frame's resolves waited for
  * 2 s, the last frames' 5 s in all.
  */
 export const QW_FORM: TimedForm = {

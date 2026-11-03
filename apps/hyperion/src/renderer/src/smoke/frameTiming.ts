@@ -115,7 +115,7 @@
  * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
  * timed, back to back; two sweeps over every combination, the second in the reverse order. There
  * is no idle gap: a frame waits only for the resolves of the frame three before it, so that two
- * frames stay queued and the timer, which holds `TIMING_FRAMES_IN_FLIGHT` (135) resolves in flight,
+ * frames stay queued and the timer, which holds `TIMING_FRAMES_IN_FLIGHT` (153) resolves in flight,
  * drops none. A frame with any resolve missing is left out and counted. Timings are figures, never
  * held: a check fails only when frames are missing or not finite, or a frame's sources are not its
  * set's.

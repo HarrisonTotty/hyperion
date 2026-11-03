@@ -2205,6 +2205,53 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
       view.renderer.dispose();
     }
   });
+
+  it("keeps three frames of three views in the timer's resolves with the terrain's two rasters (R14.T3.d)", async () => {
+    // The bodies pass and its late half resolve each; the pyramid's dispatches add none.
+    const engine = await countingRenderEngine();
+    const views = [
+      { name: "primary", viewport: { widthPx: 1920, heightPx: 1080 }, role: "eye" as const },
+      { name: "instrument 1", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+      { name: "instrument 2", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+    ];
+    const camera = frameWith([]).camera;
+    const drawn = await Promise.all(
+      views.map(async ({ name, viewport, role }) => {
+        const renderer = new PhotorealRenderer(engine, name);
+        await renderer.prepare(viewport, "high", role, camera);
+        return { viewport, role, renderer, canvas: new RecordingView() };
+      }),
+    );
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("early")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [drawOfName("late")],
+    };
+    const geometry = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
+    const overlay = (): FrameSubmission => SYMBOLOGY;
+    for (const view of drawn) {
+      view.renderer.render(view.canvas, {
+        ...frameOfDiscs(smallDiscs(view.viewport), view.viewport),
+        role: view.role,
+        meter: view.role === "eye" ? "average" : null,
+        overlay,
+        geometry,
+        terrain,
+      });
+    }
+    const resolves =
+      engine.targetFrames.length + drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
+    expect(
+      engine.targetFrames.filter((f) => f.label === PHOTOREAL_PASS_LABELS.bodiesLate),
+    ).toHaveLength(3);
+    expect(3 * resolves).toBeLessThanOrEqual(TIMING_FRAMES_IN_FLIGHT);
+    for (const view of drawn) {
+      view.renderer.dispose();
+    }
+  });
 });
 
 /**
