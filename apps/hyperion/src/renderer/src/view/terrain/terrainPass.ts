@@ -5543,9 +5543,9 @@ export class TerrainPass {
       lists: buckets.lists,
       args: buckets.args,
       marks: clusters.marks,
-      // No terrain record is a DAG's, so its records stand in for the LOD spheres, unread.
-      lods: records,
-      ...(this.#cullOccludes ? { history: clusters.history } : {}),
+      // No terrain record is a DAG's: the plain kernel's LOD spheres are its records, unread, and
+      // the occlusion's variant takes none (R14.T3.d).
+      ...(this.#cullOccludes ? { history: clusters.history } : { lods: records }),
     };
     engine.dispatch(
       clusters.kernel,
@@ -5688,13 +5688,16 @@ export class TerrainPass {
         : { levels: frame.levels, size: frame.size, projection: frame.projection, axes: late.axes },
       held.hzb,
     );
-    const passes: Array<CullPass | null> = Array.from(
-      { length: CLUSTER_LIT_LATE_PASS + 1 },
-      (_, n) => (n === CLUSTER_LIT_LATE_PASS ? late.pass : null),
+    // In the lit pass's place of the dispatch, whose bit each record's cull input holds, its
+    // buckets the late pass's.
+    const passes: Array<CullPass | null> = Array.from({ length: CLUSTER_LIT_PASS + 1 }, (_, n) =>
+      n === CLUSTER_LIT_PASS ? late.pass : null,
     );
     packCullPasses(
       passes,
-      passes.map((_, index) => buckets.place(index)),
+      passes.map((_, index) =>
+        buckets.place(index === CLUSTER_LIT_PASS ? CLUSTER_LIT_LATE_PASS : index),
+      ),
       held.passes,
     );
     packCullParams({ ...late.params, passes: passes.length }, held.params);

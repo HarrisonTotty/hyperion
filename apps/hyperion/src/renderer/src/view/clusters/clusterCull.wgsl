@@ -166,8 +166,10 @@ const HORIZON_ROUNDING : f32 = 1e-6;
 @group(0) @binding(5) var<storage, read_write> lists : array<u32>;
 @group(0) @binding(6) var<storage, read_write> args : array<atomic<u32>>;
 @group(0) @binding(7) var<storage, read_write> marks : array<u32>;
-// One parent group's LOD sphere a record (`record.ts`' `ClusterLod`), read by a DAG record alone.
-@group(0) @binding(8) var<storage, read> lods : array<vec4f>;
+// Composed here: the plain kernel's (`cull.ts`' NO_OCCLUSION) one parent group's LOD sphere a
+// record (`record.ts`' `ClusterLod`, binding 8, read by a DAG record alone through `lod_of`) and the
+// occlusion's stand-ins, or the occlusion's variant's bindings and tests (`clusterOcclusion.wgsl`),
+// whose consumer has no DAG record.
 //OCCLUSION//
 
 // A record's centre in the instances' frame, turned from its page's axes.
@@ -444,7 +446,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
     var parent_centre = centre;
     var parent_radius = record.radius;
     if (dag) {
-      let lod = lods[at];
+      let lod = lod_of(at);
       parent_centre = origin + page_to_instance(lod.xyz);
       parent_radius = lod.w;
     }

@@ -1,7 +1,10 @@
 // The cluster cull's two-pass occlusion (plan R14, R14.T3.d; `clusters/hzb.ts`), composed into
 // `clusterCull.wgsl` below its bindings for `cull.ts`' CLUSTER_CULL_OCCLUSION_KERNEL: the late pass's
 // pyramid (`hzb.ts`' `packHzbParams`; no levels refuse nothing), its texels and the clusters'
-// visibility, a bit each, with the early pass's and the late pass's reads and writes of them.
+// visibility, a bit each, with the early pass's and the late pass's reads and writes of them. It
+// takes no DAG's LOD spheres (binding 8): its consumer, terrain's lit pass, has no DAG record, and
+// WebGPU's default limit of eight storage buffers a stage holds the cull's six, the pyramid and the
+// visibility.
 
 struct HzbParams {
   right : vec4f,
@@ -76,6 +79,11 @@ fn hzb_refuses(centre : vec3f, radius : f32) -> bool {
     }
   }
   return hzb.forward.w / near_z < farthest;
+}
+
+// A record's parent group's LOD sphere: none, since no record of this kernel's consumer is a DAG's.
+fn lod_of(at : u32) -> vec4f {
+  return vec4f(0.0);
 }
 
 // Whether the cluster of visibility word `word`'s bit `bit` was visible last frame.

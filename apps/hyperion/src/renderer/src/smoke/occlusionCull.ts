@@ -248,7 +248,6 @@ export async function checkOcclusionCull(engine: RenderEngine, checks: Checks): 
       lists: buckets.lists,
       args: buckets.args,
       marks,
-      lods: buffer("smoke occlusion lods", new Float32Array(4)),
       history,
       pyramid: frame.buffer,
     };

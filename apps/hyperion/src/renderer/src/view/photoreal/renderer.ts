@@ -403,8 +403,11 @@ interface Resources {
   readonly histograms: HistogramReader;
   /** The `disc cells` kernel, which shades the small discs' cells in parallel (R07.T8.d). */
   readonly discCells: ComputeHandle;
-  /** The depth pyramid's kernel (plan R14, R14.T3.d), made with the rest, run only with occlusion. */
-  readonly pyramidKernel: ComputeHandle;
+  /**
+   * The depth pyramid's kernel (plan R14, R14.T3.d), made with the rest, run only with occlusion;
+   * `null` where its compiler refused it, when the view draws in one raster.
+   */
+  readonly pyramidKernel: ComputeHandle | null;
   /** The atmospheres' shared per-frame kernels and composite (R08.T10.b), made with the rest. */
   readonly atmosphere: AtmosphereFrameKernels;
   /**
@@ -647,7 +650,7 @@ export class PhotorealRenderer {
     let sprite: MaterialHandle;
     let kernel: ComputeHandle;
     let discCells: ComputeHandle;
-    let pyramidKernel: ComputeHandle;
+    let pyramidKernel: ComputeHandle | null;
     let atmosphere: AtmosphereFrameKernels;
     try {
       [tonemap, overlayDepth, sprite, kernel, discCells, pyramidKernel, atmosphere] =
@@ -657,7 +660,11 @@ export class PhotorealRenderer {
           engine.createMaterialAsync(SKY_SPRITE_HDR_MATERIAL, ["rgba16float"], [quad]),
           engine.createComputeAsync(HISTOGRAM_KERNEL),
           engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
-          engine.createComputeAsync(DEPTH_PYRAMID_KERNEL),
+          // A refused pyramid leaves the view its one raster: the occlusion is a lever, not the frame.
+          engine.createComputeAsync(DEPTH_PYRAMID_KERNEL).catch((error: unknown) => {
+            console.warn(`the photorealistic view ${this.#name} has no depth pyramid:`, error);
+            return null;
+          }),
           // Every world with air draws by the thick read's kernels once its correction is routed
           // (R08.T14.f), so they are made ahead of the first frame of one; and the kernel of what lies
           // behind the sky at the march's resolution, which the settings' levers take (the owner's
@@ -1062,7 +1069,8 @@ export class PhotorealRenderer {
 
   /**
    * The frame's two-pass occlusion (plan R14, R14.T3.d), where its geometry asks it (`occlusion`
-   * `hzb`) and it has terrain: the view's pyramid, made at the first such frame and begun at the
+   * `hzb`), it has terrain and the pyramid's kernel was made: the view's pyramid, made at the first
+   * such frame and begun at the
    * scene's size, and whether the last frame's visibility no longer holds, a cut among the reasons
    * (a dropped histogram, or a frame held back, `present: false`); else `null`, the pyramid let go.
    */
@@ -1071,16 +1079,13 @@ export class PhotorealRenderer {
     frame: PhotorealFrame,
     geometry: GeometrySettings,
   ): (FrameOcclusion & { readonly pyramid: DepthPyramid }) | null {
-    if (geometry.occlusion !== "hzb" || frame.terrain === undefined) {
+    const kernel = resources.pyramidKernel;
+    if (geometry.occlusion !== "hzb" || frame.terrain === undefined || kernel === null) {
       this.#pyramid?.dispose();
       this.#pyramid = null;
       return null;
     }
-    const pyramid = (this.#pyramid ??= new DepthPyramid(
-      this.#engine,
-      resources.pyramidKernel,
-      this.#name,
-    ));
+    const pyramid = (this.#pyramid ??= new DepthPyramid(this.#engine, kernel, this.#name));
     const cut = this.#cut || frame.present === false;
     this.#cut = false;
     return { pyramid, fresh: pyramid.begin(resources.size, cut) };

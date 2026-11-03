@@ -2393,7 +2393,9 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - The cull's occlusion is a kernel of its own, `CLUSTER_CULL_OCCLUSION_KERNEL`
     (`clusterOcclusion.wgsl` composed into `clusterCull.wgsl`; bindings 9 to 11, `hzb`, `pyramid`
     and `history`), which terrain's lit pass takes; every other consumer keeps `CLUSTER_CULL_KERNEL`,
-    whose stand-ins see every cluster. `CameraCullPass.occlusion` (`early`, kind 4; `late`, kind 5)
+    whose stand-ins see every cluster. The variant takes no `lods` (binding 8, now the plain
+    kernel's composition's): WebGPU's default eight storage buffers a stage would not hold a ninth,
+    and terrain has no DAG record. `CameraCullPass.occlusion` (`early`, kind 4; `late`, kind 5)
     on the ordered pass. Its twin is `cull.ts`' `cullMarksTwin` with a `CullOcclusionTwin` and
     `cullVisibilityTwin`; the pyramid's are `depthPyramidTwin` and `hzbRefuses`.
   - The visibility is a bit a (slot, cluster) a view (`TerrainClusterBuffers.history`,

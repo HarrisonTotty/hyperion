@@ -1224,7 +1224,7 @@ describe("the cull's two kernels (plan R14, R14.T3.d)", () => {
     expect([
       occluding.includes("@group(0) @binding(11) var<storage, read_write> history"),
       occluding.includes("fn hzb_refuses("),
-      plain.includes("@binding(9)"),
+      plain.includes("@binding(9)") || occluding.includes("@binding(8)"),
       plain.includes("fn occlusion_seen(word : u32, bit : u32) -> bool {\n  return true;"),
       [occluding, plain].every((source) => !source.includes("//OCCLUSION//")),
     ]).toEqual([true, true, false, true, true]);

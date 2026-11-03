@@ -7,13 +7,13 @@
 // exact, so the result is the same on every path (`bit-exact`). The TypeScript twin is
 // `clusters/hzb.ts`' `depthPyramidTwin`.
 //
-// PyramidParams: `source` (the source's width and height, texels; the level written; the source
-// level's first texel in the buffer, unread at level 0) and `target` (the written level's width,
-// height and first texel).
+// PyramidParams: `src` (the source's width and height, texels; the level written; the source
+// level's first texel in the buffer, unread at level 0) and `dst` (the written level's width,
+// height and first texel; `target` is a reserved word in WGSL).
 
 struct PyramidParams {
-  source : vec4u,
-  target : vec4u,
+  src : vec4u,
+  dst : vec4u,
 }
 
 @group(0) @binding(0) var<uniform> params : PyramidParams;
@@ -22,21 +22,21 @@ struct PyramidParams {
 
 // Texel (x, y) of the source: the depth target's at level 0, else the level before's.
 fn source_at(x : u32, y : u32) -> f32 {
-  if (params.source.z == 0u) {
+  if (params.src.z == 0u) {
     return textureLoad(depth, vec2u(x, y), 0);
   }
-  return pyramid[params.source.w + y * params.source.x + x];
+  return pyramid[params.src.w + y * params.src.x + x];
 }
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) id : vec3u) {
-  if (id.x >= params.target.x || id.y >= params.target.y) {
+  if (id.x >= params.dst.x || id.y >= params.dst.y) {
     return;
   }
   let x0 = 2u * id.x;
   let y0 = 2u * id.y;
-  let x1 = min(x0 + 1u, params.source.x - 1u);
-  let y1 = min(y0 + 1u, params.source.y - 1u);
+  let x1 = min(x0 + 1u, params.src.x - 1u);
+  let y1 = min(y0 + 1u, params.src.y - 1u);
   let farthest = min(min(source_at(x0, y0), source_at(x1, y0)), min(source_at(x0, y1), source_at(x1, y1)));
-  pyramid[params.target.z + id.y * params.target.x + id.x] = farthest;
+  pyramid[params.dst.z + id.y * params.dst.x + id.x] = farthest;
 }

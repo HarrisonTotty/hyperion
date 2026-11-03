@@ -2039,12 +2039,16 @@ describe("the two-pass occlusion on the cluster path (plan R14, R14.T3.d)", () =
     const hzb = cull.bindings.uniforms["hzb"] ?? new Uint32Array();
     const buckets = TERRAIN_CLUSTER_MESH.templates.length;
     const lit = frame.draws.filter((draw) => draw.mesh.name === "terrain clusters");
+    // The late pass's index in its dispatch, whose bit every record entering the lit pass holds.
+    const kinds = Array.from({ length: 8 }, (_, p) => passes[(p * CULL_PASS_BYTES) / 4] ?? 0);
+    const at = kinds.indexOf(5);
+    const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+    const entering = Array.from({ length: inputs.length / 2 }, (_, n) => inputs[2 * n] ?? 0).filter(
+      (word) => (word & (1 << CLUSTER_LIT_PASS)) !== 0,
+    );
     expect([
       dispatched.map((d) => d.kernel),
-      [
-        passes[(CLUSTER_LIT_PASS * CULL_PASS_BYTES) / 4],
-        passes[(CLUSTER_LIT_LATE_PASS * CULL_PASS_BYTES) / 4],
-      ],
+      [at, entering.length > 0 && entering.every((word) => (word & (1 << at)) !== 0)],
       cull.bindings.uniforms["params"]?.[15],
       [cull.bindings.buffers["pyramid"]?.name, hzb[14]],
       dispatched.slice(1).map((d) => d.bindings.uniforms["params"]?.[4]),
@@ -2053,8 +2057,8 @@ describe("the two-pass occlusion on the cluster path (plan R14, R14.T3.d)", () =
       made.pass.lateDrawFor(PRIMARY),
     ]).toEqual([
       [LIT_CULL, "cluster compaction", "cluster compaction", "cluster compaction"],
-      [0, 5],
-      CLUSTER_LIT_LATE_PASS + 1,
+      [CLUSTER_LIT_PASS, true],
+      CLUSTER_LIT_PASS + 1,
       ["view depth pyramid", pyramid.frame?.levels.length],
       [0, 1, 2].map(() => CLUSTER_LIT_LATE_PASS * buckets),
       lit.map((draw) => (draw.indirect?.offsetBytes ?? 0) + buckets * BUCKET_ARGS_BYTES),

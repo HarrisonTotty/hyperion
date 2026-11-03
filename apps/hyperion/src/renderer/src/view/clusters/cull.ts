@@ -34,10 +34,17 @@ import { cameraStrideLevel, INSTANCE_FINEST, type StrideBandsM } from "./strides
 import { STRIDES } from "./templates";
 
 /**
- * The plain cull's stand-ins for the two-pass occlusion's reads and writes (R14.T3.d): every cluster
- * seen last frame, none refused, nothing written, and no binding of the occlusion's.
+ * The plain cull's DAG LOD spheres (binding 8; R14.T4.b), and its stand-ins for the two-pass
+ * occlusion's reads and writes (R14.T3.d): every cluster seen last frame, none refused, nothing
+ * written, and no binding of the occlusion's.
  */
 const NO_OCCLUSION = `
+@group(0) @binding(8) var<storage, read> lods : array<vec4f>;
+
+fn lod_of(at : u32) -> vec4f {
+  return lods[at];
+}
+
 fn occlusion_seen(word : u32, bit : u32) -> bool {
   return true;
 }
