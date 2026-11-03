@@ -119,7 +119,7 @@ pub struct XrayMarks {
 }
 
 impl XrayMarks {
-    /// The member's kind among the six P15.T10.b's fit at 26 fitted ([`XrbHostKind::LOW_MASS_HELD`]
+    /// The member's kind among the six P15.T10.b's first fit fitted ([`XrbHostKind::LOW_MASS_HELD`]
     /// and [`XrbHostKind::HIGH_MASS_HELD`]), or `None` for one they do not hold: a symbiotic X-ray
     /// binary, a black hole beside a Be star or a supergiant, or a low-mass X-ray binary whose
     /// donor is a helium star or a white dwarf, an ultracompact one ([`member_kind`] names them).

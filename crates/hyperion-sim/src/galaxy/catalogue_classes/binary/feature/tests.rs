@@ -486,6 +486,12 @@ fn a_feature_s_binary_members_hold_no_carved_pair() {
     assert!(checked > 100, "{checked}");
 }
 
+/// The globular clusters' listed X-ray binaries over the walk under every 27 hold, as measured:
+/// 303 against the 419.6 expected, a finding. The floor refuses the ultracompact hosts the refit
+/// at 27 draws above about an hour, the scan's cold white dwarf donor being half the engine's
+/// mass there (`xrb::kinds_tests`' `PINNED_ULTRACOMPACT_ENTRIES`; for P11.T8.b).
+const PINNED_GLOBULAR_X_RAY_BINARIES: u32 = 303;
+
 /// What the lists hold over the walk's features, by process and class: expected hosts and drawn
 /// entries, printed for the record.
 #[test]
@@ -515,8 +521,10 @@ fn the_lists_hold_their_expected_hosts() {
         )
         .unwrap();
         if process == FeatureProcess::Globular {
-            // Old systems keep every white dwarf and X-ray binary their draws make.
-            for i in 0..3 {
+            // Old systems keep every white dwarf their draws make, and the X-ray binaries but the
+            // ultracompact hosts the floor refuses.
+            assert_eq!(drawn[2], PINNED_GLOBULAR_X_RAY_BINARIES);
+            for i in 0..2 {
                 let sigma = expected[i].sqrt();
                 assert!(
                     (f64::from(drawn[i]) - expected[i]).abs() < 5.0 * sigma + 1.0,

@@ -27,16 +27,27 @@
 //! their shape). Each layer's share is the galaxy's hosts with a primary in it: every population's
 //! rate in the layer times its systems there.
 //!
-//! P11.T5's fix adds the accreting white dwarfs' rows by donor kind, each kind scaled to its own
-//! observed count and its split between the classes the engine's ([`donor_rows`]). No task calls
-//! it yet: the refit at 27 switches `fit_awd` to it.
+//! From the refit at 27 the accreting white dwarfs' rows are by donor kind (P11.T5's fix,
+//! [`donor_rows`]): each kind scaled to its own observed count, its split between the classes the
+//! engine's, so `binary_awd` reads no total of its own.
+//!
+//! # The galaxy
+//!
+//! Each task fits at its manifest's `generator_version`, 27 for the refit: its census galaxy is
+//! the version's, every hold that version turns on in force, with the binary classes' scratch
+//! tables (`Galaxy::from_params_for_binary_refit`), so that the field the census's records come
+//! from does not read the rows the task fits (plan 15's lean of 2026-11-01).
 //!
 //! # A sampler
 //!
 //! Each mark of a class's sampler is fitted to its members' values (`marks`): a median that
-//! follows its condition and the residual about it. A mark is fitted to its own class's members
-//! where they number at least the manifest's `min_members`, to both classes' members pooled where
-//! they do not, and keeps the scratch table's law where neither does.
+//! follows its condition, the residual about it, and from the refit at 27 a residual law at each
+//! node of the median. A mark is fitted to its own class's members where they number at least the
+//! manifest's `min_members`, to both classes' members pooled where they do not, and keeps the
+//! scratch table's law where neither does. A mark's members are weighted so that their kinds are
+//! in the shares the class's choice of kind draws ([`weighted_to_shares`]: the rows' donor kinds,
+//! or the X-ray kinds' weights), so that a mark the kinds share is fitted to them in the rows'
+//! mix and not in the census's.
 
 pub mod donor_rows;
 mod marks;
@@ -45,7 +56,6 @@ pub mod xrb;
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
 
-use hyperion_sim::Seed;
 use hyperion_sim::galaxy::imf::{BandShares, MassBand};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, Population};
@@ -57,12 +67,14 @@ use hyperion_sim::stellar::binary::testing::{
 };
 use hyperion_sim::tables::binary::{AWD_SAMPLER, AwdDonorKind, AwdMark, AwdPick};
 use hyperion_sim::time::LIGHT_CROSSING_L;
+use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
+use donor_rows::{OBSERVED_DONOR_KINDS, awd_share_rows};
 pub use marks::{
     FittedMark, MIN_NODE_WEIGHT, MarkPoint, NODES, conditional, unconditional, weighted_quantile,
 };
 
-use crate::emit::{RustTable, TableItem};
+use crate::emit::{RustTable, TableItem, literal};
 use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
 use crate::parallel::{BuildThreadPoolError, map_reduce_chunks};
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
@@ -72,21 +84,23 @@ pub const AWD_VERSION: u32 = 0;
 
 /// The accreting white dwarfs' block's items, in its order: each side's sampler, then each side's
 /// share row.
-pub const AWD_ITEMS: [&str; 14] = [
-    "AWD_FAST_RESIDUALS_26",
-    "AWD_FAST_MEDIAN_SPANS_26",
-    "AWD_FAST_MEDIANS_26",
-    "AWD_FAST_LIMITS_26",
-    "AWD_FAST_DONOR_KINDS_26",
-    "AWD_SLOW_RESIDUALS_26",
-    "AWD_SLOW_MEDIAN_SPANS_26",
-    "AWD_SLOW_MEDIANS_26",
-    "AWD_SLOW_LIMITS_26",
-    "AWD_SLOW_DONOR_KINDS_26",
-    "AWD_FAST_HOSTS_PER_FORMED_MASS_26",
-    "AWD_FAST_LAYER_SHARES_26",
-    "AWD_SLOW_HOSTS_PER_FORMED_MASS_26",
-    "AWD_SLOW_LAYER_SHARES_26",
+pub const AWD_ITEMS: [&str; 16] = [
+    "AWD_FAST_RESIDUALS_27",
+    "AWD_FAST_NODE_RESIDUALS_27",
+    "AWD_FAST_MEDIAN_SPANS_27",
+    "AWD_FAST_MEDIANS_27",
+    "AWD_FAST_LIMITS_27",
+    "AWD_FAST_DONOR_KINDS_27",
+    "AWD_SLOW_RESIDUALS_27",
+    "AWD_SLOW_NODE_RESIDUALS_27",
+    "AWD_SLOW_MEDIAN_SPANS_27",
+    "AWD_SLOW_MEDIANS_27",
+    "AWD_SLOW_LIMITS_27",
+    "AWD_SLOW_DONOR_KINDS_27",
+    "AWD_FAST_HOSTS_PER_FORMED_MASS_27",
+    "AWD_FAST_LAYER_SHARES_27",
+    "AWD_SLOW_HOSTS_PER_FORMED_MASS_27",
+    "AWD_SLOW_LAYER_SHARES_27",
 ];
 
 /// The bands a census runs: the three whose primaries can make a class's member.
@@ -105,6 +119,25 @@ pub const OWN_SITES: [(Population, &str); 5] = [
 /// The fingerprint's galaxy's seed: the manifests' (`binary_awd.toml`).
 const FINGERPRINT_SEED: u64 = 0x0b17_15a0_0000_0001;
 
+/// The generator version the fingerprints' galaxy is built at: the refit's, the manifests'.
+pub const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+
+/// The fingerprints' galaxy: the Milky Way fixture of [`FINGERPRINT_SEED`] at
+/// [`FINGERPRINT_VERSION`], with the binary classes' scratch tables, as a census galaxy is built.
+///
+/// # Panics
+///
+/// If the Milky Way fixture does not build.
+#[must_use]
+fn fingerprint_galaxy() -> Galaxy {
+    Galaxy::from_params_for_binary_refit(
+        Seed::new(FINGERPRINT_SEED),
+        GalaxyParams::milky_way_like(),
+        FINGERPRINT_VERSION,
+    )
+    .expect("the Milky Way fixture builds")
+}
+
 /// The fingerprint's census: one layer-D cell of the solar circle's slab, of 18 records two of
 /// whose pairs the engine makes accreting white dwarfs, so that a change to the engine or to the
 /// classes moves the probes.
@@ -115,6 +148,9 @@ const FINGERPRINT_CELL: CensusSite = CensusSite::new([0, 26_128, 0], [0, 0, 0]);
 pub struct CensusParams {
     /// The Milky Way fixture's seed.
     pub seed: u64,
+    /// The generator version whose rules the census galaxy is built under, with the binary
+    /// classes' scratch tables (module documentation).
+    pub version: GeneratorVersion,
     /// The slab's records, layers C–E together.
     pub records: u64,
     /// Each population's own census's records, layers C–E together.
@@ -135,10 +171,18 @@ impl CensusParams {
     ///
     /// # Errors
     ///
-    /// [`ManifestParamError`] if one is missing, is not a number, or is out of range: no records,
-    /// no parts, more parts than `part_count`, or a site that is not six whole numbers, its centre
-    /// within `i32` light-years and its three half-widths not negative.
+    /// [`ManifestParamError`] if one is missing, is not a number, or is out of range: a generator
+    /// version under the sim's own or past `u32`, no records, no parts, more parts than
+    /// `part_count`, or a site that is not six whole numbers, its centre within `i32` light-years
+    /// and its three half-widths not negative.
     pub fn of(manifest: &Manifest) -> Result<Self, ManifestParamError> {
+        let version = u32::try_from(manifest.u64("generator_version")?)
+            .ok()
+            .filter(|&v| v >= GENERATOR_VERSION.get())
+            .map(GeneratorVersion::new)
+            .ok_or_else(|| {
+                ManifestParamError::new("generator_version", "the sim's version or a later one")
+            })?;
         let population_records = manifest.u64("population_records")?;
         let young_records = if manifest.params().contains_key("young_thin_disc_records") {
             manifest.u64("young_thin_disc_records")?
@@ -147,6 +191,7 @@ impl CensusParams {
         };
         let params = Self {
             seed: manifest.u64("seed")?,
+            version,
             records: manifest.u64("records")?,
             population_records,
             young_records,
@@ -164,6 +209,22 @@ impl CensusParams {
             ));
         }
         Ok(params)
+    }
+
+    /// The census galaxy: the Milky Way fixture of the census's seed under its version's rules,
+    /// with the binary classes' scratch tables (module documentation).
+    ///
+    /// # Panics
+    ///
+    /// If the Milky Way fixture does not build.
+    #[must_use]
+    pub fn galaxy(&self) -> Galaxy {
+        Galaxy::from_params_for_binary_refit(
+            Seed::new(self.seed),
+            GalaxyParams::milky_way_like(),
+            self.version,
+        )
+        .expect("the Milky Way fixture builds")
     }
 }
 
@@ -519,10 +580,7 @@ pub struct AwdSampler {
 pub struct AwdParams {
     /// The censuses'.
     pub census: CensusParams,
-    /// The galaxy's accreting white dwarfs, both classes, at Milky Way parameters: the observed
-    /// count the rows are scaled to.
-    pub total_hosts: f64,
-    /// The least members a mark is fitted to.
+    /// The least members a mark, or a node's law, is fitted to.
     pub min_members: usize,
     /// The greatest log₁₀ of a recurrence, years, that a slow host draws, under the clock's reach.
     pub max_log_recurrence: f64,
@@ -533,19 +591,15 @@ impl AwdParams {
     ///
     /// # Errors
     ///
-    /// [`ManifestParamError`] as [`CensusParams::of`], or if the total is not positive, the least
-    /// members under 20, or the recurrence's cap not above L's or above 11.
+    /// [`ManifestParamError`] as [`CensusParams::of`], or if the least members are under 20 or
+    /// the recurrence's cap not above L's or above 11.
     pub fn of(manifest: &Manifest) -> Result<Self, ManifestParamError> {
         let params = Self {
             census: CensusParams::of(manifest)?,
-            total_hosts: manifest.f64("total_hosts")?,
             min_members: usize::try_from(manifest.u64("min_members")?)
                 .map_err(|_| ManifestParamError::new("min_members", "a count"))?,
             max_log_recurrence: manifest.f64("max_log_recurrence")?,
         };
-        if !(params.total_hosts.is_finite() && params.total_hosts > 0.0) {
-            return Err(ManifestParamError::new("total_hosts", "positive"));
-        }
         if params.min_members < 20 {
             return Err(ManifestParamError::new("min_members", "at least 20"));
         }
@@ -619,46 +673,106 @@ fn awd_members<'a>(
         .collect()
 }
 
-/// Fits each side's sampler from the slab's members (module documentation).
+/// `points`, each of a kind (its place in `shares`), weighted so that each kind's share of their
+/// total weight is its share in `shares` among the kinds present (module documentation): each
+/// point of kind k weighs `shares[k]` over its kind's share of the points. A kind whose share is
+/// zero drops out, since the class never draws it.
+///
+/// # Panics
+///
+/// If a kind is past `shares`, or there are 2³² points or more.
+#[must_use]
+pub fn weighted_to_shares(points: &[(MarkPoint, usize)], shares: &[f64]) -> Vec<MarkPoint> {
+    let mut counts = vec![0_u32; shares.len()];
+    for &(_, k) in points {
+        counts[k] += 1;
+    }
+    let n = f64::from(u32::try_from(points.len()).expect("a mark's points number under 2³²"));
+    points
+        .iter()
+        .filter(|(_, k)| shares[*k] > 0.0)
+        .map(|&(point, k)| MarkPoint {
+            weight: shares[k] * n / f64::from(counts[k]),
+            ..point
+        })
+        .collect()
+}
+
+/// Fits each side's sampler from the slab's members, takes its donor kinds' shares from
+/// `donor_kinds`, the rows' (module documentation), and weights each mark's members so that their
+/// kinds are in those shares ([`weighted_to_shares`]). The fast side's recurrence keeps its
+/// members' rate in its lowest sixteenth (`FittedMark::with_rate_preserving_floor`): its 1 ÷ P is
+/// the galaxy's novae.
 ///
 /// # Panics
 ///
 /// Never: every donor's kind is one of [`AwdDonorKind::ALL`].
 #[must_use]
-pub fn awd_samplers(censuses: &Censuses, params: &AwdParams) -> [AwdSampler; 2] {
+pub fn awd_samplers(
+    censuses: &Censuses,
+    params: &AwdParams,
+    donor_kinds: &[[f64; 3]; 2],
+) -> [AwdSampler; 2] {
     let sides =
         AWD_CLASSES.map(|class| awd_members(censuses.slab.iter().flat_map(|c| &c.members), class));
     let pooled: Vec<(AccretingMarks, f64)> = sides.iter().flatten().copied().collect();
     let cap = params.max_log_recurrence;
-    let pairs = |members: &[(AccretingMarks, f64)], mark: AwdMark| -> Vec<MarkPoint> {
-        members
+    let scratch = AWD_SAMPLER.pick(AwdPick::DonorKind).weights();
+    // A side with no member, which only a smoke run's census can have, keeps the scratch table's
+    // shares.
+    let side_kinds: [[f64; 3]; 2] = std::array::from_fn(|side| {
+        if donor_kinds[side].iter().sum::<f64>() > 0.0 {
+            donor_kinds[side]
+        } else {
+            std::array::from_fn(|k| scratch[k])
+        }
+    });
+    let points = |members: &[(AccretingMarks, f64)], mark: AwdMark, side: usize| {
+        let raw: Vec<(MarkPoint, usize)> = members
             .iter()
-            .filter_map(|(m, age)| awd_pair(m, *age, mark, cap))
-            .map(|(condition, value)| MarkPoint {
-                condition,
-                value,
-                weight: 1.0,
+            .filter_map(|(m, age)| {
+                let (condition, value) = awd_pair(m, *age, mark, cap)?;
+                let kind = AwdDonorKind::ALL
+                    .iter()
+                    .position(|&k| k == m.donor_kind())
+                    .expect("every kind is in `AwdDonorKind::ALL`");
+                let point = MarkPoint {
+                    condition,
+                    value,
+                    weight: 1.0,
+                };
+                Some((point, kind))
             })
-            .collect()
+            .collect();
+        weighted_to_shares(&raw, &side_kinds[side])
     };
     std::array::from_fn(|side| {
         let own = &sides[side];
         let mut sources = [MarkSource::Scratch; 11];
         let marks = std::array::from_fn(|k| {
             let mark = AwdMark::ALL[k];
-            let fit = |points: &[MarkPoint]| {
-                if mark == AwdMark::Recurrence {
-                    unconditional(points)
-                } else {
-                    conditional(points, params.min_members)
+            let fit = |points: &[MarkPoint]| match mark {
+                AwdMark::Recurrence if AWD_CLASSES[side] == CarvedClass::AccretingWdFast => {
+                    unconditional(points).with_rate_preserving_floor(points)
                 }
+                AwdMark::Recurrence => unconditional(points),
+                AwdMark::WhiteDwarfMass
+                | AwdMark::MainSequencePeriod
+                | AwdMark::HeliumPeriod
+                | AwdMark::GiantPeriod
+                | AwdMark::MainSequenceDonorMass
+                | AwdMark::HeliumDonorMass
+                | AwdMark::GiantDonorMass
+                | AwdMark::PrimaryInitialMass
+                | AwdMark::DonorInitialMass
+                | AwdMark::Age => conditional(points, params.min_members),
             };
-            let mine = pairs(own, mark);
+            let mine = points(own, mark, side);
             if mine.len() >= params.min_members {
                 sources[k] = MarkSource::Own;
                 return fit(&mine);
             }
-            let all = pairs(&pooled, mark);
+            let all = points(&pooled, mark, side);
             // The recurrence is a side's alone: pooled, it would cross L.
             if all.len() >= params.min_members && mark != AwdMark::Recurrence {
                 sources[k] = MarkSource::Pooled;
@@ -666,28 +780,10 @@ pub fn awd_samplers(censuses: &Censuses, params: &AwdParams) -> [AwdSampler; 2] 
             }
             FittedMark::of_scratch(AWD_SAMPLER.mark(mark))
         });
-        let mut kinds = [0_u32; 3];
-        for (m, _) in own {
-            let k = AwdDonorKind::ALL
-                .iter()
-                .position(|&k| k == m.donor_kind())
-                .expect("every kind is in `AwdDonorKind::ALL`");
-            kinds[k] += 1;
-        }
-        let n: u32 = kinds.iter().sum();
-        let scratch = AWD_SAMPLER.pick(AwdPick::DonorKind).weights();
         AwdSampler {
             marks,
             sources,
-            // A side with no member, which only a smoke run's census can have, keeps the scratch
-            // table's shares.
-            donor_kinds: std::array::from_fn(|k| {
-                if n == 0 {
-                    scratch[k]
-                } else {
-                    f64::from(kinds[k]) / f64::from(n)
-                }
-            }),
+            donor_kinds: side_kinds[side],
             members: own.len(),
         }
     })
@@ -700,13 +796,18 @@ pub struct AwdFit {
     pub params: AwdParams,
     /// The fast and the slow classes' rows.
     pub rows: [ShareRow; 2],
+    /// Each donor kind's scale, hosts in the galaxy per census member a record and system born,
+    /// in [`AwdDonorKind`]'s order (`donor_rows::DonorKindRows::scales`).
+    pub scales: [Option<f64>; 3],
     /// The fast and the slow classes' samplers.
     pub samplers: [AwdSampler; 2],
     /// The records the slab's census ran, and each population's own.
     pub records: (u64, u64),
 }
 
-/// Runs the accreting white dwarfs' fit on `threads` threads.
+/// Runs the accreting white dwarfs' fit on `threads` threads: the rows by donor kind
+/// ([`awd_share_rows`] at [`OBSERVED_DONOR_KINDS`]) and each side's sampler, its members weighted
+/// to their side's kinds' shares.
 ///
 /// # Errors
 ///
@@ -714,16 +815,12 @@ pub struct AwdFit {
 ///
 /// # Panics
 ///
-/// If the Milky Way fixture does not build, or as [`share_rows`]: the censuses find no member of
-/// the classes, or run no record of a population.
+/// If the Milky Way fixture does not build, or as [`awd_share_rows`]: the censuses find no member
+/// of the classes, or run no record of a population.
 pub fn fit_awd(params: &AwdParams, threads: NonZeroUsize) -> Result<AwdFit, RunCensusError> {
-    let galaxy = Galaxy::from_params(
-        Seed::new(params.census.seed),
-        GalaxyParams::milky_way_like(),
-    )
-    .expect("the Milky Way fixture builds");
+    let galaxy = params.census.galaxy();
     let censuses = run_censuses(&galaxy, &params.census, threads)?;
-    let rows = share_rows(&galaxy, &censuses, &AWD_CLASSES, params.total_hosts);
+    let by_kind = awd_share_rows(&galaxy, &censuses, &OBSERVED_DONOR_KINDS);
     let records = (
         censuses
             .slab
@@ -738,8 +835,9 @@ pub fn fit_awd(params: &AwdParams, threads: NonZeroUsize) -> Result<AwdFit, RunC
     );
     Ok(AwdFit {
         params: params.clone(),
-        rows: [rows[0], rows[1]],
-        samplers: awd_samplers(&censuses, params),
+        rows: by_kind.rows,
+        scales: by_kind.scales,
+        samplers: awd_samplers(&censuses, params, &by_kind.donor_kinds),
         records,
     })
 }
@@ -750,6 +848,29 @@ const SIDES: [&str; 2] = ["FAST", "SLOW"];
 /// A side's name in its items' docs.
 const SIDE_NAMES: [&str; 2] = ["fast", "slow"];
 
+/// A `pub static` array `name` of 17-value `rows` under `doc`, one row a line: as
+/// [`TableItem::Nested`] writes a `const`, since Clippy refuses so large a `const` array
+/// (`large_const_arrays`).
+#[must_use]
+fn static_rows(name: &str, doc: &[String], rows: &[[f64; NODES]]) -> TableItem {
+    let mut out = String::new();
+    // Writing to a String cannot fail.
+    for line in doc {
+        let _ = writeln!(out, "/// {line}");
+    }
+    let _ = writeln!(out, "#[rustfmt::skip]");
+    let _ = writeln!(
+        out,
+        "pub static {name}: [[f64; {NODES}]; {}] = [",
+        rows.len()
+    );
+    for row in rows {
+        let _ = writeln!(out, "    [{}],", row.map(literal).join(", "));
+    }
+    out.push_str("];\n");
+    TableItem::Source(out)
+}
+
 /// The block's items for `fit`.
 #[must_use]
 fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
@@ -757,15 +878,24 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
     for (side, sampler) in fit.samplers.iter().enumerate() {
         let (prefix, name) = (SIDES[side], SIDE_NAMES[side]);
         items.push(TableItem::Nested {
-            name: format!("AWD_{prefix}_RESIDUALS_26"),
+            name: format!("AWD_{prefix}_RESIDUALS_27"),
             doc: vec![
-                format!("The {name} accreting white dwarfs' marks' residual quantiles at the ranks k ÷ 16, in"),
-                "[`AwdMark`]'s order, each in its mark's unit.".to_owned(),
+                format!("The {name} accreting white dwarfs' marks' residual quantiles at the ranks k ÷ 16 over all their"),
+                "members, in [`AwdMark`]'s order, each in its mark's unit.".to_owned(),
             ],
             rows: sampler.marks.iter().map(|m| m.residual.to_vec()).collect(),
         });
+        items.push(static_rows(
+            &format!("AWD_{prefix}_NODE_RESIDUALS_27"),
+            &[
+                format!("The {name} accreting white dwarfs' marks' residual laws at their medians' 17 nodes: each mark's"),
+                "17 rows in [`AwdMark`]'s order, each row its node's quantiles at the ranks k ÷ 16; the".to_owned(),
+                "recurrence's, which is unconditional, are not read.".to_owned(),
+            ],
+            &sampler.marks.iter().flat_map(FittedMark::node_rows).collect::<Vec<_>>(),
+        ));
         items.push(TableItem::Tuples {
-            name: format!("AWD_{prefix}_MEDIAN_SPANS_26"),
+            name: format!("AWD_{prefix}_MEDIAN_SPANS_27"),
             doc: vec![
                 format!("The {name} accreting white dwarfs' marks' medians' spans of their conditions, first and last"),
                 "node, in [`AwdMark`]'s order; the recurrence's, which is unconditional, is not read.".to_owned(),
@@ -773,7 +903,7 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
             rows: sampler.marks.iter().map(|m| vec![m.span.0, m.span.1]).collect(),
         });
         items.push(TableItem::Nested {
-            name: format!("AWD_{prefix}_MEDIANS_26"),
+            name: format!("AWD_{prefix}_MEDIANS_27"),
             doc: vec![
                 format!("The {name} accreting white dwarfs' marks' medians at their 17 nodes, in [`AwdMark`]'s order;"),
                 "the recurrence's is zero.".to_owned(),
@@ -781,14 +911,14 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
             rows: sampler.marks.iter().map(|m| m.median.to_vec()).collect(),
         });
         items.push(TableItem::Tuples {
-            name: format!("AWD_{prefix}_LIMITS_26"),
+            name: format!("AWD_{prefix}_LIMITS_27"),
             doc: vec![format!(
                 "The {name} accreting white dwarfs' marks' least and greatest values, in [`AwdMark`]'s order."
             )],
             rows: sampler.marks.iter().map(|m| vec![m.limits.0, m.limits.1]).collect(),
         });
         items.push(TableItem::Array {
-            name: format!("AWD_{prefix}_DONOR_KINDS_26"),
+            name: format!("AWD_{prefix}_DONOR_KINDS_27"),
             doc: vec![format!(
                 "The {name} accreting white dwarfs' donors' kinds' shares, in [`AwdDonorKind`]'s order."
             )],
@@ -798,14 +928,14 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
     for (side, row) in fit.rows.iter().enumerate() {
         let (prefix, name) = (SIDES[side], SIDE_NAMES[side]);
         items.push(TableItem::Array {
-            name: format!("AWD_{prefix}_HOSTS_PER_FORMED_MASS_26"),
+            name: format!("AWD_{prefix}_HOSTS_PER_FORMED_MASS_27"),
             doc: vec![format!(
                 "The {name} accreting white dwarfs' hosts per solar mass formed, M☉⁻¹, by population in [`POPULATIONS`]' order."
             )],
             values: row.hosts_per_formed_mass.to_vec(),
         });
         items.push(TableItem::Array {
-            name: format!("AWD_{prefix}_LAYER_SHARES_26"),
+            name: format!("AWD_{prefix}_LAYER_SHARES_27"),
             doc: vec![format!(
                 "The share of the {name} accreting white dwarfs' hosts whose primary lies in each layer, A–E."
             )],
@@ -820,9 +950,10 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
 pub fn render_awd(fit: &AwdFit) -> RustTable {
     RustTable {
         summary: vec![
-            "The accreting white dwarfs' samplers and share rows fitted against plan 11's engine (plan 15,"
+            "The accreting white dwarfs' samplers and share rows fitted against plan 11's engine at"
                 .to_owned(),
-            "P15.T10.b), held until generator version 27 (`catalogue_classes::binary`'s hold).".to_owned(),
+            "generator version 27 (plan 15, P15.T10.b), held until 27 (`catalogue_classes::binary`'s hold)."
+                .to_owned(),
         ],
         notes: awd_notes(fit),
         items: awd_items(fit),
@@ -835,30 +966,41 @@ fn awd_notes(fit: &AwdFit) -> Vec<String> {
     let p = &fit.params;
     let text = format!(
         "\
-Read by `AWD_FAST_SAMPLER_26`, `AWD_SLOW_SAMPLER_26` and `CLASS_SHARES_26`, after the block. Each
-class's marks are fitted to its own members of the engine near the solar circle (hyperion-fit's
-`tasks::binary_classes`): a median that follows the mark's condition on 17 nodes, the weighted
-median under a triangle two node spacings wide, and the residual's quantiles about it. A mark
-with under {min} members of its class takes both classes' members, and with under {min} of
-both keeps `AWD_SAMPLER`'s law. A slow host's recurrence is held at 10^{cap} years, under the
-universe clock's reach; the engine's longest, beyond it, never erupt in the Galaxy's age. The
-rows' rates are each population's members a record, its bands weighted by their shares of the
-systems, scaled together to {total:e} hosts at Milky Way parameters (plan 11's design note 11).
+Read by `AWD_FAST_SAMPLER_27`, `AWD_SLOW_SAMPLER_27` and `CLASS_SHARES_27`, after the block. Each
+class's marks are fitted to its own members of the engine near the solar circle at generator
+version {version}'s rules (hyperion-fit's `tasks::binary_classes`): a median that follows the
+mark's condition on 17 nodes, the weighted median under a triangle two node spacings wide, the
+residual's quantiles about it, and its law at each node, from the members under the node's
+triangle where their Kish size is {min} or more. Each mark's members are weighted so that their
+donor kinds are in the class's shares of them. A mark with under {min} members of its class
+takes both classes' members, and with under {min} of both keeps `AWD_SAMPLER`'s law. The fast
+recurrence's lowest quantile keeps its members' mean of 1 ÷ P over their lowest sixteenth. A
+slow host's recurrence is held at 10^{cap} years, under the universe clock's reach; the
+engine's longest, beyond it, never erupt in the Galaxy's age. The rows scale each donor kind to
+its observed figure (`donor_rows::OBSERVED_DONOR_KINDS`, plan 11's design note 11), each kind's
+rates each population's members a record, its bands weighted by their shares of the systems.
 The slab's census ran {slab} records and the populations' own {own}.",
+        version = p.census.version.get(),
         min = p.min_members,
         cap = p.max_log_recurrence,
-        total = p.total_hosts,
         slab = fit.records.0,
         own = fit.records.1,
     );
     text.lines().map(str::to_owned).collect()
 }
 
-/// The acceptance's figures for `fit`: each side's members, the marks' sources, the rows' layer
-/// shares and rates.
+/// The acceptance's figures for `fit`: the kinds' scales, then each side's members, the marks'
+/// sources and nodes with laws of their own, the rows' layer shares and rates.
 #[must_use]
 fn awd_acceptance(fit: &AwdFit) -> String {
-    let mut out = String::new();
+    let mut out = format!(
+        "kind scales {}; ",
+        fit.scales
+            .iter()
+            .map(|s| s.map_or_else(|| "none".to_owned(), |s| format!("{s:.4e}")))
+            .collect::<Vec<_>>()
+            .join("/")
+    );
     for (side, (sampler, row)) in fit.samplers.iter().zip(&fit.rows).enumerate() {
         let pooled = sampler
             .sources
@@ -867,11 +1009,17 @@ fn awd_acceptance(fit: &AwdFit) -> String {
             .filter(|(s, _)| **s != MarkSource::Own)
             .map(|(s, m)| format!("{m:?} {s:?}"))
             .collect::<Vec<_>>();
+        let nodes = sampler
+            .marks
+            .iter()
+            .map(|m| m.own_nodes.to_string())
+            .collect::<Vec<_>>()
+            .join("/");
         // Writing to a String cannot fail.
         let _ = write!(
             out,
-            "{}{}: {} members, donors {:.3}/{:.3}/{:.3}, layers C {:.3} D {:.3} E {:.3}, rates a \
-             system {}{}",
+            "{}{}: {} members, own nodes {nodes}, donors {:.3}/{:.3}/{:.3}, layers C {:.3} D {:.3} \
+             E {:.3}, rates a system {}{}",
             if side == 0 { "" } else { "; " },
             SIDE_NAMES[side],
             sampler.members,
@@ -933,9 +1081,7 @@ impl FitTask for BinaryAwdTask {
     /// formed per system, which the rows read; and the engine on one layer-D cell's records: its
     /// records, its members, and each accreting member's white dwarf mass, donor mass and rate.
     fn fingerprint(&self) -> SimFingerprint {
-        let galaxy =
-            Galaxy::from_params(Seed::new(FINGERPRINT_SEED), GalaxyParams::milky_way_like())
-                .expect("the Milky Way fixture builds");
+        let galaxy = fingerprint_galaxy();
         let shares = BandShares::of(galaxy.mass_function());
         let mut probes: Vec<(String, f64)> = CENSUS_BANDS
             .iter()
@@ -987,9 +1133,10 @@ impl FitTask for BinaryAwdTask {
             table: render_awd(&fit),
             source:
                 "plan 11's binary engine (Hurley, Tout and Pols 2002, MNRAS 329, 897, as P11.T4 \
-                     builds it) and classes (P11.T5), over plan 06's tracks, at the generator \
-                     version's rules; the total against Pala et al. 2020, MNRAS 494, 3799, and the \
-                     brainstorm's 6–12 × 10⁶"
+                     builds it) and classes (P11.T5), over plan 06's tracks, at the manifest's \
+                     generator version's rules; the rows by donor kind against Pala et al. 2020, \
+                     MNRAS 494, 3799, Carter et al. 2013, MNRAS 429, 2143, and Lü, Yungelson and \
+                     Han 2006, MNRAS 372, 1389, the total against the brainstorm's 6–12 × 10⁶"
                     .to_owned(),
             acceptance: awd_acceptance(&fit),
             provisional: None,
@@ -1024,6 +1171,12 @@ mod tests {
             let error = AwdParams::of(&manifest(|t| t.replacen(from, to, 1))).unwrap_err();
             assert!(error.to_string().contains(key), "{from} → {to}: {error}");
         };
+        assert_eq!(params.census.version, GeneratorVersion::new(27));
+        refused(
+            "generator_version = 27",
+            "generator_version = 23",
+            "generator_version",
+        );
         refused("records = 10_000_000", "records = 0", "records");
         refused("parts = 32", "parts = 65", "parts");
         refused(

@@ -18,8 +18,8 @@
 //! # The fitted tables' hold
 //!
 //! Plan 15's P15.T10.b fits the accreting white dwarfs' and the X-ray binaries' tables against the
-//! engine: `tables::binary`'s `_26` items, a sampler for each accreting class and the X-ray
-//! binaries', and their rows of the share table.
+//! engine at generator version 27's rules: `tables::binary`'s `_27` items, a sampler for each
+//! accreting class and the X-ray binaries', and their rows of the share table.
 //! They move the classes' members, so they are held until generator version 27
 //! (`BINARY_TABLES_VERSION`): a galaxy below it reads the scratch tables of P11.T7–T8, and one
 //! under `BinaryTableRules::Fitted` the fitted ones, chosen at one place, `BinaryTableRules`' two
@@ -36,11 +36,10 @@ mod tables_hold;
 mod xrb;
 
 use crate::GeneratorVersion;
-use crate::stellar::binary::xrb_class::XrbClassRules;
 use crate::tables::binary::{
-    AWD_FAST_SAMPLER_26, AWD_SAMPLER, AWD_SLOW_SAMPLER_26, AwdMark, AwdPick, CLASS_SHARES,
-    CLASS_SHARES_26, ClassSamplerTable, ClassShareTable, XRB_SAMPLER, XRB_SAMPLER_26,
-    XRB_SAMPLER_27, XrbMark, XrbPick,
+    AWD_FAST_SAMPLER_27, AWD_SAMPLER, AWD_SLOW_SAMPLER_27, AwdMark, AwdPick, CLASS_SHARES,
+    CLASS_SHARES_27, ClassSamplerTable, ClassShareTable, XRB_SAMPLER, XRB_SAMPLER_27, XrbMark,
+    XrbPick,
 };
 
 pub use awd::{
@@ -77,9 +76,8 @@ pub(crate) enum BinaryTableRules {
     /// The scratch tables of P11.T7–T8 (plan 11's design note 13): [`CLASS_SHARES`],
     /// [`AWD_SAMPLER`] for both accreting white dwarf classes and [`XRB_SAMPLER`].
     Scratch,
-    /// Plan 15's fitted tables (P15.T10.b): [`CLASS_SHARES_26`], a sampler a side,
-    /// [`AWD_FAST_SAMPLER_26`] and [`AWD_SLOW_SAMPLER_26`], and [`XRB_SAMPLER_26`], or under the
-    /// X-ray binaries' carving [`XRB_SAMPLER_27`].
+    /// Plan 15's fitted tables (P15.T10.b, refitted at 27): [`CLASS_SHARES_27`], a sampler a
+    /// side, [`AWD_FAST_SAMPLER_27`] and [`AWD_SLOW_SAMPLER_27`], and [`XRB_SAMPLER_27`].
     Fitted,
 }
 
@@ -89,7 +87,7 @@ impl BinaryTableRules {
     pub(crate) const fn class_shares(self) -> &'static ClassShareTable {
         match self {
             Self::Scratch => &CLASS_SHARES,
-            Self::Fitted => &CLASS_SHARES_26,
+            Self::Fitted => &CLASS_SHARES_27,
         }
     }
 
@@ -101,22 +99,20 @@ impl BinaryTableRules {
     ) -> &'static ClassSamplerTable<AwdMark, AwdPick> {
         match (self, side) {
             (Self::Scratch, AwdSide::Fast | AwdSide::Slow) => &AWD_SAMPLER,
-            (Self::Fitted, AwdSide::Fast) => &AWD_FAST_SAMPLER_26,
-            (Self::Fitted, AwdSide::Slow) => &AWD_SLOW_SAMPLER_26,
+            (Self::Fitted, AwdSide::Fast) => &AWD_FAST_SAMPLER_27,
+            (Self::Fitted, AwdSide::Slow) => &AWD_SLOW_SAMPLER_27,
         }
     }
 
-    /// The sampler the X-ray binaries draw from under the carving's rules `xrb_class`: from 27
-    /// (`stellar::binary::xrb_class`) the fitted one draws all nine kinds the carving counts.
+    /// The sampler the X-ray binaries draw from: the fitted one draws all nine kinds the
+    /// carving counts from 27 (`stellar::binary::xrb_class`), whose rules it was fitted under, so
+    /// a galaxy of the fitted tables and the held carving, which no version builds, draws kinds
+    /// its class's test refuses.
     #[must_use]
-    pub(crate) const fn xrb_sampler(
-        self,
-        xrb_class: XrbClassRules,
-    ) -> &'static ClassSamplerTable<XrbMark, XrbPick> {
-        match (self, xrb_class) {
-            (Self::Scratch, XrbClassRules::Held | XrbClassRules::Carved) => &XRB_SAMPLER,
-            (Self::Fitted, XrbClassRules::Held) => &XRB_SAMPLER_26,
-            (Self::Fitted, XrbClassRules::Carved) => &XRB_SAMPLER_27,
+    pub(crate) const fn xrb_sampler(self) -> &'static ClassSamplerTable<XrbMark, XrbPick> {
+        match self {
+            Self::Scratch => &XRB_SAMPLER,
+            Self::Fitted => &XRB_SAMPLER_27,
         }
     }
 }

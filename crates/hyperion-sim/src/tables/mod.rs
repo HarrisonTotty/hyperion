@@ -13,6 +13,10 @@
 //!
 //! [`GENERATOR_VERSION`]: crate::GENERATOR_VERSION
 
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
 pub mod binary;
 pub mod binary_cooling_floor;
 // The three `binary_pair_light` tables are written whole by `hyperion-fit`, whose dimensions'

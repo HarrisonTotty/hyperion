@@ -14,9 +14,10 @@
 //! The low-mass kinds (a neutron star or a black hole, persistent or transient, and from 27 an
 //! ultracompact or a symbiotic one) are the old populations' and the high-mass kinds (Be/X and
 //! supergiant, and from 27 a black hole beside a supergiant) the young disc's. From 27 the class
-//! draws all nine kinds the carving counts (`XRB_SAMPLER_27`), each in its share of the engine's
-//! members, so that the hosts its row counts are the hosts it draws (P11.T8.b's fix); below 27
-//! its tables weigh the first six alone. The class's total
+//! draws all nine kinds the carving counts (`XRB_SAMPLER_27`, refitted at 27), each in its share
+//! of the engine's members but the black-hole transients, pinned at the observed share, so that
+//! the hosts its row counts are the hosts it draws (P11.T8.b's fix); below 27 its tables weigh
+//! the first six alone. The class's total
 //! is its row's, `Σ_c r_c n_c` over every component c, with `r_c` the row's hosts per solar mass
 //! formed in c's population × the mass formed per system × its born fraction; the high-mass side
 //! takes [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER)'s high-mass share of it, 0.16, over the young thin disc's components,
@@ -284,16 +285,11 @@ impl XrayBinaries {
     /// The class in `galaxy`: its components, from its row of
     /// [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES) and
     /// [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER)'s high-mass share, or from version 27
-    /// plan 15's fitted tables in their place (`CLASS_SHARES_26` and `XRB_SAMPLER_26`, the
-    /// module's hold, or under the carving's rules `XRB_SAMPLER_27`), and the rank of the
-    /// instability line in the low-mass rate's law.
+    /// plan 15's fitted tables in their place (`CLASS_SHARES_27` and `XRB_SAMPLER_27`, the
+    /// module's hold), and the rank of the instability line in the low-mass rate's law.
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
-        let rules = galaxy.rules();
-        Self::of_table(
-            galaxy,
-            rules.binary_tables.xrb_sampler(rules.stellar.xrb_class),
-        )
+        Self::of_table(galaxy, galaxy.rules().binary_tables.xrb_sampler())
     }
 
     /// The class in `galaxy` drawing from `table`, its row the galaxy's tables'.

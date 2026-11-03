@@ -322,6 +322,34 @@ impl Galaxy {
         Self::build(seed, params, GalaxyRules::of_version(version))
     }
 
+    /// [`from_params_at_version`](Self::from_params_at_version) with the binary classes' scratch
+    /// tables in place of the fitted ones (P15.T10.b's refit): the census galaxy of `hyperion-fit`'s
+    /// binary tasks and of the sim's tests of their tables. From 26 the field gives up the class
+    /// shares (P09.T2.c), so the records a census runs depend on the rows; under the scratch rows
+    /// the census of the version's engine does not read the rows it refits (plan 15's lean of
+    /// 2026-11-01). Nothing generated builds one.
+    ///
+    /// # Errors
+    ///
+    /// As [`from_params`](Self::from_params).
+    ///
+    /// # Panics
+    ///
+    /// As [`from_params`](Self::from_params).
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn from_params_for_binary_refit(
+        seed: Seed,
+        params: GalaxyParams,
+        version: crate::GeneratorVersion,
+    ) -> Result<Self, BuildGalaxyError> {
+        let rules = GalaxyRules {
+            binary_tables: catalogue_classes::binary::BinaryTableRules::Scratch,
+            ..GalaxyRules::of_version(version)
+        };
+        Self::build(seed, params, rules)
+    }
+
     /// [`from_params`](Self::from_params) under `rules` in place of the generator version's: the
     /// tests' door to a later version's galaxy-side holds (decision-galaxy-25-train §1.3), such as
     /// `GalaxyRules::of_version(crate::GENERATOR_VERSION)`.
