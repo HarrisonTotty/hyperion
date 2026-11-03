@@ -1579,9 +1579,21 @@ export class TerrainSession {
       maxM: sight.maxM,
       slopeBaselineM: options.slopeBaselineM,
       padWidthM: options.padWidthM,
-      seasonMeanAnomalyRad:
-        held.season.kind === "held" ? meanAnomalyAt(held.season.orbit, time) : undefined,
+      seasonMeanAnomalyRad: this.readoutSeasonRad(body, time),
     });
+  }
+
+  /**
+   * The season a terrain readout of `body` at `time` is asked at ({@link TerrainSession.groundReadout}):
+   * its seasonal orbit's mean anomaly at `time`, radians from periapsis (`meanAnomalyAt`), or
+   * `undefined` where no orbit of it is held, a kept scene's body or one not wanted among them. The
+   * view's readout keeps an answer only while this stands (R10.T12.d).
+   *
+   * @throws RangeError for a malformed time (`fractionOfPeriod`).
+   */
+  readoutSeasonRad(body: BodyIdHex, time: UniverseTime): number | undefined {
+    const held = this.#bodies.get(body);
+    return held?.season.kind === "held" ? meanAnomalyAt(held.season.orbit, time) : undefined;
   }
 
   /** The session's memory report: the fields' copies and its GPU bytes. */

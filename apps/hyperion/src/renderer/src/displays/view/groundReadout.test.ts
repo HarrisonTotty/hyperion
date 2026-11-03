@@ -50,7 +50,7 @@ import { runPose, startRun, startServerRun, type ViewRun } from "./viewRun";
 /** What `GroundReadouts` calls of a terrain session, which the fake gives. */
 type ReadoutSession = Pick<
   TerrainSession,
-  "survey" | "terrainFault" | "groundReadout" | "failComputation"
+  "survey" | "terrainFault" | "groundReadout" | "failComputation" | "readoutSeasonRad"
 >;
 
 /** One terrain readout asked of {@link FakeReadoutSession}: its arguments, and its settling. */
@@ -97,6 +97,25 @@ class FakeReadoutSession implements ReadoutSession {
 
   failComputation(): void {
     this.faults += 1;
+  }
+
+  /**
+   * The season the readouts are asked at: by default one that moves on at each ask, as a served
+   * body's does while the clock runs, so that no ask is the one before it (R10.T12.d's kept
+   * answer); a test holds one still, a number or none.
+   */
+  season:
+    { readonly kind: "moving" } | { readonly kind: "still"; readonly rad: number | undefined } = {
+    kind: "moving",
+  };
+  #moved = 0;
+
+  readoutSeasonRad(): number | undefined {
+    if (this.season.kind === "still") {
+      return this.season.rad;
+    }
+    this.#moved += 1;
+    return this.#moved / 1000;
   }
 }
 
@@ -293,6 +312,47 @@ async function withAnswerHeld(): Promise<{
   await settle();
   const taken = readouts.publish(asSession(fake), run, 16);
   if (taken?.readout !== NOT_SURVEYED) {
+    throw new Error("the first answer was not taken");
+  }
+  return { fake, readouts, run };
+}
+
+/** `run` with its camera moved `dxM` along its frame's x. */
+function movedBy(run: ViewRun, dxM: number): ViewRun {
+  const pose = run.camera.pose;
+  const camera: CameraState = {
+    ...run.camera,
+    pose: { ...pose, positionM: add(pose.positionM, vec3(dxM, 0, 0)) },
+  };
+  return { ...run, camera };
+}
+
+/** `TEST MOON`'s survey at coverage revision `revision`, nothing surveyed. */
+function atRevision(revision: number): TerrainSurvey {
+  const merged = CoverageView.empty(5).merged({ ranges: [] }, revision);
+  if (!merged.ok) {
+    throw new Error(merged.message);
+  }
+  return aSurvey({ coverage: merged.coverage });
+}
+
+/**
+ * A primary's readouts on `TERRAIN TEST`, its season held still at `rad`, with {@link ON_GROUND}
+ * the answer to its first ask, taken at its second publish, at 16 ms.
+ */
+async function withAnswerKept(rad?: number): Promise<{
+  readonly fake: FakeReadoutSession;
+  readonly readouts: GroundReadouts;
+  readonly run: ViewRun;
+}> {
+  const fake = holdingMoon();
+  fake.season = { kind: "still", rad };
+  const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+  const run = terrainRun();
+  readouts.publish(asSession(fake), run, 0);
+  askAt(fake, 0).answer(ON_GROUND);
+  await settle();
+  if (readouts.publish(asSession(fake), run, 16)?.readout !== ON_GROUND) {
     throw new Error("the first answer was not taken");
   }
   return { fake, readouts, run };
@@ -951,5 +1011,93 @@ describe("the primary's terrain readout at each publish (R10.T12; decision-r10-t
         said: ["the terrain readout could not be asked:"],
       });
     });
+  });
+});
+
+describe("the kept answer (R10.T12.d)", () => {
+  it("asks nothing again for the query its last answer answered, and states that answer", async () => {
+    const { fake, readouts, run } = await withAnswerKept();
+    const snapshots = [33, 50, 300].map((atMs) => readouts.publish(asSession(fake), run, atMs));
+    expect({
+      asks: fake.asks.length,
+      readouts: snapshots.map((snapshot) => snapshot?.readout),
+    }).toEqual({ asks: 1, readouts: [ON_GROUND, ON_GROUND, ON_GROUND] });
+  });
+
+  it("keeps it at a season held still, and asks again once the season moves", async () => {
+    const { fake, readouts, run } = await withAnswerKept(0.25);
+    readouts.publish(asSession(fake), run, 33);
+    fake.season = { kind: "still", rad: 0.25 + Number.EPSILON };
+    readouts.publish(asSession(fake), run, 50);
+    expect(fake.asks.length).toBe(2);
+  });
+
+  it("asks again once the line of sight moves by any bit", async () => {
+    const { fake, readouts, run } = await withAnswerKept();
+    readouts.publish(asSession(fake), movedBy(run, 1e-6), 33);
+    expect(askAt(fake, 1).sight.originM).not.toEqual(askAt(fake, 0).sight.originM);
+  });
+
+  it("asks again once the survey's coverage revision rises", async () => {
+    const { fake, readouts, run } = await withAnswerKept();
+    fake.surveys.set(terrainMoon(), atRevision(2));
+    readouts.publish(asSession(fake), run, 33);
+    expect(fake.asks.length).toBe(2);
+  });
+
+  it("asks again at once at another baseline, and keeps the new answer", async () => {
+    const { fake, readouts, run } = await withAnswerKept();
+    expect(readouts.due(5)).toBe(true);
+    readouts.publish(asSession(fake), run, 33, 5);
+    askAt(fake, 1).answer(NO_GROUND);
+    await settle();
+    const taken = readouts.publish(asSession(fake), run, 50, 5);
+    readouts.publish(asSession(fake), run, 66, 5);
+    expect({
+      baselines: fake.asks.map((ask) => ask.options.slopeBaselineM),
+      readout: taken?.readout,
+    }).toEqual({ baselines: [2, 5], readout: NO_GROUND });
+  });
+
+  it("asks again of another session", async () => {
+    const { fake, readouts, run } = await withAnswerKept();
+    const other = holdingMoon();
+    other.season = { kind: "still", rad: undefined };
+    readouts.publish(asSession(other), run, 33);
+    expect([fake.asks.length, other.asks.length]).toEqual([1, 1]);
+  });
+
+  it("is let go with the readout, so that the readout returns with an answer of its own", async () => {
+    const { fake, readouts, run } = await withAnswerKept();
+    fake.terrainFault = TERRAIN_COMPUTATION_FAILED;
+    readouts.publish(asSession(fake), run, 33);
+    fake.terrainFault = null;
+    const returned = readouts.publish(asSession(fake), run, 50);
+    expect({ asks: fake.asks.length, readout: returned?.readout }).toEqual({
+      asks: 2,
+      readout: null,
+    });
+  });
+
+  it("keeps no null answer", async () => {
+    const fake = holdingMoon();
+    fake.season = { kind: "still", rad: undefined };
+    const readouts = new GroundReadouts(PRIMARY_VIEW_ID);
+    const run = terrainRun();
+    readouts.publish(asSession(fake), run, 0);
+    askAt(fake, 0).answer(null);
+    await settle();
+    readouts.publish(asSession(fake), run, 16);
+    expect(fake.asks.length).toBe(2);
+  });
+
+  it("asks again where the season cannot be read, so that the query's refusal is the guard's", async () => {
+    const { fake, readouts, run } = await withAnswerKept();
+    vi.spyOn(fake, "readoutSeasonRad").mockImplementation(() => {
+      throw new RangeError("a malformed time");
+    });
+    readouts.publish(asSession(fake), run, 33);
+    readouts.publish(asSession(fake), run, 50);
+    expect(fake.asks.length).toBe(2);
   });
 });

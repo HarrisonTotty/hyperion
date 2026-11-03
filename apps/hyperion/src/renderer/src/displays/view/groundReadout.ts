@@ -26,6 +26,13 @@
  *   readouts, and only where it is still the session's and the body's it was asked of; one for a
  *   session let go or a body no longer framed is dropped. Nothing stands before the first answer
  *   for the body (§7); a `null` answer (no seed or field held yet, or no worker left) leaves none.
+ * - **The kept answer** (R10.T12.d). The last answer taken is kept with what it was asked of: the
+ *   session, the body, the survey's coverage revision, the baseline, the line of sight to the bit,
+ *   body-fixed, and the season the session asks at (`TerrainSession.readoutSeasonRad`). An ask
+ *   that would be the same query asks nothing, and the kept answer stands, since the worker's
+ *   answer to it is the same to the bit: a view that stands still in the body's frame, its clock
+ *   paused or its season not held, asks its worker once. Whatever lets the readout go lets it go
+ *   too, and a `null` answer is not kept.
  * - **The guard** (§5). A refused answer goes through the queries' `TerrainFailureGuard`, as the
  *   session's step and the survey edges do: one changes nothing, and the readings hold until the
  *   next; refusals lasting `ANNUNCIATION_ONSET_MS` fault the terrain
@@ -167,10 +174,65 @@ export function lineOfSightPointOf(readout: SurfaceGroundReadout): LineOfSightPo
   return point;
 }
 
-/** A query asked: of which session and body. */
+/** A query asked: of which session and body, and what else its answer is a function of. */
 interface Asked {
   readonly session: TerrainSession;
   readonly body: BodyIdHex;
+  /** The survey's coverage revision as it was asked (`CoverageView.revision`). */
+  readonly revision: number | null;
+  readonly slopeBaselineM: SlopeBaselineM;
+  readonly sight: GroundSight;
+  /**
+   * The season the session asked at (`TerrainSession.readoutSeasonRad`); `NaN` where none could
+   * be read.
+   */
+  readonly seasonRad: number | undefined;
+}
+
+/** Whether `a` and `b` are the same bits, NaN apart: a NaN is no value to keep an answer by. */
+function sameBits(a: number | undefined, b: number | undefined): boolean {
+  return Object.is(a, b) && !Number.isNaN(a);
+}
+
+/** Whether a query `a` is the query `b`, so that the worker answers both alike to the bit. */
+function sameQuery(a: Asked, b: Asked): boolean {
+  const [p, q] = [a.sight, b.sight];
+  return (
+    a.session === b.session &&
+    a.body === b.body &&
+    a.revision === b.revision &&
+    a.slopeBaselineM === b.slopeBaselineM &&
+    sameBits(a.seasonRad, b.seasonRad) &&
+    sameBits(p.maxM, q.maxM) &&
+    sameBits(p.originM.x, q.originM.x) &&
+    sameBits(p.originM.y, q.originM.y) &&
+    sameBits(p.originM.z, q.originM.z) &&
+    sameBits(p.direction.x, q.direction.x) &&
+    sameBits(p.direction.y, q.direction.y) &&
+    sameBits(p.direction.z, q.direction.z)
+  );
+}
+
+/**
+ * The season `session` asks `body`'s readout at `time` at (`TerrainSession.readoutSeasonRad`), or
+ * `NaN` for a time it cannot read one at, a malformed time's `RangeError`: that matches no kept
+ * answer, so the query is asked and refused as before, through the answers' guard.
+ *
+ * @throws Error any other error the session throws, a bug, which the ask's guard takes.
+ */
+function seasonOf(
+  session: TerrainSession,
+  body: BodyIdHex,
+  time: UniverseTime,
+): number | undefined {
+  try {
+    return session.readoutSeasonRad(body, time);
+  } catch (error: unknown) {
+    if (error instanceof RangeError) {
+      return Number.NaN;
+    }
+    throw error;
+  }
 }
 
 /** A query's outcome, held for the next publish. */
@@ -197,6 +259,8 @@ export class GroundReadouts {
   #sightGap: SightGap | null = null;
   #inFlight: Asked | null = null;
   #settled: Settled | null = null;
+  /** The last answer taken, not `null`, with the query it answered ({@link sameQuery}). */
+  #kept: { readonly asked: Asked; readonly readout: SurfaceGroundReadout } | null = null;
   /** The baseline of the last query asked, `null` while none is held or out. */
   #askedBaselineM: SlopeBaselineM | null = null;
   /** Whether the query out was asked for a choice of baseline, so that its answer is due at once. */
@@ -281,6 +345,7 @@ export class GroundReadouts {
       // No readout may stand: what is held or still to come is let go, so that it returns with a
       // first answer of its own.
       this.#readout = null;
+      this.#kept = null;
       this.#sightGap = null;
       this.#letQueriesGo();
     } else if (this.#inFlight === null || slopeBaselineM !== this.#askedBaselineM) {
@@ -288,9 +353,10 @@ export class GroundReadouts {
       // its answer, read over a baseline no longer chosen, never stands (R10.T12.c).
       const chosen = this.#askedBaselineM !== null && slopeBaselineM !== this.#askedBaselineM;
       this.#letQueriesGo();
+      const revision = survey.coverage?.revision ?? null;
       this.#asks.run(
         () => {
-          this.#ask(session, run, body, header, slopeBaselineM, chosen);
+          this.#ask(session, run, body, header, revision, slopeBaselineM, chosen);
         },
         undefined,
         nowMs,
@@ -317,6 +383,7 @@ export class GroundReadouts {
   #forget(): void {
     this.#body = null;
     this.#readout = null;
+    this.#kept = null;
     this.#sightGap = null;
     this.#letQueriesGo();
   }
@@ -344,6 +411,7 @@ export class GroundReadouts {
       case "answered":
         this.#answers.succeeded();
         this.#readout = settled.readout;
+        this.#kept = settled.readout === null ? null : { asked: settled, readout: settled.readout };
         break;
       case "refused":
         this.#answers.failed(settled.error, nowMs, {
@@ -358,8 +426,10 @@ export class GroundReadouts {
 
   /**
    * Asks the readout along the view's line of sight now, its outcome held for the next publish;
-   * where none can be formed, asks nothing, lets the answer held go and holds why.
+   * where none can be formed, asks nothing, lets the answer held go and holds why; and where the
+   * query is the kept answer's, asks nothing and lets the kept answer stand.
    *
+   * @param revision - The survey's coverage revision now.
    * @param chosen - Whether it is asked for a choice of baseline, so that its answer is due at once.
    *
    * @throws Error where the camera's distance from the body is not finite (`sightGapOf`), which
@@ -370,6 +440,7 @@ export class GroundReadouts {
     run: ViewRun,
     body: ViewBody,
     header: NonNullable<TerrainSurvey["header"]>,
+    revision: number | null,
     slopeBaselineM: SlopeBaselineM,
     chosen: boolean,
   ): void {
@@ -379,17 +450,31 @@ export class GroundReadouts {
       // No line of sight to ask along: no answer can stand, and the readout says why. The cause
       // is let go first, so that a broken invariant, which throws, states none.
       this.#readout = null;
+      this.#kept = null;
       this.#sightGap = null;
       this.#sightGap = sightGapOf(pose, run.scene, body);
       return;
     }
     this.#sightGap = null;
-    const asked: Asked = { session, body: body.id };
-    this.#inFlight = asked;
+    const time = litTimeOf(run, body);
+    const asked: Asked = {
+      session,
+      body: body.id,
+      revision,
+      slopeBaselineM,
+      sight,
+      seasonRad: seasonOf(session, body.id, time),
+    };
     this.#askedBaselineM = slopeBaselineM;
+    const kept = this.#kept;
+    if (kept !== null && sameQuery(kept.asked, asked)) {
+      this.#readout = kept.readout;
+      return;
+    }
+    this.#inFlight = asked;
     this.#chosen = chosen;
     const options: GroundReadoutOptions = { ...GROUND_READOUT_OPTIONS, slopeBaselineM };
-    void this.#query(asked, sight, litTimeOf(run, body), options).catch((error: unknown) => {
+    void this.#query(asked, sight, time, options).catch((error: unknown) => {
       console.error("the terrain readout's answer could not be taken:", error);
     });
   }
