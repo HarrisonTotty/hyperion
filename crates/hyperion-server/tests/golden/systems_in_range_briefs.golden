@@ -54,8 +54,8 @@
           "layer": "d",
           "mass_min_msun": 2.5,
           "mass_max_msun": 8.0,
-          "expected": 40.44226550884958,
-          "returned": 42,
+          "expected": 41.90624522828199,
+          "returned": 44,
           "status": "included"
         },
         {
@@ -388,6 +388,38 @@
           "log_luminosity_lsun": -3.5067408,
           "teff_k": 7306.298,
           "star_count": 1
+        }
+      },
+      {
+        "id": "61ffd96800000006",
+        "designation": "FPG 1Z0P00 D-6",
+        "position": {
+          "cell_ly": [
+            -4,
+            26017,
+            15
+          ],
+          "offset_m": [
+            6848464541740789.0,
+            8215607945050224.0,
+            9053002037189554.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 5.852895055811929,
+        "age_myr": 393.1941992168016,
+        "population": "old_thin_disc",
+        "velocity_km_s": [
+          -231.08133077148491,
+          25.650751920217093,
+          -8.68787587228409
+        ],
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DB2.2",
+          "log_luminosity_lsun": -2.038414,
+          "teff_k": 22639.424,
+          "star_count": 2
         }
       },
       {
@@ -740,6 +772,38 @@
           "log_luminosity_lsun": -3.3533142,
           "teff_k": 7991.173,
           "star_count": 1
+        }
+      },
+      {
+        "id": "6200596800000029",
+        "designation": "GPG 000P00 D-41",
+        "position": {
+          "cell_ly": [
+            22,
+            25995,
+            22
+          ],
+          "offset_m": [
+            6963609109814885.0,
+            2501458245424698.0,
+            9225194525137544.0
+          ]
+        },
+        "layer": "d",
+        "initial_mass_msun": 2.7245018449935587,
+        "age_myr": 6343.489983844306,
+        "population": "old_thin_disc",
+        "velocity_km_s": [
+          -207.9449245917512,
+          35.270890651726525,
+          4.6857141871207695
+        ],
+        "stellar": {
+          "kind": "white_dwarf",
+          "class": "DA9.5",
+          "log_luminosity_lsun": -4.0177455,
+          "teff_k": 5289.486,
+          "star_count": 3
         }
       },
       {

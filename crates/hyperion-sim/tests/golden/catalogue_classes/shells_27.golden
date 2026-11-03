@@ -1,40 +1,40 @@
-# generator_version = 25
+# generator_version = 26
 rules every 27 hold
-FieldCoreCollapse entries 5031 deaths in the horizon 1227
-FieldCoreCollapse FreeExpansion shells 10
-FieldCoreCollapse SedovTaylor shells 653
-FieldCoreCollapse PressureDrivenSnowplough shells 3070
+FieldCoreCollapse entries 5024 deaths in the horizon 1313
+FieldCoreCollapse FreeExpansion shells 3
+FieldCoreCollapse SedovTaylor shells 677
+FieldCoreCollapse PressureDrivenSnowplough shells 3057
 FieldCoreCollapse MomentumConservingSnowplough shells 0
-FieldCoreCollapse radii below, in and above 10–800 ly [1, 3450, 282]
-FieldCoreCollapse largest radius ly = 0x409e57f68e43cf4c  # 1941.9907770724558
-FieldTypeIa entries 4227 deaths in the horizon 1177
+FieldCoreCollapse radii below, in and above 10–800 ly [0, 3514, 223]
+FieldCoreCollapse largest radius ly = 0x409e57f6ee3aeb41  # 1941.9911431509101
+FieldTypeIa entries 4252 deaths in the horizon 1184
 FieldTypeIa FreeExpansion shells 20
-FieldTypeIa SedovTaylor shells 808
-FieldTypeIa PressureDrivenSnowplough shells 2256
+FieldTypeIa SedovTaylor shells 811
+FieldTypeIa PressureDrivenSnowplough shells 2272
 FieldTypeIa MomentumConservingSnowplough shells 4
-FieldTypeIa radii below, in and above 10–800 ly [2, 2771, 315]
-FieldTypeIa largest radius ly = 0x409b4bb021ae38f4  # 1746.922003481127
-FeatureCoreCollapse entries 6301 deaths in the horizon 2970
-FeatureCoreCollapse FreeExpansion shells 32
-FeatureCoreCollapse SedovTaylor shells 2296
-FeatureCoreCollapse PressureDrivenSnowplough shells 687
+FieldTypeIa radii below, in and above 10–800 ly [2, 2790, 315]
+FieldTypeIa largest radius ly = 0x409b4bc7577d4fb5  # 1746.9446696834468
+FeatureCoreCollapse entries 6359 deaths in the horizon 2987
+FeatureCoreCollapse FreeExpansion shells 31
+FeatureCoreCollapse SedovTaylor shells 2310
+FeatureCoreCollapse PressureDrivenSnowplough shells 692
 FeatureCoreCollapse MomentumConservingSnowplough shells 0
-FeatureCoreCollapse radii below, in and above 10–800 ly [3, 2999, 13]
-FeatureCoreCollapse largest radius ly = 0x409499580405631b  # 1318.3359528390636
+FeatureCoreCollapse radii below, in and above 10–800 ly [3, 3016, 14]
+FeatureCoreCollapse largest radius ly = 0x40949944b51fe765  # 1318.31709718561
 FeatureTypeIa entries 284 deaths in the horizon 81
 FeatureTypeIa FreeExpansion shells 0
 FeatureTypeIa SedovTaylor shells 30
 FeatureTypeIa PressureDrivenSnowplough shells 182
 FeatureTypeIa MomentumConservingSnowplough shells 0
 FeatureTypeIa radii below, in and above 10–800 ly [0, 205, 7]
-FeatureTypeIa largest radius ly = 0x4092cb608ba79782  # 1202.8442827402328
-CentreCoreCollapse entries 17 deaths in the horizon 17
+FeatureTypeIa largest radius ly = 0x4092cb6e25f368a6  # 1202.8575666458723
+CentreCoreCollapse entries 18 deaths in the horizon 18
 CentreCoreCollapse FreeExpansion shells 0
 CentreCoreCollapse SedovTaylor shells 0
 CentreCoreCollapse PressureDrivenSnowplough shells 1
 CentreCoreCollapse MomentumConservingSnowplough shells 0
 CentreCoreCollapse radii below, in and above 10–800 ly [0, 1, 0]
-CentreCoreCollapse largest radius ly = 0x4042fe500bc6a249  # 37.986817810048315
+CentreCoreCollapse largest radius ly = 0x4042fe924e98982f  # 37.98883993578817
 CentreTypeIa entries 0 deaths in the horizon 0
 CentreTypeIa FreeExpansion shells 0
 CentreTypeIa SedovTaylor shells 0
@@ -42,5 +42,5 @@ CentreTypeIa PressureDrivenSnowplough shells 0
 CentreTypeIa MomentumConservingSnowplough shells 0
 CentreTypeIa radii below, in and above 10–800 ly [0, 0, 0]
 CentreTypeIa largest radius ly = 0x0000000000000000  # 0.0
-distinct shells 10049 non-radiative 3849
-longest window yr = 0x4143c2e3c2e2fc18  # 2590151.5225520246
+distinct shells 10090 non-radiative 3882
+longest window yr = 0x4143d00a6470b6b6  # 2596884.7846897496

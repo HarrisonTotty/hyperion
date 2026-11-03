@@ -19,8 +19,8 @@ mw.arm.E.digest = 0x494899bef472fe89
 # galaxy drawn, 0308d0005eed0001
 drawn.sun.E.systems = 25
 drawn.sun.E.digest = 0x1debdca757e36180
-drawn.sun.D.systems = 9
-drawn.sun.D.digest = 0xb115821d7c0c0434
+drawn.sun.D.systems = 10
+drawn.sun.D.digest = 0xbac5580283754dae
 drawn.sun.C.systems = 7
 drawn.sun.C.digest = 0x6b87554e51f24364
 drawn.sun.B.systems = 0
