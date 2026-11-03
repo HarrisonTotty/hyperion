@@ -2435,15 +2435,15 @@ pub(crate) mod tests {
             .expect("a luminous blue variable within 20,000 ly of the Sun")
     }
 
-    /// Where the galaxy's field gives up the catalogue classes' hosts, at 26 (the carve-out's and
-    /// φ's holds), its census's jobs take them (R06.T16.a): 10 ly from the luminous blue variable nearest the
+    /// Where the galaxy's field gives up the catalogue classes' hosts, at 27 (the carve-out's and
+    /// φ's holds, retargeted from 26 by train 26), its census's jobs take them (R06.T16.a): 10 ly from the luminous blue variable nearest the
     /// Sun, A to 5 ly, B to 10 and C, D and E to 30 ly in shells to 20 and 30 ly at V 11, after
     /// each step the census is the sim's of the shells done with the features' and the classes'
     /// sources, serially and in one part a shell, star for star, and the last lists the variable;
     /// without the member caches the same sky lists no class host.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn where_the_field_gives_up_the_class_hosts_the_jobs_census_takes_them() {
-        let version = hyperion_sim::GeneratorVersion::new(26);
+        let version = hyperion_sim::GeneratorVersion::new(27);
         let galaxy = Arc::new(
             Galaxy::from_params_at_version(
                 Seed::new(0x4d2),
