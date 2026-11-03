@@ -83,10 +83,11 @@ fn kick_of(stars: &SystemStars) -> Option<KilometresPerSecond> {
         .map(|kick| KilometresPerSecond::from(kick.speed()))
 }
 
-/// A displaced remnant of layer E is dead at the epoch through `SystemStars::generate`, its death
-/// the marks' time since death ago to a second (or, for the oldest, to sixteen ulps of its age,
-/// whose own rounding is a minute at 10¹⁰ years), that time inside its class's age bin, and its
-/// natal kick inside its kick constraint; the same record twice gives the same stars.
+/// A displaced remnant of layer E is dead at the epoch through `SystemStars::generate`, where its
+/// marks computed its lifetime its death the marks' time since death ago to a second (or, for the
+/// oldest, to sixteen ulps of its age, whose own rounding is a minute at 10¹⁰ years), that time
+/// inside its class's age bin, and its natal kick inside its kick constraint; the same record
+/// twice gives the same stars.
 #[test]
 fn a_displaced_remnant_died_its_time_since_death_ago_with_its_kick_in_its_bin() {
     let galaxy = displaced();
@@ -116,28 +117,33 @@ fn a_displaced_remnant_died_its_time_since_death_ago_with_its_kick_in_its_bin() 
             picked,
         )
         .expect("a displaced candidate draws marks");
-        let since = record.age_at_epoch().value() - drawn.lifetime.expect("computed").value();
         let stars = SystemStars::generate(galaxy, &record);
         let dead_for = stars
             .primary()
             .remnant_age_at_epoch()
             .expect("a displaced remnant's primary is dead at the epoch")
             .value();
-        let tolerance = (1.0 / SECONDS_PER_JULIAN_YEAR)
-            .max(16.0 * f64::EPSILON * record.age_at_epoch().value());
-        assert!(
-            (dead_for - since).abs() <= tolerance,
-            "{:?}: dead {dead_for} yr, the marks' {since} yr",
-            record.id()
-        );
-        if let ClassKey::Thin { age, .. } = fields.class(class).key() {
-            let (lo, hi) = age_bin_years(age, table.scales().tau_unit());
-            assert!(since >= lo.value() * (1.0 - 1e-9), "{since} below {lo:?}");
+        // From 27 the fate table reads most fates (P08.T12 at 27), whose marks give no lifetime:
+        // `fates_hold`'s tests hold their times since death.
+        if let Some(lifetime) = drawn.lifetime {
+            let since = record.age_at_epoch().value() - lifetime.value();
+            let tolerance = (1.0 / SECONDS_PER_JULIAN_YEAR)
+                .max(16.0 * f64::EPSILON * record.age_at_epoch().value());
             assert!(
-                hi.is_none_or(|hi| since <= hi.value() * (1.0 + 1e-9)),
-                "{since} above {hi:?}"
+                (dead_for - since).abs() <= tolerance,
+                "{:?}: dead {dead_for} yr, the marks' {since} yr",
+                record.id()
             );
+            if let ClassKey::Thin { age, .. } = fields.class(class).key() {
+                let (lo, hi) = age_bin_years(age, table.scales().tau_unit());
+                assert!(since >= lo.value() * (1.0 - 1e-9), "{since} below {lo:?}");
+                assert!(
+                    hi.is_none_or(|hi| since <= hi.value() * (1.0 + 1e-9)),
+                    "{since} above {hi:?}"
+                );
+            }
         }
+        assert!(dead_for >= 0.0, "{:?}: dead {dead_for} yr", record.id());
         let constraint = record
             .kick_constraint(galaxy)
             .expect("a displaced remnant has a kick constraint");

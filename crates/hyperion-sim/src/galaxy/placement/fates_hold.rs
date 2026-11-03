@@ -1,28 +1,20 @@
-//! The tests of P08.T12's hold at 27, `PLACEMENT_FATES_VERSION` (plan 08, P08.T12 at 27, the
-//! redesign research-leans-19 §3 sketched): under every 27 hold a dead record's marks read its
-//! progenitor's fate from the fitted fate table where it can stand for the track's, against the
-//! same galaxy under the hold's held arm, the exact path.
+//! The tests of P08.T12 at 27 (plan 08, the redesign research-leans-19 §3 sketched): under every
+//! 27 hold a dead record's marks read its progenitor's fate from the fitted fate table where it
+//! can stand for the track's.
 //!
 //! - The table read's premise, over a sweep (slow, over a finer one): the companion-stripped mark
 //!   moves no iron core's or electron capture's fate.
 //! - At the Sun-like point and about a globular's core, every dead record of layer E is dead at
 //!   its age by its exact lifetime, its time since death in its class's age bin but for the
 //!   bracket's width; the table reads most of the fates, and none whose route is not the track's.
-//! - The two arms' layer-E remnants alike there: two-sample KS tests of their initial masses and
-//!   times since death; slow, over more cells, of their remnants' masses and times since death as
-//!   the stellar stage builds them.
+//! - Slow, over more cells, every dead record's star a remnant at the epoch as the stellar stage
+//!   builds it.
 //! - The same cells twice give the same records.
-//!
-//! The tripwire is here. The bump to 27 deletes the held arm, and these become tests of the
-//! version's own galaxy.
 
 use std::sync::OnceLock;
 
-use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_two_sample};
-
-use super::marks::{FateRead, PLACEMENT_FATES_VERSION, PlacementFateRules, draws_of, table_fate};
+use super::marks::{FateRead, draws_of, table_fate};
 use super::{CellKey, SystemRecord, generate_cell};
-use crate::GENERATOR_VERSION;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::displaced::class_table::ClassKey;
@@ -59,43 +51,6 @@ fn fitted() -> &'static Galaxy {
         .expect("the Milky Way fixture builds")
         .with_full_potential()
     })
-}
-
-/// The Milky Way fixture under every 27 hold but this one, the exact path, with its kinematic
-/// tables.
-fn exact() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| {
-        Galaxy::from_params_with_rules(
-            Seed::new(SEED),
-            GalaxyParams::milky_way_like(),
-            GalaxyRules {
-                placement_fates: PlacementFateRules::Exact,
-                ..GalaxyRules::every_27_hold()
-            },
-        )
-        .expect("the Milky Way fixture builds")
-        .with_full_potential()
-    })
-}
-
-/// The tripwire of the hold: below 27 every dead record's fate is its track's.
-#[test]
-fn the_placement_fates_are_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < PLACEMENT_FATES_VERSION,
-        "the 26 → 27 bump reads a dead record's fate from the fate table where it can stand for \
-         the track's: the ages of most of layer E's dead records and of the hypervelocity \
-         survivors, and so their cells' records, move. Delete `PLACEMENT_FATES_VERSION`, \
-         `PlacementFateRules` with its `Exact` arm, `GalaxyRules::placement_fates`, `fate`'s \
-         test of it and this test in the bump's own commit, and re-bless the goldens plan 08's \
-         \"P08.T12 at 27, as built\" lists"
-    );
-    assert_eq!(
-        GalaxyRules::of_version(GENERATOR_VERSION).placement_fates,
-        PlacementFateRules::Exact
-    );
-    assert_eq!(fitted().rules().placement_fates, PlacementFateRules::Fitted);
 }
 
 /// The threads a slow test of the hold runs (its `threads-required` in `.config/nextest.toml`).
@@ -391,47 +346,6 @@ fn every_dead_record_is_dead_at_its_age_and_every_route_read_is_the_track_s() {
     }
 }
 
-/// The initial masses and times since death, by their exact lifetimes, of the dead records of
-/// `cells` in `galaxy`.
-fn masses_and_deaths(galaxy: &Galaxy, cells: &[CellKey]) -> (Vec<f64>, Vec<f64>) {
-    let rules = galaxy.rules().stellar;
-    dead_records(galaxy, cells)
-        .iter()
-        .map(|record| {
-            let (m, composition, draws) = progenitor(galaxy, record);
-            let life = lifetime_under(m, &composition, &draws, rules).value();
-            (
-                record.primary_initial_mass().value(),
-                record.age_at_epoch().value() - life,
-            )
-        })
-        .unzip()
-}
-
-/// The two arms' dead records of layer E are alike at the Sun-like point and about the
-/// globular's core: two-sample KS tests of their initial masses and of their times since death.
-#[test]
-fn the_two_arms_dead_records_have_alike_masses_and_deaths() {
-    for (name, at) in [("Sun-like", sun_like()), ("core", globular_core(fitted()))] {
-        let cells = block(&at, 1);
-        let (mut fitted_masses, mut fitted_deaths) = masses_and_deaths(fitted(), &cells);
-        let (mut exact_masses, mut exact_deaths) = masses_and_deaths(exact(), &cells);
-        let masses = ks_two_sample(&mut fitted_masses, &mut exact_masses);
-        let deaths = ks_two_sample(&mut fitted_deaths, &mut exact_deaths);
-        println!(
-            "{name}: {} and {} dead records; masses D {:.4} (p {:.3}), deaths D {:.4} (p {:.3})",
-            fitted_masses.len(),
-            exact_masses.len(),
-            masses.statistic,
-            masses.p_value,
-            deaths.statistic,
-            deaths.p_value
-        );
-        assert_p_value(&format!("{name} initial masses"), masses.p_value, ALPHA);
-        assert_p_value(&format!("{name} times since death"), deaths.p_value, ALPHA);
-    }
-}
-
 /// The remnants' masses and times since death of the dead records of `cells` in `galaxy`, as the
 /// stellar stage builds their stars, on [`SLOW_THREADS`].
 fn remnants(galaxy: &Galaxy, cells: &[CellKey]) -> (Vec<f64>, Vec<f64>) {
@@ -455,32 +369,24 @@ fn remnants(galaxy: &Galaxy, cells: &[CellKey]) -> (Vec<f64>, Vec<f64>) {
     .unzip()
 }
 
-/// The two arms' layer-E remnants alike through the stellar stage, over five cells a side at the
-/// Sun-like point and three about the globular's core: two-sample KS tests of their remnants'
-/// masses and of their times since death, and every dead record's star a remnant at the epoch.
+/// The layer-E remnants through the stellar stage, over five cells a side at the Sun-like point and
+/// three about the globular's core: every dead record's star a remnant at the epoch, and every
+/// route the table read the track's.
 #[test]
-#[ignore = "slow: some 3,200 dead records' stars, twice"]
-fn the_two_arms_remnants_have_alike_masses_and_deaths_through_the_stellar_stage() {
+#[ignore = "slow: some 1,600 dead records' stars"]
+fn the_dead_records_remnants_are_built_through_the_stellar_stage() {
     for (name, at, reach) in [
         ("Sun-like", sun_like(), 2),
         ("core", globular_core(fitted()), 1),
     ] {
         let cells = block(&at, reach);
-        let (mut fitted_masses, mut fitted_deaths) = remnants(fitted(), &cells);
-        let (mut exact_masses, mut exact_deaths) = remnants(exact(), &cells);
-        let masses = ks_two_sample(&mut fitted_masses, &mut exact_masses);
-        let deaths = ks_two_sample(&mut fitted_deaths, &mut exact_deaths);
+        let (masses, deaths) = remnants(fitted(), &cells);
         println!(
-            "{name}: {} and {} remnants; masses D {:.4} (p {:.3}), deaths D {:.4} (p {:.3})",
-            fitted_masses.len(),
-            exact_masses.len(),
-            masses.statistic,
-            masses.p_value,
-            deaths.statistic,
-            deaths.p_value
+            "{name}: {} remnants, {} times since death",
+            masses.len(),
+            deaths.len()
         );
-        assert_p_value(&format!("{name} remnant masses"), masses.p_value, ALPHA);
-        assert_p_value(&format!("{name} times since death"), deaths.p_value, ALPHA);
+        assert!(deaths.iter().all(|d| d.is_finite() && *d >= 0.0), "{name}");
         let counts = check_dead_records(&cells, SLOW_THREADS);
         println!("{name}: {counts:?}");
         assert_eq!(counts.other_route, 0, "{name}: {counts:?}");

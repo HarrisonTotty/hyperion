@@ -35,10 +35,6 @@
 //!   and the carve-out, by the build's one `match` (`Galaxy::from_params`), which installs the
 //!   classes and the stay shares that every reader of the two layers then reads; so
 //!   `Galaxy::with_rules` refuses to change it as well.
-//! - [`placement_fates`](GalaxyRules::placement_fates), at [`PLACEMENT_FATES_VERSION`] (plan 08,
-//!   P08.T12 at 27): a dead record's marks read its progenitor's fate from the fitted fate table
-//!   where it can stand for the track's, and draw its time since death after the table's bracket.
-//!   It is read where those marks are drawn, and reaches none of the galaxy's memos.
 //! - [`list_source`](GalaxyRules::list_source), at [`LIST_SOURCE_VERSION`] (plan 10, P10.T10.b's
 //!   registration member and P10.T3.d.b, with plan 09's P09.T37.b): the range query takes the global
 //!   list's streams, dwarf cores and galactic centre beside the grid, and the halo's field gives up
@@ -60,7 +56,6 @@ use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
 use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
 use crate::galaxy::global_list::{LIST_SOURCE_VERSION, ListSourceRules};
-use crate::galaxy::placement::{PLACEMENT_FATES_VERSION, PlacementFateRules};
 use crate::stellar::rules::StellarRules;
 
 /// The galaxy-side holds of the next galaxy train, carried by the `Galaxy` value
@@ -79,9 +74,6 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads.
     pub(crate) displaced: DisplacedRules,
-    /// How a dead record's marks read its progenitor's fate: the track's, or the fate table's
-    /// where it can stand for it (P08.T12 at 27).
-    pub(crate) placement_fates: PlacementFateRules,
     /// Whether the range query registers the global list's members, the centre's among them, and
     /// the galaxy stores the halo's discrete share (P10.T10.b's registration member, P10.T3.d.b),
     /// which the build reads.
@@ -121,11 +113,6 @@ impl GalaxyRules {
             } else {
                 DisplacedRules::FieldOnly
             },
-            placement_fates: if version.get() >= PLACEMENT_FATES_VERSION.get() {
-                PlacementFateRules::Fitted
-            } else {
-                PlacementFateRules::Exact
-            },
             list_source: if version.get() >= LIST_SOURCE_VERSION.get() {
                 ListSourceRules::Registered
             } else {
@@ -156,10 +143,10 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
-    /// version's rules with the galaxy's holds at 27 (`placement_fates`, P08.T12 at 27, and
-    /// `list_source`, P10.T10.b's registration with P10.T3.d.b, and those retargeted from 26,
-    /// `field_share`, P09.T2.c, `carve_out`, P09.T35, `feature_classes`, P09.T36, `merger_class`,
-    /// P11.T8.c–d, and `displaced`, P08.T12); the stellar rules hold none at 27
+    /// version's rules with the galaxy's holds at 27 (`list_source`, P10.T10.b's registration with
+    /// P10.T3.d.b, and those retargeted from 26, `field_share`, P09.T2.c, `carve_out`, P09.T35,
+    /// `feature_classes`, P09.T36, `merger_class`, P11.T8.c–d, and `displaced`, P08.T12); the
+    /// stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
     /// ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
@@ -311,15 +298,6 @@ mod tests {
     /// Each galaxy hold at 27 is held below it and new from it on, in every 27 hold.
     #[test]
     fn each_27_hold_turns_on_at_27() {
-        let fates = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).placement_fates;
-        for v in [23, 24, 25, 26] {
-            assert_eq!(fates(v), PlacementFateRules::Exact, "{v}");
-        }
-        assert_eq!(fates(27), PlacementFateRules::Fitted);
-        assert_eq!(
-            GalaxyRules::of_version(crate::GENERATOR_VERSION).placement_fates,
-            PlacementFateRules::Exact
-        );
         let list = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).list_source;
         for v in [23, 24, 25, 26] {
             assert_eq!(list(v), ListSourceRules::Unregistered, "{v}");
@@ -336,7 +314,6 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_27_hold(),
             GalaxyRules {
-                placement_fates: PlacementFateRules::Fitted,
                 list_source: ListSourceRules::Registered,
                 stellar: StellarRules::of_version(GeneratorVersion::new(27)),
                 ..GalaxyRules::every_26_hold_with_its_retargets()

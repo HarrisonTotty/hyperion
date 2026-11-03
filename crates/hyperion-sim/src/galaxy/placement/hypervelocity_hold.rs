@@ -22,8 +22,7 @@ use hyperion_testkit::stats::{ALPHA, assert_p_value, assert_poisson_count, norma
 use super::candidate::Picked;
 use super::velocity_hold::exempt_classes_padded;
 use super::{
-    CellKey, NoCache, PlacementFateRules, SystemRecord, generate_cell, is_helium_donor, marks,
-    survivor_flight,
+    CellKey, NoCache, SystemRecord, generate_cell, is_helium_donor, marks, survivor_flight,
 };
 use crate::Seed;
 use crate::coords::GalacticPosition;
@@ -262,13 +261,7 @@ fn check_survivor(
                 Marked::Lifetime(Some(life)) => assert_same_bits(death, life),
                 // Where the fate table read the progenitor's fate (P08.T12 at 27), the marks give
                 // no lifetime.
-                Marked::Lifetime(None) => assert_eq!(
-                    galaxy.rules().placement_fates,
-                    PlacementFateRules::Fitted,
-                    "a C/O donor's marks give its progenitor's lifetime but where the table read \
-                     its fate"
-                ),
-                Marked::Generated => {}
+                Marked::Lifetime(None) | Marked::Generated => {}
             }
             let age = record.age_at_epoch().value();
             assert!(age - death >= since * (1.0 - 1e-9), "{age} {death} {since}");

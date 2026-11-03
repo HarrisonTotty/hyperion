@@ -38,8 +38,8 @@
 //!   runaway's from those after its ejection, on `runaway.ejection`), draws its metallicity at
 //!   that age and takes the same fraction of `lifetime(m, Z)` as its age, so that it is alive.
 //!
-//! From generator version 27 ([`PLACEMENT_FATES_VERSION`], the redesign research-leans-19 §3
-//! sketched) a dead record's fate is the fitted fate table's wherever it can stand for the track's
+//! From generator version 27 (P08.T12 at 27, the redesign research-leans-19 §3 sketched) a dead
+//! record's fate is the fitted fate table's wherever it can stand for the track's
 //! ([`table_fate`]): its route decides the redraw, and the time since death is drawn after the
 //! upper end of the table's lifetime bracket in place of the death age, so that the record is dead
 //! by the bracket. Where it cannot, the exact fate is taken, as before. The record's age is then no
@@ -61,7 +61,6 @@ use std::cell::Cell;
 
 use super::candidate::Picked;
 use super::{CellKey, SystemRecord};
-use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::PointLy;
@@ -93,32 +92,6 @@ use crate::units::{LightYears, SolarMasses, Years};
 
 use super::record::KickConstraint;
 
-/// The generator version from which a dead record's marks read its progenitor's fate from the
-/// fitted fate table where it can stand for the track's (plan 08, P08.T12 at 27; the hold of
-/// [`PlacementFateRules`]).
-///
-/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`PlacementFateRules::Exact`], so every generated value keeps its bits. The tests reach the new
-/// arm through a galaxy built under `GalaxyRules::every_27_hold()`. The bump to 27 deletes this
-/// hold, [`PlacementFateRules`] with its `Exact` arm, the galaxy's `placement_fates` field and its
-/// tripwire (`the_placement_fates_are_held_only_until_the_27_bump`).
-pub(crate) const PLACEMENT_FATES_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// How a dead record's marks read its progenitor's fate (the hold of [`PLACEMENT_FATES_VERSION`]).
-///
-/// It is read where a retained record's, a displaced remnant's or a C/O survivor's marks are
-/// drawn, and reaches none of the galaxy's memos.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum PlacementFateRules {
-    /// Version 26's and before: the exact fate ([`fate_of`]) decides the redraw, and the time
-    /// since death is drawn after its death age.
-    Exact,
-    /// Version 27's: the fate table's route decides the redraw where it can stand for the track's
-    /// ([`table_fate`]), and the time since death is drawn after its lifetime bracket's upper
-    /// end; elsewhere the exact fate, as under [`PlacementFateRules::Exact`].
-    Fitted,
-}
-
 /// The attempts layer D's runaway reduction makes before it keeps the last: a star is rejected
 /// with the probability that it is an ejected runaway or walkaway, a few per cent at 2.5–8 M☉, so
 /// a record that needs more than a handful does not occur.
@@ -143,7 +116,7 @@ pub(super) struct DrawnMarks {
     pub(super) metallicity_age_years: Option<f32>,
     /// The primary's lifetime at its own composition and draws, where the marks computed it:
     /// what the carve-out hook's exact step reads instead of computing it again (P08.T13). A dead
-    /// record whose fate the table read ([`PlacementFateRules::Fitted`]) has none.
+    /// record whose fate the table read ([`table_fate`]) has none.
     pub(super) lifetime: Option<Years>,
 }
 
@@ -285,7 +258,7 @@ struct Progenitor {
 }
 
 /// What a dead record's marks read of its progenitor's fate: the track's, or the fate table's
-/// where it can stand for it ([`table_fate`], from [`PLACEMENT_FATES_VERSION`]).
+/// where it can stand for it ([`table_fate`], from generator version 27).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum FateRead {
     /// The track's fate, bit for bit.
@@ -333,7 +306,7 @@ impl FateRead {
 }
 
 /// The fate of a star of `m`, `composition` and `draws` under the galaxy's stellar rules: the fate
-/// table's where the galaxy's rules read it and it can stand for the track's ([`table_fate`]),
+/// table's where it can stand for the track's ([`table_fate`]),
 /// and otherwise the track's, bit for bit, at the cost of [`lifetime`], whose death age it holds;
 /// counted in test builds as a lifetime call.
 #[must_use]
@@ -344,9 +317,7 @@ fn fate(galaxy: &Galaxy, m: SolarMasses, composition: &Composition, draws: &Star
         m
     };
     let rules = galaxy.rules();
-    if rules.placement_fates == PlacementFateRules::Fitted
-        && let Some(read) = table_fate(m, composition, draws)
-    {
+    if let Some(read) = table_fate(m, composition, draws) {
         return read;
     }
     #[cfg(test)]
