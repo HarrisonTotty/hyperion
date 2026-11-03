@@ -56,8 +56,9 @@ fn young(component: u8) -> bool {
 /// candidates, past the plan's 1–20 (pinned as measured at generator version 26 with P09.T37's
 /// draw over the reach, a finding: 25 core collapses, none of the 11.3 Type Ia expected and none
 /// of the 23.7 variables'; 18 before the draw); each kept entry resolves to its member bit for bit,
-/// with a site and a window for a death; a rejected candidate and every index past the victims under the
-/// held arm resolve to "no such system", and the victims stay.
+/// with a site and a window for a death; a rejected candidate resolves to "no such system", every
+/// index of them under the held arm holds no recent entry (plan 11's binary classes follow the
+/// victims there from 27), and the victims stay.
 #[test]
 fn the_centre_lists_a_handful_past_its_victims() {
     let (off, on) = (held(), listed());
@@ -65,7 +66,10 @@ fn the_centre_lists_a_handful_past_its_victims() {
     let victims = victim_count(on).unwrap();
     let recent = CentreRecent::new(on, model, victims);
     let list = recent.list(on);
-    let entries: Vec<ListEntry> = list.entries().collect();
+    let entries: Vec<ListEntry> = list
+        .entries()
+        .take_while(|e| RecentClass::of(e.class()).is_some())
+        .collect();
     assert_eq!(entries.first().map(ListEntry::index), Some(victims + 1));
     let order = [
         RecentClass::CoreCollapse,
@@ -103,15 +107,11 @@ fn the_centre_lists_a_handful_past_its_victims() {
     // keeps 25, a finding pinned as measured.
     assert_eq!(total, 25);
     let model_off = off.centre().unwrap();
-    assert_eq!(
-        CentreRecent::new(off, model_off, victims).expected(),
-        Vec::new()
-    );
+    let recent_off = CentreRecent::new(off, model_off, victims);
+    assert_eq!(recent_off.expected(), Vec::new());
     for entry in &entries {
-        assert_eq!(
-            resolve_centre_member_with(off, model_off, list_id(entry.index())),
-            Err(ResolveSystemError::NoSuchSystem)
-        );
+        let class = RecentClass::of(entry.class()).unwrap();
+        assert_eq!(recent_off.entry(off, model_off, class, entry.index()), None);
     }
     let victim = resolve_centre_member_with(off, model_off, list_id(victims)).unwrap();
     assert_eq!(
@@ -135,13 +135,20 @@ fn the_centre_s_entries_are_pinned() {
     let model = on.centre().unwrap();
     let recent = CentreRecent::new(on, model, victim_count(on).unwrap());
     let list = recent.list(on);
-    let indices: Vec<u16> = list.entries().map(|e| e.index()).collect();
+    let indices: Vec<u16> = list
+        .entries()
+        .filter(|e| RecentClass::of(e.class()).is_some())
+        .map(|e| e.index())
+        .collect();
     assert_order_independent(&indices, |&index| {
         resolve_centre_member_with(on, model, list_id(index))
     });
     let mut values = Vec::new();
     for entry in list.entries() {
-        let class = RecentClass::of(entry.class()).unwrap();
+        // From 27 plan 11's binary classes follow the recent ones.
+        let Some(class) = RecentClass::of(entry.class()) else {
+            continue;
+        };
         let Some(kept) = recent.entry(on, model, class, entry.index()) else {
             continue;
         };

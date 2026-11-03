@@ -23,7 +23,7 @@
 //!   below) misses the sphere.
 //! - **The recent entries** (P09.T37). After the victims, under P09.T36's hold
 //!   (`FEATURE_CLASSES_VERSION`), the list holds the recently dead and the luminous blue variables
-//!   that the band-E cells give up, and from 27 under P11.T8.f's (`FEATURE_BINARIES_VERSION`)
+//!   that the band-E cells give up, and from 27 (P11.T8.f)
 //!   plan 11's binary classes after them, which are placed the same way, each counted in the
 //!   layers its class's members can be of. The census adds each class's expected candidates times the
 //!   share of its tracer's profile in the shell about the black hole that holds the sphere, in the
@@ -1292,6 +1292,27 @@ mod tests {
         assert!(hits > 0 && passed_over > 0);
     }
 
+    /// The centre's list's expected about `at` in a sphere of `radius`, added to `counts`, as the
+    /// source adds it: from 27 its plan 11 binary classes (P11.T8.f) beside its recent classes.
+    fn add_the_list_s_expected(
+        source: &CentreMemberSource<'_>,
+        at: &GalacticPosition,
+        radius: LightYears,
+        counts: &mut LayerCounts,
+    ) {
+        if let Some(list) = source.recent() {
+            let reach = (
+                LightYears::from(at.distance_to(&GalacticPosition::ORIGIN)),
+                radius,
+            );
+            list.recent
+                .add_expected_within(&list.profiles, reach, counts);
+            list.recent
+                .binaries()
+                .add_expected_within(&list.profiles, reach, counts);
+        }
+    }
+
     /// A victim still on its way in at the epoch is found where it is then and counted there: the
     /// census adds one in its layer to the cells' expected candidates, and the hits hold it. The
     /// fixture's victims are all disrupted before the epoch, so the source takes the victims of
@@ -1338,6 +1359,7 @@ mod tests {
                 );
             }
         }
+        add_the_list_s_expected(&source, &at, radius, &mut cells);
         let layer = coming.record().layer();
         for l in [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E] {
             let want = cells.get(l) + if l == layer { 1.0 } else { 0.0 };

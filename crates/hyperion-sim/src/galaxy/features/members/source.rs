@@ -23,7 +23,7 @@
 //!
 //! - **The lists** (P09.T37). Under P09.T36's hold (`FEATURE_CLASSES_VERSION`) a feature's
 //!   feature-level list holds its recent classes, the recently dead and the luminous blue
-//!   variables its band-E cells give up, and from 27 under P11.T8.f's (`FEATURE_BINARIES_VERSION`)
+//!   variables its band-E cells give up, and from 27 (P11.T8.f)
 //!   plan 11's binary classes after them, whose hosts the catalogue's classes give up; an
 //!   association, which has no nested grid, holds its members nowhere else. Each feature whose
 //!   reach touches the sphere adds to the census each listed class's expected candidates times the
@@ -87,7 +87,6 @@ use super::level_list::{FeatureLevelList, KeptDeaths};
 use super::placement::FeatureInterior;
 use super::recent::FeatureClassesRules;
 use super::{MemberRecord, local_offset};
-use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 
 /// Where a caller keeps feature interiors between queries (P09.T23).
 ///
@@ -480,7 +479,8 @@ impl<'a> FeatureMemberSource<'a> {
             (centre, lists_lookup_radius(galaxy, &sphere)),
             &mut found,
         );
-        let lists = lists_read(galaxy);
+        // From 27 every feature's list is read: it may hold P11.T8.f's binary classes.
+        let lists = FeatureClassesRules::Listed;
         let (first, step) = (u64::from(part.part), u64::from(part.parts.get()));
         let ours = (0_u64..)
             .zip(&found)
@@ -694,7 +694,8 @@ impl SystemSource for FeatureMemberSource<'_> {
     fn expected_in_sphere(&self, galaxy: &Galaxy, sphere: &QuerySphere) -> LayerCounts {
         let mut counts = LayerCounts::ZERO;
         let radius = sphere.radius();
-        let lists = lists_read(galaxy);
+        // From 27 every feature's list is read: it may hold P11.T8.f's binary classes.
+        let lists = FeatureClassesRules::Listed;
         let mut cells = Vec::new();
         for (feature, interior) in self.near(galaxy, sphere.centre(), (radius, radius), lists) {
             if lists == FeatureClassesRules::Listed
@@ -735,7 +736,8 @@ impl SystemSource for FeatureMemberSource<'_> {
         // builds), so a member that can reach the sphere by `t` lies in a feature whose reach
         // touches it padded so.
         let padded = lookup_radius(sphere);
-        let lists = lists_read(galaxy);
+        // From 27 every feature's list is read: it may hold P11.T8.f's binary classes.
+        let lists = FeatureClassesRules::Listed;
         let listed = lists_lookup_radius(galaxy, sphere);
         let mut members = Vec::new();
         for (feature, interior) in self.near(galaxy, sphere.centre(), (padded, listed), lists) {
@@ -983,24 +985,6 @@ fn drifted_from(
     epoch_position
         .translated(velocity.displacement_over(elapsed))
         .expect("a member moving under 3,000 km/s over the clock window stays addressable")
-}
-
-/// Whether the features' lists are read in `galaxy` (module documentation, "The lists"): under the
-/// new arm of P09.T36's hold or of P11.T8.f's, as [`FeatureClassesRules::Listed`], whose features'
-/// lists may hold an entry; [`FeatureClassesRules::Unlisted`] below both, where none does.
-#[must_use]
-fn lists_read(galaxy: &Galaxy) -> FeatureClassesRules {
-    match (
-        galaxy.rules().feature_classes,
-        galaxy.rules().feature_binaries,
-    ) {
-        (FeatureClassesRules::Unlisted, FeatureBinariesRules::Unlisted) => {
-            FeatureClassesRules::Unlisted
-        }
-        (FeatureClassesRules::Listed, _) | (_, FeatureBinariesRules::Listed) => {
-            FeatureClassesRules::Listed
-        }
-    }
 }
 
 /// The hits in `sphere` among `layers` of `feature`'s listed entries, of its recent and of plan

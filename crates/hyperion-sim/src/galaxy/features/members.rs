@@ -40,7 +40,6 @@
 
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::catalogue_classes::ClassId;
-use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{BodyId, FeatureMemberId, SystemId};
@@ -597,9 +596,6 @@ fn mark_and_boundary(
     position: &GalacticPosition,
     key: ObjectKey,
 ) -> (RecycledMark, Option<Metres>) {
-    if galaxy.rules().feature_binaries == FeatureBinariesRules::Unlisted {
-        return (RecycledMark::Unmarked, None);
-    }
     let (mark, share) = shares.of(class);
     let marked = if share > 0.0
         && Stream::open(galaxy.seed(), tags::MEMBER_RECYCLED, key)

@@ -78,7 +78,6 @@
 //!
 //! A core-collapsed cluster's classes all take its cusp.
 
-use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 use crate::galaxy::catalogue_classes::core_collapse::ejecting_table;
 use crate::galaxy::displaced::BirthSource;
 use crate::galaxy::displaced::class_table::ClassTable;
@@ -595,9 +594,8 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
             ProfileShape::cored(c, mass / m_to, model.half_mass_radius().value())
         }
     };
-    let modelled = galaxy.rules().feature_binaries == FeatureBinariesRules::Listed;
     let binary_fraction = |generation: Generation, mean: f64| match (model.kind(), generation) {
-        (ClusterKind::Open, _) if modelled && mean > 0.0 => {
+        (ClusterKind::Open, _) if mean > 0.0 => {
             open_cluster_binary_fraction(model, SolarMasses::new(mean))
         }
         (ClusterKind::Open, _) => BINARY_FRACTIONS.2,

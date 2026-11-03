@@ -83,7 +83,6 @@ use super::events::victims::victim_count;
 use super::members::{CentreMemberRecord, centre_composition};
 use super::profile::{REACH, TracerProfile};
 use super::{CentreModel, CentreTracer};
-use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 
 /// The oldest age of a young class: a component whose oldest star is at most this old is young,
 /// 150 Myr, the constant component's (`age_components`); the rest are old.
@@ -560,11 +559,6 @@ pub(crate) fn recent_listed(
     model: &CentreModel,
     index: u16,
 ) -> Option<(CentreMemberRecord, Option<CatalogueMotion>)> {
-    if galaxy.rules().feature_classes == FeatureClassesRules::Unlisted
-        && galaxy.rules().feature_binaries == FeatureBinariesRules::Unlisted
-    {
-        return None;
-    }
     // The disruptions' model refuses only a black hole no galaxy the builder allows has, whose
     // list holds no entry.
     let victims = victim_count(galaxy).ok()?;

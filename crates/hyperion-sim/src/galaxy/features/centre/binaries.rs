@@ -1,5 +1,5 @@
 //! Plan 11's binary classes on the galactic centre's feature-level list (P11.T8.f), after its
-//! victims and its recent classes, under P11.T8.f's hold (`FEATURE_BINARIES_VERSION`).
+//! victims and its recent classes, from generator version 27 (P11.T8.f).
 //!
 //! The nuclear cluster is a budget of its own (plan 09, Design note 5), so the catalogue gives up
 //! nothing for these hosts. Each class's expected hosts are the cluster's formed mass, its
@@ -22,8 +22,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::Population;
 use crate::galaxy::catalogue_classes::ClassId;
 use crate::galaxy::catalogue_classes::binary::feature::{
-    FeatureBinariesRules, LISTED_CLASSES, ListedBinary, hosts_per_formed_mass, is_listed_binary,
-    listed_entry,
+    LISTED_CLASSES, ListedBinary, hosts_per_formed_mass, is_listed_binary, listed_entry,
 };
 use crate::galaxy::catalogue_classes::binary::{BinaryHost, ListedHost};
 use crate::galaxy::catalogue_classes::source::member_layers;
@@ -49,15 +48,9 @@ pub(crate) struct CentreBinaries {
 }
 
 impl CentreBinaries {
-    /// The binary classes of the centre of `galaxy`, whose model is `model`; none under the hold's
-    /// held arm.
+    /// The binary classes of the centre of `galaxy`, whose model is `model`.
     #[must_use]
     pub(crate) fn new(galaxy: &Galaxy, model: &CentreModel) -> Self {
-        if galaxy.rules().feature_binaries == FeatureBinariesRules::Unlisted {
-            return Self {
-                classes: Vec::new(),
-            };
-        }
         let formed = model.classes().primaries_formed() * galaxy.mean_formed_mass().value();
         let classes = LISTED_CLASSES
             .iter()

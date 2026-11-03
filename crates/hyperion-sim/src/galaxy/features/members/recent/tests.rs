@@ -187,7 +187,12 @@ fn the_classes_keep_design_note_16_s_order() {
         }
         let list = FeatureLevelList::of(on, &feature);
         let mut previous = 0;
-        for (i, entry) in list.entries().enumerate() {
+        // From 27 plan 11's binary classes follow the recent ones (P11.T8.f).
+        for (i, entry) in list
+            .entries()
+            .take_while(|e| RecentClass::of(e.class()).is_some())
+            .enumerate()
+        {
             assert_eq!(usize::from(entry.index()), i + 1);
             let place = order
                 .iter()

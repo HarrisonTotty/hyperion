@@ -1,6 +1,5 @@
 //! Plan 11's binary classes inside features (P11.T8.f): the hosts a feature holds of each carved
-//! class, listed on its feature-level list after plan 09's own classes, from generator version 27
-//! (`FEATURE_BINARIES_VERSION`).
+//! class, listed on its feature-level list after plan 09's own classes, from generator version 27.
 //!
 //! # Where a host is
 //!
@@ -14,18 +13,17 @@
 //! a candidate whose marks cannot be that old (a white dwarf whose progenitor has not yet died, a
 //! donor past its turn-off) is thinned, as any candidate its class's test refuses.
 //!
-//! # The hold
+//! # The lists
 //!
 //! The feature-level lists of catalogue features and the galactic centre register the five
 //! classes, the catalogue's classes give up the share of their hosts that sits in features, and a
 //! feature's binary members draw their companions inside its hard–soft boundary, all from version
-//! 27 ([`FeatureBinariesRules`]).
+//! 27.
 
 use super::{
     AwdEntry, AwdProcess, AwdSide, MergerEntry, NeutronStarMergers, NsmEntry, StellarMergers,
     XrayBinaries, XrbEntry, XrbSide,
 };
-use crate::GeneratorVersion;
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::catalogue_classes::core_collapse::class_site_velocity;
 use crate::galaxy::catalogue_classes::registry::ClassId;
@@ -56,29 +54,6 @@ use crate::stellar::binary::{BinaryTimeline, CarvedClass};
 use crate::stellar::system::SystemStars;
 use crate::tables::binary::{CLASS_SHARES, ClassShareRow, NsmPairKind};
 use crate::units::{Dex, HeliumExcess, SolarMasses, Years};
-
-/// The generator version from which features list plan 11's binary classes, the catalogue's
-/// classes give up the features' share of their hosts, and a feature's binary members are drawn
-/// inside its hard–soft boundary (P11.T8.f; the hold of [`FeatureBinariesRules`]).
-///
-/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`FeatureBinariesRules::Unlisted`], the code of version 26 verbatim: no binary class is
-/// registered on a list, the catalogue holds every host and a binary member's orbits are
-/// unbounded. The tests reach the new arm through a galaxy built under `GalaxyRules::every_27_hold()`.
-/// The bump to 27 deletes this hold, [`FeatureBinariesRules`] with its `Unlisted` arm,
-/// `GalaxyRules::feature_binaries`, the `match`es that read it and the tripwire
-/// (`the_feature_binaries_are_held_only_until_the_27_bump`).
-pub(crate) const FEATURE_BINARIES_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether features hold plan 11's binary classes (the hold of [`FEATURE_BINARIES_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum FeatureBinariesRules {
-    /// Version 26's and before: no feature lists a binary class, the catalogue holds every host,
-    /// and a feature's binary members take no widest separation.
-    Unlisted,
-    /// Version 27's: the module documentation's.
-    Listed,
-}
 
 /// What an entry of a feature's list shares with its feature (P11.T8.f): its members' population,
 /// the range of their ages at the epoch, their composition, the feature's motion, and the origin
@@ -332,15 +307,11 @@ impl BinaryHost {
     }
 }
 
-/// The share of a carved class's hosts in `component` that the catalogue keeps under `galaxy`'s
-/// rules: all of them under the held arm, and from version 27 all but the features' share, which
-/// the features' lists hold ([`features_share`]).
+/// The share of a carved class's hosts in `component` that the catalogue keeps in `galaxy`: from
+/// version 27 all but the features' share, which the features' lists hold ([`features_share`]).
 #[must_use]
 pub(crate) fn catalogue_share(galaxy: &Galaxy, row: &ClassShareRow, component: &Component) -> f64 {
-    match galaxy.rules().feature_binaries {
-        FeatureBinariesRules::Unlisted => 1.0,
-        FeatureBinariesRules::Listed => 1.0 - features_share(galaxy, row, component),
-    }
+    1.0 - features_share(galaxy, row, component)
 }
 
 /// The share of a carved class's hosts in `component` that sit in catalogue features, whose
@@ -476,17 +447,13 @@ pub(crate) struct FeatureBinaries {
 
 impl FeatureBinaries {
     /// The binary classes of `feature`, whose members are `stars` where its list holds plan 09's
-    /// recent classes, or `None` under the hold's held arm and for a feature without members
-    /// ([`FeatureStars::of`]).
+    /// recent classes, or `None` for a feature without members ([`FeatureStars::of`]).
     #[must_use]
     pub(crate) fn of_feature(
         galaxy: &Galaxy,
         feature: &FeatureRecord,
         stars: Option<&FeatureStars>,
     ) -> Option<Self> {
-        if galaxy.rules().feature_binaries == FeatureBinariesRules::Unlisted {
-            return None;
-        }
         match stars {
             Some(stars) => Some(Self::of(galaxy, stars)),
             None => FeatureStars::of(galaxy, feature).map(|stars| Self::of(galaxy, &stars)),

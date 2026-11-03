@@ -27,17 +27,6 @@ fn listed() -> &'static Galaxy {
     GALAXY.get_or_init(|| milky_way(GalaxyRules::every_27_hold()))
 }
 
-/// The same galaxy under every 27 hold but P11.T8.f's.
-fn held() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| {
-        milky_way(GalaxyRules {
-            feature_binaries: FeatureBinariesRules::Unlisted,
-            ..GalaxyRules::every_27_hold()
-        })
-    })
-}
-
 /// The centre's list in `galaxy`, with its recent classes and its binaries.
 fn list_of(
     galaxy: &Galaxy,
@@ -54,17 +43,22 @@ fn list_of(
 /// The Milky Way's centre lists the five classes after its victims and its recent classes, at the
 /// 16-bit index: their expected hosts are the cluster's formed mass times each class's nuclear-disc
 /// rate, within P11.T8.e's forecast, and the list keeps its eight standard deviations with room to
-/// spare. Registering them moves no victim and no recent entry: under the held arm the list is the
-/// same up to its recent classes' last index. The counts, the drawn entries and the margin are
-/// printed for the record.
+/// spare. The binary classes' entries follow its victims and its recent entries. The counts, the
+/// drawn entries and the margin are printed for the record.
 #[test]
 fn the_centre_lists_the_binary_classes_after_its_recent_ones() {
-    let (on, off) = (listed(), held());
+    let on = listed();
     let (recent, list) = list_of(on);
-    let (_, before) = list_of(off);
-    let kept: Vec<ListEntry> = before.entries().collect();
-    let now: Vec<ListEntry> = list.entries().take(kept.len()).collect();
-    assert_eq!(kept, now);
+    let kept: Vec<ListEntry> = list
+        .entries()
+        .take_while(|e| {
+            !crate::galaxy::catalogue_classes::binary::feature::is_listed_binary(e.class())
+        })
+        .collect();
+    assert_ne!(kept.len(), 0);
+    assert!(list.entries().skip(kept.len()).all(|e| {
+        crate::galaxy::catalogue_classes::binary::feature::is_listed_binary(e.class())
+    }));
     let binaries = recent.binaries();
     let expected: f64 = binaries.expected().iter().map(|&(_, e)| e).sum();
     let forecast = centre_list_forecast(on.params()).unwrap();
@@ -102,9 +96,6 @@ fn the_centre_lists_the_binary_classes_after_its_recent_ones() {
         forecast.margin(8.0)
     );
     assert!(margin > 40_000.0, "{margin}");
-    assert!(before.entries().all(|e| {
-        !crate::galaxy::catalogue_classes::binary::feature::is_listed_binary(e.class())
-    }));
 }
 
 /// Each entry the centre keeps resolves through plan 09's resolve to the member it is, bit for

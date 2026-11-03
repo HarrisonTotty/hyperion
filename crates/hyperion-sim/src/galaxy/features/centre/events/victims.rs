@@ -881,7 +881,7 @@ mod tests {
     };
     use crate::galaxy::features::centre::testing::{milky_way_centre, milky_way_galaxy};
     use crate::galaxy::imf::MassBand;
-    use crate::galaxy::placement::{ResolveSystemError, resolve};
+    use crate::galaxy::placement::resolve;
     use crate::units::AstronomicalUnits;
 
     /// The Milky Way fixture's victims.
@@ -1050,17 +1050,14 @@ mod tests {
         assert_eq!(victims.victim(0), None);
         let past = victims.count() + 1;
         assert_eq!(victims.victim(past), None);
+        // From 27 plan 11's binary classes follow the victims on the centre's list (P11.T8.f), so
+        // the index past them may name one of theirs, but never a victim.
         for index in [0, past] {
             assert_eq!(
                 CentreVictims::one(galaxy, milky_way_centre(), index),
                 Ok(None)
             );
         }
-        let id = CentreMemberId::new(MemberSlot::FeatureLevel { index: past }).unwrap();
-        assert_eq!(
-            resolve(galaxy, SystemId::from(id)),
-            Err(ResolveSystemError::NoSuchSystem)
-        );
     }
 
     /// A victim's draws are its disruption's event stream from word 0: its pericentre's direction

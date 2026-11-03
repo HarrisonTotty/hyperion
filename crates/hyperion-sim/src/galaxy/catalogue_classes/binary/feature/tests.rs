@@ -1,14 +1,11 @@
-//! The tests of P11.T8.f's hold, `FEATURE_BINARIES_VERSION`, and of plan 11's binary classes on
-//! features' lists under every 27 hold.
+//! The tests of plan 11's binary classes on features' lists (P11.T8.f) under every 27 hold.
 
 use std::fmt::Write as _;
 
-use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::order::assert_order_independent;
 use std::sync::OnceLock;
 
 use super::*;
-use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::galaxy::POPULATIONS;
 use crate::galaxy::ages::SubDisc;
@@ -39,17 +36,6 @@ fn milky_way(rules: GalaxyRules) -> Galaxy {
 fn listed() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| milky_way(GalaxyRules::every_27_hold()))
-}
-
-/// The same galaxy under every 27 hold but this one: the held arm.
-fn held() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| {
-        milky_way(GalaxyRules {
-            feature_binaries: FeatureBinariesRules::Unlisted,
-            ..GalaxyRules::every_27_hold()
-        })
-    })
 }
 
 /// The processes the tests walk: the young disc's nurseries, two of the old thin disc's sub-discs'
@@ -93,77 +79,42 @@ fn the_entries() -> &'static [(FeatureRecord, u16, ListedBinary)] {
     ENTRIES.get_or_init(|| binary_entries(listed(), 300))
 }
 
-/// P11.T8.f is held until the 26 → 27 bump: the rules in force are version 26's and before, under
-/// which no feature lists a binary class.
+/// Features register the binary classes, and the catalogue keeps a share of every component's
+/// hosts in [0, 1], the rest the features'.
 #[test]
-fn the_feature_binaries_are_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < FEATURE_BINARIES_VERSION,
-        "the 26 → 27 bump puts P11.T8.f on the record: features and the galactic centre list plan \
-         11's binary classes, the catalogue's classes give up the features' share of their hosts, \
-         and a feature's binary members are drawn inside its hard–soft boundary. Delete \
-         `FEATURE_BINARIES_VERSION`, `FeatureBinariesRules` with its `Unlisted` arm, \
-         `GalaxyRules::feature_binaries`, the `match`es that read it and this test, in the bump's \
-         own checkpoint commit"
-    );
-    assert_eq!(
-        GalaxyRules::of_version(GENERATOR_VERSION).feature_binaries,
-        FeatureBinariesRules::Unlisted
-    );
-}
-
-/// The held arm is version 26's: no feature registers a binary class, its list is plan 09's
-/// classes alone, and the catalogue keeps every host of every component.
-#[test]
-fn the_held_arm_lists_no_binary_class_and_the_catalogue_keeps_every_host() {
-    let (off, on) = (held(), listed());
+fn features_list_the_binary_classes_and_the_catalogue_keeps_the_rest() {
+    let on = listed();
     let mut listing = 0;
     for (_, feature) in features(on, 40) {
-        assert_eq!(FeatureBinaries::of_feature(off, &feature, None), None);
-        let list = FeatureLevelList::of(off, &feature);
-        assert!(
-            list.entries().all(|e| !is_listed_binary(e.class())),
-            "{:?}",
-            feature.id()
-        );
         if FeatureBinaries::of_feature(on, &feature, None).is_some_and(|b| !b.is_empty()) {
             listing += 1;
         }
     }
     assert!(listing > 40, "{listing} features list a binary class");
-    for component in off.fields().components() {
+    for component in on.fields().components() {
         for row in CLASS_SHARES.rows() {
-            assert_same_bits(catalogue_share(off, row, component), 1.0);
             let kept = catalogue_share(on, row, component);
             assert!((0.0..=1.0).contains(&kept) && kept.is_finite(), "{kept}");
         }
     }
 }
 
-/// Registering the binary classes moves no entry of plan 09's: every recent entry of a feature's
-/// list, its supernovae and its luminous blue variables, keeps its index, its class, its number,
-/// its position and its member, and the binary classes' entries follow them.
+/// The binary classes' entries follow plan 09's on every feature's list: its recent entries, its
+/// supernovae and its luminous blue variables, come first, and every entry after them is of a
+/// binary class.
 #[test]
-fn registering_the_binary_classes_leaves_every_recent_entry_where_it_was() {
-    let (off, on) = (held(), listed());
+fn the_binary_classes_entries_follow_every_recent_entry() {
+    let on = listed();
     let mut recent = 0;
     let mut binaries = 0;
     for (_, feature) in features(on, 150) {
-        let (before, after) = (
-            FeatureLevelList::of(off, &feature),
-            FeatureLevelList::of(on, &feature),
-        );
-        let kept: Vec<_> = before.entries().collect();
-        let now: Vec<_> = after.entries().take(kept.len()).collect();
-        assert_eq!(kept, now, "{:?}", feature.id());
-        for entry in &kept {
-            assert_eq!(
-                before.recent_entry(off, entry.index()),
-                after.recent_entry(on, entry.index())
-            );
-            recent += 1;
-        }
-        let rest: Vec<_> = after.entries().skip(kept.len()).collect();
+        let list = FeatureLevelList::of(on, &feature);
+        let kept: Vec<_> = list
+            .entries()
+            .take_while(|e| !is_listed_binary(e.class()))
+            .collect();
+        recent += kept.len();
+        let rest: Vec<_> = list.entries().skip(kept.len()).collect();
         assert!(rest.iter().all(|e| is_listed_binary(e.class())));
         binaries += rest.len();
     }
@@ -359,7 +310,7 @@ fn a_million_listed_hosts_scan_marks_run_no_engine() {
 /// side), to 10⁻⁶. The field holds none: the grid redraws them (P11.T7).
 #[test]
 fn the_catalogue_and_the_features_hold_each_class_s_budget() {
-    let (off, on) = (held(), listed());
+    let on = listed();
     let formed = on.mean_formed_mass().value();
     let mut report = String::new();
     for row in CLASS_SHARES.rows() {
@@ -385,7 +336,6 @@ fn the_catalogue_and_the_features_hold_each_class_s_budget() {
                 .iter()
                 .map(|c| rate * formed * systems(c) * features_share(on, row, c))
                 .sum();
-            let whole = catalogue_hosts(off, carved, population);
             let closure = (catalogue + features) / budget - 1.0;
             writeln!(
                 report,
@@ -397,10 +347,6 @@ fn the_catalogue_and_the_features_hold_each_class_s_budget() {
             assert!(
                 closure.abs() < 1e-6,
                 "{carved:?} {population:?}: {closure:e}"
-            );
-            assert!(
-                (whole / budget - 1.0).abs() < 1e-6,
-                "{carved:?} {population:?}"
             );
         }
     }

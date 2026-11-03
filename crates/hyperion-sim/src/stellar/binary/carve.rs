@@ -18,7 +18,6 @@
 //! (P11.T8.f).
 
 use crate::galaxy::Galaxy;
-use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::stellar::multiplicity::MultiplicityContext;
 
@@ -27,12 +26,10 @@ use crate::stellar::multiplicity::MultiplicityContext;
 /// binary member, whose carved binaries its feature's list holds (P11.T8.f). Every other forced
 /// context's binaries are its caller's.
 #[must_use]
-pub(crate) fn redraws(galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityContext) -> bool {
+pub(crate) fn redraws(_galaxy: &Galaxy, record: &SystemRecord, ctx: MultiplicityContext) -> bool {
     match (record.origin(), ctx) {
-        (SystemOrigin::Grid(_), MultiplicityContext::Free) => true,
-        (SystemOrigin::FeatureMember { .. }, MultiplicityContext::ForcedMultiple { .. }) => {
-            galaxy.rules().feature_binaries == FeatureBinariesRules::Listed
-        }
+        (SystemOrigin::Grid(_), MultiplicityContext::Free)
+        | (SystemOrigin::FeatureMember { .. }, MultiplicityContext::ForcedMultiple { .. }) => true,
         (
             SystemOrigin::Grid(_),
             MultiplicityContext::ForcedSingle | MultiplicityContext::ForcedMultiple { .. },

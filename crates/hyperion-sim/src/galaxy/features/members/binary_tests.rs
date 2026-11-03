@@ -10,7 +10,7 @@ use hyperion_testkit::order::assert_order_independent;
 use super::placement::recycled_shares;
 use super::*;
 use crate::Seed;
-use crate::galaxy::catalogue_classes::binary::feature::{FeatureBinariesRules, globular_hosts};
+use crate::galaxy::catalogue_classes::binary::feature::globular_hosts;
 use crate::galaxy::features::FeatureProcess;
 use crate::galaxy::features::catalogue::FeatureCatalogue;
 use crate::galaxy::features::interior::MemberClassTable;
@@ -25,28 +25,17 @@ use crate::stellar::multiplicity::RedrawAttempt;
 use crate::stellar::multiplicity::draw_hierarchy_of_composition;
 use crate::time::UniverseTime;
 
-/// The Milky Way under every 27 hold, or under every 27 hold but this task's if `held`.
-fn milky_way(held: bool) -> &'static Galaxy {
+/// The Milky Way under every 27 hold.
+fn milky_way() -> &'static Galaxy {
     static LISTED: OnceLock<Galaxy> = OnceLock::new();
-    static HELD: OnceLock<Galaxy> = OnceLock::new();
-    let build = |rules| {
+    LISTED.get_or_init(|| {
         Galaxy::from_params_with_rules(
             Seed::new(0x1108_f000_0000_0002),
             GalaxyParams::milky_way_like(),
-            rules,
+            GalaxyRules::every_27_hold(),
         )
         .unwrap()
-    };
-    if held {
-        HELD.get_or_init(|| {
-            build(GalaxyRules {
-                feature_binaries: FeatureBinariesRules::Unlisted,
-                ..GalaxyRules::every_27_hold()
-            })
-        })
-    } else {
-        LISTED.get_or_init(|| build(GalaxyRules::every_27_hold()))
-    }
+    })
 }
 
 /// A globular of the galaxy, whose ID and origin 47 Tucanae's members take, 47 Tucanae's model and
@@ -139,9 +128,9 @@ fn characteristic_age(state: &crate::stellar::remnant::PulsarState) -> f64 {
 /// each class and its marked members are printed for the record.
 #[test]
 fn forty_seven_tucanae_s_marked_pulsars_are_recycled_and_none_young() {
-    let galaxy = milky_way(false);
+    let galaxy = milky_way();
     let (feature, model, table) = tucanae(galaxy);
-    let shares = recycled_shares(galaxy, &model, &table);
+    let shares = recycled_shares(&model, &table);
     let pulsars = table.millisecond_pulsars(&model);
     let neutron_stars = table.expected_of(ClassKind::NeutronStar);
     assert!(
@@ -244,9 +233,9 @@ fn forty_seven_tucanae_s_marked_pulsars_are_recycled_and_none_young() {
 /// star above the turn-off at the epoch, drawn conditionally.
 #[test]
 fn forty_seven_tucanae_s_marked_stragglers_lie_above_the_turn_off() {
-    let galaxy = milky_way(false);
+    let galaxy = milky_way();
     let (feature, model, table) = tucanae(galaxy);
-    let shares = recycled_shares(galaxy, &model, &table);
+    let shares = recycled_shares(&model, &table);
     assert!(shares.blue_stragglers() > 0.0, "{shares:?}");
     let classes: Vec<MemberClass> = MassBand::ALL
         .iter()
@@ -281,11 +270,10 @@ fn forty_seven_tucanae_s_marked_stragglers_lie_above_the_turn_off() {
 }
 
 /// A binary member's orbits lie inside its cluster's hard–soft boundary at its radius, the
-/// separation at which a pair of its class's system mass orbits at the cluster's dispersion;
-/// under the held arm it takes none.
+/// separation at which a pair of its class's system mass orbits at the cluster's dispersion.
 #[test]
 fn a_binary_member_s_orbits_lie_inside_the_hard_soft_boundary() {
-    let galaxy = milky_way(false);
+    let galaxy = milky_way();
     let (feature, model, table) = tucanae(galaxy);
     let class = *table
         .classes(MassBand::B)
@@ -329,20 +317,13 @@ fn a_binary_member_s_orbits_lie_inside_the_hard_soft_boundary() {
         boundary.value() / 1.495_978_707e11,
         widest / 1.495_978_707e11
     );
-    let held = milky_way(true);
-    let (feature, model, _) = tucanae(held);
-    for member in members(held, (&feature, &model), &class, RecycledShares::NONE, 20) {
-        assert_eq!(member.max_separation(), None);
-        assert_eq!(member.recycled(), RecycledMark::Unmarked);
-    }
 }
 
 /// From version 27 an open cluster's living binaries are plan 11's multiple fraction inside its
-/// hard–soft boundary, band by band; a globular's keep 5% and 1%; and the held arm keeps the
-/// scratch 30%.
+/// hard–soft boundary, band by band; and a globular's keep 5% and 1%.
 #[test]
 fn an_open_cluster_s_binaries_are_its_hard_pairs() {
-    let (on, off) = (milky_way(false), milky_way(true));
+    let on = milky_way();
     let feature = FeatureCatalogue::walk_process(
         on,
         FeatureProcess::OldOpenCluster(crate::galaxy::ages::SubDisc::First),
@@ -376,8 +357,6 @@ fn an_open_cluster_s_binaries_are_its_hard_pairs() {
             "{band:?}: {share} {model_share}"
         );
         assert!((0.05..0.7).contains(&share), "{band:?}: {share}");
-        let (held, _) = share_of(off, band);
-        assert!((held - BINARY_FRACTIONS.2).abs() < 1e-9, "{band:?}: {held}");
         writeln!(
             report,
             "{band:?}: mean {:.3} M☉, binaries {share:.4}",
@@ -400,7 +379,7 @@ fn an_open_cluster_s_binaries_are_its_hard_pairs() {
     )
     .unwrap();
     eprint!("{report}");
-    // A globular's are its populations' fixed shares under either arm.
+    // A globular's are its populations' fixed shares.
     let (tuc_feature, tuc, _) = tucanae(on);
     let table = MemberClassTable::new(on, &tuc, tuc_feature.reach(), [1.0, 0.0, 0.0]);
     for (generation, want) in [
@@ -428,9 +407,9 @@ fn an_open_cluster_s_binaries_are_its_hard_pairs() {
 #[test]
 fn a_marked_member_s_brief_is_its_stars_and_its_draw_its_id_s() {
     use crate::stellar::brief::{BriefModel, BriefRoute};
-    let galaxy = milky_way(false);
+    let galaxy = milky_way();
     let (feature, model, table) = tucanae(galaxy);
-    let shares = recycled_shares(galaxy, &model, &table);
+    let shares = recycled_shares(&model, &table);
     let class = *table
         .classes(MassBand::E)
         .find(|(c, _)| c.kind == ClassKind::NeutronStar)
@@ -477,9 +456,9 @@ fn a_marked_member_s_brief_is_its_stars_and_its_draw_its_id_s() {
 #[test]
 #[ignore = "slow: searches some 60 marked members' attempts twice, about two minutes"]
 fn a_marked_member_s_attempt_is_the_one_each_attempt_generated_whole_finds() {
-    let galaxy = milky_way(false);
+    let galaxy = milky_way();
     let (feature, model, table) = tucanae(galaxy);
-    let shares = recycled_shares(galaxy, &model, &table);
+    let shares = recycled_shares(&model, &table);
     let position = at(&feature, [1.0, 0.0, 0.0]);
     let (mut stragglers, mut pulsars, mut found) = (0, 0, 0);
     for band in MassBand::ALL {

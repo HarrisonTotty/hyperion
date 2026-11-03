@@ -51,7 +51,6 @@ use super::{
     INTERNAL_SPEED_SIGMAS, MemberRecord, RecycledShares, draw_member_marked, equipartition_factor,
     is_at_the_turn_off,
 };
-use crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules;
 
 /// A feature's interior: what placing its members needs, built once per feature and kept by the
 /// caller (P09.T21).
@@ -105,7 +104,7 @@ impl FeatureInterior {
             UNBOUND_PAD_SPEED.value()
         );
         let claims = FeatureStars::claiming(galaxy, feature).map(Box::new);
-        let recycled = recycled_shares(galaxy, &model, &table);
+        let recycled = recycled_shares(&model, &table);
         Some(Self {
             feature: *feature,
             model,
@@ -487,16 +486,9 @@ fn member_speed_bound(
 /// marks; P11.T8.f): its millisecond pulsars, `table`'s encounter-rate law capped at its neutron
 /// stars ([`MemberClassTable::millisecond_pulsars`]), over its expected neutron stars, and its
 /// blue stragglers ([`ClusterModel::blue_stragglers`]) over its expected binaries at the turn-off;
-/// none under the held arm, and none of a kind a cluster holds no member of.
+/// none of a kind a cluster holds no member of.
 #[must_use]
-pub(crate) fn recycled_shares(
-    galaxy: &Galaxy,
-    model: &ClusterModel,
-    table: &MemberClassTable,
-) -> RecycledShares {
-    if galaxy.rules().feature_binaries == FeatureBinariesRules::Unlisted {
-        return RecycledShares::NONE;
-    }
+pub(crate) fn recycled_shares(model: &ClusterModel, table: &MemberClassTable) -> RecycledShares {
     let neutron_stars = table.expected_of(ClassKind::NeutronStar);
     let at_turn_off: f64 = MassBand::ALL
         .iter()
