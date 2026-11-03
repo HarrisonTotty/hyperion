@@ -39,6 +39,7 @@ import {
   type StrideScale,
 } from "./strides";
 import { STRIDES } from "./templates";
+import { terrainMaskCluster } from "./terrain";
 
 /**
  * The plain cull's DAG LOD spheres (binding 8; R14.T4.b), and its stand-ins for the two-pass
@@ -142,6 +143,12 @@ export interface CullInstance {
    * and writing no visibility (T3.d); absent, not.
    */
   readonly subPatch?: boolean;
+  /**
+   * Its sub-patch word (terrain's `Instance.sub.x`, word 8), whose bit 31 makes it a stand-in's mask
+   * of its page's own blocks (plan R14, Design note 19; `terrain.ts`' `terrainMaskCluster`); absent,
+   * 0.
+   */
+  readonly subWord?: number;
 }
 
 /** What the two-pass occlusion's twin reads of a dispatch (T3.d; `clusterCull.wgsl`'s head). */
@@ -548,8 +555,8 @@ function templateOf(
 
 /**
  * Whether `pass` keeps `record`, at `centreM`, camera-relative, for `instance` (see the kernel's
- * head): a cluster at all, its instance entering the pass, its sphere kept, and a DAG record on
- * the cut.
+ * head): a cluster at all, its instance entering the pass, in its mask where it is one, its sphere
+ * kept (but a mask's strip's), and a DAG record on the cut.
  */
 function recordKept(
   input: CullTwinInput,
@@ -561,10 +568,13 @@ function recordKept(
   centreM: Vec3,
   slackScale: number,
 ): boolean {
+  const masked = terrainMaskCluster(instance.subWord ?? 0, cluster);
   if (
     !(record.radiusM >= 0) ||
     (instance.passMask & (1 << p)) === 0 ||
+    masked === 0 ||
     (instance.whole !== true &&
+      masked !== 2 &&
       !passKeeps(pass, input.viewAxis, centreM, record.radiusM, slackScale))
   ) {
     return false;
@@ -608,11 +618,15 @@ function orderedPass(
 function lateSees(
   occlusion: CullOcclusionTwin,
   instance: CullInstance,
+  cluster: number,
   centreM: Vec3,
   radiusM: number,
 ): boolean {
   return (
-    instance.whole === true || occlusion.refuses === null || !occlusion.refuses(centreM, radiusM)
+    instance.whole === true ||
+    terrainMaskCluster(instance.subWord ?? 0, cluster) === 2 ||
+    occlusion.refuses === null ||
+    !occlusion.refuses(centreM, radiusM)
   );
 }
 
@@ -657,7 +671,7 @@ export function cullMarksTwin(
         (phase === "early"
           ? instance.subPatch !== true && occlusion.visible(instance.page, cluster)
           : (occlusion.earlyMarks?.[at] ?? NO_MARK) === NO_MARK &&
-            lateSees(occlusion, instance, centre, record.radiusM)));
+            lateSees(occlusion, instance, cluster, centre, record.radiusM)));
     if (marked) {
       marks[at] = t;
     }
@@ -689,7 +703,7 @@ export function cullVisibilityTwin(
     const kept =
       recordKept(input, pass, p, instance, cluster, record, centre, slackScale) &&
       templateOf(record, cluster, pass, instance, input, centre) < input.templates &&
-      lateSees(occlusion, instance, centre, record.radiusM);
+      lateSees(occlusion, instance, cluster, centre, record.radiusM);
     visible.set(instance.page * input.clustersPerPage + cluster, kept);
   });
   return visible;

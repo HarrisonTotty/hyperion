@@ -301,7 +301,8 @@ fn patchVertexOf(grid : vec3f, instance : u32) -> PatchVertex {
   var morphHeightM : f32;
   var nu : vec3f;
   var at = vec2f(f32(x), f32(y));
-  if ((inst.sub.x & 31u) == 0u) {
+  // A whole patch's, and a stand-in's mask's, which draws its slot's patch's own blocks.
+  if ((inst.sub.x & 31u) == 0u || (inst.sub.x & 0x80000000u) != 0u) {
     own = ownOffset(inst.slot, rec, x, y);
     morph = morphOffset(inst.slot, rec, x, y);
     ownHeightM = heightAt(inst.slot, x, y, 0u);

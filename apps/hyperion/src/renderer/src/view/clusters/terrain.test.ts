@@ -10,6 +10,7 @@ import { worstOutsideClusters } from "../../test/clusterBounds";
 import { WGS84_FIGURE } from "../../test/terrainFixtures";
 import { vertexDir } from "../terrain/cube";
 import { litInteriorMeshData } from "../terrain/gpu/resources";
+import { subPatchWord } from "../terrain/gpu/uniforms";
 import type { PatchKey } from "../terrain/patchKey";
 import { type BodyFigure, planetGeometry, surfacePoint } from "../terrain/planet";
 import {
@@ -25,6 +26,8 @@ import {
   TERRAIN_PAGE_CLUSTERS,
   terrainClusterGrid,
   terrainClusterPlace,
+  terrainMaskCluster,
+  TERRAIN_SUB_PATCH_MASK,
   type TerrainClusterSource,
   terrainTemplateRef,
   writeTerrainClusterRecords,
@@ -184,6 +187,53 @@ function measuredSource(): {
     ),
   };
 }
+
+describe("a stand-in's mask of its slot's patch's own blocks (plan R14, Design note 19)", () => {
+  it("draws the blocks over its area, a 4 × 4, 2 × 2 or 1 × 1 set, and the first of each side's strips, whatever their spheres", () => {
+    const counts = [1, 2, 3].map((levels) => {
+      const word = TERRAIN_SUB_PATCH_MASK | subPatchWord(levels, 0, 0);
+      const of = Array.from({ length: TERRAIN_PAGE_CLUSTERS }, (_, c) =>
+        terrainMaskCluster(word, c),
+      );
+      return [of.filter((m) => m === 1).length, of.filter((m) => m === 2).length];
+    });
+    expect([counts, terrainMaskCluster(subPatchWord(2, 1, 1), 100)]).toEqual([
+      [
+        [16, 16],
+        [4, 8],
+        [1, 4],
+      ],
+      1,
+    ]);
+  });
+
+  it("lays its strips on its set's sides anticlockwise, as a patch's edges are, its own edge strips where a side lies on one", () => {
+    // Two levels down at part (1, 2): the set x 16 to 32, y 32 to 48.
+    const word = TERRAIN_SUB_PATCH_MASK | subPatchWord(2, 1, 2);
+    const at = (cluster: number, lx: number): string =>
+      terrainClusterGrid(cluster, [lx, 0, 1], word).slice(0, 2).join();
+    const corner = TERRAIN_SUB_PATCH_MASK | subPatchWord(1, 0, 0);
+    expect([
+      [at(64, 0), at(64 + 1, 8)],
+      [at(72, 0), at(72 + 1, 8)],
+      [at(80, 0), at(80 + 1, 8)],
+      [at(88, 0), at(88 + 1, 8)],
+      terrainClusterGrid(64 + 3, [5, 0, 1], corner)
+        .slice(0, 2)
+        .join(),
+      terrainClusterGrid(64 + 3, [5, 0, 1])
+        .slice(0, 2)
+        .join(),
+    ]).toEqual([
+      ["16,32", "32,32"],
+      ["32,32", "32,48"],
+      ["32,48", "16,48"],
+      ["16,48", "16,32"],
+      "29,0",
+      "29,0",
+    ]);
+  });
+});
 
 describe("terrain's cluster records (plan R14, R14.T1.b)", () => {
   /** Every vertex the GPU places of a random patch, its morphs and its feet, against its clusters. */

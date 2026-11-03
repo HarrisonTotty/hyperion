@@ -510,7 +510,8 @@ export class InstanceRecords {
    * @param quadrant - The patch's quadrant in that parent ({@link parentQuadrant}), 0 to 3.
    * @param holds - The patch's morph holds at its coarse–fine edges and corners
    * (`CoarseFineHolds`; R10.T8.c), 0 to {@link MAX_MORPH_HOLDS}, packed above the quadrant.
-   * @param sub - The sub-patch of the slot's patch it draws ({@link subPatchWord}), or 0 for the
+   * @param sub - The sub-patch of the slot's patch it draws ({@link subPatchWord}), with bit 31 a
+   * mask of that patch's own blocks (`clusters/terrain.ts`' `TERRAIN_SUB_PATCH_MASK`), or 0 for the
    * whole patch.
    * @param edgeFades - Its edges' fades, a byte each in `EDGES`' order (R10.T16.i), 0 for none.
    * @param cornerFades - Its corners' fades, a byte each in `cornerNeighbours`' order, 0 for none.
@@ -597,8 +598,8 @@ export class InstanceRecords {
     if (!Number.isInteger(holds) || holds < 0 || holds > MAX_MORPH_HOLDS) {
       throw new RangeError(`morph holds ${holds} are not 0 to ${MAX_MORPH_HOLDS}`);
     }
-    if (!Number.isInteger(sub) || sub < 0 || sub > 0x7fff_ffff) {
-      throw new RangeError(`sub-patch word ${sub} is not 31 bits`);
+    if (!Number.isInteger(sub) || sub < 0 || sub > 0xffff_ffff) {
+      throw new RangeError(`sub-patch word ${sub} is not a u32`);
     }
     for (const word of [edgeFades, cornerFades, fades, strideHoldFades]) {
       if (!Number.isInteger(word) || word < 0 || word > 0xffff_ffff) {

@@ -30,6 +30,9 @@
  * with its neighbours' errors and its edges'; some instances its quadrant word's bit 18 (stride 1)
  * and some its edges' holds at k = 0 (at most 4 on those edges), the blocks' and strips' template
  * references their places, so that the seventh pass's buckets take every stride of both shapes.
+ * Every seventh instance is a stand-in's mask of its page's own blocks (plan R14, Design note 19;
+ * word 8's bit 31) one to three levels down, so that every pass keeps its blocks alone, by their
+ * spheres, and its strips whatever theirs.
  */
 
 import type { Vec3 } from "../geometry/vec3";
@@ -76,6 +79,8 @@ import {
   type StrideScale,
 } from "../view/clusters/strides";
 import { TERRAIN_DISCARD_TEMPLATES, terrainClusterMesh } from "../view/clusters/templates";
+import { TERRAIN_SUB_PATCH_MASK } from "../view/clusters/terrain";
+import { subPatchWord } from "../view/terrain/gpu/uniforms";
 import { quaternionFromRows } from "../view/camera/quaternion";
 import { frustumOf } from "../view/terrain/cull";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
@@ -303,6 +308,17 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       // The edges' bands as the record holds them and the kernel reads them back.
       edgeBandsM: heldEdgeBandsM(bandsM),
       // Every fifth instance at stride 1 (the forced region's), every third's edges at most at 4.
+      // Every seventh a mask one to three levels down at a random part.
+      subWord:
+        n % 7 === 3
+          ? (TERRAIN_SUB_PATCH_MASK |
+              subPatchWord(
+                1 + (n % 3),
+                Math.floor(nextStride() * 2 ** (1 + (n % 3))),
+                Math.floor(nextStride() * 2 ** (1 + (n % 3))),
+              )) >>>
+            0
+          : 0,
       quadrantWord:
         (n % 5 === 0 ? INSTANCE_FINEST : 0) |
         (n % 3 === 0 ? Math.floor(nextStride() * 16) << 2 : 0),
@@ -419,6 +435,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       words.setFloat32(bytes * n + 8, instance.originM.z, true);
       words.setUint32(bytes * n + 12, instance.page, true);
       words.setUint32(bytes * n + 28, instance.quadrantWord, true);
+      words.setUint32(bytes * n + 32, instance.subWord, true);
       words.setFloat32(bytes * n + 48, instance.strideScale.statedM, true);
       words.setFloat32(bytes * n + 52, instance.strideScale.perErrorM, true);
       for (let h = 0; h < EDGE_BANDS; h += 1) {

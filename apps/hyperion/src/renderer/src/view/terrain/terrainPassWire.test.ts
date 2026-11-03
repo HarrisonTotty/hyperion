@@ -23,6 +23,7 @@ import type {
 } from "../engine/types";
 import { CULL_INPUT_WHOLE } from "../clusters/cull";
 import { CULL_PASS_BYTES } from "../clusters/cullPass";
+import { TERRAIN_MASK_LEVELS, TERRAIN_SUB_PATCH_MASK } from "../clusters/terrain";
 import {
   GEOMETRY_BEFORE_R14,
   type GeometrySettings,
@@ -838,7 +839,7 @@ describe("the wireframe's interior patches on the cluster path (plan R14, R14.T4
     ]);
   });
 
-  it("draws a stand-in of an interior bake among them, a sub-patch kept whole by the cull", async () => {
+  it("draws a stand-in of an interior bake among them, a sub-patch one to three levels down as a mask its cull tests and a deeper one kept whole (Design note 19)", async () => {
     const made = await clusteredPass();
     streamed(made);
     // Nearer, with nothing baked: the finer patches asked for are drawn by their resident ancestors.
@@ -854,9 +855,15 @@ describe("the wireframe's interior patches on the cluster path (plan R14, R14.T4
     const subPatches = Array.from({ length: records.length / WORDS }, (_, k) => k).filter(
       (k) => (records[k * WORDS + INSTANCE_SUB_PATCH_WORD] ?? 0) !== 0,
     );
+    const masked = (k: number): boolean =>
+      ((records[k * WORDS + INSTANCE_SUB_PATCH_WORD] ?? 0) & TERRAIN_SUB_PATCH_MASK) !== 0;
+    const levels = (k: number): number => (records[k * WORDS + INSTANCE_SUB_PATCH_WORD] ?? 0) & 31;
+    const whole = (k: number): boolean => ((inputs[2 * k] ?? 0) & CULL_INPUT_WHOLE) !== 0;
     expect([
       subPatches.length > 0,
-      subPatches.every((k) => ((inputs[2 * k] ?? 0) & CULL_INPUT_WHOLE) !== 0),
+      subPatches.every((k) =>
+        levels(k) <= TERRAIN_MASK_LEVELS ? masked(k) && !whole(k) : !masked(k) && whole(k),
+      ),
     ]).toEqual([true, true]);
   });
 

@@ -46,6 +46,8 @@ import {
   packClusterRecord,
 } from "./record";
 import { HZB_PARAMS_BYTES } from "./hzb";
+import { TERRAIN_SUB_PATCH_MASK } from "./terrain";
+import { subPatchWord } from "../terrain/gpu/uniforms";
 import {
   EDGE_BANDS,
   edgeBandIndex,
@@ -86,6 +88,11 @@ function cascade(extra: Partial<CascadeCullPass> = {}): CascadeCullPass {
     receivers: null,
     ...extra,
   };
+}
+
+/** A mask's strips, the first `side` of each of a page's four edges' eight. */
+function maskStrips(side: number): number[] {
+  return Array.from({ length: 4 * side }, (_, n) => 64 + 8 * Math.floor(n / side) + (n % side));
 }
 
 /** The bits of a measured record's half-float errors e₁, e₂, e₄ and e₈, m. */
@@ -545,6 +552,51 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
       8: [256 * 1 + 0],
       12: [256 * 1 + 2],
     });
+  });
+
+  /**
+   * The clusters a camera pass keeps of a page whose blocks and strips stand before the camera and
+   * whose strips' spheres behind it, for an instance of sub-patch word `subWord`.
+   */
+  function maskKept(subWord: number): number[] {
+    const records = Array.from({ length: 116 }, (_, c) =>
+      c < 64
+        ? record({ x: 0, y: 0, z: -50 }, 1)
+        : c < 96
+          ? record({ x: 0, y: 0, z: 50 }, 1, "terrain-skirt")
+          : record({ x: 0, y: 0, z: -50 }, 1, "terrain-fin"),
+    );
+    const buckets = cullTwin({
+      instances: [{ originM: Z, page: 0, passMask: 0b1, unitM: 1, subWord }],
+      records: (_page, cluster) => records[cluster] ?? record(Z, 0),
+      clustersPerPage: records.length,
+      rotationColumns: [X, Y, Z],
+      passes: [CAMERA],
+      places: [{ bucketBase: 0, listBase: 0 }],
+      templates: 16,
+      viewAxis: { x: 0, y: 0, z: -1 },
+    });
+    return [...buckets.values()].flat().toSorted((a, b) => a - b);
+  }
+
+  it("keeps a stand-in's mask's blocks over its area by their spheres, its strips along their sides whatever theirs, and no other cluster (Design note 19)", () => {
+    // One level down at part (1, 0): blocks 4 to 7 of rows 0 to 3, and four strips a side; three
+    // down at (5, 2): block 21 and one strip a side.
+    const one = Array.from({ length: 16 }, (_, n) => 8 * Math.floor(n / 4) + 4 + (n % 4));
+    expect([
+      maskKept(TERRAIN_SUB_PATCH_MASK | subPatchWord(1, 1, 0)),
+      maskKept(TERRAIN_SUB_PATCH_MASK | subPatchWord(3, 5, 2)),
+    ]).toEqual([
+      [...one, ...maskStrips(4)],
+      [21, ...maskStrips(1)],
+    ]);
+  });
+
+  it("keeps every block and fin of an instance that is not a mask by its sphere, a sub-patch's too", () => {
+    const kept = Array.from({ length: 64 }, (_, c) => c).concat(
+      Array.from({ length: 20 }, (_, n) => 96 + n),
+    );
+    expect([maskKept(0), maskKept(subPatchWord(2, 1, 1))]).toEqual([kept, kept]);
   });
 
   it("takes stride 1 in a camera pass for an instance without stride bands, whatever its cap and tolerance, so that the wireframe's contours stand on the stride-1 grid (R14.T4.c)", () => {

@@ -56,6 +56,10 @@
 //   does not enter it). An instance that is a sub-patch of its slot (its `sub.x`, word 8, not 0 in
 //   its low five bits) shares its slot's bits with others, so it is never marked early and writes
 //   no bit; one kept whole is never refused.
+// - _A stand-in's mask_ (plan R14, Design note 19; word 8's bit 31): an instance drawing its slot's
+//   patch's own blocks over its area keeps those alone, by their spheres, and its strips along the
+//   set's sides whatever theirs, which do not bound them (`mask_cluster`; `clusters/terrain.ts`'
+//   `terrainMaskCluster`).
 // - _The DAG cut_ (R14.T4.b, a record with the flags' bit 4): kept only where its own error, `f32`
 //   in its error bytes' first word, is within the pass's tolerance at its group's sphere, the
 //   record's own, and its parent's, in the second, is not at its parent group's, its `lods` entry
@@ -455,6 +459,28 @@ fn cluster_bands(scale : vec2f, page : u32, c : u32, base : u32) -> vec3f {
   return bands;
 }
 
+// `clusters/terrain.ts`' TERRAIN_SUB_PATCH_MASK: a sub-patch word's bit of a stand-in's mask.
+const SUB_PATCH_MASK : u32 = 0x80000000u;
+
+// How an instance of sub-patch word `sub` draws its page's cluster `c` (`clusters/terrain.ts`'
+// `terrainMaskCluster`): 1 by its sphere, for every cluster of one that is not a mask and a mask's
+// own blocks; 2 whatever its sphere, for a mask's strips along its set's sides; 0 for any other.
+fn mask_cluster(sub : u32, c : u32) -> u32 {
+  if ((sub & SUB_PATCH_MASK) == 0u) {
+    return 1u;
+  }
+  let side = 8u >> (sub & 31u);
+  let b0 = vec2u((sub >> 5u) & 0x1fffu, (sub >> 18u) & 0x1fffu) * side;
+  if (c < 64u) {
+    let b = vec2u(c % 8u, c / 8u);
+    return select(0u, 1u, all(b >= b0) && all(b < b0 + vec2u(side)));
+  }
+  if (c < 96u) {
+    return select(0u, 2u, (c - 64u) % 8u < side);
+  }
+  return 0u;
+}
+
 // A camera pass's stride's level for a strided record (see the module's head; `strides.ts`'
 // `cameraStrideLevel`): `bands` the record's (`cluster_bands`), `quadrant` its instance's quadrant
 // word, `distance` the record's sphere's nearest point.
@@ -542,9 +568,11 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
   var quadrant = 0u;
   var scale = vec2f(0.0);
   var sub = false;
+  var sub_word = 0u;
   if (params.counts.y >= 16u) {
     quadrant = instance_words[base + 7u];
-    sub = (instance_words[base + 8u] & 31u) != 0u;
+    sub_word = instance_words[base + 8u];
+    sub = (sub_word & 31u) != 0u;
     scale = vec2f(bitcast<f32>(instance_words[base + 12u]), bitcast<f32>(instance_words[base + 13u]));
   }
   // A slot's visibility words, a bit a cluster.
@@ -557,6 +585,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
     let centre = origin + page_to_instance(record.centre);
     let shape = record.flags & 0xfu;
     let real = record.radius >= 0.0;
+    let masked = mask_cluster(sub_word, c);
     let dag = (record.flags & CLUSTER_FLAG_DAG) != 0u;
     var parent_centre = centre;
     var parent_radius = record.radius;
@@ -575,7 +604,8 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
       let enters = real && (input.x & (1u << p)) != 0u;
       let keeps =
         enters &&
-        (whole || pass_keeps(cull_pass, centre, record.radius)) &&
+        masked != 0u &&
+        (whole || masked == 2u || pass_keeps(cull_pass, centre, record.radius)) &&
         (!dag || dag_drawn(cull_pass, record, centre, parent_centre, parent_radius));
       var level = 0u;
       if (cull_pass.header.x == PASS_CASCADE) {
@@ -596,7 +626,8 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
       }
       if (cull_pass.header.x == PASS_CAMERA_LATE) {
         let early = marks[mark] != NO_MARK;
-        let visible = keeps && t < params.templates && (whole || !occlusion_refuses(centre, record.radius));
+        let visible =
+          keeps && t < params.templates && (whole || masked == 2u || !occlusion_refuses(centre, record.radius));
         marks[mark] = select(NO_MARK, t, visible && !early);
         if (!sub) {
           occlusion_write(word, bit, visible);

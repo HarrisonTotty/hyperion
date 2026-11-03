@@ -49,7 +49,12 @@ import {
 } from "../clusters/cull";
 import { type CameraCullPass, type CascadeCullPass, CULL_PASS_BYTES } from "../clusters/cullPass";
 import { CLUSTER_FLAG_MAY_DISCARD, type ClusterRecord } from "../clusters/record";
-import { TERRAIN_CLUSTERS_PER_PAGE, TERRAIN_PAGE_CLUSTERS } from "../clusters/terrain";
+import {
+  TERRAIN_CLUSTERS_PER_PAGE,
+  TERRAIN_MASK_LEVELS,
+  TERRAIN_PAGE_CLUSTERS,
+  TERRAIN_SUB_PATCH_MASK,
+} from "../clusters/terrain";
 import {
   EDGE_BANDS,
   edgeBandIndex,
@@ -1694,15 +1699,48 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
     ]).toEqual([true, []]);
   });
 
-  it("keeps a sub-patch of an interior bake whole in the cull, its grid not its slot's records'", async () => {
-    const made = await clusteredPass();
-    nearerUnbaked(made);
+  /** The sub-patch instances of `made`'s interior records: their words, and whether kept whole. */
+  function subPatchesOf(made: Made): Array<{
+    readonly levels: number;
+    readonly masked: boolean;
+    readonly kept: boolean;
+    readonly holdsAndFades: number;
+  }> {
+    const per = INSTANCE_RECORD_BYTES / 4;
     const records = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
     const whole = keptWhole(wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`));
-    const subPatches = whole.filter(
-      (_, k) => (records[k * (INSTANCE_RECORD_BYTES / 4) + INSTANCE_SUB_PATCH_WORD] ?? 0) !== 0,
-    );
-    expect([subPatches.length > 0, subPatches.every(Boolean)]).toEqual([true, true]);
+    return whole.flatMap((kept, k) => {
+      const word = records[k * per + INSTANCE_SUB_PATCH_WORD] ?? 0;
+      const holds = (records[k * per + 7] ?? 0) >>> 2;
+      const fades = (records[k * per + 9] ?? 0) | (records[k * per + 10] ?? 0);
+      return word === 0
+        ? []
+        : [
+            {
+              levels: word & 31,
+              masked: (word & TERRAIN_SUB_PATCH_MASK) !== 0,
+              kept,
+              holdsAndFades: (holds & 0xffff) | fades,
+            },
+          ];
+    });
+  }
+
+  it("draws a sub-patch of an interior bake one to three levels down as a mask of its slot's patch's own blocks, culled by their spheres, with none of its area's holds or edges' fades (Design note 19)", async () => {
+    const made = await clusteredPass();
+    nearerUnbaked(made);
+    const masks = subPatchesOf(made).filter(({ levels }) => levels <= TERRAIN_MASK_LEVELS);
+    expect([
+      masks.length > 0,
+      masks.every(({ masked, kept, holdsAndFades }) => masked && !kept && holdsAndFades === 0),
+    ]).toEqual([true, true]);
+  });
+
+  it("keeps a sub-patch of an interior bake more than three levels down whole in the cull, its grid not its slot's records'", async () => {
+    const made = await clusteredPass();
+    nearerUnbaked(made);
+    const deeper = subPatchesOf(made).filter(({ levels }) => levels > TERRAIN_MASK_LEVELS);
+    expect(deeper.every(({ masked, kept }) => !masked && kept)).toBe(true);
   });
 
   it("draws a stand-in of an edge bake by the lit mesh", async () => {
@@ -1887,21 +1925,19 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     }));
   }
 
-  it("gives a sub-patch stand-in on the cluster path no bands, which the cull keeps whole at stride 1", async () => {
+  it("gives a sub-patch stand-in on the cluster path no bands, so that its camera passes draw it at stride 1", async () => {
     const made = await measuredPass();
     nearerUnbaked(made);
     const per = INSTANCE_RECORD_BYTES / 4;
     const words = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
-    const whole = keptWhole(wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`));
     const records = stridesOf(made).map((strides, k) => ({
       none: noStrides(strides),
       subPatch: (words[k * per + INSTANCE_SUB_PATCH_WORD] ?? 0) !== 0,
-      kept: whole[k] === true,
     }));
     const subPatches = records.filter(({ subPatch }) => subPatch);
     expect([
       subPatches.length > 0,
-      subPatches.every(({ none, kept }) => kept && none),
+      subPatches.every(({ none }) => none),
       records.some(({ subPatch, none }) => !subPatch && !none),
     ]).toEqual([true, true, true]);
   });

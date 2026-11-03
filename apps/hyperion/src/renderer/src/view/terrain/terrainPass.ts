@@ -120,7 +120,11 @@ import {
   type StrideScale,
 } from "../clusters/strides";
 import { type ClusterPassStats, ClusterStats } from "../clusters/stats";
-import { TERRAIN_PAGE_CLUSTERS } from "../clusters/terrain";
+import {
+  TERRAIN_MASK_LEVELS,
+  TERRAIN_PAGE_CLUSTERS,
+  TERRAIN_SUB_PATCH_MASK,
+} from "../clusters/terrain";
 import { type Stride, TERRAIN_DISCARD_TEMPLATES } from "../clusters/templates";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type {
@@ -4448,10 +4452,22 @@ export class TerrainPass {
         const edgeBands = at < 0 ? NO_STRIDE_EDGE_BANDS : state.strideEdges.edgesOf(at);
         const holdFades = at < 0 ? 0 : (state.strideHoldWords[n] ?? 0);
         const finest = strides && this.#nearContact(patch, contacts, patchM);
+        // A stand-in on the cluster path one to three levels below its slot's patch draws that
+        // patch's own blocks over its area, its strips along their sides (Design note 19's mask),
+        // its area's holds and edges' fades none of that grid's; a deeper one its own grid.
+        const masked =
+          inner && within !== null && within.level - patch.key.level <= TERRAIN_MASK_LEVELS;
+        const subWord =
+          within === null
+            ? 0
+            : (subPatchOf(patch.key, within) | (masked ? TERRAIN_SUB_PATCH_MASK : 0)) >>> 0;
         if (inner) {
           state.interiorFins.push(!interiorBake);
-          // A sub-patch's grid, over its finer area, is not its slot's records' (`sourceGridOf`).
-          state.interiorWhole.push(((heights >>> 8) & MIX_STEPS) !== 0 || within !== null);
+          // A deeper sub-patch's grid, over its finer area, is not its slot's records'
+          // (`sourceGridOf`).
+          state.interiorWhole.push(
+            ((heights >>> 8) & MIX_STEPS) !== 0 || (within !== null && !masked),
+          );
           finCount += interiorBake ? 0 : 1;
         }
         const target = inner ? interior : instances;
@@ -4464,10 +4480,10 @@ export class TerrainPass {
           morph[2 * level + 1] ?? 0,
           parentSlot,
           parentQuadrant(patch.key),
-          holds[n] ?? 0,
-          within === null ? 0 : subPatchOf(patch.key, within),
-          fades.edges[n] ?? 0,
-          fades.corners[n] ?? 0,
+          masked ? 0 : (holds[n] ?? 0),
+          subWord,
+          masked ? 0 : (fades.edges[n] ?? 0),
+          masked ? 0 : (fades.corners[n] ?? 0),
           fadesWord,
           scale,
           finest,

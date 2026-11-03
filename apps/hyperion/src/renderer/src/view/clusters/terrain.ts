@@ -260,20 +260,76 @@ export function terrainFinGrid(
 }
 
 /**
+ * The sub-patch word's bit (terrain's `Instance.sub.x`, bit 31; `gpu/uniforms.ts`' `subPatchWord`
+ * holds bits 0 to 30) of a stand-in drawn as a mask of its slot's patch's own blocks (plan R14,
+ * Design note 19): a missing patch `levels` (1 to {@link TERRAIN_MASK_LEVELS}) below the patch A
+ * whose slot draws it, at part (i, j), draws A's blocks over its area, a 4 × 4, 2 × 2 or 1 × 1 set,
+ * on A's own grid, and its strips, 8 a side as an edge's are, along the set's sides: A's own where a
+ * side lies on A's edge, else a foot strip on A's grid line there, where the lit mesh has no skirt.
+ */
+export const TERRAIN_SUB_PATCH_MASK = 0x8000_0000;
+
+/** The most levels below its slot's patch a stand-in is drawn as a mask at. */
+export const TERRAIN_MASK_LEVELS = 3;
+
+/**
+ * How a terrain instance of sub-patch word `subWord` draws its page's cluster `cluster`
+ * (`clusterCull.wgsl`'s `mask_cluster`): 1, as its sphere says, for every cluster of an instance
+ * that is not a mask ({@link TERRAIN_SUB_PATCH_MASK}) and for a mask's own blocks; 2, whatever its
+ * sphere says, for one of a mask's strips, the first (8 ÷ 2^levels) of each side's, which its
+ * sphere, an edge strip's, does not bound; 0 for any other.
+ */
+export function terrainMaskCluster(subWord: number, cluster: number): 0 | 1 | 2 {
+  if ((subWord & TERRAIN_SUB_PATCH_MASK) === 0) {
+    return 1;
+  }
+  const side = BLOCKS_PER_SIDE >> (subWord & 31);
+  const bx0 = ((subWord >>> 5) & 0x1fff) * side;
+  const by0 = ((subWord >>> 18) & 0x1fff) * side;
+  if (cluster < TERRAIN_BLOCKS) {
+    const bx = cluster % BLOCKS_PER_SIDE;
+    const by = Math.floor(cluster / BLOCKS_PER_SIDE);
+    return bx >= bx0 && bx < bx0 + side && by >= by0 && by < by0 + side ? 1 : 0;
+  }
+  if (cluster < TERRAIN_CLUSTERS_PER_PAGE) {
+    return (cluster - TERRAIN_BLOCKS) % BLOCKS_PER_SIDE < side ? 2 : 0;
+  }
+  return 0;
+}
+
+/**
  * The lit mesh's grid coordinates and code of a template vertex `local` ((lx, ly, code), the
- * terrain cluster mesh's `position`) of cluster `cluster`: the vertex stage's decode, which hands
- * `lit_place` exactly the lit mesh's own vertex (`terrainCluster.wgsl`'s `terrain_cluster_grid`).
+ * terrain cluster mesh's `position`) of cluster `cluster` of an instance of sub-patch word
+ * `subWord`: the vertex stage's decode, which hands `lit_place` exactly the lit mesh's own vertex
+ * (`terrainCluster.wgsl`'s `terrain_cluster_grid`), a mask's strips along its set's sides
+ * ({@link TERRAIN_SUB_PATCH_MASK}).
  */
 export function terrainClusterGrid(
   cluster: number,
   local: readonly [number, number, number],
+  subWord = 0,
 ): readonly [number, number, number] {
   const place = terrainClusterPlace(cluster);
   const [lx, ly, code] = local;
   if (place.shape === "terrain-block") {
     return [CLUSTER_QUADS * place.bx + lx, CLUSTER_QUADS * place.by + ly, code];
   }
-  const [x, y] = edgeVertex(place.edge, CLUSTER_QUADS * place.strip + lx);
+  const k = CLUSTER_QUADS * place.strip + lx;
+  if ((subWord & TERRAIN_SUB_PATCH_MASK) !== 0) {
+    const quads = PATCH_QUADS >> (subWord & 31);
+    const x0 = ((subWord >>> 5) & 0x1fff) * quads;
+    const y0 = ((subWord >>> 18) & 0x1fff) * quads;
+    // The set's sides anticlockwise, as `edgeVertex` takes a patch's.
+    const at: ReadonlyArray<readonly [number, number]> = [
+      [x0 + k, y0],
+      [x0 + quads, y0 + k],
+      [x0 + quads - k, y0 + quads],
+      [x0, y0 + quads - k],
+    ];
+    const [x, y] = at[place.edge] ?? [x0, y0];
+    return [x, y, code];
+  }
+  const [x, y] = edgeVertex(place.edge, k);
   return [x, y, code];
 }
 

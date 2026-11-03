@@ -54,8 +54,35 @@ fn terrain_fin_grid(cluster : u32, local : vec3f) -> vec3f {
   return vec3f(f32(at.x), f32(at.y), select(select(f32(LIT_COLUMN_FIN), f32(LIT_ROW_FIN), row), f32(LIT_GRID), kind == 0u));
 }
 
-// The lit mesh's (x, y, code) of template vertex `local` ((lx, ly, code)) of `cluster`.
-fn terrain_cluster_grid(cluster : u32, local : vec3f) -> vec3f {
+// `clusters/terrain.ts`' TERRAIN_SUB_PATCH_MASK: a sub-patch word's bit of a stand-in drawn as a
+// mask of its slot's patch's own blocks (plan R14, Design note 19).
+const TERRAIN_SUB_PATCH_MASK : u32 = 0x80000000u;
+
+// The `k`-th grid vertex of side `side` of the set of blocks a mask of sub-patch word `sub` draws,
+// anticlockwise as a patch's edges are (`terrain_edge_vertex`), on the grid lines its sides lie on.
+fn terrain_mask_edge_vertex(sub : u32, side : u32, k : u32) -> vec2u {
+  let quads = 64u >> (sub & 31u);
+  let lo = vec2u((sub >> 5u) & 0x1fffu, (sub >> 18u) & 0x1fffu) * quads;
+  switch side {
+    case 0u: {
+      return vec2u(lo.x + k, lo.y);
+    }
+    case 1u: {
+      return vec2u(lo.x + quads, lo.y + k);
+    }
+    case 2u: {
+      return vec2u(lo.x + quads - k, lo.y + quads);
+    }
+    default: {
+      return vec2u(lo.x, lo.y + quads - k);
+    }
+  }
+}
+
+// The lit mesh's (x, y, code) of template vertex `local` ((lx, ly, code)) of `cluster` of an
+// instance of sub-patch word `sub` (`clusters/terrain.ts`' `terrainClusterGrid`): a mask's strips
+// along its set's sides.
+fn terrain_cluster_grid(cluster : u32, local : vec3f, sub : u32) -> vec3f {
   let lx = u32(local.x);
   let ly = u32(local.y);
   if (cluster >= TERRAIN_STRIDED_CLUSTERS) {
@@ -66,12 +93,16 @@ fn terrain_cluster_grid(cluster : u32, local : vec3f) -> vec3f {
     return vec3f(f32(at.x), f32(at.y), local.z);
   }
   let strip = cluster - TERRAIN_BLOCKS;
-  let at = terrain_edge_vertex(strip / 8u, (strip % 8u) * CLUSTER_QUADS + lx);
+  var at = terrain_edge_vertex(strip / 8u, (strip % 8u) * CLUSTER_QUADS + lx);
+  if ((sub & TERRAIN_SUB_PATCH_MASK) != 0u) {
+    at = terrain_mask_edge_vertex(sub, strip / 8u, (strip % 8u) * CLUSTER_QUADS + lx);
+  }
   return vec3f(f32(at.x), f32(at.y), local.z);
 }
 
 @vertex
 fn vertexMain(@location(0) local : vec3f, @builtin(instance_index) entry : u32) -> LitVertexOut {
   let item = cluster_lists[draw.clusterBase + entry];
-  return lit_vertex(terrain_cluster_grid(item & 0xffu, local), item >> 8u);
+  let instance = item >> 8u;
+  return lit_vertex(terrain_cluster_grid(item & 0xffu, local, instances[instance].sub.x), instance);
 }

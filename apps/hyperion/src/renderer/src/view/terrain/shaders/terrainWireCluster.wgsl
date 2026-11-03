@@ -9,5 +9,6 @@
 @vertex
 fn vertexMain(@location(0) local : vec3f, @builtin(instance_index) entry : u32) -> WireVertexOut {
   let item = cluster_lists[draw.clusterBase + entry];
-  return wire_vertex(terrain_cluster_grid(item & 0xffu, local), item >> 8u);
+  let instance = item >> 8u;
+  return wire_vertex(terrain_cluster_grid(item & 0xffu, local, instances[instance].sub.x), instance);
 }
