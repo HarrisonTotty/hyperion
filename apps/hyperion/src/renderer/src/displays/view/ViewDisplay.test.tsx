@@ -289,15 +289,20 @@ function styleButtons(): Array<[string, string | null, string | null]> {
     ]);
 }
 
-/** An engine source whose engine refuses the stage's canvas: the views cannot be made. */
-function refusingViewSource(): ViewEngineSource {
+/**
+ * An engine source whose engine refuses the stage's canvas, throwing `refusal`: the views cannot be
+ * made.
+ */
+function refusingViewSource(
+  refusal: unknown = new Error("the canvas gave no context"),
+): ViewEngineSource {
   const fake = fakeViewEngineSource();
   return {
     ...fake.source,
     load: async (outcome, status) => {
       const engine = await fake.source.load(outcome, status);
       engine.createView = () => {
-        throw new Error("the canvas gave no context");
+        throw refusal;
       };
       return engine;
     },
@@ -488,7 +493,20 @@ describe("the VIEW display", () => {
       ),
       screen.queryByRole("application"),
     ]).toEqual([expect.anything(), null]);
-    expect(logged).toHaveBeenCalledWith("view view could not be made:", expect.any(Error));
+    expect(logged).toHaveBeenCalledWith(
+      "view view could not be made: Error: the canvas gave no context",
+    );
+  });
+
+  it("names a DOMException the engine refuses its canvas with by its name and message", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    setup({
+      source: refusingViewSource(new DOMException("the context was lost", "InvalidStateError")),
+    });
+    await settle();
+    expect(logged).toHaveBeenCalledWith(
+      "view view could not be made: InvalidStateError: the context was lost",
+    );
   });
 
   it("shows a refused view's fault on its own view's plate", async () => {

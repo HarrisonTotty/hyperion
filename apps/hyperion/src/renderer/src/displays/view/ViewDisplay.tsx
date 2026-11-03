@@ -62,6 +62,7 @@ import {
   useGraphicsStatus,
 } from "../../view/engine/status";
 import type { RenderView } from "../../view/engine/types";
+import { errorText } from "../../view/engine/webgpu/errorText";
 import {
   controlEv100,
   DEFAULT_EXPOSURE,
@@ -1215,7 +1216,7 @@ function ViewStage({
       // Not a loss: the canvas gave no context, or the engine could not configure it. The view
       // stays unmade until the stage remounts (a new scene); nothing here retries, so this cannot
       // loop.
-      console.error(`view ${VIEW_NAME} could not be made:`, error);
+      console.error(`view ${VIEW_NAME} could not be made: ${errorText(error)}`);
       // The engine's refusal is the external system's answer, known only once the canvas exists.
       // oxlint-disable-next-line react/set-state-in-effect
       setViewRefused(true);
