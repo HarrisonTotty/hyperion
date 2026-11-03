@@ -61,7 +61,8 @@
  * - **Where it holds.** A contact's hold (R05 Design note 6) caps each k at the vertex's hold, so
  *   the ground within every held radius is the finest interpolant (Design note 10); where a finer
  *   patch touches an edge (its coarse–fine hold at k = 0), the edge's level-2 vertices stay, since
- *   the finer patch's vertices there are its block corners; and where a coarser one does (its hold
+ *   the finer patch's vertices there are its block corners, falling to it over
+ *   {@link STRIDE_HOLD_FADE_MS} as the hold switches on; and where a coarser one does (its hold
  *   at k = 1), the edge's level-0 vertices, at the coarser grid's midpoints, move wholly, so that
  *   they stand on its edge wherever its vertices move ({@link strideHeldFactor}).
  */
@@ -430,25 +431,42 @@ export function strideMorphFactor(bandM: number, distanceM: number): number {
 }
 
 /**
- * The stride morph's hold at grid vertex (x, y) of morph level `level` of a patch whose quadrant word
- * is `quadrantWord` (`terrainStrides.wgsl`'s `stride_factor`): 0 at a level-2 vertex on an edge a
- * finer patch touches (its coarse–fine hold at k = 0, bits 2 to 5), 1 at a level-0 vertex on an
- * edge a coarser one does (k = 1, bits 10 to 13), else `null`, its k its band's.
+ * How long a coarse–fine hold at k = 0 takes to hold its edge's level-2 vertices once it switches on,
+ * ms (a hand value, lean, 2026-11-03): its stride morph falls from its last k to 0 over it, so that
+ * a finer patch arriving beside a coarse edge moves the edge's vertices at most 1 ÷ 18 of their
+ * stride's displacement a frame at 60 Hz, the two patches meanwhile parting by at most that
+ * displacement over the skirts (`StrideHoldFades`).
  */
-export function strideHeldFactor(
+export const STRIDE_HOLD_FADE_MS = 300;
+
+/**
+ * The stride morph's k at grid vertex (x, y) of morph level `level` (below 3) of a patch whose
+ * quadrant word is `quadrantWord`, its band `bandM` at its own distance `distanceM`
+ * (`terrainStrides.wgsl`'s `stride_factor`, before its contacts' hold): 1 at a level-0 vertex on an
+ * edge a coarser patch touches (its coarse–fine hold at k = 1, bits 10 to 13); at a level-2 vertex
+ * on an edge a finer one touches (k = 0, bits 2 to 5) its band's k times that edge's byte of
+ * `holdFadesWord` over 255, the share of its stride morph the hold's onset still leaves it (0 once
+ * the hold is whole); else its band's.
+ */
+export function strideFactor(
   x: number,
   y: number,
   level: number,
   quadrantWord: number,
-): number | null {
+  holdFadesWord: number,
+  bandM: number,
+  distanceM: number,
+): number {
   const edges = (x === 0 ? 1 : 0) | (x === 64 ? 2 : 0) | (y === 0 ? 4 : 0) | (y === 64 ? 8 : 0);
-  if (level === 2 && ((quadrantWord >>> 2) & edges) !== 0) {
-    return 0;
+  const held = (quadrantWord >>> 2) & edges;
+  if (level === 2 && held !== 0) {
+    const share = ((holdFadesWord >>> (8 * Math.log2(held & -held))) & 0xff) / 255;
+    return share > 0 ? strideMorphFactor(bandM, distanceM) * share : 0;
   }
   if (level === 0 && ((quadrantWord >>> 10) & edges) !== 0) {
     return 1;
   }
-  return null;
+  return strideMorphFactor(bandM, distanceM);
 }
 
 /**

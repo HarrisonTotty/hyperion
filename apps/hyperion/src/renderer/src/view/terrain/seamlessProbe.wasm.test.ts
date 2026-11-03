@@ -39,8 +39,7 @@ import {
   STRIDE_BAND_FRACTION,
   type StrideBandsM,
   type StrideErrorsM,
-  strideHeldFactor,
-  strideMorphFactor,
+  strideFactor,
   strideNeedM,
   stridePlace,
   type StrideScale,
@@ -566,6 +565,8 @@ interface DrawnInstance {
   readonly strideScale: StrideScale;
   readonly edgeBandsM: Float64Array;
   readonly quadrantWord: number;
+  /** Its holds' onsets' shares of the stride morph, a byte an edge (word 14). */
+  readonly holdFadesWord: number;
 }
 
 /** The edges' shared bands of the instance record at word `base` of `u`, m (words 20 to 67). */
@@ -637,6 +638,7 @@ function instancesOf(
         strideScale: { statedM: f[base + 12] ?? 0, perErrorM: f[base + 13] ?? 0 },
         edgeBandsM: edgeBandsAt(u, base),
         quadrantWord: word(7),
+        holdFadesWord: word(14),
       });
     }
   }
@@ -934,6 +936,8 @@ class StrideFrames {
       readonly strides: Uint8Array;
       readonly strideScale: StrideScale;
       readonly edgeBandsM: Float64Array;
+      readonly quadrantWord: number;
+      readonly holdFadesWord: number;
     }
   >();
   readonly frames: StrideFrame[] = [];
@@ -1053,34 +1057,49 @@ class StrideFrames {
         strides,
         strideScale: inst.strideScale,
         edgeBandsM: inst.edgeBandsM,
+        quadrantWord: inst.quadrantWord,
+        holdFadesWord: inst.holdFadesWord,
       });
       if (was === undefined) {
         continue;
       }
       // Measured where a band, its scale's or an edge's, moves by a quarter of its width or more,
-      // as the view's τ′ or a neighbour changes.
+      // as the view's τ′ or a neighbour changes, or its holds or their onsets' shares change.
       const bandsMoved =
         bandsMovedBy(
           scaleBandsM(was.strideScale, patchErrors),
           scaleBandsM(inst.strideScale, patchErrors),
-        ) || bandsMovedBy(was.edgeBandsM, inst.edgeBandsM);
+        ) ||
+        bandsMovedBy(was.edgeBandsM, inst.edgeBandsM) ||
+        was.quadrantWord !== inst.quadrantWord ||
+        was.holdFadesWord !== inst.holdFadesWord;
       const place = (x: number, y: number): number[] => {
         const [h, k] = surfaces.vertex(inst, x, y);
         const p = surfacePoint(figure, vertexDir(inst.area, x, y), h);
         return [p[0], p[1], p[2], k];
       };
+      // Each frame's surface by its own holds and their onsets' shares.
       const factorBy =
-        (scale: StrideScale, edges: Float64Array) =>
+        (state: {
+          readonly strideScale: StrideScale;
+          readonly edgeBandsM: Float64Array;
+          readonly quadrantWord: number;
+          readonly holdFadesWord: number;
+        }) =>
         (x: number, y: number, level: number, values: ReadonlyArray<number>): number => {
-          const held = strideHeldFactor(x, y, level, inst.quadrantWord);
-          if (held !== null) {
-            return held;
-          }
           const d = norm(sub(vec3(values[0] ?? 0, values[1] ?? 0, values[2] ?? 0), cam.positionM));
-          return strideMorphFactor(vertexStrideBandM(scale, own, edges, x, y, level), d);
+          return strideFactor(
+            x,
+            y,
+            level,
+            state.quadrantWord,
+            state.holdFadesWord,
+            vertexStrideBandM(state.strideScale, own, state.edgeBandsM, x, y, level),
+            d,
+          );
         };
-      const nowFactor = factorBy(inst.strideScale, inst.edgeBandsM);
-      const thenFactor = factorBy(was.strideScale, was.edgeBandsM);
+      const nowFactor = factorBy(inst);
+      const thenFactor = factorBy(was);
       for (let block = 0; block < 64; block += 1) {
         const sNow = strides[block] ?? 1;
         const sThen = was.strides[block] ?? 1;

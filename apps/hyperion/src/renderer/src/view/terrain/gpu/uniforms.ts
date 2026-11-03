@@ -74,7 +74,8 @@ export const SLOT_RECORD_BYTES = 496;
  *                           // from ({@link fadeWord}; R10.T16.i)
  *   strides : vec4f,        // its stride scale at its view's τ′ (plan R14, R14.T3.c; `clusters/
  *                           // strides.ts`' `StrideScale`): E_L ÷ τ′_rad, m, then 1 ÷ τ′_rad, at or
- *                           // below 0 for none, then 0 and 0
+ *                           // below 0 for none, then its holds' onsets' shares (a u32's bits; a
+ *                           // byte an edge, `strideFactor`) and 0
  *   cells : vec4u,          // its class sets (lane fix-coast-class-map; {@link InstanceRecords.setCells}):
  *                           // x its ancestor of the field's cells' level, L − 6, or NO_PARENT_SLOT;
  *                           // y its place there ({@link cellAncestorPlace}); z the fade to it, an
@@ -518,6 +519,8 @@ export class InstanceRecords {
    * @param finest - Whether every camera pass draws it at stride 1 (`clusters/strides.ts`'
    * `INSTANCE_FINEST`).
    * @param edgeBandsM - Its edges' shared stride bands, metres (`strideEdges.ts`), none by default.
+   * @param strideHoldFades - Its holds' onsets' shares of the stride morph a byte an edge, `EDGES`'
+   * order (`clusters/strides.ts`' `strideFactor`), 0 for none.
    * @throws RangeError past {@link capacity}, or for a slot, parent slot, quadrant, holds,
    * sub-patch word or fades word that is not a whole number in its range.
    */
@@ -536,6 +539,7 @@ export class InstanceRecords {
     strideScale: StrideScale = NO_STRIDE_SCALE,
     finest = false,
     edgeBandsM: StrideEdgeBandsM = NO_STRIDE_EDGE_BANDS,
+    strideHoldFades = 0,
   ): void {
     this.pushXyz(
       slot,
@@ -554,6 +558,7 @@ export class InstanceRecords {
       strideScale,
       finest,
       edgeBandsM,
+      strideHoldFades,
     );
   }
 
@@ -575,6 +580,7 @@ export class InstanceRecords {
     strideScale: StrideScale = NO_STRIDE_SCALE,
     finest = false,
     edgeBandsM: StrideEdgeBandsM = NO_STRIDE_EDGE_BANDS,
+    strideHoldFades = 0,
   ): void {
     if (this.#count >= this.capacity) {
       throw new RangeError(`more than ${this.capacity} instances in a frame`);
@@ -594,7 +600,7 @@ export class InstanceRecords {
     if (!Number.isInteger(sub) || sub < 0 || sub > 0x7fff_ffff) {
       throw new RangeError(`sub-patch word ${sub} is not 31 bits`);
     }
-    for (const word of [edgeFades, cornerFades, fades]) {
+    for (const word of [edgeFades, cornerFades, fades, strideHoldFades]) {
       if (!Number.isInteger(word) || word < 0 || word > 0xffff_ffff) {
         throw new RangeError(`fades word ${word} is not a u32`);
       }
@@ -615,7 +621,7 @@ export class InstanceRecords {
     this.#u32[base + 11] = fades;
     this.#f32[base + 12] = strideScale.statedM;
     this.#f32[base + 13] = strideScale.perErrorM;
-    this.#f32[base + 14] = 0;
+    this.#u32[base + 14] = strideHoldFades;
     this.#f32[base + 15] = 0;
     this.#u32[base + 16] = NO_PARENT_SLOT;
     this.#u32[base + 17] = 0;

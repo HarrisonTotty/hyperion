@@ -205,6 +205,7 @@ import {
 } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey, parentKey, patchKeyString } from "./patchKey";
 import { type StrideEdgePatch, StrideEdges } from "./strideEdges";
+import { StrideHoldFades } from "./strideHoldFades";
 import { type PlanetGeometry, planetGeometry, surfacePoint } from "./planet";
 import { type MorphSpans, TimeMorph } from "./timeMorph";
 import {
@@ -1160,12 +1161,15 @@ interface ViewState {
    * Its strides this frame (plan R14, R14.T3.c; the shared bands, `clusters/strides.ts`' remarks):
    * each patch it draws, by draw set index, its scale at its unslewed τ′ ({@link
    * ViewState.targetTauPx}) or `null` for none, and its place among the view's patches in {@link
-   * ViewState.strideEdges}, −1 for one it does not draw; and its patches' edges' bands, shared with
-   * the patches beside.
+   * ViewState.strideEdges}, −1 for one it does not draw; its patches' edges' bands, shared with the
+   * patches beside; and each patch's holds' onsets' shares word, by draw set index
+   * ({@link StrideHoldFades}).
    */
   readonly strideScales: Array<StrideScale | null>;
   readonly strideAt: Int32Array;
   readonly strideEdges: StrideEdges;
+  readonly strideHoldFades: StrideHoldFades;
+  readonly strideHoldWords: Uint32Array;
   readonly uniforms: {
     readonly bodyRotation: Float32Array;
     readonly sunDirection: Float32Array;
@@ -3714,6 +3718,8 @@ export class TerrainPass {
       strideScales: [],
       strideAt: new Int32Array(slotCount),
       strideEdges: new StrideEdges(slotCount),
+      strideHoldFades: new StrideHoldFades(),
+      strideHoldWords: new Uint32Array(slotCount),
       uniforms: {
         bodyRotation,
         sunDirection: new Float32Array(4),
@@ -4381,7 +4387,7 @@ export class TerrainPass {
     const classSets = lit ? input.classSets : undefined;
     const patchM = finestPatchSizeM(this.#planet);
     if (strides && drawSet !== undefined) {
-      this.#sharedStridesOf(device, state, input, drawSet, mask);
+      this.#sharedStridesOf(device, state, input, drawSet, mask, holds);
     }
     // A late pass is the frame's own: its early pass sets it (plan R14, R14.T3.d).
     state.late = null;
@@ -4440,6 +4446,7 @@ export class TerrainPass {
         const scale = strides ? (state.strideScales[n] ?? NO_STRIDE_SCALE) : NO_STRIDE_SCALE;
         const at = strides ? (state.strideAt[n] ?? -1) : -1;
         const edgeBands = at < 0 ? NO_STRIDE_EDGE_BANDS : state.strideEdges.edgesOf(at);
+        const holdFades = at < 0 ? 0 : (state.strideHoldWords[n] ?? 0);
         const finest = strides && this.#nearContact(patch, contacts, patchM);
         if (inner) {
           state.interiorFins.push(!interiorBake);
@@ -4465,6 +4472,7 @@ export class TerrainPass {
           scale,
           finest,
           edgeBands,
+          holdFades,
         );
         if (classSets !== undefined) {
           // The ancestor of the field's cells' level: the patch itself at that level, none coarser.
@@ -5515,7 +5523,8 @@ export class TerrainPass {
    * 2)) as `screenSpaceErrorPx` takes it, none for a sub-patch or an unmeasured bake; and its
    * patches' edges' shared bands over them, the area each draws at the level it draws it, beside a
    * patch that is not measured the larger of its own need and its level's largest error's
-   * (`StrideEdges`).
+   * (`StrideEdges`); and the onsets of its holds at k = 0 (`holds`, the draw set's), faded
+   * (`StrideHoldFades`).
    */
   #sharedStridesOf(
     device: Device,
@@ -5523,6 +5532,7 @@ export class TerrainPass {
     input: TerrainViewFrameInput,
     drawSet: DrawSet,
     mask: number,
+    holds: ArrayLike<number>,
   ): void {
     const { viewport, fovXRad } = input.view;
     const pxPerRad = viewport.widthPx / (2 * Math.tan(fovXRad / 2));
@@ -5562,6 +5572,21 @@ export class TerrainPass {
       }
     }
     state.strideEdges.update(patches, (level) => largest.get(level) ?? null);
+    // Each measured patch's holds at k = 0 switching on fade in (`StrideHoldFades`).
+    for (let n = 0; n < drawSet.count; n += 1) {
+      const at = state.strideAt[n] ?? -1;
+      const drawn = drawSet.patches[n];
+      state.strideHoldWords[n] =
+        at < 0 || drawn === undefined || scales[n] === null
+          ? 0
+          : state.strideHoldFades.fade(
+              drawn.keyString,
+              (holds[n] ?? 0) & 0xf,
+              state.strideEdges.edgesOf(at),
+              input.nowMs,
+            );
+    }
+    state.strideHoldFades.sweep();
   }
 
   /**

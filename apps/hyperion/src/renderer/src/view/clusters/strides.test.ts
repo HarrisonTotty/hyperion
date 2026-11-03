@@ -27,7 +27,7 @@ import {
   type StrideBandsM,
   type StrideEdgeBandsM,
   type StrideErrorsM,
-  strideHeldFactor,
+  strideFactor,
   strideMorphFactor,
   strideMorphLevel,
   strideNeedM,
@@ -231,8 +231,12 @@ function distanceOf(p: ReadonlyArray<number>, camera: Point): number {
 function factorOf(patch: Patch, camera: Point, of: PatchStrides) {
   const word = quadrantWordOf(patch);
   return (x: number, y: number, level: number, values: ReadonlyArray<number>): number =>
-    strideHeldFactor(x, y, level, word) ??
-    strideMorphFactor(
+    strideFactor(
+      x,
+      y,
+      level,
+      word,
+      0,
       vertexStrideBandM(of.scale, of.clusterErrors, of.edges, x, y, level),
       distanceOf(values, camera),
     );
@@ -370,6 +374,21 @@ describe("the stride morph's vertices", () => {
     }
     expect(most).toBeLessThanOrEqual(STRIDE_NODES);
     expect(most).toBe(STRIDE_NODES);
+  });
+
+  it("holds a level-2 vertex on an edge a finer patch touches at its band's k times its onset's share, 0 once it is whole", () => {
+    // Edge x = 64 held at k = 0 (quadrant word bit 3), its share 128 of 255.
+    const word = 0b0010 << 2;
+    const far = (1 + STRIDE_BAND_FRACTION) * 100;
+    expect([
+      strideFactor(64, 4, 2, word, 128 << 8, 100, far),
+      strideFactor(64, 4, 2, word, 0, 100, far),
+      strideFactor(4, 4, 2, word, 128 << 8, 100, far),
+    ]).toEqual([128 / 255, 0, 1]);
+  });
+
+  it("moves a level-0 vertex on an edge a coarser patch touches wholly, whatever its band", () => {
+    expect(strideFactor(64, 3, 0, 0b0010 << 10, 0, NO_STRIDE_BAND, 0)).toBe(1);
   });
 
   it("morphs across its band and stays outside it", () => {
