@@ -65,7 +65,7 @@ use self::fields::Fields;
 use self::gas::field::GasField;
 use self::gas::params::BuildGasParamsError;
 use self::global_list::ListSourceRules;
-use self::global_list::share::discrete_share_under;
+use self::global_list::share::discrete_share;
 use self::imf::{BandShares, Chabrier, Kept, Kroupa, MassFunction, MassFunctionKind};
 use self::kinematics::KinematicTables;
 use self::motion::CentreMotion;
@@ -528,12 +528,7 @@ impl Galaxy {
         match rules.list_source {
             ListSourceRules::Unregistered => {}
             ListSourceRules::Registered => {
-                feature_shares.set_halo_discrete(discrete_share_under(
-                    seed,
-                    &params,
-                    &potential,
-                    rules.orphan_streams,
-                ));
+                feature_shares.set_halo_discrete(discrete_share(seed, &params, &potential));
             }
         }
         let field_share = match rules.field_share {

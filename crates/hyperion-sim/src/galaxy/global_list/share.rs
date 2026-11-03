@@ -11,8 +11,8 @@
 //! Every count of the list is a mass over the halo's mean system mass, so the ratio of masses is
 //! the ratio of systems. The physical share has two parts:
 //!
-//! - **Globular tubes**: the galaxy's streams per globular (its `orphan_streams` hold: 1.5, and
-//!   from version 27 P15.T11.b's fit) tubes per expected globular, plan 02's count, each at the
+//! - **Globular tubes**: the streams per globular (from version 27 P15.T11.b's fit,
+//!   [`ORPHAN_STREAMS_PER_GLOBULAR_27`]) tubes per expected globular, plan 02's count, each at the
 //!   orphan law's mean mass, 1.63 × 10⁴ M☉
 //!   ([`MassLaw::mean_solar_masses`](super::orphans::MassLaw::mean_solar_masses)), counted by
 //!   the share of their mass inside 65,000 ly, [`GLOBULAR_TUBES_INSIDE`], as a dwarf's tube is
@@ -52,19 +52,18 @@
 //!
 //! [`HaloParams::discrete_share`]: crate::galaxy::params::HaloParams::discrete_share
 
-use crate::GENERATOR_VERSION;
 use crate::galaxy::Population;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::potential::PotentialTables;
-use crate::galaxy::rules::GalaxyRules;
 use crate::math;
 use crate::rng::Seed;
+use crate::tables::streams::ORPHAN_STREAMS_PER_GLOBULAR_27;
 use crate::units::{LightYears, SolarMasses};
 
 use super::DwarfCoreNumber;
 use super::debris::in_list_order;
 use super::dwarfs::{DwarfDebris, dwarfs};
-use super::orphans::{MASS_LAW, OrphanStreamsRules};
+use super::orphans::MASS_LAW;
 use super::spec::SphericalOrbit;
 
 /// The radius inside which a dwarf's tube counts towards the share, ly: the halo's cut at 65,000
@@ -87,8 +86,8 @@ pub const GLOBULAR_TUBES_INSIDE: f64 = 0.55;
 /// The halo's discrete share of the galaxy of `seed` and `params` with in-plane tables `tables`:
 /// the share of the halo's budget in streams and dwarf cores, at most the greater of the drawn
 /// [`HaloParams::discrete_share`](crate::galaxy::params::HaloParams::discrete_share) and the
-/// globular tubes' own share (module documentation), at the generator version's streams per
-/// globular, as `Galaxy::from_params` builds its galaxy under the version's rules.
+/// globular tubes' own share (module documentation): what the galaxy's build stores (P10.T3.d.b),
+/// at the streams per globular its debris reads too.
 ///
 /// The dwarfs' tubes beyond the list's 4,096 streams, which [`Debris`](super::Debris) would drop,
 /// are counted: no galaxy comes near that. It costs the dwarfs' quadratures, most of them their
@@ -117,22 +116,9 @@ pub const GLOBULAR_TUBES_INSIDE: f64 = 0.55;
 /// ```
 #[must_use]
 pub fn discrete_share(seed: Seed, params: &GalaxyParams, tables: &PotentialTables) -> f64 {
-    let orphan_streams = GalaxyRules::of_version(GENERATOR_VERSION).orphan_streams;
-    discrete_share_under(seed, params, tables, orphan_streams)
-}
-
-/// [`discrete_share`] at the streams per globular `orphan_streams` says: what the galaxy's build
-/// stores under its own rules (P10.T3.d.b), whose streams per globular its debris reads too.
-#[must_use]
-pub(crate) fn discrete_share_under(
-    seed: Seed,
-    params: &GalaxyParams,
-    tables: &PotentialTables,
-    orphan_streams: OrphanStreamsRules,
-) -> f64 {
     let mut debris = dwarfs(seed, params, tables);
     in_list_order(&mut debris);
-    ShareFigures::of(params, tables, &debris, orphan_streams).applied()
+    ShareFigures::of(params, tables, &debris).applied()
 }
 
 /// The figures the share is made of (module documentation).
@@ -150,16 +136,15 @@ pub(crate) struct ShareFigures {
 
 impl ShareFigures {
     /// The figures of the galaxy of `params` and `tables` whose recent progenitors left `dwarfs`,
-    /// in the list's order ([`in_list_order`]), at the streams per globular of `orphan_streams`.
+    /// in the list's order ([`in_list_order`]).
     #[must_use]
     pub(crate) fn of(
         params: &GalaxyParams,
         tables: &PotentialTables,
         dwarfs: &[DwarfDebris],
-        orphan_streams: OrphanStreamsRules,
     ) -> Self {
         let globulars = f64::from(params.accretion().globular_count());
-        let globular = orphan_streams.streams_per_globular()
+        let globular = ORPHAN_STREAMS_PER_GLOBULAR_27
             * globulars
             * MASS_LAW.mean_solar_masses()
             * GLOBULAR_TUBES_INSIDE;
@@ -276,6 +261,7 @@ mod tests {
     use super::*;
     use crate::galaxy::imf::MassFunctionKind;
     use crate::galaxy::potential::MassModel;
+    use crate::galaxy::rules::GalaxyRules;
 
     /// G M in (km/s)² ly for 10¹¹ M☉, as `spec`'s tests take it.
     const GM: f64 = 4.300_9e-3 * 3.261_563_777 * 1e11;
@@ -284,37 +270,28 @@ mod tests {
         -GM / r
     }
 
-    /// The version's streams per globular, those of the rules `Galaxy::from_params` builds under.
-    fn version_s() -> OrphanStreamsRules {
-        GalaxyRules::of_version(GENERATOR_VERSION).orphan_streams
-    }
-
-    /// The globular tubes' term follows the streams per globular: under the 27 arm the Milky Way
-    /// fixture's is the held term times the fit's k over 1.5, at P15.T11.b's acceptance of
-    /// 0.3–1% of the halo's budget, and the dwarfs' figures are the held arm's.
+    /// The globular tubes' term reads the fit's streams per globular: the Milky Way fixture's is
+    /// P15.T11.b's k tubes per expected globular at the orphan law's mean mass and the share
+    /// inside, at P15.T11.b's acceptance of 0.3–1% of the halo's budget.
     #[test]
-    fn the_27_arm_scales_the_globular_tubes_by_the_fit() {
-        use crate::tables::streams::ORPHAN_STREAMS_PER_GLOBULAR_27;
-
+    fn the_globular_tubes_read_the_fitted_streams_per_globular() {
         let milky_way = GalaxyParams::milky_way_like();
         let tables = PotentialTables::in_plane(&MassModel::new(&milky_way));
         let mut debris = dwarfs(Seed::new(7), &milky_way, &tables);
         in_list_order(&mut debris);
-        let held = ShareFigures::of(&milky_way, &tables, &debris, OrphanStreamsRules::Brainstorm);
-        let fitted = ShareFigures::of(&milky_way, &tables, &debris, OrphanStreamsRules::Fitted);
-        let ratio = fitted.globular_solar_masses / held.globular_solar_masses;
+        let fitted = ShareFigures::of(&milky_way, &tables, &debris);
+        let globulars = f64::from(milky_way.accretion().globular_count());
+        let term = ORPHAN_STREAMS_PER_GLOBULAR_27
+            * globulars
+            * MASS_LAW.mean_solar_masses()
+            * GLOBULAR_TUBES_INSIDE;
         assert!(
-            (ratio - ORPHAN_STREAMS_PER_GLOBULAR_27 / 1.5).abs() < 1e-12,
-            "{ratio}"
+            (fitted.globular_solar_masses / term - 1.0).abs() < 1e-12,
+            "{} against {term}",
+            fitted.globular_solar_masses
         );
         let share = fitted.globular_share();
         assert!((0.003..=0.01).contains(&share), "{share}");
-        assert!(
-            fitted
-                .dwarfs_solar_masses
-                .total_cmp(&held.dwarfs_solar_masses)
-                .is_eq()
-        );
     }
 
     /// A galaxy's figures from its seed, on in-plane tables: cheap enough for `just ci`.
@@ -323,7 +300,7 @@ mod tests {
         let tables = PotentialTables::in_plane(&MassModel::new(&params));
         let mut debris = dwarfs(seed, &params, &tables);
         in_list_order(&mut debris);
-        let figures = ShareFigures::of(&params, &tables, &debris, version_s());
+        let figures = ShareFigures::of(&params, &tables, &debris);
         let share = discrete_share(seed, &params, &tables);
         assert!(
             figures.applied().total_cmp(&share).is_eq(),
@@ -371,7 +348,7 @@ mod tests {
         let tables = PotentialTables::in_plane(&MassModel::new(&milky_way));
         let mut debris = dwarfs(Seed::new(7), &milky_way, &tables);
         in_list_order(&mut debris);
-        let fixture = ShareFigures::of(&milky_way, &tables, &debris, version_s());
+        let fixture = ShareFigures::of(&milky_way, &tables, &debris);
         eprintln!(
             "Milky Way: globular tubes {:.5}, physical {:.5}, applied {:.5}, drawn {}",
             fixture.globular_share(),
@@ -407,7 +384,7 @@ mod tests {
                 scaled += 1;
                 let tables = PotentialTables::in_plane(&MassModel::new(&params));
                 scale_cold_masses(&mut debris, scale);
-                let after = ShareFigures::of(&params, &tables, &debris, version_s());
+                let after = ShareFigures::of(&params, &tables, &debris);
                 assert!(
                     (after.physical() / f.drawn - 1.0).abs() < 1e-12,
                     "seed {seed}: {} against {}",
@@ -703,9 +680,7 @@ mod tests {
                     inside += s.mass().value() * share_inside(s.orbit(), &phi, INSIDE_LY);
                 }
             }
-            let term =
-                ShareFigures::of(galaxy.params(), tables, &[], galaxy.rules().orphan_streams)
-                    .globular_solar_masses;
+            let term = ShareFigures::of(galaxy.params(), tables, &[]).globular_solar_masses;
             shares.push(inside / mass);
             against_term.push(inside / term);
             eprintln!(
@@ -790,12 +765,12 @@ mod tests {
     }
 
     /// P10.T3.d.b's census: under every 27 hold a galaxy stores its applied share, the one
-    /// [`discrete_share_under`] gives its seed, parameters and in-plane tables at its streams per
-    /// globular, and the halo's field gives it up, its factor φ less in every band; and in three
-    /// blocks of cells off the plane the halo's records are a subset of the unstored galaxy's, bit
-    /// for bit and finite, and fewer over the three galaxies, and the expected counts about them
-    /// finite ([`halo_cell_census`]). Over the Milky Way fixture and two drawn galaxies, each
-    /// against itself under every 27 hold but the list's source.
+    /// [`discrete_share`] gives its seed, parameters and in-plane tables, and the halo's field
+    /// gives it up, its factor φ less in every band; and in three blocks of cells off the plane
+    /// the halo's records are a subset of the unstored galaxy's, bit for bit and finite, and fewer
+    /// over the three galaxies, and the expected counts about them finite ([`halo_cell_census`]).
+    /// Over the Milky Way fixture and two drawn galaxies, each against itself under every 27 hold
+    /// but the list's source.
     #[test]
     #[ignore = "slow: six galaxies under every 27 hold, their halo cells generated twice"]
     fn the_discrete_share_census() {
@@ -837,7 +812,7 @@ mod tests {
                 Galaxy::from_params_with_rules(seed, params.clone(), GalaxyRules::every_27_hold())
                     .expect("a drawn galaxy builds");
             let tables = PotentialTables::in_plane(&MassModel::new(&params));
-            let phi = discrete_share_under(seed, &params, &tables, OrphanStreamsRules::Fitted);
+            let phi = discrete_share(seed, &params, &tables);
             assert!(
                 phi > 0.0 && phi < params.halo().discrete_share().max(0.05),
                 "{phi}"

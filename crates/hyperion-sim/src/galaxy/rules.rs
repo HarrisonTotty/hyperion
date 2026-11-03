@@ -35,10 +35,6 @@
 //!   and the carve-out, by the build's one `match` (`Galaxy::from_params`), which installs the
 //!   classes and the stay shares that every reader of the two layers then reads; so
 //!   `Galaxy::with_rules` refuses to change it as well.
-//! - [`orphan_streams`](GalaxyRules::orphan_streams), at [`ORPHAN_STREAMS_VERSION`] (plan 15,
-//!   P15.T11.b): the orphans' count and the halo's discrete share take the fitted streams per
-//!   globular. It is read where a galaxy's debris is planned (`Debris::plan`, the orphans' draw
-//!   and the dwarfs' scale), and reaches none of the galaxy's memos.
 //! - [`merger_channels`](GalaxyRules::merger_channels), at [`MERGER_CHANNELS_VERSION`] (plan 11,
 //!   P11.T8.c's missing channel, at 27): the stellar merger class adds the engine's dynamical
 //!   main-sequence mergers and draws an evolved donor's companion by its donor's kind. It is read
@@ -101,7 +97,6 @@ use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::displaced::survivors::{HYPERVELOCITY_VERSION, HypervelocityRules};
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
 use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
-use crate::galaxy::global_list::orphans::{ORPHAN_STREAMS_VERSION, OrphanStreamsRules};
 use crate::galaxy::global_list::spray::{ORPHAN_SPRAY_VERSION, OrphanSprayRules};
 use crate::galaxy::global_list::{LIST_SOURCE_VERSION, ListSourceRules};
 use crate::galaxy::placement::{PLACEMENT_FATES_VERSION, PlacementFateRules};
@@ -123,9 +118,6 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads.
     pub(crate) displaced: DisplacedRules,
-    /// The streams per globular the orphans and the discrete share read: the brainstorm's or
-    /// P15.T11.b's fit.
-    pub(crate) orphan_streams: OrphanStreamsRules,
     /// Which channels the stellar merger class draws under its engine's channels: contact and
     /// evolved donor, or with the dynamical main sequence (P11.T8.c's missing channel).
     pub(crate) merger_channels: MergerChannelRules,
@@ -185,11 +177,6 @@ impl GalaxyRules {
                 DisplacedRules::Displaced
             } else {
                 DisplacedRules::FieldOnly
-            },
-            orphan_streams: if version.get() >= ORPHAN_STREAMS_VERSION.get() {
-                OrphanStreamsRules::Fitted
-            } else {
-                OrphanStreamsRules::Brainstorm
             },
             merger_channels: if version.get() >= MERGER_CHANNELS_VERSION.get() {
                 MergerChannelRules::WithDynamical
@@ -261,14 +248,13 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
-    /// version's rules with the galaxy's holds at 27 (`orphan_streams`, P15.T11.b,
-    /// `merger_channels`, P11.T8.c's missing channel, `binary_tables`, P15.T10.b, `class_source`,
-    /// P09.T37.a, `feature_binaries`, P11.T8.f, `runaway_deaths`, P09.T33.b, `hypervelocity`,
-    /// P09.T34.b, `orphan_spray`, P10.T10.b's warm-up, `placement_fates`, P08.T12 at 27, and
-    /// `list_source`, P10.T10.b's registration with P10.T3.d.b, and those retargeted from 26,
-    /// `field_share`, P09.T2.c, `carve_out`, P09.T35, `feature_classes`, P09.T36, `merger_class`,
-    /// P11.T8.c–d, and `displaced`, P08.T12); the stellar rules hold none at 27
-    /// ([`StellarRules::every_27_hold`]).
+    /// version's rules with the galaxy's holds at 27 (`merger_channels`, P11.T8.c's missing
+    /// channel, `binary_tables`, P15.T10.b, `class_source`, P09.T37.a, `feature_binaries`,
+    /// P11.T8.f, `runaway_deaths`, P09.T33.b, `hypervelocity`, P09.T34.b, `orphan_spray`,
+    /// P10.T10.b's warm-up, `placement_fates`, P08.T12 at 27, and `list_source`, P10.T10.b's
+    /// registration with P10.T3.d.b, and those retargeted from 26, `field_share`, P09.T2.c,
+    /// `carve_out`, P09.T35, `feature_classes`, P09.T36, `merger_class`, P11.T8.c–d, and
+    /// `displaced`, P08.T12); the stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -423,19 +409,6 @@ mod tests {
         reason = "one block of assertions a 27 hold; the 27 bump deletes each with its field"
     )]
     fn each_27_hold_turns_on_at_27() {
-        let orphans = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).orphan_streams;
-        for v in [23, 24, 25, 26] {
-            assert_eq!(orphans(v), OrphanStreamsRules::Brainstorm, "{v}");
-        }
-        assert_eq!(orphans(27), OrphanStreamsRules::Fitted);
-        assert_eq!(
-            GalaxyRules::of_version(crate::GENERATOR_VERSION).orphan_streams,
-            OrphanStreamsRules::Brainstorm
-        );
-        assert_eq!(
-            GalaxyRules::every_27_hold().orphan_streams,
-            OrphanStreamsRules::Fitted
-        );
         let tables = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).binary_tables;
         for v in [23, 24, 25, 26] {
             assert_eq!(tables(v), BinaryTableRules::Scratch, "{v}");
@@ -527,7 +500,6 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_27_hold(),
             GalaxyRules {
-                orphan_streams: OrphanStreamsRules::Fitted,
                 merger_channels: MergerChannelRules::WithDynamical,
                 binary_tables: BinaryTableRules::Fitted,
                 class_source: ClassSourceRules::Registered,

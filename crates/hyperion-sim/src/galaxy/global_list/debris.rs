@@ -148,13 +148,7 @@ impl Debris {
         in_list_order(&mut dwarfs);
         // Design note 1: when the drawn share is the smaller, the dwarfs' cold masses are scaled
         // down together to meet it, from the share's own figures (P10.T3.d.a).
-        let scale = ShareFigures::of(
-            galaxy.params(),
-            galaxy.potential(),
-            &dwarfs,
-            galaxy.rules().orphan_streams,
-        )
-        .dwarf_scale();
+        let scale = ShareFigures::of(galaxy.params(), galaxy.potential(), &dwarfs).dwarf_scale();
         scale_cold_masses(&mut dwarfs, scale);
         let limit = usize::from(StreamNumber::LIMIT);
         let dwarf_tubes = dwarfs.iter().filter(|d| d.tube.is_some()).count();
