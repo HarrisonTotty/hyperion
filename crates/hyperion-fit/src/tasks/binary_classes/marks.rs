@@ -412,7 +412,7 @@ fn fill(supported: &[Option<f64>; NODES], points: &[MarkPoint]) -> [f64; NODES] 
 #[cfg(test)]
 mod tests {
     use hyperion_sim::stellar::binary::sampler::ClassSampler;
-    use hyperion_sim::tables::binary::{AWD_SAMPLER, AwdMark};
+    use hyperion_sim::tables::binary::{AWD_FAST_SAMPLER, AwdMark};
     use hyperion_testkit::float::assert_same_bits;
 
     use super::*;
@@ -587,9 +587,9 @@ mod tests {
     /// residuals are taken about the curve a draw adds them to.
     #[test]
     fn the_median_is_the_sampler_s() {
-        let sampler = ClassSampler::new(&AWD_SAMPLER);
+        let sampler = ClassSampler::new(&AWD_FAST_SAMPLER);
         let mark = AwdMark::WhiteDwarfMass;
-        let fitted = FittedMark::of_scratch(AWD_SAMPLER.mark(mark));
+        let fitted = FittedMark::of_scratch(AWD_FAST_SAMPLER.mark(mark));
         for i in 0..=100 {
             let x = 4.0 + f64::from(i) * 0.045;
             assert_same_bits(fitted.median_at(x), sampler.median(mark, x));

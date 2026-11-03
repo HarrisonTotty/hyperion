@@ -63,7 +63,6 @@ mod tests;
 use core::num::NonZeroU32;
 use std::sync::Arc;
 
-use super::binary::BinaryTableRules;
 use super::grid::{
     ClassLookup, ClassProcess, ClassVisitor, ProductionClasses, candidate_count, entry_systems_in,
 };
@@ -263,7 +262,6 @@ impl<L: ClassLookup> CatalogueClassSource<L> {
         let sphere = widest_sphere(galaxy, query);
         for class in ALL_CLASSES {
             let visit = CellsRead {
-                galaxy,
                 sphere: &sphere,
                 layers,
                 out: &mut cells,
@@ -568,23 +566,20 @@ const STELLAR: LayerSet = LayerSet::EMPTY
 const E: LayerSet = LayerSet::EMPTY.with(Layer::E);
 
 /// The layers each member of `class`'s entries can be counted in by its primary's initial mass,
-/// member 0 first, one set for each member an entry can have, under the binary classes' `tables`;
-/// `None` for a class this source does not know.
+/// member 0 first, one set for each member an entry can have; `None` for a class this source does
+/// not know.
 ///
 /// Each is its class's own statement: a core collapse's and a luminous blue variable's primary is
 /// of band E (P09.T33.a, P09.T43); a Type Ia's of layer D, "every primary is of layer D", and its
 /// survivor's its own star's, the donor's of A–D or a Type Iax's partly burnt dwarf's, D
 /// (P09.T34.a); an accreting white dwarf's C or D; an X-ray binary's the compact star's
-/// progenitor's: E under the scratch tables, and D or E under the fitted ones of the 27 hold
-/// (P15.T10.b), whose engine-fitted progenitors reach down to 10^0.54 M☉, 3.5 M☉, for a neutron
-/// star and 10^0.51 M☉, 3.2 M☉, for a black hole (`XRB_RESIDUALS_26`'s lowest quantiles), the
-/// accretors of earlier transfer that grew past the core-collapse mass; a neutron-star merger's E;
-/// and a stellar merger's any (P11.T8). A test holds every generated member to its set.
+/// progenitor's, D or E under the fitted tables (P15.T10.b), whose engine-fitted progenitors reach
+/// down to 10^0.54 M☉, 3.5 M☉, for a neutron star and 10^0.51 M☉, 3.2 M☉, for a black hole
+/// (`XRB_RESIDUALS_26`'s lowest quantiles), the accretors of earlier transfer that grew past the
+/// core-collapse mass; a neutron-star merger's E; and a stellar merger's any (P11.T8). A test holds
+/// every generated member to its set.
 #[must_use]
-pub(crate) fn member_layers(
-    class: ClassId,
-    tables: BinaryTableRules,
-) -> Option<&'static [LayerSet]> {
+pub(crate) fn member_layers(class: ClassId) -> Option<&'static [LayerSet]> {
     const D: LayerSet = LayerSet::EMPTY.with(Layer::D);
     const SURVIVOR: LayerSet = LayerSet::EMPTY
         .with(Layer::A)
@@ -597,10 +592,7 @@ pub(crate) fn member_layers(
         ClassId::CORE_COLLAPSE | ClassId::LUMINOUS_BLUE_VARIABLE | ClassId::NEUTRON_STAR_MERGER => {
             Some(&[E])
         }
-        ClassId::XRAY_BINARY => match tables {
-            BinaryTableRules::Scratch => Some(&[E]),
-            BinaryTableRules::Fitted => Some(&[COMPACT_PROGENITOR]),
-        },
+        ClassId::XRAY_BINARY => Some(&[COMPACT_PROGENITOR]),
         ClassId::TYPE_IA => Some(&[D, SURVIVOR]),
         ClassId::ACCRETING_WHITE_DWARF | ClassId::ACCRETING_WHITE_DWARF_SLOW => {
             Some(&[WHITE_DWARF])
@@ -626,10 +618,9 @@ impl ClassVisitor for Expected<'_> {
     /// For a class with a process but no [`member_layers`], which the source's tests rule out.
     fn visit<P: ClassProcess>(self, process: &P) {
         let class = process.class();
-        let members =
-            member_layers(class, self.galaxy.rules().binary_tables).unwrap_or_else(|| {
-                panic!("the {class} class has a process but no member layers in the range query")
-            });
+        let members = member_layers(class).unwrap_or_else(|| {
+            panic!("the {class} class has a process but no member layers in the range query")
+        });
         let hosts = expected_hosts(self.galaxy, process, self.sphere);
         for layer in Layer::ALL {
             let slots = members.iter().filter(|set| set.contains(layer)).count();
@@ -752,7 +743,7 @@ impl ClassVisitor for Hits<'_> {
             out,
         } = self;
         let class = process.class();
-        if !may_be_asked(galaxy, class, layers) {
+        if !may_be_asked(class, layers) {
             return;
         }
         let reach = place_reach(sphere);
@@ -783,13 +774,12 @@ impl ClassVisitor for Hits<'_> {
     }
 }
 
-/// Whether a member of `class`'s entries can be in a layer of `layers` under `galaxy`'s binary
-/// tables: not where every member's layers miss them all.
+/// Whether a member of `class`'s entries can be in a layer of `layers`: not where every member's
+/// layers miss them all.
 #[must_use]
-fn may_be_asked(galaxy: &Galaxy, class: ClassId, layers: LayerSet) -> bool {
+fn may_be_asked(class: ClassId, layers: LayerSet) -> bool {
     let asked = |set: &LayerSet| layers.iter().any(|layer| set.contains(layer));
-    member_layers(class, galaxy.rules().binary_tables)
-        .is_none_or(|members| members.iter().any(asked))
+    member_layers(class).is_none_or(|members| members.iter().any(asked))
 }
 
 /// The cells of `process`'s class whose systems its hits about `sphere` read, in the order they
@@ -838,7 +828,7 @@ impl ClassVisitor for ShellHosts<'_> {
             cells,
             each,
         } = self;
-        if !may_be_asked(galaxy, process.class(), LayerSet::EMPTY.with(layer)) {
+        if !may_be_asked(process.class(), LayerSet::EMPTY.with(layer)) {
             return;
         }
         let reach = place_reach(sphere);
@@ -959,7 +949,6 @@ fn length(v: [f64; 3]) -> f64 {
 /// [`CatalogueClassSource::cells_read`]'s visit of one class: the cells its hits in `layers` about
 /// the sphere read, appended to `out`.
 struct CellsRead<'a> {
-    galaxy: &'a Galaxy,
     sphere: &'a QuerySphere,
     layers: LayerSet,
     out: &'a mut Vec<CatalogueCellKey>,
@@ -969,7 +958,7 @@ impl ClassVisitor for CellsRead<'_> {
     type Output = ();
 
     fn visit<P: ClassProcess>(self, process: &P) {
-        if may_be_asked(self.galaxy, process.class(), self.layers) {
+        if may_be_asked(process.class(), self.layers) {
             self.out.extend(hit_cells(process, self.sphere));
         }
     }

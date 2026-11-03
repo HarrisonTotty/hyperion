@@ -35,8 +35,8 @@
 //!
 //! Each task fits at its manifest's `generator_version`, 27 for the refit: its census galaxy is
 //! the version's, every hold that version turns on in force, with the binary classes' scratch
-//! tables (`Galaxy::from_params_for_binary_refit`), so that the field the census's records come
-//! from does not read the rows the task fits (plan 15's lean of 2026-11-01).
+//! share rows in its class shares (`Galaxy::from_params_for_binary_refit`), so that the field the
+//! census's records come from does not read the rows the task fits (plan 15's lean of 2026-11-01).
 //!
 //! # A sampler
 //!
@@ -44,7 +44,8 @@
 //! follows its condition, the residual about it, and from the refit at 27 a residual law at each
 //! node of the median. A mark is fitted to its own class's members where they number at least the
 //! manifest's `min_members`, to both classes' members pooled where they do not, and keeps the
-//! scratch table's law where neither does. A mark's members are weighted so that their kinds are
+//! sim's sampler's law where neither does, which the fitted tables hold as P11.T8's scratch had it
+//! where the refit at 27 kept it. A mark's members are weighted so that their kinds are
 //! in the shares the class's choice of kind draws ([`weighted_to_shares`]: the rows' donor kinds,
 //! or the X-ray kinds' weights), so that a mark the kinds share is fitted to them in the rows'
 //! mix and not in the census's.
@@ -65,7 +66,9 @@ use hyperion_sim::stellar::binary::testing::{
     AccretingMarks, CensusPart, CensusRecords, CensusSite, ClassCensus, ClassMember,
     class_census_in,
 };
-use hyperion_sim::tables::binary::{AWD_SAMPLER, AwdDonorKind, AwdMark, AwdPick};
+use hyperion_sim::tables::binary::{
+    AWD_FAST_SAMPLER, AWD_SLOW_SAMPLER, AwdDonorKind, AwdMark, AwdPick,
+};
 use hyperion_sim::time::LIGHT_CROSSING_L;
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
@@ -124,7 +127,8 @@ const FINGERPRINT_SEED: u64 = 0x0b17_15a0_0000_0001;
 const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// The fingerprints' galaxy: the Milky Way fixture of [`FINGERPRINT_SEED`] at
-/// [`FINGERPRINT_VERSION`], with the binary classes' scratch tables, as a census galaxy is built.
+/// [`FINGERPRINT_VERSION`], with the binary classes' scratch share rows, as a census galaxy is
+/// built.
 ///
 /// # Panics
 ///
@@ -150,7 +154,7 @@ pub struct CensusParams {
     /// The Milky Way fixture's seed.
     pub seed: u64,
     /// The generator version whose rules the census galaxy is built under, with the binary
-    /// classes' scratch tables (module documentation).
+    /// classes' scratch share rows (module documentation).
     pub version: GeneratorVersion,
     /// The slab's records, layers C–E together.
     pub records: u64,
@@ -213,7 +217,7 @@ impl CensusParams {
     }
 
     /// The census galaxy: the Milky Way fixture of the census's seed under its version's rules,
-    /// with the binary classes' scratch tables (module documentation).
+    /// with the binary classes' scratch share rows (module documentation).
     ///
     /// # Panics
     ///
@@ -558,7 +562,7 @@ pub enum MarkSource {
     Own,
     /// Both classes' members, its own being too few.
     Pooled,
-    /// None: the scratch table's law.
+    /// None: the sim's sampler's law, the scratch one's where the refit at 27 kept it.
     Scratch,
 }
 
@@ -718,14 +722,17 @@ pub fn awd_samplers(
         AWD_CLASSES.map(|class| awd_members(censuses.slab.iter().flat_map(|c| &c.members), class));
     let pooled: Vec<(AccretingMarks, f64)> = sides.iter().flatten().copied().collect();
     let cap = params.max_log_recurrence;
-    let scratch = AWD_SAMPLER.pick(AwdPick::DonorKind).weights();
-    // A side with no member, which only a smoke run's census can have, keeps the scratch table's
+    // A mark too few members define keeps the side's sampler's law: P15.T10.b's refit at 27,
+    // itself the scratch law where the refit kept it.
+    let kept = [&AWD_FAST_SAMPLER, &AWD_SLOW_SAMPLER];
+    // A side with no member, which only a smoke run's census can have, keeps the side's sampler's
     // shares.
     let side_kinds: [[f64; 3]; 2] = std::array::from_fn(|side| {
         if donor_kinds[side].iter().sum::<f64>() > 0.0 {
             donor_kinds[side]
         } else {
-            std::array::from_fn(|k| scratch[k])
+            let kinds = kept[side].pick(AwdPick::DonorKind).weights();
+            std::array::from_fn(|k| kinds[k])
         }
     });
     let points = |members: &[(AccretingMarks, f64)], mark: AwdMark, side: usize| {
@@ -779,7 +786,7 @@ pub fn awd_samplers(
                 sources[k] = MarkSource::Pooled;
                 return fit(&all);
             }
-            FittedMark::of_scratch(AWD_SAMPLER.mark(mark))
+            FittedMark::of_scratch(kept[side].mark(mark))
         });
         AwdSampler {
             marks,

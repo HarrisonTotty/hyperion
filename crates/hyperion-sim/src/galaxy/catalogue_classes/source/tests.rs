@@ -218,8 +218,7 @@ fn every_class_s_members_keep_to_their_layers() {
     assert!(!classes.contains(&ClassId::TIDAL_DISRUPTION_VICTIM));
     let mut members = 0;
     for class in classes {
-        let slots = member_layers(class, galaxy.rules().binary_tables)
-            .unwrap_or_else(|| panic!("{class} has no layers"));
+        let slots = member_layers(class).unwrap_or_else(|| panic!("{class} has no layers"));
         let hosts = first_hosts(galaxy, class, 3);
         assert!(!hosts.is_empty(), "{class}");
         for host in &hosts {
@@ -283,7 +282,7 @@ fn the_census_counts_each_class_s_expected_hosts_in_its_layers() {
         let whole = sphere(centre, 0.5 * edge);
         let counts =
             CatalogueClassSource::with_lookup(Only(class)).expected_in_sphere(galaxy, &whole);
-        let slots = member_layers(class, galaxy.rules().binary_tables).expect("layers");
+        let slots = member_layers(class).expect("layers");
         for layer in Layer::ALL {
             let times = slots.iter().filter(|set| set.contains(layer)).count();
             let times = f64::from(u32::try_from(times).expect("few"));
@@ -833,32 +832,14 @@ fn a_kept_class_cell_changes_no_answer_whatever_was_asked_before() {
     }
 }
 
-/// The X-ray binaries' layers follow the binary tables' hold (P15.T10.b at 27): layer E alone under
-/// the scratch tables, D and E under the fitted ones, whose progenitors reach down to 3.2 M☉; and
-/// under every 27 hold the fixture's first cells hold one of layer D, the entry that layer E alone
-/// left out of the census: in its first eight cells from generator version 26, whose refitted
-/// tables place it in the eighth (the first three until 26).
+/// The X-ray binaries' layers are the fitted tables' (P15.T10.b): D and E, whose progenitors reach
+/// down to 3.2 M☉; and under every 27 hold the fixture's first cells hold one of layer D, the entry
+/// that layer E alone left out of the census: in its first eight cells from generator version 26,
+/// whose refitted tables place it in the eighth (the first three until 26).
 #[test]
-fn the_x_ray_binaries_layers_follow_the_binary_tables_hold() {
-    use crate::galaxy::catalogue_classes::binary::BinaryTableRules;
-    let e = LayerSet::EMPTY.with(Layer::E);
-    let d_and_e = e.with(Layer::D);
-    assert_eq!(
-        member_layers(ClassId::XRAY_BINARY, BinaryTableRules::Scratch),
-        Some(&[e][..])
-    );
-    assert_eq!(
-        member_layers(ClassId::XRAY_BINARY, BinaryTableRules::Fitted),
-        Some(&[d_and_e][..])
-    );
-    assert_eq!(
-        GalaxyRules::every_27_hold().binary_tables,
-        BinaryTableRules::Fitted
-    );
-    assert_eq!(
-        GalaxyRules::of_version(crate::GENERATOR_VERSION).binary_tables,
-        BinaryTableRules::Scratch
-    );
+fn the_x_ray_binaries_layers_follow_the_fitted_tables() {
+    let d_and_e = LayerSet::EMPTY.with(Layer::E).with(Layer::D);
+    assert_eq!(member_layers(ClassId::XRAY_BINARY), Some(&[d_and_e][..]));
     let hosts = first_hosts(at_27(), ClassId::XRAY_BINARY, 8);
     assert!(
         hosts

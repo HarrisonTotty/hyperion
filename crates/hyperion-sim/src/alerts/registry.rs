@@ -65,15 +65,16 @@
 //! - **Luminous red novae:** the heaviest merger the stellar mergers draw, two of the tracks'
 //!   150 M☉ stars.
 //! - **Kilonovae:** the most a neutron-star merger ejects, two neutron stars' 0.05 M☉.
-//! - **Novae:** at their peak for a 1.36 M☉ white dwarf, the top of `AWD_SAMPLER`'s white dwarf
-//!   masses, and as long as a 0.55 M☉ dwarf's, its bottom, whose decline is the slowest.
+//! - **Novae:** at their peak for a 1.36 M☉ white dwarf, the top of the scratch sampler's white
+//!   dwarf masses, and as long as a 0.55 M☉ dwarf's, its bottom, whose decline is the slowest.
 //! - **Dwarf novae:** at Warner's maximum for the 10-hour period at which the curve holds it, and
 //!   no longer than its rise, the light of the most mass a disc gathers at the faintest maximum,
 //!   and the slowest decay, each at its own extreme: a disc gathers at most
 //!   [`MAX_NOVA_TRANSFER_RATE`] over the longest cycle, 33 years, onto a 1.36 M☉ dwarf. That bound
 //!   is 5,517 years, against outbursts of days to months in sampled hosts: a recorded finding.
-//! - **X-ray transients:** at the Eddington luminosity of a 15 M☉ black hole, the top of
-//!   `XRB_SAMPLER`'s, for the donors' hydrogen, where the curve holds its peak; the shape is fixed.
+//! - **X-ray transients:** at the Eddington luminosity of a 15 M☉ black hole, the top of the
+//!   scratch sampler's, for the donors' hydrogen, where the curve holds its peak; the shape is
+//!   fixed.
 //! - **X-ray bursts:** a helium burst on a 2.2 M☉ neutron star, at its helium Eddington
 //!   luminosity, brighter than a mixed burst's half of the hydrogen-rich one, which lasts longer.
 //! - **Be/X outbursts:** a fifth of a 2.2 M☉ neutron star's Eddington luminosity, in X-rays alone.
@@ -737,9 +738,9 @@ pub const MAGNETAR_BURST_XRAY_PEAK: Watts =
 
 /// The bound on a classical or recurrent nova's light in each band, W, in [`AlertBand::ALL`]'s
 /// order: plan 11's curve ([`NovaCurve`], P11.T9.a) at its peak for a 1.36 M☉ white dwarf, the
-/// heaviest an accreting white dwarf host has (`AWD_SAMPLER`'s limit), rounded up at the fifth
-/// figure (P12.T5.c). A heavier dwarf peaks brighter (Livio's maximum magnitude), at 3.0662 × 10³²
-/// W in all for 1.36 M☉, an 8,000 K blackbody's light through each band; no radio or X-rays.
+/// heaviest an accreting white dwarf host had (the scratch sampler's limit), rounded up at the
+/// fifth figure (P12.T5.c). A heavier dwarf peaks brighter (Livio's maximum magnitude), at 3.0662 ×
+/// 10³² W in all for 1.36 M☉, an 8,000 K blackbody's light through each band; no radio or X-rays.
 pub const NOVA_BAND_PEAKS: [Watts; BAND_COUNT] = [
     Watts::new(3.5937e31),
     Watts::new(4.5319e31),
@@ -775,10 +776,10 @@ pub const DWARF_NOVA_BAND_PEAKS: [Watts; BAND_COUNT] = [
 
 /// The bound on an X-ray transient's outburst's light in each band, W, in [`AlertBand::ALL`]'s
 /// order: plan 11's curve ([`XrayTransientCurve`], P11.T9.a) at its peak, held at the Eddington
-/// luminosity of a 15 M☉ black hole, the heaviest `XRB_SAMPLER` gives, for the donors' hydrogen
-/// mass fraction of 0.7, 2.2184 × 10³² W in all, rounded up at the fifth figure (P12.T5.c). Its
-/// 2–10 keV light is 98% of it at a 0.55 keV blackbody's share, 1.0282 × 10³² W, and its optical
-/// light the 2% its disc reprocesses at 25,000 K; none in radio.
+/// luminosity of a 15 M☉ black hole, the heaviest the scratch sampler gave, for the donors'
+/// hydrogen mass fraction of 0.7, 2.2184 × 10³² W in all, rounded up at the fifth figure
+/// (P12.T5.c). Its 2–10 keV light is 98% of it at a 0.55 keV blackbody's share, 1.0282 × 10³² W,
+/// and its optical light the 2% its disc reprocesses at 25,000 K; none in radio.
 pub const XRAY_TRANSIENT_BAND_PEAKS: [Watts; BAND_COUNT] = [
     Watts::new(2.0718e29),
     Watts::new(1.5313e29),
@@ -795,8 +796,8 @@ pub const XRAY_TRANSIENT_BAND_PEAKS: [Watts; BAND_COUNT] = [
 
 /// The bound on a Type I X-ray burst's light in each band, W, in [`AlertBand::ALL`]'s order: plan
 /// 11's curve ([`XrayBurstCurve`], P11.T9.a) at the peak of a helium burst on a 2.2 M☉ neutron
-/// star, the heaviest `XRB_SAMPLER` gives, at its helium Eddington luminosity, 5.5311 × 10³¹ W in
-/// all, rounded up at the fifth figure (P12.T5.c). A mixed burst peaks at half the hydrogen-rich
+/// star, the heaviest the scratch sampler gave, at its helium Eddington luminosity, 5.5311 × 10³¹ W
+/// in all, rounded up at the fifth figure (P12.T5.c). A mixed burst peaks at half the hydrogen-rich
 /// Eddington luminosity, under a third of it. Its 2–10 keV light is 98% of it at a 2 keV
 /// blackbody's share, 3.9023 × 10³¹ W, its optical light the disc's 2% at 25,000 K; none in radio.
 pub const XRAY_BURST_BAND_PEAKS: [Watts; BAND_COUNT] = [
@@ -813,12 +814,12 @@ pub const XRAY_BURST_BAND_PEAKS: [Watts; BAND_COUNT] = [
     Watts::new(3.9023e31),
 ];
 
-/// The bound on a Be/X-ray binary's giant outburst's light in each band, W, in
-/// [`AlertBand::ALL`]'s order: plan 11's curve ([`BeXOutburstCurve`], P11.T9.a) at its peak, a
-/// fifth of the Eddington luminosity of a 2.2 M☉ neutron star, the heaviest `XRB_SAMPLER` gives,
-/// for the Be star's hydrogen mass fraction of 0.7, 6.5072 × 10³⁰ W in all; its 2–10 keV light at
-/// a 3 keV blackbody's share, rounded up at the fifth figure (P12.T5.c). Its optical light is the
-/// Be star's disc's, the system's, so none is the outburst's own.
+/// The bound on a Be/X-ray binary's giant outburst's light in each band, W, in [`AlertBand::ALL`]'s
+/// order: plan 11's curve ([`BeXOutburstCurve`], P11.T9.a) at its peak, a fifth of the Eddington
+/// luminosity of a 2.2 M☉ neutron star, the heaviest the scratch sampler gave, for the Be star's
+/// hydrogen mass fraction of 0.7, 6.5072 × 10³⁰ W in all; its 2–10 keV light at a 3 keV blackbody's
+/// share, rounded up at the fifth figure (P12.T5.c). Its optical light is the Be star's disc's, the
+/// system's, so none is the outburst's own.
 pub const BEX_OUTBURST_BAND_PEAKS: [Watts; BAND_COUNT] = [
     Watts::ZERO,
     Watts::ZERO,
@@ -1212,7 +1213,9 @@ mod tests {
     };
     use crate::stellar::binary::scan::{MAX_NOVA_TRANSFER_RATE, scan_cell};
     use crate::stellar::remnant::SupernovaType;
-    use crate::tables::binary::{AWD_SAMPLER, AwdMark, XRB_SAMPLER, XrbHostKind, XrbMark};
+    use crate::tables::binary::{
+        AWD_FAST_SAMPLER, AWD_SLOW_SAMPLER, AwdMark, XRB_SAMPLER, XrbHostKind, XrbMark,
+    };
     use crate::time::{SourceHorizon, UniverseTime};
     use crate::units::consts::SOLAR_LUMINOSITY_W;
     use crate::units::{Days, LightYears, SolarMasses, SolarRadii, WattsPerSquareMetre, Years};
@@ -1642,7 +1645,9 @@ mod tests {
     /// dwarf, a burst burning hydrogen too, and a dwarf nova under its sum of extremes.
     #[test]
     fn plan_11s_rows_bound_their_curves_over_the_samplers_ranges() {
-        let white_dwarfs = AWD_SAMPLER.mark(AwdMark::WhiteDwarfMass).limits();
+        let [fast, slow] = [&AWD_FAST_SAMPLER, &AWD_SLOW_SAMPLER]
+            .map(|sampler| sampler.mark(AwdMark::WhiteDwarfMass).limits());
+        let white_dwarfs = (fast.0.min(slow.0), fast.1.max(slow.1));
         let neutron_stars = XRB_SAMPLER.mark(XrbMark::NeutronStarMass).limits();
         let black_holes = XRB_SAMPLER.mark(XrbMark::BlackHoleMass).limits();
         assert_eq!(

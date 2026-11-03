@@ -23,7 +23,6 @@ use crate::coords::SystemVelocity;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
-use crate::galaxy::rules::GalaxyRules;
 use crate::orbit::KeplerElements;
 use crate::rng::Seed;
 use crate::stellar::binary::collapses::{OuterOrbit, PointLoss, outer_orbit_after};
@@ -440,18 +439,15 @@ const FLOORED_PIN: u64 = 0x81c9_b51f_c000_0001;
 /// floor stepped past the pin and the engine never acted on it (its debug assertion fired).
 #[test]
 fn a_floored_step_stops_at_the_pin() {
-    use crate::galaxy::catalogue_classes::binary::BinaryTableRules;
     use crate::galaxy::placement::{CellKey, generate_cell};
     use crate::id::{Layer, SystemId};
     use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
     use crate::stellar::system::{StarModel, draw_metallicity, primary_draws};
-    let galaxy = Galaxy::from_params_with_rules(
+    // The binary refit's census galaxy, on the scratch rows, as the refit found it.
+    let galaxy = Galaxy::from_params_for_binary_refit(
         Seed::new(0x0b17_15a0_0000_0001),
         GalaxyParams::milky_way_like(),
-        GalaxyRules {
-            binary_tables: BinaryTableRules::Scratch,
-            ..GalaxyRules::every_27_hold()
-        },
+        crate::GeneratorVersion::new(27),
     )
     .expect("the Milky Way fixture builds");
     let key = CellKey::new(Layer::E, [-55, 212, -4]).expect("a cell");

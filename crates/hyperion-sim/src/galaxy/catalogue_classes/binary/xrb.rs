@@ -5,22 +5,21 @@
 //! nowhere in the cells, and the share matrix gives up what the class holds: its row of
 //! [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES), hosts per solar mass formed, by
 //! population. The class is a Poisson process placed by thinning on the class grid of plan 09
-//! ([`ClassProcess`]), as P11.T8.a places the accreting white dwarfs. From generator version 27 it
-//! reads plan 15's fitted share row and sampler in place of the scratch ones (the hold of
-//! [`BinaryTableRules`](super::BinaryTableRules)).
+//! ([`ClassProcess`]), as P11.T8.a places the accreting white dwarfs. It reads plan 15's fitted
+//! share row and sampler (P15.T10.b's refit at 27).
 //!
 //! # The two sides
 //!
 //! The low-mass kinds (a neutron star or a black hole, persistent or transient, and from 27 an
 //! ultracompact or a symbiotic one) are the old populations' and the high-mass kinds (Be/X and
-//! supergiant, and from 27 a black hole beside a supergiant) the young disc's. From 27 the class
-//! draws all nine kinds the carving counts (`XRB_SAMPLER_27`, refitted at 27), each in its share
-//! of the engine's members but the black-hole transients, pinned at the observed share, so that
-//! the hosts its row counts are the hosts it draws (P11.T8.b's fix); below 27 its tables weigh
-//! the first six alone. The class's total
+//! supergiant, and from 27 a black hole beside a supergiant) the young disc's. The class draws all
+//! nine kinds the carving counts from 27 ([`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER),
+//! fitted at 27), each in its share of the engine's members but the black-hole transients, pinned
+//! at the observed share, so that the hosts its row counts are the hosts it draws (P11.T8.b's
+//! fix). The class's total
 //! is its row's, `Σ_c r_c n_c` over every component c, with `r_c` the row's hosts per solar mass
 //! formed in c's population × the mass formed per system × its born fraction; the high-mass side
-//! takes [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER)'s high-mass share of it, 0.16, over the young thin disc's components,
+//! takes its sampler's high-mass share of it over the young thin disc's components,
 //! and the low-mass side the rest over every other component, each side's components in
 //! proportion to `r_c n_c` (lean, 2026-10-31). A row equal in every population would give the
 //! young disc, a few tenths of a per cent of the mass formed, about 25 high-mass hosts, fewer
@@ -99,7 +98,6 @@ use super::super::grid::{CatalogueMember, ClassProcess};
 use super::super::ids::CatalogueCellKey;
 use super::super::registry::ClassId;
 use super::super::system::{CatalogueMotion, CatalogueSystem};
-use super::BinaryTableRules;
 use super::awd::{
     GIANT_DONOR_CORE_MASS, GIANT_DONOR_TEMPERATURE_K, LIFETIME_MARGIN, donor_state, luminosity_of,
 };
@@ -131,7 +129,9 @@ use crate::stellar::sse::wind::REIMERS;
 use crate::stellar::sse::{Track, ZCoeffs, turn_off_mass, zams};
 use crate::stellar::system::{StarModel, SystemStars, track_mass_of};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts, lifetime};
-use crate::tables::binary::{AwdDonorKind, ClassSamplerTable, XrbHostKind, XrbMark, XrbPick};
+use crate::tables::binary::{
+    AwdDonorKind, CLASS_SHARES, ClassSamplerTable, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
+};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
@@ -277,29 +277,24 @@ pub struct XrayBinaries {
     /// Each side's hosts per solar mass formed over the row's: the low-mass side's, then the
     /// high-mass side's.
     side_scales: (f64, f64),
-    /// The tables it reads (`GalaxyRules::binary_tables`).
-    tables: BinaryTableRules,
 }
 
 impl XrayBinaries {
-    /// The class in `galaxy`: its components, from its row of
-    /// [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES) and
-    /// [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER)'s high-mass share, or from version 27
-    /// plan 15's fitted tables in their place (`CLASS_SHARES_27` and `XRB_SAMPLER_27`, the
-    /// module's hold), and the rank of the instability line in the low-mass rate's law.
+    /// The class in `galaxy`: its components, from its row of [`CLASS_SHARES`] and
+    /// [`XRB_SAMPLER`]'s high-mass share, plan 15's fitted tables, and the rank of the instability
+    /// line in the low-mass rate's law.
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
-        Self::of_table(galaxy, galaxy.rules().binary_tables.xrb_sampler())
+        Self::of_table(galaxy, &XRB_SAMPLER)
     }
 
-    /// The class in `galaxy` drawing from `table`, its row the galaxy's tables'.
+    /// The class in `galaxy` drawing from `table`, its row [`CLASS_SHARES`]'.
     #[must_use]
     pub(crate) fn of_table(
         galaxy: &Galaxy,
         table: &'static ClassSamplerTable<XrbMark, XrbPick>,
     ) -> Self {
-        let tables = galaxy.rules().binary_tables;
-        let row = tables.class_shares().row(CarvedClass::XrayBinary);
+        let row = CLASS_SHARES.row(CarvedClass::XrayBinary);
         let sampler = ClassSampler::new(table);
         let formed = galaxy.mean_formed_mass().value();
         let fields = galaxy.fields();
@@ -354,7 +349,6 @@ impl XrayBinaries {
             sampler,
             rate_split,
             side_scales: (low_scale, high_scale),
-            tables,
         }
     }
 
@@ -368,8 +362,7 @@ impl XrayBinaries {
             XrbSide::LowMass => self.side_scales.0,
             XrbSide::HighMass => self.side_scales.1,
         };
-        self.tables
-            .class_shares()
+        CLASS_SHARES
             .row(CarvedClass::XrayBinary)
             .hosts_per_formed_mass(population)
             * scale
@@ -381,8 +374,7 @@ impl XrayBinaries {
         &self.components
     }
 
-    /// The sampler the class draws from: [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER), or
-    /// from version 27 the fitted one.
+    /// The sampler the class draws from: the fitted [`XRB_SAMPLER`].
     #[must_use]
     pub const fn sampler(&self) -> ClassSampler<XrbMark, XrbPick> {
         self.sampler

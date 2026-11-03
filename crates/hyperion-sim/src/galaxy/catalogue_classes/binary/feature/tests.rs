@@ -132,7 +132,7 @@ fn the_held_arm_lists_no_binary_class_and_the_catalogue_keeps_every_host() {
     }
     assert!(listing > 40, "{listing} features list a binary class");
     for component in off.fields().components() {
-        for row in on.rules().binary_tables.class_shares().rows() {
+        for row in CLASS_SHARES.rows() {
             assert_same_bits(catalogue_share(off, row, component), 1.0);
             let kept = catalogue_share(on, row, component);
             assert!((0.0..=1.0).contains(&kept) && kept.is_finite(), "{kept}");
@@ -362,7 +362,7 @@ fn the_catalogue_and_the_features_hold_each_class_s_budget() {
     let (off, on) = (held(), listed());
     let formed = on.mean_formed_mass().value();
     let mut report = String::new();
-    for row in on.rules().binary_tables.class_shares().rows() {
+    for row in CLASS_SHARES.rows() {
         let carved = row.class();
         for population in POPULATIONS {
             let components: Vec<&Component> = on
@@ -911,7 +911,7 @@ fn the_globulars_hold_what_the_catalogue_gives_up_for_them() {
     let (bulge, thick, halo) = shares.globulars().population_masses();
     let per_system = galaxy.mean_formed_mass().value();
     let weights = shares.globular_band_weights();
-    for row in galaxy.rules().binary_tables.class_shares().rows() {
+    for row in CLASS_SHARES.rows() {
         if row.class() == CarvedClass::XrayBinary {
             continue;
         }
@@ -962,11 +962,7 @@ fn the_globulars_hold_what_the_catalogue_gives_up_for_them() {
             if class == ClassId::XRAY_BINARY {
                 continue;
             }
-            let row = galaxy
-                .rules()
-                .binary_tables
-                .class_shares()
-                .row(carved_of(class).unwrap());
+            let row = CLASS_SHARES.row(carved_of(class).unwrap());
             let band_weight: f64 = MassBand::ALL
                 .iter()
                 .map(|&b| row.layer_share(b) * weights[b.index()])

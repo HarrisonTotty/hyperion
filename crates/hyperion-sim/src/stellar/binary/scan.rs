@@ -115,11 +115,11 @@ pub const NOVA_NOISE_LATTICE_CYCLES: u32 = 1;
 /// of 1.03 × 10⁻⁷ above which a white dwarf burns steadily and erupts in no nova (Hurley, Tout and
 /// Pols 2002, section 2.6.6; P11.T5's `STEADY_BURNING_RATE`), where the recurrence would be
 /// infinite and a host's nova clock undefined. The recurrence falls as the rate rises
-/// (Ṁ^−1.29), so a held rate lengthens it; at the scratch
-/// [`AWD_SAMPLER`](crate::tables::binary::AWD_SAMPLER)'s recurrences, 28,000 years and more, the
-/// rate stays under 10⁻⁸ and the hold binds nowhere (a test holds it). Were it to bind, as it may
-/// on plan 15's fitted fast sampler's recurrent novae from version 27, a fast host could recur
-/// beyond L, which the scan and the class's test would both refuse.
+/// (Ṁ^−1.29), so a held rate lengthens it; at the scratch sampler's recurrences of version 26,
+/// 28,000 years and more, the rate stays under 10⁻⁸ and the hold binds nowhere (a test holds it).
+/// Were it to bind, as it may on plan 15's fitted fast sampler's recurrent novae from version 27
+/// ([`AWD_FAST_SAMPLER`](crate::tables::binary::AWD_FAST_SAMPLER)), a fast host could recur beyond
+/// L, which the scan and the class's test would both refuse.
 pub const MAX_NOVA_TRANSFER_RATE: SolarMassesPerYear = SolarMassesPerYear::new(1.0e-7);
 
 /// What a galaxy-wide scan reads of an accreting white dwarf host (plan 11's Provides; P11.T8.a):
@@ -1258,8 +1258,9 @@ pub fn nova_series(seed: Seed, system: SystemId) -> EventSeries {
 /// # Panics
 ///
 /// If the period is not a span of at least [`LinearClock::MIN_PERIOD`]: a catalogue host's
-/// recurrence is at least 28,000 years ([`AWD_SAMPLER`](crate::tables::binary::AWD_SAMPLER)'s
-/// least), and from version 27 some years (plan 15's fitted fast sampler's).
+/// recurrence was at least 28,000 years (version 26's scratch sampler's least), and from version 27
+/// some years (plan 15's fitted fast sampler's,
+/// [`AWD_FAST_SAMPLER`](crate::tables::binary::AWD_FAST_SAMPLER)).
 #[must_use]
 pub fn nova_clock(recurrence: Years, share: f64) -> LinearClock {
     let seconds = recurrence.value() * SECONDS_PER_JULIAN_YEAR;

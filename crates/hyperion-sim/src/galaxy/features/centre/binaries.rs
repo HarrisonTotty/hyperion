@@ -162,7 +162,6 @@ impl CentreBinaries {
     /// ball. Classes in list order.
     pub(crate) fn add_expected_within(
         &self,
-        galaxy: &Galaxy,
         profiles: &TracerProfiles,
         (distance, radius): (LightYears, LightYears),
         counts: &mut LayerCounts,
@@ -173,7 +172,7 @@ impl CentreBinaries {
             sum + c.share / total * profiles.shell_share(c.tracer, (distance, radius))
         });
         for &(class, expected) in &self.classes {
-            let layers = member_layers(class, galaxy.rules().binary_tables)
+            let layers = member_layers(class)
                 .and_then(|sets| sets.first().copied())
                 .unwrap_or(LayerSet::EMPTY);
             for layer in layers.iter() {

@@ -3,10 +3,8 @@
 //! directory, and each writes the same block both times, in the header grammar, declaring the
 //! task's items (Design notes 2 and 11). The tasks cut their censuses into fixed parts and join
 //! them in order, so the pairs check that the thread split leaves the bytes alone. The full runs'
-//! acceptance, their samplers against the half of the census they were not fitted to, is the sim's
-//! slow
-//! `tables_hold::the_accreting_white_dwarf_samplers_against_the_engine` and
-//! `tables_hold::the_x_ray_binary_sampler_against_the_engine`.
+//! acceptance, their samplers against the half of the census they were not fitted to, was the
+//! sim's slow tests of P15.T10.b's hold, which went with it.
 //!
 //! The accreting white dwarfs' rows by donor kind (P11.T5's fix, `donor_rows`), which the refit at
 //! 27 runs, meet their cited figures on the smoke manifest's censuses, read through the galaxy's

@@ -76,6 +76,7 @@ use self::shares::ShareMatrix;
 use self::snr::WindowCaps;
 use self::substellar::{SubstellarAbundance, SubstellarParams};
 use crate::coords::GalacticPosition;
+use crate::tables::binary::{CLASS_SHARES, ClassShareTable};
 use crate::units::SolarMasses;
 use crate::{GENERATOR_VERSION, Seed};
 
@@ -322,12 +323,13 @@ impl Galaxy {
         Self::build(seed, params, GalaxyRules::of_version(version))
     }
 
-    /// [`from_params_at_version`](Self::from_params_at_version) with the binary classes' scratch
-    /// tables in place of the fitted ones (P15.T10.b's refit): the census galaxy of `hyperion-fit`'s
-    /// binary tasks and of the sim's tests of their tables. From 26 the field gives up the class
-    /// shares (P09.T2.c), so the records a census runs depend on the rows; under the scratch rows
-    /// the census of the version's engine does not read the rows it refits (plan 15's lean of
-    /// 2026-11-01). Nothing generated builds one.
+    /// [`from_params_at_version`](Self::from_params_at_version) with the share matrix's class
+    /// shares from the binary classes' scratch rows (P11.T7's, `SCRATCH_CLASS_SHARES`) in place
+    /// of the fitted ones (P15.T10.b's refit): the census galaxy of `hyperion-fit`'s binary tasks.
+    /// From 26 the field gives up the class shares (P09.T2.c), so the records a census runs depend
+    /// on the rows; under the scratch rows the census of the version's engine does not read the
+    /// rows it refits (plan 15's lean of 2026-11-01). Its classes read the fitted tables, which no
+    /// census reads. Nothing generated builds one.
     ///
     /// # Errors
     ///
@@ -343,11 +345,12 @@ impl Galaxy {
         params: GalaxyParams,
         version: crate::GeneratorVersion,
     ) -> Result<Self, BuildGalaxyError> {
-        let rules = GalaxyRules {
-            binary_tables: catalogue_classes::binary::BinaryTableRules::Scratch,
-            ..GalaxyRules::of_version(version)
-        };
-        Self::build(seed, params, rules)
+        Self::build_with_class_shares(
+            seed,
+            params,
+            GalaxyRules::of_version(version),
+            &crate::tables::binary::SCRATCH_CLASS_SHARES,
+        )
     }
 
     /// [`from_params`](Self::from_params) under `rules` in place of the generator version's: the
@@ -399,16 +402,12 @@ impl Galaxy {
     /// `rules` must keep this galaxy's: a test of any of their new arms builds the galaxy through
     /// [`from_params_with_rules`](Self::from_params_with_rules). A galaxy that holds the displaced
     /// classes keeps its stellar rules too, whose kick law its class table was built with.
-    /// The binary tables (`GalaxyRules::binary_tables`, P15.T10.b) are read then too, into the
-    /// share matrix's class shares, which this installs again under `rules`, as a build does, and
-    /// into the field share, so they may change only where the field share is not in force.
     ///
     /// # Panics
     ///
     /// In debug builds, which every test profile is, if `rules` changes the field share, the
     /// carve-out, the displaced classes' arm, the survivors' weight or the list's source, or the
-    /// stellar rules of a
-    /// galaxy that holds the classes, or the binary tables of a galaxy under the field share.
+    /// stellar rules of a galaxy that holds the classes.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn with_rules(self, rules: GalaxyRules) -> Self {
@@ -442,18 +441,6 @@ impl Galaxy {
             "the displaced classes' table was built under the galaxy's stellar rules, so a galaxy \
              under others is built with `Galaxy::from_params_with_rules`"
         );
-        let feature_shares = if rules.binary_tables == self.rules.binary_tables {
-            self.feature_shares
-        } else {
-            debug_assert!(
-                self.field_share.is_none(),
-                "the binary tables are read into the field share when a galaxy is built: build it \
-                 under the new rules with `Galaxy::from_params_with_rules`"
-            );
-            let mut shares = self.feature_shares;
-            shares.set_class_shares(rules.binary_tables.class_shares());
-            shares
-        };
         let (centre, type_ia_delays) = if rules.stellar == self.rules.stellar {
             (self.centre, self.type_ia_delays)
         } else {
@@ -465,7 +452,6 @@ impl Galaxy {
             CoreCollapseCell::default()
         };
         Self {
-            feature_shares,
             centre,
             type_ia_delays,
             core_collapse,
@@ -475,6 +461,16 @@ impl Galaxy {
     }
 
     /// [`from_params`](Self::from_params) under `rules`.
+    fn build(
+        seed: Seed,
+        params: GalaxyParams,
+        rules: GalaxyRules,
+    ) -> Result<Self, BuildGalaxyError> {
+        Self::build_with_class_shares(seed, params, rules, &CLASS_SHARES)
+    }
+
+    /// [`build`](Self::build) with the share matrix's class shares from `class_shares`
+    /// ([`CLASS_SHARES`], or the census galaxy's scratch rows).
     ///
     /// This is the one `match` on the displaced classes' hold (P08.T12.a;
     /// [`DISPLACED_VERSION`](displaced::DISPLACED_VERSION), E4′ of decision-stellar-holds, lean
@@ -483,23 +479,26 @@ impl Galaxy {
     /// 0.4–0.5 s in a release build, plan 08's P08.T9 as built, and never kept as a static), and
     /// the classes and the share matrix's stay shares and class counts are installed, so that every
     /// reader of layers D and E reads them through the galaxy's fields and shares.
-    fn build(
+    fn build_with_class_shares(
         seed: Seed,
         params: GalaxyParams,
         rules: GalaxyRules,
+        class_shares: &ClassShareTable,
     ) -> Result<Self, BuildGalaxyError> {
-        let field = Self::build_field(seed, params, rules)?;
+        let field = Self::build_field(seed, params, rules, class_shares)?;
         match rules.displaced {
             DisplacedRules::FieldOnly => Ok(field),
             DisplacedRules::Displaced => field.with_displaced_classes(),
         }
     }
 
-    /// The field galaxy: version 25's build verbatim, with nothing of plan 08's displaced classes.
+    /// The field galaxy: version 25's build verbatim, with nothing of plan 08's displaced classes,
+    /// its class shares `class_shares`'.
     fn build_field(
         seed: Seed,
         params: GalaxyParams,
         rules: GalaxyRules,
+        class_shares: &ClassShareTable,
     ) -> Result<Self, BuildGalaxyError> {
         let mass_function = HeldMassFunction::of(params.mass_function());
         let model = MassModel::new(&params);
@@ -521,7 +520,7 @@ impl Galaxy {
             mass_function.as_dyn(),
             params.mean_formed_mass(),
         );
-        feature_shares.set_class_shares(rules.binary_tables.class_shares());
+        feature_shares.set_class_shares(class_shares);
         // From version 27 the halo gives up its discrete share to the global list's streams and
         // dwarf cores, in the train whose range query first serves their members, and before the
         // field's factors are taken from the shares (plan 10, P10.T3.d.b; `LIST_SOURCE_VERSION`).

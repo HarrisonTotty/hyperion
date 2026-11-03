@@ -700,7 +700,7 @@ impl SystemSource for FeatureMemberSource<'_> {
             if lists == FeatureClassesRules::Listed
                 && let Some(list) = self.interiors.list(galaxy, &feature)
             {
-                list.add_expected_within(galaxy, (sphere.centre(), radius), &mut counts);
+                list.add_expected_within((sphere.centre(), radius), &mut counts);
             }
             let Some(interior) = interior else {
                 continue;
@@ -1089,7 +1089,7 @@ fn list_hits(
             }
             continue;
         }
-        let possible = FeatureLevelList::class_layers(galaxy, entry.class());
+        let possible = FeatureLevelList::class_layers(entry.class());
         if !possible.iter().any(|layer| layers.contains(layer)) {
             continue;
         }

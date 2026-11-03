@@ -712,10 +712,10 @@ impl FeatureLevelList {
     /// recent class's its primaries' ([`RecentClass::layer`]), one of plan 11's its catalogue
     /// class's (the class source's `member_layers`), none for another class.
     #[must_use]
-    pub(crate) fn class_layers(galaxy: &Galaxy, class: ClassId) -> LayerSet {
+    pub(crate) fn class_layers(class: ClassId) -> LayerSet {
         match RecentClass::of(class) {
             Some(recent) => LayerSet::EMPTY.with(recent.layer()),
-            None => member_layers(class, galaxy.rules().binary_tables)
+            None => member_layers(class)
                 .and_then(|sets| sets.first().copied())
                 .unwrap_or(LayerSet::EMPTY),
         }
@@ -730,7 +730,6 @@ impl FeatureLevelList {
     /// galactic centre's list, whose entries draw their own places. Classes in list order.
     pub(crate) fn add_expected_within(
         &self,
-        galaxy: &Galaxy,
         (centre, radius): (&GalacticPosition, LightYears),
         counts: &mut LayerCounts,
     ) {
@@ -740,7 +739,7 @@ impl FeatureLevelList {
         let distance = LightYears::from(self.centre.distance_to(centre)).value();
         let radius = radius.value();
         for class in &self.classes {
-            let layers = Self::class_layers(galaxy, class.class);
+            let layers = Self::class_layers(class.class);
             if layers.is_empty() {
                 continue;
             }

@@ -26,22 +26,23 @@
 //! class ([`SystemStars::generate`](crate::stellar::system::SystemStars::generate)), gives up
 //! exactly what P11.T8's catalogue classes hold.
 //!
-//! **Scratch.** Every population makes the same hosts per solar mass formed, scaled so that the
-//! Milky Way fixture's formed mass ([`MILKY_WAY_FORMED_MASS`]) gives the counts above, and each
-//! class's layers are a guess from the stars that make it: an accreting white dwarf's primary is
-//! its white dwarf's progenitor, 0.75–8 M☉; an X-ray binary's and a neutron-star merger's is the
-//! first compact star's, 8 M☉ and up; a stellar merger's is spread over the layers with most of it
-//! in C, where the contact binaries of W Ursae Majoris type lie. Plan 15's P15.T10.b fits them
-//! against the engine.
+//! **Fitted** for the accreting white dwarfs and the X-ray binaries, by plan 15's P15.T10.b against
+//! the engine at generator version 27, and **scratch** for the two merger classes: every
+//! population makes the same hosts per solar mass formed, scaled so that the Milky Way fixture's
+//! formed mass ([`MILKY_WAY_FORMED_MASS`]) gives the counts above, and each class's layers are a
+//! guess from the stars that make it: a neutron-star merger's primary is the first compact star's,
+//! 8 M☉ and up; a stellar merger's is spread over the layers with most of it in C, where the
+//! contact binaries of W Ursae Majoris type lie.
 //!
 //! [`ClassSamplerTable`] (P11.T8) is a catalogue class's conditional laws of the marks that define
 //! it now and of its history, which plan 11's `stellar::binary::sampler::ClassSampler` draws by
 //! inverse transform. Each mark is a residual given by its quantiles at the 17 ranks k ÷ 16, as
 //! plan 15's `PRIMARY_MASS_CDF` gives its laws, added to a median that follows a condition on a
-//! 17-point grid. [`AWD_SAMPLER`] is the accreting white dwarfs' and [`XRB_SAMPLER`] the X-ray
-//! binaries': hand-made scratch from the observed figures each mark's doc names (Design note 13),
-//! which P15.T10.b refits against the engine's own members; [`MERGER_SAMPLER`] is the stellar
-//! mergers' (P11.T8.c) and [`NSM_SAMPLER`] the neutron-star mergers' (P11.T8.d).
+//! 17-point grid. [`AWD_FAST_SAMPLER`] and [`AWD_SLOW_SAMPLER`] are the accreting white dwarfs'
+//! and [`XRB_SAMPLER`] the X-ray binaries': P15.T10.b's fits against the engine's own members, a
+//! mark too few members define kept from plan 11's hand-made scratch (Design note 13);
+//! [`MERGER_SAMPLER`] is the stellar mergers' (P11.T8.c) and [`NSM_SAMPLER`] the neutron-star
+//! mergers' (P11.T8.d).
 
 use std::marker::PhantomData;
 
@@ -141,10 +142,15 @@ const fn uniform(class: CarvedClass, count: f64, layer_shares: [f64; 5]) -> Clas
     }
 }
 
-/// The scratch share rows (P11.T7; module documentation): 4.5 × 10⁶ fast and 4.5 × 10⁶ slow
-/// accreting white dwarfs, 10⁴ X-ray binaries, 9 × 10⁴ stellar mergers and 10 neutron-star
-/// mergers in the source horizon at Milky Way parameters.
-pub const CLASS_SHARES: ClassShareTable = ClassShareTable {
+/// The scratch share rows (P11.T7): 4.5 × 10⁶ fast and 4.5 × 10⁶ slow accreting white dwarfs and
+/// 10⁴ X-ray binaries at Milky Way parameters, every population alike, an accreting white dwarf's
+/// primary its white dwarf's progenitor, 0.75–8 M☉, so in layers C and D, an X-ray binary's the
+/// compact star's, 8 M☉ and up; the merger classes' rows are [`CLASS_SHARES`]' own. Only the
+/// census galaxy of `hyperion-fit`'s binary tasks reads them
+/// (`Galaxy::from_params_for_binary_refit`), so that the field its records come from does not
+/// read the rows the tasks fit.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) const SCRATCH_CLASS_SHARES: ClassShareTable = ClassShareTable {
     rows: [
         uniform(
             CarvedClass::AccretingWdFast,
@@ -157,16 +163,8 @@ pub const CLASS_SHARES: ClassShareTable = ClassShareTable {
             [0.0, 0.0, 0.75, 0.25, 0.0],
         ),
         uniform(CarvedClass::XrayBinary, 1.0e4, [0.0, 0.0, 0.0, 0.0, 1.0]),
-        uniform(
-            CarvedClass::StellarMerger,
-            9.0e4,
-            [0.1, 0.2, 0.5, 0.15, 0.05],
-        ),
-        uniform(
-            CarvedClass::NeutronStarMerger,
-            10.0,
-            [0.0, 0.0, 0.0, 0.0, 1.0],
-        ),
+        CLASS_SHARES.rows[3],
+        CLASS_SHARES.rows[4],
     ],
 };
 
@@ -402,7 +400,8 @@ pub trait SamplerKey: Copy {
 
 /// A catalogue class's sampler table (plan 11's Provides; P11.T8): its marks and its choices, in
 /// the order the class draws them, keyed by the class's mark enum `M` and choice enum `P`. The
-/// mark list is fixed per class: [`AwdMark`] and [`AwdPick`] for [`AWD_SAMPLER`].
+/// mark list is fixed per class: [`AwdMark`] and [`AwdPick`] for [`AWD_FAST_SAMPLER`] and
+/// [`AWD_SLOW_SAMPLER`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClassSamplerTable<M, P> {
     marks: &'static [SamplerMark],
@@ -454,8 +453,9 @@ impl<M: SamplerKey, P: SamplerKey> ClassSamplerTable<M, P> {
     }
 }
 
-/// The marks of [`AWD_SAMPLER`], in its order (P11.T8.a): what an accreting white dwarf is now,
-/// then its history.
+/// The marks of the accreting white dwarfs' samplers ([`AWD_FAST_SAMPLER`] and
+/// [`AWD_SLOW_SAMPLER`]), in their order (P11.T8.a): what an accreting white dwarf is now, then
+/// its history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AwdMark {
     /// log₁₀ of the nova recurrence period, years, unconditional: the mark the two classes split
@@ -485,7 +485,7 @@ pub enum AwdMark {
 }
 
 impl AwdMark {
-    /// Every mark, in [`AWD_SAMPLER`]'s order.
+    /// Every mark, in the samplers' order.
     pub const ALL: [Self; 11] = [
         Self::Recurrence,
         Self::WhiteDwarfMass,
@@ -500,7 +500,7 @@ impl AwdMark {
         Self::Age,
     ];
 
-    /// The mark's place in [`AWD_SAMPLER`]'s marks.
+    /// The mark's place in the samplers' marks.
     #[must_use]
     pub const fn index(self) -> usize {
         self as usize
@@ -513,7 +513,7 @@ impl SamplerKey for AwdMark {
     }
 }
 
-/// The choices of [`AWD_SAMPLER`], in its order (P11.T8.a).
+/// The choices of the accreting white dwarfs' samplers, in their order (P11.T8.a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AwdPick {
     /// The donor's kind ([`AwdDonorKind`]).
@@ -528,7 +528,7 @@ impl SamplerKey for AwdPick {
     }
 }
 
-/// The donor kinds of [`AWD_SAMPLER`]'s one choice, in its order (P11.T8.a).
+/// The donor kinds of the accreting white dwarfs' samplers' one choice, in its order (P11.T8.a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AwdDonorKind {
     /// A hydrogen-rich main-sequence star: a cataclysmic variable.
@@ -561,210 +561,6 @@ const fn normal(sigma: f64) -> [f64; 17] {
     }
     out
 }
-
-/// A median flat at `value` over the condition's span `(first, last)`.
-const fn flat(first: f64, last: f64, value: f64) -> MedianCurve {
-    MedianCurve {
-        first,
-        last,
-        nodes: [value; 17],
-    }
-}
-
-/// A median rising linearly from `at_first` to `at_last` over the condition's span.
-const fn linear(first: f64, last: f64, at_first: f64, at_last: f64) -> MedianCurve {
-    let mut nodes = [0.0; 17];
-    let mut k = 0;
-    while k < 17 {
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "a node number of 0–16, exact in f64"
-        )]
-        let t = k as f64 / 16.0;
-        nodes[k] = at_first + (at_last - at_first) * t;
-        k += 1;
-    }
-    MedianCurve { first, last, nodes }
-}
-
-/// The scratch sampler of the two accreting white dwarf classes (P11.T8.a; Design notes 10, 12
-/// and 13): [`AwdMark`]'s eleven marks and [`AwdPick`]'s one choice, the donor's kind
-/// ([`AwdDonorKind`]).
-///
-/// Hand-made from observed figures, each recalled and not read at source in this build unless its
-/// line says otherwise, and the same in every population; P15.T10.b refits it against the
-/// engine's members (plan 11's `brute_force_class_members`):
-///
-/// - **Recurrence**, log₁₀ years: ranks 0 to ½ from 28,000 years to L (the fast hosts), ½ to 1
-///   from L to 10⁸ years (the slow), so that the median is L exactly and the two classes take
-///   halves, as [`CLASS_SHARES`] gives them. Classical novae recur every 10⁴–10⁵ years; at 9 × 10⁶
-///   hosts the law gives 49 eruptions a year, inside the brainstorm's 30–50. It holds no recurrent
-///   nova (under a century), which a 17-rank law cannot resolve at their few hundred hosts.
-/// - **White dwarf mass**: 0.70 + 0.45 exp(−(x − 4.45) ÷ 0.8) M☉ at log₁₀ recurrence x, ±0.10
-///   (one standard deviation, truncated at 2.5), on 0.55–1.36 M☉. Fast novae have the heavier
-///   dwarfs; cataclysmic variables' white dwarfs average 0.83 ± 0.23 M☉ (Zorotovic, Schreiber and
-///   Gänsicke 2011, A&A 536, A42).
-/// - **Periods** by donor kind, given the transfer rate y = log₁₀ Ṁ: main-sequence donors after the
-///   standard track (Knigge, Baraffe and Patterson 2011, ApJS 194, 28): 0.12 dex in hours (80
-///   minutes) up to y = −11, rising to 2.1 hours at y = −9.7, across the period gap of 2.15–3.18
-///   hours by y = −9.5 and to 5 hours at y = −8.5, ±0.03 dex; helium donors from an hour at
-///   y = −12 to 12 minutes at y = −8.5, ±0.05 dex, held to AM Canum Venaticorum stars' 5.4–65.6
-///   minutes (Ramsay et al. 2018; Solheim 2010, PASP 122, 1133); giants flat at 600 days, ±0.15
-///   dex, the peak of the symbiotic stars' periods (Mikołajewska 2012, Baltic Astronomy 21, 5).
-/// - **Donor masses** given log₁₀ of the period in hours, p: main-sequence donors on Warner's
-///   (1995, Cataclysmic Variable Stars, equation 2.100) M₂ = 0.065 P^(5/4), ±0.03 dex; helium
-///   donors 10^(−1 − 2(p + ½)) M☉, 0.1 M☉ at 19 minutes and 0.01 at an hour, ±0.05 dex; giants
-///   1.3 M☉, ±0.08 dex.
-/// - **The primary's initial mass** given the white dwarf's: Cummings et al.'s (2018, ApJ 866, 21)
-///   initial–final mass relation (their PARSEC fit, three lines from 0.87 to 8.2 M☉) inverted,
-///   held to 0.95–7.9 M☉ (layers C and D), ±0.03 dex.
-/// - **The donor's initial mass** given its mass now: through 1.4 M☉ for the helium donors' 0.005
-///   M☉, 0.63 M☉ for a donor of 0.1 M☉ now, 1.15 for one of 1 M☉, ±0.06 dex.
-/// - **The age**: 10^(10.3 − 2.5 log₁₀ m₀) years, about twice the main-sequence lifetime of the
-///   primary's m₀, at most 10^10.1, ±0.12 dex.
-/// - **The donor's kind**: 0.907 main-sequence, 0.09 helium, 0.003 giant: AM Canum Venaticorum
-///   stars' space density, 5 × 10⁻⁷ pc⁻³ (Carter et al. 2013, MNRAS 429, 2143, as Ramsay et al.
-///   2018, A&A 620, A141, quote it), against Pala et al.'s (2020) 4.8 × 10⁻⁶ pc⁻³ for
-///   cataclysmic variables, and a few times 10⁴ symbiotic stars.
-pub const AWD_SAMPLER: ClassSamplerTable<AwdMark, AwdPick> = ClassSamplerTable::new(
-    &AWD_MARKS,
-    &[SamplerPick::new("donor_kind", &[0.907, 0.09, 0.003])],
-);
-
-/// log₁₀ L in years: 18 log₁₀ 2.
-const LOG_L_YEARS: f64 = 5.418_539_921_951_662;
-
-/// The span of the transfer rate's log₁₀ the periods' medians follow, M☉ yr⁻¹.
-const RATE_SPAN: (f64, f64) = (-12.0, -8.5);
-
-/// [`AWD_SAMPLER`]'s marks, in [`AwdMark`]'s order.
-#[rustfmt::skip]
-const AWD_MARKS: [SamplerMark; 11] = [
-    SamplerMark {
-        name: "log_recurrence_years",
-        residual: [
-            4.45, 4.75, 4.92, 5.05, 5.15, 5.23, 5.30, 5.36, LOG_L_YEARS,
-            5.62, 5.84, 6.08, 6.34, 6.62, 6.94, 7.34, 8.0,
-        ],
-        median: None,
-        node_residuals: None,
-        limits: (4.45, 8.0),
-    },
-    SamplerMark {
-        name: "white_dwarf_mass",
-        residual: normal(0.10),
-        median: Some(MedianCurve {
-            first: 4.45,
-            last: 8.0,
-            nodes: [
-                1.150_000, 1.041_007, 0.958_413, 0.895_824, 0.848_394, 0.812_452, 0.785_216,
-                0.764_576, 0.748_935, 0.737_083, 0.728_101, 0.721_295, 0.716_137, 0.712_229,
-                0.709_267, 0.707_022, 0.705_321,
-            ],
-        }),
-        node_residuals: None,
-        limits: (0.55, 1.36),
-    },
-    SamplerMark {
-        name: "log_main_sequence_period_hours",
-        residual: normal(0.03),
-        median: Some(MedianCurve {
-            first: RATE_SPAN.0,
-            last: RATE_SPAN.1,
-            nodes: [
-                0.120_000, 0.120_000, 0.120_000, 0.120_000, 0.120_000, 0.129_375, 0.151_250,
-                0.173_125, 0.195_000, 0.243_875, 0.300_750, 0.420_312, 0.525_000, 0.568_750,
-                0.612_500, 0.656_250, 0.700_000,
-            ],
-        }),
-        node_residuals: None,
-        limits: (0.0, 1.0),
-    },
-    SamplerMark {
-        name: "log_helium_period_hours",
-        residual: normal(0.05),
-        median: Some(linear(RATE_SPAN.0, RATE_SPAN.1, 0.0, -0.7)),
-        node_residuals: None,
-        // 5.4 and 65.6 minutes.
-        limits: (-1.045_757, 0.038_753),
-    },
-    SamplerMark {
-        name: "log_giant_period_hours",
-        residual: normal(0.15),
-        // 600 days.
-        median: Some(flat(RATE_SPAN.0, RATE_SPAN.1, 4.158_362)),
-        node_residuals: None,
-        limits: (3.5, 5.0),
-    },
-    SamplerMark {
-        name: "log_main_sequence_donor_mass",
-        residual: normal(0.03),
-        // log₁₀ 0.065 + 1.25 p.
-        median: Some(linear(0.0, 0.8, -1.187_087, -0.187_087)),
-        node_residuals: None,
-        limits: (-1.301_030, -0.022_276),
-    },
-    SamplerMark {
-        name: "log_helium_donor_mass",
-        residual: normal(0.05),
-        median: Some(linear(-1.0, 0.1, 0.0, -2.2)),
-        node_residuals: None,
-        limits: (-2.301_030, -0.698_970),
-    },
-    SamplerMark {
-        name: "log_giant_donor_mass",
-        residual: normal(0.08),
-        // 1.3 M☉.
-        median: Some(flat(3.5, 5.0, 0.113_943)),
-        node_residuals: None,
-        limits: (-0.096_910, 0.477_121),
-    },
-    SamplerMark {
-        name: "log_primary_initial_mass",
-        residual: normal(0.03),
-        median: Some(MedianCurve {
-            first: 0.55,
-            last: 1.36,
-            nodes: [
-                -0.022_276, 0.154_591, 0.302_644, 0.412_854, 0.476_721, 0.515_468, 0.551_039,
-                0.608_993, 0.669_378, 0.722_383, 0.769_616, 0.812_213, 0.851_002, 0.886_609,
-                0.897_627, 0.897_627, 0.897_627,
-            ],
-        }),
-        node_residuals: None,
-        limits: (-0.022_276, 0.897_627),
-    },
-    SamplerMark {
-        name: "log_donor_initial_mass",
-        residual: normal(0.06),
-        median: Some(MedianCurve {
-            first: -2.3,
-            last: 0.5,
-            nodes: [
-                0.150_000, 0.117_188, 0.084_375, 0.051_562, 0.018_750, -0.030_000, -0.100_000,
-                -0.170_000, -0.176_000, -0.134_000, -0.092_000, -0.045_000, 0.004_000, 0.053_000,
-                0.198_000, 0.359_000, 0.520_000,
-            ],
-        }),
-        node_residuals: None,
-        limits: (-1.096_910, 0.897_627),
-    },
-    SamplerMark {
-        name: "log_age_years",
-        residual: normal(0.12),
-        median: Some(MedianCurve {
-            first: -0.022_276,
-            last: 0.897_627,
-            nodes: [
-                10.100_000, 10.100_000, 10.068_221, 9.924_486, 9.780_751, 9.637_016, 9.493_281,
-                9.349_547, 9.205_812, 9.062_077, 8.918_342, 8.774_607, 8.630_872, 8.487_137,
-                8.343_402, 8.199_667, 8.055_932,
-            ],
-        }),
-        node_residuals: None,
-        limits: (7.5, 10.12),
-    },
-];
 
 /// The marks of [`MERGER_SAMPLER`], in its order (P11.T8.c): a stellar merger's age, then its
 /// pair.
@@ -1211,9 +1007,9 @@ const NSM_MARKS: [SamplerMark; 5] = [
     },
 ];
 
-/// The kinds of the X-ray binaries' class (P11.T8.b), in [`XRB_SAMPLER`]'s two choices' order:
-/// the four low-mass kinds of the old populations, then the two high-mass kinds of the young disc,
-/// then the three the carving names (P11.T8.b's fix, drawn from 27 by plan 15's fitted tables): two
+/// The kinds of the X-ray binaries' class (P11.T8.b), in its sampler's two choices' order: the four
+/// low-mass kinds of the old populations, then the two high-mass kinds of the young disc, then the
+/// three the carving names (P11.T8.b's fix, drawn from 27 by plan 15's fitted tables): two
 /// low-mass, one high-mass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum XrbHostKind {
@@ -1240,7 +1036,8 @@ pub enum XrbHostKind {
 }
 
 impl XrbHostKind {
-    /// Every kind: the six of [`XRB_SAMPLER`] and P15.T10.b's first fit, then the carving's three.
+    /// Every kind: the six of P11.T8.b's scratch sampler and P15.T10.b's first fit, then the
+    /// carving's three.
     pub const ALL: [Self; 9] = [
         Self::NeutronStarPersistent,
         Self::NeutronStarTransient,
@@ -1268,8 +1065,8 @@ impl XrbHostKind {
     /// [`HIGH_MASS_HELD`](Self::HIGH_MASS_HELD)'s two, then the black-hole one.
     pub const HIGH_MASS: [Self; 3] = [Self::BeX, Self::Supergiant, Self::BlackHoleHighMass];
 
-    /// The low-mass kinds [`XRB_SAMPLER`]'s choice weighs and P15.T10.b's first fit fitted, the
-    /// first of [`LOW_MASS`](Self::LOW_MASS).
+    /// The low-mass kinds P11.T8.b's scratch sampler's choice weighed and P15.T10.b's first fit
+    /// fitted, the first of [`LOW_MASS`](Self::LOW_MASS).
     pub const LOW_MASS_HELD: [Self; 4] = [
         Self::NeutronStarPersistent,
         Self::NeutronStarTransient,
@@ -1277,8 +1074,8 @@ impl XrbHostKind {
         Self::BlackHoleTransient,
     ];
 
-    /// The high-mass kinds [`XRB_SAMPLER`]'s choice weighs and P15.T10.b's first fit fitted, the
-    /// first of [`HIGH_MASS`](Self::HIGH_MASS).
+    /// The high-mass kinds P11.T8.b's scratch sampler's choice weighed and P15.T10.b's first fit
+    /// fitted, the first of [`HIGH_MASS`](Self::HIGH_MASS).
     pub const HIGH_MASS_HELD: [Self; 2] = [Self::BeX, Self::Supergiant];
 
     /// Whether the kind is a high-mass X-ray binary's, whose hosts are the young disc's.
@@ -1494,246 +1291,6 @@ impl SamplerKey for XrbPick {
     }
 }
 
-/// The scratch sampler of the X-ray binaries' class (P11.T8.b; Design notes 10 and 13):
-/// [`XrbMark`]'s thirty marks and [`XrbPick`]'s two kind choices.
-///
-/// Hand-made from observed figures, each recalled and not read at source in this build unless its
-/// line says otherwise, and the same in every population; P15.T10.b refits it against the engine's
-/// members (plan 11's `brute_force_class_members`). Each unconditional mark marked "±" is a normal
-/// of the given mean and standard deviation, truncated at 2.5 and held to its limits.
-///
-/// - **The kinds**, as shares of all hosts: a neutron star's low-mass X-ray binaries 0.01
-///   persistent and 0.699 transient, a black hole's 0.001 and 0.13, so that the black-hole
-///   transients are the brainstorm's 1,300 of 10⁴ (Corral-Santana et al. 2016, A&A 587, A61) and
-///   the persistent ones the Galaxy's hundred or so bright sources (Grimm, Gilfanov and Sunyaev
-///   2002, A&A 391, 923); Be/X-ray binaries 0.15 and supergiant ones 0.01, some hundred against
-///   the forty to fifty known, most of the high-mass systems being Be/X (Reig 2011, Ap&SS 332, 1).
-///   Each choice's weights are its side's shares; the high-mass side's sum, 0.16, is the young
-///   disc's share of the hosts.
-/// - **Accretors**: neutron stars 1.45 ± 0.15 M☉ on 1.2–2.2 (Özel and Freire 2016, ARA&A 54,
-///   401); black holes 7.8 ± 1.2 on 5–15 (Özel et al. 2010, ApJ 725, 1918).
-/// - **Low-mass systems**: periods by a hand-made law from 2 hours to 10.5 days, median 8.3
-///   hours, with a tail of evolved donors to days (the spread of Ritter and Kolb's 2003, A&A 404,
-///   301, catalogue); donors on the Roche-lobe-filling main sequence's M₂ ≈ 0.11 P (hours) M☉
-///   (Frank, King and Raine 2002, Accretion Power in Astrophysics, section 4.6) up to 0.8 M☉, at
-///   7.3 hours, and evolved donors of 0.8 M☉ beyond, ±0.08 dex, on 0.1–1.5 M☉; the rate over the
-///   irradiated disc's line from 3 dex below it to 1 above, its median on the line, so that each
-///   side takes its own kinds by rank, and the Eddington rate held (`stellar::binary::scan`);
-///   transients recurring every 10^(3.0 ± 0.5) years with a neutron star and 10^(2.5 ± 0.5)
-///   with a black hole, some 14 and 8 outbursts a year over the Galaxy, against the 130 or so
-///   black-hole outbursts of 1996–2015 (Tetarenko et al. 2016, ApJS 222, 15) that the sky
-///   monitors saw.
-/// - **Be/X-ray binaries**: periods 10^(1.8 ± 0.35) days on 12.6–355 d, eccentricities 0.35 ±
-///   0.15 on 0–0.85 (Reig 2011's 12.7–330 d and 0.03–0.9), Be stars of 14 ± 2.5 M☉ on 9–19,
-///   B0–B2 (Negueruela 1998, A&A 338, 505); 10^(6.8 ± 0.25) years after the supernova, on 0.3–20
-///   Myr, within the Be star's main sequence.
-/// - **Supergiant X-ray binaries**, marked in Roche-lobe overflow: periods 10^(0.6 ± 0.3) days on
-///   1.3–16 d, donors of 20 ± 4 M☉ on 10–35, transfer 10^(−9 ± 0.5) M☉ yr⁻¹, 10³⁶–10³⁸ erg s⁻¹,
-///   the Eddington rate held; 10^(6.2 ± 0.2) years after the supernova on 0.3–5 Myr.
-/// - **Systemic speeds**: Maxwellians whose mean projected speed is van den Heuvel et al.'s (2000,
-///   A&A 364, 563) mean tangential speed, 15 ± 6 km s⁻¹ for Be/X and 42 ± 14 for supergiant
-///   systems, σ the mean tangential speed ÷ √(π ÷ 2): 12.0 km s⁻¹ (plan 09's
-///   `PAIR_SYSTEMIC_SIGMA`, ruling 126.3) and 33.5, mean speeds of 19.1 and 53.5 km s⁻¹, held to
-///   their 99.5% points, 43 and 120.
-/// - **History**: a neutron star's progenitor of 10^(1.08 ± 0.08) M☉ on 9–17 and a black hole's
-///   of 10^(1.48 ± 0.1) on 21–60, the ranges in which plan 06's single stars leave that remnant
-///   at [Fe/H] −0.5 to +0.3 with median draws (measured for P11.T8.b); a low-mass donor's initial
-///   mass 10^(0.15 ± 0.1) times its mass now, on 1–4 times.
-///
-/// The three kinds the carving names (P11.T8.b's fix) have marks of their own, `@provisional`,
-/// for P15.T10.b's refit at 27; the choices weigh the first six kinds alone, so no host of this
-/// table draws them, and version 27's table ([`XRB_SAMPLER_27`]) weighs all nine:
-///
-/// - **Ultracompact X-ray binaries**: periods 10^(1.5 ± 0.16) minutes on 10–80, median 32 (the
-///   known systems lie at 11–60 minutes: in 't Zand, Jonker and Markwardt 2007, A&A 465, 953,
-///   table 1); the donor a helium white dwarf filling its Roche lobe, its mass from the period
-///   and the cold white dwarf's mass–radius relation, and its rate driven by gravitational
-///   radiation (`stellar::binary::scan`); a transient's outbursts recurring every 10^(1.0 ± 0.4)
-///   years, ours, the few seen in outburst more than once doing so after some years; and the
-///   donor's progenitor of 10^(0.15 ± 0.08) M☉ on 0.9–2.3, ours, a low-mass giant whose core it
-///   is.
-/// - **Symbiotic X-ray binaries**, marked detached and fed by their giant's wind: periods 10^(3.0
-///   ± 0.25) days on 150–5,000, the measured ones running from IGR J16194−2810's 192.7 d to 4U
-///   1700+24's 4,391 d (Hinkle et al. 2019, ApJ 872, 43; research's ruling of 2026-11-02) about
-///   GX 1+4's 1,161 d (Hinkle et al. 2006, ApJ 641, 479); giants of 10^(0.176 ± 0.07) M☉, 1.5
-///   M☉, on 1–3; and the giant's radius 0.45 ± 0.12 of its Roche lobe's on 0.15–0.75, ours,
-///   inside the carving's detached 0.8 (`stellar::binary::xrb_class`), at the accreting white
-///   dwarfs' giant donors' 3,600 K (`awd`) and no larger than the red giant branch's tip there
-///   (`catalogue_classes::binary`'s 129 R☉), so that its luminosity and its Reimers wind follow.
-/// - **Black-hole high-mass X-ray binaries**, marked in Roche-lobe overflow as the supergiant
-///   systems are, with their recoils and years since the supernova: Cyg X-1's black hole, 21.2 ±
-///   2.2 M☉ on 15–30, its period, 10^(0.748 ± 0.1) days on 2–10 about its 5.6 d, and its O
-///   supergiant, 40.6 ± 7.4 M☉ on 20–60 (Miller-Jones et al. 2021, Science 371, 1046), fed at
-///   10^(−8.5 ± 0.4) M☉ yr⁻¹, ours, about Cyg X-1's 10³⁷ erg s⁻¹.
-///
-/// Every figure is recalled, not read at source in this build.
-pub const XRB_SAMPLER: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
-    &XRB_MARKS,
-    &[
-        SamplerPick::new("low_mass_kind", &[0.01, 0.699, 0.001, 0.13]),
-        SamplerPick::new("high_mass_kind", &[0.15, 0.01]),
-    ],
-);
-
-/// The quantiles of a Maxwellian of σ = 1 at the ranks k ÷ 16, the last its 99.5% point: speeds
-/// of three normal components (the χ distribution of three degrees of freedom).
-const MAXWELL_RANKS: [f64; 17] = [
-    0.0, 0.642_815, 0.832_080, 0.976_476, 1.101_151, 1.215_477, 1.324_379, 1.431_091, 1.538_172,
-    1.648_056, 1.763_470, 1.887_973, 2.026_905, 2.189_572, 2.395_707, 2.704_675, 3.583_037,
-];
-
-/// [`MAXWELL_RANKS`] scaled to `sigma`.
-const fn maxwell(sigma: f64) -> [f64; 17] {
-    let mut out = [0.0; 17];
-    let mut k = 0;
-    while k < 17 {
-        out[k] = MAXWELL_RANKS[k] * sigma;
-        k += 1;
-    }
-    out
-}
-
-/// The Maxwellian σ of a Be/X-ray binary's systemic speed, km s⁻¹: 12.0, van den Heuvel et al.'s
-/// mean tangential 15 ÷ √(π ÷ 2), plan 09's `PAIR_SYSTEMIC_SIGMA` (ruling 126.3).
-const BEX_RECOIL_SIGMA: f64 = 12.0;
-
-/// The Maxwellian σ of a supergiant X-ray binary's systemic speed, km s⁻¹: van den Heuvel et
-/// al.'s mean tangential 42 ÷ √(π ÷ 2).
-const SUPERGIANT_RECOIL_SIGMA: f64 = 33.511_152;
-
-/// [`XRB_SAMPLER`]'s marks, in [`XrbMark`]'s order.
-#[rustfmt::skip]
-const XRB_MARKS: [SamplerMark; 30] = [
-    SamplerMark::new("neutron_star_mass", normal_about(1.45, 0.15), None, (1.2, 2.2)),
-    SamplerMark::new("black_hole_mass", normal_about(7.8, 1.2), None, (5.0, 15.0)),
-    SamplerMark::new(
-        "log_low_mass_period_hours",
-        [
-            0.3, 0.45, 0.55, 0.62, 0.68, 0.74, 0.80, 0.86, 0.92,
-            0.99, 1.07, 1.16, 1.27, 1.40, 1.58, 1.85, 2.4,
-        ],
-        None,
-        (0.3, 2.4),
-    ),
-    SamplerMark::new(
-        "log_low_mass_donor_mass",
-        normal(0.08),
-        // log₁₀ 0.11 + p to the fifth node, then log₁₀ 0.8, on nodes 0.13125 apart in p.
-        Some(MedianCurve::new(
-            0.3,
-            2.4,
-            [
-                -0.658_607, -0.527_357, -0.396_107, -0.264_857, -0.133_607, -0.096_910,
-                -0.096_910, -0.096_910, -0.096_910, -0.096_910, -0.096_910, -0.096_910,
-                -0.096_910, -0.096_910, -0.096_910, -0.096_910, -0.096_910,
-            ],
-        )),
-        (-1.0, 0.176_091),
-    ),
-    SamplerMark::new(
-        "low_mass_rate_excess_dex",
-        [
-            -3.0, -2.4, -2.0, -1.7, -1.4, -1.1, -0.8, -0.4, 0.0,
-            0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0,
-        ],
-        None,
-        (-3.0, 1.0),
-    ),
-    SamplerMark::new("log_neutron_star_recurrence_years", normal_about(3.0, 0.5), None, (1.75, 4.25)),
-    SamplerMark::new("log_black_hole_recurrence_years", normal_about(2.5, 0.5), None, (1.25, 3.75)),
-    SamplerMark::new("log_bex_period_days", normal_about(1.8, 0.35), None, (1.1, 2.55)),
-    SamplerMark::new("bex_eccentricity", normal_about(0.35, 0.15), None, (0.0, 0.85)),
-    SamplerMark::new("bex_donor_mass", normal_about(14.0, 2.5), None, (9.0, 19.0)),
-    SamplerMark::new("log_supergiant_period_days", normal_about(0.6, 0.3), None, (0.1, 1.2)),
-    SamplerMark::new("supergiant_donor_mass", normal_about(20.0, 4.0), None, (10.0, 35.0)),
-    SamplerMark::new("log_supergiant_rate", normal_about(-9.0, 0.5), None, (-10.25, -7.75)),
-    SamplerMark::new("bex_recoil_km_s", maxwell(BEX_RECOIL_SIGMA), None, (0.0, 43.0)),
-    SamplerMark::new(
-        "supergiant_recoil_km_s",
-        maxwell(SUPERGIANT_RECOIL_SIGMA),
-        None,
-        (0.0, 120.1),
-    ),
-    SamplerMark::new("log_bex_years_since_supernova", normal_about(6.8, 0.25), None, (5.5, 7.3)),
-    SamplerMark::new(
-        "log_supergiant_years_since_supernova",
-        normal_about(6.2, 0.2),
-        None,
-        (5.5, 6.7),
-    ),
-    SamplerMark::new(
-        "log_neutron_star_progenitor_mass",
-        normal_about(1.08, 0.08),
-        None,
-        (0.954_243, 1.230_449),
-    ),
-    SamplerMark::new(
-        "log_black_hole_progenitor_mass",
-        normal_about(1.48, 0.1),
-        None,
-        (1.322_219, 1.778_151),
-    ),
-    SamplerMark::new("log_donor_initial_excess", normal_about(0.15, 0.1), None, (0.0, 0.6)),
-    SamplerMark::new(
-        "log_ultracompact_period_minutes",
-        normal_about(1.5, 0.16),
-        None,
-        // 10 and 80 minutes.
-        (1.0, 1.903_090),
-    ),
-    SamplerMark::new(
-        "log_ultracompact_recurrence_years",
-        normal_about(1.0, 0.4),
-        None,
-        (0.0, 2.0),
-    ),
-    SamplerMark::new(
-        "log_ultracompact_donor_initial_mass",
-        normal_about(0.15, 0.08),
-        None,
-        (-0.045_757, 0.361_728),
-    ),
-    SamplerMark::new(
-        "log_symbiotic_period_days",
-        normal_about(3.0, 0.25),
-        None,
-        // 150 and 5,000 days.
-        (2.176_091, 3.698_970),
-    ),
-    SamplerMark::new(
-        "log_symbiotic_donor_mass",
-        normal_about(0.176_091, 0.07),
-        None,
-        (0.0, 0.477_121),
-    ),
-    SamplerMark::new("symbiotic_filling", normal_about(0.45, 0.12), None, (0.15, 0.75)),
-    SamplerMark::new(
-        "black_hole_high_mass_accretor_mass",
-        normal_about(21.2, 2.2),
-        None,
-        (15.0, 30.0),
-    ),
-    SamplerMark::new(
-        "log_black_hole_high_mass_period_days",
-        normal_about(0.748_188, 0.1),
-        None,
-        // 2 and 10 days.
-        (std::f64::consts::LOG10_2, 1.0),
-    ),
-    SamplerMark::new(
-        "black_hole_high_mass_donor_mass",
-        normal_about(40.6, 7.4),
-        None,
-        (20.0, 60.0),
-    ),
-    SamplerMark::new(
-        "log_black_hole_high_mass_rate",
-        normal_about(-8.5, 0.4),
-        None,
-        (-9.5, -7.5),
-    ),
-];
-
 /// The names of [`AwdMark`]'s marks, in its order: each accreting white dwarf sampler's.
 const AWD_MARK_NAMES: [&str; 11] = [
     "log_recurrence_years",
@@ -1809,22 +1366,22 @@ const AWD_SLOW_MARKS_27: [SamplerMark; 11] = fitted_awd_marks(
 );
 
 /// The fast accreting white dwarfs' sampler fitted against the engine at generator version 27
-/// (P15.T10.b's refit), held until 27 (`catalogue_classes::binary`'s hold): [`AwdMark`]'s marks
-/// and the donor's kind, each mark fitted to the engine's fast members alone, so that its
-/// recurrence lies all within L and its every rank is the fast hosts'. Each member is weighted by
-/// the hosts its donor's kind stands for in the rows, which the kinds' shares are, so that the
-/// marks the kinds share follow the observed mix of kinds and not the engine's. Where
-/// [`AWD_SAMPLER`] serves both classes, split at L, each class has its own: the engine's two sides
-/// differ in their donors and rates, and the fast hosts are an eighth of the members, too few of a
-/// shared law's 17 ranks.
-pub const AWD_FAST_SAMPLER_27: ClassSamplerTable<AwdMark, AwdPick> = ClassSamplerTable::new(
+/// (P15.T10.b's refit): [`AwdMark`]'s marks and the donor's kind, each mark fitted to the engine's
+/// fast members alone, so that its recurrence lies all within L and its every rank is the fast
+/// hosts'. Each member is weighted by the hosts its donor's kind stands for in the rows, which the
+/// kinds' shares are, so that the marks the kinds share follow the observed mix of kinds and not
+/// the engine's. Where P11.T8.a's scratch sampler served both classes, split at L, each class has
+/// its own: the engine's two sides differ in their donors and rates, and the fast hosts are an
+/// eighth of the members, too few of a shared law's 17 ranks. A mark too few members define keeps
+/// the scratch sampler's law (task `binary_awd`'s block says which).
+pub const AWD_FAST_SAMPLER: ClassSamplerTable<AwdMark, AwdPick> = ClassSamplerTable::new(
     &AWD_FAST_MARKS_27,
     &[SamplerPick::new("donor_kind", &AWD_FAST_DONOR_KINDS_27)],
 );
 
 /// The slow accreting white dwarfs' sampler fitted against the engine at 27, as
-/// [`AWD_FAST_SAMPLER_27`] is the fast ones', its recurrence all beyond L.
-pub const AWD_SLOW_SAMPLER_27: ClassSamplerTable<AwdMark, AwdPick> = ClassSamplerTable::new(
+/// [`AWD_FAST_SAMPLER`] is the fast ones', its recurrence all beyond L.
+pub const AWD_SLOW_SAMPLER: ClassSamplerTable<AwdMark, AwdPick> = ClassSamplerTable::new(
     &AWD_SLOW_MARKS_27,
     &[SamplerPick::new("donor_kind", &AWD_SLOW_DONOR_KINDS_27)],
 );
@@ -1899,13 +1456,14 @@ const XRB_MARKS_27: [SamplerMark; 30] = fitted_xrb_marks(
 );
 
 /// The X-ray binaries' sampler fitted against the engine at generator version 27 (P15.T10.b's
-/// refit), held until 27 (`catalogue_classes::binary`'s hold): [`XrbMark`]'s marks and the two
-/// kind choices over all nine kinds the carving counts, fitted to the engine's members of each
-/// kind, each mark no member defines kept as [`XRB_SAMPLER`]'s (task `binary_xrb`'s block says
-/// which). Each kind is weighted by the galaxy's share of the engine's members of it, but the
-/// black-hole transients, pinned at [`BLACK_HOLE_TRANSIENT_SHARE`], so that the kinds the class
-/// draws are those its row counts (P11.T8.b's fix).
-pub const XRB_SAMPLER_27: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
+/// refit): [`XrbMark`]'s marks and the two kind choices over all nine kinds the carving counts,
+/// fitted to the engine's members of each kind, each mark too few members define kept as
+/// P11.T8.b's hand-made scratch sampler had it, from the observed figures of plan 11's design note
+/// 13 (task `binary_xrb`'s block says which). Each kind is weighted by the galaxy's share of the
+/// engine's members of it, but the black-hole transients, pinned at
+/// [`BLACK_HOLE_TRANSIENT_SHARE`], so that the kinds the class draws are those its row counts
+/// (P11.T8.b's fix).
+pub const XRB_SAMPLER: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
     &XRB_MARKS_27,
     &[
         SamplerPick::new("low_mass_kind", &XRB_LOW_MASS_KINDS_27),
@@ -1921,11 +1479,12 @@ pub const XRB_SAMPLER_27: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTabl
 /// `α_CE λ` nor the kicks are touched, which would move every class after a common envelope).
 pub const BLACK_HOLE_TRANSIENT_SHARE: f64 = 0.13;
 
-/// The share rows fitted against the engine at generator version 27 (P15.T10.b's refit), held
-/// until 27: the accreting white dwarfs' rows from task `binary_awd`'s block, each donor kind
-/// scaled to its observed figure, and the X-ray binaries' from task `binary_xrb`'s, the two
-/// merger classes' [`CLASS_SHARES`]' scratch until their own fits.
-pub const CLASS_SHARES_27: ClassShareTable = ClassShareTable {
+/// The share rows (P11.T7, P15.T10.b; module documentation): the accreting white dwarfs' rows
+/// fitted against the engine at generator version 27 from task `binary_awd`'s block, each donor
+/// kind scaled to its observed figure, and the X-ray binaries' from task `binary_xrb`'s, and the
+/// two merger classes' scratch until their own fits, 9 × 10⁴ stellar mergers and 10 neutron-star
+/// mergers in the source horizon at Milky Way parameters.
+pub const CLASS_SHARES: ClassShareTable = ClassShareTable {
     rows: [
         ClassShareRow {
             class: CarvedClass::AccretingWdFast,
@@ -1942,8 +1501,16 @@ pub const CLASS_SHARES_27: ClassShareTable = ClassShareTable {
             hosts_per_formed_mass: XRB_HOSTS_PER_FORMED_MASS_27,
             layer_shares: XRB_LAYER_SHARES_27,
         },
-        CLASS_SHARES.rows[3],
-        CLASS_SHARES.rows[4],
+        uniform(
+            CarvedClass::StellarMerger,
+            9.0e4,
+            [0.1, 0.2, 0.5, 0.15, 0.05],
+        ),
+        uniform(
+            CarvedClass::NeutronStarMerger,
+            10.0,
+            [0.0, 0.0, 0.0, 0.0, 1.0],
+        ),
     ],
 };
 
@@ -2870,8 +2437,9 @@ mod tests {
         systems * galaxy.mean_formed_mass().value()
     }
 
-    /// The scratch rates are scaled to the fixture's formed mass, so that it holds the
-    /// brainstorm's counts, and each class's layer shares sum to 1.
+    /// The scratch rates, the census galaxy's and the merger classes' own, are scaled to the
+    /// fixture's formed mass, so that it holds the brainstorm's counts, and each class's layer
+    /// shares sum to 1.
     #[test]
     fn the_scratch_rates_give_the_milky_way_counts() {
         let formed = milky_way_formed_mass();
@@ -2880,7 +2448,7 @@ mod tests {
             "the fixture forms {formed:e} M_sun, the table is scaled to {MILKY_WAY_FORMED_MASS:e}"
         );
         let expected = [4.5e6, 4.5e6, 1.0e4, 9.0e4, 10.0];
-        for (row, count) in CLASS_SHARES.rows().iter().zip(expected) {
+        for (row, count) in SCRATCH_CLASS_SHARES.rows().iter().zip(expected) {
             let hosts = row.hosts_per_formed_mass(Population::YoungThinDisc) * formed;
             assert!(
                 (hosts / count - 1.0).abs() < 1e-9,
@@ -2898,7 +2466,7 @@ mod tests {
             }));
         }
         assert_eq!(
-            CLASS_SHARES.row(CarvedClass::XrayBinary).class(),
+            SCRATCH_CLASS_SHARES.row(CarvedClass::XrayBinary).class(),
             CarvedClass::XrayBinary
         );
     }

@@ -423,10 +423,10 @@ fn check_sphere(
 /// The layers the census counts the entries of `class`, a list's class, in: a recent class's its
 /// primaries' ([`RecentClass::layer`]), one of plan 11's its catalogue class's
 /// (`catalogue_classes::source::member_layers`).
-fn class_layers(galaxy: &Galaxy, class: ClassId) -> LayerSet {
+fn class_layers(class: ClassId) -> LayerSet {
     match RecentClass::of(class) {
         Some(recent) => LayerSet::EMPTY.with(recent.layer()),
-        None => member_layers(class, galaxy.rules().binary_tables)
+        None => member_layers(class)
             .and_then(|sets| sets.first().copied())
             .expect("a listed class has its members' layers"),
     }
@@ -555,7 +555,7 @@ fn features_in_range(
             if !kind.holds(class.class()) {
                 continue;
             }
-            for layer in class_layers(galaxy, class.class()).iter() {
+            for layer in class_layers(class.class()).iter() {
                 listed.set(layer, listed.get(layer) + class.expected());
             }
         }

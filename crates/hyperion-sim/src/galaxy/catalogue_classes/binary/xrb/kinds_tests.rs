@@ -25,7 +25,7 @@ use crate::stellar::binary::{
     BinaryClass, BinaryParams, ClassContext, HmxbKind, SYMBIOTIC_XRB_MIN_LUMINOSITY, XrbKind,
     classify, wind_fed_luminosity,
 };
-use crate::tables::binary::{SamplerPick, XRB_SAMPLER, XRB_SAMPLER_27};
+use crate::tables::binary::{SamplerPick, XRB_SAMPLER};
 use crate::time::SourceHorizon;
 use crate::units::consts::SECONDS_PER_DAY;
 
@@ -47,7 +47,7 @@ const NEW: [XrbHostKind; 3] = [
 /// A table of version 27's marks that draws the carving's three kinds alone, half each of the
 /// low-mass side and all of the high-mass side, so that their hosts fill the sample cells.
 static NEW_KINDS: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
-    XRB_SAMPLER_27.marks(),
+    XRB_SAMPLER.marks(),
     &[
         SamplerPick::new("low_mass_kind", &[0.0, 0.0, 0.0, 0.0, 0.5, 0.5]),
         SamplerPick::new("high_mass_kind", &[0.0, 0.0, 0.5]),
@@ -143,20 +143,19 @@ fn side_share(table: &ClassSamplerTable<XrbMark, XrbPick>, kind: XrbHostKind) ->
 /// From 27 the class draws from version 27's table, which weighs all nine kinds: the kinds'
 /// expected hosts are their weights' shares of their side's hosts and sum to the class's total, so
 /// that no host the row counts goes undrawn, the black holes are at most 0.01 of the young disc's
-/// high-mass hosts and the black-hole transients the observed 1,300 ± 400. Below 27 the class's
-/// table weighs the first six alone, and the carving's kinds have no hosts.
+/// high-mass hosts and the black-hole transients the observed 1,300 ± 400.
 #[test]
 fn from_27_the_class_draws_every_kind_its_row_counts() {
     let (galaxy, process) = (galaxy(), process());
-    assert_eq!(process.sampler().table(), &XRB_SAMPLER_27);
+    assert_eq!(process.sampler().table(), &XRB_SAMPLER);
     // The refit at 27 fits the low-mass donor's mass with a law at each node.
     assert!(
-        XRB_SAMPLER_27
+        XRB_SAMPLER
             .mark(XrbMark::LowMassDonorMass)
             .node_residuals()
             .is_some()
     );
-    let weights = |pick| XRB_SAMPLER_27.pick(pick).weights();
+    let weights = |pick| XRB_SAMPLER.pick(pick).weights();
     assert_eq!(
         weights(XrbPick::LowMassKind).len(),
         XrbHostKind::LOW_MASS.len()
@@ -180,24 +179,17 @@ fn from_27_the_class_draws_every_kind_its_row_counts() {
         } else {
             XrbSide::LowMass
         };
-        let share = side_share(&XRB_SAMPLER_27, kind);
+        let share = side_share(&XRB_SAMPLER, kind);
         assert!(share > 0.0, "{kind:?}");
         let of_side = hosts / process.expected_hosts_on(galaxy, side);
         assert!((of_side - share).abs() < 1e-12, "{kind:?}");
     }
-    let black_holes = side_share(&XRB_SAMPLER_27, XrbHostKind::BlackHoleHighMass);
+    let black_holes = side_share(&XRB_SAMPLER, XrbHostKind::BlackHoleHighMass);
     println!("black holes {black_holes:.4} of the high-mass hosts");
     // The black-hole transients are pinned to the observed 1,300, P11.T8.b's 1,300 ± 400.
     let transients = process.expected_hosts_of(galaxy, XrbHostKind::BlackHoleTransient);
     assert!((900.0..=1_700.0).contains(&transients), "{transients}");
     assert!(black_holes <= MAX_BLACK_HOLE_SHARE, "{black_holes}");
-    let version = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
-        .expect("the Milky Way fixture's gas is mostly neutral");
-    let held = XrayBinaries::new(&version);
-    assert_eq!(held.sampler().table(), &XRB_SAMPLER);
-    for kind in NEW {
-        assert!(held.expected_hosts_of(&version, kind) <= 0.0, "{kind:?}");
-    }
 }
 
 /// The ultracompact hosts the sample cells hold under the refit at 27 (P15.T10.b), as measured: 50
@@ -234,7 +226,7 @@ fn the_drawn_kinds_follow_their_weights() {
         if !high_mass {
             assert_eq!(ultracompact, PINNED_ULTRACOMPACT_ENTRIES);
         }
-        let weights = XRB_SAMPLER_27.pick(pick).weights();
+        let weights = XRB_SAMPLER.pick(pick).weights();
         let sum = kinds
             .iter()
             .zip(weights)

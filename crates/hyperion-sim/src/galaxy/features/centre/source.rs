@@ -601,9 +601,8 @@ impl<'a> CentreMemberSource<'a> {
                 push(entry.member().record(), hit);
             }
         }
-        let tables = self.galaxy.rules().binary_tables;
         for place in binaries {
-            let possible = member_layers(place.class(), tables)
+            let possible = member_layers(place.class())
                 .and_then(|sets| sets.first().copied())
                 .unwrap_or(LayerSet::EMPTY);
             if !possible.iter().any(|layer| layers.contains(layer)) {
@@ -911,7 +910,6 @@ impl SystemSource for CentreMemberSource<'_> {
                 &mut counts,
             );
             list.recent.binaries().add_expected_within(
-                galaxy,
                 &list.profiles,
                 (from_black_hole, sphere.radius()),
                 &mut counts,

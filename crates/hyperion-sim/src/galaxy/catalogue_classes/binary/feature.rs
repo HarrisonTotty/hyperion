@@ -54,7 +54,7 @@ use crate::stellar::binary::light_curves::XrayAccretor;
 use crate::stellar::binary::scan::{awd_marks_at, merger_marks_at, nsm_marks_at, xrb_marks_at};
 use crate::stellar::binary::{BinaryTimeline, CarvedClass};
 use crate::stellar::system::SystemStars;
-use crate::tables::binary::{ClassShareRow, NsmPairKind};
+use crate::tables::binary::{CLASS_SHARES, ClassShareRow, NsmPairKind};
 use crate::units::{Dex, HeliumExcess, SolarMasses, Years};
 
 /// The generator version from which features list plan 11's binary classes, the catalogue's
@@ -403,10 +403,8 @@ pub fn is_listed_binary(class: ClassId) -> bool {
 }
 
 /// The hosts per solar mass formed of plan 11's binary class `class` among members of
-/// `population`: its row of the galaxy's share table (`GalaxyRules::binary_tables`:
-/// [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES),
-/// or from version 27 plan 15's fitted rows), the X-ray binaries' on the side the population's
-/// members are on ([`XrayBinaries::hosts_per_formed_mass`]).
+/// `population`: its row of the share table ([`CLASS_SHARES`]), the X-ray binaries' on the side the
+/// population's members are on ([`XrayBinaries::hosts_per_formed_mass`]).
 ///
 /// # Panics
 ///
@@ -423,12 +421,9 @@ pub(crate) fn hosts_per_formed_mass(
         CarvedClass::AccretingWdFast
         | CarvedClass::AccretingWdSlow
         | CarvedClass::StellarMerger
-        | CarvedClass::NeutronStarMerger => galaxy
-            .rules()
-            .binary_tables
-            .class_shares()
-            .row(carved)
-            .hosts_per_formed_mass(population),
+        | CarvedClass::NeutronStarMerger => {
+            CLASS_SHARES.row(carved).hosts_per_formed_mass(population)
+        }
     }
 }
 
@@ -447,11 +442,7 @@ pub(crate) fn globular_hosts(
     population: Population,
     mass: SolarMasses,
 ) -> f64 {
-    let row = galaxy
-        .rules()
-        .binary_tables
-        .class_shares()
-        .row(carved_of(class).expect("a listed class is plan 11's"));
+    let row = CLASS_SHARES.row(carved_of(class).expect("a listed class is plan 11's"));
     let weights = galaxy.feature_shares().globular_band_weights();
     let band_weight = MassBand::ALL.iter().fold(0.0, |sum, &band| {
         sum + row.layer_share(band) * weights[band.index()]

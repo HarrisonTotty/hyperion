@@ -24,8 +24,9 @@
 //!   function, whose primaries form 0.703 of `m̄_f` (0.713 under Kroupa's).
 //! - **Hosts** of each carved class: the formed mass times the class's rate, hosts per solar mass
 //!   formed, the largest of its row over the seven populations ([`POPULATIONS`]). The centre is
-//!   none of them. The scratch rows are equal in every population, so this is exact now and an
-//!   upper bound once plan 15's P15.T10.b refits them apart.
+//!   none of them. The merger classes' scratch rows are equal in every population, and the
+//!   accreting white dwarfs' and the X-ray binaries', plan 15's P15.T10.b's fits, apart, so the
+//!   forecast is an upper bound.
 //! - **Candidates**: each class's hosts over [`CLASS_ACCEPTANCE_FLOOR`], summed in the rows'
 //!   ([`CarvedClass`]) order. A candidate that fails its class's test is thinned, and P11.T8 keeps
 //!   that under one in ten, so the floor bounds what the thinning adds.

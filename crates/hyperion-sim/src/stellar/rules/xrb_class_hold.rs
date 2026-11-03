@@ -21,7 +21,7 @@ use std::sync::OnceLock;
 
 use hyperion_testkit::order::assert_order_independent;
 
-use crate::galaxy::catalogue_classes::binary::{BinaryTableRules, XrayBinaries};
+use crate::galaxy::catalogue_classes::binary::XrayBinaries;
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId};
 use crate::galaxy::imf::{BandShares, MassBand};
 use crate::galaxy::params::GalaxyParams;
@@ -40,7 +40,7 @@ use crate::stellar::binary::testing::{
 use crate::stellar::binary::xrb_class::{SPUN_UP_GAINED_SHARE, XRB_MIN_TRANSFER_RATE};
 use crate::stellar::binary::{BinaryClass, CarvedClass, Component, HmxbKind, SegmentKind};
 use crate::tables::binary::{
-    ClassSamplerTable, SamplerPick, XRB_SAMPLER_27, XrbHostKind, XrbMark, XrbPick,
+    ClassSamplerTable, SamplerPick, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
 };
 use crate::units::{Seconds, Years};
 
@@ -230,12 +230,8 @@ fn a_b_star_spun_up_by_transfer_is_a_be_star() {
 /// carving's kinds too.
 #[test]
 fn the_scan_refuses_a_host_fed_under_the_floor() {
-    let rules = galaxy().rules();
-    let fitted = galaxy().clone().with_rules(GalaxyRules {
-        binary_tables: BinaryTableRules::Fitted,
-        ..rules
-    });
-    let process = XrayBinaries::of_table(&fitted, &XRB_SAMPLER_27);
+    let fitted = galaxy().clone();
+    let process = XrayBinaries::of_table(&fitted, &XRB_SAMPLER);
     let under = |h: &XrbScanMarks| h.transfer_rate().is_some_and(|r| r < XRB_MIN_TRANSFER_RATE);
     let mut kept = 0_usize;
     for x in -20..20 {
@@ -417,7 +413,7 @@ fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
 /// A table of version 27's marks that draws the carving's three kinds alone, so that their marks
 /// fill the catalogue's laws in the sample cells.
 static NEW_KINDS: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
-    XRB_SAMPLER_27.marks(),
+    XRB_SAMPLER.marks(),
     &[
         SamplerPick::new("low_mass_kind", &[0.0, 0.0, 0.0, 0.0, 0.5, 0.5]),
         SamplerPick::new("high_mass_kind", &[0.0, 0.0, 0.5]),

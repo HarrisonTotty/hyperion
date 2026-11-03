@@ -232,7 +232,6 @@ fn the_held_arm_is_every_26_hold_s() {
     let every_26 = built(GalaxyRules::every_26_hold_with_its_retargets());
     let held = built(GalaxyRules {
         runaway_deaths: RunawayDeathsRules::FieldOnly,
-        binary_tables: crate::galaxy::catalogue_classes::binary::BinaryTableRules::Scratch,
         hypervelocity: crate::galaxy::displaced::survivors::HypervelocityRules::Unweighted,
         ..GalaxyRules::every_27_hold()
     });

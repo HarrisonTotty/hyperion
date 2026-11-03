@@ -10,9 +10,10 @@
 //! uniform word for its rank, so a mark's value is a monotone function of its word and a
 //! restricted draw ([`ClassSampler::draw_in_ranks`]) is an exact conditional one, as plan 11's
 //! design note 1 draws the stripped orbits. The four binary classes share it
-//! (P11.T8.a–d), each with its own table: the accreting white dwarfs' is
-//! [`AWD_SAMPLER`](crate::tables::binary::AWD_SAMPLER) and the X-ray binaries'
-//! [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER).
+//! (P11.T8.a–d), each with its own table: the accreting white dwarfs' are
+//! [`AWD_FAST_SAMPLER`](crate::tables::binary::AWD_FAST_SAMPLER) and
+//! [`AWD_SLOW_SAMPLER`](crate::tables::binary::AWD_SLOW_SAMPLER), a side each, and the X-ray
+//! binaries' [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER).
 
 use crate::rng::Stream;
 use crate::tables::binary::{ClassSamplerTable, MedianCurve, SamplerKey};
@@ -21,26 +22,26 @@ use crate::tables::binary::{ClassSamplerTable, MedianCurve, SamplerKey};
 ///
 /// # Examples
 ///
-/// An accreting white dwarf's recurrence period, drawn on the slow side of L alone, and its white
-/// dwarf's mass given it: a slow host has the lighter dwarfs.
+/// A slow accreting white dwarf's recurrence period, beyond L at every rank of its side's
+/// sampler, and its white dwarf's mass given it, inside the mark's limits.
 ///
 /// ```
 /// use hyperion_sim::Seed;
 /// use hyperion_sim::math;
 /// use hyperion_sim::rng::{ObjectKey, Stream, tags};
 /// use hyperion_sim::stellar::binary::sampler::ClassSampler;
-/// use hyperion_sim::tables::binary::{AWD_SAMPLER, AwdMark};
+/// use hyperion_sim::tables::binary::{AWD_SLOW_SAMPLER, AwdMark};
 /// use hyperion_sim::time::LIGHT_CROSSING_L;
 ///
-/// let sampler = ClassSampler::new(&AWD_SAMPLER);
+/// let sampler = ClassSampler::new(&AWD_SLOW_SAMPLER);
 /// let log_l = math::log10(LIGHT_CROSSING_L.as_julian_years_f64());
-/// let split = sampler.rank_of(AwdMark::Recurrence, 0.0, log_l);
-/// assert!((split - 0.5).abs() < 1e-12);
+/// assert!(sampler.value_at(AwdMark::Recurrence, 0.0, 0.0) > log_l);
 /// let mut stream = Stream::open(Seed::new(3), tags::SELFTEST_STREAM, ObjectKey::galaxy());
-/// let log_years = sampler.draw_in_ranks(AwdMark::Recurrence, 0.0, (split, 1.0), &mut stream);
-/// assert!(log_years >= log_l - 1e-12);
+/// let log_years = sampler.draw(AwdMark::Recurrence, 0.0, &mut stream);
+/// assert!(log_years > log_l);
 /// let mass = sampler.draw(AwdMark::WhiteDwarfMass, log_years, &mut stream);
-/// assert!((0.55..=1.09).contains(&mass));
+/// let (lightest, heaviest) = AWD_SLOW_SAMPLER.mark(AwdMark::WhiteDwarfMass).limits();
+/// assert!((lightest..=heaviest).contains(&mass));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClassSampler<M: 'static, P: 'static> {
@@ -225,17 +226,22 @@ mod tests {
     use crate::Seed;
     use crate::rng::{ObjectKey, tags};
     use crate::tables::binary::{
-        AWD_SAMPLER, AwdDonorKind, AwdMark, AwdPick, MedianCurve, SamplerMark, SamplerPick,
-        XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
+        AWD_FAST_SAMPLER, AWD_SLOW_SAMPLER, AwdDonorKind, AwdMark, AwdPick, MedianCurve,
+        SamplerMark, SamplerPick, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
     };
+
+    /// The accreting white dwarfs' samplers, the fast side's and the slow side's.
+    const AWD_SAMPLERS: [&ClassSamplerTable<AwdMark, AwdPick>; 2] =
+        [&AWD_FAST_SAMPLER, &AWD_SLOW_SAMPLER];
 
     fn stream(seed: u64) -> Stream {
         Stream::open(Seed::new(seed), tags::SELFTEST_STREAM, ObjectKey::galaxy())
     }
 
-    /// The marks lie in the order `AwdMark` names them, and every residual is non-decreasing.
+    /// Each side's marks lie in the order `AwdMark` names them, and every residual is
+    /// non-decreasing.
     #[test]
-    fn the_awd_table_follows_its_mark_list() {
+    fn the_awd_tables_follow_their_mark_list() {
         let names = [
             "log_recurrence_years",
             "white_dwarf_mass",
@@ -249,23 +255,24 @@ mod tests {
             "log_donor_initial_mass",
             "log_age_years",
         ];
-        assert_eq!(AWD_SAMPLER.marks().len(), AwdMark::ALL.len());
-        for (mark, name) in AwdMark::ALL.into_iter().zip(names) {
-            let law = AWD_SAMPLER.mark(mark);
-            assert_eq!(law.name(), name);
-            assert!(law.residual().windows(2).all(|w| w[0] <= w[1]), "{name}");
-            let (lo, hi) = law.limits();
-            assert!(lo < hi, "{name}");
+        for table in AWD_SAMPLERS {
+            assert_eq!(table.marks().len(), AwdMark::ALL.len());
+            for (mark, name) in AwdMark::ALL.into_iter().zip(names) {
+                let law = table.mark(mark);
+                assert_eq!(law.name(), name);
+                assert!(law.residual().windows(2).all(|w| w[0] <= w[1]), "{name}");
+                let (lo, hi) = law.limits();
+                assert!(lo < hi, "{name}");
+            }
+            let kinds = table.pick(AwdPick::DonorKind).weights();
+            assert_eq!(kinds.len(), AwdDonorKind::ALL.len());
+            assert!((kinds.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         }
-        let kinds = AWD_SAMPLER.pick(AwdPick::DonorKind).weights();
-        assert_eq!(kinds.len(), AwdDonorKind::ALL.len());
-        assert!((kinds.iter().sum::<f64>() - 1.0).abs() < 1e-12);
     }
 
     /// The X-ray binaries' marks lie in the order `XrbMark` names them, every residual is
-    /// non-decreasing and inside its limits' reach, each choice has one weight per held kind of its
-    /// side, and the weights over both sides sum to 1, the high-mass side's to 0.16; the rate's
-    /// median is the line, so that a rank of ½ splits the transients from the persistent hosts.
+    /// non-decreasing and inside its limits' reach, each choice has one weight per kind of its
+    /// side, and the weights over both sides sum to 1.
     #[test]
     fn the_xrb_table_follows_its_mark_list() {
         let names = [
@@ -310,36 +317,24 @@ mod tests {
         }
         let low = XRB_SAMPLER.pick(XrbPick::LowMassKind).weights();
         let high = XRB_SAMPLER.pick(XrbPick::HighMassKind).weights();
-        assert_eq!(low.len(), XrbHostKind::LOW_MASS_HELD.len());
-        assert_eq!(high.len(), XrbHostKind::HIGH_MASS_HELD.len());
+        assert_eq!(low.len(), XrbHostKind::LOW_MASS.len());
+        assert_eq!(high.len(), XrbHostKind::HIGH_MASS.len());
         let (low_sum, high_sum) = (low.iter().sum::<f64>(), high.iter().sum::<f64>());
         assert!((low_sum + high_sum - 1.0).abs() < 1e-12);
-        assert!((high_sum - 0.16).abs() < 1e-12);
         assert!(XrbHostKind::LOW_MASS.iter().all(|k| !k.is_high_mass()));
         assert!(XrbHostKind::HIGH_MASS.iter().all(|k| k.is_high_mass()));
-        let sampler = ClassSampler::new(&XRB_SAMPLER);
-        let split = sampler.rank_of(XrbMark::LowMassRateExcess, 0.0, 0.0);
-        assert!((split - 0.5).abs() < 1e-15, "{split}");
-        // The donors' median follows M₂ = 0.11 P (hours) up to 0.8 M☉.
-        for p in [0.3, 0.5, 0.8] {
-            let median = sampler.median(XrbMark::LowMassDonorMass, p);
-            let line = crate::math::log10(0.11) + p;
-            assert!((median - line).abs() < 0.01, "{p}: {median} against {line}");
-        }
-        let evolved = sampler.median(XrbMark::LowMassDonorMass, 2.0);
-        assert!(
-            (evolved - crate::math::log10(0.8)).abs() < 1e-6,
-            "{evolved}"
-        );
     }
 
     /// `rank_of` inverts `value_at` inside the limits, at every rank and condition tried, and
     /// the medians are their nodes at the nodes.
     #[test]
     fn the_rank_inverts_the_value() {
-        let sampler = ClassSampler::new(&AWD_SAMPLER);
-        for mark in AwdMark::ALL {
-            let law = AWD_SAMPLER.mark(mark);
+        for (table, mark) in AWD_SAMPLERS
+            .into_iter()
+            .flat_map(|table| AwdMark::ALL.map(|mark| (table, mark)))
+        {
+            let sampler = ClassSampler::new(table);
+            let law = table.mark(mark);
             let (lo, hi) = law.limits();
             let conditions: Vec<f64> = law.median().map_or_else(
                 || vec![0.0],
@@ -463,10 +458,10 @@ mod tests {
             }
         }
         assert!(
-            AWD_SAMPLER
-                .marks()
-                .iter()
-                .all(|m| m.node_residuals().is_none())
+            AWD_FAST_SAMPLER
+                .mark(AwdMark::Recurrence)
+                .node_residuals()
+                .is_none()
         );
     }
 
@@ -482,26 +477,24 @@ mod tests {
         assert_eq!(sampler.pick(Only, &mut stream(4)), 0);
     }
 
-    /// The recurrence's median is L, so the two classes split the hosts in halves, as the share
-    /// table gives them; a restricted draw stays on its side.
+    /// Each side's recurrence lies on its side of L at every rank: a fast host's draw within L, a
+    /// slow host's beyond it.
     #[test]
-    fn the_recurrence_splits_at_l_in_halves() {
-        let sampler = ClassSampler::new(&AWD_SAMPLER);
+    fn each_side_s_recurrence_lies_on_its_side_of_l() {
         let mark = AwdMark::Recurrence;
         let log_l = crate::math::log10(crate::time::LIGHT_CROSSING_L.as_julian_years_f64());
-        let split = sampler.rank_of(mark, 0.0, log_l);
-        assert!((split - 0.5).abs() < 1e-12, "{split}");
+        let [fast, slow] = AWD_SAMPLERS.map(ClassSampler::new);
         let mut s = stream(1);
         for _ in 0..10_000 {
-            assert!(sampler.draw_in_ranks(mark, 0.0, (0.0, split), &mut s) <= log_l + 1e-12);
-            assert!(sampler.draw_in_ranks(mark, 0.0, (split, 1.0), &mut s) >= log_l - 1e-12);
+            assert!(fast.draw(mark, 0.0, &mut s) <= log_l);
+            assert!(slow.draw(mark, 0.0, &mut s) > log_l);
         }
     }
 
-    /// Each draw takes one word, and a pick takes its kinds at their weights.
+    /// Each draw takes one word, and a pick takes its kinds at their weights, a kind of none never.
     #[test]
     fn draws_take_one_word_and_picks_their_weights() {
-        let sampler = ClassSampler::new(&AWD_SAMPLER);
+        let sampler = ClassSampler::new(&AWD_FAST_SAMPLER);
         let mut a = stream(2);
         let _ = sampler.draw(AwdMark::Age, 0.5, &mut a);
         let _ = sampler.pick(AwdPick::DonorKind, &mut a);
@@ -515,12 +508,12 @@ mod tests {
         for _ in 0..n {
             counts[sampler.pick(AwdPick::DonorKind, &mut s)] += 1;
         }
-        let weights = AWD_SAMPLER.pick(AwdPick::DonorKind).weights();
+        let weights = AWD_FAST_SAMPLER.pick(AwdPick::DonorKind).weights();
         for (count, weight) in counts.iter().zip(weights) {
             let share = f64::from(*count) / f64::from(n);
             let sigma = (weight * (1.0 - weight) / f64::from(n)).sqrt();
             assert!(
-                (share - weight).abs() < 5.0 * sigma,
+                (share - weight).abs() <= 5.0 * sigma,
                 "{share} against {weight}"
             );
         }
