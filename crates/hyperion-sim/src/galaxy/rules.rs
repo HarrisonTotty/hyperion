@@ -35,10 +35,6 @@
 //!   and the carve-out, by the build's one `match` (`Galaxy::from_params`), which installs the
 //!   classes and the stay shares that every reader of the two layers then reads; so
 //!   `Galaxy::with_rules` refuses to change it as well.
-//! - [`class_source`](GalaxyRules::class_source), at [`CLASS_SOURCE_VERSION`] (plan 09,
-//!   P09.T37.a): the range query takes the catalogue classes' hosts beside the grid. It is read
-//!   where a caller asks for the query's sources (`CatalogueClassSource::registered_in`), and
-//!   reaches none of the galaxy's memos.
 //! - [`feature_binaries`](GalaxyRules::feature_binaries), at [`FEATURE_BINARIES_VERSION`] (plan
 //!   11, P11.T8.f): catalogue features and the galactic centre list plan 11's binary classes, the
 //!   catalogue's classes give up the features' share of their hosts, and a feature's binary members
@@ -81,7 +77,6 @@ use crate::galaxy::catalogue_classes::binary::feature::{
 };
 use crate::galaxy::catalogue_classes::binary::{MERGER_CLASS_VERSION, MergerClassRules};
 use crate::galaxy::catalogue_classes::core_collapse::{RUNAWAY_DEATHS_VERSION, RunawayDeathsRules};
-use crate::galaxy::catalogue_classes::source::{CLASS_SOURCE_VERSION, ClassSourceRules};
 use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::displaced::survivors::{HYPERVELOCITY_VERSION, HypervelocityRules};
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
@@ -107,8 +102,6 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads.
     pub(crate) displaced: DisplacedRules,
-    /// Whether the range query registers the catalogue classes beside the grid (P09.T37.a).
-    pub(crate) class_source: ClassSourceRules,
     /// Whether features hold plan 11's binary classes (P11.T8.f).
     pub(crate) feature_binaries: FeatureBinariesRules,
     /// Whether the core-collapse class follows the young field's runaways and walkaways
@@ -161,11 +154,6 @@ impl GalaxyRules {
                 DisplacedRules::Displaced
             } else {
                 DisplacedRules::FieldOnly
-            },
-            class_source: if version.get() >= CLASS_SOURCE_VERSION.get() {
-                ClassSourceRules::Registered
-            } else {
-                ClassSourceRules::Unregistered
             },
             feature_binaries: if version.get() >= FEATURE_BINARIES_VERSION.get() {
                 FeatureBinariesRules::Listed
@@ -222,12 +210,12 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
-    /// version's rules with the galaxy's holds at 27 (`class_source`, P09.T37.a,
-    /// `feature_binaries`, P11.T8.f, `runaway_deaths`, P09.T33.b, `hypervelocity`, P09.T34.b,
-    /// `orphan_spray`, P10.T10.b's warm-up, `placement_fates`, P08.T12 at 27, and `list_source`,
-    /// P10.T10.b's registration with P10.T3.d.b, and those retargeted from 26, `field_share`,
-    /// P09.T2.c, `carve_out`, P09.T35, `feature_classes`, P09.T36, `merger_class`, P11.T8.c–d, and
-    /// `displaced`, P08.T12); the stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
+    /// version's rules with the galaxy's holds at 27 (`feature_binaries`, P11.T8.f,
+    /// `runaway_deaths`, P09.T33.b, `hypervelocity`, P09.T34.b, `orphan_spray`, P10.T10.b's
+    /// warm-up, `placement_fates`, P08.T12 at 27, and `list_source`, P10.T10.b's registration with
+    /// P10.T3.d.b, and those retargeted from 26, `field_share`, P09.T2.c, `carve_out`, P09.T35,
+    /// `feature_classes`, P09.T36, `merger_class`, P11.T8.c–d, and `displaced`, P08.T12); the
+    /// stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -378,19 +366,6 @@ mod tests {
     /// Each galaxy hold at 27 is held below it and new from it on, in every 27 hold.
     #[test]
     fn each_27_hold_turns_on_at_27() {
-        let source = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).class_source;
-        for v in [23, 24, 25, 26] {
-            assert_eq!(source(v), ClassSourceRules::Unregistered, "{v}");
-        }
-        assert_eq!(source(27), ClassSourceRules::Registered);
-        assert_eq!(
-            GalaxyRules::of_version(crate::GENERATOR_VERSION).class_source,
-            ClassSourceRules::Unregistered
-        );
-        assert_eq!(
-            GalaxyRules::every_27_hold().class_source,
-            ClassSourceRules::Registered
-        );
         let binaries = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).feature_binaries;
         for v in [23, 24, 25, 26] {
             assert_eq!(binaries(v), FeatureBinariesRules::Unlisted, "{v}");
@@ -456,7 +431,6 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_27_hold(),
             GalaxyRules {
-                class_source: ClassSourceRules::Registered,
                 feature_binaries: FeatureBinariesRules::Listed,
                 runaway_deaths: RunawayDeathsRules::Ejected,
                 hypervelocity: HypervelocityRules::Weighted,

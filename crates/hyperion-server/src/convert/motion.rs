@@ -618,15 +618,16 @@ mod tests {
         }
     }
 
+    /// From generator version 27 the range query serves the catalogue classes' hosts (P09.T37.a),
+    /// so a catalogue system is traced at every time, on its class's line.
     #[test]
-    fn a_catalogue_system_is_refused_at_every_time() {
+    fn a_catalogue_system_is_traced_at_every_time() {
         let galaxy = galaxy();
         let record = a_catalogue_system();
         assert!(matches!(record.origin(), SystemOrigin::CatalogueSystem(_)));
         for t in times() {
-            assert_eq!(
-                system_motion(galaxy, MotionReads::uncached(), &record, t),
-                Err(TraceMotionError::CatalogueMotionNotTraced(record.id())),
+            assert!(
+                system_motion(galaxy, MotionReads::uncached(), &record, t).is_ok(),
                 "{t}"
             );
         }

@@ -716,11 +716,11 @@ mod tests {
     use super::*;
 
     /// A catalogue system's row (plan 09): a Type Ia's members have no brief, since their class
-    /// does not model their stars (P09.T34.a), where a core collapse's has its stars'; and the
-    /// observed row refuses either's line, which breaks at its explosion, before it builds any
-    /// stars. No range source places a catalogue system yet (P09.T37); these are the hits it will.
+    /// does not model their stars (P09.T34.a), where a core collapse's has its stars'; and from
+    /// generator version 27, when the range query serves the classes (P09.T37.a), the observed row
+    /// traces either's line.
     #[test]
-    fn a_catalogue_system_s_row_has_its_class_s_brief_and_no_traced_line() {
+    fn a_catalogue_system_s_row_has_its_class_s_brief_and_its_traced_line() {
         use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
         use hyperion_sim::galaxy::catalogue_classes::type_ia::TypeIaProcess;
         use hyperion_sim::galaxy::catalogue_classes::{
@@ -769,18 +769,19 @@ mod tests {
         let observer =
             Observer::new(*hits[0].record().epoch_position(), time).expect("an observer");
         for hit in &hits {
-            assert_eq!(
+            assert!(
                 observe_row(
                     &galaxy,
                     MotionReads::uncached(),
                     &mut systems.handle(key),
                     hit,
                     &observer
-                ),
-                Err(TraceMotionError::CatalogueMotionNotTraced(hit.id()))
+                )
+                .is_ok(),
+                "{:?}",
+                hit.id()
             );
         }
-        assert_eq!(systems.counters().entries(), 0);
     }
 
     /// An observed query's rows, briefs and observations, are the same built whole or in four

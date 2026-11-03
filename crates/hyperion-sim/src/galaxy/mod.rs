@@ -50,7 +50,6 @@ use std::fmt;
 use std::sync::{Arc, OnceLock};
 
 use self::ages::FieldShareRules;
-use self::catalogue_classes::CatalogueClassSource;
 use self::catalogue_classes::core_collapse::CoreCollapseProcess;
 use self::catalogue_classes::type_ia::DelayTimeDistribution;
 use self::displaced::class_table::{ClassTable, FormTable};
@@ -766,7 +765,7 @@ impl Galaxy {
     /// tables and from the Kepler regime's version (P09.T28.b.b), the centre's motion
     /// ([`centre_motion`](Self::centre_motion)), some 64 ms, which every grid record's loss-cone
     /// carve reads, so that a served query's cell jobs each waited some 55 ms on the first of them
-    /// to build it (8 workers, measured 2026-11-01); and from the catalogue classes' version
+    /// to build it (8 workers, measured 2026-11-01); and for the catalogue classes' source
     /// (P09.T37.a), the Type Ia class's delay times (`type_ia_delays`), some 32 ms, and the
     /// core-collapse class's process (`core_collapse`).
     ///
@@ -778,11 +777,9 @@ impl Galaxy {
             // Built and kept in the galaxy; the reference is not needed here.
             let _ = self.centre_motion();
         }
-        if CatalogueClassSource::registered_in(self).is_some() {
-            // Built and kept in the galaxy, as the motion is.
-            let _ = self.type_ia_delays();
-            let _ = self.core_collapse();
-        }
+        // Built and kept in the galaxy, as the motion is.
+        let _ = self.type_ia_delays();
+        let _ = self.core_collapse();
     }
 
     /// The galactic centre's model: the nuclear cluster's profile, its four distribution
@@ -1233,7 +1230,6 @@ mod tests {
     /// own rules without them, the classes' where its holds register them.
     #[test]
     fn a_galaxy_makes_its_query_tables_where_its_rules_read_them() {
-        use self::catalogue_classes::CatalogueClassSource;
         use self::rules::GalaxyRules;
         let seed = Seed::new(0x0937_0000_7461_626c);
         let made = |galaxy: &Galaxy| {
@@ -1266,12 +1262,7 @@ mod tests {
         assert_eq!(full.core_collapse(), lazy.core_collapse());
         let version = Galaxy::from_params(seed, GalaxyParams::milky_way_like()).unwrap();
         version.make_query_tables();
-        let classes = CatalogueClassSource::registered_in(&version).is_some();
-        assert_eq!(
-            made(&version),
-            [false, classes, classes],
-            "no kinematic tables"
-        );
+        assert_eq!(made(&version), [false, true, true], "no kinematic tables");
     }
 
     #[test]

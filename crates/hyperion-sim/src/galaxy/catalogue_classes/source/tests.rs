@@ -1,10 +1,9 @@
-//! The tests of P09.T37.a's source and its hold, `CLASS_SOURCE_VERSION`: its tripwire and the
-//! version's rules; the classes' member layers, held by every member of each class's first cells
-//! with entries; the census's expected hosts, exact over the cells' bounds, in each class's layers;
-//! under every 27 hold, a host of each class returned by the range query at its place at two
-//! times, with its origin, as plan 03 resolves it, and none outside its sphere; the census lines
-//! and the hits whatever the cell cache holds and the order queries come in; and no grid twin left
-//! for the source to suppress.
+//! The tests of P09.T37.a's source: the version's rules register it; the classes' member layers,
+//! held by every member of each class's first cells with entries; the census's expected hosts,
+//! exact over the cells' bounds, in each class's layers; under every 27 hold, a host of each class
+//! returned by the range query at its place at two times, with its origin, as plan 03 resolves it,
+//! and none outside its sphere; the census lines and the hits whatever the cell cache holds and the
+//! order queries come in; and no grid twin left for the source to suppress.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -14,7 +13,6 @@ use hyperion_testkit::float::{assert_same_bits, bits};
 use hyperion_testkit::order::assert_order_independent;
 
 use super::*;
-use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::galaxy::catalogue_classes::core_collapse::recent_death_claims;
@@ -45,20 +43,6 @@ fn milky_way(rules: GalaxyRules) -> Galaxy {
 fn at_27() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| milky_way(GalaxyRules::every_27_hold()))
-}
-
-/// The fixture under every 26 hold: the grid gives the classes their hosts, and the range query
-/// does not register them.
-fn at_26() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| {
-        Galaxy::from_params_with_rules(
-            Seed::new(SEED),
-            GalaxyParams::milky_way_like(),
-            GalaxyRules::of_version(crate::GENERATOR_VERSION),
-        )
-        .expect("the Milky Way fixture builds")
-    })
 }
 
 /// One class of the production lookup.
@@ -175,36 +159,18 @@ fn census_lines(result: &RangeResult) -> (Option<Layer>, String, Vec<u64>, Vec<S
     )
 }
 
-/// P09.T37.a is held until the 26 → 27 bump: the rules in force are version 26's and before, under
-/// which a galaxy registers no class source.
+/// A galaxy registers the production lookup's source, under every 27 hold and the version's own
+/// rules alike.
 #[test]
-fn the_class_source_is_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < CLASS_SOURCE_VERSION,
-        "the 26 → 27 bump puts P09.T37.a on the record: the range query registers the catalogue \
-         classes beside the grid. Delete `CLASS_SOURCE_VERSION`, `ClassSourceRules` with its \
-         `Unregistered` arm, `GalaxyRules::class_source`, the `match` in \
-         `CatalogueClassSource::registered_in` (which then always gives the source) and this \
-         test, in the bump's own checkpoint commit, and re-bless what the classes' hosts move"
-    );
-    assert_eq!(
-        GalaxyRules::of_version(GENERATOR_VERSION).class_source,
-        ClassSourceRules::Unregistered
-    );
-    let held = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+fn a_galaxy_registers_the_source() {
+    let version = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
         .expect("the Milky Way fixture builds");
-    assert_eq!(CatalogueClassSource::registered_in(&held), None);
-}
-
-/// A galaxy under every 26 hold registers no source, so its range query takes the grid and the
-/// features' members alone, as before; one under every 27 hold registers the production lookup's.
-#[test]
-fn a_galaxy_registers_the_source_from_27() {
-    assert_eq!(CatalogueClassSource::registered_in(at_26()), None);
-    assert_eq!(
-        CatalogueClassSource::registered_in(at_27()),
-        Some(CatalogueClassSource::new())
-    );
+    for galaxy in [at_27(), &version] {
+        assert_eq!(
+            CatalogueClassSource::registered_in(galaxy),
+            Some(CatalogueClassSource::new())
+        );
+    }
 }
 
 /// Every class the production lookup has a process for has its member layers, and every member of

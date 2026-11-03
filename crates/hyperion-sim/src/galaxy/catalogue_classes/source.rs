@@ -53,9 +53,8 @@
 //! ([`CatalogueClassSource::cells_read`]) on several threads before it asks for the hits
 //! ([`CachedClassSource::read_ahead`]; P09.T37's bench).
 //!
-//! The range query registers the source from generator version 27, the hold's
-//! (`CLASS_SOURCE_VERSION`; [`CatalogueClassSource::registered_in`]); below it a query takes the
-//! grid and the features' members as before, bit for bit.
+//! The range query registers the source beside the grid from generator version 27
+//! ([`CatalogueClassSource::registered_in`]).
 
 #[cfg(test)]
 mod tests;
@@ -69,7 +68,6 @@ use super::grid::{
 use super::{
     ALL_CLASSES, CatalogueCellKey, CatalogueSystem, ClassId, cells_in_sphere, resolve_entry,
 };
-use crate::GeneratorVersion;
 use crate::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
 use crate::galaxy::Galaxy;
 use crate::galaxy::features::members::source::part_of_key;
@@ -84,31 +82,9 @@ use crate::time::{Span, UniverseTime};
 use crate::units::LightYears;
 use crate::units::consts::SPEED_OF_LIGHT;
 
-/// The generator version from which the range query registers the catalogue classes beside the
-/// grid (plan 09, P09.T37.a; the hold of [`ClassSourceRules`]).
-///
-/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`ClassSourceRules::Unregistered`]: [`CatalogueClassSource::registered_in`] gives no source, so
-/// a query's census and hits are the grid's and the features' members', bit for bit. The tests
-/// reach the new arm through a galaxy built under `GalaxyRules::every_27_hold()`. The bump to 27
-/// deletes this hold, [`ClassSourceRules`] with its `Unregistered` arm, `GalaxyRules::class_source`,
-/// the `match` in [`CatalogueClassSource::registered_in`] (which then always gives the source) and
-/// the tripwire (`the_class_source_is_held_only_until_the_27_bump`).
-pub(crate) const CLASS_SOURCE_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
 /// The first word of a class cell's key for the sky's member parts ([`part_of_key`]), `"class"` in
 /// ASCII.
 const CLASS_PART_WORD: u64 = 0x0000_0063_6c61_7373;
-
-/// Whether the range query registers the catalogue classes beside the grid (the hold of
-/// [`CLASS_SOURCE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum ClassSourceRules {
-    /// Version 26's and before: the classes' hosts reach a player through plan 12's alerts alone.
-    Unregistered,
-    /// Version 27's: [`CatalogueClassSource`] beside the grid (P09.T37.a).
-    Registered,
-}
 
 /// The catalogue classes as a source of the range query (module documentation), over the
 /// processes of `L`, the production lookup unless a test gives its own.
@@ -148,11 +124,7 @@ pub struct CatalogueClassSource<L = ProductionClasses> {
 
 impl CatalogueClassSource {
     /// The source over every class the production lookup has a process for, whatever a galaxy's
-    /// rules: what a query in a galaxy of generator version 27 or later registers.
-    ///
-    /// Below 27 the grid may hold the classes' hosts itself (before 26's carve-out) and the range
-    /// query does not register it; a caller that serves queries asks
-    /// [`registered_in`](Self::registered_in).
+    /// rules: what a range query registers ([`registered_in`](Self::registered_in)).
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -160,15 +132,11 @@ impl CatalogueClassSource {
         }
     }
 
-    /// The source a range query in `galaxy` registers beside the grid: [`new`](Self::new)'s from
-    /// generator version 27 (P09.T37.a's hold), and `None` below it, where the query takes the grid
-    /// and the features' members alone.
+    /// The source a range query in `galaxy` registers beside the grid: [`new`](Self::new)'s, in
+    /// every galaxy from generator version 27 (P09.T37.a).
     #[must_use]
-    pub const fn registered_in(galaxy: &Galaxy) -> Option<Self> {
-        match galaxy.rules().class_source {
-            ClassSourceRules::Unregistered => None,
-            ClassSourceRules::Registered => Some(Self::new()),
-        }
+    pub const fn registered_in(_galaxy: &Galaxy) -> Option<Self> {
+        Some(Self::new())
     }
 }
 

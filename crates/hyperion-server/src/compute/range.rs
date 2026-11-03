@@ -1048,13 +1048,12 @@ mod tests {
         .expect("a drawn galaxy builds")
     }
 
-    /// A served query takes the catalogue classes' hosts beside the features' members under the 27
-    /// arm alone (P09.T37.a): at the version in force and under every 26 hold the members' source
-    /// is the only one, as before, and from 27 the classes' follows it, counting what
+    /// A served query takes the catalogue classes' hosts beside the features' members from 27
+    /// (P09.T37.a): the classes' source follows the members', counting what
     /// [`CatalogueClassSource`] counts; held, there is none. The finish and the cells' jobs ask the
     /// same list (`super::with_sources`). With the global list taken, from 27 its source is beside
     /// them, in place of the centre's bare one (P10.T10.b's registration), the rows read it, and
-    /// its census is the list's own; below 27 the list is read for nothing.
+    /// its census is the list's own.
     #[test]
     fn from_27_a_served_query_takes_the_classes_beside_the_members() {
         use hyperion_sim::galaxy::query::QuerySphere;
@@ -1078,8 +1077,6 @@ mod tests {
                 (sources.len(), last)
             })
         };
-        assert_eq!(asked(galaxy().clone(), FeatureMembers::Served).0, 1);
-        assert_eq!(asked(galaxy_at(26), FeatureMembers::Served).0, 1);
         let at_27 = galaxy_at(27);
         let classes = CatalogueClassSource::new()
             .expected_in_sphere(&at_27, &sphere)
@@ -1116,8 +1113,6 @@ mod tests {
             "the classes' census, beside the list's"
         );
         assert_eq!(listed(at_27, FeatureMembers::Held).0, 0);
-        let (n, read, _) = listed(galaxy_at(26), FeatureMembers::Served);
-        assert_eq!((n, read), (1, false));
     }
 
     /// The server tests' galaxy under every 27 hold, shared with the pools' jobs.
