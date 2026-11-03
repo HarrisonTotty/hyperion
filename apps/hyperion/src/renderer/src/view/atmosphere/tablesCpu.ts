@@ -4033,7 +4033,9 @@ export type RayMarchReach = Pick<TableSizes, "aerialPerspectiveReachM" | "marchB
  * The ray of the ray-march texel at `u`, `v` of the target, where the scene's reversed-Z depth is
  * `depth` (0 where nothing is drawn): every texel once the camera reaches the march band
  * (`hillaire.ts`'s `marchWeightOf` above 0, R08.T8; the camera's geodetic height is its h\* on the
- * sphere, s ≡ 1), and below it the surfaces beyond the aerial-perspective volume's reach.
+ * sphere, s ≡ 1), and below it the surfaces beyond the aerial-perspective volume's reach; over a
+ * deck (`overDeck`, `hillaire.ts`'s `withDeckRead`) also those within it whose ray meets the deck's
+ * datum first ({@link deckBeforeSurface}).
  */
 export function rayMarchRayTwin(
   medium: AtmosphereMedium,
@@ -4042,15 +4044,28 @@ export function rayMarchRayTwin(
   v: number,
   depth: number,
   reach: RayMarchReach,
+  overDeck = false,
 ): RayMarchRay | null {
   const marched = marchWeightOf(view.heightM, medium.topHeightM, reach.marchBand) > 0;
   const unnormalised = unnormalisedRay(view, u, v);
   const lengthM = Math.sqrt(unnormalised.x ** 2 + unnormalised.y ** 2 + unnormalised.z ** 2);
   const tSurfaceM = depth > 0 ? (view.nearM / depth) * lengthM : Number.POSITIVE_INFINITY;
-  if (!(marched || (depth > 0 && tSurfaceM > reach.aerialPerspectiveReachM))) {
+  const beyond = marched || (depth > 0 && tSurfaceM > reach.aerialPerspectiveReachM);
+  if (!beyond && !overDeck) {
     return null;
   }
-  return rayMarchRayAlongTwin(medium, view, view.cameraM, unit(unnormalised), tSurfaceM);
+  const along = rayMarchRayAlongTwin(medium, view, view.cameraM, unit(unnormalised), tSurfaceM);
+  return beyond || deckBeforeSurface(along, depth, tSurfaceM) ? along : null;
+}
+
+/**
+ * Whether a texel's clipped ray `along`, onto a surface `tSurfaceM` on (`depth` above 0), meets the
+ * datum at or before it: over a deck the march draws such a surface within the volume's reach too,
+ * reading the deck there, and the composite takes it from the march, the volume reading no deck
+ * (`deckRead.wgsl`'s `deckBeforeSurface`; research-leans-33 §4(c)).
+ */
+function deckBeforeSurface(along: RayMarchRay | null, depth: number, tSurfaceM: number): boolean {
+  return depth > 0 && along !== null && along.datumHitM !== null && along.datumHitM <= tSurfaceM;
 }
 
 /**
@@ -4773,7 +4788,8 @@ export function rayMarchTwin(
     marchTargetTexelInto(
       context,
       shells,
-      (u, v, depthHere) => rayMarchRayTwin(planet.medium, view, u, v, depthHere, settings),
+      (u, v, depthHere) =>
+        rayMarchRayTwin(planet.medium, view, u, v, depthHere, settings, planet.deck !== undefined),
       (u, v) => depthAtUv(depthAt, fullW, fullH, u, v),
       { x, y, widthTexels: w, heightTexels: h },
       out,
@@ -4845,7 +4861,8 @@ export function rayMarchTargetTexelsTwin(
   marchTargetTexelInto(
     rayMarchContext(planet, view, settings),
     farLimbShellsOf(planet, view),
-    (u, v, depthHere) => rayMarchRayTwin(planet.medium, view, u, v, depthHere, settings),
+    (u, v, depthHere) =>
+      rayMarchRayTwin(planet.medium, view, u, v, depthHere, settings, planet.deck !== undefined),
     () => depth,
     targetTexelOf(view, settings, x, y),
     out,
@@ -7140,7 +7157,7 @@ export function oblateRayMarchRayAlongTwin(
 /**
  * The oblate ray-march texel's ray at `u`, `v` of the target, where the scene's reversed-Z depth is
  * `depth` (R08.T6.e): {@link rayMarchRayTwin}'s, the march band taken at the camera's h\* (R08.T8),
- * clipped by {@link oblateRayMarchRayAlongTwin}.
+ * clipped by {@link oblateRayMarchRayAlongTwin}, over the planet's deck (`planet.deck`) as there.
  */
 export function oblateRayMarchRayTwin(
   planet: OblatePlanetTwin,
@@ -7157,10 +7174,18 @@ export function oblateRayMarchRayTwin(
   const unnormalised = unnormalisedRay(view, u, v);
   const lengthM = Math.sqrt(unnormalised.x ** 2 + unnormalised.y ** 2 + unnormalised.z ** 2);
   const tSurfaceM = depth > 0 ? (view.nearM / depth) * lengthM : Number.POSITIVE_INFINITY;
-  if (!(marched || (depth > 0 && tSurfaceM > reach.aerialPerspectiveReachM))) {
+  const beyond = marched || (depth > 0 && tSurfaceM > reach.aerialPerspectiveReachM);
+  if (!beyond && planet.deck === undefined) {
     return null;
   }
-  return oblateRayMarchRayAlongTwin(planet, view, view.cameraM, unit(unnormalised), tSurfaceM);
+  const along = oblateRayMarchRayAlongTwin(
+    planet,
+    view,
+    view.cameraM,
+    unit(unnormalised),
+    tSurfaceM,
+  );
+  return beyond || deckBeforeSurface(along, depth, tSurfaceM) ? along : null;
 }
 
 /** What every oblate ray-march texel of a view reads (R08.T6.e). */

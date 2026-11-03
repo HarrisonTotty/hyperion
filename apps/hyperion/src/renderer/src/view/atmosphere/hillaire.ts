@@ -1332,11 +1332,25 @@ const DECK_GROUND: readonly [string, string] = [
 ];
 
 /**
+ * The deck read's rewrite of which texels a thick ray march draws (plan R08, R08.T15.b.2's route;
+ * research-leans-33 §4(c)): below the march band, besides the surfaces beyond the
+ * aerial-perspective volume's reach, those within it whose ray meets the deck's datum first
+ * (`deckRead.wgsl`'s `deckBeforeSurface`), which the composite takes from the march under the deck's
+ * route (`composite.wgsl`'s `levers.z`), since the volume reads no deck. It stands once in each
+ * march, at its footprint's entry point.
+ */
+const DECK_NEEDED: readonly [string, string] = [
+  "let needed = view.exact.w > 0.0 || (depth > 0.0 && tSurface > reach);",
+  "let needed = view.exact.w > 0.0 || (depth > 0.0 && (tSurface > reach || deckBeforeSurface(uv, tSurface)));",
+];
+
+/**
  * `pair`, a thick ray march's ({@link withThickRead}), reading a cloud deck as its ground (plan
  * R08, R08.T15.a.2; Design note 9; `thick/deckRead.ts`): the bare ground's light is the deck's
  * ({@link DECK_READ}), read wherever the ray reaches the deck's datum before a drawn surface
- * ({@link DECK_GROUND}, R08.T16.b.2), its table bound at `deckTable` beside the thick table. Every
- * other line is the thick kernel's own, so that a body with no deck keeps its kernels to the byte.
+ * ({@link DECK_GROUND}, R08.T16.b.2), and such a surface within the volume's reach marched
+ * ({@link DECK_NEEDED}), its table bound at `deckTable` beside the thick table. Every other line is
+ * the thick kernel's own, so that a body with no deck keeps its kernels to the byte.
  *
  * @throws Error naming the kernel when its sources hold a rewritten line other than once (the bare
  *   ground's test other than twice), or it does not read the thick table.
@@ -1353,7 +1367,10 @@ export function withDeckRead(pair: KernelPair): KernelPair {
       }
       return text.replaceAll(general, deck);
     };
-    const code = DECK_READ.reduce((text, rewritten) => replaced(text, rewritten, 1), wgsl);
+    const code = [...DECK_READ, DECK_NEEDED].reduce(
+      (text, rewritten) => replaced(text, rewritten, 1),
+      wgsl,
+    );
     return `${replaced(code, DECK_GROUND, 2)}\n${deckReadWgsl}`;
   };
   return {
@@ -3661,10 +3678,13 @@ export class HillaireAtmosphere {
     }
     if (deferUnread) {
       this.#behindFormed = formsBehind;
+      // Under a deck's route from above its split the march's deck forms draw the surfaces whose
+      // rays meet the deck first, and the composite takes them from the march (R08.T15.b.2's route;
+      // research-leans-33 §4(c)): its `levers.z`, 0 for every other body.
       this.#uniforms["levers"]?.set([
         formsBehind ? 1 : 0,
         this.#levers.surfaceTransmittance === "channels" ? 1 : 0,
-        0,
+        read === "deck" && inputs.heightM >= 0 ? 1 : 0,
         0,
       ]);
     }

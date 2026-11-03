@@ -6068,7 +6068,8 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       below the split after its re-trace; the gates recorded, no deck routed, the owner's runs
       pending_ (Risks, "Deviations in T15.b.2, as built"). _Routed 2026-11-02: a Venus-class
       deck over a surface opens on its gates, the thermal forms read a deck; the RTX frame a close
-      item_ (Risks, "T15.b.2's route, as built").
+      item_ (Risks, "T15.b.2's route, as built"). _The composite past the deck's datum built
+      2026-11-03_ (Risks, "The composite's reach over a deck, as built").
 
   By hand, the Venus-class surface and a descent through its deck are recorded here.
 
@@ -24786,3 +24787,17 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   macOS gives `HyperionApi.performanceThreads`, as R05.T18's leans count the height workers: 3 on an
   M5, where it was 4. Elsewhere unchanged. `useAtmosphereCache` takes `performanceThreads` from
   `ViewDisplay`.
+- **The composite's reach over a deck, as built** (R08.T15.b.2's route, 2026-11-03; lane
+  `fix-deck-composite-reach`; research-leans-33 §4(c); figures in the lane's outbox). Renderer only.
+  - `composite.wgsl`'s `levers.z`: 1 under a deck's route with the camera above its split
+    (`hillaire.ts`: `read === "deck"` and `inputs.heightM >= 0`), 0 elsewhere. There a surface
+    within the volume's reach whose ray meets the datum first (`datumWithin`) takes the march.
+  - `withDeckRead`'s `DECK_NEEDED` (lean, 2026-11-03; research-leans-33 §4(c) named the composite
+    alone, but below the band the march drew nothing within the reach): the deck forms march those
+    surfaces too (`deckRead.wgsl`'s `deckBeforeSurface`). Thick forms keep their bytes.
+  - Twins: `rayMarchRayTwin` takes `overDeck`, which its target twins set where the planet has a
+    deck; `oblateRayMarchRayTwin` reads `planet.deck`. `referenceTwin`'s aerial perspective draws
+    the case's own ground, and past a deck's datum from above its split takes the march.
+  - Smoke part 14: `DECK_REACH_FRAME`, R05's Earth over its deck from 1 km, a surface 12 km ahead.
+  - Pending, the owner's RTX run: T15.b.2's look at TEST VENUS's surface and a descent through its
+    deck. TEST VENUS's splits (61–63 km) never showed the seam; a served low-deck world would.

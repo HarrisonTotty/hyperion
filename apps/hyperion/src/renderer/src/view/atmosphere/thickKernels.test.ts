@@ -297,6 +297,9 @@ const ALBEDO = "* max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW;";
 const DECK = "* deckGroundAt(body, s, datum.normal, dir, source.direction.xyz, slot, toSun);";
 const BARE_GROUND = "if (depth == 0.0 && hitsGround && ground.x <= tEnd) {";
 const DECK_DATUM = "if (hitsGround && ground.x <= tEnd) {";
+const NEEDED = "let needed = view.exact.w > 0.0 || (depth > 0.0 && tSurface > reach);";
+const DECK_NEEDED =
+  "let needed = view.exact.w > 0.0 || (depth > 0.0 && (tSurface > reach || deckBeforeSurface(uv, tSurface)));";
 
 describe("the deck read's kernels (R08.T15.a.2)", () => {
   it.each(THICK_DIGESTS.map(([pair, digest]) => [pair.name, pair, digest] as const))(
@@ -310,7 +313,7 @@ describe("the deck read's kernels (R08.T15.a.2)", () => {
     ["the ray march", RAY_MARCH_THICK_KERNEL, RAY_MARCH_DECK_KERNEL],
     ["the ray march by slot", RAY_MARCH_SLOTS_THICK_KERNEL, RAY_MARCH_SLOTS_DECK_KERNEL],
   ] as const)(
-    "makes %s's deck form from its thick one, differing only at the bare ground's light and where it is read, the datum's hit before anything drawn (R08.T16.b.2), with the read appended",
+    "makes %s's deck form from its thick one, differing only at the bare ground's light and where it is read, the datum's hit before anything drawn (R08.T16.b.2), and at the texels it draws, those within the volume's reach past the datum too (research-leans-33 §4(c)), with the read appended",
     (_name, thick, deck) => {
       expect(deck.name).toBe(`${thick.name}, over a deck`);
       const appended = `\n${deckReadWgsl}`;
@@ -321,6 +324,7 @@ describe("the deck read's kernels (R08.T15.a.2)", () => {
         [GROUND_LIGHT, DECK_GROUND_LIGHT],
         [ALBEDO, DECK],
         [BARE_GROUND, DECK_DATUM],
+        [NEEDED, DECK_NEEDED],
       ]);
       expect([...kernelBindings(deck.reference).keys()]).toEqual([
         ...kernelBindings(thick.reference).keys(),
@@ -591,6 +595,28 @@ describe("HillaireAtmosphere beneath a deck (R08.T15.b.2)", () => {
       expect.arrayContaining([SKY_VIEW_THICK_KERNEL.name, AERIAL_PERSPECTIVE_THICK_KERNEL.name]),
     );
     expect(drawn(NEAR).some((name) => name.includes("beneath a deck"))).toBe(false);
+  });
+
+  // research-leans-33 §4(c): the composite takes a surface past the deck's datum from the march.
+  it("has the composite take the march past the deck's datum (levers.z) under the deck's route from above its split alone", async () => {
+    const engine = await countingRenderEngine();
+    const kernels = await createAtmosphereFrameKernels(engine);
+    const tables = new AtmosphereTables(
+      engine,
+      EARTH_ABOVE_DECK,
+      tableRadiusM(WGS84),
+      [],
+      earthBody(),
+    );
+    const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+    const lever = (camera: AtmosphereCamera): number | undefined =>
+      view.drawFrame(camera, [NOON], SCENE).uniforms["levers"]?.[2];
+    const withoutDeck = lever(NEAR);
+    tables.setDeckTables(
+      patternedDeckTables(tables.plan.bands, kernelMedium(tables.medium), 1, DECK_ALTITUDE_M, true),
+      kernelMedium(R05_EARTH_REFERENCE),
+    );
+    expect([withoutDeck, lever(NEAR), lever(BENEATH)]).toEqual([0, 1, 0]);
   });
 });
 

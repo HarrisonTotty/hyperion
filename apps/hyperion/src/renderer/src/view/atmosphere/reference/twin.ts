@@ -63,9 +63,11 @@
  * (`deckDatumOf`, a sphere's radius raised by the split), with the deck's J above it and the
  * correction over it as its thick table, and where a ray from orbit meets the deck before anything
  * drawn, the march reads the deck's own tables in place of the bare ground's albedo, as the kernels
- * over a deck do (`hillaire.ts`'s `withDeckRead`). The observers stand where the case puts them, on
- * its own datum. The deck's bake is made on the case's own body (`twinBakeBody`), whose split
- * `thick/deck.ts`'s `prepareDeck` takes.
+ * over a deck do (`hillaire.ts`'s `withDeckRead`). For aerial perspective from above the split the
+ * client draws the case's own ground beneath the deck, and where the ray meets the deck before that
+ * surface the twin takes the march, as the composite does (research-leans-33 §4(c)). The observers
+ * stand where the case puts them, on its own datum. The deck's bake is made on the case's own body
+ * (`twinBakeBody`), whose split `thick/deck.ts`'s `prepareDeck` takes.
  *
  * **Below the deck** (R08.T15.b.2; `thick/deckRead.ts`, "Below the deck"). Under a deck over a
  * surface, an observer below the split reads the deck's table below it in place of every upper
@@ -1005,26 +1007,41 @@ export function referenceTwin(
       : [t[3], t[3], t[3]];
   };
 
-  const orbitAlong = (geometry: ReferenceGeometry, direction: Vec3): TwinParts => {
-    const originM = observerOf(geometry);
-    const sun = sunState(geometry);
+  // The march's texel at the centre of a camera at `originM` along `direction`, over a surface
+  // `surfaceM` on (`null` where nothing is drawn), lit ground where `lit` and else black, through
+  // the march's transmittance.
+  const marchedAlong = (
+    originM: Vec3,
+    direction: Vec3,
+    sun: SunState,
+    surfaceM: number | null,
+    lit: boolean,
+  ): TwinParts => {
     const view = twinView(cameraAlong(originM, direction, defaultFovRad), sun, datum, NEAR_M);
-    // Over a deck nothing is drawn at the ground: the march reads the deck there.
-    const groundM = deck === null ? figureGroundDistanceM(originM, direction, figure) : null;
-    const depth = groundM === null ? 0 : NEAR_M / groundM;
+    const depth = surfaceM === null ? 0 : NEAR_M / surfaceM;
     const x = (TWIN_VIEWPORT.widthPx - 1) / 2;
     const y = (TWIN_VIEWPORT.heightPx - 1) / 2;
     const marchedTexel = sphere
       ? rayMarchTargetTexelsTwin(planet, view, sizes, x, y, depth)
       : oblateRayMarchTargetTexelsTwin(oblate, view, sizes, x, y, depth);
     const [r, g, b] = marchedTexel.light;
-    if (groundM === null) {
+    if (surfaceM === null || !lit) {
       return { total: [r, g, b], surface: DARK };
     }
     const t = surfaceThrough(marchedTexel.transmittance);
-    const lit = litGroundRadiance(pointAlong(originM, direction, groundM), sun.directionBodyFixed);
-    const surface: Rgb = [lit[0] * t[0], lit[1] * t[1], lit[2] * t[2]];
+    const ground = litGroundRadiance(
+      pointAlong(originM, direction, surfaceM),
+      sun.directionBodyFixed,
+    );
+    const surface: Rgb = [ground[0] * t[0], ground[1] * t[1], ground[2] * t[2]];
     return { total: [r + surface[0], g + surface[1], b + surface[2]], surface };
+  };
+
+  const orbitAlong = (geometry: ReferenceGeometry, direction: Vec3): TwinParts => {
+    const originM = observerOf(geometry);
+    // Over a deck nothing is drawn at the ground: the march reads the deck there.
+    const groundM = deck === null ? figureGroundDistanceM(originM, direction, figure) : null;
+    return marchedAlong(originM, direction, sunState(geometry), groundM, true);
   };
 
   const aerialAlong = (
@@ -1034,13 +1051,30 @@ export function referenceTwin(
   ): TwinParts => {
     const originM = observerOf(geometry);
     const sun = sunState(geometry);
+    const reachM = sizes.aerialPerspectiveReachM;
+    // The ground drawn is the case's own, beneath a deck too (R08.T15.b.2).
+    const groundM = figureGroundDistanceM(originM, direction, caseFigure);
+    const onGround = groundM !== null && groundM < targetM;
+    const surfaceM = onGround ? groundM : targetM;
+    if (!(surfaceM <= reachM)) {
+      throw new RangeError(
+        `the twin reads aerial perspective within the volume's reach alone: ${geometry.name}`,
+      );
+    }
+    // From above a deck's split, a surface whose ray meets the deck's datum first takes the march,
+    // which reads the deck there, as `composite.wgsl`'s reach branch takes it under the deck's route:
+    // the volume reads no deck (research-leans-33 §4(c)).
+    const below = belowTheSplit(geometry);
+    const datumM =
+      deck === null || below ? null : figureGroundDistanceM(originM, direction, figure);
+    if (datumM !== null && datumM <= surfaceM) {
+      return marchedAlong(originM, direction, sun, surfaceM, onGround);
+    }
     const fovXRad = 2 * atan(tan(defaultFovRad / 2) * AERIAL_FROXEL_SCALE);
     const view = twinView(cameraAlong(originM, direction, fovXRad), sun, datum, NEAR_M);
     const size = { widthTexels: 2, heightTexels: 2, slices: sizes.aerialPerspective.slices };
-    const reachM = sizes.aerialPerspectiveReachM;
     const samplesPerSlice = sizes.aerialPerspectiveSamplesPerSlice;
-    // Beneath a deck the volume is the table below's, and the ground the case's own (R08.T15.b.2).
-    const below = belowTheSplit(geometry);
+    // Beneath a deck the volume is the table below's (R08.T15.b.2).
     let volume: TwinAerialVolume;
     if (below) {
       volume = belowDeckAerialPerspectiveTwin(belowOf(geometry), view, size, reachM);
@@ -1048,14 +1082,6 @@ export function referenceTwin(
       volume = aerialPerspectiveTwin(planet, view, size, samplesPerSlice, reachM);
     } else {
       volume = oblateAerialPerspectiveTwin(oblate, view, size, samplesPerSlice, reachM);
-    }
-    const groundM = figureGroundDistanceM(originM, direction, below ? caseFigure : figure);
-    const onGround = groundM !== null && groundM < targetM;
-    const surfaceM = onGround ? groundM : targetM;
-    if (!(surfaceM <= reachM)) {
-      throw new RangeError(
-        `the twin reads aerial perspective within the volume's reach alone: ${geometry.name}`,
-      );
     }
     // `aerialRead.wgsl`: the slice axis at w = d ÷ reach − ½ ÷ slices, linear between slices and
     // held at the edges; the screen's centre, the mean of the four froxels; the first slice's fade.

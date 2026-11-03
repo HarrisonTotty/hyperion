@@ -2,8 +2,9 @@
 // packing and CPU twin): at a ray's hit on the deck, the upper medium's ground, each source's light
 // reflected by the deck in place of the bare ground's Lambertian term. Appended after
 // `thickRead.wgsl` to the ray march's thick kernels by `hillaire.ts`'s withDeckRead, which points
-// the march's bare-ground term here and leaves every other line as it is, so that a body with no
-// deck keeps its kernels to the byte.
+// the march's bare-ground term here, and its test of which texels it draws at `deckBeforeSurface`
+// (R08.T15.b.2's route), and leaves every other line as it is, so that a body with no deck keeps
+// its kernels to the byte.
 //
 // The table, `rgba32uint`, one layer a band and light slot (band b's slot k at b x slots + k), each
 // texel's first three words three f32 values' bits (red, green, blue): 208 texels across, eight cells
@@ -162,4 +163,17 @@ fn deckGroundAt(
   let share = clamp(muSun * 32.0 + 7.0, 0.0, 1.0);
   let transmitted = select(toSun, vec3f(1.0), carried);
   return max(direct * transmitted * light.beam + share * light.sky, vec3f(0.0));
+}
+
+// Whether the march's ray through `uv` meets the kernels' datum, the deck's, at or before a drawn
+// surface `tSurface` on, as `marchRay` finds its ground (R08.T15.b.2's route; research-leans-33
+// §4(c)): below the march band such a surface within the aerial-perspective volume's reach is
+// marched too (`hillaire.ts`'s DECK_NEEDED), the deck read there, since the composite takes it from
+// the march, the volume reading no deck.
+fn deckBeforeSurface(uv : vec2f, tSurface : f32) -> bool {
+  let a = view.figure.x;
+  let far = view.camera.w > 0.5 * a;
+  let groundQ = rayQuadric(view.camera.xyz, rayThrough(view, uv), a / view.figure.y, a, view.exact.x, far);
+  let ground = quadricHits(groundQ);
+  return ground.x > 0.0 && ground.x <= tSurface;
 }

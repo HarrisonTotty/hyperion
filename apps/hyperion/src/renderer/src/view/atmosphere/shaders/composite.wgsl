@@ -72,6 +72,10 @@
 // dim in red and 23% too bright in blue through 5 km from 2 m on the measured Earth, and through the
 // limb from orbit grey where the air reddens it (`AtmosphereSettings`' `surfaceTransmittance`,
 // `levers.y`, whose `grey` is the way back).
+// Changes (plan R08, R08.T15.b.2's route; research-leans-33 §4(c)): under a deck's route, from above
+// its split (`levers.z`), a drawn surface within the volume's reach whose ray meets the deck's datum
+// first takes the ray march, which reads the deck there (R08.T16.b.2), as beyond the reach: the
+// volume reads no deck, and the ground within the reach showed dim through it, the deck beyond.
 
 struct Draw {
   offsetFromCameraM : vec3f,
@@ -121,7 +125,8 @@ struct Draw {
   // x 1 where what lies behind the sky from above the top is read at the march's resolution
   // (`behindMarch`, which `compositeBehind.wgsl` wrote over the march's area this frame), 0 where
   // it is formed per pixel; y 1 where a drawn surface is dimmed by its transmittance per channel
-  // (R08.T9.c), 0 where by the channels' mean.
+  // (R08.T9.c), 0 where by the channels' mean; z 1 under a deck's route with the camera above its
+  // split (R08.T15.b.2; the march's deck forms), 0 for every other body (`deckFirst`).
   levers : vec4f,
 }
 
@@ -206,6 +211,20 @@ fn belowDeckBehind(v : AtmosphereView, dir : vec3f) -> vec3f {
     return vec3f(0.0);
   }
   return vec3f(exp(-draw.shell.w / mu));
+}
+
+// Whether the ray from the camera along `dir` meets the tables' datum within `distanceM` (R08.T15.b.2's
+// route; research-leans-33 §4(c)): the ground quadric Q(t) = q_g + t (2 (S P) . (S d) + t |S d|^2)
+// (`oblate.wgsl`'s quadricAlong, `view.exact.x` its q_g, S = diag(1, 1, a / c)) at or below 0 at its
+// least over [0, distance], the line's closest approach held to that span. From a camera above the
+// datum, Q(0) > 0, that is the march's first hit on its ground at or before the distance
+// (`rayMarch.wgsl`'s marchRay), up to rounding.
+fn datumWithin(v : AtmosphereView, dir : vec3f, distanceM : f32) -> bool {
+  let scale = vec3f(1.0, 1.0, v.figure.x / v.figure.y);
+  let scaled = v.camera.xyz * scale;
+  let scaledDirection = dir * scale;
+  let nearest = -dot(scaled, scaledDirection) / dot(scaledDirection, scaledDirection);
+  return quadricAlong(v.exact.x, scaled, scaledDirection, clamp(nearest, 0.0, distanceM)) <= 0.0;
 }
 
 // Whether a ray falls within a source's disc: |d x s| <= sin(rho) with d . s > 0, sin(rho) formed
@@ -553,10 +572,15 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   // The surface's light through the air per channel (R08.T9.c), or by the channels' mean, the way
   // back; the same for every pixel, so each branch on it is uniform.
   let channels = draw.levers.y > 0.5 && COMPOSITE_PROBE != 4u;
+  // Under a deck's route from above its split, whether the ray meets the deck's datum before the
+  // surface (R08.T15.b.2): the march reads the deck there, and the volume no deck. `levers.z` is the
+  // same for every pixel, and 0 for every other body, whose composite is as before.
+  let deckFirst = draw.levers.z > 0.5 && datumWithin(v, dir, distance);
   // Within the volume's reach, the volume, through the read every reader of it takes
   // (`aerialRead.wgsl`, R08.T9.a), blended with the ray march by its share in the march band
-  // (R08.T8); beyond it, and from the band's upper edge up (above the air included), the ray march.
-  if (distance <= reach && marchWeight < 1.0) {
+  // (R08.T8); beyond it, from the band's upper edge up (above the air included), and past a deck's
+  // datum (`deckFirst`), the ray march.
+  if (distance <= reach && marchWeight < 1.0 && !deckFirst) {
     let aerialAt = aerialPerspectiveAt(aerial, linearClamp, uv, distance, reach);
     var through = vec3f(aerialAt.a);
     if (channels) {

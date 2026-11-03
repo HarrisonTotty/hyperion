@@ -9,6 +9,7 @@ import {
   WGS84_SPHEROID,
 } from "../../test/atmosphereFixtures";
 import { limbCamera, limbPitchRad } from "../../test/farLimb";
+import { patternedDeckTables } from "../../test/thickTables";
 import { quaternion, quaternionFromRows } from "../camera/quaternion";
 import type { Rgb } from "../photometry/toneCurve";
 import { EARTH_REFERENCE, EARTH_REFERENCE_CURVES, referenceSunIlluminanceLx } from "./earth";
@@ -24,6 +25,7 @@ import type { AtmosphereMedium } from "./medium";
 import { gravityRatio, type LevelSpheroid, oblateSlicing } from "./oblate";
 import { transmittanceUvToRMu, unitFromTexelUv } from "./opticalDepth";
 import { type AbsorberCurveSlots, multiScatteringLayersOf, type TableSize } from "./tables";
+import { packDeckTable } from "./thick/deckRead";
 import {
   aerialPerspectiveTwin,
   bandMultiScattering,
@@ -211,6 +213,11 @@ function skyThenSurface(_x: number, y: number): number {
   return y < 4 ? 0 : 0.1 / 60_000;
 }
 
+/** A scene's depth: sky in the top half of a 16 × 8 view, a surface 10 km away below. */
+function skyThenNearSurface(_x: number, y: number): number {
+  return y < 4 ? 0 : 0.1 / 10_000;
+}
+
 /** A twin with its ground black: the air's light alone. */
 function withBlackGround<T extends { readonly medium: AtmosphereMedium }>(planet: T): T {
   return { ...planet, medium: { ...planet.medium, groundAlbedo: [0, 0, 0] } };
@@ -299,6 +306,37 @@ describe("a sphere with ω = 0 (R08.T6.e)", () => {
         rayMarchTwin(p, low, settings, skyThenSurface),
       ),
     ).toBeLessThan(1e-12);
+  });
+
+  // research-leans-33 §4(c): over a deck the march draws a surface within the volume's reach whose
+  // ray meets the datum first, reading the deck there, which the composite takes in place of the
+  // volume; with no deck it draws none of them.
+  it("marches a surface within the volume's reach past a deck's datum, oblate as on the sphere, and none with no deck", () => {
+    const { oblate: o, spherical: p } = twins();
+    const settings = { ...TABLE_SIZES.low, rayMarchSamples: 24 };
+    const band = { gravityRatio: 1, latitudeRad: 0, bottomRadiusM: radius, coefficientFactor: 1 };
+    const deck = packDeckTable(patternedDeckTables([band], o.medium, 1, 1_000));
+    // From 1 km over the datum, sky above the horizon and a surface below it whose every ray meets
+    // the datum first, within the volume's 32 km.
+    const view = twinView(equatorCamera(STILL_SPHERE, 1_000), sunAt(20), STILL_SPHERE, 0.1);
+    const over = oblateRayMarchTwin({ ...o, deck }, view, settings, skyThenNearSurface);
+    expect(
+      worstRelative(over, rayMarchTwin({ ...p, deck }, view, settings, skyThenNearSurface)),
+    ).toBeLessThan(1e-12);
+    const bare = oblateRayMarchTwin(o, view, settings, skyThenNearSurface);
+    // The target's lower half, its rows over the surface: over the deck lit and nothing let
+    // through, the deck read; with no deck not marched, (0, 0, 0, 1).
+    const off: string[] = [];
+    for (let at = over.texels.length / 2; at < over.texels.length; at += 4) {
+      const through = over.transmittance.subarray(at, at + 4);
+      if (!(through.every((t) => t === 0) && (over.texels[at + 1] ?? 0) > 0)) {
+        off.push(`texel ${at / 4} over the deck`);
+      }
+      if (![0, 0, 0, 1].every((value, c) => bare.texels[at + c] === value)) {
+        off.push(`texel ${at / 4} with no deck`);
+      }
+    }
+    expect(off).toEqual([]);
   });
 
   // R08.T8.c: from 10⁸ m, on a 16 × 8 frame whose pixels are 1080p's at 60° across, its forward ray

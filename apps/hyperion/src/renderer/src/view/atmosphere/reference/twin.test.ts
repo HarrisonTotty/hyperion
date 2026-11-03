@@ -27,8 +27,10 @@ import {
   MULTI_SCATTERING_KERNEL_OPTIONS,
   multiScatteringTwin,
   planetTwin,
+  rayMarchRayAlongTwin,
   rayMarchTargetTexelsTwin,
   rayMarchTargetTexelTwin,
+  rayMarchTexelsTwin,
   skyViewReadTwin,
   skyViewTexelsTwin,
   slicedSunTransmittance,
@@ -997,6 +999,63 @@ describe("a twin beneath a cloud deck (R08.T15.b.2)", () => {
         0,
         0,
       ]);
+    },
+  );
+});
+
+describe("a twin above a cloud deck over a surface (research-leans-33 §4(c))", () => {
+  /** The split: 5 km over the sweep's Earth-sized sphere, the cache tests' fixtures' deck top. */
+  const SPLIT_M = 5_000;
+  const medium = sweepMedium(POINT);
+  const upper = kernelMedium(upperMediumOf(medium, SPLIT_M));
+  const ONE_BAND = [
+    { gravityRatio: 1, latitudeRad: 0, bottomRadiusM: RADIUS_M, coefficientFactor: 1 },
+  ];
+  /** The patterned deck over a surface, with its patterned table below. */
+  const deck: TwinDeck = {
+    tables: patternedDeckTables(ONE_BAND, upper, 1, SPLIT_M, true),
+    polarisation: null,
+  };
+  const DECK_DATUM = { equatorialRadiusM: RADIUS_M + SPLIT_M, polarRadiusM: RADIUS_M + SPLIT_M };
+  /** From 1 km over the deck's top, looking down `zenithDeg` from the zenith; an aerial target 30 km on. */
+  const down = (zenithDeg: number): ReferenceGeometry => ({
+    name: `down-${zenithDeg}`,
+    image: "aerial",
+    observer: { heightM: SPLIT_M + 1_000, latitudeDeg: 0 },
+    view: { zenithDeg, azimuthDeg: 90 },
+    sun: { zenithDeg: 30, azimuthDeg: 0 },
+    maxDistanceM: 30_000,
+  });
+
+  it.each([180, 150, 120, 110])(
+    "reads the march's deck where the ray meets it before the ground within the volume's reach, %s° from the zenith, not the volume over that ground",
+    { timeout: TWIN_TIMEOUT_MS },
+    (zenithDeg) => {
+      const twin = referenceTwin(medium, FIGURE, { deck });
+      const geometry = down(zenithDeg);
+      const direction = axisOf(geometry);
+      const originM = observerOf(geometry);
+      // The ground drawn beneath the deck, 6 to 20 km on.
+      const groundM = groundDistanceM(originM, direction, RADIUS_M) ?? Number.NaN;
+      expect([groundM >= 6_000, groundM <= 20_000]).toEqual([true, true]);
+      // The march along the ray to that ground, which reads the deck at its datum's hit before it
+      // (R08.T16.b.2) and lets none of the ground through.
+      const view = twinView(cameraAlong(geometry, direction), sunStateOf(geometry), DECK_DATUM, 1);
+      const marched = rayMarchTexelsTwin(
+        twin.planet,
+        view,
+        TABLE_SIZES.high,
+        rayMarchRayAlongTwin(twin.planet.medium, view, originM, direction, groundM),
+      );
+      expect([...marched.transmittance]).toEqual([0, 0, 0, 0]);
+      const drawn = twin.radianceAlong(geometry, direction);
+      expect(drawn.surface).toEqual([0, 0, 0]);
+      for (let c = 0; c < 3; c += 1) {
+        // The camera's centre ray stands an ulp or so off the axis.
+        expect(
+          Math.abs((drawn.total[c] ?? Number.NaN) / (marched.light[c] ?? Number.NaN) - 1),
+        ).toBeLessThan(1e-9);
+      }
     },
   );
 });

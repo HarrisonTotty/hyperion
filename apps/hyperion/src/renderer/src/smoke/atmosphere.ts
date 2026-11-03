@@ -2421,6 +2421,21 @@ const DECK_TWIN_FRAMES: ReadonlyArray<TwinFrame> = [
 const EARTH_DECK_ALTITUDE_M = 3_000;
 
 /**
+ * A frame over a deck within the aerial-perspective volume's 32 km reach (research-leans-33 §4(c)):
+ * from 1 km over its datum, below the march band, a surface 12 km ahead across the frame. The rays
+ * of every row below the horizon's first meet the deck's datum by about 10.7 km, before the
+ * surface, and the deck's marches draw them, reading the deck there (`hillaire.ts`'s DECK_NEEDED);
+ * the first row's meet it from about 25 km on, and the sky's not at all, and stay undrawn, the
+ * volume's.
+ */
+const DECK_REACH_FRAME: TwinFrame = {
+  name: "1 km, a surface 12 km ahead within the reach",
+  heightM: 1_000,
+  suns: [sunAt(20)],
+  surfaceM: 12_000,
+};
+
+/**
  * R08.T15.a.2: the march reading a cloud deck at its ground, held to its CPU twin over the GPU's own
  * per-planet tables, the same packed thick table (the deck's J above it, with the correction) and
  * the same packed deck table, to 10⁻³ above 10⁻⁶ of the largest (R08.T6.b's bound,
@@ -2428,7 +2443,8 @@ const EARTH_DECK_ALTITUDE_M = 3_000;
  * R05's Earth's upper medium over a deck 3 km up, on the deck's datum (one band), and the
  * Saturn-class air's over its NH₃-like deck's top, 0.5 bar (five slices, four bands), each over
  * {@link DECK_TWIN_FRAMES}, on high; and since R08.T16.a.2 the same Saturn-class air over an
- * envelope's floor there, whose rays onto it the march steps from the camera.
+ * envelope's floor there, whose rays onto it the march steps from the camera. R05's Earth also
+ * over {@link DECK_REACH_FRAME}, its surfaces past the datum within the volume's reach marched.
  */
 export async function checkDeckFrameTwins(
   engine: RenderEngine,
@@ -2445,7 +2461,7 @@ export async function checkDeckFrameTwins(
       curves: NO_ABSORBER_CURVES,
       figure: deckDatumOf(WGS84, EARTH_GRAVITY, EARTH_DECK_ALTITUDE_M),
       gravity: EARTH_GRAVITY,
-      frames: DECK_TWIN_FRAMES,
+      frames: [...DECK_TWIN_FRAMES, DECK_REACH_FRAME],
     },
     {
       name: "the Saturn-class figure over its deck",
