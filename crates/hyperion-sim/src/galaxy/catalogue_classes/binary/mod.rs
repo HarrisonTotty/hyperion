@@ -49,9 +49,7 @@ pub use awd::{
 };
 pub use feature::{BinaryHost, HostPlace, ListedBinary, ListedHost, is_listed_binary};
 pub use hosts::{ClassHosts, HostComponent};
-pub(crate) use merger::{
-    MERGER_CHANNELS_VERSION, MERGER_CLASS_VERSION, MergerChannelRules, MergerClassRules,
-};
+pub(crate) use merger::{MERGER_CLASS_VERSION, MergerClassRules};
 pub use merger::{MergerCandidate, MergerEntry, MergerPair, StellarMergers};
 pub use nsm::{Inspiral, NeutronStarMergers, NsmCandidate, NsmEntry};
 pub use xrb::{

@@ -517,8 +517,7 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// with its holds.
 ///
 /// The galaxy's own holds at 27 travel with its rules, not the thread: a test builds its galaxy
-/// under `GalaxyRules::every_27_hold()` (P11.T8.c's `merger_channels`) and runs inside this helper
-/// for the planetary ones.
+/// under `GalaxyRules::every_27_hold()` and runs inside this helper for the planetary ones.
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::photometry::area_mix::{

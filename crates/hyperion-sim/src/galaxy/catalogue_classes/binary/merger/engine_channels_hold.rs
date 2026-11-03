@@ -1,12 +1,9 @@
-//! The tests of P11.T8.c's missing channel, [`MERGER_CHANNELS_VERSION`]: from 27 the stellar
-//! merger class adds the engine's dynamical main-sequence mergers, a low-mass main-sequence donor
-//! at its lobe that the engine merges dynamically, by `MERGER_SAMPLER`'s `EngineChannel` weights,
-//! and draws an evolved donor's companion by its donor's kind's mark. The class at 26 is the held
-//! arm verbatim (`channels_hold.rs` holds it, its chi-square pins among its tests); these hold the
-//! new arm, under every 27 hold.
+//! The tests of P11.T8.c's missing channel, from generator version 27: the stellar merger class
+//! adds the engine's dynamical main-sequence mergers, a low-mass main-sequence donor at its lobe
+//! that the engine merges dynamically, by `MERGER_SAMPLER`'s `EngineChannel` weights, and draws an
+//! evolved donor's companion by its donor's kind's mark. These hold it under every 27 hold.
 //!
-//! - The tripwire; the held arm's cells are every 26 hold's, its first entries pinned bit for bit;
-//!   and each of the three channels' share against its weight (χ², α = 10⁻³).
+//! - Each of the three channels' share against its weight (χ², α = 10⁻³).
 //! - Every dynamical main-sequence pair is a low-mass donor on its main sequence at its lobe
 //!   beside a lighter companion on its main sequence inside its own, detached before T; the
 //!   engine, built at T on the pair rebuilt from the entry, merges it dynamically from a detached
@@ -16,21 +13,13 @@
 //!   exactly the cells' entries without stepping the engine, and the cells do not depend on the
 //!   order they are generated in.
 //! - Slow: the class against the engine's own mergers at 48,000 members, an effective 1,236 (17
-//!   times P11.T8.c's 73), by chi-square per degree of freedom by mark under every 27 hold and
-//!   under the 26 arm, pinned as measured, with the engine's channel split and its donors' mass
-//!   ratios by kind printed.
-//!
-//! No value moves at 24–26: the field is read only under the 26 arm's channels
-//! (`MergerClassRules::Channels`), and below 27 it takes the held arm, whose words are version
-//! 26's. The class's golden runs at 24, under `MergerClassRules::ContactOnly`, so the held arm's
-//! bits are pinned here (`the_held_arm_s_first_entries_are_pinned`) and by `channels_hold`'s slow
-//! chi-square pins; the 27 bump deletes the pin with the hold.
+//!   times P11.T8.c's 73), by chi-square per degree of freedom by mark under every 27 hold, pinned
+//!   as measured, with the engine's channel split and its donors' mass ratios by kind printed.
 
 use std::sync::OnceLock;
 
 use super::reference::{decile_chi_square, members_as};
 use super::*;
-use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::galaxy::catalogue_classes::grid::candidate_count;
 use crate::galaxy::catalogue_classes::{CatalogueClassCell, CatalogueEntry};
@@ -64,17 +53,6 @@ fn galaxy() -> &'static Galaxy {
         Galaxy::from_params_with_rules(Seed::new(SEED), params, GalaxyRules::every_27_hold())
             .expect("the Milky Way fixture's gas is mostly neutral")
             .with_full_potential()
-    })
-}
-
-/// The fixture under every 27 hold but this one: the held arm, version 26's channels, with P11.T8.f's
-/// hold set back too, whose catalogue gives up the features' share of its hosts.
-fn held() -> Galaxy {
-    galaxy().clone().with_rules(GalaxyRules {
-        merger_channels: MergerChannelRules::ContactAndEvolved,
-        feature_binaries:
-            crate::galaxy::catalogue_classes::binary::feature::FeatureBinariesRules::Unlisted,
-        ..GalaxyRules::every_27_hold()
     })
 }
 
@@ -112,144 +90,6 @@ fn all_entries() -> impl Iterator<Item = &'static MergerEntry> {
     entries()
         .iter()
         .flat_map(|(_, cell)| cell.iter().map(CatalogueEntry::value))
-}
-
-/// The version's class keeps the held arm, every version below 27 does, and 27 and every 27 hold
-/// take the dynamical main sequence, beside the 26 arm's channels. The tripwire: the bump to 27
-/// deletes this hold.
-#[test]
-fn the_merger_channels_are_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < MERGER_CHANNELS_VERSION,
-        "the bump to 27 deletes P11.T8.c's missing-channel hold: `MERGER_CHANNELS_VERSION`, \
-         `MergerChannelRules` with its `ContactAndEvolved` arm, `GalaxyRules::merger_channels`, \
-         the scan's match on it with `MergerPick::Channel` and `MergerChannel::HELD`, and this \
-         module's tripwire"
-    );
-    let at = |v: u32| GalaxyRules::of_version(GeneratorVersion::new(v)).merger_channels;
-    for v in [GENERATOR_VERSION.get(), 25, 26] {
-        assert_eq!(at(v), MergerChannelRules::ContactAndEvolved, "version {v}");
-    }
-    assert_eq!(at(27), MergerChannelRules::WithDynamical);
-    assert_eq!(
-        GalaxyRules::every_26_hold_with_its_retargets().merger_channels,
-        MergerChannelRules::ContactAndEvolved
-    );
-    assert_eq!(
-        GalaxyRules::every_27_hold().merger_channels,
-        MergerChannelRules::WithDynamical
-    );
-    assert_eq!(
-        GalaxyRules::every_27_hold().merger_class,
-        MergerClassRules::Channels
-    );
-}
-
-/// The fixture built under every 26 hold, with its kinematic tables.
-fn every_26() -> Galaxy {
-    Galaxy::from_params_with_rules(
-        Seed::new(SEED),
-        GalaxyParams::milky_way_like(),
-        GalaxyRules::every_26_hold_with_its_retargets(),
-    )
-    .expect("the Milky Way fixture's gas is mostly neutral")
-    .with_full_potential()
-}
-
-/// Under the held arm the class's cells are every 26 hold's, bit for bit: the field alone turns
-/// the new arm on. A later hold at 27 that moves the class's cells sets itself back in [`held`]
-/// too.
-#[test]
-fn the_held_arm_s_cells_are_every_26_hold_s() {
-    let (every_26, held) = (every_26(), held());
-    for key in sample_cells().into_iter().take(2) {
-        let [a, b] = [&every_26, &held]
-            .map(|g| CatalogueClassCell::generate(g, &StellarMergers::new(g), key).into_entries());
-        assert_ne!(a.len(), 0, "{key:?}");
-        assert_eq!(a, b, "{key:?}");
-    }
-}
-
-/// The held arm's first entries of a solar-circle cell under every 26 hold, as measured
-/// (2026-11-01): each one's channel and the bits of its primary's and secondary's initial masses
-/// and of its merger time, seconds since the epoch.
-const HELD_FIRST_ENTRIES: [(MergerChannel, u64, u64, u64); 8] = [
-    (
-        MergerChannel::EvolvedDonor,
-        0x3ff2_c25d_4d48_5d82,
-        0x3fe7_aaf9_b646_14bc,
-        0xc298_70b7_839b_028f,
-    ),
-    (
-        MergerChannel::EvolvedDonor,
-        0x3ff2_2722_3223_5184,
-        0x3fcb_5f31_9aaf_796b,
-        0xc25a_f7f1_157e_b790,
-    ),
-    (
-        MergerChannel::EvolvedDonor,
-        0x3ff3_0fd5_5369_c739,
-        0x3fc8_21b4_687d_b6ef,
-        0xc298_a124_13cf_5a41,
-    ),
-    (
-        MergerChannel::EvolvedDonor,
-        0x3ffb_3e63_0992_4327,
-        0x3fcc_0727_cc89_5464,
-        0xc28d_4b78_4c23_9bfe,
-    ),
-    (
-        MergerChannel::EvolvedDonor,
-        0x3ff0_bdea_f038_a193,
-        0x3fca_5696_21f4_73d0,
-        0xc29d_d1ca_5a74_c796,
-    ),
-    (
-        MergerChannel::EvolvedDonor,
-        0x3ff0_6873_96a6_8215,
-        0x3fc8_9a91_7e6e_c908,
-        0xc292_89d5_a72e_ceee,
-    ),
-    (
-        MergerChannel::Contact,
-        0x3fe6_5830_23d9_8fe5,
-        0x3fba_057b_074f_10ca,
-        0xc281_21d6_cc06_48b4,
-    ),
-    (
-        MergerChannel::EvolvedDonor,
-        0x3ff0_d629_46ae_65d5,
-        0x3fce_a150_1d53_b44a,
-        0xc295_1c95_e69d_1848,
-    ),
-];
-
-/// Every 26 hold's first entries of the cell along +y at the solar circle are pinned bit for bit:
-/// the held arm's words, which the class's golden (at 24, contact pairs only) never reaches.
-#[test]
-fn the_held_arm_s_first_entries_are_pinned() {
-    use hyperion_testkit::float::bits;
-    let galaxy = every_26();
-    let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [0, 6, 0]).unwrap();
-    let cell = CatalogueClassCell::generate(&galaxy, &StellarMergers::new(&galaxy), key);
-    let first: Vec<(MergerChannel, u64, u64, u64)> = cell
-        .entries()
-        .iter()
-        .take(HELD_FIRST_ENTRIES.len())
-        .map(|e| {
-            let scan = e.value().scan();
-            (
-                scan.channel(),
-                bits(scan.primary_mass().value()),
-                bits(scan.secondary_mass().value()),
-                bits(scan.merger_time().since_epoch().as_seconds_f64()),
-            )
-        })
-        .collect();
-    for (channel, m1, m2, t) in &first {
-        println!("(MergerChannel::{channel:?}, {m1:#018x}, {m2:#018x}, {t:#018x})");
-    }
-    assert_eq!(first, HELD_FIRST_ENTRIES);
 }
 
 /// Each channel's share of the entries is its weight, by χ² at α = 10⁻³: the channel's word is the
@@ -368,8 +208,8 @@ fn every_dynamical_pair_merges_as_the_engine_merges_it() {
 
 /// Every evolved donor's companion lies inside its donor's kind's mark's limits: a gap donor's
 /// below 0.25 of it, a helium-burning donor's below a third, an asymptotic-giant-branch donor's and
-/// a giant branch's anywhere in 0.05–1 (the scan's own unstable ratio holds the first two under
-/// either arm; `scan::merger`'s `an_evolved_companion_s_mark_follows_its_donor_s_kind_from_27`
+/// a giant branch's anywhere in 0.05–1 (the scan's own unstable ratio holds the first two whatever
+/// their mark; `scan::merger`'s `an_evolved_companion_s_mark_follows_its_donor_s_kind_from_27`
 /// holds which mark each kind takes).
 #[test]
 fn every_evolved_companion_lies_inside_its_donor_s_kind_s_mark() {
@@ -710,83 +550,67 @@ fn engine_reference(galaxy: &Galaxy) -> Vec<([f64; 3], f64, bool)> {
     engine
 }
 
-/// The class against the engine under every 27 hold and under the 26 arm (P11.T8.c's missing
-/// channel): the pair's total mass, mass ratio and primary's initial mass of the engine's own
-/// mergers, 48,000 members weighted as mergers in the horizon (an effective 1,236), in the
-/// deciles of 10,000 of the class's entries in the same place ([`catalogue`]), by chi-square per
-/// degree of freedom, pinned as measured (a miss of P15.T10.b's 3.1 is a finding); with the same
-/// against the engine's mergers the class's channels cover, the engine's shares of the class's
-/// deciles, and the engine's channel split and its donors' mass ratios by kind
-/// ([`engine_reference`]), printed against the class's.
+/// The class against the engine under every 27 hold (P11.T8.c's missing channel): the pair's total
+/// mass, mass ratio and primary's initial mass of the engine's own mergers, 48,000 members weighted
+/// as mergers in the horizon (an effective 1,236), in the deciles of 10,000 of the class's entries
+/// in the same place ([`catalogue`]), by chi-square per degree of freedom, pinned as measured (a
+/// miss of P15.T10.b's 3.1 is a finding); with the same against the engine's mergers the class's
+/// channels cover, the engine's shares of the class's deciles, and the engine's channel split and
+/// its donors' mass ratios by kind ([`engine_reference`]), printed against the class's.
 #[test]
 #[ignore = "slow: 48,000 grid pairs run through the binary engine and 20,000 entries"]
 fn the_engine_channels_against_the_engine_under_every_27_hold() {
     let galaxy = galaxy();
     let engine = engine_reference(galaxy);
-    let held = held();
-    let mut measured = [[0.0; 3]; 2];
-    for (row, (name, g)) in [("every 27 hold", galaxy), ("the 26 arm", &held)]
-        .into_iter()
+    let mut measured = [0.0; 3];
+    let entries = catalogue(galaxy);
+    let shares: Vec<usize> = MergerChannel::ALL
+        .iter()
+        .map(|c| entries.iter().filter(|(_, e)| e == c).count())
+        .collect();
+    println!(
+        "every 27 hold: {} entries, by channel {shares:?}, by the primary's layer {:.3?}",
+        entries.len(),
+        layer_shares(entries.iter().map(|(m, _)| (crate::math::exp10(m[2]), 1.0)))
+    );
+    for (k, mark) in ["log total mass", "mass ratio", "log primary mass"]
+        .iter()
         .enumerate()
     {
-        let entries = catalogue(g);
-        let shares: Vec<usize> = MergerChannel::ALL
+        let expected: Vec<f64> = entries.iter().map(|(m, _)| m[k]).collect();
+        let observed: Vec<(f64, f64)> = engine.iter().map(|(m, w, _)| (m[k], *w)).collect();
+        let (per_dof, effective) = decile_chi_square(&expected, &observed);
+        let covered: Vec<(f64, f64)> = engine
             .iter()
-            .map(|c| entries.iter().filter(|(_, e)| e == c).count())
+            .filter(|(_, _, c)| *c)
+            .map(|(m, w, _)| (m[k], *w))
             .collect();
+        let (covered_per_dof, covered_effective) = decile_chi_square(&expected, &covered);
         println!(
-            "{name}: {} entries, by channel {shares:?}, by the primary's layer {:.3?}",
-            entries.len(),
-            layer_shares(entries.iter().map(|(m, _)| (crate::math::exp10(m[2]), 1.0)))
+            "  {mark}: chi2/dof {per_dof:.2} (effective {effective:.0}); against the engine's \
+             mergers the class's channels cover, {covered_per_dof:.2} (effective \
+             {covered_effective:.0}); the engine's shares of the class's deciles {:.3?}",
+            decile_shares(&expected, &observed)
         );
-        for (k, mark) in ["log total mass", "mass ratio", "log primary mass"]
-            .iter()
-            .enumerate()
-        {
-            let expected: Vec<f64> = entries.iter().map(|(m, _)| m[k]).collect();
-            let observed: Vec<(f64, f64)> = engine.iter().map(|(m, w, _)| (m[k], *w)).collect();
-            let (per_dof, effective) = decile_chi_square(&expected, &observed);
-            let covered: Vec<(f64, f64)> = engine
-                .iter()
-                .filter(|(_, _, c)| *c)
-                .map(|(m, w, _)| (m[k], *w))
-                .collect();
-            let (covered_per_dof, covered_effective) = decile_chi_square(&expected, &covered);
-            println!(
-                "  {mark}: chi2/dof {per_dof:.2} (effective {effective:.0}); against the engine's \
-                 mergers the class's channels cover, {covered_per_dof:.2} (effective \
-                 {covered_effective:.0}); the engine's shares of the class's deciles {:.3?}",
-                decile_shares(&expected, &observed)
-            );
-            measured[row][k] = per_dof;
-        }
+        measured[k] = per_dof;
     }
-    for (row, pinned) in measured.iter().zip(PINNED_CHI_SQUARE) {
-        for (m, p) in row.iter().zip(pinned) {
-            assert!((m / p - 1.0).abs() < 1e-6, "{measured:?}");
-        }
+    for (m, p) in measured.iter().zip(PINNED_CHI_SQUARE) {
+        assert!((m / p - 1.0).abs() < 1e-6, "{measured:?}");
     }
 }
 
 /// The chi-square per degree of freedom of the total mass, the mass ratio and the primary's mass
-/// under every 27 hold and under the 26 arm, as measured (2026-11-01, re-measured once every 27
-/// hold took P15.T11.b's orphan streams, whose galaxy draws this reference, and again once it took
-/// P11.T4's neutron-star accretion and P11.T6's Type Ia explosion together, and P11.T4's heavy
-/// donors; at an effective 73 the 26 arm read 14.2, 12.1 and 16.0, `channels_hold`'s pins; at
-/// generator versions 25 and 26, measured again), all over P15.T10.b's 3.1: a finding, for
-/// P15.T10.b's fit. The dynamical channel takes the mass ratio's from 153 to 62 (167 to 68 at 25,
-/// 170 to 61 at 24); the masses' stay high, the engine holding 13% of its primaries in layers D
-/// and E against the class's 1.3% and (at 24) its giant-branch donors heavier (median 1.69 M☉)
-/// than the class's at the turn-off.
-const PINNED_CHI_SQUARE: [[f64; 3]; 2] = [
-    [
-        220.684_057_012_801_25,
-        61.883_954_795_534_14,
-        317.196_346_698_717_43,
-    ],
-    [
-        187.314_709_595_2,
-        152.982_397_738_890_88,
-        288.772_168_495_690_2,
-    ],
+/// under every 27 hold, as measured (2026-11-01, re-measured once every 27 hold took P15.T11.b's
+/// orphan streams, whose galaxy draws this reference, and again once it took P11.T4's neutron-star
+/// accretion and P11.T6's Type Ia explosion together, and P11.T4's heavy donors; at generator
+/// versions 25 and 26, measured again), all over P15.T10.b's 3.1: a finding, for P15.T10.b's fit.
+/// Version 26's two channels read 187, 153 and 289 here, and 14.2, 12.1 and 16.0 at an effective
+/// 73: the dynamical channel takes the mass ratio's from 153 to 62 (167 to 68 at 25, 170 to 61 at
+/// 24); the masses' stay high, the engine holding 13% of its primaries in layers D and E against
+/// the class's 1.3% and (at 24) its giant-branch donors heavier (median 1.69 M☉) than the class's
+/// at the turn-off.
+const PINNED_CHI_SQUARE: [f64; 3] = [
+    220.684_057_012_801_25,
+    61.883_954_795_534_14,
+    317.196_346_698_717_43,
 ];

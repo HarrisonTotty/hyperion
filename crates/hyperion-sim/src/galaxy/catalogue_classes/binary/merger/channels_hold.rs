@@ -1,10 +1,11 @@
 //! The tests of P11.T8.c's fix, [`MERGER_CLASS_VERSION`]: from 26 the stellar merger class
 //! draws the engine's channels, a contact pair at the tidal limit or an evolved donor whose common
-//! envelope merges it with its companion, by `MERGER_SAMPLER`'s channel weights. The version's
-//! class is its held arm verbatim (the class's own tests and golden hold it); these hold the new
-//! arm, under every 26 hold.
+//! envelope merges it with its companion, by `MERGER_SAMPLER`'s channel weights, and from 27 a
+//! dynamical main-sequence merger beside them (`engine_channels_hold.rs`, which holds the three
+//! channels' shares). The version's class is its held arm verbatim (the class's own tests and
+//! golden hold it); these hold the new arm, under every 26 hold.
 //!
-//! - The tripwire, and each channel's share against its weight (χ², α = 10⁻³).
+//! - The tripwire.
 //! - Every evolved donor is past its main sequence and living at T, fills its lobe on its orbit,
 //!   detached before T; the engine itself, run on the pair rebuilt from the entry, sends its onset
 //!   of transfer to a common envelope after a detached history, and leaves the entry's merged star
@@ -128,34 +129,6 @@ fn the_merger_class_is_held_only_until_the_27_bump() {
     );
 }
 
-/// Each channel's share of the entries is its weight, by χ² at α = 10⁻³: the channel's word is the
-/// scan's first on its stream, and the engine refuses so few candidates of either channel that the
-/// shares stay the weights'.
-#[test]
-fn each_channel_s_share_is_its_weight() {
-    use hyperion_testkit::stats::{ALPHA, assert_p_value, chi_square_gof};
-    let n = all_entries().count();
-    let evolved = all_entries()
-        .filter(|e| e.scan().channel() == MergerChannel::EvolvedDonor)
-        .count();
-    let weights = MERGER_SAMPLER.pick(MergerPick::Channel).weights();
-    let counts = [n - evolved, evolved].map(|c| u64::try_from(c).expect("a few hundred"));
-    #[expect(clippy::cast_precision_loss, reason = "counts of some hundreds")]
-    let expected = [weights[0] * n as f64, weights[1] * n as f64];
-    #[expect(clippy::cast_precision_loss, reason = "counts of some hundreds")]
-    let share = evolved as f64 / n as f64;
-    println!(
-        "{evolved} of {n} evolved donors: {share:.3} against {}",
-        weights[1]
-    );
-    assert!(n > 200, "{n}");
-    assert_p_value(
-        "the evolved donors' share",
-        chi_square_gof(&counts, &expected).p_value,
-        ALPHA,
-    );
-}
-
 /// Every contact pair's mass ratio lies in the contact mark's 0.06–0.15: its primary is heavy
 /// enough that the secondary at the largest ratio is a track's.
 #[test]
@@ -182,9 +155,13 @@ fn every_evolved_donor_merges_as_the_engine_merges_it() {
     let galaxy = galaxy();
     let mut checked = 0;
     for entry in all_entries() {
-        if entry.scan().channel() != MergerChannel::EvolvedDonor {
-            assert_eq!(entry.pair().before(), SegmentKind::Contact);
-            continue;
+        match entry.scan().channel() {
+            MergerChannel::EvolvedDonor => {}
+            MergerChannel::Contact => {
+                assert_eq!(entry.pair().before(), SegmentKind::Contact);
+                continue;
+            }
+            MergerChannel::DynamicalMainSequence => continue,
         }
         let pair = entry.pair();
         let [donor, companion] = pair.stars();
@@ -403,10 +380,12 @@ fn the_channel_sampler_against_the_engine_under_every_26_hold() {
     let total: f64 = split.iter().sum();
     println!(
         "engine (weighted, pre-main-sequence left out): two main-sequence stars {:.3}, an evolved \
-         donor beside a main-sequence star {:.3}, others {:.3}; sampler 0.15 / 0.85",
+         donor beside a main-sequence star {:.3}, others {:.3}; sampler (contact, evolved donor, \
+         dynamical main sequence) {:?}",
         split[0] / total,
         split[1] / total,
-        split[2] / total
+        split[2] / total,
+        MERGER_SAMPLER.pick(MergerPick::EngineChannel).weights()
     );
     let evolved: f64 = kinds.iter().sum();
     println!(

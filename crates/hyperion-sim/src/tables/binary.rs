@@ -839,8 +839,6 @@ impl SamplerKey for MergerMark {
 pub enum MergerPick {
     /// The layer of the primary, A–E, in [`MassBand::ALL`]'s order.
     Layer,
-    /// The channel among [`MergerChannel::HELD`]: version 26's.
-    Channel,
     /// The channel among [`MergerChannel::ALL`]: version 27's, with the dynamical main sequence.
     EngineChannel,
 }
@@ -849,14 +847,13 @@ impl SamplerKey for MergerPick {
     fn index(self) -> usize {
         match self {
             Self::Layer => 0,
-            Self::Channel => 1,
-            Self::EngineChannel => 2,
+            Self::EngineChannel => 1,
         }
     }
 }
 
-/// The channels of [`MERGER_SAMPLER`]'s channel choices (P11.T8.c's fix, versions 26 and 27): what
-/// a stellar merger is before its merger time.
+/// The channels of [`MERGER_SAMPLER`]'s channel choice (P11.T8.c's fix and its missing channel):
+/// what a stellar merger is before its merger time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MergerChannel {
     /// A contact pair of two main-sequence stars, at the tidal limit (Rasio 1995).
@@ -876,10 +873,6 @@ impl MergerChannel {
         Self::EvolvedDonor,
         Self::DynamicalMainSequence,
     ];
-
-    /// Version 26's channels, in [`MergerPick::Channel`]'s order. The bump to 27 deletes them with
-    /// that choice.
-    pub const HELD: [Self; 2] = [Self::Contact, Self::EvolvedDonor];
 }
 
 /// The ranks k ÷ 16 themselves: a residual that leaves a rank as it is drawn.
@@ -908,9 +901,10 @@ const IDENTITY_RANKS: [f64; 17] = [
 /// - **The layer**: [`CLASS_SHARES`]'s row for the stellar mergers, A 0.1, B 0.2, C 0.5, D 0.15,
 ///   E 0.05, restricted to the layers with stars on their main sequence at the merger.
 ///
-/// Version 26's channels (P11.T8.c's fix; research-leans-13 §2(c)) add three marks and a choice:
+/// Version 26's channels (P11.T8.c's fix; research-leans-13 §2(c)) add three marks, the contact
+/// pair's and the evolved donor's, whose channel version 27's choice draws:
 ///
-/// - **The channel**: 0.15 contact, 0.85 evolved donor, scratch. Luminous red novae whose
+/// - **The channel**: at 26 0.15 contact and 0.85 evolved donor, scratch. Luminous red novae whose
 ///   progenitors are resolved had evolved donors: M31-LRN-2015's a subgiant of 3–5.5 M☉ (MacLeod
 ///   et al. 2017, ApJ 835, 282) and M101 OT2015-1's a yellow supergiant of about 18 M☉
 ///   (Blagorodnova et al. 2017, ApJ 834, 107); and the engine's own mergers, its pre-main-sequence
@@ -951,7 +945,6 @@ pub const MERGER_SAMPLER: ClassSamplerTable<MergerMark, MergerPick> = ClassSampl
     &MERGER_MARKS,
     &[
         SamplerPick::new("layer", &[0.1, 0.2, 0.5, 0.15, 0.05]),
-        SamplerPick::new("channel", &[0.15, 0.85]),
         SamplerPick::new("engine_channel", &[0.15, 0.50, 0.35]),
     ],
 );
@@ -2938,18 +2931,9 @@ mod tests {
                 "{name}"
             );
         }
-        for (pick, kinds) in [
-            (MergerPick::Channel, MergerChannel::HELD.len()),
-            (MergerPick::EngineChannel, MergerChannel::ALL.len()),
-        ] {
-            let channels = MERGER_SAMPLER.pick(pick).weights();
-            assert_eq!(channels.len(), kinds, "{pick:?}");
-            assert!(
-                (channels.iter().sum::<f64>() - 1.0).abs() < 1e-12,
-                "{pick:?}"
-            );
-        }
-        assert_eq!(MergerChannel::ALL[..2], MergerChannel::HELD);
+        let channels = MERGER_SAMPLER.pick(MergerPick::EngineChannel).weights();
+        assert_eq!(channels.len(), MergerChannel::ALL.len());
+        assert!((channels.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         let row = CLASS_SHARES.row(CarvedClass::StellarMerger);
         let weights = MERGER_SAMPLER.pick(MergerPick::Layer).weights();
         assert_eq!(weights.len(), MassBand::ALL.len());

@@ -43,16 +43,16 @@
 //!
 //! # The dynamical main sequence, from 27
 //!
-//! From [`MERGER_CHANNELS_VERSION`] (P11.T8.c's missing channel, research-leans-16 §1.1: the
-//! engine's mergers of two main-sequence stars, 0.30 of its mergers, are nearly all a low-mass
-//! donor's dynamical transfer, detached just before, whose mass ratio no contact pair at the tidal
-//! limit has) the scan draws one of three channels, by `MERGER_SAMPLER`'s `EngineChannel` weights:
-//! the two above, or a **dynamical main-sequence** merger, a low-mass (BSE's k = 0) main-sequence
-//! donor at its lobe beside a lighter main-sequence companion, built at its lobe as an evolved
-//! donor is. The engine's onset of transfer finds the donor past its critical ratio and merges the
-//! pair dynamically (`Engine::merge_dynamically`); before T the pair is detached at the donor's
-//! lobe, from T the engine's merged star, bit for bit. An evolved donor's companion is drawn by
-//! its donor's kind's mark.
+//! From version 27 (P11.T8.c's missing channel, research-leans-16 §1.1: the engine's mergers of two
+//! main-sequence stars, 0.30 of its mergers, are nearly all a low-mass donor's dynamical transfer,
+//! detached just before, whose mass ratio no contact pair at the tidal limit has) the scan draws
+//! one of three channels, by `MERGER_SAMPLER`'s `EngineChannel` weights: the two above, or a
+//! **dynamical main-sequence** merger, a low-mass (BSE's k = 0) main-sequence donor at its lobe
+//! beside a lighter main-sequence companion, built at its lobe as an evolved donor is. The engine's
+//! onset of transfer finds the donor past its critical ratio and merges the pair dynamically
+//! (`Engine::merge_dynamically`); before T the pair is detached at the donor's lobe, from T the
+//! engine's merged star, bit for bit. An evolved donor's companion is drawn by its donor's kind's
+//! mark.
 //!
 //! # The test
 //!
@@ -112,32 +112,6 @@ use crate::units::{
 /// (`the_merger_class_is_held_only_until_the_27_bump`).
 pub(crate) const MERGER_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
-/// The generator version whose stellar merger class adds the engine's dynamical main-sequence
-/// mergers (P11.T8.c's missing channel, research-leans-16 §1.1): a third channel, a low-mass
-/// main-sequence donor at its lobe that the engine merges dynamically, by `MERGER_SAMPLER`'s
-/// `EngineChannel` weights; and an evolved donor's companion by its donor's kind's mark.
-///
-/// Below it the class's channels take the held arm, [`MergerChannelRules::ContactAndEvolved`],
-/// version 26's two verbatim (and under [`MergerClassRules::ContactOnly`], below 26, the channels
-/// are never read), so every generated value keeps its bits; the tests reach the new arm through
-/// `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold: [`MergerChannelRules`] with
-/// its `ContactAndEvolved` arm, the galaxy rules' `merger_channels` field, the scan's match on it
-/// with `MergerPick::Channel` and `MergerChannel::HELD`, and the tripwire
-/// (`the_merger_channels_are_held_only_until_the_27_bump`).
-pub(crate) const MERGER_CHANNELS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Which channels the stellar merger class draws under [`MergerClassRules::Channels`] (the galaxy
-/// rules' `merger_channels` field, the hold of [`MERGER_CHANNELS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum MergerChannelRules {
-    /// Version 26's: a contact pair or an evolved donor, by `MergerPick::Channel`, an evolved
-    /// donor's companion by `MergerMark::EvolvedMassRatio` whatever its kind.
-    ContactAndEvolved,
-    /// Version 27's: a contact pair, an evolved donor or a dynamical main-sequence donor, by
-    /// `MergerPick::EngineChannel`, an evolved donor's companion by its donor's kind's mark.
-    WithDynamical,
-}
-
 /// How the merger classes draw their entries (the galaxy rules' `merger_class` field, the hold of
 /// [`MERGER_CLASS_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -145,8 +119,8 @@ pub(crate) enum MergerClassRules {
     /// Version 25's and before: every stellar merger a contact pair of main-sequence stars, its
     /// mass ratio `MergerMark::MassRatio`'s; a neutron-star merger's remnant the pair's mass.
     ContactOnly,
-    /// Version 26's: the engine's channels, contact or evolved donor; a neutron-star merger's
-    /// remnant the pair's mass less its ejecta.
+    /// Version 26's: the engine's channels, contact or evolved donor, and from 27 the dynamical
+    /// main sequence; a neutron-star merger's remnant the pair's mass less its ejecta.
     Channels,
 }
 
