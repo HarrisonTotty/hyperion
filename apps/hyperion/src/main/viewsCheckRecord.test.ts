@@ -9,6 +9,7 @@ import {
   readAtmosphereCheckRecord,
   readHandoverCheckRecord,
   readTerrainCheckRecord,
+  readTerrainPhaseUpdate,
   readViewsCheckRecord,
 } from "./viewsCheckRecord";
 
@@ -254,6 +255,17 @@ describe("the terrain run's record (R10.T16.d)", () => {
     [["phases", 0, "passes"], [{ label: "", ms: [1], kernels: [], workgroups: [] }]],
   ])("refuses a record whose %j is %j", (path, value) => {
     expect(readTerrainCheckRecord(withTerrainField(path, value))).toBeNull();
+  });
+
+  it("reads a phase as it ended, with the timer and the device-pixel ratio (R14's Mac measurements)", () => {
+    const update = { timer: "quantized", devicePixelRatio: 2, phase: TERRAIN_RECORD.phases[0] };
+    expect(readTerrainPhaseUpdate(structuredClone(update))).toEqual(update);
+    expect([
+      readTerrainPhaseUpdate({ ...update, timer: "fast" }),
+      readTerrainPhaseUpdate({ ...update, devicePixelRatio: 0 }),
+      readTerrainPhaseUpdate({ ...update, phase: { ...update.phase, name: "photoreal-alone" } }),
+      readTerrainPhaseUpdate(TERRAIN_RECORD),
+    ]).toEqual([null, null, null, null]);
   });
 
   it("refuses T20's record, and T20's reader refuses it", () => {

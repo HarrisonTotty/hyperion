@@ -37,7 +37,7 @@
  *   section; the version stays 6, and a file without the block reads as before.
  */
 
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { cpus, hostname, loadavg, totalmem } from "node:os";
 import { join } from "node:path";
 
@@ -3116,6 +3116,55 @@ const NODE_RESULTS_FILES: ResultsFiles = {
     ),
   writeFile: (path, text) => writeFile(path, text, "utf8"),
 };
+
+/**
+ * The suffix, after a run's results' name, of its finished phases' files, which it writes as each
+ * phase ends and removes once its results are written, so that a run stopped part-way keeps them
+ * (R14's Mac measurements).
+ */
+export const PARTIAL_SUFFIX = "-partial";
+
+/** The file system calls of a writer of finished phases, which removes them too. */
+export interface PartialResultsFiles extends ResultsFiles {
+  /** Removes a file; one already gone is no failure. */
+  remove(path: string): Promise<void>;
+}
+
+/** Node's file system, for a writer of finished phases. */
+export const NODE_PARTIAL_FILES: PartialResultsFiles = {
+  ...NODE_RESULTS_FILES,
+  remove: (path) => rm(path, { force: true }),
+};
+
+/**
+ * The first of `stem`, `stem-2`, `stem-3` and so on that names in `dir` neither a results file
+ * (`<name>.json`) nor a stopped run's finished phases (`<name>-partial.json`).
+ *
+ * @throws Error if the day's names are used up.
+ */
+export async function freeResultsName(
+  dir: string,
+  stem: string,
+  files: Pick<ResultsFiles, "exists">,
+): Promise<string> {
+  const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
+    i === 0 ? stem : `${stem}-${String(i + 1)}`,
+  );
+  const taken = await Promise.all(
+    candidates.map(async (candidate) => {
+      const [results, partial] = await Promise.all([
+        files.exists(join(dir, `${candidate}.json`)),
+        files.exists(join(dir, `${candidate}${PARTIAL_SUFFIX}.json`)),
+      ]);
+      return results || partial;
+    }),
+  );
+  const name = candidates[taken.indexOf(false)];
+  if (name === undefined) {
+    throw new Error(`${dir} already holds ${String(MAX_RUNS_A_DAY)} runs named ${stem}`);
+  }
+  return name;
+}
 
 /**
  * Writes a results file and its summary into `dir` as `<date>-<machine>-<setting>.json` and

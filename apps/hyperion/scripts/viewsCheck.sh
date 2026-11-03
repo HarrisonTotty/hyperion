@@ -29,7 +29,9 @@
 # descent and the sunset, then with instruments (high: one photorealistic and one wireframe; low:
 # one wireframe), then a device loss the harness forces mid-stream. It writes under
 # target/views-check/terrain/ for a smoke and docs/measurements/terrain-check/ otherwise, and exits
-# 1 when one of its checks fails. A setting lasts the whole launch, so --terrain with no --setting
+# 1 when one of its checks fails. As each phase ends it writes the phases finished so far, unjudged,
+# as <name>-partial.json and .md beside them, so that a run stopped part-way keeps them; the
+# results file takes their place as the run ends (R14's Mac measurements). A setting lasts the whole launch, so --terrain with no --setting
 # makes two launches, high then low, each with its own profile, watchdog and results file; the
 # script's exit is the first non-zero one.
 #

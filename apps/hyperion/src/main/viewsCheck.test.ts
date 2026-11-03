@@ -39,7 +39,7 @@ import {
   viewsCheckWatchdogMs,
   WindowScan,
 } from "./viewsCheck";
-import type { TerrainCheckResults } from "./terrainCheckResults";
+import type { TerrainCheckResults, TerrainPhasesResults } from "./terrainCheckResults";
 import { NO_WINDOW_REASON, type ViewsCheckResults } from "./viewsCheckResults";
 
 /**
@@ -122,11 +122,13 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
   readonly deps: ViewsCheckSessionDeps;
   readonly written: ViewsCheckResults[];
   readonly terrainWritten: TerrainCheckResults[];
+  readonly terrainPhasesWritten: TerrainPhasesResults[];
   readonly handoverWritten: HandoverCheckResults[];
   readonly atmosphereWritten: AtmosphereCheckResults[];
 } {
   const written: ViewsCheckResults[] = [];
   const terrainWritten: TerrainCheckResults[] = [];
+  const terrainPhasesWritten: TerrainPhasesResults[] = [];
   const handoverWritten: HandoverCheckResults[] = [];
   const atmosphereWritten: AtmosphereCheckResults[] = [];
   const deps: ViewsCheckSessionDeps = {
@@ -182,9 +184,15 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
       written.push(results);
       return Promise.resolve({ json: "/out/a.json", markdown: "/out/a.md" });
     },
-    writeTerrain: (_dir, results) => {
-      terrainWritten.push(results);
-      return Promise.resolve({ json: "/out/t.json", markdown: "/out/t.md" });
+    terrainWriter: {
+      writePhases: (phases) => {
+        terrainPhasesWritten.push(phases);
+        return Promise.resolve({ json: "/out/t-partial.json", markdown: "/out/t-partial.md" });
+      },
+      writeResults: (results) => {
+        terrainWritten.push(results);
+        return Promise.resolve({ json: "/out/t.json", markdown: "/out/t.md" });
+      },
     },
     writeHandover: (_dir, results) => {
       handoverWritten.push(results);
@@ -203,6 +211,7 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
     deps,
     written,
     terrainWritten,
+    terrainPhasesWritten,
     handoverWritten,
     atmosphereWritten,
   };
@@ -822,6 +831,29 @@ describe("the views check's session on a terrain launch (R10.T16.d)", () => {
     expect(terrainWritten[0]?.overall).toBe("fail");
   });
 
+  it("writes its finished phases as each ends, unjudged, before its results (R14's Mac measurements)", async () => {
+    const { session: run, terrainPhasesWritten, terrainWritten } = terrainSession();
+    const [alone, wireframe] = TERRAIN_RECORD.phases;
+    if (alone === undefined || wireframe === undefined) {
+      throw new Error("the fixture has no first two phases");
+    }
+    await run.writeTerrainPhase({ timer: "quantized", devicePixelRatio: 2, phase: alone });
+    await run.writeTerrainPhase({ timer: "quantized", devicePixelRatio: 2, phase: wireframe });
+    await run.writeTerrainResults(TERRAIN_RECORD);
+    expect([
+      terrainPhasesWritten.map((each) => each.phases.map((phase) => phase.name)),
+      terrainPhasesWritten.map((each) => [each.run.timer, each.run.devicePixelRatio]),
+      terrainWritten.length,
+    ]).toEqual([
+      [["terrain-alone"], ["terrain-alone", "terrain-photoreal-wireframe"]],
+      [
+        ["quantized", 2],
+        ["quantized", 2],
+      ],
+      1,
+    ]);
+  });
+
   it("records its captures from the repository's root, not by the checkout's own path", async () => {
     const { session: run, terrainWritten } = terrainSession({
       capturesRecordedAs: "target/views-check/terrain/captures-x",
@@ -1183,6 +1215,10 @@ describe("the views check's handlers", () => {
           calls.push("write terrain");
           return Promise.resolve({ json: "a", markdown: "b" });
         },
+        writeTerrainPhase: (update) => {
+          calls.push(`write terrain phase ${update.phase.name}`);
+          return Promise.resolve({ json: "a", markdown: "b" });
+        },
         writeHandoverResults: () => {
           calls.push("write handover");
           return Promise.resolve({ json: "a", markdown: "b" });
@@ -1415,6 +1451,21 @@ describe("the views check's handlers", () => {
       /the whole body's field is the terrain run's/,
     );
     expect(other.calls).toEqual([]);
+  });
+
+  it("take a terrain run's phase as it ends on a terrain launch alone (R14's Mac measurements)", async () => {
+    const [phase] = TERRAIN_RECORD.phases;
+    const update = { timer: "quantized", devicePixelRatio: 2, phase };
+    const terrain = handlers("terrain");
+    await terrain.call(VIEWS_CHECK_CHANNELS.writeTerrainPhase, true, update);
+    await expect(
+      terrain.call(VIEWS_CHECK_CHANNELS.writeTerrainPhase, true, { ...update, timer: "fast" }),
+    ).rejects.toThrow(/not a terrain run's phase/);
+    const other = handlers("several-views");
+    await expect(other.call(VIEWS_CHECK_CHANNELS.writeTerrainPhase, true, update)).rejects.toThrow(
+      /not a terrain run's phase/,
+    );
+    expect([terrain.calls, other.calls]).toEqual([["write terrain phase terrain-alone"], []]);
   });
 
   it("refuse T20's record on a terrain launch, which writes its own alone", async () => {

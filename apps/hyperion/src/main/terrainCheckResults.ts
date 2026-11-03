@@ -72,14 +72,16 @@ import { keepsLoadAverage, QUIET_RULE_UNCHECKED, quietOf } from "./machineLoad";
 import {
   ADDED_FILE_LIMIT_BYTES,
   formatAsPrettier,
+  freeResultsName,
   type MachineDescription,
   type Measured,
-  type ResultsFiles,
+  NODE_PARTIAL_FILES,
+  PARTIAL_SUFFIX,
+  type PartialResultsFiles,
   type SpikeSetting,
   type Verdict,
 } from "./results";
 import { type DurationStats, durationStats, type ViewSlotName } from "./viewsCheckResults";
-import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /** The file's schema name. */
@@ -943,6 +945,80 @@ function wholeFinding(whole: TerrainWholeRecord, record: TerrainCheckRecord): Te
   };
 }
 
+/** A results file's run block: the run's description, its timer and why its figures are provisional. */
+function runBlock(
+  run: TerrainCheckRunInput,
+  timer: SpikePassTimer,
+  devicePixelRatio: number,
+): TerrainCheckResults["run"] {
+  const quiet = quietOf(run.platform, run.machine.loadAverage);
+  const load = run.machine.loadAverage[0];
+  const provisional = [
+    keepsLoadAverage(run.platform)
+      ? `load average ${load.toFixed(2)} at the start`
+      : QUIET_RULE_UNCHECKED,
+    ...(quiet.provisional ? ["a shared machine"] : []),
+    ...(run.shown ? [] : ["a hidden run: no presentation"]),
+    ...(run.smoke ? ["a smoke run: short windows"] : []),
+  ].join("; ");
+  return {
+    startedAt: run.startedAt.toISOString(),
+    machine: run.machine,
+    versions: run.versions,
+    platform: run.platform,
+    launchMode: run.launchMode,
+    setting: run.setting,
+    smoke: run.smoke,
+    ...fixtureRecord(run.fixture),
+    switches: run.switches,
+    shown: run.shown,
+    window: run.window,
+    devicePixelRatio,
+    timer,
+    captures: run.captures,
+    provisional: `provisional: ${provisional}`,
+  };
+}
+
+/** The schema name of a terrain run's finished phases, written as each ends. */
+export const TERRAIN_PHASES_SCHEMA = "hyperion.views-check.terrain-phases";
+
+/** The finished phases' schema's version; bumped with any change to the file's shape. */
+export const TERRAIN_PHASES_VERSION = 1;
+
+/** What a terrain run's finished phases are built from: its phases' records as each ended. */
+export interface TerrainPhasesInput {
+  readonly run: TerrainCheckRunInput;
+  readonly timer: SpikePassTimer;
+  readonly devicePixelRatio: number;
+  readonly phases: ReadonlyArray<TerrainCheckPhaseRecord>;
+}
+
+/**
+ * A terrain run's phases as each ended (R14's Mac measurements), so that a run stopped part-way
+ * keeps them: their figures as the results give them, judged by nothing; the run's results file,
+ * written as it ends, takes their place.
+ */
+export interface TerrainPhasesResults {
+  readonly schema: typeof TERRAIN_PHASES_SCHEMA;
+  readonly version: typeof TERRAIN_PHASES_VERSION;
+  readonly run: TerrainCheckResults["run"];
+  readonly phases: ReadonlyArray<TerrainPhaseFigures>;
+  readonly phaseWindows: TerrainCheckResults["phaseWindows"];
+}
+
+/** A run's finished phases, unjudged. */
+export function buildTerrainPhases(input: TerrainPhasesInput): TerrainPhasesResults {
+  const { run } = input;
+  return {
+    schema: TERRAIN_PHASES_SCHEMA,
+    version: TERRAIN_PHASES_VERSION,
+    run: runBlock(run, input.timer, input.devicePixelRatio),
+    phases: input.phases.map((phase) => phaseFigures(phase, run.setting)),
+    phaseWindows: input.phases.map(({ name, startMs, endMs }) => ({ name, startMs, endMs })),
+  };
+}
+
 /** The results of a run, judged. */
 export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheckResults {
   const { run, record } = input;
@@ -989,36 +1065,10 @@ export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheck
     findings.teardown,
     ...(findings.whole === undefined ? [] : [findings.whole]),
   ].map((each) => each.verdict);
-  const quiet = quietOf(run.platform, run.machine.loadAverage);
-  const load = run.machine.loadAverage[0];
-  const provisional = [
-    keepsLoadAverage(run.platform)
-      ? `load average ${load.toFixed(2)} at the start`
-      : QUIET_RULE_UNCHECKED,
-    ...(quiet.provisional ? ["a shared machine"] : []),
-    ...(run.shown ? [] : ["a hidden run: no presentation"]),
-    ...(run.smoke ? ["a smoke run: short windows"] : []),
-  ].join("; ");
   return {
     schema: TERRAIN_CHECK_SCHEMA,
     version: TERRAIN_CHECK_VERSION,
-    run: {
-      startedAt: run.startedAt.toISOString(),
-      machine: run.machine,
-      versions: run.versions,
-      platform: run.platform,
-      launchMode: run.launchMode,
-      setting: run.setting,
-      smoke: run.smoke,
-      ...fixtureRecord(run.fixture),
-      switches: run.switches,
-      shown: run.shown,
-      window: run.window,
-      devicePixelRatio: record.devicePixelRatio,
-      timer: record.timer,
-      captures: run.captures,
-      provisional: `provisional: ${provisional}`,
-    },
+    run: runBlock(run, record.timer, record.devicePixelRatio),
     phases,
     findings,
     sessions: record.sessions,
@@ -1125,44 +1175,23 @@ function gpuPassLines(phases: ReadonlyArray<TerrainPhaseFigures>): ReadonlyArray
   ];
 }
 
-/** The results' summary, for a person reading the record. */
-export function terrainCheckMarkdown(results: TerrainCheckResults): string {
-  const { run, phases, findings } = results;
-  const loss = findings.loss.record;
-  const teardown = findings.teardown.record;
-  const handover = findings.handover;
+/** The summary's lines of the run: its machine, versions, launch, field and captures. */
+function runLines(run: TerrainCheckResults["run"]): ReadonlyArray<string> {
   return [
-    `# Terrain run: ${run.machine.name}, ${run.setting}, ${run.startedAt.slice(0, 10)}`,
-    "",
-    `- **Overall:** ${results.overall}`,
     `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${textOf(run.machine.gpu, (gpu) => gpu.description ?? `${String(gpu.vendorId)}:${String(gpu.deviceId)}`)}; governor ${textOf(run.machine.governor, (governor) => governor)}; load average ${keepsLoadAverage(run.platform) ? run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ") : "none"} (${run.provisional})`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
     `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}`,
     ...fixtureNaming(run.fixture).lines,
     `- **Captures (not committed):** ${textOf(run.captures, (dir) => `\`${dir}\``)}`,
-    "",
-    "## The hidden run's checks",
-    "",
-    "| Check | Verdict | Reading |",
-    "| --- | --- | --- |",
-    `| The setting's phases ran and held their views | ${findings.phases.verdict} | ${phases.map((phase) => `${phase.name}${phase.held ? "" : " (NOT held)"}`).join(", ")}${reasonsText(findings.phases)} |`,
-    `| Every frame drawn (no frame a view was due missed, outside the restore) | ${findings.framesDrawn.verdict} | missed frames: ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${String(view.missedFrames)}`).join(", ")}`).join("; ")}${reasonsText(findings.framesDrawn)} |`,
-    `| No view stopped (no time without a frame or a view's draw over ${String(findings.noStall.limitMs)} ms from VIEW's opening to the teardown, outside the restore) | ${findings.noStall.verdict} | the page's longest time between animation frames ${results.span.longestFrameGapMs.toFixed(0)} ms (${windowOf(results.phaseWindows, results.span.longestGapEndMs)}); the longest time between draws: ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${view.longestGapMs.toFixed(0)} ms${gapEnd(view)}`).join(", ")}`).join("; ")}${reasonsText(findings.noStall)} |`,
-    `| Every frame finite (the photorealistic scene targets read back) | ${findings.framesFinite.verdict} | ${String(findings.framesFinite.readBacks)} read-backs${reasonsText(findings.framesFinite)} |`,
-    `| The terrain drawn once handed over | ${findings.terrainDrawn.verdict} | ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${String(view.terrainDraws)} of ${String(view.handedOverDraws)} handed-over draws with a patch in view (${String(view.offSurveyDraws)} with none)${view.terrainDelayMs === null ? "" : `, first ${view.terrainDelayMs.toFixed(0)} ms after the hand-over`}`).join(", ")}`).join("; ")}${reasonsText(findings.terrainDrawn)} |`,
-    `| One forced loss, then one restore, and no other fault | ${findings.faults.verdict} | ${findings.faults.expected === null ? "no forced loss excluded" : `excluded: ${findings.faults.expected.line}`}; ${String(findings.faults.restores)} restores; ${String(findings.faults.others.length)} other faults; ${String(findings.faults.gpuProcessExits)} GPU-process exits${reasonsText(findings.faults)} |`,
-    `| No terrain fault (the session's terrainFaults never held a view) | ${findings.terrainFaults.verdict} | ${findings.terrainFaults.record.length === 0 ? "none" : `${String(findings.terrainFaults.record.length)} raised or changed`}${reasonsText(findings.terrainFaults)} |`,
-    `| The loss mid-stream, and after it no field asked again | ${findings.loss.verdict} | ${loss.destroyedAtScriptS === null ? "not destroyed" : `destroyed at ${loss.destroyedAtScriptS.toFixed(1)} s of the script, ${String(loss.blocksToCome)} blocks to come, ${String(loss.bakesInFlight)} bakes in flight`}; after: ${String(loss.after.fieldAsks)} asks, ${String(loss.after.fieldInits)} inits, ${String(loss.after.fieldChunks)} chunks for ${String(loss.after.blocksSent)} blocks to ${String(loss.workers)} workers; the mask ${String(loss.masks.before ?? "—")} cells before, ${String(loss.masks.afterRestore ?? "—")} after the restore, ${String(loss.masks.end ?? "—")} at the end of ${String(loss.masks.expected)}${reasonsText(findings.loss)} |`,
-    `| The session torn down | ${findings.teardown.verdict} | ${teardown.disposed ? "disposed" : "NOT disposed"}; ${String(teardown.workersLive)} of ${String(teardown.workersMade)} workers left; the session's textures ${String(teardown.sessionGpuBytes)} B; the terrain's GPU bytes left: ${bytesText(teardown.liveBytes)}${reasonsText(findings.teardown)} |`,
-    `| No pixel drawn by both surfaces on the datum | — | ${findings.bothSurfaces} |`,
-    ...(findings.whole === undefined ? [] : [wholeRow(findings.whole)]),
-    "",
-    `VIEW's opening (recorded, not judged): its views' ${String(results.opening.preparations)} preparations settled ${results.opening.preparedMs.toFixed(0)} ms after the run's start, the longest time between animation frames meanwhile ${results.opening.longestFrameGapMs === null ? "—" : `${results.opening.longestFrameGapMs.toFixed(0)} ms`}.`,
-    "",
-    `The sessions' materials, compiled as each is made, before its phases (judged by the same limit): ${results.sessions.length === 0 ? "no session made" : results.sessions.map(({ compile }, n) => `session ${String(n + 1)} ${compile.kind === "pending" ? "not compiled by the run's end" : `${String(compile.compiled)} compiled in ${compile.compileMs.toFixed(0)} ms, the longest time between animation frames meanwhile ${compile.longestFrameGapMs === null ? "—" : `${compile.longestFrameGapMs.toFixed(0)} ms`}`}`).join("; ")}.`,
-    "",
-    `The hand-over: ${handover.rangeM === null ? "no range" : `range ${(handover.rangeM / 1000).toFixed(0)} km, crossed at ${handover.expectedScriptS?.toFixed(1) ?? "—"} s of the script`}; the primary handed over at ${handover.observedScriptS?.toFixed(1) ?? "—"} s. Console errors: ${String(findings.consoleErrors.count)}${findings.consoleErrors.first.length === 0 ? "" : ` (${findings.consoleErrors.first.join(" | ")})`}.`,
-    "",
+  ];
+}
+
+/**
+ * The summary's sections of the phases' figures, provisional: each phase's frames, its triangles,
+ * its GPU time by pass, its views and the session's memory at its end.
+ */
+function phaseLines(phases: ReadonlyArray<TerrainPhaseFigures>): ReadonlyArray<string> {
+  return [
     "## Phases (provisional)",
     "",
     "Durations as p50 / p95 / max ms.",
@@ -1207,57 +1236,151 @@ export function terrainCheckMarkdown(results: TerrainCheckResults): string {
         : `| ${phase.name} | ${mib(phase.memory.workerFieldBytes)} | ${mib(phase.memory.keptFieldBytes)} | ${bytesText(phase.memory.sessionGpuBytes)} | ${bytesText(phase.memory.liveBytes)} | ${bytesText(phase.memory.peakBytes)} |`,
     ),
     "",
+  ];
+}
+
+/** The results' summary, for a person reading the record. */
+export function terrainCheckMarkdown(results: TerrainCheckResults): string {
+  const { run, phases, findings } = results;
+  const loss = findings.loss.record;
+  const teardown = findings.teardown.record;
+  const handover = findings.handover;
+  return [
+    `# Terrain run: ${run.machine.name}, ${run.setting}, ${run.startedAt.slice(0, 10)}`,
+    "",
+    `- **Overall:** ${results.overall}`,
+    ...runLines(run),
+    "",
+    "## The hidden run's checks",
+    "",
+    "| Check | Verdict | Reading |",
+    "| --- | --- | --- |",
+    `| The setting's phases ran and held their views | ${findings.phases.verdict} | ${phases.map((phase) => `${phase.name}${phase.held ? "" : " (NOT held)"}`).join(", ")}${reasonsText(findings.phases)} |`,
+    `| Every frame drawn (no frame a view was due missed, outside the restore) | ${findings.framesDrawn.verdict} | missed frames: ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${String(view.missedFrames)}`).join(", ")}`).join("; ")}${reasonsText(findings.framesDrawn)} |`,
+    `| No view stopped (no time without a frame or a view's draw over ${String(findings.noStall.limitMs)} ms from VIEW's opening to the teardown, outside the restore) | ${findings.noStall.verdict} | the page's longest time between animation frames ${results.span.longestFrameGapMs.toFixed(0)} ms (${windowOf(results.phaseWindows, results.span.longestGapEndMs)}); the longest time between draws: ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${view.longestGapMs.toFixed(0)} ms${gapEnd(view)}`).join(", ")}`).join("; ")}${reasonsText(findings.noStall)} |`,
+    `| Every frame finite (the photorealistic scene targets read back) | ${findings.framesFinite.verdict} | ${String(findings.framesFinite.readBacks)} read-backs${reasonsText(findings.framesFinite)} |`,
+    `| The terrain drawn once handed over | ${findings.terrainDrawn.verdict} | ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${String(view.terrainDraws)} of ${String(view.handedOverDraws)} handed-over draws with a patch in view (${String(view.offSurveyDraws)} with none)${view.terrainDelayMs === null ? "" : `, first ${view.terrainDelayMs.toFixed(0)} ms after the hand-over`}`).join(", ")}`).join("; ")}${reasonsText(findings.terrainDrawn)} |`,
+    `| One forced loss, then one restore, and no other fault | ${findings.faults.verdict} | ${findings.faults.expected === null ? "no forced loss excluded" : `excluded: ${findings.faults.expected.line}`}; ${String(findings.faults.restores)} restores; ${String(findings.faults.others.length)} other faults; ${String(findings.faults.gpuProcessExits)} GPU-process exits${reasonsText(findings.faults)} |`,
+    `| No terrain fault (the session's terrainFaults never held a view) | ${findings.terrainFaults.verdict} | ${findings.terrainFaults.record.length === 0 ? "none" : `${String(findings.terrainFaults.record.length)} raised or changed`}${reasonsText(findings.terrainFaults)} |`,
+    `| The loss mid-stream, and after it no field asked again | ${findings.loss.verdict} | ${loss.destroyedAtScriptS === null ? "not destroyed" : `destroyed at ${loss.destroyedAtScriptS.toFixed(1)} s of the script, ${String(loss.blocksToCome)} blocks to come, ${String(loss.bakesInFlight)} bakes in flight`}; after: ${String(loss.after.fieldAsks)} asks, ${String(loss.after.fieldInits)} inits, ${String(loss.after.fieldChunks)} chunks for ${String(loss.after.blocksSent)} blocks to ${String(loss.workers)} workers; the mask ${String(loss.masks.before ?? "—")} cells before, ${String(loss.masks.afterRestore ?? "—")} after the restore, ${String(loss.masks.end ?? "—")} at the end of ${String(loss.masks.expected)}${reasonsText(findings.loss)} |`,
+    `| The session torn down | ${findings.teardown.verdict} | ${teardown.disposed ? "disposed" : "NOT disposed"}; ${String(teardown.workersLive)} of ${String(teardown.workersMade)} workers left; the session's textures ${String(teardown.sessionGpuBytes)} B; the terrain's GPU bytes left: ${bytesText(teardown.liveBytes)}${reasonsText(findings.teardown)} |`,
+    `| No pixel drawn by both surfaces on the datum | — | ${findings.bothSurfaces} |`,
+    ...(findings.whole === undefined ? [] : [wholeRow(findings.whole)]),
+    "",
+    `VIEW's opening (recorded, not judged): its views' ${String(results.opening.preparations)} preparations settled ${results.opening.preparedMs.toFixed(0)} ms after the run's start, the longest time between animation frames meanwhile ${results.opening.longestFrameGapMs === null ? "—" : `${results.opening.longestFrameGapMs.toFixed(0)} ms`}.`,
+    "",
+    `The sessions' materials, compiled as each is made, before its phases (judged by the same limit): ${results.sessions.length === 0 ? "no session made" : results.sessions.map(({ compile }, n) => `session ${String(n + 1)} ${compile.kind === "pending" ? "not compiled by the run's end" : `${String(compile.compiled)} compiled in ${compile.compileMs.toFixed(0)} ms, the longest time between animation frames meanwhile ${compile.longestFrameGapMs === null ? "—" : `${compile.longestFrameGapMs.toFixed(0)} ms`}`}`).join("; ")}.`,
+    "",
+    `The hand-over: ${handover.rangeM === null ? "no range" : `range ${(handover.rangeM / 1000).toFixed(0)} km, crossed at ${handover.expectedScriptS?.toFixed(1) ?? "—"} s of the script`}; the primary handed over at ${handover.observedScriptS?.toFixed(1) ?? "—"} s. Console errors: ${String(findings.consoleErrors.count)}${findings.consoleErrors.first.length === 0 ? "" : ` (${findings.consoleErrors.first.join(" | ")})`}.`,
+    "",
+    ...phaseLines(phases),
   ].join("\n");
 }
 
-/** Runs of one day, machine and setting the writer numbers before it gives up. */
-const MAX_RUNS_A_DAY = 100;
+/** The finished phases' summary: the phases' figures so far, and that nothing is judged yet. */
+export function terrainPhasesMarkdown(partial: TerrainPhasesResults): string {
+  const { run, phases } = partial;
+  return [
+    `# Terrain run's finished phases: ${run.machine.name}, ${run.setting}, ${run.startedAt.slice(0, 10)}`,
+    "",
+    `Written as each phase ended, the last ${phases.at(-1)?.name ?? "none"}: the run stopped before it wrote its results, or has not ended yet. No check is judged here; the results file, written as the run ends, takes this file's place.`,
+    "",
+    ...runLines(run),
+    "",
+    ...phaseLines(phases),
+  ].join("\n");
+}
 
-const NODE_FILES: ResultsFiles = {
-  mkdir: (path) => mkdir(path, { recursive: true }),
-  exists: (path) =>
-    access(path).then(
-      () => true,
-      () => false,
-    ),
-  writeFile: (path, text) => writeFile(path, text, "utf8"),
-};
+/** The name a run's files are given before a repeat's `-2` or a stopped run's `-partial`. */
+function terrainStem(run: TerrainCheckResults["run"]): string {
+  return `${run.startedAt.slice(0, 10)}-${run.machine.name}-${run.setting}-terrain${fixtureNaming(run.fixture).stem}${run.smoke ? "-smoke" : ""}`;
+}
 
 /**
- * Writes the results and their summary into `dir` as `<date>-<machine>-<setting>-terrain.json` and
- * `.md` (`-terrain-weathered` for a run on the weathered fixture, R10.T1.c; `-smoke` before the
- * extension for a smoke run), adding `-2`, `-3` and so on where a run of the same name is there,
- * and warns of a file over the repository's limit for added files.
+ * A terrain run's files in `dir`, under one name taken at the first write: its finished phases as
+ * each phase ends, `<name>-partial.json` and `.md` (R14's Mac measurements), then its results,
+ * `<name>.json` and `.md`, which take their place. The name is
+ * `<date>-<machine>-<setting>-terrain`, `-terrain-weathered` for a run on the weathered fixture
+ * (R10.T1.c), with `-smoke` before the extension for a smoke run, and `-2`, `-3` and so on added
+ * where a run of the same name, or a stopped run's finished phases, is there.
+ */
+export class TerrainResultsWriter {
+  readonly #dir: string;
+  readonly #files: PartialResultsFiles;
+  #name: string | null = null;
+  #wrotePhases = false;
+
+  constructor(dir: string, files: PartialResultsFiles = NODE_PARTIAL_FILES) {
+    this.#dir = dir;
+    this.#files = files;
+  }
+
+  /**
+   * Writes the run's finished phases and their summary, in place of those written before.
+   *
+   * @throws Error if the day's names are used up.
+   */
+  async writePhases(
+    partial: TerrainPhasesResults,
+  ): Promise<{ readonly json: string; readonly markdown: string }> {
+    const paths = this.#paths(`${await this.#nameOf(partial.run)}${PARTIAL_SUFFIX}`);
+    await this.#files.writeFile(paths.json, `${JSON.stringify(partial, null, 2)}\n`);
+    await this.#files.writeFile(paths.markdown, terrainPhasesMarkdown(partial));
+    this.#wrotePhases = true;
+    return paths;
+  }
+
+  /**
+   * Writes the results and their summary, warns of a file over the repository's limit for added
+   * files, and removes the finished phases' files this writer wrote.
+   *
+   * @throws Error if the day's names are used up.
+   */
+  async writeResults(
+    results: TerrainCheckResults,
+  ): Promise<{ readonly json: string; readonly markdown: string }> {
+    const name = await this.#nameOf(results.run);
+    const { json, markdown } = this.#paths(name);
+    const text = `${JSON.stringify(results, null, 2)}\n`;
+    await this.#files.writeFile(json, text);
+    await this.#files.writeFile(markdown, terrainCheckMarkdown(results));
+    const bytes = Buffer.byteLength(formatAsPrettier(text), "utf8");
+    if (bytes > ADDED_FILE_LIMIT_BYTES) {
+      console.warn(
+        `views check: ${json} is ${String(bytes)} B once formatted, over the ${String(ADDED_FILE_LIMIT_BYTES)} B the repository accepts for an added file`,
+      );
+    }
+    if (this.#wrotePhases) {
+      const partial = this.#paths(`${name}${PARTIAL_SUFFIX}`);
+      await this.#files.remove(partial.json);
+      await this.#files.remove(partial.markdown);
+    }
+    return { json, markdown };
+  }
+
+  async #nameOf(run: TerrainCheckResults["run"]): Promise<string> {
+    if (this.#name === null) {
+      await this.#files.mkdir(this.#dir);
+      this.#name = await freeResultsName(this.#dir, terrainStem(run), this.#files);
+    }
+    return this.#name;
+  }
+
+  #paths(name: string): { readonly json: string; readonly markdown: string } {
+    return { json: join(this.#dir, `${name}.json`), markdown: join(this.#dir, `${name}.md`) };
+  }
+}
+
+/**
+ * Writes a run's results and their summary into `dir`, under {@link TerrainResultsWriter}'s name,
+ * where no finished phases were written first.
  *
  * @throws Error if the day's names are used up.
  */
 export async function writeTerrainResults(
   dir: string,
   results: TerrainCheckResults,
-  files: ResultsFiles = NODE_FILES,
+  files: PartialResultsFiles = NODE_PARTIAL_FILES,
 ): Promise<{ readonly json: string; readonly markdown: string }> {
-  await files.mkdir(dir);
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-terrain${fixtureNaming(results.run.fixture).stem}${results.run.smoke ? "-smoke" : ""}`;
-  const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
-    i === 0 ? stem : `${stem}-${String(i + 1)}`,
-  );
-  const taken = await Promise.all(
-    candidates.map((candidate) => files.exists(join(dir, `${candidate}.json`))),
-  );
-  const name = candidates[taken.indexOf(false)];
-  if (name === undefined) {
-    throw new Error(`${dir} already holds ${String(MAX_RUNS_A_DAY)} runs named ${stem}`);
-  }
-  const json = join(dir, `${name}.json`);
-  const markdown = join(dir, `${name}.md`);
-  const text = `${JSON.stringify(results, null, 2)}\n`;
-  await files.writeFile(json, text);
-  await files.writeFile(markdown, terrainCheckMarkdown(results));
-  const bytes = Buffer.byteLength(formatAsPrettier(text), "utf8");
-  if (bytes > ADDED_FILE_LIMIT_BYTES) {
-    console.warn(
-      `views check: ${json} is ${String(bytes)} B once formatted, over the ${String(ADDED_FILE_LIMIT_BYTES)} B the repository accepts for an added file`,
-    );
-  }
-  return { json, markdown };
+  return new TerrainResultsWriter(dir, files).writeResults(results);
 }

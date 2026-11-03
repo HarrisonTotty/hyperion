@@ -37,6 +37,7 @@ import type {
   TerrainCheckMemory,
   TerrainCheckPhaseName,
   TerrainCheckPhaseRecord,
+  TerrainCheckPhaseUpdate,
   TerrainCheckRecord,
   TerrainCheckSessionFault,
   TerrainCheckOpeningRecord,
@@ -702,6 +703,25 @@ function wholeOf(value: unknown): TerrainWholeRecord | null | undefined {
         selectionBudget,
         looks,
       }
+    : null;
+}
+
+/**
+ * `value` as a terrain run's phase as it ended (R14's Mac measurements), or `null` if it is not
+ * one: the phase's record, checked as the run's record checks each of its phases, and the timer's
+ * kind and the page's device-pixel ratio, as the run's record checks them.
+ */
+export function readTerrainPhaseUpdate(value: unknown): TerrainCheckPhaseUpdate | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { timer, devicePixelRatio } = value;
+  const ended = terrainPhase(value["phase"]);
+  return (timer === "full" || timer === "quantized" || timer === "absent") &&
+    isFiniteNumber(devicePixelRatio) &&
+    devicePixelRatio > 0 &&
+    ended !== null
+    ? { timer, devicePixelRatio, phase: ended }
     : null;
 }
 

@@ -7,9 +7,10 @@ import type {
   TerrainWholeRecord,
 } from "../preload/api";
 import { DESTROYED_AT_MS, LOSS_WINDOW, TERRAIN_RECORD } from "./fixtures/terrainRecord";
-import { measured, type ResultsFiles } from "./results";
+import { measured, type PartialResultsFiles } from "./results";
 import {
   buildTerrainCheckResults,
+  buildTerrainPhases,
   TERRAIN_DELAY_LIMIT_MS,
   TERRAIN_GAP_LIMIT_MS,
   TERRAIN_PHASES,
@@ -17,8 +18,26 @@ import {
   terrainCheckMarkdown,
   terrainFailures,
   terrainFaultsVerdict,
+  type TerrainPhasesResults,
+  TerrainResultsWriter,
   writeTerrainResults,
 } from "./terrainCheckResults";
+
+/** Files held in `written`, by path, which a removal deletes. */
+function memoryFiles(written: Map<string, string>): PartialResultsFiles {
+  return {
+    mkdir: () => Promise.resolve(),
+    exists: (path) => Promise.resolve(written.has(path)),
+    writeFile: (path, text) => {
+      written.set(path, text);
+      return Promise.resolve();
+    },
+    remove: (path) => {
+      written.delete(path);
+      return Promise.resolve();
+    },
+  };
+}
 
 function input(overrides: Partial<TerrainCheckInput> = {}): TerrainCheckInput {
   return {
@@ -765,14 +784,7 @@ describe("the terrain run's summary and its files", () => {
 
   it("names each file for its date, machine and setting, a smoke's and a repeat's apart", async () => {
     const written = new Map<string, string>();
-    const files: ResultsFiles = {
-      mkdir: () => Promise.resolve(),
-      exists: (path) => Promise.resolve(written.has(path)),
-      writeFile: (path, text) => {
-        written.set(path, text);
-        return Promise.resolve();
-      },
-    };
+    const files = memoryFiles(written);
     const results = buildTerrainCheckResults(input());
     const first = await writeTerrainResults("/out", results, files);
     const second = await writeTerrainResults("/out", results, files);
@@ -792,16 +804,51 @@ describe("the terrain run's summary and its files", () => {
     });
   });
 
+  it("writes the finished phases as each ends, then the results under the same name in their place (R14's Mac measurements)", async () => {
+    const written = new Map<string, string>();
+    const files = memoryFiles(written);
+    // A stopped run's finished phases, whose name a later run of the day never takes.
+    written.set("/out/2026-10-19-effect-high-terrain-partial.json", "{}");
+    const run = input().run;
+    const writer = new TerrainResultsWriter("/out", files);
+    const [alone, wireframe] = TERRAIN_RECORD.phases;
+    if (alone === undefined || wireframe === undefined) {
+      throw new Error("the fixture has no first two phases");
+    }
+    const phases = (records: TerrainCheckRecord["phases"]): TerrainPhasesResults =>
+      buildTerrainPhases({ run, timer: "quantized", devicePixelRatio: 2, phases: records });
+    const first = await writer.writePhases(phases([alone]));
+    const second = await writer.writePhases(phases([alone, wireframe]));
+    expect([first, second.json]).toEqual([
+      {
+        json: "/out/2026-10-19-effect-high-terrain-2-partial.json",
+        markdown: "/out/2026-10-19-effect-high-terrain-2-partial.md",
+      },
+      "/out/2026-10-19-effect-high-terrain-2-partial.json",
+    ]);
+    expect(JSON.parse(written.get(second.json) ?? "null")).toMatchObject({
+      schema: "hyperion.views-check.terrain-phases",
+      version: 1,
+      run: { timer: "quantized", devicePixelRatio: 2 },
+      phases: [{ name: "terrain-alone" }, { name: "terrain-photoreal-wireframe" }],
+    });
+    expect(written.get(second.markdown)).toContain(
+      "No check is judged here; the results file, written as the run ends, takes this file's place.",
+    );
+    const results = await writer.writeResults(buildTerrainCheckResults(input()));
+    expect([results.json, [...written.keys()].toSorted()]).toEqual([
+      "/out/2026-10-19-effect-high-terrain-2.json",
+      [
+        "/out/2026-10-19-effect-high-terrain-2.json",
+        "/out/2026-10-19-effect-high-terrain-2.md",
+        "/out/2026-10-19-effect-high-terrain-partial.json",
+      ],
+    ]);
+  });
+
   it("names a weathered run's files -terrain-weathered, its run block and summary naming its field (R10.T1.c)", async () => {
     const written = new Map<string, string>();
-    const files: ResultsFiles = {
-      mkdir: () => Promise.resolve(),
-      exists: (path) => Promise.resolve(written.has(path)),
-      writeFile: (path, text) => {
-        written.set(path, text);
-        return Promise.resolve();
-      },
-    };
+    const files = memoryFiles(written);
     const weathered = (smoke: boolean): TerrainCheckInput => ({
       ...input(),
       run: { ...input().run, smoke, fixture: "terrain-test-weathered" },

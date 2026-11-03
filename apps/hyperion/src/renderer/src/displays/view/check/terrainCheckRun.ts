@@ -256,7 +256,7 @@ export function terrainProbeOptions(smoke: boolean): TerrainProbeOptions {
 
 /** What the terrain run drives and reads. */
 export interface TerrainCheckDeps {
-  readonly api: Pick<ViewsCheckApi, "startPhase" | "endPhase" | "capture">;
+  readonly api: Pick<ViewsCheckApi, "startPhase" | "endPhase" | "capture" | "writeTerrainPhase">;
   readonly views: Pick<
     ViewsProbe,
     "canvasOf" | "timer" | "restoresAtMs" | "preparations" | "frameTimes"
@@ -404,7 +404,11 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     terrain.resetPeaks();
     return terrain.mark();
   };
-  /** Ends a phase begun at `start`: its window marked and handed on, and its record kept. */
+  /**
+   * Ends a phase begun at `start`: its window marked and handed on, and its record kept and handed
+   * to the main process, which writes the run's finished phases so that a stopped run keeps them
+   * (R14's Mac measurements); a phase it could not write is warned of, and the run goes on.
+   */
   const finish = async (
     name: TerrainCheckPhaseName,
     start: TerrainMark,
@@ -416,7 +420,21 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     stopped();
     await deps.api.endPhase(name, window);
     const fromMs = deps.nowMs();
-    phases.push(terrain.phase(name, start, end, driver.shownViews(), quiet, deps.passTimes));
+    const phase = terrain.phase(name, start, end, driver.shownViews(), quiet, deps.passTimes);
+    phases.push(phase);
+    stopped();
+    // Within the harness's span: the record's copy across, and the main process's writing it.
+    await deps.api
+      .writeTerrainPhase({
+        timer: deps.views.timer(),
+        devicePixelRatio: deps.devicePixelRatio,
+        phase,
+      })
+      .catch((error: unknown) => {
+        console.warn(
+          `views check: the ${name} phase's results were not written: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
     harness.push({ fromMs, toMs: deps.nowMs() });
   };
   /**

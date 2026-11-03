@@ -1449,6 +1449,17 @@ export interface TerrainCheckPhaseRecord {
   readonly passes: ReadonlyArray<InspectionTimingPass> | null;
 }
 
+/**
+ * A terrain run's phase as it ends, handed to the main process, which writes the run's finished
+ * phases so that a run stopped part-way keeps them (R14's Mac measurements): the phase's record,
+ * and the pass timer's kind and the page's device-pixel ratio so far, as the run's record gives them.
+ */
+export interface TerrainCheckPhaseUpdate {
+  readonly timer: SpikePassTimer;
+  readonly devicePixelRatio: number;
+  readonly phase: TerrainCheckPhaseRecord;
+}
+
 /** An engine fault the terrain run saw, with its time. */
 export interface TerrainCheckFault {
   /** `performance.now()` ms. */
@@ -2158,6 +2169,12 @@ export interface ViewsCheckApi {
    * the main process judges it, and a run whose checks fail ends with 1 whatever its end says.
    */
   writeTerrainResults(record: TerrainCheckRecord): Promise<SpikeResultsPaths>;
+  /**
+   * Hands a terrain run's phase to the main process as it ends, which writes the run's finished
+   * phases so far, unjudged, so that a run stopped part-way keeps them (R14's Mac measurements);
+   * refused on any other launch. The results file takes their place as the run ends.
+   */
+  writeTerrainPhase(update: TerrainCheckPhaseUpdate): Promise<SpikeResultsPaths>;
   /**
    * Writes a hand-over check's results file and its summary (R10.T10.g) from its renderer's
    * record, refused on any other launch; the main process judges it, and a run whose verdict fails

@@ -15,6 +15,7 @@ import type {
   InspectionTimingWindowName,
   SpikeEnd,
   SpikeResultsPaths,
+  TerrainCheckPhaseUpdate,
   TerrainCheckRecord,
   ViewsCheckApi,
   ViewsCheckLaunch,
@@ -30,6 +31,7 @@ export const VIEWS_CHECK_CHANNEL_NAMES = {
   askRightWayUp: "hyperion:views-check:ask-right-way-up",
   writeResults: "hyperion:views-check:write-results",
   writeTerrainResults: "hyperion:views-check:write-terrain-results",
+  writeTerrainPhase: "hyperion:views-check:write-terrain-phase",
   writeHandoverResults: "hyperion:views-check:write-handover-results",
   writeAtmosphereResults: "hyperion:views-check:write-atmosphere-results",
   startProfile: "hyperion:views-check:start-profile",
@@ -79,6 +81,13 @@ export function viewsCheckApi(launch: ViewsCheckLaunch, deps: ViewsCheckApiDeps)
       const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeTerrainResults, record);
       if (!isPaths(paths)) {
         throw new Error("the main process wrote no terrain results file");
+      }
+      return paths;
+    },
+    writeTerrainPhase: async (update: TerrainCheckPhaseUpdate) => {
+      const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeTerrainPhase, update);
+      if (!isPaths(paths)) {
+        throw new Error("the main process wrote no terrain phases file");
       }
       return paths;
     },

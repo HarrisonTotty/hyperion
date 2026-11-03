@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import terrainGoldenText from "../../../../../../../../crates/hyperion-surface/tests/golden/worker/terrain_test.golden?raw";
 
@@ -437,12 +437,14 @@ function fakeProbe(
 
 /**
  * The run over a fake `VIEW` and probe on the test's clock, to its end, on `fixture`'s field, its
- * phases recording their GPU time by pass where `passTimes` says.
+ * phases recording their GPU time by pass where `passTimes` says, and the main process refusing to
+ * write each as it ends where `phasesRefused` says.
  */
 async function run(
   fixture: TerrainCheckDeps["fixture"] = "terrain-test",
   devicePixelRatio = 1,
   passTimes = false,
+  phasesRefused = false,
 ): Promise<{
   readonly record: Awaited<ReturnType<typeof runTerrainCheck>>;
   readonly calls: ReadonlyArray<string>;
@@ -470,6 +472,12 @@ async function run(
       capture: (label) => {
         calls.push(`capture ${label} at ${(terrain.scriptS ?? 0).toFixed(1)} s`);
         return Promise.resolve();
+      },
+      writeTerrainPhase: (update) => {
+        calls.push(`write ${update.phase.name}`);
+        return phasesRefused
+          ? Promise.reject(new Error("the disk is full"))
+          : Promise.resolve({ json: "a", markdown: "b" });
       },
     },
     views: {
@@ -595,6 +603,38 @@ describe("the terrain run's script (R10.T16.d)", () => {
       "terrain-photoreal-wireframe",
       "terrain-loss",
     ]);
+  });
+
+  it("hands each phase to the main process as it ends, before the next begins (R14's Mac measurements)", async () => {
+    const { calls } = await run();
+    expect(
+      calls.filter(
+        (call) => /^(?:start|end|write) /u.test(call) && !call.startsWith("write whole"),
+      ),
+    ).toEqual([
+      "start terrain-alone",
+      "end terrain-alone",
+      "write terrain-alone",
+      "start terrain-photoreal-wireframe",
+      "end terrain-photoreal-wireframe",
+      "write terrain-photoreal-wireframe",
+      "start terrain-loss",
+      "end terrain-loss",
+      "write terrain-loss",
+    ]);
+  });
+
+  it("goes on past a phase the main process could not write, with a warning", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { record } = await run("terrain-test", 1, false, true);
+    expect(record.phases.map((phase) => phase.name)).toEqual([
+      "terrain-alone",
+      "terrain-photoreal-wireframe",
+      "terrain-loss",
+    ]);
+    expect(console.warn).toHaveBeenCalledWith(
+      "views check: the terrain-alone phase's results were not written: the disk is full",
+    );
   });
 
   it("records each phase's GPU time by pass where the launch asks (R14's Mac measurements)", async () => {

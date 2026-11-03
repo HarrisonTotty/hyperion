@@ -70,6 +70,7 @@ function viewsCheckApi(): ViewsCheckApi & { readonly end: Mock<ViewsCheckApi["en
     endPhase: () => Promise.resolve(),
     askRightWayUp: () => Promise.resolve(),
     writeTerrainResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    writeTerrainPhase: () => Promise.resolve({ json: "a", markdown: "b" }),
     writeHandoverResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     writeAtmosphereResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     startProfile: () => Promise.resolve(),

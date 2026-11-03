@@ -14,7 +14,10 @@
  * through the same channels: its phases take no trace (each lasts minutes, and a hidden run has no
  * presentation to read), each ends with a capture of the page, the run may capture named moments
  * between ({@link ViewsCheckSession.capture}), and its record goes through its own narrow writer,
- * judged here (`terrainCheckResults.ts`): a run whose checks fail ends with 1. Each handler refuses
+ * judged here (`terrainCheckResults.ts`): a run whose checks fail ends with 1. Each phase's record
+ * comes too as it ends, and the run's finished phases are written, unjudged, beside where its
+ * results go (`<name>-partial.json`), so that a run stopped part-way keeps them; its results take
+ * their place (R14's Mac measurements). Each handler refuses
  * a phase that is not of the launch's run. A `--handover` launch (R10.T10.g) runs the terrain run's
  * hand-over check in its place: no phases (a start or end of one refused), its captures named for
  * its looks, and its record through
@@ -48,6 +51,8 @@ import type {
   InspectionTimingWindowName,
   SpikeResultsPaths,
   TerrainCheckPhaseName,
+  TerrainCheckPhaseRecord,
+  TerrainCheckPhaseUpdate,
   TerrainCheckRecord,
   ViewsCheckLaunch,
   ViewsCheckPhaseName,
@@ -87,9 +92,11 @@ import {
 import { readSpikeEnd } from "./spike";
 import {
   buildTerrainCheckResults,
+  buildTerrainPhases,
   type TerrainCheckResults,
+  type TerrainCheckRunInput,
   terrainFailures,
-  writeTerrainResults,
+  TerrainResultsWriter,
 } from "./terrainCheckResults";
 import {
   CAPTURE_LABEL,
@@ -98,6 +105,7 @@ import {
   readHandoverCheckRecord,
   readInspectionTimingRecord,
   readTerrainCheckRecord,
+  readTerrainPhaseUpdate,
   readTimingWindowName,
   readViewsCheckRecord,
 } from "./viewsCheckRecord";
@@ -119,6 +127,7 @@ export const VIEWS_CHECK_CHANNELS = {
   askRightWayUp: "hyperion:views-check:ask-right-way-up",
   writeResults: "hyperion:views-check:write-results",
   writeTerrainResults: "hyperion:views-check:write-terrain-results",
+  writeTerrainPhase: "hyperion:views-check:write-terrain-phase",
   writeHandoverResults: "hyperion:views-check:write-handover-results",
   writeAtmosphereResults: "hyperion:views-check:write-atmosphere-results",
   startProfile: "hyperion:views-check:start-profile",
@@ -471,11 +480,11 @@ export interface ViewsCheckSessionDeps {
     dir: string,
     results: ViewsCheckResults,
   ) => Promise<{ readonly json: string; readonly markdown: string }>;
-  /** Writes a terrain run's results into a directory: {@link writeTerrainResults} by default. */
-  readonly writeTerrain?: (
-    dir: string,
-    results: TerrainCheckResults,
-  ) => Promise<{ readonly json: string; readonly markdown: string }>;
+  /**
+   * Writes a terrain run's finished phases as each ends, then its results, under one name: a
+   * {@link TerrainResultsWriter} into `outDir` by default.
+   */
+  readonly terrainWriter?: Pick<TerrainResultsWriter, "writePhases" | "writeResults">;
   /** Writes a hand-over check's results: {@link writeHandoverResults} by default (R10.T10.g). */
   readonly writeHandover?: (
     dir: string,
@@ -520,6 +529,9 @@ export class ViewsCheckSession {
   #viewsResults: ViewsCheckResults | null = null;
   /** A terrain run's results once written, judged. */
   #terrainResults: TerrainCheckResults | null = null;
+  /** A terrain run's phases as each ended, and where they and its results are written. */
+  readonly #terrainPhases: TerrainCheckPhaseRecord[] = [];
+  readonly #terrainWriter: Pick<TerrainResultsWriter, "writePhases" | "writeResults">;
   /** A hand-over check's results once written, judged (R10.T10.g). */
   #handoverResults: HandoverCheckResults | null = null;
   /** An atmosphere run's results once written, judged (R08.T10.b). */
@@ -538,6 +550,7 @@ export class ViewsCheckSession {
 
   constructor(deps: ViewsCheckSessionDeps) {
     this.#deps = deps;
+    this.#terrainWriter = deps.terrainWriter ?? new TerrainResultsWriter(deps.outDir);
     // Read at the start, for the load average then; a failure surfaces where it is awaited.
     this.#run = deps.describe();
     this.#run.catch(() => undefined);
@@ -854,28 +867,53 @@ export class ViewsCheckSession {
     return paths;
   }
 
-  /** Builds a terrain run's results from its renderer's record, judges and writes them. */
-  async writeTerrainResults(record: TerrainCheckRecord): Promise<SpikeResultsPaths> {
+  /** A terrain run's description as its files record it. */
+  async #terrainRun(): Promise<TerrainCheckRunInput> {
     const run = await this.#run;
     const dir = this.#deps.capturesDir;
+    return {
+      ...run,
+      fixture: this.#deps.launch.fixture,
+      window: this.#deps.windowSize(),
+      captures:
+        dir === null
+          ? missing("no capture directory")
+          : this.#captured
+            ? measured(this.#deps.capturesRecordedAs ?? dir)
+            : missing("no capture was saved"),
+    };
+  }
+
+  /**
+   * Writes a terrain run's finished phases as each ends (R14's Mac measurements), so that a run
+   * stopped part-way keeps them: the phase just ended added to those before, unjudged.
+   */
+  async writeTerrainPhase(update: TerrainCheckPhaseUpdate): Promise<SpikeResultsPaths> {
+    this.#terrainPhases.push(update.phase);
+    const paths = await this.#terrainWriter.writePhases(
+      buildTerrainPhases({
+        run: await this.#terrainRun(),
+        timer: update.timer,
+        devicePixelRatio: update.devicePixelRatio,
+        phases: this.#terrainPhases,
+      }),
+    );
+    this.#deps.log(`views check: ${update.phase.name} ended; its phases so far in ${paths.json}`);
+    return paths;
+  }
+
+  /**
+   * Builds a terrain run's results from its renderer's record, judges and writes them, in place of
+   * its finished phases' files.
+   */
+  async writeTerrainResults(record: TerrainCheckRecord): Promise<SpikeResultsPaths> {
     const results = buildTerrainCheckResults({
-      run: {
-        ...run,
-        fixture: this.#deps.launch.fixture,
-        window: this.#deps.windowSize(),
-        captures:
-          dir === null
-            ? missing("no capture directory")
-            : this.#captured
-              ? measured(this.#deps.capturesRecordedAs ?? dir)
-              : missing("no capture was saved"),
-      },
+      run: await this.#terrainRun(),
       record,
       gpuProcessExits: this.#gpuProcessExits,
       consoleErrors: this.#consoleErrors,
     });
-    const write = this.#deps.writeTerrain ?? writeTerrainResults;
-    const paths = await write(this.#deps.outDir, results);
+    const paths = await this.#terrainWriter.writeResults(results);
     this.#terrainResults = results;
     this.#deps.log(`views check: wrote ${paths.json} and ${paths.markdown}`);
     return paths;
@@ -981,6 +1019,7 @@ export interface ViewsCheckHandlerDeps<E = IpcMainInvokeEvent> {
     | "askRightWayUp"
     | "writeResults"
     | "writeTerrainResults"
+    | "writeTerrainPhase"
     | "writeHandoverResults"
     | "writeAtmosphereResults"
     | "startProfile"
@@ -1132,6 +1171,15 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
       );
     }
     return deps.session.writeTerrainResults(record);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.writeTerrainPhase, async ([value]) => {
+    const update = deps.run === "terrain" ? readTerrainPhaseUpdate(value) : null;
+    if (update === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.writeTerrainPhase} refused: not a terrain run's phase`,
+      );
+    }
+    return deps.session.writeTerrainPhase(update);
   });
   guarded(VIEWS_CHECK_CHANNELS.writeHandoverResults, async ([value]) => {
     const record = deps.run === "handover" ? readHandoverCheckRecord(value) : null;
