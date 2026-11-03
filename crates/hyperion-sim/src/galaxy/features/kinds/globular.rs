@@ -580,7 +580,7 @@ const BM03_EXPONENT: f64 = 0.75;
 /// Their mean stellar mass, M☉.
 const BM03_MEAN_MASS: f64 = 0.547;
 /// The bound share of BM03's inverted mass law, `M = 0.70 M₀ (1 − t ÷ t_dis)`: the intercept of
-/// their linear law, for their Kroupa function from 0.1 to 15 M☉, which [`bound_share`] replaced
+/// their linear law, for their Kroupa function from 0.1 to 15 M☉, which `bound_share` replaced
 /// at 26 by the cluster's own population's (ruling 145.5).
 pub const BOUND_SHARE: f64 = 0.70;
 

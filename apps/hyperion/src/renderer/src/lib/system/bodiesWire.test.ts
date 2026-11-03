@@ -2099,7 +2099,7 @@ describe("body-state times beyond 2^53 s (P14.T35.d)", () => {
 
     expect(moon?.state).toEqual({
       kind: "unbound",
-      at: { seconds: -67_192_169_239_939_344, nanos: 0 },
+      at: { seconds: -67_192_167_787_324_024, nanos: 0 },
     });
   });
 

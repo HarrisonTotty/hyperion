@@ -296,7 +296,7 @@ describe("the hand Jupiter's medium", () => {
   });
 });
 
-describe("the protocol fixture's Jupiter (generator version 25's record)", () => {
+describe("the protocol fixture's Jupiter (generator version 26's record)", () => {
   it("bases its NH₃, NH₄SH and H₂O decks at 0.6415, 2.128 and 4.873 bar, τ 2.39, 1.60 and 1.73", () => {
     const decks = ["NH3", "NH4SH", "H2O"].map((m) => modeOf("jupiter", m));
     expect(decks.map((m) => Math.round(m.basePa / 10) / 1e4)).toEqual([0.6415, 2.1278, 4.8726]);
@@ -393,20 +393,23 @@ describe("the protocol fixture's Jupiter (generator version 25's record)", () =>
   });
 });
 
-describe("the protocol fixture's hot Jupiter (generator version 25's record)", () => {
-  it("puts its floor above its photosphere, inside its silicate decks", () => {
+describe("the protocol fixture's hot Jupiter (generator version 26's record)", () => {
+  // From 26 a hot envelope's dayside decks are cut at 1 bar (P14.T52.h): every silicate and Fe
+  // deck's top lies there, below the photosphere at 0.2067 bar.
+  it("puts its floor below its photosphere, at its silicate decks' 1-bar tops", () => {
     const { floorPa } = drawnOf("hotJupiter").drawn.envelope;
     const forsterite = modeOf("hotJupiter", "Mg2SiO4");
-    expect(floorPa).toBeLessThan(HOT_JUPITER_PHOTOSPHERE_PA);
+    expect(forsterite.topPa).toBe(1e5);
+    expect(floorPa).toBeGreaterThan(HOT_JUPITER_PHOTOSPHERE_PA);
     expect(floorPa).toBeGreaterThan(forsterite.topPa);
     expect(floorPa).toBeLessThan(forsterite.basePa);
   });
 
-  it("draws of Mg₂SiO₄'s τ of 8.1 × 10⁴ only the share its profile puts above the floor", () => {
+  it("draws of Mg₂SiO₄'s τ of 7.3 × 10⁴ only the share its profile puts above the floor", () => {
     const forsterite = modeOf("hotJupiter", "Mg2SiO4");
     const { floorPa } = drawnOf("hotJupiter").drawn.envelope;
     const tau = skyOpticalDepth550(forsterite) * shareAbove(forsterite, floorPa);
-    expect(skyOpticalDepth550(forsterite)).toBeGreaterThan(8e4);
+    expect(skyOpticalDepth550(forsterite)).toBeGreaterThan(7e4);
     expect(Math.abs(drawnDepth550("hotJupiter", "Mg2SiO4") / tau - 1)).toBeLessThan(1e-12);
     expect(tau).toBeLessThan(CLOUD_DECK_SPLIT_OPTICAL_DEPTH);
   });
@@ -415,33 +418,29 @@ describe("the protocol fixture's hot Jupiter (generator version 25's record)", (
     expect(drawnOf("hotJupiter").drawn.envelope.dropped).toEqual([]);
   });
 
-  it("labels an entering stand-in by materials.ts's depth rule: its liquid Fe, above the floor", () => {
+  it("shows no stand-in's label for its liquid Fe, whose top the cut puts at 1 bar", () => {
     const { result } = drawnOf("hotJupiter");
-    // Measured 2026-11-01: 24's, its CaTiO₃'s, is no longer shown: its τ 0.018 above the floor, the
-    // least of its decks', is left out at the term limit once the Fe takes a term.
-    expect(result.reasons).toContain(
+    // Measured 2026-11-03: 25's record labelled it, its top then at 0.0188 bar.
+    expect(result.reasons).not.toContain(
       "no liquid Fe on file: metallic Fe films at room temperature stands in, a named analogue",
     );
   });
 
-  it("draws its liquid Fe, of no τ at 24, with its τ cut at the floor, and no reason left for its τ", () => {
+  it("draws its liquid Fe with its τ cut at the floor, and no reason left for its τ", () => {
     const fe = modeOf("hotJupiter", "Fe");
     const { drawn, result } = drawnOf("hotJupiter");
-    expect([fe.opticalDepth.kind, Math.round(fe.topPa) / 1e5]).toEqual(["value", 0.01882]);
-    // Measured 2026-11-01: 2.41 of its 1.18 × 10⁵ above the floor, at 0.0825 bar.
+    expect([fe.opticalDepth.kind, Math.round(fe.topPa) / 1e5]).toEqual(["value", 1]);
+    // Measured 2026-11-03: 2.44 of its 1.14 × 10⁵ above the floor, at 1.0002 bar.
     const tau = skyOpticalDepth550(fe) * shareAbove(fe, drawn.envelope.floorPa);
     expect(Math.abs(drawnDepth550("hotJupiter", "Fe") / tau - 1)).toBeLessThan(1e-12);
     expect(result.reasons.filter((r) => r.includes("Fe particles"))).toEqual([]);
   });
 
-  it("puts τ 172.9 above its photosphere, its Fe's 38.2 on its other decks' 134.7 of 24", () => {
+  it("puts no deck's τ above its photosphere", () => {
     expect(Math.round(HOT_JUPITER_PHOTOSPHERE_PA / 10) / 1e4).toBe(0.2067);
     const modes = envelopeOf(ANSWERS.hotJupiter()).aerosols.modes;
-    // Measured 2026-11-01: 172.89, under the 188.4 research-r08-t16a's sums had put there at 25: its
-    // Fe's 38.2 is of the sim's own τ, not their 53.7.
-    expect(modesAbove(modes, HOT_JUPITER_PHOTOSPHERE_PA)).toBeCloseTo(172.9, 1);
-    const others = modes.filter((m) => m.material !== "Fe");
-    expect(modesAbove(others, HOT_JUPITER_PHOTOSPHERE_PA)).toBeCloseTo(134.7, 1);
+    // Measured 2026-11-03: none, where 25's record put 172.9 there, its Fe's 38.2 of it.
+    expect(modesAbove(modes, HOT_JUPITER_PHOTOSPHERE_PA)).toBe(0);
   });
 
   it("is self-luminous", () => {

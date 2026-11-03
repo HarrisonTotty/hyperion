@@ -922,8 +922,8 @@ impl BoundStar {
     /// star's own model and plan 11's pair light does not. So a star of a pair that is not its own
     /// model at some attempt (a [`StarLight::OwnOr`] or [`StarLight::Dark`] star), whose products
     /// may be white dwarfs at any age, takes the brighter of its bound and the white dwarfs'
-    /// brightest ([`WHITE_DWARF_BRIGHTEST_V`]); a star that is its own model takes its own bound
-    /// alone.
+    /// brightest (`stellar::photometry::WHITE_DWARF_BRIGHTEST_V`); a star that is its own model
+    /// takes its own bound alone.
     #[must_use]
     pub fn brightest(
         &self,

@@ -53,6 +53,8 @@
 //!   moons inside [`EJECTED_MOON_HILL_SHARE`] of its birth Hill radius; heavier, it formed alone
 //!   and keeps them all. Its moons are `0x0100` upward, its rings `0x0080` upward.
 //!
+//! [`HostKind::BrownDwarf`]: crate::planetary::context::HostKind::BrownDwarf
+//! [`HostKind::RoguePlanet`]: crate::planetary::context::HostKind::RoguePlanet
 
 use core::f64::consts::TAU;
 
