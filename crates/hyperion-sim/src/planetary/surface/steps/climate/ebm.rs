@@ -137,7 +137,6 @@ use crate::substance::{
 };
 use crate::units::consts::STEFAN_BOLTZMANN;
 use crate::units::{Kelvin, Pascals, Seconds};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// Water's freezing point, the model's `T_f` for water, which R09.T13.d shifts to the climate
 /// condensable's ([`EnergyBalance::for_inputs`]), K: 273.15, ice Ih's melting point at 101,325 Pa
@@ -627,8 +626,8 @@ struct Stop {
     probe_k: Option<f64>,
     /// Where its drift stop ends it ([`drifting`]; the lane's lean, 2026-10-30).
     drift: Drift,
-    /// Whether, from version 27, the run turns to RRE(2) once a jump is rejected
-    /// ([`OrbitExtrapolationRules::ReducedRank`]): the climate's geographic runs, I13's G runs;
+    /// Whether the run turns to RRE(2) once a jump is rejected (rendering plan R09, I13;
+    /// [`Marched`]): the climate's geographic runs, I13's G runs;
     /// never the zonal search's, whose runs near a fold drift where a reduced rank extrapolation
     /// finds no limit.
     reduced_rank: bool,
@@ -728,83 +727,13 @@ pub(super) enum Jumps {
     Never,
 }
 
-/// The generator version from which a geographic seasonal run whose jump by one ratio has been
-/// rejected extrapolates its slow modes by reduced rank extrapolation over its last marched
-/// orbits, RRE(2) (rendering plan R09, R09.T13.i's I13, its first candidate): 27.
-///
-/// Why: a rejected jump leaves a run marching. Under the server's body seed the reference Earth's
-/// G1 rejected both its jumps and marched 15 orbits; after one reject RRE(2) brings it to 11, its
-/// climate step 42.4 s to 37.0 s (pod, 2026-11-01). A run whose jumps stand keeps them, so the
-/// reference worlds' fields are 26's (the reference Earth's G1 7 orbits either way). The zonal
-/// search keeps its ratio: RRE(2) sent its runs near a fold to 160 orbits. It does not converge a
-/// run past the fold (I12): the small Earth's G1 and G2 still stop at [`MAX_ORBITS`].
-///
-/// Below it [`OrbitExtrapolationRules::in_force`] is [`OrbitExtrapolationRules::Geometric`], each
-/// point shifted by its last change times the largest point's r ÷ (1 − r) within
-/// [`JUMP_RATIO_RANGE`], and every climate is version 24's, 25's and 26's bit for bit. 27's bump
-/// deletes this hold, the `Geometric` arm, the tests' switch and its tripwire
-/// (`the_orbit_extrapolation_is_held_only_until_the_27_bump`).
-pub(crate) const ORBIT_EXTRAPOLATION_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// How a seasonal run extrapolates its slow modes (its hold, [`ORBIT_EXTRAPOLATION_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum OrbitExtrapolationRules {
-    /// Version 26's and before: one geometric ratio, r within [`JUMP_RATIO_RANGE`] ([`Extrapolation`]).
-    Geometric,
-    /// Version 27's: after a reject, RRE(2) over the last [`RRE_STATES`] marched end-of-orbit
-    /// states, at any r above [`JUMP_RATIO_RANGE`]'s floor and below 1 ([`reduced_rank`]).
-    ReducedRank,
-}
-
-impl OrbitExtrapolationRules {
-    /// The rules this generator version gives: RRE(2) from [`ORBIT_EXTRAPOLATION_VERSION`], the
-    /// geometric ratio below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_orbit_extrapolation`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = ORBIT_EXTRAPOLATION_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= ORBIT_EXTRAPOLATION_VERSION {
-            Self::ReducedRank
-        } else {
-            Self::Geometric
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The orbit extrapolation's rules a test sets on its thread, `None` for the version's.
-    static ORBIT_EXTRAPOLATION_RULES: core::cell::Cell<Option<OrbitExtrapolationRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// Runs `run` with the seasonal runs extrapolating under `rules` on this thread, restoring the
-/// rules before it after, however `run` ends: the tests' switch of [`ORBIT_EXTRAPOLATION_VERSION`].
-#[cfg(test)]
-pub(crate) fn with_orbit_extrapolation<R>(
-    rules: OrbitExtrapolationRules,
-    run: impl FnOnce() -> R,
-) -> R {
-    struct Restore(Option<OrbitExtrapolationRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            ORBIT_EXTRAPOLATION_RULES.with(|held| held.set(self.0));
-        }
-    }
-    let _restore = Restore(ORBIT_EXTRAPOLATION_RULES.with(|held| held.replace(Some(rules))));
-    run()
-}
-
 /// The marched end-of-orbit states RRE(2) reads: four, the three changes between them (rendering
 /// plan R09, I13; Sidi 2017, *Vector Extrapolation Methods with Applications*, SIAM, ch. 1). With
 /// three, as two orbits after an extrapolation have, it takes RRE(1) over two changes.
 const RRE_STATES: usize = 4;
 
 /// A run's last marched orbits since its start, its last extrapolation or its last reject, for
-/// RRE(2) ([`OrbitExtrapolationRules::ReducedRank`]): the end-of-orbit states S₀ … Sₙ, S₀ the
+/// RRE(2) (rendering plan R09, I13): the end-of-orbit states S₀ … Sₙ, S₀ the
 /// state the first of them began from, and the annual means A₁ … Aₙ, Aⱼ of the orbit from Sⱼ₋₁ to
 /// Sⱼ; at most [`RRE_STATES`] states.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -948,9 +877,10 @@ struct Extrapolation {
     jump_ratio: Option<f64>,
     /// The ratio that triggered the jump [`gain`](Self::gain) last found due.
     due_ratio: f64,
-    /// How it extrapolates (its hold, [`ORBIT_EXTRAPOLATION_VERSION`]).
-    rules: OrbitExtrapolationRules,
-    /// The marched orbits RRE(2) reads, under [`OrbitExtrapolationRules::ReducedRank`].
+    /// Whether it turns to RRE(2) after a reject ([`Stop::reduced_rank`]); else it extrapolates by
+    /// one geometric ratio, r within [`JUMP_RATIO_RANGE`].
+    reduced_rank: bool,
+    /// The marched orbits RRE(2) reads, where it takes it.
     marched: Marched,
 }
 
@@ -981,8 +911,7 @@ enum Review {
 }
 
 impl Extrapolation {
-    /// A run's extrapolation under its stop `stop`: RRE(2) after a reject where the stop takes it
-    /// and the rules in force give it.
+    /// A run's extrapolation under its stop `stop`: RRE(2) after a reject where the stop takes it.
     #[must_use]
     fn new(stop: &Stop) -> Self {
         Self {
@@ -995,11 +924,7 @@ impl Extrapolation {
             rejects: 0,
             jump_ratio: None,
             due_ratio: 0.0,
-            rules: if stop.reduced_rank {
-                OrbitExtrapolationRules::in_force()
-            } else {
-                OrbitExtrapolationRules::Geometric
-            },
+            reduced_rank: stop.reduced_rank,
             marched: Marched {
                 states: VecDeque::new(),
                 annuals: VecDeque::new(),
@@ -1010,7 +935,7 @@ impl Extrapolation {
     /// Whether it extrapolates by RRE(2).
     #[must_use]
     fn reduced(&self) -> bool {
-        self.rules == OrbitExtrapolationRules::ReducedRank
+        self.reduced_rank
     }
 
     /// Notes the state `state_k` the run begins, or begins again, from: under RRE(2), the first of
@@ -6694,31 +6619,6 @@ mod tests {
     use crate::planetary::surface::grid::CellGraph;
     use crate::planetary::surface::reference;
     use crate::planetary::surface::steps::{Pass, Working};
-
-    /// The orbit extrapolation's tripwire: RRE(2) is held until generator version 27, and the bump
-    /// that reaches it deletes the hold (rendering plan R09, I13).
-    #[test]
-    fn the_orbit_extrapolation_is_held_only_until_the_27_bump() {
-        assert!(
-            GENERATOR_VERSION < ORBIT_EXTRAPOLATION_VERSION,
-            "generator version {} reaches the orbit extrapolation's hold: delete \
-             `ORBIT_EXTRAPOLATION_VERSION`, `OrbitExtrapolationRules` with its `Geometric` arm, \
-             the tests' switch `with_orbit_extrapolation` with its place in `with_every_27_hold` \
-             and its uses, and this test",
-            GENERATOR_VERSION.get()
-        );
-        assert_eq!(
-            OrbitExtrapolationRules::in_force(),
-            OrbitExtrapolationRules::Geometric
-        );
-        assert_eq!(
-            with_orbit_extrapolation(
-                OrbitExtrapolationRules::ReducedRank,
-                OrbitExtrapolationRules::in_force
-            ),
-            OrbitExtrapolationRules::ReducedRank
-        );
-    }
 
     /// One linear mode of a run: it shrinks by `ratio` an orbit from `size`, along `state` in the
     /// end-of-orbit states and along `annual` in the annual means.

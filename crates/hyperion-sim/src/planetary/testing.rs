@@ -499,9 +499,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// - the equilibrium network's further carriers, `CARRIERS_VERSION` (P14.T52.e), at
 ///   `CarriersRules::Carried` through `with_carriers`: the registry's rows from 115 on, which the
 ///   network carries, P and Cl solved.
-/// - the coarse pass's seasonal runs extrapolated by RRE(2), `ORBIT_EXTRAPOLATION_VERSION`
-///   (rendering plan R09, I13), at `OrbitExtrapolationRules::ReducedRank` through
-///   `with_orbit_extrapolation`: the climate's orbits to their stop, and so every wet world's field.
 /// - the icy lid's regolith, `ICY_REGOLITH_VERSION` (P14.T49.m), at `IcyRegolithRules::Mixture`
 ///   through `with_icy_regolith`: an airless or tenuous body's `H2O` regolith ice with its rock's
 ///   lag where its tidal heat does not resurface it.
@@ -561,11 +558,7 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
         RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
         with_organic_sediment, with_rayleigh_adding,
     };
-    use crate::planetary::surface::steps::climate::{
-        OrbitExtrapolationRules, with_orbit_extrapolation,
-    };
     use crate::substance::{CarriersRules, with_carriers};
-    let run = move || with_orbit_extrapolation(OrbitExtrapolationRules::ReducedRank, run);
     let run = move || with_carriers(CarriersRules::Carried, run);
     let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
     let run = move || with_minor_clouds(MinorCloudsRules::OwnShare, run);

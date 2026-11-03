@@ -122,8 +122,6 @@ pub(crate) mod after_erosion;
 mod airless;
 mod coordinates;
 mod ebm;
-#[cfg(test)]
-pub(crate) use ebm::{OrbitExtrapolationRules, with_orbit_extrapolation};
 mod evaporation;
 mod frost;
 mod grid;

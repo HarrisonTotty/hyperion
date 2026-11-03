@@ -886,50 +886,6 @@ fn under_every_26_hold_r09_shows_the_locked_earth_s_sea_under_its_deck() {
     assert!(coldest >= 205.0, "the antistellar point at {coldest} K");
 }
 
-/// Under every 27 hold, R09.T16.a's orbit extrapolation moves none of the six goldens: each
-/// world's pass is built inside `with_every_27_hold`, with and without the extrapolation set back
-/// to the geometric jump, so that only this hold's movers would be listed. No reference world's
-/// G run rejects a jump, so none extrapolates by reduced rank.
-#[test]
-#[ignore = "slow: six worlds' coarse passes twice, about 150 s in the test profile"]
-fn under_every_27_hold_the_orbit_extrapolation_moves_no_golden() {
-    use crate::planetary::surface::steps::climate::{
-        OrbitExtrapolationRules, with_orbit_extrapolation,
-    };
-    use crate::planetary::testing::with_every_27_hold;
-
-    let worlds = [
-        ("earth_like", reference::earth_like()),
-        ("locked_earth_like", reference::locked_earth_like()),
-        ("mars_like", reference::mars_like()),
-        ("europa_like", reference::europa_like()),
-        ("moon_like", reference::moon_like()),
-        ("ceres_like", reference::ceres_like()),
-    ];
-    let mut moved = Vec::new();
-    for (name, inputs) in &worlds {
-        let pass = || text(name, &coarse_pass(reference::SEED, inputs)).0;
-        let geometric = with_every_27_hold(|| {
-            with_orbit_extrapolation(OrbitExtrapolationRules::Geometric, pass)
-        });
-        let reduced = with_every_27_hold(pass);
-        let changed = geometric
-            .lines()
-            .zip(reduced.lines())
-            .filter(|(a, b)| a != b)
-            .count();
-        eprintln!("{name}: {changed} lines move under the orbit extrapolation");
-        if geometric != reduced {
-            moved.push(*name);
-        }
-    }
-    assert_eq!(
-        moved,
-        Vec::<&str>::new(),
-        "the worlds the extrapolation moves"
-    );
-}
-
 /// [`byte_digest`] is [`f64_digest`] over the bytes as `f64`s, for every byte value and a run of
 /// them.
 #[test]

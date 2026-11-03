@@ -37,9 +37,6 @@ use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_cli
 use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
 use crate::planetary::hosts::strip::{StripRules, with_stripping};
 use crate::planetary::placement::zones::{BinaryHostZonesRules, with_binary_host_zones};
-use crate::planetary::surface::steps::climate::{
-    OrbitExtrapolationRules, with_orbit_extrapolation,
-};
 use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 use crate::substance::{CarriersRules, with_carriers};
 
@@ -96,8 +93,6 @@ held_rules! {
     rayleigh_adding: RayleighAddingRules = RayleighAddingRules::in_force => with_rayleigh_adding,
     haze_layer: HazeLayerRules = HazeLayerRules::in_force => with_haze_layer,
     locked_climate: LockedClimateRules = LockedClimateRules::in_force => with_locked_climate,
-    orbit_extrapolation: OrbitExtrapolationRules =
-        OrbitExtrapolationRules::in_force => with_orbit_extrapolation,
     carriers: CarriersRules = CarriersRules::in_force => with_carriers,
     desert: DesertRules = DesertRules::in_force => with_desert,
     steepness_tails: SteepnessTailsRules = steepness_tails_in_force => with_steepness_tails,
