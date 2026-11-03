@@ -2295,34 +2295,47 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - The twin is `clusters/strides.ts` and `cull.ts`' `cameraPassStrideLevel` (the plan's
     `cullTwin.ts` is `cull.ts`); the WGSL is `terrainStrides.wgsl`'s `stride_place` (not
     `patchVertex.wgsl`) and the cull's `camera_stride_level`. `STRIDE_BAND_FRACTION` β = 0.02, under
-    `SELECTION_MARGIN`. The camera pass reads no record's measured errors (flags bit 6): its bands
-    come from `BakedPatch.clusterErrors` on the CPU.
-  - The rule (lean, 2026-11-03): one ladder a view, U(n) by the absolute level n of the chords a
-    stride draws, the largest (E_L + e_s) ÷ τ′_rad of the levels drawing them, e_s each level's
-    largest over the view's drawn patches (`StrideLevelErrors`: raised at once, decaying 0.2% a
-    frame), not each cluster's own: a shared vertex must be placed alike on both sides, coarse–fine
-    edges included. The cull takes stride 2^m at (1 + β) U.
-  - The acceptance's lit triangles fail: the seamless probe draws 0.40 of stride 1's against T3.a's
-    0.022, which it reproduces with each cluster's own e_s (0.020); the level's largest e_s is the
-    cost. So `strides` stays `off` on both settings (Design note 17's row says `measured`), pending
-    the owner's ruling on the rule; the next lever is a threshold shared by the two patches of each
-    edge. Moves, normals, cracks and marks pass (the lane's outbox has the figures).
+    `SELECTION_MARGIN`.
+  - The rule is the shared bands (research-leans-35's ruling, fix-r14-t3c-shared-bands,
+    2026-11-03), in place of the first form's view-wide ladder (`StrideLevelErrors` and
+    `strideLadder` are gone). A block's need is (E_L + e_s) ÷ τ′_rad (`strideNeedM` under its
+    patch's `StrideScale`, `patchStrideScale`); its band the largest need of it, its side blocks and
+    its edges' shared bands along it, none where any is (`clusterStrideBandsM`; the cull's
+    `cluster_bands`, from the page's records, flags bit 6); the cull takes 2^m at (1 + β) times it.
+    `StrideEdges` (`terrain/strideEdges.ts`, a view's, since a need takes the view's τ′; it finds
+    neighbours as `CoarseFineHolds` does, by `coarsePlaceInto`) shares each patch edge block by
+    block as the ruling says, the coarse level 2 none and the fine level 0 its own at a coarse–fine
+    edge.
+  - Not the ruling's vertex band (as built, 2026-11-03): its largest need of the holding blocks drew
+    1.08 τ′ in the drawn-error test, a block held at stride 4 by a neighbour moving its level-2
+    vertices to stride 8's chords. A vertex inside a block takes its block's band of its parts not
+    none, one on a block's side the smaller of its two blocks' so formed, one on a patch's edge the
+    edge's shared band (`vertexStrideBandM`; `stride_band`). A block's side or edge vertex can still
+    move before the block of the larger band drops it, so a block's mesh can mix two strides: the
+    drawn error within τ′ is what `strides.wasm.test.ts` finds on single patches, not a bound of the
+    rule. T3.e takes it.
   - The morph is hierarchical (`stridePlace`): a dropped vertex moves towards its two neighbours'
     mean, each placed so in turn (at most 9 `lit_place` a vertex), so every place is a function of
     the vertex alone and any stride may stand beside any other. No second dispatch or workgroup
     barrier is built: none is needed. Holds: an edge a finer patch touches keeps its level-2
     vertices (k = 0) and its clusters at stride 4 at most; an edge a coarser one touches moves its
     level-0 vertices wholly (k = 1); each contact caps k as the CDLOD morph does.
-  - Not the plan's "stride ≤ 2 beside an edge patch": edge patches take their level's bands and
-    morph on every path, their may-discard clusters at stride 1. Sub-patch stand-ins and unmeasured
-    bakes take no bands and hold no neighbour, so a shared edge there differs by up to the
-    neighbour's e_s, over the skirts (lean). A record kept whole as its heights fade draws at stride
-    1 in camera passes, its vertices still morphed.
-  - `INSTANCE_RECORD_BYTES` is 64 (the record grew 32 → 64 B, not 48; each cascade's copies take
-    slots × 64 B): `Instance.strides` (the bands towards 2, 4 and 8, m, ≤ 0 none) and bit 18 of
-    `parentQuadrant`, `INSTANCE_FINEST` (a patch whose bounding sphere comes within a contact's
-    forced radius: camera passes at stride 1). The cull reads words 7 and 12 to 14 where an instance
-    has 16 words or more.
+  - Not the plan's "stride ≤ 2 beside an edge patch": edge patches take their own bands and morph on
+    every path, their may-discard clusters at stride 1. Sub-patch stand-ins and unmeasured bakes
+    take no scale, so their vertices never move, and their neighbours' edges the level's largest
+    e_s: the two part by at most that e_s under τ′, over the skirts. A record kept whole as its
+    heights fade draws at stride 1 in camera passes, its vertices still morphed.
+  - Not the ruling's per-instance `f16` buffer: the edges' bands are in the instance record and the
+    blocks' errors in the slot record, so the lit vertex stage keeps its 6 storage bindings.
+    `INSTANCE_RECORD_BYTES` is 256 (32 → 256 B): `Instance.strides` (E_L ÷ τ′_rad, 1 ÷ τ′_rad; ≤ 0
+    none), `Instance.edgeBands` (4 × 8 × 3 half floats of km rounded up, `edgeBandIndex`) and bit 18
+    of `parentQuadrant`, `INSTANCE_FINEST` (camera passes at stride 1 near a contact). The cull reads
+    words 7, 12 and 13 where an instance has 16 words or more, and 16 to 63 where 64.
+    `SLOT_RECORD_BYTES` is 496 (`SlotRecord.blockErrors`, e₂, e₄ and e₈ a block in half floats, +∞
+    unmeasured).
+  - Design note 15's rows, by the record sizes (not by allocation events): today's path's
+    per-cascade copies are 4 × slots × 256 B (about 1.2 MB on high, not 0.4 MB), each lit view's
+    records slots × 256 B, and the slot records 496 B a slot (about 0.6 MB on high).
   - `STRIDE_MORPH` is each material's own: the lit forms take the morph, the depth materials and the
     casters do not. With strides the overlay takes its own pass at stride 1 whatever `overlayDepth`
     says, and `scene-depth` never reads the scene's depth (`frameTerrain.ts`; `photoreal/overlay.ts`
@@ -2332,6 +2345,16 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - The drawn-error test (`strides.wasm.test.ts`) puts its cameras at random about three patches
     each of the Moon-like and Earth-like fixtures, half across each level's CDLOD band, not at R05's
     descent poses; Mars-like has no field fixture.
+  - The acceptance, as the ruling restated it (lit triangles within 10% of the shared bands' share,
+    0.031 high and 0.018 low; the rest as the task says), fails, so `strides` stays `off` on both
+    settings (Design note 17's row says `measured`; the figures are in the lane's outbox):
+    - moves fail on both settings over the whole seamless probe: as a finer patch arrives beside a
+      coarse edge, its level-2 vertices, on stride 8's chords, take the coarse–fine hold's k = 0 in
+      one frame, by up to τ′;
+    - normals pass on high and fail on low (one frame); no crack, and marks pass (test-render);
+    - lit triangles pass on high and fail on low over the whole probe, and fail on high over the
+      ruling's 0–70 s: β = 0.02 alone sets the excess over the shared bands' own share.
+    - Not built: a fade of the hold's onset (QUESTION in the lane's report).
   - Not built: the counting harness's strides rule (its flat bakes hold no measured e_s); a GPU
     check of `stride_place` against its twin; the time-fade fallback.
   - For T2.c–d: the lit vertex stage places by `stride_place`; the resolve must too.
@@ -2383,6 +2406,11 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     submission's pass-time resolve ends its own command buffer, with no `pass times` encoder.
   - Pending: the owner's Mac re-profile, `views-check --inspection --timing --hidden` (gate.txt).
 - **R14.T3.d** (`r14-t3c-strides`):
+  - Split off to its own lane, r14-t3d-occlusion (2026-11-03), after this lane had built it: its
+    commits here stand behind `occlusion: "off"` on both settings, and its acceptance captures (off
+    against `--geometry occlusion=hzb`) were not run here. The device's checks pass: the pyramid
+    and both passes against their twins (part 7), and part 15's frame byte-identical with and
+    without, no tie pixel.
   - `GeometrySettings.occlusion` is `"off" | "hzb"` (the brief's), not the plan's `"none" | "hzb"`;
     `--geometry occlusion=`; results files without it read `off`.
   - `DepthPyramid` (`clusters/hzb.ts`) holds its levels in one `r32` storage buffer, row by row, not
