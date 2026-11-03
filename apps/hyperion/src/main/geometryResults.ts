@@ -73,8 +73,9 @@ function countFigures(value: unknown): SpikeCountFigures | null | undefined {
 /**
  * The fields a file written before each lacks: the consumers' levers (plan R14's T4) and the edge
  * patches' (R14.T1.g), each absent one read as off, the mesh page pool's bytes (T5.b), absent read
- * as 0, no pool, the meshes' tolerance (T5.f), absent read as 0 px, the finest cut, and the camera
- * passes' strides (T3.c), absent read as `off`.
+ * as 0, no pool, the meshes' tolerance (T5.f), absent read as 0 px, the finest cut, the camera
+ * passes' strides (T3.c), absent read as `off`, and the two-pass occlusion (T3.d), absent read as
+ * `off`.
  */
 const LATER_FIELDS = [
   "figureClusters",
@@ -84,6 +85,7 @@ const LATER_FIELDS = [
   "meshTolerancePx",
   "finClusters",
   "strides",
+  "occlusion",
 ] as const;
 
 /** `value` as a mesh tolerance, two numbers of at least 0, px, or `null`. */
@@ -127,6 +129,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     meshTolerancePx: tolerance = { camera: 0, wireframeOccluder: 0 },
     finClusters = false,
     strides = "off",
+    occlusion = "off",
   } = value;
   const meshTolerancePx = meshToleranceOf(tolerance);
   if (
@@ -141,6 +144,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     meshTolerancePx === null ||
     typeof finClusters !== "boolean" ||
     (strides !== "off" && strides !== "measured") ||
+    (occlusion !== "off" && occlusion !== "hzb") ||
     (casterStrideCap !== 1 &&
       casterStrideCap !== 2 &&
       casterStrideCap !== 4 &&
@@ -163,6 +167,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     meshTolerancePx,
     finClusters,
     strides,
+    occlusion,
   };
 }
 
@@ -276,8 +281,9 @@ function settingsWords(settings: SpikeGeometryReport["settings"]): string {
     meshTolerancePx,
     finClusters,
     strides,
+    occlusion,
   } = settings;
-  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}, meshes cut at ${String(meshTolerancePx.camera)} px in the camera and ${String(meshTolerancePx.wireframeOccluder)} px as the wireframe's occluders, the lit pass's edge patches by ${finClusters ? "clusters" : "the lit mesh"}, the camera's strides ${strides === "measured" ? "by measured error" : "off"}`;
+  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}, meshes cut at ${String(meshTolerancePx.camera)} px in the camera and ${String(meshTolerancePx.wireframeOccluder)} px as the wireframe's occluders, the lit pass's edge patches by ${finClusters ? "clusters" : "the lit mesh"}, the camera's strides ${strides === "measured" ? "by measured error" : "off"}, occlusion ${occlusion === "hzb" ? "two-pass against the depth pyramid" : "off"}`;
 }
 
 /** The summary's "Geometry" section of `geometry` (plan R14, R14.T1.f). */

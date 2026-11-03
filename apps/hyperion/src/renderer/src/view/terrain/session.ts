@@ -128,7 +128,7 @@ import { relativeToCamera } from "../coords/relative";
 import { rotateToBodyFixed } from "../coords/rotation";
 import { type MemoryCategory, textureBytes, type TextureSpec } from "../engine/memory";
 import { EngineUnavailable } from "../engine/resilientEngine";
-import type { RenderEngine, TextureHandle } from "../engine/types";
+import type { DrawItem, RenderEngine, TextureHandle } from "../engine/types";
 import { isLitBody } from "../lighting/retarded";
 import type { GeometrySettings, QualitySetting, TerrainSettings } from "../quality/qualitySetting";
 import {
@@ -1278,6 +1278,19 @@ export class TerrainSession {
     }
     const ratio = photorealRangeRatio(report, body, reliefM);
     return { ...input, classSets: { cellFade: classCellFade(ratio), morph: true } };
+  }
+
+  /**
+   * View `view`'s late draws of `body`'s terrain this frame (plan R14, R14.T3.d): its pass's
+   * `lateDrawFor`, where the frame's {@link TerrainSession.drawTerrain} took the two-pass
+   * occlusion's early pass; none where no pass draws the body, or once the session is disposed.
+   * Call it after the view's first raster and its pyramid's build.
+   */
+  drawLateTerrain(view: ViewId, body: BodyIdHex): ReadonlyArray<DrawItem> {
+    if (this.#disposed) {
+      return [];
+    }
+    return this.#passes.get(body)?.lateDrawFor(view) ?? [];
   }
 
   /** `body`'s wireframe pass (R10.T11), from its first hand-over in a wireframe view, or `null`. */

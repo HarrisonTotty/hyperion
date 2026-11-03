@@ -12,8 +12,9 @@
  * instance origins are in (terrain's: the body's non-rotating axes, as `TerrainPass`' `#write` forms
  * them), every number formed in `f64` and narrowed once here.
  *
- * `CullPass`, 128 B: `header` (kind: 0 none, 1 cascade, 2 camera appended, 3 camera ordered; the
- * stride cap as log₂ of it; the pass's first bucket; its first list entry) and `scalars` (the
+ * `CullPass`, 128 B: `header` (kind: 0 none, 1 cascade, 2 camera appended, 3 camera ordered, 4 and
+ * 5 camera ordered, the two-pass occlusion's early and late passes (R14.T3.d); the stride cap as
+ * log₂ of it; the pass's first bucket; its first list entry) and `scalars` (the
  * tolerance, a cascade's in m, a camera's in rad (R14.T4.b); then a cascade's radius r, m, its far plane's distance from its centre away from
  * the light, m, and its receivers' cull, 1 on and 0 off, T1.c; or a camera's planes' count, its
  * horizon's plane distance, m, and the sine of its cone's half-angle, 0 for no horizon test). A
@@ -187,6 +188,13 @@ export interface CameraCullPass {
    */
   readonly order: "appended" | "ordered";
   /**
+   * An ordered pass's part of the two-pass occlusion (plan R14, R14.T3.d; `clusters/hzb.ts`): the
+   * early pass, which keeps only the clusters visible last frame, or the late pass, which keeps
+   * the rest that the depth pyramid does not refuse and writes each cluster's visibility; absent,
+   * neither.
+   */
+  readonly occlusion?: CullOcclusion;
+  /**
    * Its tolerance, rad: its τ, px, over its px per radian, W ÷ (2 tan(fov_h ÷ 2)) as
    * `screenSpaceErrorPx` takes it, at which a DAG-cut cluster is drawn where its own error,
    * projected at its group's sphere, is within it and its parent's is not (plan R14, R14.T4.b).
@@ -196,6 +204,9 @@ export interface CameraCullPass {
   /** The coarsest stride it may take: every camera pass takes 1 until plan R14's T3.c. */
   readonly strideCap: Stride;
 }
+
+/** An ordered camera pass's part of the two-pass occlusion (R14.T3.d). */
+export type CullOcclusion = "early" | "late";
 
 /** A pass of the cull: a cascade's box (T1.b–d) or a camera's frustum (T1.e). */
 export type CullPass = CascadeCullPass | CameraCullPass;
@@ -261,7 +272,24 @@ function passKindCode(pass: CullPass): number {
       code = 1;
       break;
     case "camera":
-      code = pass.order === "ordered" ? 3 : 2;
+      code = pass.order === "appended" ? 2 : occlusionCode(pass.occlusion);
+      break;
+  }
+  return code;
+}
+
+/** An ordered camera pass's kind code: 3, or 4 and 5 for the occlusion's early and late passes. */
+function occlusionCode(occlusion: CullOcclusion | undefined): number {
+  let code: number;
+  switch (occlusion) {
+    case undefined:
+      code = 3;
+      break;
+    case "early":
+      code = 4;
+      break;
+    case "late":
+      code = 5;
       break;
   }
   return code;

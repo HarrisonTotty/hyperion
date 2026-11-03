@@ -130,7 +130,7 @@ describe("the quality settings", () => {
 });
 
 describe("the geometry's settings (plan R14)", () => {
-  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, its edge patches on the path, its camera strides off until their acceptance (R14.T3.c), and keeps the way back", () => {
+  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, its edge patches on the path, its camera strides and occlusion off until their acceptance (R14.T3.c, T3.d), and keeps the way back", () => {
     for (const setting of QUALITY_SETTINGS) {
       const {
         pageBytes: _pageBytes,
@@ -149,6 +149,7 @@ describe("the geometry's settings (plan R14)", () => {
         wireClusters: true,
         finClusters: true,
         strides: "off",
+        occlusion: "off",
       });
     }
     expect([SETTINGS.high.geometry.pageBytes, SETTINGS.low.geometry.pageBytes]).toEqual([
@@ -168,6 +169,7 @@ describe("the geometry's settings (plan R14)", () => {
       meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
       finClusters: false,
       strides: "off",
+      occlusion: "off",
     });
   });
 

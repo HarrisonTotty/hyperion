@@ -189,8 +189,27 @@ export const CLUSTER_OVERLAY_PASS = CLUSTER_CASTER_PASSES;
  */
 export const CLUSTER_LIT_PASS = CLUSTER_OVERLAY_PASS + 1;
 
-/** The passes a view's cluster buckets hold: the cascades', the overlay's and the lit pass's. */
-export const CLUSTER_PASSES = CLUSTER_LIT_PASS + 1;
+/**
+ * The two-pass occlusion's late pass of a view's cluster buckets (plan R14, R14.T3.d), the seventh:
+ * the lit pass's clusters the early pass did not draw and the depth pyramid does not refuse, drawn
+ * after the first raster, its buckets written by the stable compaction as the lit pass's are.
+ */
+export const CLUSTER_LIT_LATE_PASS = CLUSTER_LIT_PASS + 1;
+
+/**
+ * The passes a view's cluster buckets hold: the cascades', the overlay's, the lit pass's and the
+ * occlusion's late pass's.
+ */
+export const CLUSTER_PASSES = CLUSTER_LIT_LATE_PASS + 1;
+
+/**
+ * Bytes of a slot's cluster visibility (plan R14, R14.T3.d): a bit a cluster, its last frame's in
+ * the occlusion's late pass, in whole `u32`s, as `clusterCull.wgsl`'s `history` reads them.
+ */
+export const CLUSTER_HISTORY_SLOT_BYTES = 4 * Math.ceil(TERRAIN_PAGE_CLUSTERS / 32);
+
+/** A slot's cleared visibility (plan R14, R14.T3.d). */
+const NO_HISTORY = new Uint8Array(CLUSTER_HISTORY_SLOT_BYTES);
 
 /**
  * Bytes of a slot's cluster records: its patch's 96 blocks and strips (plan R14, R14.T1.b) and its
@@ -939,6 +958,13 @@ export interface TerrainClusterBuffers {
   readonly cullInputs: BufferHandle;
   readonly marks: BufferHandle;
   readonly tallies: BufferHandle;
+  /**
+   * The two-pass occlusion's visibility (plan R14, R14.T3.d), {@link CLUSTER_HISTORY_SLOT_BYTES} a
+   * slot, zero as made, each slot's cleared when it is filled.
+   */
+  readonly history: BufferHandle;
+  /** The pyramid the cull binds where its dispatch has no late pass (R14.T3.d): one texel, unread. */
+  readonly noPyramid: BufferHandle;
 }
 
 /** One view's interior patches' frame buffers (plan R14, R14.T1.a). */
@@ -1166,6 +1192,19 @@ export class TerrainResources {
         tallies: this.#engine.createBuffer({
           name: `${named} tallies`,
           bytes: slots * COMPACT_TEMPLATES * 4,
+          usage: BUFFER_USAGE.STORAGE,
+          category: "geometry-clusters",
+        }),
+        // COPY_SRC for the smoke harness's twin check, which reads it back (`smoke/clusterCull.ts`).
+        history: this.#engine.createBuffer({
+          name: `${named} visibility`,
+          bytes: slots * CLUSTER_HISTORY_SLOT_BYTES,
+          usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST | BUFFER_USAGE.COPY_SRC,
+          category: "geometry-clusters",
+        }),
+        noPyramid: this.#engine.createBuffer({
+          name: `${named} no pyramid`,
+          bytes: 16,
           usage: BUFFER_USAGE.STORAGE,
           category: "geometry-clusters",
         }),
@@ -1554,6 +1593,10 @@ export class TerrainResources {
         slot * CLUSTER_RECORDS_SLOT_BYTES,
         new Uint8Array(this.#clusterRecord),
       );
+      // The slot's new clusters were seen in no view's last frame (plan R14, R14.T3.d).
+      for (const buffers of made.clusters.values()) {
+        this.#engine.writeBuffer(buffers.history, slot * CLUSTER_HISTORY_SLOT_BYTES, NO_HISTORY);
+      }
     }
     return UPLOADED;
   }
@@ -1758,6 +1801,8 @@ export class TerrainResources {
     this.#engine.releaseBuffer(clusters.cullInputs);
     this.#engine.releaseBuffer(clusters.marks);
     this.#engine.releaseBuffer(clusters.tallies);
+    this.#engine.releaseBuffer(clusters.history);
+    this.#engine.releaseBuffer(clusters.noPyramid);
   }
 
   #releaseCasters(casters: TerrainCasterBuffers): void {

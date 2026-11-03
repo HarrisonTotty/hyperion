@@ -85,11 +85,17 @@ import {
   compactWorkgroups,
   packCompactParams,
 } from "../clusters/compact";
-import { CLUSTER_CULL_KERNEL, CULL_INPUT_WHOLE, receiversRefuse } from "../clusters/cull";
+import {
+  CLUSTER_CULL_KERNEL,
+  CLUSTER_CULL_OCCLUSION_KERNEL,
+  CULL_INPUT_WHOLE,
+  receiversRefuse,
+} from "../clusters/cull";
 import { CLUSTER_SHAPE_CODE } from "../clusters/record";
 import {
   cullHorizonOf,
   type CameraCullPass,
+  type CullParams,
   type CullPass,
   CULL_PARAMS_BYTES,
   CULL_PASS_BYTES,
@@ -97,6 +103,13 @@ import {
   packCullParams,
   packCullPasses,
 } from "../clusters/cullPass";
+import {
+  type DepthPyramid,
+  type FrameOcclusion,
+  HZB_PARAMS_BYTES,
+  hzbAxesOf,
+  packHzbParams,
+} from "../clusters/hzb";
 import { cascadeCullPasses } from "../clusters/receivers";
 import {
   largestStrideErrorsM,
@@ -109,7 +122,7 @@ import {
 } from "../clusters/strides";
 import { type ClusterPassStats, ClusterStats } from "../clusters/stats";
 import { TERRAIN_PAGE_CLUSTERS } from "../clusters/terrain";
-import { TERRAIN_DISCARD_TEMPLATES } from "../clusters/templates";
+import { type Stride, TERRAIN_DISCARD_TEMPLATES } from "../clusters/templates";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type {
   ComputeHandle,
@@ -156,6 +169,8 @@ import { vertexSpacing } from "./cube";
 import { drawsCells, pixelAngleRad } from "./handover";
 import { TERRAIN_SHADOW_PASS_LABEL, terrainMaterialSpec } from "./gpu/material";
 import {
+  CLUSTER_HISTORY_SLOT_BYTES,
+  CLUSTER_LIT_LATE_PASS,
   CLUSTER_LIT_PASS,
   CLUSTER_OVERLAY_PASS,
   DEFAULT_TERRAIN_VIEW,
@@ -477,6 +492,13 @@ export interface TerrainFrameInput {
   readonly takesCascades?: boolean;
   /** A monotonic time for the annunciation's debounce, milliseconds. */
   readonly nowMs: number;
+  /**
+   * The view-frame's two-pass occlusion (plan R14, R14.T3.d), where its renderer runs it: its lit
+   * pass on the cluster path then draws only the clusters visible last frame, and the rest are
+   * drawn by {@link TerrainPass.lateDrawFor}'s after the first raster; absent, it draws every
+   * cluster its camera's tests keep. Read where `GeometrySettings.occlusion` is `hzb`.
+   */
+  readonly occlusion?: FrameOcclusion;
 }
 
 /** One view-frame's shadow cascades (plan R10, R10.T9.b), as {@link TerrainPass.drawFor} drew them. */
@@ -796,9 +818,11 @@ export interface TerrainPassOptions {
    */
   readonly geometry?: GeometrySettings;
   /**
-   * The cluster cull's kernel (plan R14, R14.T1.b): `CLUSTER_CULL_KERNEL` where absent. The smoke's
-   * `--fixture=broken-wgsl` gives one that does not compile, whose refusal the pass falls back from
-   * to today's path, stating it ({@link TerrainPass.clusterRefusal}; Design note 16).
+   * The cluster cull's kernel (plan R14, R14.T1.b): where absent, `CLUSTER_CULL_OCCLUSION_KERNEL` in
+   * the lit style, whose pass may take the two-pass occlusion (R14.T3.d), and `CLUSTER_CULL_KERNEL`
+   * in the others. The smoke's `--fixture=broken-wgsl` gives one that does not compile, whose
+   * refusal the pass falls back from to today's path, stating it ({@link TerrainPass.clusterRefusal};
+   * Design note 16).
    */
   readonly clusterCullKernel?: KernelPair;
 }
@@ -1182,6 +1206,17 @@ interface ViewState {
   /** Its cluster path's state (plan R14), made at its first frame on it. */
   clusters: ViewClusters | null;
   /**
+   * The two-pass occlusion's state (plan R14, R14.T3.d): the pyramid its last early pass was drawn
+   * for, and that pyramid's builds when its late pass ran, by which a frame the view did not draw
+   * drops its visibility; this frame's late pass, set by its early pass and taken by
+   * {@link TerrainPass.lateDrawFor}, `null` otherwise; and whether its last frame drew one, whose
+   * counts then join the lit pass's.
+   */
+  occlusionPyramid: Pick<DepthPyramid, "builds" | "frame"> | null;
+  occlusionBuilds: number;
+  late: LatePass | null;
+  lastLate: boolean;
+  /**
    * The interior patches' records this frame (plan R14, R14.T1.a), apart from {@link
    * ViewState.instances}, which then hold the other patches', and the draw set's index of each; with
    * them, in the draw set's order, the edge patches the cluster path draws (plan R14, R14.T1.g),
@@ -1259,6 +1294,10 @@ interface ViewClusters {
   readonly inputs: Uint32Array;
   readonly passes: ArrayBuffer;
   readonly params: ArrayBuffer;
+  /** The late pass's pyramid as the cull reads it (R14.T3.d; `hzb.ts`' `packHzbParams`). */
+  readonly hzb: ArrayBuffer;
+  /** A cleared visibility of every slot, written where the view's drops (R14.T3.d); `null` before. */
+  clearedHistory: Uint8Array | null;
   casterBase: BucketDrawBase | null;
   overlayBase: BucketDrawBase | null;
   /**
@@ -1311,6 +1350,9 @@ interface ClusterPath {
   readonly marks: BufferHandle;
   readonly tallies: BufferHandle;
   readonly compact: ComputeHandle | null;
+  /** The two-pass occlusion's visibility and the pyramid bound without one (R14.T3.d). */
+  readonly history: BufferHandle;
+  readonly noPyramid: BufferHandle;
   /**
    * The may-discard buckets' draws' shared parts where the edge patches draw through the path (plan
    * R14, R14.T1.g): the lit pass's, the casters' and the overlay's depth's; `null` where none does.
@@ -1326,8 +1368,42 @@ const OVERLAY_PASS_BIT = 1 << CLUSTER_OVERLAY_PASS;
 /** The lit pass's pass of the cull (plan R14, R14.T2.a), after the overlay's, and its bit. */
 const LIT_PASS_BIT = 1 << CLUSTER_LIT_PASS;
 
-/** The cull's passes' names for the counters: the cascades', the overlay's depth and the lit pass. */
-const CLUSTER_PASS_NAMES: ReadonlyArray<string> = [...CASCADE_PASS_NAMES, "overlay depth", "lit"];
+/**
+ * View `state`'s late pass as its frame's cull left it (plan R14, R14.T3.d), read after the cull's
+ * dispatch, which sets it.
+ */
+function latePassOf(state: ViewState): LatePass | null {
+  return state.late;
+}
+
+/**
+ * The cull's passes' names for the counters: the cascades', the overlay's depth, the lit pass and
+ * the two-pass occlusion's late pass.
+ */
+const CLUSTER_PASS_NAMES: ReadonlyArray<string> = [
+  ...CASCADE_PASS_NAMES,
+  "overlay depth",
+  "lit",
+  "lit late",
+];
+
+/**
+ * A view-frame's late pass of the two-pass occlusion (plan R14, R14.T3.d), as its early pass left
+ * it for {@link TerrainPass.lateDrawFor}: the cluster path and the device it was culled on, the lit
+ * pass as the late pass, the dispatch's parameters and bindings, the records culled, the view's
+ * axes, the occlusion it was drawn for and the lit pass's stride cap.
+ */
+interface LatePass {
+  readonly device: Device;
+  readonly clusters: ClusterPath;
+  readonly pass: CameraCullPass;
+  readonly params: CullParams;
+  readonly buffers: Readonly<Record<string, BufferHandle>>;
+  readonly count: number;
+  readonly axes: ReturnType<typeof hzbAxesOf>;
+  readonly occlusion: FrameOcclusion;
+  readonly cap: Stride;
+}
 
 /**
  * How far each side of the overlay's frustum is opened for its cull, rad: past the `f32` rounding
@@ -1812,6 +1888,8 @@ export class TerrainPass {
   #measuring = false;
   /** The cluster cull's kernel ({@link TerrainPassOptions.clusterCullKernel}). */
   readonly #cullKernel: KernelPair;
+  /** Whether it is the occlusion's variant, which binds the pyramid and the visibility (R14.T3.d). */
+  readonly #cullOccludes: boolean;
   /** Why the cluster path was refused on the current device, `null` while it stands. */
   #clusterRefusal: string | null = null;
   /** Each view's own frame state, by its name. */
@@ -1881,7 +1959,10 @@ export class TerrainPass {
     this.#lookaheadClockMs = options.lookaheadClockMs ?? null;
     this.#reliefM = options.reliefM ?? ((): number | null => null);
     this.#geometry = options.geometry ?? SETTINGS[options.setting].geometry;
-    this.#cullKernel = options.clusterCullKernel ?? CLUSTER_CULL_KERNEL;
+    this.#cullKernel =
+      options.clusterCullKernel ??
+      (this.#shading === "lit" ? CLUSTER_CULL_OCCLUSION_KERNEL : CLUSTER_CULL_KERNEL);
+    this.#cullOccludes = this.#cullKernel === CLUSTER_CULL_OCCLUSION_KERNEL;
     if (this.#shading === "lit") {
       this.#ownShadows = options.shadows === undefined;
       this.#shadows =
@@ -1983,16 +2064,25 @@ export class TerrainPass {
     const drawnTriangles = (interior * LIT_INTERIOR_INDICES + edge * edgeIndices) / 3;
     // The edge patches the lit mesh draws: those on the cluster path are its counts' (R14.T1.g).
     const edgeTriangles = ((edge - fins) * edgeIndices) / 3;
+    // With the two-pass occlusion the lit pass's triangles are its early and late passes' (R14.T3.d).
+    const lateTriangles = state.lastLate ? (stats?.[CLUSTER_LIT_LATE_PASS]?.triangles ?? null) : 0;
     let overlayTriangles: number | null = drawnTriangles;
     if (state.lastOverlayPass !== null) {
       const overlayStats = stats?.[state.lastOverlayPass] ?? null;
-      overlayTriangles = overlayStats === null ? null : edgeTriangles + overlayStats.triangles;
+      const late = state.lastOverlayPass === CLUSTER_LIT_PASS ? lateTriangles : 0;
+      overlayTriangles =
+        overlayStats === null || late === null
+          ? null
+          : edgeTriangles + overlayStats.triangles + late;
     }
     const litStats = state.lastLit ? (stats?.[CLUSTER_LIT_PASS] ?? null) : null;
     return {
       patches: state.lastPatches,
       drawnTriangles,
-      litClusterTriangles: litStats === null ? null : edgeTriangles + litStats.triangles,
+      litClusterTriangles:
+        litStats === null || lateTriangles === null
+          ? null
+          : edgeTriangles + litStats.triangles + lateTriangles,
       casterTriangles,
       overlayTriangles,
     };
@@ -3524,6 +3614,10 @@ export class TerrainPass {
       lastOverlayPass: null,
       lastLit: false,
       clusters: null,
+      occlusionPyramid: null,
+      occlusionBuilds: -1,
+      late: null,
+      lastLate: false,
       interior: new InstanceRecords(slotCount),
       interiorDrawn: [],
       interiorFins: [],
@@ -4166,6 +4260,9 @@ export class TerrainPass {
     if (strides && drawSet !== undefined) {
       this.#strideBandsOf(device, state, input, drawSet, mask);
     }
+    // A late pass is the frame's own: its early pass sets it (plan R14, R14.T3.d).
+    state.late = null;
+    state.lastLate = false;
     instances.clear();
     interior.clear();
     phases?.clear();
@@ -4395,15 +4492,27 @@ export class TerrainPass {
       };
     } else if (clusters !== null && litBase !== null && depthBase !== null) {
       overlayPass = CLUSTER_LIT_PASS;
+      // With the two-pass occlusion, its late pass's clusters too, drawn by then (R14.T3.d).
       overlayDepth = {
         edge,
-        clusters: clusters.buckets.drawItems(
-          CLUSTER_LIT_PASS,
-          clusters.mesh,
-          depthBase,
-          1,
-          finDepthBase,
-        ),
+        clusters: [
+          ...clusters.buckets.drawItems(
+            CLUSTER_LIT_PASS,
+            clusters.mesh,
+            depthBase,
+            1,
+            finDepthBase,
+          ),
+          ...(latePassOf(state) === null
+            ? []
+            : clusters.buckets.drawItems(
+                CLUSTER_LIT_LATE_PASS,
+                clusters.mesh,
+                depthBase,
+                1,
+                finDepthBase,
+              )),
+        ],
       };
     }
     const patches =
@@ -4481,6 +4590,8 @@ export class TerrainPass {
       inputs: new Uint32Array(2 * slots),
       passes: new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES),
       params: new ArrayBuffer(CULL_PARAMS_BYTES),
+      hzb: new ArrayBuffer(HZB_PARAMS_BYTES),
+      clearedHistory: null,
       casterBase: null,
       overlayBase: null,
       litBase: null,
@@ -4537,6 +4648,8 @@ export class TerrainPass {
       marks: buffers.marks,
       tallies: buffers.tallies,
       compact: device.compactKernel,
+      history: buffers.history,
+      noPyramid: buffers.noPyramid,
       finLitBase: null,
       finCasterBase: null,
       finDepthBase: null,
@@ -5083,6 +5196,8 @@ export class TerrainPass {
       inputs: new Uint32Array(2 * slots),
       passes: new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES),
       params: new ArrayBuffer(CULL_PARAMS_BYTES),
+      hzb: new ArrayBuffer(HZB_PARAMS_BYTES),
+      clearedHistory: null,
       casterBase: null,
       overlayBase: null,
       litBase: null,
@@ -5207,6 +5322,8 @@ export class TerrainPass {
       marks: buffers.marks,
       tallies: buffers.tallies,
       compact: device.compactKernel,
+      history: buffers.history,
+      noPyramid: buffers.noPyramid,
       finLitBase: lit && fins ? clusters.finLitBase : null,
       finCasterBase: fins ? clusters.finCasterBase : null,
       finDepthBase: fins ? clusters.finDepthBase : null,
@@ -5380,10 +5497,13 @@ export class TerrainPass {
             casterStrideCap,
             casterDepthCull,
           ).map((pass, index) => (due[index] === true ? pass : null));
+    const strides = this.#stridesOn();
+    const early = this.#earlyOcclusion(state, held, clusters, input);
+    const litPass = clusters.litBase !== null ? this.#litCullPass(input, strides) : null;
     const passes: Array<CullPass | null> = [
       ...cascades,
       clusters.overlay ? this.#overlayCullPass(input) : null,
-      clusters.litBase !== null ? this.#litCullPass(input, this.#stridesOn()) : null,
+      litPass === null || early === null ? litPass : { ...litPass, occlusion: "early" },
     ];
     while (passes.length > CASCADES.length && passes.at(-1) === null) {
       passes.pop();
@@ -5394,44 +5514,47 @@ export class TerrainPass {
       passes.map((_, index) => buckets.place(index)),
       held.passes,
     );
-    packCullParams(
-      {
-        rotationColumns: [
-          { x: r0.x, y: r1.x, z: r2.x },
-          { x: r0.y, y: r1.y, z: r2.y },
-          { x: r0.z, y: r1.z, z: r2.z },
-        ],
-        instances: count,
-        instanceWords: INSTANCE_RECORD_BYTES / 4,
-        clustersPerPage: TERRAIN_PAGE_CLUSTERS,
-        passes: passes.length,
-        templateOffsets: buckets.templateOffsets,
-        templateCapacities: buckets.capacities,
-        viewAxis,
-        firstShape: CLUSTER_SHAPE_CODE["terrain-block"],
-        discardTemplates: TERRAIN_DISCARD_TEMPLATES,
-      },
-      held.params,
-    );
+    const params: CullParams = {
+      rotationColumns: [
+        { x: r0.x, y: r1.x, z: r2.x },
+        { x: r0.y, y: r1.y, z: r2.y },
+        { x: r0.z, y: r1.z, z: r2.z },
+      ],
+      instances: count,
+      instanceWords: INSTANCE_RECORD_BYTES / 4,
+      clustersPerPage: TERRAIN_PAGE_CLUSTERS,
+      passes: passes.length,
+      templateOffsets: buckets.templateOffsets,
+      templateCapacities: buckets.capacities,
+      viewAxis,
+      firstShape: CLUSTER_SHAPE_CODE["terrain-block"],
+      discardTemplates: TERRAIN_DISCARD_TEMPLATES,
+    };
+    packCullParams(params, held.params);
+    // The first dispatch's pyramid is none: only a late pass reads it (R14.T3.d).
+    packHzbParams(null, held.hzb);
     engine.writeBuffer(clusters.cullInputs, 0, clusters.inputs.subarray(0, 2 * count));
     buckets.clear();
+    const buffers: Readonly<Record<string, BufferHandle>> = {
+      instance_words: interior.instances,
+      cull_inputs: clusters.cullInputs,
+      records,
+      lists: buckets.lists,
+      args: buckets.args,
+      marks: clusters.marks,
+      // No terrain record is a DAG's, so its records stand in for the LOD spheres, unread.
+      lods: records,
+      ...(this.#cullOccludes ? { history: clusters.history } : {}),
+    };
     engine.dispatch(
       clusters.kernel,
       {
         uniforms: {
           params: new Uint32Array(held.params),
           passes: new Uint32Array(held.passes),
+          ...(this.#cullOccludes ? { hzb: new Uint32Array(held.hzb) } : {}),
         },
-        buffers: {
-          instance_words: interior.instances,
-          cull_inputs: clusters.cullInputs,
-          records,
-          lists: buckets.lists,
-          args: buckets.args,
-          marks: clusters.marks,
-          // No terrain record is a DAG's, so its records stand in for the LOD spheres, unread.
-          lods: records,
-        },
+        buffers: this.#cullOccludes ? { ...buffers, pyramid: clusters.noPyramid } : buffers,
         sampled: {},
         storage: {},
       },
@@ -5439,22 +5562,178 @@ export class TerrainPass {
       TERRAIN_CLUSTER_CULL_LABEL,
     );
     if (clusters.litBase !== null && clusters.compact !== null) {
-      this.#compactLitPass(clusters, clusters.compact, count);
+      this.#compactLitPass(clusters, clusters.compact, count, CLUSTER_LIT_PASS);
     }
-    if (this.#measuring) {
-      held.stats ??= new ClusterStats(engine, `terrain clusters (${state.id})`);
-      held.stats.sample(buckets, TERRAIN_CLUSTER_MESH.templates, CLUSTER_PASS_NAMES);
+    if (litPass !== null && early !== null) {
+      // The rest of the lit pass's clusters wait for the first raster's depth (R14.T3.d).
+      state.late = {
+        device,
+        clusters,
+        pass: { ...litPass, occlusion: "late" },
+        params,
+        buffers,
+        count,
+        axes: hzbAxesOf(input.view.orientation),
+        occlusion: early,
+        cap: strides ? 8 : 1,
+      };
+      return;
     }
+    this.#sampleClusters(state, buckets);
+  }
+
+  /** Samples view `state`'s buckets' counts into its counters, behind the measurement switch. */
+  #sampleClusters(state: ViewState, buckets: ClusterBuckets): void {
+    const held = state.clusters;
+    if (!this.#measuring || held === null) {
+      return;
+    }
+    held.stats ??= new ClusterStats(this.#engine, `terrain clusters (${state.id})`);
+    held.stats.sample(buckets, TERRAIN_CLUSTER_MESH.templates, CLUSTER_PASS_NAMES);
   }
 
   /**
-   * Writes the lit pass's buckets from the cull's marks in the draw set's order (plan R14, R14.T2.a;
-   * `clusters/compact.ts`): the count, the scan and the scatter, three dispatches over `count`
-   * interior records, each submitted after the cull's and before the frame's draws.
+   * The occlusion view `state`'s lit pass takes its early pass for this frame (plan R14, R14.T3.d):
+   * `input`'s, where `GeometrySettings.occlusion` is `hzb` on the lit pass's cluster path; else
+   * `null`. Where the view's last frame's visibility no longer holds (the renderer's word for it, a
+   * pyramid the view did not draw its last early pass for, or one built since the view's last late
+   * pass: a frame the view did not draw), it is cleared first, so that the early pass draws nothing.
    */
-  #compactLitPass(clusters: ClusterPath, kernel: ComputeHandle, count: number): void {
+  #earlyOcclusion(
+    state: ViewState,
+    held: ViewClusters,
+    clusters: ClusterPath,
+    input: TerrainViewFrameInput,
+  ): FrameOcclusion | null {
+    const occlusion = input.occlusion;
+    if (
+      occlusion === undefined ||
+      clusters.litBase === null ||
+      clusters.compact === null ||
+      !this.#cullOccludes ||
+      !this.#occlusionOn()
+    ) {
+      return null;
+    }
+    if (
+      occlusion.fresh ||
+      state.occlusionPyramid !== occlusion.pyramid ||
+      state.occlusionBuilds !== occlusion.pyramid.builds
+    ) {
+      const slots = this.#device.resources.layout.slots.slotCount;
+      held.clearedHistory ??= new Uint8Array(slots * CLUSTER_HISTORY_SLOT_BYTES);
+      this.#engine.writeBuffer(clusters.history, 0, held.clearedHistory);
+    }
+    state.occlusionPyramid = occlusion.pyramid;
+    return occlusion;
+  }
+
+  /**
+   * Whether the geometry asks the two-pass occlusion (plan R14, R14.T3.d): the cluster path, its lit
+   * pass on it and `occlusion` `hzb`, in the lit style.
+   */
+  #occlusionOn(): boolean {
+    const geometry = this.#geometry;
+    return (
+      this.#shading === "lit" &&
+      geometry.clusterPath &&
+      geometry.litClusters &&
+      geometry.occlusion === "hzb"
+    );
+  }
+
+  /**
+   * View `id`'s late draws this frame (plan R14, R14.T3.d; `clusters/hzb.ts`): where its frame's
+   * draws took the two-pass occlusion's early pass ({@link TerrainFrameInput.occlusion}), the cull's
+   * late pass against the pyramid its renderer built from the first raster's depth (none, where it
+   * built none: then nothing is refused), the stable compaction into the late pass's buckets, and
+   * their draws, in the lit pass's order, which the renderer draws after the first raster, loading
+   * its colour and depth; none otherwise. Call it once a view-frame, after the pyramid's build and
+   * before the view's next {@link TerrainPass.drawFor}.
+   */
+  lateDrawFor(id: TerrainViewId): ReadonlyArray<DrawItem> {
+    const state = this.#views.get(id);
+    const late = state?.late ?? null;
+    if (state === undefined || late === null) {
+      return NO_DRAWS;
+    }
+    state.late = null;
+    if (this.#faulted || this.#disposed || late.device !== this.#device) {
+      return NO_DRAWS;
+    }
+    try {
+      return this.#drawLate(state, late);
+    } catch (error: unknown) {
+      if (error instanceof EngineUnavailable) {
+        return NO_DRAWS;
+      }
+      throw error;
+    }
+  }
+
+  /** {@link TerrainPass.lateDrawFor}'s dispatches and draws of view `state`'s late pass `late`. */
+  #drawLate(state: ViewState, late: LatePass): ReadonlyArray<DrawItem> {
+    const held = state.clusters;
+    const { clusters } = late;
     const { buckets } = clusters;
-    const place = buckets.place(CLUSTER_LIT_PASS);
+    const litBase = clusters.litBase;
+    if (held === null || litBase === null || clusters.compact === null) {
+      return NO_DRAWS;
+    }
+    const frame = late.occlusion.pyramid.frame;
+    packHzbParams(
+      frame === null
+        ? null
+        : { levels: frame.levels, size: frame.size, projection: frame.projection, axes: late.axes },
+      held.hzb,
+    );
+    const passes: Array<CullPass | null> = Array.from(
+      { length: CLUSTER_LIT_LATE_PASS + 1 },
+      (_, n) => (n === CLUSTER_LIT_LATE_PASS ? late.pass : null),
+    );
+    packCullPasses(
+      passes,
+      passes.map((_, index) => buckets.place(index)),
+      held.passes,
+    );
+    packCullParams({ ...late.params, passes: passes.length }, held.params);
+    this.#engine.dispatch(
+      clusters.kernel,
+      {
+        uniforms: {
+          params: new Uint32Array(held.params),
+          passes: new Uint32Array(held.passes),
+          hzb: new Uint32Array(held.hzb),
+        },
+        buffers: { ...late.buffers, pyramid: frame?.buffer ?? clusters.noPyramid },
+        sampled: {},
+        storage: {},
+      },
+      [late.count, 1, 1],
+      TERRAIN_CLUSTER_CULL_LABEL,
+    );
+    this.#compactLitPass(clusters, clusters.compact, late.count, CLUSTER_LIT_LATE_PASS);
+    state.occlusionBuilds = late.occlusion.pyramid.builds;
+    state.lastLate = true;
+    this.#sampleClusters(state, buckets);
+    return buckets.drawItems(
+      CLUSTER_LIT_LATE_PASS,
+      clusters.mesh,
+      litBase,
+      late.cap,
+      clusters.finLitBase,
+    );
+  }
+
+  /**
+   * Writes the lit pass's buckets, or the occlusion's late pass's (R14.T3.d), from the cull's marks
+   * in the draw set's order (plan R14, R14.T2.a; `clusters/compact.ts`): the count, the scan and the
+   * scatter, three dispatches over `count` interior records, each submitted after the cull's and
+   * before the pass's draws.
+   */
+  #compactLitPass(clusters: ClusterPath, kernel: ComputeHandle, count: number, pass: number): void {
+    const { buckets } = clusters;
+    const place = buckets.place(pass);
     for (const phase of COMPACT_PHASES) {
       this.#engine.dispatch(
         kernel,

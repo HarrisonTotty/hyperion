@@ -27,6 +27,8 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     depth === "redraw" || depth === "scene-depth" || depth === "cluster" ? depth : undefined;
   const strideText = parameters.get("geometry-strides");
   const strides = strideText === "off" || strideText === "measured" ? strideText : undefined;
+  const occlusionText = parameters.get("geometry-occlusion");
+  const occlusion = occlusionText === "off" || occlusionText === "hzb" ? occlusionText : undefined;
   const rate = parameters.get("geometry-farCascadeRate");
   const farCascadeRate = rate === "1" ? 1 : rate === "2" ? 2 : rate === "4" ? 4 : undefined;
   const toleranceText = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(
@@ -52,5 +54,6 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     ...(tolerance === null ? {} : { meshTolerancePx: tolerance }),
     ...(finClusters === undefined ? {} : { finClusters }),
     ...(strides === undefined ? {} : { strides }),
+    ...(occlusion === undefined ? {} : { occlusion }),
   };
 }

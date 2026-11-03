@@ -63,6 +63,12 @@ import {
 import type { DiscRecord } from "../bodies/discShading";
 import type { LitRegime, ScreenCircle } from "../bodies/regime";
 import {
+  DEPTH_PYRAMID_KERNEL,
+  DepthPyramid,
+  type FrameOcclusion,
+  pyramidProjectionOf,
+} from "../clusters/hzb";
+import {
   NEAR_PLANE_M,
   perspectiveReversedInfinite,
   type ProjectionCamera,
@@ -151,10 +157,26 @@ export interface FrameTerrain {
    * is called as the `bodies` pass is built, and that pass is rendered next, so that its resolve
    * times them and the terrain's draws read the layers they drew.
    *
+   * With `occlusion` (plan R14, R14.T3.d), its lit clusters visible last frame alone; the rest are
+   * {@link FrameTerrain.lateDraws}'.
+   *
    * @param bodies - The frame's lit bodies, which the plan was made from: each handed-over body's
    *   terrain is drawn with the rotation and centre the plan drew its figure with (R10.T16.c).
+   * @param occlusion - The frame's two-pass occlusion, where the geometry asks it (`occlusion`
+   *   `hzb`).
    */
-  draws(plan: BodyFramePlan, bodies: ReadonlyArray<LitBodyInput>): ReadonlyArray<DrawItem>;
+  draws(
+    plan: BodyFramePlan,
+    bodies: ReadonlyArray<LitBodyInput>,
+    occlusion?: FrameOcclusion,
+  ): ReadonlyArray<DrawItem>;
+  /**
+   * The two-pass occlusion's late draws (plan R14, R14.T3.d): the lit clusters the frame's
+   * {@link FrameTerrain.draws} left to the second raster that the view's pyramid, built from the
+   * first raster's depth, does not refuse; none without the occlusion. Called once, after the
+   * pyramid's build, and drawn in the `bodies late` pass.
+   */
+  lateDraws(): ReadonlyArray<DrawItem>;
   /**
    * The terrain the frame's {@link FrameTerrain.draws} drew, as depth alone, which the symbology's
    * pass draws before its lines, so that nearer ground hides a mark behind it over the image as it
@@ -381,6 +403,8 @@ interface Resources {
   readonly histograms: HistogramReader;
   /** The `disc cells` kernel, which shades the small discs' cells in parallel (R07.T8.d). */
   readonly discCells: ComputeHandle;
+  /** The depth pyramid's kernel (plan R14, R14.T3.d), made with the rest, run only with occlusion. */
+  readonly pyramidKernel: ComputeHandle;
   /** The atmospheres' shared per-frame kernels and composite (R08.T10.b), made with the rest. */
   readonly atmosphere: AtmosphereFrameKernels;
   /**
@@ -533,6 +557,13 @@ export class PhotorealRenderer {
   /** The colour the latest frame's later passes read: its last composite's, or the scene's. */
   #drawnColour: TextureHandle | null = null;
   /**
+   * The view's depth pyramid (plan R14, R14.T3.d), made at the first frame whose geometry asks the
+   * two-pass occlusion and let go at the first that does not; and whether a cut came since its last
+   * frame ({@link PhotorealRenderer.dropHistograms}), which drops the visibility it carries.
+   */
+  #pyramid: DepthPyramid | null = null;
+  #cut = false;
+  /**
    * The `disc cells` kernel's forms: its emissive form (R08.T18.a), made at the first frame with a
    * record that carries its ground's emission, or at {@link PhotorealRenderer.prepareEmissive}, and
    * its air form (R08.T16.b), at the first with a record that carries its air, or at
@@ -554,6 +585,9 @@ export class PhotorealRenderer {
       this.#resources?.histograms.dispose();
       this.#resources = null;
       this.#drawnColour = null;
+      // Its buffer died with the device; the next frame that occludes makes it again.
+      this.#pyramid?.dispose();
+      this.#pyramid = null;
       // Their shared kernels died with the device; each is made again at its next frame.
       this.#releaseAtmospheres();
       this.#formCells = noFormCells();
@@ -613,20 +647,23 @@ export class PhotorealRenderer {
     let sprite: MaterialHandle;
     let kernel: ComputeHandle;
     let discCells: ComputeHandle;
+    let pyramidKernel: ComputeHandle;
     let atmosphere: AtmosphereFrameKernels;
     try {
-      [tonemap, overlayDepth, sprite, kernel, discCells, atmosphere] = await Promise.all([
-        engine.createMaterialAsync(TONEMAP_MATERIAL, ["canvas-in-pass"], [triangle]),
-        engine.createMaterialAsync(OVERLAY_SCENE_DEPTH_MATERIAL, ["canvas"], [triangle]),
-        engine.createMaterialAsync(SKY_SPRITE_HDR_MATERIAL, ["rgba16float"], [quad]),
-        engine.createComputeAsync(HISTOGRAM_KERNEL),
-        engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
-        // Every world with air draws by the thick read's kernels once its correction is routed
-        // (R08.T14.f), so they are made ahead of the first frame of one; and the kernel of what lies
-        // behind the sky at the march's resolution, which the settings' levers take (the owner's
-        // priority, 2026-11-01).
-        createAtmosphereFrameKernels(engine, { thick: CORRECTION_ROUTED, behind: true }),
-      ]);
+      [tonemap, overlayDepth, sprite, kernel, discCells, pyramidKernel, atmosphere] =
+        await Promise.all([
+          engine.createMaterialAsync(TONEMAP_MATERIAL, ["canvas-in-pass"], [triangle]),
+          engine.createMaterialAsync(OVERLAY_SCENE_DEPTH_MATERIAL, ["canvas"], [triangle]),
+          engine.createMaterialAsync(SKY_SPRITE_HDR_MATERIAL, ["rgba16float"], [quad]),
+          engine.createComputeAsync(HISTOGRAM_KERNEL),
+          engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
+          engine.createComputeAsync(DEPTH_PYRAMID_KERNEL),
+          // Every world with air draws by the thick read's kernels once its correction is routed
+          // (R08.T14.f), so they are made ahead of the first frame of one; and the kernel of what lies
+          // behind the sky at the march's resolution, which the settings' levers take (the owner's
+          // priority, 2026-11-01).
+          createAtmosphereFrameKernels(engine, { thick: CORRECTION_ROUTED, behind: true }),
+        ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it.
       void making
@@ -673,6 +710,7 @@ export class PhotorealRenderer {
         }
       }),
       discCells,
+      pyramidKernel,
       atmosphere,
       airTargets: [],
       glare: this.#glareBuffer(GLARE_CAPACITY),
@@ -849,7 +887,11 @@ export class PhotorealRenderer {
     // draws submit the view's shadow cascades first (R10.T9.b's `terrain shadows`), whose times
     // ride this pass's resolve: nothing is rendered between them and it. A frame whose terrain
     // draws nothing submits none, so the pass always follows them.
-    const meshes = [...this.#bodies.meshDraws(plan), ...(frame.terrain?.draws(plan, bodies) ?? [])];
+    const occlusion = this.#occlusionOf(resources, frame, geometry);
+    const meshes = [
+      ...this.#bodies.meshDraws(plan),
+      ...(frame.terrain?.draws(plan, bodies, occlusion ?? undefined) ?? []),
+    ];
     if (meshes.length > 0) {
       resources.target.render({
         label: PHOTOREAL_PASS_LABELS.bodies,
@@ -859,6 +901,23 @@ export class PhotorealRenderer {
         postProcesses: [],
         colourLoad: "load",
       });
+    }
+    // With the two-pass occlusion (plan R14, R14.T3.d), the pyramid of that raster's depth, then
+    // the terrain's clusters it left that the pyramid does not refuse, over it.
+    const drawnDepth = resources.target.depth;
+    if (occlusion !== null && drawnDepth !== null && frame.terrain !== undefined) {
+      occlusion.pyramid.build(drawnDepth, pyramidProjectionOf(camera.fovXRad, viewport));
+      const late = frame.terrain.lateDraws();
+      if (late.length > 0) {
+        resources.target.render({
+          label: PHOTOREAL_PASS_LABELS.bodiesLate,
+          viewRotation,
+          projection,
+          draws: late,
+          postProcesses: [],
+          colourLoad: "load",
+        });
+      }
     }
     resources.target.render({
       label: PHOTOREAL_PASS_LABELS.discs,
@@ -997,6 +1056,34 @@ export class PhotorealRenderer {
   dropHistograms(): void {
     this.#histogram = undefined;
     this.#resources?.histograms.dropInFlight();
+    // A cut: the next frame's two-pass occlusion keeps nothing of this one's visibility (R14.T3.d).
+    this.#cut = true;
+  }
+
+  /**
+   * The frame's two-pass occlusion (plan R14, R14.T3.d), where its geometry asks it (`occlusion`
+   * `hzb`) and it has terrain: the view's pyramid, made at the first such frame and begun at the
+   * scene's size, and whether the last frame's visibility no longer holds, a cut among the reasons
+   * (a dropped histogram, or a frame held back, `present: false`); else `null`, the pyramid let go.
+   */
+  #occlusionOf(
+    resources: Resources,
+    frame: PhotorealFrame,
+    geometry: GeometrySettings,
+  ): (FrameOcclusion & { readonly pyramid: DepthPyramid }) | null {
+    if (geometry.occlusion !== "hzb" || frame.terrain === undefined) {
+      this.#pyramid?.dispose();
+      this.#pyramid = null;
+      return null;
+    }
+    const pyramid = (this.#pyramid ??= new DepthPyramid(
+      this.#engine,
+      resources.pyramidKernel,
+      this.#name,
+    ));
+    const cut = this.#cut || frame.present === false;
+    this.#cut = false;
+    return { pyramid, fresh: pyramid.begin(resources.size, cut) };
   }
 
   /**
@@ -1283,5 +1370,7 @@ export class PhotorealRenderer {
       this.#engine.releaseTexture(resources.blueNoise);
       this.#resources = null;
     }
+    this.#pyramid?.dispose();
+    this.#pyramid = null;
   }
 }

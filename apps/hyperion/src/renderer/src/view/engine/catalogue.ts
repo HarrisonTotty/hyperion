@@ -85,7 +85,8 @@ import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
 import { CLUSTER_COMPACT } from "../clusters/compact";
-import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
+import { CLUSTER_CULL_KERNEL, CLUSTER_CULL_OCCLUSION_KERNEL } from "../clusters/cull";
+import { DEPTH_PYRAMID_KERNEL } from "../clusters/hzb";
 import { CLUSTER_STATS_KERNEL } from "../clusters/stats";
 import {
   TERRAIN_CLUSTER_DEPTH_MATERIALS,
@@ -304,8 +305,10 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     targets: ["depth-only"],
   })),
   // Plan R14's cluster path (R14.T1.b): its cull, the copy of its counters and its stable
-  // compaction (R14.T2.a).
+  // compaction (R14.T2.a); the cull with the two-pass occlusion and the depth pyramid (R14.T3.d).
   { kind: "compute", spec: CLUSTER_CULL_KERNEL },
+  { kind: "compute", spec: CLUSTER_CULL_OCCLUSION_KERNEL },
+  { kind: "compute", spec: DEPTH_PYRAMID_KERNEL },
   { kind: "compute", spec: CLUSTER_STATS_KERNEL },
   { kind: "compute", spec: CLUSTER_COMPACT },
 ];

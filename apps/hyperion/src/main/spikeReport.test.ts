@@ -159,6 +159,7 @@ describe("the spike report's check", () => {
         meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
         finClusters: false,
         strides: "off",
+        occlusion: "off",
       },
       segments: [
         {
@@ -176,7 +177,7 @@ describe("the spike report's check", () => {
     const withGeometry = { ...smallReport(), geometry };
     // A report from before plan R14's T4 lacks its consumers' levers, which read as off, the page
     // pool's bytes (T5.b), which read as 0, the meshes' tolerance (T5.f), 0 px, the edge patches'
-    // lever (T1.g), off, and the camera's strides (T3.c), off.
+    // lever (T1.g), off, the camera's strides (T3.c), off, and the occlusion (T3.d), off.
     const {
       figureClusters: _figureClusters,
       hullClusters: _hullClusters,
@@ -185,6 +186,7 @@ describe("the spike report's check", () => {
       meshTolerancePx: _meshTolerancePx,
       finClusters: _finClusters,
       strides: _strides,
+      occlusion: _occlusion,
       ...beforeT4
     } = geometry.settings;
     expect([

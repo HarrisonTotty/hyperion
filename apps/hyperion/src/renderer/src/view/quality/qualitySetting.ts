@@ -166,6 +166,15 @@ export interface GeometrySettings {
    * the pod (the brief's ruling, 2026-11-02).
    */
   readonly strides: "off" | "measured";
+  /**
+   * R14.T3.d: two-pass occlusion against the depth pyramid. `hzb` draws the lit pass's clusters
+   * visible last frame first, builds the pyramid from that depth, and draws after it only the rest
+   * the pyramid does not refuse (`clusters/hzb.ts`); `off` draws every cluster the camera's tests
+   * keep in the one raster. Exact: the image differs only where two surfaces meet at equal depth,
+   * whose order it changes. Read where `litClusters` is on. `off` on both settings until its
+   * acceptance on the pod (the brief's ruling, 2026-11-02; the plan writes `none`).
+   */
+  readonly occlusion: "off" | "hzb";
 }
 
 /**
@@ -191,6 +200,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
   finClusters: false,
   strides: "off",
+  occlusion: "off",
 };
 
 /**
@@ -364,6 +374,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       meshTolerancePx: { camera: 1, wireframeOccluder: 0.5 },
       finClusters: true,
       strides: "off",
+      occlusion: "off",
     },
     decoration: true,
     scatterDensity: 1,
@@ -410,6 +421,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       meshTolerancePx: { camera: 2, wireframeOccluder: 0.5 },
       finClusters: true,
       strides: "off",
+      occlusion: "off",
     },
     decoration: false,
     scatterDensity: 0,

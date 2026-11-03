@@ -1,4 +1,10 @@
 import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
+import {
+  DEPTH_PYRAMID_KERNEL,
+  DEPTH_PYRAMID_LABEL,
+  type FrameOcclusion,
+  pyramidLevels,
+} from "../clusters/hzb";
 import { describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
@@ -135,6 +141,17 @@ class RecordingView implements RenderView {
     return Promise.resolve(new Uint8Array(0));
   }
   dispose(): void {}
+}
+
+/** A cluster draw of the material `name`. */
+function drawOfName(name: string): DrawItem {
+  return {
+    mesh: { kind: "mesh", name: "terrain clusters" },
+    material: { kind: "material", name },
+    offsetFromCameraM: new Float32Array(3),
+    uniforms: {},
+    textures: {},
+  };
 }
 
 function frameWith(sky: ReadonlyArray<DrawItem>): PhotorealFrame {
@@ -313,6 +330,7 @@ describe("the photorealistic renderer", () => {
       },
       symbologyDepth: () => [],
       sceneDepth: () => false,
+      lateDraws: () => [],
     };
     const bodiesPass = (from: number): ReadonlyArray<string> | undefined =>
       engine.targetFrames
@@ -336,6 +354,82 @@ describe("the photorealistic renderer", () => {
       "bodies:smoothMeshCluster",
       "terrain-lit-baked-offsets",
     ]);
+    renderer.dispose();
+  });
+
+  it("splits the bodies pass around the view's depth pyramid with the two-pass occlusion, and draws it whole without (R14.T3.d)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const given: Array<FrameOcclusion | undefined> = [];
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: (_plan, _bodies, occlusion) => {
+        given.push(occlusion);
+        return [drawOfName("early")];
+      },
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [drawOfName("late")],
+    };
+    const occluded = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
+    const passes = (): Array<readonly [string, string]> => {
+      const from = engine.targetFrames.length;
+      const dispatched = engine.dispatched.length;
+      renderer.render(new RecordingView(), { ...frameWith([]), geometry: occluded, terrain });
+      const frames = engine.targetFrames.slice(from).map((f, n) => [f.label, n] as const);
+      const pyramid = engine.dispatched
+        .slice(dispatched)
+        .filter((d) => d.pass === DEPTH_PYRAMID_LABEL)
+        .map((d) => [d.pass ?? "", d.framesBefore - from] as const);
+      return [...frames, ...pyramid]
+        .toSorted((a, b) => a[1] - b[1] || (a[0] === DEPTH_PYRAMID_LABEL ? -1 : 1))
+        .map(([label]) => [label, label === DEPTH_PYRAMID_LABEL ? "dispatch" : "frame"] as const)
+        .filter(
+          ([label], n, all) =>
+            label !== DEPTH_PYRAMID_LABEL || all[n - 1]?.[0] !== DEPTH_PYRAMID_LABEL,
+        );
+    };
+    const first = passes();
+    const late = engine.targetFrames.find((f) => f.label === PHOTOREAL_PASS_LABELS.bodiesLate);
+    const pyramid = engine.dispatched.find((d) => d.pass === DEPTH_PYRAMID_LABEL);
+    expect([
+      first.slice(1, 4),
+      [late?.colourLoad, late?.draws.map((draw) => draw.material.name)],
+      engine.dispatched.filter((d) => d.pass === DEPTH_PYRAMID_LABEL).length,
+      pyramid?.bindings.sampled["depth"]?.name,
+    ]).toEqual([
+      [
+        [PHOTOREAL_PASS_LABELS.bodies, "frame"],
+        [DEPTH_PYRAMID_LABEL, "dispatch"],
+        [PHOTOREAL_PASS_LABELS.bodiesLate, "frame"],
+      ],
+      ["load", ["late"]],
+      pyramidLevels(VIEWPORT).length,
+      "test view:hdr depth",
+    ]);
+    // The view's first frame drops the visibility, the next keeps it, a cut drops it again.
+    passes();
+    renderer.dropHistograms();
+    passes();
+    renderer.render(new RecordingView(), {
+      ...frameWith([]),
+      geometry: occluded,
+      terrain,
+      present: false,
+    });
+    passes();
+    // Without the occlusion, one bodies pass and no pyramid.
+    const from = engine.targetFrames.length;
+    const dispatched = engine.dispatched.length;
+    renderer.render(new RecordingView(), { ...frameWith([]), terrain });
+    expect([
+      given.map((occlusion) => occlusion?.fresh),
+      engine.targetFrames.slice(from).filter((f) => f.label.startsWith("bodies")).length,
+      engine.dispatched.slice(dispatched).some((d) => d.pass === DEPTH_PYRAMID_LABEL),
+    ]).toEqual([[true, false, true, true, false, undefined], 1, false]);
     renderer.dispose();
   });
 
@@ -686,6 +780,7 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
       },
       symbologyDepth: () => [],
       sceneDepth: () => false,
+      lateDraws: () => [],
     };
     const air = { ...frameWith([]), bodies: [planet], atmospheres: [airOf(planet, tables)] };
     const first = renderer.render(view, air);
@@ -1041,16 +1136,17 @@ async function overlayDatums(
  * surface, and both deck marches' footprints in their thermal forms, for a self-luminous body over
  * a deck; its per-planet tables' four, and since
  * R08.T14.d.4 the sky's irradiance over the thick table; since plan R14's T4.a the cluster cull, the
- * mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; and the sky bake's
- * four. Each is a module constant, its WGSL fixed text with no value of a medium, a body or a
+ * mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; since R14.T3.d the
+ * depth pyramid's, made with the renderer; and the sky bake's four. Each is a module constant, its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 49,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 50,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
 const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   HISTOGRAM_KERNEL,
+  DEPTH_PYRAMID_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_AIR_KERNEL,
@@ -1332,6 +1428,7 @@ describe("the photorealistic renderer's overlay", () => {
       draws: () => [],
       symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
       sceneDepth: () => false,
+      lateDraws: () => [],
     };
     renderer.render(view, { ...frameWith([]), overlay, terrain });
     expect(
@@ -1357,6 +1454,7 @@ describe("the photorealistic renderer's overlay", () => {
       draws: () => [],
       symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
       sceneDepth: () => asks,
+      lateDraws: () => [],
     });
     const symbology = (frame: PhotorealFrame): ReadonlyArray<string> | undefined => {
       view.frames.length = 0;

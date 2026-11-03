@@ -55,6 +55,7 @@ import type { BodyFramePlan, LitBodyInput } from "../bodies/draw";
 import type { DiscRecord } from "../bodies/discShading";
 import { discSurfaceLaws } from "../bodies/discSurface";
 import { rotationColumns } from "../bodies/smoothMesh";
+import type { FrameOcclusion } from "../clusters/hzb";
 import type { ProjectionCamera, Viewport } from "../camera/projection";
 import type { RenderStyle, ViewId } from "../camera/state";
 import { relativeToCamera } from "../coords/relative";
@@ -261,6 +262,8 @@ export interface FrameTerrainPass {
 export interface FrameTerrainSource {
   /** View `view`'s draw of `body`'s terrain this frame (`TerrainSession.drawTerrain`). */
   drawTerrain(view: ViewId, body: BodyIdHex, input: TerrainViewFrameInput): TerrainViewFrame | null;
+  /** View `view`'s late draws of `body`'s terrain this frame (`TerrainSession.drawLateTerrain`). */
+  drawLateTerrain(view: ViewId, body: BodyIdHex): ReadonlyArray<DrawItem>;
   /** `body`'s GPU coverage mask, or `null` (`TerrainSession.coverageMask`). */
   coverageMask(body: BodyIdHex): TextureHandle | null;
   /** Whether `body`'s GPU coverage mask holds every cell surveyed (`TerrainSession.coverageWhole`). */
@@ -358,6 +361,8 @@ export class LiveFrameTerrain implements FrameTerrain {
   #decorated = false;
   #depth: DrawItem[] = [];
   #sceneDepth = false;
+  /** The bodies the last {@link LiveFrameTerrain.draws} drew with the two-pass occlusion. */
+  #occluded: BodyIdHex[] = [];
 
   constructor(source: FrameTerrainSource, input: LiveFrameTerrainInput) {
     this.#source = source;
@@ -414,9 +419,17 @@ export class LiveFrameTerrain implements FrameTerrain {
    * whose resolve times them and whose terrain reads the layers, with no other view's frame
    * between.
    *
+   * With `occlusion` (plan R14, R14.T3.d), each body's pass draws its lit clusters visible last
+   * frame alone, the rest left for {@link LiveFrameTerrain.lateDraws}.
+   *
    * @param bodies - The lit bodies the plan was made from, its `LitBodyInput`s.
+   * @param occlusion - The frame's two-pass occlusion, where its renderer runs it.
    */
-  draws(plan: BodyFramePlan, bodies: ReadonlyArray<LitBodyInput>): ReadonlyArray<DrawItem> {
+  draws(
+    plan: BodyFramePlan,
+    bodies: ReadonlyArray<LitBodyInput>,
+    occlusion?: FrameOcclusion,
+  ): ReadonlyArray<DrawItem> {
     const { view, camera, presentedPx, selectionPx, exposureScale, occluderSlopePx, nowMs } =
       this.#input;
     const byId = new Map(bodies.map((body) => [body.id, body]));
@@ -450,6 +463,7 @@ export class LiveFrameTerrain implements FrameTerrain {
       this.#source.pass(each.record.body) === null ? [] : [{ ...each, index }],
     );
     const cascades = drawable[cascadeBodyIndex(drawable)]?.index ?? -1;
+    const occluded: BodyIdHex[] = [];
     for (const [index, { record, view: terrainView }] of handed.entries()) {
       const frame = this.#source.drawTerrain(view, record.body, {
         view: terrainView,
@@ -457,9 +471,13 @@ export class LiveFrameTerrain implements FrameTerrain {
         exposureScale,
         takesCascades: index === cascades,
         nowMs,
+        ...(occlusion === undefined ? {} : { occlusion }),
       });
       if (frame === null) {
         continue;
+      }
+      if (occlusion !== undefined) {
+        occluded.push(record.body);
       }
       annunciation = morePressingAnnunciation(annunciation, frame.annunciation);
       if (frame.draws.length === 0) {
@@ -492,9 +510,22 @@ export class LiveFrameTerrain implements FrameTerrain {
     }
     this.#annunciation = annunciation;
     this.#decorated = decorated;
+    this.#occluded = occluded;
     this.#depth = depth;
     this.#sceneDepth = sceneDepth && depth.length > 0;
     return draws;
+  }
+
+  /**
+   * The late draws of each body the last {@link LiveFrameTerrain.draws} drew with the two-pass
+   * occlusion (plan R14, R14.T3.d; `TerrainSession.drawLateTerrain`), in its order: its lit
+   * clusters the early pass did not draw and the view's pyramid does not refuse. Call it once, after
+   * the first raster and the pyramid's build; none without the occlusion.
+   */
+  lateDraws(): ReadonlyArray<DrawItem> {
+    const occluded = this.#occluded;
+    this.#occluded = [];
+    return occluded.flatMap((body) => this.#source.drawLateTerrain(this.#input.view, body));
   }
 
   /**

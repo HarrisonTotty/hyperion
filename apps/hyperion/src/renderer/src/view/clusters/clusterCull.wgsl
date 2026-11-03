@@ -43,6 +43,19 @@
 //   template, or NO_MARK where it is refused or its instance does not enter the pass, is written to
 //   `marks`, one word a cluster of every instance, for the stable compaction to write the pass's
 //   buckets in the draw set's order (`compact.wgsl`); nothing is appended for it.
+// - _The two-pass occlusion_ (T3.d; `clusters/hzb.ts`; the occlusion's variant alone, `cull.ts`'
+//   CLUSTER_CULL_OCCLUSION_KERNEL, which composes `clusterOcclusion.wgsl`'s bindings and tests
+//   below the bindings here; the plain kernel's stand-ins see every cluster, refuse none and write
+//   nothing), an ordered pass of either of two kinds:
+//   the early pass (kind 4) marks only the clusters its camera's tests keep that were visible last
+//   frame, their bits set in `history` (one a cluster of every slot, a slot's ⌈clusters ÷ 32⌉
+//   words, cleared when the slot is filled); the late pass (kind 5), a dispatch of its own after
+//   the first raster and the pyramid's build, marks those its camera's tests keep that the early
+//   pass did not mark, as `marks` holds them, and that the pyramid does not refuse (`hzb_refuses`),
+//   and writes each cluster's bit, whether it was kept and not refused (cleared for an instance that
+//   does not enter it). An instance that is a sub-patch of its slot (its `sub.x`, word 8, not 0 in
+//   its low five bits) shares its slot's bits with others, so it is never marked early and writes
+//   no bit; one kept whole is never refused.
 // - _The DAG cut_ (R14.T4.b, a record with the flags' bit 4): kept only where its own error, `f32`
 //   in its error bytes' first word, is within the pass's tolerance at its group's sphere, the
 //   record's own, and its parent's, in the second, is not at its parent group's, its `lods` entry
@@ -117,6 +130,9 @@ const MAX_CULL_PASSES : u32 = 8u;
 const PASS_CASCADE : u32 = 1u;
 const PASS_CAMERA : u32 = 2u;
 const PASS_CAMERA_ORDERED : u32 = 3u;
+// The two-pass occlusion's ordered passes (`cullPass.ts`' `CameraCullPass.occlusion`; T3.d).
+const PASS_CAMERA_EARLY : u32 = 4u;
+const PASS_CAMERA_LATE : u32 = 5u;
 // A cluster an ordered pass refuses (`cull.ts`' NO_MARK).
 const NO_MARK : u32 = 0xffffffffu;
 // The cull input's bit of an instance each pass it enters keeps whole (`cull.ts`' CULL_INPUT_WHOLE).
@@ -152,6 +168,7 @@ const HORIZON_ROUNDING : f32 = 1e-6;
 @group(0) @binding(7) var<storage, read_write> marks : array<u32>;
 // One parent group's LOD sphere a record (`record.ts`' `ClusterLod`), read by a DAG record alone.
 @group(0) @binding(8) var<storage, read> lods : array<vec4f>;
+//OCCLUSION//
 
 // A record's centre in the instances' frame, turned from its page's axes.
 fn page_to_instance(v : vec3f) -> vec3f {
@@ -252,7 +269,7 @@ fn pass_keeps(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool {
     case PASS_CASCADE: {
       return cascade_keeps(cull_pass, centre, radius) && !receivers_refuse(cull_pass, centre, radius);
     }
-    case PASS_CAMERA, PASS_CAMERA_ORDERED: {
+    case PASS_CAMERA, PASS_CAMERA_ORDERED, PASS_CAMERA_EARLY, PASS_CAMERA_LATE: {
       return camera_keeps(cull_pass, centre, radius);
     }
     default: {
@@ -399,19 +416,26 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
   let whole = (input.x & INPUT_WHOLE) != 0u;
   let clusters = params.counts.z;
   let pass_count = min(params.counts.w, MAX_CULL_PASSES);
-  // The instance's quadrant word and stride bands, where its record holds them (T3.c).
+  // The instance's quadrant word and stride bands, where its record holds them (T3.c), and whether
+  // it is a sub-patch of its slot (T3.d).
   var quadrant = 0u;
   var bands = vec3f(-1.0);
+  var sub = false;
   if (params.counts.y >= 16u) {
     quadrant = instance_words[base + 7u];
+    sub = (instance_words[base + 8u] & 31u) != 0u;
     bands = vec3f(
       bitcast<f32>(instance_words[base + 12u]),
       bitcast<f32>(instance_words[base + 13u]),
       bitcast<f32>(instance_words[base + 14u]),
     );
   }
+  // A slot's visibility words, a bit a cluster.
+  let history_words = (clusters + 31u) / 32u;
   for (var c = local.x; c < clusters; c = c + CULL_GROUP) {
     let at = page * clusters + c;
+    let word = page * history_words + c / 32u;
+    let bit = 1u << (c % 32u);
     let record = records[at];
     let centre = origin + page_to_instance(record.centre);
     let shape = record.flags & 0xfu;
@@ -438,8 +462,23 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
         level = camera_stride_level(cull_pass, record, bands, quadrant, group_distance(centre, record.radius));
       }
       let t = template_of(cull_pass, shape, record.flags, level);
+      let mark = instance * clusters + c;
       if (cull_pass.header.x == PASS_CAMERA_ORDERED) {
-        marks[instance * clusters + c] = select(NO_MARK, t, keeps && t < params.templates);
+        marks[mark] = select(NO_MARK, t, keeps && t < params.templates);
+        continue;
+      }
+      if (cull_pass.header.x == PASS_CAMERA_EARLY) {
+        let seen = !sub && occlusion_seen(word, bit);
+        marks[mark] = select(NO_MARK, t, keeps && seen && t < params.templates);
+        continue;
+      }
+      if (cull_pass.header.x == PASS_CAMERA_LATE) {
+        let early = marks[mark] != NO_MARK;
+        let visible = keeps && t < params.templates && (whole || !occlusion_refuses(centre, record.radius));
+        marks[mark] = select(NO_MARK, t, visible && !early);
+        if (!sub) {
+          occlusion_write(word, bit, visible);
+        }
         continue;
       }
       if (!keeps || t >= params.templates) {

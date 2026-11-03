@@ -47,18 +47,31 @@ import {
   LitBodyRenderer,
   planLitBodies,
 } from "../view/bodies/draw";
-import { project } from "../view/camera/projection";
+import {
+  NEAR_PLANE_M,
+  perspectiveReversedInfinite,
+  project,
+  viewRotation4,
+} from "../view/camera/projection";
+import {
+  DEPTH_PYRAMID_KERNEL,
+  DepthPyramid,
+  type FrameOcclusion,
+  pyramidProjectionOf,
+} from "../view/clusters/hzb";
+import type { ClusterPassStats } from "../view/clusters/stats";
 import { lookAlong, rotate } from "../view/camera/quaternion";
 import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
 import { occluderRadius } from "../view/depth/depth";
 import type { KernelPair } from "../view/engine/kernels";
-import type { RenderEngine } from "../view/engine/types";
+import type { DrawItem, RenderEngine } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../view/lighting/planetshine";
 import { overlaySubmission } from "../view/photoreal/overlay";
 import { PHOTOREAL_PASS_LABELS } from "../view/photoreal/passes";
+import { createSceneTarget } from "../view/photoreal/sceneTarget";
 import { type PhotorealOverlay, PhotorealRenderer } from "../view/photoreal/renderer";
 import {
   GEOMETRY_BEFORE_R14,
@@ -86,7 +99,12 @@ import {
   type TerrainGeometryCounts,
   type TerrainPool,
 } from "../view/terrain/terrainPass";
-import { LIT_INTERIOR_INDICES, LIT_PATCH_INDICES } from "../view/terrain/gpu/resources";
+import {
+  CLUSTER_LIT_LATE_PASS,
+  CLUSTER_LIT_PASS,
+  LIT_INTERIOR_INDICES,
+  LIT_PATCH_INDICES,
+} from "../view/terrain/gpu/resources";
 import { PATCH_VERTICES_PER_SIDE } from "../view/terrain/slotLayout";
 import {
   finestPatchSizeM,
@@ -105,7 +123,7 @@ import {
 import { WireframeRenderer, WIREFRAME_MATERIALS } from "../view/wireframe/submit";
 import { moonLikeFixture } from "../test/moonLikeFixture";
 import { addCanvas } from "./frames";
-import { bytesDigest, type Checks, pause } from "./harness";
+import { bytesDigest, type Checks, halfTexels, pause } from "./harness";
 import { MOON_LIKE } from "./litTerrain";
 import {
   bodyAt,
@@ -302,6 +320,7 @@ function sourceOf(pass: TerrainPass, mask: CoverageMask): FrameTerrainSource {
     },
     coverageMask: () => mask.texture,
     coverageWhole: () => mask.whole,
+    drawLateTerrain: (view) => pass.lateDrawFor(view),
     pass: () => pass,
   };
 }
@@ -353,12 +372,17 @@ function cracksOf(before: Float32Array, after: Float32Array): number {
   return cracks;
 }
 
+/** Pass `pass`'s clusters drawn in `stats`, or `null` without them (plan R14, R14.T3.d). */
+function litOf(stats: ReadonlyArray<ClusterPassStats> | null, pass: number): number | null {
+  return stats?.[pass]?.clusters ?? null;
+}
+
 /** No patches drawn, where a frame gave no counts. */
 const NO_DRAWN_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0, fins: 0 };
 
 /**
  * Steps `pass` from `pose`, with `grounded`'s contacts, and makes the frame, as `VIEW`'s loop and
- * drawer do.
+ * drawer do, with `occlusion` where its renderer runs the two-pass occlusion (plan R14, R14.T3.d).
  */
 function liveFrame(
   pass: TerrainPass,
@@ -366,6 +390,7 @@ function liveFrame(
   pose: Pose,
   nowMs: number,
   grounded: ReadonlyArray<GroundContact> = [],
+  occlusion?: FrameOcclusion,
 ): LiveFrame {
   const base = bodyOf(pose);
   const view = terrainViewOf(base, pose.camera, VIEWPORT);
@@ -402,7 +427,48 @@ function liveFrame(
     optionsOf(pose),
     new Map([[body.id, "disc"]]),
   );
-  return { plan, body, terrain, terrainDraws: terrain.draws(plan, [body]) };
+  return { plan, body, terrain, terrainDraws: terrain.draws(plan, [body], occlusion) };
+}
+
+/**
+ * A frame drawn as the renderer draws it with the two-pass occlusion (plan R14, R14.T3.d): `early`,
+ * then `pyramid` built from that raster's depth, then `late()`'s draws over it, loading its colour
+ * and depth; read back.
+ */
+async function drawnOccluded(
+  engine: RenderEngine,
+  pose: Pose,
+  early: ReadonlyArray<DrawItem>,
+  pyramid: DepthPyramid,
+  late: () => ReadonlyArray<DrawItem>,
+): Promise<Float32Array> {
+  const target = createSceneTarget(engine, "smoke occluded frame", VIEWPORT);
+  try {
+    const depth = target.depth;
+    if (depth === null) {
+      throw new Error("the scene target has no depth");
+    }
+    const frame = {
+      viewRotation: viewRotation4(pose.camera.orientation),
+      projection: perspectiveReversedInfinite(
+        pose.camera.fovXRad,
+        VIEWPORT.widthPx / VIEWPORT.heightPx,
+        NEAR_PLANE_M,
+      ),
+      postProcesses: [],
+    };
+    target.render({ ...frame, label: PHOTOREAL_PASS_LABELS.bodies, draws: early });
+    pyramid.build(depth, pyramidProjectionOf(pose.camera.fovXRad, VIEWPORT));
+    target.render({
+      ...frame,
+      label: PHOTOREAL_PASS_LABELS.bodiesLate,
+      draws: late(),
+      colourLoad: "load",
+    });
+    return halfTexels(await engine.readTexture(target.colour));
+  } finally {
+    target.dispose();
+  }
 }
 
 /** The patch of `level` whose square holds the body-fixed point `p` on or near the datum, p = M·d. */
@@ -800,6 +866,7 @@ export async function checkTerrainFrame(
     ): Promise<{
       readonly texels: Float32Array;
       readonly counts: TerrainGeometryCounts | null;
+      readonly stats: ReadonlyArray<ClusterPassStats> | null;
     }> => {
       relief.setGeometry(geometry);
       const texels = await reliefFrame();
@@ -808,7 +875,7 @@ export async function checkTerrainFrame(
         // oxlint-disable-next-line no-await-in-loop
         await reliefFrame();
       }
-      return { texels, counts: relief.counts(VIEW) };
+      return { texels, counts: relief.counts(VIEW), stats: relief.clusterStats(VIEW) };
     };
     relief.measureClusters(true);
     const byLitMesh = await countedFrame({ ...SETTINGS.low.geometry, finClusters: false });
@@ -887,6 +954,77 @@ export async function checkTerrainFrame(
         trianglesStrided !== null &&
         trianglesStrided < trianglesAt1,
       `lit triangles ${String(trianglesAt1)} at stride 1, ${String(trianglesStrided)} with strides, ${trianglesAt1 === null || trianglesStrided === null ? "—" : (trianglesStrided / trianglesAt1).toFixed(4)} of them; ${String(strideChanges.pixels)} pixels changed of ${String(pixels)}, the largest difference ${strideChanges.largest.toExponential(3)}; of ${String(strideStops.terrain)} terrain pixels ${String(strideStops.differing)} differ, ${String(strideStops.within)} within 1/3 stop, the largest ${strideStops.largestStops.toFixed(3)} stops; cracks ${String(cracks)}; digests ${bytesDigest(atStride1.texels)} at stride 1, ${bytesDigest(strided.texels)} with strides`,
+    );
+
+    // R14.T3.d: the two-pass occlusion, the lit pass's clusters visible last frame drawn first, the
+    // depth pyramid built from that raster, and the rest the pyramid does not refuse drawn over it,
+    // against the one raster (T1.g's frame by clusters), from the same selection and residents, in
+    // one run: from a frame whose visibility is dropped, whose first raster draws no terrain, and
+    // from the next, which draws first what the one before saw; the counters on, so that each pass's
+    // clusters are counted, and those the pyramid refused with them.
+    const OCCLUDED: GeometrySettings = { ...SETTINGS.low.geometry, occlusion: "hzb" };
+    relief.measureClusters(true);
+    const oneRaster = await countedFrame(SETTINGS.low.geometry);
+    relief.setGeometry(OCCLUDED);
+    const pyramidKernel = await engine.createComputeAsync(DEPTH_PYRAMID_KERNEL);
+    const pyramid = new DepthPyramid(engine, pyramidKernel, "terrain frame smoke");
+    const occludedFrame = async (cut: boolean): Promise<Float32Array> => {
+      const fresh = pyramid.begin(VIEWPORT, cut);
+      const frame = liveFrame(relief, mask, pose, performance.now(), [], { pyramid, fresh });
+      return drawnOccluded(
+        engine,
+        pose,
+        [...renderer.meshDraws(frame.plan), ...frame.terrainDraws],
+        pyramid,
+        () => frame.terrain.lateDraws(),
+      );
+    };
+    let occludedStats: ReadonlyArray<ClusterPassStats> | null = null;
+    let occludedCounts: TerrainGeometryCounts | null = null;
+    let firstOccluded: Float32Array;
+    let nextOccluded: Float32Array;
+    try {
+      firstOccluded = await occludedFrame(true);
+      nextOccluded = await occludedFrame(false);
+      for (let round = 0; round < 8; round += 1) {
+        // oxlint-disable-next-line no-await-in-loop
+        await occludedFrame(false);
+      }
+      occludedStats = relief.clusterStats(VIEW);
+      occludedCounts = relief.counts(VIEW);
+    } finally {
+      pyramid.dispose();
+      engine.releaseCompute(pyramidKernel);
+      relief.measureClusters(false);
+      relief.setGeometry(SETTINGS.low.geometry);
+    }
+    const firstTies = differingTexels(oneRaster.texels, firstOccluded);
+    const nextTies = differingTexels(oneRaster.texels, nextOccluded);
+    const oneRasterClusters = litOf(oneRaster.stats, CLUSTER_LIT_PASS);
+    const earlyClusters = litOf(occludedStats, CLUSTER_LIT_PASS);
+    const lateClusters = litOf(occludedStats, CLUSTER_LIT_LATE_PASS);
+    const refusedClusters =
+      oneRasterClusters === null || earlyClusters === null || lateClusters === null
+        ? null
+        : oneRasterClusters - earlyClusters - lateClusters;
+    if (captures) {
+      const exposure = captureScale(oneRaster.texels, oneRaster.texels);
+      images.push(
+        captureOf("r14-t3d-frame-one-raster", oneRaster.texels, VIEWPORT, exposure),
+        captureOf("r14-t3d-frame-occlusion-dropped", firstOccluded, VIEWPORT, exposure),
+        captureOf("r14-t3d-frame-occlusion", nextOccluded, VIEWPORT, exposure),
+      );
+    }
+    checks.check(
+      "R14.T3.d the two-pass occlusion draws the one raster's frame byte for byte, from a frame whose visibility is dropped and from the next, its refused clusters counted",
+      withRelief.done &&
+        firstTies.pixels === 0 &&
+        nextTies.pixels === 0 &&
+        refusedClusters !== null &&
+        refusedClusters >= 0 &&
+        earlyClusters !== null &&
+        earlyClusters > 0,
+      `the lit pass's clusters ${String(oneRasterClusters)} in one raster; with the occlusion ${String(earlyClusters)} early and ${String(lateClusters)} late, ${String(refusedClusters)} refused by the pyramid; lit triangles ${String(oneRaster.counts?.litClusterTriangles ?? null)} and ${String(occludedCounts?.litClusterTriangles ?? null)}; tie pixels ${String(firstTies.pixels)} from the dropped frame and ${String(nextTies.pixels)} from the next, the largest difference ${Math.max(firstTies.largest, nextTies.largest).toExponential(3)}; digests ${bytesDigest(oneRaster.texels)} in one raster, ${bytesDigest(firstOccluded)} and ${bytesDigest(nextOccluded)} with the occlusion`,
     );
 
     // The fallback (plan R14, Design notes 16 and 17), under `--fixture=broken-wgsl` alone: a pass
@@ -1006,6 +1144,7 @@ export async function checkTerrainFrame(
             draws: (...args: Parameters<LiveFrameTerrain["draws"]>) => frame.terrain.draws(...args),
             symbologyDepth: () => [],
             sceneDepth: () => false,
+            lateDraws: () => [],
           };
       // The datums the renderer packs the overlay with, from its plan.
       let datums = 0;

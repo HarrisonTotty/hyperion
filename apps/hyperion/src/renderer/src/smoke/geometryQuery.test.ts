@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { queryOverride } from "./geometryQuery";
 
 describe("the smoke page's geometry override (plan R14, Design note 17)", () => {
-  it("reads each field's values from the query, the far cascades' rate (R14.T6.b), the consumers' levers (R14.T4), the page pool's bytes (R14.T5.b) the edge patches' lever (R14.T1.g) and the camera's strides (R14.T3.c) among them", () => {
+  it("reads each field's values from the query, the far cascades' rate (R14.T6.b), the consumers' levers (R14.T4), the page pool's bytes (R14.T5.b) the edge patches' lever (R14.T1.g), the camera's strides (R14.T3.c) and the occlusion (R14.T3.d) among them", () => {
     expect(
       queryOverride(
         new URLSearchParams(
-          "geometry-clusterPath=false&geometry-casterStrideCap=4&geometry-overlayDepth=redraw&geometry-litClusters=false&geometry-farCascadeRate=2&geometry-figureClusters=false&geometry-hullClusters=true&geometry-wireClusters=false&geometry-pageBytes=1048576&geometry-meshTolerancePx=2:0.5&geometry-finClusters=false&geometry-strides=measured",
+          "geometry-clusterPath=false&geometry-casterStrideCap=4&geometry-overlayDepth=redraw&geometry-litClusters=false&geometry-farCascadeRate=2&geometry-figureClusters=false&geometry-hullClusters=true&geometry-wireClusters=false&geometry-pageBytes=1048576&geometry-meshTolerancePx=2:0.5&geometry-finClusters=false&geometry-strides=measured&geometry-occlusion=hzb",
         ),
       ),
     ).toEqual({
@@ -23,6 +23,7 @@ describe("the smoke page's geometry override (plan R14, Design note 17)", () => 
       meshTolerancePx: { camera: 2, wireframeOccluder: 0.5 },
       finClusters: false,
       strides: "measured",
+      occlusion: "hzb",
     });
   });
 
@@ -30,7 +31,7 @@ describe("the smoke page's geometry override (plan R14, Design note 17)", () => 
     expect([
       queryOverride(
         new URLSearchParams(
-          "geometry-farCascadeRate=3&geometry-casterDepthCull=1&geometry-pageBytes=1MiB&geometry-meshTolerancePx=1&geometry-strides=on",
+          "geometry-farCascadeRate=3&geometry-casterDepthCull=1&geometry-pageBytes=1MiB&geometry-meshTolerancePx=1&geometry-strides=on&geometry-occlusion=none",
         ),
       ),
       queryOverride(new URLSearchParams("")),

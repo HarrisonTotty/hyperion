@@ -85,6 +85,7 @@ const NO_TERRAIN = {
   draws: () => [],
   symbologyDepth: () => [],
   sceneDepth: () => false,
+  lateDraws: () => [],
 };
 
 /** A lit body lit as a static scene's: by the frame's hosts and the bodies where drawn. */
@@ -223,6 +224,7 @@ describe("a photorealistic frame of the phase scene", () => {
         draws: () => [],
         symbologyDepth: () => [],
         sceneDepth: () => false,
+        lateDraws: () => [],
       },
     });
     expect(asked).toEqual([...PHASE_PLANETS, PHASE_GIANT]);
@@ -235,6 +237,7 @@ describe("a photorealistic frame of the phase scene", () => {
       draws: () => [],
       symbologyDepth: () => [],
       sceneDepth: () => false,
+      lateDraws: () => [],
     };
     expect((await frameOfPhaseScene({ terrain })).terrain).toBe(terrain);
   });

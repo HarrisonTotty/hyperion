@@ -41,6 +41,7 @@ import {
   fittedTerrainLayout,
   GRID_INDICES,
   GRID_VERTICES,
+  CLUSTER_HISTORY_SLOT_BYTES,
   CLUSTER_PASSES,
   CLUSTER_RECORDS_SLOT_BYTES,
   CULL_INPUT_BYTES,
@@ -1335,7 +1336,7 @@ describe("the terrain's resources", () => {
     expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
   });
 
-  it("make a clustered lit layout's records, cluster mesh and each view's buckets, the cascades', the overlay's and the lit pass's, and its compaction's marks and tallies, under geometry-clusters (R14.T1.b, T1.e, T2.a)", async () => {
+  it("make a clustered lit layout's records, cluster mesh and each view's buckets, the cascades', the overlay's, the lit pass's and its late pass's, its compaction's marks and tallies and its clusters' visibility, under geometry-clusters (R14.T1.b, T1.e, T2.a, T3.d)", async () => {
     const engine = await countingRenderEngine();
     const created: Array<readonly [string, string]> = [];
     engine.onAllocation((event) => {
@@ -1364,17 +1365,20 @@ describe("the terrain's resources", () => {
         "terrain clusters (view) cull inputs",
         "terrain clusters (view) marks",
         "terrain clusters (view) tallies",
+        "terrain clusters (view) visibility",
+        "terrain clusters (view) no pyramid",
       ],
     ]);
-    // The marks hold every cluster of a page, its fin clusters too (R14.T1.g), and the tallies the
-    // compaction's sixteen templates.
-    expect([clusters?.marks.bytes, clusters?.tallies.bytes]).toEqual([
+    // The marks hold every cluster of a page, its fin clusters too (R14.T1.g), the tallies the
+    // compaction's sixteen templates, and the visibility a bit a cluster in whole words (R14.T3.d).
+    expect([clusters?.marks.bytes, clusters?.tallies.bytes, clusters?.history.bytes]).toEqual([
       slots * 116 * 4,
       slots * 16 * 4,
+      slots * 16,
     ]);
     const before = engine.live.buffers;
     resources.releaseView("view");
-    expect(before - engine.live.buffers).toBe(5);
+    expect(before - engine.live.buffers).toBe(7);
     resources.dispose();
     expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
   });
@@ -1425,6 +1429,27 @@ describe("the terrain's resources", () => {
     const unmeasured = recordsAt(2);
     expect([unmeasured.getUint32(20, true), unmeasured.getUint32(28, true) & (1 << 6)]).toEqual([
       0x7f80_0000, 0,
+    ]);
+    resources.dispose();
+  });
+
+  it("clear a slot's clusters' visibility in every view's when a bake fills it (R14.T3.d)", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit", true);
+    resources.clusterBuffers("primary");
+    resources.clusterBuffers("second");
+    resources.upload({
+      ...upload(5, 65, false),
+      layers: mappedLayers(),
+      originM: { x: 1, y: 2, z: 3 },
+      heightRangeM: [-5, 5] as const,
+    });
+    const cleared = engine.writes
+      .filter((w) => w.buffer.endsWith("visibility"))
+      .map((w) => [w.buffer, w.offsetBytes, w.bytes, w.data.every((b) => b === 0)]);
+    expect(cleared).toEqual([
+      ["terrain clusters (primary) visibility", 5 * CLUSTER_HISTORY_SLOT_BYTES, 16, true],
+      ["terrain clusters (second) visibility", 5 * CLUSTER_HISTORY_SLOT_BYTES, 16, true],
     ]);
     resources.dispose();
   });

@@ -10,11 +10,16 @@
  * kernel's but where a test falls within that rounding; at 0 it is the exact test, every cluster of
  * which the kernel must keep; at 2 it bounds every cluster the kernel may keep. The smoke harness
  * holds the device's buckets between the two (`smoke/clusterCull.ts`).
+ *
+ * The two-pass occlusion's ordered passes (R14.T3.d) take each cluster's visibility of the last
+ * frame and, for the late pass, the early pass's marks and the depth pyramid's test
+ * ({@link CullOcclusionTwin}); {@link cullVisibilityTwin} is the late pass's visibility.
  */
 
 import type { Vec3 } from "../../geometry/vec3";
 import type { KernelPair } from "../engine/kernels";
 import clusterCullWgsl from "./clusterCull.wgsl?raw";
+import clusterOcclusionWgsl from "./clusterOcclusion.wgsl?raw";
 import type {
   CameraCullPass,
   CascadeCullPass,
@@ -28,10 +33,38 @@ import { NO_DISCARD_TEMPLATE } from "./cullPass";
 import { cameraStrideLevel, INSTANCE_FINEST, type StrideBandsM } from "./strides";
 import { STRIDES } from "./templates";
 
+/**
+ * The plain cull's stand-ins for the two-pass occlusion's reads and writes (R14.T3.d): every cluster
+ * seen last frame, none refused, nothing written, and no binding of the occlusion's.
+ */
+const NO_OCCLUSION = `
+fn occlusion_seen(word : u32, bit : u32) -> bool {
+  return true;
+}
+
+fn occlusion_refuses(centre : vec3f, radius : f32) -> bool {
+  return false;
+}
+
+fn occlusion_write(word : u32, bit : u32, visible : bool) {}
+`;
+
 /** The cull's kernel: the reference alone, `presentation-only`, its appends' order not reproducible. */
 export const CLUSTER_CULL_KERNEL: KernelPair = {
   name: "cluster cull",
-  reference: clusterCullWgsl,
+  reference: clusterCullWgsl.replace("//OCCLUSION//", NO_OCCLUSION),
+  subgroup: null,
+  readback: "presentation-only",
+};
+
+/**
+ * The cull with the two-pass occlusion's bindings and tests (plan R14, R14.T3.d;
+ * `clusterOcclusion.wgsl`): the pyramid's parameters and texels and the clusters' visibility,
+ * which terrain's lit pass binds; otherwise {@link CLUSTER_CULL_KERNEL}.
+ */
+export const CLUSTER_CULL_OCCLUSION_KERNEL: KernelPair = {
+  name: "cluster cull occlusion",
+  reference: clusterCullWgsl.replace("//OCCLUSION//", clusterOcclusionWgsl),
   subgroup: null,
   readback: "presentation-only",
 };
@@ -83,6 +116,25 @@ export interface CullInstance {
    * (`INSTANCE_FINEST`), stride 1 (T3.c); absent, 0.
    */
   readonly quadrantWord?: number;
+  /**
+   * Whether it is a sub-patch of its page (terrain's `Instance.sub.x`, its low five bits not 0),
+   * which shares its page's visibility with others: never marked by the occlusion's early pass,
+   * and writing no visibility (T3.d); absent, not.
+   */
+  readonly subPatch?: boolean;
+}
+
+/** What the two-pass occlusion's twin reads of a dispatch (T3.d; `clusterCull.wgsl`'s head). */
+export interface CullOcclusionTwin {
+  /** Whether a page's cluster was visible last frame: its bit in the kernel's `history`. */
+  readonly visible: (page: number, cluster: number) => boolean;
+  /** The early pass's marks, as {@link cullMarksTwin} gives them, which the late pass reads. */
+  readonly earlyMarks: Uint32Array | null;
+  /**
+   * Whether the late pass's pyramid refuses a sphere at `centreM`, camera-relative, of radius
+   * `radiusM` (`hzb.ts`' `hzbRefuses` of its pyramid), or `null` for none, which refuses nothing.
+   */
+  readonly refuses: ((centreM: Vec3, radiusM: number) => boolean) | null;
 }
 
 /**
@@ -474,27 +526,107 @@ function recordKept(
   );
 }
 
+/** The dispatch's ordered pass and its index, or `null` where it has none. */
+function orderedPass(
+  input: CullTwinInput,
+): { readonly pass: CameraCullPass; readonly p: number } | null {
+  const p = input.passes.findIndex((pass) => pass?.kind === "camera" && pass.order === "ordered");
+  const pass = input.passes[p] ?? null;
+  return pass?.kind === "camera" ? { pass, p } : null;
+}
+
+/**
+ * Whether the occlusion's late pass sees a kept cluster (T3.d): its instance kept whole, or its
+ * sphere not refused by the pyramid.
+ */
+function lateSees(
+  occlusion: CullOcclusionTwin,
+  instance: CullInstance,
+  centreM: Vec3,
+  radiusM: number,
+): boolean {
+  return (
+    instance.whole === true || occlusion.refuses === null || !occlusion.refuses(centreM, radiusM)
+  );
+}
+
 /**
  * The twin of one dispatch's ordered pass (T2.a): each cluster's mark, instance by instance and
  * cluster by cluster, its template where the pass keeps it, else {@link NO_MARK}; every mark
- * {@link NO_MARK} where the dispatch has no ordered pass.
+ * {@link NO_MARK} where the dispatch has no ordered pass. The occlusion's early pass keeps only
+ * the clusters `occlusion` holds visible last frame, of instances that are not sub-patches; its late
+ * pass only those the early pass did not mark and the pyramid does not refuse (T3.d).
+ *
+ * @throws Error for an occlusion's pass without `occlusion`, or a late pass without the early
+ *   pass's marks.
  */
-export function cullMarksTwin(input: CullTwinInput, slackScale = 1): Uint32Array {
+export function cullMarksTwin(
+  input: CullTwinInput,
+  slackScale = 1,
+  occlusion?: CullOcclusionTwin,
+): Uint32Array {
   const marks = new Uint32Array(input.instances.length * input.clustersPerPage).fill(NO_MARK);
-  const p = input.passes.findIndex((pass) => pass?.kind === "camera" && pass.order === "ordered");
-  const pass = input.passes[p] ?? null;
-  if (pass === null) {
+  const ordered = orderedPass(input);
+  if (ordered === null) {
     return marks;
   }
+  const { pass, p } = ordered;
+  const phase = pass.occlusion;
+  if (
+    phase !== undefined &&
+    ((occlusion?.earlyMarks === null && phase === "late") || occlusion === undefined)
+  ) {
+    throw new Error(`the occlusion's ${phase} pass needs its visibility and the early marks`);
+  }
   eachCluster(input, (n, instance, cluster, record, centre) => {
-    if (recordKept(input, pass, p, instance, cluster, record, centre, slackScale)) {
-      const t = templateOf(record, pass, instance, input, centre);
-      if (t < input.templates) {
-        marks[n * input.clustersPerPage + cluster] = t;
-      }
+    if (!recordKept(input, pass, p, instance, cluster, record, centre, slackScale)) {
+      return;
+    }
+    const at = n * input.clustersPerPage + cluster;
+    const t = templateOf(record, pass, instance, input, centre);
+    const marked =
+      t < input.templates &&
+      (occlusion === undefined ||
+        phase === undefined ||
+        (phase === "early"
+          ? instance.subPatch !== true && occlusion.visible(instance.page, cluster)
+          : (occlusion.earlyMarks?.[at] ?? NO_MARK) === NO_MARK &&
+            lateSees(occlusion, instance, centre, record.radiusM)));
+    if (marked) {
+      marks[at] = t;
     }
   });
   return marks;
+}
+
+/**
+ * The twin of the occlusion's late pass's visibility (T3.d): for each cluster of each instance that
+ * is not a sub-patch, keyed page × clusters a page + cluster, whether the pass keeps it at a
+ * template and the pyramid does not refuse it, as the kernel writes its bit; empty where the
+ * dispatch has no late pass.
+ */
+export function cullVisibilityTwin(
+  input: CullTwinInput,
+  occlusion: CullOcclusionTwin,
+  slackScale = 1,
+): ReadonlyMap<number, boolean> {
+  const visible = new Map<number, boolean>();
+  const ordered = orderedPass(input);
+  if (ordered?.pass.occlusion !== "late") {
+    return visible;
+  }
+  const { pass, p } = ordered;
+  eachCluster(input, (_n, instance, cluster, record, centre) => {
+    if (instance.subPatch === true) {
+      return;
+    }
+    const kept =
+      recordKept(input, pass, p, instance, cluster, record, centre, slackScale) &&
+      templateOf(record, pass, instance, input, centre) < input.templates &&
+      lateSees(occlusion, instance, centre, record.radiusM);
+    visible.set(instance.page * input.clustersPerPage + cluster, kept);
+  });
+  return visible;
 }
 
 /**

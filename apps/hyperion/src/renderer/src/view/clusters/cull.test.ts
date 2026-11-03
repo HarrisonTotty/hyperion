@@ -12,11 +12,14 @@ import clusterCullWgsl from "./clusterCull.wgsl?raw";
 import {
   cameraKeeps,
   cascadeKeeps,
+  CLUSTER_CULL_KERNEL,
+  CLUSTER_CULL_OCCLUSION_KERNEL,
   CULL_INPUT_WHOLE,
   CULL_ROUNDING_M,
   type CullInstance,
   cullMarksTwin,
   cullTwin,
+  cullVisibilityTwin,
   horizonRefuses,
   NO_MARK,
   RECEIVER_ROUNDING_M,
@@ -42,6 +45,7 @@ import {
   clusterFlags,
   packClusterRecord,
 } from "./record";
+import { HZB_PARAMS_BYTES } from "./hzb";
 import { INSTANCE_FINEST, NO_STRIDE_BANDS, type StrideBandsM } from "./strides";
 import { TERRAIN_DISCARD_TEMPLATES } from "./templates";
 
@@ -1053,6 +1057,193 @@ describe("the cluster cull's horizon and ordered passes (plan R14, R14.T2.a)", (
       [0, NO_MARK, 4, NO_MARK, NO_MARK, NO_MARK],
       // The appended pass, instance 1's alone.
       { 0: [256], 4: [256 + 2] },
+    ]);
+  });
+});
+
+/** Last frame's visibility in the occlusion's tests: each page's first cluster alone. */
+function visible(_page: number, cluster: number): boolean {
+  return cluster === 0;
+}
+
+/** A pyramid that refuses every sphere. */
+function refusesAll(): boolean {
+  return true;
+}
+
+/** A visibility twin's bits in their keys' order. */
+function byPage(map: ReadonlyMap<number, boolean>): Array<readonly [number, boolean]> {
+  return [...map].toSorted(([a], [b]) => a - b);
+}
+
+/** Marks three a page, instance by instance. */
+function marksByInstance(marks: Uint32Array): number[][] {
+  return Array.from({ length: marks.length / 3 }, (_, n) => [...marks.subarray(3 * n, 3 * n + 3)]);
+}
+
+describe("the two-pass occlusion's passes (plan R14, R14.T3.d)", () => {
+  /** Three clusters: a block ahead, one behind the camera, and a strip ahead. */
+  const records = [
+    record({ x: 0, y: 0, z: -100 }, 1),
+    record({ x: 0, y: 0, z: 50 }, 1),
+    record({ x: 0, y: 0, z: -80 }, 2, "terrain-skirt"),
+  ];
+  const ORDERED: CameraCullPass = { ...CAMERA, order: "ordered" };
+
+  /** One dispatch of `pass` over `instances`, the pass the second. */
+  function inputOf(pass: CameraCullPass, instances: ReadonlyArray<CullInstance>) {
+    return {
+      instances,
+      records: (_page: number, cluster: number) => records[cluster] ?? record(Z, 0),
+      clustersPerPage: 3,
+      rotationColumns: [X, Y, Z] as const,
+      passes: [null, pass],
+      places: [
+        { bucketBase: 0, listBase: 0 },
+        { bucketBase: 8, listBase: 100 },
+      ],
+      templates: 8,
+      viewAxis: { x: 0, y: 0, z: -1 },
+    };
+  }
+
+  const AT_CAMERA = { x: 0, y: 0, z: 0 };
+  const INSTANCES: ReadonlyArray<CullInstance> = [
+    { originM: AT_CAMERA, page: 0, passMask: 0b10, unitM: 0.1 },
+    { originM: AT_CAMERA, page: 1, passMask: 0b10, unitM: 0.1, subPatch: true },
+    { originM: AT_CAMERA, page: 2, passMask: 0b10, unitM: 0.1, whole: true },
+    { originM: AT_CAMERA, page: 3, passMask: 0b00, unitM: 0.1 },
+  ];
+
+  it("packs the early pass as kind 4 and the late as kind 5", () => {
+    const out = new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES);
+    const place = { bucketBase: 0, listBase: 0 };
+    packCullPasses(
+      [ORDERED, { ...ORDERED, occlusion: "early" }, { ...ORDERED, occlusion: "late" }],
+      [place, place, place],
+      out,
+    );
+    const view = new DataView(out);
+    expect([0, 1, 2].map((n) => view.getUint32(n * CULL_PASS_BYTES, true))).toEqual([3, 4, 5]);
+  });
+
+  it("marks in the early pass only the kept clusters visible last frame, none of a sub-patch's", () => {
+    const marks = cullMarksTwin(inputOf({ ...ORDERED, occlusion: "early" }, INSTANCES), 0, {
+      visible,
+      earlyMarks: null,
+      refuses: null,
+    });
+    expect(marksByInstance(marks)).toEqual([
+      [0, NO_MARK, NO_MARK],
+      [NO_MARK, NO_MARK, NO_MARK],
+      [0, NO_MARK, NO_MARK],
+      [NO_MARK, NO_MARK, NO_MARK],
+    ]);
+  });
+
+  it("marks in the late pass the kept clusters the early pass did not, but those the pyramid refuses, never one kept whole", () => {
+    const input = inputOf({ ...ORDERED, occlusion: "late" }, INSTANCES);
+    const earlyMarks = cullMarksTwin(inputOf({ ...ORDERED, occlusion: "early" }, INSTANCES), 0, {
+      visible,
+      earlyMarks: null,
+      refuses: null,
+    });
+    const seen = { visible, earlyMarks, refuses: null };
+    expect([
+      marksByInstance(cullMarksTwin(input, 0, seen)),
+      marksByInstance(cullMarksTwin(input, 0, { ...seen, refuses: refusesAll })),
+    ]).toEqual([
+      // The instance kept whole keeps every cluster, its sphere behind the camera too.
+      [
+        [NO_MARK, NO_MARK, 4],
+        [0, NO_MARK, 4],
+        [NO_MARK, 0, 4],
+        [NO_MARK, NO_MARK, NO_MARK],
+      ],
+      [
+        [NO_MARK, NO_MARK, NO_MARK],
+        [NO_MARK, NO_MARK, NO_MARK],
+        [NO_MARK, 0, 4],
+        [NO_MARK, NO_MARK, NO_MARK],
+      ],
+    ]);
+  });
+
+  it("writes in the late pass each cluster's visibility, kept and not refused, cleared where its instance enters no pass, and none of a sub-patch's", () => {
+    const input = inputOf({ ...ORDERED, occlusion: "late" }, INSTANCES);
+    const seen = { visible, earlyMarks: new Uint32Array(12).fill(NO_MARK), refuses: null };
+    expect([
+      byPage(cullVisibilityTwin(input, seen, 0)),
+      byPage(cullVisibilityTwin(input, { ...seen, refuses: refusesAll }, 0)),
+      cullVisibilityTwin(inputOf({ ...ORDERED, occlusion: "early" }, INSTANCES), seen).size,
+    ]).toEqual([
+      [
+        [0, true],
+        [1, false],
+        [2, true],
+        [6, true],
+        [7, true],
+        [8, true],
+        [9, false],
+        [10, false],
+        [11, false],
+      ],
+      [
+        [0, false],
+        [1, false],
+        [2, false],
+        [6, true],
+        [7, true],
+        [8, true],
+        [9, false],
+        [10, false],
+        [11, false],
+      ],
+      0,
+    ]);
+  });
+
+  it("needs the visibility for an occlusion's pass, and the early marks for the late one", () => {
+    expect(() => cullMarksTwin(inputOf({ ...ORDERED, occlusion: "early" }, INSTANCES))).toThrow(
+      Error,
+    );
+    expect(() =>
+      cullMarksTwin(inputOf({ ...ORDERED, occlusion: "late" }, INSTANCES), 1, {
+        visible,
+        earlyMarks: null,
+        refuses: null,
+      }),
+    ).toThrow(Error);
+  });
+});
+
+describe("the cull's two kernels (plan R14, R14.T3.d)", () => {
+  it("compose the occlusion's bindings and tests into its variant alone, the plain one's stand-ins in their place", () => {
+    const occluding = CLUSTER_CULL_OCCLUSION_KERNEL.reference;
+    const plain = CLUSTER_CULL_KERNEL.reference;
+    expect([
+      occluding.includes("@group(0) @binding(11) var<storage, read_write> history"),
+      occluding.includes("fn hzb_refuses("),
+      plain.includes("@binding(9)"),
+      plain.includes("fn occlusion_seen(word : u32, bit : u32) -> bool {\n  return true;"),
+      [occluding, plain].every((source) => !source.includes("//OCCLUSION//")),
+    ]).toEqual([true, true, false, true, true]);
+  });
+
+  it("lays HzbParams out as hzb.ts packs it", () => {
+    const layout = declaredStructLayout(CLUSTER_CULL_OCCLUSION_KERNEL.reference, "HzbParams");
+    expect([layout?.members.map((m) => [m.name, m.offsetBytes]), layout?.sizeBytes]).toEqual([
+      [
+        ["right", 0],
+        ["up", 16],
+        ["forward", 32],
+        ["size", 48],
+        ["offsets0", 64],
+        ["offsets1", 80],
+        ["offsets2", 96],
+        ["offsets3", 112],
+      ],
+      HZB_PARAMS_BYTES,
     ]);
   });
 });

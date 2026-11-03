@@ -11,12 +11,13 @@ import {
 describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
   it("reads each field's values and writes them back in the fields' order", () => {
     const override = parseGeometryOverride(
-      "overlayDepth=scene-depth,strides=measured,finClusters=true,wireClusters=false,hullClusters=true,figureClusters=false,casterStrideCap=4,clusterPath=true,casterDepthCull=false",
+      "overlayDepth=scene-depth,occlusion=hzb,strides=measured,finClusters=true,wireClusters=false,hullClusters=true,figureClusters=false,casterStrideCap=4,clusterPath=true,casterDepthCull=false",
     );
     expect([override, geometryText(override), geometryText({})]).toEqual([
       {
         overlayDepth: "scene-depth",
         strides: "measured",
+        occlusion: "hzb",
         finClusters: true,
         wireClusters: false,
         hullClusters: true,
@@ -25,7 +26,7 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
         clusterPath: true,
         casterDepthCull: false,
       },
-      "clusterPath=true,casterDepthCull=false,casterStrideCap=4,overlayDepth=scene-depth,figureClusters=false,hullClusters=true,wireClusters=false,finClusters=true,strides=measured",
+      "clusterPath=true,casterDepthCull=false,casterStrideCap=4,overlayDepth=scene-depth,figureClusters=false,hullClusters=true,wireClusters=false,finClusters=true,strides=measured,occlusion=hzb",
       "",
     ]);
   });
@@ -46,6 +47,12 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
   it("refuses a far cascades' rate other than 1, 2 or 4 (R14.T6.b)", () => {
     for (const text of ["farCascadeRate=3", "farCascadeRate=8", "farCascadeRate=0"]) {
       expect(() => parseGeometryOverride(text)).toThrow("farCascadeRate is 1, 2 or 4");
+    }
+  });
+
+  it("refuses an occlusion other than off or hzb (R14.T3.d)", () => {
+    for (const text of ["occlusion=none", "occlusion=on", "occlusion="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("occlusion is off or hzb");
     }
   });
 

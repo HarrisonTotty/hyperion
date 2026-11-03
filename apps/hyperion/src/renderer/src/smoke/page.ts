@@ -145,6 +145,7 @@ import { checkHistogram } from "./histogram";
 import { checkClassCurveSeam, checkLitBody } from "./litBody";
 import { checkLitTerrain } from "./litTerrain";
 import { checkClusterCull } from "./clusterCull";
+import { checkOcclusionCull } from "./occlusionCull";
 import { captureSurveyLimb, checkSurveyEdge } from "./surveyEdge";
 import { captureOccultation, checkMeshBodies } from "./meshBodies";
 import { checkSkyBake, checkSkyBand, checkSkyDisc } from "./sky";
@@ -630,6 +631,9 @@ async function run(
   );
   await group(7, "R14.T1.b the cluster cull against its twin", () =>
     checkClusterCull(engine, checks),
+  );
+  await group(7, "R14.T3.d the depth pyramid and the occlusion's passes against their twins", () =>
+    checkOcclusionCull(engine, checks),
   );
   await group(7, "R10.T11 the wireframe's terrain", () => checkWireframeTerrain(engine, checks));
   // On the page's engine, whose variant decides the cascades' capability path (R10.T9.b); with the

@@ -29,10 +29,19 @@ import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { DepthLayerPass, DrawItem, MaterialHandle, MeshHandle } from "../engine/types";
 import { annulusEdges } from "../lighting/annuli";
+import { BUCKET_ARGS_BYTES } from "../clusters/buckets";
 import { compactTwin } from "../clusters/compact";
+import {
+  type PyramidFrame,
+  pyramidLevels,
+  pyramidProjectionOf,
+  pyramidTexels,
+} from "../clusters/hzb";
+import { BUFFER_USAGE } from "../engine/gpuFlags";
 import {
   cascadeKeeps,
   CLUSTER_CULL_KERNEL,
+  CLUSTER_CULL_OCCLUSION_KERNEL,
   CULL_INPUT_WHOLE,
   cullMarksTwin,
   cullTwin,
@@ -53,7 +62,14 @@ import { vertexDir, vertexSpacing } from "./cube";
 import { horizonCone } from "./cull";
 import { allocationTally } from "./gpu/allocationTally";
 import { TERRAIN_SHADOW_PASS_LABEL } from "./gpu/material";
-import { LIT_PATCH_INDICES, normalsAtlasOf, TERRAIN_CLUSTER_MESH } from "./gpu/resources";
+import {
+  CLUSTER_HISTORY_SLOT_BYTES,
+  CLUSTER_LIT_LATE_PASS,
+  CLUSTER_LIT_PASS,
+  LIT_PATCH_INDICES,
+  normalsAtlasOf,
+  TERRAIN_CLUSTER_MESH,
+} from "./gpu/resources";
 import {
   DATUM_SLOT,
   fadeWord,
@@ -102,6 +118,9 @@ import {
   PALETTE_NONE,
   type TerrainLayers,
 } from "./workers/messages";
+
+/** The lit pass's cull, the occlusion's variant (plan R14, R14.T3.d), by its name. */
+const LIT_CULL = CLUSTER_CULL_OCCLUSION_KERNEL.name;
 
 const PLANET: PlanetGeometry = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
 
@@ -853,7 +872,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     const made = await clusteredPass();
     const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const cast = cascadesOf(frame);
-    const dispatched = made.engine.dispatched.filter((d) => d.kernel === "cluster cull");
+    const dispatched = made.engine.dispatched.filter((d) => d.kernel === LIT_CULL);
     const interior = recordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
     expect([
       frame.draws.map((draw) => draw.mesh.name),
@@ -949,7 +968,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
   it("culls each cascade up to its stride cap at its texel, and draws every stride's buckets up to the cap (R14.T1.d)", async () => {
     const made = await clusteredPass();
     const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
-    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL);
     const passes = parsePasses(dispatch?.bindings.uniforms["passes"] ?? new Uint32Array());
     const set = cascadesOf(frame).set;
     const buckets = (cascadesOf(frame).passes[1] ?? fail()).draws.filter(
@@ -970,7 +989,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     const made = await clusteredPass();
     made.pass.setGeometry(OVERLAY_ALONE);
     const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
-    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL);
     const words = dispatch?.bindings.uniforms["passes"] ?? new Uint32Array();
     const passes = new DataView(words.buffer, words.byteOffset, words.byteLength);
     const params = dispatch?.bindings.uniforms["params"] ?? new Uint32Array();
@@ -1016,7 +1035,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
   it("culls the overlay's pass alone where no cascades are drawn, as on the low setting (R14.T1.e)", async () => {
     const made = await clusteredPass("low");
     const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, false));
-    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL);
     const words = dispatch?.bindings.uniforms["passes"] ?? new Uint32Array();
     const passes = new DataView(words.buffer, words.byteOffset, words.byteLength);
     expect([
@@ -1028,8 +1047,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
 
   it("redraws the overlay's depth by the way back and where its lever is redraw, culling no overlay pass (R14.T1.e)", async () => {
     const made = await clusteredPass("low");
-    const culls = (): number =>
-      made.engine.dispatched.filter((d) => d.kernel === "cluster cull").length;
+    const culls = (): number => made.engine.dispatched.filter((d) => d.kernel === LIT_CULL).length;
     made.pass.setGeometry({ ...SETTINGS.low.geometry, overlayDepth: "redraw", litClusters: false });
     const before = culls();
     const redrawn = made.pass.drawFor(PRIMARY, frameOf(NEAR, false));
@@ -1062,9 +1080,9 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     const edge = await streamedAt(NEAR);
     const edgeFrame = edge.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     expect([
-      made.engine.dispatched.filter((d) => d.kernel === "cluster cull").length,
+      made.engine.dispatched.filter((d) => d.kernel === LIT_CULL).length,
       cascadesOf(back).clustered,
-      edge.engine.dispatched.filter((d) => d.kernel === "cluster cull").length,
+      edge.engine.dispatched.filter((d) => d.kernel === LIT_CULL).length,
       cascadesOf(edgeFrame).clustered,
     ]).toEqual([0, false, 0, false]);
   });
@@ -1073,7 +1091,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     const made = await clusteredPass();
     made.pass.setGeometry(CLUSTERS_ALONE);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
-    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL);
     const passes = parsePasses(dispatch?.bindings.uniforms["passes"] ?? new Uint32Array());
     const viewAxis = parsedViewAxis(dispatch?.bindings.uniforms["params"] ?? new Uint32Array());
     const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
@@ -1167,7 +1185,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     const made = await clusteredPass();
     made.pass.setGeometry(EVERY_FRAME);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
-    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    const dispatch = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL);
     const passes = parsePasses(dispatch?.bindings.uniforms["passes"] ?? new Uint32Array());
     const receivers = passes.map((pass) => pass.receivers ?? fail());
     const far = receivers.map((r) => r.depthM[1]);
@@ -1181,7 +1199,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     ]).toEqual([4, [true, false, false, false], true, true, true]);
     made.pass.setGeometry(CLUSTERS_ALONE);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
-    const alone = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull");
+    const alone = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL);
     expect(
       parsePasses(alone?.bindings.uniforms["passes"] ?? new Uint32Array()).map((p) => p.receivers),
     ).toEqual([null, null, null, null]);
@@ -1211,7 +1229,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     const made = await clusteredPass();
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const made0 = {
-      kernels: made.engine.kernelPairs.filter((pair) => pair.name === "cluster cull").length,
+      kernels: made.engine.kernelPairs.filter((pair) => pair.name === LIT_CULL).length,
       writes: made.engine.writes.length,
     };
     const created: string[] = [];
@@ -1230,7 +1248,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     const fresh = await clusteredPass();
     const freshFrame = fresh.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     expect([
-      made.engine.kernelPairs.filter((pair) => pair.name === "cluster cull").length > made0.kernels,
+      made.engine.kernelPairs.filter((pair) => pair.name === LIT_CULL).length > made0.kernels,
       made.engine.writes
         .slice(made0.writes)
         .some(
@@ -1354,7 +1372,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const dispatched = made.engine.dispatched.slice(from);
     const interior = recordsIn(made.engine, `terrain interior instances (${PRIMARY})`).length;
-    const cull = dispatched.find((d) => d.kernel === "cluster cull") ?? fail();
+    const cull = dispatched.find((d) => d.kernel === LIT_CULL) ?? fail();
     const lit = parseLitPass(cull.bindings.uniforms["passes"] ?? new Uint32Array(), 5);
     const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
     const compactions = dispatched.filter((d) => d.kernel === "cluster compaction");
@@ -1370,7 +1388,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       [lit.planes.length, lit.strideCap, lit.horizon !== null],
       Array.from({ length: interior }, (_, n) => ((inputs[2 * n] ?? 0) >> 5) & 1),
     ]).toEqual([
-      ["cluster cull", "cluster compaction", "cluster compaction", "cluster compaction"],
+      [LIT_CULL, "cluster compaction", "cluster compaction", "cluster compaction"],
       [0, 1, 2].map((phase) => [
         TERRAIN_CLUSTER_COMPACT_LABEL,
         phase === 1 ? [1, 1, 1] : [interior, 1, 1],
@@ -1390,7 +1408,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
   it("marks in its twin every cluster the lit pass's frustum and horizon keep, and refuses the others, in the draw set's order after the compaction (R14.T2.a)", async () => {
     const made = await clusteredPass();
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
-    const cull = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull") ?? fail();
+    const cull = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL) ?? fail();
     const lit = parseLitPass(cull.bindings.uniforms["passes"] ?? new Uint32Array(), 5);
     const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
     const instances = instanceOrigins(made.engine, `terrain interior instances (${PRIMARY})`);
@@ -1838,7 +1856,7 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     const made = await measuredPass();
     made.pass.setGeometry(SETTINGS.high.geometry);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
-    const cull = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull") ?? fail();
+    const cull = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL) ?? fail();
     const records = stridesOf(made);
     expect(records.length).toBeGreaterThan(0);
     expect(records.every(({ bands }) => bands.every((band) => band === NO_STRIDE_BAND))).toBe(true);
@@ -1880,7 +1898,7 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
   it("culls the lit pass up to stride 8 and draws every stride's buckets", async () => {
     const made = await measuredPass();
     const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
-    const cull = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull") ?? fail();
+    const cull = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL) ?? fail();
     const lit = 5 * TEMPLATES;
     expect([
       parseLitPass(cull.bindings.uniforms["passes"] ?? new Uint32Array(), 5).strideCap,
@@ -1925,6 +1943,169 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     expect([finest.some(Boolean), finest.every(Boolean)]).toEqual([true, false]);
     // Its bands stand: its vertices still morph, held at the contact as the CDLOD morph is.
     expect(stridesOf(made).every(({ bands }) => bands[0] !== NO_STRIDE_BAND)).toBe(true);
+  });
+});
+
+/** A view's pyramid as its renderer holds one: its builds counted by hand, its frame a buffer. */
+interface HandPyramid {
+  builds: number;
+  frame: PyramidFrame | null;
+}
+
+/** A pyramid of a 64 × 48 depth on `made`'s engine, built `builds` times (plan R14, R14.T3.d). */
+function pyramidOf(made: Made, builds = 0): HandPyramid {
+  const size = { widthPx: 64, heightPx: 48 };
+  const levels = pyramidLevels(size);
+  const buffer = made.engine.createBuffer({
+    name: "view depth pyramid",
+    bytes: 4 * pyramidTexels(levels),
+    usage: BUFFER_USAGE.STORAGE,
+    category: "geometry-clusters",
+  });
+  return {
+    builds,
+    frame: { buffer, levels, size, projection: pyramidProjectionOf(Math.PI / 3, size) },
+  };
+}
+
+describe("the two-pass occlusion on the cluster path (plan R14, R14.T3.d)", () => {
+  const OCCLUDED: GeometrySettings = { ...SETTINGS.high.geometry, occlusion: "hzb" };
+
+  /** The kind of the last lit cull's pass `index`. */
+  function lastKind(made: Made, index: number): number {
+    const cull = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL) ?? fail();
+    return cull.bindings.uniforms["passes"]?.[(index * CULL_PASS_BYTES) / 4] ?? -1;
+  }
+
+  /** How many times the view's whole visibility was cleared. */
+  function drops(made: Made): number {
+    const bytes = made.pass.layout.slots.slotCount * CLUSTER_HISTORY_SLOT_BYTES;
+    return made.engine.writes.filter(
+      (w) => w.buffer === `terrain clusters (${PRIMARY}) visibility` && w.bytes === bytes,
+    ).length;
+  }
+
+  it("culls the lit pass as the occlusion's early pass where the frame takes it, and as before where it does not or the lever is off", async () => {
+    const made = await clusteredPass();
+    made.pass.setGeometry(OCCLUDED);
+    const occlusion = { pyramid: pyramidOf(made), fresh: true };
+    made.pass.drawFor(PRIMARY, { ...frameOf(NEAR, true), occlusion });
+    const early = lastKind(made, CLUSTER_LIT_PASS);
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const without = [lastKind(made, CLUSTER_LIT_PASS), made.pass.lateDrawFor(PRIMARY).length];
+    made.pass.setGeometry(SETTINGS.high.geometry);
+    made.pass.drawFor(PRIMARY, { ...frameOf(NEAR, true), occlusion });
+    expect([
+      early,
+      without,
+      lastKind(made, CLUSTER_LIT_PASS),
+      made.pass.lateDrawFor(PRIMARY),
+    ]).toEqual([4, [3, 0], 3, []]);
+  });
+
+  it("draws the rest after the first raster: the late pass against the view's pyramid, compacted into its own buckets, in the lit pass's order", async () => {
+    const made = await clusteredPass();
+    made.pass.setGeometry(OCCLUDED);
+    const pyramid = pyramidOf(made);
+    const frame = made.pass.drawFor(PRIMARY, {
+      ...frameOf(NEAR, true),
+      occlusion: { pyramid, fresh: true },
+    });
+    pyramid.builds += 1;
+    const from = made.engine.dispatched.length;
+    const late = made.pass.lateDrawFor(PRIMARY);
+    const dispatched = made.engine.dispatched.slice(from);
+    const cull = dispatched[0] ?? fail();
+    const passes = cull.bindings.uniforms["passes"] ?? new Uint32Array();
+    const hzb = cull.bindings.uniforms["hzb"] ?? new Uint32Array();
+    const buckets = TERRAIN_CLUSTER_MESH.templates.length;
+    const lit = frame.draws.filter((draw) => draw.mesh.name === "terrain clusters");
+    expect([
+      dispatched.map((d) => d.kernel),
+      [
+        passes[(CLUSTER_LIT_PASS * CULL_PASS_BYTES) / 4],
+        passes[(CLUSTER_LIT_LATE_PASS * CULL_PASS_BYTES) / 4],
+      ],
+      cull.bindings.uniforms["params"]?.[15],
+      [cull.bindings.buffers["pyramid"]?.name, hzb[14]],
+      dispatched.slice(1).map((d) => d.bindings.uniforms["params"]?.[4]),
+      late.map((draw) => draw.indirect?.offsetBytes),
+      late.map((draw) => draw.material.name),
+      made.pass.lateDrawFor(PRIMARY),
+    ]).toEqual([
+      [LIT_CULL, "cluster compaction", "cluster compaction", "cluster compaction"],
+      [0, 5],
+      CLUSTER_LIT_LATE_PASS + 1,
+      ["view depth pyramid", pyramid.frame?.levels.length],
+      [0, 1, 2].map(() => CLUSTER_LIT_LATE_PASS * buckets),
+      lit.map((draw) => (draw.indirect?.offsetBytes ?? 0) + buckets * BUCKET_ARGS_BYTES),
+      lit.map((draw) => draw.material.name),
+      [],
+    ]);
+  });
+
+  it("refuses nothing where the renderer built no pyramid", async () => {
+    const made = await clusteredPass();
+    made.pass.setGeometry(OCCLUDED);
+    made.pass.drawFor(PRIMARY, {
+      ...frameOf(NEAR, true),
+      occlusion: { pyramid: { builds: 0, frame: null }, fresh: true },
+    });
+    made.pass.lateDrawFor(PRIMARY);
+    const cull = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL) ?? fail();
+    expect([
+      cull.bindings.buffers["pyramid"]?.name,
+      cull.bindings.uniforms["hzb"]?.every((word) => word === 0),
+    ]).toEqual([`terrain clusters (${PRIMARY}) no pyramid`, true]);
+  });
+
+  it("drops the visibility where the frame says, at another pyramid and after a frame the view did not draw, and keeps it otherwise", async () => {
+    const made = await clusteredPass();
+    made.pass.setGeometry(OCCLUDED);
+    const pyramid = pyramidOf(made);
+    const frame = (occlusion: {
+      readonly pyramid: HandPyramid;
+      readonly fresh: boolean;
+    }): number => {
+      const before = drops(made);
+      made.pass.drawFor(PRIMARY, { ...frameOf(NEAR, true), occlusion });
+      occlusion.pyramid.builds += 1;
+      made.pass.lateDrawFor(PRIMARY);
+      return drops(made) - before;
+    };
+    const first = frame({ pyramid, fresh: true });
+    const next = frame({ pyramid, fresh: false });
+    const cut = frame({ pyramid, fresh: true });
+    // A frame of the view's this pass did not draw: a hand-over, a view's switch.
+    pyramid.builds += 1;
+    const gap = frame({ pyramid, fresh: false });
+    const another = frame({ pyramid: pyramidOf(made, pyramid.builds), fresh: false });
+    expect([first, next, cut, gap, another]).toEqual([1, 0, 1, 1, 1]);
+  });
+
+  it("redraws the late pass's clusters for the overlay's depth beside the lit pass's", async () => {
+    const made = await clusteredPass();
+    made.pass.setGeometry({ ...OCCLUDED, overlayDepth: "redraw" });
+    const frame = made.pass.drawFor(PRIMARY, {
+      ...frameOf(NEAR, true),
+      occlusion: { pyramid: pyramidOf(made), fresh: true },
+    });
+    const buckets = TERRAIN_CLUSTER_MESH.templates.length;
+    const late = CLUSTER_LIT_LATE_PASS * buckets * BUCKET_ARGS_BYTES;
+    const offsets = (frame.overlayDepth?.clusters ?? []).map((d) => d.indirect?.offsetBytes ?? 0);
+    expect([offsets.some((o) => o < late), offsets.some((o) => o >= late)]).toEqual([true, true]);
+  });
+
+  it("draws no late pass culled on a device that was lost since (Design note 16)", async () => {
+    const made = await clusteredPass();
+    made.pass.setGeometry(OCCLUDED);
+    made.pass.drawFor(PRIMARY, {
+      ...frameOf(NEAR, true),
+      occlusion: { pyramid: pyramidOf(made), fresh: true },
+    });
+    made.engine.loseDevice();
+    made.engine.restore();
+    expect(made.pass.lateDrawFor(PRIMARY)).toEqual([]);
   });
 });
 
@@ -2411,7 +2592,7 @@ describe("the far cascades at a lower rate (plan R14, R14.T6.b)", () => {
     const made = await clusteredPass();
     const lastCull = (): CascadeCullPass[] =>
       parsePasses(
-        made.engine.dispatched.findLast((d) => d.kernel === "cluster cull")?.bindings.uniforms[
+        made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL)?.bindings.uniforms[
           "passes"
         ] ?? new Uint32Array(),
       );

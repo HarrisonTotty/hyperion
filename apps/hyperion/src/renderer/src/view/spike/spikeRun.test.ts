@@ -11,6 +11,7 @@ import { IDENTITY_ROTATION } from "../coords/rotation";
 import { normalsAtlasOf } from "../terrain/gpu/resources";
 import { planetGeometry } from "../terrain/planet";
 import type { PatchRequest, Selection } from "../terrain/select";
+import type { DrawItem } from "../engine/types";
 import type { TerrainViewReport } from "../terrain/session";
 import { type TerrainFrameInput, TerrainPass, type TerrainPool } from "../terrain/terrainPass";
 import { type PatchKey, patchKeyString } from "../terrain/patchKey";
@@ -374,6 +375,10 @@ class LoggingSession implements SpikeTerrainSession {
 
   coverageMask(): null {
     return null;
+  }
+
+  drawLateTerrain(): ReadonlyArray<DrawItem> {
+    return [];
   }
 
   coverageWhole(): boolean {

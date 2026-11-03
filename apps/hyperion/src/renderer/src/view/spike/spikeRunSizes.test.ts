@@ -11,6 +11,7 @@ import type { MemoryCategory } from "../engine/memory";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { planetGeometry } from "../terrain/planet";
 import type { PatchRequest } from "../terrain/select";
+import type { DrawItem } from "../engine/types";
 import type { TerrainViewReport } from "../terrain/session";
 import { type TerrainFrameInput, TerrainPass, type TerrainPool } from "../terrain/terrainPass";
 import type { BakedPatch } from "../terrain/workers/messages";
@@ -122,6 +123,10 @@ class SizedSession implements SpikeTerrainSession, SpikeSizesSession {
 
   coverageMask(): null {
     return null;
+  }
+
+  drawLateTerrain(): ReadonlyArray<DrawItem> {
+    return [];
   }
 
   coverageWhole(): boolean {

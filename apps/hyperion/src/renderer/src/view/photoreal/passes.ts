@@ -7,7 +7,8 @@
  * near-limb bands' (R07.T8.d–g, a compute pass, a dispatch a set of bound textures, whose sums the
  * bodies' draws read); R10's terrain shadows (R10.T9.b, the shadow cascades' four caster passes, depth
  * alone into the engine's layers, which the terrain's draws read); mesh bodies (opaque, depth);
- * R10's terrain; host discs, disc bodies and point bodies in one painter order (Design note 2);
+ * R10's terrain; with plan R14's two-pass occlusion (R14.T3.d) the depth pyramid of that raster and
+ * the terrain's clusters it leaves to a second; host discs, disc bodies and point bodies in one painter order (Design note 2);
  * R08's atmosphere, each body's composite over everything drawn before it (R08.T10.b); R11's
  * rings, clouds and oceans; the histogram; bloom of the light above the
  * display's range; the tone-mapping pass; the symbology cased over the result. A style owns no
@@ -26,6 +27,7 @@ import {
 } from "../atmosphere/hillaire";
 import { ATMOSPHERE_TABLES_PASS } from "../atmosphere/tables";
 import { DISC_CELLS_PASS } from "../bodies/draw";
+import { DEPTH_PYRAMID_LABEL } from "../clusters/hzb";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { TERRAIN_PASS_LABEL, TERRAIN_SHADOW_PASS_LABEL } from "../terrain/gpu/material";
 import { BLOOM_PASS } from "../post/bloomChain";
@@ -44,6 +46,12 @@ export const PHOTOREAL_PASS_LABELS = {
    */
   discCells: DISC_CELLS_PASS,
   bodies: "bodies",
+  /**
+   * The bodies pass's second raster under the two-pass occlusion (plan R14, R14.T3.d): the terrain's
+   * lit clusters the first did not draw and the depth pyramid does not refuse, loading its colour
+   * and depth.
+   */
+  bodiesLate: "bodies late",
   discs: "discs",
   histogram: HISTOGRAM_PASS,
   bloom: BLOOM_PASS,
@@ -72,7 +80,7 @@ export const ATMOSPHERE_PASS_LABELS: ReadonlyArray<string> = [
 ];
 
 /** The plan that owns a pass. */
-export type PassOwner = "R06" | "R07" | "R08" | "R10" | "R11";
+export type PassOwner = "R06" | "R07" | "R08" | "R10" | "R11" | "R14";
 
 /** One pass of the list. */
 export interface PassEntry {
@@ -128,6 +136,10 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
       slot(TERRAIN_SHADOW_PASS_LABEL, "R10", true),
       own(PHOTOREAL_PASS_LABELS.bodies),
       slot(TERRAIN_PASS_LABEL, "R10", true),
+      // The two-pass occlusion's pyramid of the bodies' first raster, then the second (R14.T3.d);
+      // the cull's late pass between them takes the terrain cull's label.
+      slot(DEPTH_PYRAMID_LABEL, "R14", true),
+      own(PHOTOREAL_PASS_LABELS.bodiesLate),
       own(PHOTOREAL_PASS_LABELS.discs),
       // Each body's air over everything opaque drawn before it (R08.T10.b).
       slot("atmosphere", "R08", true, ATMOSPHERE_PASS_LABELS),

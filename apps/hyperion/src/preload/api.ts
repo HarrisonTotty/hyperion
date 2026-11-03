@@ -256,6 +256,8 @@ export interface GeometryOverride {
   readonly finClusters?: boolean;
   /** R14.T3.c: the lit pass's clusters at stride 1, or at each one's stated error and e_s. */
   readonly strides?: "off" | "measured";
+  /** R14.T3.d: two-pass occlusion against the depth pyramid. */
+  readonly occlusion?: "off" | "hzb";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

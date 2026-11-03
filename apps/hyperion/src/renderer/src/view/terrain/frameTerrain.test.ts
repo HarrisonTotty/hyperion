@@ -407,14 +407,18 @@ function fakeSource(
     readonly overlayMode?: FrameTerrainPass["geometry"]["overlayDepth"];
     readonly strides?: FrameTerrainPass["geometry"]["strides"];
     readonly whole?: boolean;
+    /** The pass's late draws (plan R14, R14.T3.d). */
+    readonly late?: ReadonlyArray<DrawItem>;
   } = {},
 ): {
   readonly source: ViewTerrainSource;
   readonly drawn: Array<{ view: string; body: string; input: TerrainViewFrameInput }>;
   readonly askedReady: string[];
+  readonly askedLate: Array<readonly [string, string]>;
 } {
   const drawn: Array<{ view: string; body: string; input: TerrainViewFrameInput }> = [];
   const askedReady: string[] = [];
+  const askedLate: Array<readonly [string, string]> = [];
   const pass: FrameTerrainPass = {
     maskReadyFor: (view) => {
       askedReady.push(view);
@@ -442,11 +446,16 @@ function fakeSource(
   return {
     drawn,
     askedReady,
+    askedLate,
     source: {
       wanted: new Set(),
       survey: () => null,
       coverageMask: (body) => (body === BODY ? MASK : null),
       coverageWhole: (body) => body === BODY && options.whole === true,
+      drawLateTerrain: (view, body) => {
+        askedLate.push([view, body]);
+        return body === BODY ? (options.late ?? []) : [];
+      },
       wirePass: () => null,
       drawWireTerrain: () => null,
       pass: (body) => (body === BODY && options.hasPass !== false ? pass : null),
@@ -753,6 +762,22 @@ describe("a view's frame terrain and the overlay's depth on the cluster path (pl
     ]);
   });
 
+  it("hands each body's pass the frame's occlusion, and asks each one it drew for its late draws once (plan R14, R14.T3.d)", () => {
+    const { plan, body } = handed();
+    const late: DrawItem = { ...DRAW, material: { kind: "material", name: "late" } };
+    const { source, drawn, askedLate } = fakeSource({ late: [late] });
+    const terrain = frameTerrain(source);
+    const occlusion = { pyramid: { builds: 0, frame: null }, fresh: true };
+    terrain.draws(plan, [body], occlusion);
+    const occluded = [drawn.at(-1)?.input.occlusion, terrain.lateDraws(), terrain.lateDraws()];
+    terrain.draws(plan, [body]);
+    expect([occluded, [drawn.at(-1)?.input.occlusion, terrain.lateDraws()], askedLate]).toEqual([
+      [occlusion, [late], []],
+      [undefined, []],
+      [[VIEW, BODY]],
+    ]);
+  });
+
   it("never asks the scene's depth where the camera's strides draw it (plan R14, R14.T3.c)", () => {
     const { plan, body } = handed();
     const terrain = frameTerrain(
@@ -893,6 +918,7 @@ function edgeSource(
         : null,
     coverageMask: () => null,
     coverageWhole: () => false,
+    drawLateTerrain: () => [],
     wirePass: () => null,
     drawWireTerrain: () => null,
     drawTerrain: () => null,

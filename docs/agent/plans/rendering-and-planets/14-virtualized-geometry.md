@@ -1487,6 +1487,8 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
   - _Acceptance:_ captures byte-identical with and without it, tie pixels listed (it reorders
     draws); clusters refused counted per pass; the frame's GPU time on the Mac and RTX recorded
     (pending).
+  - _Built_ (`r14-t3c-strides`; behind `occlusion`, off on both settings): records at the end of
+    Risks.
 - **R14.T3.e The triangle budget.** Size S to propose, M to build.
   - With strides, a frame's cost is its drawn triangles, not its patch count, so selection's budget
     (`maxPatches`, half the slots) may follow a triangle budget and the cache may grow without
@@ -2380,6 +2382,37 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     bind groups (`compute.ts`' `DispatchObjects`, over the draw path's `BindGroupCache`); a
     submission's pass-time resolve ends its own command buffer, with no `pass times` encoder.
   - Pending: the owner's Mac re-profile, `views-check --inspection --timing --hidden` (gate.txt).
+- **R14.T3.d** (`r14-t3c-strides`):
+  - `GeometrySettings.occlusion` is `"off" | "hzb"` (the brief's), not the plan's `"none" | "hzb"`;
+    `--geometry occlusion=`; results files without it read `off`.
+  - `DepthPyramid` (`clusters/hzb.ts`) holds its levels in one `r32` storage buffer, row by row, not
+    an `r32float` texture's mips (lean, 2026-11-03): the engine binds a sampled texture whole, which
+    cannot be read while a level of it is written. Its API is `begin(size, cut)` (whether the last
+    frame's visibility no longer holds), `build(depth, projection)`, `frame` and `builds`, not
+    `resize` and `texture`. The renderer owns one a view, made with its kernel, `depth pyramid`.
+  - The cull's occlusion is a kernel of its own, `CLUSTER_CULL_OCCLUSION_KERNEL`
+    (`clusterOcclusion.wgsl` composed into `clusterCull.wgsl`; bindings 9 to 11, `hzb`, `pyramid`
+    and `history`), which terrain's lit pass takes; every other consumer keeps `CLUSTER_CULL_KERNEL`,
+    whose stand-ins see every cluster. `CameraCullPass.occlusion` (`early`, kind 4; `late`, kind 5)
+    on the ordered pass. Its twin is `cull.ts`' `cullMarksTwin` with a `CullOcclusionTwin` and
+    `cullVisibilityTwin`; the pyramid's are `depthPyramidTwin` and `hzbRefuses`.
+  - The visibility is a bit a (slot, cluster) a view (`TerrainClusterBuffers.history`,
+    `CLUSTER_HISTORY_SLOT_BYTES`), cleared at each upload into its slot, and cleared whole where the
+    renderer's pyramid says fresh (the first frame, a new size, a cut: `dropHistograms` or
+    `present: false`), at another pyramid, and after a build the view's pass did not take (a
+    hand-over, a view's switch). A sub-patch takes no early pass and writes no bit; an instance kept
+    whole is never refused.
+  - The late pass is the buckets' seventh, `CLUSTER_LIT_LATE_PASS`, compacted as the lit pass is;
+    its counters are `lit late`, and `counts()`' lit triangles add them. The overlay's redraw of the
+    lit pass takes the late pass's buckets too.
+  - The frame: `TerrainFrameInput.occlusion`, `TerrainPass.lateDrawFor`,
+    `TerrainSession.drawLateTerrain`, `FrameTerrain.draws(plan, bodies, occlusion?)` and
+    `lateDraws()`; the renderer draws `bodies`, then `depth pyramid`'s dispatches, the late cull
+    (under the cull's label) and compaction, then `bodies late` loading colour and depth.
+    `photorealisticPasses` lists `depth pyramid` (owner R14) and `bodies late`.
+  - Not built: the visibility path (T2.c–d are not); the edge patches the lit mesh draws (with
+    `finClusters` off) are not tested, drawn in the first raster; the wireframe (after T4.c).
+  - Pending: the Mac's and the RTX's GPU times with `occlusion` on and off; Windows NOT RUN.
 - **R14, the WGSL digest pins** (`tool-pin-digests`, 2026-11-03): `just pin-digests` rewrites the
   `<NAME>_DIGESTS` tables' hex strings in `discReflectance.test.ts` and `thickKernels.test.ts` from
   the kernels' sources, and `--check` only compares. Run it after moving a kernel, or after resolving
