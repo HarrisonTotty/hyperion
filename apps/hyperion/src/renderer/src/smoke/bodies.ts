@@ -728,15 +728,18 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
     // refined in a pattern that varies cell to cell, a cell of each not surveyed, read at the
     // field's level in its refined texels and across their edges, on the GPU and in the rasteriser
     // alike: a level-8 field's 4 × 4 cells, and a level-7 field's 2 × 2 under a maturity, whose
-    // codes the cells and the tiles' gutters carry.
-    for (const [side, matured] of [
-      [4, false],
-      [2, true],
+    // codes the cells and the tiles' gutters carry; each at its cells' centres and, from the crate's
+    // REFINED_CORNERS_FROM, at their corners.
+    for (const [side, matured, corners] of [
+      [4, false, false],
+      [2, true, false],
+      [4, false, true],
+      [2, true, true],
     ] as const) {
-      const fine = fineClassMap(side, matured);
+      const fine = corners ? fineCornerMap(side, matured) : fineClassMap(side, matured);
       const withFine = classMapSurface(
         engine,
-        `smoke class map with a fine page of ${String(side)} cells a side`,
+        `smoke class map with a fine page of ${String(side)} cells a side${corners ? " at their corners" : ""}`,
         fine,
         levelClassLaws(),
         uniform,
@@ -759,7 +762,7 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
       const fineFinite = refined.texels.every((value) => Number.isFinite(value));
       const fineAgreement = texelAgreement(refined);
       checks.check(
-        `fix-coast-class-map a disc under a class map with a fine page of ${String(side)} × ${String(side)} cells${matured ? " and a maturity" : ""} equals the CPU rasteriser's, every texel finite`,
+        `fix-coast-class-map a disc under a class map with a fine page of ${String(side)} × ${String(side)} cells${corners ? " at their corners" : ""}${matured ? " and a maturity" : ""} equals the CPU rasteriser's, every texel finite`,
         fineFinite &&
           fineAgreement.worst <= 1 &&
           fineAgreement.classes &&
@@ -878,6 +881,61 @@ function fineClassMap(r: 2 | 4, matured: boolean): ClassMapTexels {
       }
     : undefined;
   return packClassMap(4, 2, ownOf, maturity, { side: r, refined });
+}
+
+/**
+ * {@link fineClassMap} at its refined texels' cells' corners (the crate's REFINED_CORNERS_FROM):
+ * four texels a face of two classes, every texel surveyed, those with i + j even refined to `r` ×
+ * `r` cells, their corner (ca, cb) class 0's where ca + 2 cb + face
+ * is 1 mod 3 and class 1's otherwise, the last cell of each not surveyed and its first corner none;
+ * the others class 0 at a quarter and class 1 at the rest, their own the mean of their corners' for
+ * the refined. Where `matured`, texel (i, j)'s code is 5,000 + 7,000 i + 3,000 j and corner c's of a
+ * refined one 10,000 + 2,000 c, each class drawn from nodes rising with their maturity.
+ */
+function fineCornerMap(r: 2 | 4, matured: boolean): ClassMapTexels {
+  const refined = ([0, 1, 2, 3, 4, 5] as const).flatMap((face) =>
+    Array.from({ length: 16 }, (_, k) => ({ i: k % 4, j: Math.floor(k / 4) }))
+      .filter(({ i, j }) => (i + j) % 2 === 0)
+      .map(({ i, j }) => ({
+        texel: { face, i, j },
+        surveyed: Array.from({ length: r * r }, (_, c) => c !== r * r - 1),
+        corners: Array.from({ length: (r + 1) ** 2 }, (_, c) => {
+          // The last cell's first corner, which a cell not surveyed holds, none.
+          if (c === (r - 1) * (r + 2)) {
+            return null;
+          }
+          const w = ((c % (r + 1)) + 2 * Math.floor(c / (r + 1)) + face) % 3 === 1 ? 1 : 0;
+          return [w, 1 - w];
+        }),
+        codes: Array.from({ length: (r + 1) ** 2 }, (_, c) => 10_000 + 2_000 * c),
+      })),
+  );
+  const ownOf = ({ face, i, j }: ClassMapTexel): ReadonlyArray<number> => {
+    const input = refined.find(
+      ({ texel }) => texel.face === face && texel.i === i && texel.j === j,
+    );
+    if (input === undefined) {
+      return [0.25, 0.75];
+    }
+    const corners = input.corners.filter((corner) => corner !== null);
+    const w = corners.reduce((sum, corner) => sum + (corner[0] ?? 0), 0) / corners.length;
+    return [w, 1 - w];
+  };
+  const maturity = matured
+    ? {
+        codeOf: ({ i, j }: ClassMapTexel): number => 5_000 + 7_000 * i + 3_000 * j,
+        nodes: Float32Array.from(
+          { length: 3 * MATURITY_NODES * 2 },
+          (_, at) =>
+            0.05 +
+            0.04 * (Math.floor(at / 3) % MATURITY_NODES) +
+            0.3 * Math.floor(at / (3 * MATURITY_NODES)) +
+            0.01 * (at % 3),
+        ),
+        drawn: [true, true],
+      }
+    : undefined;
+  return packClassMap(4, 2, ownOf, maturity, { side: r, lattice: "corners", refined });
 }
 
 /** {@link levelClassMap}'s two classes' laws: a dark lunar class and a bright terrestrial one. */

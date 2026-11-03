@@ -55,6 +55,8 @@ function oneTexelMap(
     nodes: () => Float32Array.from({ length: 16 * 3 }, (_, k) => 0.01 * (k + 1)),
     fineSide: refined ? 2 : 1,
     refined: () => (refined ? Uint32Array.from([0]) : new Uint32Array()),
+    fineCorners: false,
+    fineSurveyed: () => (refined ? Uint8Array.from([1, 0, 1, 1]) : new Uint8Array()),
     fineWeights: () => (refined ? Uint8Array.from([255, 0, 255, 255]) : new Uint8Array()),
     fineMaturity: () =>
       refined && codes.length > 0 ? Uint16Array.from([100, 0, 200, 300]) : new Uint16Array(),
@@ -573,7 +575,7 @@ describe("a height worker's fields", () => {
       expect(Object.hasOwn(map, "refinement")).toBe(false);
     });
 
-    it("answers each refined texel's cells and their codes as the module's, all transferred (lane fix-coast-class-map)", () => {
+    it("answers each refined texel's cells, their survey and codes, and their lattice as the module's, all transferred (lane fix-coast-class-map)", () => {
       const { map, transfer } = classMapAnswered(Uint16Array.from([40_000]), true);
       const { refinement } = map;
       if (refinement === undefined) {
@@ -581,12 +583,15 @@ describe("a height worker's fields", () => {
       }
       expect([
         refinement.side,
+        refinement.corners,
         [...refinement.texels],
+        [...refinement.surveyed],
         [...refinement.weights],
         [...refinement.codes],
-      ]).toEqual([2, [0], [255, 0, 255, 255], [100, 0, 200, 300]]);
-      expect(transfer.slice(-3)).toEqual([
+      ]).toEqual([2, false, [0], [1, 0, 1, 1], [255, 0, 255, 255], [100, 0, 200, 300]]);
+      expect(transfer.slice(-4)).toEqual([
         refinement.texels.buffer,
+        refinement.surveyed.buffer,
         refinement.weights.buffer,
         refinement.codes.buffer,
       ]);

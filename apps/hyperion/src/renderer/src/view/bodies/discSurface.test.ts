@@ -42,6 +42,7 @@ import {
   classMapAlbedoAt,
   classMapFineCapacity,
   type ClassMapFineInput,
+  type ClassMapRefinedInput,
   classMapFineLayer,
   classMapIndexLayer,
   type ClassMapMaturityInput,
@@ -1717,5 +1718,441 @@ describe("the class map's fine page (lane fix-coast-class-map)", () => {
       code(0, 1, 1),
       code(0, 2, 2),
     ]).toEqual([20_000, 20_002, 1_001, 1_001, 10_000, 10_003]);
+  });
+});
+
+/**
+ * A two-class map of `n` texels a face, every texel class 0's alone but where `refined` gives a
+ * texel's `side` × `side` cells' (`side` + 1)² corners, each `[w, 1 − w]` from `cornerOf(ca, cb)`
+ * or `null`, its cells surveyed where `surveyed(ci, cj)` holds (all of them where absent), its own
+ * the mean of its surveyed corners'.
+ */
+function cornerMap(
+  n: number,
+  refined: ReadonlyArray<{
+    readonly texel: ClassMapTexel;
+    readonly cornerOf: (ca: number, cb: number) => number | null;
+    readonly surveyed?: (ci: number, cj: number) => boolean;
+  }>,
+  side = R,
+): ClassMapTexels {
+  const inputs = refined.map(({ texel, cornerOf, surveyed }) => ({
+    texel,
+    surveyed: Array.from({ length: side * side }, (_, c) =>
+      surveyed === undefined ? true : surveyed(c % side, Math.floor(c / side)),
+    ),
+    corners: Array.from({ length: (side + 1) ** 2 }, (_, c) => {
+      const w = cornerOf(c % (side + 1), Math.floor(c / (side + 1)));
+      return w === null ? null : [w, 1 - w];
+    }),
+  }));
+  const own = (texel: ClassMapTexel): ReadonlyArray<number> => {
+    const input = inputs.find(
+      ({ texel: t }) => t.face === texel.face && t.i === texel.i && t.j === texel.j,
+    );
+    if (input === undefined) {
+      return [1, 0];
+    }
+    const surveyed = input.corners.filter((corner) => corner !== null);
+    const w = surveyed.reduce((sum, corner) => sum + (corner[0] ?? 0), 0) / surveyed.length;
+    return [w, 1 - w];
+  };
+  return packClassMap(n, 2, own, undefined, { side, lattice: "corners", refined: inputs });
+}
+
+/** {@link FINE_TEXEL}'s 4 × 4 cells surveyed and their 5 × 5 corners class 0's, and their codes, for the refusals. */
+const CORNER_SURVEYED: ReadonlyArray<boolean> = Array.from({ length: R * R }, () => true);
+const CORNER_READINGS: ReadonlyArray<ReadonlyArray<number>> = Array.from(
+  { length: (R + 1) ** 2 },
+  () => [1, 0],
+);
+const CORNER_CODES: ReadonlyArray<number> = Array.from({ length: (R + 1) ** 2 }, () => 0);
+
+/** {@link FINE_TEXEL} as a refined texel, with `given` in place of its own. */
+function cornerTexel(given: Partial<ClassMapRefinedInput> = {}): ClassMapRefinedInput {
+  return { texel: FINE_TEXEL, surveyed: CORNER_SURVEYED, corners: CORNER_READINGS, ...given };
+}
+
+/** Corner (ca, cb)'s class-0 weight (ca + `row` cb) ÷ `over` as its byte packs it. */
+function cornerWeightOf(over: number, row: number): (ca: number, cb: number) => number {
+  return (ca, cb) => Math.round(((ca + row * cb) / over) * 255) / 255;
+}
+
+/** The bilinear of corner weights w(ca, cb) over cell (ci, cj) at (fx, fy) within it. */
+function bilinear(
+  w: (ca: number, cb: number) => number,
+  ci: number,
+  cj: number,
+  fx: number,
+  fy: number,
+): number {
+  const below = w(ci, cj) * (1 - fx) + w(ci + 1, cj) * fx;
+  const above = w(ci, cj + 1) * (1 - fx) + w(ci + 1, cj + 1) * fx;
+  return below * (1 - fy) + above * fy;
+}
+
+describe("the class map's fine page at its cells' corners (lane fix-coast-class-map; the crate's REFINED_CORNERS_FROM)", () => {
+  it("takes its index's six layers and a layer a page at two classes, in its texture's size", () => {
+    const map = cornerMap(4, [{ texel: { face: 0, i: 1, j: 1 }, cornerOf: () => 0 }]);
+    expect(map.fine).toEqual({ side: R, tiles: 1, pages: 1, corners: true });
+    expect(classMapTexelLayers(map)).toBe(6 + 6 + 1);
+    expect(map.data).toHaveLength(13 * 6 * 6 * 4);
+    expect(classMapTextureSpec("refined", map).size).toEqual({
+      width: 6,
+      height: 6,
+      depthOrArrayLayers: 13,
+    });
+  });
+
+  it("packs each refined texel's corners from (0, 0) of its tile, its cells' survey at (r + 1, j), and t + 1 and r in its face's index", () => {
+    const map = cornerMap(4, [
+      { texel: { face: 0, i: 1, j: 1 }, cornerOf: (ca) => (ca === 0 ? 0 : 1) },
+      {
+        texel: { face: 3, i: 2, j: 0 },
+        cornerOf: (_, cb) => (cb === R ? null : 0.5),
+        surveyed: (_, cj) => cj !== R - 1,
+      },
+    ]);
+    expect([indexBytes(map, 0, 1, 1), indexBytes(map, 3, 2, 0), indexBytes(map, 0, 2, 1)]).toEqual([
+      [0, 1, R],
+      [0, 2, R],
+      [0, 0, 0],
+    ]);
+    // Its index's a 255 at each refined texel, which a page at the cells' centres leaves 0.
+    const indexAlpha = (face: Face, i: number, j: number): number => {
+      const side = classMapSide(map.faceTexels);
+      return (
+        map.data[
+          ((classMapIndexLayer(face, map.classes, false) * side + j + 1) * side + i + 1) * 4 + 3
+        ] ?? Number.NaN
+      );
+    };
+    expect([indexAlpha(0, 1, 1), indexAlpha(3, 2, 0), indexAlpha(0, 2, 1)]).toEqual([255, 255, 0]);
+    expect([
+      tileByte(map, 0, 0, 2, 0),
+      tileByte(map, 0, 0, 2, 1),
+      tileByte(map, 0, 1, 2, 0),
+      tileByte(map, 0, R, R, 0),
+    ]).toEqual([0, 255, 255, 255]);
+    // Its texel's own as without the page.
+    expect([storedByte(map, 0, 2, 2, 0), storedByte(map, 0, 2, 2, 1)]).toEqual([204, 51]);
+    // A corner not surveyed holds no weight, the others their own; a cell's flag 255 where it is
+    // surveyed and 0 where not.
+    expect([
+      tileByte(map, 1, 1, R, 0),
+      tileByte(map, 1, 1, R, 1),
+      tileByte(map, 1, 1, R - 1, 0),
+      ...[0, 1, 2, 3].map((ci) => tileByte(map, 1, R + 1, 0, ci)),
+      ...[0, 1, 2, 3].map((ci) => tileByte(map, 1, R + 1, R - 1, ci)),
+    ]).toEqual([0, 0, 128, 255, 255, 255, 255, 0, 0, 0, 0]);
+  });
+
+  it("draws a refined texel as the terrain's quads: in each cell the bilinear of its four corners, and elsewhere alone in a cell not surveyed", () => {
+    const n = 4;
+    const w = cornerWeightOf(24, 5);
+    const map = cornerMap(n, [
+      {
+        texel: { face: 2, i: 1, j: 2 },
+        cornerOf: (ca, cb) => (ca + 5 * cb) / 24,
+        surveyed: (ci, cj) => !(ci === 3 && cj === 3),
+      },
+    ]);
+    let worst = 0;
+    const unsurveyed: number[][] = [];
+    for (let cj = 0; cj < R; cj += 1) {
+      for (let ci = 0; ci < R; ci += 1) {
+        for (const [fx, fy] of [
+          [0.5, 0.5],
+          [0.1, 0.8],
+          [0.9, 0.3],
+        ] as const) {
+          const d = directionAt(2, (1 + (ci + fx) / R) / n, (2 + (cj + fy) / R) / n);
+          const shares = classMapSharesAt(map, d);
+          if (ci === 3 && cj === 3) {
+            unsurveyed.push(shares);
+            continue;
+          }
+          const expected = bilinear(w, ci, cj, fx, fy);
+          worst = Math.max(
+            worst,
+            Math.abs((shares[1] ?? 0) - expected),
+            Math.abs((shares[2] ?? 0) - (1 - expected)),
+          );
+        }
+      }
+    }
+    expect(worst).toBeLessThan(1e-9);
+    expect(unsurveyed).toEqual([
+      [1, 0, 0],
+      [1, 0, 0],
+      [1, 0, 0],
+    ]);
+  });
+
+  it("counts a surveyed cell's corner not surveyed as elsewhere alone, as the terrain's vertex of no weight", () => {
+    // The texel's last cell surveyed, its far corner, whose cell lies past the survey, none.
+    const n = 4;
+    const w = cornerWeightOf(24, 5);
+    const map = cornerMap(n, [
+      {
+        texel: { face: 2, i: 1, j: 2 },
+        cornerOf: (ca, cb) => (ca === R && cb === R ? null : (ca + 5 * cb) / 24),
+      },
+    ]);
+    const [fx, fy] = [0.7, 0.6];
+    const d = directionAt(2, (1 + (R - 1 + fx) / R) / n, (2 + (R - 1 + fy) / R) / n);
+    const shares = classMapSharesAt(map, d);
+    const kept = (ca: number, cb: number): number => (ca === R && cb === R ? 0 : w(ca, cb));
+    const other = (ca: number, cb: number): number => (ca === R && cb === R ? 0 : 1 - w(ca, cb));
+    const expected = [
+      fx * fy,
+      bilinear(kept, R - 1, R - 1, fx, fy),
+      bilinear(other, R - 1, R - 1, fx, fy),
+    ];
+    expect(shares.map((share, m) => Math.abs(share - (expected[m] ?? 0)) < 1e-9)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+  });
+
+  it("meets an unrefined texel at a refined texel's edge within half their gap: its own edge corners on the refined side, half the texel's on the other", () => {
+    // Face 0's column i = 1 refined, its corners on its −u edge class 1's and the rest class 0's,
+    // every other texel class 0's.
+    const n = 4;
+    const map = cornerMap(
+      n,
+      [0, 1, 2, 3].map((j) => ({
+        texel: { face: 0, i: 1, j },
+        cornerOf: (ca: number) => (ca === 0 ? 0 : 1),
+      })),
+    );
+    const at = (s: number, t: number): number =>
+      classMapSharesAt(map, directionAt(0, s, t))[2] ?? 0;
+    const edge = 1 / n;
+    const wrong = [0.3, 0.375, 0.42, 0.5, 0.6].flatMap((t) => {
+      const left = at(edge - 1e-9, t);
+      const right = at(edge + 1e-9, t);
+      return Math.abs(left - 0.5) > 1e-6 || Math.abs(right - 1) > 1e-6
+        ? [`t ${String(t)}: ${String(left)} | ${String(right)}`]
+        : [];
+    });
+    expect(wrong).toEqual([]);
+    // The unrefined texel's centre its own; the refined texel's first cell's far corners class 0's.
+    expect(at(0.5 / n, 0.4)).toBe(0);
+    expect(at((1 + 1 / R) / n, 0.4)).toBeCloseTo(0, 9);
+  });
+
+  it("keeps the refined texels whose corners stand furthest from their texel's where more than fit", () => {
+    // Four texels a face at 16 classes with a maturity: one tile a page, 44 pages.
+    const n = 4;
+    const classes = 16;
+    const capacity = classMapFineCapacity(n, classes, true, R);
+    expect(capacity).toBe(44);
+    const texels = ([0, 1, 2, 3, 4, 5] as const).flatMap((face) =>
+      Array.from({ length: n * n }, (_, k): ClassMapTexel => ({
+        face,
+        i: k % n,
+        j: Math.floor(k / n),
+      })),
+    );
+    const weightsOf = (): number[] => Array.from({ length: classes }, (_, k) => (k === 0 ? 1 : 0));
+    // Texel k's corners part from its own by k: the first, by nothing, is left out.
+    const refined = texels.slice(0, capacity + 1).map((texel, k) => ({
+      texel,
+      surveyed: Array.from({ length: R * R }, () => true),
+      corners: Array.from({ length: (R + 1) ** 2 }, () =>
+        Array.from({ length: classes }, (_, c) => (c === 0 ? 1 - k / 100 : c === 1 ? k / 100 : 0)),
+      ),
+      codes: Array.from({ length: (R + 1) ** 2 }, () => 0),
+    }));
+    const map = packClassMap(
+      n,
+      classes,
+      weightsOf,
+      maturityOf(classes, () => 0),
+      {
+        side: R,
+        lattice: "corners",
+        refined,
+      },
+    );
+    expect(map.fine?.tiles).toBe(capacity);
+    expect(classMapTexelLayers(map)).toBe(256);
+    // The first texel unrefined, the second tile 0.
+    const index = (texel: ClassMapTexel): number => {
+      const side = classMapSide(n);
+      const at =
+        ((classMapIndexLayer(texel.face, classes, true) * side + texel.j + 1) * side +
+          texel.i +
+          1) *
+        4;
+      return (map.data[at] ?? 0) * 256 + (map.data[at + 1] ?? 0);
+    };
+    const texelAt = (k: number): ClassMapTexel => {
+      const texel = texels[k];
+      if (texel === undefined) {
+        throw new Error(`no texel ${String(k)}`);
+      }
+      return texel;
+    };
+    expect([index(texelAt(0)), index(texelAt(1)), index(texelAt(capacity))]).toEqual([
+      0,
+      1,
+      capacity,
+    ]);
+  });
+
+  it("gives a refined texel's albedo at each corner from that corner's own code", () => {
+    const n = 4;
+    const texel: ClassMapTexel = { face: 1, i: 2, j: 1 };
+    const corners = (R + 1) ** 2;
+    const codes = Array.from({ length: corners }, (_, c) => 1_000 * (c + 1));
+    const map = packClassMap(
+      n,
+      2,
+      () => [0.5, 0.5],
+      maturityOf(2, () => 30_000),
+      {
+        side: R,
+        lattice: "corners",
+        refined: [
+          {
+            texel,
+            surveyed: Array.from({ length: R * R }, () => true),
+            corners: Array.from({ length: corners }, (_, c) => (c % 2 === 0 ? [1, 0] : [0, 1])),
+            codes,
+          },
+        ],
+      },
+    );
+    const wrong: string[] = [];
+    // At each corner, those on the texel's edge a millionth of a cell inside it, so that the point is
+    // the texel's.
+    const inside = (k: number): number => k + (k === 0 ? 1e-6 : k === R ? -1e-6 : 0);
+    for (let c = 0; c < corners; c += 1) {
+      const ca = c % (R + 1);
+      const cb = Math.floor(c / (R + 1));
+      const d = directionAt(1, (2 + inside(ca) / R) / n, (1 + inside(cb) / R) / n);
+      const shares = classMapSharesAt(map, d);
+      const k = c % 2;
+      const albedo = classMapAlbedoAt(map, d, shares)?.[k] ?? null;
+      const expected = maturityNodeAlbedo(
+        map.maturity?.nodes ?? new Float32Array(),
+        3 * MATURITY_NODES * k,
+        maturitySegment(maturityCodeRatio(codes[c] ?? Number.NaN)),
+      );
+      if (
+        albedo === null ||
+        albedo.some((a, ch) => Math.abs(a - (expected[ch] ?? Number.NaN)) > 1e-6)
+      ) {
+        wrong.push(`corner ${String(c)}: ${String(albedo)} against ${expected.join(", ")}`);
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: "r other than 2 or 4",
+      fine: { side: 3, lattice: "corners" as const, refined: [] },
+      message: /2 or 4/u,
+    },
+    {
+      name: "a texel not surveyed",
+      fine: { side: R, lattice: "corners" as const, refined: [cornerTexel()] },
+      surveyed: false,
+      message: /not a surveyed/u,
+    },
+    {
+      name: "a texel given twice",
+      fine: { side: R, lattice: "corners" as const, refined: [cornerTexel(), cornerTexel()] },
+      message: /twice/u,
+    },
+    {
+      name: "a survey not r² cells",
+      fine: {
+        side: R,
+        lattice: "corners" as const,
+        refined: [cornerTexel({ surveyed: CORNER_SURVEYED.slice(1) })],
+      },
+      message: /15 cells, 25 corners and 0 codes, not 16 and 25/u,
+    },
+    {
+      name: "corners not (r + 1)² many",
+      fine: {
+        side: R,
+        lattice: "corners" as const,
+        refined: [cornerTexel({ corners: CORNER_READINGS.slice(1) })],
+      },
+      message: /16 cells, 24 corners and 0 codes, not 16 and 25/u,
+    },
+    {
+      name: "a corner's weights not a class each",
+      fine: {
+        side: R,
+        lattice: "corners" as const,
+        refined: [cornerTexel({ corners: [[1], ...CORNER_READINGS.slice(1)] })],
+      },
+      message: /has 1 weights for 2 classes/u,
+    },
+  ])("refuses $name", ({ fine, surveyed, message }) => {
+    expect(() => packFine(fine, surveyed)).toThrow(message);
+  });
+
+  it.each([
+    {
+      name: "codes not (r + 1)² many",
+      codes: CORNER_CODES.slice(1),
+      message: /25 corners and 24 codes/u,
+    },
+    {
+      name: "a code past a unorm16",
+      codes: [70_000, ...CORNER_CODES.slice(1)],
+      message: /maturity code 70000/u,
+    },
+  ])("refuses, under a maturity, $name", ({ codes, message }) => {
+    expect(() =>
+      packClassMap(
+        4,
+        2,
+        () => [1, 0],
+        maturityOf(2, () => 0),
+        {
+          side: R,
+          lattice: "corners",
+          refined: [cornerTexel({ codes })],
+        },
+      ),
+    ).toThrow(message);
+  });
+
+  it("carries no page for a refinement of no texel", () => {
+    expect(packFine({ side: R, lattice: "corners", refined: [] }).fine).toBeUndefined();
+  });
+
+  it("packs and reads 2 × 2 cells, a level-7 field's, in each the bilinear of its 3 × 3 corners", () => {
+    const n = 4;
+    const w = cornerWeightOf(8, 3);
+    const map = cornerMap(
+      n,
+      [{ texel: { face: 2, i: 1, j: 2 }, cornerOf: (ca, cb) => (ca + 3 * cb) / 8 }],
+      2,
+    );
+    expect(map.fine).toEqual({ side: 2, tiles: 1, pages: 1, corners: true });
+    let worst = 0;
+    for (let c = 0; c < 4; c += 1) {
+      const ci = c % 2;
+      const cj = Math.floor(c / 2);
+      const d = directionAt(2, (1 + (ci + 0.3) / 2) / n, (2 + (cj + 0.6) / 2) / n);
+      const expected = bilinear(w, ci, cj, 0.3, 0.6);
+      const shares = classMapSharesAt(map, d);
+      worst = Math.max(
+        worst,
+        Math.abs((shares[1] ?? 0) - expected),
+        Math.abs((shares[2] ?? 0) - (1 - expected)),
+      );
+    }
+    expect(worst).toBeLessThan(1e-9);
   });
 });

@@ -234,7 +234,11 @@ export interface WasmClassMap {
   readonly fineSide: number;
   /** The place in `texels()` of each refined texel, rising; empty where none is. */
   refined(): Uint32Array;
-  /** Each refined texel's r² cells' weight bytes (`ClassMapRefinementAnswer.weights`). */
+  /** Whether the refined texels are read at their cells' corners (`ClassMapRefinementAnswer.corners`). */
+  readonly fineCorners: boolean;
+  /** Each refined texel's r² cells' survey, 1 or 0 (`ClassMapRefinementAnswer.surveyed`). */
+  fineSurveyed(): Uint8Array;
+  /** Each refined texel's cells' or corners' weight bytes (`ClassMapRefinementAnswer.weights`). */
   fineWeights(): Uint8Array;
   /** Their maturity codes, empty where the header carries no maturity. */
   fineMaturity(): Uint16Array;
@@ -981,7 +985,9 @@ export class WorkerFields {
           : {
               refinement: {
                 side: map.fineSide,
+                corners: map.fineCorners,
                 texels: refined,
+                surveyed: map.fineSurveyed(),
                 weights: map.fineWeights(),
                 codes: map.fineMaturity(),
               },

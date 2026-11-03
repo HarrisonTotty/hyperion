@@ -99,7 +99,8 @@
 // `ClassMapFine`): six index layers, one a face, each refined texel's tile t + 1 in r and g and its
 // cells a side, r, in b (`fine_tile`), then the tiles' pages, each its classes' layers and under a
 // maturity its codes' layer, each tile r + 2 texels a side, its cells and a gutter of the cells about
-// it; any one texture where the surface is uniform, unread.
+// it, or where its index's a is 255 its cells' (r + 1)² corners from (0, 0) and its cells' survey
+// flags at (r + 1, j); any one texture where the surface is uniform, unread.
 @group(2) @binding(2) var class_weights : texture_2d_array<f32>;
 
 // The body's atmosphere, which `surfaceLighting.wgsl` reads (plan R08, R08.T9.b; `draw.ts`'s
@@ -289,11 +290,13 @@ struct ClassMapLayout {
 }
 
 // A refined texel's tile in the fine page: its first texel, its page's first layer and its cells
-// along a side, r; `found` false for a texel not refined.
+// along a side, r, whether it holds its cells' corners (its index's a 255) rather than the cells;
+// `found` false for a texel not refined.
 struct FineTile {
   origin : vec2u,
   layer : u32,
   side : u32,
+  corners : bool,
   found : bool,
 }
 
@@ -313,6 +316,7 @@ fn fine_tile(texel : vec2u, face : u32, map_layout : ClassMapLayout) -> FineTile
   }
   let tile = code - 1u;
   out.side = u32(round(index.b * UNORM8_MAX));
+  out.corners = index.a > 0.5;
   let per_row = textureDimensions(class_weights).x / (out.side + 2u);
   let per_page = per_row * per_row;
   let q = tile % per_page;
@@ -367,6 +371,10 @@ fn add_clamped_cells(
   b : f32,
   map_layout : ClassMapLayout,
 ) {
+  if (tile.corners) {
+    add_clamped_corners(sums, tile, texel, st_n, b, map_layout);
+    return;
+  }
   let r = f32(tile.side);
   let local = clamp(st_n * r - r * vec2f(texel), vec2f(0.5), vec2f(r - 0.5)) - 0.5;
   let first = min(vec2u(floor(local)), vec2u(tile.side - 2u));
@@ -383,6 +391,55 @@ fn add_clamped_cells(
   }
 }
 
+// Tile `tile`'s cell `cell` at `f` within it, under a fine page at its cells' corners
+// (`discSurface.ts`' `cornerTerms`): its four corners, each by its bilinear weight times `b`, `every`
+// one, a corner not surveyed as law 0 alone, or those surveyed alone.
+fn add_cell_corners(
+  sums : ptr<function, SurfaceSums>,
+  tile : FineTile,
+  cell : vec2u,
+  f : vec2f,
+  b : f32,
+  map_layout : ClassMapLayout,
+  every : bool,
+) {
+  for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+    let step = vec2u(corner & 1u, corner >> 1u);
+    let stored = tile.origin + cell + step;
+    let one = texel_shares(stored, tile.layer, 1u, map_layout.count);
+    if (!every && !one.surveyed) {
+      continue;
+    }
+    let w = select(1.0 - f.x, f.x, step.x == 1u) * select(1.0 - f.y, f.y, step.y == 1u);
+    add_term(sums, one, b * w, map_layout, stored, tile.layer + map_layout.groups);
+  }
+}
+
+// Whether tile `tile`'s cell `cell` is surveyed, under a fine page at its cells' corners
+// (`discSurface.ts`' `cellSurveyed`): channel x of the page's first layer at (r + 1, y), 255 for a
+// surveyed cell.
+fn fine_cell_surveyed(tile : FineTile, cell : vec2u) -> bool {
+  let flags = textureLoad(class_weights, tile.origin + vec2u(tile.side + 1u, cell.y), tile.layer, 0);
+  return flags[cell.x] > 0.0;
+}
+
+// `add_clamped_cells` under a fine page at its cells' corners (`discSurface.ts`'
+// `clampedCornerTerms`): its cells' corners about the point held within its span, each by its
+// bilinear weight among them times `b`, those surveyed alone.
+fn add_clamped_corners(
+  sums : ptr<function, SurfaceSums>,
+  tile : FineTile,
+  texel : vec2i,
+  st_n : vec2f,
+  b : f32,
+  map_layout : ClassMapLayout,
+) {
+  let r = f32(tile.side);
+  let local = clamp(st_n * r - r * vec2f(texel), vec2f(0.0), vec2f(r));
+  let cell = min(vec2u(floor(local)), vec2u(tile.side - 1u));
+  add_cell_corners(sums, tile, cell, local - vec2f(cell), b, map_layout, false);
+}
+
 // The share of each of the disc's laws at the point `q` (from the body's centre ÷ a): law 0's
 // alone on a uniform surface; under a class map, by the survey-masked bilinear reconstruction
 // (R10.T10.d, decision-r07-t8b; `classMapSharesAt`) at the point's cube-sphere direction (R05's
@@ -393,7 +450,10 @@ fn add_clamped_cells(
 // of at least ¼. Under a fine page (lane fix-coast-class-map; `ClassMapFine`), in a refined texel
 // the same rule on its tile's cells, the field's, law 0 alone where the cell holding the point holds
 // no weight; and a refined texel among another's four stands by its cells at the point held within
-// their span (`add_clamped_cells`). Each law's A is its own (`surface_law`), but where the map
+// their span (`add_clamped_cells`). A page at its cells' corners draws a refined texel's cell
+// bilinearly between its four corners instead, a corner not surveyed as law 0 alone, as the
+// terrain's patch of level L − 6 draws its quad, law 0 alone where that cell is not surveyed, and a
+// refined neighbour by its corners about the point held within its span (`add_clamped_corners`). Each law's A is its own (`surface_law`), but where the map
 // carries its texels' maturity (`body.maturity`, R10.T1.c; `classMapAlbedoAt`): there a class of a
 // share above 0 drawn from its nodes takes Σ b T(x) ÷ Σ b over the same surveyed terms and weights
 // b, T(x) its nodes' albedo at the term's code (`maturity_segment`, `maturity_mix`), a zero share's
@@ -424,7 +484,18 @@ fn surface_at(body : Body, q : vec3f, classes : u32) -> SurfaceAt {
   let holding = vec2i(clamp(floor(st_n), vec2f(0.0), vec2f(last)));
   var sums : SurfaceSums;
   let own = fine_tile(vec2u(holding + vec2i(1)), at.face, map_layout);
-  if (own.found) {
+  if (own.found && own.corners) {
+    // In a refined texel of a fine page at its cells' corners: the corners of its cell holding the
+    // point, as the terrain's patch of level L − 6 draws its quad there, a corner not surveyed as
+    // the patch's vertex of no weight.
+    let r = f32(own.side);
+    let local = st_n * r - r * vec2f(holding);
+    let held = vec2u(clamp(floor(local), vec2f(0.0), vec2f(r - 1.0)));
+    if (!fine_cell_surveyed(own, held)) {
+      return out;
+    }
+    add_cell_corners(&sums, own, held, local - vec2f(held), 1.0, map_layout, true);
+  } else if (own.found) {
     // In a refined texel: its tile's cells, on the grid of N r a face.
     let r = f32(own.side);
     let local = st_n * r - r * vec2f(holding);

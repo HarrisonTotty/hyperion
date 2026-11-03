@@ -223,8 +223,21 @@ export interface ClassMapTexels {
  * ⌊q ÷ T⌋ (r + 2)), q = t mod T². The index's layer of face f ({@link classMapIndexLayer}) holds at
  * each refined texel t + 1, its high byte in r and its low in g, and r in b; 0 elsewhere, the gutter
  * included, so that across a face's edge a refined neighbour counts as its texel.
+ *
+ * A page at its cells' corners ({@link ClassMapFine.corners}, from the crate's `REFINED_CORNERS_FROM`)
+ * holds in each tile, in place of its cells and gutter, the (r + 1)² corners of its cells at (0, 0)
+ * to (r, r), the vertices of the terrain's patch of level L − 6 there, all 0 at a corner not
+ * surveyed, and cell (a, b)'s survey in channel a of the page's first layer at (r + 1, b), 255 for a
+ * surveyed cell and 0 for another; its index holds 255 in a, which a page at the centres leaves 0.
+ * The reconstruction then draws a refined cell bilinearly between its four corners, as that patch
+ * draws its quad, a corner not surveyed as `elsewhere` alone.
  */
 export interface ClassMapFine {
+  /**
+   * Whether its tiles hold their cells' corners rather than the cells themselves (the crate's
+   * `REFINED_CORNERS_FROM`); absent for a page at the cells' centres.
+   */
+  readonly corners?: true;
   /** r, the field cells along a refined texel's side: 2 or 4. */
   readonly side: number;
   /** The tiles it holds, one a refined texel. */
@@ -238,10 +251,20 @@ export interface ClassMapRefinedInput {
   readonly texel: ClassMapTexel;
   /**
    * Its r² cells in rising (j, i), each its weight per class, each in [0, 1] and summing to at most
-   * 1, or `null` for a cell not surveyed.
+   * 1, or `null` for a cell not surveyed: a page at its cells' centres'.
    */
-  readonly cells: ReadonlyArray<ReadonlyArray<number> | null>;
-  /** Each cell's maturity code alike, an integer 0 to 65,535, for a map that carries a maturity. */
+  readonly cells?: ReadonlyArray<ReadonlyArray<number> | null>;
+  /** Whether each of its r² cells, in rising (j, i), is surveyed: a page at its cells' corners'. */
+  readonly surveyed?: ReadonlyArray<boolean>;
+  /**
+   * The (r + 1)² corners of its cells in rising (j, i), each its weight per class as a cell's, or
+   * `null` for a corner not surveyed: a page at its cells' corners'.
+   */
+  readonly corners?: ReadonlyArray<ReadonlyArray<number> | null>;
+  /**
+   * Each cell's, or under a page at its corners each corner's, maturity code alike, an integer 0 to
+   * 65,535, for a map that carries a maturity.
+   */
   readonly codes?: ReadonlyArray<number>;
 }
 
@@ -249,6 +272,12 @@ export interface ClassMapRefinedInput {
 export interface ClassMapFineInput {
   /** r, the field cells along a texel's side: 2 or 4. */
   readonly side: number;
+  /**
+   * Where its refined texels are read: `"corners"` at their cells' corners (the crate's
+   * `REFINED_CORNERS_FROM`), each giving its `surveyed` and `corners`; absent at their centres, each
+   * giving its `cells`.
+   */
+  readonly lattice?: "corners";
   /**
    * The refined texels, each of a surveyed texel and at most once. Past
    * {@link classMapFineCapacity} those whose cells stand furthest from their texel's mean are
@@ -456,6 +485,7 @@ export function packClassMap(
           side: fine.side,
           tiles: kept.length,
           pages: Math.ceil(kept.length / classMapTilesPerRow(faceTexels, fine.side) ** 2),
+          ...(fine.lattice === "corners" ? { corners: true as const } : {}),
         };
   const layers = classMapTexelLayers({
     classes,
@@ -504,7 +534,11 @@ export function packClassMap(
     }
   });
   if (page !== undefined) {
-    packFinePage(map, page, kept);
+    if (page.corners === true) {
+      packFineCorners(map, page, kept);
+    } else {
+      packFinePage(map, page, kept);
+    }
   }
   return map;
 }
@@ -539,16 +573,10 @@ function keptRefined(
       throw new Error(`refined texel (${face}, ${i}, ${j}) is given twice`);
     }
     seen.add(key);
-    if (
-      refined.cells.length !== r * r ||
-      (maturity !== undefined && refined.codes?.length !== r * r)
-    ) {
-      throw new Error(
-        `refined texel (${face}, ${i}, ${j}) has ${refined.cells.length} cells and ${refined.codes?.length ?? 0} codes, not ${r * r}`,
-      );
-    }
+    const readings =
+      fine.lattice === "corners" ? cornersOf(refined, r, maturity) : cellsOf(refined, r, maturity);
     let score = 0;
-    for (const cell of refined.cells) {
+    for (const cell of readings) {
       if (cell === null) {
         continue;
       }
@@ -572,6 +600,53 @@ function keptRefined(
     .slice(0, capacity)
     .toSorted((a, b) => a.order - b.order)
     .map(({ refined }) => refined);
+}
+
+/**
+ * A refined texel's r² cells, as a fine page at its cells' centres packs them.
+ *
+ * @throws Error as {@link packClassMap} does for its `fine`.
+ */
+function cellsOf(
+  refined: ClassMapRefinedInput,
+  r: number,
+  maturity: ClassMapMaturityInput | undefined,
+): ReadonlyArray<ReadonlyArray<number> | null> {
+  const { face, i, j } = refined.texel;
+  const cells = refined.cells ?? [];
+  if (cells.length !== r * r || (maturity !== undefined && refined.codes?.length !== r * r)) {
+    throw new Error(
+      `refined texel (${face}, ${i}, ${j}) has ${cells.length} cells and ${refined.codes?.length ?? 0} codes, not ${r * r}`,
+    );
+  }
+  return cells;
+}
+
+/**
+ * A refined texel's (r + 1)² corners, as a fine page at its cells' corners packs them, its r² cells'
+ * survey checked beside them.
+ *
+ * @throws Error as {@link packClassMap} does for its `fine`.
+ */
+function cornersOf(
+  refined: ClassMapRefinedInput,
+  r: number,
+  maturity: ClassMapMaturityInput | undefined,
+): ReadonlyArray<ReadonlyArray<number> | null> {
+  const { face, i, j } = refined.texel;
+  const corners = refined.corners ?? [];
+  const surveyed = refined.surveyed ?? [];
+  const count = (r + 1) ** 2;
+  if (
+    surveyed.length !== r * r ||
+    corners.length !== count ||
+    (maturity !== undefined && refined.codes?.length !== count)
+  ) {
+    throw new Error(
+      `refined texel (${face}, ${i}, ${j}) has ${surveyed.length} cells, ${corners.length} corners and ${refined.codes?.length ?? 0} codes, not ${r * r} and ${count}`,
+    );
+  }
+  return corners;
 }
 
 /** The byte offset of the index's texel at stored (x, y) of `face`'s index layer. */
@@ -638,7 +713,7 @@ function packFinePage(
     map.data[at] = Math.floor((tile + 1) / (UNORM_MAX + 1));
     map.data[at + 1] = (tile + 1) % (UNORM_MAX + 1);
     map.data[at + 2] = r;
-    cells.forEach((cell, n) => {
+    (cells ?? []).forEach((cell, n) => {
       if (cell === null) {
         return;
       }
@@ -689,6 +764,55 @@ function packFinePage(
         }
       }
     }
+  });
+}
+
+/**
+ * Writes the fine page of `map` at its refined texels' cells' corners ({@link ClassMapFine}): each
+ * kept texel's tile index, its index's a 255, its corners from (0, 0) and its cells' survey at
+ * (r + 1, j); no gutter, a corner reading no neighbour.
+ */
+function packFineCorners(
+  map: ClassMapTexels,
+  page: ClassMapFine,
+  kept: ReadonlyArray<ClassMapRefinedInput>,
+): void {
+  const r = page.side;
+  const groups = weightGroups(map.classes);
+  const coded = map.maturity !== undefined;
+  kept.forEach(({ texel, surveyed, corners, codes }, tile) => {
+    const at = indexOffset(map, texel.face, texel.i + 1, texel.j + 1);
+    map.data[at] = Math.floor((tile + 1) / (UNORM_MAX + 1));
+    map.data[at + 1] = (tile + 1) % (UNORM_MAX + 1);
+    map.data[at + 2] = r;
+    map.data[at + 3] = UNORM_MAX;
+    (surveyed ?? []).forEach((cell, n) => {
+      map.data[tileOffset(map, page, tile, r + 1, Math.floor(n / r), 0) + (n % r)] = cell
+        ? UNORM_MAX
+        : 0;
+    });
+    (corners ?? []).forEach((corner, n) => {
+      if (corner === null) {
+        return;
+      }
+      const x = n % (r + 1);
+      const y = Math.floor(n / (r + 1));
+      weightBytes(corner).forEach((byte, k) => {
+        const group = Math.floor(k / CLASSES_PER_LAYER);
+        map.data[tileOffset(map, page, tile, x, y, group) + (k % CLASSES_PER_LAYER)] = byte;
+      });
+      if (coded) {
+        const code = codes?.[n] ?? Number.NaN;
+        if (!(Number.isInteger(code) && code >= 0 && code <= MATURITY_CODE_MAX)) {
+          throw new Error(
+            `a corner of refined texel (${texel.face}, ${texel.i}, ${texel.j}) has maturity code ${code}, not an integer 0 to ${MATURITY_CODE_MAX}`,
+          );
+        }
+        const to = tileOffset(map, page, tile, x, y, groups);
+        map.data[to] = Math.floor(code / (UNORM_MAX + 1));
+        map.data[to + 1] = code % (UNORM_MAX + 1);
+      }
+    });
   });
 }
 
@@ -859,7 +983,9 @@ function reconstructionTerms(
   const { fine } = map;
   const own = storedTile(map, face, holding[0] + 1, holding[1] + 1);
   if (fine !== undefined && own >= 0) {
-    return cellTerms(map, fine, own, holding, sN, tN);
+    return fine.corners === true
+      ? cornerCellTerms(map, fine, own, holding, sN, tN)
+      : cellTerms(map, fine, own, holding, sN, tN);
   }
   const terms: ReconstructionTerm[] = [];
   for (let corner = 0; corner < 4; corner += 1) {
@@ -877,7 +1003,11 @@ function reconstructionTerms(
     const b = cornerWeight(di, dj, fx, fy);
     const tile = storedTile(map, face, i + 1, j + 1);
     if (fine !== undefined && tile >= 0) {
-      for (const term of clampedCellTerms(map, fine, tile, [i, j], sN, tN)) {
+      const clamped =
+        fine.corners === true
+          ? clampedCornerTerms(map, fine, tile, [i, j], sN, tN)
+          : clampedCellTerms(map, fine, tile, [i, j], sN, tN);
+      for (const term of clamped) {
         terms.push({ at: term.at, b: b * term.b });
       }
       continue;
@@ -951,6 +1081,92 @@ function clampedCellTerms(
     }
   }
   return terms;
+}
+
+/**
+ * The terms in refined texel `texel`, tile `tile` of a fine page at its cells' corners, at (n s,
+ * n t) = (`sN`, `tN`): the four corners of the cell holding the point by their bilinear weights, a
+ * corner not surveyed as law 0 alone, as the terrain's patch of level L − 6 draws its quad there
+ * from the weights it bakes, 0 at a vertex outside the survey; `null` where the cell holding the
+ * point is not surveyed.
+ */
+function cornerCellTerms(
+  map: ClassMapTexels,
+  fine: ClassMapFine,
+  tile: number,
+  texel: readonly [number, number],
+  sN: number,
+  tN: number,
+): ReadonlyArray<ReconstructionTerm> | null {
+  const r = fine.side;
+  const x = sN * r - r * texel[0];
+  const y = tN * r - r * texel[1];
+  const held = (v: number): number => Math.min(Math.max(Math.floor(v), 0), r - 1);
+  const cx = held(x);
+  const cy = held(y);
+  if (!cellSurveyed(map, fine, tile, cx, cy)) {
+    return null;
+  }
+  return cornerTerms(map, tile, cx, cy, x - cx, y - cy, "every");
+}
+
+/**
+ * The terms by which refined texel `texel`, tile `tile` of a fine page at its cells' corners,
+ * stands as a corner of another texel's reconstruction at (`sN`, `tN`): its corners about the
+ * point held within its span, by their bilinear weights, those surveyed alone; none where none of
+ * them is surveyed.
+ */
+function clampedCornerTerms(
+  map: ClassMapTexels,
+  fine: ClassMapFine,
+  tile: number,
+  texel: readonly [number, number],
+  sN: number,
+  tN: number,
+): ReadonlyArray<ReconstructionTerm> {
+  const r = fine.side;
+  const within = (v: number): number => Math.min(Math.max(v, 0), r);
+  const x = within(sN * r - r * texel[0]);
+  const y = within(tN * r - r * texel[1]);
+  const cx = Math.min(Math.floor(x), r - 1);
+  const cy = Math.min(Math.floor(y), r - 1);
+  return cornerTerms(map, tile, cx, cy, x - cx, y - cy, "surveyed");
+}
+
+/**
+ * The terms of tile `tile`'s cell (`cx`, `cy`) at (`fx`, `fy`) within it: its four corners by their
+ * bilinear weights, `every` one, a corner not surveyed as law 0 alone, or those `surveyed` alone.
+ */
+function cornerTerms(
+  map: ClassMapTexels,
+  tile: number,
+  cx: number,
+  cy: number,
+  fx: number,
+  fy: number,
+  corners: "every" | "surveyed",
+): ReconstructionTerm[] {
+  const terms: ReconstructionTerm[] = [];
+  for (let corner = 0; corner < 4; corner += 1) {
+    const di = corner % 2;
+    const dj = Math.floor(corner / 2);
+    const at: StoredAt = { kind: "tile", tile, x: cx + di, y: cy + dj };
+    if (corners === "every" || surveyedAt(map, at)) {
+      terms.push({ at, b: cornerWeight(di, dj, fx, fy) });
+    }
+  }
+  return terms;
+}
+
+/** Whether tile `tile`'s cell (`cx`, `cy`) is surveyed, as its flag stores it ({@link ClassMapFine}). */
+function cellSurveyed(
+  map: ClassMapTexels,
+  fine: ClassMapFine,
+  tile: number,
+  cx: number,
+  cy: number,
+): boolean {
+  return (map.data[tileOffset(map, fine, tile, fine.side + 1, cy, 0) + cx] ?? 0) > 0;
 }
 
 /** The byte offset of class `k`'s weight where `at` is stored. */

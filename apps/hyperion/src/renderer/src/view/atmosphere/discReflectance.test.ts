@@ -170,13 +170,16 @@ function digestOf(source: string): string {
  * terrain's stride morph (`terrainStrides.wgsl`), which a material without it, or an instance with
  * no bands, skips, its place `lit_place`'s as before. Every one re-pinned by the fitted lookup's
  * least rise (`oblate.wgsl`'s `oblateLeastRiseOf`, 2026-11-03), which only a body of several
- * bands reaches: a body of one band returns before the fit, its every lookup as before.
+ * bands reaches: a body of one band returns before the fit, its every lookup as before. The
+ * disc's three and the figure again by lane fix-coast-class-map's fine page at its cells' corners
+ * (2026-11-03; the crate's `REFINED_CORNERS_FROM`): a tile whose index's a is 255 read at its
+ * cells' corners, every page at the centres as before.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "3adc4a8f957a68fe"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "3adc4a8f957a68fe"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "caa0effcecd3dbad"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "788d1adc535878f5"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "386680ee8ea04c63"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "386680ee8ea04c63"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "bedc50f3dcfc18f8"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "720099455d88308e"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a

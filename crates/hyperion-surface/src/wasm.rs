@@ -173,11 +173,15 @@
 //!   of K × 3 a class, its albedo nodes at band level 0 as `maturityNodes` lays out one level's,
 //!   all 0 where the palette names no substance; `fineSide`, r, the field cells along a texel's
 //!   side; `refined()`, a `Uint32Array` of the place in `texels()` of each texel refined to the
-//!   field's level ([`ClassMap::refined`]), rising, empty where none is; `fineWeights()`, a
-//!   `Uint8Array` of r² cells a refined texel in rising (j, i), `classes` bytes each, all 0 for a
-//!   cell not surveyed; `fineMaturity()`, a `Uint16Array` of their codes alike, empty where the
-//!   header carries no maturity; and `complete`, `false` where some texel's weights read a cell the
-//!   field does not hold yet.
+//!   field's level ([`ClassMap::refined`]), rising, empty where none is; `fineCorners`, whether
+//!   they are read at their cells' corners ([`ClassMap::lattice`], from
+//!   [`REFINED_CORNERS_FROM`](crate::worker::REFINED_CORNERS_FROM)) rather than at their centres;
+//!   `fineSurveyed()`, a `Uint8Array` of r² cells a refined texel in rising (j, i), 1 for a
+//!   surveyed cell and 0 for another; `fineWeights()`, a `Uint8Array` of r² cells a refined texel
+//!   in rising (j, i), or under `fineCorners` of the (r + 1)² corners of those cells, `classes`
+//!   bytes each, all 0 for one not surveyed; `fineMaturity()`, a `Uint16Array` of their codes
+//!   alike, empty where the header carries no maturity; and `complete`, `false` where some texel's
+//!   weights read a cell the field does not hold yet.
 //! - `normalMap(system, body, seed)` returns a `NormalMapAnswer`, the body's normal map for R07's
 //!   disc ([`WorkerFields::normal_map`], plan R10, T10.g), or `undefined` where no field of the
 //!   body is held: its `level`, the field's (5 to 8); `cells()`, a `Uint32Array` of the cell index
@@ -202,10 +206,20 @@ use crate::reading::{LineOfSight, SlantRange, SurveyedReading};
 use crate::synth::BandLevel;
 use crate::test_planet::{Ridges, TEST_PLANET};
 use crate::worker::{
-    BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, GroundAtSight, GroundProperties,
-    GroundReadout, GroundReadoutQuery, LEVEL_TABLE_ROWS, NormalMap, QueryBodyError, RefinedTexel,
-    SeasonAnomaly, SigmaSurvey, SlopeBaseline, SurveyChange, SurveyedMaterial, WorkerFields,
+    BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, FineLattice, FineTexel, GroundAtSight,
+    GroundProperties, GroundReadout, GroundReadoutQuery, LEVEL_TABLE_ROWS, NormalMap,
+    QueryBodyError, RefinedTexel, SeasonAnomaly, SigmaSurvey, SlopeBaseline, SurveyChange,
+    SurveyedMaterial, WorkerFields,
 };
+
+/// A refined texel's readings as `map`'s lattice holds them: its cells' at their centres, or its
+/// cells' corners' ([`ClassMap::lattice`]).
+fn fine_of<'a>(map: &ClassMap, refined: &'a RefinedTexel) -> &'a [Option<FineTexel>] {
+    match map.lattice() {
+        FineLattice::Centres => refined.cells(),
+        FineLattice::Corners => refined.corners(),
+    }
+}
 
 /// The generator version this module computes surfaces for, the crate's `generator_version`.
 ///
@@ -1966,17 +1980,40 @@ impl ClassMapAnswer {
         self.map.refined().iter().map(RefinedTexel::texel).collect()
     }
 
+    /// Whether the refined texels are read at their cells' corners ([`ClassMap::lattice`]'s
+    /// [`FineLattice::Corners`]) rather than at their centres.
+    #[wasm_bindgen(getter, js_name = fineCorners)]
+    #[must_use]
+    pub fn fine_corners(&self) -> bool {
+        self.map.lattice() == FineLattice::Corners
+    }
+
+    /// Whether each refined texel's field cells are surveyed, r² cells a texel in
+    /// [`refined`](Self::refined)'s order, each in rising (j, i): 1 for a surveyed cell, 0 for
+    /// another ([`RefinedTexel::surveyed`]).
+    #[wasm_bindgen(js_name = fineSurveyed)]
+    #[must_use]
+    pub fn fine_surveyed(&self) -> Vec<u8> {
+        self.map
+            .refined()
+            .iter()
+            .flat_map(RefinedTexel::surveyed)
+            .map(|&surveyed| u8::from(surveyed))
+            .collect()
+    }
+
     /// Each refined texel's field cells' weight bytes over the classes, r² cells a texel in
-    /// [`refined`](Self::refined)'s order, each in rising (j, i) and `classes` bytes; all 0 for a
-    /// cell not surveyed.
+    /// [`refined`](Self::refined)'s order, or under [`fine_corners`](Self::fine_corners) the
+    /// (r + 1)² corners of those cells ([`RefinedTexel::corners`]), each in rising (j, i) and
+    /// `classes` bytes; all 0 for one not surveyed.
     #[wasm_bindgen(js_name = fineWeights)]
     #[must_use]
     pub fn fine_weights(&self) -> Vec<u8> {
         let classes = self.map.classes().len();
         let refined = self.map.refined();
-        let cells: usize = refined.iter().map(|r| r.cells().len()).sum();
+        let cells: usize = refined.iter().map(|r| fine_of(&self.map, r).len()).sum();
         let mut out = Vec::with_capacity(cells * classes);
-        for cell in refined.iter().flat_map(RefinedTexel::cells) {
+        for cell in refined.iter().flat_map(|r| fine_of(&self.map, r)) {
             match cell {
                 Some(cell) => out.extend_from_slice(&cell.weights()[..classes]),
                 None => out.resize(out.len() + classes, 0),
@@ -1985,9 +2022,9 @@ impl ClassMapAnswer {
         out
     }
 
-    /// Each refined texel's field cells' maturity codes, r² a texel in
-    /// [`fine_weights`](Self::fine_weights)' order, 0 for a cell not surveyed; empty where the
-    /// header carries no maturity.
+    /// Each refined texel's field cells' maturity codes, or its corners', one a value in
+    /// [`fine_weights`](Self::fine_weights)' order, 0 for one not surveyed; empty where the header
+    /// carries no maturity.
     #[wasm_bindgen(js_name = fineMaturity)]
     #[must_use]
     pub fn fine_maturity(&self) -> Vec<u16> {
@@ -1998,8 +2035,7 @@ impl ClassMapAnswer {
             .refined()
             .iter()
             .flat_map(|refined| {
-                refined
-                    .cells()
+                fine_of(&self.map, refined)
                     .iter()
                     .map(|cell| cell.and_then(|cell| cell.maturity()).unwrap_or(0))
             })

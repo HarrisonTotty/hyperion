@@ -280,10 +280,12 @@ export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null 
 /**
  * An answered map's refined texels as R07's fine page takes them (lane fix-coast-class-map;
  * `packClassMap`'s `fine`): each refined texel's r² cells, byte ÷ 255, a cell of no weight not
- * surveyed, and their codes under a maturity; `undefined` where the answer refines none.
+ * surveyed, and their codes under a maturity; or under the answer's `corners` its cells' survey and
+ * the (r + 1)² corners of its cells, a corner of no weight not surveyed; `undefined` where the
+ * answer refines none.
  *
- * @throws Error for a refined texel past the answer's texels, or weights or codes that are not r²
- *   cells a refined texel.
+ * @throws Error for a refined texel past the answer's texels, or a survey, weights or codes that
+ *   are not a refined texel's cells or corners.
  */
 function fineInputOf(answer: ClassMapAnswer, classes: number): ClassMapFineInput | undefined {
   const { refinement } = answer;
@@ -291,14 +293,16 @@ function fineInputOf(answer: ClassMapAnswer, classes: number): ClassMapFineInput
     return undefined;
   }
   const cells = refinement.side * refinement.side;
+  const values = refinement.corners ? (refinement.side + 1) ** 2 : cells;
   const refinedCount = refinement.texels.length;
   const coded = answer.maturity !== undefined;
   if (
-    refinement.weights.length !== refinedCount * cells * classes ||
-    refinement.codes.length !== (coded ? refinedCount * cells : 0)
+    refinement.surveyed.length !== refinedCount * cells ||
+    refinement.weights.length !== refinedCount * values * classes ||
+    refinement.codes.length !== (coded ? refinedCount * values : 0)
   ) {
     throw new Error(
-      `a class map's ${String(refinedCount)} refined texels of ${String(cells)} cells have ${String(refinement.weights.length)} weights over ${String(classes)} classes and ${String(refinement.codes.length)} codes`,
+      `a class map's ${String(refinedCount)} refined texels of ${String(cells)} cells and ${String(values)} readings have ${String(refinement.surveyed.length)} cells, ${String(refinement.weights.length)} weights over ${String(classes)} classes and ${String(refinement.codes.length)} codes`,
     );
   }
   const refined = Array.from(refinement.texels, (t, k): ClassMapRefinedInput => {
@@ -309,19 +313,30 @@ function fineInputOf(answer: ClassMapAnswer, classes: number): ClassMapFineInput
       );
     }
     const texel = fieldCellAt(CLASS_MAP_LEVEL, index);
-    const first = k * cells;
-    const cellWeights = Array.from({ length: cells }, (_, c) => {
+    const first = k * values;
+    const readings = Array.from({ length: values }, (_, c) => {
       const at = (first + c) * classes;
       const bytes = refinement.weights.subarray(at, at + classes);
       return bytes.some((byte) => byte > 0) ? Array.from(bytes, (byte) => byte / BYTE_MAX) : null;
     });
-    return {
-      texel: { face: texel.face, i: texel.i, j: texel.j },
-      cells: cellWeights,
-      ...(coded ? { codes: Array.from(refinement.codes.subarray(first, first + cells)) } : {}),
-    };
+    const codes = coded
+      ? { codes: Array.from(refinement.codes.subarray(first, first + values)) }
+      : {};
+    return refinement.corners
+      ? {
+          texel: { face: texel.face, i: texel.i, j: texel.j },
+          surveyed: Array.from(
+            refinement.surveyed.subarray(k * cells, (k + 1) * cells),
+            (s) => s > 0,
+          ),
+          corners: readings,
+          ...codes,
+        }
+      : { texel: { face: texel.face, i: texel.i, j: texel.j }, cells: readings, ...codes };
   });
-  return { side: refinement.side, refined };
+  return refinement.corners
+    ? { side: refinement.side, lattice: "corners", refined }
+    : { side: refinement.side, refined };
 }
 
 /**

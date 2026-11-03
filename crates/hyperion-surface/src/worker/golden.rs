@@ -11,7 +11,9 @@
 //! maturity's digests, `tests/golden/worker/maturity_layer.golden` (the same ruling's §4), the
 //! maturity layer, the albedo nodes and the class map's maturity on two weathered worlds, and
 //! `tests/golden/worker/class_map.golden` (lane fix-coast-class-map), the class map over fields
-//! finer than its texels, as this version answers it and refined.
+//! finer than its texels, as this version answers it and refined, and
+//! `tests/golden/worker/class_map_corners.golden`, the same maps read at their refined texels'
+//! cells' corners (`REFINED_CORNERS_FROM`).
 //!
 //! The client's worker test (`apps/hyperion/.../workers/fieldsWasm.test.ts`) reads the first: it
 //! posts the blocks to the client's module, through the worker's own answers, and asks the module's
@@ -173,6 +175,13 @@
 //!   for one not surveyed.
 //!
 //! The `default` lines are the `refined` lines' texels (R10.T15.b.2).
+//!
+//! `worker/class_map_corners` holds the same two worlds' maps read at their refined texels' cells'
+//! corners (`ClassMapDetail::Corners`, from `REFINED_CORNERS_FROM`, 28): a line `world <name>:
+//! level <L>, corners <texels> texels <refined> refined complete <bool>`, then for each refined
+//! texel `fine <place> cells <flags> corners <corner>…`, a `1` or `0` for each of its cells,
+//! surveyed or not, and each of their corners `<bytes>/<code>` or `-` for one not surveyed. The
+//! texels' own are `worker/class_map`'s `refined` lines'.
 //!
 //! # The maturity layer's format
 //!
@@ -1164,6 +1173,66 @@ fn worker_matches_its_class_map_golden() {
     golden!("worker/class_map", &class_map_text());
 }
 
+/// The class map's corners' golden text (the module documentation's format).
+fn class_map_corners_text() -> String {
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    let (earth, _) = coast_worker();
+    let (crusts, _) = two_crust_worker();
+    for (name, mut fields, body) in [
+        (
+            "earth_coast",
+            earth,
+            crate::synth::test_support::world(crate::testing::SyntheticWorld::EarthLike)
+                .header()
+                .body(),
+        ),
+        ("two_crusts", crusts.0, crusts.1),
+    ] {
+        let map = fields
+            .class_map_at(body, SEED, ClassMapDetail::Corners)
+            .expect("held");
+        out.line(&format!(
+            "world {name}: level {}, corners {} texels {} refined complete {}",
+            map.field_level(),
+            map.texels().len(),
+            map.refined().len(),
+            map.is_complete()
+        ));
+        let n = map.classes().len();
+        for r in map.refined() {
+            let surveyed: String = r
+                .surveyed()
+                .iter()
+                .map(|&surveyed| if surveyed { '1' } else { '0' })
+                .collect();
+            let corners: Vec<String> = r
+                .corners()
+                .iter()
+                .map(|corner| {
+                    corner.map_or_else(
+                        || "-".to_owned(),
+                        |corner| {
+                            texel_words(&corner.weights(), n, corner.maturity()).replace(' ', "/")
+                        },
+                    )
+                })
+                .collect();
+            out.line(&format!(
+                "fine {} cells {surveyed} corners {}",
+                r.texel(),
+                corners.join(" ")
+            ));
+        }
+    }
+    out.finish()
+}
+
+#[test]
+fn worker_matches_its_class_map_corners_golden() {
+    golden!("worker/class_map_corners", &class_map_corners_text());
+}
+
 /// Block 0 of the terrain test's first payload carries the Moon-like world's header, which its
 /// `dto` lines state for the client; that those lines are the header the server sends is held by
 /// `hyperion-server`'s `requests::surface` tests (`terrain_test_golden`).
@@ -1187,8 +1256,9 @@ mod native_only {
 
     /// The files of `tests/golden/worker/`, each one a test writes and compares
     /// (decision-r10-t16-contracts §4): a stray file fails the test below, as before.
-    const WORKER_GOLDENS: [&str; 6] = [
+    const WORKER_GOLDENS: [&str; 7] = [
         "class_map.golden",
+        "class_map_corners.golden",
         "earth_like.golden",
         "maturity_layer.golden",
         "moon_like.golden",

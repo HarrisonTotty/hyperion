@@ -107,6 +107,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::{Kelvin, Metres, Pascals, Radians, SquareMetres};
+use hyperion_base::{GENERATOR_VERSION, GeneratorVersion};
 
 use crate::bake::{
     RefinedNormals, TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain, encode_maturity,
@@ -124,8 +125,8 @@ use crate::material::{
     ClassWeights, FrictionModel, GroundExposure, GroundMaterial, MATURITY_NODES, Material,
     MaterialProperties, PhaseLaw, ResolvePropertiesError, UnresolvedTerms, WEIGHT_TOTAL,
     bearing_capacity_on_slope, cell_material, exposed_properties, interface_friction, lapse_drop_k,
-    material_at, maturity_at, maturity_at_level, maturity_nodes, scaled_normal_albedo,
-    unresolved_mix, unresolved_terms, weights_at,
+    material_at, maturity_at, maturity_at_level, maturity_at_level_dir, maturity_nodes,
+    scaled_normal_albedo, unresolved_mix, unresolved_terms, weights_at, weights_with_sample,
 };
 use crate::num;
 use crate::patch::NormalScale;
@@ -737,22 +738,29 @@ pub const CLASS_MAP_BAND: u8 = CLASS_MAP_LEVEL - 6;
 /// The classes a class map holds at most: R07's `MAX_DISC_CLASSES`, the laws its disc carries.
 pub const CLASS_MAP_CLASSES: usize = 16;
 
-/// How finely a [`ClassMap`] reads its texels: the map's detail. [`WorkerFields::class_map`]
-/// answers at [`Refined`](Self::Refined) (R10.T15.b.2): a coast, an ice edge, or a crust's or a
-/// climate's bound runs along the field's cells, and the terrain draws it so, while a texel of
-/// [`CLASS_MAP_LEVEL`] over a level-8 field reads one class mix for its 16 cells, the coast then
-/// popped by up to 2–3 stops at the hand-over.
+/// The generator version from which a refined texel carries the readings at its field cells'
+/// corners rather than at their centres ([`ClassMap::lattice`], [`FineLattice::Corners`]): 28.
+///
+/// A field cell of level L is a quad of the terrain's patches of level L − 6, whose class weights
+/// are baked at its corners, the patch's vertices, and drawn bilinearly between them; read at the
+/// cells' centres, a coast's cells differed by over a third of a stop in 8,655 of the served wet
+/// world's 36,576 refined cells (lane fix-coast-class-map, 2026-11-03). Train 27's list froze with
+/// the refined map on it, re-blessing `worker/class_map` from its refined lines, so the corners
+/// ride the next train (rule B); below it a refined map reads its cells' centres, as
+/// before, bit for bit.
+pub const REFINED_CORNERS_FROM: GeneratorVersion = GeneratorVersion::new(28);
+
+/// How finely a [`ClassMap`] reads its texels: the map's detail, which the generator version
+/// chooses ([`ClassMapDetail::of_version`]). [`WorkerFields::class_map`] answers at
+/// [`Refined`](Self::Refined) (R10.T15.b.2), and at [`Corners`](Self::Corners) from
+/// [`REFINED_CORNERS_FROM`]: a coast, an ice edge, or a crust's or a climate's bound runs along the
+/// field's cells, and the terrain draws it so, while a texel of [`CLASS_MAP_LEVEL`] over a level-8
+/// field reads one class mix for its 16 cells, the coast then popped by up to 2–3 stops at the
+/// hand-over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ClassMapDetail {
     /// Each texel one reading at its centre, or its surveyed cells' mean where its centre's cell is
     /// not surveyed: the map before R10.T15.b.2, which the tests compare the refined one with.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the worker answers the refined map; the tests compare the coarse one"
-        )
-    )]
     Coarse,
     /// As [`Coarse`](Self::Coarse), but over a field finer than [`CLASS_MAP_LEVEL`] a texel two of
     /// whose surveyed field cells' classes, by their records (`cell_material`), are drawn apart
@@ -761,6 +769,33 @@ pub(crate) enum ClassMapDetail {
     /// is drawn apart from the surveyed cell beside it across the texel's edge carries its own
     /// reading for each of its surveyed cells.
     Refined,
+    /// As [`Refined`](Self::Refined), but each refined texel carries the readings at its cells'
+    /// corners, the terrain's lattice of level L − 6 ([`RefinedTexel::corners`]): the map from
+    /// [`REFINED_CORNERS_FROM`].
+    Corners,
+}
+
+impl ClassMapDetail {
+    /// The detail of the class map at generator version `version`: [`Corners`](Self::Corners)
+    /// from [`REFINED_CORNERS_FROM`], [`Refined`](Self::Refined) below it.
+    #[must_use]
+    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
+        if version.get() >= REFINED_CORNERS_FROM.get() {
+            Self::Corners
+        } else {
+            Self::Refined
+        }
+    }
+
+    /// The lattice its refined texels carry: [`FineLattice::Corners`] at
+    /// [`Corners`](Self::Corners), [`FineLattice::Centres`] otherwise.
+    #[must_use]
+    const fn lattice(self) -> FineLattice {
+        match self {
+            Self::Coarse | Self::Refined => FineLattice::Centres,
+            Self::Corners => FineLattice::Corners,
+        }
+    }
 }
 
 /// One class of a [`ClassMap`]: a form of a palette entry, with the photometry it is drawn with.
@@ -888,17 +923,44 @@ pub struct ClassMap {
     classes: Vec<ClassMapClass>,
     texels: Vec<ClassMapTexel>,
     refined: Vec<RefinedTexel>,
+    lattice: FineLattice,
     complete: bool,
 }
 
-/// A texel of a [`ClassMap`] refined to its field's level, its field cells' own readings.
+/// Where a [`ClassMap`]'s refined texels are read: at their field cells' centres, or at their
+/// corners ([`REFINED_CORNERS_FROM`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum FineLattice {
+    /// Each surveyed cell's reading at its centre ([`RefinedTexel::cells`]).
+    Centres,
+    /// The readings at the cells' corners, the vertices of the terrain's patch of level L − 6
+    /// ([`RefinedTexel::corners`]).
+    Corners,
+}
+
+/// A texel of a [`ClassMap`] refined to its field's level: its field cells' own readings at their
+/// centres, or under [`FineLattice::Corners`] the readings at their corners, and which of its cells
+/// are surveyed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RefinedTexel {
     texel: u32,
     cells: Vec<Option<FineTexel>>,
+    surveyed: Vec<bool>,
+    corners: Vec<Option<FineTexel>>,
 }
 
 impl RefinedTexel {
+    /// The refined texel at `texel` of its field cells' readings `cells` at their centres, each
+    /// surveyed where it has one.
+    fn of_cells(texel: u32, cells: Vec<Option<FineTexel>>) -> Self {
+        Self {
+            texel,
+            surveyed: cells.iter().map(Option::is_some).collect(),
+            cells,
+            corners: Vec::new(),
+        }
+    }
+
     /// Its texel's place in [`ClassMap::texels`].
     #[must_use]
     pub const fn texel(&self) -> u32 {
@@ -906,17 +968,36 @@ impl RefinedTexel {
     }
 
     /// Its field cells, [`ClassMap::fine_side`]² of them in rising (j, i) as [`ClassMapTexel::cells`]
-    /// counts them, `None` for a cell not surveyed (a margin cell counting as unsurveyed).
+    /// counts them, `None` for a cell not surveyed (a margin cell counting as unsurveyed); none
+    /// under [`FineLattice::Corners`].
     #[must_use]
     pub fn cells(&self) -> &[Option<FineTexel>] {
         &self.cells
+    }
+
+    /// Whether each of its field cells is surveyed, in [`cells`](Self::cells)' order.
+    #[must_use]
+    pub fn surveyed(&self) -> &[bool] {
+        &self.surveyed
+    }
+
+    /// Under [`FineLattice::Corners`], the readings at its field cells' corners,
+    /// ([`ClassMap::fine_side`] + 1)² of them in rising (j, i): each the vertex of the patch of level
+    /// L − 6 there, as the bake reads it (`PatchKey::vertex_dir`), `None` where the field cell
+    /// holding the vertex is not surveyed, as the bake's survey mask leaves it; none under
+    /// [`FineLattice::Centres`].
+    #[must_use]
+    pub fn corners(&self) -> &[Option<FineTexel>] {
+        &self.corners
     }
 }
 
 /// One surveyed field cell of a [`RefinedTexel`]: its reading at its centre, its weights at its own
 /// level's band, the field's level less 6 (Design note 8's rule, the normal map's band), and its
 /// maturity at the map's, [`CLASS_MAP_BAND`], that of the classes' albedo nodes; or, where its
-/// texel's cells are drawn alike and it is refined for a bound along its edge, its texel's.
+/// texel's cells are drawn alike and it is refined for a bound along its edge, its texel's. Under
+/// [`FineLattice::Corners`], one surveyed corner of its cells, its weights as the patches whose
+/// vertex it is bake them, at the same band, and its maturity at the map's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FineTexel {
     weights: [u8; CLASS_MAP_CLASSES],
@@ -968,6 +1049,12 @@ impl ClassMap {
     #[must_use]
     pub fn refined(&self) -> &[RefinedTexel] {
         &self.refined
+    }
+
+    /// Where its refined texels are read: [`FineLattice::Corners`] from [`REFINED_CORNERS_FROM`].
+    #[must_use]
+    pub const fn lattice(&self) -> FineLattice {
+        self.lattice
     }
 
     /// Whether every texel the survey touches was answered, and each at its detail: `false` where a
@@ -1080,6 +1167,12 @@ enum FineReadings {
     /// Whether each cell is surveyed, each surveyed one taking the texel's own reading: a texel of
     /// one class refined for a bound along its edge.
     Texel(Vec<bool>),
+    /// Whether each cell is surveyed, and the readings at the cells' corners in rising (j, i)
+    /// ([`corner_readings`]): a texel refined under [`ClassMapDetail::Corners`].
+    Corners {
+        surveyed: Vec<bool>,
+        corners: Vec<Option<PointReading>>,
+    },
 }
 
 /// One point's reading: its weights ([`weights_at`]) at [`CLASS_MAP_BAND`], or at its cell's band
@@ -1172,12 +1265,101 @@ fn fine_readings(
     }
 }
 
+/// A texel's [`FineReadings::Corners`] where `variation` refines it: its field `cells`' survey, in
+/// their order, and their corners' readings ([`corner_readings`]); `None` for a texel whose cells
+/// are drawn alike, and for one a corner of which reads past the cells held, which stays unrefined
+/// until a later block, `complete` then set `false`.
+fn corner_fine_readings(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    texel: PatchKey,
+    cells: &[PatchKey],
+    variation: Variation,
+    complete: &mut bool,
+) -> Option<FineReadings> {
+    if variation == Variation::Alike {
+        return None;
+    }
+    let field = synth.field();
+    let level = field.header().level().get();
+    let band =
+        BandLevel::new(normal_map_band(level)).expect("a field's level less 6 is a band level");
+    // At most 25 corners, a field of level 8's.
+    let mut corners = Vec::with_capacity(25);
+    match corner_readings(synth, cache, texel, level, band, &mut corners) {
+        Ok(()) => Some(FineReadings::Corners {
+            surveyed: cells.iter().map(|&cell| field.is_surveyed(cell)).collect(),
+            corners,
+        }),
+        Err(QueryHeightError::NotSurveyed(_)) => {
+            *complete = false;
+            None
+        }
+    }
+}
+
+/// The readings at a refined texel's field cells' corners, into `corners`, which it clears first:
+/// the (r + 1)² vertices, in rising (j, i), of the patch of level L − 6 holding `texel` (r field
+/// cells of level `level` a texel side), each the bake's (`PatchKey::vertex_dir`), its weights at
+/// `weights_band` from the height there ([`weights_with_sample`]), as the patch bakes them, and its
+/// maturity at [`CLASS_MAP_BAND`]; `None` where the field cell holding it is not surveyed.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] for a read past the cells held.
+///
+/// # Panics
+///
+/// If `level` is not finer than [`CLASS_MAP_LEVEL`], or as [`weights_at`].
+fn corner_readings(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    texel: PatchKey,
+    level: u8,
+    weights_band: BandLevel,
+    corners: &mut Vec<Option<PointReading>>,
+) -> Result<(), QueryHeightError> {
+    corners.clear();
+    let field = synth.field();
+    let patch_level = normal_map_band(level);
+    let shift = CLASS_MAP_LEVEL - patch_level;
+    let patch = PatchKey::new(
+        texel.face(),
+        patch_level,
+        texel.i() >> shift,
+        texel.j() >> shift,
+    )
+    .expect("a texel's ancestor is a patch of its level");
+    let side = 1_u32 << (level - CLASS_MAP_LEVEL);
+    let quad = |k: u32| u8::try_from(k).expect("a patch's vertex index is at most 64");
+    let x0 = (texel.i() & ((1 << shift) - 1)) * side;
+    let y0 = (texel.j() & ((1 << shift) - 1)) * side;
+    let maturity_band = BandLevel::new(CLASS_MAP_BAND).expect("band level 0 is a band level");
+    for b in 0..=side {
+        for a in 0..=side {
+            let dir = patch.vertex_dir(quad(x0 + a), quad(y0 + b));
+            let holding =
+                PatchKey::containing(level, dir).expect("a coarse level is a quadtree level");
+            if !field.is_surveyed(holding) {
+                corners.push(None);
+                continue;
+            }
+            let sample = synth.height_at(cache, dir, weights_band)?;
+            corners.push(Some(PointReading {
+                weights: weights_with_sample(synth, cache, dir, weights_band, &sample)?,
+                maturity: maturity_at_level_dir(synth, cache, dir, maturity_band)?,
+            }));
+        }
+    }
+    Ok(())
+}
+
 /// A class map's texels and its refined texels from its texels' readings, as bytes over the
 /// classes `kept` ([`bytes_by_largest_remainder`]), the refined cells' maturity coded against the
 /// body's `m_body`, `background`, where the header carries one.
 #[must_use]
 fn class_map_texels(
-    readings: &[TexelReading],
+    readings: Vec<TexelReading>,
     kept: &[GroundMaterial],
     background: Option<f64>,
 ) -> (Vec<ClassMapTexel>, Vec<RefinedTexel>) {
@@ -1188,9 +1370,15 @@ fn class_map_texels(
         }
         bytes_by_largest_remainder(&values[..kept.len()])
     };
+    let own_texel = |own: PointReading| FineTexel {
+        weights: bytes_of(&|m| f64::from(own.weights.weight(m))),
+        maturity: background
+            .zip(own.maturity)
+            .map(|(body, m)| texel_code(m, body)),
+    };
     let mut texels = Vec::with_capacity(readings.len());
     let mut refined = Vec::new();
-    for (at, reading) in readings.iter().enumerate() {
+    for (at, reading) in readings.into_iter().enumerate() {
         let texel = ClassMapTexel {
             cell: reading.cell,
             surveyed: reading.surveyed,
@@ -1198,21 +1386,15 @@ fn class_map_texels(
             weights: bytes_of(&|m| reading.weights.get(&m).copied().unwrap_or(0.0)),
             maturity: reading.maturity,
         };
-        let cells = match &reading.fine {
-            None => None,
-            Some(FineReadings::Own(own)) => Some(
-                own.iter()
-                    .map(|cell| {
-                        cell.map(|own| FineTexel {
-                            weights: bytes_of(&|m| f64::from(own.weights.weight(m))),
-                            maturity: background
-                                .zip(own.maturity)
-                                .map(|(body, m)| texel_code(m, body)),
-                        })
-                    })
-                    .collect(),
-            ),
-            Some(FineReadings::Texel(surveyed)) => Some(
+        let place = u32::try_from(at).expect("a map holds at most 6 · 4⁶ texels");
+        match reading.fine {
+            None => {}
+            Some(FineReadings::Own(own)) => refined.push(RefinedTexel::of_cells(
+                place,
+                own.into_iter().map(|cell| cell.map(own_texel)).collect(),
+            )),
+            Some(FineReadings::Texel(surveyed)) => refined.push(RefinedTexel::of_cells(
+                place,
                 surveyed
                     .iter()
                     .map(|&surveyed| {
@@ -1222,11 +1404,16 @@ fn class_map_texels(
                         })
                     })
                     .collect(),
-            ),
-        };
-        if let Some(cells) = cells {
-            let texel = u32::try_from(at).expect("a map holds at most 6 · 4⁶ texels");
-            refined.push(RefinedTexel { texel, cells });
+            )),
+            Some(FineReadings::Corners { surveyed, corners }) => refined.push(RefinedTexel {
+                texel: place,
+                cells: Vec::new(),
+                surveyed,
+                corners: corners
+                    .into_iter()
+                    .map(|corner| corner.map(own_texel))
+                    .collect(),
+            }),
         }
         texels.push(texel);
     }
@@ -2360,7 +2547,8 @@ impl WorkerFields {
     /// [complete](ClassMap::is_complete). Each texel over a field finer than [`CLASS_MAP_LEVEL`]
     /// takes its surveyed cells' classes by their records (`cell_material`, once a cell a map)
     /// first, and those of the surveyed cells beside it; where the disc would draw its own apart, it
-    /// is read at each surveyed cell's centre, its own their mean ([`ClassMap::refined`]).
+    /// is read at each surveyed cell's centre, its own their mean ([`ClassMap::refined`]), and from
+    /// [`REFINED_CORNERS_FROM`] at its cells' corners ([`ClassMapDetail::of_version`]).
     ///
     /// # Errors
     ///
@@ -2374,7 +2562,7 @@ impl WorkerFields {
         body: BodyRef,
         seed: DetailSeed,
     ) -> Result<ClassMap, QueryBodyError> {
-        self.class_map_at(body, seed, ClassMapDetail::Refined)
+        self.class_map_at(body, seed, ClassMapDetail::of_version(GENERATOR_VERSION))
     }
 
     /// [`class_map`](Self::class_map) at an explicit detail, rather than the generator version's.
@@ -2417,7 +2605,7 @@ impl WorkerFields {
         let count = |n: usize| u32::try_from(n).expect("a texel holds at most 16 field cells");
         let mut looks = CellLooks::new(match detail {
             ClassMapDetail::Coarse => 0,
-            ClassMapDetail::Refined => level,
+            ClassMapDetail::Refined | ClassMapDetail::Corners => level,
         });
         for index in 0..texel_count {
             let texel =
@@ -2433,7 +2621,7 @@ impl WorkerFields {
             if surveyed.is_empty() {
                 continue;
             }
-            let variation = if detail == ClassMapDetail::Refined && level > CLASS_MAP_LEVEL {
+            let variation = if detail != ClassMapDetail::Coarse && level > CLASS_MAP_LEVEL {
                 match variation_of(field, &mut looks, texel, &surveyed) {
                     Ok(variation) => variation,
                     Err(QueryHeightError::NotSurveyed(_)) => {
@@ -2472,7 +2660,11 @@ impl WorkerFields {
             for value in weights.values_mut() {
                 *value /= points_read;
             }
-            let fine = fine_readings(field, &cells, variation, &read);
+            let fine = if detail == ClassMapDetail::Corners {
+                corner_fine_readings(&synth, cache, texel, &cells, variation, &mut complete)
+            } else {
+                fine_readings(field, &cells, variation, &read)
+            };
             readings.push(TexelReading {
                 cell: texel,
                 surveyed: count(surveyed.len()),
@@ -2488,13 +2680,14 @@ impl WorkerFields {
             });
         }
         let kept = kept_classes(&readings);
-        let (texels, refined) = class_map_texels(&readings, &kept, background);
+        let (texels, refined) = class_map_texels(readings, &kept, background);
         let classes = self.class_map_classes(body, kept, band);
         Ok(ClassMap {
             field_level: level,
             classes,
             texels,
             refined,
+            lattice: detail.lattice(),
             complete,
         })
     }

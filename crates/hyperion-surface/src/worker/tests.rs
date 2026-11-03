@@ -2489,6 +2489,209 @@ fn place(refined: &RefinedTexel) -> usize {
     usize::try_from(refined.texel()).unwrap()
 }
 
+/// The directions of the class-map texel `texel`'s field cells' corners over a field of `level`,
+/// in rising (j, i): the vertices of the patch of level `level` − 6 there, as the bake takes them.
+fn corner_dirs(texel: PatchKey, level: u8) -> Vec<[f64; 3]> {
+    let patch_level = level - 6;
+    let shift = CLASS_MAP_LEVEL - patch_level;
+    let patch = PatchKey::new(
+        texel.face(),
+        patch_level,
+        texel.i() >> shift,
+        texel.j() >> shift,
+    )
+    .unwrap();
+    let side = 1_u32 << (level - CLASS_MAP_LEVEL);
+    let (x0, y0) = (
+        (texel.i() & ((1 << shift) - 1)) * side,
+        (texel.j() & ((1 << shift) - 1)) * side,
+    );
+    (0..=side)
+        .flat_map(|b| (0..=side).map(move |a| (a, b)))
+        .map(|(a, b)| {
+            patch.vertex_dir(u8::try_from(x0 + a).unwrap(), u8::try_from(y0 + b).unwrap())
+        })
+        .collect()
+}
+
+/// Asserts that refined texel `fine`, of `texel` over a level-8 field, holds as its corners the
+/// weights the patch of level 8 − 6 bakes at its vertices there, byte for byte, a vertex the bake's
+/// survey mask leaves out none: the terrain's lattice.
+fn assert_corners_are_the_bake_s(
+    fields: &mut WorkerFields,
+    body: BodyRef,
+    texel: PatchKey,
+    fine: &RefinedTexel,
+    classes: &[ClassMapClass],
+) {
+    let patch = PatchKey::new(texel.face(), 2, texel.i() >> 4, texel.j() >> 4).unwrap();
+    let bake = fields.bake(body, SEED, patch, &MESH).unwrap();
+    let layers = bake.terrain().layers();
+    let (x0, y0) = ((texel.i() & 15) * 4, (texel.j() & 15) * 4);
+    assert_eq!(fine.corners().len(), 25);
+    for (n, corner) in fine.corners().iter().enumerate() {
+        let n = u32::try_from(n).unwrap();
+        let vertex = usize::try_from((y0 + n / 5) * (PATCH_QUADS + 1) + x0 + n % 5).unwrap();
+        let baked: BTreeMap<GroundMaterial, u8> = layers
+            .palette()
+            .iter()
+            .zip(layers.weights()[vertex])
+            .filter_map(|(&material, byte)| material.filter(|_| byte > 0).map(|m| (m, byte)))
+            .collect();
+        match corner {
+            None => assert_ne!(layers.survey_mask()[vertex], SURVEYED, "corner {n}"),
+            Some(corner) => assert_eq!(
+                bytes_by_material(corner.weights(), classes),
+                baked,
+                "corner {n}"
+            ),
+        }
+    }
+}
+
+#[test]
+fn the_refined_corners_wait_for_their_version() {
+    assert_eq!(
+        ClassMapDetail::of_version(GeneratorVersion::new(27)),
+        ClassMapDetail::Refined
+    );
+    assert_eq!(
+        ClassMapDetail::of_version(REFINED_CORNERS_FROM),
+        ClassMapDetail::Corners
+    );
+    // The tripwire: the bump to 28 fails it, and re-blesses `worker/class_map`, whose `refined`
+    // texels' cells then become `worker/class_map_corners`' corners, or raises the switch to the
+    // train they ride.
+    assert!(
+        GENERATOR_VERSION < REFINED_CORNERS_FROM,
+        "generator version {GENERATOR_VERSION} reaches REFINED_CORNERS_FROM: re-bless \
+         `worker/class_map` and retire the switch"
+    );
+}
+
+#[test]
+fn worker_class_map_reads_the_corners_at_their_detail_and_leaves_its_texels_as_the_refined_map_s() {
+    let (mut fields, _) = coast_worker();
+    let body = world(SyntheticWorld::EarthLike).header().body();
+    let refined = fields
+        .class_map_at(body, SEED, ClassMapDetail::Refined)
+        .unwrap();
+    let corners = fields
+        .class_map_at(body, SEED, ClassMapDetail::Corners)
+        .unwrap();
+    assert_eq!(
+        [refined.lattice(), corners.lattice()],
+        [FineLattice::Centres, FineLattice::Corners]
+    );
+    assert_eq!(corners.texels(), refined.texels());
+    assert_eq!(corners.classes(), refined.classes());
+    assert_eq!(
+        corners.refined().iter().map(place).collect::<Vec<_>>(),
+        refined.refined().iter().map(place).collect::<Vec<_>>()
+    );
+    for (corner, centre) in corners.refined().iter().zip(refined.refined()) {
+        assert_eq!(corner.surveyed(), centre.surveyed());
+        assert_eq!(
+            (
+                corner.cells().len(),
+                corner.corners().len(),
+                centre.corners().len()
+            ),
+            (0, 25, 0)
+        );
+    }
+}
+
+#[test]
+fn worker_class_map_reads_a_coast_texel_s_corners_as_the_bake_reads_its_vertices() {
+    let field = world(SyntheticWorld::EarthLike);
+    let level = field.header().level().get();
+    let (coast, inland) = earth_coast_and_inland();
+    let mut coast_cells = Vec::new();
+    field_cells_of(coast, level, &mut coast_cells);
+    // The coast texel surveyed but for one of its dry cells.
+    let left_out = *coast_cells
+        .iter()
+        .find(|&&c| !field.cell(c).unwrap().is_under_water())
+        .unwrap();
+    let mut cells: BTreeSet<PatchKey> = coast_cells.iter().copied().collect();
+    cells.remove(&left_out);
+    cells.extend(inland.children().into_iter().flat_map(PatchKey::children));
+    let mut fields = worker_over(field, &cells);
+    let body = field.header().body();
+    let map = fields
+        .class_map_at(body, SEED, ClassMapDetail::Corners)
+        .unwrap();
+    assert!(map.is_complete());
+    let fine = &map.refined()[0];
+    assert_eq!(
+        fine.surveyed(),
+        coast_cells
+            .iter()
+            .map(|&cell| cell != left_out)
+            .collect::<Vec<_>>()
+    );
+    assert_corners_are_the_bake_s(&mut fields, body, coast, fine, map.classes());
+    let first = fine.corners()[0].unwrap().weights();
+    assert!(
+        fine.corners()
+            .iter()
+            .flatten()
+            .any(|corner| corner.weights() != first),
+        "the coast's corners read apart"
+    );
+}
+
+#[test]
+fn worker_class_map_codes_each_refined_corner_s_maturity() {
+    let ((mut fields, body), field) = two_crust_worker();
+    let level = field.header().level().get();
+    assert_eq!(level, CLASS_MAP_LEVEL + 1);
+    let texels = two_crust_texels();
+    let map = fields
+        .class_map_at(body, SEED, ClassMapDetail::Corners)
+        .unwrap();
+    assert!(map.is_complete());
+    assert_eq!(map.fine_side(), 2);
+    assert_eq!(
+        map.refined()
+            .iter()
+            .map(|r| map.texels()[place(r)].cell())
+            .collect::<Vec<_>>(),
+        texels,
+        "texel 20 for its cells, 21 and 22 for their shared edge"
+    );
+    let m_body = field.header().maturity().unwrap();
+    let held = fields.field(body).unwrap().clone();
+    let synth = Synthesiser::new(&held, SEED);
+    let band_0 = band(CLASS_MAP_BAND);
+    // Each texel's corners, the vertices of the patch of level 7 − 6 there, each its own code at
+    // band level 0, held at m_body, where the cell holding it is surveyed.
+    for (refined, &texel) in map.refined().iter().zip(&texels) {
+        let own: Vec<Option<u16>> = corner_dirs(texel, level)
+            .into_iter()
+            .map(|dir| {
+                let holding = PatchKey::containing(level, dir).unwrap();
+                held.is_surveyed(holding).then(|| {
+                    let m = maturity_at_level_dir(&synth, &mut SynthCache::new(), dir, band_0)
+                        .unwrap()
+                        .unwrap();
+                    encode_maturity(if m < m_body { m } else { m_body }, m_body)
+                })
+            })
+            .collect();
+        assert_eq!(
+            refined
+                .corners()
+                .iter()
+                .map(|corner| corner.and_then(|corner| corner.maturity()))
+                .collect::<Vec<_>>(),
+            own,
+            "texel {texel:?}"
+        );
+    }
+}
+
 /// The Earth-like world's coast texel ([`earth_coast_and_inland`]) and the texels either side of it
 /// along i, surveyed with their margin, and the three texels.
 pub(super) fn coast_worker() -> (WorkerFields, [PatchKey; 3]) {

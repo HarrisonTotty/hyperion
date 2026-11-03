@@ -337,7 +337,9 @@ describe("a class map from a worker's answer", () => {
       ...answerOf(TEXELS),
       refinement: {
         side: 4,
+        corners: false,
         texels: Uint32Array.from([1]),
+        surveyed: Uint8Array.from({ length: 16 }, (_, c) => (c === 15 ? 0 : 1)),
         weights: Uint8Array.from(cells.flat()),
         codes: new Uint16Array(),
       },
@@ -369,7 +371,8 @@ describe("a class map from a worker's answer", () => {
     {
       name: "whose refined cells' weights are not 16 a texel over its classes",
       change: { weights: new Uint8Array(15 * 3) },
-      message: /1 refined texels of 16 cells have 45 weights over 3 classes/u,
+      message:
+        /1 refined texels of 16 cells and 16 readings have 16 cells, 45 weights over 3 classes/u,
     },
     {
       name: "whose refined texel is past its texels",
@@ -379,8 +382,76 @@ describe("a class map from a worker's answer", () => {
   ])("refuses a refinement $name", ({ change, message }) => {
     const refinement = {
       side: 4,
+      corners: false,
       texels: Uint32Array.from([1]),
+      surveyed: new Uint8Array(16).fill(1),
       weights: new Uint8Array(16 * 3).fill(85),
+      codes: new Uint16Array(),
+      ...change,
+    };
+    expect(() => classMapTexelsOf({ ...answerOf(TEXELS), refinement })).toThrow(message);
+  });
+
+  it("packs its refined texels' corners in the map's fine page, a corner of no weight not surveyed, and their cells' survey (lane fix-coast-class-map)", () => {
+    // TEXELS' second texel refined to its level-8 field's 4 × 4 cells: each of their 5 × 5 corners
+    // one class's alone by its column, and the last cell not surveyed.
+    const corners = Array.from({ length: 25 }, (_, c) =>
+      [0, 1, 2].map((k) => (k === (c % 5) % 3 ? 255 : 0)),
+    );
+    const answer: ClassMapAnswer = {
+      ...answerOf(TEXELS),
+      refinement: {
+        side: 4,
+        corners: true,
+        texels: Uint32Array.from([1]),
+        surveyed: Uint8Array.from({ length: 16 }, (_, c) => (c === 15 ? 0 : 1)),
+        weights: Uint8Array.from(corners.flat()),
+        codes: new Uint16Array(),
+      },
+    };
+    const map = classMapTexelsOf(answer);
+    if (map === null) {
+      throw new Error("no map");
+    }
+    expect(map.fine).toEqual({ side: 4, tiles: 1, pages: 1, corners: true });
+    const n = CLASS_MAP_FACE_TEXELS;
+    // Corner (ca, cb), a millionth of a cell inside the cell it is the first corner of.
+    const corner = (ca: number, cb: number): readonly [number, number, number] =>
+      faceUvToXyz(2, stToUv((11 + (ca + 1e-6) / 4) / n), stToUv((11 + (cb + 1e-6) / 4) / n));
+    expect([
+      inBytes(classMapSharesAt(map, corner(0, 0))),
+      inBytes(classMapSharesAt(map, corner(2, 1))),
+      inBytes(classMapSharesAt(map, corner(3.5, 3.5))),
+    ]).toEqual([
+      [0, 255, 0, 0],
+      [0, 0, 0, 255],
+      [255, 0, 0, 0],
+    ]);
+    // The texel's own as without its refinement.
+    expect(classWeightsAt(map, centreOf(2, 11, 11)).map((w) => Math.round(w * 255))).toEqual([
+      100, 100, 55,
+    ]);
+  });
+
+  it.each([
+    {
+      name: "whose refined corners' weights are not 25 a texel over its classes",
+      change: { weights: new Uint8Array(24 * 3) },
+      message:
+        /1 refined texels of 16 cells and 25 readings have 16 cells, 72 weights over 3 classes/u,
+    },
+    {
+      name: "whose refined cells' survey is not 16 a texel",
+      change: { surveyed: new Uint8Array(15) },
+      message: /have 15 cells, 75 weights/u,
+    },
+  ])("refuses a refinement at its cells' corners $name", ({ change, message }) => {
+    const refinement = {
+      side: 4,
+      corners: true,
+      texels: Uint32Array.from([1]),
+      surveyed: new Uint8Array(16).fill(1),
+      weights: new Uint8Array(25 * 3).fill(85),
       codes: new Uint16Array(),
       ...change,
     };

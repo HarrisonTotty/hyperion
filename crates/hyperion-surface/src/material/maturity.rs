@@ -911,6 +911,22 @@ pub fn maturity_at_level<F: FieldView>(
     )
 }
 
+/// [`maturity_at_level`] at the unit direction `dir`, as a patch's vertex gives it, rather than at
+/// a face point.
+///
+/// # Errors
+///
+/// As [`maturity_at_level`].
+pub(crate) fn maturity_at_level_dir<F: FieldView>(
+    synth: &Synthesiser<'_, F>,
+    cache: &mut SynthCache,
+    dir: [f64; 3],
+    level: BandLevel,
+) -> Result<Option<f64>, QueryHeightError> {
+    let cut = maturity_cut(&synth.field().header().figure(), level);
+    point_maturity(synth, cache, || dir, Kept::From(cut))
+}
+
 /// Which small-crater octaves a maturity draws crater by crater.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Kept {

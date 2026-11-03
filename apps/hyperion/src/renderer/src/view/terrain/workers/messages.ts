@@ -372,22 +372,30 @@ export interface ClassMapAnswer {
 
 /**
  * A class map's texels refined to the field's level, as a worker answers them (lane
- * fix-coast-class-map; `src/wasm.rs`'s `ClassMapAnswer.refined`, `fineWeights` and `fineMaturity`):
- * those whose field cells' classes the disc would draw apart, each with its cells' own readings.
+ * fix-coast-class-map; `src/wasm.rs`'s `ClassMapAnswer.refined`, `fineCorners`, `fineSurveyed`,
+ * `fineWeights` and `fineMaturity`): those whose field cells' classes the disc would draw apart,
+ * each with its cells' own readings, or from the crate's `REFINED_CORNERS_FROM` the readings at
+ * their corners, the terrain's lattice of level L − 6 (`RefinedTexel::corners`).
  */
 export interface ClassMapRefinementAnswer {
   /** r, the field cells along a texel's side: 2 or 4. */
   readonly side: number;
+  /** Whether its texels are read at their cells' corners rather than at their centres. */
+  readonly corners: boolean;
   /** The place in {@link ClassMapAnswer.texels} of each refined texel, rising. */
   readonly texels: Uint32Array;
+  /** Each refined texel's r² cells in rising (j, i), 1 for a surveyed cell and 0 for another. */
+  readonly surveyed: Uint8Array;
   /**
-   * Each refined texel's r² cells in rising (j, i), each its weight bytes over the classes as
-   * {@link ClassMapAnswer.weights}' texels; all 0 for a cell not surveyed.
+   * Each refined texel's r² cells in rising (j, i), or under {@link ClassMapRefinementAnswer.corners}
+   * the (r + 1)² corners of those cells, each its weight bytes over the classes as
+   * {@link ClassMapAnswer.weights}' texels; all 0 for one not surveyed.
    */
   readonly weights: Uint8Array;
   /**
-   * Each of those cells' maturity code, one a cell in {@link ClassMapRefinementAnswer.weights}'
-   * order, 0 for a cell not surveyed; empty where the header carries no maturity.
+   * Each of those cells' or corners' maturity code, one a value in
+   * {@link ClassMapRefinementAnswer.weights}' order, 0 for one not surveyed; empty where the header
+   * carries no maturity.
    */
   readonly codes: Uint16Array;
 }
@@ -771,7 +779,12 @@ export function classMapTransferables(map: ClassMapAnswer | null): Transferable[
     buffers.push(maturity.codes.buffer, maturity.nodes.buffer);
   }
   if (refinement !== undefined) {
-    buffers.push(refinement.texels.buffer, refinement.weights.buffer, refinement.codes.buffer);
+    buffers.push(
+      refinement.texels.buffer,
+      refinement.surveyed.buffer,
+      refinement.weights.buffer,
+      refinement.codes.buffer,
+    );
   }
   return buffers;
 }
