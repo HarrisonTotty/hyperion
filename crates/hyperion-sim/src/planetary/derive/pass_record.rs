@@ -512,7 +512,7 @@ impl PassContext {
     }
 
     /// A moon's tide at the pass it is of, `None` for a body no parent tides: a moon's air reads
-    /// its heat flow in its surface from P14.T55.j's `MOON_SURFACE_HEAT_VERSION`.
+    /// its heat flow in its surface (P14.T55.j's record side).
     #[must_use]
     pub(crate) const fn tide(&self) -> Option<PassTide> {
         self.tide

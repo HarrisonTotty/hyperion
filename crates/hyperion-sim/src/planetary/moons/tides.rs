@@ -75,11 +75,10 @@
 //! and Maxwell profile read that surface (`with_radiating_surface`, solved to
 //! [`SURFACE_HEAT_TOLERANCE`] of `T_s`). Io's 2.2 W m⁻² raises its surface by some 7 K, Enceladus's by 0.35 K: the rise of the
 //! effective temperature that radiates the whole flux, not of the passive surface between Io's hot
-//! spots, which carry most of its heat. From 27 too (`MOON_SURFACE_HEAT_VERSION`), the air and the
-//! record's surface conditions read it: a moon's air starts from that surface, held at its night's
-//! floor, wherever its heat flow is positive (`MoonSurfaceHeatRules::lit_surface`; lean,
-//! 2026-11-02). Below it they read the sunlight, held at the night's floor that F sets (P14.T24.i;
-//! ruling 112.7's split).
+//! spots, which carry most of its heat. The air and the record's surface conditions read it too: a
+//! moon's air starts from that surface, held at its night's floor, wherever its heat flow is
+//! positive (lean, 2026-11-02), where every other body's starts from its sunlight, held at the
+//! night's floor that F sets (P14.T24.i; ruling 112.7's split).
 //!
 //! Every function here is pure and deterministic: the shell's modulus is a fixed midpoint sum
 //! ([`SHELL_QUADRATURE_NODES`]) and the root is refined by a fixed count of bisections
@@ -109,7 +108,6 @@ use crate::units::{
     Kelvin, Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, Pascals,
     WattsPerSquareMetre,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// The fluid Love number `k_f` of a body of moment of inertia C ÷ M a², the Darwin–Radau relation
 /// inverted: P14.T56.a's, re-exported so that a moon's tides and its parent's J₂ read one
@@ -253,82 +251,6 @@ pub fn membrane_love_number(ocean: f64, lambda: MembraneStiffness) -> ComplexLov
         // 0 − x, so that a shell of no loss gives +0, not −0.
         imaginary: 0.0 - ocean * im / norm,
     }
-}
-
-/// The generator version from which a moon's air and its record's surface conditions read the
-/// surface that radiates its internal heat as well as its sunlight, as its tides read it
-/// (P14.T55.j, the record's side): 27, with the tides' own.
-///
-/// It is the rule's one hold. Below it [`MoonSurfaceHeatRules::in_force`] is
-/// [`MoonSurfaceHeatRules::Held`]: a moon's air starts from the larger of its equilibrium
-/// temperature and its night's floor, as every body's does (P14.T24.i), and every figure is version
-/// 24's, 25's and 26's bit for bit. 27's bump deletes this hold, [`MoonSurfaceHeatRules`] with its
-/// `Held` arm, the tests' switch and its tripwire
-/// (`the_moon_surface_heat_is_held_only_until_the_27_bump`).
-pub(crate) const MOON_SURFACE_HEAT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether a moon's air reads its internal heat in its surface (its hold,
-/// [`MOON_SURFACE_HEAT_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum MoonSurfaceHeatRules {
-    /// Version 26's and before: the air at the equilibrium temperature, held at its night's floor.
-    Held,
-    /// Version 27's: the air at σ `T_s`⁴ = σ `T_eq`⁴ + F ([`radiating_surface_temperature`]),
-    /// held at its night's floor.
-    Radiated,
-}
-
-impl MoonSurfaceHeatRules {
-    /// The rules this generator version gives: the radiated surface from
-    /// [`MOON_SURFACE_HEAT_VERSION`], the equilibrium temperature below it; in the tests, the rules
-    /// a test's switch sets on its thread ([`with_moon_surface_heat`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = MOON_SURFACE_HEAT_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= MOON_SURFACE_HEAT_VERSION {
-            Self::Radiated
-        } else {
-            Self::Held
-        }
-    }
-
-    /// The sunlit surface of a moon of equilibrium temperature `equilibrium` and heat flow at its
-    /// surface `heat_flow`, before its night's floor holds it: `T_eq` under the hold, and
-    /// [`radiating_surface_temperature`] from it, which is `T_eq` to the bit where F is not
-    /// positive.
-    #[must_use]
-    pub(crate) fn lit_surface(self, equilibrium: Kelvin, heat_flow: WattsPerSquareMetre) -> Kelvin {
-        match self {
-            Self::Held => equilibrium,
-            Self::Radiated => radiating_surface_temperature(equilibrium, heat_flow),
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The moon surface heat's rules a test sets on its thread, `None` for the version's.
-    static MOON_SURFACE_HEAT_RULES: core::cell::Cell<Option<MoonSurfaceHeatRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the moon surface heat's rules `rules` on this thread, for the tests to reach
-/// P14.T55.j's record side ahead of the bump; the version's rules are set back after, a panic in
-/// `run` included. 27's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_moon_surface_heat<R>(rules: MoonSurfaceHeatRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<MoonSurfaceHeatRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            MOON_SURFACE_HEAT_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(MOON_SURFACE_HEAT_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
 }
 
 /// The surface temperature of a solid body of equilibrium temperature `equilibrium` that also

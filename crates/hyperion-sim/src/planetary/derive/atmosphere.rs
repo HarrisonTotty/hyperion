@@ -62,9 +62,9 @@
 //! The irradiation this module reads is the equilibrium temperature from the hosts' light alone;
 //! a giant's internal heat enters only its gas envelope's temperature, so that the two can be
 //! told apart (ruling 112.7). A solid body's heat flow holds its surface at its night's floor
-//! (P14.T24.i), and from generator version 27 a moon's surface also radiates it beside its
-//! sunlight, σ `T_s`⁴ = σ `T_eq`⁴ + F, as its tides read it (P14.T55.j, behind
-//! `MOON_SURFACE_HEAT_VERSION`): the record's `T_eq` stays the light's.
+//! (P14.T24.i), and a moon's surface also radiates it beside its sunlight,
+//! σ `T_s`⁴ = σ `T_eq`⁴ + F, as its tides read it (P14.T55.j's record side): the record's `T_eq`
+//! stays the light's.
 
 mod escaping;
 mod present;

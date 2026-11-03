@@ -499,9 +499,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// - the equilibrium network's further carriers, `CARRIERS_VERSION` (P14.T52.e), at
 ///   `CarriersRules::Carried` through `with_carriers`: the registry's rows from 115 on, which the
 ///   network carries, P and Cl solved.
-/// - a moon's air and record that read that surface, `MOON_SURFACE_HEAT_VERSION` (P14.T55.j, the
-///   record's side), at `MoonSurfaceHeatRules::Radiated` through `with_moon_surface_heat`: its
-///   air's base the larger of its night's floor and (`T_eq`⁴ + F ÷ σ)^¼.
 /// - a gas envelope's own Bond albedo, `ENVELOPE_BOND_VERSION` (P14.T24.h.b part 5), at
 ///   `EnvelopeBondRules::Own` through `with_envelope_bond`: its column's above its floor, in place
 ///   of T51.b's class table, with part 6's chromophore at the disc's column, the haze above a
@@ -572,14 +569,12 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::photometry::envelope_bond::{
         EnvelopeBondRules, with_envelope_bond,
     };
-    use crate::planetary::moons::tides::{MoonSurfaceHeatRules, with_moon_surface_heat};
     use crate::planetary::surface::steps::climate::{
         OrbitExtrapolationRules, with_orbit_extrapolation,
     };
     use crate::substance::{CarriersRules, with_carriers};
     let run = move || with_orbit_extrapolation(OrbitExtrapolationRules::ReducedRank, run);
     let run = move || with_carriers(CarriersRules::Carried, run);
-    let run = move || with_moon_surface_heat(MoonSurfaceHeatRules::Radiated, run);
     let run = move || with_envelope_bond(EnvelopeBondRules::Own, run);
     let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
     let run = move || with_minor_clouds(MinorCloudsRules::OwnShare, run);

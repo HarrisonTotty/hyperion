@@ -1713,36 +1713,10 @@ fn the_core_term_has_kelvin_s_limit_and_vanishes_for_a_rigid_core() {
     assert_same_bits(ComplexRigidity::POROUS_CORE.imaginary.value(), 8e6);
 }
 
-/// P14.T55.j's record side's hold: 26's bump leaves it, 27's deletes it; the tests' switch and 27's
-/// helper reach the radiated air, and 26's and 25's helpers do not.
-#[test]
-fn the_moon_surface_heat_is_held_only_until_the_27_bump() {
-    use MoonSurfaceHeatRules::{Held, Radiated};
-    assert!(
-        crate::GENERATOR_VERSION < MOON_SURFACE_HEAT_VERSION,
-        "the 26 → 27 bump makes a moon's air and record read its surface's internal heat \
-         (P14.T55.j): delete `MOON_SURFACE_HEAT_VERSION`, `MoonSurfaceHeatRules` with its `Held` \
-         arm (`airless_mean` then reads `radiating_surface_temperature`), the tests' \
-         `with_moon_surface_heat`, its switch in `with_every_27_hold`, and this test; re-bless the \
-         movers plan 14's record of P14.T55.j lists"
-    );
-    assert_eq!(MoonSurfaceHeatRules::in_force(), Held);
-    assert_eq!(
-        with_moon_surface_heat(Radiated, MoonSurfaceHeatRules::in_force),
-        Radiated
-    );
-    assert_eq!(with_every_27_hold(MoonSurfaceHeatRules::in_force), Radiated);
-    assert_eq!(
-        with_every_27_hold(|| with_moon_surface_heat(Held, MoonSurfaceHeatRules::in_force)),
-        Held
-    );
-    assert_eq!(MoonSurfaceHeatRules::in_force(), Held);
-}
-
 /// P14.T55.j's record side: under every 27 hold the surface a moon's air starts from, before its
 /// night's floor, is its tides' own: Io's, heated at its measured elements, lies on its tides'
-/// balance to 10⁻¹² and rises within its 7 K; held, it is the equilibrium temperature to the bit,
-/// and so is a surface with no heat flow under either rule.
+/// balance to 10⁻¹² and rises within its 7 K, and a surface with no heat flow is the equilibrium
+/// temperature to the bit.
 #[test]
 fn under_every_27_hold_io_s_air_starts_from_its_tides_surface() {
     let io = moon("Io");
@@ -1754,7 +1728,7 @@ fn under_every_27_hold_io_s_air_starts_from_its_tides_surface() {
     });
     assert_eq!(tides.branch(), TidalBranch::Heated);
     let f = tides.heat_flow();
-    let lit = with_every_27_hold(|| MoonSurfaceHeatRules::in_force().lit_surface(t_eq, f));
+    let lit = radiating_surface_temperature(t_eq, f);
     let rise = lit.value() - io.surface;
     eprintln!(
         "Io under every 27 hold: its air from {:.4} K at {:.4} W m⁻² (+{rise:.4} K), its tides' \
@@ -1768,15 +1742,9 @@ fn under_every_27_hold_io_s_air_starts_from_its_tides_surface() {
         "{lit:?} against {surface:?}"
     );
     assert!(rise > 0.0 && rise < 7.0, "{rise} K");
-    let held = crate::planetary::testing::with_every_26_hold_with_its_retargets(|| {
-        MoonSurfaceHeatRules::in_force().lit_surface(t_eq, f)
-    });
-    assert_same_bits(held.value(), io.surface);
-    for rules in [MoonSurfaceHeatRules::Held, MoonSurfaceHeatRules::Radiated] {
-        for none in [0.0, -1.0, f64::NAN] {
-            let lit = rules.lit_surface(t_eq, WattsPerSquareMetre::new(none));
-            assert_same_bits(lit.value(), io.surface);
-        }
+    for none in [0.0, -1.0, f64::NAN] {
+        let lit = radiating_surface_temperature(t_eq, WattsPerSquareMetre::new(none));
+        assert_same_bits(lit.value(), io.surface);
     }
 }
 
