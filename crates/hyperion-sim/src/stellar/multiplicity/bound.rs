@@ -40,7 +40,7 @@ use crate::units::Metres;
 /// lists is the generated one, not an interval about it.
 ///
 /// **The cover.** The generator keeps the first attempt with no pair in a carved class
-/// ([`SystemStars::carved_pair`]), nor, under P11.T6's hold, one whose Type Ia candidate explodes
+/// ([`SystemStars::carved_pair`]), nor one whose Type Ia candidate explodes
 /// ([`SystemStars::exploded_pair`]), and only a pair that the binary engine runs can be carved or
 /// pool a candidate: one of two stars, neither a brown dwarf ([`AttemptBound::pairs`]). So
 /// attempt n + 1 can be kept only if attempt n holds such a pair ([`AttemptBound::may_carve`]).

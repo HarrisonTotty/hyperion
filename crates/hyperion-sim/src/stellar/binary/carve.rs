@@ -1,8 +1,8 @@
 //! The grid's half of the carve (plan 11, P11.T7, design notes 8 and 9): a grid system one of
 //! whose pairs falls into a carved catalogue class at any age of the source horizon
 //! ([`carved_class`](super::carved_class)) is redrawn on its next attempt, in
-//! [`SystemStars::generate`](crate::stellar::system::SystemStars::generate). Under P11.T6's hold
-//! so is one whose pair's pooled Type Ia candidate its explosion mark explodes, at or before +H
+//! [`SystemStars::generate`](crate::stellar::system::SystemStars::generate), and so is one whose
+//! pair's pooled Type Ia candidate its explosion mark explodes, at or before +H
 //! ([`SystemStars::exploded_pair`](crate::stellar::system::SystemStars::exploded_pair)): plan 09's
 //! Type Ia class holds every recent one.
 //!

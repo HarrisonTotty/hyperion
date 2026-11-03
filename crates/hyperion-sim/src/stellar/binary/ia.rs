@@ -19,38 +19,18 @@
 //! engine made it: a massive white dwarf, an R Coronae Borealis star, a hot subdwarf.
 //!
 //! The mark is a pure function of the seed, the pair's key and the attempt, and nothing else reads
-//! its stream, so it moves no other draw. The system stage reads it under P11.T6's hold (the
-//! stellar rules' `ia_explosion`, from version 27): a grid binary whose marked explosion lies at or
-//! before +H redraws, as the four binary classes do (design notes 8 and 9), since plan 09's Type
-//! Ia class holds every recent Type Ia.
+//! its stream, so it moves no other draw. The system stage reads it: a grid binary whose marked
+//! explosion lies at or before +H redraws, as the four binary classes do (design notes 8 and 9),
+//! since plan 09's Type Ia class holds every recent Type Ia.
 
 use super::classify::MIN_DETONATABLE_MASS;
 use super::timeline::{BinaryTimeline, IaPoolChannel, PooledIaEvent};
-use crate::GeneratorVersion;
 use crate::id::BodyId;
 use crate::rng::{Mark, ObjectKey, Seed, Stream, Threshold, tags};
 use crate::stellar::multiplicity::RedrawAttempt;
 use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 use crate::tables::binary::IaYieldTable;
 use crate::units::SolarMasses;
-
-/// The generator version from which the grid redraws a binary whose pooled Type Ia candidate its
-/// explosion mark explodes at or before +H (plan 11, P11.T6): the hold of the stellar rules'
-/// `ia_explosion` field ([`IaExplosionRules`]).
-pub(crate) const IA_EXPLOSION_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether the system stage reads the Type Ia explosion mark (the stellar rules' `ia_explosion`
-/// field, the hold of [`IA_EXPLOSION_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum IaExplosionRules {
-    /// Version 26's and before: no pooled candidate explodes, and every grid binary stays what
-    /// the engine made it.
-    Pooled,
-    /// Version 27's: a pooled candidate the mark explodes at or before +H is a Type Ia, plan 09's
-    /// class holds it, and the grid redraws its binary
-    /// ([`SystemStars::exploded_pair`](crate::stellar::system::SystemStars::exploded_pair)).
-    Marked,
-}
 
 /// A pair's Type Ia explosion mark at one redraw attempt (plan 11's Provides): the integer draw
 /// that decides whether the pair's pooled Type Ia candidate explodes.

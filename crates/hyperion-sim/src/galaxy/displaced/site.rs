@@ -454,8 +454,7 @@ pub(crate) fn recent_death_claim(rules: CarveOutRules) -> Option<RecentDeathClai
 ///
 /// It is the carve's Type Ia test (P11.T6): whether a pair's pooled Type Ia candidate is one its
 /// explosion mark explodes ([`SystemStars::exploded_pair`]), the test the grid's redraw reads
-/// beside `carved_class`, so the redraw keeps it false. Under the held arm of P11.T6's hold no
-/// candidate explodes and it is false for every system.
+/// beside `carved_class`, so the redraw keeps it false.
 #[must_use]
 pub(crate) fn keeps_a_recent_type_ia(stars: &SystemStars) -> bool {
     stars.exploded_pair().is_some()

@@ -38,11 +38,6 @@
 //!   reach tables fitted from the engine's runs keep the version's rules until the bump refits
 //!   them, and the range brief's gate refuses them under another arm
 //!   (`stellar/rules/merger_mass_hold.rs` lists the movers).
-//! - [`ia_explosion`](StellarRules::ia_explosion), at [`IA_EXPLOSION_VERSION`] (plan 11, P11.T6):
-//!   whether the binary engine's pooled Type Ia candidates take their explosion mark. From it the
-//!   grid redraws a binary whose candidate the mark explodes at or before +H, in one test,
-//!   [`SystemStars::exploded_pair`], which the system stage's redraw and P09.T35's hook read
-//!   (`stellar/rules/ia_hold.rs`).
 //! - [`ns_accretion`](StellarRules::ns_accretion), at [`NS_ACCRETION_VERSION`] (plan 11, P11.T4's
 //!   fix): what a neutron star keeps of a companion's stable Roche-lobe overflow, all of it up to
 //!   the Eddington rate below it, a share from it, read at one choke point, `Engine::accretion`,
@@ -105,7 +100,6 @@
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
-//! [`SystemStars::exploded_pair`]: crate::stellar::system::SystemStars::exploded_pair
 //! [`BINARY_KICKS_VERSION`]: crate::stellar::system::BINARY_KICKS_VERSION
 //! [`SystemStars::shown_at`]: crate::stellar::system::SystemStars::shown_at
 //! [`WIND_ACCRETION_VERSION`]: crate::stellar::binary::wind_accretion::WIND_ACCRETION_VERSION
@@ -115,7 +109,6 @@ use crate::stellar::binary::awd_donors::{AWD_DONORS_VERSION, AwdDonorRules};
 use crate::stellar::binary::collapses::{COLLAPSES_VERSION, CollapseRules};
 use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
 use crate::stellar::binary::heavy_donor::{HEAVY_DONOR_VERSION, HeavyDonorRules};
-use crate::stellar::binary::ia::{IA_EXPLOSION_VERSION, IaExplosionRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
 use crate::stellar::binary::ns_accretion::{NS_ACCRETION_VERSION, NsAccretionRules};
 use crate::stellar::binary::pinned_white_dwarfs::{
@@ -137,9 +130,6 @@ pub(crate) struct StellarRules {
     /// What a dynamically transferring main-sequence pair's merger keeps in the binary engine,
     /// the hold of [`MERGER_MASS_VERSION`].
     pub(crate) merger_mass: MergerMassRules,
-    /// Whether the system stage reads the Type Ia explosion mark and redraws a binary it explodes
-    /// by +H, the hold of [`IA_EXPLOSION_VERSION`].
-    pub(crate) ia_explosion: IaExplosionRules,
     /// What a neutron star keeps of a companion's stable Roche-lobe overflow in the binary engine,
     /// the hold of [`NS_ACCRETION_VERSION`].
     pub(crate) ns_accretion: NsAccretionRules,
@@ -180,11 +170,6 @@ impl StellarRules {
                 MergerMassRules::Pair
             } else {
                 MergerMassRules::ThermalLimit
-            },
-            ia_explosion: if version.get() >= IA_EXPLOSION_VERSION.get() {
-                IaExplosionRules::Marked
-            } else {
-                IaExplosionRules::Pooled
             },
             ns_accretion: if version.get() >= NS_ACCRETION_VERSION.get() {
                 NsAccretionRules::Efficiency
@@ -249,9 +234,9 @@ impl StellarRules {
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// those that turn on at 27 (P11.T6's `ia_explosion`, P11.T4's `ns_accretion`, `heavy_donor`,
-    /// `pinned_white_dwarfs` and `dwarf_limit`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and
-    /// `xrb_class`, P11.T10's `binary_kicks` and `collapses`, and P11.T12's `wind_accretion`).
+    /// those that turn on at 27 (P11.T4's `ns_accretion`, `heavy_donor`, `pinned_white_dwarfs` and
+    /// `dwarf_limit`, P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and `xrb_class`, P11.T10's
+    /// `binary_kicks` and `collapses`, and P11.T12's `wind_accretion`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.
@@ -288,8 +273,6 @@ mod dwarf_limit_hold;
 mod events_hold;
 #[cfg(test)]
 mod heavy_donor_hold;
-#[cfg(test)]
-mod ia_hold;
 #[cfg(test)]
 mod merger_mass_hold;
 #[cfg(test)]

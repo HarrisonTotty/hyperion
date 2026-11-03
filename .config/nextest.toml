@@ -367,12 +367,6 @@ threads-required = 16
 filter = "package(hyperion-sim) & test(/^galaxy::catalogue_classes::verification::/)"
 threads-required = 16
 
-# P11.T6's two censuses of the Type Ia redraw run their records in sixteen shares of their own
-# (`in_shares`), so each reserves sixteen slots.
-[[profile.slow.overrides]]
-filter = "package(hyperion-sim) & test(/^stellar::rules::ia_hold::slow::under_every_27_hold_/)"
-threads-required = 16
-
 # P11.T12's statistical suite draws its generated records in 64 fixed parts on eight threads of
 # its own (`in_shares`, `THREADS` in `tests/binaries_statistical.rs`), so each test reserves eight
 # slots.
