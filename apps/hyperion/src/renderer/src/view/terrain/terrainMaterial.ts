@@ -77,7 +77,12 @@ import { SURFACE_LIGHTING_WGSL, surfaceLightingTextures } from "../atmosphere/su
 import { THERMAL_WGSL } from "../atmosphere/thermal";
 import type { DiscLight, DiscOccluder, DiscSecondary } from "../bodies/discShading";
 import { oblateAlbedoScale } from "../bodies/oblate";
-import type { StorageBufferSpec, UniformSpec, WgslMaterialSpec } from "../engine/types";
+import type {
+  StorageBufferSpec,
+  TextureHandle,
+  UniformSpec,
+  WgslMaterialSpec,
+} from "../engine/types";
 import type { Rgb } from "../photometry/toneCurve";
 import type { TerrainVertexPath } from "../quality/qualitySetting";
 import frameWgsl from "../shaders/frame.wgsl?raw";
@@ -142,6 +147,11 @@ export const TERRAIN_LIT_BINDINGS = {
   clusterLists: 22,
   /** The sources' transmittance table, R08's surface lighting's ninth (R08.T9.b's lever). */
   sourceTable: 23,
+  /**
+   * The disc's normal map, which the shading normal fades from near a hand-over (R10.T15.b.2;
+   * `terrainLitShade.wgsl`'s `disc_normals`).
+   */
+  discNormals: 24,
 } as const;
 
 /**
@@ -150,6 +160,13 @@ export const TERRAIN_LIT_BINDINGS = {
  * `depth32float` array texture, which the receiver never samples at w = 0.
  */
 export const SHADOW_CASCADES_TEXTURE = "shadowCascades";
+
+/**
+ * The `DrawItem.textures` name under which a lit terrain draw binds its disc's normal map
+ * (R10.T15.b.2; {@link HandoverFade.discNormals}), or, with no fade under way, any 2D array texture
+ * of floats, which the fragment never reads at a detail share of 1.
+ */
+export const DISC_NORMALS_TEXTURE = "discNormals";
 
 /**
  * The lit material's comparison sampler (R10.T9.b): declared by the spec and made by the engine,
@@ -204,7 +221,8 @@ const LIT_TERRAIN_SOURCE =
  * Its uniforms are the `Draw`'s own fields, then the cascades' ({@link CASCADE_UNIFORM_SPECS},
  * which `packCascadeUniforms` writes; zeros read as no cascades), and it binds the cascades' layers
  * as {@link SHADOW_CASCADES_TEXTURE} at binding 19, `depth` and `2d-array`, read through the
- * comparison sampler {@link SHADOW_COMPARE_SAMPLER} at binding 20. The receiver is composed here
+ * comparison sampler {@link SHADOW_COMPARE_SAMPLER} at binding 20, and the disc's normal map as
+ * {@link DISC_NORMALS_TEXTURE} at binding 24 (R10.T15.b.2). The receiver is composed here
  * alone, not into {@link LIT_TERRAIN_SOURCE}, which the depth material and the caster share: WGSL
  * type-checks every function, and their `Draw`s have none of the cascades' fields
  * (decision-r10-t9b-design D5(a)). Textures and samplers are visible to both stages, as the engine
@@ -255,6 +273,7 @@ export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpe
         sampleType: "depth",
         viewDimension: "2d-array",
       },
+      { name: DISC_NORMALS_TEXTURE, binding: b.discNormals, viewDimension: "2d-array" },
     ],
     cullMode: "back",
     depthWrite: true,
@@ -1230,6 +1249,21 @@ export function packClassNodes(
   return out;
 }
 
+/**
+ * A handed-over body's terrain near its hand-over, drawn between the disc's shading and its own
+ * (plan R10, R10.T15.b.2; `handover.ts`' `handoverDetailShare`).
+ */
+export interface HandoverFade {
+  /**
+   * The share of its own sub-cell shading it is drawn with, 0 to 1, below 1: each texel lit at a
+   * place mixed from the disc's point along its ray, its shading normal mixed from the disc's normal
+   * map's and its horizon map's elevations scaled, at 0 lit as the disc lights the pixel.
+   */
+  readonly detailShare: number;
+  /** The disc's normal map (R10.T10.g; `bodies/discNormals.ts`' layout), its normals faded from. */
+  readonly discNormals: TextureHandle;
+}
+
 /** The stars that light one terrain at most: the brightest two, as R07's disc's. */
 export const MAX_TERRAIN_LIGHTS = 2;
 
@@ -1268,6 +1302,11 @@ export interface TerrainLighting {
   readonly elsewhere: PhotometricLaw;
   /** The frame's pre-exposure (R02's `exposureScale` of its EV100). */
   readonly exposureScale: number;
+  /**
+   * The hand-over's fade of the terrain's own detail (plan R10, R10.T15.b.2), where it is under way;
+   * absent, the terrain is drawn with its own detail whole.
+   */
+  readonly fade?: HandoverFade;
   /**
    * The ground's thermal emission, body-fixed, for a body above R08's visibility cut (R08.T18.a;
    * its disc record's, `DiscRecord.emission`, its star turned into the body's axes); absent below
@@ -1313,7 +1352,7 @@ export function packTerrainLighting(
     elsewhere.a[2] * k,
     elsewhere.lommelSeeligerShare,
   ]);
-  put(2, [0, lighting.exposureScale / Math.PI, 0, 0]);
+  put(2, [0, lighting.exposureScale / Math.PI, lighting.fade?.detailShare ?? 1, 0]);
   lights.forEach((light, j) => {
     const first = FIRST_LIGHT_ROW + j * LIGHT_ROWS;
     put(first, [light.direction.x, light.direction.y, light.direction.z, light.distance]);

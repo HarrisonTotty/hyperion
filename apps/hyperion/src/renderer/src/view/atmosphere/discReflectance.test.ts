@@ -197,21 +197,25 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // and its rebakes', rises', refines' and coarsens' mix of heights, normals and maturity
   // (R10.T16.i), which with no fade are k and the newer bake, bit for bit. Re-pinned by the lane's
   // settled frame (R10.T16.i): the mix behind `TERRAIN_MIXES`, true, and each material's still form
-  // beside it, false (`stillMaterialSpec`), the arithmetic as before.
+  // beside it, false (`stillMaterialSpec`), the arithmetic as before. And by the hand-over's fade
+  // of the terrain's own detail (R10.T15.b.2): the place a texel is lit at (`ShadePlace`), the
+  // horizon map's share and the disc's normal map at 24, which at a share of 1, wherever no fade
+  // stands, are the texel's own place, map and normal, bit for bit; the depth and the casters
+  // compose the shared module alone.
   ...[
-    ["terrain-lit-baked-offsets", "a115221f2fabe8b9"],
-    ["terrain-lit-face-differences", "e23fe44ae444474c"],
+    ["terrain-lit-baked-offsets", "6991da297f965aa3"],
+    ["terrain-lit-face-differences", "f55d780b928c5b0e"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "ef64e5361e32ad47"],
-    ["terrain-depth-face-differences", "a0511f6740cb4c32"],
-    ["terrain-shadow-baked-offsets", "faff40613c6b785"],
-    ["terrain-shadow-face-differences", "d529f9ee50f739a8"],
-    ["terrain-lit-baked-offsets-still", "69dab0033f4ad42a"],
-    ["terrain-lit-face-differences-still", "d4ce05b44b7c3e3b"],
-    ["terrain-depth-baked-offsets-still", "c34ae744d19a6422"],
-    ["terrain-depth-face-differences-still", "331a4e67469da043"],
-    ["terrain-shadow-baked-offsets-still", "1a576b578db6b272"],
-    ["terrain-shadow-face-differences-still", "719b5be04a76aa13"],
+    ["terrain-depth-baked-offsets", "625ac236b3f0f5"],
+    ["terrain-depth-face-differences", "ecc920e6e2ccecd8"],
+    ["terrain-shadow-baked-offsets", "164034387f222ea7"],
+    ["terrain-shadow-face-differences", "1f9288dbaf5eee52"],
+    ["terrain-lit-baked-offsets-still", "8e8abb6584bdd320"],
+    ["terrain-lit-face-differences-still", "136237a3530807b9"],
+    ["terrain-depth-baked-offsets-still", "68f5a1db2655cb1a"],
+    ["terrain-depth-face-differences-still", "6d903b3d9a1978eb"],
+    ["terrain-shadow-baked-offsets-still", "dbdf5be2e18c970a"],
+    ["terrain-shadow-face-differences-still", "9b69cd7c5b56485b"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const still = name.endsWith("-still");
     const spec = [

@@ -232,7 +232,9 @@ fn terrain_star_distance_radii(distance : f32, radius : f32) -> f32 {
 // `slot`, `parent`, `face`, `st`, `patch_uv` and `morph` are the texel's (its slot, its parent's
 // slot and quadrant, its face, its cell coordinates, its place in its patch ÷ 64, its morph
 // factor); `nu` the datum's unit normal, `towards` the unit direction to the star and `phi` its
-// angle from the terrain's normal, all body-fixed.
+// angle from the terrain's normal, all body-fixed; `share` the share of the terrain's own detail
+// near a hand-over (R10.T15.b.2; `handover.ts`' `handoverDetailShare`), which scales e: at 0 the
+// datum's horizontal, the disc's cut, and at 1, wherever no fade stands, e itself, bit for bit.
 fn terrain_horizon(
   slot : u32,
   parent : vec2u,
@@ -243,9 +245,10 @@ fn terrain_horizon(
   nu : vec3f,
   towards : vec3f,
   phi : f32,
+  share : f32,
 ) -> f32 {
   let knots = horizon_knots(horizon_grid_azimuth(face, st, towards));
-  let e = horizon_blended(slot, parent, patch_uv * 64.0, knots, morph);
+  let e = share * horizon_blended(slot, parent, patch_uv * 64.0, knots, morph);
   // In `angle_between`'s form and operand order, so that with n = ν the two angles are one.
   let star = TRIG_HALF_PI - preciseAtan2(length(cross(nu, towards)), dot(nu, towards));
   return element_horizon(e, star, phi);

@@ -70,7 +70,7 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import type { DiscSurface } from "../appearance/bodyAppearance";
+import type { DiscNormalMap, DiscSurface } from "../appearance/bodyAppearance";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
 import { lawFor } from "../appearance/phase";
 import type { DiscGround } from "../atmosphere/AtmosphereCache";
@@ -87,9 +87,12 @@ import { frustumOf } from "../terrain/cull";
 import { patchMeshData } from "../terrain/gpu/resources";
 import { INSTANCE_RECORD_BYTES } from "../terrain/gpu/uniforms";
 import {
+  handoverDetailShare,
   type HandoverSphere,
+  handoverSubtense,
   handOverRegimes,
   handoverTauPx,
+  limbDistanceM,
   pixelAngleRad,
 } from "../terrain/handover";
 import patchVertexWgsl from "../terrain/shaders/patchVertex.wgsl?raw";
@@ -179,6 +182,7 @@ import {
   type LitRegime,
   litRegimes,
   promoteOverlapping,
+  REGIME_HYSTERESIS,
   type ScreenCircle,
   sphereFootprint,
 } from "./regime";
@@ -329,6 +333,12 @@ export interface BodyFrameOptions {
    */
   readonly previousTabled?: ReadonlySet<BodyIdHex>;
   /**
+   * Each body handed over on the previous frame and its relief's subtense where it handed over
+   * ({@link BodyFramePlan.handedOver}), from which its terrain's own detail fades in (R10.T15.b.2).
+   * Absent, every body's fade starts at τ (1 + h), the hand-over's own threshold.
+   */
+  readonly previousHandedOver?: ReadonlyMap<BodyIdHex, number>;
+  /**
    * The cells per axis a disc of 32 px or more takes in its limb pixels (`discSamples`):
    * `PhotorealSettings.floorLimbSamples` while the view's frame-rate floor stands at its lowest
    * step (R07.T8.i). Absent, `LIMB_SAMPLES`.
@@ -352,11 +362,17 @@ export interface MeshBodyPlan {
  * Why a body is drawn as a mesh (T9; plan R10, R10.T10.e): `promoted` by its overlaps alone
  * (`mesh`), its figure drawn whole, or `handed-over` to terrain (`terrain`), whose ground R05's
  * quadtree draws over its figure, with its survey's coverage mask, which discards its figure where
- * the terrain draws the ground (R10.T10.c), or `null` where the view gives it none.
+ * the terrain draws the ground (R10.T10.c), or `null` where the view gives it none, and the share
+ * of its own sub-cell shading its terrain is drawn with this frame over the disc's (R10.T15.b.2;
+ * `handoverDetailShare`), 1 where its disc carries no normal map to fade from.
  */
 export type MeshBodyRole =
   | { readonly kind: "promoted" }
-  | { readonly kind: "handed-over"; readonly coverage: MeshBodyCoverage | null };
+  | {
+      readonly kind: "handed-over";
+      readonly coverage: MeshBodyCoverage | null;
+      readonly detailShare: number;
+    };
 
 /**
  * The coverage mask that discards a mesh body's figure and its limb: a handed-over body's, a
@@ -417,6 +433,12 @@ export interface BodyFramePlan {
    * {@link BodyFrameOptions.previousTabled}.
    */
   readonly tabled: ReadonlySet<BodyIdHex>;
+  /**
+   * Each body handed over to terrain, with its relief's subtense, in τ, at its first frame handed
+   * over (`handoverSubtense`; R10.T15.b.2), for the next frame's
+   * {@link BodyFrameOptions.previousHandedOver}.
+   */
+  readonly handedOver: ReadonlyMap<BodyIdHex, number>;
 }
 
 /**
@@ -628,6 +650,15 @@ function pointReflectionOf(
 }
 
 /**
+ * The normal map a drawn surface shades its surveyed ground with (plan R10, R10.T10.g), its class
+ * map's, or `null` where it has none: what a handed-over body's terrain fades its own shading from
+ * near the hand-over (R10.T15.b.2).
+ */
+export function drawnNormalMap(surface: DrawnDiscSurface): DiscNormalMap | null {
+  return surface.kind === "class-map" ? surface.normals : null;
+}
+
+/**
  * The surface a body's disc shades with: its own, or its photometry's uniform law; a class map
  * whose body has no known rotation cannot be oriented, and shades with its `elsewhere` law.
  */
@@ -784,7 +815,11 @@ function pointSpriteOf(
  * terrain (`handOverRegimes`, plan R10, R10.T10.e). The two switches now count different pixels:
  * R07's 3 px switch (`litRegimes`) the frame's own (`options.viewport`), in which the disc's summed
  * flux meets the point's, and the hand-over the selection's, so that the resolution controller's
- * internal scale, which moves the first, never moves the second (decision-r10-t16-leans §13). A
+ * internal scale, which moves the first, never moves the second (decision-r10-t16-leans §13). Its
+ * role carries the share of its own sub-cell shading its terrain is drawn with, by the same range
+ * and limb on the setting's `TerrainSettings.handoverDetail` (`handoverDetailShare`, R10.T15.b.2),
+ * from its subtense where it handed over ({@link BodyFrameOptions.previousHandedOver}), where its
+ * drawn surface carries the normal map the terrain fades from ({@link drawnNormalMap}). A
  * disc whose footprint overlaps one of `options.depthWriters`, a mesh body or a body handed over is
  * promoted to a mesh (`promoteOverlapping`). A mesh body's limb, a handed-over body's included, is
  * drawn in the sequence as a disc's is, so the order takes it as a disc (Design note 2); its
@@ -845,11 +880,13 @@ export function planLitBodies(
   }
   // The 3 px switch counts the frame's own pixels, where its flux match is drawn; the hand-over
   // the presented ones, as the field's want does (R10.T10.g).
+  const tauPx = handoverTauPx("photorealistic", options.setting);
+  const radPerPx = pixelAngleRad(camera, options.selectionPx ?? options.presentedPx);
   const handed = handOverRegimes(
     litRegimes(spheres, camera, viewport, previous),
     spheres,
-    handoverTauPx("photorealistic", options.setting),
-    pixelAngleRad(camera, options.selectionPx ?? options.presentedPx),
+    tauPx,
+    radPerPx,
     previous,
   );
   const meshed = new Map<BodyIdHex, LitRegime>(
@@ -883,6 +920,14 @@ export function planLitBodies(
   const steps: BodyStep[] = [];
   const sources = new Map<BodyIdHex, BodyLightSources>();
   const tabled = new Set<BodyIdHex>();
+  // Each handed-over body's subtense where it handed over (R10.T15.b.2): the previous frame's, or
+  // this frame's at its first frame handed over; τ (1 + h) where the caller keeps none.
+  const handedOver = new Map<BodyIdHex, number>();
+  const wasHandedOver = options.previousHandedOver;
+  const startOf = (id: BodyIdHex, subtense: number | null): number =>
+    wasHandedOver === undefined
+      ? 1 + REGIME_HYSTERESIS
+      : (wasHandedOver.get(id) ?? subtense ?? 1 + REGIME_HYSTERESIS);
   let run: PointSprite[] = [];
   const closeRun = (): void => {
     if (run.length > 0) {
@@ -951,9 +996,29 @@ export function planLitBodies(
     }
     if (drawnAsMesh(regime)) {
       // Only a body handed over has terrain over its figure to give the surveyed ground to.
+      const subtense = handoverSubtense(
+        limbDistanceM(norm(body.centreM), body.figure.equatorialRadiusM),
+        body.handoverReliefM ?? null,
+        tauPx,
+        radPerPx,
+      );
+      if (regime === "terrain" && subtense !== null) {
+        handedOver.set(body.id, startOf(body.id, subtense));
+      }
       const role: MeshBodyRole =
         regime === "terrain"
-          ? { kind: "handed-over", coverage: body.surveyCoverage ?? null }
+          ? {
+              kind: "handed-over",
+              coverage: body.surveyCoverage ?? null,
+              detailShare:
+                drawnNormalMap(drawn) === null
+                  ? 1
+                  : handoverDetailShare(
+                      subtense,
+                      startOf(body.id, subtense),
+                      SETTINGS[options.setting].terrain.handoverDetail,
+                    ),
+            }
           : { kind: "promoted" };
       steps.push({ kind: "limb", mesh: meshes.length });
       meshes.push({
@@ -983,7 +1048,7 @@ export function planLitBodies(
     discs.push(record);
   }
   closeRun();
-  return { regimes, order, discs, meshes, laws, steps, sources, tabled };
+  return { regimes, order, discs, meshes, laws, steps, sources, tabled, handedOver };
 }
 
 /**

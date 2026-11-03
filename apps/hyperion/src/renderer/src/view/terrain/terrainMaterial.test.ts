@@ -27,7 +27,9 @@ import {
 } from "../engine/webgpu/uniforms";
 import { annulusEdges } from "../lighting/annuli";
 import { bindingStages } from "../../test/wgslStages";
-import { wgslFunction } from "../../test/wgslText";
+import { collapseWhitespace, wgslFunction } from "../../test/wgslText";
+import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
+import cubeTexelWgsl from "../shaders/cubeTexel.wgsl?raw";
 import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
 import occluderWgsl from "../shaders/occluder.wgsl?raw";
 import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
@@ -62,6 +64,7 @@ import {
   classPhotometryOf,
   classRowLaw,
   classTexelLaw,
+  DISC_NORMALS_TEXTURE,
   dominantSlot,
   MELT_CLASS_CODE,
   packClassLaws,
@@ -260,8 +263,10 @@ describe("the lit terrain's material (R10.T10.b)", () => {
     ]);
     const textures = differences.textures ?? [];
     // R08's surface lighting's nine tables, the table below a deck at 21 (R08.T15.b.2) and the
-    // sources' table at 23 (R08.T9.b's lever).
-    expect(textures.map((t) => t.binding)).toEqual([4, 7, 9, 10, 11, 12, 13, 14, 15, 21, 23, 19]);
+    // sources' table at 23 (R08.T9.b's lever), and the disc's normal map at 24 (R10.T15.b.2).
+    expect(textures.map((t) => t.binding)).toEqual([
+      4, 7, 9, 10, 11, 12, 13, 14, 15, 21, 23, 19, 24,
+    ]);
     expect(differences.samplers.map((s) => s.binding)).toEqual([20]);
     for (const [name, binding] of [
       ["class_layers", TERRAIN_LIT_BINDINGS.classLayers],
@@ -274,10 +279,11 @@ describe("the lit terrain's material (R10.T10.b)", () => {
       ["survey_mask", TERRAIN_LIT_BINDINGS.surveyMask],
       ["shadow_cascades", TERRAIN_LIT_BINDINGS.shadowCascades],
       ["shadow_compare", TERRAIN_LIT_BINDINGS.shadowCompare],
+      ["disc_normals", TERRAIN_LIT_BINDINGS.discNormals],
     ] as const) {
-      expect(terrainLitWgsl + horizonWgsl + terrainSurveyWgsl + cascadeShadowWgsl).toMatch(
-        new RegExp(`@binding\\(${String(binding)}\\) var[^\\n]* ${name}`, "u"),
-      );
+      expect(
+        terrainLitWgsl + horizonWgsl + terrainSurveyWgsl + cascadeShadowWgsl + terrainLitShadeWgsl,
+      ).toMatch(new RegExp(`@binding\\(${String(binding)}\\) var[^\\n]* ${name}`, "u"));
     }
     // No binding its entry points read is left out of the layout, on either path.
     expect([offsets, differences].map(undeclaredBindings)).toEqual([[], []]);
@@ -326,6 +332,26 @@ describe("the lit terrain's material (R10.T10.b)", () => {
     },
   );
 });
+
+/** WGSL function `name` of `source` with its comments taken out first. */
+function uncommented(source: string, name: string): string {
+  return wgslFunction(source.replaceAll(/\/\/[^\n]*/gu, ""), name);
+}
+
+/**
+ * WGSL text with the terrain's copies' names as the disc's (R10.T15.b.2): the decode and the
+ * survey-masked bilinear sum of bodyDisc.wgsl's `stored_normal` and `shading_normal`, and
+ * cubeTexel.wgsl's warp, which terrainLitShade.wgsl copies under its own names.
+ */
+function asDiscs(text: string): string {
+  return collapseWhitespace(text)
+    .replaceAll("disc_stored_normal(", "stored_normal(")
+    .replaceAll("disc_uv_to_st(", "uv_to_st(")
+    .replaceAll("disc_normals", "surface_normals")
+    .replaceAll("DISC_NO_NORMAL_ABOVE", "NO_NORMAL_ABOVE")
+    .replaceAll("disc_decode_octahedral(", "decodeOctahedral(")
+    .replaceAll("at.face", "face");
+}
 
 describe("the lit terrain's shadow receiver (R10.T9.b)", () => {
   const lit = terrainLitMaterialSpec("face-differences");
@@ -408,7 +434,7 @@ describe("the lit terrain's shadow receiver (R10.T9.b)", () => {
     expect(derivatives).toBeGreaterThan(0);
     expect(derivatives).toBeLessThan(code.indexOf("discard"));
     expect(code).toContain("var cascade_lit = 1.0;");
-    expect(code).toContain("shade_terrain(in, normal, reference, cascade_lit)");
+    expect(code).toContain("shade_terrain(in, normal, reference, cascade_lit, at)");
     expect(terrainLitWgsl).toContain("cascade_lit : f32,");
   });
 
@@ -421,6 +447,70 @@ describe("the lit terrain's shadow receiver (R10.T9.b)", () => {
     expect(terrainLitWgsl).toContain(
       "out.lit = out.lit || (horizon > TERRAIN_LIT_IRRADIANCE && any(visible > vec3f(TERRAIN_LIT_IRRADIANCE)));",
     );
+  });
+
+  it("scales the horizon map's elevations by row 2's share before carrying them into the element's frame (R10.T15.b.2)", () => {
+    expect(terrainLitWgsl).toMatch(/terrain_horizon\([^)]*nu, towards, phi,\s*misc\.z\s*\)/u);
+    expect(horizonWgsl).toContain(
+      "let e = share * horizon_blended(slot, parent, patch_uv * 64.0, knots, morph);",
+    );
+    expect(horizonWgsl).toContain("return element_horizon(e, star, phi);");
+  });
+
+  it("reconstructs the disc's normal map as the disc does, operation for operation (R10.T15.b.2)", () => {
+    const sum = (text: string): string =>
+      asDiscs(text).slice(
+        asDiscs(text).indexOf("let corner_at"),
+        asDiscs(text).indexOf("let size"),
+      );
+    expect(asDiscs(uncommented(terrainLitShadeWgsl, "disc_stored_normal"))).toBe(
+      asDiscs(uncommented(bodyDiscWgsl, "stored_normal")),
+    );
+    expect(sum(uncommented(terrainLitShadeWgsl, "disc_shading_normal"))).toBe(
+      sum(uncommented(bodyDiscWgsl, "shading_normal")),
+    );
+    expect(sum(uncommented(bodyDiscWgsl, "shading_normal")).length).toBeGreaterThan(200);
+    expect(asDiscs(uncommented(terrainLitShadeWgsl, "disc_uv_to_st"))).toBe(
+      asDiscs(uncommented(cubeTexelWgsl, "uv_to_st")),
+    );
+  });
+
+  it("mixes the place lit, its datum, height and shading normal from the disc's by row 2's share below 1 alone, after the rebake's fade (R10.T15.b.2)", () => {
+    const code = terrainLitShadeWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    const fade = code.indexOf(
+      "normal = normalize(mix(disc_shading_normal(disc.face, disc.st, disc.datum), normal, share));",
+    );
+    expect(code).toMatch(
+      /at = ShadePlace\(\s*mix\(disc\.place, at\.place, share\), normalize\(mix\(disc\.datum, at\.datum, share\)\), share \* at\.heightM\s*\);/u,
+    );
+    // shade_terrain lights the texel at the place given, its own wherever no fade stands.
+    const shade = wgslFunction(terrainLitWgsl, "shade_terrain");
+    expect([shade.includes("let q = at.place;"), shade.includes("let nu = at.datum;")]).toEqual([
+      true,
+      true,
+    ]);
+    expect(wgslFunction(terrainLitWgsl, "own_shade_place")).toContain(
+      "(in.fromCameraBf + draw.cameraBodyFixedM.xyz) * draw.cameraBodyFixedM.w,",
+    );
+    expect(fade).toBeGreaterThan(code.indexOf("normalize(mix(normal, older, in.rebakeFade))"));
+    expect(code.slice(code.lastIndexOf("if (share < 1.0)", fade), fade)).toMatch(
+      /^if \(share < 1\.0\) \{\s*let disc = disc_place\(in, at\);\s*$/u,
+    );
+    expect(code).toContain("@group(2) @binding(24) var disc_normals : texture_2d_array<f32>;");
+    for (const path of ["baked-offsets", "face-differences"] as const) {
+      for (const spec of [
+        terrainLitMaterialSpec(path),
+        terrainLitEmissiveMaterialSpec(path),
+        terrainLitInteriorMaterialSpec(path),
+        terrainLitEmissiveInteriorMaterialSpec(path),
+      ]) {
+        expect(spec.textures).toContainEqual({
+          name: DISC_NORMALS_TEXTURE,
+          binding: TERRAIN_LIT_BINDINGS.discNormals,
+          viewDimension: "2d-array",
+        });
+      }
+    }
   });
 });
 
@@ -699,13 +789,21 @@ describe("the lit terrain's lights", () => {
     expect(row(0)).toEqual([1, 1, 1, 2]);
     const k = oblateAlbedoScale(1, 0.9);
     expect(row(1)).toEqual([0.12 * k, 0.12 * k, 0.12 * k, 1].map(Math.fround));
-    expect(row(2)).toEqual([0, Math.fround(1e-3 / Math.PI), 0, 0]);
+    expect(row(2)).toEqual([0, Math.fround(1e-3 / Math.PI), 1, 0]);
     expect(row(3)).toEqual([0, 0.6, 0.8, 2.3e4].map(Math.fround));
     expect(row(4)).toEqual([1.2e5, 1.1e5, 1.0e5, 109].map(Math.fround));
     expect(row(5)).toEqual([...annuli.edges.subarray(1, 3), 1, 1].map(Math.fround));
     expect(row(19)).toEqual([60, 0, 0, 0.27].map(Math.fround));
     expect(row(21)).toEqual([1, 0, 0, 60]);
     expect(row(22)).toEqual([0.2, 0.2, 0.2, 0.27].map(Math.fround));
+  });
+
+  it("packs a fade's share of the terrain's own detail in row 2, 1 with no fade (R10.T15.b.2)", () => {
+    const discNormals = { kind: "texture", name: "disc normals" } as const;
+    const shareOf = (detailShare: number): number | undefined =>
+      packTerrainLighting({ ...lighting, fade: { detailShare, discNormals } }, 1)[2 * 4 + 2];
+    expect([shareOf(0), shareOf(0.375), shareOf(1)]).toEqual([0, 0.375, 1]);
+    expect(packTerrainLighting(lighting, 1)[2 * 4 + 2]).toBe(1);
   });
 
   it("draws at most two stars, occluders and planetshine sources", () => {

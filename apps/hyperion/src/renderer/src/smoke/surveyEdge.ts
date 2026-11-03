@@ -77,6 +77,7 @@ import type { PatchKey } from "../view/terrain/patchKey";
 import { spheroidNormal, surfacePoint } from "../view/terrain/planet";
 import { createShadowPlaceholder } from "../view/terrain/shadows/terrainShadows";
 import {
+  DISC_NORMALS_TEXTURE,
   SHADOW_CASCADES_TEXTURE,
   type TerrainLighting,
   terrainLitMaterialSpec,
@@ -496,6 +497,8 @@ async function terrainDraw(
       phaseFactorTable: lit.phaseTable,
       ...surfaceLightingDrawTextures(air),
       [SHADOW_CASCADES_TEXTURE]: shadow,
+      // No disc normal map: read at no detail share below 1 (R10.T15.b.2).
+      [DISC_NORMALS_TEXTURE]: resources.normals,
     },
     storageBuffers,
     indirect: { buffer: resources.indirect, offsetBytes: 0 },

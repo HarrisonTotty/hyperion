@@ -263,7 +263,11 @@ import {
   fitCascades,
 } from "./shadows/cascades";
 import { CascadeReuse, TerrainShadows } from "./shadows/terrainShadows";
-import { SHADOW_CASCADES_TEXTURE, type TerrainLighting } from "./terrainMaterial";
+import {
+  DISC_NORMALS_TEXTURE,
+  SHADOW_CASCADES_TEXTURE,
+  type TerrainLighting,
+} from "./terrainMaterial";
 import { CONTOUR_PX, contourPhase, type GraticulePatch, graticulePatch } from "./terrainWire";
 import type {
   BakedPatch,
@@ -1260,6 +1264,11 @@ interface ViewState {
   casters: ViewCasters | null;
   /** The shadow texture the lit draw binds: the set's layers or the placeholder (R10.T9.b). */
   drawnShadow: TextureHandle | null;
+  /**
+   * The disc's normal map the lit draw binds, or the normals atlas in its place (R10.T15.b.2's
+   * `HandoverFade.discNormals`).
+   */
+  drawnDiscNormals: TextureHandle | null;
   /** The wireframe's `Draw` (`terrainWire.wgsl`), rewritten in place each frame (R10.T11). */
   readonly wireUniforms: {
     readonly bodyRotation: Float32Array;
@@ -3726,6 +3735,7 @@ export class TerrainPass {
       interiorBeside: null,
       casters: null,
       drawnShadow: null,
+      drawnDiscNormals: null,
       wireUniforms: {
         bodyRotation,
         atlas: new Float32Array(4),
@@ -4928,19 +4938,29 @@ export class TerrainPass {
       return { draws: NO_DRAWS, live: null };
     }
     const shadow = shadows.bound();
+    // The disc's normal map of a fade under way (R10.T15.b.2), or the normals atlas, a 2D array of
+    // the same kind, unread at a share of 1, in its place.
+    const discNormals = lighting?.fade?.discNormals ?? resources.normals;
     if (
       state.draw === null ||
       state.drawDevice !== device ||
       state.drawnTable !== table ||
       state.drawnAtmosphere !== atmosphere ||
       state.drawnShadow !== shadow ||
+      state.drawnDiscNormals !== discNormals ||
       state.draw.material !== material
     ) {
-      state.draw = this.#drawItem(device, state, material, { table, atmosphere, shadow });
+      state.draw = this.#drawItem(device, state, material, {
+        table,
+        atmosphere,
+        shadow,
+        discNormals,
+      });
       state.drawDevice = device;
       state.drawnTable = table;
       state.drawnAtmosphere = atmosphere;
       state.drawnShadow = shadow;
+      state.drawnDiscNormals = discNormals;
     }
     const draw = state.draw;
     const interior = state.interior.count > 0 ? this.#interiorDrawOf(device, state, forms) : null;
@@ -6106,6 +6126,8 @@ export class TerrainPass {
       readonly atmosphere: SurfaceLightingTables;
       /** The shadow cascades' layers, or the placeholder (R10.T9.b). */
       readonly shadow: TextureHandle;
+      /** The disc's normal map, or a texture in its place (R10.T15.b.2). */
+      readonly discNormals: TextureHandle;
     } | null = null,
   ): DrawItem {
     const { resources } = device;
@@ -6169,6 +6191,7 @@ export class TerrainPass {
         phaseFactorTable: phase.table,
         ...surfaceLightingDrawTextures(phase.atmosphere),
         [SHADOW_CASCADES_TEXTURE]: phase.shadow,
+        [DISC_NORMALS_TEXTURE]: phase.discNormals,
       },
       storageBuffers,
       indirect: { buffer: buffers.indirect, offsetBytes: 0 },

@@ -51,7 +51,7 @@ import type { BodyIdHex, SurfaceHeaderDto } from "@hyperion/protocol";
 import { scale, type Vec3, vec3 } from "../../geometry/vec3";
 import { CASING_PX } from "../../lib/strokes";
 import type { ColourTokens } from "../../spatial/paint";
-import type { BodyFramePlan, LitBodyInput } from "../bodies/draw";
+import { type BodyFramePlan, drawnNormalMap, type LitBodyInput } from "../bodies/draw";
 import type { DiscRecord } from "../bodies/discShading";
 import { discSurfaceLaws } from "../bodies/discSurface";
 import { rotationColumns } from "../bodies/smoothMesh";
@@ -407,7 +407,9 @@ export class LiveFrameTerrain implements FrameTerrain {
 
   /**
    * The session's draw of each body `plan` hands over, for this view: its `TerrainView` from the
-   * plan's body ({@link terrainViewOf}) and its lights from its record ({@link terrainLightingOf});
+   * plan's body ({@link terrainViewOf}) and its lights from its record ({@link terrainLightingOf}),
+   * with the share of its own detail its role carries and its record's normal map (R10.T15.b.2's
+   * `handoverDetailShare`);
    * none for a body without a rotation or a pass, or with nothing drawn. Notes the frame's
    * annunciation and its terrain's depth for the symbology's pass.
    *
@@ -443,11 +445,13 @@ export class LiveFrameTerrain implements FrameTerrain {
       readonly record: DiscRecord;
       readonly figure: BodyFigure;
       readonly view: TerrainView;
+      readonly detailShare: number;
     }> = [];
     for (const mesh of plan.meshes) {
       if (mesh.role.kind !== "handed-over") {
         continue;
       }
+      const { detailShare } = mesh.role;
       const record = plan.discs[mesh.index];
       const body = record === undefined ? undefined : byId.get(record.body);
       const terrainView =
@@ -455,7 +459,7 @@ export class LiveFrameTerrain implements FrameTerrain {
       if (record === undefined || body === undefined || terrainView === null) {
         continue;
       }
-      handed.push({ record, figure: body.figure, view: terrainView });
+      handed.push({ record, figure: body.figure, view: terrainView, detailShare });
     }
     // Among the bodies a pass draws, so that one with no pass, whose draw is none, takes no
     // cascades another could take.
@@ -464,10 +468,18 @@ export class LiveFrameTerrain implements FrameTerrain {
     );
     const cascades = drawable[cascadeBodyIndex(drawable)]?.index ?? -1;
     const occluded: BodyIdHex[] = [];
-    for (const [index, { record, view: terrainView }] of handed.entries()) {
+    for (const [index, { record, view: terrainView, detailShare }] of handed.entries()) {
+      const lit = terrainLightingOf(record, terrainView.rotation, exposureScale);
+      // The plan's share of the terrain's own detail near the hand-over, with the disc's normal map
+      // it fades from (R10.T15.b.2): a fade only where it is under way and the disc has the map.
+      const discNormals = drawnNormalMap(record.surface)?.texture;
       const frame = this.#source.drawTerrain(view, record.body, {
         view: terrainView,
-        ...terrainLightingOf(record, terrainView.rotation, exposureScale),
+        ...lit,
+        lighting:
+          detailShare < 1 && discNormals !== undefined
+            ? { ...lit.lighting, fade: { detailShare, discNormals } }
+            : lit.lighting,
         exposureScale,
         takesCascades: index === cascades,
         nowMs,

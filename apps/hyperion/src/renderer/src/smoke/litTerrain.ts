@@ -62,6 +62,7 @@ import type { BodyFigure } from "../view/terrain/planet";
 import { createShadowPlaceholder } from "../view/terrain/shadows/terrainShadows";
 import {
   classPhotometryOf,
+  DISC_NORMALS_TEXTURE,
   MELT_CLASS_CODE,
   SHADOW_CASCADES_TEXTURE,
   TERRAIN_CLASSES,
@@ -742,6 +743,8 @@ async function renderInto(
           phaseFactorTable: lit.phaseTable,
           ...surfaceLightingDrawTextures(air),
           [SHADOW_CASCADES_TEXTURE]: shadow,
+          // No disc normal map: read at no detail share below 1 (R10.T15.b.2).
+          [DISC_NORMALS_TEXTURE]: resources.normals,
         },
         storageBuffers,
         indirect: { buffer: resources.indirect, offsetBytes: 0 },

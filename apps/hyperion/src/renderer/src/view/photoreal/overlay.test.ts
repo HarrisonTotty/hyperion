@@ -449,7 +449,11 @@ describe("the datums that give way over the image, from the frame's plan (R10.T1
       meshes: [
         {
           index: 1,
-          role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED, whole: false } },
+          role: {
+            kind: "handed-over",
+            coverage: { mask: MASK, rotation: TURNED, whole: false },
+            detailShare: 1,
+          },
         },
       ],
       discs: [{ body: B }, { body: A }],
@@ -463,17 +467,22 @@ describe("the datums that give way over the image, from the frame's plan (R10.T1
     const plan: SurveyedPlan = {
       meshes: [
         { index: 0, role: { kind: "promoted" } },
-        { index: 1, role: { kind: "handed-over", coverage: null } },
+        { index: 1, role: { kind: "handed-over", coverage: null, detailShare: 1 } },
         {
           index: 2,
           role: {
             kind: "handed-over",
             coverage: { mask: OTHER_MASK, rotation: IDENTITY_ROTATION, whole: false },
+            detailShare: 1,
           },
         },
         {
           index: 3,
-          role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED, whole: false } },
+          role: {
+            kind: "handed-over",
+            coverage: { mask: MASK, rotation: TURNED, whole: false },
+            detailShare: 1,
+          },
         },
       ],
       discs: [{ body: A }, { body: B }, { body: C }],
@@ -491,13 +500,18 @@ describe("the datums that give way over the image, from the frame's plan (R10.T1
       meshes: [
         {
           index: 0,
-          role: { kind: "handed-over", coverage: { mask: MASK, rotation: TURNED, whole: false } },
+          role: {
+            kind: "handed-over",
+            coverage: { mask: MASK, rotation: TURNED, whole: false },
+            detailShare: 1,
+          },
         },
         {
           index: 1,
           role: {
             kind: "handed-over",
             coverage: { mask: OTHER_MASK, rotation: IDENTITY_ROTATION, whole: false },
+            detailShare: 1,
           },
         },
       ],

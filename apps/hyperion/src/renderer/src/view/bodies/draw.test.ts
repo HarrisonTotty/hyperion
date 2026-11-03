@@ -2030,6 +2030,7 @@ describe("mesh bodies (T9)", () => {
           {
             kind: "handed-over",
             coverage: { mask: SURVEY_MASK, rotation: SURVEY_ROTATION, whole: false },
+            detailShare: 1,
           },
         ],
         [MOON, { kind: "promoted" }],
@@ -2139,6 +2140,12 @@ describe("mesh bodies (T9)", () => {
   });
 });
 
+/** The detail share of the plan's first mesh body where it is handed over (R10.T15.b.2), else `null`. */
+function detailShareOf(plan: BodyFramePlan): number | null {
+  const role = plan.meshes[0]?.role;
+  return role?.kind === "handed-over" ? role.detailShare : null;
+}
+
 describe("the hand-over to terrain (R10.T10.e)", () => {
   /** A body 10⁸ m ahead, 212 px across, whose relief subtends `reliefPx` at its limb. */
   function bodyWithRelief(reliefPx: number | null): ReturnType<typeof scene> {
@@ -2203,6 +2210,62 @@ describe("the hand-over to terrain (R10.T10.e)", () => {
       regime({ ...OPTIONS, viewport: HALF, presentedPx: VIEWPORT }),
       regime(OPTIONS),
     ]).toEqual(["point", "disc"]);
+  });
+
+  it("draws the terrain almost as the disc at the switch on high, its own detail whole by τ (1 + 3h), on low and without a normal map (R10.T15.b.2)", () => {
+    const shareOf = (reliefPx: number, setting: "high" | "low", normals = true): number | null => {
+      const { body, hosts } = bodyWithRelief(reliefPx);
+      const mapped: LitBodyInput = {
+        ...body,
+        rotation: IDENTITY_ROTATION,
+        surface: surfaceWith(normals),
+      };
+      const plan = planLitBodies(
+        [mapped],
+        hosts,
+        { ...OPTIONS, setting },
+        new Map([[body.id, "disc"]]),
+      );
+      const role = plan.meshes[0]?.role;
+      return role?.kind === "handed-over" ? role.detailShare : null;
+    };
+    expect(shareOf(1.11, "high")).toBeCloseTo(0.05, 9);
+    expect(shareOf(1.2, "high")).toBeCloseTo(0.5, 9);
+    expect(shareOf(1.31, "high")).toBe(1);
+    // The low setting's τ of 2 px: handed over by 2.3 px, its detail whole there.
+    expect(shareOf(2.3, "low")).toBe(1);
+    // A disc with no normal map gives the terrain none to fade from.
+    expect(shareOf(1.2, "high", false)).toBe(1);
+  });
+
+  it("fades the terrain's own detail in from the subtense where the body handed over, which it carries frame to frame (R10.T15.b.2)", () => {
+    const planAt = (
+      reliefPx: number,
+      previousHandedOver: ReadonlyMap<string, number>,
+      previous: LitRegime,
+    ): BodyFramePlan => {
+      const { body, hosts } = bodyWithRelief(reliefPx);
+      const mapped: LitBodyInput = {
+        ...body,
+        rotation: IDENTITY_ROTATION,
+        surface: surfaceWith(true),
+      };
+      return planLitBodies(
+        [mapped],
+        hosts,
+        { ...OPTIONS, previousHandedOver },
+        new Map([[body.id, previous]]),
+      );
+    };
+    // First handed over at 1.25 τ, as a hand-over at the field's cells may be: none there.
+    const first = planAt(1.25, new Map(), "disc");
+    const [[id, start] = ["", 0]] = [...first.handedOver];
+    expect([detailShareOf(first), start]).toEqual([0, expect.closeTo(1.25, 9)]);
+    // Half a span on, from the start it carries.
+    expect(detailShareOf(planAt(1.35, first.handedOver, "terrain"))).toBeCloseTo(0.5, 9);
+    expect(planAt(1.35, first.handedOver, "terrain").handedOver.get(id)).toBe(start);
+    // A disc keeps no start.
+    expect(planAt(0.5, first.handedOver, "terrain").handedOver.size).toBe(0);
   });
 
   it("draws a body handed over as a mesh body, its limb in the sequence and its figure the reference surface", () => {

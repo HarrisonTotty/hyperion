@@ -36,6 +36,11 @@
  *   hand-over and refined from the roots, a level a bake's round trip, so that on the served wet
  *   world the terrain's first frame differed from its settled one by over a third of a stop in 431
  *   of 750 coast cells, and the disc → terrain switch failed there whatever the disc drew.
+ * - **The detail's fade** ({@link handoverDetailShare}; R10.T15.b.2): on a setting whose terrain
+ *   fades it (`TerrainSettings.handoverDetail`), a handed-over body's terrain is shaded as the disc
+ *   is at either switch, on the disc's normal map with the star cut by the datum's tangent plane,
+ *   and with its own shading normals and horizon map once the relief subtends 2h τ more than where
+ *   it handed over, τ (1 + 3h) px at the soonest.
  */
 import type { BodyIdHex, SurfaceHeaderDto } from "@hyperion/protocol";
 
@@ -43,7 +48,12 @@ import { norm } from "../../geometry/vec3";
 import { type LitRegime, type LitSphere, REGIME_HYSTERESIS } from "../bodies/regime";
 import type { ProjectionCamera, Viewport } from "../camera/projection";
 import type { RenderStyle } from "../camera/state";
-import { type QualitySetting, SETTINGS, WIREFRAME_TERRAIN_TAU_PX } from "../quality/qualitySetting";
+import {
+  type HandoverDetail,
+  type QualitySetting,
+  SETTINGS,
+  WIREFRAME_TERRAIN_TAU_PX,
+} from "../quality/qualitySetting";
 import type { DrawSet } from "./cache";
 import type { CoverageView } from "./coverage";
 
@@ -247,6 +257,75 @@ export function handsOver(
   const factor = handedOver ? 1 - REGIME_HYSTERESIS : 1 + REGIME_HYSTERESIS;
   // The relief's subtense against τ (1 ± h): in range, d ≤ range ÷ (1 ± h).
   return rangeM > 0 && limbM * factor <= rangeM;
+}
+
+/**
+ * The span of the relief's subtense, in τ, over which a handed-over body's own sub-cell shading
+ * fades in below the hand-over ({@link handoverDetailShare}): the hysteresis band's own width, 2h,
+ * from τ (1 + h) to τ (1 + 3h) where the body hands over at τ (1 + h).
+ */
+export const HANDOVER_FADE_SPAN = 2 * REGIME_HYSTERESIS;
+
+/**
+ * The share of its own sub-cell shading a handed-over body's terrain is drawn with (plan R10,
+ * R10.T15.b.2; decision-r10-t16-leans, "R10.T10.g terminator cross-fade"), from 0 to 1: each texel
+ * lit at a place mixed from the disc's, where its ray meets the datum, to its own, its shading
+ * normal mixed from the disc's normal map's n′ to its own, and its horizon map's elevations scaled
+ * from the datum's horizontal to their own (`terrainLitShade.wgsl` and `terrain_horizon`).
+ *
+ * @remarks
+ * - **Why.** The disc lights a pixel at the datum's point along its ray on one normal, the
+ *   field's at the cell's scale, and cuts each star by the datum's tangent plane (`bodyDisc.wgsl`'s
+ *   horizon term on n′); the terrain lights it at its own relief's point on its own sub-cell
+ *   slopes, above its own horizon map. Within about a degree of the terminator the two part: the
+ *   terrain's slopes that face the star, and its points that its relief's parallax moves towards
+ *   it, stand lit where the disc's cell is dark or dim, and its cast shadows dark where the disc is
+ *   lit. On the served airless world's 90° look at the high setting, every cell over 1/3 stop lay
+ *   within 5° of the terminator, most of them brighter on the terrain, and with the horizon map's
+ *   shadows taken off 1.3% of the cells were still over (R10.T15.b's record, software mode).
+ * - **The fade** (`faded`): 0 while the relief subtends no more than it did where the body handed
+ *   over, `startSubtense`, and at least τ (1 + h), so that both switches, the hand-over and the
+ *   hand-back at τ (1 − h) ({@link handsOver}), see the terrain shaded as the disc is, rising
+ *   linearly in the subtense to 1 a {@link HANDOVER_FADE_SPAN} past it: the step the switch would
+ *   show spread over the camera's closing by about a sixth. The start is where the body handed
+ *   over, not τ (1 + h), since under {@link HANDOVER_AT_CELLS} a body in range hands over only once
+ *   its warmed pass draws the field's cells, which a slow frame may make long after.
+ * - **1** under `whole` (the low setting), with no relief known, or at the ground (`subtense`
+ *   `null`).
+ *
+ * @param subtense - The relief's subtense now ({@link handoverSubtense}), in τ.
+ * @param startSubtense - Its subtense at the body's first frame handed over, in τ.
+ */
+export function handoverDetailShare(
+  subtense: number | null,
+  startSubtense: number,
+  detail: HandoverDetail,
+): number {
+  if (detail === "whole" || subtense === null) {
+    return 1;
+  }
+  const start = Math.max(startSubtense, 1 + REGIME_HYSTERESIS);
+  return Math.min(1, Math.max(0, (subtense - start) / HANDOVER_FADE_SPAN));
+}
+
+/**
+ * The relief's subtense from `limbM`, in τ: the hand-over range over the camera's distance to the
+ * limb, 1 + h at the hand-over's own threshold ({@link handsOver}); `null` with no relief known or
+ * at the ground (`limbM` 0), where a body's terrain is drawn with its own detail whole.
+ *
+ * @param limbM - The camera's distance to the body's limb ({@link limbDistanceM}), m.
+ * @param reliefM - Its relief ({@link handoverReliefM}), or `null`.
+ */
+export function handoverSubtense(
+  limbM: number,
+  reliefM: number | null,
+  tauPx: number,
+  radPerPx: number,
+): number | null {
+  if (reliefM === null || !(limbM > 0)) {
+    return null;
+  }
+  return handoverRangeM(reliefM, tauPx, radPerPx) / limbM;
 }
 
 /**

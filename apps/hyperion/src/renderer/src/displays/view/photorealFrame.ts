@@ -122,6 +122,11 @@ export interface PhotorealInputs {
    */
   readonly previousTabled?: ReadonlySet<BodyIdHex> | undefined;
   /**
+   * Each body handed over on the previous frame, with its relief's subtense where it handed over
+   * (plan R10, R10.T15.b.2), from which its terrain's own detail fades in; absent, none.
+   */
+  readonly previousHandedOver?: ReadonlyMap<BodyIdHex, number> | undefined;
+  /**
    * The symbology's canvas pass, which the renderer builds once it has the frame's plan (R10.T16.f),
    * or `null`.
    */
@@ -499,6 +504,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     depthWriters: [],
     previousRegimes: inputs.previousRegimes,
     previousTabled: inputs.previousTabled,
+    previousHandedOver: inputs.previousHandedOver,
     terrain: inputs.terrain,
     overlay: inputs.overlay,
     meter: inputs.meter,

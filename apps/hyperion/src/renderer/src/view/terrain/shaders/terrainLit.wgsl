@@ -102,7 +102,8 @@
 // The lights, TERRAIN_LIGHT_ROWS (`terrainMaterial.ts`' `packTerrainLighting`), body-fixed:
 //   0  the stars, the occluders, the planetshine sources, the annuli in use;
 //   1  law 0's A per channel (r, g, b), scaled for the figure; w, its L(0);
-//   2  x law 0's row; y the exposure scale ÷ π;
+//   2  x law 0's row; y the exposure scale ÷ π; z the share of its own detail the terrain is
+//      shaded with, 1 but near a hand-over that fades it (R10.T15.b.2; `terrainLitShade.wgsl`);
 //   3 + 8j, star j: its unit direction from the body's centre, w its distance ÷ a; its illuminance
 //      face-on at the body per channel (lx), w its radius ÷ a; then its annuli (`DiscAnnuli`'s
 //      outer edges and fluxes) for r, g and b, two rows each;
@@ -681,23 +682,43 @@ struct TerrainShaded {
   lit : bool,
 }
 
-// The radiance of the texel `in` with the terrain's normal `terrain_normal`, both body-fixed; with
-// `reference`, a skirt's or a fin's in the reference surface's appearance (R10.T10.c): law 0 alone
-// under `terrain_normal`, the datum's, seen from either side, with no decoration and no horizon map.
-// A skirt's lip (`skirt_lip`) is shaded as the grid, with `reference` false. `cascade_lit` is the
-// shadow cascades' lit fraction c′ of star 0's direct light (R10.T9.b), 1 for a reference fragment
-// and where no cascades were drawn.
+// Where a texel is lit (R10.T15.b.2): its place from the body's centre ÷ a, its datum's unit normal
+// ν, both body-fixed, and its geodetic height, metres; its own (`own_shade_place`), or, near a
+// hand-over that fades the terrain's own detail, mixed from the disc's point along its ray
+// (`terrainLitShade.wgsl`'s `disc_place`).
+struct ShadePlace {
+  place : vec3f,
+  datum : vec3f,
+  heightM : f32,
+}
+
+// The texel's own place to be lit at: its place, its datum's normal and its height.
+fn own_shade_place(in : LitVertexOut) -> ShadePlace {
+  return ShadePlace(
+    (in.fromCameraBf + draw.cameraBodyFixedM.xyz) * draw.cameraBodyFixedM.w,
+    normalize(in.datumNormal),
+    in.heightM,
+  );
+}
+
+// The radiance of the texel `in` with the terrain's normal `terrain_normal`, both body-fixed, lit at
+// `at`; with `reference`, a skirt's or a fin's in the reference surface's appearance (R10.T10.c):
+// law 0 alone under `terrain_normal`, the datum's, seen from either side, with no decoration and no
+// horizon map. A skirt's lip (`skirt_lip`) is shaded as the grid, with `reference` false.
+// `cascade_lit` is the shadow cascades' lit fraction c′ of star 0's direct light (R10.T9.b), 1 for a
+// reference fragment and where no cascades were drawn.
 fn shade_terrain(
   in : LitVertexOut,
   terrain_normal : vec3f,
   reference : bool,
   cascade_lit : f32,
+  at : ShadePlace,
 ) -> TerrainShaded {
   var out : TerrainShaded;
   out.radiance = vec3f(0.0);
   out.lit = false;
   // The texel from the body's centre ÷ a.
-  let q = (in.fromCameraBf + draw.cameraBodyFixedM.xyz) * draw.cameraBodyFixedM.w;
+  let q = at.place;
   var decoration = TerrainDecoration(vec3f(1.0), terrain_normal);
   if (!reference) {
     decoration = terrain_decoration(q, terrain_normal);
@@ -728,9 +749,9 @@ fn shade_terrain(
   }
   mean_a = mean_a * decoration.albedo;
   // R08's lookups: the texel's geodetic latitude and north from the datum's normal, its height.
-  let nu = normalize(in.datumNormal);
+  let nu = at.datum;
   let local = local_frame(nu, BODY_POLE);
-  let height = in.heightM;
+  let height = at.heightM;
   // R08's sky irradiance is a horizontal surface's; a texel tilted by β from the datum sees
   // (1 + cos β) ÷ 2 of an isotropic sky (Bruneton 2017's `GetSunAndSkyIrradiance`, its
   // `(1 + dot(normal, point) ÷ r) ÷ 2`; R08's note on a tilted surface makes it the caller's),
@@ -750,12 +771,14 @@ fn shade_terrain(
     // that a star just set still lights the twilight ground (`bodyDisc.wgsl`).
     let sky = atmosphere_sky_irradiance(height, mu_datum, local.latitude, j) * sky_factor;
     // The horizon term on the terrain's normal, above the local horizon of the patch's horizon map
-    // towards the star (R10.T8.b).
+    // towards the star (R10.T8.b), its elevations by the share of the terrain's own detail
+    // (R10.T15.b.2).
     let phi = angle_between(normal, towards);
     var local_horizon = 0.0;
     if (!reference) {
       local_horizon = terrain_horizon(
-        in.slot, in.parent, in.horizonFace, in.horizonSt, in.patchUv, in.morph, nu, towards, phi
+        in.slot, in.parent, in.horizonFace, in.horizonSt, in.patchUv, in.morph, nu, towards, phi,
+        misc.z
       );
     }
     let star_distance_radii = terrain_star_distance_radii(distance, light.w);

@@ -562,6 +562,7 @@ describe("a view's frame terrain (R10.T16.c)", () => {
         body: BODY,
         input: {
           view: terrainViewOf(body, CAMERA, VIEWPORT),
+          // No fade: the relief subtends well past τ (1 + 3h) (R10.T15.b.2).
           lighting,
           sunDirectionBodyFixed,
           sunIlluminanceLx,
@@ -571,6 +572,32 @@ describe("a view's frame terrain (R10.T16.c)", () => {
           nowMs: 1_234,
         },
       },
+    ]);
+  });
+
+  it("fades a body's terrain from its disc's normal map by its role's share, under way only below 1 and with the map (R10.T15.b.2)", () => {
+    const normals = {
+      texture: texture("disc normals"),
+      texels: { faceTexels: 32, data: new Float16Array(0) },
+    };
+    const fadeOf = (surface: ClassMapDiscSurface, detailShare: number): unknown => {
+      const { plan, body } = handed({ surface });
+      const [mesh] = plan.meshes;
+      if (mesh?.role.kind !== "handed-over") {
+        throw new Error("the plan hands the body over");
+      }
+      const { source, drawn } = fakeSource();
+      frameTerrain(source).draws(
+        { ...plan, meshes: [{ ...mesh, role: { ...mesh.role, detailShare } }] },
+        [body],
+      );
+      return drawn[0]?.input.lighting?.fade;
+    };
+    const mapped = { ...oneClassMap(), normals };
+    expect([fadeOf(mapped, 0.25), fadeOf(mapped, 1), fadeOf(oneClassMap(), 0.25)]).toEqual([
+      { detailShare: 0.25, discNormals: normals.texture },
+      undefined,
+      undefined,
     ]);
   });
 
@@ -826,7 +853,7 @@ describe("a view's frame terrain and the datum over the image (R10.T16.f)", () =
     const { plan, body } = handedWith(terrain);
     terrain.draws(plan, [body]);
     expect([plan.meshes[0]?.role, surveyedDatumsOf(plan, [body]).size]).toEqual([
-      { kind: "handed-over", coverage: null },
+      { kind: "handed-over", coverage: null, detailShare: 1 },
       0,
     ]);
   });

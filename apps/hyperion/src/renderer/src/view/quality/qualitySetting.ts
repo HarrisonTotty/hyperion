@@ -50,6 +50,15 @@ export const QUALITY_NAMES = {
  * `terrainKinds.ts`, which the height workers read too. */
 export type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 
+/**
+ * How a handed-over body's terrain draws its own sub-cell shading near the hand-over (plan R10,
+ * R10.T15.b.2): `faded`, the disc's at the hand-over and the hand-back, each texel lit at the
+ * disc's point along its ray on the disc's normal map's normal, its star cut by the datum's tangent
+ * plane, rising to its own place, normals and horizon map as the camera closes in
+ * (`terrain/handover.ts`' `handoverDetailShare`); `whole`, its own at every range.
+ */
+export type HandoverDetail = "faded" | "whole";
+
 /** The terrain's settings for one {@link QualitySetting} (R05 Design notes 4, 7, 10 and 26). */
 export interface TerrainSettings {
   /**
@@ -72,6 +81,15 @@ export interface TerrainSettings {
    * held by R10.T14.b (decision-r10-t14b-constants) on the hard bound, re-sized after R10.T4.b.
    */
   readonly cacheBytes: number;
+  /**
+   * How its sub-cell shading stands near the hand-over: `faded` on the high setting, whose τ of
+   * 1 px puts its hand-over twice as far out as the low setting's on one display (three times on the
+   * hand-over check's windows), so that a view there takes in the terminator, where the terrain's
+   * sub-cell slopes, its relief's parallax and its cast shadows, none of which the disc draws, move
+   * a cell by more than 1/3 stop (the served airless world's 90° look, R10.T15.b.2); `whole` on the
+   * low setting, as before.
+   */
+  readonly handoverDetail: HandoverDetail;
 }
 
 /**
@@ -324,7 +342,9 @@ const LOW_CACHE_BYTES = 64 * MIB;
  * cache. The high setting renders at the canvas's size, at most 1,080 rows presented upscaled (lean
  * 2026-11-01: the brainstorm states the budget at 1080p, a larger display rendering below native
  * and upscaling, "Two deployments, one scene"; R07 Design note 14), with τ = 1 px, doubled normals
- * and `baked-offsets`, its precision holding by construction until R05.T18 chooses. Under a
+ * and `baked-offsets`, its precision holding by construction until R05.T18 chooses, and its
+ * sub-cell shading faded in below the hand-over, where the low setting's stands whole
+ * (R10.T15.b.2). Under a
  * grounded body every setting draws the finest level whatever these say (R05 Design note 9). Both
  * settings hold the photorealistic view's internal scale in [0.5, 1.0]; the low setting budgets a
  * photorealistic primary view at 30 Hz and allows one photorealistic view (R07 Design notes 14 and
@@ -346,6 +366,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       normals: "double",
       vertexPath: "baked-offsets",
       cacheBytes: HIGH_CACHE_BYTES,
+      handoverDetail: "faded",
     },
     atmosphere: TABLE_SIZES.high,
     atmosphereView: ATMOSPHERE_VIEW_SETTINGS.high,
@@ -393,6 +414,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       normals: "mesh",
       vertexPath: "face-differences",
       cacheBytes: LOW_CACHE_BYTES,
+      handoverDetail: "whole",
     },
     atmosphere: TABLE_SIZES.low,
     atmosphereView: ATMOSPHERE_VIEW_SETTINGS.low,

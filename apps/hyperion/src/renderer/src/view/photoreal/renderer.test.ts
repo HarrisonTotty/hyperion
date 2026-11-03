@@ -1679,7 +1679,7 @@ describe("the photorealistic renderer's overlay", () => {
       disc.plan?.meshes.length,
       unmasked.plan?.meshes[0]?.role,
       [...disc.given.map((each) => each.size), ...unmasked.given.map((each) => each.size)],
-    ]).toEqual([0, { kind: "handed-over", coverage: null }, [0, 0]]);
+    ]).toEqual([0, { kind: "handed-over", coverage: null, detailShare: 1 }, [0, 0]]);
   });
 
   it("builds no symbology while its pipelines are being made (R10.T16.f)", async () => {

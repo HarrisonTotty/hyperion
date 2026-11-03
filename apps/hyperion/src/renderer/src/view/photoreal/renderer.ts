@@ -306,6 +306,12 @@ export interface PhotorealFrame {
    */
   readonly previousTabled?: ReadonlySet<BodyIdHex> | undefined;
   /**
+   * Each body handed over on the previous frame, with its relief's subtense where it handed over
+   * (`BodyFramePlan.handedOver`, plan R10, R10.T15.b.2), from which its terrain's own detail fades
+   * in; absent, every fade starts at the hand-over's threshold.
+   */
+  readonly previousHandedOver?: ReadonlyMap<BodyIdHex, number> | undefined;
+  /**
    * The terrain of the bodies handed over to it (plan R10, R10.T10.e), or absent, when a body
    * handed over is drawn as a mesh body is.
    */
@@ -902,6 +908,9 @@ export class PhotorealRenderer {
         setting: frame.setting,
         drawsAir,
         ...(frame.previousTabled === undefined ? {} : { previousTabled: frame.previousTabled }),
+        ...(frame.previousHandedOver === undefined
+          ? {}
+          : { previousHandedOver: frame.previousHandedOver }),
         ...(frame.floorLowest === true ? { limbSamples: settings.floorLimbSamples } : {}),
       },
       frame.previousRegimes,

@@ -76,7 +76,10 @@ export function elementHorizonRad(
  * @param h - H, the star's distance over its radius; above 1, infinite for a point star.
  * @param phiRad - φ, the star's angle from the element's normal, rad.
  * @param starElevationRad - e★, the star's elevation above the datum's horizontal, rad.
- * @param horizonRad - e_h, the map's horizon towards the star, against the datum's horizontal, rad.
+ * @param horizonRad - e_h, the map's horizon towards the star, against the datum's horizontal, rad,
+ *   as the shader takes it: times the frame's share of the map near a hand-over that fades its
+ *   shadows (`handover.ts`' `handoverDetailShare`, R10.T15.b.2), so that at a share of 0 the term is
+ *   the disc's, the star cut by the datum's tangent plane.
  */
 export function terrainHorizonFactor(
   h: number,

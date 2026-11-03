@@ -372,6 +372,8 @@ export class ViewFrameDrawer {
   #regimesFromM: ReadonlyMap<BodyIdHex, Vec3> = new Map();
   /** The bodies the last photorealistic plan drew by their disc tables (R08.T16.b), its hysteresis's. */
   #tabled: ReadonlySet<BodyIdHex> = new Set();
+  /** The bodies the previous frame's plan handed over, with their subtense there (R10.T15.b.2). */
+  #handedOver: ReadonlyMap<BodyIdHex, number> = new Map();
   /**
    * Each body's sources on its last photorealistic plan (`BodyFramePlan.sources`), the lights the
    * atmosphere cache builds its medium for (R08.T10.b); none before such a frame.
@@ -719,6 +721,7 @@ export class ViewFrameDrawer {
           cube: cube === null ? null : this.#cubes.draw(cube, "hdr", exposed),
           previousRegimes: this.#regimes,
           previousTabled: this.#tabled,
+          previousHandedOver: this.#handedOver,
           meter: inputs.meter,
           present: inputs.present,
           classMaps: inputs.classMaps,
@@ -763,6 +766,7 @@ export class ViewFrameDrawer {
       }
       this.#regimesFromM = fromCamera;
       this.#tabled = plan.tabled;
+      this.#handedOver = plan.handedOver;
       this.#sources = plan.sources;
       this.#frameFailed = false;
       return {

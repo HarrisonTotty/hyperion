@@ -9,6 +9,7 @@ import { lookAlong } from "../camera/quaternion";
 import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
 import { scale, sub, type Vec3 } from "../../geometry/vec3";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
+import type { TextureHandle } from "../engine/types";
 import {
   GEOMETRY_BEFORE_R14,
   type GeometrySettings,
@@ -85,6 +86,7 @@ import {
   slewedTauPx,
   type TerrainFrame,
   type TerrainFrameInput,
+  type TerrainFrameLighting,
   type TerrainPassOptions,
   TerrainPass,
   type TerrainPool,
@@ -1568,6 +1570,19 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     expect(lit.pass.layout.slots).toEqual(terrainSlotLayout(TERRAIN_SETTINGS.high, "lit"));
   });
 
+  it("binds the disc's normal map its lighting gives, for the fade near the hand-over, and the draw anew when it changes (R10.T15.b.2)", async () => {
+    const { pass, pool } = await passOn("low", { source: BODY });
+    pool().layers = edgeLayers();
+    const view = northPole(2_000_000);
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    pool().bakeDemand(pass);
+    const discNormals: TextureHandle = { kind: "texture", name: "disc normals" };
+    const drawn = (lighting: TerrainFrameLighting): TextureHandle | undefined =>
+      pass.frame({ ...inputAt(view), lighting }).draws.at(-1)?.textures["discNormals"];
+    expect(drawn({ ...LIGHTING, fade: { detailShare: 0.5, discNormals } })).toBe(discNormals);
+    expect(drawn(LIGHTING)?.name).toBe("terrain normals");
+  });
+
   it("binds the slots' class weights and laws, the lights, the phase table and a body without air's tables", async () => {
     const { pass, pool, engine } = await passOn("low", { source: BODY });
     pool().layers = edgeLayers();
@@ -1604,12 +1619,15 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
       "atmosphereLastAbsorberPressureColumn",
       "atmosphereSourceTable",
       "atmosphereTransmittance",
+      "discNormals",
       "normals",
       "phaseFactorTable",
       "shadowCascades",
     ]);
     // The low setting has no cascades: the placeholder stands for them (R10.T9.b).
     expect(draw.textures["shadowCascades"]?.name).toBe("terrain shadow placeholder");
+    // No disc normal map given: the normals atlas stands for it, unread (R10.T15.b.2).
+    expect(draw.textures["discNormals"]).toBe(draw.textures["normals"]);
     // The camera body-fixed, with 1 ÷ a beside it.
     expect([...(draw.uniforms["cameraBodyFixedM"] ?? [])]).toEqual(
       [0, 0, PLANET.figure.polarRadiusM + 2_000_000, 1 / PLANET.figure.equatorialRadiusM].map(

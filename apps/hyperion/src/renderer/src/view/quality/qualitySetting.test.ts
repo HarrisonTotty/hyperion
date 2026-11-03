@@ -21,6 +21,7 @@ const TERRAIN_FIELDS = {
   normals: true,
   vertexPath: true,
   cacheBytes: true,
+  handoverDetail: true,
 } satisfies Record<keyof TerrainSettings, true>;
 
 describe("the quality settings", () => {
@@ -43,6 +44,7 @@ describe("the quality settings", () => {
       normals: "mesh",
       vertexPath: "face-differences",
       cacheBytes: 64 * 1024 * 1024,
+      handoverDetail: "whole",
     });
   });
 
@@ -54,6 +56,13 @@ describe("the quality settings", () => {
       vertexPath: "baked-offsets",
     });
     expect(SETTINGS.high.terrain.cacheBytes).toBeGreaterThan(SETTINGS.low.terrain.cacheBytes);
+  });
+
+  it("fades the terrain's sub-cell shading in below the hand-over on the high setting alone (R10.T15.b.2)", () => {
+    expect([SETTINGS.high.terrain.handoverDetail, SETTINGS.low.terrain.handoverDetail]).toEqual([
+      "faded",
+      "whole",
+    ]);
   });
 
   it("gives the high setting's cache 400,000,000 B, held by R10.T14.b until R10.T4.b", () => {

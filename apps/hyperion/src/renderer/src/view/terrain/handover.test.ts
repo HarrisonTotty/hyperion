@@ -33,6 +33,7 @@ import type { ProjectionCamera } from "../camera/projection";
 import { rotateToBody, rotateToBodyFixed, rotation3FromRows } from "../coords/rotation";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
+import { sphereIrradianceFactor } from "../lighting/sphereIrradiance";
 import type { Rgb } from "../photometry/toneCurve";
 import { SETTINGS, WIREFRAME_TERRAIN_TAU_PX } from "../quality/qualitySetting";
 import { AU_M } from "../scenes/kept";
@@ -46,6 +47,8 @@ import {
   CLASS_FADE_NEAR,
   classCellFade,
   drawsCells,
+  handoverDetailShare,
+  HANDOVER_FADE_SPAN,
   handoverRangeM,
   handoverRangeRatio,
   handoverReliefM,
@@ -53,6 +56,7 @@ import {
   handoverTauPx,
   handsOver,
   type HandoverSphere,
+  handoverSubtense,
   limbDistanceM,
   pixelAngleRad,
   selectionViewport,
@@ -293,6 +297,86 @@ describe("the hand-over's decision", () => {
       new Map([[BODY, "terrain"]]),
     );
     expect(held.get(BODY)).toBe("terrain");
+  });
+});
+
+describe("the terrain's own detail near the hand-over (R10.T15.b.2)", () => {
+  const rangeM = handoverRangeM(EARTH_RELIEF_M, 1, NOTE_RAD_PER_PX);
+  const h = REGIME_HYSTERESIS;
+  const subtense = (limbM: number): number | null =>
+    handoverSubtense(limbM, EARTH_RELIEF_M, 1, NOTE_RAD_PER_PX);
+  const share = (limbM: number, startSubtense = 1 + h): number =>
+    handoverDetailShare(subtense(limbM), startSubtense, "faded");
+
+  it("is none at the hand-over, at the hand-back and between, so that both switches see the disc's shading", () => {
+    expect([
+      share(rangeM / (1 + h)),
+      share(rangeM),
+      share(rangeM / (1 - h)),
+      share(4 * rangeM),
+    ]).toEqual([0, 0, 0, 0]);
+  });
+
+  it("rises linearly in the relief's subtense to the whole at τ (1 + 3h) px", () => {
+    expect(HANDOVER_FADE_SPAN).toBeCloseTo(2 * h, 15);
+    expect(share(rangeM / (1 + 2 * h))).toBeCloseTo(0.5, 12);
+    expect(share(rangeM / (1 + 1.5 * h))).toBeCloseTo(0.25, 12);
+    expect(share(rangeM / (1 + 3 * h) / 1.000_001)).toBe(1);
+    expect(share(rangeM / 10)).toBe(1);
+    // It never falls as the camera closes in.
+    const limbsM = Array.from({ length: 40 }, (_, k) => (rangeM / (1 + h)) * (1 - k / 50));
+    const shares = limbsM.map((limbM) => share(limbM));
+    expect(shares.every((value, k) => k === 0 || value >= (shares[k - 1] ?? 0))).toBe(true);
+  });
+
+  it("starts where the body handed over, past τ (1 + h), as a hand-over at the field's cells may (HANDOVER_AT_CELLS)", () => {
+    // Handed over at 1.25 τ: none there, half a span on, whole a span on.
+    expect([
+      share(rangeM / 1.25, 1.25),
+      share(rangeM / (1.25 + h), 1.25),
+      share(rangeM / (1.25 + 2 * h) / 1.000_001, 1.25),
+    ]).toEqual([0, expect.closeTo(0.5, 12), 1]);
+    // A start inside the hysteresis band counts from τ (1 + h).
+    expect(share(rangeM / (1 + 2 * h), 1)).toBeCloseTo(0.5, 12);
+  });
+
+  it("is the relief's subtense in τ, the range over the camera's distance to the limb", () => {
+    expect([subtense(rangeM / 1.1), subtense(rangeM), subtense(0)]).toEqual([
+      expect.closeTo(1.1, 12),
+      1,
+      null,
+    ]);
+    expect(handoverSubtense(rangeM, null, 1, NOTE_RAD_PER_PX)).toBeNull();
+  });
+
+  it("stands whole on a setting whose detail is whole, with no relief known, and at the ground", () => {
+    expect([
+      handoverDetailShare(1, 1.1, "whole"),
+      handoverDetailShare(null, 1.1, "faded"),
+      share(0),
+    ]).toEqual([1, 1, 1]);
+  });
+
+  it("gives the terrain the disc's horizon term at a share of 0, the star cut by the datum's tangent plane", () => {
+    // The Sun from 1 au behind a map's horizon of 8°: its centre 0.1° above the datum over a slope
+    // tilted 10° towards it, whose disc the datum's plane cuts, and 3° above it over a slope tilted
+    // 1° away, which its own plane cuts.
+    const hSun = AU_M / 6.957e8;
+    const mapHorizon = 8 * RAD;
+    for (const [starDeg, tiltDeg] of [
+      [0.1, 10],
+      [3, -1],
+    ] as const) {
+      const star = starDeg * RAD;
+      const phiDatum = Math.PI / 2 - star;
+      const phi = phiDatum - tiltDeg * RAD;
+      // The terrain's term with the map's elevation by the share, as `terrain_horizon` takes it.
+      const terrain = (mapShare: number): number =>
+        terrainHorizonFactor(hSun, phi, star, mapShare * mapHorizon);
+      const disc = sphereIrradianceFactor(hSun, phi, Math.max(phiDatum - phi, 0));
+      expect([terrain(1), disc > 0]).toEqual([0, true]);
+      expect(terrain(0)).toBeCloseTo(disc, 12);
+    }
   });
 });
 
