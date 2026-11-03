@@ -46,7 +46,7 @@ use hyperion_sim::galaxy::features::catalogue::{
 use hyperion_sim::galaxy::features::cluster::ClusterModel;
 use hyperion_sim::galaxy::features::interior::counts::{ClassCounts, class_counts};
 use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
-use hyperion_sim::galaxy::features::members::{FeatureInterior, FeatureLevelList};
+use hyperion_sim::galaxy::features::members::{FeatureInterior, FeatureLevelList, KeptDeaths};
 use hyperion_sim::galaxy::features::{FeatureId, FeatureProcess};
 use hyperion_sim::id::FeatureCell;
 use hyperion_sim::units::LightYears;
@@ -68,13 +68,43 @@ impl HeapBytes for FeatureCellContents {
 /// What [`SharedClusterModelCache`] holds of one feature: its interior once a query has needed
 /// it, and before that the bound on its nested grid's reach that the query tested it by
 /// ([`FeatureInterior::grid_reach_bound`]; P09.T40.a); and its feature-level list once a
-/// query has read it (P09.T37).
+/// query has read it (P09.T37), or before that its list's kept deaths, which a query reads of every
+/// feature within the reach of its dead (fix-p09-recent-kicks).
 #[derive(Debug)]
 struct HeldFeature {
     /// Its interior or its bound, if a query has asked for either.
     model: Option<HeldModel>,
     /// Its list ([`FeatureLevelList::listed_of`]), if a query has read it.
     list: Option<HeldList>,
+    /// Its list's kept deaths ([`FeatureLevelList::kept_deaths`]), if a query has read them and
+    /// not its list, which holds them.
+    deaths: Option<HeldDeaths>,
+}
+
+/// A feature's list's kept deaths, as a query read them.
+#[derive(Debug, Clone)]
+enum HeldDeaths {
+    /// Its list's.
+    Listed(Arc<KeptDeaths>),
+    /// It registers no class.
+    Unlisted,
+}
+
+impl HeldDeaths {
+    /// `deaths`, held: [`HeldDeaths::Unlisted`] for `None`.
+    #[must_use]
+    fn of(deaths: Option<&Arc<KeptDeaths>>) -> Self {
+        deaths.map_or(Self::Unlisted, |deaths| Self::Listed(Arc::clone(deaths)))
+    }
+
+    /// The deaths it lends: `None` for a feature that registers no class.
+    #[must_use]
+    fn lent(&self) -> Option<Arc<KeptDeaths>> {
+        match self {
+            Self::Listed(deaths) => Some(Arc::clone(deaths)),
+            Self::Unlisted => None,
+        }
+    }
 }
 
 /// A feature's feature-level list, as a query read it.
@@ -119,6 +149,7 @@ impl HeldFeature {
         Self {
             model: Some(model),
             list: held.and_then(|held| held.list.clone()),
+            deaths: held.and_then(|held| held.deaths.clone()),
         }
     }
 }
@@ -139,7 +170,11 @@ impl HeapBytes for HeldFeature {
             Some(HeldList::Listed(list)) => size_of::<FeatureLevelList>() + list.heap_bytes(),
             Some(HeldList::Unlisted) | None => 0,
         };
-        model + list
+        let deaths = match &self.deaths {
+            Some(HeldDeaths::Listed(deaths)) => size_of::<KeptDeaths>() + deaths.heap_bytes(),
+            Some(HeldDeaths::Unlisted) | None => 0,
+        };
+        model + list + deaths
     }
 }
 
@@ -318,6 +353,7 @@ impl SharedClusterModelCache {
             kept: Mutex::new(BTreeMap::new()),
             reaches: Mutex::new(BTreeMap::new()),
             lists: Mutex::new(BTreeMap::new()),
+            deaths: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -440,9 +476,59 @@ impl SharedClusterModelCache {
             Arc::new(HeldFeature {
                 model: held.as_ref().and_then(|held| held.model.clone()),
                 list: Some(HeldList::of(list.as_ref())),
+                deaths: None,
             }),
         );
         list
+    }
+
+    /// `feature`'s list's kept deaths in `galaxy`, the galaxy `key` names
+    /// (fix-p09-recent-kicks): those of the list the cache holds, or the deaths it holds, or else
+    /// those of a list built, which are stored beside what the cache holds of the feature without
+    /// the list, so that the far features a query reads the deaths of cost their bytes alone;
+    /// `None` for a feature that registers no class, which is stored too.
+    ///
+    /// As [`interior`](Self::interior), a galaxy without its kinematic tables never reads the cache.
+    fn deaths(
+        &self,
+        key: GalaxyKey,
+        galaxy: &Galaxy,
+        feature: &FeatureRecord,
+    ) -> Option<Arc<KeptDeaths>> {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a cluster model cache handle lends the interiors of one galaxy, and this is another's"
+        );
+        let built = || {
+            FeatureLevelList::listed_of(galaxy, feature)
+                .map(|list| Arc::clone(list.kept_deaths(galaxy)))
+        };
+        if galaxy.kinematics().is_none() {
+            return built();
+        }
+        let entry_key = (key, feature.id());
+        let held = self.interiors.get(&entry_key);
+        if let Some(held) = held.as_ref() {
+            if let Some(list) = &held.list {
+                return list.lent().map(|list| Arc::clone(list.kept_deaths(galaxy)));
+            }
+            if let Some(deaths) = &held.deaths {
+                return deaths.lent();
+            }
+        }
+        let deaths = built();
+        // Only if nothing was stored meanwhile, as a list is.
+        let _ = self.interiors.insert_if_unchanged(
+            entry_key,
+            held.as_ref(),
+            Arc::new(HeldFeature {
+                model: held.as_ref().and_then(|held| held.model.clone()),
+                list: None,
+                deaths: Some(HeldDeaths::of(deaths.as_ref())),
+            }),
+        );
+        deaths
     }
 }
 
@@ -491,6 +577,15 @@ impl FeatureInteriorCache for ClusterModelHandle<'_> {
     fn list(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureLevelList>> {
         self.cache.list(self.galaxy, galaxy, feature)
     }
+
+    /// Lends `feature`'s list's kept deaths, building its list if the cache has neither.
+    ///
+    /// # Panics
+    ///
+    /// As [`interior`](Self::interior).
+    fn deaths(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<KeptDeaths>> {
+        self.cache.deaths(self.galaxy, galaxy, feature)
+    }
 }
 
 /// One job's view of the [`SharedClusterModelCache`]: every interior the job reads is kept for as
@@ -509,6 +604,9 @@ pub struct KeptInteriors<'a> {
     /// or built there: its census and its hits read the same, some thousand of them near the inner
     /// disc.
     lists: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureLevelList>>>>,
+    /// The deaths of the features' lists the job reads the deaths of alone
+    /// (fix-p09-recent-kicks): some ten thousand near the inner disc.
+    deaths: Mutex<BTreeMap<FeatureId, Option<Arc<KeptDeaths>>>>,
 }
 
 impl FeatureInteriorCache for KeptInteriors<'_> {
@@ -554,6 +652,27 @@ impl FeatureInteriorCache for KeptInteriors<'_> {
             .unwrap_or_else(PoisonError::into_inner)
             .entry(feature.id())
             .or_insert_with(|| self.shared.list(galaxy, feature))
+            .clone()
+    }
+
+    /// Lends `feature`'s list's kept deaths: those of the list the job keeps, or the job's own, or
+    /// the shared cache's, kept.
+    fn deaths(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<KeptDeaths>> {
+        if let Some(list) = self
+            .lists
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&feature.id())
+        {
+            return list
+                .as_ref()
+                .map(|list| Arc::clone(list.kept_deaths(galaxy)));
+        }
+        self.deaths
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(feature.id())
+            .or_insert_with(|| self.shared.deaths(galaxy, feature))
             .clone()
     }
 }

@@ -37,6 +37,12 @@
 //! built before, as the server builds them ahead of a query, its models kept with it, as the
 //! server keeps them with the list (`GlobalListModels`), and the centre's orbits read through the
 //! server's centre orbit cache; and at 50 ly the list's source alone through no orbit cache.
+//!
+//! `kicks_by_version` is the Sun-like query of 50 ly and the inner disc's, 13,000 ly from the
+//! centre on +y, under generator version 26's rules and 27's, with every source each registers,
+//! cold and warm: from 27 a feature's list may hold a core collapse its kick takes far from its
+//! feature (fix-p09-recent-kicks), so the lists a query reads at 27 are those whose dead can reach
+//! its sphere.
 
 use std::collections::BTreeMap;
 use std::hint::black_box;
@@ -133,6 +139,31 @@ impl Caches {
         range_query(galaxy, &mut cells, &[&members, &listed, &classes], query)
     }
 
+    /// `query` with every source `galaxy`'s rules register, in the order a served query takes
+    /// them: the members, the global list's through `list` where it is registered, and the
+    /// catalogue classes' where they are.
+    fn query_every(
+        &self,
+        galaxy: &Galaxy,
+        key: GalaxyKey,
+        query: &RangeQuery,
+        list: &dyn TubeLookup,
+    ) -> RangeResult {
+        let mut cells = self.cells.handle(key);
+        let (features, interiors) = (self.features.handle(key), self.interiors.kept(key));
+        let members = FeatureMemberSource::new(&features, &interiors);
+        let class_cells = self.classes.handle(key);
+        let classes = CatalogueClassSource::registered_in(galaxy)
+            .map(|classes| classes.with_cells(&class_cells));
+        let orbits = self.centre.handle(key);
+        let listed = GlobalListSource::is_registered_in(galaxy)
+            .then(|| GlobalListSource::new(galaxy, list, &orbits).expect("the centre builds"));
+        let mut sources: Vec<&dyn SystemSource> = vec![&members];
+        sources.extend(listed.as_ref().map(|listed| listed as &dyn SystemSource));
+        sources.extend(classes.as_ref().map(|classes| classes as &dyn SystemSource));
+        range_query(galaxy, &mut cells, &sources, query)
+    }
+
     /// `query` as the served `systems_in_range` job runs it: one kept view of the interiors for
     /// the job, the features' members beside the grid, and from generator version 27 the
     /// catalogue classes' hosts beside them.
@@ -184,6 +215,11 @@ fn query_at(centre: GalacticPosition, radius_ly: f64) -> RangeQuery {
 /// The Sun-like point, 26,000 ly from the centre on +y.
 fn sun_like() -> GalacticPosition {
     GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("inside the root cube")
+}
+
+/// The inner disc's point, 13,000 ly from the centre on +y.
+fn inner_disc() -> GalacticPosition {
+    GalacticPosition::from_light_years([0.0, 13_000.0, 0.0]).expect("inside the root cube")
 }
 
 /// The globular with members nearest the Sun-like point, as the server's tests choose it.
@@ -666,12 +702,66 @@ fn list_at_27(c: &mut Criterion) {
     group.finish();
 }
 
+/// The Sun-like and the inner disc's 50 ly queries under 26's rules and 27's, with every source
+/// each registers, cold and warm (module documentation).
+fn kicks_by_version(c: &mut Criterion) {
+    let mut group = c.benchmark_group("kicks_by_version");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(20));
+    for number in [26, 27] {
+        let seed = Seed::new(SEED);
+        let version = GeneratorVersion::new(number);
+        let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
+        let galaxy = Galaxy::from_params_at_version(seed, params, version)
+            .expect("a drawn galaxy builds")
+            .with_full_potential();
+        let key = GalaxyKey::new(SEED, version);
+        let list = GlobalList::build(&galaxy);
+        let lookup = KeepTubes {
+            galaxy: &galaxy,
+            models: GlobalListModels::new(&galaxy, &list),
+            list,
+            tubes: Mutex::default(),
+        };
+        let queries = [
+            ("Sun-like 50 ly", query_at(sun_like(), 50.0)),
+            ("inner disc 50 ly", query_at(inner_disc(), 50.0)),
+        ];
+        for (name, query) in &queries {
+            if GlobalListSource::is_registered_in(&galaxy) {
+                for stream in GlobalListSource::streams_read(&galaxy, &lookup.list, query) {
+                    drop(lookup.tube(stream));
+                }
+            }
+            group.bench_function(format!("{name} at {number} (cold)"), |b| {
+                b.iter_batched_ref(
+                    Caches::new,
+                    |caches| caches.query_every(&galaxy, key, black_box(query), &lookup),
+                    BatchSize::PerIteration,
+                );
+            });
+            let warm = Caches::new();
+            let result = warm.query_every(&galaxy, key, query, &lookup);
+            println!(
+                "kicks_by_version: {name} at {number}: {} systems, complete down to {:?}",
+                result.systems().len(),
+                result.census().complete_down_to()
+            );
+            group.bench_function(format!("{name} at {number} (warm)"), |b| {
+                b.iter(|| warm.query_every(&galaxy, key, black_box(query), &lookup));
+            });
+        }
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     served,
     served_on_the_pool,
     classes_at_27,
     served_at_27,
-    list_at_27
+    list_at_27,
+    kicks_by_version
 );
 criterion_main!(benches);

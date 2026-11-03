@@ -42,6 +42,7 @@
 //! the centre after them starts past their count.
 
 use std::num::NonZeroU16;
+use std::sync::{Arc, OnceLock};
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
@@ -50,11 +51,13 @@ use crate::galaxy::catalogue_classes::binary::feature::{
 };
 use crate::galaxy::catalogue_classes::source::member_layers;
 use crate::galaxy::catalogue_classes::{CatalogueMotion, ClassId, FEATURE_LEVEL_LIST_ORDER};
+use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::{LayerCounts, LayerSet};
 use crate::id::{CentreMemberId, FeatureMemberId, MemberSlot, SystemId, SystemIdKind};
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::stellar::system::SystemStars;
+use crate::time::{CLOCK_WINDOW_H, UniverseTime};
 use crate::units::LightYears;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
@@ -246,6 +249,97 @@ pub struct FeatureLevelList {
     /// The feature's hosts of plan 11's binary classes, which draw their entries, where it
     /// registers any (P11.T8.f).
     binaries: Option<Box<FeatureBinaries>>,
+    /// Its core collapses that their test keeps, found once ([`kept_deaths`](Self::kept_deaths)).
+    deaths: DeathsFound,
+}
+
+/// A feature's list's core collapses that their test keeps, each on its broken line
+/// (fix-p09-recent-kicks), and the farthest any of their remnants lies from its candidate's line
+/// by the clock window's end: what a range query reads of them (P09.T37), found once a list
+/// ([`FeatureLevelList::kept_deaths`]). A cache may keep it apart from its list, which is far
+/// larger, so that a query reads a list only where its entries can reach its sphere, and of a list
+/// whose dead alone can, these.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeptDeaths {
+    velocity: Option<GalacticVelocity>,
+    reach: LightYears,
+    deaths: Vec<KeptDeath>,
+}
+
+impl KeptDeaths {
+    /// The velocity its list's entries move at before any death, its feature's bulk motion:
+    /// `None` for a list that has neither stars nor binary hosts to draw them.
+    #[must_use]
+    pub const fn velocity(&self) -> Option<GalacticVelocity> {
+        self.velocity
+    }
+
+    /// How far from its candidate's line any of them lies at any time of the clock window, ly,
+    /// with margins over the rounding: zero for a list that keeps none.
+    #[must_use]
+    pub const fn reach(&self) -> LightYears {
+        self.reach
+    }
+
+    /// Each, in index order.
+    #[must_use]
+    pub fn deaths(&self) -> &[KeptDeath] {
+        &self.deaths
+    }
+
+    /// The bytes it owns on the heap, its deaths' buffer by its capacity: what a caller's
+    /// byte-bounded cache charges it.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.deaths.capacity() * size_of::<KeptDeath>()
+    }
+}
+
+/// One of a list's core collapses that its test keeps: its candidate's index and place, its
+/// member's record and its broken line ([`RecentEntry::motion`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeptDeath {
+    index: u16,
+    candidate: GalacticPosition,
+    record: SystemRecord,
+    motion: CatalogueMotion,
+}
+
+impl KeptDeath {
+    /// Its index on the list.
+    #[must_use]
+    pub const fn index(&self) -> u16 {
+        self.index
+    }
+
+    /// Its candidate's place at the epoch, on whose line its progenitor moves.
+    #[must_use]
+    pub const fn candidate(&self) -> &GalacticPosition {
+        &self.candidate
+    }
+
+    /// Its member's record.
+    #[must_use]
+    pub const fn record(&self) -> &SystemRecord {
+        &self.record
+    }
+
+    /// Its broken line.
+    #[must_use]
+    pub const fn motion(&self) -> &CatalogueMotion {
+        &self.motion
+    }
+}
+
+/// A list's [`KeptDeaths`], found when first asked for: a function of the list, so no part of its
+/// value, and two lists are equal whatever either has found.
+#[derive(Debug, Clone, Default)]
+struct DeathsFound(OnceLock<Arc<KeptDeaths>>);
+
+impl PartialEq for DeathsFound {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
 }
 
 impl FeatureLevelList {
@@ -283,7 +377,14 @@ impl FeatureLevelList {
     #[must_use]
     pub fn listed_of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
         let list = Self::of(galaxy, feature);
-        (!list.classes.is_empty()).then_some(list)
+        if list.classes.is_empty() {
+            return None;
+        }
+        // A query reads every list's dead (fix-p09-recent-kicks), so they are found with it, and a
+        // cache that keeps the list charges their bytes; the list keeps them, so the reference is
+        // not needed here.
+        let _ = list.kept_deaths(galaxy);
+        Some(list)
     }
 
     /// The list keyed by the feature word `word` about `centre`, with or without member zero,
@@ -376,6 +477,7 @@ impl FeatureLevelList {
             first,
             stars: None,
             binaries: None,
+            deaths: DeathsFound::default(),
         }
     }
 
@@ -399,6 +501,63 @@ impl FeatureLevelList {
             + self.binaries.as_ref().map_or(0, |binaries| {
                 size_of::<FeatureBinaries>() + binaries.heap_bytes()
             })
+            + self
+                .deaths
+                .0
+                .get()
+                .map_or(0, |found| size_of::<KeptDeaths>() + found.heap_bytes())
+    }
+
+    /// Its core collapses that their test keeps, found when first asked for and kept with the
+    /// list (P09.T37; fix-p09-recent-kicks): each with its candidate's place, its member's record
+    /// and its broken line, and how far from its candidate's line any lies by the clock window's
+    /// end, +H. Its remnant leaves the line at its death, so the farthest is at +H, its kick's
+    /// travel since; a margin of 10⁻⁹ of it and 10⁻⁶ ly covers the rounding of both lines.
+    /// Empty for a list without its stars.
+    ///
+    /// # Panics
+    ///
+    /// Never: +H is on the clock, and no line slower than light leaves the addressable range by
+    /// then.
+    #[must_use]
+    pub fn kept_deaths(&self, galaxy: &Galaxy) -> &Arc<KeptDeaths> {
+        self.deaths.0.get_or_init(|| {
+            let end = UniverseTime::EPOCH
+                .checked_add(CLOCK_WINDOW_H)
+                .expect("+H is on the clock");
+            let mut deaths = Vec::new();
+            let mut farthest: f64 = 0.0;
+            let velocity = self.stars.as_deref().map(FeatureStars::velocity);
+            for entry in self.entries() {
+                if entry.class() != ClassId::CORE_COLLAPSE {
+                    continue;
+                }
+                let Some((death, velocity)) =
+                    self.recent_entry(galaxy, entry.index()).zip(velocity)
+                else {
+                    continue;
+                };
+                let motion = *death.motion();
+                let line = CatalogueMotion::straight(*entry.position(), velocity).position_at(end);
+                let off = LightYears::from(motion.position_at(end).distance_to(&line)).value();
+                farthest = farthest.max(off);
+                deaths.push(KeptDeath {
+                    index: entry.index(),
+                    candidate: *entry.position(),
+                    record: *death.member().record(),
+                    motion,
+                });
+            }
+            Arc::new(KeptDeaths {
+                velocity: self.entries_velocity(),
+                reach: LightYears::new(if deaths.is_empty() {
+                    0.0
+                } else {
+                    farthest * (1.0 + 1e-9) + 1e-6
+                }),
+                deaths,
+            })
+        })
     }
 
     /// Whether index 0 is a member.

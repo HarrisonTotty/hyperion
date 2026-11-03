@@ -5991,6 +5991,15 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Test._ `centre::members::tests::a_centre_living_class_yields_its_expected_count_from_27`
     (`CentrePlacement::class_under`, split out of `candidate_under` bit for bit), which failed
     first at 123; now 562, every candidate of the class kept, within four standard deviations.
+- **P09.T37, the kicks' cost cut (lane `fix-p09-recent-dead`, 2026-11-03, under `feature_classes`
+  (27); no output moved at 24–27).**
+  - _Deaths._ `FeatureLevelList::kept_deaths`: a list's kept core collapses (candidate, record,
+    broken line) and their farthest offset from their lines by +H, found once with the list.
+  - _Caches._ `FeatureInteriorCache::deaths` lends them apart from the list; the server holds
+    them in `HeldFeature::deaths`, charged their bytes, so a far feature costs no list.
+  - _Hits._ A feature is read where its entries or its dead can reach the sphere, its list only
+    where its entries can; no candidate is tested again.
+  - _Bench._ `feature_range_query`'s `kicks_by_version`; figures in the lane's outbox.
 - **P09.T28.d.c as built (lane `fix-p09-t28d-local-arc`, 2026-11-02, behind `KEPLER_ARC_VERSION`
   = 27; no output moved at 24–26).**
   - _Names._ `motion::spherical::{KEPLER_ARC_VERSION, KeplerArcRules::{Series, Local}}`,

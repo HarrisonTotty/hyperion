@@ -84,7 +84,8 @@ pub use headroom::{
     check_feature_list_headroom,
 };
 pub use level_list::{
-    FeatureLevelList, ListClass, ListEntry, ListIndex, MemberZero, listed_death_motion,
+    FeatureLevelList, KeptDeath, KeptDeaths, ListClass, ListEntry, ListIndex, MemberZero,
+    listed_death_motion,
 };
 pub use placement::{FeatureInterior, resolve_member};
 pub use source::{FeatureInteriorCache, FeatureMemberSource, KeepInteriors, NoInteriorCache};

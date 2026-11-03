@@ -41,8 +41,12 @@
 //!   padded so hold every list that can reach the sphere. The census counts a core collapse by
 //!   its candidate's place, as the catalogue's classes count theirs by their cells' (the lane's
 //!   lean): its kick spreads the class about the feature's profile and does not change its count.
-//!   Each candidate's line is tested against the sphere, a core collapse's grown by that reach,
-//!   before its class's draws and test are asked, and a kept entry is a hit as a member is
+//!   Each candidate's line is tested against the sphere before its class's draws and test are
+//!   asked, but a core collapse's test is asked once a list, with the farthest its kept deaths lie
+//!   from their lines (`FeatureLevelList::kept_deaths`), which a cache may keep apart from the
+//!   list ([`FeatureInteriorCache::deaths`]): so a feature is read only where its entries or its
+//!   dead can reach the sphere, its list only where its entries can, and a kept entry is a hit as
+//!   a member is
 //!   ([`SystemOrigin::FeatureMember`](crate::galaxy::placement::SystemOrigin::FeatureMember)), its
 //!   ID resolved by [`resolve_member`](super::resolve_member). Below both holds' versions no list
 //!   is read, bit for bit.
@@ -78,7 +82,7 @@ use crate::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
 use super::super::catalogue::{FeatureCatalogue, FeatureCellCache, FeatureRecord};
 use super::super::interior::LocalCell;
 use super::super::nested::{NestedCell, box_distance};
-use super::level_list::FeatureLevelList;
+use super::level_list::{FeatureLevelList, KeptDeaths};
 use super::placement::FeatureInterior;
 use super::recent::FeatureClassesRules;
 use super::{MemberRecord, local_offset};
@@ -108,6 +112,16 @@ pub trait FeatureInteriorCache {
     fn list(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<FeatureLevelList>> {
         FeatureLevelList::listed_of(galaxy, feature).map(Arc::new)
     }
+
+    /// `feature`'s list's kept deaths in `galaxy` (fix-p09-recent-kicks), which an implementation
+    /// may keep apart from the list: exactly [`FeatureLevelList::kept_deaths`] of the list
+    /// [`list`](Self::list) lends, `None` for a feature that registers no class. A range query reads
+    /// them of every feature its lists' lookup finds, the list itself only where its entries can
+    /// reach the sphere.
+    fn deaths(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<KeptDeaths>> {
+        self.list(galaxy, feature)
+            .map(|list| Arc::clone(list.kept_deaths(galaxy)))
+    }
 }
 
 /// The cache that keeps nothing: every lookup builds its interior.
@@ -135,6 +149,8 @@ pub struct KeepInteriors<'a> {
     kept: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureInterior>>>>,
     reaches: Mutex<BTreeMap<FeatureId, Option<LightYears>>>,
     lists: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureLevelList>>>>,
+    /// The deaths of the lists it was asked for the deaths of alone.
+    deaths: Mutex<BTreeMap<FeatureId, Option<Arc<KeptDeaths>>>>,
 }
 
 impl<'a> KeepInteriors<'a> {
@@ -146,6 +162,7 @@ impl<'a> KeepInteriors<'a> {
             kept: Mutex::new(BTreeMap::new()),
             reaches: Mutex::new(BTreeMap::new()),
             lists: Mutex::new(BTreeMap::new()),
+            deaths: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -201,6 +218,30 @@ impl FeatureInteriorCache for KeepInteriors<'_> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(feature.id())
             .or_insert_with(|| FeatureLevelList::listed_of(galaxy, feature).map(Arc::new))
+            .clone()
+    }
+
+    /// The deaths of the list it keeps, or of a list built, whose deaths alone it keeps.
+    fn deaths(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<KeptDeaths>> {
+        self.check(galaxy);
+        if let Some(list) = self
+            .lists
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&feature.id())
+        {
+            return list
+                .as_ref()
+                .map(|list| Arc::clone(list.kept_deaths(galaxy)));
+        }
+        self.deaths
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(feature.id())
+            .or_insert_with(|| {
+                FeatureLevelList::listed_of(galaxy, feature)
+                    .map(|list| Arc::clone(list.kept_deaths(galaxy)))
+            })
             .clone()
     }
 }
@@ -451,10 +492,15 @@ impl<'a> FeatureMemberSource<'a> {
             if touches {
                 drop(self.interiors.interior(galaxy, feature));
             }
-            // Every feature the lookups find has its list read, by the census and the hits: some
+            // Every feature the lookups find has its list's deaths read by the hits, and its list
+            // where its entries can reach the sphere, as the members' lookup finds it: some
             // thousand near the inner disc at 0.4 ms each (P09.T37), so they are made here too.
             if lists == FeatureClassesRules::Listed {
-                drop(self.interiors.list(galaxy, feature));
+                drop(self.interiors.deaths(galaxy, feature));
+                let near = member_reach(sphere.radius(), sphere.time(), UNBOUND_PAD_SPEED);
+                if reach_touches(feature, centre, near) {
+                    drop(self.interiors.list(galaxy, feature));
+                }
             }
         }
     }
@@ -689,10 +735,8 @@ impl SystemSource for FeatureMemberSource<'_> {
         let listed = lists_lookup_radius(galaxy, sphere);
         let mut members = Vec::new();
         for (feature, interior) in self.near(galaxy, sphere.centre(), (padded, listed), lists) {
-            if lists == FeatureClassesRules::Listed
-                && let Some(list) = self.interiors.list(galaxy, &feature)
-            {
-                list_hits(galaxy, (&feature, &list), sphere, layers, out);
+            if lists == FeatureClassesRules::Listed {
+                list_hits(galaxy, (&feature, self.interiors), sphere, layers, out);
             }
             let Some(interior) = interior else {
                 continue;
@@ -758,6 +802,15 @@ fn death_reach(galaxy: &Galaxy) -> LightYears {
         FeatureClassesRules::Unlisted => LightYears::ZERO,
         FeatureClassesRules::Listed => LIFETIME_REACH,
     }
+}
+
+/// Whether `feature`'s reach touches the ball of `radius` about `centre`, as the catalogue's lookup
+/// tests it ([`FeatureCatalogue::near`]): the features whose lists the census and the hits read,
+/// for a `radius` the lists' pad bounds.
+#[must_use]
+fn reach_touches(feature: &FeatureRecord, centre: &GalacticPosition, radius: LightYears) -> bool {
+    LightYears::from(centre.distance_to(feature.position())).value()
+        <= radius.value() + feature.reach().value()
 }
 
 /// Whether a grid of `reach` about `feature`'s centre may hold a cell that the ball of `radius`
@@ -916,13 +969,16 @@ fn lists_read(galaxy: &Galaxy) -> FeatureClassesRules {
     }
 }
 
-/// The hits in `sphere` among `layers` of `feature`'s listed entries, its `list`'s, of its recent
-/// and of plan 11's binary classes (module documentation, "The lists"), appended to `out` in index
-/// order.
+/// The hits in `sphere` among `layers` of `feature`'s listed entries, of its recent and of plan
+/// 11's binary classes, its list's as `interiors` lends it (module documentation, "The lists"),
+/// appended to `out` in index order.
 ///
 /// An entry moves on its candidate's line, but a core collapse, which leaves it at its death for
-/// its remnant's (fix-p09-recent-kicks): its candidate's line is tested against the sphere grown
-/// by [`death_reach`], and then the entry's own broken line, which its ID places it on
+/// its remnant's (fix-p09-recent-kicks): the list's kept deaths ([`FeatureLevelList::kept_deaths`],
+/// [`FeatureInteriorCache::deaths`]) are found once, with how far from their lines they lie, so
+/// the list is read only where its entries can reach the sphere, its deaths alone where only they
+/// can, and neither where none can. A death's candidate's line is tested against the sphere grown
+/// by [`death_reach`], and then its own broken line, which its ID places it on
 /// ([`Drift::of_record_in`](crate::observe::Drift::of_record_in)).
 ///
 /// # Panics
@@ -931,12 +987,31 @@ fn lists_read(galaxy: &Galaxy) -> FeatureClassesRules {
 /// features' lookup assumes, or an entry's member is not on its line at the epoch.
 fn list_hits(
     galaxy: &Galaxy,
-    (feature, list): (&FeatureRecord, &FeatureLevelList),
+    (feature, interiors): (&FeatureRecord, &dyn FeatureInteriorCache),
     sphere: &QuerySphere,
     layers: LayerSet,
     out: &mut Vec<SystemHit>,
 ) {
-    let Some(velocity) = list.entries_velocity() else {
+    let away = LightYears::from(sphere.centre().distance_to(feature.position())).value();
+    let t = sphere.time();
+    // A feature that its entries may reach the sphere from, at any bulk speed the lookup allows,
+    // has its list read, and its deaths from it; another its deaths alone, which a cache may keep
+    // without the list.
+    let near =
+        away <= member_reach(sphere.radius() + feature.reach(), t, UNBOUND_PAD_SPEED).value();
+    let (list, kept) = if near {
+        let Some(list) = interiors.list(galaxy, feature) else {
+            return;
+        };
+        let kept = Arc::clone(list.kept_deaths(galaxy));
+        (Some(list), kept)
+    } else {
+        let Some(kept) = interiors.deaths(galaxy, feature) else {
+            return;
+        };
+        (None, kept)
+    };
+    let Some(velocity) = kept.velocity() else {
         return;
     };
     let speed = KilometresPerSecond::from(velocity.speed());
@@ -945,48 +1020,49 @@ fn list_hits(
         "{:?}: a feature's bulk speed {speed:?} is below the features' lookup pad",
         feature.id()
     );
-    let dead = if list.count(ClassId::CORE_COLLAPSE) > 0 {
-        death_reach(galaxy)
-    } else {
-        LightYears::ZERO
-    };
-    // The list's pad: its entries lie within the reach of the feature's centre at the epoch, and
-    // its dead within `dead` of their lines.
-    let within = member_reach(
-        sphere.radius() + feature.reach() + dead,
-        sphere.time(),
-        speed,
-    );
-    if LightYears::from(sphere.centre().distance_to(feature.position())).value() > within.value() {
+    // The list's pads: its entries lie within the reach of the feature's centre at the epoch, and
+    // its dead within their reach of their lines.
+    if away > member_reach(sphere.radius() + feature.reach() + kept.reach(), t, speed).value() {
         return;
     }
-    let elapsed = Seconds::new(sphere.time().since_epoch().as_seconds_f64());
+    let elapsed = Seconds::new(t.since_epoch().as_seconds_f64());
+    let mut death_hits = kept.deaths().iter().filter_map(|death| {
+        let at = drifted_from(death.candidate(), velocity, t, elapsed);
+        let line = LightYears::from(sphere.centre().distance_to(&at));
+        let record = death.record();
+        (line.value() <= (sphere.radius() + death_reach(galaxy)).value()
+            && layers.contains(record.layer()))
+        .then(|| {
+            (
+                death.index(),
+                hit_there(record, death.motion().position_at(t), sphere),
+            )
+        })
+    });
+    let list = match list {
+        Some(list) if away <= member_reach(sphere.radius() + feature.reach(), t, speed).value() => {
+            list
+        }
+        // Only its dead can reach the sphere.
+        _ => {
+            out.extend(death_hits.filter_map(|(_, hit)| hit));
+            return;
+        }
+    };
+    let mut death_hits = death_hits.by_ref().peekable();
     for entry in list.entries() {
+        if entry.class() == ClassId::CORE_COLLAPSE {
+            if let Some((_, hit)) = death_hits.next_if(|&(index, _)| index == entry.index()) {
+                out.extend(hit);
+            }
+            continue;
+        }
         let possible = FeatureLevelList::class_layers(galaxy, entry.class());
         if !possible.iter().any(|layer| layers.contains(layer)) {
             continue;
         }
-        let kicked = entry.class() == ClassId::CORE_COLLAPSE;
-        let reach = if kicked { dead } else { LightYears::ZERO };
-        let at = drifted_from(entry.position(), velocity, sphere.time(), elapsed);
-        let away = LightYears::from(sphere.centre().distance_to(&at));
-        if away.value() > (sphere.radius() + reach).value() {
-            continue;
-        }
-        if kicked {
-            let Some(death) = list.recent_entry(galaxy, entry.index()) else {
-                continue;
-            };
-            let record = death.member().record();
-            debug_assert!(
-                *record.epoch_position() == death.motion().position_at(UniverseTime::EPOCH),
-                "{:?}: a listed core collapse's member is on its broken line",
-                record.id()
-            );
-            if layers.contains(record.layer()) {
-                let position = death.motion().position_at(sphere.time());
-                out.extend(hit_there(record, position, sphere));
-            }
+        let at = drifted_from(entry.position(), velocity, t, elapsed);
+        if LightYears::from(sphere.centre().distance_to(&at)).value() > sphere.radius().value() {
             continue;
         }
         let Some(member) = list.member(galaxy, entry.index()) else {
