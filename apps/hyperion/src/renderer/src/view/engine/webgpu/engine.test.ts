@@ -5,6 +5,7 @@ import {
   FakeCommandBuffer,
   type FakeDevice,
   FakeGpu,
+  FakeShaderModule,
   FakeTextureView,
   INTEL_UHD_620_INFO,
 } from "../../../test/fakeGpu";
@@ -435,6 +436,38 @@ describe("the engine's pass times", () => {
       times.mock.calls,
     ]).toEqual([[], [], []]);
     expect(engine.passTimesFrame).toBe(3);
+  });
+});
+
+describe("the engine's log lines of a failure (R14's Mac measurements)", () => {
+  it("name a compile check's DOMException by its name and message", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(FakeShaderModule.prototype, "getCompilationInfo").mockRejectedValue(
+      new DOMException("the device was lost", "OperationError"),
+    );
+    const { engine } = await engineOn();
+    engine.createMaterial(SYNC_TILED);
+    await vi.waitFor(() => {
+      expect(console.error).toHaveBeenCalledExactlyOnceWith(
+        `the compile check of material ${SYNC_TILED.name} failed: OperationError: the device was lost`,
+      );
+    });
+  });
+
+  it("name a pipeline's DOMException by its name and message", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const material = await engine.createMaterialAsync(SYNC_TILED, []);
+    gpu.createRenderPipelineAsync = () =>
+      Promise.reject(new DOMException("the layout does not match", "OperationError"));
+    drawEach(outTarget(engine), mesh, [material], engine.createTexture(sampled("tiles", 1)));
+    await vi.waitFor(() => {
+      expect(console.error).toHaveBeenCalledExactlyOnceWith(
+        `the pipeline of material ${SYNC_TILED.name} could not be made: OperationError: the layout does not match`,
+      );
+    });
   });
 });
 

@@ -18,6 +18,7 @@
  */
 
 import { BUFFER_USAGE, MAP_MODE } from "../gpuFlags";
+import { errorParts, errorText } from "./errorText";
 import type { BufferSpec } from "../memory";
 import type { GpuTimer } from "../status";
 import type { BufferHandle, PassTimes } from "../types";
@@ -314,29 +315,4 @@ export class PassTimer {
     this.#pending.push(pass);
     return pass;
   }
-}
-
-/**
- * An error's name and message, or `null` for a value with neither: an `Error`'s, or those of an
- * object that carries both, as a `DOMException` does whether or not its engine makes it an `Error`.
- */
-function errorParts(error: unknown): { readonly name: string; readonly message: string } | null {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message };
-  }
-  if (typeof error !== "object" || error === null) {
-    return null;
-  }
-  const name: unknown = Reflect.get(error, "name");
-  const message: unknown = Reflect.get(error, "message");
-  return typeof name === "string" && typeof message === "string" ? { name, message } : null;
-}
-
-/**
- * An error as one line, its name and message: the error itself, logged, reaches the main process's
- * log as `[object DOMException]`.
- */
-function errorText(error: unknown): string {
-  const parts = errorParts(error);
-  return parts === null ? String(error) : `${parts.name}: ${parts.message}`;
 }

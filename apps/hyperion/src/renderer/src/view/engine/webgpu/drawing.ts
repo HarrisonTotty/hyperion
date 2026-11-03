@@ -39,6 +39,7 @@ import {
   resourceLayoutEntries,
   SHADER_STAGE,
 } from "./materials";
+import { errorText } from "./errorText";
 import type { MeshRecord } from "./meshes";
 import { viewDimensionBinds, viewDimensionOf } from "./resources";
 import type { TextureBindingSpec } from "../types";
@@ -212,7 +213,7 @@ function pipelineFor(
     })
     .catch((error: unknown) => {
       pipelines.set(key, "failed");
-      console.error(`the pipeline of ${owner} could not be made:`, error);
+      console.error(`the pipeline of ${owner} could not be made: ${errorText(error)}`);
     });
   return undefined;
 }

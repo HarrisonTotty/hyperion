@@ -31,6 +31,21 @@ describe("the device-loss watch", () => {
     });
   });
 
+  it("names a failure of the watch itself by its name and message (R14's Mac measurements)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const lost = Promise.reject(new DOMException("the device is gone", "OperationError"));
+    watchDeviceLoss(
+      { lost },
+      () => false,
+      () => undefined,
+    );
+    await vi.waitFor(() => {
+      expect(console.error).toHaveBeenCalledExactlyOnceWith(
+        "watching the device for loss failed: OperationError: the device is gone",
+      );
+    });
+  });
+
   it("does not report the loss that follows the engine's own disposal", async () => {
     const gpu = await device();
     const report = vi.fn<(fault: GraphicsFault) => void>();

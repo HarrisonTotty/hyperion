@@ -2350,8 +2350,13 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     drops its resolve's times and warns once, by the error's name and message (`failedReads`).
   - `--hyperion-gpu-timing` on `just views-check --terrain` gives each phase's `gpuPasses` (results
     schema 4): every pass label's p50, p95, max and mean, and its share of the frame's GPU time,
-    with a "GPU time by pass" table in the summary; a run without it reads `null`. On the Mac the
-    switch lifts no quantization (timer `quantized`).
+    with a "GPU time by pass" table in the summary; a run without it reads `null`.
+  - (lean, 2026-11-03) `--hyperion-gpu-timing` lifts Dawn's quantization in every mode that draws
+    with WebGPU (`graphicsSwitches`: `vulkan`, `default`, `software`; not `safe`), the Mac's Metal
+    included, so a Mac run's timer reads `full`. A spike or views check off Linux gets it too.
+  - The engine's log lines name a failure as `<name>: <message>` through `webgpu/errorText.ts`
+    (`errorText`, `errorParts`): the pass timer, the device-loss watch, the compile check and the
+    pipeline.
   - A terrain run writes its finished phases as each ends, as `<name>-partial.json` and `.md`
     (schema `hyperion.views-check.terrain-phases` 1, unjudged). A full spike run writes its finished
     segments' results 2 s after each segment ends (`<name>-partial`, `run.trace` missing, the frame

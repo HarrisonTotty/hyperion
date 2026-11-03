@@ -79,6 +79,7 @@ import {
   type MaterialRecord,
   type PostProcessRecord,
 } from "./drawing";
+import { errorText } from "./errorText";
 import { KernelCache } from "./kernelCache";
 import { resolveKernelResources } from "./kernelResources";
 import {
@@ -1024,7 +1025,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   /** A compile check that could not run (a lost device, say): logged unless the engine is gone. */
   #reportCompileCheckFailure(owner: string, error: unknown): void {
     if (!this.#disposed) {
-      console.error(`the compile check of ${owner} failed:`, error);
+      console.error(`the compile check of ${owner} failed: ${errorText(error)}`);
     }
   }
 
