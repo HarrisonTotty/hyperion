@@ -53,7 +53,7 @@ import { TERRAIN_CLUSTERS_PER_PAGE, TERRAIN_PAGE_CLUSTERS } from "../clusters/te
 import {
   EDGE_BANDS,
   edgeBandIndex,
-  edgeBandOfHalf,
+  edgeBandMOfHalf,
   INSTANCE_FINEST,
   NO_STRIDE_BAND,
   type StrideScale,
@@ -1879,7 +1879,7 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
         perErrorM: f32Of(words[per * n + 13] ?? 0),
       },
       edges: Array.from({ length: EDGE_BANDS }, (_half, h) =>
-        edgeBandOfHalf(
+        edgeBandMOfHalf(
           ((words[per * n + INSTANCE_EDGE_BANDS_WORD + (h >> 1)] ?? 0) >>> (16 * (h & 1))) & 0xffff,
         ),
       ),
@@ -1924,9 +1924,10 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const levels = levelsOf(made);
     const byLevel = new Map<number, number>();
-    const records = stridesOf(made).filter(({ strideScale }) => strideScale.perErrorM > 0);
-    const unlike = records.filter(({ strideScale }, n) => {
-      const level = levels[n] ?? -1;
+    const records = stridesOf(made)
+      .map(({ strideScale }, n) => ({ strideScale, level: levels[n] ?? -1 }))
+      .filter(({ strideScale }) => strideScale.perErrorM > 0);
+    const unlike = records.filter(({ strideScale, level }) => {
       const held = byLevel.get(level) ?? strideScale.statedM;
       byLevel.set(level, held);
       return (
@@ -1936,37 +1937,49 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     expect([records.length > 0, unlike]).toEqual([true, []]);
   });
 
-  it("holds each bake's blocks' errors in its slot record, and gives its edges their blocks' needs or larger, none at level 2 where a finer patch touches", async () => {
+  it("holds each bake's blocks' e₂, e₄ and e₈ in its slot record", async () => {
     const made = await measuredPass();
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
-    // The last slot record written: its first two blocks' e₂, e₄ and e₈ from byte 112.
+    // The last slot record written: its first two blocks' errors from byte 112.
     const slot = Uint32Array.from(wordsIn(made.engine, "terrain slot records")).buffer;
-    const half = new Float16Array(slot, 112, 6);
+    expect([...new Float16Array(slot, 112, 6)]).toEqual([
+      ...Float16Array.of(0.01, 0.02, 0.04, 0.01, 0.02, 0.04),
+    ]);
+  });
+
+  it("gives each measured patch's edges their blocks' needs or larger", async () => {
+    const made = await measuredPass();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const records = stridesOf(made).filter(({ strideScale }) => strideScale.perErrorM > 0);
-    // An edge a finer patch touches, held at k = 0 at level 2 along its length, beside it at
-    // some of its blocks, the others beside no drawn patch.
-    const finerTouched = records.flatMap(({ edges, quadrant }) =>
-      [0, 1, 2, 3]
-        .filter((e) => ((quadrant >>> (2 + e)) & 1) === 1)
-        .map((e) =>
-          Array.from({ length: 8 }, (_, t) => edges[edgeBandIndex(e, t, 2)]).some(
-            (band) => band === NO_STRIDE_BAND,
-          ),
-        ),
-    );
     const below = records.flatMap(({ strideScale, edges }) =>
       edges.filter((band, h) => {
         const need = strideNeedM(strideScale, [0.01, 0.02, 0.04][h % 3] ?? 0);
         return band !== NO_STRIDE_BAND && band < need;
       }),
     );
-    expect([
-      [...half],
-      records.length > 0,
-      finerTouched.length > 0 && finerTouched.every(Boolean),
-      records.some(({ edges }) => edges.some((band) => band > 0)),
-      below,
-    ]).toEqual([[...Float16Array.of(0.01, 0.02, 0.04, 0.01, 0.02, 0.04)], true, true, true, []]);
+    expect([records.some(({ edges }) => edges.some((band) => band > 0)), below]).toEqual([
+      true,
+      [],
+    ]);
+  });
+
+  it("gives an edge a finer patch touches none at level 2 where the finer patch is beside it", async () => {
+    const made = await measuredPass();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    // An edge a finer patch touches is held at k = 0 at level 2 along its length, the finer patch
+    // beside some of its blocks, the others beside no drawn patch.
+    const finerTouched = stridesOf(made)
+      .filter(({ strideScale }) => strideScale.perErrorM > 0)
+      .flatMap(({ edges, quadrant }) =>
+        [0, 1, 2, 3]
+          .filter((e) => ((quadrant >>> (2 + e)) & 1) === 1)
+          .map((e) =>
+            Array.from({ length: 8 }, (_, t) => edges[edgeBandIndex(e, t, 2)]).some(
+              (band) => band === NO_STRIDE_BAND,
+            ),
+          ),
+      );
+    expect([finerTouched.length > 0, finerTouched.every(Boolean)]).toEqual([true, true]);
   });
 
   it("culls the lit pass up to stride 8 and draws every stride's buckets", async () => {

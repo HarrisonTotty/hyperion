@@ -73,20 +73,22 @@ const B: StrideErrorsM = [15, 18, 50];
 const C: StrideErrorsM = [12, 30, 60];
 
 describe("the edges' shared stride bands (plan R14, R14.T3.c's shared bands)", () => {
-  it("shares a same-level edge's block by block as the larger of both blocks' needs, and keeps a patch's own where none is beside", () => {
-    const left = { face: 0, level: 6, i: 10, j: 20 } as const;
-    const right = { face: 0, level: 6, i: 11, j: 20 } as const;
-    // The right patch's block on its x = 0 at y ÷ 8 = 3 its own.
-    const edges = edgesOf([
-      measured(left, errorsOf(A)),
-      measured(right, errorsOf(B, [[24, [30, 5, 60]]])),
+  /** Two level-6 patches side by side, the right's block on its x = 0 at y ÷ 8 = 3 its own. */
+  function sideBySide(): StrideEdges {
+    return edgesOf([
+      measured({ face: 0, level: 6, i: 10, j: 20 }, errorsOf(A)),
+      measured({ face: 0, level: 6, i: 11, j: 20 }, errorsOf(B, [[24, [30, 5, 60]]])),
     ]);
+  }
+
+  it("shares a same-level edge block by block as the larger of both blocks' needs", () => {
+    const edges = sideBySide();
     const shared = Array.from({ length: 8 }, (_, t) => (t === 3 ? [30, 20, 60] : [15, 20, 50]));
-    expect([edgeOf(edges, 0, 1), edgeOf(edges, 1, 0), bandsAt(edges, 0, 0, 5)]).toEqual([
-      shared,
-      shared,
-      [...A],
-    ]);
+    expect([edgeOf(edges, 0, 1), edgeOf(edges, 1, 0)]).toEqual([shared, shared]);
+  });
+
+  it("keeps a patch's own needs on an edge with no drawn patch beside it", () => {
+    expect(bandsAt(sideBySide(), 0, 0, 5)).toEqual([...A]);
   });
 
   it("shares a same-level edge beside a patch that is not measured as the larger of its own need and its level's largest error's, the other's none", () => {
@@ -147,28 +149,30 @@ describe("the edges' shared stride bands (plan R14, R14.T3.c's shared bands)", (
     ]);
   });
 
-  it("shares a finer patch's levels 1 and 2 beside a coarser one that is not measured, a sub-patch among them, with its level's largest errors at those levels", () => {
-    const largest = LEVEL_7_LARGEST;
-    const beside = edgesOf(
+  it("shares a finer patch's levels 1 and 2 beside a coarser one that is not measured with its level's largest errors there, the coarser one's none", () => {
+    const edges = edgesOf(
       [
         unmeasured({ face: 0, level: 6, i: 10, j: 20 }),
         measured({ face: 0, level: 7, i: 22, j: 40 }, errorsOf(A)),
       ],
-      largest,
+      LEVEL_7_LARGEST,
     );
+    expect([bandsAt(edges, 1, 0, 3), bandsAt(edges, 0, 1, 1)]).toEqual([
+      [10, 41, 51],
+      [NONE, NONE, NONE],
+    ]);
+  });
+
+  it("shares a patch's levels 1 and 2 beside a sub-patch of its key's level, drawn a level coarser, with its level's largest errors there", () => {
     // A level-7 area drawn by its level-6 ancestor's slot beside a level-7 patch.
-    const sub = edgesOf(
+    const edges = edgesOf(
       [
         unmeasured({ face: 0, level: 7, i: 20, j: 40 }, 6),
         measured({ face: 0, level: 7, i: 21, j: 40 }, errorsOf(A)),
       ],
-      largest,
+      LEVEL_7_LARGEST,
     );
-    expect([bandsAt(beside, 1, 0, 3), bandsAt(beside, 0, 1, 1), bandsAt(sub, 1, 0, 6)]).toEqual([
-      [10, 41, 51],
-      [NONE, NONE, NONE],
-      [10, 41, 51],
-    ]);
+    expect(bandsAt(edges, 1, 0, 6)).toEqual([10, 41, 51]);
   });
 
   it("shares a patch's edge beside a sub-patch keyed finer than it, drawn at its level, as the larger of its own need and its level's largest error's", () => {

@@ -387,9 +387,13 @@ export function patchTerms(
 }
 
 /**
- * Writes `terms` and the skirt depth into slot record `slot` of `out`, narrowing each value once.
+ * Writes `terms`, the skirt depth and the blocks' measured errors into slot record `slot` of `out`,
+ * narrowing each value once.
  *
  * @param out - The slot records, {@link SLOT_RECORD_BYTES} each; at least `slot + 1` of them.
+ * @param clusterErrors - The bake's clusters' errors, m (`BakedPatch.clusterErrors`, four a
+ * cluster, e₁ first), of which each block's e₂, e₄ and e₈ are written as half floats (plan R14,
+ * R14.T3.c); `null`, or a NaN, writes a block unmeasured (+∞).
  * @throws RangeError if `slot` lies outside `out`.
  */
 export function writeSlotRecord(
@@ -511,9 +515,9 @@ export class InstanceRecords {
    * @param cornerFades - Its corners' fades, a byte each in `cornerNeighbours`' order, 0 for none.
    * @param fades - Its own fade and its rebake's ({@link fadeWord}), 0 for none.
    * @param strideScale - Its stride scale at its view's τ′ (plan R14, R14.T3.c), none by default.
-   * @param edgeBandsM - Its edges' shared stride bands, metres (`strideEdges.ts`), none by default.
    * @param finest - Whether every camera pass draws it at stride 1 (`clusters/strides.ts`'
    * `INSTANCE_FINEST`).
+   * @param edgeBandsM - Its edges' shared stride bands, metres (`strideEdges.ts`), none by default.
    * @throws RangeError past {@link capacity}, or for a slot, parent slot, quadrant, holds,
    * sub-patch word or fades word that is not a whole number in its range.
    */

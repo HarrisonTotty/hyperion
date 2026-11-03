@@ -88,7 +88,6 @@ function cascade(extra: Partial<CascadeCullPass> = {}): CascadeCullPass {
   };
 }
 
-/** A block record at `centreM` of radius `radiusM`. */
 /** The bits of a measured record's half-float errors e₁, e₂, e₄ and e₈, m. */
 function errorBits(
   errorsM: readonly [number, number, number, number],
@@ -98,6 +97,7 @@ function errorBits(
   return [bits[0] ?? 0, bits[1] ?? 0, bits[2] ?? 0, bits[3] ?? 0];
 }
 
+/** A block record at `centreM` of radius `radiusM`. */
 function record(
   centreM: Vec3,
   radiusM: number,

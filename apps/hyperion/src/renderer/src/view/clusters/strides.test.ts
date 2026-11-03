@@ -14,7 +14,7 @@ import {
   EDGE_BANDS,
   edgeBandHalf,
   edgeBandIndex,
-  edgeBandOfHalf,
+  edgeBandMOfHalf,
   heldEdgeBandsM,
   INSTANCE_FINEST,
   largestStrideErrorsM,
@@ -451,57 +451,75 @@ describe("the cull's camera strides", () => {
     ]);
   });
 
-  it("gives a cluster the largest need of it, its neighbours and its edges, none where one is, a vertex inside it that band of its parts not none, and one on its side the smaller of its two blocks'", () => {
-    // Needs 10 + 2e: block 0's 12, 14, 16, block 1's 20, 12 and none, block 8's 10, 30, 12; the
-    // other blocks unmeasured. Edge x = 0's first block 11, 50, 13; edge y = 0's 15, 13, 40.
-    const scale: StrideScale = { statedM: 10, perErrorM: 2 };
-    const errors = new Float16Array(4 * 64).fill(Number.POSITIVE_INFINITY);
-    errors.set([0, 1, 2, 3], 0);
-    errors.set([0, 5, 1, Number.NaN], 4);
-    errors.set([0, 0, 10, 1], 32);
-    const edges = new Float64Array(EDGE_BANDS).fill(NO_STRIDE_BAND);
-    edges.set([11, 50, 13], edgeBandIndex(0, 0, 0));
-    edges.set([15, 13, 40], edgeBandIndex(2, 0, 0));
+  /**
+   * A patch's blocks for the band rules: needs 10 + 2e, block 0's 12, 14, 16, block 1's 20, 12 and
+   * none, block 8's 10, 30, 12, the other blocks unmeasured; edge x = 0's first block 11, 50, 13 and
+   * edge y = 0's 15, 13, 40, the other edges none.
+   */
+  const SCALE: StrideScale = { statedM: 10, perErrorM: 2 };
+  const ERRORS = new Float16Array(4 * 64).fill(Number.POSITIVE_INFINITY);
+  ERRORS.set([0, 1, 2, 3], 0);
+  ERRORS.set([0, 5, 1, Number.NaN], 4);
+  ERRORS.set([0, 0, 10, 1], 32);
+  const EDGES = new Float64Array(EDGE_BANDS).fill(NO_STRIDE_BAND);
+  EDGES.set([11, 50, 13], edgeBandIndex(0, 0, 0));
+  EDGES.set([15, 13, 40], edgeBandIndex(2, 0, 0));
+  const NONE3 = [NO_STRIDE_BAND, NO_STRIDE_BAND, NO_STRIDE_BAND];
+
+  it("gives a block the largest need of it, its side neighbours and its edges, none where one is", () => {
     expect([
-      clusterStrideBandsM(scale, errors, edges, 0),
-      clusterStrideBandsM(scale, errors, edges, 64),
-      clusterStrideBandsM(scale, errors, edges, 64 + 8 * 3 + 7),
-      clusterStrideBandsM(scale, errors, edges, 96),
-      clusterStrideBandsM(NO_STRIDE_SCALE, errors, edges, 0),
-    ]).toEqual([
-      [20, 50, NO_STRIDE_BAND],
-      [15, 13, 40],
-      [11, 50, 13],
-      [NO_STRIDE_BAND, NO_STRIDE_BAND, NO_STRIDE_BAND],
-      [NO_STRIDE_BAND, NO_STRIDE_BAND, NO_STRIDE_BAND],
-    ]);
-    // Block 1's band at stride 2 is none (blocks 2 and 9 unmeasured), its vertices' its own and block
-    // 0's 20; block 8's at stride 4 its own 30 for its vertices, block 0's 50; block 2 is none.
+      clusterStrideBandsM(SCALE, ERRORS, EDGES, 0),
+      clusterStrideBandsM(NO_STRIDE_SCALE, ERRORS, EDGES, 0),
+    ]).toEqual([[20, 50, NO_STRIDE_BAND], NONE3]);
+  });
+
+  it("gives a strip its edge's bands along its block, and a fin or head run none", () => {
     expect([
-      vertexStrideBandM(scale, errors, edges, 3, 5, 0),
-      vertexStrideBandM(scale, errors, edges, 8, 3, 0),
-      vertexStrideBandM(scale, errors, edges, 2, 8, 1),
-      vertexStrideBandM(scale, errors, edges, 0, 3, 0),
-      vertexStrideBandM(scale, errors, edges, 3, 0, 2),
-      vertexStrideBandM(scale, errors, edges, 64, 3, 0),
-      vertexStrideBandM(scale, errors, edges, 9, 3, 0),
-      vertexStrideBandM(scale, errors, edges, 17, 3, 0),
-    ]).toEqual([20, 20, 30, 11, 40, NO_STRIDE_BAND, 20, NO_STRIDE_BAND]);
+      clusterStrideBandsM(SCALE, ERRORS, EDGES, 64),
+      clusterStrideBandsM(SCALE, ERRORS, EDGES, 64 + 8 * 3 + 7),
+      clusterStrideBandsM(SCALE, ERRORS, EDGES, 96),
+    ]).toEqual([[15, 13, 40], [11, 50, 13], NONE3]);
+  });
+
+  it("gives a vertex inside a block its block's band of its parts not none, none where its own need is", () => {
+    // Block 1's band at stride 2 is none (blocks 2 and 9 unmeasured), its vertices' 20; block 2 is
+    // unmeasured.
+    expect([
+      vertexStrideBandM(SCALE, ERRORS, EDGES, 3, 5, 0),
+      vertexStrideBandM(SCALE, ERRORS, EDGES, 9, 3, 0),
+      vertexStrideBandM(SCALE, ERRORS, EDGES, 17, 3, 0),
+    ]).toEqual([20, 20, NO_STRIDE_BAND]);
+  });
+
+  it("gives a vertex on a block's side the smaller of its two blocks' bands", () => {
+    // Block 8's band at stride 4 for its vertices is its own 30, block 0's 50.
+    expect([
+      vertexStrideBandM(SCALE, ERRORS, EDGES, 8, 3, 0),
+      vertexStrideBandM(SCALE, ERRORS, EDGES, 2, 8, 1),
+    ]).toEqual([20, 30]);
+  });
+
+  it("gives a vertex on a patch's edge that edge's shared band there", () => {
+    expect([
+      vertexStrideBandM(SCALE, ERRORS, EDGES, 0, 3, 0),
+      vertexStrideBandM(SCALE, ERRORS, EDGES, 3, 0, 2),
+      vertexStrideBandM(SCALE, ERRORS, EDGES, 64, 3, 0),
+    ]).toEqual([11, 40, NO_STRIDE_BAND]);
   });
 
   it("holds an edge's band in a half float of kilometres rounded up, none and +∞ as they are", () => {
     const random = seededRandom(0xed6e);
     for (let n = 0; n < 2_000; n += 1) {
       const bandM = 10 ** (1 + 5 * random());
-      const held = edgeBandOfHalf(edgeBandHalf(bandM));
+      const held = edgeBandMOfHalf(edgeBandHalf(bandM));
       expect(held).toBeGreaterThanOrEqual(bandM);
       expect(held).toBeLessThan(bandM * (1 + 2 ** -9));
     }
     expect([
-      edgeBandOfHalf(edgeBandHalf(NO_STRIDE_BAND)),
-      edgeBandOfHalf(edgeBandHalf(0)),
-      edgeBandOfHalf(edgeBandHalf(Number.POSITIVE_INFINITY)),
-      edgeBandOfHalf(edgeBandHalf(1e12)),
+      edgeBandMOfHalf(edgeBandHalf(NO_STRIDE_BAND)),
+      edgeBandMOfHalf(edgeBandHalf(0)),
+      edgeBandMOfHalf(edgeBandHalf(Number.POSITIVE_INFINITY)),
+      edgeBandMOfHalf(edgeBandHalf(1e12)),
     ]).toEqual([NO_STRIDE_BAND, NO_STRIDE_BAND, Infinity, Infinity]);
   });
 

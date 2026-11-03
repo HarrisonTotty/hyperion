@@ -23,20 +23,23 @@
  *   block's of its parts that are not none, and on a block's side the smaller of its two blocks'
  *   ({@link vertexStrideBandM}): at most the band of each block that drops it, so that each draws it
  *   wholly moved, and at least the need of each block holding it. So every vertex two clusters draw
- *   is placed alike by both, whichever patch each is of.
+ *   is placed alike by both, whichever patch each is of. A vertex on a block's side or a patch's
+ *   edge may still move before the block of the larger band drops it, so a block's mesh can mix
+ *   two strides there: the drawn error within τ′ is what `strides.wasm.test.ts` finds, not a bound
+ *   of the rule.
  * - **Why a block's band inside it** (as built, 2026-11-03; the ruling gave each vertex the largest
  *   need of the blocks holding it): e_s bounds a block's stride-s mesh with one k across it (Design
  *   note 3). A vertex the block keeps but that moves at its own block's need, while a neighbour's
  *   larger need holds the block at the finer stride, leaves a mesh that is neither stride's: on the
  *   Moon-like world's bakes the drawn-error test (`strides.wasm.test.ts`) drew 1.08 τ′ at a block
- *   held at stride 4 whose level-2 vertices had moved to stride 8's chords (e₄ 15.1 m, e₈ 23.0 m,
- *   26.1 m drawn). At its block's band a vertex moves only as its block is about to drop it, as
+ *   held at stride 4 whose level-2 vertices had moved to stride 8's chords. At its block's band a
+ *   vertex moves only as its block is about to drop it, as
  *   under the view's ladder, at no cost to the cull's strides. A block's side still moves at the
  *   smaller band of its two blocks, and a patch's edge at the larger need of its blocks. An edge's
  *   none (beside a finer patch at level 2, or two levels apart) holds its block at a finer stride
- *   but not the vertices inside it: held, they would all move at once as the finer patch left
- *   (4.1 px on the seamless probe's low setting), so there they move at their block's other parts'
- *   band and the block's mesh mixes its strides, as under the ruling.
+ *   but not the vertices inside it: held, they would all move at once as the finer patch left, so
+ *   there they move at their block's other parts' band and the block's mesh mixes its strides, as
+ *   under the ruling.
  * - **The records.** The blocks' errors reach the vertex stage in their slot's record and the
  *   edges' bands in the instance's, as half floats of kilometres rounded up
  *   ({@link edgeBandHalf}).
@@ -68,12 +71,10 @@ import { selectionErrorM } from "../terrain/select";
 
 /**
  * β, a stride's band's width over its start: a vertex dropped at stride 2s morphs over the
- * distances U to (1 + β) U, and the cull takes 2s at (1 + β) U (a hand value, lean, 2026-11-03).
- * Well under selection's margin m (`SELECTION_MARGIN`, 0.1): a patch is drawn from at least
- * (1 + m) times the distance at which its level's stated error meets τ′, so its nearest clusters
- * still stride where its e_s is small beside that error; at β = m the seamless probe drew 0.69 of
- * its lit triangles against 0.18 with no band, while a stride's change moved a vertex 0.001 px at
- * most.
+ * distances U to (1 + β) U, and the cull takes 2s at (1 + β) U (a hand value, lean, 2026-11-03, to
+ * be ruled on). Well under selection's margin m (`SELECTION_MARGIN`, 0.1), but under the shared
+ * bands it sets most of the lit triangles drawn past the bands' own share on the seamless probe,
+ * where many blocks stand within β of a band (the lane's outbox has the figures).
  */
 export const STRIDE_BAND_FRACTION = 0.02;
 
@@ -225,11 +226,12 @@ export function edgeBandHalf(bandM: number): number {
 }
 
 /**
- * The band, m, of an edge's half float ({@link edgeBandHalf}), in `f32` as the kernel and the vertex
- * stage read it (`unpack2x16float` × 1000), {@link NO_STRIDE_BAND} for a negative one.
+ * The band, m, of an edge's half float of kilometres, `halfKmBits` its bits ({@link edgeBandHalf}),
+ * in `f32` as the kernel and the vertex stage read it (`unpack2x16float` × 1000),
+ * {@link NO_STRIDE_BAND} for a negative one.
  */
-export function edgeBandOfHalf(half: number): number {
-  HALF_BITS[0] = half;
+export function edgeBandMOfHalf(halfKmBits: number): number {
+  HALF_BITS[0] = halfKmBits;
   const km = HALF[0] ?? -1;
   return km > 0 ? Math.fround(Math.fround(km) * 1000) : NO_STRIDE_BAND;
 }
@@ -237,7 +239,7 @@ export function edgeBandOfHalf(half: number): number {
 /** `bandsM` as the instance record holds them and the shaders read them back, m. */
 export function heldEdgeBandsM(bandsM: StrideEdgeBandsM): Float64Array {
   return Float64Array.from({ length: EDGE_BANDS }, (_, n) =>
-    edgeBandOfHalf(edgeBandHalf(bandsM[n] ?? NO_STRIDE_BAND)),
+    edgeBandMOfHalf(edgeBandHalf(bandsM[n] ?? NO_STRIDE_BAND)),
   );
 }
 

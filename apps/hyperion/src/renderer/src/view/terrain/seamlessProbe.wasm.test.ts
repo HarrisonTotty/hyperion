@@ -33,7 +33,7 @@ import { TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
 import {
   clusterStrideBandsM,
   EDGE_BANDS,
-  edgeBandOfHalf,
+  edgeBandMOfHalf,
   largestStrideErrorsM,
   NO_STRIDE_BAND,
   STRIDE_BAND_FRACTION,
@@ -571,7 +571,7 @@ interface DrawnInstance {
 /** The edges' shared bands of the instance record at word `base` of `u`, m (words 20 to 67). */
 function edgeBandsAt(u: Uint32Array, base: number): Float64Array {
   return Float64Array.from({ length: EDGE_BANDS }, (_, h) =>
-    edgeBandOfHalf(
+    edgeBandMOfHalf(
       ((u[base + INSTANCE_EDGE_BANDS_WORD + (h >> 1)] ?? 0) >>> (16 * (h & 1))) & 0xffff,
     ),
   );

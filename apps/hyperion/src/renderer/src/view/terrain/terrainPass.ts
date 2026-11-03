@@ -4375,13 +4375,13 @@ export class TerrainPass {
     const fades = this.#fadesAt(device, input.nowMs);
     // The edge patches join the interior patches' records only where every pass draws them there.
     const fins = lit && split && this.#finsDrawn(device, state, forms);
-    // The camera's strides (plan R14, R14.T3.c): each level's bands from the view's ladder.
+    // The camera's strides (plan R14, R14.T3.c): each patch's scale and its edges' shared bands.
     const strides = this.#stridesOn() && this.#litClustersReady(device, state, forms);
     // The class sets a lit pass's patches take (lane fix-coast-class-map), none on another shading.
     const classSets = lit ? input.classSets : undefined;
     const patchM = finestPatchSizeM(this.#planet);
     if (strides && drawSet !== undefined) {
-      this.#strideBandsOf(device, state, input, drawSet, mask);
+      this.#sharedStridesOf(device, state, input, drawSet, mask);
     }
     // A late pass is the frame's own: its early pass sets it (plan R14, R14.T3.d).
     state.late = null;
@@ -5517,7 +5517,7 @@ export class TerrainPass {
    * patch that is not measured the larger of its own need and its level's largest error's
    * (`StrideEdges`).
    */
-  #strideBandsOf(
+  #sharedStridesOf(
     device: Device,
     state: ViewState,
     input: TerrainViewFrameInput,

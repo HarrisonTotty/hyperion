@@ -8,7 +8,7 @@
  * @remarks
  * Each patch looks up the drawn patch across each of its edges, of its level or a coarser one, as
  * `CoarseFineHolds` does, across a cube face's edge too, and finds the neighbour's block at each of
- * its own by the place of the block's stretch's middle in the neighbour's grid (`coarsePlaceOf`):
+ * its own by the place of the block's stretch's middle in the neighbour's grid (`coarsePlaceInto`):
  * - **Of its level**: at each block along the edge and each stride, the larger of its block's need
  *   and the neighbour's adjacent block's; each side forms the same.
  * - **Coarser by one level**: a fine patch's vertex of morph level j + 1 on the edge is the coarse
@@ -39,7 +39,7 @@ import {
   type StrideScale,
   strideNeedM,
 } from "../clusters/strides";
-import { coarsePlaceOf } from "./coarseFineHolds";
+import { coarsePlaceInto, type PlaceOut } from "./coarseFineHolds";
 import { type CellOut, type Face, MAX_LEVEL, type PatchKey, stepCellInto } from "./patchKey";
 import { PatchKeyTable } from "./patchKeyTable";
 
@@ -118,10 +118,7 @@ function edgeAt(x: number, y: number): readonly [edge: number, t: number] {
   return [y === 0 ? 2 : 3, Math.min(7, Math.floor(x / 8))];
 }
 
-/**
- * The shared bands of a view's drawn patches' edges (see the module's remarks), refilled each
- * frame, with nothing allocated after warm-up but where a patch meets another across a face's edge.
- */
+/** The shared bands of a view's drawn patches' edges (see the module's remarks), refilled each frame. */
 export class StrideEdges {
   /** Each patch's edges' bands, m: {@link EDGE_BANDS} a patch by its index, at `edgeBandIndex`. */
   readonly bandsM: Float64Array;
@@ -129,6 +126,7 @@ export class StrideEdges {
   readonly #drawn = new PatchKeyTable<number>();
   readonly #cell: CellOut = { face: 0, i: 0, j: 0 };
   readonly #beside: ScratchKey = { face: 0, level: 0, i: 0, j: 0 };
+  readonly #place: PlaceOut = { x: 0, y: 0 };
   /**
    * Each coarse block along an edge's shared bands at its levels 0 and 1 where a measured patch one
    * level finer is beside it, two a block by (patch, edge, block), and what is beside it, one a
@@ -272,8 +270,8 @@ export class StrideEdges {
     const subBeside = !own && theirs && patch.key.level > this.#beside.level;
     for (let t = 0; t < 8; t += 1) {
       const [x, y] = stretchMiddle(e, t);
-      const [xo, yo] = coarsePlaceOf(patch.key, x, y, this.#beside);
-      const [eo, to] = edgeAt(xo, yo);
+      coarsePlaceInto(this.#place, patch.key, x, y, this.#beside);
+      const [eo, to] = edgeAt(this.#place.x, this.#place.y);
       if (step === 0) {
         for (let l = 0; l < LEVELS; l += 1) {
           const mine = need(n, edgeBlock(e, t), l);

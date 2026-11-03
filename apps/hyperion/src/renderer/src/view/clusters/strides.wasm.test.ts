@@ -302,7 +302,6 @@ describe("the camera's strides on the surface module's bakes (plan R14, R14.T3.c
           }
         }
       }
-      console.warn(`${world.name} strided ${strided} worst ${worst}`);
       expect(strided).toBeGreaterThan(100);
       expect(worst).toBeLessThanOrEqual(1);
     },
