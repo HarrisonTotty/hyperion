@@ -348,6 +348,8 @@ interface TerrainFrameView {
 interface TerrainFrame {
   /** The script's time the stage last told the fixture, s. */
   readonly scriptS: number | null;
+  /** The sessions made by its time: the ordinal of the session it drew on. */
+  readonly session: number;
   readonly views: Map<string, TerrainFrameView>;
   /** The patches the pass drew, at the primary's scene target's submission, if it had a pass. */
   patches: number | null;
@@ -814,6 +816,12 @@ export class TerrainProbe {
       // first at the first terrain draw: the hand-over the terrain was first drawn in (R10.T14.d).
       let runStartMs: number | null = null;
       let terrainHandoverMs: number | null = null;
+      // A view that drew the terrain on this session before the phase: its gaps count from the
+      // phase's first frame, not from the phase's first terrain draw (the owner's Mac A/B).
+      const firstDraw = draws[0] === undefined ? undefined : this.#frames.get(draws[0]);
+      const continuing =
+        firstDraw !== undefined &&
+        this.#drewTerrainBefore(figures.name, firstDraw.session, start.atMs);
       for (const atMs of draws) {
         const frame = this.#frames.get(atMs);
         const seen = frame?.views.get(figures.name);
@@ -839,7 +847,7 @@ export class TerrainProbe {
         if (seen.terrain) {
           terrainDraws += 1;
           current = null;
-        } else if (firstTerrainMs !== null && !inQuiet(atMs)) {
+        } else if ((firstTerrainMs !== null || continuing) && !inQuiet(atMs)) {
           terrainGaps += 1;
           const scriptS = frame?.scriptS ?? 0;
           if (current === null) {
@@ -978,6 +986,16 @@ export class TerrainProbe {
     });
   }
 
+  /** Whether `view` drew the terrain on session `session` in a frame before `beforeMs`. */
+  #drewTerrainBefore(view: string, session: number, beforeMs: number): boolean {
+    for (const [atMs, frame] of this.#frames) {
+      if (atMs < beforeMs && frame.session === session && frame.views.get(view)?.terrain === true) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   #frameAt(frameMs: number): TerrainFrame {
     const known = this.#frames.get(frameMs);
     if (known !== undefined) {
@@ -985,6 +1003,7 @@ export class TerrainProbe {
     }
     const frame: TerrainFrame = {
       scriptS: this.#scriptS,
+      session: this.#sessionsMade,
       views: new Map(),
       patches: null,
       triangles: null,

@@ -26,8 +26,9 @@
  *   and every view that handed it over with a drawn patch in its view, a photorealistic one to its
  *   lit pass or a wireframe one to its wireframe pass (plan R10, R10.T11), drew its style's terrain
  *   material within {@link TERRAIN_DELAY_LIMIT_MS}, and in every such draw after (outside the
- *   restore); a view past the survey, which sees no patch, draws the reference surface alone, and
- *   its draws are counted apart.
+ *   restore), from a phase's first frame where it drew it on the session before the phase; a view
+ *   past the survey, which sees no patch, draws the reference surface alone, and its draws are
+ *   counted apart.
  * - **The faults**: exactly one `device-lost` with reason `destroyed` inside the loss phase's
  *   window, then exactly one restore, and no other fault and no exit of the GPU process
  *   ({@link terrainFaultsVerdict}).
@@ -693,7 +694,7 @@ function terrainDrawnFinding(phases: ReadonlyArray<TerrainPhaseFigures>): Terrai
           .map(([from, to]) => `${from.toFixed(1)}–${to.toFixed(1)} s`)
           .join(", ");
         reasons.push(
-          `${phase.name}: ${view.slot} drew ${String(view.terrainGaps)} handed-over frames without the terrain after its first (${spans} of the script)`,
+          `${phase.name}: ${view.slot} drew ${String(view.terrainGaps)} handed-over frames without the terrain once drawn (${spans} of the script)`,
         );
       }
     }

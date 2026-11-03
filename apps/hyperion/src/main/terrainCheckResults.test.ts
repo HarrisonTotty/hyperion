@@ -309,7 +309,7 @@ describe("the terrain run's results", () => {
     [
       "lost it after its first",
       { terrainGaps: 4, terrainGapSpansS: [[120.5, 120.6]] },
-      /4 handed-over frames without the terrain after its first \(120\.5–120\.6 s of the script\)/,
+      /4 handed-over frames without the terrain once drawn \(120\.5–120\.6 s of the script\)/,
     ],
   ] as const)("fail a view that handed over and %s", (_what, change, reason) => {
     const [alone, ...rest] = TERRAIN_RECORD.phases;
