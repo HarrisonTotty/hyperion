@@ -127,8 +127,8 @@ use crate::planetary::moons::eccentricity::{
 #[cfg(test)]
 use crate::planetary::moons::tides::{BalanceEnd, radiating_balance};
 use crate::planetary::moons::tides::{
-    MoonTides, SurfaceHeatRules, TidalBranch, TidalMaterial, TideInputs, TideSweep, mean_density,
-    tidal_forcing, with_radiating_surface,
+    MoonTides, TidalBranch, TidalMaterial, TideInputs, TideSweep, mean_density, tidal_forcing,
+    with_radiating_surface,
 };
 use crate::planetary::moons::{MoonParent, decide, draw_rank, log_uniform, moon_orbit, rayleigh};
 use crate::planetary::placement::spacing::{
@@ -2826,33 +2826,25 @@ impl TideModel {
     /// Its tides, the ocean its branch keeps and its tidal heat at the eccentricity `e`, its
     /// axis and mean motion its orbit's: the branch at the forcing Φ(e), and its heat
     /// [`tidal_heating`] at that branch's loss. At its orbit's own eccentricity, [`own_tides`]'.
-    /// From P14.T55.j's hold its shell's top is the surface that radiates its whole heat flow as
-    /// well as its sunlight ([`with_radiating_surface`]).
+    /// Its shell's top is the surface that radiates its whole heat flow as well as its sunlight
+    /// ([`with_radiating_surface`], P14.T55.j).
     #[must_use]
     fn solve(&self, e: f64) -> (MoonTides, Subsurface, Watts) {
         let (tides, subsurface, _, heat) = self.solve_at_surface(e);
         (tides, subsurface, heat)
     }
 
-    /// [`solve`](Self::solve), with the surface temperature its tides read. Under P14.T55.j's
-    /// balance its solves read each base of its water once ([`TideSweep`]); held, its one solve is
-    /// [`MoonTides::with_ocean`]'s.
+    /// [`solve`](Self::solve), with the surface temperature its tides read. Its solves under
+    /// P14.T55.j's balance read each base of its water once ([`TideSweep`]).
     #[must_use]
     fn solve_at_surface(&self, e: f64) -> (MoonTides, Subsurface, Kelvin, Watts) {
-        match SurfaceHeatRules::in_force() {
-            SurfaceHeatRules::Held => {
-                self.solve_at_surface_by(e, |inputs| MoonTides::with_ocean(inputs, &self.solutes))
-            }
-            SurfaceHeatRules::Radiated => {
-                let mut sweep = self
-                    .ocean_open
-                    .then(|| TideSweep::new(&self.inputs, &self.solutes));
-                self.solve_at_surface_by(e, |inputs| match &mut sweep {
-                    Some(sweep) => sweep.with_ocean(inputs),
-                    None => MoonTides::with_ocean(inputs, &self.solutes),
-                })
-            }
-        }
+        let mut sweep = self
+            .ocean_open
+            .then(|| TideSweep::new(&self.inputs, &self.solutes));
+        self.solve_at_surface_by(e, |inputs| match &mut sweep {
+            Some(sweep) => sweep.with_ocean(inputs),
+            None => MoonTides::with_ocean(inputs, &self.solutes),
+        })
     }
 
     /// [`solve_at_surface`](Self::solve_at_surface) at the eccentricity `e`, its ocean branch's
@@ -5412,35 +5404,30 @@ mod tests {
     /// P14.T55.j's). A core's heat does not fall as its shell thins, so a small moon held at
     /// e ≈ 0.03 close to its planet runs to some 10² W m⁻² (recorded for P14.T55.j with plan 14's
     /// record of P14.T56.e). Every tide stays finite and positive, and some moons take the ocean
-    /// branch. The surface heat is held (P14.T55.j): at a held e it moves the hottest ocean moons'
-    /// shells, and the census measures the core alone.
+    /// branch, their surfaces radiating their heat (P14.T55.j).
     #[test]
     fn under_every_27_hold_the_generated_moons_a_porous_core_moves_are_recorded() {
-        use crate::planetary::moons::tides::{SurfaceHeatRules, TidalBranch, with_surface_heat};
+        use crate::planetary::moons::tides::TidalBranch;
         use crate::planetary::testing::with_every_27_hold;
         const MOONS: usize = 5_000;
-        // The surface heat (P14.T55.j) held, so that the census measures the core alone: with it,
-        // a held e's ocean heat can warm a surface past its shell's edge (2 moons here).
         let porous = with_every_27_hold(|| {
-            with_surface_heat(SurfaceHeatRules::Held, || {
-                let mut moons = Vec::with_capacity(MOONS);
-                'giants: for i in 0..1_000 {
-                    for giant in &table_giants() {
-                        let slot = giant.0.id().body_index().to_be_bytes()[0];
-                        let p = renamed(&giant.0, i, slot);
-                        for moon in regular_moons(Seed::new(12), &p).moons() {
-                            let rank = spread_rank(u32::try_from(moons.len()).unwrap());
-                            let own = regular_derived(moon, &p, giant, rank, SOLAR_AGE);
-                            let e = moon.orbit().eccentricity().value();
-                            moons.push((own.tides(), own.radius().value() / 1e3, e));
-                            if moons.len() >= MOONS {
-                                break 'giants;
-                            }
+            let mut moons = Vec::with_capacity(MOONS);
+            'giants: for i in 0..1_000 {
+                for giant in &table_giants() {
+                    let slot = giant.0.id().body_index().to_be_bytes()[0];
+                    let p = renamed(&giant.0, i, slot);
+                    for moon in regular_moons(Seed::new(12), &p).moons() {
+                        let rank = spread_rank(u32::try_from(moons.len()).unwrap());
+                        let own = regular_derived(moon, &p, giant, rank, SOLAR_AGE);
+                        let e = moon.orbit().eccentricity().value();
+                        moons.push((own.tides(), own.radius().value() / 1e3, e));
+                        if moons.len() >= MOONS {
+                            break 'giants;
                         }
                     }
                 }
-                moons
-            })
+            }
+            moons
         });
         assert_eq!(porous.len(), MOONS);
         let index = |branch: TidalBranch| match branch {
@@ -5641,91 +5628,72 @@ mod tests {
         count: usize,
         kept: bool,
     ) -> (Vec<CensusMoon>, Vec<CensusPair>, Vec<u32>) {
-        use crate::planetary::moons::tides::SurfaceHeatRules;
-        damping_census_under(giants, (age, SurfaceHeatRules::Radiated), count, kept)
-    }
-
-    /// [`damping_census`] with the surface heat's rules `surface` (P14.T55.j) in place of every 27
-    /// hold's.
-    fn damping_census_under(
-        giants: &[CensusGiant],
-        (age, surface): (Years, crate::planetary::moons::tides::SurfaceHeatRules),
-        count: usize,
-        kept: bool,
-    ) -> (Vec<CensusMoon>, Vec<CensusPair>, Vec<u32>) {
-        use crate::planetary::moons::tides::with_surface_heat;
         use crate::planetary::testing::with_every_27_hold;
         let (mut moons, mut pairs) = (Vec::with_capacity(count + 6), Vec::new());
         let mut found = vec![0_u32; giants.len()];
         with_every_27_hold(|| {
-            with_surface_heat(surface, || {
-                'giants: for i in 0..2_000 {
-                    for (g, giant) in giants.iter().enumerate() {
-                        let slot = giant.parent.id().body_index().to_be_bytes()[0];
-                        let p = renamed(&giant.parent, i, slot);
-                        let system_moons = regular_moons(Seed::new(12), &p);
-                        let mut tides = RegularTides {
-                            nursery: giant.nursery,
-                            sky: giant.sky.clone(),
-                            love_number: giant.love,
+            'giants: for i in 0..2_000 {
+                for (g, giant) in giants.iter().enumerate() {
+                    let slot = giant.parent.id().body_index().to_be_bytes()[0];
+                    let p = renamed(&giant.parent, i, slot);
+                    let system_moons = regular_moons(Seed::new(12), &p);
+                    let mut tides = RegularTides {
+                        nursery: giant.nursery,
+                        sky: giant.sky.clone(),
+                        love_number: giant.love,
+                        age,
+                        t: UniverseTime::EPOCH,
+                        memo: DampingMemo::default(),
+                    };
+                    let base = u32::try_from(moons.len()).unwrap();
+                    let rank = |k: usize| spread_rank(base + u32::try_from(k).unwrap());
+                    let ranks =
+                        |k: usize, _: &RegularMoon| Some((rank(k), MoonVolatiles::SHARED.draws));
+                    let (damped, held_pairs) = damping(system_moons.moons(), &p, &mut tides, ranks);
+                    found[g] += u32::try_from(resonant_pairs(system_moons.moons()).len()).unwrap();
+                    let start = moons.len();
+                    for pair in &held_pairs {
+                        pairs.push(CensusPair {
+                            giant: g,
+                            moons: (start + pair.inner, start + pair.inner + 1),
+                            budget: *pair,
+                        });
+                    }
+                    let census = (&giant.parent, &giant.nursery, &giant.sky);
+                    let derive = |moon: &RegularMoon, k: usize| {
+                        derive_regular_moon(
+                            moon,
+                            census.0,
+                            census.1,
+                            census.2,
+                            rank(k),
+                            MoonVolatiles::SHARED.draws,
                             age,
-                            t: UniverseTime::EPOCH,
-                            memo: DampingMemo::default(),
-                        };
-                        let base = u32::try_from(moons.len()).unwrap();
-                        let rank = |k: usize| spread_rank(base + u32::try_from(k).unwrap());
-                        let ranks = |k: usize, _: &RegularMoon| {
-                            Some((rank(k), MoonVolatiles::SHARED.draws))
-                        };
-                        let (damped, held_pairs) =
-                            damping(system_moons.moons(), &p, &mut tides, ranks);
-                        found[g] +=
-                            u32::try_from(resonant_pairs(system_moons.moons()).len()).unwrap();
-                        let start = moons.len();
-                        for pair in &held_pairs {
-                            pairs.push(CensusPair {
-                                giant: g,
-                                moons: (start + pair.inner, start + pair.inner + 1),
-                                budget: *pair,
-                            });
-                        }
-                        let census = (&giant.parent, &giant.nursery, &giant.sky);
-                        let derive = |moon: &RegularMoon, k: usize| {
-                            derive_regular_moon(
-                                moon,
-                                census.0,
-                                census.1,
-                                census.2,
-                                rank(k),
-                                MoonVolatiles::SHARED.draws,
-                                age,
-                                UniverseTime::EPOCH,
-                            )
-                            .unwrap()
-                        };
-                        for (k, (at, before)) in damped.iter().zip(system_moons.moons()).enumerate()
-                        {
-                            let own = derive(&at.moon, k);
-                            moons.push(CensusMoon {
-                                giant: g,
-                                at: *at,
-                                own: own.tides(),
-                                heat: own.tidal_heating(),
-                                flux: own.heat_flux(),
-                                kept: kept.then(|| {
-                                    (
-                                        derive(before, k).tides(),
-                                        before.orbit().eccentricity().value(),
-                                    )
-                                }),
-                            });
-                        }
-                        if moons.len() >= count {
-                            break 'giants;
-                        }
+                            UniverseTime::EPOCH,
+                        )
+                        .unwrap()
+                    };
+                    for (k, (at, before)) in damped.iter().zip(system_moons.moons()).enumerate() {
+                        let own = derive(&at.moon, k);
+                        moons.push(CensusMoon {
+                            giant: g,
+                            at: *at,
+                            own: own.tides(),
+                            heat: own.tidal_heating(),
+                            flux: own.heat_flux(),
+                            kept: kept.then(|| {
+                                (
+                                    derive(before, k).tides(),
+                                    before.orbit().eccentricity().value(),
+                                )
+                            }),
+                        });
+                    }
+                    if moons.len() >= count {
+                        break 'giants;
                     }
                 }
-            });
+            }
         });
         (moons, pairs, found)
     }
@@ -5944,18 +5912,15 @@ mod tests {
     }
 
     /// P14.T55.j's census at the age `age`: the generated moons of [`damping_census`] under every 27
-    /// hold, their surfaces radiating their whole heat flow, against held at their equilibrium
-    /// temperature. Each moon's balance, σ `T_s`⁴ = σ `T_eq`⁴ + F on its tide model at its
+    /// hold, their surfaces radiating their whole heat flow. Each moon's balance, σ `T_s`⁴ = σ `T_eq`⁴ + F on its tide model at its
     /// eccentricity, settles: at a root to [`SURFACE_HEAT_TOLERANCE`] of `T_s`, or, for at most 5
     /// moons, on a jump with no root, an ocean whose heat warms its surface past its shell's edge,
     /// which the cold branch then lets cool (2 at 100 Myr, none at the Sun's age, as built).
-    /// Recorded: the moons that change branch, derived afresh, the largest rise of a surface and
-    /// the counts at 1 and 10 K or more, the solves a balance took, the largest residual of the
+    /// Recorded: the moons on each branch, derived afresh, the largest rise of a surface and the
+    /// counts at 1 and 10 K or more, the solves a balance took, the largest residual of the
     /// balance as a share of F, and the moons on a jump.
     fn surface_heat_census(age: Years) {
-        use crate::planetary::moons::tides::{
-            SURFACE_HEAT_TOLERANCE, SurfaceHeatRules, TidalBranch,
-        };
+        use crate::planetary::moons::tides::{SURFACE_HEAT_TOLERANCE, TidalBranch};
         use crate::planetary::testing::with_every_27_hold;
         use crate::units::consts::STEFAN_BOLTZMANN;
         let giants = census_giants();
@@ -5964,11 +5929,10 @@ mod tests {
             TidalBranch::Ocean => 1,
             TidalBranch::Heated => 2,
         };
-        let held = damping_census_under(&giants, (age, SurfaceHeatRules::Held), 5_000, false);
         let radiated = damping_census(&giants, age, 5_000, false);
-        let mut moves = [[0_u32; 3]; 3];
-        for (a, b) in held.0.iter().zip(&radiated.0) {
-            moves[index(a.own.branch())][index(b.own.branch())] += 1;
+        let mut branches = [0_u32; 3];
+        for moon in &radiated.0 {
+            branches[index(moon.own.branch())] += 1;
         }
         // Each moon's balance on its model, read under the rules that damped the moons.
         let (rise, past, solves, residual, jumps) = with_every_27_hold(|| {
@@ -6006,8 +5970,8 @@ mod tests {
             (rise, past, solves, residual, jumps)
         });
         eprintln!(
-            "{} moons at {:.3e} yr, held → radiated surface, by branch afresh (cold, ocean, \
-             heated): {moves:?}; the largest rise {rise:?} (K, T_eq K, W m⁻², branch); {} at 1 K \
+            "{} moons at {:.3e} yr, their surfaces radiated, by branch afresh (cold, ocean, \
+             heated): {branches:?}; the largest rise {rise:?} (K, T_eq K, W m⁻², branch); {} at 1 K \
              or more, {} at 10 K or more; {:.2} solves a balance, at most {}, to \
              {SURFACE_HEAT_TOLERANCE:e} of T_s; the balance's largest residual {residual:.2e} of \
              F; {} moons on a jump (T_eq K, T_s K, W m⁻², branch): {jumps:?}",

@@ -1713,32 +1713,6 @@ fn the_core_term_has_kelvin_s_limit_and_vanishes_for_a_rigid_core() {
     assert_same_bits(ComplexRigidity::POROUS_CORE.imaginary.value(), 8e6);
 }
 
-/// P14.T55.j's hold: 26's bump leaves it, 27's deletes it; the tests' switch and 27's helper reach
-/// the radiated surface, and 26's helper does not.
-#[test]
-fn the_surface_heat_is_held_only_until_the_27_bump() {
-    use SurfaceHeatRules::{Held, Radiated};
-    assert!(
-        crate::GENERATOR_VERSION < SURFACE_HEAT_VERSION,
-        "the 26 → 27 bump makes a moon's surface radiate its internal heat in its tides (P14.T55.j): \
-         delete `SURFACE_HEAT_VERSION`, `SurfaceHeatRules` with its `Held` arm in \
-         `with_radiating_surface`, the tests' `with_surface_heat`, its switch in \
-         `with_every_27_hold`, and this test; re-bless the movers plan 14's record of P14.T55.j \
-         lists"
-    );
-    assert_eq!(SurfaceHeatRules::in_force(), Held);
-    assert_eq!(
-        with_surface_heat(Radiated, SurfaceHeatRules::in_force),
-        Radiated
-    );
-    assert_eq!(with_every_27_hold(SurfaceHeatRules::in_force), Radiated);
-    assert_eq!(
-        with_every_27_hold(|| with_surface_heat(Held, SurfaceHeatRules::in_force)),
-        Held
-    );
-    assert_eq!(SurfaceHeatRules::in_force(), Held);
-}
-
 /// P14.T55.j's record side's hold: 26's bump leaves it, 27's deletes it; the tests' switch and 27's
 /// helper reach the radiated air, and 26's and 25's helpers do not.
 #[test]
@@ -1761,18 +1735,6 @@ fn the_moon_surface_heat_is_held_only_until_the_27_bump() {
     assert_eq!(
         with_every_27_hold(|| with_moon_surface_heat(Held, MoonSurfaceHeatRules::in_force)),
         Held
-    );
-    // The tides' own hold and this one are apart: each switch leaves the other's rules.
-    assert_eq!(
-        with_every_27_hold(|| with_moon_surface_heat(Held, SurfaceHeatRules::in_force)),
-        SurfaceHeatRules::Radiated
-    );
-    assert_eq!(
-        with_every_27_hold(|| with_surface_heat(
-            SurfaceHeatRules::Held,
-            MoonSurfaceHeatRules::in_force
-        )),
-        Radiated
     );
     assert_eq!(MoonSurfaceHeatRules::in_force(), Held);
 }

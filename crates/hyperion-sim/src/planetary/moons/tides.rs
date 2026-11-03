@@ -68,13 +68,12 @@
 //! Only an ocean frees the core to deform: under a shell frozen to it, ice some 350 times stiffer
 //! holds it, so the heated and cold branches read no core.
 //!
-//! # The surface's own heat (P14.T55.j, from generator version 27)
+//! # The surface's own heat (P14.T55.j)
 //!
-//! A generated moon's tides read its equilibrium temperature, its sunlight's, as its surface's.
-//! From 27 (`SURFACE_HEAT_VERSION`) its surface radiates its whole heat flow F too,
-//! σ `T_s`⁴ = σ `T_eq`⁴ + F ([`radiating_surface_temperature`]), and its shell's top and Maxwell
-//! profile read that surface (`with_radiating_surface`, solved to [`SURFACE_HEAT_TOLERANCE`] of
-//! `T_s`). Io's 2.2 W m⁻² raises its surface by some 7 K, Enceladus's by 0.35 K: the rise of the
+//! A generated moon's surface, as its tides read it, radiates its whole heat flow F as well as its
+//! sunlight, σ `T_s`⁴ = σ `T_eq`⁴ + F ([`radiating_surface_temperature`]), and its shell's top
+//! and Maxwell profile read that surface (`with_radiating_surface`, solved to
+//! [`SURFACE_HEAT_TOLERANCE`] of `T_s`). Io's 2.2 W m⁻² raises its surface by some 7 K, Enceladus's by 0.35 K: the rise of the
 //! effective temperature that radiates the whole flux, not of the passive surface between Io's hot
 //! spots, which carry most of its heat. From 27 too (`MOON_SURFACE_HEAT_VERSION`), the air and the
 //! record's surface conditions read it: a moon's air starts from that surface, held at its night's
@@ -256,71 +255,9 @@ pub fn membrane_love_number(ocean: f64, lambda: MembraneStiffness) -> ComplexLov
     }
 }
 
-/// The generator version from which a moon's surface radiates its internal heat as well as its
-/// sunlight, in its tides' reading of it (P14.T55.j): 27, with P14.T55.j.a's damping and P14.T56.e's
-/// porous core. It does not ride 26: it landed after 26's membership.
-///
-/// It is the rule's one hold. Below it [`SurfaceHeatRules::in_force`] is
-/// [`SurfaceHeatRules::Held`]: a moon's tides read its equilibrium temperature as its surface's,
-/// and every figure is version 24's, 25's and 26's bit for bit. 27's bump deletes this hold,
-/// [`SurfaceHeatRules`] with its `Held` arm, the tests' switch and its tripwire
-/// (`the_surface_heat_is_held_only_until_the_27_bump`).
-pub(crate) const SURFACE_HEAT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether a moon's surface radiates its internal heat in its tides (its hold,
-/// [`SURFACE_HEAT_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum SurfaceHeatRules {
-    /// Version 26's and before: the surface at the equilibrium temperature alone.
-    Held,
-    /// Version 27's: σ `T_s`⁴ = σ `T_eq`⁴ + F ([`radiating_surface_temperature`]).
-    Radiated,
-}
-
-impl SurfaceHeatRules {
-    /// The rules this generator version gives: the radiated surface from
-    /// [`SURFACE_HEAT_VERSION`], the equilibrium temperature below it; in the tests, the rules a
-    /// test's switch sets on its thread ([`with_surface_heat`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = SURFACE_HEAT_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= SURFACE_HEAT_VERSION {
-            Self::Radiated
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The surface heat's rules a test sets on its thread, `None` for the version's.
-    static SURFACE_HEAT_RULES: core::cell::Cell<Option<SurfaceHeatRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the surface heat's rules `rules` on this thread, for the tests to reach
-/// P14.T55.j ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// 27's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_surface_heat<R>(rules: SurfaceHeatRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<SurfaceHeatRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            SURFACE_HEAT_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(SURFACE_HEAT_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
 /// The generator version from which a moon's air and its record's surface conditions read the
-/// surface that radiates its internal heat as well as its sunlight, as its tides read it from
-/// [`SURFACE_HEAT_VERSION`] (P14.T55.j, the record's side): 27, with the tides' own.
+/// surface that radiates its internal heat as well as its sunlight, as its tides read it
+/// (P14.T55.j, the record's side): 27, with the tides' own.
 ///
 /// It is the rule's one hold. Below it [`MoonSurfaceHeatRules::in_force`] is
 /// [`MoonSurfaceHeatRules::Held`]: a moon's air starts from the larger of its equilibrium
@@ -452,26 +389,17 @@ pub(crate) enum BalanceEnd {
 }
 
 /// The tides `solve` gives the moon of `inputs`, whose surface temperature there is its
-/// equilibrium temperature, and the surface temperature they are read at: from
-/// [`SURFACE_HEAT_VERSION`] the surface radiates the moon's whole heat flow too, F its tides'
-/// ([`MoonTides::heat_flow`]: the ocean branch's root, or the rock's heat with its tidal flux),
-/// which its shell's depth and top read in turn, solved to convergence ([`radiating_balance`]).
-/// Below the hold, `solve` at `inputs` and their surface.
+/// equilibrium temperature, and the surface temperature they are read at: the surface radiates the
+/// moon's whole heat flow too, F its tides' ([`MoonTides::heat_flow`]: the ocean branch's root, or
+/// the rock's heat with its tidal flux), which its shell's depth and top read in turn, solved to
+/// convergence ([`radiating_balance`]).
 #[must_use]
 pub(crate) fn with_radiating_surface(
     inputs: &TideInputs,
-    mut solve: impl FnMut(&TideInputs) -> (MoonTides, Subsurface),
+    solve: impl FnMut(&TideInputs) -> (MoonTides, Subsurface),
 ) -> (MoonTides, Subsurface, Kelvin) {
-    match SurfaceHeatRules::in_force() {
-        SurfaceHeatRules::Held => {
-            let (tides, subsurface) = solve(inputs);
-            (tides, subsurface, inputs.surface_temperature)
-        }
-        SurfaceHeatRules::Radiated => {
-            let (tides, subsurface, surface, _) = radiating_balance(inputs, solve);
-            (tides, subsurface, surface)
-        }
-    }
+    let (tides, subsurface, surface, _) = radiating_balance(inputs, solve);
+    (tides, subsurface, surface)
 }
 
 /// The surface temperature `T_s` at which the moon of `inputs`, of equilibrium temperature
