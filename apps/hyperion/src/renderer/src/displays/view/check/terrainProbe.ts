@@ -111,7 +111,10 @@ const SCENE_TARGET = /^[^: ]+:hdr$/u;
 /** What the probe reads of one of a body's passes. */
 export interface WatchedPass {
   readonly viewIds: ReadonlySet<string>;
-  readonly lastStep: { readonly drawSet: { readonly count: number } } | null;
+  readonly lastStep: {
+    readonly drawSet: { readonly count: number };
+    readonly selection: { readonly patches: { readonly size: number } };
+  } | null;
   /** The selection budget, half the cache's slots (`TerrainPass.maxPatches`). */
   readonly maxPatches: number;
   seesPatch(id: string): boolean;
@@ -353,6 +356,8 @@ interface TerrainFrame {
   readonly views: Map<string, TerrainFrameView>;
   /** The patches the pass drew, at the primary's scene target's submission, if it had a pass. */
   patches: number | null;
+  /** The patches its selection held then (`Selection.patches`). */
+  selected: number | null;
   /** Its triangles then, the lit draws' and the casters' (`null` where not known; plan R14). */
   triangles: number | null;
   casterTriangles: number | null;
@@ -893,6 +898,9 @@ export class TerrainProbe {
     const patchesDrawn = inWindow.flatMap((frame) =>
       frame.patches === null ? [] : [frame.patches],
     );
+    const patchesSelected = inWindow.flatMap((frame) =>
+      frame.selected === null ? [] : [frame.selected],
+    );
     const trianglesDrawn = inWindow.flatMap((frame) =>
       frame.triangles === null ? [] : [frame.triangles],
     );
@@ -910,6 +918,7 @@ export class TerrainProbe {
       mainThreadMs: window.mainThreadMs,
       frameGpuMs: window.frameGpuMs,
       patchesDrawn,
+      patchesSelected,
       trianglesDrawn,
       casterTriangles,
       bakes: {
@@ -957,6 +966,7 @@ export class TerrainProbe {
       seen.views.set(view, part);
       if (pass !== null && owner === `${view}:hdr` && view === "view") {
         seen.patches = pass.lastStep?.drawSet.count ?? 0;
+        seen.selected = pass.lastStep?.selection.patches.size ?? 0;
         // The run measures: the cluster path's counters are read back from here on (plan R14).
         pass.measureClusters?.(true);
         const counts = pass.counts?.(view) ?? null;
@@ -1006,6 +1016,7 @@ export class TerrainProbe {
       session: this.#sessionsMade,
       views: new Map(),
       patches: null,
+      selected: null,
       triangles: null,
       casterTriangles: null,
     };

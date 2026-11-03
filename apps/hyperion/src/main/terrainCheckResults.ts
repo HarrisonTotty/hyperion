@@ -780,8 +780,12 @@ const WHOLE_LOOK_COUNT = 3;
 /** The whole-body run's finding (plan R10, R10.T14.c): its own readings, with their peaks. */
 export interface TerrainWholeFinding extends TerrainFinding {
   readonly record: TerrainWholeRecord;
-  /** The patch cache's most bytes alive at once over the phases, and the most patches drawn at once. */
+  /**
+   * The patch cache's most bytes alive at once over the phases, the most patches selected at once,
+   * and the most drawn at once, a coarsen's held finer patches among them (R10.T16.i).
+   */
   readonly peakCacheBytes: number;
+  readonly mostPatchesSelected: number;
   readonly mostPatchesDrawn: number;
   /** The most the height workers held of the field as a phase ended, bytes (recorded). */
   readonly workerFieldBytes: number;
@@ -792,8 +796,9 @@ export interface TerrainWholeFinding extends TerrainFinding {
  * field held as the first phase ended and in the coverage mask at the loss phase's end, so that no
  * reference sphere draws past the terrain; no off-survey state read and no survey edge named;
  * every look read, settled, its disc drawn with no pixel of the sky's and nothing lit beyond its
- * limb, every texel finite; and no draw of more patches than the lit pass's selection budget, half
- * its cache's slots (R10.T14's sizes). The cache's GPU bytes are recorded beside its nominal
+ * limb, every texel finite; and no selection of more patches than the lit pass's selection budget,
+ * half its cache's slots (R10.T14's sizes), nor a draw of more than the slots: the time morph holds
+ * a coarsen's finer patches until its fade ends (R10.T16.i), and its draw passes the selection's. The cache's GPU bytes are recorded beside its nominal
  * budget, not judged: the setting fixes its allocation, the patch's and the whole body's alike.
  */
 function wholeFinding(whole: TerrainWholeRecord, record: TerrainCheckRecord): TerrainWholeFinding {
@@ -859,13 +864,26 @@ function wholeFinding(whole: TerrainWholeRecord, record: TerrainCheckRecord): Te
           .map((each) => each.bytes) ?? [],
     ),
   );
+  const mostPatchesSelected = Math.max(
+    0,
+    ...record.phases.flatMap((phase) => phase.patchesSelected),
+  );
   const mostPatchesDrawn = Math.max(0, ...record.phases.flatMap((phase) => phase.patchesDrawn));
   if (whole.selectionBudget === null) {
     reasons.push("no lit pass's selection budget was read");
-  } else if (mostPatchesDrawn > whole.selectionBudget) {
-    reasons.push(
-      `${String(mostPatchesDrawn)} patches drawn at once, over the selection's budget of ${String(whole.selectionBudget)}`,
-    );
+  } else {
+    if (mostPatchesSelected > whole.selectionBudget) {
+      reasons.push(
+        `${String(mostPatchesSelected)} patches selected at once, over the selection's budget of ${String(whole.selectionBudget)}`,
+      );
+    }
+    // The time morph holds a coarsen's finer patches until its fade ends (R10.T16.i): a draw may
+    // pass the selection's budget, but not the cache's slots, twice it.
+    if (mostPatchesDrawn > 2 * whole.selectionBudget) {
+      reasons.push(
+        `${String(mostPatchesDrawn)} patches drawn at once, over the cache's ${String(2 * whole.selectionBudget)} slots`,
+      );
+    }
   }
   const workerFieldBytes = Math.max(
     0,
@@ -875,6 +893,7 @@ function wholeFinding(whole: TerrainWholeRecord, record: TerrainCheckRecord): Te
     ...finding(reasons),
     record: whole,
     peakCacheBytes,
+    mostPatchesSelected,
     mostPatchesDrawn,
     workerFieldBytes,
   };
@@ -999,7 +1018,7 @@ function wholeRow(whole: TerrainWholeFinding): string {
     record.decodeMs === null
       ? "never held whole"
       : `held whole ${record.decodeMs.toFixed(0)} ms after its first ask, the longest time between animation frames meanwhile ${record.decodeLongestFrameGapMs?.toFixed(0) ?? "—"} ms`;
-  return `| The whole body held and drawn (every cell held, no off-survey state, no sky in its disc, within the selection's budget) | ${whole.verdict} | ${String(record.heldCells)} of ${String(record.cells)} cells held; ${String(record.notSurveyedSamples)} NOT SURVEYED and ${String(record.surveyEdgeSamples)} SURVEY EDGE of ${String(record.textSamples)} samples; the field ${decode}; looks: ${looks}; the patch cache's peak ${String(whole.peakCacheBytes)} B (its budget ${String(record.cacheBytes)} B), at most ${String(whole.mostPatchesDrawn)} patches drawn of the selection's ${String(record.selectionBudget ?? "—")}; the height workers' field ${String(whole.workerFieldBytes)} B${reasonsText(whole)} |`;
+  return `| The whole body held and drawn (every cell held, no off-survey state, no sky in its disc, the selection within its budget) | ${whole.verdict} | ${String(record.heldCells)} of ${String(record.cells)} cells held; ${String(record.notSurveyedSamples)} NOT SURVEYED and ${String(record.surveyEdgeSamples)} SURVEY EDGE of ${String(record.textSamples)} samples; the field ${decode}; looks: ${looks}; the patch cache's peak ${String(whole.peakCacheBytes)} B (its budget ${String(record.cacheBytes)} B), at most ${String(whole.mostPatchesSelected)} patches selected of the selection's ${String(record.selectionBudget ?? "—")} and ${String(whole.mostPatchesDrawn)} drawn; the height workers' field ${String(whole.workerFieldBytes)} B${reasonsText(whole)} |`;
 }
 
 /** A figure's text, or its reason in brackets. */

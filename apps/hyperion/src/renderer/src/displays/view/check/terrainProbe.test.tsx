@@ -118,7 +118,18 @@ function watchedSession(
   return {
     pass: () => ({
       viewIds: handing,
-      lastStep: { drawSet: patches },
+      // Its selection three patches short of its draw set: a coarsen's four finer patches held
+      // in its one's place (R10.T16.i).
+      lastStep: {
+        drawSet: patches,
+        selection: {
+          patches: {
+            get size(): number {
+              return Math.max(0, patches.count - 3);
+            },
+          },
+        },
+      },
       maxPatches: 604,
       seesPatch: (id) => handing.has(id) && !blind.has(id),
       // Its interior patches' triangles, and its casters' once it draws 15 (plan R14).
@@ -510,6 +521,7 @@ describe("the terrain probe (R10.T16.d)", () => {
       missedFrames: 0,
     });
     expect(record.patchesDrawn).toEqual([0, 12, 12, 15, 15, 15]);
+    expect(record.patchesSelected).toEqual([0, 9, 9, 12, 12, 12]);
     expect([record.trianglesDrawn, record.casterTriangles, patches.measured]).toEqual([
       [0, 12, 12, 15, 15, 15].map((n) => 8_704 * n),
       [10, 10, 10],

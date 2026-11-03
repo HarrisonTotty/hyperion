@@ -541,8 +541,17 @@ describe("the whole-body run's results (R10.T14.c)", () => {
     ]);
     expect([
       results.findings.whole?.peakCacheBytes,
+      results.findings.whole?.mostPatchesSelected,
       results.findings.whole?.mostPatchesDrawn,
-    ]).toEqual([20_000_000, 61]);
+    ]).toEqual([20_000_000, 55, 61]);
+  });
+
+  it("pass a run whose draw passes the selection's budget by a coarsen's held patches, its selection within it (R10.T16.i)", () => {
+    const results = buildTerrainCheckResults(wholeInput({ ...WHOLE, selectionBudget: 58 }));
+    expect([results.findings.whole?.verdict, results.findings.whole?.reasons]).toEqual([
+      "pass",
+      [],
+    ]);
   });
 
   it.each([
@@ -550,7 +559,8 @@ describe("the whole-body run's results (R10.T14.c)", () => {
     [{ notSurveyedSamples: 3 }, "NOT SURVEYED read in 3 of 400 samples"],
     [{ surveyEdgeSamples: 2 }, "a SURVEY EDGE named in 2 of 400 samples"],
     [{ textSamples: 0 }, "the page's text was never sampled"],
-    [{ selectionBudget: 50 }, "61 patches drawn at once, over the selection's budget of 50"],
+    [{ selectionBudget: 54 }, "55 patches selected at once, over the selection's budget of 54"],
+    [{ selectionBudget: 30 }, "61 patches drawn at once, over the cache's 60 slots"],
     [{ selectionBudget: null }, "no lit pass's selection budget was read"],
   ] as const)("fail on %j", (change, reason) => {
     const results = buildTerrainCheckResults(wholeInput({ ...WHOLE, ...change }));

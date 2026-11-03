@@ -419,6 +419,7 @@ function fakeProbe(
         mainThreadMs: [],
         frameGpuMs: [],
         patchesDrawn: [],
+        patchesSelected: [],
         trianglesDrawn: [],
         casterTriangles: [],
         bakes: { posted: 0, baked: 0, refused: 0 },

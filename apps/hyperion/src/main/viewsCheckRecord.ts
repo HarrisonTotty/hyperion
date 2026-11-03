@@ -395,6 +395,7 @@ function terrainPhase(value: unknown): TerrainCheckPhaseRecord | null {
   const mainThreadMs = numbers(value["mainThreadMs"]);
   const frameGpuMs = numbers(value["frameGpuMs"]);
   const patchesDrawn = numbers(value["patchesDrawn"]);
+  const patchesSelected = numbers(value["patchesSelected"]);
   const trianglesDrawn = numbers(value["trianglesDrawn"]);
   const casterTriangles = numbers(value["casterTriangles"]);
   const bakes = value["bakes"];
@@ -409,6 +410,8 @@ function terrainPhase(value: unknown): TerrainCheckPhaseRecord | null {
     frameGpuMs === null ||
     patchesDrawn === null ||
     !patchesDrawn.every(isCount) ||
+    patchesSelected === null ||
+    !patchesSelected.every(isCount) ||
     trianglesDrawn === null ||
     !trianglesDrawn.every(isCount) ||
     casterTriangles === null ||
@@ -443,6 +446,7 @@ function terrainPhase(value: unknown): TerrainCheckPhaseRecord | null {
     mainThreadMs,
     frameGpuMs,
     patchesDrawn,
+    patchesSelected,
     trianglesDrawn,
     casterTriangles,
     bakes: { posted: bakes["posted"], baked: bakes["baked"], refused: bakes["refused"] },

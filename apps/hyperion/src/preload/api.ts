@@ -1402,6 +1402,11 @@ export interface TerrainCheckPhaseRecord {
   /** The patches `TEST MOON`'s pass drew, at each of the primary's draws while it had a pass. */
   readonly patchesDrawn: ReadonlyArray<number>;
   /**
+   * The patches its selection held at those draws (`Selection.patches`): the draw set beside them
+   * holds a coarsen's finer patches until its fade ends (plan R10, R10.T16.i), so it may draw more.
+   */
+  readonly patchesSelected: ReadonlyArray<number>;
+  /**
    * The terrain's triangles at those draws (plan R14, R14.T1.b; `TerrainPass.counts`): the lit
    * draws', and the shadow cascades' casters', every cascade's, at those draws that drew cascades
    * and whose cluster counts had come back.
@@ -1666,8 +1671,8 @@ export interface TerrainWholeRecord {
   /**
    * The setting's patch cache budget, bytes (`TerrainSettings.cacheBytes`, R10.T14.b), recorded
    * beside the cache's peak; and the lit pass's selection budget, half its cache's slots
-   * (`TerrainPass.maxPatches`), as the first phase ended, which no draw may pass, or `null` with no
-   * pass then.
+   * (`TerrainPass.maxPatches`), as the first phase ended, which no selection may pass, nor a draw
+   * the cache's slots, or `null` with no pass then.
    */
   readonly cacheBytes: number;
   readonly selectionBudget: number | null;
