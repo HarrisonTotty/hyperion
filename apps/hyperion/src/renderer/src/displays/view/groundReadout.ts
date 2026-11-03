@@ -259,9 +259,16 @@ export class GroundReadouts {
   #sightGap: SightGap | null = null;
   #inFlight: Asked | null = null;
   #settled: Settled | null = null;
-  /** The last answer taken, not `null`, with the query it answered ({@link sameQuery}). */
-  #kept: { readonly asked: Asked; readonly readout: SurfaceGroundReadout } | null = null;
-  /** The baseline of the last query asked, `null` while none is held or out. */
+  /**
+   * The query the answer held answered, where that answer is not `null` ({@link sameQuery}): the
+   * kept answer is {@link GroundReadouts.#readout} itself, which nothing else sets while this
+   * stands.
+   */
+  #keptQuery: Asked | null = null;
+  /**
+   * The baseline of the last query asked, or of the kept answer's where an ask found it the same
+   * query, `null` while none is held or out: {@link GroundReadouts.due} reads it.
+   */
   #askedBaselineM: SlopeBaselineM | null = null;
   /** Whether the query out was asked for a choice of baseline, so that its answer is due at once. */
   #chosen = false;
@@ -345,7 +352,7 @@ export class GroundReadouts {
       // No readout may stand: what is held or still to come is let go, so that it returns with a
       // first answer of its own.
       this.#readout = null;
-      this.#kept = null;
+      this.#keptQuery = null;
       this.#sightGap = null;
       this.#letQueriesGo();
     } else if (this.#inFlight === null || slopeBaselineM !== this.#askedBaselineM) {
@@ -383,7 +390,7 @@ export class GroundReadouts {
   #forget(): void {
     this.#body = null;
     this.#readout = null;
-    this.#kept = null;
+    this.#keptQuery = null;
     this.#sightGap = null;
     this.#letQueriesGo();
   }
@@ -411,7 +418,7 @@ export class GroundReadouts {
       case "answered":
         this.#answers.succeeded();
         this.#readout = settled.readout;
-        this.#kept = settled.readout === null ? null : { asked: settled, readout: settled.readout };
+        this.#keptQuery = settled.readout === null ? null : settled;
         break;
       case "refused":
         this.#answers.failed(settled.error, nowMs, {
@@ -450,7 +457,7 @@ export class GroundReadouts {
       // No line of sight to ask along: no answer can stand, and the readout says why. The cause
       // is let go first, so that a broken invariant, which throws, states none.
       this.#readout = null;
-      this.#kept = null;
+      this.#keptQuery = null;
       this.#sightGap = null;
       this.#sightGap = sightGapOf(pose, run.scene, body);
       return;
@@ -466,9 +473,7 @@ export class GroundReadouts {
       seasonRad: seasonOf(session, body.id, time),
     };
     this.#askedBaselineM = slopeBaselineM;
-    const kept = this.#kept;
-    if (kept !== null && sameQuery(kept.asked, asked)) {
-      this.#readout = kept.readout;
+    if (this.#keptQuery !== null && sameQuery(this.#keptQuery, asked)) {
       return;
     }
     this.#inFlight = asked;

@@ -1091,13 +1091,42 @@ describe("the kept answer (R10.T12.d)", () => {
     expect(fake.asks.length).toBe(2);
   });
 
-  it("asks again where the season cannot be read, so that the query's refusal is the guard's", async () => {
+  it("never keeps an answer by a season that cannot be read, a malformed time's", async () => {
     const { fake, readouts, run } = await withAnswerKept();
     vi.spyOn(fake, "readoutSeasonRad").mockImplementation(() => {
       throw new RangeError("a malformed time");
     });
     readouts.publish(asSession(fake), run, 33);
+    askAt(fake, 1).answer(ON_GROUND);
+    await settle();
     readouts.publish(asSession(fake), run, 50);
-    expect(fake.asks.length).toBe(2);
+    expect(fake.asks.length).toBe(3);
+  });
+
+  it("is let go once the view frames no body with a surface, so that it is asked again on return", async () => {
+    const { fake, readouts, run } = await withAnswerKept();
+    const away = readouts.publish(
+      asSession(fake),
+      framedOn(run, terrainStar(), vec3(0, 0, 1e10)),
+      33,
+    );
+    const back = readouts.publish(asSession(fake), run, 50);
+    expect({ away, asks: fake.asks.length, back: back?.readout }).toEqual({
+      away: null,
+      asks: 2,
+      back: null,
+    });
+  });
+
+  it("is let go once no line of sight forms, so that it is asked again once one does", async () => {
+    const { fake, readouts, run } = await withAnswerKept();
+    const far = framedOn(run, terrainMoon(), vec3(0, 0, 2 * MAX_SIGHT_M));
+    const gap = readouts.publish(asSession(fake), far, 33);
+    const back = readouts.publish(asSession(fake), run, 50);
+    expect({ gap: gap?.sightGap, asks: fake.asks.length, back: back?.readout }).toEqual({
+      gap: "far",
+      asks: 2,
+      back: null,
+    });
   });
 });
