@@ -1148,7 +1148,7 @@ fn surface_gravity(inputs: &AtmosphereInputs) -> Option<MetresPerSecondSquared> 
 /// The Bond albedo of the disc `disc` of the atmosphere `air` of the body `inputs` describe, under
 /// its air's own Rayleigh layer and haze, under the light and the haze's τ(550) of `lit`.
 ///
-/// To 25 it is floored at its air's own Rayleigh layer's (P14.T24.h.a; [`area_mix::rayleigh_floor`]):
+/// To 25 it is floored at its air's own Rayleigh layer's (P14.T24.h.a; `area_mix::rayleigh_floor`):
 /// the larger of the two on every body with a surface, a gas envelope's class albedo excepted, and
 /// the disc's own otherwise, or where it is not a number (which [`bond_albedo`] labels) or the
 /// body has no mass or radius. The floor binds only where an air is darker than its own Rayleigh
@@ -1187,10 +1187,13 @@ fn floored(
     let Some(gravity) = surface_gravity(inputs) else {
         return albedo;
     };
+    // The floor is the oracle's, and the tests' record of it.
+    #[cfg(test)]
     let floor = area_mix::rayleigh_floor(&air.partials, gravity, shade);
     #[cfg(test)]
     floor_read::record(floor);
     match area_mix::RayleighAddingRules::in_force() {
+        #[cfg(test)]
         area_mix::RayleighAddingRules::Max => {
             let layered = if floor > albedo { floor } else { albedo };
             area_mix::hazed(layered, haze, shade)

@@ -116,7 +116,7 @@
 //!
 //! The area mix has no Rayleigh term, so a thick air's Bond albedo is its surface's alone, which
 //! under several bar can be physically impossible (`filler_c` e201's 0.046 under 23 bar at 23).
-//! [`rayleigh_floor`] is the air's own Bond albedo over a black surface: its Rayleigh optical depth
+//! `rayleigh_floor` is the air's own Bond albedo over a black surface: its Rayleigh optical depth
 //! at 550 nm from each gas row's cross section in the registry
 //! ([`rayleigh`](crate::substance::rayleigh)) over the column `p_s` ÷ (g m̄), taken to each of the
 //! optics' twelve bins at λ^−4.08, and each bin's conservative layer in the Eddington closure
@@ -155,7 +155,6 @@ use crate::units::{
     EarthFluxes, Kelvin, KilogramsPerSquareMetre, MetresPerSecondSquared, Pascals,
     WattsPerSquareMetre, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod icy_lag_tests;
@@ -2021,28 +2020,19 @@ fn surface_bond_with(
     })
 }
 
-/// The generator version from which the organic sediment a hazy air's fallout lays covers its
-/// solid ground (P14.T24.h.b's second part; decision-p14-t51-batch §9.4): 26, the train after 25's.
-///
-/// It is this rule's one hold. Below it [`OrganicSedimentRules::in_force`] is
-/// [`OrganicSedimentRules::Bare`]: the ground is its rows' and its regolith's, as to 25, bit for
-/// bit. 26's bump deletes this hold, [`OrganicSedimentRules`] with its `Bare` arm, the guard in
-/// [`sediment_share`], the tests' switch and its tripwire
-/// (`the_organic_sediment_is_held_only_until_the_27_bump`).
-pub(crate) const ORGANIC_SEDIMENT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether a hazy air's fallout covers its solid ground (its hold, [`ORGANIC_SEDIMENT_VERSION`]).
+/// Whether a hazy air's fallout covers its solid ground (on the record from generator version 27;
+/// in the tests the held arm too, their oracle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum OrganicSedimentRules {
-    /// Version 25's and before: no sediment.
+    /// Version 26's and before, the tests' oracle: no sediment.
+    #[cfg(test)]
     Bare,
-    /// Version 26's: the sediment covers its share of the solid ground ([`sediment_share`]).
+    /// Every version's: the sediment covers its share of the solid ground ([`sediment_share`]).
     Sediment,
 }
 
 impl OrganicSedimentRules {
-    /// The rules this generator version gives: the sediment from [`ORGANIC_SEDIMENT_VERSION`], none
-    /// below it; in the tests, the rules a test's switch sets on its thread
+    /// The rules in force: the sediment; in the tests, the rules a test's switch sets on its thread
     /// ([`with_organic_sediment`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
@@ -2050,11 +2040,7 @@ impl OrganicSedimentRules {
         if let Some(rules) = ORGANIC_SEDIMENT_RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= ORGANIC_SEDIMENT_VERSION {
-            Self::Sediment
-        } else {
-            Self::Bare
-        }
+        Self::Sediment
     }
 }
 
@@ -2065,9 +2051,9 @@ thread_local! {
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the sediment's rules `rules` on this thread, for the tests to reach version
-/// 26's ahead of the bump; the version's rules are set back after, a panic in `run` included. A
-/// record derives lazily, so a test reads it inside the switch. 26's bump deletes it with the hold.
+/// `run`'s result with the sediment's rules `rules` on this thread, the held arm the tests' oracle;
+/// the version's rules are set back after, a panic in `run` included. A record derives lazily, so a
+/// test reads it inside the switch.
 #[cfg(test)]
 pub(crate) fn with_organic_sediment<R>(rules: OrganicSedimentRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
@@ -2138,7 +2124,7 @@ pub(crate) fn snapshot_haze_optical_depth(
 #[must_use]
 pub(crate) fn sediment_share(haze: f64) -> f64 {
     use crate::planetary::hooks::aerosols::TITAN_HAZE_OPTICAL_DEPTH;
-    if OrganicSedimentRules::in_force() == OrganicSedimentRules::Bare
+    if OrganicSedimentRules::in_force() != OrganicSedimentRules::Sediment
         || haze.is_nan()
         || haze <= 0.0
     {
@@ -2279,41 +2265,28 @@ fn cloud_condensable(partition: &Partition, shade: &HostShade) -> Option<(Substa
     Some((condensable, available))
 }
 
-/// The generator version from which a cloud whose condensable is not water covers its own measured
-/// share (P14.T24.h.b's first part; decision-p14-t51-batch §9.4): 26, the train after 25's.
-///
-/// It is this rule's one hold. Below it [`MinorCloudsRules::in_force`] is
-/// [`MinorCloudsRules::WaterShare`]: every temperate or snowball world's cloud takes water's 0.67
-/// before its availability, as to 25, bit for bit. 26's bump deletes this hold, [`MinorCloudsRules`]
-/// with its `WaterShare` arm, the guard in [`condensable_cloud_share`], the tests' switch and its
-/// tripwire (`the_minor_clouds_are_held_only_until_the_27_bump`).
-pub(crate) const MINOR_CLOUDS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether a cloud whose condensable is not water covers its own share (its hold,
-/// [`MINOR_CLOUDS_VERSION`]).
+/// Whether a cloud whose condensable is not water covers its own share (on the record from
+/// generator version 27; in the tests the held arm too, their oracle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum MinorCloudsRules {
-    /// Version 25's and before: any condensable's cloud takes water's reference share.
+    /// Version 26's and before, the tests' oracle: any condensable's cloud takes water's reference
+    /// share.
+    #[cfg(test)]
     WaterShare,
-    /// Version 26's: a condensable that is not water takes [`MINOR_CONDENSABLE_CLOUD_SHARE`].
+    /// Every version's: a condensable that is not water takes [`MINOR_CONDENSABLE_CLOUD_SHARE`].
     OwnShare,
 }
 
 impl MinorCloudsRules {
-    /// The rules this generator version gives: a minor condensable's own share from
-    /// [`MINOR_CLOUDS_VERSION`], water's below it; in the tests, the rules a test's switch sets on
-    /// its thread ([`with_minor_clouds`]).
+    /// The rules in force: a minor condensable's own share; in the tests, the rules a test's switch
+    /// sets on its thread ([`with_minor_clouds`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = MINOR_CLOUDS_RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= MINOR_CLOUDS_VERSION {
-            Self::OwnShare
-        } else {
-            Self::WaterShare
-        }
+        Self::OwnShare
     }
 }
 
@@ -2324,10 +2297,9 @@ thread_local! {
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the minor clouds' rules `rules` on this thread, for the tests to reach
-/// version 26's ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, so a test reads it inside the switch. 26's bump deletes it
-/// with the hold.
+/// `run`'s result with the minor clouds' rules `rules` on this thread, the held arm the tests'
+/// oracle; the version's rules are set back after, a panic in `run` included. A record derives
+/// lazily, so a test reads it inside the switch.
 #[cfg(test)]
 pub(crate) fn with_minor_clouds<R>(rules: MinorCloudsRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
@@ -2511,6 +2483,7 @@ pub(crate) fn water_cloud_albedo() -> f64 {
         .value();
     let cloud = SurfaceState::Temperate.cloud_fraction();
     let clear = match RayleighAddingRules::in_force() {
+        #[cfg(test)]
         RayleighAddingRules::Max => reference_earth_clear_sky(),
         RayleighAddingRules::Added => reference_earth_clear_sky_added(),
     };
@@ -2532,43 +2505,28 @@ pub(crate) fn reference_earth_clear_sky_added() -> f64 {
     )
 }
 
-/// The generator version from which a body's air's Rayleigh layer is laid over its clear sky by the
-/// adding rule, not taken as its floor (P14.T24.h.b's fourth part; decision-p14-t51-batch §9.4;
-/// decision-p14-t54a-passes §G3.5): 26, the train after 25's.
-///
-/// It is this rule's one hold. Below it [`RayleighAddingRules::in_force`] is
-/// [`RayleighAddingRules::Max`]: the snapshot path's Bond albedo is the larger of the area mix and
-/// the floor, and the water cloud's calibration Earth's 0.294 without its air, as to 25, bit for
-/// bit. 26's bump deletes this hold, [`RayleighAddingRules`] with its `Max` arm, the guards in
-/// [`water_cloud_albedo`] and `surface_mix::floored`, the tests' switch and its tripwire
-/// (`the_rayleigh_adding_is_held_only_until_the_27_bump`).
-pub(crate) const RAYLEIGH_ADDING_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// How the air's Rayleigh layer joins the area mix (its hold, [`RAYLEIGH_ADDING_VERSION`]).
+/// How the air's Rayleigh layer joins the area mix (on the record from generator version 27; in the
+/// tests the held arm too, their oracle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum RayleighAddingRules {
-    /// Version 25's and before: the larger of the two, P14.T24.h.a's floor.
+    /// Version 26's and before, the tests' oracle: the larger of the two, P14.T24.h.a's floor.
+    #[cfg(test)]
     Max,
-    /// Version 26's: the layer over the clear sky by the adding rule ([`rayleigh_added`]), the cloud
+    /// Every version's: the layer over the clear sky by the adding rule ([`rayleigh_added`]), the cloud
     /// above it, Earth's cloud re-split ([`water_cloud_albedo`]).
     Added,
 }
 
 impl RayleighAddingRules {
-    /// The rules this generator version gives: the adding rule from [`RAYLEIGH_ADDING_VERSION`],
-    /// the max below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_rayleigh_adding`]).
+    /// The rules in force: the adding rule; in the tests, the rules a test's switch sets on its
+    /// thread ([`with_rayleigh_adding`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = RAYLEIGH_ADDING_RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= RAYLEIGH_ADDING_VERSION {
-            Self::Added
-        } else {
-            Self::Max
-        }
+        Self::Added
     }
 }
 
@@ -2579,10 +2537,10 @@ thread_local! {
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the adding rule's rules `rules` on this thread, for the tests to reach
-/// version 26's ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, and a shade takes its water cloud when it is built, so a
-/// test reads both inside the switch. 26's bump deletes it with the hold.
+/// `run`'s result with the adding rule's rules `rules` on this thread, the held arm the tests'
+/// oracle; the version's rules are set back after, a panic in `run` included. A record derives
+/// lazily, and a shade takes its water cloud when it is built, so a test reads both inside the
+/// switch.
 #[cfg(test)]
 pub(crate) fn with_rayleigh_adding<R>(rules: RayleighAddingRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
@@ -2596,43 +2554,28 @@ pub(crate) fn with_rayleigh_adding<R>(rules: RayleighAddingRules, run: impl FnOn
     run()
 }
 
-/// The generator version from which a hazy air's haze is an absorbing layer over the rest of its
-/// disc, and its absorbed sunlight its anti-greenhouse (P14.T24.h.b's third part;
-/// decision-p14-t51-batch §9.4): 26, the train after 25's.
-///
-/// It is this rule's one hold. Below it [`HazeLayerRules::in_force`] is [`HazeLayerRules::Clear`]:
-/// no haze in the Bond albedo and no anti-greenhouse, as to 25, bit for bit. 26's bump deletes this
-/// hold, [`HazeLayerRules`] with its `Clear` arm, the guards in [`hazed_bins`],
-/// [`anti_greenhouse_share`] and [`step_anti_greenhouse`] and the one in `escaping`'s solve that
-/// builds the step's closure, the tests' switch, its line in `with_scattering_held` and its tripwire
-/// (`the_haze_layer_is_held_only_until_the_27_bump`).
-pub(crate) const HAZE_LAYER_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether a hazy air's haze absorbs (its hold, [`HAZE_LAYER_VERSION`]).
+/// Whether a hazy air's haze absorbs (on the record from generator version 27; in the tests the
+/// held arm too, their oracle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum HazeLayerRules {
-    /// Version 25's and before: no haze layer.
+    /// Version 26's and before, the tests' oracle: no haze layer.
+    #[cfg(test)]
     Clear,
-    /// Version 26's: the haze a layer over the rest ([`hazed_bins`]), its absorption the
+    /// Every version's: the haze a layer over the rest ([`hazed_bins`]), its absorption the
     /// anti-greenhouse ([`anti_greenhouse_share`]).
     Absorbing,
 }
 
 impl HazeLayerRules {
-    /// The rules this generator version gives: the absorbing layer from [`HAZE_LAYER_VERSION`],
-    /// none below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_haze_layer`]).
+    /// The rules in force: the absorbing layer; in the tests, the rules a test's switch sets on its
+    /// thread ([`with_haze_layer`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         #[cfg(test)]
         if let Some(rules) = HAZE_LAYER_RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= HAZE_LAYER_VERSION {
-            Self::Absorbing
-        } else {
-            Self::Clear
-        }
+        Self::Absorbing
     }
 }
 
@@ -2643,9 +2586,9 @@ thread_local! {
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the haze layer's rules `rules` on this thread, for the tests to reach version
-/// 26's ahead of the bump; the version's rules are set back after, a panic in `run` included. A
-/// record derives lazily, so a test reads it inside the switch. 26's bump deletes it with the hold.
+/// `run`'s result with the haze layer's rules `rules` on this thread, the held arm the tests'
+/// oracle; the version's rules are set back after, a panic in `run` included. A record derives
+/// lazily, so a test reads it inside the switch.
 #[cfg(test)]
 pub(crate) fn with_haze_layer<R>(rules: HazeLayerRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
@@ -2794,7 +2737,7 @@ pub(crate) fn hazes(haze: f64) -> bool {
 /// The haze ([`snapshot_haze_optical_depth`]) is laid over the rest, its air's Rayleigh layer and
 /// cloud and ground, in each bin by the adding rule, its lower layer first and its upper over it
 /// ([`haze_layer_bins`]), weighted by the light. `below`'s own Bond albedo, weighted alike, under
-/// [`HazeLayerRules::Clear`] or with no haze.
+/// `HazeLayerRules::Clear` or with no haze.
 #[must_use]
 pub(crate) fn hazed_bins(below: &[f64; OPTICS_BANDS], haze: f64, shade: &HostShade) -> f64 {
     if !hazes(haze) {
@@ -2810,7 +2753,7 @@ pub(crate) fn hazed_bins(below: &[f64; OPTICS_BANDS], haze: f64, shade: &HostSha
 
 /// The Bond albedo of a disc of Bond albedo `below`, the same in every bin, under a haze of τ(550)
 /// `haze` under the light `shade` ([`hazed_bins`]); `below` to the bit under
-/// [`HazeLayerRules::Clear`] or with no haze.
+/// `HazeLayerRules::Clear` or with no haze.
 #[must_use]
 pub(crate) fn hazed(below: f64, haze: f64, shade: &HostShade) -> f64 {
     if !hazes(haze) {
@@ -2836,12 +2779,12 @@ pub(crate) fn haze_absorbed(haze: f64, shade: &HostShade) -> f64 {
 
 /// The anti-greenhouse's share γ of the body's absorbed sunlight its upper haze takes (P14.T24.h.b's
 /// third part): `absorbed` ([`haze_absorbed`]) over the body's `absorbed_share`, 1 − A, held to [0,
-/// 1]; 0 under [`HazeLayerRules::Clear`], with no haze or no absorbed light.
+/// 1]; 0 under `HazeLayerRules::Clear`, with no haze or no absorbed light.
 ///
 /// The grey surface beneath it is [`anti_greenhouse`]'s.
 #[must_use]
 pub(crate) fn anti_greenhouse_share(absorbed: f64, absorbed_share: f64) -> f64 {
-    if HazeLayerRules::in_force() == HazeLayerRules::Clear
+    if HazeLayerRules::in_force() != HazeLayerRules::Absorbing
         || absorbed.is_nan()
         || absorbed <= 0.0
         || absorbed_share.is_nan()
@@ -2884,7 +2827,7 @@ pub(crate) fn anti_greenhouse(grey: Kelvin, base: Kelvin, gamma: f64) -> Kelvin 
 /// The body's surface gravity and hottest host are `lit`, its light is `shade` and it absorbs
 /// `absorbed_share` of the light it receives: its upper haze's absorption over black
 /// ([`haze_absorbed`]) at its snapshot τ ([`snapshot_haze_optical_depth`]) through
-/// [`anti_greenhouse_share`]. 0, read at no cost, under [`HazeLayerRules::Clear`].
+/// [`anti_greenhouse_share`]. 0, read at no cost, under `HazeLayerRules::Clear`.
 #[must_use]
 pub(crate) fn step_anti_greenhouse(
     partials: &PartialPressures,
@@ -2892,7 +2835,7 @@ pub(crate) fn step_anti_greenhouse(
     shade: &HostShade,
     absorbed_share: f64,
 ) -> f64 {
-    if HazeLayerRules::in_force() == HazeLayerRules::Clear {
+    if HazeLayerRules::in_force() != HazeLayerRules::Absorbing {
         return 0.0;
     }
     let haze = snapshot_haze_optical_depth(partials, gravity, hottest_host);
@@ -2906,8 +2849,8 @@ pub(crate) fn step_anti_greenhouse(
 /// on this thread.
 ///
 /// The four are the minor clouds, the sediment, the adding rule and the haze layer, set back for a
-/// test that pins another hold's figures inside 27's helper as they stood before them; each set
-/// back after, a panic in `run` included. 27's bump deletes it with them.
+/// test that pins another hold's figures inside 27's helper as they stood before them, the four's
+/// oracles together; each set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_scattering_held<R>(run: impl FnOnce() -> R) -> R {
     with_minor_clouds(MinorCloudsRules::WaterShare, || {
@@ -3161,6 +3104,7 @@ pub(crate) fn rayleigh_optical_depth(
 /// up to the share of the hosts' light it reflects beyond the absorbers' edge: about 0.13–0.21 for
 /// `filler_c` e201's CH₄ column (decision-p14-t54a-passes §G3.2's bound is 0.25). Recorded for
 /// P14.T24.h.b, whose adding rule and absorbers take it up.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn rayleigh_floor(
     partials: &PartialPressures,
@@ -3171,6 +3115,7 @@ pub(crate) fn rayleigh_floor(
 }
 
 /// [`rayleigh_floor`] under the light `bands` in the optics' bins.
+#[cfg(test)]
 #[must_use]
 fn rayleigh_floor_in(
     partials: &PartialPressures,
@@ -3180,7 +3125,7 @@ fn rayleigh_floor_in(
     rayleigh_bins(partials, gravity).map_or(0.0, |albedos| band_weighted(&albedos, bands))
 }
 
-/// The air's Rayleigh layer's albedo over black in each of the optics' bins ([`rayleigh_floor`]'s,
+/// The air's Rayleigh layer's albedo over black in each of the optics' bins (`rayleigh_floor`'s,
 /// before the light weighs them), of partial pressures `partials` under the surface gravity
 /// `gravity`; `None` for an air of no Rayleigh depth, or one not a number.
 #[must_use]

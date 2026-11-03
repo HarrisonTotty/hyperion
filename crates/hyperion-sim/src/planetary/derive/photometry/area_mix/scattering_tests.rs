@@ -24,104 +24,52 @@ fn earth_like() -> Partition {
     partitioned((261.0, 288.0, 305.0), wet, 9.82)
 }
 
-/// P14.T24.h.b's first part is held until the 26 → 27 bump: the rules in force are version 26's and
-/// before, any condensable's cloud at water's share, and 27's helper reaches its own.
-#[test]
-fn the_minor_clouds_are_held_only_until_the_27_bump() {
-    use crate::planetary::testing::with_every_27_hold;
-    assert!(
-        GENERATOR_VERSION < MINOR_CLOUDS_VERSION,
-        "the 26 → 27 bump puts P14.T24.h.b's minor clouds on the record (decision-p14-t51-batch \
-         §9.4): delete `MINOR_CLOUDS_VERSION`, `MinorCloudsRules` with its `WaterShare` arm and the \
-         guard that reads it in `condensable_cloud_share`, the tests' `with_minor_clouds`, its \
-         switch in `with_every_27_hold` and in `with_scattering_held` with its callers (and the \
-         helpers, if no other 27 hold is left), the `WaterShare` arms of `scattering_tests`, and \
-         this test"
-    );
-    assert_eq!(MinorCloudsRules::in_force(), MinorCloudsRules::WaterShare);
-    assert_eq!(
-        with_every_27_hold(MinorCloudsRules::in_force),
-        MinorCloudsRules::OwnShare
-    );
-    assert_eq!(
-        with_every_27_hold(|| with_minor_clouds(
-            MinorCloudsRules::WaterShare,
-            MinorCloudsRules::in_force
-        )),
-        MinorCloudsRules::WaterShare
-    );
-    assert_eq!(MinorCloudsRules::in_force(), MinorCloudsRules::WaterShare);
-}
-
 /// Under its own share a Titan-like air's methane cloud covers Titan's 0.2–0.6% (Bouchez and Brown
 /// 2005), its condensable's availability whole, where water's share gave it 0.67; a water cloud,
 /// an Earth's, keeps 0.67 to the bit under both, and a runaway solved without its deck the same.
+///
+/// Its held arms are the tests' oracles (`with_scattering_held`): from 27 every version takes the
+/// new ones.
 #[test]
 fn a_minor_condensable_s_cloud_covers_titan_s_share() {
-    let sun = HostShade::sun();
-    let titan = titan_like();
-    let (condensable, available) = cloud_condensable(&titan, &sun).expect("its methane condenses");
-    assert_eq!(condensable, id("CH4"));
-    let snowball = (SurfaceState::Snowball, RunawayDeck::Kept);
-    let water_share = cloud_fraction(snowball, &titan, &sun);
-    let own = with_minor_clouds(MinorCloudsRules::OwnShare, || {
-        cloud_fraction(snowball, &titan, &sun)
-    });
-    eprintln!(
-        "a Titan-like air: methane available {available:.4}; its cloud {water_share:.4} at water's \
-         share, {own:.5} at its own"
-    );
-    assert_same_bits(
-        water_share,
-        SurfaceState::Temperate.cloud_fraction() * available,
-    );
-    assert_same_bits(own, MINOR_CONDENSABLE_CLOUD_SHARE * available);
-    assert!((0.002..=0.006).contains(&own), "{own}");
-    let earth = earth_like();
-    for state in [
-        (SurfaceState::Temperate, RunawayDeck::Kept),
-        (SurfaceState::Snowball, RunawayDeck::Kept),
-        (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless),
-    ] {
-        let held = cloud_fraction(state, &earth, &sun);
-        let mine = with_minor_clouds(MinorCloudsRules::OwnShare, || {
-            cloud_fraction(state, &earth, &sun)
+    with_scattering_held(|| {
+        let sun = HostShade::sun();
+        let titan = titan_like();
+        let (condensable, available) =
+            cloud_condensable(&titan, &sun).expect("its methane condenses");
+        assert_eq!(condensable, id("CH4"));
+        let snowball = (SurfaceState::Snowball, RunawayDeck::Kept);
+        let water_share = cloud_fraction(snowball, &titan, &sun);
+        let own = with_minor_clouds(MinorCloudsRules::OwnShare, || {
+            cloud_fraction(snowball, &titan, &sun)
         });
-        assert_same_bits(mine, held);
-    }
-    assert_same_bits(
-        cloud_fraction((SurfaceState::Temperate, RunawayDeck::Kept), &earth, &sun),
-        SurfaceState::Temperate.cloud_fraction(),
-    );
-}
-
-/// P14.T24.h.b's second part is held until the 26 → 27 bump: the rules in force are version 26's
-/// and before, no sediment, and 27's helper reaches it.
-#[test]
-fn the_organic_sediment_is_held_only_until_the_27_bump() {
-    use crate::planetary::testing::with_every_27_hold;
-    assert!(
-        GENERATOR_VERSION < ORGANIC_SEDIMENT_VERSION,
-        "the 26 → 27 bump puts P14.T24.h.b's organic sediment on the record \
-         (decision-p14-t51-batch §9.4): delete `ORGANIC_SEDIMENT_VERSION`, `OrganicSedimentRules` \
-         with its `Bare` arm and the guards that read it in `sediment_share` and \
-         `surface_mix::pass_haze`, the tests' `with_organic_sediment`, its switch in \
-         `with_every_27_hold` and in `with_scattering_held` with its callers (and the helpers, if \
-         no other 27 hold is left), the `Bare` arms of `scattering_tests`, and this test"
-    );
-    assert_eq!(OrganicSedimentRules::in_force(), OrganicSedimentRules::Bare);
-    assert_eq!(
-        with_every_27_hold(OrganicSedimentRules::in_force),
-        OrganicSedimentRules::Sediment
-    );
-    assert_eq!(
-        with_every_27_hold(|| with_organic_sediment(
-            OrganicSedimentRules::Bare,
-            OrganicSedimentRules::in_force
-        )),
-        OrganicSedimentRules::Bare
-    );
-    assert_eq!(OrganicSedimentRules::in_force(), OrganicSedimentRules::Bare);
+        eprintln!(
+            "a Titan-like air: methane available {available:.4}; its cloud {water_share:.4} at water's \
+             share, {own:.5} at its own"
+        );
+        assert_same_bits(
+            water_share,
+            SurfaceState::Temperate.cloud_fraction() * available,
+        );
+        assert_same_bits(own, MINOR_CONDENSABLE_CLOUD_SHARE * available);
+        assert!((0.002..=0.006).contains(&own), "{own}");
+        let earth = earth_like();
+        for state in [
+            (SurfaceState::Temperate, RunawayDeck::Kept),
+            (SurfaceState::Snowball, RunawayDeck::Kept),
+            (SurfaceState::RunawayGreenhouse, RunawayDeck::Deckless),
+        ] {
+            let held = cloud_fraction(state, &earth, &sun);
+            let mine = with_minor_clouds(MinorCloudsRules::OwnShare, || {
+                cloud_fraction(state, &earth, &sun)
+            });
+            assert_same_bits(mine, held);
+        }
+        assert_same_bits(
+            cloud_fraction((SurfaceState::Temperate, RunawayDeck::Kept), &earth, &sun),
+            SurfaceState::Temperate.cloud_fraction(),
+        );
+    });
 }
 
 /// Partial pressures of `fractions` by mole at a surface pressure `pressure`, Pa.
@@ -177,110 +125,88 @@ fn the_snapshot_haze_is_t24c_s_scaled_by_the_column() {
 /// none under `Bare`; and the sedimented surface takes `tholin`'s albedo for its regolith and its
 /// listed `H2O` ice at Titan's haze, its seas as they are, and is `surface_bond` to the bit at
 /// none.
+///
+/// Its held arms are the tests' oracles (`with_scattering_held`): from 27 every version takes the
+/// new ones.
 #[test]
 fn titan_s_solid_ground_is_its_haze_s_sediment() {
-    use crate::planetary::chem::partition::{Cover, CrustWater, WaterCover};
-    use crate::planetary::hooks::aerosols::TITAN_HAZE_OPTICAL_DEPTH;
-    assert_same_bits(sediment_share(TITAN_HAZE_OPTICAL_DEPTH), 0.0);
-    with_organic_sediment(OrganicSedimentRules::Sediment, || {
-        assert_same_bits(sediment_share(TITAN_HAZE_OPTICAL_DEPTH), 1.0);
-        assert_same_bits(sediment_share(2.0 * TITAN_HAZE_OPTICAL_DEPTH), 1.0);
-        assert!((sediment_share(0.5 * TITAN_HAZE_OPTICAL_DEPTH) - 0.5).abs() < 1e-15);
-        assert_same_bits(sediment_share(0.0), 0.0);
-        assert_same_bits(sediment_share(f64::NAN), 0.0);
-    });
-    let sun = HostShade::sun();
-    let titan = partitioned(
-        (89.7, 93.65, 93.65),
-        vec![
-            (id("CH4"), Pascals::new(5.5e3)),
-            (id("N2"), Pascals::new(1.418e5)),
-            (id("H2O"), Pascals::new(1e9)),
-        ],
-        1.352,
-    );
-    let profile = |t: Kelvin| ((t.value() - 85.0) / 10.0).clamp(0.0, 1.0);
-    let water = WaterCover {
-        surface_water: KilogramsPerSquareMetre::ZERO,
-        potential_ocean: 0.0,
-        ice_fraction: 0.5,
-        ice_density: crate::units::KilogramsPerCubicMetre::new(917.0),
-        crust_water: CrustWater::Listed,
-    };
-    let published = titan.publish(&Cover {
-        cold_area: &profile,
-        state: SurfaceState::Snowball,
-        water,
-    });
-    let ice = published
-        .entry(id("H2O"), CondensatePhase::Solid)
-        .expect("its listed crust");
-    let seas = published
-        .entry(id("ch4_c2h6_n2"), CondensatePhase::Liquid)
-        .expect("its seas");
-    eprintln!(
-        "Titan's published ground: ice {:.4}, seas {:.4}",
-        ice.area_fraction(),
-        seas.area_fraction()
-    );
-    let regolith = 0.35;
-    let haze = TITAN_HAZE_OPTICAL_DEPTH;
-    let bare = surface_bond(&published, &titan, (regolith, &[]), &sun);
-    for tau in [0.0, haze] {
-        assert_same_bits(
-            sedimented_surface_bond(&published, &titan, (regolith, &[]), &sun, tau),
-            bare,
+    with_scattering_held(|| {
+        use crate::planetary::chem::partition::{Cover, CrustWater, WaterCover};
+        use crate::planetary::hooks::aerosols::TITAN_HAZE_OPTICAL_DEPTH;
+        with_organic_sediment(OrganicSedimentRules::Bare, || {
+            assert_same_bits(sediment_share(TITAN_HAZE_OPTICAL_DEPTH), 0.0);
+        });
+        with_organic_sediment(OrganicSedimentRules::Sediment, || {
+            assert_same_bits(sediment_share(TITAN_HAZE_OPTICAL_DEPTH), 1.0);
+            assert_same_bits(sediment_share(2.0 * TITAN_HAZE_OPTICAL_DEPTH), 1.0);
+            assert!((sediment_share(0.5 * TITAN_HAZE_OPTICAL_DEPTH) - 0.5).abs() < 1e-15);
+            assert_same_bits(sediment_share(0.0), 0.0);
+            assert_same_bits(sediment_share(f64::NAN), 0.0);
+        });
+        let sun = HostShade::sun();
+        let titan = partitioned(
+            (89.7, 93.65, 93.65),
+            vec![
+                (id("CH4"), Pascals::new(5.5e3)),
+                (id("N2"), Pascals::new(1.418e5)),
+                (id("H2O"), Pascals::new(1e9)),
+            ],
+            1.352,
         );
-    }
-    let tholin = solid_bond(id("tholin"), &sun.bands).bond;
-    let sedimented = with_organic_sediment(OrganicSedimentRules::Sediment, || {
-        assert_same_bits(
-            sedimented_surface_bond(&published, &titan, (regolith, &[]), &sun, 0.0),
-            bare,
+        let profile = |t: Kelvin| ((t.value() - 85.0) / 10.0).clamp(0.0, 1.0);
+        let water = WaterCover {
+            surface_water: KilogramsPerSquareMetre::ZERO,
+            potential_ocean: 0.0,
+            ice_fraction: 0.5,
+            ice_density: crate::units::KilogramsPerCubicMetre::new(917.0),
+            crust_water: CrustWater::Listed,
+        };
+        let published = titan.publish(&Cover {
+            cold_area: &profile,
+            state: SurfaceState::Snowball,
+            water,
+        });
+        let ice = published
+            .entry(id("H2O"), CondensatePhase::Solid)
+            .expect("its listed crust");
+        let seas = published
+            .entry(id("ch4_c2h6_n2"), CondensatePhase::Liquid)
+            .expect("its seas");
+        eprintln!(
+            "Titan's published ground: ice {:.4}, seas {:.4}",
+            ice.area_fraction(),
+            seas.area_fraction()
         );
-        sedimented_surface_bond(&published, &titan, (regolith, &[]), &sun, haze)
-    });
-    let by_hand = surface_bond_with(&published, &titan, (tholin, &[]), &sun, &|row| {
-        if row == id("H2O") {
-            tholin
-        } else {
-            solid_bond(row, &sun.bands).bond
+        let regolith = 0.35;
+        let haze = TITAN_HAZE_OPTICAL_DEPTH;
+        let bare = surface_bond(&published, &titan, (regolith, &[]), &sun);
+        for tau in [0.0, haze] {
+            assert_same_bits(
+                sedimented_surface_bond(&published, &titan, (regolith, &[]), &sun, tau),
+                bare,
+            );
         }
+        let tholin = solid_bond(id("tholin"), &sun.bands).bond;
+        let sedimented = with_organic_sediment(OrganicSedimentRules::Sediment, || {
+            assert_same_bits(
+                sedimented_surface_bond(&published, &titan, (regolith, &[]), &sun, 0.0),
+                bare,
+            );
+            sedimented_surface_bond(&published, &titan, (regolith, &[]), &sun, haze)
+        });
+        let by_hand = surface_bond_with(&published, &titan, (tholin, &[]), &sun, &|row| {
+            if row == id("H2O") {
+                tholin
+            } else {
+                solid_bond(row, &sun.bands).bond
+            }
+        });
+        assert_same_bits(sedimented, by_hand);
+        eprintln!(
+            "Titan's ground: bare {bare:.4}, under its sediment {sedimented:.4} (tholin {tholin:.4})"
+        );
+        assert!(sedimented < bare, "{sedimented} against {bare}");
     });
-    assert_same_bits(sedimented, by_hand);
-    eprintln!(
-        "Titan's ground: bare {bare:.4}, under its sediment {sedimented:.4} (tholin {tholin:.4})"
-    );
-    assert!(sedimented < bare, "{sedimented} against {bare}");
-}
-
-/// P14.T24.h.b's fourth part is held until the 26 → 27 bump: the rules in force are version 26's
-/// and before, the floor's max, and 27's helper reaches the adding rule.
-#[test]
-fn the_rayleigh_adding_is_held_only_until_the_27_bump() {
-    use crate::planetary::testing::with_every_27_hold;
-    assert!(
-        GENERATOR_VERSION < RAYLEIGH_ADDING_VERSION,
-        "the 26 → 27 bump puts P14.T24.h.b's adding rule on the record (decision-p14-t51-batch \
-         §9.4): delete `RAYLEIGH_ADDING_VERSION`, `RayleighAddingRules` with its `Max` arm and the \
-         guards that read it in `water_cloud_albedo` and `surface_mix::floored`, the tests' \
-         `with_rayleigh_adding`, its switch in `with_every_27_hold` and in `with_scattering_held` \
-         with its callers (and the helpers, if no other 27 hold is left), the `Max` arms of \
-         `scattering_tests`, and this test"
-    );
-    assert_eq!(RayleighAddingRules::in_force(), RayleighAddingRules::Max);
-    assert_eq!(
-        with_every_27_hold(RayleighAddingRules::in_force),
-        RayleighAddingRules::Added
-    );
-    assert_eq!(
-        with_every_27_hold(|| with_rayleigh_adding(
-            RayleighAddingRules::Max,
-            RayleighAddingRules::in_force
-        )),
-        RayleighAddingRules::Max
-    );
-    assert_eq!(RayleighAddingRules::in_force(), RayleighAddingRules::Max);
 }
 
 /// The adding rule is its closed form: the ground's light passed through the layer both ways and
@@ -336,7 +262,7 @@ fn the_adding_rule_takes_its_closed_form() {
 /// under the max its cloud is T51.b's calibration to the bit. Both clouds are stated.
 #[test]
 fn under_the_adding_rule_the_reference_earth_keeps_0_294() {
-    let held = water_cloud_albedo();
+    let held = with_rayleigh_adding(RayleighAddingRules::Max, water_cloud_albedo);
     let clear = reference_earth_clear_sky();
     let cloud = SurfaceState::Temperate.cloud_fraction();
     let earth = SurfaceState::Temperate
@@ -362,7 +288,10 @@ fn under_the_adding_rule_the_reference_earth_keeps_0_294() {
     assert!(split < held);
     let shade = with_rayleigh_adding(RayleighAddingRules::Added, HostShade::sun);
     assert_same_bits(shade.water_cloud, split);
-    assert_same_bits(HostShade::sun().water_cloud, held);
+    assert_same_bits(
+        with_rayleigh_adding(RayleighAddingRules::Max, HostShade::sun).water_cloud,
+        held,
+    );
 }
 
 /// Under the adding rule the Solar System table's airless Moon, Mercury and Ceres keep their Bond
@@ -370,51 +299,30 @@ fn under_the_adding_rule_the_reference_earth_keeps_0_294() {
 /// stated both ways and pinned as they stand. The plan's "the Moon and Mars move by under 0.005"
 /// is the measured Mars's, 6 mbar: the table's Mars at the passes' stand-ins holds some 0.22 bar,
 /// its layer about 0.056 (a deferred finding).
+///
+/// Its held arms are the tests' oracles (`with_scattering_held`): from 27 every version takes the
+/// new ones.
 #[test]
 fn under_the_adding_rule_the_table_s_airless_bodies_and_venus_keep_their_bonds() {
-    use crate::planetary::derive::solar::historic_table;
-    let held = historic_table();
-    let added = with_rayleigh_adding(RayleighAddingRules::Added, historic_table);
-    let mut seen = Vec::new();
-    for ((name, before), (_, after)) in held.iter().zip(&added) {
-        let (a, b) = (before.albedo().value(), after.albedo().value());
-        eprintln!("{name}: Bond {a:.4} → {b:.4} under the adding rule");
-        match *name {
-            "Moon" | "Mercury" | "Ceres" | "Venus" => assert_same_bits(b, a),
-            "Mars" => assert!((0.01..0.03).contains(&(b - a)), "{name}: {a} → {b}"),
-            "Earth" => assert!((b - a).abs() < 0.005, "{name}: {a} → {b}"),
-            _ => continue,
+    with_scattering_held(|| {
+        use crate::planetary::derive::solar::historic_table;
+        let held = historic_table();
+        let added = with_rayleigh_adding(RayleighAddingRules::Added, historic_table);
+        let mut seen = Vec::new();
+        for ((name, before), (_, after)) in held.iter().zip(&added) {
+            let (a, b) = (before.albedo().value(), after.albedo().value());
+            eprintln!("{name}: Bond {a:.4} → {b:.4} under the adding rule");
+            match *name {
+                "Moon" | "Mercury" | "Ceres" | "Venus" => assert_same_bits(b, a),
+                "Mars" => assert!((0.01..0.03).contains(&(b - a)), "{name}: {a} → {b}"),
+                "Earth" => assert!((b - a).abs() < 0.005, "{name}: {a} → {b}"),
+                _ => continue,
+            }
+            seen.push(*name);
         }
-        seen.push(*name);
-    }
-    seen.sort_unstable();
-    assert_eq!(seen, ["Ceres", "Earth", "Mars", "Mercury", "Moon", "Venus"]);
-}
-
-/// P14.T24.h.b's third part is held until the 26 → 27 bump: the rules in force are version 26's
-/// and before, no haze layer, and 27's helper reaches it.
-#[test]
-fn the_haze_layer_is_held_only_until_the_27_bump() {
-    use crate::planetary::testing::with_every_27_hold;
-    assert!(
-        GENERATOR_VERSION < HAZE_LAYER_VERSION,
-        "the 26 → 27 bump puts P14.T24.h.b's haze layer on the record (decision-p14-t51-batch \
-         §9.4): delete `HAZE_LAYER_VERSION`, `HazeLayerRules` with its `Clear` arm and the guards \
-         that read it in `hazed`, `hazed_bins`, `anti_greenhouse_share`, `step_anti_greenhouse`, \
-         `surface_mix::pass_haze` and `escaping`'s solve, the tests' `with_haze_layer`, its switch \
-         in `with_every_27_hold` and in `with_scattering_held` with its callers (and the helpers, \
-         if no other 27 hold is left), the `Clear` arms of `scattering_tests`, and this test"
-    );
-    assert_eq!(HazeLayerRules::in_force(), HazeLayerRules::Clear);
-    assert_eq!(
-        with_every_27_hold(HazeLayerRules::in_force),
-        HazeLayerRules::Absorbing
-    );
-    assert_eq!(
-        with_every_27_hold(|| with_haze_layer(HazeLayerRules::Clear, HazeLayerRules::in_force)),
-        HazeLayerRules::Clear
-    );
-    assert_eq!(HazeLayerRules::in_force(), HazeLayerRules::Clear);
+        seen.sort_unstable();
+        assert_eq!(seen, ["Ceres", "Earth", "Mars", "Mercury", "Moon", "Venus"]);
+    });
 }
 
 /// The δ-Eddington layer: conservative and isotropic it is the Eddington closure's diffuse R =
@@ -478,9 +386,11 @@ fn titan_s_haze_absorbs_and_cools_its_surface() {
         .unwrap()
         .map(|layer| rayleigh_added(layer, ground));
     let unhazed = band_weighted(&below, &sun.bands);
-    assert_same_bits(hazed_bins(&below, haze, &sun), unhazed);
-    assert_same_bits(hazed(0.3, haze, &sun), 0.3);
-    assert_same_bits(anti_greenhouse_share(0.3, 0.7), 0.0);
+    with_haze_layer(HazeLayerRules::Clear, || {
+        assert_same_bits(hazed_bins(&below, haze, &sun), unhazed);
+        assert_same_bits(hazed(0.3, haze, &sun), 0.3);
+        assert_same_bits(anti_greenhouse_share(0.3, 0.7), 0.0);
+    });
     let (grey, base) = (Kelvin::new(98.5), Kelvin::new(81.0));
     assert_same_bits(anti_greenhouse(grey, base, 0.0).value(), grey.value());
     with_haze_layer(HazeLayerRules::Absorbing, || {
