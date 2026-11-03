@@ -165,8 +165,8 @@ fn the_centre_s_binary_entries_resolve_and_are_their_classes() {
 /// The digest (`f64_digest`) of the centre's first [`PINNED_BINARIES`] kept binary entries in index
 /// order ([`the_centre_s_binary_entries_are_pinned`]): each one's ID (high, low 32 bits), class,
 /// initial mass, age, position and velocity. Blessed natively on x86-64 after P09.T37 drew the
-/// centre's list over its reach; the wasip1 suite compares it.
-const CENTRE_BINARIES_DIGEST: u64 = 0x04e3_32a8_fa9a_23b7;
+/// centre's list over its reach, and again at generator version 26; the wasip1 suite compares it.
+const CENTRE_BINARIES_DIGEST: u64 = 0x4c49_2496_b09c_7610;
 
 /// The centre's binary entries the pin reads.
 const PINNED_BINARIES: usize = 40;

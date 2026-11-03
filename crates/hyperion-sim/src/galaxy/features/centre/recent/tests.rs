@@ -52,11 +52,11 @@ fn young(component: u8) -> bool {
 }
 
 /// A handful at the centre at Milky Way values (P09.T36.b): its list's classes start past its
-/// victims, at N + 1 (30), in Design note 16's order, and the classes' tests keep 18 of its 567
-/// candidates, in 1–20 (pinned as measured at generator version 26: 18 core collapses, none of the
-/// 11.3 Type Ia expected, of whose candidates about 13% keep a window, and none of the 23.7
-/// variables'; 17 of 565 until 26); each kept entry resolves to its member bit for bit, with a
-/// site and a window for a death; a rejected candidate and every index past the victims under the
+/// victims, at N + 1 (30), in Design note 16's order, and the classes' tests keep 25 of its 567
+/// candidates, past the plan's 1–20 (pinned as measured at generator version 26 with P09.T37's
+/// draw over the reach, a finding: 25 core collapses, none of the 11.3 Type Ia expected and none
+/// of the 23.7 variables'; 18 before the draw); each kept entry resolves to its member bit for bit,
+/// with a site and a window for a death; a rejected candidate and every index past the victims under the
 /// held arm resolve to "no such system", and the victims stay.
 #[test]
 fn the_centre_lists_a_handful_past_its_victims() {
@@ -99,8 +99,9 @@ fn the_centre_lists_a_handful_past_its_victims() {
         entries.len(),
         recent.expected()
     );
-    assert!((1..=20).contains(&total), "{total}");
-    assert_eq!(total, 18);
+    // The plan's handful is 1–20; drawn over the reach (P09.T37's fix of the radius) the centre
+    // keeps 25, a finding pinned as measured.
+    assert_eq!(total, 25);
     let model_off = off.centre().unwrap();
     assert_eq!(
         CentreRecent::new(off, model_off, victims).expected(),
@@ -122,9 +123,9 @@ fn the_centre_lists_a_handful_past_its_victims() {
 /// The digest (`f64_digest`) of the centre's kept entries ([`the_centre_s_entries_are_pinned`]):
 /// each one's ID (high, low 32 bits), class, initial mass, age, local position, velocity, death
 /// and window, in index order. Blessed natively on x86-64; the wasip1 suite compares it. Pinned at
-/// generator version 25 under every 26 hold (P09.T36's tests), and re-pinned at 26 (it was
-/// `0xa3c7_dc59_2d18_529d`).
-const CENTRE_ENTRIES_DIGEST: u64 = 0x236e_004f_0fff_a27f;
+/// generator version 25 under every 26 hold (P09.T36's tests), and re-pinned at 26 with P09.T37's
+/// entries drawn over the reach (it was `0x236e_004f_0fff_a27f` at 26 before).
+const CENTRE_ENTRIES_DIGEST: u64 = 0x045b_0cd0_0f31_084f;
 
 /// The centre's entries' bits, pinned before the bump, each the member its ID resolves to in any
 /// order.
