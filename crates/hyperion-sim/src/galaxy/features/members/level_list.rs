@@ -548,6 +548,10 @@ impl FeatureLevelList {
                     motion,
                 });
             }
+            debug_assert!(
+                farthest <= super::source::LISTED_DEATH_REACH.value(),
+                "a list's dead lie {farthest} ly from their lines, past the listed deaths' reach"
+            );
             Arc::new(KeptDeaths {
                 velocity: self.entries_velocity(),
                 reach: LightYears::new(if deaths.is_empty() {

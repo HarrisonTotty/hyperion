@@ -5967,15 +5967,18 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Shell._ Its `SupernovaEntry` takes the kick (`with_remnant`): `RecentEntry::supernova`.
   - _By ID._ `Drift::of_record_in` reads `members::listed_death_motion` (`Drift::broken`),
     `CentrePath` a `Law::Broken`; the server's `SystemLine::at` reads `velocity_at(t)`.
-  - _Pads._ A remnant lies within `LIFETIME_REACH` of its candidate's line: the features' lists
-    are looked up about the sphere grown by it (`lists_lookup_radius`; interiors as before), the
-    centre's within `REACH` plus it; a core collapse's candidate is tested so, then its own line.
+  - _Pads._ A remnant lies within `LISTED_DEATH_REACH` of its candidate's line (below): the
+    features' lists are looked up about the sphere grown by it (`lists_lookup_radius`; interiors
+    as before), the centre's within `REACH` plus it; a candidate is tested so, then its own line.
   - _Lean (2026-11-02)._ The census counts a core collapse by its candidate's place, as the
     classes count by cell: every list within 4,096 ly would add some 2,400 expected candidates
     to layer E at the Sun, past a 50 ly query's 4,096 limit.
-  - _Lean (2026-11-02)._ `LIFETIME_REACH` bounds a remnant's travel from its site; from its
-    candidate's line a kick against the bulk could take it up to twice that. Largest seen:
-    2,710 ly (381 kept within 4,147 ly of the inner disc).
+  - _Reach (fix-p09-listed-death-reach, 2026-11-03; research-leans-33 overturned the lean of
+    `LIFETIME_REACH`)._ `members::source::LISTED_DEATH_REACH`, 8,192 ly: the cap keeps each of the
+    two lines within `LIFETIME_REACH` of the site, so by the triangle inequality the remnant lies
+    within twice that of its candidate's line; test
+    `members::source::tests::a_remnant_kicked_against_its_bulk_keeps_its_candidate_in_the_pre_tests`
+    (5,524 ly), which failed first.
   - _Digests._ `ENTRIES_DIGEST` and `CENTRE_ENTRIES_DIGEST` re-pinned (places and velocities).
   - _Test (slow)._ `verification::recent_in_range::a_listed_core_collapse_moves_on_its_remnant_s_kick_under_every_27_hold`,
     which failed on BASE at all 90 kicked places.

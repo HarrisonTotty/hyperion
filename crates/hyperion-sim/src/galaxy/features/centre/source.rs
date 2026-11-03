@@ -31,7 +31,7 @@
 //!   only one whose straight line lies inside the sphere at its time is asked its class's test, a
 //!   lifetime and a star. A core collapse leaves that line at its death for its remnant's, at its
 //!   velocity plus its natal kick (fix-p09-recent-kicks), so its candidate is asked where its line
-//!   lies within `LIFETIME_REACH` of the sphere, and a kept entry is tested on its broken line
+//!   lies within `LISTED_DEATH_REACH` of the sphere, and a kept entry is tested on its broken line
 //!   ([`CentrePath`](super::CentrePath)'s); the census counts it by its candidate's place, as a
 //!   feature's list does. The list and the places are built once a source, when a sphere first
 //!   needs them. Below the hold's version no list is read.
@@ -69,8 +69,8 @@
 //!
 //! - **The recent entries' bound.** The centre's list's recent classes (P09.T36.b) lie inside the
 //!   centre's reach at the epoch and move on straight lines below light's speed (module
-//!   documentation of `recent`), a core collapse's remnant within `LIFETIME_REACH` of its line,
-//!   which bounds its travel from its site over its entry's lifetime (`DeathMarks::of`'s cap), so
+//!   documentation of `recent`), a core collapse's remnant within `LISTED_DEATH_REACH` of its
+//!   line, twice the travel `DeathMarks::of`'s cap allows each of its lines from its site, so
 //!   a sphere farther from the black hole than the reach, that and light's travel over |t| holds
 //!   none, and the list is not read.
 //! - **The victims' bound.** A victim moves at most at the escape speed from the black hole alone,

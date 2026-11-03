@@ -353,7 +353,6 @@ impl SharedClusterModelCache {
             kept: Mutex::new(BTreeMap::new()),
             reaches: Mutex::new(BTreeMap::new()),
             lists: Mutex::new(BTreeMap::new()),
-            deaths: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -604,9 +603,6 @@ pub struct KeptInteriors<'a> {
     /// or built there: its census and its hits read the same, some thousand of them near the inner
     /// disc.
     lists: Mutex<BTreeMap<FeatureId, Option<Arc<FeatureLevelList>>>>,
-    /// The deaths of the features' lists the job reads the deaths of alone
-    /// (fix-p09-recent-kicks): some ten thousand near the inner disc.
-    deaths: Mutex<BTreeMap<FeatureId, Option<Arc<KeptDeaths>>>>,
 }
 
 impl FeatureInteriorCache for KeptInteriors<'_> {
@@ -655,8 +651,9 @@ impl FeatureInteriorCache for KeptInteriors<'_> {
             .clone()
     }
 
-    /// Lends `feature`'s list's kept deaths: those of the list the job keeps, or the job's own, or
-    /// the shared cache's, kept.
+    /// Lends `feature`'s list's kept deaths: those of the list the job keeps, or the shared
+    /// cache's. A job reads a far feature's deaths once, so it does not keep them: some ten
+    /// thousand features near the inner disc, each a map entry a job.
     fn deaths(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<KeptDeaths>> {
         if let Some(list) = self
             .lists
@@ -668,12 +665,7 @@ impl FeatureInteriorCache for KeptInteriors<'_> {
                 .as_ref()
                 .map(|list| Arc::clone(list.kept_deaths(galaxy)));
         }
-        self.deaths
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .entry(feature.id())
-            .or_insert_with(|| self.shared.deaths(galaxy, feature))
-            .clone()
+        self.shared.deaths(galaxy, feature)
     }
 }
 

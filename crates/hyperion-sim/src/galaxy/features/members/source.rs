@@ -36,9 +36,9 @@
 //!   (fix-p09-recent-kicks; `RecentEntry::motion`). `member_speed_bound` does not cover the
 //!   lists, so a list has a pad of its own: its entries lie within the feature's reach of its
 //!   centre at the epoch and move at the bulk speed, below [`UNBOUND_PAD_SPEED`], and a remnant
-//!   within `LIFETIME_REACH` of its line, which bounds its travel from its site over its entry's
-//!   lifetime (`DeathMarks::of`'s cap), so the features looked up for the hits about the sphere
-//!   padded so hold every list that can reach the sphere. The census counts a core collapse by
+//!   within [`LISTED_DEATH_REACH`] of its line, twice the travel `DeathMarks::of`'s cap allows
+//!   each of its lines from its site over its entry's lifetime, so the features looked up for the
+//!   hits about the sphere padded so hold every list that can reach the sphere. The census counts a core collapse by
 //!   its candidate's place, as the catalogue's classes count theirs by their cells' (the lane's
 //!   lean): its kick spreads the class about the feature's profile and does not change its count.
 //!   Each candidate's line is tested against the sphere before its class's draws and test are
@@ -73,6 +73,7 @@ use crate::galaxy::query::{
 };
 use crate::id::{FeatureCell, Layer};
 use crate::time::UniverseTime;
+use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{KilometresPerSecond, LightYears, Seconds};
 
 use super::super::{FeatureId, FeatureProcess};
@@ -526,12 +527,15 @@ impl<'a> FeatureMemberSource<'a> {
             FeatureClassesRules::Listed => listed,
         };
         FeatureCatalogue::near(galaxy, centre, looked_up, self.features).filter_map(move |f| {
-            let interior = self
-                .interiors
-                .grid_reach(galaxy, &f)
-                .is_some_and(|reach| grid_may_touch(&f, centre, reach, radius))
-                .then(|| self.interiors.interior(galaxy, &f))
-                .flatten();
+            // A feature found for its list's dead alone, beyond the lookup about `radius`, has no
+            // interior the members' hits read, and its bound is not asked.
+            let interior = (reach_touches(&f, centre, radius)
+                && self
+                    .interiors
+                    .grid_reach(galaxy, &f)
+                    .is_some_and(|reach| grid_may_touch(&f, centre, reach, radius)))
+            .then(|| self.interiors.interior(galaxy, &f))
+            .flatten();
             let given = match lists {
                 FeatureClassesRules::Unlisted => interior.is_some(),
                 FeatureClassesRules::Listed => true,
@@ -792,15 +796,27 @@ fn lists_lookup_radius(galaxy: &Galaxy, sphere: &QuerySphere) -> LightYears {
     lookup_radius(sphere) + death_reach(galaxy)
 }
 
-/// How far from its progenitor's line a listed core collapse's remnant may lie in `galaxy`
-/// (fix-p09-recent-kicks): [`LIFETIME_REACH`] under P09.T36's new arm, which bounds its travel
-/// from its site over its entry's lifetime through `DeathMarks::of`'s cap (the grid's rule 5);
-/// nothing under its held arm, whose lists hold no recent class.
+/// How far from its candidate's line a listed core collapse's remnant may lie
+/// (fix-p09-listed-death-reach; research-leans-33): 8,192 ly, twice [`LIFETIME_REACH`].
+///
+/// `DeathMarks::of`'s cap (the grid's rule 5) keeps each of its two lines within `LIFETIME_REACH`
+/// of its site over its entry's lifetime, which holds the clock window from its death on: its
+/// progenitor's, at its feature's bulk velocity `b`, which its candidate's line continues, and its
+/// remnant's, at `b + k` with its kick `k`. So a time `dt` after its death the remnant is
+/// `|b + k| dt` from the site and the candidate's line `|b| dt`, and by the triangle inequality
+/// they are at most `|b| dt + |b + k| dt ≤ 2 LIFETIME_REACH` apart, which a kick against the bulk
+/// comes nearest: 460 km/s against 230 km/s for 3.6 Myr gives 5,524 ly. Every list's own bound,
+/// [`KeptDeaths::reach`], is one of these offsets, so never more.
+pub const LISTED_DEATH_REACH: LightYears = LightYears::new(2.0 * LIFETIME_REACH.value());
+
+/// How far from its candidate's line a listed core collapse's remnant may lie in `galaxy`:
+/// [`LISTED_DEATH_REACH`] under P09.T36's new arm; nothing under its held arm, whose lists hold no
+/// recent class.
 #[must_use]
 pub(crate) fn death_reach(galaxy: &Galaxy) -> LightYears {
     match galaxy.rules().feature_classes {
         FeatureClassesRules::Unlisted => LightYears::ZERO,
-        FeatureClassesRules::Listed => LIFETIME_REACH,
+        FeatureClassesRules::Listed => LISTED_DEATH_REACH,
     }
 }
 
@@ -827,7 +843,7 @@ pub(crate) fn listed_death_may_reach(
 /// for a `radius` the lists' pad bounds.
 #[must_use]
 fn reach_touches(feature: &FeatureRecord, centre: &GalacticPosition, radius: LightYears) -> bool {
-    LightYears::from(centre.distance_to(feature.position())).value()
+    feature.position().distance_to(centre).value() / METRES_PER_LIGHT_YEAR
         <= radius.value() + feature.reach().value()
 }
 
