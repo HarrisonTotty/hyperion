@@ -10,9 +10,11 @@ import { HANDOVER_RECORD, passingLook } from "./fixtures/handoverRecord";
 import {
   buildHandoverCheckResults,
   HANDOVER_BOUND_STOPS,
+  HANDOVER_LIGHT_FLOOR_SHARE,
   type HandoverCheckInput,
   handoverCheckMarkdown,
   handoverFailures,
+  type HandoverTexelFigures,
   stopsBetween,
   texelFigures,
   writeHandoverResults,
@@ -415,34 +417,61 @@ describe("the hand-over check's results", () => {
   });
 
   it("read a cell dark on both sides as unchanged", () => {
-    const both = texelFigures({
-      texel: 1,
-      sharedPixels: 2,
-      meanBefore: 0,
-      meanAfter: 0,
-      muFloored: false,
-    });
-    expect([both.dark, both.log2, both.over]).toEqual(["both", null, false]);
+    const both = texelFigures(
+      { texel: 1, sharedPixels: 2, meanBefore: 0, meanAfter: 0, muFloored: false },
+      1,
+    );
+    expect([both.dark, both.log2, both.flooredLog2, both.over]).toEqual(["both", null, 0, false]);
   });
 
   it("hold a cell to a third of a stop either way", () => {
-    const within = texelFigures({
-      texel: 1,
-      sharedPixels: 2,
-      meanBefore: 1,
-      meanAfter: 1.25,
-      muFloored: false,
-    });
-    const beyond = texelFigures({
-      texel: 2,
-      sharedPixels: 2,
-      meanBefore: 1.27,
-      meanAfter: 1,
-      muFloored: false,
-    });
+    const within = texelFigures(
+      { texel: 1, sharedPixels: 2, meanBefore: 1, meanAfter: 1.25, muFloored: false },
+      1,
+    );
+    const beyond = texelFigures(
+      { texel: 2, sharedPixels: 2, meanBefore: 1.27, meanAfter: 1, muFloored: false },
+      1,
+    );
     expect([HANDOVER_BOUND_STOPS, within.over, beyond.over]).toEqual([1 / 3, false, true]);
   });
+
+  describe("the light floor (research-leans-36)", () => {
+    it("floors each mean at 1% of the switch's mean light", () => {
+      expect(HANDOVER_LIGHT_FLOOR_SHARE).toBe(0.01);
+    });
+
+    it("passes a cell from 0.5% to 0.2% of the mean light, and counts it", () => {
+      const faint = lightCell(0.005, 0.002);
+      expect([faint.over, faint.passedByFloor, faint.flooredLog2]).toEqual([false, true, 0]);
+    });
+
+    it("fails a cell from 30% to 0, dark on one side", () => {
+      const dark = lightCell(0.3, 0);
+      expect([dark.over, dark.passedByFloor, dark.dark]).toEqual([true, false, "after"]);
+      expect(dark.flooredLog2).toBeCloseTo(Math.log2(0.01 / 0.3), 12);
+    });
+
+    it("fails a cell from 0.9% to 2%, past the floored bound", () => {
+      const rising = lightCell(0.009, 0.02);
+      expect([rising.over, rising.passedByFloor]).toEqual([true, false]);
+      expect(rising.flooredLog2).toBeCloseTo(1, 12);
+    });
+
+    it("keeps a cell at the μ floor left out, whatever its means", () => {
+      const floored = lightCell(0.3, 0, true);
+      expect([floored.judged, floored.over, floored.passedByFloor]).toEqual([false, false, false]);
+    });
+  });
 });
+
+/** A judged cell of 4 pixels, its means given as shares of a switch's mean light of 2. */
+function lightCell(before: number, after: number, muFloored = false): HandoverTexelFigures {
+  return texelFigures(
+    { texel: 9, sharedPixels: 4, meanBefore: 2 * before, meanAfter: 2 * after, muFloored },
+    2,
+  );
+}
 
 describe("the hand-over check's summary", () => {
   /** The summary of a run with one cell over the bound at 90°. */
@@ -477,9 +506,9 @@ describe("the hand-over check's summary", () => {
     expect(summary()).toContain("the hand-over range 15419 km");
   });
 
-  it("counts each switch's cells left out at the μ floor and its pixels and cells left out by the resampling", () => {
+  it("counts each switch's cells left out at the μ floor, those the light floor passes and its pixels and cells left out by the resampling", () => {
     expect(summary()).toMatch(
-      /\| handover-90 \| disc-to-figure \| .* \| 3 of 5 \| 1 \| 0 px, 0 cells \| 1 \| 0 \|/u,
+      /\| handover-90 \| disc-to-figure \| .* \| 3 of 5 \| 1 \| 0 \| 0 px, 0 cells \| 1 \| 0 \|/u,
     );
   });
 });
@@ -523,7 +552,7 @@ describe("the hand-over check's files", () => {
     const { json } = await writeHandoverResults("/out", buildHandoverCheckResults(input()), files);
     expect(JSON.parse(written.get(json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.handover-results",
-      version: 4,
+      version: 5,
       overall: "pass",
       rangeM: 1.5419e7,
     });

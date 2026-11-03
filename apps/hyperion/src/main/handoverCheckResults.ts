@@ -18,10 +18,11 @@
  *   {@link HANDOVER_MIN_SHARED_PIXELS} pixels within it too, its means over those pixels: each pixel
  *   of the frame not the disc's on the cell, against the disc's frame resampled at the pixel's
  *   ground point, so that the camera's closing between the frames moves no cell's figure
- *   (R10.T15.b.2; `handoverReading.ts`), with no floor (decision-r10-t16-leans §1). A cell dark on
- *   one side and not the
- *   other is over the bound, counted and listed, never dropped; one of a single shared pixel is
- *   listed and not judged. A cell where the disc's μ floor binds at its centre in either frame
+ *   (R10.T15.b.2; `handoverReading.ts`), each floored at {@link HANDOVER_LIGHT_FLOOR_SHARE} of the
+ *   switch's body mean (research-leans-36, in place of decision-r10-t16-leans §1's "no floor"), the
+ *   cells the floor passes counted. A cell dark on one side and not the other is floored as any
+ *   other, counted and listed, never dropped, and over only past the floored bound; one of a single
+ *   shared pixel is listed and not judged. A cell where the disc's μ floor binds at its centre in either frame
  *   (n′ · v < ½ μ_ν; plan R10, R10.T15.b, as decision-r10-t16-leans rules for "R10.T10.g terminator
  *   cross-fade") is listed, left out of the per-cell bound and counted, the means still taken over
  *   every pixel.
@@ -75,9 +76,11 @@ export const HANDOVER_CHECK_SCHEMA = "hyperion.views-check.handover-results";
  * R10.T15.b.2's `run.look`, the one look a `--look` launch asked; 4 from R10.T15.b.2's resampled
  * cells, each cell's `sharedPixels` and means over the pixels of the frame not the disc's, against
  * the disc's frame at their ground points, not over the pixels both frames give it, and each
- * switch's `resampleGaps`.
+ * switch's `resampleGaps`; 5 from research-leans-36's light floor, each cell's `flooredLog2` and
+ * `passedByFloor`, each switch's `lightFlooredTexels` and the bounds' `lightFloorShare`, none of
+ * which a file of version 4 or earlier holds: a reader takes them there as `null`.
  */
-export const HANDOVER_CHECK_VERSION = 4;
+export const HANDOVER_CHECK_VERSION = 5;
 
 /**
  * The bound on a change across a switch, stops (log₂ of the ratio): plan 10's T10.e and T10.g, a
@@ -86,8 +89,23 @@ export const HANDOVER_CHECK_VERSION = 4;
 export const HANDOVER_BOUND_STOPS = 1 / 3;
 
 /**
+ * The share of a switch's mean light at which each cell's means are floored before the bound
+ * judges them (research-leans-36's ruling, 2026-11-03): log₂(max(after, f L̄) ÷ max(before, f L̄)),
+ * L̄ the body's mean over the pixels both frames share, ½(before + after).
+ *
+ * @remarks
+ * Under the exposure locked on the `LIT` meter, which keys the body's lit light to middle grey,
+ * 1% of the body's mean lies 6.6 stops below the key, in AgX's toe (`photometry/toneCurve.ts`):
+ * the curve's log encoding puts it at x = 0.203 of [`AGX_MIN_EV`, `AGX_MAX_EV`], where its sigmoid
+ * gives 0.025 against 0.497 at the key, 0.14% of the key's light on the display. A change there,
+ * near the terminator's last light, is not one a third of a stop names on the screen; a side at 0
+ * is floored as any other, so that a cell dark on one side is over only past the floored bound.
+ */
+export const HANDOVER_LIGHT_FLOOR_SHARE = 0.01;
+
+/**
  * The fewest pixels a cell's means are taken over for the bound to judge it (`sharedPixels`): two,
- * the least that is not one pixel's aliasing, with no floor above it (decision-r10-t16-leans §1).
+ * the least that is not one pixel's aliasing (decision-r10-t16-leans §1).
  */
 export const HANDOVER_MIN_SHARED_PIXELS = 2;
 
@@ -174,11 +192,18 @@ export type MeansFigures<T> = T & { readonly log2: number | null };
 export interface HandoverTexelFigures extends HandoverTexelRecord {
   /** log₂(after ÷ before), stops; `null` where a side is dark. */
   readonly log2: number | null;
+  /**
+   * The change the bound judges, stops: log₂(max(after, f L̄) ÷ max(before, f L̄)), f
+   * {@link HANDOVER_LIGHT_FLOOR_SHARE} and L̄ the switch's body mean; {@link log2} where L̄ is 0.
+   */
+  readonly flooredLog2: number | null;
+  /** Judged, and within the bound only by the floor: over by {@link log2}'s reading, not by it. */
+  readonly passedByFloor: boolean;
   /** Which side's mean is 0, if either. */
   readonly dark: "before" | "after" | "both" | null;
   /** At least {@link HANDOVER_MIN_SHARED_PIXELS} shared pixels, and its μ floor clear. */
   readonly judged: boolean;
-  /** Judged and changed by more than the bound (dark on one side among them). */
+  /** Judged and changed by more than the bound on its floored means. */
   readonly over: boolean;
 }
 
@@ -208,9 +233,11 @@ export interface HandoverComparisonFigures {
   readonly flooredTexels: number;
   /** What the cells' means leave out (R10.T15.b.2): recorded, not judged. */
   readonly resampleGaps: HandoverResampleGaps;
+  /** Judged cells the light floor passes that its unfloored means would put over the bound. */
+  readonly lightFlooredTexels: number;
   /** Judged cells over the bound, the dark ones among them. */
   readonly texelsOver: number;
-  /** Judged cells dark on one side. */
+  /** Judged cells dark on one side, reported whether or not the floor passes them. */
   readonly darkTexels: number;
   /** The judged cell of the largest change (a dark one first), or `null` with none judged. */
   readonly worst: HandoverTexelFigures | null;
@@ -267,6 +294,8 @@ export interface HandoverCheckResults {
     readonly stops: number;
     readonly minSharedPixels: number;
     readonly missLimit: number;
+    /** Each cell's means floored at this share of its switch's body mean (research-leans-36). */
+    readonly lightFloorShare: number;
   };
   readonly looks: ReadonlyArray<HandoverLookFigures>;
   readonly findings: {
@@ -296,8 +325,12 @@ function sharedFigures(means: HandoverSharedMeans): MeansFigures<HandoverSharedM
   return { ...means, log2: stopsBetween(means.meanBefore, means.meanAfter) };
 }
 
-/** A cell's figures. */
-export function texelFigures(texel: HandoverTexelRecord): HandoverTexelFigures {
+/**
+ * A cell's figures, its means floored at {@link HANDOVER_LIGHT_FLOOR_SHARE} of `meanLight`.
+ *
+ * @param meanLight - L̄, the switch's body mean over its shared pixels, ½(before + after).
+ */
+export function texelFigures(texel: HandoverTexelRecord, meanLight: number): HandoverTexelFigures {
   const dark =
     texel.meanBefore === 0 && texel.meanAfter === 0
       ? "both"
@@ -308,12 +341,19 @@ export function texelFigures(texel: HandoverTexelRecord): HandoverTexelFigures {
           : null;
   const log2 = stopsBetween(texel.meanBefore, texel.meanAfter);
   const judged = texel.sharedPixels >= HANDOVER_MIN_SHARED_PIXELS && !texel.muFloored;
-  const over =
-    judged &&
-    (dark === "before" ||
-      dark === "after" ||
-      (log2 !== null && Math.abs(log2) > HANDOVER_BOUND_STOPS));
-  return { ...texel, log2, dark, judged, over };
+  const unflooredOver =
+    dark === "before" ||
+    dark === "after" ||
+    (log2 !== null && Math.abs(log2) > HANDOVER_BOUND_STOPS);
+  const floor = HANDOVER_LIGHT_FLOOR_SHARE * meanLight;
+  const flooredLog2 =
+    floor > 0
+      ? Math.log2(Math.max(texel.meanAfter, floor) / Math.max(texel.meanBefore, floor))
+      : log2;
+  const flooredOver = floor > 0 ? Math.abs(flooredLog2 ?? 0) > HANDOVER_BOUND_STOPS : unflooredOver;
+  const over = judged && flooredOver;
+  const passedByFloor = judged && unflooredOver && !flooredOver;
+  return { ...texel, log2, flooredLog2, passedByFloor, dark, judged, over };
 }
 
 /** The larger change of two cells, a dark one counting as the larger. */
@@ -321,9 +361,12 @@ function worseOf(a: HandoverTexelFigures, b: HandoverTexelFigures): HandoverTexe
   return changeSize(b) > changeSize(a) ? b : a;
 }
 
-/** A cell's change in stops, either way; a cell dark on one side's the largest. */
+/** A cell's judged change in stops, either way; with no floor, a cell dark on one side's the largest. */
 function changeSize(texel: HandoverTexelFigures): number {
-  return texel.dark === "before" || texel.dark === "after" ? Infinity : Math.abs(texel.log2 ?? 0);
+  if (texel.flooredLog2 !== null) {
+    return Math.abs(texel.flooredLog2);
+  }
+  return texel.dark === "before" || texel.dark === "after" ? Infinity : 0;
 }
 
 /** A change in stops as the summary writes it: signed, to 3 decimals, or why there is none. */
@@ -360,7 +403,9 @@ function comparisonFigures(
   comparison: HandoverComparisonRecord,
   judged: boolean,
 ): HandoverComparisonFigures {
-  const texels = comparison.texels.map(texelFigures);
+  // L̄, the body's mean over the pixels both frames share, either side.
+  const meanLight = (comparison.body.shared.meanBefore + comparison.body.shared.meanAfter) / 2;
+  const texels = comparison.texels.map((texel) => texelFigures(texel, meanLight));
   const judgedTexels = texels.filter((texel) => texel.judged);
   const floored = texels.filter(
     (texel) => texel.muFloored && texel.sharedPixels >= HANDOVER_MIN_SHARED_PIXELS,
@@ -416,6 +461,7 @@ function comparisonFigures(
     judgedTexels: judgedTexels.length,
     flooredTexels: floored.length,
     resampleGaps: comparison.resampleGaps,
+    lightFlooredTexels: judgedTexels.filter((texel) => texel.passedByFloor).length,
     texelsOver: over.length,
     darkTexels: dark.length,
     worst: judgedTexels.reduce<HandoverTexelFigures | null>(
@@ -534,6 +580,7 @@ export function buildHandoverCheckResults(input: HandoverCheckInput): HandoverCh
       stops: HANDOVER_BOUND_STOPS,
       minSharedPixels: HANDOVER_MIN_SHARED_PIXELS,
       missLimit: HANDOVER_MISS_LIMIT,
+      lightFloorShare: HANDOVER_LIGHT_FLOOR_SHARE,
     },
     looks,
     findings: {
@@ -590,8 +637,8 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
       const worst =
         each.worst === null
           ? "—"
-          : `${stopsText(each.worst.log2)} (cell ${String(each.worst.texel)}, ${String(each.worst.sharedPixels)} px)`;
-      return `| ${look.name} | ${each.name} | ${frameText(each.before)} → ${frameText(each.after)} | ${String(each.framesApart)}${each.beforeWasLast && each.afterWasFirst ? "" : " (not adjacent in regime)"} | ${pairText(each.body)} | ${pairText(each.survey)} | ${String(each.judgedTexels)} of ${String(each.texels.length)} | ${String(each.flooredTexels)} | ${String(each.resampleGaps.pixels)} px, ${String(each.resampleGaps.cells)} cells | ${String(each.texelsOver)} | ${String(each.darkTexels)} | ${worst} | ${each.verdict} |`;
+          : `${stopsText(each.worst.flooredLog2)} floored, ${stopsText(each.worst.log2)} (cell ${String(each.worst.texel)}, ${String(each.worst.sharedPixels)} px)`;
+      return `| ${look.name} | ${each.name} | ${frameText(each.before)} → ${frameText(each.after)} | ${String(each.framesApart)}${each.beforeWasLast && each.afterWasFirst ? "" : " (not adjacent in regime)"} | ${pairText(each.body)} | ${pairText(each.survey)} | ${String(each.judgedTexels)} of ${String(each.texels.length)} | ${String(each.flooredTexels)} | ${String(each.lightFlooredTexels)} | ${String(each.resampleGaps.pixels)} px, ${String(each.resampleGaps.cells)} cells | ${String(each.texelsOver)} | ${String(each.darkTexels)} | ${worst} | ${each.verdict} |`;
     }),
   );
   const overRows = looks.flatMap((look) =>
@@ -600,7 +647,7 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
         .filter((texel) => texel.over)
         .map(
           (texel) =>
-            `| ${look.name} | ${each.name} | ${String(texel.texel)} | ${String(texel.sharedPixels)} | ${texel.meanBefore.toPrecision(4)} | ${texel.meanAfter.toPrecision(4)} | ${stopsText(texel.log2)} |`,
+            `| ${look.name} | ${each.name} | ${String(texel.texel)} | ${String(texel.sharedPixels)} | ${texel.meanBefore.toPrecision(4)} | ${texel.meanAfter.toPrecision(4)} | ${stopsText(texel.log2)} | ${stopsText(texel.flooredLog2)} |`,
         ),
     ),
   );
@@ -625,7 +672,7 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
     ...(run.look === undefined ? [] : [`- **Look:** \`${run.look}\` alone (\`--look\`)`]),
     `- **World:** ${results.world}; the primary ${String(results.canvas.widthPx)} × ${String(results.canvas.heightPx)} px presented, its scene target ${String(results.target.widthPx)} × ${String(results.target.heightPx)} px; the hand-over range ${(results.rangeM / 1000).toFixed(0)} km (relief ${results.reliefM.toFixed(0)} m at τ ${String(results.tauPx)} px, ${results.radPerPx.toExponential(4)} rad a pixel); cells of level ${String(results.cellLevel)}`,
     `- **The line:** ${(results.approach.ratePerS * 100).toFixed(0)}% of the limb distance a second, from ${String(results.approach.startRatio)} to ${String(results.approach.closestRatio)} of the range, a ${String(results.approach.holdS)} s hold, out to ${String(results.approach.endRatio)}`,
-    `- **Bounds:** ${results.bounds.stops.toFixed(3)} stop at every switch, cells of ${String(results.bounds.minSharedPixels)} shared pixels or more judged, no floor, but cells where the disc's μ floor binds at their centre (n′ · v < ½ μ_ν) left out and counted; at most ${String(results.bounds.missLimit * 100)}% of a frame's body pixels off the datum`,
+    `- **Bounds:** ${results.bounds.stops.toFixed(3)} stop at every switch, cells of ${String(results.bounds.minSharedPixels)} shared pixels or more judged, each cell's means floored at ${String(results.bounds.lightFloorShare * 100)}% of its switch's body mean and the cells the floor passes counted, cells where the disc's μ floor binds at their centre (n′ · v < ½ μ_ν) left out and counted; at most ${String(results.bounds.missLimit * 100)}% of a frame's body pixels off the datum`,
     `- **Captures (not committed):** ${textOf(run.captures, (dir) => `\`${dir}\``)}`,
     `- **Faults:** ${String(results.findings.faults.record.length)} engine faults, ${String(results.findings.faults.gpuProcessExits)} GPU-process exits; console errors ${String(results.findings.consoleErrors.count)}${results.findings.consoleErrors.first.length === 0 ? "" : ` (${results.findings.consoleErrors.first.join(" | ")})`}`,
     "",
@@ -642,8 +689,8 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
     "",
     "Changes are log₂(after ÷ before), stops, over each frame's own pixels / over the pixels both share.",
     "",
-    "| Look | Switch | Frames (script s, regime, limb distance ÷ range) | Frames apart | Body | Survey | Cells judged | Left out at the μ floor | Left out by the resampling | Over 1/3 stop | Dark on one side | Worst cell | Verdict |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Look | Switch | Frames (script s, regime, limb distance ÷ range) | Frames apart | Body | Survey | Cells judged | Left out at the μ floor | Passed by the light floor | Left out by the resampling | Over 1/3 stop | Dark on one side | Worst cell | Verdict |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...comparisonRows,
     "",
     "## Cells over 1/3 stop",
@@ -651,8 +698,8 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
     ...(overRows.length === 0
       ? ["None."]
       : [
-          "| Look | Switch | Cell | Shared pixels | Mean before | Mean after | Change (stops) |",
-          "| --- | --- | --- | --- | --- | --- | --- |",
+          "| Look | Switch | Cell | Shared pixels | Mean before | Mean after | Change (stops) | Floored (stops) |",
+          "| --- | --- | --- | --- | --- | --- | --- | --- |",
           ...overRows,
         ]),
     "",
