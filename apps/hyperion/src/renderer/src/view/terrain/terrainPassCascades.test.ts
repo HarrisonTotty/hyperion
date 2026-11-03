@@ -1852,6 +1852,25 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     }));
   }
 
+  it("gives a sub-patch stand-in on the cluster path no bands, which the cull keeps whole at stride 1", async () => {
+    const made = await measuredPass();
+    nearerUnbaked(made);
+    const per = INSTANCE_RECORD_BYTES / 4;
+    const words = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+    const whole = keptWhole(wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`));
+    const records = stridesOf(made).map(({ bands }, k) => ({
+      bands,
+      subPatch: (words[k * per + INSTANCE_SUB_PATCH_WORD] ?? 0) !== 0,
+      kept: whole[k] === true,
+    }));
+    const subPatches = records.filter(({ subPatch }) => subPatch);
+    expect([
+      subPatches.length > 0,
+      subPatches.every(({ bands, kept }) => kept && bands.every((b) => b === NO_STRIDE_BAND)),
+      records.some(({ subPatch, bands }) => !subPatch && bands.every((b) => b > 0)),
+    ]).toEqual([true, true, true]);
+  });
+
   it("draws at stride 1, every record without bands, while the lever is off", async () => {
     const made = await measuredPass();
     made.pass.setGeometry(SETTINGS.high.geometry);

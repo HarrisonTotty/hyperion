@@ -4307,9 +4307,10 @@ export class TerrainPass {
           fades: fadesWord,
         });
         // Every measured patch takes its level's bands, whichever path draws it, so that a vertex it
-        // shares is placed alike; a camera pass draws the forced region's at stride 1.
+        // shares is placed alike; a camera pass draws the forced region's at stride 1. A sub-patch
+        // stand-in takes none: its grid is not its slot's records', which the cull keeps whole.
         const bands =
-          strides && resident !== undefined && resident.strideErrorsM !== null
+          strides && within === null && resident !== undefined && resident.strideErrorsM !== null
             ? (state.strideBandsM[level] ?? NO_STRIDE_BANDS)
             : NO_STRIDE_BANDS;
         const finest = strides && this.#nearContact(patch, contacts, patchM);
