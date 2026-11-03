@@ -21,6 +21,7 @@ import { terrainMeshSpec } from "./gpu/resources";
 import {
   COMPILE_MESH_NAME,
   sessionMaterials,
+  TERRAIN_COMPILES_IN_FLIGHT,
   type TerrainMaterialKind,
   TerrainMaterialSet,
   terrainMaterialOf,
@@ -57,9 +58,9 @@ function compiles(engine: CountingRenderEngine, from = 0): string[] {
     .map(({ name, targets, meshes }) => `${name} ${targets.join(",")} ${meshes.join(",")}`);
 }
 
-/** Lets the set's promise chains settle. */
+/** Lets the set's promise chains settle, its compiles two at a time among them. */
 async function settle(): Promise<void> {
-  for (let hop = 0; hop < 10; hop += 1) {
+  for (let hop = 0; hop < 200; hop += 1) {
     // Each hop waits on the last.
     // oxlint-disable-next-line no-await-in-loop
     await Promise.resolve();
@@ -67,7 +68,7 @@ async function settle(): Promise<void> {
 }
 
 /**
- * The high setting's twelve, on its own path, the shadow cascades' caster (R10.T9.b), the interior
+ * The high setting's twelve, on its own path, in its order of first use: the shadow cascades' caster (R10.T9.b), the interior
  * patches' lit form (plan R14, R14.T1.a), their cluster caster (R14.T1.b), their cluster depth
  * (R14.T1.e), their lit form on the cluster path (R14.T2.a), the wireframe's interior patches' on
  * it (R14.T4.c) and the edge patches' fin forms (R14.T1.g) among them: what every compile below is
@@ -75,15 +76,15 @@ async function settle(): Promise<void> {
  */
 const HIGH = [
   `terrain-lit-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
-  `terrain-lit-interior-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
   `terrain-lit-cluster-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
   `terrain-lit-fin-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
-  `terrain-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
-  `terrain-cluster-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
-  `terrain-fin-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
-  `terrain-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
   `terrain-cluster-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
   `terrain-fin-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
+  `terrain-cluster-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
+  `terrain-fin-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
+  `terrain-lit-interior-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
+  `terrain-shadow-baked-offsets depth-only ${COMPILE_MESH_NAME}`,
+  `terrain-depth-baked-offsets canvas ${COMPILE_MESH_NAME}`,
   `terrain-wire-baked-offsets canvas ${COMPILE_MESH_NAME}`,
   `terrain-wire-cluster-baked-offsets canvas ${COMPILE_MESH_NAME}`,
 ];
@@ -126,20 +127,47 @@ class MeshRecordingEngine extends CountingRenderEngine {
   }
 }
 
+/** A counting engine whose compiles end only when a test ends them, the oldest first. */
+class DeferredEngine extends CountingRenderEngine {
+  readonly #held: Array<() => void> = [];
+
+  override createMaterialAsync(
+    ...args: Parameters<CountingRenderEngine["createMaterialAsync"]>
+  ): Promise<MaterialHandle> {
+    const compiled = super.createMaterialAsync(...args);
+    return new Promise((resolve, reject) => {
+      this.#held.push(() => {
+        compiled.then(resolve, reject);
+      });
+    });
+  }
+
+  /** The compiles started and not yet ended. */
+  get running(): number {
+    return this.#held.length;
+  }
+
+  /** Ends the oldest compile still running, and lets the set's chains settle. */
+  async endOne(): Promise<void> {
+    this.#held.shift()?.();
+    await settle();
+  }
+}
+
 describe("sessionMaterials (R10.T14.d)", () => {
-  it("gives the high setting's lit, depth, caster and wireframe materials on baked offsets", async () => {
+  it("gives the high setting's lit, caster, depth and wireframe materials on baked offsets, in their order of first use", async () => {
     const engine = await countingRenderEngine();
     expect(sessionMaterials("high", engine.capabilities)).toEqual([
       { kind: "lit", path: "baked-offsets" },
-      { kind: "lit-interior", path: "baked-offsets" },
       { kind: "lit-cluster", path: "baked-offsets" },
       { kind: "lit-fin", path: "baked-offsets" },
-      { kind: "depth", path: "baked-offsets" },
-      { kind: "depth-cluster", path: "baked-offsets" },
-      { kind: "depth-fin", path: "baked-offsets" },
-      { kind: "shadow", path: "baked-offsets" },
       { kind: "shadow-cluster", path: "baked-offsets" },
       { kind: "shadow-fin", path: "baked-offsets" },
+      { kind: "depth-cluster", path: "baked-offsets" },
+      { kind: "depth-fin", path: "baked-offsets" },
+      { kind: "lit-interior", path: "baked-offsets" },
+      { kind: "shadow", path: "baked-offsets" },
+      { kind: "depth", path: "baked-offsets" },
       { kind: "wire", path: "baked-offsets" },
       { kind: "wire-cluster", path: "baked-offsets" },
     ]);
@@ -151,12 +179,12 @@ describe("sessionMaterials (R10.T14.d)", () => {
       sessionMaterials("low", engine.capabilities).map(({ kind, path }) => `${kind} ${path}`),
     ).toEqual([
       "lit face-differences",
-      "lit-interior face-differences",
       "lit-cluster face-differences",
       "lit-fin face-differences",
-      "depth face-differences",
       "depth-cluster face-differences",
       "depth-fin face-differences",
+      "lit-interior face-differences",
+      "depth face-differences",
       "wire face-differences",
       "wire-cluster face-differences",
     ]);
@@ -166,15 +194,15 @@ describe("sessionMaterials (R10.T14.d)", () => {
     const engine = await countingRenderEngine(NARROW);
     expect(sessionMaterials("high", engine.capabilities)).toEqual([
       { kind: "lit", path: "face-differences" },
-      { kind: "lit-interior", path: "face-differences" },
       { kind: "lit-cluster", path: "face-differences" },
       { kind: "lit-fin", path: "face-differences" },
-      { kind: "depth", path: "face-differences" },
-      { kind: "depth-cluster", path: "face-differences" },
-      { kind: "depth-fin", path: "face-differences" },
-      { kind: "shadow", path: "face-differences" },
       { kind: "shadow-cluster", path: "face-differences" },
       { kind: "shadow-fin", path: "face-differences" },
+      { kind: "depth-cluster", path: "face-differences" },
+      { kind: "depth-fin", path: "face-differences" },
+      { kind: "lit-interior", path: "face-differences" },
+      { kind: "shadow", path: "face-differences" },
+      { kind: "depth", path: "face-differences" },
       { kind: "wire", path: "baked-offsets" },
       { kind: "wire-cluster", path: "baked-offsets" },
     ]);
@@ -357,6 +385,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.loseDevice();
     engine.restore();
     const after = await (asked[0] ?? Promise.reject(new Error("never asked")));
+    await settle();
     expect([after === before, engine.live.materials]).toEqual([false, HIGH.length]);
     set.dispose();
     expect(engine.live.materials).toBe(0);
@@ -409,6 +438,83 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     set.dispose();
     await settle();
     expect(engine.live.materials).toBe(0);
+  });
+
+  it("compiles two at a time, in the setting's order of first use (plan R14)", async () => {
+    const engine = new DeferredEngine(await fakeDevice());
+    const set = new TerrainMaterialSet(engine, "high");
+    const running = [engine.running];
+    expect(compiles(engine)).toEqual(HIGH.slice(0, TERRAIN_COMPILES_IN_FLIGHT));
+    for (let ended = 0; ended < HIGH.length; ended += 1) {
+      // Each compile ends before the next is started.
+      // oxlint-disable-next-line no-await-in-loop
+      await engine.endOne();
+      running.push(engine.running);
+    }
+    expect([compiles(engine), running, await set.compiled]).toEqual([
+      HIGH,
+      [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0],
+      HIGH.length,
+    ]);
+  });
+
+  it("compiles a pass's asks ahead of the setting's waiting materials, its first frame's first", async () => {
+    const engine = new DeferredEngine(await fakeDevice());
+    const set = new TerrainMaterialSet(engine, "high");
+    // A pass's emissive form and another path, which the set holds neither of, then the wireframe's
+    // material, which a wireframe pass's first frame waits for and the setting's queue holds last.
+    const emissive = set.material("lit-emissive", "baked-offsets");
+    const other = set.material("depth", "face-differences");
+    const wire = set.material("wire", "baked-offsets");
+    for (let ended = 0; ended < 5; ended += 1) {
+      // oxlint-disable-next-line no-await-in-loop
+      await engine.endOne();
+    }
+    expect(compiles(engine).slice(0, 7)).toEqual([
+      ...HIGH.slice(0, 2),
+      `terrain-wire-baked-offsets canvas ${COMPILE_MESH_NAME}`,
+      `terrain-lit-emissive-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
+      `terrain-depth-face-differences canvas ${COMPILE_MESH_NAME}`,
+      ...HIGH.slice(2, 4),
+    ]);
+    expect((await Promise.all([emissive, other, wire])).map(({ name }) => name)).toEqual([
+      "terrain-lit-emissive-baked-offsets",
+      "terrain-depth-face-differences",
+      "terrain-wire-baked-offsets",
+    ]);
+  });
+
+  it("refuses the compiles still waiting when let go, starting none of them", async () => {
+    const engine = new DeferredEngine(await fakeDevice());
+    const set = new TerrainMaterialSet(engine, "high");
+    const waiting = set.material("depth", "baked-offsets");
+    set.dispose();
+    await expect(waiting).rejects.toThrow(/let go/u);
+    await engine.endOne();
+    await engine.endOne();
+    expect([compiles(engine).length, await set.compiled, engine.live.materials]).toEqual([
+      TERRAIN_COMPILES_IN_FLIGHT,
+      0,
+      0,
+    ]);
+  });
+
+  it("refuses the compiles still waiting at a restore, and queues the setting again", async () => {
+    const engine = new DeferredEngine(await fakeDevice());
+    const set = new TerrainMaterialSet(engine, "high");
+    const waiting = set.material("depth", "baked-offsets");
+    engine.loseDevice();
+    engine.restore();
+    await expect(waiting).rejects.toBeInstanceOf(EngineUnavailable);
+    while (engine.running > 0) {
+      // oxlint-disable-next-line no-await-in-loop
+      await engine.endOne();
+    }
+    // The lost device's two compiles, released as they end, then the setting's twelve again.
+    expect([compiles(engine), engine.live.materials]).toEqual([
+      [...HIGH.slice(0, 2), ...HIGH],
+      HIGH.length,
+    ]);
   });
 
   it("follows no restore once let go", async () => {

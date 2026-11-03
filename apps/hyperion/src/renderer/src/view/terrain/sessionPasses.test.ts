@@ -541,6 +541,8 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
 
   it("keeps a pass handed back, and disposes of it with its handles at its field's release", async () => {
     const h = await harness();
+    // The session's own materials, compiled two at a time as it is made, are where it starts.
+    await h.session.compiled;
     const before = h.engine.live;
     const bytes = (["height-cache", "other"] as const).map((c) => h.tally.liveBytes(c));
     await handedOver(h);
@@ -567,6 +569,8 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
 
   it("leaves the tallies where they started after 50 hand-overs and releases", async () => {
     const h = await harness();
+    // The session's own materials, compiled two at a time as it is made, are where it starts.
+    await h.session.compiled;
     const categories: ReadonlyArray<MemoryCategory> = ["height-cache", "other", "coarse-field-gpu"];
     const before = h.engine.live;
     const bytes = categories.map((c) => h.tally.liveBytes(c));
@@ -1654,6 +1658,8 @@ describe("a body handed over in both styles at once (R10.T11)", () => {
 
   it("disposes of both passes at the field's release, its handles and tallies where they started", async () => {
     const h = await harness();
+    // The session's own materials, compiled two at a time as it is made, are where it starts.
+    await h.session.compiled;
     const categories: ReadonlyArray<MemoryCategory> = ["height-cache", "other", "coarse-field-gpu"];
     const before = h.engine.live;
     const bytes = categories.map((c) => h.tally.liveBytes(c));
@@ -1723,15 +1729,15 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
    */
   const HIGH = [
     "terrain-lit-baked-offsets",
-    "terrain-lit-interior-baked-offsets",
     "terrain-lit-cluster-baked-offsets",
     "terrain-lit-fin-baked-offsets",
-    "terrain-depth-baked-offsets",
-    "terrain-cluster-depth-baked-offsets",
-    "terrain-fin-depth-baked-offsets",
-    "terrain-shadow-baked-offsets",
     "terrain-cluster-shadow-baked-offsets",
     "terrain-fin-shadow-baked-offsets",
+    "terrain-cluster-depth-baked-offsets",
+    "terrain-fin-depth-baked-offsets",
+    "terrain-lit-interior-baked-offsets",
+    "terrain-shadow-baked-offsets",
+    "terrain-depth-baked-offsets",
     "terrain-wire-baked-offsets",
     "terrain-wire-cluster-baked-offsets",
   ];
@@ -1756,12 +1762,12 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     await h.session.compiled;
     expect(compiled(h)).toEqual([
       "terrain-lit-face-differences",
-      "terrain-lit-interior-face-differences",
       "terrain-lit-cluster-face-differences",
       "terrain-lit-fin-face-differences",
-      "terrain-depth-face-differences",
       "terrain-cluster-depth-face-differences",
       "terrain-fin-depth-face-differences",
+      "terrain-lit-interior-face-differences",
+      "terrain-depth-face-differences",
       "terrain-wire-face-differences",
       "terrain-wire-cluster-face-differences",
     ]);
@@ -1807,8 +1813,11 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     h.engine.restore();
     await settle();
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
+    // The setting's again, two at a time, but for the wireframe's material, which the instrument's
+    // pass, made again at the restore, waits for its first frame on and asks ahead of the rest.
+    const wire = "terrain-wire-baked-offsets";
     expect([compiled(h, HIGH.length), drawnWith(h), h.engine.live.materials]).toEqual([
-      HIGH,
+      [...HIGH.slice(0, 2), wire, ...HIGH.slice(2).filter((name) => name !== wire)],
       HIGH_DRAWN,
       HIGH.length,
     ]);

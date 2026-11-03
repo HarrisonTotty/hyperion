@@ -2334,3 +2334,12 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     check of `stride_place` against its twin; the time-fade fallback.
   - For T2.c–d: the lit vertex stage places by `stride_place`; the resolve must too.
   - Pending: the owner's Mac and RTX runs with `strides` on and off; Windows NOT RUN.
+- **A session's materials two at a time (lean, 2026-11-03; lane fix-session-load-spike).**
+  `TerrainMaterialSet` compiles `TERRAIN_COMPILES_IN_FLIGHT` (2) at once, in `sessionMaterials`'
+  order of first use: lit; lit-cluster and lit-fin; the casters; the overlay's depth; the fallbacks
+  (lit-interior, shadow, depth); the wireframe's. A pass's ask of a material the set does not hold
+  (an emissive form, another path, a variant such as fix-survey-edge-stroke's no-mix stage) waits
+  ahead of the setting's, in the order asked, and a pass's ask of `lit` or `wire` goes first of
+  all. A new kind added to `sessionMaterials` takes its place in that order. `compiled` still
+  settles once all of the setting's have, so the views check's phases, which wait for it, start
+  later. Pending: the owner's Mac re-run.

@@ -20,6 +20,18 @@
  *   the patches' own vertex layout (`terrainMeshSpec`), made for the compile and released after it:
  *   the engine keys a material's pipelines by the mesh's layout, the target's format and its depth,
  *   so the pipelines serve every pass's mesh of that layout.
+ * - **Two at a time, first use first** (plan R14's Mac measurements; a lean, 2026-11-03). The
+ *   twelve of the high setting, sixteen pipelines, were asked at once: twelve of the twenty
+ *   compiles in flight on the GPU process's thread pool in a session's first seconds (pod,
+ *   SwiftShader, 2026-11-03), which Metal's compiler takes as wide. So the set compiles
+ *   {@link TERRAIN_COMPILES_IN_FLIGHT} at once, the rest waiting in
+ *   the setting's order of first use ({@link sessionMaterials}): the lit material first, which a
+ *   pass's first frame waits for, then the forms the setting's geometry draws, then their fallbacks
+ *   and the wireframe's. A material a pass asks that the set does not hold (an emissive form,
+ *   another path, a variant) waits ahead of the setting's, in the order asked, and a pass's ask of
+ *   the material its first frame waits for (`lit`, `wire`) goes first of all. Until a form is made
+ *   the pass draws by the one it falls back on, and until a caster is, with no shadow (w = 0), as
+ *   where one cannot be made.
  * - **A path not compiled** (a pass on another setting, say) is compiled at its first ask and kept
  *   for the next; a compile that fails is forgotten, so that the next ask tries again.
  * - **A device loss.** The handles die with the device; at the restore the set forgets them and
@@ -27,7 +39,8 @@
  *   (decision-r10-t9b-design D1), before any pass is told: its listener is added when the
  *   session is made, before any pass's resources add theirs, and the engine calls its listeners in
  *   the order they were added (`ResilientEngine`'s restore). A compile that ends after a restore or
- *   after the set is let go is released at once, and rejects.
+ *   after the set is let go is released at once, and rejects; one still waiting then is refused,
+ *   never started.
  * - **Ownership.** The set owns every handle it compiles and releases them when it is let go
  *   ({@link TerrainMaterialSet.dispose}); a pass never releases one.
  */
@@ -214,14 +227,19 @@ export function terrainMaterialOf(
 }
 
 /**
- * The materials a terrain session's passes draw with on `setting`, on a device of `limits`: the lit
- * material, its interior patches' form (plan R14, R14.T1.a) and their form on the cluster path
- * (plan R14, R14.T2.a) with the edge patches' fin forms beside each (R14.T1.g), its depth material and its interior
- * patches' cluster depth (plan R14, R14.T1.e) on the lit layout's vertex path, on the high setting the shadow cascades' caster and its interior patches'
- * cluster caster on that path too (R10.T9.b; plan R14, R14.T1.b; the low setting has no
- * cascades), and the wireframe's and its interior patches' on the cluster path (plan R14,
- * R14.T4.c) on the wireframe layout's, as `terrainLayout` resolves each; none of a layout the
- * device cannot hold (`fittedTerrainLayout`), of which no pass can be made either.
+ * The materials a terrain session's passes draw with on `setting`, on a device of `limits`, in the
+ * order the setting's passes first draw them, which the set compiles them in: on the lit layout's
+ * vertex path, the lit material, which a lit pass's first frame waits for; its interior patches'
+ * form on the cluster path (plan R14, R14.T2.a) and the edge patches' fin form (R14.T1.g), which the
+ * setting's geometry draws them by; on the high setting the shadow cascades' casters on that path,
+ * the interior patches' cluster caster (R14.T1.b) and its fin form (R10.T9.b; the low setting has no
+ * cascades); the overlay's depth on that path, the interior patches' cluster depth (R14.T1.e) and
+ * its fin form; then the forms the pass falls back on while those are made or where they cannot be,
+ * the interior patches' own mesh (R14.T1.a), the caster and the depth material by the lit mesh; and
+ * last, on the wireframe layout's path, the wireframe's and its interior patches' on the cluster path
+ * (plan R14, R14.T4.c), which an instrument's view draws. Each path is as `terrainLayout` resolves
+ * it; none of a layout the device cannot hold (`fittedTerrainLayout`), of which no pass can be made
+ * either.
  */
 export function sessionMaterials(
   setting: QualitySetting,
@@ -230,22 +248,24 @@ export function sessionMaterials(
   const keys: TerrainMaterialKey[] = [];
   const lit = fittedTerrainLayout(TERRAIN_SETTINGS[setting], limits, "lit");
   if (lit !== null) {
+    const path = lit.vertexPath;
+    const cascades = setting === "high";
     keys.push(
-      { kind: "lit", path: lit.vertexPath },
-      { kind: "lit-interior", path: lit.vertexPath },
-      { kind: "lit-cluster", path: lit.vertexPath },
-      { kind: "lit-fin", path: lit.vertexPath },
-      { kind: "depth", path: lit.vertexPath },
-      { kind: "depth-cluster", path: lit.vertexPath },
-      { kind: "depth-fin", path: lit.vertexPath },
+      { kind: "lit", path },
+      { kind: "lit-cluster", path },
+      { kind: "lit-fin", path },
+      ...(cascades
+        ? ([
+            { kind: "shadow-cluster", path },
+            { kind: "shadow-fin", path },
+          ] as const)
+        : []),
+      { kind: "depth-cluster", path },
+      { kind: "depth-fin", path },
+      { kind: "lit-interior", path },
+      ...(cascades ? ([{ kind: "shadow", path }] as const) : []),
+      { kind: "depth", path },
     );
-    if (setting === "high") {
-      keys.push(
-        { kind: "shadow", path: lit.vertexPath },
-        { kind: "shadow-cluster", path: lit.vertexPath },
-        { kind: "shadow-fin", path: lit.vertexPath },
-      );
-    }
   }
   const wire = fittedTerrainLayout(wireframeTerrainSettings(setting), limits, "wire");
   if (wire !== null) {
@@ -283,6 +303,25 @@ export type TerrainMaterialEngine = Pick<
 /** The name of the mesh each compile is made against, released once the compile ends. */
 export const COMPILE_MESH_NAME = "terrain compile";
 
+/**
+ * The compiles a set runs at once, the rest waiting their turn (a lean, 2026-11-03; see the module's
+ * remarks): two, so that a session's start asks the GPU process for two compiles at a time, not
+ * twelve.
+ */
+export const TERRAIN_COMPILES_IN_FLIGHT = 2;
+
+/** The kinds a pass's first frame waits for (`TerrainPass.ready`): an ask of one waiting goes first. */
+const FIRST_FRAME_KINDS: ReadonlySet<TerrainMaterialKind> = new Set(["lit", "wire"]);
+
+/** A material asked of the set whose compile waits for its turn. */
+interface Waiting {
+  readonly key: string;
+  /** Starts its compile, which takes one of the {@link TERRAIN_COMPILES_IN_FLIGHT}. */
+  readonly start: () => void;
+  /** Refuses it, unstarted: at a restore, or when the set is let go. */
+  readonly refuse: (error: unknown) => void;
+}
+
 /** One material asked of the set, on the device it was asked on. */
 interface Entry {
   readonly promise: Promise<MaterialHandle>;
@@ -301,6 +340,12 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
   readonly #setting: QualitySetting;
   readonly #entries = new Map<string, Entry>();
   readonly #offRestored: () => void;
+  /** The asks of passes waiting for a compile, in the order asked, each before the setting's. */
+  readonly #asked: Waiting[] = [];
+  /** The setting's materials waiting for a compile, in its order of first use. */
+  readonly #queued: Waiting[] = [];
+  /** The compiles running: at most {@link TERRAIN_COMPILES_IN_FLIGHT}, a lost device's among them. */
+  #inFlight = 0;
   /** Rises at each restore, so that a compile asked on a lost device is told from a new one's. */
   #epoch = 0;
   #disposed = false;
@@ -313,8 +358,8 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
   readonly startedAtMs: number;
 
   /**
-   * Starts compiling `setting`'s materials ({@link sessionMaterials}) on `engine`'s device at once,
-   * and again after each restore.
+   * Starts compiling `setting`'s materials ({@link sessionMaterials}) on `engine`'s device, in
+   * their order, {@link TERRAIN_COMPILES_IN_FLIGHT} at a time, and again after each restore.
    */
   constructor(engine: TerrainMaterialEngine, setting: QualitySetting) {
     this.#engine = engine;
@@ -332,17 +377,54 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
   }
 
   material(kind: TerrainMaterialKind, path: TerrainVertexPath): Promise<MaterialHandle> {
+    return this.#ask(kind, path, "pass");
+  }
+
+  /**
+   * `kind` on `path`: its entry's promise where it has one, else a new entry whose compile waits its
+   * turn, a pass's ask ahead of the setting's (see the module's remarks).
+   */
+  #ask(
+    kind: TerrainMaterialKind,
+    path: TerrainVertexPath,
+    by: "pass" | "setting",
+  ): Promise<MaterialHandle> {
     if (this.#disposed) {
       return Promise.reject(new Error("the terrain's materials were let go"));
     }
     const key = keyOf(kind, path);
     const held = this.#entries.get(key);
     if (held !== undefined) {
+      if (by === "pass" && FIRST_FRAME_KINDS.has(kind)) {
+        this.#hurry(key);
+      }
       return held.promise;
     }
     const epoch = this.#epoch;
     let entry: Entry | null = null;
-    const promise = this.#compile(kind, path).then(
+    const compiled = new Promise<MaterialHandle>((resolve, reject) => {
+      const waiting: Waiting = {
+        key,
+        start: () => {
+          this.#inFlight += 1;
+          void this.#compile(kind, path)
+            .then(resolve, reject)
+            .finally(() => {
+              this.#inFlight -= 1;
+              this.#startWaiting();
+            });
+        },
+        refuse: reject,
+      };
+      if (by === "setting") {
+        this.#queued.push(waiting);
+      } else if (FIRST_FRAME_KINDS.has(kind)) {
+        this.#asked.unshift(waiting);
+      } else {
+        this.#asked.push(waiting);
+      }
+    });
+    const promise = compiled.then(
       (handle) => {
         if (this.#disposed || epoch !== this.#epoch) {
           // Asked on a device a restore replaced, or of a set let go meanwhile: no pass draws it.
@@ -365,7 +447,43 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
     );
     entry = { promise, handle: null };
     this.#entries.set(key, entry);
+    this.#startWaiting();
     return promise;
+  }
+
+  /** Moves `key`'s compile, where it still waits, to the head of the queue. */
+  #hurry(key: string): void {
+    for (const queue of [this.#asked, this.#queued]) {
+      const at = queue.findIndex((each) => each.key === key);
+      if (at >= 0) {
+        const [waiting] = queue.splice(at, 1);
+        if (waiting !== undefined) {
+          this.#asked.unshift(waiting);
+        }
+        return;
+      }
+    }
+  }
+
+  /** Starts the waiting compiles, the passes' asks first, while fewer than the cap run. */
+  #startWaiting(): void {
+    while (this.#inFlight < TERRAIN_COMPILES_IN_FLIGHT) {
+      const next = this.#asked.shift() ?? this.#queued.shift();
+      if (next === undefined) {
+        return;
+      }
+      next.start();
+    }
+  }
+
+  /** Refuses every compile still waiting with `error`, unstarted. */
+  #refuseWaiting(error: unknown): void {
+    const waiting = [...this.#asked, ...this.#queued];
+    this.#asked.length = 0;
+    this.#queued.length = 0;
+    for (const each of waiting) {
+      each.refuse(error);
+    }
   }
 
   /**
@@ -378,13 +496,14 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
     }
     this.#disposed = true;
     this.#offRestored();
+    this.#refuseWaiting(new Error("the terrain's materials were let go"));
     this.#releaseAll();
   }
 
   /** Compiles every material of the setting; settles with how many compiled, never rejecting. */
   async #compileSetting(): Promise<number> {
     const settled = await Promise.allSettled(
-      this.keys.map(({ kind, path }) => this.material(kind, path)),
+      this.keys.map(({ kind, path }) => this.#ask(kind, path, "setting")),
     );
     // A failure is the pass's to report when it asks (`TerrainPass.ready`), as before the set.
     return settled.filter((each) => each.status === "fulfilled").length;
@@ -408,6 +527,8 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
    */
   #restored(): void {
     this.#epoch += 1;
+    // Asked on the lost device: refused as a compile a restore overtook is.
+    this.#refuseWaiting(new EngineUnavailable("createMaterialAsync"));
     try {
       this.#releaseAll();
     } finally {
