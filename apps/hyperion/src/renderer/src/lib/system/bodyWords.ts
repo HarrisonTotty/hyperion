@@ -13,7 +13,6 @@ import type {
   BeltCompositionDto,
   BeltSiteDto,
   CrustLidDto,
-  DestructionCauseDto,
   DetailLevelDto,
   HabitabilityClassDto,
   MoonOriginDto,
@@ -24,7 +23,14 @@ import type {
 } from "@hyperion/protocol";
 
 import { substanceName } from "../substances";
-import type { BodyKind, BodyState, HabitabilityLimit, Section, SurfaceState } from "./model";
+import type {
+  BodyKind,
+  BodyState,
+  DestructionCause,
+  HabitabilityLimit,
+  Section,
+  SurfaceState,
+} from "./model";
 
 /** A section that stands in place of its values: withheld, or not computed. */
 export type SectionStandIn = Extract<Section<unknown>["state"], "not_resolved" | "not_modelled">;
@@ -106,9 +112,12 @@ export function bodyStateLabel(state: BodyState): string {
   return label;
 }
 
-/** What destroyed a body, in words. */
-export function destructionCauseLabel(cause: DestructionCauseDto): string {
-  let label: string;
+/**
+ * What destroyed a body, in words; `null` for a cause this build does not know, which reads
+ * Missing.
+ */
+export function destructionCauseLabel(cause: DestructionCause): string | null {
+  let label: string | null;
   switch (cause) {
     case "dispersed":
       label = "DISPERSED";
@@ -121,6 +130,9 @@ export function destructionCauseLabel(cause: DestructionCauseDto): string {
       break;
     case "collided":
       label = "COLLIDED";
+      break;
+    case "unknown":
+      label = null;
       break;
   }
   return label;

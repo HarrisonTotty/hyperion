@@ -14,6 +14,7 @@ import {
   type BodyRotationDto,
   type BodySummaryDto,
   decodeServerMessage,
+  type DestructionCauseDto,
   type HabitabilityDto,
   type HabitabilityLimitDto,
   type RequestKind,
@@ -178,6 +179,13 @@ export function anUnknownHabitabilityLimit(name = "tidal_heating"): Habitability
   // The decoder's own trust at the wire, made where the test plays a newer server.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   return name as HabitabilityLimitDto;
+}
+
+/** A destruction cause this build does not know, typed as the decoder types it. */
+export function anUnknownDestructionCause(name = "sublimated"): DestructionCauseDto {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as DestructionCauseDto;
 }
 
 /** A surface state this build does not know, typed as the decoder types it. */

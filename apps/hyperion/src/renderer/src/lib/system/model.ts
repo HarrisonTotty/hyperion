@@ -254,11 +254,17 @@ export type BodyKind =
   | { readonly kind: "debris_disc" }
   | { readonly kind: "unresolved" };
 
+/**
+ * What destroyed a body as the display reads it: the wire's, or `unknown` for one this build does
+ * not know, since the list grows without a protocol bump (galaxy plan 04's growing enums).
+ */
+export type DestructionCause = DestructionCauseDto | "unknown";
+
 /** What has become of a body at the answer's time. */
 export type BodyState =
   | { readonly kind: "not_yet_formed" }
   | { readonly kind: "present" }
-  | { readonly kind: "destroyed"; readonly cause: DestructionCauseDto; readonly at: UniverseTime }
+  | { readonly kind: "destroyed"; readonly cause: DestructionCause; readonly at: UniverseTime }
   | { readonly kind: "unbound"; readonly at: UniverseTime };
 
 /** A body's orbit about what it orbits, and until when its elements hold. */

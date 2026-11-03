@@ -45,6 +45,7 @@ import type {
   BodySurface,
   BulkProperties,
   CrustComposition,
+  DestructionCause,
   GasShare,
   Habitability,
   Modelled,
@@ -123,6 +124,15 @@ function detailSeedRow(seed: Section<string>): ReactNode {
       return null;
   }
   return <ReadoutRow label="DETAIL SEED" shown={reading} wide />;
+}
+
+/**
+ * The `CAUSE` row of a destroyed body: its cause in words, and the guide's Missing state, the em
+ * dash, for a cause this build does not know, as a newer server's may be.
+ */
+function causeRow(cause: DestructionCause): ReactNode {
+  const label = destructionCauseLabel(cause);
+  return <ReadoutRow label="CAUSE" shown={label === null ? MISSING : value(label)} wide />;
 }
 
 /**
@@ -1009,9 +1019,7 @@ export function BodyRecordReadings({
         <ReadoutRow label="ORIGIN" shown={value(moonOriginLabel(body.kind.origin))} wide />
       ) : null}
       <ReadoutRow label="STATE" shown={value(bodyStateLabel(state))} wide />
-      {state.kind === "destroyed" ? (
-        <ReadoutRow label="CAUSE" shown={value(destructionCauseLabel(state.cause))} wide />
-      ) : null}
+      {state.kind === "destroyed" ? causeRow(state.cause) : null}
       {state.kind === "destroyed" || state.kind === "unbound" ? (
         <ReadoutRow
           label="SINCE"

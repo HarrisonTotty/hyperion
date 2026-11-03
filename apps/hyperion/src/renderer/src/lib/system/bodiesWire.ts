@@ -35,6 +35,7 @@ import {
   type CraterContractDto,
   type CraterScreeningDto,
   type CrustCompositionDto,
+  type DestructionCauseDto,
   type DetailSeedHex,
   type GasShareDto,
   type HabitabilityDto,
@@ -93,6 +94,7 @@ import type {
   CraterContract,
   CraterScreening,
   CrustComposition,
+  DestructionCause,
   GasShare,
   Habitability,
   HabitabilityLimit,
@@ -330,6 +332,20 @@ function displayableTime(time: UniverseTime): boolean {
   return Number.isInteger(time.seconds) && validNanos(time.nanos);
 }
 
+/** Every destruction cause this build knows, so that one it does not reads `unknown`. */
+const DESTRUCTION_CAUSES: Readonly<Record<DestructionCauseDto, true>> = {
+  dispersed: true,
+  engulfed: true,
+  tidally_disrupted: true,
+  collided: true,
+};
+
+// The causes grow without a protocol bump (galaxy plan 04's growing enums), and the decoder trusts
+// the generated types, so a newer server's string arrives typed as one this build knows.
+function toDestructionCause(wire: DestructionCauseDto): DestructionCause {
+  return Object.hasOwn(DESTRUCTION_CAUSES, wire) ? wire : "unknown";
+}
+
 function toState(state: BodyStateDto): BodyState {
   let result: BodyState;
   switch (state.type) {
@@ -339,7 +355,7 @@ function toState(state: BodyStateDto): BodyState {
       break;
     case "destroyed":
       check(displayableTime(state.at), "state time unusable");
-      result = { kind: "destroyed", cause: state.cause, at: state.at };
+      result = { kind: "destroyed", cause: toDestructionCause(state.cause), at: state.at };
       break;
     case "unbound":
       check(displayableTime(state.at), "state time unusable");

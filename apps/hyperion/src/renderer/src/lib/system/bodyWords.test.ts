@@ -1,9 +1,4 @@
-import type {
-  CrustLidDto,
-  DestructionCauseDto,
-  HabitabilityClassDto,
-  RedoxClassDto,
-} from "@hyperion/protocol";
+import type { CrustLidDto, HabitabilityClassDto, RedoxClassDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -15,7 +10,7 @@ import {
   redoxClassLabel,
   surfaceStateLabel,
 } from "./bodyWords";
-import type { HabitabilityLimit, SurfaceState } from "./model";
+import type { DestructionCause, HabitabilityLimit, SurfaceState } from "./model";
 
 describe("envelopeLabel", () => {
   // An H₂/He envelope's null, the steam envelope's water, other condensables' formulas and a name
@@ -49,16 +44,15 @@ describe("surfaceStateLabel", () => {
 });
 
 describe("destructionCauseLabel", () => {
-  it("names every cause the wire carries", () => {
-    const causes: [DestructionCauseDto, string][] = [
-      ["dispersed", "DISPERSED"],
-      ["engulfed", "ENGULFED"],
-      ["tidally_disrupted", "TIDALLY DISRUPTED"],
-      ["collided", "COLLIDED"],
-    ];
-    for (const [cause, word] of causes) {
-      expect(destructionCauseLabel(cause)).toBe(word);
-    }
+  // Every cause the wire carries, and one this build does not know, which reads Missing.
+  it.each<readonly [DestructionCause, string | null]>([
+    ["dispersed", "DISPERSED"],
+    ["engulfed", "ENGULFED"],
+    ["tidally_disrupted", "TIDALLY DISRUPTED"],
+    ["collided", "COLLIDED"],
+    ["unknown", null],
+  ])("names %s as %s", (cause, word) => {
+    expect(destructionCauseLabel(cause)).toBe(word);
   });
 });
 

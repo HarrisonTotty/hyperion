@@ -11,6 +11,7 @@ import type {
   BodySummaryDto,
   BodySurfaceDto,
   CondensateDeckDto,
+  DestructionCauseDto,
   OrbitDriftDto,
   ResourceAbundancesDto,
   ResponseFor,
@@ -24,6 +25,7 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import {
+  anUnknownDestructionCause,
   anUnknownHabitabilityLimit,
   anUnknownSurfaceState,
   crustResources,
@@ -2123,6 +2125,22 @@ describe("body-state times beyond 2^53 s (P14.T35.d)", () => {
 
     expect(faultOf(withFirstState({ type: "unbound", at }))).toBe("no fault");
     expect(faultOf(withFirstState({ type: "destroyed", cause: "engulfed", at }))).toBe("no fault");
+  });
+
+  it("reads a destruction cause this build does not know as unknown, and the rest as they are", () => {
+    const at = { seconds: LONG_AGO_S, nanos: 0 };
+    const first = sliceBodies().bodies[0]?.id;
+    const causeOf = (cause: DestructionCauseDto) =>
+      bodiesOf(withFirstState({ type: "destroyed", cause, at })).bodies.bodies.find(
+        (body) => body.id === first,
+      )?.state;
+
+    expect(causeOf(anUnknownDestructionCause())).toEqual({
+      kind: "destroyed",
+      cause: "unknown",
+      at,
+    });
+    expect(causeOf("collided")).toEqual({ kind: "destroyed", cause: "collided", at });
   });
 
   it("refuses a state time that is not whole seconds and nanoseconds", () => {
