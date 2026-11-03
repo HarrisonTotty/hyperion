@@ -23,11 +23,13 @@
  * where the adapter offers subgroups, so that both paths are held to the twin.
  *
  * The seventh pass is a camera's of no planes at strides up to 8 (plan R14, R14.T3.c), which every
- * instance enters, the lit pass's cap 8 too: each instance's record holds random stride bands in its
- * words 12 to 14 (none for some), drawn from a generator of their own, some instances its quadrant
- * word's bit 18 (stride 1) and some its edges' holds at k = 0 (at most 4 on those edges), the
- * blocks' and strips' template references their places, so that the seventh pass's buckets take
- * every stride of both shapes.
+ * instance enters, the lit pass's cap 8 too: the records hold random measured errors (some none),
+ * and each instance's record a random stride scale in its words 12 and 13 (none for some) and its
+ * edges' shared bands in words 20 to 67 (half floats of kilometres, some none and some +∞), drawn
+ * from generators of their own, so that each cluster's shared bands (`clusterStrideBandsM`) vary
+ * with its neighbours' errors and its edges'; some instances its quadrant word's bit 18 (stride 1)
+ * and some its edges' holds at k = 0 (at most 4 on those edges), the blocks' and strips' template
+ * references their places, so that the seventh pass's buckets take every stride of both shapes.
  */
 
 import type { Vec3 } from "../geometry/vec3";
@@ -64,7 +66,15 @@ import {
   type ClusterRecord,
   packClusterRecord,
 } from "../view/clusters/record";
-import { INSTANCE_FINEST, NO_STRIDE_BAND, type StrideBandsM } from "../view/clusters/strides";
+import {
+  EDGE_BANDS,
+  edgeBandHalf,
+  heldEdgeBandsM,
+  INSTANCE_FINEST,
+  NO_STRIDE_BAND,
+  NO_STRIDE_SCALE,
+  type StrideScale,
+} from "../view/clusters/strides";
 import { TERRAIN_DISCARD_TEMPLATES, terrainClusterMesh } from "../view/clusters/templates";
 import { quaternionFromRows } from "../view/camera/quaternion";
 import { frustumOf } from "../view/terrain/cull";
@@ -81,8 +91,11 @@ const PAGES = 12;
 const CLUSTERS = 96;
 const PASSES = 7;
 
-/** Words of the check's instance records: terrain's, the stride bands in words 12 to 14 (T3.c). */
-const INSTANCE_WORDS = 16;
+/**
+ * Words of the check's instance records: terrain's, the stride scale in words 12 and 13 and its
+ * edges' shared bands in words 20 to 67 (T3.c), its class sets' words 16 to 19 0.
+ */
+const INSTANCE_WORDS = 68;
 
 /** The cascades' passes, the first four, and the ordered pass's index, after the camera's. */
 const CASCADES = 4;
@@ -203,17 +216,49 @@ function smokeTemplateRefOf(c: number): number {
   return c < 88 ? (c % 4) << 16 : 0;
 }
 
+/** The `Float16Array` scratch the records' errors are narrowed through. */
+const HALF = new Float16Array(1);
+const HALF_BITS = new Uint16Array(HALF.buffer);
+
 /**
- * Random stride bands of an instance (R14.T3.c), rising from 0.2 to 3.2 km for stride 2 by 1.3 to
- * 2.3 times a stride, so that the clusters at up to some 20 km take every stride; none for a tenth.
+ * A record's random measured errors (R14.T3.c), the bits of e₁ to e₈: e₂ from 0.1 to 1.6 m rising
+ * by 1.3 to 2.3 times a stride, so that under {@link smokeScaleOf}'s scales the clusters at up to
+ * some 20 km take every stride; none for a tenth.
  */
-function smokeBandsOf(next: () => number): StrideBandsM {
+function smokeErrorBitsOf(next: () => number): readonly [number, number, number, number] | null {
   if (next() < 0.1) {
-    return [NO_STRIDE_BAND, NO_STRIDE_BAND, NO_STRIDE_BAND];
+    return null;
   }
-  const two = 200 + 3_000 * next();
+  const bitsOf = (e: number): number => {
+    HALF[0] = e;
+    return HALF_BITS[0] ?? 0;
+  };
+  const two = 0.1 + 1.5 * next();
   const four = two * (1.3 + next());
-  return [two, four, four * (1.3 + next())];
+  return [bitsOf(0.5 * two), bitsOf(two), bitsOf(four), bitsOf(four * (1.3 + next()))];
+}
+
+/** An instance's random stride scale (R14.T3.c): E_L ÷ τ′ 0.1 to 1.6 km, 1 ÷ τ′ 300 to 1,000; none for a tenth. */
+function smokeScaleOf(next: () => number): StrideScale {
+  if (next() < 0.1) {
+    return NO_STRIDE_SCALE;
+  }
+  return { statedM: Math.fround(100 + 1_500 * next()), perErrorM: Math.fround(300 + 700 * next()) };
+}
+
+/**
+ * An instance's random edges' shared bands, m (R14.T3.c): 0.2 to 12 km, a tenth none (as beside a
+ * patch two levels apart) and a fiftieth +∞.
+ */
+function smokeEdgeBandsOf(next: () => number): Float64Array {
+  return Float64Array.from({ length: EDGE_BANDS }, () => {
+    const roll = next();
+    return roll < 0.1
+      ? NO_STRIDE_BAND
+      : roll < 0.12
+        ? Number.POSITIVE_INFINITY
+        : 200 + 11_800 * next();
+  });
 }
 
 /** R14.T1.b's cull on the device against its twin: see the module's remarks. */
@@ -223,13 +268,15 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
   // input is as it was drawn before them.
   const nextStride = random(0x5eed_3c);
   const { templates } = terrainClusterMesh();
+  // The records' measured errors from a generator of their own too.
+  const nextError = random(0x5eed_3f);
   const records: ClusterRecord[] = [];
   for (let n = 0; n < PAGES * CLUSTERS; n += 1) {
     records.push({
       centreM: { x: 4_000 * (next() - 0.5), y: 4_000 * (next() - 0.5), z: 4_000 * (next() - 0.5) },
       radiusM: 1 + 300 * next(),
       mode: "strided",
-      strideErrorBits: null,
+      strideErrorBits: smokeErrorBitsOf(nextError),
       templateRef: smokeTemplateRefOf(n % CLUSTERS),
       shape: smokeShapeOf(n % CLUSTERS),
       // Every fin and head run, and every fifth block and strip, may discard (R14.T1.g).
@@ -238,20 +285,29 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     });
   }
   // Each origin narrowed as an instance record holds it, so that the twin takes the device's.
-  const instances = Array.from({ length: INSTANCES }, (_, n) => ({
-    originM: {
-      x: Math.fround(30_000 * (next() - 0.5)),
-      y: Math.fround(30_000 * (next() - 0.5)),
-      z: Math.fround(30_000 * (next() - 0.5)),
-    },
-    page: n % PAGES,
-    passMask: Math.floor(next() * 64) | (1 << STRIDING),
-    unitM: 0.01 + next(),
-    strideBandsM: smokeBandsOf(nextStride),
-    // Every fifth instance at stride 1 (the forced region's), every third's edges at most at 4.
-    quadrantWord:
-      (n % 5 === 0 ? INSTANCE_FINEST : 0) | (n % 3 === 0 ? Math.floor(nextStride() * 16) << 2 : 0),
-  }));
+  // The edges' bands from a generator of their own, as the strides' are.
+  const nextEdge = random(0x5eed_3e);
+  const instances = Array.from({ length: INSTANCES }, (_, n) => {
+    const bandsM = smokeEdgeBandsOf(nextEdge);
+    return {
+      originM: {
+        x: Math.fround(30_000 * (next() - 0.5)),
+        y: Math.fround(30_000 * (next() - 0.5)),
+        z: Math.fround(30_000 * (next() - 0.5)),
+      },
+      page: n % PAGES,
+      passMask: Math.floor(next() * 64) | (1 << STRIDING),
+      unitM: 0.01 + next(),
+      strideScale: smokeScaleOf(nextStride),
+      bandsM,
+      // The edges' bands as the record holds them and the kernel reads them back.
+      edgeBandsM: heldEdgeBandsM(bandsM),
+      // Every fifth instance at stride 1 (the forced region's), every third's edges at most at 4.
+      quadrantWord:
+        (n % 5 === 0 ? INSTANCE_FINEST : 0) |
+        (n % 3 === 0 ? Math.floor(nextStride() * 16) << 2 : 0),
+    };
+  });
   const axes = frame(next);
   const cascades: CascadeCullPass[] = Array.from({ length: CASCADES }, (_, k) => ({
     kind: "cascade",
@@ -363,9 +419,11 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       words.setFloat32(bytes * n + 8, instance.originM.z, true);
       words.setUint32(bytes * n + 12, instance.page, true);
       words.setUint32(bytes * n + 28, instance.quadrantWord, true);
-      instance.strideBandsM.forEach((band, l) => {
-        words.setFloat32(bytes * n + 48 + 4 * l, band, true);
-      });
+      words.setFloat32(bytes * n + 48, instance.strideScale.statedM, true);
+      words.setFloat32(bytes * n + 52, instance.strideScale.perErrorM, true);
+      for (let h = 0; h < EDGE_BANDS; h += 1) {
+        words.setUint16(bytes * n + 80 + 2 * h, edgeBandHalf(instance.bandsM[h] ?? -1), true);
+      }
       inputs[2 * n] = instance.passMask;
       inputs[2 * n + 1] = new Uint32Array(Float32Array.of(instance.unitM).buffer)[0] ?? 0;
     });
@@ -501,7 +559,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       return (
         instance !== undefined &&
         (((instance.quadrantWord & INSTANCE_FINEST) !== 0 && level > 0) ||
-          (instance.strideBandsM[0] <= 0 && level > 0))
+          (instance.strideScale.perErrorM <= 0 && level > 0))
       );
     }).length;
     checks.check(

@@ -34,13 +34,15 @@ const TERRAIN_MIXES : bool = true;
 // uniforms.ts' `subPatchWord`); everything else the instance carries is the slot's patch's. `sub.y`
 // to `sub.w` are its fades (R10.T16.i): its edges' and its corners' bytes, then its own fade's
 // byte, its rebake's fade's and the slot of the bake it fades from (`fadeFloor`, `rebakeOf`).
-// `strides` are its view's stride bands towards strides 2, 4 and 8, metres, at or below 0 for none
-// (plan R14, R14.T3.c; `terrainStrides.wgsl`), and bit 18 of `parentQuadrant` holds its camera
-// passes at stride 1 (uniforms.ts' `INSTANCE_FINEST`). `cells` are its class sets' (lane
+// `strides` are its stride scale at its view's τ′ (plan R14, R14.T3.c; `terrainStrides.wgsl`): E_L ÷
+// τ′_rad, m, then 1 ÷ τ′_rad, at or below 0 for none, and bit 18 of `parentQuadrant` holds its
+// camera passes at stride 1 (uniforms.ts' `INSTANCE_FINEST`). `cells` are its class sets' (lane
 // fix-coast-class-map; uniforms.ts' `InstanceRecords.setCells`): x the slot of its ancestor of the
 // field's cells' level, L − 6, whose class weights it fades to near the hand-over range, or
 // NO_PARENT_SLOT for none; y its place in that ancestor (`cellAncestorPlace`); z the fade, an f32's
-// bits; w its flags (`CLASS_MORPH`); all of them 0 but x where the instance takes none.
+// bits; w its flags (`CLASS_MORPH`); all of them 0 but x where the instance takes none. `edgeBands`
+// are its edges' shared stride bands, half floats of kilometres (`strideEdges.ts`), negative for
+// none.
 struct Instance {
   originM : vec3f,
   slot : u32,
@@ -51,6 +53,7 @@ struct Instance {
   sub : vec4u,
   strides : vec4f,
   cells : vec4u,
+  edgeBands : array<vec4u, 12>,
 }
 
 // `Instance.cells.w`'s flag that its class weights morph to its parent's by the morph factor, as

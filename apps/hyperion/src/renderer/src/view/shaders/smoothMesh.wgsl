@@ -43,10 +43,10 @@ struct Draw {
 // a drawn patch, both in the frame's order.
 @group(2) @binding(3) var<storage, read> slots : array<SlotRecord>;
 
-// R05's `INSTANCE_RECORD_BYTES`. The last five fields are the terrain's horizon blend's parent
+// R05's `INSTANCE_RECORD_BYTES`. The last six fields are the terrain's horizon blend's parent
 // slot and quadrant (R10.T8.b), the quadrant's word with the terrain's morph holds above it
-// (R10.T8.c), the terrain's sub-patch, its stride bands and its class sets (`terrainPatch.wgsl`'s
-// `Instance`), which the smooth figure does not read.
+// (R10.T8.c), the terrain's sub-patch, its stride scale, its class sets and its edges' stride bands
+// (`terrainPatch.wgsl`'s `Instance`), which the smooth figure does not read.
 struct PatchInstance {
   originM : vec3f,
   slot : u32,
@@ -57,6 +57,7 @@ struct PatchInstance {
   sub : vec4u,
   strides : vec4f,
   cells : vec4u,
+  edgeBands : array<vec4u, 12>,
 }
 
 @group(2) @binding(4) var<storage, read> instances : array<PatchInstance>;

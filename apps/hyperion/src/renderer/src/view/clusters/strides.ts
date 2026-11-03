@@ -10,32 +10,46 @@
  *   the level's stated error E_L (`selectionErrorM`) plus e_s, projected at the cluster's own
  *   distance by `screenSpaceErrorPx`'s one function, is within the view's τ′ (Design note 3's,
  *   `effectiveTauPx(τ, limitExcess, w)`, unslewed): at distances of at least A(L, s) = (E_L + e_s) ÷
- *   τ′_rad, τ′_rad = τ′ ÷ (W ÷ (2 tan(fov_h ÷ 2))). The e_s it takes is the largest over the
- *   level's patches the view draws (`BakedPatch.clusterErrors`; {@link StrideLevelErrors}), not
- *   each cluster's own: a shared vertex must be placed alike by every cluster that draws it, which
- *   a threshold of its own a cluster would part (lean, 2026-11-03).
- * - **The ladder.** The thresholds are one ladder a view, U(n) by the absolute level n of the chords
- *   a stride draws: a level-L patch at stride 2^(l + 1) draws the chords of level L − l − 1, and
- *   takes its bands from U(L − 1), U(L − 2) and U(L − 3) ({@link strideBandsOf}). A vertex's place
- *   then depends on where it lies on the body alone, never on which patch draws it, so two patches
- *   of one level, and a coarse and a fine one, place their shared vertices alike (the fine patch's
- *   vertex at 2^(j + 1) of its grid is the coarse one's at 2^j, and both take U(L − j − 1)). Each
- *   U(n) is the largest A(n + l, 2^l) of a resident level (l = 1, 2, 3), and at least the next
- *   finer one's ({@link strideLadder}), so that a level's bands rise with its strides. Two bands of
- *   one place may overlap: a vertex's neighbours may be moving as it moves, which the morph's
- *   evaluation of each neighbour in turn holds exact.
+ *   τ′_rad, τ′_rad = τ′ ÷ (W ÷ (2 tan(fov_h ÷ 2))), a cluster's need ({@link strideNeedM}, of its
+ *   patch's {@link StrideScale}).
+ * - **The shared bands** (fix-r14-t3c-shared-bands, research-leans-35's ruling, 2026-11-03): on a
+ *   patch's edge a vertex's band towards 2^(j + 1) is the edge's shared band there, the largest need
+ *   of its own block and the neighbour's adjacent blocks (a fine patch's level j + 1 against a
+ *   coarse one's level j, over each coarse block's stretch, the coarse–fine holds kept), or of its
+ *   block and the level's largest e_s where the neighbour is not a measured whole patch
+ *   (`terrain/strideEdges.ts`). A block's band is the largest need of it, the blocks on its sides
+ *   and its edges' shared bands along it ({@link clusterStrideBandsM}), and a cluster takes stride
+ *   2^m at (1 + β) times it. Inside a block a vertex's band is its block's, and on a block's side
+ *   the smaller of its two blocks' ({@link vertexStrideBandM}): at most each band of the blocks that
+ *   drop it, so that each draws it wholly moved, and at least the needs of the blocks holding it.
+ *   So every vertex two clusters draw is placed alike by both, whichever patch each is of.
+ * - **Why a block's band inside it** (as built, 2026-11-03; the ruling gave each vertex the largest
+ *   need of the blocks holding it): e_s bounds a block's stride-s mesh with one k across it (Design
+ *   note 3). A vertex the block keeps but that moves at its own block's need, while a neighbour's
+ *   larger need holds the block at the finer stride, leaves a mesh that is neither stride's: on the
+ *   Moon-like world's bakes the drawn-error test (`strides.wasm.test.ts`) drew 1.08 τ′ at a block
+ *   held at stride 4 whose level-2 vertices had moved to stride 8's chords (e₄ 15.1 m, e₈ 23.0 m,
+ *   26.1 m drawn). At its block's band a vertex moves only as its block is about to drop it, as
+ *   under the view's ladder, at no cost to the cull's strides. A block's side still moves at the
+ *   smaller band of its two blocks, and a patch's edge at the larger need of its blocks.
+ * - **The records.** The blocks' errors reach the vertex stage in their slot's record and the
+ *   edges' bands in the instance's, as half floats of kilometres rounded up
+ *   ({@link edgeBandHalf}).
  * - **The stride morph** (CDLOD's distance morph, Strugar 2010, applied to the strides; stateless):
  *   a vertex at morph level j, its grid place a multiple of 2^j but not of 2^(j + 1) (capped at 3,
  *   a block's corners, which never move), is what the stride-2^(j + 1) mesh drops; it moves towards
  *   the mean of its two neighbours at 2^j along its quad's side or on its (0, 0)–(1, 1) diagonal
  *   ({@link strideParents}), the coarser mesh's interpolant there, by k_j = clamp((d − U) ÷ (β U),
- *   0, 1), d its own distance and U its band ({@link STRIDE_BAND_FRACTION}). The neighbours are
- *   placed so themselves, so a vertex's place is a function of the vertex alone
- *   ({@link stridePlace}), and a cluster drawn at stride 2^m, every vertex it drops at k = 1, draws
- *   exactly the morphed surface: the cull takes 2^m only where the cluster's nearest point is past
- *   (1 + β) U of its stride-2^m band ({@link cameraStrideLevel}), so a stride flipping there moves
- *   nothing, at any stride beside any other. The morph mixes the vertex's height, its CDLOD k and
- *   its datum's normal with its place, so that the varyings flip with it.
+ *   0, 1), d its own distance and U its band ({@link STRIDE_BAND_FRACTION};
+ *   {@link vertexStrideBandM}). The neighbours are placed so themselves, so a vertex's place is a
+ *   function of the vertex, its patch's errors and scale and its edges' bands alone
+ *   ({@link stridePlace}), and a cluster drawn at stride 2^m, every vertex it drops at k = 1,
+ *   draws exactly the morphed surface: the cull takes 2^m only where the cluster's nearest point is
+ *   past (1 + β) U of each of its bands up to stride 2^m ({@link cameraStrideLevel}), so a stride
+ *   flipping there moves nothing, at any stride beside any other. A vertex's neighbours may be
+ *   moving as it moves, which the evaluation of each in turn holds exact. The morph mixes the
+ *   vertex's height, its CDLOD k and its datum's normal with its place, so that the varyings flip
+ *   with it.
  * - **Where it holds.** A contact's hold (R05 Design note 6) caps each k at the vertex's hold, so
  *   the ground within every held radius is the finest interpolant (Design note 10); where a finer
  *   patch touches an edge (its coarse–fine hold at k = 0), the edge's level-2 vertices stay, since
@@ -44,7 +58,6 @@
  *   they stand on its edge wherever its vertices move ({@link strideHeldFactor}).
  */
 
-import { MAX_LEVEL } from "../terrain/patchKey";
 import type { PlanetGeometry } from "../terrain/planet";
 import { selectionErrorM } from "../terrain/select";
 
@@ -72,7 +85,7 @@ export const STRIDE_MORPH_LEVELS = 3;
  */
 export const INSTANCE_FINEST = 1 << 18;
 
-/** A view's three bands for one level's patches, m: towards strides 2, 4 and 8. */
+/** A patch's or an edge's three bands, m: towards strides 2, 4 and 8. */
 export type StrideBandsM = readonly [two: number, four: number, eight: number];
 
 /** No strides: every band {@link NO_STRIDE_BAND}. */
@@ -81,57 +94,6 @@ export const NO_STRIDE_BANDS: StrideBandsM = [NO_STRIDE_BAND, NO_STRIDE_BAND, NO
 /** A cluster's or a level's e₂, e₄ and e₈, m. */
 export type StrideErrorsM = readonly [two: number, four: number, eight: number];
 
-/** The largest e_s a level holds, m, three a level (s = 2, 4, 8) in {@link StrideLevelErrors}. */
-export const STRIDE_LEVEL_ERRORS = 3;
-
-/**
- * A frame's decay of a view's levels' errors (see {@link StrideLevelErrors}), as a fraction (a hand
- * value, lean, 2026-11-03): a level's bands come back in by at most a tenth of their width
- * ({@link STRIDE_BAND_FRACTION}) a frame once its roughest patch leaves the view, so that a vertex's
- * k moves by at most 0.1 a frame for it, and the bands halve in some 350 frames.
- */
-export const STRIDE_ERROR_DECAY = 0.002;
-
-/**
- * The largest measured e₂, e₄ and e₈ over each level's clusters, m, for levels 0 to `MAX_LEVEL`, as
- * a view's ladder takes them (lean, 2026-11-03): raised at once to its drawn patches' each frame,
- * which the drawn error needs, and else lowered by at most {@link STRIDE_ERROR_DECAY} a frame; a
- * level none has held reads −1.
- */
-export class StrideLevelErrors {
-  /** Three a level, e₂, e₄, e₈, m; −1 for a level with none. */
-  readonly errorsM = new Float64Array((MAX_LEVEL + 1) * STRIDE_LEVEL_ERRORS).fill(-1);
-
-  /** Raises `level`'s errors to a bake's largest ({@link largestStrideErrorsM} of its clusters). */
-  raise(level: number, largestM: StrideErrorsM): void {
-    const base = STRIDE_LEVEL_ERRORS * level;
-    for (let l = 0; l < STRIDE_LEVEL_ERRORS; l += 1) {
-      const at = base + l;
-      this.errorsM[at] = Math.max(this.errorsM[at] ?? -1, largestM[l] ?? Infinity);
-    }
-  }
-
-  /** Raises `level`'s errors by a bake's clusters' errors (`BakedPatch.clusterErrors`). */
-  take(level: number, clusterErrors: Float16Array): void {
-    this.raise(level, largestStrideErrorsM(clusterErrors));
-  }
-
-  /** Lowers every level's errors by {@link STRIDE_ERROR_DECAY}, as a frame begins. */
-  decay(): void {
-    for (let at = 0; at < this.errorsM.length; at += 1) {
-      const e = this.errorsM[at] ?? -1;
-      if (e > 0 && Number.isFinite(e)) {
-        this.errorsM[at] = e * (1 - STRIDE_ERROR_DECAY);
-      }
-    }
-  }
-
-  /** Forgets every level's errors, as for a new device. */
-  clear(): void {
-    this.errorsM.fill(-1);
-  }
-}
-
 /**
  * The largest e₂, e₄ and e₈ of a bake's clusters, m (`BakedPatch.clusterErrors`, four half floats a
  * cluster, e₁ first), +∞ for a NaN.
@@ -139,7 +101,7 @@ export class StrideLevelErrors {
 export function largestStrideErrorsM(clusterErrors: Float16Array): StrideErrorsM {
   const most = [0, 0, 0];
   for (let c = 0; 4 * c + 3 < clusterErrors.length; c += 1) {
-    for (let l = 0; l < STRIDE_LEVEL_ERRORS; l += 1) {
+    for (let l = 0; l < 3; l += 1) {
       const e = clusterErrors[4 * c + l + 1] ?? Number.POSITIVE_INFINITY;
       most[l] = Math.max(most[l] ?? 0, Number.isNaN(e) ? Infinity : e);
     }
@@ -148,53 +110,228 @@ export function largestStrideErrorsM(clusterErrors: Float16Array): StrideErrorsM
 }
 
 /**
- * A view's ladder (see the module's remarks): U(n) for n from 0 to `MAX_LEVEL` into `outM`, m, the
- * band at which the chords of level n begin to be drawn, {@link NO_STRIDE_BAND} where no resident
- * level takes it or the view takes no strides.
- *
- * @param toleranceRad - τ′ over the view's px per radian; at or below 0, or not finite, no strides.
- * @param levelErrorsM - {@link StrideLevelErrors.errorsM}.
+ * A patch's stride scale at its view's tolerance (see the module's remarks): a cluster whose error
+ * towards a stride is e needs the band statedM + e × perErrorM, m, A(L, s) = (E_L + e_s) ÷ τ′_rad.
  */
-export function strideLadder(
+export interface StrideScale {
+  /** E_L ÷ τ′_rad, m. */
+  readonly statedM: number;
+  /** 1 ÷ τ′_rad, m of band a metre of error; at or below 0 for none, its patch never striding. */
+  readonly perErrorM: number;
+}
+
+/** No strides: no band. */
+export const NO_STRIDE_SCALE: StrideScale = { statedM: 0, perErrorM: 0 };
+
+/**
+ * A level-`level` patch's scale at the view's tolerance `toleranceRad` (τ′ over its px per radian):
+ * {@link NO_STRIDE_SCALE} where the tolerance is not above 0 or not finite.
+ */
+export function patchStrideScale(
   planet: PlanetGeometry,
+  level: number,
   toleranceRad: number,
-  levelErrorsM: Float64Array,
-  outM: Float64Array,
-): Float64Array {
-  outM.fill(NO_STRIDE_BAND);
+): StrideScale {
   if (!(toleranceRad > 0 && Number.isFinite(toleranceRad))) {
-    return outM;
+    return NO_STRIDE_SCALE;
   }
-  const deepest = Math.min(planet.finestLevel, MAX_LEVEL);
-  let finer = NO_STRIDE_BAND;
-  for (let n = deepest - 1; n >= 0; n -= 1) {
-    let need = Number.NEGATIVE_INFINITY;
-    for (let l = 1; l <= STRIDE_MORPH_LEVELS; l += 1) {
-      const level = n + l;
-      const e = level <= deepest ? (levelErrorsM[STRIDE_LEVEL_ERRORS * level + l - 1] ?? -1) : -1;
-      if (e >= 0) {
-        need = Math.max(need, (selectionErrorM(planet, level) + e) / toleranceRad);
-      }
-    }
-    if (need === Number.NEGATIVE_INFINITY) {
-      finer = NO_STRIDE_BAND;
-      continue;
-    }
-    need = Math.max(need, finer);
-    const band = Number.isFinite(need) ? need : NO_STRIDE_BAND;
-    outM[n] = band;
-    finer = band;
-  }
-  return outM;
+  return { statedM: selectionErrorM(planet, level) / toleranceRad, perErrorM: 1 / toleranceRad };
 }
 
 /**
- * A level-`level` patch's bands from `ladder`, m: U(L − 1), U(L − 2) and U(L − 3), each
- * {@link NO_STRIDE_BAND} where the ladder has none or L − l − 1 is below 0.
+ * The band, m, a cluster of error `errorM` towards a stride needs under `scale`, in `f32` as the
+ * kernel and the vertex stage form it (`clusterCull.wgsl`'s `stride_need`, `terrainStrides.wgsl`'s
+ * own); {@link NO_STRIDE_BAND} for no scale or an error not finite and at least 0.
  */
-export function strideBandsOf(ladderM: Float64Array, level: number): StrideBandsM {
-  const band = (n: number): number => (n >= 0 ? (ladderM[n] ?? NO_STRIDE_BAND) : NO_STRIDE_BAND);
-  return [band(level - 1), band(level - 2), band(level - 3)];
+export function strideNeedM(scale: StrideScale, errorM: number): number {
+  const f = Math.fround;
+  if (!(scale.perErrorM > 0) || !(errorM >= 0) || !Number.isFinite(errorM)) {
+    return NO_STRIDE_BAND;
+  }
+  return f(f(scale.statedM) + f(f(errorM) * f(scale.perErrorM)));
+}
+
+/** Band `a` and band `b` shared: the larger, none where either is none. */
+export function sharedStrideBandM(a: number, b: number): number {
+  return a > 0 && b > 0 ? Math.max(a, b) : NO_STRIDE_BAND;
+}
+
+/**
+ * The band of a vertex two clusters of bands `a` and `b` hold: the smaller, where the first of them
+ * drops it, or the one that drops it at all; none where neither does.
+ */
+export function heldStrideBandM(a: number, b: number): number {
+  if (a > 0 && b > 0) {
+    return Math.min(a, b);
+  }
+  return a > 0 ? a : b > 0 ? b : NO_STRIDE_BAND;
+}
+
+/** Bands `a` and `b` shared, stride by stride ({@link sharedStrideBandM}). */
+export function sharedStrideBandsM(a: StrideBandsM, b: StrideBandsM): StrideBandsM {
+  return [
+    sharedStrideBandM(a[0], b[0]),
+    sharedStrideBandM(a[1], b[1]),
+    sharedStrideBandM(a[2], b[2]),
+  ];
+}
+
+/**
+ * A block's error towards stride 2^(level + 1), m, of a bake's clusters' errors (`BakedPatch.
+ * clusterErrors`, four half floats a cluster, e₁ first), +∞ for a NaN or one missing.
+ */
+export function blockErrorM(
+  clusterErrors: ArrayLike<number>,
+  block: number,
+  level: number,
+): number {
+  const e = clusterErrors[4 * block + level + 1] ?? Number.POSITIVE_INFINITY;
+  return Number.isNaN(e) ? Number.POSITIVE_INFINITY : e;
+}
+
+/** The bands a patch's edges share (see the module's remarks): 4 edges × 8 blocks × 3 strides. */
+export const EDGE_BANDS = 96;
+
+/**
+ * The place in a patch's edges' bands of edge `edge` (`EDGES`' order: x = 0, x = 64, y = 0, y = 64)
+ * at its block `t` along it (y ÷ 8 on x = 0 and 64, x ÷ 8 on y = 0 and 64), towards stride
+ * 2^(level + 1).
+ */
+export function edgeBandIndex(edge: number, t: number, level: number): number {
+  return (8 * edge + t) * 3 + level;
+}
+
+/** A patch's edges' shared bands, m, {@link EDGE_BANDS} of them at {@link edgeBandIndex}. */
+export type StrideEdgeBandsM = ArrayLike<number>;
+
+/** No edge's bands: every edge's vertices held. */
+export const NO_STRIDE_EDGE_BANDS: StrideEdgeBandsM = new Float64Array(EDGE_BANDS).fill(
+  NO_STRIDE_BAND,
+);
+
+/** The `Float16Array` scratch the edges' bands are rounded through. */
+const HALF = new Float16Array(1);
+const HALF_BITS = new Uint16Array(HALF.buffer);
+
+/**
+ * An edge's shared band as the instance record holds it (`gpu/uniforms.ts`): a half float of
+ * kilometres, rounded up, so that no stride is taken nearer than its need; a negative half for none
+ * and +∞ for a band past 65,504 km.
+ */
+export function edgeBandHalf(bandM: number): number {
+  if (!(bandM > 0)) {
+    return 0xbc00; // −1
+  }
+  const km = bandM / 1000;
+  HALF[0] = km;
+  if (HALF[0] < km && (HALF_BITS[0] ?? 0) < 0x7c00) {
+    HALF_BITS[0] = (HALF_BITS[0] ?? 0) + 1;
+  }
+  return HALF_BITS[0] ?? 0x7c00;
+}
+
+/**
+ * The band, m, of an edge's half float ({@link edgeBandHalf}), in `f32` as the kernel and the vertex
+ * stage read it (`unpack2x16float` × 1000), {@link NO_STRIDE_BAND} for a negative one.
+ */
+export function edgeBandOfHalf(half: number): number {
+  HALF_BITS[0] = half;
+  const km = HALF[0] ?? -1;
+  return km > 0 ? Math.fround(Math.fround(km) * 1000) : NO_STRIDE_BAND;
+}
+
+/** `bandsM` as the instance record holds them and the shaders read them back, m. */
+export function heldEdgeBandsM(bandsM: StrideEdgeBandsM): Float64Array {
+  return Float64Array.from({ length: EDGE_BANDS }, (_, n) =>
+    edgeBandOfHalf(edgeBandHalf(bandsM[n] ?? NO_STRIDE_BAND)),
+  );
+}
+
+/**
+ * The band, m, of a patch's grid vertex (x, y) at morph level `level` (below 3; see the module's
+ * remarks): on a patch's edge (not a corner, which is level 3) its edge's shared band there, on a
+ * block's side the smaller of its two blocks' bands ({@link heldStrideBandM}), else its block's
+ * (`terrainStrides.wgsl`'s `stride_band`).
+ */
+export function vertexStrideBandM(
+  scale: StrideScale,
+  clusterErrors: ArrayLike<number>,
+  edgeBandsM: StrideEdgeBandsM,
+  x: number,
+  y: number,
+  level: number,
+): number {
+  if (x === 0 || x === 64 || y === 0 || y === 64) {
+    const edge = x === 0 ? 0 : x === 64 ? 1 : y === 0 ? 2 : 3;
+    const t = Math.floor((edge < 2 ? y : x) / 8);
+    return edgeBandsM[edgeBandIndex(edge, t, level)] ?? NO_STRIDE_BAND;
+  }
+  const cluster = (bx: number, by: number): number =>
+    clusterStrideBandsM(scale, clusterErrors, edgeBandsM, 8 * by + bx)[level] ?? NO_STRIDE_BAND;
+  const bx = Math.floor(x / 8);
+  const by = Math.floor(y / 8);
+  const band = cluster(bx, by);
+  if (x % 8 === 0) {
+    return heldStrideBandM(band, cluster(bx - 1, by));
+  }
+  if (y % 8 === 0) {
+    return heldStrideBandM(band, cluster(bx, by - 1));
+  }
+  return band;
+}
+
+/**
+ * Cluster `cluster`'s bands, m, towards strides 2, 4 and 8 (see the module's remarks): the largest
+ * band of the vertices it drops, none where any is none. A block's own need, its neighbours' on its
+ * sides within the patch, and its patch's edges' shared bands along it; a strip's edge's shared
+ * bands along its block (strip m of edge e, anticlockwise in `gpu/resources.ts`' numbering); none
+ * for a fin or head run, drawn at stride 1 (`clusterCull.wgsl`'s `cluster_bands`).
+ */
+export function clusterStrideBandsM(
+  scale: StrideScale,
+  clusterErrors: ArrayLike<number>,
+  edgeBandsM: StrideEdgeBandsM,
+  cluster: number,
+): StrideBandsM {
+  const edgeBands = (edge: number, t: number): StrideBandsM => [
+    edgeBandsM[edgeBandIndex(edge, t, 0)] ?? NO_STRIDE_BAND,
+    edgeBandsM[edgeBandIndex(edge, t, 1)] ?? NO_STRIDE_BAND,
+    edgeBandsM[edgeBandIndex(edge, t, 2)] ?? NO_STRIDE_BAND,
+  ];
+  if (cluster >= 64 && cluster < 96) {
+    const e = Math.floor((cluster - 64) / 8);
+    const m = (cluster - 64) % 8;
+    // Edge e of `gpu/resources.ts` (0 y = 0, 1 x = 64, 2 y = 64, 3 x = 0), anticlockwise.
+    const edge = [2, 1, 3, 0][e] ?? 0;
+    return edgeBands(edge, e < 2 ? m : 7 - m);
+  }
+  if (cluster < 0 || cluster >= 64) {
+    return NO_STRIDE_BANDS;
+  }
+  const bx = cluster % 8;
+  const by = Math.floor(cluster / 8);
+  const need = (block: number): StrideBandsM => [
+    strideNeedM(scale, blockErrorM(clusterErrors, block, 0)),
+    strideNeedM(scale, blockErrorM(clusterErrors, block, 1)),
+    strideNeedM(scale, blockErrorM(clusterErrors, block, 2)),
+  ];
+  let bands = need(cluster);
+  const sides: ReadonlyArray<readonly [boolean, () => StrideBandsM]> = [
+    [bx > 0, () => need(cluster - 1)],
+    [bx < 7, () => need(cluster + 1)],
+    [by > 0, () => need(cluster - 8)],
+    [by < 7, () => need(cluster + 8)],
+    [bx === 0, () => edgeBands(0, by)],
+    [bx === 7, () => edgeBands(1, by)],
+    [by === 0, () => edgeBands(2, bx)],
+    [by === 7, () => edgeBands(3, bx)],
+  ];
+  for (const [on, of] of sides) {
+    if (on) {
+      bands = sharedStrideBandsM(bands, of());
+    }
+  }
+  return bands;
 }
 
 /**
@@ -250,10 +387,11 @@ export function strideParents(
 
 /**
  * The stride morph's k at a vertex of `band`, m, at its own distance `distanceM`: clamp((d − U) ÷
- * (β U), 0, 1), 0 for no band (`stride_factor`, before its holds).
+ * (β U), 0, 1), 0 for no band or one past `f32`'s reach, an edge's +∞ (`stride_factor`, before its
+ * holds).
  */
 export function strideMorphFactor(bandM: number, distanceM: number): number {
-  if (!(bandM > 0)) {
+  if (!(bandM > 0 && bandM < 3.0e38)) {
     return 0;
   }
   return Math.min(1, Math.max(0, (distanceM - bandM) / (STRIDE_BAND_FRACTION * bandM)));

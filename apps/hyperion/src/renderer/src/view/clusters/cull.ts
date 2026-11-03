@@ -30,7 +30,14 @@ import type {
 import type { ClusterLod, ClusterRecord } from "./record";
 import { CLUSTER_SHAPE_CODE } from "./record";
 import { NO_DISCARD_TEMPLATE } from "./cullPass";
-import { cameraStrideLevel, INSTANCE_FINEST, type StrideBandsM } from "./strides";
+import {
+  cameraStrideLevel,
+  clusterStrideBandsM,
+  INSTANCE_FINEST,
+  NO_STRIDE_EDGE_BANDS,
+  type StrideEdgeBandsM,
+  type StrideScale,
+} from "./strides";
 import { STRIDES } from "./templates";
 
 /**
@@ -113,10 +120,16 @@ export interface CullInstance {
    */
   readonly whole?: boolean;
   /**
-   * Its camera passes' stride bands, m (plan R14, R14.T3.c; terrain's `Instance.strides`); absent,
-   * none: its camera passes draw it at stride 1.
+   * Its camera passes' stride scale (plan R14, R14.T3.c; terrain's `Instance.strides`), its
+   * clusters' bands formed from their records' measured errors; absent, none: its camera passes
+   * draw it at stride 1.
    */
-  readonly strideBandsM?: StrideBandsM;
+  readonly strideScale?: StrideScale;
+  /**
+   * Its edges' shared stride bands, m, as its record holds them (`strides.ts`' `heldEdgeBandsM`;
+   * terrain's `Instance.edgeBands`); absent, none: its edges' vertices held.
+   */
+  readonly edgeBandsM?: StrideEdgeBandsM;
   /**
    * Its instance record's quadrant word (terrain's `parentQuadrant`): its coarse–fine holds at
    * k = 0 in bits 2 to 5, a camera pass's stride at most 4 on those edges, and bit 18
@@ -433,28 +446,73 @@ export function recordEdges(record: ClusterRecord): number {
   return 0;
 }
 
+/** The `Float16Array` scratch a record's measured errors are read through. */
+const HALF = new Float16Array(1);
+const HALF_BITS = new Uint16Array(HALF.buffer);
+
 /**
- * A camera pass's stride's level for `record` of `instance` at `centreM`, camera-relative
- * (`camera_stride_level`; plan R14, R14.T3.c): 0 for an instance with no bands, held at stride 1 or
- * kept whole (its heights fading from another surface, which its spheres do not bound), else
- * `cameraStrideLevel` at the sphere's nearest point, up to the pass's cap and to 2 on an edge a
- * finer patch touches.
+ * The measured errors, m, of cluster `cluster`'s block and the blocks on its sides, of page `page`'s
+ * records, four a block, e₁ first, as `strides.ts`' `blockErrorM` reads a bake's (the kernel's
+ * `record_error`): +∞ for a block past the page or not measured.
+ */
+function blockErrorsOf(
+  input: Pick<CullTwinInput, "records" | "clustersPerPage">,
+  page: number,
+  cluster: number,
+): Float64Array {
+  const errorsM = new Float64Array(4 * 64).fill(Number.POSITIVE_INFINITY);
+  for (const block of [cluster, cluster - 1, cluster + 1, cluster - 8, cluster + 8]) {
+    if (block < 0 || block >= Math.min(64, input.clustersPerPage)) {
+      continue;
+    }
+    const record = input.records(page, block);
+    const bits = record.mode === "strided" ? record.strideErrorBits : null;
+    bits?.forEach((b, n) => {
+      HALF_BITS[0] = b;
+      errorsM[4 * block + n] = HALF[0] ?? Number.POSITIVE_INFINITY;
+    });
+  }
+  return errorsM;
+}
+
+/**
+ * A camera pass's stride's level for `record`, cluster `cluster` of `instance` at `centreM`,
+ * camera-relative (`camera_stride_level`; plan R14, R14.T3.c): 0 for an instance with no scale, held
+ * at stride 1 or kept whole (its heights fading from another surface, which its spheres do not
+ * bound), else `cameraStrideLevel` at the sphere's nearest point of its shared bands
+ * (`clusterStrideBandsM`, its page's records' measured errors under its scale and its edges' bands),
+ * up to the pass's cap and to 2 on an edge a finer patch touches.
  */
 export function cameraPassStrideLevel(
   pass: CameraCullPass,
   record: ClusterRecord,
+  cluster: number,
   instance: CullInstance,
+  input: Pick<CullTwinInput, "records" | "clustersPerPage">,
   centreM: Vec3,
 ): number {
   const quadrant = instance.quadrantWord ?? 0;
-  const bands = instance.strideBandsM;
-  if (bands === undefined || instance.whole === true || (quadrant & INSTANCE_FINEST) !== 0) {
+  const scale = instance.strideScale;
+  if (
+    scale === undefined ||
+    !(scale.perErrorM > 0) ||
+    instance.whole === true ||
+    (quadrant & INSTANCE_FINEST) !== 0 ||
+    cluster >= input.clustersPerPage
+  ) {
     return 0;
   }
+  const edges = recordEdges(record);
   let cap = Math.min(Math.log2(pass.strideCap), STRIDES.length - 1);
-  if ((recordEdges(record) & ((quadrant >>> 2) & 0xf)) !== 0) {
+  if ((edges & ((quadrant >>> 2) & 0xf)) !== 0) {
     cap = Math.min(cap, 2);
   }
+  const bands = clusterStrideBandsM(
+    scale,
+    blockErrorsOf(input, instance.page, cluster),
+    instance.edgeBandsM ?? NO_STRIDE_EDGE_BANDS,
+    cluster,
+  );
   return cameraStrideLevel(bands, cap, distance(centreM, record.radiusM));
 }
 
@@ -467,6 +525,7 @@ export function cameraPassStrideLevel(
  */
 function templateOf(
   record: ClusterRecord,
+  cluster: number,
   pass: CullPass,
   instance: CullInstance,
   input: CullTwinInput,
@@ -482,7 +541,7 @@ function templateOf(
     record.mode === "dag"
       ? 0
       : pass.kind === "camera"
-        ? cameraPassStrideLevel(pass, record, instance, centreM)
+        ? cameraPassStrideLevel(pass, record, cluster, instance, input, centreM)
         : strideLevel(pass, instance.unitM);
   return shape < 0 ? Infinity : shape * STRIDES.length + level;
 }
@@ -590,7 +649,7 @@ export function cullMarksTwin(
       return;
     }
     const at = n * input.clustersPerPage + cluster;
-    const t = templateOf(record, pass, instance, input, centre);
+    const t = templateOf(record, cluster, pass, instance, input, centre);
     const marked =
       t < input.templates &&
       (occlusion === undefined ||
@@ -629,7 +688,7 @@ export function cullVisibilityTwin(
     }
     const kept =
       recordKept(input, pass, p, instance, cluster, record, centre, slackScale) &&
-      templateOf(record, pass, instance, input, centre) < input.templates &&
+      templateOf(record, cluster, pass, instance, input, centre) < input.templates &&
       lateSees(occlusion, instance, centre, record.radiusM);
     visible.set(instance.page * input.clustersPerPage + cluster, kept);
   });
@@ -660,7 +719,7 @@ export function cullTwin(input: CullTwinInput, slackScale = 1): CullTwinBuckets 
         ) {
           return;
         }
-        const t = templateOf(record, pass, instance, input, centre);
+        const t = templateOf(record, cluster, pass, instance, input, centre);
         if (t >= input.templates) {
           return;
         }

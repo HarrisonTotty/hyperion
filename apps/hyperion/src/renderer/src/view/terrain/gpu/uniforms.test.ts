@@ -324,7 +324,7 @@ describe("an instance record's class sets (lane fix-coast-class-map)", () => {
       Array.from(u.slice(16, 20)),
       [u[WORDS + 16], u[WORDS + 17], f[WORDS + 18], u[WORDS + 19]],
       INSTANCE_RECORD_BYTES,
-    ]).toEqual([[NO_PARENT_SLOT, 0, 0, 0], [9, 3 | (5 << 5) | (6 << 18), 0.25, CLASS_MORPH], 80]);
+    ]).toEqual([[NO_PARENT_SLOT, 0, 0, 0], [9, 3 | (5 << 5) | (6 << 18), 0.25, CLASS_MORPH], 272]);
   });
 
   it("places a patch in its ancestor d levels up by its i and j mod 2^d, the patch itself at 0 levels", () => {

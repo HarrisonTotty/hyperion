@@ -46,7 +46,14 @@ import {
   packClusterRecord,
 } from "./record";
 import { HZB_PARAMS_BYTES } from "./hzb";
-import { INSTANCE_FINEST, NO_STRIDE_BANDS, type StrideBandsM } from "./strides";
+import {
+  EDGE_BANDS,
+  edgeBandIndex,
+  INSTANCE_FINEST,
+  NO_STRIDE_BAND,
+  NO_STRIDE_SCALE,
+  type StrideScale,
+} from "./strides";
 import { TERRAIN_DISCARD_TEMPLATES } from "./templates";
 
 /** Fails a test whose fixture lacks what it needs. */
@@ -82,6 +89,15 @@ function cascade(extra: Partial<CascadeCullPass> = {}): CascadeCullPass {
 }
 
 /** A block record at `centreM` of radius `radiusM`. */
+/** The bits of a measured record's half-float errors e₁, e₂, e₄ and e₈, m. */
+function errorBits(
+  errorsM: readonly [number, number, number, number],
+): readonly [number, number, number, number] {
+  const half = new Float16Array(errorsM);
+  const bits = new Uint16Array(half.buffer);
+  return [bits[0] ?? 0, bits[1] ?? 0, bits[2] ?? 0, bits[3] ?? 0];
+}
+
 function record(
   centreM: Vec3,
   radiusM: number,
@@ -549,17 +565,34 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
     expect([...buckets.keys()].map(strideOf)).toEqual([1, 1]);
   });
 
-  /** One cluster's stride in a camera pass of cap `cap` for an instance of `bands` and `quadrant`. */
+  /** A page's block of errors e₂, e₄ and e₈ 1, 2 and 4 m, its bands 100, 200 and 400 m at SCALE. */
+  const PAGE_BLOCK = { ...record(Z, 1), strideErrorBits: errorBits([0.5, 1, 2, 4]) };
+
+  /** A scale of 1 ÷ τ′ 100: a band of 100 m a metre of error. */
+  const SCALE: StrideScale = { statedM: 0, perErrorM: 100 };
+
+  /** The page's cluster the strides test by default: block (3, 3), within the patch. */
+  const INNER = 27;
+
+  /**
+   * One cluster's stride in a camera pass of cap `cap` for an instance of `extra`, cluster `at` of a
+   * page of 116 whose blocks are {@link PAGE_BLOCK} but for `page`'s.
+   */
   function cameraStride(
     cluster: ClusterRecord,
     distanceM: number,
     extra: Partial<CullInstance> = {},
     cap: CameraCullPass["strideCap"] = 8,
+    at = INNER,
+    page: ReadonlyMap<number, ClusterRecord> = new Map(),
   ): number {
     const buckets = cullTwin({
       instances: [{ originM: { x: 0, y: 0, z: 0 }, page: 0, passMask: 0b1, unitM: 1, ...extra }],
-      records: () => ({ ...cluster, centreM: { x: 0, y: 0, z: -distanceM } }),
-      clustersPerPage: 1,
+      records: (_page, c) =>
+        c === at
+          ? { ...cluster, centreM: { x: 0, y: 0, z: -distanceM } }
+          : { ...(page.get(c) ?? PAGE_BLOCK), radiusM: -1 },
+      clustersPerPage: 116,
       rotationColumns: [X, Y, Z],
       passes: [{ ...CAMERA, strideCap: cap }],
       places: [{ bucketBase: 0, listBase: 0 }],
@@ -570,35 +603,63 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
     return bucket === undefined ? 0 : strideOf(bucket);
   }
 
-  const BANDS: StrideBandsM = [100, 200, 400];
-
-  it("strides a camera pass's cluster coarser with its distance past its instance's bands (R14.T3.c)", () => {
+  it("strides a camera pass's cluster coarser with its distance past its bands, its records' errors under its instance's scale (R14.T3.c)", () => {
     const at = (distanceM: number): number =>
-      cameraStride(record(Z, 1), distanceM, { strideBandsM: BANDS });
+      cameraStride(PAGE_BLOCK, distanceM, { strideScale: SCALE });
     expect([at(50), at(150), at(300), at(1_000)]).toEqual([1, 2, 4, 8]);
   });
 
-  it("holds an instance with the quadrant word's bit 18, or kept whole as its heights fade, at stride 1, and every stride within the pass's cap (R14.T3.c)", () => {
-    const block = record(Z, 1);
+  it("strides a block at the largest band of the vertices it drops: its neighbours' on its sides, none where one is not measured, and not a corner's (R14.T3.c's shared bands)", () => {
+    const larger = { ...PAGE_BLOCK, strideErrorBits: errorBits([1, 3, 6, 12]) };
+    const unmeasured = { ...PAGE_BLOCK, strideErrorBits: null };
+    const at = (page: ReadonlyMap<number, ClusterRecord>): number =>
+      cameraStride(PAGE_BLOCK, 350, { strideScale: SCALE }, 8, INNER, page);
     expect([
-      cameraStride(block, 1_000, { strideBandsM: BANDS, quadrantWord: INSTANCE_FINEST }),
-      cameraStride(block, 1_000, { strideBandsM: BANDS }, 2),
-      cameraStride(block, 1_000, { strideBandsM: NO_STRIDE_BANDS }),
-      cameraStride(block, 1_000, { strideBandsM: BANDS, whole: true }),
+      at(new Map()),
+      at(new Map([[INNER + 1, larger]])),
+      at(new Map([[INNER - 8, larger]])),
+      at(new Map([[INNER - 9, larger]])),
+      at(new Map([[INNER + 8, unmeasured]])),
+    ]).toEqual([4, 2, 2, 4, 1]);
+  });
+
+  it("strides a block or a strip on its patch's edge by that edge's shared bands there, none where its record holds none (R14.T3.c's shared bands)", () => {
+    // Block (0, 3) on x = 0, and strip 7 of `gpu/resources.ts`' edge 3 (x = 0), along block (0, 0).
+    const edgeBandsM = new Float64Array(EDGE_BANDS).fill(NO_STRIDE_BAND);
+    edgeBandsM.set([300, 600, 1_200], edgeBandIndex(0, 3, 0));
+    edgeBandsM.set([100, 200, 400], edgeBandIndex(0, 0, 0));
+    const strip = { ...record(Z, 1, "terrain-skirt"), templateRef: 3 << 16 };
+    expect([
+      cameraStride(PAGE_BLOCK, 350, { strideScale: SCALE, edgeBandsM }, 8, 24),
+      cameraStride(PAGE_BLOCK, 350, { strideScale: SCALE }, 8, 24),
+      cameraStride(strip, 1_000, { strideScale: SCALE, edgeBandsM }, 8, 64 + 8 * 3 + 7),
+      cameraStride(strip, 1_000, { strideScale: SCALE, edgeBandsM }, 8, 64 + 8 * 3 + 6),
+      cameraStride(PAGE_BLOCK, 1_000, { strideScale: SCALE, edgeBandsM }, 8, 100),
+    ]).toEqual([2, 1, 8, 1, 1]);
+  });
+
+  it("holds an instance with the quadrant word's bit 18, or kept whole as its heights fade, at stride 1, and every stride within the pass's cap (R14.T3.c)", () => {
+    expect([
+      cameraStride(PAGE_BLOCK, 1_000, { strideScale: SCALE, quadrantWord: INSTANCE_FINEST }),
+      cameraStride(PAGE_BLOCK, 1_000, { strideScale: SCALE }, 2),
+      cameraStride(PAGE_BLOCK, 1_000, { strideScale: NO_STRIDE_SCALE }),
+      cameraStride(PAGE_BLOCK, 1_000, { strideScale: SCALE, whole: true }),
     ]).toEqual([1, 2, 1, 1]);
   });
 
   it("holds a block or a strip on an edge a finer patch touches at stride 4, and none on another edge (R14.T3.c)", () => {
     const block = (x0: number, y0: number): ClusterRecord => ({
-      ...record(Z, 1),
+      ...PAGE_BLOCK,
       templateRef: x0 | (y0 << 8),
     });
+    // At the page's block (3, 3) in this test, its bands its errors'.
     const strip = (edge: number): ClusterRecord => ({
-      ...record(Z, 1, "terrain-skirt"),
+      ...PAGE_BLOCK,
+      shape: "terrain-skirt",
       templateRef: edge << 16,
     });
     const at = (cluster: ClusterRecord, quadrantWord: number): number =>
-      cameraStride(cluster, 1_000, { strideBandsM: BANDS, quadrantWord });
+      cameraStride(cluster, 1_000, { strideScale: SCALE, quadrantWord });
     expect([
       at(block(0, 24), heldEdge(0)),
       at(block(56, 24), heldEdge(1)),

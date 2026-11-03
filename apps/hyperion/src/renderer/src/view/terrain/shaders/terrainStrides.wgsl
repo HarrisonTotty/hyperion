@@ -4,16 +4,18 @@
 // (`stride_morph_level`, capped at 3, a block's corners), is what the stride-2^(j + 1) mesh drops;
 // `lit_place`'s place of it moves towards the mean of its two neighbours at 2^j along its quad's
 // side or on its (0, 0)–(1, 1) diagonal (`stride_parents`), each placed so in turn, by k_j =
-// clamp((d − U) ÷ (β U), 0, 1), d the grid vertex's distance and U its instance's band towards
-// stride 2^(j + 1) (`Instance.strides`, its view's ladder for its level), held at each contact as
-// the CDLOD morph is; at 0 for the level-2 vertices of an edge a finer patch touches, whose
-// vertices there are block corners; and at 1 for the level-0 vertices of an edge a coarser patch
-// touches, which stand at the coarser grid's midpoints (R10.T8.c's hold at k = 1), so that they
-// follow its vertices wherever those move. The morph mixes the height, the grid vertex's height, the CDLOD
-// k and the datum's normal with the place, so that the varyings flip with it. The cull takes a
-// stride only where every vertex it drops is wholly moved (`clusterCull.wgsl`'s
-// `camera_stride_level`), so each cluster draws exactly this surface. The TypeScript twin is
-// `clusters/strides.ts`' `stridePlace`.
+// clamp((d − U) ÷ (β U), 0, 1), d the grid vertex's distance and U its band towards stride
+// 2^(j + 1) (`stride_band`, the shared bands of `clusters/strides.ts`: its block's band, the
+// largest need of it and its sides' blocks from its slot's record's errors under its instance's
+// scale; on a block's side the smaller of its two blocks'; on a patch's edge its instance's shared
+// band there), held at each contact as the CDLOD morph is; at 0 for the level-2 vertices of an
+// edge a finer patch touches, whose vertices there are block corners; and at 1 for the level-0
+// vertices of an edge a coarser patch touches, which stand at the coarser grid's midpoints
+// (R10.T8.c's hold at k = 1), so that they follow its vertices wherever those move. The morph mixes
+// the height, the grid vertex's height, the CDLOD k and the datum's normal with the place, so that
+// the varyings flip with it. The cull takes a stride only where every vertex it drops is wholly
+// moved (`clusterCull.wgsl`'s `camera_stride_level`), so each cluster draws exactly this surface.
+// The TypeScript twin is `clusters/strides.ts`' `stridePlace`.
 //
 // Composed after terrainSurvey.wgsl, whose `lit_place` it moves, and before terrainLit.wgsl,
 // whose vertex stage calls `stride_place`. Each material's own source declares STRIDE_MORPH: true
@@ -77,6 +79,88 @@ fn stride_mix(a : StrideValues, b : StrideValues, c : StrideValues, k : f32) -> 
   return v;
 }
 
+// A block's need towards stride 2^(level + 1) under `inst`'s scale, its error from its slot's
+// record (`strides.ts`' `strideNeedM`); −1 for none, an unmeasured block's error being +∞.
+fn stride_need(inst : Instance, block : u32, level : u32) -> f32 {
+  let h = 3u * block + level;
+  let e = unpack2x16float(slots[inst.slot].blockErrors[h / 8u][(h / 2u) % 4u])[h % 2u];
+  if (inst.strides.y <= 0.0 || !(e >= 0.0) || e > 65504.0) {
+    return -1.0;
+  }
+  return inst.strides.x + e * inst.strides.y;
+}
+
+// Bands `a` and `b` shared: the larger, none where either is none (`strides.ts`' `sharedStrideBandM`).
+fn stride_shared(a : f32, b : f32) -> f32 {
+  return select(-1.0, max(a, b), a > 0.0 && b > 0.0);
+}
+
+// The band of a vertex two clusters of bands `a` and `b` hold: the smaller, or the one's that drops
+// it at all (`strides.ts`' `heldStrideBandM`).
+fn stride_held(a : f32, b : f32) -> f32 {
+  if (a > 0.0 && b > 0.0) {
+    return min(a, b);
+  }
+  return select(select(-1.0, b, b > 0.0), a, a > 0.0);
+}
+
+// The shared band of `inst`'s patch edge `edge` at its block `t` (`strides.ts`' `edgeBandIndex`), a
+// half float of kilometres.
+fn stride_edge_band(inst : Instance, edge : u32, t : u32, level : u32) -> f32 {
+  let h = (8u * edge + t) * 3u + level;
+  let km = unpack2x16float(inst.edgeBands[h / 8u][(h / 2u) % 4u])[h % 2u];
+  return select(-1.0, km * 1000.0, km > 0.0);
+}
+
+// The band of `inst`'s block (bx, by) (`strides.ts`' `clusterStrideBandsM`, `clusterCull.wgsl`'s
+// `cluster_bands`): the largest need of it and the blocks on its sides, and of its patch's edges'
+// shared bands along it.
+fn stride_block_band(inst : Instance, bx : u32, by : u32, level : u32) -> f32 {
+  let block = 8u * by + bx;
+  var band = stride_need(inst, block, level);
+  if (bx > 0u) {
+    band = stride_shared(band, stride_need(inst, block - 1u, level));
+  } else {
+    band = stride_shared(band, stride_edge_band(inst, 0u, by, level));
+  }
+  if (bx < 7u) {
+    band = stride_shared(band, stride_need(inst, block + 1u, level));
+  } else {
+    band = stride_shared(band, stride_edge_band(inst, 1u, by, level));
+  }
+  if (by > 0u) {
+    band = stride_shared(band, stride_need(inst, block - 8u, level));
+  } else {
+    band = stride_shared(band, stride_edge_band(inst, 2u, bx, level));
+  }
+  if (by < 7u) {
+    band = stride_shared(band, stride_need(inst, block + 8u, level));
+  } else {
+    band = stride_shared(band, stride_edge_band(inst, 3u, bx, level));
+  }
+  return band;
+}
+
+// The band of `inst`'s grid vertex (x, y) at morph level `level` (`strides.ts`' `vertexStrideBandM`):
+// on a patch's edge its shared band there, on a block's side the smaller of its two blocks' bands,
+// else its block's.
+fn stride_band(inst : Instance, x : u32, y : u32, level : u32) -> f32 {
+  if (x == 0u || x == 64u || y == 0u || y == 64u) {
+    let edge = select(select(select(3u, 2u, y == 0u), 1u, x == 64u), 0u, x == 0u);
+    return stride_edge_band(inst, edge, min(select(x, y, edge < 2u) / 8u, 7u), level);
+  }
+  let bx = x / 8u;
+  let by = y / 8u;
+  let band = stride_block_band(inst, bx, by, level);
+  if (x % 8u == 0u) {
+    return stride_held(band, stride_block_band(inst, bx - 1u, by, level));
+  }
+  if (y % 8u == 0u) {
+    return stride_held(band, stride_block_band(inst, bx, by - 1u, level));
+  }
+  return band;
+}
+
 // The contacts' hold at the place `at` less the camera: `morphFactor`'s, 1 with no contact.
 fn stride_contact_hold(at : vec3f) -> f32 {
   var hold = 1.0;
@@ -89,13 +173,10 @@ fn stride_contact_hold(at : vec3f) -> f32 {
 }
 
 // The stride morph's k of `inst`'s grid vertex (x, y) at morph level `level`, its grid vertex at
-// `at` less the camera (`strides.ts`' `strideMorphFactor`, with its holds).
+// `at` less the camera (`strides.ts`' `strideMorphFactor` of its `vertexStrideBandM`, with its
+// holds); 0 for a band of none or past `f32`'s range.
 fn stride_factor(inst : Instance, level : u32, x : u32, y : u32, at : vec3f) -> f32 {
   if (level >= STRIDE_MORPH_LEVELS) {
-    return 0.0;
-  }
-  let band = inst.strides[level];
-  if (band <= 0.0) {
     return 0.0;
   }
   let edges = holdBitsAt(x, y) & 0xfu;
@@ -104,6 +185,10 @@ fn stride_factor(inst : Instance, level : u32, x : u32, y : u32, at : vec3f) -> 
   }
   if (level == 0u && ((inst.parentQuadrant >> 10u) & edges) != 0u) {
     return 1.0;
+  }
+  let band = stride_band(inst, x, y, level);
+  if (!(band > 0.0 && band < 3.0e38)) {
+    return 0.0;
   }
   let k = clamp((length(at) - band) / (STRIDE_BAND_FRACTION * band), 0.0, 1.0);
   return min(k, stride_contact_hold(at));
@@ -144,7 +229,7 @@ fn stride_place(grid : vec3f, instance : u32) -> LitPlace {
   let x = u32(grid.x);
   let y = u32(grid.y);
   let level = stride_morph_level(x, y);
-  if (inst.strides.x <= 0.0 || (inst.sub.x & 31u) != 0u || level >= STRIDE_MORPH_LEVELS) {
+  if (inst.strides.y <= 0.0 || (inst.sub.x & 31u) != 0u || level >= STRIDE_MORPH_LEVELS) {
     return own;
   }
   let k0 = stride_factor(inst, level, x, y, own.vertex.fromCameraM);

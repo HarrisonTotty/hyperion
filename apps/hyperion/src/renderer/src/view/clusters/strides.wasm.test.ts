@@ -2,8 +2,9 @@
  * The camera's strides on the real surface module's bakes (plan R14, R14.T3.c's drawn-error test):
  * over wasm bakes of R10.T4.b's sample worlds (the worker's Moon-like and Earth-like fixture fields,
  * `tests/golden/worker/`), as the GPU places them, each block drawn at the stride the cull's twin
- * gives it from cameras about each patch, through the stride morph's twin, at the view's ladder of
- * the bakes' own measured errors, each vertex at its own CDLOD k: the drawn error, the level's
+ * gives it from cameras about each patch, through the stride morph's twin, at each bake's shared
+ * bands from its blocks' measured errors (its edges its own blocks', with no patch beside), each
+ * vertex at its own CDLOD k: the drawn error, the level's
  * stated error plus the drawn surface's distance from the stride-1 surface, is within τ′ at the
  * distance of every vertex it is measured at, the stride-1 vertices, where a block's triangles'
  * difference is largest. The cameras stand at random about each patch, half at 0.2 to 40 of its
@@ -26,20 +27,22 @@ import { seededRandom } from "../../test/seededRandom";
 import { gpuPlacement } from "../../test/strideOracle";
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 import { blockBytes } from "../scenes/terrainGolden";
-import { MAX_LEVEL, type PatchKey } from "../terrain/patchKey";
+import type { PatchKey } from "../terrain/patchKey";
 import { type BodyFigure, planetGeometry } from "../terrain/planet";
 import { selectionErrorM } from "../terrain/select";
+import { StrideEdges } from "../terrain/strideEdges";
 import { MORPH_START_FRACTION } from "../terrain/terrainPass";
 import { answerRequest, type HeightModule, WorkerFields } from "../terrain/workers/heightBake";
 import type { BakedPatch } from "../terrain/workers/messages";
 import {
   cameraStrideLevel,
-  NO_STRIDE_BAND,
-  strideBandsOf,
-  StrideLevelErrors,
-  strideLadder,
+  clusterStrideBandsM,
+  heldEdgeBandsM,
+  largestStrideErrorsM,
+  patchStrideScale,
   strideMorphFactor,
   stridePlace,
+  vertexStrideBandM,
 } from "./strides";
 
 function wasmBytes(): Uint8Array {
@@ -179,25 +182,22 @@ describe("the camera's strides on the surface module's bakes (plan R14, R14.T3.c
       // The field's own stated errors, at which the CDLOD bands are drawn.
       const stated = planetGeometry(figure, levelTables.get(world.field.body) ?? null);
       const bakes = world.keys.map((key) => lit(world.field, key));
-      const errors = new StrideLevelErrors();
-      for (const bake of bakes) {
-        if (bake.clusterErrors === undefined) {
-          throw new Error("a lit bake is measured");
-        }
-        errors.take(bake.key.level, bake.clusterErrors);
-      }
-      const ladder = strideLadder(
-        planet,
-        TOLERANCE_RAD,
-        errors.errorsM,
-        new Float64Array(MAX_LEVEL + 1),
-      );
       const random = seededRandom(0x3c7 + world.keys.length);
       let strided = 0;
       let worst = 0;
       for (const bake of bakes) {
         const place = gpuPlacement({ ...bake, figure });
-        const bands = strideBandsOf(ladder, bake.key.level);
+        if (bake.clusterErrors === undefined) {
+          throw new Error("a lit bake is measured");
+        }
+        const { clusterErrors } = bake;
+        const scale = patchStrideScale(planet, bake.key.level, TOLERANCE_RAD);
+        const edges = new StrideEdges(1);
+        edges.update(
+          [{ key: bake.key, level: bake.key.level, measured: { scale, clusterErrors } }],
+          () => largestStrideErrorsM(clusterErrors),
+        );
+        const edgeBandsM = heldEdgeBandsM(edges.edgesOf(0));
         const statedM = selectionErrorM(planet, bake.key.level);
         // The level's CDLOD band at 1 px (`terrainPass.ts`' `morphRangeM`), m.
         const level = bake.key.level;
@@ -229,11 +229,15 @@ describe("the camera's strides on the surface module's bakes (plan R14, R14.T3.c
             return [p.x, p.y, p.z];
           };
           const factor = (
-            _x: number,
-            _y: number,
+            x: number,
+            y: number,
             morphLevel: number,
             values: ReadonlyArray<number>,
-          ): number => strideMorphFactor(bands[morphLevel] ?? NO_STRIDE_BAND, distanceOf(values));
+          ): number =>
+            strideMorphFactor(
+              vertexStrideBandM(scale, clusterErrors, edgeBandsM, x, y, morphLevel),
+              distanceOf(values),
+            );
           const morphed = new Map<number, number[]>();
           const at = (x: number, y: number): number[] => {
             let held = morphed.get(65 * y + x);
@@ -265,6 +269,7 @@ describe("the camera's strides on the surface module's bakes (plan R14, R14.T3.c
                 ),
               ),
             );
+            const bands = clusterStrideBandsM(scale, clusterErrors, edgeBandsM, block);
             const s = 1 << cameraStrideLevel(bands, 3, Math.max(0, distanceOf(centre) - radius));
             strided += s > 1 ? 1 : 0;
             for (let ly = 0; ly <= 8; ly += 1) {
@@ -297,6 +302,7 @@ describe("the camera's strides on the surface module's bakes (plan R14, R14.T3.c
           }
         }
       }
+      console.warn(`${world.name} strided ${strided} worst ${worst}`);
       expect(strided).toBeGreaterThan(100);
       expect(worst).toBeLessThanOrEqual(1);
     },

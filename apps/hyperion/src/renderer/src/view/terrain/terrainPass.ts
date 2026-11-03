@@ -113,12 +113,11 @@ import {
 import { cascadeCullPasses } from "../clusters/receivers";
 import {
   largestStrideErrorsM,
-  NO_STRIDE_BANDS,
-  type StrideBandsM,
-  strideBandsOf,
+  NO_STRIDE_EDGE_BANDS,
+  NO_STRIDE_SCALE,
+  patchStrideScale,
   type StrideErrorsM,
-  StrideLevelErrors,
-  strideLadder,
+  type StrideScale,
 } from "../clusters/strides";
 import { type ClusterPassStats, ClusterStats } from "../clusters/stats";
 import { TERRAIN_PAGE_CLUSTERS } from "../clusters/terrain";
@@ -205,6 +204,7 @@ import {
   WirePhaseRecords,
 } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey, parentKey, patchKeyString } from "./patchKey";
+import { type StrideEdgePatch, StrideEdges } from "./strideEdges";
 import { type PlanetGeometry, planetGeometry, surfacePoint } from "./planet";
 import { type MorphSpans, TimeMorph } from "./timeMorph";
 import {
@@ -885,11 +885,15 @@ interface Resident {
   /** Its bake's sizes, which the time morph's spans read (R10.T16.i). */
   readonly sizes: BakeSizes;
   /**
-   * The largest e₂, e₄ and e₈ of its bake's clusters' measured errors (`BakedPatch.clusterErrors`,
-   * plan R14, R14.T3.b), m, which its view's stride ladder takes (T3.c); `null` for a bake without
-   * them, which no camera pass strides.
+   * Its bake's clusters' measured errors (`BakedPatch.clusterErrors`, plan R14, R14.T3.b), which its
+   * strides' shared bands take (T3.c), and their largest e₂, e₄ and e₈, m, which an edge beside a
+   * patch that is not measured takes for its level; `null` for a bake without them, which no camera
+   * pass strides.
    */
-  readonly strideErrorsM: StrideErrorsM | null;
+  readonly strideErrors: {
+    readonly clusterErrors: Float16Array;
+    readonly largestM: StrideErrorsM;
+  } | null;
 }
 
 /**
@@ -1153,13 +1157,15 @@ interface ViewState {
   /** The last selection's {@link effectiveTauPx} for the view, pixels, which the bands follow. */
   targetTauPx: number | null;
   /**
-   * Its stride ladder this frame (plan R14, R14.T3.c; `clusters/strides.ts`' `strideLadder`), U(n)
-   * by absolute level, m, at its unslewed τ′ ({@link ViewState.targetTauPx}), from its levels'
-   * errors, its drawn patches' largest held as they decay, and each level's three bands from it.
+   * Its strides this frame (plan R14, R14.T3.c; the shared bands, `clusters/strides.ts`' remarks):
+   * each patch it draws, by draw set index, its scale at its unslewed τ′ ({@link
+   * ViewState.targetTauPx}) or `null` for none, and its place among the view's patches in {@link
+   * ViewState.strideEdges}, −1 for one it does not draw; and its patches' edges' bands, shared with
+   * the patches beside.
    */
-  readonly strideErrors: StrideLevelErrors;
-  readonly strideLadderM: Float64Array;
-  readonly strideBandsM: StrideBandsM[];
+  readonly strideScales: Array<StrideScale | null>;
+  readonly strideAt: Int32Array;
+  readonly strideEdges: StrideEdges;
   readonly uniforms: {
     readonly bodyRotation: Float32Array;
     readonly sunDirection: Float32Array;
@@ -3533,8 +3539,13 @@ export class TerrainPass {
       originHeightM: Math.fround(bake.originHeightM),
       interior: isInteriorBake(layers),
       sizes,
-      strideErrorsM:
-        bake.clusterErrors === undefined ? null : largestStrideErrorsM(bake.clusterErrors),
+      strideErrors:
+        bake.clusterErrors === undefined
+          ? null
+          : {
+              clusterErrors: bake.clusterErrors,
+              largestM: largestStrideErrorsM(bake.clusterErrors),
+            },
     });
     device.graticules.delete(keyString);
     device.rebakes.delete(keyString);
@@ -3700,9 +3711,9 @@ export class TerrainPass {
       morph: new Float64Array(2 * (MAX_LEVEL + 1)),
       bandTauPx: null,
       targetTauPx: null,
-      strideErrors: new StrideLevelErrors(),
-      strideLadderM: new Float64Array(MAX_LEVEL + 1),
-      strideBandsM: Array.from({ length: MAX_LEVEL + 1 }, () => NO_STRIDE_BANDS),
+      strideScales: [],
+      strideAt: new Int32Array(slotCount),
+      strideEdges: new StrideEdges(slotCount),
       uniforms: {
         bodyRotation,
         sunDirection: new Float32Array(4),
@@ -4422,13 +4433,13 @@ export class TerrainPass {
           cornerFades: fades.corners[n] ?? 0,
           fades: fadesWord,
         });
-        // Every measured patch takes its level's bands, whichever path draws it, so that a vertex it
-        // shares is placed alike; a camera pass draws the forced region's at stride 1. A sub-patch
-        // stand-in takes none: its grid is not its slot's records', which the cull keeps whole.
-        const bands =
-          strides && within === null && resident !== undefined && resident.strideErrorsM !== null
-            ? (state.strideBandsM[level] ?? NO_STRIDE_BANDS)
-            : NO_STRIDE_BANDS;
+        // Every measured patch takes its scale, whichever path draws it, and its edges' bands shared
+        // with the patches beside, so that a vertex it shares is placed alike; a camera pass draws
+        // the forced region's at stride 1. A sub-patch stand-in takes none: its grid is not its
+        // slot's records', which the cull keeps whole.
+        const scale = strides ? (state.strideScales[n] ?? NO_STRIDE_SCALE) : NO_STRIDE_SCALE;
+        const at = strides ? (state.strideAt[n] ?? -1) : -1;
+        const edgeBands = at < 0 ? NO_STRIDE_EDGE_BANDS : state.strideEdges.edgesOf(at);
         const finest = strides && this.#nearContact(patch, contacts, patchM);
         if (inner) {
           state.interiorFins.push(!interiorBake);
@@ -4451,8 +4462,9 @@ export class TerrainPass {
           fades.edges[n] ?? 0,
           fades.corners[n] ?? 0,
           fadesWord,
-          bands,
+          scale,
           finest,
+          edgeBands,
         );
         if (classSets !== undefined) {
           // The ancestor of the field's cells' level: the patch itself at that level, none coarser.
@@ -5497,11 +5509,13 @@ export class TerrainPass {
   }
 
   /**
-   * View `state`'s stride bands this frame (plan R14, R14.T3.c; `clusters/strides.ts`): its levels'
-   * errors decayed a frame and raised to the largest of the patches of `drawSet` it draws (`mask`'s
-   * views), then its ladder at its unslewed τ′ ({@link ViewState.targetTauPx}, Design note 3's)
-   * over its viewport's px per radian, W ÷ (2 tan(fov_h ÷ 2)) as `screenSpaceErrorPx` takes it, and
-   * each level's three bands from it; none before the view's first selection.
+   * View `state`'s strides this frame (plan R14, R14.T3.c; the shared bands, `clusters/strides.ts`'
+   * remarks): each patch of `drawSet` it draws (`mask`'s views) its scale at its unslewed τ′ ({@link
+   * ViewState.targetTauPx}, Design note 3's) over its viewport's px per radian, W ÷ (2 tan(fov_h ÷
+   * 2)) as `screenSpaceErrorPx` takes it, none for a sub-patch or an unmeasured bake; and its
+   * patches' edges' shared bands over them, the area each draws at the level it draws it, beside a
+   * patch that is not measured the larger of its own need and its level's largest error's
+   * (`StrideEdges`).
    */
   #strideBandsOf(
     device: Device,
@@ -5510,25 +5524,44 @@ export class TerrainPass {
     drawSet: DrawSet,
     mask: number,
   ): void {
-    const errors = state.strideErrors;
-    errors.decay();
+    const { viewport, fovXRad } = input.view;
+    const pxPerRad = viewport.widthPx / (2 * Math.tan(fovXRad / 2));
+    const toleranceRad = (state.targetTauPx ?? 0) / pxPerRad;
+    const scales = state.strideScales;
+    scales.length = drawSet.count;
+    const patches: StrideEdgePatch[] = [];
+    const largest = new Map<number, [number, number, number]>();
     for (let n = 0; n < drawSet.count; n += 1) {
       const drawn = drawSet.patches[n];
+      scales[n] = null;
+      state.strideAt[n] = -1;
       if (drawn === undefined || ((drawSet.views[n] ?? 0) & mask) === 0) {
         continue;
       }
-      const largestM = device.residents.get(drawn.keyString)?.strideErrorsM ?? null;
-      if (largestM !== null) {
-        errors.raise(drawn.patch.key.level, largestM);
+      const { patch, within } = drawn;
+      const errors = device.residents.get(drawn.keyString)?.strideErrors ?? null;
+      const level = patch.key.level;
+      const scale =
+        within === null && errors !== null
+          ? patchStrideScale(this.#planet, level, toleranceRad)
+          : null;
+      scales[n] = scale;
+      state.strideAt[n] = patches.length;
+      patches.push({
+        key: within ?? patch.key,
+        level,
+        measured:
+          scale === null || errors === null ? null : { scale, clusterErrors: errors.clusterErrors },
+      });
+      if (scale !== null && errors !== null) {
+        const most = largest.get(level) ?? [0, 0, 0];
+        errors.largestM.forEach((e, l) => {
+          most[l] = Math.max(most[l] ?? 0, e);
+        });
+        largest.set(level, most);
       }
     }
-    const { viewport, fovXRad } = input.view;
-    const pxPerRad = viewport.widthPx / (2 * Math.tan(fovXRad / 2));
-    const tauPx = state.targetTauPx ?? 0;
-    strideLadder(this.#planet, tauPx / pxPerRad, errors.errorsM, state.strideLadderM);
-    for (let level = 0; level <= MAX_LEVEL; level += 1) {
-      state.strideBandsM[level] = strideBandsOf(state.strideLadderM, level);
-    }
+    state.strideEdges.update(patches, (level) => largest.get(level) ?? null);
   }
 
   /**

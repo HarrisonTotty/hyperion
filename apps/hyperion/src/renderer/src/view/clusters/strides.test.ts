@@ -1,24 +1,41 @@
 import { describe, expect, it } from "vitest";
 
 import { seededRandom } from "../../test/seededRandom";
+import { WGS84_FIGURE } from "../../test/terrainFixtures";
+import type { PatchKey } from "../terrain/patchKey";
+import { planetGeometry } from "../terrain/planet";
+import { selectionErrorM } from "../terrain/select";
 import terrainStridesWgsl from "../terrain/shaders/terrainStrides.wgsl?raw";
+import { StrideEdges } from "../terrain/strideEdges";
 import clusterCullWgsl from "./clusterCull.wgsl?raw";
 import {
   cameraStrideLevel,
+  clusterStrideBandsM,
+  EDGE_BANDS,
+  edgeBandHalf,
+  edgeBandIndex,
+  edgeBandOfHalf,
+  heldEdgeBandsM,
   INSTANCE_FINEST,
+  largestStrideErrorsM,
   NO_STRIDE_BAND,
+  NO_STRIDE_SCALE,
+  patchStrideScale,
+  sharedStrideBandsM,
   STRIDE_BAND_FRACTION,
   STRIDE_MORPH_LEVELS,
   type StrideBandsM,
-  strideBandsOf,
-  STRIDE_ERROR_DECAY,
+  type StrideEdgeBandsM,
+  type StrideErrorsM,
   strideHeldFactor,
-  StrideLevelErrors,
   strideMorphFactor,
   strideMorphLevel,
+  strideNeedM,
   STRIDE_NODES,
   strideParents,
   stridePlace,
+  type StrideScale,
+  vertexStrideBandM,
 } from "./strides";
 
 /**
@@ -26,9 +43,13 @@ import {
  * 1 m, drawn by a level-4 patch P (2 m quads) beside the four level-5 children of its neighbour
  * (1 m quads), so that it holds same-level edges (between the children) and a coarse–fine one
  * (P's x = 64 against the children's x = 0), each patch's 64 blocks drawn at the strides the
- * cull's twin gives them from a hand-made ladder.
+ * cull's twin gives them from their shared bands, their own errors and their neighbours' under its
+ * scale and its edges' bands, which `StrideEdges` shares over the patches' keys and their records
+ * hold in half floats: face 0's level-4 patch (0, 0) and the four children of (1, 0), whose lattice
+ * they are.
  */
 interface Patch {
+  readonly key: PatchKey;
   readonly level: 4 | 5;
   /** Its corner on the lattice, m. */
   readonly x0: number;
@@ -45,18 +66,76 @@ function quadM(patch: Patch): number {
 }
 
 const PATCHES: ReadonlyArray<Patch> = [
-  { level: 4, x0: 0, y0: 0, holds: [0, 1, 0, 0] },
-  { level: 5, x0: 128, y0: 0, holds: [2, 0, 0, 0] },
-  { level: 5, x0: 192, y0: 0, holds: [0, 0, 0, 0] },
-  { level: 5, x0: 128, y0: 64, holds: [2, 0, 0, 0] },
-  { level: 5, x0: 192, y0: 64, holds: [0, 0, 0, 0] },
+  { key: { face: 0, level: 4, i: 0, j: 0 }, level: 4, x0: 0, y0: 0, holds: [0, 1, 0, 0] },
+  { key: { face: 0, level: 5, i: 2, j: 0 }, level: 5, x0: 128, y0: 0, holds: [2, 0, 0, 0] },
+  { key: { face: 0, level: 5, i: 3, j: 0 }, level: 5, x0: 192, y0: 0, holds: [0, 0, 0, 0] },
+  { key: { face: 0, level: 5, i: 2, j: 1 }, level: 5, x0: 128, y0: 64, holds: [2, 0, 0, 0] },
+  { key: { face: 0, level: 5, i: 3, j: 1 }, level: 5, x0: 192, y0: 64, holds: [0, 0, 0, 0] },
 ];
 
-/** U(n) by absolute level, m: level 4 takes U(3), U(2), U(1), level 5 U(4), U(3), U(2). */
-const LADDER = Float64Array.from([NO_STRIDE_BAND, 200, 120, 60, 20, NO_STRIDE_BAND]);
+/**
+ * Each patch's strides as its records hold them: its scale, its blocks' errors and its edges' shared
+ * bands, m, rounded up into half floats of kilometres and read back as the kernel and the vertex
+ * stage read them.
+ */
+interface PatchStrides {
+  readonly scale: StrideScale;
+  readonly clusterErrors: Float16Array;
+  readonly edges: StrideEdgeBandsM;
+}
 
-/** A ladder whose bands overlap, as one of levels whose stated errors rule them: 55 to 70 m. */
-const CLOSE_LADDER = Float64Array.from([NO_STRIDE_BAND, 70, 60, 60, 55, NO_STRIDE_BAND]);
+/** Blocks' errors of none: every one +∞, unmeasured. */
+const UNMEASURED_ERRORS = new Float16Array(4 * 64).fill(Number.POSITIVE_INFINITY);
+
+/**
+ * Strides a patch, in {@link PATCHES}' order, at random from `seed`: a scale of E_L ÷ τ′ 10 to 30 m
+ * and 1 ÷ τ′ 40, each block's e₂ 0.25 to 2.25 m and each next 1.2 to 2.6 times it, so that each
+ * block's bands differ from its neighbours'; none for a patch at the indices `unmeasured`, as a
+ * stand-in or an unmeasured bake. Their edges' bands are `StrideEdges`' over the patches' keys.
+ */
+function stridesOf(
+  seed: number,
+  unmeasured: ReadonlyArray<number> = [],
+): ReadonlyArray<PatchStrides> {
+  const random = seededRandom(seed);
+  const measured = PATCHES.map((_, n) => {
+    const scale: StrideScale = { statedM: 10 + 20 * random(), perErrorM: 40 };
+    const clusterErrors = new Float16Array(4 * 64);
+    for (let block = 0; block < 64; block += 1) {
+      const two = 0.25 + 2 * random();
+      const four = two * (1.2 + 1.4 * random());
+      clusterErrors.set([two / 2, two, four, four * (1.2 + 1.4 * random())], 4 * block);
+    }
+    return unmeasured.includes(n) ? null : { scale, clusterErrors };
+  });
+  const largest = new Map<number, StrideErrorsM>();
+  measured.forEach((of, n) => {
+    const level = PATCHES[n]?.level ?? 0;
+    if (of !== null) {
+      const own = largestStrideErrorsM(of.clusterErrors);
+      const most = largest.get(level) ?? [0, 0, 0];
+      largest.set(level, [
+        Math.max(most[0], own[0]),
+        Math.max(most[1], own[1]),
+        Math.max(most[2], own[2]),
+      ]);
+    }
+  });
+  const edges = new StrideEdges(PATCHES.length);
+  edges.update(
+    PATCHES.map((patch, n) => ({
+      key: patch.key,
+      level: patch.level,
+      measured: measured[n] ?? null,
+    })),
+    (level) => largest.get(level) ?? null,
+  );
+  return measured.map((of, n) => ({
+    scale: of?.scale ?? NO_STRIDE_SCALE,
+    clusterErrors: of?.clusterErrors ?? UNMEASURED_ERRORS,
+    edges: heldEdgeBandsM(edges.edgesOf(n)),
+  }));
+}
 
 /** `patch`'s quadrant word's coarse–fine holds: k = 0 in bits 2 to 5, k = 1 in bits 10 to 13. */
 function quadrantWordOf(patch: Patch): number {
@@ -149,17 +228,20 @@ function distanceOf(p: ReadonlyArray<number>, camera: Point): number {
 }
 
 /** The morph's k of `patch`'s vertex, as `stride_factor` takes it, its edges' holds with it. */
-function factorOf(patch: Patch, camera: Point, ladder: Float64Array) {
-  const bands = strideBandsOf(ladder, patch.level);
+function factorOf(patch: Patch, camera: Point, of: PatchStrides) {
   const word = quadrantWordOf(patch);
   return (x: number, y: number, level: number, values: ReadonlyArray<number>): number =>
     strideHeldFactor(x, y, level, word) ??
-    strideMorphFactor(bands[level] ?? NO_STRIDE_BAND, distanceOf(values, camera));
+    strideMorphFactor(
+      vertexStrideBandM(of.scale, of.clusterErrors, of.edges, x, y, level),
+      distanceOf(values, camera),
+    );
 }
 
-/** One drawn patch: each vertex's morphed place, each block's stride. */
+/** One drawn patch: each vertex's place before the stride morph and after it, each block's stride. */
 interface Drawn {
   readonly patch: Patch;
+  readonly unmoved: ReadonlyArray<ReadonlyArray<number>>;
   readonly places: ReadonlyArray<ReadonlyArray<number>>;
   readonly strides: ReadonlyArray<number>;
 }
@@ -168,17 +250,18 @@ function drawPatch(
   patch: Patch,
   height: (x: number, y: number) => number,
   camera: Point,
-  ladder: Float64Array = LADDER,
+  of: PatchStrides,
 ): Drawn {
   const place = placeOf(patch, height, camera);
-  const factor = factorOf(patch, camera, ladder);
+  const factor = factorOf(patch, camera, of);
+  const unmoved: Point[] = [];
   const places: number[][] = [];
   for (let y = 0; y <= QUADS; y += 1) {
     for (let x = 0; x <= QUADS; x += 1) {
+      unmoved.push(place(x, y));
       places.push(stridePlace(x, y, place, factor));
     }
   }
-  const bands = strideBandsOf(ladder, patch.level);
   const strides: number[] = [];
   for (let by = 0; by < 8; by += 1) {
     for (let bx = 0; bx < 8; bx += 1) {
@@ -194,15 +277,16 @@ function drawPatch(
         ...own.map((p) => distanceOf(p, [centre[0] ?? 0, centre[1] ?? 0, centre[2] ?? 0])),
       );
       const nearest = Math.max(0, distanceOf(centre, camera) - radius);
-      const touchesFiner =
-        (bx === 0 && patch.holds[0] === 1) ||
-        (bx === 7 && patch.holds[1] === 1) ||
-        (by === 0 && patch.holds[2] === 1) ||
-        (by === 7 && patch.holds[3] === 1);
+      const edges =
+        (bx === 0 ? 1 : 0) | (bx === 7 ? 2 : 0) | (by === 0 ? 4 : 0) | (by === 7 ? 8 : 0);
+      const touchesFiner = patch.holds.some(
+        (hold, edge) => hold === 1 && (edges & (1 << edge)) !== 0,
+      );
+      const bands = clusterStrideBandsM(of.scale, of.clusterErrors, of.edges, 8 * by + bx);
       strides.push(1 << cameraStrideLevel(bands, touchesFiner ? 2 : 3, nearest));
     }
   }
-  return { patch, places, strides };
+  return { patch, unmoved, places, strides };
 }
 
 /**
@@ -232,6 +316,15 @@ function surfaceAt(drawn: Drawn, u: number, v: number): number[] {
 function surfaceAtLattice(drawn: Drawn, gx: number, gy: number): number[] {
   const q = quadM(drawn.patch);
   return surfaceAt(drawn, (gx - drawn.patch.x0) / q, (gy - drawn.patch.y0) / q);
+}
+
+/** `drawn`'s surface at lattice place (gx, gy) at stride 1, before the stride morph, m. */
+function unmovedAtLattice(drawn: Drawn, gx: number, gy: number): number[] {
+  return surfaceAtLattice(
+    { ...drawn, places: drawn.unmoved, strides: drawn.strides.map(() => 1) },
+    gx,
+    gy,
+  );
 }
 
 function gap(a: ReadonlyArray<number>, b: ReadonlyArray<number>): number {
@@ -323,10 +416,96 @@ describe("the cull's camera strides", () => {
     expect([cameraStrideLevel(bands, 0, 1e9), cameraStrideLevel(bands, 2, 1e9)]).toEqual([0, 2]);
   });
 
-  it("gives a level its ladder's three bands, none below level 0", () => {
-    expect(strideBandsOf(LADDER, 4)).toEqual([60, 120, 200]);
-    expect(strideBandsOf(LADDER, 5)).toEqual([20, 60, 120]);
-    expect(strideBandsOf(LADDER, 2)).toEqual([200, NO_STRIDE_BAND, NO_STRIDE_BAND]);
+  it("gives a patch its scale from its level's stated error at its view's tolerance, none for a tolerance not above 0", () => {
+    const planet = planetGeometry(WGS84_FIGURE, null);
+    const statedM = selectionErrorM(planet, 9);
+    expect(patchStrideScale(planet, 9, 1e-3)).toEqual({
+      statedM: statedM / 1e-3,
+      perErrorM: 1 / 1e-3,
+    });
+    expect(patchStrideScale(planet, 9, 0)).toEqual(NO_STRIDE_SCALE);
+  });
+
+  it("gives a cluster of error e the band (E_L + e) ÷ τ′ in f32, none for no scale or an error not finite", () => {
+    const scale: StrideScale = { statedM: 10, perErrorM: 2 };
+    expect([
+      strideNeedM(scale, 0.1),
+      strideNeedM(scale, Number.POSITIVE_INFINITY),
+      strideNeedM(scale, Number.NaN),
+      strideNeedM(scale, -1),
+      strideNeedM(NO_STRIDE_SCALE, 1),
+    ]).toEqual([
+      Math.fround(10 + Math.fround(Math.fround(0.1) * 2)),
+      NO_STRIDE_BAND,
+      NO_STRIDE_BAND,
+      NO_STRIDE_BAND,
+      NO_STRIDE_BAND,
+    ]);
+  });
+
+  it("shares two bands as the larger, none where either is none", () => {
+    expect(sharedStrideBandsM([10, 30, NO_STRIDE_BAND], [20, 25, 40])).toEqual([
+      20,
+      30,
+      NO_STRIDE_BAND,
+    ]);
+  });
+
+  it("gives a cluster the largest need of it, its neighbours and its edges, a vertex inside it its band and one on its side the smaller of its two blocks' bands", () => {
+    // Needs 10 + 2e: block 0's 12, 14, 16, block 1's 20, 12 and none, block 8's 10, 30, 12; the
+    // other blocks unmeasured. Edge x = 0's first block 11, 50, 13; edge y = 0's 15, 13, 40.
+    const scale: StrideScale = { statedM: 10, perErrorM: 2 };
+    const errors = new Float16Array(4 * 64).fill(Number.POSITIVE_INFINITY);
+    errors.set([0, 1, 2, 3], 0);
+    errors.set([0, 5, 1, Number.NaN], 4);
+    errors.set([0, 0, 10, 1], 32);
+    const edges = new Float64Array(EDGE_BANDS).fill(NO_STRIDE_BAND);
+    edges.set([11, 50, 13], edgeBandIndex(0, 0, 0));
+    edges.set([15, 13, 40], edgeBandIndex(2, 0, 0));
+    expect([
+      clusterStrideBandsM(scale, errors, edges, 0),
+      clusterStrideBandsM(scale, errors, edges, 64),
+      clusterStrideBandsM(scale, errors, edges, 64 + 8 * 3 + 7),
+      clusterStrideBandsM(scale, errors, edges, 96),
+      clusterStrideBandsM(NO_STRIDE_SCALE, errors, edges, 0),
+    ]).toEqual([
+      [20, 50, NO_STRIDE_BAND],
+      [15, 13, 40],
+      [11, 50, 13],
+      [NO_STRIDE_BAND, NO_STRIDE_BAND, NO_STRIDE_BAND],
+      [NO_STRIDE_BAND, NO_STRIDE_BAND, NO_STRIDE_BAND],
+    ]);
+    // Block 1's band at stride 2 is its own and block 0's 20 (block 2 and 9 unmeasured: none), and
+    // block 8's at stride 4 none (blocks 9 and 16 unmeasured).
+    expect([
+      vertexStrideBandM(scale, errors, edges, 3, 5, 0),
+      vertexStrideBandM(scale, errors, edges, 8, 3, 0),
+      vertexStrideBandM(scale, errors, edges, 2, 8, 1),
+      vertexStrideBandM(scale, errors, edges, 0, 3, 0),
+      vertexStrideBandM(scale, errors, edges, 3, 0, 2),
+      vertexStrideBandM(scale, errors, edges, 64, 3, 0),
+      vertexStrideBandM(scale, errors, edges, 9, 3, 0),
+    ]).toEqual([20, 20, 50, 11, 40, NO_STRIDE_BAND, NO_STRIDE_BAND]);
+  });
+
+  it("holds an edge's band in a half float of kilometres rounded up, none and +∞ as they are", () => {
+    const random = seededRandom(0xed6e);
+    for (let n = 0; n < 2_000; n += 1) {
+      const bandM = 10 ** (1 + 5 * random());
+      const held = edgeBandOfHalf(edgeBandHalf(bandM));
+      expect(held).toBeGreaterThanOrEqual(bandM);
+      expect(held).toBeLessThan(bandM * (1 + 2 ** -9));
+    }
+    expect([
+      edgeBandOfHalf(edgeBandHalf(NO_STRIDE_BAND)),
+      edgeBandOfHalf(edgeBandHalf(0)),
+      edgeBandOfHalf(edgeBandHalf(Number.POSITIVE_INFINITY)),
+      edgeBandOfHalf(edgeBandHalf(1e12)),
+    ]).toEqual([NO_STRIDE_BAND, NO_STRIDE_BAND, Infinity, Infinity]);
+  });
+
+  it("takes no stride morph at a band of +∞", () => {
+    expect(strideMorphFactor(Number.POSITIVE_INFINITY, 1e30)).toBe(0);
   });
 });
 
@@ -337,18 +516,36 @@ describe("the stride morph's surface", () => {
     cameras.push([-100 + 450 * random(), -80 + 300 * random(), 4 + 160 * random() ** 2]);
   }
 
-  it.each([
-    ["spaced", LADDER],
-    ["overlapping", CLOSE_LADDER],
-  ] as const)(
-    "draws each block at the strides it takes exactly as the morph places its every vertex, its ladder's bands %s",
-    (_name, ladder) => {
+  /**
+   * Each camera's strides: every patch measured, or one not, as a stand-in or an unmeasured bake: a
+   * finer patch beside the coarse one, the coarse one, or a finer one beside only its siblings.
+   */
+  const MEASURED = cameras.map((_, n) => stridesOf(0x3e + n));
+  const UNMEASURED: ReadonlyArray<readonly [string, number]> = [
+    ["a finer patch beside the coarse one unmeasured", 3],
+    ["the coarse patch unmeasured", 0],
+    ["a finer patch beside its siblings unmeasured", 4],
+  ];
+  const ALL = [
+    ["every patch measured", MEASURED, -1] as const,
+    ...UNMEASURED.map(
+      ([name, k]) => [name, cameras.map((_, n) => stridesOf(0x3e + n, [k])), k] as const,
+    ),
+  ];
+
+  it.each(ALL)(
+    "draws each block at the strides it takes exactly as the morph places its every vertex, %s",
+    (_name, bands, _unmeasured) => {
       let strided = 0;
       let worst = 0;
       cameras.forEach((camera, n) => {
         const height = heightOf(n);
-        for (const patch of PATCHES) {
-          const drawn = drawPatch(patch, height, camera, ladder);
+        for (const [k, patch] of PATCHES.entries()) {
+          const of = bands[n]?.[k];
+          if (of === undefined) {
+            throw new Error("the fixture's bands");
+          }
+          const drawn = drawPatch(patch, height, camera, of);
           strided += drawn.strides.filter((s) => s > 1).length;
           for (let y = 0; y <= QUADS; y += 1) {
             for (let x = 0; x <= QUADS; x += 1) {
@@ -365,17 +562,22 @@ describe("the stride morph's surface", () => {
     },
   );
 
-  it.each([
-    ["spaced", LADDER],
-    ["overlapping", CLOSE_LADDER],
-  ] as const)(
-    "joins every patch to its neighbours along their edges, coarse–fine edges included, its ladder's bands %s",
-    (_name, ladder) => {
+  it.each(ALL)(
+    "joins every patch to its neighbours along their edges, coarse–fine edges included, a measured one beside one that is not parting by no more than its own stride morph moves it, %s",
+    (_name, bands, unmeasured) => {
       let worst = 0;
+      let parted = 0;
+      let unmovedWorst = 0;
       let differing = 0;
       cameras.forEach((camera, n) => {
         const height = heightOf(n);
-        const drawn = PATCHES.map((patch) => drawPatch(patch, height, camera, ladder));
+        const drawn = PATCHES.map((patch, k) => {
+          const of = bands[n]?.[k];
+          if (of === undefined) {
+            throw new Error("the fixture's bands");
+          }
+          return drawPatch(patch, height, camera, of);
+        });
         const [p, q00, q10, q01, q11] = drawn;
         if (
           p === undefined ||
@@ -386,24 +588,43 @@ describe("the stride morph's surface", () => {
         ) {
           throw new Error("the fixture's five patches");
         }
-        const edges: Array<readonly [Drawn, Drawn, (t: number) => readonly [number, number]]> = [
-          [p, q00, (t) => [128, t]],
-          [p, q01, (t) => [128, 64 + t]],
-          [q00, q10, (t) => [192, t]],
-          [q01, q11, (t) => [192, 64 + t]],
-          [q00, q01, (t) => [128 + t, 64]],
-          [q10, q11, (t) => [192 + t, 64]],
+        const edges: Array<
+          readonly [Drawn, Drawn, (t: number) => readonly [number, number], readonly number[]]
+        > = [
+          [p, q00, (t) => [128, t], [0, 1]],
+          [p, q01, (t) => [128, 64 + t], [0, 3]],
+          [q00, q10, (t) => [192, t], [1, 2]],
+          [q01, q11, (t) => [192, 64 + t], [3, 4]],
+          [q00, q01, (t) => [128 + t, 64], [1, 3]],
+          [q10, q11, (t) => [192 + t, 64], [2, 4]],
         ];
-        for (const [a, b, along] of edges) {
+        for (const [a, b, along, pair] of edges) {
+          const beside = pair.includes(unmeasured);
+          let moved = 0;
+          let apart = 0;
           for (let t = 0; t <= 64; t += 0.25) {
             const [gx, gy] = along(t);
-            worst = Math.max(worst, gap(surfaceAtLattice(a, gx, gy), surfaceAtLattice(b, gx, gy)));
+            const [sa, sb] = [surfaceAtLattice(a, gx, gy), surfaceAtLattice(b, gx, gy)];
+            const [ua, ub] = [unmovedAtLattice(a, gx, gy), unmovedAtLattice(b, gx, gy)];
+            apart = Math.max(apart, gap(sa, sb));
+            moved = Math.max(moved, gap(sa, ua), gap(sb, ub));
+            if (beside) {
+              const [s, u] = pair[0] === unmeasured ? [sa, ua] : [sb, ub];
+              unmovedWorst = Math.max(unmovedWorst, gap(s, u));
+            }
+          }
+          if (beside) {
+            parted = Math.max(parted, apart - moved);
+          } else {
+            worst = Math.max(worst, apart);
           }
           differing += a.strides.some((s, i) => s !== b.strides[i]) ? 1 : 0;
         }
       });
       expect(differing).toBeGreaterThan(20);
       expect(worst).toBeLessThan(1e-9);
+      expect(parted).toBeLessThan(1e-9);
+      expect(unmovedWorst).toBeLessThan(1e-9);
     },
   );
 
@@ -417,8 +638,12 @@ describe("the stride morph's surface", () => {
     const height = heightOf(7);
     let compared = 0;
     let worst = 0;
-    for (const camera of cameras) {
-      const drawn = drawPatch(patch, height, camera);
+    for (const [n, camera] of cameras.entries()) {
+      const of = MEASURED[n]?.[0];
+      if (of === undefined) {
+        throw new Error("the fixture's bands");
+      }
+      const drawn = drawPatch(patch, height, camera, of);
       for (let b = 0; b < 64; b += 1) {
         const chosen = drawn.strides[b] ?? 1;
         for (let s = 1; s < chosen; s *= 2) {
@@ -455,30 +680,13 @@ describe("the stride morph's surface", () => {
   });
 });
 
-describe("the levels' measured errors", () => {
-  it("raises a level's errors at once and lowers them by their decay a frame", () => {
-    const errors = new StrideLevelErrors();
-    errors.raise(5, [1, 2, 4]);
-    errors.decay();
-    expect([...errors.errorsM.subarray(15, 18)]).toEqual([
-      1 - STRIDE_ERROR_DECAY,
-      2 * (1 - STRIDE_ERROR_DECAY),
-      4 * (1 - STRIDE_ERROR_DECAY),
-    ]);
-    errors.raise(5, [3, 0, 0]);
-    expect(errors.errorsM[15]).toBe(3);
-    expect(errors.errorsM[3]).toBe(-1);
-  });
-
-  it("keeps each level's largest e₂, e₄ and e₈ over the bakes it takes", () => {
-    const errors = new StrideLevelErrors();
-    errors.take(7, bakeErrors(1));
-    errors.take(7, bakeErrors(0.5));
-    errors.take(8, bakeErrors(2));
-    expect([...errors.errorsM.subarray(21, 27)]).toEqual([1, 2, 4, 2, 4, 8]);
-    expect(errors.errorsM[0]).toBe(-1);
-    errors.clear();
-    expect(errors.errorsM[21]).toBe(-1);
+describe("a patch's measured errors", () => {
+  it("are its clusters' largest e₂, e₄ and e₈, a NaN's infinite", () => {
+    const errors = bakeErrors(1);
+    errors.set([0, 0.25, 7, 0.5], 4 * 10);
+    expect(largestStrideErrorsM(errors)).toEqual([1, 7, 4]);
+    errors[4 * 20 + 3] = Number.NaN;
+    expect(largestStrideErrorsM(errors)[2]).toBe(Infinity);
   });
 
   it("morphs at most three levels, towards strides 2, 4 and 8", () => {

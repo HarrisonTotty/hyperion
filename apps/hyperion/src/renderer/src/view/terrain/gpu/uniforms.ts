@@ -16,7 +16,15 @@
 
 import type { Vec3 } from "../../../geometry/vec3";
 import type { SpheroidFigure } from "../../atmosphere/hillaire";
-import { INSTANCE_FINEST, NO_STRIDE_BANDS, type StrideBandsM } from "../../clusters/strides";
+import {
+  EDGE_BANDS,
+  edgeBandHalf,
+  INSTANCE_FINEST,
+  NO_STRIDE_EDGE_BANDS,
+  NO_STRIDE_SCALE,
+  type StrideEdgeBandsM,
+  type StrideScale,
+} from "../../clusters/strides";
 import { MAX_MORPH_HOLDS } from "../coarseFineHolds";
 import type { Face, PatchKey } from "../patchKey";
 import type { GraticulePatch } from "../terrainWire";
@@ -35,12 +43,16 @@ import type { GraticulePatch } from "../terrainWire";
  *   skirtDepthM : f32,              // how far the skirts hang along ν, metres
  *   straddles : u32,                // 1 for a level-0 patch, which straddles s = ½
  *   _pad : vec2u,
+ *   blockErrors : array<vec4u, 24>, // each block's e₂, e₄ and e₈, metres, half floats in pairs,
+ *                                   // half 3 b + l of block b towards stride 2^(l + 1), +∞ where
+ *                                   // unmeasured (plan R14, R14.T3.c's shared bands)
  * }
  * ```
  *
- * The fields are `hyperion_surface::patch::vertex::PatchTermsF32`'s, plus the skirt depth.
+ * The fields are `hyperion_surface::patch::vertex::PatchTermsF32`'s, plus the skirt depth and the
+ * blocks' errors, which the vertex stage's stride morph reads (`terrainStrides.wgsl`).
  */
-export const SLOT_RECORD_BYTES = 112;
+export const SLOT_RECORD_BYTES = 496;
 
 /**
  * Bytes of one instance record, one per drawn patch a frame:
@@ -60,16 +72,20 @@ export const SLOT_RECORD_BYTES = 112;
  *                           // patch ({@link subPatchWord}); y its edges' fades and z its corners',
  *                           // a byte each; w its own fade, its rebake's and the slot it fades
  *                           // from ({@link fadeWord}; R10.T16.i)
- *   strides : vec4f,        // its view's stride bands towards strides 2, 4 and 8, metres, at or
- *                           // below 0 for none, and 0 (plan R14, R14.T3.c; `clusters/strides.ts`)
+ *   strides : vec4f,        // its stride scale at its view's τ′ (plan R14, R14.T3.c; `clusters/
+ *                           // strides.ts`' `StrideScale`): E_L ÷ τ′_rad, m, then 1 ÷ τ′_rad, at or
+ *                           // below 0 for none, then 0 and 0
  *   cells : vec4u,          // its class sets (lane fix-coast-class-map; {@link InstanceRecords.setCells}):
  *                           // x its ancestor of the field's cells' level, L − 6, or NO_PARENT_SLOT;
  *                           // y its place there ({@link cellAncestorPlace}); z the fade to it, an
  *                           // f32's bits; w its flags ({@link CLASS_MORPH})
+ *   edgeBands : array<vec4u, 12>, // its edges' shared bands (`strideEdges.ts`), half floats of
+ *                           // kilometres rounded up in pairs, half `edgeBandIndex(e, t, l)`,
+ *                           // negative for none (words 20 to 67)
  * }
  * ```
  */
-export const INSTANCE_RECORD_BYTES = 80;
+export const INSTANCE_RECORD_BYTES = 272;
 
 /**
  * `Instance.cells.w`'s flag that the patch's class weights morph to its parent's by its morph
@@ -100,6 +116,9 @@ export function cellAncestorPlace(levels: number, i: number, j: number): number 
 
 /** The instance record's 32-bit words a reader takes by index (the struct above): its `slot`. */
 export const INSTANCE_SLOT_WORD = 3;
+
+/** The first of the instance record's words of its edges' shared stride bands (`edgeBands`). */
+export const INSTANCE_EDGE_BANDS_WORD = 20;
 /** Its `parentSlot`. */
 export const INSTANCE_PARENT_SLOT_WORD = 6;
 /** Its `sub.x`, the sub-patch it draws of its slot's patch ({@link subPatchWord}), 0 for the whole. */
@@ -378,6 +397,7 @@ export function writeSlotRecord(
   slot: number,
   terms: PatchTerms,
   skirtDepthM: number,
+  clusterErrors: ArrayLike<number> | null = null,
 ): void {
   if (!Number.isInteger(slot) || slot < 0 || (slot + 1) * SLOT_RECORD_BYTES > out.byteLength) {
     throw new RangeError(`slot ${slot} lies outside ${out.byteLength} B of slot records`);
@@ -403,7 +423,23 @@ export function writeSlotRecord(
   u[25] = terms.straddles ? 1 : 0;
   u[26] = 0;
   u[27] = 0;
+  // The blocks' e₂, e₄ and e₈ (plan R14, R14.T3.c), +∞ where unmeasured or a NaN.
+  const halves = new Uint16Array(out, slot * SLOT_RECORD_BYTES + 112, BLOCK_ERROR_HALVES);
+  for (let block = 0; block < 64; block += 1) {
+    for (let level = 0; level < 3; level += 1) {
+      const e = clusterErrors?.[4 * block + level + 1] ?? Number.POSITIVE_INFINITY;
+      ERROR_HALF[0] = Number.isNaN(e) ? Number.POSITIVE_INFINITY : e;
+      halves[3 * block + level] = ERROR_HALF_BITS[0] ?? 0x7c00;
+    }
+  }
 }
+
+/** The half floats of a slot's blocks' errors: 64 blocks × e₂, e₄ and e₈. */
+const BLOCK_ERROR_HALVES = 192;
+
+/** The `Float16Array` scratch a block's error is narrowed through. */
+const ERROR_HALF = new Float16Array(1);
+const ERROR_HALF_BITS = new Uint16Array(ERROR_HALF.buffer);
 
 /** The first `bytes` of `buffer` as bytes, from `views` or made once into it. */
 function viewOf(views: Map<number, Uint8Array>, buffer: ArrayBuffer, bytes: number): Uint8Array {
@@ -474,8 +510,8 @@ export class InstanceRecords {
    * @param edgeFades - Its edges' fades, a byte each in `EDGES`' order (R10.T16.i), 0 for none.
    * @param cornerFades - Its corners' fades, a byte each in `cornerNeighbours`' order, 0 for none.
    * @param fades - Its own fade and its rebake's ({@link fadeWord}), 0 for none.
-   * @param strideBandsM - Its view's stride bands for its level, metres (plan R14, R14.T3.c), none
-   * by default.
+   * @param strideScale - Its stride scale at its view's τ′ (plan R14, R14.T3.c), none by default.
+   * @param edgeBandsM - Its edges' shared stride bands, metres (`strideEdges.ts`), none by default.
    * @param finest - Whether every camera pass draws it at stride 1 (`clusters/strides.ts`'
    * `INSTANCE_FINEST`).
    * @throws RangeError past {@link capacity}, or for a slot, parent slot, quadrant, holds,
@@ -493,8 +529,9 @@ export class InstanceRecords {
     edgeFades = 0,
     cornerFades = 0,
     fades = 0,
-    strideBandsM: StrideBandsM = NO_STRIDE_BANDS,
+    strideScale: StrideScale = NO_STRIDE_SCALE,
     finest = false,
+    edgeBandsM: StrideEdgeBandsM = NO_STRIDE_EDGE_BANDS,
   ): void {
     this.pushXyz(
       slot,
@@ -510,8 +547,9 @@ export class InstanceRecords {
       edgeFades,
       cornerFades,
       fades,
-      strideBandsM,
+      strideScale,
       finest,
+      edgeBandsM,
     );
   }
 
@@ -530,8 +568,9 @@ export class InstanceRecords {
     edgeFades = 0,
     cornerFades = 0,
     fades = 0,
-    strideBandsM: StrideBandsM = NO_STRIDE_BANDS,
+    strideScale: StrideScale = NO_STRIDE_SCALE,
     finest = false,
+    edgeBandsM: StrideEdgeBandsM = NO_STRIDE_EDGE_BANDS,
   ): void {
     if (this.#count >= this.capacity) {
       throw new RangeError(`more than ${this.capacity} instances in a frame`);
@@ -570,14 +609,19 @@ export class InstanceRecords {
     this.#u32[base + 9] = edgeFades;
     this.#u32[base + 10] = cornerFades;
     this.#u32[base + 11] = fades;
-    this.#f32[base + 12] = strideBandsM[0];
-    this.#f32[base + 13] = strideBandsM[1];
-    this.#f32[base + 14] = strideBandsM[2];
+    this.#f32[base + 12] = strideScale.statedM;
+    this.#f32[base + 13] = strideScale.perErrorM;
+    this.#f32[base + 14] = 0;
     this.#f32[base + 15] = 0;
     this.#u32[base + 16] = NO_PARENT_SLOT;
     this.#u32[base + 17] = 0;
     this.#u32[base + 18] = 0;
     this.#u32[base + 19] = 0;
+    for (let h = 0; h < EDGE_BANDS; h += 2) {
+      const lo = edgeBandHalf(edgeBandsM[h] ?? -1);
+      const hi = edgeBandHalf(edgeBandsM[h + 1] ?? -1);
+      this.#u32[base + INSTANCE_EDGE_BANDS_WORD + h / 2] = (lo | (hi << 16)) >>> 0;
+    }
     this.#count += 1;
   }
 

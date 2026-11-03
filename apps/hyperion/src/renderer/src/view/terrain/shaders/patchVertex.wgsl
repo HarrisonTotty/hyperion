@@ -9,7 +9,9 @@
 // may still differ in the last bits (fused multiply-adds, WGSL's 2.5 ULP division and its sqrt),
 // far inside T4.b's 1 mm bound.
 
-// uniforms.ts's SLOT_RECORD_BYTES: PatchTermsF32 and the skirt depth.
+// uniforms.ts's SLOT_RECORD_BYTES: PatchTermsF32, the skirt depth, and each block's e₂, e₄ and e₈ in
+// half floats, half 3 b + l of block b, +∞ where unmeasured (plan R14, R14.T3.c's shared bands;
+// `terrainStrides.wgsl`), which only the terrain's stride morph reads.
 struct SlotRecord {
   axisA : vec3f, s0 : f32,
   axisE1 : vec3f, t0 : f32,
@@ -20,6 +22,7 @@ struct SlotRecord {
   skirtDepthM : f32,
   straddles : u32,
   pad : vec2u,
+  blockErrors : array<vec4u, 24>,
 }
 
 // The cube sphere's warp, `st_to_uv_f32`.

@@ -208,11 +208,16 @@ interface ScratchKey {
 }
 
 /**
- * The bits at k = 0 of `coarse`'s grid at vertex (`x`, `y`) of `fine`, a finer patch whose place
- * there lies on `coarse`'s boundary: the corner's bit alone where the place is a corner of
- * `coarse`, else the bit of the edge it lies on.
+ * The place in `coarse`'s grid, its quads, of vertex (`x`, `y`) of `fine`, a patch of its level or
+ * finer: exact in `f64`, across a face's edge by `sampleDir`'s integer lattice. `terrain/
+ * strideEdges.ts` finds the blocks across an edge by it (plan R14, R14.T3.c).
  */
-function coarseBitsAt(fine: PatchKey, x: number, y: number, coarse: PatchKey): number {
+export function coarsePlaceOf(
+  fine: PatchKey,
+  x: number,
+  y: number,
+  coarse: PatchKey,
+): readonly [number, number] {
   let xc: number;
   let yc: number;
   if (fine.face === coarse.face) {
@@ -237,6 +242,16 @@ function coarseBitsAt(fine: PatchKey, x: number, y: number, coarse: PatchKey): n
     xc = (u + coarseQuads) / 2 - 64 * coarse.i;
     yc = (v + coarseQuads) / 2 - 64 * coarse.j;
   }
+  return [xc, yc];
+}
+
+/**
+ * The bits at k = 0 of `coarse`'s grid at vertex (`x`, `y`) of `fine`, a finer patch whose place
+ * there lies on `coarse`'s boundary: the corner's bit alone where the place is a corner of
+ * `coarse`, else the bit of the edge it lies on.
+ */
+function coarseBitsAt(fine: PatchKey, x: number, y: number, coarse: PatchKey): number {
+  const [xc, yc] = coarsePlaceOf(fine, x, y, coarse);
   const at = vertexHoldBits(xc, yc);
   return (at & CORNER_HOLDS) !== 0 ? at & CORNER_HOLDS : at;
 }

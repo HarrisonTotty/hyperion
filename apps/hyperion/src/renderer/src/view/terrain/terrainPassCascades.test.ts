@@ -50,7 +50,15 @@ import {
 import { type CameraCullPass, type CascadeCullPass, CULL_PASS_BYTES } from "../clusters/cullPass";
 import { CLUSTER_FLAG_MAY_DISCARD, type ClusterRecord } from "../clusters/record";
 import { TERRAIN_CLUSTERS_PER_PAGE, TERRAIN_PAGE_CLUSTERS } from "../clusters/terrain";
-import { INSTANCE_FINEST, NO_STRIDE_BAND } from "../clusters/strides";
+import {
+  EDGE_BANDS,
+  edgeBandIndex,
+  edgeBandOfHalf,
+  INSTANCE_FINEST,
+  NO_STRIDE_BAND,
+  type StrideScale,
+  strideNeedM,
+} from "../clusters/strides";
 import { STRIDES } from "../clusters/templates";
 import {
   GEOMETRY_BEFORE_R14,
@@ -75,6 +83,7 @@ import {
   fadeWord,
   INSTANCE_FADES_WORD,
   INSTANCE_PARENT_SLOT_WORD,
+  INSTANCE_EDGE_BANDS_WORD,
   INSTANCE_RECORD_BYTES,
   INSTANCE_SLOT_WORD,
   INSTANCE_SUB_PATCH_WORD,
@@ -1808,6 +1817,21 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
   });
 });
 
+/**
+ * An instance record's strides (plan R14, R14.T3.c): its scale, its edges' shared bands as the
+ * shaders read them back, m, at `edgeBandIndex`, and its quadrant word.
+ */
+interface RecordStrides {
+  readonly strideScale: StrideScale;
+  readonly edges: number[];
+  readonly quadrant: number;
+}
+
+/** Whether a record has no strides: no scale, and none at any edge. */
+function noStrides({ strideScale, edges }: RecordStrides): boolean {
+  return strideScale.perErrorM === 0 && edges.every((band) => band === NO_STRIDE_BAND);
+}
+
 /** Each interior record's draw set level, in the records' order. */
 function levelsOf(made: Made): number[] {
   return (made.pass.lastStep?.drawSet.patches ?? [])
@@ -1845,12 +1869,20 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     return made;
   }
 
-  /** Each interior record's stride bands and quadrant word as last written. */
-  function stridesOf(made: Made): Array<{ readonly bands: number[]; readonly quadrant: number }> {
+  /** Each interior record's strides as last written. */
+  function stridesOf(made: Made): RecordStrides[] {
     const words = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
     const per = INSTANCE_RECORD_BYTES / 4;
-    return Array.from({ length: words.length / per }, (_, n) => ({
-      bands: [12, 13, 14].map((w) => f32Of(words[per * n + w] ?? 0)),
+    return Array.from({ length: words.length / per }, (_record, n) => ({
+      strideScale: {
+        statedM: f32Of(words[per * n + 12] ?? 0),
+        perErrorM: f32Of(words[per * n + 13] ?? 0),
+      },
+      edges: Array.from({ length: EDGE_BANDS }, (_half, h) =>
+        edgeBandOfHalf(
+          ((words[per * n + INSTANCE_EDGE_BANDS_WORD + (h >> 1)] ?? 0) >>> (16 * (h & 1))) & 0xffff,
+        ),
+      ),
       quadrant: words[per * n + 7] ?? 0,
     }));
   }
@@ -1861,60 +1893,80 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     const per = INSTANCE_RECORD_BYTES / 4;
     const words = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
     const whole = keptWhole(wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`));
-    const records = stridesOf(made).map(({ bands }, k) => ({
-      bands,
+    const records = stridesOf(made).map((strides, k) => ({
+      none: noStrides(strides),
       subPatch: (words[k * per + INSTANCE_SUB_PATCH_WORD] ?? 0) !== 0,
       kept: whole[k] === true,
     }));
     const subPatches = records.filter(({ subPatch }) => subPatch);
     expect([
       subPatches.length > 0,
-      subPatches.every(({ bands, kept }) => kept && bands.every((b) => b === NO_STRIDE_BAND)),
-      records.some(({ subPatch, bands }) => !subPatch && bands.every((b) => b > 0)),
+      subPatches.every(({ none, kept }) => kept && none),
+      records.some(({ subPatch, none }) => !subPatch && !none),
     ]).toEqual([true, true, true]);
   });
 
-  it("draws at stride 1, every record without bands, while the lever is off", async () => {
+  it("draws at stride 1, every record without a scale or edges' bands, while the lever is off", async () => {
     const made = await measuredPass();
     made.pass.setGeometry(SETTINGS.high.geometry);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const cull = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL) ?? fail();
     const records = stridesOf(made);
     expect(records.length).toBeGreaterThan(0);
-    expect(records.every(({ bands }) => bands.every((band) => band === NO_STRIDE_BAND))).toBe(true);
+    expect(records.every(noStrides)).toBe(true);
     expect(parseLitPass(cull.bindings.uniforms["passes"] ?? new Uint32Array(), 5).strideCap).toBe(
       1,
     );
   });
 
-  it("gives each measured patch its level's bands, the same for each of a level's patches and rising with the stride", async () => {
+  it("gives each measured patch its level's scale, the same for each of a level's patches and one 1 ÷ τ′ for the view's", async () => {
     const made = await measuredPass();
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const levels = levelsOf(made);
-    const byLevel = new Map<number, string>();
-    const records = stridesOf(made);
-    const unlike = records.filter(({ bands }, n) => {
+    const byLevel = new Map<number, number>();
+    const records = stridesOf(made).filter(({ strideScale }) => strideScale.perErrorM > 0);
+    const unlike = records.filter(({ strideScale }, n) => {
       const level = levels[n] ?? -1;
-      const held = byLevel.get(level) ?? bands.join();
+      const held = byLevel.get(level) ?? strideScale.statedM;
       byLevel.set(level, held);
-      const taken = bands.filter((band) => band > 0);
-      return bands.join() !== held || taken.toSorted((a, b) => a - b).join() !== taken.join();
+      return (
+        strideScale.statedM !== held || strideScale.perErrorM !== records[0]?.strideScale.perErrorM
+      );
     });
-    expect([records.some(({ bands }) => bands.every((band) => band > 0)), unlike]).toEqual([
-      true,
-      [],
-    ]);
+    expect([records.length > 0, unlike]).toEqual([true, []]);
   });
 
-  it("takes a finer level's bands towards strides 4 and 8 from a coarser one's towards 2 and 4: one ladder of the chords' levels", async () => {
+  it("holds each bake's blocks' errors in its slot record, and gives its edges their blocks' needs or larger, none at level 2 where a finer patch touches", async () => {
     const made = await measuredPass();
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
-    const levels = levelsOf(made);
-    const records = stridesOf(made);
-    const fine = Math.max(...levels);
-    const fineBands = records[levels.indexOf(fine)]?.bands ?? [];
-    const coarse = records[levels.indexOf(fine - 1)]?.bands ?? [];
-    expect([fineBands[1], fineBands[2]]).toEqual([coarse[0], coarse[1]]);
+    // The last slot record written: its first two blocks' e₂, e₄ and e₈ from byte 112.
+    const slot = Uint32Array.from(wordsIn(made.engine, "terrain slot records")).buffer;
+    const half = new Float16Array(slot, 112, 6);
+    const records = stridesOf(made).filter(({ strideScale }) => strideScale.perErrorM > 0);
+    // An edge a finer patch touches, held at k = 0 at level 2 along its length, beside it at
+    // some of its blocks, the others beside no drawn patch.
+    const finerTouched = records.flatMap(({ edges, quadrant }) =>
+      [0, 1, 2, 3]
+        .filter((e) => ((quadrant >>> (2 + e)) & 1) === 1)
+        .map((e) =>
+          Array.from({ length: 8 }, (_, t) => edges[edgeBandIndex(e, t, 2)]).some(
+            (band) => band === NO_STRIDE_BAND,
+          ),
+        ),
+    );
+    const below = records.flatMap(({ strideScale, edges }) =>
+      edges.filter((band, h) => {
+        const need = strideNeedM(strideScale, [0.01, 0.02, 0.04][h % 3] ?? 0);
+        return band !== NO_STRIDE_BAND && band < need;
+      }),
+    );
+    expect([
+      [...half],
+      records.length > 0,
+      finerTouched.length > 0 && finerTouched.every(Boolean),
+      records.some(({ edges }) => edges.some((band) => band > 0)),
+      below,
+    ]).toEqual([[...Float16Array.of(0.01, 0.02, 0.04, 0.01, 0.02, 0.04)], true, true, true, []]);
   });
 
   it("culls the lit pass up to stride 8 and draws every stride's buckets", async () => {
@@ -1949,12 +2001,12 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     ).toEqual([overlay, overlay + 4]);
   });
 
-  it("gives a bake without measured errors no bands", async () => {
+  it("gives a bake without measured errors no scale and no edges' bands", async () => {
     const made = await measuredPass(null);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const records = stridesOf(made);
     expect(records.length).toBeGreaterThan(0);
-    expect(records.every(({ bands }) => bands.every((band) => band === NO_STRIDE_BAND))).toBe(true);
+    expect(records.every(noStrides)).toBe(true);
   });
 
   it("holds every patch that may lie in a contact's forced region at stride 1, and no other", async () => {
@@ -1964,8 +2016,8 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const finest = stridesOf(made).map(({ quadrant }) => (quadrant & INSTANCE_FINEST) !== 0);
     expect([finest.some(Boolean), finest.every(Boolean)]).toEqual([true, false]);
-    // Its bands stand: its vertices still morph, held at the contact as the CDLOD morph is.
-    expect(stridesOf(made).every(({ bands }) => bands[0] !== NO_STRIDE_BAND)).toBe(true);
+    // Its scale stands: its vertices still morph, held at the contact as the CDLOD morph is.
+    expect(stridesOf(made).every(({ strideScale }) => strideScale.perErrorM > 0)).toBe(true);
   });
 });
 

@@ -870,7 +870,8 @@ export interface SlotUpload {
   readonly heightRangeM?: readonly [number, number];
   /**
    * The bake's clusters' measured errors (`BakedPatch.clusterErrors`, plan R14, R14.T3.b), which a
-   * clustered layout's records hold; absent, they stay unmeasured.
+   * clustered layout's records and the slot record's blocks' errors hold (T3.c's shared bands);
+   * absent, they stay unmeasured.
    */
   readonly clusterErrors?: Float16Array;
 }
@@ -1513,6 +1514,7 @@ export class TerrainResources {
       0,
       patchTerms(patch.key, this.#figure, patch.originHeightM),
       patch.skirtDepthM,
+      patch.clusterErrors ?? null,
     );
     this.#engine.writeBuffer(
       this.#made.slotRecords,

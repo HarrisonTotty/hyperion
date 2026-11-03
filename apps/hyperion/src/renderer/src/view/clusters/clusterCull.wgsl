@@ -71,9 +71,13 @@
 // - _The stride_: for a cascade the coarsest s = 2^l, l up to the pass's cap, with s × the unit
 //   within the pass's tolerance, in `f32` as the twin forms it; s = 1 where none is, and for a DAG
 //   record. For a camera pass (T3.c; `clusters/strides.ts`), up to its cap, the coarsest whose
-//   every band below it the cluster's nearest point is past by (1 + β), the bands its instance's
-//   record holds (terrain's `Instance.strides`, words 12 to 14, read where an instance has 16 words
-//   or more), so that every vertex the stride drops is wholly moved by the stride morph
+//   every band below it the cluster's nearest point is past by (1 + β), its bands the largest of
+//   the vertices it drops (the shared bands, `cluster_bands`): a block's own need, its neighbours'
+//   on its sides within its page, from their records' measured errors under its instance's scale
+//   (terrain's `Instance.strides`, words 12 and 13, read where an instance has 16 words or more),
+//   and the shared bands of its patch's edges along it (`Instance.edgeBands`, words 20 to 67, half
+//   floats of kilometres, where it has 68 or more), a strip's edge's along its block, so that every
+//   vertex the stride drops is wholly moved by the stride morph
 //   (`terrainStrides.wgsl`); s = 1 where the instance's quadrant word has bit 18 (the forced
 //   region's) and where it is kept whole (its heights fade from another surface, which its records'
 //   spheres do not bound, so that its vertices may stand nearer than its spheres), and at most 4 for
@@ -141,6 +145,8 @@ const INPUT_WHOLE : u32 = 0x80000000u;
 // CLUSTER_FLAG_MAY_DISCARD), and a shape with no may-discard template (`cullPass.ts`').
 const CLUSTER_FLAG_DAG : u32 = 16u;
 const CLUSTER_FLAG_MAY_DISCARD : u32 = 32u;
+// `record.ts`' CLUSTER_FLAG_MEASURED: a strided record whose errors are measured (T3.b).
+const CLUSTER_FLAG_MEASURED : u32 = 64u;
 const NO_DISCARD_TEMPLATE : u32 = 0xffu;
 const STRIDE_LEVELS : u32 = 4u;
 // `strides.ts`' STRIDE_BAND_FRACTION, and the quadrant word's bit by which a camera pass draws an
@@ -337,15 +343,128 @@ fn record_edges(shape : u32, template_ref : u32) -> u32 {
   return 0u;
 }
 
+// A record's measured error towards stride 2^(level + 1), m (`record.ts`' `strideErrorBits`: e₁
+// and e₂, e₄ and e₈ in half floats); +∞ where it is not measured.
+fn record_error(record : ClusterRecord, level : u32) -> f32 {
+  if ((record.flags & CLUSTER_FLAG_MEASURED) == 0u) {
+    return 3.4e38;
+  }
+  switch level {
+    case 0u: {
+      return unpack2x16float(record.errors.x).y;
+    }
+    case 1u: {
+      return unpack2x16float(record.errors.y).x;
+    }
+    default: {
+      return unpack2x16float(record.errors.y).y;
+    }
+  }
+}
+
+// A cluster's need towards a stride under `scale` (E_L ÷ τ′_rad, 1 ÷ τ′_rad) of its error `e`
+// (`strides.ts`' `strideNeedM`); −1 for none.
+fn stride_need(scale : vec2f, e : f32) -> f32 {
+  if (scale.y <= 0.0 || !(e >= 0.0) || e > 65504.0) {
+    return -1.0;
+  }
+  return scale.x + e * scale.y;
+}
+
+// Bands `a` and `b` shared, stride by stride: the larger, none where either is none (`strides.ts`'
+// `sharedStrideBandsM`).
+fn shared_bands(a : vec3f, b : vec3f) -> vec3f {
+  return select(vec3f(-1.0), max(a, b), (a > vec3f(0.0)) & (b > vec3f(0.0)));
+}
+
+// Block `block`'s needs of page `page` under `scale`.
+fn block_needs(scale : vec2f, page : u32, block : u32) -> vec3f {
+  let record = records[page * params.counts.z + block];
+  return vec3f(
+    stride_need(scale, record_error(record, 0u)),
+    stride_need(scale, record_error(record, 1u)),
+    stride_need(scale, record_error(record, 2u)),
+  );
+}
+
+// The shared bands of edge `edge` (`EDGES`' order) at block `t` along it, of the instance whose
+// words begin at `base` (`strides.ts`' `edgeBandIndex`), half floats of kilometres; none where the
+// record holds none, its edges' vertices held.
+fn edge_bands(base : u32, edge : u32, t : u32) -> vec3f {
+  if (params.counts.y < 68u) {
+    return vec3f(-1.0);
+  }
+  var out = vec3f(-1.0);
+  for (var l = 0u; l < 3u; l = l + 1u) {
+    let h = (8u * edge + t) * 3u + l;
+    let km = unpack2x16float(instance_words[base + 20u + h / 2u])[h % 2u];
+    out[l] = select(-1.0, km * 1000.0, km > 0.0);
+  }
+  return out;
+}
+
+// The bands of cluster `c` of the instance whose words begin at `base`, of page `page`, under
+// `scale` (`strides.ts`' `clusterStrideBandsM`): the largest band of the vertices it drops; none
+// for no scale.
+fn cluster_bands(scale : vec2f, page : u32, c : u32, base : u32) -> vec3f {
+  if (scale.y <= 0.0 || c >= 96u || c >= params.counts.z) {
+    return vec3f(-1.0);
+  }
+  if (c >= 64u) {
+    // Strip m of edge e (`gpu/resources.ts`' numbering, anticlockwise) lies along one block.
+    let e = (c - 64u) / 8u;
+    let m = (c - 64u) % 8u;
+    switch e {
+      case 0u: {
+        return edge_bands(base, 2u, m);
+      }
+      case 1u: {
+        return edge_bands(base, 1u, m);
+      }
+      case 2u: {
+        return edge_bands(base, 3u, 7u - m);
+      }
+      default: {
+        return edge_bands(base, 0u, 7u - m);
+      }
+    }
+  }
+  let bx = c % 8u;
+  let by = c / 8u;
+  var bands = block_needs(scale, page, c);
+  if (bx > 0u) {
+    bands = shared_bands(bands, block_needs(scale, page, c - 1u));
+  } else {
+    bands = shared_bands(bands, edge_bands(base, 0u, by));
+  }
+  if (bx < 7u) {
+    bands = shared_bands(bands, block_needs(scale, page, c + 1u));
+  } else {
+    bands = shared_bands(bands, edge_bands(base, 1u, by));
+  }
+  if (by > 0u) {
+    bands = shared_bands(bands, block_needs(scale, page, c - 8u));
+  } else {
+    bands = shared_bands(bands, edge_bands(base, 2u, bx));
+  }
+  if (by < 7u) {
+    bands = shared_bands(bands, block_needs(scale, page, c + 8u));
+  } else {
+    bands = shared_bands(bands, edge_bands(base, 3u, bx));
+  }
+  return bands;
+}
+
 // A camera pass's stride's level for a strided record (see the module's head; `strides.ts`'
-// `cameraStrideLevel`): `bands` its instance's, `quadrant` its instance's quadrant word, `distance`
-// the record's sphere's nearest point.
+// `cameraStrideLevel`): `bands` the record's (`cluster_bands`), `quadrant` its instance's quadrant
+// word, `distance` the record's sphere's nearest point.
 fn camera_stride_level(cull_pass : CullPass, record : ClusterRecord, bands : vec3f, quadrant : u32, distance : f32) -> u32 {
   if ((quadrant & INSTANCE_FINEST) != 0u) {
     return 0u;
   }
+  let edges = record_edges(record.flags & 0xfu, record.templateRef);
   var cap = min(cull_pass.header.y, STRIDE_LEVELS - 1u);
-  if ((record_edges(record.flags & 0xfu, record.templateRef) & ((quadrant >> 2u) & 0xfu)) != 0u) {
+  if ((edges & ((quadrant >> 2u) & 0xfu)) != 0u) {
     cap = min(cap, 2u);
   }
   var level = 0u;
@@ -421,16 +540,12 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
   // The instance's quadrant word and stride bands, where its record holds them (T3.c), and whether
   // it is a sub-patch of its slot (T3.d).
   var quadrant = 0u;
-  var bands = vec3f(-1.0);
+  var scale = vec2f(0.0);
   var sub = false;
   if (params.counts.y >= 16u) {
     quadrant = instance_words[base + 7u];
     sub = (instance_words[base + 8u] & 31u) != 0u;
-    bands = vec3f(
-      bitcast<f32>(instance_words[base + 12u]),
-      bitcast<f32>(instance_words[base + 13u]),
-      bitcast<f32>(instance_words[base + 14u]),
-    );
+    scale = vec2f(bitcast<f32>(instance_words[base + 12u]), bitcast<f32>(instance_words[base + 13u]));
   }
   // A slot's visibility words, a bit a cluster.
   let history_words = (clusters + 31u) / 32u;
@@ -449,6 +564,11 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
       let lod = lod_of(at);
       parent_centre = origin + page_to_instance(lod.xyz);
       parent_radius = lod.w;
+    }
+    // The camera passes' bands, alike in each.
+    var bands = vec3f(-1.0);
+    if (!dag && !whole && scale.y > 0.0) {
+      bands = cluster_bands(scale, page, c, base);
     }
     for (var p = 0u; p < pass_count; p = p + 1u) {
       let cull_pass = passes[p];

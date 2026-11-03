@@ -183,7 +183,10 @@ function digestOf(source: string): string {
  * the terrain's by its exact cut, a star's direct term in a loop of one pass, skipped only where
  * its product is 0; and again by its lever, the sources' table, read only where one is bound, its
  * one-texel stub leaving every lookup's arithmetic as before; and by `SOURCE_TABLE_ONLY`, false
- * as written, whose table-only twins the lever's second step draws a body of one band by.
+ * as written, whose table-only twins the lever's second step draws a body of one band by. The
+ * figure and the terrain's again by the shared stride bands (fix-r14-t3c-shared-bands): the
+ * record's `edgeBands` and the slot record's `blockErrors`, which the figure's structs step over,
+ * and the stride morph's bands from them, which an instance with no scale skips.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "e29de864d360e7a5"],
