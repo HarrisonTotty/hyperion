@@ -794,12 +794,6 @@ fn shade_terrain(
     if (horizon <= 0.0) {
       continue;
     }
-    let alpha = angle_between(towards, -ray);
-    let reflectance =
-      class_sets_reflectance(&sets, horizon, mu0, mu, alpha, star_radius) * decoration.albedo;
-    let transmitted = atmosphere_sun_transmittance(
-      height, mu_datum, local.latitude, local_azimuth(local, towards), j
-    );
     var shadowed = terrain_shadow_factor(q) * terrain_ring_shadow(q, towards);
     if (j == 0u) {
       // The map's share at the cut R07's term used, the nearer of the horizon and the element's
@@ -807,7 +801,20 @@ fn shade_terrain(
       let m = disc_visible_fraction(star_distance_radii, clamp(phi + max(local_horizon, 0.0), 0.0, LIT_PI));
       shadowed = shadowed * terrain_cascade_term(m, cascade_lit);
     }
-    out.radiance = out.radiance + light.xyz * misc.y * reflectance * visible * transmitted * shadowed;
+    // The direct term only where some channel is neither eclipsed nor shadowed (R08.T9.b's exact
+    // cut): elsewhere its product is 0 and the reflectance and the air's lookup are not formed, the
+    // sum unchanged to the bit. A loop of at most one pass, not an `if`, as the composite's reads
+    // are (`composite.wgsl`): SwiftShader, the checks' adapter, runs both sides of a branch under
+    // its lanes' mask, and a loop only while a lane is in it.
+    for (var direct = any((visible > vec3f(0.0)) & (shadowed > vec3f(0.0))); direct; direct = false) {
+      let alpha = angle_between(towards, -ray);
+      let reflectance =
+        class_sets_reflectance(&sets, horizon, mu0, mu, alpha, star_radius) * decoration.albedo;
+      let transmitted = atmosphere_sun_transmittance(
+        height, mu_datum, local.latitude, local_azimuth(local, towards), j
+      );
+      out.radiance = out.radiance + light.xyz * misc.y * reflectance * visible * transmitted * shadowed;
+    }
     out.lit = out.lit || (horizon > TERRAIN_LIT_IRRADIANCE && any(visible > vec3f(TERRAIN_LIT_IRRADIANCE)));
   }
   // Planetshine (R07's Design note 7), as R07's disc takes it: each lit neighbour a uniform sphere,

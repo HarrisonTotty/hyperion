@@ -845,16 +845,23 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     if (horizon <= 0.0) {
       continue;
     }
-    let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
-    // `body_brdf` with the disc's μ₀ factor replaced by the horizon term (`lit_disc_term`), each of
-    // the surface's laws by its share.
-    let reflectance = surface_reflectance(surface, laws, horizon, mu0, mu, alpha, star_radius);
-    // R08's transmittance to the star's centre (R08.T9.b; Design note 7: a star's disc is under
-    // about 1°), its light slot j's, 0 where the ground hides it, at the datum's cosine.
-    let transmitted = atmosphere_sun_transmittance(
-      0.0, mu0_datum, local.latitude, local_azimuth(local, towards), j
-    );
-    out.radiance = out.radiance + light.xyz * misc.z * reflectance * visible * transmitted * ring;
+    // The direct term only where some channel is neither eclipsed nor in the ring's shadow (R08.T9.b's
+    // exact cut): elsewhere its product is 0 and the reflectance and the air's lookup are not formed,
+    // the sum unchanged to the bit. A loop of at most one pass, not an `if`, as the composite's reads
+    // are (`composite.wgsl`): SwiftShader, the checks' adapter, runs both sides of a branch under its
+    // lanes' mask, and a loop only while a lane is in it.
+    for (var direct = any((visible > vec3f(0.0)) & (ring > vec3f(0.0))); direct; direct = false) {
+      let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
+      // `body_brdf` with the disc's μ₀ factor replaced by the horizon term (`lit_disc_term`), each
+      // of the surface's laws by its share.
+      let reflectance = surface_reflectance(surface, laws, horizon, mu0, mu, alpha, star_radius);
+      // R08's transmittance to the star's centre (R08.T9.b; Design note 7: a star's disc is under
+      // about 1°), its light slot j's, 0 where the ground hides it, at the datum's cosine.
+      let transmitted = atmosphere_sun_transmittance(
+        0.0, mu0_datum, local.latitude, local_azimuth(local, towards), j
+      );
+      out.radiance = out.radiance + light.xyz * misc.z * reflectance * visible * transmitted * ring;
+    }
     // Lit directly: the horizon and eclipse terms leave more than LIT_IRRADIANCE of face-on.
     out.lit = out.lit || (horizon > LIT_IRRADIANCE && any(visible > vec3f(LIT_IRRADIANCE)));
   }
