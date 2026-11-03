@@ -203,15 +203,15 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // stands, are the texel's own place, map and normal, bit for bit; the depth and the casters
   // compose the shared module alone.
   ...[
-    ["terrain-lit-baked-offsets", "6991da297f965aa3"],
-    ["terrain-lit-face-differences", "f55d780b928c5b0e"],
+    ["terrain-lit-baked-offsets", "2f1d51e7dca5638c"],
+    ["terrain-lit-face-differences", "f6fa79d7b7bedac5"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
     ["terrain-depth-baked-offsets", "625ac236b3f0f5"],
     ["terrain-depth-face-differences", "ecc920e6e2ccecd8"],
     ["terrain-shadow-baked-offsets", "164034387f222ea7"],
     ["terrain-shadow-face-differences", "1f9288dbaf5eee52"],
-    ["terrain-lit-baked-offsets-still", "8e8abb6584bdd320"],
-    ["terrain-lit-face-differences-still", "136237a3530807b9"],
+    ["terrain-lit-baked-offsets-still", "ac74e6144029f9ad"],
+    ["terrain-lit-face-differences-still", "6cdc2c9431bb5940"],
     ["terrain-depth-baked-offsets-still", "68f5a1db2655cb1a"],
     ["terrain-depth-face-differences-still", "6d903b3d9a1978eb"],
     ["terrain-shadow-baked-offsets-still", "dbdf5be2e18c970a"],

@@ -22,8 +22,9 @@
 // the datum's normal and height there, its shading normal mixed from the disc's n′ there
 // (`disc_shading_normal`, the disc's normal map bound at 24), and `shade_terrain` scales the
 // horizon map's elevations by it, so that at 0 the terrain's pixel is lit as the disc lights the
-// same pixel, its relief standing in its geometry alone. The cascades' receiver keeps the texel's
-// own place and geometric normal.
+// same pixel, its relief standing in its geometry alone; a skirt's wall and a fin shade there as
+// the grid at their edge vertex, as its lip does. The cascades' receiver keeps the texel's own place
+// and geometric normal.
 
 struct Draw {
   // Zero: each instance carries its own origin.
@@ -167,8 +168,12 @@ fn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {
   }
   // One call of the shading: a compiler that inlines every call (SwiftShader's) takes one copy.
   // The grid's normal morphs with its height, to the parent's tile by k, and a skirt's lip shades
-  // as the grid at its edge vertex (R10.T8.c).
-  let reference = in.kind != LIT_GRID && !skirt_lip(in);
+  // as the grid at its edge vertex (R10.T8.c). Near a hand-over that fades the terrain's own detail
+  // (the lights' row 2's z below 1; R10.T15.b.2) a skirt's wall and a fin shade as the grid at
+  // their edge vertex too, and so as the disc draws the pixel: the disc draws no wall, and at the
+  // hand-back a wall seen at a patch's edge, in the reference surface's law 0 on ν, moved the served
+  // airless world's cells there by over 1/3 stop.
+  let reference = in.kind != LIT_GRID && !skirt_lip(in) && !(terrain_row(2u).z < 1.0);
   // A branch, not a `select`, so that a skirt's or a fin's fragment reads no tile and no cascade.
   var normal = datum;
   var cascade_lit = 1.0;

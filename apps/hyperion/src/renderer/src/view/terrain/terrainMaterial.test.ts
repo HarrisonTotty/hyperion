@@ -457,6 +457,13 @@ describe("the lit terrain's shadow receiver (R10.T9.b)", () => {
     expect(horizonWgsl).toContain("return element_horizon(e, star, phi);");
   });
 
+  it("shades a skirt's wall and a fin as the grid at their edge vertex below a share of 1 alone (R10.T15.b.2)", () => {
+    const code = terrainLitShadeWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    expect(code).toContain(
+      "let reference = in.kind != LIT_GRID && !skirt_lip(in) && !(terrain_row(2u).z < 1.0);",
+    );
+  });
+
   it("reconstructs the disc's normal map as the disc does, operation for operation (R10.T15.b.2)", () => {
     const sum = (text: string): string =>
       asDiscs(text).slice(
