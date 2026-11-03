@@ -29,6 +29,11 @@
 //! | `--keep-skies`           | `HYPERION_KEEP_SKIES`              | on                                                     |
 //! | `--stop-on-stdin-close`  | `HYPERION_STOP_ON_STDIN_CLOSE`     | off                                                    |
 //!
+//! On Apple silicon `--num-workers` defaults to no more than its performance threads with a third
+//! of its efficiency threads, less two, so that the pool and a client's height workers together
+//! stay within about twice the performance cores (four on an M5's 4 performance and 6 efficiency
+//! cores).
+//!
 //! `--serve-sky`, `--keep-skies` and `--stop-on-stdin-close` are switches. Their variables take
 //! clap's boolish values, in any case: `y`, `yes`, `t`, `true`, `on` or `1` for on, and `n`, `no`,
 //! `f`, `false`, `off` or `0` for off. They refuse anything else, the empty string included.
@@ -277,7 +282,9 @@ pub struct ServerArgs {
     #[arg(long, value_name = "DIR", env = ENV_DATA_DIR, default_value = DEFAULT_DATA_DIR)]
     data_dir: PathBuf,
 
-    /// Generation worker threads; defaults to the available parallelism less one, at least one
+    /// Generation worker threads; defaults to the available parallelism less one, at least one,
+    /// and on Apple silicon to its performance threads with a third of its efficiency threads,
+    /// less two
     #[arg(long, value_name = "COUNT", env = ENV_WORKERS, default_value_t = default_workers())]
     num_workers: NonZeroUsize,
 
@@ -1138,12 +1145,84 @@ impl ServerConfigBuilder {
     }
 }
 
-/// Available parallelism less one, for the runtime and the sockets, and at least one.
+/// The workers by default on this machine ([`workers_for`] of its parallelism and its core
+/// levels).
 fn default_workers() -> NonZeroUsize {
-    std::thread::available_parallelism()
-        .ok()
+    workers_for(
+        std::thread::available_parallelism().ok(),
+        CoreLevels::of_this_machine(),
+    )
+}
+
+/// The logical processors of a machine whose OS tells its performance cores from its efficiency
+/// cores: Apple silicon's, as `hw.perflevel0` and `hw.perflevel1` count them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct CoreLevels {
+    performance: usize,
+    efficiency: usize,
+}
+
+impl CoreLevels {
+    /// This machine's levels, read through gdt-cpus (`CpuInfo::detect`, which reads the
+    /// `hw.perflevelN` nodes on macOS): `None` off macOS, as the client's own count reads them on
+    /// macOS alone (`performanceThreads.ts`), on a Mac with one level (an Intel one), and where the
+    /// reading fails.
+    fn of_this_machine() -> Option<Self> {
+        if !cfg!(target_os = "macos") {
+            return None;
+        }
+        // A failed reading only leaves the default as it is off Apple silicon.
+        let info = gdt_cpus::CpuInfo::detect().ok()?;
+        let mut levels = Self {
+            performance: 0,
+            efficiency: 0,
+        };
+        for lp in &info.lps {
+            match lp.kind {
+                gdt_cpus::CoreKind::Performance => levels.performance += 1,
+                gdt_cpus::CoreKind::Efficiency | gdt_cpus::CoreKind::LpEfficiency => {
+                    levels.efficiency += 1;
+                }
+                gdt_cpus::CoreKind::Unknown => {}
+            }
+        }
+        (levels.performance > 0 && levels.efficiency > 0).then_some(levels)
+    }
+}
+
+/// The efficiency cores' threads counted as one performance core's thread: three, as the
+/// client's height workers count them (`EFFICIENCY_THREADS_A_PERFORMANCE_THREAD` in
+/// `performanceThreads.ts`, a lean of 2026-11-01).
+const EFFICIENCY_THREADS_A_PERFORMANCE_THREAD: usize = 3;
+
+/// The performance threads the pool leaves by default on Apple silicon: two, as the client's height
+/// workers leave for the render thread and the GPU process
+/// (`PERFORMANCE_THREADS_LEFT_BESIDE_HEIGHT_WORKERS` in `workers/pool.ts`), so that the pool is as
+/// many as they are.
+const PERFORMANCE_THREADS_LEFT_BESIDE_WORKERS: usize = 2;
+
+/// The default worker count: `available` less one, for the runtime and the sockets, and at least
+/// one; on a machine of [`CoreLevels`], no more than its P performance and E efficiency threads'
+/// P + ⌊E ÷ 3⌋ − 2, at least one (a lean, 2026-11-03).
+///
+/// A new terrain session on the owner's Mac (an M5's 4 performance and 6 efficiency cores) took the
+/// load from about 4 to 20–45. The client's height workers there are 4, counted by performance
+/// cores (`defaultHeightWorkers`), where this pool took 9, the processors less one. Bounded the same
+/// way, the pool is 4 there too, so that the two together stay under about twice the performance
+/// cores. A worker's count moves no value, only when jobs end, and `--num-workers` still sets any
+/// count.
+#[must_use]
+fn workers_for(available: Option<NonZeroUsize>, levels: Option<CoreLevels>) -> NonZeroUsize {
+    let less_one = available
         .and_then(|cores| NonZeroUsize::new(cores.get() - 1))
+        .unwrap_or(NonZeroUsize::MIN);
+    let Some(levels) = levels else {
+        return less_one;
+    };
+    let threads = levels.performance + levels.efficiency / EFFICIENCY_THREADS_A_PERFORMANCE_THREAD;
+    NonZeroUsize::new(threads.saturating_sub(PERFORMANCE_THREADS_LEFT_BESIDE_WORKERS))
         .unwrap_or(NonZeroUsize::MIN)
+        .min(less_one)
 }
 
 /// The most coarse surface passes run at once by default, whatever the workers.
@@ -1252,12 +1331,51 @@ mod tests {
         ServerArgs::command().debug_assert();
     }
 
+    /// The default pool is the processors less one off Apple silicon, and on it P + ⌊E ÷ 3⌋ − 2,
+    /// at least one and never more than the processors less one.
+    #[test]
+    fn the_default_workers_leave_the_performance_cores_beside_the_height_workers() {
+        let cores = |n: usize| NonZeroUsize::new(n);
+        let levels = |performance, efficiency| {
+            Some(CoreLevels {
+                performance,
+                efficiency,
+            })
+        };
+        let counts = |available: Option<NonZeroUsize>, levels: Option<CoreLevels>| {
+            workers_for(available, levels).get()
+        };
+        assert_eq!(
+            [cores(16), cores(10), cores(2), cores(1), None].map(|each| counts(each, None)),
+            [15, 9, 1, 1, 1]
+        );
+        // An M5's four and six, an M1's four and four, an M1 Pro's eight and two, an M4 Max's
+        // twelve and four, and a chip of two and two.
+        assert_eq!(
+            [
+                (10, levels(4, 6)),
+                (8, levels(4, 4)),
+                (10, levels(8, 2)),
+                (16, levels(12, 4)),
+                (4, levels(2, 2)),
+            ]
+            .map(|(available, levels)| counts(cores(available), levels)),
+            [4, 3, 6, 11, 1]
+        );
+        // Never past the processors the OS lets the server have, less one.
+        assert_eq!(counts(cores(3), levels(4, 6)), 2);
+        assert_eq!(counts(None, levels(4, 6)), 1);
+    }
+
     #[test]
     fn defaults_match_the_builder() {
         let config = config(&[]);
         assert_eq!(fields(&config), fields(&ServerConfig::builder().build()));
-        let cores = std::thread::available_parallelism().map_or(1, NonZeroUsize::get);
-        let workers = cores.saturating_sub(1).max(1);
+        let workers = workers_for(
+            std::thread::available_parallelism().ok(),
+            CoreLevels::of_this_machine(),
+        )
+        .get();
         assert_eq!(
             fields(&config),
             (

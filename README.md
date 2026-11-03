@@ -173,6 +173,10 @@ An option given on the command line wins over its variable.
 | `--keep-skies`          | `HYPERION_KEEP_SKIES`          | on                                                     | Answer a sky asked again from memory         |
 | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                                    | Stop gracefully when standard input closes   |
 
+On Apple silicon `--num-workers` defaults to no more than its performance threads with a third of
+its efficiency threads, less two (four on an M5's 4 performance and 6 efficiency cores), so that
+the pool and a client's height workers together stay within about twice the performance cores.
+
 `--stop-on-stdin-close` is for a server run as another program's child. The parent stops it by
 closing its standard input, which on Windows is the only graceful stop a parent has, and if the
 parent dies the pipe closes, so the server never outlives it. It is off by default: with it, a

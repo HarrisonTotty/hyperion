@@ -8288,6 +8288,12 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
 - **An Apple chip's efficiency cores counted at a third (lean, 2026-11-01; lane
   perf-terrain-bakes-2).** clamp(P − 2 + ⌊E ÷ 3⌋, 1, 8), E from `hw.perflevel1.logicalcpu`: 4 on
   the M5, 3 on an M1, unchanged where E ≤ 2. The owner's `workerSweep.mjs` on the Mac decides it.
+- **The server's pool beside them on Apple silicon (lean, 2026-11-03; lane
+  fix-session-load-spike).** `hyperion-server`'s default `--num-workers` there is min(P + ⌊E ÷ 3⌋
+  − 2, cores − 1), at least 1 (`config.rs` `workers_for`, read through gdt-cpus's
+  `hw.perflevelN`): 4 on the M5, where it was 9, so that the pool and the height workers stay
+  within about 2P. Elsewhere unchanged. The brief's "at a session's start" read as the pool's size
+  at the server's start: the server never hears of a fixture's terrain session.
 - **R05.T18's first draws after the batched bake (2026-11-01; lane perf-terrain-bakes-2).** About
   97 high drafts a second at eight workers on the pod's stream, against 94 before and 129.9 asked:
   the batching cut the double normals (the refinements) by a fifth, but a cold draft is mostly the
