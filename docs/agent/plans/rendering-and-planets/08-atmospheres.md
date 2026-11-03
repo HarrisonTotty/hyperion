@@ -5334,6 +5334,9 @@ per-fragment chain (4.4–13.1 ms). The levers' target is p95 ≤ 15.67 ms at ev
   `just test-render`, and QW34. _Built 2026-10-29; the RTX runs pending: the owner's RTX run_
   (Risks, "Deviations in R08.T11.g, as built": the thin read only, R01.T15's bound 25 → 27, part
   8's check byte for byte on SwiftShader, the parts' times taken in a pod).
+- **The routes' rows** (research-rm4-rm5-close-out §4, lane 3): part 1's rows for the routes
+  opened since QW33, so that RM4's one QW judges the 16.67 ms blocker on each. _Built 2026-11-03;
+  the RTX run pending: the owner's RTX run_ (Risks, "R08.T11's routes' rows, as built").
 
 Acceptance: the record is here, and `pnpm test` passes.
 
@@ -24731,3 +24734,29 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     frame; `atmosphereScene.test.ts` holds its closed plan equal with and without the ground.
   - Closes T16.a.2's and T16.b.2's _Open_ questions on the served giant's disc and the deck it hid.
   - Pending, the owner's RTX run: the routed frame, and (Q)'s row with the deck read over its disc.
+- **R08.T11's routes' rows, as built** (2026-11-03; lane `rm4-frame-rows`; research-rm4-rm5-close-out
+  §4, lane 3). Smoke only; no generated value moves.
+  - Part 1's timing group (`smoke/frameTiming.ts`) gains, under `--smoke-thick-read=1`, (R)
+    `titan-class` through its haze route, (S) the hand Jupiter through its envelope's deck, (T) the
+    measured Earth's air at 3,000 K beside its correction (T18.b's thermal forms) and (U)
+    `venus-92bar` through its deck over its surface (R08.T15.b.2), each at high's `x1`, `x2` and
+    `x4` (`frameTimingScene.ts`' `routedMedia`, `routedPlacesOf`, `routedSets`).
+  - Their tables hold the smoke's patterns (`atmosphere.ts`' `withRoutedTable`, which the twins
+    share): the read's cost, not a bake's values, as (Q)'s deck (lean, 2026-11-03).
+  - Cameras (lean, 2026-11-03): (A)'s five scaled to the radius, less Titan's nearest (in its air)
+    and the hand Jupiter's farthest (past 10⁹ m, where its disc table draws).
+  - (S)'s black disc stands on its medium's own datum, 1,049 km under its tables' floor, and (U)'s
+    ground on its sphere under its deck (`FrameMedium.drawnFigure`), as "The disc's ground, as
+    built" draws them, the deck read beyond a drawn surface reading the deck over them. (U) holds
+    no table below its deck.
+  - SwiftShader: each row's twins (`checkRoutedTwins`) and its frame drawn once, untimed
+    (`checkRoutedRow`), in parts 2 (U), 6 (S), 12 (T) and 13 (R).
+  - (S)'s twins leave out its four aerosol decks (`OBLATE_TWIN_MISSES`): on its oblate figure the
+    kernels miss their twin with them under every read (NH₃ and NH₄SH ices up to 7% in the deck's
+    march, 3.3% beside the correction alone; water and chromophore 2.1 × 10⁻³); on a sphere, or
+    without them, they agree. Left for a fix; then empty the set.
+  - `smoke/result.ts`: `THICK_READ_WATCHDOG_MS`, 720 s more for part 1's timing run under
+    `--smoke-thick-read=1`, sized from QW32 and estimates (lean, 2026-11-03: in place of splitting
+    part 1, which would add a run to the QW's command); re-size it from the QW's wall times.
+  - _Pending, the owner's RTX run_: the QW (research-rm4-rm5-close-out §3), whose part 1 times every
+    row, these four among them.

@@ -32,6 +32,9 @@
  * `TEST SATURN`'s spheroid (`datumFrame.ts`); R08.T8.b's far limb, with the composite from above
  * the top, in part 4 after R05.T12.e's marches, and its low pick, which has no twin, in part 1;
  * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11;
+ * R08.T11's routes' rows, each its twins and its row's frame drawn untimed, last in its part: (T)'s
+ * in part 12, whose catalogue compiles its thermal forms, (R)'s in part 13, whose compiles its thick
+ * read, and (S)'s and (U)'s, their deck's marches compiled in their groups, in parts 6 and 2;
  * R08.T14.c's thick read in part 13, its kernels' catalogue first, then its kernels against their
  * twins on Earth, R08.T14.f's correction alone against its twins on Earth and its specialised march, and its kernels against their twins on a Saturn-class
  * figure in part 3 after R08.T6.g's heights; and part 7 R10.T10.b's lit terrain, R10.T10.e's
@@ -95,6 +98,7 @@ import {
   checkMarchOneBand,
   checkMarchSpecialised,
   checkCorrectionFrameTwinsEarth,
+  checkRoutedTwins,
   checkThermalFrameTwins,
   checkBelowDeckFrameTwins,
   checkDeckFrameTwins,
@@ -116,7 +120,15 @@ import { checkCellPassEveryRecord } from "./cellPass";
 import { checkDiscAir, checkJupiterDiscAir } from "./discAir";
 import { checkThermalDiscs } from "./thermal";
 import { captureDatum, checkDatumFrame } from "./datumFrame";
-import { timeAtmosphereFrame } from "./frameTiming";
+import { checkRoutedRow, type RoutedRow, timeAtmosphereFrame } from "./frameTiming";
+import {
+  handJupiterDeckMedium,
+  type RoutedMedium,
+  selfLuminousEarthMedium,
+  titanHazeMedium,
+  venusDeckMedium,
+  withoutOblateTwinMisses,
+} from "./frameTimingScene";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
@@ -652,10 +664,33 @@ async function run(
   await group(12, "R08.T18.b the medium's own light against its twins", () =>
     checkThermalFrameTwins(engine, checks, twins),
   );
+  // R08.T11's routes' rows on SwiftShader, each its twins and its row's frame, untimed: (T)'s here,
+  // whose catalogue compiles its thermal forms, (R)'s in part 13, whose compiles its thick read, and
+  // (S)'s and (U)'s in parts 6 and 2, the lightest. (S)'s twins leave out its aerosol decks, which
+  // miss their twin on its oblate figure under any read (`OBLATE_TWIN_MISSES`, a finding).
+  const routedRow = async (row: RoutedRow, made: () => Promise<RoutedMedium>): Promise<void> => {
+    const routed = await made();
+    await checkRoutedTwins(engine, checks, twins, [withoutOblateTwinMisses(routed)]);
+    await checkRoutedRow(engine, checks, routed, row);
+  };
+  // (S) and (U), whose deck's marches compile in their groups: part 14, which compiles them first,
+  // took 229 s of its 360 s on a pod with (S) and before R08.T15.b.2's thermal twins joined it.
+  await group(6, "R08.T11 (S) the hand Jupiter's deck route's row and its twins", () =>
+    routedRow("(S)", handJupiterDeckMedium),
+  );
+  await group(2, "R08.T11 (U) venus-92bar's deck route's row and its twins", () =>
+    routedRow("(U)", venusDeckMedium),
+  );
+  await group(12, "R08.T11 (T) a self-luminous medium's row and its twins", () =>
+    routedRow("(T)", () => Promise.resolve(selfLuminousEarthMedium())),
+  );
   // In part 13, last: in part 6 it took the part to its watchdog (180 s), and beside the thin one
   // in part 12 to 166 to 172 s under load.
   await group(13, "R08.T14.c the thick read's specialised march", () =>
     checkThickMarchSpecialised(engine, checks, summary.fallback),
+  );
+  await group(13, "R08.T11 (R) titan-class's haze route's row and its twins", () =>
+    routedRow("(R)", titanHazeMedium),
   );
   // In part 14 after the deck's catalogue, whose marches it draws by.
   await group(14, "R08.T15.a.2 the deck's march against its twins", () =>

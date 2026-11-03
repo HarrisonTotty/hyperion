@@ -92,6 +92,25 @@
  *   its figure's vertices, the depth's rounding), and (B)'s, the atmosphere alone over an empty
  *   scene, where every ray of the march that meets the ground reads it.
  *
+ * Four more under the same flag time the routes opened since QW33, so that the owner's one QW
+ * judges the 16.67 ms blocker on each (research-rm4-rm5-close-out §1.1 and §4, lane 3), each at its
+ * cameras (`frameTimingScene.ts`' `routedPlacesOf`: (A)'s five, scaled to its radius, less those
+ * inside its air or past the full passes' boundary) under high's `x1`, `x2` and `x4`, timed and
+ * reported as (A) is, its tables its own and holding the smoke's pattern of its route's table
+ * (`withRoutedTable`: the read's cost, not a bake's values, as (Q)'s deck), which its twins hold in
+ * a group of their own (`atmosphere.ts`' `checkRoutedTwins`):
+ *
+ * - (R) `titan-class` through its haze route (R08.T14.d.4): its sphere, its thick table with the
+ *   correction summed in;
+ * - (S) the hand Jupiter routed through its envelope's deck (R08.T16.a.2; its gate stays closed):
+ *   its upper medium on its floor's datum, the deck at the floor, its black disc on the medium's own
+ *   datum below it (research-rm4-rm5-close-out §1.3), so that the march reads the deck over the disc;
+ * - (T) a self-luminous medium through R08.T18.b's thermal forms: the measured Earth's air at
+ *   3,000 K beside its correction alone, as a thin world's tables hold it;
+ * - (U) `venus-92bar` through its deck route (R08.T15.b.2): its upper medium on the deck's datum
+ *   over its sphere, the deck at its top, its ground drawn below it on the sphere
+ *   (research-rm4-rm5-close-out §1.3), so that the march reads the deck over the disc.
+ *
  * The timed parts take QW2's and QW3's form (`decision-r08-t8-leans.md` §10;
  * `frameTimingLedger.ts`' `QW_FORM` and `runTimed`): each combination's 10 warm-up frames, then 30
  * timed, back to back; two sweeps over every combination, the second in the reverse order. There
@@ -187,6 +206,7 @@ import {
   SMOKE_EV100,
   SMOKE_EXPOSURE_SCALE,
   withDeckTable,
+  withRoutedTable,
 } from "./atmosphere";
 import { addCanvas } from "./frames";
 import {
@@ -222,6 +242,10 @@ import {
   NORMAL_MAP_LEVEL,
   placesScaledTo,
   planetshineShare,
+  type RoutedMedium,
+  routedMedia,
+  routedPlacesOf,
+  routedSets,
   SATURN_GIANT_DISTANCE_M,
   SMALL_TRIO,
   type SmallBodiesScene,
@@ -236,7 +260,7 @@ import {
   type TimedPlace,
   trioSourceSet,
 } from "./frameTimingScene";
-import { type Checks, frameOf, NEAR_M } from "./harness";
+import { type Checks, frameOf, halfTexels, NEAR_M } from "./harness";
 import { percentile } from "./soak";
 import {
   iceGiantMethaneBody,
@@ -307,6 +331,10 @@ const EARTH_IDS = {
   corrected: "0200080020000000.0319",
   correctedClassMap: "0200080020000000.031a",
   deck: "0200080020000000.031b",
+  titan: "0200080020000000.031c",
+  jupiter: "0200080020000000.031d",
+  luminous: "0200080020000000.031e",
+  venus: "0200080020000000.031f",
 } as const;
 
 /** (H)'s three small bodies' ids, in `SMALL_TRIO`'s order. */
@@ -437,6 +465,11 @@ interface FrameMedium {
   readonly lightSlots: number;
   /** The body's figure, its pole +z: WGS 84 for the Earths, Saturn's spheroid for (J)'s. */
   readonly figure: SpheroidFigure;
+  /**
+   * The figure its body is drawn on where it is not {@link FrameMedium.figure}: (S)'s, a routed
+   * envelope's disc on its medium's own datum, under its tables' (research-rm4-rm5-close-out §1.3).
+   */
+  readonly drawnFigure?: SpheroidFigure;
   /**
    * The giants' distance from the body's centre, m: `GIANT_DISTANCE_M` for the Earths,
    * `SATURN_GIANT_DISTANCE_M` for (J)'s.
@@ -687,7 +720,8 @@ function photorealFrame(
 
 /**
  * The far-limb frame's combination of `setting`, `medium`, a camera and a set: the medium's body
- * on its figure, under its class map where it has one.
+ * on its figure, under its class map where it has one, at `setting`'s output unless `viewport` is
+ * given.
  */
 function frameCombination(
   setting: QualitySetting,
@@ -695,8 +729,8 @@ function frameCombination(
   place: TimedPlace,
   set: SourceSet,
   failures: string[],
+  viewport: ViewSize = settingOutput(setting),
 ): Timed<FrameCombination> {
-  const viewport = settingOutput(setting);
   const scene = farLimbFrameScene(
     place.distanceM,
     viewport,
@@ -705,7 +739,12 @@ function frameCombination(
     medium.giantDistanceM,
   );
   const earth: LitBodyInput = {
-    ...earthInput(medium.id, medium.medium, scene.earthCentreM, medium.figure),
+    ...earthInput(
+      medium.id,
+      medium.medium,
+      scene.earthCentreM,
+      medium.drawnFigure ?? medium.figure,
+    ),
     ...medium.surface,
   };
   const air: FrameAtmosphere = {
@@ -775,8 +814,8 @@ interface FrameView {
 }
 
 /**
- * A new renderer on a new canvas view at `setting`'s output, both held by `releases`, prepared for
- * `camera`, with the wall time of its `prepare`, ms.
+ * A new renderer on a new canvas view at `setting`'s output (or `viewport`), both held by
+ * `releases`, prepared for `camera`, with the wall time of its `prepare`, ms.
  *
  * @throws Error where the renderer could not be made.
  */
@@ -786,8 +825,8 @@ async function heldFrameView(
   name: string,
   setting: QualitySetting,
   camera: FrameScene["camera"],
+  viewport: ViewSize = settingOutput(setting),
 ): Promise<{ readonly on: FrameView; readonly prepareMs: number }> {
-  const viewport = settingOutput(setting);
   const view = heldView(releases, engine, name, viewport);
   const renderer = releases.hold(new PhotorealRenderer(engine, name), (made) => {
     made.dispose();
@@ -2399,8 +2438,8 @@ async function firstAirFrame(
  * The group's summary checks, which fail together without `timestamp-query`: each setting's and
  * medium's table of (A), and (B), (C), (H), (G), R08.T18.a's (O), (I)'s two tables, (J)'s on each
  * setting, (D), (E) and (F)'s, and the dropped frames', by the full run's own templates
- * ({@link CHECK_NAMES}). (K) to (N) and (Q), which only `options.thickRead` runs, are not among
- * them.
+ * ({@link CHECK_NAMES}). (K) to (N) and (Q) to (U), which only `options.thickRead` runs, are not
+ * among them.
  */
 function summaryCheckNames(): string[] {
   const frameTables = (["high", "low"] as const).flatMap((setting) =>
@@ -2427,9 +2466,10 @@ function summaryCheckNames(): string[] {
 /** What a run of {@link timeAtmosphereFrame} takes beyond its checks. */
 export interface FrameTimingOptions {
   /**
-   * Whether (K) to (N) and (Q) run: the measured Earth through the thick read, its bake forced on,
-   * with its polarisation correction alone, and over a cloud deck (plan R08, R08.T14.c, R08.T14.f
-   * and R08.T15.a.2; the page's `thickRead`, `--smoke-thick-read=1`).
+   * Whether (K) to (N) and (Q) to (U) run: the measured Earth through the thick read, its bake
+   * forced on, with its polarisation correction alone, and over a cloud deck (plan R08, R08.T14.c,
+   * R08.T14.f and R08.T15.a.2), and the routes' rows (the page's `thickRead`,
+   * `--smoke-thick-read=1`).
    */
   readonly thickRead: boolean;
 }
@@ -2450,6 +2490,23 @@ const CORRECTED_CLASS_MAP_NAME =
 
 /** (Q)'s medium's name in its checks. */
 const DECK_EARTH_NAME = "the measured Earth over a cloud deck";
+
+/**
+ * One of the routes' rows: (R) `titan-class`, (S) the hand Jupiter, (T) the self-luminous Earth,
+ * (U) `venus-92bar`.
+ */
+export type RoutedRow = "(R)" | "(S)" | "(T)" | "(U)";
+
+/** The routes' rows in `routedMedia`'s order. */
+const ROUTED_ROWS: readonly RoutedRow[] = ["(R)", "(S)", "(T)", "(U)"];
+
+/** Each route's row's body's id. */
+const ROUTED_IDS: Readonly<Record<RoutedRow, BodyIdHex>> = {
+  "(R)": EARTH_IDS.titan,
+  "(S)": EARTH_IDS.jupiter,
+  "(T)": EARTH_IDS.luminous,
+  "(U)": EARTH_IDS.venus,
+};
 
 /** (Q)'s deck's split over WGS 84, m: 3 km, in the gas and under the ozone, as part 14's R05 Earth. */
 const DECK_SPLIT_M = 3_000;
@@ -2565,16 +2622,181 @@ function deckMeasuredMedium(
   const deck = tables.deckPacked;
   return {
     medium: { ...measured, name: DECK_EARTH_NAME, id: EARTH_IDS.deck, medium, tables, figure },
-    about: `its tables (its own, beside (A)'s) hold the upper medium over a cloud deck ${(DECK_SPLIT_M / 1_000).toFixed(0)} km up on the deck's datum and the smoke's patterned deck (R08.T15.a.2's smoke-only override; nothing routes a deck): ${deck?.bands ?? 0} band and ${deck?.slots ?? 0} light slots, the deck table ${tables.deckBytes.toLocaleString("en-GB")} B and the J above it ${tables.thickBytes.toLocaleString("en-GB")} B, the row's ${tables.rowBytes.toLocaleString("en-GB")} B in all; the sky view and the aerial perspective read the J above, and the march the deck wherever it reaches the datum before a drawn surface (withDeckRead)`,
+    about: `its tables (its own, beside (A)'s) hold the upper medium over a cloud deck ${(DECK_SPLIT_M / 1_000).toFixed(0)} km up on the deck's datum and the smoke's patterned deck (R08.T15.a.2's smoke-only override: the measured Earth's air routes on no deck gate, while an envelope's deck routes on giant-deck's, R08.T16.a.2, and a Venus-class deck over a surface on its own, R08.T15.b.2): ${deck?.bands ?? 0} band and ${deck?.slots ?? 0} light slots, the deck table ${tables.deckBytes.toLocaleString("en-GB")} B and the J above it ${tables.thickBytes.toLocaleString("en-GB")} B, the row's ${tables.rowBytes.toLocaleString("en-GB")} B in all; the sky view and the aerial perspective read the J above, and the march the deck wherever it reaches the datum before a drawn surface (withDeckRead)`,
   };
+}
+
+/** One of (R) to (U)'s media on the page: its tables and body, its row's cameras, and its rows' words. */
+interface RoutedFrameMedium {
+  readonly medium: FrameMedium;
+  readonly places: ReadonlyArray<TimedPlace>;
+  readonly about: string;
+}
+
+/**
+ * One of (R) to (U)'s media (`frameTimingScene.ts`' `RoutedMedium`), its own tables held by
+ * `releases`: its curves twice, a binary's two light slots, as (A)'s, and the smoke's pattern of its
+ * route's table (`withRoutedTable`, as its twins draw it), with the column's own light where it
+ * emits.
+ */
+function routedFrameMedium(
+  engine: RenderEngine,
+  releases: Releases,
+  routed: RoutedMedium,
+  id: BodyIdHex,
+): RoutedFrameMedium {
+  const curves = [...routed.curves, ...routed.curves];
+  const body = routed.gravity === null ? null : { figure: routed.figure, gravity: routed.gravity };
+  const tables = releases.hold(
+    new AtmosphereTables(engine, routed.medium, tableRadiusM(routed.figure), curves, body),
+    (made) => {
+      made.dispose();
+    },
+  );
+  const task = withRoutedTable(tables, curves.length, routed.table, routed.thermal !== null);
+  if (routed.thermal !== null) {
+    tables.setThermalSource(routed.thermal);
+  }
+  const drawn = routed.drawnFigure;
+  const lowered =
+    drawn === routed.figure
+      ? ""
+      : `; its black disc drawn on its medium's own datum, ${((routed.figure.equatorialRadiusM - drawn.equatorialRadiusM) / 1_000).toFixed(0)} km under its tables' at the equator, as a routed envelope's stands (research-rm4-rm5-close-out §1.3), so that the march reads the deck over it`;
+  const own =
+    routed.thermal === null
+      ? ""
+      : `; its air emitting (setThermalSource, R08.T18.b), isothermal at ${String(routed.thermal.temperaturesK[0] ?? Number.NaN)} K, so that it draws by the thermal forms`;
+  const medium: FrameMedium = {
+    name: routed.name,
+    id,
+    medium: routed.medium,
+    tables,
+    lightSlots: absorberCount(routed.medium) > 0 ? curves.length : Infinity,
+    figure: routed.figure,
+    ...(drawn === routed.figure ? {} : { drawnFigure: drawn }),
+    giantDistanceM: routed.giantDistanceM,
+    surface: null,
+  };
+  const places = routedPlacesOf(routed);
+  return {
+    medium,
+    places,
+    about: `${routed.name}: its tables (its own) hold the smoke's ${routed.table.kind} pattern, ${task}'s read (withRoutedTable: the read's cost, not a bake's values, as (Q)'s deck; --smoke-thick-read=1's), ${tables.plan.kappa.length} slices and ${tables.plan.bands.length} bands, ${tables.curves.length} light slots, the row's ${tables.rowBytes.toLocaleString("en-GB")} B in all${lowered}${own}; ${places.length} of (A)'s cameras scaled to its equatorial radius (${places.map(({ label }) => label).join(", ")}), those inside its air or past the full passes' boundary (10⁹ m) left out; its giants ${routed.giantDistanceM.toExponential(2)} m from its centre`,
+  };
+}
+
+/**
+ * (R) to (U): a route's medium at its row's cameras under high's `x1`, `x2` and `x4`
+ * (research-rm4-rm5-close-out §4, lane 3: the owner's QW judges the 16.67 ms blocker on each route).
+ */
+async function timeRouted(
+  on: FrameView,
+  ledger: ResolveLedger,
+  routed: RoutedFrameMedium,
+): Promise<FrameTimings> {
+  const failures: string[] = [];
+  const combinations = routed.places.flatMap((place) =>
+    routedSets().map((set) => frameCombination("high", routed.medium, place, set, failures)),
+  );
+  return timeCombinations(on, ledger, combinations, failures);
+}
+
+/** The output a route's row's frame is drawn at on SwiftShader: 320 × 180, high's 16:9. */
+const ROUTED_CHECK_OUTPUT: ViewSize = { widthPx: 320, heightPx: 180 };
+
+/**
+ * The frames {@link checkRoutedRow} draws, the last read back: kernels a body's tables first ask
+ * at a frame (the deck's march, the thermal forms) are made then, and drawn by in the next.
+ */
+const ROUTED_CHECK_FRAMES = 3;
+
+/**
+ * A route's row on a device without `timestamp-query`, untimed (research-rm4-rm5-close-out §4,
+ * lane 3: each row meets its twin on SwiftShader, and nothing is timed in the pod), beside its
+ * twins (`atmosphere.ts`' `checkRoutedTwins`): `routed` as its row makes it ({@link
+ * routedFrameMedium}), drawn through `PhotorealRenderer` at {@link ROUTED_CHECK_OUTPUT} from the
+ * row's nearest camera under `x4`, so that the row's whole path runs before the owner's QW. It
+ * holds that the frame is planned, its air draws without a failure and exactly the set's sources,
+ * and every texel of its output is finite.
+ */
+export async function checkRoutedRow(
+  engine: RenderEngine,
+  checks: Checks,
+  routed: RoutedMedium,
+  row: RoutedRow,
+): Promise<void> {
+  const releases = new Releases();
+  try {
+    const made = routedFrameMedium(engine, releases, routed, ROUTED_IDS[row]);
+    const place = made.places[0];
+    const set = routedSets().at(-1);
+    if (place === undefined || set === undefined) {
+      throw new Error(`${row}'s row has a camera and a set`);
+    }
+    const failures: string[] = [];
+    const { item } = frameCombination(
+      "high",
+      made.medium,
+      place,
+      set,
+      failures,
+      ROUTED_CHECK_OUTPUT,
+    );
+    const { on } = await heldFrameView(
+      releases,
+      engine,
+      `${TASK} ${row} check`,
+      "high",
+      item.scene.camera,
+      ROUTED_CHECK_OUTPUT,
+    );
+    let plan: BodyFramePlan | null = null;
+    for (let i = 0; i < ROUTED_CHECK_FRAMES; i += 1) {
+      plan = renderFrame(on, item.frame).plan;
+    }
+    const colours = on.renderer.frameColours;
+    if (plan === null || colours === null) {
+      throw new Error(`${row}'s frame was not planned`);
+    }
+    const drawn = halfTexels(await engine.readTexture(colours.drawn));
+    const sources = plan.sources.get(made.medium.id);
+    item.listed =
+      sources === undefined
+        ? null
+        : listSources(
+            sources,
+            item.scene.air,
+            made.medium.figure,
+            made.medium.medium,
+            made.medium.lightSlots,
+            TABLE_SIZES.high.marchSourceCap,
+          );
+    const finite = drawn.every((value) => Number.isFinite(value));
+    const regime = plan.regimes.get(made.medium.id);
+    checks.check(
+      `${TASK} ${row} ${routed.name}: its row's frame draws on SwiftShader, untimed`,
+      sourcesHeld(item) && failures.length === 0 && finite && regime !== undefined,
+      [
+        `${place.label}, ${set.name}, at ${ROUTED_CHECK_OUTPUT.widthPx} × ${ROUTED_CHECK_OUTPUT.heightPx} on high, the last of its ${ROUTED_CHECK_FRAMES} frames read back`,
+        made.about,
+        sourcesText(item),
+        `the body drawn as ${regime ?? "nothing"}`,
+        failures.length === 0 ? "no air failure" : `air failures: ${failures.join("; ")}`,
+        finite ? "every texel finite" : "a texel not finite",
+      ].join("; "),
+    );
+  } finally {
+    releases.run();
+  }
 }
 
 /**
  * R08.T11's photorealistic frame's timings (the module's remarks): (D) first, so that its cold
  * builds are as cold as the page leaves them, then (A), (B) on (A)'s sources, (C), (G), R08.T18.a's
- * (O), R08.T11.c's (H), (I) and (J), R08.T14.c's (K) and (L), R08.T14.f's (M) and (N) and
- * R08.T15.a.2's (Q) where `options.thickRead` asks (their bake, correction and deck made before the
- * renderer, with (I)'s and (J)'s media), then (E) and (F);
+ * (O), R08.T11.c's (H), (I) and (J), R08.T14.c's (K) and (L), R08.T14.f's (M) and (N),
+ * R08.T15.a.2's (Q) and the routes' (R) to (U) where `options.thickRead` asks (their bake,
+ * correction, deck and media made before the renderer, with (I)'s and (J)'s media), then (E) and
+ * (F);
  * a check a table, one per combination with its per-frame sums, and one that no timed frame was
  * dropped. Without `timestamp-query` each check fails with the reason.
  */
@@ -2623,6 +2845,16 @@ export async function timeAtmosphereFrame(
     const corrected =
       bakes === null ? null : correctedMeasuredMedium(engine, releases, measured, bakes);
     const deck = options.thickRead ? deckMeasuredMedium(engine, releases, measured) : null;
+    // (R) to (U)'s media before the renderer too, Titan's haze optics, the hand Jupiter's assembly
+    // and Venus's Mie made here.
+    const routed = options.thickRead
+      ? (await timedPart("(R) to (U)'s media", routedMedia)).flatMap((made, i) => {
+          const row = ROUTED_ROWS[i];
+          return row === undefined
+            ? []
+            : [{ row, ...routedFrameMedium(engine, releases, made, ROUTED_IDS[row]) }];
+        })
+      : [];
     const judged = specs.find((spec) => spec.name === CLASS_MAP_NAME);
     if (judged === undefined) {
       throw new Error("(I)'s judged class map is among its specs");
@@ -2729,6 +2961,14 @@ export async function timeAtmosphereFrame(
       );
       deckMissing = missingOf(deckFrames) + deckAloneMissing;
     }
+    let routedMissing = 0;
+    for (const made of routed) {
+      // The harness's timed parts run one after another.
+      // oxlint-disable-next-line no-await-in-loop
+      const routedFrames = await timedPart(made.row, () => timeRouted(on, ledger, made));
+      reportFrames(checks, routedFrames, () => made.about);
+      routedMissing += missingOf(routedFrames);
+    }
     const frameMissing = missingOf(frames);
     const mappedMissing = missingOf(mappedFrames);
     const saturnMissing = missingOf(saturnFrames);
@@ -2743,11 +2983,12 @@ export async function timeAtmosphereFrame(
       mappedMissing +
       saturnMissing +
       thickMissing +
-      deckMissing;
+      deckMissing +
+      routedMissing;
     checks.check(
       CHECK_NAMES.dropped,
       missing === 0,
-      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (O) ${emittingMissing}, (P) ${pastMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) to (N) ${thickMissing}`}${deck === null ? "" : `, (Q) ${deckMissing}`}`,
+      `${missing} timed frames had a resolve missing or none: (A) ${frameMissing}, (B) ${aloneMissing}, (C) ${smallMissing}, (G) ${bareMissing}, (O) ${emittingMissing}, (P) ${pastMissing}, (H) ${trioMissing}, (I) ${mappedMissing}, (J) ${saturnMissing}${thick === null ? "" : `, (K) to (N) ${thickMissing}`}${deck === null ? "" : `, (Q) ${deckMissing}`}${routed.length === 0 ? "" : `, (R) to (U) ${routedMissing}`}`,
     );
     const bytes = await timedPart("(E)", () => perViewBytes(engine, checks, measured));
     await timedPart("(F)", () =>

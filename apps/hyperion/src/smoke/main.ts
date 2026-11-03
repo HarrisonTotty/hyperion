@@ -232,6 +232,7 @@ const WATCHDOG_MS = smokeWatchdogMs({
   part,
   captures: capturesDir !== "",
   gpuTiming: gpuTiming === "1",
+  thickRead: thickRead === "1",
   soakSeconds,
   childSeconds,
   scale: watchdogScale ?? 1,

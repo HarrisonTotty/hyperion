@@ -1,9 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { add, dot, norm, normalise, sub, vec3 } from "../geometry/vec3";
 import { NO_NORMAL_ABOVE, type NormalMapTexels } from "../view/bodies/discNormals";
 import { type ClassMapTexels, classMapSide } from "../view/bodies/discSurface";
-import { SATURN_OBLATE_CASE } from "../view/atmosphere/reference/cases";
+import { heightAtPressureM, SATURN_OBLATE_CASE } from "../view/atmosphere/reference/cases";
+import {
+  TITAN_GROUND_ALBEDO,
+  TITAN_RADIUS_M,
+  titanColumn,
+  VENUS_DECK,
+  VENUS_RADIUS_M,
+  VENUS_SURFACE_PRESSURES_PA,
+  venusColumn,
+} from "../view/atmosphere/reference/thickCases";
 import { builtOfCase } from "../view/scenes/atmosphereScene";
 import { CLASS_MAP_FACE_TEXELS } from "../view/terrain/classMap";
 import {
@@ -23,6 +32,7 @@ import {
   NO_ABSORBER_CURVES,
 } from "../view/atmosphere/tables";
 import { type BodyLightSources, bodyLightSources } from "../view/bodies/draw";
+import { GAS_GIANT_FULL_PASS_BOUNDARY_M } from "../view/bodies/regime";
 import { rotate } from "../view/camera/quaternion";
 import { SUN_RADIUS_M } from "../view/lighting/hostDisc";
 import { photopicIlluminance } from "../view/lighting/illuminance";
@@ -48,7 +58,12 @@ import {
   NORMAL_MAP_LEVEL,
   placesScaledTo,
   planetshineShare,
+  handJupiterDeckMedium,
+  type RoutedMedium,
+  routedPlacesOf,
+  routedSets,
   SATURN_GIANT_DISTANCE_M,
+  selfLuminousEarthMedium,
   SMALL_TRIO,
   type SourceSet,
   smallEarthScene,
@@ -59,6 +74,7 @@ import {
   sourcesAsSet,
   sourceSetsOf,
   trioSourceSet,
+  withoutOblateTwinMisses,
 } from "./frameTimingScene";
 
 /** The three media the frames are timed on, each with its tables' light slots' curves. */
@@ -751,5 +767,246 @@ describe("a generated palette's class map", () => {
       2 ** NORMAL_MAP_LEVEL,
       [],
     ]);
+  });
+});
+
+/**
+ * Every frame of `routed`'s row, with its sources as the plan makes them, each medium with an
+ * absorber on a binary's two light slots, as the rows' tables take its curves twice.
+ */
+function framesOf(routed: RoutedMedium): Array<{
+  readonly label: string;
+  readonly set: SourceSet;
+  readonly scene: FrameScene;
+  readonly listed: ListedSources;
+}> {
+  const viewport = settingOutput("high");
+  const photoreal = SETTINGS.high.photoreal;
+  return routedPlacesOf(routed).flatMap((place) =>
+    routedSets().map((set) => {
+      const scene = farLimbFrameScene(
+        place.distanceM,
+        viewport,
+        set,
+        routed.figure,
+        routed.giantDistanceM,
+      );
+      const body = earthInput(
+        "0200080020000000.031c",
+        routed.medium,
+        scene.earthCentreM,
+        routed.drawnFigure,
+      );
+      const sources = bodyLightSources(body, [body, ...scene.giants], scene.lights, {
+        annuli: photoreal.discAnnuli,
+        planetshine: photoreal.planetshineSources,
+      });
+      const listed = listSources(
+        sources,
+        scene.air,
+        routed.figure,
+        routed.medium,
+        2,
+        TABLE_SIZES.high.marchSourceCap,
+      );
+      return { label: `${routed.name} ${place.label} ${set.name}`, set, scene, listed };
+    }),
+  );
+}
+
+/** A routed medium's terms' names, in their order. */
+function termNames(routed: RoutedMedium): string[] {
+  return routed.medium.terms.map(({ name }) => name);
+}
+
+describe("the routes' rows' frames (R08.T11's (R) to (U))", () => {
+  // Titan's sphere and its air's top as its case stands on them (`thickCases.ts`' `titanCase`, its
+  // medium's top its column's), without its haze's optics.
+  const titanFigure = { equatorialRadiusM: TITAN_RADIUS_M, polarRadiusM: TITAN_RADIUS_M };
+  const titan: RoutedMedium = {
+    name: "titan-class through its haze route",
+    table: { kind: "thick" },
+    medium: {
+      name: "titan-class",
+      topHeightM: titanColumn().topHeightM,
+      groundAlbedo: [TITAN_GROUND_ALBEDO, TITAN_GROUND_ALBEDO, TITAN_GROUND_ALBEDO],
+      terms: [],
+    },
+    curves: [],
+    figure: titanFigure,
+    gravity: null,
+    thermal: null,
+    drawnFigure: titanFigure,
+    giantDistanceM: GIANT_DISTANCE_M,
+  };
+  const earth = selfLuminousEarthMedium();
+  // venus-92bar's air above its deck as its row stands on it (`venusDeckMedium`), its split at the
+  // deck's top pressure on its column, without its deck's Mie.
+  const venusColumnOf = venusColumn(VENUS_SURFACE_PRESSURES_PA["venus-92bar"]);
+  const venusSplitM = heightAtPressureM(venusColumnOf, VENUS_DECK.topPa);
+  const venusDatum = {
+    equatorialRadiusM: VENUS_RADIUS_M + venusSplitM,
+    polarRadiusM: VENUS_RADIUS_M + venusSplitM,
+  };
+  const venus: RoutedMedium = {
+    name: "venus-92bar through its deck route",
+    table: { kind: "deck", deckAltitudeM: venusSplitM, floor: "ground" },
+    medium: {
+      name: "venus-92bar above its deck",
+      topHeightM: venusColumnOf.topHeightM - venusSplitM,
+      groundAlbedo: [0, 0, 0],
+      terms: [],
+    },
+    curves: [],
+    figure: venusDatum,
+    gravity: null,
+    thermal: null,
+    drawnFigure: { equatorialRadiusM: VENUS_RADIUS_M, polarRadiusM: VENUS_RADIUS_M },
+    giantDistanceM: GIANT_DISTANCE_M,
+  };
+  let jupiter: RoutedMedium | undefined;
+
+  beforeAll(async () => {
+    jupiter = await handJupiterDeckMedium();
+  }, 120_000);
+
+  /** The hand Jupiter's medium, once made. */
+  const handJupiter = (): RoutedMedium => {
+    if (jupiter === undefined) {
+      throw new Error("the hand Jupiter's medium is made before the tests");
+    }
+    return jupiter;
+  };
+
+  const media = (): RoutedMedium[] => [titan, handJupiter(), earth, venus];
+
+  it("takes high's x1, x2 and x4", () => {
+    expect(routedSets().map((set) => set.name)).toEqual(["x1", "x2", "x4"]);
+  });
+
+  it("takes (A)'s five cameras on the Earth", () => {
+    expect(routedPlacesOf(earth)).toEqual(FAR_LIMB_TIMING_PLACES);
+  });
+
+  it("leaves out Titan's nearest scaled camera, which stands in its air", () => {
+    const scaled = placesScaledTo(titanFigure);
+    expect([
+      (scaled[0]?.distanceM ?? Number.NaN) - TITAN_RADIUS_M < titan.medium.topHeightM,
+      routedPlacesOf(titan).map(({ label }) => label),
+    ]).toEqual([true, scaled.slice(1).map(({ label }) => label)]);
+  });
+
+  it("leaves out the hand Jupiter's farthest scaled camera, past the full passes' boundary", () => {
+    const routed = handJupiter();
+    const scaled = placesScaledTo(routed.figure);
+    expect([
+      (scaled.at(-1)?.distanceM ?? 0) >= GAS_GIANT_FULL_PASS_BOUNDARY_M,
+      routedPlacesOf(routed).map(({ label }) => label),
+    ]).toEqual([true, scaled.slice(0, -1).map(({ label }) => label)]);
+  });
+
+  it("routes the hand Jupiter through its envelope's deck at its floor, its disc on its medium's datum below", () => {
+    const routed = handJupiter();
+    const lowerM = routed.figure.equatorialRadiusM - routed.drawnFigure.equatorialRadiusM;
+    expect([routed.table.kind, routed.table.kind === "deck" ? routed.table.floor : null]).toEqual([
+      "deck",
+      "envelope",
+    ]);
+    // The floor 1,049 km over the medium's datum (research-rm4-rm5-close-out §1.3); the datum
+    // spheroid through it stands a little higher at the equator.
+    expect(lowerM).toBeGreaterThan(1.049e6);
+    expect(lowerM).toBeLessThan(1.2e6);
+    expect(routed.medium.groundAlbedo).toEqual([0, 0, 0]);
+  });
+
+  it("leaves the hand Jupiter's four aerosol decks out of its twins, and nothing else of any row's", () => {
+    const routed = handJupiter();
+    const kept = termNames(withoutOblateTwinMisses(routed));
+    expect([
+      termNames(routed).filter((name) => !kept.includes(name)),
+      [titan, earth].map((medium) => withoutOblateTwinMisses(medium) === medium),
+    ]).toEqual([
+      ["aerosol:H2O", "aerosol:NH4SH", "aerosol:NH3", "aerosol:chromophore"],
+      [true, true],
+    ]);
+  });
+
+  it("takes venus-92bar's five scaled cameras, every one above its air, its deck some 60 km up", () => {
+    expect([
+      routedPlacesOf(venus).map(({ label }) => label),
+      venusSplitM > 5e4 && venusSplitM < 8e4,
+    ]).toEqual([placesScaledTo(venusDatum).map(({ label }) => label), true]);
+  });
+
+  it("draws the self-luminous Earth's air at 3,000 K beside its correction alone", () => {
+    expect([earth.table.kind, earth.thermal?.temperaturesK[0]]).toEqual(["correction", 3_000]);
+  });
+
+  it("stands every camera above its air's top", () => {
+    const inside = media().flatMap((routed) =>
+      framesOf(routed)
+        .filter(
+          ({ scene }) =>
+            !(geodeticOf(scene.air.positionM, routed.figure).heightM > routed.medium.topHeightM),
+        )
+        .map(({ label }) => label),
+    );
+    expect(inside).toEqual([]);
+  });
+
+  it("keeps exactly each set's sources, kind and slot, and marches the set's two, everywhere", () => {
+    const wrong = media().flatMap((routed) =>
+      framesOf(routed)
+        .filter(({ set, listed }) => !sourcesAsSet(listed, set, TABLE_SIZES.high.marchSourceCap))
+        .map(({ label }) => label),
+    );
+    expect(wrong).toEqual([]);
+  });
+
+  it("leaves none of the plan's sources out of the sky", () => {
+    const left = media().flatMap((routed) =>
+      framesOf(routed)
+        .filter(({ listed }) => listed.left.length > 0)
+        .map(({ label }) => label),
+    );
+    expect(left).toEqual([]);
+  });
+
+  it("keeps every giant out of the view, and its disc off the body's", () => {
+    const seen = media().flatMap((routed) =>
+      framesOf(routed)
+        .filter(({ scene }) => {
+          const bodyRad = Math.asin(routed.figure.equatorialRadiusM / norm(scene.earthCentreM));
+          return scene.giants.some(
+            (giant) =>
+              !sphereOutsideView(
+                giant.centreM,
+                giant.figure.equatorialRadiusM,
+                scene.camera,
+                settingOutput("high"),
+              ) ||
+              !(
+                angleBetweenRad(giant.centreM, scene.earthCentreM) >
+                bodyRad + Math.asin(giant.figure.equatorialRadiusM / norm(giant.centreM))
+              ),
+          );
+        })
+        .map(({ label }) => label),
+    );
+    expect(seen).toEqual([]);
+  });
+
+  it("gives each giant's planetshine over 5e-4 of the Sun at the camera, under the second star", () => {
+    const outside = media().flatMap((routed) =>
+      framesOf(routed)
+        .filter(({ set, listed }) => {
+          const share = planetshineShare(listed);
+          return set.giants === 0
+            ? share !== null
+            : share === null || share < 5e-4 || share >= 0.05;
+        })
+        .map(({ label }) => label),
+    );
+    expect(outside).toEqual([]);
   });
 });

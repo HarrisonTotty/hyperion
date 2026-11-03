@@ -43,6 +43,12 @@
  *   ({@link smokeClassMapTexels}, {@link smokeNormalMapTexels}), and a generated patch's whole
  *   palette, every texel surveyed, each class drawn from its maturity nodes
  *   ({@link generatedClassMapTexels}, {@link generatedNormalMapTexels}).
+ *
+ * The routes' rows (R08.T11's (R) to (U), for RM4's close; research-rm4-rm5-close-out §4, lane 3)
+ * take high's `x1`, `x2` and `x4` ({@link routedSets}) at {@link routedPlacesOf}'s cameras over
+ * {@link routedMedia}: `titan-class` through its haze route, the hand Jupiter through its envelope's
+ * deck, a self-luminous medium through R08.T18.b's thermal forms, and `venus-92bar` through its
+ * deck over its surface.
  */
 
 import type { BodyIdHex } from "@hyperion/protocol";
@@ -52,6 +58,7 @@ import { checkerNormalMap } from "../test/normalMapFixtures";
 import { type BodyPhotometry, PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import type { PhotometricLaw } from "../view/appearance/law";
 import { lawFor } from "../view/appearance/phase";
+import { EARTH_REFERENCE, EARTH_REFERENCE_CURVES } from "../view/atmosphere/earth";
 import {
   type AtmosphereCamera,
   marchSourcesOf,
@@ -68,6 +75,7 @@ import {
 import type { NormalMapTexels } from "../view/bodies/discNormals";
 import { type ClassMapTexels, packClassMap } from "../view/bodies/discSurface";
 import type { BodyLightSources, LitBodyInput } from "../view/bodies/draw";
+import { GAS_GIANT_FULL_PASS_BOUNDARY_M } from "../view/bodies/regime";
 import { DEFAULT_FOV_DEG, type ProjectionCamera, type Viewport } from "../view/camera/projection";
 import { IDENTITY_QUATERNION, rotate } from "../view/camera/quaternion";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
@@ -84,7 +92,9 @@ import {
   FAR_LIMB_TIMING_SUN_AZIMUTH_DEG,
   FAR_LIMB_TIMING_SUN_ZENITH_DEG,
   farLimbTimingCamera,
+  HOT_COLUMN,
   limbSunToward,
+  type RoutedTwinBody,
   SLICES_EARTH,
 } from "./atmosphere";
 
@@ -422,6 +432,222 @@ export function placesScaledTo(figure: SpheroidFigure): TimedPlace[] {
     const scaledM = distanceM * ratio;
     return { label: `${scaledM.toExponential(2).replace("e+", "e")} m`, distanceM: scaledM };
   });
+}
+
+// --- The routes' rows (R08.T11's (R) to (U)) ------------------------------------------------------
+
+/**
+ * One medium a route's row times (R08.T11's (R) to (U): the routes opened since QW33,
+ * research-rm4-rm5-close-out §4, lane 3), as its tables take it ({@link RoutedTwinBody}, which its
+ * twins check), with the figure its body is drawn on and its giants' distance from its centre.
+ */
+export interface RoutedMedium extends RoutedTwinBody {
+  /** The figure its body is drawn on, its pole +z: its tables' but for a routed envelope's. */
+  readonly drawnFigure: SpheroidFigure;
+  /** Its giants' distance from its centre, m: {@link GIANT_DISTANCE_M} or twenty giants' radii. */
+  readonly giantDistanceM: number;
+}
+
+/** The sets the routes' rows take: high's `x1`, `x2` and `x4` (research-rm4-rm5-close-out §4). */
+const ROUTED_SET_NAMES: ReadonlySet<SourceSetName> = new Set(["x1", "x2", "x4"]);
+
+/** The routes' rows' sets, on high: `x1`, `x2` and `x4`, as {@link sourceSetsOf} gives them. */
+export function routedSets(): SourceSet[] {
+  return sourceSetsOf("high").filter((set) => ROUTED_SET_NAMES.has(set.name));
+}
+
+/**
+ * A route's row's cameras: (A)'s five on WGS 84; on another figure {@link placesScaledTo}'s, less
+ * those inside its air (lean, 2026-11-03: Titan's nearest, 161 km up, stands in its haze) and those
+ * at or past R08's full passes' boundary, `GAS_GIANT_FULL_PASS_BOUNDARY_M`, past which a giant is
+ * drawn by its disc table, (P)'s row (the hand Jupiter's farthest, 1.12 × 10⁹ m).
+ */
+export function routedPlacesOf(routed: Pick<RoutedMedium, "figure" | "medium">): TimedPlace[] {
+  const { figure } = routed;
+  if (
+    figure.equatorialRadiusM === SLICES_EARTH.figure.equatorialRadiusM &&
+    figure.polarRadiusM === SLICES_EARTH.figure.polarRadiusM
+  ) {
+    return [...FAR_LIMB_TIMING_PLACES];
+  }
+  return placesScaledTo(figure).filter(
+    ({ distanceM }) =>
+      distanceM - figure.equatorialRadiusM > routed.medium.topHeightM &&
+      distanceM < GAS_GIANT_FULL_PASS_BOUNDARY_M,
+  );
+}
+
+/**
+ * (R)'s medium: `titan-class` (`reference/thickCases.ts`, its haze's aggregate optics some 20 s,
+ * pod, 16 vCPU), routed by its haze's range (R08.T14.d.4), on its sphere of one slice and one band,
+ * its tables holding a thick table with its correction summed in, as a haze route's bake is given.
+ *
+ * @throws Error where the case is not on a sphere.
+ */
+export async function titanHazeMedium(): Promise<RoutedMedium> {
+  const { titanClassReferenceCase } = await import("../view/atmosphere/reference/thickCases");
+  const titan = titanClassReferenceCase();
+  if (titan.figure.kind !== "sphere") {
+    throw new Error("titan-class's case is on a sphere");
+  }
+  const figure = { equatorialRadiusM: titan.figure.radiusM, polarRadiusM: titan.figure.radiusM };
+  return {
+    name: "titan-class through its haze route",
+    table: { kind: "thick" },
+    medium: titan.medium,
+    curves: [titan.curves],
+    figure,
+    gravity: null,
+    thermal: null,
+    drawnFigure: figure,
+    giantDistanceM: GIANT_DISTANCE_M,
+  };
+}
+
+/**
+ * (S)'s medium: the hand Jupiter (`test/giantFixtures.ts`) as its record is assembled (an envelope's
+ * cover, the optics workers' `OPTICS_ASSEMBLY`; no line species' tables, as its tests assemble it,
+ * which adds no absorber term), routed through its envelope's deck at its floor (R08.T16.a.2,
+ * `--smoke-thick-read=1`'s override; its chromophore keeps the route closed): its upper medium on
+ * the floor's datum (`deckDatumOf`), the deck's table at the floor, and its black disc drawn on the
+ * medium's own datum, the column's base 1,049 km under the floor, as a routed envelope's disc stands
+ * (research-rm4-rm5-close-out §1.3), so that the march reads the deck over the disc. Its giants
+ * stand twenty of their radii off, as `TEST SATURN`'s.
+ *
+ * @throws Error where the record draws no medium split at its floor.
+ */
+export async function handJupiterDeckMedium(): Promise<RoutedMedium> {
+  const [assembly, records, giants, decks] = await Promise.all([
+    import("../view/atmosphere/assemble"),
+    import("../test/atmosphereRecords"),
+    import("../test/giantFixtures"),
+    import("../view/atmosphere/thick/deckRead"),
+  ]);
+  const assembled = assembly.assembleMedium(
+    records.recordInput(records.detailOf(giants.handJupiterDetail())),
+    { envelopes: true },
+  );
+  if (assembled.medium === undefined || assembled.regime.kind !== "cloudDeck") {
+    throw new Error("the hand Jupiter draws a medium split at its floor");
+  }
+  const floorM = assembled.regime.deckAltitudeM;
+  const { figure, gravity } = assembled.drawn.body;
+  return {
+    name: "the hand Jupiter through its envelope's deck route",
+    table: { kind: "deck", deckAltitudeM: floorM, floor: "envelope" },
+    medium: decks.upperMediumOf(assembled.medium, floorM),
+    curves: assembly.absorberCurveSlots(assembled.drawn),
+    figure: decks.deckDatumOf(figure, gravity, floorM),
+    gravity,
+    thermal: null,
+    drawnFigure: figure,
+    giantDistanceM: SATURN_GIANT_DISTANCE_M,
+  };
+}
+
+/**
+ * (T)'s medium: a self-luminous one through R08.T18.b's thermal forms, the measured Earth's air
+ * isothermal at 3,000 K (`atmosphere.ts`' `HOT_COLUMN`, its thermal twins' body), its tables holding
+ * its correction alone, as a thin world's are (R08.T14.f), so that it draws by the thick read's
+ * thermal forms.
+ *
+ * @throws Error where the smoke's WGS 84 Earth has no gravity.
+ */
+export function selfLuminousEarthMedium(): RoutedMedium {
+  const { figure, gravity } = SLICES_EARTH;
+  if (gravity === null) {
+    throw new Error("the smoke's WGS 84 Earth has its normal gravity");
+  }
+  return {
+    name: "the measured Earth at 3,000 K",
+    table: { kind: "correction" },
+    medium: EARTH_REFERENCE,
+    curves: EARTH_REFERENCE_CURVES,
+    figure,
+    gravity,
+    thermal: HOT_COLUMN,
+    drawnFigure: figure,
+    giantDistanceM: GIANT_DISTANCE_M,
+  };
+}
+
+/**
+ * (U)'s medium: `venus-92bar` (`reference/thickCases.ts`, its deck's and the cases' Mie some 60 s,
+ * pod), routed through its deck over its surface on its gates (R08.T15.b.2), split as `ATMOSPHERE
+ * TEST` splits `TEST VENUS` (`venusDeckCover`, `classifyRegime`): its upper medium on its sphere
+ * raised to the deck's top, the deck's table there, and its ground drawn on its own sphere below,
+ * as a surface world's ground lies below its routed deck (research-rm4-rm5-close-out §1.3), so that
+ * the march reads the deck over the disc. The table below the deck, which a camera beneath it alone
+ * reads, is not held.
+ *
+ * @throws Error where the case is not on a sphere, or its cover does not split it at a deck.
+ */
+export async function venusDeckMedium(): Promise<RoutedMedium> {
+  const [cases, regimes, decks] = await Promise.all([
+    import("../view/atmosphere/reference/thickCases"),
+    import("../view/atmosphere/thick/regime"),
+    import("../view/atmosphere/thick/deckRead"),
+  ]);
+  const venus = cases.thickReferenceCases()["venus-92bar"];
+  if (venus.figure.kind !== "sphere") {
+    throw new Error("venus-92bar's case is on a sphere");
+  }
+  const regime = regimes.classifyRegime(venus.medium, cases.venusDeckCover(venus.medium));
+  if (regime.kind !== "cloudDeck") {
+    throw new Error("venus-92bar's cover splits it at its deck");
+  }
+  const splitM = regime.deckAltitudeM;
+  const groundM = venus.figure.radiusM;
+  return {
+    name: "venus-92bar through its deck route",
+    table: { kind: "deck", deckAltitudeM: splitM, floor: "ground" },
+    medium: decks.upperMediumOf(venus.medium, splitM),
+    curves: [venus.curves],
+    figure: { equatorialRadiusM: groundM + splitM, polarRadiusM: groundM + splitM },
+    gravity: null,
+    thermal: null,
+    drawnFigure: { equatorialRadiusM: groundM, polarRadiusM: groundM },
+    giantDistanceM: GIANT_DISTANCE_M,
+  };
+}
+
+/**
+ * The terms (S)'s twins leave out (finding, 2026-11-03): the hand Jupiter's four aerosol decks. On
+ * its oblate figure the per-frame kernels miss their twin with its NH₃ or NH₄SH ice (drawn on H₂O
+ * ice's roughened column table) under every read: NH₃'s alone by up to 2.8% in the deck's sky view,
+ * and with every deck up to 7% in the deck's march and 3.3% in the sky view beside the correction
+ * alone; its water and chromophore pass alone but together miss by 2.1 × 10⁻³ in one frame's march.
+ * The same medium on a sphere agrees, and without its aerosols every read agrees, its deck, floor,
+ * absorbers and bands among them: so the miss is the kernels' or the twin's for those phases on a
+ * sliced body, not the route's.
+ */
+export const OBLATE_TWIN_MISSES: ReadonlySet<string> = new Set([
+  "aerosol:H2O",
+  "aerosol:NH4SH",
+  "aerosol:NH3",
+  "aerosol:chromophore",
+]);
+
+/** `routed` less {@link OBLATE_TWIN_MISSES}' terms, for its twins; the medium itself where none. */
+export function withoutOblateTwinMisses(routed: RoutedMedium): RoutedMedium {
+  const terms = routed.medium.terms.filter((term) => !OBLATE_TWIN_MISSES.has(term.name));
+  return terms.length === routed.medium.terms.length
+    ? routed
+    : {
+        ...routed,
+        name: `${routed.name}, its aerosol decks left out`,
+        medium: { ...routed.medium, terms },
+      };
+}
+
+/** (R), (S), (T) and (U)'s media, in their order. */
+export async function routedMedia(): Promise<RoutedMedium[]> {
+  const [titan, jupiter, venus] = await Promise.all([
+    titanHazeMedium(),
+    handJupiterDeckMedium(),
+    venusDeckMedium(),
+  ]);
+  return [titan, jupiter, selfLuminousEarthMedium(), venus];
 }
 
 /**

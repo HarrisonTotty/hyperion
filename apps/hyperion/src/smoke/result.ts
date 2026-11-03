@@ -86,6 +86,26 @@ export const CAPTURES_WATCHDOG_MS = 1_860_000;
 export const GPU_TIMING_WATCHDOG_MS = 480_000;
 
 /**
+ * What part 1's watchdog gains besides {@link GPU_TIMING_WATCHDOG_MS} when a timing run also forces
+ * the thick read (`--smoke-thick-read=1`), ms: the allowance of R08.T11's rows only that flag runs
+ * (`frameTiming.ts`), R08.T14.c's (K) and (L), R08.T14.f's (M) and (N), R08.T15.a.2's (Q) and the
+ * routes' (R) to (U), which RM4's one QW takes (research-rm4-rm5-close-out §3).
+ *
+ * @remarks
+ * Three times their time, rounded up to the minute, as {@link GPU_TIMING_WATCHDOG_MS} is sized.
+ * Measured on the RTX 3080 in QW32 (2026-10-27): (K)'s bake, (K) and (L) 39 s. The rest estimated
+ * from QW32's time a combination, 0.73 s for (K)'s and 1.2 s for (L)'s: (M) and (N) as (K) and (L),
+ * 37 s; (Q) as (K), 29 s, and its atmosphere alone at (B)'s 0.58 s a combination, 6 s; (R) to (U),
+ * 54 combinations at (L)'s pace, 65 s, and their media 45 s (`titan-class`'s haze optics some 20 s
+ * and the Venus-class cases' Mie some 60 s on a pod's thread). 221 s in all, 663 s three times, 12
+ * minutes rounded up. Without it the QW's run of part 1 would stand at some 550 s of its 660 s (an
+ * estimate: part 1's groups 180 s and the plain timing group about 150 s besides), past two thirds
+ * of it. No `just test-render` run lifts quantization, so `scripts/testRender.sh`'s outer limit
+ * takes none of it.
+ */
+export const THICK_READ_WATCHDOG_MS = 720_000;
+
+/**
  * The largest whole factor `--smoke-watchdog-scale` may stretch a run's watchdog by
  * (`scripts/testRender.sh`'s `HYPERION_SMOKE_WATCHDOG_SCALE`).
  *
@@ -116,6 +136,8 @@ export interface SmokeWatchdogInputs {
   readonly captures: boolean;
   /** Whether `--smoke-gpu-timing=1` lifts timestamp quantization, which part 1's timings take. */
   readonly gpuTiming: boolean;
+  /** Whether `--smoke-thick-read=1` forces the thick read, whose rows part 1's timings add. */
+  readonly thickRead: boolean;
   /** `--smoke-soak`'s seconds, 0 for none. */
   readonly soakSeconds: number;
   /** `--smoke-child`'s seconds, 0 for none. */
@@ -132,16 +154,19 @@ export interface SmokeWatchdogInputs {
 /**
  * A run's watchdog, ms: {@link SMOKE_WATCHDOG_BASE_MS}, plus {@link CAPTURES_WATCHDOG_MS} where the
  * captures are asked for and {@link GPU_TIMING_WATCHDOG_MS} where timestamp quantization is
- * lifted, each where the run takes part 1, whose groups they are (part 1 or all of them), those
- * three times the scale; plus the soak's and the child window's seconds, which are the clock's and
+ * lifted, with {@link THICK_READ_WATCHDOG_MS} where the thick read is forced too, each where the
+ * run takes part 1, whose groups they are (part 1 or all of them), each of these stretched by the
+ * scale; plus the soak's and the child window's seconds, which are the clock's and
  * are not scaled; plus {@link TRANSFER_WATCHDOG_MS} for the transfer check, whose waits are its own
  * and are not scaled either.
  */
 export function smokeWatchdogMs(inputs: SmokeWatchdogInputs): number {
-  const { part, captures, gpuTiming, soakSeconds, childSeconds, scale, transfer } = inputs;
+  const { part, captures, gpuTiming, thickRead, soakSeconds, childSeconds, scale, transfer } =
+    inputs;
   const partOne = part === "1" || part === "all";
   const capturesMs = captures && partOne ? CAPTURES_WATCHDOG_MS : 0;
-  const timingMs = gpuTiming && partOne ? GPU_TIMING_WATCHDOG_MS : 0;
+  const thickMs = thickRead ? THICK_READ_WATCHDOG_MS : 0;
+  const timingMs = gpuTiming && partOne ? GPU_TIMING_WATCHDOG_MS + thickMs : 0;
   const transferMs = transfer ? TRANSFER_WATCHDOG_MS : 0;
   return (
     (SMOKE_WATCHDOG_BASE_MS + capturesMs + timingMs) * scale +

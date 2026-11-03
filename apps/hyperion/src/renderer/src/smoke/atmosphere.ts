@@ -2191,7 +2191,8 @@ interface ThickTwinBody {
   readonly medium: AtmosphereMedium;
   readonly curves: AbsorberCurveSlots;
   readonly figure: SpheroidFigure;
-  readonly gravity: BodyGravity;
+  /** Its gravity: `null` for a sphere's tables of one slice and one band (R08.T11's Titan row). */
+  readonly gravity: BodyGravity | null;
   readonly frames: ReadonlyArray<TwinFrame>;
   /** Its column's temperature, where it draws the medium's own light (R08.T18.b). */
   readonly thermal?: MediumTemperature;
@@ -2202,9 +2203,15 @@ interface ThickTwinBody {
  * thin read (R08.T18.b's thermal forms), or a deck's (R08.T15.a.2), the body's medium its upper
  * medium and its figure the deck's datum.
  */
-type ThickTwinTable =
+type ThickTwinTable = { readonly kind: "none" } | RoutedTable;
+
+/**
+ * The tables a route draws a medium over, as the smoke patterns them ({@link withRoutedTable}): a
+ * thick table of its kind, or a deck's (R08.T15.a.2), the medium its upper medium and its figure the
+ * deck's datum.
+ */
+export type RoutedTable =
   | { readonly kind: ThickTableKind }
-  | { readonly kind: "none" }
   | {
       readonly kind: "deck";
       /** The deck's split, h\* in m over the body's own datum. */
@@ -2212,6 +2219,40 @@ type ThickTwinTable =
       /** Its floor: a surface's, or an envelope's, whose rays onto it the march steps from the camera. */
       readonly floor: DeckFloor;
     };
+
+/**
+ * Gives `tables` the smoke's pattern of `table` over `slots` light slots (at least one): the thick
+ * table with its correction summed in ({@link withThickTable}), the correction alone
+ * ({@link withCorrectionTable}), or a deck and the correction over it ({@link withDeckTable}), the
+ * thick table holding a patterned scattered thermal light where `thermal` asks (R08.T18.b). The
+ * read's cost and arithmetic do not depend on the values, so R08.T11's routes' rows time it and their
+ * twins hold it as a bake's.
+ *
+ * @returns The task whose read it is, for a check's name.
+ */
+export function withRoutedTable(
+  tables: AtmosphereTables,
+  slots: number,
+  table: RoutedTable,
+  thermal = false,
+): string {
+  let task: string;
+  switch (table.kind) {
+    case "thick":
+      withThickTable(tables, slots, thermal);
+      task = "R08.T14.c";
+      break;
+    case "correction":
+      withCorrectionTable(tables, slots);
+      task = "R08.T14.f";
+      break;
+    case "deck":
+      withDeckTable(tables, slots, table.deckAltitudeM, null, table.floor);
+      task = "R08.T15.a.2";
+      break;
+  }
+  return task;
+}
 
 /**
  * R08.T14.c's frames: R08.T6.b's two (from 2 km at a sun 20° up with a surface 60 km ahead, and
@@ -2315,7 +2356,7 @@ export async function checkThickFrameTwinsSaturn(
 }
 
 /** A column isothermal at 3,000 K to 10⁶ m, past any medium's top the smoke draws. */
-const HOT_COLUMN: MediumTemperature = {
+export const HOT_COLUMN: MediumTemperature = {
   heightsM: Float64Array.of(0, 1e6),
   temperaturesK: Float64Array.of(3_000, 3_000),
 };
@@ -2492,6 +2533,50 @@ export async function checkDeckThermalFrameTwins(
 }
 
 /**
+ * A medium one of R08.T11's routes' rows times (`frameTiming.ts`' (R) to (T), of
+ * `frameTimingScene.ts`' `RoutedMedium`), as its tables take it: what {@link checkRoutedTwins} holds
+ * to its twins.
+ */
+export interface RoutedTwinBody {
+  readonly name: string;
+  readonly table: RoutedTable;
+  /** Its medium as its tables take it: a deck's upper medium. */
+  readonly medium: AtmosphereMedium;
+  /** One light slot's curves. */
+  readonly curves: AbsorberCurveSlots;
+  /** Its tables' figure: a deck's datum. */
+  readonly figure: SpheroidFigure;
+  readonly gravity: BodyGravity | null;
+  /** Its column's temperature where it draws the medium's own light (R08.T18.b), or `null`. */
+  readonly thermal: MediumTemperature | null;
+}
+
+/**
+ * R08.T11's routes' rows against their twins (research-rm4-rm5-close-out §4, lane 3: each row meets
+ * its twin on SwiftShader): each body's sky view, aerial perspective and march over its own tables
+ * and the smoke's pattern of its route's table, as its row draws them ({@link withRoutedTable}),
+ * held to their CPU twins to 10⁻³ above 10⁻⁶ of the largest (R08.T6.b's bound), on high: a deck's
+ * over {@link DECK_TWIN_FRAMES}, every other's over R08.T6.b's two frames.
+ */
+export async function checkRoutedTwins(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+  bodies: ReadonlyArray<RoutedTwinBody>,
+): Promise<void> {
+  await checkThickTwinBodies(
+    engine,
+    checks,
+    twins,
+    bodies.map(({ thermal, ...body }) => ({
+      ...body,
+      frames: body.table.kind === "deck" ? DECK_TWIN_FRAMES : THICK_TWIN_FRAMES.slice(0, 2),
+      ...(thermal === null ? {} : { thermal }),
+    })),
+  );
+}
+
+/**
  * R08.T15.b.2's frames beneath a deck, each camera's height above the deck's datum, the kernels'
  * (its true height the split's 3 km less): from 1 km up with the sun 20° up and a surface 60 km
  * ahead (the march's, beyond the volume's reach), from 1 km with the sun 60° up and a surface 5 km
@@ -2662,30 +2747,27 @@ async function checkThickTwinBodies(
         const drawn = body.table;
         switch (drawn.kind) {
           case "thick":
-            withThickTable(atmosphere.tables, body.curves.length, body.thermal !== undefined);
-            task = "R08.T14.c";
             table = ", over the thick table";
             break;
           case "correction":
-            withCorrectionTable(atmosphere.tables, body.curves.length);
-            task = "R08.T14.f";
             table = ", beside the correction alone";
             break;
           case "none":
-            task = "R08.T6.b";
             table = "";
             break;
           case "deck":
-            withDeckTable(
-              atmosphere.tables,
-              body.curves.length,
-              drawn.deckAltitudeM,
-              null,
-              drawn.floor,
-            );
-            task = "R08.T15.a.2";
             table = ", over the deck";
             break;
+        }
+        if (drawn.kind === "none") {
+          task = "R08.T6.b";
+        } else {
+          task = withRoutedTable(
+            atmosphere.tables,
+            body.curves.length,
+            drawn,
+            body.thermal !== undefined,
+          );
         }
         // A self-luminous body's kernels are the thermal forms, its tables the thermal source's.
         let light = "";

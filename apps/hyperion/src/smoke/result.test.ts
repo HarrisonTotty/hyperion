@@ -19,6 +19,7 @@ import {
   SMOKE_WATCHDOG_SCALE_MAX,
   type SmokeResult,
   smokeWatchdogMs,
+  THICK_READ_WATCHDOG_MS,
   TRANSFER_WATCHDOG_MS,
   transferSocketUrl,
   UNCAPTURED_GPU_ERROR,
@@ -139,6 +140,7 @@ describe("smokeWatchdogMs", () => {
     part: "1",
     captures: false,
     gpuTiming: false,
+    thickRead: false,
     soakSeconds: 0,
     childSeconds: 0,
     scale: 1,
@@ -181,6 +183,21 @@ describe("smokeWatchdogMs", () => {
     for (const part of LATER_PARTS) {
       expect(smokeWatchdogMs({ ...plain, part, gpuTiming: true })).toBe(180_000);
     }
+  });
+
+  it("adds the thick read's rows' allowance to part 1's GPU timings, and nothing without them", () => {
+    for (const part of ["1", "all"]) {
+      expect(smokeWatchdogMs({ ...plain, part, gpuTiming: true, thickRead: true })).toBe(
+        180_000 + GPU_TIMING_WATCHDOG_MS + THICK_READ_WATCHDOG_MS,
+      );
+      expect(smokeWatchdogMs({ ...plain, part, thickRead: true })).toBe(180_000);
+    }
+    for (const part of LATER_PARTS) {
+      expect(smokeWatchdogMs({ ...plain, part, gpuTiming: true, thickRead: true })).toBe(180_000);
+    }
+    expect(smokeWatchdogMs({ ...plain, gpuTiming: true, thickRead: true, scale: 2 })).toBe(
+      2 * (180_000 + GPU_TIMING_WATCHDOG_MS + THICK_READ_WATCHDOG_MS),
+    );
   });
 
   it("adds the soak's and the child window's seconds as before", () => {
