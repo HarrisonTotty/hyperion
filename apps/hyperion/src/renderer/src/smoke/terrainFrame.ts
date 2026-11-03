@@ -65,7 +65,7 @@ import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
 import { occluderRadius } from "../view/depth/depth";
 import type { KernelPair } from "../view/engine/kernels";
-import type { DrawItem, RenderEngine } from "../view/engine/types";
+import type { DrawItem, RenderEngine, RenderView } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../view/lighting/planetshine";
@@ -88,6 +88,7 @@ import {
   LiveFrameTerrain,
   terrainViewOf,
 } from "../view/terrain/frameTerrain";
+import type { FrameTerrain } from "../view/photoreal/renderer";
 import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../view/terrain/handover";
 import { uvToSt, vertexSpacing, xyzToFaceUv } from "../view/terrain/cube";
 import { type PatchKey, sameKey } from "../view/terrain/patchKey";
@@ -396,6 +397,21 @@ function liveFrame(
   grounded: ReadonlyArray<GroundContact> = [],
   occlusion?: FrameOcclusion,
 ): LiveFrame {
+  const frame = steppedFrame(pass, mask, pose, nowMs, grounded);
+  return { ...frame, terrainDraws: frame.terrain.draws(frame.plan, [frame.body], occlusion) };
+}
+
+/**
+ * {@link liveFrame}'s frame before its terrain draws, for a renderer that draws them itself with
+ * its own occlusion (plan R14, R14.T3.d).
+ */
+function steppedFrame(
+  pass: TerrainPass,
+  mask: CoverageMask,
+  pose: Pose,
+  nowMs: number,
+  grounded: ReadonlyArray<GroundContact> = [],
+): Omit<LiveFrame, "terrainDraws"> {
   const base = bodyOf(pose);
   const view = terrainViewOf(base, pose.camera, VIEWPORT);
   if (view === null) {
@@ -431,7 +447,7 @@ function liveFrame(
     optionsOf(pose),
     new Map([[body.id, "disc"]]),
   );
-  return { plan, body, terrain, terrainDraws: terrain.draws(plan, [body], occlusion) };
+  return { plan, body, terrain };
 }
 
 /**
@@ -473,6 +489,171 @@ async function drawnOccluded(
   } finally {
     target.dispose();
   }
+}
+
+/** A frame through the photorealistic renderer (plan R14, R14.T3.d), its scene read back. */
+interface SceneFrame {
+  readonly colour: Float32Array;
+  readonly depth: Float32Array;
+  /** Whether its terrain drew a late raster. */
+  readonly late: boolean;
+}
+
+/** What a frame through the renderer is drawn with: its renderer and canvas, a pass and its view. */
+interface SceneOf {
+  readonly engine: RenderEngine;
+  readonly photoreal: PhotorealRenderer;
+  readonly canvas: RenderView;
+  readonly pass: TerrainPass;
+  readonly mask: CoverageMask;
+  readonly view: Pose;
+}
+
+/**
+ * One frame of `of`'s view through its renderer at `geometry`, as `VIEW` draws it, with no
+ * symbology, held back where `present` is `false` (a cut): its scene's colour and depth.
+ */
+async function sceneFrame(
+  of: SceneOf,
+  geometry: GeometrySettings,
+  present: boolean,
+): Promise<SceneFrame> {
+  const { engine, photoreal, canvas, pass, mask, view } = of;
+  const frame = steppedFrame(pass, mask, view, performance.now());
+  let late = false;
+  const terrain: FrameTerrain = {
+    surveyCoverage: (body) => frame.terrain.surveyCoverage(body),
+    surveyedWhole: (body) => frame.terrain.surveyedWhole(body),
+    draws: (...args) => frame.terrain.draws(...args),
+    symbologyDepth: () => frame.terrain.symbologyDepth(),
+    sceneDepth: () => frame.terrain.sceneDepth(),
+    lateDraws: () => {
+      const draws = frame.terrain.lateDraws();
+      late = draws.length > 0;
+      return draws;
+    },
+  };
+  photoreal.render(canvas, {
+    camera: view.camera,
+    viewport: VIEWPORT,
+    presentedPx: VIEWPORT,
+    role: "eye",
+    setting: "low",
+    geometry,
+    exposureScale: EXPOSURE,
+    sky: [],
+    starSprites: [],
+    hostDraws: new Map(),
+    glareSources: [],
+    lights: [{ disc: sunLikeHostDisc(), centreM: add(frame.body.centreM, scale(view.sun, AU_M)) }],
+    bodies: [frame.body],
+    depthWriters: [],
+    previousRegimes: new Map([[frame.body.id, "terrain"]]),
+    terrain,
+    overlay: null,
+    meter: null,
+    present,
+  });
+  const colours = photoreal.frameColours;
+  const depth = colours?.scene.depth ?? null;
+  if (colours === null || depth === null) {
+    throw new Error("the renderer drew no scene");
+  }
+  const [colour, depthBytes] = await Promise.all([
+    engine.readTexture(colours.scene.colour),
+    engine.readTexture(depth),
+  ]);
+  return { colour: halfTexels(colour), depth: new Float32Array(depthBytes), late };
+}
+
+/** A frame and its pass's counters: the last of nine drawn alike. */
+interface CountedFrame {
+  readonly frame: SceneFrame;
+  readonly stats: ReadonlyArray<ClusterPassStats> | null;
+}
+
+/**
+ * `of`'s view through the renderer in one raster and with the two-pass occlusion (plan R14,
+ * R14.T3.d), from the same selection and residents, at `geometry` but its `occlusion`: with it, at
+ * frames that each drop the view's visibility (held back, a cut) and at frames that keep it; each
+ * the last of nine, the counters on, so that its counts are its own.
+ */
+async function occlusionRun(
+  of: SceneOf,
+  geometry: GeometrySettings,
+): Promise<{
+  readonly one: CountedFrame;
+  readonly cut: CountedFrame;
+  readonly kept: CountedFrame;
+}> {
+  const { pass } = of;
+  const counted = async (at: GeometrySettings, present: boolean): Promise<CountedFrame> => {
+    let frame = await sceneFrame(of, at, present);
+    for (let round = 0; round < 8; round += 1) {
+      // Each frame reads the counters that some frames before it answered: the last of nine.
+      // oxlint-disable-next-line no-await-in-loop
+      frame = await sceneFrame(of, at, present);
+    }
+    return { frame, stats: pass.clusterStats(VIEW) };
+  };
+  const oneRaster: GeometrySettings = { ...geometry, occlusion: "off" };
+  const occluded: GeometrySettings = { ...geometry, occlusion: "hzb" };
+  pass.measureClusters(true);
+  try {
+    pass.setGeometry(oneRaster);
+    const one = await counted(oneRaster, true);
+    pass.setGeometry(occluded);
+    const cut = await counted(occluded, false);
+    const kept = await counted(occluded, true);
+    return { one, cut, kept };
+  } finally {
+    pass.setGeometry(geometry);
+    pass.measureClusters(false);
+  }
+}
+
+/**
+ * How {@link occlusionRun}'s frames with the occlusion compare with its one raster's (plan R14,
+ * R14.T3.d): whether each one's colour differs at no pixel (no tie pixel) and its depth is the same
+ * bytes, the held-back frames drawing a late raster; the clusters the pyramid refused at the frames
+ * that keep the visibility; and the lit pass's clusters by pass.
+ */
+function occlusionSummary(run: Awaited<ReturnType<typeof occlusionRun>>): {
+  readonly same: boolean;
+  readonly refused: number | null;
+  readonly text: string;
+} {
+  const { one, cut, kept } = run;
+  const oneLit = litOf(one.stats, CLUSTER_LIT_PASS);
+  const passes = (
+    counted: CountedFrame,
+  ): readonly [number | null, number | null, number | null] => {
+    const early = litOf(counted.stats, CLUSTER_LIT_PASS);
+    const late = litOf(counted.stats, CLUSTER_LIT_LATE_PASS);
+    return [
+      early,
+      late,
+      oneLit === null || early === null || late === null ? null : oneLit - early - late,
+    ];
+  };
+  const compared = [cut, kept].map(({ frame }) => ({
+    ties: differingTexels(one.frame.colour, frame.colour),
+    depth: bytesDigest(frame.depth) === bytesDigest(one.frame.depth),
+    late: frame.late,
+  }));
+  const [cutEarly, cutLate, cutRefused] = passes(cut);
+  const [keptEarly, keptLate, refused] = passes(kept);
+  const same =
+    compared.every(({ ties, depth }) => ties.pixels === 0 && depth) && compared[0]?.late === true;
+  const text = `the lit pass's clusters ${String(oneLit)} in one raster; with the occlusion, the visibility dropped: ${String(cutEarly)} early, ${String(cutLate)} late, ${String(cutRefused)} refused; kept: ${String(keptEarly)} early, ${String(keptLate)} late, ${String(refused)} refused; ${compared
+    .map(
+      ({ ties, depth, late }, n) =>
+        `${n === 0 ? "dropped" : "kept"}: a late raster ${String(late)}, tie pixels ${String(ties.pixels)}, the largest difference ${ties.largest.toExponential(3)}, the depth the same bytes ${String(depth)}`,
+    )
+    .join(
+      "; ",
+    )}; digests ${bytesDigest(one.frame.colour)} in one raster, ${bytesDigest(cut.frame.colour)} and ${bytesDigest(kept.frame.colour)} with the occlusion`;
+  return { same, refused, text };
 }
 
 /** The patch of `level` whose square holds the body-fixed point `p` on or near the datum, p = M·d. */
@@ -1489,6 +1670,19 @@ export async function checkTerrainFrame(
         behindRidge.marked === 0 &&
         ridgeBare.marked >= 40,
       `settled ${String(ridgeSettled.done)} (${ridgeSettled.state}), handed over ${String(behindRidge.handedOver)}, ${String(behindRidge.depthDraws)} depth draws: the edge's pixels ${String(behindRidge.marked)} (by row ${behindRidge.markedRows.slice(GRAZE_ROW - 3, GRAZE_ROW + 4).join(" ")} about its row); with no terrain depth, ${String(ridgeBare.marked)}; digests ${behindRidge.digest} with depth, ${ridgeBare.digest} without`,
+    );
+    // R14.T3.d over the ridge, through the renderer, as `VIEW` draws: the ground behind the ridge
+    // is hidden, so the pyramid refuses clusters, and the frame is still the one raster's.
+    const overRidge = occlusionSummary(
+      await occlusionRun(
+        { engine, photoreal, canvas, pass: ridgePass, mask, view: graze },
+        SETTINGS.low.geometry,
+      ),
+    );
+    checks.check(
+      "R14.T3.d over a ridge the renderer's two-pass occlusion refuses the clusters the ridge hides and draws the one raster's frame, its colour and depth byte for byte, where it drops the visibility and where it keeps it",
+      ridgeSettled.done && overRidge.same && overRidge.refused !== null && overRidge.refused > 0,
+      overRidge.text,
     );
     // The cluster path is the setting's (plan R14, R14.T1.e's choice); the scene's depth is recorded
     // where it differs, its reference surfaces' depth hiding marks on their datum.
