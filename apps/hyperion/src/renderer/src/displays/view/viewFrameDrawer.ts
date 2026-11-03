@@ -717,6 +717,8 @@ export class ViewFrameDrawer {
           atmospheres: inputs.atmosphere?.tablesOf,
           // Each body's ground drawn emitting where its record's field is above the cut (R08.T18.a).
           groundFields: inputs.atmosphere?.groundFieldOf,
+          // A disc beneath a gas envelope's air on that air's ground, not its 1-bar figure (R08.T16.a.2).
+          discGrounds: inputs.atmosphere?.discGroundOf,
           // A body's air that throws as it is drawn is the cache's to hold failed (R08.T10.b;
           // decision-r08-t10b-leans §2).
           atmosphereFailed: reportAirFailure,

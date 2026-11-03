@@ -15,6 +15,7 @@ import type {
   AtmosphereScene,
   AtmosphereView,
   AtmosphereViewReport,
+  DiscGround,
   KeptBodyAtmosphere,
 } from "../../view/atmosphere/AtmosphereCache";
 import type { BodyLight } from "../../view/atmosphere/atmosphereInput";
@@ -53,6 +54,11 @@ export interface ViewAtmosphereInput {
    * `AtmosphereCache.groundFieldOf`).
    */
   readonly groundFieldOf: (body: BodyIdHex) => SurfaceTemperatureField | null;
+  /**
+   * The ground a body's disc stands on beneath its drawn medium where that medium has a gas
+   * envelope (plan R08, R08.T16.a.2 and R08.T16.b.2; `AtmosphereCache.discGroundOf`).
+   */
+  readonly discGroundOf: (body: BodyIdHex) => DiscGround | null;
   /** The server's scene as the cache's requests take it; `null` for a kept scene. */
   readonly scene: AtmosphereScene | null;
   /** A monotonic time, ms: the frame's, which `ATMOSPHERE: PENDING`'s hold reads. */
@@ -92,6 +98,7 @@ export class ViewAtmosphereHandle {
       view,
       tablesOf: (body) => cache.entryOf(body)?.tables ?? null,
       groundFieldOf: (body) => cache.groundFieldOf(body),
+      discGroundOf: (body) => cache.discGroundOf(body),
       scene,
       nowMs,
     };

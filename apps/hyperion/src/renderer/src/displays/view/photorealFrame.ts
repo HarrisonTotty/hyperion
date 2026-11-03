@@ -16,6 +16,7 @@
  */
 import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
+import type { DiscGround } from "../../view/atmosphere/AtmosphereCache";
 import { atmosphereToBodyFixed, bodyAtmosphereCamera } from "../../view/atmosphere/bodyCamera";
 import { tablesFigureOf } from "../../view/atmosphere/hillaire";
 import type { AtmosphereTables } from "../../view/atmosphere/tables";
@@ -159,6 +160,12 @@ export interface PhotorealInputs {
    */
   readonly groundFields?: GroundFieldSource | undefined;
   /**
+   * The ground a lit body's disc stands on beneath its drawn medium where that medium has a gas
+   * envelope (plan R08, R08.T16.a.2 and R08.T16.b.2; `AtmosphereCache.discGroundOf`), read for the
+   * bodies whose air the frame draws; absent, every disc stands on its record's figure.
+   */
+  readonly discGrounds?: DiscGroundSource | undefined;
+  /**
    * Takes a throw from the drawing of a body's atmosphere (`PhotorealFrame.onAtmosphereFailed`):
    * the view's handle on the cache (`AtmosphereView.reportDrawFailure`).
    */
@@ -171,6 +178,12 @@ export interface PhotorealInputs {
  * atmosphere cache's, from the records it holds.
  */
 export type GroundFieldSource = (body: BodyIdHex) => SurfaceTemperatureField | null;
+
+/**
+ * Where a frame's lit bodies find their discs' ground beneath a gas envelope's air (plan R08,
+ * R08.T16.a.2 and R08.T16.b.2): the atmosphere cache's, from the media it draws.
+ */
+export type DiscGroundSource = (body: BodyIdHex) => DiscGround | null;
 
 /** What the lit bodies take of a view's terrain (plan R10, R10.T10.e). */
 export interface LitBodiesTerrain {
@@ -286,13 +299,15 @@ export function frameGlareAir(
  * map where `classMaps` holds one, and its relief and survey's coverage mask where `terrain` holds
  * them and its rotation is known: a body whose rotation is not known is never handed over, its
  * figure and disc standing (R10.T16.c; decision-r10-live-path, D5). Its ground's temperature field
- * where `groundFields` holds one (R08.T18.a).
+ * where `groundFields` holds one (R08.T18.a), and its disc's ground beneath a gas envelope's air
+ * where `discGrounds` holds one (R08.T16.a.2).
  */
 function litBodyOf(
   { body, centreM, frame }: LitBodyLighting,
   classMaps: ClassMapSource | undefined,
   terrain: LitBodiesTerrain,
   groundFields: GroundFieldSource | undefined,
+  discGrounds: DiscGroundSource | undefined,
 ): LitBodyInput {
   const id = body.id;
   const figure = body.appearance?.figure ?? {
@@ -306,6 +321,7 @@ function litBodyOf(
   const reliefM = body.rotation === null ? null : (terrain.reliefs?.reliefM(id) ?? null);
   const coverage = terrain.terrain?.surveyCoverage(id) ?? null;
   const thermal = groundFields?.(id) ?? null;
+  const ground = discGrounds?.(id) ?? null;
   return {
     id,
     centreM,
@@ -325,6 +341,7 @@ function litBodyOf(
           },
         }),
     ...(thermal === null ? {} : { thermal }),
+    ...(ground === null ? {} : { ground }),
     lighting: frame,
   };
 }
@@ -350,6 +367,8 @@ function litBodyOf(
  * @param classMaps - The bodies' class maps; absent, every disc is uniform.
  * @param terrain - The bodies' reliefs and coverage masks; absent, none hands over.
  * @param groundFields - The bodies' ground temperature fields (R08.T18.a); absent, none emits.
+ * @param discGrounds - The grounds of the bodies' discs beneath a gas envelope's air, of those whose
+ *   air is drawn (R08.T16.a.2); absent, every disc stands on its record's figure.
  */
 export function litBodiesOf(
   scene: ViewScene,
@@ -358,9 +377,10 @@ export function litBodiesOf(
   classMaps?: ClassMapSource,
   terrain: LitBodiesTerrain = {},
   groundFields?: GroundFieldSource,
+  discGrounds?: DiscGroundSource,
 ): LitBodyInput[] {
   return lightingFramesOf(scene, pose, discs).map((lit) =>
-    litBodyOf(lit, classMaps, terrain, groundFields),
+    litBodyOf(lit, classMaps, terrain, groundFields, discGrounds),
   );
 }
 
@@ -432,6 +452,9 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
       }
     }
   }
+  // A disc stands on its ground beneath a gas envelope's air only where the frame draws that air.
+  const withAir = new Set(atmospheres.map((each) => each.id));
+  const groundOf = inputs.discGrounds;
   const litBodies = litBodiesOf(
     scene,
     pose,
@@ -439,9 +462,10 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     inputs.classMaps,
     { reliefs: inputs.reliefs, terrain: inputs.terrain },
     inputs.groundFields,
+    groundOf === undefined ? undefined : (id) => (withAir.has(id) ? groundOf(id) : null),
   );
   // A disc's glare is of the light that reaches the camera past the frame's bodies.
-  const occluders = glareOccluders(litBodies, new Set(atmospheres.map((each) => each.id)));
+  const occluders = glareOccluders(litBodies, withAir);
   return {
     camera,
     viewport,

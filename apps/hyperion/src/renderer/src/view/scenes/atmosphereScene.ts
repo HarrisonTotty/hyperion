@@ -46,10 +46,14 @@
  *   load's bodies are drawn as it lands. Each air body is drawn on its medium's own figure, the one
  *   its tables take (`hillaire.ts`'s `tablesFigureOf`): a sphere of the case's ground radius, or
  *   Saturn's spheroid; before its load lands, on the same figures restated here, which the test
- *   holds to the cases'. `TEST JUPITER` is drawn on its envelope's floor, the level surface its
- *   tables stand on (R08.T16.a.2), restated as its figure, black. Its disc is a grey Lambert sphere of its medium's ground albedo,
- *   provisional (`BODY PHOTOMETRY: NOT YET MODELLED`), so that the ground the composite's march
- *   draws at the limb is the disc's (`decision-r08-t10b-depth.md`, text B).
+ *   holds to the cases'. `TEST JUPITER`'s figure is its envelope's floor, the level surface its
+ *   tables stand on while its route is closed (R08.T16.a.2), restated. Its disc stands on it only
+ *   until its medium lands: then, as a served giant's, on the ground the atmosphere cache gives
+ *   from that medium (`AtmosphereCache.discGroundOf`; research-rm4-rm5-close-out §1.2–§1.3), the
+ *   same floor while closed and the medium's own datum, its column's base, once it routes, black.
+ *   Each disc is a grey Lambert sphere of its medium's ground albedo, provisional
+ *   (`BODY PHOTOMETRY: NOT YET MODELLED`), so that the ground the composite's march draws at the
+ *   limb is the disc's (`decision-r08-t10b-depth.md`, text B).
  * - **The moonlit night.** The own ship, `TEST HULL`, stands body-fixed {@link ATMOSPHERE_SHIP_HEIGHT_M}
  *   over `TEST EARTH`'s ground on its night side, pitched up at the moon and clear of the ground, the star {@link ATMOSPHERE_SUN_DEPRESSION_DEG}
  *   below the horizon there, beyond the measured Earth's twilight limit (about 20°, `sources.ts`'s
@@ -307,7 +311,8 @@ const GIANT_GROUND_ALBEDO = 0;
  * 1-bar figure lowered to its column's base, R08.T16.a.1), on which its medium above the floor
  * stands while its route is closed and its deck's once it opens, m, restated from its assembly
  * (the test holds the two equal): some 181 km under Jupiter's 1-bar 71,492 km (Archinal et al.
- * 2018).
+ * 2018). `TEST JUPITER`'s figure; its disc stands on it until its medium lands, and then on the
+ * cache's ground, this floor again while its route is closed.
  */
 const JUPITER_FLOOR: AtmosphereFixtureFigure = {
   equatorialRadiusM: 71_310_949.177_708_8,

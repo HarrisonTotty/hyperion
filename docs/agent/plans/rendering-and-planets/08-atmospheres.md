@@ -6138,7 +6138,8 @@ Acceptance: `pnpm test`.
   _T16.a.2 built 2026-11-01; its gate passes and its route is open over `giant-deck`'s envelope
   range since its floor's march, 2026-11-01; its march by piece depth built 2026-11-02_ (Risks,
   "Deviations in T16.a.2, as built", "The envelope's disc edge, as built" and "The march by piece
-  depth, as built").
+  depth, as built"). _A served giant's disc on its floor built 2026-11-02_ (Risks, "The disc's
+  ground, as built").
 
 - **R08.T16.b `DiscReflectanceTable`.** `discReflectance.ts` bakes it spectrally from the medium
   and tables, one layer a latitude band (Design note 17), reading R08.T14.f's thick table, the
@@ -6174,6 +6175,7 @@ Acceptance: `pnpm test`.
 
   _T16.b.1 built 2026-10-30_ (Risks, "Deviations in T16.b.1, as built"). _T16.b.2 built 2026-11-01,
   its read path shut while the giant's route is closed_ (Risks, "Deviations in T16.b.2, as built").
+  _The routed disc on its medium's datum built 2026-11-02_ (Risks, "The disc's ground, as built").
 
 Acceptance: `pnpm test` and `just test-render`.
 
@@ -24704,3 +24706,28 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     digests, and `HAZE_GATE_MISSES`' `disc-p60/r`, 1.074344 → 1.075547 (`routing.ts`; within its
     1.08 bound, the haze's route open as before).
   - Pending, the owner's Mac A/B (the lane's outbox has its command).
+- **The disc's ground, as built** (R08.T16.a.2 and R08.T16.b.2, 2026-11-02; lane `giant-disc-datum`;
+  research-rm4-rm5-close-out §1.2–§1.3; figures in the lane's outbox). Renderer only.
+  - `AtmosphereCache.discGroundOf(id)`: `DiscGround { figure, tableFigure }` for an envelope's
+    entry with tables made; closed, both its tables' figure (the floor); routed, `figure` the
+    medium's datum (`built.body.figure`) and `tableFigure` the deck's. `null` otherwise.
+  - Wiring: `ViewAtmosphereInput.discGroundOf` → `PhotorealInputs.discGrounds` →
+    `LitBodyInput.ground`, given only to bodies whose air the frame draws.
+  - `planLitBodies` draws such a disc, mesh and limb black (`GROUND_SURFACE`) on `ground.figure`,
+    or on `ground.tableFigure` where its table draws it. Regimes, points, planetshine and eclipses
+    keep `figure` and `photometry`.
+  - _The deck read beyond a drawn surface_ (lean, 2026-11-02; the ruling assumed no shader change):
+    `withDeckRead`'s `DECK_GROUND` and the twin's `rayMarchTexelInto` read the deck wherever the ray
+    meets the datum before a drawn surface. Thick forms keep their bytes; (Q) now reads its deck
+    across its disc.
+  - `TEST JUPITER` keeps `JUPITER_FLOOR` as its figure (lean, 2026-11-02: the stand-in until its
+    medium lands, and its overlays' figure). Its disc takes the cache's ground, the same floor
+    while closed.
+  - `test/discAirCases.ts`: `integratedRadianceAt(…, view: DiscAirView)`, with `distanceM` and
+    `routedDisc`. `thick/discBakeJupiter.test.ts`, by hand: the routed passes at 1.0 × 10⁹ m, their
+    disc on the medium's datum, read as with nothing drawn, within 3.6% of the table at
+    1.15 × 10⁹ m.
+  - _TEST JUPITER's closed captures_: `just test-render` draws no `TEST JUPITER` through the view's
+    frame; `atmosphereScene.test.ts` holds its closed plan equal with and without the ground.
+  - Closes T16.a.2's and T16.b.2's _Open_ questions on the served giant's disc and the deck it hid.
+  - Pending, the owner's RTX run: the routed frame, and (Q)'s row with the deck read over its disc.

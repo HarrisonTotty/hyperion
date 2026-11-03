@@ -61,12 +61,19 @@
  * Its disc, its mesh and its cells are drawn by the kernels' air forms
  * ({@link BODY_DISC_AIR_MATERIALS}, {@link SMOOTH_MESH_AIR_MATERIAL},
  * {@link BODY_DISC_CELLS_AIR_KERNEL}), the table at group 2's binding 15.
+ *
+ * A body given its disc's ground beneath a gas envelope's air ({@link LitBodyInput.ground}, plan
+ * R08, R08.T16.a.2 and R08.T16.b.2) draws its disc, its mesh and its limb black on that ground's
+ * figure, its table's where its table draws it; its point, the planetshine it gives and its
+ * eclipses keep its figure and photometry.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { DiscSurface } from "../appearance/bodyAppearance";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
+import { lawFor } from "../appearance/phase";
+import type { DiscGround } from "../atmosphere/AtmosphereCache";
 import type { ClusterBuckets } from "../clusters/buckets";
 import { type ClusterConsumer, ClusterConsumerPath } from "../clusters/consumer";
 import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
@@ -228,6 +235,16 @@ export interface LitBodyInput {
    * its bake lands, or for a body without air.
    */
   readonly air?: DiscAir;
+  /**
+   * The ground its disc stands on beneath its air where its drawn medium has a gas envelope (plan
+   * R08, R08.T16.a.2 and R08.T16.b.2; `AtmosphereCache.discGroundOf`), given by a frame that draws
+   * that air: its disc, its mesh and its limb are drawn black on it, so that the air's march lays
+   * the envelope over its own ground and not over the record's 1-bar disc, whose photometry already
+   * holds the clouds. Its point, the planetshine it gives and its eclipses keep
+   * {@link LitBodyInput.figure} and {@link LitBodyInput.photometry}. Absent, its disc is drawn on
+   * them.
+   */
+  readonly ground?: DiscGround;
   /**
    * The GPU's coverage mask of its survey (plan R10, R10.T10.c; `terrain/coverage.ts`'
    * `CoverageMask.texture`) with the axes it is read in, given by a view that draws its terrain,
@@ -436,6 +453,16 @@ export function bodyLightSources(
     ),
   };
 }
+
+/**
+ * What a disc beneath a gas envelope's air is drawn with ({@link LitBodyInput.ground}; plan R08,
+ * R08.T16.a.2): black, a Lambert sphere of geometric albedo 0, as `ATMOSPHERE TEST` drew
+ * `TEST JUPITER`'s.
+ */
+const GROUND_SURFACE: DrawnDiscSurface = {
+  kind: "uniform",
+  law: lawFor([0, 0, 0], [1.5, 1.5, 1.5], "lambert"),
+};
 
 /** No body drawn with depth for its air. */
 const NO_DEPTH_BODY_SHELLS: ReadonlyMap<BodyIdHex, number> = new Map();
@@ -881,7 +908,21 @@ export function planLitBodies(
       }
       continue;
     }
-    const drawn = drawnSurface(body);
+    const air = byTable.has(body.id) ? body.air : undefined;
+    // A disc beneath a gas envelope's air stands black on that air's ground (R08.T16.a.2), on its
+    // table's figure where its table draws it (R08.T16.b.2); every other use keeps its own figure.
+    const { ground } = body;
+    const shown: LitBodyInput =
+      ground === undefined
+        ? body
+        : {
+            ...body,
+            figure: {
+              ...(air === undefined ? ground.figure : ground.tableFigure),
+              pole: body.figure.pole,
+            },
+          };
+    const drawn = ground === undefined ? drawnSurface(body) : GROUND_SURFACE;
     const rows = discSurfaceLaws(drawn).map((law) => {
       let row = laws.indexOf(law);
       if (row < 0) {
@@ -894,8 +935,7 @@ export function planLitBodies(
       stars: lightsOf(body, hosts),
       planetshine: planetshineSources(body, neighbours, options.planetshine),
     };
-    const air = byTable.has(body.id) ? body.air : undefined;
-    const record = discRecordOf(body, drawn, lit, occluders, rows, options, air);
+    const record = discRecordOf(shown, drawn, lit, occluders, rows, options, air);
     if (record === null) {
       continue;
     }
@@ -921,7 +961,7 @@ export function planLitBodies(
         mesh: smoothMeshOf(
           body.id,
           body.centreM,
-          body.figure,
+          shown.figure,
           record.pole,
           camera,
           viewport,
@@ -929,7 +969,7 @@ export function planLitBodies(
         ),
         limbDepths: limbDepths(
           body.centreM,
-          body.figure,
+          shown.figure,
           record.pole,
           record.rect,
           camera,

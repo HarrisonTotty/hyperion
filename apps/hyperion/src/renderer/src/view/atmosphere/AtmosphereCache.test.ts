@@ -18,10 +18,18 @@ import {
   vi,
 } from "vitest";
 
+import { vec3 } from "../../geometry/vec3";
 import { toBodyDetail } from "../../lib/system/bodiesWire";
 import type { BodyDetail } from "../../lib/system/model";
 import { earthBody, saturnBody, venusClassMedium } from "../../test/atmosphereFixtures";
-import { type DetailAnswer, SUN_LIGHT, withRecord } from "../../test/atmosphereRecords";
+import {
+  type DetailAnswer,
+  detailOf,
+  recordInput,
+  SUN_LIGHT,
+  withRecord,
+} from "../../test/atmosphereRecords";
+import { aHostDisc } from "../../test/litFixtures";
 import { handJupiterRecord } from "../../test/giantFixtures";
 import { FakeTables } from "../../test/atmosphereCacheFakes";
 import { sweepMedium } from "../../test/atmosphereSweep";
@@ -34,6 +42,7 @@ import {
   FIXTURE_EARTH,
   FIXTURE_SYSTEM,
   FIXTURE_UNIVERSE,
+  jupiterDetail,
   lavaWorldDetail,
 } from "../../test/planetaryFixture";
 import { RENDERER_ROOT, runTimeGraph } from "../../test/runTimeGraph";
@@ -46,11 +55,20 @@ import {
   patternedThickBake,
 } from "../../test/thickTables";
 import { heldAppearanceOf } from "../appearance/fromWire";
+import { planLitBodies } from "../bodies/draw";
 import type { LitRegime } from "../bodies/regime";
+import { IDENTITY_QUATERNION } from "../camera/quaternion";
+import { AU_M } from "../scenes/kept";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import { builtOfCase } from "../scenes/atmosphereScene";
 import { ANNUNCIATION_CLEAR_MS, ANNUNCIATION_ONSET_MS } from "../terrain/annunciation";
-import { type AssembledMedium, assembleMedium, mediumTableRadiusM } from "./assemble";
+import {
+  absorberCurveSlots,
+  type AssembledMedium,
+  assembleMedium,
+  mediumTableRadiusM,
+  withCurves,
+} from "./assemble";
 import { groundTemperatureFieldOf } from "./thermal";
 import type { MediumTemperature } from "./thermalSource";
 import {
@@ -110,6 +128,7 @@ import { type AtmosphereBody, kernelMedium, perPlanetRowOf, tablesPlanOf } from 
 import { DISC_LAYER_VALUES, type DiscReflectanceTable } from "./discTable";
 import { type MsSourceTable, thickBakeBands } from "./thick/bake";
 import { spectralColumnOf } from "./thick/columnLayout";
+import { deckDatumOf } from "./thick/deckRead";
 import type { PolarisationTable } from "./thick/polarisation";
 import { keptColumnOf, sphereBakeBody } from "./thick/keptBake";
 import {
@@ -2013,6 +2032,116 @@ describe("a gas envelope's entry (R08.T16.a.2)", () => {
     const surface = harness();
     await drawn(surface, [lit(A)], envelopeAssembly(false));
     expect([envelope.builder.discs.length, surface.builder.discs.length]).toEqual([0, 1]);
+  });
+
+  // research-rm4-rm5-close-out §1.2 (giant-disc-datum's acceptance): a served Jupiter-class record.
+  it("stands a served Jupiter-class record's disc on its tables' figure at albedo 0, below its record's 1-bar figure, while its route is closed", async () => {
+    const answered = answerFor(A, jupiterDetail());
+    const detail = detailOf(answered);
+    const bare = assembleMedium(recordInput(detail), { envelopes: true });
+    if (bare.medium === undefined) {
+      throw new Error("the generated Jupiter draws a medium");
+    }
+    // Its curves of growth computed here, as no worker pool shares them.
+    const assembled = withCurves(bare, absorberCurveSlots(bare.drawn));
+    const { drawn: medium } = bare;
+    if (medium.envelope === undefined) {
+      throw new Error("the generated Jupiter draws its envelope");
+    }
+    const h = harness(undefined, "product", "product");
+    note(h, [lit(A)]);
+    await answer(h, A, answered);
+    await land(h, A, { kind: "built", assembled });
+    note(h, [lit(A)]);
+    const ground = h.cache.discGroundOf(A);
+    const floor = deckDatumOf(
+      medium.body.figure,
+      medium.body.gravity,
+      medium.envelope.floorAltitudeM,
+    );
+    const oneBar = heldAppearanceOf(detail.record).figure;
+    if (oneBar === null) {
+      throw new Error("the generated Jupiter's record carries its 1-bar figure");
+    }
+    // Drawn 5 × 10⁸ m off, inside the full passes' boundary, as a frame that draws its air.
+    const distanceM = 5e8;
+    const centreM = vec3(0, 0, -distanceM);
+    const plan = planLitBodies(
+      [
+        {
+          id: A,
+          centreM,
+          figure: { ...oneBar, pole: null },
+          photometry: heldAppearanceOf(detail.record).photometry,
+          lighting: undefined,
+          ...(ground === null ? {} : { ground }),
+        },
+      ],
+      [{ disc: aHostDisc(), centreM: vec3(AU_M, 0, -distanceM) }],
+      {
+        camera: { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
+        viewport: { widthPx: 1920, heightPx: 1080 },
+        presentedPx: { widthPx: 1920, heightPx: 1080 },
+        exposureScale: 1e-3,
+        annuli: 4,
+        planetshine: 0,
+        setting: "high",
+      },
+      new Map([[A, "disc"]]),
+    );
+    const record = plan.discs[0];
+    expect([
+      ground,
+      madeAt(h, 0).body?.figure,
+      floor.equatorialRadiusM < oneBar.equatorialRadiusM,
+      record?.radiusOverDistance,
+      plan.laws[record?.tableRows[0] ?? -1]?.a,
+    ]).toEqual([
+      { figure: floor, tableFigure: floor },
+      floor,
+      true,
+      floor.equatorialRadiusM / distanceM,
+      [0, 0, 0],
+    ]);
+  }, 120_000);
+
+  // research-rm4-rm5-close-out §1.2: closed, the disc stands on its floor, its tables' figure.
+  it("stands a closed envelope's disc on its tables' figure, the floor, under the product's route", async () => {
+    const h = harness(undefined, "product", "product");
+    await drawn(h, [lit(A)], envelopeAssembly());
+    const floor = madeAt(h, 0).body?.figure;
+    expect([floor, h.cache.discGroundOf(A)]).toEqual([
+      deckDatumOf(earthBody().figure, earthBody().gravity, 5_000),
+      { figure: floor, tableFigure: floor },
+    ]);
+  });
+
+  // §1.3: routed, below its deck's datum on the medium's own datum; its table's on the deck's.
+  it("drops a routed envelope's disc onto its medium's datum under the full passes, its table's on the deck's datum", async () => {
+    const h = harness(undefined, routedDeck);
+    await drawn(h, [lit(A)], envelopeAssembly());
+    expect(h.cache.discGroundOf(A)).toEqual({
+      figure: earthBody().figure,
+      tableFigure: madeAt(h, 0).body?.figure,
+    });
+    expect(madeAt(h, 0).body?.figure.equatorialRadiusM).toBeGreaterThan(
+      earthBody().figure.equatorialRadiusM,
+    );
+  });
+
+  it("gives no disc's ground to a surface's air split at its deck, to a body not yet drawn, or to one whose tables were taken away", async () => {
+    const surface = harness(undefined, routedDeck);
+    await drawn(surface, [lit(A)], envelopeAssembly(false));
+    const pending = harness();
+    note(pending, [lit(A)]);
+    const lost = harness();
+    lost.factory.throws = new EngineUnavailable("createTexture");
+    await drawn(lost, [lit(A)], envelopeAssembly());
+    expect([
+      surface.cache.discGroundOf(A),
+      pending.cache.discGroundOf(A),
+      lost.cache.discGroundOf(A),
+    ]).toEqual([null, null, null]);
   });
 
   it("builds a kept scene's record as a server body's reply, pending until it lands, asking nothing of the server", async () => {

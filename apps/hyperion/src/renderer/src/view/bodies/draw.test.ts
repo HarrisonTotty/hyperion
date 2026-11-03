@@ -38,6 +38,7 @@ import { METER_CLASS } from "../post/meter";
 import {
   compositeDiscPixels,
   DISC_ROWS,
+  type DiscRecord,
   drawnThroughCells,
   packDiscRecords,
   rasteriseDisc,
@@ -75,6 +76,8 @@ import {
 import { type LitRegime, sphereFootprint } from "./regime";
 import { limbDistanceM } from "../terrain/handover";
 import { DISC_LIMB_DEPTHS, rotationColumns } from "./smoothMesh";
+import type { DiscGround } from "../atmosphere/AtmosphereCache";
+import type { SpheroidFigure } from "../atmosphere/oblate";
 import type { DiscAir } from "../atmosphere/discReflectance";
 import { DISC_LAYER_VALUES } from "../atmosphere/discTable";
 import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
@@ -108,6 +111,11 @@ function scene(
     },
     hosts: [{ disc: aHostDisc(), centreM: add(centreM, scale(towardsStar, AU_M)) }],
   };
+}
+
+/** A plan's point sprites, in its steps' order. */
+function pointSprites(plan: BodyFramePlan): ReadonlyArray<unknown> {
+  return plan.steps.flatMap((step) => (step.kind === "points" ? step.sprites : []));
 }
 
 const OPTIONS = {
@@ -814,6 +822,107 @@ describe("the plan", () => {
       // Inside the boundary the same body's record carries its emission and no air.
       const inside = airPlan(1.05e9, { drawsAir: true }, { thermal: field }).plan.discs[0];
       expect([inside?.air, inside?.emission === undefined]).toEqual([undefined, false]);
+    });
+  });
+
+  describe("a disc beneath a gas envelope's air (R08.T16.a.2 and R08.T16.b.2)", () => {
+    const RADIUS_M = 6e7;
+    /** Its ground: the medium's datum under the full passes, its table's figure above it. */
+    const GROUND: DiscGround = {
+      figure: { equatorialRadiusM: 5.9e7, polarRadiusM: 5.5e7 },
+      tableFigure: { equatorialRadiusM: 5.95e7, polarRadiusM: 5.6e7 },
+    };
+    /** Its disc air: a table of one band and slot, its texture a stand-in. */
+    const AIR: DiscAir = {
+      table: { bands: 1, slots: 1, sunFloor: -0.18, values: new Float32Array(DISC_LAYER_VALUES) },
+      texture: { kind: "texture", name: "disc table" },
+      lnBands: [0],
+      gravity: null,
+    };
+    /**
+     * The body `distanceM` ahead, its air and disc table drawn, with or without its ground, on its
+     * own figure of {@link RADIUS_M} or `figure`, beside `others`.
+     */
+    function groundPlan(
+      distanceM: number,
+      ground: DiscGround | null,
+      options: Partial<BodyFrameOptions> = {},
+      figure: SpheroidFigure = { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M },
+      others: ReadonlyArray<LitBodyInput> = [],
+    ): { readonly plan: BodyFramePlan; readonly body: LitBodyInput } {
+      const { body, hosts } = scene(distanceM, 30, {
+        figure: { ...figure, pole: null },
+        air: AIR,
+        ...(ground === null ? {} : { ground }),
+      });
+      const plan = planLitBodies(
+        [body, ...others],
+        hosts,
+        { ...OPTIONS, depthBodyShellRadiiM: new Map([[body.id, 1.01 * RADIUS_M]]), ...options },
+        new Map([[body.id, "disc"]]),
+      );
+      return { plan, body };
+    }
+
+    it("draws its disc and mesh black on its ground's figure under the full passes", () => {
+      const distanceM = 5e8;
+      const { plan } = groundPlan(distanceM, GROUND);
+      const record = plan.discs[0];
+      const law = plan.laws[record?.tableRows[0] ?? -1];
+      expect([
+        record?.radiusOverDistance,
+        record?.polarOverEquatorial,
+        record?.surface.kind,
+        law?.a,
+        plan.meshes[0]?.mesh.figure,
+      ]).toEqual([
+        5.9e7 / distanceM,
+        5.5e7 / 5.9e7,
+        "uniform",
+        [0, 0, 0],
+        { ...GROUND.figure, pole: null },
+      ]);
+      // Its mesh and its limb's depths are those of a body whose own figure the ground's is.
+      expect(plan.meshes).toEqual(groundPlan(distanceM, null, {}, GROUND.figure).plan.meshes);
+    });
+
+    it("draws it by its table on the table's figure, past the boundary", () => {
+      const distanceM = 1.2e9;
+      const { plan } = groundPlan(distanceM, GROUND, { drawsAir: true });
+      expect([plan.tabled.size, plan.discs[0]?.radiusOverDistance, plan.meshes]).toEqual([
+        1,
+        5.95e7 / distanceM,
+        [],
+      ]);
+    });
+
+    it("keeps its point's flux and its regime on its own figure and photometry", () => {
+      const far = (ground: DiscGround | null): BodyFramePlan => groundPlan(2e12, ground).plan;
+      expect(far(GROUND).regimes).toEqual(far(null).regimes);
+      expect(pointSprites(far(GROUND))).toEqual(pointSprites(far(null)));
+      expect(pointSprites(far(GROUND))).toHaveLength(1);
+    });
+
+    it("keeps the planetshine it gives and the eclipse it casts on a moon behind it", () => {
+      const distanceM = 5e8;
+      // A moon behind the giant from its star, a little off its shadow's axis, in the view.
+      const moon: LitBodyInput = {
+        ...scene(distanceM, 30).body,
+        id: "0200080020000000.0402",
+        centreM: vec3(-1e8, 2e7, -distanceM - 1.73e8),
+        figure: { equatorialRadiusM: 2e6, polarRadiusM: 2e6, pole: null },
+      };
+      const moonRecord = (ground: DiscGround | null): DiscRecord | undefined =>
+        groundPlan(distanceM, ground, {}, undefined, [moon]).plan.discs.find(
+          (record) => record.body === moon.id,
+        );
+      const grounded = moonRecord(GROUND);
+      const own = moonRecord(null);
+      expect([grounded?.occluders, grounded?.secondaries]).toEqual([
+        own?.occluders,
+        own?.secondaries,
+      ]);
+      expect([grounded?.occluders.length, grounded?.secondaries.length]).toEqual([1, 1]);
     });
   });
 

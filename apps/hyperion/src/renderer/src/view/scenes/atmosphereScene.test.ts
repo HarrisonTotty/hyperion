@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { add, dot, norm, normalise, scale, sub, vec3 } from "../../geometry/vec3";
 import type { BodyDetail } from "../../lib/system/model";
 import { detailOf, recordInput } from "../../test/atmosphereRecords";
+import { aHostDisc } from "../../test/litFixtures";
 import { handJupiterDetail, handJupiterRecord } from "../../test/giantFixtures";
 import { RENDERER_ROOT, runTimeGraph } from "../../test/runTimeGraph";
 import { standInThickCases } from "../../test/thickFixtureStandIns";
@@ -22,7 +23,8 @@ import titanCase from "../atmosphere/reference/titan-class.case.json" with { typ
 import venus58Case from "../atmosphere/reference/venus-58bar.case.json" with { type: "json" };
 import venus92Case from "../atmosphere/reference/venus-92bar.case.json" with { type: "json" };
 import { twilightLimitRad } from "../atmosphere/sources";
-import { rotate } from "../camera/quaternion";
+import { planLitBodies, type BodyFramePlan } from "../bodies/draw";
+import { IDENTITY_QUATERNION, rotate } from "../camera/quaternion";
 import { SUN_RADIUS_M } from "../lighting/hostDisc";
 import { TEST_HULL } from "../scene/hull";
 import type { ViewBody, ViewScene } from "../scene/model";
@@ -433,6 +435,49 @@ describe("ATMOSPHERE TEST's media", () => {
       assembled.medium.groundAlbedo[1],
     ]);
   }, 120_000);
+
+  // giant-disc-datum's acceptance: closed, the cache's ground for TEST JUPITER is its tables'
+  // figure, which the test above holds to the floor restated, so its drawn disc does not move.
+  it("draws TEST JUPITER's disc on the cache's ground while its route is closed as on its restated floor, to the bit, in the full passes and as a point", async () => {
+    const scene = await loadedScene();
+    const { id, appearance } = bodyNamed(scene, "TEST JUPITER");
+    const [fixture] = fixturesOf("giant");
+    const figure = appearance?.figure ?? null;
+    if (appearance === null || figure === null || fixture === undefined) {
+      throw new Error("TEST JUPITER is drawn with its appearance");
+    }
+    const { photometry } = appearance;
+    const ground = { figure: fixture.figure, tableFigure: fixture.figure };
+    const planAt = (distanceM: number, withGround: boolean): BodyFramePlan =>
+      planLitBodies(
+        [
+          {
+            id,
+            centreM: vec3(0, 0, -distanceM),
+            figure,
+            photometry,
+            lighting: undefined,
+            ...(withGround ? { ground } : {}),
+          },
+        ],
+        [{ disc: aHostDisc(), centreM: vec3(AU_M, 0, -distanceM) }],
+        {
+          camera: { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
+          viewport: { widthPx: 1920, heightPx: 1080 },
+          presentedPx: { widthPx: 1920, heightPx: 1080 },
+          exposureScale: 1e-3,
+          annuli: 4,
+          planetshine: 0,
+          setting: "high",
+          depthBodyShellRadiiM: new Map([[id, 1.01 * fixture.figure.equatorialRadiusM]]),
+        },
+        new Map([[id, "disc"]]),
+      );
+    const near = planAt(2.2e8, true);
+    expect([near.discs.length, near.meshes.length]).toEqual([1, 1]);
+    expect(near).toEqual(planAt(2.2e8, false));
+    expect(planAt(1e12, true)).toEqual(planAt(1e12, false));
+  });
 
   it("are each its case's medium, with its curves where it has absorbers", async () => {
     const scene = await loadedScene();

@@ -135,6 +135,16 @@
  * deck's own and its deck read at the datum (R08.T16.b.2); a gas envelope whose route is closed asks
  * none, so that the full passes draw it at every distance until its gate opens.
  *
+ * **The disc's ground** (R08.T16.a.2 and R08.T16.b.2; research-rm4-rm5-close-out §1.2–§1.3). A
+ * body whose drawn medium has a gas envelope stands its lit disc, black, on that medium's ground
+ * ({@link AtmosphereCache.discGroundOf}), not on its record's 1-bar figure, whose R07 photometry is
+ * already the disc's whole reflectance and would count the clouds above 1 bar twice: while its
+ * route is closed on its tables' figure, the envelope's floor; once it routes, under its full
+ * passes, on the medium's own datum, the column's base, below its deck's, so that the march meets
+ * the deck's datum first and reads the deck there; and drawn by its disc table on the table's
+ * figure, the deck's datum. Its point, its planetshine, its eclipses and every readout keep the
+ * record's figure and photometry, as does a body with no tables made.
+ *
  * **The cloud deck** (R08.T15.a.2; Design note 9's split). A drawn body whose regime is
  * `cloudDeck` and which the router routes (`routes`, `thick/routing.ts`'s `deckRouted`, which
  * routes a gas envelope within `giant-deck`'s range alone and a deck over a surface within the
@@ -189,7 +199,7 @@ import {
   type AtmosphereProblem,
 } from "./labels";
 import type { AtmosphereMedium } from "./medium";
-import { bodyGravity } from "./oblate";
+import { bodyGravity, type SpheroidFigure } from "./oblate";
 import { keptBakeLightsOf } from "./opticsMessages";
 import type {
   AtmosphereBuilder,
@@ -473,6 +483,21 @@ export interface AtmosphereEntry<T> {
   readonly built: BuiltAtmosphere | null;
   /** Its per-planet tables; `null` with no `built`, after an eviction, or while the device is lost. */
   readonly tables: T | null;
+}
+
+/**
+ * The ground a body's lit disc stands on beneath its drawn medium where that medium has a gas
+ * envelope (R08.T16.a.2 and R08.T16.b.2; the module's remarks, "The disc's ground"): black, on one
+ * figure under its air's full passes and on another where its disc table draws it.
+ */
+export interface DiscGround {
+  /**
+   * The figure its disc stands on under its air's full passes: its tables', the envelope's floor,
+   * while its route is closed; the medium's own datum, the column's base, once it routes.
+   */
+  readonly figure: SpheroidFigure;
+  /** The figure its disc stands on where its disc table draws it: its tables', the deck's datum. */
+  readonly tableFigure: SpheroidFigure;
 }
 
 /** What a view's frame draws and says of its wanted bodies. */
@@ -1080,6 +1105,14 @@ function bakeLabelsOf(
 }
 
 /**
+ * The figure tables are built on (`hillaire.ts`'s `tablesFigureOf`): their body's datum spheroid,
+ * or for tables of one slice and one band (`body` `null`), the sphere of their ground's radius.
+ */
+function figureOf(body: AtmosphereBody | null, bottomRadiusM: number): SpheroidFigure {
+  return body?.figure ?? { equatorialRadiusM: bottomRadiusM, polarRadiusM: bottomRadiusM };
+}
+
+/**
  * The body a thick bake of `tables` is for: their built body, its slicing widened over the 2 MB row
  * where `tables.ts`'s `rowBodyOf` widened it, on their ground R_ref; or, for tables of one slice
  * and one band (`body` `null`), a sphere of their ground's radius with no spin, as
@@ -1343,6 +1376,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   readonly #discs: (column: SpectralColumn) => boolean;
   /** Every body held, least recently wanted first. */
   readonly #bodies = new Map<BodyIdHex, HeldBody<T>>();
+  /** Each drawn entry's disc's ground, read once an entry: a new entry reads its route again. */
+  readonly #grounds = new WeakMap<AtmosphereEntry<T>, DiscGround | null>();
   /** Each open view's wanted bodies, as its latest frame noted them. */
   readonly #views = new Map<object, ReadonlySet<BodyIdHex>>();
   /** The arrival last noted. */
@@ -1407,6 +1442,38 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   entryOf(body: BodyIdHex): AtmosphereEntry<T> | null {
     const held = this.#bodies.get(body);
     return held === undefined || held.problem !== null ? null : held.drawn;
+  }
+
+  /**
+   * The ground a body's lit disc stands on beneath its drawn medium (the module's remarks, "The
+   * disc's ground"): for an entry whose cover is a gas envelope's, its tables made, its tables'
+   * figure, and once its deck routes the medium's own datum under its full passes; `null` for any
+   * other body, whose disc keeps its record's figure and photometry.
+   */
+  discGroundOf(body: BodyIdHex): DiscGround | null {
+    const entry = this.entryOf(body);
+    if (entry === null) {
+      return null;
+    }
+    let ground = this.#grounds.get(entry);
+    if (ground === undefined) {
+      ground = this.#groundOf(entry);
+      this.#grounds.set(entry, ground);
+    }
+    return ground;
+  }
+
+  /** A drawn entry's disc's ground ({@link AtmosphereCache.discGroundOf}). */
+  #groundOf(entry: AtmosphereEntry<T>): DiscGround | null {
+    if (!entry.envelope || entry.built === null || entry.tables === null) {
+      return null;
+    }
+    const tableFigure = figureOf(entry.tables.body, entry.tables.bottomRadiusM);
+    const routed = this.#deckSplitOf(entry, entry.built.medium) !== null;
+    return {
+      figure: routed ? figureOf(entry.built.body, entry.built.bottomRadiusM) : tableFigure,
+      tableFigure,
+    };
   }
 
   /**

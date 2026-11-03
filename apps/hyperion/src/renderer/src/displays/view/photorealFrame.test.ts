@@ -37,7 +37,12 @@ import type { PhotometricLaw } from "../../view/appearance/law";
 import { lawFor } from "../../view/appearance/phase";
 import type { Viewport } from "../../view/camera/projection";
 import { type AbsorberCurve, absorberCurve } from "../../view/atmosphere/absorbers";
-import { EARTH_OZONE, EARTH_REFERENCE, EARTH_REFERENCE_CURVES } from "../../view/atmosphere/earth";
+import {
+  EARTH_OZONE,
+  EARTH_REFERENCE,
+  EARTH_REFERENCE_CURVES,
+  R05_EARTH_REFERENCE,
+} from "../../view/atmosphere/earth";
 import { BAKE_BIN_COUNT } from "../../view/atmosphere/medium";
 import { bakeSpectrumOf } from "../../view/atmosphere/spectralColour";
 import { AtmosphereTables } from "../../view/atmosphere/tables";
@@ -482,6 +487,52 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
 
   it("state the label for a kept scene's bodies, which carry no appearance", () => {
     expect(litLabelsOf(phaseScene().sceneAt(0))).toEqual(["BODY PHOTOMETRY: NOT YET MODELLED"]);
+  });
+});
+
+/** The lit body `id` of `bodies`. */
+function litBodyNamed(bodies: ReadonlyArray<LitBodyInput>, id: string): LitBodyInput | undefined {
+  return bodies.find((body) => body.id === id);
+}
+
+describe("a served giant's disc beneath its gas envelope's air (R08.T16.a.2)", () => {
+  it("stands on the ground the cache gives where the frame draws its air, keeping its record's figure and photometry for the rest", async () => {
+    const engine = await countingRenderEngine();
+    const { scene, pose } = sliceScene();
+    const floorM = 71_310_949;
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, floorM);
+    const floor = { equatorialRadiusM: floorM, polarRadiusM: floorM };
+    const ground = { figure: floor, tableFigure: floor };
+    const frame = photorealFrame({
+      run: startServerRun(scene),
+      pose,
+      viewport: VIEWPORT,
+      presentedPx: VIEWPORT,
+      setting: "high",
+      exposureScale: exposureScale(controlEv100(DEFAULT_EXPOSURE)),
+      list: emptyDrawList(viewStrokesAt(1)),
+      sky: null,
+      band: null,
+      discs: new HostDiscLayer(engine),
+      cube: null,
+      previousRegimes: new Map(),
+      overlay: null,
+      meter: "average",
+      atmospheres: (id) => (id === FIXTURE_JUPITER ? tables : null),
+      // The Earth's air is not drawn, so the ground given for it is not taken.
+      discGrounds: () => ground,
+    });
+    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null));
+    const jupiter = litBodyNamed(bare, FIXTURE_JUPITER);
+    expect(jupiter).toBeDefined();
+    expect([
+      litBodyNamed(frame.bodies, FIXTURE_JUPITER),
+      litBodyNamed(frame.bodies, FIXTURE_EARTH),
+    ]).toEqual([
+      jupiter === undefined ? undefined : { ...jupiter, ground },
+      litBodyNamed(bare, FIXTURE_EARTH),
+    ]);
+    tables.dispose();
   });
 });
 
