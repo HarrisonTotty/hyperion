@@ -54,7 +54,7 @@ import { spikeExposure } from "./litView";
 export interface SpikeViewSession
   extends
     ViewTerrainSession,
-    Pick<TerrainSession, "noteView" | "forgetView" | "classMaps" | "reliefs"> {}
+    Pick<TerrainSession, "noteView" | "forgetView" | "classMaps" | "reliefsFor"> {}
 
 /** Who a session view is. */
 export interface SpikeSessionViewOptions {
@@ -203,7 +203,7 @@ export class SpikeSessionView {
       availability: BOTH_STYLES,
       meter: null,
       classMaps: session.classMaps,
-      reliefs: session.reliefs,
+      reliefs: session.reliefsFor(this.#options.id),
       terrain: {
         source: session,
         view: this.#options.id,

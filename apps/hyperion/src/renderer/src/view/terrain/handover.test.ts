@@ -726,14 +726,25 @@ describe("the survey's edge on a regolith body (R10.T10.e)", () => {
   });
 });
 
-/** A draw set as `drawsCells` reads it: `missing` patches missing, and patches drawn at `levels`, stand-ins where `standIn`. */
+/**
+ * A draw set as `drawsCells` reads it: `missing` patches missing, for the views `missingViews`, and
+ * patches drawn at `levels`, stand-ins where `standIn`, each seen by the views `views` (every view
+ * where absent).
+ */
 function set(
   missing: number,
-  drawn: ReadonlyArray<{ readonly level: number; readonly standIn: boolean }>,
-): Pick<DrawSet, "count" | "missing" | "patches"> {
+  drawn: ReadonlyArray<{
+    readonly level: number;
+    readonly standIn: boolean;
+    readonly views?: number;
+  }>,
+  missingViews = missing > 0 ? ~0 : 0,
+): Pick<DrawSet, "count" | "missing" | "patches" | "views" | "missingViews"> {
   return {
     count: drawn.length,
     missing,
+    missingViews,
+    views: Uint32Array.from(drawn, ({ views }) => views ?? ~0),
     patches: drawn.map(({ level, standIn }, slot): DrawnPatch => {
       const patch: CachedPatch = {
         key: { face: 0, level, i: 0, j: 0 },
@@ -766,5 +777,23 @@ describe("the hand-over at the field's cells (lane fix-coast-class-map; HANDOVER
 
   it("draws the cells of a set of none, its seen ground all unsurveyed, but not of one still missing", () => {
     expect([drawsCells(set(0, []), 2), drawsCells(set(1, []), 2)]).toEqual([true, false]);
+  });
+
+  it("judges a view's patches alone where given its bit: another view's coarse stand-in or missing patch apart", () => {
+    const first = 0b01;
+    const second = 0b10;
+    const drawSet = set(
+      1,
+      [
+        { level: 2, standIn: false, views: first | second },
+        { level: 1, standIn: true, views: second },
+      ],
+      second,
+    );
+    expect([
+      drawsCells(drawSet, 2, first),
+      drawsCells(drawSet, 2, second),
+      drawsCells(drawSet, 2),
+    ]).toEqual([true, false, false]);
   });
 });

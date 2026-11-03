@@ -147,7 +147,7 @@ import { type CacheInsert, type DrawSet, DrawSetResolver, PatchCache } from "./c
 import { CoarseFineHolds, TransitionFades } from "./coarseFineHolds";
 import { frustumOf, horizonCone, inFrustum } from "./cull";
 import { vertexSpacing } from "./cube";
-import { pixelAngleRad } from "./handover";
+import { drawsCells, pixelAngleRad } from "./handover";
 import { TERRAIN_SHADOW_PASS_LABEL, terrainMaterialSpec } from "./gpu/material";
 import {
   CLUSTER_LIT_PASS,
@@ -2878,6 +2878,21 @@ export class TerrainPass {
       }
     }
     return false;
+  }
+
+  /**
+   * Whether the last selection draws view `id`'s seen ground at the field's cells or finer, its
+   * patches alone judged (the hand-over's `drawsCells` at `cellLevel` on the view's bit): the
+   * reliefs by which the view hands the body over under `HANDOVER_AT_CELLS`. `false` for a view the
+   * last step did not take, and once the pass is faulted or disposed.
+   */
+  drawsCellsFor(id: TerrainViewId, cellLevel: number): boolean {
+    const selected = this.#selected;
+    if (this.#faulted || this.#disposed || selected === null) {
+      return false;
+    }
+    const bit = selected.views.findIndex((view) => view.id === id);
+    return bit >= 0 && drawsCells(selected.drawSet, cellLevel, 1 << bit);
   }
 
   /**

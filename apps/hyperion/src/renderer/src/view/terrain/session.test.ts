@@ -616,23 +616,23 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
   it("gives the views the relief of a body whose header and survey it holds, the rule off", async () => {
     const h = await harness({ handoverAtCells: false });
     await holdMoon(h);
-    expect([h.session.reliefs.reliefM(MOON), h.session.reliefs.reliefM(PLANET)]).toEqual([
-      18_000,
-      null,
-    ]);
+    expect([
+      h.session.reliefsFor(PRIMARY).reliefM(MOON),
+      h.session.reliefsFor(PRIMARY).reliefM(PLANET),
+    ]).toEqual([18_000, null]);
   });
 
   it("withholds a held body's relief from the frames while no settled terrain of it is drawn (HANDOVER_AT_CELLS)", async () => {
     const h = await harness();
     await holdMoon(h);
-    expect(h.session.reliefs.reliefM(MOON)).toBeNull();
+    expect(h.session.reliefsFor(PRIMARY).reliefM(MOON)).toBeNull();
   });
 
   it("gives the relief once a photorealistic view's plan draws the body as terrain (HANDOVER_AT_CELLS)", async () => {
     const h = await harness();
     await holdMoon(h);
     h.session.noteView(PRIMARY, { ...viewAt(5e6), regimes: new Map([[MOON, "terrain"]]) });
-    expect(h.session.reliefs.reliefM(MOON)).toBe(18_000);
+    expect(h.session.reliefsFor(PRIMARY).reliefM(MOON)).toBe(18_000);
   });
 });
 

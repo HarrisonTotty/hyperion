@@ -136,21 +136,30 @@ describe("VIEW's terrain session (R10.T16.a)", () => {
     expect(view.heightWorkers).toEqual([]);
   });
 
-  it("gives every view's frames its class maps and reliefs, the instruments' included", async () => {
+  it("gives every view's frames its class maps, and each view its own reliefs, the instruments' included", async () => {
     const view = await serverScene();
     await openInstrument(view, "INSTRUMENT 1");
     const frames = framesOver(view, 200);
     const first = frames[0]?.inputs;
+    // Each view hands its bodies over by its own reliefs (HANDOVER_AT_CELLS; lane fix-coast-class-map).
+    const reliefsByDrawer = new Map<unknown, Set<unknown>>();
+    const distinct = new Set<unknown>();
+    for (const { drawer, inputs } of frames) {
+      reliefsByDrawer.set(drawer, (reliefsByDrawer.get(drawer) ?? new Set()).add(inputs.reliefs));
+      distinct.add(inputs.reliefs);
+    }
+    const reliefs = [...reliefsByDrawer.values()];
     expect([
-      new Set(frames.map(({ drawer }) => drawer)).size,
+      reliefsByDrawer.size,
       frames.every(
         ({ inputs }) =>
           inputs.classMaps !== undefined &&
           inputs.classMaps === first?.classMaps &&
-          inputs.reliefs !== undefined &&
-          inputs.reliefs === first.reliefs,
+          inputs.reliefs !== undefined,
       ),
-    ]).toEqual([2, true]);
+      reliefs.map((each) => each.size),
+      distinct.size,
+    ]).toEqual([2, true, [1, 1], 2]);
   });
 
   it("gives a kept scene's frames no class maps or reliefs", async () => {

@@ -26,7 +26,7 @@
  *   `surface_revisions`, {@link TerrainSession.resync} the scene topic opened again, and
  *   {@link TerrainSession.setLinkUp} the link's state: each asks the store for the new cells with the
  *   revision held.
- * - **What it gives the views**: {@link TerrainSession.classMaps} and {@link TerrainSession.reliefs},
+ * - **What it gives the views**: {@link TerrainSession.classMaps} and {@link TerrainSession.reliefsFor},
  *   `PhotorealInputs`' `classMaps` and `reliefs`, for every view's frames.
  * - **Memory.** The masks and maps are under `coarse-field-gpu` (R12 Design note 6); the
  *   session's report ({@link TerrainSession.memory}) gives the workers' copies of the fields, the
@@ -55,9 +55,9 @@
  *   ({@link sceneContacts}) on the ground its resident bakes hold; each view draws its own through
  *   {@link TerrainSession.drawTerrain}. Under the hand-over's `HANDOVER_AT_CELLS` (lane
  *   fix-coast-class-map) a view whose plan draws a body as a disc in its hand-over range hands it
- *   to its pass too ({@link warmingDiscs}), the pass warmed while the disc is drawn, and the frames
- *   take the body's relief only once that pass draws the field's cells
- *   ({@link TerrainSession.reliefs}): wherever these remarks and the members' say a view hands a
+ *   to its pass too ({@link warmingDiscs}), the pass warmed while the disc is drawn, and the view's
+ *   frames take the body's relief only once that pass draws the field's cells where the view sees
+ *   it ({@link TerrainSession.reliefsFor}): wherever these remarks and the members' say a view hands a
  *   body over, its pass made, stepped and its fault shown, a warming disc's view is meant too.
  * - **The survey and the mask (D6 and D7).** Each wanted body's {@link SurveyedCells}, which its
  *   pass's selection reads, take every block's cells and the store's coverage at once. Its GPU
@@ -161,7 +161,6 @@ import {
 } from "./grounded";
 import {
   cellPatchLevel,
-  drawsCells,
   HANDOVER_AT_CELLS,
   handoverRangeRatio,
   type HandoverReliefSource,
@@ -972,8 +971,8 @@ export class TerrainSession {
   #reducedMotion = false;
   readonly #budgetHoldMargin: number | null | undefined;
   readonly #handoverAtCells: boolean;
-  /** The reliefs the frames hand over by ({@link TerrainSession.reliefs}). */
-  readonly #frameReliefs: HandoverReliefSource;
+  /** Each view's reliefs its frames hand over by ({@link TerrainSession.reliefsFor}). */
+  readonly #frameReliefs = new Map<ViewId, HandoverReliefSource>();
   #faults: ReadonlyMap<ViewId, TerrainFault> = NO_FAULTS;
   /** The terrain's fault by its first cause raised, which stands for the session; `null` before. */
   #cause: TerrainFault | null = null;
@@ -1001,7 +1000,6 @@ export class TerrainSession {
     this.#morphInMs = options.morphInMs;
     this.#budgetHoldMargin = options.budgetHoldMargin;
     this.#handoverAtCells = options.handoverAtCells ?? HANDOVER_AT_CELLS;
-    this.#frameReliefs = { reliefM: (body) => this.#frameReliefM(body) };
     // A readout worker beside the bake workers, so that the readout, which a choice of BASELINE
     // asks at once, never waits behind their bakes (R10.T12.c).
     const pool = new HeightWorkerPool({
@@ -1078,34 +1076,38 @@ export class TerrainSession {
   }
 
   /**
-   * The reliefs by which every view's lit bodies hand over (T10.e's `PhotorealInputs.reliefs`,
-   * `storeReliefSource` over the session's store). Under `HANDOVER_AT_CELLS` a body not handed over
-   * in any view reads none, so that it stays a disc, until its warmed pass's draw set draws the
-   * field's cells (`drawsCells`): the terrain's first frame then draws them as its settled one does.
+   * The reliefs by which `view`'s lit bodies hand over (T10.e's `PhotorealInputs.reliefs`,
+   * `storeReliefSource` over the session's store), each view its own. Under `HANDOVER_AT_CELLS` a
+   * body the view's last plan did not draw as terrain reads none, so that it stays a disc, until its
+   * warmed pass's last selection draws the field's cells where that view sees it
+   * (`TerrainPass.drawsCellsFor`): the view's first terrain frame then draws them as its settled one
+   * does, whatever another view has handed over. Without the rule every view reads the store's.
    */
-  get reliefs(): HandoverReliefSource {
-    return this.#frameReliefs;
+  reliefsFor(view: ViewId): HandoverReliefSource {
+    let reliefs = this.#frameReliefs.get(view);
+    if (reliefs === undefined) {
+      reliefs = { reliefM: (body) => this.#frameReliefM(body, view) };
+      this.#frameReliefs.set(view, reliefs);
+    }
+    return reliefs;
   }
 
-  /** `body`'s relief as the frames hand over by ({@link TerrainSession.reliefs}). */
-  #frameReliefM(body: BodyIdHex): number | null {
+  /** `body`'s relief as `view`'s frames hand over by ({@link TerrainSession.reliefsFor}). */
+  #frameReliefM(body: BodyIdHex, view: ViewId): number | null {
     const reliefM = this.#reliefs.reliefM(body);
-    if (reliefM === null || !this.#handoverAtCells || this.#handedOverInAView(body)) {
+    if (reliefM === null || !this.#handoverAtCells) {
+      return reliefM;
+    }
+    // The view's own hand-over keeps its relief, and with it R07's hysteresis on the way out.
+    const report = this.#reports.get(view);
+    if (report?.drawnStyle === "photorealistic" && report.regimes.get(body) === "terrain") {
       return reliefM;
     }
     const level = this.#store.header(body)?.level;
-    const drawSet = this.#passes.get(body)?.lastStep?.drawSet ?? null;
-    return level !== undefined && drawsCells(drawSet, cellPatchLevel(level)) ? reliefM : null;
-  }
-
-  /** Whether some photorealistic view's last plan drew `body` as terrain. */
-  #handedOverInAView(body: BodyIdHex): boolean {
-    for (const report of this.#reports.values()) {
-      if (report.drawnStyle === "photorealistic" && report.regimes.get(body) === "terrain") {
-        return true;
-      }
-    }
-    return false;
+    const pass = this.#passes.get(body);
+    return level !== undefined && pass?.drawsCellsFor(view, cellPatchLevel(level)) === true
+      ? reliefM
+      : null;
   }
 
   /** The bodies whose fields are wanted, in the order first wanted. */
@@ -1258,6 +1260,7 @@ export class TerrainSession {
   forgetView(id: ViewId): void {
     this.#reports.delete(id);
     this.#wireHanded.delete(id);
+    this.#frameReliefs.delete(id);
   }
 
   /**

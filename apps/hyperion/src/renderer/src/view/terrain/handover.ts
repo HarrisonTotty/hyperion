@@ -159,17 +159,25 @@ const PATCH_SPAN_LEVELS = 6;
  * level or finer. A finer patch still streaming may stand in below it, as the terrain's refinement
  * goes on after the hand-over. A set of none, its seen ground all unsurveyed, draws the reference
  * surface before the hand-over and after it alike. `null`, before any selection, draws none.
+ *
+ * @param viewMask - The views judged, bit k for the selection's view k (`DrawSet.views`): the
+ *   patches they see and the selected patches missing for them alone; every view's where absent.
  */
 export function drawsCells(
-  drawSet: Pick<DrawSet, "count" | "missing" | "patches"> | null,
+  drawSet: Pick<DrawSet, "count" | "missing" | "patches" | "views" | "missingViews"> | null,
   cellLevel: number,
+  viewMask?: number,
 ): boolean {
-  if (drawSet === null || drawSet.missing > 0) {
+  if (drawSet === null) {
+    return false;
+  }
+  if (viewMask === undefined ? drawSet.missing > 0 : (drawSet.missingViews & viewMask) !== 0) {
     return false;
   }
   for (let n = 0; n < drawSet.count; n += 1) {
     const drawn = drawSet.patches[n];
-    if (drawn !== undefined && drawn.standIn && drawn.patch.key.level < cellLevel) {
+    const seen = viewMask === undefined || ((drawSet.views[n] ?? 0) & viewMask) !== 0;
+    if (seen && drawn !== undefined && drawn.standIn && drawn.patch.key.level < cellLevel) {
       return false;
     }
   }

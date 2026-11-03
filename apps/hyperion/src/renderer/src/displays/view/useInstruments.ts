@@ -826,9 +826,10 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           // The primary is the exposure's source: an instrument meters nothing (Design note 11).
           meter: null,
           present: each.present,
-          // The terrain session's, as the primary's frame read them (R10.T16.a).
+          // The terrain session's class maps, as the primary's frame reads them (R10.T16.a), and
+          // the instrument's own reliefs, by which it hands its bodies over (HANDOVER_AT_CELLS).
           classMaps: session?.classMaps,
-          reliefs: session?.reliefs,
+          reliefs: session?.reliefsFor(instrumentViewId(slot)),
           // Its own terrain of the session's passes, from its own camera, and its survey edges
           // (R10.T16.c).
           terrain:

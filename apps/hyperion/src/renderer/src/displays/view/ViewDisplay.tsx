@@ -1484,7 +1484,7 @@ function ViewStage({
           present: !auto.holds,
           // Every view's lit bodies shade and hand over by the session's (R10.T16.a).
           classMaps: session?.classMaps,
-          reliefs: session?.reliefs,
+          reliefs: session?.reliefsFor(VIEW_ID),
           // The view's own terrain of the session's passes, and its survey edges (R10.T16.c),
           // its contour interval through the stage's holder (R10.T12.b).
           terrain:

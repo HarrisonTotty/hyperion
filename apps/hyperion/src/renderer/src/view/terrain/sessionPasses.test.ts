@@ -1109,21 +1109,69 @@ describe("a disc's terrain warmed before its hand-over (HANDOVER_AT_CELLS; lane 
   it("makes the disc's pass while it is drawn as a disc, and withholds its relief from the frames", async () => {
     const h = await harness();
     await warming(h);
-    expect([h.session.pass(MOON) !== null, h.session.reliefs.reliefM(MOON)]).toEqual([true, null]);
+    expect([h.session.pass(MOON) !== null, h.session.reliefsFor(PRIMARY).reliefM(MOON)]).toEqual([
+      true,
+      null,
+    ]);
   });
 
   it("gives the relief once the warmed pass draws the field's cells, nothing missing", async () => {
     const h = await harness();
     await warming(h);
-    const before = h.session.reliefs.reliefM(MOON);
+    const before = h.session.reliefsFor(PRIMARY).reliefM(MOON);
     await streamBakes(h, 6);
     const drawSet = h.session.pass(MOON)?.lastStep?.drawSet ?? null;
     expect([
       before,
       drawSet?.missing,
       drawSet?.standingIn,
-      h.session.reliefs.reliefM(MOON),
+      h.session.reliefsFor(PRIMARY).reliefM(MOON),
     ]).toEqual([null, 0, 0, 18_000]);
+  });
+
+  it("withholds a second view's relief until the pass draws its own seen ground at the cells, though the first has handed the body over", async () => {
+    const h = await harness();
+    h.session.noteView(PRIMARY, handing(5e6));
+    h.session.step();
+    await answerField(h);
+    await streamBakes(h, 6);
+    // INSTRUMENT 1 comes into range: its plan draws the moon as a disc, the pass not yet stepped
+    // over its camera.
+    h.session.noteView(INSTRUMENT, handing(5e6, { regimes: new Map([[MOON, "disc"]]) }));
+    const entering = h.session.reliefsFor(INSTRUMENT).reliefM(MOON);
+    await streamBakes(h, 6);
+    expect([
+      h.session.reliefsFor(PRIMARY).reliefM(MOON),
+      entering,
+      h.session.reliefsFor(INSTRUMENT).reliefM(MOON),
+    ]).toEqual([18_000, null, 18_000]);
+  });
+
+  it("judges each warming view by its own patches: the first's drawn at the cells gives it the relief, the second's still coarse withholds its", async () => {
+    const h = await harness();
+    // 2,000 km from the moon's centre over its north pole, the horizon 30° from the pole: no ground
+    // the same view over the south pole sees.
+    const north = handing(2e6, { regimes: new Map([[MOON, "disc"]]) });
+    h.session.noteView(PRIMARY, north);
+    h.session.step();
+    await answerSurveyedField(h, LEVEL_7);
+    await streamBakes(h, 6, EVERY_CELL);
+    // INSTRUMENT 1 as far out over the south pole, looking at it: ground the pass has not baked.
+    const south: TerrainViewReport = {
+      ...north,
+      pose: {
+        ...north.pose,
+        positionM: add(north.pose.positionM, vec3(0, 0, -4e6)),
+        orientation: { w: 0, x: 1, y: 0, z: 0 },
+      },
+    };
+    h.session.noteView(INSTRUMENT, south);
+    h.session.step();
+    await settle();
+    expect([
+      h.session.reliefsFor(PRIMARY).reliefM(MOON),
+      h.session.reliefsFor(INSTRUMENT).reliefM(MOON),
+    ]).toEqual([18_000, null]);
   });
 
   it("refines a level-7 field's seen survey to level 1, its cells' patches, where the rule off leaves its roots", async () => {
@@ -1155,7 +1203,7 @@ describe("a disc's terrain warmed before its hand-over (HANDOVER_AT_CELLS; lane 
     h.session.step();
     await answerSurveyedField(h, LEVEL_7);
     let rounds = 0;
-    while (rounds < 8 && h.session.reliefs.reliefM(MOON) === null) {
+    while (rounds < 8 && h.session.reliefsFor(PRIMARY).reliefM(MOON) === null) {
       rounds += 1;
       // Each round answers the bakes the round before asked.
       // oxlint-disable-next-line no-await-in-loop
@@ -1167,7 +1215,7 @@ describe("a disc's terrain warmed before its hand-over (HANDOVER_AT_CELLS; lane 
       rounds > 1,
       drawSet?.missing,
       Math.min(...seenLevels(drawn)),
-      h.session.reliefs.reliefM(MOON),
+      h.session.reliefsFor(PRIMARY).reliefM(MOON),
     ]).toEqual([true, 0, 1, 18_000]);
   });
 });
