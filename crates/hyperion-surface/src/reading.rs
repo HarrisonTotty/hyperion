@@ -323,8 +323,9 @@ impl SlantRange {
 /// [module documentation](self)).
 ///
 /// `direction` need not be a unit vector. `cache` is the caller's, and no result depends on what
-/// it holds. The march reads every cell the view holds once a call, for its ceiling (about a
-/// millisecond on a level-8 field).
+/// it holds. The march reads every cell the view holds once a call, for its ceiling (3.5 ms on a
+/// level-8 field surveyed whole, natively, pod, 16 vCPU, 2026-11-03), which a worker's fields form
+/// once a block instead (`WorkerFields::slant_range`).
 ///
 /// # Errors
 ///
@@ -343,6 +344,29 @@ pub fn slant_range<F: SurveyView>(
     max: Metres,
 ) -> Result<LineOfSight, QueryHeightError> {
     march(synth, cache, origin_m, direction, max)
+}
+
+/// [`slant_range`] under `ceiling_m`, the ceiling [`SurveyedGround::ceiling_m`] gives over the
+/// cells `synth`'s view holds now, formed by the caller once for every march until the view takes
+/// a block: [`slant_range`]'s answer, bit for bit, without its scan of every cell (R10.T12.d: 3.5 ms
+/// of a 4.0 ms readout on a level-8 field surveyed whole, natively, pod, 16 vCPU, 2026-11-03).
+///
+/// # Errors
+///
+/// As [`slant_range`].
+///
+/// # Panics
+///
+/// As [`slant_range`].
+pub(crate) fn slant_range_under<F: SurveyView>(
+    synth: &Synthesiser<'_, F>,
+    cache: &mut SynthCache,
+    origin_m: &[f64; 3],
+    direction: &[f64; 3],
+    max: Metres,
+    ceiling_m: f64,
+) -> Result<LineOfSight, QueryHeightError> {
+    march_under(synth, cache, origin_m, direction, max, |_| ceiling_m)
 }
 
 /// What a view knows of a cell's survey.
@@ -743,6 +767,18 @@ pub(crate) fn march<S: SurveyedGround>(
     direction: &[f64; 3],
     max: Metres,
 ) -> Result<LineOfSight, S::Error> {
+    march_under(source, cache, origin, direction, max, S::ceiling_m)
+}
+
+/// [`march`] under the ceiling `ceiling_m` gives of `source`, once its arguments are checked.
+fn march_under<S: SurveyedGround>(
+    source: &S,
+    cache: &mut S::Cache,
+    origin: &[f64; 3],
+    direction: &[f64; 3],
+    max: Metres,
+    ceiling_m: impl FnOnce(&S) -> f64,
+) -> Result<LineOfSight, S::Error> {
     assert!(
         origin.iter().all(|x| x.is_finite()),
         "a line of sight's origin must be finite, got {origin:?}"
@@ -758,7 +794,7 @@ pub(crate) fn march<S: SurveyedGround>(
         figure,
         origin: *origin,
         direction: unit_dir(*direction),
-        ceiling_m: source.ceiling_m(),
+        ceiling_m: ceiling_m(source),
         cell_step_m: 0.5
             * f64::from(PATCH_QUADS)
             * vertex_spacing(figure.polar_radius_m, source.field_level()).min_m,

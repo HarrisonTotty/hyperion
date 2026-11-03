@@ -131,8 +131,13 @@ use crate::material::{
 use crate::num;
 use crate::patch::NormalScale;
 use crate::patch::normals::{encode_octahedral_f32, surface_normal};
+// The free query each march here answers as, bit for bit, under its kept ceiling: the docs'
+// links name it, and the tests hold the readout to it.
+#[cfg(any(test, doc))]
+use crate::reading::slant_range;
 use crate::reading::{
-    LineOfSight, SLOPE_BASELINES, SlantRange, SurveyedReading, slant_range, surveyed_reading,
+    LineOfSight, SLOPE_BASELINES, SlantRange, SurveyedGround, SurveyedReading, slant_range_under,
+    surveyed_reading,
 };
 use crate::synth::craters::CraterOctaves;
 use crate::synth::levels::HeldChannels;
@@ -183,6 +188,11 @@ struct BodyField {
     /// the first query with it: a function of the header and the seed alone, which a block never
     /// changes, so that each query's synthesiser over the field as it then is skips their build.
     parts: Option<SynthesisParts>,
+    /// The slant range's ceiling over the cells held, with the parts kept
+    /// ([`SurveyedGround::ceiling_m`]), formed at the first march after the field took a block or
+    /// the parts were made, `None` until then: a function of the cells held and the parts alone, so
+    /// that every march between two blocks reads one scan's answer ([`slant_range_under`]).
+    ceiling_m: Option<f64>,
 }
 
 impl BodyField {
@@ -193,11 +203,33 @@ impl BodyField {
         &mut self,
         seed: DetailSeed,
     ) -> (Synthesiser<'_, PartialField>, &mut SynthCache) {
+        self.keep_parts(seed);
+        let parts = self.parts.as_ref().expect("the parts are kept above");
+        (Synthesiser::with_parts(&self.field, parts), &mut self.cache)
+    }
+
+    /// [`synthesiser`](Self::synthesiser), with the slant range's ceiling over the cells held,
+    /// formed here at the first march after a block or a new seed and kept until the next.
+    fn marcher(
+        &mut self,
+        seed: DetailSeed,
+    ) -> (Synthesiser<'_, PartialField>, &mut SynthCache, f64) {
+        self.keep_parts(seed);
+        let parts = self.parts.as_ref().expect("the parts are kept above");
+        let synth = Synthesiser::with_parts(&self.field, parts);
+        let ceiling_m = *self
+            .ceiling_m
+            .get_or_insert_with(|| SurveyedGround::ceiling_m(&synth));
+        (synth, &mut self.cache, ceiling_m)
+    }
+
+    /// Keeps the parts for `seed`: made afresh for another seed, the ceiling let go with the old
+    /// ones.
+    fn keep_parts(&mut self, seed: DetailSeed) {
         if self.parts.as_ref().is_none_or(|parts| parts.seed() != seed) {
             self.parts = Some(SynthesisParts::new(self.field.header(), seed));
+            self.ceiling_m = None;
         }
-        let parts = self.parts.as_ref().expect("the parts are made above");
-        (Synthesiser::with_parts(&self.field, parts), &mut self.cache)
     }
 }
 
@@ -2100,6 +2132,7 @@ impl WorkerFields {
             cache: SynthCache::new(),
             nodes: NodeCache::default(),
             parts: None,
+            ceiling_m: None,
         };
         held.hold_cells(&block);
         held.survey_sigma(&change);
@@ -2131,6 +2164,7 @@ impl WorkerFields {
         }
         let change = survey_change(&held.field, &block);
         held.field.insert(&block).map_err(TakeBlockError::Insert)?;
+        held.ceiling_m = None;
         held.hold_cells(&block);
         held.survey_sigma(&change);
         Ok(change)
@@ -2345,6 +2379,10 @@ impl WorkerFields {
     /// Where the line of sight from `origin_m` along `direction`, body-fixed, metres, meets
     /// `body`'s ground within `max` metres, as far as the survey can say ([`slant_range`]).
     ///
+    /// Its ceiling over the cells held is formed at the first march after a block and kept until
+    /// the next, so that the march's scan of every cell is not repeated on each 4 Hz ask; the
+    /// answer is [`slant_range`]'s, bit for bit (R10.T12.d).
+    ///
     /// # Errors
     ///
     /// As [`bake`](Self::bake): no field of `body`, or a height on surveyed ground past the cells
@@ -2362,8 +2400,10 @@ impl WorkerFields {
         direction: &[f64; 3],
         max: Metres,
     ) -> Result<LineOfSight, QueryBodyError> {
-        let (synth, cache) = self.held(body)?.synthesiser(seed);
-        Ok(slant_range(&synth, cache, origin_m, direction, max)?)
+        let (synth, cache, ceiling_m) = self.held(body)?.marcher(seed);
+        Ok(slant_range_under(
+            &synth, cache, origin_m, direction, max, ceiling_m,
+        )?)
     }
 
     /// The material at `at` on `body` ([`material_at`]) with its ground's maturity there
@@ -2430,9 +2470,15 @@ impl WorkerFields {
         seed: DetailSeed,
         query: &GroundReadoutQuery,
     ) -> Result<GroundReadout, QueryBodyError> {
-        let (synth, cache) = self.held(body)?.synthesiser(seed);
-        let sight = match slant_range(&synth, cache, &query.origin_m, &query.direction, query.max)?
-        {
+        let (synth, cache, ceiling_m) = self.held(body)?.marcher(seed);
+        let sight = match slant_range_under(
+            &synth,
+            cache,
+            &query.origin_m,
+            &query.direction,
+            query.max,
+            ceiling_m,
+        )? {
             LineOfSight::Ground(sight) => sight,
             LineOfSight::NoGround => return Ok(GroundReadout::NoGround),
             LineOfSight::NotSurveyed => return Ok(GroundReadout::NotSurveyed),

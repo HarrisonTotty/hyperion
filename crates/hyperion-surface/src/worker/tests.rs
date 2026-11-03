@@ -3713,6 +3713,72 @@ fn worker_ground_readout_is_the_separate_queries_bit_for_bit() {
     );
 }
 
+/// R10.T12.d: the worker's marches keep their ceiling only between blocks and for one seed, so that
+/// after each block posted, and with another seed, every line of sight's slant range and readout
+/// sight are a fresh synthesiser's over the field as then held, to the bit: the three lines from
+/// 20 km and one straight down from far above, whose march takes Newton's step to the ceiling,
+/// which the blocks raise.
+#[test]
+fn worker_slant_range_keeps_its_ceiling_only_until_a_block_or_another_seed() {
+    let f = fixture();
+    let other = DetailSeed::new(0x0074_6865_7273_6565);
+    let max = Metres::new(1e9);
+    let mut fields = WorkerFields::new();
+    let mut held: Option<PartialField> = None;
+    let mut ceilings = Vec::new();
+    for (n, bytes) in f.blocks().enumerate() {
+        let block = decode_block(bytes).unwrap();
+        if n == 0 {
+            fields.init(f.body, bytes, SigmaSurvey::Skipped).unwrap();
+            held = Some(PartialField::new(block.header().unwrap().clone()));
+        } else {
+            fields.chunk(f.body, bytes).unwrap();
+        }
+        let field = held.as_mut().unwrap();
+        field.insert(&block).unwrap();
+        let [down, across, up] = sight_lines(field);
+        let far = (down.0.map(|x| 50.0 * x), down.1);
+        let seeds: &[DetailSeed] = if n == 0 {
+            &[SEED, other, SEED]
+        } else {
+            &[SEED]
+        };
+        for &seed in seeds {
+            let synth = Synthesiser::new(&*field, seed);
+            ceilings.push(SurveyedGround::ceiling_m(&synth));
+            for sight in [down, across, up, far] {
+                let fresh = slant_range(&synth, &mut SynthCache::new(), &sight.0, &sight.1, max)
+                    .map_err(QueryBodyError::from);
+                assert_eq!(
+                    fields.slant_range(f.body, seed, &sight.0, &sight.1, max),
+                    fresh,
+                    "block {n}"
+                );
+                let query = GroundReadoutQuery {
+                    max,
+                    ..readout_query(sight, CAPACITY_SLOPE_BASELINE, None)
+                };
+                let readout = fields
+                    .ground_readout(f.body, seed, &query)
+                    .map(|r| match r {
+                        GroundReadout::Ground(ground) => LineOfSight::Ground(*ground.sight()),
+                        GroundReadout::NoGround => LineOfSight::NoGround,
+                        GroundReadout::NotSurveyed => LineOfSight::NotSurveyed,
+                    });
+                match (&readout, &fresh) {
+                    // A foot in a margin cell reads `NotSurveyed` where the line meets ground.
+                    (Ok(LineOfSight::NotSurveyed), Ok(LineOfSight::Ground(_))) => {}
+                    _ => assert_eq!(readout, fresh, "block {n}'s readout"),
+                }
+            }
+        }
+    }
+    assert!(
+        ceilings.windows(2).any(|w| w[0].total_cmp(&w[1]).is_ne()),
+        "the blocks raise the ceiling: {ceilings:?}"
+    );
+}
+
 /// R10.T12: on regolith the pad friction is NAVFAC's constant, at any temperature and with none:
 /// it does not depend on the temperature, so the readout states no `AT`, and a year of twelve
 /// months with no season takes no temperature.
