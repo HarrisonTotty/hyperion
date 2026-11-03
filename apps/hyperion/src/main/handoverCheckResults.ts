@@ -15,8 +15,11 @@
  * - **The photometry, at 30° and 90°** (the terminator's recorded, not judged): at every switch,
  *   the body's and the survey's mean luminance, over each frame's own pixels and over the pixels
  *   both share, within {@link HANDOVER_BOUND_STOPS}, and every surveyed cell of at least
- *   {@link HANDOVER_MIN_SHARED_PIXELS} pixels both frames assign to it within it too, its mean over
- *   those pixels, with no floor (decision-r10-t16-leans §1). A cell dark on one side and not the
+ *   {@link HANDOVER_MIN_SHARED_PIXELS} pixels within it too, its means over those pixels: each pixel
+ *   of the frame not the disc's on the cell, against the disc's frame resampled at the pixel's
+ *   ground point, so that the camera's closing between the frames moves no cell's figure
+ *   (R10.T15.b.2; `handoverReading.ts`), with no floor (decision-r10-t16-leans §1). A cell dark on
+ *   one side and not the
  *   other is over the bound, counted and listed, never dropped; one of a single shared pixel is
  *   listed and not judged. A cell where the disc's μ floor binds at its centre in either frame
  *   (n′ · v < ½ μ_ν; plan R10, R10.T15.b, as decision-r10-t16-leans rules for "R10.T10.g terminator
@@ -44,6 +47,7 @@ import type {
   HandoverLookRecord,
   HandoverOwnMeans,
   HandoverRegime,
+  HandoverResampleGaps,
   HandoverSharedMeans,
   HandoverSwitchName,
   HandoverTexelRecord,
@@ -66,11 +70,14 @@ import { fixtureNaming, fixtureRecord, type TerrainCheckRunInput } from "./terra
 export const HANDOVER_CHECK_SCHEMA = "hyperion.views-check.handover-results";
 
 /**
- * The schema's version; bumped with any change to the file's shape: 2 from R10.T15.b's μ floor,
- * each cell's `muFloored` and each switch's `flooredTexels`; 3 from R10.T15.b.2's `run.look`, the
- * one look a `--look` launch asked.
+ * The schema's version; bumped with any change to the file's shape or to what its figures mean: 2
+ * from R10.T15.b's μ floor, each cell's `muFloored` and each switch's `flooredTexels`; 3 from
+ * R10.T15.b.2's `run.look`, the one look a `--look` launch asked; 4 from R10.T15.b.2's resampled
+ * cells, each cell's `sharedPixels` and means over the pixels of the frame not the disc's, against
+ * the disc's frame at their ground points, not over the pixels both frames give it, and each
+ * switch's `resampleGaps`.
  */
-export const HANDOVER_CHECK_VERSION = 3;
+export const HANDOVER_CHECK_VERSION = 4;
 
 /**
  * The bound on a change across a switch, stops (log₂ of the ratio): plan 10's T10.e and T10.g, a
@@ -79,8 +86,8 @@ export const HANDOVER_CHECK_VERSION = 3;
 export const HANDOVER_BOUND_STOPS = 1 / 3;
 
 /**
- * The fewest pixels both frames assign to a cell for the bound to judge it: two, the least that is
- * not one pixel's aliasing, with no floor above it (decision-r10-t16-leans §1).
+ * The fewest pixels a cell's means are taken over for the bound to judge it (`sharedPixels`): two,
+ * the least that is not one pixel's aliasing, with no floor above it (decision-r10-t16-leans §1).
  */
 export const HANDOVER_MIN_SHARED_PIXELS = 2;
 
@@ -199,6 +206,8 @@ export interface HandoverComparisonFigures {
    * the disc's μ floor binds at their centre (R10.T15.b): those it would otherwise judge.
    */
   readonly flooredTexels: number;
+  /** What the cells' means leave out (R10.T15.b.2): recorded, not judged. */
+  readonly resampleGaps: HandoverResampleGaps;
   /** Judged cells over the bound, the dark ones among them. */
   readonly texelsOver: number;
   /** Judged cells dark on one side. */
@@ -406,6 +415,7 @@ function comparisonFigures(
     texels,
     judgedTexels: judgedTexels.length,
     flooredTexels: floored.length,
+    resampleGaps: comparison.resampleGaps,
     texelsOver: over.length,
     darkTexels: dark.length,
     worst: judgedTexels.reduce<HandoverTexelFigures | null>(
@@ -581,7 +591,7 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
         each.worst === null
           ? "—"
           : `${stopsText(each.worst.log2)} (cell ${String(each.worst.texel)}, ${String(each.worst.sharedPixels)} px)`;
-      return `| ${look.name} | ${each.name} | ${frameText(each.before)} → ${frameText(each.after)} | ${String(each.framesApart)}${each.beforeWasLast && each.afterWasFirst ? "" : " (not adjacent in regime)"} | ${pairText(each.body)} | ${pairText(each.survey)} | ${String(each.judgedTexels)} of ${String(each.texels.length)} | ${String(each.flooredTexels)} | ${String(each.texelsOver)} | ${String(each.darkTexels)} | ${worst} | ${each.verdict} |`;
+      return `| ${look.name} | ${each.name} | ${frameText(each.before)} → ${frameText(each.after)} | ${String(each.framesApart)}${each.beforeWasLast && each.afterWasFirst ? "" : " (not adjacent in regime)"} | ${pairText(each.body)} | ${pairText(each.survey)} | ${String(each.judgedTexels)} of ${String(each.texels.length)} | ${String(each.flooredTexels)} | ${String(each.resampleGaps.pixels)} px, ${String(each.resampleGaps.cells)} cells | ${String(each.texelsOver)} | ${String(each.darkTexels)} | ${worst} | ${each.verdict} |`;
     }),
   );
   const overRows = looks.flatMap((look) =>
@@ -632,8 +642,8 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
     "",
     "Changes are log₂(after ÷ before), stops, over each frame's own pixels / over the pixels both share.",
     "",
-    "| Look | Switch | Frames (script s, regime, limb distance ÷ range) | Frames apart | Body | Survey | Cells judged | Left out at the μ floor | Over 1/3 stop | Dark on one side | Worst cell | Verdict |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Look | Switch | Frames (script s, regime, limb distance ÷ range) | Frames apart | Body | Survey | Cells judged | Left out at the μ floor | Left out by the resampling | Over 1/3 stop | Dark on one side | Worst cell | Verdict |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...comparisonRows,
     "",
     "## Cells over 1/3 stop",

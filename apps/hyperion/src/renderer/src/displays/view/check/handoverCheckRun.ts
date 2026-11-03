@@ -29,7 +29,8 @@
  *    until the next, and only the frames either side of a regime's change, as `SwitchPairing`
  *    pairs them, are read (`readFrame`) and compared (`compareReadings`): the regime's switch from
  *    the disc (`disc-to-figure`), the terrain's first draw against the disc's last frame
- *    (`disc-to-terrain`), and the hand-back (`terrain-to-disc`). A frame's regime is that of its
+ *    (`disc-to-terrain`), and the hand-back (`terrain-to-disc`), each cell's means with the disc's
+ *    frame resampled at the other's pixels' ground points (R10.T15.b.2). A frame's regime is that of its
  *    scene target's draws' materials ({@link regimeOf}), and every primary frame's is kept, so that a
  *    comparison states how many frames apart its two are and whether each was its regime's last or
  *    first (`pairAdjacency`). Each frame's reading flags the cells where the disc's μ floor binds
@@ -83,6 +84,7 @@ import {
   type FrameReading,
   type PixelRect,
   readFrame,
+  type ResampledFrame,
 } from "./handoverReading";
 import {
   type FramePair,
@@ -106,6 +108,16 @@ const RECT_MARGIN_PX = 4;
 
 /** `EXPOSURE`'s automation level once `INHIBIT` holds. */
 const INHIBITED = "INHIBITED · OPERATOR";
+
+/**
+ * Each switch's frame of the disc, the smooth one, which its cells' means resample at the other
+ * frame's pixels' ground points (`compareReadings`; R10.T15.b.2).
+ */
+export const DISC_FRAME: Readonly<Record<HandoverSwitchName, ResampledFrame>> = {
+  "disc-to-figure": "before",
+  "disc-to-terrain": "before",
+  "terrain-to-disc": "after",
+};
 
 /** The switches, in the order a look meets them. */
 const SWITCHES: ReadonlyArray<HandoverSwitchName> = [
@@ -411,7 +423,11 @@ export async function runHandoverCheck(deps: HandoverCheckDeps): Promise<Handove
   /** Compares a pair of held frames across its switch, and keeps it. */
   const compare = (look: LookState, { name, before, after }: FramePair<HeldFrame>): void => {
     try {
-      const figures = compareReadings(readingOf(look, before), readingOf(look, after));
+      const figures = compareReadings(
+        readingOf(look, before),
+        readingOf(look, after),
+        DISC_FRAME[name],
+      );
       look.comparisons.set(name, {
         name,
         before: frameRecord(look, before),

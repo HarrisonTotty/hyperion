@@ -12,10 +12,20 @@
  *   model's self-check, which the limb's relief alone may trip.
  * - **The comparison** ({@link compareReadings}): the body's and the survey's mean luminance over
  *   each frame's own pixels and over the pixels both share (the same pixel of the body, and for the
- *   survey the same pixel assigned to the same cell), and each surveyed cell's mean over the pixels
- *   both frames assign to it, every cell with one such pixel or more listed. Means, not sums, so
- *   that the camera's closing between the frames moves no figure; a cell's shared pixels remove the
- *   closing altogether. The judging is the main process's.
+ *   survey the same pixel assigned to the same cell), means, not sums, so that the camera's closing
+ *   between the frames moves no figure; and each surveyed cell's mean over the other frame's pixels
+ *   on it, each against the disc's frame resampled at that pixel's own ground point
+ *   ({@link resampledAt}), every cell with one such pixel or more listed. The judging is the main
+ *   process's.
+ * - **Why resampled** (plan R10, R10.T15.b.2): the camera closes between the two frames, by 0.25%
+ *   of its distance in the software mode, whose frames carry the script 0.25 s each, and so each
+ *   pixel's ground point moves within its cell, about 0.7 px at the served airless world's 90° look
+ *   on the high setting. Where a cell's light changes steeply across it, within half a degree of
+ *   the terminator, that alone moved the mean of the pixels both frames give a cell by over a third
+ *   of a stop: about 0.5% of the cells of two identical smooth frames (a simulation of the look,
+ *   R10.T15.b's record), all of them there. Comparing each pixel with the disc's light at its own
+ *   ground point removes the closing to the interpolation's error, the disc's frame being the
+ *   smooth one.
  * - **The μ floor** (plan R10, R10.T15.b; decision-r10-t16-leans, "R10.T10.g terminator
  *   cross-fade"): each surveyed cell a frame's pixels meet is flagged where the disc's floor on the
  *   law's μ binds at the cell's centre, seen from that frame's eye ({@link muFloorBinds}), and a cell
@@ -25,6 +35,7 @@
 
 import type {
   HandoverOwnMeans,
+  HandoverResampleGaps,
   HandoverSharedMeans,
   HandoverTexelRecord,
 } from "../../../../../preload/api";
@@ -206,6 +217,11 @@ export interface FrameReading {
    * from this frame's eye ({@link muFloorBinds}).
    */
   readonly floored: ReadonlySet<number>;
+  /** Each pixel's meter class: 1 where the body's lit side is drawn, else 0. */
+  readonly lit: Uint8Array;
+  /** The frame's camera and the body's datum, by which its pixels' ground points are found. */
+  readonly camera: FrameCamera;
+  readonly figure: HandoverFigure;
 }
 
 /** What {@link readFrame} reads. */
@@ -251,8 +267,7 @@ export function readFrame(input: FrameReadInput): FrameReading {
   const value = halves();
   const luminance = new Float32Array(count);
   const cells = new Int32Array(count).fill(OFF_BODY);
-  const s = 1 / Math.tan(camera.fovXRad / 2);
-  const aspect = widthPx / heightPx;
+  const lit = new Uint8Array(count);
   const [lumaR, lumaG, lumaB] = METER_LUMA;
   let bodyPixels = 0;
   let bodyMisses = 0;
@@ -261,7 +276,6 @@ export function readFrame(input: FrameReadInput): FrameReading {
   const flags = new Map<number, boolean>();
   for (let row = 0; row < rect.height; row += 1) {
     const y = rect.y + row;
-    const viewY = (1 - ((y + 0.5) / heightPx) * 2) / (s * aspect);
     for (let column = 0; column < rect.width; column += 1) {
       const p = row * rect.width + column;
       const at = p * 4;
@@ -270,14 +284,12 @@ export function readFrame(input: FrameReadInput): FrameReading {
         continue;
       }
       bodyPixels += 1;
+      lit[p] = meter === METER_CLASS.litBody ? 1 : 0;
       luminance[p] =
         lumaR * (value[input.halfBits[at] ?? 0] ?? 0) +
         lumaG * (value[input.halfBits[at + 1] ?? 0] ?? 0) +
         lumaB * (value[input.halfBits[at + 2] ?? 0] ?? 0);
-      const x = rect.x + column;
-      const viewX = (((x + 0.5) / widthPx) * 2 - 1) / s;
-      const ray = sub(add(scale(camera.right, viewX), scale(camera.up, viewY)), camera.back);
-      const hit = rayDatumHitM(camera.eyeM, ray, figure);
+      const hit = pixelGroundM(camera, rect.x + column, y, widthPx, heightPx, figure);
       cells[p] = UNSURVEYED;
       if (hit === null) {
         bodyMisses += 1;
@@ -303,7 +315,98 @@ export function readFrame(input: FrameReadInput): FrameReading {
     bodyMisses,
     surveyPixels,
     floored: new Set([...flags].flatMap(([texel, binds]) => (binds ? [texel] : []))),
+    lit,
+    camera,
+    figure,
   };
+}
+
+/**
+ * Where the ray through the centre of pixel (`x`, `y`) of a `widthPx` × `heightPx` target from
+ * `camera` first meets the datum, body-fixed, m from the centre; `null` where it misses.
+ */
+export function pixelGroundM(
+  camera: FrameCamera,
+  x: number,
+  y: number,
+  widthPx: number,
+  heightPx: number,
+  figure: HandoverFigure,
+): Vec3 | null {
+  const s = 1 / Math.tan(camera.fovXRad / 2);
+  const viewX = (((x + 0.5) / widthPx) * 2 - 1) / s;
+  const viewY = (1 - ((y + 0.5) / heightPx) * 2) / (s * (widthPx / heightPx));
+  const ray = sub(add(scale(camera.right, viewX), scale(camera.up, viewY)), camera.back);
+  return rayDatumHitM(camera.eyeM, ray, figure);
+}
+
+/**
+ * The place a body-fixed point `pointM` projects to in a `widthPx` × `heightPx` target from
+ * `camera`, px, pixel (x, y)'s centre at (x, y): the inverse of {@link pixelGroundM}'s ray; `null`
+ * for a point not in front of the camera.
+ */
+export function projectToPixel(
+  camera: FrameCamera,
+  pointM: Vec3,
+  widthPx: number,
+  heightPx: number,
+): { readonly x: number; readonly y: number } | null {
+  const v = sub(pointM, camera.eyeM);
+  const ahead = -dot(v, camera.back);
+  if (!(ahead > 0)) {
+    return null;
+  }
+  const s = 1 / Math.tan(camera.fovXRad / 2);
+  const viewX = dot(v, camera.right) / ahead;
+  const viewY = dot(v, camera.up) / ahead;
+  return {
+    x: ((viewX * s + 1) / 2) * widthPx - 0.5,
+    y: ((1 - viewY * s * (widthPx / heightPx)) / 2) * heightPx - 0.5,
+  };
+}
+
+/**
+ * The luminance of `reading` at the body-fixed ground point `pointM`: bilinear between the centres
+ * of the four pixels about the point's projection into the reading's camera, or `null` where any
+ * of the four lies outside the region or off the body, where they are not all of one meter class
+ * (lit or unlit: the terminator's kink, across which the light is not linear), or where the point
+ * faces away from the reading's eye.
+ */
+export function resampledAt(reading: FrameReading, pointM: Vec3): number | null {
+  const toEye = sub(reading.camera.eyeM, pointM);
+  if (!(dot(datumNormal(pointM, reading.figure), toEye) > 0)) {
+    return null;
+  }
+  const at = projectToPixel(reading.camera, pointM, reading.widthPx, reading.heightPx);
+  if (at === null) {
+    return null;
+  }
+  const { rect } = reading;
+  const x0 = Math.floor(at.x);
+  const y0 = Math.floor(at.y);
+  if (
+    x0 < rect.x ||
+    y0 < rect.y ||
+    x0 + 1 >= rect.x + rect.width ||
+    y0 + 1 >= rect.y + rect.height
+  ) {
+    return null;
+  }
+  const fx = at.x - x0;
+  const fy = at.y - y0;
+  let sum = 0;
+  let litCorners = 0;
+  for (let corner = 0; corner < 4; corner += 1) {
+    const dx = corner & 1;
+    const dy = corner >> 1;
+    const p = (y0 + dy - rect.y) * rect.width + (x0 + dx - rect.x);
+    if ((reading.cells[p] ?? OFF_BODY) === OFF_BODY) {
+      return null;
+    }
+    litCorners += reading.lit[p] ?? 0;
+    sum += (dx === 1 ? fx : 1 - fx) * (dy === 1 ? fy : 1 - fy) * (reading.luminance[p] ?? 0);
+  }
+  return litCorners === 0 || litCorners === 4 ? sum : null;
 }
 
 /** Two frames' comparison: see the module's remarks. */
@@ -311,11 +414,21 @@ export interface ReadingComparison {
   readonly body: { readonly own: HandoverOwnMeans; readonly shared: HandoverSharedMeans };
   readonly survey: { readonly own: HandoverOwnMeans; readonly shared: HandoverSharedMeans };
   /**
-   * Every surveyed cell with a pixel both frames assign to it, in texel order, each marked where its
-   * μ floor binds in either frame.
+   * Every surveyed cell with a pixel of the frame not resampled whose ground point the resampled
+   * frame shows ({@link resampledAt}), in texel order, each marked where its μ floor binds in either
+   * frame.
    */
   readonly texels: ReadonlyArray<HandoverTexelRecord>;
+  /** The kept frame's surveyed pixels the cells' means leave out, and the cells left with none. */
+  readonly resampleGaps: HandoverResampleGaps;
 }
+
+/**
+ * Which of a comparison's two frames is resampled at the other's pixels' ground points: the disc's,
+ * the smooth one (`before` at the switch from the disc and at the terrain's first draw, `after` at
+ * the hand-back).
+ */
+export type ResampledFrame = "before" | "after";
 
 /** A sum and its count. */
 interface Tally {
@@ -380,10 +493,15 @@ function sharedMeans(tally: PairTally): HandoverSharedMeans {
 /**
  * Compares the frames either side of a switch: see the module's remarks.
  *
+ * @param resampled - The frame resampled at the other's pixels' ground points for each cell's means.
  * @throws Error where the two were read from targets of different sizes, whose pixels are not the
  *   same pixels.
  */
-export function compareReadings(before: FrameReading, after: FrameReading): ReadingComparison {
+export function compareReadings(
+  before: FrameReading,
+  after: FrameReading,
+  resampled: ResampledFrame,
+): ReadingComparison {
   if (before.widthPx !== after.widthPx || before.heightPx !== after.heightPx) {
     throw new Error(
       `the scene target was ${String(before.widthPx)} × ${String(before.heightPx)} px before and ${String(after.widthPx)} × ${String(after.heightPx)} px after`,
@@ -415,12 +533,42 @@ export function compareReadings(before: FrameReading, after: FrameReading): Read
         survey.b += lumB;
         survey.a += lumA;
         survey.n += 1;
-        const entry = texels.get(cellB) ?? { b: 0, a: 0, n: 0 };
-        entry.b += lumB;
-        entry.a += lumA;
-        entry.n += 1;
-        texels.set(cellB, entry);
       }
+    }
+  }
+  // Each cell's means: every surveyed pixel of the frame kept against the resampled frame at its
+  // ground point.
+  const kept = resampled === "before" ? after : before;
+  const other = resampled === "before" ? before : after;
+  let gapPixels = 0;
+  const gapCells = new Set<number>();
+  for (let row = 0; row < kept.rect.height; row += 1) {
+    for (let column = 0; column < kept.rect.width; column += 1) {
+      const p = row * kept.rect.width + column;
+      const cell = kept.cells[p] ?? OFF_BODY;
+      if (cell < 0) {
+        continue;
+      }
+      const ground = pixelGroundM(
+        kept.camera,
+        kept.rect.x + column,
+        kept.rect.y + row,
+        kept.widthPx,
+        kept.heightPx,
+        kept.figure,
+      );
+      const there = ground === null ? null : resampledAt(other, ground);
+      if (there === null) {
+        gapPixels += 1;
+        gapCells.add(cell);
+        continue;
+      }
+      const own = kept.luminance[p] ?? 0;
+      const entry = texels.get(cell) ?? { b: 0, a: 0, n: 0 };
+      entry.b += resampled === "before" ? there : own;
+      entry.a += resampled === "before" ? own : there;
+      entry.n += 1;
+      texels.set(cell, entry);
     }
   }
   return {
@@ -435,5 +583,9 @@ export function compareReadings(before: FrameReading, after: FrameReading): Read
         meanAfter: tally.a / tally.n,
         muFloored: before.floored.has(texel) || after.floored.has(texel),
       })),
+    resampleGaps: {
+      pixels: gapPixels,
+      cells: [...gapCells].filter((cell) => !texels.has(cell)).length,
+    },
   };
 }

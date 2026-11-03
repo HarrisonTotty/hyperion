@@ -22,6 +22,7 @@ import type {
   HandoverRegime,
   HandoverSharedMeans,
   HandoverSwitchName,
+  HandoverResampleGaps,
   HandoverTexelRecord,
   InspectionGpuCall,
   InspectionTimingBytes,
@@ -933,9 +934,11 @@ function handoverComparison(value: unknown): HandoverComparisonRecord | null {
   const body = meansPair(value["body"]);
   const survey = meansPair(value["survey"]);
   const texels = listOf(value["texels"], handoverTexel);
+  const resampleGaps = handoverResampleGaps(value["resampleGaps"]);
   const { framesApart, beforeWasLast, afterWasFirst } = value;
   if (
     name === null ||
+    resampleGaps === null ||
     before === null ||
     after === null ||
     body === null ||
@@ -963,7 +966,17 @@ function handoverComparison(value: unknown): HandoverComparisonRecord | null {
     body,
     survey,
     texels,
+    resampleGaps,
   };
+}
+
+/** A switch's resampling gaps (R10.T15.b.2), or `null`. */
+function handoverResampleGaps(value: unknown): HandoverResampleGaps | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { pixels, cells } = value;
+  return isCount(pixels) && isCount(cells) && cells <= pixels ? { pixels, cells } : null;
 }
 
 function handoverExposure(value: unknown): HandoverExposureRecord | null {

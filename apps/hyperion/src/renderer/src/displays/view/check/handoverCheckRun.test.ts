@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { HandoverCheckRecord, ViewsCheckApi } from "../../../../../preload/api";
 import {
+  DISC_FRAME,
   HANDOVER_CHECK_TIMING,
   type HandoverCheckEnding,
   handoverCheckTimingFor,
@@ -13,6 +14,16 @@ import {
   sceneBeforeTheLooks,
   SERVED_HANDOVER_CHECK_TIMING,
 } from "./handoverCheckRun";
+
+describe("the frame of the disc a switch resamples (R10.T15.b.2)", () => {
+  it("is the frame before the switch from the disc and the terrain's first draw, and the frame after the hand-back", () => {
+    expect(DISC_FRAME).toEqual({
+      "disc-to-figure": "before",
+      "disc-to-terrain": "before",
+      "terrain-to-disc": "after",
+    });
+  });
+});
 
 describe("a frame's regime", () => {
   it.each([

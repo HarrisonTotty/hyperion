@@ -477,9 +477,9 @@ describe("the hand-over check's summary", () => {
     expect(summary()).toContain("the hand-over range 15419 km");
   });
 
-  it("counts each switch's cells left out at the μ floor", () => {
+  it("counts each switch's cells left out at the μ floor and its pixels and cells left out by the resampling", () => {
     expect(summary()).toMatch(
-      /\| handover-90 \| disc-to-figure \| .* \| 3 of 5 \| 1 \| 1 \| 0 \|/u,
+      /\| handover-90 \| disc-to-figure \| .* \| 3 of 5 \| 1 \| 0 px, 0 cells \| 1 \| 0 \|/u,
     );
   });
 });
@@ -523,7 +523,7 @@ describe("the hand-over check's files", () => {
     const { json } = await writeHandoverResults("/out", buildHandoverCheckResults(input()), files);
     expect(JSON.parse(written.get(json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.handover-results",
-      version: 3,
+      version: 4,
       overall: "pass",
       rangeM: 1.5419e7,
     });

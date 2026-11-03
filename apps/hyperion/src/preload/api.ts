@@ -1896,14 +1896,16 @@ export interface HandoverSharedMeans {
 }
 
 /**
- * One surveyed cell across a switch: the mean over the pixels both frames assign to it, which the
- * main process judges (decision-r10-t16-leans §1: at least 2 such pixels, no floor; a cell dark on
- * one side counted, never dropped), unless the disc's μ floor binds at its centre (R10.T15.b).
+ * One surveyed cell across a switch: its means over the pixels of the frame not the disc's that
+ * fall on it, each against the disc's frame resampled at the pixel's ground point (R10.T15.b.2;
+ * `handoverReading.ts`' `compareReadings`), which the main process judges (decision-r10-t16-leans
+ * §1: at least 2 such pixels, no floor; a cell dark on one side counted, never dropped), unless the
+ * disc's μ floor binds at its centre (R10.T15.b).
  */
 export interface HandoverTexelRecord {
   /** The cell as its coverage-mask texel: face × N² + row j × N + column i, N = 2^level. */
   readonly texel: number;
-  /** The pixels both frames assign to it, at least 1. */
+  /** The pixels its means are over, at least 1. */
   readonly sharedPixels: number;
   readonly meanBefore: number;
   readonly meanAfter: number;
@@ -1913,6 +1915,17 @@ export interface HandoverTexelRecord {
    * cross-fade"): the per-cell bound leaves such a cell out and counts it.
    */
   readonly muFloored: boolean;
+}
+
+/**
+ * The pixels of a switch's frame not the disc's, on surveyed cells, that its cells' means leave out
+ * (R10.T15.b.2): where the disc's frame cannot be resampled at the pixel's ground point, its four
+ * pixels about it straddling the terminator or the limb, off the region read, or the point facing
+ * away; and the cells all of whose pixels are so left out, which no means list.
+ */
+export interface HandoverResampleGaps {
+  readonly pixels: number;
+  readonly cells: number;
 }
 
 /** The frames either side of a switch, and what changed between them. */
@@ -1927,8 +1940,10 @@ export interface HandoverComparisonRecord {
   readonly afterWasFirst: boolean;
   readonly body: { readonly own: HandoverOwnMeans; readonly shared: HandoverSharedMeans };
   readonly survey: { readonly own: HandoverOwnMeans; readonly shared: HandoverSharedMeans };
-  /** Every surveyed cell with a pixel both frames assign to it, in texel order. */
+  /** Every surveyed cell with a pixel its means are over, in texel order. */
   readonly texels: ReadonlyArray<HandoverTexelRecord>;
+  /** What the cells' means leave out (R10.T15.b.2). */
+  readonly resampleGaps: HandoverResampleGaps;
 }
 
 /** The look's exposure: `AUTO` on `LIT` until it settled, then `INHIBIT`, and whether that held. */

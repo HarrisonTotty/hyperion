@@ -64,6 +64,7 @@ export function passingComparison(
       shared: { pixels: 290, meanBefore: 0.19, meanAfter: 0.191 },
     },
     texels: TEXELS,
+    resampleGaps: { pixels: 0, cells: 0 },
   };
 }
 

@@ -15,7 +15,10 @@ import {
   muFloorBinds,
   OFF_BODY,
   type PixelRect,
+  pixelGroundM,
+  projectToPixel,
   readFrame,
+  resampledAt,
   UNSURVEYED,
 } from "./handoverReading";
 
@@ -222,37 +225,20 @@ function strip(
     bodyMisses: 0,
     surveyPixels: cells.filter((cell) => cell >= 0).length,
     floored: new Set(floored),
+    lit: Uint8Array.from(cells, (cell) => (cell === OFF_BODY ? 0 : 1)),
+    camera: CAMERA,
+    figure: SPHERE,
   };
 }
 
-describe("the comparison of two frames", () => {
+describe("the comparison of two frames' means", () => {
   // Pixels 0 and 1 on cell 7 in both; pixel 2 on cell 9, then on 8; pixel 3 off the body, then
   // on cell 9; pixel 4 unsurveyed in both; pixel 5 on cell 11 in both, dark after.
   const before = strip([7, 7, 9, OFF_BODY, UNSURVEYED, 11], [1, 1, 2, 0, 3, 0.5]);
   const after = strip([7, 7, 8, 9, UNSURVEYED, 11], [2, 2, 3, 5, 3, 0]);
 
-  it("takes each cell's mean over the pixels both frames assign to it", () => {
-    expect(compareReadings(before, after).texels).toEqual([
-      { texel: 7, sharedPixels: 2, meanBefore: 1, meanAfter: 2, muFloored: false },
-      { texel: 11, sharedPixels: 1, meanBefore: 0.5, meanAfter: 0, muFloored: false },
-    ]);
-  });
-
-  it("marks a cell whose μ floor binds in either frame, its means taken as any cell's", () => {
-    const flooredBefore = strip([7, 7, 9, OFF_BODY, UNSURVEYED, 11], [1, 1, 2, 0, 3, 0.5], 0, [11]);
-    const flooredAfter = strip([7, 7, 8, 9, UNSURVEYED, 11], [2, 2, 3, 5, 3, 0], 0, [7]);
-    const comparison = compareReadings(flooredBefore, flooredAfter);
-    expect([comparison.texels, comparison.survey]).toEqual([
-      [
-        { texel: 7, sharedPixels: 2, meanBefore: 1, meanAfter: 2, muFloored: true },
-        { texel: 11, sharedPixels: 1, meanBefore: 0.5, meanAfter: 0, muFloored: true },
-      ],
-      compareReadings(before, after).survey,
-    ]);
-  });
-
   it("takes the body's and the survey's means over their own and their shared pixels", () => {
-    const { body, survey } = compareReadings(before, after);
+    const { body, survey } = compareReadings(before, after, "before");
     expect([body, survey]).toEqual([
       {
         own: { pixelsBefore: 5, pixelsAfter: 6, meanBefore: 7.5 / 5, meanAfter: 15 / 6 },
@@ -268,13 +254,163 @@ describe("the comparison of two frames", () => {
   it("shares pixels by their place in the target, whatever the regions", () => {
     const left = strip([7, 7, 7], [1, 1, 1], 0);
     const right = strip([7, 7, 7], [2, 2, 2], 1);
-    expect(compareReadings(left, right).texels).toEqual([
-      { texel: 7, sharedPixels: 2, meanBefore: 1, meanAfter: 2, muFloored: false },
-    ]);
+    expect(compareReadings(left, right, "before").survey.shared).toEqual({
+      pixels: 2,
+      meanBefore: 1,
+      meanAfter: 2,
+    });
   });
 
   it("refuses frames of targets of different sizes", () => {
-    expect(() => compareReadings(before, { ...after, widthPx: 9 })).toThrow(/scene target/);
+    expect(() => compareReadings(before, { ...after, widthPx: 9 }, "before")).toThrow(
+      /scene target/,
+    );
+  });
+});
+
+/** A target of 120 × 90 px for the cells' comparisons. */
+const WIDE = 120;
+const TALL = 90;
+const WIDE_RECT: PixelRect = { x: 0, y: 0, width: WIDE, height: TALL };
+
+/** The cells' level: 8 a face's side, some 6 to 12 px across from 3 km. */
+const CELL_LEVEL = 3;
+
+/** {@link CAMERA}'s axes with its eye `distanceM` out along +z. */
+function cameraAt(distanceM: number): FrameCamera {
+  return { ...CAMERA, eyeM: vec3(0, 0, distanceM) };
+}
+
+/** A star 80° from the view's axis, so that the terminator crosses the visible disc. */
+const STAR = normalise(vec3(Math.sin((80 * Math.PI) / 180), 0, Math.cos((80 * Math.PI) / 180)));
+
+/** A smooth surface's light at a ground point: Lambert's under {@link STAR}, lit where above 0. */
+function lambert(groundM: Vec3): number {
+  return Math.max(0, dot(normalise(groundM), STAR));
+}
+
+/** Every cell the target can show from 3 km. */
+const EVERY_CELL = new Set(Array.from({ length: 6 * 4 ** CELL_LEVEL }, (_, i) => i));
+
+/** A frame of the sphere from `camera`, each body pixel's light `light` at its ground point. */
+function frameOf(camera: FrameCamera, light: (groundM: Vec3) => number): FrameReading {
+  return readFrame({
+    halfBits: hdr(WIDE_RECT, (x, y) => {
+      const ground = pixelGroundM(camera, x, y, WIDE, TALL, SPHERE);
+      if (ground === null) {
+        return OTHER;
+      }
+      const value = light(ground);
+      return {
+        rgb: [value, value, value],
+        meter: value > 0 ? METER_CLASS.litBody : METER_CLASS.unlitBody,
+      };
+    }),
+    widthPx: WIDE,
+    heightPx: TALL,
+    rect: WIDE_RECT,
+    camera,
+    figure: SPHERE,
+    level: CELL_LEVEL,
+    surveyed: EVERY_CELL,
+    normals: null,
+  });
+}
+
+describe("the comparison of two frames' cells (R10.T15.b.2)", () => {
+  it("projects a pixel's ground point back to the pixel's centre, pixelGroundM's inverse", () => {
+    const camera = cameraAt(3000);
+    const ground = pixelGroundM(camera, 70, 33, WIDE, TALL, SPHERE);
+    if (ground === null) {
+      throw new Error("the pixel shows the body");
+    }
+    const at = projectToPixel(camera, ground, WIDE, TALL);
+    expect([at?.x, at?.y]).toEqual([expect.closeTo(70, 9), expect.closeTo(33, 9)]);
+    expect(projectToPixel(camera, vec3(0, 0, 4000), WIDE, TALL)).toBeNull();
+  });
+
+  it("takes each cell's means over the kept frame's pixels, the disc's frame at their ground points", () => {
+    const camera = cameraAt(3000);
+    const disc = frameOf(camera, () => 1);
+    const terrain = frameOf(camera, () => 2);
+    const { texels } = compareReadings(disc, terrain, "before");
+    expect(texels.length).toBeGreaterThan(20);
+    expect(
+      texels.every((t) => t.meanBefore === 1 && t.meanAfter === 2 && t.sharedPixels >= 1),
+    ).toBe(true);
+    // At the hand-back the disc's frame is the after one.
+    const back = compareReadings(terrain, disc, "after").texels;
+    expect(back.every((t) => t.meanBefore === 2 && t.meanAfter === 1)).toBe(true);
+  });
+
+  it("moves no cell's means by the camera's closing between the frames, the terminator's included", () => {
+    // Two frames of one smooth surface, the camera 1% closer in the second: the pixels both give a
+    // cell see different parts of it, which across the terminator's steep light differ by stops.
+    const far = frameOf(cameraAt(3000), lambert);
+    const near = frameOf(cameraAt(2970), lambert);
+    const { texels } = compareReadings(far, near, "before");
+    const judged = texels.filter((t) => t.sharedPixels >= 2 && t.meanBefore > 0);
+    const worst = Math.max(...judged.map((t) => Math.abs(Math.log2(t.meanAfter / t.meanBefore))));
+    const dim = judged.filter((t) => t.meanBefore < 0.1);
+    // Within 0.1 stop, a third of the bound: the bilinear resampling's error across a pixel of
+    // 1/36 of the radius (0.077 stop at worst, in a cell 2.6% lit).
+    expect([judged.length > 20, dim.length > 0, worst < 0.1]).toEqual([true, true, true]);
+    // None is dark on one side and not the other.
+    expect(texels.filter((t) => t.meanBefore > 0 !== t.meanAfter > 0)).toEqual([]);
+  });
+
+  it("counts the pixels it leaves out, at the terminator and the limb, and the cells left with none", () => {
+    const camera = cameraAt(3000);
+    const uniform = compareReadings(
+      frameOf(camera, () => 1),
+      frameOf(camera, () => 2),
+      "before",
+    );
+    const lit = compareReadings(frameOf(camera, lambert), frameOf(camera, lambert), "before");
+    // The limb alone in the first; the terminator's column of pixels too in the second.
+    expect(uniform.resampleGaps.pixels).toBeGreaterThan(0);
+    expect(lit.resampleGaps.pixels).toBeGreaterThan(uniform.resampleGaps.pixels);
+    expect(lit.resampleGaps.cells).toBeLessThanOrEqual(lit.resampleGaps.pixels);
+  });
+
+  it("leaves out a pixel whose four neighbours in the disc's frame straddle the terminator or the limb", () => {
+    const camera = cameraAt(3000);
+    const disc = frameOf(camera, lambert);
+    const lit = (x: number): number => disc.lit[(TALL / 2) * WIDE + x] ?? -1;
+    const edge = Array.from({ length: WIDE - 1 }, (_, x) => x).find((x) => lit(x) !== lit(x + 1));
+    if (edge === undefined) {
+      throw new Error("the terminator crosses the row");
+    }
+    const straddling = pixelGroundM(camera, edge + 0.5, TALL / 2, WIDE, TALL, SPHERE);
+    const inside = pixelGroundM(camera, edge - 3, TALL / 2, WIDE, TALL, SPHERE);
+    if (straddling === null || inside === null) {
+      throw new Error("both points lie on the body");
+    }
+    expect([resampledAt(disc, straddling), resampledAt(disc, inside)]).toEqual([
+      null,
+      expect.closeTo(lambert(inside), 9),
+    ]);
+    expect(resampledAt(disc, vec3(0, 0, -1000))).toBeNull();
+  });
+
+  it("marks a cell whose μ floor binds in either frame, its means taken as any cell's", () => {
+    const camera = cameraAt(3000);
+    const disc = frameOf(camera, () => 1);
+    const terrain = frameOf(camera, () => 2);
+    const [first, second] = compareReadings(disc, terrain, "before").texels;
+    if (first === undefined || second === undefined) {
+      throw new Error("the frames show two cells or more");
+    }
+    const floored = compareReadings(
+      { ...disc, floored: new Set([first.texel]) },
+      { ...terrain, floored: new Set([second.texel]) },
+      "before",
+    ).texels;
+    expect(floored.slice(0, 2)).toEqual([
+      { ...first, muFloored: true },
+      { ...second, muFloored: true },
+    ]);
+    expect(floored.slice(2).every((t) => !t.muFloored)).toBe(true);
   });
 });
 
