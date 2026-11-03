@@ -2550,9 +2550,10 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     220,400 ly, not 240,000. The farthest system lies at R = 92,682 ly.
   - The spheroid tables' last node, `exp(LN_FIRST + 63 STEP)`, is 262,143.999 999 999 94 ly, about
     2 ulp below the edge. A node exactly at 2¹⁸ ly would still take the unchanged branch, but one
-    rounded above it would take the new one and move the bulge, bar and nuclear tables. No test
-    guards either premise. Candidates for a guard test are that the node is at most 2¹⁸ ly, and that
-    the disc tables' largest radius and tail height are at most 2¹⁸ ly over the parameter ranges.
+    rounded above it would take the new one and move the bulge, bar and nuclear tables. Both
+    premises are guarded (2026-11-03, `galaxy/potential/reach_tests.rs`): the spheroid tables' last
+    node is at most 2¹⁸ ly, and the disc tables' largest radius (168,729 ly) and tail height
+    (242,880 ly) are at most 2¹⁸ ly over the ranges' edges and 16 seeded galaxies.
   - **Remaining for the Risks, as ruled.** The force still jumps at the box's faces, where the
     continuation's slope is not the grid's. `InPlaneTable::at` still scales `v_c²` and Φ
     separately beyond L. Smoothing either would change `potential` where the Jeans tables integrate,
