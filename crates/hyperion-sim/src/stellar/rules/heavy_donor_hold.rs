@@ -1,45 +1,22 @@
-//! The tests of P11.T4's heavy-donor fix, [`HEAVY_DONOR_VERSION`]: a main-sequence donor heavier
-//! than its compact accretor transfers at its thermal rate, and the transfer keeps its angular
-//! momentum, only under the rules that turn it on, read by the transfer's step, its trials and its
-//! corotation through the engine's input's rules. Each fast test turns this hold's arm on alone
-//! ([`thermal_rules`]), so that the other 27 holds move nothing it holds equal.
+//! The tests of P11.T4's heavy-donor fix: a main-sequence donor heavier than its compact accretor
+//! transfers at its thermal rate, and the transfer keeps its angular momentum, read by the
+//! transfer's step, its trials and its corotation (`stellar::binary::heavy_donor`). Its hold is
+//! deleted (the 27 fold); these are its tests of the new arm, which the bump re-pins by name.
 //!
-//! - The version's rules keep the held arm, and the tripwire holds it only until the bump.
 //! - The brief's pair, a 1.4 M☉ main-sequence donor at its lobe beside a 0.6 M☉ white dwarf: under
-//!   the held arm it transfers at about 10⁻¹⁰ M☉ yr⁻¹ for 3.4 Gyr while it is the heavier; under
-//!   the arm alone and under every 27 hold never below a tenth of its thermal rate.
-//! - The same pair twice under the arm gives the same timeline, and a cell's systems whose pairs
-//!   never feed a white dwarf, a neutron star or a black hole by stable transfer move under neither
-//!   arm.
-//! - Case BB: a naked helium star beside a neutron star leaves a double neutron star under the arm
-//!   alone and under every 27 hold, its donor's corotation taking its spin at its Roche lobe, and
-//!   under the held arm at 25 and 26 as pinned.
-//! - Slow: a census of 10⁷ slab records' accreting white dwarfs under the version's rules and
-//!   under every 27 hold.
-//!
-//! The movers under the arm, found by turning it on at the version (and back off), over the sim's
-//! tests (with its `testing` feature too), the server's and the fitting crate's (2026-11-01): three
-//! goldens, `stellar/binary_timelines`, `sky/census_near_sun` and `sky/band_face_row`; the paper's
-//! cataclysmic variable, whose 1.3 M☉ donor, heavier than its white dwarf, opens at its thermal
-//! rate (4.2 × 10⁻⁷ M☉ yr⁻¹) with the dwarf burning steadily, not in novae
-//! (`the_papers_cataclysmic_variable_reproduces_its_sequence`,
-//! `the_papers_cataclysmic_variable_is_one`, which reads a Type Ia progenitor first, and
-//! `a_timeline_from_marks_keeps_its_carved_class_and_state`); the fitted tables' fingerprints of
-//! `binary_awd`, `binary_xrb`, `binary_pair_light_c`, `_d` and `_e`, and `sky_binary_light_c`, `_d`
-//! and `_e`, stale under the arm until the bump refits them; and, of the binaries' slow tests, the
-//! merger channels' pinned chi-squares (`channels_hold` and `engine_channels_hold`). Under every 27
-//! hold the engine channels' pin and the neutron-star census's are re-pinned with this hold, and
-//! the listed binaries' sampler test (`the_listed_samplers_against_the_engine_s_members`) draws
-//! its fast accreting white dwarfs of layer C at one in 1.7 × 10⁵ records, against 17 times that
-//! without the arm, so it runs for about an hour.
+//!   the version's rules and under every 27 hold it transfers never below a tenth of its thermal
+//!   rate while it is the heavier.
+//! - The same pair twice gives the same timeline.
+//! - Case BB: a naked helium star beside a neutron star leaves a double neutron star under the
+//!   version's rules and under every 27 hold, its donor's corotation taking its spin at its Roche
+//!   lobe.
+//! - Slow: a census of 10⁷ slab records' accreting white dwarfs under every 27 hold.
 
 use super::*;
 use crate::GENERATOR_VERSION;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
 use crate::galaxy::rules::GalaxyRules;
-use crate::id::Layer;
 use crate::planetary::testing::with_every_27_hold;
 use crate::rng::Seed;
 use crate::stellar::Phase;
@@ -47,10 +24,7 @@ use crate::stellar::binary::testing::census::{Census, slab_census};
 use crate::stellar::binary::testing::remnant_pair::{
     ONSET_AGE, donor_onto_remnant, helium_star_beside_remnant, thermal_rate,
 };
-use crate::stellar::binary::{BinaryClass, BinaryTimeline, CarvedClass, CvKind, SegmentKind};
-use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
-use crate::stellar::system::{StarModel, SystemStars, draw_metallicity, primary_draws};
-use crate::time::{ClockWindow, UniverseTime};
+use crate::stellar::binary::{BinaryClass, BinaryTimeline, CarvedClass, CvKind};
 use crate::units::Years;
 
 /// The census's Milky Way seed: the binary fits' (P15.T10.b's manifests).
@@ -81,14 +55,6 @@ fn version() -> StellarRules {
     StellarRules::of_version(GENERATOR_VERSION)
 }
 
-/// The version's rules with this hold's arm on alone.
-fn thermal_rules() -> StellarRules {
-    StellarRules {
-        heavy_donor: HeavyDonorRules::Thermal,
-        ..version()
-    }
-}
-
 /// The pinned pair's timeline under `rules`, to 12 Gyr after its onset.
 fn pinned(rules: StellarRules) -> BinaryTimeline {
     let (donor, tau, dwarf) = PINNED;
@@ -101,33 +67,6 @@ fn pinned(rules: StellarRules) -> BinaryTimeline {
         1.2e10,
     )
     .0
-}
-
-/// The version's rules keep the held arm, every version below 27 does and 27 transfers at the
-/// thermal rate; the fitted tables hold only under the version's arm. The tripwire: the bump to 27
-/// deletes this hold.
-#[test]
-fn the_heavy_donor_rules_are_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < HEAVY_DONOR_VERSION,
-        "the bump to 27 deletes P11.T4's heavy-donor hold: `HEAVY_DONOR_VERSION`, \
-         `HeavyDonorRules` with its `Nuclear` arm, `StellarRules::heavy_donor`, the transfer's \
-         three reads of it, `Engine::corotate_donor`, the brief's read of \
-         `HeavyDonorRules::fitted_tables_hold`, this module and its line in `stellar/rules.rs`, \
-         and refits the pair-light and reach tables"
-    );
-    assert_eq!(version().heavy_donor, HeavyDonorRules::Nuclear);
-    let at = |v: u32| StellarRules::of_version(crate::GeneratorVersion::new(v)).heavy_donor;
-    for v in [GENERATOR_VERSION.get(), 25, 26] {
-        assert_eq!(at(v), HeavyDonorRules::Nuclear, "version {v}");
-    }
-    assert_eq!(at(27), HeavyDonorRules::Thermal);
-    assert_eq!(
-        StellarRules::every_27_hold().heavy_donor,
-        HeavyDonorRules::Thermal
-    );
-    assert!(version().heavy_donor.fitted_tables_hold());
-    assert!(!HeavyDonorRules::Thermal.fitted_tables_hold());
 }
 
 /// While the pair's donor is the heavier, its least rate of transfer, M☉ yr⁻¹, and how long that
@@ -150,40 +89,34 @@ fn while_heavier(timeline: &BinaryTimeline) -> (f64, f64) {
 }
 
 /// The pinned pair's least rate while its donor is the heavier and how long that lasts, under the
-/// held arm, the arm alone and every 27 hold, as measured (2026-11-01, at generator version 25).
-const PINNED_FIGURES: [(f64, f64); 3] = [
-    (4.405_438_444_327_729e-11, 3_380_337_007.177_530_3),
+/// version's rules and every 27 hold, as measured (2026-11-01, at generator version 25, the
+/// version's under the held rules with this arm alone).
+const PINNED_FIGURES: [(f64, f64); 2] = [
     (4.389_759_460_751_92e-7, 1_244_629.241_081_902),
     (4.389_759_460_751_92e-7, 1_244_629.241_081_902),
 ];
 
-/// The brief's pair: under the held arm its donor, heavier than the white dwarf for 3.4 Gyr,
-/// transfers far below a tenth of its thermal rate; under the arm alone and under every 27 hold
-/// never below a tenth of it while it is the heavier, which then lasts about a million years.
+/// The brief's pair: under the version's rules and under every 27 hold its donor transfers never
+/// below a tenth of its thermal rate while it is the heavier, which then lasts about a million
+/// years (under the held arm it was the heavier for 3.4 Gyr, far below a tenth of it).
 #[test]
-fn the_heavy_donor_transfers_at_its_thermal_rate_under_the_arm() {
+fn the_heavy_donor_transfers_at_its_thermal_rate() {
     let (donor, tau, _) = PINNED;
     let thermal = thermal_rate(donor, tau);
     let mut measured = Vec::new();
-    for (k, rules) in [version(), thermal_rules(), StellarRules::every_27_hold()]
+    for (k, rules) in [version(), StellarRules::every_27_hold()]
         .into_iter()
         .enumerate()
     {
         let timeline = pinned(rules);
         let (least, lasts) = while_heavier(&timeline);
         println!(
-            "{:?}: the least rate while the donor is the heavier {least:.4e} M_sun/yr \
+            "rules {k}: the least rate while the donor is the heavier {least:.4e} M_sun/yr \
              ({:.4} of the thermal {thermal:.4e}), for {lasts:.4e} yr",
-            rules.heavy_donor,
             least / thermal
         );
-        if k == 0 {
-            assert!(least < 0.01 * thermal, "{least}");
-            assert!(lasts > 1.0e9, "{lasts}");
-        } else {
-            assert!(least >= 0.1 * thermal, "{least} against {thermal}");
-            assert!(lasts < 1.0e7, "{lasts}");
-        }
+        assert!(least >= 0.1 * thermal, "{least} against {thermal}");
+        assert!(lasts < 1.0e7, "{lasts}");
         measured.push((least, lasts));
     }
     for (m, pinned) in measured.iter().zip(PINNED_FIGURES) {
@@ -194,10 +127,10 @@ fn the_heavy_donor_transfers_at_its_thermal_rate_under_the_arm() {
     }
 }
 
-/// The same pair twice under the arm gives the same timeline.
+/// The same pair twice gives the same timeline.
 #[test]
-fn the_arm_is_deterministic() {
-    assert_eq!(pinned(thermal_rules()), pinned(thermal_rules()));
+fn the_pinned_pair_is_deterministic() {
+    assert_eq!(pinned(version()), pinned(version()));
 }
 
 /// The case BB pairs, (M☉, a R☉): a solar naked helium star of M☉ at its zero age, detached beside
@@ -236,29 +169,15 @@ fn case_bb_double_neutron_star(helium: f64, a: f64, rules: StellarRules) -> Opti
     }
 }
 
-/// The case BB pairs' double neutron stars at the end, (a R☉, e), under the version's rules (25)
-/// and every 26 hold, as measured (2026-11-02, at generator version 25).
-const CASE_BB_HELD: [[(f64, f64); 2]; 2] = [
-    [
-        (6.769_745_587_442_72, 0.234_619_667_067_044_93),
-        (7.280_389_958_608_069, 0.109_291_030_135_487_83),
-    ],
-    [
-        (6.769_745_587_442_72, 0.234_619_667_067_044_93),
-        (7.280_389_958_608_069, 0.109_291_030_135_487_83),
-    ],
-];
-
 /// A case BB helium star's stable transfer onto its neutron star leaves a double neutron star
-/// under the arm alone and under every 27 hold, as it does under the held arm, whose figures at 25
-/// and 26 are pinned as measured. Under the arm the donor's corotation draws its spin from the
-/// orbit at its radius held to its Roche lobe, as BSE's transfer reads it; at the radius the
+/// under the version's rules and under every 27 hold. The donor's corotation draws its spin from
+/// the orbit at its radius held to its Roche lobe, as BSE's transfer reads it; at the radius the
 /// swelling giant would have alone it drained the first pair's orbit to 0.03 R☉ and merged its
 /// neutron stars into a black hole, and widened the second's until its supernova unbound it.
 #[test]
 fn a_case_bb_helium_star_beside_a_neutron_star_leaves_a_double_neutron_star() {
     for (name, rules) in [
-        ("the arm alone", thermal_rules()),
+        ("the version's rules", version()),
         ("every 27 hold", StellarRules::every_27_hold()),
     ] {
         for (helium, a) in CASE_BB {
@@ -271,114 +190,6 @@ fn a_case_bb_helium_star_beside_a_neutron_star_leaves_a_double_neutron_star() {
             );
         }
     }
-    let held = [version(), StellarRules::every_26_hold_with_its_retargets()].map(|rules| {
-        CASE_BB.map(|(helium, a)| {
-            case_bb_double_neutron_star(helium, a, rules)
-                .expect("a double neutron star under the held arm")
-        })
-    });
-    println!("held, at 25 and 26: {held:?}");
-    for (measured, pinned) in held.iter().flatten().zip(CASE_BB_HELD.iter().flatten()) {
-        assert!(
-            (measured.0 / pinned.0 - 1.0).abs() < 1e-9
-                && (measured.1 / pinned.1 - 1.0).abs() < 1e-9,
-            "{held:?}"
-        );
-    }
-}
-
-/// The first attempt's stars of `record` in `galaxy`, as the engine's members run them.
-fn first_attempt(galaxy: &Galaxy, record: &SystemRecord) -> SystemStars {
-    let primary = StarModel::new_under(
-        record.primary_initial_mass(),
-        draw_metallicity(galaxy, record),
-        primary_draws(galaxy, record),
-        record.age_at_epoch(),
-        galaxy.rules().stellar,
-    )
-    .expect("a grid primary is a star with a finite age");
-    SystemStars::at_attempt(
-        galaxy,
-        record,
-        &primary,
-        MultiplicityContext::Free,
-        RedrawAttempt::FIRST,
-    )
-}
-
-/// Whether `timeline` feeds a white dwarf, a neutron star or a black hole by stable transfer in
-/// any segment.
-fn feeds_a_compact_star(timeline: &BinaryTimeline) -> bool {
-    timeline.segments().iter().any(|s| {
-        let SegmentKind::StableTransfer { donor } = s.kind() else {
-            return false;
-        };
-        let at = Years::new(s.start().value());
-        matches!(
-            timeline.state_at(at).stars()[1 - donor.index()].phase(),
-            Phase::HeliumWhiteDwarf
-                | Phase::CarbonOxygenWhiteDwarf
-                | Phase::OxygenNeonWhiteDwarf
-                | Phase::NeutronStar
-                | Phase::BlackHole
-        )
-    })
-}
-
-/// A cell's systems of layer C whose pairs feed no compact star by stable transfer under the held
-/// arm are in the same states across the clock window under both arms, those that transfer onto a
-/// main-sequence star or a giant among them.
-#[test]
-fn systems_that_feed_no_compact_star_move_under_neither_arm() {
-    let held = Galaxy::from_params(Seed::new(CENSUS_SEED), GalaxyParams::milky_way_like())
-        .expect("the Milky Way fixture's gas is mostly neutral");
-    let arm = held.clone().with_rules(GalaxyRules {
-        stellar: thermal_rules(),
-        ..GalaxyRules::of_version(GENERATOR_VERSION)
-    });
-    let size = i32::try_from(Layer::C.cell_size_ly()).expect("a small cell size");
-    let mut records = Vec::new();
-    let mut cell = Vec::new();
-    for x in 0..4_096 {
-        let key = CellKey::new(Layer::C, [x, 26_000 / size, 0]).expect("a cell of the grid");
-        generate_cell(&held, key, &mut cell);
-        records.extend_from_slice(&cell);
-        if records.len() >= 300 {
-            break;
-        }
-    }
-    let (mut compared, mut fed, mut transferring) = (0, 0, 0);
-    for record in records.iter().take(300) {
-        let stars = first_attempt(&held, record);
-        if stars
-            .pairs()
-            .iter()
-            .any(|pair| feeds_a_compact_star(pair.timeline()))
-        {
-            fed += 1;
-            continue;
-        }
-        transferring += usize::from(stars.pairs().iter().any(|pair| {
-            pair.timeline()
-                .segments()
-                .iter()
-                .any(|s| matches!(s.kind(), SegmentKind::StableTransfer { .. }))
-        }));
-        let other = first_attempt(&arm, record);
-        for t in [ClockWindow::START, UniverseTime::EPOCH, ClockWindow::END] {
-            assert_eq!(
-                stars.state_at(t),
-                other.state_at(t),
-                "{:?} at {t}",
-                record.id()
-            );
-        }
-        compared += 1;
-    }
-    println!(
-        "{compared} compared, {transferring} of them in stable transfer; {fed} feed a compact star"
-    );
-    assert!(compared > 200, "{compared} of {}", records.len());
 }
 
 /// What a census says of its hydrogen-donor cataclysmic variables.
@@ -448,30 +259,20 @@ fn figures(census: &Census) -> CvFigures {
     }
 }
 
-/// The census's figures under the version's rules and under every 27 hold, as measured
-/// (2026-11-01, at generator versions 25 and 26).
-const CENSUS_FIGURES: [CvFigures; 2] = [
-    CvFigures {
-        members: 3_638,
-        variables: 1_402,
-        heavy: 828,
-        below_gap: 436,
-        above_six_hours: 845,
-    },
-    CvFigures {
-        members: 4_131,
-        variables: 2_669,
-        heavy: 52,
-        below_gap: 2_305,
-        above_six_hours: 84,
-    },
-];
+/// The census's figures under every 27 hold, as measured (2026-11-01, at generator versions 25
+/// and 26).
+const CENSUS_FIGURES: CvFigures = CvFigures {
+    members: 4_131,
+    variables: 2_669,
+    heavy: 52,
+    below_gap: 2_305,
+    above_six_hours: 84,
+};
 
-/// A census of 10⁷ slab records' accreting white dwarfs ([`slab_census`]), under the version's
-/// rules and under every 27 hold. Under the version's most hydrogen-donor cataclysmic variables
-/// have a donor heavier than the white dwarf; under every 27 hold at most [`MOST_HEAVY_DONORS`] do,
-/// and the share below the period gap is at least Pala et al.'s less its error
-/// ([`BELOW_GAP_SHARE`]).
+/// A census of 10⁷ slab records' accreting white dwarfs ([`slab_census`]) under every 27 hold: at
+/// most [`MOST_HEAVY_DONORS`] of the hydrogen-donor cataclysmic variables have a donor heavier than
+/// the white dwarf (most did under the held arm), and the share below the period gap is at least
+/// Pala et al.'s less its error ([`BELOW_GAP_SHARE`]).
 #[test]
 #[ignore = "slow: 2 × 10⁷ grid records' pairs run through the binary engine"]
 fn census_of_the_heavy_donors() {
@@ -489,23 +290,17 @@ fn census_of_the_heavy_donors() {
         );
         (census.scanned, figures(&census))
     };
-    let before = census(GalaxyRules::of_version(GENERATOR_VERSION));
-    let after = with_every_27_hold(|| census(GalaxyRules::every_27_hold()));
-    for (name, (scanned, f)) in [("version's rules", before), ("every 27 hold", after)] {
-        println!(
-            "{name}: {scanned:?} records by band, {f:?}: heavier donors {:.4}, below the gap {:.4}",
-            f.heavy_share(),
-            f.below_gap_share()
-        );
-    }
-    let (before, after) = (before.1, after.1);
-    assert!(before.heavy_share() > 0.5, "{before:?}");
-    assert!(after.heavy_share() <= MOST_HEAVY_DONORS, "{after:?}");
-    assert!(
-        after.below_gap_share() >= BELOW_GAP_SHARE.0 - BELOW_GAP_SHARE.1,
-        "{after:?}"
+    let (scanned, f) = with_every_27_hold(|| census(GalaxyRules::every_27_hold()));
+    println!(
+        "every 27 hold: {scanned:?} records by band, {f:?}: heavier donors {:.4}, below the gap \
+         {:.4}",
+        f.heavy_share(),
+        f.below_gap_share()
     );
-    for (f, pinned) in [before, after].iter().zip(CENSUS_FIGURES) {
-        assert_eq!(*f, pinned);
-    }
+    assert!(f.heavy_share() <= MOST_HEAVY_DONORS, "{f:?}");
+    assert!(
+        f.below_gap_share() >= BELOW_GAP_SHARE.0 - BELOW_GAP_SHARE.1,
+        "{f:?}"
+    );
+    assert_eq!(f, CENSUS_FIGURES);
 }

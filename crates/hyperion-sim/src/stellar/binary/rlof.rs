@@ -22,10 +22,9 @@
 //!   engine takes it implicitly, the rate the overfill at the step's end gives, found by
 //!   bisection, which is stable at any step and settles on the same steady overfill. The rate over
 //!   each step is the segment's mean rate there. The transfer ends where the donor, given nothing,
-//!   would lie inside its lobe by more than BSE's window of 1.002. From generator version 27 a
-//!   main-sequence donor heavier than its compact accretor is held to its thermal rate too, and
-//!   transfers at it wherever a step at it leaves it overfilling
-//!   ([`heavy_donor`](super::heavy_donor), P11.T4's fix).
+//!   would lie inside its lobe by more than BSE's window of 1.002. A main-sequence donor heavier
+//!   than its compact accretor is held to its thermal rate too, and transfers at it wherever a
+//!   step at it leaves it overfilling ([`heavy_donor`](super::heavy_donor), P11.T4's fix).
 //! - **Accretion** (section 2.6.6): a main-sequence, Hertzsprung-gap or core-helium-burning star
 //!   takes min(1, 10 `τ_Ṁ` ÷ `τ_KH`) of it (equations 64 and 65) and is rejuvenated; a giant takes all;
 //!   a white dwarf fed hydrogen keeps ε of it below 1.03 × 10⁻⁷ M☉ yr⁻¹ (novae, equation 66), all
@@ -39,13 +38,12 @@
 //!   donor's specific orbital angular momentum, a (M₁ + M₂) = constant for it (section 2.6), or
 //!   with the accretor's for novae and super-Eddington loss, as the published code has it. The
 //!   donor's transferred spin returns to the orbit and the accretor's spin grows by the specific
-//!   angular momentum of the inner disc (equations 54 and 55), up to break-up. Below generator
-//!   version 27 the step reads no mark of the accretor's loss, so every loss leaves with the
-//!   donor's angular momentum, and the donor's corotation after it is restored with nothing drawn
-//!   from the orbit; from 27 the marked loss leaves with the accretor's, and onto a compact
-//!   accretor the corotation draws the donor's spin from the orbit, the pair's total kept, its
-//!   envelope's spin at its radius held to its Roche lobe as BSE's transfer reads it
-//!   ([`heavy_donor`](super::heavy_donor), P11.T4's fix).
+//!   angular momentum of the inner disc (equations 54 and 55), up to break-up. The loss marked as
+//!   the accretor's leaves with the accretor's angular momentum, and onto a compact accretor the
+//!   step returns no spin to the orbit and the donor's corotation draws its spin from the orbit,
+//!   the pair's total kept, its envelope's spin at its radius held to its Roche lobe as BSE's
+//!   transfer reads it; onto any other the donor's corotation after the step is restored with
+//!   nothing drawn from the orbit ([`heavy_donor`](super::heavy_donor), P11.T4's fix).
 //! - **The swell** (sections 2.6.4, "effectively a reverse of the process which formed the
 //!   degenerate remnant star in the first place", and 2.6.6; BSE `evolv2.f` 1480–1490 and
 //!   1513–1547, `gntage.f` 99–160; ruling p11-c2-swell of 2026-10-06, P11.T4.m). A fed helium star
@@ -88,6 +86,7 @@ use crate::units::{SolarMasses, Years};
 
 use super::detached::{Snapshot, orbital_momentum, semi_major_axis};
 use super::evolve::{Engine, roche_lobe};
+use super::heavy_donor;
 use super::ns_accretion::NS_ACCRETION_EFFICIENCY;
 use super::star::{
     G, Kind, Member, MemberRadiusAt, Path, Surface, cooling_origin, moment_of_inertia,
@@ -209,7 +208,7 @@ struct TrialBase<'e> {
     /// The specific angular momentum of the mass lost from the system, R☉² yr⁻¹: the donor's.
     specific: f64,
     /// The accretor's specific orbital angular momentum, R☉² yr⁻¹, which what is lost from it takes
-    /// under P11.T4's heavy-donor hold (`heavy_donor`).
+    /// (P11.T4's fix, `heavy_donor`).
     accretor_specific: f64,
     /// The orbit's losses over the step to the winds, gravitational waves and magnetic braking,
     /// in that order, where each is on.
@@ -312,8 +311,8 @@ impl Engine {
     }
 
     /// [`Engine::synchronise`] for donor `d` after a step of stable transfer onto a compact
-    /// accretor, under P11.T4's heavy-donor hold, its envelope's spin at its radius held to its
-    /// Roche lobe ([`moment_of_inertia_within`]).
+    /// accretor (P11.T4's fix, `heavy_donor`), its envelope's spin at its radius held to its Roche
+    /// lobe ([`moment_of_inertia_within`]).
     ///
     /// That is how BSE's transfer reads a donor that overfills its lobe. A case BB helium giant
     /// stripped toward its core swells, by HPT's helium-giant radius (their equations 85–88), to
@@ -560,7 +559,7 @@ impl Engine {
             }
             self.accept(&next);
             let ka = Kind::of(sa.state.phase(), s.masses[a_idx]);
-            if self.ctx.rules().heavy_donor.corotation_from_orbit(ka) {
+            if heavy_donor::corotation_from_orbit(ka) {
                 self.synchronise_donor(d);
             } else {
                 self.corotate_donor(d);
@@ -750,10 +749,10 @@ impl Engine {
         let kd = Kind::of(sd.state.phase(), md);
         let ka = Kind::of(sa.state.phase(), ma);
         // The thermal rate for a giant-like donor, the dynamical rate for any other (BSE
-        // equations 60–63); under P11.T4's hold the thermal rate for a main-sequence donor heavier
-        // than its compact accretor too, at which it transfers wherever a step at it leaves it
+        // equations 60–63); and, P11.T4's fix, the thermal rate for a main-sequence donor heavier
+        // than its compact accretor, at which it transfers wherever a step at it leaves it
         // overfilling (`heavy_donor`).
-        let thermal = self.ctx.rules().heavy_donor.thermal_rate(kd, ka, md, ma);
+        let thermal = heavy_donor::thermal_rate(kd, ka, md, ma);
         let cap = if kd.is_giant_like() || thermal {
             md / kelvin_helmholtz(sd, kd)
         } else {
@@ -893,8 +892,7 @@ impl Engine {
         let wind = base.wind;
         let md2 = (md - x - wind[0] * dt).max(1e-9);
         let ma2 = (ma + gained - wind[1] * dt).max(1e-9);
-        let rules = self.ctx.rules().heavy_donor;
-        let specific = if rules.loss_from_accretor(accretion.from_accretor) {
+        let specific = if accretion.from_accretor {
             base.accretor_specific
         } else {
             base.specific
@@ -903,9 +901,10 @@ impl Engine {
         for sink in base.sinks.into_iter().flatten() {
             j -= sink;
         }
-        // The donor's transferred spin, which the held arm returns to the orbit here; under P11.T4's
-        // hold the corotation after the step draws the donor's spin from the orbit instead.
-        if !rules.corotation_from_orbit(ka) {
+        // The donor's transferred spin, returned to the orbit here but onto a compact accretor,
+        // whose corotation after the step draws the donor's spin from the orbit instead (P11.T4's
+        // fix, `heavy_donor`).
+        if !heavy_donor::corotation_from_orbit(ka) {
             j += x * base.lobe_d * base.lobe_d * base.omega;
         }
         let disc = gained * base.disc_speed;

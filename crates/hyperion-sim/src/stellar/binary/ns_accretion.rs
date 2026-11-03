@@ -15,9 +15,8 @@
 //! slow pulsars' (Tauris, Langer and Kramer 2012, MNRAS 425, 1601; Antoniadis et al. 2016,
 //! arXiv:1605.01665). So a neutron star keeps a share [`NS_ACCRETION_EFFICIENCY`] of the transfer,
 //! never more than its Eddington rate (`Engine::accretion`), and the rest leaves the pair. Its
-//! accretion is marked as lost from the accretor, as the super-Eddington excess is; the transfer's
-//! step books it so only under the heavy-donor hold, at 27 ([`heavy_donor`](super::heavy_donor)),
-//! and with the donor's specific angular momentum otherwise, as it books every loss.
+//! accretion is marked as lost from the accretor, as the super-Eddington excess is, and the
+//! transfer's step books it so ([`heavy_donor`](super::heavy_donor)).
 
 /// The share of a stable transfer a neutron star keeps, below its Eddington rate: 0.1.
 ///

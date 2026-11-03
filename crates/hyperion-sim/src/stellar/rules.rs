@@ -44,12 +44,6 @@
 //!   choke point, [`SystemStars::shown_at`], which the system's summary, state and brief and the
 //!   range brief's paired route read, and under which the range brief's gate checks every pair
 //!   (`stellar/rules/binary_kicks_hold.rs` lists the movers).
-//! - [`heavy_donor`](StellarRules::heavy_donor), at [`HEAVY_DONOR_VERSION`] (plan 11, P11.T4's
-//!   fix): stable transfer from a main-sequence donor heavier than its compact accretor at its
-//!   thermal rate, and the transfer's angular momentum kept, read by the transfer's step, its
-//!   trials and its corotation through the engine's input's rules. The fitted tables keep the
-//!   version's rules until the bump refits them (`stellar/rules/heavy_donor_hold.rs` lists the
-//!   movers).
 //! - [`xrb_class`](StellarRules::xrb_class), at [`XRB_CLASS_VERSION`] (plan 11, P11.T5's and
 //!   P11.T8.b's fix): what `classify` counts as an X-ray binary, a floor on the transfer rate onto
 //!   a compact star, Be donors spun up by stable transfer, a wind-fed black hole's disc, Be/X of
@@ -102,7 +96,6 @@ use crate::GeneratorVersion;
 use crate::stellar::binary::awd_donors::{AWD_DONORS_VERSION, AwdDonorRules};
 use crate::stellar::binary::collapses::{COLLAPSES_VERSION, CollapseRules};
 use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
-use crate::stellar::binary::heavy_donor::{HEAVY_DONOR_VERSION, HeavyDonorRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
 use crate::stellar::binary::pinned_white_dwarfs::{
     PINNED_WHITE_DWARFS_VERSION, PinnedWhiteDwarfRules,
@@ -126,10 +119,6 @@ pub(crate) struct StellarRules {
     /// Whether a system that a supernova has unbound goes on showing the star it released, the
     /// hold of [`BINARY_KICKS_VERSION`].
     pub(crate) binary_kicks: BinaryKicksRules,
-    /// How the binary engine's stable transfer treats a main-sequence donor heavier than its
-    /// compact accretor and books the transfer's angular momentum, the hold of
-    /// [`HEAVY_DONOR_VERSION`].
-    pub(crate) heavy_donor: HeavyDonorRules,
     /// Which donors give an accreting white dwarf its novae, the hold of [`AWD_DONORS_VERSION`].
     pub(crate) awd_donors: AwdDonorRules,
     /// What `classify` counts as an X-ray binary, the hold of [`XRB_CLASS_VERSION`].
@@ -165,11 +154,6 @@ impl StellarRules {
                 BinaryKicksRules::Alone
             } else {
                 BinaryKicksRules::Paired
-            },
-            heavy_donor: if version.get() >= HEAVY_DONOR_VERSION.get() {
-                HeavyDonorRules::Thermal
-            } else {
-                HeavyDonorRules::Nuclear
             },
             awd_donors: if version.get() >= AWD_DONORS_VERSION.get() {
                 AwdDonorRules::HydrogenDonors
@@ -219,9 +203,9 @@ impl StellarRules {
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// those that turn on at 27 (P11.T4's `heavy_donor`, `pinned_white_dwarfs` and `dwarf_limit`,
-    /// P11.T4.d's `merger_mass`, P11.T5's `awd_donors` and `xrb_class`, P11.T10's `binary_kicks`
-    /// and `collapses`, and P11.T12's `wind_accretion`).
+    /// those that turn on at 27 (P11.T4's `pinned_white_dwarfs` and `dwarf_limit`, P11.T4.d's
+    /// `merger_mass`, P11.T5's `awd_donors` and `xrb_class`, P11.T10's `binary_kicks` and
+    /// `collapses`, and P11.T12's `wind_accretion`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.

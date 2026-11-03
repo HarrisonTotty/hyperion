@@ -4,7 +4,7 @@
 //! name.
 //!
 //! - A pinned pair, a 1.5 M☉ main-sequence donor at its lobe beside a 1.35 M☉ neutron star: under
-//!   the version's rules and under every 27 hold it keeps a tenth and stays a neutron star.
+//!   every 27 hold it keeps under a tenth and stays a neutron star.
 //! - The same pair twice gives the same timeline.
 //! - Slow: a census of 10⁷ slab records under every 27 hold.
 
@@ -51,70 +51,55 @@ fn pinned(rules: StellarRules) -> BinaryTimeline {
 }
 
 /// The pinned pair's neutron star at the end of the donor's first transfer, and its compact star's
-/// mass 12 Gyr on, M☉, under the version's rules and under every 27 hold, as measured
-/// (2026-11-01, at generator version 25, the version's under the held rules with this arm alone;
-/// every 27 hold's again on 2026-11-02, once P11.T4's heavy-donor hold took the overfilling
-/// donor's spin at its lobe).
-const PINNED_FIGURES: [(f64, f64); 2] = [
-    (1.387_548_786_842_689_2, 1.483_859_458_716_522_6),
-    (1.392_403_839_204_236_6, 1.474_077_743_736_024_2),
-];
+/// mass 12 Gyr on, M☉, under every 27 hold, as measured (2026-11-02, once P11.T4's heavy-donor
+/// hold took the overfilling donor's spin at its lobe).
+const PINNED_FIGURES: (f64, f64) = (1.392_403_839_204_236_6, 1.474_077_743_736_024_2);
 
-/// Under the version's rules the pinned pair's neutron star keeps [`NS_ACCRETION_EFFICIENCY`] of
-/// what the donor gives (its wind gives none on the main sequence), to a part in 10⁶, and under
-/// every 27 hold less, the Eddington rate cutting the donor's thermal rate; under both it is a
-/// neutron star 12 Gyr on, having gained less than [`MOST_GAINED`].
+/// Under every 27 hold the pinned pair's neutron star keeps less than [`NS_ACCRETION_EFFICIENCY`]
+/// of what the donor gives (its wind gives none on the main sequence): the donor, the heavier,
+/// transfers at its thermal rate at first (`heavy_donor`), over the star's Eddington rate, which
+/// then cuts its share. It is a neutron star 12 Gyr on, having gained less than [`MOST_GAINED`].
+/// (Under the version's rules with this fix alone it kept a tenth to a part in 10⁶; under the held
+/// arm it took the transfer whole and became a black hole.)
 #[test]
-fn the_pinned_neutron_star_keeps_a_tenth() {
+fn the_pinned_neutron_star_keeps_under_a_tenth() {
     let (donor, _, star) = PINNED;
-    let mut measured = Vec::new();
-    for (k, rules) in [version(), StellarRules::every_27_hold()]
-        .into_iter()
-        .enumerate()
-    {
-        let timeline = pinned(rules);
-        let first = timeline
-            .segments()
-            .iter()
-            .find(|s| s.start().value() >= ONSET_AGE)
-            .expect("the transfer from the onset");
-        assert_eq!(
-            first.kind(),
-            SegmentKind::StableTransfer {
-                donor: Component::Primary
-            }
-        );
-        let end = timeline.state_at(Years::new(first.end().value() * (1.0 - 1e-12)));
-        let [d, a] = end.stars();
-        let (given, gained) = (donor - d.mass().value(), a.mass().value() - star);
-        let last = timeline.state_at(Years::new(ONSET_AGE + 1.2e10));
-        let compact = last.stars()[1];
-        println!(
-            "rules {k}: the donor gave {given:.6} M_sun by {:.4e} yr, the star gained {gained:.6} \
-             ({:.6} of it); 12 Gyr on a {:?} of {:.6} M_sun",
-            first.end().value(),
-            gained / given,
-            compact.phase(),
-            compact.mass().value()
-        );
-        // Under every 27 hold the donor, the heavier, transfers at its thermal rate at first
-        // (`heavy_donor`), over the star's Eddington rate, which then cuts its share.
-        let share = gained / given / NS_ACCRETION_EFFICIENCY;
-        if k == 0 {
-            assert!((share - 1.0).abs() < 1e-6, "{gained} of {given}");
-        } else {
-            assert!(share < 1.0, "{gained} of {given}");
+    let timeline = pinned(StellarRules::every_27_hold());
+    let first = timeline
+        .segments()
+        .iter()
+        .find(|s| s.start().value() >= ONSET_AGE)
+        .expect("the transfer from the onset");
+    assert_eq!(
+        first.kind(),
+        SegmentKind::StableTransfer {
+            donor: Component::Primary
         }
-        assert_eq!(compact.phase(), Phase::NeutronStar);
-        assert!(compact.mass().value() - star < MOST_GAINED);
-        measured.push((a.mass().value(), compact.mass().value()));
-    }
-    for (m, pinned) in measured.iter().zip(PINNED_FIGURES) {
-        assert!(
-            (m.0 - pinned.0).abs() < 1e-12 && (m.1 - pinned.1).abs() < 1e-12,
-            "{measured:?}"
-        );
-    }
+    );
+    let end = timeline.state_at(Years::new(first.end().value() * (1.0 - 1e-12)));
+    let [d, a] = end.stars();
+    let (given, gained) = (donor - d.mass().value(), a.mass().value() - star);
+    let last = timeline.state_at(Years::new(ONSET_AGE + 1.2e10));
+    let compact = last.stars()[1];
+    println!(
+        "the donor gave {given:.6} M_sun by {:.4e} yr, the star gained {gained:.6} ({:.6} of it); \
+         12 Gyr on a {:?} of {:.6} M_sun",
+        first.end().value(),
+        gained / given,
+        compact.phase(),
+        compact.mass().value()
+    );
+    assert!(
+        gained / given / NS_ACCRETION_EFFICIENCY < 1.0,
+        "{gained} of {given}"
+    );
+    assert_eq!(compact.phase(), Phase::NeutronStar);
+    assert!(compact.mass().value() - star < MOST_GAINED);
+    let m = (a.mass().value(), compact.mass().value());
+    assert!(
+        (m.0 - PINNED_FIGURES.0).abs() < 1e-12 && (m.1 - PINNED_FIGURES.1).abs() < 1e-12,
+        "{m:?}"
+    );
 }
 
 /// The same pair twice gives the same timeline.
