@@ -62,14 +62,16 @@ use crate::units::Years;
 const SEED: u64 = 0x0b17_0010_5eed_0001;
 
 /// The three systems, each with its primary's mass, M☉, its white dwarf's under the held arm,
-/// M☉, and that dwarf's phase (research-leans-26; as measured, 2026-11-01).
+/// M☉, and that dwarf's phase (research-leans-26's census of layer E's 10⁴ records, as measured,
+/// 2026-11-01; at generator version 26 the grid keeps two of its three no more, and the same
+/// census's first oxygen–neon and carbon–oxygen dwarfs of the kind take their places).
 const SYSTEMS: [(u64, f64, f64, Phase); 3] = [
-    // A common envelope on the early AGB at 41.51 Myr, then case-BB transfer from the helium giant
-    // to 1.320 M☉, whose core reaches its mass at 41.58 Myr; pinned at 42.02 Myr.
+    // An oxygen–neon dwarf of 1.333 M☉ before its pin at 40.79 Myr (from 26; at 24 and 25
+    // `0x81f7_b160_0000_0018`, a common envelope and case-BB transfer to 1.320 M☉).
     (
-        0x81f7_b160_0000_0018,
-        8.050,
-        1.320,
+        0x820b_b2a0_0000_0016,
+        8.171,
+        1.333,
         Phase::OxygenNeonWhiteDwarf,
     ),
     // A common envelope on the thermally pulsing AGB at 38.556 Myr, which leaves its 1.439 M☉ core;
@@ -80,13 +82,12 @@ const SYSTEMS: [(u64, f64, f64, Phase); 3] = [
         1.439,
         Phase::OxygenNeonWhiteDwarf,
     ),
-    // A common envelope on the early AGB at 32.98 Myr leaves a 2.47 M☉ helium star, whose own
-    // envelope at 33.017 Myr merges it with its 2.04 M☉ companion; the product, a thermally pulsing
-    // AGB star of its 1.490 M☉ core, has no track; pinned at 33.033 Myr.
+    // A carbon–oxygen dwarf of 1.457 M☉ before its pin at 34.45 Myr (from 26; at 24 and 25
+    // `0x8219_b020_0000_001b`, a merger's product of a 1.490 M☉ core).
     (
-        0x8219_b020_0000_001b,
-        9.047,
-        1.490,
+        0x81eb_afe0_0000_001a,
+        8.851,
+        1.457,
         Phase::CarbonOxygenWhiteDwarf,
     ),
 ];
