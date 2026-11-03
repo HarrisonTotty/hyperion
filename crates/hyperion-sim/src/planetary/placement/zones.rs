@@ -155,7 +155,7 @@
 //! orbit and masses then, intersected with the birth limits widened as the zone's planets' orbits
 //! are, by its host's mass at birth over its mass then (design note 10's intersection, read as a
 //! condition at each time; lean, 2026-11-02). The fate transform unbinds a body at the first time
-//! its orbit leaves them.
+//! its orbit leaves them by more than `ZONE_EDGE_TOLERANCE`.
 //!
 //! [`StarSlot`]: crate::stellar::multiplicity::StarSlot
 
@@ -251,6 +251,17 @@ pub(crate) enum PairBound {
     /// The pair's own zone, which the pair bounds from inside: their P-type limit.
     Pair,
 }
+
+/// The share of a zone's limit by which a body's orbit must cross it to leave the zone at its
+/// pair's evaluated state (P14.T9.d): 10⁻⁹ (lean, research-leans-35 §4, W1).
+///
+/// Placement puts a planet on its zone's inner limit to every digit, and the fate reads both again
+/// through other arithmetic (the orbit widened from its reference mass, the limit from the pair's
+/// state), so a planet on the limit lies on it only to a rounding, 10⁻¹⁶ of it. The share is far
+/// above that rounding and far below the fits' own accuracy (3% for Holman and Wiegert's P-type
+/// fit, 1999, eq. 3): 150 m at 1 au. A limit that moves past the planet by more still unbinds it,
+/// as a pair's fit does when its donor's wind shifts the pair's masses and orbit.
+pub(crate) const ZONE_EDGE_TOLERANCE: f64 = 1e-9;
 
 /// The coefficients of Holman and Wiegert's S-type fit, in the order of their equation 1:
 /// `a_c ÷ a_b` = 0.464 − 0.380μ − 0.631e + 0.586μe + 0.150e² − 0.198μe².

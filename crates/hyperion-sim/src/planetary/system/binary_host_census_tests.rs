@@ -31,7 +31,9 @@ use crate::planetary::context::{
     with_binary_host_light, with_binary_host_xuv,
 };
 use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
-use crate::planetary::placement::zones::{BinaryHostZonesRules, PairBound, with_binary_host_zones};
+use crate::planetary::placement::zones::{
+    BinaryHostZonesRules, PairBound, ZONE_EDGE_TOLERANCE, with_binary_host_zones,
+};
 use crate::planetary::testing::{PairHistory, SampleFilter, sample_records, with_every_27_hold};
 use crate::stellar::system::SystemStars;
 use crate::stellar::system::{PairTimeline, SystemState, pair_of};
@@ -192,7 +194,7 @@ fn zone_bound<'c>(
 /// Whether the body of `fate` in `zone` of `ctx`, which `pair` bounds as `bound`, lay outside the
 /// zone at its pair's evaluated state at one of the pair's segment boundaries after it formed and
 /// at or before `t`: by the fate's own reading where its host holds the bound, and otherwise at
-/// the segment's opening state.
+/// the segment's opening state, past the fate's [`ZONE_EDGE_TOLERANCE`] of a limit.
 fn was_outside(
     ctx: &SystemContext,
     zone: &OrbitZone,
@@ -220,7 +222,9 @@ fn was_outside(
         }
         let state = pair.timeline().state_at(segment.start());
         let (inner, outer) = zone.limits_at(&state, bound, zone.host_mass().value() / mass);
-        outer.is_some_and(|r| orbit.apoapsis() > r) || inner.is_some_and(|r| orbit.periapsis() < r)
+        // Past the fate's own easing of each limit.
+        outer.is_some_and(|r| orbit.apoapsis() > r * (1.0 + ZONE_EDGE_TOLERANCE))
+            || inner.is_some_and(|r| orbit.periapsis() < r * (1.0 - ZONE_EDGE_TOLERANCE))
     })
 }
 

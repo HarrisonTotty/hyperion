@@ -112,7 +112,7 @@ use crate::planetary::hosts::evolved::{
 };
 use crate::planetary::hosts::young::Formation;
 use crate::planetary::placement::OrbitZone;
-use crate::planetary::placement::zones::{BinaryHostZonesRules, PairBound};
+use crate::planetary::placement::zones::{BinaryHostZonesRules, PairBound, ZONE_EDGE_TOLERANCE};
 use crate::planetary::record::BodyOrbit;
 use crate::stellar::Phase;
 use crate::stellar::binary::{BinaryTimeline, Component as PairComponent, SegmentKind};
@@ -1759,8 +1759,8 @@ impl<'a> BodyFate<'a> {
 
     /// The first time in `segment` up to `end` at which the body's orbit leaves its zone at its
     /// pair's evaluated state (P14.T9.d, [`FateHost::limits_at`]), its apocentre beyond the outer
-    /// limit or its pericentre inside the inner, if any: `None` below the zones' hold at 27 and
-    /// for a zone no pair the engine ran bounds.
+    /// limit or its pericentre inside the inner by more than [`ZONE_EDGE_TOLERANCE`] of it, if
+    /// any: `None` below the zones' hold at 27 and for a zone no pair the engine ran bounds.
     ///
     /// The scan's points are the segment's ends and every knot of the pair's timeline between
     /// them ([`BinaryTimeline::knot_ages`]), where the pair's orbit or its stars' masses may
@@ -1785,8 +1785,9 @@ impl<'a> BodyFate<'a> {
 
     /// How far inside its zone at its pair's evaluated state the body's orbit on `segment` lies
     /// at `t`, m: the least of the outer limit less its apocentre and its pericentre less the inner
-    /// limit, infinite where neither is set; `None` for a zone no pair the engine ran bounds, and
-    /// a host with no mass then.
+    /// limit, each limit eased by [`ZONE_EDGE_TOLERANCE`] of it (the outer outwards, the inner
+    /// inwards) so that a body on a limit counts inside, infinite where neither is set; `None` for
+    /// a zone no pair the engine ran bounds, and a host with no mass then.
     fn zone_clearance(&self, segment: &Segment, t: UniverseTime) -> Option<f64> {
         let bound = self.host.bound.as_ref()?;
         let state =
@@ -1807,8 +1808,12 @@ impl<'a> BodyFate<'a> {
         let widening = bound.zone.host_mass().value() / mass.value();
         let (inner, outer) = bound.zone.limits_at(&state, bound.bound, widening);
         let orbit = self.orbit_in(segment, t, mass);
-        let outside = outer.map_or(f64::INFINITY, |r| r.value() - orbit.apoapsis().value());
-        let inside = inner.map_or(f64::INFINITY, |r| orbit.periapsis().value() - r.value());
+        let outside = outer.map_or(f64::INFINITY, |r| {
+            r.value() * (1.0 + ZONE_EDGE_TOLERANCE) - orbit.apoapsis().value()
+        });
+        let inside = inner.map_or(f64::INFINITY, |r| {
+            orbit.periapsis().value() - r.value() * (1.0 - ZONE_EDGE_TOLERANCE)
+        });
         Some(outside.min(inside))
     }
 

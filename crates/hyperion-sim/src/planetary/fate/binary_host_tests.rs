@@ -621,3 +621,120 @@ fn a_released_star_s_planets_leave_with_it() {
         }
     });
 }
+
+/// The binary hosts' census's universe (research-binary-hosts §1) at version 27, whose traces the
+/// zones' edge cases come from (research-leans-35 §4).
+fn census_galaxy() -> Galaxy {
+    Galaxy::from_params_at_version(
+        Seed::new(11),
+        GalaxyParams::milky_way_like(),
+        GeneratorVersion::new(27),
+    )
+    .expect("the Milky Way fixture's gas is mostly neutral")
+}
+
+/// The context of `galaxy`'s system `raw` with its planets, as the census generates them.
+fn census_system(
+    galaxy: &Galaxy,
+    raw: u64,
+) -> (SystemContext, crate::planetary::system::PlanetarySystem) {
+    let id = crate::id::SystemId::from_raw(raw).expect("a trace's ID");
+    let ctx = SystemContext::for_system(galaxy, id).expect("a trace's system has stars");
+    let system = crate::planetary::system::generate_planets(galaxy.seed(), &ctx);
+    (ctx, system)
+}
+
+/// The primordial orbits of `system`'s planets about `zone`'s host.
+fn planets_of<'s>(
+    system: &'s crate::planetary::system::PlanetarySystem,
+    zone: &OrbitZone,
+) -> impl Iterator<Item = &'s FateBody> {
+    let host = zone.host();
+    system
+        .planets()
+        .filter(move |planet| planet.host() == host)
+        .filter_map(crate::planetary::system::Body::fate)
+}
+
+/// A planet placed on its zone's inner limit stays in its zone while nothing moves the limit or
+/// its orbit, and leaves it only once the limit lies past its orbit by more than
+/// [`ZONE_EDGE_TOLERANCE`] of it (research-leans-35 §4, W1). `SystemId(0x41ffacb1ff800002)`'s
+/// circumbinary planet lies on its zone's P-type limit of 1.166 au, on a circular orbit about a
+/// pair whose mass holds to 3.25 Gyr. There the primary's wind turns on, and the pair's fit moves
+/// out past the planet by 10⁻⁶ of it within 2 Myr: the fate unbound it a rounding past the limit.
+#[test]
+fn a_planet_on_its_zone_s_inner_limit_stays_while_nothing_moves_it() {
+    use crate::planetary::placement::zones::with_binary_host_zones;
+    let galaxy = census_galaxy();
+    with_every_27_hold(|| {
+        let (ctx, system) = census_system(&galaxy, 0x41ff_acb1_ff80_0002);
+        let (zone, body) = system
+            .zones()
+            .iter()
+            .find_map(|zone| {
+                let inner = zone.inner()?;
+                planets_of(&system, zone)
+                    .find(|body| (body.orbit().periapsis() / inner - 1.0).abs() < 1e-12)
+                    .map(|body| (zone, body))
+            })
+            .expect("a planet placed on its zone's inner limit");
+        let (pair, _) = pair_of(ctx.pairs(), zone.members().next().unwrap()).unwrap();
+        let timeline = pair.timeline();
+        let host = FateHost::evolved(&ctx, zone);
+        let fate = BodyFate::resolve(body, &host);
+        let formed = fate.formed_at().unwrap();
+        let mass = fate.host_mass(formed);
+        // The last of the pair's knots before its mass moves by 10⁻⁶, the pair detached to it.
+        let quiet = timeline
+            .knot_ages(0.0, timeline.until().value())
+            .into_iter()
+            .filter_map(|age| clock_time(&ctx.stars()[0], Years::new(age)))
+            .filter(|&t| t > formed && t <= UniverseTime::EPOCH)
+            .take_while(|&t| (fate.host_mass(t) / mass - 1.0).abs() < 1e-6)
+            .last()
+            .unwrap();
+        let age = ctx.stars()[0].age_at(quiet);
+        assert!(
+            age.value() > 3.25e9
+                && timeline
+                    .segments()
+                    .iter()
+                    .take_while(|segment| segment.start() <= age)
+                    .all(|segment| segment.kind() == SegmentKind::Detached),
+            "{:?}: the pair's mass or its orbit moves before 3.25 Gyr",
+            ctx.id()
+        );
+        assert_eq!(
+            fate.at(quiet).state(),
+            BodyState::Present,
+            "{:?}: {:?}",
+            ctx.id(),
+            fate.ending()
+        );
+        // Where it leaves, the limit lies past its pericentre by the tolerance's 10⁻⁹ of it, on the
+        // orbit the zones at birth keep it on, and not by a rounding: half of it, a margin for the
+        // arithmetic's own rounding at the bisected second.
+        let Some(BodyState::Unbound { at }) = fate.ending() else {
+            panic!(
+                "{:?}: {:?} as the pair's fit moves out",
+                ctx.id(),
+                fate.ending()
+            );
+        };
+        let periapsis = with_binary_host_zones(BinaryHostZonesRules::Birth, || {
+            let host = FateHost::evolved(&ctx, zone);
+            BodyFate::resolve(body, &host)
+                .at(at)
+                .orbit()
+                .unwrap()
+                .periapsis()
+        });
+        let inner = host.limits_at(zone, at).0.unwrap();
+        assert!(
+            at > quiet && inner / periapsis - 1.0 > 0.5e-9,
+            "{:?}: unbound at {at:?} with the limit {} of its pericentre beyond it",
+            ctx.id(),
+            inner / periapsis - 1.0
+        );
+    });
+}
