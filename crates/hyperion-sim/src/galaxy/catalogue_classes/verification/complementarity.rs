@@ -38,7 +38,7 @@ use super::{milky_way, ridge_cells};
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::core_collapse::{
-    self, CoreCollapseEntry, CoreCollapseProcess, RunawayDeathsRules, recent_death_claims,
+    self, CoreCollapseEntry, CoreCollapseProcess, recent_death_claims,
 };
 use crate::galaxy::catalogue_classes::lbv::{
     self, LbvProcess, claims_its_placement, horizon_window, host_ages, lbv_claims, may_host,
@@ -327,7 +327,7 @@ fn sides(galaxy: &Galaxy, record: &SystemRecord, lifetime: Option<Years>) -> Sid
 /// The one shared test on `record`'s marks, as the test states it: plan 08's predicate on the
 /// primary's marks under the galaxy's stellar rules, the site the epoch position moved along the
 /// epoch velocity to T, then [`DeathMarks::of`] and [`claims`] in the field (P09.T35); else, for a
-/// field system (any system under 26's runaways), the variables' prefilter and window (P09.T43);
+/// field system, the variables' prefilter and window (P09.T43);
 /// else the grid's.
 fn shared_test(galaxy: &Galaxy, record: &SystemRecord) -> Holder {
     let composition = draw_metallicity(galaxy, record);
@@ -340,12 +340,7 @@ fn shared_test(galaxy: &Galaxy, record: &SystemRecord) -> Holder {
         || primary_draws(galaxy, record),
         galaxy.rules().stellar,
     );
-    let field = match galaxy.rules().runaway_deaths {
-        RunawayDeathsRules::FieldOnly => true,
-        RunawayDeathsRules::Ejected => {
-            !matches!(record.placement_class(), PlacementClass::Displaced { .. })
-        }
-    };
+    let field = !matches!(record.placement_class(), PlacementClass::Displaced { .. });
     let prefiltered = field && may_host(mass, age);
     if death.is_none() && !prefiltered {
         return Holder::Grid;

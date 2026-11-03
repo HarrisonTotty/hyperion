@@ -96,7 +96,7 @@
 //! [`tables::lbv`]: crate::tables::lbv
 //! [`death_in_interval`]: crate::galaxy::displaced::death_in_interval
 
-use super::core_collapse::{RunawayDeathsRules, class_site_velocity};
+use super::core_collapse::class_site_velocity;
 use super::grid::{CatalogueMember, ClassProcess, site_stream};
 use super::ids::CatalogueCellKey;
 use super::registry::ClassId;
@@ -212,24 +212,19 @@ pub(crate) fn lbv_claims(galaxy: &Galaxy, record: &SystemRecord) -> bool {
         .is_some()
 }
 
-/// Whether the class may claim a grid record of `record`'s placement class: any below 27, and from
-/// 27 (the runaways' hold, [`RunawayDeathsRules::Ejected`], P09.T33.b) a field system's alone, not
-/// one of plan 08's displaced classes (a runaway, a walkaway or a kicked remnant).
+/// Whether the class may claim a grid record of `record`'s placement class: from 27 (P09.T33.b's
+/// runaways) a field system's alone, not one of plan 08's displaced classes (a runaway, a walkaway
+/// or a kicked remnant).
 ///
 /// The class draws the field's systems at their share of each component
 /// ([`Galaxy::field_component_share`], the stay share under plan 08's displaced classes), so no
-/// candidate of it can be a displaced system: under the held arm a displaced record whose window
-/// overlaps the source horizon is claimed by nobody, a lost system (P09.T38's complementarity, a
-/// fault fixed at 27, its output held). From 27 the grid keeps it, a host the class does not list,
-/// until the class follows the runaways as the core collapses do (P09.T43's runaway half).
+/// candidate of it can be a displaced system: up to 26 a displaced record whose window overlapped
+/// the source horizon was claimed by nobody, a lost system (P09.T38's complementarity, a fault
+/// fixed at 27). From 27 the grid keeps it, a host the class does not list, until the class follows
+/// the runaways as the core collapses do (P09.T43's runaway half).
 #[must_use]
-pub(crate) fn claims_its_placement(galaxy: &Galaxy, record: &SystemRecord) -> bool {
-    match galaxy.rules().runaway_deaths {
-        RunawayDeathsRules::FieldOnly => true,
-        RunawayDeathsRules::Ejected => {
-            !matches!(record.placement_class(), PlacementClass::Displaced { .. })
-        }
-    }
+pub(crate) fn claims_its_placement(_galaxy: &Galaxy, record: &SystemRecord) -> bool {
+    !matches!(record.placement_class(), PlacementClass::Displaced { .. })
 }
 
 /// One of the young field's components, as the class thins on it.

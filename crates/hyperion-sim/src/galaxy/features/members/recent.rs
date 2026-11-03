@@ -18,7 +18,7 @@
 //!   as its stars are (`death_in_interval_under`), then [`DeathMarks::of`] and
 //!   [`claims`] in the feature's surroundings, the nursery's superbubble at the death
 //!   ([`ShellEnvironment::Bubble`], the window ended at the wall) where the site lies in one, the
-//!   field's otherwise. From generator version 27 (P09.T33.b's `RUNAWAY_DEATHS_VERSION`) a
+//!   field's otherwise. From generator version 27 (P09.T33.b) a
 //!   candidate whose ejection marks put a runaway's ejection before its death is no entry: a
 //!   runaway dies some 1,900 ly from its birth cluster, in the field, where the class's runaway
 //!   terms place it at the whole budget, while a walkaway dies inside its feature's bubble and

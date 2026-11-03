@@ -1228,11 +1228,10 @@ fn lbv_hosts_over_seeds() {
     }
 }
 
-/// P09.T38's fault, fixed at 27 and held there: a living runaway or walkaway of the grid is one of
-/// plan 08's displaced systems, which the class, drawing the field's systems alone, never places.
-/// Under the 26 arm (with its retargets, the carve-out's among them) the grid's claim takes it all
-/// the same when its window overlaps the source horizon, so that nobody holds it; under every 27
-/// hold the grid keeps it. A living field star so aged is claimed under either arm.
+/// P09.T38's fault, fixed at 27: a living runaway or walkaway of the grid is one of plan 08's
+/// displaced systems, which the class, drawing the field's systems alone, never places, so the
+/// grid keeps it, where up to 26 the grid's claim took it all the same when its window overlapped
+/// the source horizon, so that nobody held it. A living field star so aged is claimed.
 #[test]
 fn a_displaced_host_is_the_grid_s_from_27() {
     use crate::galaxy::displaced::DisplacedKind;
@@ -1254,10 +1253,7 @@ fn a_displaced_host_is_the_grid_s_from_27() {
                 Some(probe.with_age_at_epoch(Years::new(3.0e7 + since + 1.0e3)))
             })
     }
-    for (rules, claimed) in [
-        (GalaxyRules::every_26_hold_with_its_retargets(), true),
-        (GalaxyRules::every_27_hold(), false),
-    ] {
+    for (rules, claimed) in [(GalaxyRules::every_27_hold(), false)] {
         let galaxy =
             Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
                 .expect("the Milky Way fixture builds");

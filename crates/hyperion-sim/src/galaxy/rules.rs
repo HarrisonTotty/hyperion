@@ -35,11 +35,6 @@
 //!   and the carve-out, by the build's one `match` (`Galaxy::from_params`), which installs the
 //!   classes and the stay shares that every reader of the two layers then reads; so
 //!   `Galaxy::with_rules` refuses to change it as well.
-//! - [`runaway_deaths`](GalaxyRules::runaway_deaths), at [`RUNAWAY_DEATHS_VERSION`] (plan 09,
-//!   P09.T33.b, at 27): the core-collapse class follows the young field's runaways and walkaways,
-//!   its field term at the band budget keeping only the deaths its ejection marks leave it. It is
-//!   read where the class's process is built and its candidates drawn, and reaches none of the
-//!   galaxy's memos.
 //! - [`hypervelocity`](GalaxyRules::hypervelocity), at [`HYPERVELOCITY_VERSION`] (plan 09,
 //!   P09.T34.b): the hypervelocity survivors' class has its weight in layer D. It is read where the
 //!   class table is built, with the galaxy, so `Galaxy::with_rules` refuses to change it.
@@ -68,7 +63,6 @@
 use crate::GeneratorVersion;
 use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules};
 use crate::galaxy::catalogue_classes::binary::{MERGER_CLASS_VERSION, MergerClassRules};
-use crate::galaxy::catalogue_classes::core_collapse::{RUNAWAY_DEATHS_VERSION, RunawayDeathsRules};
 use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::displaced::survivors::{HYPERVELOCITY_VERSION, HypervelocityRules};
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
@@ -94,9 +88,6 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads.
     pub(crate) displaced: DisplacedRules,
-    /// Whether the core-collapse class follows the young field's runaways and walkaways
-    /// (P09.T33.b).
-    pub(crate) runaway_deaths: RunawayDeathsRules,
     /// Whether the hypervelocity survivors' class has its weight in layer D (P09.T34.b), which the
     /// class table reads where the galaxy is built.
     pub(crate) hypervelocity: HypervelocityRules,
@@ -145,11 +136,6 @@ impl GalaxyRules {
             } else {
                 DisplacedRules::FieldOnly
             },
-            runaway_deaths: if version.get() >= RUNAWAY_DEATHS_VERSION.get() {
-                RunawayDeathsRules::Ejected
-            } else {
-                RunawayDeathsRules::FieldOnly
-            },
             hypervelocity: if version.get() >= HYPERVELOCITY_VERSION.get() {
                 HypervelocityRules::Weighted
             } else {
@@ -195,12 +181,11 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
-    /// version's rules with the galaxy's holds at 27 (`runaway_deaths`, P09.T33.b, `hypervelocity`,
-    /// P09.T34.b, `orphan_spray`, P10.T10.b's warm-up, `placement_fates`, P08.T12 at 27, and
-    /// `list_source`, P10.T10.b's registration with P10.T3.d.b, and those retargeted from 26,
-    /// `field_share`, P09.T2.c, `carve_out`, P09.T35, `feature_classes`, P09.T36, `merger_class`,
-    /// P11.T8.c–d, and `displaced`, P08.T12); the stellar rules hold none at 27
-    /// ([`StellarRules::every_27_hold`]).
+    /// version's rules with the galaxy's holds at 27 (`hypervelocity`, P09.T34.b, `orphan_spray`,
+    /// P10.T10.b's warm-up, `placement_fates`, P08.T12 at 27, and `list_source`, P10.T10.b's
+    /// registration with P10.T3.d.b, and those retargeted from 26, `field_share`, P09.T2.c,
+    /// `carve_out`, P09.T35, `feature_classes`, P09.T36, `merger_class`, P11.T8.c–d, and
+    /// `displaced`, P08.T12); the stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -351,15 +336,6 @@ mod tests {
     /// Each galaxy hold at 27 is held below it and new from it on, in every 27 hold.
     #[test]
     fn each_27_hold_turns_on_at_27() {
-        let runaways = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).runaway_deaths;
-        for v in [23, 24, 25, 26] {
-            assert_eq!(runaways(v), RunawayDeathsRules::FieldOnly, "{v}");
-        }
-        assert_eq!(runaways(27), RunawayDeathsRules::Ejected);
-        assert_eq!(
-            GalaxyRules::every_27_hold().runaway_deaths,
-            RunawayDeathsRules::Ejected
-        );
         let survivors = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).hypervelocity;
         for v in [23, 24, 25, 26] {
             assert_eq!(survivors(v), HypervelocityRules::Unweighted, "{v}");
@@ -407,7 +383,6 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_27_hold(),
             GalaxyRules {
-                runaway_deaths: RunawayDeathsRules::Ejected,
                 hypervelocity: HypervelocityRules::Weighted,
                 orphan_spray: OrphanSprayRules::Coarse,
                 placement_fates: PlacementFateRules::Fitted,

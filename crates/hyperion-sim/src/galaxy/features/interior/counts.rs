@@ -47,7 +47,7 @@
 //!   and 3% of band D. The peak at 10^3.5 M☉ is Oh, Kroupa and Pflamm-Altenburg's (2015, ApJ 805,
 //!   92); the amplitudes are ours (provisional): their 15% and "up to 38%" are O-star shares over a
 //!   whole population of embedded clusters, varying with the models, not the ends of `f_ej(M)`.
-//!   From generator version 27 (P09.T33.b's `RUNAWAY_DEATHS_VERSION`; research-leans-21) a
+//!   From generator version 27 (P09.T33.b; research-leans-21) a
 //!   cluster of an ejecting source has lost instead, at each living mass of bands D and E, plan
 //!   08's `RunawayModel` share ejected by its age, as a runaway or a walkaway by either channel
 //!   (`ClassTable::ejected_by`), integrated over the band as its other counts are: the grid's

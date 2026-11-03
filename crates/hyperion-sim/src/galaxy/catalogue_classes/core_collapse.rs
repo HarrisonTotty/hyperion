@@ -68,9 +68,8 @@
 //!
 //! A massive star of the young field may die away from where it was born: plan 08's runaways and
 //! walkaways (`displaced::runaway`), ejected by an encounter in its young cluster or by its
-//! companion's supernova, at the shares, speeds and ejection ages of `RunawayModel`. From
-//! `RUNAWAY_DEATHS_VERSION` (27, P09.T33.b) the class follows them too, in the same cells and index
-//! space:
+//! companion's supernova, at the shares, speeds and ejection ages of `RunawayModel`. From version
+//! 27 (P09.T33.b) the class follows them too, in the same cells and index space:
 //!
 //! - **The field term** takes its component's band budget taken to the field, not the share the
 //!   field keeps of its systems now (`ShareMatrix::component_share`'s stay share), and keeps a
@@ -147,7 +146,6 @@ use super::supernova::{
     claims, field_window_bound, lifetime_cap,
 };
 use super::system::{CatalogueMotion, CatalogueSystem};
-use crate::GeneratorVersion;
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::ages::{AgeDistribution, YOUNG_AGE_LIMIT};
 use crate::galaxy::bounds::CellBox;
@@ -205,35 +203,6 @@ const LIFETIME_MARGIN: f64 = 0.25;
 /// Band E's node intervals, the class table's 33 mass nodes', over which the class bounds its
 /// deaths by mass from 27 (P09.T33.b).
 const INTERVALS: usize = MARK_MASS_NODES - 1;
-
-/// The generator version from which the core-collapse class follows the young field's runaways and
-/// walkaways (plan 09, P09.T33.b): the field term at its band budget keeps the deaths its ejection
-/// marks leave it, and one term per band-E runaway and walkaway class of the thin disc and the
-/// nuclear disc places the rest (module documentation). From it too the luminous blue variables'
-/// claim leaves the displaced classes' systems on the grid, since that class follows the field's
-/// alone (P09.T38's fault; `lbv::claims_its_placement`).
-///
-/// Below it the class takes the held arm, [`RunawayDeathsRules::FieldOnly`], the code of version 26
-/// verbatim, so every generated value keeps its bits; the tests reach the new arm through
-/// `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold: [`RunawayDeathsRules`] with
-/// its `FieldOnly` arm, the galaxy rules' `runaway_deaths` field, the match on it in
-/// [`CoreCollapseProcess::new`] (whose terms `candidate` and `bound` read) and the one in
-/// `lbv::claims_its_placement`, and the tripwire
-/// (`the_runaway_deaths_are_held_only_until_the_27_bump`).
-pub(crate) const RUNAWAY_DEATHS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether the core-collapse class follows the young field's runaways and walkaways (the galaxy
-/// rules' `runaway_deaths` field, the hold of [`RUNAWAY_DEATHS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum RunawayDeathsRules {
-    /// Version 26's and before: the field's deaths alone, at the share its field keeps of each
-    /// component's systems (P09.T33.a).
-    FieldOnly,
-    /// Version 27's: the field's deaths not ejected before they die, at its band budget, and the
-    /// runaways' and walkaways' deaths, by class (P09.T33.b). A galaxy without plan 08's displaced
-    /// classes has no runaways to follow and takes the held arm.
-    Ejected,
-}
 
 /// A death-rate bound by band E's node interval (from 27, P09.T33.b): over each, the bound on the
 /// deaths per system over the supernova test's interval of stars of those masses, and the
@@ -665,10 +634,8 @@ impl CoreCollapseProcess {
                 )
             })
             .collect();
-        let displaced = match galaxy.rules().runaway_deaths {
-            RunawayDeathsRules::FieldOnly => None,
-            RunawayDeathsRules::Ejected => fields.displaced(),
-        };
+        // A galaxy without plan 08's displaced classes has no runaways to follow.
+        let displaced = fields.displaced();
         let intervals = displaced
             .map(|displaced| MassIntervals::of(galaxy, displaced.class_table(), interval_years));
         let ejected =

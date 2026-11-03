@@ -1,18 +1,14 @@
-//! The tests of P09.T33.b, [`RUNAWAY_DEATHS_VERSION`]: from 27 the core-collapse class follows the
-//! young field's runaways and walkaways. The class at 26 is the held arm verbatim (the class's own
-//! tests and golden hold it at the version's rules); these hold the new arm, under every 27 hold.
+//! The tests of P09.T33.b: from generator version 27 the core-collapse class follows the young
+//! field's runaways and walkaways, under every 27 hold.
 //!
-//! - The tripwire; the held arm's process and cells are every 26 hold's, and its first entries of a
-//!   cell are pinned bit for bit (the class's golden runs at 24, which holds no displaced class);
-//!   the galaxy keeps one process per rules, a fresh one's.
+//! - The galaxy keeps one process, a fresh one's.
 //! - The terms are the young field's band-E runaway and walkaway classes, each with a form, a term
 //!   per kind, the runaways' at the component's whole budget and the walkaways' at the field's
 //!   part of it; a term's largest share bounds its class's share of a star's deaths as its kind at
 //!   every mass; a source's classes together take exactly each kind's share of `RunawayModel`'s
 //!   closed form, mass by mass, which the field's ejection marks drop, at α = 10⁻³.
 //! - A feature's list drops its runaways' deaths by the same marks on its members' own keys, at
-//!   the closed form's runaway share (α = 10⁻³), and a nursery's list is the held arm's less
-//!   them.
+//!   the closed form's runaway share (α = 10⁻³), and a nursery's list keeps none of them.
 //! - The envelope holds over random points, and no cell comes near the index.
 //! - The ejection's speed is its kind's law inside its bin.
 //! - Every runaway's or walkaway's entry is its term's: its ejection in its class's speed and age
@@ -32,11 +28,9 @@ use hyperion_testkit::order::assert_order_independent;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, normal_cdf};
 
 use super::*;
-use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::galaxy::catalogue_classes::grid::candidate_count;
 use crate::galaxy::catalogue_classes::{CatalogueClassCell, CatalogueEntry, check_class_headroom};
-use std::collections::BTreeMap;
 
 use crate::galaxy::displaced::PlacementClass;
 use crate::galaxy::displaced::death_in_interval_under;
@@ -44,7 +38,7 @@ use crate::galaxy::displaced::explosion_site;
 use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureRecord};
 use crate::galaxy::features::ids::FeatureProcess;
 use crate::galaxy::features::members::FeatureLevelList;
-use crate::galaxy::features::members::recent::{RecentClass, RecentEntry};
+use crate::galaxy::features::members::recent::RecentClass;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{CellKey, generate_cell};
 use crate::galaxy::rules::GalaxyRules;
@@ -191,74 +185,14 @@ fn band_masses(n: u32) -> impl Iterator<Item = SolarMasses> {
 
 // 1. The hold.
 
-/// The version's class keeps the held arm, every version below 27 does, and 27 and every 27 hold
-/// follow the runaways. The tripwire: the bump to 27 deletes this hold.
-#[test]
-fn the_runaway_deaths_are_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < RUNAWAY_DEATHS_VERSION,
-        "the bump to 27 deletes P09.T33.b's hold: `RUNAWAY_DEATHS_VERSION`, \
-         `RunawayDeathsRules` with its `FieldOnly` arm, `GalaxyRules::runaway_deaths`, the \
-         matches on it in `CoreCollapseProcess::new` (`ejecting`), and this module's tripwire"
-    );
-    let at = |v: u32| GalaxyRules::of_version(GeneratorVersion::new(v)).runaway_deaths;
-    for v in [GENERATOR_VERSION.get(), 25, 26] {
-        assert_eq!(at(v), RunawayDeathsRules::FieldOnly, "version {v}");
-    }
-    assert_eq!(at(27), RunawayDeathsRules::Ejected);
-    assert_eq!(
-        GalaxyRules::every_26_hold_with_its_retargets().runaway_deaths,
-        RunawayDeathsRules::FieldOnly
-    );
-    assert_eq!(
-        GalaxyRules::every_27_hold().runaway_deaths,
-        RunawayDeathsRules::Ejected
-    );
-    assert_ne!(CoreCollapseProcess::new(galaxy()).ejected_terms().len(), 0);
-}
-
-/// Under the held arm the class's process and cells are every 26 hold's, bit for bit: the field
-/// alone turns the new arm on. Two other 27 holds move the young components' shares, so they are
-/// held back too: plan 15's fitted binary tables (P15.T10.b), through the features' share φ, and
-/// the hypervelocity survivors' weight (P09.T34.b), through layer D's. The survivors' weight is
-/// read where the galaxy is built, so the held arm's galaxy is built under its rules.
-#[test]
-fn the_held_arm_is_every_26_hold_s() {
-    let built = |rules| {
-        Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
-            .expect("the Milky Way fixture's gas is mostly neutral")
-            .with_full_potential()
-    };
-    let every_26 = built(GalaxyRules::every_26_hold_with_its_retargets());
-    let held = built(GalaxyRules {
-        runaway_deaths: RunawayDeathsRules::FieldOnly,
-        hypervelocity: crate::galaxy::displaced::survivors::HypervelocityRules::Unweighted,
-        ..GalaxyRules::every_27_hold()
-    });
-    let process = CoreCollapseProcess::new(&every_26);
-    assert_eq!(process, CoreCollapseProcess::new(&held));
-    assert_eq!(process.ejected_terms(), []);
-    for cell in [key([0, 12, 0]), key([0, 20, -1]), key([0, 0, 0])] {
-        let [a, b] = [&every_26, &held]
-            .map(|g| CatalogueClassCell::generate(g, &CoreCollapseProcess::new(g), cell));
-        assert_eq!(a.into_entries(), b.into_entries(), "{cell:?}");
-    }
-}
-
 /// The galaxy keeps the process the production lookup visits, built once and equal to a fresh
-/// one; a galaxy whose rules change builds its own.
+/// one.
 #[test]
 fn the_galaxy_keeps_one_process_per_rules() {
     let galaxy = galaxy().clone();
     let kept = galaxy.core_collapse();
     assert!(std::ptr::eq(kept, galaxy.core_collapse()), "built once");
     assert_eq!(*kept, CoreCollapseProcess::new(&galaxy));
-    let held = galaxy.clone().with_rules(GalaxyRules {
-        runaway_deaths: RunawayDeathsRules::FieldOnly,
-        ..GalaxyRules::every_27_hold()
-    });
-    assert_eq!(*held.core_collapse(), CoreCollapseProcess::new(&held));
-    assert_eq!(held.core_collapse().ejected_terms(), []);
 }
 
 // 2. The terms and the closed form.
@@ -530,7 +464,7 @@ fn the_field_s_marks_drop_the_closed_form_s_share() {
 /// field's ejection marks on the member's own key ([`feature_runaway`]): over 40,000 masses
 /// across band E, keyed as the young disc's nurseries' list entries are, the drops against the
 /// sum of their odds, at α = 10⁻³. A member's key is a feature-level member ID's, prefix `0`,
-/// and never a class candidate's, prefix `111`. Under the held arm nothing is dropped.
+/// and never a class candidate's, prefix `111`.
 #[test]
 fn a_feature_s_list_drops_its_runaways_deaths() {
     let galaxy = galaxy();
@@ -542,10 +476,6 @@ fn a_feature_s_list_drops_its_runaways_deaths() {
             .take(5)
             .collect();
     assert_eq!(nurseries.len(), 5);
-    let held = galaxy.clone().with_rules(GalaxyRules {
-        runaway_deaths: RunawayDeathsRules::FieldOnly,
-        ..GalaxyRules::every_27_hold()
-    });
     let mut lcg = Lcg::new(0x0933_b005);
     let (lo, hi) = (MassBand::E.lo(), MassBand::E.hi());
     let (mut dropped, mut expected, mut variance) = (0_u32, 0.0, 0.0);
@@ -563,12 +493,6 @@ fn a_feature_s_list_drops_its_runaways_deaths() {
         let key = ObjectKey::from(system);
         let m = SolarMasses::new(lo * crate::math::exp(lcg.next_f64() * crate::math::ln(hi / lo)));
         dropped += u32::from(feature_runaway(galaxy, young, m, key));
-        if index % 100 == 0 {
-            assert!(
-                !feature_runaway(&held, young, m, key),
-                "the held arm drops none"
-            );
-        }
         let p = closed_form_kind_share(table, BirthSource::ThinDisc, Ejected::Runaway, m);
         expected += p;
         variance += p * (1.0 - p);
@@ -582,59 +506,42 @@ fn a_feature_s_list_drops_its_runaways_deaths() {
     );
 }
 
-/// A nursery's list under every 27 hold is its list under the held arm less the core collapses
-/// whose members its ejection marks make runaways: the same entries, sites and windows otherwise,
-/// walkaways' deaths among them.
+/// A nursery's list under every 27 hold keeps no core collapse whose member its ejection marks make
+/// a runaway: every recent core collapse of the young disc's nurseries is a death its member's
+/// marks leave in the feature, walkaways' deaths among them.
 #[test]
-fn a_nursery_s_list_is_the_held_arm_s_less_its_runaways() {
+fn a_nursery_s_list_keeps_no_runaway_s_death() {
     let galaxy = galaxy();
     let young = young_disc_of(galaxy);
-    let held = galaxy.clone().with_rules(GalaxyRules {
-        runaway_deaths: RunawayDeathsRules::FieldOnly,
-        ..GalaxyRules::every_27_hold()
-    });
-    let (mut kept, mut dropped) = (0, 0);
+    let mut kept = 0;
     for feature in FeatureCatalogue::walk_process(galaxy, FeatureProcess::Nursery)
         .filter(|f| f.component() == Some(young))
     {
-        let held_list = FeatureLevelList::of(&held, &feature);
         let list = FeatureLevelList::of(galaxy, &feature);
-        assert_eq!(
-            list.entries().count(),
-            held_list.entries().count(),
-            "the drop is a thinning: the candidates' count is the held arm's"
-        );
-        let ejected: BTreeMap<SystemId, RecentEntry> = list
-            .recent_entries(galaxy)
-            .map(|entry| (entry.member().record().id(), entry))
-            .collect();
-        for entry in held_list.recent_entries(&held) {
-            let record = entry.member().record();
-            let now = ejected.get(&record.id());
+        for entry in list.recent_entries(galaxy) {
             if entry.class() != RecentClass::CoreCollapse {
-                assert_eq!(now, Some(&entry));
                 continue;
             }
+            let record = entry.member().record();
             let key = ObjectKey::from(record.id());
-            if feature_runaway(galaxy, young, record.primary_initial_mass(), key) {
-                assert_eq!(now, None, "{:?} is a runaway's death", record.id());
-                dropped += 1;
-            } else {
-                assert_eq!(now, Some(&entry));
-                kept += 1;
-            }
+            assert!(
+                !feature_runaway(galaxy, young, record.primary_initial_mass(), key),
+                "{:?} is a runaway's death",
+                record.id()
+            );
+            kept += 1;
         }
-        if kept >= 20 && dropped >= 2 {
+        if kept >= 20 {
             break;
         }
     }
-    eprintln!("{kept} core collapses kept, {dropped} runaways' dropped");
-    assert!(kept >= 20 && dropped >= 2, "{kept} {dropped}");
+    eprintln!("{kept} core collapses kept");
+    assert!(kept >= 20, "{kept}");
 }
 
 /// From 27 a field component's death rate is bounded by mass interval: its field ages' densest
 /// below each interval's oldest death age, the odds the interval's share of band E × that rate,
-/// summing to the component's deaths per system in the envelope; under the held arm it has none.
+/// summing to the component's deaths per system in the envelope.
 /// The young disc's rate in the envelope falls to about a third of its densest below 100 Myr.
 #[test]
 fn the_field_s_death_rate_is_bounded_where_band_e_dies() {
@@ -664,16 +571,6 @@ fn the_field_s_death_rate_is_bounded_where_band_e_dies() {
             assert!(young.deaths_per_system() < 0.5 * densest);
         }
     }
-    let held = galaxy.clone().with_rules(GalaxyRules {
-        runaway_deaths: RunawayDeathsRules::FieldOnly,
-        ..GalaxyRules::every_27_hold()
-    });
-    assert!(
-        CoreCollapseProcess::new(&held)
-            .components()
-            .iter()
-            .all(|young| young.by_mass.is_none())
-    );
 }
 
 /// The lifetime bracket, widened by [`LIFETIME_MARGIN`], bounds the lifetimes of band E's stars
@@ -1157,59 +1054,6 @@ fn entry_bits<'a>(
             ]
         })
         .collect()
-}
-
-/// The held arm's bound over the inner disc's cell (0, 12, 0) under every 26 hold, and the first
-/// two entries' marks of the sample cells, as measured (2026-11-01, at generator version 25, and
-/// re-measured at 26).
-const HELD_PIN: (u64, [[u64; 7]; 2]) = (
-    0x3e6d_1195_161f_c41c,
-    [
-        [
-            0x402c_e0d9_4d04_2f86,
-            0x416c_2c58_ff47_ac65,
-            0x3fc0_fac1_1ea3_b3df,
-            0xc118_1c56_6cda_c18c,
-            0xc108_f879_0b48_f285,
-            0x410a_c2fe_0b4f_9c80,
-            0x0000_0000_0000_0000,
-        ],
-        [
-            0x402e_5e2e_c3cc_6733,
-            0x416c_35b3_7288_343d,
-            0x3f73_020e_10dd_be60,
-            0x40d2_ccf0_b8dd_bc9a,
-            0xc0f9_d467_cda9_9e23,
-            0xc0df_e847_3d2c_1653,
-            0x0000_0000_0000_0000,
-        ],
-    ],
-);
-
-/// Under every 26 hold the class's bound over a cell of the inner disc and the sample cells' first
-/// entries are pinned bit for bit: the held arm in a galaxy holding the displaced classes, which the class's
-/// golden, at 25, never builds. The bump to 27 deletes the pin with the hold.
-#[test]
-fn the_held_arm_s_cell_is_pinned_under_every_26_hold() {
-    let galaxy = Galaxy::from_params_with_rules(
-        Seed::new(SEED),
-        GalaxyParams::milky_way_like(),
-        GalaxyRules::every_26_hold_with_its_retargets(),
-    )
-    .expect("the Milky Way fixture's gas is mostly neutral")
-    .with_full_potential();
-    let process = CoreCollapseProcess::new(&galaxy);
-    let bound = bits(process.bound(&galaxy, &key([0, 12, 0])).value());
-    let mut entries = Vec::new();
-    for cell in sample_cells() {
-        entries.extend(CatalogueClassCell::generate(&galaxy, &process, cell).into_entries());
-        if entries.len() >= 2 {
-            break;
-        }
-    }
-    let marks = entry_bits(entries.iter().map(CatalogueEntry::value), 2);
-    eprintln!("bound {bound:#018x}, entries {marks:#018x?}");
-    assert_eq!((bound, marks.as_slice()), (HELD_PIN.0, &HELD_PIN.1[..]));
 }
 
 /// The new arm's first runaway and walkaway entries of the sample cells, as measured
