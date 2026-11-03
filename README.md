@@ -481,3 +481,9 @@ the commit-stage hooks against every file.
 Edit the types in `crates/hyperion-protocol`, run `just gen-protocol`, re-export any new type
 from `packages/protocol/src/index.ts`, and commit the regenerated bindings. `just ci` fails if they
 are stale.
+
+### Kernel digest pins
+
+After resolving a digest conflict, run `just pin-digests`: it rewrites the WGSL digest pins of
+`discReflectance.test.ts` and `thickKernels.test.ts` from the kernels' sources, with no test run
+(`just pin-digests --check` only compares).

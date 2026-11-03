@@ -978,6 +978,17 @@ gen-surface: (_wasm-preflight "bindgen")
         mv "$fresh" "$out"
     fi
 
+# The WGSL digest pins of `discReflectance.test.ts` and `thickKernels.test.ts`: each
+# `<NAME>_DIGESTS` table's expected hex strings, digested from the kernels' sources by the file's
+# own `digestOf` and rewritten in place, its comments and all else untouched
+# (`apps/hyperion/src/tools/pinDigests.ts`). A generator, not a test: after resolving a digest
+# conflict, run it and commit what it writes. `--check` writes nothing and fails on a stale pin.
+# About 3 s, with no build.
+# Re-pin the client's WGSL digest tables from the kernels' sources (`--check` only compares).
+[positional-arguments]
+pin-digests *args:
+    cd apps/hyperion && node scripts/pinDigests.mjs "$@"
+
 # Run a command once the surface module is built: the git hooks' pnpm entries, since a fresh
 # worktree has no generated module and the client's typecheck, lint and tests need it.
 [positional-arguments]

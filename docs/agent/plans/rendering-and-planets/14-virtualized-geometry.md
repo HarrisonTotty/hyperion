@@ -2371,3 +2371,8 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   inside it. `--compile-budget <n|unlimited>` on a spike or a check sets it, `unlimited` as before
   (`preload/compileBudgetLaunch.ts`, `HyperionApi.compileBudget`, `LoadEngineOptions.compileBudget`,
   `CreateWebGpuEngine`'s fourth argument). Pending: the owner's Mac re-run.
+- **R14, the WGSL digest pins** (`tool-pin-digests`, 2026-11-03): `just pin-digests` rewrites the
+  `<NAME>_DIGESTS` tables' hex strings in `discReflectance.test.ts` and `thickKernels.test.ts` from
+  the kernels' sources, and `--check` only compares. Run it after moving a kernel, or after resolving
+  a digest conflict. A new table there is a top-level `const` named `<NAME>_DIGESTS`, each row
+  ending in its pin, a string literal, after what the file's `digestOf` digests.
