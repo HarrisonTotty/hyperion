@@ -91,7 +91,7 @@ function consolidate(switches: ReadonlyArray<ChromiumSwitch>): ReadonlyArray<Chr
  * @param spike - The spike's options, or `undefined` for an ordinary launch, which gets exactly
  * R01's {@link graphicsSwitches}.
  * @returns For a spike run, R01's switches with `gpuTiming` on, as `--hyperion-gpu-timing` sets it
- * (R01 applies it only in its Linux `vulkan` mode), and, when `dawnSafety` is `off` and the mode
+ * (R01 applies it in every mode but `safe`), and, when `dawnSafety` is `off` and the mode
  * draws with WebGPU at all (not `safe`), Design note 22's safety toggles merged into one
  * `--enable-dawn-features` and one `--disable-dawn-features`. Never `--enable-unsafe-webgpu`.
  */

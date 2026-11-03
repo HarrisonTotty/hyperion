@@ -72,8 +72,7 @@
 # Mac measurements): the bodies pass, the shadow cascades, the cluster cull and compaction, the
 # overlay and the rest, each label's time over the phase's frames timed in full, in the results file
 # and its summary; a phase of a run without it reads `null` there. The switch goes to the client as
-# it is, which also takes it for R01's unquantized timestamps on the forced Vulkan path; elsewhere,
-# a Mac's Metal among them, the timestamps stay quantized.
+# it is, which also takes it for R01's unquantized timestamps, a Mac's Metal included.
 #
 # --atmosphere runs the atmosphere run instead (plan R08, R08.T10.b), on the kept `ATMOSPHERE TEST`
 # scene: the primary photorealistic, its atmosphere media awaited, the moonlit night captured from

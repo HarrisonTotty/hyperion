@@ -610,10 +610,11 @@ function prepareGraphics(
     safe: app.commandLine.hasSwitch(SAFE_MODE_SWITCH),
     software,
   });
-  // The timing toggle is one of the forced path's switches: nothing else lifts the quantization.
-  // A spike run always asks for it (T14.b's `launchSwitches`), and so does a views check (R07.T20).
+  // The timing toggle lifts the quantization in every mode that draws with WebGPU, safe mode's
+  // none. A spike run always asks for it (T14.b's `launchSwitches`), and so does a views check
+  // (R07.T20).
   const gpuTiming =
-    mode === "vulkan" &&
+    mode !== "safe" &&
     (spike !== undefined || viewsCheck || app.commandLine.hasSwitch(GPU_TIMING_SWITCH));
   const switches = launchSwitches(
     { platform: process.platform, mode, gpuTiming },

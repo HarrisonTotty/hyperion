@@ -1140,9 +1140,8 @@ export interface ViewsCheckLaunch {
   /**
    * The terrain run's GPU time by pass (`--hyperion-gpu-timing`; R14's Mac measurements): present,
    * and `true`, only on a `--terrain` launch given the switch, each of whose phases then records
-   * its passes' times ({@link TerrainCheckPhaseRecord.passes}); absent on every other launch. On
-   * the forced Vulkan path the switch also lifts the timestamps' quantization; elsewhere, the
-   * owner's Mac among them, they stay quantized.
+   * its passes' times ({@link TerrainCheckPhaseRecord.passes}); absent on every other launch. The
+   * switch also lifts the timestamps' quantization, on the owner's Mac as on Linux.
    */
   readonly passTimes?: true;
 }

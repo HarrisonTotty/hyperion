@@ -32,11 +32,14 @@ describe("the graphics launch hand-off", () => {
     expect(graphicsLaunchFromArgv(RENDERER_ARGV, "linux").gpuTiming).toBe(false);
   });
 
-  it("reports no timing outside the forced path, whatever the switch", () => {
+  it("reports timing with its switch in every mode but safe, a Mac's and Windows' included (R14's Mac measurements)", () => {
     const timedSafe = [...RENDERER_ARGV, ...graphicsArguments("safe", true)];
-    expect(graphicsLaunchFromArgv(timedSafe, "linux").gpuTiming).toBe(false);
-    const timed = [...RENDERER_ARGV, ...graphicsArguments("vulkan", true)];
-    expect(graphicsLaunchFromArgv(timed, "win32").gpuTiming).toBe(false);
+    const timed = [...RENDERER_ARGV, ...graphicsArguments("default", true)];
+    expect([
+      graphicsLaunchFromArgv(timedSafe, "linux").gpuTiming,
+      graphicsLaunchFromArgv(timed, "darwin").gpuTiming,
+      graphicsLaunchFromArgv(timed, "win32").gpuTiming,
+    ]).toEqual([false, true, true]);
   });
 
   it("carries nothing for a plain Vulkan launch", () => {
@@ -50,11 +53,11 @@ describe("the graphics launch hand-off", () => {
     expect(graphicsLaunchFromArgv(argv, "win32").launchMode).toBe("default");
   });
 
-  it("reports no timing in software mode, whatever the switch", () => {
+  it("reports timing in software mode with its switch, SwiftShader's timestamps unquantized too", () => {
     const timed = [...RENDERER_ARGV, ...graphicsArguments("software", true)];
     expect(graphicsLaunchFromArgv(timed, "linux")).toEqual({
       launchMode: "software",
-      gpuTiming: false,
+      gpuTiming: true,
     });
   });
 

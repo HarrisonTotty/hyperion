@@ -68,9 +68,10 @@ const SAFETY_OFF_ENABLE: ChromiumSwitch = {
   name: "enable-dawn-features",
   value: DAWN_SAFETY_OFF_ENABLED.join(","),
 };
-const SAFETY_OFF_DISABLE: ChromiumSwitch = {
+/** The safety toggles' disabled list with the timing toggle first, as a spike off the Vulkan path merges them. */
+const TIMING_SAFETY_OFF_DISABLE: ChromiumSwitch = {
   name: "disable-dawn-features",
-  value: DAWN_SAFETY_OFF_DISABLED.join(","),
+  value: ["timestamp_quantization", ...DAWN_SAFETY_OFF_DISABLED].join(","),
 };
 const VULKAN_SAFETY_OFF: ReadonlyArray<ChromiumSwitch> = [
   { name: "use-angle", value: "vulkan" },
@@ -95,10 +96,11 @@ function documentedSpikeSet(
   if (mode === "safe") {
     return [];
   }
+  // The timing toggle is on every backend's (R14's Mac measurements); the Vulkan set Linux's alone.
   if (dawnSafety === "on") {
-    return forced ? [...VULKAN_SET, TIMING] : [];
+    return forced ? [...VULKAN_SET, TIMING] : [TIMING];
   }
-  return forced ? VULKAN_SAFETY_OFF : [SAFETY_OFF_ENABLE, SAFETY_OFF_DISABLE];
+  return forced ? VULKAN_SAFETY_OFF : [TIMING_SAFETY_OFF_DISABLE, SAFETY_OFF_ENABLE];
 }
 
 describe("the spike's measurement switches", () => {
@@ -184,15 +186,18 @@ describe("the spike's measurement switches", () => {
     ]);
   });
 
-  it("put the safety toggles on a default-mode launch, which has no R01 switches", () => {
+  it("put the safety toggles on a default-mode launch, merged after its one R01 switch, the timing toggle", () => {
     expect(
       launchSwitches(
         { platform: "win32", mode: "default", gpuTiming: false },
         { dawnSafety: "off" },
       ),
     ).toEqual([
+      {
+        name: "disable-dawn-features",
+        value: ["timestamp_quantization", ...DAWN_SAFETY_OFF_DISABLED].join(","),
+      },
       { name: "enable-dawn-features", value: DAWN_SAFETY_OFF_ENABLED.join(",") },
-      { name: "disable-dawn-features", value: DAWN_SAFETY_OFF_DISABLED.join(",") },
     ]);
   });
 

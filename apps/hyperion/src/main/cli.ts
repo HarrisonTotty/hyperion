@@ -100,7 +100,7 @@
  * for an A/B of the composite's cost; it is refused without `--timing`.
  *
  * `--hyperion-gpu-timing`, R01's measurement switch, which lifts the timestamps' quantization on
- * the forced Vulkan path (read from Chromium's command line, `GPU_TIMING_SWITCH`), also has a
+ * every backend but safe mode's (read from Chromium's command line, `GPU_TIMING_SWITCH`), also has a
  * `--terrain` run record each phase's GPU time by pass (R14's Mac measurements), on any platform;
  * every other run takes it for its timestamps alone.
  *
@@ -420,7 +420,7 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option(
         `--${GPU_TIMING_SWITCH}`,
-        "measurement: unquantized timestamps on the forced Vulkan path, and the terrain run's GPU time by pass",
+        "measurement: unquantized timestamps, and the terrain run's GPU time by pass",
       ),
     )
     .addOption(

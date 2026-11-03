@@ -98,7 +98,7 @@ export function graphicsArguments(mode: GraphicsLaunchMode, gpuTiming: boolean):
 /** The launch's graphics set-up, as the preload reads it back. */
 export interface GraphicsLaunch {
   readonly launchMode: GraphicsLaunchMode;
-  /** Whether timestamps are unquantized: only ever true in `vulkan` mode. */
+  /** Whether timestamps are unquantized: never true in `safe` mode, which draws no WebGPU. */
   readonly gpuTiming: boolean;
 }
 
@@ -115,8 +115,8 @@ export function graphicsLaunchFromArgv(
     safe: argv.includes(`--${SAFE_MODE_SWITCH}`),
     software: argv.includes(`--${SOFTWARE_MODE_SWITCH}`),
   });
-  // Only the forced path carries the timing toggle, so no other mode has full timestamps.
-  const gpuTiming = launchMode === "vulkan" && argv.includes(`--${GPU_TIMING_SWITCH}`);
+  // Every mode that draws with WebGPU carries the timing toggle (`graphicsSwitches`); safe mode none.
+  const gpuTiming = launchMode !== "safe" && argv.includes(`--${GPU_TIMING_SWITCH}`);
   return { launchMode, gpuTiming };
 }
 
