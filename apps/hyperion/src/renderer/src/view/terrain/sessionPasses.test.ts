@@ -63,6 +63,7 @@ import {
   TERRAIN_NOT_AVAILABLE,
 } from "./annunciation";
 import { TerrainFailureGuard } from "./failureGuard";
+import { ClassMapStore } from "./classMap";
 import { fieldCellIndex } from "./coverage";
 import { LiveFrameTerrain } from "./frameTerrain";
 import { allocationTally } from "./gpu/allocationTally";
@@ -74,6 +75,7 @@ import { CASCADE_BYTES, casterReachM } from "./shadows/cascades";
 import { SHADOW_PLACEHOLDER, SHADOW_PLACEHOLDER_NAME } from "./shadows/terrainShadows";
 import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import {
+  photorealRangeRatio,
   REGIME_HOLD_SHARE,
   regimeHolds,
   sceneContacts,
@@ -81,6 +83,7 @@ import {
   terrainPassViewOf,
   type TerrainViewReport,
 } from "./session";
+import { classCellFade } from "./handover";
 import type {
   TerrainPass,
   TerrainView,
@@ -1172,6 +1175,34 @@ describe("a disc's terrain warmed before its hand-over (HANDOVER_AT_CELLS; lane 
       h.session.reliefsFor(PRIMARY).reliefM(MOON),
       h.session.reliefsFor(INSTRUMENT).reliefM(MOON),
     ]).toEqual([18_000, null]);
+  });
+
+  it("gives a view's draw its class sets where the body's class map reads its cells' corners, none otherwise or with the rule off (lane fix-coast-class-map)", async () => {
+    const classSetsGiven = async (
+      corners: boolean,
+      handoverAtCells?: boolean,
+    ): Promise<unknown> => {
+      const h = await harness("high", undefined, undefined, handoverAtCells);
+      await handedOver(h);
+      const reads = vi.spyOn(ClassMapStore.prototype, "readsCellCorners").mockReturnValue(corners);
+      const pass = h.session.pass(MOON);
+      if (pass === null) {
+        throw new Error("no pass");
+      }
+      const draw = vi.spyOn(pass, "drawFor");
+      // 15,000 km out, where the fade is partway (`classCellFade`).
+      h.session.noteView(PRIMARY, handing(1.5e7));
+      h.session.drawTerrain(PRIMARY, MOON, frameAt(0));
+      reads.mockRestore();
+      return draw.mock.calls[0]?.[1].classSets;
+    };
+    const fade = classCellFade(photorealRangeRatio(handing(1.5e7), MOON, 18_000));
+    expect([
+      await classSetsGiven(true),
+      await classSetsGiven(false),
+      await classSetsGiven(true, false),
+      fade > 0 && fade < 1,
+    ]).toEqual([{ cellFade: fade, morph: true }, undefined, undefined, true]);
   });
 
   it("refines a level-7 field's seen survey to level 1, its cells' patches, where the rule off leaves its roots", async () => {

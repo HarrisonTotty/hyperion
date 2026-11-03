@@ -162,6 +162,7 @@ import {
 import {
   cellPatchLevel,
   HANDOVER_AT_CELLS,
+  classCellFade,
   handoverRangeRatio,
   type HandoverReliefSource,
   handoverTauPx,
@@ -614,6 +615,39 @@ export function warmingDiscs(
     }
   }
   return warming;
+}
+
+/**
+ * A photorealistic view's range ratio for `body` of relief `reliefM` (`handoverRangeRatio`, lane
+ * fix-coast-class-map): the camera's limb distance over the body's hand-over range at the
+ * photorealistic τ (`handoverTauPx`) and the selection size's centre pixel, as {@link warmingDiscs}
+ * judges it; `Infinity` for a body not in the view's scene.
+ */
+export function photorealRangeRatio(
+  report: TerrainViewReport,
+  body: BodyIdHex,
+  reliefM: number,
+): number {
+  const seen = report.scene.bodies.find((each) => each.id === body);
+  if (seen === undefined) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const { pose } = report;
+  const centreM = relativeToCamera(
+    { kind: "body", body, m: vec3(0, 0, 0) },
+    pose,
+    cameraSceneOf(report.scene).origins,
+  );
+  const radPerPx = pixelAngleRad(
+    { orientation: pose.orientation, fovXRad: report.fovXRad },
+    report.selectionPx ?? report.presentedPx,
+  );
+  return handoverRangeRatio(
+    limbDistanceM(norm(centreM), seen.radiusM),
+    reliefM,
+    handoverTauPx("photorealistic", report.setting),
+    radPerPx,
+  );
 }
 
 /**
@@ -1217,7 +1251,33 @@ export class TerrainSession {
     if (this.#disposed) {
       return null;
     }
-    return this.#passes.get(body)?.drawFor(view, input) ?? null;
+    return this.#passes.get(body)?.drawFor(view, this.#withClassSets(view, body, input)) ?? null;
+  }
+
+  /**
+   * `input` with the class sets `view`'s lit terrain of `body` takes (`TerrainFrameInput.classSets`;
+   * lane fix-coast-class-map): under `HANDOVER_AT_CELLS`, where the body's class map was read at its
+   * refined texels' cells' corners (the crate's `REFINED_CORNERS_FROM`), its fade to its patches'
+   * ancestors of the field's cells' level at the view's range ratio ({@link classCellFade}) and its
+   * class weights' morph to their parents'; `input` itself otherwise.
+   */
+  #withClassSets(
+    view: ViewId,
+    body: BodyIdHex,
+    input: TerrainViewFrameInput,
+  ): TerrainViewFrameInput {
+    const report = this.#reports.get(view);
+    const reliefM = this.#reliefs.reliefM(body);
+    if (
+      !this.#handoverAtCells ||
+      report === undefined ||
+      reliefM === null ||
+      !this.#classMaps.readsCellCorners(body)
+    ) {
+      return input;
+    }
+    const ratio = photorealRangeRatio(report, body, reliefM);
+    return { ...input, classSets: { cellFade: classCellFade(ratio), morph: true } };
   }
 
   /** `body`'s wireframe pass (R10.T11), from its first hand-over in a wireframe view, or `null`. */

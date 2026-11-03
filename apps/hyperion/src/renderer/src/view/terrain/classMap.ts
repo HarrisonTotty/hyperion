@@ -380,6 +380,8 @@ interface HeldMap {
   readonly normals: NormalMapTexels | null;
   /** Whether every texel the survey touched, and every surveyed cell's normal, was answered. */
   readonly complete: boolean;
+  /** Whether the module read it at its refined texels' cells' corners (`ClassMapAnswer.cellCorners`). */
+  readonly cellCorners: boolean;
   /** Its texture, `null` while the device is lost. */
   texture: TextureHandle | null;
   /** The normal map's texture, `null` while the device is lost or where it has none. */
@@ -486,6 +488,15 @@ export class ClassMapStore implements ClassMapSource {
    * (R10.T10.g); `null` where the body has no map, its map no normal, or its textures are not made
    * (the device lost). The hand-over check reads it for its μ floor (plan R10, R10.T15.b).
    */
+  /**
+   * Whether `body`'s map was read at its refined texels' cells' corners (lane fix-coast-class-map;
+   * `ClassMapAnswer.cellCorners`), on which its terrain draws the field's cells near the hand-over
+   * range (`TerrainFrameInput.classSets`); `false` where the body holds no map.
+   */
+  readsCellCorners(body: BodyIdHex): boolean {
+    return this.#bodies.get(body)?.map?.cellCorners === true;
+  }
+
   normalMapOf(body: BodyIdHex): NormalMapTexels | null {
     const map = this.#bodies.get(body)?.map ?? null;
     return map === null || map.texture === null || map.normalTexture === null ? null : map.normals;
@@ -606,6 +617,7 @@ export class ClassMapStore implements ClassMapSource {
       meltClasses: classMapMeltOf(answer),
       normals,
       complete: answer.complete && answer.normalsComplete,
+      cellCorners: answer.cellCorners === true,
       texture: null,
       normalTexture: null,
       surface: null,

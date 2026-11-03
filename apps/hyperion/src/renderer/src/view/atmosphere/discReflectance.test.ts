@@ -173,12 +173,15 @@ function digestOf(source: string): string {
  * bands reaches: a body of one band returns before the fit, its every lookup as before. The
  * disc's three and the figure again by lane fix-coast-class-map's fine page at its cells' corners
  * (2026-11-03; the crate's `REFINED_CORNERS_FROM`): a tile whose index's a is 255 read at its
- * cells' corners, every page at the centres as before.
+ * cells' corners, every page at the centres as before. The figure and the terrain's again by its
+ * class sets (2026-11-03; `terrainLit.wgsl`'s `class_sets`): the instance record's `cells`, which
+ * the figure's struct and the depth's and shadows' step over, and a lit texel shaded by its class
+ * sets, one set of weight 1 where its instance takes none, as before.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "386680ee8ea04c63"],
   ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "386680ee8ea04c63"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "bedc50f3dcfc18f8"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "b0d7186f625a413d"],
   ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "720099455d88308e"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
@@ -187,13 +190,13 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // and its rebakes', rises', refines' and coarsens' mix of heights, normals and maturity
   // (R10.T16.i), which with no fade are k and the newer bake, bit for bit.
   ...[
-    ["terrain-lit-baked-offsets", "919e2a9bb42b60ce"],
-    ["terrain-lit-face-differences", "25766c39a2ca4c4f"],
+    ["terrain-lit-baked-offsets", "3d88e60d67c8d58a"],
+    ["terrain-lit-face-differences", "39cff9cc1cd836db"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "64d299be5a373ad0"],
-    ["terrain-depth-face-differences", "7a2e4843541938a9"],
-    ["terrain-shadow-baked-offsets", "dbbcafdc1936e98c"],
-    ["terrain-shadow-face-differences", "f76a545cdef7e0c5"],
+    ["terrain-depth-baked-offsets", "68373419a96d4784"],
+    ["terrain-depth-face-differences", "8c96f97ab3759a2d"],
+    ["terrain-shadow-baked-offsets", "349e7ea734617f90"],
+    ["terrain-shadow-face-differences", "1cfcc08e18e723e9"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const spec = [
       ...TERRAIN_LIT_MATERIALS,

@@ -30,7 +30,11 @@ const HALF_FLOAT_MAX : f32 = 65504.0;
 // byte, its rebake's fade's and the slot of the bake it fades from (`fadeFloor`, `rebakeOf`).
 // `strides` are its view's stride bands towards strides 2, 4 and 8, metres, at or below 0 for none
 // (plan R14, R14.T3.c; `terrainStrides.wgsl`), and bit 18 of `parentQuadrant` holds its camera
-// passes at stride 1 (uniforms.ts' `INSTANCE_FINEST`).
+// passes at stride 1 (uniforms.ts' `INSTANCE_FINEST`). `cells` are its class sets' (lane
+// fix-coast-class-map; uniforms.ts' `InstanceRecords.setCells`): x the slot of its ancestor of the
+// field's cells' level, L − 6, whose class weights it fades to near the hand-over range, or
+// NO_PARENT_SLOT for none; y its place in that ancestor (`cellAncestorPlace`); z the fade, an f32's
+// bits; w its flags (`CLASS_MORPH`); all of them 0 but x where the instance takes none.
 struct Instance {
   originM : vec3f,
   slot : u32,
@@ -40,6 +44,19 @@ struct Instance {
   parentQuadrant : u32,
   sub : vec4u,
   strides : vec4f,
+  cells : vec4u,
+}
+
+// `Instance.cells.w`'s flag that its class weights morph to its parent's by the morph factor, as
+// its heights, normals and maturity do (uniforms.ts' `CLASS_MORPH`).
+const CLASS_MORPH : u32 = 1u;
+
+// The place `patch_uv` of a patch in its ancestor `place` levels up (`cellAncestorPlace`'s word:
+// bits 0 to 4 the levels d, bits 5 to 17 the patch's i mod 2^d, bits 18 to 30 its j mod 2^d).
+fn ancestorPatchUv(place : u32, patch_uv : vec2f) -> vec2f {
+  let d = place & 31u;
+  let at = vec2f(f32((place >> 5u) & 0x1fffu), f32((place >> 18u) & 0x1fffu));
+  return (at + patch_uv) / f32(1u << d);
 }
 
 // uniforms.ts's CONTACT_RECORD_BYTES. The centre is camera-relative in the instance origins' frame

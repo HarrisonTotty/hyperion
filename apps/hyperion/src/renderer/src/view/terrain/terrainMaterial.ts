@@ -275,9 +275,12 @@ const EMISSIVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
 const SHADE_TERRAIN_END =
   "    out.radiance = out.radiance + source.xyz * misc.y * reflectance * transmitted;\n  }\n  return out;\n}";
 
-/** {@link SHADE_TERRAIN_END} with the emission added before the return. */
+/**
+ * {@link SHADE_TERRAIN_END} with the emission added before the return: each class set's by its
+ * weight (`class_sets`, lane fix-coast-class-map), a texel of one set's as before.
+ */
 const EMISSIVE_SHADE_TERRAIN_END =
-  "    out.radiance = out.radiance + source.xyz * misc.y * reflectance * transmitted;\n  }\n  out.radiance = out.radiance + terrain_emission(nu, shares, albedos, in.slot);\n  return out;\n}";
+  "    out.radiance = out.radiance + source.xyz * misc.y * reflectance * transmitted;\n  }\n  for (var s = 0u; s < sets.count; s = s + 1u) {\n    out.radiance = out.radiance + sets.weight[s] * terrain_emission(nu, sets.shares[s], sets.albedos[s], sets.slot[s]);\n  }\n  return out;\n}";
 
 /**
  * A lit terrain source's emissive form (the module's remarks): `source` with `shade_terrain` adding

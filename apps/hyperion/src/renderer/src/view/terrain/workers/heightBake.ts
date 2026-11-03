@@ -980,6 +980,7 @@ export class WorkerFields {
         normalPairs: packNormals(normals.pairs()),
         normalsComplete: normals.complete,
         ...(codes.length === 0 ? {} : { maturity: { codes, nodes: map.nodes() } }),
+        ...(map.fineCorners ? { cellCorners: true as const } : {}),
         ...(refined.length === 0
           ? {}
           : {

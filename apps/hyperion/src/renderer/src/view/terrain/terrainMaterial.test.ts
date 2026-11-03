@@ -1206,7 +1206,7 @@ describe("the lit terrain's term of a class drawn from its maturity nodes (R10.T
     // The slot is the instance's, and on a rebake's second pass its older bake's (R10.T16.i).
     expect(skip).toBeLessThan(albedos.indexOf("class_drawn_from_nodes(slot, k)"));
     expect(albedos).toContain("albedos[0] = terrain_row(1u).xyz;");
-    expect(albedos).toContain("albedos[k + 1u] = class_law(in.slot, k).law.a;");
+    expect(albedos).toContain("albedos[k + 1u] = class_law(base, k).law.a;");
     // One call each in the source, so that a compiler inlining every call takes one copy.
     expect([
       wgslCalls(terrainLitWgsl, "texel_maturity"),
@@ -1221,9 +1221,30 @@ describe("the lit terrain's term of a class drawn from its maturity nodes (R10.T
       "reflectance = reflectance + share * albedos[m] * row.rgb * disc_term;",
     );
     const shade = wgslFunction(terrainLitWgsl, "shade_terrain");
-    expect(shade).toContain("let albedos = terrain_albedos(in, shares);");
-    expect(shade).toContain("mean_a = mean_a + shares[m] * albedos[m];");
+    // Each class set's A and shares (`class_sets`, lane fix-coast-class-map), by its weight.
+    expect(wgslFunction(terrainLitWgsl, "class_sets")).toContain(
+      "sets.albedos[s] = terrain_albedos(",
+    );
+    expect(shade).toContain("set_a = set_a + sets.shares[s][m] * sets.albedos[s][m];");
+    expect(shade).toContain("mean_a = mean_a + sets.weight[s] * set_a;");
     expect(shade).not.toContain("terrain_law(in.slot, m).a");
+  });
+
+  it("shades a texel by its class sets, its own, its parent's by μ and its cells' ancestor's by the fade, of weights (1 − c)(1 − μ), (1 − c) μ and c (lane fix-coast-class-map)", () => {
+    const sets = wgslFunction(terrainLitWgsl, "class_sets");
+    expect([
+      sets.includes("let own = (1.0 - c) * (1.0 - mu);"),
+      sets.includes("sets.weight[sets.count] = (1.0 - c) * mu;"),
+      sets.includes("sets.weight[sets.count] = c;"),
+      sets.includes("(in.cells.w & CLASS_MORPH) != 0u"),
+      wgslFunction(terrainLitWgsl, "class_sets_reflectance").includes(
+        "reflectance = reflectance + (*sets).weight[s] * terrain_reflectance(",
+      ),
+      // One call each of the shares, the albedos and the reflectance in the source.
+      wgslCalls(terrainLitWgsl, "terrain_shares"),
+      wgslCalls(terrainLitWgsl, "terrain_albedos"),
+      wgslCalls(terrainLitWgsl, "terrain_reflectance"),
+    ]).toEqual([true, true, true, true, true, 1, 1, 1]);
   });
 
   it("cuts each planetshine source's disc at the datum's tangent plane, as the disc does (R10.T10.g)", () => {
@@ -1386,10 +1407,12 @@ describe("the interior patches' lit forms (plan R14, R14.T1.a)", () => {
 
 describe("the lit terrain's emissive form (R08.T18.a)", () => {
   /** The line `withTerrainEmission` adds to `shade_terrain`. */
-  const LINE = "  out.radiance = out.radiance + terrain_emission(nu, shares, albedos, in.slot);\n";
+  // Each class set's emission by its weight (`class_sets`, lane fix-coast-class-map).
+  const LINE =
+    "  for (var s = 0u; s < sets.count; s = s + 1u) {\n    out.radiance = out.radiance + sets.weight[s] * terrain_emission(nu, sets.shares[s], sets.albedos[s], sets.slot[s]);\n  }\n";
 
   it.each(["baked-offsets", "face-differences"] as const)(
-    "makes the %s path's from its plain form, one line added to shade_terrain and the emission appended, its bindings and states the same",
+    "makes the %s path's from its plain form, one loop added to shade_terrain and the emission appended, its bindings and states the same",
     (path) => {
       const plain = terrainLitMaterialSpec(path);
       const emissive = terrainLitEmissiveMaterialSpec(path);

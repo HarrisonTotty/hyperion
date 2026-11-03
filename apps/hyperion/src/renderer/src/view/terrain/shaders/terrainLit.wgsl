@@ -254,6 +254,9 @@ struct LitVertexOut {
   // of the normals and maturity towards it, 0 with none.
   @location(12) @interpolate(flat) rebakeSlot : u32,
   @location(13) @interpolate(flat) rebakeFade : f32,
+  // Its instance's class sets (lane fix-coast-class-map; `terrainPatch.wgsl`'s `Instance.cells`):
+  // its ancestor of the field's cells' level and its place there, the fade to it, and its flags.
+  @location(14) @interpolate(flat) cells : vec4u,
 }
 
 // The depth below its edge to which a skirt's foot strip of the patch of slot record `rec` stands
@@ -307,6 +310,7 @@ fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32
   out.lipM = skirt_lip_m(rec);
   out.rebakeSlot = v.rebakeSlot;
   out.rebakeFade = v.rebakeFade;
+  out.cells = inst.cells;
   return out;
 }
 
@@ -494,35 +498,140 @@ fn terrain_class_albedo(slot : u32, k : u32, maturity : TexelMaturity, morph : f
   return (1.0 - morph) * own + morph * parent;
 }
 
-// Each of a texel's laws' A by their shares: law 0's, then each slot's, its law's or, where the
-// slot is drawn from its maturity nodes, `terrain_class_albedo`'s (R10.T1.c); a slot of no share
-// skipped before its flag or nodes are read, its A left 0. The texel's maturity quads are read once,
-// at the first slot drawn from its nodes.
-fn terrain_albedos(in : LitVertexOut, shares : array<f32, TERRAIN_LAWS>) -> array<vec3f, TERRAIN_LAWS> {
+// Each of a texel's laws' A by their shares, the texel at `patch_uv` of `base` at the morph factor
+// `morph`: law 0's, then each slot's, its law's or, where the slot is drawn from its maturity nodes,
+// `terrain_class_albedo`'s (R10.T1.c); a slot of no share skipped before its flag or nodes are read,
+// its A left 0. The texel's maturity quads are read once, at the first slot drawn from its nodes. A
+// rebake's fade, `rebake_fade` from the bake in `rebake_slot`, mixes in its older bake's maturity
+// (R10.T16.i): a second pass over its slot's classes drawn from their nodes, one call of each
+// function in the source all the same.
+fn terrain_albedos(
+  base : u32,
+  patch_uv : vec2f,
+  morph : f32,
+  rebake_slot : u32,
+  rebake_fade : f32,
+  shares : array<f32, TERRAIN_LAWS>,
+) -> array<vec3f, TERRAIN_LAWS> {
   var albedos : array<vec3f, TERRAIN_LAWS>;
   albedos[0] = terrain_row(1u).xyz;
-  // A rebake's fade mixes in its older bake's maturity (R10.T16.i): a second pass over its slot's
-  // classes drawn from their nodes, one call of each function in the source all the same.
-  let bakes = select(1u, 2u, in.rebakeFade > 0.0 && older_drawn_at(in.rebakeSlot, in.patchUv));
+  let bakes = select(1u, 2u, rebake_fade > 0.0 && older_drawn_at(rebake_slot, patch_uv));
   for (var bake = 0u; bake < bakes; bake = bake + 1u) {
-    let slot = select(in.slot, in.rebakeSlot, bake == 1u);
+    let slot = select(base, rebake_slot, bake == 1u);
     var maturity : TexelMaturity;
     var gathered = false;
     for (var k = 0u; k < TERRAIN_CLASSES; k = k + 1u) {
       if (!(shares[k + 1u] > 0.0)) { continue; }
       if (class_drawn_from_nodes(slot, k)) {
         if (!gathered) {
-          maturity = texel_maturity(slot, in.patchUv, in.morph);
+          maturity = texel_maturity(slot, patch_uv, morph);
           gathered = true;
         }
-        let albedo = terrain_class_albedo(slot, k, maturity, in.morph);
-        albedos[k + 1u] = select(albedo, mix(albedos[k + 1u], albedo, in.rebakeFade), bake == 1u);
+        let albedo = terrain_class_albedo(slot, k, maturity, morph);
+        albedos[k + 1u] = select(albedo, mix(albedos[k + 1u], albedo, rebake_fade), bake == 1u);
       } else if (bake == 0u) {
-        albedos[k + 1u] = class_law(in.slot, k).law.a;
+        albedos[k + 1u] = class_law(base, k).law.a;
       }
     }
   }
   return albedos;
+}
+
+// The most class sets a texel is shaded with: its own slot's, its parent's and its cells' ancestor's.
+const MAX_CLASS_SETS : u32 = 3u;
+
+// The class sets a lit texel is shaded with (lane fix-coast-class-map; `Instance.cells`), each of
+// weight above 0, the weights summing to 1: its own slot's; its parent's by the morph factor μ where
+// its instance takes `CLASS_MORPH` and the parent holds the ground there, as its heights, normals
+// and maturity morph, so that a coast does not pop where the patch splits or merges; and its
+// ancestor's of the field's cells' level, L − 6, by its fade c near the hand-over range where that
+// ancestor holds the ground there, so that on either side of the switch the terrain draws the
+// field's cells as the disc's class map does. The weights are (1 − c)(1 − μ), (1 − c) μ and c; one
+// set of weight 1 where the instance takes neither, the texel then shaded as before, bit for bit.
+struct ClassSets {
+  count : u32,
+  weight : array<f32, MAX_CLASS_SETS>,
+  slot : array<u32, MAX_CLASS_SETS>,
+  uv : array<vec2f, MAX_CLASS_SETS>,
+  shares : array<array<f32, TERRAIN_LAWS>, MAX_CLASS_SETS>,
+  albedos : array<array<vec3f, TERRAIN_LAWS>, MAX_CLASS_SETS>,
+}
+
+// The class sets of the texel `in`, with `reference` law 0 alone (`shade_terrain`'s): their slots,
+// places and weights, then each set's shares and A (`terrain_shares`, `terrain_albedos`), the own
+// set's at its morph factor and rebake, another's at its own field.
+fn class_sets(in : LitVertexOut, reference : bool) -> ClassSets {
+  var sets : ClassSets;
+  var c = 0.0;
+  var mu = 0.0;
+  var ancestor_uv = in.patchUv;
+  if (!reference) {
+    let fade = clamp(bitcast<f32>(in.cells.z), 0.0, 1.0);
+    ancestor_uv = ancestorPatchUv(in.cells.y, in.patchUv);
+    if (fade > 0.0 && in.cells.x != NO_PARENT_SLOT && survey_surveyed(in.cells.x, ancestor_uv * 64.0)) {
+      c = fade;
+    }
+    if ((in.cells.w & CLASS_MORPH) != 0u && in.morph > 0.0 && parent_drawn_at(in.parent, in.patchUv)) {
+      mu = min(in.morph, 1.0);
+    }
+  }
+  let own = (1.0 - c) * (1.0 - mu);
+  if (own > 0.0) {
+    sets.weight[sets.count] = own;
+    sets.slot[sets.count] = in.slot;
+    sets.uv[sets.count] = in.patchUv;
+    sets.count = sets.count + 1u;
+  }
+  if (mu > 0.0 && c < 1.0) {
+    sets.weight[sets.count] = (1.0 - c) * mu;
+    sets.slot[sets.count] = in.parent.x;
+    sets.uv[sets.count] = parentPatchUv(in.parent.y, in.patchUv);
+    sets.count = sets.count + 1u;
+  }
+  if (c > 0.0) {
+    sets.weight[sets.count] = c;
+    sets.slot[sets.count] = in.cells.x;
+    sets.uv[sets.count] = ancestor_uv;
+    sets.count = sets.count + 1u;
+  }
+  for (var s = 0u; s < sets.count; s = s + 1u) {
+    let own_set = sets.slot[s] == in.slot && all(sets.uv[s] == in.patchUv);
+    if (reference) {
+      sets.shares[s][0] = 1.0;
+    } else {
+      sets.shares[s] = terrain_shares(sets.slot[s], sets.uv[s]);
+    }
+    // Each law's A at the texel, its maturity's where a slot is drawn from its nodes (R10.T1.c); a
+    // reference fragment's law 0 alone, its slots' shares being 0.
+    sets.albedos[s] = terrain_albedos(
+      sets.slot[s],
+      sets.uv[s],
+      select(0.0, in.morph, own_set),
+      in.rebakeSlot,
+      select(0.0, in.rebakeFade, own_set),
+      sets.shares[s],
+    );
+  }
+  return sets;
+}
+
+// The reflectance I/F of the class sets `sets` lit by one source (`terrain_reflectance`'s
+// arguments): each set's by its weight.
+fn class_sets_reflectance(
+  sets : ptr<function, ClassSets>,
+  h : f32,
+  mu0 : f32,
+  mu : f32,
+  alpha : f32,
+  source_radius : f32,
+) -> vec3f {
+  var reflectance = vec3f(0.0);
+  for (var s = 0u; s < (*sets).count; s = s + 1u) {
+    reflectance = reflectance + (*sets).weight[s] * terrain_reflectance(
+      (*sets).shares[s], (*sets).albedos[s], (*sets).slot[s], h, mu0, mu, alpha, source_radius
+    );
+  }
+  return reflectance;
 }
 
 // The reflectance I/F of a texel's laws by their shares lit by one source of irradiance factor
@@ -599,21 +708,18 @@ fn shade_terrain(
   let counts = terrain_row(0u);
   let misc = terrain_row(2u);
   let annulus_count = u32(counts.w);
-  var shares : array<f32, TERRAIN_LAWS>;
-  if (reference) {
-    shares[0] = 1.0;
-  } else {
-    shares = terrain_shares(in.slot, in.patchUv);
-  }
-  // Each law's A at the texel, its maturity's where a slot is drawn from its nodes (R10.T1.c); a
-  // reference fragment's law 0 alone, its slots' shares being 0.
-  let albedos = terrain_albedos(in, shares);
-  // The texel's mean A, for R08's sky light on the Lambert share's flat term.
+  var sets = class_sets(in, reference);
+  // The texel's mean A, for R08's sky light on the Lambert share's flat term: each set's by its
+  // weight.
   var mean_a = vec3f(0.0);
-  for (var m = 0u; m < TERRAIN_LAWS; m = m + 1u) {
-    if (shares[m] > 0.0) {
-      mean_a = mean_a + shares[m] * albedos[m];
+  for (var s = 0u; s < sets.count; s = s + 1u) {
+    var set_a = vec3f(0.0);
+    for (var m = 0u; m < TERRAIN_LAWS; m = m + 1u) {
+      if (sets.shares[s][m] > 0.0) {
+        set_a = set_a + sets.shares[s][m] * sets.albedos[s][m];
+      }
     }
+    mean_a = mean_a + sets.weight[s] * set_a;
   }
   mean_a = mean_a * decoration.albedo;
   // R08's lookups: the texel's geodetic latitude and north from the datum's normal, its height.
@@ -687,7 +793,7 @@ fn shade_terrain(
     }
     let alpha = angle_between(towards, -ray);
     let reflectance =
-      terrain_reflectance(shares, albedos, in.slot, horizon, mu0, mu, alpha, star_radius) * decoration.albedo;
+      class_sets_reflectance(&sets, horizon, mu0, mu, alpha, star_radius) * decoration.albedo;
     let transmitted = atmosphere_sun_transmittance(
       height, mu_datum, local.latitude, local_azimuth(local, towards), j
     );
@@ -727,7 +833,7 @@ fn shade_terrain(
     let alpha = angle_between(towards, -ray);
     let source_radius = angular_radius(source.w, distance);
     let reflectance =
-      terrain_reflectance(shares, albedos, in.slot, irradiance, mu0, mu, alpha, source_radius) * decoration.albedo;
+      class_sets_reflectance(&sets, irradiance, mu0, mu, alpha, source_radius) * decoration.albedo;
     let transmitted = atmosphere_source_transmittance(
       height, mu_datum, local.latitude, local_azimuth(local, towards), source_radius, 0u
     );

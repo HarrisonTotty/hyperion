@@ -171,6 +171,9 @@ import {
   type TerrainViewBuffers,
 } from "./gpu/resources";
 import {
+  CLASS_MORPH,
+  cellAncestorPlace,
+  MAX_CELL_ANCESTOR_LEVELS,
   ContactRecords,
   DATUM_SLOT,
   fadeWord,
@@ -436,6 +439,15 @@ export interface TerrainView {
 /** One frame's inputs. */
 export interface TerrainFrameInput {
   readonly view: TerrainView;
+  /**
+   * The view's class sets on a lit pass (lane fix-coast-class-map; `terrainLit.wgsl`'s
+   * `class_sets`), its session's where the body's class map reads its refined texels at their
+   * cells' corners (the crate's `REFINED_CORNERS_FROM`): `cellFade`, 0 to 1, the fade to the class
+   * weights of each patch's ancestor of the field's cells' level (`surveyedFloorLevel`) near the
+   * hand-over range, and `morph`, whether a patch's class weights morph to its parent's by its morph
+   * factor. Absent, neither: every texel shaded as before, bit for bit.
+   */
+  readonly classSets?: { readonly cellFade: number; readonly morph: boolean };
   /** Grounded and descending bodies, body-fixed (Design note 9). */
   readonly grounded: ReadonlyArray<GroundContact>;
   /** The unit direction towards the sun, body-fixed. */
@@ -4148,6 +4160,8 @@ export class TerrainPass {
     const fins = lit && split && this.#finsDrawn(device, state, forms);
     // The camera's strides (plan R14, R14.T3.c): each level's bands from the view's ladder.
     const strides = this.#stridesOn() && this.#litClustersReady(device, state, forms);
+    // The class sets a lit pass's patches take (lane fix-coast-class-map), none on another shading.
+    const classSets = lit ? input.classSets : undefined;
     const patchM = finestPatchSizeM(this.#planet);
     if (strides && drawSet !== undefined) {
       this.#strideBandsOf(device, state, input, drawSet, mask);
@@ -4208,7 +4222,8 @@ export class TerrainPass {
           state.interiorWhole.push(((heights >>> 8) & MIX_STEPS) !== 0 || within !== null);
           finCount += interiorBake ? 0 : 1;
         }
-        (inner ? interior : instances).pushXyz(
+        const target = inner ? interior : instances;
+        target.pushXyz(
           patch.slot,
           r0.x * o.x + r0.y * o.y + r0.z * o.z - cameraM.x,
           r1.x * o.x + r1.y * o.y + r1.z * o.z - cameraM.y,
@@ -4225,6 +4240,21 @@ export class TerrainPass {
           bands,
           finest,
         );
+        if (classSets !== undefined) {
+          // The ancestor of the field's cells' level: the patch itself at that level, none coarser.
+          const cellsLevel = this.#surveyedFloorLevel;
+          const levels = level - cellsLevel;
+          const ancestor =
+            cellsLevel > 0 && levels >= 0 && levels <= MAX_CELL_ANCESTOR_LEVELS
+              ? device.cache.residentOver(patch.key, cellsLevel)
+              : undefined;
+          target.setCells(
+            ancestor?.slot ?? NO_PARENT_SLOT,
+            ancestor === undefined ? 0 : cellAncestorPlace(levels, patch.key.i, patch.key.j),
+            Math.min(Math.max(classSets.cellFade, 0), 1),
+            classSets.morph ? CLASS_MORPH : 0,
+          );
+        }
         (inner ? state.interiorDrawn : drawnIndices).push(n);
         const phasesOf = inner ? interiorPhases : phases;
         if (phasesOf !== null && wire !== undefined) {

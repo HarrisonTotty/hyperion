@@ -23,7 +23,7 @@ import { coarseFineMorph } from "./coarseFineHolds";
 import { uvToSt, vertexDir, xyzToFaceUv } from "./cube";
 import { allocationTally } from "./gpu/allocationTally";
 import { normalsAtlasOf } from "./gpu/resources";
-import { INSTANCE_RECORD_BYTES, NO_PARENT_SLOT } from "./gpu/uniforms";
+import { CLASS_MORPH, INSTANCE_RECORD_BYTES, NO_PARENT_SLOT } from "./gpu/uniforms";
 import { craftContact, datumGroundUnder, finestPatchSizeM } from "./grounded";
 import {
   cornerNeighbours,
@@ -251,7 +251,13 @@ async function sharedPass(
   extra: Partial<
     Pick<
       TerrainPassOptions,
-      "source" | "survey" | "onSelect" | "planet" | "frustumMargin" | "lookaheadClockMs"
+      | "source"
+      | "survey"
+      | "onSelect"
+      | "planet"
+      | "frustumMargin"
+      | "lookaheadClockMs"
+      | "surveyedFloorLevel"
     >
   > = {},
   given?: CountingRenderEngine,
@@ -2290,5 +2296,69 @@ describe("the morph at every coarse–fine edge in each view of a shared pass (R
       breaksByBandsAlone: true,
       seams: shut(views),
     });
+  });
+});
+
+/** Each instance record's slot and class sets in `bytes`: words 3 and 16 to 19. */
+function classSetsOf(bytes: Uint8Array): Array<readonly [number, number, number, number, number]> {
+  const u = new Uint32Array(bytes.slice().buffer);
+  const f = new Float32Array(u.buffer);
+  const out: Array<readonly [number, number, number, number, number]> = [];
+  for (let n = 0; n < u.length; n += WORDS) {
+    out.push([u[n + 3] ?? 0, u[n + 16] ?? 0, u[n + 17] ?? 0, f[n + 18] ?? 0, u[n + 19] ?? 0]);
+  }
+  return out;
+}
+
+describe("a lit pass's class sets (lane fix-coast-class-map; terrainLit.wgsl's class_sets)", () => {
+  /** A lit pass floored at level 1, streamed under the primary 2,000 km over the north pole. */
+  async function flooredPass(): Promise<{ readonly made: Made; readonly view: TerrainView }> {
+    const made = await sharedPass("high", { source: BODY, surveyedFloorLevel: 1 });
+    made.lane().layers = layers();
+    const view = northPole(2_000_000);
+    stream(made, [passView(PRIMARY, view)], 6);
+    return { made, view };
+  }
+
+  /** The records last written for the primary, interior and edge alike. */
+  function primaryRecords(made: Made): Array<readonly [number, number, number, number, number]> {
+    return [
+      ...classSetsOf(recordBytes(made.engine, `terrain interior instances (${PRIMARY})`)),
+      ...classSetsOf(recordBytes(made.engine, `terrain instances (${PRIMARY})`)),
+    ];
+  }
+
+  it("gives each record its ancestor of the floor's level, its place there, the view's fade and the morph flag", async () => {
+    const { made, view } = await flooredPass();
+    made.pass.drawFor(PRIMARY, {
+      ...frameOf(view, 50, LIGHTING),
+      classSets: { cellFade: 0.25, morph: true },
+    });
+    const written = primaryRecords(made);
+    const wrong = written.filter(([slot, ancestor, place, fade, flags]) => {
+      const levels = place & 31;
+      // At the floor's level its own slot; finer, another resident patch's.
+      const ancestorRight =
+        levels === 0 ? ancestor === slot : ancestor !== NO_PARENT_SLOT && ancestor !== slot;
+      return !ancestorRight || fade !== 0.25 || flags !== CLASS_MORPH;
+    });
+    expect([written.length > 0, written.some(([, , place]) => (place & 31) > 0), wrong]).toEqual([
+      true,
+      true,
+      [],
+    ]);
+  });
+
+  it("gives every record none without the view's class sets, as before", async () => {
+    const { made, view } = await flooredPass();
+    made.pass.drawFor(PRIMARY, frameOf(view, 50, LIGHTING));
+    const written = primaryRecords(made);
+    expect([
+      written.length > 0,
+      written.every(
+        ([, ancestor, place, fade, flags]) =>
+          ancestor === NO_PARENT_SLOT && place === 0 && fade === 0 && flags === 0,
+      ),
+    ]).toEqual([true, true]);
   });
 });

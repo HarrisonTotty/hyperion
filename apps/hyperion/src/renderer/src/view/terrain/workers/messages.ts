@@ -368,6 +368,14 @@ export interface ClassMapAnswer {
    * `ClassMap::refined`); absent where none is.
    */
   readonly refinement?: ClassMapRefinementAnswer;
+  /**
+   * Whether the module reads a map's refined texels at their cells' corners (lane
+   * fix-coast-class-map; `src/wasm.rs`'s `ClassMapAnswer.fineCorners`, from the crate's
+   * `REFINED_CORNERS_FROM`), whether or not this map refines any: the terrain then draws the field's
+   * cells near the hand-over range as the disc does (`TerrainFrameInput.classSets`); absent where it
+   * reads them at their centres.
+   */
+  readonly cellCorners?: true;
 }
 
 /**

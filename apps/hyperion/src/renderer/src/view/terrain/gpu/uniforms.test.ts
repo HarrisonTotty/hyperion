@@ -11,8 +11,11 @@ import {
   DATUM_SLOT,
   fadeWord,
   MIX_STEPS,
+  CLASS_MORPH,
+  cellAncestorPlace,
   INSTANCE_RECORD_BYTES,
   InstanceRecords,
+  MAX_CELL_ANCESTOR_LEVELS,
   MAX_CONTACTS,
   MAX_SUB_PATCH_LEVELS,
   NO_PARENT_SLOT,
@@ -307,6 +310,58 @@ describe("an instance record", () => {
       expect(copy.count).toBe(0);
     },
   );
+});
+
+describe("an instance record's class sets (lane fix-coast-class-map)", () => {
+  it("carries no ancestor, fade or flag until they are set, then its ancestor's slot, its place there, the fade and its flags", () => {
+    const records = new InstanceRecords(2);
+    records.push(1, vec3(0, 0, 0), 0, 1);
+    records.push(2, vec3(0, 0, 0), 0, 1);
+    records.setCells(9, cellAncestorPlace(3, 13, 6), 0.25, CLASS_MORPH);
+    const u = new Uint32Array(records.buffer);
+    const f = new Float32Array(records.buffer);
+    expect([
+      Array.from(u.slice(16, 20)),
+      [u[WORDS + 16], u[WORDS + 17], f[WORDS + 18], u[WORDS + 19]],
+      INSTANCE_RECORD_BYTES,
+    ]).toEqual([[NO_PARENT_SLOT, 0, 0, 0], [9, 3 | (5 << 5) | (6 << 18), 0.25, CLASS_MORPH], 80]);
+  });
+
+  it("places a patch in its ancestor d levels up by its i and j mod 2^d, the patch itself at 0 levels", () => {
+    expect([
+      cellAncestorPlace(0, 77, 91),
+      cellAncestorPlace(1, 3, 2),
+      cellAncestorPlace(MAX_CELL_ANCESTOR_LEVELS, 2 ** 13 + 5, 7),
+    ]).toEqual([0, 1 | (1 << 5), 13 | (5 << 5) | (7 << 18)]);
+  });
+
+  it("refuses class sets with no record, out of range, or a place past its levels", () => {
+    expect(() => {
+      new InstanceRecords(1).setCells(1, 0, 0, 0);
+    }).toThrow(/no record/u);
+    const records = new InstanceRecords(1);
+    records.push(1, vec3(0, 0, 0), 0, 1);
+    expect(
+      [
+        () => {
+          records.setCells(1, 0, 1.5, 0);
+        },
+        () => {
+          records.setCells(1, 0, 0, 2);
+        },
+        () => cellAncestorPlace(MAX_CELL_ANCESTOR_LEVELS + 1, 0, 0),
+      ].map((call) =>
+        (() => {
+          try {
+            call();
+            return "none";
+          } catch (error) {
+            return error instanceof RangeError ? "RangeError" : "other";
+          }
+        })(),
+      ),
+    ).toEqual(["RangeError", "RangeError", "RangeError"]);
+  });
 });
 
 describe("the contacts buffer", () => {

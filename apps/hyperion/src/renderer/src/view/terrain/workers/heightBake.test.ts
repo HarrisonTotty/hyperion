@@ -35,13 +35,14 @@ function emptyBlock(): WasmFieldBlock {
 /**
  * The fake module's class map: one texel of one class, wholly surveyed, with `codes` its maturity
  * (none by default) and then K × 3 nodes rising from 0.01; where `refined`, the texel refined to a
- * level-7 field's 2 × 2 cells, the second not surveyed, with codes under a maturity; `free` names it
- * in `freed`.
+ * level-7 field's 2 × 2 cells, the second not surveyed, with codes under a maturity; where `corners`,
+ * read as the module reads its refined texels at their cells' corners; `free` names it in `freed`.
  */
 function oneTexelMap(
   freed: string[],
   codes: Uint16Array = new Uint16Array(),
   refined = false,
+  corners = false,
 ): WasmClassMap {
   return {
     level: 6,
@@ -55,7 +56,7 @@ function oneTexelMap(
     nodes: () => Float32Array.from({ length: 16 * 3 }, (_, k) => 0.01 * (k + 1)),
     fineSide: refined ? 2 : 1,
     refined: () => (refined ? Uint32Array.from([0]) : new Uint32Array()),
-    fineCorners: false,
+    fineCorners: corners,
     fineSurveyed: () => (refined ? Uint8Array.from([1, 0, 1, 1]) : new Uint8Array()),
     fineWeights: () => (refined ? Uint8Array.from([255, 0, 255, 255]) : new Uint8Array()),
     fineMaturity: () =>
@@ -172,6 +173,7 @@ function fakeModule(
   bake?: FakeBake,
   classMapCodes: Uint16Array = new Uint16Array(),
   classMapRefined = false,
+  classMapCorners = false,
 ): {
   module: HeightModule;
   held: Map<string, number>;
@@ -241,7 +243,7 @@ function fakeModule(
         throw new WebAssembly.RuntimeError("unreachable");
       }
       return held.has(key(system, body))
-        ? oneTexelMap(freed, classMapCodes, classMapRefined)
+        ? oneTexelMap(freed, classMapCodes, classMapRefined, classMapCorners)
         : undefined;
     },
     // A held body's normal map of the class map's cell; seed 0xbeef, a broken module's, none.
@@ -281,12 +283,13 @@ function fakeModule(
 function classMapAnswered(
   codes: Uint16Array = new Uint16Array(),
   refined = false,
+  corners = false,
 ): {
   readonly map: ClassMapAnswer;
   readonly transfer: ReadonlyArray<Transferable>;
   readonly freed: ReadonlyArray<string>;
 } {
-  const { module, freed } = fakeModule(undefined, codes, refined);
+  const { module, freed } = fakeModule(undefined, codes, refined, corners);
   const fields = new WorkerFields(module);
   answerRequest(
     module,
@@ -573,6 +576,13 @@ describe("a height worker's fields", () => {
     it("answers no refinement where the module's map refines no texel (lane fix-coast-class-map)", () => {
       const { map } = classMapAnswered();
       expect(Object.hasOwn(map, "refinement")).toBe(false);
+    });
+
+    it("answers whether the module reads its refined texels at their cells' corners, whether or not it refines any (lane fix-coast-class-map)", () => {
+      expect([
+        Object.hasOwn(classMapAnswered().map, "cellCorners"),
+        classMapAnswered(undefined, false, true).map.cellCorners,
+      ]).toEqual([false, true]);
     });
 
     it("answers each refined texel's cells, their survey and codes, and their lattice as the module's, all transferred (lane fix-coast-class-map)", () => {

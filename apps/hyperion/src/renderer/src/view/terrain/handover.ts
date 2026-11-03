@@ -184,6 +184,33 @@ export function drawsCells(
   return true;
 }
 
+/**
+ * The range ratio, the camera's limb distance over the body's hand-over range, from which a lit
+ * terrain draws its class weights as its patches' ancestors of the field's cells' level do
+ * ({@link classCellFade}): three quarters of the ratio at which the body hands over, 1 ÷ (1 + h),
+ * about 0.68, so that both switches, that one and the hand-back's 1 ÷ (1 − h), fall within it however
+ * long the terrain takes to draw the cells (lane fix-coast-class-map, a lean).
+ */
+export const CLASS_FADE_FAR = 0.75 / (1 + REGIME_HYSTERESIS);
+
+/** The range ratio within which a lit terrain draws its patches' own class weights alone: half {@link CLASS_FADE_FAR}. */
+export const CLASS_FADE_NEAR = CLASS_FADE_FAR / 2;
+
+/**
+ * The fade of a lit terrain's class weights to those of its patches' ancestors of the field's
+ * cells' level, L − 6 (lane fix-coast-class-map; `TerrainFrameInput.classSets`), at the range ratio
+ * `rangeRatio` ({@link handoverRangeRatio}): 1 from {@link CLASS_FADE_FAR} out, so that on either
+ * side of the switch the terrain draws the field's cells as the disc's class map does from their
+ * corners, falling linearly to 0 at {@link CLASS_FADE_NEAR} as the camera nears and the terrain's
+ * finer classes resolve. 1 at an infinite ratio, 0 at a ratio that is not a number.
+ */
+export function classCellFade(rangeRatio: number): number {
+  if (!(rangeRatio > CLASS_FADE_NEAR)) {
+    return 0;
+  }
+  return Math.min((rangeRatio - CLASS_FADE_NEAR) / (CLASS_FADE_FAR - CLASS_FADE_NEAR), 1);
+}
+
 /** The hand-over's τ in a style on a setting, px (Design note 13). */
 export function handoverTauPx(style: RenderStyle, setting: QualitySetting): number {
   let tauPx: number;

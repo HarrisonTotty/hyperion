@@ -62,10 +62,41 @@ export const SLOT_RECORD_BYTES = 112;
  *                           // from ({@link fadeWord}; R10.T16.i)
  *   strides : vec4f,        // its view's stride bands towards strides 2, 4 and 8, metres, at or
  *                           // below 0 for none, and 0 (plan R14, R14.T3.c; `clusters/strides.ts`)
+ *   cells : vec4u,          // its class sets (lane fix-coast-class-map; {@link InstanceRecords.setCells}):
+ *                           // x its ancestor of the field's cells' level, L − 6, or NO_PARENT_SLOT;
+ *                           // y its place there ({@link cellAncestorPlace}); z the fade to it, an
+ *                           // f32's bits; w its flags ({@link CLASS_MORPH})
  * }
  * ```
  */
-export const INSTANCE_RECORD_BYTES = 64;
+export const INSTANCE_RECORD_BYTES = 80;
+
+/**
+ * `Instance.cells.w`'s flag that the patch's class weights morph to its parent's by its morph
+ * factor, as its heights, normals and maturity do (lane fix-coast-class-map;
+ * `terrainPatch.wgsl`'s `CLASS_MORPH`), so that a coast does not pop where it splits.
+ */
+export const CLASS_MORPH = 1;
+
+/** The most levels a patch lies below the ancestor of its field's cells that `cells.y` places it in. */
+export const MAX_CELL_ANCESTOR_LEVELS = 13;
+
+/**
+ * `Instance.cells.y`: the place of a patch of (`i`, `j`) in its ancestor `levels` up
+ * (`terrainPatch.wgsl`'s `ancestorPatchUv`): bits 0 to 4 the levels d, bits 5 to 17 i mod 2^d,
+ * bits 18 to 30 j mod 2^d.
+ *
+ * @throws RangeError for levels that are not a whole number 0 to {@link MAX_CELL_ANCESTOR_LEVELS}.
+ */
+export function cellAncestorPlace(levels: number, i: number, j: number): number {
+  if (!Number.isInteger(levels) || levels < 0 || levels > MAX_CELL_ANCESTOR_LEVELS) {
+    throw new RangeError(
+      `a cell ancestor ${levels} levels up is not 0 to ${MAX_CELL_ANCESTOR_LEVELS}`,
+    );
+  }
+  const mask = 2 ** levels - 1;
+  return (levels | ((i & mask) << 5) | ((j & mask) << 18)) >>> 0;
+}
 
 /** The instance record's 32-bit words a reader takes by index (the struct above): its `slot`. */
 export const INSTANCE_SLOT_WORD = 3;
@@ -543,7 +574,45 @@ export class InstanceRecords {
     this.#f32[base + 13] = strideBandsM[1];
     this.#f32[base + 14] = strideBandsM[2];
     this.#f32[base + 15] = 0;
+    this.#u32[base + 16] = NO_PARENT_SLOT;
+    this.#u32[base + 17] = 0;
+    this.#u32[base + 18] = 0;
+    this.#u32[base + 19] = 0;
     this.#count += 1;
+  }
+
+  /**
+   * Sets the last record's class sets (lane fix-coast-class-map; `terrainLit.wgsl`'s
+   * `class_sets`): the ancestor of its field's cells' level whose class weights it fades to, the
+   * fade and its flags. A record takes none until this is called: no ancestor, no fade, no flag.
+   *
+   * @param ancestorSlot - The ancestor's slot, or {@link NO_PARENT_SLOT} for none.
+   * @param place - The patch's place in it ({@link cellAncestorPlace}).
+   * @param fade - The fade to it, 0 to 1.
+   * @param flags - {@link CLASS_MORPH}, or 0.
+   * @throws RangeError with no record this frame, or for a slot, place, fade or flags out of range.
+   */
+  setCells(ancestorSlot: number, place: number, fade: number, flags: number): void {
+    if (this.#count === 0) {
+      throw new RangeError("no record to set the class sets of");
+    }
+    if (!Number.isInteger(ancestorSlot) || ancestorSlot < 0 || ancestorSlot > NO_PARENT_SLOT) {
+      throw new RangeError(`ancestor slot ${ancestorSlot} is not a u32`);
+    }
+    if (!Number.isInteger(place) || place < 0 || place > 0x7fff_ffff) {
+      throw new RangeError(`cell ancestor place ${place} is not 31 bits`);
+    }
+    if (!(fade >= 0 && fade <= 1)) {
+      throw new RangeError(`class fade ${fade} is not 0 to 1`);
+    }
+    if (flags !== 0 && flags !== CLASS_MORPH) {
+      throw new RangeError(`class flags ${flags} are not 0 or CLASS_MORPH`);
+    }
+    const base = (this.#count - 1) * F32_WORDS_PER_INSTANCE;
+    this.#u32[base + 16] = ancestorSlot;
+    this.#u32[base + 17] = place;
+    this.#f32[base + 18] = fade;
+    this.#u32[base + 19] = flags;
   }
 
   /**

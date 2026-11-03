@@ -42,6 +42,9 @@ import { CLASS_MAP_LEVEL, classMapLawsOf } from "./classMap";
 import { CoverageView } from "./coverage";
 import {
   cellPatchLevel,
+  CLASS_FADE_FAR,
+  CLASS_FADE_NEAR,
+  classCellFade,
   drawsCells,
   handoverRangeM,
   handoverRangeRatio,
@@ -795,5 +798,27 @@ describe("the hand-over at the field's cells (lane fix-coast-class-map; HANDOVER
       drawsCells(drawSet, 2, second),
       drawsCells(drawSet, 2),
     ]).toEqual([true, false, false]);
+  });
+});
+
+describe("a lit terrain's fade to its cells' class weights (lane fix-coast-class-map)", () => {
+  it("fades from 1 at three quarters of the hand-over's ratio outwards to 0 at half that, both switches within it", () => {
+    expect(
+      [
+        CLASS_FADE_FAR,
+        CLASS_FADE_NEAR,
+        classCellFade(1 / 1.1),
+        classCellFade(1 / 0.9),
+        classCellFade(Number.POSITIVE_INFINITY),
+        classCellFade((CLASS_FADE_FAR + CLASS_FADE_NEAR) / 2),
+        classCellFade(CLASS_FADE_NEAR),
+        classCellFade(0),
+        classCellFade(Number.NaN),
+      ].map((value) => Math.round(value * 1e12) / 1e12),
+    ).toEqual(
+      [0.75 / 1.1, 0.375 / 1.1, 1, 1, 1, 0.5, 0, 0, 0].map(
+        (value) => Math.round(value * 1e12) / 1e12,
+      ),
+    );
   });
 });
