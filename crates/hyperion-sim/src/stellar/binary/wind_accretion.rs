@@ -1,11 +1,10 @@
-//! The hold on a wide pair's wind accretion (plan 11, P11.T12's fix, at
-//! [`WIND_ACCRETION_VERSION`]).
+//! A wide pair's wind accretion (plan 11, P11.T12's fix).
 //!
-//! As built, a pair whose stars never reach their Roche lobes, on the drawn orbit or after the
-//! engine's sinks have shrunk it, is passed over by the pre-test ([`can_interact`]) as two single
-//! stars on their orbit, plan 06's own. So the Bondi–Hoyle accretion of Hurley, Tout and Pols
-//! (2002, MNRAS 329, 897, "BSE", equations 6–10), which the engine takes in `detached.rs`, never
-//! feeds the wide pairs whose wind transfer makes the field's long-period blue stragglers (P of
+//! As first built, a pair whose stars never reach their Roche lobes, on the drawn orbit or after
+//! the engine's sinks have shrunk it, was passed over by the pre-test ([`can_interact`]) as two
+//! single stars on their orbit, plan 06's own. So the Bondi–Hoyle accretion of Hurley, Tout and
+//! Pols (2002, MNRAS 329, 897, "BSE", equations 6–10), which the engine takes in `detached.rs`,
+//! never fed the wide pairs whose wind transfer makes the field's long-period blue stragglers (P of
 //! 10²–10⁴ d, low e, white-dwarf companions: Preston and Sneden 2000, AJ 120, 1014; Carney et al.
 //! 2005, AJ 129, 466; recalled, not read in the pod). research-leans-29 found, under every 27 hold,
 //! 0.215 blue stragglers per horizontal-branch star in the halo against the halo field's about 4,
@@ -13,8 +12,8 @@
 //! halo's companions within 0.25 M☉ under the turn-off beside an evolved primary, about 12.5 per
 //! horizontal-branch star stayed detached at P ≥ 10³ d, every one with no mass accreted.
 //!
-//! From 27 ([`WindAccretionRules::WindRocheLobe`]) a pair the lobe and decay tests pass over is
-//! walked over its partner's own track: a hydrogen main-sequence star of at least 0.1 M☉ on its own
+//! So ([`WindAccretionRules::WindRocheLobe`]) a pair the lobe and decay tests pass over is walked
+//! over its partner's own track: a hydrogen main-sequence star of at least 0.1 M☉ on its own
 //! track takes BSE's equation-6 share of its partner's wind ([`bondi_hoyle_share`], the engine's own
 //! expression), with equation 9's wind speed and at most equation 10's 0.8, or, beside a partner on
 //! its asymptotic giant branch, the larger share of wind Roche-lobe overflow
@@ -45,8 +44,8 @@
 //! classified from the state, as before) nor a giant nor a star below 0.1 M☉ takes a wind here; and
 //! the accretor's later radius on its new track is not tested against its lobe.
 //!
-//! The rules' one reading is [`onset`], which [`can_interact`] and `evolve`'s pass-over read
-//! through the input's rules. The pair's past does not depend on the age it is run to: the steps
+//! Its one reading is [`onset`], which [`can_interact`] and `evolve`'s pass-over read. The pair's
+//! past does not depend on the age it is run to: the steps
 //! are the partner's track's own, the onset is read at the start of a step, and the last step taken
 //! is the one that reaches or passes the age, as the engine's is (`detached::StepLimit`).
 //!
@@ -55,10 +54,8 @@
 
 use std::sync::Arc;
 
-use crate::GeneratorVersion;
 use crate::planetary::context::UNIVERSE_AGE;
 use crate::stellar::Phase;
-use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{self, Track};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{SolarMasses, Years};
@@ -73,29 +70,13 @@ use super::rlof::rejuvenated_tau_unheld;
 use super::star::{G, Kind, Member, Path};
 use super::timeline::{BinaryInput, BinaryTimeline, Context, Segment, SegmentKind};
 
-/// The generator version whose stellar rules give a passed-over pair's main-sequence star its share
-/// of its partner's wind (P11.T12's fix): [`WindAccretionRules::WindRocheLobe`].
-///
-/// Below it every pair takes the held arm, [`WindAccretionRules::OwnTracks`], the code of version
-/// 24 verbatim, so every generated value keeps its bits; the tests reach the new arm through
-/// `StellarRules::every_27_hold()`. The bump to 27 deletes this hold: [`WindAccretionRules`], the
-/// stellar rules' `wind_accretion` field, [`onset`]'s read of it, the brief's read of
-/// [`WindAccretionRules::fitted_tables_hold`], and the tripwire
-/// (`the_wind_accretion_is_held_only_until_the_27_bump`). The bump refits the pair-light and reach
-/// tables, which the engine's runs fit, and gives `pair_light_bound`'s `Detached` the wind's reach,
-/// which `detached_generated_pairs_are_passed_over` then asks of it.
-pub(crate) const WIND_ACCRETION_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether a passed-over pair's stars take each other's wind (the stellar rules' `wind_accretion`
-/// field, the hold of [`WIND_ACCRETION_VERSION`]).
+/// Which share of its partner's wind a passed-over pair's main-sequence star takes: the input's
+/// arm (`BinaryInput::wind`), 27's in every generated pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum WindAccretionRules {
-    /// Version 26's and before: a pair the lobe and decay tests pass over is two single stars on
-    /// their orbit, plan 06's own.
-    OwnTracks,
     /// Its main-sequence star takes its Bondi–Hoyle share of its partner's wind alone, and from
-    /// [`LEAST_ACCRETED_MSUN`] the pair is wind-fed: the arm as first built, which no version
-    /// takes, for the tests that hold the closed form against the engine's own Bondi–Hoyle wind.
+    /// [`LEAST_ACCRETED_MSUN`] the pair is wind-fed: the arm as first built, which no pair takes
+    /// but in the tests that hold the closed form against the engine's own Bondi–Hoyle wind.
     #[cfg(test)]
     BondiHoyle,
     /// Version 27's: as [`WindAccretionRules::BondiHoyle`], with the larger share of wind Roche-lobe
@@ -104,36 +85,15 @@ pub(crate) enum WindAccretionRules {
 }
 
 impl WindAccretionRules {
-    /// Whether a passed-over pair's stars take each other's wind under these rules.
-    #[must_use]
-    pub(crate) const fn accretes(self) -> bool {
-        match self {
-            Self::OwnTracks => false,
-            #[cfg(test)]
-            Self::BondiHoyle => true,
-            Self::WindRocheLobe => true,
-        }
-    }
-
-    /// Whether an AGB partner's wind overflows to its companion through its Roche lobe under these
-    /// rules ([`wind_roche_lobe_share`]).
+    /// Whether an AGB partner's wind overflows to its companion through its Roche lobe under this
+    /// arm ([`wind_roche_lobe_share`]).
     #[must_use]
     const fn overflows(self) -> bool {
         match self {
-            Self::OwnTracks => false,
             #[cfg(test)]
             Self::BondiHoyle => false,
             Self::WindRocheLobe => true,
         }
-    }
-
-    /// Whether the tables fitted offline from the binary engine's runs, and the closed-form bound
-    /// beside them (the pair-light and reach tables and `pair_light_bound`'s `Detached`, which the
-    /// range brief's gate reads), hold for a pair under this arm: under the version's arm only,
-    /// until the bump refits them.
-    #[must_use]
-    pub(crate) fn fitted_tables_hold(self) -> bool {
-        self == StellarRules::of_version(crate::GENERATOR_VERSION).wind_accretion
     }
 }
 
@@ -301,7 +261,7 @@ impl<'a> Walk<'a> {
             e: orbit.eccentricity().value(),
             total0: m1 + m2,
             steps_per_interval: STEPS_PER_INTERVAL,
-            overflows: input.rules().wind_accretion.overflows(),
+            overflows: input.wind().overflows(),
         })
     }
 
@@ -470,7 +430,7 @@ impl<'a> Walk<'a> {
 }
 
 /// Where the pair of `input`, whose own `members` the lobe and decay tests pass over by `until`
-/// years, becomes wind-fed under the input's rules ([`WindAccretionRules`]), if it does by then:
+/// years, becomes wind-fed under the input's arm ([`WindAccretionRules`]), if it does by then:
 /// the earlier of its two stars' onsets, the primary's first.
 ///
 /// None for a pair that its lobe and decay tests send to the engine at some later age up to
@@ -480,9 +440,6 @@ impl<'a> Walk<'a> {
 /// run to; and the closed form records no supernova, whether P11.T10's fix runs the pair or not.
 #[must_use]
 pub(super) fn onset(input: &BinaryInput, members: &[Member; 2], until: f64) -> Option<Onset> {
-    if !input.rules().wind_accretion.accretes() {
-        return None;
-    }
     (0..2)
         .filter_map(|accretor| {
             let walk = Walk::of(input, members, accretor)?;

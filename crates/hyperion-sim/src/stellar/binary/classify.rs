@@ -1297,7 +1297,7 @@ mod tests {
     use crate::stellar::StarState;
     use crate::stellar::binary::tests::{describe, pair, period_days};
     use crate::stellar::binary::{
-        BinaryInput, BinaryMarks, BinaryParams, MarkedMerger, MarkedPhase, can_interact, evolve,
+        BinaryInput, BinaryMarks, BinaryParams, MarkedMerger, MarkedPhase, evolve,
     };
     use crate::stellar::multiplicity::MultiplicityModel;
     use crate::units::{Days, Dex, GravitationalParameter, HeliumExcess, Radians, Seconds};
@@ -1759,14 +1759,17 @@ mod tests {
         assert_eq!(class(dwarf, carved).0, persistent);
     }
 
-    /// Design note 7: a pair too wide to interact is classified from its state, and a white dwarf
-    /// fed by its companion's giant wind is a symbiotic star however wide the orbit.
+    /// Design note 7: a pair too wide for the engine to run, detached throughout, is classified
+    /// from its state, and a white dwarf fed by its companion's giant wind is a symbiotic star
+    /// however wide the orbit.
     #[test]
     fn a_wide_white_dwarf_beside_a_giant_is_symbiotic() {
         for period in [3.0e4, 1.0e5, 3.0e5] {
             let input = pair(3.0, 2.6, period, 0.0, 0.02);
             let until = Years::new(1.0e9);
-            if can_interact(&input, until) {
+            // Too wide for the lobe test; since P11.T12's fix the companion takes the primary's
+            // wind on its main sequence, so the pair is wind-fed in closed form, all detached.
+            if crate::stellar::binary::evolve::lobe_reached(&input, until) {
                 continue;
             }
             let t = evolve(&input, until);
@@ -1780,7 +1783,12 @@ mod tests {
                 continue;
             };
             let state = t.state_at(age);
-            assert_eq!(t.segments().len(), 1, "a wide pair is one segment");
+            assert!(
+                t.segments()
+                    .iter()
+                    .all(|s| s.kind() == SegmentKind::Detached),
+                "a wide pair is detached"
+            );
             assert!(is_white_dwarf(state.stars()[0].phase()));
             assert!(is_giant(state.stars()[1].phase()));
             return;

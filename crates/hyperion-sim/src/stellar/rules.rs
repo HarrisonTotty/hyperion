@@ -38,14 +38,6 @@
 //!   reach tables fitted from the engine's runs keep the version's rules until the bump refits
 //!   them, and the range brief's gate refuses them under another arm
 //!   (`stellar/rules/merger_mass_hold.rs` lists the movers).
-//! - [`wind_accretion`](StellarRules::wind_accretion), at [`WIND_ACCRETION_VERSION`] (plan 11,
-//!   P11.T12's fix): whether a pair the pre-test's lobe and decay tests pass over takes its winds,
-//!   two single stars on their orbit below it, from it a main-sequence star fed its Bondi–Hoyle
-//!   share of its partner's wind, or the larger share of an AGB partner's wind Roche-lobe
-//!   overflow, read at one choke point, `wind_accretion::onset`, through the
-//!   pair's input's rules, by `can_interact` and `evolve`'s pass-over. The fitted tables keep the
-//!   version's rules until the bump refits them, and the range brief's gate refuses them under
-//!   another arm (`stellar/rules/wind_accretion_hold.rs` lists the movers).
 //! - [`dwarf_limit`](StellarRules::dwarf_limit), at [`DWARF_LIMIT_VERSION`] (plan 11, P11.T4's
 //!   fix): whether the binary engine holds its white dwarfs below the Chandrasekhar mass and types
 //!   the dwarf a merger's unplaced product leaves by its core, read by `Engine::new_star`'s
@@ -57,12 +49,10 @@
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
 //! [`SystemStars::shown_at`]: crate::stellar::system::SystemStars::shown_at
-//! [`WIND_ACCRETION_VERSION`]: crate::stellar::binary::wind_accretion::WIND_ACCRETION_VERSION
 
 use crate::GeneratorVersion;
 use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
-use crate::stellar::binary::wind_accretion::{WIND_ACCRETION_VERSION, WindAccretionRules};
 use crate::stellar::remnant::KickRankRules;
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -76,9 +66,6 @@ pub(crate) struct StellarRules {
     /// What a dynamically transferring main-sequence pair's merger keeps in the binary engine,
     /// the hold of [`MERGER_MASS_VERSION`].
     pub(crate) merger_mass: MergerMassRules,
-    /// Whether a pair the pre-test's lobe and decay tests pass over takes its winds, the hold of
-    /// [`WIND_ACCRETION_VERSION`].
-    pub(crate) wind_accretion: WindAccretionRules,
     /// Whether the binary engine holds its white dwarfs below the Chandrasekhar mass and types the
     /// dwarf a merger's unplaced product leaves by its core, the hold of [`DWARF_LIMIT_VERSION`].
     pub(crate) dwarf_limit: DwarfLimitRules,
@@ -96,11 +83,6 @@ impl StellarRules {
                 MergerMassRules::Pair
             } else {
                 MergerMassRules::ThermalLimit
-            },
-            wind_accretion: if version.get() >= WIND_ACCRETION_VERSION.get() {
-                WindAccretionRules::WindRocheLobe
-            } else {
-                WindAccretionRules::OwnTracks
             },
             dwarf_limit: if version.get() >= DWARF_LIMIT_VERSION.get() {
                 DwarfLimitRules::Chandrasekhar
@@ -125,8 +107,7 @@ impl StellarRules {
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// those that turn on at 27 (P11.T4's `dwarf_limit`, P11.T4.d's `merger_mass`, and P11.T12's
-    /// `wind_accretion`).
+    /// those that turn on at 27 (P11.T4's `dwarf_limit` and P11.T4.d's `merger_mass`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.

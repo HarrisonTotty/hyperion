@@ -30,6 +30,7 @@ use crate::units::{
 
 use super::params::BinaryParams;
 use super::star::{Member, Path};
+use super::wind_accretion::WindAccretionRules;
 
 /// Which member of a pair: the one the input names first (the inner member's star, body index
 /// order) or the other.
@@ -264,6 +265,10 @@ pub struct BinaryInput {
     params: BinaryParams,
     /// The stellar stage's rules the engine's kicks and tracks read (`stellar::rules`).
     rules: StellarRules,
+    /// The share of its partner's wind a passed-over pair's star takes (`wind_accretion`): 27's,
+    /// or in the tests that hold the closed form against the engine's own wind, the Bondi–Hoyle
+    /// share alone.
+    wind: WindAccretionRules,
 }
 
 /// Why [`BinaryInput::new`] refused its inputs.
@@ -329,6 +334,7 @@ impl BinaryInput {
             age_at_epoch,
             params: BinaryParams::default(),
             rules: StellarRules::of_version(GENERATOR_VERSION),
+            wind: WindAccretionRules::WindRocheLobe,
         })
     }
 
@@ -343,6 +349,21 @@ impl BinaryInput {
     #[must_use]
     pub(crate) const fn with_rules(self, rules: StellarRules) -> Self {
         Self { rules, ..self }
+    }
+
+    /// The same input whose passed-over stars take the share `wind` of each other's wind, for the
+    /// tests that hold the closed form against the engine's own Bondi–Hoyle wind.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn with_wind(self, wind: WindAccretionRules) -> Self {
+        Self { wind, ..self }
+    }
+
+    /// The share of its partner's wind a passed-over pair's star takes (`wind_accretion`): 27's, or
+    /// in a test the one [`with_wind`](Self::with_wind) set.
+    #[must_use]
+    pub(crate) const fn wind(&self) -> WindAccretionRules {
+        self.wind
     }
 
     /// The initial masses, M☉, primary first.

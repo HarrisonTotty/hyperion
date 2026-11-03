@@ -22,10 +22,7 @@ fn halo_pair(period_days: f64) -> BinaryInput {
 
 /// The brief's halo pair under `arm`, on a circular orbit of `period_days`.
 fn halo_pair_under(arm: WindAccretionRules, period_days: f64) -> BinaryInput {
-    pair(0.85, 0.80, period_days, 0.0, 0.0003).with_rules(StellarRules {
-        wind_accretion: arm,
-        ..StellarRules::of_version(crate::GENERATOR_VERSION)
-    })
+    pair(0.85, 0.80, period_days, 0.0, 0.0003).with_wind(arm)
 }
 
 /// What the secondary of `input`, on its own track, takes of the primary's whole wind in `steps`

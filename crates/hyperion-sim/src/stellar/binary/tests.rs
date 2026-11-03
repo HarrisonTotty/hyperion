@@ -163,14 +163,18 @@ fn a_wide_pair_is_two_single_stars() {
     }
 }
 
-/// T4.a: a close pair can interact, and a wide one cannot, by the pre-test's periastron.
+/// T4.a: a close pair can interact, and a wide one cannot, by the pre-test's periastron, which its
+/// lobe test reads. Since P11.T12's fix the wind's onset feeds the 10⁴-day pair whatever its
+/// eccentricity, so the pair still passed over is circular at 10⁶ days, too wide for the wind.
 #[test]
 fn the_pre_test_reads_the_periastron() {
     let until = Years::new(1.2e10);
     assert!(can_interact(&pair(1.2, 0.8, 100.0, 0.0, 0.02), until));
     // A giant reaches about 170 R☉: 10⁴ days is out of reach circular, and in reach at e = 0.95.
-    assert!(!can_interact(&pair(1.2, 0.8, 1.0e4, 0.0, 0.02), until));
+    assert!(!lobe_reached(&pair(1.2, 0.8, 1.0e4, 0.0, 0.02), until));
+    assert!(lobe_reached(&pair(1.2, 0.8, 1.0e4, 0.95, 0.02), until));
     assert!(can_interact(&pair(1.2, 0.8, 1.0e4, 0.95, 0.02), until));
+    assert!(!can_interact(&pair(1.2, 0.8, 1.0e6, 0.0, 0.02), until));
     // By 1 Gyr the 1.2 M☉ star is still on its main sequence.
     assert!(!can_interact(
         &pair(1.2, 0.8, 100.0, 0.0, 0.02),
@@ -2439,41 +2443,25 @@ fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
     assert_eq!(missed + wide_missed, 0, "interactions missed");
 }
 
-/// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] under 27's arm of P11.T12's fix
-/// (`wind_accretion.rs`), which feeds a pair the lobe and decay tests pass over its partner's wind
-/// in closed form: such a pair has the same history to the earlier age as the later run, and one
-/// passed over at the earlier age keeps its stars' own forms to the later run's first event, as
-/// under the held arm, each run on to the universe's age, the horizon to which the closed form
-/// holds a pair the engine runs at no age. The arm runs no pair through the engine that the held
-/// arm does not, and the brief's wind-fed halo pairs have the same history to each earlier age.
+/// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] with each pair run on to the universe's
+/// age, the horizon to which P11.T12's fix (`wind_accretion.rs`), which feeds a pair the lobe and
+/// decay tests pass over its partner's wind in closed form, holds a pair the engine runs at no
+/// age: such a pair has the same history to the earlier age as the later run, and one passed over
+/// at the earlier age keeps its stars' own forms to the later run's first event. The brief's
+/// wind-fed halo pairs have the same history to each earlier age.
 #[test]
 fn a_timeline_is_the_same_whatever_age_it_is_run_to_under_the_wind_accretion_arm() {
     use crate::planetary::context::UNIVERSE_AGE;
-    use crate::stellar::binary::wind_accretion::WindAccretionRules;
-    let rules = StellarRules {
-        wind_accretion: WindAccretionRules::WindRocheLobe,
-        ..StellarRules::of_version(crate::GENERATOR_VERSION)
-    };
     let later = UNIVERSE_AGE.value();
     let [[same, passed, collapsed, missed], _, [_, _, _, wide_missed]] =
-        any_age_over_under(60, 0x0b1e_00a9, Some(rules), later);
-    let [[held_same, held_passed, held_collapsed, _], _, _] =
         any_age_over_under(60, 0x0b1e_00a9, None, later);
-    println!(
-        "{same} same, {passed} passed over and {collapsed} through collapses, against \
-         {held_same}, {held_passed} and {held_collapsed} held"
-    );
+    println!("{same} same, {passed} passed over and {collapsed} through collapses");
     assert_eq!(missed + wide_missed, 0, "interactions missed");
-    assert!(
-        same >= held_same && same + passed + collapsed == held_same + held_passed + held_collapsed,
-        "{same} same, {passed} passed over and {collapsed} through collapses, against \
-         {held_same}, {held_passed} and {held_collapsed} held"
-    );
     // The sample's pairs are rarely wind-fed, so the brief's halo pairs are checked too: 0.85 and
     // 0.80 M☉ at Z = 0.0003, at 10³–10⁴ days, run to ages from 11.5 to 13 Gyr.
     let mut fed = 0;
     for days in [1.0e3, 3.0e3, 1.0e4] {
-        let input = pair(0.85, 0.80, days, 0.0, 0.0003).with_rules(rules);
+        let input = pair(0.85, 0.80, days, 0.0, 0.0003);
         for until in [1.15e10, 1.2e10, 1.3e10] {
             let until = Years::new(until);
             if can_interact(&input, until) {
@@ -3531,7 +3519,8 @@ fn the_pre_test_only_widens_with_age() {
     assert!(passes > 10, "{passes} pairs pass at some age");
 }
 
-/// P11.T4.j: a wide pair is still two single stars. 1 + 0.8 M☉ at 10⁴ d fails at 13.8 Gyr. The
+/// P11.T4.j: a wide pair is still two single stars. 1 + 0.8 M☉ at 10⁶ d fails at 13.8 Gyr (at
+/// 10⁴ d the companion takes the primary's wind since P11.T12's fix). The
 /// bound's boundary for a circular 1 + 0.8 M☉ pair ([Fe/H] 0, median draws) lies at P₀ ≈ 0.73 d
 /// at 1 Gyr and 1.54 d at 10 Gyr, against the science check's 0.64 and 1.22 d from BSE equation
 /// 50 at a locked spin alone (plan 11's Risks): above them by the spins' reservoir and the
@@ -3539,7 +3528,7 @@ fn the_pre_test_only_widens_with_age() {
 #[test]
 fn a_wide_pair_is_still_passed_over() {
     assert!(!can_interact(
-        &pair(1.0, 0.8, 1.0e4, 0.0, 0.02),
+        &pair(1.0, 0.8, 1.0e6, 0.0, 0.02),
         Years::new(1.38e10)
     ));
     let tracks = full_tracks(&pair(1.0, 0.8, 1.0, 0.0, 0.02));
