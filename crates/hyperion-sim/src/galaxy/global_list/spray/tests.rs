@@ -270,28 +270,6 @@ fn a_spray_and_its_table_are_shared_between_threads() {
     shared::<SprayForce>();
 }
 
-/// The tripwire of the hold: below 27 every galaxy sprays every stream at the step rule's 64 and
-/// 1,000 tracers an arm.
-#[test]
-fn the_orphan_spray_is_held_only_until_the_27_bump() {
-    assert!(
-        crate::GENERATOR_VERSION < ORPHAN_SPRAY_VERSION,
-        "the 26 → 27 bump sprays every orphan's tube from 500 tracers an arm at ruling 146.3's \
-         τ_p ÷ 32 (P10.T10.b's warm-up): every orphan's tube table, its members and the range \
-         query's answers in it move, but no golden file (checked with the hold at 24). Delete \
-         `ORPHAN_SPRAY_VERSION`, `OrphanSprayRules` with its `Exact` arm, \
-         `GalaxyRules::orphan_spray` and this test in the bump's own commit, and re-pin by name \
-         the server's slow warm-up test (`the_warm_up_readies_every_track_and_a_range_query_\
-         finds_a_stream_s_members`: its tables' digest and range answers) and P10.T12's \
-         `a_drawn_galaxy_s_tubes_and_contrast_keep_their_measured_figures` (the globular tubes' \
-         median length falls 6.1 %)"
-    );
-    assert_eq!(
-        crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION).orphan_spray,
-        OrphanSprayRules::Exact
-    );
-}
-
 /// The Milky Way fixture's full tables and their spray table, built once for the checks below.
 mod milky_way {
     use std::sync::OnceLock;
@@ -367,9 +345,9 @@ mod milky_way {
         the_energy_at_release_names_each_tracer_s_arm();
     }
 
-    /// P10.T10.b's orphan spray, held at 27: through 26 every test stream is sprayed at the
-    /// generator's default; under 27's rules `gd1_like`, an orphan, from 500 tracers an arm at
-    /// `τ_p ÷ 32`, its step count halved, and `pal5_like` and `sagittarius_like` as before. At `τ_p
+    /// P10.T10.b's orphan spray, from 27: `gd1_like`, an orphan, from 500 tracers an arm at `τ_p ÷
+    /// 32`, its step count halved, and `pal5_like` and `sagittarius_like` at the generator's
+    /// default. At `τ_p
     /// ÷ 32` each tracer's energy at the epoch is its energy at release within ruling 146.3's 5 ×
     /// 10⁻⁴ (the leapfrog's error, the potential being static; 5.2 × 10⁻⁵ at worst over 200
     /// tracers at generator version 25, 5.3 × 10⁻⁵ at 24 and at 26, x86-64), and a spray of the
@@ -379,22 +357,14 @@ mod milky_way {
     fn under_27_an_orphan_is_sprayed_from_half_its_tracers_at_half_its_steps() {
         let f = fixture();
         let streams = test_streams();
-        for (name, spec) in &streams {
-            assert_eq!(
-                OrphanSprayRules::Exact.params(spec),
-                SprayParams::default(),
-                "{name}"
-            );
-        }
-        let coarse = OrphanSprayRules::Coarse;
-        assert_eq!(coarse.params(&streams[0].1), SprayParams::default());
-        assert_eq!(coarse.params(&streams[2].1), SprayParams::default());
+        assert_eq!(SprayParams::of_spec(&streams[0].1), SprayParams::default());
+        assert_eq!(SprayParams::of_spec(&streams[2].1), SprayParams::default());
         let (name, gd1) = &streams[1];
         assert!(
             matches!(gd1.mass_loss(), MassLoss::Dissolved { .. }),
             "{name}"
         );
-        let params = coarse.params(gd1);
+        let params = SprayParams::of_spec(gd1);
         assert_eq!(
             (params.tracers_per_arm(), params.steps_per_crossing()),
             (ORPHAN_TRACERS_PER_ARM, ORPHAN_STEPS_PER_CROSSING)
