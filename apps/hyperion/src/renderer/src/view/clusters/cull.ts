@@ -69,7 +69,7 @@ export interface CullInstance {
   readonly unitM: number;
   /**
    * Whether each pass it enters keeps every cluster of it, its spheres untested
-   * ({@link CULL_INPUT_WHOLE}; plan R10, R10.T16.i's fades); absent, not.
+   * ({@link CULL_INPUT_WHOLE}; plan R10, R10.T16.i's fades and sub-patches); absent, not.
    */
   readonly whole?: boolean;
   /**
@@ -89,7 +89,8 @@ export interface CullInstance {
  * The bit of an instance's cull input (the passes' mask's word) by which each pass it enters keeps
  * every cluster of it, its records' spheres untested: terrain's instance whose heights fade from
  * another surface (plan R10, R10.T16.i; plan R14's design note on culling), which its slot's
- * records, of its newer bake alone, do not bound.
+ * records, of its newer bake alone, do not bound, and its sub-patch (`DrawnPatch.within`), whose
+ * grid placed over a finer area they do not bound either.
  */
 export const CULL_INPUT_WHOLE = 0x8000_0000;
 

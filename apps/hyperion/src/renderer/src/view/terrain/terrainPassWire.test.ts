@@ -21,6 +21,7 @@ import type {
   RenderTargetFormat,
   WgslMaterialSpec,
 } from "../engine/types";
+import { CULL_INPUT_WHOLE } from "../clusters/cull";
 import { CULL_PASS_BYTES } from "../clusters/cullPass";
 import {
   GEOMETRY_BEFORE_R14,
@@ -33,7 +34,11 @@ import {
 import { vertexDir } from "./cube";
 import { finestPatchSizeM, heldRadiusM, morphRampM } from "./grounded";
 import { CLUSTER_LIT_PASS } from "./gpu/resources";
-import { INSTANCE_RECORD_BYTES, WIRE_PHASE_RECORD_BYTES } from "./gpu/uniforms";
+import {
+  INSTANCE_RECORD_BYTES,
+  INSTANCE_SUB_PATCH_WORD,
+  WIRE_PHASE_RECORD_BYTES,
+} from "./gpu/uniforms";
 import { type PatchKey, patchKeyString } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
 import { PRIMARY_VIEW_WEIGHT } from "./priority";
@@ -832,6 +837,28 @@ describe("the wireframe's interior patches on the cluster path (plan R14, R14.T4
           : []),
       ],
     ]);
+  });
+
+  it("draws a stand-in of an interior bake among them, a sub-patch kept whole by the cull", async () => {
+    const made = await clusteredPass();
+    streamed(made);
+    // Nearer, with nothing baked: the finer patches asked for are drawn by their resident ancestors.
+    const nearer = northPole(200_000);
+    made.pass.step({ views: [passView(nearer)], grounded: [] });
+    made.pass.drawFor(PRIMARY, frameOf(nearer, WIRE));
+    const records = new Uint32Array(
+      lastWrite(made.engine, `terrain interior instances (${PRIMARY})`),
+    );
+    const inputs = new Uint32Array(
+      lastWrite(made.engine, `terrain clusters (${PRIMARY}) cull inputs`),
+    );
+    const subPatches = Array.from({ length: records.length / WORDS }, (_, k) => k).filter(
+      (k) => (records[k * WORDS + INSTANCE_SUB_PATCH_WORD] ?? 0) !== 0,
+    );
+    expect([
+      subPatches.length > 0,
+      subPatches.every((k) => ((inputs[2 * k] ?? 0) & CULL_INPUT_WHOLE) !== 0),
+    ]).toEqual([true, true]);
   });
 
   it("culls them by one ordered camera pass at stride 1 and compacts them in the draw set's order", async () => {

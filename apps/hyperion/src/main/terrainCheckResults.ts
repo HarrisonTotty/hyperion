@@ -881,7 +881,7 @@ function wholeFinding(whole: TerrainWholeRecord, record: TerrainCheckRecord): Te
     // pass the selection's budget, but not the cache's slots, twice it.
     if (mostPatchesDrawn > 2 * whole.selectionBudget) {
       reasons.push(
-        `${String(mostPatchesDrawn)} patches drawn at once, over the cache's ${String(2 * whole.selectionBudget)} slots`,
+        `${String(mostPatchesDrawn)} patches drawn at once, over twice the selection's budget, ${String(2 * whole.selectionBudget)}, the cache's slots`,
       );
     }
   }

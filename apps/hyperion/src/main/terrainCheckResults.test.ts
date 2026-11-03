@@ -560,7 +560,10 @@ describe("the whole-body run's results (R10.T14.c)", () => {
     [{ surveyEdgeSamples: 2 }, "a SURVEY EDGE named in 2 of 400 samples"],
     [{ textSamples: 0 }, "the page's text was never sampled"],
     [{ selectionBudget: 54 }, "55 patches selected at once, over the selection's budget of 54"],
-    [{ selectionBudget: 30 }, "61 patches drawn at once, over the cache's 60 slots"],
+    [
+      { selectionBudget: 30 },
+      "61 patches drawn at once, over twice the selection's budget, 60, the cache's slots",
+    ],
     [{ selectionBudget: null }, "no lit pass's selection budget was read"],
   ] as const)("fail on %j", (change, reason) => {
     const results = buildTerrainCheckResults(wholeInput({ ...WHOLE, ...change }));

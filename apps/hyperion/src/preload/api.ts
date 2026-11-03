@@ -1358,7 +1358,8 @@ export interface TerrainCheckViewRecord {
   /** Of those, the draws whose submissions held a draw of the terrain's lit material. */
   readonly terrainDraws: number;
   /**
-   * Handed-over draws without the terrain after its first terrain draw of the phase, outside the
+   * Handed-over draws without the terrain after its first terrain draw of the phase, or from the
+   * phase's first frame where it drew the terrain on its session before the phase, outside the
    * loss's restore: a terrain once drawn that went missing.
    */
   readonly terrainGaps: number;

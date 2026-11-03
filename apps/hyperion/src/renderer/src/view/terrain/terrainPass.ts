@@ -4392,7 +4392,8 @@ export class TerrainPass {
    * View `state`'s wireframe interior patches' cluster path (plan R14, R14.T4.c): its buckets, the
    * lit pass's ordered camera pass alone, and the bucket draws' shared part, the wireframe draw
    * `beside`'s but its mesh, indirect arguments and material, with the interior records, their
-   * phases and the lists; each interior record's cull input the lit pass's bit.
+   * phases and the lists; each interior record's cull input the lit pass's bit, and
+   * `CULL_INPUT_WHOLE` for a sub-patch ({@link ViewState.interiorWhole}).
    *
    * @throws Error where the frame splits its interior patches ({@link TerrainPass}'s `#wireSplits`)
    *   but a part is missing.
@@ -4993,7 +4994,8 @@ export class TerrainPass {
    * interior record's cull input is its level's largest vertex spacing, its passes none until the
    * casters' or the overlay's mark them. An edge patch's record on the path (plan R14, R14.T1.g)
    * takes {@link FIN_ERROR_UNIT_M} as its unit, so that it casts at stride 1, and a record whose
-   * heights fade (R10.T16.i) `CULL_INPUT_WHOLE`, so that the cull keeps its every cluster; where
+   * heights fade (R10.T16.i), or a sub-patch, `CULL_INPUT_WHOLE`, so that the cull keeps its every
+   * cluster ({@link ViewState.interiorWhole}); where
    * the frame holds an edge patch, the may-discard buckets' draws' shared parts come too.
    */
   #clusterPath(device: Device, state: ViewState, forms: LitForms): ClusterPath | null {

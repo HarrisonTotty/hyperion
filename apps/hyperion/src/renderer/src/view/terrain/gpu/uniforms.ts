@@ -71,6 +71,8 @@ export const INSTANCE_RECORD_BYTES = 64;
 export const INSTANCE_SLOT_WORD = 3;
 /** Its `parentSlot`. */
 export const INSTANCE_PARENT_SLOT_WORD = 6;
+/** Its `sub.x`, the sub-patch it draws of its slot's patch ({@link subPatchWord}), 0 for the whole. */
+export const INSTANCE_SUB_PATCH_WORD = 8;
 /** Its `sub.w`, the fades' word ({@link fadeWord}). */
 export const INSTANCE_FADES_WORD = 11;
 

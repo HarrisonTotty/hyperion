@@ -61,6 +61,7 @@ import {
   INSTANCE_PARENT_SLOT_WORD,
   INSTANCE_RECORD_BYTES,
   INSTANCE_SLOT_WORD,
+  INSTANCE_SUB_PATCH_WORD,
   mixStep,
   NO_PARENT_SLOT,
   PARENT_MIX_SLOT,
@@ -1564,6 +1565,20 @@ function keptWhole(words: ReadonlyArray<number>): boolean[] {
   return words.filter((_, k) => k % 2 === 0).map((word) => (word & CULL_INPUT_WHOLE) !== 0);
 }
 
+/** `made` stepped nearer with nothing baked: the finer patches asked for drawn by their ancestors. */
+function nearerUnbaked(made: Made): void {
+  const nearer = viewOver(10);
+  made.pass.step({ views: [passView(PRIMARY, nearer)], grounded: [] });
+  made.pass.drawFor(PRIMARY, frameOf(nearer, true));
+}
+
+/** The stand-ins of `made`'s last draw set. */
+function standInsOf(made: Made): number {
+  return (made.pass.lastStep?.drawSet.patches ?? [])
+    .slice(0, made.pass.lastStep?.drawSet.count ?? 0)
+    .filter((entry) => entry.standIn).length;
+}
+
 describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
   /**
    * A body's layers surveyed on the patch's half x < 32 alone, of a field 20 levels deep: its patches
@@ -1640,32 +1655,33 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
     expect(cascadesOf(frame).litMeshCasters).toEqual([0, 0, 0, 0]);
   });
 
-  it("draws a stand-in of an interior bake on the cluster path, a sub-patch kept whole by the cull, and one of an edge bake by the lit mesh", async () => {
-    const interiorMade = await clusteredPass();
-    // Nearer, with nothing baked: the finer patches asked for are drawn by their resident ancestors.
-    const nearer = viewOver(10);
-    interiorMade.pass.step({ views: [passView(PRIMARY, nearer)], grounded: [] });
-    interiorMade.pass.drawFor(PRIMARY, frameOf(nearer, true));
-    const drawSet = interiorMade.pass.lastStep?.drawSet;
-    const entries = (drawSet?.patches ?? []).slice(0, drawSet?.count ?? 0);
-    const inputs = wordsIn(interiorMade.engine, `terrain clusters (${PRIMARY}) cull inputs`);
-    const subPatches = entries.flatMap((entry, n) =>
-      entry.within === null ? [] : [(inputs[2 * n] ?? 0) >>> 31],
-    );
-    const made = await edgePass();
-    made.pass.step({ views: [passView(PRIMARY, nearer)], grounded: [] });
-    made.pass.drawFor(PRIMARY, frameOf(nearer, true));
-    const edgeSet = made.pass.lastStep?.drawSet;
-    const edgeStandIns = (edgeSet?.patches ?? [])
-      .slice(0, edgeSet?.count ?? 0)
-      .filter((entry) => entry.standIn).length;
+  it("draws a stand-in of an interior bake on the cluster path", async () => {
+    const made = await clusteredPass();
+    nearerUnbaked(made);
     expect([
-      entries.filter((entry) => entry.standIn).length > 0,
-      recordsIn(interiorMade.engine, `terrain instances (${PRIMARY})`).length,
-      subPatches.length > 0 && subPatches.every((bit) => bit === 1),
-      edgeStandIns > 0,
-      recordsIn(made.engine, `terrain instances (${PRIMARY})`).length,
-    ]).toEqual([true, 0, true, true, edgeStandIns]);
+      standInsOf(made) > 0,
+      recordsIn(made.engine, `terrain instances (${PRIMARY})`),
+    ]).toEqual([true, []]);
+  });
+
+  it("keeps a sub-patch of an interior bake whole in the cull, its grid not its slot's records'", async () => {
+    const made = await clusteredPass();
+    nearerUnbaked(made);
+    const records = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+    const whole = keptWhole(wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`));
+    const subPatches = whole.filter(
+      (_, k) => (records[k * (INSTANCE_RECORD_BYTES / 4) + INSTANCE_SUB_PATCH_WORD] ?? 0) !== 0,
+    );
+    expect([subPatches.length > 0, subPatches.every(Boolean)]).toEqual([true, true]);
+  });
+
+  it("draws a stand-in of an edge bake by the lit mesh", async () => {
+    const made = await edgePass();
+    nearerUnbaked(made);
+    const standIns = standInsOf(made);
+    expect([standIns > 0, recordsIn(made.engine, `terrain instances (${PRIMARY})`).length]).toEqual(
+      [true, standIns],
+    );
   });
 
   it("reuses their casters, the fin caster's among them, on a still camera, and renders them once again where the fins' lever turns (R14.T6.a)", async () => {

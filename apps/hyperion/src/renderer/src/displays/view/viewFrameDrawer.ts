@@ -270,7 +270,7 @@ export function terrainReportOf(
   regimes: ReadonlyMap<BodyIdHex, LitRegime>,
   streamPriority: ViewBudget["streamPriority"],
   drawnStyle: RenderStyle,
-  regimesFromM: ReadonlyMap<BodyIdHex, Vec3> | null = null,
+  regimesFromM: ReadonlyMap<BodyIdHex, Vec3> | null,
 ): TerrainViewReport | null {
   const { run, size } = inputs;
   if (size === null) {

@@ -216,8 +216,9 @@ export class SpikeSessionView {
 
   /**
    * Notes what it draws this frame with `session` (`TerrainSession.noteView`), for the step that
-   * follows: `terrainReportOf` of `inputs`, its drawer's regimes, its streaming priority and the
-   * style it last drew in, with its readout body; nothing while its stage is not laid out.
+   * follows: `terrainReportOf` of `inputs`, its drawer's regimes and where they were planned, its
+   * streaming priority and the style it last drew in, with its readout body; nothing while its
+   * stage is not laid out.
    */
   note(session: SpikeViewSession, inputs: ViewFrameInputs): void {
     const report = terrainReportOf(
@@ -225,6 +226,7 @@ export class SpikeSessionView {
       this.#drawer.regimes,
       this.#options.streamPriority,
       this.#drawnStyle,
+      this.#drawer.regimesFromM,
     );
     if (report === null) {
       return;

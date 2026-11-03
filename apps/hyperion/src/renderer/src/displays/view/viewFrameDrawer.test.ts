@@ -419,7 +419,7 @@ describe("what a view drew, for the terrain session (R10.T16.a)", () => {
   it("reports its scene, pose, field of view, presented and selection sizes, styles, setting and priority", () => {
     const inputs = inputsOf("wireframe", 1.5);
     const regimes = new Map();
-    expect(terrainReportOf(inputs, regimes, "secondary", "photorealistic")).toEqual({
+    expect(terrainReportOf(inputs, regimes, "secondary", "photorealistic", null)).toEqual({
       scene: inputs.run.scene,
       pose: runPose(inputs.run),
       fovXRad: (inputs.run.camera.fovDeg * Math.PI) / 180,
@@ -437,7 +437,13 @@ describe("what a view drew, for the terrain session (R10.T16.a)", () => {
 
   it("reports nothing while its stage is not laid out", () => {
     expect(
-      terrainReportOf({ ...inputsOf("wireframe"), size: null }, new Map(), "primary", "wireframe"),
+      terrainReportOf(
+        { ...inputsOf("wireframe"), size: null },
+        new Map(),
+        "primary",
+        "wireframe",
+        null,
+      ),
     ).toBe(null);
   });
 

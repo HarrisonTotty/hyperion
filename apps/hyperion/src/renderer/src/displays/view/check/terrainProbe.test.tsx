@@ -583,45 +583,52 @@ describe("the terrain probe (R10.T16.d)", () => {
   });
 
   it.each([
-    { session: "the session that drew it before the phase", fresh: false, gaps: 1 },
-    { session: "a fresh session", fresh: true, gaps: 0 },
-  ])(
-    "counts a handed-over draw with no terrain at a phase's first frame as a gap on $session (the owner's Mac A/B)",
-    async ({ fresh, gaps }) => {
-      const page = new FakePage();
-      const { probe, primary, stop } = await probedPage(page);
-      const handing = new Set<string>(["view"]);
-      const release = probe.watchTerrain(watchedSession(handing, { count: 12 }));
-      const draw = (terrain: boolean): void => {
-        primary.render(frame("tonemap", terrain ? [`${TERRAIN_LIT_PREFIX}baked-offsets`] : []));
-      };
-      page.frame(100, () => {
-        draw(true);
-      });
-      if (fresh) {
-        release();
-        probe.watchTerrain(watchedSession(handing, { count: 12 }));
-      }
-      page.nowMs = 110;
-      const start = probe.mark();
-      page.frame(116, () => {
-        draw(false);
-      });
-      page.frame(133, () => {
-        draw(true);
-      });
-      page.nowMs = 140;
-      const record = probe.phase(
-        "terrain-photoreal-wireframe",
-        start,
-        probe.mark(),
-        [{ name: "view", style: "photorealistic" }],
-        null,
-      );
-      stop();
-      expect(record.views[0]?.terrainGaps).toBe(gaps);
+    {
+      title:
+        "counts a handed-over draw with no terrain at a phase's first frame as a gap where the view drew the terrain on its session before",
+      fresh: false,
+      gaps: 1,
     },
-  );
+    {
+      title:
+        "leaves a handed-over draw with no terrain at a phase's first frame uncounted on a fresh session",
+      fresh: true,
+      gaps: 0,
+    },
+  ])("$title (the owner's Mac A/B)", async ({ fresh, gaps }) => {
+    const page = new FakePage();
+    const { probe, primary, stop } = await probedPage(page);
+    const handing = new Set<string>(["view"]);
+    const release = probe.watchTerrain(watchedSession(handing, { count: 12 }));
+    const draw = (terrain: boolean): void => {
+      primary.render(frame("tonemap", terrain ? [`${TERRAIN_LIT_PREFIX}baked-offsets`] : []));
+    };
+    page.frame(100, () => {
+      draw(true);
+    });
+    if (fresh) {
+      release();
+      probe.watchTerrain(watchedSession(handing, { count: 12 }));
+    }
+    page.nowMs = 110;
+    const start = probe.mark();
+    page.frame(116, () => {
+      draw(false);
+    });
+    page.frame(133, () => {
+      draw(true);
+    });
+    page.nowMs = 140;
+    const record = probe.phase(
+      "terrain-photoreal-wireframe",
+      start,
+      probe.mark(),
+      [{ name: "view", style: "photorealistic" }],
+      null,
+    );
+    stop();
+    expect(record.views[0]?.terrainGaps).toBe(gaps);
+  });
 
   describe("a wireframe view's terrain (R10.T11)", () => {
     /**
