@@ -18,7 +18,6 @@ use hyperion_protocol::{
     SystemsInRangeRequest, UniverseIdHex, UniverseTime,
 };
 use hyperion_server::FeatureMembers;
-use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::galaxy::catalogue_classes::CatalogueClassSource;
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
@@ -332,20 +331,22 @@ async fn a_query_inside_a_globular_returns_its_members_with_their_origin() {
     server.stop().await;
 }
 
-/// Behind the gate, the default at the version in force, the same query answers as the grid
-/// alone: no member, no origin on any row and no `origin` key on the wire, so that no reply moves
-/// before P09.T2.c (P09.T40.a).
+/// Held back (`FeatureMembers::Held`, the tests' door), the same query answers as the grid alone:
+/// no member, no origin on any row and no `origin` key on the wire (P09.T40.a). Every server
+/// serves them by default.
 #[tokio::test]
-async fn behind_the_gate_a_query_inside_a_globular_answers_as_the_grid() {
-    assert_eq!(
-        FeatureMembers::default(),
-        FeatureMembers::of_version(GENERATOR_VERSION)
-    );
-    assert_eq!(FeatureMembers::default(), FeatureMembers::Held);
+async fn held_back_a_query_inside_a_globular_answers_as_the_grid() {
+    assert_eq!(FeatureMembers::default(), FeatureMembers::Served);
     let reference = std::thread::spawn(|| {
         a_globular();
     });
-    let server = TestServer::start().await;
+    let temp_dir = tempfile::tempdir().expect("a temporary directory");
+    let server = TestServer::start_with(
+        TestServer::config(temp_dir.path())
+            .feature_members(FeatureMembers::Held)
+            .build(),
+    )
+    .await;
     let mut client = server.connected().await;
     let universe = client.create_universe("Omega Reach", SEED).await.id;
     reference.join().expect("the globular is found");

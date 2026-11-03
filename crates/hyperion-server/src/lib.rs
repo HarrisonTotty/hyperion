@@ -62,8 +62,8 @@ use crate::universe::{LoadRegistryError, UniverseRegistry, UniverseStore};
 use crate::ws::ConnectionLimits;
 
 pub use config::{
-    FEATURE_MEMBERS_FROM, FeatureMembers, GlobalListWarmUp, KeptSkies, ServerArgs, ServerConfig,
-    ServerConfigBuilder, SkyService,
+    FeatureMembers, GlobalListWarmUp, KeptSkies, ServerArgs, ServerConfig, ServerConfigBuilder,
+    SkyService,
 };
 pub use stats::{OutboundCounters, RequestCounters, ServerStats};
 
@@ -150,8 +150,7 @@ pub(crate) struct AppState {
     /// Whether an open starts its galaxy's global list and warms its tube tables (P10.T10.b).
     pub(crate) global_list_warm_up: GlobalListWarmUp,
     /// Whether the range query serves plan 09's feature members, each row its origin, and the sky
-    /// the features' gas: P09.T40.a's serve gate, held until
-    /// [`FEATURE_MEMBERS_FROM`](config::FEATURE_MEMBERS_FROM).
+    /// the features' gas (P09.T40.a): every server does, but a test's.
     pub(crate) feature_members: FeatureMembers,
     /// What answers each request: [`Handlers`], or a test's double.
     pub(crate) handler: Arc<dyn Handler>,

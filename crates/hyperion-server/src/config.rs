@@ -74,7 +74,6 @@ use std::sync::Arc;
 
 use clap::builder::{BoolishValueParser, TypedValueParser};
 use clap::{ArgAction, Parser};
-use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
 use crate::DEFAULT_ADDR;
 use crate::compute::{BulkGate, SkyCaps};
@@ -441,54 +440,30 @@ pub enum GlobalListWarmUp {
     AtOpen,
 }
 
-/// The generator version from which the server serves plan 09's feature members: 27, P09.T2.c's,
-/// the serve gate of P09.T40.a (main's ruling of 2026-10-30; plan 09's Risks, "P09.T39 as built"),
-/// raised from 26 with P09.T2.c, which rides 27 with R06.T16.a.
-///
-/// Until P09.T2.c gives up φ, each population's share in the features, the field still places the
-/// whole of every population, so a feature's members registered beside it would be counted twice
-/// (`decision-r06-t16a-scope.md`). The gate holds the registration back until then, in the pattern
-/// of the surface's serve gate, which held generated bodies' fields back until generator version 25
-/// (P14.T54.a): the range query's `FeatureMemberSource`, every row's `origin`, and the features'
-/// gas in the sky's sightlines all wait for it, so that at the version in force no reply moves.
-/// Its tripwire, `the_feature_members_gate_holds_until_its_version`, fails at the version, so that
-/// the bump that reaches it opens the gate with P09.T2.c, or raises it to the train P09.T2.c rides.
-pub const FEATURE_MEMBERS_FROM: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether the server serves plan 09's feature members (P09.T40.a): the serve gate,
-/// [`FEATURE_MEMBERS_FROM`].
+/// Whether the server serves plan 09's feature members (P09.T40.a), which it does from generator
+/// version 27, with P09.T2.c's field share (main's ruling of 2026-10-30; the serve gate opened at
+/// 27's bump).
 ///
 /// Served, the range query registers the catalogue features' members as a source beside the grid
 /// (`FeatureMemberSource`, over the server's feature caches), every row carries its `origin`, and
-/// the sky's sightlines take the features' gas (`FeatureGas`). Held, the server answers as before
-/// P09.T40.a, bit for bit. The catalogue classes' hosts join the members from generator version 27
+/// the sky's sightlines take the features' gas (`FeatureGas`). Held is the tests' and benches'
+/// door to the grid's answer alone, which no option or variable sets: with the field share on
+/// the record, a server that holds them back misses each feature's share of its population. The catalogue classes' hosts join the members from generator version 27
 /// (`CatalogueClassSource::registered_in`, P09.T37.a); the galactic centre's members wait on
 /// P09.T37.b.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FeatureMembers {
-    /// No feature member is served, and no row carries an origin: the server's answer below
-    /// [`FEATURE_MEMBERS_FROM`].
+    /// No feature member is served, and no row carries an origin: the grid's answer alone, the
+    /// tests' and benches' door.
     Held,
     /// The features' members, the rows' origins and the features' gas are served.
     Served,
 }
 
-impl FeatureMembers {
-    /// The gate's arm at `version`: served from [`FEATURE_MEMBERS_FROM`], held below it.
-    #[must_use]
-    pub const fn of_version(version: GeneratorVersion) -> Self {
-        if version.get() >= FEATURE_MEMBERS_FROM.get() {
-            Self::Served
-        } else {
-            Self::Held
-        }
-    }
-}
-
 impl Default for FeatureMembers {
-    /// The arm of the generator version in force.
+    /// [`FeatureMembers::Served`], every version's.
     fn default() -> Self {
-        Self::of_version(GENERATOR_VERSION)
+        Self::Served
     }
 }
 
@@ -797,8 +772,7 @@ impl ServerConfig {
         self.global_list_warm_up
     }
 
-    /// Whether the server serves plan 09's feature members (P09.T40.a's serve gate,
-    /// [`FEATURE_MEMBERS_FROM`]).
+    /// Whether the server serves plan 09's feature members (P09.T40.a).
     #[must_use]
     pub fn feature_members(&self) -> FeatureMembers {
         self.feature_members
@@ -1064,13 +1038,10 @@ impl ServerConfigBuilder {
         self
     }
 
-    /// Whether the server serves plan 09's feature members; the generator version's
-    /// ([`FeatureMembers::of_version`]) by default, [`FeatureMembers::Held`] until
-    /// [`FEATURE_MEMBERS_FROM`].
+    /// Whether the server serves plan 09's feature members; [`FeatureMembers::Served`] by default.
     ///
-    /// Tests serve them, so that the range query's members, their rows' origins and the features'
-    /// gas are tested before the gate opens; no option or variable sets it, so that no server
-    /// counts a feature's members twice before P09.T2.c (P09.T40.a).
+    /// Tests and benches hold them back, to compare an answer with the grid's alone; no option or
+    /// variable sets it (P09.T40.a).
     #[must_use]
     pub fn feature_members(mut self, members: FeatureMembers) -> Self {
         self.config.feature_members = members;
@@ -1401,7 +1372,7 @@ mod tests {
                 ],
                 SkyService::Served,
                 KeptSkies::Kept,
-                FeatureMembers::Held,
+                FeatureMembers::Served,
                 StdinStop::Ignore,
             )
         );
@@ -1477,7 +1448,7 @@ mod tests {
                 ],
                 SkyService::Unsupported,
                 KeptSkies::Off,
-                FeatureMembers::Held,
+                FeatureMembers::Served,
                 StdinStop::Watch,
             )
         );
@@ -1868,7 +1839,7 @@ mod tests {
             .surface_passes(NonZeroUsize::new(3).unwrap())
             .sky_service(SkyService::Unsupported)
             .kept_skies(KeptSkies::Off)
-            .feature_members(FeatureMembers::Served)
+            .feature_members(FeatureMembers::Held)
             .stdin_stop(StdinStop::Watch)
             .build();
         assert_eq!(
@@ -1881,42 +1852,9 @@ mod tests {
                 [10, 20, 30, 40, 50, 60, 70, 110, 120, 140, 130, 80, 90, 100],
                 SkyService::Unsupported,
                 KeptSkies::Off,
-                FeatureMembers::Served,
+                FeatureMembers::Held,
                 StdinStop::Watch,
             )
         );
-    }
-
-    /// The feature members' gate's tripwire: it holds until [`FEATURE_MEMBERS_FROM`], and the
-    /// bump that reaches it opens it with P09.T2.c or raises it (P09.T40.a).
-    #[test]
-    fn the_feature_members_gate_holds_until_its_version() {
-        assert!(
-            GENERATOR_VERSION < FEATURE_MEMBERS_FROM,
-            "generator version {} reaches the feature members' gate's {}: if P09.T2.c gives up φ \
-             in this bump, open the gate (delete `FEATURE_MEMBERS_FROM`, `FeatureMembers` with \
-             its `Held` arm and the matches on it, and this test, and re-bless the server's range \
-             pins, whose rows then carry their origins); otherwise raise the constant to the bump \
-             P09.T2.c rides, since members served before it are counted twice \
-             (`decision-r06-t16a-scope.md`; plan 09's P09.T40.a)",
-            GENERATOR_VERSION.get(),
-            FEATURE_MEMBERS_FROM.get()
-        );
-        assert_eq!(FeatureMembers::default(), FeatureMembers::Held);
-        assert_eq!(
-            ServerConfig::builder().build().feature_members(),
-            FeatureMembers::Held
-        );
-    }
-
-    /// The gate's arm follows its version: held below it, served from it on.
-    #[test]
-    fn the_feature_members_gate_opens_at_its_version() {
-        let at = |v| FeatureMembers::of_version(GeneratorVersion::new(v));
-        assert_eq!(at(23), FeatureMembers::Held);
-        assert_eq!(at(25), FeatureMembers::Held);
-        assert_eq!(at(26), FeatureMembers::Held);
-        assert_eq!(at(27), FeatureMembers::Served);
-        assert_eq!(at(28), FeatureMembers::Served);
     }
 }
