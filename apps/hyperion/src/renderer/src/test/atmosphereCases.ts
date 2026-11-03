@@ -38,7 +38,16 @@ import {
   type PhaseTable,
 } from "../view/atmosphere/medium";
 import type { ReferenceCase } from "../view/atmosphere/reference/cases";
-import type { LocalDirection } from "../view/atmosphere/reference/geometries";
+import type {
+  LocalDirection,
+  ReferenceAggregate,
+  ReferenceGeometry,
+} from "../view/atmosphere/reference/geometries";
+import type {
+  SpectralCaseAbsorber,
+  SpectralCasePhase,
+  SpectralReferenceCase,
+} from "../view/atmosphere/reference/spectralCases";
 import { linearInUMoments } from "./mieMatrices";
 
 /** The case format the writer writes, `case.rs`'s `CASE_FORMAT`. */
@@ -502,25 +511,170 @@ export function caseJson(referenceCase: ReferenceCase, counts: SampleCounts | un
     terms,
     suns: [{ name: "sun", irradiance: rgbArray(referenceCase.sunIlluminanceLx) }],
     detectorHalfAngleDeg: referenceCase.detectorHalfAngleDeg,
-    geometries: referenceCase.geometries.map((g) => ({
-      name: g.name,
-      observer: { heightM: g.observer.heightM, latitudeDeg: g.observer.latitudeDeg },
-      view: { zenithDeg: g.view.zenithDeg, azimuthDeg: g.view.azimuthDeg },
-      sunDirections: [{ zenithDeg: g.sun.zenithDeg, azimuthDeg: g.sun.azimuthDeg }],
-      ...(g.maxDistanceM === undefined ? {} : { maxDistanceM: g.maxDistanceM }),
-      ...(g.detectorHalfAngleDeg === undefined
-        ? {}
-        : { detectorHalfAngleDeg: g.detectorHalfAngleDeg }),
-      ...ownSamples(counts?.geometries?.[g.name]),
-    })),
-    aggregates: referenceCase.aggregates.map((a) => ({
-      name: a.name,
-      latitudeDeg: a.latitudeDeg,
-      sunDirections: [{ zenithDeg: a.sun.zenithDeg, azimuthDeg: a.sun.azimuthDeg }],
-      ...ownSamples(counts?.aggregates?.[a.name]),
-    })),
+    geometries: referenceCase.geometries.map((g) => geometryJson(g, counts)),
+    aggregates: referenceCase.aggregates.map((a) => aggregateJson(a, counts)),
   };
 }
+
+/** A geometry in the format, with its own count where `counts` gives one. */
+function geometryJson(g: ReferenceGeometry, counts: SampleCounts | undefined): GeometryJson {
+  return {
+    name: g.name,
+    observer: { heightM: g.observer.heightM, latitudeDeg: g.observer.latitudeDeg },
+    view: { zenithDeg: g.view.zenithDeg, azimuthDeg: g.view.azimuthDeg },
+    sunDirections: [{ zenithDeg: g.sun.zenithDeg, azimuthDeg: g.sun.azimuthDeg }],
+    ...(g.maxDistanceM === undefined ? {} : { maxDistanceM: g.maxDistanceM }),
+    ...(g.detectorHalfAngleDeg === undefined
+      ? {}
+      : { detectorHalfAngleDeg: g.detectorHalfAngleDeg }),
+    ...ownSamples(counts?.geometries?.[g.name]),
+  };
+}
+
+/** An aggregate in the format, with its own count where `counts` gives one. */
+function aggregateJson(a: ReferenceAggregate, counts: SampleCounts | undefined): AggregateJson {
+  return {
+    name: a.name,
+    latitudeDeg: a.latitudeDeg,
+    sunDirections: [{ zenithDeg: a.sun.zenithDeg, azimuthDeg: a.sun.azimuthDeg }],
+    ...ownSamples(counts?.aggregates?.[a.name]),
+  };
+}
+
+/**
+ * A spectral case's phase in the format (R08.T17): a table's channel 0 at each wavelength divided
+ * by its integral over the sphere read linearly in u, the tracer's rule, on the one u every
+ * wavelength's table shares.
+ *
+ * @throws RangeError for tables on different entries.
+ */
+function spectralPhaseJson(phase: SpectralCasePhase): PhaseJson {
+  let json: PhaseJson;
+  switch (phase.kind) {
+    case "rayleigh":
+      json = { kind: "rayleigh", depolarisation: [...phase.depolarisation] };
+      break;
+    case "cornette-shanks":
+      json = { kind: "cornette-shanks", asymmetry: phase.asymmetry };
+      break;
+    case "none":
+      json = { kind: "none" };
+      break;
+    case "tabulated": {
+      const [first] = phase.tables;
+      if (first === undefined) {
+        throw new RangeError("a tabulated spectral phase has a table a wavelength");
+      }
+      const u = first.u;
+      if (phase.tables.some((t) => t.u.length !== u.length || t.u.some((v, i) => v !== u[i]))) {
+        throw new RangeError("a tabulated spectral phase's tables share their entries");
+      }
+      const integrals = phase.tables.map((t) => linearInUMoments(u, t.values[0]).integral);
+      const rows = (element: (t: PhaseTable) => Float64Array | undefined): number[][] =>
+        phase.tables.map((t, w) =>
+          Array.from(element(t) ?? [], (v) => v / (integrals[w] ?? Number.NaN)),
+        );
+      const matrix = phase.tables.every((t) => t.matrix !== undefined)
+        ? {
+            matrix: {
+              a2: rows((t) => t.matrix?.a2[0]),
+              a3: rows((t) => t.matrix?.a3[0]),
+              a4: rows((t) => t.matrix?.a4[0]),
+              b1: rows((t) => t.matrix?.b1[0]),
+              b2: rows((t) => t.matrix?.b2[0]),
+            },
+          }
+        : {};
+      json = {
+        kind: "tabulated",
+        u: Array.from(u),
+        a1: rows((t) => t.values[0]),
+        asymmetry: [...phase.asymmetry],
+        ...matrix,
+      };
+      break;
+    }
+  }
+  return json;
+}
+
+/** A spectral case's absorber in the format: its bins' curves as one curve of 15 wavelengths. */
+function spectralAbsorberJson(absorber: SpectralCaseAbsorber): AbsorberJson {
+  const { curves } = absorber;
+  const rows =
+    curves.logPressures.length > 1
+      ? {
+          logPressures: Array.from(curves.logPressures),
+          readTopLogPressure: curves.readTopLogPressure,
+        }
+      : {};
+  const curve: AbsorberCurveJson = {
+    logColumns: Array.from(curves.logColumns),
+    ...rows,
+    opticalDepth: curves.opticalDepth.map((bin) => Array.from(bin)),
+  };
+  let json: AbsorberJson;
+  switch (absorber.kind) {
+    case "column":
+      json = { kind: "column", numberDensityPerM3: absorber.numberDensityPerM3, curves: [curve] };
+      break;
+    case "pair":
+      json = { kind: "pair", pairDensityPerM6: absorber.pairDensityPerM6, curves: [curve] };
+      break;
+  }
+  return json;
+}
+
+/**
+ * A spectral case in the format (plan R08, R08.T17; `spectralCases.ts`), at its 15 wavelengths,
+ * with its own `counts`, every number of its terms rounded to
+ * {@link SPECTRAL_CASE_SIGNIFICANT_FIGURES} so that the files stay under the added-file hook.
+ */
+export function spectralCaseJson(
+  spectral: SpectralReferenceCase,
+  counts: SampleCounts | undefined,
+): CaseJson {
+  const { base } = spectral;
+  const terms = spectral.terms.map((term) => {
+    const phase = spectralPhaseJson(term.phase);
+    const json: TermJson = {
+      name: term.name,
+      density: densityJson(term.density),
+      scattering: [...term.scatteringPerM],
+      absorption: [...term.absorptionPerM],
+      phase,
+      ...(phase.kind === "cornette-shanks" ||
+      (phase.kind === "tabulated" && phase.matrix === undefined)
+        ? { depolarising: true as const }
+        : {}),
+      ...(term.absorber === undefined ? {} : { absorber: spectralAbsorberJson(term.absorber) }),
+    };
+    return roundedTermJson(json, SPECTRAL_CASE_SIGNIFICANT_FIGURES);
+  });
+  const profile =
+    base.medium.pressureBar === undefined ? undefined : densityJson(base.medium.pressureBar);
+  return {
+    format: CASE_FORMAT,
+    name: spectral.name,
+    seed: spectral.seed,
+    wavelengthsNm: [...spectral.wavelengthsNm],
+    shells: shellsJson(base.figure),
+    topHeightM: base.medium.topHeightM,
+    groundAlbedo: [...spectral.groundAlbedo],
+    ...(profile === undefined ? {} : { pressureBar: profile }),
+    terms,
+    suns: [{ name: "sun", irradiance: [...spectral.sunIrradianceWPerM2Nm] }],
+    detectorHalfAngleDeg: base.detectorHalfAngleDeg,
+    geometries: spectral.geometries.map((g) => geometryJson(g, counts)),
+    aggregates: spectral.aggregates.map((a) => aggregateJson(a, counts)),
+  };
+}
+
+/**
+ * The significant figures a spectral case's terms are written to: 7, as `caseGate.ts` records its
+ * figures, so that Mars's dust at 15 wavelengths stays under the added-file hook.
+ */
+export const SPECTRAL_CASE_SIGNIFICANT_FIGURES = 7;
 
 /**
  * The bytes a committed file stays under: 500,000, a little inside the repository's added-file hook

@@ -9,11 +9,20 @@ import { describe, expect, it } from "vitest";
 import type { MediumTerm, PhaseTable } from "../view/atmosphere/medium";
 import { EARTH_CASE, MARS_CASE, type ReferenceCase } from "../view/atmosphere/reference/cases";
 import {
+  EARTH_SPECTRAL_DAY_CASE,
+  MARS_SPECTRAL_LOW_CASE,
+  type SpectralCaseTerm,
+  type SpectralReferenceCase,
+} from "../view/atmosphere/reference/spectralCases";
+import {
   absorberCurveJson,
   caseJson,
   densityJson,
   roundedTermJson,
+  SPECTRAL_CASE_SIGNIFICANT_FIGURES,
+  spectralCaseJson,
   tabulatedPhaseJson,
+  type TermJson,
   termJson,
   traceCommand,
 } from "./atmosphereCases";
@@ -272,5 +281,126 @@ describe("the case writer's geometries", () => {
 describe("the trace command", () => {
   it("traces at the default count the committed references record", () => {
     expect(traceCommand("mars")).toMatch(/ --samples 4096 /u);
+  });
+});
+
+/** `spectral` with its term `name` changed by `change`. */
+function withTerm(
+  spectral: SpectralReferenceCase,
+  name: string,
+  change: (term: SpectralCaseTerm) => SpectralCaseTerm,
+): SpectralReferenceCase {
+  return { ...spectral, terms: spectral.terms.map((t) => (t.name === name ? change(t) : t)) };
+}
+
+/** A spectral case's dust as the writer writes it. */
+function writtenDust(spectral: SpectralReferenceCase): TermJson {
+  const dust = spectralCaseJson(spectral, undefined).terms.find((t) => t.name === "dust");
+  if (dust === undefined) {
+    throw new Error("the dust is written");
+  }
+  return dust;
+}
+
+describe("the spectral case writer (R08.T17)", () => {
+  it("normalises each wavelength's table over the sphere read linearly in u, by its own integral", () => {
+    // One wavelength's table doubled: its row must still integrate to 1, the others unmoved.
+    const doubled = withTerm(MARS_SPECTRAL_LOW_CASE, "dust", (t) =>
+      t.phase.kind === "tabulated"
+        ? {
+            ...t,
+            phase: {
+              ...t.phase,
+              tables: t.phase.tables.map((table, w) =>
+                w === 5
+                  ? {
+                      ...table,
+                      values: [
+                        table.values[0].map((v) => 2 * v),
+                        table.values[1].map((v) => 2 * v),
+                        table.values[2].map((v) => 2 * v),
+                      ],
+                    }
+                  : table,
+              ),
+            },
+          }
+        : t,
+    );
+    const plain = writtenDust(MARS_SPECTRAL_LOW_CASE);
+    const json = writtenDust(doubled);
+    if (json.phase.kind !== "tabulated" || plain.phase.kind !== "tabulated") {
+      throw new Error("the dust is written tabulated");
+    }
+    const u = Float64Array.from(json.phase.u);
+    expect(json.phase.a1).toHaveLength(15);
+    for (const row of json.phase.a1) {
+      expect(linearInUMoments(u, Float64Array.from(row)).integral).toBeCloseTo(1, 5);
+    }
+    // Doubling is exact in binary, so the doubled row over its doubled integral is the plain row.
+    expect(json.phase.a1[5]).toEqual(plain.phase.a1[5]);
+    expect(json.depolarising).toBeUndefined();
+  });
+
+  it("drops the matrix and marks the term depolarising where one wavelength's table has none", () => {
+    const spectral = withTerm(MARS_SPECTRAL_LOW_CASE, "dust", (t) =>
+      t.phase.kind === "tabulated"
+        ? {
+            ...t,
+            phase: {
+              ...t.phase,
+              tables: t.phase.tables.map((table, w) =>
+                w === 7 ? { ...table, matrix: undefined } : table,
+              ),
+            },
+          }
+        : t,
+    );
+    const dust = spectralCaseJson(spectral, undefined).terms.find((t) => t.name === "dust");
+    expect(dust?.phase.kind === "tabulated" ? dust.phase.matrix : "none").toBeUndefined();
+    expect(dust?.depolarising).toBe(true);
+  });
+
+  it("refuses a tabulated phase whose wavelengths' tables are on different entries", () => {
+    const spectral = withTerm(MARS_SPECTRAL_LOW_CASE, "dust", (t) =>
+      t.phase.kind === "tabulated"
+        ? {
+            ...t,
+            phase: {
+              ...t.phase,
+              tables: t.phase.tables.map((table, w) =>
+                w === 3 ? { ...table, u: table.u.map((v, i) => (i === 1 ? v * 1.01 : v)) } : table,
+              ),
+            },
+          }
+        : t,
+    );
+    expect(() => spectralCaseJson(spectral, undefined)).toThrow(RangeError);
+  });
+
+  it("writes an absorber's 15 bins' curves as one curve of 15 wavelengths", () => {
+    const ozone = spectralCaseJson(EARTH_SPECTRAL_DAY_CASE, undefined).terms.find(
+      (t) => t.name === "absorber:O3",
+    );
+    expect(ozone?.absorber?.curves).toHaveLength(1);
+    expect(ozone?.absorber?.curves[0]?.opticalDepth).toHaveLength(15);
+    expect(ozone?.absorber?.kind).toBe("column");
+  });
+
+  it("writes its terms to its figures and its geometries in full, with their own counts", () => {
+    const [g] = EARTH_SPECTRAL_DAY_CASE.geometries;
+    if (g === undefined) {
+      throw new Error("Earth by day has geometries");
+    }
+    const json = spectralCaseJson(EARTH_SPECTRAL_DAY_CASE, { geometries: { [g.name]: 8192 } });
+    const rayleigh = json.terms.find((t) => t.name === "rayleigh");
+    for (const v of rayleigh?.scattering ?? []) {
+      expect(Number(v.toPrecision(SPECTRAL_CASE_SIGNIFICANT_FIGURES))).toBe(v);
+    }
+    expect(json.geometries[0]?.view).toEqual(g.view);
+    expect(json.geometries[0]?.observer).toEqual(g.observer);
+    expect(json.geometries[0]?.samples).toBe(8192);
+    expect(json.geometries[1]?.samples).toBeUndefined();
+    expect(json.wavelengthsNm).toHaveLength(15);
   });
 });

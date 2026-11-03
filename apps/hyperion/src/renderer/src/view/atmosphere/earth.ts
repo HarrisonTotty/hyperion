@@ -177,8 +177,11 @@ export const EARTH_TOP_HEIGHT_M = 100_000;
  */
 export const EARTH_GROUND_ALBEDO = 0.1;
 
-/** The aerosol's extinction at the ground per channel, m⁻¹: τ(λ) ÷ H with the Ångström law. */
-function aerosolExtinctionPerM(wavelengthNm: number): number {
+/**
+ * The aerosol's extinction at the ground at a wavelength, m⁻¹: τ(λ) ÷ H with the Ångström law, at
+ * the channels and at R08.T17's spectral bins alike.
+ */
+export function aerosolExtinctionPerM(wavelengthNm: number): number {
   const opticalDepth =
     AEROSOL_OPTICAL_DEPTH_550 * pow(wavelengthNm / 550, -AEROSOL_ANGSTROM_EXPONENT);
   return opticalDepth / AEROSOL_SCALE_HEIGHT_M;

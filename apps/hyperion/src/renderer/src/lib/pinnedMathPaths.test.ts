@@ -77,6 +77,11 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/reference/cases.ts",
     "../view/atmosphere/reference/thickCases.ts",
     "../test/venusAlbedo.ts",
+    // R08.T17's spectral cases and check, and the conversion and colours they read.
+    "../view/atmosphere/reference/spectralCases.ts",
+    "../view/atmosphere/reference/spectralCheck.ts",
+    "../view/atmosphere/thick/binConversion.ts",
+    "../view/atmosphere/spectralColour.ts",
     // The aggregates' optics, which the Titan-class case's haze reads: its platform maths moved
     // the case's bits between x86_64 Linux and arm64 macOS (R08.T12.b.2).
     "../view/atmosphere/aggregate.ts",
@@ -96,6 +101,8 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/reference/cases.test.ts",
     "../view/atmosphere/reference/metricVerdicts.test.ts",
     "../view/atmosphere/reference/references.test.ts",
+    "../view/atmosphere/reference/spectralCases.test.ts",
+    "../view/atmosphere/reference/spectralCheck.test.ts",
     "../view/atmosphere/reference/sweepBoundary.test.ts",
     "../view/atmosphere/reference/sweepCases.test.ts",
     "../view/atmosphere/reference/thickCases.test.ts",
@@ -109,7 +116,7 @@ const MODULES = import.meta.glob<string>(
 );
 
 /** How many modules the list names: the glob drops a path that no longer exists. */
-const LISTED = 71;
+const LISTED = 77;
 
 /** Every renderer test, as its text: the scan finds among them the tests that bless a table. */
 const TESTS = import.meta.glob<string>("../**/*.test.ts", {

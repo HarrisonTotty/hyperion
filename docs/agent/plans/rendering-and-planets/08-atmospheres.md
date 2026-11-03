@@ -6282,7 +6282,9 @@ the spectral check. Its low-sun figure is recorded beside R08.T4.a's finding tha
 direct sunlight at the fitted triple is 0.022 off in u′v′ under the Sun, above Verification's "up to
 0.02 at low sun" (its gamut floor is 0.008–0.010, its error 0.012–0.072 by star; Risks, "Deviations
 in T4.a, as built"). Acceptance: `just ci`, `just test-slow` and `just test-render` pass, and the
-records are here.
+records are here. _The pod half built 2026-11-02_ (Risks, "R08.T17's pod half, as built"): the
+spectral check, the atmosphere's slow suites, test-render and the automatic list; the by-hand
+scenes, the timed runs, the benchmarks and `just ci` wait on the owner's RTX 3080 and UHD 620.
 
 ## Verification
 
@@ -24760,3 +24762,22 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     part 1, which would add a run to the QW's command); re-size it from the QW's wall times.
   - _Pending, the owner's RTX run_: the QW (research-rm4-rm5-close-out §3), whose part 1 times every
     row, these four among them.
+- **R08.T17's pod half, as built** (2026-11-02; lane `r08-t17-pod-half`, at `c6fef462`, R08.T9.c
+  in; no generated value moves). The figures are in the lane's outbox, `measurements.md`.
+  - _Spectral cases_ (`reference/spectralCases.ts`, `spectralCaseJson`): `earth` and `mars` in the
+    15 bins, parts `-spectral-day` (sun zenith under 80°) and `-spectral-low`, seeds 11–14.
+  - _Deviations_: σ 1% a bin (1.5% at 80°, 2% at 90°), above Design note 10's T ÷ 8, at a fifth of
+    its cost; the 95° image left out; Earth's aerosol on R05's Ångström law, not held ends.
+  - _The check_ (`reference/spectralCheck.ts`, `spectralCheck.json`, never gated), Δu′v′ medians:
+    Earth 0.003 by day and at a low sun (worst 0.007), Mars 0.002 by day (worst 0.005, its limb)
+    and 0.003 at a low sun (worst 0.004): pass.
+  - _The low-sun figure_: Earth's beam on the horizon is 0.036 off, 1.44 times too bright, beside
+    R08.T4.a's 0.022 at 1 nm. It fails "up to 0.02": a visible difference, for the owner.
+  - _Bruneton 2017_ (his CPU model on Earth's air): his sky's colour within 0.004 of ours, 8–19%
+    brighter, a finding; his spectrum read at three points takes ozone at point cross-sections.
+  - _test-slow_'s 16 atmosphere suites and _test-render_ (both variants, at `c6fef462`) pass,
+    Design note 18's cameras from 2 m (T6.g's set). Garcia and Siewert, and Loughman, still wait.
+  - _The automatic list_: fails on the twin against the vector reference (Earth 2 of 360, Mars 168
+    of 384, `saturn-oblate` 43 of 474, so "with the slicing" fails). Every other item passes.
+  - _Pending, the owner's_ (the outbox's `not-run.md`): the by-eye list on both GPUs, the timed
+    views check, the benchmarks, the RTX twin rows, `just ci` and the rest of `just test-slow`.

@@ -146,7 +146,8 @@ export interface ReferenceCase {
  * Each case's seed, its own, so that two cases' references draw independent noise: Design note
  * 10's false failures over ten cases assume it, and `earth` and `earth-ozone-slab` would otherwise
  * follow the same paths, their shells alike but at the slab's edges. The pilots took seeds from
- * 1000 (ruling 8). `venus-92bar-albedo` is R08.T5.e's plane-parallel albedo case (`test/venusAlbedo.ts`).
+ * 1000 (ruling 8). `venus-92bar-albedo` is R08.T5.e's plane-parallel albedo case (`test/venusAlbedo.ts`);
+ * the `-spectral-` cases are R08.T17's 15-bin cases (`spectralCases.ts`).
  */
 export const REFERENCE_SEEDS: Readonly<Record<string, number>> = {
   earth: 0,
@@ -160,6 +161,10 @@ export const REFERENCE_SEEDS: Readonly<Record<string, number>> = {
   "earth-high-limb": 8,
   "earth-ozone-slab-high-limb": 9,
   "venus-92bar-albedo": 10,
+  "earth-spectral-day": 11,
+  "earth-spectral-low": 12,
+  "mars-spectral-day": 13,
+  "mars-spectral-low": 14,
 };
 
 /**
