@@ -12,13 +12,23 @@ import { PRIMARY_VIEW_ID } from "../../displays/view/viewNames";
 import { type CountingRenderEngine, countingRenderEngine } from "../../test/countingRenderEngine";
 import { lawFor } from "../appearance/phase";
 import type { LitRegime } from "../bodies/regime";
-import { project, type Viewport } from "../camera/projection";
+import { NEAR_PLANE_M, project, type Viewport } from "../camera/projection";
 import type { Quaternion } from "../camera/pose";
 import { conjugate, multiply, quaternionFromRows } from "../camera/quaternion";
 import { rotateToBodyFixed } from "../coords/rotation";
 import { relativeToCamera } from "../coords/relative";
 import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
-import { cameraPassStrideLevel } from "../clusters/cull";
+import { cameraKeeps, cameraPassStrideLevel } from "../clusters/cull";
+import { type CameraCullPass, cullHorizonOf } from "../clusters/cullPass";
+import {
+  depthPyramidTwin,
+  hzbAxesOf,
+  hzbRefuses,
+  type HzbTestInput,
+  pyramidLevels,
+  pyramidProjectionOf,
+} from "../clusters/hzb";
+import { TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
 import { CLUSTER_RECORD_BYTES, type ClusterRecord } from "../clusters/record";
 import {
   cameraStrideLevel,
@@ -44,6 +54,7 @@ import {
 } from "../scenes/terrainScene";
 import { distanceToBoxM, relativeBounds } from "./bounds";
 import { fadedMorph, FADE_STEPS } from "./coarseFineHolds";
+import { frustumOf, horizonCone } from "./cull";
 import { vertexDir } from "./cube";
 import {
   CLUSTER_RECORDS_SLOT_BYTES,
@@ -147,6 +158,12 @@ import type { WorkerLike } from "./workers/pool";
  *   this one through the stride morph's twin (`clusters/strides.ts`' `stridePlace`), both from this
  *   frame's camera ({@link StrideFrames}); and the lit triangles its seen blocks draw. Off by
  *   default, where the passes draw at stride 1.
+ * - `SEAM_OCCLUSION=hzb` (plan R14, R14.T3.d): every `SEAM_OCCLUSION_STRIDE`th frame (4) a model of
+ *   the lit pass's two rasters ({@link OcclusionFrames}): of the clusters on the path that the
+ *   cull's twin keeps, those seen at the model's frame before drawn first, the first raster's ground
+ *   drawn into a depth `SEAM_OCCLUSION_SCALE` (4) times coarser a side than the view's, and the rest
+ *   tested against its pyramid by the occlusion's twin: those it refuses, and those the late raster
+ *   draws, counted. Off by default.
  */
 const SLOW = import.meta.env["HYPERION_SLOW_TESTS"] === "1";
 
@@ -184,6 +201,9 @@ const RECORD = knob("SEAM_RECORD") === "1";
 const DRAFT_SHARE = Math.min(1, Math.max(0, numberKnob("SEAM_DRAFT_SHARE", 1)));
 const LOOKAHEAD = knob("SEAM_LOOKAHEAD") !== "0";
 const STRIDED = knob("SEAM_STRIDES") === "measured";
+const OCCLUDED = knob("SEAM_OCCLUSION") === "hzb";
+const OCCLUSION_STRIDE = Math.max(1, Math.round(numberKnob("SEAM_OCCLUSION_STRIDE", 4)));
+const OCCLUSION_SCALE = Math.max(1, numberKnob("SEAM_OCCLUSION_SCALE", 4));
 
 /** The settings the slow run plays: `SEAM_SETTING`'s alone, or both. */
 function settingsPlayed(): QualitySetting[] {
@@ -510,6 +530,8 @@ const SURFACE_WORDS = [3, 6, 7, 8, 9, 10, 11] as const;
 interface DrawnInstance {
   /** The area it draws: its slot's patch, or a sub-patch's part of it. */
   readonly area: PatchKey;
+  /** Whether its record is the cluster path's (`terrain interior instances`), not the lit mesh's. */
+  readonly onPath: boolean;
   readonly held: Held;
   readonly slot: number;
   /** {@link SURFACE_WORDS}, joined: an instance of the same bake and words draws the same. */
@@ -574,6 +596,7 @@ function instancesOf(
       const rebakeFade = ((fades >>> 8) & MIX_STEPS) / MIX_STEPS;
       drawn.set(patchKeyString(area), {
         area,
+        onPath: name.includes("interior"),
         held,
         slot: word(3),
         words: SURFACE_WORDS.map(word).join(),
@@ -1207,6 +1230,299 @@ function strideSummaryOf(frames: ReadonlyArray<StrideFrame>): StrideSummary {
   };
 }
 
+/** One frame's model of the lit pass's two rasters (plan R14, R14.T3.d): see {@link OcclusionFrames}. */
+interface OcclusionFrame {
+  readonly tS: number;
+  /** The clusters on the path one raster draws: those the cull's twin keeps, of 96 a patch. */
+  readonly kept: number;
+  /** Of them, those of instances kept whole (sub-patches, and heights fading), never refused. */
+  readonly whole: number;
+  /** The early raster's (seen at the model's frame before), the late raster's, and the refused. */
+  readonly first: number;
+  readonly second: number;
+  readonly refused: number;
+  /** The share of the model's depth the first raster drew. */
+  readonly covered: number;
+}
+
+/** The view's depth, reversed Z, each pixel the nearest a triangle drawn into it gave it. */
+class DepthRaster {
+  readonly depth: Float32Array;
+
+  constructor(readonly size: Viewport) {
+    this.depth = new Float32Array(size.widthPx * size.heightPx);
+  }
+
+  /**
+   * Draws a triangle of three points on the view, px from its top left and depth n ÷ d, at the
+   * pixels whose centres it holds, its depth there interpolated in screen space as the raster's.
+   */
+  triangle(a: Vec3, b: Vec3, c: Vec3): void {
+    const { widthPx: w, heightPx: h } = this.size;
+    const area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    if (area === 0) {
+      return;
+    }
+    const x0 = Math.max(0, Math.ceil(Math.min(a.x, b.x, c.x) - 0.5));
+    const x1 = Math.min(w - 1, Math.floor(Math.max(a.x, b.x, c.x) - 0.5));
+    const y0 = Math.max(0, Math.ceil(Math.min(a.y, b.y, c.y) - 0.5));
+    const y1 = Math.min(h - 1, Math.floor(Math.max(a.y, b.y, c.y) - 0.5));
+    for (let y = y0; y <= y1; y += 1) {
+      const py = y + 0.5;
+      for (let x = x0; x <= x1; x += 1) {
+        const px = x + 0.5;
+        const wa = ((b.x - px) * (c.y - py) - (b.y - py) * (c.x - px)) / area;
+        const wb = ((c.x - px) * (a.y - py) - (c.y - py) * (a.x - px)) / area;
+        const wc = 1 - wa - wb;
+        if (wa < 0 || wb < 0 || wc < 0) {
+          continue;
+        }
+        const z = wa * a.z + wb * b.z + wc * c.z;
+        const at = y * w + x;
+        if (z > (this.depth[at] ?? 0)) {
+          this.depth[at] = z;
+        }
+      }
+    }
+  }
+}
+
+/** The quads of a block a side, and the vertices the model's raster steps by over them. */
+const BLOCK_QUADS = 8;
+const RASTER_STEP = 2;
+
+/** The blocks of a page's 96 clusters, the strips after them (`clusters/terrain.ts`). */
+const PAGE_BLOCKS = 64;
+
+/**
+ * A model of the lit pass's two rasters over the run (`SEAM_OCCLUSION=hzb`; plan R14, R14.T3.d),
+ * every {@link OCCLUSION_STRIDE}th frame, as the cull's twin (`cullMarksTwin`) has them: of each
+ * patch on the cluster path, each of its 96 blocks and strips the camera's frustum and the body's
+ * horizon keep (its record's sphere), every one of an instance kept whole (a sub-patch, or its
+ * heights fading); the early raster, those its slot's bake had in sight at the model's frame before,
+ * none of a sub-patch's; the first raster's ground (the early blocks, and every quad the lit mesh
+ * draws, at every {@link RASTER_STEP}th vertex, morphed as drawn) rasterised into a depth
+ * {@link OCCLUSION_SCALE} times coarser a side than the view's; and the late raster, the rest that
+ * the occlusion's twin (`hzbRefuses`) does not refuse against the pyramid of that depth
+ * (`depthPyramidTwin`), an instance kept whole never refused. Each slot's visibility is written
+ * whole for every instance on the path but a sub-patch, as the late pass writes it. A model's
+ * counts: the depth is coarser than the device's, and its triangles are the drawn ground's every
+ * other vertex, its skirts and fins left out.
+ */
+class OcclusionFrames {
+  readonly frames: OcclusionFrame[] = [];
+  /** Each slot's clusters in sight at the model's last frame, with the bake it held then. */
+  readonly #seen = new Map<number, { readonly bake: BakedPatch; readonly bits: Uint8Array }>();
+
+  frame(
+    planet: PlanetGeometry,
+    surfaces: DrawnSurfaces,
+    cam: FrameCamera,
+    records: SlotRecords,
+    drawn: ReadonlyMap<string, DrawnInstance>,
+    tS: number,
+  ): void {
+    const { figure } = planet;
+    const size = {
+      widthPx: Math.max(1, Math.round(cam.viewport.widthPx / OCCLUSION_SCALE)),
+      heightPx: Math.max(1, Math.round(cam.viewport.heightPx / OCCLUSION_SCALE)),
+    };
+    const axes = hzbAxesOf(cam.orientation);
+    const projection = pyramidProjectionOf(cam.fovXRad, size);
+    const { right, up, forward } = axes;
+    // A point, camera-relative and body-fixed, on the coarse view: px and depth; `null` too near.
+    const onView = (p: Vec3): Vec3 | null => {
+      const z = p.x * forward.x + p.y * forward.y + p.z * forward.z;
+      if (!(z > NEAR_PLANE_M)) {
+        return null;
+      }
+      const x = p.x * right.x + p.y * right.y + p.z * right.z;
+      const y = p.x * up.x + p.y * up.y + p.z * up.z;
+      return vec3(
+        ((projection.scaleX * x) / z / 2 + 0.5) * size.widthPx,
+        (0.5 - (projection.scaleY * y) / z / 2) * size.heightPx,
+        NEAR_PLANE_M / z,
+      );
+    };
+    const raster = new DepthRaster(size);
+    // Rasterises `inst`'s quads from (x0, y0) for `quads` a side at every RASTER_STEPth vertex.
+    const draw = (inst: DrawnInstance, x0: number, y0: number, quads: number): void => {
+      const n = quads / RASTER_STEP + 1;
+      const placed: Array<Vec3 | null> = [];
+      for (let j = 0; j < n; j += 1) {
+        for (let i = 0; i < n; i += 1) {
+          const x = x0 + i * RASTER_STEP;
+          const y = y0 + j * RASTER_STEP;
+          const [h] = surfaces.vertex(inst, x, y);
+          const [px, py, pz] = surfacePoint(figure, vertexDir(inst.area, x, y), h);
+          placed.push(
+            onView(vec3(px - cam.positionM.x, py - cam.positionM.y, pz - cam.positionM.z)),
+          );
+        }
+      }
+      for (let j = 0; j + 1 < n; j += 1) {
+        for (let i = 0; i + 1 < n; i += 1) {
+          const a = placed[j * n + i] ?? null;
+          const b = placed[j * n + i + 1] ?? null;
+          const c = placed[(j + 1) * n + i] ?? null;
+          const d = placed[(j + 1) * n + i + 1] ?? null;
+          if (a !== null && b !== null && c !== null) {
+            raster.triangle(a, b, c);
+          }
+          if (b !== null && d !== null && c !== null) {
+            raster.triangle(b, d, c);
+          }
+        }
+      }
+    };
+    const frustum = frustumOf(
+      { orientation: cam.orientation, fovXRad: cam.fovXRad, viewport: cam.viewport },
+      0.01,
+    );
+    const pass: CameraCullPass = {
+      kind: "camera",
+      planes: frustum.planes,
+      horizon: cullHorizonOf(cam.positionM, horizonCone(planet, cam.positionM).occluderRadiusM),
+      order: "ordered",
+      toleranceRad: 0,
+      strideCap: 1,
+    };
+    // The clusters the one raster draws: sphere and all, whether its instance is kept whole, and
+    // whether the early raster draws it.
+    const kept: Array<{
+      readonly inst: DrawnInstance;
+      readonly cluster: number;
+      readonly centreM: Vec3;
+      readonly radiusM: number;
+      readonly whole: boolean;
+      readonly first: boolean;
+    }> = [];
+    for (const inst of drawn.values()) {
+      if (!inst.onPath) {
+        // The lit mesh's: the first raster's, untested.
+        draw(inst, 0, 0, QUADS);
+        continue;
+      }
+      const subPatch = inst.levels !== 0;
+      const whole = subPatch || inst.rebakeFade > 0;
+      const seen = this.#seen.get(inst.slot);
+      const own = !subPatch && seen?.bake === inst.held.bake ? seen.bits : null;
+      const origin = inst.held.bake.originM;
+      for (let cluster = 0; cluster < TERRAIN_CLUSTERS_PER_PAGE; cluster += 1) {
+        const sphere = records.sphere(inst.slot, cluster);
+        if (sphere === null || !(sphere.radiusM >= 0)) {
+          continue;
+        }
+        const centreM = vec3(
+          origin.x + sphere.centreM.x - cam.positionM.x,
+          origin.y + sphere.centreM.y - cam.positionM.y,
+          origin.z + sphere.centreM.z - cam.positionM.z,
+        );
+        if (!whole && !cameraKeeps(pass, centreM, sphere.radiusM, 0)) {
+          continue;
+        }
+        const first = own !== null && own[cluster] === 1;
+        kept.push({ inst, cluster, centreM, radiusM: sphere.radiusM, whole, first });
+        // A block drawn first is the first raster's; its strips hang below it, left out.
+        if (first && cluster < PAGE_BLOCKS) {
+          draw(
+            inst,
+            BLOCK_QUADS * (cluster % 8),
+            BLOCK_QUADS * Math.floor(cluster / 8),
+            BLOCK_QUADS,
+          );
+        }
+      }
+    }
+    const levels = pyramidLevels(size);
+    const input: HzbTestInput = {
+      texels: depthPyramidTwin(raster.depth, size),
+      levels,
+      size,
+      projection,
+      axes,
+    };
+    let first = 0;
+    let second = 0;
+    let refused = 0;
+    let whole = 0;
+    // Each slot drawn on the path but a sub-patch: its visibility written afresh, nothing seen.
+    for (const inst of drawn.values()) {
+      if (inst.onPath && inst.levels === 0) {
+        this.#seen.set(inst.slot, {
+          bake: inst.held.bake,
+          bits: new Uint8Array(TERRAIN_CLUSTERS_PER_PAGE),
+        });
+      }
+    }
+    for (const each of kept) {
+      const visible = each.whole || !hzbRefuses(input, each.centreM, each.radiusM, 1);
+      whole += each.whole ? 1 : 0;
+      if (each.first) {
+        first += 1;
+      } else if (visible) {
+        second += 1;
+      } else {
+        refused += 1;
+      }
+      const bits = each.inst.levels === 0 ? this.#seen.get(each.inst.slot)?.bits : undefined;
+      if (bits !== undefined) {
+        bits[each.cluster] = visible ? 1 : 0;
+      }
+    }
+    const drawnPixels = raster.depth.reduce((sum, z) => sum + (z > 0 ? 1 : 0), 0);
+    this.frames.push({
+      tS,
+      kept: kept.length,
+      whole,
+      first,
+      second,
+      refused,
+      covered: drawnPixels / raster.depth.length,
+    });
+  }
+}
+
+/** A run's two-raster figures (plan R14, R14.T3.d), over its modelled frames. */
+interface OcclusionSummary {
+  readonly frames: number;
+  /** The kept clusters, and the shares each raster drew and the pyramid refused, of all frames'. */
+  readonly kept: number;
+  readonly firstShare: number;
+  readonly secondShare: number;
+  readonly refusedShare: number;
+  readonly wholeShare: number;
+  /** The frames' largest and median share refused. */
+  readonly refusedShareMax: number;
+  readonly refusedShareMedian: number;
+  /** The frames' median share of the model's depth the first raster drew. */
+  readonly coveredMedian: number;
+}
+
+/** A run's two-raster figures from its modelled frames. */
+function occlusionSummaryOf(frames: ReadonlyArray<OcclusionFrame>): OcclusionSummary {
+  const sum = (of: (f: OcclusionFrame) => number): number =>
+    frames.reduce((total, f) => total + of(f), 0);
+  const kept = sum((f) => f.kept);
+  const share = (n: number): number => (kept > 0 ? n / kept : 0);
+  const shares = frames
+    .filter((f) => f.kept > 0)
+    .map((f) => f.refused / f.kept)
+    .toSorted((a, b) => a - b);
+  return {
+    frames: frames.length,
+    kept,
+    firstShare: share(sum((f) => f.first)),
+    secondShare: share(sum((f) => f.second)),
+    refusedShare: share(sum((f) => f.refused)),
+    wholeShare: share(sum((f) => f.whole)),
+    refusedShareMax: shares.at(-1) ?? 0,
+    refusedShareMedian: shares[Math.floor(shares.length / 2)] ?? 0,
+    coveredMedian:
+      frames.map((f) => f.covered).toSorted((a, b) => a - b)[Math.floor(frames.length / 2)] ?? 0,
+  };
+}
+
 /** The keys of every strict ancestor of `drawn`'s areas, as `patchKeyString`s. */
 function ancestorsOf(drawn: ReadonlyMap<string, DrawnInstance>): Set<string> {
   const ancestors = new Set<string>();
@@ -1543,6 +1859,8 @@ interface Played {
   readonly trace: ReadonlyArray<TraceEntry>;
   /** Each frame's camera strides, with `SEAM_STRIDES=measured` (plan R14, R14.T3.c); else none. */
   readonly strides: ReadonlyArray<StrideFrame>;
+  /** Each modelled frame's two rasters, with `SEAM_OCCLUSION=hzb` (plan R14, R14.T3.d); else none. */
+  readonly occlusion: ReadonlyArray<OcclusionFrame>;
 }
 
 /** Plays TERRAIN TEST's script from `fromS` to `toS` at {@link HZ} and records the drawn ground. */
@@ -1637,6 +1955,8 @@ async function play(options: ProbeOptions): Promise<Played> {
   const pops: SeamPop[] = [];
   const masks = new SurveyMasks();
   const strideFrames = new StrideFrames();
+  const occlusionFrames = new OcclusionFrames();
+  let frameIndex = 0;
   // Each level's largest measured errors over the run's resident bakes, as the pass keeps them.
   const residentErrors = new StrideLevelErrors();
   const slotRecords = new SlotRecords();
@@ -1786,7 +2106,7 @@ async function play(options: ProbeOptions): Promise<Played> {
       // The step's draw in the primary view, as the app draws it, and its change from the frame
       // before's; the engine's records cleared first, as a run's would fill the memory, the slots'
       // cluster records kept, which the strides' measure reads.
-      if (STRIDED) {
+      if (STRIDED || OCCLUDED) {
         slotRecords.take(engine);
       }
       engine.writes.length = 0;
@@ -1828,6 +2148,22 @@ async function play(options: ProbeOptions): Promise<Played> {
           latest.cam.tauPrimeRad,
           residentErrors,
           new DrawnSurfaces(figure, camNow, masks),
+          camNow,
+          slotRecords,
+          drawnNow,
+          tS,
+        );
+      }
+      frameIndex += 1;
+      if (
+        OCCLUDED &&
+        frameIndex % OCCLUSION_STRIDE === 0 &&
+        drawingPass !== null &&
+        camNow !== null
+      ) {
+        occlusionFrames.frame(
+          drawingPass.planet,
+          new DrawnSurfaces(drawingPass.planet.figure, camNow, masks),
           camNow,
           slotRecords,
           drawnNow,
@@ -2027,6 +2363,7 @@ async function play(options: ProbeOptions): Promise<Played> {
     draftShare,
     trace,
     strides: strideFrames.frames,
+    occlusion: occlusionFrames.frames,
   };
 }
 
@@ -2087,6 +2424,7 @@ function report(played: Played, summary: SeamSummary): Record<string, unknown> {
     fadePopsBeside: run.pops.filter((pop) => pop.cause === "fade" && pop.beside).length,
     trace: played.trace,
     ...(STRIDED ? { strides: strideSummaryOf(played.strides) } : {}),
+    ...(OCCLUDED ? { occlusion: occlusionSummaryOf(played.occlusion) } : {}),
     ...(RECORD ? { record: run } : {}),
   };
 }
