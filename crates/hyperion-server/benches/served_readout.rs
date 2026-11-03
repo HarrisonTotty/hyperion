@@ -8,7 +8,7 @@
 //! as `hyperion-surface`'s `readout` bench does on `TERRAIN TEST`: `readout`, the whole query, asked
 //! again unchanged, as a view standing still asks it at 4 Hz; `march`, the slant range alone;
 //! `reading` and `material` at the line's foot; and `readout-cold`, the whole query from a cache that
-//! holds nothing, the synthesis's parts already made. The sights are the inspection's three windows
+//! holds nothing, the synthesis's parts and the march's ceiling already made. The sights are the inspection's three windows
 //! (the owner's Mac profile, 2026-11-01): `orbit`, 22.0 Mm from the centre; `close`, 6.76 Mm; and
 //! `low`, 4 km over the datum. The world is the wet world R10.T15.b's runs fly,
 //! `41ffecb200000002.0400` of the `Dev Fixture` universe, as `served_bake` computes it, but read
@@ -200,9 +200,9 @@ fn served_readout(c: &mut Criterion) {
             });
         }
         group.bench_function(format!("{name}/readout-cold"), |b| {
-            b.iter_batched(
+            b.iter_batched_ref(
                 || primed.clone(),
-                |mut f| black_box(f.ground_readout(body, seed, &q)),
+                |f| black_box(f.ground_readout(body, seed, &q)),
                 BatchSize::LargeInput,
             );
         });

@@ -7,8 +7,8 @@
 //! (`WorkerFields::slant_range`, `reading.rs`' `march`); `reading` and `material`, the reading over
 //! 2 m and the material at the line's foot, which make the rest of the readout's ground
 //! (`ground_at`, whose capacity reads the 2 m reading itself); and natively `readout-cold`, the
-//! whole query from a cache that holds nothing, its synthesis's parts already made, as the first ask
-//! after the view moves. The worlds:
+//! whole query from a cache that holds nothing, its synthesis's parts and the march's ceiling
+//! already made, as the first ask after the view moves. The worlds:
 //!
 //! - `moon`, `TERRAIN TEST`'s field (its two payloads' blocks, `testing::terrain_test_fixture`, a
 //!   level-6 field surveyed about the edge of faces +x and +y), along the scene's sights: `low`,
@@ -266,9 +266,9 @@ mod bench {
                     });
                 });
                 group.bench_function(format!("{name}/readout-cold"), |b| {
-                    b.iter_batched(
+                    b.iter_batched_ref(
                         || primed.clone(),
-                        |mut f| f.ground_readout(body, seed, &query),
+                        |f| f.ground_readout(body, seed, &query),
                         BatchSize::LargeInput,
                     );
                 });

@@ -325,7 +325,8 @@ impl SlantRange {
 /// `direction` need not be a unit vector. `cache` is the caller's, and no result depends on what
 /// it holds. The march reads every cell the view holds once a call, for its ceiling (3.5 ms on a
 /// level-8 field surveyed whole, natively, pod, 16 vCPU, 2026-11-03), which a worker's fields form
-/// once a block instead (`WorkerFields::slant_range`).
+/// once a block instead
+/// ([`WorkerFields::slant_range`](crate::worker::WorkerFields::slant_range)).
 ///
 /// # Errors
 ///
@@ -346,10 +347,12 @@ pub fn slant_range<F: SurveyView>(
     march(synth, cache, origin_m, direction, max)
 }
 
-/// [`slant_range`] under `ceiling_m`, the ceiling [`SurveyedGround::ceiling_m`] gives over the
-/// cells `synth`'s view holds now, formed by the caller once for every march until the view takes
-/// a block: [`slant_range`]'s answer, bit for bit, without its scan of every cell (R10.T12.d: 3.5 ms
-/// of a 4.0 ms readout on a level-8 field surveyed whole, natively, pod, 16 vCPU, 2026-11-03).
+/// [`slant_range`] under a ceiling its caller formed, without the scan of every cell.
+///
+/// `ceiling_m` must be what [`SurveyedGround::ceiling_m`] gives over the cells `synth`'s view holds
+/// now, with `synth`'s parts: the caller forms it again once the view takes a block or the parts
+/// change. The answer is then [`slant_range`]'s, bit for bit. The scan was 3.5 ms of a 4.0 ms
+/// readout on a level-8 field surveyed whole (R10.T12.d; natively, pod, 16 vCPU, 2026-11-03).
 ///
 /// # Errors
 ///

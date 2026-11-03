@@ -3717,7 +3717,7 @@ fn worker_ground_readout_is_the_separate_queries_bit_for_bit() {
 /// after each block posted, and with another seed, every line of sight's slant range and readout
 /// sight are a fresh synthesiser's over the field as then held, to the bit: the three lines from
 /// 20 km and one straight down from far above, whose march takes Newton's step to the ceiling,
-/// which the blocks raise.
+/// which the blocks raise. A query of another seed that marches nothing lets the ceiling go too.
 #[test]
 fn worker_slant_range_keeps_its_ceiling_only_until_a_block_or_another_seed() {
     let f = fixture();
@@ -3771,6 +3771,17 @@ fn worker_slant_range_keeps_its_ceiling_only_until_a_block_or_another_seed() {
                     _ => assert_eq!(readout, fresh, "block {n}'s readout"),
                 }
             }
+            assert_eq!(
+                fields.bodies[&f.body].ceiling_m.map(bits),
+                ceilings.last().copied().map(bits),
+                "block {n}'s kept ceiling"
+            );
+        }
+        if n == 0 {
+            // A query of another seed that marches nothing lets the ceiling go with the parts.
+            let at = crate::cube::xyz_to_face_uv(down.0);
+            fields.reading(f.body, other, at, Metres::new(2.0)).unwrap();
+            assert!(fields.bodies[&f.body].ceiling_m.is_none());
         }
     }
     assert!(
