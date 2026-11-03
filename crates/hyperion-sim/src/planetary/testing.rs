@@ -504,10 +504,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// - an ocean-branch moon's porous rock core, `POROUS_CORE_VERSION` (P14.T56.e), at
 ///   `PorousCoreRules::Porous` through `with_porous_core`: a core under its compaction pressure
 ///   dissipates, and its moon's membrane floats on it.
-/// - a rocky body's core share by its host's iron, `CORE_SHARE_HOST_VERSION` (P14.T51.k's fix),
-///   at `CoreShareRules::Host` through `with_core_share`: its draw, ruling 58's floor and the
-///   window's dry top shifted by its host's Fe/(Mg + Si), and P14.T51.k's factor reading its core
-///   share about the Sun's ratios.
 /// - a regular moon's eccentricity at its age, `ECCENTRICITY_DAMPING_VERSION` (P14.T55.j.a), at
 ///   `EccentricityDampingRules::Damped` through `with_eccentricity_damping`: a forced
 ///   eccentricity only in a resonance that holds, at its budget, and a free one damped by its
@@ -588,7 +584,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::derive::photometry::envelope_bond::{
         EnvelopeBondRules, with_envelope_bond,
     };
-    use crate::planetary::derive::rocky::{CoreShareRules, with_core_share};
     use crate::planetary::hooks::resources::{ResourceRatiosRules, with_resource_ratios};
     use crate::planetary::moons::eccentricity::{
         EccentricityDampingRules, with_eccentricity_damping,
@@ -602,7 +597,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     };
     use crate::substance::{CarriersRules, with_carriers};
     let run = move || with_orbit_extrapolation(OrbitExtrapolationRules::ReducedRank, run);
-    let run = move || with_core_share(CoreShareRules::Host, run);
     let run = move || with_carriers(CarriersRules::Carried, run);
     let run = move || with_resource_ratios(ResourceRatiosRules::Ratios, run);
     let run = move || with_porous_core(PorousCoreRules::Porous, run);

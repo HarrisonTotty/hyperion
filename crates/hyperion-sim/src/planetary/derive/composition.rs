@@ -31,8 +31,8 @@
 //! The envelope is solved at [`COMPOSITION_REFERENCE_AGE`] and the flux the caller passes. Its
 //! radius at other ages, and its loss to escape (P14.T13), follow from the solved fraction.
 //!
-//! From generator version 27 (the core share by the host, `CORE_SHARE_HOST_VERSION`) the
-//! Earth-like core is Earth's about the body's host ([`CoreShareShift::about_host`] of 0.325): the
+//! The Earth-like core is Earth's about the body's host (the core share by the host, P14.T51.k's
+//! fix) ([`CoreShareShift::about_host`] of 0.325): the
 //! Earth-like curve beyond the snow line, the core under its water and every envelope's core take
 //! the host's shift, as the rocky outcomes' draw does, and so do a giant's heavy elements;
 //! [`composition`] and [`giant_composition`], with no host, are about the Sun's ratios.

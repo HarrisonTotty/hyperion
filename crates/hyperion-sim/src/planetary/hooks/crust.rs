@@ -782,7 +782,7 @@ pub(crate) fn iron_oxide_per_iron() -> f64 {
 /// core: at the Sun's ratios an Earth (0.325) has 8.05 wt% `FeO`, a Mars (0.204) 15.80, and a
 /// body of the generated Venus's core (0.288) 10.69. f̃ is the body's core share about the Sun's
 /// ratios, logistic(logit(`f_core`) − Δ) with Δ its host's shift
-/// ([`CoreShareShift::solar_equivalent`]; held, as Δ = 0, below 27 by `CORE_SHARE_HOST_VERSION`),
+/// ([`CoreShareShift::solar_equivalent`]),
 /// and `f_core` itself about a host at the Sun's ratios: an Earth-like body about a host of
 /// \[α/Fe\] +0.3, its core 0.194, keeps 4.0 wt%.
 ///

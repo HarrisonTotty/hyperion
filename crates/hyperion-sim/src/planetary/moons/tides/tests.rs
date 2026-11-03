@@ -58,9 +58,11 @@ const EARTH_GM: f64 = 398_600.436;
 /// 0.0202, Dione's 0.0022, Rhea's 0.0010, Titan's 0.0292 and Iapetus's 0.0283 are the fact
 /// sheet's, the Moon's 0.0554 JPL's. The surface temperatures and water fractions are
 /// decision-p14-moons's (its `membrane.py`): Europa 102 K and 8% water, Ganymede 110 K and 45%, Callisto 125 K and 45%,
-/// Titan 94 K and 42%, Enceladus 75 K and 40%, Dione 87 K and 50%, Mimas 64 K and 35%. Rhea's and
+/// Titan 94 K and 42%, Enceladus 75 K and 40%, Dione 87 K and 50%, and Mimas 64 K. Rhea's and
 /// Iapetus's water is what their densities hold at ruling 83.7's rock and ice (0.66 and 0.81), at
-/// a nominal 76 K and 90 K; both are far from an ocean at any of these.
+/// a nominal 76 K and 90 K; both are far from an ocean at any of these. Mimas's, 0.743, is what
+/// its density holds at the same rock and ice, 3,077 and 945 kg m⁻³, back-solved from Rhea's and
+/// Iapetus's.
 const MOONS: [Measured; 11] = [
     Measured {
         name: "Moon",
@@ -181,7 +183,7 @@ const MOONS: [Measured; 11] = [
         e: 0.0202,
         period_days: 0.942_421_8,
         surface: 64.0,
-        water: 0.35,
+        water: 0.743,
     },
 ];
 

@@ -31,14 +31,13 @@
 //! ([`core_mass_fraction_at_least`]), and every rank above that curve keeps Chen and Kipping's
 //! radius, and with it the water the solve reads there.
 //!
-//! # About the host's iron (from version 27)
+//! # About the host's iron
 //!
 //! A host's rock sets the iron its rocky planets can hold: Plotnykov and Valencia (2020) predict
 //! their planets' core mass fractions from their host stars' abundances as 0.32 +0.14 −0.12,
 //! inside the planets' own wider 0.24 +0.33 −0.18 (abstract, read), and Adibekyan et al. (2021,
-//! Science 374, 330; not read here) is cited for the planets' iron following their hosts'. From
-//! version 27 (`CORE_SHARE_HOST_VERSION`) the population's spread is kept and shifted in logit by
-//! its host's iron ([`CoreShareShift`], lean, 2026-11-01): the host's Fe/(Mg + Si), so its
+//! Science 374, 330; not read here) is cited for the planets' iron following their hosts'. The
+//! population's spread is kept and shifted in logit by its host's iron ([`CoreShareShift`], lean, 2026-11-01): the host's Fe/(Mg + Si), so its
 //! \[α/Fe\] and Mg/Si, and not its \[Fe/H\], sets a rocky body's iron per kilogram of rock. Ruling
 //! 58's floor beyond the snow line takes the same shift, and a host at the Sun's ratios moves no
 //! share, to the bit.
@@ -48,7 +47,6 @@ use crate::planetary::chem::solar_magnesium_to_silicon;
 use crate::planetary::derive::radius::EARTH_CORE_MASS_FRACTION;
 use crate::planetary::hooks::crust::bulk_iron_mass_fraction;
 use crate::units::Dex;
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// The median core mass fraction of rocky exoplanets, 0.24 (Plotnykov and Valencia 2020,
 /// abstract).
@@ -74,69 +72,6 @@ fn logistic(y: f64) -> f64 {
     1.0 / (1.0 + math::exp(-y))
 }
 
-/// The generator version from which a rocky body's core share answers to its host's iron: 27,
-/// the version of P14.T51.k's bulk iron, whose mantles it keeps from clamping to no `FeO` about
-/// α-rich hosts.
-///
-/// Below it [`CoreShareRules::in_force`] is [`CoreShareRules::Population`]: every host's shift is
-/// [`CoreShareShift::NONE`], so a rocky body's core share is drawn from Plotnykov and Valencia's
-/// population whatever its host, ruling 58's floor is Earth's 0.325, P14.T51.k's factor reads the
-/// body's own core share, and every figure is version 24's, 25's and 26's bit for bit. 27's bump
-/// deletes this hold, [`CoreShareRules`] with its `Population` arm, the tests' switch and its
-/// tripwire (`the_core_share_is_held_only_until_the_27_bump`).
-pub(crate) const CORE_SHARE_HOST_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether a rocky body's core share answers to its host's iron (its hold,
-/// [`CORE_SHARE_HOST_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum CoreShareRules {
-    /// Version 26's and before: the population's distribution about every host.
-    Population,
-    /// Version 27's: the distribution shifted by the host's iron ([`CoreShareShift::of_host`]).
-    Host,
-}
-
-impl CoreShareRules {
-    /// The rules this generator version gives: the host's shift from [`CORE_SHARE_HOST_VERSION`],
-    /// the population's below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_core_share`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = CORE_SHARE_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= CORE_SHARE_HOST_VERSION {
-            Self::Host
-        } else {
-            Self::Population
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The core share's rules a test sets on its thread, `None` for the version's.
-    static CORE_SHARE_RULES: core::cell::Cell<Option<CoreShareRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the core share's rules `rules` on this thread, for the tests to reach the
-/// host's shift ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 27's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_core_share<R>(rules: CoreShareRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<CoreShareRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            CORE_SHARE_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(CORE_SHARE_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
 /// How far a host's iron moves its rocky bodies' core shares, Δ in logit(cmf): logit(0.325 ρ) −
 /// logit(0.325), with ρ the host's solids' iron mass fraction over the Sun's (lean, 2026-11-01).
 ///
@@ -147,14 +82,12 @@ pub(crate) fn with_core_share<R>(rules: CoreShareRules, run: impl FnOnce() -> R)
 /// ([`about_host`](Self::about_host) of 0.325); P14.T51.k's factor reads a body's share about the
 /// Sun's ratios ([`solar_equivalent`](Self::solar_equivalent)), which its two anchors, an Earth
 /// and a Mars, are. An α-rich host's ρ is below 1: 0.82 at \[α/Fe\] +0.12 and 0.60 at +0.3, at the
-/// Sun's Mg/Si, from version 27's bulk iron (P14.T51.k).
-///
-/// Below version 27 (its hold, `CORE_SHARE_HOST_VERSION`) every host's is [`NONE`](Self::NONE),
-/// as a host's at the Sun's ratios is at every version: a shift of 0 moves no share, to the bit.
+/// Sun's Mg/Si, from P14.T51.k's bulk iron. A host's at the Sun's ratios is
+/// [`NONE`](Self::NONE): a shift of 0 moves no share, to the bit.
 ///
 /// # Examples
 ///
-/// The Sun's ratios move no share, at every version:
+/// The Sun's ratios move no share:
 ///
 /// ```
 /// use hyperion_sim::planetary::chem::solar_magnesium_to_silicon;
@@ -173,22 +106,16 @@ impl CoreShareShift {
     pub const NONE: Self = Self(0.0);
 
     /// The shift of a host of Mg/Si `host_magnesium_to_silicon` (by number) and \[α/Fe\]
-    /// `alpha_fe`, under the rules in force: [`NONE`](Self::NONE) below version 27.
+    /// `alpha_fe`.
     ///
     /// 0.325 ρ is held inside (0, 1), which only a host of over 3.08 times the Sun's iron
     /// fraction would leave, so the shift is finite for every finite host.
     #[must_use]
     pub fn of_host(host_magnesium_to_silicon: f64, alpha_fe: Dex) -> Self {
-        match CoreShareRules::in_force() {
-            CoreShareRules::Population => Self::NONE,
-            CoreShareRules::Host => {
-                let sun = bulk_iron_mass_fraction(solar_magnesium_to_silicon(), Dex::ZERO);
-                let rho = bulk_iron_mass_fraction(host_magnesium_to_silicon, alpha_fe) / sun;
-                let earth =
-                    (EARTH_CORE_MASS_FRACTION * rho).clamp(f64::EPSILON, 1.0 - f64::EPSILON);
-                Self(logit(earth) - logit(EARTH_CORE_MASS_FRACTION))
-            }
-        }
+        let sun = bulk_iron_mass_fraction(solar_magnesium_to_silicon(), Dex::ZERO);
+        let rho = bulk_iron_mass_fraction(host_magnesium_to_silicon, alpha_fe) / sun;
+        let earth = (EARTH_CORE_MASS_FRACTION * rho).clamp(f64::EPSILON, 1.0 - f64::EPSILON);
+        Self(logit(earth) - logit(EARTH_CORE_MASS_FRACTION))
     }
 
     /// Δ, in logit(cmf): negative about a host poorer in iron than the Sun.
@@ -385,42 +312,6 @@ mod tests {
         assert!((mercury - 0.918).abs() < 0.001, "{mercury}");
         let over_half = 1.0 - core_mass_fraction_rank(0.5, NONE);
         assert!((over_half - 0.21).abs() < 0.01, "{over_half}");
-    }
-
-    /// The host's shift is held until the 26 → 27 bump: the rules in force are the population's,
-    /// the tests' switch and 27's helper reach the host's, and 26's helper does not.
-    #[test]
-    fn the_core_share_is_held_only_until_the_27_bump() {
-        use crate::planetary::testing::with_every_27_hold;
-        assert!(
-            GENERATOR_VERSION < CORE_SHARE_HOST_VERSION,
-            "the 26 → 27 bump makes a rocky body's core share answer to its host's iron: delete \
-             `CORE_SHARE_HOST_VERSION`, `CoreShareRules` with its `Population` arm, its match in \
-             `CoreShareShift::of_host`, the tests' `with_core_share`, its switch in \
-             `with_every_27_hold` (and the helper, if no other 27 hold is left), and this test; \
-             restate the tests held below 27, and re-bless the movers plan 14's record of the core \
-             share by the host lists"
-        );
-        assert_eq!(CoreShareRules::in_force(), CoreShareRules::Population);
-        assert_eq!(
-            with_core_share(CoreShareRules::Host, CoreShareRules::in_force),
-            CoreShareRules::Host
-        );
-        assert_eq!(
-            with_every_27_hold(CoreShareRules::in_force),
-            CoreShareRules::Host
-        );
-        assert_eq!(CoreShareRules::in_force(), CoreShareRules::Population);
-        assert_eq!(
-            with_every_27_hold(|| {
-                with_core_share(CoreShareRules::Population, CoreShareRules::in_force)
-            }),
-            CoreShareRules::Population
-        );
-        assert_eq!(CoreShareRules::in_force(), CoreShareRules::Population);
-        // Held, an α-rich host moves no share.
-        let shift = CoreShareShift::of_host(solar_magnesium_to_silicon(), Dex::new(0.3));
-        assert_eq!(shift, NONE);
     }
 
     /// Under every 27 hold a host at the Sun's ratios moves no share, to the bit: its shift is 0,

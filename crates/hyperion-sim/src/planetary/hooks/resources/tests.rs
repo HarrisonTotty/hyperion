@@ -738,13 +738,9 @@ fn under_27_a_halo_twin_s_crust_is_poorer_only_in_its_non_alpha_metals() {
 /// the median rank of the rocky population about its host, keeps iron in its silicate crust: its
 /// core share is 0.136, the population's 0.24 moved by its host's iron, its mantle holds 8.1 wt%
 /// `FeO`, and its iron group is that iron's, 6.3% of the crust, as well as the V–Ni traces'.
-/// Drawn from the population alone (the core share's hold), its mantle clamped to no `FeO` and
-/// its iron group was V–Ni alone.
 #[test]
 fn under_27_a_halo_twin_drawn_about_its_host_keeps_iron_in_its_crust() {
-    use crate::planetary::derive::rocky::{
-        CoreShareRules, CoreShareShift, core_mass_fraction_at, with_core_share,
-    };
+    use crate::planetary::derive::rocky::{CoreShareShift, core_mass_fraction_at};
     use crate::planetary::testing::with_every_27_hold;
     let (fe_h, alpha) = (Dex::new(-1.0), Dex::new(0.3));
     // Its core share at the median rank, its crust's iron group and that group less its V–Ni.
@@ -771,9 +767,6 @@ fn under_27_a_halo_twin_drawn_about_its_host_keeps_iron_in_its_crust() {
         assert!((0.075..0.09).contains(&feo), "{feo}");
         assert!(iron > 0.05 && iron < group, "{iron} of {group}");
         assert!((iron - feo / iron_oxide_per_iron()).abs() < 1e-15, "{iron}");
-        let (held_core, held_group, held_iron) = with_core_share(CoreShareRules::Population, twin);
-        assert!((held_core - 0.24).abs() < 1e-12, "{held_core}");
-        assert!(held_iron.abs() < 1e-15, "{held_iron} of {held_group}");
     });
 }
 
