@@ -55,6 +55,15 @@ function isCaptureShim(path: string): boolean {
   return path === "view/spike/capture.ts" || path === "view/spike/capture.test.ts";
 }
 
+/**
+ * Whether `path` is the views check's WebGPU call counter's test (plan R14), which drives a fake
+ * device's `createBuffer` and `createTexture` to check that what they make is counted; the counter
+ * itself allocates nothing.
+ */
+function isCallCounterTest(path: string): boolean {
+  return path === "displays/view/check/gpuCallCounter.test.ts";
+}
+
 /** Each rule `file` breaks, in words. */
 function violations(file: SourceFile): string[] {
   const found: string[] = [];
@@ -76,6 +85,7 @@ function violations(file: SourceFile): string[] {
   if (
     !inEngineAdapter(file.path) &&
     !isCaptureShim(file.path) &&
+    !isCallCounterTest(file.path) &&
     RAW_DEVICE_ALLOCATION.test(file.text)
   ) {
     found.push(`${file.path} allocates GPU memory outside the engine's one creation path`);
