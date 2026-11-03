@@ -38,13 +38,6 @@
 //!   reach tables fitted from the engine's runs keep the version's rules until the bump refits
 //!   them, and the range brief's gate refuses them under another arm
 //!   (`stellar/rules/merger_mass_hold.rs` lists the movers).
-//! - [`pinned_white_dwarfs`](StellarRules::pinned_white_dwarfs), at
-//!   [`PINNED_WHITE_DWARFS_VERSION`] (plan 11, P11.T4's fix): whether a pinned primary, its pin
-//!   pending, that its binary would make a white dwarf is born one below it or held at its core's
-//!   last living state until its pin from it, read through the engine's input's rules at one
-//!   `match`, [`PinnedWhiteDwarfRules::holds`], by the strip (`Engine::stripped_member_at`) and a
-//!   merger's product that no star can hold (`Engine::held_product`)
-//!   (`stellar/rules/pinned_white_dwarfs_hold.rs` lists the movers).
 //! - [`wind_accretion`](StellarRules::wind_accretion), at [`WIND_ACCRETION_VERSION`] (plan 11,
 //!   P11.T12's fix): whether a pair the pre-test's lobe and decay tests pass over takes its winds,
 //!   two single stars on their orbit below it, from it a main-sequence star fed its Bondi–Hoyle
@@ -69,9 +62,6 @@
 use crate::GeneratorVersion;
 use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
-use crate::stellar::binary::pinned_white_dwarfs::{
-    PINNED_WHITE_DWARFS_VERSION, PinnedWhiteDwarfRules,
-};
 use crate::stellar::binary::wind_accretion::{WIND_ACCRETION_VERSION, WindAccretionRules};
 use crate::stellar::remnant::KickRankRules;
 
@@ -86,9 +76,6 @@ pub(crate) struct StellarRules {
     /// What a dynamically transferring main-sequence pair's merger keeps in the binary engine,
     /// the hold of [`MERGER_MASS_VERSION`].
     pub(crate) merger_mass: MergerMassRules,
-    /// Whether a pinned primary, its pin pending, that its binary would make a white dwarf is
-    /// held until its pin, the hold of [`PINNED_WHITE_DWARFS_VERSION`].
-    pub(crate) pinned_white_dwarfs: PinnedWhiteDwarfRules,
     /// Whether a pair the pre-test's lobe and decay tests pass over takes its winds, the hold of
     /// [`WIND_ACCRETION_VERSION`].
     pub(crate) wind_accretion: WindAccretionRules,
@@ -109,11 +96,6 @@ impl StellarRules {
                 MergerMassRules::Pair
             } else {
                 MergerMassRules::ThermalLimit
-            },
-            pinned_white_dwarfs: if version.get() >= PINNED_WHITE_DWARFS_VERSION.get() {
-                PinnedWhiteDwarfRules::Frozen
-            } else {
-                PinnedWhiteDwarfRules::Born
             },
             wind_accretion: if version.get() >= WIND_ACCRETION_VERSION.get() {
                 WindAccretionRules::WindRocheLobe
@@ -143,8 +125,8 @@ impl StellarRules {
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// those that turn on at 27 (P11.T4's `pinned_white_dwarfs` and `dwarf_limit`, P11.T4.d's
-    /// `merger_mass`, and P11.T12's `wind_accretion`).
+    /// those that turn on at 27 (P11.T4's `dwarf_limit`, P11.T4.d's `merger_mass`, and P11.T12's
+    /// `wind_accretion`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.

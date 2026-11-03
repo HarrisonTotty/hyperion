@@ -1,45 +1,25 @@
-//! The tests of P11.T4's pinned white-dwarf fix, [`PINNED_WHITE_DWARFS_VERSION`]: a pinned
-//! primary whose pin is pending is never a white dwarf, but held at its core's last living state
-//! until its pin collapses it, only under the rules that turn it on, read by the strip
-//! (`Engine::stripped_member_at`) and a merger's product that no star can hold
-//! (`Engine::held_product`) through the engine's input's rules.
+//! The tests of P11.T4's pinned white-dwarf fix: a pinned primary whose pin is pending is never a
+//! white dwarf, but held at its core's last living state until its pin collapses it, read by the
+//! strip (`Engine::stripped_member_at`) and a merger's product that no star can hold
+//! (`Engine::held_product`). Its hold is deleted (the 27 fold); these are its tests of the new arm.
 //!
-//! - The version's rules keep the held arm, and the tripwire holds it only until the bump.
-//! - Three systems of layer E's sample in P11.T10's slow tests (research-leans-26, 2026-11-01),
-//!   under every 27 hold and every 27 hold but this one: a primary of 8.05 M☉ that a common
-//!   envelope and case-BB transfer make a 1.320 M☉ oxygen–neon white dwarf at 41.58 Myr, pinned
-//!   at 42.02 Myr; one of 8.37 M☉ that a common envelope on the thermally pulsing AGB makes a
-//!   1.439 M☉ oxygen–neon white dwarf 17.6 kyr before its pin; and one of 9.05 M☉ whose helium
-//!   star's common envelope ends in a merger whose product no star can hold, a 1.490 M☉
-//!   carbon–oxygen white dwarf 16 kyr before its pin. Under the held arm each is a white dwarf
-//!   at its pin and has no collapse there; under the arm each is held at its core's mass and
-//!   collapses at its pin to plan 06's neutron star with plan 06's kick, and before the strip or
-//!   merger each timeline is the held arm's bit for bit.
-//! - Pairs of 8.0–9.6 M☉ primaries under the arm alone: a pinned primary is no white dwarf before
-//!   its pin, a held core's radius is its white dwarf's, and every pair that the held arm does not
-//!   make a white dwarf before its pin is the held arm's bit for bit.
+//! - Three systems of layer E's sample in P11.T10's slow tests (research-leans-26, 2026-11-01, two
+//!   of them replaced at generator version 26), under every 27 hold: primaries of 8.17, 8.37 and
+//!   8.85 M☉ that their binaries strip to oxygen–neon or carbon–oxygen cores of 1.333, 1.439 and
+//!   1.457 M☉ before their pins. Each is held at its core's mass, living, and collapses at its pin
+//!   to plan 06's neutron star with plan 06's kick (under the held arm each was a white dwarf at
+//!   its pin with no collapse there).
+//! - Pairs of 8.0–9.6 M☉ primaries: a pinned primary is no white dwarf before its pin, and a pair
+//!   is the same twice.
 //! - Slow: `binary_kick_massive_primaries_die_as_plan_06_says` (`stellar/binary/supernova/
 //!   agreement.rs`) over layer E's 10⁴ systems under every 27 hold: none of 5,421 pinned primaries
-//!   misses plan 06's collapse (`PIN_MISSES`), against 63 without the arm (55 white dwarfs at their
+//!   misses plan 06's collapse (`PIN_MISSES`), against 63 without the fix (55 white dwarfs at their
 //!   pin with no collapse, 8 collapsing later; 59 systems, the sample drawing some cells twice).
-//!
-//! The movers under the arm, found by turning it on at the version (and back off), over the sim's,
-//! the server's and the fitting crate's fast tests and the engine's slow invariants (2026-11-01):
-//! the goldens `stellar/binary_timelines` (pairs 0252, 0438 and 0902 of the pinned thousand) and
-//! `sky/census_near_sun` (layer D's and E's stars without photometry, 916 and 571, fall to 914 and
-//! 560: held cores in place of white dwarfs), and this module's tests of the version's arm. Nothing
-//! moves at 24–26. Under every 27 hold three slow pins are re-pinned with this hold:
-//! `engine_channels_hold`'s chi-squares; `heavy_donor_hold::census_of_the_heavy_donors`'s accreting
-//! white dwarfs, 4,116 to 4,106, as ten pinned primaries a pair made white dwarfs collapse to
-//! neutron stars at their pins instead; and the neutron stars of
-//! `ns_accretion_hold::census_of_the_neutron_star_accretion`, 1,132 to 1,143.
 
 use std::sync::OnceLock;
 
 use hyperion_testkit::lcg::Lcg;
 
-use super::*;
-use crate::GENERATOR_VERSION;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement;
@@ -47,13 +27,9 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::id::SystemId;
 use crate::rng::Seed;
 use crate::stellar::Phase;
-use crate::stellar::binary::{
-    BinaryInput, BinaryState, BinaryTimeline, Component, SegmentKind, SupernovaRecord, evolve,
-};
+use crate::stellar::binary::{BinaryInput, BinaryTimeline, Component, SupernovaRecord, evolve};
 use crate::stellar::multiplicity::{StarIndex, stripped_mark_min_mass};
-use crate::stellar::remnant::white_dwarf::WhiteDwarfCore;
-use crate::stellar::remnant::{RemnantKind, RemnantRecipe};
-use crate::stellar::sse::bare_core_light;
+use crate::stellar::remnant::RemnantKind;
 use crate::stellar::system::{StarModel, SystemStars};
 use crate::units::Years;
 
@@ -61,8 +37,8 @@ use crate::units::Years;
 /// holds the three systems.
 const SEED: u64 = 0x0b17_0010_5eed_0001;
 
-/// The three systems, each with its primary's mass, M☉, its white dwarf's under the held arm,
-/// M☉, and that dwarf's phase (research-leans-26's census of layer E's 10⁴ records, as measured,
+/// The three systems, each with its primary's mass, M☉, the white dwarf's it made under the held
+/// arm, M☉, and that dwarf's phase (research-leans-26's census of layer E's 10⁴ records, as measured,
 /// 2026-11-01; at generator version 26 the grid keeps two of its three no more, and the same
 /// census's first oxygen–neon and carbon–oxygen dwarfs of the kind take their places).
 const SYSTEMS: [(u64, f64, f64, Phase); 3] = [
@@ -92,19 +68,6 @@ const SYSTEMS: [(u64, f64, f64, Phase); 3] = [
     ),
 ];
 
-/// The version's rules.
-fn version() -> StellarRules {
-    StellarRules::of_version(GENERATOR_VERSION)
-}
-
-/// The version's rules with this hold's arm on alone.
-fn held_rules() -> StellarRules {
-    StellarRules {
-        pinned_white_dwarfs: PinnedWhiteDwarfRules::Frozen,
-        ..version()
-    }
-}
-
 /// The Milky Way fixture under every 27 hold.
 fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
@@ -113,30 +76,6 @@ fn galaxy() -> &'static Galaxy {
             Seed::new(SEED),
             GalaxyParams::milky_way_like(),
             GalaxyRules::every_27_hold(),
-        )
-        .expect("the Milky Way fixture builds under every 27 hold")
-    })
-}
-
-/// The Milky Way fixture under every 27 hold but this one and P11.T4's dwarf limit, built under
-/// them, as the agreement tests build theirs. The dwarf limit, held at 27 beside this hold, would
-/// otherwise collapse the third system's merged dwarf above the Chandrasekhar mass at its merger,
-/// before its pin, so this arm keeps the white dwarfs both holds act on.
-fn born() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| {
-        let rules = GalaxyRules::every_27_hold();
-        Galaxy::from_params_with_rules(
-            Seed::new(SEED),
-            GalaxyParams::milky_way_like(),
-            GalaxyRules {
-                stellar: StellarRules {
-                    pinned_white_dwarfs: PinnedWhiteDwarfRules::Born,
-                    dwarf_limit: crate::stellar::binary::dwarf_limit::DwarfLimitRules::Unchecked,
-                    ..rules.stellar
-                },
-                ..rules
-            },
         )
         .expect("the Milky Way fixture builds under every 27 hold")
     })
@@ -179,47 +118,13 @@ fn before(pin: f64) -> Years {
     Years::new(pin - 1.0e-9 * pin)
 }
 
-/// The version's rules keep the held arm, every version below 27 does and 27 holds a pinned
-/// primary until its pin. The tripwire: the bump to 27 deletes this hold.
-#[test]
-fn the_pinned_white_dwarfs_are_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < PINNED_WHITE_DWARFS_VERSION,
-        "the bump to 27 deletes P11.T4's pinned white-dwarf hold: `PINNED_WHITE_DWARFS_VERSION`, \
-         `PinnedWhiteDwarfRules` with its `Born` arm and `holds`, \
-         `StellarRules::pinned_white_dwarfs`, its readers' matches in `stripped_member_at` and \
-         `Engine::held_product`, this module and its line in `stellar/rules.rs`"
-    );
-    assert_eq!(version().pinned_white_dwarfs, PinnedWhiteDwarfRules::Born);
-    let at = |v: u32| StellarRules::of_version(crate::GeneratorVersion::new(v)).pinned_white_dwarfs;
-    for v in [GENERATOR_VERSION.get(), 25, 26] {
-        assert_eq!(at(v), PinnedWhiteDwarfRules::Born, "version {v}");
-    }
-    assert_eq!(at(27), PinnedWhiteDwarfRules::Frozen);
-    assert_eq!(
-        StellarRules::every_26_hold_with_its_retargets().pinned_white_dwarfs,
-        PinnedWhiteDwarfRules::Born
-    );
-    assert_eq!(
-        StellarRules::every_27_hold().pinned_white_dwarfs,
-        PinnedWhiteDwarfRules::Frozen
-    );
-    assert_eq!(
-        GalaxyRules::every_27_hold().stellar.pinned_white_dwarfs,
-        PinnedWhiteDwarfRules::Frozen
-    );
-    assert!(!PinnedWhiteDwarfRules::Born.holds());
-    assert!(PinnedWhiteDwarfRules::Frozen.holds());
-}
-
-/// Each of the three systems: under every 27 hold but this one its primary is a white dwarf just
-/// before its pin and has no collapse there; under every 27 hold it is held there at that dwarf's
-/// mass, living, and collapses at its pin to plan 06's remnant, a neutron star, with plan 06's
-/// kick; and before its white dwarf is born the two timelines are the same.
+/// Each of the three systems, under every 27 hold: its primary is no white dwarf before its pin,
+/// but held, living, at its core's mass, that of the white dwarf it made under the held arm, and
+/// collapses at its pin to plan 06's remnant, a neutron star, with plan 06's kick.
 #[test]
 fn each_system_s_primary_collapses_at_its_pin_under_every_27_hold() {
-    for (raw, initial, dwarf, phase) in SYSTEMS {
-        let (stars, held) = system(born(), raw);
+    for (raw, initial, dwarf, _) in SYSTEMS {
+        let (stars, arm) = system(galaxy(), raw);
         let model = stars.primary();
         assert!(
             (model.initial_mass().value() - initial).abs() < 1e-3,
@@ -229,37 +134,25 @@ fn each_system_s_primary_collapses_at_its_pin_under_every_27_hold() {
         let death = model.death().expect("a massive star dies");
         assert!(death.kind().is_sudden(), "{raw:#x}: {death:?}");
         let pin = death.age().value();
-        let shown = held.state_at(before(pin)).stars()[0];
-        assert_eq!(shown.phase(), phase, "{raw:#x}: {shown:?}");
-        assert!(
-            (shown.mass().value() - dwarf).abs() < 1e-3,
-            "{raw:#x}: {shown:?}"
-        );
-        assert!(
-            primary_record(&held).is_none_or(|r| r.age().value() > pin * (1.0 + 1e-9)),
-            "{raw:#x}: {:?}",
-            held.supernovae()
-        );
-
-        // The white dwarf's birth under the held arm: the first segment that starts with one.
-        let born_at = held
+        for t in arm
             .segments()
             .iter()
             .map(crate::stellar::binary::Segment::start)
-            .find(|&t| white_dwarf(held.state_at(t).stars()[0].phase()))
-            .expect("a white dwarf before the pin");
-        let born_mass = held.state_at(born_at).stars()[0].mass();
-
-        let (stars, arm) = system(galaxy(), raw);
-        assert_eq!(stars.primary().death(), Some(death), "{raw:#x}");
-        // Held at the white dwarf's mass at its birth, which the held arm's dwarf then grows from
-        // by its companion's wind.
-        for k in 1..=8_u32 {
-            let t = born_at.value() + (pin - born_at.value()) * f64::from(k) / 8.0;
-            let living = arm.state_at(before(t)).stars()[0];
-            assert!(living.phase().is_living(), "{raw:#x} at {t} yr: {living:?}");
-            assert_eq!(living.mass(), born_mass, "{raw:#x} at {t} yr");
+            .chain([before(pin)])
+            .filter(|t| t.value() < pin)
+        {
+            let primary = arm.state_at(t).stars()[0];
+            assert!(
+                !white_dwarf(primary.phase()),
+                "{raw:#x} at {t:?}: {primary:?}"
+            );
         }
+        let living = arm.state_at(before(pin)).stars()[0];
+        assert!(living.phase().is_living(), "{raw:#x}: {living:?}");
+        assert!(
+            (living.mass().value() - dwarf).abs() < 1e-3,
+            "{raw:#x}: {living:?}"
+        );
         let record = primary_record(&arm).unwrap_or_else(|| panic!("{raw:#x}: no record"));
         assert!(
             (record.age().value() - pin).abs() <= 1e-9 * pin,
@@ -270,10 +163,6 @@ fn each_system_s_primary_collapses_at_its_pin_under_every_27_hold() {
         assert_eq!(remnant.kind(), RemnantKind::NeutronStar, "{raw:#x}");
         assert_eq!(record.remnant(), remnant, "{raw:#x}");
         assert_eq!(record.kick(), model.natal_kick(), "{raw:#x}");
-        for k in 0..=16_u32 {
-            let t = Years::new(born_at.value() * f64::from(k) / 17.0);
-            assert_eq!(arm.state_at(t), held.state_at(t), "{raw:#x} at {t:?}");
-        }
     }
 }
 
@@ -331,38 +220,13 @@ fn massive_pairs(n: u32) -> Vec<BinaryInput> {
         .collect()
 }
 
-/// What the engine made of a pair: each segment's kind, its span and the pair's state at its
-/// start, with the supernovae.
-type Made = (
-    Vec<(SegmentKind, Years, Years, BinaryState)>,
-    Vec<SupernovaRecord>,
-);
-
-/// What the engine made of the pair of `timeline`, which the timeline's rules, part of its value
-/// (and of its tracks'), do not compare.
-fn made(timeline: &BinaryTimeline) -> Made {
-    (
-        timeline
-            .segments()
-            .iter()
-            .map(|s| (s.kind(), s.start(), s.end(), timeline.state_at(s.start())))
-            .collect(),
-        timeline.supernovae().to_vec(),
-    )
-}
-
-/// The pairs of [`massive_pairs`] that move under the arm, as measured (2026-11-01).
-const MOVED: u32 = 9;
-
-/// Pairs of 8.0–9.6 M☉ primaries ([`massive_pairs`]) under the arm alone: no pinned primary is a
-/// white dwarf at any segment's start before its pin or just before it, and a pair whose primary
-/// the held arm does not make a white dwarf before its pin is the held arm's bit for bit. The
-/// [`MOVED`] pairs that move are held at their core, living, at no more than
-/// `sse::bare_core_light`'s radius, and collapse at their pin with plan 06's remnant and kick.
+/// Pairs of 8.0–9.6 M☉ primaries ([`massive_pairs`]), the range whose primaries the held arm made
+/// white dwarfs before their pin: no pinned primary is a white dwarf at any segment's start before
+/// its pin or just before it.
 #[test]
-fn only_a_pinned_primary_made_a_white_dwarf_moves() {
+fn no_pinned_primary_is_a_white_dwarf_before_its_pin() {
     let until = Years::new(6.0e7);
-    let mut moved = 0_u32;
+    let mut pinned = 0_u32;
     for (i, input) in massive_pairs(240).iter().enumerate() {
         let model = StarModel::new(
             input.masses()[0],
@@ -371,81 +235,38 @@ fn only_a_pinned_primary_made_a_white_dwarf_moves() {
             input.age_at_epoch(),
         )
         .expect("a star");
-        let held = evolve(input, until);
-        let arm = evolve(&input.clone().with_rules(held_rules()), until);
-        let pin = model
+        let Some(pin) = model
             .death()
             .filter(|d| {
                 d.kind().is_sudden()
                     && model.initial_mass() >= stripped_mark_min_mass(model.composition())
             })
-            .map(|d| d.age().value());
-        let dwarf_before = |timeline: &BinaryTimeline, pin: f64| {
-            timeline
-                .segments()
-                .iter()
-                .map(crate::stellar::binary::Segment::start)
-                .chain([before(pin)])
-                .filter(|t| t.value() < pin)
-                .any(|t| white_dwarf(timeline.state_at(t).stars()[0].phase()))
-        };
-        let Some(pin) = pin else {
-            assert_eq!(made(&arm), made(&held), "pair {i}");
+            .map(|d| d.age().value())
+        else {
             continue;
         };
+        pinned += 1;
+        let timeline = evolve(input, until);
+        let dwarf_before = timeline
+            .segments()
+            .iter()
+            .map(crate::stellar::binary::Segment::start)
+            .chain([before(pin)])
+            .filter(|t| t.value() < pin)
+            .any(|t| white_dwarf(timeline.state_at(t).stars()[0].phase()));
         assert!(
-            !dwarf_before(&arm, pin),
+            !dwarf_before,
             "pair {i}: a white dwarf before its pin at {pin} yr"
         );
-        if !dwarf_before(&held, pin) {
-            assert_eq!(made(&arm), made(&held), "pair {i}");
-            continue;
-        }
-        moved += 1;
-        // Held at its core, a star of no more than its bare core's radius, and collapsed from its
-        // mass (`held_to`).
-        let core = arm.state_at(before(pin)).stars()[0];
-        let (_, bare) = bare_core_light(
-            RemnantRecipe::default(),
-            input.composition().z_fit(),
-            WhiteDwarfCore::CarbonOxygen,
-            core.mass(),
-        );
-        assert!(
-            core.phase().is_living() && core.radius().value() <= bare.value() * (1.0 + 1e-9),
-            "pair {i}: {core:?} against its bare core's {bare:?}"
-        );
-        let record = primary_record(&arm).unwrap_or_else(|| panic!("pair {i}: no record"));
-        assert!(
-            (record.age().value() - pin).abs() <= 1e-9 * pin,
-            "pair {i}: {record:?} against the pin at {pin} yr"
-        );
-        let remnant = model.remnant().expect("a remnant");
-        assert_eq!(record.remnant().kind(), remnant.kind(), "pair {i}");
-        assert_eq!(
-            record.remnant().mass().value(),
-            remnant.mass().value().min(core.mass().value()),
-            "pair {i}"
-        );
-        assert_eq!(record.kick(), model.natal_kick(), "pair {i}");
     }
-    assert_eq!(moved, MOVED, "of 240 pairs");
+    assert!(pinned > 100, "{pinned} of 240 pairs pinned");
 }
 
-/// The same moved pairs under the arm twice give the same timelines, bit for bit.
+/// The pairs twice give the same timelines, bit for bit.
 #[test]
 fn a_held_pair_is_the_same_twice() {
     let until = Years::new(6.0e7);
-    let rules = held_rules();
-    let mut moved = 0_u32;
     for (i, input) in massive_pairs(240).iter().enumerate() {
-        let input = input.clone().with_rules(rules);
-        let first = evolve(&input, until);
-        if made(&first) == made(&evolve(&input.clone().with_rules(version()), until)) {
-            continue;
-        }
-        moved += 1;
-        assert_eq!(evolve(&input, until), first, "pair {i}");
+        assert_eq!(evolve(input, until), evolve(input, until), "pair {i}");
     }
-    assert_eq!(moved, MOVED, "of 240 pairs");
 }

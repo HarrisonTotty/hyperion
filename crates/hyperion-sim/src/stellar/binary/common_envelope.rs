@@ -323,11 +323,9 @@ impl Engine {
     /// (P11.T4.g), where the track itself has already died. `None` where the member has no
     /// envelope to lose and stays as it is.
     ///
-    /// Under [`PinnedWhiteDwarfRules::Frozen`] (P11.T4's fix, at 27) a pinned primary whose pin is
-    /// pending is held at its bare core's last living state whether the core collapses or is a
-    /// white dwarf's; below it, a white dwarf's core is born one.
-    ///
-    /// [`PinnedWhiteDwarfRules::Frozen`]: super::pinned_white_dwarfs::PinnedWhiteDwarfRules::Frozen
+    /// A pinned primary whose pin is pending is held at its bare core's last living state whether
+    /// the core collapses or is a white dwarf's (P11.T4's fix,
+    /// [`pinned_white_dwarfs`](super::pinned_white_dwarfs)).
     #[must_use]
     pub(super) fn stripped_member_at(&self, i: usize, track_age: f64) -> Option<(Member, bool)> {
         let age = self.age;
@@ -372,7 +370,7 @@ impl Engine {
             }
             Remains::WhiteDwarf {
                 core, core_radius, ..
-            } if pinned && self.ctx.rules().pinned_white_dwarfs.holds() => {
+            } if pinned => {
                 return Some((held_core(&core, core_radius), false));
             }
             Remains::WhiteDwarf {
@@ -1301,20 +1299,18 @@ impl Engine {
 
     /// A merger's product in the primary's place to be placed as `target` that no star of that
     /// kind can hold, whose white dwarf of `phase` and `mass` [`Engine::new_star`] makes of its
-    /// core, held at its core's last living state instead while the primary's pin is pending,
-    /// under [`PinnedWhiteDwarfRules::Frozen`] (P11.T4's fix, at 27): design note 16's "if the
-    /// pair has merged, the product collapses", at its pin. `None` otherwise, and below the hold.
+    /// core, held at its core's last living state instead while the primary's pin is pending
+    /// (P11.T4's fix, [`pinned_white_dwarfs`](super::pinned_white_dwarfs)): design note 16's "if
+    /// the pair has merged, the product collapses", at its pin. `None` otherwise.
     ///
     /// The held state is the bare core as `Track::remains_at` holds a stripped AGB star's: a star
     /// of `target`'s phase whose mass is all core, at [`sse::bare_core_light`]'s luminosity and
     /// radius, its white dwarf's at formation below the Chandrasekhar mass (HPT section 6.3's
     /// limit of a giant as its envelope goes, µ = 0). The product has no track whose structure it
     /// could take, so this state is a lean (2026-11-01, recorded in plan 11).
-    ///
-    /// [`PinnedWhiteDwarfRules::Frozen`]: super::pinned_white_dwarfs::PinnedWhiteDwarfRules::Frozen
     #[must_use]
     fn held_product(&self, target: NewStar, phase: Phase, mass: SolarMasses) -> Option<Member> {
-        if !(self.ctx.rules().pinned_white_dwarfs.holds() && self.pin_pending()) {
+        if !self.pin_pending() {
             return None;
         }
         let kind = WhiteDwarfCore::of(phase)?;

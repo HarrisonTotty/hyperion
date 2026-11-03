@@ -6385,13 +6385,10 @@ fn an_unplaced_helium_core_is_its_helium_star() {
     let held_rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
     let run =
         |input: &BinaryInput, rules| evolve(&input.clone().with_rules(rules), Years::new(until));
-    // The 108 + 78 M☉ pair and pinned pair 0787 merge so under every 27 hold alone, but P11.T4's
-    // pinned white dwarfs', which holds a product its primary's pin is pending for at its core's
-    // last living state: both arms set that hold back.
-    let every_27 = crate::stellar::rules::StellarRules {
-        pinned_white_dwarfs: super::pinned_white_dwarfs::PinnedWhiteDwarfRules::Born,
-        ..crate::stellar::rules::StellarRules::every_27_hold()
-    };
+    // The 108 + 78 M☉ pair and pinned pair 0787 merge so under every 27 hold alone (P11.T4's
+    // pinned white dwarfs, folded, hold a product its primary's pin is pending for at its core's
+    // last living state; both arms set that hold back while it was held).
+    let every_27 = crate::stellar::rules::StellarRules::every_27_hold();
     let every_27_held = crate::stellar::rules::StellarRules {
         dwarf_limit: super::dwarf_limit::DwarfLimitRules::Unchecked,
         ..every_27

@@ -819,7 +819,7 @@ pub(crate) enum Remains {
     /// `core` is the bare core's last living state, the track's structure at the stripping at the
     /// core's mass, and `core_radius` that structure's core radius, as [`Remains::Ended`] holds
     /// them: the state a pinned primary whose pin is still to come is held at instead of its white
-    /// dwarf (plan 11, P11.T4's fix at 27, `binary::pinned_white_dwarfs`).
+    /// dwarf (plan 11, P11.T4's fix, `binary::pinned_white_dwarfs`).
     WhiteDwarf {
         phase: Phase,
         mass: SolarMasses,

@@ -844,14 +844,14 @@ fn binary_kick_most_black_holes_are_unkicked() {
 ///
 /// As measured (2026-11-01, with P11.T10's fix, which records the 237 collapses of pairs the
 /// pre-test passed over) every one of 5,421 pinned primaries is, under every 27 hold
-/// ([`PIN_MISSES`]). Without P11.T4's pinned white-dwarf fix ([`PinnedWhiteDwarfRules::Frozen`]) 63
+/// ([`PIN_MISSES`]). Without P11.T4's pinned white-dwarf fix ([`pinned_white_dwarfs`]) 63
 /// are not: primaries of 8.0–9.5 M☉, pinned at 29–42.5 Myr, that their pair makes a white dwarf
 /// before their pin, by a common envelope and case-BB transfer or by a merger. 55 then have no
 /// collapse at all, and 8 collapse later from the pair's merger or an accretion-induced collapse,
 /// at 45–128 Myr (system `0x81f7_b160_0000_0018` of the sample: pinned at 42.02 Myr, its merger's
 /// neutron star at 63.33 Myr). They are 59 systems: the sample draws some cells twice.
 ///
-/// [`PinnedWhiteDwarfRules::Frozen`]: crate::stellar::binary::pinned_white_dwarfs::PinnedWhiteDwarfRules::Frozen
+/// [`pinned_white_dwarfs`]: crate::stellar::binary::pinned_white_dwarfs
 #[test]
 #[ignore = "slow: 10⁴ systems of layer E, their pairs run through the engine"]
 fn binary_kick_massive_primaries_die_as_plan_06_says() {
