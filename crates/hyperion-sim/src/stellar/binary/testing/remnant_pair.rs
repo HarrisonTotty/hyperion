@@ -1,7 +1,7 @@
 //! A main-sequence donor at its Roche lobe beside a white dwarf or a neutron star, run through the
-//! engine from the onset of its transfer (plan 11's test helpers): the single pairs P11.T4's engine
-//! fixes measure a transfer on, built directly, since the grid's pairs come to such a state only
-//! after a supernova or a common envelope.
+//! engine from the onset of its transfer, and a naked helium star detached beside one (plan 11's
+//! test helpers): the single pairs P11.T4's engine fixes measure a transfer on, built directly,
+//! since the grid's pairs come to such a state only after a supernova or a common envelope.
 
 use std::sync::Arc;
 
@@ -119,4 +119,71 @@ pub(crate) fn thermal_rate(donor: f64, tau: f64) -> f64 {
         .evaluate(timeline.context(), 0, ONSET_AGE, donor, tau)
         .expect("a main-sequence donor has a structure");
     donor / kelvin_helmholtz(&s, Kind::of(s.state.phase(), donor))
+}
+
+/// The timeline of a solar naked helium star of `helium` M☉ at its zero age, detached on a
+/// circular orbit of `a` R☉ about a remnant of `phase` and `accretor` M☉, under `rules`, from
+/// [`ONSET_AGE`] for `years`: case BB's pairs, whose helium star swells after its core helium
+/// burning and fills its lobe, as a grid pair's comes to after its first supernova and a common
+/// envelope; its remnant was born at half the onset's age.
+///
+/// # Panics
+///
+/// If `helium` or `accretor` lies outside the stars' 0.08–150 M☉ (the input's masses).
+#[must_use]
+pub(crate) fn helium_star_beside_remnant(
+    helium: f64,
+    phase: Phase,
+    accretor: f64,
+    a: f64,
+    rules: StellarRules,
+    years: f64,
+) -> BinaryTimeline {
+    let placeholder = KeplerElements::from_semi_major_axis(
+        Metres::new(1.0e10),
+        GravitationalParameter::from_solar_masses(SolarMasses::new(helium + accretor)),
+        Eccentricity::CIRCULAR,
+        Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO).expect("zero angles"),
+        Radians::ZERO,
+    )
+    .expect("a bound orbit");
+    let input = BinaryInput::new(
+        SolarMasses::new(helium),
+        SolarMasses::new(accretor),
+        Composition::SOLAR,
+        placeholder,
+        [StarDraws::median(), StarDraws::median()],
+        Years::new(ONSET_AGE + years),
+    )
+    .expect("a pair of stars' masses")
+    .with_rules(rules);
+    let ctx = Arc::new(Context::of(&input));
+    let star = Member::MainSequence {
+        helium: true,
+        mass: Path::starting(ONSET_AGE, helium),
+        tau: Path::starting(ONSET_AGE, 0.0),
+    };
+    let remnant = Member::Remnant {
+        phase,
+        birth: 0.5 * ONSET_AGE,
+        origin: cooling_origin(&ctx, phase, accretor, None),
+        mass: Path::starting(ONSET_AGE, accretor),
+    };
+    let orbit = LiveOrbit::new(
+        ONSET_AGE,
+        a,
+        0.0,
+        *placeholder.orientation(),
+        placeholder.mean_anomaly_at_epoch(),
+    );
+    let mut engine = Engine::new(
+        ctx,
+        ONSET_AGE,
+        ONSET_AGE + years,
+        [star, remnant],
+        orbit,
+        None,
+    );
+    engine.run();
+    engine.finish()
 }

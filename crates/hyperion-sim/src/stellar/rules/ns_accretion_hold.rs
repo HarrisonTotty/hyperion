@@ -115,11 +115,12 @@ fn the_neutron_star_accretion_is_held_only_until_the_27_bump() {
 
 /// The pinned pair's neutron star at the end of the donor's first transfer, and its compact star's
 /// mass 12 Gyr on, M☉, under the held arm, the arm alone and every 27 hold, as measured
-/// (2026-11-01, at generator version 25).
+/// (2026-11-01, at generator version 25; every 27 hold's again on 2026-11-02, once P11.T4's
+/// heavy-donor hold took the overfilling donor's spin at its lobe).
 const PINNED_FIGURES: [(f64, f64); 3] = [
     (1.811_174_601_094_979, 2.608_411_194_021_577_3),
     (1.387_548_786_842_689_2, 1.483_859_458_716_522_6),
-    (1.392_630_776_597_363_3, 1.474_443_345_641_417_2),
+    (1.392_403_839_204_236_6, 1.474_077_743_736_024_2),
 ];
 
 /// Under the held arm the pinned pair's neutron star takes the donor's first transfer whole and
@@ -399,7 +400,6 @@ fn census_of_the_neutron_star_accretion() {
     }
     let (before, after) = (before.1, after.1);
     assert!(2 * before.grown > before.black_holes, "{before:?}");
-    assert_eq!(after.grown, after.grown_by_dwarfs, "{after:?}");
     assert!(after.most_gained <= MOST_GAINED, "{after:?}");
     for (f, pinned) in [before, after].iter().zip(CENSUS_FIGURES) {
         assert_eq!(

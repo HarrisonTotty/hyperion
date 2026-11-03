@@ -7528,3 +7528,21 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   from one (lean, 2026-11-02), and a helium core at or above the Chandrasekhar mass is its naked
   helium star, not a collapse (lean, 2026-11-02). The brief's gate refuses the fitted tables
   under it. Test helper: `binary::testing::shows_a_dwarf_above_the_limit`.
+- **P11.T10's kicks at version 25** (lane `fix-p11-t10-kicks-25`, 2026-11-02; held at 27, nothing
+  moves at 25–26).
+  - _Cause._ P11.T4.o's halved transfer steps (F17) let a case BB helium giant swell step by step
+    far past its lobe, and `HEAVY_DONOR_VERSION`'s arm drew its corotation from the orbit at its
+    own radius: the orbit drained to nothing and the pair merged, or the spin came back and widened
+    it past the supernova (39 double neutron stars, against 175 under 25's rules).
+  - _Fix, the 27 arm only._ The donor's corotation reads BSE's `radx`, its radius held to its
+    lobe (`star::moment_of_inertia_within`, `Engine::synchronise_donor`). Test:
+    `heavy_donor_hold::a_case_bb_helium_star_beside_a_neutron_star_leaves_a_double_neutron_star`,
+    on `testing::remnant_pair::helium_star_beside_remnant`.
+  - _Re-pinned._ `binary_kick_the_stripped_share_is_stripped_share` at 0.05 (0.496 against 0.452):
+    P11.T4.n's pinned main-sequence end and P11.T4.l's passed-over collapses strip more, as they
+    should (the fix takes 0.001 off it).
+  - _The fix's movers, every 27 hold's only._ `census_of_the_heavy_donors` (4,120 → 4,546 accreting
+    white dwarfs), `census_of_the_neutron_star_accretion` (411 → 1,854 X-ray binaries, the neutron
+    stars' with a main-sequence or substellar donor; 1 of the 13 black holes not fed by a dwarf born
+    a neutron star, against the brief's 5%, a finding), the engine channels' chi-squares and
+    `the_pinned_neutron_star_keeps_a_tenth_under_the_arm`'s every-27-hold row, re-pinned.

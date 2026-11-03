@@ -11,6 +11,9 @@
 //! - The same pair twice under the arm gives the same timeline, and a cell's systems whose pairs
 //!   never feed a white dwarf, a neutron star or a black hole by stable transfer move under neither
 //!   arm.
+//! - Case BB: a naked helium star beside a neutron star leaves a double neutron star under the arm
+//!   alone and under every 27 hold, its donor's corotation taking its spin at its Roche lobe, and
+//!   under the held arm at 25 and 26 as pinned.
 //! - Slow: a census of 10⁷ slab records' accreting white dwarfs under the version's rules and
 //!   under every 27 hold.
 //!
@@ -41,7 +44,9 @@ use crate::planetary::testing::with_every_27_hold;
 use crate::rng::Seed;
 use crate::stellar::Phase;
 use crate::stellar::binary::testing::census::{Census, slab_census};
-use crate::stellar::binary::testing::remnant_pair::{ONSET_AGE, donor_onto_remnant, thermal_rate};
+use crate::stellar::binary::testing::remnant_pair::{
+    ONSET_AGE, donor_onto_remnant, helium_star_beside_remnant, thermal_rate,
+};
 use crate::stellar::binary::{BinaryClass, BinaryTimeline, CarvedClass, CvKind, SegmentKind};
 use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
 use crate::stellar::system::{StarModel, SystemStars, draw_metallicity, primary_draws};
@@ -193,6 +198,93 @@ fn the_heavy_donor_transfers_at_its_thermal_rate_under_the_arm() {
 #[test]
 fn the_arm_is_deterministic() {
     assert_eq!(pinned(thermal_rules()), pinned(thermal_rules()));
+}
+
+/// The case BB pairs, (M☉, a R☉): a solar naked helium star of M☉ at its zero age, detached beside
+/// a neutron star of [`CASE_BB_NEUTRON_STAR`] at a R☉. The first is the helium star of the
+/// prior-sampled massive system `0x8201_9920_0000_0031` after its common envelope, which lay at
+/// 4.79 R☉ (solar and at its zero age here, its pair drains at 2), and the second a lighter one
+/// (P11.T10's kicks at version 25).
+const CASE_BB: [(f64, f64); 2] = [(4.165, 2.0), (2.8, 3.0)];
+
+/// The neutron star of the case BB pairs, M☉.
+const CASE_BB_NEUTRON_STAR: f64 = 1.3874;
+
+/// The case BB pair of `helium` M☉ at `a` R☉ under `rules`, run 10 Myr: its orbit's semi-major
+/// axis, R☉, and eccentricity at the end if it is then a bound double neutron star whose one
+/// supernova left it bound.
+fn case_bb_double_neutron_star(helium: f64, a: f64, rules: StellarRules) -> Option<(f64, f64)> {
+    let years = 1.0e7;
+    let timeline = helium_star_beside_remnant(
+        helium,
+        Phase::NeutronStar,
+        CASE_BB_NEUTRON_STAR,
+        a,
+        rules,
+        years,
+    );
+    let end = timeline.state_at(Years::new(ONSET_AGE + years - 1.0));
+    let both = end.stars().iter().all(|s| s.phase() == Phase::NeutronStar);
+    match timeline.supernovae() {
+        [sn] if sn.bound() && both => end.orbit().map(|o| {
+            (
+                o.semi_major_axis().value() / crate::units::consts::SOLAR_RADIUS_M,
+                o.eccentricity().value(),
+            )
+        }),
+        _ => None,
+    }
+}
+
+/// The case BB pairs' double neutron stars at the end, (a R☉, e), under the version's rules (25)
+/// and every 26 hold, as measured (2026-11-02, at generator version 25).
+const CASE_BB_HELD: [[(f64, f64); 2]; 2] = [
+    [
+        (6.769_745_587_442_72, 0.234_619_667_067_044_93),
+        (7.280_389_958_608_069, 0.109_291_030_135_487_83),
+    ],
+    [
+        (6.769_745_587_442_72, 0.234_619_667_067_044_93),
+        (7.280_389_958_608_069, 0.109_291_030_135_487_83),
+    ],
+];
+
+/// A case BB helium star's stable transfer onto its neutron star leaves a double neutron star
+/// under the arm alone and under every 27 hold, as it does under the held arm, whose figures at 25
+/// and 26 are pinned as measured. Under the arm the donor's corotation draws its spin from the
+/// orbit at its radius held to its Roche lobe, as BSE's transfer reads it; at the radius the
+/// swelling giant would have alone it drained the first pair's orbit to 0.03 R☉ and merged its
+/// neutron stars into a black hole, and widened the second's until its supernova unbound it.
+#[test]
+fn a_case_bb_helium_star_beside_a_neutron_star_leaves_a_double_neutron_star() {
+    for (name, rules) in [
+        ("the arm alone", thermal_rules()),
+        ("every 27 hold", StellarRules::every_27_hold()),
+    ] {
+        for (helium, a) in CASE_BB {
+            let dns = case_bb_double_neutron_star(helium, a, rules);
+            println!("{name}: {helium} M_sun at {a} R_sun: {dns:?}");
+            let (a_end, e) = dns.unwrap_or_else(|| panic!("{name}: {helium} at {a}: no DNS"));
+            assert!(
+                a_end > 0.5 * a && e < 0.3,
+                "{name}: {helium} at {a}: {a_end}, {e}"
+            );
+        }
+    }
+    let held = [version(), StellarRules::every_26_hold_with_its_retargets()].map(|rules| {
+        CASE_BB.map(|(helium, a)| {
+            case_bb_double_neutron_star(helium, a, rules)
+                .expect("a double neutron star under the held arm")
+        })
+    });
+    println!("held, at 25 and 26: {held:?}");
+    for (measured, pinned) in held.iter().flatten().zip(CASE_BB_HELD.iter().flatten()) {
+        assert!(
+            (measured.0 / pinned.0 - 1.0).abs() < 1e-9
+                && (measured.1 / pinned.1 - 1.0).abs() < 1e-9,
+            "{held:?}"
+        );
+    }
 }
 
 /// The first attempt's stars of `record` in `galaxy`, as the engine's members run them.

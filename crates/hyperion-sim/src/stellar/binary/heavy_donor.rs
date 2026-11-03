@@ -37,7 +37,11 @@
 //!   accretion marks it so ([`HeavyDonorRules::loss_from_accretor`]);
 //! - onto a white dwarf, a neutron star or a black hole, the transfer's step returns no spin to the
 //!   orbit, and the donor's corotation after it draws its spin from the orbit, the pair's total
-//!   kept ([`HeavyDonorRules::corotation_from_orbit`]).
+//!   kept ([`HeavyDonorRules::corotation_from_orbit`]), its envelope's spin at its radius held to
+//!   its Roche lobe, as BSE's transfer reads a donor that overfills it (`evolv2.f`'s `radx`;
+//!   P11.T10's kicks at version 25: at the radius it would have alone, a case BB helium giant
+//!   stripped toward its core, which HPT's helium-giant radius swells far past its lobe, drained
+//!   its orbit to nothing and merged its neutron stars).
 //!
 //! Onto any other accretor the transfer keeps the held arm's book of its spin (a lean of
 //! 2026-11-01): forced on at version 24, the corotation drawn from the orbit moves the paper's
@@ -76,7 +80,7 @@ pub(crate) enum HeavyDonorRules {
     /// Version 27's: the thermal rate for a main-sequence donor heavier than its compact accretor
     /// that a step at it leaves overfilling; the accretor's specific angular momentum where the
     /// accretion marks the loss as its; and, onto a compact accretor, the pair's total angular
-    /// momentum kept through the donor's corotation.
+    /// momentum kept through the donor's corotation, at the donor's radius held to its Roche lobe.
     Thermal,
 }
 
@@ -113,10 +117,10 @@ impl HeavyDonorRules {
     }
 
     /// Whether the donor's corotation after a step of transfer onto an accretor of type `accretor`
-    /// draws its spin from the orbit, keeping the pair's total angular momentum, where the held
-    /// arm returns the transferred spin to the orbit in the step and restores the corotation with
-    /// nothing drawn: under [`HeavyDonorRules::Thermal`], onto a white dwarf, a neutron star or a
-    /// black hole.
+    /// draws its spin from the orbit, keeping the pair's total angular momentum, its envelope's
+    /// spin at its radius held to its Roche lobe, where the held arm returns the transferred spin
+    /// to the orbit in the step and restores the corotation with nothing drawn: under
+    /// [`HeavyDonorRules::Thermal`], onto a white dwarf, a neutron star or a black hole.
     #[must_use]
     pub(super) fn corotation_from_orbit(self, accretor: Kind) -> bool {
         match self {

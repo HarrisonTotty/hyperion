@@ -737,6 +737,29 @@ pub(crate) fn moment_of_inertia(s: &Structure) -> f64 {
     sse::ENVELOPE_GYRATION * (m - mc).max(0.0) * r * r + sse::CORE_GYRATION * mc * rc * rc
 }
 
+/// [`moment_of_inertia`] of a star whose Roche lobe is `lobe_rsun` R☉, its envelope's radius held
+/// to the lobe where it overfills it.
+///
+/// The radius is held to no less than the core's. It is the radius BSE's transfer reads its donor's
+/// spin at, `radx(j1) = MAX(radc(j1),rol(j1))` where `rad(j1).gt.rol(j1)`, its spin
+/// `jspin` ÷ (`k2str` (`mass` − `massc`) `radx`² + `k3` `massc` `radc`²) (the published code's
+/// `evolv2.f`, its Roche-lobe overflow loop; Hurley, Tout and Pols 2002; read at source in
+/// COSMIC's copy, 2026-11-02). Within its lobe, or a remnant, it is [`moment_of_inertia`].
+#[must_use]
+pub(super) fn moment_of_inertia_within(s: &Structure, lobe_rsun: f64) -> f64 {
+    let r = s.state.radius().value();
+    if s.state.phase().is_remnant() || r <= lobe_rsun {
+        return moment_of_inertia(s);
+    }
+    let (m, mc, rc) = (
+        s.state.mass().value(),
+        s.state.core_mass().value(),
+        s.core_radius.value(),
+    );
+    let held = lobe_rsun.max(rc);
+    sse::ENVELOPE_GYRATION * (m - mc).max(0.0) * held * held + sse::CORE_GYRATION * mc * rc * rc
+}
+
 /// A star's rotation on the zero-age main sequence, rad yr⁻¹: 45.35 v̄ ÷ R with v̄ = 330 M^3.3 ÷
 /// (15 + M^3.45) km s⁻¹ (HPT equations 107 and 108).
 #[must_use]

@@ -43,7 +43,8 @@
 //!   version 27 the step reads no mark of the accretor's loss, so every loss leaves with the
 //!   donor's angular momentum, and the donor's corotation after it is restored with nothing drawn
 //!   from the orbit; from 27 the marked loss leaves with the accretor's, and onto a compact
-//!   accretor the corotation draws the donor's spin from the orbit, the pair's total kept
+//!   accretor the corotation draws the donor's spin from the orbit, the pair's total kept, its
+//!   envelope's spin at its radius held to its Roche lobe as BSE's transfer reads it
 //!   ([`heavy_donor`](super::heavy_donor), P11.T4's fix).
 //! - **The swell** (sections 2.6.4, "effectively a reverse of the process which formed the
 //!   degenerate remnant star in the first place", and 2.6.6; BSE `evolv2.f` 1480–1490 and
@@ -87,7 +88,10 @@ use crate::units::{SolarMasses, Years};
 
 use super::detached::{Snapshot, orbital_momentum, semi_major_axis};
 use super::evolve::{Engine, roche_lobe};
-use super::star::{G, Kind, Member, Path, Surface, cooling_origin, moment_of_inertia, positive};
+use super::star::{
+    G, Kind, Member, Path, Surface, cooling_origin, moment_of_inertia, moment_of_inertia_within,
+    positive,
+};
 use super::timeline::{Component, IaPoolChannel, PooledIaEvent, SegmentKind};
 
 /// The critical mass ratio of a low-mass main-sequence donor (BSE section 2.6.4).
@@ -300,11 +304,30 @@ impl Engine {
     }
 
     /// Sets member `i`'s spin to co-rotate with the orbit, from the orbit's angular momentum.
+    pub(super) fn synchronise(&mut self, i: usize) {
+        self.synchronise_by(i, |s, _| moment_of_inertia(s));
+    }
+
+    /// [`Engine::synchronise`] for donor `d` after a step of stable transfer onto a compact
+    /// accretor, under P11.T4's heavy-donor hold, its envelope's spin at its radius held to its
+    /// Roche lobe ([`moment_of_inertia_within`]).
+    ///
+    /// That is how BSE's transfer reads a donor that overfills its lobe. A case BB helium giant
+    /// stripped toward its core swells, by HPT's helium-giant radius (their equations 85–88), to
+    /// hundreds of R☉ about an orbit of a few, and drawn from the orbit at that radius its
+    /// corotation drained the orbit to nothing, step by step, and merged the pair (P11.T10's kicks
+    /// at version 25).
+    fn synchronise_donor(&mut self, d: usize) {
+        self.synchronise_by(d, moment_of_inertia_within);
+    }
+
+    /// [`Engine::synchronise`] with member `i`'s moment of inertia `inertia` of its structure and
+    /// its Roche lobe in R☉.
     #[expect(
         clippy::many_single_char_names,
         reason = "the names are BSE's own symbols"
     )]
-    pub(super) fn synchronise(&mut self, i: usize) {
+    fn synchronise_by(&mut self, i: usize, inertia: impl Fn(&Structure, f64) -> f64) {
         let Some(orbit) = &self.orbit else {
             return;
         };
@@ -315,7 +338,7 @@ impl Engine {
         };
         let total = m + mo;
         let omega = (G * total / (orbit.a * orbit.a * orbit.a)).sqrt();
-        let spin = moment_of_inertia(&s) * omega;
+        let spin = inertia(&s, roche_lobe(m, mo, orbit.a)) * omega;
         let j = orbital_momentum(m, mo, orbit.a, orbit.e) + self.spins[i] - spin;
         self.spins[i] = spin.max(1e-10);
         if j > 0.0 {
@@ -535,7 +558,7 @@ impl Engine {
             self.accept(&next);
             let ka = Kind::of(sa.state.phase(), s.masses[a_idx]);
             if self.ctx.rules().heavy_donor.corotation_from_orbit(ka) {
-                self.synchronise(d);
+                self.synchronise_donor(d);
             } else {
                 self.corotate_donor(d);
             }
