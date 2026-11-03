@@ -37,9 +37,12 @@ import type { Rgb } from "../photometry/toneCurve";
 import { SETTINGS, WIREFRAME_TERRAIN_TAU_PX } from "../quality/qualitySetting";
 import { AU_M } from "../scenes/kept";
 import { terrainHorizonFactor } from "./shadows/litFraction";
+import type { CachedPatch, DrawnPatch, DrawSet } from "./cache";
 import { CLASS_MAP_LEVEL, classMapLawsOf } from "./classMap";
 import { CoverageView } from "./coverage";
 import {
+  cellPatchLevel,
+  drawsCells,
   handoverRangeM,
   handoverRangeRatio,
   handoverReliefM,
@@ -720,5 +723,48 @@ describe("the survey's edge on a regolith body (R10.T10.e)", () => {
     const marsAt90 = stepsAt(edgeLaws(mars, 1, "before"), 1, 90);
     expect(marsAt90.disc).toBeGreaterThan(1.3);
     expect(marsAt90.terrain).toBeCloseTo(marsAt90.disc, 12);
+  });
+});
+
+/** A draw set as `drawsCells` reads it: `missing` patches missing, and patches drawn at `levels`, stand-ins where `standIn`. */
+function set(
+  missing: number,
+  drawn: ReadonlyArray<{ readonly level: number; readonly standIn: boolean }>,
+): Pick<DrawSet, "count" | "missing" | "patches"> {
+  return {
+    count: drawn.length,
+    missing,
+    patches: drawn.map(({ level, standIn }, slot): DrawnPatch => {
+      const patch: CachedPatch = {
+        key: { face: 0, level, i: 0, j: 0 },
+        generation: 0,
+        originM: vec3(0, 0, 0),
+        heightRangeM: [0, 0],
+        boundingRadiusM: 1,
+        slot,
+        keyString: `0/${String(level)}/0/0`,
+      };
+      return { keyString: patch.keyString, patch, standIn, within: null };
+    }),
+  };
+}
+
+describe("the hand-over at the field's cells (lane fix-coast-class-map; HANDOVER_AT_CELLS)", () => {
+  it("takes the patches whose quads are the field's cells, level L − 6, at 0 from a field of level 6 down", () => {
+    expect([5, 6, 7, 8].map(cellPatchLevel)).toEqual([0, 0, 1, 2]);
+  });
+
+  it("draws the cells where nothing is missing and nothing coarser than the cells' level stands in", () => {
+    expect([
+      drawsCells(set(0, [{ level: 2, standIn: false }]), 2),
+      drawsCells(set(0, [{ level: 3, standIn: true }]), 2),
+      drawsCells(set(0, [{ level: 1, standIn: true }]), 2),
+      drawsCells(set(1, [{ level: 2, standIn: false }]), 2),
+      drawsCells(null, 2),
+    ]).toEqual([true, true, false, false, false]);
+  });
+
+  it("draws the cells of a set of none, its seen ground all unsurveyed, but not of one still missing", () => {
+    expect([drawsCells(set(0, []), 2), drawsCells(set(1, []), 2)]).toEqual([true, false]);
   });
 });

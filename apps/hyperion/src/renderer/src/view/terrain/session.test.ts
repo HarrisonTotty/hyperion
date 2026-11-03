@@ -91,7 +91,9 @@ interface Harness {
   readonly tally: ReturnType<typeof allocationTally>;
 }
 
-async function harness(options: { readonly workers?: number | "default" } = {}): Promise<Harness> {
+async function harness(
+  options: { readonly workers?: number | "default"; readonly handoverAtCells?: boolean } = {},
+): Promise<Harness> {
   const hook = renderHook(() => useServerLink(), { wrapper: ServerLinkHarness });
   act(() => {
     FakeWebSocket.latest().serverWelcomes();
@@ -114,6 +116,7 @@ async function harness(options: { readonly workers?: number | "default" } = {}):
     },
     // Two workers unless a test asks for the default count.
     ...(options.workers === "default" ? {} : { workers: options.workers ?? 2 }),
+    ...(options.handoverAtCells === undefined ? {} : { handoverAtCells: options.handoverAtCells }),
   });
   return {
     socket: () => FakeWebSocket.latest(),
@@ -610,13 +613,26 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
     h.session.dispose();
   });
 
-  it("gives the views the relief of a body whose header and survey it holds", async () => {
-    const h = await harness();
+  it("gives the views the relief of a body whose header and survey it holds, the rule off", async () => {
+    const h = await harness({ handoverAtCells: false });
     await holdMoon(h);
     expect([h.session.reliefs.reliefM(MOON), h.session.reliefs.reliefM(PLANET)]).toEqual([
       18_000,
       null,
     ]);
+  });
+
+  it("withholds a held body's relief from the frames while no settled terrain of it is drawn (HANDOVER_AT_CELLS)", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    expect(h.session.reliefs.reliefM(MOON)).toBeNull();
+  });
+
+  it("gives the relief once a photorealistic view's plan draws the body as terrain (HANDOVER_AT_CELLS)", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    h.session.noteView(PRIMARY, { ...viewAt(5e6), regimes: new Map([[MOON, "terrain"]]) });
+    expect(h.session.reliefs.reliefM(MOON)).toBe(18_000);
   });
 });
 

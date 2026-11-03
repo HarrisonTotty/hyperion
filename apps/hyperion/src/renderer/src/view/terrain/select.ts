@@ -121,7 +121,8 @@ export interface Selection {
   /**
    * Whether `maxPatches` stopped a split that a view's tolerance asked for, so that the drawn
    * error is above τ somewhere: what drives `TERRAIN: DETAIL LIMITED` (the patch-demand ruling,
-   * 2026-10-03).
+   * 2026-10-03). A split only {@link SelectionInput.surveyedFloorLevel} asked for, refused, is not
+   * one, and stops none after it.
    */
   readonly limited: boolean;
   /**
@@ -302,6 +303,15 @@ export interface SelectionInput {
    * prices.
    */
   readonly occluderHeightM?: number;
+  /**
+   * The level surveyed ground a view sees is refined to at least (lane fix-coast-class-map; the
+   * hand-over's `HANDOVER_AT_CELLS`): a seen patch with a surveyed cell under it, coarser than this,
+   * asks to split whatever its error, as one a view finds ρ > τ of does, under the same streaming
+   * gate and budget. The terrain pass gives the level whose quads are the field's cells, max(L − 6,
+   * 0), so that the terrain draws the field's own cells, its coasts among them. Absent, 0: no floor,
+   * every split decided by the error alone, as before, bit for bit.
+   */
+  readonly surveyedFloorLevel?: number;
 }
 
 /**
@@ -743,6 +753,8 @@ interface Traversal extends PlanetTables {
   readonly skirtMarginM: number;
   /** The finest level's patch edge, metres: the forced region's unit. */
   readonly patchSizeM: number;
+  /** {@link SelectionInput.surveyedFloorLevel}, 0 where absent. */
+  readonly surveyedFloorLevel: number;
 }
 
 /**
@@ -898,7 +910,8 @@ function requestPriority(t: Traversal, target: TraversalNode, standIn: Traversal
 }
 
 /**
- * Whether a selected patch should be split: it is in a forced region, or a view finds ρ > τ and,
+ * Whether a selected patch should be split: it is in a forced region, or a view finds ρ > τ, or a
+ * view sees it over surveyed ground coarser than {@link SelectionInput.surveyedFloorLevel}, and,
  * where baked ranges are given, it is baked itself (the streaming gate).
  *
  * @remarks
@@ -919,7 +932,8 @@ function wantsRefining(t: Traversal, node: TraversalNode): boolean {
   if (node.forced) {
     return true;
   }
-  return node.excess > 1 && (t.heightRanges === null || node.resident);
+  const belowFloor = node.key.level < t.surveyedFloorLevel && node.seenBy !== 0 && !node.bare;
+  return (node.excess > 1 || belowFloor) && (t.heightRanges === null || node.resident);
 }
 
 /**
@@ -1140,6 +1154,7 @@ export function selectPatches(input: SelectionInput): Selection {
     survey: input.survey ?? null,
     skirtMarginM: input.skirtMarginM ?? 0,
     patchSizeM: finestPatchSizeM(planet),
+    surveyedFloorLevel: input.surveyedFloorLevel ?? 0,
   };
   const maxPatches = input.maxPatches ?? Infinity;
   // A forced patch no view sees is selected, to be kept resident, but neither drawn nor counted;
@@ -1182,6 +1197,10 @@ export function selectPatches(input: SelectionInput): Selection {
     const added = tree.splitBalanced(node.key, childOf);
     if (!node.forced && tree.size > (held ? maxPatches : newMax)) {
       tree.rollback();
+      if (node.excess <= 1) {
+        // A split the surveyed floor alone asked for: no view's tolerance is above τ for it.
+        continue;
+      }
       if (!limited) {
         limited = true;
         limitExcess = node.weighted;

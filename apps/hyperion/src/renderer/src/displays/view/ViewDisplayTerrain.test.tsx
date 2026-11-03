@@ -186,19 +186,20 @@ describe("VIEW's terrain session (R10.T16.a)", () => {
 
   describe("each view's own terrain annunciation on its own label block (G10; R10.T16.c)", () => {
     /**
-     * The Earth handed over to the photorealistic primary, its field answered and its bakes held
-     * back, INSTRUMENT 1 open in the wireframe beside it, past the annunciation's onset.
+     * The Earth in the photorealistic primary's hand-over range, its field answered and its bakes
+     * held back, INSTRUMENT 1 open in the wireframe beside it, past the annunciation's onset. Under
+     * `HANDOVER_AT_CELLS` its terrain is warmed behind its disc until its bakes land.
      */
     async function earthStreaming(): Promise<void> {
-      const view = await earthHandedOver();
+      const view = await earthInRange();
       await openInstrument(view, "INSTRUMENT 1");
       view.advance(ANNUNCIATION_ONSET_MS + 500);
       await settle();
     }
 
-    it("states TERRAIN: STREAMING on the primary's, whose terrain waits for its bakes", async () => {
+    it("states none on the primary's while its terrain is warmed behind the disc, its bakes held back (HANDOVER_AT_CELLS)", async () => {
       await earthStreaming();
-      expect(within(primaryLabelBlock()).getByText("TERRAIN: STREAMING")).toBeInTheDocument();
+      expect(within(primaryLabelBlock()).queryByText(/^TERRAIN:/u)).toBeNull();
     });
 
     it("states none on a wireframe instrument's, which hands nothing over", async () => {
@@ -477,9 +478,10 @@ function earthWithSeed(): ResponseFor<"body_detail"> {
 /**
  * `VIEW` drawing the server's scene photorealistically, the ship 2,000 km over the slice's Earth,
  * the Earth's field (surveyed whole) and seed answered and its bakes held back by the scripted
- * workers, so that the primary hands it over with its terrain waiting.
+ * workers, so that the primary, the Earth in its hand-over range, warms its terrain behind its
+ * disc with its bakes waiting (`HANDOVER_AT_CELLS`), and hands it over once they land.
  */
-async function earthHandedOver(
+async function earthInRange(
   seams: Pick<Parameters<typeof renderViewDisplay>[0], "watchTerrain"> = {},
 ): Promise<ViewDisplayHarness> {
   const fake = timedEngineSource();
@@ -519,8 +521,8 @@ async function earthHandedOver(
 }
 
 describe("the terrain's fault on a live VIEW (R10.T16.b's line, a body handed over in a live frame; R10.T16.c)", () => {
-  it("states the fault on the primary's label block while it hands the Earth over and every height worker is lost", async () => {
-    const view = await earthHandedOver();
+  it("states the fault on the primary's label block while it warms the Earth's terrain and every height worker is lost", async () => {
+    const view = await earthInRange();
     const before = faultLines();
     // Every height worker the session runs fails, each replacement too, until none is left.
     const workers = view.heightWorkers.length;
@@ -531,18 +533,19 @@ describe("the terrain's fault on a live VIEW (R10.T16.b's line, a body handed ov
     }
     view.advance(500);
     await settle();
-    // The fault stands only for a view that hands a body over: the primary's live frame does.
+    // The fault stands only for a view that hands a body over, or warms its terrain behind its
+    // disc: the primary's live frame does.
     expect([before, faultLines()]).toEqual([[], [TERRAIN_NOT_AVAILABLE]]);
     expect(within(primaryLabelBlock()).queryByText("TERRAIN: STREAMING")).toBeNull();
   });
 
-  /** The Earth handed over, with the session `VIEW` made. */
+  /** The Earth in the primary's range, its terrain warmed, with the session `VIEW` made. */
   async function earthAndSession(): Promise<{
     readonly view: ViewDisplayHarness;
     readonly session: TerrainSession;
   }> {
     const sessions: TerrainSession[] = [];
-    const view = await earthHandedOver({
+    const view = await earthInRange({
       watchTerrain: (session) => {
         sessions.push(session);
         return () => undefined;
@@ -798,11 +801,11 @@ describe("the wireframe's terrain on a live VIEW (R10.T11)", () => {
 
 describe("a closed instrument forgotten by the terrain session (the batch review's S17)", () => {
   /**
-   * The Earth handed over to the primary and to INSTRUMENT 1, both photorealistic, with the
-   * session `VIEW` made given to `sessions`.
+   * The Earth in the range of the primary and of INSTRUMENT 1, both photorealistic, its terrain
+   * warmed for both, with the session `VIEW` made given to `sessions`.
    */
   async function bothHandOver(sessions: TerrainSession[]): Promise<ViewDisplayHarness> {
-    const view = await earthHandedOver({
+    const view = await earthInRange({
       watchTerrain: (session) => {
         sessions.push(session);
         return () => undefined;

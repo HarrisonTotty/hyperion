@@ -708,6 +708,12 @@ export interface TerrainPassOptions {
    */
   readonly budgetHoldMargin?: number | null;
   /**
+   * The level its selection refines seen surveyed ground to at least (`SelectionInput.surveyedFloorLevel`;
+   * lane fix-coast-class-map): the session gives a lit pass max(L − 6, 0) under `HANDOVER_AT_CELLS`.
+   * Absent, 0: no floor, as before.
+   */
+  readonly surveyedFloorLevel?: number;
+  /**
    * Called with each selection's input and result, right after `selectPatches` and outside the
    * `terrain.select` span, for the spike's second, calibrated pass (T13.c). Unset, it costs nothing.
    */
@@ -1619,6 +1625,7 @@ export class TerrainPass {
   readonly #frustumMargin: TerrainFrustumMargin;
   readonly #morphInMs: number | undefined;
   readonly #budgetHoldMargin: number | null;
+  readonly #surveyedFloorLevel: number;
   /** Whether the drawn ground's changes cut ({@link TerrainPass.setReducedMotion}). */
   #reducedMotion = false;
   /** The pixels each change moves the ground by, from the resident patches' sizes (R10.T16.i). */
@@ -1715,6 +1722,7 @@ export class TerrainPass {
     this.#morphInMs = options.morphInMs;
     this.#budgetHoldMargin =
       options.budgetHoldMargin === undefined ? BUDGET_HOLD_MARGIN : options.budgetHoldMargin;
+    this.#surveyedFloorLevel = options.surveyedFloorLevel ?? 0;
     this.#morphSpans = {
       morphPx: (keyString) => this.#screenPx(keyString, this.#morphSizeM(keyString)),
       risePx: (keyString) =>
@@ -3530,6 +3538,7 @@ export class TerrainPass {
       ...(holdMargin === null || last === undefined
         ? {}
         : { budgetHold: { split: splitKeysOf(last.patches.values()), margin: holdMargin } }),
+      ...(this.#surveyedFloorLevel > 0 ? { surveyedFloorLevel: this.#surveyedFloorLevel } : {}),
     };
     // The lookahead's cadence reads the selection's cost too.
     const timed = this.#measureSelection || this.#lookaheadClockMs !== null;

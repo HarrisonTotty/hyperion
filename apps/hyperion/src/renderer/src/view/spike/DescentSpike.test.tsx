@@ -944,7 +944,9 @@ describe("DescentSpike's main view over a generated world, drawn (R10.T14.c)", (
     ]).toEqual([
       ["WIREFRAME", ["POSITIONS AS SEEN FROM SHIP", "PHOTOREALISTIC: PREPARING"]],
       "PHOTOREALISTIC",
-      ["POSITIONS AS SEEN FROM SHIP", "TERRAIN: STREAMING", "CRAFT PHOTOMETRY: NOT YET MODELLED"],
+      // No `TERRAIN:` line: the moon's bakes are never answered, so under `HANDOVER_AT_CELLS` its
+      // terrain is warmed behind its disc and never takes over.
+      ["POSITIONS AS SEEN FROM SHIP", "CRAFT PHOTOMETRY: NOT YET MODELLED"],
     ]);
   });
 

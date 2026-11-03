@@ -6,7 +6,7 @@
  * (R10.T11) beside the lit ones close the file; the hand-over they take is `sessionWire.test.ts`'.
  */
 
-import type { BodyIdHex, DetailSeedHex, UniverseIdHex } from "@hyperion/protocol";
+import type { BodyIdHex, DetailSeedHex, SurfaceHeaderDto, UniverseIdHex } from "@hyperion/protocol";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -160,6 +160,7 @@ async function harness(
   setting: QualitySetting = "high",
   horizonMap?: HorizonLayerSetting,
   lookaheadClockMs?: () => number,
+  handoverAtCells?: boolean,
 ): Promise<Harness> {
   const hook = renderHook(() => useServerLink(), { wrapper: ServerLinkHarness });
   act(() => {
@@ -182,6 +183,7 @@ async function harness(
     workers: 2,
     ...(horizonMap === undefined ? {} : { horizonMap }),
     ...(lookaheadClockMs === undefined ? {} : { lookaheadClockMs }),
+    ...(handoverAtCells === undefined ? {} : { handoverAtCells }),
   });
   return {
     socket: () => FakeWebSocket.latest(),
@@ -1003,17 +1005,121 @@ function frameTerrainOf(h: Harness, view: ViewId, nowMs = 0): LiveFrameTerrain {
   });
 }
 
-/** Steps the session and answers the bakes asked, `rounds` times. */
-async function streamBakes(h: Harness, rounds: number): Promise<void> {
+/** Steps the session and answers the bakes asked over the survey `surveyed`, `rounds` times. */
+async function streamBakes(
+  h: Harness,
+  rounds: number,
+  surveyed: ReadonlySet<number> = new Set([0, 1]),
+): Promise<void> {
   for (let n = 0; n < rounds; n += 1) {
     h.session.step();
-    answerBakes(h, new Set([0, 1]), new Map());
+    answerBakes(h, surveyed, new Map());
     // Each round answers the bakes the round before asked, so the rounds cannot run together.
     // oxlint-disable-next-line no-await-in-loop
     await settle();
   }
   h.session.step();
 }
+
+/** `moonLikeHeader`'s moon at level 7, whose cells are level 1's patches' quads (`cellPatchLevel`). */
+const LEVEL_7 = { ...moonLikeHeader(MOON), level: 7 };
+
+/** Every cell at {@link FIELD_LEVEL}, over which a bake leaves none of the body unsurveyed. */
+const EVERY_CELL: ReadonlySet<number> = new Set(
+  Array.from({ length: 6 * 4 ** FIELD_LEVEL }, (_, n) => n),
+);
+
+/** Answers the latest field request with one block of `header`'s field, every cell surveyed. */
+async function answerSurveyedField(h: Harness, header: SurfaceHeaderDto): Promise<void> {
+  const { id } = latestFieldAsk(h.socket());
+  const bulk = sendFieldFrames(h.socket(), id, fieldPayload([fieldBlock(50, 1)]));
+  const cover = fieldCover([0, 6 * 4 ** header.level, 30]);
+  h.socket().serverResponds(id, readyField(header, 1, cover, bulk));
+  await settle();
+}
+
+/** The levels of the patches a draw set or a selection draws or selects where a view sees them. */
+function seenLevels(
+  patches: Iterable<{ readonly key: PatchKey; readonly seen?: boolean }>,
+): number[] {
+  return [...patches].filter((p) => p.seen !== false).map((p) => p.key.level);
+}
+
+describe("a disc's terrain warmed before its hand-over (HANDOVER_AT_CELLS; lane fix-coast-class-map)", () => {
+  /** The primary 5,000 km over the moon, which its last plan drew as a disc in its range. */
+  async function warming(h: Harness): Promise<void> {
+    h.session.noteView(PRIMARY, handing(5e6, { regimes: new Map([[MOON, "disc"]]) }));
+    h.session.step();
+    await answerField(h);
+    h.session.step();
+    await settle();
+  }
+
+  it("makes the disc's pass while it is drawn as a disc, and withholds its relief from the frames", async () => {
+    const h = await harness();
+    await warming(h);
+    expect([h.session.pass(MOON) !== null, h.session.reliefs.reliefM(MOON)]).toEqual([true, null]);
+  });
+
+  it("gives the relief once the warmed pass draws the field's cells, nothing missing", async () => {
+    const h = await harness();
+    await warming(h);
+    const before = h.session.reliefs.reliefM(MOON);
+    await streamBakes(h, 6);
+    const drawSet = h.session.pass(MOON)?.lastStep?.drawSet ?? null;
+    expect([
+      before,
+      drawSet?.missing,
+      drawSet?.standingIn,
+      h.session.reliefs.reliefM(MOON),
+    ]).toEqual([null, 0, 0, 18_000]);
+  });
+
+  it("refines a level-7 field's seen survey to level 1, its cells' patches, where the rule off leaves its roots", async () => {
+    const coarsestSeen = async (handoverAtCells: boolean): Promise<number> => {
+      const h = await harness("high", undefined, undefined, handoverAtCells);
+      h.session.noteView(PRIMARY, handing(5e6));
+      h.session.step();
+      await answerSurveyedField(h, LEVEL_7);
+      await streamBakes(h, 6, EVERY_CELL);
+      const patches = h.session.pass(MOON)?.lastStep?.selection.patches.values() ?? [];
+      return Math.min(...seenLevels(patches));
+    };
+    expect([await coarsestSeen(false), await coarsestSeen(true)]).toEqual([0, 1]);
+  });
+
+  it("gives a wireframe pass no floor, its level-7 field's roots left as the error leaves them", async () => {
+    const h = await harness();
+    h.session.noteView(PRIMARY, handing(5e6, { style: "wireframe", drawnStyle: "wireframe" }));
+    h.session.step();
+    await answerSurveyedField(h, LEVEL_7);
+    await streamBakes(h, 6, EVERY_CELL);
+    const patches = h.session.wirePass(MOON)?.lastStep?.selection.patches.values() ?? [];
+    expect(Math.min(...seenLevels(patches))).toBe(0);
+  });
+
+  it("hands a level-7 field's body over first on a draw set of level 1 or finer, nothing missing", async () => {
+    const h = await harness();
+    h.session.noteView(PRIMARY, handing(5e6, { regimes: new Map([[MOON, "disc"]]) }));
+    h.session.step();
+    await answerSurveyedField(h, LEVEL_7);
+    let rounds = 0;
+    while (rounds < 8 && h.session.reliefs.reliefM(MOON) === null) {
+      rounds += 1;
+      // Each round answers the bakes the round before asked.
+      // oxlint-disable-next-line no-await-in-loop
+      await streamBakes(h, 1, EVERY_CELL);
+    }
+    const drawSet = h.session.pass(MOON)?.lastStep?.drawSet;
+    const drawn = drawSet?.patches.slice(0, drawSet.count).map((each) => each.patch) ?? [];
+    expect([
+      rounds > 1,
+      drawSet?.missing,
+      Math.min(...seenLevels(drawn)),
+      h.session.reliefs.reliefM(MOON),
+    ]).toEqual([true, 0, 1, 18_000]);
+  });
+});
 
 describe("each view's frame terrain through the session (R10.T16.c)", () => {
   it("draws a body's terrain in the view that hands it over, and in another only once it hands it over too", async () => {

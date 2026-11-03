@@ -53,7 +53,12 @@
  *   once over the views that hand its body over, each at its own style's τ, presented size and
  *   weight (`ViewBudget.streamPriority`), with the scene's craft over it as its contacts
  *   ({@link sceneContacts}) on the ground its resident bakes hold; each view draws its own through
- *   {@link TerrainSession.drawTerrain}.
+ *   {@link TerrainSession.drawTerrain}. Under the hand-over's `HANDOVER_AT_CELLS` (lane
+ *   fix-coast-class-map) a view whose plan draws a body as a disc in its hand-over range hands it
+ *   to its pass too ({@link warmingDiscs}), the pass warmed while the disc is drawn, and the frames
+ *   take the body's relief only once that pass draws the field's cells
+ *   ({@link TerrainSession.reliefs}): wherever these remarks and the members' say a view hands a
+ *   body over, its pass made, stepped and its fault shown, a warming disc's view is meant too.
  * - **The survey and the mask (D6 and D7).** Each wanted body's {@link SurveyedCells}, which its
  *   pass's selection reads, take every block's cells and the store's coverage at once. Its GPU
  *   mask takes a block's cells once the rebakes the block named have landed where a pass draws
@@ -149,6 +154,9 @@ import {
   heldGroundUnder,
 } from "./grounded";
 import {
+  cellPatchLevel,
+  drawsCells,
+  HANDOVER_AT_CELLS,
   handoverRangeRatio,
   type HandoverReliefSource,
   handoverTauPx,
@@ -266,6 +274,12 @@ export interface TerrainSessionOptions {
    * `TerrainPassOptions.budgetHoldMargin`): absent, the pass's own; `null`, no hold.
    */
   readonly budgetHoldMargin?: number | null;
+  /**
+   * Whether a body hands over disc → terrain only once its terrain draws the field's cells (the
+   * hand-over's `HANDOVER_AT_CELLS`, lane fix-coast-class-map): absent, that rule's own; `false`,
+   * the hand-over as R10.T10.e built it.
+   */
+  readonly handoverAtCells?: boolean;
 }
 
 /**
@@ -304,7 +318,8 @@ export interface TerrainViewReport {
   readonly streamPriority: ViewBudget["streamPriority"];
   /**
    * Its last photorealistic plan's regimes (`ViewFrameDrawer.regimes`), by which R10.T16.b's passes
-   * take the bodies it hands over (T10.e's `terrain`).
+   * take the bodies it hands over (T10.e's `terrain`, and under `HANDOVER_AT_CELLS` the discs and
+   * meshes in their range, {@link warmingDiscs}).
    */
   readonly regimes: ReadonlyMap<BodyIdHex, LitRegime>;
   /**
@@ -509,6 +524,51 @@ export function wireframeHandovers(
     }
   }
   return handed;
+}
+
+/**
+ * The discs a photorealistic view's last plan drew in their hand-over range (Design note 13; the
+ * hand-over's `HANDOVER_AT_CELLS`): each lit body of its scene whose rotation is known, drawn as a
+ * disc or as the mesh a disc whose air is drawn, or that overlaps a mesh, becomes (`planLitBodies`),
+ * whose relief (`reliefM`) subtends the photorealistic τ (`handoverTauPx`) at its limb, at the
+ * selection size's centre pixel, as `handsOver` judges a body not yet handed over. Their passes are
+ * warmed while the discs are drawn, so that each hands over once its terrain is settled.
+ *
+ * @param reliefM - A body's relief by which it hands over (the store's), or `null` where it never
+ *   does.
+ */
+export function warmingDiscs(
+  report: TerrainViewReport,
+  reliefM: (body: BodyIdHex) => number | null,
+): Set<BodyIdHex> {
+  const warming = new Set<BodyIdHex>();
+  if (report.style !== "photorealistic" || report.drawnStyle !== "photorealistic") {
+    return warming;
+  }
+  const { scene, pose } = report;
+  const origins = cameraSceneOf(scene).origins;
+  const tauPx = handoverTauPx("photorealistic", report.setting);
+  const radPerPx = pixelAngleRad(
+    { orientation: pose.orientation, fovXRad: report.fovXRad },
+    report.selectionPx ?? report.presentedPx,
+  );
+  for (const body of scene.bodies) {
+    // The regimes `handOverRegimes` hands over from: a point is out of range, a terrain is handed.
+    const regime = report.regimes.get(body.id);
+    if (!isLitBody(body) || body.rotation === null || (regime !== "disc" && regime !== "mesh")) {
+      continue;
+    }
+    const centreM = relativeToCamera(
+      { kind: "body", body: body.id, m: vec3(0, 0, 0) },
+      pose,
+      origins,
+    );
+    const limbM = limbDistanceM(norm(centreM), body.radiusM);
+    if (handsOver(limbM, reliefM(body.id), tauPx, radPerPx, false)) {
+      warming.add(body.id);
+    }
+  }
+  return warming;
 }
 
 /**
@@ -865,6 +925,9 @@ export class TerrainSession {
   /** Whether the passes' changes cut ({@link TerrainSession.setReducedMotion}). */
   #reducedMotion = false;
   readonly #budgetHoldMargin: number | null | undefined;
+  readonly #handoverAtCells: boolean;
+  /** The reliefs the frames hand over by ({@link TerrainSession.reliefs}). */
+  readonly #frameReliefs: HandoverReliefSource;
   #faults: ReadonlyMap<ViewId, TerrainFault> = NO_FAULTS;
   /** The terrain's fault by its first cause raised, which stands for the session; `null` before. */
   #cause: TerrainFault | null = null;
@@ -891,6 +954,8 @@ export class TerrainSession {
     this.#geometry = options.geometry ?? null;
     this.#morphInMs = options.morphInMs;
     this.#budgetHoldMargin = options.budgetHoldMargin;
+    this.#handoverAtCells = options.handoverAtCells ?? HANDOVER_AT_CELLS;
+    this.#frameReliefs = { reliefM: (body) => this.#frameReliefM(body) };
     // A readout worker beside the bake workers, so that the readout, which a choice of BASELINE
     // asks at once, never waits behind their bakes (R10.T12.c).
     const pool = new HeightWorkerPool({
@@ -968,10 +1033,33 @@ export class TerrainSession {
 
   /**
    * The reliefs by which every view's lit bodies hand over (T10.e's `PhotorealInputs.reliefs`,
-   * `storeReliefSource` over the session's store).
+   * `storeReliefSource` over the session's store). Under `HANDOVER_AT_CELLS` a body not handed over
+   * in any view reads none, so that it stays a disc, until its warmed pass's draw set draws the
+   * field's cells (`drawsCells`): the terrain's first frame then draws them as its settled one does.
    */
   get reliefs(): HandoverReliefSource {
-    return this.#reliefs;
+    return this.#frameReliefs;
+  }
+
+  /** `body`'s relief as the frames hand over by ({@link TerrainSession.reliefs}). */
+  #frameReliefM(body: BodyIdHex): number | null {
+    const reliefM = this.#reliefs.reliefM(body);
+    if (reliefM === null || !this.#handoverAtCells || this.#handedOverInAView(body)) {
+      return reliefM;
+    }
+    const level = this.#store.header(body)?.level;
+    const drawSet = this.#passes.get(body)?.lastStep?.drawSet ?? null;
+    return level !== undefined && drawsCells(drawSet, cellPatchLevel(level)) ? reliefM : null;
+  }
+
+  /** Whether some photorealistic view's last plan drew `body` as terrain. */
+  #handedOverInAView(body: BodyIdHex): boolean {
+    for (const report of this.#reports.values()) {
+      if (report.drawnStyle === "photorealistic" && report.regimes.get(body) === "terrain") {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** The bodies whose fields are wanted, in the order first wanted. */
@@ -1682,7 +1770,9 @@ export class TerrainSession {
   /**
    * The views that hand each wanted body over, in the order they first reported: T10.e's `terrain`
    * regime in a photorealistic view's last plan, for a body whose rotation is known (R10.T16.b;
-   * the wireframe's are {@link TerrainSession}'s `#wireHandingViews`, R10.T11).
+   * the wireframe's are {@link TerrainSession}'s `#wireHandingViews`, R10.T11); and under
+   * `HANDOVER_AT_CELLS` each disc of its plan in its hand-over range, whose pass is warmed while
+   * the disc is drawn ({@link warmingDiscs}).
    */
   #handingViews(): Map<BodyIdHex, HandingView[]> {
     const handing = new Map<BodyIdHex, HandingView[]>();
@@ -1692,8 +1782,13 @@ export class TerrainSession {
       if (report.drawnStyle !== "photorealistic") {
         continue;
       }
+      const warming = this.#handoverAtCells
+        ? warmingDiscs(report, (body) =>
+            this.#bodies.has(body) ? this.#reliefs.reliefM(body) : null,
+          )
+        : NO_BODIES;
       for (const [body, regime] of report.regimes) {
-        if (regime !== "terrain" || !this.#bodies.has(body)) {
+        if ((regime !== "terrain" && !warming.has(body)) || !this.#bodies.has(body)) {
           continue;
         }
         const seen = report.scene.bodies.find((each) => each.id === body);
@@ -1797,6 +1892,10 @@ export class TerrainSession {
         ...(this.#budgetHoldMargin === undefined
           ? {}
           : { budgetHoldMargin: this.#budgetHoldMargin }),
+        // The field's cells drawn before the hand-over, and kept after it (`HANDOVER_AT_CELLS`).
+        ...(shading === "lit" && this.#handoverAtCells
+          ? { surveyedFloorLevel: cellPatchLevel(header.level) }
+          : {}),
       });
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {

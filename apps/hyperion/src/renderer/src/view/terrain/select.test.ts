@@ -1722,3 +1722,58 @@ describe("a box that prunes its subtree", () => {
     }
   });
 });
+
+/** The levels of the patches a selection's views see. */
+function seenLevels(sel: Selection): number[] {
+  return [...sel.patches.values()].filter((p) => p.seen).map((p) => p.key.level);
+}
+
+describe("the surveyed floor (lane fix-coast-class-map; the hand-over's HANDOVER_AT_CELLS)", () => {
+  /** A view 30,000 km out over the site, where R05's selection keeps coarse patches. */
+  const FAR = above(3e7);
+  const far = (): ViewSelectionInput => view(FAR, lookingDown(FAR));
+  const input = (given: Partial<SelectionInput> = {}): SelectionInput => ({
+    planet: PLANET,
+    views: [far()],
+    setting: "high",
+    grounded: [],
+    survey: ALL_SURVEYED,
+    ...given,
+  });
+  it("refines every seen patch over surveyed ground to the floor, which the error alone does not", () => {
+    const plain = selectPatches(input());
+    const floored = selectPatches(input({ surveyedFloorLevel: 2 }));
+    expect([Math.min(...seenLevels(plain)) < 2, Math.min(...seenLevels(floored))]).toEqual([
+      true,
+      2,
+    ]);
+  });
+
+  it("gives R05's selection, bit for bit, with no floor or a floor of 0", () => {
+    expect(outcome(selectPatches(input({ surveyedFloorLevel: 0 })))).toEqual(
+      outcome(selectPatches(input())),
+    );
+  });
+
+  it("splits no bare ground for the floor, pinning none of its bakes beyond what no floor does", () => {
+    const survey = surveyOf(SURVEY_CELLS);
+    const floored = (level: number): Selection =>
+      selectPatches(input({ survey, surveyedFloorLevel: level, heightRanges: bakedToDepth(4) }));
+    expect([floored(3).hiddenBaked, seenLevels(floored(3))]).toEqual([floored(0).hiddenBaked, [3]]);
+  });
+
+  it("refuses a split the floor alone asks for past maxPatches without calling the selection limited", () => {
+    const sel = selectPatches(input({ surveyedFloorLevel: 2, maxPatches: 30 }));
+    expect([
+      sel.patches.size <= 30,
+      Math.min(...seenLevels(sel)),
+      sel.limited,
+      sel.limitExcess,
+    ]).toEqual([true, 1, false, 0]);
+  });
+
+  it("keeps the streaming gate: with only the roots baked it reaches their children alone", () => {
+    const sel = selectPatches(input({ surveyedFloorLevel: 3, heightRanges: bakedToDepth(0) }));
+    expect(Math.max(...seenLevels(sel))).toBe(1);
+  });
+});

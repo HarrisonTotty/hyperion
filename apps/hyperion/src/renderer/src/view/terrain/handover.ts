@@ -28,6 +28,14 @@
  *   1.66 × 10⁷ m), and 0 at the ground, so that a body whose relief is small beside its radius
  *   still hands over as the camera nears it, which the centre's distance would not let a Venus of
  *   13 km do in the wireframe (a · 4 px is 14.6 km at 1080p).
+ * - **At the field's cells** ({@link HANDOVER_AT_CELLS}; lane fix-coast-class-map): in the
+ *   photorealistic style a body in range hands over only once its terrain draws the field's own
+ *   cells, its pass warmed while the disc is drawn, so that the terrain's first frame draws them
+ *   as its settled one does ({@link drawsCells}). Its selection refines seen surveyed ground to the
+ *   level whose quads are the cells ({@link cellPatchLevel}). Without it the pass was made at the first
+ *   hand-over and refined from the roots, a level a bake's round trip, so that on the served wet
+ *   world the terrain's first frame differed from its settled one by over a third of a stop in 431
+ *   of 750 coast cells, and the disc → terrain switch failed there whatever the disc drew.
  */
 import type { BodyIdHex, SurfaceHeaderDto } from "@hyperion/protocol";
 
@@ -36,6 +44,7 @@ import { type LitRegime, type LitSphere, REGIME_HYSTERESIS } from "../bodies/reg
 import type { ProjectionCamera, Viewport } from "../camera/projection";
 import type { RenderStyle } from "../camera/state";
 import { type QualitySetting, SETTINGS, WIREFRAME_TERRAIN_TAU_PX } from "../quality/qualitySetting";
+import type { DrawSet } from "./cache";
 import type { CoverageView } from "./coverage";
 
 /**
@@ -121,6 +130,50 @@ export function handoverReliefM(
  */
 export function limbDistanceM(distanceM: number, radiusM: number): number {
   return distanceM > radiusM ? Math.sqrt((distanceM - radiusM) * (distanceM + radiusM)) : 0;
+}
+
+/**
+ * Whether a body hands over disc → terrain in the photorealistic style only once its terrain draws
+ * the field's cells (the module's remarks): the hand-over's one rule of lane fix-coast-class-map.
+ * `false` restores the hand-over as R10.T10.e built it, its pass made at the first hand-over and no
+ * floor on its selection, bit for bit.
+ */
+export const HANDOVER_AT_CELLS = true;
+
+/**
+ * The level of a body's terrain patches whose quads are its coarse field's cells: max(L − 6, 0) for
+ * a field of level L, 5 to 8, a patch spanning 2⁶ quads a side (the surface crate's
+ * `PATCH_SPAN_LEVELS`, and the disc's normal map's band, `discNormals.ts`).
+ */
+export function cellPatchLevel(fieldLevel: number): number {
+  return Math.max(fieldLevel - PATCH_SPAN_LEVELS, 0);
+}
+
+/** The quadtree levels a patch spans: its 64 quads a side are cells 6 levels below its own. */
+const PATCH_SPAN_LEVELS = 6;
+
+/**
+ * Whether a warmed pass's latest draw set draws the field's cells, on which a body hands over under
+ * {@link HANDOVER_AT_CELLS}: no selected patch is missing, and none is stood in for by an ancestor
+ * coarser than `cellLevel` ({@link cellPatchLevel}), so that every cell it draws is drawn at its own
+ * level or finer. A finer patch still streaming may stand in below it, as the terrain's refinement
+ * goes on after the hand-over. A set of none, its seen ground all unsurveyed, draws the reference
+ * surface before the hand-over and after it alike. `null`, before any selection, draws none.
+ */
+export function drawsCells(
+  drawSet: Pick<DrawSet, "count" | "missing" | "patches"> | null,
+  cellLevel: number,
+): boolean {
+  if (drawSet === null || drawSet.missing > 0) {
+    return false;
+  }
+  for (let n = 0; n < drawSet.count; n += 1) {
+    const drawn = drawSet.patches[n];
+    if (drawn !== undefined && drawn.standIn && drawn.patch.key.level < cellLevel) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** The hand-over's τ in a style on a setting, px (Design note 13). */
