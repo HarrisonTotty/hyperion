@@ -8,6 +8,8 @@
 //!   triples whose inner pair stays bound through a low-mode collapse, one releasing its outer
 //!   star and one keeping it, with the kernel's escape speed checked on a constructed orbit.
 //! - The range brief counts the stars the summary shows, on every route.
+//! - A detached step held at its floor stops at a pinned primary's collapse inside it, on the
+//!   census galaxy's system the floor stepped past.
 //!
 //! The slow agreement tests (`binary_kick_*`, in `stellar/binary/supernova/agreement.rs`) count
 //! what the fix releases over 10⁴ massive systems under every 27 hold.
@@ -21,6 +23,7 @@ use crate::coords::SystemVelocity;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
+use crate::galaxy::rules::GalaxyRules;
 use crate::orbit::KeplerElements;
 use crate::rng::Seed;
 use crate::stellar::binary::collapses::{OuterOrbit, PointLoss, outer_orbit_after};
@@ -423,4 +426,74 @@ fn a_merged_product_s_kick_unbinds_the_orbit_above_it() {
     ));
     let now = UniverseTime::EPOCH;
     assert_eq!(applied.shown_at(now), Shown::Pair(inner.node()));
+}
+
+/// The census galaxy's system `0x81c9_b51f_c000_0001`, in layer E's cell (−55, 212, −4): a
+/// thick-disc pair of 75.6 and 23.0 M☉ at Z 0.0063, about 1,800 au apart (e = 0.55), which the
+/// engine runs for its primary's collapse. The primary, stripped by its mark, dies at its pin of
+/// 4,237,646.62 yr, which a detached step held at its floor passed (found by P15.T10.b's refit at
+/// 27, plan 11's records).
+const FLOORED_PIN: u64 = 0x81c9_b51f_c000_0001;
+
+/// A detached step held at its floor stops at a pinned primary's collapse inside it: under every
+/// 27 hold [`FLOORED_PIN`]'s primary's supernova is recorded at its pin, plan 06's age, where the
+/// floor stepped past the pin and the engine never acted on it (its debug assertion fired).
+#[test]
+fn a_floored_step_stops_at_the_pin() {
+    use crate::galaxy::catalogue_classes::binary::BinaryTableRules;
+    use crate::galaxy::placement::{CellKey, generate_cell};
+    use crate::id::{Layer, SystemId};
+    use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
+    use crate::stellar::system::{StarModel, draw_metallicity, primary_draws};
+    let galaxy = Galaxy::from_params_with_rules(
+        Seed::new(0x0b17_15a0_0000_0001),
+        GalaxyParams::milky_way_like(),
+        GalaxyRules {
+            binary_tables: BinaryTableRules::Scratch,
+            ..GalaxyRules::every_27_hold()
+        },
+    )
+    .expect("the Milky Way fixture builds");
+    let key = CellKey::new(Layer::E, [-55, 212, -4]).expect("a cell");
+    let mut cell = Vec::new();
+    generate_cell(&galaxy, key, &mut cell);
+    let id = SystemId::from_raw(FLOORED_PIN).expect("an ID");
+    let record = cell.iter().find(|r| r.id() == id).expect("the system");
+    let primary = StarModel::new_under(
+        record.primary_initial_mass(),
+        draw_metallicity(&galaxy, record),
+        primary_draws(&galaxy, record),
+        record.age_at_epoch(),
+        galaxy.rules().stellar,
+    )
+    .expect("a star");
+    let stars = SystemStars::at_attempt(
+        &galaxy,
+        record,
+        &primary,
+        MultiplicityContext::Free,
+        RedrawAttempt::FIRST,
+    );
+    let pair = stars
+        .pairs()
+        .iter()
+        .find(|p| p.stars() == [StarIndex::PRIMARY, StarIndex::from_body(1).expect("a star")])
+        .expect("the primary's pair is run for its collapse");
+    let at = stars
+        .primary()
+        .death()
+        .expect("the primary collapses")
+        .age()
+        .value();
+    let sn = pair
+        .timeline()
+        .supernovae()
+        .iter()
+        .find(|sn| sn.component() == Component::Primary)
+        .expect("the primary's supernova is recorded");
+    assert!(
+        (sn.age().value() - at).abs() <= 4.0 * f64::EPSILON * at,
+        "at {} against the pin's {at}",
+        sn.age().value()
+    );
 }
