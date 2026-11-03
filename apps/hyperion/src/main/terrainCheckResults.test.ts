@@ -717,6 +717,48 @@ describe("the terrain run's summary and its files", () => {
     expect(text).toContain("| terrain-alone | 0.444 M, 0.531 M; 3 | 0.968 M, 1.032 M; 2 |");
   });
 
+  it("gives each phase's GPU time by pass, the dearest first, on a run given --hyperion-gpu-timing (R14's Mac measurements)", () => {
+    const [alone, ...rest] = TERRAIN_RECORD.phases;
+    if (alone === undefined) {
+      throw new Error("the fixture has no first phase");
+    }
+    const passes = [
+      { label: "symbology", ms: [0.5, 0.5], kernels: [], workgroups: [] },
+      { label: "bodies", ms: [2, 2.2], kernels: [], workgroups: [] },
+    ];
+    const results = buildTerrainCheckResults(changed({ phases: [{ ...alone, passes }, ...rest] }));
+    // The fixture's frames' GPU time, 2.5 and 2.6 ms, has a mean of 2.55 ms.
+    expect(results.phases.map((phase) => phase.gpuPasses)).toEqual([
+      [
+        {
+          label: "bodies",
+          gpuMs: { count: 2, p50Ms: 2, p95Ms: 2.2, p99Ms: 2.2, maxMs: 2.2, meanMs: 2.1 },
+          shareOfGpu: 2.1 / 2.55,
+          kernels: [],
+        },
+        {
+          label: "symbology",
+          gpuMs: { count: 2, p50Ms: 0.5, p95Ms: 0.5, p99Ms: 0.5, maxMs: 0.5, meanMs: 0.5 },
+          shareOfGpu: 0.5 / 2.55,
+          kernels: [],
+        },
+      ],
+      null,
+      null,
+    ]);
+    const text = terrainCheckMarkdown(results);
+    expect(text).toContain("## GPU time by pass (provisional; R14's Mac measurements)");
+    expect(text).toContain("| terrain-alone | bodies | 2 | 2.00 / 2.20 / 2.20 | 2.10 | 82.4% |");
+  });
+
+  it("reads no GPU time by pass where the run was not given --hyperion-gpu-timing", () => {
+    const results = buildTerrainCheckResults(input());
+    expect(results.phases.map((phase) => phase.gpuPasses)).toEqual([null, null, null]);
+    expect(terrainCheckMarkdown(results)).toContain(
+      "None recorded: the run was not given `--hyperion-gpu-timing`.",
+    );
+  });
+
   it("states the machine's CPU governor, as T20's summary does", () => {
     expect(terrainCheckMarkdown(buildTerrainCheckResults(input()))).toContain("governor schedutil");
   });
@@ -744,7 +786,7 @@ describe("the terrain run's summary and its files", () => {
     expect(smoke.markdown).toBe("/out/2026-10-19-effect-high-terrain-smoke.md");
     expect(JSON.parse(written.get(first.json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.terrain-results",
-      version: 3,
+      version: 4,
       overall: "pass",
       findings: { terrainFaults: { verdict: "pass", reasons: [], record: [] } },
     });

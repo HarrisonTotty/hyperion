@@ -164,6 +164,22 @@ describe("the views check's launch switch", () => {
     expect(readViewsCheckLaunch({ ...LAUNCH, look: "handover-30" })).toBeNull();
   });
 
+  it("carries the terrain run's GPU time by pass, on a terrain run alone (R14's Mac measurements)", () => {
+    const launch: ViewsCheckLaunch = { ...LAUNCH, run: "terrain", passTimes: true };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    const whole: ViewsCheckLaunch = {
+      ...launch,
+      fixture: "terrain-test-whole",
+      wholeField: "/data/whole.golden",
+    };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(whole)])).toEqual(whole);
+    expect([
+      readViewsCheckLaunch({ ...launch, passTimes: false }),
+      readViewsCheckLaunch({ ...LAUNCH, passTimes: true }),
+      readViewsCheckLaunch({ ...LAUNCH, run: "handover", passTimes: true }),
+    ]).toEqual([null, null, null]);
+  });
+
   it("is absent on any other launch", () => {
     expect(viewsCheckLaunchFromArgv(["--hyperion-server-url=ws://127.0.0.1:7878/ws"])).toBeNull();
   });

@@ -50,6 +50,7 @@
  */
 
 import type {
+  InspectionTimingPass,
   SpikePassTimer,
   TerrainCheckBytes,
   TerrainCheckFault,
@@ -87,9 +88,10 @@ export const TERRAIN_CHECK_SCHEMA = "hyperion.views-check.terrain-results";
 /**
  * The schema's version; bumped with any change to the file's shape (2: R10.T16.e's
  * `terrainFaults`; 3: R10.T14.d's `noStall`, each view's `longestGapEndScriptS`, the `sessions`,
- * the `opening`, the `span` and the `phaseWindows`).
+ * the `opening`, the `span` and the `phaseWindows`; 4: each phase's `gpuPasses`, R14's Mac
+ * measurements, which a file of an earlier version lacks and reads as `null`).
  */
-export const TERRAIN_CHECK_VERSION = 3;
+export const TERRAIN_CHECK_VERSION = 4;
 
 /**
  * The longest from a view's hand-over to its first terrain draw, ms: the lit material compiles and
@@ -268,6 +270,20 @@ export interface TerrainViewFigures {
   readonly nonFiniteTexels: number;
 }
 
+/** One pass label's GPU time over a phase (R14's Mac measurements). */
+export interface TerrainPassFigures {
+  readonly label: string;
+  /**
+   * Its time in each of the phase's frames whose resolves all arrived, every view's passes of the
+   * label summed, 0 in a frame without one; `null` with no such frame.
+   */
+  readonly gpuMs: DurationStats | null;
+  /** Its mean over the mean of those frames' GPU time, 0 to 1, or `null` with none timed. */
+  readonly shareOfGpu: number | null;
+  /** The kernels its dispatches ran, each once; none for a render pass. */
+  readonly kernels: ReadonlyArray<string>;
+}
+
 /** One phase's figures. */
 export interface TerrainPhaseFigures {
   readonly name: TerrainCheckPhaseName;
@@ -300,6 +316,11 @@ export interface TerrainPhaseFigures {
   readonly fieldAsks: number;
   readonly blocksSent: number;
   readonly memory: TerrainCheckMemory | null;
+  /**
+   * Each pass label's GPU time, the dearest by its mean first, on a run given
+   * `--hyperion-gpu-timing` (`ViewsCheckLaunch.passTimes`); `null` on any other.
+   */
+  readonly gpuPasses: ReadonlyArray<TerrainPassFigures> | null;
 }
 
 /** A finding's verdict and why it failed, if it did. */
@@ -431,6 +452,28 @@ function countStats(counts: ReadonlyArray<number>): CountStats | null {
   };
 }
 
+/** Each of a phase's pass labels' GPU time, the dearest by its mean first. */
+function passFigures(
+  passes: ReadonlyArray<InspectionTimingPass>,
+  frameGpuMs: ReadonlyArray<number>,
+): ReadonlyArray<TerrainPassFigures> {
+  const frameMeanMs = durationStats(frameGpuMs)?.meanMs ?? null;
+  return passes
+    .map(({ label, ms: times, kernels }): TerrainPassFigures => {
+      const gpuMs = durationStats(times);
+      return {
+        label,
+        gpuMs,
+        shareOfGpu:
+          gpuMs === null || frameMeanMs === null || !(frameMeanMs > 0)
+            ? null
+            : gpuMs.meanMs / frameMeanMs,
+        kernels,
+      };
+    })
+    .toSorted((a, b) => (b.gpuMs?.meanMs ?? 0) - (a.gpuMs?.meanMs ?? 0));
+}
+
 function phaseFigures(record: TerrainCheckPhaseRecord, setting: SpikeSetting): TerrainPhaseFigures {
   const expected = TERRAIN_PHASES[setting].find((plan) => plan.name === record.name)?.views ?? [];
   const held =
@@ -491,6 +534,7 @@ function phaseFigures(record: TerrainCheckPhaseRecord, setting: SpikeSetting): T
     fieldAsks: record.fieldAsks,
     blocksSent: record.blocksSent,
     memory: record.memory,
+    gpuPasses: record.passes === null ? null : passFigures(record.passes, record.frameGpuMs),
   };
 }
 
@@ -1049,6 +1093,38 @@ function reasonsText(entry: TerrainFinding): string {
   return entry.reasons.length === 0 ? "" : ` — ${entry.reasons.join("; ")}`;
 }
 
+/** A share of the frame's GPU time, as a percentage. */
+function shareText(share: number | null): string {
+  return share === null ? "—" : `${(100 * share).toFixed(1)}%`;
+}
+
+/**
+ * The summary's section of the phases' GPU time by pass (R14's Mac measurements), or a line saying
+ * the run recorded none.
+ */
+function gpuPassLines(phases: ReadonlyArray<TerrainPhaseFigures>): ReadonlyArray<string> {
+  const timed = phases.filter((phase) => phase.gpuPasses !== null);
+  return [
+    "## GPU time by pass (provisional; R14's Mac measurements)",
+    "",
+    ...(timed.length === 0
+      ? ["None recorded: the run was not given `--hyperion-gpu-timing`."]
+      : [
+          "Each pass label's time over the phase's frames whose resolves all arrived, every view's passes of the label summed and 0 in a frame without one, the dearest first; a label a frame repeats is numbered from its second (`terrain shadows #2`). Durations as p50 / p95 / max ms; a `quantized` timer's are multiples of its quantum.",
+          "",
+          "| Phase | Pass | Frames | GPU | Mean (ms) | Share of the frame's GPU |",
+          "| --- | --- | --- | --- | --- | --- |",
+          ...timed.flatMap((phase) =>
+            (phase.gpuPasses ?? []).map(
+              (pass) =>
+                `| ${phase.name} | ${pass.label} | ${String(pass.gpuMs?.count ?? 0)} | ${durations(pass.gpuMs)} | ${pass.gpuMs === null ? "—" : ms(pass.gpuMs.meanMs)} | ${shareText(pass.shareOfGpu)} |`,
+            ),
+          ),
+        ]),
+    "",
+  ];
+}
+
 /** The results' summary, for a person reading the record. */
 export function terrainCheckMarkdown(results: TerrainCheckResults): string {
   const { run, phases, findings } = results;
@@ -1109,6 +1185,7 @@ export function terrainCheckMarkdown(results: TerrainCheckResults): string {
         `| ${phase.name} | ${countText(phase.triangles)} | ${countText(phase.casterTriangles)} |`,
     ),
     "",
+    ...gpuPassLines(phases),
     "## Views (provisional)",
     "",
     "| Phase | View | Style | Canvas (px) | Draws | GPU (ms) | Submit (ms) | Hand-over (script s) | Terrain draws | Read-backs |",

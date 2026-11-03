@@ -779,6 +779,9 @@ export class TerrainProbe {
   /**
    * The phase `name` from `start` to `end`, whose views were `shown`, leaving out `quiet` (the
    * loss's restore) where it judges a view's draws.
+   *
+   * @param passTimes - Whether the record carries each pass label's GPU time in each frame timed
+   *   in full (`ViewsCheckLaunch.passTimes`; R14's Mac measurements), else `null`.
    */
   phase(
     name: TerrainCheckPhaseName,
@@ -786,6 +789,7 @@ export class TerrainProbe {
     end: TerrainMark,
     shown: ReadonlyArray<ShownView>,
     quiet: QuietSpan | null,
+    passTimes: boolean,
   ): TerrainCheckPhaseRecord {
     const window: WindowFigures = this.#views.window(start.atMs, end.atMs, shown);
     const inQuiet = (atMs: number): boolean =>
@@ -934,6 +938,7 @@ export class TerrainProbe {
       fieldAsks: end.fixture.fieldAsks - start.fixture.fieldAsks,
       blocksSent: end.fixture.blocksSent - start.fixture.blocksSent,
       memory: this.memory(),
+      passes: passTimes ? this.#views.passTimes(start.atMs, end.atMs) : null,
     };
   }
 

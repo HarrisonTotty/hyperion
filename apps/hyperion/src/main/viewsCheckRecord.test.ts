@@ -187,6 +187,18 @@ describe("the terrain run's record (R10.T16.d)", () => {
     });
   });
 
+  it("is read back with each phase's GPU time by pass (R14's Mac measurements)", () => {
+    const passes = [
+      { label: "bodies", ms: [4.1, 3.9], kernels: [], workgroups: [] },
+      { label: "terrain cluster cull", ms: [0.2, 0.3], kernels: ["cull"], workgroups: [12, 12] },
+    ];
+    const record = {
+      ...TERRAIN_RECORD,
+      phases: TERRAIN_RECORD.phases.map((phase) => ({ ...phase, passes })),
+    };
+    expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
   it("is read back with no hand-over range and an undestroyed device", () => {
     const record = {
       ...TERRAIN_RECORD,
@@ -237,6 +249,9 @@ describe("the terrain run's record (R10.T16.d)", () => {
     [["opening", "preparedMs"], -1],
     [["opening", "preparations"], 0.5],
     [["opening", "longestFrameGapMs"], "long"],
+    [["phases", 0, "passes"], undefined],
+    [["phases", 0, "passes"], [{ label: "bodies", ms: [-1], kernels: [], workgroups: [] }]],
+    [["phases", 0, "passes"], [{ label: "", ms: [1], kernels: [], workgroups: [] }]],
   ])("refuses a record whose %j is %j", (path, value) => {
     expect(readTerrainCheckRecord(withTerrainField(path, value))).toBeNull();
   });

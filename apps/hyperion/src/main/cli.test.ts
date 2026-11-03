@@ -664,6 +664,28 @@ describe("the several-views check's options", () => {
     expect(error.message).toContain("handover-45");
   });
 
+  it("has the terrain run record its GPU time by pass with --hyperion-gpu-timing (R14's Mac measurements)", () => {
+    expect([
+      parse(["--views-check", "--terrain", "--hyperion-gpu-timing"]).viewsCheck,
+      parse(["--views-check", "--terrain"]).viewsCheck?.passTimes,
+      parse(["--views-check", "--hyperion-gpu-timing"]).viewsCheck?.passTimes,
+      parse(["--views-check", "--terrain", "--handover", "--hyperion-gpu-timing"]).viewsCheck
+        ?.passTimes,
+    ]).toEqual([
+      {
+        setting: "high",
+        smoke: false,
+        out: null,
+        run: "terrain",
+        fixture: "terrain-test",
+        passTimes: true,
+      },
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("takes --timing, the inspection run's frame profile (the owner's report)", () => {
     expect(
       parse(["--views-check", "--inspection", "--universe", UNIVERSE, "--body", BODY, "--timing"])

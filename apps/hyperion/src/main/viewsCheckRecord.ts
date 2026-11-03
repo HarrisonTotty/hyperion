@@ -401,10 +401,12 @@ function terrainPhase(value: unknown): TerrainCheckPhaseRecord | null {
   const bakes = value["bakes"];
   const posts = value["fieldPosts"];
   const memory = value["memory"] === null ? null : memoryOf(value["memory"]);
+  const passes = value["passes"] === null ? null : listOf(value["passes"], timingPass);
   const { startMs, endMs, scriptStartS, scriptEndS, fieldAsks, blocksSent } = value;
   if (
     name === null ||
     views === null ||
+    (value["passes"] !== null && passes === null) ||
     frameIntervalsMs === null ||
     mainThreadMs === null ||
     frameGpuMs === null ||
@@ -454,6 +456,7 @@ function terrainPhase(value: unknown): TerrainCheckPhaseRecord | null {
     fieldAsks,
     blocksSent,
     memory,
+    passes,
   };
 }
 

@@ -92,6 +92,11 @@
  * every drawn surface dimmed by the channels' mean as the grey way back does (plan R08, R08.T9.c),
  * for an A/B of the composite's cost; it is refused without `--timing`.
  *
+ * `--hyperion-gpu-timing`, R01's measurement switch, which lifts the timestamps' quantization on
+ * the forced Vulkan path (read from Chromium's command line, `GPU_TIMING_SWITCH`), also has a
+ * `--terrain` run record each phase's GPU time by pass (R14's Mac measurements), on any platform;
+ * every other run takes it for its timestamps alone.
+ *
  * `--device-pixel-ratio <N>` draws a hidden check's page at a device-pixel ratio of N, 1 to 3, as a
  * HiDPI display does (the owner's Retina report, 2026-11-01): its offscreen window N times its
  * setting's size at a zoom factor of N, which Chromium counts in `devicePixelRatio`, so that its
@@ -113,6 +118,7 @@ import type {
   ServedWorldNames,
 } from "../preload/api";
 import { geometryText, parseGeometryOverride } from "../preload/geometryLaunch";
+import { GPU_TIMING_SWITCH } from "../preload/graphicsLaunch";
 import {
   DEFAULT_SPIKE_SEED,
   isBodyIdText,
@@ -381,6 +387,12 @@ export function buildCommand(version: string): Command {
       new Option(
         "--timing",
         "the inspection run's frame profile (the owner's report): per pass and per thread, from orbit, close in and low",
+      ),
+    )
+    .addOption(
+      new Option(
+        `--${GPU_TIMING_SWITCH}`,
+        "measurement: unquantized timestamps on the forced Vulkan path, and the terrain run's GPU time by pass",
       ),
     )
     .addOption(
@@ -677,22 +689,23 @@ function kebab(name: string): string {
 function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCheckLaunch {
   const out = options["out"];
   const whole = options["whole"];
+  // `--handover` and `--weathered` are refused without `--terrain` before this is reached, and
+  // `--atmosphere` with it, so an atmosphere launch names `TERRAIN TEST`'s field, the default.
+  const run: ViewsCheckLaunch["run"] =
+    options["inspection"] === true
+      ? "inspection"
+      : options["atmosphere"] === true
+        ? "atmosphere"
+        : options["terrain"] !== true
+          ? "several-views"
+          : options["handover"] === true
+            ? "handover"
+            : "terrain";
   return {
     setting: settingOf(options),
     smoke: options["smoke"] === true,
     out: typeof out === "string" ? out : null,
-    // `--handover` and `--weathered` are refused without `--terrain` before this is reached, and
-    // `--atmosphere` with it, so an atmosphere launch names `TERRAIN TEST`'s field, the default.
-    run:
-      options["inspection"] === true
-        ? "inspection"
-        : options["atmosphere"] === true
-          ? "atmosphere"
-          : options["terrain"] !== true
-            ? "several-views"
-            : options["handover"] === true
-              ? "handover"
-              : "terrain",
+    run,
     fixture:
       options["weathered"] === true
         ? "terrain-test-weathered"
@@ -708,6 +721,8 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     ...compositeProbeOf(options),
     // Refused without `--handover` before this is reached; commander holds it to the three names.
     ...lookOf(options),
+    // The terrain run's alone; any other run takes the switch for its timestamps only.
+    ...(run === "terrain" && options["hyperionGpuTiming"] === true ? { passTimes: true } : {}),
   };
 }
 

@@ -211,6 +211,7 @@ interface Seen {
   readonly phases: Array<{
     readonly name: TerrainCheckPhaseName;
     readonly quiet: QuietSpan | null;
+    readonly passTimes: boolean;
   }>;
   destroyedAtMs: number | null;
   /** Each phase record's making, which holds the page's main thread with no frame drawn. */
@@ -381,8 +382,9 @@ function fakeProbe(
       end: TerrainMark,
       shown: ReadonlyArray<ShownView>,
       quiet: QuietSpan | null,
+      passTimes: boolean,
     ): TerrainCheckPhaseRecord => {
-      seen.phases.push({ name, quiet });
+      seen.phases.push({ name, quiet, passTimes });
       // The record's making holds the main thread, as the probe's does over a long phase.
       const fromMs = clock();
       advance(RECORD_COST_MS);
@@ -427,15 +429,20 @@ function fakeProbe(
         fieldAsks: 0,
         blocksSent: 0,
         memory: null,
+        passes: passTimes ? [] : null,
       };
     },
   };
 }
 
-/** The run over a fake `VIEW` and probe on the test's clock, to its end, on `fixture`'s field. */
+/**
+ * The run over a fake `VIEW` and probe on the test's clock, to its end, on `fixture`'s field, its
+ * phases recording their GPU time by pass where `passTimes` says.
+ */
 async function run(
   fixture: TerrainCheckDeps["fixture"] = "terrain-test",
   devicePixelRatio = 1,
+  passTimes = false,
 ): Promise<{
   readonly record: Awaited<ReturnType<typeof runTerrainCheck>>;
   readonly calls: ReadonlyArray<string>;
@@ -496,6 +503,7 @@ async function run(
     fixture,
     document,
     timing: TIMING,
+    passTimes,
     nowMs: clock,
     markWindow: () => undefined,
     sleep: (ms) => {
@@ -587,6 +595,22 @@ describe("the terrain run's script (R10.T16.d)", () => {
       "terrain-photoreal-wireframe",
       "terrain-loss",
     ]);
+  });
+
+  it("records each phase's GPU time by pass where the launch asks (R14's Mac measurements)", async () => {
+    const { record, seen } = await run("terrain-test", 1, true);
+    expect([
+      seen.phases.map((phase) => phase.passTimes),
+      record.phases.map((phase) => phase.passes),
+    ]).toEqual([
+      [true, true, true],
+      [[], [], []],
+    ]);
+  });
+
+  it("records no GPU time by pass where the launch does not ask", async () => {
+    const { record } = await run();
+    expect(record.phases.map((phase) => phase.passes)).toEqual([null, null, null]);
   });
 
   it("destroys the device once, mid-stream, after the delta's first block, and leaves the restore out", async () => {

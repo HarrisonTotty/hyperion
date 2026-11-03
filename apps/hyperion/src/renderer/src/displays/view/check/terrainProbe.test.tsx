@@ -313,6 +313,7 @@ describe("the longest time between frames through a compile (R10.T14.d)", () => 
 async function probedPage(page: FakePage): Promise<{
   readonly probe: TerrainProbe;
   readonly primary: ReturnType<RenderEngine["createView"]>;
+  readonly timed: ReturnType<typeof timedEngineSource>;
   readonly stop: () => void;
 }> {
   const timed = timedEngineSource();
@@ -326,8 +327,38 @@ async function probedPage(page: FakePage): Promise<{
   views.installFrameClock(page);
   const stop = probe.start();
   const primary = engine.createView(document.createElement("canvas"), "view");
-  return { probe, primary, stop };
+  return { probe, primary, timed, stop };
 }
+
+describe("the terrain probe's GPU time by pass (R14's Mac measurements)", () => {
+  it("records each pass label's time in each frame timed in full where asked, and none otherwise", async () => {
+    const page = new FakePage();
+    const { probe, primary, timed, stop } = await probedPage(page);
+    const start = probe.mark();
+    page.frame(100, () => {
+      primary.render(frame("tonemap"));
+    });
+    page.frame(116, () => {
+      primary.render(frame("tonemap"));
+    });
+    timed.deliver(() => 2.5);
+    // A frame whose resolve has not arrived is left out, as the frame's GPU time leaves it out.
+    page.frame(133, () => {
+      primary.render(frame("tonemap"));
+    });
+    page.nowMs = 150;
+    const end = probe.mark();
+    const shown = [{ name: "view", style: "photorealistic" }] as const;
+    const asked = probe.phase("terrain-alone", start, end, shown, null, true);
+    const unasked = probe.phase("terrain-alone", start, end, shown, null, false);
+    stop();
+    expect([asked.frameGpuMs, asked.passes, unasked.passes]).toEqual([
+      [2.5, 2.5],
+      [{ label: "view", ms: [2.5, 2.5], kernels: [], workgroups: [] }],
+      null,
+    ]);
+  });
+});
 
 describe("the terrain probe's longest gap and its session's compile (R10.T14.d)", () => {
   it("gives the script's time at the end of a view's longest gap", async () => {
@@ -353,6 +384,7 @@ describe("the terrain probe's longest gap and its session's compile (R10.T14.d)"
       probe.mark(),
       [{ name: "view", style: "photorealistic" }],
       null,
+      false,
     );
     stop();
     expect(record.views[0]).toMatchObject({ longestGapMs: 284, longestGapEndScriptS: 11 });
@@ -507,6 +539,7 @@ describe("the terrain probe (R10.T16.d)", () => {
       probe.mark(),
       [{ name: "view", style: "photorealistic" }],
       null,
+      false,
     );
     expect(record.views[0]).toMatchObject({
       draws: 6,
@@ -573,6 +606,7 @@ describe("the terrain probe (R10.T16.d)", () => {
       probe.mark(),
       [{ name: "view", style: "photorealistic" }],
       null,
+      false,
     );
     stop();
     expect(record.views[0]).toMatchObject({
@@ -693,6 +727,7 @@ describe("the terrain probe (R10.T16.d)", () => {
         probe.mark(),
         [{ name: "view", style: "wireframe" }],
         null,
+        false,
       );
       stop();
       const view = record.views[0];
@@ -916,6 +951,7 @@ describe("the terrain probe's read-backs (R10.T16.d; the batch review's D-C)", (
         { name: "instrument-1", style: "photorealistic" },
       ],
       null,
+      false,
     );
     stop();
     expect(record.views.map((view) => [view.name, view.readBacks])).toEqual([
@@ -961,6 +997,7 @@ describe("the terrain probe's read-backs (R10.T16.d; the batch review's D-C)", (
         probe.mark(),
         [{ name: "view", style: "photorealistic" }],
         null,
+        false,
       );
       stop();
       expect([record.views[0]?.readBacks, warn.mock.calls.length]).toEqual([0, warnings]);

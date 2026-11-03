@@ -230,6 +230,7 @@ export function ViewsCheckRunner({
               terrain,
               setting: api.launch.setting,
               fixture: api.launch.fixture,
+              passTimes: api.launch.passTimes === true,
               timing: terrainCheckTimingOf(
                 api.launch.smoke ? TERRAIN_CHECK_TIMING.smoke : TERRAIN_CHECK_TIMING.full,
                 launchMode,

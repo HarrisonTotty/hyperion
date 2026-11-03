@@ -290,6 +290,11 @@ export interface TerrainCheckDeps {
   readonly fixture: ViewsCheckTerrainFixture;
   readonly document: Document;
   readonly timing: TerrainCheckTiming;
+  /**
+   * Whether each phase records its passes' GPU times (`ViewsCheckLaunch.passTimes`,
+   * `--hyperion-gpu-timing`; R14's Mac measurements).
+   */
+  readonly passTimes: boolean;
   /** The page's clock, `performance.now()`, on which the probes stamp frames. */
   readonly nowMs: () => number;
   /** Marks a phase's window in the page's user timing, as T20's run does. */
@@ -411,7 +416,7 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     stopped();
     await deps.api.endPhase(name, window);
     const fromMs = deps.nowMs();
-    phases.push(terrain.phase(name, start, end, driver.shownViews(), quiet));
+    phases.push(terrain.phase(name, start, end, driver.shownViews(), quiet, deps.passTimes));
     harness.push({ fromMs, toMs: deps.nowMs() });
   };
   /**

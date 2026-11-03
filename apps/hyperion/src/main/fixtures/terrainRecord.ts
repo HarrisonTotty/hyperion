@@ -108,6 +108,7 @@ function phase(
         { category: "height-cache", bytes: 20_000_000 },
       ],
     },
+    passes: null,
   };
 }
 

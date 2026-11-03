@@ -10,6 +10,7 @@
 #                 [--geometry <field>=<value>[,...]]
 #                 [--device-pixel-ratio <N>]
 #                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered | --whole]
+#                            [--hyperion-gpu-timing]
 #                  | --atmosphere
 #                  | --inspection --universe <ID> --body <ID>
 #                    [--timing [--composite-probe sky-off|transmittance-off|per-pixel|surface-grey]]]
@@ -64,6 +65,13 @@
 # writes it to target/views-check/terrain/whole.golden, about 4.5 MB and never committed, then gives
 # the client `--whole <that file>`, which its main process reads. The files are named
 # <date>-<machine>-<setting>-terrain-whole. The client refuses it beside --weathered or --handover.
+#
+# --terrain --hyperion-gpu-timing has each phase of the terrain run record its GPU time by pass (R14's
+# Mac measurements): the bodies pass, the shadow cascades, the cluster cull and compaction, the
+# overlay and the rest, each label's time over the phase's frames timed in full, in the results file
+# and its summary; a phase of a run without it reads `null` there. The switch goes to the client as
+# it is, which also takes it for R01's unquantized timestamps on the forced Vulkan path; elsewhere,
+# a Mac's Metal among them, the timestamps stay quantized.
 #
 # --atmosphere runs the atmosphere run instead (plan R08, R08.T10.b), on the kept `ATMOSPHERE TEST`
 # scene: the primary photorealistic, its atmosphere media awaited, the moonlit night captured from

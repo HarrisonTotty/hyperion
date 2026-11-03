@@ -1111,6 +1111,14 @@ export interface ViewsCheckLaunch {
    * three in one launch pass its watchdog, and a look a launch makes each run resumable by look.
    */
   readonly look?: HandoverLookName;
+  /**
+   * The terrain run's GPU time by pass (`--hyperion-gpu-timing`; R14's Mac measurements): present,
+   * and `true`, only on a `--terrain` launch given the switch, each of whose phases then records
+   * its passes' times ({@link TerrainCheckPhaseRecord.passes}); absent on every other launch. On
+   * the forced Vulkan path the switch also lifts the timestamps' quantization; elsewhere, the
+   * owner's Mac among them, they stay quantized.
+   */
+  readonly passTimes?: true;
 }
 
 /**
@@ -1432,6 +1440,13 @@ export interface TerrainCheckPhaseRecord {
   readonly blocksSent: number;
   /** The session's memory as the window ends, or `null` with no session then. */
   readonly memory: TerrainCheckMemory | null;
+  /**
+   * Each pass label's GPU time in each of the window's frames whose resolves all arrived, as the
+   * inspection run's frame profile reads them (`ViewsProbe.passTimes`): the bodies pass, the shadow
+   * cascades, the cluster cull and compaction, the overlay and the rest, on a launch given
+   * `--hyperion-gpu-timing` (`ViewsCheckLaunch.passTimes`); `null` on any other.
+   */
+  readonly passes: ReadonlyArray<InspectionTimingPass> | null;
 }
 
 /** An engine fault the terrain run saw, with its time. */
