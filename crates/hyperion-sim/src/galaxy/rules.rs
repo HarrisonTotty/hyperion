@@ -255,10 +255,10 @@ impl GalaxyRules {
 
     /// The version's rules with the holds retargeted from 26 to 27 in force too (train 26,
     /// 2026-11-01: P09.T2.c's `field_share`, P09.T35's `carve_out` (2026-11-02), P09.T36's
-    /// `feature_classes`, P11.T8.c–d's `merger_class`, P08.T12's `displaced` and the stellar rules'
-    /// `merger_mass`, P11.T4.d; [`StellarRules::every_26_hold_with_its_retargets`]): the rules
-    /// their tests, and those of the 27 holds built over them, were measured under while they were
-    /// held at 26. The 27 bump deletes it with them.
+    /// `feature_classes`, P11.T8.c–d's `merger_class` and P08.T12's `displaced`; the stellar
+    /// rules', [`StellarRules::every_26_hold_with_its_retargets`], hold none since P11.T4.d's
+    /// `merger_mass` was folded): the rules their tests, and those of the 27 holds built over them,
+    /// were measured under while they were held at 26. The 27 bump deletes it with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
@@ -281,7 +281,7 @@ impl GalaxyRules {
     /// `list_source`, P10.T10.b's registration with P10.T3.d.b, and `kepler_arc`, P09.T28.d.c, and
     /// those retargeted from 26, `field_share`, P09.T2.c, `carve_out`, P09.T35, `feature_classes`,
     /// P09.T36, `merger_class`, P11.T8.c–d, and `displaced`, P08.T12) and the stellar rules'
-    /// `dwarf_limit`, P11.T4 and `merger_mass`, P11.T4.d ([`StellarRules::every_27_hold`]).
+    /// `dwarf_limit`, P11.T4 ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -567,11 +567,6 @@ mod tests {
                 stellar: StellarRules::of_version(GeneratorVersion::new(27)),
                 ..GalaxyRules::every_26_hold_with_its_retargets()
             }
-        );
-        // The holds retargeted from 26 (train 26) are every 27 hold's too.
-        assert_eq!(
-            GalaxyRules::every_27_hold().stellar.merger_mass,
-            StellarRules::every_26_hold_with_its_retargets().merger_mass
         );
         assert_eq!(
             GalaxyRules::every_27_hold().stellar,

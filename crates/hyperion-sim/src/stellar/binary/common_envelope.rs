@@ -46,9 +46,8 @@ use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years
 
 use super::dwarf_limit::{DwarfLimitRules, Unplaced};
 use super::evolve::{Engine, roche_lobe, track_mass};
-use super::merger_mass::MergerMassRules;
 use super::params::BinaryParams;
-use super::rlof::{dynamical, kelvin_helmholtz};
+use super::rlof::kelvin_helmholtz;
 use super::star::{G, Kind, Member, Path, cooling_origin, moment_of_inertia, positive};
 use super::timeline::{IaPoolChannel, PooledIaEvent, SegmentKind};
 
@@ -1065,13 +1064,25 @@ impl Engine {
     }
 
     /// Dynamical transfer from member `d` that merges the pair (BSE sections 2.6.4 and 2.6.5):
-    /// a low-mass main-sequence donor over its critical ratio gives its whole mass on
-    /// √(`τ_KH` `τ_dyn`), of which a main-sequence accretor keeps what its thermal timescale allows
-    /// (equation 64) and a giant all, or, under [`MergerMassRules::Pair`] (P11.T4.d, from 26), a
-    /// main-sequence accretor both stars' masses as the collision of two main-sequence stars does
-    /// (section 2.7.3) and a Hertzsprung-gap accretor the whole donor, as BSE's code gives any
-    /// accretor of k 2–6; a white dwarf's, neutron star's or black hole's coalesces with its
-    /// companion as a collision does.
+    /// a low-mass main-sequence donor over its critical ratio gives its whole mass, of which a
+    /// main-sequence accretor keeps both stars' masses as the collision of two main-sequence stars
+    /// does (section 2.7.3) and a Hertzsprung-gap accretor the whole donor, as BSE's code gives any
+    /// accretor of k 2–6 (P11.T4.d's fix); a white dwarf's, neutron star's or black hole's
+    /// coalesces with its companion as a collision does.
+    ///
+    /// As first built a main-sequence or gap accretor kept only what its thermal timescale allowed
+    /// of the donor, √(`τ_KH` `τ_dyn`) ÷ `τ_KH,2` of it (equation 64), a small fraction, and the
+    /// rest left the pair: a 0.454 + 0.138 M☉ pair left 0.1375 M☉. BSE's own code, read as COSMIC
+    /// carries it (research-leans-16; v3.4.0's `evolv2.f`, the original branch), restricts a
+    /// main-sequence accretor so ("Restrict accretion to thermal timescale of secondary", `dm2 =
+    /// taum/tkh(j2)*dm1`), but gives an accretor of k 2–6, the gap among them, the whole donor ("Add
+    /// all the material to the giant's envelope", `dm2 = dm1`). Its collision rule, `mix.f`, merges
+    /// two main-sequence stars with M₁ + M₂, and COSMIC changed the dynamical branch's main-sequence
+    /// accretor to full accretion on 2023-07-20 ("This will lead to a merger of the two MS stars").
+    /// P11.T4.d's rule as main reads it (the brief of 2026-10-31) is that collision rule: a
+    /// main-sequence accretor and the donor make a main-sequence star of M₁ + M₂ at the fractional
+    /// age 0.1 Σ Mᵢ τᵢ ÷ M (their equation 80) of both stars, and a gap accretor takes the whole
+    /// donor, at its place in the gap on its new mass's track, each with no mass lost.
     pub(super) fn merge_dynamically(&mut self, d: usize) {
         let o = 1 - d;
         let (md, td) = self.current(d);
@@ -1087,32 +1098,18 @@ impl Engine {
         let ko = Kind::of(so.state.phase(), mo);
         if kd == Kind::LowMassMainSequence && (ko.is_main_sequence() || ko == Kind::HertzsprungGap)
         {
-            let timescale = (kelvin_helmholtz(&sd, kd) * dynamical(&sd)).sqrt();
-            let kept = (timescale / kelvin_helmholtz(&so, ko) * md).min(md);
-            let total = mo + kept;
             let product = if ko.is_main_sequence() {
-                match self.ctx.rules().merger_mass {
-                    MergerMassRules::ThermalLimit => {
-                        self.main_sequence_merger(false, total, [(mo, &so), (0.0, &so)])
-                    }
-                    // P11.T4.d's rule, the collision of two main-sequence stars (BSE section
-                    // 2.7.3): both stars' masses, at both stars' fractional age.
-                    MergerMassRules::Pair => {
-                        self.main_sequence_merger(false, md + mo, [(md, &sd), (mo, &so)])
-                    }
-                }
+                // P11.T4.d's rule, the collision of two main-sequence stars (BSE section 2.7.3):
+                // both stars' masses, at both stars' fractional age.
+                self.main_sequence_merger(false, md + mo, [(md, &sd), (mo, &so)])
             } else {
-                // From 26 a Hertzsprung-gap accretor takes the whole donor, as BSE's own dynamical
-                // branch gives an accretor of k 2–6 (`evolv2.f`: "Add all the material to the
-                // giant's envelope", `dm2 = dm1`). Either arm's star sits at the accretor's place
-                // in the gap on its own mass's track, whose core it takes.
-                let gap_total = match self.ctx.rules().merger_mass {
-                    MergerMassRules::ThermalLimit => total,
-                    MergerMassRules::Pair => mo + md,
-                };
+                // A Hertzsprung-gap accretor takes the whole donor, as BSE's own dynamical branch
+                // gives an accretor of k 2–6 (`evolv2.f`: "Add all the material to the giant's
+                // envelope", `dm2 = dm1`), and sits at the accretor's place in the gap on its own
+                // mass's track, whose core it takes.
                 self.new_star(
                     Kind::HertzsprungGap,
-                    gap_total,
+                    mo + md,
                     so.state.core_mass().value(),
                     0.0,
                     so.state.phase_fraction(),

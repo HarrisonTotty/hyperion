@@ -31,13 +31,6 @@
 //!   second table yet, so every version takes the committed one. The tests reach a test-only
 //!   second table through it, to show that every reader goes through the choke point.
 //!
-//! - [`merger_mass`](StellarRules::merger_mass), at [`MERGER_MASS_VERSION`] (plan 11, P11.T4.d's
-//!   fix): what the binary engine's dynamical main-sequence merger keeps, the accretor's mass and
-//!   what its thermal timescale allows below it, both stars' masses from it, read at one choke
-//!   point, `Engine::merge_dynamically`, through the engine's input's rules. The pair-light and
-//!   reach tables fitted from the engine's runs keep the version's rules until the bump refits
-//!   them, and the range brief's gate refuses them under another arm
-//!   (`stellar/rules/merger_mass_hold.rs` lists the movers).
 //! - [`dwarf_limit`](StellarRules::dwarf_limit), at [`DWARF_LIMIT_VERSION`] (plan 11, P11.T4's
 //!   fix): whether the binary engine holds its white dwarfs below the Chandrasekhar mass and types
 //!   the dwarf a merger's unplaced product leaves by its core, read by `Engine::new_star`'s
@@ -52,7 +45,6 @@
 
 use crate::GeneratorVersion;
 use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
-use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
 use crate::stellar::remnant::KickRankRules;
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -63,9 +55,6 @@ pub(crate) struct StellarRules {
     ///
     /// [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
     pub(crate) kick_rank: KickRankRules,
-    /// What a dynamically transferring main-sequence pair's merger keeps in the binary engine,
-    /// the hold of [`MERGER_MASS_VERSION`].
-    pub(crate) merger_mass: MergerMassRules,
     /// Whether the binary engine holds its white dwarfs below the Chandrasekhar mass and types the
     /// dwarf a merger's unplaced product leaves by its core, the hold of [`DWARF_LIMIT_VERSION`].
     pub(crate) dwarf_limit: DwarfLimitRules,
@@ -79,11 +68,6 @@ impl StellarRules {
     pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
         Self {
             kick_rank: KickRankRules::Committed,
-            merger_mass: if version.get() >= MERGER_MASS_VERSION.get() {
-                MergerMassRules::Pair
-            } else {
-                MergerMassRules::ThermalLimit
-            },
             dwarf_limit: if version.get() >= DWARF_LIMIT_VERSION.get() {
                 DwarfLimitRules::Chandrasekhar
             } else {
@@ -92,22 +76,20 @@ impl StellarRules {
         }
     }
 
-    /// The version's stellar rules with those retargeted from 26 to 27 in force too (P11.T4.d's
-    /// `merger_mass`): the stellar part of [`GalaxyRules::every_26_hold_with_its_retargets`].
+    /// The version's stellar rules with those retargeted from 26 to 27 in force too: none is left,
+    /// P11.T4.d's `merger_mass` folded (the 27 folds), so they are the version's; the stellar part
+    /// of [`GalaxyRules::every_26_hold_with_its_retargets`].
     ///
     /// [`GalaxyRules::every_26_hold_with_its_retargets`]:
     ///     crate::galaxy::rules::GalaxyRules::every_26_hold_with_its_retargets
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
-        Self {
-            merger_mass: MergerMassRules::Pair,
-            ..Self::of_version(crate::GENERATOR_VERSION)
-        }
+        Self::of_version(crate::GENERATOR_VERSION)
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// those that turn on at 27 (P11.T4's `dwarf_limit` and P11.T4.d's `merger_mass`).
+    /// those that turn on at 27 (P11.T4's `dwarf_limit`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.
