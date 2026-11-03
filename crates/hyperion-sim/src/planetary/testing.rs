@@ -499,9 +499,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// - the equilibrium network's further carriers, `CARRIERS_VERSION` (P14.T52.e), at
 ///   `CarriersRules::Carried` through `with_carriers`: the registry's rows from 115 on, which the
 ///   network carries, P and Cl solved.
-/// - an ocean-branch moon's porous rock core, `POROUS_CORE_VERSION` (P14.T56.e), at
-///   `PorousCoreRules::Porous` through `with_porous_core`: a core under its compaction pressure
-///   dissipates, and its moon's membrane floats on it.
 /// - a regular moon's eccentricity at its age, `ECCENTRICITY_DAMPING_VERSION` (P14.T55.j.a), at
 ///   `EccentricityDampingRules::Damped` through `with_eccentricity_damping`: a forced
 ///   eccentricity only in a resonance that holds, at its budget, and a free one damped by its
@@ -586,8 +583,7 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
         EccentricityDampingRules, with_eccentricity_damping,
     };
     use crate::planetary::moons::tides::{
-        MoonSurfaceHeatRules, PorousCoreRules, SurfaceHeatRules, with_moon_surface_heat,
-        with_porous_core, with_surface_heat,
+        MoonSurfaceHeatRules, SurfaceHeatRules, with_moon_surface_heat, with_surface_heat,
     };
     use crate::planetary::surface::steps::climate::{
         OrbitExtrapolationRules, with_orbit_extrapolation,
@@ -595,7 +591,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::substance::{CarriersRules, with_carriers};
     let run = move || with_orbit_extrapolation(OrbitExtrapolationRules::ReducedRank, run);
     let run = move || with_carriers(CarriersRules::Carried, run);
-    let run = move || with_porous_core(PorousCoreRules::Porous, run);
     let run = move || with_eccentricity_damping(EccentricityDampingRules::Damped, run);
     let run = move || with_surface_heat(SurfaceHeatRules::Radiated, run);
     let run = move || with_moon_surface_heat(MoonSurfaceHeatRules::Radiated, run);

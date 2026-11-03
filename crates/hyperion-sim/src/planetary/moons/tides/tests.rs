@@ -331,6 +331,22 @@ impl Measured {
         MoonTides::of(&self.inputs())
     }
 
+    /// Its tides in fresh water on a compacted core, the rigid mantle P14.T56.d's membrane floats
+    /// on, whatever its own core's compaction (P14.T56.e): [`tides`](Self::tides) with its ocean
+    /// branch reading no porous core.
+    fn on_a_compacted_core(&self) -> MoonTides {
+        let inputs = self.inputs();
+        let (density, gravity) = MoonTides::bulk(&inputs);
+        let off_an_ocean = || MoonTides::off_an_ocean(&inputs, density, gravity);
+        let Some(mut branch) = ShellBranch::of(&inputs, &OceanSolutes::FRESH, density, gravity)
+        else {
+            return off_an_ocean();
+        };
+        branch.core = None;
+        MoonTides::at_its_root(&branch, inputs.surface_temperature, |t| branch.state(t))
+            .map_or_else(off_an_ocean, |(tides, _)| tides)
+    }
+
     fn area(&self) -> f64 {
         let r = self.radius().value();
         4.0 * core::f64::consts::PI * r * r
@@ -511,13 +527,14 @@ fn the_ocean_worlds_take_the_ocean_branch_at_their_measured_elements() {
 /// root is a few tenths of a GW against Howett et al.'s (2011, JGR 116, E03003) 15.8 GW from its
 /// south polar terrain, as the literature finds for a conductive shell (Roberts and Nimmo 2008);
 /// its stiff shell's gain X is far from 1, so it is cold. The missing heat is a porous rock core's
-/// (Choblet et al. 2017), P14.T56.e's (plan 14's Risks, P14.T56.d's membrane, as ruled): the held
-/// arm's test, on the rigid mantle ([`PorousCoreRules::Held`]), which
-/// [`under_every_27_hold_enceladus_s_porous_core_keeps_its_ocean`] answers.
+/// (Choblet et al. 2017), P14.T56.e's (plan 14's Risks, P14.T56.d's membrane, as ruled): on a
+/// compacted core, a rigid mantle, its ocean branch has no root and it takes the cold branch,
+/// which [`under_every_27_hold_enceladus_s_porous_core_keeps_its_ocean`] answers.
 #[test]
 fn enceladus_s_shell_cannot_keep_its_ocean() {
     let enceladus = moon("Enceladus");
-    let tides = with_porous_core(PorousCoreRules::Held, || enceladus.tides());
+    assert_eq!(enceladus.core().compaction(), CoreCompaction::Porous);
+    let tides = enceladus.on_a_compacted_core();
     let watts = enceladus.hot_root().value() * enceladus.area();
     let gain = enceladus.gain();
     eprintln!(
@@ -818,27 +835,31 @@ fn a_cold_rocky_moon_s_heat_is_its_own_loss_over_io_s() {
 }
 
 /// Mimas at its own 0.94-day period keeps a nearly elastic shell (δ 0.011), so its stiff shell's
-/// gain X is 0.23 and it stays cold (decision-p14-t56d-membrane §2.2): the Mimas paradox, a cold
-/// Mimas despite its forcing, is the model's at its own elements. Its inferred ocean (Lainey et al.
-/// 2024, Nature 626, 280) needs heat or an eccentricity history this model lacks.
+/// gain X is 0.23 and on a compacted core it stays cold (decision-p14-t56d-membrane §2.2): the
+/// Mimas paradox, a cold Mimas despite its forcing, is the rigid mantle's at its own elements. Its
+/// inferred ocean (Lainey et al. 2024, Nature 626, 280) needs more heat: its own porous core's
+/// (P14.T56.e), on which it takes the ocean branch, recorded.
 #[test]
 fn mimas_stays_cold_at_its_own_period() {
     let mimas = moon("Mimas");
     let gain = mimas.gain();
+    let (rigid, own) = (mimas.on_a_compacted_core(), mimas.tides());
     eprintln!(
-        "Mimas: {:?}, X {gain:.4}, its hot root {:.3} mW m⁻²",
-        mimas.tides().branch(),
+        "Mimas: {:?} on a compacted core, {:?} on its own, X {gain:.4}, its hot root {:.3} mW m⁻²",
+        rigid.branch(),
+        own.branch(),
         1e3 * mimas.hot_root().value()
     );
-    assert_eq!(mimas.tides().branch(), TidalBranch::Cold);
+    assert_eq!(rigid.branch(), TidalBranch::Cold);
     assert!((0.15..0.35).contains(&gain), "{gain}");
 }
 
 /// A Dione past X = 1 (decision-p14-t56d-membrane §2.5): at e = 0.02 instead of its 0.0022 its stiff
-/// shell's gain is 1.6–2.5, and its hot root takes the thin-shell branch, the ocean branch at
-/// 0.035–0.08 W m⁻² under a shell under 20 km. To version 23 the planar membrane's cubic had a
-/// single root above `F_nt`, the largest and stable; from 24 the branch reads the solve's
-/// spherical shell (P14.T51.g.b), whose root that cubic does not give.
+/// shell's gain is 1.6–2.5, and on a compacted core its hot root takes the thin-shell branch, the
+/// ocean branch at 0.035–0.08 W m⁻² under a shell under 20 km. To version 23 the planar membrane's
+/// cubic had a single root above `F_nt`, the largest and stable; from 24 the branch reads the
+/// solve's spherical shell (P14.T51.g.b), whose root that cubic does not give. On its own porous
+/// core (P14.T56.e) its heat is recorded.
 #[test]
 fn a_dione_past_x_one_takes_the_thin_shell_branch() {
     let dione = Measured {
@@ -846,13 +867,16 @@ fn a_dione_past_x_one_takes_the_thin_shell_branch() {
         ..moon("Dione")
     };
     let gain = dione.gain();
-    let tides = dione.tides();
+    let (tides, own) = (dione.on_a_compacted_core(), dione.tides());
     let f = tides.heat_flow();
     eprintln!(
-        "Dione at e = 0.02: X {gain:.3}, {:?}, F {:.2} mW m⁻² under {:.1} km",
+        "Dione at e = 0.02: X {gain:.3}, {:?}, F {:.2} mW m⁻² under {:.1} km on a compacted core; \
+         {:?}, F {:.2} mW m⁻² on its own",
         tides.branch(),
         1e3 * f.value(),
-        dione.shell(f) / 1e3
+        dione.shell(f) / 1e3,
+        own.branch(),
+        1e3 * own.heat_flow().value()
     );
     assert!((1.6..2.5).contains(&gain), "{gain}");
     assert_eq!(tides.branch(), TidalBranch::Ocean);
@@ -1311,8 +1335,7 @@ fn the_measured_moons_tides_on_their_shell_are_pinned() {
     golden!("planetary/moon_tides_on_their_shell", w.as_str());
 }
 
-// P14.T56.e: the porous core, behind its hold at 27 (`POROUS_CORE_VERSION`; the lane's science
-// draft, decision-p14-t56d-membrane §2.4).
+// P14.T56.e: the porous core (the lane's science draft, decision-p14-t56d-membrane §2.4).
 
 use crate::planetary::testing::with_every_27_hold;
 
@@ -1326,36 +1349,6 @@ impl Measured {
         );
         OceanCore::under(self.radius(), self.mass(), column.base()).unwrap()
     }
-}
-
-/// P14.T56.e is held until the 26 → 27 bump: the rules in force are the rigid mantle's, the
-/// tests' switch and 27's helper reach the porous core, and 26's helper does not.
-#[test]
-fn the_porous_core_is_held_only_until_the_27_bump() {
-    assert!(
-        crate::GENERATOR_VERSION < POROUS_CORE_VERSION,
-        "the 26 → 27 bump frees an ocean-branch moon's porous core (P14.T56.e): delete \
-         `POROUS_CORE_VERSION`, `PorousCoreRules` with its `Held` arm and its match in \
-         `ShellBranch::of`, the tests' `with_porous_core`, its switch in `with_every_27_hold` (and \
-         the helper, if no other 27 hold is left), and this test; restate \
-         `enceladus_s_shell_cannot_keep_its_ocean` on a compacted core, drop the `Held` halves of \
-         the 27 tests, and re-bless the movers plan 14's record of P14.T56.e lists"
-    );
-    assert_eq!(PorousCoreRules::in_force(), PorousCoreRules::Held);
-    assert_eq!(
-        with_porous_core(PorousCoreRules::Porous, PorousCoreRules::in_force),
-        PorousCoreRules::Porous
-    );
-    assert_eq!(
-        with_every_27_hold(PorousCoreRules::in_force),
-        PorousCoreRules::Porous
-    );
-    assert_eq!(PorousCoreRules::in_force(), PorousCoreRules::Held);
-    assert_eq!(
-        with_every_27_hold(|| with_porous_core(PorousCoreRules::Held, PorousCoreRules::in_force)),
-        PorousCoreRules::Held
-    );
-    assert_eq!(PorousCoreRules::in_force(), PorousCoreRules::Held);
 }
 
 /// P14.T56.e's calibration (decision-p14-t56d-membrane §2.4): under every 27 hold Enceladus's
@@ -1410,8 +1403,9 @@ fn under_every_27_hold_enceladus_s_porous_core_keeps_its_ocean() {
 }
 
 /// P14.T56.e: Ganymede's, Titan's, Callisto's and Europa's cores are compacted, at 2.7–15 GPa, so
-/// under every 27 hold their tides and their branch's ocean are the rigid mantle's to the bit; so
-/// are the dry moons' and Triton's, on no ocean.
+/// under every 27 hold their ocean branch reads no porous core, in fresh water and in their own
+/// brine, and their tides and their branch's ocean are the rigid mantle's to the bit; so are the
+/// dry moons' and Triton's, on no ocean branch.
 #[test]
 fn under_every_27_hold_the_compacted_cores_leave_the_large_moons_tides_unchanged() {
     for name in ["Ganymede", "Titan", "Callisto", "Europa"] {
@@ -1430,24 +1424,17 @@ fn under_every_27_hold_the_compacted_cores_leave_the_large_moons_tides_unchanged
             continue;
         }
         let ammonia = !matches!(moon.name, "Europa" | "Ganymede" | "Io" | "Moon");
-        let held = with_every_27_hold(|| {
-            with_porous_core(PorousCoreRules::Held, || {
-                (moon.tides(), moon.solved(ammonia))
-            })
-        });
-        let porous = with_every_27_hold(|| (moon.tides(), moon.solved(ammonia)));
-        for (a, b) in [(held.0, porous.0), (held.1.0, porous.1.0)] {
-            assert_eq!(a.branch(), b.branch(), "{}", moon.name);
-            for (x, y) in [
-                (a.k2(), b.k2()),
-                (a.q(), b.q()),
-                (a.loss(), b.loss()),
-                (a.heat_flow().value(), b.heat_flow().value()),
-            ] {
-                assert_same_bits(x, y);
-            }
+        let inputs = moon.inputs();
+        let (density, gravity) = MoonTides::bulk(&inputs);
+        for solutes in [OceanSolutes::FRESH, moon.solutes(ammonia)] {
+            let branch =
+                with_every_27_hold(|| ShellBranch::of(&inputs, &solutes, density, gravity));
+            assert!(
+                branch.is_none_or(|branch| branch.core.is_none()),
+                "{}",
+                moon.name
+            );
         }
-        assert_eq!(held.1.1, porous.1.1, "{}", moon.name);
     }
 }
 
@@ -1461,15 +1448,13 @@ fn under_every_27_hold_dione_s_and_mimas_s_porous_cores_are_recorded() {
         let body = moon(name);
         let core = body.core();
         let (tides, ocean) = with_every_27_hold(|| body.solved(true));
-        let held = with_porous_core(PorousCoreRules::Held, || body.solved(true)).0;
         let shell = match ocean {
             Subsurface::Ocean(ocean) => Some(ocean.shell_thickness().value() / 1e3),
             _ => None,
         };
         eprintln!(
             "{name} under every 27 hold: its core {:?} at {:.1} MPa (ρ {:.0} kg m⁻³, r {:.1} km); \
-             {:?} at {:.3} mW m⁻² ({:.3} GW) under {shell:?} km of shell, k2 {:.4}; held {:?} at \
-             {:.3} mW m⁻²",
+             {:?} at {:.3} mW m⁻² ({:.3} GW) under {shell:?} km of shell, k2 {:.4}",
             core.compaction(),
             core.effective_pressure().value() / 1e6,
             core.density.value(),
@@ -1477,9 +1462,7 @@ fn under_every_27_hold_dione_s_and_mimas_s_porous_cores_are_recorded() {
             tides.branch(),
             1e3 * tides.heat_flow().value(),
             tides.heat_flow().value() * body.area() / 1e9,
-            tides.k2(),
-            held.branch(),
-            1e3 * held.heat_flow().value()
+            tides.k2()
         );
         assert!(
             tides.k2().is_finite() && tides.k2() > 0.0,

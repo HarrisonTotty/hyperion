@@ -5384,92 +5384,74 @@ mod tests {
         }
     }
 
-    /// P14.T56.e: over 5,000 generated regular moons, the moons a porous core moves under every
-    /// 27 hold are recorded, against the same moons with its core held rigid: the branches they
-    /// leave and join, the ocean-branch moons whose heat flow moves, those it puts at 1 and at
-    /// 10 W m⁻² or more, and the largest heat flow it gives (W m⁻², km, e, and the rigid mantle's
-    /// W m⁻²). There is no bound in W m⁻², as on the rigid mantle's thin-shell branch
-    /// (decision-p14-t56d-membrane §7.1: physical for a held eccentricity; its limit, the
-    /// eccentricity's damping and a resonance's budget, is P14.T55.j's). A core's heat does not
-    /// fall as its shell thins, so a small moon held at e ≈ 0.03 close to its planet runs to some
-    /// 10² W m⁻² (recorded for P14.T55.j with plan 14's record of P14.T56.e). Every tide stays
-    /// finite and positive, a porous core only adds heat, so no moon leaves the ocean branch, and
-    /// some join it. The surface heat is held (P14.T55.j): at a held e it moves the hottest ocean
-    /// moons' shells, and the census measures the core alone.
+    /// P14.T56.e: over 5,000 generated regular moons under every 27 hold, their porous cores are
+    /// recorded: the moons on each branch, the ocean-branch moons at 1 and at 10 W m⁻² or more, and
+    /// the largest heat flow a core gives (W m⁻², km, e). There is no bound in W m⁻², as on the
+    /// rigid mantle's thin-shell branch (decision-p14-t56d-membrane §7.1: physical for a held
+    /// eccentricity; its limit, the eccentricity's damping and a resonance's budget, is
+    /// P14.T55.j's). A core's heat does not fall as its shell thins, so a small moon held at
+    /// e ≈ 0.03 close to its planet runs to some 10² W m⁻² (recorded for P14.T55.j with plan 14's
+    /// record of P14.T56.e). Every tide stays finite and positive, and some moons take the ocean
+    /// branch. The surface heat is held (P14.T55.j): at a held e it moves the hottest ocean moons'
+    /// shells, and the census measures the core alone.
     #[test]
     fn under_every_27_hold_the_generated_moons_a_porous_core_moves_are_recorded() {
-        use crate::planetary::moons::tides::{
-            PorousCoreRules, SurfaceHeatRules, TidalBranch, with_porous_core, with_surface_heat,
-        };
+        use crate::planetary::moons::tides::{SurfaceHeatRules, TidalBranch, with_surface_heat};
         use crate::planetary::testing::with_every_27_hold;
         const MOONS: usize = 5_000;
         // The surface heat (P14.T55.j) held, so that the census measures the core alone: with it,
         // a held e's ocean heat can warm a surface past its shell's edge (2 moons here).
-        let census = |rules: PorousCoreRules| {
-            with_every_27_hold(|| {
-                with_surface_heat(SurfaceHeatRules::Held, || {
-                    with_porous_core(rules, || {
-                        let mut moons = Vec::with_capacity(MOONS);
-                        'giants: for i in 0..1_000 {
-                            for giant in &table_giants() {
-                                let slot = giant.0.id().body_index().to_be_bytes()[0];
-                                let p = renamed(&giant.0, i, slot);
-                                for moon in regular_moons(Seed::new(12), &p).moons() {
-                                    let rank = spread_rank(u32::try_from(moons.len()).unwrap());
-                                    let own = regular_derived(moon, &p, giant, rank, SOLAR_AGE);
-                                    let e = moon.orbit().eccentricity().value();
-                                    moons.push((own.tides(), own.radius().value() / 1e3, e));
-                                    if moons.len() >= MOONS {
-                                        break 'giants;
-                                    }
-                                }
+        let porous = with_every_27_hold(|| {
+            with_surface_heat(SurfaceHeatRules::Held, || {
+                let mut moons = Vec::with_capacity(MOONS);
+                'giants: for i in 0..1_000 {
+                    for giant in &table_giants() {
+                        let slot = giant.0.id().body_index().to_be_bytes()[0];
+                        let p = renamed(&giant.0, i, slot);
+                        for moon in regular_moons(Seed::new(12), &p).moons() {
+                            let rank = spread_rank(u32::try_from(moons.len()).unwrap());
+                            let own = regular_derived(moon, &p, giant, rank, SOLAR_AGE);
+                            let e = moon.orbit().eccentricity().value();
+                            moons.push((own.tides(), own.radius().value() / 1e3, e));
+                            if moons.len() >= MOONS {
+                                break 'giants;
                             }
                         }
-                        moons
-                    })
-                })
+                    }
+                }
+                moons
             })
-        };
-        let (held, porous) = (
-            census(PorousCoreRules::Held),
-            census(PorousCoreRules::Porous),
-        );
-        assert_eq!((held.len(), porous.len()), (MOONS, MOONS));
+        });
+        assert_eq!(porous.len(), MOONS);
         let index = |branch: TidalBranch| match branch {
             TidalBranch::Cold => 0,
             TidalBranch::Ocean => 1,
             TidalBranch::Heated => 2,
         };
-        let mut moves = [[0_u32; 3]; 3];
-        let (mut warmer, mut past) = (0_u32, [0_u32; 2]);
-        let mut largest = None::<(f64, f64, f64, f64)>;
-        for ((before, km, e), (after, ..)) in held.iter().zip(&porous) {
-            assert!(after.k2().is_finite() && after.k2() > 0.0, "{after:?}");
-            assert!(after.q().is_finite() && after.q() > 0.0, "{after:?}");
-            assert!(after.heat_flow().value().is_finite(), "{after:?}");
-            moves[index(before.branch())][index(after.branch())] += 1;
-            if after.branch() == TidalBranch::Ocean {
-                let (f, rigid) = (after.heat_flow().value(), before.heat_flow().value());
-                let shifted = before.branch() != TidalBranch::Ocean || f > rigid;
-                warmer += u32::from(before.branch() == TidalBranch::Ocean && f > rigid);
-                if shifted {
-                    past[0] += u32::from(f >= 1.0);
-                    past[1] += u32::from(f >= 10.0);
-                }
+        let mut branches = [0_u32; 3];
+        let mut past = [0_u32; 2];
+        let mut largest = None::<(f64, f64, f64)>;
+        for (tides, km, e) in &porous {
+            assert!(tides.k2().is_finite() && tides.k2() > 0.0, "{tides:?}");
+            assert!(tides.q().is_finite() && tides.q() > 0.0, "{tides:?}");
+            assert!(tides.heat_flow().value().is_finite(), "{tides:?}");
+            branches[index(tides.branch())] += 1;
+            if tides.branch() == TidalBranch::Ocean {
+                let f = tides.heat_flow().value();
+                past[0] += u32::from(f >= 1.0);
+                past[1] += u32::from(f >= 10.0);
                 if largest.is_none_or(|(most, ..)| f > most) {
-                    largest = Some((f, *km, *e, rigid));
+                    largest = Some((f, *km, *e));
                 }
             }
         }
         eprintln!(
-            "{MOONS} moons under every 27 hold, held core → porous core, by branch (cold, ocean, \
-             heated): {moves:?}; {warmer} ocean-branch moons warmer; {} moved moons at 1 W m⁻² or \
-             more, {} at 10 or more; the largest ocean-branch heat flow {largest:?} (W m⁻², km, \
-             e, the rigid mantle's W m⁻²)",
+            "{MOONS} moons under every 27 hold, by branch (cold, ocean, heated): {branches:?}; {} \
+             ocean-branch moons at 1 W m⁻² or more, {} at 10 or more; the largest ocean-branch heat \
+             flow {largest:?} (W m⁻², km, e)",
             past[0], past[1]
         );
-        assert_eq!(moves[1][0] + moves[1][2], 0, "{moves:?}");
-        assert!(moves[0][1] + moves[2][1] > 0, "{moves:?}");
+        assert!(branches[1] > 0, "{branches:?}");
     }
 
     /// P14.T55.j.a's step 1: under its rule a generated moon keeps a forced eccentricity only in

@@ -39,8 +39,7 @@ use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
 use crate::planetary::hosts::strip::{StripRules, with_stripping};
 use crate::planetary::moons::eccentricity::{EccentricityDampingRules, with_eccentricity_damping};
 use crate::planetary::moons::tides::{
-    MoonSurfaceHeatRules, PorousCoreRules, SurfaceHeatRules, with_moon_surface_heat,
-    with_porous_core, with_surface_heat,
+    MoonSurfaceHeatRules, SurfaceHeatRules, with_moon_surface_heat, with_surface_heat,
 };
 use crate::planetary::placement::zones::{BinaryHostZonesRules, with_binary_host_zones};
 use crate::planetary::surface::steps::climate::{
@@ -105,7 +104,6 @@ held_rules! {
     orbit_extrapolation: OrbitExtrapolationRules =
         OrbitExtrapolationRules::in_force => with_orbit_extrapolation,
     carriers: CarriersRules = CarriersRules::in_force => with_carriers,
-    porous_core: PorousCoreRules = PorousCoreRules::in_force => with_porous_core,
     eccentricity_damping: EccentricityDampingRules =
         EccentricityDampingRules::in_force => with_eccentricity_damping,
     surface_heat: SurfaceHeatRules = SurfaceHeatRules::in_force => with_surface_heat,

@@ -53,12 +53,12 @@
 //! equilibrium, a Maxwell or Andrade body whose viscosity balances tidal heat against convective
 //! loss, would give Im k₂ continuously in place of the branches: P14.T55.j.
 //!
-//! # The porous core (P14.T56.e, from generator version 27)
+//! # The porous core (P14.T56.e)
 //!
 //! A conductive shell alone keeps no Enceladus ocean, as the literature finds
 //! (decision-p14-t56d-membrane §2.4): its heat is a porous, water-saturated, unconsolidated rock
-//! core's (Choblet et al. 2017, Nature Astronomy 1, 841). From 27 (`POROUS_CORE_VERSION`) the
-//! ocean branch's rock, under the solve's column ([`OceanCore`]), is porous where its effective
+//! core's (Choblet et al. 2017, Nature Astronomy 1, 841). The ocean branch's rock, under the
+//! solve's column ([`OceanCore`]), is porous where its effective
 //! pressure leaves it so ([`CORE_COMPACTION_PRESSURE`]), with a complex rigidity of
 //! [`ComplexRigidity::POROUS_CORE`], and the shell's membrane floats on it
 //! ([`deformable_membrane_love_number`], over the core term [`core_love_number`]); a compacted
@@ -254,69 +254,6 @@ pub fn membrane_love_number(ocean: f64, lambda: MembraneStiffness) -> ComplexLov
         // 0 − x, so that a shell of no loss gives +0, not −0.
         imaginary: 0.0 - ocean * im / norm,
     }
-}
-
-/// The generator version from which an ocean-branch moon's rock core may be porous and dissipate
-/// (P14.T56.e; decision-p14-t56d-membrane §2.4, decision-pre-23-review item 4): 27. It does not
-/// ride 26: it landed after 26's membership.
-///
-/// It is P14.T56.e's one hold. Below it [`PorousCoreRules::in_force`] is
-/// [`PorousCoreRules::Held`]: every ocean-branch moon's shell floats on a rigid mantle
-/// ([`membrane_love_number`]), as P14.T56.d built it, and every figure is version 24's, 25's and
-/// 26's bit for bit. 27's bump deletes this hold, [`PorousCoreRules`] with its `Held` arm, the
-/// tests' switch and its tripwire (`the_porous_core_is_held_only_until_the_27_bump`).
-pub(crate) const POROUS_CORE_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether an ocean-branch moon's rock core may be porous (its hold, [`POROUS_CORE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum PorousCoreRules {
-    /// Version 26's and before: every ocean-branch moon's mantle is rigid (P14.T56.d).
-    Held,
-    /// Version 27's: a core below [`CORE_COMPACTION_PRESSURE`] is porous, its complex rigidity
-    /// [`ComplexRigidity::POROUS_CORE`], and its moon's membrane floats on it
-    /// ([`deformable_membrane_love_number`]); a compacted core stays rigid.
-    Porous,
-}
-
-impl PorousCoreRules {
-    /// The rules this generator version gives: the porous core from [`POROUS_CORE_VERSION`], the
-    /// rigid mantle below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_porous_core`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = POROUS_CORE_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= POROUS_CORE_VERSION {
-            Self::Porous
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The porous core's rules a test sets on its thread, `None` for the version's.
-    static POROUS_CORE_RULES: core::cell::Cell<Option<PorousCoreRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the porous core's rules `rules` on this thread, for the tests to reach
-/// P14.T56.e ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// 27's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_porous_core<R>(rules: PorousCoreRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<PorousCoreRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            POROUS_CORE_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(POROUS_CORE_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
 }
 
 /// The generator version from which a moon's surface radiates its internal heat as well as its
@@ -1435,7 +1372,7 @@ pub(crate) struct ShellBranch {
     membrane_per_m: f64,
     /// `k_oc`.
     ocean: f64,
-    /// Its porous core's tide, from 27 (P14.T56.e): `None` for a rigid mantle.
+    /// Its porous core's tide (P14.T56.e): `None` for a rigid mantle, a compacted core.
     core: Option<PorousCore>,
     /// `F_nt`.
     non_tidal: WattsPerSquareMetre,
@@ -1480,7 +1417,7 @@ struct ShellAt {
 impl ShellBranch {
     /// The branch of the moon `inputs` describe, of mean density `density` and surface gravity
     /// `gravity`, dissolving `solutes`: `None` without water, with an ocean limit that is not
-    /// positive, or under a surface at or above water's triple point. From 27 (P14.T56.e) the rock
+    /// positive, or under a surface at or above water's triple point. The rock (P14.T56.e)
     /// under its water ([`OceanCore::under`] the column's base) is porous where it is not compacted
     /// ([`OceanCore::compaction`]), and its membrane then floats on it.
     #[must_use]
@@ -1510,23 +1447,18 @@ impl ShellBranch {
         let membrane = 8.0 * (1.0 + ICE_POISSON_RATIO) / (5.0 + ICE_POISSON_RATIO)
             * ICE_RIGIDITY.value()
             / (WATER_DENSITY.value() * gravity.value() * r * r);
-        let core = match PorousCoreRules::in_force() {
-            PorousCoreRules::Held => None,
-            PorousCoreRules::Porous => {
-                OceanCore::under(inputs.radius, inputs.mass, water.column().base())
-                    .filter(|core| core.compaction() == CoreCompaction::Porous)
-                    .map(|core| PorousCore {
-                        term: core_love_number(
-                            core,
-                            ComplexRigidity::POROUS_CORE,
-                            density,
-                            gravity,
-                            inputs.radius,
-                        ),
-                        density,
-                    })
-            }
-        };
+        let core = OceanCore::under(inputs.radius, inputs.mass, water.column().base())
+            .filter(|core| core.compaction() == CoreCompaction::Porous)
+            .map(|core| PorousCore {
+                term: core_love_number(
+                    core,
+                    ComplexRigidity::POROUS_CORE,
+                    density,
+                    gravity,
+                    inputs.radius,
+                ),
+                density,
+            });
         Some(Self {
             water,
             profile,
