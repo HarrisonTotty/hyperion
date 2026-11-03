@@ -1,10 +1,10 @@
-//! The binary classes' fits (plan 15, P15.T10.b): `binary_awd`'s smoke manifest runs end to end
-//! through the command line on one thread and on four, into a temporary directory, and writes the
-//! same block both times, in the header grammar, declaring the task's items (Design notes 2 and
-//! 11). The task cuts its censuses into fixed parts and joins them in order, so the pair checks
-//! that the thread split leaves the bytes alone; `binary_xrb`, which runs the same censuses, has
-//! its smoke run once. The full runs' acceptance, their samplers against the half of the census
-//! they were not fitted to, is the sim's slow
+//! The binary classes' fits (plan 15, P15.T10.b): `binary_awd`'s and `binary_xrb`'s smoke
+//! manifests run end to end through the command line on one thread and on four, into a temporary
+//! directory, and each writes the same block both times, in the header grammar, declaring the
+//! task's items (Design notes 2 and 11). The tasks cut their censuses into fixed parts and join
+//! them in order, so the pairs check that the thread split leaves the bytes alone. The full runs'
+//! acceptance, their samplers against the half of the census they were not fitted to, is the sim's
+//! slow
 //! `tables_hold::the_accreting_white_dwarf_samplers_against_the_engine` and
 //! `tables_hold::the_x_ray_binary_sampler_against_the_engine`.
 //!
@@ -81,12 +81,18 @@ fn the_binary_awd_smoke_run_is_the_same_on_any_thread_count() {
     assert_smoke_block(&one, "binary_awd");
 }
 
-/// The X-ray binaries' smoke run writes its block, its header in the grammar and its items the
-/// task's.
+/// The X-ray binaries' smoke run writes the same block on one thread and on four, its header in
+/// the grammar and its items the task's.
 #[test]
-fn the_binary_xrb_smoke_run_writes_its_block() {
+fn the_binary_xrb_smoke_run_is_the_same_on_any_thread_count() {
     let dir = tempfile::tempdir().unwrap();
-    assert_smoke_block(&smoke("binary_xrb", "4", dir.path()), "binary_xrb");
+    let one = smoke("binary_xrb", "1", dir.path());
+    let four = smoke("binary_xrb", "4", dir.path());
+    assert_eq!(
+        one, four,
+        "binary_xrb --smoke: --threads 1 and --threads 4 wrote different blocks"
+    );
+    assert_smoke_block(&one, "binary_xrb");
 }
 
 /// On the smoke manifest's censuses each donor kind's rows give its cited figure to 1%, read as
@@ -118,7 +124,11 @@ fn the_donor_kinds_rows_meet_their_cited_figures() {
     let pc3 = LIGHT_YEARS_PER_PARSEC * LIGHT_YEARS_PER_PARSEC * LIGHT_YEARS_PER_PARSEC;
     for (k, target) in OBSERVED_DONOR_KINDS.iter().enumerate() {
         if rows.scales[k].is_none() {
-            let zero = |row: &ShareRow| row.hosts_per_formed_mass.iter().all(|h| h.abs() <= 0.0);
+            let zero = |row: &ShareRow| {
+                row.hosts_per_formed_mass
+                    .iter()
+                    .all(|h| h.abs() < f64::MIN_POSITIVE)
+            };
             assert!(rows.by_kind[k].iter().all(zero), "{k}");
             continue;
         }

@@ -10,8 +10,7 @@
 //! ([`SUN_LY`]) to its observed density, or its hosts in the galaxy to its observed count. A
 //! kind's rates, by population and band, are its census members a record, as `share_rows`' are;
 //! a class's row is the sum of its kinds', and its donor kinds' shares are its hosts' in the
-//! galaxy, which its sampler's pick should draw. No task calls it yet: the refit at 27 switches
-//! `fit_awd` to it.
+//! galaxy, which its sampler's pick draws. `fit_awd` takes it from the refit at 27.
 
 use hyperion_sim::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use hyperion_sim::galaxy::fields::Component;

@@ -316,8 +316,17 @@ impl SamplerMark {
     /// The mark with a residual law at each node of its median: `rows[k]`, the law's quantiles at
     /// the ranks k ÷ 16 (each row non-decreasing), at node k. Its own residual stays the law of
     /// all its members, which a draw of a mark with node laws does not read.
+    ///
+    /// # Panics
+    ///
+    /// If the mark has no median, whose nodes the laws are at: in a `const` table, a compile
+    /// error.
     #[must_use]
     pub const fn with_node_residuals(self, rows: &'static [[f64; 17]; 17]) -> Self {
+        assert!(
+            self.median.is_some(),
+            "a mark with node laws follows a median"
+        );
         Self {
             node_residuals: Some(rows),
             ..self
@@ -675,8 +684,8 @@ const AWD_MARKS: [SamplerMark; 11] = [
         name: "log_helium_period_hours",
         residual: normal(0.05),
         median: Some(linear(RATE_SPAN.0, RATE_SPAN.1, 0.0, -0.7)),
-        // 5.4 and 65.6 minutes.
         node_residuals: None,
+        // 5.4 and 65.6 minutes.
         limits: (-1.045_757, 0.038_753),
     },
     SamplerMark {
@@ -1953,7 +1962,7 @@ pub const CLASS_SHARES_27: ClassShareTable = ClassShareTable {
 // inputs-sha256: 77b2d86b5c0e936218648dcaba146e41f9af9bc698b21286d75ee37dec5f5dd7
 // manifest: crates/hyperion-fit/manifests/binary_awd.toml
 // data: none
-// sim-fingerprint: 3cc4bd9506d591bace586f3ca9394cc61ccfd7b2c2ddd0b844b3c4bbdf9daa95
+// sim-fingerprint: 7e786303287be2da402a5458cd09202bd8cc004d62d5e86c3c1f8b2ca2dec9ac
 // since-generator-version: 24
 // source: plan 11's binary engine (Hurley, Tout and Pols 2002, MNRAS 329, 897, as P11.T4 builds
 //   it) and classes (P11.T5), over plan 06's tracks, at the manifest's generator version's
@@ -2576,7 +2585,7 @@ pub const AWD_SLOW_LAYER_SHARES_27: [f64; 5] = [
 // inputs-sha256: 519618bd9567af6ddf2a07f1639885fbe012655854b1f95f345428a97ae7815e
 // manifest: crates/hyperion-fit/manifests/binary_xrb.toml
 // data: none
-// sim-fingerprint: d2688c787e2325d293f366c3123cc5d2df407261f21a9145bf76897528d67705
+// sim-fingerprint: 72325b0f2658c5ace59c3c7457ed5f212fc813bf9f288a45647bcaceee8c700b
 // since-generator-version: 24
 // source: plan 11's binary engine (Hurley, Tout and Pols 2002, MNRAS 329, 897, as P11.T4 builds
 //   it) and classes (P11.T5), over plan 06's tracks, at the manifest's generator version's
@@ -2741,6 +2750,7 @@ pub const XRB_MEDIANS_27: [[f64; 17]; 30] = [
 
 /// The X-ray binaries' marks' least and greatest values, in [`XrbMark`]'s order.
 #[rustfmt::skip]
+#[allow(clippy::approx_constant, reason = "fitted values that may land near a constant are data")]
 pub const XRB_LIMITS_27: [(f64, f64); 30] = [
     (1.150_547_897_432_618_9, 1.980_991_864_166_536_3),
     (5.0, 15.0),

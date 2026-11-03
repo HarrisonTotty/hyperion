@@ -1920,7 +1920,7 @@ Risks, "T7.b as built") and its swap, held for 26 (`tables::helium_26` behind `H
 Risks, "T7.b's swap as built"), T8.a–c (production at their committed values by
 decision-p15-t8-blocks, adopted by T8.d; no bump), T8.d, T9.a, T10.a (fitted at P09.T43's
 scratch bits, no bump; Risks, "T10.a as built"), T10.b's accreting white dwarfs and X-ray
-binaries (held for 27; Risks, "T10.b as built"), T11.a (`streams` registered, provisional; Risks,
+binaries (held for 27, refitted at 27; Risks, "T10.b as built" and "T10.b's refit at 27"), T11.a (`streams` registered, provisional; Risks,
 "T11.a as built") and T11.b (fitted, held for 27; Risks, "T11.b as built").
 
 ## Verification
@@ -3274,7 +3274,8 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     (`XRB_SAMPLER_27`, weighted by the census's shares at 27); the task still fits the held six
     and `XrbMark::HELD`'s twenty marks, so its block is unchanged. The refit at 27 widens
     `kind_shares` and `XrbSampler` to the nine kinds (`XrayMarks::member_kind`) and thirty marks.
-  - _For the bump:_ refit `binary_awd` and `binary_xrb` at 27, rename the `_26` items (their
+  - _For the bump_ (superseded by "T10.b's refit at 27" below, which did the refit and named the
+    items `_27`): refit `binary_awd` and `binary_xrb` at 27, rename the `_26` items (their
     names, and the blocks' summaries, still say 26: generated) over the scratch ones and delete
     the hold (the tripwire lists it). From 26 the field gives up the class shares (P09.T2.c), so
     a census galaxy reads the rows it refits: refit against the scratch rows' field, or iterate
@@ -3296,6 +3297,125 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     kind shares (the recurrence, the white dwarf's mass, the initial masses, the age) are fitted to
     members in the engine's ratio of kinds; under these rows the refit should weight them by kind.
     On the smoke census the AM CVn stars' scale is 1/16 of the CVs'.
+- **T10.b's refit at 27 (lane `p15-t10b-refit-27`, 2026-11-03; research-p15-t10b-rates; held at
+  27, nothing moves at 24–26).**
+  - _The galaxy._ Each task reads its manifest's `generator_version` (27; `CensusParams::version`,
+    refused under the sim's). Its census galaxy is every hold of that version with the binary
+    classes' scratch tables (`Galaxy::from_params_for_binary_refit`, behind `testing`). The field
+    the records come from therefore does not read the rows being fitted: the lean of 2026-11-01's
+    first option, a fixed point by construction. The fingerprints' galaxy is built the same way.
+  - _The shape_ (the lane's lean, taken). A conditional `SamplerMark` may hold a residual law at
+    each of its median's 17 nodes (`with_node_residuals`). `ClassSampler::residual_at` mixes the
+    two nearest nodes' laws rank by rank, as the median mixes its nodes, and `value_at` and
+    `rank_of` read it. A mark of one law draws as before, bit for bit. A node's law is fitted to
+    the members under its triangle where their Kish size is at least `min_members` (50), and is
+    the mark's own law otherwise. The block's sizes: 17 nodes, `tables/binary.rs` 306 kB, so 9
+    nodes were not needed. The accreting white dwarfs' node laws are `pub static`
+    (`large_const_arrays`).
+  - _Weights._ Every member a mark is fitted to is weighted so that its kinds are in the shares
+    the class's choice of kind draws (`weighted_to_shares`). Those shares are the rows' donor
+    kinds for the accreting white dwarfs, and for the X-ray binaries the census's kinds with the
+    black-hole transients pinned at `BLACK_HOLE_TRANSIENT_SHARE`. Quantiles are the weighted
+    analogue of Hyndman and Fan's fifth definition.
+  - _A rate-preserving tail._ The fast recurrence's rank 0 is fitted so that its first segment's
+    mean of 10^−x is its members' over their lowest sixteenth by weight
+    (`FittedMark::with_rate_preserving_floor`).
+  - _Deviations from the brief._
+    - The tail is fitted on the fast recurrence alone. The slow hosts' novae are a small part of
+      the rate, and no other mark's consumer weighs its upper tail (rank 16).
+    - A node short of `min_members` takes the mark's own law over all its members. It does not
+      pool its neighbours' members.
+    - The brief's two structural misses (the fast age's `LIFETIME_MARGIN` hold and a chained
+      period miss) do not miss at the shape's resolution, so nothing is pinned.
+    - Fortin et al.'s 152 is recalled, not read at source: the pod reads no web.
+    - The novae fell under Shafter's 27, not above 81, and are pinned rather than calibrated, as
+      step 6 rules for a miss above.
+    - The high-mass check counts the catalogue's hosts (27.6). The features' lists are not
+      drawn; their part is the table's high-mass weights' 68 of the row's 9,931 less the 27.6.
+    - The smoke census at 27 finds no symbiotic star, so its rows are zero, which the smoke test
+      (`tests/binary_classes.rs`) accepts.
+  - _Renamed._ The fitted items are `_27`: `AWD_FAST_SAMPLER_27`, `AWD_SLOW_SAMPLER_27`,
+    `XRB_SAMPLER_27` and `CLASS_SHARES_27`. `XRB_SAMPLER_26` and the X-ray sampler's choice by
+    `XrbClassRules` are gone (`BinaryTableRules::xrb_sampler` takes no carving rule), since the
+    fitted tables draw all nine kinds. `kind_shares` is `census_kind_shares` and `kind_weights`.
+    The fingerprint cells are ones that hold members at 27 (2,048 ly and 5,376 ly along x).
+  - _For the bump._ Rename the `_27` items over the scratch ones, and delete the hold and
+    `Galaxy::from_params_for_binary_refit` (the tripwire lists them).
+  - _Re-pinned under every 27 hold_, since the field gives up the refitted class shares:
+    - `engine_channels_hold`'s chi-square values;
+    - `heavy_donor_hold`'s census (4,103 → 4,099 members, 2,689 variables, 2,311 below the gap);
+    - `ns_accretion_hold`'s (378 → 379 members, 371 → 372 neutron stars);
+    - `CENTRE_BINARIES_DIGEST`;
+    - and, for the ultracompact finding below, `kinds_tests`' and `feature::tests`' pins.
+  - _Rows._ `fit_awd` takes `awd_share_rows` at `OBSERVED_DONOR_KINDS`; `total_hosts` is gone from
+    `binary_awd.toml`. Kind scales at 27: CVs 0.290, AM CVn 0.0572, symbiotic 0.0231 hosts a
+    member a record and system born. Fast: 660 slab members, donors 0.967/0.000/0.033. Slow:
+    19,196 members, donors 0.911/0.088/0.000; its giant marks are pooled.
+  - _X-ray binaries._ `binary_xrb` fits all nine kinds (`XrayMarks::member_kind`) and thirty
+    marks. Each mark is fitted to the kinds the class draws it for (`xrb_pair`), and a compact
+    star's mark only where the member's compact star is its kind's (13 black holes beside
+    ultracompact donors are left out of the neutron stars' marks). Slab members by kind 8/916/2/
+    36/7/0/795/2/0, young disc's 14/64/109/55/1,145/8/98/2/2. Seventeen marks keep `XRB_SAMPLER`'s
+    law (under 50 members): the recurrences, the black holes' mass and progenitor, the
+    supergiants', the symbiotic and the black-hole high-mass kinds' marks, and the symbiotic
+    giant's filling, which the marks do not carry. The census's black-hole transients are 196 of
+    10⁴, and the table draws 1,300.
+  - _Emission._ The blocks were re-emitted at 24, the version in force, with their
+    `since-generator-version` lines removed before the run, as design note 10 allows a table no
+    generated output reads: the first-emission path would have appended them after the tests
+    module. `binary_xrb`'s second run wrote the same body. Each fit is about 25 minutes at 24
+    threads.
+  - _Tests_ (`tables_hold`, under every 27 hold). A K–S test passes at the shape's resolution
+    when the held-out half's distance is within `ks_critical_distance` (1%, at the weighted
+    sample's Kish size) of the fitted half's (in-sample) distance. hyperion-testkit gains
+    `ks_two_sample_weighted` and `ks_critical_distance`. The engine's members are weighted to the
+    table's kind shares, as the fits weight them. The rates over ten Milky Way seeds:
+    accreting white dwarfs 6–12 × 10⁶ and within 30% of Pala et al.'s density, novae inside
+    Shafter's 27–81, the fast table's mean 1 ÷ P within 10% of its held-out engine members',
+    black-hole transients 1,300 ± 400, and high-mass hosts at least Fortin et al.'s catalogued
+    152 (recalled). A rate that misses its window is pinned as measured.
+  - _Measured_ (every 27 hold; the same at all ten seeds, since the rows and the fields are).
+    The accreting white dwarfs number 8.78 × 10⁶ (fast 2.60 × 10⁵), 5.28 × 10⁻⁶ pc⁻³ at the
+    Sun-like point, 1.10 of Pala et al.'s. The galaxy has 22.2 novae a year, under Shafter's
+    27–81 (the brainstorm's 30–50), a finding pinned (`PINNED_NOVAE_A_YEAR`). The rate-preserving
+    tail takes it from the first fit's 1,159; the fast table's mean 1 ÷ P is 0.912 of its held-out
+    engine members'. The X-ray binaries number 9.93 × 10³, with 1,296.5 black-hole transients.
+    Their high-mass hosts are 27.6 in the catalogue and about 68 with the features' lists (the
+    census's high-mass share, 0.0068), under Fortin et al.'s 152: a finding pinned
+    (`PINNED_HIGH_MASS_HOSTS`; main's ruling of 2026-11-01 took the high-mass hosts for research).
+  - _K–S verdicts, at the shape's resolution._ Every mark compared passes, so `AWD_MISSES` and
+    `XRB_MISSES` are empty.
+    - Fast accreting white dwarfs: held-out D 0.036–0.080 against a critical 0.084. At plain 1%
+      all pass too.
+    - Slow accreting white dwarfs: D 0.025–0.100, each within 0.0167 of its in-sample distance.
+      At plain 1% all eight would miss. Held-out D against in-sample D, in `AWD_COMPARED`'s
+      order: 0.0405/0.0407, 0.0425/0.0428, 0.0903/0.0901, 0.0525/0.0529, 0.1003/0.0971,
+      0.0328/0.0293, 0.0318/0.0322, 0.0245/0.0267, against a critical 0.0167.
+    - Fast, the same: 0.0428/0.0389, 0.0357/0.0346, 0.0590/0.0473, 0.0629/0.0353, 0.0803/0.0418,
+      0.0440/0.0348, 0.0647/0.0545, 0.0752/0.0264, against 0.0843.
+    - X-ray binaries' thirteen marks compared: neutron-star mass D 0.051 against 0.040 + 0.025 in
+      sample, and the Be/X recoil 0.053 against 0.048 + 0.054. These two would miss at plain 1%.
+      The others' held-out against in-sample D (critical 0.076 for the low-mass marks, 0.048 for
+      Be/X, 0.040 for the progenitor, 0.059 for the ultracompact ones): low-mass period
+      0.049/0.021, donor mass 0.064/0.035, rate excess 0.044/0.038, Be/X period 0.038/0.029,
+      eccentricity 0.028/0.022, donor mass 0.027/0.019, years since the supernova 0.043/0.045,
+      neutron-star progenitor 0.039/0.036, donor initial excess 0.055/0.019, ultracompact period
+      0.049/0.034 and donor initial mass 0.045/0.041.
+      The other seventeen marks have under 50 members in a half and are not compared.
+  - _Finding, an engine bug that blocks the K–S tests under the slow profile_ (for P11.T4). With
+    debug assertions on, both K–S tests panic at `evolve.rs`'s pin assertion ("the primary's pin
+    at 4,237,647 yr lies behind the engine at 8,397,062 yr", the primary a black hole, Z 0.0063)
+    on the fitted half's 7,448th record of layer E's part 19 of 64. That record is system
+    `0x81c9b51fc0000001`, in cell (−55, 212, −4) of layer E: a thick-disc primary of 75.6 M☉,
+    11.45 Gyr old, in the census galaxy at 27. The verdicts above are from a run with
+    `CARGO_PROFILE_SLOW_TEST_DEBUG_ASSERTIONS=false`. The fits run in release, so they ran
+    through it.
+  - _Findings_ (for P11.T8.b). The floor refuses 63 of 93 ultracompact candidates in the kinds
+    tests' cells, and they keep 50 entries against 88.8, because the refit draws the engine's
+    periods (median 65 minutes). There the scan's cold white-dwarf donor, 0.0063 M☉, feeds a
+    quarter of the engine's semi-degenerate donor's rate (0.012 M☉), under 10⁻¹² M☉ yr⁻¹. The
+    globular clusters' listed X-ray binaries likewise fall to 303 of 419.6. Both are pinned
+    (`kinds_tests`, `feature::tests`).
 - **T9.b's target, after P11.T6's detonatable mark (lane `fix-p11-t6-ia-eligible`, 2026-11-01;
   research `research-p11-t6-ia-rate`, main's lean).** It replaces T9.b's Acceptance:
   - Fill `IA_YIELD` per delay bin and channel with η = min(1, target ÷ pool). The pool is

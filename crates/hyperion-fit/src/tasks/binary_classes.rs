@@ -119,8 +119,9 @@ pub const OWN_SITES: [(Population, &str); 5] = [
 /// The fingerprint's galaxy's seed: the manifests' (`binary_awd.toml`).
 const FINGERPRINT_SEED: u64 = 0x0b17_15a0_0000_0001;
 
-/// The generator version the fingerprints' galaxy is built at: the refit's, the manifests'.
-pub const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+/// The generator version the fingerprints' galaxy is built at: the refit's, the manifests'
+/// (a test holds the four manifests to it).
+const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
 
 /// The fingerprints' galaxy: the Milky Way fixture of [`FINGERPRINT_SEED`] at
 /// [`FINGERPRINT_VERSION`], with the binary classes' scratch tables, as a census galaxy is built.
@@ -138,10 +139,10 @@ fn fingerprint_galaxy() -> Galaxy {
     .expect("the Milky Way fixture builds")
 }
 
-/// The fingerprint's census: one layer-D cell of the solar circle's slab, of 18 records two of
-/// whose pairs the engine makes accreting white dwarfs, so that a change to the engine or to the
-/// classes moves the probes.
-const FINGERPRINT_CELL: CensusSite = CensusSite::new([0, 26_128, 0], [0, 0, 0]);
+/// The fingerprint's census: one layer-D cell of the solar circle's slab, of 21 records two of
+/// whose pairs the engine makes accreting white dwarfs at 27, so that a change to the engine or to
+/// the classes moves the probes.
+const FINGERPRINT_CELL: CensusSite = CensusSite::new([2_048, 26_128, 0], [0, 0, 0]);
 
 /// The censuses' parameters, from a manifest.
 #[derive(Debug, Clone, PartialEq)]
@@ -851,8 +852,16 @@ const SIDE_NAMES: [&str; 2] = ["fast", "slow"];
 /// A `pub static` array `name` of 17-value `rows` under `doc`, one row a line: as
 /// [`TableItem::Nested`] writes a `const`, since Clippy refuses so large a `const` array
 /// (`large_const_arrays`).
+///
+/// # Panics
+///
+/// If a value is not finite, which a fitted law's never is (`marks`' points are checked).
 #[must_use]
 fn static_rows(name: &str, doc: &[String], rows: &[[f64; NODES]]) -> TableItem {
+    assert!(
+        rows.iter().flatten().all(|v| v.is_finite()),
+        "item `{name}` holds a value that is not finite"
+    );
     let mut out = String::new();
     // Writing to a String cannot fail.
     for line in doc {
@@ -1195,5 +1204,59 @@ mod tests {
             "max_log_recurrence",
         );
         refused("min_members = 50", "min_members = 5", "min_members");
+    }
+
+    /// The four binary manifests fit at the fingerprints' version, so that `check`'s probes are
+    /// the census galaxy's.
+    #[test]
+    fn the_manifests_fit_at_the_fingerprints_version() {
+        for (path, text) in [
+            (
+                "binary_awd.toml",
+                include_str!("../../manifests/binary_awd.toml"),
+            ),
+            (
+                "binary_awd.smoke.toml",
+                include_str!("../../manifests/binary_awd.smoke.toml"),
+            ),
+            (
+                "binary_xrb.toml",
+                include_str!("../../manifests/binary_xrb.toml"),
+            ),
+            (
+                "binary_xrb.smoke.toml",
+                include_str!("../../manifests/binary_xrb.smoke.toml"),
+            ),
+        ] {
+            let manifest = Manifest::from_bytes(path.as_ref(), text.as_bytes().to_vec()).unwrap();
+            let params = CensusParams::of(&manifest).unwrap();
+            assert_eq!(params.version, FINGERPRINT_VERSION, "{path}");
+        }
+    }
+
+    /// The points are weighted so that each kind present takes its share of their weight: kinds
+    /// of three points, one and one under shares of a half, a half and none come out as equal
+    /// halves, and the kind of no share drops out.
+    #[test]
+    fn points_are_weighted_to_their_kinds_shares() {
+        let point = |value: f64| MarkPoint {
+            condition: 0.0,
+            value,
+            weight: 1.0,
+        };
+        let points = [
+            (point(1.0), 0),
+            (point(2.0), 0),
+            (point(3.0), 0),
+            (point(4.0), 1),
+            (point(5.0), 2),
+        ];
+        let weighted = weighted_to_shares(&points, &[0.5, 0.5, 0.0]);
+        assert_eq!(weighted.len(), 4);
+        let of = |range: std::ops::Range<usize>| {
+            weighted[range].iter().fold(0.0, |sum, p| sum + p.weight)
+        };
+        assert!((of(0..3) - of(3..4)).abs() < 1e-12, "{weighted:?}");
+        assert!(weighted.iter().all(|p| p.value < 5.0));
     }
 }

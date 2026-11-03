@@ -15,10 +15,10 @@
 //! conditions, evaluated as the sampler evaluates it. A node's residual law is the quantiles of the
 //! residuals under its triangle, weighted alike, where those members' Kish effective size, (Σw)² ÷
 //! Σw², is at least the manifest's `min_members`; a node with fewer takes the law of all the
-//! members, the mark's own. The quantiles are the weighted analogue of Hyndman and Fan's (1996)
-//! fifth definition, each value at the middle of its weight's span of ranks and linear between
-//! them, the least and the greatest value at ranks 0 and 1, so that a draw spans what the members
-//! span. The limits are the members' least and greatest values.
+//! members, the mark's own. The quantiles are the weighted analogue of Hyndman and Fan's (1996,
+//! Am. Stat. 50, 361) fifth definition, each value at the middle of its weight's span of ranks and
+//! linear between them, the least and the greatest value at ranks 0 and 1, so that a draw spans
+//! what the members span. The limits are the members' least and greatest values.
 //!
 //! A mark whose consumer weighs its low tail by 10⁻ˣ, the recurrence, whose 1 ÷ P is a nova rate,
 //! has its rank-0 quantile fitted instead so that its first segment's mean of 10⁻ˣ is its members'
@@ -116,8 +116,8 @@ impl FittedMark {
     ///
     /// # Panics
     ///
-    /// If `points` is empty or holds a value that is not finite or a weight that is not positive
-    /// and finite.
+    /// If `points` is empty or holds a condition or value that is not finite or a weight that is
+    /// not positive and finite.
     #[must_use]
     pub fn with_rate_preserving_floor(self, points: &[MarkPoint]) -> Self {
         check(points);
@@ -181,10 +181,15 @@ fn median_at((first, last): (f64, f64), median: &[f64; NODES], condition: f64) -
 /// The quantile at rank `p` in [0, 1] of `sorted`, `(value, weight)` pairs ascending by value,
 /// not empty, their weights positive: each value at the middle of its weight's span of ranks,
 /// linear between them, the least value at and below the first's and the greatest at and above
-/// the last's (module documentation). With unit weights it is Hyndman and Fan's fifth
-/// definition.
+/// the last's (module documentation). With unit weights it is Hyndman and Fan's (1996, Am. Stat.
+/// 50, 361) fifth definition.
+///
+/// # Panics
+///
+/// If `sorted` is empty.
 #[must_use]
 pub fn weighted_quantile(sorted: &[(f64, f64)], p: f64) -> f64 {
+    assert!(!sorted.is_empty(), "a quantile of no values");
     let total = sorted.iter().fold(0.0, |sum, s| sum + s.1);
     let target = p.clamp(0.0, 1.0) * total;
     let mut before = 0.0;
@@ -200,7 +205,7 @@ pub fn weighted_quantile(sorted: &[(f64, f64)], p: f64) -> f64 {
         previous = Some((x, at));
         before += w;
     }
-    sorted.last().map_or(0.0, |s| s.0)
+    sorted[sorted.len() - 1].0
 }
 
 /// The 17 quantiles at k ÷ 16 of `values`, `(value, weight)` pairs, which it sorts.
@@ -255,13 +260,13 @@ fn check(points: &[MarkPoint]) {
     );
 }
 
-/// An unconditional mark of `points`, their conditions not read: its weighted quantiles, about a
+/// An unconditional mark of `points`, their conditions unused: its weighted quantiles, about a
 /// zero median.
 ///
 /// # Panics
 ///
-/// If `points` is empty or holds a value that is not finite or a weight that is not positive and
-/// finite.
+/// If `points` is empty or holds a condition or value that is not finite or a weight that is not
+/// positive and finite.
 #[must_use]
 pub fn unconditional(points: &[MarkPoint]) -> FittedMark {
     check(points);
@@ -499,6 +504,34 @@ mod tests {
                 .all(|(a, b)| (a - b).abs() < f64::MIN_POSITIVE)
         };
         assert!(rows.iter().any(own_law));
+    }
+
+    /// A conditional mark counts its members' weights: points of value 0 weighing three for each
+    /// point of value 1 put every node's median at 0, and each interior node's law at 0 below
+    /// about three quarters of its ranks and at 1 above.
+    #[test]
+    fn a_conditional_mark_counts_its_weights() {
+        let points: Vec<MarkPoint> = (0..4_000)
+            .map(|i| {
+                let (value, weight) = if i % 2 == 0 { (0.0, 3.0) } else { (1.0, 1.0) };
+                MarkPoint {
+                    condition: f64::from(i % 100),
+                    value,
+                    weight,
+                }
+            })
+            .collect();
+        let mark = conditional(&points, 50);
+        assert!(
+            mark.median.iter().all(|m| m.abs() < 1e-12),
+            "{:?}",
+            mark.median
+        );
+        let rows = mark.node_residuals.expect("node laws");
+        for (k, row) in rows.iter().enumerate().take(15).skip(2) {
+            assert!(row[10].abs() < 1e-12, "{k}: {row:?}");
+            assert!((row[14] - 1.0).abs() < 1e-12, "{k}: {row:?}");
+        }
     }
 
     /// An unsupported node lies on the line between its supported neighbours.

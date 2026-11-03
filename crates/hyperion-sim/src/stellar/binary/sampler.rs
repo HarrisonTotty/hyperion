@@ -85,13 +85,14 @@ impl<M: SamplerKey, P: SamplerKey> ClassSampler<M, P> {
     #[must_use]
     pub fn residual_at(&self, mark: M, condition: f64) -> [f64; 17] {
         let law = self.table.mark(mark);
-        match (law.node_residuals(), law.median()) {
-            (Some(rows), Some(curve)) => {
-                let (k, t) = node_step(node_position(curve, condition));
-                std::array::from_fn(|j| rows[k][j] + t * (rows[k + 1][j] - rows[k][j]))
-            }
-            (None, _) | (Some(_), None) => *law.residual(),
-        }
+        let Some(rows) = law.node_residuals() else {
+            return *law.residual();
+        };
+        let curve = law
+            .median()
+            .expect("a mark with node laws follows a median (`SamplerMark::with_node_residuals`)");
+        let (k, t) = node_step(node_position(curve, condition));
+        std::array::from_fn(|j| rows[k][j] + t * (rows[k + 1][j] - rows[k][j]))
     }
 
     /// The value of `mark` at rank `rank` given `condition`: the median plus the residual's
@@ -448,13 +449,13 @@ mod tests {
         assert!((sampler.value_at(Only, 4.5, 1.0) - 9.281_25).abs() < 1e-12);
         // Beyond the span the last node's ±1 about 32.
         assert!((sampler.value_at(Only, 40.0, 0.0) - 31.0).abs() < 1e-12);
-        for condition in [0.0, 3.3, 8.0, 15.9] {
+        // At node 0 every quantile ties at the median, which takes the lowest rank.
+        for (condition, tied) in [(0.0, true), (3.3, false), (8.0, false), (15.9, false)] {
             for i in 0..=32 {
                 let rank = f64::from(i) / 32.0;
                 let value = sampler.value_at(Only, condition, rank);
                 let back = sampler.rank_of(Only, condition, value);
-                // At node 0 every quantile ties at the median, which takes the lowest rank.
-                let expected = if condition == 0.0 { 0.0 } else { rank };
+                let expected = if tied { 0.0 } else { rank };
                 assert!(
                     (back - expected).abs() < 1e-9,
                     "{condition}, {rank}: {back}"

@@ -7382,6 +7382,8 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     weighted by its galaxy share in those censuses (`XRB_LOW_MASS_KINDS_27`,
     `XRB_HIGH_MASS_KINDS_27`; black holes 0.0017 of the high-mass hosts). Below 27 the tables
     weigh the six alone and nothing moves; the fit at 26 keeps `XrbMark::HELD`'s twenty marks.
+    From P15.T10.b's refit at 27 (plan 15's "T10.b's refit at 27"), `xrb_sampler` takes no
+    carving rule: the fitted tables draw from `XRB_SAMPLER_27`, its marks and kinds fitted at 27.
   - _Marks_ (`XRB_SAMPLER`'s ten new ones, `@provisional`, for the refit at 27). Ultracompact: a
     period of 10^(1.5 ± 0.16) min on 10–80, a helium white dwarf filling its lobe on Eggleton's
     cold mass–radius relation (0.057 M☉ at 11.4 min), fed by gravitational radiation (ζ the
@@ -7450,6 +7452,25 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     1,280 ± 120, a lower limit), the other kinds keeping the census's ratios in the rest. The
     census's 0.0196, about 190, is a finding: likely the common envelopes that survive at
     `α_CE λ` = 0.5 (Podsiadlowski et al. 2003), which is not touched, nor are the kicks.
+  - _Ultracompact hosts under the refit_ (P15.T10.b's refit at 27, 2026-11-03; a finding). The
+    refit draws the engine's ultracompact periods, median 65 minutes (q10 41, q90 77). The scan
+    takes its donor's mass from the cold white dwarfs' relation at the drawn period (0.0063 M☉ at
+    65 minutes, against the engine's semi-degenerate 0.012). Above about an hour that donor's
+    gravitational-wave rate falls under the 10⁻¹² M☉ yr⁻¹ floor (1.7 × 10⁻¹² at 55 minutes, 6.6 ×
+    10⁻¹³ at 65, beside 1.4 M☉). The scan and the test refuse 63 of 93 ultracompact candidates,
+    against P11.T8's bound of one in ten, and the kinds tests' cells keep 50 entries against the
+    88.8 their weight gives. Pinned in `xrb::kinds_tests` and `feature::tests`. A remedy is
+    P11.T8.b's to choose: draw the donor's mass from a mark conditional on the period, as the
+    engine's members give it, or keep the cold relation and refit the period to it.
+  - _An engine pin behind the engine_ (P15.T10.b's refit at 27, 2026-11-03; a finding for
+    P11.T4). Under the slow profile's debug assertions, `evolve.rs`'s pin assertion fires: "the
+    primary's pin at 4,237,647 yr lies behind the engine at 8,397,062 yr", detached, the primary
+    a black hole at Z 0.0063. It fires on system `0x81c9b51fc0000001` in layer E's cell (−55,
+    212, −4), a thick-disc primary of 75.6 M☉ at 11.45 Gyr, in the census galaxy at 27 (every 27
+    hold with the scratch binary tables, seed `0x0b17_15a0_0000_0001`). That record is the
+    7,448th of `class_census_in` over the solar circle's slab, part 19 of 64. Both of
+    `tables_hold`'s K–S tests stop on it. Their verdicts were taken with
+    `CARGO_PROFILE_SLOW_TEST_DEBUG_ASSERTIONS=false`; release builds, the fits', run through it.
   - _Deviation._ A timeline from marks has no history, so a Be star spun up by transfer is one in
     the engine's timeline alone; `classify`'s marks round trip skips such pairs.
   - _A Be star feeds a neutron star alone_ (main's ruling of 2026-11-01: the black holes' 0.145 of

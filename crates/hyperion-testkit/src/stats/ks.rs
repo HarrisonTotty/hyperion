@@ -42,7 +42,8 @@ pub fn kolmogorov_survival(lambda: f64) -> f64 {
     (2.0 * sum).clamp(0.0, 1.0)
 }
 
-/// Stephens's finite-sample correction: λ = (√n + 0.12 + 0.11 ÷ √n) D.
+/// Stephens's finite-sample correction (Stephens 1970, J. R. Stat. Soc. B 32, 115): λ =
+/// (√n + 0.12 + 0.11 ÷ √n) D.
 fn stephens_lambda(effective_n: f64, d: f64) -> f64 {
     let root = effective_n.sqrt();
     (root + 0.12 + 0.11 / root) * d
@@ -208,9 +209,11 @@ pub fn ks_two_sample_weighted(a: &mut [(f64, f64)], b: &mut [(f64, f64)]) -> Kol
 }
 
 /// The distance at which a Kolmogorov–Smirnov test of effective sample size `effective_n` has
-/// p-value `level`: the inverse of the tests' p-value, Stephens's λ at which
-/// [`kolmogorov_survival`] is `level` over his factor. At 1% λ is 1.628, so for a large sample the
-/// distance is about 1.628 ÷ √n.
+/// p-value `level`.
+///
+/// It inverts the tests' p-value: Stephens's λ at which [`kolmogorov_survival`] is `level`, over
+/// his factor (Stephens 1970, J. R. Stat. Soc. B 32, 115). At 1% λ is 1.628, so for a large sample
+/// the distance is about 1.628 ÷ √n.
 ///
 /// # Panics
 ///

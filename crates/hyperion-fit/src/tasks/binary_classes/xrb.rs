@@ -41,7 +41,7 @@ use super::{
     census_error, conditional, fingerprint_galaxy, run_censuses, share_rows, unconditional,
     weighted_to_shares,
 };
-use crate::emit::{RustTable, TableItem};
+use crate::emit::{RustTable, TableItem, literal};
 use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 
@@ -62,7 +62,7 @@ pub const XRB_ITEMS: [&str; 9] = [
 ];
 
 /// The marks of the high-mass kinds, fitted to the young thin disc's own census.
-pub const HIGH_MASS_MARKS: [XrbMark; 14] = [
+const HIGH_MASS_MARKS: [XrbMark; 14] = [
     XrbMark::BexPeriod,
     XrbMark::BexEccentricity,
     XrbMark::BexDonorMass,
@@ -79,10 +79,10 @@ pub const HIGH_MASS_MARKS: [XrbMark; 14] = [
     XrbMark::BlackHoleHighMassRate,
 ];
 
-/// The fingerprint's census: one layer-E cell of the solar circle's slab, of 33 records one of
-/// whose pairs the engine makes an X-ray binary, so that a change to the engine or to the classes
-/// moves the probes.
-const FINGERPRINT_CELL: CensusSite = CensusSite::new([-384, 26_000, 0], [0, 0, 0]);
+/// The fingerprint's census: one layer-E cell of the solar circle's slab, of 30 records three of
+/// whose pairs the engine makes X-ray binaries at 27, so that a change to the engine or to the
+/// classes moves the probes.
+const FINGERPRINT_CELL: CensusSite = CensusSite::new([5_376, 26_000, 0], [0, 0, 0]);
 
 /// The X-ray binaries' fit parameters, from the manifest.
 #[derive(Debug, Clone, PartialEq)]
@@ -434,6 +434,37 @@ pub fn fit_xrb(params: &XrbParams, threads: NonZeroUsize) -> Result<XrbFit, RunC
     })
 }
 
+/// The limits' item `name`, as [`TableItem::Tuples`] writes it, under its one-line `doc`, with
+/// Clippy's `approx_constant` allowed on it: a limit may land near a constant, and is data (the
+/// black-hole high-mass period's, kept from `XRB_SAMPLER`, is log₁₀ 2 days).
+///
+/// # Panics
+///
+/// If a limit is not finite, which a fitted mark's never is.
+#[must_use]
+fn limits_item(name: &str, doc: &str, limits: &[(f64, f64)]) -> TableItem {
+    assert!(
+        limits
+            .iter()
+            .all(|(lo, hi)| lo.is_finite() && hi.is_finite()),
+        "item `{name}` holds a value that is not finite"
+    );
+    let mut out = String::new();
+    // Writing to a String cannot fail.
+    let _ = writeln!(out, "/// {doc}");
+    let _ = writeln!(out, "#[rustfmt::skip]");
+    let _ = writeln!(
+        out,
+        "#[allow(clippy::approx_constant, reason = \"fitted values that may land near a constant are data\")]"
+    );
+    let _ = writeln!(out, "pub const {name}: [(f64, f64); {}] = [", limits.len());
+    for &(lo, hi) in limits {
+        let _ = writeln!(out, "    ({}, {}),", literal(lo), literal(hi));
+    }
+    out.push_str("];\n");
+    TableItem::Source(out)
+}
+
 /// The block's contents for `fit`.
 #[must_use]
 pub fn render_xrb(fit: &XrbFit) -> RustTable {
@@ -475,14 +506,11 @@ pub fn render_xrb(fit: &XrbFit) -> RustTable {
             ],
             rows: s.marks.iter().map(|m| m.median.to_vec()).collect(),
         },
-        TableItem::Tuples {
-            name: XRB_ITEMS[4].to_owned(),
-            doc: vec![
-                "The X-ray binaries' marks' least and greatest values, in [`XrbMark`]'s order."
-                    .to_owned(),
-            ],
-            rows: s.marks.iter().map(|m| vec![m.limits.0, m.limits.1]).collect(),
-        },
+        limits_item(
+            XRB_ITEMS[4],
+            "The X-ray binaries' marks' least and greatest values, in [`XrbMark`]'s order.",
+            &s.marks.iter().map(|m| m.limits).collect::<Vec<_>>(),
+        ),
         TableItem::Array {
             name: XRB_ITEMS[5].to_owned(),
             doc: vec![

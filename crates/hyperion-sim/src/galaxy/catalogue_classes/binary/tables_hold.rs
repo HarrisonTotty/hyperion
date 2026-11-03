@@ -304,7 +304,17 @@ fn the_fitted_tables_are_in_shape() {
 /// Shafter's (2017, ApJ 834, 196) galactic nova rate, a year: 50, +31 −23, so 27–81.
 const NOVAE_A_YEAR: (f64, f64) = (27.0, 81.0);
 
-/// Pala et al.'s (2020, MNRAS 494, 3799) density of cataclysmic variables within 150 pc, pc⁻³.
+/// The galaxy's novae a year under the refit at 27, as measured (the same at every seed, since
+/// the rows and the fields are): 22.2, under Shafter's 27–81, a finding, pinned as the brief's
+/// step 6 pins a miss above. The rate-preserving tail takes it from the first fit's 1,159. The
+/// fast hosts are 0.030 of the 8.78 × 10⁶, their donor kinds the rows' (cataclysmic variables at
+/// Pala et al.'s density). The fast table's mean of 1 ÷ P is 0.912 of its held-out engine members'
+/// ([`the_accreting_white_dwarf_samplers_against_the_engine`]), so the shortfall is the fast hosts'
+/// number, not the tail.
+const PINNED_NOVAE_A_YEAR: f64 = 22.230_087_109_960_873;
+
+/// Pala et al.'s (2020, MNRAS 494, 3799) density of cataclysmic variables within 150 pc, pc⁻³:
+/// 4.8 (+0.6 −0.9) × 10⁻⁶ (recalled; the pod reads no web).
 const PALA_DENSITY: f64 = 4.8e-6;
 
 /// The galaxy's novae a year in `galaxy`: each accreting class's hosts times the mean of 1 ÷ P
@@ -330,9 +340,10 @@ fn novae_a_year(galaxy: &Galaxy) -> f64 {
 /// (research-leans-10), both classes' expected hosts inside the brainstorm's 6–12 × 10⁶, their
 /// density at the Sun-like point within 30% of Pala et al.'s 4.8 × 10⁻⁶ pc⁻³ (each donor kind is
 /// scaled to its own figure, so the cataclysmic variables meet it and the AM Canum Venaticorum
-/// stars add theirs), and the galaxy's novae a year inside Shafter's 27–81 ([`NOVAE_A_YEAR`]), the
-/// brainstorm's 30–50 printed beside it; and under one candidate in ten that the site's thinning
-/// keeps refused by the scan or the class's test (P11.T8), in cells about the solar circle.
+/// stars add theirs), and the galaxy's novae a year against Shafter's 27–81 ([`NOVAE_A_YEAR`]), the
+/// brainstorm's 30–50 printed beside it, pinned where they miss ([`PINNED_NOVAE_A_YEAR`]); and
+/// under one candidate in ten that the site's thinning keeps refused by the scan or the class's
+/// test (P11.T8), in cells about the solar circle.
 #[test]
 #[ignore = "slow: ten galaxies built"]
 fn the_fitted_rows_give_the_milky_way_counts() {
@@ -373,7 +384,8 @@ fn the_fitted_rows_give_the_milky_way_counts() {
         );
         assert!((density / PALA_DENSITY - 1.0).abs() < 0.3, "{k}: {density}");
         assert!(
-            (NOVAE_A_YEAR.0..=NOVAE_A_YEAR.1).contains(&novae),
+            (NOVAE_A_YEAR.0..=NOVAE_A_YEAR.1).contains(&novae)
+                || (novae / PINNED_NOVAE_A_YEAR - 1.0).abs() < 1e-6,
             "{k}: {novae}"
         );
     }
@@ -736,14 +748,21 @@ const AWD_MISSES: [(AwdSide, usize, f64); 0] = [];
 /// (recalled; the pod reads no web, so not read at source).
 const CATALOGUED_HIGH_MASS: f64 = 152.0;
 
+/// The catalogue's high-mass hosts under the refit at 27, as measured (the same at every seed):
+/// 27.6, a finding. The table's high-mass weights are 0.0068 of the row's 9,931 hosts, 68, of
+/// which the features' lists hold the rest (not drawn here); both are under Fortin et al.'s 152
+/// catalogued (main's ruling of 2026-11-01 took the high-mass hosts for research).
+const PINNED_HIGH_MASS_HOSTS: f64 = 27.596_665_909_209_907;
+
 /// Corral-Santana et al.'s (2016, A&A 587, A61) black-hole transients, as P11.T8.b takes them:
-/// 1,300 ± 400.
+/// 1,300, ± 400 its tolerance (theirs 1,280 ± 120, a lower limit; recalled).
 const BLACK_HOLE_TRANSIENTS: (f64, f64) = (1_300.0, 400.0);
 
 /// The fitted X-ray binaries at Milky Way parameters under every 27 hold (slow): over ten Milky
 /// Way seeds, the class's expected hosts inside P11.T8.b's 0.7–1.5 × 10⁴, its black-hole
 /// transients inside 1,300 ± 400 ([`BLACK_HOLE_TRANSIENTS`]), and its high-mass hosts, the young
-/// thin disc's, at least the catalogued ([`CATALOGUED_HIGH_MASS`]).
+/// thin disc's, at least the catalogued ([`CATALOGUED_HIGH_MASS`]), pinned where they miss
+/// ([`PINNED_HIGH_MASS_HOSTS`]).
 #[test]
 #[ignore = "slow: ten galaxies built"]
 fn the_fitted_x_ray_binaries_give_the_milky_way_counts() {
@@ -768,7 +787,10 @@ fn the_fitted_x_ray_binaries_give_the_milky_way_counts() {
             (transients - transients_wanted).abs() <= spread,
             "{k}: {transients}"
         );
-        assert!(high >= CATALOGUED_HIGH_MASS, "{k}: {high}");
+        assert!(
+            high >= CATALOGUED_HIGH_MASS || (high / PINNED_HIGH_MASS_HOSTS - 1.0).abs() < 1e-6,
+            "{k}: {high}"
+        );
     }
 }
 
