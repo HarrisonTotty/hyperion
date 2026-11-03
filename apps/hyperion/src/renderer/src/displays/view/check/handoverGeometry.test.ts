@@ -12,12 +12,15 @@ import {
   closingTimeS,
   datumNormal,
   datumPointM,
+  HALO_CRATER_CENTRE,
   HANDOVER_APPROACH,
+  HANDOVER_HALO_LOOK,
   HANDOVER_LOOKS,
   type HandoverLook,
   limbRatioAt,
   lookAnglesRad,
   lookGeometry,
+  NAMED_HANDOVER_LOOKS,
   rayDatumHitM,
   texelMappingMismatches,
   texelOfDirection,
@@ -59,6 +62,60 @@ describe("the hand-over check's looks", () => {
       ["HAND-OVER 90°", 45, 45, true],
       ["HAND-OVER TERMINATOR", 78, 12, false],
     ]);
+  });
+
+  it("name a fourth, the halo's, at 30° about its crater, recorded, which no run takes unnamed (R10.T1.c)", () => {
+    const secondSurvey = normalise(vec3(1, 1, 0.62));
+    expect([
+      NAMED_HANDOVER_LOOKS.map((each) => each.name),
+      [HANDOVER_HALO_LOOK.scene, HANDOVER_HALO_LOOK.judged, HANDOVER_HALO_LOOK.middle],
+      HANDOVER_LOOKS.map((each) => each.middle),
+      // Inside the second survey's 3.1° (its cells' centres within a cosine of 0.9985).
+      dot(normalise(HALO_CRATER_CENTRE), secondSurvey) > 0.9985,
+    ]).toEqual([
+      ["handover-30", "handover-90", "handover-terminator", "handover-halo"],
+      ["HAND-OVER HALO", false, HALO_CRATER_CENTRE],
+      [null, null, null],
+      true,
+    ]);
+  });
+
+  it("closes the halo's line past the hand-over to its limb some 1,000 km off, the crater resolved", () => {
+    const halo = HANDOVER_APPROACH.halo;
+    // TERRAIN TEST's high setting's hand-over range (its record of 2026-11-03), and its pixel.
+    const rangeM = 15_337e3;
+    const radPerPx = 1.031e-3;
+    const limbM = halo.closestRatio * rangeM;
+    // The camera's height over a sphere of the moon's radius at that distance to its limb.
+    const radiusM = FIGURE.equatorialRadiusM;
+    const heightM = Math.sqrt(radiusM * radiusM + limbM * limbM) - radiusM;
+    expect([
+      { ...halo, closestRatio: HANDOVER_APPROACH.full.closestRatio, ratePerS: 0.01 },
+      Math.round(limbM / 1e3),
+      Math.round(heightM / 1e3),
+      Math.round(8_104 / (heightM * radPerPx)),
+    ]).toEqual([HANDOVER_APPROACH.full, 997, 266, 30]);
+  });
+
+  it("sees the halo's crater from straight above, the star 15° from its normal, at every range", () => {
+    const geometry = lookGeometry(HANDOVER_HALO_LOOK, {
+      ...INPUT,
+      surveyMiddle: HALO_CRATER_CENTRE,
+    });
+    const at = (ratio: number) => {
+      const angles = lookAnglesRad(geometry, cameraOnLineM(geometry, ratio));
+      return [angles.incidenceRad / DEG, angles.emissionRad / DEG];
+    };
+    // The line runs to the moon's centre, the crater's normal off it by the figure's flattening:
+    // some 0.35°, a crater's 1.6 km at 266 km up.
+    const [incidenceDeg, emissionDeg] = at(1);
+    const [closeIncidenceDeg, closeEmissionDeg] = at(HANDOVER_APPROACH.halo.closestRatio);
+    expect([
+      incidenceDeg,
+      (emissionDeg ?? Number.NaN) < 0.01,
+      closeIncidenceDeg,
+      (closeEmissionDeg ?? Number.NaN) < 0.5,
+    ]).toEqual([expect.closeTo(15, 6), true, expect.closeTo(15, 6), true]);
   });
 });
 

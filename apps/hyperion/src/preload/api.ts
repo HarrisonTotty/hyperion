@@ -1737,7 +1737,13 @@ export type HandoverLookName =
   /** `HAND-OVER 90°`: i = e = 45°, judged. */
   | "handover-90"
   /** `HAND-OVER TERMINATOR`: i = 78°, e = 12°, recorded and not judged. */
-  | "handover-terminator";
+  | "handover-terminator"
+  /**
+   * `HAND-OVER HALO`: straight above a young crater of `TEST MOON` weathered's survey in its
+   * middle's place, i = 15°, e = 0° (R10.T1.c's close-range halo frame), recorded and not judged;
+   * taken only where `--look` names it.
+   */
+  | "handover-halo";
 
 /**
  * How a frame drew the look's body, by the materials of its scene target's draws: its disc

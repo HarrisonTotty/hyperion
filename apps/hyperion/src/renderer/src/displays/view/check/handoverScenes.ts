@@ -85,7 +85,7 @@ import {
   type HandoverApproach,
   type HandoverFigure,
   type HandoverLook,
-  HANDOVER_LOOKS,
+  NAMED_HANDOVER_LOOKS,
   limbRatioAt,
   type LookGeometry,
   lookAttitude,
@@ -505,7 +505,7 @@ export function handoverRangeAtM(
 export class HandoverScenes {
   readonly world: HandoverWorld;
   readonly approach: HandoverApproach;
-  /** The scenes, in {@link HANDOVER_LOOKS}' order, each with its own fixture. */
+  /** The scenes, in {@link NAMED_HANDOVER_LOOKS}' order, each with its own fixture. */
   readonly sceneOptions: ReadonlyArray<SceneOption>;
   /** The range the looks are drawn at, m: the provisional one until the run sets its own. */
   #rangeM: number;
@@ -527,7 +527,7 @@ export class HandoverScenes {
     this.world = world;
     this.approach = approach;
     this.#rangeM = provisionalRangeM;
-    this.sceneOptions = HANDOVER_LOOKS.map((look): SceneOption => {
+    this.sceneOptions = NAMED_HANDOVER_LOOKS.map((look): SceneOption => {
       const inner = world.fixture();
       return {
         name: look.scene,
@@ -579,7 +579,7 @@ export class HandoverScenes {
     }
     const geometry = lookGeometry(look, {
       figure: this.world.figure,
-      surveyMiddle: this.world.surveyMiddle,
+      surveyMiddle: look.middle ?? this.world.surveyMiddle,
       towardStarM: this.world.towardStarM,
       rangeM,
     });

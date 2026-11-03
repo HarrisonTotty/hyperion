@@ -57,8 +57,16 @@ export interface HandoverLook {
   readonly incidenceRad: number;
   /** Its emission toward the camera at the hand-over range, rad. */
   readonly emissionRad: number;
-  /** Whether the verdict judges its figures (30° and 90°), or records them (the terminator's). */
+  /**
+   * Whether the verdict judges its figures (30° and 90°), or records them (the terminator's and the
+   * halo's).
+   */
   readonly judged: boolean;
+  /**
+   * The body-fixed direction it centres, not normalised, in the world's survey's middle's place
+   * (the halo's crater); `null` for the survey's middle.
+   */
+  readonly middle: Vec3 | null;
 }
 
 /** `deg` in radians. */
@@ -77,6 +85,7 @@ export const HANDOVER_LOOKS: ReadonlyArray<HandoverLook> = [
     incidenceRad: rad(15),
     emissionRad: rad(15),
     judged: true,
+    middle: null,
   },
   {
     name: "handover-90",
@@ -84,6 +93,7 @@ export const HANDOVER_LOOKS: ReadonlyArray<HandoverLook> = [
     incidenceRad: rad(45),
     emissionRad: rad(45),
     judged: true,
+    middle: null,
   },
   {
     name: "handover-terminator",
@@ -91,7 +101,41 @@ export const HANDOVER_LOOKS: ReadonlyArray<HandoverLook> = [
     incidenceRad: rad(78),
     emissionRad: rad(12),
     judged: false,
+    middle: null,
   },
+];
+
+/**
+ * The centre of the young crater `HAND-OVER HALO` centres, body-fixed, a unit direction (R10.T1.c's
+ * close-range halo frame): `TEST MOON` weathered's largest crater younger than 0.3 Gyr within its
+ * surveys, of 8.10 km, 0.280 Gyr old on its 1 Gyr surface, its ejecta's maturity 0.575 under the
+ * body's 1.0 (`maturity_after`, at a weathering rate of 1), some 2.6° from the second survey's
+ * centre, inside its 3.1°; listed from the synthesis's octave-3 craters by hand (pod-looks,
+ * 2026-11-03). `TERRAIN TEST`'s own field, 4.4 Gyr old and with no maturity, has no such crater
+ * there: the same look on it is the control, which draws no halo.
+ */
+export const HALO_CRATER_CENTRE: Vec3 = vec3(0.616_793, 0.656_634, 0.434_048);
+
+/**
+ * `HAND-OVER HALO` (R10.T1.c's close-range halo frame; research-rm4-rm5-close-out §4, lane 4): the
+ * hand-over's line down the normal of {@link HALO_CRATER_CENTRE} (e = 0, so that the crater stands
+ * at the frame's centre at every range), the star i = 15° from it behind the camera, recorded and
+ * not judged, and taken only where `--look` names it, on the halo's line
+ * (`HANDOVER_APPROACH.halo`), which closes on through the hand-over to the crater resolved.
+ */
+export const HANDOVER_HALO_LOOK: HandoverLook = {
+  name: "handover-halo",
+  scene: "HAND-OVER HALO",
+  incidenceRad: rad(15),
+  emissionRad: 0,
+  judged: false,
+  middle: HALO_CRATER_CENTRE,
+};
+
+/** Every look `--look` may name: the run's three, then the halo's, which no run takes unnamed. */
+export const NAMED_HANDOVER_LOOKS: ReadonlyArray<HandoverLook> = [
+  ...HANDOVER_LOOKS,
+  HANDOVER_HALO_LOOK,
 ];
 
 /** The camera's line through a look: see the module's remarks. */
@@ -111,14 +155,21 @@ export interface HandoverApproach {
 /**
  * A full run's line, T10.e's scratch harness's (1% a second, 3 to 0.85 of the range, a 12 s hold,
  * out to 1.25: about 3 minutes a look), and a smoke's, five times as fast with a 3 s hold (about
- * 40 s a look), which proves the harness and not the photometry.
+ * 40 s a look), which proves the harness and not the photometry; and the halo's (R10.T1.c), the
+ * smoke's rate closing on to 0.065 of the range, its limb some 1,000 km off (15,337 km on
+ * `TERRAIN TEST`'s high setting) and the camera some 270 km up, where the halo's 8.1 km crater
+ * stands some 30 px across at 1.03 × 10⁻³ rad a pixel, with the full run's 12 s hold there (about
+ * 2.5 minutes of script; at the full run's 1% a second, 11.5, which SwiftShader's frames of the
+ * close terrain stretch past the software watchdog).
  */
 export const HANDOVER_APPROACH: {
   readonly full: HandoverApproach;
   readonly smoke: HandoverApproach;
+  readonly halo: HandoverApproach;
 } = {
   full: { ratePerS: 0.01, startRatio: 3, closestRatio: 0.85, holdS: 12, endRatio: 1.25 },
   smoke: { ratePerS: 0.05, startRatio: 3, closestRatio: 0.85, holdS: 3, endRatio: 1.25 },
+  halo: { ratePerS: 0.05, startRatio: 3, closestRatio: 0.065, holdS: 12, endRatio: 1.25 },
 };
 
 /** How long the approach closes, s. */

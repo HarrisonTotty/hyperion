@@ -68,6 +68,7 @@ import {
   closingTimeS,
   eyeOnLineM,
   HANDOVER_LOOKS,
+  NAMED_HANDOVER_LOOKS,
   type HandoverLook,
   limbRatioAt,
   type LookGeometry,
@@ -237,11 +238,14 @@ export class LookDeadline {
 
 /**
  * The looks a launch's run makes: all of {@link HANDOVER_LOOKS} in order, or the one `name` names
+ * of {@link NAMED_HANDOVER_LOOKS} (the halo's among them)
  * (`--look`; R10.T15.b.2's runs: a served look on SwiftShader at the high setting takes over an
  * hour, so that a launch a look keeps each within its watchdog and the runs resumable by look).
  */
 export function handoverLooksFor(name: HandoverLookName | undefined): ReadonlyArray<HandoverLook> {
-  return name === undefined ? HANDOVER_LOOKS : HANDOVER_LOOKS.filter((look) => look.name === name);
+  return name === undefined
+    ? HANDOVER_LOOKS
+    : NAMED_HANDOVER_LOOKS.filter((look) => look.name === name);
 }
 
 /** What the hand-over check drives and reads. */

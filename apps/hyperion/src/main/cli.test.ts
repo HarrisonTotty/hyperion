@@ -650,6 +650,20 @@ describe("the several-views check's options", () => {
     });
   });
 
+  it("takes --look handover-halo on a weathered launch, the halo's look no run takes unnamed (R10.T1.c)", () => {
+    expect(
+      parse(["--views-check", "--terrain", "--handover", "--weathered", "--look", "handover-halo"])
+        .viewsCheck,
+    ).toEqual({
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "handover",
+      fixture: "terrain-test-weathered",
+      look: "handover-halo",
+    });
+  });
+
   it("refuses --look without --handover", () => {
     const error = refusal(["--views-check", "--terrain", "--look", "handover-30"]);
     expect([error.exitCode, error.message]).toEqual([

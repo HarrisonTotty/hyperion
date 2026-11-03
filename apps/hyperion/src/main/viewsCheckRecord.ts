@@ -795,6 +795,7 @@ const HANDOVER_LOOK_NAMES: ReadonlyArray<HandoverLookName> = [
   "handover-30",
   "handover-90",
   "handover-terminator",
+  "handover-halo",
 ];
 
 const HANDOVER_REGIMES: ReadonlyArray<HandoverRegime> = ["disc", "figure", "terrain", "none"];

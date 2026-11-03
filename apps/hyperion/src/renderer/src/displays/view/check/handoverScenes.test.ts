@@ -10,7 +10,15 @@ import {
   terrainTestGolden,
 } from "../../../view/scenes/terrainScene";
 import { SCENE_OPTIONS } from "../viewRun";
-import { HANDOVER_APPROACH, HANDOVER_LOOKS, type HandoverLook } from "./handoverGeometry";
+import {
+  datumNormal,
+  datumPointM,
+  HALO_CRATER_CENTRE,
+  HANDOVER_APPROACH,
+  HANDOVER_HALO_LOOK,
+  HANDOVER_LOOKS,
+  type HandoverLook,
+} from "./handoverGeometry";
 import {
   coverageSurveyedCells,
   handoverRangeAtM,
@@ -32,7 +40,7 @@ import type { TerrainRequests } from "../../../view/terrain/session";
 import { TerrainProbe } from "./terrainProbe";
 import { ViewsProbe } from "./viewsProbe";
 
-const LOOK_SCENES = ["HAND-OVER 30°", "HAND-OVER 90°", "HAND-OVER TERMINATOR"];
+const LOOK_SCENES = ["HAND-OVER 30°", "HAND-OVER 90°", "HAND-OVER TERMINATOR", "HAND-OVER HALO"];
 
 /** The range of the high setting's primary, 1126 px across. */
 const RANGE_M = 1.5419e7;
@@ -275,6 +283,21 @@ describe("the hand-over check's scenes", () => {
       PROVISIONAL_M,
     );
     expect(shipLimbM(unset, 0) / PROVISIONAL_M).toBeCloseTo(3, 9);
+  });
+
+  it("turn the halo's crater, not the survey's middle, to the halo look's incidence (R10.T1.c)", () => {
+    const made = scenes();
+    const halo = made.geometry(HANDOVER_HALO_LOOK);
+    const at30 = made.geometry(lookAt(0));
+    expect([
+      norm(
+        sub(
+          halo.surveyNormal,
+          datumNormal(datumPointM(HALO_CRATER_CENTRE, made.world.figure), made.world.figure),
+        ),
+      ),
+      norm(sub(at30.surveyNormal, halo.surveyNormal)) > 0.01,
+    ]).toEqual([expect.closeTo(0, 12), true]);
   });
 
   it("draw a look at the run's range once it is set, in the provisional's place", () => {

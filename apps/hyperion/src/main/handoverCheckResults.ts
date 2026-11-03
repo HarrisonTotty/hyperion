@@ -107,6 +107,7 @@ export const HANDOVER_LOOK_RULES: Readonly<
   "handover-30": { scene: "HAND-OVER 30°", judged: true },
   "handover-90": { scene: "HAND-OVER 90°", judged: true },
   "handover-terminator": { scene: "HAND-OVER TERMINATOR", judged: false },
+  "handover-halo": { scene: "HAND-OVER HALO", judged: false },
 };
 
 /**

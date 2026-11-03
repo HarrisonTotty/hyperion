@@ -74,8 +74,13 @@ describe("the looks a launch makes (R10.T15.b.2)", () => {
     ]);
   });
 
-  it("are the one --look names", () => {
-    for (const name of ["handover-30", "handover-90", "handover-terminator"] as const) {
+  it("are the one --look names, the halo's among them (R10.T1.c)", () => {
+    for (const name of [
+      "handover-30",
+      "handover-90",
+      "handover-terminator",
+      "handover-halo",
+    ] as const) {
       expect(handoverLooksFor(name).map((look) => look.name)).toEqual([name]);
     }
   });

@@ -171,9 +171,16 @@ function checkProbesOf(
         { widthPx: windowPx, heightPx: windowPx },
         window.devicePixelRatio,
       );
+      // The halo's look closes on past the hand-over to its crater resolved (R10.T1.c).
+      const approach =
+        launch.look === "handover-halo"
+          ? HANDOVER_APPROACH.halo
+          : launch.smoke
+            ? HANDOVER_APPROACH.smoke
+            : HANDOVER_APPROACH.full;
       const scenes = new HandoverScenes(
         world,
-        launch.smoke ? HANDOVER_APPROACH.smoke : HANDOVER_APPROACH.full,
+        approach,
         handoverRangeAtM(world, launch.setting, selection.widthPx).rangeM,
       );
       run = { kind: "handover", terrain: terrainProbe(scenes.sceneOptions), scenes };

@@ -72,8 +72,10 @@
  * R10, R10.T15.b) the hand-over check's looks are made on that body as the server serves it, in
  * `TERRAIN TEST`'s place: both or neither, on `--terrain --handover` alone, never with
  * `--weathered`. `--look <NAME>` (R10.T15.b.2) runs the hand-over check's one look of that name
- * (`handover-30`, `handover-90` or `handover-terminator`) in place of all three, a launch a look; it
- * is refused without `--handover`. With `--atmosphere` instead (plan R08,
+ * (`handover-30`, `handover-90` or `handover-terminator`) in place of all three, a launch a look,
+ * or `handover-halo`, which no run takes unnamed: a look from straight above a young crater of
+ * `TEST MOON` weathered's survey, closing on until it is resolved (R10.T1.c's close-range halo
+ * frame); it is refused without `--handover`. With `--atmosphere` instead (plan R08,
  * R08.T10.b) it runs the atmosphere run on `ATMOSPHERE TEST`, at its `--setting`: the primary
  * photorealistic, its atmosphere media awaited, the moonlit night captured from the seat, then a
  * scripted free-camera flight to a few radii of each air fixture, each captured. `--atmosphere` is
@@ -126,7 +128,7 @@ import {
   isUniverseId,
   type SpikeLaunch,
 } from "../preload/spikeLaunch";
-import { HANDOVER_LOOK_NAMES, type ViewsCheckLaunch } from "../preload/viewsCheckLaunch";
+import { NAMED_HANDOVER_LOOK_NAMES, type ViewsCheckLaunch } from "../preload/viewsCheckLaunch";
 
 /** The variable giving the address of the server to link to, for `--address`. */
 export const ENV_SERVER_ADDR = "HYPERION_SERVER_ADDR";
@@ -381,7 +383,7 @@ export function buildCommand(version: string): Command {
       new Option(
         "--look <NAME>",
         "the hand-over check's one look, in place of all three (R10.T15.b.2): a launch a look",
-      ).choices(HANDOVER_LOOK_NAMES),
+      ).choices(NAMED_HANDOVER_LOOK_NAMES),
     )
     .addOption(
       new Option(
@@ -743,7 +745,7 @@ function compositeProbeOf(
 function lookOf(
   options: Readonly<Record<string, unknown>>,
 ): { readonly look: HandoverLookName } | Record<string, never> {
-  const look = HANDOVER_LOOK_NAMES.find((each) => each === options["look"]);
+  const look = NAMED_HANDOVER_LOOK_NAMES.find((each) => each === options["look"]);
   return look === undefined ? {} : { look };
 }
 

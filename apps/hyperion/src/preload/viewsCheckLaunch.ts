@@ -69,6 +69,15 @@ export const HANDOVER_LOOK_NAMES = [
 ] as const satisfies ReadonlyArray<HandoverLookName>;
 
 /**
+ * Every look `--look` may name: the run's ({@link HANDOVER_LOOK_NAMES}), then the halo's
+ * (R10.T1.c's close-range halo frame), which no run takes unnamed.
+ */
+export const NAMED_HANDOVER_LOOK_NAMES = [
+  ...HANDOVER_LOOK_NAMES,
+  "handover-halo",
+] as const satisfies ReadonlyArray<HandoverLookName>;
+
+/**
  * `value` as the check's options, or `null` if it is not one: {@link readLaunchBase}'s, with the one
  * look (`look`) a hand-over check alone may name (R10.T15.b.2's runs), and the GPU time by pass
  * (`passTimes`, `true`) a terrain run alone may record (R14's Mac measurements).
@@ -86,7 +95,7 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   if (value["look"] === undefined) {
     return timed;
   }
-  const look = HANDOVER_LOOK_NAMES.find((each) => each === value["look"]);
+  const look = NAMED_HANDOVER_LOOK_NAMES.find((each) => each === value["look"]);
   return look !== undefined && base.run === "handover" ? { ...timed, look } : null;
 }
 

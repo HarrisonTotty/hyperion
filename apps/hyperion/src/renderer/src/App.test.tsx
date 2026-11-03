@@ -213,7 +213,12 @@ describe("App", () => {
       );
     });
 
-    const LOOK_SCENES = ["HAND-OVER 30°", "HAND-OVER 90°", "HAND-OVER TERMINATOR"];
+    const LOOK_SCENES = [
+      "HAND-OVER 30°",
+      "HAND-OVER 90°",
+      "HAND-OVER TERMINATOR",
+      "HAND-OVER HALO",
+    ];
 
     /** Each look's `SCENE` button, `null` where `VIEW` offers none, its kept scenes drawn. */
     function lookButtons(): ReadonlyArray<HTMLElement | null> {
