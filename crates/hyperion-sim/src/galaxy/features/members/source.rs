@@ -797,11 +797,29 @@ fn lists_lookup_radius(galaxy: &Galaxy, sphere: &QuerySphere) -> LightYears {
 /// from its site over its entry's lifetime through `DeathMarks::of`'s cap (the grid's rule 5);
 /// nothing under its held arm, whose lists hold no recent class.
 #[must_use]
-fn death_reach(galaxy: &Galaxy) -> LightYears {
+pub(crate) fn death_reach(galaxy: &Galaxy) -> LightYears {
     match galaxy.rules().feature_classes {
         FeatureClassesRules::Unlisted => LightYears::ZERO,
         FeatureClassesRules::Listed => LIFETIME_REACH,
     }
+}
+
+/// Whether a feature's listed core collapse whose candidate is at `candidate` at the epoch, on a
+/// line at `velocity`, may have its remnant inside `sphere` in `galaxy` (fix-p09-recent-kicks):
+/// whether that line lies within [`death_reach`] of the sphere at its time, the pre-test of a
+/// list's dead.
+#[must_use]
+pub(crate) fn listed_death_may_reach(
+    galaxy: &Galaxy,
+    candidate: &GalacticPosition,
+    velocity: GalacticVelocity,
+    sphere: &QuerySphere,
+) -> bool {
+    let t = sphere.time();
+    let elapsed = Seconds::new(t.since_epoch().as_seconds_f64());
+    let at = drifted_from(candidate, velocity, t, elapsed);
+    LightYears::from(sphere.centre().distance_to(&at)).value()
+        <= (sphere.radius() + death_reach(galaxy)).value()
 }
 
 /// Whether `feature`'s reach touches the ball of `radius` about `centre`, as the catalogue's lookup
@@ -1027,10 +1045,8 @@ fn list_hits(
     }
     let elapsed = Seconds::new(t.since_epoch().as_seconds_f64());
     let mut death_hits = kept.deaths().iter().filter_map(|death| {
-        let at = drifted_from(death.candidate(), velocity, t, elapsed);
-        let line = LightYears::from(sphere.centre().distance_to(&at));
         let record = death.record();
-        (line.value() <= (sphere.radius() + death_reach(galaxy)).value()
+        (listed_death_may_reach(galaxy, death.candidate(), velocity, sphere)
             && layers.contains(record.layer()))
         .then(|| {
             (
@@ -2053,5 +2069,49 @@ mod tests {
             found_any >= CENTRES - 2,
             "{found_any} centres found members"
         );
+    }
+
+    /// fix-p09-listed-death-reach: `DeathMarks::of` caps each of a listed core collapse's two
+    /// lines' travel from its site over its entry's lifetime at `LIFETIME_REACH`, so its remnant
+    /// may lie up to twice that from its candidate's line. A 460 km/s kick against a 230 km/s bulk,
+    /// read 3.6 Myr after its death, puts it 5,524 ly off; the features' and the centre's
+    /// pre-tests keep its candidate for a sphere of 10 ly about the remnant, under every 27 hold.
+    #[test]
+    fn a_remnant_kicked_against_its_bulk_keeps_its_candidate_in_the_pre_tests() {
+        use crate::galaxy::catalogue_classes::CatalogueMotion;
+        use crate::galaxy::features::centre::source::centre_death_may_reach;
+        use crate::galaxy::rules::GalaxyRules;
+
+        let galaxy = Galaxy::from_params_with_rules(
+            Seed::new(0x0937_0000_0000_000b),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::every_27_hold(),
+        )
+        .unwrap();
+        let site = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap();
+        let bulk = GalacticVelocity::new([230e3, 0.0, 0.0]);
+        let remnant = GalacticVelocity::new([230e3 - 460e3, 0.0, 0.0]);
+        let death = UniverseTime::from_julian_years(-3_600_000).unwrap();
+        let motion = CatalogueMotion::broken(site, death, bulk, remnant);
+        // The candidate's line, through the site at the bulk velocity, and its place at the epoch.
+        let line = CatalogueMotion::broken(site, death, bulk, bulk);
+        let candidate = line.position_at(UniverseTime::EPOCH);
+        for t in [
+            UniverseTime::EPOCH,
+            UniverseTime::from_julian_years(1_000).unwrap(),
+        ] {
+            let at = motion.position_at(t);
+            let apart = LightYears::from(at.distance_to(&line.position_at(t))).value();
+            assert!(apart > 5_500.0, "{apart} ly from its line at {t:?}");
+            let sphere = QuerySphere::new(at, LightYears::new(10.0), t, LightYears::ZERO).unwrap();
+            assert!(
+                listed_death_may_reach(&galaxy, &candidate, bulk, &sphere),
+                "the features' pre-test drops a remnant {apart:.0} ly from its line at {t:?}"
+            );
+            assert!(
+                centre_death_may_reach(&galaxy, &candidate, bulk, &sphere),
+                "the centre's pre-test drops a remnant {apart:.0} ly from its line at {t:?}"
+            );
+        }
     }
 }

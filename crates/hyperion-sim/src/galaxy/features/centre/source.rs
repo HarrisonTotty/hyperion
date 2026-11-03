@@ -98,10 +98,10 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::coords::GalacticPosition;
-use crate::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
+use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
-use crate::galaxy::features::members::recent::{FeatureClassesRules, RecentClass, moved};
+use crate::galaxy::features::members::recent::{RecentClass, moved};
+use crate::galaxy::features::members::source::death_reach;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::motion::{CentreMotion, EpochState, Regime, SpeedBound, StateAt, Trajectory};
 use crate::galaxy::placement::{Existence, SystemRecord};
@@ -537,10 +537,7 @@ impl<'a> CentreMemberSource<'a> {
         let light =
             KilometresPerSecond::new(SPEED_OF_LIGHT / METRES_PER_SECOND_PER_KILOMETRE_PER_SECOND);
         // A core collapse's remnant lies within `dead` of its candidate's line (fix-p09-recent-kicks).
-        let dead = match self.galaxy.rules().feature_classes {
-            FeatureClassesRules::Unlisted => LightYears::ZERO,
-            FeatureClassesRules::Listed => LIFETIME_REACH,
-        };
+        let dead = death_reach(self.galaxy);
         if from_black_hole.value() - sphere.radius().value()
             > (REACH + dead + pad_for(t, light)).value()
         {
@@ -590,7 +587,7 @@ impl<'a> CentreMemberSource<'a> {
             }
             if place.class() == RecentClass::CoreCollapse {
                 // Its candidate's line within the remnant's reach of the sphere, then its own.
-                if inside(place.position(), place.velocity(), dead).is_some()
+                if centre_death_may_reach(self.galaxy, place.position(), place.velocity(), sphere)
                     && let Some(entry) = place.kept(self.galaxy)
                     && let Some(hit) = within(entry.motion().position_at(t), LightYears::ZERO)
                 {
@@ -975,6 +972,27 @@ impl SystemSource for CentreMemberSource<'_> {
         self.check(galaxy);
         false
     }
+}
+
+/// Whether the centre's listed core collapse whose candidate is placed at `position` at the
+/// epoch, moving at `velocity`, may have its remnant inside `sphere` in `galaxy`
+/// (fix-p09-recent-kicks): whether that line lies within [`death_reach`] of the sphere at its
+/// time, as a feature's list's dead are pre-tested.
+#[must_use]
+pub(crate) fn centre_death_may_reach(
+    galaxy: &Galaxy,
+    position: &GalacticPosition,
+    velocity: GalacticVelocity,
+    sphere: &QuerySphere,
+) -> bool {
+    let t = sphere.time();
+    let at = if t == UniverseTime::EPOCH {
+        *position
+    } else {
+        moved(position, velocity, t)
+    };
+    LightYears::from(sphere.centre().distance_to(&at)).value()
+        <= (sphere.radius() + death_reach(galaxy)).value()
 }
 
 /// `band` and `cell` as one integer, distinct for every pair: the band's index, the level and the
