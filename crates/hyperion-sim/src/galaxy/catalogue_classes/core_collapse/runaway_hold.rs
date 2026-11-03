@@ -1119,34 +1119,34 @@ fn the_held_arm_s_cell_is_pinned_under_every_26_hold() {
 
 /// The new arm's first runaway and walkaway entries of the sample cells, as measured
 /// (2026-11-01, with the runaways' terms at the whole budget and the bounds by mass; at generator
-/// version 25).
+/// versions 25 and 26).
 const EJECTED_PIN: [[u64; 7]; 3] = [
     [
-        0x4021_8607_7ed8_951f,
-        0x4180_d358_e29e_a54e,
-        0x3fd2_b547_76f5_d4a4,
-        0xc111_46d8_74d0_09ae,
-        0x4102_b17b_d7a6_2231,
-        0xc0f0_c465_0908_52e9,
-        0x4023_d3eb_7fc3_53de,
-    ],
-    [
-        0x4027_9a73_834c_7186,
-        0x4175_2eef_3901_d0d1,
+        0x4021_ee99_24f8_d9e6,
+        0x4180_e6a6_65de_8fdc,
         0xbfa0_947d_748e_8bb8,
-        0xc10c_a9c1_9e93_c4a3,
-        0xc110_2b1b_70c3_295b,
-        0x40d1_bb9a_6eaf_5ff6,
-        0x4042_57b1_45a4_ae3c,
+        0xc10d_0729_0ca1_e34d,
+        0xc108_fa4e_6e9f_d254,
+        0x40c0_a908_8b72_aba5,
+        0x4023_c417_6c59_4de2,
     ],
     [
-        0x4024_75c3_c5ac_6779,
-        0x4179_ed89_b75f_a584,
-        0x3fca_7d17_0bf2_f67a,
-        0xc11b_628c_a31b_b143,
-        0xc0e1_0bdb_f214_332b,
-        0xc0ac_f1a7_4e88_5660,
-        0x4047_4044_dff7_651e,
+        0x4031_63ab_85b9_ea3a,
+        0x4167_6e2b_bcf8_63a5,
+        0x3fb1_0738_5966_72dd,
+        0xc110_19eb_c306_81c9,
+        0x4127_5fe8_4f43_5b16,
+        0xc103_b6ef_92fa_2a4e,
+        0x4040_b876_8f48_fd90,
+    ],
+    [
+        0x4022_92de_2667_bfd4,
+        0x417e_3187_77c8_ad7b,
+        0x3fdb_94d2_f341_5d34,
+        0xc0f6_7986_9eed_0abb,
+        0x4104_6973_e5eb_a5bd,
+        0x40e2_492a_8ad7_734c,
+        0x404b_b4d4_ad86_6866,
     ],
 ];
 

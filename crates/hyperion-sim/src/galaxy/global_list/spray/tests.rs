@@ -372,8 +372,9 @@ mod milky_way {
     /// `τ_p ÷ 32`, its step count halved, and `pal5_like` and `sagittarius_like` as before. At `τ_p
     /// ÷ 32` each tracer's energy at the epoch is its energy at release within ruling 146.3's 5 ×
     /// 10⁻⁴ (the leapfrog's error, the potential being static; 5.2 × 10⁻⁵ at worst over 200
-    /// tracers at generator version 25, 5.3 × 10⁻⁵ at 24, x86-64), and a spray of the coarse step
-    /// is pinned by its bits.
+    /// tracers at generator version 25, 5.3 × 10⁻⁵ at 24 and at 26, x86-64), and a spray of the
+    /// coarse step is pinned by its bits (re-pinned at 26, whose high-mass fate table, refitted
+    /// under the enforced Humphreys–Davidson limit, moves it).
     #[test]
     fn under_27_an_orphan_is_sprayed_from_half_its_tracers_at_half_its_steps() {
         let f = fixture();
@@ -434,7 +435,7 @@ mod milky_way {
         }
         assert_eq!(
             (tracers.len(), format!("{:016x}", f64_digest(&bits))),
-            (200, "ab8c5b60be5be582".to_owned()),
+            (200, "83b1e60d51c0eb91".to_owned()),
             "{name} at τ_p ÷ 32, energy drift {worst:e}"
         );
     }

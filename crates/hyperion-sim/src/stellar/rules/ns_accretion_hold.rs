@@ -354,13 +354,13 @@ const CENSUS_FIGURES: [CompactFigures; 2] = [
         most_gained: 0.787_410_651_917_862_5,
     },
     CompactFigures {
-        members: 411,
-        black_holes: 12,
-        grown: 2,
-        grown_by_dwarfs: 2,
-        median_black_hole: 2.810_847_362_212_409_3,
-        neutron_stars: 399,
-        most_gained: 0.156_648_260_868_635_04,
+        members: 413,
+        black_holes: 11,
+        grown: 0,
+        grown_by_dwarfs: 0,
+        median_black_hole: 3.514_700_978_122_044,
+        neutron_stars: 402,
+        most_gained: 0.166_682_517_111_517_38,
     },
 ];
 
@@ -374,7 +374,7 @@ const CENSUS_FIGURES: [CompactFigures; 2] = [
 ///   (a finding). At generator version 25 before P11.T4's heavy donors the one was a neutron star
 ///   born at 1.861 M☉ that a 1.46 M☉ main-sequence donor fed for 7 Gyr, grinding itself down to
 ///   0.068 M☉: 0.139 M☉ gained at the arm's tenth carries it past `MAX_NEUTRON_STAR_MASS` (a lean
-///   of land-pod's, 2026-11-01, for research);
+///   of land-pod's, 2026-11-01, for research); at 26 there is none;
 /// - no neutron star in a low-mass X-ray binary has gained more than [`MOST_GAINED`];
 /// - the black holes' median mass in the low-mass X-ray binaries is pinned as measured, under the
 ///   brief's 5 M☉ (a finding): most are fallback black holes of 2–4 M☉ (plan 06's Mandel and

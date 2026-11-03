@@ -357,21 +357,21 @@ fn figures(census: &Census) -> CvFigures {
 }
 
 /// The census's figures under the version's rules and under every 27 hold, as measured
-/// (2026-11-01, at generator version 25).
+/// (2026-11-01, at generator versions 25 and 26).
 const CENSUS_FIGURES: [CvFigures; 2] = [
     CvFigures {
-        members: 3_642,
-        variables: 1_404,
-        heavy: 832,
+        members: 3_638,
+        variables: 1_402,
+        heavy: 828,
         below_gap: 436,
-        above_six_hours: 848,
+        above_six_hours: 845,
     },
     CvFigures {
-        members: 4_120,
-        variables: 2_656,
-        heavy: 47,
-        below_gap: 2_298,
-        above_six_hours: 80,
+        members: 4_131,
+        variables: 2_669,
+        heavy: 52,
+        below_gap: 2_305,
+        above_six_hours: 84,
     },
 ];
 

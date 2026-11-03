@@ -484,18 +484,52 @@ fn near_the_suns_circle_survivors_fly_from_their_launch_sites() {
 }
 
 /// A survivor's brief is its system's: the brief model takes a helium donor's white dwarf exactly,
-/// as the stellar stage builds it, and a C/O donor's by its routes, the same at the epoch.
+/// as the stellar stage builds it, and a C/O donor's by its routes, at the epoch the same, or on
+/// the fate table's route ([`BriefRoute::Table`]) its kind and class with its luminosity and
+/// temperature within their stated error, as every table brief is. From 26, whose fate tables
+/// are fitted under the enforced Humphreys–Davidson limit every 27 hold takes, most C/O donors
+/// take the table's route (17 of the 21 here).
+///
+/// [`BriefRoute::Table`]: crate::stellar::brief::BriefRoute::Table
 #[test]
 fn a_survivors_brief_is_its_white_dwarfs() {
+    use crate::stellar::brief::BriefRoute;
     let galaxy = weighted();
     let at = GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).expect("in the cube");
-    let mut kinds = [0_u32; 2];
+    let (mut kinds, mut tabled) = ([0_u32; 2], 0_u32);
     for (record, _) in survivors_at(galaxy, &at, 200) {
-        let brief = BriefModel::new(galaxy, &record).brief_at(UniverseTime::EPOCH);
+        let model = BriefModel::new(galaxy, &record);
+        let brief = model.brief_at(UniverseTime::EPOCH);
         let stars = SystemStars::generate_in(galaxy, &record, MultiplicityContext::ForcedSingle);
-        assert_eq!(brief, stars.brief_at(UniverseTime::EPOCH), "{record:?}");
+        let exact = stars.brief_at(UniverseTime::EPOCH);
         kinds[usize::from(is_helium_donor(&record))] += 1;
+        if model.route() != BriefRoute::Table {
+            assert_eq!(brief, exact, "{record:?}");
+            continue;
+        }
+        assert!(!is_helium_donor(&record), "{record:?}");
+        tabled += 1;
+        let (fitted, exact) = (brief.expect("a brief"), exact.expect("a brief"));
+        assert_eq!(
+            (fitted.kind(), fitted.class().to_string()),
+            (exact.kind(), exact.class().to_string()),
+            "{record:?}"
+        );
+        let stated = model
+            .stated_error_at(UniverseTime::EPOCH)
+            .expect("a table brief states its error");
+        let (log_l, teff) = (
+            exact.log_luminosity().expect("a luminosity").value(),
+            exact.effective_temperature().value(),
+        );
+        assert!(
+            (stated.log_luminosity.0..=stated.log_luminosity.1).contains(&log_l)
+                && (stated.effective_temperature.0..=stated.effective_temperature.1)
+                    .contains(&teff),
+            "{record:?}: {log_l}, {teff} outside {stated:?}"
+        );
     }
+    eprintln!("survivors by donor (C/O, helium) {kinds:?}, {tabled} on the table's route");
     assert!(kinds[0] > 0 && kinds[1] > 0, "{kinds:?}");
 }
 
