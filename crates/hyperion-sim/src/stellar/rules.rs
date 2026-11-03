@@ -31,20 +31,13 @@
 //!   second table yet, so every version takes the committed one. The tests reach a test-only
 //!   second table through it, to show that every reader goes through the choke point.
 //!
-//! - [`dwarf_limit`](StellarRules::dwarf_limit), at [`DWARF_LIMIT_VERSION`] (plan 11, P11.T4's
-//!   fix): whether the binary engine holds its white dwarfs below the Chandrasekhar mass and types
-//!   the dwarf a merger's unplaced product leaves by its core, read by `Engine::new_star`'s
-//!   fallback, `Engine::finish_merger` and the accretor's events through the engine's input's
-//!   rules. The fitted tables keep the version's rules until the bump refits them
-//!   (`stellar/rules/dwarf_limit_hold.rs` lists the movers).
+//! No stellar hold is held now: the 27 folds put P11's 27 holds on the record.
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
-//! [`SystemStars::shown_at`]: crate::stellar::system::SystemStars::shown_at
 
 use crate::GeneratorVersion;
-use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
 use crate::stellar::remnant::KickRankRules;
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -55,24 +48,16 @@ pub(crate) struct StellarRules {
     ///
     /// [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
     pub(crate) kick_rank: KickRankRules,
-    /// Whether the binary engine holds its white dwarfs below the Chandrasekhar mass and types the
-    /// dwarf a merger's unplaced product leaves by its core, the hold of [`DWARF_LIMIT_VERSION`].
-    pub(crate) dwarf_limit: DwarfLimitRules,
 }
 
 impl StellarRules {
-    /// Each field's arm at `version`: the new arm from its `*_VERSION`, the held arm below it.
+    /// Each field's arm at `_version`: the new arm from its `*_VERSION`, the held arm below it.
     ///
-    /// Every version takes the committed kick-rank table.
+    /// Every version takes the committed kick-rank table, and no field is held now (the 27 folds).
     #[must_use]
-    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
+    pub(crate) const fn of_version(_version: GeneratorVersion) -> Self {
         Self {
             kick_rank: KickRankRules::Committed,
-            dwarf_limit: if version.get() >= DWARF_LIMIT_VERSION.get() {
-                DwarfLimitRules::Chandrasekhar
-            } else {
-                DwarfLimitRules::Unchecked
-            },
         }
     }
 
@@ -89,7 +74,8 @@ impl StellarRules {
     }
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// those that turn on at 27 (P11.T4's `dwarf_limit`).
+    /// none is left, the 27 folds having put each on the record, so these are the version's rules
+    /// (the lane deletes this helper after the merge).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.
@@ -107,7 +93,6 @@ impl StellarRules {
     pub(crate) const fn probe() -> Self {
         Self {
             kick_rank: KickRankRules::Probe,
-            ..Self::of_version(crate::GENERATOR_VERSION)
         }
     }
 }

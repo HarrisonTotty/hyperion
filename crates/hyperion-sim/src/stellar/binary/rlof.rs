@@ -85,6 +85,7 @@ use crate::stellar::sse::{self, NewStar, Structure, Track};
 use crate::units::{SolarMasses, Years};
 
 use super::detached::{Snapshot, orbital_momentum, semi_major_axis};
+use super::dwarf_limit;
 use super::evolve::{Engine, roche_lobe};
 use super::heavy_donor;
 use super::ns_accretion::NS_ACCRETION_EFFICIENCY;
@@ -1186,12 +1187,12 @@ impl Engine {
                 );
                 false
             }
-            // From 27 a dwarf at the Chandrasekhar mass collapses below, edge-lit or not
-            // (`dwarf_limit`, P11.T4's fix).
+            // A dwarf at the Chandrasekhar mass collapses below, edge-lit or not (`dwarf_limit`,
+            // P11.T4's fix).
             Kind::CarbonOxygenWhiteDwarf
                 if kd.surface() == Surface::Helium
                     && self.accreted_helium[a_idx] >= EDGE_LIT_HELIUM
-                    && !self.ctx.rules().dwarf_limit.collapses(ma) =>
+                    && !dwarf_limit::collapses(ma) =>
             {
                 let masses = masses_now(self);
                 self.pool(PooledIaEvent::new(
@@ -1371,8 +1372,8 @@ impl Engine {
     }
 
     /// Member `i`, a white dwarf a wind has fed to the Chandrasekhar mass in a detached phase,
-    /// collapses as a dwarf fed by stable transfer does there ([`Engine::accretor_events`]; from
-    /// version 27, P11.T4's `dwarf_limit`): a Type Ia candidate pooled unless it is oxygen–neon,
+    /// collapses as a dwarf fed by stable transfer does there ([`Engine::accretor_events`]; P11.T4's
+    /// `dwarf_limit`): a Type Ia candidate pooled unless it is oxygen–neon,
     /// with the two stars' masses, and then its accretion-induced collapse.
     pub(super) fn collapse_fed_dwarf(&mut self, i: usize) {
         let (m, _) = self.current(i);

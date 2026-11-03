@@ -784,15 +784,13 @@ fn gate(
     let ages = Years::new(age_at(age_at_epoch, ClockWindow::START))
         ..=Years::new(age_at(age_at_epoch, ClockWindow::END));
     let stars = attempt.stars();
-    let stellar = galaxy.rules().stellar;
-    let tables_hold = stellar.dwarf_limit.fitted_tables_hold();
     // A supernova that unbinds any pair changes what the system shows (P11.T10), so every pair is
     // checked, as for a system the grid redraws.
     let certified = attempt.pairs().iter().all(|pair| {
         let [a, b] = pair
             .stars()
             .map(|star| stars[usize::from(star.get())].initial_mass());
-        tables_hold && pair_keeps_own_models(a, b, pair.periastron(), composition, ages.clone())
+        pair_keeps_own_models(a, b, pair.periastron(), composition, ages.clone())
     });
     Gate {
         star_count: attempt.hierarchy().star_count(),

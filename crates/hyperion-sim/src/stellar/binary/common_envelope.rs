@@ -38,13 +38,13 @@ use std::sync::Arc;
 
 use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::MAX_NEUTRON_STAR_MASS;
-use crate::stellar::remnant::structure::{CHANDRASEKHAR_MASS, white_dwarf_radius};
+use crate::stellar::remnant::structure::white_dwarf_radius;
 use crate::stellar::remnant::white_dwarf::WhiteDwarfCore;
 use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
 use crate::stellar::{Phase, StarState, StarStateParts};
 use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
 
-use super::dwarf_limit::{DwarfLimitRules, Unplaced};
+use super::dwarf_limit::{self, Unplaced};
 use super::evolve::{Engine, roche_lobe, track_mass};
 use super::params::BinaryParams;
 use super::rlof::kelvin_helmholtz;
@@ -642,7 +642,6 @@ impl Engine {
         let (m_hi, m_lo) = (s_hi.state.mass().value(), s_lo.state.mass().value());
         let total = m_hi + m_lo;
         let masses = [SolarMasses::new(m0), SolarMasses::new(m1)];
-        let chandrasekhar = CHANDRASEKHAR_MASS.value();
         let product = match (hi, lo) {
             (
                 Kind::LowMassMainSequence | Kind::MainSequence,
@@ -699,18 +698,8 @@ impl Engine {
                 } else {
                     Phase::CarbonOxygenWhiteDwarf
                 };
-                match self.ctx.rules().dwarf_limit {
-                    // From 27 `finish_merger` collapses a dwarf at the Chandrasekhar mass, as here.
-                    DwarfLimitRules::Chandrasekhar => self.white_dwarf(phase, total),
-                    DwarfLimitRules::Unchecked if total < chandrasekhar => {
-                        self.white_dwarf(phase, total)
-                    }
-                    DwarfLimitRules::Unchecked => {
-                        self.finish_merger(self.white_dwarf(phase, total));
-                        self.accretion_induced_collapse(0, total);
-                        return;
-                    }
-                }
+                // `finish_merger` collapses a dwarf at the Chandrasekhar mass (P11.T4's fix).
+                self.white_dwarf(phase, total)
             }
             (
                 Kind::NeutronStar | Kind::BlackHole,
@@ -754,12 +743,11 @@ impl Engine {
 
     /// Records the merger: `product` in the primary's place, nothing in the secondary's, no orbit.
     ///
-    /// From version 27 a white dwarf product at or above the Chandrasekhar mass collapses at once,
-    /// as an accreting one does (`Engine::accretor_events`): a Type Ia candidate is pooled unless
-    /// it is oxygen–neon, with the two stars' masses before the merger, and the dwarf collapses by
-    /// accretion-induced collapse ([`DwarfLimitRules::collapses`]).
+    /// A white dwarf product at or above the Chandrasekhar mass collapses at once, as an accreting
+    /// one does (`Engine::accretor_events`): a Type Ia candidate is pooled unless it is oxygen–neon,
+    /// with the two stars' masses before the merger, and the dwarf collapses by accretion-induced
+    /// collapse (P11.T4's fix, `dwarf_limit::collapses`).
     fn finish_merger(&mut self, product: Member) {
-        let limit = self.ctx.rules().dwarf_limit;
         let dwarf = if let Member::Remnant { phase, mass, .. } = &product
             && matches!(
                 phase,
@@ -767,7 +755,7 @@ impl Engine {
                     | Phase::CarbonOxygenWhiteDwarf
                     | Phase::OxygenNeonWhiteDwarf
             )
-            && limit.collapses(mass.at(self.age))
+            && dwarf_limit::collapses(mass.at(self.age))
         {
             Some((*phase, mass.at(self.age)))
         } else {
@@ -1237,8 +1225,8 @@ impl Engine {
     }
 
     /// [`Engine::new_star`] for a product whose core is the white dwarf of kind `dwarf` it merged
-    /// from, if it is one, which types the dwarf an unplaced product leaves from version 27
-    /// ([`DwarfLimitRules::unplaced`]).
+    /// from, if it is one, which types the dwarf an unplaced product leaves (P11.T4's fix,
+    /// `dwarf_limit::unplaced`).
     #[must_use]
     fn new_star_around(
         &self,
@@ -1285,7 +1273,7 @@ impl Engine {
             Kind::Massless => return Member::Gone,
         };
         self.placed_star(0, target, m, core).unwrap_or_else(|| {
-            match self.ctx.rules().dwarf_limit.unplaced(kind, m, core, dwarf) {
+            match dwarf_limit::unplaced(kind, m, core, dwarf) {
                 Unplaced::WhiteDwarf { phase, mass } => self
                     .held_product(target, phase, SolarMasses::new(mass))
                     .unwrap_or_else(|| self.white_dwarf(phase, mass)),

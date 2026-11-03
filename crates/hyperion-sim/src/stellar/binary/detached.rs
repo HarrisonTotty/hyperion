@@ -32,6 +32,7 @@
 use crate::math;
 use crate::orbit::KeplerElements;
 use crate::stellar::Phase;
+use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 use crate::stellar::sse::{CORE_GYRATION, ENVELOPE_GYRATION, Structure, Track};
 use crate::units::consts::{GM_SUN, SECONDS_PER_JULIAN_YEAR, SOLAR_RADIUS_M, SPEED_OF_LIGHT};
 use crate::units::{SolarMasses, Years};
@@ -122,8 +123,8 @@ pub(super) enum Stop {
     Stripped(usize),
     /// The orbit can hold no angular momentum left: the stars spiral together.
     Coalescence,
-    /// Member `i`, a white dwarf a wind feeds, reaches the Chandrasekhar mass (from version 27,
-    /// P11.T4's `dwarf_limit`; [`Engine::collapse_fed_dwarf`]).
+    /// Member `i`, a white dwarf a wind feeds, reaches the Chandrasekhar mass (P11.T4's
+    /// `dwarf_limit`; [`Engine::collapse_fed_dwarf`]).
     Chandrasekhar(usize),
 }
 
@@ -719,11 +720,11 @@ impl Engine {
     }
 
     /// The time, years, in which member `i`, a white dwarf a wind feeds at `rates` from `s`,
-    /// reaches the Chandrasekhar mass, at which it stops from version 27 (P11.T4's `dwarf_limit`,
-    /// [`Stop::Chandrasekhar`]); `None` for any other member, or under the held arm.
+    /// reaches the Chandrasekhar mass, at which it stops (P11.T4's `dwarf_limit`,
+    /// [`Stop::Chandrasekhar`]); `None` for any other member.
     #[must_use]
     fn to_the_dwarf_limit(&self, i: usize, s: &Snapshot, rates: &Rates) -> Option<f64> {
-        let limit = self.ctx.rules().dwarf_limit.limit()?;
+        let limit = CHANDRASEKHAR_MASS.value();
         let Member::Remnant { phase, .. } = &self.members[i] else {
             return None;
         };
