@@ -30,7 +30,6 @@ pub const TERRAIN_TEST_SEED: DetailSeed = DetailSeed::new(0x6173_7365_6d62_6c79)
 
 /// The fixture's largest block, bytes: 4 KiB, so that each payload is several blocks, as the
 /// client's chunked answers are.
-#[cfg(test)]
 const TERRAIN_TEST_BLOCK_BYTES: usize = 4096;
 
 /// The whole body's largest block in a whole answer, bytes: 16 KiB, so that its 1.7 MB come in 68
@@ -47,7 +46,6 @@ const WHOLE_TERRAIN_TEST_DELTA_BLOCK_BYTES: usize = 3072;
 /// both, some five cells of level 6 from the corner they share with face +z, so that the survey
 /// straddles the edge and its margin reaches round the corner (T8.b's third place, "a face edge
 /// near a cube corner").
-#[cfg(test)]
 const FIRST_CENTRE: [f64; 3] = [1.0, 1.0, 0.8];
 
 /// The second survey's centre, along the same edge away from the corner, at v = 0.62: some four
@@ -258,9 +256,8 @@ fn fixture_of(
 
 /// `TERRAIN TEST`'s patch over `field`, a Moon-like world of the fixture's level (`TEST MOON`'s,
 /// or `TEST MOON` weathered's): the first survey at 50 m, then the second's cells at 20 m with it.
-#[cfg(test)]
 #[must_use]
-pub(crate) fn terrain_test_fixture(field: &CoarseField) -> TerrainTestFixture {
+pub fn terrain_test_fixture(field: &CoarseField) -> TerrainTestFixture {
     let first = cells_about(field, FIRST_CENTRE, SURVEY_DOT);
     let second = cells_about(field, SECOND_CENTRE, SURVEY_DOT);
     let both: BTreeSet<PatchKey> = first.union(&second).copied().collect();

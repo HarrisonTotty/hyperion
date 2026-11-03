@@ -34,12 +34,12 @@ pub use liquids::{
 };
 // `TERRAIN TEST`'s fields and their text: `worker::golden` blesses the patch's, and the views
 // check's whole-body run reads the whole body's (`examples/whole_terrain_test.rs`).
-pub use terrain_test::{
-    TERRAIN_TEST_SEED, TerrainTestFixture, TerrainTestPayload, terrain_test_lines,
-    terrain_test_text, whole_terrain_test_fixture,
-};
 #[cfg(test)]
-pub(crate) use terrain_test::{payload_cover, terrain_test_fixture};
+pub(crate) use terrain_test::payload_cover;
+pub use terrain_test::{
+    TERRAIN_TEST_SEED, TerrainTestFixture, TerrainTestPayload, terrain_test_fixture,
+    terrain_test_lines, terrain_test_text, whole_terrain_test_fixture,
+};
 #[cfg(test)]
 pub(crate) use worlds::pluto_like;
 // R10.T1.c's tests and the bake's bench weather and vary the Moon-like world

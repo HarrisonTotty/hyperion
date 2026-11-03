@@ -71,6 +71,10 @@ name = "served_bake"
 harness = false
 
 [[bench]]
+name = "served_readout"
+harness = false
+
+[[bench]]
 name = "sky"
 harness = false
 

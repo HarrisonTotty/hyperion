@@ -66,6 +66,13 @@ name = "bake"
 harness = false
 required-features = ["testing"]
 
+# A view's terrain readout and its parts, `readout/` (plan R10, T12; R10.T12.d's cost), on
+# `TERRAIN TEST`'s field of the `testing` feature.
+[[bench]]
+name = "readout"
+harness = false
+required-features = ["testing"]
+
 # `TERRAIN TEST`'s whole body for the views check's whole-body run (plan R10, R10.T14.c), from the
 # Moon-like world of the `testing` feature, which no WebAssembly module is built with.
 [[example]]
