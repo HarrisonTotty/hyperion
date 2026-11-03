@@ -2029,10 +2029,12 @@ pages are assets and presentation; collision never reads them. No domain tag is 
 - **R14.T6.a**: the inputs every cascade shares, compared once a frame and numbered
   (`CascadeReuse.shared`): each cascade's `f32` matrices and `f64` splits, texel, depths and slack,
   the light basis, the camera's place and view axis and the body's rotation in `f64`, the caster
-  uniforms, all nine `GeometrySettings` fields, the contacts, the providers' version and revisions.
+  uniforms, every `GeometrySettings` field, the contacts, the providers' version and revisions.
 - **R14.T6.a**: each cascade's own: its caster records as written (on the path, each interior record
   its cull takes, with its index and cull input), and each slot's upload version, its own and, while
   its heights mix, the older bake's or its parent's (`PARENT_MIX_SLOT`).
+- **R14.T6.a**: T1.g's fin casters are among them: an edge patch drawn by its records casts from the
+  interior records, its fin clusters by its slot, and `finClusters` is a shared input.
 - **R14.T6.a** (lean, 2026-11-02): the snapped centre is compared as the matrices' `f32` shift the
   casters are drawn with (a snap moves it a whole texel); `casterReachM` follows from what is.
 - **R14.T6.a** (lean, 2026-11-02): on the cluster path alone; the way back renders every cascade
