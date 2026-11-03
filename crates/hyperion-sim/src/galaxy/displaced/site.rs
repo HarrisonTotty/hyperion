@@ -89,7 +89,7 @@ use crate::stellar::brief::{DEAD_MARGIN_FLOOR, STATED_FACTOR};
 use crate::stellar::draws::{StandardNormal, StarDraws};
 use crate::stellar::fates::{FittedFate, FittedFates, STRIPPED_WINDOW, stripped_mark_matters};
 use crate::stellar::rules::StellarRules;
-use crate::stellar::sse::{MIN_INITIAL_MASS, lifetime_under};
+use crate::stellar::sse::{MIN_INITIAL_MASS, lifetime_by_under, lifetime_under};
 use crate::stellar::system::SystemStars;
 use crate::stellar::system::{
     clock_time_of_death, draw_metallicity, primary_draws, primary_eta, track_mass_of,
@@ -242,6 +242,36 @@ pub(crate) fn death_in_interval_under(
         age_at_epoch,
         &given_marks(composition, eta, draws),
         |m, composition, draws| lifetime_under(m, composition, draws, rules),
+    )
+}
+
+/// [`death_in_interval_under`], bit for bit, its exact tier's build stopped where the star outlives
+/// the interval's end, +H, which the verdict needs no further (`lifetime_by_under`): a star alive
+/// then dies after the interval (P09.T37's cold cost: a far feature's core collapses).
+///
+/// # Panics
+///
+/// As [`death_in_interval`] does.
+#[must_use]
+pub(crate) fn death_in_interval_by_end(
+    m0: SolarMasses,
+    composition: &Composition,
+    eta: StandardNormal,
+    age_at_epoch: Years,
+    draws: impl FnOnce() -> StarDraws,
+    rules: StellarRules,
+) -> Option<UniverseTime> {
+    // A year past +H's age, so that a death at +H itself is built to; a star the build finds
+    // alive then has its death past the interval, which no finite age stands for.
+    let age_max = Years::new(age_at_epoch.value() + CLOCK_WINDOW_H.as_julian_years_f64() + 1.0);
+    decide(
+        m0,
+        age_at_epoch,
+        &given_marks(composition, eta, draws),
+        |m, composition, draws| {
+            lifetime_by_under(m, composition, draws, rules, age_max)
+                .unwrap_or(Years::new(f64::INFINITY))
+        },
     )
 }
 
@@ -1027,6 +1057,60 @@ mod tests {
     #[ignore = "slow: 10⁴ lifetimes, about 12 s"]
     fn death_in_interval_keeps_every_death_inside_the_interval_over_ten_thousand_primaries() {
         soundness(10_000);
+    }
+
+    /// `death_in_interval_by_end`, whose exact tier stops its build at +H, gives
+    /// `death_in_interval_under`'s verdict bit for bit (P09.T37's cold cost): over band-E masses
+    /// of 8–60 M☉ at two metallicities, under the version's rules and every 27 hold's, at ages
+    /// from 5 Myr short of each star's death to 5 Myr past it, its own draws each.
+    #[test]
+    fn a_death_found_by_the_interval_s_end_is_the_death_bit_for_bit() {
+        let seed = Seed::new(0x0937_0000_0000_00c0);
+        let key = CellKey::new(Layer::E, [0, 0, 0]).unwrap();
+        let (mut inside, mut outside) = (0, 0);
+        for rules in [
+            StellarRules::of_version(GENERATOR_VERSION),
+            StellarRules::every_27_hold(),
+        ] {
+            for fe_h in [0.0, -1.0] {
+                let composition = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO);
+                for k in 0..24_u32 {
+                    let m0 = SolarMasses::new(8.0 + 52.0 * f64::from(k) / 23.0);
+                    let draws =
+                        StarDraws::for_star(seed, BodyId::new(key.candidate_id(k).unwrap(), 0));
+                    let life = lifetime_under(m0, &composition, &draws, rules);
+                    for offset in [-5e6, -1e6, -3e5, -1e3, 0.0, 5e2, 1e5, 2e6, 5e6] {
+                        let age = Years::new((life.value() + offset).max(0.0));
+                        let under = death_in_interval_under(
+                            m0,
+                            &composition,
+                            draws.eta(),
+                            age,
+                            || draws.clone(),
+                            rules,
+                        );
+                        let by_end = death_in_interval_by_end(
+                            m0,
+                            &composition,
+                            draws.eta(),
+                            age,
+                            || draws.clone(),
+                            rules,
+                        );
+                        assert_eq!(by_end, under, "{m0:?} at {age:?}, Fe/H {fe_h}");
+                        if under.is_some() {
+                            inside += 1;
+                        } else {
+                            outside += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            inside > 100 && outside > 100,
+            "{inside} inside, {outside} outside"
+        );
     }
 
     /// A composition with a helium excess, which shortens a life and which the mass bracket is

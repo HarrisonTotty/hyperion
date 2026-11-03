@@ -42,11 +42,13 @@
 //!   its candidate's place, as the catalogue's classes count theirs by their cells' (the lane's
 //!   lean): its kick spreads the class about the feature's profile and does not change its count.
 //!   Each candidate's line is tested against the sphere before its class's draws and test are
-//!   asked, but a core collapse's test is asked once a list, with the farthest its kept deaths lie
-//!   from their lines (`FeatureLevelList::kept_deaths`), which a cache may keep apart from the
-//!   list ([`FeatureInteriorCache::deaths`]): so a feature is read only where its entries or its
-//!   dead can reach the sphere, its list only where its entries can, and a kept entry is a hit as
-//!   a member is
+//!   asked, but a core collapse's candidate is bounded first, by how far its kick can take its
+//!   remnant from its line, from its draws and then from its death's time, and its test's steps
+//!   asked only where those bounds reach the sphere, each once a list
+//!   (`FeatureLevelList::kept_deaths`), which a cache may keep apart from the list
+//!   ([`FeatureInteriorCache::deaths`]): so a feature is read only where its entries or its dead
+//!   can reach the sphere, its list only where its entries can, and a kept entry is a hit as a
+//!   member is
 //!   ([`SystemOrigin::FeatureMember`](crate::galaxy::placement::SystemOrigin::FeatureMember)), its
 //!   ID resolved by [`resolve_member`](super::resolve_member). Below both holds' versions no list
 //!   is read, bit for bit.
@@ -85,7 +87,7 @@ use super::super::interior::LocalCell;
 use super::super::nested::{NestedCell, box_distance};
 use super::level_list::{FeatureLevelList, KeptDeaths};
 use super::placement::FeatureInterior;
-use super::recent::FeatureClassesRules;
+use super::recent::{FeatureClassesRules, RecentClass};
 use super::{MemberRecord, local_offset};
 
 /// Where a caller keeps feature interiors between queries (P09.T23).
@@ -113,14 +115,13 @@ pub trait FeatureInteriorCache {
         FeatureLevelList::listed_of(galaxy, feature).map(Arc::new)
     }
 
-    /// `feature`'s list's kept deaths in `galaxy` (fix-p09-recent-kicks), which an implementation
-    /// may keep apart from the list: exactly [`FeatureLevelList::kept_deaths`] of the list
-    /// [`list`](Self::list) lends, `None` for a feature that registers no class. A range query reads
+    /// `feature`'s list's core collapses in `galaxy` as a range query reads them
+    /// (fix-p09-recent-kicks), which an implementation may keep apart from the list: exactly
+    /// [`FeatureLevelList::deaths_of`], `None` for a feature that lists none. A range query reads
     /// them of every feature its lists' lookup finds, the list itself only where its entries can
-    /// reach the sphere.
+    /// reach the sphere, and asks their test only of the few whose bounds reach it.
     fn deaths(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<KeptDeaths>> {
-        self.list(galaxy, feature)
-            .map(|list| Arc::clone(list.kept_deaths(galaxy)))
+        FeatureLevelList::deaths_of(galaxy, feature).map(Arc::new)
     }
 }
 
@@ -221,7 +222,7 @@ impl FeatureInteriorCache for KeepInteriors<'_> {
             .clone()
     }
 
-    /// The deaths of the list it keeps, or of a list built, whose deaths alone it keeps.
+    /// The deaths of the list it keeps, or else those made without a list, kept.
     fn deaths(&self, galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Arc<KeptDeaths>> {
         self.check(galaxy);
         if let Some(list) = self
@@ -232,16 +233,13 @@ impl FeatureInteriorCache for KeepInteriors<'_> {
         {
             return list
                 .as_ref()
-                .map(|list| Arc::clone(list.kept_deaths(galaxy)));
+                .and_then(|list| list.kept_deaths(galaxy).cloned());
         }
         self.deaths
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(feature.id())
-            .or_insert_with(|| {
-                FeatureLevelList::listed_of(galaxy, feature)
-                    .map(|list| Arc::clone(list.kept_deaths(galaxy)))
-            })
+            .or_insert_with(|| FeatureLevelList::deaths_of(galaxy, feature).map(Arc::new))
             .clone()
     }
 }
@@ -491,21 +489,33 @@ impl<'a> FeatureMemberSource<'a> {
             .zip(&found)
             .filter_map(|(index, feature)| (index % step == first).then_some(feature));
         for feature in ours {
-            let touches = self
-                .interiors
-                .grid_reach(galaxy, feature)
-                .is_some_and(|reach| grid_may_touch(feature, centre, reach, radius));
+            // As the lookups ask, a feature found for its list's dead alone not asked its bound.
+            let touches = reach_touches(feature, centre, radius)
+                && self
+                    .interiors
+                    .grid_reach(galaxy, feature)
+                    .is_some_and(|reach| grid_may_touch(feature, centre, reach, radius));
             if touches {
                 drop(self.interiors.interior(galaxy, feature));
             }
-            // Every feature the lookups find has its list's deaths read by the hits, and its list
-            // where its entries can reach the sphere, as the members' lookup finds it: some
-            // thousand near the inner disc at 0.4 ms each (P09.T37), so they are made here too.
+            // Every feature the lookups find has its list's dead read by the hits, from its list
+            // where its entries can reach the sphere (some thousand near the inner disc at 0.4 ms
+            // each, P09.T37), and of them the steps of the test the sphere asks (P09.T37's cold
+            // cost), so they are made here too.
             if lists == FeatureClassesRules::Listed {
-                drop(self.interiors.deaths(galaxy, feature));
                 let near = member_reach(sphere.radius(), sphere.time(), UNBOUND_PAD_SPEED);
-                if reach_touches(feature, centre, near) {
-                    drop(self.interiors.list(galaxy, feature));
+                let kept = if reach_touches(feature, centre, near) {
+                    self.interiors
+                        .list(galaxy, feature)
+                        .and_then(|list| list.kept_deaths(galaxy).cloned())
+                } else {
+                    self.interiors.deaths(galaxy, feature)
+                };
+                if let Some(kept) = &kept {
+                    let away = LightYears::from(centre.distance_to(feature.position())).value();
+                    let layers = LayerSet::EMPTY.with(RecentClass::CoreCollapse.layer());
+                    let at = (feature, away, kept.velocity());
+                    death_hits(galaxy, Some(kept), at, &sphere, layers).for_each(drop);
                 }
             }
         }
@@ -812,8 +822,8 @@ fn lists_lookup_radius(galaxy: &Galaxy, sphere: &QuerySphere) -> LightYears {
 /// remnant's, at `b + k` with its kick `k`. So a time `dt` after its death the remnant is
 /// `|b + k| dt` from the site and the candidate's line `|b| dt`, and by the triangle inequality
 /// they are at most `|b| dt + |b + k| dt ≤ 2 LIFETIME_REACH` apart, which a kick against the bulk
-/// comes nearest: 460 km/s against 230 km/s for 3.6 Myr gives 5,524 ly. Every list's own bound,
-/// [`KeptDeaths::reach`], is one of these offsets, so never more.
+/// comes nearest: 460 km/s against 230 km/s for 3.6 Myr gives 5,524 ly. Every candidate's own
+/// bound, and so a list's [`KeptDeaths::reach`], is clamped at it.
 pub const LISTED_DEATH_REACH: LightYears = LightYears::new(2.0 * LIFETIME_REACH.value());
 
 /// How far from its candidate's line a listed core collapse's remnant may lie in `galaxy`:
@@ -1021,20 +1031,21 @@ fn list_hits(
     // without the list.
     let near =
         away <= member_reach(sphere.radius() + feature.reach(), t, UNBOUND_PAD_SPEED).value();
-    let (list, kept) = if near {
+    let (list, kept, velocity) = if near {
         let Some(list) = interiors.list(galaxy, feature) else {
             return;
         };
-        let kept = Arc::clone(list.kept_deaths(galaxy));
-        (Some(list), kept)
+        let Some(velocity) = list.entries_velocity() else {
+            return;
+        };
+        let kept = list.kept_deaths(galaxy).cloned();
+        (Some(list), kept, velocity)
     } else {
         let Some(kept) = interiors.deaths(galaxy, feature) else {
             return;
         };
-        (None, kept)
-    };
-    let Some(velocity) = kept.velocity() else {
-        return;
+        let velocity = kept.velocity();
+        (None, Some(kept), velocity)
     };
     let speed = KilometresPerSecond::from(velocity.speed());
     debug_assert!(
@@ -1043,22 +1054,18 @@ fn list_hits(
         feature.id()
     );
     // The list's pads: its entries lie within the reach of the feature's centre at the epoch, and
-    // its dead within their reach of their lines.
-    if away > member_reach(sphere.radius() + feature.reach() + kept.reach(), t, speed).value() {
+    // its dead within their bounds of their lines.
+    let dead = kept.as_deref().map_or(LightYears::ZERO, KeptDeaths::reach);
+    if away > member_reach(sphere.radius() + feature.reach() + dead, t, speed).value() {
         return;
     }
-    let elapsed = Seconds::new(t.since_epoch().as_seconds_f64());
-    let mut death_hits = kept.deaths().iter().filter_map(|death| {
-        let record = death.record();
-        (listed_death_may_reach(galaxy, death.candidate(), velocity, sphere)
-            && layers.contains(record.layer()))
-        .then(|| {
-            (
-                death.index(),
-                hit_there(record, death.motion().position_at(t), sphere),
-            )
-        })
-    });
+    let mut death_hits = death_hits(
+        galaxy,
+        kept.as_deref(),
+        (feature, away, velocity),
+        sphere,
+        layers,
+    );
     let list = match list {
         Some(list) if away <= member_reach(sphere.radius() + feature.reach(), t, speed).value() => {
             list
@@ -1069,6 +1076,7 @@ fn list_hits(
             return;
         }
     };
+    let elapsed = Seconds::new(t.since_epoch().as_seconds_f64());
     let mut death_hits = death_hits.by_ref().peekable();
     for entry in list.entries() {
         if entry.class() == ClassId::CORE_COLLAPSE {
@@ -1097,6 +1105,45 @@ fn list_hits(
             out.extend(hit_at(member.record(), velocity, sphere, elapsed));
         }
     }
+}
+
+/// The hits in `sphere` among `layers` of `kept`'s core collapses, of a feature `away` ly from the
+/// sphere's centre whose candidates move at `velocity`, each with its index, in index order: a
+/// candidate's test is asked only where its bound before its death reaches the sphere, its place
+/// and the rest only where the bound its death gives does too ([`KeptDeaths`]), and a death kept is
+/// pre-tested on its candidate's line ([`listed_death_may_reach`]) and then tested on its own.
+fn death_hits<'a>(
+    galaxy: &'a Galaxy,
+    kept: Option<&'a KeptDeaths>,
+    (feature, away, velocity): (&'a FeatureRecord, f64, GalacticVelocity),
+    sphere: &'a QuerySphere,
+    layers: LayerSet,
+) -> impl Iterator<Item = (u16, Option<SystemHit>)> + 'a {
+    let t = sphere.time();
+    let speed = KilometresPerSecond::from(velocity.speed());
+    let reaches = move |bound: LightYears| {
+        away <= member_reach(sphere.radius() + feature.reach() + bound, t, speed).value()
+    };
+    let asked = layers.contains(RecentClass::CoreCollapse.layer());
+    let candidates = kept
+        .filter(|_| asked)
+        .map_or(&[][..], KeptDeaths::candidates);
+    candidates.iter().filter_map(move |candidate| {
+        let kept = kept?;
+        if !reaches(candidate.bound()) || !reaches(kept.told(galaxy, candidate)?.1) {
+            return None;
+        }
+        let death = kept.kept(galaxy, candidate)?;
+        let record = death.record();
+        (listed_death_may_reach(galaxy, death.candidate(), velocity, sphere)
+            && layers.contains(record.layer()))
+        .then(|| {
+            (
+                death.index(),
+                hit_there(record, death.motion().position_at(t), sphere),
+            )
+        })
+    })
 }
 
 #[cfg(test)]

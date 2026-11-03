@@ -481,11 +481,11 @@ impl SharedClusterModelCache {
         list
     }
 
-    /// `feature`'s list's kept deaths in `galaxy`, the galaxy `key` names
-    /// (fix-p09-recent-kicks): those of the list the cache holds, or the deaths it holds, or else
-    /// those of a list built, which are stored beside what the cache holds of the feature without
-    /// the list, so that the far features a query reads the deaths of cost their bytes alone;
-    /// `None` for a feature that registers no class, which is stored too.
+    /// `feature`'s list's core collapses in `galaxy` as a query reads them, the galaxy `key` names
+    /// (fix-p09-recent-kicks): those of the list the cache holds, or those it holds, or else those
+    /// made without a list ([`FeatureLevelList::deaths_of`]), which are stored beside what the cache
+    /// holds of the feature, so that the far features a query reads the dead of cost their bytes
+    /// alone; `None` for a feature that lists none, which is stored too.
     ///
     /// As [`interior`](Self::interior), a galaxy without its kinematic tables never reads the cache.
     fn deaths(
@@ -499,10 +499,7 @@ impl SharedClusterModelCache {
             key.seed(),
             "a cluster model cache handle lends the interiors of one galaxy, and this is another's"
         );
-        let built = || {
-            FeatureLevelList::listed_of(galaxy, feature)
-                .map(|list| Arc::clone(list.kept_deaths(galaxy)))
-        };
+        let built = || FeatureLevelList::deaths_of(galaxy, feature).map(Arc::new);
         if galaxy.kinematics().is_none() {
             return built();
         }
@@ -510,7 +507,9 @@ impl SharedClusterModelCache {
         let held = self.interiors.get(&entry_key);
         if let Some(held) = held.as_ref() {
             if let Some(list) = &held.list {
-                return list.lent().map(|list| Arc::clone(list.kept_deaths(galaxy)));
+                return list
+                    .lent()
+                    .and_then(|list| list.kept_deaths(galaxy).cloned());
             }
             if let Some(deaths) = &held.deaths {
                 return deaths.lent();
@@ -663,7 +662,7 @@ impl FeatureInteriorCache for KeptInteriors<'_> {
         {
             return list
                 .as_ref()
-                .map(|list| Arc::clone(list.kept_deaths(galaxy)));
+                .and_then(|list| list.kept_deaths(galaxy).cloned());
         }
         self.shared.deaths(galaxy, feature)
     }

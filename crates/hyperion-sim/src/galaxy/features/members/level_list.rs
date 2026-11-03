@@ -50,21 +50,25 @@ use crate::galaxy::catalogue_classes::binary::feature::{
     FeatureBinaries, ListedBinary, is_listed_binary,
 };
 use crate::galaxy::catalogue_classes::source::member_layers;
+use crate::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
 use crate::galaxy::catalogue_classes::{CatalogueMotion, ClassId, FEATURE_LEVEL_LIST_ORDER};
+use crate::galaxy::displaced::marks::LifetimeBracket;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::{LayerCounts, LayerSet};
+use crate::galaxy::snr::ShellEnvironment;
 use crate::id::{CentreMemberId, FeatureMemberId, MemberSlot, SystemId, SystemIdKind};
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::stellar::system::SystemStars;
-use crate::time::{CLOCK_WINDOW_H, UniverseTime};
+use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, UniverseTime};
 use crate::units::LightYears;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
+use crate::units::consts::SPEED_OF_LIGHT;
 
 use super::super::catalogue::{FeatureCatalogue, FeatureRecord};
 use super::super::interior::ClassProfile;
 use super::MemberRecord;
-use super::recent::{FeatureStars, RecentClass, RecentEntry};
+use super::recent::{CandidateDeath, FeatureStars, RecentClass, RecentEntry};
 
 /// The words each class owns on the list's streams: 2³², far beyond any count's draws.
 const CLASS_WORDS: u64 = 1 << 32;
@@ -245,7 +249,7 @@ pub struct FeatureLevelList {
     /// The index of the classes' first entry: 1, or past the galactic centre's victims.
     first: u32,
     /// The feature's stars, which draw its recent classes' entries, where it registers any.
-    stars: Option<Box<FeatureStars>>,
+    stars: Option<Arc<FeatureStars>>,
     /// The feature's hosts of plan 11's binary classes, which draw their entries, where it
     /// registers any (P11.T8.f).
     binaries: Option<Box<FeatureBinaries>>,
@@ -253,46 +257,236 @@ pub struct FeatureLevelList {
     deaths: DeathsFound,
 }
 
-/// A feature's list's core collapses that their test keeps, each on its broken line
-/// (fix-p09-recent-kicks), and the farthest any of their remnants lies from its candidate's line
-/// by the clock window's end: what a range query reads of them (P09.T37), found once a list
-/// ([`FeatureLevelList::kept_deaths`]). A cache may keep it apart from its list, which is far
-/// larger, so that a query reads a list only where its entries can reach its sphere, and of a list
-/// whose dead alone can, these.
+/// A feature's list's core collapses as a range query reads them (P09.T37; fix-p09-recent-kicks):
+/// each candidate with a bound on how far from its candidate's line its remnant can lie, found
+/// from its draws alone, and the class's test asked of it only when a query's sphere lies within
+/// that bound of its feature: first its death's time, which reads no place and gives a closer
+/// bound, and then, where that bound still reaches the sphere, its place and the rest
+/// ([`FeatureLevelList::kept_deaths`]). Each step is found once and kept, so a query asks no
+/// candidate again; a far feature's few dead that can reach a sphere are all a cold query
+/// places, and a cache may keep these apart from the list, some hundred bytes a feature, without
+/// its stars, which each step makes again (`FeatureStars::of`, some 20 µs without its profile's
+/// table).
+///
+/// A bound (`death_bound`) reads the clock time from the death to +H, `dt`, and the feature's
+/// bulk speed `b`. The remnant leaves its candidate's line at its kick's `|k| dt`; its kick is
+/// at most the kick law's 1,000 km/s, its window at most the galaxy's longest cap, and its entry's
+/// lifetime keeps its two lines, at `b` and `b + k`, within `LIFETIME_REACH` of its site
+/// (`DeathMarks::of`'s cap). Before the death is known `dt` is bounded by the earliest death age
+/// the shared lifetime bracket gives its mass (the supernova test's first tier).
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeptDeaths {
-    velocity: Option<GalacticVelocity>,
+    stars: DeathsStars,
+    velocity: GalacticVelocity,
+    seed: Seed,
+    word: u64,
+    centre: GalacticPosition,
     reach: LightYears,
-    deaths: Vec<KeptDeath>,
+    candidates: Vec<DeathCandidate>,
+}
+
+/// Where a [`KeptDeaths`]'s steps find their feature's stars: its list's, or made again from its
+/// feature for each step, where it is kept without its list.
+#[derive(Debug, Clone, PartialEq)]
+enum DeathsStars {
+    /// Its list's.
+    Listed(Arc<FeatureStars>),
+    /// Its feature's, made again ([`FeatureStars::listing`]).
+    Alone(FeatureRecord),
+}
+
+/// One core-collapse candidate of a [`KeptDeaths`]: its index, its bound before its death is
+/// known, and its test's two steps, each found when first asked: its death's time with the bound
+/// that gives, and its death kept, placed.
+#[derive(Debug, Clone)]
+pub(crate) struct DeathCandidate {
+    index: u16,
+    bound: LightYears,
+    told: OnceLock<Option<(UniverseTime, LightYears)>>,
+    kept: OnceLock<Option<Box<KeptDeath>>>,
+}
+
+/// Two candidates are the same if their index and bound are: what each step finds is a function
+/// of those and their list.
+impl PartialEq for DeathCandidate {
+    fn eq(&self, other: &Self) -> bool {
+        (self.index, self.bound) == (other.index, other.bound)
+    }
+}
+
+impl DeathCandidate {
+    /// How far from its candidate's line its remnant can lie by +H, from its draws alone.
+    #[must_use]
+    pub(crate) const fn bound(&self) -> LightYears {
+        self.bound
+    }
 }
 
 impl KeptDeaths {
-    /// The velocity its list's entries move at before any death, its feature's bulk motion:
-    /// `None` for a list that has neither stars nor binary hosts to draw them.
+    /// The list's `count` core-collapse candidates, from index 1, of a feature whose stars are
+    /// `stars` (and found again by `source`), whose list is keyed by `seed` and `word` about
+    /// `centre`.
     #[must_use]
-    pub const fn velocity(&self) -> Option<GalacticVelocity> {
+    fn of(
+        galaxy: &Galaxy,
+        (stars, source): (&FeatureStars, DeathsStars),
+        (seed, word, centre): (Seed, u64, GalacticPosition),
+        count: u32,
+    ) -> Self {
+        let bulk = stars.velocity().speed().value() / SPEED_OF_LIGHT;
+        let candidates: Vec<DeathCandidate> = (0..count)
+            .filter_map(|number| {
+                let index = u16::try_from(number + 1).ok()?;
+                let (record, _) = stars.core_collapse_draws(galaxy, index)?;
+                Some(DeathCandidate {
+                    index,
+                    bound: bound_before_death(galaxy, &record, bulk),
+                    told: OnceLock::new(),
+                    kept: OnceLock::new(),
+                })
+            })
+            .collect();
+        let reach =
+            candidates
+                .iter()
+                .map(|candidate| candidate.bound)
+                .fold(
+                    LightYears::ZERO,
+                    |a, b| if b.value() > a.value() { b } else { a },
+                );
+        Self {
+            stars: source,
+            velocity: stars.velocity(),
+            seed,
+            word,
+            centre,
+            reach,
+            candidates,
+        }
+    }
+
+    /// The velocity its candidates move at before their deaths, its feature's bulk motion.
+    #[must_use]
+    pub const fn velocity(&self) -> GalacticVelocity {
         self.velocity
     }
 
-    /// How far from its candidate's line any of them lies at any time of the clock window, ly,
-    /// with margins over the rounding: zero for a list that keeps none.
+    /// How far from its candidate's line any of their remnants can lie at any time of the clock
+    /// window, ly, by their bounds before their deaths are known: zero for none.
     #[must_use]
     pub const fn reach(&self) -> LightYears {
         self.reach
     }
 
-    /// Each, in index order.
+    /// Its candidates, in index order.
     #[must_use]
-    pub fn deaths(&self) -> &[KeptDeath] {
-        &self.deaths
+    pub(crate) fn candidates(&self) -> &[DeathCandidate] {
+        &self.candidates
     }
 
-    /// The bytes it owns on the heap, its deaths' buffer by its capacity: what a caller's
-    /// byte-bounded cache charges it.
+    /// Its feature's stars, for a step.
+    ///
+    /// # Panics
+    ///
+    /// If its feature has none, which the list it was made from had.
+    fn with_stars<R>(&self, galaxy: &Galaxy, step: impl FnOnce(&FeatureStars) -> R) -> R {
+        match &self.stars {
+            DeathsStars::Listed(stars) => step(stars),
+            DeathsStars::Alone(feature) => step(
+                &FeatureStars::listing(galaxy, feature).expect("a listed feature's stars, again"),
+            ),
+        }
+    }
+
+    /// `candidate`'s death's time, if its runaway's and its death's tests keep it, with the bound
+    /// that gives: found when first asked, and kept.
+    #[must_use]
+    pub(crate) fn told(
+        &self,
+        galaxy: &Galaxy,
+        candidate: &DeathCandidate,
+    ) -> Option<(UniverseTime, LightYears)> {
+        *candidate.told.get_or_init(|| {
+            let death = self.with_stars(galaxy, |stars| {
+                let (record, range) = stars.core_collapse_draws(galaxy, candidate.index)?;
+                stars.core_collapse_death(galaxy, record, range)
+            })?;
+            let dt = clock_end()
+                .checked_since(death.death())
+                .expect("two clock times are a span apart")
+                .as_julian_years_f64();
+            let bulk = self.velocity.speed().value() / SPEED_OF_LIGHT;
+            Some((death.death(), death_bound(dt, bulk)))
+        })
+    }
+
+    /// `candidate`'s death that the class's test keeps, placed: found when first asked, after its
+    /// death's time ([`told`](Self::told)), and kept.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if its remnant lies farther from its candidate's line by +H than its
+    /// bound, which would make the bound no bound.
+    #[must_use]
+    pub(crate) fn kept<'c>(
+        &self,
+        galaxy: &Galaxy,
+        candidate: &'c DeathCandidate,
+    ) -> Option<&'c KeptDeath> {
+        candidate
+            .kept
+            .get_or_init(|| {
+                let (death, bound) = self.told(galaxy, candidate)?;
+                let (position, entry) = self.with_stars(galaxy, |stars| {
+                    let position = list_position(
+                        (self.seed, self.word, &self.centre),
+                        ClassId::CORE_COLLAPSE,
+                        stars.profile(),
+                        u32::from(candidate.index) - 1,
+                    );
+                    let (record, range) = stars.core_collapse_draws(galaxy, candidate.index)?;
+                    let death = CandidateDeath::of(record, range, death);
+                    Some((
+                        position,
+                        stars.core_collapse_entry(galaxy, &position, &death)?,
+                    ))
+                })?;
+                let motion = *entry.motion();
+                if cfg!(debug_assertions) {
+                    let end = clock_end();
+                    let line = CatalogueMotion::straight(position, self.velocity).position_at(end);
+                    let off = LightYears::from(motion.position_at(end).distance_to(&line)).value();
+                    debug_assert!(
+                        off <= bound.value(),
+                        "{:?}: a remnant {off} ly from its line, past its bound {bound:?}",
+                        entry.member().record().id()
+                    );
+                }
+                Some(Box::new(KeptDeath {
+                    index: candidate.index,
+                    candidate: position,
+                    record: *entry.member().record(),
+                    motion,
+                }))
+            })
+            .as_deref()
+    }
+
+    /// The bytes it owns on the heap: its candidates' buffer by its capacity, and a kept death's
+    /// box for each, room for what their steps find: what a caller's byte-bounded cache charges
+    /// it. Its stars are its list's, or made again.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
-        self.deaths.capacity() * size_of::<KeptDeath>()
+        self.candidates.capacity() * (size_of::<DeathCandidate>() + size_of::<KeptDeath>())
     }
+}
+
+/// The clock window's end, +H, by which a bound holds.
+#[must_use]
+fn clock_end() -> UniverseTime {
+    UniverseTime::EPOCH
+        .checked_add(CLOCK_WINDOW_H)
+        .expect("+H is on the clock")
 }
 
 /// One of a list's core collapses that its test keeps: its candidate's index and place, its
@@ -331,10 +525,105 @@ impl KeptDeath {
     }
 }
 
-/// A list's [`KeptDeaths`], found when first asked for: a function of the list, so no part of its
-/// value, and two lists are equal whatever either has found.
+/// How far a remnant can lie from its candidate's line `dt` years after its death, its feature's
+/// bulk speed `b` ly a year (c = 1), with margins of 10⁻⁹ of it and 10⁻⁶ ly over the rounding
+/// (fix-p09-recent-kicks' cold cost; [`KeptDeaths`]).
+///
+/// It is `|k| dt` at the most for a kick `|k|` up to the kick law's ceiling `K`, 1,000 km/s (its
+/// ordinary mode's truncation; its low modes' Maxwellians reach some 75 km/s from a 53-bit
+/// uniform), given that the entry's lifetime keeps the remnant's line, at `b + k`, within
+/// `LIFETIME_REACH`, R, of its site over `dt` and the progenitor's, at `b`, too: `dt` at most
+/// `R ÷ max(b, |k| − b)`. Kicks up to `2b` give at most `2b min(dt, R ÷ b)`; faster ones, whose
+/// remnant's line is at least `|k| − b`, give `k* dt = b dt + R` at `k* = b + R ÷ dt` where that
+/// lies under `K`, or `K dt` where it lies past it. Never more than [`LISTED_DEATH_REACH`].
+#[must_use]
+pub(crate) fn death_bound(dt: f64, b: f64) -> LightYears {
+    let reach = LIFETIME_REACH.value();
+    let k_max = KICK_CEILING_KM_S / (SPEED_OF_LIGHT / 1e3);
+    let dt = dt.max(0.0);
+    let slow = (2.0 * b).min(k_max) * dt.min(reach / b);
+    let fast = if 2.0 * b < k_max {
+        let k_star = b + reach / dt;
+        if k_star > k_max {
+            k_max * dt
+        } else if k_star > 2.0 * b {
+            k_star * dt
+        } else {
+            2.0 * reach
+        }
+    } else {
+        0.0
+    };
+    LightYears::new(
+        (slow.max(fast) * (1.0 + 1e-9) + 1e-6).min(super::source::LISTED_DEATH_REACH.value()),
+    )
+}
+
+/// The ceiling of the natal kick law's speeds, km/s: its ordinary mode's truncation (plan 06,
+/// `stellar::remnant::kick`), above every low mode's draw.
+const KICK_CEILING_KM_S: f64 = 1_000.0;
+
+/// The bound on a core-collapse candidate's remnant's distance from its candidate's line by +H,
+/// from its draws, `record`, before its death is known: its earliest death by the shared lifetime
+/// bracket of its initial mass, or else the interval's longest reach back, the galaxy's longest
+/// window cap and L + 2H, whichever comes later; its feature's bulk speed `speed` ly a year.
+#[must_use]
+fn bound_before_death(galaxy: &Galaxy, record: &SystemRecord, speed: f64) -> LightYears {
+    let caps = galaxy.window_caps();
+    let longest = caps
+        .cap(ShellEnvironment::Field)
+        .value()
+        .max(caps.cap(ShellEnvironment::Bubble).value());
+    let h = CLOCK_WINDOW_H.as_julian_years_f64();
+    let cap = longest + LIGHT_CROSSING_L.as_julian_years_f64() + 2.0 * h;
+    let dt = LifetimeBracket::shared()
+        .bracket(record.primary_initial_mass())
+        .map_or(cap, |(least, _)| {
+            (h + record.age_at_epoch().value() - least.value()).min(cap)
+        });
+    death_bound(dt, speed)
+}
+
+/// Member `number` of class `class` placed by `profile` on the list keyed by `seed` and `word`
+/// about `centre`: the radius's quantile of its profile, an isotropic direction
+/// ([`FeatureLevelList::entry`]'s place, which [`KeptDeaths`] reads without the list).
+#[must_use]
+fn list_position(
+    (seed, word, centre): (Seed, u64, &GalacticPosition),
+    class: ClassId,
+    profile: &ClassProfile,
+    number: u32,
+) -> GalacticPosition {
+    let mut stream = Stream::open(seed, tags::MEMBER_LIST_POSITION, ObjectKey::feature(word));
+    stream.seek(CLASS_WORDS * u64::from(class.value()) + 3 * u64::from(number));
+    let r = profile.radius_quantile(stream.uniform());
+    let cos_theta = 2.0 * stream.uniform() - 1.0;
+    let phi = 2.0 * core::f64::consts::PI * stream.uniform();
+    let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+    let (s, c) = math::sin_cos(phi);
+    let local = [r * sin_theta * c, r * sin_theta * s, r * cos_theta];
+    centre
+        .translated(GalacticDisplacement::new(
+            local.map(|x| x * METRES_PER_LIGHT_YEAR),
+        ))
+        .expect("a list member lies within its feature's reach of a centre in the root cube")
+}
+
+/// The count of `class`, expecting `expected` members, on the list keyed by `word` in `galaxy`,
+/// with `room` indices left for it: its Poisson draw on its own words of the list's stream,
+/// clamped at the room (module documentation).
+#[must_use]
+fn class_count(galaxy: &Galaxy, word: u64, (class, expected): (ClassId, f64), room: u32) -> u32 {
+    let mut stream = Stream::open(galaxy.seed(), tags::MEMBER_LIST, ObjectKey::feature(word));
+    stream.seek(CLASS_WORDS * u64::from(class.value()));
+    let drawn = u32::try_from(stream.poisson(expected)).unwrap_or(u32::MAX);
+    drawn.min(room)
+}
+
+/// A list's [`KeptDeaths`], made when first asked for: a function of the list, so no part of its
+/// value, and two lists are equal whatever either has made.
 #[derive(Debug, Clone, Default)]
-struct DeathsFound(OnceLock<Arc<KeptDeaths>>);
+struct DeathsFound(OnceLock<Option<Arc<KeptDeaths>>>);
 
 impl PartialEq for DeathsFound {
     fn eq(&self, _other: &Self) -> bool {
@@ -347,7 +636,7 @@ impl FeatureLevelList {
     /// feature has one, and a catalogue feature's 13-bit index.
     #[must_use]
     pub fn of(galaxy: &Galaxy, feature: &FeatureRecord) -> Self {
-        let stars = FeatureStars::listing(galaxy, feature);
+        let stars = FeatureStars::listing(galaxy, feature).map(FeatureStars::tabulated);
         let mut classes = stars
             .as_ref()
             .map_or_else(Vec::new, |stars| stars.list_classes(galaxy));
@@ -358,7 +647,7 @@ impl FeatureLevelList {
             classes.extend(binaries.list_classes());
         }
         Self {
-            stars: stars.filter(|_| recent).map(Box::new),
+            stars: stars.filter(|_| recent).map(Arc::new),
             binaries: binaries.map(Box::new),
             ..Self::with_classes(
                 galaxy,
@@ -380,9 +669,9 @@ impl FeatureLevelList {
         if list.classes.is_empty() {
             return None;
         }
-        // A query reads every list's dead (fix-p09-recent-kicks), so they are found with it, and a
-        // cache that keeps the list charges their bytes; the list keeps them, so the reference is
-        // not needed here.
+        // A query reads every list's dead (fix-p09-recent-kicks), their draws and bounds, so they
+        // are made with it, and a cache that keeps the list charges their bytes; the list keeps
+        // them, so the reference is not needed here.
         let _ = list.kept_deaths(galaxy);
         Some(list)
     }
@@ -458,11 +747,7 @@ impl FeatureLevelList {
         let counts = classes
             .iter()
             .map(|c| {
-                let mut stream =
-                    Stream::open(galaxy.seed(), tags::MEMBER_LIST, ObjectKey::feature(word));
-                stream.seek(CLASS_WORDS * u64::from(c.class.value()));
-                let drawn = u32::try_from(stream.poisson(c.expected)).unwrap_or(u32::MAX);
-                let kept = drawn.min(room);
+                let kept = class_count(galaxy, word, (c.class, c.expected), room);
                 room -= kept;
                 kept
             })
@@ -505,62 +790,52 @@ impl FeatureLevelList {
                 .deaths
                 .0
                 .get()
+                .and_then(Option::as_ref)
                 .map_or(0, |found| size_of::<KeptDeaths>() + found.heap_bytes())
     }
 
-    /// Its core collapses that their test keeps, found when first asked for and kept with the
-    /// list (P09.T37; fix-p09-recent-kicks): each with its candidate's place, its member's record
-    /// and its broken line, and how far from its candidate's line any lies by the clock window's
-    /// end, +H. Its remnant leaves the line at its death, so the farthest is at +H, its kick's
-    /// travel since; a margin of 10⁻⁹ of it and 10⁻⁶ ly covers the rounding of both lines.
-    /// Empty for a list without its stars.
-    ///
-    /// # Panics
-    ///
-    /// Never: +H is on the clock, and no line slower than light leaves the addressable range by
-    /// then.
+    /// Its core collapses as a range query reads them ([`KeptDeaths`]), made when first asked for
+    /// and kept with the list; `None` for a list without them.
     #[must_use]
-    pub fn kept_deaths(&self, galaxy: &Galaxy) -> &Arc<KeptDeaths> {
-        self.deaths.0.get_or_init(|| {
-            let end = UniverseTime::EPOCH
-                .checked_add(CLOCK_WINDOW_H)
-                .expect("+H is on the clock");
-            let mut deaths = Vec::new();
-            let mut farthest: f64 = 0.0;
-            let velocity = self.stars.as_deref().map(FeatureStars::velocity);
-            for entry in self.entries() {
-                if entry.class() != ClassId::CORE_COLLAPSE {
-                    continue;
-                }
-                let Some((death, velocity)) =
-                    self.recent_entry(galaxy, entry.index()).zip(velocity)
-                else {
-                    continue;
-                };
-                let motion = *death.motion();
-                let line = CatalogueMotion::straight(*entry.position(), velocity).position_at(end);
-                let off = LightYears::from(motion.position_at(end).distance_to(&line)).value();
-                farthest = farthest.max(off);
-                deaths.push(KeptDeath {
-                    index: entry.index(),
-                    candidate: *entry.position(),
-                    record: *death.member().record(),
-                    motion,
-                });
-            }
-            debug_assert!(
-                farthest <= super::source::LISTED_DEATH_REACH.value(),
-                "a list's dead lie {farthest} ly from their lines, past the listed deaths' reach"
-            );
-            Arc::new(KeptDeaths {
-                velocity: self.entries_velocity(),
-                reach: LightYears::new(if deaths.is_empty() {
-                    0.0
-                } else {
-                    farthest * (1.0 + 1e-9) + 1e-6
-                }),
-                deaths,
+    pub fn kept_deaths(&self, galaxy: &Galaxy) -> Option<&Arc<KeptDeaths>> {
+        self.deaths
+            .0
+            .get_or_init(|| {
+                let count = self.count(ClassId::CORE_COLLAPSE);
+                let stars = self.stars.as_ref().filter(|_| count > 0)?;
+                Some(Arc::new(KeptDeaths::of(
+                    galaxy,
+                    (stars, DeathsStars::Listed(Arc::clone(stars))),
+                    (self.seed, self.word, self.centre),
+                    count,
+                )))
             })
+            .as_ref()
+    }
+
+    /// `feature`'s list's core collapses ([`kept_deaths`](Self::kept_deaths)) without its list:
+    /// its stars and its core collapses' count, which its list draws first, bit for bit, kept
+    /// without its stars; `None` for a feature that lists none. What a far feature costs a query
+    /// (P09.T37).
+    #[must_use]
+    pub fn deaths_of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<KeptDeaths> {
+        let stars = FeatureStars::listing(galaxy, feature)?;
+        let expected = stars.core_collapse_expected()?;
+        let word = feature.id().object_word();
+        // The first of a catalogue feature's classes, at index 1 (`with_classes_from`).
+        let count = class_count(
+            galaxy,
+            word,
+            (ClassId::CORE_COLLAPSE, expected),
+            ListIndex::Feature.limit() - 1,
+        );
+        (count > 0).then(|| {
+            KeptDeaths::of(
+                galaxy,
+                (&stars, DeathsStars::Alone(*feature)),
+                (galaxy.seed(), word, *feature.position()),
+                count,
+            )
         })
     }
 
@@ -635,23 +910,12 @@ impl FeatureLevelList {
     /// direction.
     #[must_use]
     fn position_of(&self, class: &ListClass, number: u32) -> GalacticPosition {
-        let mut stream = Stream::open(
-            self.seed,
-            tags::MEMBER_LIST_POSITION,
-            ObjectKey::feature(self.word),
-        );
-        stream.seek(CLASS_WORDS * u64::from(class.class.value()) + 3 * u64::from(number));
-        let r = class.profile.radius_quantile(stream.uniform());
-        let cos_theta = 2.0 * stream.uniform() - 1.0;
-        let phi = 2.0 * core::f64::consts::PI * stream.uniform();
-        let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
-        let (s, c) = math::sin_cos(phi);
-        let local = [r * sin_theta * c, r * sin_theta * s, r * cos_theta];
-        self.centre
-            .translated(GalacticDisplacement::new(
-                local.map(|x| x * METRES_PER_LIGHT_YEAR),
-            ))
-            .expect("a list member lies within its feature's reach of a centre in the root cube")
+        list_position(
+            (self.seed, self.word, &self.centre),
+            class.class,
+            &class.profile,
+            number,
+        )
     }
 
     /// The member at `index`, or `None`: no member zero is generated for a catalogue feature, and

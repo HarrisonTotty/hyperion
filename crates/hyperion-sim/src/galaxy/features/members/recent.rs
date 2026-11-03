@@ -79,7 +79,7 @@ use crate::galaxy::catalogue_classes::{CatalogueMotion, ClassId};
 #[cfg(doc)]
 use crate::galaxy::displaced::death_in_interval;
 use crate::galaxy::displaced::marks::LifetimeBracket;
-use crate::galaxy::displaced::{ExplosionSite, death_in_interval_under};
+use crate::galaxy::displaced::{ExplosionSite, death_in_interval_by_end, death_in_interval_under};
 use crate::galaxy::features::catalogue::{FeatureMarks, FeatureRecord, bulk_velocity};
 use crate::galaxy::features::cluster::PLUMMER_HALF_MASS_RATIO;
 use crate::galaxy::features::ids::PackedFeature;
@@ -286,17 +286,15 @@ impl FeatureStars {
         let formed = SolarMasses::new(born.value() * survival);
         let band_e = formed.value() / galaxy.mean_formed_mass().value()
             * galaxy.shares().share(MassBand::E, population);
-        // Tabulated now, so that its list's classes, plan 11's among them, share one table
-        // (`ClassProfile::tabulated`; P09.T37: a range query reads some thousand lists near the
-        // inner disc).
+        // Tabulated when first read, or by its list before its classes share it (`tabulated`): a
+        // far feature's dead read it for their places alone, where few need one (P09.T37).
         let profile = ClassProfile::new(
             ProfileShape::Plummer {
                 scale: half_mass / PLUMMER_HALF_MASS_RATIO,
             },
             feature.reach().value(),
             1.0,
-        )
-        .tabulated();
+        );
         let mut stars = Self {
             feature: *feature,
             population,
@@ -317,6 +315,27 @@ impl FeatureStars {
             stars.variables = Candidates::luminous_blue_variable(imf, ages);
         }
         Some(stars)
+    }
+
+    /// The same stars with their profile's table made now ([`ClassProfile::tabulated`]), so that
+    /// its list's classes, plan 11's among them, share one table (P09.T37: a range query reads
+    /// some thousand lists near the inner disc). The table is the same whenever it is made.
+    #[must_use]
+    pub(crate) fn tabulated(self) -> Self {
+        Self {
+            profile: self.profile.tabulated(),
+            ..self
+        }
+    }
+
+    /// Its core collapses' expected candidates, the count its list draws its class's on, or `None`
+    /// where it lists none: what [`list_classes`](Self::list_classes) gives the class, bit for bit.
+    #[must_use]
+    pub(crate) fn core_collapse_expected(&self) -> Option<f64> {
+        self.core_collapses
+            .as_ref()
+            .map(|candidates| self.band_e * candidates.share())
+            .filter(|&expected| expected > 0.0)
     }
 
     /// The feature.
@@ -593,31 +612,8 @@ impl FeatureStars {
                         supernova: None,
                     });
                 }
-                // From 27 a runaway's death is the class's, in the field (P09.T33.b).
-                if self.runaway(galaxy, &record) {
-                    return None;
-                }
-                let death =
-                    self.core_collapse(galaxy, &record, &self.composition, self.velocity)?;
-                // The remnant where its kick takes it (fix-p09-recent-kicks): the member's epoch
-                // place and velocity are its broken line's.
-                let at = death.motion.position_at(UniverseTime::EPOCH);
-                let kicked = self.record(
-                    record.id(),
-                    &at,
-                    record.primary_initial_mass(),
-                    record.age_at_epoch(),
-                );
-                Some(RecentEntry {
-                    class,
-                    member: self
-                        .member(kicked, range)
-                        .moving_at(death.motion.velocity_at(UniverseTime::EPOCH)),
-                    site: Some(death.site),
-                    window: Some(*death.supernova.window()),
-                    motion: death.motion,
-                    supernova: Some(death.supernova),
-                })
+                let death = self.core_collapse_death(galaxy, record, range)?;
+                self.core_collapse_entry(galaxy, position, &death)
             }
             RecentClass::TypeIa => self.type_ia(galaxy, index, position),
         }
@@ -694,6 +690,98 @@ impl FeatureStars {
         })
     }
 
+    /// Core-collapse candidate `index`'s draws and its death's time, if they keep it so far: the
+    /// first steps of the class's test ([`entry`](Self::entry)), its runaway's and its death's,
+    /// which read its record's ID, initial mass and age but not its place, so that a far feature's
+    /// dead can be told before any is placed (P09.T37's cold cost); `None` for an index past the
+    /// list's 13 bits or a candidate they refuse.
+    #[must_use]
+    pub(crate) fn core_collapse_draws(
+        &self,
+        galaxy: &Galaxy,
+        index: u16,
+    ) -> Option<(SystemRecord, (SolarMasses, SolarMasses))> {
+        // The feature's centre stands in for the place, which nothing before the site reads.
+        self.candidate(
+            galaxy,
+            RecentClass::CoreCollapse,
+            index,
+            self.feature.position(),
+        )
+    }
+
+    /// The death of the core-collapse candidate whose draws gave `record` and `range`
+    /// ([`core_collapse_draws`](Self::core_collapse_draws), or [`candidate`](Self::candidate)'s at
+    /// its place), if its runaway's and its death's tests keep it: its record's place is not read.
+    #[must_use]
+    pub(crate) fn core_collapse_death(
+        &self,
+        galaxy: &Galaxy,
+        record: SystemRecord,
+        range: (SolarMasses, SolarMasses),
+    ) -> Option<CandidateDeath> {
+        // From 27 a runaway's death is the class's, in the field (P09.T33.b).
+        if self.runaway(galaxy, &record) {
+            return None;
+        }
+        let death = death_in_interval_by_end(
+            record.primary_initial_mass(),
+            &self.composition,
+            primary_eta(galaxy, &record),
+            record.age_at_epoch(),
+            || primary_draws(galaxy, &record),
+            galaxy.rules().stellar,
+        )?;
+        Some(CandidateDeath {
+            record,
+            range,
+            death,
+        })
+    }
+
+    /// The core collapse whose candidate's `death` its first steps found, placed at `position`: the
+    /// rest of the class's test and its entry ([`entry`](Self::entry)), bit for bit.
+    #[must_use]
+    pub(crate) fn core_collapse_entry(
+        &self,
+        galaxy: &Galaxy,
+        position: &GalacticPosition,
+        death: &CandidateDeath,
+    ) -> Option<RecentEntry> {
+        let record = self.record(
+            death.record.id(),
+            position,
+            death.record.primary_initial_mass(),
+            death.record.age_at_epoch(),
+        );
+        let listed = self.core_collapse_after(
+            galaxy,
+            &record,
+            &self.composition,
+            self.velocity,
+            death.death,
+        )?;
+        // The remnant where its kick takes it (fix-p09-recent-kicks): the member's epoch place and
+        // velocity are its broken line's.
+        let at = listed.motion.position_at(UniverseTime::EPOCH);
+        let kicked = self.record(
+            record.id(),
+            &at,
+            record.primary_initial_mass(),
+            record.age_at_epoch(),
+        );
+        Some(RecentEntry {
+            class: RecentClass::CoreCollapse,
+            member: self
+                .member(kicked, death.range)
+                .moving_at(listed.motion.velocity_at(UniverseTime::EPOCH)),
+            site: Some(listed.site),
+            window: Some(*listed.supernova.window()),
+            motion: listed.motion,
+            supernova: Some(listed.supernova),
+        })
+    }
+
     /// The core collapses' test on `record`, of composition `composition` moving at `velocity`: its
     /// death ([`ListedDeath`]), if the one shared test keeps it.
     #[must_use]
@@ -712,6 +800,19 @@ impl FeatureStars {
             || primary_draws(galaxy, record),
             galaxy.rules().stellar,
         )?;
+        self.core_collapse_after(galaxy, record, composition, velocity, death)
+    }
+
+    /// [`core_collapse`](Self::core_collapse) of a record whose death in the interval is `death`.
+    #[must_use]
+    fn core_collapse_after(
+        &self,
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        composition: &Composition,
+        velocity: GalacticVelocity,
+        death: UniverseTime,
+    ) -> Option<ListedDeath> {
         let site = ExplosionSite::new(moved(record.epoch_position(), velocity, death), death);
         let stars = SystemStars::generate_with(
             galaxy,
@@ -994,6 +1095,40 @@ pub(crate) fn claimed_by(
         ))
         .is_some())
     .then_some(Claim::Listed(RecentClass::LuminousBlueVariable))
+}
+
+/// A core-collapse candidate's record, drawn mass range and death in the interval, which its
+/// runaway's and its death's tests keep ([`FeatureStars::core_collapse_death`]): the steps of the
+/// class's test that read no place.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CandidateDeath {
+    record: SystemRecord,
+    range: (SolarMasses, SolarMasses),
+    death: UniverseTime,
+}
+
+impl CandidateDeath {
+    /// The death at `death` of the candidate whose draws gave `record` and `range`, which its
+    /// runaway's and its death's tests keep ([`FeatureStars::core_collapse_death`]'s, found
+    /// before).
+    #[must_use]
+    pub(crate) const fn of(
+        record: SystemRecord,
+        range: (SolarMasses, SolarMasses),
+        death: UniverseTime,
+    ) -> Self {
+        Self {
+            record,
+            range,
+            death,
+        }
+    }
+
+    /// When it dies.
+    #[must_use]
+    pub(crate) const fn death(&self) -> UniverseTime {
+        self.death
+    }
 }
 
 /// A listed core collapse's death (P09.T36; fix-p09-recent-kicks): its site, its shell's entry,

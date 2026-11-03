@@ -46,7 +46,9 @@ pub mod survivors;
 pub use fields::{DisplacedClass, DisplacedFields, DisplacedForm};
 pub use scales::GalaxyScales;
 pub use site::{ExplosionSite, death_in_interval, explosion_site};
-pub(crate) use site::{death_in_interval_knowing, death_in_interval_under};
+pub(crate) use site::{
+    death_in_interval_by_end, death_in_interval_knowing, death_in_interval_under,
+};
 
 /// Whether layers D and E hold plan 08's displaced classes (P08.T12, on the record from generator
 /// version 27 with plan 15's production form table): every version's do. The galaxy's build

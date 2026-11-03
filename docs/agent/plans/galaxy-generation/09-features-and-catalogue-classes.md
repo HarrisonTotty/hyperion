@@ -6008,6 +6008,20 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Hits._ A feature is read where its entries or its dead can reach the sphere, its list only
     where its entries can; no candidate is tested again.
   - _Bench._ `feature_range_query`'s `kicks_by_version`; figures in the lane's outbox.
+- **P09.T37, the kicks' cold cost (lane `fix-p09-recent-dead`, 2026-11-03, under `feature_classes`
+  (26); no output moved at 24–27).**
+  - _Profile._ Cold at 27, the dead within 8,247 ly of the Sun-like point: their stars' profile
+    tables 34%, the lists' other classes 8%, the candidates' death tests 41%, their stars 18%.
+  - _Bounds._ `level_list::death_bound`: a remnant lies within `|k| dt` of its candidate's line,
+    `|k|` ≤ 1,000 km/s and `dt` bounded by its two lines' `LIFETIME_REACH`; before its death
+    `dt` comes from the shared lifetime bracket, after it from its time.
+  - _Steps._ `KeptDeaths` asks each candidate's death, then its place and the rest, only where
+    its bound reaches the sphere, each once; a far feature's are kept without its stars or list.
+  - _Tables._ `FeatureStars::of` no longer tabulates its profile; its list does, before its
+    classes share it (`FeatureStars::tabulated`), bit for bit.
+  - _Lifetimes._ `displaced::death_in_interval_by_end` stops the exact tier's build at +H
+    (`track::fate_to_age`), bit for bit (`a_death_found_by_the_interval_s_end_is_the_death_bit_for_bit`).
+  - _Figures._ In the lane's outbox; the 3× target is missed (a finding).
 - **P09.T28.d.c as built (lane `fix-p09-t28d-local-arc`, 2026-11-02, behind `KEPLER_ARC_VERSION`
   = 27; no output moved at 24–26).**
   - _Names._ `motion::spherical::{KEPLER_ARC_VERSION, KeplerArcRules::{Series, Local}}`,
