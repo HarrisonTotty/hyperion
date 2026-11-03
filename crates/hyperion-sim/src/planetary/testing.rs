@@ -9,6 +9,8 @@
 //! - [`sample_contexts`] draws real systems from a galaxy of the Milky Way's parameters: the
 //!   systems nearest a Sun-like point that pass a [`SampleFilter`], for the statistical tests
 //!   (design note 20).
+//! - [`sample_rogue_records`] takes a galaxy's rogue planets about the same point, in a fixed walk
+//!   of layer G's cells.
 //! - [`partial_pressures`] states an air by hand, for other crates' tests of what a derivation
 //!   reads of one.
 //! - [`envelope_by_hand`] builds a record's envelope from inputs stated by hand
@@ -31,10 +33,10 @@ use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::placement::{LayerSpec, STELLAR_LAYERS, SystemRecord, generate_cell};
+use crate::galaxy::placement::{CellKey, LayerSpec, STELLAR_LAYERS, SystemRecord, generate_cell};
 use crate::galaxy::query::{QuerySphere, cells_in_sphere, count_cells_in_sphere};
 use crate::galaxy::{BuildGalaxyError, Galaxy};
-use crate::id::SystemId;
+use crate::id::{Layer, SystemId};
 use crate::orbit::Eccentricity;
 use crate::time::UniverseTime;
 use crate::units::{
@@ -196,7 +198,7 @@ const FIRST_RADIUS_LY: f64 = 16.0;
 
 /// The most generation cells one sphere of [`sample_contexts`] may cover, summed over the layers
 /// it walks: 2¹⁸, a sphere of about 315 ly in layer A, which holds some 10⁵ systems at the Sun's
-/// density.
+/// density. It is also the most cells [`sample_rogue_records`] walks.
 pub const MAX_SAMPLE_CELLS: u64 = 1 << 18;
 
 /// Which systems [`sample_contexts`] keeps: a band of primary initial mass, and a test of the
@@ -368,7 +370,65 @@ pub fn sample_records(
     }
 }
 
-/// [`sample_contexts`] or [`sample_records`] could not draw its sample.
+/// The cell of layer G's 4 ly cells that holds [`SAMPLE_CENTRE_LY`]'s 26,000 ly along +y.
+const ROGUE_CENTRE_CELL_Y: i32 = 6_500;
+
+/// The first `n` rogue planets of `galaxy`'s layer G about the solar circle, in a fixed walk of
+/// its cells: a slab two cells thick about the plane, ring by ring outwards from the cell at the
+/// Sun-like point ([`SAMPLE_CENTRE_LY`]), each cell's records in their order.
+///
+/// They are the galaxy's own rogue planets, their masses drawn by Sumi et al.'s (2023) law, so few
+/// are giants. The answer is a pure function of the galaxy and `n`, and the first `k` of it are the
+/// sample of `k`. A record's context is [`SystemContext::from_record`]'s, which is what
+/// [`SystemContext::for_system`] gives its ID.
+///
+/// # Errors
+///
+/// [`SampleContextsError::TooFewSystems`] if the walk's first [`MAX_SAMPLE_CELLS`] cells hold
+/// fewer than `n` rogue planets.
+///
+/// # Panics
+///
+/// Never: the walk's first [`MAX_SAMPLE_CELLS`] cells lie within 181 cells (724 ly) of the
+/// Sun-like point's, inside the root cube.
+pub fn sample_rogue_records(
+    galaxy: &Galaxy,
+    n: usize,
+) -> Result<Vec<SystemRecord>, SampleContextsError> {
+    let mut found = Vec::with_capacity(n);
+    let mut cell = Vec::new();
+    let mut walked = 0_u64;
+    let mut ring = 0_i32;
+    loop {
+        for x in -ring..=ring {
+            for y in -ring..=ring {
+                if x.abs().max(y.abs()) != ring {
+                    continue;
+                }
+                for z in [-1, 0] {
+                    if found.len() >= n {
+                        found.truncate(n);
+                        return Ok(found);
+                    }
+                    if walked == MAX_SAMPLE_CELLS {
+                        return Err(SampleContextsError::TooFewSystems {
+                            wanted: n,
+                            found: found.len(),
+                        });
+                    }
+                    walked += 1;
+                    let key = CellKey::new(Layer::RoguePlanet, [x, ROGUE_CENTRE_CELL_Y + y, z])
+                        .expect("the walk's cells lie within 181 cells of the solar circle's");
+                    generate_cell(galaxy, key, &mut cell);
+                    found.extend(cell.iter().copied());
+                }
+            }
+        }
+        ring += 1;
+    }
+}
+
+/// [`sample_contexts`], [`sample_records`] or [`sample_rogue_records`] could not draw its sample.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SampleContextsError {
     /// The galaxy could not be built.
@@ -592,6 +652,26 @@ mod tests {
             sample_records(&galaxy, 150, SampleFilter::ALL).unwrap(),
             sample[..150]
         );
+    }
+
+    /// The rogue planets' walk starts at the cell that holds the Sun-like point, takes layer G's
+    /// records alone, and its first `k` are the sample of `k`.
+    #[test]
+    fn a_rogue_sample_walks_out_from_the_sun_like_point() {
+        let galaxy = galaxy();
+        assert_eq!(
+            CellKey::containing(Layer::RoguePlanet, &centre()).unwrap(),
+            CellKey::new(Layer::RoguePlanet, [0, ROGUE_CENTRE_CELL_Y, 0]).unwrap()
+        );
+        let sample = sample_rogue_records(&galaxy, 200).unwrap();
+        assert_eq!(sample.len(), 200);
+        assert!(
+            sample
+                .iter()
+                .all(|r| r.kind() == crate::galaxy::placement::SystemKind::RoguePlanet)
+        );
+        assert_eq!(sample_rogue_records(&galaxy, 80).unwrap(), sample[..80]);
+        assert_eq!(sample_rogue_records(&galaxy, 0).unwrap(), Vec::new());
     }
 
     #[test]

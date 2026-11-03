@@ -7,9 +7,8 @@ use hyperion_testkit::order::assert_order_independent;
 use super::*;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::placement::{CellKey, SystemKind, SystemRecord, generate_cell};
+use crate::galaxy::placement::{SystemKind, SystemRecord};
 use crate::galaxy::substellar::{ROGUE_PLANET_MAX_MSUN, ROGUE_PLANET_MIN_MSUN};
-use crate::id::Layer;
 use crate::orbit::KeplerElements;
 use crate::planetary::HostKind;
 use crate::planetary::context::SystemContext;
@@ -27,6 +26,7 @@ use crate::planetary::satellites::{
     Satellite, SatelliteFrame, SatelliteMoon, Satellites, satellites_inside,
 };
 use crate::planetary::system::{PlanetarySystem, RoguePlanet, generate};
+use crate::planetary::testing::sample_rogue_records;
 use crate::stellar::substellar::giant_cooling;
 use crate::stellar::system::draw_metallicity;
 use crate::time::{ClockWindow, UniverseTime};
@@ -51,30 +51,11 @@ fn seed() -> Seed {
 }
 
 /// The first `n` rogue planets of the cells of layer G about the solar circle, 26,000 ly out on
-/// +y, in a fixed walk of the cells: a slab two cells thick about the plane, widening outwards
-/// from the cell at the Sun-like point.
+/// +y ([`sample_rogue_records`]).
 fn rogue_planets(n: usize) -> Vec<SystemRecord> {
-    let mut found = Vec::with_capacity(n);
-    let mut cell = Vec::new();
-    'walk: for ring in 0_i32.. {
-        for x in -ring..=ring {
-            for y in -ring..=ring {
-                if x.abs().max(y.abs()) != ring {
-                    continue;
-                }
-                for z in [-1, 0] {
-                    let key = CellKey::new(Layer::RoguePlanet, [x, 6_500 + y, z])
-                        .expect("the solar circle lies inside the cube");
-                    generate_cell(galaxy(), key, &mut cell);
-                    found.extend(cell.iter().copied());
-                    if found.len() >= n {
-                        break 'walk;
-                    }
-                }
-            }
-        }
-    }
-    found.truncate(n);
+    let found =
+        sample_rogue_records(galaxy(), n).expect("the solar circle's layer G holds the sample");
+    assert_eq!(found.len(), n);
     assert!(
         found.iter().all(|r| r.kind() == SystemKind::RoguePlanet),
         "layer G places rogue planets alone"

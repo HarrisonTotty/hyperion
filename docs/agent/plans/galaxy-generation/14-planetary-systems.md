@@ -3468,6 +3468,7 @@ before and after), and three ordinary fillers.
     `tests/planetary_end_to_end.rs`, 338 s, `snapshot_at` kept; every asserted figure is inside
     T10.b's window but small planets at −0.8 against solar (0.933, provisional). See "Risks and
     open points", "Deviations in P14.T33.a and T33.b, as built".
+  - _(iii) built_ (2026-11-03): Risks, "P14.T33.a (iii) as built".
 - **P14.T33.c The composition census** (decision-composition; after P14.T54.b). A slow test over
   10⁵ bodies in the ordinary census and 10⁶ under `just test-slow`. It writes into this plan the
   tables of:
@@ -34176,3 +34177,6 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     (design note 14); the LBV census is pinned as it stands.
   - _Left after 26:_ the two slow censuses near the black hole fail as after 25; P11.T10's three
     figures fail as at 25; the pre-test passes over 13 probe pairs (pinned).
+- **P14.T33.a (iii) as built** (lane galaxy-close-26, 2026-11-03, at 26; no output moves).
+  `planetary::testing::sample_rogue_records(galaxy, n)` returns a `Result`, `TooFewSystems` past
+  `MAX_SAMPLE_CELLS` cells; `benches/planetary.rs`'s `rogue_1000` times (iii).

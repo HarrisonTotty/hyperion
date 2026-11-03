@@ -12,8 +12,12 @@
 //!   ([`sample_contexts`] with [`SampleFilter::ALL`]: the galaxy's own mixture of masses,
 //!   multiplicities, populations and ages, binaries and evolved hosts included), their contexts,
 //!   and so their stars, built beforehand. The figure per system is the mean, a thousandth of it.
-//! - (iii) 1,000 rogue planets: waits for P14.T27.b, which generates a rogue planet's system; not
-//!   built.
+//! - (iii) `rogue_1000`: the same for the first 1,000 rogue planets of layer G about the Sun-like
+//!   point ([`sample_rogue_records`]), their contexts built beforehand
+//!   ([`SystemContext::from_record`]). Their masses are the galaxy's own, by Sumi et al.'s (2023)
+//!   law, so few are giants: 646 rocky, 234 icy, 85 sub-Neptunes, 29 ice giants and 6 gas giants
+//!   (median 0.69 M⊕, the heaviest 162 M⊕), 137 of them with satellites, 1,267 bodies in all. The
+//!   figure per rogue is a thousandth of it.
 //! - (iv) `moon_position_at`: `position_at` of the Solar-like golden's first moon at the epoch.
 //! - (v) `body_detail_surface_1000`: `body_at` at the epoch degraded to
 //!   [`DetailLevel::Surface`], what the server's `body_detail` computes at `surface`
@@ -50,6 +54,11 @@
 //! stride that left out the list's last few percent, read 6.52 ms, 3.57 s, 4.42 µs, 171 ms and
 //! 5.07 ms.
 //!
+//! (iii), by `just bench --bench planetary` on 2026-11-03 at generator version 26, pod, 16 vCPU
+//! (an EPYC 7R13 at a node load of about 24): 15.23 ms (15.04–15.39), 15.2 µs per rogue, against
+//! the 1 ms a system: met. The same run read (i) 42.6 ms and (ii) 39.7 s, 39.7 ms per system, both
+//! missed.
+//!
 //! (vii) and (viii), by `cargo bench -p hyperion-sim --bench planetary --features testing --
 //! cost_20` (criterion's mean and its interval, ten samples), on 2026-10-30 in P14.T54.b.l's
 //! performance lane, pod, 16 vCPU (a pod runs this probe at about half the owner's desktop's
@@ -81,7 +90,7 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::record::{BodyKind, DetailLevel};
-use hyperion_sim::planetary::testing::{SampleFilter, sample_contexts};
+use hyperion_sim::planetary::testing::{SampleFilter, sample_contexts, sample_rogue_records};
 use hyperion_sim::planetary::{self, BodyIndex, PlanetarySystem, SystemContext};
 use hyperion_sim::time::UniverseTime;
 
@@ -96,6 +105,9 @@ const FIELD_SYSTEMS: usize = 1_000;
 
 /// How many bodies (v) resolves.
 const SAMPLE_BODIES: usize = 1_000;
+
+/// How many rogue planets (iii) generates.
+const ROGUE_PLANETS: usize = 1_000;
 
 /// The seed of the system tests' universe, whose first [`COST_SYSTEMS`] field systems (vii) and
 /// (viii) generate (`planetary::system::tests::SEED`).
@@ -133,6 +145,16 @@ fn sample_bodies(systems: &[PlanetarySystem]) -> Vec<(usize, BodyIndex)> {
         .collect()
 }
 
+/// (iii)'s contexts: the first [`ROGUE_PLANETS`] rogue planets of [`sample_rogue_records`], each
+/// through [`SystemContext::from_record`].
+fn rogue_contexts(galaxy: &Galaxy) -> Vec<SystemContext> {
+    sample_rogue_records(galaxy, ROGUE_PLANETS)
+        .expect("the solar circle holds a thousand rogue planets")
+        .iter()
+        .map(|record| SystemContext::from_record(galaxy, record))
+        .collect()
+}
+
 fn planetary_stage(c: &mut Criterion) {
     let seed = Seed::new(GOLDEN_SEED);
     let galaxy = Galaxy::from_params(seed, GalaxyParams::milky_way_like())
@@ -155,7 +177,15 @@ fn planetary_stage(c: &mut Criterion) {
                 .sum::<usize>()
         });
     });
-    // (iii), 1,000 rogue planets, waits for P14.T27.b.
+    let rogues = rogue_contexts(&galaxy);
+    group.bench_function("rogue_1000", |b| {
+        b.iter(|| {
+            black_box(&rogues)
+                .iter()
+                .map(|context| generate_and_snapshot(seed, context))
+                .sum::<usize>()
+        });
+    });
     group.sample_size(100);
     let system = planetary::generate(seed, &solar);
     let moon = system
