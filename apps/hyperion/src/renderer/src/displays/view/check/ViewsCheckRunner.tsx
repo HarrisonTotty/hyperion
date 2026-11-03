@@ -14,6 +14,7 @@ import {
   recordAtmosphereCheck,
   runAtmosphereCheck,
 } from "./atmosphereCheckRun";
+import type { PlacedAtmosphere } from "./atmospherePlaces";
 import {
   handoverCheckTimingFor,
   handoverLooksFor,
@@ -45,12 +46,13 @@ import type { ViewsProbe } from "./viewsProbe";
  * probe alone; the terrain run (plan R10, R10.T16.d) its terrain probe, whose engine source,
  * workers and kept scenes `VIEW` takes; the hand-over check (plan R10, R10.T10.g) that probe and
  * its looks, which `VIEW` offers through the terrain probe's kept scenes; the atmosphere run (plan
- * R08, R08.T10.b) the views probe alone, as T20's; the inspection run (the owner's request,
+ * R08, R08.T10.b) the views probe alone, as T20's, and in the software mode its places, whose kept
+ * scenes `VIEW` offers (`atmospherePlaces.ts`); the inspection run (the owner's request,
  * 2026-11-01) the views probe and the link's request client, through which it asks what it opens.
  */
 export type CheckedRun =
   | { readonly kind: "several-views" }
-  | { readonly kind: "atmosphere" }
+  | { readonly kind: "atmosphere"; readonly placed: PlacedAtmosphere | null }
   | {
       readonly kind: "inspection";
       readonly requests: RequestClient;
@@ -168,6 +170,7 @@ export function ViewsCheckRunner({
               views: probe,
               fixtures: pageAtmosphereFixtures(),
               setting: api.launch.setting,
+              placed: run.placed,
               // Through the probe's frame clock, which stamps VIEW's own callbacks the same.
               frame: () =>
                 new Promise<number>((resolve) => {

@@ -120,7 +120,7 @@ describe("ViewsCheckRunner", () => {
       <ViewsCheckRunner
         api={api}
         probe={new ViewsProbe()}
-        run={{ kind: "atmosphere" }}
+        run={{ kind: "atmosphere", placed: null }}
         launchMode="vulkan"
         openSystem={() => undefined}
       />,
@@ -165,7 +165,7 @@ describe("ViewsCheckRunner", () => {
       <ViewsCheckRunner
         api={api}
         probe={new ViewsProbe()}
-        run={{ kind: "atmosphere" }}
+        run={{ kind: "atmosphere", placed: null }}
         launchMode="software"
         openSystem={() => undefined}
       />,

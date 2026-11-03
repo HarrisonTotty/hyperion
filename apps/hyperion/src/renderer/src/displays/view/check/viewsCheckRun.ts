@@ -289,11 +289,17 @@ export class ViewControls {
     return panel === null ? null : buttonIn(panel, label);
   }
 
+  /** A setting of the shown `STYLE` panel's `GRID` row (`ON`, `OFF`), or `null`. */
+  gridButton(label: "ON" | "OFF"): HTMLButtonElement | null {
+    const row = this.#document.querySelector("section.view-style:not([hidden]) .view-style__grid");
+    return row === null ? null : buttonIn(row, label);
+  }
+
   /**
-   * Unfolds a side panel (`view-exposure`, `view-meter`) where the compact layout has folded it,
-   * by its disclosure button; nothing where it stands unfolded.
+   * Unfolds a side panel (`view-exposure`, `view-meter`, `view-style`) where the compact layout has
+   * folded it, by its disclosure button; nothing where it stands unfolded.
    */
-  unfoldPanel(panelClass: "view-exposure" | "view-meter"): void {
+  unfoldPanel(panelClass: "view-exposure" | "view-meter" | "view-style"): void {
     const panel = this.#document.querySelector<HTMLElement>(`section.${panelClass}`);
     if (panel === null || panel.hidden === false || panel.id.length === 0) {
       return;

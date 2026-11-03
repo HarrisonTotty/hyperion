@@ -14,6 +14,7 @@ import {
 } from "./displays/view/ViewSceneProvider";
 import { ViewDisplay } from "./displays/view/ViewDisplay";
 import { type CheckedRun, ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
+import { placedAtmosphere } from "./displays/view/check/atmospherePlaces";
 import { HANDOVER_APPROACH } from "./displays/view/check/handoverGeometry";
 import {
   handoverRangeAtM,
@@ -42,7 +43,12 @@ import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
 import type { QualitySetting } from "./view/quality/qualitySetting";
 import { selectionViewport } from "./view/terrain/handover";
-import type { GeometryOverride, ServedWorldNames, ViewsCheckLaunch } from "../../preload/api";
+import type {
+  GeometryOverride,
+  GraphicsLaunchMode,
+  ServedWorldNames,
+  ViewsCheckLaunch,
+} from "../../preload/api";
 import { useSurfaceModuleCheck } from "./wasm/useSurfaceModuleCheck";
 
 /** What `App` hands the displays besides the server link and the universe, which are contexts. */
@@ -70,22 +76,24 @@ interface DisplayInputs {
 
 /**
  * The terrain run's seam a `--terrain` check launch hands `VIEW` (R10.T16.d): its counted height
- * workers, its kept scenes with `TERRAIN TEST`'s paced fixture, and its watch of the terrain
- * session, all three together.
+ * workers and its watch of the terrain session, together, beside its kept scenes with
+ * `TERRAIN TEST`'s paced fixture (`CheckedView.sceneOptions`).
  */
 interface TerrainSeam {
   readonly heightWorkers: () => WorkerLike;
-  readonly sceneOptions: ReadonlyArray<SceneOption>;
   readonly watchTerrain: (session: TerrainSession) => () => void;
 }
 
 /**
- * What a `--views-check` launch hands `VIEW`: its probe's engine source (R07.T20), and the terrain
- * run's seam on a `--terrain` launch, `null` on T20's (the batch review's D-C).
+ * What a `--views-check` launch hands `VIEW`: its probe's engine source (R07.T20), the terrain
+ * run's seam on a `--terrain` launch, `null` on T20's (the batch review's D-C), and the kept scenes
+ * it offers: the terrain probe's on a `--terrain` launch, and `VIEW`'s own with the places' on a
+ * software `--atmosphere` one (`atmospherePlaces.ts`), `undefined` for `VIEW`'s own alone.
  */
 interface CheckedView {
   readonly engineSource: ViewEngineSource;
   readonly terrain: TerrainSeam | null;
+  readonly sceneOptions: ReadonlyArray<SceneOption> | undefined;
 }
 
 /**
@@ -109,11 +117,13 @@ function servedHandoverOf(launch: ViewsCheckLaunch): ServedWorldNames | null {
 }
 
 /**
- * A `--views-check` launch's probes, by its options; a `--handover` launch's looks on `served`,
- * the served world read from the server, where it names one, else on `TERRAIN TEST`'s.
+ * A `--views-check` launch's probes, by its options and graphics mode (an `--atmosphere` run's
+ * places in the software mode alone); a `--handover` launch's looks on `served`, the served world
+ * read from the server, where it names one, else on `TERRAIN TEST`'s.
  */
 function checkProbesOf(
   launch: ViewsCheckLaunch,
+  launchMode: GraphicsLaunchMode,
   requests: RequestClient,
   served: HandoverWorld | null = null,
 ): CheckProbes {
@@ -133,7 +143,10 @@ function checkProbesOf(
       run = { kind: "several-views" };
       break;
     case "atmosphere":
-      run = { kind: "atmosphere" };
+      run = {
+        kind: "atmosphere",
+        placed: launchMode === "software" ? placedAtmosphere(launch.smoke) : null,
+      };
       break;
     case "inspection":
       run = { kind: "inspection", requests, served: launch.served ?? null };
@@ -175,17 +188,21 @@ function checkedViewOf(probes: CheckProbes): CheckedView {
   const { run } = probes;
   // T20's run, the atmosphere run (R08.T10.b) and the inspection run draw through the views probe
   // alone.
-  if (run.kind === "several-views" || run.kind === "atmosphere" || run.kind === "inspection") {
-    return { engineSource: probes.views.source, terrain: null };
+  if (run.kind === "several-views" || run.kind === "inspection") {
+    return { engineSource: probes.views.source, terrain: null, sceneOptions: undefined };
+  }
+  if (run.kind === "atmosphere") {
+    return {
+      engineSource: probes.views.source,
+      terrain: null,
+      sceneOptions: run.placed?.sceneOptions,
+    };
   }
   const { terrain } = run;
   return {
     engineSource: terrain.source,
-    terrain: {
-      heightWorkers: terrain.heightWorkers,
-      sceneOptions: terrain.sceneOptions,
-      watchTerrain: terrain.watchTerrain,
-    },
+    terrain: { heightWorkers: terrain.heightWorkers, watchTerrain: terrain.watchTerrain },
+    sceneOptions: terrain.sceneOptions,
   };
 }
 
@@ -215,7 +232,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
         <ViewDisplay
           engineSource={inputs.checkedView?.engineSource}
           heightWorkers={inputs.checkedView?.terrain?.heightWorkers}
-          sceneOptions={inputs.checkedView?.terrain?.sceneOptions}
+          sceneOptions={inputs.checkedView?.sceneOptions}
           watchTerrain={inputs.checkedView?.terrain?.watchTerrain}
           setting={inputs.setting}
           platform={inputs.platform}
@@ -281,7 +298,7 @@ export function App() {
   const [probes, setProbes] = useState((): CheckProbes | null =>
     viewsCheck === undefined || servedHandoverOf(viewsCheck.launch) !== null
       ? null
-      : checkProbesOf(viewsCheck.launch, connection.requests),
+      : checkProbesOf(viewsCheck.launch, window.hyperion.graphics.launchMode, connection.requests),
   );
   const awaitingServed =
     probes === null && viewsCheck !== undefined && servedHandoverOf(viewsCheck.launch) !== null;
@@ -310,7 +327,14 @@ export function App() {
         }
         switch (read.kind) {
           case "read":
-            setProbes(checkProbesOf(viewsCheck.launch, requests, read.world));
+            setProbes(
+              checkProbesOf(
+                viewsCheck.launch,
+                window.hyperion.graphics.launchMode,
+                requests,
+                read.world,
+              ),
+            );
             break;
           case "not served":
             fail(

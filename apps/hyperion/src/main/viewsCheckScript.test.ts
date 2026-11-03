@@ -369,11 +369,14 @@ describe.runIf(process.platform === "linux")("the views check's script", () => {
       ["--smoke", "--atmosphere"],
       ["--terrain", "--setting=high"],
       ["--terrain", "--handover", "--universe", "u", "--body", "b", "--setting=low"],
+      ["--atmosphere", "--setting=high"],
     ].map((args) => {
       const run = runScriptWith(["--software", ...args], {});
       return /each launch's limit (\d+) s/u.exec(run.output)?.[1];
     });
-    expect(limits).toEqual(["1500", "3000", "12000", "18000"]);
+    // The atmosphere run's full run takes its places a stage each in the software mode (R08.T17):
+    // 40 minutes, five times, above its watchdog's 150.
+    expect(limits).toEqual(["1500", "3000", "12000", "18000", "12000"]);
   });
 
   it("passes --device-pixel-ratio on, and sizes a software launch's headless screen by it", () => {

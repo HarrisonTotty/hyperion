@@ -1947,7 +1947,7 @@ export interface AtmosphereCheckFrames {
 export interface AtmosphereCheckCaptureTaken {
   /**
    * Its label, which names its picture among the run's captures: `fixture-<designation in lower
-   * kebab case>`, or `moonlit-night`.
+   * kebab case>`, or `moonlit-night`; in the software mode also a look's, `ground-test-earth-noon`.
    */
   readonly label: string;
   /** The camera's preset as the label block's `CAMERA` line read it (`SEAT`, `FREE · RATE …`). */
@@ -1984,17 +1984,21 @@ export interface AtmosphereCheckCaptureTaken {
   readonly airSetting: QualitySettingName;
 }
 
-/** A capture of an air fixture, seen from the free camera at a few radii. */
+/**
+ * A capture of an air fixture, seen from the free camera at a few radii, or in the software mode
+ * from a place by it, its disc or its sky from its ground (`atmospherePlaces.ts`).
+ */
 export interface AtmosphereFixtureCapture extends AtmosphereCheckCaptureTaken {
   readonly kind: "fixture";
   /** The fixture's designation (`TEST EARTH`). */
   readonly designation: string;
   /**
    * The camera's distance from the fixture's centre as the run flew it, m, dead-reckoned from the
-   * scene's geometry, the free camera's rate and the primary's frames.
+   * scene's geometry, the free camera's rate and the primary's frames; placed, in the software
+   * mode, as the label block's `POSITION` line read it.
    */
   readonly rangeM: number;
-  /** The phase angle at the fixture between the star and the camera as flown, deg. */
+  /** The phase angle at the fixture between the star and the camera as flown or placed, deg. */
   readonly phaseDeg: number;
 }
 
@@ -2057,7 +2061,7 @@ export interface AtmosphereCheckRecord {
   readonly mediaReadyMs: number;
   /** The captures, in the order taken. */
   readonly captures: ReadonlyArray<AtmosphereCheckCapture>;
-  /** The flight's stages, in the order flown, the climb's first. */
+  /** The flight's stages, in the order flown, the climb's first; none where the run was placed. */
   readonly stages: ReadonlyArray<AtmosphereCheckStage>;
   /** The engine's faults over the run, each as a line, as T20's record gives them. */
   readonly faults: ReadonlyArray<string>;

@@ -6347,7 +6347,9 @@ scenes, the timed runs, the benchmarks and `just ci` wait on the owner's RTX 308
 - **Spectral error:** the reference at 15 wavelengths against its three-channel run at Earth and
   Mars. Expect about 0.003 in u′v′ by day and up to 0.02 at low sun with the fitted triple (0.036
   with 680/550/440). Bruneton 2017's implementation (BSD-3) is the cross-check at Earth. A visible
-  difference goes to the owner.
+  difference goes to the owner. The 0.02 holds for the sky; Earth's direct beam on the horizon
+  (sun zenith 90°) is bounded at 0.036, the fitted triple's floor at an airmass of about 38
+  (research-leans-34 §4).
 - **Benchmarks, recorded on a quiet machine:** per-frame and per-planet times on both settings,
   table bytes (with the oblate slice and band counts), optics-worker times, bake times summed over
   bands, and the references' trace times.
@@ -24801,3 +24803,16 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - Smoke part 14: `DECK_REACH_FRAME`, R05's Earth over its deck from 1 km, a surface 12 km ahead.
   - Pending, the owner's RTX run: T15.b.2's look at TEST VENUS's surface and a descent through its
     deck. TEST VENUS's splits (61–63 km) never showed the seam; a served low-deck world would.
+- **R08.T17's by-eye list on SwiftShader** (2026-11-03; lane `pod-looks`; client only, no generated
+  value moves; its verdicts and thumbnails in the lane's outbox).
+  - `views-check --software --atmosphere` flies nothing: `check/atmospherePlaces.ts` stands each
+    tour capture at its leg's planned end, then nine looks the tour misses (`ATMOSPHERE_LOOKS`:
+    `TEST JUPITER` at 1.05 × 10⁹ m, `TEST SATURN` over its pole, views from the ground of Earth,
+    Mars and Venus, Earth's limb from 400 km, Earth's night horizon), each from the check-only
+    `PLACE A` and `PLACE B` in turn, GRID OFF, its range read off `POSITION` within 1%. The GPU
+    tour is unchanged; the software full run's watchdog is 30 minutes and its limit 40, times 5.
+  - Visibly wrong on SwiftShader: lit air discs some 100–250 px across draw dark rows (high) or
+    columns (low) through their air (`fix-disc-air-rows`, drafted); the Venus-class surface by day
+    (lane `open-venus-deck-route`'s). The other items as expected.
+  - Pending, the owner's RTX run: `just views-check --hidden --atmosphere`, both settings, which
+    also tells whether the rows are SwiftShader's alone.

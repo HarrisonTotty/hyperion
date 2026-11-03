@@ -527,10 +527,11 @@ describe("a views check's directories and watchdog", () => {
     }
   });
 
-  it("gives a software run five times the watchdog", () => {
+  it("gives a software run five times the watchdog, the atmosphere run's full run twice that (R08.T17)", () => {
     for (const launch of LAUNCHES) {
+      const placed = launch.run === "atmosphere" && !launch.smoke;
       expect(viewsCheckWatchdogMs(launch, "software")).toBe(
-        5 * viewsCheckWatchdogMs(launch, "vulkan"),
+        (placed ? 10 : 5) * viewsCheckWatchdogMs(launch, "vulkan"),
       );
     }
   });

@@ -57,6 +57,20 @@
  * error, a few percent of the range left after it, is so taken up by the next; the capture's range
  * and phase are recorded as reckoned, and every stage as flown (`AtmosphereCheckRecord.stages`).
  *
+ * **Placed, in the software mode** (R08.T17's by-eye list; research-rm4-rm5-close-out §4, lane 4).
+ * SwiftShader's frames, 0.4 to 5 s against `MAX_FREE_STEP_S`, leave a flown leg 10⁹ to 10¹⁰ m
+ * short of its capture. So where the launch gives places ({@link AtmosphereCheckDeps.placed},
+ * `atmospherePlaces.ts`), after the moonlit night the run offers each in turn and chooses the
+ * check-only kept scene that makes it, whose free camera stands at the capture's pose; waits, at most
+ * {@link AtmosphereCheckTiming.mediaWaitMs}, until its stage stands, draws photorealistic and
+ * states none of `PHOTOREALISTIC: PREPARING`, `ATMOSPHERE: PENDING` and `ATMOSPHERE: COMPUTING`
+ * (each place's stage makes its pipelines afresh); reads the camera's range from its fixture's
+ * centre off the `POSITION` line in the fixture's `FRAME`, and fails unless it lies within
+ * {@link PLACE_RANGE_TOLERANCE} of the place's; then sets its `GRID` at `OFF`, the image bare, and
+ * captures it as above, its range as read. Each scene brings its own meter (`LIT` at a disc, `AVG`
+ * at the sky). Nothing is flown: the record holds no stages. With no places, the tour is flown as
+ * above.
+ *
  * Each capture records the primary's frame times since the capture before (the views probe's),
  * the style its canvas's accessible name said it drew, and its label block's statements and fault
  * lines. The main process fails the run on any fault line, a capture not drawn photorealistic, an
@@ -85,7 +99,8 @@ import {
   phaseAngleDeg,
 } from "../../../view/scenes/atmosphereScene";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
-import { freeRateReading } from "../viewRun";
+import { freeRateReading, PHOTOREAL_PREPARING } from "../viewRun";
+import type { AtmospherePlace, PlacedAtmosphere } from "./atmospherePlaces";
 import { viewDriver } from "./viewsCheckRun";
 import type { ViewsProbe, WindowFigures } from "./viewsProbe";
 
@@ -100,6 +115,15 @@ export const ATMOSPHERE_STAGE_FRACTION = 1 / 20;
 
 /** The statement a pending atmosphere stands as. */
 const ATMOSPHERE_PENDING = ATMOSPHERE_STATEMENTS.atmospherePending;
+
+/** The statement a running thick bake or correction stands as. */
+const ATMOSPHERE_COMPUTING = ATMOSPHERE_STATEMENTS.atmosphereComputing;
+
+/**
+ * How near a placed capture's range, as the `POSITION` line reads it, must lie to its place's, as a
+ * fraction of it: 1% (lane 4's acceptance), past the line's three significant figures' rounding.
+ */
+export const PLACE_RANGE_TOLERANCE = 0.01;
 
 /** `TEST MOON`'s designation, the climb's target. */
 const MOON_DESIGNATION = "TEST MOON";
@@ -431,6 +455,27 @@ export function exposureEv100(exposureLine: string | null): number | null {
   return match?.[1] === undefined ? null : Number(match[1]);
 }
 
+/** Metres in each of the `POSITION` line's units. */
+export const METRES_PER_UNIT: Readonly<Record<string, number>> = {
+  km: 1e3,
+  Mm: 1e6,
+  Gm: 1e9,
+  AU: 1.495_978_707e11,
+};
+
+/**
+ * The camera's range from its frame's centre as the `POSITION` line reads it (`6.69 Mm 023° -12°`),
+ * m, or `null` where it reads none.
+ */
+export function positionRangeM(positionLine: string | null): number | null {
+  const match = /^([\d,]+(?:\.\d+)?) (km|Mm|Gm|AU) /u.exec(positionLine ?? "");
+  const digits = match?.[1];
+  const perUnit = match?.[2] === undefined ? undefined : METRES_PER_UNIT[match[2]];
+  return digits === undefined || perUnit === undefined
+    ? null
+    : Number(digits.replaceAll(",", "")) * perUnit;
+}
+
 /**
  * The `q` quantile of `values` by nearest rank (the ⌈q n⌉-th smallest), or `null` for none: the
  * median at 0.5, the 95th percentile at 0.95.
@@ -620,6 +665,12 @@ export interface AtmosphereCheckDeps {
   readonly devicePixelRatio: number;
   /** The launch's setting, whose sizes a capture's air takes unless the floor stepped it. */
   readonly setting: QualitySetting;
+  /**
+   * The places the run captures from in the software mode, and the check-only kept scene `VIEW`
+   * offers to choose for each (`atmospherePlaces.ts`); `null` on any other launch, whose run flies
+   * the tour.
+   */
+  readonly placed: Pick<PlacedAtmosphere, "places" | "offer"> | null;
 }
 
 /** A key's press and release, dispatched on `target` as a keyboard would. */
@@ -652,8 +703,8 @@ interface ReckonedPlace {
  *
  * @throws Error naming the step when a control does not take effect within the timing's wait, when
  *   the scene's media did not load, when `AUTO` did not settle within the timing's longest wait,
- *   when the camera was reckoned past a stage's end, or when the run is stopped through
- *   `deps.signal` (`STOPPED`).
+ *   when the camera was reckoned past a stage's end, when a place's air did not settle or its
+ *   camera did not read its range, or when the run is stopped through `deps.signal` (`STOPPED`).
  */
 export async function runAtmosphereCheck(
   deps: AtmosphereCheckDeps,
@@ -957,6 +1008,141 @@ export async function runAtmosphereCheck(
   await chooseMeter("AVG");
   await capture("moonlit-night", null);
 
+  /** The run's record, with the flight's `stages`. */
+  const record = (stages: ReadonlyArray<AtmosphereCheckStage>): AtmosphereCheckRecord => ({
+    timer: views.timer(),
+    devicePixelRatio: deps.devicePixelRatio,
+    canvas: views.canvasOf(PRIMARY_VIEW_NAME),
+    mediaReadyMs,
+    captures,
+    stages,
+    faults: views.faults(),
+  });
+  /**
+   * The camera's range from `place`'s fixture's centre as the label block reads it, m: its
+   * `POSITION` line in the fixture's `FRAME`.
+   *
+   * @throws Error where the `FRAME` line names another frame, the `POSITION` line reads no range, or
+   *   the range lies more than {@link PLACE_RANGE_TOLERANCE} off the place's.
+   */
+  const placedRangeM = (place: AtmospherePlace): number => {
+    const said = plate();
+    const frame = said.line("FRAME");
+    if (frame !== `BODY ${place.designation}`) {
+      throw new Error(
+        `views check: the camera at ${place.label} stood in ${frame ?? "no frame"}, not BODY ${place.designation}`,
+      );
+    }
+    const line = said.line("POSITION");
+    const rangeM = positionRangeM(line);
+    if (rangeM === null) {
+      throw new Error(
+        `views check: the POSITION line at ${place.label} reads no range (${line ?? "none"})`,
+      );
+    }
+    if (!(Math.abs(rangeM / place.rangeM - 1) <= PLACE_RANGE_TOLERANCE)) {
+      throw new Error(
+        `views check: the camera at ${place.label} read POSITION ${line ?? ""}, placed ${String(Math.round(place.rangeM / 1000))} km from ${place.designation}'s centre`,
+      );
+    }
+    return rangeM;
+  };
+  /**
+   * Sets the primary's `GRID` at `OFF` through its `STYLE` panel, the image bare, as the inspection
+   * run's last capture has it: each stage mounts at `ON`, and the datum's graticule over a disc
+   * hides the air's shading the looks judge.
+   */
+  const gridOff = async (): Promise<void> => {
+    controls.unfoldPanel("view-style");
+    const button = (): HTMLButtonElement | null => controls.gridButton("OFF");
+    if (button()?.getAttribute("aria-pressed") === "true") {
+      return;
+    }
+    await driver.press(button, "the STYLE panel's GRID OFF");
+    await until("GRID did not go OFF", () => button()?.getAttribute("aria-pressed") === "true");
+  };
+  /** Whether a statement says a place's stage has not settled. */
+  const unsettledStatement = (statement: string): boolean =>
+    statement === PHOTOREAL_PREPARING ||
+    statement === ATMOSPHERE_PENDING ||
+    statement === ATMOSPHERE_COMPUTING;
+  /**
+   * What still stands between `place`'s stage and its capture, none once it has settled: the stage
+   * before (its label block's `SCENE` line names another, the stage before standing in until
+   * `VIEW` renders the new one), the wireframe, and any of `PHOTOREALISTIC: PREPARING`,
+   * `ATMOSPHERE: PENDING` and `ATMOSPHERE: COMPUTING`.
+   */
+  const unsettled = (place: AtmospherePlace): ReadonlyArray<string> => {
+    const said = plate();
+    return [
+      ...(said.line("SCENE") === place.scene ? [] : [`the scene before ${place.scene}`]),
+      ...(controls.styleOf(PRIMARY_NAME) === "photorealistic" ? [] : ["the wireframe"]),
+      ...said.statements.filter(unsettledStatement),
+    ];
+  };
+  /**
+   * Captures `place` once its stage has settled, by `deadlineMs`: nothing of {@link unsettled} has
+   * stood over {@link AtmosphereCheckTiming.framesBeforeCapture} of the primary's draws, since a
+   * new stage reads photorealistic for a frame or two before it asks for its pipelines; and takes
+   * it again where the capture's own plate says the stage had not settled after all. Each place's
+   * stage makes its pipelines afresh, and SwiftShader's pipelines and thick bakes outlast a
+   * control's wait.
+   */
+  const takePlace = async (place: AtmospherePlace, deadlineMs: number): Promise<void> => {
+    const late = (standing: ReadonlyArray<string>): Error =>
+      new Error(
+        `views check: ${standing.length === 0 ? "a settled stage" : standing.join(" and ")} still stood at ${place.label} within ${String(timing.mediaWaitMs / 1000)} s`,
+      );
+    const settled = async (clearSinceMs: number | null): Promise<void> => {
+      stopped();
+      const standing = unsettled(place);
+      const sinceMs = standing.length === 0 ? (clearSinceMs ?? deps.nowMs()) : null;
+      if (sinceMs !== null && drawsSince(sinceMs).length >= timing.framesBeforeCapture) {
+        return;
+      }
+      if (deps.nowMs() > deadlineMs) {
+        throw late(standing);
+      }
+      await wait(timing.pollMs);
+      await settled(sinceMs);
+    };
+    await settled(null);
+    await gridOff();
+    await capture(place.label, {
+      designation: place.designation,
+      rangeM: placedRangeM(place),
+      phaseDeg: place.phaseDeg,
+    });
+    const taken = captures.at(-1);
+    if (
+      taken !== undefined &&
+      (taken.style !== "photorealistic" || taken.statements.some(unsettledStatement))
+    ) {
+      captures.pop();
+      if (deps.nowMs() > deadlineMs) {
+        throw late(taken.statements.filter(unsettledStatement));
+      }
+      await takePlace(place, deadlineMs);
+    }
+  };
+  /** Takes each of `placed`'s places from `index` on in turn, each from the kept scene it offers. */
+  const takePlaces = async (
+    placed: Pick<PlacedAtmosphere, "places" | "offer">,
+    index: number,
+  ): Promise<void> => {
+    const place = placed.places[index];
+    if (place === undefined) {
+      return;
+    }
+    await driver.chooseScene(placed.offer(place));
+    await takePlace(place, deps.nowMs() + timing.mediaWaitMs);
+    await takePlaces(placed, index + 1);
+  };
+  if (deps.placed !== null) {
+    await takePlaces(deps.placed, 0);
+    return record([]);
+  }
+
   await chooseMeter("LIT");
   pressSingle("3");
   await until("FREE was not taken", () => plate().line("CAMERA")?.startsWith("FREE") === true);
@@ -1034,16 +1220,7 @@ export async function runAtmosphereCheck(
     await tour(index + 1);
   };
   await tour(0);
-
-  return {
-    timer: views.timer(),
-    devicePixelRatio: deps.devicePixelRatio,
-    canvas: views.canvasOf(PRIMARY_VIEW_NAME),
-    mediaReadyMs,
-    captures,
-    stages,
-    faults: views.faults(),
-  };
+  return record(stages);
 }
 
 /** What {@link recordAtmosphereCheck} asks of the main process. */

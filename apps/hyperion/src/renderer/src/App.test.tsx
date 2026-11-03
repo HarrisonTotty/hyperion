@@ -226,7 +226,7 @@ describe("App", () => {
       const user = userEvent.setup();
       render(<App />);
       await user.keyboard("{F4}");
-      expect(lookButtons()).toEqual([null, null, null]);
+      expect(lookButtons()).toEqual(LOOK_SCENES.map(() => null));
     });
 
     it("are offered on no terrain run's launch", () => {
@@ -236,7 +236,7 @@ describe("App", () => {
       };
       stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
       render(<App />);
-      expect(lookButtons()).toEqual([null, null, null]);
+      expect(lookButtons()).toEqual(LOOK_SCENES.map(() => null));
     });
 
     it("are made on a served world, read from the server, on a hand-over launch naming one (R10.T15.b)", async () => {
@@ -330,6 +330,30 @@ describe("App", () => {
         "ATMOSPHERE TEST",
         ...LOOK_SCENES,
       ]);
+    });
+  });
+
+  describe("the atmosphere run's places (R08.T17)", () => {
+    /** The `SCENE` selector's buttons after `ATMOSPHERE TEST`, on an atmosphere launch in `mode`. */
+    function scenesAfterAtmosphere(mode: "vulkan" | "software"): ReadonlyArray<string> {
+      const api = {
+        ...viewsCheckApi(),
+        launch: { ...viewsCheckApi().launch, run: "atmosphere" as const },
+      };
+      stubHyperionApi(TEST_SERVER_URL, { ...TEST_GRAPHICS, launchMode: mode }, undefined, api);
+      render(<App />);
+      const scenes = within(screen.getByRole("group", { name: "Scene" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent);
+      return scenes.slice(scenes.indexOf("ATMOSPHERE TEST") + 1);
+    }
+
+    it("are offered as two scenes after the kept scenes on a software launch", () => {
+      expect(scenesAfterAtmosphere("software")).toEqual(["PLACE A", "PLACE B"]);
+    });
+
+    it("are not offered on a GPU launch, whose run flies the tour", () => {
+      expect(scenesAfterAtmosphere("vulkan")).toEqual([]);
     });
   });
 

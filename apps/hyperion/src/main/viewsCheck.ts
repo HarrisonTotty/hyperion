@@ -218,7 +218,9 @@ export const INSPECTION_TIMING_DIR = "target/views-check/timing";
  * takes the same, and 15 minutes more on a served world (R10.T15.b), whose body's coarse field the
  * server computes, about a minute at level 8 (R09.T16.a), and sends whole, some 15 MB, once to read
  * the world and once to each look's session; the atmosphere run's (plan R08, R08.T10.b), its media
- * awaited and a flight to eight air fixtures and the seat's night, 8 and 15; the inspection run's,
+ * awaited and a flight to eight air fixtures and the seat's night, 8 and 15, and its full run's 30
+ * in the software mode, which takes each of its 22 places from a stage of its own whose pipelines
+ * SwiftShader makes afresh (R08.T17's by-eye list, 2 to 4 minutes a place in a pod); the inspection run's,
  * one body opened, its first photorealistic frames, its atmosphere and its surveyed ground awaited,
  * and a close look flown to and its terrain streamed, 8 and 15, and 10 more with its frame profile
  * (`--timing`; the owner's report), whose two windows each last up to two minutes. Each is
@@ -240,7 +242,7 @@ export function viewsCheckWatchdogMs(
         (launch.smoke ? 8 * 60_000 : 30 * 60_000) + (launch.served === undefined ? 0 : 15 * 60_000);
       break;
     case "atmosphere":
-      ms = launch.smoke ? 8 * 60_000 : 15 * 60_000;
+      ms = launch.smoke ? 8 * 60_000 : launchMode === "software" ? 30 * 60_000 : 15 * 60_000;
       break;
     case "inspection":
       // A profile's two windows, each at most two minutes and a trace's reduction, 10 more.

@@ -6,6 +6,8 @@ import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../..
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
 import { IMAGE_DETAIL_LIMITED } from "../../../view/budget/viewBudget";
 import { freeRateMPerS, MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
+import { rotate } from "../../../view/camera/quaternion";
+import { formatBodyDistance } from "../../../lib/format";
 import { STYLE_TOGGLE_KEY } from "../../../view/photoreal/style";
 import {
   ATMOSPHERE_FIXTURES,
@@ -16,7 +18,7 @@ import {
   atmosphereSeatM,
 } from "../../../view/scenes/atmosphereScene";
 import { ViewLabelBlock } from "../ViewLabelBlock";
-import { freeRateReading } from "../viewRun";
+import { freeRateReading, PHOTOREAL_PREPARING } from "../viewRun";
 import {
   ATMOSPHERE_CHECK_TIMING,
   ATMOSPHERE_END_TOLERANCE,
@@ -33,6 +35,7 @@ import {
   JUPITER_CAPTURE_RANGES_M,
   heldMs,
   legRateStep,
+  PLACE_RANGE_TOLERANCE,
   quantile,
   rangeCaptureLabel,
   rateStepOfCameraLine,
@@ -41,6 +44,12 @@ import {
   stageRangesM,
   TITAN_LIMB_RANGE_M,
 } from "./atmosphereCheckRun";
+import {
+  ATMOSPHERE_LOOKS,
+  type AtmospherePlace,
+  atmospherePlaces,
+  PLACE_SCENE_NAMES,
+} from "./atmospherePlaces";
 import { STOPPED } from "./viewsCheckRun";
 import type { WindowFigures } from "./viewsProbe";
 
@@ -470,6 +479,31 @@ interface Stall {
 }
 
 /**
+ * The places a fake offers as check-only scenes (the software mode's), how long each one's bake
+ * runs once chosen, ms, and how far off its range the fake stands the camera, a factor.
+ */
+interface PlacedFake {
+  readonly places: ReadonlyArray<AtmospherePlace>;
+  readonly computingMs: number;
+  readonly misplacement: number;
+  /** How long a place's stage draws the wireframe while its pipelines are made, ms. */
+  readonly preparingMs?: number;
+  /**
+   * How long a place's stage reads photorealistic once it stands before it asks for its pipelines,
+   * ms, as `VIEW`'s new stage does for a frame or more.
+   */
+  readonly preparingAfterMs?: number;
+  /**
+   * How long after a scene's choice its stage stands in for the one before, ms, as `VIEW`'s does
+   * until it renders the new one.
+   */
+  readonly swapMs?: number;
+}
+
+/** No places: the tour is flown. */
+const NO_PLACES: PlacedFake = { places: [], computingMs: 0, misplacement: 1 };
+
+/**
  * `VIEW`'s controls, canvas and primary label block as the run finds them, drawn into the page,
  * with the state they set: a free camera flown by `W` (or back by `S`) at its rate step in every
  * frame, each step at most `MAX_FREE_STEP_S` as `VIEW`'s, cut to look at a target's centre by the
@@ -500,11 +534,32 @@ class FakeView {
   limited = false;
   /** Until when, ms of the test's clock, a body's record is building: `ATMOSPHERE: PENDING`. */
   buildingUntilMs: number | null = null;
+  /** The place whose scene is chosen, or `null`. */
+  place: AtmospherePlace | null = null;
+  /** The place the run last offered, which either of the two placed scenes makes. */
+  offered: AtmospherePlace | null = null;
+  /** Until when, ms of the test's clock, a chosen place's bake runs: `ATMOSPHERE: COMPUTING`. */
+  computingUntilMs: number | null = null;
+  /**
+   * Until when, ms of the test's clock, a chosen place's stage makes its pipelines: the wireframe
+   * drawn, `PHOTOREALISTIC: PREPARING`.
+   */
+  preparingUntilMs: number | null = null;
+  /** The scene the plate shows: the chosen one, once its stage stands. */
+  shownScene = "SERVER";
+  /** The primary's `GRID`: `ON` as each stage mounts. */
+  grid = true;
+  /** The `GRID` at each capture, in order. */
+  readonly gridAtCaptures: boolean[] = [];
+  /** A chosen scene whose stage is still to stand, and when it does, ms of the test's clock. */
+  #swap: { readonly scene: string; readonly atMs: number } | null = null;
   readonly #clock: () => number;
   readonly #media: () => AtmosphereFixtureMedia;
   readonly #speeds: AutoSpeeds;
+  readonly #placed: PlacedFake;
   readonly #canvas: HTMLCanvasElement;
   readonly #marks: HTMLElement;
+  readonly #gridRow: HTMLElement;
   readonly #plate: RenderResult;
   /** The frames run so far, ms of the test's clock: every one a draw of the primary. */
   readonly #frames: number[] = [];
@@ -520,12 +575,18 @@ class FakeView {
     media: () => AtmosphereFixtureMedia,
     speeds: AutoSpeeds,
     stall: Stall | null,
+    placed: PlacedFake = NO_PLACES,
   ) {
     this.#clock = clock;
     this.#media = media;
     this.#speeds = speeds;
     this.#stall = stall;
-    const scenes = this.#fieldset("Scene", ["SERVER", ATMOSPHERE_SCENE_NAME]);
+    this.#placed = placed;
+    const scenes = this.#fieldset("Scene", [
+      "SERVER",
+      ATMOSPHERE_SCENE_NAME,
+      ...(placed.places.length === 0 ? [] : PLACE_SCENE_NAMES),
+    ]);
     scenes.setAttribute("aria-label", "Scene");
     this.#fieldset("CONTROLS", ["PRIMARY", "INSTRUMENT 1", "INSTRUMENT 2"]);
     const exposure = document.createElement("section");
@@ -538,6 +599,21 @@ class FakeView {
       this.#redraw();
     });
     exposure.append(enable);
+    const style = document.createElement("section");
+    style.className = "view-style";
+    const gridRow = document.createElement("fieldset");
+    gridRow.className = "view-style__grid";
+    for (const label of ["ON", "OFF"]) {
+      const button = document.createElement("button");
+      button.textContent = label;
+      button.addEventListener("click", () => {
+        this.grid = label === "ON";
+        this.#redraw();
+      });
+      gridRow.append(button);
+    }
+    style.append(gridRow);
+    this.#gridRow = gridRow;
     const meter = document.createElement("section");
     meter.className = "view-meter";
     for (const mode of ["AVG", "LIT", "DARK"]) {
@@ -564,7 +640,7 @@ class FakeView {
     this.#canvas.addEventListener("keyup", (event) => this.#canvasKey(event, false), {
       signal: listening.signal,
     });
-    document.body.append(exposure, meter, this.#marks, this.#canvas);
+    document.body.append(exposure, style, meter, this.#marks, this.#canvas);
     document.body.addEventListener("keydown", (event) => this.#singleKey(event), {
       signal: listening.signal,
     });
@@ -625,9 +701,24 @@ class FakeView {
         this.ev = Math.abs(gap) <= stepEv ? targetEv : this.ev + Math.sign(gap) * stepEv;
       }
     }
+    if (this.#swap !== null && toMs >= this.#swap.atMs) {
+      this.#show(this.#swap.scene);
+      this.#swap = null;
+    }
     if (this.#plateText() !== this.#shown) {
       this.#redraw();
     }
+  }
+
+  /**
+   * Stands the stage of `scene`: a place's, the one last offered, for one of the two scenes that
+   * make them, its `SCENE` line the place's; else the scene's own.
+   */
+  #show(scene: string): void {
+    const place = PLACE_SCENE_NAMES.some((name) => name === scene) ? this.offered : null;
+    this.shownScene = place?.scene ?? scene;
+    this.grid = true;
+    this.#choosePlace(place);
   }
 
   /** The animation frames drawn from `startMs` up to `endMs`, by now. */
@@ -636,21 +727,69 @@ class FakeView {
   }
 
   #statements(): ReadonlyArray<string> {
-    if (this.scene !== ATMOSPHERE_SCENE_NAME) {
+    if (this.scene === "SERVER") {
       return [];
     }
     if (this.#media().kind === "loading") {
       return [ATMOSPHERE_STATEMENTS.atmospherePending];
     }
-    const statements =
+    let statements =
       this.buildingUntilMs !== null && this.#clock() < this.buildingUntilMs
         ? [ATMOSPHERE_STATEMENTS.atmospherePending, ...PLATE_STATEMENTS]
         : PLATE_STATEMENTS;
+    if (this.computingUntilMs !== null && this.#clock() < this.computingUntilMs) {
+      statements = [ATMOSPHERE_STATEMENTS.atmosphereComputing, ...statements];
+    }
+    if (this.#preparing()) {
+      statements = [PHOTOREAL_PREPARING, ...statements];
+    }
     return this.limited ? [...statements, IMAGE_DETAIL_LIMITED] : statements;
   }
 
+  /**
+   * The `SCENE` line of a kept scene, and the `FRAME` and `POSITION` lines at a place, its
+   * fixture's, as `VIEW` reads them.
+   */
+  #placeLines(): ReadonlyArray<{ readonly label: string; readonly value: string }> {
+    const { place } = this;
+    const scene = this.shownScene === "SERVER" ? [] : [{ label: "SCENE", value: this.shownScene }];
+    if (place === null) {
+      return scene;
+    }
+    const range = formatBodyDistance(this.rangeTo(place.designation) / 1000, null);
+    return [
+      ...scene,
+      { label: "FRAME", value: `BODY ${place.designation}` },
+      { label: "POSITION", value: `${range.value} ${range.unit} 047° +12°` },
+    ];
+  }
+
+  /** When a chosen place's stage asked for its pipelines, ms of the test's clock. */
+  preparingFromMs: number | null = null;
+
+  /** Whether a chosen place's stage still makes its pipelines. */
+  #preparing(): boolean {
+    const now = this.#clock();
+    return (
+      this.preparingUntilMs !== null &&
+      now < this.preparingUntilMs &&
+      (this.preparingFromMs === null || now >= this.preparingFromMs)
+    );
+  }
+
+  /** The style the primary draws: the wireframe while its pipelines are made. */
+  #drawnStyle(): "wireframe" | "photorealistic" {
+    return this.#preparing() ? "wireframe" : this.style;
+  }
+
   #plateText(): string {
-    return [this.cameraLine(), this.exposureLine(), ...this.#statements()].join("|");
+    return [
+      this.#drawnStyle(),
+      this.cameraLine(),
+      this.exposureLine(),
+      ...this.#placeLines().map((line) => line.value),
+      ...this.#statements(),
+    ].join("|");
   }
 
   #block() {
@@ -660,10 +799,11 @@ class FakeView {
         lines={[
           { label: "CAMERA", value: this.cameraLine() },
           { label: "EXPOSURE", value: this.exposureLine() },
+          ...this.#placeLines(),
         ]}
         statements={this.#statements()}
         countLine={null}
-        faults={this.scene === ATMOSPHERE_SCENE_NAME ? PLATE_FAULTS : []}
+        faults={this.scene === "SERVER" ? [] : PLATE_FAULTS}
       />
     );
   }
@@ -679,7 +819,14 @@ class FakeView {
       button.addEventListener("click", () => {
         if (legend === "Scene") {
           this.scene = label;
-          this.chosenAtMs = this.#clock();
+          // The media are the page's, loading from the first choice of a scene that draws them.
+          this.chosenAtMs ??= this.#clock();
+          const swapMs = this.#placed.swapMs ?? 0;
+          if (swapMs > 0) {
+            this.#swap = { scene: label, atMs: this.#clock() + swapMs };
+          } else {
+            this.#show(label);
+          }
           for (const each of set.querySelectorAll("button")) {
             each.setAttribute("aria-pressed", String(each === button));
           }
@@ -690,6 +837,24 @@ class FakeView {
     }
     document.body.append(set);
     return set;
+  }
+
+  /** Stands the free camera at `place`, if any, its bake running a while. */
+  #choosePlace(place: AtmospherePlace | null): void {
+    this.place = place;
+    if (place === null) {
+      return;
+    }
+    const centreM = MARKS.find((mark) => mark.designation === place.designation)?.centreM;
+    if (centreM === undefined) {
+      throw new Error(`the fake has no mark ${place.designation}`);
+    }
+    this.preset = "FREE";
+    this.positionM = add(centreM, scale(place.fromCentreM, this.#placed.misplacement));
+    this.forward = rotate(place.orientation, vec3(0, 0, -1));
+    this.computingUntilMs = this.#clock() + this.#placed.computingMs;
+    this.preparingFromMs = this.#clock() + (this.#placed.preparingAfterMs ?? 0);
+    this.preparingUntilMs = this.preparingFromMs + (this.#placed.preparingMs ?? 0);
   }
 
   #singleKey(event: KeyboardEvent): void {
@@ -729,9 +894,12 @@ class FakeView {
 
   #redraw(): void {
     this.#shown = this.#plateText();
+    for (const button of this.#gridRow.querySelectorAll("button")) {
+      button.setAttribute("aria-pressed", String((button.textContent === "ON") === this.grid));
+    }
     this.#canvas.setAttribute(
       "aria-label",
-      `VIEW, ${this.style === "wireframe" ? "WIREFRAME" : "PHOTOREALISTIC"}, PRIMARY, ${this.preset}`,
+      `VIEW, ${this.#drawnStyle() === "wireframe" ? "WIREFRAME" : "PHOTOREALISTIC"}, PRIMARY, ${this.preset}`,
     );
     // Windowed as `ViewMarkList` is: the rows about the selected one alone, each giving the
     // list's length as its `aria-setsize`.
@@ -787,6 +955,8 @@ function fakeRun(
      * `VIEW`'s then runs once the run's has acted.
      */
     readonly runFirst?: boolean;
+    /** The software mode's places, the fake's scenes for them, and the run's. */
+    readonly placed?: PlacedFake;
   } = {},
 ): FakeRun {
   let now = 0;
@@ -800,9 +970,11 @@ function fakeRun(
     media,
     options.speeds ?? { brightenEvPerS: 3, darkenEvPerS: 1 },
     options.stall ?? null,
+    options.placed,
   );
   made = view;
   const captured: string[] = [];
+  let offers = 0;
   const controller = new AbortController();
   /** A frame the run has been called back in whose `VIEW` callback is still to come. */
   let pendingMs: number | null = null;
@@ -818,6 +990,7 @@ function fakeRun(
     api: {
       capture: (label) => {
         captured.push(`${label}: ${view.meter} ${view.auto ? "AUTO" : "MAN"} ${view.preset}`);
+        view.gridAtCaptures.push(view.grid);
         return Promise.resolve();
       },
     },
@@ -879,6 +1052,17 @@ function fakeRun(
     },
     signal: controller.signal,
     devicePixelRatio: 1,
+    placed:
+      options.placed === undefined
+        ? null
+        : {
+            places: options.placed.places,
+            offer: (place) => {
+              view.offered = place;
+              offers += 1;
+              return PLACE_SCENE_NAMES[offers % 2] ?? PLACE_SCENE_NAMES[0];
+            },
+          },
   };
   return { view, captured, controller, deps };
 }
@@ -1106,5 +1290,148 @@ describe("the atmosphere run's script (R08.T10.b)", () => {
     };
     await expect(runAtmosphereCheck(deps)).rejects.toThrow(STOPPED);
     expect([view.held, view.flightKeys]).toEqual([null, ["W down", "W up"]]);
+  });
+});
+
+/** A smoke's places and a look from the ground: the software mode's, as `App` gives them. */
+const PLACES = atmospherePlaces(
+  ATMOSPHERE_SMOKE_TOUR,
+  ATMOSPHERE_LOOKS.filter((look) => look.label === "ground-test-earth-noon"),
+);
+
+describe("the atmosphere run placed, in the software mode (R08.T17)", () => {
+  it("takes the night from the seat, then each place from its own scene with GRID OFF, flying nothing", async () => {
+    const run = fakeRun({ placed: { places: PLACES, computingMs: 0, misplacement: 1 } });
+    const record = await runAtmosphereCheck(run.deps);
+    expect([
+      record.captures.map((each) => [each.kind, each.label]),
+      run.view.gridAtCaptures,
+      run.view.flightKeys,
+      record.stages,
+    ]).toEqual([
+      [
+        ["night", "moonlit-night"],
+        ["fixture", "fixture-test-earth-o3-slab"],
+        ["fixture", "ground-test-earth-noon"],
+      ],
+      [true, false, false],
+      [],
+      [],
+    ]);
+  });
+
+  it("captures a place only once its stage draws photorealistic, its pipelines made, past a control's wait", async () => {
+    const preparingMs = 90_000;
+    // Each place's stage stands a second after its choice, the one before standing in meanwhile.
+    const run = fakeRun({
+      placed: { places: PLACES, computingMs: 0, misplacement: 1, preparingMs, swapMs: 1_000 },
+    });
+    const record = await runAtmosphereCheck(run.deps);
+    const placed = record.captures.slice(1);
+    expect([
+      ATMOSPHERE_CHECK_TIMING.smoke.waitMs < preparingMs,
+      placed.map((each) => [each.style, each.statements.includes(PHOTOREAL_PREPARING)]),
+      placed.every((each, i) => i === 0 || each.atMs - (placed[i - 1]?.atMs ?? 0) >= preparingMs),
+    ]).toEqual([
+      true,
+      [
+        ["photorealistic", false],
+        ["photorealistic", false],
+      ],
+      true,
+    ]);
+  });
+
+  it("takes a place again where its stage asked for its pipelines after it first read photorealistic", async () => {
+    // Each place's stage reads photorealistic for 2 s, past the frames the run waits for, then
+    // prepares for 5 s: the run's first capture of the slab is taken over its wireframe, and again;
+    // the noon's, whose AUTO settles past the 2 s, once.
+    const run = fakeRun({
+      placed: {
+        places: PLACES,
+        computingMs: 0,
+        misplacement: 1,
+        preparingAfterMs: 2_000,
+        preparingMs: 5_000,
+      },
+    });
+    const record = await runAtmosphereCheck(run.deps);
+    expect([
+      record.captures.map((each) => [
+        each.label,
+        each.style,
+        each.statements.includes(PHOTOREAL_PREPARING),
+      ]),
+      run.captured.map((each) => each.split(":")[0]),
+    ]).toEqual([
+      [
+        ["moonlit-night", "photorealistic", false],
+        ["fixture-test-earth-o3-slab", "photorealistic", false],
+        ["ground-test-earth-noon", "photorealistic", false],
+      ],
+      [
+        "moonlit-night",
+        "fixture-test-earth-o3-slab",
+        "fixture-test-earth-o3-slab",
+        "ground-test-earth-noon",
+      ],
+    ]);
+  });
+
+  it("captures a place only once no ATMOSPHERE: COMPUTING stands, past a control's wait", async () => {
+    const computingMs = 90_000;
+    const run = fakeRun({ placed: { places: PLACES, computingMs, misplacement: 1 } });
+    const record = await runAtmosphereCheck(run.deps);
+    const placed = record.captures.slice(1);
+    expect([
+      ATMOSPHERE_CHECK_TIMING.smoke.waitMs < computingMs,
+      placed.map(
+        (each) =>
+          each.statements.includes(ATMOSPHERE_STATEMENTS.atmosphereComputing) ||
+          each.statements.includes(ATMOSPHERE_STATEMENTS.atmospherePending),
+      ),
+      placed.every((each, i) => i === 0 || each.atMs - (placed[i - 1]?.atMs ?? 0) >= computingMs),
+    ]).toEqual([true, [false, false], true]);
+  });
+
+  it("records each place's range as its POSITION line reads it, within the tolerance of its own", async () => {
+    const run = fakeRun({ placed: { places: PLACES, computingMs: 0, misplacement: 1 } });
+    const record = await runAtmosphereCheck(run.deps);
+    expect(
+      record.captures.flatMap((each) =>
+        each.kind === "fixture"
+          ? [
+              [
+                each.designation,
+                Math.abs(
+                  each.rangeM /
+                    (PLACES.find((place) => place.label === each.label)?.rangeM ?? Number.NaN) -
+                    1,
+                ) < 0.005,
+              ],
+            ]
+          : [],
+      ),
+    ).toEqual([
+      ["TEST EARTH O3 SLAB", true],
+      ["TEST EARTH", true],
+    ]);
+  });
+
+  it("fails where a place's camera reads more than the tolerance off its range", async () => {
+    const run = fakeRun({
+      placed: { places: PLACES, computingMs: 0, misplacement: 1 + 2 * PLACE_RANGE_TOLERANCE },
+    });
+    await expect(runAtmosphereCheck(run.deps)).rejects.toThrow(
+      /^views check: the camera at fixture-test-earth-o3-slab read POSITION 52\.0 Mm 047° \+12°, placed 50968 km from TEST EARTH O3 SLAB's centre$/u,
+    );
+  });
+
+  it("fails where a place's bake outlasts the media's wait", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const run = fakeRun({ placed: { places: PLACES, computingMs: 1e9, misplacement: 1 } });
+    await expect(runAtmosphereCheck(run.deps)).rejects.toThrow(
+      "views check: ATMOSPHERE: COMPUTING still stood at fixture-test-earth-o3-slab within 180 s",
+    );
   });
 });

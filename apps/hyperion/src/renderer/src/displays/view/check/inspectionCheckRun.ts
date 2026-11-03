@@ -87,6 +87,8 @@ import { MAXIMIZE_KEY } from "../displayKeys";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
 import {
   exposureEv100,
+  METRES_PER_UNIT,
+  positionRangeM,
   primaryCanvas,
   primaryPlate,
   type PrimaryPlate,
@@ -296,27 +298,6 @@ export function readoutHeldBack(lines: ReadonlyArray<string>): boolean {
   return lines.some(
     (line) => line.startsWith("NOT AVAILABLE: no room for ") && line.includes(READOUT_NAME),
   );
-}
-
-/** Metres in each of the `POSITION` line's units. */
-const METRES_PER_UNIT: Readonly<Record<string, number>> = {
-  km: 1e3,
-  Mm: 1e6,
-  Gm: 1e9,
-  AU: 1.495_978_707e11,
-};
-
-/**
- * The camera's range from its frame's centre as the `POSITION` line reads it (`6.69 Mm 023° -12°`),
- * m, or `null` where it reads none.
- */
-export function positionRangeM(positionLine: string | null): number | null {
-  const match = /^([\d,]+(?:\.\d+)?) (km|Mm|Gm|AU) /u.exec(positionLine ?? "");
-  const digits = match?.[1];
-  const perUnit = match?.[2] === undefined ? undefined : METRES_PER_UNIT[match[2]];
-  return digits === undefined || perUnit === undefined
-    ? null
-    : Number(digits.replaceAll(",", "")) * perUnit;
 }
 
 /** Metres in each of the slant range's units (`formatSurfaceRange`'s). */

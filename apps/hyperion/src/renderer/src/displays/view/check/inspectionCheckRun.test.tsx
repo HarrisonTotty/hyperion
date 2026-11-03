@@ -6,6 +6,7 @@ import { freeRateMPerS, MAX_FREE_STEP_S } from "../../../view/camera/freeCamera"
 import type { DrawItem, FrameSubmission } from "../../../view/engine/types";
 import { LIGHTING_NOT_RECEIVED, LIGHTING_PENDING } from "../../../view/lighting/hostLights";
 import { TERRAIN_LOWEST_ALTITUDE_M } from "../../../view/scenes/terrainScene";
+import { positionRangeM } from "./atmosphereCheckRun";
 import {
   closeRateStep,
   drawsLitBody,
@@ -15,7 +16,6 @@ import {
   inspectionLighting,
   LitBodyDraws,
   LOW_HEIGHT_M,
-  positionRangeM,
   readoutHeldBack,
   recordInspectionCheck,
   runInspectionCheck,
