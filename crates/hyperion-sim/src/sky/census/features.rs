@@ -737,7 +737,7 @@ mod tests {
     use crate::galaxy::motion::EpochState;
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::CellKey;
-    use crate::galaxy::query::{LayerPads, LayerSet, QuerySphere, SystemHit, SystemSource};
+    use crate::galaxy::query::{LayerSet, QuerySphere, SystemHit, SystemSource};
     use crate::galaxy::rules::GalaxyRules;
     use crate::id::{Layer, SystemId, SystemIdKind};
     use crate::sky::caps::{CAPPED_LAYERS, LayerCap};
@@ -891,14 +891,13 @@ mod tests {
 
     /// [`query_at`] at `time`.
     fn query_at_time(
-        galaxy: &Galaxy,
+        _galaxy: &Galaxy,
         (at, time): ([f64; 3], UniverseTime),
         cut: f64,
     ) -> crate::sky::census::SkyQueryBuilder {
         let position = GalacticPosition::from_light_years(at).expect("in the cube");
         let observer = Observer::new(position, time).expect("on the clock");
         SkyQuery::builder(observer, Magnitudes::new(cut))
-            .pads(LayerPads::of(galaxy))
             .n_max(NonZeroU32::new(MAX_N_MAX).expect("not zero"))
     }
 

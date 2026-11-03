@@ -22,7 +22,7 @@
 //!
 //! The escape cut of Design note 7 holds every class but the fastest of each age bin, which hold
 //! the unbound (Design note 23), and the survivors: those are cut at their record's layer's
-//! [`pad_speed_in`](crate::galaxy::query::pad_speed_in) instead. A Gaussian draw at or above its cut is
+//! [`pad_speed`](crate::galaxy::query::pad_speed) instead. A Gaussian draw at or above its cut is
 //! drawn again on the next words, and the last scaled to 0.99 of the cut; a ballistic velocity or
 //! a survivor's, which no draw makes, is scaled.
 //!
@@ -37,7 +37,7 @@ use crate::galaxy::displaced::class_table::ClassKey;
 use crate::galaxy::displaced::runaway::{Ejected, RUNAWAY_CUT_OF_V_C, WALKAWAY_CUT};
 use crate::galaxy::displaced::{DisplacedClassId, DisplacedFields, DisplacedKind, SPEED_BINS};
 use crate::galaxy::placement::{SystemRecord, ballistic_motion, survivor_flight};
-use crate::galaxy::query::{PAD_SPEED, pad_speed_in};
+use crate::galaxy::query::{PAD_SPEED, pad_speed};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
 use crate::math;
@@ -133,10 +133,7 @@ fn launched(
     record: &SystemRecord,
     stream: &mut Stream,
 ) -> VelocityDraw {
-    let survivors = displaced
-        .class_table()
-        .survivors()
-        .expect("a survivor is placed only where its class has weight");
+    let survivors = displaced.class_table().survivors();
     let flight = survivor_flight(galaxy, record).expect("a member of the class has its flight");
     let at = PointLy::from(record.epoch_position());
     let direction = survivors
@@ -145,7 +142,7 @@ fn launched(
     let speed = flight.speed().value();
     scaled_to(
         direction.map(|c| c * speed),
-        pad_speed_in(galaxy, record.layer()).value(),
+        pad_speed(record.layer()).value(),
         1,
     )
 }
@@ -195,7 +192,7 @@ pub(crate) fn class_velocity(
     let p = PointLy::from(position);
     let axes = basis(position, &p, EllipsoidAxes::Cylindrical);
     let cut = if is_exempt(key) {
-        pad_speed_in(galaxy, layer).value()
+        pad_speed(layer).value()
     } else {
         let r_cyl = math::hypot(p.x, p.y);
         let escape = galaxy

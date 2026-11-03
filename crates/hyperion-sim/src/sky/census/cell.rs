@@ -74,9 +74,7 @@ use crate::galaxy::gas::modifiers::GasModifier;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{CellKey, SystemKind, SystemRecord, generate_cell_where};
-use crate::galaxy::query::pad_for;
-#[cfg(doc)]
-use crate::galaxy::query::pad_speed;
+use crate::galaxy::query::{pad_for, pad_speed};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{BodyId, Layer, SystemId};
 use crate::math;
@@ -1387,20 +1385,20 @@ impl CellReach {
     /// most far + β |t − epoch|, within the same sum.
     ///
     /// It rests, as the range query's padding and the cells' floors do, on every grid record moving
-    /// slower than its layer's pad, the query's ([`SkyQuery::pads`]), [`pad_speed`]'s to generator
-    /// version 26: plan 08's draw holds every speed below the least of the escape speed and
-    /// 1,000 km/s (`galaxy::kinematics::draw`), and layer E pads at 3,000 km/s, as from 27 layer D
-    /// does with the hypervelocity survivors (plan 09, P09.T34.b). P08.T17 owns that premise: plan 08's
-    /// [`epoch_velocity`](crate::galaxy::query::epoch_velocity), through which
-    /// [`Drift::of_record`] reads every grid velocity, debug-asserts each speed below its layer's
-    /// [`pad_speed`] (decided 2026-10-05, `decision-r06-pad-speed.md`), and R06.T8.j tests this pad
-    /// and the plan's cells in a galaxy whose systems move.
+    /// slower than its layer's pad, [`pad_speed`]'s: plan 08's draw holds every speed below the
+    /// least of the escape speed and 1,000 km/s (`galaxy::kinematics::draw`), and layer E pads at
+    /// 3,000 km/s, as from 27 layer D does with the hypervelocity survivors (plan 09, P09.T34.b).
+    /// P08.T17 owns that premise: plan 08's
+    /// [`epoch_velocity`](crate::galaxy::query::epoch_velocity), through which [`Drift::of_record`]
+    /// reads every grid velocity, debug-asserts each speed below its layer's [`pad_speed`] (decided
+    /// 2026-10-05, `decision-r06-pad-speed.md`), and R06.T8.j tests this pad and the plan's cells
+    /// in a galaxy whose systems move.
     #[must_use]
     fn of(offsets: &CellOffsets, key: CellKey, query: &SkyQuery) -> Self {
         let apex = query.observer().position().to_light_years_f64();
         let (near_ly, far_ly) = box_distances_ly(key, apex);
         let t = query.observer().time();
-        let beta = pad_beta(query.pads().speed(key.layer()));
+        let beta = pad_beta(pad_speed(key.layer()));
         let offset = offsets.of(key).value();
         let lead = t.since_epoch().as_julian_years_f64().abs();
         let pad = beta * (lead + far_ly + offset) / (1.0 - beta);
@@ -1455,7 +1453,7 @@ const KEY_SLACK_SHARE: f64 = 2.0 * BEFORE_DRIFT_SLACK_SHARE;
 pub(crate) fn entry_need(offsets: &CellOffsets, key: CellKey, params: &BlockParams) -> CellNeed {
     let (near, far) = box_distances_ly(key, params.at().to_light_years_f64());
     let h = CLOCK_WINDOW_H.as_julian_years_f64();
-    let beta = pad_beta(params.pads().speed(key.layer()));
+    let beta = pad_beta(pad_speed(key.layer()));
     let offset = offsets.of(key).value();
     let pad = beta * (h + far + CACHE_APPROACH_LY + offset) / (1.0 - beta);
     let least = (near * (1.0 - KEY_SLACK_SHARE) - CACHE_APPROACH_LY - pad - offset).max(0.0);
@@ -3583,7 +3581,7 @@ mod tests {
         let pad = pad_for(earliest, walk_speed)
             .value()
             .max(pad_for(t, walk_speed).value());
-        let pad_speed_m_s = crate::units::MetresPerSecond::from(query.pads().speed(layer)).value();
+        let pad_speed_m_s = crate::units::MetresPerSecond::from(pad_speed(layer)).value();
         let ly = |a: &GalacticPosition, b: &GalacticPosition| {
             a.distance_to(b).value() / METRES_PER_LIGHT_YEAR
         };

@@ -32,8 +32,8 @@ pub use census::decide_census;
 pub use expected::expected_counts;
 pub use mode::{QueryMode, range_query_observed};
 pub use motion::{
-    LayerPads, PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, escape_cut_holds, escape_cut_holds_in,
-    hit_at, kepler_pad_for, pad_for, pad_speed, pad_speed_in, position_at,
+    PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, escape_cut_holds, hit_at, kepler_pad_for,
+    pad_for, pad_speed, position_at,
 };
 pub(crate) use motion::{drifted, walk_pad};
 pub use parts::{SourceHits, WalkedCells};
@@ -233,7 +233,7 @@ impl RangePlan {
         query: &RangeQuery,
         grid: LayerCounts,
     ) -> Self {
-        let widest = widest_sphere(galaxy, query);
+        let widest = widest_sphere(query);
         let per_source: Vec<LayerCounts> = sources
             .iter()
             .map(|source| source.expected_in_sphere(galaxy, &widest))
@@ -360,11 +360,11 @@ pub(crate) fn sphere_for_layer(galaxy: &Galaxy, query: &RangeQuery, layer: Layer
 /// The sources pad for their own members' motion, so the grid's Kepler-regime pad, which only the
 /// grid's records need, does not widen it (plan 09, P09.T28.b.b).
 #[must_use]
-pub(crate) fn widest_sphere(galaxy: &Galaxy, query: &RangeQuery) -> QuerySphere {
+pub(crate) fn widest_sphere(query: &RangeQuery) -> QuerySphere {
     let pad = Layer::ALL
         .into_iter()
         .fold(LightYears::ZERO, |most, layer| {
-            let pad = pad_for(query.time(), pad_speed_in(galaxy, layer));
+            let pad = pad_for(query.time(), pad_speed(layer));
             if pad.total_cmp(&most).is_gt() {
                 pad
             } else {

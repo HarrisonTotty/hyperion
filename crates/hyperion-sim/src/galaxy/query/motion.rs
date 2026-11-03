@@ -21,8 +21,8 @@
 //! [`epoch_velocity`], which every grid velocity passes through, checks it in debug builds, and
 //! [`escape_cut_holds`] names the layers whose grid records also all stay below the local escape
 //! speed (plan 08, P08.T17). From generator version 27 layer D holds the hypervelocity survivors,
-//! and a galaxy's own pad is [`pad_speed_in`]'s (plan 09, P09.T34.b). Feature members move by their
-//! own laws, and plan 09 pads each feature by its own members' bound (P09.T23.b).
+//! and pads as layer E does (plan 09, P09.T34.b). Feature members move by their own laws, and plan
+//! 09 pads each feature by its own members' bound (P09.T23.b).
 
 use super::result::SystemHit;
 use super::walk::QuerySphere;
@@ -31,7 +31,6 @@ use crate::galaxy::Galaxy;
 #[cfg(doc)]
 use crate::galaxy::catalogue_classes::CatalogueSystem;
 use crate::galaxy::catalogue_classes::system_of_record;
-use crate::galaxy::displaced::survivors::HypervelocityRules;
 use crate::galaxy::kinematics::draw_velocity;
 use crate::galaxy::motion::{EpochState, SpeedBound, StateAt, position_velocity_at};
 use crate::galaxy::placement::{Existence, SystemOrigin, SystemRecord};
@@ -69,23 +68,17 @@ pub const UNBOUND_PAD_SPEED: KilometresPerSecond = KilometresPerSecond::new(3_00
 
 /// The speed the sphere is padded by when walking `layer`.
 ///
-/// [`UNBOUND_PAD_SPEED`] for layer E, the only layer whose cells hold plan 08's unbound class, and
-/// [`PAD_SPEED`] for every other layer (plan 08, Design note 27). It lives behind one function so
-/// that raising one layer's moves no other layer's cells (plan 03, Design note 13). Every grid
-/// record of a layer moves below it: [`epoch_velocity`] asserts that, and [`escape_cut_holds`] is
-/// read from it (P08.T17).
-///
-/// Plan 09 raises layer D's together with the hypervelocity survivors it places there
-/// (P09.T34.b), from generator version 27: until that bump a galaxy's own pad is
-/// [`pad_speed_in`]'s, which every walk and reach reads, and the sky census and the server's sky
-/// through their query's [`LayerPads`]. This is a galaxy's of version 26 and before.
+/// [`UNBOUND_PAD_SPEED`] for layer E, whose cells hold plan 08's unbound class, and from generator
+/// version 27 for layer D, whose cells hold the hypervelocity survivors at up to 2,500 km/s (plan
+/// 09, P09.T34.b); [`PAD_SPEED`] for every other layer (plan 08, Design note 27). It lives behind
+/// one function so that raising one layer's moves no other layer's cells (plan 03, Design note
+/// 13). Every grid record of a layer moves below it: [`epoch_velocity`] asserts that, and
+/// [`escape_cut_holds`] is read from it (P08.T17).
 #[must_use]
 pub const fn pad_speed(layer: Layer) -> KilometresPerSecond {
     match layer {
-        Layer::E => UNBOUND_PAD_SPEED,
-        Layer::A | Layer::B | Layer::C | Layer::D | Layer::BrownDwarf | Layer::RoguePlanet => {
-            PAD_SPEED
-        }
+        Layer::D | Layer::E => UNBOUND_PAD_SPEED,
+        Layer::A | Layer::B | Layer::C | Layer::BrownDwarf | Layer::RoguePlanet => PAD_SPEED,
     }
 }
 
@@ -118,117 +111,14 @@ pub const fn pad_speed(layer: Layer) -> KilometresPerSecond {
 /// assert!((bound(Layer::C, 574.0) - 574.0).abs() < 1e-9);
 /// // ...but layer E holds plan 08's unbound class, so only its pad bounds it.
 /// assert!((bound(Layer::E, 574.0) - 3_000.0).abs() < 1e-9);
+/// // So does layer D, which holds the hypervelocity survivors (P09.T34.b).
+/// assert!((bound(Layer::D, 574.0) - 3_000.0).abs() < 1e-9);
 /// ```
 #[must_use]
 pub const fn escape_cut_holds(layer: Layer) -> bool {
     // No layer pads below `PAD_SPEED`, which the escape cut can reach, so this is "is
     // `PAD_SPEED`" without comparing floats for equality.
     pad_speed(layer).value() <= PAD_SPEED.value()
-}
-
-/// The speed `galaxy`'s spheres are padded by when walking `layer`: [`pad_speed`], but from
-/// generator version 27 [`UNBOUND_PAD_SPEED`] for layer D, whose cells then hold the hypervelocity
-/// survivors at up to 2,500 km/s (plan 09, P09.T34.b; plan 08, Design note 27).
-///
-/// The raise is held with the survivors' weight (`HYPERVELOCITY_VERSION`), so that a galaxy of
-/// versions 24–26 walks the cells it always has: a wider pad moves no system, but the cells a walk
-/// visits count against its budgets, and the sky census's and the cells' tallies are pinned.
-///
-/// # Examples
-///
-/// ```
-/// use hyperion_sim::Seed;
-/// use hyperion_sim::galaxy::Galaxy;
-/// use hyperion_sim::galaxy::query::{PAD_SPEED, pad_speed_in};
-/// use hyperion_sim::id::Layer;
-///
-/// // Below generator version 27 layer D holds no survivors and pads at plan 03's speed.
-/// let galaxy = Galaxy::new(Seed::new(7));
-/// assert_eq!(pad_speed_in(&galaxy, Layer::D), PAD_SPEED);
-/// ```
-#[must_use]
-pub fn pad_speed_in(galaxy: &Galaxy, layer: Layer) -> KilometresPerSecond {
-    match (layer, galaxy.rules().hypervelocity) {
-        (Layer::D, HypervelocityRules::Weighted) => UNBOUND_PAD_SPEED,
-        (Layer::D, HypervelocityRules::Unweighted)
-        | (Layer::A | Layer::B | Layer::C | Layer::E | Layer::BrownDwarf | Layer::RoguePlanet, _) => {
-            pad_speed(layer)
-        }
-    }
-}
-
-/// Whether every grid record of `layer` in `galaxy` is drawn below the local escape speed:
-/// [`escape_cut_holds`], read from [`pad_speed_in`], so false for layer D from generator version
-/// 27 (plan 09, P09.T34.b).
-#[must_use]
-pub fn escape_cut_holds_in(galaxy: &Galaxy, layer: Layer) -> bool {
-    pad_speed_in(galaxy, layer).value() <= PAD_SPEED.value()
-}
-
-/// Every layer's pad speed in one galaxy, [`pad_speed_in`]'s, for a reader that pads where it
-/// holds no galaxy: the sky census, which reads its query's (`SkyQueryBuilder::pads`), and the
-/// server's sky (plan 09, P09.T34.b).
-///
-/// # Examples
-///
-/// ```
-/// use hyperion_sim::Seed;
-/// use hyperion_sim::galaxy::Galaxy;
-/// use hyperion_sim::galaxy::query::{LayerPads, pad_speed};
-/// use hyperion_sim::id::Layer;
-///
-/// // Below generator version 27 a galaxy's pads are every layer's held one.
-/// let pads = LayerPads::of(&Galaxy::new(Seed::new(7)));
-/// assert_eq!(pads, LayerPads::held());
-/// assert_eq!(pads.speed(Layer::D), pad_speed(Layer::D));
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LayerPads {
-    /// By layer, in [`Layer::ALL`]'s order, which is their values'.
-    speeds: [KilometresPerSecond; Layer::ALL.len()],
-}
-
-impl LayerPads {
-    /// The pads of a galaxy whose hypervelocity survivors have no weight, every galaxy's to
-    /// generator version 26: [`pad_speed`]'s.
-    #[must_use]
-    pub const fn held() -> Self {
-        let mut speeds = [PAD_SPEED; Layer::ALL.len()];
-        let mut i = 0;
-        while i < Layer::ALL.len() {
-            speeds[i] = pad_speed(Layer::ALL[i]);
-            i += 1;
-        }
-        Self { speeds }
-    }
-
-    /// `galaxy`'s pads, [`pad_speed_in`]'s.
-    #[must_use]
-    pub fn of(galaxy: &Galaxy) -> Self {
-        Self {
-            speeds: Layer::ALL.map(|layer| pad_speed_in(galaxy, layer)),
-        }
-    }
-
-    /// `layer`'s pad speed.
-    #[must_use]
-    pub fn speed(&self, layer: Layer) -> KilometresPerSecond {
-        self.speeds[usize::from(layer.value())]
-    }
-
-    /// Whether every grid record of `layer` is drawn below the local escape speed, read from its
-    /// pad as [`escape_cut_holds`] is.
-    #[must_use]
-    pub fn escape_cut_holds(&self, layer: Layer) -> bool {
-        self.speed(layer).value() <= PAD_SPEED.value()
-    }
-}
-
-impl Default for LayerPads {
-    /// [`held`](Self::held)'s.
-    fn default() -> Self {
-        Self::held()
-    }
 }
 
 /// How far a sphere must be padded to hold everything that could reach it by `t` at `speed`,
@@ -318,7 +208,7 @@ pub fn kepler_pad_for(
     radius: LightYears,
     t: UniverseTime,
 ) -> LightYears {
-    let speed = pad_speed_in(galaxy, layer);
+    let speed = pad_speed(layer);
     let straight = pad_for(t, speed).value();
     if t == UniverseTime::EPOCH {
         return LightYears::new(straight);
@@ -364,7 +254,7 @@ pub fn kepler_pad_for(
 /// Every grid velocity that the range query, R06's sky census and plan 12's lensing walk read
 /// passes through here, by [`position_at`] and
 /// [`Drift::of_record`](crate::observe::Drift::of_record). So this is where the padding's premise
-/// is checked: every grid record of a layer moves below that layer's pad, [`pad_speed_in`]'s
+/// is checked: every grid record of a layer moves below that layer's pad, [`pad_speed`]'s
 /// (P08.T17).
 ///
 /// A catalogue system's is its class's, its broken line's at the epoch (plan 09, P09.T33.a): away
@@ -375,7 +265,7 @@ pub fn kepler_pad_for(
 ///
 /// - In a galaxy with kinematic tables, if `record` is a feature member or a centre member, as
 ///   [`draw_velocity`]; if it is a catalogue system that does not resolve in `galaxy`.
-/// - In debug builds, if the drawn speed is not below `pad_speed_in(galaxy, record.layer())`. Plan
+/// - In debug builds, if the drawn speed is not below `pad_speed(record.layer())`. Plan
 ///   08's draw prevents that: its escape cut holds every grid record below [`PAD_SPEED`], and
 ///   P08.T12.d caps each exempt class below its layer's pad (Design note 7), the hypervelocity
 ///   survivors of version 27 among them (P09.T34.b).
@@ -390,7 +280,7 @@ pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocit
     }
     if galaxy.kinematics().is_some() {
         let velocity = draw_velocity(galaxy, record);
-        let pad = pad_speed_in(galaxy, record.layer());
+        let pad = pad_speed(record.layer());
         debug_assert!(
             velocity.speed().value() < MetresPerSecond::from(pad).value(),
             "{:?} of layer {:?} moves at {} km/s, not below its layer's pad speed of {} km/s \
@@ -464,7 +354,7 @@ pub fn position_at(galaxy: &Galaxy, record: &SystemRecord, t: UniverseTime) -> G
 
 /// The pad a walk of `layer`'s cells about a sphere of `radius` at `centre` at `t` takes, ly: from
 /// generator version 25 the Kepler regime's [`kepler_pad_for`], at least the straight lines'
-/// [`pad_for`] at the layer's [`pad_speed_in`] (plan 09, P09.T28.b.b), so that the cells chosen
+/// [`pad_for`] at the layer's [`pad_speed`] (plan 09, P09.T28.b.b), so that the cells chosen
 /// hold every record [`position_at`] puts in the sphere at `t`. The range query's walk and the
 /// frame search pad by it.
 #[must_use]
@@ -575,12 +465,13 @@ mod tests {
         assert!((CLOCK_WINDOW_H.as_julian_years_f64() - 1_000.0).abs() < f64::EPSILON);
     }
 
-    /// Plan 08, P08.T6: layer E pads at the unbound class's 3,000 km/s, every other layer at plan
-    /// 03's 1,000 km/s; at |t| = H that is 10 ly, against layer E's 128 ly cells.
+    /// Plan 08, P08.T6: layer E pads at the unbound class's 3,000 km/s, and from generator version
+    /// 27 layer D at the same for the hypervelocity survivors (P09.T34.b), every other layer at
+    /// plan 03's 1,000 km/s; at |t| = H that is 10 ly, against layer E's 128 ly cells.
     #[test]
     fn motion_pads_layer_e_for_the_unbound_class() {
         for layer in Layer::ALL {
-            let expected = if layer == Layer::E {
+            let expected = if matches!(layer, Layer::D | Layer::E) {
                 UNBOUND_PAD_SPEED
             } else {
                 PAD_SPEED
@@ -592,7 +483,7 @@ mod tests {
     }
 
     /// Plan 08, P08.T17: the escape cut holds exactly where a layer pads at plan 03's speed, and
-    /// no layer pads below it, since the escape cut can reach it. Today that is every layer but E.
+    /// no layer pads below it, since the escape cut can reach it: every layer but D and E.
     #[test]
     fn escape_cut_holds_where_the_pad_is_plan_03s() {
         for layer in Layer::ALL {
@@ -600,7 +491,11 @@ mod tests {
             assert!(pad >= PAD_SPEED.value(), "{layer:?} pads at {pad} km/s");
             let is_plan_03s = pad.total_cmp(&PAD_SPEED.value()).is_eq();
             assert_eq!(escape_cut_holds(layer), is_plan_03s, "{layer:?}");
-            assert_eq!(escape_cut_holds(layer), layer != Layer::E, "{layer:?}");
+            assert_eq!(
+                escape_cut_holds(layer),
+                !matches!(layer, Layer::D | Layer::E),
+                "{layer:?}"
+            );
         }
     }
 

@@ -11,7 +11,7 @@
 //!   cells touching the sphere's unpadded radius, which errs high, as [`SystemSource`]'s contract
 //!   allows, and does not depend on the query's time. Each band counts in the layer of its band.
 //! - **Hits.** The cells are chosen within the padded radius, since members move: band by band,
-//!   padded at the larger of the band's layer's [`pad_speed_in`] and the feature's own members' bound
+//!   padded at the larger of the band's layer's [`pad_speed`] and the feature's own members' bound
 //!   ([`FeatureInterior::member_speed_bound`], P09.T23.b), so that where the bound is the lower the
 //!   cells are the layer's. The features are looked up about the sphere padded at
 //!   [`UNBOUND_PAD_SPEED`], above every feature's bound. Only the candidates placed within the
@@ -69,7 +69,7 @@ use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::{
     LayerCounts, LayerSet, QuerySphere, RangeQuery, SystemHit, SystemSource, UNBOUND_PAD_SPEED,
-    pad_for, pad_speed_in, widest_sphere,
+    pad_for, pad_speed, widest_sphere,
 };
 use crate::id::{FeatureCell, Layer};
 use crate::time::UniverseTime;
@@ -373,7 +373,7 @@ impl<'a> FeatureMemberSource<'a> {
         galaxy: &Galaxy,
         query: &RangeQuery,
     ) -> Vec<(FeatureCell, FeatureProcess)> {
-        let sphere = widest_sphere(galaxy, query);
+        let sphere = widest_sphere(query);
         FeatureCatalogue::cells_near(
             galaxy,
             sphere.centre(),
@@ -469,7 +469,7 @@ impl<'a> FeatureMemberSource<'a> {
         (cell, last): (FeatureCell, FeatureProcess),
         part: CellPart,
     ) {
-        let sphere = widest_sphere(galaxy, query);
+        let sphere = widest_sphere(query);
         let (centre, radius) = (sphere.centre(), lookup_radius(&sphere));
         let mut found = Vec::new();
         FeatureCatalogue::found_in(
@@ -755,7 +755,7 @@ impl SystemSource for FeatureMemberSource<'_> {
                 if !layers.contains(band.layer()) {
                     continue;
                 }
-                let reach = band_reach(galaxy, sphere.radius(), t, band.layer(), bound);
+                let reach = band_reach(sphere.radius(), t, band.layer(), bound);
                 for cell in interior.grid().cells_touching(&local, reach) {
                     interior.members_in_cell_near(
                         galaxy,
@@ -875,18 +875,17 @@ fn grid_may_touch(
 /// How far from a query's centre a feature's cells of `layer` are visited, for a sphere of
 /// `radius` at `t` (P09.T23.b).
 ///
-/// The sphere is padded at the larger of the layer's pad in `galaxy` ([`pad_speed_in`]) and the
+/// The sphere is padded at the larger of the layer's pad ([`pad_speed`]) and the
 /// feature's members' `bound` ([`FeatureInterior::member_speed_bound`]). Where the bound is the
 /// lower, the reach is the layer's, bit for bit.
 #[must_use]
 pub(crate) fn band_reach(
-    galaxy: &Galaxy,
     radius: LightYears,
     t: UniverseTime,
     layer: Layer,
     bound: KilometresPerSecond,
 ) -> LightYears {
-    let speed = pad_speed_in(galaxy, layer).value().max(bound.value());
+    let speed = pad_speed(layer).value().max(bound.value());
     radius + pad_for(t, KilometresPerSecond::new(speed))
 }
 
@@ -1461,7 +1460,7 @@ mod tests {
             .time(UniverseTime::from_julian_years(400).unwrap())
             .build()
             .unwrap();
-        let sphere = widest_sphere(galaxy, &query);
+        let sphere = widest_sphere(&query);
         let answer = |source: &FeatureMemberSource<'_>| {
             let census = source.expected_in_sphere(galaxy, &sphere);
             let mut hits = Vec::new();
@@ -1523,7 +1522,7 @@ mod tests {
             RangeQuery::builder(*open_cluster().feature().position(), LightYears::new(12.0))
                 .build()
                 .unwrap();
-        let sphere = widest_sphere(galaxy, &query);
+        let sphere = widest_sphere(&query);
         let interiors = KeepInteriors::new(galaxy);
         let source = FeatureMemberSource::new(&NoFeatureCache, &interiors);
         for cell in FeatureMemberSource::feature_cells(galaxy, &query) {
@@ -1780,21 +1779,20 @@ mod tests {
     /// the layer's pad speed, and by the bound where it is above.
     #[test]
     fn a_feature_s_reach_is_its_layer_s_unless_its_bound_is_faster() {
-        let galaxy = galaxy();
         let radius = LightYears::new(12.0);
         for years in [-1_000, -600, 1, 1_000] {
             let t = UniverseTime::from_julian_years(years).unwrap();
             for layer in [Layer::A, Layer::D, Layer::E] {
-                let pad = pad_speed_in(galaxy, layer);
+                let pad = pad_speed(layer);
                 let today = radius + pad_for(t, pad);
                 for below in [0.0, 164.0, 0.5 * pad.value(), pad.value()] {
                     let below = KilometresPerSecond::new(below);
-                    let reach = band_reach(galaxy, radius, t, layer, below);
+                    let reach = band_reach(radius, t, layer, below);
                     assert_same_bits(reach.value(), today.value());
                 }
                 for above in [pad.value() * (1.0 + 1e-9), 1.2 * pad.value(), 4_000.0] {
                     let bound = KilometresPerSecond::new(above);
-                    let reach = band_reach(galaxy, radius, t, layer, bound);
+                    let reach = band_reach(radius, t, layer, bound);
                     assert_same_bits(reach.value(), (radius + pad_for(t, bound)).value());
                     assert!(reach.value() > today.value(), "{layer:?} at {years} years");
                 }
@@ -1802,7 +1800,6 @@ mod tests {
         }
         // At the epoch nothing has moved, however fast.
         let epoch = band_reach(
-            galaxy,
             radius,
             UniverseTime::EPOCH,
             Layer::A,

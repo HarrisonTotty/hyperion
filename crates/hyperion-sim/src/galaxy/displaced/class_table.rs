@@ -676,8 +676,8 @@ pub struct ClassTable {
     /// `None` before it, where the field is the budget.
     field: Option<Vec<[f64; BANDS]>>,
     /// From generator version 27 (plan 09, P09.T34.b), the hypervelocity survivors, the class's
-    /// count; `None` before it, where the class has no weight.
-    survivors: Option<Survivors>,
+    /// count.
+    survivors: Survivors,
 }
 
 /// The log-mean speed of kicks in bin `s`, in units of the speed scale.
@@ -1453,7 +1453,7 @@ impl ClassTable {
             components,
             classes,
             field,
-            survivors: Survivors::where_weighted(galaxy, forms),
+            survivors: Survivors::of(galaxy, forms),
         }
     }
 
@@ -1469,11 +1469,10 @@ impl ClassTable {
     }
 
     /// The hypervelocity survivors, from generator version 27 (plan 09, P09.T34.b): the class's
-    /// count and what its members' flights are drawn from. `None` below it, where the class has
-    /// no weight.
+    /// count and what its members' flights are drawn from.
     #[must_use]
-    pub fn survivors(&self) -> Option<&Survivors> {
-        self.survivors.as_ref()
+    pub fn survivors(&self) -> &Survivors {
+        &self.survivors
     }
 
     /// The runaway model the table was built with, its walkaway scale W solved for the galaxy
@@ -1529,10 +1528,7 @@ impl ClassTable {
                 .flat_map(|class| class.marks.iter())
                 .map(ConditionalMarks::heap_bytes)
                 .sum::<usize>()
-            + self
-                .survivors
-                .as_ref()
-                .map_or(0, |survivors| size_of_val(survivors.births_per_year()))
+            + size_of_val(self.survivors.births_per_year())
     }
 
     /// The galaxy's scales the table was built at.
@@ -1622,9 +1618,7 @@ impl ClassTable {
             (Some(source), Some(b)) => {
                 class.weight[b] * self.sources[source_index(source)].budget[b]
             }
-            (None, Some(_)) if band == MassBand::D => {
-                self.survivors.as_ref().map_or(0.0, Survivors::total)
-            }
+            (None, Some(_)) if band == MassBand::D => self.survivors.total(),
             (None, _) | (_, None) => 0.0,
         }
     }

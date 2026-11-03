@@ -48,7 +48,7 @@ use crate::galaxy::displaced::runaway::{ENCOUNTER_SHARE, RUNAWAY_MIN_SPEED, WALK
 use crate::galaxy::displaced::{PlacementClass, binarity};
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
-use crate::galaxy::query::pad_speed_in;
+use crate::galaxy::query::pad_speed;
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::Layer;
 use crate::math;
@@ -923,7 +923,7 @@ fn binary_kick_massive_primaries_die_as_plan_06_says() {
 fn binary_kick_bound_remnants_move_at_their_recoil_within_their_class() {
     let galaxy = galaxy();
     let records = layer_e(galaxy);
-    let pad = pad_speed_in(galaxy, Layer::E).value();
+    let pad = pad_speed(Layer::E).value();
     let parts = in_shares(SHARES, THREADS, |k| {
         let (mut bound, mut within, mut fastest) = (0_u64, 0_u64, 0.0_f64);
         for record in records.iter().skip(k).step_by(SHARES) {

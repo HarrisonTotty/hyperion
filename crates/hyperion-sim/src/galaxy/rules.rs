@@ -35,9 +35,6 @@
 //!   and the carve-out, by the build's one `match` (`Galaxy::from_params`), which installs the
 //!   classes and the stay shares that every reader of the two layers then reads; so
 //!   `Galaxy::with_rules` refuses to change it as well.
-//! - [`hypervelocity`](GalaxyRules::hypervelocity), at [`HYPERVELOCITY_VERSION`] (plan 09,
-//!   P09.T34.b): the hypervelocity survivors' class has its weight in layer D. It is read where the
-//!   class table is built, with the galaxy, so `Galaxy::with_rules` refuses to change it.
 //! - [`orphan_spray`](GalaxyRules::orphan_spray), at [`ORPHAN_SPRAY_VERSION`] (plan 10, P10.T10.b's
 //!   warm-up, at 27): an orphan's tube is sprayed from 500 tracers an arm at ruling 146.3's `τ_p ÷
 //!   32`. It is read where a stream's spray is set (`SprayParams::of_stream`), and reaches none of
@@ -64,7 +61,6 @@ use crate::GeneratorVersion;
 use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules};
 use crate::galaxy::catalogue_classes::binary::{MERGER_CLASS_VERSION, MergerClassRules};
 use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
-use crate::galaxy::displaced::survivors::{HYPERVELOCITY_VERSION, HypervelocityRules};
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
 use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
 use crate::galaxy::global_list::spray::{ORPHAN_SPRAY_VERSION, OrphanSprayRules};
@@ -88,9 +84,6 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads.
     pub(crate) displaced: DisplacedRules,
-    /// Whether the hypervelocity survivors' class has its weight in layer D (P09.T34.b), which the
-    /// class table reads where the galaxy is built.
-    pub(crate) hypervelocity: HypervelocityRules,
     /// How an orphan's tube is sprayed: as every stream's, or from fewer tracers at a longer step
     /// (P10.T10.b's warm-up).
     pub(crate) orphan_spray: OrphanSprayRules,
@@ -136,11 +129,6 @@ impl GalaxyRules {
             } else {
                 DisplacedRules::FieldOnly
             },
-            hypervelocity: if version.get() >= HYPERVELOCITY_VERSION.get() {
-                HypervelocityRules::Weighted
-            } else {
-                HypervelocityRules::Unweighted
-            },
             orphan_spray: if version.get() >= ORPHAN_SPRAY_VERSION.get() {
                 OrphanSprayRules::Coarse
             } else {
@@ -181,11 +169,11 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
-    /// version's rules with the galaxy's holds at 27 (`hypervelocity`, P09.T34.b, `orphan_spray`,
-    /// P10.T10.b's warm-up, `placement_fates`, P08.T12 at 27, and `list_source`, P10.T10.b's
-    /// registration with P10.T3.d.b, and those retargeted from 26, `field_share`, P09.T2.c,
-    /// `carve_out`, P09.T35, `feature_classes`, P09.T36, `merger_class`, P11.T8.c–d, and
-    /// `displaced`, P08.T12); the stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
+    /// version's rules with the galaxy's holds at 27 (`orphan_spray`, P10.T10.b's warm-up,
+    /// `placement_fates`, P08.T12 at 27, and `list_source`, P10.T10.b's registration with
+    /// P10.T3.d.b, and those retargeted from 26, `field_share`, P09.T2.c, `carve_out`, P09.T35,
+    /// `feature_classes`, P09.T36, `merger_class`, P11.T8.c–d, and `displaced`, P08.T12); the
+    /// stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -336,19 +324,6 @@ mod tests {
     /// Each galaxy hold at 27 is held below it and new from it on, in every 27 hold.
     #[test]
     fn each_27_hold_turns_on_at_27() {
-        let survivors = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).hypervelocity;
-        for v in [23, 24, 25, 26] {
-            assert_eq!(survivors(v), HypervelocityRules::Unweighted, "{v}");
-        }
-        assert_eq!(survivors(27), HypervelocityRules::Weighted);
-        assert_eq!(
-            GalaxyRules::of_version(crate::GENERATOR_VERSION).hypervelocity,
-            HypervelocityRules::Unweighted
-        );
-        assert_eq!(
-            GalaxyRules::every_27_hold().hypervelocity,
-            HypervelocityRules::Weighted
-        );
         let spray = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).orphan_spray;
         for v in [23, 24, 25, 26] {
             assert_eq!(spray(v), OrphanSprayRules::Exact, "{v}");
@@ -383,7 +358,6 @@ mod tests {
         assert_eq!(
             GalaxyRules::every_27_hold(),
             GalaxyRules {
-                hypervelocity: HypervelocityRules::Weighted,
                 orphan_spray: OrphanSprayRules::Coarse,
                 placement_fates: PlacementFateRules::Fitted,
                 list_source: ListSourceRules::Registered,

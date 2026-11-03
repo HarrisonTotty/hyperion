@@ -13,7 +13,7 @@ use crate::galaxy::gas::modifiers::GasModifierSource;
 use crate::galaxy::gas::noise::NoiseCache;
 use crate::galaxy::placement::CellKey;
 use crate::galaxy::query::{
-    LayerPads, QuerySphere, cells_in_shell_slab, count_cells_in_sphere, pad_for, sphere_slabs,
+    QuerySphere, cells_in_shell_slab, count_cells_in_sphere, pad_for, pad_speed, sphere_slabs,
 };
 use crate::id::{Layer, SystemId};
 use crate::math;
@@ -624,9 +624,6 @@ pub struct SkyQuery {
     /// The synthetic ceiling V<sub>P</sub>, if the request states one (rendering plan R13): finite
     /// and no fainter than the cut once built.
     synthetic_ceiling: Option<Magnitudes>,
-    /// The galaxy's pad speeds, by which the census walks each layer and bounds its cells' reach
-    /// (plan 09, P09.T34.b).
-    pads: LayerPads,
 }
 
 /// Builds a [`SkyQuery`].
@@ -682,7 +679,6 @@ impl SkyQuery {
                 illumination: None,
                 eye_visibility: None,
                 synthetic_ceiling: None,
-                pads: LayerPads::held(),
             },
         }
     }
@@ -760,13 +756,6 @@ impl SkyQuery {
     #[must_use]
     pub const fn exclude(&self) -> Option<SystemId> {
         self.exclude
-    }
-
-    /// The galaxy's pad speeds the census walks each layer by and bounds its cells' reach with
-    /// ([`SkyQueryBuilder::pads`]).
-    #[must_use]
-    pub const fn pads(&self) -> LayerPads {
-        self.pads
     }
 
     /// Each layer's forced cap, where the query forces its caps
@@ -957,17 +946,6 @@ impl SkyQueryBuilder {
     #[must_use]
     pub fn exclude(mut self, system: SystemId) -> Self {
         self.query.exclude = Some(system);
-        self
-    }
-
-    /// States the galaxy's pad speeds ([`LayerPads::of`]), which the census walks each layer by
-    /// and bounds its cells' reach with: [`LayerPads::held`]'s unless stated, every galaxy's to
-    /// generator version 26. From 27 a galaxy whose hypervelocity survivors have weight pads
-    /// layer D at `UNBOUND_PAD_SPEED` (plan 09, P09.T34.b), and its queries state its pads;
-    /// [`census_plan`] holds a query to its galaxy's in debug builds.
-    #[must_use]
-    pub fn pads(mut self, pads: LayerPads) -> Self {
-        self.query.pads = pads;
         self
     }
 
@@ -1653,13 +1631,6 @@ pub fn census_plan(
     query: &SkyQuery,
     cache: &mut NoiseCache,
 ) -> CensusPlan {
-    // The census pads by its query's pads, which hold no galaxy: a query of another galaxy's
-    // would walk too few cells of a galaxy whose survivors have weight (P09.T34.b).
-    debug_assert_eq!(
-        query.pads(),
-        LayerPads::of(galaxy),
-        "a census's query pads as its galaxy does: state its pads (`SkyQueryBuilder::pads`)"
-    );
     let observer = query.observer();
     let caps = match (
         &query.forced_caps,
@@ -1767,7 +1738,7 @@ fn padded_sphere(query: &SkyQuery, layer: Layer, radius: LightYears) -> (QuerySp
     let earliest = t
         .checked_sub(light_time(radius.value()))
         .expect("an observer's time less a cap's light time is on the clock");
-    let speed = query.pads().speed(layer);
+    let speed = pad_speed(layer);
     let pad = LightYears::new(
         pad_for(earliest, speed)
             .value()

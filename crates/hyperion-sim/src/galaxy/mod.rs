@@ -395,8 +395,7 @@ impl Galaxy {
     ///
     /// The field share (`GalaxyRules::field_share`, P09.T2.c), the carve-out
     /// (`GalaxyRules::carve_out`, P09.T35), plan 08's displaced classes
-    /// (`GalaxyRules::displaced`, P08.T12.a), the hypervelocity survivors' weight
-    /// (`GalaxyRules::hypervelocity`, P09.T34.b) and the halo's discrete share
+    /// (`GalaxyRules::displaced`, P08.T12.a) and the halo's discrete share
     /// (`GalaxyRules::list_source`, P10.T3.d.b) are the holds read when the galaxy is built, so
     /// `rules` must keep this galaxy's: a test of any of their new arms builds the galaxy through
     /// [`from_params_with_rules`](Self::from_params_with_rules). A galaxy that holds the displaced
@@ -405,7 +404,7 @@ impl Galaxy {
     /// # Panics
     ///
     /// In debug builds, which every test profile is, if `rules` changes the field share, the
-    /// carve-out, the displaced classes' arm, the survivors' weight or the list's source, or the
+    /// carve-out, the displaced classes' arm or the list's source, or the
     /// stellar rules of a galaxy that holds the classes.
     #[cfg(test)]
     #[must_use]
@@ -429,11 +428,6 @@ impl Galaxy {
             rules.list_source, self.rules.list_source,
             "the halo's discrete share is stored when a galaxy is built: build it under the new \
              rules with `Galaxy::from_params_with_rules`"
-        );
-        debug_assert_eq!(
-            rules.hypervelocity, self.rules.hypervelocity,
-            "the hypervelocity survivors' weight is read when a galaxy's class table is built: \
-             build it under the new rules with `Galaxy::from_params_with_rules`"
         );
         debug_assert!(
             self.fields.displaced().is_none() || rules.stellar == self.rules.stellar,

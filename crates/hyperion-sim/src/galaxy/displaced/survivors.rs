@@ -1,7 +1,7 @@
 //! The hypervelocity survivors' weight and flights (plan 09, P09.T34.b; plan 08, Design note 25).
 //!
 //! The donors that double detonations fling out (ruling 128.1) are plan 08's hypervelocity class,
-//! registered in layer D at zero weight. From `HYPERVELOCITY_VERSION` the class has its weight.
+//! registered in layer D at zero weight. From generator version 27 the class has its weight.
 //! A survivor launched τ ago at `v` is inside the cube while τ < `path ÷ v`. It is the class's,
 //! and not one of the Type Ia class's entries (P09.T34.a's member 1), while τ is at least S, the
 //! latest start that class's interval can have: [`SHELL_WINDOW_CAP`] + L + H before the epoch,
@@ -37,10 +37,9 @@
 //!   `system.velocity` stream. P15.T6's production form convolves the same density.
 //!
 //! The survivors outrun plan 03's pad, so from the same version layer D pads at
-//! `UNBOUND_PAD_SPEED` ([`pad_speed_in`](crate::galaxy::query::pad_speed_in)).
+//! `UNBOUND_PAD_SPEED` ([`pad_speed`](crate::galaxy::query::pad_speed)).
 
 use super::class_table::{FormTable, SURVIVOR_POPULATIONS, SurvivorPopulation};
-use crate::GeneratorVersion;
 use crate::galaxy::catalogue_classes::supernova::SupernovaInterval;
 use crate::galaxy::catalogue_classes::type_ia::DelayTimeDistribution;
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
@@ -52,28 +51,6 @@ use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, Threshold, tags};
 use crate::units::consts::{GM_SUN, SOLAR_RADIUS_M};
 use crate::units::{KilometresPerSecond, SolarMasses, Years};
-
-/// The generator version from which the hypervelocity survivors' class has its weight
-/// ([`Survivors`], the hold of [`HypervelocityRules`]).
-///
-/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`HypervelocityRules::Unweighted`], so every generated value keeps its bits. The tests reach
-/// the new arm through a galaxy built under `GalaxyRules::every_27_hold()`. The bump to 27 deletes
-/// this hold, [`HypervelocityRules`] with its `Unweighted` arm, the galaxy's `hypervelocity` field
-/// and its tripwire (`the_hypervelocity_survivors_are_held_only_until_the_27_bump`).
-pub(crate) const HYPERVELOCITY_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether the hypervelocity survivors' class has weight (the hold of [`HYPERVELOCITY_VERSION`]).
-///
-/// It is read where the class table is built, so `Galaxy::with_rules` refuses to change it, and
-/// where a walk pads layer D (`query::pad_speed_in`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum HypervelocityRules {
-    /// Version 26's and before: the class registered at zero weight (plan 08, Design note 25).
-    Unweighted,
-    /// Version 27's: the class weighted by [`Survivors`].
-    Weighted,
-}
 
 /// Bisection steps of a survivor's speed quantile, 2⁻⁴⁸ of its band, and of its donor's mass.
 const SPEED_BISECTIONS: u32 = 48;
@@ -388,16 +365,6 @@ impl Survivors {
             per_system_per_year,
             youngest,
             mean_exit_ly,
-        }
-    }
-
-    /// The survivors of `galaxy` where its rules give the class weight, from generator version 27;
-    /// `None` under the held arm.
-    #[must_use]
-    pub(crate) fn where_weighted(galaxy: &Galaxy, forms: &FormTable) -> Option<Self> {
-        match galaxy.rules().hypervelocity {
-            HypervelocityRules::Unweighted => None,
-            HypervelocityRules::Weighted => Some(Self::of(galaxy, forms)),
         }
     }
 
@@ -922,9 +889,7 @@ mod tests {
     use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample, normal_cdf};
 
     use super::*;
-    use crate::GENERATOR_VERSION;
     use crate::galaxy::displaced::class_table::survivors_inside;
-    use crate::galaxy::rules::GalaxyRules;
     use crate::tables::displaced_forms::HYPERVELOCITY_MEAN_EXIT_LY;
 
     /// Survivors at the Milky Way's rate, 0.54 per century, and the latest interval, 4.26 Myr.
@@ -939,26 +904,6 @@ mod tests {
             youngest,
             mean_exit_ly: HYPERVELOCITY_MEAN_EXIT_LY,
         }
-    }
-
-    /// The tripwire of the hold: below 27 the class has no weight.
-    #[test]
-    fn the_hypervelocity_survivors_are_held_only_until_the_27_bump() {
-        assert!(
-            GENERATOR_VERSION < HYPERVELOCITY_VERSION,
-            "the 26 → 27 bump gives the hypervelocity survivors their weight: layer D's thinning \
-             and every record of its cells move. Delete `HYPERVELOCITY_VERSION`, \
-             `HypervelocityRules` with its `Unweighted` arm, `GalaxyRules::hypervelocity`, \
-             `ClassTable`'s `Option` on its survivors and this test in the bump's own commit; \
-             raise `query::pad_speed(Layer::D)` to `UNBOUND_PAD_SPEED` and fold `pad_speed_in`, \
-             `escape_cut_holds_in` and `LayerPads` (the sky query's and its cache's pads) into it; \
-             and \
-             re-bless the goldens plan 09's \"P09.T34.b, as built\" lists"
-        );
-        assert_eq!(
-            GalaxyRules::of_version(GENERATOR_VERSION).hypervelocity,
-            HypervelocityRules::Unweighted
-        );
     }
 
     /// With no interval the count is ruling 128.1's, and the interval takes its share of each

@@ -18,9 +18,7 @@ use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{
     CellKey, NoCache, SystemOrigin, SystemRecord, generate_cell, resolve,
 };
-use hyperion_sim::galaxy::query::{
-    PAD_SPEED, RangeQuery, epoch_velocity, pad_speed_in, range_query,
-};
+use hyperion_sim::galaxy::query::{PAD_SPEED, RangeQuery, epoch_velocity, pad_speed, range_query};
 use hyperion_sim::galaxy::{Galaxy, PointLy};
 use hyperion_sim::id::Layer;
 use hyperion_sim::math;
@@ -291,7 +289,7 @@ fn no_velocity_reaches_its_padding_speed() {
                             );
                         }
                         assert!(speed < d.cut().value());
-                        let pad = pad_speed_in(galaxy, record.layer()).value();
+                        let pad = pad_speed(record.layer()).value();
                         assert!(
                             speed < pad,
                             "{speed} km/s for {:?} of layer {:?}, against its pad {pad} km/s",

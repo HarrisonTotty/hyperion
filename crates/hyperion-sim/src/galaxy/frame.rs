@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn the_search_pads_as_the_walk_does() {
         use crate::galaxy::params::GalaxyParams;
-        use crate::galaxy::query::{kepler_pad_for, pad_for, pad_speed_in};
+        use crate::galaxy::query::{kepler_pad_for, pad_for, pad_speed};
         use crate::rng::Seed;
 
         let galaxy = Galaxy::from_params(
@@ -541,8 +541,7 @@ mod tests {
                 let pad = kepler_pad_for(&galaxy, layer, &ship, radius, t);
                 assert_eq!(curved, QuerySphere::new(ship, radius, t, pad).unwrap());
                 // Never narrower: the Kepler pad is at least the straight lines'.
-                let straight =
-                    QuerySphere::new(ship, radius, t, pad_for(t, pad_speed_in(&galaxy, layer)));
+                let straight = QuerySphere::new(ship, radius, t, pad_for(t, pad_speed(layer)));
                 let (a, b) = (straight.unwrap().padded_radius(), curved.padded_radius());
                 assert!(b.value() >= a.value(), "{layer:?} at {years} yr");
                 if b.value() > a.value() {
@@ -550,8 +549,9 @@ mod tests {
                 }
             }
         }
-        // Layer E's straight pad at ±1,000 yr, 10 ly, already holds the orbits there.
-        assert!(wider >= 18, "{wider} of 20 layer-times padded wider");
+        // Layers D's and E's straight pads at ±1,000 yr, 10 ly (from 27 layer D pads at layer E's
+        // speed, P09.T34.b), already hold the orbits there.
+        assert!(wider >= 16, "{wider} of 20 layer-times padded wider");
     }
 
     #[test]

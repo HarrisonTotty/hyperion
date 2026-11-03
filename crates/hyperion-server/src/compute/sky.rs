@@ -2438,7 +2438,6 @@ pub(crate) mod tests {
         let caps = SkyCaps::forced(LightYears::new(12.0)).unwrap();
         let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
         let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(9.0))
-            .pads(hyperion_sim::galaxy::query::LayerPads::of(&galaxy))
             .build()
             .unwrap());
         let pool = pool(3);
@@ -2582,7 +2581,6 @@ pub(crate) mod tests {
                 .unwrap();
         let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
         let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(11.0))
-            .pads(hyperion_sim::galaxy::query::LayerPads::of(&galaxy))
             .build()
             .unwrap());
         let pool = pool(3);
@@ -2680,7 +2678,6 @@ pub(crate) mod tests {
         let caps = SkyCaps::forced(LightYears::new(12.0)).unwrap();
         let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
         let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(9.0))
-            .pads(hyperion_sim::galaxy::query::LayerPads::of(&galaxy))
             .build()
             .unwrap());
         let pool = pool(3);
@@ -2853,7 +2850,6 @@ pub(crate) mod tests {
                 .unwrap();
         let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
         let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(11.0))
-            .pads(hyperion_sim::galaxy::query::LayerPads::of(&galaxy))
             .build()
             .unwrap());
         let pool = pool(3);

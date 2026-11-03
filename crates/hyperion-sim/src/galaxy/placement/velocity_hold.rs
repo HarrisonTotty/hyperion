@@ -22,9 +22,7 @@ use crate::galaxy::displaced::{
 };
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::kinematics::{ESCAPE_CUT_ATTEMPTS, draw, is_exempt};
-use crate::galaxy::query::{
-    PAD_SPEED, epoch_velocity, escape_cut_holds_in, pad_speed, pad_speed_in,
-};
+use crate::galaxy::query::{PAD_SPEED, epoch_velocity, escape_cut_holds, pad_speed};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
 use crate::math;
@@ -475,20 +473,22 @@ fn an_exempt_class_is_cut_at_its_layer_s_pad_speed() {
 
 /// Every class exempt from the escape cut with weight in a band belongs to a layer where the cut
 /// does not hold, that is padded at `UNBOUND_PAD_SPEED` (Design note 7; from the class table
-/// alone): under every 26 hold, layer E alone.
+/// alone): under every 26 hold layer E, and from 27 the hypervelocity survivors in layer D
+/// (P09.T34.b).
 #[test]
 fn every_exempt_class_is_padded() {
     let exempt = exempt_classes_padded(displaced());
     assert_ne!(exempt, []);
     assert!(
-        exempt.iter().all(|&(_, layer)| layer == Layer::E),
+        exempt.iter().all(|&(key, layer)| layer == Layer::E
+            || (key == ClassKey::Hypervelocity && layer == Layer::D)),
         "{exempt:?}"
     );
 }
 
 /// The classes exempt from the escape cut with weight in `galaxy`'s layers D and E, with their
 /// layers, each asserted to be in a layer of the galaxy where the cut does not hold
-/// ([`escape_cut_holds_in`]): [`every_exempt_class_is_padded`]'s check, which plan 09's P09.T34.b
+/// ([`escape_cut_holds`]): [`every_exempt_class_is_padded`]'s check, which plan 09's P09.T34.b
 /// runs again with the hypervelocity survivors' weight.
 pub(super) fn exempt_classes_padded(galaxy: &Galaxy) -> Vec<(ClassKey, Layer)> {
     let fields = galaxy
@@ -501,7 +501,7 @@ pub(super) fn exempt_classes_padded(galaxy: &Galaxy) -> Vec<(ClassKey, Layer)> {
             let key = fields.class(class).key();
             if is_exempt(key) {
                 assert!(
-                    !escape_cut_holds_in(galaxy, layer),
+                    !escape_cut_holds(layer),
                     "{key:?} is exempt with weight in layer {layer:?}"
                 );
                 exempt.push((key, layer));
@@ -558,7 +558,7 @@ fn no_record_reaches_its_layers_pad_speed() {
                         for record in members(galaxy, (class, band), &at, &[], (MEMBERS, 0)) {
                             let v = epoch_velocity(galaxy, &record);
                             let speed = v.speed().value() / 1_000.0;
-                            let pad = pad_speed_in(galaxy, record.layer()).value();
+                            let pad = pad_speed(record.layer()).value();
                             assert!(speed < pad, "{key:?}");
                             if !exempt {
                                 assert!(speed < PAD_SPEED.value(), "{key:?}");

@@ -721,9 +721,7 @@ fn survivor_marks(
     id: SystemId,
     class: DisplacedClassId,
 ) -> DrawnMarks {
-    let survivors = table
-        .survivors()
-        .expect("a survivor is placed only where its class has weight");
+    let survivors = table.survivors();
     let index = pick(
         stream(galaxy, tags::DISPLACED_BIRTH, id).mark(),
         survivors.births_per_year(),
@@ -797,7 +795,7 @@ pub(crate) fn survivor_flight(galaxy: &Galaxy, record: &SystemRecord) -> Option<
         } => Some(
             displaced
                 .class_table()
-                .survivors()?
+                .survivors()
                 .flight(galaxy.seed(), record.id()),
         ),
         PlacementClass::Alive

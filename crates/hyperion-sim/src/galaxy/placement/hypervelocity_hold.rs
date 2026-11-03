@@ -1,10 +1,8 @@
-//! The tests of P09.T34.b's hold, `HYPERVELOCITY_VERSION` (plan 09, P09.T34.b; plan 08, Design
-//! notes 25 and 27), under every 27 hold:
+//! The tests of the hypervelocity survivors' weight, from generator version 27 (plan 09,
+//! P09.T34.b; plan 08, Design notes 25 and 27), under every 27 hold:
 //!
-//! - the survivors inside the cube, some tens of thousands, at the galaxy's own Type Ia rate, and
-//!   none under the held arm;
-//! - layer D padded at `UNBOUND_PAD_SPEED`, the escape cut no longer holding there, and under the
-//!   held arm plan 03's pad;
+//! - the survivors inside the cube, some tens of thousands, at the galaxy's own Type Ia rate;
+//! - layer D padded at `UNBOUND_PAD_SPEED`, the escape cut no longer holding there;
 //! - every exempt class padded with the class's weight (P08.T12.d's check), the survivors alone in
 //!   layer D;
 //! - each survivor launched before the Type Ia class's interval, its donor a helium white dwarf
@@ -14,9 +12,6 @@
 //! - layer D's cells visited at |t| = H rising by under a third with its raised pad;
 //! - and, slow, at t = ±H a 50 ly query about each of 100 centres, each with a survivor within
 //!   15 ly outside it at the epoch, equal to the brute-force enumeration.
-//!
-//! The tripwire is with the hold (`displaced::survivors`). The bump to 27 deletes the held arm,
-//! and these become tests of the version's own galaxy.
 
 use std::sync::OnceLock;
 
@@ -34,18 +29,16 @@ use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::galaxy::catalogue_classes::supernova::SupernovaInterval;
 use crate::galaxy::displaced::class_table::{ClassKey, hypervelocity_class};
-use crate::galaxy::displaced::hold::displaced;
 use crate::galaxy::displaced::survivors::{
-    DonorKind, HypervelocityRules, LaunchDirection, LaunchSampler, SurvivorBand, SurvivorFlight,
+    DonorKind, LaunchDirection, LaunchSampler, SurvivorBand, SurvivorFlight,
 };
 use crate::galaxy::displaced::{DisplacedKind, PlacementClass};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::kinematics::draw;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::query::{
-    LayerPads, PAD_SPEED, QuerySphere, RangeQuery, UNBOUND_PAD_SPEED, count_cells_in_sphere,
-    epoch_velocity, escape_cut_holds, escape_cut_holds_in, pad_for, pad_speed, pad_speed_in,
-    position_at, range_query,
+    PAD_SPEED, QuerySphere, RangeQuery, UNBOUND_PAD_SPEED, count_cells_in_sphere, epoch_velocity,
+    escape_cut_holds, pad_for, pad_speed, position_at, range_query,
 };
 use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::snr::ShellEnvironment;
@@ -102,8 +95,7 @@ fn is_survivor(record: &SystemRecord) -> bool {
 }
 
 /// The survivors inside the cube are some tens of thousands at the galaxy's Type Ia rate, within
-/// Li et al.'s (2011) 0.54 ± 0.12 per century for the Milky Way; they are layer D's alone, and the
-/// held arm gives the class no weight.
+/// Li et al.'s (2011) 0.54 ± 0.12 per century for the Milky Way; they are layer D's alone.
 #[test]
 fn the_survivors_inside_the_cube_are_tens_of_thousands() {
     let hv = hypervelocity_class();
@@ -112,7 +104,7 @@ fn the_survivors_inside_the_cube_are_tens_of_thousands() {
         .displaced()
         .expect("the classes are installed");
     let table = fields.class_table();
-    let survivors = table.survivors().expect("weighted under every 27 hold");
+    let survivors = table.survivors();
     let inside = table.class_count(MassBand::D, hv);
     eprintln!(
         "{inside:.0} survivors inside the cube, {:?} by population, at {:.3} Type Ia a century, \
@@ -135,94 +127,21 @@ fn the_survivors_inside_the_cube_are_tens_of_thousands() {
     assert!((0.42..=0.66).contains(&per_century), "{per_century}");
     assert!(fields.order(MassBand::D).contains(&hv));
     assert!(!fields.order(MassBand::E).contains(&hv));
-    let held = displaced()
-        .fields()
-        .displaced()
-        .expect("the classes are installed");
-    assert!(held.class_table().survivors().is_none());
-    assert!(held.class_table().class_count(MassBand::D, hv).abs() < 1e-300);
-    assert!(!held.order(MassBand::D).contains(&hv));
 }
 
-/// Layer D pads at `UNBOUND_PAD_SPEED` with the survivors' weight, and the escape cut no longer
-/// holds there; every other layer pads as before. The held arm, every 26 hold's galaxy and the
-/// version's, pads layer D at plan 03's speed, as `pad_speed` does; and a galaxy's `LayerPads`
-/// are its own, which the sky census and the server's sky read from their queries.
+/// Layer D pads at `UNBOUND_PAD_SPEED` with the survivors' weight, as layer E does, and the escape
+/// cut no longer holds there; every other layer pads at plan 03's speed.
 #[test]
 fn layer_d_pads_at_the_unbound_speed_with_the_survivors() {
-    let galaxy = weighted();
-    assert_eq!(pad_speed_in(galaxy, Layer::D), UNBOUND_PAD_SPEED);
-    assert!(!escape_cut_holds_in(galaxy, Layer::D));
-    let held = displaced();
-    let built = Galaxy::new(Seed::new(SEED));
     for layer in Layer::ALL {
-        if layer != Layer::D {
-            assert_eq!(pad_speed_in(galaxy, layer), pad_speed(layer), "{layer:?}");
-            assert_eq!(escape_cut_holds_in(galaxy, layer), escape_cut_holds(layer));
-        }
-        for other in [held, &built] {
-            assert_eq!(pad_speed_in(other, layer), pad_speed(layer), "{layer:?}");
-            assert_eq!(escape_cut_holds_in(other, layer), escape_cut_holds(layer));
-        }
-    }
-    assert_eq!(pad_speed(Layer::D), PAD_SPEED);
-    let pads = LayerPads::of(galaxy);
-    for layer in Layer::ALL {
-        assert_eq!(pads.speed(layer), pad_speed_in(galaxy, layer), "{layer:?}");
-        assert_eq!(
-            pads.escape_cut_holds(layer),
-            escape_cut_holds_in(galaxy, layer)
-        );
-        assert_eq!(
-            LayerPads::of(held).speed(layer),
-            pad_speed(layer),
-            "{layer:?}"
-        );
-    }
-    assert_eq!(LayerPads::of(held), LayerPads::held());
-    assert_eq!(LayerPads::of(&built), LayerPads::held());
-    assert_ne!(pads, LayerPads::held());
-}
-
-/// A sky census of the weighted galaxy, its query stating the galaxy's pads, walks layer D's cells
-/// padded at `UNBOUND_PAD_SPEED`: a superset of the held pads' cells, and more of them, at the
-/// epoch and at +H, by the light time to its cap; every other layer's cells are the held pads'.
-#[test]
-fn the_sky_census_walks_layer_d_by_the_galaxys_pad() {
-    use crate::observe::Observer;
-    use crate::sky::census::{SkyQuery, plan_cells};
-    use crate::units::Magnitudes;
-    use std::collections::BTreeSet;
-
-    let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).expect("in the cube");
-    let [_, plus_h] = window_ends();
-    for t in [UniverseTime::EPOCH, plus_h] {
-        let cells = |pads: LayerPads, layer: Layer| -> BTreeSet<CellKey> {
-            let query = SkyQuery::builder(
-                Observer::new(sun, t).expect("an observer"),
-                Magnitudes::new(7.0),
-            )
-            .pads(pads)
-            .build()
-            .expect("a sky query")
-            .with_caps_forced(LightYears::new(400.0))
-            .expect("forced caps");
-            let caps = query.forced_caps().expect("forced caps").to_vec();
-            plan_cells(&query, caps)
-                .into_iter()
-                .filter(|key| key.layer() == layer)
-                .collect()
+        let unbound = matches!(layer, Layer::D | Layer::E);
+        let speed = if unbound {
+            UNBOUND_PAD_SPEED
+        } else {
+            PAD_SPEED
         };
-        let weighted_pads = LayerPads::of(weighted());
-        for layer in [Layer::A, Layer::C, Layer::D, Layer::E] {
-            let (raised, held) = (cells(weighted_pads, layer), cells(LayerPads::held(), layer));
-            if layer == Layer::D {
-                assert!(raised.is_superset(&held), "{t}");
-                assert!(raised.len() > held.len(), "{t}: {} cells", raised.len());
-            } else {
-                assert_eq!(raised, held, "{layer:?} at {t}");
-            }
-        }
+        assert_eq!(pad_speed(layer), speed, "{layer:?}");
+        assert_eq!(escape_cut_holds(layer), !unbound, "{layer:?}");
     }
 }
 
@@ -238,20 +157,6 @@ fn every_exempt_class_is_padded_with_the_survivors_weight() {
         .collect();
     assert_eq!(in_d, [ClassKey::Hypervelocity], "{exempt:?}");
     assert!(exempt.len() > 1, "{exempt:?}");
-}
-
-/// The survivors' weight is read when the class table is built, so a galaxy refuses to change it:
-/// the rules asked differ from the galaxy's in the weight alone, since `with_rules` refuses the
-/// other holds read at a build first (P10.T3.d.b's halo share among them).
-#[test]
-#[cfg(debug_assertions)]
-#[should_panic(expected = "the hypervelocity survivors' weight is read when")]
-fn with_rules_refuses_to_change_the_survivors_weight() {
-    let galaxy = weighted();
-    let _ = galaxy.clone().with_rules(GalaxyRules {
-        hypervelocity: HypervelocityRules::Unweighted,
-        ..galaxy.rules()
-    });
 }
 
 /// `n` survivors at `at`, their marks drawn for consecutive candidates of the layer-D cell holding
@@ -311,8 +216,8 @@ fn check_survivor(
     let survivors = galaxy
         .fields()
         .displaced()
-        .and_then(|fields| fields.class_table().survivors())
-        .expect("weighted under every 27 hold");
+        .map(|fields| fields.class_table().survivors())
+        .expect("the classes are installed");
     assert!(is_survivor(record), "{record:?}");
     assert_eq!(record.layer(), Layer::D);
     let flight = survivor_flight(galaxy, record).expect("a survivor has its flight");
@@ -380,7 +285,7 @@ fn check_survivor(
     let velocity = draw(galaxy, record);
     let speed = velocity.velocity().speed().value() / 1_000.0;
     assert!((speed - v).abs() <= 1e-9 * v, "{speed} {v}");
-    assert!(speed < pad_speed_in(galaxy, Layer::D).value());
+    assert!(speed < pad_speed(Layer::D).value());
     assert!((velocity.cut().value() - UNBOUND_PAD_SPEED.value()).abs() < 1e-9);
     let w = velocity.velocity().metres_per_second();
     for (c, n) in w.iter().zip(launch.direction()) {
@@ -413,8 +318,8 @@ fn a_survivor_is_a_white_dwarf_launched_before_the_interval() {
     let survivors = galaxy
         .fields()
         .displaced()
-        .and_then(|fields| fields.class_table().survivors())
-        .expect("weighted under every 27 hold");
+        .map(|fields| fields.class_table().survivors())
+        .expect("the classes are installed");
     let at = |ly: [f64; 3]| GalacticPosition::from_light_years(ly).expect("in the cube");
     let (mut seen, mut fast) = (0_u32, 0_u32);
     for place in [
@@ -448,8 +353,8 @@ fn near_the_suns_circle_survivors_fly_from_their_launch_sites() {
     let survivors = galaxy
         .fields()
         .displaced()
-        .and_then(|fields| fields.class_table().survivors())
-        .expect("weighted under every 27 hold");
+        .map(|fields| fields.class_table().survivors())
+        .expect("the classes are installed");
     let (mut cosines, mut radial, mut tries) = (Vec::new(), 0_u32, 0_u64);
     for k in 0..24_u32 {
         let azimuth = core::f64::consts::TAU * f64::from(k) / 24.0;
@@ -543,8 +448,8 @@ fn the_launchs_bound_holds_its_ratio_over_the_sphere() {
     let survivors = galaxy
         .fields()
         .displaced()
-        .and_then(|fields| fields.class_table().survivors())
-        .expect("weighted under every 27 hold");
+        .map(|fields| fields.class_table().survivors())
+        .expect("the classes are installed");
     let at = |ly: [f64; 3]| GalacticPosition::from_light_years(ly).expect("in the cube");
     let mut largest: f64 = 0.0;
     for place in [
@@ -595,9 +500,9 @@ fn the_same_seed_gives_the_same_survivors_twice() {
         galaxy
             .fields()
             .displaced()
-            .and_then(|fields| fields.class_table().survivors())
+            .map(|fields| fields.class_table().survivors())
             .cloned()
-            .expect("weighted under every 27 hold")
+            .expect("the classes are installed")
     };
     assert_eq!(table(weighted()), table(&again));
     assert_eq!(table(weighted()), table(&built(7)));
@@ -793,8 +698,8 @@ fn at_the_window_ends_a_query_beside_a_survivor_is_the_brute_force_enumeration()
     let survivors = galaxy
         .fields()
         .displaced()
-        .and_then(|fields| fields.class_table().survivors())
-        .expect("weighted under every 27 hold");
+        .map(|fields| fields.class_table().survivors())
+        .expect("the classes are installed");
     let found = scanned_survivors(galaxy);
     let expected = expected_in_scan(galaxy);
     eprintln!(
@@ -833,10 +738,7 @@ fn at_the_window_ends_a_query_beside_a_survivor_is_the_brute_force_enumeration()
         let speed =
             (velocity[0] * velocity[0] + velocity[1] * velocity[1] + velocity[2] * velocity[2])
                 .sqrt();
-        assert!(
-            speed / 1_000.0 < pad_speed_in(galaxy, Layer::D).value(),
-            "{speed} m/s"
-        );
+        assert!(speed / 1_000.0 < pad_speed(Layer::D).value(), "{speed} m/s");
         let travel = speed / SPEED_OF_LIGHT * h_years;
         let (sign, toward) = if i % 2 == 0 {
             (1.0, plus_h)

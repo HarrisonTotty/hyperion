@@ -227,7 +227,7 @@ impl<L: ClassLookup> CatalogueClassSource<L> {
         if layers.is_empty() {
             return cells;
         }
-        let sphere = widest_sphere(galaxy, query);
+        let sphere = widest_sphere(query);
         for class in ALL_CLASSES {
             let visit = CellsRead {
                 sphere: &sphere,
