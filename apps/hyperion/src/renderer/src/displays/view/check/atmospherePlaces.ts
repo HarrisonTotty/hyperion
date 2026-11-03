@@ -378,18 +378,26 @@ export function placedAtmosphereScene(
 /** The two check-only kept scenes a software `--atmosphere` launch offers, taken in turn. */
 export const PLACE_SCENE_NAMES = ["PLACE A", "PLACE B"] as const;
 
+/** One of {@link PLACE_SCENE_NAMES}. */
+export type PlaceSceneName = (typeof PLACE_SCENE_NAMES)[number];
+
 /**
  * A software `--atmosphere` launch's places, and the kept scenes `VIEW` offers for them: its own,
- * then two, `PLACE A` and `PLACE B`, each making the place last offered ({@link offer}), which the
- * run chooses in turn, so that each place mounts a stage of its own while the `SCENE` selector
- * holds two buttons more, not one a place (22 crowded the low setting's view to 816 × 265 px).
+ * then two, `PLACE A` and `PLACE B`, which the run chooses in turn, each making the place last
+ * offered to it ({@link offer}), so that each place mounts a stage of its own while the `SCENE`
+ * selector holds two buttons more, not one a place (22 crowded the low setting's view to
+ * 816 × 265 px).
+ *
+ * @remarks
+ * Each scene reads only its own place, and an offer changes only the place of the scene about to
+ * be chosen, never the one on screen, so that a stage on screen made again makes the same place.
  */
 export class PlacedAtmosphere {
   readonly places: ReadonlyArray<AtmospherePlace>;
   /** `VIEW`'s own kept scenes, then {@link PLACE_SCENE_NAMES}' two. */
   readonly sceneOptions: ReadonlyArray<SceneOption>;
-  /** The place the two scenes make: the one last offered, the first before any is. */
-  #current: AtmospherePlace;
+  /** Each scene's place: the one last offered to it, the first place before any is. */
+  readonly #placeOf: Map<PlaceSceneName, AtmospherePlace>;
   #offered = 0;
 
   /**
@@ -406,12 +414,12 @@ export class PlacedAtmosphere {
       throw new Error("views check: an atmosphere run placed needs a place");
     }
     this.places = places;
-    this.#current = first;
+    this.#placeOf = new Map(PLACE_SCENE_NAMES.map((name) => [name, first]));
     this.sceneOptions = [
       ...SCENE_OPTIONS,
       ...PLACE_SCENE_NAMES.map((name): SceneOption => ({
         name,
-        make: () => placedAtmosphereScene(this.#current, scene()),
+        make: () => placedAtmosphereScene(this.#placeOf.get(name) ?? first, scene()),
         prepare: () => {
           prepareAtmosphereScene();
         },
@@ -420,13 +428,12 @@ export class PlacedAtmosphere {
   }
 
   /**
-   * Offers `place` to the scenes and returns the name of the one to choose for it: the other of the
-   * two from the one chosen last, so that choosing it mounts a new stage, which makes `place`.
+   * Offers `place` to the scene the run chooses next and returns its name: the other of the two
+   * from the one chosen last, so that choosing it mounts a new stage, which makes `place`.
    */
-  offer(place: AtmospherePlace): string {
-    this.#current = place;
-    const name =
-      PLACE_SCENE_NAMES[this.#offered % PLACE_SCENE_NAMES.length] ?? PLACE_SCENE_NAMES[0];
+  offer(place: AtmospherePlace): PlaceSceneName {
+    const name = this.#offered % 2 === 0 ? PLACE_SCENE_NAMES[0] : PLACE_SCENE_NAMES[1];
+    this.#placeOf.set(name, place);
     this.#offered += 1;
     return name;
   }

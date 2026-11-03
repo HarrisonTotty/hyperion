@@ -224,6 +224,21 @@ describe("the software mode's places (R08.T17)", () => {
         ]),
     );
   });
+
+  it("keep the scene on screen making its own place once the next is offered", () => {
+    const placed = placedAtmosphere(false);
+    const [first, second] = placed.places;
+    const made = (name: string) =>
+      placed.sceneOptions
+        .find((each) => each.name === name)
+        ?.make()
+        .sceneAt(0).provenance;
+    const shown = first === undefined ? "" : placed.offer(first);
+    if (second !== undefined) {
+      placed.offer(second);
+    }
+    expect(made(shown)).toEqual({ kind: "kept", name: first?.scene });
+  });
 });
 
 describe("a place's kept scene (R08.T17)", () => {
