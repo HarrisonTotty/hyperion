@@ -24928,4 +24928,7 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - The exact cuts: a star's direct term is formed only where its eclipse and shadow factors leave a
     channel lit. `--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment` is an
     option of `--inspection --timing`.
+  - _The top term left_ (a step undone): the per-fragment sliced lookup compiled into the lit
+    modules beside the table's read. On SwiftShader, with it compiled out, the bodies pass fell a
+    further 37% at low. A table-only form of the lit modules a lever is next, if the Mac's A/B asks.
   - _Pending, the owner's Mac run_: the A/B, its command in the outbox's `gate.txt`.

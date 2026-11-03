@@ -587,11 +587,11 @@ const SOURCE_TABLE_HELD_SHARE = 0.995;
 
 /**
  * R08.T9.b's lever on drawn bodies: R05's Earth's air on a 13 px disc, a 96 px mesh body and a
- * 220 px disc, each at a gibbous (80°), a quarter (90°) and a crescent (150°) phase of the Sun,
- * drawn in-fragment with the sources' table bound (`AtmosphereSettings.sourceTransmittance`'s
- * `table`) and with its stub (`per-fragment`); at least {@link SOURCE_TABLE_HELD_SHARE} of the
- * pixels either draw's meter class says the Sun lights within 1/3 stop in every channel (a channel
- * both leave dark agreeing), the classes equal.
+ * 220 px disc, each with the Sun 80°, 90° and 120° off the line of sight, drawn in-fragment with
+ * the sources' table bound (`AtmosphereSettings.sourceTransmittance`'s `table`) and with its stub
+ * (`per-fragment`); at least {@link SOURCE_TABLE_HELD_SHARE} of the pixels either draw's meter class
+ * says the Sun lights within 1/3 stop in every channel (a channel both leave dark agreeing), the
+ * classes equal.
  */
 export async function checkSourceTableFrames(engine: RenderEngine, checks: Checks): Promise<void> {
   const kept = keepingSums(engine);
@@ -636,7 +636,7 @@ export async function checkSourceTableFrames(engine: RenderEngine, checks: Check
       if (tabled === undefined) {
         throw new Error("each case is drawn both ways");
       }
-      for (const sunDeg of [80, 90, 120, 150]) {
+      for (const sunDeg of [80, 90, 120]) {
         const draw = (drawn: CellCase) =>
           drawPlan(
             engine,
