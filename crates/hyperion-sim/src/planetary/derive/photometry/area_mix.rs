@@ -98,20 +98,19 @@
 //! whose maturity is not modelled its stand-in, each labelled. `ferric`'s weathering deposit joins
 //! the area mix at its row's optics ([`surface_bond`]).
 //!
-//! # The icy lid's regolith (P14.T49.m; from generator version 26)
+//! # The icy lid's regolith (P14.T49.m; from generator version 27)
 //!
 //! T49.i's `H2O` row is fresh 100 µm frost, 0.832 about a Sun, where measured icy satellites run
 //! from 0.10 to 0.76 by their non-ice fraction, radiolysis and resurfacing
-//! (decision-p14-t54a-ganymede §1.5). Behind its hold ([`ICY_REGOLITH_VERSION`]), an airless or
-//! tenuous body's `H2O` regolith, a known lid's or the stand-in's row for ice, is ice with its
-//! rock's lag ([`icy_lag_bins`]): T49.i's two-size intimate mixture (decision-p14-t49i-rock-mixtures
-//! (b)) of the frost and an icy body's rock, `chondrite_ci`, at [`ICY_LAG_NON_ICE_SHARE`] by
-//! volume, each grain's single-scattering albedo and phase asymmetry weighted by its cross-section
-//! (Hapke 2012's rule, as the ruling states it) into van de Hulst's similarity relation. Fresh frost
-//! stays where resurfacing outruns the lag: a tidal heat flux of at least
-//! [`RESURFACING_TIDAL_FLUX`] ([`IcyResurfacing`]). Neither size, density nor exposure age is read
-//! (the ruling: Enceladus and Ganymede are both about 60% rock; an exposure age is a weathering
-//! law, P14.T54.b's kind).
+//! (decision-p14-t54a-ganymede §1.5). From generator version 27 an airless or tenuous body's `H2O`
+//! regolith, a known lid's or the stand-in's row for ice, is ice with its rock's lag
+//! ([`icy_lag_bins`]): T49.i's two-size intimate mixture (decision-p14-t49i-rock-mixtures (b)) of
+//! the frost and an icy body's rock, `chondrite_ci`, at [`ICY_LAG_NON_ICE_SHARE`] by volume, each
+//! grain's single-scattering albedo and phase asymmetry weighted by its cross-section (Hapke 2012's
+//! rule, as the ruling states it) into van de Hulst's similarity relation. Fresh frost stays where
+//! resurfacing outruns the lag: a tidal heat flux of at least [`RESURFACING_TIDAL_FLUX`]
+//! ([`IcyResurfacing`]). Neither size, density nor exposure age is read (the ruling: Enceladus and
+//! Ganymede are both about 60% rock; an exposure age is a weathering law, P14.T54.b's kind).
 //!
 //! # The Rayleigh floor (P14.T24.h.a; decision-p14-t54a-passes §G3.5)
 //!
@@ -1548,7 +1547,7 @@ impl Regolith {
         let airless = matches!(state, SurfaceState::Airless | SurfaceState::Tenuous);
         if !airless
             || self.resurfacing.resurfaced()
-            || IcyRegolithRules::in_force() == IcyRegolithRules::Frost
+            || IcyRegolithRules::in_force() != IcyRegolithRules::Mixture
         {
             return None;
         }
@@ -1559,31 +1558,21 @@ impl Regolith {
     }
 }
 
-/// The generator version from which an airless body's `H2O` regolith is ice with its rock's lag
-/// where it is not resurfaced (P14.T49.m; decision-p14-t54a-ganymede §1.5 and §1.8): 26, the
-/// train after 25's.
-///
-/// It is this rule's one hold. Below it [`IcyRegolithRules::in_force`] is
-/// [`IcyRegolithRules::Frost`]: every `H2O` regolith is T49.i's fresh frost, and every value on
-/// the record is version 25's bit for bit. 26's bump deletes this hold, [`IcyRegolithRules`] with
-/// its `Frost` arm, the guards that read it in [`Regolith::weathered_lid`] and
-/// [`Regolith::bond`], the tests' switch and its tripwire
-/// (`the_icy_regolith_is_held_only_until_the_27_bump`).
-pub(crate) const ICY_REGOLITH_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether an `H2O` regolith takes its rock's lag (its hold, [`ICY_REGOLITH_VERSION`]).
+/// Whether an `H2O` regolith takes its rock's lag (on the record from generator version 27; in the
+/// tests the held arm too, their oracle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum IcyRegolithRules {
-    /// Version 25's and before: every `H2O` regolith is T49.i's fresh 100 µm frost.
+    /// Version 26's and before, the tests' oracle: every `H2O` regolith is T49.i's fresh 100 µm
+    /// frost.
+    #[cfg(test)]
     Frost,
-    /// Version 26's: an airless or tenuous body's `H2O` regolith is ice with its rock's lag
+    /// Every version's: an airless or tenuous body's `H2O` regolith is ice with its rock's lag
     /// ([`icy_lag_bins`]), but where it is resurfaced ([`IcyResurfacing`]).
     Mixture,
 }
 
 impl IcyRegolithRules {
-    /// The rules this generator version gives: the mixture from [`ICY_REGOLITH_VERSION`], the
-    /// frost below it; in the tests, the rules a test's switch sets on its thread
+    /// The rules in force: the mixture; in the tests, the rules a test's switch sets on its thread
     /// ([`with_icy_regolith`]).
     #[must_use]
     pub(crate) fn in_force() -> Self {
@@ -1591,11 +1580,7 @@ impl IcyRegolithRules {
         if let Some(rules) = ICY_REGOLITH_RULES.with(core::cell::Cell::get) {
             return rules;
         }
-        if GENERATOR_VERSION >= ICY_REGOLITH_VERSION {
-            Self::Mixture
-        } else {
-            Self::Frost
-        }
+        Self::Mixture
     }
 }
 
@@ -1606,10 +1591,9 @@ thread_local! {
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the icy regolith's rules `rules` on this thread, for the tests to reach
-/// version 26's ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, so a test reads it inside the switch. 26's bump deletes it
-/// with the hold.
+/// `run`'s result with the icy regolith's rules `rules` on this thread, the held arm the tests'
+/// oracle; the version's rules are set back after, a panic in `run` included. A record derives
+/// lazily, so a test reads it inside the switch.
 #[cfg(test)]
 pub(crate) fn with_icy_regolith<R>(rules: IcyRegolithRules, run: impl FnOnce() -> R) -> R {
     /// Sets the thread's rules back as it drops.
