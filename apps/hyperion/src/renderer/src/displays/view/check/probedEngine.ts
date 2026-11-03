@@ -241,6 +241,8 @@ export class ProbedEngine implements RenderEngine {
   #censusesAsked: Array<{
     readonly resolve: (census: MarchCensus) => void;
     readonly reject: (cause: unknown) => void;
+    /** Stops following the ask's signal, once the ask is taken. */
+    readonly release: () => void;
   }> = [];
 
   /**
@@ -280,15 +282,18 @@ export class ProbedEngine implements RenderEngine {
       if (signal.aborted) {
         return;
       }
-      const asked = { resolve, reject };
-      this.#censusesAsked.push(asked);
-      signal.addEventListener(
-        "abort",
-        () => {
-          this.#censusesAsked = this.#censusesAsked.filter((each) => each !== asked);
+      const withdraw = (): void => {
+        this.#censusesAsked = this.#censusesAsked.filter((each) => each !== asked);
+      };
+      const asked = {
+        resolve,
+        reject,
+        release: () => {
+          signal.removeEventListener("abort", withdraw);
         },
-        { once: true },
-      );
+      };
+      this.#censusesAsked.push(asked);
+      signal.addEventListener("abort", withdraw, { once: true });
     });
   }
 
@@ -328,7 +333,9 @@ export class ProbedEngine implements RenderEngine {
         .readBuffer(buffer)
         .then((bytes) => marchCensusOf(kernel, new Uint32Array(bytes)));
     } catch (error: unknown) {
-      read = Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      read = Promise.reject(
+        error instanceof Error ? error : new Error(String(error), { cause: error }),
+      );
     }
     // Released once read, so that nothing the dispatch holds goes before it has run.
     const made = counter;
@@ -338,7 +345,8 @@ export class ProbedEngine implements RenderEngine {
         inner.releaseCompute(made);
       }
     });
-    for (const { resolve, reject } of asked) {
+    for (const { resolve, reject, release } of asked) {
+      release();
       void released.then(resolve, reject);
     }
   }

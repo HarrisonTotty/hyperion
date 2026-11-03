@@ -10,6 +10,7 @@
  */
 
 import type {
+  AtmosphereLeversOverride,
   CompositeProbeName,
   HandoverLookName,
   MarchProbeName,
@@ -20,6 +21,7 @@ import type {
 import { readServedWorldNames } from "./spikeLaunch";
 
 export type {
+  AtmosphereLeversOverride,
   CompositeProbeName,
   MarchProbeName,
   ViewsCheckLaunch,
@@ -65,6 +67,29 @@ const COMPOSITE_PROBES: ReadonlyArray<CompositeProbeName> = [
 
 /** The march's probes an inspection profile may draw under (plan R08, R08.T8.d). */
 const MARCH_PROBES: ReadonlyArray<MarchProbeName> = ["centre"];
+
+/**
+ * `value` as the atmosphere's levers over a setting's (plan R08, R08.T8.d), or `null` if it is not
+ * an object of at least one of them, each one of its names.
+ */
+export function readAtmosphereLevers(value: unknown): AtmosphereLeversOverride | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { marchCover, limbRays, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    (marchCover === undefined && limbRays === undefined) ||
+    !(marchCover === undefined || marchCover === "area" || marchCover === "tiles") ||
+    !(limbRays === undefined || limbRays === "per-texel" || limbRays === "packed")
+  ) {
+    return null;
+  }
+  return {
+    ...(marchCover === undefined ? {} : { marchCover }),
+    ...(limbRays === undefined ? {} : { limbRays }),
+  };
+}
 
 /** The hand-over check's looks, in the order a run takes them, which `--look` may name one of. */
 export const HANDOVER_LOOK_NAMES = [
@@ -126,6 +151,8 @@ function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
     return null;
   }
   const { setting, smoke, out, served, wholeField, timing, compositeProbe, marchProbe } = value;
+  const leversGiven = value["atmosphereLevers"];
+  const levers = leversGiven === undefined ? null : readAtmosphereLevers(leversGiven);
   const run = RUN_KINDS.find((each) => each === value["run"]) ?? null;
   const fixture = TERRAIN_FIXTURES.find((each) => each === value["fixture"]) ?? null;
   const probe = COMPOSITE_PROBES.find((each) => each === compositeProbe) ?? null;
@@ -133,6 +160,7 @@ function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
   if (
     (compositeProbe !== undefined && probe === null) ||
     (marchProbe !== undefined && march === null) ||
+    (leversGiven !== undefined && levers === null) ||
     (setting !== "high" && setting !== "low") ||
     typeof smoke !== "boolean" ||
     !(out === null || (typeof out === "string" && out.length > 0)) ||
@@ -150,13 +178,18 @@ function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
       timing === undefined &&
       probe === null &&
       march === null &&
+      levers === null &&
       typeof wholeField === "string" &&
       wholeField.length > 0
       ? { setting, smoke, out, run, fixture, wholeField }
       : null;
   }
   if (served === undefined) {
-    return run === "inspection" || timing !== undefined || probe !== null || march !== null
+    return run === "inspection" ||
+      timing !== undefined ||
+      probe !== null ||
+      march !== null ||
+      levers !== null
       ? null
       : { setting, smoke, out, run, fixture };
   }
@@ -169,7 +202,7 @@ function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
     return null;
   }
   if (timing === undefined) {
-    return probe === null && march === null
+    return probe === null && march === null && levers === null
       ? { setting, smoke, out, run, fixture, served: names }
       : null;
   }
@@ -186,6 +219,7 @@ function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
     timing,
     ...(probe === null ? {} : { compositeProbe: probe }),
     ...(march === null ? {} : { marchProbe: march }),
+    ...(levers === null ? {} : { atmosphereLevers: levers }),
   };
 }
 

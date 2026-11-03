@@ -136,7 +136,7 @@ import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
 import { type DrawnSky, primarySkyPlace, type SkyLineReading, useViewSky } from "./useViewSky";
 import { renderViewport } from "../../view/photoreal/internalScale";
 import { decorationStatement } from "../../view/surface/decoration/decorationSetting";
-import type { GeometryOverride } from "../../../../preload/api";
+import type { AtmosphereLeversOverride, GeometryOverride } from "../../../../preload/api";
 import {
   type GeometrySettings,
   geometryOf,
@@ -392,6 +392,12 @@ interface ViewDisplayProps {
    */
   readonly geometry?: GeometryOverride | undefined;
   /**
+   * A frame profile's atmosphere levers over the setting's (`--march-cover`, `--limb-rays`; plan
+   * R08, R08.T8.d): every view's atmospheres draw with them over `SETTINGS[s].atmosphereLevers`;
+   * none by default.
+   */
+  readonly atmosphereLevers?: AtmosphereLeversOverride | undefined;
+  /**
    * Starts one of the terrain session's height workers (plan R10, R10.T16.a), stable in identity:
    * the renderer's module worker by default (`browserHeightWorker`), a fake in a test.
    */
@@ -482,6 +488,8 @@ interface ViewStageProps {
    * setting's, as the terrain session's passes take it; `undefined`, the setting's.
    */
   readonly geometry: GeometrySettings | undefined;
+  /** The launch's atmosphere levers over the setting's (plan R08, R08.T8.d), or `undefined`. */
+  readonly atmosphereLevers: AtmosphereLeversOverride | undefined;
   /** The platform's primary modifier, whose chord with the arrows steps the rate (R07.T19.f). */
   readonly modifier: PrimaryModifier;
   /**
@@ -518,6 +526,8 @@ interface BudgetInputs {
   readonly setting: QualitySetting;
   /** How every view draws its geometry (plan R14): a launch's override, or the setting's. */
   readonly geometry: GeometrySettings | undefined;
+  /** The launch's atmosphere levers over the setting's (plan R08, R08.T8.d), or `undefined`. */
+  readonly atmosphereLevers: AtmosphereLeversOverride | undefined;
   /** Draws the instruments in a frame the primary draws. */
   readonly instruments: (frame: InstrumentsFrame) => void;
 }
@@ -855,6 +865,7 @@ function ViewStage({
   universe,
   setting,
   geometry,
+  atmosphereLevers,
   modifier,
   terrain,
   atmosphere,
@@ -1164,6 +1175,7 @@ function ViewStage({
     timer: graphics.timer,
     setting,
     geometry,
+    atmosphereLevers,
     instruments: instruments.frame,
   });
   useLayoutEffect(() => {
@@ -1172,9 +1184,10 @@ function ViewStage({
       timer: graphics.timer,
       setting,
       geometry,
+      atmosphereLevers,
       instruments: instruments.frame,
     };
-  }, [budgets, graphics.timer, setting, geometry, instruments.frame]);
+  }, [budgets, graphics.timer, setting, geometry, atmosphereLevers, instruments.frame]);
 
   // The view's camera is reported to the server's scene while the stage draws it (R03.T14).
   const removeCamera = server?.removeCamera ?? null;
@@ -1470,6 +1483,7 @@ function ViewStage({
           style: primaryBudget.style,
           setting: paced.setting,
           geometry: paced.geometry,
+          atmosphereLevers: paced.atmosphereLevers,
           // Its air at the low setting's sizes while its frame-rate floor holds it stepped down
           // (the owner's report, 2026-11-01).
           atmosphereSetting: primaryScale.airStepped ? "low" : paced.setting,
@@ -2769,6 +2783,7 @@ function ViewPanels({
   platform = "linux",
   performanceThreads = null,
   geometry: override,
+  atmosphereLevers,
   heightWorkers = browserHeightWorker,
   sceneOptions = SCENE_OPTIONS,
   watchTerrain,
@@ -3068,6 +3083,7 @@ function ViewPanels({
         universe={universe}
         setting={setting}
         geometry={terrainGeometry}
+        atmosphereLevers={atmosphereLevers}
         modifier={primaryModifierOf(platform)}
         terrain={terrain}
         atmosphere={atmosphere}

@@ -49,7 +49,12 @@ import type { DrawItem, FrameSubmission, RenderView, TextureHandle } from "../en
 import { AU_M } from "../scenes/kept";
 import { BloomChain } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL, histogramParams, histogramWorkgroups } from "../post/histogram";
-import { GEOMETRY_BEFORE_R14, type QualitySetting, SETTINGS } from "../quality/qualitySetting";
+import {
+  GEOMETRY_BEFORE_R14,
+  QUALITY_SETTINGS,
+  type QualitySetting,
+  SETTINGS,
+} from "../quality/qualitySetting";
 import { limbDistanceM, pixelAngleRad } from "../terrain/handover";
 import { OUTSIDE_VIEW_MARGIN_PX, type SurveyedDatumFrame } from "../wireframe/submit";
 import {
@@ -58,9 +63,17 @@ import {
   ATMOSPHERE_BEHIND_PASS,
   ATMOSPHERE_COMPOSITE_PASS,
   AtmosphereRetired,
+  type AtmosphereSettings,
   COMPOSITE_BEHIND_KERNEL,
+  LIMB_KERNELS,
   RAY_MARCH_BELOW_DECK_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
+  RAY_MARCH_CENTRE_ONE_BAND_KERNEL,
+  RAY_MARCH_CENTRE_SPECIAL_KERNEL,
+  RAY_MARCH_LIMB_SPECIAL_KERNEL,
+  RAY_MARCH_PACKED_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL,
   RAY_MARCH_DECK_KERNEL,
   RAY_MARCH_DECK_SPECIAL_KERNEL,
   RAY_MARCH_DECK_THERMAL_KERNEL,
@@ -623,6 +636,61 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     },
   );
 
+  it("draws its atmospheres with a frame profile's levers over its setting's, the cull's made up front and the packed limb's at its first frame (R08.T8.d)", async () => {
+    vi.useFakeTimers();
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const levers = { marchCover: "tiles", limbRays: "packed" } as const;
+    await renderer.prepare(
+      VIEWPORT,
+      "high",
+      "eye",
+      { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
+      levers,
+    );
+    const ahead = new Set(engine.kernelPairs.map((pair) => pair.name));
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const frame: PhotorealFrame = {
+      ...frameWith([]),
+      atmosphereLevers: levers,
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    };
+    const marches = (): string[] =>
+      engine.dispatched
+        .map((d) => d.kernel)
+        .filter((name) => name.startsWith("atmosphere ray march"));
+    renderer.render(view, frame);
+    const first = marches();
+    // The packed limb's kernels made in the background, its next frame packs.
+    await vi.advanceTimersByTimeAsync(0);
+    engine.dispatched.length = 0;
+    renderer.render(view, frame);
+    expect({
+      ahead: [
+        ahead.has(RAY_MARCH_CENTRE_SPECIAL_KERNEL.name),
+        LIMB_KERNELS.some((pair) => ahead.has(pair.name)),
+      ],
+      first,
+      next: marches(),
+    }).toEqual({
+      ahead: [true, false],
+      first: [RAY_MARCH_CENTRE_SPECIAL_KERNEL.name, RAY_MARCH_SPECIAL_KERNEL.name],
+      next: [
+        RAY_MARCH_CENTRE_SPECIAL_KERNEL.name,
+        RAY_MARCH_PACKED_SPECIAL_KERNEL.name,
+        "atmosphere ray march's limb dispatch",
+        RAY_MARCH_LIMB_SPECIAL_KERNEL.name,
+        "atmosphere ray march's limb resolve",
+      ],
+    });
+    renderer.dispose();
+    tables.dispose();
+    vi.useRealTimers();
+  });
+
   it("draws a far body's composite over its air's area alone, over a copy of the colour it reads (R08.T16.a.2)", async () => {
     const { engine, view, renderer } = await preparedRenderer();
     // Some 8 px across the test's 64 px view.
@@ -1124,8 +1192,9 @@ async function overlayDatums(
  * for both (`withDiscEmissionAndAir`); the atmosphere's per-frame kernels, its sky view,
  * aerial perspective, its two marches' footprint entry points, each general, specialised for one band
  * and no layer edge (R08.T11.d) and for one band, edged (R08.T11.g), their centre ray's entry points
- * under R08.T11.d's tile cull (off for a view) and the march's fill, and since the owner's priority
- * (2026-11-01) what lies behind the sky at the march's resolution; since R08.T14.c the sky view, the
+ * under R08.T11.d's tile cull and the march's fill, and since the owner's priority (2026-11-01) what
+ * lies behind the sky at the march's resolution, and since R08.T8.d the cull's centre ray in the
+ * specialised forms and the far limb's packed kernels (`LIMB_KERNELS`), each a setting's lever's; since R08.T14.c the sky view, the
  * aerial perspective and both marches' footprints,
  * general and specialised, reading the thick table (`withThickRead`), for a body whose tables hold
  * one; since R08.T18.b the sky view, the aerial perspective and both marches' footprints of each
@@ -1140,7 +1209,7 @@ async function overlayDatums(
  * depth pyramid's, made with the renderer; and the sky bake's four. Each is a module constant, its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 50,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 68,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
@@ -1163,6 +1232,11 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   COMPOSITE_BEHIND_KERNEL,
+  RAY_MARCH_CENTRE_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL,
+  RAY_MARCH_CENTRE_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL,
+  ...LIMB_KERNELS,
   SKY_VIEW_THICK_KERNEL,
   AERIAL_PERSPECTIVE_THICK_KERNEL,
   RAY_MARCH_THICK_KERNEL,
@@ -1301,6 +1375,11 @@ function sessionAirs(
   });
 }
 
+/** Whether both settings leave an atmosphere lever off: none takes it (R08.T8.d). */
+function leverOff(taken: (levers: AtmosphereSettings) => boolean): boolean {
+  return QUALITY_SETTINGS.every((each) => !taken(SETTINGS[each].atmosphereLevers));
+}
+
 describe("the device's kernels over a session's bodies (R01.T15)", () => {
   it("stay within VIEW's fixed set, and stop growing after the first of each kind of air, thin, thick and over a deck, over 50 bodies", async () => {
     const { engine, view, renderer } = await preparedRenderer();
@@ -1374,18 +1453,30 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // one more, the sky's irradiance over the thick table (R08.T14.d.4), and the deck's pass its four
     // marches, 26 in all, bounded however many bodies follow. All but twenty-three are made: the sky bake's four are the sky's, the march's fill
     // a reader's, which no frame asks, the tile cull's two centre ray's kernels its own cover's,
-    // which a view never takes (R08.T11.d), the disc cells' emissive form a body's above the
+    // which a view takes only under a setting's `tiles` (R08.T11.d, R08.T8.d), the disc cells' emissive form a body's above the
     // thermal cut, which none of these is (R08.T18.a), their air form a body's drawn by its disc
     // table, which none of these has (R08.T16.b), and their form for both and the per-frame
     // kernels' ten thermal forms (two over a deck, R08.T15.b.2) a glowing or self-luminous body's,
     // which none of these is (R08.T18.b), and the three beneath a deck a camera's under one, which
-    // none of these frames is (R08.T15.b.2).
+    // none of these frames is (R08.T15.b.2). Since R08.T8.d the cull's centre ray takes its six
+    // forms up front (its two general among the twenty-three) where a setting takes `tiles`, and none
+    // where both leave it off; and under `packed` the first frame of each read and form from above
+    // the top makes that pair of the packed limb's fourteen, with the resolve and the dispatches, in
+    // the background, so that the thin first pass makes the pairs its kinds of air meet, and the
+    // rest stay unmade.
+    const made = new Set(engine.kernelPairs.map((pair) => pair.name));
+    const limbMade = LIMB_KERNELS.filter((pair) => made.has(pair.name)).length;
+    expect(limbMade > 0).toBe(!leverOff((levers) => levers.limbRays === "packed"));
+    const unmade =
+      19 +
+      (leverOff((levers) => levers.marchCover === "tiles") ? 4 : -2) +
+      (LIMB_KERNELS.length - limbMade);
     expect([held[kinds.length - 1], held[2 * kinds.length - 1]]).toEqual([
-      VIEW_KERNELS.length - BAKE_KERNELS.length - 19 - 1 - 4,
-      VIEW_KERNELS.length - BAKE_KERNELS.length - 19 - 4,
+      VIEW_KERNELS.length - BAKE_KERNELS.length - unmade - 1 - 4,
+      VIEW_KERNELS.length - BAKE_KERNELS.length - unmade - 4,
     ]);
     expect(new Set(held.slice(3 * kinds.length - 1))).toEqual(new Set([held.at(-1)]));
-    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - 19);
+    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - unmade);
     // Each body's tables made their own handles all the while.
     expect(engine.counts.kernels).toBeGreaterThan(2 * airs.length);
     renderer.dispose();

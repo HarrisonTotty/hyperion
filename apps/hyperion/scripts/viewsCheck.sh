@@ -14,7 +14,8 @@
 #                  | --atmosphere
 #                  | --inspection --universe <ID> --body <ID>
 #                    [--timing [--composite-probe sky-off|transmittance-off|per-pixel|surface-grey]
-#                              [--count-gpu-calls] [--march-probe centre]]]
+#                              [--count-gpu-calls] [--march-probe centre]
+#                              [--march-cover area|tiles] [--limb-rays per-texel|packed]]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --geometry, passed to the client, draws VIEW's terrain with those fields of its geometry over the
@@ -125,6 +126,9 @@
 # footprint, the A/B of the footprint's node rays; its files end -march-centre. Each window also
 # records the far limb's census of the march the frame after it: the texels by node rays and the
 # tiles that hold one.
+# --march-cover area|tiles and --limb-rays per-texel|packed draw that profile's atmospheres with that
+# lever over its setting's (plan R08, R08.T8.d), the A/B of each lever on and off on one build; its
+# files end -cover-<cover> and -limb-<rays>.
 #
 # --device-pixel-ratio <N> draws a hidden run's page at a device-pixel ratio of N, 1 to 3, as a HiDPI
 # display does (the owner's Retina report, 2026-11-01): its offscreen window N times the setting's

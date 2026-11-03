@@ -103,6 +103,9 @@
  * With `--march-probe centre` too (plan R08, R08.T8.d) that profile marches every texel's centre
  * ray alone, with no far-limb footprint, for an A/B of the footprint's node rays; it is refused
  * without `--timing`, and may stand beside `--composite-probe`.
+ * `--march-cover area|tiles` and `--limb-rays per-texel|packed` (plan R08, R08.T8.d) draw that
+ * profile's atmospheres with that lever over its setting's, for the A/B of each lever on and off
+ * on one build; each is refused without `--timing`.
  *
  * `--hyperion-gpu-timing`, R01's measurement switch, which lifts the timestamps' quantization on
  * every backend but safe mode's (read from Chromium's command line, `GPU_TIMING_SWITCH`), also has a
@@ -123,6 +126,7 @@
 import { Command, InvalidArgumentError, Option } from "commander";
 
 import type {
+  AtmosphereLeversOverride,
   CompositeProbeName,
   GeometryOverride,
   MarchProbeName,
@@ -449,6 +453,18 @@ export function buildCommand(version: string): Command {
     )
     .addOption(
       new Option(
+        "--march-cover <COVER>",
+        "the frame profile's march cover over its setting's (R08.T8.d): the area, or the tile cull",
+      ).choices(["area", "tiles"]),
+    )
+    .addOption(
+      new Option(
+        "--limb-rays <RAYS>",
+        "the frame profile's far-limb node rays over its setting's (R08.T8.d): per texel, or packed",
+      ).choices(["per-texel", "packed"]),
+    )
+    .addOption(
+      new Option(
         "--march-probe <PROBE>",
         "the frame profile's march probe (R08.T8.d): every texel's centre ray alone, no far-limb footprint",
       ).choices(["centre"]),
@@ -600,6 +616,14 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   }
   if (options["marchProbe"] !== undefined && options["timing"] !== true) {
     command.error("error: --march-probe is an option of --timing, which was not given");
+  }
+  for (const [option, flag] of [
+    ["marchCover", "--march-cover"],
+    ["limbRays", "--limb-rays"],
+  ] as const) {
+    if (options[option] !== undefined && options["timing"] !== true) {
+      command.error(`error: ${flag} is an option of --timing, which was not given`);
+    }
   }
   if (options["look"] !== undefined && options["handover"] !== true) {
     command.error("error: --look is an option of --handover, which was not given");
@@ -802,6 +826,7 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     ...(options["countGpuCalls"] === true ? { countGpuCalls: true } : {}),
     // Refused without `--timing` before this is reached; commander has checked its choices.
     ...marchProbeOf(options),
+    ...atmosphereLeversOf(options),
     // Refused without `--handover` before this is reached; commander holds it to the three names.
     ...lookOf(options),
     // The terrain run's alone; any other run takes the switch for its timestamps only.
@@ -827,6 +852,22 @@ function marchProbeOf(
   options: Readonly<Record<string, unknown>>,
 ): { readonly marchProbe: MarchProbeName } | Record<string, never> {
   return options["marchProbe"] === "centre" ? { marchProbe: "centre" } : {};
+}
+
+/**
+ * The atmosphere's levers `--march-cover` and `--limb-rays` name where either is given, else
+ * nothing (plan R08, R08.T8.d); commander has checked their choices.
+ */
+function atmosphereLeversOf(
+  options: Readonly<Record<string, unknown>>,
+): { readonly atmosphereLevers: AtmosphereLeversOverride } | Record<string, never> {
+  const cover = options["marchCover"];
+  const rays = options["limbRays"];
+  const levers: AtmosphereLeversOverride = {
+    ...(cover === "area" || cover === "tiles" ? { marchCover: cover } : {}),
+    ...(rays === "per-texel" || rays === "packed" ? { limbRays: rays } : {}),
+  };
+  return Object.keys(levers).length === 0 ? {} : { atmosphereLevers: levers };
 }
 
 /** The one look `--look` names, where it names one of the hand-over check's, else nothing. */

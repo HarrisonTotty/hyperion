@@ -160,10 +160,27 @@ export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>> = {
  * `channels` (plan R08, R08.T9.c) dims a drawn surface seen through the air per channel on both
  * settings, its cost the second textures' memory (the volume's 262 KB on high, 131 KB on low, and
  * 8 bytes a march texel) and one more store a froxel and a march texel; `grey` is the way back.
+ *
+ * `packed` (plan R08, R08.T8.d) takes the far limb's node rays one an invocation on both settings:
+ * byte for byte the per-texel march on SwiftShader, and from orbit in the inspection profile (pod,
+ * 16 vCPU, from 22 Mm and 28.9 Mm, each against the composite's time) 29% less of the march on high
+ * at the floor's low sizes and 16% less on low; `per-texel` is the way back. `area` stays the
+ * march's cover on both: under the packed limb the tile cull was within 5% of it either way there,
+ * so the owner's Mac decides it.
  */
 export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSettings>> = {
-  high: { compositeTransmittance: "march", surfaceTransmittance: "channels" },
-  low: { compositeTransmittance: "march", surfaceTransmittance: "channels" },
+  high: {
+    compositeTransmittance: "march",
+    surfaceTransmittance: "channels",
+    marchCover: "area",
+    limbRays: "packed",
+  },
+  low: {
+    compositeTransmittance: "march",
+    surfaceTransmittance: "channels",
+    marchCover: "area",
+    limbRays: "packed",
+  },
 };
 
 /** The atmosphere's quality limits per setting: `SETTINGS[s].atmosphereView.qualityLimits`. */

@@ -16,8 +16,11 @@ import {
   AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
   COMPOSITE_BEHIND_KERNEL,
   COMPOSITE_MATERIAL,
+  LIMB_KERNELS,
   RAY_MARCH_BELOW_DECK_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
+  RAY_MARCH_CENTRE_ONE_BAND_KERNEL,
+  RAY_MARCH_CENTRE_SPECIAL_KERNEL,
   RAY_MARCH_DECK_KERNEL,
   RAY_MARCH_DECK_SPECIAL_KERNEL,
   RAY_MARCH_DECK_THERMAL_KERNEL,
@@ -25,6 +28,8 @@ import {
   RAY_MARCH_KERNEL,
   RAY_MARCH_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_DECK_KERNEL,
   RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL,
@@ -218,6 +223,20 @@ const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 export const ATMOSPHERE_ONE_BAND_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   RAY_MARCH_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
+].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
+
+/**
+ * R08.T8.d's far limb's node rays packed (`hillaire.ts`'s `LIMB_KERNELS`: each read's packed entry
+ * point and node pass in each form, the resolve and the dispatches) and the tile cull's centre ray
+ * in the specialised forms. The smoke page compiles them in a part of their own (`smoke/page.ts`),
+ * for the watchdog of the part that compiles the rest.
+ */
+export const ATMOSPHERE_LIMB_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  ...LIMB_KERNELS,
+  RAY_MARCH_CENTRE_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL,
+  RAY_MARCH_CENTRE_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL,
 ].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
 
 /**
@@ -437,6 +456,7 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...POST_ENTRIES,
   ...ATMOSPHERE_VIEW_ENTRIES,
   ...ATMOSPHERE_ONE_BAND_ENTRIES,
+  ...ATMOSPHERE_LIMB_ENTRIES,
   ...ATMOSPHERE_THICK_ENTRIES,
   ...ATMOSPHERE_THERMAL_ENTRIES,
   ...ATMOSPHERE_DECK_ENTRIES,

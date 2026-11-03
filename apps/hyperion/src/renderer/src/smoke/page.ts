@@ -8,11 +8,12 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in sixteen parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * groups are in seventeen parts, each a run of its own under the harness's watchdog (perf-smoke,
  * 2026-10-13), parts 2 to 6 and 8 to 14 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
  * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, parts 7 and 15
- * R10's terrain groups and part 16 R14.T3.c's ground under a grounded craft, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14
+ * R10's terrain groups and part 16 R14.T3.c's ground under a grounded craft, part 17 R08.T8.d's
+ * packed far limb's kernels and their general forms' check, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14
  * R08.T15.a.2's deck, and part 1 every other; with no part given the page runs them all, in its
  * order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
@@ -55,6 +56,7 @@
 
 import {
   ATMOSPHERE_DECK_ENTRIES,
+  ATMOSPHERE_LIMB_ENTRIES,
   ATMOSPHERE_ONE_BAND_ENTRIES,
   ATMOSPHERE_THERMAL_ENTRIES,
   ATMOSPHERE_THICK_ENTRIES,
@@ -97,6 +99,7 @@ import {
   checkMarchBand,
   checkMarchOneBand,
   checkMarchOverBody,
+  checkMarchPackedGeneral,
   checkMarchSpecialised,
   checkCorrectionFrameTwinsEarth,
   checkRoutedTwins,
@@ -275,9 +278,12 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * its 360 s scaled watchdog on a pod, R10.T16's frame 124 to 127 s of it, so part 15 joined, with
  * that frame alone (2026-11-02). R14.T3.c's ground under a grounded craft streams a pass of its own
  * to the finest level about the craft, some 90 s on a pod, which took part 15 to 262 s, so part 16
- * joined, with that check alone (2026-11-03).
+ * joined, with that check alone (2026-11-03). R08.T8.d's packed far limb brought eighteen march
+ * kernels' catalogue (some 120 s on a pod) and its general forms' frames on the Saturn-class
+ * figure (some 45 s), so part 17 joined, with those two, and part 16 keeps its check alone
+ * (2026-11-03).
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16;
+type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -317,6 +323,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 15;
     case "16":
       return 16;
+    case "17":
+      return 17;
     default:
       return null;
   }
@@ -443,6 +451,7 @@ async function run(
   // part 12, beside their twins' group.
   const thin = WGSL_CATALOGUE.filter(
     (entry) =>
+      !ATMOSPHERE_LIMB_ENTRIES.includes(entry) &&
       !ATMOSPHERE_THICK_ENTRIES.includes(entry) &&
       !ATMOSPHERE_DECK_ENTRIES.includes(entry) &&
       !ATMOSPHERE_ONE_BAND_ENTRIES.includes(entry) &&
@@ -627,6 +636,14 @@ async function run(
     images = [...images, ...(await checkTerrainFrame(engine, checks, captures, fixture))];
   });
   // In part 16, alone: its own pass streams to the finest level about the craft (R14.T3.c).
+  // R08.T8.d's packed far limb's kernels and the cull's specialised centre rays, in part 17 beside
+  // the general forms' check, first: parts 8 and 12 hold the specialised forms' checks.
+  await group(17, "T9.b catalogue: the far limb's packed kernels", () =>
+    checkCatalogue(engine, status, ATMOSPHERE_LIMB_ENTRIES, checks),
+  );
+  await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>
+    checkMarchPackedGeneral(engine, checks, summary.fallback),
+  );
   await group(16, "R14.T3.c the ground under a grounded craft", () =>
     checkStridesUnderCraft(engine, checks),
   );

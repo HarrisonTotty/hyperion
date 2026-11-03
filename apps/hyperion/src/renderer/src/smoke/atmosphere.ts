@@ -78,6 +78,7 @@ import {
   frameSourcesOf,
   HillaireAtmosphere,
   type MarchBand,
+  type LimbRays,
   type MarchCover,
   marchSourcesOf,
   marchOneBandFor,
@@ -3383,6 +3384,8 @@ const ONE_BAND_BODIES: ReadonlyArray<AreaBody> = [
 interface AreaReads {
   readonly composite: ArrayBuffer;
   readonly march: ArrayBuffer;
+  /** The far limb's texels and node rays the packed lists took (R08.T8.d), or `null` per texel. */
+  readonly packed: { readonly texels: number; readonly rays: number } | null;
   /** The tile cull's kinds the frame wrote, by kind, under the cull; none on the reference path. */
   readonly kinds: Readonly<Record<MarchTileKind, number>>;
   /** The tiles whose code is none of the kinds' (`MARCH_TILE_CODES`). */
@@ -3438,7 +3441,8 @@ function halvesDiffering(
 
 /**
  * One frame of `tables` drawn under `cover` by an atmosphere of its own, so that its march's
- * target starts empty, over the device's shared kernels, and read back.
+ * target starts empty, over the device's shared kernels, its far limb's node rays taken as
+ * `limbRays` asks (R08.T8.d), and read back.
  */
 async function areaReadsOf(
   engine: RenderEngine,
@@ -3446,12 +3450,14 @@ async function areaReadsOf(
   kernels: AtmosphereFrameKernels,
   frame: AreaFrame,
   cover: MarchCover,
+  limbRays: LimbRays = "per-texel",
 ): Promise<AreaReads> {
   const atmosphere = HillaireAtmosphere.over(
     engine,
     tables,
     twinSizes(TABLE_SIZES[frame.setting]),
     kernels,
+    { ...PER_PIXEL_LEVERS, limbRays },
   );
   atmosphere.setMarchCover(cover);
   // The surface's mesh and material, made once and let go with the frame.
@@ -3485,11 +3491,21 @@ async function areaReadsOf(
       { label: "march area", surface, preExposure: SMOKE_EXPOSURE_SCALE },
       (output) => engine.readTexture(output.colour),
     );
-    const { rayMarch, marchTiles, marchArea } = atmosphere.frameTables;
+    const { rayMarch, marchTiles, marchArea, limbCounts } = atmosphere.frameTables;
     if (rayMarch === null || marchArea === null) {
       throw new Error("the ray march drew no target");
     }
     const march = await engine.readTexture(rayMarch, 0, undefined, "tolerance");
+    let packed: AreaReads["packed"] = null;
+    if (limbRays === "packed") {
+      if (limbCounts === null) {
+        throw new Error("the packed march made no lists");
+      }
+      const [, , texels = 0, rays = 0] = new Uint32Array(
+        await engine.readBuffer(limbCounts, "tolerance"),
+      );
+      packed = { texels, rays };
+    }
     const kinds = { miss: 0, centre: 0, footprint: 0 };
     let unknown = 0;
     const tiles = marchArea.tilesAcross * marchArea.tilesDown;
@@ -3515,6 +3531,7 @@ async function areaReadsOf(
     return {
       composite,
       march,
+      packed,
       kinds,
       unknown,
       area: `${marchArea.tilesAcross} × ${marchArea.tilesDown} tiles from (${marchArea.firstTileX}, ${marchArea.firstTileY}) of ${all}`,
@@ -3540,7 +3557,9 @@ async function areaReadsOf(
  * float: on a fallback adapter (SwiftShader) the same byte for byte, and on hardware within T8.d's
  * fused-multiply-add ulp, 1, where two compiles may fuse differently (as E1′ and E4 did on the RTX
  * 3080, R08.T8.e). Each frame names its area and the kinds its tiles took on the GPU under the
- * cull, and the check holds that the frames met every kind.
+ * cull, and the check holds that the frames met every kind. Since R08.T8.d the cull takes the
+ * area's specialised form, and each frame is drawn again over the area and under the cull with its
+ * far limb's node rays packed (`LimbRays` `packed`), held to the reference the same way.
  *
  * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
  */
@@ -3550,10 +3569,15 @@ export async function checkMarchArea(
   fallback: boolean,
 ): Promise<void> {
   // The measured Earth's tables hold the slot layers: the march by slot alone, up front, with
-  // the tile cull's centre ray's kernel, so that none is made on the frame path.
-  const kernels = await createAtmosphereFrameKernels(engine, { reads: "by slot", tiles: true });
+  // the tile cull's centre ray's kernel and the packed limb's in its form, so that none is made on
+  // the frame path.
+  const kernels = await createAtmosphereFrameKernels(engine, {
+    reads: "by slot",
+    tiles: ["special"],
+    packed: ["special"],
+  });
   try {
-    await checkAreaBodies(engine, checks, fallback, kernels, AREA_BODIES, true);
+    await checkAreaBodies(engine, checks, fallback, kernels, AREA_BODIES, true, "R08.T11.d", true);
   } finally {
     engine.releaseMaterial(kernels.composite);
     engine.releaseMesh(kernels.triangle);
@@ -3564,7 +3588,9 @@ export async function checkMarchArea(
  * R08.T11.d: the march specialised for one band and no layer edge over the shared read, exact
  * (`hillaire.ts`'s `withMarchSpecialised`): R05's Earth's frames over the air's area, which take
  * it, held to the general march over the whole frame as {@link checkMarchArea} holds the measured
- * Earth's by slot, byte for byte on a fallback adapter and within T8.d's ulp on hardware.
+ * Earth's by slot, byte for byte on a fallback adapter and within T8.d's ulp on hardware; and,
+ * since R08.T8.d, under the tile cull in that form and each again with its far limb's node rays
+ * packed.
  *
  * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
  */
@@ -3573,10 +3599,24 @@ export async function checkMarchSpecialised(
   checks: Checks,
   fallback: boolean,
 ): Promise<void> {
-  // R05's Earth keeps the shared read: that march alone, up front, without the tile cull's.
-  const kernels = await createAtmosphereFrameKernels(engine, { reads: "shared read" });
+  // R05's Earth keeps the shared read: that march alone, up front, with the tile cull's centre ray
+  // and the packed limb's in its form (R08.T8.d).
+  const kernels = await createAtmosphereFrameKernels(engine, {
+    reads: "shared read",
+    tiles: ["special"],
+    packed: ["special"],
+  });
   try {
-    await checkAreaBodies(engine, checks, fallback, kernels, SPECIALISED_BODIES, false);
+    await checkAreaBodies(
+      engine,
+      checks,
+      fallback,
+      kernels,
+      SPECIALISED_BODIES,
+      true,
+      "R08.T11.d",
+      true,
+    );
   } finally {
     engine.releaseMaterial(kernels.composite);
     engine.releaseMesh(kernels.triangle);
@@ -3587,7 +3627,8 @@ export async function checkMarchSpecialised(
  * R08.T11.g: the march for one band, edged, exact (`hillaire.ts`'s `withMarchOneBand`; main's
  * pre-ruling of 2026-10-28): the slab Earth's frames over the air's area, which take it, held to the
  * general march over the whole frame as {@link checkMarchArea} holds the measured Earth's, byte for
- * byte on a fallback adapter and within T8.d's ulp on hardware.
+ * byte on a fallback adapter and within T8.d's ulp on hardware; and, since R08.T8.d, under the tile
+ * cull in that form and each again with its far limb's node rays packed.
  *
  * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
  */
@@ -3598,9 +3639,76 @@ export async function checkMarchOneBand(
 ): Promise<void> {
   // The slab's tables hold the slot layers: the march by slot alone, up front, as checkMarchArea's
   // in the same part, so that no part compiles both reads' marches.
-  const kernels = await createAtmosphereFrameKernels(engine, { reads: "by slot" });
+  const kernels = await createAtmosphereFrameKernels(engine, {
+    reads: "by slot",
+    tiles: ["one band"],
+    packed: ["one band"],
+  });
   try {
-    await checkAreaBodies(engine, checks, fallback, kernels, ONE_BAND_BODIES, false, "R08.T11.g");
+    await checkAreaBodies(
+      engine,
+      checks,
+      fallback,
+      kernels,
+      ONE_BAND_BODIES,
+      true,
+      "R08.T11.g",
+      true,
+    );
+  } finally {
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/**
+ * The Saturn-class figure (R08.T6.f), of several slices and bands, so that its area takes the
+ * general march, and its packed limb the general forms (R08.T8.d), as a generated world's
+ * oblate body does: from 10⁸ m on high and 3 × 10⁸ m on low, the limb across the frame.
+ */
+const GENERAL_BODIES: ReadonlyArray<AreaBody> = [
+  {
+    name: "the Saturn-class figure",
+    medium: saturnClassMedium(),
+    curves: NO_ABSORBER_CURVES,
+    body: saturnBody,
+    frames: [
+      { name: "from 10⁸ m", setting: "high", distanceM: 1e8, surfaceM: null },
+      { name: "from 3 × 10⁸ m", setting: "low", distanceM: 3e8, surfaceM: null },
+    ],
+    specialised: false,
+  },
+];
+
+/**
+ * R08.T8.d: the far limb's node rays packed (`hillaire.ts`'s `LimbRays` `packed`) in the general
+ * forms, exact: the Saturn-class figure's frames over the air's area and under the tile cull, each
+ * per texel and packed, held to the general march over the whole frame byte for byte on a fallback
+ * adapter and within T8.d's ulp on hardware, as {@link checkMarchArea} holds the specialised forms.
+ *
+ * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
+ */
+export async function checkMarchPackedGeneral(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+): Promise<void> {
+  const kernels = await createAtmosphereFrameKernels(engine, {
+    reads: "shared read",
+    tiles: ["general"],
+    packed: ["general"],
+  });
+  try {
+    await checkAreaBodies(
+      engine,
+      checks,
+      fallback,
+      kernels,
+      GENERAL_BODIES,
+      true,
+      "R08.T8.d",
+      true,
+    );
   } finally {
     engine.releaseMaterial(kernels.composite);
     engine.releaseMesh(kernels.triangle);
@@ -3926,7 +4034,8 @@ export async function checkThickMarchSpecialised(
 /**
  * {@link checkMarchArea}'s, {@link checkMarchSpecialised}'s and {@link checkMarchOneBand}'s bodies
  * and frames over the device's shared kernels, each frame over the area and, where `tileCull`,
- * under the tile cull, each held to the whole frame's.
+ * under the tile cull, each held to the whole frame's; where `packed`, each again with its far
+ * limb's node rays packed (R08.T8.d), which the frames must have taken.
  */
 async function checkAreaBodies(
   engine: RenderEngine,
@@ -3936,8 +4045,10 @@ async function checkAreaBodies(
   bodies: ReadonlyArray<AreaBody>,
   tileCull: boolean,
   task = "R08.T11.d",
+  packed = false,
 ): Promise<void> {
   const met = { miss: 0, centre: 0, footprint: 0, unknown: 0 };
+  const listed = { texels: 0, rays: 0 };
   for (const body of bodies) {
     const sliced = body.body();
     const tables = new AtmosphereTables(
@@ -3970,7 +4081,19 @@ async function checkAreaBodies(
           // oxlint-disable-next-line no-await-in-loop
           tiles = await areaReadsOf(engine, tables, kernels, frame, "tiles");
         }
-        // The reference after both, in order as they were: its read-backs before the next.
+        // The packed limb's after them (R08.T8.d), over the area and under the cull, in order.
+        const packedCovers: Array<readonly [MarchCover, AreaReads]> = [];
+        for (const cover of packed
+          ? tileCull
+            ? (["area", "tiles"] as const)
+            : (["area"] as const)
+          : []) {
+          // Each packed cover is read back before the next draws.
+          // oxlint-disable-next-line no-await-in-loop
+          const reads = await areaReadsOf(engine, tables, kernels, frame, cover, "packed");
+          packedCovers.push([cover, reads]);
+        }
+        // The reference after them, in order as they were: its read-backs before the next.
         // oxlint-disable-next-line no-await-in-loop
         const whole = await areaReadsOf(engine, tables, kernels, frame, "whole frame");
         const covers: Array<readonly [string, AreaReads, string, boolean]> = [
@@ -3993,6 +4116,16 @@ async function checkAreaBodies(
             true,
           ]);
         }
+        for (const [cover, reads] of packedCovers) {
+          listed.texels += reads.packed?.texels ?? 0;
+          listed.rays += reads.packed?.rays ?? 0;
+          covers.push([
+            `${march} ${cover === "area" ? "over the air's area" : "under the tile cull"} with its far limb's node rays packed (R08.T8.d)`,
+            reads,
+            `the area ${reads.area}; ${String(reads.packed?.texels ?? 0)} texels packed, ${String(reads.packed?.rays ?? 0)} node rays`,
+            reads.packed !== null,
+          ]);
+        }
         for (const [what, reads, how, chosen] of covers) {
           const composite = halvesDiffering(reads.composite, whole.composite);
           const marched = halvesDiffering(reads.march, whole.march);
@@ -4009,9 +4142,16 @@ async function checkAreaBodies(
       tables.dispose();
     }
   }
+  if (packed) {
+    checks.check(
+      `${task === "R08.T8.d" ? task : `R08.T8.d ${task}`} ${bodies.map((body) => body.name).join(", ")}: the frames packed far-limb texels and their node rays on the GPU`,
+      listed.texels > 0 && listed.rays > 0,
+      `${String(listed.texels)} texels and ${String(listed.rays)} node rays over the frames' packed lists`,
+    );
+  }
   if (tileCull) {
     checks.check(
-      "R08.T11.d the tile cull's frames met each of its kinds on the GPU, and wrote no other code",
+      `${task} ${bodies.map((body) => body.name).join(", ")}: the tile cull's frames met each of its kinds on the GPU, and wrote no other code`,
       met.miss > 0 && met.centre > 0 && met.footprint > 0 && met.unknown === 0,
       `${met.miss} tiles missed, ${met.centre} at the centre ray, ${met.footprint} over the footprint, ${met.unknown} of no kind`,
     );
@@ -4452,8 +4592,8 @@ async function behindReadsOf(
   transmittance: CompositeTransmittance,
 ): Promise<BehindReads> {
   const atmosphere = HillaireAtmosphere.over(engine, tables, twinSizes(TABLE_SIZES.low), kernels, {
+    ...PER_PIXEL_LEVERS,
     compositeTransmittance: transmittance,
-    surfaceTransmittance: "channels",
   });
   const targetOf = (name: string, depth: boolean): RenderTarget =>
     engine.createRenderTarget({

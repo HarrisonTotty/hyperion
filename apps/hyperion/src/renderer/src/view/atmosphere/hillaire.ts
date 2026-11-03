@@ -101,6 +101,10 @@ import compositeWgsl from "./shaders/composite.wgsl?raw";
 import compositeBehindWgsl from "./shaders/compositeBehind.wgsl?raw";
 import compositeTransmittanceWgsl from "./shaders/compositeTransmittance.wgsl?raw";
 import farLimbWgsl from "./shaders/farLimb.wgsl?raw";
+import limbDispatchWgsl from "./shaders/limbDispatch.wgsl?raw";
+import limbListWgsl from "./shaders/limbList.wgsl?raw";
+import limbNodesWgsl from "./shaders/limbNodes.wgsl?raw";
+import limbResolveWgsl from "./shaders/limbResolve.wgsl?raw";
 import marchAreaWgsl from "./shaders/marchArea.wgsl?raw";
 import marchFillWgsl from "./shaders/marchFill.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
@@ -110,6 +114,7 @@ import rayMarchBelowDeckWgsl from "./shaders/rayMarchBelowDeck.wgsl?raw";
 import rayMarchCentreWgsl from "./shaders/rayMarchCentre.wgsl?raw";
 import rayMarchCurvesWgsl from "./shaders/rayMarchCurves.wgsl?raw";
 import rayMarchFootprintWgsl from "./shaders/rayMarchFootprint.wgsl?raw";
+import rayMarchPackedWgsl from "./shaders/rayMarchPacked.wgsl?raw";
 import rayMarchSlotsWgsl from "./shaders/rayMarchSlots.wgsl?raw";
 import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import skyViewWgsl from "./shaders/skyView.wgsl?raw";
@@ -431,6 +436,29 @@ export type CompositeTransmittance = "march" | "per-pixel";
 export type SurfaceTransmittance = "channels" | "grey";
 
 /**
+ * How a view's ray march covers its target (plan R08, R08.T8.d; {@link MarchCover}): `area`, the
+ * air's area by the footprint's entry point alone, the way back; or `tiles`, R08.T11.d's exact tile
+ * cull over it, the centre ray's entry point marching the tiles no far-limb footprint can blend in
+ * and the footprint's the rest. Since R08.T8.d both of the cull's entry points take the area's
+ * form, specialised for one band where the tables fit it ({@link marchSpecialisedFor},
+ * {@link marchOneBandFor}), so that the cull drops no specialisation; a thick or self-luminous
+ * body's march takes no cull, as before.
+ */
+export type ViewMarchCover = Exclude<MarchCover, "whole frame">;
+
+/**
+ * How a frame's march takes the node rays of its far-limb footprints (plan R08, R08.T8.d; the
+ * owner's Mac, 2026-11-01): `per-texel`, each texel marching its centre ray and its nodes in turn,
+ * the way back, so that a tile of 8 × 8 texels waits on its slowest texel's up to ten nodes; or
+ * `packed`, each blended texel's nodes written to a list by the march (`rayMarchPacked.wgsl`) and
+ * marched one an invocation (`limbNodes.wgsl`), then summed into the texel in node order
+ * (`limbResolve.wgsl`), so that each texel's bits are the per-texel march's. A texel whose nodes
+ * find no room in the lists is marched per texel. The thin read's march alone, on the area and the
+ * tile cull; the thick, deck and self-luminous marches, and the whole frame, march per texel.
+ */
+export type LimbRays = "per-texel" | "packed";
+
+/**
  * The atmosphere's levers on a setting, `SETTINGS[s].atmosphereLevers` (the owner's priority,
  * 2026-11-01), each with the way back beside it, as R14's `GeometrySettings` keeps its own.
  */
@@ -439,16 +467,23 @@ export interface AtmosphereSettings {
   readonly compositeTransmittance: CompositeTransmittance;
   /** {@link SurfaceTransmittance} (R08.T9.c): `channels` on both settings; `grey` is the way back. */
   readonly surfaceTransmittance: SurfaceTransmittance;
+  /** {@link ViewMarchCover} (R08.T8.d): `area` on both settings, the way back; `tiles` the lever. */
+  readonly marchCover: ViewMarchCover;
+  /** {@link LimbRays} (R08.T8.d): `packed` on both settings; `per-texel` is the way back. */
+  readonly limbRays: LimbRays;
 }
 
 /**
- * The composite with its transmittance behind the sky per pixel, as before the cost levers, and its
- * surfaces dimmed per channel (R08.T9.c): what an atmosphere drawn outside a view takes (the smoke's
- * checks, the descent spike), unless given its view's.
+ * The composite with its transmittance behind the sky per pixel, as before the cost levers, its
+ * surfaces dimmed per channel (R08.T9.c), and a view's march over the air's area per texel: what an
+ * atmosphere drawn outside a view takes (the smoke's checks, the descent spike), unless given its
+ * view's.
  */
 export const PER_PIXEL_LEVERS: AtmosphereSettings = {
   compositeTransmittance: "per-pixel",
   surfaceTransmittance: "channels",
+  marchCover: "area",
+  limbRays: "per-texel",
 };
 
 /**
@@ -1044,6 +1079,186 @@ export const RAY_MARCH_ONE_BAND_KERNEL = withMarchOneBand(RAY_MARCH_KERNEL);
 export const RAY_MARCH_SLOTS_ONE_BAND_KERNEL = withMarchOneBand(RAY_MARCH_SLOTS_KERNEL);
 
 /**
+ * {@link RAY_MARCH_CENTRE_KERNEL} specialised for one band and no layer edge (plan R08, R08.T8.d;
+ * {@link withMarchSpecialised}): the tile cull's centre ray over such a body, so that the cull, a
+ * view's {@link ViewMarchCover} `tiles`, marches it as the area's specialised march does.
+ */
+export const RAY_MARCH_CENTRE_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_CENTRE_KERNEL);
+/** {@link RAY_MARCH_SLOTS_CENTRE_KERNEL} specialised likewise (R08.T8.d). */
+export const RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL = withMarchSpecialised(
+  RAY_MARCH_SLOTS_CENTRE_KERNEL,
+);
+/** {@link RAY_MARCH_CENTRE_KERNEL} for one band, edged (R08.T8.d; {@link withMarchOneBand}). */
+export const RAY_MARCH_CENTRE_ONE_BAND_KERNEL = withMarchOneBand(RAY_MARCH_CENTRE_KERNEL);
+/** {@link RAY_MARCH_SLOTS_CENTRE_KERNEL} for one band, edged (R08.T8.d). */
+export const RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL = withMarchOneBand(
+  RAY_MARCH_SLOTS_CENTRE_KERNEL,
+);
+
+/** The march's form a body's tables take (R08.T11.d, R08.T11.g): the general or a specialised. */
+export type MarchForm = "general" | "special" | "one band";
+
+/** Every form of the march, the general first. */
+const MARCH_FORMS: ReadonlyArray<MarchForm> = ["general", "special", "one band"];
+
+/** One of the march's two reads of the sources' light (R08.T8.e, lever 5). */
+type MarchRead = "shared read" | "by slot";
+
+/** Each read's tile cull's centre ray, by form (R08.T11.d; R08.T8.d's forms). */
+const CENTRE_PAIRS: Readonly<Record<MarchRead, Readonly<Record<MarchForm, KernelPair>>>> = {
+  "shared read": {
+    general: RAY_MARCH_CENTRE_KERNEL,
+    special: RAY_MARCH_CENTRE_SPECIAL_KERNEL,
+    "one band": RAY_MARCH_CENTRE_ONE_BAND_KERNEL,
+  },
+  "by slot": {
+    general: RAY_MARCH_SLOTS_CENTRE_KERNEL,
+    special: RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL,
+    "one band": RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL,
+  },
+};
+
+/**
+ * The ray march's entry point over the far limb's footprint with its node rays packed (plan R08,
+ * R08.T8.d; {@link LimbRays} `packed`; `rayMarchPacked.wgsl`): each texel blended in writes its
+ * nodes to the limb's lists and marches its centre ray alone, for the node pass
+ * ({@link RAY_MARCH_LIMB_KERNEL}) and the resolve ({@link LIMB_RESOLVE_KERNEL}); every other texel
+ * as {@link RAY_MARCH_KERNEL} marches it.
+ */
+export const RAY_MARCH_PACKED_KERNEL = kernel(
+  "atmosphere ray march, its limb packed",
+  `${farLimbWgsl}\n${limbListWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${rayMarchPackedWgsl}`,
+);
+/** {@link RAY_MARCH_PACKED_KERNEL} by slot, {@link RAY_MARCH_SLOTS_KERNEL}'s read (R08.T8.d). */
+export const RAY_MARCH_SLOTS_PACKED_KERNEL = kernel(
+  "atmosphere ray march by slot, its limb packed",
+  `${farLimbWgsl}\n${limbListWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${rayMarchPackedWgsl}`,
+);
+
+/**
+ * The lines of `rayMarch.wgsl` the limb's node pass leaves out (R08.T8.d): its two targets'
+ * declarations and stores, since the pass writes its marches to the limb's list and a kernel binds
+ * every binding it declares (`compute.ts`'s kernelBindings). Each stands once in a march's sources.
+ */
+const WITHOUT_MARCH_TARGETS: ReadonlyArray<readonly [string, string]> = [
+  ["@group(0) @binding(8) var rayMarchOut : texture_storage_2d<rgba16float, write>;", ""],
+  [
+    "@group(0) @binding(19) var rayMarchTransmittanceOut : texture_storage_2d<rgba16float, write>;",
+    "",
+  ],
+  ["  textureStore(rayMarchOut, texel, marched.light);", ""],
+  [
+    "  textureStore(rayMarchTransmittanceOut, texel, vec4f(marched.transmittance, marched.light.a));",
+    "",
+  ],
+];
+
+/** `pair`, a march's, without its two targets ({@link WITHOUT_MARCH_TARGETS}), its name kept. */
+function withoutMarchTargets(pair: KernelPair): KernelPair {
+  return { ...withMarchRewrites(pair, WITHOUT_MARCH_TARGETS, "the limb"), name: pair.name };
+}
+
+/**
+ * The far limb's node pass (plan R08, R08.T8.d; `limbNodes.wgsl`): each node ray the packed entry
+ * point listed, one an invocation, by the one `marchRay` call site, over the shared read.
+ */
+export const RAY_MARCH_LIMB_KERNEL = withoutMarchTargets(
+  kernel(
+    "atmosphere ray march's limb rays",
+    `${limbListWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${limbNodesWgsl}`,
+  ),
+);
+/** {@link RAY_MARCH_LIMB_KERNEL} by slot (R08.T8.d). */
+export const RAY_MARCH_SLOTS_LIMB_KERNEL = withoutMarchTargets(
+  kernel(
+    "atmosphere ray march's limb rays by slot",
+    `${limbListWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${limbNodesWgsl}`,
+  ),
+);
+
+/** {@link RAY_MARCH_PACKED_KERNEL} specialised for one band and no layer edge (R08.T8.d). */
+export const RAY_MARCH_PACKED_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_PACKED_KERNEL);
+/** {@link RAY_MARCH_SLOTS_PACKED_KERNEL} specialised likewise (R08.T8.d). */
+export const RAY_MARCH_SLOTS_PACKED_SPECIAL_KERNEL = withMarchSpecialised(
+  RAY_MARCH_SLOTS_PACKED_KERNEL,
+);
+/** {@link RAY_MARCH_PACKED_KERNEL} for one band, edged (R08.T8.d). */
+export const RAY_MARCH_PACKED_ONE_BAND_KERNEL = withMarchOneBand(RAY_MARCH_PACKED_KERNEL);
+/** {@link RAY_MARCH_SLOTS_PACKED_KERNEL} for one band, edged (R08.T8.d). */
+export const RAY_MARCH_SLOTS_PACKED_ONE_BAND_KERNEL = withMarchOneBand(
+  RAY_MARCH_SLOTS_PACKED_KERNEL,
+);
+/** {@link RAY_MARCH_LIMB_KERNEL} specialised for one band and no layer edge (R08.T8.d). */
+export const RAY_MARCH_LIMB_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_LIMB_KERNEL);
+/** {@link RAY_MARCH_SLOTS_LIMB_KERNEL} specialised likewise (R08.T8.d). */
+export const RAY_MARCH_SLOTS_LIMB_SPECIAL_KERNEL = withMarchSpecialised(
+  RAY_MARCH_SLOTS_LIMB_KERNEL,
+);
+/** {@link RAY_MARCH_LIMB_KERNEL} for one band, edged (R08.T8.d). */
+export const RAY_MARCH_LIMB_ONE_BAND_KERNEL = withMarchOneBand(RAY_MARCH_LIMB_KERNEL);
+/** {@link RAY_MARCH_SLOTS_LIMB_KERNEL} for one band, edged (R08.T8.d). */
+export const RAY_MARCH_SLOTS_LIMB_ONE_BAND_KERNEL = withMarchOneBand(RAY_MARCH_SLOTS_LIMB_KERNEL);
+
+/**
+ * The far limb's resolve (plan R08, R08.T8.d; `limbResolve.wgsl`): each listed texel's node rays
+ * summed in node order and blended with its centre ray into both of the march's targets.
+ */
+export const LIMB_RESOLVE_KERNEL: KernelPair = {
+  name: "atmosphere ray march's limb resolve",
+  reference: `${limbListWgsl}\n${limbResolveWgsl}`,
+  subgroup: null,
+  readback: "presentation-only",
+};
+
+/**
+ * The far limb's dispatches (plan R08, R08.T8.d; `limbDispatch.wgsl`): the lists' counts held to
+ * their room, and the node pass's and the resolve's workgroups, whole numbers.
+ */
+export const LIMB_DISPATCH_KERNEL: KernelPair = {
+  name: "atmosphere ray march's limb dispatch",
+  reference: `${limbListWgsl}\n${limbDispatchWgsl}`,
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** Each read's packed entry point and node pass, by form (R08.T8.d). */
+const LIMB_PAIRS: Readonly<
+  Record<
+    MarchRead,
+    Readonly<Record<MarchForm, { readonly footprint: KernelPair; readonly nodes: KernelPair }>>
+  >
+> = {
+  "shared read": {
+    general: { footprint: RAY_MARCH_PACKED_KERNEL, nodes: RAY_MARCH_LIMB_KERNEL },
+    special: { footprint: RAY_MARCH_PACKED_SPECIAL_KERNEL, nodes: RAY_MARCH_LIMB_SPECIAL_KERNEL },
+    "one band": {
+      footprint: RAY_MARCH_PACKED_ONE_BAND_KERNEL,
+      nodes: RAY_MARCH_LIMB_ONE_BAND_KERNEL,
+    },
+  },
+  "by slot": {
+    general: { footprint: RAY_MARCH_SLOTS_PACKED_KERNEL, nodes: RAY_MARCH_SLOTS_LIMB_KERNEL },
+    special: {
+      footprint: RAY_MARCH_SLOTS_PACKED_SPECIAL_KERNEL,
+      nodes: RAY_MARCH_SLOTS_LIMB_SPECIAL_KERNEL,
+    },
+    "one band": {
+      footprint: RAY_MARCH_SLOTS_PACKED_ONE_BAND_KERNEL,
+      nodes: RAY_MARCH_SLOTS_LIMB_ONE_BAND_KERNEL,
+    },
+  },
+};
+
+/** Every packed kernel (R08.T8.d): each read's forms, then the resolve and the dispatches. */
+export const LIMB_KERNELS: ReadonlyArray<KernelPair> = [
+  ...Object.values(LIMB_PAIRS).flatMap((forms) =>
+    Object.values(forms).flatMap(({ footprint, nodes }) => [footprint, nodes]),
+  ),
+  LIMB_RESOLVE_KERNEL,
+  LIMB_DISPATCH_KERNEL,
+];
+
+/**
  * The thick read's rewrites of a per-frame kernel's sources (plan R08, R08.T14.c): each source's
  * multiple scattering taken by `thickRead.wgsl`'s `thickSourceAt` in place of `source.wgsl`'s
  * `sourceAt`, and the forward lobes' higher orders at the analytic term's share. Each is one line;
@@ -1497,11 +1712,13 @@ export const RAY_MARCH_FILL_KERNEL: KernelPair = {
  *   composite reading no air outside it, specialised for a body of one band and no layer edge
  *   ({@link RAY_MARCH_SPECIAL_KERNEL}, {@link marchSpecialisedFor}) and for one of one band and
  *   layer edges ({@link RAY_MARCH_ONE_BAND_KERNEL}, {@link marchOneBandFor}; R08.T11.g);
- * - `tiles`: the area under the tile cull (`decision-r08-t8-leans.md` §11, Ruling 4),
- *   {@link RAY_MARCH_CENTRE_KERNEL} taking the tiles no far-limb footprint can blend in and
- *   {@link RAY_MARCH_KERNEL} the rest. Off: on the RTX 3080 it cost 0.4–1.0 ms against the whole
- *   frame from 400 km and 10⁷ m, where the area alone gained 0.4–0.6 ms, and gained 0.4–1.3 ms
- *   farther (plan R08's "Deviations in R08.T11.d, as built");
+ * - `tiles`: the area under the tile cull (`decision-r08-t8-leans.md` §11, Ruling 4), the centre
+ *   ray's entry point ({@link RAY_MARCH_CENTRE_KERNEL}) taking the tiles no far-limb footprint can
+ *   blend in and the footprint's the rest, each since R08.T8.d in the area's form, specialised for
+ *   one band where the tables fit it; a view's under {@link ViewMarchCover} `tiles`. Before the
+ *   specialised forms, on the RTX 3080 it cost 0.4–1.0 ms against the whole frame from 400 km and
+ *   10⁷ m, where the area alone gained 0.4–0.6 ms, and gained 0.4–1.3 ms farther (plan R08's
+ *   "Deviations in R08.T11.d, as built");
  * - `whole frame`: {@link RAY_MARCH_KERNEL} over every texel, the march as it was before them, the
  *   smoke's reference path for its byte-for-byte check, and an atmosphere's own kernels' default.
  */
@@ -1676,8 +1893,11 @@ const STORAGE_SAMPLED =
  * cull): the centre ray's, dispatched first, and the footprint's.
  */
 interface MarchKernels {
-  /** The centre ray's, made at its first culled frame where the kernels are made synchronously. */
-  readonly centre: () => ComputeHandle;
+  /**
+   * The centre ray's in a form (R08.T8.d), made at its first culled frame in it where the kernels
+   * are made synchronously or were not made ahead ({@link FrameKernelsAhead.tiles}).
+   */
+  readonly centre: (form: MarchForm) => ComputeHandle;
   readonly footprint: ComputeHandle;
   /**
    * The footprint's entry point specialised for one band and no layer edge (R08.T11.d,
@@ -1691,6 +1911,125 @@ interface MarchKernels {
    * {@link MarchKernels.special} is.
    */
   readonly oneBand: () => ComputeHandle;
+}
+
+/**
+ * A read's packed entry point and node pass in one form, with the resolve and the dispatches
+ * (R08.T8.d).
+ */
+interface LimbPair {
+  readonly footprint: ComputeHandle;
+  readonly nodes: ComputeHandle;
+  readonly resolve: ComputeHandle;
+  readonly dispatch: ComputeHandle;
+}
+
+/** The far limb's packed kernels (R08.T8.d; {@link LIMB_KERNELS}). */
+interface LimbKernels {
+  /**
+   * Each read's packed kernels in `form`, or `null` while they are made: at the first ask, at once
+   * or in the background ({@link limbKernelsOver}'s `later`), a frame marching its limb per texel,
+   * which gives the same bits, until they are made, and for good where their making failed.
+   */
+  readonly pair: (read: MarchRead, form: MarchForm) => LimbPair | null;
+}
+
+/**
+ * The far limb's packed kernels on `engine` (R08.T8.d): the resolve, the dispatches and, of `reads`,
+ * each form of `forms` made up front, asynchronously; every other made at its first ask, in the
+ * background.
+ */
+async function limbKernelsOf(
+  engine: RenderEngine,
+  reads: MarchReads,
+  forms: ReadonlyArray<MarchForm>,
+): Promise<LimbKernels> {
+  const asked = (["shared read", "by slot"] as const).filter(
+    (read) => reads === "both" || reads === read,
+  );
+  const keys = asked.flatMap((read) => forms.map((form) => [read, form] as const));
+  const [pairs, resolve, dispatch] = await Promise.all([
+    Promise.all(
+      keys.map(async ([read, form]) => {
+        const kernels = LIMB_PAIRS[read][form];
+        const [footprint, nodes] = await Promise.all([
+          engine.createComputeAsync(kernels.footprint),
+          engine.createComputeAsync(kernels.nodes),
+        ]);
+        return [`${read}/${form}`, { footprint, nodes }] as const;
+      }),
+    ),
+    engine.createComputeAsync(LIMB_RESOLVE_KERNEL),
+    engine.createComputeAsync(LIMB_DISPATCH_KERNEL),
+  ]);
+  const made = new Map(pairs.map(([key, pair]) => [key, { ...pair, resolve, dispatch }] as const));
+  return limbKernelsOver(engine, true, made, { resolve, dispatch });
+}
+
+/**
+ * The far limb's packed kernels on `engine` over those `made`, each other read and form made at its
+ * first ask: at once where not `later` (an atmosphere's own kernels), else in the background, by
+ * `createComputeAsync`, so that no frame waits on a compile (the device's shared kernels, a view's;
+ * on SwiftShader a synchronous compile beside the march's was ended as hung, R08.T11.d).
+ */
+function limbKernelsOver(
+  engine: RenderEngine,
+  later: boolean,
+  made = new Map<string, LimbPair>(),
+  shared: Pick<LimbPair, "resolve" | "dispatch"> | null = null,
+): LimbKernels {
+  let common = shared;
+  let commonMaking: Promise<Pick<LimbPair, "resolve" | "dispatch">> | null = null;
+  const commonLater = async (): Promise<Pick<LimbPair, "resolve" | "dispatch">> => {
+    const [resolve, dispatch] = await Promise.all([
+      engine.createComputeAsync(LIMB_RESOLVE_KERNEL),
+      engine.createComputeAsync(LIMB_DISPATCH_KERNEL),
+    ]);
+    common = { resolve, dispatch };
+    return common;
+  };
+  const asked = new Set<string>();
+  return {
+    pair: (read, form) => {
+      const key = `${read}/${form}`;
+      const held = made.get(key);
+      if (held !== undefined) {
+        return held;
+      }
+      const pairs = LIMB_PAIRS[read][form];
+      if (!later) {
+        common ??= {
+          resolve: engine.createCompute(LIMB_RESOLVE_KERNEL),
+          dispatch: engine.createCompute(LIMB_DISPATCH_KERNEL),
+        };
+        const pair: LimbPair = {
+          footprint: engine.createCompute(pairs.footprint),
+          nodes: engine.createCompute(pairs.nodes),
+          ...common,
+        };
+        made.set(key, pair);
+        return pair;
+      }
+      if (!asked.has(key)) {
+        asked.add(key);
+        const making = async (): Promise<void> => {
+          const [footprint, nodes, both] = await Promise.all([
+            engine.createComputeAsync(pairs.footprint),
+            engine.createComputeAsync(pairs.nodes),
+            common === null ? (commonMaking ??= commonLater()) : Promise.resolve(common),
+          ]);
+          made.set(key, { footprint, nodes, ...both });
+        };
+        void making().catch((cause: unknown) => {
+          console.warn(
+            `the far limb's packed kernels (${read}, ${form}) could not be made; its frames march per texel:`,
+            cause,
+          );
+        });
+      }
+      return null;
+    },
+  };
 }
 
 /** The per-frame kernels, each with its output, as one frame dispatches them. */
@@ -1716,6 +2055,11 @@ interface FrameKernels {
    * the first reader's ask (R08.T11.d).
    */
   readonly rayMarchFill: () => ComputeHandle;
+  /**
+   * The far limb's packed kernels ({@link LimbRays} `packed`; R08.T8.d): made at the first frame
+   * that takes them where they were not made ahead ({@link FrameKernelsAhead.packed}).
+   */
+  readonly limb: () => LimbKernels;
   /**
    * The kernels that read the thick table ({@link withThickRead}; plan R08, R08.T14.c), for a body
    * whose tables hold one ({@link AtmosphereTables.thickTable}), a thick bake or a polarisation
@@ -2069,11 +2413,12 @@ export interface FrameKernelsAhead {
    */
   readonly reads?: MarchReads;
   /**
-   * Whether the tile cull's centre ray's kernels are made too (R08.T11.d's `tiles` cover, off for
-   * a view): for the smoke's check of that cover. Not where absent; then made at the first
-   * `tiles` frame.
+   * Whether the tile cull's centre ray's kernels are made too (R08.T11.d's `tiles` cover), in every
+   * form (`true`) or in those listed (R08.T8.d): for a view whose setting takes
+   * {@link ViewMarchCover} `tiles`, and the smoke's check of that cover. Not where absent; then each
+   * made at the first `tiles` frame in its form.
    */
-  readonly tiles?: boolean;
+  readonly tiles?: boolean | ReadonlyArray<MarchForm>;
   /**
    * Whether the kernels that read the thick table are made too (plan R08, R08.T14.c): for a caller
    * that draws a body with one, as the smoke's frame timing with the thick read forced does, and a
@@ -2095,6 +2440,21 @@ export interface FrameKernelsAhead {
    * frame that takes it.
    */
   readonly behind?: boolean;
+  /**
+   * Whether the far limb's packed kernels are made too ({@link LIMB_KERNELS}; R08.T8.d), of the
+   * reads asked, in every form (`true`) or in those listed: for a view whose setting takes
+   * {@link LimbRays} `packed`, and the smoke's check of it. Not where absent; then each made at the
+   * first frame that takes it.
+   */
+  readonly packed?: boolean | ReadonlyArray<MarchForm>;
+}
+
+/** The forms a {@link FrameKernelsAhead} member asks for: every one for `true`, none where absent. */
+function formsOf(asked: boolean | ReadonlyArray<MarchForm> | undefined): ReadonlyArray<MarchForm> {
+  if (asked === undefined || asked === false) {
+    return [];
+  }
+  return asked === true ? MARCH_FORMS : asked;
 }
 
 /**
@@ -2113,39 +2473,52 @@ export async function createAtmosphereFrameKernels(
   ahead: FrameKernelsAhead = {},
 ): Promise<AtmosphereFrameKernels> {
   const reads = ahead.reads ?? "both";
-  const tiles = ahead.tiles ?? false;
+  const tiles = formsOf(ahead.tiles);
   const triangle = compositeTriangle(engine);
   const pairOf = async (
     made: boolean,
-    centrePair: KernelPair,
+    read: MarchRead,
     footprintPair: KernelPair,
     specialPair: KernelPair,
     oneBandPair: KernelPair,
   ): Promise<() => MarchKernels> => {
+    const centres = new Map<MarchForm, ComputeHandle>();
+    const centre = (form: MarchForm): ComputeHandle => {
+      let cull = centres.get(form);
+      if (cull === undefined) {
+        cull = engine.createCompute(CENTRE_PAIRS[read][form]);
+        centres.set(form, cull);
+      }
+      return cull;
+    };
     if (!made) {
       let late: MarchKernels | null = null;
       return () =>
         (late ??= (() => {
-          let centre: ComputeHandle | null = null;
           let special: ComputeHandle | null = null;
           let oneBand: ComputeHandle | null = null;
           return {
-            centre: () => (centre ??= engine.createCompute(centrePair)),
+            centre,
             footprint: engine.createCompute(footprintPair),
             special: () => (special ??= engine.createCompute(specialPair)),
             oneBand: () => (oneBand ??= engine.createCompute(oneBandPair)),
           };
         })());
     }
-    const [footprint, special, oneBand, centre] = await Promise.all([
+    const [footprint, special, oneBand, ...culled] = await Promise.all([
       engine.createComputeAsync(footprintPair),
       engine.createComputeAsync(specialPair),
       engine.createComputeAsync(oneBandPair),
-      tiles ? engine.createComputeAsync(centrePair) : Promise.resolve(null),
+      ...tiles.map((form) => engine.createComputeAsync(CENTRE_PAIRS[read][form])),
     ]);
-    let late: ComputeHandle | null = centre;
+    for (const [i, cull] of culled.entries()) {
+      const form = tiles[i];
+      if (form !== undefined) {
+        centres.set(form, cull);
+      }
+    }
     const kernels: MarchKernels = {
-      centre: () => (late ??= engine.createCompute(centrePair)),
+      centre,
       footprint,
       special: () => special,
       oneBand: () => oneBand,
@@ -2157,14 +2530,14 @@ export async function createAtmosphereFrameKernels(
     engine.createComputeAsync(AERIAL_PERSPECTIVE_KERNEL),
     pairOf(
       reads !== "by slot",
-      RAY_MARCH_CENTRE_KERNEL,
+      "shared read",
       RAY_MARCH_KERNEL,
       RAY_MARCH_SPECIAL_KERNEL,
       RAY_MARCH_ONE_BAND_KERNEL,
     ),
     pairOf(
       reads !== "shared read",
-      RAY_MARCH_SLOTS_CENTRE_KERNEL,
+      "by slot",
       RAY_MARCH_SLOTS_KERNEL,
       RAY_MARCH_SLOTS_SPECIAL_KERNEL,
       RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
@@ -2181,6 +2554,9 @@ export async function createAtmosphereFrameKernels(
       : thermalKernelsOf(engine, (pair) => pair);
   let behind: ComputeHandle | null =
     ahead.behind === true ? await engine.createComputeAsync(COMPOSITE_BEHIND_KERNEL) : null;
+  const packedForms = formsOf(ahead.packed);
+  let limb: LimbKernels | null =
+    packedForms.length > 0 ? await limbKernelsOf(engine, reads, packedForms) : null;
   // The fill is a reader's (the smoke's), which a view's frame never asks: made at the first ask.
   let fill: ComputeHandle | null = null;
   return {
@@ -2189,6 +2565,7 @@ export async function createAtmosphereFrameKernels(
     rayMarch,
     rayMarchSlots,
     rayMarchFill: () => (fill ??= engine.createCompute(RAY_MARCH_FILL_KERNEL)),
+    limb: () => (limb ??= limbKernelsOver(engine, true)),
     thick,
     thermal,
     behind: () => (behind ??= engine.createCompute(COMPOSITE_BEHIND_KERNEL)),
@@ -2531,7 +2908,72 @@ interface FrameResources {
    */
   marchTiles: BufferHandle | null;
   marchTilesBytes: number;
+  /** The far limb's lists (R08.T8.d), made at the first packed frame and grown, never shrunk. */
+  limb: LimbLists | null;
+  /** The lists' room the counts read back last asked for, texels and node rays (R08.T8.d). */
+  limbWanted: { texels: number; rays: number };
+  /** Whether a read-back of the lists' counts is in flight, and the packed frames since the last. */
+  limbReading: boolean;
+  limbFramesSinceRead: number;
 }
+
+/**
+ * The far limb's lists on the GPU (plan R08, R08.T8.d; `limbList.wgsl`): their counts, the node
+ * pass's and the resolve's indirect workgroups, the texel entries and the node rays, with the room
+ * each list was made with.
+ */
+interface LimbLists {
+  readonly counts: BufferHandle;
+  readonly dispatch: BufferHandle;
+  readonly texels: BufferHandle;
+  readonly rays: BufferHandle;
+  readonly texelRoom: number;
+  readonly rayRoom: number;
+}
+
+/** Releases `lists`' buffers, where there are any. */
+function releaseLimbLists(engine: RenderEngine, lists: LimbLists | null): void {
+  if (lists !== null) {
+    for (const buffer of [lists.counts, lists.dispatch, lists.texels, lists.rays]) {
+      engine.releaseBuffer(buffer);
+    }
+  }
+}
+
+/** A limb texel's entry and a node ray, bytes (`limbList.wgsl`'s LimbTexel and LimbRay). */
+const LIMB_TEXEL_BYTES = 48;
+const LIMB_RAY_BYTES = 48;
+
+/**
+ * The lists' least room, texels, and the room a frame's area asks for: texels, `LIMB_ROOM_PER_EDGE`
+ * of them for each texel of the area's width and height, against its limb's length, at most the
+ * area's perimeter, and a band of the limb a few texels deep (from 22 Mm on the floor's low sizes
+ * the inspection's 2,528 limb texels in an area of 32 × 31 tiles, 2 to 3 a texel of its edges;
+ * from 400 km on high the smoke's limb past 1,024 in 20 × 8); node rays, `LIMB_RAYS_PER_TEXEL` a
+ * texel (8.9 the mean there, 10 the most). A frame past either marches the texels that find no room
+ * per texel, exactly; the counts, read back every `LIMB_READ_FRAMES` packed frames, grow the lists
+ * to `LIMB_ROOM_GROWTH` times the counts for the frames after.
+ */
+const LIMB_LEAST_TEXELS = 2048;
+const LIMB_ROOM_PER_EDGE = 6;
+const LIMB_RAYS_PER_TEXEL = 8;
+const LIMB_READ_FRAMES = 30;
+const LIMB_ROOM_GROWTH = 1.25;
+
+/** Where the node pass's and the resolve's indirect workgroups stand in the dispatch buffer, bytes. */
+const LIMB_NODES_ARGS_OFFSET_BYTES = 0;
+const LIMB_RESOLVE_ARGS_OFFSET_BYTES = 12;
+
+/**
+ * The node pass's and the resolve's workgroup, invocations (`limbList.wgsl`'s LIMB_WORKGROUP), and
+ * the most workgroups a dispatch takes along x (WebGPU's `maxComputeWorkgroupsPerDimension`'s
+ * default, which every adapter meets).
+ */
+const LIMB_WORKGROUP = 64;
+const LIMB_MOST_WORKGROUPS = 65_535;
+
+/** The lists' counts cleared before a frame's packed entry point (`LimbCounts.reserved`). */
+const LIMB_COUNTS_CLEARED = new Uint32Array(2);
 
 /** The kernel arm's per-frame GPU objects (R08.T6.g), made at its first frame. */
 interface KernelArmResources {
@@ -2624,6 +3066,10 @@ function createFrameResources(
     behindMarchSize: null,
     marchTiles: null,
     marchTilesBytes: 0,
+    limb: null,
+    limbWanted: { texels: 0, rays: 0 },
+    limbReading: false,
+    limbFramesSinceRead: 0,
   };
 }
 
@@ -2637,17 +3083,25 @@ function marchKernelsOf(engine: RenderEngine, as: (pair: KernelPair) => KernelPa
   let slots: MarchKernels | null = null;
   let fill: ComputeHandle | null = null;
   let behind: ComputeHandle | null = null;
+  let limb: LimbKernels | null = null;
   const pairOf = (
-    centre: KernelPair,
+    read: MarchRead,
     footprint: KernelPair,
     specialPair: KernelPair,
     oneBandPair: KernelPair,
   ): MarchKernels => {
-    let made: ComputeHandle | null = null;
+    const centres = new Map<MarchForm, ComputeHandle>();
     let special: ComputeHandle | null = null;
     let oneBand: ComputeHandle | null = null;
     return {
-      centre: () => (made ??= engine.createCompute(as(centre))),
+      centre: (form) => {
+        let made = centres.get(form);
+        if (made === undefined) {
+          made = engine.createCompute(as(CENTRE_PAIRS[read][form]));
+          centres.set(form, made);
+        }
+        return made;
+      },
       footprint: engine.createCompute(as(footprint)),
       special: () => (special ??= engine.createCompute(as(specialPair))),
       oneBand: () => (oneBand ??= engine.createCompute(as(oneBandPair))),
@@ -2658,19 +3112,21 @@ function marchKernelsOf(engine: RenderEngine, as: (pair: KernelPair) => KernelPa
     aerial: engine.createCompute(as(AERIAL_PERSPECTIVE_KERNEL)),
     rayMarch: () =>
       (shared ??= pairOf(
-        RAY_MARCH_CENTRE_KERNEL,
+        "shared read",
         RAY_MARCH_KERNEL,
         RAY_MARCH_SPECIAL_KERNEL,
         RAY_MARCH_ONE_BAND_KERNEL,
       )),
     rayMarchSlots: () =>
       (slots ??= pairOf(
-        RAY_MARCH_SLOTS_CENTRE_KERNEL,
+        "by slot",
         RAY_MARCH_SLOTS_KERNEL,
         RAY_MARCH_SLOTS_SPECIAL_KERNEL,
         RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
       )),
     rayMarchFill: () => (fill ??= engine.createCompute(as(RAY_MARCH_FILL_KERNEL))),
+    // The kernel arm marches the whole frame, per texel: the packed kernels are the frame's alone.
+    limb: () => (limb ??= limbKernelsOver(engine, false)),
     thick: thickKernelsOf(engine, as),
     thermal: thermalKernelsOf(engine, as),
     behind: () => (behind ??= engine.createCompute(as(COMPOSITE_BEHIND_KERNEL))),
@@ -2825,8 +3281,9 @@ export class HillaireAtmosphere {
    */
   #unread: UnreadTables = NO_UNREAD_TABLES;
   /**
-   * How the march covers its target (R08.T11.d): the area over the device's shared kernels, the
-   * whole frame over its own until asked ({@link HillaireAtmosphere.setMarchCover}).
+   * How the march covers its target (R08.T11.d): over the device's shared kernels its levers' cover
+   * (R08.T8.d), the area or the tile cull; over its own the whole frame, until asked
+   * ({@link HillaireAtmosphere.setMarchCover}).
    */
   #cover: MarchCover;
   /**
@@ -2892,10 +3349,11 @@ export class HillaireAtmosphere {
       );
     }
     this.#frame = createFrameResources(engine, tables, this.#shared);
-    // A view's atmosphere, over the device's shared kernels, marches the air's area alone; one with
-    // its own kernels (the smoke's other checks, the descent spike) the whole frame as before
-    // R08.T11.d, unless asked, so that their frames are those they were checked by.
-    this.#cover = this.#shared === null ? "whole frame" : "area";
+    // A view's atmosphere, over the device's shared kernels, marches the air's area alone, by its
+    // levers' cover (R08.T8.d); one with its own kernels (the smoke's other checks, the descent
+    // spike) the whole frame as before R08.T11.d, unless asked, so that their frames are those they
+    // were checked by.
+    this.#cover = this.#shared === null ? "whole frame" : levers.marchCover;
     this.#uniforms = Object.fromEntries(
       COMPOSITE_MEMBERS.map((name) => [name, new Float32Array(4)]),
     );
@@ -2999,6 +3457,12 @@ export class HillaireAtmosphere {
     readonly marchTiles: BufferHandle | null;
     /** The latest frame's march area (R08.T11.d), `null` before the first frame. */
     readonly marchArea: MarchArea | null;
+    /**
+     * The far limb's counts (R08.T8.d; `limbList.wgsl`'s LimbCounts, four `u32`): the texels and
+     * node rays the packed entry point reserved, then those taken; `null` before the first packed
+     * frame.
+     */
+    readonly limbCounts: BufferHandle | null;
   } {
     this.#read("skyView");
     this.#read("aerial");
@@ -3011,6 +3475,7 @@ export class HillaireAtmosphere {
       rayMarchTransmittance: this.#frame.rayMarchTransmittance,
       marchTiles: this.#frame.marchTiles,
       marchArea: this.#area,
+      limbCounts: this.#frame.limb?.counts ?? null,
     };
   }
 
@@ -3163,7 +3628,8 @@ export class HillaireAtmosphere {
    * march where they hold one band and layer edges and no thick table ({@link marchOneBandFor};
    * R08.T11.g). Over its own kernels (the smoke's other checks, the descent spike, the kernel arm)
    * it marches the whole frame by the general march as before, unless asked
-   * ({@link HillaireAtmosphere.setMarchCover}; the tile cull is a cover of its own, off). Every
+   * ({@link HillaireAtmosphere.setMarchCover}); a view's takes its levers' cover, the area or the
+   * tile cull, in the area's form (R08.T8.d), and its levers' limb rays. Every
    * cover is exact, each texel what the general march over the whole frame gives: the smoke's
    * `checkMarchArea`, `checkMarchSpecialised` and `checkMarchOneBand` hold the area's, specialised
    * or for one band, and the tile cull's to the whole frame's, byte for byte on SwiftShader, and so
@@ -3330,6 +3796,8 @@ export class HillaireAtmosphere {
     }
     frame.marchTiles = null;
     frame.marchTilesBytes = 0;
+    releaseLimbLists(this.#engine, frame.limb);
+    frame.limb = null;
     const arm = this.#arm;
     if (arm !== null) {
       for (const texture of [
@@ -3548,6 +4016,14 @@ export class HillaireAtmosphere {
     // A thick body's march takes no cull (R08.T14.c): its area's every tile, exact as the cull is.
     // Nor does a self-luminous body's (R08.T18.b), which takes its read's thermal footprint alone.
     const tileCull = this.#cover === "tiles" && thick === null && thermal === null;
+    // The march's form on every cover but the whole frame: specialised for one band where the
+    // tables fit it (R08.T11.d, R08.T11.g); the thick read has no one-band form.
+    let form: MarchForm = "general";
+    if (this.#cover !== "whole frame" && marchSpecialisedFor(tables)) {
+      form = "special";
+    } else if (this.#cover !== "whole frame" && thick === null && marchOneBandFor(tables)) {
+      form = "one band";
+    }
     const shell = topShellOf(this.#figure, medium.topHeightM, this.#gravity);
     const area =
       this.#cover === "whole frame"
@@ -3610,27 +4086,94 @@ export class HillaireAtmosphere {
       const tiles = [area.tilesAcross, area.tilesDown, 1] as const;
       const marched = thermal === null ? march() : null;
       if (tileCull && marched?.kind === "thin") {
-        engine.dispatch(marched.kernels.centre(), bindings, tiles, ATMOSPHERE_VIEW_PASS);
+        engine.dispatch(marched.kernels.centre(form), bindings, tiles, ATMOSPHERE_VIEW_PASS);
       }
       // A view's area over a body of one band with no layer edge takes the specialised march
       // (R08.T11.d), and over a thin one of one band with layer edges the one-band march
-      // (R08.T11.g): each exact there, and the general one on the reference path and under the cull.
-      // A self-luminous body takes its read's thermal footprint under every cover (R08.T18.b).
+      // (R08.T11.g), since R08.T8.d under the tile cull too: each exact there, and the general one
+      // on the reference path. A self-luminous body takes its read's thermal footprint under every
+      // cover (R08.T18.b).
       let footprint: ComputeHandle;
       if (thermal !== null) {
         footprint = slotDepths === null ? thermal.rayMarch() : thermal.rayMarchSlots();
       } else if (marched === null) {
         throw new Error("a frame without the thermal forms marches by its read's kernels");
-      } else if (this.#cover !== "area") {
-        footprint = marched.kernels.footprint;
-      } else if (marchSpecialisedFor(tables)) {
+      } else if (form === "special") {
         footprint = marched.kernels.special();
-      } else if (marched.kind === "thin" && marchOneBandFor(tables)) {
+      } else if (form === "one band" && marched.kind === "thin") {
         footprint = marched.kernels.oneBand();
       } else {
         footprint = marched.kernels.footprint;
       }
-      engine.dispatch(footprint, bindings, tiles, ATMOSPHERE_VIEW_PASS);
+      // The far limb's node rays packed (R08.T8.d, `LimbRays`): the frame's thin march over an
+      // area from above the top, where alone a footprint blends, by its packed entry point in the
+      // march's form, then the lists' dispatches, the node pass and the resolve, each texel's bits
+      // the per-texel march's; per texel while the packed kernels are made. Where the camera's f32
+      // h* stands on the top, either march gives the same bits.
+      const cameraAt = this.#uniforms["camera"];
+      const curvatureAt = this.#uniforms["curvature"];
+      const pair =
+        deferUnread &&
+        marched?.kind === "thin" &&
+        this.#cover !== "whole frame" &&
+        this.#levers.limbRays === "packed" &&
+        (cameraAt?.[3] ?? 0) * (curvatureAt?.[2] ?? 0) >= medium.topHeightM
+          ? kernels.limb().pair(slotDepths === null ? "shared read" : "by slot", form)
+          : null;
+      if (pair !== null) {
+        const lists = this.#limbLists(area);
+        const listed = {
+          limbCounts: lists.counts,
+          limbTexels: lists.texels,
+          limbRays: lists.rays,
+        };
+        engine.writeBuffer(lists.counts, 0, LIMB_COUNTS_CLEARED);
+        engine.dispatch(
+          pair.footprint,
+          { ...bindings, buffers: { ...bindings.buffers, ...listed } },
+          tiles,
+          ATMOSPHERE_VIEW_PASS,
+        );
+        engine.dispatch(
+          pair.dispatch,
+          {
+            uniforms: {},
+            buffers: { ...listed, limbDispatch: lists.dispatch },
+            sampled: {},
+            storage: {},
+          },
+          [1, 1, 1],
+          ATMOSPHERE_VIEW_PASS,
+        );
+        engine.dispatch(
+          pair.nodes,
+          {
+            buffers: { ...common.buffers, limbCounts: lists.counts, limbRays: lists.rays },
+            sampled: {
+              ...common.sampled,
+              sceneDepth: scene.depth,
+              ...(slotDepths === null ? {} : { slotDepths }),
+            },
+            uniforms: {
+              medium: perFrameMedium,
+              view: marchUniforms,
+              layerEdges: tables.layerEdges,
+            },
+            storage: {},
+          },
+          { buffer: lists.dispatch, offsetBytes: LIMB_NODES_ARGS_OFFSET_BYTES },
+          ATMOSPHERE_VIEW_PASS,
+        );
+        engine.dispatch(
+          pair.resolve,
+          { uniforms: {}, buffers: listed, sampled: {}, storage: marchStorage },
+          { buffer: lists.dispatch, offsetBytes: LIMB_RESOLVE_ARGS_OFFSET_BYTES },
+          ATMOSPHERE_VIEW_PASS,
+        );
+        this.#readLimbCounts(lists);
+      } else {
+        engine.dispatch(footprint, bindings, tiles, ATMOSPHERE_VIEW_PASS);
+      }
     }
     // What lies behind the sky from above the top at the march's resolution (the owner's priority,
     // 2026-11-01; `compositeBehind.wgsl`), over the march's tiles: where the march runs below the
@@ -3747,6 +4290,102 @@ export class HillaireAtmosphere {
       depth,
     );
     return depth[1];
+  }
+
+  /**
+   * The far limb's lists for a frame over `area` (R08.T8.d): their room the larger of what its whole
+   * target asks ({@link LIMB_ROOM_PER_EDGE}, {@link LIMB_RAYS_PER_TEXEL}) and what the counts read
+   * back last asked, made anew where the held lists are smaller, never smaller.
+   */
+  #limbLists(area: MarchArea): LimbLists {
+    const frame = this.#frame;
+    // The whole target's edges, not the area's, so that an approach whose area grows frame by frame
+    // remakes no list (as the tiles' kinds are made for the whole target, `#marchTiles`).
+    const edges =
+      (Math.ceil(area.widthTexels / MARCH_TILE_TEXELS) +
+        Math.ceil(area.heightTexels / MARCH_TILE_TEXELS)) *
+      MARCH_TILE_TEXELS;
+    const texels = Math.max(LIMB_LEAST_TEXELS, LIMB_ROOM_PER_EDGE * edges, frame.limbWanted.texels);
+    const rays = Math.max(LIMB_RAYS_PER_TEXEL * texels, frame.limbWanted.rays);
+    const held = frame.limb;
+    if (held !== null && held.texelRoom >= texels && held.rayRoom >= rays) {
+      return held;
+    }
+    // Each list within a storage binding, and its pass's workgroups within a dispatch's.
+    const { maxStorageBufferBindingSize, maxBufferSize } = this.#engine.capabilities;
+    const most = (bytes: number): number =>
+      Math.min(
+        Math.floor(Math.min(maxStorageBufferBindingSize, maxBufferSize) / bytes),
+        LIMB_MOST_WORKGROUPS * LIMB_WORKGROUP,
+      );
+    const texelRoom = Math.min(Math.max(texels, held?.texelRoom ?? 0), most(LIMB_TEXEL_BYTES));
+    const rayRoom = Math.min(Math.max(rays, held?.rayRoom ?? 0), most(LIMB_RAY_BYTES));
+    if (held !== null && held.texelRoom >= texelRoom && held.rayRoom >= rayRoom) {
+      return held;
+    }
+    releaseLimbLists(this.#engine, held);
+    const buffer = (name: string, bytes: number, usage: number): BufferHandle =>
+      this.#engine.createBuffer({ name, bytes, usage, category: "atmosphere-view" });
+    const made: LimbLists = {
+      counts: buffer(
+        "atmosphere far limb's counts",
+        16,
+        BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST | BUFFER_USAGE.COPY_SRC,
+      ),
+      dispatch: buffer(
+        "atmosphere far limb's dispatches",
+        24,
+        BUFFER_USAGE.STORAGE | BUFFER_USAGE.INDIRECT,
+      ),
+      texels: buffer(
+        "atmosphere far limb's texels",
+        texelRoom * LIMB_TEXEL_BYTES,
+        BUFFER_USAGE.STORAGE,
+      ),
+      rays: buffer("atmosphere far limb's rays", rayRoom * LIMB_RAY_BYTES, BUFFER_USAGE.STORAGE),
+      texelRoom,
+      rayRoom,
+    };
+    frame.limb = made;
+    return made;
+  }
+
+  /**
+   * Reads `lists`' counts back at the first packed frame and every {@link LIMB_READ_FRAMES} after,
+   * one read at a time (R08.T8.d): where a frame reserved more than their room, the frames after
+   * ask {@link LIMB_ROOM_GROWTH} times its counts. A read that fails asks nothing, and is said.
+   */
+  #readLimbCounts(lists: LimbLists): void {
+    const frame = this.#frame;
+    if (
+      frame.limbReading ||
+      (frame.limbFramesSinceRead > 0 && frame.limbFramesSinceRead < LIMB_READ_FRAMES)
+    ) {
+      frame.limbFramesSinceRead += 1;
+      return;
+    }
+    frame.limbReading = true;
+    frame.limbFramesSinceRead = 1;
+    const engine = this.#engine;
+    const grown = async (): Promise<void> => {
+      // The dispatches' kernel, whose counts are whole numbers, writes them last.
+      const bytes = await engine.readBuffer(lists.counts);
+      const words = new Uint32Array(bytes, 0, Math.min(2, Math.floor(bytes.byteLength / 4)));
+      const [texels = 0, rays = 0] = words;
+      if (texels > lists.texelRoom || rays > lists.rayRoom) {
+        frame.limbWanted = {
+          texels: Math.max(frame.limbWanted.texels, Math.ceil(texels * LIMB_ROOM_GROWTH)),
+          rays: Math.max(frame.limbWanted.rays, Math.ceil(rays * LIMB_ROOM_GROWTH)),
+        };
+      }
+    };
+    void grown()
+      .catch((cause: unknown) => {
+        console.warn("the far limb's counts could not be read back:", cause);
+      })
+      .finally(() => {
+        frame.limbReading = false;
+      });
   }
 
   /**

@@ -184,6 +184,38 @@ describe("the views check's launch switch", () => {
     expect(readViewsCheckLaunch({ ...LAUNCH, marchProbe: "centre" })).toBeNull();
   });
 
+  it("carries the frame profile's atmosphere levers, each or both, on that profile alone (R08.T8.d)", () => {
+    const profile: ViewsCheckLaunch = {
+      ...LAUNCH,
+      run: "inspection",
+      served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+      timing: true,
+    };
+    for (const atmosphereLevers of [
+      { marchCover: "tiles" },
+      { limbRays: "packed" },
+      { marchCover: "area", limbRays: "per-texel" },
+    ] as const) {
+      const launch: ViewsCheckLaunch = { ...profile, atmosphereLevers };
+      expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    }
+    for (const atmosphereLevers of [
+      {},
+      { marchCover: "whole frame" },
+      { limbRays: "per-node" },
+      { marchCover: "tiles", strides: true },
+    ]) {
+      expect(readViewsCheckLaunch({ ...profile, atmosphereLevers })).toBeNull();
+    }
+    const { timing: _, ...inspection } = profile;
+    expect(
+      readViewsCheckLaunch({ ...inspection, atmosphereLevers: { limbRays: "packed" } }),
+    ).toBeNull();
+    expect(
+      readViewsCheckLaunch({ ...LAUNCH, atmosphereLevers: { limbRays: "packed" } }),
+    ).toBeNull();
+  });
+
   it("carries the hand-over check's one look, on a hand-over check alone (R10.T15.b.2)", () => {
     const launch: ViewsCheckLaunch = {
       ...LAUNCH,

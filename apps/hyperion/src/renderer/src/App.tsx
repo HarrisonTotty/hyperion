@@ -45,6 +45,7 @@ import { navigatorGpu } from "./view/engine/status";
 import type { QualitySetting } from "./view/quality/qualitySetting";
 import { selectionViewport } from "./view/terrain/handover";
 import type {
+  AtmosphereLeversOverride,
   GeometryOverride,
   GraphicsLaunchMode,
   ServedWorldNames,
@@ -73,6 +74,11 @@ interface DisplayInputs {
   readonly performanceThreads: number | null;
   /** The launch's geometry override (`--geometry`, plan R14), which `VIEW`'s terrain draws with. */
   readonly geometry: GeometryOverride | undefined;
+  /**
+   * A frame profile's atmosphere levers over the setting's (`--march-cover`, `--limb-rays`; plan
+   * R08, R08.T8.d), which `VIEW`'s atmospheres draw with; none on any other launch.
+   */
+  readonly atmosphereLevers: AtmosphereLeversOverride | undefined;
 }
 
 /**
@@ -246,6 +252,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
           platform={inputs.platform}
           performanceThreads={inputs.performanceThreads}
           geometry={inputs.geometry}
+          atmosphereLevers={inputs.atmosphereLevers}
         />
       );
       break;
@@ -420,6 +427,7 @@ export function App() {
     platform: window.hyperion.platform,
     performanceThreads: window.hyperion.performanceThreads,
     geometry: window.hyperion.geometry,
+    atmosphereLevers: viewsCheck?.launch.atmosphereLevers,
   };
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>

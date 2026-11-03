@@ -14,6 +14,7 @@
  * the sky's cube under its own name, so that one sky is baked once. A drawer asked for during a
  * loss is made at the restore ({@link makeViewFrameDrawer}).
  */
+import type { AtmosphereLeversOverride } from "../../../../preload/api";
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { type Vec3, vec3 } from "../../geometry/vec3";
@@ -121,6 +122,11 @@ export interface ViewFrameInputs {
    * 2026-11-01); {@link setting} where absent.
    */
   readonly atmosphereSetting?: QualitySetting | undefined;
+  /**
+   * A frame profile's atmosphere levers over its setting's (plan R08, R08.T8.d), which its
+   * photorealistic frame's atmospheres draw with; the setting's where absent.
+   */
+  readonly atmosphereLevers?: AtmosphereLeversOverride | undefined;
   /**
    * Whether its frame-rate floor holds its scale at its lowest step (`BudgetedScale.atLowestStep`),
    * when its large discs' limbs take fewer cells (R07.T8.i); `false` where absent.
@@ -703,6 +709,7 @@ export class ViewFrameDrawer {
           setting: inputs.setting,
           geometry: inputs.geometry,
           atmosphereSetting: inputs.atmosphereSetting,
+          atmosphereLevers: inputs.atmosphereLevers,
           floorLowest: inputs.floorLowest,
           exposureScale: exposed,
           list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },

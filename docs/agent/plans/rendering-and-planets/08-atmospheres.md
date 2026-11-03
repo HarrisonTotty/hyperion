@@ -4601,6 +4601,8 @@ added on 2026-10-22 by `decision-r08-t8-leans.md` §9):
   recorded target there, not a hold. If lever 1 confirms the mechanism, `hillaire.test.ts` gains a
   static check beside R05's. It follows T8.c and precedes R08.T10.b. `pnpm test` and
   `just test-render` pass. _Built 2026-10-22_ (Risks, "Deviations in T8.d, as built").
+  _Reopened 2026-11-03 for the far limb's rays from orbit (the owner's M5 profile): built, the
+  Mac A/B pending_ (Risks, "R08.T8.d's far limb from orbit, as built").
 
 - **R08.T8.e The march's sources and steps from outside the air** (`decision-r08-t8-leans.md`
   §9). At the setting's count the march is a blocker for R08.T10.b: from 400 km on high, after
@@ -24876,3 +24878,35 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     Earth from 1.6 radii at low's targets. On it BASE's kernels leave 2,419 channels off their
     ground; the fix leaves none.
   - Pending, the owner's RTX run: `just views-check --hidden --atmosphere`, both settings.
+- **R08.T8.d's far limb from orbit, as built** (2026-11-03; main's brief on the owner's M5 profile
+  of 2026-11-01; the pod's table in the lane's outbox). Client only; no generated value moves.
+  - _Measure first_ (check-only): `--march-probe centre` (`marchProbe.ts`) makes every march kernel
+    with no footprint; each profiled window takes `MARCH_CENSUS_KERNEL`'s census
+    (`marchCensus.wgsl`): texels by node rays, limb tiles, rays and lanes' rays. Timing file v2.
+  - _Levers_: `AtmosphereSettings.marchCover` (`ViewMarchCover`; `area` on both, the way back) and
+    `limbRays` (`LimbRays`; `packed` on both, `per-texel` the way back), by the pod's table.
+  - _`tiles`, against R08.T11.d's and R08.T11.g's records_: both of the cull's entry points take the
+    area's form (four new centre kernels, `CENTRE_PAIRS`); a thick, deck or self-luminous body takes
+    no cull and marches under `tiles` as under `area`. `FrameKernelsAhead.tiles`, `.packed` take
+    `true` or a list of `MarchForm`s.
+  - _`packed`_ (thin read only, lean 2026-11-03): `rayMarchPacked.wgsl` lists each blended texel's
+    nodes and marches its centre alone; `limbDispatch.wgsl`, `limbNodes.wgsl` (`rayMarch.wgsl` less
+    its targets) one node an invocation, `limbResolve.wgsl` in node order; `LIMB_KERNELS`, 14.
+  - _When_: a view asks a body's (read, form) pair at its first frame from above the top and makes
+    it in the background, marching per texel, the same bits, until then; a texel past the lists'
+    room is marched per texel.
+  - _Lists_: max(2,048, 6 × the target's edge texels) texels, 8 rays each, 48 B an entry, grown from
+    a read-back every 30 packed frames to 1.25 × the counts, never shrunk: 0.88 MB a body at least,
+    about 7.8 MB at 1920 × 1080 on high, 2.6 MB on low (`atmosphere-view`).
+  - _Mac A/B_ (check-only): `--march-cover`, `--limb-rays` (`AtmosphereLeversOverride`) reach
+    `PhotorealFrame.atmosphereLevers`; files end `-cover-<c>`, `-limb-<r>`.
+  - _R01.T15's bound_ 49 → 67; smoke part 17 compiles `ATMOSPHERE_LIMB_ENTRIES` and holds the
+    general forms; parts 8 and 12 hold the specialised and one-band forms, area and cull.
+  - _Against `decision-r08-t8-leans.md` §12 (b) and §16 Ruling 1_: the separate node pass is built
+    on main's brief (§16 withdrew (b) on the RTX's QW3); the warp-shared form is not tried.
+  - _Not byte-checked_: the general by-slot and the one-band shared-read forms, centre and packed
+    (compiled in part 17 only).
+  - _Not reached_: the profile's close and 4 km windows (the served body reads
+    `TERRAIN: NOT YET MODELLED` at generator 24).
+  - _Pending, the owner's Mac A/B_ (high, each lever on and off) and the RTX QW, with T8.d's one
+    ulp on hardware.

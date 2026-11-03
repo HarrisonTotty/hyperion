@@ -856,6 +856,46 @@ describe("the several-views check's options", () => {
     ]);
   });
 
+  it("takes --march-cover and --limb-rays, the frame profile's levers over its setting's (R08.T8.d)", () => {
+    const profile = [
+      "--views-check",
+      "--inspection",
+      "--universe",
+      UNIVERSE,
+      "--body",
+      BODY,
+      "--timing",
+    ];
+    expect([
+      parse([...profile, "--march-cover", "tiles"]).viewsCheck?.atmosphereLevers,
+      parse([...profile, "--limb-rays", "packed"]).viewsCheck?.atmosphereLevers,
+      parse([...profile, "--march-cover", "area", "--limb-rays", "per-texel"]).viewsCheck
+        ?.atmosphereLevers,
+      parse(profile).viewsCheck?.atmosphereLevers,
+    ]).toEqual([
+      { marchCover: "tiles" },
+      { limbRays: "packed" },
+      { marchCover: "area", limbRays: "per-texel" },
+      undefined,
+    ]);
+  });
+
+  it.each([
+    ["--march-cover", "tiles"],
+    ["--limb-rays", "packed"],
+  ] as const)(
+    "refuses %s without the frame profile, or naming no value (R08.T8.d)",
+    (flag, value) => {
+      const inspection = ["--views-check", "--inspection", "--universe", UNIVERSE, "--body", BODY];
+      const error = refusal([...inspection, flag, value]);
+      expect([error.exitCode, error.message]).toEqual([
+        1,
+        `error: ${flag} is an option of --timing, which was not given`,
+      ]);
+      expect(refusal([...inspection, "--timing", flag, "whole"]).exitCode).toBe(1);
+    },
+  );
+
   it("refuses --march-probe without the frame profile, or naming no probe (R08.T8.d)", () => {
     const inspection = ["--views-check", "--inspection", "--universe", UNIVERSE, "--body", BODY];
     const error = refusal([...inspection, "--march-probe", "centre"]);

@@ -14,6 +14,7 @@
  * and the stars are the wireframe draw list's sprites, the sky's or the interim field's, with the
  * host discs under three pixels.
  */
+import type { AtmosphereLeversOverride } from "../../../../preload/api";
 import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
 import type { DiscGround } from "../../view/atmosphere/AtmosphereCache";
@@ -99,6 +100,8 @@ export interface PhotorealInputs {
   readonly geometry?: GeometrySettings | undefined;
   /** The setting whose sizes the frame's air is drawn at (`PhotorealFrame.atmosphereSetting`). */
   readonly atmosphereSetting?: QualitySetting | undefined;
+  /** The levers over its setting's its air is drawn with (`PhotorealFrame.atmosphereLevers`). */
+  readonly atmosphereLevers?: AtmosphereLeversOverride | undefined;
   /** Whether its frame-rate floor stands at its lowest step (`PhotorealFrame.floorLowest`). */
   readonly floorLowest?: boolean | undefined;
   /** The exposure scale (`exposureScale`), the target's pre-exposure. */
@@ -475,6 +478,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     setting: inputs.setting,
     geometry: inputs.geometry,
     atmosphereSetting: inputs.atmosphereSetting,
+    atmosphereLevers: inputs.atmosphereLevers,
     floorLowest: inputs.floorLowest,
     exposureScale,
     sky: [...(band === null ? [] : [band]), ...(inputs.cube === null ? [] : [inputs.cube])],

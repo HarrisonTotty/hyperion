@@ -1,6 +1,7 @@
 import { screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { AtmosphereLeversOverride } from "../../../../preload/api";
 import { statusLine } from "../../test/statusLine";
 import {
   nominalStore,
@@ -27,7 +28,10 @@ interface Setup extends ViewDisplayHarness {
  * `VIEW` on the high setting drawing `PHASE TEST` photorealistic, its adapter with `features`
  * (`timestamp-query` gives it a pass timer; without it the floor reads the frames' intervals).
  */
-async function photoreal(features: ReadonlyArray<GPUFeatureName> = []): Promise<Setup> {
+async function photoreal(
+  features: ReadonlyArray<GPUFeatureName> = [],
+  atmosphereLevers?: AtmosphereLeversOverride,
+): Promise<Setup> {
   const fake = timedEngineSource();
   const harness = renderViewDisplay({
     store: await nominalStore(features),
@@ -35,6 +39,7 @@ async function photoreal(features: ReadonlyArray<GPUFeatureName> = []): Promise<
     engines: fake.engines,
     setting: "high",
     stagePx: STAGE_PX,
+    ...(atmosphereLevers === undefined ? {} : { atmosphereLevers }),
   });
   await settle();
   harness.advance(100);
@@ -97,5 +102,24 @@ describe("VIEW's frame-rate floor (the owner's report, 2026-11-01)", () => {
       { widthPx: 1280, heightPx: 720 },
       true,
     ]);
+  });
+});
+
+describe("VIEW's atmosphere levers over its setting's (plan R08, R08.T8.d)", () => {
+  it("hands a frame profile's levers to every photorealistic frame", async () => {
+    const render = vi.spyOn(PhotorealRenderer.prototype, "render");
+    const levers = { marchCover: "tiles", limbRays: "packed" } as const;
+    const view = await photoreal(["timestamp-query"], levers);
+    draw(view, 5, 17, 0.2);
+    const given = render.mock.calls.map(([, frame]) => frame.atmosphereLevers);
+    expect([given.length > 0, given.every((each) => each === levers)]).toEqual([true, true]);
+  });
+
+  it("hands none where the launch gives none, the setting's own", async () => {
+    const render = vi.spyOn(PhotorealRenderer.prototype, "render");
+    const view = await photoreal(["timestamp-query"]);
+    draw(view, 5, 17, 0.2);
+    const given = render.mock.calls.map(([, frame]) => frame.atmosphereLevers);
+    expect([given.length > 0, given.every((each) => each === undefined)]).toEqual([true, true]);
   });
 });

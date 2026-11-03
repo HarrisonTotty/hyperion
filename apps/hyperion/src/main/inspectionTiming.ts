@@ -28,6 +28,7 @@ import { join } from "node:path";
 import type { TraceConfig } from "electron";
 
 import type {
+  AtmosphereLeversOverride,
   CompositeProbeName,
   InspectionGpuCall,
   InspectionTimingMarchCensus,
@@ -51,7 +52,7 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
 
 /**
  * The schema's version; bumped with any change to the file's shape: 2 since each window's march
- * census and the run's march probe (plan R08, R08.T8.d).
+ * census, the run's march probe and its levers over the setting's (plan R08, R08.T8.d).
  */
 export const INSPECTION_TIMING_VERSION = 2;
 
@@ -748,6 +749,11 @@ export interface InspectionTimingResults {
      * the march as a player's is drawn.
      */
     readonly marchProbe: MarchProbeName | null;
+    /**
+     * The atmosphere's levers the profile drew with over its setting's (`--march-cover`,
+     * `--limb-rays`; plan R08, R08.T8.d), or `null`, the setting's own.
+     */
+    readonly atmosphereLevers: AtmosphereLeversOverride | null;
   };
   readonly windows: ReadonlyArray<InspectionTimingWindowResults>;
 }
@@ -760,6 +766,8 @@ export interface InspectionTimingInput {
   readonly compositeProbe: CompositeProbeName | null;
   /** The march's probe the launch drew under, or `null` (`ViewsCheckLaunch.marchProbe`). */
   readonly marchProbe: MarchProbeName | null;
+  /** The levers the launch drew with over its setting's, or `null` (`ViewsCheckLaunch.atmosphereLevers`). */
+  readonly atmosphereLevers: AtmosphereLeversOverride | null;
   readonly record: InspectionTimingRecord;
   /** Each window's reduced trace, by name; a window without one is recorded as missing. */
   readonly traces: ReadonlyMap<InspectionTimingWindowName, Measured<ProfileTraceFigures>>;
@@ -867,6 +875,7 @@ export function buildInspectionTimingResults(
       timer: record.timer,
       compositeProbe: input.compositeProbe,
       marchProbe: input.marchProbe,
+      atmosphereLevers: input.atmosphereLevers,
     },
     windows: record.windows.map((window) => windowResults(window, input.traces.get(window.name))),
   };
@@ -1077,6 +1086,18 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
   ];
 }
 
+/** The launch line's part for the levers a run drew with over its setting's, or nothing. */
+function leversText(levers: AtmosphereLeversOverride | null): string {
+  if (levers === null) {
+    return "";
+  }
+  const named = [
+    ...(levers.marchCover === undefined ? [] : [`march cover ${levers.marchCover}`]),
+    ...(levers.limbRays === undefined ? [] : [`limb rays ${levers.limbRays}`]),
+  ];
+  return `; atmosphere levers ${named.join(", ")} over the setting's`;
+}
+
 /** The timing file's summary, for a person reading it. */
 export function inspectionTimingMarkdown(results: InspectionTimingResults): string {
   const { run } = results;
@@ -1091,7 +1112,7 @@ export function inspectionTimingMarkdown(results: InspectionTimingResults): stri
     `- **Body:** ${run.served === null ? "—" : `\`${run.served.body}\` of universe \`${run.served.universe}\``}`,
     `- **Machine:** ${cell(run.machine.cpu)}, ${String(run.machine.logicalCores)} threads; GPU ${cell(gpu)}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}${run.marchProbe === null ? "" : `; march probe ${run.marchProbe}, not the picture a player sees`}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}${run.marchProbe === null ? "" : `; march probe ${run.marchProbe}, not the picture a player sees`}${leversText(run.atmosphereLevers)}`,
     "- **A profile, not a measurement:** nothing is judged; a hidden run's frames are never presented, and the machine may be shared.",
     "",
     ...results.windows.flatMap(windowMarkdown),
@@ -1114,7 +1135,8 @@ const NODE_FILES: ResultsFiles = {
 /**
  * Writes the timing file and its summary into `dir` as
  * `<date>-<machine>-<setting>-inspection-timing.json` and `.md` (with `-composite-<probe>` and
- * `-march-<probe>` after it for a probed run), adding `-2`, `-3` and so on where a run of the same name is there, and warns of a file over the repository's limit for added files.
+ * `-march-<probe>` after it for a probed run, and `-cover-<cover>` and `-limb-<rays>` for one drawn
+ * with a lever over its setting's), adding `-2`, `-3` and so on where a run of the same name is there, and warns of a file over the repository's limit for added files.
  *
  * @throws Error if the day's names are used up.
  */
@@ -1126,7 +1148,8 @@ export async function writeInspectionTimingResults(
   await files.mkdir(dir);
   const probe = results.run.compositeProbe;
   const march = results.run.marchProbe;
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}`;
+  const levers = results.run.atmosphereLevers;
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}${levers?.marchCover === undefined ? "" : `-cover-${levers.marchCover}`}${levers?.limbRays === undefined ? "" : `-limb-${levers.limbRays}`}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${String(i + 1)}`,
   );

@@ -9,6 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
 import { vi } from "vitest";
 
+import type { AtmosphereLeversOverride } from "../../../preload/api";
 import { UniverseProvider } from "../components/UniverseProvider";
 import { rootRemPx } from "../lib/useElementSize";
 import type { ViewEngineSource } from "../displays/view/useViewEngine";
@@ -461,6 +462,8 @@ export function renderViewDisplay(options: {
   readonly watchTerrain?: (session: TerrainSession) => () => void;
   /** The body inspection opened as `VIEW` mounts (the owner's request, 2026-11-01): none by default. */
   readonly inspection?: InspectionOpening;
+  /** A frame profile's atmosphere levers over the setting's (R08.T8.d): none by default. */
+  readonly atmosphereLevers?: AtmosphereLeversOverride;
 }): ViewDisplayHarness {
   const advanceTimers = fakeFramesAndTimeouts();
   let viewPx: LaidOutPx = options.viewPx ?? FULL_VIEW_PX;
@@ -500,6 +503,7 @@ export function renderViewDisplay(options: {
                     opticsWorkers={startOpticsWorker}
                     sceneOptions={options.sceneOptions}
                     watchTerrain={options.watchTerrain}
+                    atmosphereLevers={options.atmosphereLevers}
                   />
                 </main>
               </Activity>

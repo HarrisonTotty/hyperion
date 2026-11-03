@@ -58,10 +58,14 @@ import {
   geodeticOf,
   HillaireAtmosphere,
   RAY_MARCH_CENTRE_KERNEL,
+  RAY_MARCH_CENTRE_ONE_BAND_KERNEL,
+  RAY_MARCH_CENTRE_SPECIAL_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
   RAY_MARCH_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
   RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
@@ -1276,6 +1280,14 @@ describe("the per-frame marches' steps (R08.T8.d)", () => {
     ["the specialised ray march by slot", RAY_MARCH_SLOTS_SPECIAL_KERNEL.reference],
     ["the ray march for one band, edged", RAY_MARCH_ONE_BAND_KERNEL.reference],
     ["the ray march by slot for one band, edged", RAY_MARCH_SLOTS_ONE_BAND_KERNEL.reference],
+    // The cull's centre ray in the area's forms (R08.T8.d).
+    ["the specialised centre ray", RAY_MARCH_CENTRE_SPECIAL_KERNEL.reference],
+    ["the specialised centre ray by slot", RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL.reference],
+    ["the centre ray for one band, edged", RAY_MARCH_CENTRE_ONE_BAND_KERNEL.reference],
+    [
+      "the centre ray by slot for one band, edged",
+      RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL.reference,
+    ],
   ])("calls the march from one place in %s's entry point", (_name, source) => {
     const main = wgslFunctions(source).get("main");
     expect(main?.body.match(/\bmarchRay\(/gu)).toHaveLength(1);
@@ -1286,6 +1298,13 @@ describe("the per-frame marches' steps (R08.T8.d)", () => {
   it.each([
     ["the ray march at the centre ray", RAY_MARCH_CENTRE_KERNEL.reference],
     ["the ray march by slot at the centre ray", RAY_MARCH_SLOTS_CENTRE_KERNEL.reference],
+    ["the specialised centre ray", RAY_MARCH_CENTRE_SPECIAL_KERNEL.reference],
+    ["the specialised centre ray by slot", RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL.reference],
+    ["the centre ray for one band, edged", RAY_MARCH_CENTRE_ONE_BAND_KERNEL.reference],
+    [
+      "the centre ray by slot for one band, edged",
+      RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL.reference,
+    ],
   ])("forms no footprint in %s's entry point", (_name, source) => {
     const reached = [...wgslReached(source, ["main"])];
     expect(
@@ -2095,9 +2114,10 @@ describe("HillaireAtmosphere's march over the air's area, and the tile cull (R08
     expect(area.whole).toBe(false);
     const marches = marchesOf(engine);
     const tiles = [area.tilesAcross, area.tilesDown, 1];
+    // R05's Earth on WGS 84 takes the specialised march, under the cull too since R08.T8.d.
     expect(marches.map((d) => [d.kernel, d.workgroups])).toEqual([
-      ["atmosphere ray march at the centre ray", tiles],
-      ["atmosphere ray march", tiles],
+      [RAY_MARCH_CENTRE_SPECIAL_KERNEL.name, tiles],
+      [RAY_MARCH_SPECIAL_KERNEL.name, tiles],
     ]);
     // Its first tile, its tiles, the cull on, the widening, and the target's size.
     expect([...(marches[0]?.bindings.uniforms["marchArea"] ?? [])]).toEqual([
@@ -2214,8 +2234,10 @@ describe("HillaireAtmosphere's march over the air's area, and the tile cull (R08
     );
     atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     atmosphere.drawFrame(CAMERA, [DUSK], SCENE);
+    // Its absorbers' layer edges and one band take the one-band march, the cull's too (R08.T8.d).
     expect(made).toContain("atmosphere ray march by slot");
-    expect(made).toContain("atmosphere ray march by slot at the centre ray");
+    expect(made).toContain(RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL.name);
+    expect(made.filter((name) => name.startsWith("atmosphere ray march at"))).toEqual([]);
     expect(made).not.toContain(RAY_MARCH_KERNEL.name);
     expect(made).not.toContain(RAY_MARCH_CENTRE_KERNEL.name);
   });
@@ -2261,8 +2283,8 @@ describe("HillaireAtmosphere's march over the air's area, and the tile cull (R08
     engine.dispatched.length = 0;
     own.drawFrame(far, [NOON], SCENE);
     expect(marchesOf(engine).map((d) => d.kernel)).toEqual([
-      "atmosphere ray march at the centre ray",
-      "atmosphere ray march",
+      RAY_MARCH_CENTRE_SPECIAL_KERNEL.name,
+      RAY_MARCH_SPECIAL_KERNEL.name,
     ]);
     expect(engine.counts.kernels - before).toBe(3);
   });
@@ -2299,7 +2321,13 @@ describe("HillaireAtmosphere's march over the air's area, and the tile cull (R08
     expect(engine.counts.kernels - before).toBeGreaterThanOrEqual(2);
     made.length = 0;
     await createAtmosphereFrameKernels(engine, { reads: "by slot", tiles: true });
-    expect(made).toContain("atmosphere ray march by slot at the centre ray");
+    expect(made).toEqual(
+      expect.arrayContaining([
+        RAY_MARCH_SLOTS_CENTRE_KERNEL.name,
+        RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL.name,
+        RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL.name,
+      ]),
+    );
   });
 
   it("marches nothing where the air lies behind the camera, and the composite reads none of it", async () => {
@@ -2542,7 +2570,7 @@ describe("the ray march specialised for one band, edge-free (R08.T11.d)", () => 
     },
   );
 
-  it("marches such a body's area by the specialised march, and the reference path and the tile cull by the general", async () => {
+  it("marches such a body's area and its tile cull by the specialised march, and the reference path by the general", async () => {
     const engine = await countingRenderEngine();
     const kernels = await createAtmosphereFrameKernels(engine);
     const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, tableRadiusM(WGS84));
@@ -2556,7 +2584,8 @@ describe("the ray march specialised for one band, edge-free (R08.T11.d)", () => 
     expect(covers).toEqual([
       ["area", [RAY_MARCH_SPECIAL_KERNEL.name]],
       ["whole frame", [RAY_MARCH_KERNEL.name]],
-      ["tiles", [RAY_MARCH_CENTRE_KERNEL.name, RAY_MARCH_KERNEL.name]],
+      // Since R08.T8.d the cull's two entry points take the area's form.
+      ["tiles", [RAY_MARCH_CENTRE_SPECIAL_KERNEL.name, RAY_MARCH_SPECIAL_KERNEL.name]],
     ]);
   });
 
@@ -2713,7 +2742,7 @@ describe("the ray march for one band, edged (R08.T11.g)", () => {
     );
   }
 
-  it("marches the slab's area by the one-band march, and the reference path and the tile cull by the general", async () => {
+  it("marches the slab's area and its tile cull by the one-band march, and the reference path by the general", async () => {
     const engine = await countingRenderEngine();
     const kernels = await createAtmosphereFrameKernels(engine);
     const tables = slabTables(engine);
@@ -2728,7 +2757,10 @@ describe("the ray march for one band, edged (R08.T11.g)", () => {
     expect(covers).toEqual([
       ["area", [RAY_MARCH_SLOTS_ONE_BAND_KERNEL.name]],
       ["whole frame", [RAY_MARCH_SLOTS_KERNEL.name]],
-      ["tiles", [RAY_MARCH_SLOTS_CENTRE_KERNEL.name, RAY_MARCH_SLOTS_KERNEL.name]],
+      [
+        "tiles",
+        [RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL.name, RAY_MARCH_SLOTS_ONE_BAND_KERNEL.name],
+      ],
     ]);
   });
 
@@ -3005,11 +3037,25 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
     ]);
   });
 
-  it("takes the setting's levers in every view: the march's resolution on both", () => {
+  it("takes the setting's levers in every view: the march's resolution, the channels, and the march's cover and limb rays on both (R08.T8.d)", () => {
     expect([SETTINGS.high.atmosphereLevers, SETTINGS.low.atmosphereLevers]).toEqual([
-      { compositeTransmittance: "march", surfaceTransmittance: "channels" },
-      { compositeTransmittance: "march", surfaceTransmittance: "channels" },
+      ATMOSPHERE_SETTINGS.high,
+      ATMOSPHERE_SETTINGS.low,
     ]);
+    expect(ATMOSPHERE_SETTINGS).toEqual({
+      high: {
+        compositeTransmittance: "march",
+        surfaceTransmittance: "channels",
+        marchCover: "area",
+        limbRays: "packed",
+      },
+      low: {
+        compositeTransmittance: "march",
+        surfaceTransmittance: "channels",
+        marchCover: "area",
+        limbRays: "packed",
+      },
+    });
   });
 });
 

@@ -1148,6 +1148,13 @@ export interface ViewsCheckLaunch {
    */
   readonly marchProbe?: MarchProbeName;
   /**
+   * The frame profile's atmosphere levers over its setting's (`--march-cover`, `--limb-rays`; plan
+   * R08, R08.T8.d): present only on an `--inspection --timing` launch that gives either, whose
+   * `VIEW` then draws its atmospheres with them over `SETTINGS[s].atmosphereLevers`, for the A/B of
+   * each lever on and off on one build; absent on every other launch.
+   */
+  readonly atmosphereLevers?: AtmosphereLeversOverride;
+  /**
    * The one look a `--terrain --handover` launch runs (`--look`; R10.T15.b.2's runs), absent for all
    * three in order: a served look on SwiftShader at the high setting takes over an hour, so that
    * three in one launch pass its watchdog, and a look a launch makes each run resumable by look.
@@ -1182,6 +1189,17 @@ export type CompositeProbeName = "sky-off" | "transmittance-off" | "per-pixel" |
  * A measurement's picture, never a player's: the limb from orbit then flickers as before R08.T8.c.
  */
 export type MarchProbeName = "centre";
+
+/**
+ * The atmosphere's levers a frame profile draws with over its setting's (plan R08, R08.T8.d): the
+ * march's cover (`area`, or `tiles`, the exact tile cull) and its far limb's node rays (`per-texel`,
+ * or `packed`), each as `hillaire.ts`'s `AtmosphereSettings` names them; either may be absent, the
+ * setting's then. The pictures are a player's, to the bit on a fallback adapter.
+ */
+export interface AtmosphereLeversOverride {
+  readonly marchCover?: "area" | "tiles";
+  readonly limbRays?: "per-texel" | "packed";
+}
 
 /**
  * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s

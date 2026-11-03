@@ -215,6 +215,7 @@ const RECORD: InspectionTimingRecord = {
 function results(
   compositeProbe: InspectionTimingResults["run"]["compositeProbe"] = null,
   marchProbe: InspectionTimingResults["run"]["marchProbe"] = null,
+  atmosphereLevers: InspectionTimingResults["run"]["atmosphereLevers"] = null,
 ): InspectionTimingResults {
   return buildInspectionTimingResults({
     run: {
@@ -244,6 +245,7 @@ function results(
     served: { universe: "9ada16dcbdbd080a", body: "41ffecb200000002.0400" },
     compositeProbe,
     marchProbe,
+    atmosphereLevers,
     record: RECORD,
     traces: new Map([
       [
@@ -432,7 +434,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
       version: 2,
-      run: { compositeProbe: null, marchProbe: null },
+      run: { compositeProbe: null, marchProbe: null, atmosphereLevers: null },
     });
   });
 
@@ -460,6 +462,32 @@ describe("the frame profile's timing file (the owner's report)", () => {
         "- **Launch:** linux, software mode, setting low, window hidden 1280 × 720 DIP at a device-pixel ratio of 1; pass timer quantized; composite probe transmittance-off, not the picture a player sees",
       plain: false,
     });
+  });
+
+  it("names and states a run drawn with its atmosphere's levers over its setting's (R08.T8.d)", async () => {
+    const written = new Map<string, string>();
+    const files = {
+      mkdir: () => Promise.resolve(),
+      exists: (path: string) => Promise.resolve(written.has(path)),
+      writeFile: (path: string, text: string) => {
+        written.set(path, text);
+        return Promise.resolve();
+      },
+    };
+    const both = results(null, null, { marchCover: "tiles", limbRays: "packed" });
+    const one = results(null, null, { limbRays: "per-texel" });
+    expect([
+      (await writeInspectionTimingResults("/timing", both, files)).json,
+      (await writeInspectionTimingResults("/timing", one, files)).json,
+      inspectionTimingMarkdown(both)
+        .split("\n")
+        .find((line) => line.startsWith("- **Launch:**"))
+        ?.endsWith("; atmosphere levers march cover tiles, limb rays packed over the setting's"),
+    ]).toEqual([
+      "/timing/2026-11-01-pod-low-inspection-timing-cover-tiles-limb-packed.json",
+      "/timing/2026-11-01-pod-low-inspection-timing-limb-per-texel.json",
+      true,
+    ]);
   });
 
   it("names and states a run drawn under the march's probe (R08.T8.d)", async () => {

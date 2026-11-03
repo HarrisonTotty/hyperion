@@ -748,6 +748,7 @@ export class ViewsCheckSession {
       served: this.#deps.launch.served ?? null,
       compositeProbe: this.#deps.launch.compositeProbe ?? null,
       marchProbe: this.#deps.launch.marchProbe ?? null,
+      atmosphereLevers: this.#deps.launch.atmosphereLevers ?? null,
       record,
       traces: this.#profiles,
     });

@@ -1001,10 +1001,10 @@ describe("HillaireAtmosphere over a thick table (R08.T14.c)", () => {
     ).toBe(true);
   });
 
-  it("takes no tile cull for a thick body, and the general thick march on the reference path", async () => {
+  it("takes no tile cull for a thick body, its area's form under the cover, and the general thick march on the reference path", async () => {
     const tiles = await drawn(true, "tiles");
     expect(tiles.kernels.filter((name) => name.startsWith("atmosphere ray march"))).toEqual([
-      RAY_MARCH_THICK_KERNEL.name,
+      RAY_MARCH_THICK_SPECIAL_KERNEL.name,
     ]);
     const whole = await drawn(true, "whole frame");
     expect(whole.kernels.filter((name) => name.startsWith("atmosphere ray march"))).toEqual([

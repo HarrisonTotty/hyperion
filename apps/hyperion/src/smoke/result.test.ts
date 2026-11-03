@@ -132,8 +132,8 @@ describe("readSmokeImages", () => {
 /** `scripts/testRender.sh`, which sets each run's outer limit. */
 const script = (): string => readFileSync(join(__dirname, "../../scripts/testRender.sh"), "utf8");
 
-/** The parts after the first, 2 to 16, which take neither part 1's captures nor its timings. */
-const LATER_PARTS = Array.from({ length: 15 }, (_, k) => String(k + 2));
+/** The parts after the first, 2 to 17, which take neither part 1's captures nor its timings. */
+const LATER_PARTS = Array.from({ length: 16 }, (_, k) => String(k + 2));
 
 describe("smokeWatchdogMs", () => {
   const plain = {
@@ -162,7 +162,7 @@ describe("smokeWatchdogMs", () => {
     }
   });
 
-  it("adds nothing for the captures to parts 2 to 16, which take none", () => {
+  it("adds nothing for the captures to parts 2 to 17, which take none", () => {
     for (const part of LATER_PARTS) {
       expect(smokeWatchdogMs({ ...plain, part, captures: true })).toBe(180_000);
     }
@@ -179,7 +179,7 @@ describe("smokeWatchdogMs", () => {
     }
   });
 
-  it("adds nothing for the GPU timings to parts 2 to 16, which take none", () => {
+  it("adds nothing for the GPU timings to parts 2 to 17, which take none", () => {
     for (const part of LATER_PARTS) {
       expect(smokeWatchdogMs({ ...plain, part, gpuTiming: true })).toBe(180_000);
     }
@@ -313,16 +313,16 @@ describe.runIf(process.platform !== "win32")("testRender.sh's scale", () => {
 });
 
 describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
-  it("takes every part from 1 to 16 as --part= and refuses 17, before any run", () => {
+  it("takes every part from 1 to 17 as --part= and refuses 18, before any run", () => {
     for (const part of ["1", ...LATER_PARTS]) {
       expect(runScriptAtScale("1", [`--part=${part}`]).stderr).not.toContain("unknown argument");
     }
-    const seventeen = runScriptAtScale("1", ["--part=17"]);
-    expect(seventeen.status).toBe(2);
-    expect(seventeen.stderr).toContain("unknown argument --part=17");
+    const eighteen = runScriptAtScale("1", ["--part=18"]);
+    expect(eighteen.status).toBe(2);
+    expect(eighteen.stderr).toContain("unknown argument --part=18");
   });
 
-  it("runs every part from 1 to 16 when none is asked for", () => {
+  it("runs every part from 1 to 17 when none is asked for", () => {
     const parts = /^ {4}parts=\(([\d ]+)\)$/mu.exec(script())?.[1];
     expect(parts).toBe(["1", ...LATER_PARTS].join(" "));
   });

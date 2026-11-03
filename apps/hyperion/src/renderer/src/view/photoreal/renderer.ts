@@ -28,6 +28,7 @@
  * before the first frame, and again after a device loss; until then {@link
  * PhotorealRenderer.render} draws nothing and says so, and the view keeps its wireframe.
  */
+import type { AtmosphereLeversOverride } from "../../../../preload/api";
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { norm } from "../../geometry/vec3";
@@ -108,7 +109,12 @@ import { HISTOGRAM_KERNEL, type Histogram, HistogramReader } from "../post/histo
 import type { HistogramMeter } from "../post/meter";
 import { TONEMAP_MATERIAL, TONEMAP_PASS, tonemapDraw } from "../post/tonemap";
 import { OVERLAY_SCENE_DEPTH_MATERIAL, overlaySceneDepthDraw, sizesAgree } from "./overlayDepth";
-import { type GeometrySettings, type QualitySetting, SETTINGS } from "../quality/qualitySetting";
+import {
+  type GeometrySettings,
+  QUALITY_SETTINGS,
+  type QualitySetting,
+  SETTINGS,
+} from "../quality/qualitySetting";
 import { HDR_COLOUR_FORMAT } from "../photometry/toneCurve";
 import { DEFAULT_EYE_OBSERVER } from "../sky/eye";
 import { toHalfArray } from "../sky/half";
@@ -258,6 +264,12 @@ export interface PhotorealFrame {
    * absent.
    */
   readonly atmosphereSetting?: QualitySetting | undefined;
+  /**
+   * A frame profile's atmosphere levers over its setting's `SETTINGS[s].atmosphereLevers` (plan R08,
+   * R08.T8.d; `--march-cover`, `--limb-rays`), which its atmospheres draw with, the A/B of each
+   * lever on one build; the setting's alone where absent.
+   */
+  readonly atmosphereLevers?: AtmosphereLeversOverride | undefined;
   /**
    * Whether the view's frame-rate floor stands at its lowest step (`BudgetedScale.atLowestStep`),
    * when a large disc's limb pixels take `PhotorealSettings.floorLimbSamples` cells (R07.T8.i, the
@@ -551,11 +563,16 @@ export class PhotorealRenderer {
   #disposed = false;
   /**
    * Each body's atmosphere on this view, over the cache's tables (R08.T10.b), made at the first
-   * frame that draws it and let go at the first that does not, with the setting it was made at.
+   * frame that draws it and let go at the first that does not, with the setting it was made at and
+   * the levers it was made with over that setting's (R08.T8.d).
    */
   readonly #atmospheres = new Map<
     BodyIdHex,
-    { readonly atmosphere: HillaireAtmosphere; readonly setting: QualitySetting }
+    {
+      readonly atmosphere: HillaireAtmosphere;
+      readonly setting: QualitySetting;
+      readonly levers: AtmosphereLeversOverride | undefined;
+    }
   >();
   /** The colour the latest frame's later passes read: its last composite's, or the scene's. */
   #drawnColour: TextureHandle | null = null;
@@ -608,22 +625,30 @@ export class PhotorealRenderer {
     return this.#status;
   }
 
-  /** Starts making the resources for a view of `size`, once; resolves when they are made. */
+  /**
+   * Starts making the resources for a view of `size`, once; resolves when they are made.
+   *
+   * @param levers - A frame profile's atmosphere levers over the settings' (R08.T8.d), whose tile
+   *   cull's kernels are made up front beside the settings' own; none where absent.
+   */
   prepare(
     size: ViewSize,
     setting: QualitySetting,
     role: ViewRole,
     camera: ProjectionCamera,
+    levers?: AtmosphereLeversOverride,
   ): Promise<void> {
     if (this.#making === null) {
       const generation = this.#generation;
       this.#status = "making";
-      this.#making = this.#make(size, setting, role, camera, generation).catch((error: unknown) => {
-        if (generation === this.#generation && !this.#disposed) {
-          this.#status = "failed";
-          console.error(`the photorealistic view ${this.#name} could not be made:`, error);
-        }
-      });
+      this.#making = this.#make(size, setting, role, camera, generation, levers).catch(
+        (error: unknown) => {
+          if (generation === this.#generation && !this.#disposed) {
+            this.#status = "failed";
+            console.error(`the photorealistic view ${this.#name} could not be made:`, error);
+          }
+        },
+      );
     }
     return this.#making;
   }
@@ -634,6 +659,7 @@ export class PhotorealRenderer {
     role: ViewRole,
     camera: ProjectionCamera,
     generation: number,
+    levers: AtmosphereLeversOverride | undefined,
   ): Promise<void> {
     const engine = this.#engine;
     const triangle = fullScreenTriangle(engine, `${this.#name} tonemap triangle`);
@@ -668,8 +694,17 @@ export class PhotorealRenderer {
           // Every world with air draws by the thick read's kernels once its correction is routed
           // (R08.T14.f), so they are made ahead of the first frame of one; and the kernel of what lies
           // behind the sky at the march's resolution, which the settings' levers take (the owner's
-          // priority, 2026-11-01).
-          createAtmosphereFrameKernels(engine, { thick: CORRECTION_ROUTED, behind: true }),
+          // priority, 2026-11-01), with the tile cull's where a setting takes it (R08.T8.d): either
+          // setting's, since the frame-rate floor draws high's air at low's. The packed limb's are made
+          // in the background at the first frame that takes them, each body's form alone, its frames
+          // marching per texel, the same bits, until then.
+          createAtmosphereFrameKernels(engine, {
+            thick: CORRECTION_ROUTED,
+            behind: true,
+            tiles: QUALITY_SETTINGS.some(
+              (each) => ({ ...SETTINGS[each].atmosphereLevers, ...levers }).marchCover === "tiles",
+            ),
+          }),
         ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it.
@@ -812,7 +847,13 @@ export class PhotorealRenderer {
     const resources = this.#resources;
     if (resources === null) {
       if (this.#status !== "failed") {
-        void this.prepare(frame.viewport, frame.setting, frame.role, frame.camera);
+        void this.prepare(
+          frame.viewport,
+          frame.setting,
+          frame.role,
+          frame.camera,
+          frame.atmosphereLevers,
+        );
       }
       return null;
     }
@@ -1165,6 +1206,7 @@ export class PhotorealRenderer {
           resources,
           air,
           frame.atmosphereSetting ?? frame.setting,
+          frame.atmosphereLevers,
         );
         const suns: ReadonlyArray<SunState> = skySources(
           sources.stars,
@@ -1220,15 +1262,22 @@ export class PhotorealRenderer {
 
   /**
    * A body's atmosphere on this view over `air`'s tables, made at the setting's sizes the first
-   * time, or again on a new setting, and following the cache's tables as they are remade.
+   * time, or again on a new setting or levers, with `levers` over the setting's (R08.T8.d), and
+   * following the cache's tables as they are remade.
    */
   #atmosphereOf(
     resources: Resources,
     air: FrameAtmosphere,
     setting: QualitySetting,
+    levers: AtmosphereLeversOverride | undefined,
   ): HillaireAtmosphere {
     const held = this.#atmospheres.get(air.id);
-    if (held !== undefined && held.setting === setting) {
+    if (
+      held !== undefined &&
+      held.setting === setting &&
+      held.levers?.marchCover === levers?.marchCover &&
+      held.levers?.limbRays === levers?.limbRays
+    ) {
       held.atmosphere.setTables(air.tables);
       return held.atmosphere;
     }
@@ -1238,9 +1287,9 @@ export class PhotorealRenderer {
       air.tables,
       SETTINGS[setting].atmosphere,
       resources.atmosphere,
-      SETTINGS[setting].atmosphereLevers,
+      { ...SETTINGS[setting].atmosphereLevers, ...levers },
     );
-    this.#atmospheres.set(air.id, { atmosphere, setting });
+    this.#atmospheres.set(air.id, { atmosphere, setting, levers });
     return atmosphere;
   }
 
