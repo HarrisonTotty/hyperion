@@ -156,7 +156,10 @@
 //! intersection, read as a condition at each time; lean, 2026-11-02). The pair's own zone's inner
 //! limit is its P-type fit then alone, and none once the pair has merged or come apart: the limit
 //! at birth bounds placement only (lean, 2026-11-03, research-leans-35 §4). The fate transform
-//! unbinds a body at the first time its orbit leaves them by more than `ZONE_EDGE_TOLERANCE`.
+//! unbinds a body at the first time its orbit leaves them by more than `ZONE_EDGE_TOLERANCE`. From
+//! generator version 28 placement keeps a planet `P_TYPE_PLACEMENT_MARGIN` outside a pair's
+//! P-type limit, so that only a drift of the fit past its own accuracy unbinds it
+//! (research-leans-37 §1).
 //!
 //! [`StarSlot`]: crate::stellar::multiplicity::StarSlot
 
@@ -180,6 +183,7 @@ use crate::stellar::premain;
 use crate::units::{
     AstronomicalUnits, Dex, Megayears, Metres, SolarLuminosities, SolarMasses, SolarRadii,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// How a pair the binary engine ran bounds a zone at its evaluated state (P14.T9.d).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -201,6 +205,94 @@ pub(crate) enum PairBound {
 /// fit, 1999, eq. 3): 150 m at 1 au. A limit that moves past the planet by more still unbinds it,
 /// as a pair's fit does when its donor's wind shifts the pair's masses and orbit.
 pub(crate) const ZONE_EDGE_TOLERANCE: f64 = 1e-9;
+
+/// The share of a pair's P-type inner limit by which placement keeps a planet's periapsis outside
+/// it from generator version 28 (P14.T9.d, [`ZONE_PLACEMENT_MARGIN_VERSION`]): 0.03, the P-type
+/// fit's typical accuracy (Holman and Wiegert 1999, eq. 3, within 3% of their Table 7 typically
+/// and 6% at worst; research-leans-37 §1).
+///
+/// The fit smooths a ragged boundary, so a planet on it is marginal either way. Placed on it, as
+/// a law reaching inside the limit had it, a planet was unbound by any outward drift of the pair's
+/// fit before a common envelope, 10⁻⁶–10⁻² of it as a donor's wind shifts the pair's mass ratio.
+/// Placed 3% inside, it stays through every drift short of the fit's own accuracy, and one past it
+/// still unbinds it. The disc stays cut at the fit, and the fate, `zones_at` and the census read
+/// the fit itself, so every present body lies inside its zone by the fit.
+pub(crate) const P_TYPE_PLACEMENT_MARGIN: f64 = 0.03;
+
+/// The generator version from which placement keeps a planet [`P_TYPE_PLACEMENT_MARGIN`] inside
+/// its zone's P-type inner limit (P14.T9.d, research-leans-37 §1): 28, held with the 28 train
+/// (27's list froze before it).
+///
+/// Below it [`ZonePlacementMarginRules::in_force`] is [`ZonePlacementMarginRules::OnTheLimit`]: a
+/// planet whose law lies inside the limit is placed on it, and every figure is version 27's bit for
+/// bit. 28's bump deletes this hold, [`ZonePlacementMarginRules`] with its `OnTheLimit` arm, the
+/// tests' switch, its line in the tests' `HeldRules` and its tripwire
+/// (`the_zone_placement_margin_is_held_only_until_the_28_bump`).
+pub(crate) const ZONE_PLACEMENT_MARGIN_VERSION: GeneratorVersion = GeneratorVersion::new(28);
+
+/// Where placement holds a planet whose law lies inside its zone's P-type inner limit (its hold,
+/// [`ZONE_PLACEMENT_MARGIN_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum ZonePlacementMarginRules {
+    /// Version 27's and before: on the limit.
+    OnTheLimit,
+    /// Version 28's: [`P_TYPE_PLACEMENT_MARGIN`] inside it.
+    Margin,
+}
+
+impl ZonePlacementMarginRules {
+    /// The rules this generator version gives: the margin from [`ZONE_PLACEMENT_MARGIN_VERSION`],
+    /// the limit itself below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_zone_placement_margin`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = ZONE_PLACEMENT_MARGIN_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= ZONE_PLACEMENT_MARGIN_VERSION {
+            Self::Margin
+        } else {
+            Self::OnTheLimit
+        }
+    }
+
+    /// The inner limit placement holds a planet's periapsis to in a zone whose P-type inner limit
+    /// is `inner`, m: the limit itself, or [`P_TYPE_PLACEMENT_MARGIN`] outside it.
+    #[must_use]
+    pub(crate) fn placement_inner(self, inner: Metres) -> Metres {
+        match self {
+            Self::OnTheLimit => inner,
+            Self::Margin => inner * (1.0 + P_TYPE_PLACEMENT_MARGIN),
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The zones' placement margin rules a test sets on its thread, `None` for the version's.
+    static ZONE_PLACEMENT_MARGIN_RULES: core::cell::Cell<Option<ZonePlacementMarginRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the zones' placement margin rules `rules` on this thread, for the tests to
+/// reach the margin ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. 28's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_zone_placement_margin<R>(
+    rules: ZonePlacementMarginRules,
+    run: impl FnOnce() -> R,
+) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<ZonePlacementMarginRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            ZONE_PLACEMENT_MARGIN_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(ZONE_PLACEMENT_MARGIN_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
 
 /// The coefficients of Holman and Wiegert's S-type fit, in the order of their equation 1:
 /// `a_c ÷ a_b` = 0.464 − 0.380μ − 0.631e + 0.586μe + 0.150e² − 0.198μe².

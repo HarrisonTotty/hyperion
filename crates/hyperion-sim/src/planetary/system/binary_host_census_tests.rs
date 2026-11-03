@@ -12,8 +12,13 @@
 //! zone at its pair's state at one of the pair's segment boundaries since it formed
 //! ([`OrbitZone::limits_at`]); and a planet of a zone that holds a star a supernova released from
 //! the system (P11.T10), which goes with its star or is unbound. The census runs under every 27
-//! hold and prints its counts. A zone that holds a released star is read for the last two columns
-//! alone, its stars' states not being the engine's to compare.
+//! hold and on the same galaxy under every 28 hold, and prints both. A zone that holds a released
+//! star is read for the last two columns alone, its stars' states not being the engine's to
+//! compare.
+//!
+//! Each census also counts, by cause, the planets unbound by the zones at their pairs' evaluated
+//! states alone ([`ZoneLoss`]), and the planets placed on their zone's P-type limit, which 28's
+//! placement margin keeps off it (research-leans-37 §1).
 //!
 //! The test is native only, as the other censuses are.
 
@@ -26,7 +31,9 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{Existence, SystemKind, SystemRecord};
 use crate::planetary::placement::zones::{PairBound, ZONE_EDGE_TOLERANCE};
-use crate::planetary::testing::{PairHistory, SampleFilter, sample_records, with_every_27_hold};
+use crate::planetary::testing::{
+    PairHistory, SampleFilter, sample_records, with_every_27_hold, with_every_28_hold,
+};
 use crate::stellar::system::SystemStars;
 use crate::stellar::system::{PairTimeline, SystemState, pair_of};
 
@@ -80,6 +87,24 @@ struct Row {
     released: usize,
 }
 
+/// Why a planet unbound at the epoch is unbound by its zone at its pair's evaluated state alone
+/// (P14.T9.d): no star of its zone has left the system (P11.T10). A crossing's limit is the one nearer the orbit a second before, or
+/// the orbit as placed for a body that left as it formed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ZoneLoss {
+    /// Its pericentre crossed the inner limit, and it was placed with its pericentre on its zone's
+    /// limit: the pair's fit drifting past it (research-leans-37 §1).
+    InnerEdge,
+    /// Its pericentre crossed the inner limit, placed off it: a fit that grew past it.
+    Inner,
+    /// Its apocentre crossed the outer limit, and it was placed with its apocentre on its zone's.
+    OuterEdge,
+    /// Its apocentre crossed the outer limit, placed off it.
+    Outer,
+    /// Alone, the zone keeps it: scattered after a sibling left (ruling 71).
+    Scattered,
+}
+
 /// The census's counts, by history.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Census {
@@ -87,6 +112,11 @@ struct Census {
     /// Systems the stellar stage shows fewer of their stars at the epoch than it drew (P11.T10's
     /// released stars).
     released: usize,
+    /// The planets unbound by their zones at their pairs' evaluated states alone, by cause.
+    zone_losses: BTreeMap<ZoneLoss, usize>,
+    /// The planets placed with their pericentre on their zone's P-type limit, to
+    /// [`ZONE_EDGE_TOLERANCE`] of it.
+    on_the_limit: usize,
 }
 
 impl Census {
@@ -152,6 +182,14 @@ impl Census {
         line(&mut out, "total", &self.total());
         writeln!(out, "systems with a released star: {}", self.released)
             .expect("a string takes every write");
+        writeln!(
+            out,
+            "unbound by the zone check alone: {} {:?}; placed on a P-type limit: {}",
+            self.zone_losses.values().sum::<usize>(),
+            self.zone_losses,
+            self.on_the_limit
+        )
+        .expect("a string takes every write");
         out
     }
 }
@@ -220,6 +258,51 @@ fn was_outside(
     })
 }
 
+/// Why `zone_bodies[me]`, a planet of `zone` of `ctx` about `host` unbound at `t` under the rules
+/// in force, is unbound by its zone at its pair's evaluated state alone, if it is ([`ZoneLoss`]).
+fn zone_loss(
+    ctx: &SystemContext,
+    zone: &OrbitZone,
+    host: &FateHost<'_>,
+    (zone_bodies, me): (&[&FateBody], usize),
+    t: UniverseTime,
+) -> Option<ZoneLoss> {
+    if zone
+        .members()
+        .any(|member| ctx.has_left(usize::from(member), t))
+    {
+        return None;
+    }
+    let body = zone_bodies[me];
+    let alone = BodyFate::resolve(body, host);
+    let BodyState::Unbound { at } = alone.at(t).state() else {
+        return Some(ZoneLoss::Scattered);
+    };
+    // The orbit a second before it left, or as placed where it left as it formed.
+    let just = at
+        .checked_sub(Span::from_seconds(1))
+        .expect("a second before a body leaves is a time");
+    let placed = body.orbit();
+    let orbit = alone.at(just).orbit().copied().unwrap_or(*placed);
+    let (inner, outer) = host.limits_at(zone, at);
+    let inside = inner.map_or(f64::INFINITY, |r| orbit.periapsis() / r - 1.0);
+    let outside = outer.map_or(f64::INFINITY, |r| 1.0 - orbit.apoapsis() / r);
+    let on = |x: Metres, limit: Option<Metres>| {
+        limit.is_some_and(|r| (x / r - 1.0).abs() <= ZONE_EDGE_TOLERANCE)
+    };
+    Some(if inside <= outside {
+        if on(placed.periapsis(), zone.inner()) {
+            ZoneLoss::InnerEdge
+        } else {
+            ZoneLoss::Inner
+        }
+    } else if on(placed.apoapsis(), zone.outer()) {
+        ZoneLoss::OuterEdge
+    } else {
+        ZoneLoss::Outer
+    })
+}
+
 /// The engine's state at `t` of each star of `stars`, by body index, from `state`, the system's
 /// then: `None` for a star the system no longer shows (P11.T10).
 fn engine_states(
@@ -252,6 +335,28 @@ fn pair_histories(ctx: &SystemContext, t: UniverseTime) -> Vec<(u32, PairHistory
         .collect()
 }
 
+/// The planets of `zone` of `system` in body order, as `PlanetarySystem::fates` resolves them.
+fn zone_planets<'s>(system: &'s PlanetarySystem, zone: &OrbitZone) -> Vec<&'s FateBody> {
+    system
+        .bodies
+        .iter()
+        .filter(|body| body.host == zone.host() && matches!(body.part, Part::Planet(_)))
+        .filter_map(Body::fate)
+        .collect()
+}
+
+/// How many of `bodies`, planets of `zone`, were placed with their pericentre on its P-type limit,
+/// to [`ZONE_EDGE_TOLERANCE`] of it.
+fn on_the_limit(zone: &OrbitZone, bodies: &[&FateBody]) -> usize {
+    let Some(inner) = zone.inner() else {
+        return 0;
+    };
+    bodies
+        .iter()
+        .filter(|body| (body.orbit().periapsis() / inner - 1.0).abs() <= ZONE_EDGE_TOLERANCE)
+        .count()
+}
+
 /// The census of `records`, systems of `galaxy`, under the rules in force on this thread, added to
 /// `census`.
 fn census_of(galaxy: &Galaxy, records: &[SystemRecord], census: &mut Census) {
@@ -281,7 +386,7 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], census: &mut Census) {
             .map(|zone| fate_host(&ctx, zone))
             .collect();
         let fates = system.fates(&hosts);
-        for zone in &system.zones {
+        for (zone, host) in system.zones.iter().zip(&hosts) {
             let members = members_of(zone);
             let Some(history) = pairs
                 .iter()
@@ -310,11 +415,14 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], census: &mut Census) {
                     (l + star.luminosity().value(), m + star.mass().value())
                 })
             });
+            let zone_bodies = zone_planets(&system, zone);
+            census.on_the_limit += on_the_limit(zone, &zone_bodies);
             let row = census.rows.entry(history).or_default();
-            for (body, fate) in system.bodies.iter().zip(&fates) {
-                if body.host != zone.host() || !matches!(body.part, Part::Planet(_)) {
-                    continue;
-                }
+            let planets = system.bodies.iter().zip(&fates).filter(|(body, _)| {
+                body.host == zone.host() && matches!(body.part, Part::Planet(_))
+            });
+            // Every planet has its fate, so `me` is its place among `zone_bodies` too.
+            for (me, (_, fate)) in planets.enumerate() {
                 row.systems.insert(ctx.id());
                 row.planets += 1;
                 let Some(fate) = fate else {
@@ -324,6 +432,9 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], census: &mut Census) {
                     BodyState::Present => {}
                     BodyState::Unbound { .. } => {
                         row.unbound += 1;
+                        if let Some(loss) = zone_loss(&ctx, zone, host, (&zone_bodies, me), t) {
+                            *census.zone_losses.entry(loss).or_default() += 1;
+                        }
                         continue;
                     }
                     BodyState::Destroyed { .. } => {
@@ -351,17 +462,19 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], census: &mut Census) {
     }
 }
 
-/// The binary hosts' census at 27: every present planet's zone light reads as the engine's
-/// (P14.T1.e) and the mass its orbit follows is the engine's, no S-type planet of a pair that went
-/// through a common envelope is left, and none orbits a host the engine left with no mass
-/// (P14.T28.g), none has left its zone at its pair's evaluated state, and none is of a zone that
-/// holds a star a supernova released (P14.T9.d), where under the single models, in the research's
-/// sample of 500,000 systems, some 19,000, 19,600, 392, 549 and 1,432 did not
-/// (research-binary-hosts §1).
+/// The binary hosts' census at 27, and under every 28 hold: every present planet's zone light
+/// reads as the engine's (P14.T1.e) and the mass its orbit follows is the engine's, no S-type
+/// planet of a pair that went through a common envelope is left, and none orbits a host the
+/// engine left with no mass (P14.T28.g), none has left its zone at its pair's evaluated state,
+/// and none is of a zone that holds a star a supernova released (P14.T9.d), where under the
+/// single models, in the research's sample of 500,000 systems, some 19,000, 19,600, 392, 549 and
+/// 1,432 did not (research-binary-hosts §1). Under every 28 hold no planet is placed on its
+/// zone's P-type limit, where under every 27 hold some are (research-leans-37 §1); the planets
+/// unbound by the zone check alone are printed by cause, unjudged.
 #[test]
-#[ignore = "slow: the binary hosts' census, 100,000 systems, about 90 s"]
+#[ignore = "slow: the binary hosts' census, 100,000 systems under two rules, about 3 min"]
 fn the_binary_hosts_census_reads_every_paired_star_as_the_engine_does() {
-    let mut after = Census::default();
+    let (mut after, mut margin) = (Census::default(), Census::default());
     for seed in GALAXY_SEEDS {
         let galaxy = Galaxy::from_params_at_version(
             Seed::new(seed),
@@ -371,26 +484,42 @@ fn the_binary_hosts_census_reads_every_paired_star_as_the_engine_does() {
         .expect("the Milky Way fixture's gas is mostly neutral");
         let records = sample_records(&galaxy, SYSTEMS, SampleFilter::ALL).unwrap();
         with_every_27_hold(|| census_of(&galaxy, &records, &mut after));
+        with_every_28_hold(|| census_of(&galaxy, &records, &mut margin));
     }
-    eprintln!("{}", after.table("every 27 hold"));
-    for (history, row) in &after.rows {
-        assert_eq!(
-            row.light_unequal, 0,
-            "{history:?}: zones lit off the engine's"
-        );
-        assert_eq!(
-            row.mass_off, 0,
-            "{history:?}: orbits about a mass off the engine's"
-        );
-        assert_eq!(
-            row.enveloped, 0,
-            "{history:?}: S-type planets through an envelope"
-        );
-        assert_eq!(
-            row.massless, 0,
-            "{history:?}: planets of a host with no mass"
-        );
-        assert_eq!(row.outside, 0, "{history:?}: planets that left their zone");
-        assert_eq!(row.released, 0, "{history:?}: planets of a released star");
+    eprintln!(
+        "{}\n{}",
+        after.table("every 27 hold"),
+        margin.table("every 28 hold")
+    );
+    for (version, census) in [(27, &after), (28, &margin)] {
+        for (history, row) in &census.rows {
+            assert_eq!(
+                row.light_unequal, 0,
+                "{version}, {history:?}: zones lit off the engine's"
+            );
+            assert_eq!(
+                row.mass_off, 0,
+                "{version}, {history:?}: orbits about a mass off the engine's"
+            );
+            assert_eq!(
+                row.enveloped, 0,
+                "{version}, {history:?}: S-type planets through an envelope"
+            );
+            assert_eq!(
+                row.massless, 0,
+                "{version}, {history:?}: planets of a host with no mass"
+            );
+            assert_eq!(
+                row.outside, 0,
+                "{version}, {history:?}: planets that left their zone"
+            );
+            assert_eq!(
+                row.released, 0,
+                "{version}, {history:?}: planets of a released star"
+            );
+        }
     }
+    assert_eq!(after.total().planets, margin.total().planets);
+    assert!(after.on_the_limit > 0, "no planet on a P-type limit at 27");
+    assert_eq!(margin.on_the_limit, 0, "planets on a P-type limit at 28");
 }

@@ -34375,3 +34375,12 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     the main sequence, not after it, as the slow
     `composition_census_under_every_28_hold_publishes_no_hot_small_body_past_its_evaporation`
     pins.
+- **P14.T9.d's placement margin (lane `fix-p14-zone-placement-margin`, 2026-11-03).** Held at 28
+  (`zones::ZONE_PLACEMENT_MARGIN_VERSION`; `ZonePlacementMarginRules::{OnTheLimit, Margin}`,
+  `with_zone_placement_margin`, a line in `with_every_28_hold` and `HeldRules`); nothing moves at
+  24–27 (research-leans-37 §1). It answers the zone edges' "left open" above.
+  - _Changed:_ `Placer` reads a zone's P-type inner limit times 1 + `zones::P_TYPE_PLACEMENT_MARGIN`
+    (0.03) in `lo`, the cavity floor and `eccentricity_limit`. The disc, the fate, `zones_at` and
+    `ZONE_EDGE_TOLERANCE` read the fit as before.
+  - _For 28's bump:_ delete what `the_zone_placement_margin_is_held_only_until_the_28_bump` lists.
+    The census's third run (every 28 hold) and its `on_the_limit` check stay.

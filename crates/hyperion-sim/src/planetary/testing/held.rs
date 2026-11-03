@@ -28,6 +28,7 @@ use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_daysi
 use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
 use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
 use crate::planetary::hosts::strip::{StripRules, with_stripping};
+use crate::planetary::placement::zones::{ZonePlacementMarginRules, with_zone_placement_margin};
 use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 
 /// Declares [`HeldRules`] over the holds, each its field, its rules' type, the reader of its rules
@@ -88,6 +89,8 @@ held_rules! {
     binary_host_remnants: BinaryHostRemnantsRules =
         BinaryHostRemnantsRules::in_force => with_binary_host_remnants,
     evaporation: EvaporationRules = EvaporationRules::in_force => with_evaporation,
+    zone_placement_margin: ZonePlacementMarginRules =
+        ZonePlacementMarginRules::in_force => with_zone_placement_margin,
 }
 
 /// `share(0)` to `share(shares − 1)` on at most `hyperion_testkit::threads::granted(reserved)`

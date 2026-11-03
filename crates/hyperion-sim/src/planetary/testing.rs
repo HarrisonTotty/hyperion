@@ -500,6 +500,10 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
 ///   `EvaporationRules::Evaporated` through `with_evaporation`: a planet, a moon or a belt member
 ///   below 10⁻³ M⊕ is `Destroyed { Evaporated }` once its rock's free-streaming vapour has taken
 ///   its radius.
+/// - a planet placed inside its pair's P-type limit, `ZONE_PLACEMENT_MARGIN_VERSION` (P14.T9.d),
+///   at `ZonePlacementMarginRules::Margin` through `with_zone_placement_margin`: a planet whose
+///   law lies inside a zone's P-type inner limit is placed 3% outside it, where the fit's drift
+///   before a common envelope no longer unbinds it.
 ///
 /// A system or a record is read under the rules in force when it is generated, so a test
 /// generates afresh inside it. A later hold at 28 adds its switch here, and 28's bump deletes it
@@ -511,6 +515,12 @@ pub(crate) fn with_every_28_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || {
         use crate::planetary::fate::evaporation::{EvaporationRules, with_evaporation};
         with_evaporation(EvaporationRules::Evaporated, run)
+    };
+    let run = move || {
+        use crate::planetary::placement::zones::{
+            ZonePlacementMarginRules, with_zone_placement_margin,
+        };
+        with_zone_placement_margin(ZonePlacementMarginRules::Margin, run)
     };
     let run = move || with_binary_host_remnants(BinaryHostRemnantsRules::Engine, run);
     with_every_27_hold(move || with_steam_division(SteamDivisionRules::Hothouse, run))
