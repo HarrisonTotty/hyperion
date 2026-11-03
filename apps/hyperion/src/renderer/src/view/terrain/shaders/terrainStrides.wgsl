@@ -24,7 +24,7 @@
 // which keep the stride-1 surface and their own strides' meshes.
 
 // `strides.ts`' STRIDE_BAND_FRACTION, STRIDE_MORPH_LEVELS and STRIDE_NODES.
-const STRIDE_BAND_FRACTION : f32 = 0.02;
+const STRIDE_BAND_FRACTION : f32 = 0.002;
 const STRIDE_MORPH_LEVELS : u32 = 3u;
 const STRIDE_NODES : u32 = 9u;
 const STRIDE_NO_NODE : u32 = 0xffffffffu;

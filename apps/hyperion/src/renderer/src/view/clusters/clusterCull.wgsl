@@ -151,7 +151,7 @@ const NO_DISCARD_TEMPLATE : u32 = 0xffu;
 const STRIDE_LEVELS : u32 = 4u;
 // `strides.ts`' STRIDE_BAND_FRACTION, and the quadrant word's bit by which a camera pass draws an
 // instance at stride 1 (uniforms.ts' `INSTANCE_FINEST`).
-const STRIDE_BAND_FRACTION : f32 = 0.02;
+const STRIDE_BAND_FRACTION : f32 = 0.002;
 const INSTANCE_FINEST : u32 = 0x40000u;
 // The threads of a workgroup, each taking every 64th cluster of its instance's page.
 const CULL_GROUP : u32 = 64u;

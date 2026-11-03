@@ -72,12 +72,13 @@ import { selectionErrorM } from "../terrain/select";
 
 /**
  * β, a stride's band's width over its start: a vertex dropped at stride 2s morphs over the
- * distances U to (1 + β) U, and the cull takes 2s at (1 + β) U (a hand value, lean, 2026-11-03, to
- * be ruled on). Well under selection's margin m (`SELECTION_MARGIN`, 0.1), but under the shared
- * bands it sets most of the lit triangles drawn past the bands' own share on the seamless probe,
- * where many blocks stand within β of a band (the lane's outbox has the figures).
+ * distances U to (1 + β) U, and the cull takes 2s at (1 + β) U (a hand value, lean, 2026-11-03).
+ * Under the shared bands many seen blocks stand within a few per cent of a band, so β sets most of
+ * the lit triangles drawn past the bands' own share: on the seamless probe's 0–70 s on high 0.122
+ * of stride 1's at 0.02, 0.0456 at 0.005 and 0.0325 at 0.002, against 0.027 with no band, its moves
+ * unchanged (the lane's outbox). The widest within the restated 0.031 + 10%.
  */
-export const STRIDE_BAND_FRACTION = 0.02;
+export const STRIDE_BAND_FRACTION = 0.002;
 
 /** A band no stride is taken at, and no vertex morphs by: any value at or below 0. */
 export const NO_STRIDE_BAND = -1;
