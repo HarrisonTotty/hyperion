@@ -252,17 +252,13 @@ impl AwdProcess {
         self.sampler
     }
 
-    /// Whether candidate `key`'s white dwarf has no nova under `galaxy`'s stellar rules: from 27
-    /// one fed helium has none (`AwdDonorRules::has_novae`, P11.T5's fix), so it is never a fast
-    /// host. Its donor's kind is read only then, from its binary's stream as
-    /// [`candidate`](Self::candidate) reads it ([`donor_draw`](Self::donor_draw)).
+    /// Whether candidate `key`'s white dwarf has no nova: one fed helium has none (P11.T5's fix,
+    /// `stellar::binary::awd_donors`), so it is never a fast host. Its donor's kind is read from
+    /// its binary's stream as [`candidate`](Self::candidate) reads it
+    /// ([`donor_draw`](Self::donor_draw)).
     #[must_use]
     pub(crate) fn has_no_nova(&self, galaxy: &Galaxy, key: ObjectKey) -> bool {
-        !galaxy
-            .rules()
-            .stellar
-            .awd_donors
-            .has_novae(|| self.donor_draw(galaxy.seed(), key).0 == AwdDonorKind::Helium)
+        self.donor_draw(galaxy.seed(), key).0 == AwdDonorKind::Helium
     }
 
     /// Candidate `key`'s donor's kind, the first draw of its binary's stream

@@ -44,12 +44,6 @@
 //!   neutron stars alone and symbiotic X-ray binaries of neutron stars beside cool giants, each
 //!   read through [`XrbClassRules::carves`] and each timeline's rules
 //!   (`stellar/rules/xrb_class_hold.rs` lists the movers).
-//! - [`awd_donors`](StellarRules::awd_donors), at [`AWD_DONORS_VERSION`] (plan 11, P11.T5's fix):
-//!   which donors give an accreting white dwarf its novae, every donor below it and a hydrogen
-//!   donor alone from it, read at one choke point, `classify::nova_recurrence_under`, through each
-//!   timeline's rules, by `carved_class` and the census's marks. The catalogue's own timelines,
-//!   built from marks, take the version's rules (`stellar/rules/awd_donors_hold.rs` lists the
-//!   movers).
 //! - [`pinned_white_dwarfs`](StellarRules::pinned_white_dwarfs), at
 //!   [`PINNED_WHITE_DWARFS_VERSION`] (plan 11, P11.T4's fix): whether a pinned primary, its pin
 //!   pending, that its binary would make a white dwarf is born one below it or held at its core's
@@ -79,7 +73,6 @@
 //! [`WIND_ACCRETION_VERSION`]: crate::stellar::binary::wind_accretion::WIND_ACCRETION_VERSION
 
 use crate::GeneratorVersion;
-use crate::stellar::binary::awd_donors::{AWD_DONORS_VERSION, AwdDonorRules};
 use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
 use crate::stellar::binary::merger_mass::{MERGER_MASS_VERSION, MergerMassRules};
 use crate::stellar::binary::pinned_white_dwarfs::{
@@ -100,8 +93,6 @@ pub(crate) struct StellarRules {
     /// What a dynamically transferring main-sequence pair's merger keeps in the binary engine,
     /// the hold of [`MERGER_MASS_VERSION`].
     pub(crate) merger_mass: MergerMassRules,
-    /// Which donors give an accreting white dwarf its novae, the hold of [`AWD_DONORS_VERSION`].
-    pub(crate) awd_donors: AwdDonorRules,
     /// What `classify` counts as an X-ray binary, the hold of [`XRB_CLASS_VERSION`].
     pub(crate) xrb_class: XrbClassRules,
     /// Whether a pinned primary, its pin pending, that its binary would make a white dwarf is
@@ -127,11 +118,6 @@ impl StellarRules {
                 MergerMassRules::Pair
             } else {
                 MergerMassRules::ThermalLimit
-            },
-            awd_donors: if version.get() >= AWD_DONORS_VERSION.get() {
-                AwdDonorRules::HydrogenDonors
-            } else {
-                AwdDonorRules::EveryDonor
             },
             xrb_class: if version.get() >= XRB_CLASS_VERSION.get() {
                 XrbClassRules::Carved
@@ -172,7 +158,7 @@ impl StellarRules {
 
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
     /// those that turn on at 27 (P11.T4's `pinned_white_dwarfs` and `dwarf_limit`, P11.T4.d's
-    /// `merger_mass`, P11.T5's `awd_donors` and `xrb_class`, and P11.T12's `wind_accretion`).
+    /// `merger_mass`, P11.T5's `xrb_class`, and P11.T12's `wind_accretion`).
     ///
     /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
     /// with nothing to edit.

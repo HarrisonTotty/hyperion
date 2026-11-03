@@ -718,12 +718,7 @@ pub(super) fn accreting_marks(
         donor_phase: donor.phase(),
         period: state.orbit().map(KeplerElements::period),
         transfer_rate: rate,
-        recurrence: nova_recurrence_under(
-            white_dwarf.mass(),
-            rate,
-            donor.phase(),
-            timeline.context().rules(),
-        ),
+        recurrence: nova_recurrence_under(white_dwarf.mass(), rate, donor.phase()),
         magnetic,
         white_dwarf_initial_mass: initial[a],
         donor_initial_mass: initial[1 - a],

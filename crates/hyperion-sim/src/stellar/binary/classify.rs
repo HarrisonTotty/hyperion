@@ -40,8 +40,8 @@
 //! [`carved_class`] is the one deterministic test that the grid and the catalogue both apply
 //! (design notes 8 and 10): a stellar or neutron-star merger at an age inside the source horizon,
 //! or an X-ray binary or accreting white dwarf at any age inside it, the white dwarfs split by
-//! their nova recurrence period against L ([`nova_recurrence_period`]; from 27 none for a white
-//! dwarf fed helium, `nova_recurrence_under`). The fifth carved case, exploded as a Type Ia, is
+//! their nova recurrence period against L ([`nova_recurrence_period`]; none for a white dwarf fed
+//! helium, `nova_recurrence_under`). The fifth carved case, exploded as a Type Ia, is
 //! P11.T6's.
 //!
 //! Every threshold is a named constant with its source, re-checked for P11.T5; those marked
@@ -344,22 +344,18 @@ pub(crate) fn nova_recurrence_period(mass: SolarMasses, rate: SolarMassesPerYear
 }
 
 /// The recurrence period of the novae of a white dwarf of `mass` fed at `rate` by a donor of
-/// `donor`'s phase under `rules`: [`nova_recurrence_period`], or, from [`AWD_DONORS_VERSION`], none
-/// (infinite) for a donor that feeds it helium ([`feeds_helium`], `AwdDonorRules::has_novae`), the
-/// engine's reading of the hold, which [`carved_class`] and the census's marks read.
-///
-/// [`AWD_DONORS_VERSION`]: super::awd_donors::AWD_DONORS_VERSION
+/// `donor`'s phase: [`nova_recurrence_period`], or none (infinite) for a donor that feeds it helium
+/// ([`feeds_helium`], P11.T5's fix), which [`carved_class`] and the census's marks read.
 #[must_use]
 pub(crate) fn nova_recurrence_under(
     mass: SolarMasses,
     rate: SolarMassesPerYear,
     donor: Phase,
-    rules: StellarRules,
 ) -> Years {
-    if rules.awd_donors.has_novae(|| feeds_helium(donor)) {
-        nova_recurrence_period(mass, rate)
-    } else {
+    if feeds_helium(donor) {
         Years::new(f64::INFINITY)
+    } else {
+        nova_recurrence_period(mass, rate)
     }
 }
 
@@ -1178,8 +1174,8 @@ fn horizon_sample_years(timeline: &BinaryTimeline, (lo, hi): (f64, f64), now: f6
 /// one ([`CarvedClass`]); an X-ray binary at any age of the horizon; an accreting white dwarf
 /// (a cataclysmic variable, a symbiotic star or a single-degenerate Type Ia progenitor) at any
 /// age of it, fast if its novae recur within L at the epoch's age, or at the first age of the
-/// horizon at which it accretes if it does not then, and slow otherwise (from 27 a white dwarf fed
-/// helium has none, under the timeline's stellar rules: `nova_recurrence_under`).
+/// horizon at which it accretes if it does not then, and slow otherwise (a white dwarf fed helium
+/// has none: `nova_recurrence_under`).
 ///
 /// "Any age" is read at each segment's first age inside the horizon, the midpoint of its span
 /// there, the epoch's age and the horizon's end: the classes it looks for are those of a segment
@@ -1218,7 +1214,6 @@ pub fn carved_class(timeline: &BinaryTimeline, age_at_epoch: Years) -> Option<Ca
                 accretor.mass(),
                 feeding.rate,
                 state.stars()[1 - feeding.accretor].phase(),
-                timeline.context().rules(),
             );
             white_dwarf = Some((recurrence.value(), at_now));
         }

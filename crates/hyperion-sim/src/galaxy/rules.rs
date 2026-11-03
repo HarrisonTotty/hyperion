@@ -281,8 +281,8 @@ impl GalaxyRules {
     /// `list_source`, P10.T10.b's registration with P10.T3.d.b, and `kepler_arc`, P09.T28.d.c, and
     /// those retargeted from 26, `field_share`, P09.T2.c, `carve_out`, P09.T35, `feature_classes`,
     /// P09.T36, `merger_class`, P11.T8.c–d, and `displaced`, P08.T12) and the stellar rules'
-    /// `pinned_white_dwarfs` and `dwarf_limit`, P11.T4, `awd_donors`, P11.T5's fix, `xrb_class`,
-    /// P11.T5's and P11.T8.b's fix, and `merger_mass`, P11.T4.d ([`StellarRules::every_27_hold`]).
+    /// `pinned_white_dwarfs` and `dwarf_limit`, P11.T4, `xrb_class`, P11.T5's and P11.T8.b's fix,
+    /// and `merger_mass`, P11.T4.d ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
