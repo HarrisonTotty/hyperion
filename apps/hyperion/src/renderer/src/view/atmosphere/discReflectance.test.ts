@@ -168,13 +168,15 @@ function digestOf(source: string): string {
  * 0 to the albedo where it was skipped. The figure and the terrain's re-pinned by plan R14's camera
  * strides (R14.T3.c): the instance record's `strides`, which the figure's struct steps over, and the
  * terrain's stride morph (`terrainStrides.wgsl`), which a material without it, or an instance with
- * no bands, skips, its place `lit_place`'s as before.
+ * no bands, skips, its place `lit_place`'s as before. Every one re-pinned by the fitted lookup's
+ * least rise (`oblate.wgsl`'s `oblateLeastRiseOf`, 2026-11-03), which only a body of several
+ * bands reaches: a body of one band returns before the fit, its every lookup as before.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "4b4e90e1f9345407"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "4b4e90e1f9345407"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "a114ff4dcd5525fc"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "e3c05eef9ccdb61a"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "3adc4a8f957a68fe"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "3adc4a8f957a68fe"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "caa0effcecd3dbad"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "788d1adc535878f5"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a
@@ -182,13 +184,13 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // and its rebakes', rises', refines' and coarsens' mix of heights, normals and maturity
   // (R10.T16.i), which with no fade are k and the newer bake, bit for bit.
   ...[
-    ["terrain-lit-baked-offsets", "e95f6d174ea07abf"],
-    ["terrain-lit-face-differences", "dfc388b5690802ba"],
+    ["terrain-lit-baked-offsets", "919e2a9bb42b60ce"],
+    ["terrain-lit-face-differences", "25766c39a2ca4c4f"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "13ed0fdc99b4244d"],
-    ["terrain-depth-face-differences", "789b6a171728fe20"],
-    ["terrain-shadow-baked-offsets", "585fc6a7516f045f"],
-    ["terrain-shadow-face-differences", "a6f252e68f64719a"],
+    ["terrain-depth-baked-offsets", "64d299be5a373ad0"],
+    ["terrain-depth-face-differences", "7a2e4843541938a9"],
+    ["terrain-shadow-baked-offsets", "dbbcafdc1936e98c"],
+    ["terrain-shadow-face-differences", "f76a545cdef7e0c5"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const spec = [
       ...TERRAIN_LIT_MATERIALS,

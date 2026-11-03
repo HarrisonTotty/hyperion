@@ -123,6 +123,7 @@ import { captureDatum, checkDatumFrame } from "./datumFrame";
 import { checkRoutedRow, type RoutedRow, timeAtmosphereFrame } from "./frameTiming";
 import {
   handJupiterDeckMedium,
+  oneSheetOf,
   type RoutedMedium,
   selfLuminousEarthMedium,
   titanHazeMedium,
@@ -674,8 +675,8 @@ async function run(
   );
   // R08.T11's routes' rows on SwiftShader, each its twins and its row's frame, untimed: (T)'s here,
   // whose catalogue compiles its thermal forms, (R)'s in part 13, whose compiles its thick read, and
-  // (S)'s and (U)'s in parts 6 and 2, the lightest. (S)'s twins leave out its aerosol decks, which
-  // miss their twin on its oblate figure under any read (`OBLATE_TWIN_MISSES`, a finding).
+  // (S)'s and (U)'s in parts 6 and 2, the lightest. (S)'s twins take its whole medium, its aerosol
+  // decks among them (`OBLATE_TWIN_MISSES` holds none since the fit's least rise, 2026-11-03).
   const routedRow = async (row: RoutedRow, made: () => Promise<RoutedMedium>): Promise<void> => {
     const routed = await made();
     await checkRoutedTwins(engine, checks, twins, [withoutOblateTwinMisses(routed)]);
@@ -685,6 +686,15 @@ async function run(
   // took 229 s of its 360 s on a pod with (S) and before R08.T15.b.2's thermal twins joined it.
   await group(6, "R08.T11 (S) the hand Jupiter's deck route's row and its twins", () =>
     routedRow("(S)", handJupiterDeckMedium),
+  );
+  // The fit's least rise (`medium.ts`'s `fitLeastRiseM`, 2026-11-03): (S)'s gas and one tabulated
+  // crystal's sheet alone on its oblate figure against its twins, after (S), whose group compiles
+  // the deck's marches it draws by.
+  await group(
+    6,
+    "R08.T16.a.2 one crystal sheet on a giant's oblate figure against its twins",
+    async () =>
+      checkRoutedTwins(engine, checks, twins, [oneSheetOf(await handJupiterDeckMedium())]),
   );
   await group(2, "R08.T11 (U) venus-92bar's deck route's row and its twins", () =>
     routedRow("(U)", venusDeckMedium),

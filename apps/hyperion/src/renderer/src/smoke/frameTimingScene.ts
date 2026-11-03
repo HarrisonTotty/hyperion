@@ -612,21 +612,14 @@ export async function venusDeckMedium(): Promise<RoutedMedium> {
 }
 
 /**
- * The terms (S)'s twins leave out (finding, 2026-11-03): the hand Jupiter's four aerosol decks. On
- * its oblate figure the per-frame kernels miss their twin with its NH₃ or NH₄SH ice (drawn on H₂O
- * ice's roughened column table) under every read: NH₃'s alone by up to 2.8% in the deck's sky view,
- * and with every deck up to 7% in the deck's march and 3.3% in the sky view beside the correction
- * alone; its water and chromophore pass alone but together miss by 2.1 × 10⁻³ in one frame's march.
- * The same medium on a sphere agrees, and without its aerosols every read agrees, its deck, floor,
- * absorbers and bands among them: so the miss is the kernels' or the twin's for those phases on a
- * sliced body, not the route's.
+ * The terms (S)'s twins leave out: none. Until 2026-11-03 the hand Jupiter's four aerosol decks,
+ * whose per-frame kernels missed their twin on its oblate figure by up to 7% in the deck's march
+ * and 2.8% with its NH₃ ice alone in the sky view: in their sheets the fitted sliced lookup's
+ * local scale height stood at its 1 km floor, a rise whose drop below its tangent the kernels'
+ * `f32` could not take on a giant's figure. The fit rises at least the body's least rise since
+ * (`medium.ts`'s `fitLeastRiseM`), and (S)'s twins take its whole medium.
  */
-export const OBLATE_TWIN_MISSES: ReadonlySet<string> = new Set([
-  "aerosol:H2O",
-  "aerosol:NH4SH",
-  "aerosol:NH3",
-  "aerosol:chromophore",
-]);
+export const OBLATE_TWIN_MISSES: ReadonlySet<string> = new Set<string>();
 
 /** `routed` less {@link OBLATE_TWIN_MISSES}' terms, for its twins; the medium itself where none. */
 export function withoutOblateTwinMisses(routed: RoutedMedium): RoutedMedium {
@@ -638,6 +631,28 @@ export function withoutOblateTwinMisses(routed: RoutedMedium): RoutedMedium {
         name: `${routed.name}, its aerosol decks left out`,
         medium: { ...routed.medium, terms },
       };
+}
+
+/** The aerosol the one-sheet twins keep beside (S)'s gas: its NH₃ ice. */
+const ONE_SHEET_AEROSOL = "aerosol:NH3";
+
+/**
+ * (S)'s route with its gas and one aerosol deck alone, its NH₃ ice, a tabulated crystal phase (H₂O
+ * ice's roughened column table): the least medium whose per-frame kernels missed their twin on the
+ * hand Jupiter's oblate figure, 2.8% in the deck's sky view, before the fit's least rise
+ * (`medium.ts`'s `fitLeastRiseM`; 2026-11-03), held to its twins beside (S).
+ */
+export function oneSheetOf(routed: RoutedMedium): RoutedMedium {
+  return {
+    ...routed,
+    name: `${routed.name}, its gas and its NH₃ ice alone`,
+    medium: {
+      ...routed.medium,
+      terms: routed.medium.terms.filter(
+        (term) => !term.name.startsWith("aerosol:") || term.name === ONE_SHEET_AEROSOL,
+      ),
+    },
+  };
 }
 
 /** (R), (S), (T) and (U)'s media, in their order. */

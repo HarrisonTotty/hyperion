@@ -24810,3 +24810,25 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     `just test-render --captures`' frames. R05's descent spike itself waits on the owner.
   - Visibly wrong: dark rows or columns on lit air discs (`fix-disc-air-rows`, drafted); the
     Venus-class surface by day (lane `open-venus-deck-route`). Pending, the owner's RTX run.
+- **The fit's least rise and the march's shares at their rounding, as built** (R08.T16.a.2's
+  routed giant, 2026-11-03; lane `fix-oblate-kernel-twin`). Renderer and smoke; no generated value
+  moves.
+  - The term: the fitted sliced lookup (R08.T6.f) of a body of several bands. In a thin sheet its
+    local scale height stood at `FIT_SCALE_FLOOR_M`'s 1 km, where the fit's denominator, twice the
+    ray's drop below its tangent (about H² ÷ 2R), is 0.13 m on the hand Jupiter, beyond the
+    kernels' `f32`: the kernels were wrong, and the fix holds both, as twins. Not the forward lobes'
+    orders (`#lobes`): with them off on both sides the misses stood.
+  - `medium.ts`: `FIT_LEAST_DROP_M` (2 m) and `fitLeastRiseM(referenceRadiusM)`, which
+    `OblateReader.rayOf` and `oblate.wgsl`'s `slicedRayOf` (`oblateLeastRiseOf`) hold H to: 16.7 km
+    on the hand Jupiter's deck datum, 15.3 km on Saturn's figure. A body of one band takes no fit.
+  - `marchSteps.ts`' `marchPieces` and `depthSharedPieces`, and `tablesCpu.ts`' `rayPieces` and
+    `piecedSteps`, take `otherWithinSteps` (0 by default; `MARCH_SHARE_ROUNDING_STEPS`, 2⁻⁸), and
+    `RayMarchSettings` `otherShareWithinSteps`. The smoke's routed twins hold a ray-march texel over
+    its bound by the twin marched with such shares taken the other way (`shareEnvelope`, counted
+    with the splits): the kernel's `f32` took one share the other way in each of two frames.
+  - `OBLATE_TWIN_MISSES` is empty, which closes the rows' bullet above: (S)'s twins take its whole
+    medium. Part 6 adds "R08.T16.a.2 one crystal sheet on a giant's oblate figure against its
+    twins" (`oneSheetOf`: (S)'s gas and its NH₃ ice alone).
+  - Re-pinned: the thin and thick kernels' digests, and the disc's and the terrain's.
+  - `saturn-oblate`'s routed sliced misses in `vectorGate.json` (43 of 474, all at s95) are not
+    this term: the record re-blesses byte for byte with the fix (a finding, the lane's outbox).

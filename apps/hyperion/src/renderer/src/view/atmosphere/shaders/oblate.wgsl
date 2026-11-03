@@ -46,6 +46,11 @@ const OBLATE_SCALE_HEIGHTS : u32 = 64u;
 // below it the fit's differences of h* are lost in f32's rounding of h*.
 const OBLATE_SCALE_FLOOR_M : f32 = 1000.0;
 
+// The least drop below its tangent the fitted lookup's second point stands at, m of h*
+// (`medium.ts`'s FIT_LEAST_DROP_M): the fit's denominator, twice that drop, is a second difference
+// of h*, which f32 loses on a giant's figure at a rise of OBLATE_SCALE_FLOOR_M.
+const OBLATE_FIT_LEAST_DROP_M : f32 = 2.0;
+
 // Below this squared horizontal part a ray is taken as vertical, its radius of curvature the
 // Gaussian √(MN) (`tablesCpu.ts`'s VERTICAL_BELOW is 10⁻²⁴ in f64; in f32 a vertical direction's
 // parts round to about 10⁻¹⁴, and a ray this near the vertical hardly depends on its sphere).
@@ -123,6 +128,13 @@ fn oblateScaleHeightAt(body : OblateBody, table : texture_2d<f32>, scaledHeightM
   let below = textureLoad(table, vec2u(first + i / 4u, 0u), 0)[i % 4u];
   let above = textureLoad(table, vec2u(first + (i + 1u) / 4u, 0u), 0)[(i + 1u) % 4u];
   return max(below + f * (above - below), OBLATE_SCALE_FLOOR_M);
+}
+
+// The least rise the fitted lookup places its second point at, m of h* (`medium.ts`'s
+// fitLeastRiseM): √(2 R_ref OBLATE_FIT_LEAST_DROP_M), the rise whose drop below its tangent at 45°
+// on the sphere of R_ref is that drop, and at least OBLATE_SCALE_FLOOR_M.
+fn oblateLeastRiseOf(body : OblateBody) -> f32 {
+  return max(OBLATE_SCALE_FLOOR_M, sqrt(2.0 * body.figure.z * OBLATE_FIT_LEAST_DROP_M));
 }
 
 // s = g(φ) ÷ g_ref at the geodetic latitude whose sine squared is `sin2` (`oblate.ts`'s
@@ -363,7 +375,8 @@ fn slicedRayOn(
 //   h* there, s μ + h (∂s ÷ ∂φ) √(1 − μ²) cos α ÷ (M + h), and through h* where the ray on the start's
 //   R_α has risen one local scale height H ÷ s (one datum point); or, for a ray that dips by more
 //   than half a local scale height, at its lowest point, by the parabola through h* at its tangent
-//   point on the start's R_α and √(2 R_α H ÷ s) either side (three).
+//   point on the start's R_α and √(2 R_α H ÷ s) either side (three); H held to the body's least
+//   rise (`oblateLeastRiseOf`).
 // The steps' distances are taken in the forms that do not cancel in f32: x₁'s root as
 // rise (2 reach + rise) ÷ (reach μ + √(…)) upward, and the fitted radius's numerator with
 // (h*₀ − h*₁)(h*₀ + h*₁).
@@ -389,7 +402,7 @@ fn slicedRayOf(
     let lowest = lowestOnSphereM(sphereM, z0, mu);
     return slicedRayOn(body, bodyTable, start, sphereM, false, mu, mu < 0.0, lowest);
   }
-  let scaleM = start.scaleHeightM;
+  let scaleM = max(start.scaleHeightM, oblateLeastRiseOf(body));
   let riseM = scaleM / s0;
   let reach = rAlpha + h0;
   let reachMu = reach * mu;

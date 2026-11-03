@@ -40,6 +40,7 @@ import {
   MARCH_PIECE_DEPTH_CAP,
   MARCH_PIECE_SHADE,
   MARCH_PIECE_TURN,
+  MARCH_SHARE_ROUNDING_STEPS,
   marchPieces,
   marchPiecesSteps,
   type MarchDepthSteps,
@@ -392,6 +393,22 @@ describe("marchPieces and marchPiecesSteps: the marches cut at layer edges (R08.
     const steps = marchPiecesSteps(pieces);
     expect(steps[0]?.dtM).toBeCloseTo((camera.beforeM - 40_000) / first ** 2, 6);
     expect(steps[first]?.dtM).toBeCloseTo(40_000 / second ** 2, 6);
+  });
+
+  it("take a share within 2⁻⁸ of a step of its rounding to its other side for the smoke's envelope alone", () => {
+    // A cut where the first piece's share of the 18 left over stands 10⁻⁴ of a step past 6½, its
+    // rounding: √x ÷ (√x + √(5,000 − x)) = (6.5 + 10⁻⁴) ÷ 18.
+    const share = (6.5 + 1e-4) / 18;
+    const ratio = (1 - share) / share;
+    const cutM = 5_000 / (1 + ratio * ratio);
+    expect(MARCH_SHARE_ROUNDING_STEPS).toBe(2 ** -8);
+    expect(marchPieces(upward, [cutM]).after).toEqual([8, 12]);
+    expect(marchPieces(upward, [cutM], MARCH_SHARE_ROUNDING_STEPS).after).toEqual([7, 13]);
+    // A share half a step from its rounding keeps it, and the side its count.
+    expect(marchPieces(upward, [1_000], MARCH_SHARE_ROUNDING_STEPS).after).toEqual([7, 13]);
+    expect(marchPieces(orbit, [-600_000, 400_000], MARCH_SHARE_ROUNDING_STEPS)).toEqual(
+      marchPieces(orbit, [-600_000, 400_000]),
+    );
   });
 
   it("keep R05.T12.e's placement on a side with more pieces than steps, and count it", () => {

@@ -59,6 +59,7 @@ import {
   placesScaledTo,
   planetshineShare,
   handJupiterDeckMedium,
+  oneSheetOf,
   type RoutedMedium,
   routedPlacesOf,
   routedSets,
@@ -919,15 +920,23 @@ describe("the routes' rows' frames (R08.T11's (R) to (U))", () => {
     expect(routed.medium.groundAlbedo).toEqual([0, 0, 0]);
   });
 
-  it("leaves the hand Jupiter's four aerosol decks out of its twins, and nothing else of any row's", () => {
+  it("holds every row's twins to its whole medium, the hand Jupiter's four aerosol decks among them", () => {
+    expect(
+      [handJupiter(), titan, earth].map((medium) => withoutOblateTwinMisses(medium) === medium),
+    ).toEqual([true, true, true]);
+  });
+
+  it("keeps the hand Jupiter's gas and its NH₃ ice alone for the one-sheet twins", () => {
     const routed = handJupiter();
-    const kept = termNames(withoutOblateTwinMisses(routed));
+    const kept = termNames(oneSheetOf(routed));
     expect([
       termNames(routed).filter((name) => !kept.includes(name)),
-      [titan, earth].map((medium) => withoutOblateTwinMisses(medium) === medium),
+      kept.filter((name) => name.startsWith("aerosol:")),
+      oneSheetOf(routed).table,
     ]).toEqual([
-      ["aerosol:H2O", "aerosol:NH4SH", "aerosol:NH3", "aerosol:chromophore"],
-      [true, true],
+      ["aerosol:H2O", "aerosol:NH4SH", "aerosol:chromophore"],
+      ["aerosol:NH3"],
+      routed.table,
     ]);
   });
 

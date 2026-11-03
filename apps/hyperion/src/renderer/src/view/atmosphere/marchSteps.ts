@@ -452,8 +452,8 @@ export interface MarchPieces {
  * One side's steps by piece (`common.wgsl`'s `marchSideShares`): `steps` among the pieces from
  * `startM` to `endM` from t* that the crossings `first` to `first + count` cut, one a piece and the
  * rest in proportion to the square root of each piece's length, each piece's count rounding its
- * end's share of the rest, the last the rest; `null` for a side that crosses no edge or has more
- * pieces than steps.
+ * end's share of the rest (or taking its other side, {@link sharesOf}), the last the rest; `null`
+ * for a side that crosses no edge or has more pieces than steps.
  */
 function sideShares(
   fromLowestM: ReadonlyArray<number>,
@@ -462,6 +462,7 @@ function sideShares(
   startM: number,
   endM: number,
   steps: number,
+  otherWithinSteps: number,
 ): number[] | null {
   const pieces = count + 1;
   if (count === 0 || pieces > steps) {
@@ -477,23 +478,40 @@ function sideShares(
     total += root;
     from = to;
   }
-  return sharesOf(roots, total, steps);
+  return sharesOf(roots, total, steps, otherWithinSteps);
 }
 
 /**
  * `steps` among pieces by their weights (`rayMarch.wgsl`'s `marchSharesOf`): one a piece and the rest
  * in proportion to each piece's weight, each piece's count rounding its end's share of the rest, the
  * last the rest. `total` is the weights' sum, above 0.
+ *
+ * @param otherWithinSteps - How near its rounding an end's share may stand, in steps, to be taken
+ *   to the other side of it, each piece still at least one: 0 for the kernels' rounding; the
+ *   smoke's envelope's share the kernel's `f32` may take ({@link MARCH_SHARE_ROUNDING_STEPS}).
  */
-function sharesOf(weights: ReadonlyArray<number>, total: number, steps: number): number[] {
+function sharesOf(
+  weights: ReadonlyArray<number>,
+  total: number,
+  steps: number,
+  otherWithinSteps = 0,
+): number[] {
   const pieces = weights.length;
   const rest = steps - pieces;
   let spent = 0;
   let cumulative = 0;
   return weights.map((weight, p) => {
     cumulative += weight;
-    // floor(x + 0.5), as the WGSL rounds.
-    const share = p + 1 < pieces ? Math.floor((rest * cumulative) / total + 0.5) : rest;
+    let share = rest;
+    if (p + 1 < pieces) {
+      // floor(x + 0.5), as the WGSL rounds.
+      const at = (rest * cumulative) / total + 0.5;
+      share = Math.floor(at);
+      const off = at - Math.round(at);
+      if (Math.abs(off) < otherWithinSteps) {
+        share = Math.min(Math.max(off < 0 ? share + 1 : share - 1, spent), rest);
+      }
+    }
     const taken = 1 + share - spent;
     spent = share;
     return taken;
@@ -519,10 +537,13 @@ function sharesOf(weights: ReadonlyArray<number>, total: number, steps: number):
  *
  * @param crossingsFromLowestM - Where the ray crosses the edges, as signed distances from t*, m, in
  *   any order; those not strictly inside either side, and repeats, are left out.
+ * @param otherWithinSteps - The shares taken to the other side of their rounding
+ *   ({@link MARCH_SHARE_ROUNDING_STEPS}): 0, none, the kernels' own.
  */
 export function marchPieces(
   split: MarchSplit,
   crossingsFromLowestM: Iterable<number>,
+  otherWithinSteps = 0,
 ): MarchPieces {
   const inside = [...crossingsFromLowestM]
     .filter((t) => (t > -split.beforeM && t < 0) || (t > 0 && t < split.afterM))
@@ -536,7 +557,15 @@ export function marchPieces(
   }
   const crossingsBefore = fromLowestM.filter((t) => t < 0).length;
   const crossingsAfter = fromLowestM.length - crossingsBefore;
-  const before = sideShares(fromLowestM, 0, crossingsBefore, -split.beforeM, 0, split.stepsBefore);
+  const before = sideShares(
+    fromLowestM,
+    0,
+    crossingsBefore,
+    -split.beforeM,
+    0,
+    split.stepsBefore,
+    otherWithinSteps,
+  );
   const after = sideShares(
     fromLowestM,
     crossingsBefore,
@@ -544,6 +573,7 @@ export function marchPieces(
     0,
     split.afterM,
     split.stepsAfter,
+    otherWithinSteps,
   );
   const crowded =
     (crossingsBefore > 0 && before === null ? 1 : 0) +
@@ -605,6 +635,22 @@ export const MARCH_PIECE_TURN = 100;
 export const MARCH_PIECE_SHADE = 0.01;
 
 /**
+ * How near its rounding a piece's share may stand, in steps, for the kernel's `f32` to take the
+ * other side of it: 2⁻⁸ (plan R08, R08.T16.a.2; the smoke's envelope of a march's piece shares).
+ *
+ * @remarks
+ * The ray march shares a cut side's steps by its pieces' light ({@link depthSharedPieces}), formed
+ * from the lookups at the pieces' ends, which the kernel forms in `f32` and the twin in `f64`. On
+ * the hand Jupiter's deck route, whose four sheets cut each side into ten pieces of a rest of 26
+ * steps, the twin's shares stood 1.7 × 10⁻³ and 7 × 10⁻⁵ of a step from their rounding at the one
+ * texel in each of two frames whose kernel took a step from one piece to the next (2026-11-03):
+ * 2⁻⁸ holds twice the larger, and a kernel's share further off still misses. The kernels round
+ * every share; only the smoke's twin envelope takes the other side, as it holds the split
+ * (`marchSplit`) the kernel may take at its rounding.
+ */
+export const MARCH_SHARE_ROUNDING_STEPS = 2 ** -8;
+
+/**
  * `pieces` with each side that is cut into pieces sharing its steps among them by the light each can
  * return along the view, and each placed toward its brighter end (plan R08, R08.T16.a.2;
  * `rayMarch.wgsl`'s `rayMarchDepthShares`).
@@ -644,12 +690,16 @@ export const MARCH_PIECE_SHADE = 0.01;
  *   the horizon missed it (2.3–3.2%), its troposphere's fine steps turned from the ground;
  * - lit, turned only toward an end 100 times the brighter, the measures of `marchSheets.test.ts`,
  *   `thick/discBakeJupiter.test.ts`, `reference/envelopeMarch.test.ts` and `test/marchGate.ts`.
+ *
+ * @param otherWithinSteps - The shares taken to the other side of their rounding
+ *   ({@link MARCH_SHARE_ROUNDING_STEPS}): 0, none, the kernels' own.
  */
 export function depthSharedPieces(
   pieces: MarchPieces,
   depthAt: PieceDepthAt,
   lightAt: PieceLightAt,
   extinctionPerMAt: PieceExtinctionAt,
+  otherWithinSteps = 0,
 ): MarchPieces {
   const { split, fromLowestM, crossingsBefore } = pieces;
   const capped = (t: number, back: boolean): number => {
@@ -705,7 +755,7 @@ export function depthSharedPieces(
     });
     const steps = shares.reduce((sum, n) => sum + n, 0);
     return {
-      shares: sharesOf(weights, total, steps),
+      shares: sharesOf(weights, total, steps, otherWithinSteps),
       towardStart: shares.map((_, p) => {
         const start = brightness[p] ?? Number.NaN;
         const end = brightness[p + 1] ?? Number.NaN;

@@ -728,9 +728,42 @@ export function termNamed(medium: AtmosphereMedium, name: string): MediumTerm {
  * (0.06 m a step at 800 km): the smoke's kernel arm parted from the twin by 2% there. A kilometre
  * keeps them to about 10⁻⁴, and lies under the least scale height drawn so far (R05's Earth
  * aerosol, 1.2 km); a body of one band takes no fit.
- * `oblate.wgsl`'s `OBLATE_SCALE_FLOOR_M` is the same.
+ * `oblate.wgsl`'s `OBLATE_SCALE_FLOOR_M` is the same. The fit itself rises at least
+ * {@link fitLeastRiseM}, which a giant's figure takes over this.
  */
 export const FIT_SCALE_FLOOR_M = 1_000;
+
+/**
+ * The least drop below its tangent the fitted lookup's second point stands at, m of h\*: 2 m
+ * (plan R08, R08.T6.f; R08.T16.a.2's routed giant, 2026-11-03).
+ *
+ * @remarks
+ * The fit's radius is a quotient whose denominator, 2(h\*₁ − h\*₀ − μ\* s x₁), is twice the ray's
+ * drop below its tangent over x₁: about H² ÷ 2R at 45°, a second difference, where
+ * {@link FIT_SCALE_FLOOR_M} was sized by the first, H. In a thin cloud sheet, whose local scale
+ * height is held at that floor, the drop was 6.7 cm on the hand Jupiter's deck datum (R_ref
+ * 6.98 × 10⁷ m; its NH₃ sheet at h\* 178 km, the sun 20° up), near the kernel's `f32` rounding of
+ * h\* there (1.6 cm a step), and the kernel's h\*₁ stood some 5 cm from the twin's (the twin read
+ * the kernel's sky-view texel to 3 × 10⁻⁴ with its h\*₁ 5 cm lower): the kernel's κ\* fell above
+ * the slices' range where the twin's fell below it, and the per-frame kernels missed their twin by
+ * 2.3% in the sky view and 7% in the march (R08.T11's (S) row). 2 m holds the drop at 45° forty
+ * times that difference and over a hundred times the rounding.
+ * `oblate.wgsl`'s `OBLATE_FIT_LEAST_DROP_M` is the same.
+ */
+export const FIT_LEAST_DROP_M = 2;
+
+/**
+ * The least rise the fitted lookup of a body of several bands places its second point at, m of
+ * h\*: the local scale height held to at least √(2 R_ref {@link FIT_LEAST_DROP_M}), the rise whose
+ * drop below its tangent at 45° on the sphere of R_ref is that drop, and to
+ * {@link FIT_SCALE_FLOOR_M}; 16.7 km on the hand Jupiter's deck datum and 15.3 km on Saturn's
+ * figure, under its air's 49.7 km scale height. `oblate.wgsl`'s `oblateLeastRiseOf` is the same.
+ *
+ * @param referenceRadiusM - The tables' R_ref (`tableRadiusM`), m.
+ */
+export function fitLeastRiseM(referenceRadiusM: number): number {
+  return Math.max(FIT_SCALE_FLOOR_M, Math.sqrt(2 * referenceRadiusM * FIT_LEAST_DROP_M));
+}
 
 /**
  * The local scale height in h\* at `scaledHeightM` (plan R08, R08.T6.f; moved here from

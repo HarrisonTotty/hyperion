@@ -118,17 +118,19 @@ function digestOf(pair: KernelPair): string {
  * ray march's are R08.T16.a.2's, whose shares by the light each piece returns and crossings on their
  * edges' levels moved `rayMarch.wgsl` (2026-11-02), and the aerial perspective's and every march's
  * (its fill's too) R08.T9.c's, which stores their transmittance per channel in a second texture
- * (2026-11-02).
+ * (2026-11-02). All but the fill's re-pinned by the fitted lookup's least rise (`oblate.wgsl`'s
+ * `oblateLeastRiseOf`, 2026-11-03), which only a body of several bands reaches: a body of one band
+ * returns before the fit, its every lookup as before.
  */
 const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
-  [SKY_VIEW_KERNEL, "3041f0a7e55328c4"],
-  [AERIAL_PERSPECTIVE_KERNEL, "3b76a8ef6a2d9e5"],
-  [RAY_MARCH_KERNEL, "60b666946c8ec3bf"],
-  [RAY_MARCH_SLOTS_KERNEL, "2fbc833e37385f93"],
-  [RAY_MARCH_CENTRE_KERNEL, "2dbea9b9b4e562fb"],
-  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "a8338a1299025ef"],
-  [RAY_MARCH_SPECIAL_KERNEL, "ff5816a4102485ab"],
-  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "7124fffbe8942acf"],
+  [SKY_VIEW_KERNEL, "a1d12c8aae1e4f3b"],
+  [AERIAL_PERSPECTIVE_KERNEL, "aa69ad50f1c34e8"],
+  [RAY_MARCH_KERNEL, "6a9800a21d378eb0"],
+  [RAY_MARCH_SLOTS_KERNEL, "8032737ffed35a36"],
+  [RAY_MARCH_CENTRE_KERNEL, "ae2d8b520613be94"],
+  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "84578ddd3f5859c6"],
+  [RAY_MARCH_SPECIAL_KERNEL, "200a9b665894183e"],
+  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "1c456c9cf9027dac"],
   [RAY_MARCH_FILL_KERNEL, "f2a36f005c4cf5bd"],
 ];
 
@@ -137,15 +139,15 @@ const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
  * R08.T15.a.2 at 1e949d8e, and that read moved them), the ray march's as R08.T16.a.2's march moved
  * them, and the aerial perspective's and the marches' as R08.T9.c's second texture moved them: the
  * deck read is made beside them, and leaves each to the byte, so that a body with no deck draws as
- * before.
+ * before. Each re-pinned by the fitted lookup's least rise, as {@link THIN_DIGESTS}.
  */
 const THICK_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
-  [SKY_VIEW_THICK_KERNEL, "8d9564b785fc26f6"],
-  [AERIAL_PERSPECTIVE_THICK_KERNEL, "1f27c90c96e77121"],
-  [RAY_MARCH_THICK_KERNEL, "2f7ca8c342b7f933"],
-  [RAY_MARCH_SLOTS_THICK_KERNEL, "1388c6e2294e6ecd"],
-  [RAY_MARCH_THICK_SPECIAL_KERNEL, "cb8cb913143f7e87"],
-  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "5e8e8644a2589f71"],
+  [SKY_VIEW_THICK_KERNEL, "b6e4733b0245a48f"],
+  [AERIAL_PERSPECTIVE_THICK_KERNEL, "d0ae89988654ddaa"],
+  [RAY_MARCH_THICK_KERNEL, "a172446a7add3592"],
+  [RAY_MARCH_SLOTS_THICK_KERNEL, "2154e79c6c072c46"],
+  [RAY_MARCH_THICK_SPECIAL_KERNEL, "fe85153d1914a420"],
+  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "ee253a47dd4dd150"],
 ];
 
 /** Each thick kernel beside the thin one it is made from. */

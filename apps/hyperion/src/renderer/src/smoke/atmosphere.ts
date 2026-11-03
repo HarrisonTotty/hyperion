@@ -101,6 +101,7 @@ import {
 import {
   grazingTwilight,
   LOW_TWIN_WORST,
+  MARCH_SHARE_ROUNDING_STEPS,
   MARCH_TOLERANCE,
   TWILIGHT_TOLERANCE,
 } from "../view/atmosphere/marchSteps";
@@ -152,6 +153,7 @@ import {
   oblateRayMarchRayAlongTwin,
   oblateRayMarchRayTwin,
   oblateRayMarchTargetTexelTwin,
+  oblateRayMarchTargetTexelsTwin,
   oblateRayMarchTexelTwin,
   oblateSkyViewMarchTwin,
   oblateSkyViewRayTwin,
@@ -164,6 +166,7 @@ import {
   rayMarchRayAlongTwin,
   rayMarchRayTwin,
   rayMarchTargetTexelTwin,
+  rayMarchTargetTexelsTwin,
   rayMarchTexelTwin,
   skyViewRayTwin,
   slotDepthTablesTwin,
@@ -176,6 +179,7 @@ import {
   type TwinTransmittance,
   type TwinView,
   type TwinAerialVolume,
+  type TwinMarchedTexel,
   type TwinMarchTarget,
   unitRayTwin,
 } from "../view/atmosphere/tablesCpu";
@@ -2053,6 +2057,10 @@ function layersOf(texels: Float32Array, layers: number): Float32Array[] {
 /**
  * Draws one frame, its twins begun on the twin workers first, and returns its per-frame outputs'
  * agreements with them over the GPU's tables, once the twins are done.
+ *
+ * @param shares - Whether the ray march's texels over their bound are held by its pieces' shares'
+ *   envelope ({@link shareEnvelope}): the routed bodies', whose sheets cut each side into many
+ *   pieces.
  */
 async function frameAgreements(
   engine: RenderEngine,
@@ -2062,6 +2070,7 @@ async function frameAgreements(
   sizes: TableSizes,
   frame: TwinFrame,
   twins: TwinPool,
+  shares = false,
 ): Promise<() => Promise<FrameAgreements>> {
   const camera = equatorCamera(frame.heightM, FRAME_SIZE, figure);
   const view = frameViewOf(atmosphere, camera, frame.suns, figure);
@@ -2075,10 +2084,20 @@ async function frameAgreements(
   return async () => {
     const aerial = await frameTwins.aerial;
     const rayMarch = await frameTwins.rayMarch;
+    const marchTransmittance = { ...rayMarch, texels: rayMarch.transmittance };
+    const envelopeOf = (twin: TwinTable, target: keyof TwinMarchedTexel): TwinOptions => {
+      if (!shares) {
+        return { arm: "stored" };
+      }
+      return {
+        arm: "stored",
+        envelope: shareEnvelope(planet, marchView, sizes, twin, surfaceDepth, target),
+      };
+    };
     return {
       skyView: twinAgreement(gpu.skyView, await frameTwins.skyView, false),
       aerial: twinAgreement(gpu.aerial, aerial, true),
-      rayMarch: twinAgreement(gpu.rayMarch, rayMarch, true),
+      rayMarch: twinAgreement(gpu.rayMarch, rayMarch, true, envelopeOf(rayMarch, "light")),
       aerialTransmittance: twinAgreement(
         gpu.aerialTransmittance,
         { ...aerial, texels: aerial.transmittance },
@@ -2086,12 +2105,48 @@ async function frameAgreements(
       ),
       rayMarchTransmittance: twinAgreement(
         gpu.rayMarchTransmittance,
-        { ...rayMarch, texels: rayMarch.transmittance },
+        marchTransmittance,
         true,
+        envelopeOf(marchTransmittance, "transmittance"),
       ),
       compositeWithinRange: withinHalfRange(composite),
     };
   };
+}
+
+/**
+ * A ray-march texel's envelope of its pieces' shares (plan R08, R08.T16.a.2): the twin's texel as
+ * the kernel draws it, `target` its first target's (`light`) or its second's (`transmittance`),
+ * and the same marched with each piece's share that stands within
+ * {@link MARCH_SHARE_ROUNDING_STEPS} of its rounding taken to the other side of it, the share the
+ * kernel's `f32` may take there (`marchSteps.ts`). A share is formed from the lookups at its
+ * pieces' ends, so a routed giant, whose sheets cut each side into ten pieces, holds a few such
+ * shares a frame; recorded with R08.T6.f's splits ({@link TexelEnvelope.split}), not §10.3's.
+ */
+function shareEnvelope(
+  planet: SmokePlanet,
+  view: TwinView,
+  sizes: TableSizes,
+  twin: TwinTable,
+  depth: number,
+  target: keyof TwinMarchedTexel,
+): (index: number) => TexelEnvelope | null {
+  const { widthTexels: w, heightTexels: h } = twin;
+  const settings = { ...sizes, otherShareWithinSteps: MARCH_SHARE_ROUNDING_STEPS };
+  return memoised((index) => {
+    const x = index % w;
+    const y = Math.floor(index / w);
+    const other =
+      planet.kind === "sphere"
+        ? rayMarchTargetTexelsTwin(planet.twin, view, settings, x, y, depth)
+        : oblateRayMarchTargetTexelsTwin(planet.twin, view, settings, x, y, depth);
+    const d = unitRayTwin(view, (x + 0.5) / w, (y + 0.5) / h);
+    return {
+      ...rangeOf([twin.texels.subarray(index * 4, index * 4 + 4), other[target]], 4),
+      tangentHeightM: tangentHeightOverM(view.figure, view.cameraM, d),
+      split: true,
+    };
+  });
 }
 
 /**
@@ -2808,6 +2863,7 @@ async function checkThickTwinBodies(
             sizes,
             frame,
             twins,
+            true,
           );
           void ordered.later(async (later) => {
             const result = await agreements();
@@ -2825,10 +2881,15 @@ async function checkThickTwinBodies(
                 result.rayMarchTransmittance,
               ],
             ] as const) {
+              const sharedAt = [...new Set(held.split.map((channel) => channel.where))].join(", ");
+              const shared =
+                held.split.length === 0
+                  ? ""
+                  : `; ${held.split.length} within the twin at a piece's share's other rounding (${sharedAt})`;
               later.check(
                 `${over.replace("{label}", label).replace("{what}", what)} agrees with the CPU twin to 10⁻³`,
                 held.worst <= 1 && held.above > 0,
-                `worst ${held.at}; ${held.above} channels above 10⁻⁶ of the largest, ${held.over} over the bound`,
+                `worst ${held.at}; ${held.above} channels above 10⁻⁶ of the largest, ${held.over} over the bound${shared}`,
               );
             }
           });

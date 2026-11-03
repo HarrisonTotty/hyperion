@@ -151,6 +151,7 @@ import {
   checkTabulatedTops,
   densityLookup,
   extinction,
+  fitLeastRiseM,
   layerEdgesM,
   type PhaseFunction,
   phaseAt,
@@ -2440,6 +2441,8 @@ function edgeLevelM(
  *
  * @param samples - The steps, an integer of at least 2.
  * @param edgesM - The marches' layer edges, m ({@link mediumMarchEdgesM}).
+ * @param otherWithinSteps - The pieces' shares taken to the other side of their rounding
+ *   (`marchSteps.ts`'s `MARCH_SHARE_ROUNDING_STEPS`): 0, none, the kernels' own.
  * @throws RangeError from `marchSplit` for fewer than 2 steps.
  */
 export function rayPieces(
@@ -2447,12 +2450,17 @@ export function rayPieces(
   samples: number,
   edgesM: ReadonlyArray<number>,
   geometry: MarchGeometry,
+  otherWithinSteps = 0,
 ): MarchPieces {
   const o = ray.originM;
   const d = ray.direction;
   const nearestM = -(o.x * d.x + o.y * d.y + o.z * d.z);
   const split = marchSplit(ray.tStartM, ray.tEndM, nearestM, samples, ray.fromCamera);
-  return marchPieces(split, crossingsFromLowestM(ray, split.lowestM, edgesM, geometry));
+  return marchPieces(
+    split,
+    crossingsFromLowestM(ray, split.lowestM, edgesM, geometry),
+    otherWithinSteps,
+  );
 }
 
 /**
@@ -2485,6 +2493,8 @@ export interface MarchShareReads {
  * (its first source, as the sky's warp takes it) and the medium's extinction read at the pieces'
  * ends (`marchSteps.ts`'s `depthSharedPieces`), the light 1 where the ray has no source.
  *
+ * @param otherWithinSteps - The pieces' shares taken to the other side of their rounding, as
+ *   {@link rayPieces}'.
  * @throws RangeError as {@link rayPieces}, and for a two-sided sky segment given without its sun.
  */
 export function piecedSteps(
@@ -2493,8 +2503,9 @@ export function piecedSteps(
   edgesM: ReadonlyArray<number>,
   geometry: MarchGeometry,
   shares: MarchShareReads | null = null,
+  otherWithinSteps = 0,
 ): MarchStep[] {
-  const pieces = rayPieces(ray, samples, edgesM, geometry);
+  const pieces = rayPieces(ray, samples, edgesM, geometry, otherWithinSteps);
   const warp = skyWarpOfSegment(ray, pieces.split);
   if (warp !== null) {
     return marchEvenSteps(pieces.split, pieces.fromLowestM, warp);
@@ -2515,6 +2526,7 @@ export function piecedSteps(
       (fromLowestM, toward) => shares.depthAlong(placeAt(fromLowestM), toward ? back : d),
       (fromLowestM) => (first === undefined ? 1 : shares.lightAlong(placeAt(fromLowestM), first)),
       (fromLowestM) => shares.extinctionPerMAt(placeAt(fromLowestM)),
+      otherWithinSteps,
     ),
   );
 }
@@ -4119,12 +4131,14 @@ export function rayMarchRayAlongTwin(
 /**
  * The ray march's settings: `TableSizes`' scale, steps, reach and march band (R08.T8), and its
  * count by a segment's optical depth, the bare ground's and a thin sky's (R08.T8.e), `null` for the
- * setting's count everywhere.
+ * setting's count everywhere; and, for the smoke's envelope alone, `otherShareWithinSteps`, how
+ * near its rounding a piece's share may stand to be taken to the other side of it
+ * (`marchSteps.ts`'s `MARCH_SHARE_ROUNDING_STEPS`), 0 or absent for the kernels' rounding.
  */
 export type RayMarchSettings = Pick<
   TableSizes,
   "rayMarchScale" | "rayMarchSamples" | "aerialPerspectiveReachM" | "marchBand" | "marchDepthSteps"
->;
+> & { readonly otherShareWithinSteps?: number };
 
 /**
  * One ray-march texel's twin along a clipped ray (`rayMarchRayTwin`, `rayMarchRayAlongTwin`): its
@@ -4190,6 +4204,8 @@ interface RayMarchContext {
   readonly depthSteps: MarchDepthSteps | null;
   /** The cloud deck the bare ground reads in place of its albedo (R08.T15.a.2), or `null`. */
   readonly deck: MarchDeck | null;
+  /** The pieces' shares taken to the other side of their rounding ({@link RayMarchSettings}). */
+  readonly otherShareWithinSteps: number;
 }
 
 /** A march's cloud deck at its ground (R08.T15.a.2; `thick/deckRead.ts`). */
@@ -4255,6 +4271,7 @@ function rayMarchContext(
     view,
     samples: Math.max(Math.floor(settings.rayMarchSamples), 2),
     depthSteps: settings.marchDepthSteps,
+    otherShareWithinSteps: settings.otherShareWithinSteps ?? 0,
     deck:
       planet.deck === undefined
         ? null
@@ -4311,7 +4328,8 @@ function rayMarchTexelInto(
       return local[4] ?? Number.NaN;
     },
   };
-  for (const { tM, dtM } of piecedSteps(ray, samples, edgesM, geometry, shares)) {
+  const steps = piecedSteps(ray, samples, edgesM, geometry, shares, context.otherShareWithinSteps);
+  for (const { tM, dtM } of steps) {
     marcher.step(tM, dtM);
   }
   const luminance = marcher.luminance;
@@ -5712,6 +5730,8 @@ class OblateReader {
   readonly #rootKappa: Float64Array;
   readonly #lnBands: Float64Array;
   readonly #topM: number;
+  /** The least rise the fit takes ({@link fitLeastRiseM} of the tables' R_ref). */
+  readonly #leastRiseM: number;
   readonly #absorbers = new Map<number, TwinAbsorbers>();
   readonly #scratch = readScratch();
   readonly #sample = new Float64Array(SAMPLE_FLOATS);
@@ -5740,6 +5760,7 @@ class OblateReader {
     this.#lnKappa = planet.kappa.map(log);
     this.#rootKappa = planet.kappa.map(Math.sqrt);
     this.#lnBands = Float64Array.from(planet.bands, (band) => log(band.gravityRatio));
+    this.#leastRiseM = fitLeastRiseM(planet.referenceRadiusM);
     checkAbsorberCurves(planet.medium, planet.curves);
     this.absorbersAt(0);
     this.#absorbing = hasAbsorbers(this.#terms);
@@ -5810,7 +5831,8 @@ class OblateReader {
    * and the ground hides the source where that height is below the datum. The slices are
    * interpolated linearly in √κ\*, a κ\* beyond their range taking the nearer slice, and how far
    * it lies beyond is kept. H is {@link OblateReader}'s local scale height, or `scaleHeightM` where
-   * it is given: the lit passes' reading of the body's table (R08.T9.b).
+   * it is given: the lit passes' reading of the body's table (R08.T9.b); either held to the body's
+   * least rise ({@link fitLeastRiseM}), so that the kernels' `f32` resolves the fit's drop.
    */
   rayOf(
     positionM: Vec3,
@@ -5861,7 +5883,7 @@ class OblateReader {
         lowest,
       );
     }
-    const scaleM = scaleHeightM ?? this.#localScaleHeightM(z0);
+    const scaleM = Math.max(scaleHeightM ?? this.#localScaleHeightM(z0), this.#leastRiseM);
     const riseM = scaleM / s0;
     const reach = rAlpha + h0;
     const dip = mu < 0 ? h0 - lowestOnSphereM(rAlpha, h0, mu) : 0;
@@ -7225,6 +7247,7 @@ function oblateRayMarchContext(
     view,
     samples: Math.max(Math.floor(settings.rayMarchSamples), 2),
     depthSteps: settings.marchDepthSteps,
+    otherShareWithinSteps: settings.otherShareWithinSteps ?? 0,
     deck:
       planet.deck === undefined
         ? null

@@ -34,7 +34,7 @@ import {
   R05_EARTH_REFERENCE,
   referenceSunIlluminanceLx,
 } from "./earth";
-import type { AtmosphereMedium } from "./medium";
+import { type AtmosphereMedium, FIT_LEAST_DROP_M, fitLeastRiseM } from "./medium";
 import { gravityRatio, principalRadiiM } from "./oblate";
 import {
   ATMOSPHERE_SETTINGS,
@@ -1591,6 +1591,23 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
       `const OBLATE_SCALE_FLOOR_M : f32 = ${FIT_SCALE_FLOOR_M.toFixed(1)};`,
     );
     expect(localScaleHeightM({ ...medium, terms: [] }, 50_000)).toBe(50_000);
+  });
+
+  it("holds the fit's rise to the one whose drop below its tangent at 45° on R_ref is 2 m, and to its floor", () => {
+    const saturnM = tableRadiusM(SATURN_SPHEROID);
+    const rise = fitLeastRiseM(saturnM);
+    expect(FIT_LEAST_DROP_M).toBe(2);
+    expect(rise ** 2 / (2 * saturnM)).toBeCloseTo(FIT_LEAST_DROP_M, 12);
+    // 15.3 km on Saturn's figure, under its air's 49.7 km scale height; the floor on a small body.
+    expect(rise).toBeCloseTo(15_271, -1);
+    expect(fitLeastRiseM(100_000)).toBe(FIT_SCALE_FLOOR_M);
+    expect(oblateWgsl).toContain(
+      `const OBLATE_FIT_LEAST_DROP_M : f32 = ${FIT_LEAST_DROP_M.toFixed(1)};`,
+    );
+    expect(oblateWgsl).toContain(
+      "max(OBLATE_SCALE_FLOOR_M, sqrt(2.0 * body.figure.z * OBLATE_FIT_LEAST_DROP_M))",
+    );
+    expect(oblateWgsl).toContain("let scaleM = max(start.scaleHeightM, oblateLeastRiseOf(body));");
   });
 
   it("puts the ray march's top through h* = H at the equator and the poles (R08.T6.f)", () => {
