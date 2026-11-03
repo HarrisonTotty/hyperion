@@ -15,7 +15,6 @@ use std::collections::BTreeMap;
 
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
-use hyperion_testkit::threads::in_shares;
 
 use super::milky_way;
 use crate::GENERATOR_VERSION;
@@ -37,6 +36,7 @@ use crate::galaxy::imf::MassFunctionKind;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::snr::{SHELL_WINDOW_CAP, ShellPhase, ShellWindow, shell_state_at};
+use crate::planetary::testing::in_shares;
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, SourceHorizon, UniverseTime};
 use crate::units::Years;
 

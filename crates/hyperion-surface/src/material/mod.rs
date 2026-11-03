@@ -103,12 +103,12 @@ pub use weathering::{
     REGOLITH_HOST_INDEX, npfe_optical_depth, weathered_entry_bvr, weathered_hemispherical_albedos,
     weathered_normal_albedo, weathered_spherical_albedo,
 };
-#[cfg(any(test, feature = "hold-switches"))]
-pub use weights::with_steepness_tails;
 pub use weights::{
     ClassWeights, MAX_CLASSES, SLOPE_LAG, SteepnessTailsRules, WEIGHT_TOTAL, weights_at,
 };
 pub(crate) use weights::{kept_omitted_rms, weights_with_sample};
+#[cfg(any(test, feature = "hold-switches"))]
+pub use weights::{steepness_tails_in_force, with_steepness_tails};
 
 use hyperion_base::units::Radians;
 

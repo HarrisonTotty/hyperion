@@ -10,12 +10,11 @@
 //! [`PARTS`] parts, each with its own stream of cells, so a census is the same on any number of
 //! threads.
 
-use hyperion_testkit::threads::in_shares;
-
 use crate::galaxy::Galaxy;
 use crate::galaxy::imf::{BandShares, MassBand};
 use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
 use crate::id::Layer;
+use crate::planetary::testing::in_shares;
 use crate::stellar::Phase;
 use crate::stellar::binary::{BinaryTimeline, CarvedClass, carved_class};
 use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};

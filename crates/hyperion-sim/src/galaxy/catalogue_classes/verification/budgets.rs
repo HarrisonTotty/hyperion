@@ -43,7 +43,6 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
 use hyperion_testkit::stats::{ALPHA, assert_p_value, normal_cdf};
-use hyperion_testkit::threads::in_shares;
 
 use super::{KeepCells, KeepClassCells, Tubes, milky_way};
 use crate::coords::GalacticPosition;
@@ -68,6 +67,7 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, POPULATIONS, Population};
 use crate::id::{Layer, SystemId, SystemIdKind};
 use crate::math;
+use crate::planetary::testing::in_shares;
 use crate::units::LightYears;
 
 /// The run's shares (`in_shares`; `.config/nextest.toml`).

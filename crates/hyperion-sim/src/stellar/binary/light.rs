@@ -1919,7 +1919,7 @@ mod tests {
             }
             part
         };
-        let parts: Vec<[Checked; 2]> = hyperion_testkit::threads::in_shares(SHARES, SHARES, share);
+        let parts: Vec<[Checked; 2]> = crate::planetary::testing::in_shares(SHARES, SHARES, share);
         let mut total = [Checked::new(), Checked::new()];
         for [old, young] in parts {
             total[0].merge(old);

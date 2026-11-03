@@ -40,7 +40,6 @@ use std::sync::OnceLock;
 
 use hyperion_testkit::lcg::Lcg;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, normal_cdf};
-use hyperion_testkit::threads::in_shares;
 
 use super::super::evolve::clock_resolution_years;
 use crate::coords::SystemVelocity;
@@ -53,6 +52,7 @@ use crate::galaxy::query::pad_speed_in;
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::Layer;
 use crate::math;
+use crate::planetary::testing::in_shares;
 use crate::rng::Seed;
 use crate::stellar::Phase;
 use crate::stellar::binary::testing::massive_records;

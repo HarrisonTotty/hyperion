@@ -19,7 +19,6 @@
 use std::sync::OnceLock;
 
 use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_two_sample};
-use hyperion_testkit::threads::in_shares;
 
 use super::marks::{FateRead, PLACEMENT_FATES_VERSION, PlacementFateRules, draws_of, table_fate};
 use super::{CellKey, SystemRecord, generate_cell};
@@ -35,6 +34,7 @@ use crate::galaxy::features::members::FeatureInterior;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::Layer;
+use crate::planetary::testing::in_shares;
 use crate::rng::{Mark, Seed};
 use crate::stellar::draws::{StandardNormal, StarDraws};
 use crate::stellar::fates::{FateRoute, node_draws};

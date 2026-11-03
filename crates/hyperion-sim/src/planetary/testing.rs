@@ -11,6 +11,8 @@
 //!   (design note 20).
 //! - [`sample_rogue_records`] takes a galaxy's rogue planets about the same point, in a fixed walk
 //!   of layer G's cells.
+//! - For this crate's tests alone, `in_shares` runs a test's shares on threads of its own with the
+//!   test's holds in force on each (`held`).
 //! - [`partial_pressures`] states an air by hand, for other crates' tests of what a derivation
 //!   reads of one.
 //! - [`envelope_by_hand`] builds a record's envelope from inputs stated by hand
@@ -43,6 +45,11 @@ use crate::units::{
     Dex, EarthMasses, Kelvin, LightYears, Metres, MetresPerSecondSquared, Pascals, SolarMasses,
     Watts, Years,
 };
+
+#[cfg(test)]
+mod held;
+#[cfg(test)]
+pub(crate) use held::{HeldRules, in_shares};
 
 /// An air's partial pressures stated by hand, each gas's `pressure(gas)` in [`Gas::ALL`]'s order,
 /// unvalidated, as the crate's own tests state one: for other crates' tests of what a derivation

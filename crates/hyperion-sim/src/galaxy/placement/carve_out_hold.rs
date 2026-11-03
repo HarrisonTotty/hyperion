@@ -18,7 +18,6 @@ use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::golden::f64_digest;
 use hyperion_testkit::order::assert_order_independent;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, normal_cdf};
-use hyperion_testkit::threads::in_shares;
 
 use super::candidate::catalogue_claims;
 use super::*;
@@ -42,6 +41,7 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, Population};
 use crate::id::Layer;
 use crate::math;
+use crate::planetary::testing::in_shares;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::system::{ClockDeath, SystemStars};
 use crate::time::UniverseTime;

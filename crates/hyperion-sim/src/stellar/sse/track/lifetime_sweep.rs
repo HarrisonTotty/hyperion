@@ -6,11 +6,11 @@
 
 use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::golden::f64_digest;
-use hyperion_testkit::threads::in_shares;
 
 use super::*;
 use crate::GeneratorVersion;
 use crate::id::{BodyId, SystemId};
+use crate::planetary::testing::in_shares;
 use crate::rng::Seed;
 use crate::units::{Dex, HeliumExcess};
 

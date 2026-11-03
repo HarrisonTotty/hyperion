@@ -33,7 +33,6 @@
 use std::sync::OnceLock;
 
 use hyperion_testkit::order::assert_order_independent;
-use hyperion_testkit::threads::in_shares;
 
 use super::*;
 use crate::GENERATOR_VERSION;
@@ -46,6 +45,7 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::SystemId;
 use crate::math;
+use crate::planetary::testing::in_shares;
 use crate::rng::Seed;
 use crate::stellar::Phase;
 use crate::stellar::binary::scan::{XrbScanMarks, scan_cell};

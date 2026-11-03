@@ -12,7 +12,6 @@
 use std::sync::OnceLock;
 
 use hyperion_testkit::stats::ks_two_sample;
-use hyperion_testkit::threads::in_shares;
 
 use super::*;
 use crate::GENERATOR_VERSION;
@@ -27,6 +26,7 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, POPULATIONS, PointLy, Population};
 use crate::math;
 use crate::orbit::Eccentricity;
+use crate::planetary::testing::in_shares;
 use crate::stellar::binary::CarvedClass;
 use crate::stellar::binary::light_curves::XrayAccretor;
 use crate::stellar::binary::sampler::ClassSampler;

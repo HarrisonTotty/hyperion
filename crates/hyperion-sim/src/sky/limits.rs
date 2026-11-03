@@ -3761,9 +3761,10 @@ mod tests {
         let stars: Vec<SkyStar> = if cfg!(target_family = "wasm") {
             job()
         } else {
+            let held = crate::planetary::testing::HeldRules::on_this_thread();
             std::thread::scope(|scope| {
                 let threads: Vec<_> = (0..hyperion_testkit::threads::granted(4))
-                    .map(|_| scope.spawn(job))
+                    .map(|_| scope.spawn(move || held.install(job)))
                     .collect();
                 threads
                     .into_iter()

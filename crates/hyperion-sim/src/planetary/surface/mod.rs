@@ -468,7 +468,7 @@ mod tests {
     fn no_generated_cell_lacks_its_crust_s_entry() {
         let systems = crate::planetary::system::tests::whole();
         let shares =
-            hyperion_testkit::threads::in_shares(systems.len(), CRUST_CENSUS_THREADS, |k| {
+            crate::planetary::testing::in_shares(systems.len(), CRUST_CENSUS_THREADS, |k| {
                 let (ctx, system) = &systems[k];
                 let snapshot = system.snapshot_at(ctx, RECORD_TIME);
                 let records = snapshot.bodies();

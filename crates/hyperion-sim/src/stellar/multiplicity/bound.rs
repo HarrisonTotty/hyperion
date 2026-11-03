@@ -585,7 +585,7 @@ mod tests {
             }
             tally
         };
-        let parts: Vec<Tally> = hyperion_testkit::threads::in_shares(SHARES, SHARES, share);
+        let parts: Vec<Tally> = crate::planetary::testing::in_shares(SHARES, SHARES, share);
         let mut total = Tally::default();
         for part in &parts {
             total.merge(part);

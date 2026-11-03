@@ -30,8 +30,8 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::potential::{MassModel, PotentialTables};
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{Layer, StreamMemberId};
+use crate::planetary::testing::in_shares;
 use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
-use hyperion_testkit::threads::in_shares;
 
 /// The test streams' seed: their galaxy's, their sprays' and their gap noise's.
 const SEED: Seed = Seed::new(0x0a10_c000_0000_0000);

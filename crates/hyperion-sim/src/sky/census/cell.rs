@@ -4238,7 +4238,7 @@ mod tests {
                         records.iter().skip(k).step_by(4).copied().collect();
                     check_realised_of(&mine)
                 };
-                let parts: Vec<RealisedCheck> = hyperion_testkit::threads::in_shares(4, 4, share);
+                let parts: Vec<RealisedCheck> = crate::planetary::testing::in_shares(4, 4, share);
                 let mut found = RealisedCheck {
                     least_margin: f64::INFINITY,
                     ..RealisedCheck::default()

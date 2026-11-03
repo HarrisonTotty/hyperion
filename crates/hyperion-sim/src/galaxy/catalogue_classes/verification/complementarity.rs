@@ -33,7 +33,6 @@
 use std::collections::BTreeMap;
 
 use hyperion_testkit::lcg::Lcg;
-use hyperion_testkit::threads::in_shares;
 
 use super::{milky_way, ridge_cells};
 use crate::coords::GalacticPosition;
@@ -60,6 +59,7 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::snr::SHELL_WINDOW_CAP;
 use crate::id::Layer;
 use crate::math;
+use crate::planetary::testing::in_shares;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::sse::lifetime_under;
 use crate::stellar::system::{

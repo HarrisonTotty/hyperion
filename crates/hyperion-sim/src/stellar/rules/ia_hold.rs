@@ -260,9 +260,9 @@ fn attempt_n_is_reproducible_alone() {
 mod slow {
     use std::collections::BTreeSet;
 
+    use crate::planetary::testing::in_shares;
     use hyperion_testkit::lcg::Lcg;
     use hyperion_testkit::stats::assert_poisson_count;
-    use hyperion_testkit::threads::in_shares;
 
     use super::*;
     use crate::coords::GalacticPosition;

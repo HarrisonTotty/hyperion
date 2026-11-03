@@ -38,8 +38,6 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::time::Instant;
 
-use hyperion_testkit::threads::in_shares;
-
 use super::audit_tests::{AuditBody, AuditCase, Item, audit_walk_system};
 use super::tests::SEED;
 use super::*;
@@ -57,6 +55,7 @@ use crate::planetary::hooks::aerosols::{AerosolDeck, AerosolMode};
 use crate::planetary::hooks::figures::Subsurface;
 use crate::planetary::hooks::surface::Forcing;
 use crate::planetary::record::{Modelled, RecordSection, SectionState};
+use crate::planetary::testing::in_shares;
 use crate::planetary::testing::{SampleFilter, sample_records, with_every_27_hold};
 use crate::substance::{self, CondensedOptics, SubstanceId, by_key};
 use crate::time::{ClockWindow, Span, UniverseTime};

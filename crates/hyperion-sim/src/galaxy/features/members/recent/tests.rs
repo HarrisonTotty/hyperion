@@ -8,7 +8,6 @@ use std::sync::{Arc, OnceLock};
 use hyperion_testkit::golden::f64_digest;
 use hyperion_testkit::lcg::Lcg;
 use hyperion_testkit::order::assert_order_independent;
-use hyperion_testkit::threads::in_shares;
 
 use super::*;
 use crate::GENERATOR_VERSION;
@@ -29,6 +28,7 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::ResolveSystemError;
 use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::snr::shell_state_at;
+use crate::planetary::testing::in_shares;
 use crate::time::UniverseTime;
 
 /// The seed of the tests' Milky Way.

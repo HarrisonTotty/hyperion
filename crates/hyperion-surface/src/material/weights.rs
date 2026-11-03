@@ -79,8 +79,9 @@ const MAX_PANELS: u32 = 16;
 /// It is the steepness tails' one hold. Below it [`SteepnessTailsRules::in_force`] is
 /// [`SteepnessTailsRules::Quadrature`], and every weight is the quadrature's, bit for bit. 27's
 /// bump deletes this hold, [`SteepnessTailsRules`] with its `Quadrature` arm, the tests'
-/// `with_steepness_tails`, the `hold-switches` feature with the sim's dev-dependency on it, its
-/// switch in the sim's `with_every_27_hold`, and the tripwire
+/// `with_steepness_tails` and its reader `steepness_tails_in_force`, the `hold-switches` feature
+/// with the sim's dev-dependency on it, its switch in the sim's `with_every_27_hold` and its line in
+/// the sim's `HeldRules`, and the tripwire
 /// `the_steepness_tails_are_held_only_until_the_27_bump`; [`exceedance_by_quadrature`] stays, as
 /// [`marcum_q1`]'s fallback past [`LARGEST_PRODUCT`]. It re-blesses the movers R10.T6.a's record
 /// lists.
@@ -136,6 +137,16 @@ pub fn with_steepness_tails<R>(rules: SteepnessTailsRules, run: impl FnOnce() ->
     }
     let _restore = Restore(STEEPNESS_TAILS_RULES.with(|cell| cell.replace(Some(rules))));
     run()
+}
+
+/// The steepness tails' rules in force on this thread (`SteepnessTailsRules::in_force`'s), for the
+/// sim's tests, which carry every hold's rules to the threads of their own pools. As
+/// [`with_steepness_tails`], only the `hold-switches` feature has it; 27's bump deletes it with the
+/// hold.
+#[cfg(any(test, feature = "hold-switches"))]
+#[must_use]
+pub fn steepness_tails_in_force() -> SteepnessTailsRules {
+    SteepnessTailsRules::in_force()
 }
 
 /// The gap b − a, in deviations, from which Marcum's Q₁(a, b) is below 2⁻⁵⁴ ([`marcum_q1`]): 8.6522,

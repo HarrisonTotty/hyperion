@@ -23,7 +23,6 @@ use std::sync::OnceLock;
 use hyperion_testkit::float::{assert_same_bits, bits};
 use hyperion_testkit::lcg::Lcg;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, assert_poisson_count, normal_cdf};
-use hyperion_testkit::threads::in_shares;
 
 use super::candidate::Picked;
 use super::velocity_hold::exempt_classes_padded;
@@ -53,6 +52,7 @@ use crate::galaxy::snr::ShellEnvironment;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
 use crate::math;
+use crate::planetary::testing::in_shares;
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::Phase;
 use crate::stellar::brief::BriefModel;

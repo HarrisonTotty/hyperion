@@ -29,7 +29,6 @@ use std::sync::OnceLock;
 
 use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::order::assert_order_independent;
-use hyperion_testkit::threads::in_shares;
 
 use super::*;
 use crate::GENERATOR_VERSION;
@@ -43,6 +42,7 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement;
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::{Layer, SystemId};
+use crate::planetary::testing::in_shares;
 use crate::rng::Seed;
 use crate::stellar::Phase;
 use crate::stellar::binary::scan::scan_cell;

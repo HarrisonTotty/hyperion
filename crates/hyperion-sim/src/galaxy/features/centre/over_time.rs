@@ -23,7 +23,6 @@
 use std::sync::OnceLock;
 
 use hyperion_testkit::stats::{ALPHA, assert_p_value, assert_poisson_count, ks_one_sample};
-use hyperion_testkit::threads::in_shares;
 
 use super::marks::OrbitMarks;
 use super::members::CentrePlacement;
@@ -38,6 +37,7 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{Layer, MemberSlot, SystemIdKind};
 use crate::math;
+use crate::planetary::testing::in_shares;
 use crate::rng::Seed;
 use crate::time::UniverseTime;
 use crate::units::LightYears;
