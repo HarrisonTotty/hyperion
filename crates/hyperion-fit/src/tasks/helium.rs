@@ -12,9 +12,10 @@
 //! helium-enhanced models (Pietrinferni, Cassisi, Salaris and Castelli 2006, ApJ 642, 797, with the
 //! database's helium-enhanced extension; `data/basti_helium/`, reduced by its `reduce.py`) relative
 //! to plan 06's tracks, its figures measured on those tracks under the fitted table. It is revision
-//! 1, from `manifests/helium.toml` with the fit's fingerprint, and the sim's tracks read it at every
-//! version from 26 on. It was emitted first as a second table, `helium_26`, behind the stellar
-//! rules' hold (`HELIUM_VERSION`), and folded into this one, bit for bit, by P15.T12's check.
+//! 1, from `manifests/helium.toml` with the fit's fingerprint, and the sim's tracks read it at
+//! every version from 26 on. It was emitted first as a second table, `helium_26`, behind the
+//! stellar rules' hold (`HELIUM_VERSION`), and folded into this one, bit for bit, by P15.T12's
+//! check.
 
 pub mod cluster;
 pub mod figures;

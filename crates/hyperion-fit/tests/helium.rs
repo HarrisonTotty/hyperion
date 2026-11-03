@@ -128,6 +128,7 @@ fn the_committed_table_is_the_fit_with_its_bound() {
     }
     assert_same_bits(HB_ENVELOPE_MAX, params.hb_envelope_msun.1);
     assert_eq!(fitted.table, committed_fit());
+    assert_eq!(committed_fit(), CandidateHeliumTable::COMMITTED);
     let split = TableText::of_file(COMMITTED);
     let header = split.header().unwrap();
     assert_eq!(header.kind, Some(HeaderKind::Generated));

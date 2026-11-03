@@ -600,7 +600,7 @@ pub fn fingerprint_probes() -> Vec<(String, f64)> {
             .value(),
     )];
     for m in [0.6, 0.8, 0.9] {
-        for (delta_y, table) in [(0.0, CandidateHeliumTable::COMMITTED), (0.15, PROBE_TABLE)] {
+        for (delta_y, table) in [(0.0, CandidateHeliumTable::IDENTITY), (0.15, PROBE_TABLE)] {
             probes.push((
                 format!("main sequence of {m} M☉ at Z {PROBE_Z}, ΔY {delta_y}, years"),
                 main_sequence_duration_yr(m, &composition(fe_h, delta_y), &table)
@@ -609,7 +609,7 @@ pub fn fingerprint_probes() -> Vec<(String, f64)> {
         }
     }
     for (m, delta_y, table) in [
-        (0.84, 0.0, CandidateHeliumTable::COMMITTED),
+        (0.84, 0.0, CandidateHeliumTable::IDENTITY),
         (0.64, 0.154, PROBE_TABLE),
     ] {
         let track = track_with_helium_table(

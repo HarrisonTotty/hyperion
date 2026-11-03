@@ -18,7 +18,7 @@ use hyperion_fit::emit::{HeaderKind, TableText, Workspace};
 use hyperion_fit::manifest::{Manifest, ManifestParamError};
 use hyperion_fit::pipeline::rerender;
 use hyperion_fit::task::{RunTaskError, find, registry};
-use hyperion_fit::tasks::mge::boxy::{self, BoxyRow};
+use hyperion_fit::tasks::mge::boxy::{self, BoxyFigures, BoxyRow};
 use hyperion_fit::tasks::mge::refit::{self, Refit, RefitParams, figures};
 use hyperion_fit::tasks::mge::{WIDTHS, fit, residuals};
 use hyperion_sim::GENERATOR_VERSION;
@@ -726,6 +726,36 @@ fn boxy_pull(terms: &[boxy::Term], r: f64) -> f64 {
         let g = Gaussian::new(SolarMasses::new(t.mass()), LightYears::new(t.width), t.q).unwrap();
         sum + g.v_circ_sq(LightYears::new(r)) / (G * r)
     })
+}
+
+/// The ruled criteria judge the masses and the forces alone: a density error of 13% passes them
+/// and fails plan 15's, and a mass beyond 1%, a force beyond 2% or a NaN fails them.
+#[test]
+fn the_ruled_criteria_judge_the_masses_and_the_forces() {
+    let met = BoxyFigures {
+        c: 3.5,
+        rms_density: 0.13,
+        enclosed: [0.002; 4],
+        force: [0.003; 6],
+        total: 0.002,
+    };
+    assert!(met.passes_as_ruled() && !met.passes(), "{met:?}");
+    for missed in [
+        BoxyFigures {
+            enclosed: [0.002, 0.011, 0.002, 0.002],
+            ..met
+        },
+        BoxyFigures {
+            force: [0.003, 0.003, -0.021, 0.003, 0.003, 0.003],
+            ..met
+        },
+        BoxyFigures {
+            force: [f64::NAN; 6],
+            ..met
+        },
+    ] {
+        assert!(!missed.passes_as_ruled(), "{missed:?}");
+    }
 }
 
 /// P15.T3.b's figures for each boxiness, and plan 02's table checks for each row of `MGE_BOXY`:

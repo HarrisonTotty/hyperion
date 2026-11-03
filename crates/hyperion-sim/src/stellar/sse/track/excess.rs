@@ -191,8 +191,8 @@ impl CandidateHeliumTable {
     pub const COMMITTED: Self = Self::new(helium::LIFETIME_SLOPE, helium::HB_TEMPERATURE_SHIFT)
         .with_envelope_max(SolarMasses::new(helium::HB_ENVELOPE_MAX));
 
-    /// P06.T17's identity, every coefficient zero, as a candidate: under it a track is the
-    /// generator's at any ΔY.
+    /// P06.T17's identity, every coefficient zero, as a candidate: under it a star's track at any
+    /// ΔY is its track at ΔY = 0.
     pub const IDENTITY: Self = Self::new([[0.0; 3]; 4], [0.0; 2]);
 
     /// A candidate of `lifetime_slope`, as `LIFETIME_SLOPE`, and `hb_temperature_shift`, as
@@ -262,8 +262,8 @@ impl CandidateHeliumTable {
     }
 }
 
-/// The committed table: a table of zeros would be the identity too, but the committed one is the
-/// generator's.
+/// The committed table, [`COMMITTED`](CandidateHeliumTable::COMMITTED), the one every track
+/// reads.
 #[cfg(any(test, feature = "testing"))]
 impl Default for CandidateHeliumTable {
     fn default() -> Self {
@@ -277,9 +277,9 @@ impl Default for CandidateHeliumTable {
 /// It is [`Track::full`](super::Track::full)'s track, the generator's options and resolution,
 /// with `table`'s correction for the star's ΔY (`Composition::helium_excess`). For a star of
 /// ΔY = 0 it is [`Track::full`](super::Track::full)'s bit for bit, whatever `table` holds, since
-/// no correction is built for it; under [`CandidateHeliumTable::IDENTITY`] it is that track at any
-/// ΔY. Plan 15's P15.T7.b fits the table with it. Behind the `testing` feature; the generator
-/// never calls it.
+/// no correction is built for it; under [`CandidateHeliumTable::COMMITTED`], the table every track
+/// reads, it is that track at any ΔY. Plan 15's P15.T7.b fits the table with it. Behind the
+/// `testing` feature; the generator never calls it.
 ///
 /// # Panics
 ///
@@ -394,7 +394,36 @@ mod tests {
         for row in fitted.lifetime_slope {
             assert_same_bits(row[2], 0.0);
         }
-        assert_eq!(fitted.hb_envelope_max, Some(helium::HB_ENVELOPE_MAX));
+        assert_same_bits(
+            fitted
+                .hb_envelope_max
+                .expect("the fitted table holds its fit's upper envelope"),
+            helium::HB_ENVELOPE_MAX,
+        );
+    }
+
+    /// The candidates' committed table is the one every track reads, its bound included, and is
+    /// their default; their identity is P06.T17's.
+    #[test]
+    fn the_candidates_name_the_fitted_table_and_the_identity() {
+        let as_table = |c: CandidateHeliumTable| HeliumTable {
+            log_z_nodes: c.log_z_nodes(),
+            lifetime_slope: c.lifetime_slope,
+            hb_temperature_shift: c.hb_temperature_shift,
+            hb_envelope_max: c.hb_envelope_max,
+        };
+        assert_eq!(
+            as_table(CandidateHeliumTable::COMMITTED),
+            HeliumTable::FITTED
+        );
+        assert_eq!(
+            as_table(CandidateHeliumTable::IDENTITY),
+            HeliumTable::IDENTITY
+        );
+        assert_eq!(
+            CandidateHeliumTable::default(),
+            CandidateHeliumTable::COMMITTED
+        );
     }
 
     /// The fitted table's values, pinned bit for bit (P15.T7.b): a 0.8 M☉ star of \[Fe/H\] −1.5
