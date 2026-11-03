@@ -1,35 +1,31 @@
-//! The tests of P11.T10's fix's hold, [`COLLAPSES_VERSION`]: from version 27 every core collapse
-//! acts on the orbits it unbinds, a pair a star of which collapses by its age run through the
-//! engine (`evolve`'s pre-test) and each run pair's supernova applied to the orbits above it
-//! (`SystemStars`' outer releases, read by `SystemStars::shown_at`).
+//! The tests of P11.T10's fix: every core collapse acts on the orbits it unbinds, a pair a star of
+//! which collapses by its age run through the engine (`evolve`'s pre-test) and each run pair's
+//! supernova applied to the orbits above it (`SystemStars`' outer releases, read by
+//! `SystemStars::shown_at`). Its hold is deleted (the 27 fold); these are its tests of the new arm.
 //!
-//! - The version's rules keep the held arm, and the tripwire holds it only until the bump.
 //! - Pinned massive systems of the binaries' census sampler (`testing::massive_records`): a wide
-//!   pair the pre-test passes over whose primary's collapse the arm records and which it unbinds,
-//!   and two triples whose inner pair stays bound through a low-mode collapse, one releasing its
-//!   outer star and one keeping it, with the kernel's escape speed checked on a constructed orbit.
-//! - The range brief counts the stars the summary shows, on every route under the arm.
+//!   pair the pre-test passes over whose primary's collapse is recorded and unbinds it, and two
+//!   triples whose inner pair stays bound through a low-mode collapse, one releasing its outer
+//!   star and one keeping it, with the kernel's escape speed checked on a constructed orbit.
+//! - The range brief counts the stars the summary shows, on every route.
 //!
 //! The slow agreement tests (`binary_kick_*`, in `stellar/binary/supernova/agreement.rs`) count
-//! what the arm releases over 10⁴ massive systems under every 27 hold.
+//! what the fix releases over 10⁴ massive systems under every 27 hold.
 //!
-//! The movers under the arm, found by turning it on at the version over the sim's, the server's
+//! The movers of the fold, found by turning the arm on at the version over the sim's, the server's
 //! and the fitting crate's tests (2026-11-01), are listed in plan 11's records.
 
 use std::sync::OnceLock;
 
-use super::*;
-use crate::GENERATOR_VERSION;
 use crate::coords::SystemVelocity;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
-use crate::galaxy::rules::GalaxyRules;
 use crate::orbit::KeplerElements;
 use crate::rng::Seed;
 use crate::stellar::binary::collapses::{OuterOrbit, PointLoss, outer_orbit_after};
 use crate::stellar::binary::testing::massive_records;
-use crate::stellar::binary::{BinaryInput, Component, Segment, SegmentKind, can_interact};
+use crate::stellar::binary::{BinaryInput, Component, can_interact};
 use crate::stellar::brief::BriefModel;
 use crate::stellar::multiplicity::{HierarchyNode, NodeIndex, StarIndex};
 use crate::stellar::system::{
@@ -38,56 +34,8 @@ use crate::stellar::system::{
 use crate::time::UniverseTime;
 use crate::units::Years;
 
-/// The version's rules keep the held arm, every version below 27 does and 27 applies every
-/// collapse. The tripwire: the bump to 27 deletes this hold.
-#[test]
-fn the_collapses_are_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < COLLAPSES_VERSION,
-        "the bump to 27 puts P11.T10's fix on the record: a pair a star of which collapses by its \
-         age is run through the engine, and each run pair's supernova acts on the orbits above it. \
-         Delete `COLLAPSES_VERSION`, `CollapseRules` with its `Gated` arm, \
-         `StellarRules::collapses`, its reads in `run_pair`, `outer_releases` and the brief's \
-         gate, this module and its line in `stellar/rules.rs`, and re-pin the movers plan 11's \
-         records list"
-    );
-    assert_eq!(
-        StellarRules::of_version(GENERATOR_VERSION).collapses,
-        CollapseRules::Gated
-    );
-    let at = |v: u32| StellarRules::of_version(GeneratorVersion::new(v)).collapses;
-    for v in [GENERATOR_VERSION.get(), 25, 26] {
-        assert_eq!(at(v), CollapseRules::Gated, "version {v}");
-    }
-    assert_eq!(at(27), CollapseRules::Applied);
-    assert_eq!(
-        StellarRules::every_26_hold_with_its_retargets().collapses,
-        CollapseRules::Gated
-    );
-    assert_eq!(
-        StellarRules::every_27_hold().collapses,
-        CollapseRules::Applied
-    );
-    assert_eq!(
-        GalaxyRules::every_27_hold().stellar,
-        StellarRules::every_27_hold()
-    );
-}
-
-/// The version's rules with this hold's arm on.
-fn applied_rules() -> GalaxyRules {
-    let version = GalaxyRules::of_version(GENERATOR_VERSION);
-    GalaxyRules {
-        stellar: StellarRules {
-            collapses: CollapseRules::Applied,
-            ..version.stellar
-        },
-        ..version
-    }
-}
-
 /// The Milky Way fixture, under the version's rules: the binaries' agreement tests' (P11.T10).
-fn held() -> &'static Galaxy {
+fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
         Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
@@ -95,16 +43,10 @@ fn held() -> &'static Galaxy {
     })
 }
 
-/// [`held`]'s galaxy under [`applied_rules`].
-fn applied() -> &'static Galaxy {
-    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| held().clone().with_rules(applied_rules()))
-}
-
 /// The binaries' census sampler's massive systems the pins are among.
 fn records() -> &'static [SystemRecord] {
     static RECORDS_OF: OnceLock<Vec<SystemRecord>> = OnceLock::new();
-    RECORDS_OF.get_or_init(|| massive_records(held(), RECORDS, RECORDS_SEED))
+    RECORDS_OF.get_or_init(|| massive_records(galaxy(), RECORDS, RECORDS_SEED))
 }
 
 /// The seed of the Milky Way fixture, the binaries' agreement tests'.
@@ -142,13 +84,9 @@ const PASSED_UP: usize = 67;
 /// at 86 au, and then the outer one, at 848 au (found by search, 2026-11-01).
 const MERGED_PRODUCT: usize = 6;
 
-/// The system `index` of the sampler under each arm.
-fn both(index: usize) -> (SystemStars, SystemStars) {
-    let record = &records()[index];
-    (
-        SystemStars::generate(held(), record),
-        SystemStars::generate(applied(), record),
-    )
+/// The system `index` of the sampler.
+fn system(index: usize) -> SystemStars {
+    SystemStars::generate(galaxy(), &records()[index])
 }
 
 /// The clock time at which `stars` is `age` old.
@@ -162,41 +100,22 @@ fn either_side(age: Years) -> [Years; 2] {
 }
 
 /// A wide pair the pre-test passes over is run for its primary's collapse: its supernova is at plan
-/// 06's age with plan 06's remnant and kick, and unbinds it. From generator version 25 the held
-/// arm's closed form (P11.T4.l) records the same supernova and unbinds the pair too, a detached
-/// segment and then a disrupted one, where at 24 it kept the pair on its drawn orbit as one
-/// detached segment with no record; the held arm's system still shows its drawn pair (as
-/// measured, a finding for P11.T10).
+/// 06's age with plan 06's remnant and kick, and unbinds it (under the held arm, deleted, P11.T4.l's
+/// closed form recorded the same supernova and unbound the drawn orbit).
 #[test]
 fn a_wide_pair_records_its_primary_s_collapse_and_is_unbound() {
-    let (held, applied) = both(WIDE_PAIR);
+    let applied = system(WIDE_PAIR);
     assert_eq!(
-        held.record().id(),
+        applied.record().id(),
         crate::id::SystemId::from_raw(0x8200_9920_0000_0000).expect("an ID")
     );
-    let [held_pair, applied_pair] = [&held, &applied].map(|s| {
-        s.pairs()
-            .iter()
-            .find(|p| p.stars() == [StarIndex::PRIMARY, StarIndex::from_body(1).expect("a star")])
-            .expect("the primary's pair is run for its remnant")
-    });
-    let input_until = held_pair.timeline().until();
-    let kinds: Vec<SegmentKind> = held_pair
-        .timeline()
-        .segments()
+    let applied_pair = applied
+        .pairs()
         .iter()
-        .map(Segment::kind)
-        .collect();
-    assert_eq!(
-        kinds,
-        [
-            SegmentKind::Detached,
-            SegmentKind::Disrupted {
-                by: Component::Primary
-            }
-        ]
-    );
-    assert!(!can_interact(&wide_input(&held), input_until));
+        .find(|p| p.stars() == [StarIndex::PRIMARY, StarIndex::from_body(1).expect("a star")])
+        .expect("the primary's pair is run for its remnant");
+    let input_until = applied_pair.timeline().until();
+    assert!(!can_interact(&wide_input(&applied), input_until));
     let model = applied.primary();
     let death = model.death().expect("the primary collapses by 60 Myr");
     assert!(death.kind().is_sudden());
@@ -211,21 +130,9 @@ fn a_wide_pair_records_its_primary_s_collapse_and_is_unbound() {
     assert_eq!(sn.kick(), model.natal_kick());
     assert_eq!(Some(sn.remnant().kind()), model.remnant().map(|r| r.kind()));
     assert!(!sn.bound());
-    // The held arm's closed form: the same collapse, at the same age, unbinding the drawn orbit.
-    let closed = disrupting_supernova(held_pair.timeline()).expect("the closed form unbinds it");
-    assert_eq!(
-        (
-            closed.component(),
-            closed.age(),
-            closed.kick(),
-            closed.remnant()
-        ),
-        (sn.component(), sn.age(), sn.kick(), sn.remnant())
-    );
-    // The system shows the primary's remnant alone from the collapse, and the held arm's both stars.
+    // The system shows the primary's remnant alone from the collapse.
     let now = UniverseTime::EPOCH;
     assert_eq!(applied.shown_at(now), Shown::Alone);
-    assert_eq!(held.shown_at(now), Shown::Drawn);
     assert_eq!(applied.summary_at(now).stars().len(), 1);
 }
 
@@ -328,12 +235,12 @@ fn an_outer_orbit_is_unbound_by_a_recoil_above_its_escape_speed() {
 /// A triple whose inner pair stays bound through a low-mode collapse releases its outer star
 /// where the pair's recoil exceeds the outer orbit's escape speed there, and shows the primary's
 /// own pair from the collapse; where the recoil is below it, the outer star stays on its drawn
-/// orbit. Before the collapse, and under the held arm, each is the version's bit for bit.
+/// orbit. Before the collapse each shows every drawn star.
 #[test]
 fn a_triple_s_outer_star_is_released_by_its_inner_pair_s_recoil_above_its_escape_speed() {
     let now = UniverseTime::EPOCH;
     for (index, releases) in [(RELEASING_TRIPLE, true), (KEEPING_TRIPLE, false)] {
-        let (held, applied) = both(index);
+        let applied = system(index);
         assert_eq!(applied.star_count(), 3, "{index}");
         let inner = applied
             .pairs()
@@ -354,15 +261,10 @@ fn a_triple_s_outer_star_is_released_by_its_inner_pair_s_recoil_above_its_escape
             releases,
             "{index}: {recoil} against {escape} m/s"
         );
-        assert_eq!(held.shown_at(now), Shown::Drawn);
         let [early, late] = either_side(sn.age());
         let at = |age: Years| on_the_clock(&applied, age);
         assert_eq!(applied.shown_at(at(early)), Shown::Drawn, "{index}");
-        assert_eq!(
-            applied.summary_at(at(early)),
-            held.summary_at(at(early)),
-            "{index}"
-        );
+        assert_eq!(applied.summary_at(at(early)).stars().len(), 3, "{index}");
         if releases {
             let release = applied.releases()[0];
             assert_eq!(release.node(), NodeIndex::ROOT);
@@ -405,15 +307,15 @@ fn escape_speed_at(stars: &SystemStars, inner: &PairTimeline, age: Years) -> f64
     (2.0 * GRAVITATIONAL_CONSTANT * SOLAR_MASS_KG * (pair(late) + outer) / separation).sqrt()
 }
 
-/// Under this hold's arm with P11.T10's, every sampled system's range brief, whatever its route,
-/// counts the stars the system shows at the epoch, and the same system twice is the same.
+/// Every sampled system's range brief, whatever its route, counts the stars the system shows at
+/// the epoch, and the same system twice is the same.
 #[test]
-fn under_the_arm_every_route_counts_the_stars_shown() {
+fn every_route_counts_the_stars_shown() {
     let now = UniverseTime::EPOCH;
     for record in records().iter().take(80) {
-        let stars = SystemStars::generate(applied(), record);
-        assert_eq!(stars, SystemStars::generate(applied(), record));
-        let model = BriefModel::new(applied(), record);
+        let stars = SystemStars::generate(galaxy(), record);
+        assert_eq!(stars, SystemStars::generate(galaxy(), record));
+        let model = BriefModel::new(galaxy(), record);
         let shown = match stars.shown_at(now) {
             Shown::Drawn => model.star_count(),
             Shown::Pair(_) => 2,
@@ -436,7 +338,7 @@ fn under_the_arm_every_route_counts_the_stars_shown() {
 /// drawn orbits.
 #[test]
 fn a_bound_orbit_passes_its_recoil_to_the_orbit_above_it() {
-    let (held, applied) = both(PASSED_UP);
+    let applied = system(PASSED_UP);
     let h = applied.hierarchy();
     let inner = applied
         .pairs()
@@ -463,7 +365,6 @@ fn a_bound_orbit_passes_its_recoil_to_the_orbit_above_it() {
             stars: 3
         }
     );
-    assert_eq!(held.shown_at(now), Shown::Drawn);
     // The shown triple is the drawn one below the outer orbit, its pairs renumbered from it.
     let shown = applied.hierarchy_at(now);
     assert_eq!(shown.as_ref(), &h.part(middle));
@@ -480,7 +381,7 @@ fn a_bound_orbit_passes_its_recoil_to_the_orbit_above_it() {
     assert_eq!(applied.summary_at(now).stars().len(), 3);
     assert_eq!(applied.brief_at(now).map(|b| b.star_count()), Some(3));
     assert_eq!(
-        BriefModel::new(self::applied(), &records()[PASSED_UP])
+        BriefModel::new(galaxy(), &records()[PASSED_UP])
             .brief_at(now)
             .map(|b| b.star_count()),
         Some(3)
@@ -493,7 +394,7 @@ fn a_bound_orbit_passes_its_recoil_to_the_orbit_above_it() {
 /// the primary.
 #[test]
 fn a_merged_product_s_kick_unbinds_the_orbit_above_it() {
-    let (held, applied) = both(MERGED_PRODUCT);
+    let applied = system(MERGED_PRODUCT);
     let inner = applied
         .pairs()
         .iter()
@@ -522,5 +423,4 @@ fn a_merged_product_s_kick_unbinds_the_orbit_above_it() {
     ));
     let now = UniverseTime::EPOCH;
     assert_eq!(applied.shown_at(now), Shown::Pair(inner.node()));
-    assert_eq!(held.shown_at(now), Shown::Drawn);
 }

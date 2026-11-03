@@ -5,9 +5,9 @@
 //!
 //! - Three pinned massive systems of the binaries' census sampler (`testing::massive_records`):
 //!   a pair whose primary's supernova releases its 19.6 M☉ companion, a pair whose companion's
-//!   supernova leaves the primary's black hole, and a quadruple whose outer pair the supernova of
-//!   its heavier star unbinds. The first two show the primary alone and the third the primary's own
-//!   pair on its drawn orbit, and before the disruption each shows every drawn star.
+//!   supernova leaves the primary's black hole, and a quadruple whose outer pair its inner pair's
+//!   supernova releases. The first two show the primary alone and the third the primary's own pair
+//!   on its drawn orbit, and before the disruption each shows every drawn star.
 //! - The range brief counts the stars the summary shows, on every route, and the same system twice
 //!   is the same.
 //!

@@ -84,9 +84,8 @@
 //!    pair's age at +H, the end of the clock window, which may lie after the window's end. A pair
 //!    it runs for its remnant alone is still one detached segment of its own models
 //!    ([`evolve`](super::evolve)'s pre-test gate), whose cooling member accretes nothing; the
-//!    engine steps the pair only if it can interact by +H, or, under the stellar rules of P11.T10's
-//!    fix, if a star of it collapses by then, which item 3 already refuses. The window's ages are
-//!    light-time ages,
+//!    engine steps the pair only if it can interact by +H, or if a star of it collapses by then
+//!    (P11.T10's fix), which item 3 already refuses. The window's ages are light-time ages,
 //!    each the age at an emission time of the source horizon (−(H + L) to +H), so the age at +H
 //!    lies at most [`RUN_HORIZON_PAST_WINDOW_YEARS`], 2H + L, past the window's end. So such a
 //!    pair is `Detached` only if items 1–3 also hold there. Otherwise it is read from the tables,
@@ -1234,13 +1233,13 @@ mod tests {
         assert_eq!(solar(1.0, 0.3, 1.0e4, 1.3e10), Some(PairLight::Detached));
     }
 
-    /// A pair the pre-test passes over has its stars' collapses applied to its drawn orbit, with
-    /// their kicks (P11.T4.l, finding F3; at version 21 it kept the drawn orbit through them, with
-    /// no record, which this test pinned before T4.l), and a collapse that leaves it bound can
-    /// hand it to the engine on an orbit the drawn periastron does not bound. So P11.T17's
-    /// collapse rule (the module's item 3) still holds, as T17.a ruled it for this case (plan 11,
-    /// P11.T17's note on the deferred batch): such a pair is never `Detached`, and its verdict is
-    /// the tables', which sample the kicks.
+    /// A pair the pre-test passes over has its stars' collapses applied to its orbit, with their
+    /// kicks: the engine runs it from the start for its primary's collapse (P11.T10's fix,
+    /// `collapses.rs`; before it P11.T4.l's closed form applied the collapse to its drawn orbit,
+    /// finding F3, and at version 21 it kept the drawn orbit through them, with no record, which
+    /// this test pinned before T4.l). So P11.T17's collapse rule (the module's item 3) still holds,
+    /// as T17.a ruled it for this case (plan 11, P11.T17's note on the deferred batch): such a pair
+    /// is never `Detached`, and its verdict is the tables', which sample the kicks.
     #[test]
     fn a_passed_over_pairs_collapse_is_applied_and_the_bound_does_not_lean_on_it() {
         use crate::stellar::binary::{Component, evolve};
@@ -1252,7 +1251,7 @@ mod tests {
             panic!("the primary's collapse is recorded");
         };
         assert_eq!(record.component(), Component::Primary);
-        assert_eq!(timeline.segments().len(), 2);
+        assert!(record.kick().is_some());
         assert_ne!(timeline.state_at(until).orbit(), Some(input.orbit()));
         // The bound does not lean on the drawn orbit: the primary may have collapsed, so the pair
         // is not `Detached`.

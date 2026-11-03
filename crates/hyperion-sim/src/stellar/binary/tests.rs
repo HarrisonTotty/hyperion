@@ -2186,9 +2186,8 @@ enum EarlierRun {
 }
 
 /// Plan 11's consistency to any age (P11's build-age dependence, 2026-10-05), for `input` run to
-/// `until` and to `later`. A pair that [`can_interact`] by `until`, or, under the stellar rules of
-/// P11.T10's fix, a star of which collapses by then ([`engine_runs`](super::evolve::engine_runs)),
-/// has the same history to `until` as the later run, bit for bit ([`assert_same_history`]), and
+/// `until` and to `later`. A pair that [`can_interact`] by `until`, or a star of which collapses by
+/// then (P11.T10's fix, [`engine_runs`](super::evolve::engine_runs)), has the same history to `until` as the later run, bit for bit ([`assert_same_history`]), and
 /// the same supernova records before it ([`assert_same_records`]), whether the engine runs it or,
 /// under P11.T12's fix, it is wind-fed in closed form. One it passes over is a detached segment of
 /// its stars' own forms on the drawn orbit to its first collapse (P11.T4.l). If the pre-test
@@ -2438,30 +2437,6 @@ fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
         "{collapsed} + {wide_collapsed} passed over through collapses"
     );
     assert_eq!(missed + wide_missed, 0, "interactions missed");
-}
-
-/// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] under the stellar rules of P11.T10's fix
-/// (`collapses.rs`), which run a pair the pre-test passes over for a star's collapse by its age:
-/// such a pair has the same history to the earlier age as the later run, and one passed over at
-/// the earlier age keeps its stars' own forms to the later run's first event, as under the held
-/// arm. Before its collapse the later run's orbit is the engine's, which the check does not read
-/// (the fix's lean).
-#[test]
-fn a_timeline_is_the_same_whatever_age_it_is_run_to_under_the_collapses_arm() {
-    use crate::stellar::binary::collapses::CollapseRules;
-    let rules = StellarRules {
-        collapses: CollapseRules::Applied,
-        ..StellarRules::of_version(crate::GENERATOR_VERSION)
-    };
-    let [[same, passed, collapsed, missed], _, [_, _, _, wide_missed]] =
-        any_age_over_under(60, 0x0b1e_00a9, Some(rules), 1.5e10);
-    let [[held_same, held_passed, held_collapsed, _], _, _] = any_age_over(60, 0x0b1e_00a9);
-    assert_eq!(missed + wide_missed, 0, "interactions missed");
-    assert!(
-        same > held_same && same + passed + collapsed == held_same + held_passed + held_collapsed,
-        "{same} run, {passed} passed over and {collapsed} through collapses, against {held_same}, \
-         {held_passed} and {held_collapsed} held"
-    );
 }
 
 /// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] under 27's arm of P11.T12's fix

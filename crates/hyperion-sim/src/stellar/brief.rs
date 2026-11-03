@@ -786,7 +786,6 @@ fn gate(
     let stars = attempt.stars();
     let stellar = galaxy.rules().stellar;
     let tables_hold = stellar.merger_mass.fitted_tables_hold()
-        && stellar.collapses.fitted_tables_hold()
         && stellar.wind_accretion.fitted_tables_hold()
         && stellar.dwarf_limit.fitted_tables_hold();
     // A supernova that unbinds any pair changes what the system shows (P11.T10), so every pair is

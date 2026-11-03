@@ -38,7 +38,7 @@ use crate::math;
 use crate::orbit::KeplerElements;
 use crate::rng::{Mark, ObjectKey, Seed, Stream, tags};
 use crate::stellar::binary::Component as PairComponent;
-use crate::stellar::binary::collapses::{CollapseRules, OuterOrbit, PointLoss, outer_orbit_after};
+use crate::stellar::binary::collapses::{OuterOrbit, PointLoss, outer_orbit_after};
 use crate::stellar::binary::ia::{IaExplosionMark, marked_explosion};
 use crate::stellar::binary::{
     BinaryClass, BinaryInput, BinaryState, BinaryTimeline, CarvedClass, PooledIaEvent, SegmentKind,
@@ -1972,7 +1972,7 @@ pub struct SystemStars {
     hierarchy: SystemHierarchy,
     stars: Vec<StarModel>,
     pairs: Vec<PairTimeline>,
-    /// The outer orbits its pairs' supernovae unbind (P11.T10's fix, from version 27), by age.
+    /// The outer orbits its pairs' supernovae unbind (P11.T10's fix), by age.
     releases: Vec<OuterRelease>,
     attempt: RedrawAttempt,
     /// The seed of the galaxy the stars were generated in, from which each star's own event
@@ -2116,7 +2116,7 @@ impl SystemStars {
         );
         let (hierarchy, stars) = models_at(galaxy, record, primary, ctx, attempt);
         let pairs = run_pairs(&hierarchy, &stars, galaxy.rules().stellar);
-        let releases = outer_releases(&hierarchy, &stars, &pairs, galaxy.rules().stellar.collapses);
+        let releases = outer_releases(&hierarchy, &stars, &pairs);
         Self {
             record: *record,
             hierarchy,
@@ -2608,10 +2608,9 @@ impl SystemStars {
     /// inner pair, has no shape of its own, and its outer star has lost the pair's mass from its
     /// orbit).
     ///
-    /// Under the stellar rules of P11.T10's fix (from version 27, [`CollapseRules::Applied`]) an
-    /// outer orbit a supernova of a pair below it unbinds ([`OuterRelease`]) takes from the system
-    /// its member that does not hold the primary, or both where neither does
-    /// ([`SystemStars::released_by`]). What is left is shown as above, the primary's own pair where
+    /// Under P11.T10's fix an outer orbit a supernova of a pair below it unbinds
+    /// ([`OuterRelease`]) takes from the system its member that does not hold the primary, or both
+    /// where neither does ([`SystemStars::released_by`]). What is left is shown as above, the primary's own pair where
     /// stars 0 and 1 are all that is left, and otherwise the largest drawn part of the hierarchy
     /// on the primary's inner chain that it holds ([`Shown::Part`] for three stars or more; the
     /// primary alone if none).
@@ -2755,8 +2754,7 @@ impl SystemStars {
         }
     }
 
-    /// The outer orbits its pairs' supernovae unbind, by age (P11.T10's fix; none under the held
-    /// arm).
+    /// The outer orbits its pairs' supernovae unbind, by age (P11.T10's fix).
     #[cfg(test)]
     #[must_use]
     pub(crate) fn releases(&self) -> &[OuterRelease] {
@@ -3021,13 +3019,13 @@ fn summarised<'a>(
 /// Every pair of two stars of `hierarchy` that can interact by +H or holds a remnant by then, run
 /// through the binary engine on the tracks of `stars` (P11.T11): from zero age to the pair's age at
 /// the end of the clock window, +H, so that its timeline covers the source horizon. A pair the
-/// pre-test passes over that holds a remnant is run so that its stars' collapses act on its orbit,
-/// with their records, and the engine takes it over where a collapse leaves an orbit that can
-/// interact (P11.T4.l); under the stellar rules of P11.T10's fix, the engine runs it from the start
-/// where a star of it collapses by then. Any other pair is two single stars on their orbit, in no
-/// class, whose timeline would be one detached segment of its models, so it is not run. A pair
-/// with a brown dwarf, or with a member that is itself a pair, is not run either. Each pair runs
-/// under the stellar stage's `rules`, those of the galaxy the stars were generated in.
+/// pre-test passes over that holds a remnant is run too: where a star of it collapses by then the
+/// engine runs it from the start, so that the collapse acts on its orbit, with its record (P11.T10's
+/// fix), and otherwise it is its two models on the drawn orbit. Any other pair is two single stars
+/// on their orbit, in no class, whose timeline would be one detached segment of its models, so it
+/// is not run. A pair with a brown dwarf, or with a member that is itself a pair, is not run
+/// either. Each pair runs under the stellar stage's `rules`, those of the galaxy the stars were
+/// generated in.
 #[must_use]
 fn run_pairs(
     hierarchy: &SystemHierarchy,
@@ -3083,7 +3081,7 @@ fn run_pairs(
 }
 
 /// An orbit of a system's hierarchy that a supernova of a pair below it unbinds (P11.T10's fix,
-/// from version 27: `collapses.rs`): its node, the system's age then, and each member's velocity
+/// `collapses.rs`): its node, the system's age then, and each member's velocity
 /// after in the frame of the orbit's barycentre before, inner member first.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct OuterRelease {
@@ -3318,7 +3316,7 @@ fn on_the_clock(age_at_epoch: Years, age: Years) -> UniverseTime {
 }
 
 /// The outer orbits of `hierarchy` that the supernovae of its run pairs `pairs` unbind, by age
-/// (P11.T10's fix, `collapses.rs`): none under the held arm of `rules`.
+/// (P11.T10's fix, `collapses.rs`).
 ///
 /// Each supernova of a pair, while the pair is bound just before it or is all its merged product,
 /// acts on the orbit of the pair's parent node with the node's other member, the pair a point mass
@@ -3338,9 +3336,8 @@ fn outer_releases(
     hierarchy: &SystemHierarchy,
     stars: &[StarModel],
     pairs: &[PairTimeline],
-    rules: CollapseRules,
 ) -> Vec<OuterRelease> {
-    if !rules.acts_on_outer_orbits() || pairs.is_empty() {
+    if pairs.is_empty() {
         return Vec::new();
     }
     let parents = hierarchy
