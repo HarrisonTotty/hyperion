@@ -192,6 +192,44 @@ describe("a frame's encoding", () => {
     expect(commands.at(-1)?.op).toBe("end");
   });
 
+  it("sets a pipeline, resources and vertex buffers only where a draw changes them (plan R14)", async () => {
+    const { engine, gpu } = await engineOn();
+    const first = triangle(engine);
+    const second = triangle(engine);
+    const flat = material(engine, "flat");
+    const other = material(engine, "other", "other");
+    const target = engine.createRenderTarget({
+      name: "scene",
+      size: { widthPx: 8, heightPx: 8 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    target.render(
+      frame("shared", [
+        draw(first, flat),
+        draw(first, flat),
+        draw(second, flat),
+        draw(second, other),
+        draw(second, flat),
+      ]),
+    );
+    const commands = commandsOf(gpu, "shared");
+    const count = (op: string, index?: number): number =>
+      commands.filter(
+        ({ op: each, args: [slot] }) => each === op && (index === undefined || slot === index),
+      ).length;
+    // Five draws: the pipeline and the resources are set three times, the vertex buffer twice.
+    expect([
+      count("draw"),
+      count("setPipeline"),
+      count("setBindGroup", 1),
+      count("setBindGroup", 2),
+      count("setVertexBuffer"),
+    ]).toEqual([5, 3, 5, 3, 2]);
+  });
+
   it("chains post-processes through the intermediates, the last writing the output", async () => {
     const { engine, gpu } = await engineOn();
     const mesh = triangle(engine);

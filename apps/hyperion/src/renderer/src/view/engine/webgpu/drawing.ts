@@ -41,6 +41,7 @@ import {
 } from "./materials";
 import { errorText } from "./errorText";
 import type { MeshRecord } from "./meshes";
+import { BindGroupCache, type CachedBindGroupEntry } from "./bindGroupCache";
 import { viewDimensionBinds, viewDimensionOf } from "./resources";
 import type { TextureBindingSpec } from "../types";
 import {
@@ -239,10 +240,7 @@ export class Drawing {
   readonly #frameBindGroup: GPUBindGroup;
   readonly #ring: UniformRing;
   readonly #fullScreen: GPUShaderModule;
-  /** Each object's number, for cache keys. */
-  readonly #ids = new WeakMap<object, number>();
-  #nextId = 1;
-  readonly #bindGroups = new Map<string, GPUBindGroup>();
+  readonly #bindGroups: BindGroupCache;
   readonly #views = new WeakMap<GPUTexture, Map<string, GPUTextureView>>();
 
   constructor(host: DrawingHost, fullScreenWgsl: string) {
@@ -269,6 +267,7 @@ export class Drawing {
       entries: [{ binding: 0, resource: { buffer: host.gpuBufferOf(this.#frameBuffer) } }],
     });
     this.#ring = new UniformRing(host, this.drawLayout);
+    this.#bindGroups = new BindGroupCache(device);
     this.#fullScreen = device.createShaderModule({ label: "full screen", code: fullScreenWgsl });
   }
 
@@ -468,8 +467,9 @@ export class Drawing {
       scene.setScissorRect(x, y, width, height);
     }
     scene.setBindGroup(0, this.#frameBindGroup);
+    const bound = new BoundState();
     for (const resolved of draws) {
-      encodeDraw(scene, resolved, this.#ring.bindGroup(resolved.slot));
+      encodeDraw(scene, resolved, this.#ring.bindGroup(resolved.slot), bound);
     }
     scene.end();
 
@@ -539,8 +539,9 @@ export class Drawing {
       ...optionalTimestamps(timestamps(pass.label)),
     });
     encoded.setBindGroup(0, this.#frameBindGroup);
+    const bound = new BoundState();
     for (const draw of draws) {
-      encodeDraw(encoded, draw, this.#ring.bindGroup(draw.slot));
+      encodeDraw(encoded, draw, this.#ring.bindGroup(draw.slot), bound);
     }
     encoded.end();
   }
@@ -634,11 +635,7 @@ export class Drawing {
   }
 
   #drawResources(record: MaterialRecord, draw: DrawItem): GPUBindGroup {
-    const entries: Array<{
-      readonly binding: number;
-      readonly resource: GPUBindingResource;
-      readonly key: object;
-    }> = [];
+    const entries: CachedBindGroupEntry[] = [];
     for (const texture of record.bindings.textures) {
       const handle = draw.textures[texture.name];
       if (handle === undefined) {
@@ -659,16 +656,12 @@ export class Drawing {
       const gpuSampler = this.#host.sampler(sampler);
       entries.push({ binding: sampler.binding, resource: gpuSampler, key: gpuSampler });
     }
-    return this.#bindGroup(record.resourceLayout, record.spec.name, entries);
+    return this.#bindGroups.bindGroup(record.resourceLayout, record.spec.name, entries);
   }
 
   #postProcessResources(resolved: ResolvedPostProcess, input: GPUTexture): GPUBindGroup {
     const { record, item } = resolved;
-    const entries: Array<{
-      readonly binding: number;
-      readonly resource: GPUBindingResource;
-      readonly key: object;
-    }> = [];
+    const entries: CachedBindGroupEntry[] = [];
     for (const texture of record.bindings.textures) {
       let view: GPUTextureView;
       if (texture.name === "hdr-colour") {
@@ -686,35 +679,7 @@ export class Drawing {
       const gpuSampler = this.#host.sampler(sampler);
       entries.push({ binding: sampler.binding, resource: gpuSampler, key: gpuSampler });
     }
-    return this.#bindGroup(record.resourceLayout, record.spec.name, entries);
-  }
-
-  #bindGroup(
-    layout: GPUBindGroupLayout,
-    label: string,
-    entries: ReadonlyArray<{
-      readonly binding: number;
-      readonly resource: GPUBindingResource;
-      readonly key: object;
-    }>,
-  ): GPUBindGroup {
-    const key = [
-      this.#id(layout),
-      ...entries.map((entry) => `${entry.binding}:${this.#id(entry.key)}`),
-    ].join(",");
-    let bindGroup = this.#bindGroups.get(key);
-    if (bindGroup === undefined) {
-      if (this.#bindGroups.size > 4096) {
-        this.#bindGroups.clear();
-      }
-      bindGroup = this.#host.device.createBindGroup({
-        label,
-        layout,
-        entries: entries.map(({ binding, resource }) => ({ binding, resource })),
-      });
-      this.#bindGroups.set(key, bindGroup);
-    }
-    return bindGroup;
+    return this.#bindGroups.bindGroup(record.resourceLayout, record.spec.name, entries);
   }
 
   /**
@@ -779,16 +744,6 @@ export class Drawing {
     }
     return view;
   }
-
-  #id(object: object): number {
-    let id = this.#ids.get(object);
-    if (id === undefined) {
-      id = this.#nextId;
-      this.#nextId += 1;
-      this.#ids.set(object, id);
-    }
-    return id;
-  }
 }
 
 /** One post-process of a chain: the intermediate it reads, and where it writes. */
@@ -815,21 +770,76 @@ function optionalTimestamps(writes: GPURenderPassTimestampWrites | undefined): {
   return writes === undefined ? {} : { timestampWrites: writes };
 }
 
-/** Encodes one resolved draw: direct, indexed or indirect, as its mesh and item say. */
+/**
+ * What a pass has set so far: its pipeline, its `@group(2)` resources, its vertex buffers by slot
+ * and its index buffer (plan R14, the owner's Mac).
+ *
+ * @remarks
+ * A pass keeps each of them until it is set again, whatever pipeline is set between (W3C WebGPU,
+ * `GPUBindingCommandsMixin`'s `[[bind_groups]]` and `GPURenderCommandsMixin`'s `[[pipeline]]`,
+ * `[[vertex_buffers]]` and `[[index_buffer]]`), so a draw that sets one to what the pass holds
+ * already draws exactly as one that does not: the call is skipped, each one a call the browser
+ * serializes to the GPU process and Dawn encodes. The `Draw` group is set for every draw, since its
+ * dynamic offset is the draw's own slot.
+ */
+export class BoundState {
+  #pipeline: GPURenderPipeline | null = null;
+  #resources: GPUBindGroup | null = null;
+  readonly #vertexBuffers: Array<GPUBuffer | undefined> = [];
+  #index: GPUBuffer | null = null;
+
+  /** Sets `pipeline` on `pass` unless the pass holds it already. */
+  pipeline(pass: GPURenderPassEncoder, pipeline: GPURenderPipeline): void {
+    if (this.#pipeline !== pipeline) {
+      pass.setPipeline(pipeline);
+      this.#pipeline = pipeline;
+    }
+  }
+
+  /** Sets `resources` as `@group(2)` on `pass` unless the pass holds them already. */
+  resources(pass: GPURenderPassEncoder, resources: GPUBindGroup): void {
+    if (this.#resources !== resources) {
+      pass.setBindGroup(2, resources);
+      this.#resources = resources;
+    }
+  }
+
+  /** Sets `buffer` in vertex slot `slot` on `pass` unless the pass holds it there already. */
+  vertexBuffer(pass: GPURenderPassEncoder, slot: number, buffer: GPUBuffer): void {
+    if (this.#vertexBuffers[slot] !== buffer) {
+      pass.setVertexBuffer(slot, buffer);
+      this.#vertexBuffers[slot] = buffer;
+    }
+  }
+
+  /** Sets `buffer` as the `uint32` index buffer on `pass` unless the pass holds it already. */
+  indexBuffer(pass: GPURenderPassEncoder, buffer: GPUBuffer): void {
+    if (this.#index !== buffer) {
+      pass.setIndexBuffer(buffer, "uint32");
+      this.#index = buffer;
+    }
+  }
+}
+
+/**
+ * Encodes one resolved draw: direct, indexed or indirect, as its mesh and item say, setting only
+ * the state the pass does not hold already (`bound`, the pass's own).
+ */
 function encodeDraw(
   pass: GPURenderPassEncoder,
   resolved: ResolvedDraw,
   drawGroup: GPUBindGroup,
+  bound: BoundState,
 ): void {
   const { draw, mesh, pipeline, slot, resources } = resolved;
-  pass.setPipeline(pipeline);
+  bound.pipeline(pass, pipeline);
   pass.setBindGroup(1, drawGroup, [slot.offsetBytes]);
-  pass.setBindGroup(2, resources);
+  bound.resources(pass, resources);
   mesh.vertexBuffers.forEach((buffer, index) => {
-    pass.setVertexBuffer(index, buffer);
+    bound.vertexBuffer(pass, index, buffer);
   });
   if (mesh.index !== null) {
-    pass.setIndexBuffer(mesh.index.buffer, "uint32");
+    bound.indexBuffer(pass, mesh.index.buffer);
   }
   if (resolved.indirect !== null) {
     // The GPU wrote the counts (Design note 19), in WebGPU's layout of the draw call.
