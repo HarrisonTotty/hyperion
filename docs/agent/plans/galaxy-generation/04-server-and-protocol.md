@@ -505,8 +505,9 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   `CatalogueClassWire` and `MemberClassWire` will grow, and so will plan 14's `PopulationDto`
   (its disc arms from generator version 26, P14.T28.a and T28.d), `HabitabilityLimitDto`
   (P14.T25's limits, named before any build sent one; a client reads one it does not know as
-  Missing) and `SurfaceStateDto` (named before any build sent `desert`, 27's label; lean,
-  2026-11-01). TypeScript switches over them are
+  Missing), `SurfaceStateDto` (named before any build sent `desert`, 27's label; lean,
+  2026-11-01) and `DestructionCauseDto` (named before any build sent `evaporated`, 28's cause,
+  P14.T55.b.a; a client reads one it does not know as Missing). TypeScript switches over them are
   exhaustive with no `default`, so a new value is a compile error where it matters. The
   `PARAMETERS` page reads a unit it does not know as Missing (P07.T10.b). `SystemOriginWire`,
   `CatalogueClassWire` and `MemberClassWire` are plan 09's (P09.T39), named here before any build
