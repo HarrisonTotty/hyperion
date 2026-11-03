@@ -12,7 +12,7 @@ import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
 import { ID_NONE } from "../idTarget";
 import type { KernelPair } from "../kernels";
 import type { AllocationEvent, TextureSpec } from "../memory";
-import { GraphicsStatusStore, initialGraphicsStatus } from "../status";
+import { type GraphicsFault, GraphicsStatusStore, initialGraphicsStatus } from "../status";
 import {
   ColourSelfSample,
   type DepthLayerPass,
@@ -405,7 +405,41 @@ describe("the engine's pass times", () => {
     renderEmptyFrame(engine, "frame");
     expect(engine.passTimesFrame).toBe(0);
   });
+
+  it("drop the reads their device's loss cuts short, with no error or warning", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { engine, gpu } = await engineOn(["timestamp-query"]);
+    const times = vi.fn<(times: PassTimes) => void>();
+    engine.onPassTimes(times);
+    const faults = vi.fn<(fault: GraphicsFault) => void>();
+    engine.onFault(faults);
+    // The terrain run's forced loss, as the owner's Mac met it: frames' reads still in flight.
+    gpu.holdMaps = true;
+    renderEmptyFrame(engine, "first");
+    renderEmptyFrame(engine, "second");
+    gpu.destroy();
+    await vi.waitFor(() => {
+      expect(faults).toHaveBeenCalledOnce();
+    });
+    await macrotask();
+    renderEmptyFrame(engine, "after the loss");
+    await macrotask();
+    expect([
+      vi.mocked(console.error).mock.calls,
+      vi.mocked(console.warn).mock.calls,
+      times.mock.calls,
+    ]).toEqual([[], [], []]);
+    expect(engine.passTimesFrame).toBe(3);
+  });
 });
+
+/** Runs every microtask queued before it: a read's mapping, its report or failure and its end. */
+function macrotask(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
 
 /** Renders a frame with no draws into a small target, which resolves the pending pass times. */
 function renderEmptyFrame(engine: WebGpuRenderEngine, label: string): void {

@@ -218,6 +218,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         () => this.#disposed,
         (fault) => {
           this.#lost = fault;
+          // The reads of the pass times in flight died with it too, and no later one is read.
+          this.#timer.deviceLost();
           // The records' pipelines died with the device: none is handed out again.
           this.#kernels.clear();
           for (const listener of this.#faultListeners) {
