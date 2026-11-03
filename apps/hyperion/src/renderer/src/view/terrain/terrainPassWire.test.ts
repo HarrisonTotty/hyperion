@@ -33,6 +33,7 @@ import {
 } from "../quality/qualitySetting";
 import { vertexDir } from "./cube";
 import { finestPatchSizeM, heldRadiusM, morphRampM } from "./grounded";
+import { stillMaterialSpec } from "./gpu/material";
 import { CLUSTER_LIT_PASS } from "./gpu/resources";
 import {
   INSTANCE_RECORD_BYTES,
@@ -413,18 +414,16 @@ function expectedPhases(
 describe("the wireframe's terrain pass (R10.T11)", () => {
   it("compiles the wireframe's material for the canvas over the lit material's mesh, and its interior patches' form on the cluster path (plan R14, R14.T4.c), and nothing more", async () => {
     const { pass, engine } = await wirePass();
-    expect(engine.compiled).toEqual([
-      {
-        spec: terrainWireClusterMaterialSpec(pass.layout.vertexPath),
-        targets: ["canvas"],
-        meshes: ["terrain lit patch"],
-      },
-      {
-        spec: terrainWireMaterialSpec(pass.layout.vertexPath),
-        targets: ["canvas"],
-        meshes: ["terrain lit patch"],
-      },
-    ]);
+    const path = pass.layout.vertexPath;
+    expect(engine.compiled).toEqual(
+      [
+        terrainWireClusterMaterialSpec(path),
+        terrainWireMaterialSpec(path),
+        // Their still forms after them (R10.T16.i), which a frame mixing no heights draws.
+        stillMaterialSpec(terrainWireClusterMaterialSpec(path)),
+        stillMaterialSpec(terrainWireMaterialSpec(path)),
+      ].map((spec) => ({ spec, targets: ["canvas"], meshes: ["terrain lit patch"] })),
+    );
   });
 
   it("makes no depth material for the symbology, which draws over its own depth", async () => {
@@ -444,7 +443,7 @@ describe("the wireframe's terrain pass (R10.T11)", () => {
       draw?.indirect?.offsetBytes,
     ]).toEqual([
       "terrain lit patch",
-      "terrain-wire-face-differences",
+      "terrain-wire-face-differences-still",
       {},
       `terrain indirect (${PRIMARY})`,
       0,
@@ -818,19 +817,19 @@ describe("the wireframe's interior patches on the cluster path (plan R14, R14.T4
       [
         [
           "terrain clusters",
-          "terrain-wire-cluster-face-differences",
+          "terrain-wire-cluster-face-differences-still",
           `terrain clusters (${PRIMARY}) arguments`,
         ],
         [
           "terrain clusters",
-          "terrain-wire-cluster-face-differences",
+          "terrain-wire-cluster-face-differences-still",
           `terrain clusters (${PRIMARY}) arguments`,
         ],
         ...((patches?.edge ?? 0) > 0
           ? [
               [
                 "terrain lit patch",
-                "terrain-wire-face-differences",
+                "terrain-wire-face-differences-still",
                 `terrain indirect (${PRIMARY})`,
               ],
             ]
@@ -955,7 +954,7 @@ describe("the wireframe's interior patches on the cluster path (plan R14, R14.T4
       engine.dispatched.filter((d) => d.pass === TERRAIN_CLUSTER_COMPACT_LABEL).length,
       pass.clusterRefusal?.includes("wire-cluster") === true,
       errors.mock.calls.length > 0,
-    ]).toEqual([[["terrain lit patch", "terrain-wire-face-differences"]], 0, true, true]);
+    ]).toEqual([[["terrain lit patch", "terrain-wire-face-differences-still"]], 0, true, true]);
   });
 
   it("binds the interior records and their own phases to its cluster draws", async () => {
@@ -990,7 +989,7 @@ describe("the wireframe's interior patches on the cluster path (plan R14, R14.T4
     streamed(made);
     const frame = made.pass.drawFor(PRIMARY, frameOf(VIEW, WIRE));
     expect(frame.draws.map((d) => [d.mesh.name, d.material.name])).toEqual([
-      ["terrain lit patch", "terrain-wire-face-differences"],
+      ["terrain lit patch", "terrain-wire-face-differences-still"],
     ]);
   });
 

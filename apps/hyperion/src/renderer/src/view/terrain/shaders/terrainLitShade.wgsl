@@ -65,7 +65,7 @@ fn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {
   var cascade_lit = 1.0;
   if (!reference) {
     normal = shadingNormalAt(in.slot, in.parent, in.patchUv, in.morph);
-    if (in.rebakeFade > 0.0) {
+    if (TERRAIN_MIXES && in.rebakeFade > 0.0) {
       // A rebake's normal fades from the older bake's tile (R10.T16.i), or from the datum's where
       // the reference surface stood; a refine's or a coarsen's takes the parent's tile by the morph
       // factor already, and fades from the datum's where the parent held the ground unsurveyed.

@@ -243,7 +243,11 @@ import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionToleran
 import { PATCH_VERTICES_PER_SIDE, TERRAIN_SHADING_TRAITS, type TerrainShading } from "./slotLayout";
 import { ResidentHeights, type ResidentHeightsView } from "./residentHeights";
 import { DrawnGround, type DrawnGroundView } from "./drawnGround";
-import { type TerrainMaterialSource, terrainMaterialOf } from "./materialSet";
+import {
+  type TerrainMaterialKind,
+  type TerrainMaterialSource,
+  terrainMaterialOf,
+} from "./materialSet";
 import {
   type CascadeIndex,
   cascadeUniforms,
@@ -1100,6 +1104,13 @@ interface Device {
    * be made, when the wireframe draws every patch by the lit mesh.
    */
   wireClusterMaterial: MaterialHandle | null;
+  /**
+   * The still forms of its materials (plan R10, R10.T16.i; `stillMaterialSpec`), by the material:
+   * a frame none of whose instances mixes its heights draws each draw's still form where it is made.
+   */
+  readonly stills: Map<MaterialHandle, MaterialHandle>;
+  /** Each draw drawn by its still form, by the draw, so that a draw kept from frame to frame is too. */
+  readonly stillDraws: WeakMap<DrawItem, DrawItem>;
   /** Each resident patch's layers' summary and request, by key string. */
   readonly residents: Map<string, Resident>;
   /** The resident patches asked for again by the rebake rule, at their last requests. */
@@ -1216,6 +1227,11 @@ interface ViewState {
   occlusionBuilds: number;
   late: LatePass | null;
   lastLate: boolean;
+  /**
+   * Whether this frame's draws took their materials' still forms (R10.T16.i;
+   * `stillMaterialSpec`), which its late pass's take too.
+   */
+  lateStill: boolean;
   /**
    * The interior patches' records this frame (plan R14, R14.T1.a), apart from {@link
    * ViewState.instances}, which then hold the other patches', and the draw set's index of each; with
@@ -1416,6 +1432,24 @@ type CasterFrame = Pick<TerrainCascadeFrame, "passes" | "litMeshCasters" | "clus
 
 /** An instance record's 32-bit words. */
 const INSTANCE_WORDS = INSTANCE_RECORD_BYTES / 4;
+
+/**
+ * `draw` by its material's still form on `device` (plan R10, R10.T16.i; `stillMaterialSpec`),
+ * where that is made, kept by the draw so that a draw kept from frame to frame is too; `draw`
+ * itself otherwise.
+ */
+function stillDrawOf(device: Device, draw: DrawItem): DrawItem {
+  const form = device.stills.get(draw.material);
+  if (form === undefined) {
+    return draw;
+  }
+  let kept = device.stillDraws.get(draw);
+  if (kept?.material !== form) {
+    kept = { ...draw, material: form };
+    device.stillDraws.set(draw, kept);
+  }
+  return kept;
+}
 
 /** The overlay's depths, by their word in the cascades' caster inputs (plan R14, R14.T6.a). */
 const OVERLAY_DEPTH_WORD = {
@@ -1911,6 +1945,11 @@ export class TerrainPass {
   #rangesVersion = 0;
   #device: Device;
   #selected: Selected | null = null;
+  /**
+   * Whether the view's frame last drawn drew its materials' still forms (R10.T16.i), which
+   * {@link TerrainPass.symbologyDepthMaterial} follows.
+   */
+  #lastStill = false;
   #demandDirty = true;
   /**
    * Every height worker is lost, or the session halted the pass ({@link TerrainPass.halt}): it asks
@@ -2222,10 +2261,12 @@ export class TerrainPass {
    * A lit pass's terrain as depth alone, compiled for the canvas (`terrainDepthMaterialSpec`,
    * R10.T16.c): a view's draw with this material writes the drawn ground's depth, pushed by its
    * constant fraction, into the symbology's pass before its lines; `null` before it is compiled, and for R05's
-   * spike shading, which no overlay draws over.
+   * spike shading, which no overlay draws over. Its still form where the view's frame last drawn
+   * ({@link TerrainPass.drawFor}) drew its materials' (R10.T16.i; `stillMaterialSpec`).
    */
   get symbologyDepthMaterial(): MaterialHandle | null {
-    return this.#device.depthMaterial;
+    const depth = this.#device.depthMaterial;
+    return depth !== null && this.#lastStill ? (this.#device.stills.get(depth) ?? depth) : depth;
   }
 
   /**
@@ -2298,6 +2339,7 @@ export class TerrainPass {
       | "wire-cluster",
     device: Device,
     path: TerrainLayout["vertexPath"],
+    still = false,
   ): Promise<MaterialHandle> {
     if (kind === "spike") {
       return this.#engine.createMaterialAsync(
@@ -2306,13 +2348,49 @@ export class TerrainPass {
         [device.resources.mesh],
       );
     }
+    let made: Promise<MaterialHandle>;
     if (this.#materials !== null) {
-      return this.#materials.material(kind, path);
+      made = this.#materials.material(kind, path, still);
+    } else {
+      // The device's capabilities at each making: a caster made again after a restore onto
+      // another adapter takes that adapter's `depth-clip-control` (decision-r10-t9b-design D1).
+      const { spec, targets } = terrainMaterialOf(kind, path, this.#engine.capabilities, still);
+      made = this.#engine.createMaterialAsync(spec, targets, [device.resources.mesh]);
     }
-    // The device's capabilities at each making: a caster made again after a restore onto another
-    // adapter takes that adapter's `depth-clip-control` (decision-r10-t9b-design D1).
-    const { spec, targets } = terrainMaterialOf(kind, path, this.#engine.capabilities);
-    return this.#engine.createMaterialAsync(spec, targets, [device.resources.mesh]);
+    return still
+      ? made
+      : made.then((material) => {
+          // Its still form after it, so that it delays no first frame (R10.T16.i).
+          void this.#readyStill(kind, device, path, material);
+          return material;
+        });
+  }
+
+  /**
+   * Compiles, or takes, the still form of `kind` on `path` (`stillMaterialSpec`), `material`'s, for
+   * `device`'s frames that mix no heights ({@link Device.stills}); never rejects. Until it is made,
+   * and where it cannot be, those frames draw `material`.
+   */
+  async #readyStill(
+    kind: TerrainMaterialKind,
+    device: Device,
+    path: TerrainLayout["vertexPath"],
+    material: MaterialHandle,
+  ): Promise<void> {
+    try {
+      const still = await this.#materialOf(kind, device, path, true);
+      if (device === this.#device && !this.#disposed && !device.stills.has(material)) {
+        device.stills.set(material, still);
+      } else {
+        this.#releaseOwn(still);
+      }
+    } catch (error: unknown) {
+      // A device replaced, a loss or a pass let go meanwhile is no failure (C9); otherwise its
+      // frames draw the material, as before the still forms.
+      if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
+        console.error(`the terrain's still ${kind} material failed:`, error);
+      }
+    }
   }
 
   /** Releases a material the pass compiled itself; the session's are the session's to release. */
@@ -2830,8 +2908,9 @@ export class TerrainPass {
     const missing = (drawSet.missingViews & mask) !== 0;
     const standingIn = (drawSet.standingInViews & mask) !== 0;
     const set = this.#cascadesFor(state, input);
-    const { draws, patches, count, refused, cast, overlayDepth, overlayPass, lit } =
+    const { draws, patches, count, refused, cast, overlayDepth, overlayPass, lit, still } =
       this.#writeOrNone(state, mask, selected.nearContacts, input, set);
+    this.#lastStill = still;
     const conditions: TerrainConditions = {
       streaming: missing || standingIn,
       // A view of weight w is limited where its τ′ is above τ (decision-r10-t16-contracts §3); the
@@ -3150,6 +3229,10 @@ export class TerrainPass {
 
   /** The materials the pass compiled itself and the tables of no air of `device`. */
   #releaseDevice(device: Device): void {
+    for (const still of device.stills.values()) {
+      this.#releaseOwn(still);
+    }
+    device.stills.clear();
     if (device.material !== null) {
       this.#releaseOwn(device.material);
       device.material = null;
@@ -3280,6 +3363,8 @@ export class TerrainPass {
       finDepthMaterial: null,
       finShadowMaterial: null,
       wireClusterMaterial: null,
+      stills: new Map(),
+      stillDraws: new WeakMap(),
       clusterShadowMaterial: null,
       clusterDepthMaterial: null,
       cullKernel: null,
@@ -3618,6 +3703,7 @@ export class TerrainPass {
       occlusionBuilds: -1,
       late: null,
       lastLate: false,
+      lateStill: false,
       interior: new InstanceRecords(slotCount),
       interiorDrawn: [],
       interiorFins: [],
@@ -4170,6 +4256,7 @@ export class TerrainPass {
     readonly overlayDepth: TerrainOverlayDepth | null;
     readonly overlayPass: number | null;
     readonly lit: boolean;
+    readonly still: boolean;
   } {
     try {
       return {
@@ -4187,6 +4274,7 @@ export class TerrainPass {
           overlayDepth: null,
           overlayPass: null,
           lit: false,
+          still: false,
         };
       }
       throw error;
@@ -4237,6 +4325,7 @@ export class TerrainPass {
     readonly overlayDepth: TerrainOverlayDepth | null;
     readonly overlayPass: number | null;
     readonly lit: boolean;
+    readonly still: boolean;
   } {
     const { resources, residents } = device;
     const { instances, morph, phases, interiorPhases, drawn: drawnIndices, interior } = state;
@@ -4272,6 +4361,9 @@ export class TerrainPass {
     state.interiorFins.length = 0;
     state.interiorWhole.length = 0;
     let finCount = 0;
+    // Whether an instance drawn mixes its heights towards another surface (R10.T16.i): a frame
+    // where none does draws its materials' still forms (`stillMaterialSpec`).
+    let mixes = false;
     const drawnGround = state.drawnGround;
     drawnGround.begin();
     if (drawSet !== undefined) {
@@ -4295,6 +4387,7 @@ export class TerrainPass {
         const heights = device.morph.heightWords[n] ?? 0;
         const parentSlot = this.#parentSlotOf(device, patch.key);
         const fadesWord = fadeWordOf(fades.own[n] ?? 0, heights);
+        mixes ||= ((fadesWord >>> 8) & MIX_STEPS) !== 0;
         drawnGround.push({
           key: patch.key,
           area: within ?? patch.key,
@@ -4393,6 +4486,7 @@ export class TerrainPass {
         overlayDepth: null,
         overlayPass: null,
         lit: false,
+        still: false,
       };
     }
     rotationMat4(input.view.rotation, state.uniforms.bodyRotation);
@@ -4524,14 +4618,38 @@ export class TerrainPass {
             fins: finCount,
           }
         : NO_PATCHES;
+    state.lateStill = !mixes && device.stills.size > 0;
+    if (!state.lateStill) {
+      return {
+        draws: drawn,
+        patches,
+        count,
+        cast,
+        overlayDepth,
+        overlayPass,
+        lit: litBase !== null || wireLit,
+        still: false,
+      };
+    }
+    // No instance mixes: each draw by its material's still form, where it is made, which draws the
+    // same to the bit (the lane's settled frame).
+    const still = (draw: DrawItem): DrawItem => stillDrawOf(device, draw);
+    const passes: DepthLayerPass[] = [];
+    for (const pass of cast.passes) {
+      passes.push({ ...pass, draws: pass.draws.map(still) });
+    }
     return {
-      draws: drawn,
+      draws: drawn.map(still),
       patches,
       count,
-      cast,
-      overlayDepth,
+      cast: cast === NO_CASTERS ? cast : { ...cast, passes },
+      overlayDepth:
+        overlayDepth === null
+          ? null
+          : { edge: overlayDepth.edge.map(still), clusters: overlayDepth.clusters.map(still) },
       overlayPass,
       lit: litBase !== null || wireLit,
+      still: true,
     };
   }
 
@@ -5720,13 +5838,15 @@ export class TerrainPass {
     state.occlusionBuilds = late.occlusion.pyramid.builds;
     state.lastLate = true;
     this.#sampleClusters(state, buckets);
-    return buckets.drawItems(
+    const draws = buckets.drawItems(
       CLUSTER_LIT_LATE_PASS,
       clusters.mesh,
       litBase,
       late.cap,
       clusters.finLitBase,
     );
+    // By the still forms where the frame's early draws took them (R10.T16.i).
+    return state.lateStill ? draws.map((draw) => stillDrawOf(late.device, draw)) : draws;
   }
 
   /**

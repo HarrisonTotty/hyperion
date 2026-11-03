@@ -18,6 +18,12 @@ const PATCH_VERTICES : u32 = 4225u;
 const METER_LIT_BODY : f32 = 2.0;
 // rgba16float's largest finite value (R02's HALF_FLOAT_MAX).
 const HALF_FLOAT_MAX : f32 = 65504.0;
+// Whether the pipeline mixes an instance's heights, normals and maturity towards another surface
+// (R10.T16.i's rebakes, rises, refines and coarsens; `rebakeOf`). A material's still form
+// (gpu/material.ts' `stillMaterialSpec`), which a frame draws when no instance it draws mixes,
+// declares it false, so that the mix is not compiled into its pipeline: with no mix the block is
+// never taken, and every value it leaves is as before, bit for bit.
+const TERRAIN_MIXES : bool = true;
 
 // uniforms.ts's INSTANCE_RECORD_BYTES. The parent's slot and the patch's quadrant in it (bit 0
 // i & 1, bit 1 j & 1) are for the horizon map's and the normals' blends (R10.T8.b, T8.c;
@@ -311,7 +317,7 @@ fn patchVertexOf(grid : vec3f, instance : u32) -> PatchVertex {
   // that where the bakes agree nothing moves and shared vertices still agree. A vertex's offset is
   // linear in its height, along ν, on either vertex path.
   let rebake = rebakeOf(inst);
-  if (rebake.fade > 0.0) {
+  if (TERRAIN_MIXES && rebake.fade > 0.0) {
     var older = vec2f(ownHeightM, morphHeightM);
     if (rebake.slot != PARENT_MIX_SLOT) {
       older = olderHeightsAt(rebake.slot, at);

@@ -17,10 +17,12 @@ import { EngineUnavailable } from "../engine/resilientEngine";
 import { assertOutputsFit } from "../engine/webgpu/materials";
 import { pipelineOutputs } from "../engine/webgpu/pipelineOutputs";
 import type { MaterialHandle, MeshHandle, MeshSpec } from "../engine/types";
+import { TERRAIN_MIXES_OFF, TERRAIN_MIXES_ON } from "./gpu/material";
 import { terrainMeshSpec } from "./gpu/resources";
 import {
   COMPILE_MESH_NAME,
   sessionMaterials,
+  type TerrainMaterialKey,
   TERRAIN_COMPILES_IN_FLIGHT,
   type TerrainMaterialKind,
   TerrainMaterialSet,
@@ -88,6 +90,22 @@ const HIGH = [
   `terrain-wire-baked-offsets canvas ${COMPILE_MESH_NAME}`,
   `terrain-wire-cluster-baked-offsets canvas ${COMPILE_MESH_NAME}`,
 ];
+
+/** {@link HIGH}'s still forms (plan R10, R10.T16.i; `stillMaterialSpec`), in the same order. */
+const HIGH_STILL = HIGH.map((compile) => compile.replace(/^(\S+)/u, "$1-still"));
+
+/** What the set compiles on the high setting: {@link HIGH}, then their still forms. */
+const SETTING = [...HIGH, ...HIGH_STILL];
+
+/** `keys`, then each one's still form, as {@link sessionMaterials} gives them (R10.T16.i). */
+function withStills(keys: ReadonlyArray<TerrainMaterialKey>): TerrainMaterialKey[] {
+  return [...keys, ...keys.map((key): TerrainMaterialKey => ({ ...key, still: true }))];
+}
+
+/** A still form's source with `TERRAIN_MIXES` declared true again. */
+function back(source: string): string {
+  return source.replace(TERRAIN_MIXES_OFF, TERRAIN_MIXES_ON);
+}
 
 /**
  * A binding under the high lit cache's offsets (1,208 slots × 101,400 B), and over its fallback's
@@ -157,27 +175,27 @@ class DeferredEngine extends CountingRenderEngine {
 describe("sessionMaterials (R10.T14.d)", () => {
   it("gives the high setting's lit, caster, depth and wireframe materials on baked offsets, in their order of first use", async () => {
     const engine = await countingRenderEngine();
-    expect(sessionMaterials("high", engine.capabilities)).toEqual([
-      { kind: "lit", path: "baked-offsets" },
-      { kind: "lit-cluster", path: "baked-offsets" },
-      { kind: "lit-fin", path: "baked-offsets" },
-      { kind: "shadow-cluster", path: "baked-offsets" },
-      { kind: "shadow-fin", path: "baked-offsets" },
-      { kind: "depth-cluster", path: "baked-offsets" },
-      { kind: "depth-fin", path: "baked-offsets" },
-      { kind: "lit-interior", path: "baked-offsets" },
-      { kind: "shadow", path: "baked-offsets" },
-      { kind: "depth", path: "baked-offsets" },
-      { kind: "wire", path: "baked-offsets" },
-      { kind: "wire-cluster", path: "baked-offsets" },
-    ]);
+    expect(sessionMaterials("high", engine.capabilities)).toEqual(
+      withStills([
+        { kind: "lit", path: "baked-offsets" },
+        { kind: "lit-cluster", path: "baked-offsets" },
+        { kind: "lit-fin", path: "baked-offsets" },
+        { kind: "shadow-cluster", path: "baked-offsets" },
+        { kind: "shadow-fin", path: "baked-offsets" },
+        { kind: "depth-cluster", path: "baked-offsets" },
+        { kind: "depth-fin", path: "baked-offsets" },
+        { kind: "lit-interior", path: "baked-offsets" },
+        { kind: "shadow", path: "baked-offsets" },
+        { kind: "depth", path: "baked-offsets" },
+        { kind: "wire", path: "baked-offsets" },
+        { kind: "wire-cluster", path: "baked-offsets" },
+      ]),
+    );
   });
 
   it("gives the low setting's on face differences, with no caster", async () => {
     const engine = await countingRenderEngine();
-    expect(
-      sessionMaterials("low", engine.capabilities).map(({ kind, path }) => `${kind} ${path}`),
-    ).toEqual([
+    const low = [
       "lit face-differences",
       "lit-cluster face-differences",
       "lit-fin face-differences",
@@ -187,33 +205,42 @@ describe("sessionMaterials (R10.T14.d)", () => {
       "depth face-differences",
       "wire face-differences",
       "wire-cluster face-differences",
-    ]);
+    ];
+    expect(
+      sessionMaterials("low", engine.capabilities).map(
+        ({ kind, path, still }) => `${kind} ${path}${still === true ? " still" : ""}`,
+      ),
+    ).toEqual([...low, ...low.map((key) => `${key} still`)]);
   });
 
   it("gives the lit layout's on face differences where the device's binding holds the wireframe's offsets alone", async () => {
     const engine = await countingRenderEngine(NARROW);
-    expect(sessionMaterials("high", engine.capabilities)).toEqual([
-      { kind: "lit", path: "face-differences" },
-      { kind: "lit-cluster", path: "face-differences" },
-      { kind: "lit-fin", path: "face-differences" },
-      { kind: "shadow-cluster", path: "face-differences" },
-      { kind: "shadow-fin", path: "face-differences" },
-      { kind: "depth-cluster", path: "face-differences" },
-      { kind: "depth-fin", path: "face-differences" },
-      { kind: "lit-interior", path: "face-differences" },
-      { kind: "shadow", path: "face-differences" },
-      { kind: "depth", path: "face-differences" },
-      { kind: "wire", path: "baked-offsets" },
-      { kind: "wire-cluster", path: "baked-offsets" },
-    ]);
+    expect(sessionMaterials("high", engine.capabilities)).toEqual(
+      withStills([
+        { kind: "lit", path: "face-differences" },
+        { kind: "lit-cluster", path: "face-differences" },
+        { kind: "lit-fin", path: "face-differences" },
+        { kind: "shadow-cluster", path: "face-differences" },
+        { kind: "shadow-fin", path: "face-differences" },
+        { kind: "depth-cluster", path: "face-differences" },
+        { kind: "depth-fin", path: "face-differences" },
+        { kind: "lit-interior", path: "face-differences" },
+        { kind: "shadow", path: "face-differences" },
+        { kind: "depth", path: "face-differences" },
+        { kind: "wire", path: "baked-offsets" },
+        { kind: "wire-cluster", path: "baked-offsets" },
+      ]),
+    );
   });
 
   it("gives only the wireframe's where the device's binding holds the wireframe's layout alone", async () => {
     const engine = await countingRenderEngine(TINY);
-    expect(sessionMaterials("high", engine.capabilities)).toEqual([
-      { kind: "wire", path: "face-differences" },
-      { kind: "wire-cluster", path: "face-differences" },
-    ]);
+    expect(sessionMaterials("high", engine.capabilities)).toEqual(
+      withStills([
+        { kind: "wire", path: "face-differences" },
+        { kind: "wire-cluster", path: "face-differences" },
+      ]),
+    );
   });
 
   it("gives none where the device holds no layout of the setting", async () => {
@@ -277,6 +304,24 @@ describe("terrainMaterialOf (R10.T14.d)", () => {
     expect(refused).toEqual([]);
   });
 
+  it("makes each kind's still form from its source with TERRAIN_MIXES declared false, and nothing else (R10.T16.i)", () => {
+    const changed = TERRAIN_MATERIAL_KINDS.filter((kind) => {
+      const made = terrainMaterialOf(kind, "baked-offsets", { depthClipControl: true });
+      const still = terrainMaterialOf(kind, "baked-offsets", { depthClipControl: true }, true);
+      return !(
+        still.spec.name === `${made.spec.name}-still` &&
+        still.spec.vertexWgsl.includes(TERRAIN_MIXES_OFF) &&
+        back(still.spec.vertexWgsl) === made.spec.vertexWgsl &&
+        back(still.spec.fragmentWgsl) === made.spec.fragmentWgsl &&
+        JSON.stringify({ ...still.spec, name: "", vertexWgsl: "", fragmentWgsl: "" }) ===
+          JSON.stringify({ ...made.spec, name: "", vertexWgsl: "", fragmentWgsl: "" }) &&
+        JSON.stringify([still.targets, still.shading]) ===
+          JSON.stringify([made.targets, made.shading])
+      );
+    });
+    expect(changed).toEqual([]);
+  });
+
   it("makes the caster unclipped exactly where the device offers depth-clip-control (R10.T9.b)", () => {
     expect(
       [true, false].map(
@@ -291,21 +336,20 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
   it("compiles its setting's materials as it is made", async () => {
     const engine = await countingRenderEngine();
     const set = new TerrainMaterialSet(engine, "high");
-    expect([await set.compiled, compiles(engine)]).toEqual([HIGH.length, HIGH]);
+    expect([await set.compiled, compiles(engine)]).toEqual([SETTING.length, SETTING]);
   });
 
   it("compiles each against a mesh of its pass's layout, released once compiled", async () => {
     const engine = new MeshRecordingEngine(await fakeDevice());
     const set = new TerrainMaterialSet(engine, "high");
     await set.compiled;
-    expect([engine.meshSpecs.map(layout), engine.live.meshes]).toEqual([
-      [
-        ...Array.from({ length: 10 }, () => layout(terrainMeshSpec("lit"))),
-        layout(terrainMeshSpec("wire")),
-        layout(terrainMeshSpec("wire")),
-      ],
-      0,
-    ]);
+    // The setting's ten lit meshes and two wireframe meshes, then their still forms' likewise.
+    const once = [
+      ...Array.from({ length: 10 }, () => layout(terrainMeshSpec("lit"))),
+      layout(terrainMeshSpec("wire")),
+      layout(terrainMeshSpec("wire")),
+    ];
+    expect([engine.meshSpecs.map(layout), engine.live.meshes]).toEqual([[...once, ...once], 0]);
   });
 
   it("gives the one handle however often a material is asked, compiling it once", async () => {
@@ -314,7 +358,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     await set.compiled;
     const first = await set.material("lit", "baked-offsets");
     const second = await set.material("lit", "baked-offsets");
-    expect([second, compiles(engine).length]).toEqual([first, HIGH.length]);
+    expect([second, compiles(engine).length]).toEqual([first, SETTING.length]);
   });
 
   it("compiles a material of another path at its first ask, once", async () => {
@@ -323,7 +367,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     await set.compiled;
     await set.material("wire", "face-differences");
     await set.material("wire", "face-differences");
-    expect(compiles(engine, HIGH.length)).toEqual([
+    expect(compiles(engine, SETTING.length)).toEqual([
       `terrain-wire-face-differences canvas ${COMPILE_MESH_NAME}`,
     ]);
   });
@@ -332,12 +376,12 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     const engine = await countingRenderEngine();
     engine.failMaterials((name) => name === "terrain-depth-baked-offsets");
     const set = new TerrainMaterialSet(engine, "high");
-    expect(await set.compiled).toBe(HIGH.length - 1);
+    expect(await set.compiled).toBe(SETTING.length - 1);
     engine.failMaterials(() => false);
     const depth = await set.material("depth", "baked-offsets");
     expect([depth.name, compiles(engine).length]).toEqual([
       "terrain-depth-baked-offsets",
-      HIGH.length + 1,
+      SETTING.length + 1,
     ]);
   });
 
@@ -351,8 +395,8 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     const lit = await set.material("lit", "baked-offsets");
     expect([lit.name, compiles(engine), engine.live.materials]).toEqual([
       "terrain-lit-baked-offsets",
-      HIGH,
-      HIGH.length,
+      SETTING,
+      SETTING.length,
     ]);
   });
 
@@ -365,10 +409,10 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.restore();
     await settle();
     const after = await set.material("lit", "baked-offsets");
-    expect([after === before, compiles(engine, HIGH.length), engine.live.materials]).toEqual([
+    expect([after === before, compiles(engine, SETTING.length), engine.live.materials]).toEqual([
       false,
-      HIGH,
-      HIGH.length,
+      SETTING,
+      SETTING.length,
     ]);
   });
 
@@ -386,7 +430,7 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.restore();
     const after = await (asked[0] ?? Promise.reject(new Error("never asked")));
     await settle();
-    expect([after === before, engine.live.materials]).toEqual([false, HIGH.length]);
+    expect([after === before, engine.live.materials]).toEqual([false, SETTING.length]);
     set.dispose();
     expect(engine.live.materials).toBe(0);
   });
@@ -402,8 +446,9 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
       await engine.endOne();
     }
     await expect(overtaken).rejects.toBeInstanceOf(EngineUnavailable);
-    // The setting's twelve compiled again on the restored device, and nothing else held.
-    expect(engine.live.materials).toBe(HIGH.length);
+    // The setting's twelve and their still forms compiled again on the restored device, and
+    // nothing else held.
+    expect(engine.live.materials).toBe(SETTING.length);
   });
 
   it("releases every material when let go, and refuses asks after", async () => {
@@ -432,7 +477,10 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     engine.loseDevice();
     engine.restore();
     await settle();
-    expect([compiles(engine, HIGH.length), engine.live.materials]).toEqual([HIGH, HIGH.length]);
+    expect([compiles(engine, SETTING.length), engine.live.materials]).toEqual([
+      SETTING,
+      SETTING.length,
+    ]);
   });
 
   it("releases a compile that ends after it is let go", async () => {
@@ -448,16 +496,16 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     const set = new TerrainMaterialSet(engine, "high");
     const running = [engine.running];
     expect(compiles(engine)).toEqual(HIGH.slice(0, TERRAIN_COMPILES_IN_FLIGHT));
-    for (let ended = 0; ended < HIGH.length; ended += 1) {
+    for (let ended = 0; ended < SETTING.length; ended += 1) {
       // Each compile ends before the next is started.
       // oxlint-disable-next-line no-await-in-loop
       await engine.endOne();
       running.push(engine.running);
     }
     expect([compiles(engine), running, await set.compiled]).toEqual([
-      HIGH,
-      [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0],
-      HIGH.length,
+      SETTING,
+      [...Array.from({ length: SETTING.length - 1 }, () => 2), 1, 0],
+      SETTING.length,
     ]);
   });
 
@@ -520,10 +568,11 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
       // oxlint-disable-next-line no-await-in-loop
       await engine.endOne();
     }
-    // The lost device's two compiles, released as they end, then the setting's twelve again.
+    // The lost device's two compiles, released as they end, then the setting's twelve and their
+    // still forms again.
     expect([compiles(engine), engine.live.materials]).toEqual([
-      [...HIGH.slice(0, 2), ...HIGH],
-      HIGH.length,
+      [...HIGH.slice(0, 2), ...SETTING],
+      SETTING.length,
     ]);
   });
 
@@ -534,6 +583,22 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
     set.dispose();
     engine.restore();
     await settle();
-    expect(compiles(engine).length).toBe(HIGH.length);
+    expect(compiles(engine).length).toBe(SETTING.length);
+  });
+
+  it("hurries no still form a pass asks, the first frame's kinds' among them (R10.T16.i)", async () => {
+    const engine = new DeferredEngine(await fakeDevice());
+    const set = new TerrainMaterialSet(engine, "high");
+    const asked = set.material("wire", "baked-offsets", true);
+    for (let ended = 0; ended < 2; ended += 1) {
+      // oxlint-disable-next-line no-await-in-loop
+      await engine.endOne();
+    }
+    expect(compiles(engine)).toEqual(HIGH.slice(0, 4));
+    while (engine.running > 0) {
+      // oxlint-disable-next-line no-await-in-loop
+      await engine.endOne();
+    }
+    expect((await asked).name).toBe("terrain-wire-baked-offsets-still");
   });
 });

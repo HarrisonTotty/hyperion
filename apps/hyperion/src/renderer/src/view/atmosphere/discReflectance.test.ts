@@ -46,6 +46,7 @@ import {
   TERRAIN_LIT_MATERIALS,
   TERRAIN_SHADOW_MATERIALS,
 } from "../terrain/terrainMaterial";
+import { stillMaterialSpec } from "../terrain/gpu/material";
 import { fnv1a64 } from "../terrain/workers/f32Digest";
 import {
   DISC_EMISSION_ROWS,
@@ -188,22 +189,32 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a
   // sub-patch's vertex on its slot's surface, a whole patch's as before; and its fades' floor on k
   // and its rebakes', rises', refines' and coarsens' mix of heights, normals and maturity
-  // (R10.T16.i), which with no fade are k and the newer bake, bit for bit.
+  // (R10.T16.i), which with no fade are k and the newer bake, bit for bit. Re-pinned by the lane's
+  // settled frame (R10.T16.i): the mix behind `TERRAIN_MIXES`, true, and each material's still form
+  // beside it, false (`stillMaterialSpec`), the arithmetic as before.
   ...[
-    ["terrain-lit-baked-offsets", "3d88e60d67c8d58a"],
-    ["terrain-lit-face-differences", "39cff9cc1cd836db"],
+    ["terrain-lit-baked-offsets", "720633499caf5ad9"],
+    ["terrain-lit-face-differences", "5e7e9fa8c73a49ac"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "68373419a96d4784"],
-    ["terrain-depth-face-differences", "8c96f97ab3759a2d"],
-    ["terrain-shadow-baked-offsets", "349e7ea734617f90"],
-    ["terrain-shadow-face-differences", "1cfcc08e18e723e9"],
+    ["terrain-depth-baked-offsets", "204a1e7855def967"],
+    ["terrain-depth-face-differences", "1a82fbcbaf139792"],
+    ["terrain-shadow-baked-offsets", "c920f9114a5ce5"],
+    ["terrain-shadow-face-differences", "4cbebed1865f6448"],
+    ["terrain-lit-baked-offsets-still", "5f46e5eab9f994ae"],
+    ["terrain-lit-face-differences-still", "1de12e3a0b1476ef"],
+    ["terrain-depth-baked-offsets-still", "a01ce12c8ba39486"],
+    ["terrain-depth-face-differences-still", "527872bf4e4b9e17"],
+    ["terrain-shadow-baked-offsets-still", "25872179e708a1c6"],
+    ["terrain-shadow-face-differences-still", "5dfecc60fcf5d4d7"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
+    const still = name.endsWith("-still");
     const spec = [
       ...TERRAIN_LIT_MATERIALS,
       ...TERRAIN_DEPTH_MATERIALS,
       ...TERRAIN_SHADOW_MATERIALS,
-    ].find((each) => each.name === name);
-    return [name, spec?.fragmentWgsl ?? "", digest];
+    ].find((each) => each.name === name.replace(/-still$/u, ""));
+    const source = spec === undefined ? undefined : still ? stillMaterialSpec(spec) : spec;
+    return [name, source?.fragmentWgsl ?? "", digest];
   }),
 ];
 

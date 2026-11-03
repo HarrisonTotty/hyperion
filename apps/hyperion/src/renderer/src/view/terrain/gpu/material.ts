@@ -96,6 +96,38 @@ export function terrainMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
   };
 }
 
+/** `terrainPatch.wgsl`'s declaration that its pipeline mixes an instance's heights (R10.T16.i). */
+export const TERRAIN_MIXES_ON = "const TERRAIN_MIXES : bool = true;";
+
+/** The still form's declaration of it ({@link stillMaterialSpec}). */
+export const TERRAIN_MIXES_OFF = "const TERRAIN_MIXES : bool = false;";
+
+/**
+ * A terrain material's still form (plan R10, R10.T16.i; the lane's settled frame): its source with
+ * `TERRAIN_MIXES` declared false, so that its pipeline holds no rebake's, rise's, refine's or
+ * coarsen's mix, which on SwiftShader every vertex paid for whether or not it mixed. A frame draws
+ * it where no instance it draws mixes (`fadeWord`'s bits 8 to 19 all 0), and draws what the
+ * material draws there, bit for bit. Its name is the material's, marked still; its display name the
+ * material's, since it draws the same.
+ *
+ * @throws Error where the material's source does not declare `TERRAIN_MIXES` exactly once.
+ */
+export function stillMaterialSpec(spec: WgslMaterialSpec): WgslMaterialSpec {
+  const still = (source: string): string => {
+    const parts = source.split(TERRAIN_MIXES_ON);
+    if (parts.length !== 2) {
+      throw new Error(`terrain material ${spec.name} does not declare TERRAIN_MIXES once`);
+    }
+    return parts.join(TERRAIN_MIXES_OFF);
+  };
+  return {
+    ...spec,
+    name: `${spec.name}-still`,
+    vertexWgsl: still(spec.vertexWgsl),
+    fragmentWgsl: still(spec.fragmentWgsl),
+  };
+}
+
 /** Both paths' materials, for the catalogue. */
 export const TERRAIN_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainMaterialSpec("baked-offsets"),

@@ -515,7 +515,9 @@ fn terrain_albedos(
 ) -> array<vec3f, TERRAIN_LAWS> {
   var albedos : array<vec3f, TERRAIN_LAWS>;
   albedos[0] = terrain_row(1u).xyz;
-  let bakes = select(1u, 2u, rebake_fade > 0.0 && older_drawn_at(rebake_slot, patch_uv));
+  // A rebake's fade mixes in its older bake's maturity (R10.T16.i): a second pass over its slot's
+  // classes drawn from their nodes, one call of each function in the source all the same.
+  let bakes = select(1u, 2u, TERRAIN_MIXES && rebake_fade > 0.0 && older_drawn_at(rebake_slot, patch_uv));
   for (var bake = 0u; bake < bakes; bake = bake + 1u) {
     let slot = select(base, rebake_slot, bake == 1u);
     var maturity : TexelMaturity;

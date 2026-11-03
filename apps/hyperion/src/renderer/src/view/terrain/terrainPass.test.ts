@@ -16,7 +16,7 @@ import {
   TERRAIN_SETTINGS,
   terrainSettingsFor,
 } from "../quality/qualitySetting";
-import { terrainMaterialSpec } from "./gpu/material";
+import { stillMaterialSpec, terrainMaterialSpec } from "./gpu/material";
 import { DEFAULT_TERRAIN_VIEW, LIT_INTERIOR_INDICES, normalsAtlasOf } from "./gpu/resources";
 import { CLASS_LAWS_BYTES, terrainSlotLayout } from "./slotLayout";
 import { terrainWireMaterialSpec } from "./terrainWire";
@@ -1555,7 +1555,9 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     if (draw === undefined) {
       throw new Error("the lit pass drew nothing");
     }
-    expect(draw.material.name).toBe(terrainLitMaterialSpec(pass.layout.vertexPath).name);
+    expect(draw.material.name).toBe(
+      stillMaterialSpec(terrainLitMaterialSpec(pass.layout.vertexPath)).name,
+    );
     expect(Object.keys(draw.storageBuffers ?? {}).toSorted()).toEqual([
       "classLayers",
       "contacts",
@@ -1645,7 +1647,7 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     const { pass, view } = await bakedLitPass();
     const plain = pass.frame({ ...inputAt(view), lighting: EMITTING });
     expect(plain.draws.at(-1)?.material.name).toBe(
-      terrainLitMaterialSpec(pass.layout.vertexPath).name,
+      stillMaterialSpec(terrainLitMaterialSpec(pass.layout.vertexPath)).name,
     );
   });
 
@@ -1655,7 +1657,7 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     await microtasks();
     const emissive = pass.frame({ ...inputAt(view), lighting: EMITTING });
     expect(emissive.draws.at(-1)?.material.name).toBe(
-      terrainLitEmissiveMaterialSpec(pass.layout.vertexPath).name,
+      stillMaterialSpec(terrainLitEmissiveMaterialSpec(pass.layout.vertexPath)).name,
     );
   });
 
@@ -1671,13 +1673,54 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     );
   });
 
+  it("draws a frame some instance of which mixes its heights by the material, and the frames either side by its still form (R10.T16.i)", async () => {
+    const { pass, pool, engine, view } = await bakedLitPass();
+    const path = pass.layout.vertexPath;
+    // Whether the frame's records, the edge patches' and the interior patches', hold a mix.
+    const mixes = (): boolean =>
+      ["terrain instances", "terrain interior instances"].some((buffer) => {
+        const write = engine.writes.findLast((w) => w.buffer === buffer);
+        const words = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
+        return words.some((word, k) => k % WORDS === 11 && ((word >>> 8) & MIX_STEPS) !== 0);
+      });
+    const formOf = (
+      frame: TerrainFrame,
+    ): readonly [string | undefined, boolean, string | undefined] => [
+      frame.draws.at(-1)?.material.name,
+      mixes(),
+      pass.symbologyDepthMaterial?.name,
+    ];
+    const before = pass.frame({ ...inputAt(view, 10_000), lighting: LIGHTING });
+    const [drawn] = before.drawSet.patches;
+    if (drawn === undefined) {
+      throw new Error("the lit pass drew nothing");
+    }
+    const settled = formOf(before);
+    // A rebake of a drawn patch, whose heights mix from its older bake's until its fade ends.
+    pool().deliver(pass, drawn.patch.key);
+    const rebaking = formOf(pass.frame({ ...inputAt(view, 11_000), lighting: LIGHTING }));
+    const after = formOf(
+      pass.frame({ ...inputAt(view, 11_000 + 2 * MORPH_MAX_MS), lighting: LIGHTING }),
+    );
+    const still = [
+      stillMaterialSpec(terrainLitMaterialSpec(path)).name,
+      false,
+      stillMaterialSpec(terrainDepthMaterialSpec(path)).name,
+    ];
+    expect([settled, rebaking, after]).toEqual([
+      still,
+      [terrainLitMaterialSpec(path).name, true, terrainDepthMaterialSpec(path).name],
+      still,
+    ]);
+  });
+
   it("goes back to the plain form for a frame without the emission (R08.T18.a)", async () => {
     const { pass, view } = await bakedLitPass();
     pass.frame({ ...inputAt(view), lighting: EMITTING });
     await microtasks();
     const after = pass.frame({ ...inputAt(view), lighting: LIGHTING });
     expect(after.draws.at(-1)?.material.name).toBe(
-      terrainLitMaterialSpec(pass.layout.vertexPath).name,
+      stillMaterialSpec(terrainLitMaterialSpec(pass.layout.vertexPath)).name,
     );
   });
 
@@ -1708,7 +1751,7 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     await microtasks();
     const frame = pass.frame({ ...inputAt(view), lighting: EMITTING });
     expect(frame.draws.at(-1)?.material.name).toBe(
-      terrainLitMaterialSpec(pass.layout.vertexPath).name,
+      stillMaterialSpec(terrainLitMaterialSpec(pass.layout.vertexPath)).name,
     );
     expect(reported).toHaveBeenCalledWith(
       "the terrain's emissive form failed: its ground is drawn unlit by itself",
@@ -1917,7 +1960,7 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
     expect(named(frame)).toEqual([
       [
         "terrain lit interior patch",
-        terrainLitInteriorMaterialSpec(path).name,
+        stillMaterialSpec(terrainLitInteriorMaterialSpec(path)).name,
         "terrain interior instances",
         "terrain interior indirect",
       ],
@@ -1993,7 +2036,7 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
       [
         [
           "terrain lit patch",
-          terrainLitMaterialSpec(path).name,
+          stillMaterialSpec(terrainLitMaterialSpec(path)).name,
           "terrain instances",
           "terrain indirect",
         ],
@@ -2031,7 +2074,7 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
     expect(named(frame)).toEqual([
       [
         "terrain lit patch",
-        terrainLitMaterialSpec(pass.layout.vertexPath).name,
+        stillMaterialSpec(terrainLitMaterialSpec(pass.layout.vertexPath)).name,
         "terrain instances",
         "terrain indirect",
       ],
@@ -2053,8 +2096,8 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
     const emissive = pass.frame({ ...inputAt(view), lighting: EMITTING });
     expect([plain, emissive].map((frame) => frame.draws.map((draw) => draw.material.name))).toEqual(
       [
-        [terrainLitInteriorMaterialSpec(path).name],
-        [terrainLitEmissiveInteriorMaterialSpec(path).name],
+        [stillMaterialSpec(terrainLitInteriorMaterialSpec(path)).name],
+        [stillMaterialSpec(terrainLitEmissiveInteriorMaterialSpec(path)).name],
       ],
     );
   });
@@ -2068,7 +2111,10 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
     await microtasks();
     const frame = pass.frame({ ...inputAt(view), lighting: EMITTING });
     expect(named(frame).map(([mesh, material]) => [mesh, material])).toEqual([
-      ["terrain lit patch", terrainLitEmissiveMaterialSpec(pass.layout.vertexPath).name],
+      [
+        "terrain lit patch",
+        stillMaterialSpec(terrainLitEmissiveMaterialSpec(pass.layout.vertexPath)).name,
+      ],
     ]);
   });
 });

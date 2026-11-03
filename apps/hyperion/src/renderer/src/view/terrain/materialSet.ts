@@ -29,7 +29,11 @@
  *   pass's first frame waits for, then the forms the setting's geometry draws, then their fallbacks
  *   and the wireframe's. A material a pass asks that the set does not hold (an emissive form,
  *   another path, a variant) waits ahead of the setting's, in the order asked, and a pass's ask of
- *   the material its first frame waits for (`lit`, `wire`) goes first of all. Until a form is made
+ *   the material its first frame waits for (`lit`, `wire`) goes first of all. The materials' still
+ *   forms (plan R10, R10.T16.i; `stillMaterialSpec`) follow them all, in the same order, and no
+ *   pass's ask hurries one: a frame draws a still form only once its instances mix no heights,
+ *   after the material it stands for has drawn the session's first frames, whose ground rises out
+ *   of the datum. Until a form is made
  *   the pass draws by the one it falls back on, and until a caster is, with no shadow (w = 0), as
  *   where one cannot be made. Each pipeline of a compile then waits its turn in the device's one
  *   budget (`engine/webgpu/compileBudget.ts`), beside every other compile of the page, so that the
@@ -60,6 +64,7 @@ import {
   TERRAIN_SETTINGS,
   type TerrainVertexPath,
 } from "../quality/qualitySetting";
+import { stillMaterialSpec } from "./gpu/material";
 import { fittedTerrainLayout, type TerrainLimits, terrainMeshSpec } from "./gpu/resources";
 import type { TerrainShading } from "./slotLayout";
 import {
@@ -118,6 +123,8 @@ export type TerrainMaterialKind =
 export interface TerrainMaterialKey {
   readonly kind: TerrainMaterialKind;
   readonly path: TerrainVertexPath;
+  /** Its still form (plan R10, R10.T16.i; {@link terrainMaterialOf}); absent for the material. */
+  readonly still?: true;
 }
 
 /** What a terrain material is compiled as ({@link terrainMaterialOf}). */
@@ -130,7 +137,8 @@ export interface TerrainMaterialMaking {
 }
 
 /**
- * What a material of `kind` on `path` is compiled as.
+ * What a material of `kind` on `path` is compiled as, or its still form (`still`; plan R10,
+ * R10.T16.i, `stillMaterialSpec`), drawn on a frame whose instances mix no heights.
  *
  * @remarks
  * The lit material draws into the photorealistic scene target (`rgba16float`); its depth material
@@ -145,6 +153,7 @@ export function terrainMaterialOf(
   kind: TerrainMaterialKind,
   path: TerrainVertexPath,
   capabilities: Pick<GpuCapabilities, "depthClipControl">,
+  still = false,
 ): TerrainMaterialMaking {
   let made: TerrainMaterialMaking;
   switch (kind) {
@@ -225,7 +234,7 @@ export function terrainMaterialOf(
       };
       break;
   }
-  return made;
+  return still ? { ...made, spec: stillMaterialSpec(made.spec) } : made;
 }
 
 /**
@@ -239,9 +248,10 @@ export function terrainMaterialOf(
  * its fin form; then the forms the pass falls back on while those are made or where they cannot be,
  * the interior patches' own mesh (R14.T1.a), the caster and the depth material by the lit mesh; and
  * last, on the wireframe layout's path, the wireframe's and its interior patches' on the cluster path
- * (plan R14, R14.T4.c), which an instrument's view draws. Each path is as `terrainLayout` resolves
- * it; none of a layout the device cannot hold (`fittedTerrainLayout`), of which no pass can be made
- * either.
+ * (plan R14, R14.T4.c), which an instrument's view draws; then each one's still form, in the same
+ * order (plan R10, R10.T16.i), which a frame draws only once its instances mix no heights. Each path
+ * is as `terrainLayout` resolves it; none of a layout the device cannot hold
+ * (`fittedTerrainLayout`), of which no pass can be made either.
  */
 export function sessionMaterials(
   setting: QualitySetting,
@@ -276,19 +286,28 @@ export function sessionMaterials(
       { kind: "wire-cluster", path: wire.vertexPath },
     );
   }
-  return keys;
+  const stills: TerrainMaterialKey[] = [];
+  for (const { kind, path } of keys) {
+    stills.push({ kind, path, still: true });
+  }
+  return [...keys, ...stills];
 }
 
 /** What the terrain's passes ask of a session's materials. */
 export interface TerrainMaterialSource {
   /**
-   * The material of `kind` on `path`, once compiled: the one handle every pass that asks shares,
-   * which the source owns and no pass releases.
+   * The material of `kind` on `path`, or its still form (`still`; {@link terrainMaterialOf}), once
+   * compiled: the one handle every pass that asks shares, which the source owns and no pass
+   * releases.
    *
    * @throws EngineUnavailable (rejects) while the device is lost, and for a compile that a restore
    * overtook; an `Error` where the device refuses the compile or the source has been let go.
    */
-  material(kind: TerrainMaterialKind, path: TerrainVertexPath): Promise<MaterialHandle>;
+  material(
+    kind: TerrainMaterialKind,
+    path: TerrainVertexPath,
+    still?: boolean,
+  ): Promise<MaterialHandle>;
 }
 
 /** The part of the engine the set uses. */
@@ -331,9 +350,9 @@ interface Entry {
   handle: MaterialHandle | null;
 }
 
-/** The key of a material in the set's map. */
-function keyOf(kind: TerrainMaterialKind, path: TerrainVertexPath): string {
-  return `${kind}|${path}`;
+/** The key of a material, or of its still form, in the set's map. */
+function keyOf(kind: TerrainMaterialKind, path: TerrainVertexPath, still: boolean): string {
+  return `${kind}|${path}${still ? "|still" : ""}`;
 }
 
 /** A terrain session's materials (see the module's remarks). */
@@ -378,26 +397,33 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
     return sessionMaterials(this.#setting, this.#engine.capabilities);
   }
 
-  material(kind: TerrainMaterialKind, path: TerrainVertexPath): Promise<MaterialHandle> {
-    return this.#ask(kind, path, "pass");
+  material(
+    kind: TerrainMaterialKind,
+    path: TerrainVertexPath,
+    still = false,
+  ): Promise<MaterialHandle> {
+    return this.#ask(kind, path, "pass", still);
   }
 
   /**
-   * `kind` on `path`: its entry's promise where it has one, else a new entry whose compile waits its
-   * turn, a pass's ask ahead of the setting's (see the module's remarks).
+   * `kind` on `path`, or its still form: its entry's promise where it has one, else a new entry
+   * whose compile waits its turn, a pass's ask ahead of the setting's (see the module's remarks).
    */
   #ask(
     kind: TerrainMaterialKind,
     path: TerrainVertexPath,
     by: "pass" | "setting",
+    still: boolean,
   ): Promise<MaterialHandle> {
     if (this.#disposed) {
       return Promise.reject(new Error("the terrain's materials were let go"));
     }
-    const key = keyOf(kind, path);
+    const key = keyOf(kind, path, still);
+    // A first frame waits for the material, never for its still form.
+    const first = !still && FIRST_FRAME_KINDS.has(kind);
     const held = this.#entries.get(key);
     if (held !== undefined) {
-      if (by === "pass" && FIRST_FRAME_KINDS.has(kind)) {
+      if (by === "pass" && first) {
         this.#hurry(key);
       }
       return held.promise;
@@ -409,7 +435,7 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
         key,
         start: () => {
           this.#inFlight += 1;
-          void this.#compile(kind, path)
+          void this.#compile(kind, path, still)
             .then(resolve, reject)
             .finally(() => {
               this.#inFlight -= 1;
@@ -424,7 +450,7 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
       };
       if (by === "setting") {
         this.#queued.push(waiting);
-      } else if (FIRST_FRAME_KINDS.has(kind)) {
+      } else if (first) {
         this.#asked.unshift(waiting);
       } else {
         this.#asked.push(waiting);
@@ -509,15 +535,27 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
   /** Compiles every material of the setting; settles with how many compiled, never rejecting. */
   async #compileSetting(): Promise<number> {
     const settled = await Promise.allSettled(
-      this.keys.map(({ kind, path }) => this.#ask(kind, path, "setting")),
+      this.keys.map(({ kind, path, still }) => this.#ask(kind, path, "setting", still === true)),
     );
     // A failure is the pass's to report when it asks (`TerrainPass.ready`), as before the set.
     return settled.filter((each) => each.status === "fulfilled").length;
   }
 
-  /** Compiles `kind` on `path` against a mesh of its pass's layout, made and released for it. */
-  async #compile(kind: TerrainMaterialKind, path: TerrainVertexPath): Promise<MaterialHandle> {
-    const { spec, targets, shading } = terrainMaterialOf(kind, path, this.#engine.capabilities);
+  /**
+   * Compiles `kind` on `path`, or its still form, against a mesh of its pass's layout, made and
+   * released for it.
+   */
+  async #compile(
+    kind: TerrainMaterialKind,
+    path: TerrainVertexPath,
+    still: boolean,
+  ): Promise<MaterialHandle> {
+    const { spec, targets, shading } = terrainMaterialOf(
+      kind,
+      path,
+      this.#engine.capabilities,
+      still,
+    );
     const mesh = this.#engine.createMesh({ ...terrainMeshSpec(shading), name: COMPILE_MESH_NAME });
     try {
       return await this.#engine.createMaterialAsync(spec, targets, [mesh]);

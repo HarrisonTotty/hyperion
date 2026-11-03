@@ -1291,13 +1291,14 @@ describe("each view's frame terrain through the session (R10.T16.c)", () => {
     terrain.draws(plan, [body]);
     // Its patches by the survey's edge on the cluster path (R14.T1.g): the overlay's own pass's
     // buckets by the cluster depth, the may-discard ones by the fin depth.
+    // Each by its still form, the frame mixing no heights (R10.T16.i).
     expect(terrain.symbologyDepth().map((draw) => draw.material.name)).toEqual([
-      "terrain-cluster-depth-baked-offsets",
-      "terrain-cluster-depth-baked-offsets",
-      "terrain-fin-depth-baked-offsets",
-      "terrain-fin-depth-baked-offsets",
-      "terrain-fin-depth-baked-offsets",
-      "terrain-fin-depth-baked-offsets",
+      "terrain-cluster-depth-baked-offsets-still",
+      "terrain-cluster-depth-baked-offsets-still",
+      "terrain-fin-depth-baked-offsets-still",
+      "terrain-fin-depth-baked-offsets-still",
+      "terrain-fin-depth-baked-offsets-still",
+      "terrain-fin-depth-baked-offsets-still",
     ]);
   });
 });
@@ -1868,35 +1869,43 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     "terrain-wire-cluster-baked-offsets",
   ];
 
+  /** {@link HIGH}, then their still forms (R10.T16.i), compiled after them. */
+  const HIGH_FORMS = [...HIGH, ...HIGH.map((name) => `${name}-still`)];
+
   /**
    * What the moon's passes draw with on the high setting ({@link drawnWith}): its patches by the
-   * survey's edge last by the edge patches' fin form on the cluster path (R14.T1.g).
+   * survey's edge last by the edge patches' fin form on the cluster path (R14.T1.g), each by its
+   * still form, the frames mixing no heights (R10.T16.i).
    */
   const HIGH_DRAWN = [
-    "terrain-lit-fin-baked-offsets",
-    "terrain-depth-baked-offsets",
-    "terrain-wire-baked-offsets",
+    "terrain-lit-fin-baked-offsets-still",
+    "terrain-depth-baked-offsets-still",
+    "terrain-wire-baked-offsets-still",
   ];
+
+  /** The low setting's, in its order of first use, and their still forms after them. */
+  const LOW = [
+    "terrain-lit-face-differences",
+    "terrain-lit-cluster-face-differences",
+    "terrain-lit-fin-face-differences",
+    "terrain-cluster-depth-face-differences",
+    "terrain-fin-depth-face-differences",
+    "terrain-lit-interior-face-differences",
+    "terrain-depth-face-differences",
+    "terrain-wire-face-differences",
+    "terrain-wire-cluster-face-differences",
+  ];
+  const LOW_FORMS = [...LOW, ...LOW.map((name) => `${name}-still`)];
 
   it("compiles its setting's lit, depth, caster and wireframe materials as it is made", async () => {
     const h = await harness();
-    expect([await h.session.compiled, compiled(h)]).toEqual([HIGH.length, HIGH]);
+    expect([await h.session.compiled, compiled(h)]).toEqual([HIGH_FORMS.length, HIGH_FORMS]);
   });
 
   it("compiles the low setting's on face differences", async () => {
     const h = await harness("low");
     await h.session.compiled;
-    expect(compiled(h)).toEqual([
-      "terrain-lit-face-differences",
-      "terrain-lit-cluster-face-differences",
-      "terrain-lit-fin-face-differences",
-      "terrain-cluster-depth-face-differences",
-      "terrain-fin-depth-face-differences",
-      "terrain-lit-interior-face-differences",
-      "terrain-depth-face-differences",
-      "terrain-wire-face-differences",
-      "terrain-wire-cluster-face-differences",
-    ]);
+    expect(compiled(h)).toEqual(LOW_FORMS);
   });
 
   it("compiles nothing at a hand-over in either style, its passes drawing its materials", async () => {
@@ -1904,10 +1913,10 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     await h.session.compiled;
     await handedOverBy(h, BOTH);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, HIGH.length), drawnWith(h), h.engine.live.materials]).toEqual([
+    expect([compiled(h, HIGH_FORMS.length), drawnWith(h), h.engine.live.materials]).toEqual([
       [],
       HIGH_DRAWN,
-      HIGH.length,
+      HIGH_FORMS.length,
     ]);
   });
 
@@ -1919,14 +1928,14 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
       [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary", setting: "low" })],
     ]);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, 9), drawnWith(h), h.engine.live.materials]).toEqual([
+    expect([compiled(h, LOW_FORMS.length), drawnWith(h), h.engine.live.materials]).toEqual([
       [],
       [
-        "terrain-lit-fin-face-differences",
-        "terrain-depth-face-differences",
-        "terrain-wire-face-differences",
+        "terrain-lit-fin-face-differences-still",
+        "terrain-depth-face-differences-still",
+        "terrain-wire-face-differences-still",
       ],
-      9,
+      LOW_FORMS.length,
     ]);
   });
 
@@ -1940,12 +1949,18 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     await settle();
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
     // The setting's again, two at a time, but for the wireframe's material, which the instrument's
-    // pass, made again at the restore, waits for its first frame on and asks ahead of the rest.
+    // pass, made again at the restore, waits for its first frame on and asks ahead of the rest; and
+    // their still forms after them, which no pass's ask hurries.
     const wire = "terrain-wire-baked-offsets";
-    expect([compiled(h, HIGH.length), drawnWith(h), h.engine.live.materials]).toEqual([
-      [...HIGH.slice(0, 2), wire, ...HIGH.slice(2).filter((name) => name !== wire)],
+    expect([compiled(h, HIGH_FORMS.length), drawnWith(h), h.engine.live.materials]).toEqual([
+      [
+        ...HIGH.slice(0, 2),
+        wire,
+        ...HIGH.slice(2).filter((name) => name !== wire),
+        ...HIGH.map((name) => `${name}-still`),
+      ],
       HIGH_DRAWN,
-      HIGH.length,
+      HIGH_FORMS.length,
     ]);
   });
 
@@ -1958,7 +1973,7 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
     h.session.step();
     const kept = [h.session.passBodies.size, h.engine.live.materials];
     h.session.dispose();
-    expect([kept, h.engine.live.materials]).toEqual([[0, HIGH.length], 0]);
+    expect([kept, h.engine.live.materials]).toEqual([[0, HIGH_FORMS.length], 0]);
   });
 });
 

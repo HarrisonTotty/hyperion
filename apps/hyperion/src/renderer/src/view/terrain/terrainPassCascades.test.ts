@@ -947,7 +947,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       ]),
     ).toEqual([
       [
-        `terrain-cluster-shadow-${made.pass.layout.vertexPath}`,
+        `terrain-cluster-shadow-${made.pass.layout.vertexPath}-still`,
         `terrain clusters (${PRIMARY}) arguments`,
         (2 * TEMPLATES + 0) * 20,
         `terrain clusters (${PRIMARY}) lists`,
@@ -955,7 +955,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
         2 * PASS_ENTRIES(made),
       ],
       [
-        `terrain-cluster-shadow-${made.pass.layout.vertexPath}`,
+        `terrain-cluster-shadow-${made.pass.layout.vertexPath}-still`,
         `terrain clusters (${PRIMARY}) arguments`,
         (2 * TEMPLATES + 4) * 20,
         `terrain clusters (${PRIMARY}) lists`,
@@ -1019,12 +1019,12 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       true,
       [
         [
-          `terrain-cluster-depth-${made.pass.layout.vertexPath}`,
+          `terrain-cluster-depth-${made.pass.layout.vertexPath}-still`,
           (4 * TEMPLATES + 0) * 20,
           `terrain interior instances (${PRIMARY})`,
         ],
         [
-          `terrain-cluster-depth-${made.pass.layout.vertexPath}`,
+          `terrain-cluster-depth-${made.pass.layout.vertexPath}-still`,
           (4 * TEMPLATES + 4) * 20,
           `terrain interior instances (${PRIMARY})`,
         ],
@@ -1345,7 +1345,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     ).toEqual([
       [
         "terrain clusters",
-        `terrain-lit-cluster-${path}`,
+        `terrain-lit-cluster-${path}-still`,
         (TEMPLATES * pass + 0) * 20,
         [pass * entries],
         `terrain interior instances (${PRIMARY})`,
@@ -1353,7 +1353,7 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
       ],
       [
         "terrain clusters",
-        `terrain-lit-cluster-${path}`,
+        `terrain-lit-cluster-${path}-still`,
         (TEMPLATES * pass + 4) * 20,
         [pass * entries + blocks],
         `terrain interior instances (${PRIMARY})`,
@@ -1631,12 +1631,12 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
       true,
     ]);
     expect(named(frame.draws)).toEqual([
-      ["terrain clusters", `terrain-lit-cluster-${path}`, lit, instances],
-      ["terrain clusters", `terrain-lit-cluster-${path}`, lit + 4, instances],
-      ["terrain clusters", `terrain-lit-fin-${path}`, lit + 8, instances],
-      ["terrain clusters", `terrain-lit-fin-${path}`, lit + 9, instances],
-      ["terrain clusters", `terrain-lit-fin-${path}`, lit + 10, instances],
-      ["terrain clusters", `terrain-lit-fin-${path}`, lit + 11, instances],
+      ["terrain clusters", `terrain-lit-cluster-${path}-still`, lit, instances],
+      ["terrain clusters", `terrain-lit-cluster-${path}-still`, lit + 4, instances],
+      ["terrain clusters", `terrain-lit-fin-${path}-still`, lit + 8, instances],
+      ["terrain clusters", `terrain-lit-fin-${path}-still`, lit + 9, instances],
+      ["terrain clusters", `terrain-lit-fin-${path}-still`, lit + 10, instances],
+      ["terrain clusters", `terrain-lit-fin-${path}-still`, lit + 11, instances],
     ]);
     // Counted as edge patches on the cluster path, their drawn triangles their lit mesh's.
     const counts = made.pass.counts(PRIMARY);
@@ -1667,8 +1667,11 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
     expect(
       clusters.map((draw) => [draw.material.name, (draw.indirect?.offsetBytes ?? 0) / 20]),
     ).toEqual([
-      ...[0, 1, 2, 3, 4, 5, 6, 7].map((t) => [`terrain-cluster-shadow-${path}`, TEMPLATES + t]),
-      ...[8, 9, 10, 11].map((t) => [`terrain-fin-shadow-${path}`, TEMPLATES + t]),
+      ...[0, 1, 2, 3, 4, 5, 6, 7].map((t) => [
+        `terrain-cluster-shadow-${path}-still`,
+        TEMPLATES + t,
+      ]),
+      ...[8, 9, 10, 11].map((t) => [`terrain-fin-shadow-${path}-still`, TEMPLATES + t]),
     ]);
     expect(cascadesOf(frame).litMeshCasters).toEqual([0, 0, 0, 0]);
   });
@@ -1734,12 +1737,12 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
     ]).toEqual([
       [],
       [
-        [`terrain-cluster-depth-${path}`, at],
-        [`terrain-cluster-depth-${path}`, at + 4],
-        [`terrain-fin-depth-${path}`, at + 8],
-        [`terrain-fin-depth-${path}`, at + 9],
-        [`terrain-fin-depth-${path}`, at + 10],
-        [`terrain-fin-depth-${path}`, at + 11],
+        [`terrain-cluster-depth-${path}-still`, at],
+        [`terrain-cluster-depth-${path}-still`, at + 4],
+        [`terrain-fin-depth-${path}-still`, at + 8],
+        [`terrain-fin-depth-${path}-still`, at + 9],
+        [`terrain-fin-depth-${path}-still`, at + 10],
+        [`terrain-fin-depth-${path}-still`, at + 11],
       ],
     ]);
   });
@@ -1926,9 +1929,10 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
       ),
     ]).toEqual([
       8,
+      // By its still form, the frame mixing no heights (R10.T16.i).
       Array.from({ length: 8 }, (_, t) => [
         "terrain clusters",
-        `terrain-lit-cluster-${made.pass.layout.vertexPath}`,
+        `terrain-lit-cluster-${made.pass.layout.vertexPath}-still`,
         lit + t,
         `terrain interior instances (${PRIMARY})`,
       ]),
