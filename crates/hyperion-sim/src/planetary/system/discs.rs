@@ -227,7 +227,7 @@ impl PlanetarySystem {
     /// its birth, or `None` if it has none by the end of the clock window.
     #[must_use]
     fn white_dwarf_of(&self, seed: Seed, ctx: &SystemContext) -> Option<WhiteDwarfSystem> {
-        // From 27 a paired star's white dwarf is its pair's history's (P14.T1.h).
+        // From 28 a paired star's white dwarf is its pair's history's (P14.T1.h).
         let (zone, star, death) = self.zones.iter().find_map(|zone| {
             let mut members = zone.members();
             let star = members.next()?;
@@ -379,7 +379,7 @@ impl PlanetarySystem {
         let first = zone.members().next().expect("a zone has a component");
         let age_at_epoch = ctx.stars()[usize::from(first)].age_at_epoch();
         let born = time_at_age(Years::new(0.0), age_at_epoch);
-        // The first death among the zone's stars, a paired star's its pair's history's from 27
+        // The first death among the zone's stars, a paired star's its pair's history's from 28
         // (P14.T1.h), in the arithmetic of the fate transform's clock deaths.
         let died = zone
             .members()

@@ -2,7 +2,7 @@
 //! P14.T28.e), [`generate`](super::generate)'s step 10, from generator version 26.
 //!
 //! Each single-star zone whose star is a neutron star by the end of the clock window (from
-//! generator version 27, for a star of a pair the binary engine ran and changed, by its pair's
+//! generator version 28, for a star of a pair the binary engine ran and changed, by its pair's
 //! history: [`SystemContext::remnant_by_end`], P14.T1.h), and whose
 //! host has a primordial disc for the derivation's snow line to read, draws its system on
 //! `planet.secondgen` ([`place_second_generation`]), in the second-generation slots from `0xC0`,
@@ -107,7 +107,7 @@ impl PlanetarySystem {
             let OrbitHost::Star(star) = zone.host() else {
                 continue;
             };
-            // From 27 a paired star's neutron star is its pair's history's (P14.T1.h).
+            // From 28 a paired star's neutron star is its pair's history's (P14.T1.h).
             let Some(ended) = ctx
                 .remnant_by_end(usize::from(star))
                 .filter(|ended| ended.remnant.kind() == RemnantKind::NeutronStar)

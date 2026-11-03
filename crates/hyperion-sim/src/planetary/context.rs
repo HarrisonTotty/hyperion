@@ -755,23 +755,23 @@ pub(crate) fn with_binary_host_history<R>(
 /// The generator version from which the planetary stage's generation reads what a star of a pair
 /// the binary engine ran leaves, and when it dies, from its pair's timeline (P14.T1.h): the
 /// neutron stars second-generation planets form about, the white dwarf a debris disc and its
-/// pollution mark read, and the first death that ends a protoplanetary disc; 27, held with the 27
-/// train.
+/// pollution mark read, and the first death that ends a protoplanetary disc; 28, held with the 28
+/// train (27's list froze before it).
 ///
 /// Below it [`BinaryHostRemnantsRules::in_force`] is [`BinaryHostRemnantsRules::SingleModels`]:
 /// each star leaves its own single-star model's remnant at its model's death, and every figure is
-/// version 26's bit for bit. 27's bump deletes this hold, [`BinaryHostRemnantsRules`] with its
+/// version 27's bit for bit. 28's bump deletes this hold, [`BinaryHostRemnantsRules`] with its
 /// `SingleModels` arm, the tests' switch, its line in the tests' `HeldRules` and its tripwire
-/// (`the_binary_host_remnants_are_held_only_until_the_27_bump`).
-pub(crate) const BINARY_HOST_REMNANTS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+/// (`the_binary_host_remnants_are_held_only_until_the_28_bump`).
+pub(crate) const BINARY_HOST_REMNANTS_VERSION: GeneratorVersion = GeneratorVersion::new(28);
 
 /// Where the generation reads a paired star's remnant and death (its hold,
 /// [`BINARY_HOST_REMNANTS_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum BinaryHostRemnantsRules {
-    /// Version 26's and before: every star's own single-star model.
+    /// Version 27's and before: every star's own single-star model.
     SingleModels,
-    /// Version 27's: a star its pair changed from its pair's timeline
+    /// Version 28's: a star its pair changed from its pair's timeline
     /// ([`SystemContext::remnant_by_end`], [`SystemContext::death_age`]).
     Engine,
 }
@@ -803,7 +803,7 @@ thread_local! {
 
 /// `run`'s result with the paired stars' remnant rules `rules` on this thread, for the tests to
 /// reach the engine's remnants ahead of the bump; the version's rules are set back after, a panic
-/// in `run` included. 27's bump deletes it with the hold.
+/// in `run` included. 28's bump deletes it with the hold.
 #[cfg(test)]
 pub(crate) fn with_binary_host_remnants<R>(
     rules: BinaryHostRemnantsRules,
@@ -1359,11 +1359,11 @@ impl SystemContext {
     }
 
     /// Component `star`'s pair, its component there and its state at its timeline's end, where
-    /// from generator version 27 (P14.T1.h, [`BINARY_HOST_REMNANTS_VERSION`]) the generation reads
+    /// from generator version 28 (P14.T1.h, [`BINARY_HOST_REMNANTS_VERSION`]) the generation reads
     /// what the star leaves from its pair's timeline: if the engine ran it in a pair that changed
     /// it, its state at the timeline's end (+H) not its own model's then. `None` for a star its
     /// pair left alone, which reads its model's remnant and death to the bit, for every other star,
-    /// and below 27.
+    /// and below 28.
     #[must_use]
     fn remnants_pair(&self, star: usize) -> Option<(&PairTimeline, PairComponent, StarState)> {
         match BinaryHostRemnantsRules::in_force() {
@@ -1378,7 +1378,7 @@ impl SystemContext {
 
     /// The remnant component `star` is by the end of the clock window (+H), with its birth, as
     /// the planetary stage's generation reads it (P14.T1.h): its own model's
-    /// ([`StarModel::remnant`] at its death) where it dies by then; from generator version 27,
+    /// ([`StarModel::remnant`] at its death) where it dies by then; from generator version 28,
     /// for a star of a pair the engine ran and changed, the remnant its pair's timeline leaves it
     /// at +H, born at the first age it is that kind of remnant
     /// ([`BinaryTimeline::first_age_where`](crate::stellar::binary::BinaryTimeline::first_age_where)),
@@ -1412,7 +1412,7 @@ impl SystemContext {
     }
 
     /// The age, Julian years, at which component `star` dies, as the planetary stage's generation
-    /// reads it (P14.T1.h): its model's death ([`StarModel::death`]); from generator version 27,
+    /// reads it (P14.T1.h): its model's death ([`StarModel::death`]); from generator version 28,
     /// for a star of a pair the engine ran and changed, the first age its pair's timeline leaves it
     /// no living star, if it does by +H
     /// ([`BinaryTimeline::first_death_age`](crate::stellar::binary::BinaryTimeline::first_death_age)),

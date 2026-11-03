@@ -16,7 +16,7 @@ use crate::planetary::context::{
 use crate::planetary::fate::DestructionCause;
 use crate::planetary::testing::{
     PairHistory, SampleFilter, first_paired_system, sample_records, synthetic_binary,
-    with_every_27_hold,
+    with_every_27_hold, with_every_28_hold,
 };
 use crate::stellar::remnant::RemnantKind;
 use crate::stellar::system::{PairTimeline, SystemStars};
@@ -934,22 +934,22 @@ fn binary_host_history_s_death_of_a_star_merged_away_is_at_its_merger() {
     );
 }
 
-/// The paired stars' remnants in the generation are held until the 26 → 27 bump: the rules in
-/// force are the single models', the tests' switch and 27's helper reach the engine's, and 26's
-/// and 25's helpers do not.
+/// The paired stars' remnants in the generation are held until the 27 → 28 bump: the rules in
+/// force are the single models', the tests' switch and 28's helper reach the engine's, and 27's,
+/// 26's and 25's helpers do not.
 #[test]
-fn the_binary_host_remnants_are_held_only_until_the_27_bump() {
+fn the_binary_host_remnants_are_held_only_until_the_28_bump() {
     use crate::planetary::context::{
         BINARY_HOST_REMNANTS_VERSION, BinaryHostRemnantsRules, with_binary_host_remnants,
     };
     assert!(
         GENERATOR_VERSION < BINARY_HOST_REMNANTS_VERSION,
-        "the 26 → 27 bump reads a paired star's remnant and death from its pair's timeline in the \
+        "the 27 → 28 bump reads a paired star's remnant and death from its pair's timeline in the \
          generation: delete `BINARY_HOST_REMNANTS_VERSION`, `BinaryHostRemnantsRules` with its \
          `SingleModels` arm and its match in `SystemContext::remnants_pair`, the tests' \
-         `with_binary_host_remnants`, its switch in `with_every_27_hold` (and the helper, if no \
-         other 27 hold is left), its line in `HeldRules`, and this test; restate the tests held \
-         below 27"
+         `with_binary_host_remnants`, its switch in `with_every_28_hold` (and the helper, if no \
+         other 28 hold is left), its line in `HeldRules`, and this test; restate the tests held \
+         below 28"
     );
     assert_eq!(
         BinaryHostRemnantsRules::in_force(),
@@ -963,11 +963,15 @@ fn the_binary_host_remnants_are_held_only_until_the_27_bump() {
         BinaryHostRemnantsRules::Engine
     );
     assert_eq!(
-        with_every_27_hold(BinaryHostRemnantsRules::in_force),
+        with_every_28_hold(BinaryHostRemnantsRules::in_force),
         BinaryHostRemnantsRules::Engine
     );
     assert_eq!(
-        with_every_27_hold(|| {
+        with_every_27_hold(BinaryHostRemnantsRules::in_force),
+        BinaryHostRemnantsRules::SingleModels
+    );
+    assert_eq!(
+        with_every_28_hold(|| {
             with_binary_host_remnants(
                 BinaryHostRemnantsRules::SingleModels,
                 BinaryHostRemnantsRules::in_force,
@@ -977,8 +981,8 @@ fn the_binary_host_remnants_are_held_only_until_the_27_bump() {
     );
 }
 
-/// Under the engine's remnant rules a star of a pair the engine ran that its pair leaves as its own
-/// model to +H reads its model's remnant, birth and death, to the bit; one its pair changed reads
+/// Under every 28 hold, the 27 binary-host holds on with it, and the engine's remnant rules, a star
+/// of a pair the engine ran that its pair leaves as its own model to +H reads its model's remnant, birth and death, to the bit; one its pair changed reads
 /// the remnant its timeline leaves it at +H, born at the first age it is that kind (at its model's
 /// death where the two agree), at its mass then; under the single models every star reads as its
 /// model.
@@ -1007,8 +1011,10 @@ fn binary_host_remnants_read_a_star_its_pair_left_alone_as_its_model() {
                     BinaryHostRemnantsRules::Engine,
                 ]
                 .map(|rules| {
-                    with_binary_host_remnants(rules, || {
-                        (ctx.remnant_by_end(index), ctx.death_age(index))
+                    with_every_28_hold(|| {
+                        with_binary_host_remnants(rules, || {
+                            (ctx.remnant_by_end(index), ctx.death_age(index))
+                        })
                     })
                 });
                 let own = model.remnant_age_at(ClockWindow::END).and_then(|_| {
@@ -1107,7 +1113,8 @@ fn binary_host_remnants_of_a_star_merged_away_are_none() {
     assert!(single.is_some(), "{:?}", ctx.id());
 }
 
-/// The generation's readers follow the context's remnants and deaths under both remnant rules:
+/// Under every 28 hold, the generation's readers follow the context's remnants and deaths under
+/// both remnant rules (the single models' its arm at 27):
 /// over the sample's paired systems, a few its pairs leave alone and every one whose remnants the
 /// rules read apart, a white dwarf system's birth is its white dwarf's (`remnant_by_end`), and a
 /// protoplanetary disc ends at the earlier of its lifetime and its stars' first death
@@ -1142,7 +1149,7 @@ fn binary_host_remnants_drive_the_discs_as_their_readers_say() {
             BinaryHostRemnantsRules::SingleModels,
             BinaryHostRemnantsRules::Engine,
         ] {
-            with_every_27_hold(|| {
+            with_every_28_hold(|| {
                 with_binary_host_remnants(rules, || {
                     let system = generate(SEED, &ctx);
                     if let Some(wd) = system.white_dwarf() {
@@ -1231,7 +1238,7 @@ fn binary_host_remnants_leave_an_unpaired_system_as_it_was() {
     assert_eq!(contexts.len(), 3);
     for ctx in &contexts {
         let read = |rules| {
-            with_every_27_hold(|| {
+            with_every_28_hold(|| {
                 with_binary_host_remnants(rules, || {
                     generate(SEED, ctx).snapshot_at(ctx, UniverseTime::EPOCH)
                 })

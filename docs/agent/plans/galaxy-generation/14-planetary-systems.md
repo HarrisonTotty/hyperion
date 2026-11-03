@@ -961,7 +961,7 @@ Order and parallelism:
   merger's product's main-sequence clock is its own.
   - _Accept:_ `cargo test -p hyperion-sim --lib -- binary_host_history`.
 - **P14.T1.h A paired star's remnant and death in the generation** (lane `fix-binary-hosts`'s
-  findings, held at 27). Second-generation planets' neutron star, a debris disc's white dwarf and
+  findings, held at 28). Second-generation planets' neutron star, a debris disc's white dwarf and
   a protoplanetary disc's first death read a star its pair changed from its pair's timeline.
   - _Accept:_ `cargo test -p hyperion-sim --lib -- binary_host_remnants`.
 
@@ -9627,7 +9627,7 @@ it:
   - its light and peak luminosity (P14.T1.e, `BINARY_HOST_LIGHT_VERSION`);
   - its X-ray and ultraviolet history (P14.T1.f, `BINARY_HOST_XUV_VERSION`);
   - its halo, clocks and pulsar light (P14.T1.g, `BINARY_HOST_HISTORY_VERSION`);
-  - its remnant and death in the generation (P14.T1.h, `BINARY_HOST_REMNANTS_VERSION`);
+  - from 28, its remnant and death in the generation (P14.T1.h, `BINARY_HOST_REMNANTS_VERSION`);
   - its mass, largest radius and sudden events in the fate (P14.T28.g, `BINARY_HOST_FATE_VERSION`);
   - its zones at the evaluated state, and its released stars (P14.T9.d, `BINARY_HOST_ZONES_VERSION`).
 - **Plan 05's spatial view** is unit-agnostic, which the orbit map needs, and its plane follows
@@ -34326,10 +34326,11 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     explosion or death within 10⁻⁹ of the model's own takes the model's age; a pair that records no
     supernova (its two models on their drawn orbit) explodes a star at its model's death; past +H a
     star on its own track dies at its model's death.
-- **P14.T1.h's paired remnants, as built (lane `fix-binary-hosts`, 2026-11-03).** Held at 27
-  (`context::BINARY_HOST_REMNANTS_VERSION`; `BinaryHostRemnantsRules::{SingleModels, Engine}`,
-  `with_binary_host_remnants`, a line in `with_every_27_hold` and in `HeldRules`), a sibling of
-  T1.g's hold, since it adds and removes bodies. Nothing moves at 24, 25 or 26.
+- **P14.T1.h's paired remnants, as built (lane `fix-binary-hosts`, 2026-11-03).** Held at 28,
+  train 27's list having frozen (`context::BINARY_HOST_REMNANTS_VERSION`;
+  `BinaryHostRemnantsRules::{SingleModels, Engine}`, `with_binary_host_remnants`, the new
+  `testing::with_every_28_hold`, which wraps the 27 helper, and a line in `HeldRules`), a sibling of
+  T1.g's hold, since it adds and removes bodies. Nothing moves at 24 to 27.
   - _New items:_ `SystemContext::{remnant_by_end, death_age}` with `StarRemnant`;
     `BinaryTimeline::first_age_where`; `OWN_DEATH_SHARE` and `at_own_death` move to `context`;
     `stellar::system::remnant_kind` is `pub(crate)`; `WhiteDwarfSystem` keeps its star's death
