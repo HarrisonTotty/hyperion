@@ -16,6 +16,7 @@
 
 import type { Vec3 } from "../../../geometry/vec3";
 import type { SpheroidFigure } from "../../atmosphere/hillaire";
+import { INSTANCE_FINEST, NO_STRIDE_BANDS, type StrideBandsM } from "../../clusters/strides";
 import { MAX_MORPH_HOLDS } from "../coarseFineHolds";
 import type { Face, PatchKey } from "../patchKey";
 import type { GraticulePatch } from "../terrainWire";
@@ -54,15 +55,17 @@ export const SLOT_RECORD_BYTES = 112;
  *                           // to, or NO_PARENT_SLOT (R10.T8.b, T8.c; decision-r10-t8a §1)
  *   parentQuadrant : u32,   // bits 0 and 1 the patch's quadrant in its parent (i & 1, j & 1);
  *                           // bits 2 to 17 its morph holds at its coarse–fine edges and corners
- *                           // (`coarseFineHolds.ts`; R10.T8.c)
+ *                           // (`coarseFineHolds.ts`; R10.T8.c); bit 18 `INSTANCE_FINEST`
  *   sub : vec4u,            // x the sub-patch it draws of its slot's patch, or 0 for the whole
  *                           // patch ({@link subPatchWord}); y its edges' fades and z its corners',
  *                           // a byte each; w its own fade, its rebake's and the slot it fades
  *                           // from ({@link fadeWord}; R10.T16.i)
+ *   strides : vec4f,        // its view's stride bands towards strides 2, 4 and 8, metres, at or
+ *                           // below 0 for none, and 0 (plan R14, R14.T3.c; `clusters/strides.ts`)
  * }
  * ```
  */
-export const INSTANCE_RECORD_BYTES = 48;
+export const INSTANCE_RECORD_BYTES = 64;
 
 /** The instance record's 32-bit words a reader takes by index (the struct above): its `slot`. */
 export const INSTANCE_SLOT_WORD = 3;
@@ -438,6 +441,10 @@ export class InstanceRecords {
    * @param edgeFades - Its edges' fades, a byte each in `EDGES`' order (R10.T16.i), 0 for none.
    * @param cornerFades - Its corners' fades, a byte each in `cornerNeighbours`' order, 0 for none.
    * @param fades - Its own fade and its rebake's ({@link fadeWord}), 0 for none.
+   * @param strideBandsM - Its view's stride bands for its level, metres (plan R14, R14.T3.c), none
+   * by default.
+   * @param finest - Whether every camera pass draws it at stride 1 (`clusters/strides.ts`'
+   * `INSTANCE_FINEST`).
    * @throws RangeError past {@link capacity}, or for a slot, parent slot, quadrant, holds,
    * sub-patch word or fades word that is not a whole number in its range.
    */
@@ -453,6 +460,8 @@ export class InstanceRecords {
     edgeFades = 0,
     cornerFades = 0,
     fades = 0,
+    strideBandsM: StrideBandsM = NO_STRIDE_BANDS,
+    finest = false,
   ): void {
     this.pushXyz(
       slot,
@@ -468,6 +477,8 @@ export class InstanceRecords {
       edgeFades,
       cornerFades,
       fades,
+      strideBandsM,
+      finest,
     );
   }
 
@@ -486,6 +497,8 @@ export class InstanceRecords {
     edgeFades = 0,
     cornerFades = 0,
     fades = 0,
+    strideBandsM: StrideBandsM = NO_STRIDE_BANDS,
+    finest = false,
   ): void {
     if (this.#count >= this.capacity) {
       throw new RangeError(`more than ${this.capacity} instances in a frame`);
@@ -518,11 +531,16 @@ export class InstanceRecords {
     this.#f32[base + 4] = morphStartM;
     this.#f32[base + 5] = morphEndM;
     this.#u32[base + 6] = parentSlot;
-    this.#u32[base + 7] = quadrant | (holds << QUADRANT_BITS);
+    this.#u32[base + 7] =
+      (quadrant | (holds << QUADRANT_BITS) | (finest ? INSTANCE_FINEST : 0)) >>> 0;
     this.#u32[base + 8] = sub;
     this.#u32[base + 9] = edgeFades;
     this.#u32[base + 10] = cornerFades;
     this.#u32[base + 11] = fades;
+    this.#f32[base + 12] = strideBandsM[0];
+    this.#f32[base + 13] = strideBandsM[1];
+    this.#f32[base + 14] = strideBandsM[2];
+    this.#f32[base + 15] = 0;
     this.#count += 1;
   }
 

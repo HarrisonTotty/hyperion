@@ -15,8 +15,8 @@
 // Composed after frame.wgsl, patchVertex.wgsl, R08's surface lighting (`SURFACE_LIGHTING_WGSL`:
 // preciseTrig.wgsl, common.wgsl, oblate.wgsl, surfaceLighting.wgsl), R07's litBody.wgsl,
 // terrainPatch.wgsl, the horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b), the survey's
-// placement and discard (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11) and
-// the maturity nodes' formula (`shaders/maturityNodes.wgsl`, R10.T1.c), then a `Draw` and a
+// placement and discard (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11), the
+// stride morph (`terrainStrides.wgsl`, plan R14, R14.T3.c) and the maturity nodes' formula (`shaders/maturityNodes.wgsl`, R10.T1.c), then a `Draw` and a
 // fragment stage: the lit material's own (`terrainLitShade.wgsl`, with the
 // shadow cascades' receiver, `shadows/cascadeShadow.wgsl`, R10.T9.b), the terrain's depth alone for
 // the symbology's pass over the image (`terrainDepth.wgsl`, R10.T16.c), or the terrain as a caster
@@ -281,8 +281,9 @@ fn survey_kept(in : LitVertexOut) -> bool {
 @vertex
 fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32) -> LitVertexOut {
   // Every vertex is its grid vertex's, moved along the datum's normal to the height its part
-  // stands at (`terrainSurvey.wgsl`'s `lit_place`).
-  let placed = lit_place(grid, instance);
+  // stands at (`terrainSurvey.wgsl`'s `lit_place`), then by the stride morph where the material
+  // takes it (`terrainStrides.wgsl`, plan R14, R14.T3.c).
+  let placed = stride_place(grid, instance);
   let v = placed.vertex;
   let inst = instances[instance];
   let rec = slots[inst.slot];

@@ -44,6 +44,9 @@ struct Draw {
 
 @group(1) @binding(0) var<uniform> draw : Draw;
 
+// The lit surface takes the stride morph (plan R14, R14.T3.c; `terrainStrides.wgsl`).
+const STRIDE_MORPH : bool = true;
+
 @fragment
 fn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {
   let datum = normalize(in.datumNormal);

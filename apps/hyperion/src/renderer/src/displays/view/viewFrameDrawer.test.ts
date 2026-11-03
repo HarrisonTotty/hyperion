@@ -863,7 +863,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
             ? {
                 maskReadyFor: () => true,
                 symbologyDepthMaterial: null,
-                geometry: { overlayDepth: "redraw" },
+                geometry: { overlayDepth: "redraw", strides: "off" },
                 heights,
                 viewIds: new Set([VIEW]),
                 faulted: false,
@@ -956,7 +956,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
     const pass: FrameTerrainPass = {
       maskReadyFor: () => true,
       symbologyDepthMaterial: null,
-      geometry: { overlayDepth: "redraw" },
+      geometry: { overlayDepth: "redraw", strides: "off" },
       heights: DATUM,
       viewIds: new Set([VIEW]),
       faulted: false,
@@ -1078,7 +1078,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
             ? {
                 maskReadyFor: () => true,
                 symbologyDepthMaterial: null,
-                geometry: { overlayDepth: "redraw" },
+                geometry: { overlayDepth: "redraw", strides: "off" },
                 heights,
                 viewIds: new Set([VIEW, OTHER]),
                 faulted: false,

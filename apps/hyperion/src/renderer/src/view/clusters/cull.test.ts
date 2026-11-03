@@ -14,12 +14,14 @@ import {
   cascadeKeeps,
   CULL_INPUT_WHOLE,
   CULL_ROUNDING_M,
+  type CullInstance,
   cullMarksTwin,
   cullTwin,
   horizonRefuses,
   NO_MARK,
   RECEIVER_ROUNDING_M,
   receiversRefuse,
+  recordEdges,
   strideLevel,
 } from "./cull";
 import {
@@ -40,6 +42,7 @@ import {
   clusterFlags,
   packClusterRecord,
 } from "./record";
+import { INSTANCE_FINEST, NO_STRIDE_BANDS, type StrideBandsM } from "./strides";
 import { TERRAIN_DISCARD_TEMPLATES } from "./templates";
 
 /** Fails a test whose fixture lacks what it needs. */
@@ -378,6 +381,11 @@ function strideAt(strideCap: CascadeCullPass["strideCap"], unitM: number): numbe
   return 2 ** strideLevel({ strideCap, toleranceM: 0.2 }, unitM);
 }
 
+/** A quadrant word's coarse–fine hold at k = 0 on `edge`, bits 2 to 5: x = 0, x = 64, y = 0, y = 64. */
+function heldEdge(edge: number): number {
+  return 1 << (2 + edge);
+}
+
 describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
   it("keeps a sphere inside a cascade's box, or touching it, and refuses one wholly outside it across or beyond", () => {
     const pass = cascade();
@@ -519,7 +527,7 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
     });
   });
 
-  it("takes stride 1 in a camera pass whatever its cap and tolerance, so that the wireframe's contours stand on the stride-1 grid (R14.T4.c)", () => {
+  it("takes stride 1 in a camera pass for an instance without stride bands, whatever its cap and tolerance, so that the wireframe's contours stand on the stride-1 grid (R14.T4.c)", () => {
     const records = [
       record({ x: 0, y: 0, z: -50 }, 1),
       record({ x: 0, y: 0, z: -60 }, 1, "terrain-skirt"),
@@ -535,6 +543,71 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
       viewAxis: { x: 0, y: 0, z: -1 },
     });
     expect([...buckets.keys()].map(strideOf)).toEqual([1, 1]);
+  });
+
+  /** One cluster's stride in a camera pass of cap `cap` for an instance of `bands` and `quadrant`. */
+  function cameraStride(
+    cluster: ClusterRecord,
+    distanceM: number,
+    extra: Partial<CullInstance> = {},
+    cap: CameraCullPass["strideCap"] = 8,
+  ): number {
+    const buckets = cullTwin({
+      instances: [{ originM: { x: 0, y: 0, z: 0 }, page: 0, passMask: 0b1, unitM: 1, ...extra }],
+      records: () => ({ ...cluster, centreM: { x: 0, y: 0, z: -distanceM } }),
+      clustersPerPage: 1,
+      rotationColumns: [X, Y, Z],
+      passes: [{ ...CAMERA, strideCap: cap }],
+      places: [{ bucketBase: 0, listBase: 0 }],
+      templates: 8,
+      viewAxis: { x: 0, y: 0, z: -1 },
+    });
+    const [bucket] = buckets.keys();
+    return bucket === undefined ? 0 : strideOf(bucket);
+  }
+
+  const BANDS: StrideBandsM = [100, 200, 400];
+
+  it("strides a camera pass's cluster coarser with its distance past its instance's bands (R14.T3.c)", () => {
+    const at = (distanceM: number): number =>
+      cameraStride(record(Z, 1), distanceM, { strideBandsM: BANDS });
+    expect([at(50), at(150), at(300), at(1_000)]).toEqual([1, 2, 4, 8]);
+  });
+
+  it("holds an instance with the quadrant word's bit 18, or kept whole as its heights fade, at stride 1, and every stride within the pass's cap (R14.T3.c)", () => {
+    const block = record(Z, 1);
+    expect([
+      cameraStride(block, 1_000, { strideBandsM: BANDS, quadrantWord: INSTANCE_FINEST }),
+      cameraStride(block, 1_000, { strideBandsM: BANDS }, 2),
+      cameraStride(block, 1_000, { strideBandsM: NO_STRIDE_BANDS }),
+      cameraStride(block, 1_000, { strideBandsM: BANDS, whole: true }),
+    ]).toEqual([1, 2, 1, 1]);
+  });
+
+  it("holds a block or a strip on an edge a finer patch touches at stride 4, and none on another edge (R14.T3.c)", () => {
+    const block = (x0: number, y0: number): ClusterRecord => ({
+      ...record(Z, 1),
+      templateRef: x0 | (y0 << 8),
+    });
+    const strip = (edge: number): ClusterRecord => ({
+      ...record(Z, 1, "terrain-skirt"),
+      templateRef: edge << 16,
+    });
+    const at = (cluster: ClusterRecord, quadrantWord: number): number =>
+      cameraStride(cluster, 1_000, { strideBandsM: BANDS, quadrantWord });
+    expect([
+      at(block(0, 24), heldEdge(0)),
+      at(block(56, 24), heldEdge(1)),
+      at(block(24, 0), heldEdge(2)),
+      at(block(24, 56), heldEdge(3)),
+      at(block(24, 24), 0b1111 << 2),
+      at(block(0, 24), heldEdge(1)),
+    ]).toEqual([4, 4, 4, 4, 8, 8]);
+    // A strip's edge 0 y = 0, 1 x = 64, 2 y = 64, 3 x = 0.
+    expect([0, 1, 2, 3].map((edge) => at(strip(edge), heldEdge([2, 1, 3, 0][edge] ?? 0)))).toEqual([
+      4, 4, 4, 4,
+    ]);
+    expect(recordEdges(record(Z, 1, "mesh"))).toBe(0);
   });
 
   it("puts a may-discard record in its shape's may-discard bucket at stride 1, a fin run and a head run in theirs (R14.T1.g)", () => {

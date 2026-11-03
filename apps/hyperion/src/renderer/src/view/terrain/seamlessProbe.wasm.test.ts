@@ -17,7 +17,23 @@ import type { Quaternion } from "../camera/pose";
 import { conjugate, multiply, quaternionFromRows } from "../camera/quaternion";
 import { rotateToBodyFixed } from "../coords/rotation";
 import { relativeToCamera } from "../coords/relative";
-import type { QualitySetting } from "../quality/qualitySetting";
+import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
+import { cameraPassStrideLevel } from "../clusters/cull";
+import { CLUSTER_RECORD_BYTES, type ClusterRecord } from "../clusters/record";
+import {
+  cameraStrideLevel,
+  largestStrideErrorsM,
+  NO_STRIDE_BAND,
+  STRIDE_BAND_FRACTION,
+  type StrideBandsM,
+  strideBandsOf,
+  type StrideErrorsM,
+  strideHeldFactor,
+  StrideLevelErrors,
+  strideLadder,
+  strideMorphFactor,
+  stridePlace,
+} from "../clusters/strides";
 import { cameraSceneOf } from "../scene/model";
 import {
   TERRAIN_TEST_SCRIPT,
@@ -29,7 +45,12 @@ import {
 import { distanceToBoxM, relativeBounds } from "./bounds";
 import { fadedMorph, FADE_STEPS } from "./coarseFineHolds";
 import { vertexDir } from "./cube";
-import { packSurveyMask, surveyCellCode, surveyedAt } from "./gpu/resources";
+import {
+  CLUSTER_RECORDS_SLOT_BYTES,
+  packSurveyMask,
+  surveyCellCode,
+  surveyedAt,
+} from "./gpu/resources";
 import {
   DATUM_SLOT,
   MIX_STEPS,
@@ -39,8 +60,8 @@ import {
   NO_PARENT_SLOT,
 } from "./gpu/uniforms";
 import { handoverTauPx, handsOver, limbDistanceM, pixelAngleRad } from "./handover";
-import { parentKey, type PatchKey, patchKeyString } from "./patchKey";
-import { type BodyFigure, spheroidNormal, surfacePoint } from "./planet";
+import { MAX_LEVEL, parentKey, type PatchKey, patchKeyString } from "./patchKey";
+import { type BodyFigure, type PlanetGeometry, spheroidNormal, surfacePoint } from "./planet";
 import {
   FLIP_S,
   isDrawnHalving,
@@ -57,7 +78,12 @@ import {
   type SeamSummary,
   summariseSeamRun,
 } from "./seamlessSummary";
-import type { Selection, SelectionInput, ViewSelectionInput } from "./select";
+import {
+  type Selection,
+  type SelectionInput,
+  selectionErrorM,
+  type ViewSelectionInput,
+} from "./select";
 import { SELECTION_MARGIN } from "./selectionTolerance";
 import { TerrainSession, terrainPassViewOf, type TerrainViewReport } from "./session";
 import { decodeOctahedral } from "./shadingNormal";
@@ -114,6 +140,13 @@ import type { WorkerLike } from "./workers/pool";
  * - `SEAM_RECORD=1`: the frames, events and latencies too.
  * - `SEAM_LOOKAHEAD=0`: the session's passes look ahead of nothing; by default they look ahead on
  *   the fake clock, as the app's do on its own (`TerrainSessionOptions.lookaheadClockMs`; R10.T14.b).
+ * - `SEAM_STRIDES=measured` (plan R14, R14.T3.c): the passes draw the camera's strides
+ *   (`GeometrySettings.strides`), and each frame measures what they move: every block of a whole
+ *   patch whose stride the cull's twin (`clusters/cull.ts`' `cameraPassStrideLevel`) changes, or
+ *   whose bands its view's ladder moves, drawn at its stride and bands of the frame before and of
+ *   this one through the stride morph's twin (`clusters/strides.ts`' `stridePlace`), both from this
+ *   frame's camera ({@link StrideFrames}); and the lit triangles its seen blocks draw. Off by
+ *   default, where the passes draw at stride 1.
  */
 const SLOW = import.meta.env["HYPERION_SLOW_TESTS"] === "1";
 
@@ -150,6 +183,7 @@ const TRACE_TO_S = numberKnob("SEAM_TRACE_TO_S", Number.NEGATIVE_INFINITY);
 const RECORD = knob("SEAM_RECORD") === "1";
 const DRAFT_SHARE = Math.min(1, Math.max(0, numberKnob("SEAM_DRAFT_SHARE", 1)));
 const LOOKAHEAD = knob("SEAM_LOOKAHEAD") !== "0";
+const STRIDED = knob("SEAM_STRIDES") === "measured";
 
 /** The settings the slow run plays: `SEAM_SETTING`'s alone, or both. */
 function settingsPlayed(): QualitySetting[] {
@@ -281,6 +315,8 @@ interface DrawnArea {
 interface Camera {
   readonly view: ViewSelectionInput;
   readonly bands: Float64Array;
+  /** The view's τ′ over its px per radian (plan R14, R14.T3.c's rule): Design note 3's, unslewed. */
+  readonly tauPrimeRad: number;
 }
 
 /** A frame's camera as its draw has it, body-fixed: the per-frame layer's (R10.T16.i). */
@@ -475,6 +511,7 @@ interface DrawnInstance {
   /** The area it draws: its slot's patch, or a sub-patch's part of it. */
   readonly area: PatchKey;
   readonly held: Held;
+  readonly slot: number;
   /** {@link SURFACE_WORDS}, joined: an instance of the same bake and words draws the same. */
   readonly words: string;
   /** A sub-patch's levels below its slot's patch and its part (i, j) there; 0 for the whole. */
@@ -497,6 +534,9 @@ interface DrawnInstance {
   readonly rises: boolean;
   /** Whether a refine's or a coarsen's fade mixes its heights from its parent's (`PARENT_MIX_SLOT`). */
   readonly parentMix: boolean;
+  /** Its stride bands (plan R14, R14.T3.c; words 12 to 14) and its quadrant's whole word. */
+  readonly bandsM: StrideBandsM;
+  readonly quadrantWord: number;
 }
 
 /** The primary view's drawn instances in `engine`'s latest record writes, by area, read by slot. */
@@ -535,6 +575,7 @@ function instancesOf(
       drawn.set(patchKeyString(area), {
         area,
         held,
+        slot: word(3),
         words: SURFACE_WORDS.map(word).join(),
         levels,
         partI,
@@ -554,6 +595,12 @@ function instancesOf(
             : null,
         rises: olderSlot === DATUM_SLOT && rebakeFade > 0,
         parentMix: olderSlot === PARENT_MIX_SLOT && rebakeFade > 0,
+        bandsM: [
+          f[base + 12] ?? NO_STRIDE_BAND,
+          f[base + 13] ?? NO_STRIDE_BAND,
+          f[base + 14] ?? NO_STRIDE_BAND,
+        ],
+        quadrantWord: word(7),
       });
     }
   }
@@ -734,6 +781,430 @@ class DrawnSurfaces {
     }
     return { h, normal, surveyed: true };
   }
+}
+
+/** The cluster records of every slot, as their writes left them (`terrain cluster records`). */
+class SlotRecords {
+  readonly #bySlot = new Map<number, DataView>();
+
+  /** Takes `engine`'s record writes since its writes were last cleared. */
+  take(engine: CountingRenderEngine): void {
+    for (const write of engine.writes) {
+      if (write.buffer === "terrain cluster records") {
+        this.#bySlot.set(
+          write.offsetBytes / CLUSTER_RECORDS_SLOT_BYTES,
+          new DataView(write.data.slice().buffer),
+        );
+      }
+    }
+  }
+
+  /** Block `block`'s sphere of `slot`, about its patch's origin, body-fixed: centre and radius. */
+  sphere(slot: number, block: number): { readonly centreM: Vec3; readonly radiusM: number } | null {
+    const view = this.#bySlot.get(slot);
+    if (view === undefined) {
+      return null;
+    }
+    const at = block * CLUSTER_RECORD_BYTES;
+    return {
+      centreM: vec3(
+        view.getFloat32(at, true),
+        view.getFloat32(at + 4, true),
+        view.getFloat32(at + 8, true),
+      ),
+      radiusM: view.getFloat32(at + 12, true),
+    };
+  }
+}
+
+/** One frame's measure of the camera's strides (plan R14, R14.T3.c): see {@link StrideFrames}. */
+interface StrideFrame {
+  readonly tS: number;
+  /** Blocks of the frame's whole patches at a stride above 1, and those it measured. */
+  readonly strided: number;
+  readonly measured: number;
+  /** The largest move and normal's turn a stride's or a band's change made on screen, px and °. */
+  readonly movePx: number;
+  readonly normalDeg: number;
+  /** Lit triangles its seen blocks draw, and at stride 1. */
+  readonly litTriangles: number;
+  readonly litTrianglesAtStride1: number;
+  /**
+   * The lit triangles they would draw by the rule with neither its band nor its spacing, at the
+   * level's largest e_s, and at each block's own e_s (Design note 3's rule as T3.a counted it).
+   */
+  readonly litTrianglesBare: number;
+  readonly litTrianglesOwn: number;
+  /**
+   * And by the rule with the blocks on a patch's edge at the level's largest e_s and its others at
+   * their patch's largest, or at the largest of their own and their eight neighbours'.
+   */
+  readonly litTrianglesPatch: number;
+  readonly litTrianglesNear: number;
+  /**
+   * And by the pass's own ladder and band, from the frame's drawn bakes' errors rather than the
+   * pass's resident ones, and by each level's own bands of the resident errors, uncoupled from the
+   * other levels'.
+   */
+  readonly litTrianglesDrawnLadder: number;
+  readonly litTrianglesUncoupled: number;
+}
+
+/** A stride's lit-mesh template's triangles a block (`clusters/templates.ts`): 128 ÷ s². */
+const BLOCK_TRIANGLES = 128;
+
+/**
+ * Each frame's camera strides and what their changes move (`SEAM_STRIDES=measured`): each block of
+ * a whole patch drawn at the stride the cull's twin gives it, by its record's sphere, its
+ * instance's bands and quadrant word; and where a block's stride or bands changed since the frame
+ * before drew its bake, its surface at both, each through the stride morph's twin at this frame's
+ * camera, measured at its vertices every {@link STRIDE}th: the change the strides alone made, the
+ * camera's own motion apart. A block's surface is its stride's triangles over its vertices' morphed
+ * places, the CDLOD morph's heights and k (`DrawnSurfaces.vertex`) placed on the figure, its
+ * shading normal its tile's mixed by the morphed k.
+ */
+class StrideFrames {
+  readonly #before = new WeakMap<
+    BakedPatch,
+    { readonly strides: Uint8Array; readonly bandsM: StrideBandsM }
+  >();
+  readonly frames: StrideFrame[] = [];
+
+  frame(
+    planet: PlanetGeometry,
+    tauPrimeRad: number,
+    resident: StrideLevelErrors,
+    surfaces: DrawnSurfaces,
+    cam: FrameCamera,
+    records: SlotRecords,
+    drawn: ReadonlyMap<string, DrawnInstance>,
+    tS: number,
+  ): void {
+    const { figure } = planet;
+    // Each level's largest e₂, e₄, e₈ over the frame's bakes, as the pass's ladder takes them.
+    const levelErrors = new Map<number, StrideErrorsM>();
+    for (const inst of drawn.values()) {
+      const errors = inst.held.bake.clusterErrors;
+      if (errors === undefined) {
+        continue;
+      }
+      const largest = largestStrideErrorsM(errors);
+      const most = levelErrors.get(inst.held.key.level) ?? [0, 0, 0];
+      levelErrors.set(inst.held.key.level, [
+        Math.max(most[0], largest[0]),
+        Math.max(most[1], largest[1]),
+        Math.max(most[2], largest[2]),
+      ]);
+    }
+    const bareLevel = (
+      statedM: number,
+      errorsM: ReadonlyArray<number>,
+      distanceM: number,
+    ): number => {
+      let level = 0;
+      for (let l = 1; l <= 3; l += 1) {
+        if ((statedM + (errorsM[l - 1] ?? Infinity)) / tauPrimeRad > distanceM) {
+          break;
+        }
+        level = l;
+      }
+      return level;
+    };
+    let litTrianglesBare = 0;
+    let litTrianglesOwn = 0;
+    let litTrianglesPatch = 0;
+    let litTrianglesNear = 0;
+    let litTrianglesDrawnLadder = 0;
+    let litTrianglesUncoupled = 0;
+    const drawnErrors = new StrideLevelErrors();
+    for (const inst of drawn.values()) {
+      const errors = inst.held.bake.clusterErrors;
+      if (errors !== undefined) {
+        drawnErrors.take(inst.held.key.level, errors);
+      }
+    }
+    const drawnLadder = strideLadder(
+      planet,
+      tauPrimeRad,
+      drawnErrors.errorsM,
+      new Float64Array(MAX_LEVEL + 1),
+    );
+    const pxPerRad = cam.viewport.widthPx / 2 / Math.tan(cam.fovXRad / 2);
+    const pass = { strideCap: 8 } as const;
+    let strided = 0;
+    let measured = 0;
+    let movePx = 0;
+    let normalDeg = 0;
+    let litTriangles = 0;
+    let litTrianglesAtStride1 = 0;
+    for (const inst of drawn.values()) {
+      if (inst.levels !== 0 || inst.held.bake.clusterErrors === undefined) {
+        continue;
+      }
+      const { slot } = inst;
+      const origin = inst.held.bake.originM;
+      const strides = new Uint8Array(64);
+      for (let block = 0; block < 64; block += 1) {
+        const sphere = records.sphere(slot, block);
+        if (sphere === null) {
+          strides[block] = 1;
+          continue;
+        }
+        const centre = vec3(
+          origin.x + sphere.centreM.x - cam.positionM.x,
+          origin.y + sphere.centreM.y - cam.positionM.y,
+          origin.z + sphere.centreM.z - cam.positionM.z,
+        );
+        const record: ClusterRecord = {
+          centreM: sphere.centreM,
+          radiusM: sphere.radiusM,
+          mode: "strided",
+          strideErrorBits: null,
+          templateRef: 8 * (block % 8) + ((8 * Math.floor(block / 8)) << 8),
+          shape: "terrain-block",
+          mayDiscard: false,
+          material: 0,
+        };
+        const level = cameraPassStrideLevel(
+          { kind: "camera", planes: [], horizon: null, order: "ordered", toleranceRad: 0, ...pass },
+          record,
+          {
+            originM: vec3(0, 0, 0),
+            page: slot,
+            passMask: 0,
+            unitM: 0,
+            strideBandsM: inst.bandsM,
+            quadrantWord: inst.quadrantWord,
+          },
+          centre,
+        );
+        strides[block] = 1 << level;
+        strided += level > 0 ? 1 : 0;
+        const up = spheroidNormal(
+          figure,
+          vertexDir(inst.area, 8 * (block % 8) + 4, 8 * Math.floor(block / 8) + 4),
+        );
+        if (onScreen(cam, centre, vec3(up[0], up[1], up[2]))) {
+          litTriangles += BLOCK_TRIANGLES / (1 << level) ** 2;
+          litTrianglesAtStride1 += BLOCK_TRIANGLES;
+          const statedM = selectionErrorM(planet, inst.held.key.level);
+          const nearestM = Math.max(0, norm(centre) - sphere.radiusM);
+          const bare = bareLevel(statedM, levelErrors.get(inst.held.key.level) ?? [], nearestM);
+          const own = inst.held.bake.clusterErrors;
+          const ownErrors = [1, 2, 3].map((l) => own[4 * block + l] ?? Infinity);
+          litTrianglesBare += BLOCK_TRIANGLES / (1 << bare) ** 2;
+          litTrianglesOwn += BLOCK_TRIANGLES / (1 << bareLevel(statedM, ownErrors, nearestM)) ** 2;
+          const bx = block % 8;
+          const by = Math.floor(block / 8);
+          const onEdge = bx === 0 || bx === 7 || by === 0 || by === 7;
+          const largest = (blocks: ReadonlyArray<number>): number[] =>
+            [1, 2, 3].map((l) => Math.max(...blocks.map((c) => own[4 * c + l] ?? Infinity)));
+          const patchErrors = largest(Array.from({ length: 64 }, (_, c) => c));
+          const nearBlocks: number[] = [];
+          for (let dy = -1; dy <= 1; dy += 1) {
+            for (let dx = -1; dx <= 1; dx += 1) {
+              if (bx + dx >= 0 && bx + dx < 8 && by + dy >= 0 && by + dy < 8) {
+                nearBlocks.push(8 * (by + dy) + bx + dx);
+              }
+            }
+          }
+          const levelMost = levelErrors.get(inst.held.key.level) ?? [];
+          litTrianglesDrawnLadder +=
+            BLOCK_TRIANGLES /
+            (1 <<
+              cameraStrideLevel(strideBandsOf(drawnLadder, inst.held.key.level), 3, nearestM)) **
+              2;
+          const patchLevel = inst.held.key.level;
+          const residentMost = [0, 1, 2].map(
+            (l) => resident.errorsM[3 * patchLevel + l] ?? Infinity,
+          );
+          const uncoupled = residentMost.map((e) => (statedM + e) / tauPrimeRad);
+          litTrianglesUncoupled +=
+            BLOCK_TRIANGLES /
+            (1 <<
+              cameraStrideLevel(
+                [uncoupled[0] ?? -1, uncoupled[1] ?? -1, uncoupled[2] ?? -1],
+                3,
+                nearestM,
+              )) **
+              2;
+          litTrianglesPatch +=
+            BLOCK_TRIANGLES /
+            (1 << bareLevel(statedM, onEdge ? levelMost : patchErrors, nearestM)) ** 2;
+          litTrianglesNear +=
+            BLOCK_TRIANGLES /
+            (1 << bareLevel(statedM, onEdge ? levelMost : largest(nearBlocks), nearestM)) ** 2;
+        }
+      }
+      const was = this.#before.get(inst.held.bake);
+      this.#before.set(inst.held.bake, { strides, bandsM: inst.bandsM });
+      if (was === undefined) {
+        continue;
+      }
+      // A band's decay (`STRIDE_ERROR_DECAY`, 0.2% a frame) moves k by at most a tenth a frame:
+      // measured where a band moves by a quarter of its width or more, as a level's errors rise.
+      const bandsMoved = was.bandsM.some(
+        (band, l) =>
+          Math.abs(band - (inst.bandsM[l] ?? band)) >
+          0.25 * STRIDE_BAND_FRACTION * Math.max(Math.abs(band), 1e-9),
+      );
+      const place = (x: number, y: number): number[] => {
+        const [h, k] = surfaces.vertex(inst, x, y);
+        const p = surfacePoint(figure, vertexDir(inst.area, x, y), h);
+        return [p[0], p[1], p[2], k];
+      };
+      const factorBy =
+        (bands: StrideBandsM) =>
+        (x: number, y: number, level: number, values: ReadonlyArray<number>): number => {
+          const held = strideHeldFactor(x, y, level, inst.quadrantWord);
+          if (held !== null) {
+            return held;
+          }
+          const d = norm(sub(vec3(values[0] ?? 0, values[1] ?? 0, values[2] ?? 0), cam.positionM));
+          return strideMorphFactor(bands[level] ?? NO_STRIDE_BAND, d);
+        };
+      const nowFactor = factorBy(inst.bandsM);
+      const thenFactor = factorBy(was.bandsM);
+      for (let block = 0; block < 64; block += 1) {
+        const sNow = strides[block] ?? 1;
+        const sThen = was.strides[block] ?? 1;
+        if (sNow === sThen && !bandsMoved) {
+          continue;
+        }
+        measured += 1;
+        const bx = 8 * (block % 8);
+        const by = 8 * Math.floor(block / 8);
+        const morphedNow = new Map<number, number[]>();
+        const morphedThen = new Map<number, number[]>();
+        const at = (
+          memo: Map<number, number[]>,
+          factor: typeof nowFactor,
+          x: number,
+          y: number,
+        ): number[] => {
+          const key = y * SIDE + x;
+          let held = memo.get(key);
+          if (held === undefined) {
+            held = stridePlace(x, y, place, factor);
+            memo.set(key, held);
+          }
+          return held;
+        };
+        const surface = (
+          memo: Map<number, number[]>,
+          factor: typeof nowFactor,
+          s: number,
+          lx: number,
+          ly: number,
+        ): number[] => {
+          const qx = Math.min(8 - s, Math.floor(lx / s) * s);
+          const qy = Math.min(8 - s, Math.floor(ly / s) * s);
+          const fx = (lx - qx) / s;
+          const fy = (ly - qy) / s;
+          const p0 = at(memo, factor, bx + qx, by + qy);
+          const p2 = at(memo, factor, bx + qx + s, by + qy + s);
+          const p1 =
+            fx >= fy
+              ? at(memo, factor, bx + qx + s, by + qy)
+              : at(memo, factor, bx + qx, by + qy + s);
+          const w0 = 1 - Math.max(fx, fy);
+          const w1 = Math.abs(fx - fy);
+          const w2 = Math.min(fx, fy);
+          return [0, 1, 2, 3].map((n) => w0 * (p0[n] ?? 0) + w1 * (p1[n] ?? 0) + w2 * (p2[n] ?? 0));
+        };
+        for (let ly = 0; ly <= 8; ly += STRIDE) {
+          for (let lx = 0; lx <= 8; lx += STRIDE) {
+            const now = surface(morphedNow, nowFactor, sNow, lx, ly);
+            const then = surface(morphedThen, thenFactor, sThen, lx, ly);
+            const rel = sub(vec3(now[0] ?? 0, now[1] ?? 0, now[2] ?? 0), cam.positionM);
+            const dir = vertexDir(inst.area, bx + lx, by + ly);
+            const n = spheroidNormal(figure, dir);
+            if (!onScreen(cam, rel, vec3(n[0], n[1], n[2]))) {
+              continue;
+            }
+            const moved = vec3(
+              (now[0] ?? 0) - (then[0] ?? 0),
+              (now[1] ?? 0) - (then[1] ?? 0),
+              (now[2] ?? 0) - (then[2] ?? 0),
+            );
+            movePx = Math.max(movePx, (norm(cross(moved, normalise(rel))) * pxPerRad) / norm(rel));
+            const a = morphedNormal(inst.held, inst, bx + lx, by + ly, now[3] ?? 0);
+            const b = morphedNormal(inst.held, inst, bx + lx, by + ly, then[3] ?? 0);
+            if (a !== null && b !== null) {
+              const cos = Math.min(1, Math.max(-1, a.x * b.x + a.y * b.y + a.z * b.z));
+              normalDeg = Math.max(normalDeg, (Math.acos(cos) * 180) / Math.PI);
+            }
+          }
+        }
+      }
+    }
+    this.frames.push({
+      tS,
+      strided,
+      measured,
+      movePx,
+      normalDeg,
+      litTriangles,
+      litTrianglesAtStride1,
+      litTrianglesBare,
+      litTrianglesOwn,
+      litTrianglesPatch,
+      litTrianglesNear,
+      litTrianglesDrawnLadder,
+      litTrianglesUncoupled,
+    });
+  }
+}
+
+/** A run's stride figures (plan R14, R14.T3.c), as {@link strideSummaryOf} gives them. */
+interface StrideSummary {
+  readonly frames: number;
+  /** Frames with a block at a stride above 1, and frames that measured a change. */
+  readonly framesStrided: number;
+  readonly framesMeasured: number;
+  /** The largest move a change made, px, and turn of the normal, °. */
+  readonly movePxMax: number;
+  readonly normalDegMax: number;
+  readonly framesOverOnePx: number;
+  readonly framesOverTwoPx: number;
+  readonly framesOverTwoDeg: number;
+  /** The seen blocks' lit triangles over stride 1's: as drawn, and by each rule of `StrideFrame`. */
+  readonly litTriangleShare: number;
+  readonly litTriangleShareBare: number;
+  readonly litTriangleShareOwn: number;
+  readonly litTriangleSharePatch: number;
+  readonly litTriangleShareNear: number;
+  readonly litTriangleShareDrawnLadder: number;
+  readonly litTriangleShareUncoupled: number;
+}
+
+/** A run's stride figures (plan R14, R14.T3.c): its frames' largest move and turn, and its lit triangles. */
+function strideSummaryOf(frames: ReadonlyArray<StrideFrame>): StrideSummary {
+  const lit = frames.reduce((sum, f) => sum + f.litTriangles, 0);
+  const at1 = frames.reduce((sum, f) => sum + f.litTrianglesAtStride1, 0);
+  const bare = frames.reduce((sum, f) => sum + f.litTrianglesBare, 0);
+  const own = frames.reduce((sum, f) => sum + f.litTrianglesOwn, 0);
+  const patch = frames.reduce((sum, f) => sum + f.litTrianglesPatch, 0);
+  const near = frames.reduce((sum, f) => sum + f.litTrianglesNear, 0);
+  const drawnLadder = frames.reduce((sum, f) => sum + f.litTrianglesDrawnLadder, 0);
+  const uncoupled = frames.reduce((sum, f) => sum + f.litTrianglesUncoupled, 0);
+  return {
+    frames: frames.length,
+    framesStrided: frames.filter((f) => f.strided > 0).length,
+    framesMeasured: frames.filter((f) => f.measured > 0).length,
+    movePxMax: Math.max(0, ...frames.map((f) => f.movePx)),
+    normalDegMax: Math.max(0, ...frames.map((f) => f.normalDeg)),
+    framesOverOnePx: frames.filter((f) => f.movePx > 1).length,
+    framesOverTwoPx: frames.filter((f) => f.movePx > 2).length,
+    framesOverTwoDeg: frames.filter((f) => f.normalDeg > 2).length,
+    litTriangleShare: at1 > 0 ? lit / at1 : 1,
+    litTriangleShareBare: at1 > 0 ? bare / at1 : 1,
+    litTriangleShareOwn: at1 > 0 ? own / at1 : 1,
+    litTriangleSharePatch: at1 > 0 ? patch / at1 : 1,
+    litTriangleShareNear: at1 > 0 ? near / at1 : 1,
+    litTriangleShareDrawnLadder: at1 > 0 ? drawnLadder / at1 : 1,
+    litTriangleShareUncoupled: at1 > 0 ? uncoupled / at1 : 1,
+  };
 }
 
 /** The keys of every strict ancestor of `drawn`'s areas, as `patchKeyString`s. */
@@ -1070,6 +1541,8 @@ interface Played {
   /** A drafted bake's share of a bake's cost, the run's. */
   readonly draftShare: number;
   readonly trace: ReadonlyArray<TraceEntry>;
+  /** Each frame's camera strides, with `SEAM_STRIDES=measured` (plan R14, R14.T3.c); else none. */
+  readonly strides: ReadonlyArray<StrideFrame>;
 }
 
 /** Plays TERRAIN TEST's script from `fromS` to `toS` at {@link HZ} and records the drawn ground. */
@@ -1096,6 +1569,7 @@ async function play(options: ProbeOptions): Promise<Played> {
     ...(LOOKAHEAD ? { lookaheadClockMs: () => Date.now() } : {}),
     morphInMs: MORPH_MS,
     ...budgetHoldKnob(),
+    ...(STRIDED ? { geometry: { ...SETTINGS[setting].geometry, strides: "measured" } } : {}),
   });
   link.onSurface((event) => {
     if (event.kind === "revisions") {
@@ -1162,6 +1636,10 @@ async function play(options: ProbeOptions): Promise<Played> {
   const frameChanges: SeamFrameChange[] = [];
   const pops: SeamPop[] = [];
   const masks = new SurveyMasks();
+  const strideFrames = new StrideFrames();
+  // Each level's largest measured errors over the run's resident bakes, as the pass keeps them.
+  const residentErrors = new StrideLevelErrors();
+  const slotRecords = new SlotRecords();
   let drawnBefore = new Map<string, DrawnInstance>();
   // The selection's changes, for its flip-flops: when each patch last coarsened away or refined in.
   const flips = new SelectionFlips();
@@ -1210,7 +1688,11 @@ async function play(options: ProbeOptions): Promise<Played> {
           bands[2 * level] = start;
           bands[2 * level + 1] = end;
         }
-        latest.cam = { view, bands };
+        latest.cam = {
+          view,
+          bands,
+          tauPrimeRad: morphView.tauPx / (view.viewport.widthPx / (2 * Math.tan(view.fovXRad / 2))),
+        };
         const demanded = new Set<string>();
         for (const request of selection.demand) {
           const keyString = patchKeyString(request.key);
@@ -1260,6 +1742,9 @@ async function play(options: ProbeOptions): Promise<Played> {
           return;
         }
         const held: Held = { key, bake };
+        if (bake.clusterErrors !== undefined) {
+          residentErrors.take(key.level, bake.clusterErrors);
+        }
         const old = resident.get(keyString);
         if (old !== undefined) {
           rebaked.push({ old, now: held });
@@ -1299,7 +1784,11 @@ async function play(options: ProbeOptions): Promise<Played> {
       session.step();
       watch();
       // The step's draw in the primary view, as the app draws it, and its change from the frame
-      // before's; the engine's records cleared first, as a run's would fill the memory.
+      // before's; the engine's records cleared first, as a run's would fill the memory, the slots'
+      // cluster records kept, which the strides' measure reads.
+      if (STRIDED) {
+        slotRecords.take(engine);
+      }
       engine.writes.length = 0;
       engine.textureWritten.length = 0;
       engine.dispatched.length = 0;
@@ -1331,6 +1820,19 @@ async function play(options: ProbeOptions): Promise<Played> {
         if (change !== null) {
           frameChanges.push(change);
         }
+      }
+      if (STRIDED && drawingPass !== null && camNow !== null && latest.cam !== null) {
+        const figure = drawingPass.planet.figure;
+        strideFrames.frame(
+          drawingPass.planet,
+          latest.cam.tauPrimeRad,
+          residentErrors,
+          new DrawnSurfaces(figure, camNow, masks),
+          camNow,
+          slotRecords,
+          drawnNow,
+          tS,
+        );
       }
       drawnBefore = drawnNow;
       // Each frame waits on the clock its step's bakes run on, before the next frame steps.
@@ -1524,6 +2026,7 @@ async function play(options: ProbeOptions): Promise<Played> {
     },
     draftShare,
     trace,
+    strides: strideFrames.frames,
   };
 }
 
@@ -1583,6 +2086,7 @@ function report(played: Played, summary: SeamSummary): Record<string, unknown> {
       .slice(0, 40),
     fadePopsBeside: run.pops.filter((pop) => pop.cause === "fade" && pop.beside).length,
     trace: played.trace,
+    ...(STRIDED ? { strides: strideSummaryOf(played.strides) } : {}),
     ...(RECORD ? { record: run } : {}),
   };
 }
@@ -1622,6 +2126,9 @@ const AT_DEFAULT_KNOBS =
   knob("SEAM_BUDGET_HOLD") === undefined &&
   knob("SEAM_FROM_S") === undefined &&
   knob("SEAM_TO_S") === undefined;
+
+/** The camera's strides' bound on a frame's move (plan R14, R14.T3.c's acceptance), px. */
+const STRIDE_MOVE_PX: Readonly<Record<QualitySetting, number>> = { high: 1, low: 2 };
 
 /** The script's first draws on high: past the hand-over at 40.55 s. */
 const SHORT_TO_S = 42;
@@ -1682,6 +2189,18 @@ describe.runIf(SLOW)("the seamless probe's acceptance (HYPERION_SLOW_TESTS=1)", 
               ["appearMovePx", summary.appearMovePxMax, bounds.appearMovePx],
             ].filter(([, value, bound]) => Number(value) > Number(bound));
       expect(over).toEqual([]);
+      // The camera's strides (plan R14, R14.T3.c's acceptance): no frame's change of them moves a
+      // vertex past 1 px on high and 2 px on low, nor turns a normal past 2°.
+      const strides = strideSummaryOf(played.strides);
+      expect(
+        STRIDED
+          ? {
+              strided: strides.framesStrided > 0,
+              movePx: strides.movePxMax <= STRIDE_MOVE_PX[setting],
+              normalDeg: strides.normalDegMax <= POP_NORMAL_DEG,
+            }
+          : { strided: true, movePx: true, normalDeg: true },
+      ).toEqual({ strided: true, movePx: true, normalDeg: true });
     },
   );
 

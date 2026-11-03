@@ -98,6 +98,15 @@ import {
   packCullPasses,
 } from "../clusters/cullPass";
 import { cascadeCullPasses } from "../clusters/receivers";
+import {
+  largestStrideErrorsM,
+  NO_STRIDE_BANDS,
+  type StrideBandsM,
+  strideBandsOf,
+  type StrideErrorsM,
+  StrideLevelErrors,
+  strideLadder,
+} from "../clusters/strides";
 import { type ClusterPassStats, ClusterStats } from "../clusters/stats";
 import { TERRAIN_PAGE_CLUSTERS } from "../clusters/terrain";
 import { TERRAIN_DISCARD_TEMPLATES } from "../clusters/templates";
@@ -176,6 +185,7 @@ import { type PlanetGeometry, planetGeometry, surfacePoint } from "./planet";
 import { type MorphSpans, TimeMorph } from "./timeMorph";
 import {
   finestPatchSizeM,
+  forcedRadiusM,
   type GroundContact,
   heldGroundUnder,
   heldRadiusM,
@@ -824,6 +834,12 @@ interface Resident {
   readonly interior: boolean;
   /** Its bake's sizes, which the time morph's spans read (R10.T16.i). */
   readonly sizes: BakeSizes;
+  /**
+   * The largest e₂, e₄ and e₈ of its bake's clusters' measured errors (`BakedPatch.clusterErrors`,
+   * plan R14, R14.T3.b), m, which its view's stride ladder takes (T3.c); `null` for a bake without
+   * them, which no camera pass strides.
+   */
+  readonly strideErrorsM: StrideErrorsM | null;
 }
 
 /**
@@ -1079,6 +1095,14 @@ interface ViewState {
   bandTauPx: number | null;
   /** The last selection's {@link effectiveTauPx} for the view, pixels, which the bands follow. */
   targetTauPx: number | null;
+  /**
+   * Its stride ladder this frame (plan R14, R14.T3.c; `clusters/strides.ts`' `strideLadder`), U(n)
+   * by absolute level, m, at its unslewed τ′ ({@link ViewState.targetTauPx}), from its levels'
+   * errors, its drawn patches' largest held as they decay, and each level's three bands from it.
+   */
+  readonly strideErrors: StrideLevelErrors;
+  readonly strideLadderM: Float64Array;
+  readonly strideBandsM: StrideBandsM[];
   readonly uniforms: {
     readonly bodyRotation: Float32Array;
     readonly sunDirection: Float32Array;
@@ -3269,6 +3293,8 @@ export class TerrainPass {
       originHeightM: Math.fround(bake.originHeightM),
       interior: isInteriorBake(layers),
       sizes,
+      strideErrorsM:
+        bake.clusterErrors === undefined ? null : largestStrideErrorsM(bake.clusterErrors),
     });
     device.graticules.delete(keyString);
     device.rebakes.delete(keyString);
@@ -3434,6 +3460,9 @@ export class TerrainPass {
       morph: new Float64Array(2 * (MAX_LEVEL + 1)),
       bandTauPx: null,
       targetTauPx: null,
+      strideErrors: new StrideLevelErrors(),
+      strideLadderM: new Float64Array(MAX_LEVEL + 1),
+      strideBandsM: Array.from({ length: MAX_LEVEL + 1 }, () => NO_STRIDE_BANDS),
       uniforms: {
         bodyRotation,
         sunDirection: new Float32Array(4),
@@ -4086,6 +4115,12 @@ export class TerrainPass {
     const fades = this.#fadesAt(device, input.nowMs);
     // The edge patches join the interior patches' records only where every pass draws them there.
     const fins = lit && split && this.#finsDrawn(device, state, forms);
+    // The camera's strides (plan R14, R14.T3.c): each level's bands from the view's ladder.
+    const strides = this.#stridesOn() && this.#litClustersReady(device, state, forms);
+    const patchM = finestPatchSizeM(this.#planet);
+    if (strides && drawSet !== undefined) {
+      this.#strideBandsOf(device, state, input, drawSet, mask);
+    }
     instances.clear();
     interior.clear();
     phases?.clear();
@@ -4129,6 +4164,13 @@ export class TerrainPass {
           cornerFades: fades.corners[n] ?? 0,
           fades: fadesWord,
         });
+        // Every measured patch takes its level's bands, whichever path draws it, so that a vertex it
+        // shares is placed alike; a camera pass draws the forced region's at stride 1.
+        const bands =
+          strides && resident !== undefined && resident.strideErrorsM !== null
+            ? (state.strideBandsM[level] ?? NO_STRIDE_BANDS)
+            : NO_STRIDE_BANDS;
+        const finest = strides && this.#nearContact(patch, contacts, patchM);
         if (inner) {
           state.interiorFins.push(!interiorBake);
           state.interiorFading.push(((heights >>> 8) & MIX_STEPS) !== 0);
@@ -4148,6 +4190,8 @@ export class TerrainPass {
           fades.edges[n] ?? 0,
           fades.corners[n] ?? 0,
           fadesWord,
+          bands,
+          finest,
         );
         (inner ? state.interiorDrawn : drawnIndices).push(n);
         const phasesOf = inner ? interiorPhases : phases;
@@ -4159,7 +4203,6 @@ export class TerrainPass {
     drawnGround.end(cameraM, input.view.rotation.rows);
     const records = state.contacts;
     records.clear();
-    const patchM = finestPatchSizeM(this.#planet);
     for (const contact of contacts) {
       const c = contact.positionM;
       records.pushXyz(
@@ -4248,7 +4291,13 @@ export class TerrainPass {
     const drawn =
       clusters !== null && litBase !== null
         ? [
-            ...clusters.buckets.drawItems(CLUSTER_LIT_PASS, clusters.mesh, litBase, 1, finLitBase),
+            ...clusters.buckets.drawItems(
+              CLUSTER_LIT_PASS,
+              clusters.mesh,
+              litBase,
+              strides ? 8 : 1,
+              finLitBase,
+            ),
             ...edge,
           ]
         : draws;
@@ -5017,8 +5066,10 @@ export class TerrainPass {
     clusters.overlayBase = baseOf(device.clusterDepthMaterial, clusters.overlayBase);
     clusters.finCasterBase = baseOf(device.finShadowMaterial, clusters.finCasterBase);
     clusters.finDepthBase = baseOf(device.finDepthMaterial, clusters.finDepthBase);
+    // With the camera's strides the overlay's depth takes its own pass at stride 1, whatever
+    // `overlayDepth` says: the lit pass's strided clusters would move its marks (plan R14, R14.T3.c).
     const overlay =
-      this.#geometry.overlayDepth !== "redraw" &&
+      (this.#geometry.overlayDepth !== "redraw" || this.#stridesOn()) &&
       clusters.overlayBase !== null &&
       device.depthMaterial !== null;
     // The lit pass on the cluster path (plan R14, R14.T2.a): its form, the compaction and the cluster
@@ -5094,6 +5145,79 @@ export class TerrainPass {
       finCasterBase: fins ? clusters.finCasterBase : null,
       finDepthBase: fins ? clusters.finDepthBase : null,
     };
+  }
+
+  /**
+   * Whether the geometry asks the lit pass's camera strides (plan R14, R14.T3.c): the cluster path,
+   * its lit pass on it and `strides` measured, in the lit style.
+   */
+  #stridesOn(): boolean {
+    const geometry = this.#geometry;
+    return (
+      this.#shading === "lit" &&
+      geometry.clusterPath &&
+      geometry.litClusters &&
+      geometry.strides === "measured"
+    );
+  }
+
+  /**
+   * View `state`'s stride bands this frame (plan R14, R14.T3.c; `clusters/strides.ts`): its levels'
+   * errors decayed a frame and raised to the largest of the patches of `drawSet` it draws (`mask`'s
+   * views), then its ladder at its unslewed τ′ ({@link ViewState.targetTauPx}, Design note 3's)
+   * over its viewport's px per radian, W ÷ (2 tan(fov_h ÷ 2)) as `screenSpaceErrorPx` takes it, and
+   * each level's three bands from it; none before the view's first selection.
+   */
+  #strideBandsOf(
+    device: Device,
+    state: ViewState,
+    input: TerrainViewFrameInput,
+    drawSet: DrawSet,
+    mask: number,
+  ): void {
+    const errors = state.strideErrors;
+    errors.decay();
+    for (let n = 0; n < drawSet.count; n += 1) {
+      const drawn = drawSet.patches[n];
+      if (drawn === undefined || ((drawSet.views[n] ?? 0) & mask) === 0) {
+        continue;
+      }
+      const largestM = device.residents.get(drawn.keyString)?.strideErrorsM ?? null;
+      if (largestM !== null) {
+        errors.raise(drawn.patch.key.level, largestM);
+      }
+    }
+    const { viewport, fovXRad } = input.view;
+    const pxPerRad = viewport.widthPx / (2 * Math.tan(fovXRad / 2));
+    const tauPx = state.targetTauPx ?? 0;
+    strideLadder(this.#planet, tauPx / pxPerRad, errors.errorsM, state.strideLadderM);
+    for (let level = 0; level <= MAX_LEVEL; level += 1) {
+      state.strideBandsM[level] = strideBandsOf(state.strideLadderM, level);
+    }
+  }
+
+  /**
+   * Whether `patch` may lie in the forced region about `contacts` (Design note 10): its bounding
+   * sphere within a contact's forced radius ({@link forcedRadiusM}) of it, which holds every patch
+   * whose box is (`inForcedRegion`'s rule) and so every cluster within a contact's held
+   * radius and its ramp.
+   */
+  #nearContact(
+    patch: { readonly originM: Vec3; readonly boundingRadiusM: number },
+    contacts: ReadonlyArray<GroundContact>,
+    patchM: number,
+  ): boolean {
+    for (let n = 0; n < contacts.length; n += 1) {
+      const contact = contacts[n];
+      if (
+        contact !== undefined &&
+        distance(patch.originM, contact.positionM) - patch.boundingRadiusM <=
+          forcedRadiusM(contact, patchM)
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -5193,7 +5317,7 @@ export class TerrainPass {
     const passes: Array<CullPass | null> = [
       ...cascades,
       clusters.overlay ? this.#overlayCullPass(input) : null,
-      clusters.litBase !== null ? this.#litCullPass(input) : null,
+      clusters.litBase !== null ? this.#litCullPass(input, this.#stridesOn()) : null,
     ];
     while (passes.length > CASCADES.length && passes.at(-1) === null) {
       passes.pop();
@@ -5298,10 +5422,10 @@ export class TerrainPass {
   /**
    * The lit pass's camera as an ordered pass of the cull (plan R14, R14.T2.a): R05's frustum of the
    * view's camera in the instances' frame, each side opened by {@link OVERLAY_CULL_MARGIN_RAD}, and
-   * R05's horizon occluder seen from it (`horizonCone`), at stride 1, its kept clusters marked for
-   * the stable compaction.
+   * R05's horizon occluder seen from it (`horizonCone`), its kept clusters marked for the stable
+   * compaction; at stride 1, or with `strides` up to 8 by its instances' bands (plan R14, R14.T3.c).
    */
-  #litCullPass(input: TerrainViewFrameInput): CameraCullPass {
+  #litCullPass(input: TerrainViewFrameInput, strides: boolean): CameraCullPass {
     const { view } = input;
     const frustum = frustumOf(
       { orientation: view.orientation, fovXRad: view.fovXRad, viewport: view.viewport },
@@ -5315,7 +5439,7 @@ export class TerrainPass {
       kind: "camera",
       planes: frustum.planes,
       toleranceRad: 0,
-      strideCap: 1,
+      strideCap: strides ? 8 : 1,
       horizon: cullHorizonOf(view.cameraM, occluderRadiusM),
       order: "ordered",
     };

@@ -8,11 +8,11 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in fifteen parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * groups are in sixteen parts, each a run of its own under the harness's watchdog (perf-smoke,
  * 2026-10-13), parts 2 to 6 and 8 to 14 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
  * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, parts 7 and 15
- * R10's terrain groups, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14
+ * R10's terrain groups and part 16 R14.T3.c's ground under a grounded craft, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14
  * R08.T15.a.2's deck, and part 1 every other; with no part given the page runs them all, in its
  * order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
@@ -167,7 +167,7 @@ import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
 import { checkShadowCascades, checkSharedPass } from "./sharedPass";
-import { checkTerrainFrame } from "./terrainFrame";
+import { checkStridesUnderCraft, checkTerrainFrame } from "./terrainFrame";
 import { checkWireframeTerrain } from "./wireframeTerrain";
 import { checkForcedLoss, checkOneLayerArrays, checkTargetsAsyncIndirectTiming } from "./work";
 
@@ -270,9 +270,11 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * figure, which part 13 (156 s on a pod at R08.T14.d.1's gate) and part 9 (112 s) could not take
  * whole, so part 14 joined, with both (2026-10-30). R14's levers took part 7 to 238 to 242 s of
  * its 360 s scaled watchdog on a pod, R10.T16's frame 124 to 127 s of it, so part 15 joined, with
- * that frame alone (2026-11-02).
+ * that frame alone (2026-11-02). R14.T3.c's ground under a grounded craft streams a pass of its own
+ * to the finest level about the craft, some 90 s on a pod, which took part 15 to 262 s, so part 16
+ * joined, with that check alone (2026-11-03).
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
+type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -310,6 +312,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 14;
     case "15":
       return 15;
+    case "16":
+      return 16;
     default:
       return null;
   }
@@ -364,7 +368,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 15 or all");
+    return failed("the part asked for is not 1 to 16 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -619,6 +623,10 @@ async function run(
   await group(15, "R10.T16 the frame", async () => {
     images = [...images, ...(await checkTerrainFrame(engine, checks, captures, fixture))];
   });
+  // In part 16, alone: its own pass streams to the finest level about the craft (R14.T3.c).
+  await group(16, "R14.T3.c the ground under a grounded craft", () =>
+    checkStridesUnderCraft(engine, checks),
+  );
   await group(7, "R14.T1.b the cluster cull against its twin", () =>
     checkClusterCull(engine, checks),
   );

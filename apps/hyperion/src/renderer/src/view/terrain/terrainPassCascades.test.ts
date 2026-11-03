@@ -41,6 +41,7 @@ import {
 import { type CameraCullPass, type CascadeCullPass, CULL_PASS_BYTES } from "../clusters/cullPass";
 import { CLUSTER_FLAG_MAY_DISCARD, type ClusterRecord } from "../clusters/record";
 import { TERRAIN_CLUSTERS_PER_PAGE, TERRAIN_PAGE_CLUSTERS } from "../clusters/terrain";
+import { INSTANCE_FINEST, NO_STRIDE_BAND } from "../clusters/strides";
 import { STRIDES } from "../clusters/templates";
 import {
   GEOMETRY_BEFORE_R14,
@@ -66,6 +67,7 @@ import {
 } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey } from "./patchKey";
 import { type PlanetGeometry, planetGeometry, spheroidNormal, surfacePoint } from "./planet";
+import type { GroundContact } from "./grounded";
 import type { PatchRequest } from "./select";
 import type { CascadeIndex } from "./shadows/cascadeShadow";
 import {
@@ -141,6 +143,8 @@ class PlacedLane implements TerrainPool {
   readonly #baked = new Set<(bake: BakedPatch) => void>();
   /** The layers each bake carries: {@link layers}' unless a test gives others. */
   layers: TerrainLayers = layers();
+  /** The measured errors each bake carries (plan R14, R14.T3.b), none unless a test gives them. */
+  clusterErrors: Float16Array | null = null;
 
   constructor(readonly settings: BakeSettings) {}
 
@@ -183,6 +187,7 @@ class PlacedLane implements TerrainPool {
       originHeightM: 0,
       skirtDepthM: 1,
       layers: this.layers,
+      ...(this.clusterErrors === null ? {} : { clusterErrors: this.clusterErrors }),
     };
     for (const listener of this.#baked) {
       listener(bake);
@@ -1735,6 +1740,147 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
     const freshFrame = fresh.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     expect(restored.patches.fins).toBeGreaterThan(0);
     expect(shapeOf(restored)).toEqual(shapeOf(freshFrame));
+  });
+});
+
+/** Each interior record's draw set level, in the records' order. */
+function levelsOf(made: Made): number[] {
+  return (made.pass.lastStep?.drawSet.patches ?? [])
+    .slice(0, made.pass.lastStep?.drawSet.count ?? 0)
+    .map((drawn) => drawn.patch.key.level);
+}
+
+describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => {
+  /** e₁ to e₈ of every cluster: 0, 1, 2 and 4 cm, smooth ground. */
+  const ERRORS = (() => {
+    const out = new Float16Array(4 * TERRAIN_CLUSTERS_PER_PAGE);
+    for (let c = 0; c < TERRAIN_CLUSTERS_PER_PAGE; c += 1) {
+      out.set([0, 0.01, 0.02, 0.04], 4 * c);
+    }
+    return out;
+  })();
+
+  const STRIDED: GeometrySettings = { ...SETTINGS.high.geometry, strides: "measured" };
+
+  /** A clustered pass whose bakes carry `errors`, streamed with `grounded`'s contacts. */
+  async function measuredPass(
+    errors: Float16Array | null = ERRORS,
+    grounded: ReadonlyArray<GroundContact> = [],
+  ): Promise<Made> {
+    const made = await litPass("high");
+    made.pass.setReducedMotion(true);
+    made.pass.setGeometry(STRIDED);
+    made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
+    made.lane().clusterErrors = errors;
+    for (let n = 0; n < 24; n += 1) {
+      made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded });
+      made.lane().bakeDemand(made.pass);
+    }
+    made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded });
+    return made;
+  }
+
+  /** Each interior record's stride bands and quadrant word as last written. */
+  function stridesOf(made: Made): Array<{ readonly bands: number[]; readonly quadrant: number }> {
+    const words = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+    const per = INSTANCE_RECORD_BYTES / 4;
+    return Array.from({ length: words.length / per }, (_, n) => ({
+      bands: [12, 13, 14].map((w) => f32Of(words[per * n + w] ?? 0)),
+      quadrant: words[per * n + 7] ?? 0,
+    }));
+  }
+
+  it("draws at stride 1, every record without bands, while the lever is off", async () => {
+    const made = await measuredPass();
+    made.pass.setGeometry(SETTINGS.high.geometry);
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const cull = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull") ?? fail();
+    const records = stridesOf(made);
+    expect(records.length).toBeGreaterThan(0);
+    expect(records.every(({ bands }) => bands.every((band) => band === NO_STRIDE_BAND))).toBe(true);
+    expect(parseLitPass(cull.bindings.uniforms["passes"] ?? new Uint32Array(), 5).strideCap).toBe(
+      1,
+    );
+  });
+
+  it("gives each measured patch its level's bands, the same for each of a level's patches and rising with the stride", async () => {
+    const made = await measuredPass();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const levels = levelsOf(made);
+    const byLevel = new Map<number, string>();
+    const records = stridesOf(made);
+    const unlike = records.filter(({ bands }, n) => {
+      const level = levels[n] ?? -1;
+      const held = byLevel.get(level) ?? bands.join();
+      byLevel.set(level, held);
+      const taken = bands.filter((band) => band > 0);
+      return bands.join() !== held || taken.toSorted((a, b) => a - b).join() !== taken.join();
+    });
+    expect([records.some(({ bands }) => bands.every((band) => band > 0)), unlike]).toEqual([
+      true,
+      [],
+    ]);
+  });
+
+  it("takes a finer level's bands towards strides 4 and 8 from a coarser one's towards 2 and 4: one ladder of the chords' levels", async () => {
+    const made = await measuredPass();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const levels = levelsOf(made);
+    const records = stridesOf(made);
+    const fine = Math.max(...levels);
+    const fineBands = records[levels.indexOf(fine)]?.bands ?? [];
+    const coarse = records[levels.indexOf(fine - 1)]?.bands ?? [];
+    expect([fineBands[1], fineBands[2]]).toEqual([coarse[0], coarse[1]]);
+  });
+
+  it("culls the lit pass up to stride 8 and draws every stride's buckets", async () => {
+    const made = await measuredPass();
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const cull = made.engine.dispatched.findLast((d) => d.kernel === "cluster cull") ?? fail();
+    const lit = 5 * TEMPLATES;
+    expect([
+      parseLitPass(cull.bindings.uniforms["passes"] ?? new Uint32Array(), 5).strideCap,
+      named(frame.draws).filter(
+        (draw) => Array.isArray(draw) && typeof draw[2] === "number" && draw[2] >= lit,
+      ),
+    ]).toEqual([
+      8,
+      Array.from({ length: 8 }, (_, t) => [
+        "terrain clusters",
+        `terrain-lit-cluster-${made.pass.layout.vertexPath}`,
+        lit + t,
+        `terrain interior instances (${PRIMARY})`,
+      ]),
+    ]);
+  });
+
+  it("gives the overlay its depth by its own pass at stride 1, even where its lever is redraw", async () => {
+    const made = await measuredPass();
+    made.pass.setGeometry({ ...STRIDED, overlayDepth: "redraw" });
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const overlay = 4 * TEMPLATES;
+    expect(
+      (frame.overlayDepth?.clusters ?? []).map((draw) => (draw.indirect?.offsetBytes ?? -20) / 20),
+    ).toEqual([overlay, overlay + 4]);
+  });
+
+  it("gives a bake without measured errors no bands", async () => {
+    const made = await measuredPass(null);
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const records = stridesOf(made);
+    expect(records.length).toBeGreaterThan(0);
+    expect(records.every(({ bands }) => bands.every((band) => band === NO_STRIDE_BAND))).toBe(true);
+  });
+
+  it("holds every patch that may lie in a contact's forced region at stride 1, and no other", async () => {
+    const [x, y, z] = surfacePoint(PLANET.figure, OVER, 0);
+    const contact: GroundContact = { positionM: { x, y, z }, radiusM: 20 };
+    const made = await measuredPass(ERRORS, [contact]);
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const finest = stridesOf(made).map(({ quadrant }) => (quadrant & INSTANCE_FINEST) !== 0);
+    expect([finest.some(Boolean), finest.every(Boolean)]).toEqual([true, false]);
+    // Its bands stand: its vertices still morph, held at the contact as the CDLOD morph is.
+    expect(stridesOf(made).every(({ bands }) => bands[0] !== NO_STRIDE_BAND)).toBe(true);
   });
 });
 

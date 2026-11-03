@@ -130,7 +130,7 @@ describe("the quality settings", () => {
 });
 
 describe("the geometry's settings (plan R14)", () => {
-  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, its edge patches on the path, and keeps the way back", () => {
+  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, its edge patches on the path, its camera strides off until their acceptance (R14.T3.c), and keeps the way back", () => {
     for (const setting of QUALITY_SETTINGS) {
       const {
         pageBytes: _pageBytes,
@@ -148,6 +148,7 @@ describe("the geometry's settings (plan R14)", () => {
         hullClusters: true,
         wireClusters: true,
         finClusters: true,
+        strides: "off",
       });
     }
     expect([SETTINGS.high.geometry.pageBytes, SETTINGS.low.geometry.pageBytes]).toEqual([
@@ -166,6 +167,7 @@ describe("the geometry's settings (plan R14)", () => {
       pageBytes: 0,
       meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
       finClusters: false,
+      strides: "off",
     });
   });
 
@@ -187,6 +189,7 @@ describe("the geometry's settings (plan R14)", () => {
       geometryOf("high", { farCascadeRate: 1 }),
       geometryOf("high", { pageBytes: 2 ** 20 }),
       geometryOf("low", { finClusters: false }),
+      geometryOf("high", { strides: "measured" }),
     ]).toEqual([
       { ...SETTINGS.low.geometry, clusterPath: false },
       { ...SETTINGS.high.geometry, casterStrideCap: 1, overlayDepth: "redraw" },
@@ -194,6 +197,7 @@ describe("the geometry's settings (plan R14)", () => {
       { ...SETTINGS.high.geometry, farCascadeRate: 1 },
       { ...SETTINGS.high.geometry, pageBytes: 2 ** 20 },
       { ...SETTINGS.low.geometry, finClusters: false },
+      { ...SETTINGS.high.geometry, strides: "measured" },
     ]);
   });
 });

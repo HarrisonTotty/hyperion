@@ -405,6 +405,7 @@ function fakeSource(
     readonly overlayDepth?: TerrainViewFrame["overlayDepth"];
     readonly decorated?: boolean;
     readonly overlayMode?: FrameTerrainPass["geometry"]["overlayDepth"];
+    readonly strides?: FrameTerrainPass["geometry"]["strides"];
     readonly whole?: boolean;
   } = {},
 ): {
@@ -420,7 +421,7 @@ function fakeSource(
       return options.ready ?? true;
     },
     symbologyDepthMaterial: options.depth === undefined ? DEPTH : options.depth,
-    geometry: { overlayDepth: options.overlayMode ?? "redraw" },
+    geometry: { overlayDepth: options.overlayMode ?? "redraw", strides: options.strides ?? "off" },
     heights: new ResidentHeights(),
     viewIds: new Set([VIEW]),
     faulted: false,
@@ -751,6 +752,15 @@ describe("a view's frame terrain and the overlay's depth on the cluster path (pl
       false,
     ]);
   });
+
+  it("never asks the scene's depth where the camera's strides draw it (plan R14, R14.T3.c)", () => {
+    const { plan, body } = handed();
+    const terrain = frameTerrain(
+      fakeSource({ overlayMode: "scene-depth", strides: "measured" }).source,
+    );
+    terrain.draws(plan, [body]);
+    expect(terrain.sceneDepth()).toBe(false);
+  });
 });
 
 describe("a view's frame terrain and the datum over the image (R10.T16.f)", () => {
@@ -891,7 +901,7 @@ function edgeSource(
         ? {
             maskReadyFor: () => true,
             symbologyDepthMaterial: null,
-            geometry: { overlayDepth: "redraw" },
+            geometry: { overlayDepth: "redraw", strides: "off" },
             heights,
             viewIds: new Set([VIEW]),
             faulted: false,
@@ -1063,7 +1073,7 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
           ? {
               maskReadyFor: () => true,
               symbologyDepthMaterial: null,
-              geometry: { overlayDepth: "redraw" },
+              geometry: { overlayDepth: "redraw", strides: "off" },
               heights: wire,
               viewIds: wireViews,
               faulted: false,
@@ -1212,7 +1222,7 @@ function wireSource(bodies: ReadonlyMap<BodyIdHex, WireBody>): {
           : {
               maskReadyFor: () => true,
               symbologyDepthMaterial: null,
-              geometry: { overlayDepth: "redraw" },
+              geometry: { overlayDepth: "redraw", strides: "off" },
               heights: each.heights ?? new ResidentHeights(),
               viewIds: each.viewIds ?? new Set([VIEW]),
               faulted: false,

@@ -28,6 +28,9 @@ const HALF_FLOAT_MAX : f32 = 65504.0;
 // uniforms.ts' `subPatchWord`); everything else the instance carries is the slot's patch's. `sub.y`
 // to `sub.w` are its fades (R10.T16.i): its edges' and its corners' bytes, then its own fade's
 // byte, its rebake's fade's and the slot of the bake it fades from (`fadeFloor`, `rebakeOf`).
+// `strides` are its view's stride bands towards strides 2, 4 and 8, metres, at or below 0 for none
+// (plan R14, R14.T3.c; `terrainStrides.wgsl`), and bit 18 of `parentQuadrant` holds its camera
+// passes at stride 1 (uniforms.ts' `INSTANCE_FINEST`).
 struct Instance {
   originM : vec3f,
   slot : u32,
@@ -36,6 +39,7 @@ struct Instance {
   parentSlot : u32,
   parentQuadrant : u32,
   sub : vec4u,
+  strides : vec4f,
 }
 
 // uniforms.ts's CONTACT_RECORD_BYTES. The centre is camera-relative in the instance origins' frame

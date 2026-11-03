@@ -243,6 +243,8 @@ export interface GeometryOverride {
   readonly meshTolerancePx?: MeshTolerancePx;
   /** R14.T1.g: the lit pass's edge patches through the cluster path, their fins and heads too. */
   readonly finClusters?: boolean;
+  /** R14.T3.c: the lit pass's clusters at stride 1, or at each one's stated error and e_s. */
+  readonly strides?: "off" | "measured";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

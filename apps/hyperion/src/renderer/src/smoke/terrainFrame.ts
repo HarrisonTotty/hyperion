@@ -67,7 +67,7 @@ import {
   TERRAIN_SETTINGS,
 } from "../view/quality/qualitySetting";
 import type { CapturedImage } from "./atmosphere";
-import { captureOf, captureScale, maskOf } from "./leverCaptures";
+import { captureOf, captureScale, isTerrain, maskOf, stopsApart } from "./leverCaptures";
 import { AU_M } from "../view/scenes/kept";
 import { CoverageMask } from "../view/terrain/coverage";
 import {
@@ -88,6 +88,12 @@ import {
 } from "../view/terrain/terrainPass";
 import { LIT_INTERIOR_INDICES, LIT_PATCH_INDICES } from "../view/terrain/gpu/resources";
 import { PATCH_VERTICES_PER_SIDE } from "../view/terrain/slotLayout";
+import {
+  finestPatchSizeM,
+  type GroundContact,
+  heldGroundUnder,
+  heldRadiusM,
+} from "../view/terrain/grounded";
 import type { BakedPatch } from "../view/terrain/workers/messages";
 import { HeightWorkerPool, type HeightWorkerLane } from "../view/terrain/workers/pool";
 import {
@@ -121,6 +127,16 @@ const CACHE_BYTES = 2 ** 25;
 /** How long the workers may take over the field, and a pass over its streaming, milliseconds. */
 const FIELD_TIMEOUT_MS = 60_000;
 const STREAM_TIMEOUT_MS = 90_000;
+
+/**
+ * How long R14.T3.c's pass about a grounded craft may stream, milliseconds: its forced region to the
+ * finest level, the part's alone (part 16).
+ */
+const CRAFT_TIMEOUT_MS = 150_000;
+
+/** 70° and 8°, rad: R14.T3.c's view of a grounded craft, its depression and its field. */
+const RAD_70 = (70 * Math.PI) / 180;
+const RAD_8 = (8 * Math.PI) / 180;
 
 /** The view's name, as the session knows `VIEW`'s primary. */
 const VIEW = viewId("view");
@@ -311,11 +327,46 @@ function differingTexels(
   return { pixels, largest };
 }
 
+/**
+ * The pixels of a terrain-alone frame `before` draws inside its terrain, the pixel and its eight
+ * neighbours drawn, that `after` leaves undrawn (plan R14, R14.T3.c): where a crack between its
+ * clusters shows what lies behind.
+ */
+function cracksOf(before: Float32Array, after: Float32Array): number {
+  const { widthPx, heightPx } = VIEWPORT;
+  let cracks = 0;
+  for (let y = 1; y + 1 < heightPx; y += 1) {
+    for (let x = 1; x + 1 < widthPx; x += 1) {
+      const p = y * widthPx + x;
+      if (isTerrain(after, p)) {
+        continue;
+      }
+      let inside = true;
+      for (let dy = -1; dy <= 1 && inside; dy += 1) {
+        for (let dx = -1; dx <= 1 && inside; dx += 1) {
+          inside = isTerrain(before, p + dy * widthPx + dx);
+        }
+      }
+      cracks += inside ? 1 : 0;
+    }
+  }
+  return cracks;
+}
+
 /** No patches drawn, where a frame gave no counts. */
 const NO_DRAWN_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0, fins: 0 };
 
-/** Steps `pass` from `pose` and makes the frame, as `VIEW`'s loop and drawer do. */
-function liveFrame(pass: TerrainPass, mask: CoverageMask, pose: Pose, nowMs: number): LiveFrame {
+/**
+ * Steps `pass` from `pose`, with `grounded`'s contacts, and makes the frame, as `VIEW`'s loop and
+ * drawer do.
+ */
+function liveFrame(
+  pass: TerrainPass,
+  mask: CoverageMask,
+  pose: Pose,
+  nowMs: number,
+  grounded: ReadonlyArray<GroundContact> = [],
+): LiveFrame {
   const base = bodyOf(pose);
   const view = terrainViewOf(base, pose.camera, VIEWPORT);
   if (view === null) {
@@ -323,7 +374,7 @@ function liveFrame(pass: TerrainPass, mask: CoverageMask, pose: Pose, nowMs: num
   }
   pass.step({
     views: [{ id: VIEW, view, tauPx: handoverTauPx("photorealistic", "low"), weight: 1 }],
-    grounded: [],
+    grounded,
   });
   const terrain = new LiveFrameTerrain(sourceOf(pass, mask), {
     view: VIEW,
@@ -376,8 +427,8 @@ function chordSagM(level: number): number {
 }
 
 /**
- * Streams `pass` until its view's frame gives the mask and draws its terrain whole, or time runs
- * out: every patch its own bake; or, given the body-fixed points a check reads (`near`), every
+ * Streams `pass`, with `grounded`'s contacts, until its view's frame gives the mask and draws its
+ * terrain whole, or time runs out: every patch its own bake; or, given the body-fixed points a check reads (`near`), every
  * patch drawn and none standing in whose square holds one of them and whose chords sag more than
  * {@link STAND_IN_SAG_M} below the datum (154 m at level 0, 0.6 m at level 4); and, either way, no
  * draft waiting for its refined normals (R10.T6.a), so that the frames a check compares shade alike.
@@ -390,11 +441,13 @@ async function settled(
   mask: CoverageMask,
   pose: Pose,
   near: ReadonlyArray<Vec3> | null = null,
+  grounded: ReadonlyArray<GroundContact> = [],
+  timeoutMs = STREAM_TIMEOUT_MS,
 ): Promise<{ readonly done: boolean; readonly frame: LiveFrame; readonly state: string }> {
   const started = performance.now();
   for (;;) {
     const now = performance.now();
-    const frame = liveFrame(pass, mask, pose, now);
+    const frame = liveFrame(pass, mask, pose, now, grounded);
     const drawSet = pass.lastStep?.drawSet;
     const role = frame.plan.meshes[0]?.role;
     const standsInNear = (): boolean =>
@@ -412,7 +465,7 @@ async function settled(
       drawSet.missing === 0 &&
       pass.refining === 0 &&
       (near === null ? drawSet.standingIn === 0 : !standsInNear());
-    if (done || now - started > STREAM_TIMEOUT_MS) {
+    if (done || now - started > timeoutMs) {
       const state = `role ${String(role?.kind)}, ${String(frame.terrainDraws.length)} terrain draws, ${String(drawSet?.missing)} missing, ${String(drawSet?.standingIn)} standing in, ${String(pass.refining)} refining${near === null ? "" : `, near ${String(standsInNear())}`}`;
       return { done, frame, state };
     }
@@ -420,6 +473,11 @@ async function settled(
     // oxlint-disable-next-line no-await-in-loop
     await pause(50);
   }
+}
+
+/** Whether two frames show the same marks, mark by mark. */
+function sameShown(a: ReadonlyArray<boolean>, b: ReadonlyArray<boolean>): boolean {
+  return a.length === b.length && a.every((shown, n) => shown === b[n]);
 }
 
 /** The midpoint of a mark's two ends. */
@@ -498,9 +556,15 @@ const GRAZE_ROW = 23;
 
 /**
  * Where the ray of `view` through pixel (`xPx`, `yPx`) meets the datum, from the camera, m: on the
- * sphere of the datum's radius at {@link OVER}'s centre, within metres of the spheroid near it.
+ * sphere of the datum's radius at {@link OVER}'s centre, within metres of the spheroid near it; or
+ * on the sphere of `radiusM`.
  */
-function datumOnRay(view: Pose, xPx: number, yPx: number): Vec3 {
+function datumOnRay(
+  view: Pose,
+  xPx: number,
+  yPx: number,
+  radiusM = norm(datumAt(OVER, 32, 32).p),
+): Vec3 {
   const s = 1 / Math.tan(view.camera.fovXRad / 2);
   const aspect = VIEWPORT.widthPx / VIEWPORT.heightPx;
   const ray = normalise(
@@ -513,7 +577,6 @@ function datumOnRay(view: Pose, xPx: number, yPx: number): Vec3 {
       ),
     ),
   );
-  const radiusM = norm(datumAt(OVER, 32, 32).p);
   // |c + t r| = R for the camera c from the centre: the nearer root.
   const b = dot(view.cameraM, ray);
   const c = dot(view.cameraM, view.cameraM) - radiusM * radiusM;
@@ -524,10 +587,10 @@ function datumOnRay(view: Pose, xPx: number, yPx: number): Vec3 {
  * A grazing view of the datum at {@link OVER}'s centre (R10.T16.c's grazing fix): the camera
  * `heightM` over the datum, towards −j along the survey's rows, whose ray to the point meets the
  * datum there `elevationRad` below its horizontal, the body's curvature included, looking along it
- * with the datum's normal there up, its field `fovXRad` across.
+ * with the datum's normal there up, its field `fovXRad` across; or at vertex (`x`, `y`) of OVER.
  */
-function grazingPose(elevationRad: number, heightM: number, fovXRad: number): Pose {
-  const { p, nu } = datumAt(OVER, 32, 32);
+function grazingPose(elevationRad: number, heightM: number, fovXRad: number, x = 32, y = 32): Pose {
+  const { p, nu } = datumAt(OVER, x, y);
   const alongJ = sub(datumAt(OVER, 32, 64).p, datumAt(OVER, 32, 0).p);
   const j = normalise(sub(alongJ, scale(nu, dot(alongJ, nu))));
   const radiusM = norm(p);
@@ -539,6 +602,28 @@ function grazingPose(elevationRad: number, heightM: number, fovXRad: number): Po
   const fromPoint = add(scale(j, -Math.cos(elevationRad)), scale(nu, sin));
   return {
     cameraM: add(p, scale(fromPoint, rangeM)),
+    camera: { orientation: lookAlong(scale(fromPoint, -1), nu), fovXRad },
+    sun: poseOver().sun,
+  };
+}
+
+/**
+ * A view of the body-fixed point `target`, whose datum's normal is `nu`, from `rangeM` away along a
+ * ray `elevationRad` below its horizontal towards −j of {@link OVER} (as {@link grazingPose} looks),
+ * its field `fovXRad` across.
+ */
+function poseLookingAt(
+  target: Vec3,
+  nu: Vec3,
+  elevationRad: number,
+  rangeM: number,
+  fovXRad: number,
+): Pose {
+  const alongJ = sub(datumAt(OVER, 32, 64).p, datumAt(OVER, 32, 0).p);
+  const j = normalise(sub(alongJ, scale(nu, dot(alongJ, nu))));
+  const fromPoint = add(scale(j, -Math.cos(elevationRad)), scale(nu, Math.sin(elevationRad)));
+  return {
+    cameraM: add(target, scale(fromPoint, rangeM)),
     camera: { orientation: lookAlong(scale(fromPoint, -1), nu), fovXRad },
     sun: poseOver().sun,
   };
@@ -756,6 +841,52 @@ export async function checkTerrainFrame(
         edgeAfter !== null &&
         edgeAfter < edgeBefore,
       `${String(finPatches.interior)} interior and ${String(finPatches.edge)} edge patches, ${String(finPatches.fins)} of them on the cluster path; lit triangles ${String(beforeTriangles)} with the edge patches by the lit mesh, ${String(afterTriangles)} by clusters; the edge patches' ${String(edgeBefore)} by the lit mesh, ${String(edgeAfter)} by clusters, ${edgeAfter === null ? "—" : (edgeAfter / edgeBefore).toFixed(4)} of them; digests ${bytesDigest(byLitMesh.texels)} by the lit mesh, ${bytesDigest(byFins.texels)} by clusters; tie pixels ${String(finTies.pixels)}, the largest difference ${finTies.largest.toExponential(3)}`,
+    );
+
+    // R14.T3.c: the lit pass's camera strides, every cluster at the coarsest stride its level's
+    // stated error and measured e_s allow at the view's τ′, each vertex they drop morphed onto the
+    // coarser mesh, against stride 1 (T1.g's frame by clusters, just drawn), from the same
+    // selection and residents, in one run; the counters on, so that its lit triangles are counted.
+    // The frames differ where the strides draw coarser ground; the terrain alone, drawn both ways,
+    // shows no crack.
+    const STRIDED: GeometrySettings = { ...SETTINGS.low.geometry, strides: "measured" };
+    const atStride1 = byFins;
+    relief.measureClusters(true);
+    const strided = await countedFrame(STRIDED);
+    relief.measureClusters(false);
+    const terrainAloneBy = async (geometry: GeometrySettings): Promise<Float32Array> => {
+      relief.setGeometry(geometry);
+      return drawn(engine, pose, [
+        {
+          label: bodies,
+          draws: liveFrame(relief, mask, pose, performance.now()).terrainDraws,
+        },
+      ]);
+    };
+    const aloneAt1 = await terrainAloneBy(SETTINGS.low.geometry);
+    const aloneStrided = await terrainAloneBy(STRIDED);
+    relief.setGeometry(SETTINGS.low.geometry);
+    const cracks = cracksOf(aloneAt1, aloneStrided);
+    const strideChanges = differingTexels(atStride1.texels, strided.texels);
+    const strideStops = stopsApart(atStride1.texels, strided.texels, aloneAt1);
+    const trianglesAt1 = atStride1.counts?.litClusterTriangles ?? null;
+    const trianglesStrided = strided.counts?.litClusterTriangles ?? null;
+    if (captures) {
+      const exposure = captureScale(atStride1.texels, aloneAt1);
+      images.push(
+        captureOf("r14-t3c-frame-stride-1", atStride1.texels, VIEWPORT, exposure),
+        captureOf("r14-t3c-frame-strides", strided.texels, VIEWPORT, exposure),
+        maskOf("r14-t3c-terrain-mask", aloneAt1, VIEWPORT),
+      );
+    }
+    checks.check(
+      "R14.T3.c the lit pass's camera strides draw the frame with fewer lit triangles and no crack, their changed pixels listed",
+      withRelief.done &&
+        cracks === 0 &&
+        trianglesAt1 !== null &&
+        trianglesStrided !== null &&
+        trianglesStrided < trianglesAt1,
+      `lit triangles ${String(trianglesAt1)} at stride 1, ${String(trianglesStrided)} with strides, ${trianglesAt1 === null || trianglesStrided === null ? "—" : (trianglesStrided / trianglesAt1).toFixed(4)} of them; ${String(strideChanges.pixels)} pixels changed of ${String(pixels)}, the largest difference ${strideChanges.largest.toExponential(3)}; of ${String(strideStops.terrain)} terrain pixels ${String(strideStops.differing)} differ, ${String(strideStops.within)} within 1/3 stop, the largest ${strideStops.largestStops.toFixed(3)} stops; cracks ${String(cracks)}; digests ${bytesDigest(atStride1.texels)} at stride 1, ${bytesDigest(strided.texels)} with strides`,
     );
 
     // The fallback (plan R14, Design notes 16 and 17), under `--fixture=broken-wgsl` alone: a pass
@@ -1017,6 +1148,19 @@ export async function checkTerrainFrame(
       `handed over ${String(givingWay.handedOver)}, ${String(givingWay.datums)} datum giving way: the lines over the surveyed ground and beyond its edge, at ${linesAt.map(pixelOf).join(" and ")} px, shown ${String(surveyedShown)} and ${String(beyondShown)}; with no datum giving way, ${String(surveyedWhole)} and ${String(beyondWhole)}; digests ${givingWay.digest} giving way, ${whole.digest} whole`,
     );
 
+    // R14.T3.c: no mark's visibility changes with the camera's strides, the overlay's depth its own
+    // pass at stride 1: the marks under and over the ground, and the datum's lines, as at stride 1.
+    relief.setGeometry({ ...SETTINGS.low.geometry, strides: "measured" });
+    const stridedMarks = await drawFrame(list, { withDepth: true, giveWay: true }, marksAt);
+    const stridedLines = await drawFrame(datumList, { withDepth: true, giveWay: true }, linesAt);
+    relief.setGeometry(SETTINGS.low.geometry);
+    checks.check(
+      "R14.T3.c over the image every mark is shown or hidden with the camera's strides as at stride 1",
+      sameShown(stridedMarks.shown, withDepth.shown) &&
+        sameShown(stridedLines.shown, givingWay.shown),
+      `the marks under and over the ground shown ${stridedMarks.shown.join(", ")} with strides, ${withDepth.shown.join(", ")} at stride 1, ${String(stridedMarks.marked)} and ${String(withDepth.marked)} marked pixels; the datum's lines ${stridedLines.shown.join(", ")} and ${givingWay.shown.join(", ")}, ${String(stridedLines.marked)} and ${String(givingWay.marked)} marked pixels`,
+    );
+
     // R10.T16.c's grazing fix, over the flat ground of a pass wholly on the datum, from 10 km up
     // grazing 2° (136 km out over the body's curve), where a row of this view's 5° across 64 px
     // spans some 5.3 km of ground. A mark 1 km behind the ground along the rays through row 23's
@@ -1214,4 +1358,126 @@ export async function checkTerrainFrame(
     mask.release();
   }
   return images;
+}
+
+/**
+ * R14.T3.c's grounded craft (Design note 10; `R14.T3.c the ground under a grounded craft`), in a
+ * part of its own: the frame check's world, workers and coverage mask made again, and one lit
+ * pass on the low setting, its changes cut at their first draw, as the frame check's are.
+ */
+export async function checkStridesUnderCraft(engine: RenderEngine, checks: Checks): Promise<void> {
+  const field = moonLikeFixture("first");
+  const pool = new HeightWorkerPool({
+    workers: 2,
+    createWorker: () =>
+      new Worker(new URL("../view/terrain/workers/height.worker.ts", import.meta.url), {
+        type: "module",
+      }),
+  });
+  const survey = new SurveyedCells();
+  const mask = new CoverageMask(engine, "strides under a craft smoke: coverage mask");
+  const offChange = pool.onFieldChange((change) => {
+    survey.add(change);
+    mask.survey(change);
+  });
+  const passes: TerrainPass[] = [];
+  const makePass = async (): Promise<TerrainPass> => {
+    const pass = new TerrainPass({
+      engine,
+      setting: "low",
+      terrain: { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES },
+      geometry: smokeGeometry("low"),
+      planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
+      source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
+      createPool: (bake) => pool.lane(bake),
+      survey,
+    });
+    pass.setReducedMotion(true);
+    passes.push(pass);
+    await pass.ready();
+    return pass;
+  };
+  const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+  try {
+    field.blocks.forEach((block, n) => {
+      if (n === 0) {
+        pool.fieldInit(field.body, block);
+      } else {
+        pool.fieldChunk(field.body, block);
+      }
+    });
+    const held = await until(
+      () => pool.fieldBlocks(field.body)?.reported === field.blocks.length,
+      FIELD_TIMEOUT_MS,
+    );
+    if (!held) {
+      throw new Error("the workers did not take the fixture's blocks in time");
+    }
+    const bodies = PHOTOREAL_PASS_LABELS.bodies;
+    const STRIDED: GeometrySettings = { ...SETTINGS.low.geometry, strides: "measured" };
+    // R14.T3.c (Design note 10): a craft of 20 m grounded on the surveyed column, seen from 1.5 km
+    // over it at 70° below the horizon through a field of 8°, every patch it sees its own bake.
+    // Its ground with the camera's strides is the stride-1 ground, byte for byte, at every pixel
+    // whose ground lies within half its held radius: the forced region at stride 1, and its
+    // vertices' stride morph held at 0 there as the CDLOD morph is. Elsewhere the strides move
+    // pixels.
+    const foot = datumAt(OVER, 48, 20);
+    const groundPass = await makePass();
+    await settled(groundPass, mask, grazingPose(RAD_70, 1_500, RAD_8, 48, 20), [foot.p]);
+    const groundUnder = heldGroundUnder(MOON_LIKE_FIGURE, groundPass.heights);
+    const craft: GroundContact = { positionM: groundUnder(foot.p).groundPointM, radiusM: 20 };
+    // From 1.5 km over the craft's ground, looking at it, through a field of 8°.
+    const overhead = poseLookingAt(craft.positionM, foot.nu, RAD_70, 1_500, RAD_8);
+    const groundSettled = await settled(
+      groundPass,
+      mask,
+      overhead,
+      null,
+      [craft],
+      CRAFT_TIMEOUT_MS,
+    );
+    const groundFrameBy = async (geometry: GeometrySettings): Promise<Float32Array> => {
+      groundPass.setGeometry(geometry);
+      const frame = liveFrame(groundPass, mask, overhead, performance.now(), [craft]);
+      return drawn(engine, overhead, [
+        { label: bodies, draws: [...renderer.meshDraws(frame.plan), ...frame.terrainDraws] },
+      ]);
+    };
+    const groundAt1 = await groundFrameBy(SETTINGS.low.geometry);
+    const groundStrided = await groundFrameBy(STRIDED);
+    const heldM = heldRadiusM(craft, finestPatchSizeM(groundPass.planet));
+    const craftRadiusM = norm(craft.positionM);
+    let underCraft = 0;
+    let underDiffering = 0;
+    for (let y = 0; y < VIEWPORT.heightPx; y += 1) {
+      for (let x = 0; x < VIEWPORT.widthPx; x += 1) {
+        const ground = add(overhead.cameraM, datumOnRay(overhead, x + 0.5, y + 0.5, craftRadiusM));
+        if (norm(sub(ground, craft.positionM)) > 0.5 * heldM) {
+          continue;
+        }
+        underCraft += 1;
+        const p = 4 * (y * VIEWPORT.widthPx + x);
+        for (let c = 0; c < 4; c += 1) {
+          if (groundAt1[p + c] !== groundStrided[p + c]) {
+            underDiffering += 1;
+            break;
+          }
+        }
+      }
+    }
+    const groundChanges = differingTexels(groundAt1, groundStrided);
+    checks.check(
+      "R14.T3.c under a grounded craft the ground with the camera's strides is the stride-1 ground, byte for byte (Design note 10)",
+      groundSettled.done && underCraft >= 16 && underDiffering === 0 && groundChanges.pixels > 0,
+      `settled ${String(groundSettled.done)} (${groundSettled.state}); held radius ${heldM.toFixed(1)} m: ${String(underCraft)} pixels under half of it, ${String(underDiffering)} of them differing; ${String(groundChanges.pixels)} pixels of the frame changed; digests ${bytesDigest(groundAt1)} at stride 1, ${bytesDigest(groundStrided)} with strides`,
+    );
+  } finally {
+    renderer.dispose();
+    for (const pass of passes) {
+      pass.dispose();
+    }
+    offChange();
+    pool.terminate();
+    mask.release();
+  }
 }

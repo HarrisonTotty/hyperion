@@ -156,6 +156,16 @@ export interface GeometrySettings {
    * `false` draws them by the lit mesh. Read where `litClusters` is on. Both settings take it.
    */
   readonly finClusters: boolean;
+  /**
+   * R14.T3.c: the lit pass's camera strides. `off` draws every cluster at stride 1; `measured` at
+   * the coarsest stride whose level's stated error plus its level's largest measured e_s,
+   * projected at the cluster's own distance, is within the view's τ′, each vertex the stride drops
+   * moved onto the coarser mesh by a distance morph of its own (`clusters/strides.ts`), and stride
+   * 1 in the forced region. Read where `litClusters` is on; the overlay's depth then takes its own
+   * pass at stride 1, whatever `overlayDepth` says. `off` on both settings until its acceptance on
+   * the pod (the brief's ruling, 2026-11-02).
+   */
+  readonly strides: "off" | "measured";
 }
 
 /**
@@ -180,6 +190,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   pageBytes: 0,
   meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
   finClusters: false,
+  strides: "off",
 };
 
 /**
@@ -352,6 +363,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       pageBytes: 128 * 2 ** 20,
       meshTolerancePx: { camera: 1, wireframeOccluder: 0.5 },
       finClusters: true,
+      strides: "off",
     },
     decoration: true,
     scatterDensity: 1,
@@ -397,6 +409,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       pageBytes: 32 * 2 ** 20,
       meshTolerancePx: { camera: 2, wireframeOccluder: 0.5 },
       finClusters: true,
+      strides: "off",
     },
     decoration: false,
     scatterDensity: 0,

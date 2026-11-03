@@ -25,6 +25,7 @@ import type {
 import type { ClusterLod, ClusterRecord } from "./record";
 import { CLUSTER_SHAPE_CODE } from "./record";
 import { NO_DISCARD_TEMPLATE } from "./cullPass";
+import { cameraStrideLevel, INSTANCE_FINEST, type StrideBandsM } from "./strides";
 import { STRIDES } from "./templates";
 
 /** The cull's kernel: the reference alone, `presentation-only`, its appends' order not reproducible. */
@@ -71,6 +72,17 @@ export interface CullInstance {
    * ({@link CULL_INPUT_WHOLE}; plan R10, R10.T16.i's fades); absent, not.
    */
   readonly whole?: boolean;
+  /**
+   * Its camera passes' stride bands, m (plan R14, R14.T3.c; terrain's `Instance.strides`); absent,
+   * none: its camera passes draw it at stride 1.
+   */
+  readonly strideBandsM?: StrideBandsM;
+  /**
+   * Its instance record's quadrant word (terrain's `parentQuadrant`): its coarse–fine holds at
+   * k = 0 in bits 2 to 5, a camera pass's stride at most 4 on those edges, and bit 18
+   * (`INSTANCE_FINEST`), stride 1 (T3.c); absent, 0.
+   */
+  readonly quadrantWord?: number;
 }
 
 /**
@@ -344,16 +356,61 @@ function eachCluster(
 }
 
 /**
+ * The edges a terrain block or strip lies on, bits 0 to 3 for x = 0, x = 64, y = 0 and y = 64, by
+ * its template reference (`clusterCull.wgsl`'s `record_edges`), 0 for any other shape.
+ */
+export function recordEdges(record: ClusterRecord): number {
+  const ref = record.templateRef;
+  if (record.shape === "terrain-block") {
+    const x0 = ref & 0xff;
+    const y0 = (ref >> 8) & 0xff;
+    return (x0 === 0 ? 1 : 0) | (x0 === 56 ? 2 : 0) | (y0 === 0 ? 4 : 0) | (y0 === 56 ? 8 : 0);
+  }
+  if (record.shape === "terrain-skirt") {
+    // Edge 0 y = 0, 1 x = 64, 2 y = 64, 3 x = 0 (`gpu/resources.ts`' numbering).
+    return [4, 2, 8, 1][(ref >>> 16) & 3] ?? 0;
+  }
+  return 0;
+}
+
+/**
+ * A camera pass's stride's level for `record` of `instance` at `centreM`, camera-relative
+ * (`camera_stride_level`; plan R14, R14.T3.c): 0 for an instance with no bands, held at stride 1 or
+ * kept whole (its heights fading from another surface, which its spheres do not bound), else
+ * `cameraStrideLevel` at the sphere's nearest point, up to the pass's cap and to 2 on an edge a
+ * finer patch touches.
+ */
+export function cameraPassStrideLevel(
+  pass: CameraCullPass,
+  record: ClusterRecord,
+  instance: CullInstance,
+  centreM: Vec3,
+): number {
+  const quadrant = instance.quadrantWord ?? 0;
+  const bands = instance.strideBandsM;
+  if (bands === undefined || instance.whole === true || (quadrant & INSTANCE_FINEST) !== 0) {
+    return 0;
+  }
+  let cap = Math.min(Math.log2(pass.strideCap), STRIDES.length - 1);
+  if ((recordEdges(record) & ((quadrant >>> 2) & 0xf)) !== 0) {
+    cap = Math.min(cap, 2);
+  }
+  return cameraStrideLevel(bands, cap, distance(centreM, record.radiusM));
+}
+
+/**
  * A record's template in `pass` (`template_of`): its shape's may-discard template where it may
  * discard and the consumer has one (R14.T1.g); else its shape's less the consumer's first at a
- * cascade's stride for `instance`'s unit, at stride 1 for a camera pass's and a DAG record's; +∞
- * for a shape below the first, which the kernel's unsigned arithmetic takes past every template.
+ * cascade's stride for `instance`'s unit, at a camera pass's for its bands (T3.c), and at stride 1
+ * for a DAG record; +∞ for a shape below the first, which the kernel's unsigned arithmetic takes
+ * past every template.
  */
 function templateOf(
   record: ClusterRecord,
   pass: CullPass,
   instance: CullInstance,
   input: CullTwinInput,
+  centreM: Vec3,
 ): number {
   const code = CLUSTER_SHAPE_CODE[record.shape];
   const discarding = record.mayDiscard ? input.discardTemplates?.[code] : undefined;
@@ -362,7 +419,11 @@ function templateOf(
   }
   const shape = code - (input.firstShape ?? 0);
   const level =
-    record.mode === "dag" || pass.kind === "camera" ? 0 : strideLevel(pass, instance.unitM);
+    record.mode === "dag"
+      ? 0
+      : pass.kind === "camera"
+        ? cameraPassStrideLevel(pass, record, instance, centreM)
+        : strideLevel(pass, instance.unitM);
   return shape < 0 ? Infinity : shape * STRIDES.length + level;
 }
 
@@ -426,7 +487,7 @@ export function cullMarksTwin(input: CullTwinInput, slackScale = 1): Uint32Array
   }
   eachCluster(input, (n, instance, cluster, record, centre) => {
     if (recordKept(input, pass, p, instance, cluster, record, centre, slackScale)) {
-      const t = templateOf(record, pass, instance, input);
+      const t = templateOf(record, pass, instance, input, centre);
       if (t < input.templates) {
         marks[n * input.clustersPerPage + cluster] = t;
       }
@@ -459,7 +520,7 @@ export function cullTwin(input: CullTwinInput, slackScale = 1): CullTwinBuckets 
         ) {
           return;
         }
-        const t = templateOf(record, pass, instance, input);
+        const t = templateOf(record, pass, instance, input, centre);
         if (t >= input.templates) {
           return;
         }

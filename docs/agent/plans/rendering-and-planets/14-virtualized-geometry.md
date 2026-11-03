@@ -1465,6 +1465,8 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
     sky shows through the drawn surface in test-render's terrain frames); lit triangles as T3.a
     predicts, within 10%; no mark's visibility changes in R10.T16's frame group (T1.e's); the Mac's
     fps (pending).
+  - _Built_ (`r14-t3c-strides`; behind `strides`, off on both settings): records at the end of
+    Risks.
 - **R14.T3.d Two-pass occlusion.** Size M.
   - `DepthPyramid` and the two-pass cull of Design note 4 per view, in both the forward and the
     visibility paths. `occlusion: "hzb"`.
@@ -2287,3 +2289,48 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - Not built: the counting harness's fin rule, since its sample worlds are wholly surveyed.
   - Pending: the owner's RTX run of TERRAIN TEST mid-survey, with `finClusters` on and off. A served
     world's counts wait for the serve gate at generator version 25.
+- **R14.T3.c** (`r14-t3c-strides`):
+  - The twin is `clusters/strides.ts` and `cull.ts`' `cameraPassStrideLevel` (the plan's
+    `cullTwin.ts` is `cull.ts`); the WGSL is `terrainStrides.wgsl`'s `stride_place` (not
+    `patchVertex.wgsl`) and the cull's `camera_stride_level`. `STRIDE_BAND_FRACTION` β = 0.02, under
+    `SELECTION_MARGIN`. The camera pass reads no record's measured errors (flags bit 6): its bands
+    come from `BakedPatch.clusterErrors` on the CPU.
+  - The rule (lean, 2026-11-03): one ladder a view, U(n) by the absolute level n of the chords a
+    stride draws, the largest (E_L + e_s) ÷ τ′_rad of the levels drawing them, e_s each level's
+    largest over the view's drawn patches (`StrideLevelErrors`: raised at once, decaying 0.2% a
+    frame), not each cluster's own: a shared vertex must be placed alike on both sides, coarse–fine
+    edges included. The cull takes stride 2^m at (1 + β) U.
+  - The acceptance's lit triangles fail: the seamless probe draws 0.40 of stride 1's against T3.a's
+    0.022, which it reproduces with each cluster's own e_s (0.020); the level's largest e_s is the
+    cost. So `strides` stays `off` on both settings (Design note 17's row says `measured`), pending
+    the owner's ruling on the rule; the next lever is a threshold shared by the two patches of each
+    edge. Moves, normals, cracks and marks pass (the lane's outbox has the figures).
+  - The morph is hierarchical (`stridePlace`): a dropped vertex moves towards its two neighbours'
+    mean, each placed so in turn (at most 9 `lit_place` a vertex), so every place is a function of
+    the vertex alone and any stride may stand beside any other. No second dispatch or workgroup
+    barrier is built: none is needed. Holds: an edge a finer patch touches keeps its level-2
+    vertices (k = 0) and its clusters at stride 4 at most; an edge a coarser one touches moves its
+    level-0 vertices wholly (k = 1); each contact caps k as the CDLOD morph does.
+  - Not the plan's "stride ≤ 2 beside an edge patch": edge patches take their level's bands and
+    morph on every path, their may-discard clusters at stride 1. Sub-patch stand-ins and unmeasured
+    bakes take no bands and hold no neighbour, so a shared edge there differs by up to the
+    neighbour's e_s, over the skirts (lean). A record kept whole as its heights fade draws at stride
+    1 in camera passes, its vertices still morphed.
+  - `INSTANCE_RECORD_BYTES` is 64 (the record grew 32 → 64 B, not 48; each cascade's copies take
+    slots × 64 B): `Instance.strides` (the bands towards 2, 4 and 8, m, ≤ 0 none) and bit 18 of
+    `parentQuadrant`, `INSTANCE_FINEST` (a patch whose bounding sphere comes within a contact's
+    forced radius: camera passes at stride 1). The cull reads words 7 and 12 to 14 where an instance
+    has 16 words or more.
+  - `STRIDE_MORPH` is each material's own: the lit forms take the morph, the depth materials and the
+    casters do not. With strides the overlay takes its own pass at stride 1 whatever `overlayDepth`
+    says, and `scene-depth` never reads the scene's depth (`frameTerrain.ts`; `photoreal/overlay.ts`
+    is unchanged).
+  - `GeometrySettings.strides`, `--geometry strides=`; results files without it read `off`.
+    test-render's part 16 holds the grounded craft's check alone.
+  - The drawn-error test (`strides.wasm.test.ts`) puts its cameras at random about three patches
+    each of the Moon-like and Earth-like fixtures, half across each level's CDLOD band, not at R05's
+    descent poses; Mars-like has no field fixture.
+  - Not built: the counting harness's strides rule (its flat bakes hold no measured e_s); a GPU
+    check of `stride_place` against its twin; the time-fade fallback.
+  - For T2.c–d: the lit vertex stage places by `stride_place`; the resolve must too.
+  - Pending: the owner's Mac and RTX runs with `strides` on and off; Windows NOT RUN.

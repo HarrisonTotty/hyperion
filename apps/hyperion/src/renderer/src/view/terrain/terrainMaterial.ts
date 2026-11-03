@@ -105,6 +105,7 @@ import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
 import terrainClusterWgsl from "./shaders/terrainCluster.wgsl?raw";
 import terrainClusterShadowWgsl from "./shaders/terrainClusterShadow.wgsl?raw";
 import terrainShadowWgsl from "./shaders/terrainShadow.wgsl?raw";
+import terrainStridesWgsl from "./shaders/terrainStrides.wgsl?raw";
 import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
 import { CLASS_NODES_BYTES, PATCH_VERTICES_PER_SIDE } from "./slotLayout";
 import { PHOTOMETRY_STRIDE, type TerrainMaturity } from "./workers/messages";
@@ -175,9 +176,10 @@ const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
  * What every lit terrain module composes before its `Draw` and fragment stage: `frame.wgsl`,
  * `patchVertex.wgsl`, R08's surface lighting, R07's `litBody.wgsl`, `terrainPatch.wgsl`, the
  * horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b), the survey's placement and discard
- * (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11), the maturity nodes'
- * formula (`shaders/maturityNodes.wgsl`, R10.T1.c) and `terrainLit.wgsl`, its vertices and
- * shading.
+ * (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11), the stride morph
+ * (`terrainStrides.wgsl`, plan R14, R14.T3.c; each material's own source declares whether it takes
+ * it), the maturity nodes' formula (`shaders/maturityNodes.wgsl`, R10.T1.c) and `terrainLit.wgsl`,
+ * its vertices and shading.
  */
 const LIT_TERRAIN_SOURCE =
   frameWgsl +
@@ -187,6 +189,7 @@ const LIT_TERRAIN_SOURCE =
   terrainPatchWgsl +
   horizonWgsl +
   terrainSurveyWgsl +
+  terrainStridesWgsl +
   maturityNodesWgsl +
   terrainLitWgsl;
 

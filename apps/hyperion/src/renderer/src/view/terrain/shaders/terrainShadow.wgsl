@@ -29,6 +29,9 @@ struct Draw {
 
 @group(1) @binding(0) var<uniform> draw : Draw;
 
+// A caster keeps its own stride's mesh, unmorphed (plan R14, R14.T3.c; `terrainStrides.wgsl`).
+const STRIDE_MORPH : bool = false;
+
 @fragment
 fn fragmentMain(in : LitVertexOut) {
   if (!survey_kept(in)) {

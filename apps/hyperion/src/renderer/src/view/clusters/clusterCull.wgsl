@@ -56,8 +56,16 @@
 // - _A record of no cluster_ (R14.T4.b): a negative radius, a page's room past its clusters, which
 //   every pass refuses.
 // - _The stride_: for a cascade the coarsest s = 2^l, l up to the pass's cap, with s × the unit
-//   within the pass's tolerance, in `f32` as the twin forms it; s = 1 where none is, for a camera
-//   pass (until T3.c) and for a DAG record.
+//   within the pass's tolerance, in `f32` as the twin forms it; s = 1 where none is, and for a DAG
+//   record. For a camera pass (T3.c; `clusters/strides.ts`), up to its cap, the coarsest whose
+//   every band below it the cluster's nearest point is past by (1 + β), the bands its instance's
+//   record holds (terrain's `Instance.strides`, words 12 to 14, read where an instance has 16 words
+//   or more), so that every vertex the stride drops is wholly moved by the stride morph
+//   (`terrainStrides.wgsl`); s = 1 where the instance's quadrant word has bit 18 (the forced
+//   region's) and where it is kept whole (its heights fade from another surface, which its records'
+//   spheres do not bound, so that its vertices may stand nearer than its spheres), and at most 4 for
+//   a block or a strip on an edge whose coarse–fine hold at k = 0 is set (bits 2 to 5 of that word:
+//   a finer patch touches it), whose level-2 vertices stay.
 // - _The bucket_: the record's shape (its flags' bits 0–3) less the consumer's first shape
 //   (`shapes.x`) × STRIDE_LEVELS + l, from the pass's first bucket; or, for a record that may
 //   discard (its flags' bit 5) of a shape with a may-discard template (`shapes.y` and `shapes.z`,
@@ -119,6 +127,10 @@ const CLUSTER_FLAG_DAG : u32 = 16u;
 const CLUSTER_FLAG_MAY_DISCARD : u32 = 32u;
 const NO_DISCARD_TEMPLATE : u32 = 0xffu;
 const STRIDE_LEVELS : u32 = 4u;
+// `strides.ts`' STRIDE_BAND_FRACTION, and the quadrant word's bit by which a camera pass draws an
+// instance at stride 1 (uniforms.ts' `INSTANCE_FINEST`).
+const STRIDE_BAND_FRACTION : f32 = 0.02;
+const INSTANCE_FINEST : u32 = 0x40000u;
 // The threads of a workgroup, each taking every 64th cluster of its instance's page.
 const CULL_GROUP : u32 = 64u;
 // The `f32` allowance: per metre of the camera-relative lengths a test forms (some sixteen ulps,
@@ -278,10 +290,60 @@ fn stride_level(cull_pass : CullPass, unit : f32) -> u32 {
   return level;
 }
 
-// A record's template in the pass (see the module's head): a cascade's stride for a strided one,
-// stride 1 for a camera pass's and a DAG one's; a may-discard record's shape's may-discard
-// template where it has one.
-fn template_of(cull_pass : CullPass, shape : u32, flags : u32, unit : f32) -> u32 {
+// The edges of a terrain block or strip, bits 0 to 3 for x = 0, x = 64, y = 0 and y = 64, from its
+// template reference (`record.ts`), 0 for any other shape.
+fn record_edges(shape : u32, template_ref : u32) -> u32 {
+  if (shape == 0u) {
+    let x0 = template_ref & 0xffu;
+    let y0 = (template_ref >> 8u) & 0xffu;
+    return select(0u, 1u, x0 == 0u) | select(0u, 2u, x0 == 56u) | select(0u, 4u, y0 == 0u) | select(0u, 8u, y0 == 56u);
+  }
+  if (shape == 1u) {
+    // Edge 0 y = 0, 1 x = 64, 2 y = 64, 3 x = 0 (`gpu/resources.ts`' numbering).
+    switch (template_ref >> 16u) & 3u {
+      case 0u: {
+        return 4u;
+      }
+      case 1u: {
+        return 2u;
+      }
+      case 2u: {
+        return 8u;
+      }
+      default: {
+        return 1u;
+      }
+    }
+  }
+  return 0u;
+}
+
+// A camera pass's stride's level for a strided record (see the module's head; `strides.ts`'
+// `cameraStrideLevel`): `bands` its instance's, `quadrant` its instance's quadrant word, `distance`
+// the record's sphere's nearest point.
+fn camera_stride_level(cull_pass : CullPass, record : ClusterRecord, bands : vec3f, quadrant : u32, distance : f32) -> u32 {
+  if ((quadrant & INSTANCE_FINEST) != 0u) {
+    return 0u;
+  }
+  var cap = min(cull_pass.header.y, STRIDE_LEVELS - 1u);
+  if ((record_edges(record.flags & 0xfu, record.templateRef) & ((quadrant >> 2u) & 0xfu)) != 0u) {
+    cap = min(cap, 2u);
+  }
+  var level = 0u;
+  for (var l = 1u; l <= cap; l = l + 1u) {
+    let band = bands[l - 1u];
+    if (band <= 0.0 || distance < (1.0 + STRIDE_BAND_FRACTION) * band) {
+      break;
+    }
+    level = l;
+  }
+  return level;
+}
+
+// A record's template in the pass (see the module's head) at stride level `level`, the pass's for
+// a strided one, 0 for a DAG one's; a may-discard record's shape's may-discard template where it
+// has one.
+fn template_of(cull_pass : CullPass, shape : u32, flags : u32, level : u32) -> u32 {
   if ((flags & CLUSTER_FLAG_MAY_DISCARD) != 0u && shape < 8u) {
     let word = select(params.shapes.y, params.shapes.z, shape >= 4u);
     let discarding = (word >> (8u * (shape % 4u))) & 0xffu;
@@ -290,8 +352,7 @@ fn template_of(cull_pass : CullPass, shape : u32, flags : u32, unit : f32) -> u3
     }
   }
   let dag = (flags & CLUSTER_FLAG_DAG) != 0u;
-  let level = select(stride_level(cull_pass, unit), 0u, dag || cull_pass.header.x != PASS_CASCADE);
-  return (shape - params.shapes.x) * STRIDE_LEVELS + level;
+  return (shape - params.shapes.x) * STRIDE_LEVELS + select(level, 0u, dag);
 }
 
 // Word `t % 4` of the `t / 4`-th of four `vec4u`, a template's of sixteen.
@@ -338,6 +399,17 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
   let whole = (input.x & INPUT_WHOLE) != 0u;
   let clusters = params.counts.z;
   let pass_count = min(params.counts.w, MAX_CULL_PASSES);
+  // The instance's quadrant word and stride bands, where its record holds them (T3.c).
+  var quadrant = 0u;
+  var bands = vec3f(-1.0);
+  if (params.counts.y >= 16u) {
+    quadrant = instance_words[base + 7u];
+    bands = vec3f(
+      bitcast<f32>(instance_words[base + 12u]),
+      bitcast<f32>(instance_words[base + 13u]),
+      bitcast<f32>(instance_words[base + 14u]),
+    );
+  }
   for (var c = local.x; c < clusters; c = c + CULL_GROUP) {
     let at = page * clusters + c;
     let record = records[at];
@@ -359,7 +431,13 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
         enters &&
         (whole || pass_keeps(cull_pass, centre, record.radius)) &&
         (!dag || dag_drawn(cull_pass, record, centre, parent_centre, parent_radius));
-      let t = template_of(cull_pass, shape, record.flags, unit);
+      var level = 0u;
+      if (cull_pass.header.x == PASS_CASCADE) {
+        level = stride_level(cull_pass, unit);
+      } else if (cull_pass.header.y > 0u && !whole) {
+        level = camera_stride_level(cull_pass, record, bands, quadrant, group_distance(centre, record.radius));
+      }
+      let t = template_of(cull_pass, shape, record.flags, level);
       if (cull_pass.header.x == PASS_CAMERA_ORDERED) {
         marks[instance * clusters + c] = select(NO_MARK, t, keeps && t < params.templates);
         continue;

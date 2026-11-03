@@ -7,8 +7,8 @@
  * `clusterPath`, `casterDepthCull`, `litClusters`, `figureClusters`, `hullClusters`,
  * `wireClusters` and `finClusters` `true` or `false`,
  * `casterStrideCap` 1, 2, 4 or 8, `overlayDepth` `redraw`, `scene-depth` or `cluster`,
- * `farCascadeRate` 1, 2 or 4, `pageBytes` a whole number of bytes, and `meshTolerancePx`
- * `<camera>:<wireframe occluder>` px. As `qualityLaunch.ts` does for the setting, it rides in the
+ * `farCascadeRate` 1, 2 or 4, `pageBytes` a whole number of bytes, `meshTolerancePx`
+ * `<camera>:<wireframe occluder>` px, and `strides` `off` or `measured`. As `qualityLaunch.ts` does for the setting, it rides in the
  * renderer's own `argv` as an extra switch, `--hyperion-geometry=<override>`, present only when the
  * launch gave one, in the canonical form {@link geometryText} writes, and the preload gives it to
  * `HyperionApi.geometry`. Both sides of the hand-off use this module; it imports types only, so it
@@ -36,6 +36,7 @@ const FIELDS = [
   "pageBytes",
   "meshTolerancePx",
   "finClusters",
+  "strides",
 ] as const;
 
 /** A field's values, as a refusal names them. */
@@ -52,6 +53,7 @@ const VALUES: Readonly<Record<(typeof FIELDS)[number], string>> = {
   pageBytes: "a whole number of bytes",
   meshTolerancePx: "<camera>:<wireframe occluder> px, each a number of at least 0",
   finClusters: "true or false",
+  strides: "off or measured",
 };
 
 /** The refusal of `text` as `field`'s value. */
@@ -114,6 +116,12 @@ function readField(out: OverrideBeingRead, field: (typeof FIELDS)[number], text:
         throw refused(field, text);
       }
       out.overlayDepth = text;
+      break;
+    case "strides":
+      if (text !== "off" && text !== "measured") {
+        throw refused(field, text);
+      }
+      out.strides = text;
       break;
     case "farCascadeRate": {
       const rate = text === "1" ? 1 : text === "2" ? 2 : text === "4" ? 4 : null;

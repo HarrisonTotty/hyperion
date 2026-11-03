@@ -237,9 +237,10 @@ export interface FrameTerrainPass {
   readonly symbologyDepthMaterial: MaterialHandle | null;
   /**
    * Where the symbology's pass takes the terrain's depth (`TerrainPass.geometry`'s `overlayDepth`;
-   * plan R14, R14.T1.e).
+   * plan R14, R14.T1.e), and whether its camera passes stride (`strides`, R14.T3.c), whose scene
+   * depth it then never takes.
    */
-  readonly geometry: Pick<GeometrySettings, "overlayDepth">;
+  readonly geometry: Pick<GeometrySettings, "overlayDepth" | "strides">;
   /** The resident bakes' heights (`TerrainPass.heights`). */
   readonly heights: ResidentHeightsView;
   /**
@@ -467,7 +468,9 @@ export class LiveFrameTerrain implements FrameTerrain {
       decorated ||= frame.decorated;
       draws.push(...frame.draws);
       const pass = this.#source.pass(record.body);
-      sceneDepth &&= pass?.geometry.overlayDepth === "scene-depth";
+      // The scene's depth carries the camera's strides (plan R14, R14.T3.c), which move marks.
+      sceneDepth &&=
+        pass?.geometry.overlayDepth === "scene-depth" && pass.geometry.strides === "off";
       const material = pass?.symbologyDepthMaterial ?? null;
       if (material !== null) {
         const slope = new Float32Array([occluderSlopePx]);

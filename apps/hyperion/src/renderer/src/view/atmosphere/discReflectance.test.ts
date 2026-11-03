@@ -165,12 +165,15 @@ function digestOf(source: string): string {
  * before. The disc's three and the figure re-pinned by lane fix-coast-class-map's fine page
  * (2026-11-02): `surface_at` reads a refined texel's cells, and with no page past the map's own
  * layers every lookup and sum is as before, in the same order, a surveyed corner of no weight adding
- * 0 to the albedo where it was skipped.
+ * 0 to the albedo where it was skipped. The figure and the terrain's re-pinned by plan R14's camera
+ * strides (R14.T3.c): the instance record's `strides`, which the figure's struct steps over, and the
+ * terrain's stride morph (`terrainStrides.wgsl`), which a material without it, or an instance with
+ * no bands, skips, its place `lit_place`'s as before.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "4b4e90e1f9345407"],
   ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "4b4e90e1f9345407"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "e63df29cd61db71"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "a114ff4dcd5525fc"],
   ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "e3c05eef9ccdb61a"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
@@ -179,13 +182,13 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // and its rebakes', rises', refines' and coarsens' mix of heights, normals and maturity
   // (R10.T16.i), which with no fade are k and the newer bake, bit for bit.
   ...[
-    ["terrain-lit-baked-offsets", "6943f7c4257d9416"],
-    ["terrain-lit-face-differences", "188b7de587f22a27"],
+    ["terrain-lit-baked-offsets", "e95f6d174ea07abf"],
+    ["terrain-lit-face-differences", "dfc388b5690802ba"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "bd944dc22c7b7cc5"],
-    ["terrain-depth-face-differences", "9c9eb8e8fa1ef468"],
-    ["terrain-shadow-baked-offsets", "cd57ddca27623ba9"],
-    ["terrain-shadow-face-differences", "89b9ecfd8f1f0ffc"],
+    ["terrain-depth-baked-offsets", "13ed0fdc99b4244d"],
+    ["terrain-depth-face-differences", "789b6a171728fe20"],
+    ["terrain-shadow-baked-offsets", "585fc6a7516f045f"],
+    ["terrain-shadow-face-differences", "a6f252e68f64719a"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const spec = [
       ...TERRAIN_LIT_MATERIALS,

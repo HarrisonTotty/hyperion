@@ -32,6 +32,9 @@ struct Draw {
 
 @group(1) @binding(0) var<uniform> draw : Draw;
 
+// The overlay's depth keeps the stride-1 surface (plan R14, R14.T3.c; `terrainStrides.wgsl`).
+const STRIDE_MORPH : bool = false;
+
 // The constant push, a fraction of the depth: 2^-16, as the occluders' (`occluder.wgsl`'s
 // DEPTH_FRACTION, Design note 5 of R02's 128 units at the larger of depth32float's units).
 const TERRAIN_DEPTH_FRACTION : f32 = 0.0000152587890625;

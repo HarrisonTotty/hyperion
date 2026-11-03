@@ -11,11 +11,12 @@ import {
 describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
   it("reads each field's values and writes them back in the fields' order", () => {
     const override = parseGeometryOverride(
-      "overlayDepth=scene-depth,finClusters=true,wireClusters=false,hullClusters=true,figureClusters=false,casterStrideCap=4,clusterPath=true,casterDepthCull=false",
+      "overlayDepth=scene-depth,strides=measured,finClusters=true,wireClusters=false,hullClusters=true,figureClusters=false,casterStrideCap=4,clusterPath=true,casterDepthCull=false",
     );
     expect([override, geometryText(override), geometryText({})]).toEqual([
       {
         overlayDepth: "scene-depth",
+        strides: "measured",
         finClusters: true,
         wireClusters: false,
         hullClusters: true,
@@ -24,7 +25,7 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
         clusterPath: true,
         casterDepthCull: false,
       },
-      "clusterPath=true,casterDepthCull=false,casterStrideCap=4,overlayDepth=scene-depth,figureClusters=false,hullClusters=true,wireClusters=false,finClusters=true",
+      "clusterPath=true,casterDepthCull=false,casterStrideCap=4,overlayDepth=scene-depth,figureClusters=false,hullClusters=true,wireClusters=false,finClusters=true,strides=measured",
       "",
     ]);
   });
@@ -45,6 +46,12 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
   it("refuses a far cascades' rate other than 1, 2 or 4 (R14.T6.b)", () => {
     for (const text of ["farCascadeRate=3", "farCascadeRate=8", "farCascadeRate=0"]) {
       expect(() => parseGeometryOverride(text)).toThrow("farCascadeRate is 1, 2 or 4");
+    }
+  });
+
+  it("refuses camera strides other than off or measured (R14.T3.c)", () => {
+    for (const text of ["strides=on", "strides=true", "strides="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("strides is off or measured");
     }
   });
 

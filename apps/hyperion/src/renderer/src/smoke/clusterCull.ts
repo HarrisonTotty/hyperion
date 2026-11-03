@@ -21,6 +21,13 @@
  * over random marks of more instances than its scan's workgroup has threads, so that the scan's runs
  * are several instances long. Each variant runs its own path, the default the subgroup variant
  * where the adapter offers subgroups, so that both paths are held to the twin.
+ *
+ * The seventh pass is a camera's of no planes at strides up to 8 (plan R14, R14.T3.c), which every
+ * instance enters, the lit pass's cap 8 too: each instance's record holds random stride bands in its
+ * words 12 to 14 (none for some), drawn from a generator of their own, some instances its quadrant
+ * word's bit 18 (stride 1) and some its edges' holds at k = 0 (at most 4 on those edges), the
+ * blocks' and strips' template references their places, so that the seventh pass's buckets take
+ * every stride of both shapes.
  */
 
 import type { Vec3 } from "../geometry/vec3";
@@ -57,6 +64,7 @@ import {
   type ClusterRecord,
   packClusterRecord,
 } from "../view/clusters/record";
+import { INSTANCE_FINEST, NO_STRIDE_BAND, type StrideBandsM } from "../view/clusters/strides";
 import { TERRAIN_DISCARD_TEMPLATES, terrainClusterMesh } from "../view/clusters/templates";
 import { quaternionFromRows } from "../view/camera/quaternion";
 import { frustumOf } from "../view/terrain/cull";
@@ -71,11 +79,17 @@ import type { Checks } from "./harness";
 const INSTANCES = 48;
 const PAGES = 12;
 const CLUSTERS = 96;
-const PASSES = 6;
+const PASSES = 7;
+
+/** Words of the check's instance records: terrain's, the stride bands in words 12 to 14 (T3.c). */
+const INSTANCE_WORDS = 16;
 
 /** The cascades' passes, the first four, and the ordered pass's index, after the camera's. */
 const CASCADES = 4;
 const ORDERED = CASCADES + 1;
+
+/** The striding camera pass's index, the seventh (R14.T3.c): every instance enters it. */
+const STRIDING = ORDERED + 1;
 
 /** The second compaction's instances: more than its scan's 128 threads, several a thread. */
 const MANY_INSTANCES = 1_300;
@@ -178,9 +192,36 @@ function smokeShapeOf(c: number): ClusterRecord["shape"] {
         : "terrain-head";
 }
 
+/**
+ * The template reference of the check's cluster `c` of a page (`record.ts`): a block's grid place,
+ * a strip's edge, so that blocks and strips lie on every edge (R14.T3.c).
+ */
+function smokeTemplateRefOf(c: number): number {
+  if (c < 64) {
+    return 8 * (c % 8) + ((8 * Math.floor(c / 8)) << 8);
+  }
+  return c < 88 ? (c % 4) << 16 : 0;
+}
+
+/**
+ * Random stride bands of an instance (R14.T3.c), rising from 0.2 to 3.2 km for stride 2 by 1.3 to
+ * 2.3 times a stride, so that the clusters at up to some 20 km take every stride; none for a tenth.
+ */
+function smokeBandsOf(next: () => number): StrideBandsM {
+  if (next() < 0.1) {
+    return [NO_STRIDE_BAND, NO_STRIDE_BAND, NO_STRIDE_BAND];
+  }
+  const two = 200 + 3_000 * next();
+  const four = two * (1.3 + next());
+  return [two, four, four * (1.3 + next())];
+}
+
 /** R14.T1.b's cull on the device against its twin: see the module's remarks. */
 export async function checkClusterCull(engine: RenderEngine, checks: Checks): Promise<void> {
   const next = random(0x5eed_14);
+  // The camera strides' inputs from a generator of their own (R14.T3.c), so that every other
+  // input is as it was drawn before them.
+  const nextStride = random(0x5eed_3c);
   const { templates } = terrainClusterMesh();
   const records: ClusterRecord[] = [];
   for (let n = 0; n < PAGES * CLUSTERS; n += 1) {
@@ -189,7 +230,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       radiusM: 1 + 300 * next(),
       mode: "strided",
       strideErrorBits: null,
-      templateRef: 0,
+      templateRef: smokeTemplateRefOf(n % CLUSTERS),
       shape: smokeShapeOf(n % CLUSTERS),
       // Every fin and head run, and every fifth block and strip, may discard (R14.T1.g).
       mayDiscard: n % CLUSTERS >= 88 || n % 5 === 0,
@@ -204,8 +245,12 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       z: Math.fround(30_000 * (next() - 0.5)),
     },
     page: n % PAGES,
-    passMask: Math.floor(next() * 64),
+    passMask: Math.floor(next() * 64) | (1 << STRIDING),
     unitM: 0.01 + next(),
+    strideBandsM: smokeBandsOf(nextStride),
+    // Every fifth instance at stride 1 (the forced region's), every third's edges at most at 4.
+    quadrantWord:
+      (n % 5 === 0 ? INSTANCE_FINEST : 0) | (n % 3 === 0 ? Math.floor(nextStride() * 16) << 2 : 0),
   }));
   const axes = frame(next);
   const cascades: CascadeCullPass[] = Array.from({ length: CASCADES }, (_, k) => ({
@@ -255,8 +300,19 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     planes: camera.planes.slice(0, 5),
     horizon: cullHorizonOf(toCamera, 20_000),
     order: "ordered",
+    strideCap: 8,
   };
-  const passes: CullPass[] = [...cascades, camera, lit];
+  // A camera pass of no planes, which keeps every cluster, at strides up to 8 by its instances'
+  // bands (R14.T3.c).
+  const striding: CameraCullPass = {
+    kind: "camera",
+    planes: [],
+    toleranceRad: 0,
+    strideCap: 8,
+    horizon: null,
+    order: "appended",
+  };
+  const passes: CullPass[] = [...cascades, camera, lit, striding];
   const viewAxis = unit(next);
   const buckets = new ClusterBuckets(
     engine,
@@ -298,13 +354,18 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     records.forEach((record, n) => {
       packClusterRecord(recordBytes, n * CLUSTER_RECORD_BYTES, record);
     });
-    const words = new DataView(new ArrayBuffer(INSTANCES * 32));
+    const bytes = 4 * INSTANCE_WORDS;
+    const words = new DataView(new ArrayBuffer(INSTANCES * bytes));
     const inputs = new Uint32Array(2 * INSTANCES);
     instances.forEach((instance, n) => {
-      words.setFloat32(32 * n, instance.originM.x, true);
-      words.setFloat32(32 * n + 4, instance.originM.y, true);
-      words.setFloat32(32 * n + 8, instance.originM.z, true);
-      words.setUint32(32 * n + 12, instance.page, true);
+      words.setFloat32(bytes * n, instance.originM.x, true);
+      words.setFloat32(bytes * n + 4, instance.originM.y, true);
+      words.setFloat32(bytes * n + 8, instance.originM.z, true);
+      words.setUint32(bytes * n + 12, instance.page, true);
+      words.setUint32(bytes * n + 28, instance.quadrantWord, true);
+      instance.strideBandsM.forEach((band, l) => {
+        words.setFloat32(bytes * n + 48 + 4 * l, band, true);
+      });
       inputs[2 * n] = instance.passMask;
       inputs[2 * n + 1] = new Uint32Array(Float32Array.of(instance.unitM).buffer)[0] ?? 0;
     });
@@ -321,7 +382,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       {
         rotationColumns: identity,
         instances: INSTANCES,
-        instanceWords: 8,
+        instanceWords: INSTANCE_WORDS,
         clustersPerPage: CLUSTERS,
         passes: PASSES,
         templateOffsets: buckets.templateOffsets,
@@ -426,6 +487,28 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       `${String(kept)} entries kept of ${String(INSTANCES * CLUSTERS * (PASSES - 1))} tested, in ${String(filled.size)} of ${String(templates.length)} templates, ${String(byReceivers)} refused by the receivers' depths; ${String(missing)} the exact twin keeps missing, ${String(extra)} past the widened twin`,
     );
     const many = await manyCheck(engine, compact, tallies, next);
+    // The camera's strides (R14.T3.c): the striding pass's buckets, held to its twin above, at
+    // every strided template of both shapes, and none past what the instances hold them to.
+    const stridingPlace = buckets.place(STRIDING);
+    const strided = [...device.entries()].flatMap(([bucket, entries]) => {
+      const t = bucket - stridingPlace.bucketBase;
+      return t >= 0 && t < 8 ? entries.map((entry) => [t, entry] as const) : [];
+    });
+    const taken = new Set(strided.map(([t]) => t));
+    const held = strided.filter(([t, entry]) => {
+      const instance = instances[Math.floor(entry / 256)];
+      const level = t % 4;
+      return (
+        instance !== undefined &&
+        (((instance.quadrantWord & INSTANCE_FINEST) !== 0 && level > 0) ||
+          (instance.strideBandsM[0] <= 0 && level > 0))
+      );
+    }).length;
+    checks.check(
+      "R14.T3.c a camera pass's strides on the device are its twin's: every stride of both shapes taken, none past an instance held at stride 1 or of no bands",
+      missing === 0 && extra === 0 && taken.size === 8 && held === 0,
+      `the striding pass's ${String(strided.length)} entries at templates ${[...taken].toSorted((a, b) => a - b).join(", ")} of terrain's 8 strided ones, ${String(held)} past their instances' hold; the lit pass's marks at ${[...ordered.strides].toSorted((a, b) => a - b).join(", ")}; ${String(missing)} the exact twin keeps missing, ${String(extra)} past the widened twin`,
+    );
     checks.check(
       "R14.T2.a the lit pass's marks on the device are its twin's, its horizon refusing some, and the stable compaction writes its twin's lists byte for byte, in the draw set's order",
       ordered.missing === 0 &&
@@ -540,6 +623,7 @@ async function orderedCheck(
   readonly byHorizon: number;
   readonly differing: number;
   readonly entries: number;
+  readonly strides: ReadonlySet<number>;
 }> {
   const exact = cullMarksTwin(input, 0);
   const widened = cullMarksTwin(input, 2);
@@ -556,8 +640,12 @@ async function orderedCheck(
   let missing = 0;
   let extra = 0;
   let byHorizon = 0;
+  const strides = new Set<number>();
   deviceMarks.forEach((mark, at) => {
     kept += mark === NO_MARK ? 0 : 1;
+    if (mark < 8) {
+      strides.add(mark);
+    }
     missing += exact[at] !== NO_MARK && mark !== exact[at] ? 1 : 0;
     extra += mark !== NO_MARK && widened[at] !== mark ? 1 : 0;
     byHorizon += noHorizon[at] !== NO_MARK && exact[at] === NO_MARK ? 1 : 0;
@@ -568,6 +656,7 @@ async function orderedCheck(
     missing,
     extra,
     byHorizon,
+    strides,
     ...listsDiffer(await deviceLists(engine, buckets, ORDERED), twin.lists),
   };
 }
