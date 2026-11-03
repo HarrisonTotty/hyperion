@@ -115,6 +115,11 @@ export function bodyStateLabel(state: BodyState): string {
 /**
  * What destroyed a body, in words; `null` for a cause this build does not know, which reads
  * Missing.
+ *
+ * @remarks
+ * `EVAPORATED` is `evaporated`, from generator version 28 a small hot rocky body whose rock vapour
+ * streamed off it until none was left (plan 14, P14.T55.b.a), the literature's "evaporation" of a
+ * rocky planet (Perez-Becker and Chiang 2013), as `ENGULFED` and `COLLIDED` are their events.
  */
 export function destructionCauseLabel(cause: DestructionCause): string | null {
   let label: string | null;
@@ -130,6 +135,9 @@ export function destructionCauseLabel(cause: DestructionCause): string | null {
       break;
     case "collided":
       label = "COLLIDED";
+      break;
+    case "evaporated":
+      label = "EVAPORATED";
       break;
     case "unknown":
       label = null;

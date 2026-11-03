@@ -9,4 +9,4 @@
  * generator version may add a cause, as 28 adds a small hot body's evaporation (plan 14,
  * P14.T55.b.a), with no bump, and a client that does not know it reads it as Missing.
  */
-export type DestructionCauseDto = "dispersed" | "engulfed" | "tidally_disrupted" | "collided";
+export type DestructionCauseDto = "dispersed" | "engulfed" | "tidally_disrupted" | "collided" | "evaporated";

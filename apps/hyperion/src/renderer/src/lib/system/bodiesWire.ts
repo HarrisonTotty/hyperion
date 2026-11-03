@@ -338,6 +338,7 @@ const DESTRUCTION_CAUSES: Readonly<Record<DestructionCauseDto, true>> = {
   engulfed: true,
   tidally_disrupted: true,
   collided: true,
+  evaporated: true,
 };
 
 // The causes grow without a protocol bump (galaxy plan 04's growing enums), and the decoder trusts

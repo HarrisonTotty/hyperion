@@ -1,8 +1,9 @@
 /**
  * A body lost to the scattering after a supernova (the orchestrator's rulings 71 and 80): listed as
  * `DESTROYED`, not drawn, and read with its cause, `COLLIDED`, in the body readout (plan 14,
- * P14.T28.c and T43.a–b); and one destroyed by a cause this build does not know, which reads Missing
- * (galaxy plan 04's growing enums, P14.T55.b.a).
+ * P14.T28.c and T43.a–b); one whose rock evaporated, read `EVAPORATED` (P14.T55.b.a); and one
+ * destroyed by a cause this build does not know, which reads Missing (galaxy plan 04's growing
+ * enums).
  */
 import type { DestructionCauseDto } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
@@ -106,6 +107,22 @@ describe("a body that collided", () => {
 
     expect(readingOf("STATE")).toBe("DESTROYED");
     expect(readingOf("CAUSE")).toBe("COLLIDED");
+    expect(readingOf("SINCE")).toBe("UT -300 yr 000/00:00:00");
+  });
+});
+
+describe("a body that evaporated", () => {
+  it("reads EVAPORATED as its cause, and since when", async () => {
+    const { user } = await renderDestroyed("evaporated");
+
+    await user.click(
+      within(screen.getByRole("tree", { name: "Bodies" })).getByRole("treeitem", {
+        name: /\/768, PLANET, DESTROYED$/,
+      }),
+    );
+
+    expect(readingOf("STATE")).toBe("DESTROYED");
+    expect(readingOf("CAUSE")).toBe("EVAPORATED");
     expect(readingOf("SINCE")).toBe("UT -300 yr 000/00:00:00");
   });
 });

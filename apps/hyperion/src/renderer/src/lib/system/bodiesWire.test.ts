@@ -2141,6 +2141,7 @@ describe("body-state times beyond 2^53 s (P14.T35.d)", () => {
       at,
     });
     expect(causeOf("collided")).toEqual({ kind: "destroyed", cause: "collided", at });
+    expect(causeOf("evaporated")).toEqual({ kind: "destroyed", cause: "evaporated", at });
   });
 
   it("refuses a state time that is not whole seconds and nanoseconds", () => {

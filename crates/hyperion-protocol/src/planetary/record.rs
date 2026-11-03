@@ -150,6 +150,10 @@ pub enum DestructionCauseDto {
     /// It collided with a heavier neighbour whose orbit its own crossed after a supernova, and
     /// merged into it (P14.T28.c, ruling 71).
     Collided,
+    /// Its rock evaporated in its hosts' light: a planet, a moon or a belt member below 10⁻³ M⊕
+    /// whose rock vapour streamed off it until none was left (P14.T55.b.a), sent from generator
+    /// version 28.
+    Evaporated,
 }
 
 /// A planet's class by composition (plan 14, P14.T16.a's `PlanetClass`).
@@ -1495,6 +1499,7 @@ pub(crate) mod tests {
             (DestructionCauseDto::Engulfed, "engulfed"),
             (DestructionCauseDto::TidallyDisrupted, "tidally_disrupted"),
             (DestructionCauseDto::Collided, "collided"),
+            (DestructionCauseDto::Evaporated, "evaporated"),
         ]);
     }
 

@@ -50,6 +50,7 @@ describe("destructionCauseLabel", () => {
     ["engulfed", "ENGULFED"],
     ["tidally_disrupted", "TIDALLY DISRUPTED"],
     ["collided", "COLLIDED"],
+    ["evaporated", "EVAPORATED"],
     ["unknown", null],
   ])("names %s as %s", (cause, word) => {
     expect(destructionCauseLabel(cause)).toBe(word);
