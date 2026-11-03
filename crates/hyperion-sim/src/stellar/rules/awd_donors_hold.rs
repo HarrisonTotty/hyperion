@@ -6,10 +6,10 @@
 //! - Under the arm a donor of each helium phase gives no nova and every other donor the held
 //!   recurrence, bit for bit; under the held arm every donor gives it (`awd_donors.rs` holds the
 //!   phases to the engine's helium surface and the census's helium kind).
-//! - Under the arm alone a pinned grid system moves: a layer-D record whose first attempt's 1.262
-//!   M☉ white dwarf is fed 3.8 × 10⁻⁸ M☉ yr⁻¹ by a 0.583 M☉ helium star, a fast host recurring
-//!   every 61 years under the held arm, is a slow one with no nova, in the census's marks as in
-//!   `carved_class`.
+//! - Under the arm alone a pinned grid system moves: a layer-D record whose first attempt's 1.264
+//!   M☉ white dwarf is fed 3.8 × 10⁻⁸ M☉ yr⁻¹ by a 0.582 M☉ helium star, a fast host recurring
+//!   every 60 years under the held arm (from generator version 25), is a slow one with no nova, in
+//!   the census's marks as in `carved_class`.
 //! - The catalogue: under the arm alone the fast class's sample cells keep no host fed helium, its
 //!   scan refusing them, and the scan keeps exactly the cells' entries. A finding, pinned: the slow
 //!   class's hosts fed helium keep the nova clocks their scan draws.
@@ -199,8 +199,9 @@ fn a_white_dwarf_fed_helium_has_no_nova_under_the_arm() {
 }
 
 /// Under the arm alone the pinned system's pair moves from the fast class to the slow one, with no
-/// nova in its marks, and nothing else of it moves: under the held arm its 1.262 M☉ white dwarf,
-/// fed 3.8 × 10⁻⁸ M☉ yr⁻¹ by a 0.583 M☉ helium star, recurs every 61 years.
+/// nova in its marks, and nothing else of it moves: under the held arm its 1.264 M☉ white dwarf,
+/// fed 3.8 × 10⁻⁸ M☉ yr⁻¹ by a 0.582 M☉ helium star, recurs every 60 years (at generator versions
+/// 25 and 26; 1.262 M☉, 0.583 M☉ and 61 years at 24).
 #[test]
 fn the_pinned_helium_fed_host_is_slow_under_the_arm() {
     let id = SystemId::from_raw(PINNED).expect("a grid ID");
@@ -227,9 +228,9 @@ fn the_pinned_helium_fed_host_is_slow_under_the_arm() {
     );
     assert_eq!(h.donor_kind(), AwdDonorKind::Helium);
     assert_eq!(h.donor_phase, Phase::HeliumMainSequence);
-    assert!((h.white_dwarf_mass.value() - 1.262).abs() < 5e-4);
-    assert!((h.donor_mass.value() - 0.583).abs() < 5e-4);
-    assert!((h.recurrence.value() / 61.21 - 1.0).abs() < 1e-3);
+    assert!((h.white_dwarf_mass.value() - 1.2645).abs() < 5e-4);
+    assert!((h.donor_mass.value() - 0.5823).abs() < 5e-4);
+    assert!((h.recurrence.value() / 59.54 - 1.0).abs() < 1e-3);
     assert!(
         a.recurrence.value().is_infinite() && a.recurrence.value() > 0.0,
         "no nova"

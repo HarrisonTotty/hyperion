@@ -5,11 +5,11 @@
 //!
 //! - The version's rules keep the held arm, and the tripwire holds it only until the bump.
 //! - Under the arm alone four pinned grid systems move, one a rule, found by censuses of 3 × 10⁵
-//!   slab and 3 × 10⁵ young thin disc records: a neutron star fed 2.7 × 10⁻¹⁴ M☉ yr⁻¹ by a
-//!   helium white dwarf is no X-ray binary; a 24.5 M☉ star's wind feeding a black hole 30 days out,
-//!   far inside its Roche lobe, makes none; a 12.3 M☉ main-sequence star that gained mass from
-//!   its neutron star's progenitor is a Be star, its pair a Be/X-ray binary; and a Be star beside
-//!   a black hole makes none.
+//!   slab and 3 × 10⁵ young thin disc records: a neutron star fed 3.5 × 10⁻¹³ M☉ yr⁻¹ by a
+//!   helium white dwarf is no X-ray binary (from generator version 25); a 24.5 M☉ star's wind
+//!   feeding a black hole 30 days out, far inside its Roche lobe, makes none; a 12.3 M☉
+//!   main-sequence star that gained mass from its neutron star's progenitor is a Be star, its pair
+//!   a Be/X-ray binary; and a Be star beside a black hole makes none.
 //! - The catalogue: under the arm and plan 15's fitted tables the scan refuses the candidates its
 //!   sampler feeds under the floor, which the class's test will refuse at the bump, and keeps
 //!   exactly the cells' entries; and a pair's classes at its ages do not depend on the order they
@@ -63,9 +63,11 @@ use crate::units::{Seconds, Years};
 /// systems.
 const SEED: u64 = 0x0b17_15a0_0000_0001;
 
-/// A layer-D record of the slab whose first attempt is a neutron star fed 2.7 × 10⁻¹⁴ M☉ yr⁻¹ by
-/// a 0.0043 M☉ helium white dwarf on a 2.8-hour orbit.
-const UNDER_THE_FLOOR: u64 = 0x621d_daa7_f800_0000;
+/// A layer-D record of the slab whose first attempt is a neutron star fed 3.5 × 10⁻¹³ M☉ yr⁻¹ by
+/// a 0.0075 M☉ helium white dwarf on a 1.6-hour orbit (found at generator versions 25 and 26 by a
+/// census of 3 × 10⁵ slab records, the first of four; at 24 it was `0x621d_daa7_f800_0000`, fed
+/// 2.7 × 10⁻¹⁴ M☉ yr⁻¹).
+const UNDER_THE_FLOOR: u64 = 0x61fb_d8d7_ea00_0007;
 
 /// A layer-E record of the young thin disc whose first attempt is a black hole fed by the wind of
 /// a 24.5 M☉ main-sequence star 30.3 days out.
@@ -243,7 +245,7 @@ fn the_xrb_class_is_held_only_until_the_27_bump() {
 }
 
 /// Under the arm alone a neutron star fed by a helium white dwarf under the floor is no X-ray
-/// binary: under the held arm it is a low-mass transient fed 2.7 × 10⁻¹⁴ M☉ yr⁻¹.
+/// binary: under the held arm it is a low-mass transient fed 3.5 × 10⁻¹³ M☉ yr⁻¹.
 #[test]
 fn a_transfer_under_the_floor_makes_no_x_ray_binary_under_the_arm() {
     let held_marks = pinned_marks(held(), UNDER_THE_FLOOR).expect("an X-ray binary held");
