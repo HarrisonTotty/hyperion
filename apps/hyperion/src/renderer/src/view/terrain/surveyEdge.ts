@@ -161,12 +161,34 @@ export interface SurveyEdgeGround {
 /**
  * The source a view's rim is read from, and its revision (`ResidentHeightsView.rimRevision`): the
  * mark keeps the rim it reads at each place along a side and reads it again only once the
- * revision moves, so the rim must depend on nothing else.
+ * revision moves, so the rim must depend on nothing else; or, where the source stamps its reads
+ * ({@link SurveyEdgeRimSource.stamps}), only once that place's stamp falls.
  */
 export interface SurveyEdgeRimSource {
-  /** The source, by identity: a pass's resident heights. */
+  /** The source, by identity: a pass's resident heights, or a view's drawn ground. */
   readonly key: object;
   readonly revision: number;
+  /**
+   * How the source stamps each rim read (R10.T16.c after R10.T16.i; `DrawnGround`), so that a
+   * height kept stands while its own stamp does, whatever else the revision moved for.
+   */
+  readonly stamps?: SurveyEdgeRimStamps;
+}
+
+/** A rim source's stamps on its reads ({@link SurveyEdgeRimSource.stamps}). */
+export interface SurveyEdgeRimStamps {
+  /** The stamp of the view's last rim read (`SurveyEdgeView.heightAtM`). */
+  lastRimStamp(): number;
+  /** Whether a rim read under `stamp` would read the same now. */
+  rimStampStands(stamp: number): boolean;
+  /** What the last rim read read, which {@link SurveyEdgeRimStamps.rimAgain} takes. */
+  lastRimToken?(): unknown;
+  /**
+   * The rim at the place a read's `token` names, read again cheaply where only what its stamp
+   * stood for moved there (an instance's fade), leaving its stamp and token as a read would;
+   * `undefined` where the place is to be read afresh.
+   */
+  rimAgain?(token: unknown): number | undefined;
 }
 
 /** A body's survey as a view draws its edge. */
@@ -197,9 +219,17 @@ const RIM_KEPT_PER_SOURCE = 65_536;
 /** The rim heights a source's mark keeps, by side and place along it, at its revision. */
 interface KeptRims {
   readonly revision: number;
-  readonly sides: WeakMap<DirectedSide, Map<number, number | null>>;
+  readonly sides: WeakMap<DirectedSide, Map<number, KeptRim>>;
   /** How many it keeps, over every side. */
   count: number;
+}
+
+/** One rim height kept, with its read's stamp and token where its source gives them. */
+interface KeptRim {
+  rimM: number | null;
+  stamp: number;
+  /** What its source read there ({@link SurveyEdgeRimStamps.rimAgain}); `null` with none. */
+  token: unknown;
 }
 
 /** The rim heights each source's mark keeps. */
@@ -211,10 +241,16 @@ function keptRims(source: SurveyEdgeRimSource | undefined): KeptRims | null {
     return null;
   }
   const kept = rimsKept.get(source.key);
-  if (kept !== undefined && kept.revision === source.revision && kept.count < RIM_KEPT_PER_SOURCE) {
+  // A source that stamps its reads keeps its heights across its revisions, each by its stamp.
+  const stands = kept?.revision === source.revision || source.stamps !== undefined;
+  if (kept !== undefined && stands && kept.count < RIM_KEPT_PER_SOURCE) {
     return kept;
   }
-  const fresh: KeptRims = { revision: source.revision, sides: new WeakMap(), count: 0 };
+  const fresh: KeptRims = {
+    revision: source.revision,
+    sides: new WeakMap(),
+    count: 0,
+  };
   rimsKept.set(source.key, fresh);
   return fresh;
 }
@@ -534,8 +570,9 @@ export function surveyEdgeMark(
   };
   // The rim at `place` of `side`, of direction `d` (a place t in [0, 1] along it, or −1 − t for
   // the point just across it that its tick points to): kept from an earlier frame where its
-  // source's revision stands.
+  // source's revision stands, or where the source stamps its reads, its own stamp.
   const kept = keptRims(view.ground?.rimSource);
+  const stamps = view.ground?.rimSource?.stamps;
   const rimAt = (side: DirectedSide, place: number, d: Vec3): number | null => {
     if (kept === null) {
       return view.heightAtM(d);
@@ -546,12 +583,23 @@ export function surveyEdgeMark(
       kept.sides.set(side, byPlace);
     }
     const known = byPlace.get(place);
-    if (known !== undefined) {
-      return known;
+    if (known !== undefined && (stamps === undefined || stamps.rimStampStands(known.stamp))) {
+      return known.rimM;
     }
-    const rimM = view.heightAtM(d);
-    byPlace.set(place, rimM);
-    kept.count += 1;
+    // Read again cheaply where the source can, by what it read there before.
+    const again =
+      known !== undefined && known.token !== null ? stamps?.rimAgain?.(known.token) : undefined;
+    const rimM = again ?? view.heightAtM(d);
+    const stamp = stamps?.lastRimStamp() ?? 0;
+    const token = stamps?.lastRimToken?.() ?? null;
+    if (known === undefined) {
+      byPlace.set(place, { rimM, stamp, token });
+      kept.count += 1;
+    } else {
+      known.rimM = rimM;
+      known.stamp = stamp;
+      known.token = token;
+    }
     return rimM;
   };
   const fromCamera = (p: Vec3): Vec3 => add(centreM, rotateToBody(rotation, p));

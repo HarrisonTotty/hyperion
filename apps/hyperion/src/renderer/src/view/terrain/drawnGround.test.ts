@@ -59,7 +59,10 @@ function cameraOver(rangeM: number): Vec3 {
   return vec3(d.x * (RADIUS_M + rangeM), d.y * (RADIUS_M + rangeM), d.z * (RADIUS_M + rangeM));
 }
 
-/** The ground drawn by `instance` over `bakes`, seen from `rangeM` up, at the middle of KEY. */
+/**
+ * The ground drawn by `instance` over `bakes`, seen from `rangeM` up, at the middle of KEY, as the
+ * rim reads it: by the shader's mix whatever the instance's fades.
+ */
 function drawnAt(
   instance: DrawnInstance,
   bakes: ReadonlyMap<string, ResidentBake>,
@@ -69,7 +72,7 @@ function drawnAt(
   ground.begin();
   ground.push(instance);
   ground.end(cameraOver(rangeM), IDENTITY);
-  return ground.groundHeightAtM(at(KEY, 32.25, 32.25));
+  return ground.rimHeightAtM(at(KEY, 32.25, 32.25));
 }
 
 const EDGE = new Map([[patchKeyString(KEY), bakeOf("edge", 100, 60)]]);
@@ -112,6 +115,43 @@ describe("the ground a view drew (R10.T16.c after R10.T16.i)", () => {
     const bakes = new Map([...EDGE, [patchKeyString(PARENT), bakeOf("surveyed", 80, 40)]]);
     const orphan = { ...PLAIN, hasParent: false, fades: fadeWord(0, MIX_STEPS, PARENT_MIX_SLOT) };
     expect(drawnAt(orphan, bakes, 500)).toBeCloseTo(100, 6);
+  });
+
+  it("reads the ground of an instance at rest by its bake's own height, and of one fading by the drawn mix", () => {
+    // Past its band's end, the drawn ground stands at the morph target, 60 m.
+    const read = (fades: number): number | null => {
+      const ground = new DrawnGround(bakesOf(EDGE), FIGURE);
+      ground.begin();
+      ground.push({ ...PLAIN, fades });
+      ground.end(cameraOver(5_000), IDENTITY);
+      return ground.groundHeightAtM(at(KEY, 32.25, 32.25));
+    };
+    expect([read(0), read(fadeWord(1, 0, 0))]).toEqual([
+      expect.closeTo(100, 6),
+      expect.closeTo(60, 6),
+    ]);
+  });
+
+  it("reads a fading sub-patch's ground off its boundary quads as the drawn mix, as its rim reads it", () => {
+    const within: PatchKey = { face: 0, level: 7, i: 41, j: 45 };
+    const sloped: ResidentBake = {
+      standing: "edge",
+      ownAtM: (x, y) => 100 + 3 * x + y * y,
+      morphAtM: (x, y) => 40 + x - y,
+      surveyedAt: () => true,
+    };
+    const ground = new DrawnGround(bakesOf(new Map([[patchKeyString(KEY), sloped]])), FIGURE);
+    ground.begin();
+    ground.push({
+      ...PLAIN,
+      area: within,
+      morphStartM: 300,
+      morphEndM: 30_000,
+      fades: fadeWord(90, 0, 0),
+    });
+    ground.end(cameraOver(500), IDENTITY);
+    const place = at(within, 20.3, 41.8);
+    expect(ground.groundHeightAtM(place)).toBeCloseTo(ground.rimHeightAtM(place) ?? Number.NaN, 6);
   });
 
   it("reads the datum over unsurveyed ground, and nothing where no instance lies", () => {
@@ -194,6 +234,25 @@ describe("the ground a view drew (R10.T16.c after R10.T16.i)", () => {
     expect(reads).toEqual([100, 300, 100].map((h) => expect.closeTo(h, 6)));
   });
 
+  it("takes its rim's morph factor at each vertex, and its ground's at the place read (R10.T16.c's residual)", () => {
+    // 400 m from the camera, vertex (32, 32) stands inside a band from 450 m to 451 m, its
+    // neighbours (33, 32) and (33, 33), some 550 m out, past it, and the place (32.5, 32.25)
+    // between them, some 454 m out, past it too: weights 0.5, 0.25 and 0.25.
+    const ground = new DrawnGround(bakesOf(EDGE), FIGURE);
+    ground.begin();
+    ground.push({ ...PLAIN, morphStartM: 450, morphEndM: 451 });
+    ground.end(cameraOver(500), IDENTITY);
+    const place = at(KEY, 32.5, 32.25);
+    const fading = new DrawnGround(bakesOf(EDGE), FIGURE);
+    fading.begin();
+    fading.push({ ...PLAIN, morphStartM: 450, morphEndM: 451, fades: fadeWord(1, 0, 0) });
+    fading.end(cameraOver(500), IDENTITY);
+    expect([ground.rimHeightAtM(place), fading.groundHeightAtM(place)]).toEqual([
+      expect.closeTo(0.5 * 100 + 0.5 * 60, 6),
+      expect.closeTo(60, 6),
+    ]);
+  });
+
   describe("its revision", () => {
     const frame = (ground: DrawnGround, instance: DrawnInstance, rangeM: number): number => {
       ground.begin();
@@ -229,6 +288,90 @@ describe("the ground a view drew (R10.T16.c after R10.T16.i)", () => {
       const ground = new DrawnGround(bakesOf(surveyed), FIGURE);
       const first = frame(ground, PLAIN, 500);
       expect(frame(ground, { ...PLAIN, fades: fadeWord(10, 0, 0) }, 500)).toBe(first);
+    });
+
+    it("stamps a rim read with its instance's generation, which stands as the camera moves and falls as the instance's fade does (R10.T16.i)", () => {
+      const ground = new DrawnGround(bakesOf(EDGE), FIGURE);
+      frame(ground, PLAIN, 500);
+      ground.rimHeightAtM(at(KEY, 32, 30));
+      const stamp = ground.lastRimStamp();
+      frame(ground, PLAIN, 900);
+      const moved = ground.rimStampStands(stamp);
+      frame(ground, { ...PLAIN, fades: fadeWord(10, 0, 0) }, 900);
+      expect([stamp > 0, moved, ground.rimStampStands(stamp)]).toEqual([true, true, false]);
+    });
+
+    it("keeps a rim read's stamp as another instance's fade moves", () => {
+      const east: PatchKey = { ...KEY, i: KEY.i + 1 };
+      const ground = new DrawnGround(
+        bakesOf(new Map([...EDGE, [patchKeyString(east), bakeOf("edge", 300, 300)]])),
+        FIGURE,
+      );
+      const both = (fades: number): void => {
+        ground.begin();
+        ground.push(PLAIN);
+        ground.push({ ...PLAIN, key: east, area: east, fades });
+        ground.end(cameraOver(500), IDENTITY);
+      };
+      both(0);
+      ground.rimHeightAtM(at(KEY, 32, 30));
+      const stamp = ground.lastRimStamp();
+      both(fadeWord(10, 0, 0));
+      expect(ground.rimStampStands(stamp)).toBe(true);
+    });
+
+    it("stamps a read over no edge instance with the drawn set's own, which falls as one comes", () => {
+      const ground = new DrawnGround(bakesOf(EDGE), FIGURE);
+      ground.begin();
+      ground.end(cameraOver(500), IDENTITY);
+      const none = ground.rimHeightAtM(at(KEY, 32, 30));
+      const stamp = ground.lastRimStamp();
+      ground.begin();
+      ground.end(cameraOver(500), IDENTITY);
+      const stood = ground.rimStampStands(stamp);
+      frame(ground, PLAIN, 500);
+      expect([none, stood, ground.rimStampStands(stamp)]).toEqual([null, true, false]);
+    });
+
+    it("reads a rim again by its read's token as its instance's fade moves, as a fresh read does", () => {
+      const sloped: ResidentBake = {
+        standing: "edge",
+        ownAtM: (x, y) => 100 + x + 2 * y,
+        morphAtM: (x) => 40 + x,
+        surveyedAt: () => true,
+      };
+      const ground = new DrawnGround(bakesOf(new Map([[patchKeyString(KEY), sloped]])), FIGURE);
+      const band = { ...PLAIN, morphStartM: 300, morphEndM: 30_000 };
+      frame(ground, band, 500);
+      const place = at(KEY, 20.4, 30.7);
+      ground.rimHeightAtM(place);
+      const token = ground.lastRimToken();
+      frame(ground, { ...band, fades: fadeWord(120, 0, 0), edgeFades: 0x40 }, 500);
+      const again = ground.rimAgain(token);
+      const stood = ground.rimStampStands(ground.lastRimStamp());
+      expect([again, stood]).toEqual([
+        expect.closeTo(ground.rimHeightAtM(place) ?? Number.NaN, 9),
+        true,
+      ]);
+    });
+
+    it("reads none again by a token once its instance mixes, or its bake changes", () => {
+      const ground = new DrawnGround(bakesOf(EDGE), FIGURE);
+      frame(ground, PLAIN, 500);
+      ground.rimHeightAtM(at(KEY, 32, 30));
+      const token = ground.lastRimToken();
+      frame(ground, { ...PLAIN, fades: fadeWord(0, 100, DATUM_SLOT) }, 500);
+      const mixing = ground.rimAgain(token);
+      const rebaked = new DrawnGround(
+        bakesOf(new Map([[patchKeyString(KEY), bakeOf("edge", 100, 60)]])),
+        FIGURE,
+      );
+      frame(rebaked, PLAIN, 500);
+      expect([mixing, rebaked.rimAgain(token), ground.rimAgain({})]).toEqual([
+        undefined,
+        undefined,
+        undefined,
+      ]);
     });
 
     it("moves as the bakes' rim revision does", () => {

@@ -20,6 +20,7 @@ import {
   surveyEdgeNoteName,
   type SurveyEdgeMark,
   type SurveyEdgeOptions,
+  type SurveyEdgeRimStamps,
   type SurveyEdgeView,
 } from "./surveyEdge";
 
@@ -801,6 +802,87 @@ describe("the survey edge's rim kept from frame to frame (R10.T16.c)", () => {
     expect(surveyEdgeMark(counting(key, 1).view, camera, VIEWPORT, OPTIONS)).toEqual(
       surveyEdgeMark(fresh, camera, VIEWPORT, OPTIONS),
     );
+  });
+
+  /**
+   * The view reading its rim from `key` at `revision`, its source stamping each read `stampOf` its
+   * count, the stamps in `standing` standing; and how many times it read it.
+   */
+  const stamping = (
+    key: object,
+    revision: number,
+    standing: ReadonlySet<number>,
+    stampOf: (reads: number) => number,
+  ): { readonly view: SurveyEdgeView; readonly reads: () => number } => {
+    let reads = 0;
+    const stamps: SurveyEdgeRimStamps = {
+      lastRimStamp: () => stampOf(reads),
+      rimStampStands: (stamp) => standing.has(stamp),
+    };
+    return {
+      view: {
+        ...view,
+        heightAtM: () => {
+          reads += 1;
+          return 500;
+        },
+        ground: { heightAtM: () => 0, ceilingM: 500, rimSource: { key, revision, stamps } },
+      },
+      reads: () => reads,
+    };
+  };
+
+  it("reads the rim again, where its source stamps its reads, only where a read's stamp falls, however the revision moves (R10.T16.i)", () => {
+    const key = {};
+    const both = new Set([1, 2]);
+    // Its reads stamped 2 and 1 in turn.
+    const first = stamping(key, 1, both, (reads) => (reads % 2) + 1);
+    surveyEdgeMark(first.view, camera, VIEWPORT, OPTIONS);
+    const moved = stamping(key, 2, both, () => 1);
+    surveyEdgeMark(moved.view, camera, VIEWPORT, OPTIONS);
+    const fallen = stamping(key, 3, new Set([1]), () => 1);
+    surveyEdgeMark(fallen.view, camera, VIEWPORT, OPTIONS);
+    expect([first.reads() > 2, moved.reads(), fallen.reads()]).toEqual([
+      true,
+      0,
+      Math.floor(first.reads() / 2),
+    ]);
+  });
+
+  it("reads a place whose stamp fell again by its read's token where its source can", () => {
+    const key = {};
+    let reads = 0;
+    let agains = 0;
+    let stamp = 1;
+    const stamps: SurveyEdgeRimStamps = {
+      lastRimStamp: () => stamp,
+      rimStampStands: (s) => s === stamp,
+      lastRimToken: () => "read",
+      // As a fresh read would read it: the same height, so that the pieces and places are too.
+      rimAgain: (token) => {
+        agains += token === "read" ? 1 : 0;
+        return 500;
+      },
+    };
+    const marked = (): SurveyEdgeMark =>
+      surveyEdgeMark(
+        {
+          ...view,
+          heightAtM: () => {
+            reads += 1;
+            return 500;
+          },
+          ground: { heightAtM: () => 0, ceilingM: 900, rimSource: { key, revision: 1, stamps } },
+        },
+        camera,
+        VIEWPORT,
+        OPTIONS,
+      );
+    const before = marked();
+    const first = reads;
+    stamp = 2;
+    const after = marked();
+    expect([reads - first, agains, after.line]).toEqual([0, first, before.line]);
   });
 
   it("keeps two sources' rims apart over one coverage", () => {

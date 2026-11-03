@@ -1141,6 +1141,10 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
     rimHeightAtM: () => 700,
     groundHeightAtM: () => 700,
     revision: 3,
+    lastRimStamp: () => 1,
+    rimStampStands: () => true,
+    lastRimToken: () => null,
+    rimAgain: () => undefined,
   };
 
   /** `litAt500`'s source, its lit pass giving {@link DRAWN} as the ground `VIEW` drew. */
@@ -1171,7 +1175,7 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
       VIEWPORT,
       "photorealistic",
     );
-    expect(edge?.ground?.rimSource).toEqual({ key: DRAWN, revision: 3 });
+    expect(edge?.ground?.rimSource).toEqual({ key: DRAWN, revision: 3, stamps: DRAWN });
   });
 
   it("hides points behind the drawn ground in a wireframe view only where its wireframe pass takes it", () => {

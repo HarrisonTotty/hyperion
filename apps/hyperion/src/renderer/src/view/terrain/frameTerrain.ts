@@ -635,7 +635,7 @@ export function surveyEdgeViewsOf(
               rimSource:
                 drawn === null
                   ? { key: heights, revision: heights.rimRevision }
-                  : { key: drawn, revision: drawn.revision },
+                  : { key: drawn, revision: drawn.revision, stamps: drawn },
             },
           }
         : {}),

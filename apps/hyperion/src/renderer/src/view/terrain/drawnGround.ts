@@ -17,9 +17,10 @@
  * - mixed by its fade word's mix towards the surface it names: the datum for a rise, its parent's
  *   own surface less its morph target for a refine's or a coarsen's where it has a parent slot,
  *   and, for a rebake, its newer bake's own, since the older one's heights are not kept here;
- * - mixed between them by CDLOD's morph factor from the read place's distance to the camera (the
- *   shader's from each vertex's, a quad's share of the band apart), held and floored at its fades
- *   (`coarseFineHolds.ts`' `fadedMorph`), the grounded contacts' hold left out;
+ * - mixed between them by CDLOD's morph factor from its distance to the camera, as the shader's,
+ *   for the rim; for the ground, which a tick's line of sight reads at every sample, from the read
+ *   place's, a quad's share of the band apart; held and floored at its fades (`coarseFineHolds.ts`'
+ *   `fadedMorph`), the grounded contacts' hold left out;
  * - and a point between vertices the barycentric mix of its triangle's, the quad split on its
  *   (0, 0)–(1, 1) diagonal as the mesh splits it.
  *
@@ -29,9 +30,10 @@
 
 import { type Vec3, vec3 } from "../../geometry/vec3";
 import { fadedMorph } from "./coarseFineHolds";
+import { vertexDir } from "./cube";
 import { DATUM_SLOT, MIX_STEPS, PARENT_MIX_SLOT } from "./gpu/uniforms";
 import { type PatchKey, patchIndex } from "./patchKey";
-import type { BodyFigure } from "./planet";
+import { type BodyFigure, surfacePoint } from "./planet";
 import { columnAt, type FacePlace, facePlaces, type ResidentBake } from "./residentHeights";
 
 /** Quads along a patch's side. */
@@ -51,13 +53,16 @@ export interface DrawnGroundBakes {
 export interface DrawnGroundView {
   /**
    * The drawn ground's height above the datum at a body-fixed unit direction over the bakes whose
-   * survey mask holds the edge, the highest of the drawn instances over it there, m; `null` where
-   * no instance drawing such a bake lies over it.
+   * survey mask holds the edge, the finest drawn instance's over it there, m; `null` where no
+   * instance drawing such a bake lies over it. Each read leaves its stamp
+   * ({@link DrawnGroundView.lastRimStamp}).
    */
   rimHeightAtM(direction: Vec3): number | null;
   /**
    * The drawn ground's height above the datum at a body-fixed unit direction, m, the datum (0)
-   * where the instance over it draws unsurveyed ground; `null` where none lies over it.
+   * where the instance over it draws unsurveyed ground; `null` where none lies over it. Over an
+   * instance at rest (its own patch, no fade, no mix), its bake's own height there, CDLOD's morph
+   * left out, as the resident bakes' ground was read.
    */
   groundHeightAtM(direction: Vec3): number | null;
   /**
@@ -68,6 +73,32 @@ export interface DrawnGroundView {
    * τ pixels, as the resident bakes' own rim stood off the drawn ground before R10.T16.i.
    */
   readonly revision: number;
+  /**
+   * The stamp of the last {@link DrawnGroundView.rimHeightAtM}: the generation of the instance it
+   * read, which moves as that instance's record (its band aside) or its slot's bake changes, or as
+   * it leaves the drawn set; where it read none, the drawn set's own, which moves as an instance
+   * drawing an edge bake comes or goes, or the bakes' rim revision moves.
+   */
+  lastRimStamp(): number;
+  /** Whether a rim read under `stamp` would read the same now, by the same reasoning as above. */
+  rimStampStands(stamp: number): boolean;
+  /** What the last rim read read, for {@link DrawnGroundView.rimAgain}; `null` where it read none. */
+  lastRimToken(): unknown;
+  /**
+   * The rim at the place a read's token names, read again by its instance's holds and fades alone
+   * where only they changed; `undefined` where the place is to be read afresh.
+   */
+  rimAgain(token: unknown): number | undefined;
+}
+
+/** An instance drawing an edge bake, by its area, as the generations keep it. */
+interface Generation {
+  generation: number;
+  /** Its record's words, its band's two aside, as last seen. */
+  readonly words: Float64Array;
+  bake: ResidentBake;
+  /** The frame it was last drawn at. */
+  seen: number;
 }
 
 /** One drawn instance as the pass writes it, in the twin's terms. */
@@ -108,13 +139,27 @@ export class DrawnGround implements DrawnGroundView {
   /** The records the rim's and the ground's reads found last, which the next tries first; −1. */
   #lastRim = -1;
   #lastGround = -1;
-  /** The mixed own and morph heights of the three vertices {@link DrawnGround.#heightAt} reads. */
-  readonly #corners = new Float64Array(6);
+  /** What {@link DrawnGround.#heightAt} reads, as {@link RimRead.read} holds it. */
+  readonly #read = new Float64Array(READ_WORDS);
+  /** What the last rim read read, where its heights mixed with no other surface's. */
+  #lastRimRead: RimRead | null = null;
   /** A frame's records of instances drawing edge bakes, and the last frame's, for the revision. */
   #edge = new Float64Array(WORDS * 64);
   #previous = new Float64Array(0);
   #previousWords = -1;
   #revision = 0;
+  /** The instances drawing edge bakes, by their area's level and `patchIndex`. */
+  readonly #generations = new Map<number, Map<number, Generation>>();
+  /** Their generations this frame. */
+  readonly #live = new Set<number>();
+  #nextGeneration = 1;
+  /** Moves as an instance drawing an edge bake comes or goes, or the bakes' rim revision moves. */
+  #setRevision = 0;
+  #rimRevision = Number.NaN;
+  #frame = 0;
+  /** Each record's generation this frame, 0 for one drawing no edge bake. */
+  readonly #recordGenerations: number[] = [];
+  #lastRimStamp = 0;
   /** The instances by the area they draw: by level, finest first, then by `patchIndex`. */
   readonly #byLevel = new Map<number, Map<number, number>>();
   #levels: number[] = [];
@@ -190,19 +235,39 @@ export class DrawnGround implements DrawnGroundView {
     if (this.#edge.length < this.#records.length + 1) {
       this.#edge = new Float64Array(this.#records.length * 2);
     }
+    this.#frame += 1;
+    let membership = false;
     let words = 0;
     for (let record = 0; record < this.#count; record += 1) {
       const key = this.#keys[record];
       const bake = key === undefined ? null : this.#bakes.bakeAt(key);
       this.#slotBakes[record] = bake;
-      if (bake?.standing === "edge") {
+      this.#recordGenerations[record] = 0;
+      const area = this.#areas[record];
+      if (bake?.standing === "edge" && area !== undefined) {
         // Its morph band (words 7 and 8) left out: it slews a step at a time, and sets the morph
         // factor alone, as the camera does.
         const at = record * WORDS;
         this.#edge.set(this.#records.subarray(at, at + 7), words);
         this.#edge.set(this.#records.subarray(at + 9, at + WORDS), words + 7);
+        membership =
+          this.#generationOf(record, area, bake, this.#edge.subarray(words, words + WORDS - 2)) ||
+          membership;
         words += WORDS - 2;
       }
+    }
+    for (const level of this.#generations.values()) {
+      for (const [index, entry] of level) {
+        if (entry.seen !== this.#frame) {
+          this.#live.delete(entry.generation);
+          level.delete(index);
+          membership = true;
+        }
+      }
+    }
+    if (membership || this.#rimRevision !== this.#bakes.rimRevision) {
+      this.#setRevision += 1;
+      this.#rimRevision = this.#bakes.rimRevision;
     }
     this.#edge[words] = this.#bakes.rimRevision;
     words += 1;
@@ -222,7 +287,58 @@ export class DrawnGround implements DrawnGroundView {
 
   rimHeightAtM(direction: Vec3): number | null {
     const record = this.#find(direction, true);
-    return record < 0 ? null : this.#heightAt(record, direction);
+    if (record < 0) {
+      this.#lastRimStamp = -1 - this.#setRevision;
+      this.#lastRimRead = null;
+      return null;
+    }
+    this.#lastRimStamp = this.#recordGenerations[record] ?? 0;
+    return this.#heightAt(record, direction, true);
+  }
+
+  lastRimStamp(): number {
+    return this.#lastRimStamp;
+  }
+
+  rimStampStands(stamp: number): boolean {
+    return stamp < 0 ? stamp === -1 - this.#setRevision : this.#live.has(stamp);
+  }
+
+  /**
+   * Gives `record`, drawing `area` from an edge bake, its generation this frame: its area's last,
+   * where its words (`words`, its band's aside) and its slot's bake are as they were; a new one
+   * otherwise. Whether its area was not drawn the frame before.
+   */
+  #generationOf(record: number, area: PatchKey, bake: ResidentBake, words: Float64Array): boolean {
+    let level = this.#generations.get(area.level);
+    if (level === undefined) {
+      level = new Map();
+      this.#generations.set(area.level, level);
+    }
+    const index = patchIndex(area.face, area.i, area.j);
+    let entry = level.get(index);
+    const fresh = entry === undefined;
+    if (entry === undefined) {
+      entry = { generation: this.#nextGeneration, words: words.slice(), bake, seen: this.#frame };
+      this.#nextGeneration += 1;
+      level.set(index, entry);
+    } else {
+      let same = entry.bake === bake;
+      for (let k = 0; same && k < words.length; k += 1) {
+        same = entry.words[k] === words[k];
+      }
+      if (!same) {
+        this.#live.delete(entry.generation);
+        entry.generation = this.#nextGeneration;
+        this.#nextGeneration += 1;
+        entry.words.set(words);
+        entry.bake = bake;
+      }
+      entry.seen = this.#frame;
+    }
+    this.#live.add(entry.generation);
+    this.#recordGenerations[record] = entry.generation;
+    return fresh;
   }
 
   groundHeightAtM(direction: Vec3): number | null {
@@ -233,7 +349,50 @@ export class DrawnGround implements DrawnGroundView {
     }
     const x = this.#slotX(record, this.#foundX);
     const y = this.#slotY(record, this.#foundY);
-    return bake.surveyedAt(x, y) ? this.#heightAt(record, direction) : 0;
+    if (!bake.surveyedAt(x, y)) {
+      return 0;
+    }
+    // An instance at rest, drawing its own patch with no fade and no mix: its bake's own height,
+    // as the resident bakes' own ground was read before R10.T16.i, off the drawn ground by at most
+    // CDLOD's morph (its selection error), which a tick's line of sight is tested to a tolerance
+    // over; a line of sight reads the ground at every sample, so that this is the frame's cost.
+    const r = this.#records;
+    const at = record * WORDS;
+    const atRest =
+      r[at + 1] === r[at + 4] &&
+      (r[at + 11] ?? 0) === 0 &&
+      (r[at + 12] ?? 0) === 0 &&
+      (r[at + 13] ?? 0) === 0;
+    if (atRest) {
+      return bake.ownAtM(x, y);
+    }
+    // Off its boundary quads, with no mix, each vertex's factor is one, its fades' floor and the
+    // place's CDLOD factor, and a sub-patch's triangle lies in one of its slot's, so that the drawn
+    // ground there is its slot's on its triangle, mixed by that factor.
+    const qx = Math.floor(this.#foundX);
+    const qy = Math.floor(this.#foundY);
+    const fades = r[at + 13] ?? 0;
+    if (
+      ((fades >>> 8) & MIX_STEPS) === 0 &&
+      qx >= 1 &&
+      qx <= QUADS - 2 &&
+      qy >= 1 &&
+      qy <= QUADS - 2
+    ) {
+      const ownM = onTriangles(bake, 0, x, y);
+      const half = QUADS / 2;
+      const k = fadedMorph(
+        r[at + 10] ?? 0,
+        r[at + 11] ?? 0,
+        r[at + 12] ?? 0,
+        fades,
+        half,
+        half,
+        this.#cdlodAt(record, this.#placeDistanceOf(direction, ownM)),
+      );
+      return k === 0 ? ownM : ownM + (onTriangles(bake, 1, x, y) - ownM) * k;
+    }
+    return this.#heightAt(record, direction, false);
   }
 
   /**
@@ -299,12 +458,17 @@ export class DrawnGround implements DrawnGroundView {
   /**
    * The drawn height at `direction`, the place {@link DrawnGround.#find} left of `record`'s grid:
    * its triangle's vertices' heights, each `patchVertexOf`'s, mixed by the place's weights. CDLOD's
-   * factor is taken from the place's distance to the camera rather than each vertex's, which moves
-   * it by a quad's share of the morph band, a few hundredths at most, of a vertex's morph.
+   * factor is each vertex's, from its distance to the camera, where `perVertex` (the rim's reads)
+   * and a vertex may stand across the band's start or end from the place; otherwise the place's,
+   * which moves it by a quad's share of the morph band, a few hundredths at most, of a vertex's
+   * morph, where the band's clamp lies within the triangle (the ground's, for the ticks). A rim
+   * read leaves what it read in {@link DrawnGround.lastRimRead}, where its heights mix with no
+   * other surface's.
    */
-  #heightAt(record: number, direction: Vec3): number {
+  #heightAt(record: number, direction: Vec3, perVertex: boolean): number {
     const bake = this.#slotBakes[record];
-    if (bake === undefined || bake === null) {
+    const area = this.#areas[record];
+    if (bake === undefined || bake === null || area === undefined) {
       return 0;
     }
     const r = this.#records;
@@ -314,75 +478,144 @@ export class DrawnGround implements DrawnGroundView {
     const fx = this.#foundX - qx;
     const fy = this.#foundY - qy;
     const below = fx >= fy;
-    const w0 = 1 - Math.max(fx, fy);
-    const w1 = Math.abs(fx - fy);
-    const w2 = Math.min(fx, fy);
     const x1 = below ? qx + 1 : qx;
     const y1 = below ? qy : qy + 1;
-    const corners = this.#corners;
+    // The read: its weights, its vertices, their own and morph heights and their factors.
+    const d = this.#read;
+    d[0] = 1 - Math.max(fx, fy);
+    d[1] = Math.abs(fx - fy);
+    d[2] = Math.min(fx, fy);
+    d[3] = qx;
+    d[4] = qy;
+    d[5] = x1;
+    d[6] = y1;
+    d[7] = qx + 1;
+    d[8] = qy + 1;
+    const fades = r[at + 13] ?? 0;
+    // A vertex's heights mix towards another surface's only where its fade word's mix is not 0.
+    const mixes = ((fades >>> 8) & MIX_STEPS) !== 0;
+    for (let c = 0; c < 3; c += 1) {
+      const vx = d[3 + 2 * c] ?? 0;
+      const vy = d[4 + 2 * c] ?? 0;
+      if (mixes) {
+        this.#mixedHeights(record, bake, vx, vy, 9 + 2 * c);
+      } else {
+        d[9 + 2 * c] = this.#slotHeight(record, bake, 0, vx, vy);
+      }
+    }
+    const ownM = d[0] * (d[9] ?? 0) + d[1] * (d[11] ?? 0) + d[2] * (d[13] ?? 0);
+    const a = this.#figure.equatorialRadiusM;
+    const distanceM = this.#placeDistanceOf(direction, ownM);
+    const place = this.#cdlodAt(record, distanceM);
+    // Each vertex's own where it may stand across the band's start or end from the place, within a
+    // quad's diagonal of it (twice a quad of the face's arc at the area's level): elsewhere the
+    // factor is linear in the distance, which moves across the triangle by its curvature alone.
+    const quadM = (2 * Math.SQRT2 * a * (Math.PI / 2)) / (2 ** area.level * QUADS);
+    const near =
+      Math.abs(distanceM - (r[at + 7] ?? 0)) < quadM ||
+      Math.abs(distanceM - (r[at + 8] ?? 0)) < quadM;
+    for (let c = 0; c < 3; c += 1) {
+      d[15 + c] =
+        perVertex && near
+          ? this.#cdlodAt(
+              record,
+              this.#distanceOf(
+                surfacePoint(
+                  this.#figure,
+                  vertexDir(area, d[3 + 2 * c] ?? 0, d[4 + 2 * c] ?? 0),
+                  d[9 + 2 * c] ?? 0,
+                ),
+              ),
+            )
+          : place;
+    }
     const holds = r[at + 10] ?? 0;
     const edgeFades = r[at + 11] ?? 0;
     const cornerFades = r[at + 12] ?? 0;
-    const fades = r[at + 13] ?? 0;
-    // A vertex's heights mix towards another surface's only where its fade word's mix is not 0;
-    // otherwise its morph targets are read only where its morph factor needs them.
-    const mixes = ((fades >>> 8) & MIX_STEPS) !== 0;
-    if (mixes) {
-      this.#mixedHeights(record, bake, qx, qy, 0);
-      this.#mixedHeights(record, bake, x1, y1, 2);
-      this.#mixedHeights(record, bake, qx + 1, qy + 1, 4);
-    } else {
-      corners[0] = this.#slotHeight(record, bake, 0, qx, qy);
-      corners[2] = this.#slotHeight(record, bake, 0, x1, y1);
-      corners[4] = this.#slotHeight(record, bake, 0, qx + 1, qy + 1);
-    }
-    // CDLOD's morph factor from the place's distance, on its own surface, to the camera: the
-    // spheroid's point M·d plus the height along its normal (`surfacePoint`'s).
-    const ownM = w0 * (corners[0] ?? 0) + w1 * (corners[2] ?? 0) + w2 * (corners[4] ?? 0);
-    const a = this.#figure.equatorialRadiusM;
-    const cPolar = this.#figure.polarRadiusM;
-    const { x: dx, y: dy, z: dz } = direction;
-    const nx = dx / a;
-    const ny = dy / a;
-    const nz = dz / cPolar;
-    const along = ownM / Math.sqrt(nx * nx + ny * ny + nz * nz);
-    const px = a * dx + along * nx;
-    const py = a * dy + along * ny;
-    const pz = cPolar * dz + along * nz;
-    const [r0, r1, r2] = this.#rows;
-    const c = this.#cameraM;
-    const distanceM = Math.hypot(
-      r0.x * px + r0.y * py + r0.z * pz - c.x,
-      r1.x * px + r1.y * py + r1.z * pz - c.y,
-      r2.x * px + r2.y * py + r2.z * pz - c.z,
-    );
-    const startM = r[at + 7] ?? 0;
-    const spanM = (r[at + 8] ?? 0) - startM;
-    const cdlod = spanM > 0 ? Math.min(1, Math.max(0, (distanceM - startM) / spanM)) : 0;
-    const plain = holds === 0 && edgeFades === 0 && cornerFades === 0 && (fades & 0xff) === 0;
-    if (plain && cdlod === 0) {
-      return ownM;
-    }
     if (!mixes) {
-      corners[1] = this.#slotHeight(record, bake, 1, qx, qy);
-      corners[3] = this.#slotHeight(record, bake, 1, x1, y1);
-      corners[5] = this.#slotHeight(record, bake, 1, qx + 1, qy + 1);
+      // Its morph targets where its factor may need them: a rim read's for its reading again.
+      const plain = holds === 0 && edgeFades === 0 && cornerFades === 0 && (fades & 0xff) === 0;
+      const morphs = perVertex || !plain || d[15] !== 0 || d[16] !== 0 || d[17] !== 0;
+      for (let c = 0; c < 3; c += 1) {
+        d[10 + 2 * c] = morphs
+          ? this.#slotHeight(record, bake, 1, d[3 + 2 * c] ?? 0, d[4 + 2 * c] ?? 0)
+          : (d[9 + 2 * c] ?? 0);
+      }
     }
-    if (plain) {
-      // No hold or fade: every vertex's factor is CDLOD's (`fadedMorph`'s with none).
-      const morphM = w0 * (corners[1] ?? 0) + w1 * (corners[3] ?? 0) + w2 * (corners[5] ?? 0);
-      return ownM + (morphM - ownM) * cdlod;
+    if (perVertex) {
+      this.#lastRimRead = mixes ? null : new RimRead(area, bake, d.slice());
     }
-    const heightOf = (vx: number, vy: number, k: number): number => {
-      const own = corners[k] ?? 0;
-      const f = fadedMorph(holds, edgeFades, cornerFades, fades, vx, vy, cdlod);
-      return own + ((corners[k + 1] ?? 0) - own) * f;
-    };
-    return w0 * heightOf(qx, qy, 0) + w1 * heightOf(x1, y1, 2) + w2 * heightOf(qx + 1, qy + 1, 4);
+    return mixedHeight(holds, edgeFades, cornerFades, fades, d);
   }
 
   /**
-   * Leaves vertex (`vx`, `vy`) of `record`'s grid's own and morph heights in `#corners` at `k` and
+   * The rim at the place `token` read ({@link DrawnGround.lastRimRead}) by its instance's holds and
+   * fades now, its own and morph heights and factors as it read them: where its area is drawn from
+   * the same bake, and its heights still mix with no other surface's; otherwise `undefined`, where
+   * the place is to be read afresh. Leaves its stamp, and the read, as a read would.
+   */
+  rimAgain(token: unknown): number | undefined {
+    if (!(token instanceof RimRead)) {
+      return undefined;
+    }
+    const { area, bake, read } = token;
+    const record = this.#byLevel.get(area.level)?.get(patchIndex(area.face, area.i, area.j));
+    if (record === undefined || this.#slotBakes[record] !== bake) {
+      return undefined;
+    }
+    const r = this.#records;
+    const at = record * WORDS;
+    const fades = r[at + 13] ?? 0;
+    if (((fades >>> 8) & MIX_STEPS) !== 0) {
+      return undefined;
+    }
+    this.#lastRimStamp = this.#recordGenerations[record] ?? 0;
+    this.#lastRimRead = token;
+    return mixedHeight(r[at + 10] ?? 0, r[at + 11] ?? 0, r[at + 12] ?? 0, fades, read);
+  }
+
+  /** What the last rim read read, for its reading again ({@link DrawnGround.rimAgain}); `null`. */
+  lastRimToken(): unknown {
+    return this.#lastRimRead;
+  }
+
+  /**
+   * The distance to the camera of the ground `heightM` above the datum at the body-fixed unit
+   * `direction`: the spheroid's point M·d plus the height along its normal (`surfacePoint`'s).
+   */
+  #placeDistanceOf(direction: Vec3, heightM: number): number {
+    const a = this.#figure.equatorialRadiusM;
+    const c = this.#figure.polarRadiusM;
+    const { x, y, z } = direction;
+    const nx = x / a;
+    const ny = y / a;
+    const nz = z / c;
+    const along = heightM / Math.sqrt(nx * nx + ny * ny + nz * nz);
+    return this.#distanceOf([a * x + along * nx, a * y + along * ny, c * z + along * nz]);
+  }
+
+  /** The distance to the camera of the body-fixed point `p`, m from the body's centre. */
+  #distanceOf(p: readonly [number, number, number]): number {
+    const [r0, r1, r2] = this.#rows;
+    const c = this.#cameraM;
+    return Math.hypot(
+      r0.x * p[0] + r0.y * p[1] + r0.z * p[2] - c.x,
+      r1.x * p[0] + r1.y * p[1] + r1.z * p[2] - c.y,
+      r2.x * p[0] + r2.y * p[1] + r2.z * p[2] - c.z,
+    );
+  }
+
+  /** CDLOD's factor of `record`'s morph band at `distanceM` from the camera. */
+  #cdlodAt(record: number, distanceM: number): number {
+    const r = this.#records;
+    const at = record * WORDS;
+    const startM = r[at + 7] ?? 0;
+    const spanM = (r[at + 8] ?? 0) - startM;
+    return spanM > 0 ? Math.min(1, Math.max(0, (distanceM - startM) / spanM)) : 0;
+  }
+
+  /**
+   * Leaves vertex (`vx`, `vy`) of `record`'s grid's own and morph heights in `#read` at `k` and
    * `k` + 1, mixed by its fade word's mix towards the surface it names (`patchVertexOf`'s).
    */
   #mixedHeights(record: number, bake: ResidentBake, vx: number, vy: number, k: number): void {
@@ -409,8 +642,8 @@ export class DrawnGround implements DrawnGroundView {
       ownM += mix * (olderOwnM - ownM);
       morphM += mix * (olderMorphM - morphM);
     }
-    this.#corners[k] = ownM;
-    this.#corners[k + 1] = morphM;
+    this.#read[k] = ownM;
+    this.#read[k + 1] = morphM;
   }
 
   /** Vertex (`vx`, `vy`) of `record`'s grid's own height (`which` 0) or morph target (1). */
@@ -474,4 +707,57 @@ function onTriangles(bake: ResidentBake, which: 0 | 1, x: number, y: number): nu
     Math.abs(fx - fy) * read(below ? qx + 1 : qx, below ? qy : qy + 1) +
     Math.min(fx, fy) * read(qx + 1, qy + 1)
   );
+}
+
+/** The numbers of a read ({@link RimRead.read}). */
+const READ_WORDS = 18;
+
+/**
+ * What a rim read read at a place (plan R10, R10.T16.c after R10.T16.i), to read it again by its
+ * instance's holds and fades alone: its area, its slot's bake, and `read`: its triangle's weights
+ * (0 to 2), its vertices (3 to 8), their own and morph heights (9 to 14) and their factors (15 to
+ * 17).
+ */
+class RimRead {
+  readonly area: PatchKey;
+  readonly bake: ResidentBake;
+  readonly read: Float64Array;
+
+  constructor(area: PatchKey, bake: ResidentBake, read: Float64Array) {
+    this.area = area;
+    this.bake = bake;
+    this.read = read;
+  }
+}
+
+/**
+ * The height of a read `d` ({@link RimRead.read}) by an instance's holds and fades: each vertex's
+ * own and morph heights mixed by `fadedMorph` on its factor, then by the weights.
+ */
+function mixedHeight(
+  holds: number,
+  edgeFades: number,
+  cornerFades: number,
+  fades: number,
+  d: Float64Array,
+): number {
+  const plain = holds === 0 && edgeFades === 0 && cornerFades === 0 && (fades & 0xff) === 0;
+  let heightM = 0;
+  for (let c = 0; c < 3; c += 1) {
+    const own = d[9 + 2 * c] ?? 0;
+    const cdlod = d[15 + c] ?? 0;
+    const k = plain
+      ? cdlod
+      : fadedMorph(
+          holds,
+          edgeFades,
+          cornerFades,
+          fades,
+          d[3 + 2 * c] ?? 0,
+          d[4 + 2 * c] ?? 0,
+          cdlod,
+        );
+    heightM += (d[c] ?? 0) * (own + ((d[10 + 2 * c] ?? 0) - own) * k);
+  }
+  return heightM;
 }
