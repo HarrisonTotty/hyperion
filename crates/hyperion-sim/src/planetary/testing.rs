@@ -496,9 +496,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///
 /// The holds at 27:
 ///
-/// - a body's bulk iron with its solids' minor oxides and following its core,
-///   `MINOR_OXIDES_VERSION` (P14.T51.k), at `MinorOxidesRules::Chondritic` through
-///   `with_minor_oxides`: the mantle `FeO` and the secondary crust that read it.
 /// - the equilibrium network's further carriers, `CARRIERS_VERSION` (P14.T52.e), at
 ///   `CarriersRules::Carried` through `with_carriers`: the registry's rows from 115 on, which the
 ///   network carries, P and Cl solved.
@@ -592,7 +589,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
         EnvelopeBondRules, with_envelope_bond,
     };
     use crate::planetary::derive::rocky::{CoreShareRules, with_core_share};
-    use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
     use crate::planetary::hooks::resources::{ResourceRatiosRules, with_resource_ratios};
     use crate::planetary::moons::eccentricity::{
         EccentricityDampingRules, with_eccentricity_damping,
@@ -641,7 +637,7 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
         use hyperion_surface::material::{SteepnessTailsRules, with_steepness_tails};
         with_steepness_tails(SteepnessTailsRules::Marcum, run)
     };
-    with_minor_oxides(MinorOxidesRules::Chondritic, run)
+    run()
 }
 
 /// `run`'s result with every landed hold at generator version 28 in force on this thread, those

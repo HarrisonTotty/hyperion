@@ -361,58 +361,23 @@ fn mars_has_an_iron_rich_basalt_lid_over_a_buried_ultramafic_crust() {
     assert_eq!(crust.redox(), RedoxClass::Intermediate);
 }
 
-/// Below 27, an Earth's and a Mars's mass balance put their mantles either side of the iron-rich
-/// edge: an Earth's 7.3 wt% beside the bulk silicate Earth's 8.05, and a Mars's 22.8 wt% beside
-/// Dreibus and Wänke's 17.9 and Khan et al.'s (2022) 13.7 (plan 14's record of P14.T51.c).
+/// An Earth's and a Mars's mass balance put their mantles either side of the iron-rich edge, with
+/// the solids' minor oxides and the bulk iron following the core (P14.T51.k): an Earth's at the
+/// bulk silicate Earth's 8.05 wt%, and a Mars's between Khan et al.'s (2022) 13.7 and Dreibus and
+/// Wänke's 17.9.
 #[test]
 fn an_earth_s_mass_balance_gives_basalt_and_a_mars_s_iron_rich_basalt() {
-    with_minor_oxides(MinorOxidesRules::Held, || {
-        let solar = solar_magnesium_to_silicon();
-        let earth = mantle_iron_oxide_mass_fraction(0.325, solar, Dex::new(0.0));
-        let mars = mantle_iron_oxide_mass_fraction(0.204, solar, Dex::new(0.0));
-        assert!((0.06..0.09).contains(&earth), "{earth}");
-        assert!((0.17..0.24).contains(&mars), "{mars}");
-        assert!(earth < IRON_RICH_MANTLE_FEO && mars > IRON_RICH_MANTLE_FEO);
-        // The edge is the two measured mantles' geometric mean.
-        assert!((IRON_RICH_MANTLE_FEO - (0.080_5_f64 * 0.179).sqrt()).abs() < 1e-4);
-        // The bulk iron at the Sun's ratios is the bulk Earth's 32 wt%, within a few per cent.
-        let bulk = bulk_iron_mass_fraction(solar, Dex::new(0.0));
-        assert!((0.30..0.33).contains(&bulk), "{bulk}");
-    });
-}
-
-/// P14.T51.k is held until the 26 → 27 bump: the rules in force are the three solids', the tests'
-/// switch and 27's helper reach the minor oxides, and 26's helper does not.
-#[test]
-fn the_minor_oxides_are_held_only_until_the_27_bump() {
-    use crate::planetary::testing::with_every_27_hold;
-    assert!(
-        GENERATOR_VERSION < MINOR_OXIDES_VERSION,
-        "the 26 → 27 bump puts P14.T51.k's minor oxides and its core's factor in a body's bulk \
-         iron: delete `MINOR_OXIDES_VERSION`, `MinorOxidesRules` with its `Held` arm, its matches \
-         in `bulk_iron_mass_fraction` and `mantle_iron_oxide_mass_fraction`, \
-         `bulk_iron_of_three_solids`, the tests' `with_minor_oxides`, its switch in \
-         `with_every_27_hold` (and the helper, if no other 27 hold is left), and this test; \
-         restate `an_earth_s_mass_balance_gives_basalt_and_a_mars_s_iron_rich_basalt` and the \
-         generated Venus's held half, and re-bless the movers plan 14's record of P14.T51.k lists"
-    );
-    assert_eq!(MinorOxidesRules::in_force(), MinorOxidesRules::Held);
-    assert_eq!(
-        with_minor_oxides(MinorOxidesRules::Chondritic, MinorOxidesRules::in_force),
-        MinorOxidesRules::Chondritic
-    );
-    assert_eq!(
-        with_every_27_hold(MinorOxidesRules::in_force),
-        MinorOxidesRules::Chondritic
-    );
-    assert_eq!(MinorOxidesRules::in_force(), MinorOxidesRules::Held);
-    assert_eq!(
-        with_every_27_hold(|| {
-            with_minor_oxides(MinorOxidesRules::Held, MinorOxidesRules::in_force)
-        }),
-        MinorOxidesRules::Held
-    );
-    assert_eq!(MinorOxidesRules::in_force(), MinorOxidesRules::Held);
+    let solar = solar_magnesium_to_silicon();
+    let earth = mantle_iron_oxide_mass_fraction(0.325, solar, Dex::new(0.0));
+    let mars = mantle_iron_oxide_mass_fraction(0.204, solar, Dex::new(0.0));
+    assert!((0.070_5..=0.090_5).contains(&earth), "{earth}");
+    assert!((0.137..=0.179).contains(&mars), "{mars}");
+    assert!(earth < IRON_RICH_MANTLE_FEO && mars > IRON_RICH_MANTLE_FEO);
+    // The edge is the two measured mantles' geometric mean.
+    assert!((IRON_RICH_MANTLE_FEO - (0.080_5_f64 * 0.179).sqrt()).abs() < 1e-4);
+    // The bulk iron at the Sun's ratios is P14.T51.k's 26.8 wt%, the ruling's about 28.
+    let bulk = bulk_iron_mass_fraction(solar, Dex::new(0.0));
+    assert!((0.26..0.28).contains(&bulk), "{bulk}");
 }
 
 /// Under every 27 hold the solids carry their minor oxides and a body's bulk iron follows its core
@@ -436,18 +401,9 @@ fn under_27_an_earth_s_and_a_mars_s_mantles_lie_inside_their_measures() {
         assert!(mars_feo > IRON_RICH_MANTLE_FEO);
         let venus_feo = feo(0.30);
         assert!(venus_feo < IRON_RICH_MANTLE_FEO, "{venus_feo}");
-        // The held arm's iron is the same atoms over fewer solids.
-        let held = with_minor_oxides(MinorOxidesRules::Held, || {
-            bulk_iron_mass_fraction(solar, Dex::new(0.0))
-        });
-        assert!(bulk < held, "{bulk} against {held}");
-        // An α-rich host's solids hold less iron, by both arms.
+        // An α-rich host's solids hold less iron.
         let alpha_rich = bulk_iron_mass_fraction(solar, Dex::new(0.3));
         assert!(alpha_rich < bulk, "{alpha_rich}");
-        let held_alpha_rich = with_minor_oxides(MinorOxidesRules::Held, || {
-            bulk_iron_mass_fraction(solar, Dex::new(0.3))
-        });
-        assert!(held_alpha_rich < held, "{held_alpha_rich} against {held}");
         let surface = table_conditions("Earth");
         let crust = CrustComposition::derive(&earth(&surface)).unwrap();
         assert_eq!(key(crust.secondary()), "basalt");
@@ -541,26 +497,13 @@ fn under_27_the_generated_mars_keeps_its_iron_rich_basalt() {
 }
 
 /// The Solar System table's generated Venus (its derived core, 0.288 of its solids, below
-/// Venus's fixture's 0.30) takes `basalt_fe` below 27, its mantle at 12.5 wt% `FeO` just above
-/// the edge, and `basalt` under every 27 hold, at 6–12 wt%, below the edge as Venera's 7.7–9.3
-/// wt% basalts favour (decision-pre-23-review §8).
+/// Venus's fixture's 0.30) takes `basalt` under every 27 hold, its mantle at 6–12 wt% `FeO`,
+/// below the edge as Venera's 7.7–9.3 wt% basalts favour (decision-pre-23-review §8).
 #[test]
 fn the_generated_venus_takes_basalt_under_27() {
     use crate::planetary::derive::solar::historic;
     use crate::planetary::testing::with_every_27_hold;
-    let fractions = historic("Venus").fractions();
-    let core = core_share(&fractions);
-    assert!((0.285..0.292).contains(&core), "{core}");
-    let surface = table_conditions("Venus");
-    let generated = CrustCompositionInputs {
-        fractions,
-        ..venus(&surface)
-    };
     let solar = solar_magnesium_to_silicon();
-    let held = mantle_iron_oxide_mass_fraction(core, solar, Dex::new(0.0));
-    assert!((IRON_RICH_MANTLE_FEO..0.13).contains(&held), "{held}");
-    let crust = CrustComposition::derive(&generated).unwrap();
-    assert_eq!(key(crust.secondary()), "basalt_fe");
     // Generated afresh under the rules in force, as `with_every_27_hold` asks.
     with_every_27_hold(|| {
         let fractions = historic("Venus").fractions();
@@ -579,32 +522,6 @@ fn the_generated_venus_takes_basalt_under_27() {
             ["ultramafic", "basalt", "none", "none", "basalt"]
         );
     });
-}
-
-/// The minor oxides move no body's core: the Solar System table's mass fractions are the same to
-/// the bit under every 27 hold with and without them.
-#[test]
-fn the_minor_oxides_move_no_core_fraction() {
-    use crate::planetary::derive::solar::historic_table;
-    use crate::planetary::testing::with_every_27_hold;
-    let table = |rules| with_every_27_hold(|| with_minor_oxides(rules, historic_table));
-    let (held, chondritic) = (
-        table(MinorOxidesRules::Held),
-        table(MinorOxidesRules::Chondritic),
-    );
-    assert_eq!(held.len(), chondritic.len());
-    for ((name, a), (other, b)) in held.iter().zip(&chondritic) {
-        assert_eq!(name, other);
-        let (a, b) = (a.fractions(), b.fractions());
-        for (x, y) in [
-            (a.iron(), b.iron()),
-            (a.rock(), b.rock()),
-            (a.water(), b.water()),
-            (a.envelope(), b.envelope()),
-        ] {
-            assert_same_bits(x, y);
-        }
-    }
 }
 
 /// The share of a thousand rocky draws inside the snow line, at ranks 0.0005–0.9995 of the

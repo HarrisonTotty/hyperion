@@ -75,8 +75,8 @@ fn logistic(y: f64) -> f64 {
 }
 
 /// The generator version from which a rocky body's core share answers to its host's iron: 27,
-/// the version of P14.T51.k's bulk iron (`MINOR_OXIDES_VERSION`), whose mantles it keeps from
-/// clamping to no `FeO` about α-rich hosts.
+/// the version of P14.T51.k's bulk iron, whose mantles it keeps from clamping to no `FeO` about
+/// α-rich hosts.
 ///
 /// Below it [`CoreShareRules::in_force`] is [`CoreShareRules::Population`]: every host's shift is
 /// [`CoreShareShift::NONE`], so a rocky body's core share is drawn from Plotnykov and Valencia's

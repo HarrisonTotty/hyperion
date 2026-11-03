@@ -34,7 +34,6 @@ use crate::planetary::derive::photometry::area_mix::{
 use crate::planetary::derive::photometry::envelope_bond::{EnvelopeBondRules, with_envelope_bond};
 use crate::planetary::derive::rocky::{CoreShareRules, with_core_share};
 use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
-use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
 use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
 use crate::planetary::hooks::resources::{ResourceRatiosRules, with_resource_ratios};
 use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
@@ -119,7 +118,6 @@ held_rules! {
     envelope_bond: EnvelopeBondRules = EnvelopeBondRules::in_force => with_envelope_bond,
     desert: DesertRules = DesertRules::in_force => with_desert,
     steepness_tails: SteepnessTailsRules = steepness_tails_in_force => with_steepness_tails,
-    minor_oxides: MinorOxidesRules = MinorOxidesRules::in_force => with_minor_oxides,
     steam_division: SteamDivisionRules =
         SteamDivisionRules::in_force => with_steam_division,
     binary_host_light: BinaryHostLightRules =
