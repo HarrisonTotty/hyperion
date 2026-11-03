@@ -211,10 +211,9 @@ impl Pick {
 }
 
 /// Whether the field holds the system `record` that the budget's pick placed (plan 09, P09.T2.c):
-/// always under the held arm of P09.T2.c's hold (`FIELD_SHARE_VERSION`), where the field is the
-/// budget.
+/// always for the tests' budget (`FieldShareRules`), where the field is the budget.
 ///
-/// From version 26 the field keeps a share `f` of its component's systems of the band at the
+/// The field keeps a share `f` of its component's systems of the band at the
 /// record's age ([`FieldShare::keeps`](crate::galaxy::field_share::FieldShare::keeps)): the lowest
 /// `f` of the component's slice of the acceptance mark, so the mark, uniform inside the slice
 /// once it picked the component, keeps the candidate with probability `f` and nothing else. The
@@ -724,6 +723,19 @@ mod tests {
             .expect("the Milky Way fixture's gas is mostly neutral")
     }
 
+    /// The fixture's budget, without the field share, which gives most of the young stars to their
+    /// features, and without the carve-out, which would take the records with a site from the
+    /// grid: the field as plan 03 places it, which the draws below re-derive.
+    fn budget() -> Galaxy {
+        let rules = crate::galaxy::rules::GalaxyRules {
+            field_share: crate::galaxy::ages::FieldShareRules::None,
+            carve_out: crate::galaxy::displaced::site::CarveOutRules::Unclaimed,
+            ..crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION)
+        };
+        Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
+            .expect("the Milky Way fixture's gas is mostly neutral")
+    }
+
     /// The Sun-like point: in the plane, 26,000 ly out on the +y axis, clear of the bar.
     fn sunlike() -> GalacticPosition {
         GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap()
@@ -1160,11 +1172,11 @@ mod tests {
     /// P08.T13 and P08.T13.b: the seam half ([`walk_the_seam`]) reaches the exact tier; and over
     /// the same cells, through the whole-cell walk and through `resolve`, the production hook gives
     /// one verdict of the interval predicate per accepted layer-E candidate once a claim is set,
-    /// placed or claimed, and none under the carve-out's held arm (`recent_death_claim`), even in
-    /// the cells where the seam reached the exact tier.
+    /// placed or claimed, and none without one (`recent_death_claim`), even in the cells where the
+    /// seam reached the exact tier. It walks the budget ([`budget`]), whose grid has no claim.
     #[test]
     fn hook_asks_for_a_site_once_per_accepted_layer_e_candidate() {
-        let galaxy = galaxy();
+        let galaxy = budget();
         let (cells, seam) = walk_the_seam(&galaxy);
         let sum = |tier: fn(&Verdicts) -> u64| seam.iter().map(|(_, v)| tier(v)).sum::<u64>();
         let seam_verdicts = Verdicts {
@@ -1248,7 +1260,7 @@ mod tests {
     /// here by name and not only as a golden diff.
     #[test]
     fn outcome_follows_the_plans_streams_word_for_word() {
-        let galaxy = galaxy();
+        let galaxy = budget();
         let seed = galaxy.seed();
         let (fields, shares) = (galaxy.fields(), galaxy.shares());
         // The Sun, the bulge, the bar's end, an arm ridge and well off the plane: places where

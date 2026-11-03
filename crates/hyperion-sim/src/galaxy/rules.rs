@@ -14,9 +14,6 @@
 //!
 //! The holds, each a field:
 //!
-//! - [`field_share`](GalaxyRules::field_share), at [`FIELD_SHARE_VERSION`] (plan 09, P09.T2.c):
-//!   the field gives up the features' share φ of its systems. It is read where the galaxy is built,
-//!   which installs the field's factors, so `Galaxy::with_rules` refuses to change it.
 //! - [`carve_out`](GalaxyRules::carve_out), at [`CARVE_OUT_VERSION`] (plan 09, P09.T35): the grid
 //!   gives the core-collapse and luminous blue variables' classes their hosts, and layer D gives
 //!   up its ancient Type Ia. It is read where the galaxy is built, which installs layer D's
@@ -43,7 +40,7 @@
 //! inside [`StellarRules`].
 
 use crate::GeneratorVersion;
-use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules};
+use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::catalogue_classes::binary::{MERGER_CLASS_VERSION, MergerClassRules};
 use crate::galaxy::displaced::site::{CARVE_OUT_VERSION, CarveOutRules};
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
@@ -54,7 +51,10 @@ use crate::stellar::rules::StellarRules;
 /// (decision-galaxy-25-train §1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct GalaxyRules {
-    /// Whether the field gives up the features' share φ of its systems (P09.T2.c).
+    /// Whether the field gives up the features' share φ of its systems (P09.T2.c): every
+    /// version's field does, and only the tests' budget ([`FieldShareRules`]) does not. It is read
+    /// where the galaxy is built, which installs the field's factors, so `Galaxy::with_rules`
+    /// refuses to change it.
     pub(crate) field_share: FieldShareRules,
     /// Whether the grid gives the catalogue classes their hosts (P09.T35).
     pub(crate) carve_out: CarveOutRules,
@@ -76,11 +76,7 @@ impl GalaxyRules {
     #[must_use]
     pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
         Self {
-            field_share: if version.get() >= FIELD_SHARE_VERSION.get() {
-                FieldShareRules::Phi
-            } else {
-                FieldShareRules::None
-            },
+            field_share: FieldShareRules::Phi,
             carve_out: if version.get() >= CARVE_OUT_VERSION.get() {
                 CarveOutRules::Claimed
             } else {
@@ -115,19 +111,19 @@ impl GalaxyRules {
     #[must_use]
     pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
         Self {
-            field_share: FieldShareRules::Phi,
             carve_out: CarveOutRules::Claimed,
             feature_classes: FeatureClassesRules::Listed,
             merger_class: MergerClassRules::Channels,
             displaced: DisplacedRules::Displaced,
             stellar: StellarRules::every_26_hold_with_its_retargets(),
+            ..Self::of_version(crate::GENERATOR_VERSION)
         }
     }
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
-    /// version's rules with the galaxy's holds retargeted from 26 (`field_share`, P09.T2.c,
-    /// `carve_out`, P09.T35, `feature_classes`, P09.T36, `merger_class`, P11.T8.c–d, and
-    /// `displaced`, P08.T12); the stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
+    /// version's rules with the galaxy's holds retargeted from 26 (`carve_out`, P09.T35,
+    /// `feature_classes`, P09.T36, `merger_class`, P11.T8.c–d, and `displaced`, P08.T12); the
+    /// stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -238,19 +234,6 @@ mod tests {
     /// 27 hold.
     #[test]
     fn each_retargeted_hold_turns_on_at_27() {
-        let field = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).field_share;
-        for v in [23, 24, 25, 26] {
-            assert_eq!(field(v), FieldShareRules::None, "{v}");
-        }
-        assert_eq!(field(27), FieldShareRules::Phi);
-        assert_eq!(
-            GalaxyRules::of_version(GENERATOR_VERSION).field_share,
-            FieldShareRules::None
-        );
-        assert_eq!(
-            GalaxyRules::every_27_hold().field_share,
-            FieldShareRules::Phi
-        );
         let carve = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).carve_out;
         for v in [23, 24, 25, 26] {
             assert_eq!(carve(v), CarveOutRules::Unclaimed, "{v}");

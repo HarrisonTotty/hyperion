@@ -512,6 +512,7 @@ impl Galaxy {
         // from the shares (plan 10, P10.T3.d.b).
         feature_shares.set_halo_discrete(discrete_share(seed, &params, &potential));
         let field_share = match rules.field_share {
+            #[cfg(test)]
             FieldShareRules::None => None,
             FieldShareRules::Phi => {
                 Some(Box::new(FieldShare::new(&params, &fields, &feature_shares)))

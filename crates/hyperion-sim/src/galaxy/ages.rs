@@ -20,7 +20,6 @@ use std::fmt;
 
 use super::consts::{YEARS_PER_GIGAYEAR, YEARS_PER_MEGAYEAR};
 use super::features::shares::YoungFieldShare;
-use crate::GeneratorVersion;
 use crate::math;
 use crate::rng::Stream;
 use crate::time::CLOCK_WINDOW_H;
@@ -155,7 +154,7 @@ impl SubDisc {
 ///
 /// The young disc's constructor takes it, so that plan 09 changed no caller: the galaxy's density
 /// fields, its budget, take [`FeatureShare::None`], and the field placement thins to from
-/// generator version 27 takes [`FeatureShare::Phi`] (plan 09, P09.T2.c; `FIELD_SHARE_VERSION`).
+/// generator version 27 takes [`FeatureShare::Phi`] (plan 09, P09.T2.c; [`FieldShareRules`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FeatureShare {
     /// φ = 0 at every age: every young star is a field star.
@@ -166,32 +165,23 @@ pub enum FeatureShare {
     Phi,
 }
 
-/// The generator version from which the field gives up to the features the share φ of its
-/// systems that sit in them (plan 09, P09.T2.c; the hold of [`FieldShareRules`]).
+/// Whether the field gives up to the features the share φ of its systems that sit in them (plan
+/// 09, P09.T2.c, on the record from generator version 27).
 ///
-/// From it placement's thinning keeps of each component's budget in each band only the field's
-/// share, `FeatureShares::field_factor` (for a sub-disc of the old thin disc its own φ), and for
-/// the young disc `1 − φ(age)` at the system's age, so the young field's ages are the budget's
-/// times `1 − φ`, renormalised ([`FeatureShare::Phi`]). The catalogue classes of the field's
-/// deaths, the expected counts and the class table's stay shares read the same field. The density
-/// fields stay the budget, and so does everything else they feed: the gas, the substellar
-/// abundance, the kinematics, the feature catalogue, the map and the mean masses.
-///
-/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`FieldShareRules::None`], the code of version 25 verbatim, so every generated value keeps its
-/// bits; the tests reach the new arm through a galaxy built under `GalaxyRules::every_27_hold()`.
-/// It rides 27 with rendering plan R06's R06.T16.a, which takes the features' members into the
-/// sky. The bump to 27 deletes this hold, [`FieldShareRules`] with its `None` arm, the galaxy's
-/// `field_share` field and its tripwire (`the_field_share_is_held_only_until_the_27_bump`).
-pub(crate) const FIELD_SHARE_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether the field gives up the features' share of its systems (the hold of
-/// [`FIELD_SHARE_VERSION`]).
+/// Placement's thinning keeps of each component's budget in each band only the field's share,
+/// `FeatureShares::field_factor` (for a sub-disc of the old thin disc its own φ), and for the young
+/// disc `1 − φ(age)` at the system's age, so the young field's ages are the budget's times `1 − φ`,
+/// renormalised ([`FeatureShare::Phi`]). The catalogue classes of the field's deaths, the expected
+/// counts and the class table's stay shares read the same field. The density fields stay the
+/// budget, and so does everything else they feed: the gas, the substellar abundance, the
+/// kinematics, the feature catalogue, the map and the mean masses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum FieldShareRules {
-    /// Version 25's and before: φ = 0, and the field holds every population's whole budget.
+    /// The budget, which no version takes: φ = 0, and the field holds every population's whole
+    /// budget. The tests' reference for the field (P09.T2.c's and P09.T38's budget tests).
+    #[cfg(test)]
     None,
-    /// Version 26's: the field keeps each component's field factor of its budget, and the young
+    /// Every version's: the field keeps each component's field factor of its budget, and the young
     /// disc `1 − φ(age)` at each age (P09.T2.c).
     Phi,
 }

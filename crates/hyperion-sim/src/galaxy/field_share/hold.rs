@@ -1,13 +1,13 @@
-//! The tests of P09.T2.c's hold, [`FIELD_SHARE_VERSION`] (decision-galaxy-25-train §1.5 and
-//! §1.6): its tripwire; the version's rules (D3); under every 26 hold but plan 08's displaced
-//! classes, the field's factors and its young ages against `1 − φ`, the budget's map and fields
+//! The tests of P09.T2.c's field share, on the record from generator version 27, against the
+//! budget the tests build without it ([`FieldShareRules::None`]; decision-galaxy-25-train §1.5 and
+//! §1.6): the version's rules (D3); under every 26 hold but plan 08's displaced classes, the
+//! field's factors and its young ages against `1 − φ`, the budget's map and fields
 //! bit for bit, the field's records a subset of the budget's with only counts moving (D2, pinned
 //! for the WebAssembly suite, D5), the same seed twice (D4), the expected counts, the catalogue
 //! classes' and the class table's field, and the census C1.
 //!
 //! The bit-identity of the version in force is held by the goldens, the young field's pre-pin
-//! (`placement/young_field`, D1) among them. The bump to 26 deletes the tripwire and the held arm,
-//! and these become tests of the version's own galaxy.
+//! (`placement/young_field`, D1) among them.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -19,11 +19,12 @@ use hyperion_testkit::stats::{ALPHA, assert_p_value, assert_poisson_count, chi_s
 use super::*;
 use crate::GENERATOR_VERSION;
 use crate::coords::GalacticPosition;
-use crate::galaxy::ages::{FIELD_SHARE_VERSION, FieldShareRules, YOUNG_AGE_LIMIT};
+use crate::galaxy::ages::{FieldShareRules, YOUNG_AGE_LIMIT};
 use crate::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
 use crate::galaxy::catalogue_classes::lbv::LbvProcess;
 use crate::galaxy::catalogue_classes::type_ia::TypeIaProcess;
 use crate::galaxy::displaced::hold::field_only_rules;
+use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::features::shares::phi_young;
 use crate::galaxy::map::{MapSelection, MapSpec, MapView, render_rows};
 use crate::galaxy::placement::{
@@ -40,12 +41,21 @@ use crate::units::LightYears;
 /// The seed of the hold's Milky Way fixture.
 const SEED: u64 = 0x0902_2c00_0000_0001;
 
-/// The fixture under the generator version's rules: the held arm, whose field is the budget.
+/// The fixture's budget: [`field`]'s rules with no field share and no carve-out, whose field is
+/// the budget.
 fn held() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
-        Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
-            .expect("the Milky Way fixture builds")
+        Galaxy::from_params_with_rules(
+            Seed::new(SEED),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules {
+                field_share: FieldShareRules::None,
+                carve_out: CarveOutRules::Unclaimed,
+                ..field_only_rules()
+            },
+        )
+        .expect("the Milky Way fixture builds")
     })
 }
 
@@ -121,34 +131,9 @@ fn cell(galaxy: &Galaxy, key: CellKey) -> Vec<SystemRecord> {
     records
 }
 
-/// P09.T2.c is held until the 26 → 27 bump: the rules in force are version 26's and before,
-/// under which the field is every population's whole budget.
-#[test]
-fn the_field_share_is_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < FIELD_SHARE_VERSION,
-        "the 26 → 27 bump puts P09.T2.c on the record, with rendering plan R06's R06.T16.a: the \
-         field gives up the features' share φ (placement's thinning, the expected counts, the \
-         core-collapse and Type Ia classes and the class table's stay shares read the field). \
-         Delete `FIELD_SHARE_VERSION`, `FieldShareRules` with its `None` arm, \
-         `GalaxyRules::field_share`, the `match` in `Galaxy::build`, `Galaxy::with_rules`' \
-         refusal and this test, in the bump's own checkpoint commit, blessed at 25 (§1.6, C2)"
-    );
-    assert_eq!(held().rules().field_share, FieldShareRules::None);
-    assert!(held().field_share().is_none());
-    assert_eq!(
-        GalaxyRules::of_version(GENERATOR_VERSION).field_share,
-        FieldShareRules::None
-    );
-    assert_eq!(
-        GalaxyRules::every_27_hold().field_share,
-        FieldShareRules::Phi
-    );
-}
-
-/// D3: a galaxy built the usual way carries the version's field share, none; one built under the
-/// version's rules explicitly is the same galaxy; under every 26 hold it holds the field share,
-/// and the other builders keep it.
+/// D3: a galaxy built the usual way carries the version's field share; one built under the
+/// version's rules explicitly is the same galaxy; the budget holds none; under every 26 hold it
+/// holds the field share, and the other builders keep it.
 #[test]
 fn a_galaxy_carries_the_version_s_field_share() {
     let explicit = Galaxy::from_params_with_rules(
@@ -157,8 +142,12 @@ fn a_galaxy_carries_the_version_s_field_share() {
         GalaxyRules::of_version(GENERATOR_VERSION),
     )
     .expect("the Milky Way fixture builds");
-    assert_eq!(&explicit, held());
-    assert!(explicit.field_share().is_none());
+    let built =
+        Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like()).expect("it builds");
+    assert_eq!(explicit, built);
+    assert!(explicit.field_share().is_some());
+    assert_eq!(held().rules().field_share, FieldShareRules::None);
+    assert!(held().field_share().is_none());
     assert_ne!(field(), held());
     assert_eq!(field().rules(), field_only_rules());
     let substellar = field()

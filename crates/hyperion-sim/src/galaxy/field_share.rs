@@ -1,12 +1,12 @@
-//! The field's share of each component's budget (plan 09, P09.T2.c), from generator version 27
-//! ([`FIELD_SHARE_VERSION`]).
+//! The field's share of each component's budget (plan 09, P09.T2.c), on the record from generator
+//! version 27.
 //!
 //! The density fields are each population's budget: everything born in it, the features' members
 //! included (brainstorm, "Large features"). The field is what is left once the features take their
 //! share φ, and the carved binary classes theirs: [`FeatureShares::component_field_factor`] of each
 //! component in each band, and for the young disc `1 − φ(age)` at each age, on
 //! [`YoungFieldShare`]'s panels. A [`FieldShare`] holds those factors and the young field's ages;
-//! the galaxy builds one under the hold's new arm and none under the held arm, the one `match` on
+//! the galaxy builds one, and none for the tests' budget ([`FieldShareRules`]), the one `match` on
 //! the rules, and its readers go through the galaxy's accessors below, which give the budget's
 //! values, bit for bit, where it holds none.
 //!
@@ -40,7 +40,7 @@ use super::Galaxy;
 use super::Population;
 use super::ages::AgeDistribution;
 #[cfg(doc)]
-use super::ages::FIELD_SHARE_VERSION;
+use super::ages::FieldShareRules;
 use super::catalogue_classes::type_ia::DelayTimeDistribution;
 use super::features::shares::{FeatureShares, YoungFieldShare};
 use super::fields::{ComponentId, Fields};
@@ -154,16 +154,16 @@ impl FieldShare {
 }
 
 impl Galaxy {
-    /// The field's share of each component's budget, from generator version 27
-    /// ([`FIELD_SHARE_VERSION`]); `None` under the held arm, where the field is the budget.
+    /// The field's share of each component's budget (P09.T2.c); `None` for the tests' budget
+    /// ([`FieldShareRules`]), where the field is the budget.
     #[must_use]
     pub(crate) fn field_share(&self) -> Option<&FieldShare> {
         self.field_share.as_deref()
     }
 
-    /// The field's ages of component `id`: its budget's, [`Component::ages`], under the held arm
-    /// and for every component but the young disc; the young field's, `1 − φ(age)` times the
-    /// budget's renormalised, from version 27. The ages placed systems are drawn from, once the
+    /// The field's ages of component `id`: its budget's, [`Component::ages`], for the tests'
+    /// budget and for every component but the young disc; the young field's, `1 − φ(age)` times
+    /// the budget's renormalised. The ages placed systems are drawn from, once the
     /// thinning has kept them.
     ///
     /// [`Component::ages`]: super::fields::Component::ages
@@ -179,12 +179,12 @@ impl Galaxy {
         }
     }
 
-    /// `value`, a quantity of component `id`'s budget in `band`, as the field's: itself under the
-    /// held arm, times the field's [`factor`](FieldShare::factor) from version 27.
+    /// `value`, a quantity of component `id`'s budget in `band`, as the field's: times the field's
+    /// [`factor`](FieldShare::factor), and itself for the tests' budget.
     ///
     /// # Panics
     ///
-    /// From version 27, if `id` is not one of the galaxy's components.
+    /// If `id` is not one of the galaxy's components.
     #[must_use]
     pub(crate) fn field_part(&self, id: ComponentId, band: MassBand, value: f64) -> f64 {
         match self.field_share() {
@@ -194,8 +194,8 @@ impl Galaxy {
     }
 
     /// The field's share of component `id`'s systems in `band`: the share matrix's
-    /// [`component_share`](super::shares::ShareMatrix::component_share), taken to the field from
-    /// version 27 (P09.T2.c), and in layer D from version 27 times what the field keeps of it, 1
+    /// [`component_share`](super::shares::ShareMatrix::component_share), taken to the field
+    /// (P09.T2.c), and in layer D from version 27 times what the field keeps of it, 1
     /// less its population's ancient Type Ia (P09.T35). A layer's placed density is the sum of this
     /// times each component's density.
     ///
