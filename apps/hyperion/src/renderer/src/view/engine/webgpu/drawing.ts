@@ -782,7 +782,7 @@ function optionalTimestamps(writes: GPURenderPassTimestampWrites | undefined): {
  * serializes to the GPU process and Dawn encodes. The `Draw` group is set for every draw, since its
  * dynamic offset is the draw's own slot.
  */
-export class BoundState {
+class BoundState {
   #pipeline: GPURenderPipeline | null = null;
   #resources: GPUBindGroup | null = null;
   readonly #vertexBuffers: Array<GPUBuffer | undefined> = [];

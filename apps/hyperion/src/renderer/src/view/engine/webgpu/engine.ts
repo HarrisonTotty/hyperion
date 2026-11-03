@@ -977,6 +977,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     }
     this.#depthLayers.clear();
     this.#drawing.dispose();
+    this.#dispatchObjects.forgetBindGroups();
     this.#timer.dispose();
     this.#resources.dispose();
     this.#kernels.clear();

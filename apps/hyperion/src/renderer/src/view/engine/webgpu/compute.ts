@@ -291,7 +291,10 @@ export type Workgroups =
   | { readonly kind: "direct"; readonly counts: readonly [number, number, number] }
   | { readonly kind: "indirect"; readonly buffer: GPUBuffer; readonly offsetBytes: number };
 
-/** The object a bind-group entry's resource binds, by which a kept bind group is known. */
+/**
+ * The object a bind-group entry's resource binds, by which a kept bind group is known: a buffer
+ * binding's buffer, bound whole as {@link bindingResource} binds every one, or the view or sampler.
+ */
 function boundObject(resource: GPUBindingResource): object {
   return "buffer" in resource ? resource.buffer : resource;
 }
@@ -332,12 +335,8 @@ export class DispatchObjects {
   view(texture: GPUTexture, descriptor: GPUTextureViewDescriptor): GPUTextureView {
     const views = this.#views.get(texture) ?? new Map<string, GPUTextureView>();
     this.#views.set(texture, views);
-    const key = [
-      descriptor.label ?? "",
-      descriptor.dimension ?? "",
-      String(descriptor.baseMipLevel ?? 0),
-      String(descriptor.mipLevelCount ?? "all"),
-    ].join("|");
+    // Every field the descriptor gives, so that two that differ in any take views of their own.
+    const key = JSON.stringify(descriptor);
     let view = views.get(key);
     if (view === undefined) {
       view = texture.createView(descriptor);
