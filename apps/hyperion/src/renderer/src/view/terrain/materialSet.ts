@@ -412,6 +412,10 @@ export class TerrainMaterialSet implements TerrainMaterialSource {
             .finally(() => {
               this.#inFlight -= 1;
               this.#startWaiting();
+            })
+            .catch((error: unknown) => {
+              // The compile's own outcome went to its entry; only the queue's step can land here.
+              console.error("the terrain's material queue could not go on:", error);
             });
         },
         refuse: reject,

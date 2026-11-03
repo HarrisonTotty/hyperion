@@ -392,13 +392,16 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
   });
 
   it("refuses a compile a restore overtook, releasing what it made", async () => {
-    const engine = await countingRenderEngine();
+    const engine = new DeferredEngine(await fakeDevice());
     const set = new TerrainMaterialSet(engine, "high");
-    // The counting engine resolves a compile a microtask on: the restore comes first.
-    const overtaken = set.material("wire", "face-differences");
+    // The lit material is running as the restore comes, and ends after it.
+    const overtaken = set.material("lit", "baked-offsets");
     engine.restore();
+    while (engine.running > 0) {
+      // oxlint-disable-next-line no-await-in-loop
+      await engine.endOne();
+    }
     await expect(overtaken).rejects.toBeInstanceOf(EngineUnavailable);
-    await settle();
     // The setting's twelve compiled again on the restored device, and nothing else held.
     expect(engine.live.materials).toBe(HIGH.length);
   });
@@ -461,25 +464,32 @@ describe("TerrainMaterialSet (R10.T14.d)", () => {
   it("compiles a pass's asks ahead of the setting's waiting materials, its first frame's first", async () => {
     const engine = new DeferredEngine(await fakeDevice());
     const set = new TerrainMaterialSet(engine, "high");
-    // A pass's emissive form and another path, which the set holds neither of, then the wireframe's
-    // material, which a wireframe pass's first frame waits for and the setting's queue holds last.
-    const emissive = set.material("lit-emissive", "baked-offsets");
-    const other = set.material("depth", "face-differences");
-    const wire = set.material("wire", "baked-offsets");
-    for (let ended = 0; ended < 5; ended += 1) {
+    // A pass's emissive form and the depth of another path, which the set holds neither of, in the
+    // order asked; then the wireframe's material on that path, which a wireframe pass's first frame
+    // waits for and the set does not hold, ahead of them; then the wireframe's on the setting's
+    // path, which the setting's queue holds last, ahead of all.
+    const asked = [
+      set.material("lit-emissive", "baked-offsets"),
+      set.material("depth", "face-differences"),
+      set.material("wire", "face-differences"),
+      set.material("wire", "baked-offsets"),
+    ];
+    for (let ended = 0; ended < 6; ended += 1) {
       // oxlint-disable-next-line no-await-in-loop
       await engine.endOne();
     }
-    expect(compiles(engine).slice(0, 7)).toEqual([
+    expect(compiles(engine).slice(0, 8)).toEqual([
       ...HIGH.slice(0, 2),
       `terrain-wire-baked-offsets canvas ${COMPILE_MESH_NAME}`,
+      `terrain-wire-face-differences canvas ${COMPILE_MESH_NAME}`,
       `terrain-lit-emissive-baked-offsets rgba16float ${COMPILE_MESH_NAME}`,
       `terrain-depth-face-differences canvas ${COMPILE_MESH_NAME}`,
       ...HIGH.slice(2, 4),
     ]);
-    expect((await Promise.all([emissive, other, wire])).map(({ name }) => name)).toEqual([
+    expect((await Promise.all(asked)).map(({ name }) => name)).toEqual([
       "terrain-lit-emissive-baked-offsets",
       "terrain-depth-face-differences",
+      "terrain-wire-face-differences",
       "terrain-wire-baked-offsets",
     ]);
   });
