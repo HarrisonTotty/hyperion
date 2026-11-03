@@ -15,7 +15,7 @@
 import type { TextureSpec } from "../memory";
 import type { ComputeBindings } from "../types";
 import type { BufferHandle } from "../types";
-import type { BoundResource, KernelRecord } from "./compute";
+import type { BoundResource, DispatchObjects, KernelRecord } from "./compute";
 import {
   type ResourceRegistry,
   UNIFORM_BUFFER_USAGE,
@@ -63,11 +63,18 @@ function kernelViewDimension(
   return declared;
 }
 
+/** Views made afresh at every dispatch, as before plan R14 kept them. */
+const FRESH_VIEWS: Pick<DispatchObjects, "view"> = {
+  view: (texture, descriptor) => texture.createView(descriptor),
+};
+
 /**
  * Resolves `bindings` for `kernel`.
  *
  * @param uniformBuffers - The kernel's record's uniform buffers by name, made here when first
  * needed and kept by the caller (the engine's kernel cache, R01.T15).
+ * @param views - Where each texture's view comes from: the engine's kept views (plan R14), or a
+ * new one each.
  * @throws Error naming the kernel and the binding when a texture does not bind at the view
  * dimension the kernel declares for it, before any uniform is written or any view made; Error
  * naming the uniform when a value is larger than the buffer its first value made.
@@ -77,6 +84,7 @@ export function resolveKernelResources(
   kernel: KernelRecord,
   bindings: ComputeBindings,
   uniformBuffers: Map<string, BufferHandle>,
+  views: Pick<DispatchObjects, "view"> = FRESH_VIEWS,
 ): ReadonlyMap<string, BoundResource> {
   const sampled = Object.entries(bindings.sampled).map(([name, handle]) => {
     const { texture, spec } = resources.textureOf(handle);
@@ -118,13 +126,13 @@ export function resolveKernelResources(
   for (const { name, texture, spec, dimension } of sampled) {
     resolved.set(name, {
       kind: "texture-view",
-      view: texture.createView({ label: spec.name, dimension }),
+      view: views.view(texture, { label: spec.name, dimension }),
     });
   }
   for (const { name, texture, spec, level, dimension } of storage) {
     resolved.set(name, {
       kind: "texture-view",
-      view: texture.createView({
+      view: views.view(texture, {
         label: `${spec.name} level ${level}`,
         dimension,
         baseMipLevel: level,

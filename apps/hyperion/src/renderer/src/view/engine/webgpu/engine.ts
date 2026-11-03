@@ -64,6 +64,7 @@ import { CompileBudget, DEFAULT_COMPILE_BUDGET } from "./compileBudget";
 import {
   createKernel,
   createKernelAsync,
+  DispatchObjects,
   encodeDispatch,
   type KernelRecord,
   prepareKernel,
@@ -180,6 +181,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   readonly #watches: ReadonlyArray<() => void>;
   readonly #resources: ResourceRegistry;
   readonly #drawing: Drawing;
+  /** The dispatches' kept layouts, views and bind groups (plan R14). */
+  readonly #dispatchObjects: DispatchObjects;
   /** The device's loss, once reported. */
   #lost: GraphicsFault | null = null;
   #disposed = false;
@@ -208,11 +211,13 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       compile: (pair, spec) => createKernel(device, pair, spec),
       compileAsync: (pair, spec) => this.compiles.run(() => createKernelAsync(device, pair, spec)),
       // A kernel's uniform buffers are bound by its dispatches alone, never by a draw's cached bind
-      // group, so the draw path's cache is left as it is.
+      // group, so the draw path's cache is left as it is, and the dispatches' forgotten.
       destroyBuffer: (buffer) => {
         this.#resources.destroyBuffer(buffer);
+        this.#dispatchObjects.forgetBindGroups();
       },
     });
+    this.#dispatchObjects = new DispatchObjects(device);
     const { gpuTiming } = status.getSnapshot();
     this.#timer = new PassTimer(
       {
@@ -264,11 +269,13 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   destroyBuffer(handle: BufferHandle): void {
     this.#resources.destroyBuffer(handle);
     this.#drawing.forgetBindGroups();
+    this.#dispatchObjects.forgetBindGroups();
   }
 
   destroyTexture(texture: TextureHandle): void {
     this.#resources.destroyTexture(texture);
     this.#drawing.forgetBindGroups();
+    this.#dispatchObjects.forgetBindGroups();
   }
 
   /** The one sampler of each filter, address mode and comparison, made at its first use. */
@@ -807,7 +814,13 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     // The uniforms are written here, through the queue, and the dispatch is submitted below before
     // anything else is encoded, so that a record's buffers shared by several handles hold each
     // dispatch's own values when it runs (R01.T15).
-    const resources = resolveKernelResources(this.#resources, record, bindings, uniforms);
+    const resources = resolveKernelResources(
+      this.#resources,
+      record,
+      bindings,
+      uniforms,
+      this.#dispatchObjects,
+    );
     const counts: Workgroups =
       "buffer" in workgroups
         ? {
@@ -818,7 +831,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         : { kind: "direct", counts: workgroups };
     this.#submit(pass, (encoder) => {
       const timestampWrites = this.#timer.writesFor(pass);
-      encodeDispatch(this.device, encoder, record, resources, counts, {
+      encodeDispatch(this.#dispatchObjects, encoder, record, resources, counts, {
         label: pass,
         ...(timestampWrites === undefined ? {} : { timestampWrites }),
       });

@@ -11,6 +11,7 @@
 
 import { assertNoF16Subgroups, type KernelPair, selectKernel } from "../kernels";
 import type { GpuCapabilities } from "../platform";
+import { BindGroupCache } from "./bindGroupCache";
 
 /** Where a resource a kernel declares is bound, and how. */
 export interface KernelBinding {
@@ -290,9 +291,85 @@ export type Workgroups =
   | { readonly kind: "direct"; readonly counts: readonly [number, number, number] }
   | { readonly kind: "indirect"; readonly buffer: GPUBuffer; readonly offsetBytes: number };
 
-/** Encodes one dispatch in its own compute pass. */
+/** The object a bind-group entry's resource binds, by which a kept bind group is known. */
+function boundObject(resource: GPUBindingResource): object {
+  return "buffer" in resource ? resource.buffer : resource;
+}
+
+/**
+ * What the dispatch path keeps from one dispatch to the next (plan R14, the owner's Mac): each
+ * kernel's bind-group layouts, each texture's views by their descriptor, and the bind groups over
+ * them, so that a steady frame's dispatches make no layout, view or bind group of their own.
+ *
+ * @remarks
+ * Each is what a new one would be: a pipeline's group layout is the pipeline's, a view of a texture
+ * by one descriptor views the same subresources the same way, and a bind group binds the objects it
+ * was made over ({@link BindGroupCache}). Its bind groups are forgotten as a buffer or texture is
+ * destroyed; its layouts and views go with their pipeline or texture.
+ */
+export class DispatchObjects {
+  readonly #layouts = new WeakMap<GPUComputePipeline, Map<number, GPUBindGroupLayout>>();
+  readonly #views = new WeakMap<GPUTexture, Map<string, GPUTextureView>>();
+  readonly #bindGroups: BindGroupCache;
+
+  constructor(device: Pick<GPUDevice, "createBindGroup">) {
+    this.#bindGroups = new BindGroupCache(device);
+  }
+
+  /** The layout of `pipeline`'s group `group`, asked of it once. */
+  layout(pipeline: GPUComputePipeline, group: number): GPUBindGroupLayout {
+    const layouts = this.#layouts.get(pipeline) ?? new Map<number, GPUBindGroupLayout>();
+    this.#layouts.set(pipeline, layouts);
+    let layout = layouts.get(group);
+    if (layout === undefined) {
+      layout = pipeline.getBindGroupLayout(group);
+      layouts.set(group, layout);
+    }
+    return layout;
+  }
+
+  /** The view of `texture` by `descriptor`, made at its first use. */
+  view(texture: GPUTexture, descriptor: GPUTextureViewDescriptor): GPUTextureView {
+    const views = this.#views.get(texture) ?? new Map<string, GPUTextureView>();
+    this.#views.set(texture, views);
+    const key = [
+      descriptor.label ?? "",
+      descriptor.dimension ?? "",
+      String(descriptor.baseMipLevel ?? 0),
+      String(descriptor.mipLevelCount ?? "all"),
+    ].join("|");
+    let view = views.get(key);
+    if (view === undefined) {
+      view = texture.createView(descriptor);
+      views.set(key, view);
+    }
+    return view;
+  }
+
+  /** The bind group of `kernel`'s group `group` over `entries`, made at its first use. */
+  bindGroup(
+    kernel: KernelRecord,
+    group: number,
+    entries: ReadonlyArray<GPUBindGroupEntry>,
+  ): GPUBindGroup {
+    return this.#bindGroups.bindGroup(
+      this.layout(kernel.pipeline, group),
+      `${kernel.pair.name}:${group}`,
+      entries.map(({ binding, resource }) => ({ binding, resource, key: boundObject(resource) })),
+    );
+  }
+
+  /** Forgets every bind group, after a texture or buffer they may hold was destroyed. */
+  forgetBindGroups(): void {
+    this.#bindGroups.clear();
+  }
+}
+
+/**
+ * Encodes one dispatch in its own compute pass, its bind groups those `objects` keeps (plan R14).
+ */
 export function encodeDispatch(
-  device: GPUDevice,
+  objects: Pick<DispatchObjects, "bindGroup">,
   encoder: GPUCommandEncoder,
   kernel: KernelRecord,
   resources: ReadonlyMap<string, BoundResource>,
@@ -303,14 +380,7 @@ export function encodeDispatch(
   const pass = encoder.beginComputePass(descriptor);
   pass.setPipeline(kernel.pipeline);
   for (const [group, entries] of groups) {
-    pass.setBindGroup(
-      group,
-      device.createBindGroup({
-        label: `${kernel.pair.name}:${group}`,
-        layout: kernel.pipeline.getBindGroupLayout(group),
-        entries: [...entries],
-      }),
-    );
+    pass.setBindGroup(group, objects.bindGroup(kernel, group, entries));
   }
   if (workgroups.kind === "direct") {
     const [x, y, z] = workgroups.counts;

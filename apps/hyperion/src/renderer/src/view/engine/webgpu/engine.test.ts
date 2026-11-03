@@ -1507,6 +1507,30 @@ describe("the kernel cache (R01.T15)", () => {
     expect(gpu.buffers.filter((buffer) => buffer.label === "scaler:params")).toHaveLength(1);
   });
 
+  it("keeps a steady dispatch's layout and bind group, forgotten as a buffer is destroyed (plan R14)", async () => {
+    const { engine, gpu } = await engineOn();
+    const values = valuesBuffer(engine);
+    const kernel = engine.createCompute(SCALER);
+    const layouts = vi.spyOn(engine.kernelOf(kernel).pipeline, "getBindGroupLayout");
+    const made = (): number => gpu.bindGroups.filter(({ label }) => label === "scaler:0").length;
+    scale(engine, kernel, values, 2);
+    scale(engine, kernel, values, 3);
+    expect([made(), layouts.mock.calls.length]).toEqual([1, 1]);
+    engine.releaseBuffer(valuesBuffer(engine));
+    scale(engine, kernel, values, 5);
+    expect([made(), layouts.mock.calls.length]).toEqual([2, 1]);
+  });
+
+  it("views a dispatch's storage texture once at each level it is bound at (plan R14)", async () => {
+    const { engine, gpu } = await engineOn();
+    const image = engine.createTexture(storageTexture("image"));
+    splat(engine, image);
+    splat(engine, image);
+    expect(gpu.textures.find(({ label }) => label === "image")?.views).toEqual([
+      { label: "image level 0", dimension: "2d", baseMipLevel: 0, mipLevelCount: 1 },
+    ]);
+  });
+
   it("returns to its first buffers and events once N distinct kernels' handles are released", async () => {
     const { engine, gpu } = await engineOn();
     const values = valuesBuffer(engine);
