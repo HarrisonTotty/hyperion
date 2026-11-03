@@ -802,66 +802,6 @@ pub(crate) struct StarRemnant {
     pub(crate) born: Years,
 }
 
-/// The generator version from which a star of a pair the binary engine ran has the X-ray and
-/// ultraviolet history of what the engine made of it (P14.T1.f): 27, held with the 27 train.
-///
-/// Below it [`BinaryHostXuvRules::in_force`] is [`BinaryHostXuvRules::SingleModels`]: every star's
-/// history is its own single star's closed form, and every figure is version 26's bit for bit.
-/// 27's bump deletes this hold, [`BinaryHostXuvRules`] with its `SingleModels` arm, the tests'
-/// switch and its tripwire (`the_binary_host_xuv_is_held_only_until_the_27_bump`).
-pub(crate) const BINARY_HOST_XUV_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Where a paired star's X-ray and ultraviolet history comes from (its hold,
-/// [`BINARY_HOST_XUV_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum BinaryHostXuvRules {
-    /// Version 26's and before: every star's own closed form.
-    SingleModels,
-    /// Version 27's: what the binary engine made of it ([`SystemContext::xuv_histories`]).
-    Engine,
-}
-
-impl BinaryHostXuvRules {
-    /// The rules this generator version gives: the engine's from [`BINARY_HOST_XUV_VERSION`], the
-    /// single models' below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_binary_host_xuv`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = BINARY_HOST_XUV_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= BINARY_HOST_XUV_VERSION {
-            Self::Engine
-        } else {
-            Self::SingleModels
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The paired stars' XUV rules a test sets on its thread, `None` for the version's.
-    static BINARY_HOST_XUV_RULES: core::cell::Cell<Option<BinaryHostXuvRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the paired stars' XUV rules `rules` on this thread, for the tests to reach
-/// the engine's histories ahead of the bump; the version's rules are set back after, a panic in
-/// `run` included. 27's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_binary_host_xuv<R>(rules: BinaryHostXuvRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<BinaryHostXuvRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            BINARY_HOST_XUV_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(BINARY_HOST_XUV_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
 /// Everything plan 14's generators read about one system (P14.T1.d): its ID and host kind, its
 /// stars and their hierarchy, its composition, its age, its sphere of influence and its
 /// encounter environment.
@@ -1511,8 +1451,8 @@ impl SystemContext {
     /// The X-ray and ultraviolet history of every component, in body order: [`xuv_history`]
     /// of each; none for a rogue planet.
     ///
-    /// From generator version 27 (P14.T1.f, `BINARY_HOST_XUV_VERSION`) a star of a pair the binary
-    /// engine ran follows what the engine made of it: merged into its companion, it shines no more
+    /// A star of a pair the binary engine ran follows what the engine made of it (P14.T1.f, from
+    /// generator version 27): merged into its companion, it shines no more
     /// from the merger; left on the main sequence at another mass by the pair's first interaction,
     /// an accretor or a merger's product, it shines from that interaction's start as a star of
     /// that mass ([`XuvHistory::new`] of it and its zero-age luminosity), its age counted from its
@@ -1529,13 +1469,10 @@ impl SystemContext {
             .map(|(slot, zone_star)| {
                 XuvHistory::new(slot.initial_mass(), zone_star.zams_luminosity)
             });
-        match BinaryHostXuvRules::in_force() {
-            BinaryHostXuvRules::SingleModels => histories.collect(),
-            BinaryHostXuvRules::Engine => histories
-                .enumerate()
-                .map(|(star, history)| self.engine_xuv(star, history))
-                .collect(),
-        }
+        histories
+            .enumerate()
+            .map(|(star, history)| self.engine_xuv(star, history))
+            .collect()
     }
 
     /// Star `star`'s X-ray and ultraviolet history `history` as the binary engine leaves it

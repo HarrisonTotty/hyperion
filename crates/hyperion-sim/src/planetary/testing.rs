@@ -518,10 +518,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   `STEEPNESS_TAILS_VERSION` (rendering plan R10, R10.T6.a), at `SteepnessTailsRules::Marcum`
 ///   through `hyperion_surface::material::with_steepness_tails`, which the sim's tests have through
 ///   their dev-dependency on the surface crate's `hold-switches` feature.
-/// - a paired star's X-ray and ultraviolet history as the engine leaves it,
-///   `BINARY_HOST_XUV_VERSION` (P14.T1.f), at `BinaryHostXuvRules::Engine` through
-///   `with_binary_host_xuv`: a star merged away shines no more, and an accretor or a merger's
-///   product shines from its first interaction as a main-sequence star of its new mass.
 /// - the rest of a paired star's history from its pair's timeline, `BINARY_HOST_HISTORY_VERSION`
 ///   (P14.T1.g), at `BinaryHostHistoryRules::Engine` through `with_binary_host_history`: the
 ///   cometary halo's light, mass, mass loss and deaths, the habitability clock's and the moons'
@@ -556,10 +552,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    let run = move || {
-        use crate::planetary::context::{BinaryHostXuvRules, with_binary_host_xuv};
-        with_binary_host_xuv(BinaryHostXuvRules::Engine, run)
-    };
     let run = move || {
         use crate::planetary::context::{BinaryHostHistoryRules, with_binary_host_history};
         with_binary_host_history(BinaryHostHistoryRules::Engine, run)

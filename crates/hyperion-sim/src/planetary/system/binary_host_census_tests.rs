@@ -26,9 +26,7 @@ use crate::GeneratorVersion;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{Existence, SystemKind, SystemRecord};
-use crate::planetary::context::{
-    BinaryHostHistoryRules, BinaryHostXuvRules, with_binary_host_history, with_binary_host_xuv,
-};
+use crate::planetary::context::{BinaryHostHistoryRules, with_binary_host_history};
 use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
 use crate::planetary::placement::zones::{
     BinaryHostZonesRules, PairBound, ZONE_EDGE_TOLERANCE, with_binary_host_zones,
@@ -362,7 +360,6 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], census: &mut Census) {
 fn held<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_binary_host_zones(BinaryHostZonesRules::Birth, run);
     let run = move || with_binary_host_fate(BinaryHostFateRules::SingleModels, run);
-    let run = move || with_binary_host_xuv(BinaryHostXuvRules::SingleModels, run);
     with_binary_host_history(BinaryHostHistoryRules::SingleModels, run)
 }
 

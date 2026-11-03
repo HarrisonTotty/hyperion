@@ -18,8 +18,8 @@ use hyperion_surface::material::{
 
 use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
 use crate::planetary::context::{
-    BinaryHostHistoryRules, BinaryHostRemnantsRules, BinaryHostXuvRules, with_binary_host_history,
-    with_binary_host_remnants, with_binary_host_xuv,
+    BinaryHostHistoryRules, BinaryHostRemnantsRules, with_binary_host_history,
+    with_binary_host_remnants,
 };
 use crate::planetary::derive::atmosphere::{
     LineSwitchRules, MeltOxygenRules, SteamDivisionRules, with_line_switch, with_melt_oxygen,
@@ -96,7 +96,6 @@ held_rules! {
     steepness_tails: SteepnessTailsRules = steepness_tails_in_force => with_steepness_tails,
     steam_division: SteamDivisionRules =
         SteamDivisionRules::in_force => with_steam_division,
-    binary_host_xuv: BinaryHostXuvRules = BinaryHostXuvRules::in_force => with_binary_host_xuv,
     binary_host_history: BinaryHostHistoryRules =
         BinaryHostHistoryRules::in_force => with_binary_host_history,
     binary_host_fate: BinaryHostFateRules = BinaryHostFateRules::in_force => with_binary_host_fate,
