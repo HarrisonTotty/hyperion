@@ -29,7 +29,7 @@ use crate::orbit::KeplerElements;
 use crate::rng::Seed;
 use crate::stellar::binary::collapses::{OuterOrbit, PointLoss, outer_orbit_after};
 use crate::stellar::binary::testing::massive_records;
-use crate::stellar::binary::{BinaryInput, Component, can_interact};
+use crate::stellar::binary::{BinaryInput, Component, Segment, SegmentKind, can_interact};
 use crate::stellar::brief::BriefModel;
 use crate::stellar::multiplicity::{HierarchyNode, NodeIndex, StarIndex};
 use crate::stellar::system::{
@@ -164,8 +164,11 @@ fn either_side(age: Years) -> [Years; 2] {
 }
 
 /// A wide pair the pre-test passes over is run for its primary's collapse: its supernova is at plan
-/// 06's age with plan 06's remnant and kick, and unbinds it, where the held arm keeps it on its
-/// drawn orbit as one detached segment with no record.
+/// 06's age with plan 06's remnant and kick, and unbinds it. From generator version 25 the held
+/// arm's closed form (P11.T4.l) records the same supernova and unbinds the pair too, a detached
+/// segment and then a disrupted one, where at 24 it kept the pair on its drawn orbit as one
+/// detached segment with no record; the held arm's system still shows its drawn pair (as
+/// measured, a finding for P11.T10).
 #[test]
 fn a_wide_pair_records_its_primary_s_collapse_and_is_unbound() {
     let (held, applied) = both(WIDE_PAIR);
@@ -180,8 +183,21 @@ fn a_wide_pair_records_its_primary_s_collapse_and_is_unbound() {
             .expect("the primary's pair is run for its remnant")
     });
     let input_until = held_pair.timeline().until();
-    assert_eq!(held_pair.timeline().segments().len(), 1);
-    assert_eq!(held_pair.timeline().supernovae(), []);
+    let kinds: Vec<SegmentKind> = held_pair
+        .timeline()
+        .segments()
+        .iter()
+        .map(Segment::kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            SegmentKind::Detached,
+            SegmentKind::Disrupted {
+                by: Component::Primary
+            }
+        ]
+    );
     assert!(!can_interact(&wide_input(&held), input_until));
     let model = applied.primary();
     let death = model.death().expect("the primary collapses by 60 Myr");
@@ -197,6 +213,17 @@ fn a_wide_pair_records_its_primary_s_collapse_and_is_unbound() {
     assert_eq!(sn.kick(), model.natal_kick());
     assert_eq!(Some(sn.remnant().kind()), model.remnant().map(|r| r.kind()));
     assert!(!sn.bound());
+    // The held arm's closed form: the same collapse, at the same age, unbinding the drawn orbit.
+    let closed = disrupting_supernova(held_pair.timeline()).expect("the closed form unbinds it");
+    assert_eq!(
+        (
+            closed.component(),
+            closed.age(),
+            closed.kick(),
+            closed.remnant()
+        ),
+        (sn.component(), sn.age(), sn.kick(), sn.remnant())
+    );
     // The system shows the primary's remnant alone from the collapse, and the held arm's both stars.
     let now = UniverseTime::EPOCH;
     assert_eq!(applied.shown_at(now), Shown::Alone);
