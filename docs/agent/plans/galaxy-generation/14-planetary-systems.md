@@ -954,6 +954,12 @@ Order and parallelism:
   accretor or a merger's product left on the main sequence shines from its pair's first
   interaction as a star of its new mass.
   - _Accept:_ `cargo test -p hyperion-sim --lib -- binary_host_xuv`.
+- **P14.T1.g The rest of a paired star's history from its pair's timeline** (lane
+  `fix-binary-hosts`'s findings, held at 27). The cometary halo's light, mass, mass-loss rate,
+  explosions and first death, the habitability clock's and the moons' hot history's main-sequence
+  ends, and the pulsar host's spin-down light read a paired star where the stellar stage does; a
+  merger's product's main-sequence clock is its own.
+  - _Accept:_ `cargo test -p hyperion-sim --lib -- binary_host_history`.
 
 #### P14.T2 Orbit additions
 
@@ -9616,6 +9622,7 @@ it:
   binary engine's state of each star of a pair it ran (research-binary-hosts):
   - its light and peak luminosity (P14.T1.e, `BINARY_HOST_LIGHT_VERSION`);
   - its X-ray and ultraviolet history (P14.T1.f, `BINARY_HOST_XUV_VERSION`);
+  - its halo, clocks and pulsar light (P14.T1.g, `BINARY_HOST_HISTORY_VERSION`);
   - its mass, largest radius and sudden events in the fate (P14.T28.g, `BINARY_HOST_FATE_VERSION`);
   - its zones at the evaluated state, and its released stars (P14.T9.d, `BINARY_HOST_ZONES_VERSION`).
 - **Plan 05's spatial view** is unit-agnostic, which the orbit map needs, and its plane follows
@@ -34299,3 +34306,18 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Leans (2026-11-02):_ the later star's age is counted from its birth; its saturated phase,
     which `saturated_flux` and `saturation_time` read, stays its birth star's; a stripped or
     evolved star keeps its own closed form.
+- **P14.T1.g's paired history, as built (lane `fix-binary-hosts`, 2026-11-03).** Held at 27
+  (`context::BINARY_HOST_HISTORY_VERSION`; `BinaryHostHistoryRules::{SingleModels, Engine}`,
+  `with_binary_host_history`, a line in `with_every_27_hold`), a hold of its own beside A's light
+  hold, since its readers are separate. Nothing moves at 24, 25 or 26.
+  - _New items:_ `SystemContext::{history_pair_at, history_state_at, pulsar_at}`;
+    `BinaryTimeline::{main_sequence_left, main_sequence_end_before, first_death_age}`; in
+    `system`, `fastest_mass_loss_rate_in`, `tpagb_rate`, `paired_explosion_ages`,
+    `explosion_age`, `OWN_DEATH_SHARE`, `first_death_in` and `paired_death_age`.
+  - _Readers:_ `present_halo_bounds`, `halo_record`, `halo_comets`, `host_clock`, `hot_history`
+    and `Epoch::new`'s pulsar.
+  - _Leans (2026-11-03):_ a star its pair left alone reads its model's figures to the bit: the
+    pulsar follows `summary_at` (the pair's for a star it changed); rates read at clock times; an
+    explosion or death within 10⁻⁹ of the model's own takes the model's age; a pair that records no
+    supernova (its two models on their drawn orbit) explodes a star at its model's death; past +H a
+    star on its own track dies at its model's death.

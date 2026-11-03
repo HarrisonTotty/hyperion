@@ -136,6 +136,10 @@ impl PlanetarySystem {
 /// time one has left on it, from its track's main-sequence end less its age then, zero for one
 /// past it that still burns. A star not formed, a remnant, a brown dwarf and a star with no
 /// track (below 0.1 M☉) leave nothing.
+///
+/// From generator version 27 (P14.T1.g) a star of a pair the binary engine ran reads its clock
+/// from its pair's timeline ([`SystemContext::history_pair_at`](crate::planetary::context::SystemContext::history_pair_at)),
+/// a merger's product's its own.
 #[must_use]
 fn host_clock(epoch: &Epoch<'_>, zone: &OrbitZone) -> HostClock {
     let (ctx, t) = (epoch.ctx, epoch.t);
@@ -148,7 +152,12 @@ fn host_clock(epoch: &Epoch<'_>, zone: &OrbitZone) -> HostClock {
             continue;
         };
         let star = &ctx.stars()[usize::from(member)];
+        // A paired star's clock is its own, its pair's history's (P14.T1.g): a merger's product's
+        // is the product's.
         let ahead = || {
+            if let Some((pair, component, age)) = ctx.history_pair_at(usize::from(member), t) {
+                return pair.timeline().main_sequence_left(component, age);
+            }
             let end = star.shared_track()?.main_sequence_ends()?;
             Some(Years::new((end.value() - star.age_at(t).value()).max(0.0)))
         };

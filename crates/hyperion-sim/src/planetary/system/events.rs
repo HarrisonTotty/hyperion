@@ -816,7 +816,7 @@ impl PlanetarySystem {
         let zone = self.zone(halo.host)?;
         let states: Option<Vec<_>> = zone
             .members()
-            .map(|member| ctx.stars()[usize::from(member)].state_at(snapshot.time()))
+            .map(|member| ctx.history_state_at(usize::from(member), snapshot.time()))
             .collect();
         let states = states?;
         let luminosity = states

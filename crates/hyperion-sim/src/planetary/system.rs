@@ -221,6 +221,7 @@ use crate::planetary::satellites::{
     Satellite, SatelliteFrame, SatelliteMoon, Satellites, satellites_of,
 };
 use crate::rng::{ObjectKey, Stream, tags};
+use crate::stellar::binary::{BinaryTimeline, Component as PairComponent, SupernovaRecord};
 use crate::stellar::draws::UnitUniform;
 use crate::stellar::multiplicity::{HierarchyNode, SlotKind, SystemHierarchy};
 use crate::stellar::system::StarModel;
@@ -1675,17 +1676,20 @@ fn system_halo(
 #[must_use]
 fn present_halo_bounds(ctx: &SystemContext, halo: &SystemHalo, t: UniverseTime) -> HaloBounds {
     let stars = ctx.stars();
+    // Each member by its body index, which a paired star's readings take (P14.T1.g).
     let members = |bits: u32| {
         stars
             .iter()
             .zip(0_u32..32)
             .filter(move |&(_, i)| bits & (1 << i) != 0)
-            .map(|(star, _)| star)
+            .map(|(star, i)| (usize::try_from(i).expect("a body index below 32"), star))
     };
     let mass_of = |bits: u32| {
-        members(bits).fold((0.0, 0.0), |(initial, now), star| {
+        members(bits).fold((0.0, 0.0), |(initial, now), (i, star)| {
             let m0 = star.initial_mass().value();
-            let m = star.state_at(t).map_or(m0, |state| state.mass().value());
+            let m = ctx
+                .history_state_at(i, t)
+                .map_or(m0, |state| state.mass().value());
             (initial + m0, now + m)
         })
     };
@@ -1704,12 +1708,23 @@ fn present_halo_bounds(ctx: &SystemContext, halo: &SystemHalo, t: UniverseTime) 
         let kept = now / initial;
         let a = orbit.semi_major_axis();
         let explosions: Vec<UniverseTime> = members(pair)
-            .filter_map(|star| {
-                let death = star.death()?;
+            .flat_map(|(i, star)| -> Vec<UniverseTime> {
+                // A paired star explodes where its pair's history says (P14.T1.g).
+                if let Some(ages) = paired_explosion_ages(ctx, i, t) {
+                    return ages
+                        .into_iter()
+                        .filter_map(|at| time_at_age(at, star.age_at_epoch()))
+                        .collect();
+                }
+                let Some(death) = star.death() else {
+                    return Vec::new();
+                };
                 let age_now = star.age_at(t).value();
                 (death.kind().is_sudden() && death.age().value() <= age_now)
                     .then(|| time_at_age(death.age(), star.age_at_epoch()))
                     .flatten()
+                    .into_iter()
+                    .collect()
             })
             .collect();
         if !explosions.is_empty() {
@@ -1720,7 +1735,7 @@ fn present_halo_bounds(ctx: &SystemContext, halo: &SystemHalo, t: UniverseTime) 
             return (!unbound).then_some(pericentre);
         }
         let rate = members(pair)
-            .map(|star| fastest_mass_loss_rate(star, t).value())
+            .map(|(i, _)| fastest_mass_loss_rate_in(ctx, i, t).value())
             .fold(0.0, f64::max);
         let a_au = a.value() / METRES_PER_AU;
         let psi = rate * math::powf(a_au, 1.5) * math::powf(initial, -1.5) / TAU;
@@ -3577,7 +3592,9 @@ impl PlanetarySystem {
     /// an evolved one, the time since the earliest main-sequence end among them, with the zone's
     /// luminosity then over now (that star's at its main sequence's end, from its track, in place
     /// of its own now), by which a moon's T0 then is read. A star with no track (below 0.1 M☉)
-    /// stays on its main sequence the clock window through.
+    /// stays on its main sequence the clock window through. From generator version 27 (P14.T1.g) a
+    /// star of a pair the binary engine ran ends its main sequence where its pair's timeline says
+    /// ([`SystemContext::history_pair_at`]), a merger's product's its own.
     #[must_use]
     fn hot_history(&self, epoch: &Epoch<'_>, body: &Body) -> HotHistory {
         /// The evolved star whose main sequence ended earliest, so far.
@@ -3603,13 +3620,27 @@ impl PlanetarySystem {
                 continue;
             }
             let star = &ctx.stars()[usize::from(member)];
-            let Some(track) = star.shared_track() else {
-                continue;
-            };
-            let Some(end) = track.main_sequence_end() else {
-                continue;
-            };
-            let since = Years::new(star.age_at(t).value() - end.value());
+            // A paired star's main sequence ends where its pair's history says, a merger's
+            // product's its own (P14.T1.g).
+            let (since, then) =
+                if let Some((pair, component, at)) = ctx.history_pair_at(usize::from(member), t) {
+                    let Some((end, then)) = pair.timeline().main_sequence_end_before(component, at)
+                    else {
+                        continue;
+                    };
+                    (Years::new(at.value() - end.value()), then)
+                } else {
+                    let Some(track) = star.shared_track() else {
+                        continue;
+                    };
+                    let Some(end) = track.main_sequence_end() else {
+                        continue;
+                    };
+                    (
+                        Years::new(star.age_at(t).value() - end.value()),
+                        track.state_at(end).luminosity(),
+                    )
+                };
             if earliest
                 .as_ref()
                 .is_none_or(|e| since.value() > e.since.value())
@@ -3617,7 +3648,7 @@ impl PlanetarySystem {
                 earliest = Some(Earliest {
                     since,
                     now: state.luminosity(),
-                    then: track.state_at(end).luminosity(),
+                    then,
                 });
             }
         }
@@ -4813,21 +4844,20 @@ impl PlanetarySystem {
             .host(halo.host)
             .and_then(|host| host.disc.profile())
             .map_or(0.0, |profile| Years::from(profile.lifetime()).value());
-        let stars: Vec<&StarModel> = zone
-            .members()
-            .map(|member| &ctx.stars()[usize::from(member)])
+        let members: Vec<usize> = zone.members().map(usize::from).collect();
+        let states: Option<Vec<StarState>> = members
+            .iter()
+            .map(|&star| ctx.history_state_at(star, epoch.t))
             .collect();
-        let states: Option<Vec<StarState>> =
-            stars.iter().map(|star| star.state_at(epoch.t)).collect();
         let age = ctx.age_at(epoch.t).value();
         let (state, now) = match states {
             Some(states) if age >= lifetime => {
                 let mass_now = states
                     .iter()
                     .fold(SolarMasses::ZERO, |sum, state| sum + state.mass());
-                let rate = stars
+                let rate = members
                     .iter()
-                    .map(|star| fastest_mass_loss_rate(star, epoch.t).value())
+                    .map(|&star| fastest_mass_loss_rate_in(ctx, star, epoch.t).value())
                     .fold(0.0, f64::max);
                 let luminosity = states
                     .iter()
@@ -4849,7 +4879,7 @@ impl PlanetarySystem {
                     ),
                     None => (
                         BodyState::Unbound {
-                            at: first_death(&stars).unwrap_or(epoch.t),
+                            at: first_death_in(ctx, &members, epoch.t).unwrap_or(epoch.t),
                         },
                         None,
                     ),
@@ -6712,7 +6742,99 @@ fn fastest_mass_loss_rate(star: &StarModel, t: UniverseTime) -> SolarMassesPerYe
         return SolarMassesPerYear::new(f64::INFINITY);
     }
     let epoch_age = star.age_at_epoch();
-    let state = |age: f64| time_at_age(Years::new(age), epoch_age).and_then(|at| star.state_at(at));
+    tpagb_rate(age_t, |age| {
+        time_at_age(Years::new(age), epoch_age).and_then(|at| star.state_at(at))
+    })
+}
+
+/// [`fastest_mass_loss_rate`] of the system's star `star` at `t`, where from generator version 27
+/// (P14.T1.g) a star of a pair the engine ran is read from its pair's history: infinite after its
+/// supernova there, and otherwise the mean rate over its thermally pulsing asymptotic giant branch
+/// on its pair's timeline so far, its states read at clock times as its own model's are, so that a
+/// star its pair left as its own model gives its model's rate to the bit.
+#[must_use]
+fn fastest_mass_loss_rate_in(
+    ctx: &SystemContext,
+    star: usize,
+    t: UniverseTime,
+) -> SolarMassesPerYear {
+    let model = &ctx.stars()[star];
+    let (Some((_, _, age)), Some(explosions)) = (
+        ctx.history_pair_at(star, t),
+        paired_explosion_ages(ctx, star, t),
+    ) else {
+        return fastest_mass_loss_rate(model, t);
+    };
+    if !explosions.is_empty() {
+        return SolarMassesPerYear::new(f64::INFINITY);
+    }
+    let epoch_age = model.age_at_epoch();
+    tpagb_rate(age.value(), |at| {
+        time_at_age(Years::new(at), epoch_age).and_then(|then| ctx.history_state_at(star, then))
+    })
+}
+
+/// How near its model's own death age, as a share of it, a pair's supernova of a star stands for
+/// that death: 10⁻⁹, the stellar stage's rule for a death the engine pins to the model's
+/// (`SystemStars`' paired state, design note 16 of plan 11), which an engine landing an ulp short
+/// of the age keeps.
+const OWN_DEATH_SHARE: f64 = 1e-9;
+
+/// The age, Julian years, at which the supernova `sn` of the star `model` of a pair the engine ran
+/// explodes it, as the planetary stage reads it (P14.T1.g): its model's own sudden death's where
+/// the pair explodes the star there ([`OWN_DEATH_SHARE`]), so that a star its pair left alone
+/// explodes when its model does, to the bit, and the supernova's own otherwise.
+#[must_use]
+fn explosion_age(model: &StarModel, sn: &SupernovaRecord) -> Years {
+    match model.death() {
+        Some(death)
+            if death.kind().is_sudden()
+                && (sn.age().value() - death.age().value()).abs()
+                    <= OWN_DEATH_SHARE * death.age().value() =>
+        {
+            death.age()
+        }
+        Some(_) | None => sn.age(),
+    }
+}
+
+/// The ages, Julian years, of the explosions by `t` of the system's star `star` where from
+/// generator version 27 (P14.T1.g) its pair's history reads it ([`SystemContext::history_pair_at`]):
+/// its pair's supernovae of it, each at [`explosion_age`]; and where its pair records none of it,
+/// as a pair the engine leaves its two models on their drawn orbit records none (plan 11's design
+/// note 7, `evolve`'s pre-test), its model's own sudden death by then, where its pair leaves it its
+/// own model at `t`. `None` for a star read from its model.
+#[must_use]
+fn paired_explosion_ages(ctx: &SystemContext, star: usize, t: UniverseTime) -> Option<Vec<Years>> {
+    let (pair, component, age) = ctx.history_pair_at(star, t)?;
+    let model = &ctx.stars()[star];
+    let recorded: Vec<Years> = pair
+        .timeline()
+        .supernovae()
+        .iter()
+        .filter(|sn| sn.component() == component)
+        .map(|sn| explosion_age(model, sn))
+        .collect();
+    if !recorded.is_empty() {
+        return Some(recorded.into_iter().filter(|&at| at <= age).collect());
+    }
+    let state = ctx.history_state_at(star, t);
+    // Only a star dead by `t` can have exploded, which spares a living one its death's build.
+    let dead = state.is_some_and(|s| s.phase().is_remnant() || s.phase() == Phase::NoRemnant);
+    let own = (dead && state == model.state_at(t))
+        .then(|| model.death())
+        .flatten()
+        .filter(|death| death.kind().is_sudden() && death.age() <= age)
+        .map(|death| death.age());
+    Some(own.into_iter().collect())
+}
+
+/// The mean rate of mass loss over the thermally pulsing asymptotic giant branch so far, at the
+/// age `age_t_years`, Julian years, of the star whose state at an age in Julian years `state`
+/// gives ([`fastest_mass_loss_rate`]'s, after its sudden death's).
+#[must_use]
+fn tpagb_rate(age_t_years: f64, state: impl Fn(f64) -> Option<StarState>) -> SolarMassesPerYear {
+    let age_t = age_t_years;
     let phase_at = |age: f64| state(age).map(|s| s.phase());
     let first = |lo: f64, hi: f64, test: fn(Phase) -> bool| {
         let (mut lo, mut hi) = (lo, hi);
@@ -6753,6 +6875,53 @@ fn first_death(stars: &[&StarModel]) -> Option<UniverseTime> {
             time_at_age(death.age(), star.age_at_epoch())
         })
         .min()
+}
+
+/// The earliest death among the system's stars `stars`, by body index, as a time, if any dies and
+/// it is representable: from generator version 27 (P14.T1.g) a star of a pair the engine ran
+/// dies as [`paired_death_age`] reads it, for the pair holding it at `t`.
+#[must_use]
+fn first_death_in(ctx: &SystemContext, stars: &[usize], t: UniverseTime) -> Option<UniverseTime> {
+    stars
+        .iter()
+        .filter_map(|&star| {
+            let model = &ctx.stars()[star];
+            let age = match ctx.history_pair_at(star, t) {
+                Some((pair, component, _)) => paired_death_age(model, pair.timeline(), component)?,
+                None => model.death()?.age(),
+            };
+            time_at_age(age, model.age_at_epoch())
+        })
+        .min()
+}
+
+/// The age, Julian years, at which the star `model`, component `component` of `timeline`, dies as
+/// the cometary halo reads it (P14.T1.g): its pair's history's first age with no living star
+/// ([`BinaryTimeline::first_death_age`]), at its model's own death age where the two agree within
+/// [`OWN_DEATH_SHARE`]; and past the ages the timeline was run to, its model's death where its
+/// pair leaves it on its own track to the end, the timeline's state then its track's. So a star its
+/// pair left alone dies when its model does, to the bit.
+///
+/// [`BinaryTimeline::first_death_age`]: crate::stellar::binary::BinaryTimeline::first_death_age
+#[must_use]
+fn paired_death_age(
+    model: &StarModel,
+    timeline: &BinaryTimeline,
+    component: PairComponent,
+) -> Option<Years> {
+    let own = || model.death().map(|death| death.age());
+    let Some(age) = timeline.first_death_age(component) else {
+        let until = timeline.until();
+        let end = timeline.state_at(until).stars()[component.index()];
+        let alone = model
+            .shared_track()
+            .is_some_and(|track| track.state_at(until) == end);
+        return alone.then(own).flatten();
+    };
+    Some(match own() {
+        Some(own) if (age.value() - own.value()).abs() <= OWN_DEATH_SHARE * own.value() => own,
+        Some(_) | None => age,
+    })
 }
 
 /// The stars the bodies of `zone` orbit, as the fate transform reads them: its component alone,
@@ -6808,7 +6977,7 @@ impl<'c> Epoch<'c> {
             "a system is queried with the context it was generated from"
         );
         let pulsar = system.pulsar_host().and_then(|star| {
-            let spin_down = ctx.stars()[star].pulsar_at(t)?.spin_down_luminosity();
+            let spin_down = ctx.pulsar_at(star, t)?.spin_down_luminosity();
             Some((
                 star,
                 SolarLuminosities::new(spin_down.value() / SOLAR_LUMINOSITY_W),

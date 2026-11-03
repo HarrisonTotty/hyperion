@@ -26,7 +26,10 @@ use crate::GeneratorVersion;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{Existence, SystemKind, SystemRecord};
-use crate::planetary::context::{BinaryHostLightRules, with_binary_host_light};
+use crate::planetary::context::{
+    BinaryHostHistoryRules, BinaryHostLightRules, BinaryHostXuvRules, with_binary_host_history,
+    with_binary_host_light, with_binary_host_xuv,
+};
 use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
 use crate::planetary::placement::zones::{BinaryHostZonesRules, PairBound, with_binary_host_zones};
 use crate::planetary::testing::{PairHistory, SampleFilter, sample_records, with_every_27_hold};
@@ -354,11 +357,11 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], census: &mut Census) {
 
 /// The binary hosts' holds at 27 set back to their held arms, on this thread.
 fn held<R>(run: impl FnOnce() -> R) -> R {
-    with_binary_host_light(BinaryHostLightRules::SingleModels, || {
-        with_binary_host_fate(BinaryHostFateRules::SingleModels, || {
-            with_binary_host_zones(BinaryHostZonesRules::Birth, run)
-        })
-    })
+    let run = move || with_binary_host_zones(BinaryHostZonesRules::Birth, run);
+    let run = move || with_binary_host_fate(BinaryHostFateRules::SingleModels, run);
+    let run = move || with_binary_host_xuv(BinaryHostXuvRules::SingleModels, run);
+    let run = move || with_binary_host_history(BinaryHostHistoryRules::SingleModels, run);
+    with_binary_host_light(BinaryHostLightRules::SingleModels, run)
 }
 
 /// The census before and after the binary hosts' holds at 27. After them, every present planet's

@@ -816,6 +816,193 @@ impl BinaryTimeline {
         peak
     }
 
+    /// The time `component` has left on its hydrogen main sequence at `age`, Julian years, if it is
+    /// on it or before it then: its own clock, as plan 14's habitability reads it for a star of a
+    /// pair the engine ran (P14.T1.g). A star on its track has its track's main-sequence end less
+    /// its track age, as a single star's model has; a star whose mass and fractional age τ the
+    /// binary carries, an accretor or a merger's product, has (1 − τ) of the main-sequence lifetime
+    /// of its mass then (Hurley, Pols and Tout 2000, §7.1's effective age); `None` for any other
+    /// star and for one past its main sequence.
+    ///
+    /// # Panics
+    ///
+    /// Never: an age outside the timeline is read at its nearer end.
+    #[must_use]
+    pub(crate) fn main_sequence_left(&self, component: Component, age: Years) -> Option<Years> {
+        let slot = component.index();
+        let age = age.value().clamp(0.0, self.until);
+        let segment = &self.segments[self
+            .segments
+            .partition_point(|s| s.start <= age)
+            .saturating_sub(1)];
+        let member = &segment.members[slot];
+        match member.state_at(&self.context, slot, age).phase() {
+            Phase::Protostar | Phase::PreMainSequence | Phase::MainSequence => {}
+            Phase::Substellar
+            | Phase::HertzsprungGap
+            | Phase::FirstGiantBranch
+            | Phase::CoreHeliumBurning
+            | Phase::EarlyAgb
+            | Phase::ThermallyPulsingAgb
+            | Phase::HeliumMainSequence
+            | Phase::HeliumHertzsprungGap
+            | Phase::HeliumGiantBranch
+            | Phase::PostAgb
+            | Phase::HeliumWhiteDwarf
+            | Phase::CarbonOxygenWhiteDwarf
+            | Phase::OxygenNeonWhiteDwarf
+            | Phase::NeutronStar
+            | Phase::BlackHole
+            | Phase::NoRemnant => return None,
+        }
+        let left = match member {
+            Member::Track { track, offset } | Member::Shaped { track, offset, .. } => {
+                track.main_sequence_ends()?.value() - (age - offset)
+            }
+            Member::MainSequence {
+                helium: false,
+                mass,
+                tau,
+            } => {
+                let lifetime =
+                    sse::main_sequence_lifetime(self.context.coeffs(), false, mass.at(age));
+                (1.0 - tau.at(age).clamp(0.0, 1.0)) * lifetime
+            }
+            Member::MainSequence { helium: true, .. }
+            | Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Remnant { .. }
+            | Member::Gone => return None,
+        };
+        Some(Years::new(left.max(0.0)))
+    }
+
+    /// The age, Julian years, at which `component` last left its hydrogen main sequence by `age`,
+    /// with its luminosity then, the first age off it, if it had one and is off it at `age`: the
+    /// main-sequence end plan 14's hot history reads for a star of a pair the engine ran
+    /// (P14.T1.g), a merger's product's its own. For a star on its own track it is its track's end
+    /// and its track's state there, which a single star's model reads, to the bit.
+    ///
+    /// The phase is read at each segment's start and just before its end, and at a track's own
+    /// main-sequence end inside a segment; the last of those on the main sequence and the next off
+    /// it bracket the end, which [`TRANSITION_STEPS`] halvings find.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `age` is not finite.
+    #[must_use]
+    pub(crate) fn main_sequence_end_before(
+        &self,
+        component: Component,
+        age: Years,
+    ) -> Option<(Years, SolarLuminosities)> {
+        let slot = component.index();
+        let age = age.value().clamp(0.0, self.until);
+        let state = |at: f64| self.member_state_at(slot, at);
+        let on = |at: f64| state(at).phase() == Phase::MainSequence;
+        if on(age) {
+            return None;
+        }
+        let samples = self.phase_samples(slot, age);
+        let last = samples.iter().rposition(|&at| on(at))?;
+        let (mut before, mut after) =
+            (samples[last], samples.get(last + 1).copied().unwrap_or(age));
+        for _ in 0..TRANSITION_STEPS {
+            let mid = f64::midpoint(before, after);
+            if mid <= before || mid >= after {
+                break;
+            }
+            if on(mid) {
+                before = mid;
+            } else {
+                after = mid;
+            }
+        }
+        Some((Years::new(after), state(after).luminosity()))
+    }
+
+    /// The age, Julian years, at which `component` first has no living star, a remnant or
+    /// nothing, by the age the binary was run to: its death as plan 14's cometary halo reads it
+    /// (P14.T1.g), found as [`main_sequence_end_before`](Self::main_sequence_end_before) finds a
+    /// main sequence's end.
+    #[must_use]
+    pub(crate) fn first_death_age(&self, component: Component) -> Option<Years> {
+        let slot = component.index();
+        let dead = |at: f64| {
+            let phase = self.member_state_at(slot, at).phase();
+            phase.is_remnant() || phase == Phase::NoRemnant
+        };
+        let samples = self.phase_samples(slot, self.until);
+        let first = samples.iter().position(|&at| dead(at))?;
+        let Some(previous) = first.checked_sub(1) else {
+            return Some(Years::new(samples[first]));
+        };
+        let (mut before, mut after) = (samples[previous], samples[first]);
+        for _ in 0..TRANSITION_STEPS {
+            let mid = f64::midpoint(before, after);
+            if mid <= before || mid >= after {
+                break;
+            }
+            if dead(mid) {
+                after = mid;
+            } else {
+                before = mid;
+            }
+        }
+        Some(Years::new(after))
+    }
+
+    /// The state of slot `slot`'s member at `age`, Julian years, as [`state_at`](Self::state_at)
+    /// gives it, bit for bit, without the other member's and the orbit's.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `age` is not finite.
+    #[must_use]
+    fn member_state_at(&self, slot: usize, age: f64) -> StarState {
+        debug_assert!(
+            age.is_finite(),
+            "a timeline is read at a finite age, not {age}"
+        );
+        let age = if age > 0.0 { age.min(self.until) } else { 0.0 };
+        let index = self
+            .segments
+            .partition_point(|s| s.start <= age)
+            .saturating_sub(1);
+        self.segments[index].members[slot].state_at(&self.context, slot, age)
+    }
+
+    /// The ages up to `age`, Julian years, at which slot `slot`'s phase is sampled for its
+    /// transitions, ascending and without repeats: each segment's start and the age just before its
+    /// end, a track's own main-sequence end and death inside its segment and the ages just before
+    /// them, and `age` itself.
+    #[must_use]
+    fn phase_samples(&self, slot: usize, age: f64) -> Vec<f64> {
+        let mut samples = Vec::with_capacity(1 + 6 * self.segments.len());
+        samples.push(age);
+        for segment in self.segments.iter().take_while(|s| s.start <= age) {
+            let end = segment.end.min(age);
+            samples.extend([segment.start, end.next_down().max(segment.start)]);
+            if let Member::Track { track, offset } | Member::Shaped { track, offset, .. } =
+                &segment.members[slot]
+            {
+                for own in [track.main_sequence_ends(), track.lifetime()]
+                    .into_iter()
+                    .flatten()
+                {
+                    let at = own.value() + offset;
+                    if segment.start < at && at < end {
+                        samples.extend([at.next_down(), at]);
+                    }
+                }
+            }
+        }
+        samples.retain(|&at| at <= age);
+        samples.sort_by(f64::total_cmp);
+        samples.dedup_by(|a, b| a.total_cmp(b).is_eq());
+        samples
+    }
+
     /// The ages strictly between `from` and `to`, Julian years, at which the pair's orbit or its
     /// members' masses may turn, ascending and without repeats: its segments' starts and the
     /// knots of each segment's orbit and of its members' mass and τ paths. Plan 14's zones at the
@@ -1026,6 +1213,11 @@ impl BinaryTimeline {
             + self.supernovae.capacity() * size_of::<SupernovaRecord>()
     }
 }
+
+/// The halvings of [`BinaryTimeline::main_sequence_end_before`] and
+/// [`BinaryTimeline::first_death_age`] for the age of a transition between two of their samples:
+/// 64, past the resolution of an `f64` age, at which the loop stops.
+const TRANSITION_STEPS: u32 = 64;
 
 /// The bisections of [`BinaryTimeline::helium_star_entry_mass`] for the age at which a star
 /// becomes a naked helium star inside a segment: 64 halvings, past the resolution of an `f64`
