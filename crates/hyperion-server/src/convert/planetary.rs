@@ -30,6 +30,7 @@ use hyperion_protocol::{
     SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, TaxonomicClassDto, TectonicRegimeDto,
     ThermalRegimeDto, VerticalStructureDto, WetEpochDto, ZoneDto,
 };
+use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::architecture::{ArchitectureClass, HostMultiplicity};
@@ -75,21 +76,11 @@ use hyperion_sim::time::{ClockWindow, UniverseTime};
 use hyperion_sim::units::{
     Kelvin, Kilograms, KilogramsPerSquareMetre, Metres, MetresPerSecond, Seconds,
 };
-use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion, Seed};
 use hyperion_surface::craters::{CraterParams, Screening, TargetClass};
 
 use super::query_time;
 use super::stellar::{orbit_dto, unknown_system, wire_time};
 use super::surface::climate_model;
-
-/// The generator version from which a hooks section carries a body's resource abundances
-/// (P14.T26): 27, whose bump sets their ratios, so that no client is
-/// shown abundances that are about to move. Below it a hooks section's `resources` is
-/// `not_modelled`, whatever the sim computes; its habitability is served now. Its tripwire,
-/// `the_resources_gate_holds_until_its_version`, fails at the version, so that the bump that
-/// reaches it opens the gate (deleting this constant, its arm in `hooks` and the tripwire) or
-/// raises it.
-pub(crate) const RESOURCES_SERVED_FROM: GeneratorVersion = GeneratorVersion::new(27);
 
 /// A `system_bodies` request, checked: the system it names, decoded, the time inside the clock
 /// window, and the level asked for.
@@ -1722,8 +1713,8 @@ fn envelope(envelope: &Envelope) -> BodyEnvelopeDto {
 
 /// A hooks section's value: the body's detail seed (the rendering plans' R09.T1.b), which the
 /// client's local synthesis draws from, and from `served`, the body's server-only hooks at the
-/// record's time, its habitability (P14.T25) and, from [`RESOURCES_SERVED_FROM`], its resource
-/// abundances (P14.T26), each in the state the sim tags it with; both `not_modelled` where the
+/// record's time, its habitability (P14.T25) and its resource abundances (P14.T26), each in the
+/// state the sim tags it with; both `not_modelled` where the
 /// sim gives the body no server-only hooks. Neither value converted here holds the surface seed,
 /// so it cannot reach the wire from here.
 #[must_use]
@@ -1731,14 +1722,9 @@ fn hooks(hooks: &Hooks, served: Option<&BodyHooks>) -> BodyHooksDto {
     let (habitability, resources) = served.map_or(
         (SectionDto::NotModelled, SectionDto::NotModelled),
         |served| {
-            let resources = if GENERATOR_VERSION < RESOURCES_SERVED_FROM {
-                SectionDto::NotModelled
-            } else {
-                section(served.resources(), resource_abundances)
-            };
             (
                 section(served.habitability(), |assessed| habitability(*assessed)),
-                resources,
+                section(served.resources(), resource_abundances),
             )
         },
     );
@@ -3650,21 +3636,6 @@ mod tests {
         assert!(rings > 0, "no golden system has a ring");
     }
 
-    /// P14.T26's serve gate's tripwire: it holds until [`RESOURCES_SERVED_FROM`], and the bump
-    /// that reaches it opens it or raises it.
-    #[test]
-    fn the_resources_gate_holds_until_its_version() {
-        assert!(
-            GENERATOR_VERSION < RESOURCES_SERVED_FROM,
-            "generator version {} reaches the resources' serve gate, {}: if their ratios have \
-             landed, open it (delete `RESOURCES_SERVED_FROM`, its arm in `hooks` and this test, and \
-             let `a_full_hooks_section_carries_the_sim_s_habitability_and_holds_its_resources` \
-             read the resources as the sim's); otherwise raise the constant to the next bump",
-            GENERATOR_VERSION.get(),
-            RESOURCES_SERVED_FROM.get()
-        );
-    }
-
     /// P14.T25: each of the sim's limits, in `HabitabilityLimit::ALL`'s order, crosses the wire as
     /// its own string, the list the protocol pins and the client's words read
     /// (`bodyWords.test.ts`), so that no limit is sent as another's.
@@ -3718,9 +3689,9 @@ mod tests {
         out
     }
 
-    /// P14.T25–T26: every golden body's `full` hooks section carries its habitability in the
-    /// state the sim's server-only hooks give it, with their class and limits, in their order, and
-    /// its resources `not_modelled` behind their serve gate, whatever the sim computes; a hooks
+    /// P14.T25–T26: every golden body's `full` hooks section carries its habitability and its
+    /// resources in the states the sim's server-only hooks give them, its habitability with their
+    /// class and limits, in their order, and its resources as the sim computes them; a hooks
     /// section that is not `ok` keeps its state, with neither.
     #[test]
     fn a_full_hooks_section_carries_the_sim_s_habitability_and_holds_its_resources() {
@@ -3751,8 +3722,8 @@ mod tests {
                 let served = served.expect("a body whose hooks are shown has server-only hooks");
                 assert_eq!(
                     sent.resources,
-                    Some(SectionDto::NotModelled),
-                    "{}: behind the gate",
+                    Some(section(served.resources(), resource_abundances)),
+                    "{}: the sim's",
                     wire.id
                 );
                 computed += usize::from(matches!(served.resources(), Section::Ok(_)));
@@ -3813,8 +3784,8 @@ mod tests {
     /// P14.T25–T26 through `body_detail`: at `full`, the golden third filler's Earth, a rocky
     /// planet with water in its conservative zone, is `temperate`, and the close binary's Mars, a
     /// cold desert in its optimistic zone, is `marginal` and limited by its frozen surface, each
-    /// with its resources `not_modelled` below 27; at every lower level both go with the hooks
-    /// section, `not_resolved`.
+    /// with its resources computed; at every lower level both go with the hooks section,
+    /// `not_resolved`.
     #[test]
     fn body_detail_sends_an_earth_s_and_a_mars_s_habitability_at_full_only() {
         const EARTH: (u64, u16) = (0x4200_2cb2_0000_0000, 0x0200);
@@ -3823,7 +3794,11 @@ mod tests {
             let SectionDto::Ok(hooks) = golden_hooks(raw, index, DetailLevelDto::Full) else {
                 panic!("{raw:016x}.{index:04x}: a present planet's hooks are shown at full");
             };
-            assert_eq!(hooks.resources, Some(SectionDto::NotModelled));
+            assert!(
+                matches!(hooks.resources, Some(SectionDto::Ok(_))),
+                "{raw:016x}.{index:04x}: {:?}",
+                hooks.resources
+            );
             let Some(SectionDto::Ok(habitability)) = hooks.habitability else {
                 panic!("{raw:016x}.{index:04x}: {:?}", hooks.habitability);
             };
@@ -3853,7 +3828,7 @@ mod tests {
         }
     }
 
-    /// P14.T26, for the gate's opening: a computed abundance converts to each resource's and each
+    /// P14.T26 on the wire: a computed abundance converts to each resource's and each
     /// isotope's fraction, the sim's to the bit, on every golden body whose resources it computes,
     /// and a resource the sim does not compute, a solid layer's helium-3, is left off the wire.
     #[test]
