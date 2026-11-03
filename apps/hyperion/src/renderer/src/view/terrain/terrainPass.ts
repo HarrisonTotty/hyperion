@@ -1173,11 +1173,12 @@ interface ViewState {
   readonly interiorDrawn: number[];
   readonly interiorFins: boolean[];
   /**
-   * Of the interior records, whether each one's heights fade from another surface this frame (plan
-   * R10, R10.T16.i: a rebake's older bake, a rise's datum, a refine's or a coarsen's parent), which
-   * its slot's cluster records do not bound, so that the cull keeps it whole (`CULL_INPUT_WHOLE`).
+   * Of the interior records, whether each one's slot's cluster records do not bound what it draws,
+   * so that the cull keeps it whole (`CULL_INPUT_WHOLE`): its heights fade from another surface this
+   * frame (plan R10, R10.T16.i: a rebake's older bake, a rise's datum, a refine's or a coarsen's
+   * parent), or it is a sub-patch, its grid placed over a finer area (`DrawnPatch.within`).
    */
-  readonly interiorFading: boolean[];
+  readonly interiorWhole: boolean[];
   /**
    * The ground it drew at its last frame (plan R10, R10.T16.c after R10.T16.i), its instances as
    * the shader mixes their heights, which the survey edge's rim and ticks read.
@@ -3484,7 +3485,7 @@ export class TerrainPass {
       interior: new InstanceRecords(slotCount),
       interiorDrawn: [],
       interiorFins: [],
-      interiorFading: [],
+      interiorWhole: [],
       drawnGround: new DrawnGround(this.#heights, this.#planet.figure),
       interiorDraw: null,
       interiorBeside: null,
@@ -4065,12 +4066,12 @@ export class TerrainPass {
    * On a lit pass whose interior form is made for the frame's lighting, the interior patches'
    * records (plan R14, R14.T1.a) are written apart from the others', each in the draw set's order,
    * and drawn first, by the interior patches' mesh; without it every patch is drawn by the lit
-   * mesh, as before the split. A stand-in is never an interior patch, so that neither the interior
-   * mesh nor the cluster path (R14.T1.b) draws an instance its slot's cluster records may not bound:
-   * seamless-1's sub-patch stand-ins, an ancestor's slot and a sub-rectangle of its grid, are
-   * stand-ins, and take the edge path in every pass: plan R14's T2.a would mask their clusters only
-   * where seamless-1 draws one as its ancestor's own blocks, which it never does (it draws a
-   * sub-patch's own grid on the ancestor's triangles, `terrainPatch.wgsl`'s `sourceGridOf`).
+   * mesh, as before the split. A stand-in of an interior bake is an interior patch too, whole or a
+   * sub-patch (seamless-1's, or the time morph's coarser patch over a finer area, R10.T16.i): a
+   * sub-patch draws its own grid on its ancestor's triangles (`terrainPatch.wgsl`'s
+   * `sourceGridOf`), which its slot's cluster records do not bound, so that the cull keeps it whole
+   * ({@link ViewState.interiorWhole}), as the lit mesh drew it. A stand-in of an edge bake takes the
+   * edge path in every pass.
    *
    * On the lit pass's cluster path (plan R14, R14.T2.a; `GeometrySettings.litClusters`), the
    * interior patches draw from the lit pass's buckets at stride 1 in their interior draw's place,
@@ -4083,7 +4084,7 @@ export class TerrainPass {
    * from the strided buckets, their may-discard ones (the survey's edge, their skirt heads and
    * fins) from the may-discard buckets by the fin forms, in the lit pass, the casters and the
    * overlay's depth, and the lit mesh draws only the stand-ins. Each record whose heights fade
-   * (R10.T16.i) is marked in {@link ViewState.interiorFading}.
+   * (R10.T16.i), and each sub-patch, is marked in {@link ViewState.interiorWhole}.
    */
   #write(
     device: Device,
@@ -4128,7 +4129,7 @@ export class TerrainPass {
     drawnIndices.length = 0;
     state.interiorDrawn.length = 0;
     state.interiorFins.length = 0;
-    state.interiorFading.length = 0;
+    state.interiorWhole.length = 0;
     let finCount = 0;
     const drawnGround = state.drawnGround;
     drawnGround.begin();
@@ -4144,12 +4145,12 @@ export class TerrainPass {
         const { patch, within } = drawn;
         const o = patch.originM;
         const level = patch.key.level;
-        // A stand-in, whole or seamless-1's sub-patch of its ancestor's slot, draws by the edge path
-        // in every pass: the slot's cluster records bound its whole patch alone (plan R14). An edge
-        // patch joins the interior patches where `fins` draws it by its records (R14.T1.g).
+        // Every patch of an interior bake, a stand-in whole or a sub-patch of its slot among them, is
+        // an interior patch; an edge patch joins them where `fins` draws it by its records
+        // (R14.T1.g), but a stand-in of an edge bake draws by the edge path in every pass.
         const resident = residents.get(drawn.keyString);
         const interiorBake = resident?.interior === true;
-        const inner = split && !drawn.standIn && (interiorBake || (fins && resident !== undefined));
+        const inner = split && (interiorBake || (!drawn.standIn && fins && resident !== undefined));
         const heights = device.morph.heightWords[n] ?? 0;
         const parentSlot = this.#parentSlotOf(device, patch.key);
         const fadesWord = fadeWordOf(fades.own[n] ?? 0, heights);
@@ -4173,7 +4174,8 @@ export class TerrainPass {
         const finest = strides && this.#nearContact(patch, contacts, patchM);
         if (inner) {
           state.interiorFins.push(!interiorBake);
-          state.interiorFading.push(((heights >>> 8) & MIX_STEPS) !== 0);
+          // A sub-patch's grid, over its finer area, is not its slot's records' (`sourceGridOf`).
+          state.interiorWhole.push(((heights >>> 8) & MIX_STEPS) !== 0 || within !== null);
           finCount += interiorBake ? 0 : 1;
         }
         (inner ? interior : instances).pushXyz(
@@ -4452,8 +4454,10 @@ export class TerrainPass {
     for (let record = 0; record < state.interiorDrawn.length; record += 1) {
       const drawnIndex = state.interiorDrawn[record];
       const patch = drawnIndex === undefined ? undefined : drawSet?.patches[drawnIndex]?.patch;
-      // A record whose patch the draw set no longer holds enters no pass.
-      clusters.inputs[2 * record] = patch === undefined ? 0 : LIT_PASS_BIT;
+      // A record whose patch the draw set no longer holds enters no pass; a sub-patch is kept
+      // whole (its grid is not its slot's records').
+      const whole = state.interiorWhole[record] === true ? CULL_INPUT_WHOLE : 0;
+      clusters.inputs[2 * record] = patch === undefined ? 0 : (LIT_PASS_BIT | whole) >>> 0;
       clusters.inputs[2 * record + 1] = f32Bits(
         patch === undefined ? 0 : vertexSpacing(radiusM, patch.key.level).maxM,
       );
@@ -5112,9 +5116,9 @@ export class TerrainPass {
       // An edge patch casts at stride 1, as by its lit mesh (R14.T1.g).
       const fin = state.interiorFins[record] === true;
       fins ||= fin;
-      // A record whose patch the draw set no longer holds enters no pass; one whose heights fade
-      // is kept whole by each it enters (R10.T16.i).
-      const whole = state.interiorFading[record] === true ? CULL_INPUT_WHOLE : 0;
+      // A record whose patch the draw set no longer holds enters no pass; one whose heights fade,
+      // or a sub-patch, is kept whole by each it enters (R10.T16.i).
+      const whole = state.interiorWhole[record] === true ? CULL_INPUT_WHOLE : 0;
       clusters.inputs[2 * record] =
         patch === undefined
           ? 0

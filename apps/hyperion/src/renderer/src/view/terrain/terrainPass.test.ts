@@ -1988,7 +1988,7 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
     expect(named(again)).toEqual(named(split));
   });
 
-  it("draws a stand-in by the lit mesh, never by the interior mesh, whatever its bake", async () => {
+  it("draws a stand-in of an interior bake by the interior mesh, as its bake's other patches", async () => {
     const { pass, pool, engine } = await interiorPass();
     // Nearer, the selection asks for finer patches, which their resident ancestors stand in for.
     const nearer = northPole(200_000);
@@ -1998,10 +1998,10 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
       .filter(({ standIn }) => standIn)
       .map(({ patch }) => patch.slot);
     expect([standIns.length > 0, pool.demand.length > 0]).toEqual([true, true]);
-    expect(standIns.filter((slot) => !writtenSlots(engine).includes(slot))).toEqual([]);
-    expect(
-      standIns.filter((slot) => writtenSlots(engine, "terrain interior instances").includes(slot)),
-    ).toEqual([]);
+    expect([
+      standIns.filter((slot) => !writtenSlots(engine, "terrain interior instances").includes(slot)),
+      standIns.filter((slot) => writtenSlots(engine).includes(slot)),
+    ]).toEqual([[], []]);
   });
 
   it("draws every patch by the lit mesh where the interior form cannot be made, and reports it", async () => {

@@ -1640,6 +1640,34 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
     expect(cascadesOf(frame).litMeshCasters).toEqual([0, 0, 0, 0]);
   });
 
+  it("draws a stand-in of an interior bake on the cluster path, a sub-patch kept whole by the cull, and one of an edge bake by the lit mesh", async () => {
+    const interiorMade = await clusteredPass();
+    // Nearer, with nothing baked: the finer patches asked for are drawn by their resident ancestors.
+    const nearer = viewOver(10);
+    interiorMade.pass.step({ views: [passView(PRIMARY, nearer)], grounded: [] });
+    interiorMade.pass.drawFor(PRIMARY, frameOf(nearer, true));
+    const drawSet = interiorMade.pass.lastStep?.drawSet;
+    const entries = (drawSet?.patches ?? []).slice(0, drawSet?.count ?? 0);
+    const inputs = wordsIn(interiorMade.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+    const subPatches = entries.flatMap((entry, n) =>
+      entry.within === null ? [] : [(inputs[2 * n] ?? 0) >>> 31],
+    );
+    const made = await edgePass();
+    made.pass.step({ views: [passView(PRIMARY, nearer)], grounded: [] });
+    made.pass.drawFor(PRIMARY, frameOf(nearer, true));
+    const edgeSet = made.pass.lastStep?.drawSet;
+    const edgeStandIns = (edgeSet?.patches ?? [])
+      .slice(0, edgeSet?.count ?? 0)
+      .filter((entry) => entry.standIn).length;
+    expect([
+      entries.filter((entry) => entry.standIn).length > 0,
+      recordsIn(interiorMade.engine, `terrain instances (${PRIMARY})`).length,
+      subPatches.length > 0 && subPatches.every((bit) => bit === 1),
+      edgeStandIns > 0,
+      recordsIn(made.engine, `terrain instances (${PRIMARY})`).length,
+    ]).toEqual([true, 0, true, true, edgeStandIns]);
+  });
+
   it("reuses their casters, the fin caster's among them, on a still camera, and renders them once again where the fins' lever turns (R14.T6.a)", async () => {
     const made = await edgePass();
     made.pass.setGeometry(EVERY_FRAME);
