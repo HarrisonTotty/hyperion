@@ -14,20 +14,17 @@
 //!
 //! The hook exists only for ΔY > 0 ([`HeliumHook::of`]); for every other star the track takes no
 //! step of it, so the stars the grid places, all of ΔY = 0, are bit-identical whatever the table
-//! holds. The committed table is the identity (P06.T17); plan 15's P15.T7.b fits it.
+//! holds. P06.T17 committed the table as the identity; plan 15's P15.T7.b fitted it.
 //!
-//! Every track takes P15.T7.b's fitted table, `tables::helium_26`, through [`HeliumTable::of`]
-//! (from version 26), which holds the branch's shift at the envelope mass its fit reached and
-//! floors it at zero ([`HeliumHook::horizontal_branch`]; decision-p15-t7b-leans §8).
+//! Every track takes P15.T7.b's fitted table, `tables::helium`, through [`HeliumTable::of`] (from
+//! version 26), which holds the branch's shift at the envelope mass its fit reached and floors it
+//! at zero ([`HeliumHook::horizontal_branch`]; decision-p15-t7b-leans §8).
 
 use crate::math;
 use crate::stellar::Composition;
 use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::PhasePoint;
-// The committed table is a candidate's and the tests' alone; every track reads the fitted one.
-#[cfg(any(test, feature = "testing"))]
 use crate::tables::helium;
-use crate::tables::helium_26;
 #[cfg(any(test, feature = "testing"))]
 use crate::units::HeliumExcess;
 use crate::units::{SolarMasses, SolarRadii};
@@ -43,29 +40,29 @@ pub(crate) struct HeliumTable {
     pub(crate) hb_temperature_shift: [f64; 2],
     /// The envelope mass, M☉, at which the shift is held, beyond which it is its value there: the
     /// fitted table's `HB_ENVELOPE_MAX`, the upper envelope of its fit. With a bound the shift is
-    /// also floored at zero wherever the line is negative. `None` for the identity, whose shift is
-    /// P06.T17's line, unbounded (decision-p15-t7b-leans §8).
+    /// also floored at zero wherever the line is negative. `None` for P06.T17's identity and a
+    /// candidate's line, unbounded (decision-p15-t7b-leans §8).
     pub(crate) hb_envelope_max: Option<f64>,
 }
 
 impl HeliumTable {
-    /// The committed table, [`tables::helium`](crate::tables::helium): P06.T17's identity, which
-    /// the tests read beside the fitted one.
+    /// P06.T17's identity, every coefficient zero at plan 06's nodes, which the tests read beside
+    /// the fitted one.
     #[cfg(test)]
-    pub(crate) const COMMITTED: Self = Self {
+    pub(crate) const IDENTITY: Self = Self {
         log_z_nodes: helium::LOG_Z_NODES,
-        lifetime_slope: helium::LIFETIME_SLOPE,
-        hb_temperature_shift: helium::HB_TEMPERATURE_SHIFT,
+        lifetime_slope: [[0.0; 3]; 4],
+        hb_temperature_shift: [0.0; 2],
         hb_envelope_max: None,
     };
 
-    /// P15.T7.b's fitted table, [`tables::helium_26`](crate::tables::helium_26), which every
-    /// track reads.
+    /// P15.T7.b's fitted table, the committed [`tables::helium`](crate::tables::helium), which
+    /// every track reads.
     pub(crate) const FITTED: Self = Self {
-        log_z_nodes: helium_26::LOG_Z_NODES,
-        lifetime_slope: helium_26::LIFETIME_SLOPE,
-        hb_temperature_shift: helium_26::HB_TEMPERATURE_SHIFT,
-        hb_envelope_max: Some(helium_26::HB_ENVELOPE_MAX),
+        log_z_nodes: helium::LOG_Z_NODES,
+        lifetime_slope: helium::LIFETIME_SLOPE,
+        hb_temperature_shift: helium::HB_TEMPERATURE_SHIFT,
+        hb_envelope_max: Some(helium::HB_ENVELOPE_MAX),
     };
 
     /// The table the stellar stage's rules read: the fitted one, [`FITTED`](Self::FITTED), at
@@ -177,8 +174,8 @@ fn branch_shift(shift: [f64; 2], envelope_max: Option<f64>, envelope: f64, delta
 /// `testing` feature; the generator builds none.
 ///
 /// A candidate built by [`new`](Self::new) shifts the horizontal branch as P06.T17's identity
-/// does, along its line unbounded; [`with_envelope_max`](Self::with_envelope_max) holds and floors
-/// the shift as the fitted table's arm does (decision-p15-t7b-leans §8).
+/// did, along its line unbounded; [`with_envelope_max`](Self::with_envelope_max) holds and floors
+/// the shift as the fitted table does (decision-p15-t7b-leans §8).
 #[cfg(any(test, feature = "testing"))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CandidateHeliumTable {
@@ -189,8 +186,14 @@ pub struct CandidateHeliumTable {
 
 #[cfg(any(test, feature = "testing"))]
 impl CandidateHeliumTable {
-    /// The committed table, [`tables::helium`](crate::tables::helium), as a candidate.
-    pub const COMMITTED: Self = Self::new(helium::LIFETIME_SLOPE, helium::HB_TEMPERATURE_SHIFT);
+    /// The committed table, [`tables::helium`](crate::tables::helium), as a candidate, its bound
+    /// included.
+    pub const COMMITTED: Self = Self::new(helium::LIFETIME_SLOPE, helium::HB_TEMPERATURE_SHIFT)
+        .with_envelope_max(SolarMasses::new(helium::HB_ENVELOPE_MAX));
+
+    /// P06.T17's identity, every coefficient zero, as a candidate: under it a track is the
+    /// generator's at any ΔY.
+    pub const IDENTITY: Self = Self::new([[0.0; 3]; 4], [0.0; 2]);
 
     /// A candidate of `lifetime_slope`, as `LIFETIME_SLOPE`, and `hb_temperature_shift`, as
     /// `HB_TEMPERATURE_SHIFT`, at the committed nodes, its branch's shift unbounded.
@@ -274,8 +277,8 @@ impl Default for CandidateHeliumTable {
 /// It is [`Track::full`](super::Track::full)'s track, the generator's options and resolution,
 /// with `table`'s correction for the star's ΔY (`Composition::helium_excess`). For a star of
 /// ΔY = 0 it is [`Track::full`](super::Track::full)'s bit for bit, whatever `table` holds, since
-/// no correction is built for it; under [`CandidateHeliumTable::COMMITTED`] it is that track at
-/// any ΔY. Plan 15's P15.T7.b fits the table with it. Behind the `testing` feature; the generator
+/// no correction is built for it; under [`CandidateHeliumTable::IDENTITY`] it is that track at any
+/// ΔY. Plan 15's P15.T7.b fits the table with it. Behind the `testing` feature; the generator
 /// never calls it.
 ///
 /// # Panics
@@ -333,7 +336,7 @@ mod tests {
             let table = HeliumTable {
                 hb_temperature_shift: shift,
                 hb_envelope_max: Some(BOUND),
-                ..HeliumTable::COMMITTED
+                ..HeliumTable::IDENTITY
             };
             let hook = HeliumHook::of(&rich, &table).expect("a helium excess builds a hook");
             let top = (if a + b * BOUND > a { a + b * BOUND } else { a }) * delta_y;
@@ -391,7 +394,7 @@ mod tests {
         for row in fitted.lifetime_slope {
             assert_same_bits(row[2], 0.0);
         }
-        assert_eq!(fitted.hb_envelope_max, Some(helium_26::HB_ENVELOPE_MAX));
+        assert_eq!(fitted.hb_envelope_max, Some(helium::HB_ENVELOPE_MAX));
     }
 
     /// The fitted table's values, pinned bit for bit (P15.T7.b): a 0.8 M☉ star of \[Fe/H\] −1.5

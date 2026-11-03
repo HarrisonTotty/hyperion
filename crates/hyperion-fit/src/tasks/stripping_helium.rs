@@ -4,7 +4,7 @@
 //! stripping table at none.
 //!
 //! Each node is [`StrippingNode::of_fitted_helium`]: the `stripping` task's node, its track built
-//! under the fitted helium table (`tables::helium_26`), at the helium excesses
+//! under the fitted helium table (`tables::helium`), at the helium excesses
 //! [`stripping_heliums`] over the stripping table's grid ([`stripping_masses`],
 //! [`stripping_metallicities`]). The run validates the interpolant at the centre of every cell of
 //! the axis, those between no helium excess and the first slice included, against the exact node

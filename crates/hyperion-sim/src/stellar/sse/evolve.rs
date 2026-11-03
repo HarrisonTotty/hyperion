@@ -303,8 +303,7 @@ mod tests {
     fn the_turn_off_mass_inverts_the_main_sequence_lifetime() {
         let c = ZCoeffs::new(Composition::SOLAR.z_fit());
         for m in [0.3, 0.8, 1.0, 2.0, 7.0, 40.0] {
-            let t =
-                main_sequence_end_myr(m, &Composition::SOLAR, &c, &HeliumTable::COMMITTED) * 1e6;
+            let t = main_sequence_end_myr(m, &Composition::SOLAR, &c, &HeliumTable::FITTED) * 1e6;
             let back = turn_off_mass(Years::new(t), &Composition::SOLAR).value();
             assert!((back / m - 1.0).abs() < 1e-12, "{m}: {back}");
         }

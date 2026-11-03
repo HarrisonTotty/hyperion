@@ -437,14 +437,9 @@ fn the_refit_manifest_runs_end_to_end() {
         header.manifest.as_deref(),
         Some("crates/hyperion-fit/manifests/mge.toml")
     );
-    // Every figure of T3.a passes; T3.b's density figure is its ruled structural miss, so the
-    // header is provisional by P15.T3.b with that figure in its acceptance line.
-    assert_eq!(
-        header.kind,
-        Some(HeaderKind::Provisional {
-            by: "P15.T3.b".to_owned()
-        })
-    );
+    // Every figure of T3.a passes, and T3.b's as ruled; its density figure is its ruled
+    // structural miss, which the acceptance line states.
+    assert_eq!(header.kind, Some(HeaderKind::Generated));
     assert!(
         header
             .acceptance
@@ -768,6 +763,7 @@ fn mge_boxy_meets_plan_fifteen_s_mass_and_force_figures_and_holds_its_density_mi
             "{f:?}"
         );
         assert!(!f.passes(), "{f:?}");
+        assert!(f.passes_as_ruled(), "{f:?}");
         // Every term carries weight: the seed splits after its weights are solved.
         assert!(
             row.terms()

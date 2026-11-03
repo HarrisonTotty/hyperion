@@ -1,6 +1,6 @@
 //! P15.T7.b's fit of the helium-excess table to `BaSTI`'s helium-enhanced grid
-//! ([`grid`](super::grid)), run from `manifests/helium_26.toml` (`method = "basti_least_squares"`)
-//! into `tables::helium_26`, and its figures on plan 06's tracks under the fitted table.
+//! ([`grid`](super::grid)), run from `manifests/helium.toml` (`method = "basti_least_squares"`)
+//! into `tables::helium`, and its figures on plan 06's tracks under the fitted table.
 //!
 //! - **`LIFETIME_SLOPE`.** At every point of the grid, a helium-enhanced set's track of mass m
 //!   against the canonical sequence carried to the set's Z, the target is ln r, r = t(Y) ÷ t(Y₀)
@@ -445,8 +445,8 @@ pub fn render(table: &CandidateHeliumTable, params: &FitParams) -> RustTable {
         "thinnest and the thickest envelopes, which the linear form only approximates.",
         "The track applies the correction only where ΔY > 0, so every star the grid places (ΔY = 0) is",
         "bit-identical whatever the table holds; members of globular clusters' second populations",
-        "(ΔY > 0, plan 09) move with it. The tracks read it from version 26 on, behind the stellar",
-        "rules' hold (`HELIUM_VERSION`), and `tables::helium`, P06.T17's identity, below it.",
+        "(ΔY > 0, plan 09) move with it. The tracks read it from version 26 on; P06.T17's identity,",
+        "every coefficient zero, was the table below it.",
         "",
     ]
     .iter()
@@ -741,9 +741,9 @@ mod tests {
     #[test]
     fn the_rendered_fit_keeps_the_committed_nodes_and_declares_the_four_items() {
         let table = CandidateHeliumTable::new([[-6.5, 0.25, 0.0]; 4], [0.5, -2.5]);
-        let params_text = include_str!("../../../manifests/helium_26.toml");
+        let params_text = include_str!("../../../manifests/helium.toml");
         let manifest = Manifest::from_bytes(
-            std::path::Path::new("helium_26.toml"),
+            std::path::Path::new("helium.toml"),
             params_text.as_bytes().to_vec(),
         )
         .unwrap();
@@ -755,7 +755,7 @@ mod tests {
             .filter_map(|l| l.strip_prefix("pub const "))
             .filter_map(|l| l.split(':').next())
             .collect();
-        assert_eq!(declared, super::super::FITTED_ITEMS);
+        assert_eq!(declared, super::super::ITEMS);
         assert!(body.contains(&literal(-2.5)), "{body}");
         assert!(
             body.contains(&format!(

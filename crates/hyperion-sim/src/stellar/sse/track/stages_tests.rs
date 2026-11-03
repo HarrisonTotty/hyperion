@@ -681,7 +681,7 @@ fn state_bits(track: &Track, ages: &[f64]) -> Vec<[u64; 3]> {
 }
 
 /// With ΔY = 0 a track is bit-identical whatever the table holds, since the hook is never built;
-/// and the committed table, every coefficient zero, is the identity at any ΔY (P06.T17's test).
+/// and P06.T17's table, every coefficient zero, is the identity at any ΔY (P06.T17's test).
 #[test]
 fn without_a_helium_excess_the_track_is_bit_identical_whatever_the_table() {
     let ages: Vec<f64> = (0..400)
@@ -698,8 +698,8 @@ fn without_a_helium_excess_the_track_is_bit_identical_whatever_the_table() {
         );
         assert_eq!(
             reference,
-            state_bits(&with_helium(m, &rich, &HeliumTable::COMMITTED), &ages),
-            "{m} M☉: the committed table is the identity"
+            state_bits(&with_helium(m, &rich, &HeliumTable::IDENTITY), &ages),
+            "{m} M☉: P06.T17's table is the identity"
         );
     }
 }

@@ -26,7 +26,7 @@
 //! found by projected coordinate descent on the normal equations with a fixed number of sweeps
 //! from zero, so the result depends on no tolerance test. Plan 15 refits with free widths.
 //!
-//! The task is [`MgeTask`], fast and provisional. Since plan 15's P15.T3.c its manifest,
+//! The task is [`MgeTask`], fast. Since plan 15's P15.T3.c its manifest,
 //! `manifests/mge.toml`, is the refit's ([`refit`], P15.T3.a, with the boxy bulge's [`boxy`],
 //! P15.T3.b): it names `method = "free_widths"` and every parameter of the refit, and the committed
 //! table is the refit's, with `MGE_BOXY`. The first cut above is still the task's for a manifest
@@ -50,8 +50,9 @@ use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput};
 
 /// The task's version, written into the table's header. A change to anything below that moves
 /// the table bumps it: 2 since P15.T3.c made the committed table the refit's (plan 15, Design note
-/// 6).
-pub const VERSION: u32 = 2;
+/// 6), and 3 since P15.T12's check judged `MGE_BOXY` on its ruled criteria, which cleared the
+/// header's flag with the body unchanged.
+pub const VERSION: u32 = 3;
 
 /// The number of widths in each expansion.
 pub const WIDTHS: usize = 14;

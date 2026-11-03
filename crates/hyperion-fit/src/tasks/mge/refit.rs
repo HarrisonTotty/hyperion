@@ -940,8 +940,8 @@ pub(crate) fn render(
 }
 
 /// The refit's run on `manifest`: its table, `@generated` if every figure passes ([`passes`] and
-/// [`BoxyFigures::passes`]), else provisional by the first subtask whose figures miss, P15.T3.a or
-/// P15.T3.b, with the figures in its acceptance line.
+/// [`BoxyFigures::passes_as_ruled`]), else provisional by the first subtask whose figures miss,
+/// P15.T3.a or P15.T3.b, with the figures in its acceptance line.
 ///
 /// # Errors
 ///
@@ -954,7 +954,7 @@ pub(crate) fn run(manifest: &Manifest) -> Result<TaskOutput, RunTaskError> {
     let boxy_figures = boxy_rows.each_ref().map(boxy::figures);
     let provisional = if !passes(&f) {
         Some("P15.T3.a")
-    } else if !boxy_figures.iter().all(BoxyFigures::passes) {
+    } else if !boxy_figures.iter().all(BoxyFigures::passes_as_ruled) {
         Some("P15.T3.b")
     } else {
         None

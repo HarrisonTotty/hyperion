@@ -290,19 +290,8 @@ acceptance = "over the 455 rows, fit minus grid, log₁₀ L within 0.046 dex (r
 name = "helium"
 path = "helium.rs"
 task = "helium"
-revision = 0
-inputs_sha256 = "5121b2fc5d53445cbe322d3588b391c1d62a3b734a85f55dfcd60513f2891003"
-body_sha256 = "6889bf3b74753c7c71be191a7b9c88836833078c5cb4005011f6d5f3d7c1dc31"
-since_generator_version = 23
-provisional = true
-acceptance = "the identity: every coefficient zero, so no star moves; P15.T7.b's fit to the helium-enhanced models of Pietrinferni et al. (2006) is held for the swap"
-
-[[table]]
-name = "helium_26"
-path = "helium_26.rs"
-task = "helium_26"
 revision = 1
-inputs_sha256 = "8510d36dcad2bf1746add1cd06578f2ad4ec065d8c707bc4e869b4bcf0e70fad"
+inputs_sha256 = "23461a2622e6f9e33b74d3dc6f5664a25bcac887c776570e07cb4f5a2026cec5"
 body_sha256 = "444226d4c1dd6426234da2912a93dd463ebed5a57fc15405d502af31689f05d4"
 fingerprint = [0.0001, 41267276577.84121, 14440977877.597254, 13806318311.34176, 4831351953.383062, 8880299343.875269, 3107551963.828981, 12106650666.019646, 3.5933192170241854, 11556634283.031178, 3.600679111826002, 0.7710537608237432, 0.32, 0.18]
 since_generator_version = 24
@@ -384,12 +373,12 @@ acceptance = "17 material files (16 liquids' and 1 solid's held for the melts), 
 name = "mge"
 path = "mge.rs"
 task = "mge"
-revision = 2
-inputs_sha256 = "1869f2b0b776188b5247c68248296b70bc599e59b9044b917ac1119ab1f25edc"
+revision = 3
+inputs_sha256 = "b75e8c27390e0a7af01509e35561058b83f62e900da521348ee1e694974030a0"
 body_sha256 = "b650018948a5ca7bf2144a0aa07d9a6f1173877e427a1c69565c9a4235d3a0f6"
 fingerprint = [0.55]
 since_generator_version = 25
-provisional = true
+provisional = false
 acceptance = "`MGE_EXP` within 0.010% of e^(−s) over s = 0.05–10 and its spherical mass within 0.0014%; `MGE_HOLED_EXP` within 0.083% of e^(−s) over 0.05–8 and its mass fraction within 2.8e-6; `MGE_BAR` within 2.96% of its central value (worst at u = 0.89), its mass within 0.295% and its cumulative mass from u = 0.05 to 2.5 within 4.93% (worst at u = 1.06); the thin disc's speed against Freeman (1970) is held to 0.5% by `tests/mge.rs`; `MGE_BOXY` at c = 3, 3.5 and 4: mass-weighted rms relative density error 13.3%, 17.5% and 20.7% (plan 15's 3% is out of reach of non-negative, axis-aligned centred Gaussians, which are log-convex in (R², z²): a structural miss, ruled 2026-10-23), mass inside spheres of 0.5–4 scale lengths within 0.136%, 0.197% and 0.249%, whole mass within 0.136%, 0.192% and 0.245% and midplane force at 0.25–8 scale lengths within 0.19%, 0.27% and 0.34%"
 
 [[table]]

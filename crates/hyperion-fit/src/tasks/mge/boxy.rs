@@ -23,7 +23,9 @@
 //! relative density error is 12.8% at `c` = 3 and 19.2% at `c` = 4, against plan 15's 3%. Main
 //! ruled that miss structural on 2026-10-23 (issue #94): the weights stay non-negative, the fit is
 //! weighted towards the mass inside spheres and the midplane force, which the potential reads, and
-//! the header stays provisional by P15.T3.b with the density figure in its acceptance line.
+//! the table is judged on those figures ([`BoxyFigures::passes_as_ruled`]) and on P15.T3.c's two
+//! Milky Way checks, the sim's tests of the rotation curve and the enclosed masses, with the
+//! density figure in its acceptance line.
 //!
 //! # The fit
 //!
@@ -957,7 +959,15 @@ impl BoxyFigures {
     /// 1% and the forces within 2%.
     #[must_use]
     pub fn passes(&self) -> bool {
-        self.rms_density < 0.03 && self.worst_enclosed() < 0.01 && self.worst_force() < 0.02
+        self.rms_density < 0.03 && self.passes_as_ruled()
+    }
+
+    /// Whether every figure meets P15.T3.b's criteria as main ruled them on 2026-10-23 (issue
+    /// #94): the masses within 1% and the forces within 2%, the density's 3% being out of reach of
+    /// such a sum (the module's notes), a structural miss.
+    #[must_use]
+    pub fn passes_as_ruled(&self) -> bool {
+        self.worst_enclosed() < 0.01 && self.worst_force() < 0.02
     }
 }
 

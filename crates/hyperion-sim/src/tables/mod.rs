@@ -84,7 +84,6 @@ pub mod dwarf_sequence;
 pub mod gauss_legendre;
 pub mod giant_cooling;
 pub mod helium;
-pub mod helium_26;
 pub mod kick_defaults;
 pub mod kick_rank;
 pub mod lbv;
@@ -279,12 +278,6 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "helium",
-        revision: 0,
-        since_generator_version: 23,
-        provisional: true,
-    },
-    TableInfo {
-        name: "helium_26",
         revision: 1,
         since_generator_version: 24,
         provisional: false,
@@ -327,9 +320,9 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "mge",
-        revision: 2,
+        revision: 3,
         since_generator_version: 25,
-        provisional: true,
+        provisional: false,
     },
     TableInfo {
         name: "period_correction",

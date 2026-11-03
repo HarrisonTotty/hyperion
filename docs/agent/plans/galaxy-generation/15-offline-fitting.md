@@ -3350,3 +3350,14 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
 - **`displaced_forms` fitted to the production orbits at 26 (lane train-26, 2026-11-01).** The
   run (19,260,016 orbits) was made on train 26's tree before its bump, not 25's, whose GalaxyScales
   probes are 26's to the bit; `displaced_forms` is revision 3 and not provisional.
+- **P15.T12's precondition checked (lane galaxy-close-26, 2026-11-03, at 26; no output moves).**
+  - _`helium` is revision 1, `@generated`:_ `helium_26` is folded into it, body bit for bit.
+    `Helium26Task`, `manifests/helium_26.toml`, `tables::helium_26` and its lock entry are gone, and
+    `HeliumTask` runs only the fit. In the sim, `HeliumTable::COMMITTED` is now `IDENTITY` (tests),
+    `CandidateHeliumTable::COMMITTED` is the fitted table with its bound, and
+    `CandidateHeliumTable::IDENTITY` is new.
+  - _`mge` is revision 3, `@generated`, body bit for bit:_ its flag is set by
+    `BoxyFigures::passes_as_ruled` (masses and forces; the density's 3% is the ruled structural
+    miss). T3.c's two Milky Way checks pass at 26.
+  - `kick_rank` and `displaced_forms` were already production and `@generated` at 26; `lbv` refit
+    at 26 is unchanged, so it needs no hold.

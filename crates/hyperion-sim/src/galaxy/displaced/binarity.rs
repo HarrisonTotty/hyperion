@@ -556,7 +556,7 @@ impl StrippingNode {
         Self::of_under(m1, comp, StellarRules::of_version(GENERATOR_VERSION))
     }
 
-    /// [`StrippingNode::of`], whose track reads the fitted helium table (`tables::helium_26`)
+    /// [`StrippingNode::of`], whose track reads the fitted helium table (`tables::helium`)
     /// under the version's stellar rules: what [`HeliumStrippingTable`] tabulates, as
     /// `hyperion-fit`'s `stripping_helium` task computes each node, so that its helium axis holds
     /// the helium excess's own effect over the same tracks as the table at none.

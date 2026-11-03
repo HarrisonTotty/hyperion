@@ -5,21 +5,16 @@
 //! (`stellar/sse/track/excess.rs`).
 //!
 //! **P15.T7.b, the registration.** Plan 06's P06.T17 committed the table by hand as the identity,
-//! every coefficient zero, with no fit header, lock entry or `MANIFEST` row. Revision 0 registers
-//! it unchanged, which changes no output (plan 15, Design note 9): `manifests/helium.toml`, whose
-//! `method` is [`IDENTITY`], emits P06.T17's items verbatim, provisionally.
+//! every coefficient zero, with no fit header, lock entry or `MANIFEST` row. Revision 0 registered
+//! it unchanged, which changed no output (plan 15, Design note 9), provisionally.
 //!
-//! **P15.T7.b's swap, held.** The fit, by [`BASTI_LEAST_SQUARES`] ([`fit`]): least squares on
-//! `BaSTI`'s helium-enhanced models (Pietrinferni, Cassisi, Salaris and Castelli 2006, ApJ 642,
-//! 797, with the database's helium-enhanced extension; `data/basti_helium/`, reduced by its
-//! `reduce.py`) relative to plan 06's tracks, its figures measured on those tracks under the fitted
-//! table. It is the task's second table, [`Helium26Task`]'s `helium_26`, from
-//! `manifests/helium_26.toml` at revision 1 with the fit's fingerprint, emitted at the version in
-//! force: the sim's tracks read it from version 26 on, behind the stellar rules' hold
-//! (`HELIUM_VERSION`), since every member of a globular cluster's second population (ΔY > 0, plan
-//! 09) moves. The bump to 26 moves `helium_26.toml`'s parameters into `helium.toml`, gives
-//! [`HeliumTask`] the second table's revision, items and fingerprint, and deletes [`Helium26Task`]
-//! with its table and lock entry.
+//! **P15.T7.b's swap.** The fit, by [`BASTI_LEAST_SQUARES`] ([`fit`]): least squares on `BaSTI`'s
+//! helium-enhanced models (Pietrinferni, Cassisi, Salaris and Castelli 2006, ApJ 642, 797, with the
+//! database's helium-enhanced extension; `data/basti_helium/`, reduced by its `reduce.py`) relative
+//! to plan 06's tracks, its figures measured on those tracks under the fitted table. It is revision
+//! 1, from `manifests/helium.toml` with the fit's fingerprint, and the sim's tracks read it at every
+//! version from 26 on. It was emitted first as a second table, `helium_26`, behind the stellar
+//! rules' hold (`HELIUM_VERSION`), and folded into this one, bit for bit, by P15.T12's check.
 
 pub mod cluster;
 pub mod figures;
@@ -28,31 +23,22 @@ pub mod grid;
 
 use std::num::NonZeroUsize;
 
-use crate::emit::{RustTable, TableItem};
 use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 
-/// The task's revision: 0, P06.T17's identity registered unchanged.
-pub const VERSION: u32 = 0;
-
-/// The second table's revision, [`Helium26Task`]'s: 1, the swap's, with the fit's fingerprint.
-pub const FITTED_VERSION: u32 = 1;
+/// The task's revision: 1, the swap's, with the fit's fingerprint (0 was P06.T17's identity,
+/// registered unchanged).
+pub const VERSION: u32 = 1;
 
 /// The manifest's key that names the method.
 pub const METHOD_KEY: &str = "method";
 
-/// The method of `manifests/helium.toml`: P06.T17's identity, emitted verbatim.
-pub const IDENTITY: &str = "identity";
-
-/// The method of `manifests/helium_26.toml`: the least-squares fit to `BaSTI`'s grid ([`fit`]).
+/// The method of `manifests/helium.toml`: the least-squares fit to `BaSTI`'s grid ([`fit`]).
 pub const BASTI_LEAST_SQUARES: &str = "basti_least_squares";
 
-/// The table's items, in order.
-pub const ITEMS: [&str; 3] = ["LOG_Z_NODES", "LIFETIME_SLOPE", "HB_TEMPERATURE_SHIFT"];
-
-/// The fitted table's items, in order: the identity's, and the envelope mass at which the hook
-/// holds the branch's shift (decision-p15-t7b-leans §8).
-pub const FITTED_ITEMS: [&str; 4] = [
+/// The table's items, in order: P06.T17's three, and the envelope mass at which the hook holds the
+/// branch's shift (decision-p15-t7b-leans §8).
+pub const ITEMS: [&str; 4] = [
     "LOG_Z_NODES",
     "LIFETIME_SLOPE",
     "HB_TEMPERATURE_SHIFT",
@@ -75,8 +61,8 @@ const SIGNS: [&str; 3] = [
 
 /// P06.T17's body, byte for byte: its three items, their doc comments and their values.
 ///
-/// Every coefficient is zero. The identity's run emits it verbatim, so that registering the table
-/// moves no byte of it.
+/// Every coefficient is zero. The fitted table keeps its `LOG_Z_NODES` item as it is here
+/// ([`fit::nodes_item`]): plan 06's nodes are not fitted.
 pub const IDENTITY_BODY: &str = r"/// The metallicities at which [`LIFETIME_SLOPE`] is given, log₁₀ Z, increasing: \[Fe/H\] = −2.2,
 /// −1.6, −1.0 and −0.5 at Z☉ = 0.02, the range plan 15's P15.T7 fits over.
 pub const LOG_Z_NODES: [f64; 4] = [
@@ -98,57 +84,17 @@ pub const LIFETIME_SLOPE: [[f64; 3]; 4] = [[0.0; 3]; 4];
 pub const HB_TEMPERATURE_SHIFT: [f64; 2] = [0.0; 2];
 ";
 
-/// The identity's table: P06.T17's summary and body, with notes that say it is registered
-/// unchanged and where its fit is.
+/// The refusal of a manifest whose `method` is not the fit's.
 #[must_use]
-pub fn identity_table() -> RustTable {
-    let notes = [
-        "Provisional (P06.T17): plan 06's identity, every coefficient zero, which P06.T17 committed by",
-        "hand and plan 15's P15.T7.b registered with the fitting toolchain unchanged. The track applies",
-        "the correction only where ΔY > 0, so every star the grid places (ΔY = 0) is bit-identical",
-        "whatever the table holds. P15.T7.b fits the table to the helium-enhanced stellar models of",
-        "Pietrinferni et al. (2006) from `manifests/helium.production.toml`, to a scratch path; the",
-        "swap moves that fit here, in this shape, with a generator-version bump (members of globular",
-        "clusters' second populations have ΔY > 0, plan 09).",
-        "",
-    ];
-    RustTable {
-        summary: SUMMARY.iter().map(|&l| l.to_owned()).collect(),
-        notes: notes.iter().chain(&SIGNS).map(|&l| l.to_owned()).collect(),
-        items: vec![TableItem::Source(IDENTITY_BODY.to_owned())],
-    }
+fn other_method() -> RunTaskError {
+    ManifestParamError::new(
+        METHOD_KEY,
+        &format!("\"{BASTI_LEAST_SQUARES}\" (P15.T7.b's fit)"),
+    )
+    .into()
 }
 
-/// The identity's run: [`identity_table`], provisional by P06.T17. Its manifest holds `method`
-/// alone.
-fn identity(manifest: &Manifest) -> Result<TaskOutput, RunTaskError> {
-    if let Some(extra) = manifest.params().keys().find(|k| *k != METHOD_KEY) {
-        return Err(
-            ManifestParamError::new(extra, "absent: the identity reads no such key").into(),
-        );
-    }
-    Ok(TaskOutput {
-        table: identity_table(),
-        source: "plan 06's P06.T17, the identity, with the expected signs: helium burns hydrogen \
-                 faster, so a helium excess shortens the main sequence and the giant branch, and \
-                 a helium-rich horizontal-branch star is bluer at the same luminosity"
-            .to_owned(),
-        acceptance: "the identity: every coefficient zero, so no star moves; P15.T7.b's fit to \
-                     the helium-enhanced models of Pietrinferni et al. (2006) is held for the swap"
-            .to_owned(),
-        provisional: Some("P06.T17"),
-    })
-}
-
-/// The refusal of a manifest whose `method` is not `expected`, the one method a table's task runs,
-/// naming where the other method's table is.
-#[must_use]
-fn other_method(expected: &str, other: &str) -> RunTaskError {
-    ManifestParamError::new(METHOD_KEY, &format!("\"{expected}\" ({other})")).into()
-}
-
-/// The task: P15.T7.b's registration of P06.T17's identity, fast and provisional. Its fit is
-/// [`Helium26Task`]'s.
+/// The task: P15.T7.b's fit of the helium-excess table, fast.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct HeliumTask;
 
@@ -173,52 +119,6 @@ impl FitTask for HeliumTask {
         &ITEMS
     }
 
-    /// None at revision 0: the identity reads nothing of the generator. The swap's revision 1
-    /// gains the probes the fit reads of plan 06's tracks (P15.T7.b's record, "For the swap").
-    fn fingerprint(&self) -> SimFingerprint {
-        SimFingerprint::new(Vec::new())
-    }
-
-    /// The identity for `method = "identity"`; any other manifest is refused, the fit's too,
-    /// which is `helium_26`'s until the bump to 26.
-    fn run(&self, manifest: &Manifest, _threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
-        check_manifest(self, manifest)?;
-        match manifest.str(METHOD_KEY)? {
-            IDENTITY => identity(manifest),
-            _ => Err(other_method(
-                IDENTITY,
-                "P06.T17's table; P15.T7.b's fit is `helium_26`'s",
-            )),
-        }
-    }
-}
-
-/// The task's second table, `helium_26`: P15.T7.b's fit, fast, which the sim's tracks read from
-/// version 26 on (the stellar rules' hold, `HELIUM_VERSION`), emitted at the version in force.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct Helium26Task;
-
-impl FitTask for Helium26Task {
-    fn name(&self) -> &'static str {
-        "helium_26"
-    }
-
-    fn class(&self) -> TaskClass {
-        TaskClass::Fast
-    }
-
-    fn table_path(&self) -> &'static str {
-        "helium_26.rs"
-    }
-
-    fn revision(&self) -> u32 {
-        FITTED_VERSION
-    }
-
-    fn items(&self) -> &'static [&'static str] {
-        &FITTED_ITEMS
-    }
-
     /// The probes the fit reads of the sim (P15.T7.b's record, "For the swap" 4; Design note 7):
     /// [`fit::fingerprint_probes`].
     fn fingerprint(&self) -> SimFingerprint {
@@ -230,7 +130,7 @@ impl FitTask for Helium26Task {
         check_manifest(self, manifest)?;
         match manifest.str(METHOD_KEY)? {
             BASTI_LEAST_SQUARES => fit::run(manifest, self.name()),
-            _ => Err(other_method(BASTI_LEAST_SQUARES, "P15.T7.b's fit")),
+            _ => Err(other_method()),
         }
     }
 }
@@ -241,89 +141,53 @@ mod tests {
 
     use super::*;
 
-    /// A manifest of `text`.
-    fn manifest(text: &str) -> Manifest {
-        Manifest::from_bytes(Path::new("helium.toml"), text.as_bytes().to_vec())
-            .expect("the test's manifest parses")
-    }
-
     /// The parameter error of a run on `text`.
     fn param_error(text: &str) -> ManifestParamError {
-        match HeliumTask.run(&manifest(text), NonZeroUsize::MIN) {
+        let manifest = Manifest::from_bytes(Path::new("helium.toml"), text.as_bytes().to_vec())
+            .expect("the test's manifest parses");
+        match HeliumTask.run(&manifest, NonZeroUsize::MIN) {
             Err(RunTaskError::Param(e)) => e,
             other => panic!("expected a parameter error, got {other:?}"),
         }
     }
 
-    /// The identity emits P06.T17's body verbatim and declares the three items, provisionally,
-    /// and reads nothing of the generator.
+    /// P06.T17's body declares the first three items, the fitted table's `LOG_Z_NODES` among
+    /// them.
     #[test]
-    fn the_identity_emits_p06_t17s_body_provisionally() {
-        let output = HeliumTask
-            .run(
-                &manifest("task = \"helium\"\n[params]\nmethod = \"identity\"\n"),
-                NonZeroUsize::MIN,
-            )
-            .unwrap();
-        assert_eq!(output.provisional, Some("P06.T17"));
-        assert_eq!(output.table, identity_table());
-        assert_eq!(output.table.body().unwrap(), format!("\n{IDENTITY_BODY}"));
+    fn p06_t17s_body_declares_the_first_three_items() {
         let declared: Vec<&str> = IDENTITY_BODY
             .lines()
             .filter_map(|l| l.strip_prefix("pub const "))
             .filter_map(|l| l.split(':').next())
             .collect();
-        assert_eq!(declared, ITEMS);
-        assert!(HeliumTask.fingerprint().is_empty());
-    }
-
-    #[test]
-    fn the_identity_refuses_a_parameter_it_does_not_read() {
-        assert_eq!(
-            param_error("task = \"helium\"\n[params]\nmethod = \"identity\"\nmass_min = 0.6\n"),
-            ManifestParamError::new("mass_min", "absent: the identity reads no such key")
-        );
+        assert_eq!(declared, ITEMS[..3]);
     }
 
     #[test]
     fn a_manifest_of_another_method_is_refused() {
-        let identity = ManifestParamError::new(
-            METHOD_KEY,
-            "\"identity\" (P06.T17's table; P15.T7.b's fit is `helium_26`'s)",
+        let fit = ManifestParamError::new(METHOD_KEY, "\"basti_least_squares\" (P15.T7.b's fit)");
+        assert_eq!(
+            param_error("task = \"helium\"\n[params]\nmethod = \"identity\"\n"),
+            fit
         );
         assert_eq!(
             param_error("task = \"helium\"\n[params]\nmethod = \"spline\"\n"),
-            identity
-        );
-        assert_eq!(
-            param_error("task = \"helium\"\n[params]\nmethod = \"basti_least_squares\"\n"),
-            identity
+            fit
         );
         assert_eq!(
             param_error("task = \"helium\"\n[params]\n"),
             ManifestParamError::new(METHOD_KEY, "a string")
         );
-        let fitted = Helium26Task.run(
-            &Manifest::from_bytes(
-                Path::new("helium_26.toml"),
-                b"task = \"helium_26\"\n[params]\nmethod = \"identity\"\n".to_vec(),
-            )
-            .unwrap(),
-            NonZeroUsize::MIN,
-        );
-        match fitted {
-            Err(RunTaskError::Param(e)) => assert_eq!(
-                e,
-                ManifestParamError::new(METHOD_KEY, "\"basti_least_squares\" (P15.T7.b's fit)")
-            ),
-            other => panic!("expected a parameter error, got {other:?}"),
-        }
     }
 
     #[test]
     fn the_run_refuses_another_tasks_manifest() {
         let result = HeliumTask.run(
-            &manifest("task = \"streams\"\n[params]\nmethod = \"identity\"\n"),
+            &Manifest::from_bytes(
+                Path::new("helium.toml"),
+                b"task = \"streams\"\n[params]\nmethod = \"basti_least_squares\"\n".to_vec(),
+            )
+            .expect("the test's manifest parses"),
             NonZeroUsize::MIN,
         );
         assert!(
