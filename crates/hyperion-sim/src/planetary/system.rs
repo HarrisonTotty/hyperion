@@ -1869,12 +1869,13 @@ impl PlanetarySystem {
     /// The stable zones at `t`, the system's generated from `ctx`, in the order of
     /// [`zones`](Self::zones) (P14.T9.d): each birth zone with its limits widened as its bodies'
     /// orbits are, by its host's mass at birth over its mass then (design note 11), and from
-    /// generator version 27, for a zone a pair the binary engine ran bounds (a star's of the pair,
-    /// or the pair's own), intersected with Holman and Wiegert's fit on the pair's orbit and masses
-    /// then, which the fate transform unbinds its bodies at. From 27 too, they are the zones of the
+    /// generator version 27, for a zone a pair the binary engine ran bounds, Holman and Wiegert's
+    /// fit on the pair's orbit and masses then: intersected with a star's outer limit, and in place
+    /// of the pair's own inner limit, none once the pair has merged or come apart, which the fate
+    /// transform unbinds its bodies past by 10⁻⁹ of a limit. From 27 too, they are the zones of the
     /// stars the system holds at `t` (the hierarchy at `t`): a zone of a star a supernova has
-    /// released (P11.T10) is gone, its bodies with it. Before the system is born they are the
-    /// zones at birth.
+    /// released (P11.T10) is gone, its bodies with it. Before the system is born they are the zones
+    /// at birth.
     ///
     /// # Panics
     ///

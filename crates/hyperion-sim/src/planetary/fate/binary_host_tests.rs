@@ -382,8 +382,8 @@ fn the_states_of_a_paired_host_s_bodies_stay_a_prefix() {
     assert!(paired >= 30, "{paired} paired systems");
 }
 
-/// The zone of pair `k`'s stars at birth with its limits at its pair's state at the timeline's age
-/// `age` (P14.T9.d), widened by the pair's mass at birth over its mass then.
+/// The inner limit of the zone of pair `k`'s stars at its pair's state at the timeline's age `age`
+/// (P14.T9.d): the pair's P-type fit then.
 fn pair_limits_at(ctx: &SystemContext, k: usize, zone: &OrbitZone, age: f64) -> Option<Metres> {
     let state = ctx.pairs()[k].timeline().state_at(Years::new(age));
     let widening = zone.host_mass().value() / state.total_mass().value();
@@ -736,5 +736,119 @@ fn a_planet_on_its_zone_s_inner_limit_stays_while_nothing_moves_it() {
             ctx.id(),
             inner / periapsis - 1.0
         );
+    });
+}
+
+/// A circumbinary planet that survives its pair's common envelope on a near-circular orbit stays
+/// present after it (research-leans-35 §4, W2): the pair's own fit then bounds its zone from
+/// inside, not the limit at birth widened by the envelope's loss.
+/// `SystemId(0x41ffaca5ffc00008)`'s planet at 41.2 au, on a circular orbit about a pair that loses
+/// under half its mass in a common envelope, was unbound at the envelope by its zone at birth.
+#[test]
+fn a_circumbinary_planet_that_survives_a_common_envelope_stays_present_after_it() {
+    let galaxy = census_galaxy();
+    with_every_27_hold(|| {
+        let (ctx, system) = census_system(&galaxy, 0x41ff_aca5_ffc0_0008);
+        let k = ctx
+            .pairs()
+            .iter()
+            .position(|pair| {
+                pair.timeline()
+                    .segments()
+                    .iter()
+                    .any(|segment| segment.kind() == SegmentKind::CommonEnvelope)
+            })
+            .expect("a pair through a common envelope");
+        let members = pair_stars(&ctx, k);
+        let zone = system
+            .zones()
+            .iter()
+            .find(|zone| zone.members().eq(members))
+            .expect("the pair's own zone");
+        let envelope = first_segment(&ctx, k, SegmentKind::CommonEnvelope);
+        let at = clock_time(&ctx.stars()[0], Years::new(envelope)).unwrap();
+        let (before, after) = masses_across(&ctx, k, envelope);
+        let host = FateHost::evolved(&ctx, zone);
+        let just = at.checked_sub(Span::from_seconds(1)).unwrap();
+        let mut circular = 0;
+        for body in planets_of(&system, zone) {
+            let fate = BodyFate::resolve(body, &host);
+            let Some(orbit) = fate.at(just).orbit().copied() else {
+                continue;
+            };
+            if orbit.eccentricity().value() >= 0.01 {
+                continue;
+            }
+            circular += 1;
+            for t in [at, UniverseTime::EPOCH] {
+                assert_eq!(
+                    fate.at(t).state(),
+                    BodyState::Present,
+                    "{:?}: the planet at {} au through a loss from {before} to {after} M_sun: \
+                     {:?}",
+                    ctx.id(),
+                    AstronomicalUnits::from(orbit.semi_major_axis()).value(),
+                    fate.ending()
+                );
+            }
+        }
+        assert!(
+            circular > 0 && after > 0.5 * before,
+            "{:?}: {circular} near-circular planets through a loss from {before} to {after} M_sun",
+            ctx.id()
+        );
+    });
+}
+
+/// A pair bounds its own zone from inside only while it has an orbit (research-leans-35 §4, W2):
+/// just before a common envelope that ends in a merger the zone's inner limit is the pair's P-type
+/// fit on its state then alone, not the limit at birth widened, and from the merger on there is
+/// none, in the fate's reading of the zone and in [`PlanetarySystem::zones_at`]'s.
+///
+/// [`PlanetarySystem::zones_at`]: crate::planetary::system::PlanetarySystem::zones_at
+#[test]
+fn a_merged_pair_s_own_zone_has_no_inner_limit() {
+    let galaxy = galaxy();
+    let (stars, k) = first_paired_system(
+        &galaxy,
+        SEARCH,
+        PairHistory::CommonEnvelopeMerger,
+        |stars, k| has_pair_zone(&galaxy, stars, k),
+    )
+    .expect("a common-envelope merger with a zone about its pair");
+    let ctx = SystemContext::from_stars(&galaxy, &stars);
+    let zone = zone_of(&ctx, &pair_stars(&ctx, k));
+    let timeline = ctx.pairs()[k].timeline();
+    let merged = first_segment(&ctx, k, SegmentKind::Merged);
+    let limit = |age: f64| {
+        let state = timeline.state_at(Years::new(age));
+        let widening = zone.host_mass().value() / state.total_mass().value();
+        let fit = state.orbit().map(|orbit| {
+            let masses = state.stars().map(|star| star.mass().value());
+            orbit.semi_major_axis().value()
+                * crate::planetary::placement::holman_wiegert_p_type(
+                    masses[0].min(masses[1]) / (masses[0] + masses[1]),
+                    orbit.eccentricity().value(),
+                )
+        });
+        (zone.limits_at(&state, PairBound::Pair, widening).0, fit)
+    };
+    let (before, fit) = limit(first_segment(&ctx, k, SegmentKind::CommonEnvelope).next_down());
+    // The pair's fit before the envelope, bit for bit.
+    hyperion_testkit::float::assert_same_bits(
+        before.expect("a P-type limit before the envelope").value(),
+        fit.expect("a pair with an orbit before the envelope"),
+    );
+    assert_eq!(limit(merged), (None, None), "{:?}", ctx.id());
+    let at = clock_time(&ctx.stars()[0], Years::new(merged)).unwrap();
+    let system = crate::planetary::system::generate_planets(SEED, &ctx);
+    with_every_27_hold(|| {
+        assert_eq!(FateHost::evolved(&ctx, &zone).limits_at(&zone, at).0, None);
+        let now = system
+            .zones_at(&ctx, at)
+            .into_iter()
+            .find(|now| now.host() == zone.host())
+            .expect("the pair's zone after the merger");
+        assert_eq!(now.inner(), None, "{:?}", ctx.id());
     });
 }

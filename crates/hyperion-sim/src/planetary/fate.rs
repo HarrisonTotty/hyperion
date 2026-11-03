@@ -688,8 +688,9 @@ impl<'a> FateHost<'a> {
     /// The limits at `t` of `zone`, the zone at birth whose bodies the host holds, m (P14.T9.d):
     /// its birth limits widened as its bodies' orbits are, by its mass at birth over
     /// [`mass_at`](Self::mass_at) `t`, and where a pair the engine ran bounds it and the zones'
-    /// hold is lifted, intersected with Holman and Wiegert's fit on the pair's state then
-    /// ([`OrbitZone::limits_at`]).
+    /// hold is lifted, those [`OrbitZone::limits_at`] gives on the pair's state then: a star's
+    /// outer limit intersected with Holman and Wiegert's fit, the pair's own inner limit their fit
+    /// alone.
     ///
     /// # Panics
     ///

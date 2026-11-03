@@ -34341,3 +34341,16 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     model, to the bit; a changed star's remnant is the one its timeline holds at +H, born at the
     first age it is that kind (its model's death where within 10⁻⁹), at its mass then; a star
     merged away or destroyed leaves none.
+- **P14.T9.d's zone edges (lane `fix-p14-t9d-zone-edges`, 2026-11-03).** Inside the zones' hold at
+  27 (research-leans-35 §4); nothing moves at 24, 25 or 26.
+  - _Changed:_ `OrbitZone::limits_at` gives the pair's own zone its P-type fit at the evaluated
+    state alone as its inner limit, and none once the pair has no orbit; the birth limit bounds
+    placement only (lean, 2026-11-03). This replaces design note 10's intersection, and the
+    2026-11-02 lean above, for a pair's own inner limit. A body leaves its zone only past
+    `zones::ZONE_EDGE_TOLERANCE`, 10⁻⁹ of the limit (lean, 2026-11-03).
+  - _Left open (asked of main):_ a planet placed on its zone's edge is still unbound once its
+    pair's fit drifts past it (10⁻⁶–10⁻² before a common envelope, as the donor's wind shifts the
+    pair's masses and orbit): 136 per 10⁵ systems in the census, measured, which research-leans-35
+    read as rounding (lean, 2026-11-03: kept, the rule as ruled, 10⁻⁹ its only easing).
+  - _For 27's bump:_ `no_overlapping_orbits_in` checks bodies against `zones_at` to 10⁻¹², and a
+    body the fate keeps may lie up to 10⁻⁹ past an evaluated limit.

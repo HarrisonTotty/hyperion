@@ -154,8 +154,10 @@
 //! the pair's own, has its limits at a later time too: Holman and Wiegert's fits on the pair's
 //! orbit and masses then, intersected with the birth limits widened as the zone's planets' orbits
 //! are, by its host's mass at birth over its mass then (design note 10's intersection, read as a
-//! condition at each time; lean, 2026-11-02). The fate transform unbinds a body at the first time
-//! its orbit leaves them by more than `ZONE_EDGE_TOLERANCE`.
+//! condition at each time; lean, 2026-11-02). The pair's own zone's inner limit is its P-type fit
+//! then alone, and none once the pair has merged or come apart: the limit at birth bounds
+//! placement only (lean, 2026-11-03, research-leans-35 §4). The fate transform unbinds a body at
+//! the first time its orbit leaves them by more than `ZONE_EDGE_TOLERANCE`.
 //!
 //! [`StarSlot`]: crate::stellar::multiplicity::StarSlot
 
@@ -872,15 +874,17 @@ impl OrbitZone {
 
     /// The zone's inner and outer limits at a later time, m, from the host (P14.T9.d), where the
     /// pair the binary engine ran bounds it as `bound` says and is in the state `state` then: the
-    /// birth limits times `widening`, the host's mass at birth over its mass then (design note
-    /// 11's a₀ M₀ ÷ M, which a body's orbit widens by), intersected with Holman and Wiegert's fit
-    /// on the pair's orbit and masses then.
+    /// birth outer limit times `widening`, the host's mass at birth over its mass then (design
+    /// note 11's a₀ M₀ ÷ M, which a body's orbit widens by), for a star's zone intersected with
+    /// Holman and Wiegert's S-type fit on the pair's orbit and masses then; and for the pair's own
+    /// zone its P-type fit then alone as the inner limit, the limit at birth bounding placement
+    /// only (lean, research-leans-35 §4, W2).
     ///
     /// The S-type limit is a × [`holman_wiegert_s_type`] of the companion's share of the pair's
     /// mass then and its eccentricity, the P-type limit a × [`holman_wiegert_p_type`] of the
-    /// lighter star's share; a pair with no orbit then, merged or unbound, bounds nothing, and
-    /// neither does an S-type pair whose companion has no mass. A zone whose star has no mass
-    /// closes: its outer limit is zero.
+    /// lighter star's share; a pair with no orbit then, merged or unbound, bounds nothing, so that
+    /// its own zone has no inner limit, and neither does an S-type pair whose companion has no
+    /// mass. A zone whose star has no mass closes: its outer limit is zero.
     #[must_use]
     pub(crate) fn limits_at(
         &self,
@@ -888,7 +892,10 @@ impl OrbitZone {
         bound: PairBound,
         widening: f64,
     ) -> (Option<Metres>, Option<Metres>) {
-        let inner = self.inner.map(|r| r * widening);
+        let inner = match bound {
+            PairBound::Star(_) => self.inner.map(|r| r * widening),
+            PairBound::Pair => None,
+        };
         let outer = self.outer.map(|r| r * widening);
         let Some(orbit) = state.orbit() else {
             return (inner, outer);
@@ -915,8 +922,7 @@ impl OrbitZone {
                     return (inner, outer);
                 }
                 let limit = a * holman_wiegert_p_type(masses[0].min(masses[1]) / total, e);
-                let inner = inner.map_or(limit, |r| r.value().max(limit));
-                (Some(Metres::new(inner)), outer)
+                (Some(Metres::new(limit)), outer)
             }
         }
     }
