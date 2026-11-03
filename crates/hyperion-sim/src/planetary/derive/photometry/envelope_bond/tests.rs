@@ -192,56 +192,6 @@ const JUPITER: f64 = 0.5003;
 /// 0.096 ± 0.016 in CHEOPS's band, Brandeker et al. 2022, A&A 659, L4, as P14.T52.h cites them).
 const HOT_JUPITER: f64 = 0.1323;
 
-/// P14.T24.h.b part 5 is held until the 26 → 27 bump: the rules in force are the class table's,
-/// and 27's helper reaches the envelope's own.
-#[test]
-fn the_envelope_bond_is_held_only_until_the_27_bump() {
-    use crate::planetary::testing::with_every_27_hold;
-    assert!(
-        GENERATOR_VERSION < ENVELOPE_BOND_VERSION,
-        "the 26 → 27 bump puts P14.T24.h.b parts 5 to 8 on the record: delete \
-         `ENVELOPE_BOND_VERSION`, `EnvelopeBondRules` with its `ClassTable` arm and the guards in \
-         `gas_envelope_bond`, `photochem`'s chromophore column, P14.T52.d's photochemistry and \
-         assembly, the closed form's decks and hazes and `GreyProfile::in_force` and \
-         `in_force_at` (κ₁ then \
-         2.92e-3 in `ADOPTED`), the \
-         tests' `with_envelope_bond`, its switch in `with_every_27_hold`, the `ClassTable` arms \
-         of these tests, and this test"
-    );
-    assert_eq!(EnvelopeBondRules::in_force(), EnvelopeBondRules::ClassTable);
-    assert_eq!(
-        with_every_27_hold(EnvelopeBondRules::in_force),
-        EnvelopeBondRules::Own
-    );
-    assert_eq!(
-        with_every_27_hold(|| with_envelope_bond(
-            EnvelopeBondRules::ClassTable,
-            EnvelopeBondRules::in_force
-        )),
-        EnvelopeBondRules::ClassTable
-    );
-    assert_eq!(EnvelopeBondRules::in_force(), EnvelopeBondRules::ClassTable);
-}
-
-/// Under its hold a giant's passes keep T51.b's class table, to the bit: the table's four giants
-/// under every 27 hold with the class table set back are every 26 hold's.
-#[test]
-fn under_its_hold_a_giant_keeps_the_class_table_to_the_bit() {
-    use crate::planetary::derive::solar::{found, solar_system};
-    use crate::planetary::testing::with_every_27_hold;
-    let at_26 = solar_system();
-    let held =
-        with_every_27_hold(|| with_envelope_bond(EnvelopeBondRules::ClassTable, solar_system));
-    for (name, ..) in GIANTS {
-        let (a, b) = (found(&at_26, name), found(&held, name));
-        assert_same_bits(a.albedo().value(), b.albedo().value());
-        assert_same_bits(
-            a.equilibrium_temperature().value(),
-            b.equilibrium_temperature().value(),
-        );
-    }
-}
-
 /// An H₂/He column over black: brighter to the blue over the visible, bin 3 within 0.01 of one
 /// Rayleigh layer of its floor's τ there (the layering's and the pairs' share), dark beyond 1 µm
 /// under H₂–H₂'s pairs to its 100-bar floor; a column of absorbing gas dark in the infrared.

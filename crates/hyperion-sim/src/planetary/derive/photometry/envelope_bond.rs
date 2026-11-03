@@ -1,17 +1,17 @@
 //! A gas envelope's own Bond albedo (plan 14, P14.T24.h.b part 5; decision-deep-decks-split §6.6):
 //! the light its column returns from above its floor, the level where τ(550) from the top reaches
-//! 10, in place of T51.b's class table ([`giant_bond`](super::area_mix::giant_bond)), from generator
-//! version 27 ([`ENVELOPE_BOND_VERSION`]), on the snapshot path ([`gas_envelope_bond`]).
+//! 10, in place of T51.b's class table ([`giant_bond`](super::area_mix::giant_bond)), on the
+//! snapshot path ([`gas_envelope_bond`]).
 //!
-//! The same hold carries part 6, the cold giants' clouds the albedo reads, on the record and in
-//! the closed form alike: the chromophore at the disc's typical column
+//! With it come part 6, the cold giants' clouds the albedo reads, on the record and in the closed
+//! form alike: the chromophore at the disc's typical column
 //! (`photochem::CHROMOPHORE_DISC_COLUMN`), the haze above a Jupiter-like ammonia cloud
 //! (`photochem::ammonia_haze`), whose τ(550) is fitted on Jupiter's measured Bond albedo, and κ₁
-//! refitted to the Galileo probe at that albedo (`GreyProfile::in_force`). Part 7 draws an ice
+//! refitted to the Galileo probe at that albedo (`GreyProfile::ADOPTED`). Part 7 draws an ice
 //! giant's CH₄ deck as its methane layer, Irwin et al.'s (2022) Aerosol-2 of haze cores
 //! (`envelope_atmosphere::methane_layer_mode`). Part 8 lowers a cold envelope's κ₁ with its
-//! effective temperature below 120 K (`GreyProfile::in_force_at`), so that the cold giants meet
-//! their measured 1-bar temperatures.
+//! effective temperature below 120 K (`GreyProfile::at_effective_temperature`), so that the cold
+//! giants meet their measured 1-bar temperatures.
 //!
 //! # The column
 //!
@@ -78,78 +78,11 @@ use crate::substance::optics::SPECTRAL_BIN_EDGES_NM;
 use crate::substance::rayleigh::gas_cross_section;
 use crate::substance::{CondensedPhase, Element, MOLAR_GAS_CONSTANT};
 use crate::units::consts::BOLTZMANN_CONSTANT;
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 pub(crate) mod column;
 pub(crate) mod opacity;
 #[cfg(test)]
 mod tests;
-
-/// The generator version from which a gas envelope's Bond albedo is its own column's (P14.T24.h.b
-/// part 5): 27, the planetary train after 26's.
-///
-/// It is parts 5 to 8's one hold. Below it [`EnvelopeBondRules::in_force`] is
-/// [`EnvelopeBondRules::ClassTable`]: every gas envelope takes T51.b's table, the chromophore the
-/// Great Red Spot's column, no ammonia cloud a haze, κ₁ its fit at the table's albedo for every
-/// envelope and a CH₄ deck its ice, as to 26, bit for bit. 27's bump deletes this hold, [`EnvelopeBondRules`] with its `ClassTable` arm, the
-/// guards that read it (here, in `photochem`'s chromophore column, P14.T52.d's photochemistry and
-/// envelope assembly, the closed form's decks and hazes, and `GreyProfile::in_force` and
-/// `in_force_at`), the tests'
-/// switch and its tripwire
-/// (`the_envelope_bond_is_held_only_until_the_27_bump`).
-pub(crate) const ENVELOPE_BOND_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Where a gas envelope's Bond albedo comes from (its hold, [`ENVELOPE_BOND_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum EnvelopeBondRules {
-    /// Version 26's and before: T51.b's class table (and the clouds and κ₁ as they were).
-    ClassTable,
-    /// Version 27's: its own column's ([`column::snapshot_bond`]), with parts 6 and 7's clouds
-    /// and parts 6 and 8's κ₁.
-    Own,
-}
-
-impl EnvelopeBondRules {
-    /// The rules this generator version gives: the envelope's own from [`ENVELOPE_BOND_VERSION`],
-    /// the class table's below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_envelope_bond`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= ENVELOPE_BOND_VERSION {
-            Self::Own
-        } else {
-            Self::ClassTable
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The envelope albedo's rules a test sets on its thread, `None` for the version's.
-    static RULES: core::cell::Cell<Option<EnvelopeBondRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the envelope albedo's rules `rules` on this thread, for the tests to reach
-/// version 27's ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, so a test reads it inside the switch. 27's bump deletes it
-/// with the hold.
-#[cfg(test)]
-pub(crate) fn with_envelope_bond<R>(rules: EnvelopeBondRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<EnvelopeBondRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The Rayleigh law's index in wavelength over the optics' bins, 4.08: T24.h.a's local slope at
 /// 550 nm of Hansen and Travis 1974's eq. 2.30 (`area_mix`'s floor takes the same).
@@ -661,11 +594,10 @@ pub(crate) fn assemble(
     }
 }
 
-/// A gas envelope's Bond albedo under the light `shade` in the pass `inputs` describe, as the
-/// rules in force give it: T51.b's class table ([`giant_bond`]) to 26, and from
-/// [`ENVELOPE_BOND_VERSION`] its own column's ([`column::snapshot_bond`]), the class table's where
-/// the closed form gives no column (no internal heat to join an adiabat, an envelope not
-/// hydrogen-dominated, abundances refused) or its column no light (labelled).
+/// A gas envelope's Bond albedo under the light `shade` in the pass `inputs` describe: its own
+/// column's ([`column::snapshot_bond`]), T51.b's class table's ([`giant_bond`]) where the closed
+/// form gives no column (no internal heat to join an adiabat, an envelope not hydrogen-dominated,
+/// abundances refused) or its column no light (labelled).
 ///
 /// [`giant_bond`]: super::area_mix::giant_bond
 #[must_use]
@@ -674,8 +606,5 @@ pub(crate) fn gas_envelope_bond(
     inputs: &crate::planetary::derive::atmosphere::AtmosphereInputs,
 ) -> f64 {
     let table = || super::area_mix::giant_bond(shade, inputs.heated, inputs.class);
-    match EnvelopeBondRules::in_force() {
-        EnvelopeBondRules::ClassTable => table(),
-        EnvelopeBondRules::Own => column::snapshot_bond(inputs, shade).unwrap_or_else(table),
-    }
+    column::snapshot_bond(inputs, shade).unwrap_or_else(table)
 }

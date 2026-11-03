@@ -314,7 +314,6 @@ use crate::planetary::chem::photochem::{
 use crate::planetary::chem::quench::{
     ApplyQuenchError, DeriveQuenchError, EddyDiffusion, MixingColumn, Quench,
 };
-use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
 use crate::planetary::derive::radius::giant_share;
 use crate::planetary::hooks::aerosols::{
     Absorber, AerosolDeck, AerosolMode, BuildAbsorberError, CLOUD_EDDY_DIFFUSION, DECK_WIDTH,
@@ -1176,13 +1175,11 @@ impl EnvelopeAtmosphere {
             hazes,
             as_trimmed,
         )?;
-        // From 27 a CH₄ deck's particles are its methane layer's (P14.T24.h.b part 7).
-        if EnvelopeBondRules::in_force() == EnvelopeBondRules::Own {
-            let methane = by_key("CH4");
-            for mode in &mut atmosphere.modes {
-                if Some(mode.deck()) == methane {
-                    *mode = methane_layer_mode(mode)?;
-                }
+        // A CH₄ deck's particles are its methane layer's (P14.T24.h.b part 7).
+        let methane = by_key("CH4");
+        for mode in &mut atmosphere.modes {
+            if Some(mode.deck()) == methane {
+                *mode = methane_layer_mode(mode)?;
             }
         }
         Ok(atmosphere)
@@ -1805,10 +1802,9 @@ fn photochemistry(
         hazes.push((chromophore(ammonia.base())?, 1.0));
     }
     let mut modes = Vec::with_capacity(hazes.len() + 1);
-    // From 27 the same cloud carries its haze (P14.T24.h.b part 6), the NH₃ deck's second mode, so
-    // it leads the hazes: a deck's modes come before theirs.
+    // The same cloud carries its haze (P14.T24.h.b part 6), the NH₃ deck's second mode, so it
+    // leads the hazes: a deck's modes come before theirs.
     if let Some(ammonia) = cloud
-        && EnvelopeBondRules::in_force() == EnvelopeBondRules::Own
         && let Some(haze) = ammonia_haze(ammonia.base())?
     {
         modes.push(haze_mode(&haze, 1.0, profile)?);
@@ -1849,8 +1845,8 @@ fn haze_mode(
     haze_mode_at(haze, weight, |p| profile.temperature_at(p))
 }
 
-/// The mode of a CH₄ deck `mode` as its methane layer's particles draw it from generator version 27
-/// (P14.T24.h.b part 7, `ENVELOPE_BOND_VERSION`'s hold): Irwin et al.'s (2022) Aerosol-2, haze cores
+/// The mode of a CH₄ deck `mode` as its methane layer's particles draw it (P14.T24.h.b part 7):
+/// Irwin et al.'s (2022) Aerosol-2, haze cores
 /// of the ice giants' haze's material at [`METHANE_LAYER_PARTICLES`], still the deck's mode, with
 /// its τ(550), profile, coverage and temperature (labelled: the τ is the condensation loop's, for
 /// its own ice; a mode with no τ or temperature is kept as it is).

@@ -35,10 +35,10 @@
 //!   crossing is unique and the join moves continuously with its inputs.
 //! - **f = ¼** ([`MEAN_REDISTRIBUTION`]), the whole planet's mean.
 //! - **κ₁** ([`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`]), fitted through this module on the Solar System
-//!   table's Jupiter to its measured 166.1 K at 1 bar (Seiff et al. 1998), the own-model rule;
-//!   from 27 refitted at Jupiter's own Bond albedo (`GreyProfile::in_force`, P14.T24.h.b part 6),
-//!   and below a `T_eff` of 120 K lowered as (`T_eff` ÷ 120 K)^2.4 (`GreyProfile::in_force_at`,
-//!   part 8; [`COLD_OPACITY_EXPONENT`]).
+//!   table's Jupiter to its measured 166.1 K at 1 bar (Seiff et al. 1998), the own-model rule, at
+//!   Jupiter's own Bond albedo (P14.T24.h.b part 6), and below a `T_eff` of 120 K lowered as
+//!   (`T_eff` ÷ 120 K)^2.4 (`GreyProfile::at_effective_temperature`, part 8;
+//!   [`COLD_OPACITY_EXPONENT`]).
 //!
 //! `T_irr` is Guillot's T* (R* ÷ D)^½ (his Eq. 1, with `T_eq`⁴ = `T_irr`⁴ ÷ 4 for no albedo, Eq.
 //! 2), here of the starlight absorbed: `T_irr`⁴ = 4 `T_eq`⁴ ([`irradiation_temperature`]), `T_eq`
@@ -114,7 +114,6 @@ use super::{
     is_positive, segment_count,
 };
 use crate::math;
-use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
 use crate::substance::{SubstanceId, mixture_entropy_over_r, mixture_heat_capacity_over_r_at};
 use crate::units::{Kelvin, MetresPerSecondSquared, Pascals};
 
@@ -141,21 +140,17 @@ pub const OPTICAL_DEPTH_EXPONENT: f64 = 2.0;
 /// Eq. 30; its `κ_th` and `κ_v` in his §2.5; decision-p14-t24d-profile §1.3).
 pub const OPACITY_RATIO: f64 = 0.4;
 
-/// The envelope's thermal opacity at 1 bar, κ₁, m² kg⁻¹: 2.87 × 10⁻³, fitted through this module on
+/// The envelope's thermal opacity at 1 bar, κ₁, m² kg⁻¹: 2.92 × 10⁻³, fitted through this module on
 /// the Solar System table's Jupiter (its hydrogen and helium at P14.T50.b's He ÷ H₂, the record's
-/// `T_int` and `T_eq`) to the Galileo probe's 166.1 K at 1 bar (Seiff et al. 1998), at 2.8709 × 10⁻³
+/// `T_int` and `T_eq`) to the Galileo probe's 166.1 K at 1 bar (Seiff et al. 1998), at its own
+/// column's Bond albedo (P14.T24.h.b part 6: 0.500, its measured 0.503 ± 0.012), at
+/// 2.9182 × 10⁻³. At T51.b's class table's 0.480 the same fit gave 2.8709 × 10⁻³, version 26's
 /// (decision-p14-t24d-profile §1.3, its check 2.866 × 10⁻³; Robinson and Catling 2012 give
 /// 2.46 × 10⁻³ and their 2014 Table 1 3.12 × 10⁻³).
-pub const THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG: f64 = 2.87e-3;
+pub const THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG: f64 = 2.92e-3;
 
-/// κ₁ from generator version 27 (P14.T24.h.b part 6, `ENVELOPE_BOND_VERSION`'s hold), m² kg⁻¹:
-/// fitted as [`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`] is, to the Galileo probe's 166.1 K at 1 bar,
-/// on the table's Jupiter at its own column's Bond albedo (0.500, its measured 0.503 ± 0.012) in
-/// place of T51.b's class table's 0.480, at 2.9182 × 10⁻³.
-pub const THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG: f64 = 2.92e-3;
-
-/// The effective temperature below which an envelope's κ₁ falls with it from generator version 27
-/// (P14.T24.h.b part 8, `ENVELOPE_BOND_VERSION`'s hold): 120 K, a round level under the table's
+/// The effective temperature below which an envelope's κ₁ falls with it (P14.T24.h.b part 8):
+/// 120 K, a round level under the table's
 /// Jupiter's own 123.4 K, so that κ₁'s calibration on the Galileo probe stands.
 pub const COLD_OPACITY_REFERENCE: Kelvin = Kelvin::new(120.0);
 
@@ -251,42 +246,23 @@ impl GreyProfile {
         redistribution: MEAN_REDISTRIBUTION,
     };
 
-    /// Every envelope's parameters under the rules in force: [`Self::ADOPTED`] to 26, and from
-    /// P14.T24.h.b's `ENVELOPE_BOND_VERSION` its κ₁ refitted at the giants' own Bond albedos
-    /// ([`THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG`]), whose hold it shares.
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        match EnvelopeBondRules::in_force() {
-            EnvelopeBondRules::ClassTable => Self::ADOPTED,
-            EnvelopeBondRules::Own => Self {
-                thermal_opacity_m2_per_kg: THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG,
-                ..Self::ADOPTED
-            },
-        }
-    }
-
-    /// The parameters in force for an envelope of effective temperature `effective`, the
+    /// The parameters for an envelope of effective temperature `effective`, the
     /// (`T_eq`⁴ + `T_int`⁴)^¼ its caller already holds (its profile's emission, one pass, no
-    /// solve): [`Self::in_force`]'s, and from P14.T24.h.b's `ENVELOPE_BOND_VERSION` (part 8) κ₁
-    /// times (`T_eff` ÷ [`COLD_OPACITY_REFERENCE`])^β ([`COLD_OPACITY_EXPONENT`]) where `T_eff`
-    /// lies below the reference: one-sided, and continuous there.
+    /// solve): [`Self::ADOPTED`]'s, with κ₁ times (`T_eff` ÷ [`COLD_OPACITY_REFERENCE`])^β
+    /// ([`COLD_OPACITY_EXPONENT`]) where `T_eff` lies below the reference (P14.T24.h.b part 8):
+    /// one-sided, and continuous there.
     #[must_use]
-    pub(crate) fn in_force_at(effective: Kelvin) -> Self {
-        let grey = Self::in_force();
-        match EnvelopeBondRules::in_force() {
-            EnvelopeBondRules::ClassTable => grey,
-            EnvelopeBondRules::Own => {
-                let ratio = effective.value() / COLD_OPACITY_REFERENCE.value();
-                if ratio < 1.0 {
-                    Self {
-                        thermal_opacity_m2_per_kg: grey.thermal_opacity_m2_per_kg
-                            * math::powf(ratio, COLD_OPACITY_EXPONENT),
-                        ..grey
-                    }
-                } else {
-                    grey
-                }
+    pub(crate) fn at_effective_temperature(effective: Kelvin) -> Self {
+        let grey = Self::ADOPTED;
+        let ratio = effective.value() / COLD_OPACITY_REFERENCE.value();
+        if ratio < 1.0 {
+            Self {
+                thermal_opacity_m2_per_kg: grey.thermal_opacity_m2_per_kg
+                    * math::powf(ratio, COLD_OPACITY_EXPONENT),
+                ..grey
             }
+        } else {
+            grey
         }
     }
 

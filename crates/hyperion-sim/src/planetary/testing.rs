@@ -499,11 +499,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// - the equilibrium network's further carriers, `CARRIERS_VERSION` (P14.T52.e), at
 ///   `CarriersRules::Carried` through `with_carriers`: the registry's rows from 115 on, which the
 ///   network carries, P and Cl solved.
-/// - a gas envelope's own Bond albedo, `ENVELOPE_BOND_VERSION` (P14.T24.h.b part 5), at
-///   `EnvelopeBondRules::Own` through `with_envelope_bond`: its column's above its floor, in place
-///   of T51.b's class table, with part 6's chromophore at the disc's column, the haze above a
-///   Jupiter-like ammonia cloud and κ₁ refitted at Jupiter's own albedo, part 7's CH₄ deck drawn
-///   as its methane layer, and part 8's κ₁ falling with a cold envelope's effective temperature.
 /// - the coarse pass's seasonal runs extrapolated by RRE(2), `ORBIT_EXTRAPOLATION_VERSION`
 ///   (rendering plan R09, I13), at `OrbitExtrapolationRules::ReducedRank` through
 ///   `with_orbit_extrapolation`: the climate's orbits to their stop, and so every wet world's field.
@@ -566,16 +561,12 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
         RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
         with_organic_sediment, with_rayleigh_adding,
     };
-    use crate::planetary::derive::photometry::envelope_bond::{
-        EnvelopeBondRules, with_envelope_bond,
-    };
     use crate::planetary::surface::steps::climate::{
         OrbitExtrapolationRules, with_orbit_extrapolation,
     };
     use crate::substance::{CarriersRules, with_carriers};
     let run = move || with_orbit_extrapolation(OrbitExtrapolationRules::ReducedRank, run);
     let run = move || with_carriers(CarriersRules::Carried, run);
-    let run = move || with_envelope_bond(EnvelopeBondRules::Own, run);
     let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
     let run = move || with_minor_clouds(MinorCloudsRules::OwnShare, run);
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);

@@ -31,7 +31,6 @@ use crate::planetary::derive::photometry::area_mix::{
     with_haze_layer, with_icy_regolith, with_minor_clouds, with_organic_sediment,
     with_rayleigh_adding,
 };
-use crate::planetary::derive::photometry::envelope_bond::{EnvelopeBondRules, with_envelope_bond};
 use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
 use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
 use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
@@ -100,7 +99,6 @@ held_rules! {
     orbit_extrapolation: OrbitExtrapolationRules =
         OrbitExtrapolationRules::in_force => with_orbit_extrapolation,
     carriers: CarriersRules = CarriersRules::in_force => with_carriers,
-    envelope_bond: EnvelopeBondRules = EnvelopeBondRules::in_force => with_envelope_bond,
     desert: DesertRules = DesertRules::in_force => with_desert,
     steepness_tails: SteepnessTailsRules = steepness_tails_in_force => with_steepness_tails,
     steam_division: SteamDivisionRules =

@@ -190,8 +190,7 @@ fn reason(error: &DeriveEnvelopeError) -> &'static str {
 
 /// Asserts what every `Ok` envelope holds (the design's §4 item 1), the envelope `envelope` of the
 /// body `at` whose inputs were `of`: no supercritical condensable; the grey profile in force (κ₁
-/// 2.87 × 10⁻³ m² kg⁻¹ to 26 and 2.92 × 10⁻³ from 27, at most, below a `T_eff` of 120 K the cold
-/// law's, n 2, γ 0.4, f ¼); `T_int` finite and positive; `T_irr`⁴ = 4 `T_eq`⁴ (f ¼,
+/// 2.92 × 10⁻³ m² kg⁻¹, at most, below a `T_eff` of 120 K the cold law's, n 2, γ 0.4, f ¼); `T_int` finite and positive; `T_irr`⁴ = 4 `T_eq`⁴ (f ¼,
 /// so that the wire's `T_irr`⁴ = `T_eq`⁴ ÷ f) to 10⁻¹²; a finite join, the adiabat's nodes
 /// ascending from it to at least the larger of 100 bar and e^0.3 times its pressure; the 1-bar
 /// composition summing to 1 to 10⁻⁹, largest first, each at least 10⁻¹²; every mode covering the
@@ -199,29 +198,19 @@ fn reason(error: &DeriveEnvelopeError) -> &'static str {
 /// material and naming none; each deck's condensate once; the hazes' τ their modes' sum to the
 /// bit; and the abundances' He/H its input's times its rain's depletion, to the bit.
 fn check_envelope(at: &str, envelope: &Envelope, of: &EnvelopeOf) {
-    use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
     assert_eq!(envelope.supercritical(), None, "{at}");
     let atmosphere = envelope.atmosphere();
     let profile = atmosphere.profile();
     let grey = profile.grey();
     assert_same_bits(
         grey.thermal_opacity_m2_per_kg(),
-        GreyProfile::in_force_at(super::effective_temperature(
+        GreyProfile::at_effective_temperature(super::effective_temperature(
             of.equilibrium_temperature,
             atmosphere.internal_temperature(),
         ))
         .thermal_opacity_m2_per_kg(),
     );
-    let kappa = match EnvelopeBondRules::in_force() {
-        EnvelopeBondRules::ClassTable => 2.87e-3,
-        EnvelopeBondRules::Own => 2.92e-3,
-    };
-    assert!(
-        grey.thermal_opacity_m2_per_kg() < kappa + 5e-6
-            && (grey.thermal_opacity_m2_per_kg() > kappa - 5e-6
-                || EnvelopeBondRules::in_force() == EnvelopeBondRules::Own),
-        "{at}"
-    );
+    assert!(grey.thermal_opacity_m2_per_kg() < 2.92e-3 + 5e-6, "{at}");
     assert_same_bits(grey.optical_depth_exponent(), OPTICAL_DEPTH_EXPONENT);
     assert_same_bits(grey.optical_depth_exponent(), 2.0);
     assert_same_bits(grey.opacity_ratio(), OPACITY_RATIO);
@@ -1860,202 +1849,41 @@ fn under_every_26_hold_the_formation_draws_census() {
     assert!(!moved.is_empty(), "the census moves an envelope");
 }
 
-/// `seed`'s system `ctx`'s records at the epoch under every 27 hold, a gas envelope's Bond albedo
-/// under `rules` (P14.T24.h.b part 5), by body index.
-fn records_at_27(
-    seed: Seed,
-    ctx: &SystemContext,
-    rules: crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules,
-) -> Vec<(u32, BodyRecord)> {
-    use crate::planetary::derive::photometry::envelope_bond::with_envelope_bond;
+/// `seed`'s system `ctx`'s records at the epoch under every 27 hold, by body index.
+fn records_at_27(seed: Seed, ctx: &SystemContext) -> Vec<(u32, BodyRecord)> {
     use crate::planetary::testing::with_every_27_hold;
     with_every_27_hold(|| {
-        with_envelope_bond(rules, || {
-            let system = generate(seed, ctx);
-            let mut records = Vec::new();
-            walk(ctx, &system, UniverseTime::EPOCH, &mut |_, visit| {
-                records.push((u32::from(visit.body.index.get()), visit.record));
-            });
-            records
-        })
+        let system = generate(seed, ctx);
+        let mut records = Vec::new();
+        walk(ctx, &system, UniverseTime::EPOCH, &mut |_, visit| {
+            records.push((u32::from(visit.body.index.get()), visit.record));
+        });
+        records
     })
-}
-
-/// P14.T24.h.b part 5's census, the movers at 27 (the brief's): over [`thin_air_sets`] (the 400,
-/// the goldens and LOOK72's 27) at the epoch, every 27 hold against every 27 hold with the class
-/// table set back. Only gas envelopes and their satellites move: each moved envelope with its
-/// class, its `T_eq` and its Bond albedo either side, the satellites by kind, and the albedos'
-/// spread by class, printed (`--nocapture`).
-#[test]
-#[ignore = "slow: P14.T24.h.b part 5's census over 442 systems, the class table and the own albedo"]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one census, its movers and its spread printed in turn"
-)]
-fn under_every_27_hold_the_envelope_bond_moves_only_gas_envelopes_and_their_satellites() {
-    use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
-    use crate::planetary::placement::OrbitHost;
-    let sets = thin_air_sets();
-    let mut envelopes: Vec<(String, String, f64, f64, f64, f64)> = Vec::new();
-    let mut satellites = std::collections::BTreeMap::<String, usize>::new();
-    let (mut bodies, mut unmoved_envelopes) = (0usize, 0usize);
-    let start = std::time::Instant::now();
-    for (set, seed, ctx) in &sets {
-        let table = records_at_27(*seed, ctx, EnvelopeBondRules::ClassTable);
-        let own = records_at_27(*seed, ctx, EnvelopeBondRules::Own);
-        assert_eq!(table.len(), own.len(), "{set} {}", ctx.id());
-        let moved_index: Vec<u32> = table
-            .iter()
-            .zip(&own)
-            .filter(|((_, a), (_, b))| format!("{a:?}") != format!("{b:?}"))
-            .map(|((index, _), _)| *index)
-            .collect();
-        for ((index, a), (other, b)) in table.iter().zip(&own) {
-            assert_eq!(index, other);
-            bodies += 1;
-            let at = format!("{set} {} {index:04x}", ctx.id());
-            // A gas envelope by its bulk's class, whether its record models its envelope or not.
-            let gas_envelope =
-                matches!(a.bulk(), Section::Ok(bulk) if !bulk.class().has_solid_surface());
-            let moved = moved_index.contains(index);
-            if gas_envelope {
-                let (Section::Ok(bulk_a), Section::Ok(bulk_b)) = (a.bulk(), b.bulk()) else {
-                    panic!("{at}: an envelope with no bulk");
-                };
-                let (Section::Ok(photometry_a), Section::Ok(photometry_b)) =
-                    (a.photometry(), b.photometry())
-                else {
-                    panic!("{at}: an envelope with no photometry");
-                };
-                if moved {
-                    let modelled = if matches!(a.envelope(), Section::Ok(_)) {
-                        ""
-                    } else {
-                        " (envelope not modelled)"
-                    };
-                    envelopes.push((
-                        at,
-                        format!("{:?}{modelled}", bulk_a.class()),
-                        bulk_a.equilibrium_temperature().value(),
-                        bulk_b.equilibrium_temperature().value(),
-                        photometry_a.bond_albedo().value(),
-                        photometry_b.bond_albedo().value(),
-                    ));
-                } else {
-                    unmoved_envelopes += 1;
-                }
-                continue;
-            }
-            if !moved {
-                continue;
-            }
-            // Anything else that moves is a satellite of a moved envelope.
-            let parent = match a.identity().parent() {
-                Some(OrbitHost::Body(parent)) => u32::from(parent.get()),
-                other => panic!(
-                    "{at}: a {:?} moves with no envelope above it ({other:?})",
-                    a.identity().kind()
-                ),
-            };
-            assert!(
-                moved_index.contains(&parent),
-                "{at}: a {:?} moves under an unmoved parent {parent:04x}",
-                a.identity().kind()
-            );
-            *satellites
-                .entry(format!("{:?}", a.identity().kind()))
-                .or_default() += 1;
-        }
-    }
-    eprintln!(
-        "census: {} systems, {bodies} bodies, {} envelopes moved, {unmoved_envelopes} unmoved, \
-         satellites moved {satellites:?}, {:?}",
-        sets.len(),
-        envelopes.len(),
-        start.elapsed()
-    );
-    let mut classes = std::collections::BTreeMap::<String, Vec<(f64, f64)>>::new();
-    for (_, class, _, _, before, after) in &envelopes {
-        classes
-            .entry(class.clone())
-            .or_default()
-            .push((*before, *after));
-    }
-    for (class, pairs) in &classes {
-        let mut after: Vec<f64> = pairs.iter().map(|&(_, a)| a).collect();
-        let mut shift: Vec<f64> = pairs.iter().map(|&(b, a)| a - b).collect();
-        after.sort_by(f64::total_cmp);
-        shift.sort_by(f64::total_cmp);
-        let at = |v: &[f64], q: f64| {
-            #[expect(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                clippy::cast_precision_loss,
-                reason = "a quantile's index of a short list"
-            )]
-            let i = ((v.len() - 1) as f64 * q).round() as usize;
-            v[i]
-        };
-        eprintln!(
-            "census {class}: {} moved; own albedo min {:.3} median {:.3} max {:.3}; shift min \
-             {:+.3} median {:+.3} max {:+.3}",
-            pairs.len(),
-            after[0],
-            at(&after, 0.5),
-            after[after.len() - 1],
-            shift[0],
-            at(&shift, 0.5),
-            shift[shift.len() - 1]
-        );
-    }
-    let mut by_shift = envelopes.clone();
-    by_shift.sort_by(|a, b| (b.3 - b.2).abs().total_cmp(&(a.3 - a.2).abs()));
-    for (at, class, t_a, t_b, a, b) in by_shift.iter().take(20) {
-        eprintln!("census mover {at} {class}: T_eq {t_a:.1} -> {t_b:.1} K, Bond {a:.3} -> {b:.3}");
-    }
-    for (at, class, t_a, t_b, a, b) in envelopes.iter().filter(|e| e.5 < 0.02) {
-        eprintln!(
-            "census darkest {at} {class}: T_eq {t_a:.1} -> {t_b:.1} K, Bond {a:.3} -> {b:.4}"
-        );
-    }
-    for (at, class, t_a, t_b, a, b) in envelopes.iter().filter(|e| e.2 >= 950.0) {
-        eprintln!("census hot {at} {class}: T_eq {t_a:.1} -> {t_b:.1} K, Bond {a:.3} -> {b:.3}");
-    }
-    assert!(!envelopes.is_empty(), "the census holds gas envelopes");
 }
 
 /// P14.T24.h.b part 5: a soot-shrouded warm sub-Neptune, the sample's 42002cb200000000 body 0300
 /// (soot τ 17 at its top, ω about 0.25, `T_eq` about 720 K), whose own column the Eddington
 /// closure returns no light from, takes the class table's albedo under every 27 hold (within its
-/// passes' fixed point, an early pass's column returning some), and its photometry a p above 0 in
-/// every band.
+/// passes' fixed point, an early pass's column returning some; not compared here, the table's arm
+/// gone with its hold): an albedo above 0, and its photometry a p above 0 in every band.
 #[test]
 fn under_every_27_hold_a_soot_shrouded_envelope_keeps_the_class_table_s_albedo() {
-    use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
     let id = crate::id::SystemId::from_raw(0x4200_2cb2_0000_0000).expect("a system's id");
     let ctx = sample()
         .iter()
         .find(|ctx| ctx.id() == id)
         .expect("the sample's system");
-    let body = |rules| {
-        records_at_27(SEED, ctx, rules)
-            .into_iter()
-            .find(|(index, _)| *index == 0x0300)
-            .map(|(_, record)| record)
-            .expect("its body 0300")
+    let own = records_at_27(SEED, ctx)
+        .into_iter()
+        .find(|(index, _)| *index == 0x0300)
+        .map(|(_, record)| record)
+        .expect("its body 0300");
+    let Section::Ok(a) = own.photometry() else {
+        panic!("its photometry")
     };
-    let (own, table) = (
-        body(EnvelopeBondRules::Own),
-        body(EnvelopeBondRules::ClassTable),
-    );
-    let (Section::Ok(a), Section::Ok(b)) = (own.photometry(), table.photometry()) else {
-        panic!("photometry either side")
-    };
-    let (own, table) = (a.bond_albedo().value(), b.bond_albedo().value());
-    assert!(
-        own > 0.0 && (own - table).abs() < 1e-6,
-        "{own} against {table}"
-    );
+    let own = a.bond_albedo().value();
+    assert!(own > 0.0, "{own}");
     let p = a.geometric_albedo();
     assert!(p.b > 0.0 && p.v > 0.0 && p.r > 0.0, "{p:?}");
 }
@@ -2064,10 +1892,10 @@ fn under_every_27_hold_a_soot_shrouded_envelope_keeps_the_class_table_s_albedo()
 /// cloud's haze as the NH₃ deck's second mode, NH₃ ice of 1 µm well mixed from the deck's base to
 /// 0.1 bar at τ(550) 10, after the decks' modes and before the hazes', counted in the deck's τ and
 /// not in the hazes'; their chromophore takes the disc's typical column. Uranus and Neptune, a CH₄
-/// deck above any NH₃, carry no such haze, and at 26 no giant does.
+/// deck above any NH₃, carry no such haze.
 #[test]
 fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
-    use crate::planetary::chem::photochem::{CHROMOPHORE_COLUMN, CHROMOPHORE_DISC_COLUMN};
+    use crate::planetary::chem::photochem::CHROMOPHORE_DISC_COLUMN;
     use crate::planetary::hooks::EnvelopeAtmosphere;
     use crate::planetary::testing::with_every_27_hold;
     use crate::units::KilogramsPerSquareMetre;
@@ -2080,10 +1908,8 @@ fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
             .collect()
     };
     for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
-        let (_, held) = table_envelope(name);
         let (_, own) = with_every_27_hold(|| table_envelope(name));
-        let (held, own) = (held.atmosphere(), own.atmosphere());
-        assert!(haze(held).is_empty(), "{name} at 26");
+        let own = own.atmosphere();
         let column = |atmosphere: &EnvelopeAtmosphere| {
             atmosphere
                 .modes()
@@ -2097,7 +1923,6 @@ fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
             assert_eq!(column(own), None, "{name}");
             continue;
         }
-        assert_same_bits(column(held).expect("a column"), CHROMOPHORE_COLUMN.value());
         assert_same_bits(
             column(own).expect("a column"),
             CHROMOPHORE_DISC_COLUMN.value(),
@@ -2137,8 +1962,8 @@ fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
 
 /// P14.T24.h.b part 7: under every 27 hold the table's ice giants' CH₄ decks are their methane
 /// layers, Irwin et al.'s (2022) Aerosol-2: each mode of the CH₄ deck is of the ice giants' haze's
-/// material at 0.5 µm, still names the deck, and keeps the deck's τ in the deck's sum; at 26 the
-/// deck is its CH₄ ice, and Jupiter and Saturn, with no CH₄ deck, carry no such mode.
+/// material at 0.5 µm, still names the deck, and keeps the deck's τ in the deck's sum; Jupiter and
+/// Saturn, with no CH₄ deck, carry no such mode.
 #[test]
 fn under_every_27_hold_an_ice_giant_s_methane_deck_is_its_methane_layer() {
     use crate::planetary::hooks::aerosols::ParticleSize;
@@ -2146,7 +1971,6 @@ fn under_every_27_hold_an_ice_giant_s_methane_deck_is_its_methane_layer() {
     let methane = by_key("CH4").expect("a row");
     let haze = by_key("ice_giant_haze").expect("a row");
     for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
-        let (_, held) = table_envelope(name);
         let (_, own) = with_every_27_hold(|| table_envelope(name));
         let of_deck = |atmosphere: &crate::planetary::hooks::EnvelopeAtmosphere| {
             atmosphere
@@ -2156,13 +1980,12 @@ fn under_every_27_hold_an_ice_giant_s_methane_deck_is_its_methane_layer() {
                 .copied()
                 .collect::<Vec<AerosolMode>>()
         };
-        let (held, own_modes) = (of_deck(held.atmosphere()), of_deck(own.atmosphere()));
+        let own_modes = of_deck(own.atmosphere());
         if matches!(name, "Jupiter" | "Saturn") {
-            assert!(held.is_empty() && own_modes.is_empty(), "{name}");
+            assert!(own_modes.is_empty(), "{name}");
             continue;
         }
-        assert!(!held.is_empty() && !own_modes.is_empty(), "{name}");
-        assert!(held.iter().all(|m| m.material() == methane), "{name} at 26");
+        assert!(!own_modes.is_empty(), "{name}");
         for mode in &own_modes {
             assert_eq!(mode.material(), haze, "{name}");
             match mode.size() {
@@ -2210,9 +2033,8 @@ fn under_every_27_hold_the_cold_giants_meet_their_one_bar_temperatures() {
                 .temperature_at(Pascals::new(1e5))
                 .value()
         };
-        let (_, held) = table_envelope(name);
         let (_, own) = with_every_27_hold(|| table_envelope(name));
-        let (before, after) = (one_bar(&held), one_bar(&own));
+        let after = one_bar(&own);
         let deck = own
             .atmosphere()
             .decks()
@@ -2220,8 +2042,8 @@ fn under_every_27_hold_the_cold_giants_meet_their_one_bar_temperatures() {
             .find(|d| d.condensate() == methane)
             .map(|d| d.base().value() / 1e5);
         eprintln!(
-            "{name}: T(1 bar) {before:.1} K at 26, {after:.1} K at 27, against {measured} K; its \
-             CH₄ deck at {deck:?} bar"
+            "{name}: T(1 bar) {after:.1} K at 27, against {measured} K; its CH₄ deck at {deck:?} \
+             bar"
         );
         assert!((after - measured).abs() <= 2.0 * error, "{name}: {after} K");
         if matches!(name, "Uranus" | "Neptune") {

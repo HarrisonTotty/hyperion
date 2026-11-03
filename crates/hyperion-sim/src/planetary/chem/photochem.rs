@@ -60,10 +60,10 @@
 //!   bars in the Great Red Spot and 0.7 ± 0.1 bars elsewhere on Jupiter", a Gaussian layer in ln p
 //!   above the ammonia cloud. Braude et al. retrieve it on Jupiter alone; the rule takes any giant
 //!   with an ammonia layer for a cold giant like it, with the Great Red Spot's depth (the plan's
-//!   "no deeper than about 0.2 bar") and column, Jupiter's reddest ([`CHROMOPHORE_COLUMN`]). From
-//!   generator version 27 (P14.T24.h.b part 6, `ENVELOPE_BOND_VERSION`'s hold) it takes the disc's
-//!   typical column instead ([`CHROMOPHORE_DISC_COLUMN`]), the one a whole-disc albedo reads.
-//! - **The ammonia cloud's haze** (P14.T24.h.b part 6, held at 27): small NH₃-ice particles from
+//!   "no deeper than about 0.2 bar"), and the disc's typical column (P14.T24.h.b part 6,
+//!   [`CHROMOPHORE_DISC_COLUMN`]), the one a whole-disc albedo reads, where to 26 it took Jupiter's
+//!   reddest ([`CHROMOPHORE_COLUMN`]).
+//! - **The ammonia cloud's haze** (P14.T24.h.b part 6): small NH₃-ice particles from
 //!   a cold giant's ammonia cloud to its tropopause, of Braude et al.'s 1 µm "cloud radius", whose
 //!   τ(550) is fitted on Jupiter's measured Bond albedo ([`AMMONIA_HAZE_OPTICAL_DEPTH`]). It is the
 //!   NH₃ deck's second mode, not a haze of its own material, and lies where the chromophore does.
@@ -100,7 +100,6 @@ use std::error::Error;
 use std::fmt;
 
 use crate::math;
-use crate::planetary::derive::photometry::envelope_bond::EnvelopeBondRules;
 use crate::substance::{CondensedPhase, Element, SizeDistribution, SubstanceId, by_key};
 use crate::units::{
     Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Micrometres, Pascals,
@@ -792,8 +791,8 @@ pub const ICE_GIANT_HAZE_DEPTH: (f64, Micrometres) = (0.035, Micrometres::new(0.
 /// distribution.
 pub const ICE_GIANT_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.05), 0.05);
 
-/// The particles of an ice giant's methane layer from generator version 27 (P14.T24.h.b part 7,
-/// `ENVELOPE_BOND_VERSION`'s hold): Irwin et al.'s (2022) Aerosol-2, the layer at the methane
+/// The particles of an ice giant's methane layer (P14.T24.h.b part 7): Irwin et al.'s (2022)
+/// Aerosol-2, the layer at the methane
 /// condensation level that they read as photochemical haze onto which methane condenses (recalled,
 /// with their Table 2's radius of 0.3–0.8 µm for Uranus's layer as decision-bump-plan-after-22's
 /// G2 reads it): a radius of 0.5 µm and their variance 0.05, a gamma distribution, of the ice giants'
@@ -873,20 +872,11 @@ pub const CHROMOPHORE_WIDTH: f64 = 0.25;
 /// disc-typical alternative.
 pub const CHROMOPHORE_COLUMN: KilogramsPerSquareMetre = KilogramsPerSquareMetre::new(6.3e-4);
 
-/// The chromophore's column from generator version 27 (P14.T24.h.b part 6), kg m⁻²: 24 µg cm⁻²,
+/// The chromophore's column (P14.T24.h.b part 6), kg m⁻²: 24 µg cm⁻²,
 /// the middle of Sromovsky et al.'s (2017, Icarus 291, 232) 18–30 µg cm⁻² for most of Jupiter's
 /// features, the column a whole-disc albedo reads where [`CHROMOPHORE_COLUMN`] is its reddest
 /// spot's.
 pub const CHROMOPHORE_DISC_COLUMN: KilogramsPerSquareMetre = KilogramsPerSquareMetre::new(2.4e-4);
-
-/// The chromophore's column under the rules in force: [`CHROMOPHORE_COLUMN`] to 26 and
-/// [`CHROMOPHORE_DISC_COLUMN`] from P14.T24.h.b's `ENVELOPE_BOND_VERSION`, whose hold it shares.
-fn chromophore_column() -> KilogramsPerSquareMetre {
-    match EnvelopeBondRules::in_force() {
-        EnvelopeBondRules::ClassTable => CHROMOPHORE_COLUMN,
-        EnvelopeBondRules::Own => CHROMOPHORE_DISC_COLUMN,
-    }
-}
 
 /// The chromophore's particles: Braude et al.'s selected `r_c` = 0.05 µm, a gamma distribution of
 /// "fixed variance of 0.05" (their §4.1; their Table 2 prints 0.1).
@@ -933,7 +923,7 @@ pub fn chromophore(ammonia_layer: Pascals) -> Result<Haze, EvaluateRuleError> {
             peak,
             width: CHROMOPHORE_WIDTH,
         },
-        amount: HazeAmount::ColumnMass(chromophore_column()),
+        amount: HazeAmount::ColumnMass(CHROMOPHORE_DISC_COLUMN),
     })
 }
 
@@ -950,7 +940,7 @@ pub const AMMONIA_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(1.0), 0
 /// fitted (P14.T24.h.b part 6) so that the Solar System table's Jupiter, its chromophore at
 /// [`CHROMOPHORE_DISC_COLUMN`], takes its own column's Bond albedo within its measured 0.503 ±
 /// 0.012 (Li et al. 2018, Nature Communications 9, 3709): 10 gives 0.500 and 10.5 0.503, and 10
-/// keeps κ₁'s refit on Jupiter (`GreyProfile::in_force`) mid-way in its third figure. It stands
+/// keeps κ₁'s refit on Jupiter ([`GreyProfile::ADOPTED`](crate::planetary::hooks::structure::envelope::GreyProfile::ADOPTED)) mid-way in its third figure. It stands
 /// for the bright cloud the column reads above its floor, where the decks' large particles,
 /// forward-scattering, leave Jupiter dark.
 ///

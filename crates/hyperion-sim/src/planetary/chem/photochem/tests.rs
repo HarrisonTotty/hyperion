@@ -242,7 +242,7 @@ fn the_ice_giant_haze_lies_above_the_methane_layer() {
 
 /// The cold giants' chromophore no deeper than about 0.2 bar (Braude et al. 2020): its peak at
 /// 0.2 bar over every ammonia layer deeper, and at the layer itself over a higher one, Braude et
-/// al.'s width of 0.25 in ln p, its column 6.3 × 10⁻⁴ kg m⁻².
+/// al.'s width of 0.25 in ln p, its column the disc's typical 2.4 × 10⁻⁴ kg m⁻².
 #[test]
 fn the_chromophore_lies_no_deeper_than_0_2_bar() {
     for bar in [0.05, 0.15, 0.2, 0.5, 0.7, 2.0] {
@@ -257,26 +257,24 @@ fn the_chromophore_lies_no_deeper_than_0_2_bar() {
             }
             HazeProfile::Layer { .. } => panic!("a Gaussian"),
         }
-        assert_eq!(haze.amount(), HazeAmount::ColumnMass(CHROMOPHORE_COLUMN));
+        assert_eq!(
+            haze.amount(),
+            HazeAmount::ColumnMass(CHROMOPHORE_DISC_COLUMN)
+        );
     }
 }
 
-/// From 27 (P14.T24.h.b part 6, `ENVELOPE_BOND_VERSION`'s hold) the chromophore takes the disc's
-/// typical column, 24 µg cm⁻² (Sromovsky et al. 2017's 18–30), at the same depth and width.
+/// From 27 (P14.T24.h.b part 6) the chromophore takes the disc's typical column, 24 µg cm⁻²
+/// (Sromovsky et al. 2017's 18–30), below the Great Red Spot's [`CHROMOPHORE_COLUMN`].
 #[test]
 fn from_27_the_chromophore_takes_the_disc_s_column() {
-    use crate::planetary::derive::photometry::envelope_bond::{
-        EnvelopeBondRules, with_envelope_bond,
-    };
     let layer = Pascals::new(0.7 * PASCALS_PER_BAR);
-    let held = chromophore(layer).expect("a haze");
-    let own = with_envelope_bond(EnvelopeBondRules::Own, || chromophore(layer)).expect("a haze");
-    assert_eq!(held.amount(), HazeAmount::ColumnMass(CHROMOPHORE_COLUMN));
+    let own = chromophore(layer).expect("a haze");
     assert_eq!(
         own.amount(),
         HazeAmount::ColumnMass(CHROMOPHORE_DISC_COLUMN)
     );
-    assert_eq!(held.profile(), own.profile());
+    assert!(CHROMOPHORE_DISC_COLUMN.value() < CHROMOPHORE_COLUMN.value());
     // 24 µg cm⁻² is 24 × 10⁻⁹ kg in 10⁻⁴ m².
     assert!((CHROMOPHORE_DISC_COLUMN.value() - 24e-9 / 1e-4).abs() < 1e-18);
 }

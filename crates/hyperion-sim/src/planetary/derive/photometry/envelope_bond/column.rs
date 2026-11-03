@@ -12,9 +12,10 @@
 //!   in equilibrium, CO + 3 H₂ ⇌ CH₄ + H₂O and N₂ + 3 H₂ ⇌ 2 NH₃ (P14.T49.d's constants), not
 //!   quenched as P14.T52.b's are (labelled); oxygen's silicate share, three atoms to each silicon,
 //!   is taken from the water; every other element is its atom's gas, sulphur H₂S and chlorine HCl.
-//! - **The profile**: Guillot's grey profile of P14.T24.d (`GreyProfile::in_force`,
-//!   [`GreyProfile::ADOPTED`] but κ₁) to its join, where its gradient reaches the dry adiabat's (by
-//!   [`JOIN_BISECTIONS`] bisections in ln p), and below it the adiabat stepped in ln p by
+//! - **The profile**: Guillot's grey profile of P14.T24.d
+//!   ([`GreyProfile::at_effective_temperature`], [`GreyProfile::ADOPTED`] but κ₁) to its join,
+//!   where its gradient reaches the dry adiabat's (by [`JOIN_BISECTIONS`] bisections in ln p), and
+//!   below it the adiabat stepped in ln p by
 //!   [`ADIABAT_STEP_LN_P`], `c_p` of the gas's H₂, He, CH₄, H₂O, NH₃ and CO at each step's
 //!   midpoint, its temperature the power law between steps.
 //! - **The decks** ([`CANDIDATES`], in their condensation order): each row's law aloft, its base
@@ -75,8 +76,7 @@ use crate::units::{
 };
 
 use super::{
-    Absorbers, COLUMN_TOP_PA, ColumnMode, EnvelopeBondRules, EnvelopeColumn, assemble, column_bond,
-    particle_table,
+    Absorbers, COLUMN_TOP_PA, ColumnMode, EnvelopeColumn, assemble, column_bond, particle_table,
 };
 
 /// The rows whose decks the closed form draws, in their condensation order on a solar gas
@@ -626,7 +626,7 @@ pub(crate) fn snapshot_column(inputs: &AtmosphereInputs) -> Option<EnvelopeColum
         0.25,
     );
     // The grey parameters at that effective temperature (part 8), read once for both profiles.
-    let grey = GreyProfile::in_force_at(Kelvin::new(effective));
+    let grey = GreyProfile::at_effective_temperature(Kelvin::new(effective));
     let (_, distance) = FORMED_AT
         .iter()
         .find(|(side, _)| *side == inputs.formed)
@@ -935,10 +935,8 @@ fn decks(
             Base::At(base) => base,
         };
         let mode = deck_mode((id, &vapour), base, (shape, gas), &column, dayside);
-        // From 27 a CH₄ deck's particles are its methane layer's (part 7), as on the record.
-        let mode = if id == Species::Methane.substance()
-            && EnvelopeBondRules::in_force() == EnvelopeBondRules::Own
-        {
+        // A CH₄ deck's particles are its methane layer's (part 7), as on the record.
+        let mode = if id == Species::Methane.substance() {
             mode.and_then(|mode| methane_layer_mode(&mode).ok())
         } else {
             mode
@@ -1000,9 +998,8 @@ fn hazes(
     {
         hazes.push((haze, 1.0));
     }
-    // The cloud's haze from 27 (part 6), the NH₃ deck's second mode on the record.
+    // The cloud's haze (part 6), the NH₃ deck's second mode on the record.
     if let Some(ammonia) = cloud
-        && EnvelopeBondRules::in_force() == EnvelopeBondRules::Own
         && let Ok(Some(haze)) = ammonia_haze(Pascals::new(ammonia))
     {
         hazes.push((haze, 1.0));

@@ -19,8 +19,7 @@ use crate::planetary::hooks::aerosols::{
 };
 use crate::planetary::hooks::structure::envelope::{
     EnvelopeProfile, EnvelopeProfileInputs, GreyProfile, MEAN_REDISTRIBUTION, OPACITY_RATIO,
-    OPTICAL_DEPTH_EXPONENT, THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG,
-    THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG, irradiation_temperature,
+    OPTICAL_DEPTH_EXPONENT, THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG, irradiation_temperature,
 };
 use crate::planetary::testing::network;
 use crate::substance::aloft::laws_aloft;
@@ -308,14 +307,6 @@ fn assert_kappa_is_its_fit(adopted: f64) {
     );
 }
 
-/// κ₁ is fitted through this module on the table's Jupiter to the Galileo probe's 166.1 K at 1
-/// bar: the fit lies within decision-p14-t24d-profile's 2.7–3.0 × 10⁻³ m² kg⁻¹ (its own check
-/// 2.866 × 10⁻³), and [`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`] is it to three figures.
-#[test]
-fn the_thermal_opacity_is_fitted_on_jupiter() {
-    assert_kappa_is_its_fit(THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG);
-}
-
 /// The table's Jupiter on the grey parameters `grey` matches the probe: 166.1 K at 1 bar to 0.5 K,
 /// its 22 bar within 2 K of 427.7 K (decision-p14-t24d-profile: 427.0 K), 0.1 bar at 100–120 K
 /// (110.2 K) and its join at 0.5–1.5 bar (0.902 bar).
@@ -333,59 +324,42 @@ fn assert_jupiter_follows_the_probe(grey: GreyProfile) {
     assert!((0.5..1.5).contains(&join), "the join at {join} bar");
 }
 
-/// The table's Jupiter on the adopted parameters matches the probe.
-#[test]
-fn the_table_s_jupiter_follows_the_galileo_probe() {
-    assert_jupiter_follows_the_probe(GreyProfile::ADOPTED);
-}
-
-/// Under every 27 hold (P14.T24.h.b part 6) κ₁ is refitted on the table's Jupiter at its own
-/// column's Bond albedo, [`THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG`] the fit to three
-/// figures, and the table's Jupiter on the parameters in force follows the probe as at 26.
+/// Under every 27 hold (P14.T24.h.b part 6) κ₁ is fitted on the table's Jupiter at its own
+/// column's Bond albedo, [`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`] the fit to three figures, and the
+/// table's Jupiter on the adopted parameters follows the probe.
 #[test]
 fn under_every_27_hold_the_galileo_calibration_holds_at_jupiter_s_own_albedo() {
     use crate::planetary::testing::with_every_27_hold;
     with_every_27_hold(|| {
-        assert_kappa_is_its_fit(THERMAL_OPACITY_AT_ONE_BAR_OWN_ALBEDO_M2_PER_KG);
-        assert_jupiter_follows_the_probe(GreyProfile::in_force());
+        assert_kappa_is_its_fit(THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG);
+        assert_jupiter_follows_the_probe(GreyProfile::ADOPTED);
     });
 }
 
 /// From 27 (P14.T24.h.b part 8) κ₁ falls below an effective temperature of 120 K as (`T_eff` ÷
-/// 120 K)^2.4, read from the `T_eff` its caller holds: at or above 120 K the parameters are those in
-/// force (one-sided); an envelope at `T_eff` 60 K takes 0.5^2.4 of κ₁; the law is continuous at
-/// 120 K; and below 27 every envelope takes the adopted parameters. Only κ₁ moves.
+/// 120 K)^2.4, read from the `T_eff` its caller holds: at or above 120 K the parameters are the
+/// adopted ones (one-sided); an envelope at `T_eff` 60 K takes 0.5^2.4 of κ₁; and the law is
+/// continuous at 120 K. Only κ₁ moves.
 #[test]
 fn from_27_a_cold_envelope_s_kappa_falls_with_its_effective_temperature() {
-    use crate::planetary::derive::photometry::envelope_bond::{
-        EnvelopeBondRules, with_envelope_bond,
-    };
     use crate::planetary::hooks::structure::envelope::{
         COLD_OPACITY_EXPONENT, COLD_OPACITY_REFERENCE,
     };
     let kelvin = Kelvin::new;
-    for t_eff in [60.0, 123.4, 1_000.0] {
-        assert_eq!(
-            GreyProfile::in_force_at(kelvin(t_eff)),
-            GreyProfile::ADOPTED
-        );
-    }
-    with_envelope_bond(EnvelopeBondRules::Own, || {
-        let own = GreyProfile::in_force();
-        assert_eq!(GreyProfile::in_force_at(kelvin(120.0)), own);
-        assert_eq!(GreyProfile::in_force_at(kelvin(1_000.0)), own);
-        let cold = GreyProfile::in_force_at(kelvin(60.0));
-        let want = own.thermal_opacity_m2_per_kg() * math::powf(0.5, 2.4);
-        assert!((cold.thermal_opacity_m2_per_kg() - want).abs() < 1e-15);
-        assert_same_bits(cold.optical_depth_exponent(), own.optical_depth_exponent());
-        assert_same_bits(cold.opacity_ratio(), own.opacity_ratio());
-        assert_same_bits(cold.redistribution(), own.redistribution());
-        let edge = COLD_OPACITY_REFERENCE.value();
-        let below = GreyProfile::in_force_at(kelvin(edge * (1.0 - 1e-9)));
-        let ratio = below.thermal_opacity_m2_per_kg() / own.thermal_opacity_m2_per_kg();
-        assert!((ratio - 1.0).abs() < 1e-8, "{ratio}");
-        assert_same_bits(COLD_OPACITY_EXPONENT, 2.4);
-    });
+    let own = GreyProfile::ADOPTED;
+    assert_eq!(GreyProfile::at_effective_temperature(kelvin(120.0)), own);
+    assert_eq!(GreyProfile::at_effective_temperature(kelvin(1_000.0)), own);
+    let cold = GreyProfile::at_effective_temperature(kelvin(60.0));
+    let want = own.thermal_opacity_m2_per_kg() * math::powf(0.5, 2.4);
+    assert!((cold.thermal_opacity_m2_per_kg() - want).abs() < 1e-15);
+    assert_same_bits(cold.optical_depth_exponent(), own.optical_depth_exponent());
+    assert_same_bits(cold.opacity_ratio(), own.opacity_ratio());
+    assert_same_bits(cold.redistribution(), own.redistribution());
+    let edge = COLD_OPACITY_REFERENCE.value();
+    let below = GreyProfile::at_effective_temperature(kelvin(edge * (1.0 - 1e-9)));
+    let ratio = below.thermal_opacity_m2_per_kg() / own.thermal_opacity_m2_per_kg();
+    assert!((ratio - 1.0).abs() < 1e-8, "{ratio}");
+    assert_same_bits(COLD_OPACITY_EXPONENT, 2.4);
 }
 
 /// The cold giants run warm at 1 bar on the grey profile, recorded (decision-p14-t24d-profile §1.5:
