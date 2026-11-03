@@ -3105,7 +3105,7 @@
               "water": 0.0,
               "envelope": 0.0
             },
-            "equilibrium_temperature_k": 236.76727735399726,
+            "equilibrium_temperature_k": 236.76727727217957,
             "effective_temperature_k": null
           }
         },
@@ -3145,9 +3145,9 @@
           "state": "ok",
           "value": {
             "geometric_albedo": {
-              "b": 0.279348193900695,
-              "v": 0.2283644931127354,
-              "r": 0.22305369094732297
+              "b": 0.2793481947510659,
+              "v": 0.22836449380790558,
+              "r": 0.22305369162632638
             },
             "phase_template": "earth",
             "phase_exponent": {
@@ -3156,8 +3156,8 @@
               "r": 1.0
             },
             "lunar_lambert_share": 0.0,
-            "bond_albedo": 0.3122751673262521,
-            "bond_ratio": 0.959143419155373,
+            "bond_albedo": 0.3122751682768569,
+            "bond_ratio": 0.9591434191553729,
             "provisional": false
           }
         },
@@ -3166,30 +3166,30 @@
           "value": {
             "state": "temperate",
             "material": "rock",
-            "mean_surface_temperature_k": 281.1673894344722,
-            "equator_pole_contrast_k": 34.15724181326186,
-            "day_night_contrast_k": 0.05535219049590978,
-            "surface_pressure_pa": 532386.980170652,
+            "mean_surface_temperature_k": 281.16738930968364,
+            "equator_pole_contrast_k": 34.157241765248784,
+            "day_night_contrast_k": 0.0556702691924329,
+            "surface_pressure_pa": 532386.9801661299,
             "gases": [
               {
                 "species": "N2",
-                "mole_fraction": 0.9977191664121708
+                "mole_fraction": 0.9977191664253465
               },
               {
                 "species": "H2O",
-                "mole_fraction": 0.0015536256537020058
+                "mole_fraction": 0.0015536256405166583
               },
               {
                 "species": "Ar",
-                "mole_fraction": 0.0005031160646188983
+                "mole_fraction": 0.0005031160646255424
               },
               {
                 "species": "CO2",
-                "mole_fraction": 0.00022409186950828454
+                "mole_fraction": 0.00022409186951124387
               }
             ],
-            "mean_molar_mass_g_per_mol": 28.00805483988871,
-            "heat_capacity_over_r": 3.5014402845875088,
+            "mean_molar_mass_g_per_mol": 28.00805484002068,
+            "heat_capacity_over_r": 3.5014402845762866,
             "stellar_flux_w_m2": 1036.438989212349,
             "radiation_class": "active",
             "liquid_water": true,
@@ -3199,26 +3199,26 @@
               "condensable": "H2O",
               "model": "energy_balance"
             },
-            "ocean_fraction": 0.8757721115226695,
-            "ice_fraction": 0.06769932869109829,
+            "ocean_fraction": 0.87577211138712,
+            "ice_fraction": 0.06769933018846641,
             "cloud_fraction": 0.67,
             "surface_liquids": [
               {
                 "substance": "H2O",
-                "area_fraction": 0.8757721115226695
+                "area_fraction": 0.87577211138712
               }
             ],
             "surface_ices": [
               {
                 "substance": "H2O",
-                "area_fraction": 0.06769932869109829
+                "area_fraction": 0.06769933018846641
               }
             ],
-            "sigma_h_m": 1744.9658121221803,
+            "sigma_h_m": 1744.9658121221935,
             "continental_fraction": 0.10959624985261135,
             "heat_flow_w_m2": 0.32653897619400774,
             "tectonic_regime": "mobile_lid",
-            "volcanism_level": 0.07358316113295951,
+            "volcanism_level": 0.07358316114855365,
             "outgassing_earth": 4.464075558653224,
             "magnetic_field_class": "strong",
             "surface_age_s": 51817560582936.89,
@@ -3227,7 +3227,7 @@
               "lunar_equivalent_n_1km_per_km2": 0.00004582615974059816,
               "screening": {
                 "type": "atmosphere",
-                "column_mass_kg_m2": 65165.89972373073
+                "column_mass_kg_m2": 65165.899723177194
               },
               "projectile_density_kg_m3": 3000.0,
               "k_target": 1.0,
@@ -3246,75 +3246,75 @@
             },
             "vertical_structure": {
               "alpha": 0.6,
-              "skin_temperature_k": 199.1879018099846,
+              "skin_temperature_k": 199.1879017412788,
               "adiabat": [
                 {
-                  "pressure_pa": 532386.980170652,
-                  "temperature_k": 281.1673894344722
+                  "pressure_pa": 532386.9801661299,
+                  "temperature_k": 281.16738930968364
                 },
                 {
-                  "pressure_pa": 469502.7532265312,
-                  "temperature_k": 275.1758820521182
+                  "pressure_pa": 469502.7532396085,
+                  "temperature_k": 275.1758819316855
                 },
                 {
-                  "pressure_pa": 414046.2548814309,
-                  "temperature_k": 269.3117552617426
+                  "pressure_pa": 414046.25490801304,
+                  "temperature_k": 269.3117551455369
                 },
                 {
-                  "pressure_pa": 365140.1402935398,
-                  "temperature_k": 263.57235613417544
+                  "pressure_pa": 365140.14033025416,
+                  "temperature_k": 263.57235602207277
                 },
                 {
-                  "pressure_pa": 322010.6944132762,
-                  "temperature_k": 257.9550773698337
+                  "pressure_pa": 322010.6944573583,
+                  "temperature_k": 257.955077261713
                 },
                 {
-                  "pressure_pa": 283975.5914897832,
-                  "temperature_k": 252.45735801500635
+                  "pressure_pa": 283975.5915389802,
+                  "temperature_k": 252.45735791074944
                 },
                 {
-                  "pressure_pa": 250433.10039409492,
-                  "temperature_k": 247.07668395051599
+                  "pressure_pa": 250433.10044658353,
+                  "temperature_k": 247.07668385000827
                 },
                 {
-                  "pressure_pa": 220852.5649827028,
-                  "temperature_k": 241.81058817494
+                  "pressure_pa": 220852.56503701909,
+                  "temperature_k": 241.81058807806886
                 },
                 {
-                  "pressure_pa": 194766.00889691772,
-                  "temperature_k": 236.6566509044514
+                  "pressure_pa": 194766.0089518976,
+                  "temperature_k": 236.65665081110853
                 },
                 {
-                  "pressure_pa": 171760.73198246624,
-                  "temperature_k": 231.61249951079134
+                  "pressure_pa": 171760.7320371951,
+                  "temperature_k": 231.6124994208704
                 },
                 {
-                  "pressure_pa": 151472.78120160467,
-                  "temperature_k": 226.67580831800672
+                  "pressure_pa": 151472.78125537475,
+                  "temperature_k": 226.67580823140423
                 },
                 {
-                  "pressure_pa": 133581.1927448666,
-                  "temperature_k": 221.84429827746152
+                  "pressure_pa": 133581.19279714086,
+                  "temperature_k": 221.84429819407768
                 },
                 {
-                  "pressure_pa": 117802.91425026116,
-                  "temperature_k": 217.11573653929017
+                  "pressure_pa": 117802.91430064276,
+                  "temperature_k": 217.11573645902638
                 },
                 {
-                  "pressure_pa": 103888.32679731918,
-                  "temperature_k": 212.48793593701438
+                  "pressure_pa": 103888.32684552591,
+                  "temperature_k": 212.48793585977666
                 },
                 {
-                  "pressure_pa": 91617.2958320737,
-                  "temperature_k": 207.95875440051546
+                  "pressure_pa": 91617.29587791643,
+                  "temperature_k": 207.95875432621088
                 },
                 {
-                  "pressure_pa": 80795.6885469668,
-                  "temperature_k": 203.5260943109887
+                  "pressure_pa": 80795.68859033145,
+                  "temperature_k": 203.5260942395275
                 },
                 {
-                  "pressure_pa": 71252.30261918668,
-                  "temperature_k": 199.1879018099846
+                  "pressure_pa": 71252.30266001904,
+                  "temperature_k": 199.1879017412788
                 }
               ]
             },
@@ -3327,17 +3327,17 @@
                   "shape": "sphere",
                   "size_distribution": {
                     "type": "log_normal",
-                    "effective_radius_m": 0.00004423346390964695,
+                    "effective_radius_m": 0.00004423346379585184,
                     "effective_variance": 0.6168066722416747
                   },
-                  "column_mass_kg_m2": 0.057821840943015373,
-                  "tau_550": 1.9609771271714602,
+                  "column_mass_kg_m2": 0.057821840785621505,
+                  "tau_550": 1.9609771268835552,
                   "tau_basis": "geometric_limit",
-                  "base_pa": 475666.4485574062,
-                  "top_pa": 69252.2153766562,
-                  "f_sed": 746.6974577588832,
+                  "base_pa": 475666.4485954866,
+                  "top_pa": 69252.2153884834,
+                  "f_sed": 2.378414380769236,
                   "coverage": 0.67,
-                  "temperature_k": 275.7915831967266
+                  "temperature_k": 275.7915830784936
                 },
                 {
                   "material": "H2SO4",
@@ -3352,23 +3352,23 @@
                   "column_mass_kg_m2": 3.1479110179091654e-6,
                   "tau_550": 0.009227725799937313,
                   "tau_basis": "sphere",
-                  "base_pa": 71252.30261918668,
-                  "top_pa": 14250.460523837337,
+                  "base_pa": 71252.30266001904,
+                  "top_pa": 14250.460532003808,
                   "f_sed": 0.0,
                   "coverage": 1.0,
-                  "temperature_k": 199.1879018099846
+                  "temperature_k": 199.1879017412788
                 }
               ],
               "decks": [
                 {
                   "condensate": "H2O",
                   "phase": "liquid",
-                  "base_pa": 475666.4485574062,
-                  "base_temperature_k": 275.7915831967266,
-                  "top_pa": 69252.2153766562,
-                  "vapour_mole_fraction_below": 0.0015536256537020058,
-                  "vapour_mole_fraction_above": 2.07182809778805e-6,
-                  "f_sed": 746.6974577588832,
+                  "base_pa": 475666.4485954866,
+                  "base_temperature_k": 275.7915830784936,
+                  "top_pa": 69252.2153884834,
+                  "vapour_mole_fraction_below": 0.0015536256405166583,
+                  "vapour_mole_fraction_above": 2.0718280754123307e-6,
+                  "f_sed": 746.6974538551793,
                   "extrapolated": false
                 }
               ],
@@ -3376,8 +3376,8 @@
                 {
                   "species": "SO2",
                   "column_m2": 1.0336656237572714e19,
-                  "base_pa": 532386.980170652,
-                  "top_pa": 71252.30261918668,
+                  "base_pa": 532386.9801661299,
+                  "top_pa": 71252.30266001904,
                   "profile": null
                 }
               ],
@@ -3394,18 +3394,18 @@
               {
                 "substance": "H2O",
                 "phase": "liquid",
-                "reservoir_kg_m2": 1736544.7102818901,
-                "reservoir_gel_m": 1736.4489575071289,
-                "area_fraction": 0.8757721115226695,
+                "reservoir_kg_m2": 1736544.7076332436,
+                "reservoir_gel_m": 1736.448954845199,
+                "area_fraction": 0.87577211138712,
                 "trapped_area_fraction": 0.0,
                 "seasonal": false
               },
               {
                 "substance": "H2O",
                 "phase": "solid",
-                "reservoir_kg_m2": 119776.20647920997,
-                "reservoir_gel_m": 130.6597043738197,
-                "area_fraction": 0.06769932869109829,
+                "reservoir_kg_m2": 119776.20912841013,
+                "reservoir_gel_m": 130.65970726374016,
+                "area_fraction": 0.06769933018846641,
                 "trapped_area_fraction": 0.0,
                 "seasonal": true
               }
