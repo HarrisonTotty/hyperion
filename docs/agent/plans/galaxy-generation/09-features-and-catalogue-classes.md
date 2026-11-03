@@ -5989,8 +5989,13 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     of 150, so its class kept 123 of its 626 expected.
   - _Fix._ From 27 a living class's attempt `k` draws its age on `centre.age` word `k`, as the
     remnants' do (attempt 0 unchanged): a uniform age over the ages its band lives.
-  - _Lean (2026-11-02)._ The class's count weights each age by the masses alive at it; the age is
-    uniform over the ages any is, so the counts agree and the ages lean slightly old.
+  - _Joint draw (fix-p09-centre-joint-draw, 2026-11-03; research-leans-33 overturned the lean
+    of a uniform age)._ From 27 every class's attempt `k` draws its age on word `k` and its mass
+    over its whole range, kept where that star then is of the class (living below the turn-off,
+    dead at it or above and `remnant_fits`): exact rejection, the count's mix. Test
+    `centre::members::tests::a_centre_class_s_draws_are_its_count_s_mix_of_ages_and_masses_from_27`,
+    which failed first (band-E living 18.3 Myr against 12.2; band-D white dwarfs 323 against
+    348); no centre digest at 27 moved.
   - _Test._ `centre::members::tests::a_centre_living_class_yields_its_expected_count_from_27`
     (`CentrePlacement::class_under`, split out of `candidate_under` bit for bit), which failed
     first at 123; now 562, every candidate of the class kept, within four standard deviations.
