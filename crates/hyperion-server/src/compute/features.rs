@@ -1048,13 +1048,14 @@ mod tests {
     /// on its grid's reach and then beside its interior, charged its bytes and lent again; a
     /// feature that lists none is held by its `None`; a list read before the bound is kept when
     /// the bound is stored; and a galaxy without its kinematic tables, which lists nothing, stores
-    /// nothing (P09.T37).
+    /// nothing (P09.T37). The feature classes were retargeted from 26 to 27 (train 26), so the
+    /// galaxy is 27's.
     #[test]
     fn under_every_26_hold_a_feature_s_list_is_held_beside_its_interior() {
         use hyperion_sim::GeneratorVersion;
         use hyperion_sim::galaxy::imf::MassFunctionKind;
         use hyperion_sim::galaxy::params::GalaxyParams;
-        let (seed, version) = (Seed::new(SEED), GeneratorVersion::new(26));
+        let (seed, version) = (Seed::new(SEED), GeneratorVersion::new(27));
         let params = GalaxyParams::from_seed(seed, MassFunctionKind::default());
         let bare = Galaxy::from_params_at_version(seed, params, version).expect("a drawn galaxy");
         let galaxy = bare.clone().with_full_potential();
