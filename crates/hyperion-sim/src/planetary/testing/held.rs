@@ -17,6 +17,10 @@ use hyperion_surface::material::{
 };
 
 use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
+use crate::planetary::context::{
+    BinaryHostHistoryRules, BinaryHostLightRules, BinaryHostXuvRules, with_binary_host_history,
+    with_binary_host_light, with_binary_host_xuv,
+};
 use crate::planetary::derive::atmosphere::{
     DesertRules, LineSwitchRules, MeltOxygenRules, SteamDivisionRules, with_desert,
     with_line_switch, with_melt_oxygen, with_steam_division,
@@ -28,6 +32,7 @@ use crate::planetary::derive::photometry::area_mix::{
 };
 use crate::planetary::derive::photometry::envelope_bond::{EnvelopeBondRules, with_envelope_bond};
 use crate::planetary::derive::rocky::{CoreShareRules, with_core_share};
+use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
 use crate::planetary::hooks::crust::{MinorOxidesRules, with_minor_oxides};
 use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
 use crate::planetary::hooks::resources::{ResourceRatiosRules, with_resource_ratios};
@@ -39,6 +44,7 @@ use crate::planetary::moons::tides::{
     MoonSurfaceHeatRules, PorousCoreRules, SurfaceHeatRules, with_moon_surface_heat,
     with_porous_core, with_surface_heat,
 };
+use crate::planetary::placement::zones::{BinaryHostZonesRules, with_binary_host_zones};
 use crate::planetary::surface::steps::climate::{
     OrbitExtrapolationRules, with_orbit_extrapolation,
 };
@@ -115,6 +121,14 @@ held_rules! {
     minor_oxides: MinorOxidesRules = MinorOxidesRules::in_force => with_minor_oxides,
     steam_division: SteamDivisionRules =
         SteamDivisionRules::in_force => with_steam_division,
+    binary_host_light: BinaryHostLightRules =
+        BinaryHostLightRules::in_force => with_binary_host_light,
+    binary_host_xuv: BinaryHostXuvRules = BinaryHostXuvRules::in_force => with_binary_host_xuv,
+    binary_host_history: BinaryHostHistoryRules =
+        BinaryHostHistoryRules::in_force => with_binary_host_history,
+    binary_host_fate: BinaryHostFateRules = BinaryHostFateRules::in_force => with_binary_host_fate,
+    binary_host_zones: BinaryHostZonesRules =
+        BinaryHostZonesRules::in_force => with_binary_host_zones,
 }
 
 /// `share(0)` to `share(shares − 1)` on at most `hyperion_testkit::threads::granted(reserved)`
