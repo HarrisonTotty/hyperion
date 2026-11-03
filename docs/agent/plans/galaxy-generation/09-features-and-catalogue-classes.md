@@ -6000,7 +6000,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     (`CentrePlacement::class_under`, split out of `candidate_under` bit for bit), which failed
     first at 123; now 562, every candidate of the class kept, within four standard deviations.
 - **P09.T37, the kicks' cost cut (lane `fix-p09-recent-dead`, 2026-11-03, under `feature_classes`
-  (27); no output moved at 24–27).**
+  (26), so at 26 and 27; no output moved at 24–27).**
   - _Deaths._ `FeatureLevelList::kept_deaths`: a list's kept core collapses (candidate, record,
     broken line) and their farthest offset from their lines by +H, found once with the list.
   - _Caches._ `FeatureInteriorCache::deaths` lends them apart from the list; the server holds
