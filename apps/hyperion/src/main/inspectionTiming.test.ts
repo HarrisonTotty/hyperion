@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { InspectionTimingRecord } from "../preload/api";
 import {
   buildInspectionTimingResults,
+  gpuCallKind,
   inspectionTimingMarkdown,
   inspectionTimingTraceConfig,
   type InspectionTimingResults,
@@ -178,6 +179,12 @@ const RECORD: InspectionTimingRecord = {
         destroyed: { count: 0, bytes: 0 },
         uploads: [{ name: "view star sprites", count: 4, bytes: 2_097_152 }],
       },
+      gpuCalls: [
+        { label: "bodies", call: "render pass.draw", count: 6, bytes: 0 },
+        { label: "bodies", call: "render pass.setBindGroup", count: 12, bytes: 0 },
+        { label: "bodies", call: "queue.writeBuffer", count: 2, bytes: 4_096 },
+        { label: "atmosphere view", call: "device.createBindGroup", count: 4, bytes: 0 },
+      ],
       marchSamples: 36,
       position: "6.69 Mm 023° -12°",
       statements: ["ATMOSPHERE: APPROXIMATE", "TERRAIN: STREAMING"],
@@ -282,6 +289,59 @@ describe("the frame profile's timing file (the owner's report)", () => {
         "atmosphere ray march's fill",
       ].map(isMarchKernel),
     ).toEqual([true, true, false]);
+  });
+
+  it("sums the counted WebGPU calls a draw by kind and by pass, the most first (plan R14)", () => {
+    const calls = results().windows[0]?.gpuCalls;
+    expect(calls?.perDraw).toBe(12);
+    expect(
+      calls?.kinds.filter((each) => each.perDraw > 0).map((each) => [each.kind, each.perDraw]),
+    ).toEqual([
+      ["draws", 3],
+      ["setBindGroup", 6],
+      ["writeBuffer", 1],
+      ["createBindGroup", 2],
+    ]);
+    expect(calls?.kinds.find((each) => each.kind === "writeBuffer")?.bytesPerDraw).toBe(2_048);
+    expect(calls?.passes.map((pass) => [pass.label, pass.perDraw, pass.kinds[0]?.kind])).toEqual([
+      ["bodies", 10, "setBindGroup"],
+      ["atmosphere view", 2, "createBindGroup"],
+    ]);
+    expect(
+      [
+        "render pass.drawIndexedIndirect",
+        "compute pass.dispatchWorkgroupsIndirect",
+        "compute pass.setPipeline",
+        "device.createTexture",
+        "encoder.beginComputePass",
+        "encoder.copyTextureToTexture",
+      ].map(gpuCallKind),
+    ).toEqual([
+      "draws",
+      "dispatches",
+      "setPipeline",
+      "createBuffer or createTexture",
+      "passes",
+      "other",
+    ]);
+    const markdown = inspectionTimingMarkdown(results());
+    expect(markdown).toContain("- **Every call:** 12.0 a draw of the primary");
+    expect(markdown).toContain("| writeBuffer | 1.0 | 2.0 |");
+    expect(markdown).toContain("| bodies | 10.0 | setBindGroup 6.0, draws 3.0, writeBuffer 1.0 |");
+  });
+
+  it("leaves the WebGPU calls out of a window that did not count them", () => {
+    const [window] = RECORD.windows;
+    const uncounted = window === undefined ? [] : [{ ...window, gpuCalls: null }];
+    expect(
+      readInspectionTimingRecord({ ...RECORD, windows: uncounted })?.windows[0]?.gpuCalls,
+    ).toBe(null);
+    const twice = [
+      { label: "bodies", call: "render pass.draw", count: 1, bytes: 0 },
+      { label: "bodies", call: "render pass.draw", count: 2, bytes: 0 },
+    ];
+    const repeated = window === undefined ? [] : [{ ...window, gpuCalls: twice }];
+    expect(readInspectionTimingRecord({ ...RECORD, windows: repeated })).toBeNull();
   });
 
   it("summarises no times as none", () => {

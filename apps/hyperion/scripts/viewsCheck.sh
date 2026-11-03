@@ -13,7 +13,8 @@
 #                            [--hyperion-gpu-timing]
 #                  | --atmosphere
 #                  | --inspection --universe <ID> --body <ID>
-#                    [--timing [--composite-probe sky-off|transmittance-off|per-pixel|surface-grey]]]
+#                    [--timing [--composite-probe sky-off|transmittance-off|per-pixel|surface-grey]
+#                              [--count-gpu-calls]]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --geometry, passed to the client, draws VIEW's terrain with those fields of its geometry over the
@@ -115,7 +116,11 @@
 # transmittance across from above off (transmittance-off), with that transmittance per pixel as
 # the setting's way back forms it (per-pixel), or with every drawn surface dimmed by the channels'
 # mean as the grey way back does (surface-grey; plan R08, R08.T9.c), the A/B of the composite's
-# cost; its files end -composite-<probe>, and their pictures are not a player's.
+# cost; its files end -composite-<probe>, and their pictures are not a player's. --count-gpu-calls
+# (plan R14, the owner's Mac) has that profile count every WebGPU call each window makes, by kind
+# (draws, dispatches, setPipeline, setBindGroup, writeBuffer and its bytes, bind groups and views
+# made, passes, submissions) and by pass label, a draw of the primary, in the same files; its
+# frame times then carry the counter's own cost.
 #
 # --device-pixel-ratio <N> draws a hidden run's page at a device-pixel ratio of N, 1 to 3, as a HiDPI
 # display does (the owner's Retina report, 2026-11-01): its offscreen window N times the setting's

@@ -42,6 +42,7 @@ const WINDOW: InspectionTimingWindow = {
     destroyed: { count: 0, bytes: 0 },
     uploads: [],
   },
+  gpuCalls: null,
   marchSamples: 36,
   position: null,
   statements: [],

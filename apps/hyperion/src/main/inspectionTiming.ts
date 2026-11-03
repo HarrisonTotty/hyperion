@@ -29,6 +29,7 @@ import type { TraceConfig } from "electron";
 
 import type {
   CompositeProbeName,
+  InspectionGpuCall,
   InspectionTimingMemory,
   InspectionTimingRecord,
   InspectionTimingWindow,
@@ -524,6 +525,147 @@ export function isMarchKernel(name: string): boolean {
   return name.startsWith("atmosphere ray march") && !name.startsWith("atmosphere ray march's");
 }
 
+/**
+ * The kinds a window's WebGPU calls are summed into (plan R14, the owner's Mac): the draws, the
+ * dispatches, the state a pass sets, the writes, the objects made, the passes, encoders and
+ * submissions, and the rest.
+ */
+export const GPU_CALL_KINDS = [
+  "draws",
+  "dispatches",
+  "setPipeline",
+  "setBindGroup",
+  "setVertexBuffer",
+  "setIndexBuffer",
+  "writeBuffer",
+  "writeTexture",
+  "createBindGroup",
+  "createBuffer or createTexture",
+  "createView",
+  "getBindGroupLayout",
+  "passes",
+  "encoders",
+  "submits",
+  "other",
+] as const;
+
+/** One of {@link GPU_CALL_KINDS}. */
+export type GpuCallKind = (typeof GPU_CALL_KINDS)[number];
+
+/** The kind a call, `<object>.<method>` as the counter names it, is summed into. */
+export function gpuCallKind(call: string): GpuCallKind {
+  const method = call.slice(call.lastIndexOf(".") + 1);
+  if (call.startsWith("render pass.") && method.startsWith("draw")) {
+    return "draws";
+  }
+  if (call.startsWith("compute pass.") && method.startsWith("dispatchWorkgroups")) {
+    return "dispatches";
+  }
+  switch (call) {
+    case "render pass.setPipeline":
+    case "compute pass.setPipeline":
+      return "setPipeline";
+    case "render pass.setBindGroup":
+    case "compute pass.setBindGroup":
+      return "setBindGroup";
+    case "render pass.setVertexBuffer":
+      return "setVertexBuffer";
+    case "render pass.setIndexBuffer":
+      return "setIndexBuffer";
+    case "queue.writeBuffer":
+      return "writeBuffer";
+    case "queue.writeTexture":
+      return "writeTexture";
+    case "device.createBindGroup":
+      return "createBindGroup";
+    case "device.createBuffer":
+    case "device.createTexture":
+      return "createBuffer or createTexture";
+    case "texture.createView":
+      return "createView";
+    case "pipeline.getBindGroupLayout":
+      return "getBindGroupLayout";
+    case "encoder.beginRenderPass":
+    case "encoder.beginComputePass":
+      return "passes";
+    case "device.createCommandEncoder":
+      return "encoders";
+    case "queue.submit":
+      return "submits";
+    default:
+      return "other";
+  }
+}
+
+/** A kind's calls and their bytes a draw of the primary. */
+export interface GpuCallKindFigures {
+  readonly kind: GpuCallKind;
+  readonly perDraw: number;
+  readonly bytesPerDraw: number;
+}
+
+/** A pass label's calls a draw of the primary, and its dearest kinds. */
+export interface GpuCallPassFigures {
+  readonly label: string;
+  readonly perDraw: number;
+  /** Its kinds by their calls, the most first, those it made none of left out. */
+  readonly kinds: ReadonlyArray<{ readonly kind: GpuCallKind; readonly perDraw: number }>;
+}
+
+/** A window's WebGPU calls (`--count-gpu-calls`; plan R14), each a draw of the primary. */
+export interface GpuCallFigures {
+  /** Every call a draw. */
+  readonly perDraw: number;
+  /** Each kind's, in {@link GPU_CALL_KINDS}' order. */
+  readonly kinds: ReadonlyArray<GpuCallKindFigures>;
+  /** Each pass label's, the most calls first. */
+  readonly passes: ReadonlyArray<GpuCallPassFigures>;
+  /** The counter's own tallies, as the renderer gave them. */
+  readonly calls: ReadonlyArray<InspectionGpuCall>;
+}
+
+/** A window's counted calls a draw of the primary over `draws` draws, by kind and by pass. */
+export function gpuCallFigures(
+  calls: ReadonlyArray<InspectionGpuCall>,
+  draws: number,
+): GpuCallFigures {
+  const per = (count: number): number => (draws > 0 ? count / draws : 0);
+  const kinds = GPU_CALL_KINDS.map((kind): GpuCallKindFigures => {
+    const ofKind = calls.filter((each) => gpuCallKind(each.call) === kind);
+    return {
+      kind,
+      perDraw: per(ofKind.reduce((sum, each) => sum + each.count, 0)),
+      bytesPerDraw: per(ofKind.reduce((sum, each) => sum + each.bytes, 0)),
+    };
+  });
+  const labels = [...new Set(calls.map((each) => each.label))];
+  const passes = labels
+    .map((label): GpuCallPassFigures => {
+      const ofLabel = calls.filter((each) => each.label === label);
+      return {
+        label,
+        perDraw: per(ofLabel.reduce((sum, each) => sum + each.count, 0)),
+        kinds: GPU_CALL_KINDS.map((kind) => ({
+          kind,
+          perDraw: per(
+            ofLabel
+              .filter((each) => gpuCallKind(each.call) === kind)
+              .reduce((sum, each) => sum + each.count, 0),
+          ),
+        }))
+          .filter((each) => each.perDraw > 0)
+          .toSorted((a, b) => b.perDraw - a.perDraw),
+      };
+    })
+    .toSorted((a, b) => b.perDraw - a.perDraw);
+  return {
+    perDraw: per(calls.reduce((sum, each) => sum + each.count, 0)),
+    kinds,
+    passes,
+    calls,
+  };
+}
+
 /** One window's figures. */
 export interface InspectionTimingWindowResults {
   readonly name: InspectionTimingWindowName;
@@ -561,6 +703,8 @@ export interface InspectionTimingWindowResults {
   readonly terrainShareOfGpu: number | null;
   /** What the engine wrote to the GPU and made or released over the window. */
   readonly memory: InspectionTimingMemory;
+  /** Its WebGPU calls a draw (`--count-gpu-calls`; plan R14), or `null` where none were counted. */
+  readonly gpuCalls: GpuCallFigures | null;
   /** The window's trace, reduced, or why it is missing. */
   readonly trace: Measured<ProfileTraceFigures>;
   /** The renderer's own times, as it measured them. */
@@ -674,6 +818,7 @@ function windowResults(
     untimedFrames: window.untimedFrames,
     terrainShareOfGpu: gpu.meanMs === null || !(gpu.meanMs > 0) ? null : terrainMeanMs / gpu.meanMs,
     memory: window.memory,
+    gpuCalls: window.gpuCalls === null ? null : gpuCallFigures(window.gpuCalls, draws),
     trace: trace ?? missing("no trace was recorded over the window"),
     samples: {
       intervalsMs: window.intervalsMs,
@@ -770,6 +915,56 @@ function listedPasses(passes: ReadonlyArray<PassFigures>): ReadonlyArray<PassFig
   return passes.filter((pass) => pass.shareOfGpu === null || pass.shareOfGpu >= LISTED_PASS_SHARE);
 }
 
+/** The passes the summary lists by their calls, the most first; the JSON keeps every one. */
+const LISTED_CALL_PASSES = 20;
+
+/** The kinds the summary lists of each pass, the most calls first. */
+const LISTED_CALL_KINDS = 4;
+
+/** A count a draw as the summary writes it. */
+function perDrawText(perDraw: number): string {
+  return perDraw >= 100 ? perDraw.toFixed(0) : perDraw.toFixed(1);
+}
+
+/** A window's counted WebGPU calls, by kind and by pass, as the summary lists them. */
+function gpuCallsMarkdown(calls: GpuCallFigures | null): string[] {
+  if (calls === null) {
+    return [];
+  }
+  const listed = calls.passes.slice(0, LISTED_CALL_PASSES);
+  return [
+    "### WebGPU calls (counted)",
+    "",
+    `- **Every call:** ${perDrawText(calls.perDraw)} a draw of the primary; the counter's own cost is in this window's times.`,
+    "",
+    "| Kind | Calls a draw | KiB a draw |",
+    "| --- | --- | --- |",
+    ...calls.kinds
+      .filter((each) => each.perDraw > 0)
+      .map(
+        (each) =>
+          `| ${each.kind} | ${perDrawText(each.perDraw)} | ${each.bytesPerDraw > 0 ? (each.bytesPerDraw / 1024).toFixed(1) : "—"} |`,
+      ),
+    "",
+    "| Pass | Calls a draw | The most |",
+    "| --- | --- | --- |",
+    ...listed.map(
+      (pass) =>
+        `| ${cell(pass.label)} | ${perDrawText(pass.perDraw)} | ${pass.kinds
+          .slice(0, LISTED_CALL_KINDS)
+          .map((each) => `${each.kind} ${perDrawText(each.perDraw)}`)
+          .join(", ")} |`,
+    ),
+    ...(calls.passes.length > listed.length
+      ? [
+          "",
+          `${String(calls.passes.length - listed.length)} more pass labels, of ${perDrawText(calls.passes.slice(listed.length).reduce((sum, pass) => sum + pass.perDraw, 0))} calls a draw in all, are listed in the JSON.`,
+        ]
+      : []),
+    "",
+  ];
+}
+
 /** A window's part of the summary. */
 function windowMarkdown(window: InspectionTimingWindowResults): string[] {
   const trace = window.trace;
@@ -828,6 +1023,7 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
           ),
         ]),
     "",
+    ...gpuCallsMarkdown(window.gpuCalls),
     "### Threads (trace)",
     "",
     ...(trace.value === null

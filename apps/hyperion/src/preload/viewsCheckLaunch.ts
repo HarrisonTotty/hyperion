@@ -79,19 +79,24 @@ export const NAMED_HANDOVER_LOOK_NAMES = [
 
 /**
  * `value` as the check's options, or `null` if it is not one: {@link readLaunchBase}'s, with the one
- * look (`look`) a hand-over check alone may name (R10.T15.b.2's runs), and the GPU time by pass
- * (`passTimes`, `true`) a terrain run alone may record (R14's Mac measurements).
+ * look (`look`) a hand-over check alone may name (R10.T15.b.2's runs), the GPU time by pass
+ * (`passTimes`, `true`) a terrain run alone may record (R14's Mac measurements), and the count of
+ * WebGPU calls (`countGpuCalls`, `true`) an inspection profile alone may make (plan R14).
  */
 export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   const base = readLaunchBase(value);
   if (base === null || !isRecord(value)) {
     return base;
   }
-  const { passTimes } = value;
+  const { passTimes, countGpuCalls } = value;
   if (passTimes !== undefined && (passTimes !== true || base.run !== "terrain")) {
     return null;
   }
-  const timed: ViewsCheckLaunch = passTimes === true ? { ...base, passTimes } : base;
+  if (countGpuCalls !== undefined && (countGpuCalls !== true || base.timing !== true)) {
+    return null;
+  }
+  const counted: ViewsCheckLaunch = countGpuCalls === true ? { ...base, countGpuCalls } : base;
+  const timed: ViewsCheckLaunch = passTimes === true ? { ...counted, passTimes } : counted;
   if (value["look"] === undefined) {
     return timed;
   }

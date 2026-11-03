@@ -149,6 +149,21 @@ describe("the views check's launch switch", () => {
     expect(readViewsCheckLaunch({ ...LAUNCH, compositeProbe: "sky-off" })).toBeNull();
   });
 
+  it("carries the frame profile's count of WebGPU calls, on that profile alone (plan R14)", () => {
+    const profile: ViewsCheckLaunch = {
+      ...LAUNCH,
+      run: "inspection",
+      served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+      timing: true,
+    };
+    const launch: ViewsCheckLaunch = { ...profile, countGpuCalls: true };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    expect(readViewsCheckLaunch({ ...profile, countGpuCalls: false })).toBeNull();
+    const { timing: _, ...inspection } = profile;
+    expect(readViewsCheckLaunch({ ...inspection, countGpuCalls: true })).toBeNull();
+    expect(readViewsCheckLaunch({ ...LAUNCH, countGpuCalls: true })).toBeNull();
+  });
+
   it("carries the hand-over check's one look, on a hand-over check alone (R10.T15.b.2)", () => {
     const launch: ViewsCheckLaunch = {
       ...LAUNCH,

@@ -42,6 +42,7 @@ function figures(startMs: number, endMs: number): WindowFigures {
 function profiler(
   drawMs: number,
   untimedUntilMs = Number.NEGATIVE_INFINITY,
+  counter: InspectionProfileDeps["calls"] = null,
 ): {
   readonly profile: InspectionProfiler;
   readonly calls: string[];
@@ -96,6 +97,7 @@ function profiler(
     devicePixelRatio: 1,
     setting: "high",
     timing: INSPECTION_PROFILE_TIMING,
+    calls: counter,
   };
   return { profile: new InspectionProfiler(deps), calls, marked };
 }
@@ -124,6 +126,32 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       marchSamples: 36,
       position: "28.9 Mm 268° +49°",
     });
+  });
+
+  it("counts the WebGPU calls of its draws alone, and none on a launch that does not count", async () => {
+    let nowMs = 0;
+    const said: string[] = [];
+    const counter: InspectionProfileDeps["calls"] = {
+      begin: () => {
+        said.push("begin");
+      },
+      take: () => {
+        said.push("take");
+        return [{ label: "bodies", call: "render pass.draw", count: nowMs, bytes: 0 }];
+      },
+    };
+    const counted = profiler(100, 6_000, counter);
+    await counted.profile.measure("orbit", () => {
+      nowMs = 3;
+      return PLATE();
+    });
+    expect([said, counted.profile.windows[0]?.gpuCalls]).toEqual([
+      ["begin", "take"],
+      [{ label: "bodies", call: "render pass.draw", count: 0, bytes: 0 }],
+    ]);
+    const uncounted = profiler(100);
+    await uncounted.profile.measure("orbit", PLATE);
+    expect(uncounted.profile.windows[0]?.gpuCalls).toBeNull();
   });
 
   it("waits for its frames' late pass times, and no longer than its settle", async () => {

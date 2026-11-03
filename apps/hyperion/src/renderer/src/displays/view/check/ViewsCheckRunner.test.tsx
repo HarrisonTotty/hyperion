@@ -143,7 +143,7 @@ describe("ViewsCheckRunner", () => {
       <ViewsCheckRunner
         api={api}
         probe={new ViewsProbe()}
-        run={{ kind: "inspection", requests, served: null }}
+        run={{ kind: "inspection", requests, served: null, calls: null }}
         launchMode="vulkan"
         openSystem={() => undefined}
       />,

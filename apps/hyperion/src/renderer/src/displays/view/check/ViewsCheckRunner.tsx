@@ -21,6 +21,7 @@ import {
   recordHandoverCheck,
   runHandoverCheck,
 } from "./handoverCheckRun";
+import type { GpuCallCounter } from "./gpuCallCounter";
 import type { HandoverScenes } from "./handoverScenes";
 import {
   INSPECTION_CHECK_TIMING,
@@ -58,6 +59,11 @@ export type CheckedRun =
       readonly requests: RequestClient;
       /** The body the launch names, which the preload holds an inspection launch to. */
       readonly served: ServedWorldNames | null;
+      /**
+       * The counter of the views probe's engine's WebGPU calls on a `--count-gpu-calls` launch
+       * (plan R14), whose frame profile counts each window's; `null` on any other.
+       */
+      readonly calls: GpuCallCounter | null;
     }
   | { readonly kind: "terrain"; readonly terrain: TerrainProbe }
   | {
@@ -198,6 +204,7 @@ export function ViewsCheckRunner({
                 devicePixelRatio: shared.devicePixelRatio,
                 setting: api.launch.setting,
                 timing: inspectionProfileTimingOf(INSPECTION_PROFILE_TIMING, launchMode),
+                calls: run.calls,
               })
             : null;
         ended = recordInspectionCheck(

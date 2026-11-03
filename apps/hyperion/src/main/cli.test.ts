@@ -772,6 +772,46 @@ describe("the several-views check's options", () => {
     ]);
   });
 
+  it("takes --count-gpu-calls, the frame profile's count of WebGPU calls (plan R14)", () => {
+    expect(
+      parse([
+        "--views-check",
+        "--inspection",
+        "--universe",
+        UNIVERSE,
+        "--body",
+        BODY,
+        "--timing",
+        "--count-gpu-calls",
+      ]).viewsCheck,
+    ).toEqual({
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "inspection",
+      fixture: "terrain-test",
+      served: { universe: UNIVERSE, body: BODY },
+      timing: true,
+      countGpuCalls: true,
+    });
+  });
+
+  it("refuses --count-gpu-calls without the frame profile", () => {
+    const error = refusal([
+      "--views-check",
+      "--inspection",
+      "--universe",
+      UNIVERSE,
+      "--body",
+      BODY,
+      "--count-gpu-calls",
+    ]);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      "error: --count-gpu-calls is an option of --timing, which was not given",
+    ]);
+  });
+
   it("refuses a --composite-probe that names no probe", () => {
     const error = refusal([
       "--views-check",

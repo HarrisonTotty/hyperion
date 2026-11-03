@@ -1132,6 +1132,14 @@ export interface ViewsCheckLaunch {
    */
   readonly compositeProbe?: CompositeProbeName;
   /**
+   * The frame profile's count of WebGPU calls (`--count-gpu-calls`; plan R14, the owner's Mac):
+   * present, and `true`, only on an `--inspection --timing` launch that asks for it, whose engine's
+   * device then counts every call by kind and by pass over each window
+   * ({@link InspectionTimingWindow.gpuCalls}), at a little of the main thread's time; absent on
+   * every other launch.
+   */
+  readonly countGpuCalls?: true;
+  /**
    * The one look a `--terrain --handover` launch runs (`--look`; R10.T15.b.2's runs), absent for all
    * three in order: a served look on SwiftShader at the high setting takes over an hour, so that
    * three in one launch pass its watchdog, and a look a launch makes each run resumable by look.
@@ -2148,6 +2156,21 @@ export interface InspectionTimingMemory {
   readonly uploads: ReadonlyArray<InspectionTimingUpload>;
 }
 
+/**
+ * One WebGPU call's count under one pass label over a profiled window (`--count-gpu-calls`; plan
+ * R14, the owner's Mac): the calls made in the pass, or for it (a write, a bind group or a view
+ * made before it began), its encoder's own and its submission.
+ */
+export interface InspectionGpuCall {
+  /** The pass's label, or the encoder's (`pass times`), or `(after the last pass)`. */
+  readonly label: string;
+  /** The call, `<object>.<method>`: `render pass.setBindGroup`, `queue.writeBuffer`. */
+  readonly call: string;
+  readonly count: number;
+  /** The bytes its calls wrote, for `queue.writeBuffer` and `queue.writeTexture`; 0 otherwise. */
+  readonly bytes: number;
+}
+
 /** What the renderer measured over one profiled window of the inspection run. */
 export interface InspectionTimingWindow {
   readonly name: InspectionTimingWindowName;
@@ -2172,6 +2195,11 @@ export interface InspectionTimingWindow {
   readonly untimedFrames: number;
   /** What the engine wrote to the GPU and made or released over the window. */
   readonly memory: InspectionTimingMemory;
+  /**
+   * Every WebGPU call made over the window, by pass label and call (`--count-gpu-calls`; plan R14),
+   * or `null` on a launch that did not count them.
+   */
+  readonly gpuCalls: ReadonlyArray<InspectionGpuCall> | null;
   /**
    * The samples a ray of the atmosphere's march takes at the sizes its air was drawn at
    * (`TableSizes.rayMarchSamples`: the setting's, or the low setting's while `IMAGE: DETAIL LIMITED`

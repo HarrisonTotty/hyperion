@@ -24,6 +24,7 @@ import { TABLE_SIZES } from "../../../view/atmosphere/hillaire";
 import { IMAGE_DETAIL_LIMITED } from "../../../view/budget/viewBudget";
 import type { QualitySetting } from "../../../view/quality/qualitySetting";
 import { PRIMARY_VIEW_NAME } from "../viewNames";
+import type { GpuCallCounter } from "./gpuCallCounter";
 import type { ViewsProbe } from "./viewsProbe";
 
 /** How long a profiled window lasts. */
@@ -69,6 +70,11 @@ export interface InspectionProfileDeps {
   /** The launch's quality setting, whose march's samples a window's air takes unless stepped. */
   readonly setting: QualitySetting;
   readonly timing: InspectionProfileTiming;
+  /**
+   * The counter of the engine's WebGPU calls (`--count-gpu-calls`; plan R14), whose count over
+   * each window is the window's, or `null` on a launch that does not count them.
+   */
+  readonly calls: Pick<GpuCallCounter, "begin" | "take"> | null;
 }
 
 /** What the primary's label block says as a window ends. */
@@ -104,6 +110,7 @@ export class InspectionProfiler {
     const { api, views, timing } = this.#deps;
     await api.startProfile(name);
     const startMs = this.#deps.nowMs();
+    this.#deps.calls?.begin();
     const done = (): boolean =>
       views.drawTimes(PRIMARY_VIEW_NAME, startMs, Number.POSITIVE_INFINITY).length >=
         timing.draws || this.#deps.nowMs() - startMs >= timing.maxMs;
@@ -115,10 +122,13 @@ export class InspectionProfiler {
     };
     let ending = false;
     let endMs: number;
+    let gpuCalls: InspectionTimingWindow["gpuCalls"] = null;
     let said: ProfiledPlate;
     try {
       await waited();
       endMs = this.#deps.nowMs();
+      // Over the window's draws alone, as its figures are, not the settling after them.
+      gpuCalls = this.#deps.calls?.take() ?? null;
       this.#deps.markWindow({ startMs, endMs });
       said = plate();
       // The last frames' pass times resolve a frame or more late.
@@ -163,6 +173,7 @@ export class InspectionProfiler {
       passes: views.passTimes(startMs, endMs),
       untimedFrames: figures.untimedFrames,
       memory: views.memoryTraffic(startMs, endMs),
+      gpuCalls,
       // The floor's air at the low setting's sizes while it stands stepped (the owner's report).
       marchSamples:
         TABLE_SIZES[said.statements.includes(IMAGE_DETAIL_LIMITED) ? "low" : this.#deps.setting]

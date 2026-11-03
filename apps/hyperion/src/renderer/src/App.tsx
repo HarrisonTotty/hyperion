@@ -15,6 +15,7 @@ import {
 import { ViewDisplay } from "./displays/view/ViewDisplay";
 import { type CheckedRun, ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
 import { placedAtmosphere } from "./displays/view/check/atmospherePlaces";
+import { countedEngineSource, GpuCallCounter } from "./displays/view/check/gpuCallCounter";
 import { handoverApproachFor } from "./displays/view/check/handoverGeometry";
 import {
   handoverRangeAtM,
@@ -127,9 +128,15 @@ function checkProbesOf(
   requests: RequestClient,
   served: HandoverWorld | null = null,
 ): CheckProbes {
+  // An inspection profile's `--count-gpu-calls` counts its engine's device's calls (plan R14).
+  const calls = launch.countGpuCalls === true ? new GpuCallCounter() : null;
   // An inspection profile's `--composite-probe` makes VIEW's composite under it (the owner's
   // priority, 2026-11-01).
-  const views = new ViewsProbe(undefined, undefined, launch.compositeProbe ?? null);
+  const views = new ViewsProbe(
+    calls === null ? undefined : countedEngineSource(calls),
+    undefined,
+    launch.compositeProbe ?? null,
+  );
   // A `--weathered` launch's probe serves `TEST MOON` weathered's field in TERRAIN TEST's place.
   const terrainProbe = (checkScenes: ReadonlyArray<SceneOption>): TerrainProbe =>
     new TerrainProbe(views, {
@@ -149,7 +156,7 @@ function checkProbesOf(
       };
       break;
     case "inspection":
-      run = { kind: "inspection", requests, served: launch.served ?? null };
+      run = { kind: "inspection", requests, served: launch.served ?? null, calls };
       break;
     case "terrain":
       // A `--whole` launch's looks at the whole body (plan R10, R10.T14.c), offered after the kept

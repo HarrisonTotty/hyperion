@@ -97,7 +97,9 @@
  * 2026-11-01) that profile draws the atmosphere's composite under the probe, its sky branch off, its
  * transmittance across from above off, that transmittance per pixel as the way back forms it, or
  * every drawn surface dimmed by the channels' mean as the grey way back does (plan R08, R08.T9.c),
- * for an A/B of the composite's cost; it is refused without `--timing`.
+ * for an A/B of the composite's cost; it is refused without `--timing`. With `--count-gpu-calls`
+ * too (plan R14, the owner's Mac) that profile counts every WebGPU call each window makes, by kind
+ * and by pass, at a little of the main thread's time; it is refused without `--timing`.
  *
  * `--hyperion-gpu-timing`, R01's measurement switch, which lifts the timestamps' quantization on
  * every backend but safe mode's (read from Chromium's command line, `GPU_TIMING_SWITCH`), also has a
@@ -435,6 +437,12 @@ export function buildCommand(version: string): Command {
         "the frame profile's composite probe (the owner's priority): its sky branch, or its transmittance from above, off, that per pixel, or its surfaces grey",
       ).choices(["sky-off", "transmittance-off", "per-pixel", "surface-grey"]),
     )
+    .addOption(
+      new Option(
+        "--count-gpu-calls",
+        "the frame profile's count of every WebGPU call, by kind and by pass (plan R14)",
+      ),
+    )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
     .addOption(
@@ -576,6 +584,9 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   }
   if (options["compositeProbe"] !== undefined && options["timing"] !== true) {
     command.error("error: --composite-probe is an option of --timing, which was not given");
+  }
+  if (options["countGpuCalls"] === true && options["timing"] !== true) {
+    command.error("error: --count-gpu-calls is an option of --timing, which was not given");
   }
   if (options["look"] !== undefined && options["handover"] !== true) {
     command.error("error: --look is an option of --handover, which was not given");
@@ -774,6 +785,8 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     ...(options["timing"] === true ? { timing: true } : {}),
     // Refused without `--timing` before this is reached; commander has checked its choices.
     ...compositeProbeOf(options),
+    // Refused without `--timing` before this is reached.
+    ...(options["countGpuCalls"] === true ? { countGpuCalls: true } : {}),
     // Refused without `--handover` before this is reached; commander holds it to the three names.
     ...lookOf(options),
     // The terrain run's alone; any other run takes the switch for its timestamps only.

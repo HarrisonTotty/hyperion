@@ -23,6 +23,7 @@ import type {
   HandoverSharedMeans,
   HandoverSwitchName,
   HandoverTexelRecord,
+  InspectionGpuCall,
   InspectionTimingBytes,
   InspectionTimingMemory,
   InspectionTimingPass,
@@ -1332,9 +1333,40 @@ function timingMemory(value: unknown): InspectionTimingMemory | null {
     : { uploaded, created, destroyed, uploads };
 }
 
+/** One call's count under one pass label (plan R14): a label, a call, a count and its bytes. */
+function gpuCall(value: unknown): InspectionGpuCall | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { label, call, count, bytes } = value;
+  return typeof label === "string" &&
+    label.length > 0 &&
+    typeof call === "string" &&
+    call.length > 0 &&
+    isCount(count) &&
+    isCount(bytes)
+    ? { label, call, count, bytes }
+    : null;
+}
+
+/**
+ * A window's WebGPU calls (plan R14), each label's call once, or `null` for a window that did not
+ * count them; `undefined` where the value is neither.
+ */
+function gpuCalls(value: unknown): ReadonlyArray<InspectionGpuCall> | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  const calls = listOf(value, gpuCall);
+  return calls !== null &&
+    new Set(calls.map((each) => `${each.label}\u0000${each.call}`)).size === calls.length
+    ? calls
+    : undefined;
+}
+
 /**
  * One profiled window (the owner's report): its name, an end not before its start, and its times,
- * each pass's as many as the frames timed in full, each label once.
+ * each pass's as many as the frames timed in full, each label once, and its WebGPU calls or `null`.
  */
 function timingWindow(value: unknown): InspectionTimingWindow | null {
   if (!isRecord(value)) {
@@ -1350,6 +1382,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
   const passes = listOf(value["passes"], timingPass);
   const statements = strings(value["statements"]);
   const memory = timingMemory(value["memory"]);
+  const calls = gpuCalls(value["gpuCalls"]);
   const { startMs, endMs, untimedFrames, position, marchSamples } = value;
   if (
     name === null ||
@@ -1367,6 +1400,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     new Set(passes.map((pass) => pass.label)).size !== passes.length ||
     !isCount(untimedFrames) ||
     memory === null ||
+    calls === undefined ||
     !isCount(marchSamples) ||
     marchSamples === 0 ||
     !isTextOrNull(position) ||
@@ -1387,6 +1421,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     passes,
     untimedFrames,
     memory,
+    gpuCalls: calls,
     marchSamples,
     position,
     statements,
