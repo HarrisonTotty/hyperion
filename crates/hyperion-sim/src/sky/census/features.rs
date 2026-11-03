@@ -360,12 +360,13 @@ pub fn takes_feature_members(galaxy: &Galaxy) -> bool {
 /// The range query registers the classes only from its own hold
 /// ([`registered_in`](crate::galaxy::catalogue_classes::CatalogueClassSource::registered_in),
 /// P09.T37.a), so between the two a host is in the sky and not in a range reply. No version of
-/// its own: the carve-out's and φ's tripwires cover it.
+/// its own: it follows the galaxy's rules.
 #[must_use]
 pub fn takes_hosts_of(galaxy: &Galaxy, class: ClassId) -> bool {
     match class {
         ClassId::CORE_COLLAPSE | ClassId::LUMINOUS_BLUE_VARIABLE | ClassId::TYPE_IA => {
             match galaxy.rules().carve_out {
+                #[cfg(test)]
                 CarveOutRules::Unclaimed => false,
                 CarveOutRules::Claimed => true,
             }
@@ -1699,8 +1700,9 @@ mod tests {
     /// then each host with stars the range query returns within its shells once (R06.T16.a), each
     /// property on one build of the fixture at each version from the switches, 26 and 27:
     ///
-    /// - the switches: none at 24; the carve-out's classes under its arm and not its held arm, and
-    ///   the binary classes under φ's arm and not its held arm, each whatever the other gives;
+    /// - the switches: the version's galaxy takes them; the carve-out's classes with it and not the
+    ///   tests' grid without it, and the binary classes under φ and not the tests' budget, each
+    ///   whatever the other gives;
     /// - from the Sun to 400 ly at V 11, the hosts' stars of one shell are those of a brute force
     ///   over every host the range query returns, each on its own line, every star measured (the
     ///   accreting white dwarfs' and a stellar merger's, some hundred), and those of shells to 200
@@ -1712,7 +1714,7 @@ mod tests {
     ///   century on the census of the hosts' moving lines is the brute force's still.
     #[test]
     fn the_census_takes_each_class_host_once_where_the_field_gives_them_up() {
-        assert!(!takes_class_hosts(milky_way_galaxy()));
+        assert!(takes_class_hosts(milky_way_galaxy()));
         let carved_held = Galaxy::from_params_with_rules(
             Seed::new(SEED),
             GalaxyParams::milky_way_like(),

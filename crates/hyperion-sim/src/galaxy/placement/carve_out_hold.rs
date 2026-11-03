@@ -1,5 +1,6 @@
-//! The tests of P09.T35's hold, `CARVE_OUT_VERSION` (decision-galaxy-25-train §1.5 and §1.6), the
-//! carve-out's field half: its tripwire; the version's rules (D3) and `Galaxy::with_rules`'
+//! The tests of P09.T35's carve-out, the field half, on the record from generator version 27,
+//! against the grid the tests build without it (`CarveOutRules::Unclaimed`; decision-galaxy-25-train
+//! §1.5 and §1.6): the version's rules (D3) and `Galaxy::with_rules`'
 //! refusal; layer D's ancient Type Ia; under every 26 hold, the layer-E records the classes claim,
 //! each the record the grid places without the carve-out and resolving to no such system, every
 //! other outcome the same (D2, pinned for the WebAssembly suite, D5); the same seed twice (D4); the
@@ -8,8 +9,7 @@
 //! grid's carve (research item 4 of the galaxy leans).
 //!
 //! The bit-identity of the version in force is held by the goldens, the carve-out's pre-pin
-//! (`placement/carve_out`, D1) among them. The bump to 26 deletes the tripwire and the held arm,
-//! and these become tests of the version's own galaxy.
+//! (`placement/carve_out`, D1) among them.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -32,7 +32,7 @@ use crate::galaxy::catalogue_classes::{
 };
 use crate::galaxy::displaced::hold::field_only_rules;
 use crate::galaxy::displaced::site::{
-    CARVE_OUT_VERSION, CarveOutRules, ExplosionSite, explosion_site, recent_death_claim,
+    CarveOutRules, ExplosionSite, explosion_site, recent_death_claim,
 };
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::params::GalaxyParams;
@@ -64,8 +64,8 @@ fn milky_way(rules: GalaxyRules) -> Galaxy {
         .expect("the Milky Way fixture builds")
 }
 
-/// The fixture under the generator version's rules: the held arm.
-fn held() -> &'static Galaxy {
+/// The fixture under the generator version's rules, which claim.
+fn version() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
         Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
@@ -158,30 +158,6 @@ fn carved(off: &Galaxy, on: &Galaxy, keys: &[CellKey]) -> Vec<(SystemRecord, Cla
     claimed
 }
 
-/// P09.T35 is held until the 26 → 27 bump: the rules in force are version 26's and before, under
-/// which no class claims a grid record and layer D is the budget's.
-#[test]
-fn the_carve_out_is_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < CARVE_OUT_VERSION,
-        "the 26 → 27 bump puts P09.T35 on the record with P09.T37.a's class source: the grid gives \
-         the core-collapse and luminous blue variables' classes their hosts, and layer D its \
-         ancient Type Ia. Delete `CARVE_OUT_VERSION`, `CarveOutRules` with its `Unclaimed` arm, \
-         `GalaxyRules::carve_out`, the `match`es in `recent_death_claim` and `Galaxy::build`, \
-         `Galaxy::with_rules`' refusal and this test, in the bump's own checkpoint commit (§1.6, \
-         C2)"
-    );
-    assert_eq!(held().rules().carve_out, CarveOutRules::Unclaimed);
-    assert_eq!(
-        GalaxyRules::of_version(GENERATOR_VERSION).carve_out,
-        CarveOutRules::Unclaimed
-    );
-    assert!(recent_death_claim(held().rules().carve_out).is_none());
-    assert!(recent_death_claim(CarveOutRules::Claimed).is_some());
-    let first = held().fields().component_ids().next().unwrap();
-    assert_eq!(held().layer_d_kept(first), None);
-}
-
 /// D3: a galaxy built the usual way carries the version's carve-out; one built under the
 /// version's rules explicitly is the same galaxy; and one built under every 26 hold claims, its
 /// layer D keeping each component's `1 − ancient_share` of its population, bit for bit. Plan 08's
@@ -196,7 +172,10 @@ fn a_galaxy_carries_the_version_s_carve_out() {
         GalaxyRules::of_version(GENERATOR_VERSION),
     )
     .expect("the Milky Way fixture builds");
-    assert_eq!(&explicit, held());
+    assert_eq!(&explicit, version());
+    assert_eq!(version().rules().carve_out, CarveOutRules::Claimed);
+    assert!(recent_death_claim(version().rules().carve_out).is_some());
+    assert!(recent_death_claim(CarveOutRules::Unclaimed).is_none());
     assert_eq!(
         claimed().rules(),
         GalaxyRules::every_26_hold_with_its_retargets()
@@ -345,40 +324,6 @@ fn the_classes_claim_their_hosts_from_the_grid_pinned() {
     );
     assert!(by_class.get(&Class::CoreCollapse).copied().unwrap_or(0) > 0);
     assert_eq!(digest, CLAIMED_DIGEST, "{digest:#018x}");
-}
-
-/// At the version's rules, the carve-out held until 27 with P09.T37.a's class source (train 26's
-/// retarget, 2026-11-02): each layer-E system the carve-out alone would give a class at the
-/// version's rules stays the grid's, and the range query a server builds, over the sources the
-/// galaxy's rules register (none below 27, `CatalogueClassSource::registered_in`), returns it once
-/// within a sphere of 1 ly about its epoch place. Had the carve-out been on the record at 26 with
-/// no class source, none of them would reach a range reply.
-#[test]
-fn at_the_version_s_rules_a_system_the_carve_out_would_claim_is_returned_once() {
-    use crate::galaxy::catalogue_classes::CatalogueClassSource;
-    use crate::galaxy::query::{RangeQuery, SystemSource, range_query};
-    let galaxy = held();
-    let carving = milky_way(GalaxyRules {
-        carve_out: CarveOutRules::Claimed,
-        ..GalaxyRules::of_version(GENERATOR_VERSION)
-    });
-    let claimed = carved(galaxy, &carving, &sample_cells());
-    assert!(claimed.len() > 8, "{}", claimed.len());
-    let classes = CatalogueClassSource::registered_in(galaxy);
-    assert!(classes.is_none());
-    let sources: Vec<&dyn SystemSource> = classes.iter().map(|s| s as _).collect();
-    for (record, class) in claimed.iter().take(8) {
-        let query = RangeQuery::builder(*record.epoch_position(), LightYears::new(1.0))
-            .build()
-            .expect("a query");
-        let result = range_query(galaxy, &mut NoCache::new(), &sources, &query);
-        let returned = result
-            .systems()
-            .iter()
-            .filter(|hit| hit.id() == record.id())
-            .count();
-        assert_eq!(returned, 1, "{class:?}: {:?}", record.id());
-    }
 }
 
 /// D4: the same seed twice under every 26 hold claims the same records.
@@ -793,7 +738,6 @@ fn the_pre_pin_s_cells_hold_claimed_deaths() {
         field_only(CarveOutRules::Unclaimed),
         field_only(CarveOutRules::Claimed),
     );
-    let every_26 = claimed();
     for cell in PRE_PIN_CELLS {
         let key = CellKey::new(Layer::E, cell).unwrap();
         let claimed = carved(&off, &on, &[key]);
@@ -803,13 +747,6 @@ fn the_pre_pin_s_cells_hold_claimed_deaths() {
                 .any(|(_, class)| *class == Class::CoreCollapse),
             "{cell:?}: {claimed:?}"
         );
-        // Under every 26 hold, the classes too, the cell's records move from the version's.
-        let records = |galaxy: &Galaxy| {
-            let mut out = Vec::new();
-            generate_cell(galaxy, key, &mut out);
-            out
-        };
-        assert_ne!(records(held()), records(every_26), "{cell:?}");
     }
 }
 

@@ -545,6 +545,7 @@ impl Galaxy {
         // A second step, once the parts it reads exist: layer D's ancient Type Ia come from the
         // built galaxy's delay-time distribution (P09.T35).
         galaxy.layer_d_kept = match rules.carve_out {
+            #[cfg(test)]
             CarveOutRules::Unclaimed => None,
             CarveOutRules::Claimed => Some(field_share::layer_d_kept(&galaxy)),
         };

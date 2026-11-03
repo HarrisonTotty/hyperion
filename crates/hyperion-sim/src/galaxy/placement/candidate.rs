@@ -223,11 +223,12 @@ impl Pick {
 /// thins (brainstorm, "Exact placement by thinning"). The threshold is the pick's, in its
 /// arithmetic, so `f` = 1 keeps every candidate the pick kept.
 ///
-/// In layer D, from version 27 under P09.T35's carve-out (`displaced::site::CARVE_OUT_VERSION`),
+/// In layer D, from version 27 under P09.T35's carve-out (`displaced::site::CarveOutRules`),
 /// `f` is also times what the field keeps of the component's layer D, 1 less its ancient Type Ia
 /// ([`Galaxy::layer_d_kept`]), in the same slice: layer D's share less `ancient_share`, with only
 /// counts moving. With plan 08's displaced classes the slice is the stay's, and the share kept of
-/// it `1 − ancient_share ÷ stay_D` (P08.T12.a). Under both holds' held arms it keeps every candidate, the code of version 25.
+/// it `1 − ancient_share ÷ stay_D` (P08.T12.a). For the tests' budget, without the field share or
+/// the carve-out, it keeps every candidate.
 #[must_use]
 fn in_the_field(
     galaxy: &Galaxy,

@@ -11,7 +11,7 @@
 //! outside the influence radius); where it needs the records the thinning keeps before the loss
 //! cone carves any out, it reads them from the galaxy without its kinematic tables, whose grid
 //! records have no orbits and none of which is carved out ([`carved_by_the_loss_cone`]), while no
-//! catalogue class claims a grid record (the carve-out held, `CARVE_OUT_VERSION`).
+//! catalogue class claims a grid record.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;

@@ -27,8 +27,8 @@
 //!
 //! # Layer D's ancient Type Ia
 //!
-//! From generator version 27, under plan 09's P09.T35 hold (`displaced::site::CARVE_OUT_VERSION`,
-//! retargeted from 26 by train 26), layer D also gives up the systems that exploded as a Type Ia
+//! From generator version 27, under plan 09's P09.T35 carve-out (`displaced::site::CarveOutRules`),
+//! layer D also gives up the systems that exploded as a Type Ia
 //! before the supernova test's interval and left nothing
 //! ([`ancient_share`](super::catalogue_classes::type_ia::ancient_share)): each component's field
 //! keeps `1 −` its population's of its layer D ([`Galaxy::layer_d_kept`]). Placement's thinning
