@@ -933,6 +933,39 @@ describe("userArgs", () => {
   });
 });
 
+describe("the compile budget (plan R14)", () => {
+  beforeEach(() => {
+    for (const stream of [process.stdout, process.stderr]) {
+      vi.spyOn(stream, "write").mockImplementation(() => true);
+    }
+  });
+
+  it("takes --compile-budget on a spike's and a check's launch, a count or unlimited", () => {
+    expect([
+      parse(["--descent-spike", "--compile-budget", "2"]).compileBudget,
+      parse(["--views-check", "--terrain", "--compile-budget=unlimited"]).compileBudget,
+      parse(["--descent-spike"]).compileBudget,
+      parse(["--views-check"]).compileBudget,
+    ]).toEqual([2, "unlimited", undefined, undefined]);
+  });
+
+  it("refuses --compile-budget on an ordinary launch, as an option of the spike and the check", () => {
+    const error = refusal(["--compile-budget", "2"]);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      "error: --compile-budget is an option of --descent-spike or --views-check, neither of which was given",
+    ]);
+  });
+
+  it.each(["0", "65", "two"])("refuses --compile-budget %j as a usage error", (value) => {
+    const error = refusal(["--views-check", "--compile-budget", value]);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      `error: option '--compile-budget <N>' argument '${value}' is invalid. a compile budget is unlimited or 1 to 64 compiles, not ${value}`,
+    ]);
+  });
+});
+
 describe("the geometry override (plan R14, Design note 17)", () => {
   beforeEach(() => {
     for (const stream of [process.stdout, process.stderr]) {

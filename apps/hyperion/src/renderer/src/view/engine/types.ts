@@ -852,11 +852,18 @@ export interface RenderEngine {
   dispose(): void;
 }
 
+/**
+ * How many of a device's pipeline compiles run at once (`webgpu/compileBudget.ts`): a whole number
+ * from 1, or `unlimited`, each asked at once, as before the budget.
+ */
+export type CompileBudgetSize = number | "unlimited";
+
 /** The WebGPU module's one export, `createWebGpuEngine`, which only `loadEngine.ts` imports. */
 export type CreateWebGpuEngine = (
   outcome: AdapterOutcome & { readonly kind: "adapter" },
   status: GraphicsStatusStore,
   overrides: CapabilityOverrides | undefined,
+  compileBudget?: CompileBudgetSize,
 ) => Promise<RenderEngine>;
 
 /** How `loadRenderEngine` loads the engine. */
@@ -867,6 +874,11 @@ export interface LoadEngineOptions {
   readonly importEngine?: () => Promise<{ readonly createWebGpuEngine: CreateWebGpuEngine }>;
   /** `navigator.gpu`, from which a rebuild asks for a fresh adapter; a test passes a fake. */
   readonly gpu?: GPU;
+  /**
+   * The device's compiles in flight, the default (`DEFAULT_COMPILE_BUDGET`) where absent; the
+   * launch's `--compile-budget` (`HyperionApi.compileBudget`), for an A/B.
+   */
+  readonly compileBudget?: CompileBudgetSize;
 }
 
 /** Thrown by `createPointSplat` when the device lacks `float32-blendable` (Design note 21). */

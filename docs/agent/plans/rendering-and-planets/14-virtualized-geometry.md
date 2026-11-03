@@ -2359,3 +2359,10 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     the same name and remove these files; a stopped run leaves them behind.
   - Pending: the owner's Mac runs, for GPU per pass, whole or stopped: `just descent-spike --hidden`
     and `just views-check --terrain --whole --hidden --setting high --hyperion-gpu-timing`.
+- **Every compile of a page under one budget (lean, 2026-11-03; lane fix-session-load-spike).** The
+  engine runs at most `DEFAULT_COMPILE_BUDGET` (3) asynchronous pipeline compiles a device
+  (`engine/webgpu/compileBudget.ts`): preparations, `createMaterialAsync`'s, kernels and splats, a
+  pipeline a draw waits for first, the rest in the order asked; `TerrainMaterialSet`'s two run
+  inside it. `--compile-budget <n|unlimited>` on a spike or a check sets it, `unlimited` as before
+  (`preload/compileBudgetLaunch.ts`, `HyperionApi.compileBudget`, `LoadEngineOptions.compileBudget`,
+  `CreateWebGpuEngine`'s fourth argument). Pending: the owner's Mac re-run.

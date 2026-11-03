@@ -14,6 +14,7 @@ import type { KernelPair } from "../kernels";
 import type { AllocationEvent, TextureSpec } from "../memory";
 import { type GraphicsFault, GraphicsStatusStore, initialGraphicsStatus } from "../status";
 import {
+  type CompileBudgetSize,
   ColourSelfSample,
   type DepthLayerPass,
   DepthSelfSample,
@@ -33,8 +34,11 @@ import {
 import { samplerKey, WebGpuRenderEngine } from "./engine";
 import { pipelineOutputs } from "./pipelineOutputs";
 
-/** An engine over a fake device with `features`. */
-async function engineOn(features: ReadonlyArray<GPUFeatureName> = []): Promise<{
+/** An engine over a fake device with `features`, and its compile budget, the default's unless given. */
+async function engineOn(
+  features: ReadonlyArray<GPUFeatureName> = [],
+  compileBudget?: CompileBudgetSize,
+): Promise<{
   readonly engine: WebGpuRenderEngine;
   readonly gpu: FakeDevice;
   readonly status: GraphicsStatusStore;
@@ -46,7 +50,7 @@ async function engineOn(features: ReadonlyArray<GPUFeatureName> = []): Promise<{
     throw new Error("the fake adapter made no device");
   }
   const status = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
-  return { engine: new WebGpuRenderEngine(gpu, status), gpu, status };
+  return { engine: new WebGpuRenderEngine(gpu, status, compileBudget), gpu, status };
 }
 
 /** A storage texture of `mips` levels the CPU can read back. */
@@ -954,6 +958,51 @@ describe("prepareMaterial (R10.T14.d)", () => {
     const broken = engine.createMaterial({ ...SYNC_TILED, name: "broken", vertexWgsl: "oops" });
     await engine.prepareMaterial(broken, ["rgba16float"], [indexedTriangle(engine)]);
     expect(asked).toEqual([]);
+  });
+
+  it("asks the device for no more pipelines at once than its compile budget (plan R14)", async () => {
+    const { engine, gpu } = await engineOn([], 1);
+    const landings: Array<() => void> = [];
+    gpu.createRenderPipelineAsync = (descriptor) =>
+      new Promise((resolve) => {
+        landings.push(() => {
+          resolve(gpu.createRenderPipeline(descriptor));
+        });
+      });
+    const material = engine.createMaterial(SYNC_TILED);
+    // A colour target's two outputs, with depth and without: two pipelines, one at a time.
+    const prepared = engine.prepareMaterial(material, ["rgba16float"], [indexedTriangle(engine)]);
+    await vi.waitFor(() => {
+      expect(landings).toHaveLength(1);
+    });
+    landings[0]?.();
+    await vi.waitFor(() => {
+      expect(landings).toHaveLength(2);
+    });
+    landings[1]?.();
+    await prepared;
+    expect([landings.length, engine.compiles.mostRunning]).toEqual([2, 1]);
+  });
+
+  it("asks every pipeline at once with an unlimited budget, as before it (plan R14)", async () => {
+    const { engine, gpu } = await engineOn([], "unlimited");
+    const landings: Array<() => void> = [];
+    gpu.createRenderPipelineAsync = (descriptor) =>
+      new Promise((resolve) => {
+        landings.push(() => {
+          resolve(gpu.createRenderPipeline(descriptor));
+        });
+      });
+    const material = engine.createMaterial(SYNC_TILED);
+    const prepared = engine.prepareMaterial(material, ["rgba16float"], [indexedTriangle(engine)]);
+    await vi.waitFor(() => {
+      expect(landings).toHaveLength(2);
+    });
+    for (const land of landings) {
+      land();
+    }
+    await prepared;
+    expect(engine.compiles.mostRunning).toBe(2);
   });
 
   it("rejects for a released material", async () => {

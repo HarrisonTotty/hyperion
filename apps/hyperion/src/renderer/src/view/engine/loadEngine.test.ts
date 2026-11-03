@@ -53,7 +53,12 @@ describe("loading the engine", () => {
       }),
     ).rejects.toBe(CREATED);
 
-    expect(createWebGpuEngine).toHaveBeenCalledExactlyOnceWith(outcome, status, overrides);
+    expect(createWebGpuEngine).toHaveBeenCalledExactlyOnceWith(
+      outcome,
+      status,
+      overrides,
+      undefined,
+    );
   });
 
   it("passes no overrides when given none", async () => {
@@ -67,6 +72,31 @@ describe("loading the engine", () => {
       }),
     ).rejects.toBe(CREATED);
 
-    expect(createWebGpuEngine).toHaveBeenCalledExactlyOnceWith(outcome, status, undefined);
+    expect(createWebGpuEngine).toHaveBeenCalledExactlyOnceWith(
+      outcome,
+      status,
+      undefined,
+      undefined,
+    );
+  });
+
+  it("hands the engine the launch's compile budget (plan R14)", async () => {
+    const outcome = await vettedAdapter();
+    const status = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
+    const createWebGpuEngine = vi.fn<CreateWebGpuEngine>().mockRejectedValue(CREATED);
+
+    await expect(
+      loadRenderEngine(outcome, status, {
+        compileBudget: "unlimited",
+        importEngine: () => Promise.resolve({ createWebGpuEngine }),
+      }),
+    ).rejects.toBe(CREATED);
+
+    expect(createWebGpuEngine).toHaveBeenCalledExactlyOnceWith(
+      outcome,
+      status,
+      undefined,
+      "unlimited",
+    );
   });
 });

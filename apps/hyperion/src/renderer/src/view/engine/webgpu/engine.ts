@@ -31,6 +31,7 @@ import type {
 } from "../status";
 import type {
   BufferHandle,
+  CompileBudgetSize,
   ComputeBindings,
   ComputeHandle,
   CreateWebGpuEngine,
@@ -59,6 +60,7 @@ import type {
   WgslMaterialSpec,
   WgslPostProcessSpec,
 } from "../types";
+import { CompileBudget, DEFAULT_COMPILE_BUDGET } from "./compileBudget";
 import {
   createKernel,
   createKernelAsync,
@@ -145,6 +147,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   readonly capabilities: GpuCapabilities;
   readonly depthPolicy: DepthPolicy = "reversed-z-float";
   readonly device: GPUDevice;
+  /** The device's compiles in flight (`compileBudget.ts`): every asynchronous pipeline's. */
+  readonly compiles: CompileBudget;
   readonly #status: GraphicsStatusStore;
   readonly #meshes = new WeakMap<MeshHandle, MeshRecord>();
   readonly #materials = new WeakMap<MaterialHandle, MaterialRecord>();
@@ -185,8 +189,13 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
    * @param status - Where a shader that fails to compile is reported, and whose `gpuTiming` says
    * whether `--hyperion-gpu-timing` lifted timestamp quantization this launch.
    */
-  constructor(device: GPUDevice, status: GraphicsStatusStore) {
+  constructor(
+    device: GPUDevice,
+    status: GraphicsStatusStore,
+    compileBudget: CompileBudgetSize = DEFAULT_COMPILE_BUDGET,
+  ) {
     this.device = device;
+    this.compiles = new CompileBudget(compileBudget);
     this.#status = status;
     this.capabilities = deviceCapabilities(device);
     this.#resources = new ResourceRegistry(device, (event) => {
@@ -196,7 +205,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     });
     this.#kernels = new KernelCache({
       compile: (pair, spec) => createKernel(device, pair, spec),
-      compileAsync: (pair, spec) => createKernelAsync(device, pair, spec),
+      compileAsync: (pair, spec) => this.compiles.run(() => createKernelAsync(device, pair, spec)),
       // A kernel's uniform buffers are bound by its dispatches alone, never by a draw's cached bind
       // group, so the draw path's cache is left as it is.
       destroyBuffer: (buffer) => {
@@ -727,8 +736,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     assertSplatSupported(this.capabilities);
     const { vertex, fragment } = this.#splatModules(spec);
     try {
-      const pipeline = await this.device.createRenderPipelineAsync(
-        pointSplatPipelineDescriptor(spec, vertex, fragment),
+      const pipeline = await this.compiles.run(() =>
+        this.device.createRenderPipelineAsync(pointSplatPipelineDescriptor(spec, vertex, fragment)),
       );
       return this.#splatHandle(spec, pipeline);
     } catch (error: unknown) {
@@ -1073,6 +1082,7 @@ export const createWebGpuEngine: CreateWebGpuEngine = async (
   outcome: AdapterOutcome & { readonly kind: "adapter" },
   status: GraphicsStatusStore,
   overrides: CapabilityOverrides | undefined,
+  compileBudget?: CompileBudgetSize,
 ): Promise<RenderEngine> => {
   const requested = requiredFeatures(outcome.adapter, overrides);
   const device = await outcome.adapter.requestDevice({
@@ -1084,7 +1094,7 @@ export const createWebGpuEngine: CreateWebGpuEngine = async (
   if (notEnabled.length > 0) {
     console.warn(`the device did not enable ${notEnabled.join(", ")}, which it was asked for`);
   }
-  const engine = new WebGpuRenderEngine(device, status);
+  const engine = new WebGpuRenderEngine(device, status, compileBudget);
   // The device's features, not the adapter's, so that a withheld feature reads as absent in the
   // status too (Design note 24).
   status.dispatch({ kind: "device-capabilities", capabilities: engine.capabilities });

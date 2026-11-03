@@ -50,6 +50,11 @@
  * `--views-check` launch alone, so that the owner's before and after runs come from one build:
  * `clusterPath=false` draws the way back, as before plan R14.
  *
+ * `--compile-budget <n|unlimited>` sets how many pipeline compiles the renderer's engine runs at
+ * once (plan R14's Mac measurements; `preload/compileBudgetLaunch.ts`), 1 to 64, on a
+ * `--descent-spike` or `--views-check` launch alone: `unlimited` asks each at once, as before the
+ * budget, the A/B's way back. Without it the engine takes its default.
+ *
  * `--views-check` runs the several-views check in the consoles' `VIEW` (plan R07, T20), with the
  * spike's `--setting`, `--smoke` and `--out`; the spike's other options are refused with it, and
  * so is `--descent-spike`. With `--terrain` (plan R10, R10.T16.d; decision-r10-t16-contracts §6)
@@ -119,6 +124,7 @@ import type {
   QualitySettingName,
   ServedWorldNames,
 } from "../preload/api";
+import { type CompileBudgetLaunch, parseCompileBudget } from "../preload/compileBudgetLaunch";
 import { geometryText, parseGeometryOverride } from "../preload/geometryLaunch";
 import { GPU_TIMING_SWITCH } from "../preload/graphicsLaunch";
 import {
@@ -163,6 +169,8 @@ export interface ClientArgs {
    * over its setting's, when given, else `undefined`.
    */
   readonly geometry?: GeometryOverride;
+  /** The spike's or the check's compile budget (`--compile-budget`), when given, else `undefined`. */
+  readonly compileBudget?: CompileBudgetLaunch;
   /**
    * The check's page's device-pixel ratio (`--device-pixel-ratio`), the zoom factor its hidden
    * window is drawn at: 1 by default; `undefined` without `--views-check`.
@@ -193,10 +201,19 @@ const SPIKE_OPTIONS = [
   "universe",
   "body",
   "geometry",
+  "compileBudget",
 ] as const;
 
 /** The spike's options that `--views-check` takes too. */
-const VIEWS_CHECK_OPTIONS = ["setting", "smoke", "out", "universe", "body", "geometry"] as const;
+const VIEWS_CHECK_OPTIONS = [
+  "setting",
+  "smoke",
+  "out",
+  "universe",
+  "body",
+  "geometry",
+  "compileBudget",
+] as const;
 
 /** Reads a `--seed` value: a u64 in decimal. */
 export function parseSeed(value: string): string {
@@ -237,6 +254,15 @@ export function parseBody(value: string): string {
     throw new InvalidArgumentError("expected a body's ID, such as 61ffd967fe000023.0100");
   }
   return value;
+}
+
+/** Reads a `--compile-budget` value: `unlimited`, or 1 to 64 compiles at once. */
+export function parseCompileBudgetOption(value: string): CompileBudgetLaunch {
+  try {
+    return parseCompileBudget(value);
+  } catch (error: unknown) {
+    throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 /**
@@ -476,6 +502,12 @@ export function buildCommand(version: string): Command {
     )
     .addOption(
       new Option(
+        "--compile-budget <N>",
+        "the spike's or the check's pipeline compiles at once (plan R14): 1 to 64, or unlimited",
+      ).argParser(parseCompileBudgetOption),
+    )
+    .addOption(
+      new Option(
         "--horizon <ON>",
         "bake the horizon map with a generated world's lit patches (default on)",
       ).choices(["on", "off"]),
@@ -577,6 +609,7 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
       // Parsed by `parseDevicePixelRatio`, so 1, 2 or 3 where given.
       viewsCheckPixelRatio: ratio === 2 || ratio === 3 ? ratio : 1,
       ...geometryOf(options),
+      ...compileBudgetOf(options),
     };
   }
   if (options["descentSpike"] !== true) {
@@ -599,7 +632,22 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   if (refusal !== null) {
     command.error(`error: ${refusal}`);
   }
-  return { address, port, setting: spike.setting, spike, ...geometryOf(options) };
+  return {
+    address,
+    port,
+    setting: spike.setting,
+    spike,
+    ...geometryOf(options),
+    ...compileBudgetOf(options),
+  };
+}
+
+/** The `--compile-budget` given, else nothing (commander has parsed it). */
+function compileBudgetOf(
+  options: Readonly<Record<string, unknown>>,
+): { readonly compileBudget: CompileBudgetLaunch } | Record<string, never> {
+  const budget = options["compileBudget"];
+  return budget === "unlimited" || typeof budget === "number" ? { compileBudget: budget } : {};
 }
 
 /** The `--geometry` override given, else nothing (commander has parsed it). */

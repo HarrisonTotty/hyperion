@@ -30,7 +30,7 @@ export async function loadRenderEngine(
   const importEngine = options.importEngine ?? (() => import("./webgpu/engine"));
   const { createWebGpuEngine } = await importEngine();
   const create = (fresh: AdapterOutcome & { readonly kind: "adapter" }): Promise<RenderEngine> =>
-    createWebGpuEngine(fresh, status, options.overrides);
+    createWebGpuEngine(fresh, status, options.overrides, options.compileBudget);
   const engine = await create(outcome);
   return new ResilientEngine(engine, status, options.gpu ?? navigatorGpu(), create);
 }

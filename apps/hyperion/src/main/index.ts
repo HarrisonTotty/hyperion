@@ -23,6 +23,7 @@ import type {
   SpikeLaunch,
   ViewsCheckLaunch,
 } from "../preload/api";
+import { type CompileBudgetLaunch, compileBudgetSwitch } from "../preload/compileBudgetLaunch";
 import { geometrySwitch, geometryText } from "../preload/geometryLaunch";
 import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunch";
 import { performanceThreadsSwitch } from "../preload/machineLaunch";
@@ -111,6 +112,8 @@ interface SpikeWindow {
   readonly hidden: boolean;
   /** Its geometry override (`--geometry`, plan R14), or `undefined` for its setting's own. */
   readonly geometry: GeometryOverride | undefined;
+  /** Its compile budget (`--compile-budget`, plan R14), or `undefined` for the engine's default. */
+  readonly compileBudget: CompileBudgetLaunch | undefined;
 }
 
 /** The variable by which `just descent-spike --hidden` keeps a full run's window hidden. */
@@ -152,6 +155,8 @@ interface ViewsCheckWindowRun {
   readonly hidden: boolean;
   /** Its geometry override (`--geometry`, plan R14), or `undefined` for its setting's own. */
   readonly geometry: GeometryOverride | undefined;
+  /** Its compile budget (`--compile-budget`, plan R14), or `undefined` for the engine's default. */
+  readonly compileBudget: CompileBudgetLaunch | undefined;
   /**
    * The zoom factor its page is drawn at, which Chromium counts in its `devicePixelRatio`
    * (`--device-pixel-ratio`; the owner's Retina report, 2026-11-01): 1 on a shown run.
@@ -204,6 +209,7 @@ function createWindow(
         ...(spike === null ? [] : [spikeSwitch(spike.launch)]),
         ...(check === null ? [] : [viewsCheckSwitch(check.launch)]),
         ...(run?.geometry === undefined ? [] : [geometrySwitch(run.geometry)]),
+        ...(run?.compileBudget === undefined ? [] : [compileBudgetSwitch(run.compileBudget)]),
       ],
       // A hidden spike run renders offscreen, as the smoke harness's does: a hidden window on a
       // hardware adapter draws nothing otherwise, and headless Ozone's GPU process exits there.
@@ -291,6 +297,13 @@ function logLine(line: string): void {
 function logGeometry(run: string, geometry: GeometryOverride | undefined): void {
   if (geometry !== undefined) {
     logLine(`${run}: geometry ${geometryText(geometry)} over the setting's`);
+  }
+}
+
+/** States a run's compile budget on its first lines, where it gives one (plan R14). */
+function logCompileBudget(run: string, budget: CompileBudgetLaunch | undefined): void {
+  if (budget !== undefined) {
+    logLine(`${run}: compile budget ${String(budget)}`);
   }
 }
 
@@ -661,10 +674,12 @@ async function main(): Promise<void> {
   if (spike !== undefined) {
     const hidden = spike.smoke || process.env[SPIKE_HIDDEN_ENV] === "1";
     logGeometry("descent spike", args.geometry);
+    logCompileBudget("descent spike", args.compileBudget);
     const window = createWindow(serverUrl, graphics, args.setting, {
       launch: spike,
       hidden,
       geometry: args.geometry,
+      compileBudget: args.compileBudget,
     });
     startSpikeSession(window, spike, graphics, switches, hidden, nvidiaBaselineBytes);
     return;
@@ -681,10 +696,12 @@ async function main(): Promise<void> {
       return;
     }
     logGeometry("views check", args.geometry);
+    logCompileBudget("views check", args.compileBudget);
     const window = createWindow(serverUrl, graphics, args.setting, null, {
       launch: viewsCheck,
       hidden,
       geometry: args.geometry,
+      compileBudget: args.compileBudget,
       zoom,
     });
     startViewsCheckSession(window, viewsCheck, graphics, switches, hidden);

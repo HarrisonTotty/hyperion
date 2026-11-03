@@ -14,6 +14,7 @@
 
 import type { DescentSpikeReport, SpikeLatePipeline, SpikePassRow } from "../../../../preload/api";
 import type { ViewEngineSource } from "../../displays/view/useViewEngine";
+import { launchCompileBudget } from "../engine/launchCompileBudget";
 import { loadRenderEngine } from "../engine/loadEngine";
 import type { AllocationEvent } from "../engine/memory";
 import { requestAdapterOutcome } from "../engine/platform";
@@ -159,11 +160,11 @@ export function spikeGpu(
     source: {
       requestAdapter: () => requestAdapterOutcome(wrapped),
       load: async (outcome, status) => {
-        const engine = await loadRenderEngine(
-          outcome,
-          status,
-          wrapped === undefined ? {} : { gpu: wrapped },
-        );
+        const engine = await loadRenderEngine(outcome, status, {
+          ...(wrapped === undefined ? {} : { gpu: wrapped }),
+          // The launch's `--compile-budget` (plan R14), the engine's default without one.
+          ...launchCompileBudget(),
+        });
         resolves.follow(engine);
         return engine;
       },

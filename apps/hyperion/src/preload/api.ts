@@ -211,6 +211,12 @@ export interface HyperionApi {
    * `--views-check` launch that gave it.
    */
   readonly geometry?: GeometryOverride;
+  /**
+   * The launch's compile budget for the renderer's engine (`--compile-budget`, plan R14's Mac
+   * measurements): a whole number from 1, or `unlimited`, every compile at once; present only on a
+   * `--descent-spike` or `--views-check` launch that gave it, the engine's default otherwise.
+   */
+  readonly compileBudget?: number | "unlimited";
   /** The descent spike's functions, present only on a `--descent-spike` launch. */
   readonly spike?: SpikeApi;
   /** The several-views check's functions, present only on a `--views-check` launch (R07.T20). */

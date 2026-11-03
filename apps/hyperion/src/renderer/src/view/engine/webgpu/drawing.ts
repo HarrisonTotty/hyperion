@@ -29,6 +29,7 @@ import {
   type WgslMaterialSpec,
   type WgslPostProcessSpec,
 } from "../types";
+import type { CompileBudget } from "./compileBudget";
 import {
   type MaterialModules,
   materialPipelineDescriptor,
@@ -145,6 +146,8 @@ export interface DepthLayerOutput {
 /** What the draw path needs of the engine. */
 export interface DrawingHost extends RingHost {
   readonly device: GPUDevice;
+  /** The device's compiles in flight, which every asynchronous pipeline waits its turn in. */
+  readonly compiles: CompileBudget;
   materialOf(handle: DrawItem["material"]): MaterialRecord;
   meshOf(handle: DrawItem["mesh"]): MeshRecord;
   postProcessOf(handle: PostProcessItem["postProcess"]): PostProcessRecord;
@@ -178,6 +181,7 @@ function pipelineFor(
   owner: string,
   asynchronous: boolean,
   device: GPUDevice,
+  compiles: CompileBudget,
   descriptor: () => GPURenderPipelineDescriptor,
 ): GPURenderPipeline | undefined {
   const existing = pipelines.get(key);
@@ -199,8 +203,9 @@ function pipelineFor(
     throw error;
   }
   pipelines.set(key, "pending");
-  void device
-    .createRenderPipelineAsync(made)
+  // A draw waits for it now: ahead of every compile made ahead of its first draw.
+  void compiles
+    .run(() => device.createRenderPipelineAsync(made), "draw")
     .then((pipeline): void => {
       pipelines.set(key, pipeline);
       return undefined;
@@ -301,6 +306,7 @@ export class Drawing {
       `material ${record.spec.name}`,
       asynchronous,
       this.#host.device,
+      this.#host.compiles,
       () =>
         materialPipelineDescriptor(
           record.spec,
@@ -329,15 +335,17 @@ export class Drawing {
     try {
       record.pipelines.set(
         key,
-        await this.#host.device.createRenderPipelineAsync(
-          materialPipelineDescriptor(
-            record.spec,
-            record.modules,
-            record.layout,
-            mesh.layouts,
-            mesh.spec.topology,
-            colourFormat,
-            hasDepth,
+        await this.#host.compiles.run(() =>
+          this.#host.device.createRenderPipelineAsync(
+            materialPipelineDescriptor(
+              record.spec,
+              record.modules,
+              record.layout,
+              mesh.layouts,
+              mesh.spec.topology,
+              colourFormat,
+              hasDepth,
+            ),
           ),
         ),
       );
@@ -368,25 +376,30 @@ export class Drawing {
     if (record.pipelines.has(key)) {
       return;
     }
-    let pipeline: GPURenderPipeline;
+    let pipeline: GPURenderPipeline | null;
     try {
-      pipeline = await this.#host.device.createRenderPipelineAsync(
-        materialPipelineDescriptor(
-          record.spec,
-          record.modules,
-          record.layout,
-          mesh.layouts,
-          mesh.spec.topology,
-          colourFormat,
-          hasDepth,
-        ),
+      pipeline = await this.#host.compiles.run(async () =>
+        // A draw that came first made its own while this one waited its turn: none is made twice.
+        record.pipelines.has(key)
+          ? null
+          : this.#host.device.createRenderPipelineAsync(
+              materialPipelineDescriptor(
+                record.spec,
+                record.modules,
+                record.layout,
+                mesh.layouts,
+                mesh.spec.topology,
+                colourFormat,
+                hasDepth,
+              ),
+            ),
       );
     } catch (error: unknown) {
       throw new Error(`the pipeline of material ${record.spec.name} could not be prepared`, {
         cause: error,
       });
     }
-    if (!record.pipelines.has(key)) {
+    if (pipeline !== null && !record.pipelines.has(key)) {
       record.pipelines.set(key, pipeline);
     }
   }
@@ -600,6 +613,7 @@ export class Drawing {
         `post-process ${record.spec.name}`,
         false,
         this.#host.device,
+        this.#host.compiles,
         () =>
           postProcessPipelineDescriptor(
             record.spec,

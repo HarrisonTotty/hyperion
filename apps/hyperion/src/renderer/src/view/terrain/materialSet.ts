@@ -31,7 +31,9 @@
  *   another path, a variant) waits ahead of the setting's, in the order asked, and a pass's ask of
  *   the material its first frame waits for (`lit`, `wire`) goes first of all. Until a form is made
  *   the pass draws by the one it falls back on, and until a caster is, with no shadow (w = 0), as
- *   where one cannot be made.
+ *   where one cannot be made. Each pipeline of a compile then waits its turn in the device's one
+ *   budget (`engine/webgpu/compileBudget.ts`), beside every other compile of the page, so that the
+ *   set's two keep their order there.
  * - **A path not compiled** (a pass on another setting, say) is compiled at its first ask and kept
  *   for the next; a compile that fails is forgotten, so that the next ask tries again.
  * - **A device loss.** The handles die with the device; at the restore the set forgets them and
