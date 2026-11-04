@@ -153,7 +153,10 @@ fn old(source: BirthSource, s: usize) -> hyperion_sim::galaxy::displaced::Displa
     .id()
 }
 
-/// P08.T9: for every source and band the budget closes to 10⁻¹², and every term is a share.
+/// P08.T9: for every source and band the budget closes to 10⁻¹², and every term is a share. The
+/// stay marks hold the budget's stay share ([`ClassTable::budget_stay_share`]): from generator
+/// version 27 the table's stay share is the field's (P09.T2.c), the budget's times the share of it
+/// the field keeps, and outside layers D and E the field's share alone.
 #[test]
 fn budget_closes() {
     let (galaxy, table) = shared();
@@ -174,10 +177,14 @@ fn budget_closes() {
                 "{id:?} {band:?} {stay}"
             );
         }
-        // The layer-E stay marks hold exactly the stay share.
+        // The layer-E stay marks hold exactly the budget's stay share.
         let marks = table.stay_marks(id);
-        assert!((marks.total() - table.stay_share(MassBand::E, id)).abs() < 1e-12);
-        assert!((table.stay_share(MassBand::A, id) - 1.0).abs() < 1e-15);
+        assert!((marks.total() - table.budget_stay_share(MassBand::E, id)).abs() < 1e-12);
+        assert!((table.budget_stay_share(MassBand::A, id) - 1.0).abs() < 1e-15);
+        // The field keeps at most the budget's.
+        for band in [MassBand::A, MassBand::D, MassBand::E] {
+            assert!(table.stay_share(band, id) <= table.budget_stay_share(band, id) + 1e-15);
+        }
     }
     for (i, class) in table.classes().iter().enumerate() {
         for band in [MassBand::D, MassBand::E] {
@@ -253,7 +260,11 @@ fn the_young_disc_feeds_only_times_within_its_ages() {
 
 /// The share of living stars of the thin disc heavier than `min_mass` (M☉) in `band` that are
 /// runaways: at the band's nodes, the runaway classes' densities over the living, each node taken
-/// at its quadrature weight.
+/// at its quadrature weight. A component's part of its source's budget is its population's band
+/// share ([`ShareMatrix::share`]): from generator version 27 the galaxy holds plan 08's displaced
+/// classes (P08.T12.a), whose stay shares its `component_share` carries in layers D and E.
+///
+/// [`ShareMatrix::share`]: hyperion_sim::galaxy::shares::ShareMatrix::share
 fn runaway_fraction(table: &ClassTable, galaxy: &Galaxy, band: MassBand, min_mass: f64) -> f64 {
     let nodes = table.nodes(band);
     let per_node = |i: usize| nodes.weights()[i] / nodes.pdf()[i];
@@ -284,7 +295,7 @@ fn runaway_fraction(table: &ClassTable, galaxy: &Galaxy, band: MassBand, min_mas
                 if source_of(c.population()) != BirthSource::ThinDisc {
                     continue;
                 }
-                let relative = c.count() * galaxy.shares().component_share(band, c) / budget;
+                let relative = c.count() * galaxy.shares().share(band, c.population()) / budget;
                 let alive = table.stay_marks(id).node_density(StayCategory::Alive);
                 for (i, a) in alive.iter().enumerate() {
                     if nodes.masses()[i] > min_mass {
@@ -306,7 +317,7 @@ fn runaway_fraction(table: &ClassTable, galaxy: &Galaxy, band: MassBand, min_mas
                 })
                 .map(|id| {
                     let c = galaxy.fields().component(id);
-                    c.count() * galaxy.shares().component_share(band, c) / budget
+                    c.count() * galaxy.shares().share(band, c.population()) / budget
                         * table.alive_share(band, id)
                 })
                 .sum()
