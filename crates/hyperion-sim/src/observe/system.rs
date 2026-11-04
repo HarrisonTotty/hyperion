@@ -310,7 +310,12 @@ mod tests {
     ///
     /// A supernova falls in a given 40,000 years in about one layer-E cell in 3,000 at the solar
     /// circle, so rather than search for one the test takes a real record and changes only its age
-    /// at the epoch, which moves its death on the clock and nothing else.
+    /// at the epoch, which moves its death on the clock. From generator version 27 a system's age
+    /// at the epoch can move its stars too, its pairs and their timelines following the age it is
+    /// given (0x81d8b2e000000002's merger at 23.16 Myr is at 23.01 Myr re-aged, its death 137,706
+    /// years from the target; 0x81d8b2e000000007's single star is a pair re-aged), so the test
+    /// re-ages it again at the lifetime its re-aged stars give, until its death lands on the
+    /// target.
     fn dying_supergiant() -> (SystemRecord, SystemStars, UniverseTime) {
         let galaxy = galaxy();
         let mut cell = Vec::new();
@@ -327,23 +332,34 @@ mod tests {
                 else {
                     continue;
                 };
-                // Lifetime = T + age at the epoch; the new age puts T at the target.
-                let lifetime =
+                // Lifetime = T + age at the epoch; the new age puts T at the target. The lifetime
+                // the re-aged stars give is taken again, at most four times, until it does.
+                let mut lifetime =
                     death.since_epoch().as_julian_years_f64() + grown.age_at_epoch().value();
-                let record = SystemRecord::from_parts(
-                    grown.id(),
-                    *grown.epoch_position(),
-                    grown.origin(),
-                    grown.population(),
-                    grown.primary_initial_mass(),
-                    Years::new(lifetime + 20_000.0),
-                );
-                let stars = SystemStars::generate(galaxy, &record);
-                let ClockDeath::At(death, _) = stars.death_time() else {
+                let mut landed = None;
+                for _ in 0..4 {
+                    let record = SystemRecord::from_parts(
+                        grown.id(),
+                        *grown.epoch_position(),
+                        grown.origin(),
+                        grown.population(),
+                        grown.primary_initial_mass(),
+                        Years::new(lifetime + 20_000.0),
+                    );
+                    let stars = SystemStars::generate(galaxy, &record);
+                    let ClockDeath::At(death, _) = stars.death_time() else {
+                        break;
+                    };
+                    let off = death.checked_since(target).unwrap().as_julian_years_f64();
+                    if off.abs() < 1.0 {
+                        landed = Some((record, stars, death));
+                        break;
+                    }
+                    lifetime += off;
+                }
+                let Some((record, stars, death)) = landed else {
                     continue;
                 };
-                let off = death.checked_since(target).unwrap().as_julian_years_f64();
-                assert!(off.abs() < 1.0, "re-aged death {off} yr from the target");
                 // As observed mode reads it: a primary its companion stripped is no supergiant.
                 let kind = |t| stars.brief_at(t).map(|b| b.kind());
                 let century = Span::from_julian_years(100).unwrap();
