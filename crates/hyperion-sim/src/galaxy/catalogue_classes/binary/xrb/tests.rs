@@ -15,6 +15,7 @@ use super::*;
 use crate::galaxy::catalogue_classes::binary::{AccretingWdFast, AwdEntry};
 use crate::galaxy::catalogue_classes::grid::candidate_count;
 use crate::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
+use crate::galaxy::catalogue_classes::testing::HIGH_MASS_XRB;
 use crate::galaxy::catalogue_classes::{
     CatalogueClassCell, CatalogueEntry, check_class_headroom, resolve_entry, system_of,
 };
@@ -85,6 +86,35 @@ fn all_entries() -> impl Iterator<Item = &'static CatalogueEntry<XrbEntry>> {
     sample_entries().iter().flat_map(|(_, e)| e)
 }
 
+/// The class's process in the fixture over [`HIGH_MASS_XRB`], which draws the high-mass kinds in
+/// half its hosts: the refit at 27 leaves the sample cells none (P15.T10.b).
+fn high_mass_process() -> &'static XrayBinaries {
+    static PROCESS: OnceLock<XrayBinaries> = OnceLock::new();
+    PROCESS.get_or_init(|| XrayBinaries::of_table(galaxy(), &HIGH_MASS_XRB))
+}
+
+/// The high-mass entries [`high_mass_process`] gives the sample cells, by cell, generated once.
+fn high_mass_entries() -> &'static [(CatalogueCellKey, Vec<CatalogueEntry<XrbEntry>>)] {
+    type Cells = Vec<(CatalogueCellKey, Vec<CatalogueEntry<XrbEntry>>)>;
+    static CELLS: OnceLock<Cells> = OnceLock::new();
+    CELLS.get_or_init(|| {
+        sample_cells()
+            .into_iter()
+            .map(|key| {
+                let mut entries =
+                    CatalogueClassCell::generate(galaxy(), high_mass_process(), key).into_entries();
+                entries.retain(|e| e.value().scan().kind().is_high_mass());
+                (key, entries)
+            })
+            .collect()
+    })
+}
+
+/// Every sample entry, then every high-mass entry of [`high_mass_entries`].
+fn with_high_mass() -> impl Iterator<Item = &'static CatalogueEntry<XrbEntry>> {
+    all_entries().chain(high_mass_entries().iter().flat_map(|(_, e)| e))
+}
+
 /// A kind's place in [`XrbHostKind::ALL`].
 fn place(kind: XrbHostKind) -> usize {
     XrbHostKind::ALL
@@ -95,10 +125,12 @@ fn place(kind: XrbHostKind) -> usize {
 
 // 1. The share row, the sides and the bounds.
 
-/// The plan's totals at Milky Way parameters: the class holds its share row's 10⁴ hosts (the
-/// plan's 0.7–1.5 × 10⁴), of which the black-hole transients are 1,300 (the plan's 1,300 ± 400,
-/// Corral-Santana et al. 2016) and the high-mass side the table's 0.16; each side's components
-/// are its populations', and the rate's ranks split at the line in halves.
+/// The plan's totals at Milky Way parameters: the class and the features' lists together hold its
+/// share row's 10⁴ hosts (the plan's 0.7–1.5 × 10⁴), the catalogue all but the features' share
+/// (P11.T8.f), of which the black-hole transients are 1,300 (the plan's 1,300 ± 400,
+/// Corral-Santana et al. 2016) and the high-mass side its sampler's share, 0.0010 under the refit
+/// at 27 (P15.T10.b), the scratch sampler's 0.16 before it; each side's components are its
+/// populations', and the rate's ranks split at the line where the fitted law puts it.
 #[test]
 fn the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals() {
     let galaxy = galaxy();
@@ -110,20 +142,69 @@ fn the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals() {
         * galaxy.mean_formed_mass().value();
     assert!((formed / MILKY_WAY_FORMED_MASS - 1.0).abs() < 1e-9);
     let process = process();
+    let row = CLASS_SHARES.row(CarvedClass::XrayBinary);
+    // Each side's hosts before the features' lists take their share: the row's.
+    let row_hosts_on = |side: XrbSide| -> f64 {
+        process
+            .components()
+            .iter()
+            .filter(|c| c.side() == side)
+            .map(|c| {
+                let component = galaxy.fields().component(c.id());
+                c.hosts_per_system() * component.count_with_unborn()
+                    / catalogue_share(galaxy, row, component)
+            })
+            .sum()
+    };
+    let (low_row, high_row) = (
+        row_hosts_on(XrbSide::LowMass),
+        row_hosts_on(XrbSide::HighMass),
+    );
+    let row_total = low_row + high_row;
     let total = process.expected_hosts(galaxy);
-    assert!((total / 1.0e4 - 1.0).abs() < 1e-9, "{total}");
-    assert!((7.0e3..=1.5e4).contains(&total));
+    println!(
+        "the row's {row_total:.1} hosts, the catalogue's {total:.1} ({:.4} of them)",
+        total / row_total
+    );
+    assert!((row_total / 1.0e4 - 1.0).abs() < 1e-9, "{row_total}");
+    assert!((7.0e3..=1.5e4).contains(&row_total));
+    assert!(total < row_total && total > 0.99 * row_total, "{total}");
     let by_kind = process.expected_hosts_by_kind(galaxy);
     let summed: f64 = by_kind.iter().sum();
     assert!((summed / total - 1.0).abs() < 1e-12);
-    let black_hole_transients = by_kind[place(XrbHostKind::BlackHoleTransient)];
     println!("expected hosts by kind {by_kind:?}");
+    let weights = process
+        .sampler()
+        .table()
+        .pick(XrbPick::LowMassKind)
+        .weights();
+    let place_low = |kind| {
+        XrbHostKind::LOW_MASS
+            .iter()
+            .position(|&k| k == kind)
+            .expect("a low-mass kind")
+    };
+    let low_sum: f64 = weights.iter().sum();
+    let black_hole_transients =
+        low_row * weights[place_low(XrbHostKind::BlackHoleTransient)] / low_sum;
     assert!((black_hole_transients / 1_300.0 - 1.0).abs() < 1e-9);
     assert!((900.0..=1_700.0).contains(&black_hole_transients));
+    let share = high_mass_share(process.sampler().table());
+    assert!(
+        (high_row / row_total - share).abs() < 1e-9,
+        "{}",
+        high_row / row_total
+    );
     let high = process.expected_hosts_on(galaxy, XrbSide::HighMass);
-    assert!((high / total - 0.16).abs() < 1e-9, "{}", high / total);
+    println!(
+        "high-mass hosts: the row's {high_row:.1}, the catalogue's {high:.1}, a share of {share:.5}, \
+         against Fortin et al.'s 152 catalogued"
+    );
+    assert!(
+        (share / PINNED_HIGH_MASS_SHARE - 1.0).abs() < 1e-9,
+        "{share}"
+    );
     // The row alone, the same in every population, would give the young disc about 25.
-    let row = CLASS_SHARES.row(CarvedClass::XrayBinary);
     let fields = galaxy.fields();
     let young_by_row: f64 = process
         .components()
@@ -137,15 +218,27 @@ fn the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals() {
                 * component.count_with_unborn()
         })
         .sum();
-    println!("the row alone gives the young disc {young_by_row:.1} hosts, the class {high:.0}");
+    println!("the row alone gives the young disc {young_by_row:.1} hosts, the class {high_row:.1}");
     assert!((5.0..100.0).contains(&young_by_row), "{young_by_row}");
     for c in process.components() {
         let population = galaxy.fields().component(c.id()).population();
         assert_eq!(c.side(), XrbSide::of(population));
         assert!(c.hosts_per_system() > 0.0);
     }
-    assert!((process.rate_split() - 0.5).abs() < 1e-12);
+    println!("the rate's ranks split at {}", process.rate_split());
+    assert!((process.rate_split() - PINNED_RATE_SPLIT).abs() < 1e-12);
 }
+
+/// The rank of the instability line in the fitted low-mass rate excess's law at 27, as measured:
+/// 0.944, the engine's low-mass members mostly transients (the scratch law split in halves).
+const PINNED_RATE_SPLIT: f64 = 0.943_828_067_395_082_1;
+
+/// The high-mass side's share of the class's hosts under the refit at 27, its sampler's
+/// high-mass weights over all its weights (P15.T10.b), as measured: 0.0010, 10.2 hosts of the
+/// row's 10⁴, of which the catalogue holds 4.1 and the young features' lists the rest, against
+/// Fortin et al.'s (2023, A&A 671, A149; recalled) 152 catalogued, a finding (the fit before train
+/// 27's engine gave 68, the scratch sampler 1,600).
+const PINNED_HIGH_MASS_SHARE: f64 = 0.001_024_930_643_685_786_8;
 
 /// A cell's bound holds the class's intensity at every point tried in it, in the disc and at the
 /// centre, and the centre's cell, the fullest, leaves the index its headroom.
@@ -175,12 +268,16 @@ fn the_bound_holds_the_intensity_and_the_index_has_room() {
 
 // 2. The entries.
 
-/// The sample cells hold hosts of every kind, and each entry resolves by its ID to itself,
-/// through the class's process, the production lookup and plan 03's resolve.
+/// The sample cells hold hosts of every kind the class expects a hundred or more of in the galaxy,
+/// and each entry resolves by its ID to itself, through the class's process, the production lookup
+/// and plan 03's resolve. From 27 the class draws all nine kinds; the refit at 27 (P15.T10.b) gives
+/// the catalogue under ten each of the other five, the black-hole persistent and symbiotic hosts
+/// 4.4 and 2.8 and the high-mass kinds 4.1 together, too few for the sample to hold
+/// ([`high_mass_entries`] holds the high-mass kinds).
 #[test]
 fn entries_resolve_to_themselves() {
     let galaxy = galaxy();
-    let mut counts = [0_u32; 6];
+    let mut counts = [0_u32; XrbHostKind::ALL.len()];
     for entry in all_entries() {
         counts[place(entry.value().scan().kind())] += 1;
         let member = resolve_entry(galaxy, process(), entry.id()).unwrap();
@@ -193,16 +290,21 @@ fn entries_resolve_to_themselves() {
         );
     }
     println!("sample hosts by kind {counts:?}");
-    assert!(counts.iter().all(|&n| n > 0), "{counts:?}");
+    let expected = process().expected_hosts_by_kind(galaxy);
+    for ((kind, n), hosts) in XrbHostKind::ALL.iter().zip(counts).zip(expected) {
+        assert!(n > 0 || hosts < 100.0, "{kind:?}: {counts:?}");
+    }
+    assert!(counts.iter().filter(|&&n| n > 0).count() >= 4, "{counts:?}");
 }
 
 /// Every entry passes the shared test with its own class (plan 11's design note 10), and at every
-/// age of the source horizon its pair is the class its kind names, as `classify` reads it.
+/// age of the source horizon its pair is the class its kind names, as `classify` reads it; the
+/// high-mass entries of [`high_mass_entries`] too.
 #[test]
 fn every_entry_is_its_kind_at_every_age_of_the_horizon() {
     let start = SourceHorizon::START.since_epoch().as_julian_years_f64();
     let end = SourceHorizon::END.since_epoch().as_julian_years_f64();
-    for entry in all_entries() {
+    for entry in with_high_mass() {
         let value = entry.value();
         let now = value.record().age_at_epoch();
         let timeline = value.timeline();
@@ -220,11 +322,13 @@ fn every_entry_is_its_kind_at_every_age_of_the_horizon() {
 /// The sides follow their populations: a high-mass host is the young disc's and carries its
 /// recoil, which moved it from its site at the recoil over the years since its supernova; a
 /// low-mass host is the old populations' and sits at its site; a transient alone has a
-/// recurrence; a low-mass host's rate lies on its kind's side of its line.
+/// recurrence; a low-mass host's rate lies on its kind's side of its line. The high-mass hosts are
+/// [`high_mass_entries`]', the sample cells holding none from 27.
 #[test]
 fn the_sides_follow_their_populations() {
     let galaxy = galaxy();
-    for entry in all_entries() {
+    let mut recoiled = 0_u32;
+    for entry in with_high_mass() {
         let value = entry.value();
         let scan = value.scan();
         let kind = scan.kind();
@@ -243,13 +347,30 @@ fn the_sides_follow_their_populations() {
         assert_eq!(scan.recurrence().is_some(), scan.class() == transient);
         if let Some(recoil) = scan.recoil() {
             assert!(kind.is_high_mass());
+            recoiled += 1;
             let moved = scan.site().displacement_to(scan.position());
             let expected = recoil.displacement();
             for (a, b) in moved.metres().iter().zip(expected.metres()) {
                 assert!((a - b).abs() < 1.0e3 + 1e-12 * b.abs(), "{a} {b}");
             }
+            // Within the table's years since a supernova of either high-mass mark: from 27 the
+            // fitted Be/X ones, 1.5 × 10⁴ to 3.0 × 10⁷ years (the scratch table's 3 × 10⁵ to 2 ×
+            // 10⁷), and the scratch supergiants', 3 × 10⁵ to 5 × 10⁶.
             let since = recoil.since_supernova().value();
-            assert!((3.0e5..=2.0e7 * (1.0 + 1e-12)).contains(&since), "{since}");
+            let (lo, hi) = [
+                XrbMark::BexSinceSupernova,
+                XrbMark::SupergiantSinceSupernova,
+            ]
+            .map(|mark| XRB_SAMPLER.mark(mark).limits())
+            .into_iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), (a, b)| {
+                (lo.min(a), hi.max(b))
+            });
+            assert!(
+                (math::exp10(lo) * (1.0 - 1e-12)..=math::exp10(hi) * (1.0 + 1e-12))
+                    .contains(&since),
+                "{since}"
+            );
         } else {
             assert!(!kind.is_high_mass());
             assert_eq!(scan.position(), scan.site());
@@ -278,6 +399,7 @@ fn the_sides_follow_their_populations() {
             }
         }
     }
+    assert!(recoiled > 20, "{recoiled} recoiled hosts");
 }
 
 /// The scan keeps exactly each cell's entries, with their own marks, and neither the scan nor the
@@ -298,33 +420,62 @@ fn the_scan_keeps_exactly_the_cells_entries() {
     assert_eq!(engine_calls(), before);
 }
 
-/// No candidate that the site's thinning keeps fails the class's test, as measured: under the
-/// plan's one in ten (P11.T8).
+/// No candidate that the scan keeps fails the class's test, and under one candidate in ten that
+/// the site's thinning keeps is refused (P11.T8), as measured: from 27 the scan refuses a pair fed
+/// under the floor (P11.T8.b's fix), which the class's test would refuse, among the transients the
+/// fitted rate's tail takes far under their line and the ultracompact hosts (the finding of
+/// `kinds_tests`' `PINNED_ULTRACOMPACT_REFUSED`), pinned by kind ([`PINNED_REFUSED_BY_KIND`]).
 #[test]
 fn no_candidate_the_site_keeps_fails_the_test() {
+    use crate::galaxy::catalogue_classes::binary::BinaryHost;
     let galaxy = galaxy();
     let process = process();
     let mut candidates = 0_u32;
     let mut failed = 0_u32;
+    let mut refused = [0_u32; XrbHostKind::ALL.len()];
     for key in sample_cells() {
         let bound = process.bound(galaxy, &key);
         for index in 0..candidate_count(galaxy.seed(), &key, bound) {
             let id = key.candidate_id(index, 0).unwrap();
-            if process.site(galaxy, &key, id, bound).is_none() {
+            let Some((site, component, host_side)) = process.site(galaxy, &key, id, bound) else {
                 continue;
-            }
+            };
             candidates += 1;
-            let kept = process
-                .draw_candidate(galaxy, &key, id, bound)
-                .and_then(XrayBinaries::test_candidate);
-            failed += u32::from(kept.is_none());
+            let Some(candidate) = process.draw_candidate(galaxy, &key, id, bound) else {
+                // The kind the scan drew, as it draws it.
+                let host = BinaryHost::field(id, site, component);
+                let mut stream = Stream::open(galaxy.seed(), tags::CLASS_XRB_KIND, host.key());
+                let sampler = process.sampler();
+                let kind = match host_side {
+                    XrbSide::LowMass => {
+                        XrbHostKind::LOW_MASS[sampler.pick(XrbPick::LowMassKind, &mut stream)]
+                    }
+                    XrbSide::HighMass => {
+                        XrbHostKind::HIGH_MASS[sampler.pick(XrbPick::HighMassKind, &mut stream)]
+                    }
+                };
+                refused[place(kind)] += 1;
+                continue;
+            };
+            failed += u32::from(XrayBinaries::test_candidate(candidate).is_none());
         }
     }
-    println!("{failed} of {candidates} thinned candidates failed the test");
+    let total: u32 = refused.iter().sum();
+    println!(
+        "{failed} of {candidates} thinned candidates failed the test, {total} refused by the scan, \
+         by kind {refused:?}"
+    );
     assert!(candidates > 300, "{candidates}");
-    assert!(f64::from(failed) < 0.1 * f64::from(candidates));
     assert_eq!(failed, 0);
+    assert!(f64::from(total) < 0.1 * f64::from(candidates));
+    assert_eq!((refused, candidates), PINNED_REFUSED_BY_KIND);
 }
+
+/// The sample cells' candidates the scan refuses at 27, by kind in [`XrbHostKind::ALL`]'s order,
+/// and the candidates the site keeps, as measured: 46 of 502, 22 neutron-star transients, 3
+/// black-hole transients and 21 ultracompact hosts (none at 26, whose rules had no floor and drew
+/// no ultracompact host).
+const PINNED_REFUSED_BY_KIND: ([u32; 9], u32) = ([0, 22, 0, 3, 0, 0, 21, 0, 0], 502);
 
 /// The cells do not depend on the order they are generated in, nor on what was resolved between
 /// them; and the accreting white dwarfs' cells are the same whatever X-ray binary was resolved
@@ -357,12 +508,18 @@ fn cells_do_not_depend_on_order_and_leave_the_accreting_white_dwarfs() {
 
 /// An entry's stars are its pair: two stars, whose states at the epoch are the marked compact
 /// star and donor, on the marked orbit, the pair of its kind; plan 03's resolve and `system_of`
-/// give the same stars; its record is counted in layer E; its donor's own model is living at the
-/// epoch, and its compact star's progenitor's has left the same kind of remnant in most hosts.
+/// give the same stars; its record is counted in layer D or E, its compact star's progenitor's
+/// (the refit at 27 draws progenitors from 3.8 M☉, the row's D 0.240 and E 0.760; the scratch
+/// table's were all over 8 M☉); its donor's own model is living at the epoch but an ultracompact
+/// host's, a white dwarf's progenitor's; and its compact star's progenitor's has left the same kind
+/// of remnant in most hosts of layer E. Layer D's progenitors, whose own models leave white
+/// dwarfs, made their neutron stars in the pair, and from 27 the fitted black holes' progenitors
+/// reach down to 10.9 M☉ (the scratch table's 21–60 M☉), whose own models leave neutron stars.
 #[test]
 fn an_entry_s_stars_are_its_pair() {
     let galaxy = galaxy();
-    let (mut agree, mut checked) = (0_u32, 0_u32);
+    // Layer D's hosts, then layer E's.
+    let (mut agree, mut checked) = ([0_u32; 2], [0_u32; 2]);
     for entry in all_entries().step_by(5) {
         let value = entry.value();
         let stars = value.stars(galaxy);
@@ -376,36 +533,51 @@ fn an_entry_s_stars_are_its_pair() {
         let system = system_of(galaxy, entry.id()).unwrap();
         assert_eq!(system.star_model(), None);
         assert_eq!(system.stars(galaxy), Some(stars.clone()));
-        assert_eq!(value.record().layer(), crate::id::Layer::E);
+        assert!(
+            matches!(
+                value.record().layer(),
+                crate::id::Layer::D | crate::id::Layer::E
+            ),
+            "{:?}",
+            value.record().layer()
+        );
         let model = stars.stars()[0]
             .state_at(UniverseTime::EPOCH)
             .expect("a star at the epoch");
-        checked += 1;
-        agree += u32::from(model.phase() == value.binary().accretor().phase());
+        let in_e = usize::from(value.record().layer() == crate::id::Layer::E);
+        checked[in_e] += 1;
+        agree[in_e] += u32::from(model.phase() == value.binary().accretor().phase());
         let donor = stars.stars()[1]
             .state_at(UniverseTime::EPOCH)
             .expect("a star at the epoch");
+        // An ultracompact host's donor is a white dwarf, its own model its progenitor's, which has
+        // left its main sequence (`XrayBinaries::draw_candidate`): a white dwarf too.
+        let ultracompact = value.scan().kind() == XrbHostKind::Ultracompact;
         assert!(
-            donor.phase().is_living(),
+            donor.phase().is_living() != ultracompact,
             "{:?}: {:?}",
             entry.id(),
             donor.phase()
         );
     }
-    println!("{agree} of {checked} progenitors' own models left the marked remnant");
+    println!(
+        "{agree:?} of {checked:?} progenitors' own models in layers D and E left the marked remnant"
+    );
+    assert!(checked[1] > 50, "{checked:?}");
     assert!(
-        f64::from(agree) >= 0.8 * f64::from(checked),
-        "{agree} of {checked}"
+        f64::from(agree[1]) >= 0.8 * f64::from(checked[1]),
+        "{agree:?} of {checked:?}"
     );
 }
 
 /// A host moves on one straight line at its velocity, and stays within plan 09's 4,096 ly reach
-/// of its cell over the source horizon, its recoil's displacement included.
+/// of its cell over the source horizon, its recoil's displacement included, the high-mass hosts'
+/// of [`high_mass_entries`] among them.
 #[test]
 fn hosts_stay_within_the_reach() {
     let span_s = (CLOCK_WINDOW_H.as_seconds_f64() * 2.0) + LIGHT_CROSSING_L.as_seconds_f64();
     let mut farthest = 0.0_f64;
-    for (key, entries) in sample_entries() {
+    for (key, entries) in sample_entries().iter().chain(high_mass_entries()) {
         for entry in entries {
             let value = entry.value();
             let scan = value.scan();
@@ -454,12 +626,13 @@ fn the_recoil_s_largest_displacement_is_inside_the_reach() {
 
 /// A Be/X host's donor is plan 06's Be star by the draws its marks hold, a B star on its main
 /// sequence; the attempts it takes to find them average about 36, plan 06's share of fast
-/// rotators at its mass.
+/// rotators at its mass. The hosts are [`high_mass_entries`]', the sample cells holding none from
+/// 27.
 #[test]
 fn be_x_donors_are_be_stars() {
     let rules = StellarRules::of_version(GENERATOR_VERSION);
     let mut attempts = Vec::new();
-    for entry in all_entries() {
+    for entry in with_high_mass() {
         let value = entry.value();
         if value.scan().kind() != XrbHostKind::BeX {
             continue;
@@ -545,17 +718,22 @@ fn the_progenitor_ranges_leave_their_remnants_in_plan_06() {
 
 // 4. The golden.
 
-/// The first sample cells that hold hosts, with every kind among their entries, pinned: each
-/// cell's bound, candidates and entries, and each entry's scan marks, binary and history.
+/// The first sample cells that hold hosts, with every kind the sample holds among their entries,
+/// pinned: each cell's bound, candidates and entries, and each entry's scan marks, binary and
+/// history. From 27 the sample holds four of the nine kinds (`entries_resolve_to_themselves`).
 #[test]
 fn xray_binary_golden() {
     let galaxy = galaxy();
     let process = process();
     let mut w = GoldenWriter::new();
     w.header(GENERATOR_VERSION.get());
-    let mut seen = [false; 6];
+    let mut held = [false; XrbHostKind::ALL.len()];
+    for entry in all_entries() {
+        held[place(entry.value().scan().kind())] = true;
+    }
+    let mut seen = [false; XrbHostKind::ALL.len()];
     for (key, entries) in sample_entries() {
-        if entries.is_empty() || seen.iter().all(|&s| s) {
+        if entries.is_empty() || seen == held {
             continue;
         }
         let new_kind = entries
@@ -577,16 +755,19 @@ fn xray_binary_golden() {
             pin_entry(&mut w, galaxy, &label, entry);
         }
     }
-    assert!(seen.iter().all(|&s| s), "{seen:?}");
+    assert_eq!(seen, held);
+    assert!(held.iter().filter(|&&h| h).count() >= 4, "{held:?}");
     golden!("catalogue_classes/xray_binaries", w.as_str());
 }
 
 /// The lifetime the history reads is plan 06's, so that a high-mass host's age is its
-/// progenitor's life and the years since its supernova, to rounding.
+/// progenitor's life and the years since its supernova, to rounding; over [`high_mass_entries`],
+/// the sample cells holding no high-mass host from 27.
 #[test]
 fn a_high_mass_host_s_age_is_its_progenitor_s_life_and_its_recoil_s_years() {
     let galaxy = galaxy();
-    for entry in all_entries() {
+    let mut checked = 0_u32;
+    for entry in with_high_mass() {
         let value = entry.value();
         let Some(recoil) = value.scan().recoil() else {
             continue;
@@ -603,7 +784,9 @@ fn a_high_mass_host_s_age_is_its_progenitor_s_life_and_its_recoil_s_years() {
             (age - life - recoil.since_supernova().value()).abs() < 1e-6 * age,
             "{age} against {life}"
         );
+        checked += 1;
     }
+    assert!(checked > 20, "{checked}");
 }
 
 /// The same seed gives the same cells in two fresh galaxies and processes, so no state a galaxy or

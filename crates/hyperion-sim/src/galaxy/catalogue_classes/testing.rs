@@ -1,9 +1,28 @@
 //! Test helpers for the catalogue classes (plan 09, "Test helpers"): the catalogue's half of
-//! complementarity for plan 11's binary classes (P11.T8).
+//! complementarity for plan 11's binary classes (P11.T8), and a table of the X-ray binaries'
+//! fitted marks that draws their high-mass kinds often enough for a sample of cells to hold them.
 
 use crate::stellar::binary::{BinaryTimeline, CarvedClass, SegmentKind, carved_class};
+use crate::tables::binary::{
+    ClassSamplerTable, SamplerPick, XRB_LOW_MASS_KINDS_27, XRB_SAMPLER, XrbMark, XrbPick,
+};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
 use crate::units::Years;
+
+/// A table of the X-ray binaries' fitted marks (P15.T10.b's refit at 27) that draws the high-mass
+/// side in half the class's hosts, Be/X and supergiant hosts half each, and the low-mass kinds in
+/// their fitted weights, so that sample cells across the inner disc hold some dozens of high-mass
+/// hosts. The refit gives the high-mass kinds 0.0010 of the class's hosts, about ten in the galaxy
+/// and a supergiant host 0.06 of one, too few for any sample of cells to hold (the scratch
+/// sampler gave them 0.16). Its hosts are the class's marks under other kinds' weights: the
+/// class's own cells are not theirs, and their IDs resolve to none of them.
+pub(crate) static HIGH_MASS_XRB: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
+    XRB_SAMPLER.marks(),
+    &[
+        SamplerPick::new("low_mass_kind", &XRB_LOW_MASS_KINDS_27),
+        SamplerPick::new("high_mass_kind", &[0.5, 0.5, 0.0]),
+    ],
+);
 
 /// The evaluation ages across the source horizon [`assert_complementary`] reads, per entry, beside
 /// a merger's T on either side.

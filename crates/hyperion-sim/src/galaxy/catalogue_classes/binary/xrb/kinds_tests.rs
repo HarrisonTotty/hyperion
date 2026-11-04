@@ -192,16 +192,18 @@ fn from_27_the_class_draws_every_kind_its_row_counts() {
     assert!(black_holes <= MAX_BLACK_HOLE_SHARE, "{black_holes}");
 }
 
-/// The ultracompact hosts the sample cells hold under the refit at 27 (P15.T10.b), as measured: 50
-/// against the 88.8 their weight gives, a finding. The refit draws the engine's periods, half of
-/// them above 65 minutes, where the scan's cold white dwarf donor (0.0063 M☉ at 65 minutes against
-/// the engine's 0.012) gives a rate a quarter of the engine's, under the floor, which refuses the
-/// host (plan 11's _Findings_; for P11.T8.b).
-const PINNED_ULTRACOMPACT_ENTRIES: usize = 50;
+/// The ultracompact hosts the sample cells hold under the refit at 27 (P15.T10.b), as measured: 14
+/// against the 30.2 their weight gives, a finding (50 against 88.8 under the fit before train 27's
+/// engine, whose weight and low-mass hosts were others). The refit draws the engine's periods, half
+/// of them above 65 minutes, where the scan's cold white dwarf donor (0.0063 M☉ at 65 minutes
+/// against the engine's 0.012) gives a rate a quarter of the engine's, under the floor, which
+/// refuses the host (plan 11's _Findings_; for P11.T8.b).
+const PINNED_ULTRACOMPACT_ENTRIES: usize = 14;
 
-/// The ultracompact candidates the scan and the test refuse under the refit, as measured: 63 of the
-/// 93 tried, the finding of [`PINNED_ULTRACOMPACT_ENTRIES`].
-const PINNED_ULTRACOMPACT_REFUSED: (u32, u32) = (63, 93);
+/// The ultracompact candidates the scan and the test refuse under the refit, as measured: 102 of
+/// the 154 tried (63 of 93 under the fit before train 27's engine), the finding of
+/// [`PINNED_ULTRACOMPACT_ENTRIES`].
+const PINNED_ULTRACOMPACT_REFUSED: (u32, u32) = (102, 154);
 
 /// The kinds the class draws in the sample cells are its table's: each side's entries of each kind
 /// inside the Poisson interval of its weight's share of the side's entries, at α = 10⁻³ over the
@@ -222,8 +224,11 @@ fn the_drawn_kinds_follow_their_weights() {
             .filter(|k| k.is_high_mass() == high_mass)
             .collect();
         let ultracompact = of_side.iter().filter(|k| thinned(k)).count();
-        println!("Ultracompact: {ultracompact} drawn");
         if !high_mass {
+            let weight = side_share(&XRB_SAMPLER, XrbHostKind::Ultracompact);
+            #[expect(clippy::cast_precision_loss, reason = "a few thousand entries")]
+            let unthinned = of_side.len() as f64 * weight;
+            println!("Ultracompact: {ultracompact} drawn, {unthinned:.1} by its weight");
             assert_eq!(ultracompact, PINNED_ULTRACOMPACT_ENTRIES);
         }
         let weights = XRB_SAMPLER.pick(pick).weights();

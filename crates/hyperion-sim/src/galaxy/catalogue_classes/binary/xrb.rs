@@ -90,9 +90,9 @@
 //! a straight line. The table's recoils, at most 43 km/s for 20 Myr (Be/X) and 120 km/s for 5
 //! Myr (supergiant), take it under 3,000 ly from its site, so that with its motion over the source
 //! horizon it stays within plan 09's 4,096 ly reach of its cell. Its record is a catalogue
-//! system's, counted in its primary's layer, E: its primary is the compact star's progenitor. Its
-//! stars are the pair: each star's own model at its initial mass and the system's age, and the
-//! pair's timeline, which gives both stars' states ([`XrbEntry::stars`]).
+//! system's, counted in its primary's layer, D or E: its primary is the compact star's
+//! progenitor. Its stars are the pair: each star's own model at its initial mass and the system's
+//! age, and the pair's timeline, which gives both stars' states ([`XrbEntry::stars`]).
 
 use super::super::grid::{CatalogueMember, ClassProcess};
 use super::super::ids::CatalogueCellKey;
