@@ -12,15 +12,15 @@
 // `ci`.
 //
 //   node scripts/seamSegments.mjs --setting high|low [--dir <dir>] [--segment-s 20] [--jobs 1]
-//                                 [--to-s 240] [--timeout-s 7200]
+//                                 [--to-s 300] [--timeout-s 7200]
 //
 // --dir holds the segments' files, `<setting>-<from>-<to>.json`, and the merge's,
 // `<setting>-whole.json` (default target/seam-segments/); each vitest run's own report and output
 // go to its `work/`. --segment-s is a segment's span of the script, s; --jobs how many segments
-// play at once; --to-s the script's span, past which the last segment plays to the script's end;
-// --timeout-s a segment's limit. The probe's other knobs (SEAM_COST_MS and the rest) pass through
-// from the environment and a segment's file keeps them: the merge refuses a segment of other knobs,
-// so clear the directory after changing one. It exits 0 where the strides pass over the whole
+// play at once; --to-s the script's span (TERRAIN TEST's `durationS`), past which the last segment
+// plays to the script's end; --timeout-s a segment's limit. The probe's other knobs (SEAM_COST_MS
+// and the rest) pass through from the environment and a segment's file keeps them: the merge
+// refuses a segment of other knobs, so clear the directory after changing one. It exits 0 where the strides pass over the whole
 // script, 1 where they fail, and 2 where a segment did not end or the merge could not run.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -180,7 +180,7 @@ async function main(args) {
   mkdirSync(work, { recursive: true });
   const segmentS = positive(args, "segment-s", 20);
   const jobs = Math.round(positive(args, "jobs", 1));
-  const spanS = positive(args, "to-s", 240);
+  const spanS = positive(args, "to-s", 300);
   const timeoutS = positive(args, "timeout-s", 7200);
   // The latest first: each plays the script from its start, so they take the longest.
   const queue = segmentsOf(spanS, segmentS).toReversed();
