@@ -1217,8 +1217,9 @@ fn wire_kind(kind: ObjectKind) -> ObjectKindDto {
 }
 
 /// Every row of `answer` carries its system's brief at `time`, the sim's range brief, with the
-/// full system's kind and class and the first redraw attempt's star count, and the rows are
-/// otherwise those of `bare`, the same query without briefs.
+/// full system's kind and class and the first redraw attempt's star count (from 27, of a system a
+/// supernova has unbound by then, the stars it shows), and the rows are otherwise those of `bare`,
+/// the same query without briefs.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "the wire's f32s are the sim's f64s rounded, which is what is checked"
@@ -1247,7 +1248,8 @@ fn assert_briefs_are_the_sims(
         let expected = BriefModel::new(galaxy, &record)
             .brief_at(time)
             .expect("every system returned has formed");
-        let full = SystemStars::generate(galaxy, &record)
+        let stars = SystemStars::generate(galaxy, &record);
+        let full = stars
             .brief_at(time)
             .expect("every system returned has formed");
         assert_eq!(
@@ -1257,14 +1259,28 @@ fn assert_briefs_are_the_sims(
             row.designation
         );
         // The row counts the first attempt's stars, the kept count but for a system the grid
-        // redrew (plan 11's Risks, "Deviations in P11.T7, as built"), which the full brief counts.
+        // redrew (plan 11's Risks, "Deviations in P11.T7, as built"), which the full brief counts;
+        // a system a supernova has unbound by then counts the stars it shows, as the full brief
+        // does (P11.T10, on the record from 27).
         let first = draw_star_count(
             galaxy,
             &record,
             grid_multiplicity(&record),
             RedrawAttempt::FIRST,
         );
-        assert_eq!(expected.star_count(), first, "{}", row.designation);
+        let summary = stars.summary_at(time);
+        let count = if summary.hierarchy() == Some(stars.hierarchy()) {
+            first
+        } else {
+            assert_eq!(
+                expected.star_count(),
+                full.star_count(),
+                "{}",
+                row.designation
+            );
+            u8::try_from(summary.stars().len()).expect("a few stars")
+        };
+        assert_eq!(expected.star_count(), count, "{}", row.designation);
         let brief = row.stellar.as_ref().expect("a brief on every row");
         let lit = expected.log_luminosity();
         assert_eq!(
