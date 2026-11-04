@@ -1332,11 +1332,12 @@ mod tests {
                 .iter()
                 .flat_map(|s| core::iter::once(s.back).chain(s.ahead))
                 .collect();
-            assert_eq!(
-                legs.len(),
-                352,
-                "the 262 streams' backward legs, 88 forward ones and the core's two"
-            );
+            // Every stream's backward leg, every third one's forward one and each core's two: at
+            // 27 the fixture's list holds 360 streams and one core, 482 legs (262 streams, 352
+            // legs at 26), re-measured.
+            let (streams, cores) = (debris.streams().len(), debris.cores().len());
+            assert_eq!(legs.len(), streams + streams.div_ceil(3) + 2 * cores);
+            assert_eq!((legs.len(), streams, cores), (482, 360, 1));
             let alone: Vec<[f64; 2]> = legs
                 .iter()
                 .map(|leg| spray::radii_over_ly_alone(&force, leg))
