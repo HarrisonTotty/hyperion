@@ -79,7 +79,8 @@ const STEP_RELATIVE = 2e-4;
 
 /**
  * The registry's molecules with a permanent dipole of at least H₂S's (R08.T10.d): R08.T10.c's five,
- * then the seven `decision-r08-approximate-plate.md` §6 adds.
+ * then the seven `decision-r08-approximate-plate.md` §6 adds, then OH and PO, which P14.T52.e's
+ * further carriers add to the registry at generator version 27 (`DIPOLAR_BROADENERS`' figures).
  */
 const DIPOLAR_GASES = [
   "H2O",
@@ -94,9 +95,14 @@ const DIPOLAR_GASES = [
   "TiO",
   "VO",
   "FeH",
+  "OH",
+  "PO",
 ] as const;
 
-/** The registry's other molecules, each under H₂S's dipole (the science check of R08.T10.d). */
+/**
+ * The registry's other molecules, each under H₂S's dipole (the science check of R08.T10.d), and of
+ * 27's further carriers SH, P₂ and PH₂ (`DIPOLAR_BROADENERS`' figures).
+ */
 const NON_DIPOLAR_MOLECULES = [
   "H2",
   "CH4",
@@ -111,6 +117,9 @@ const NON_DIPOLAR_MOLECULES = [
   "C2H6",
   "PH3",
   "S8",
+  "SH",
+  "P2",
+  "PH2",
 ] as const;
 
 /** A mixture of H₂ and He at a giant's 85 : 15 with a species at its own mole fraction. */
@@ -718,7 +727,7 @@ describe("the dipolar broadeners (R08.T10.d)", () => {
   /** The registry's molecules, by the fixture's `kind`. */
   const molecules = registry.substances.filter((s) => s.kind === "molecule").map((s) => s.key);
 
-  it("are the twelve molecules of the registry with a dipole of at least H₂S's", () => {
+  it("are the fourteen molecules of the registry with a dipole of at least H₂S's, OH and PO among them from 27", () => {
     expect([...DIPOLAR_BROADENERS]).toEqual(DIPOLAR_GASES);
   });
 

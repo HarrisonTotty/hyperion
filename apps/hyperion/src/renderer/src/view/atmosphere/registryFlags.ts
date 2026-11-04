@@ -19,7 +19,11 @@ export interface RegistryOpticsFlags {
   readonly rayleigh: boolean;
 }
 
-/** The fixture's rows at generator version 24, in index order (115 rows; 54 `absorber`, 43 `rayleigh`). */
+/**
+ * The fixture's rows at generator version 27, in index order (127 rows; 54 `absorber`, 43
+ * `rayleigh`): 24's 115 and the twelve further carriers of P14.T52.e's equilibrium network, folded
+ * at 27, none flagged.
+ */
 const ROWS = {
   H2: { absorber: true, rayleigh: true },
   He: { absorber: true, rayleigh: true },
@@ -136,6 +140,18 @@ const ROWS = {
   S: { absorber: false, rayleigh: false },
   N: { absorber: false, rayleigh: false },
   C: { absorber: false, rayleigh: false },
+  SH: { absorber: false, rayleigh: false },
+  OH: { absorber: false, rayleigh: false },
+  "S+": { absorber: false, rayleigh: false },
+  "C+": { absorber: false, rayleigh: false },
+  "H+": { absorber: false, rayleigh: false },
+  "N+": { absorber: false, rayleigh: false },
+  "O+": { absorber: false, rayleigh: false },
+  P: { absorber: false, rayleigh: false },
+  P2: { absorber: false, rayleigh: false },
+  PO: { absorber: false, rayleigh: false },
+  PH2: { absorber: false, rayleigh: false },
+  Cl: { absorber: false, rayleigh: false },
 } satisfies Readonly<Record<string, RegistryOpticsFlags>>;
 
 /**

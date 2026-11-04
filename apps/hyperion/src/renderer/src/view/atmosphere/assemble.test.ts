@@ -281,6 +281,22 @@ describe("the gases' reasons", () => {
       ),
     ).toEqual([]);
   });
+
+  it("give the ions the registry asks no optics of, from 27, no reason at all", () => {
+    // P14.T52.e's further carriers at generator version 27: S⁺ and O⁺ among them, neither
+    // `absorber` nor `rayleigh`, scatter by no Rayleigh row as the other ions do.
+    const ions = withSurface(earthDetail(), (surface) => ({
+      ...surface,
+      gases: [
+        { species: "N2", mole_fraction: 0.98 },
+        { species: "H2O", mole_fraction: 0.0102 },
+        { species: "Ar", mole_fraction: 0.009 },
+        { species: "S+", mole_fraction: 0.0005 },
+        { species: "O+", mole_fraction: 0.0003 },
+      ],
+    }));
+    expect(assembled(ions).reasons.filter((reason) => /\b[SO]\+/u.test(reason))).toEqual([]);
+  });
 });
 
 describe("the key the cache holds a medium under", () => {

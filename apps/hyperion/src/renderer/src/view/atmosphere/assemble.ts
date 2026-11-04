@@ -119,7 +119,11 @@ import {
   THOMSON_CROSS_SECTION_M2,
   thomsonTermOf,
 } from "./absorbers";
-import { committedLineSpecies, type KDistributionTable } from "./absorbers/kDistribution";
+import {
+  CHARGED_BROADENERS,
+  committedLineSpecies,
+  type KDistributionTable,
+} from "./absorbers/kDistribution";
 import {
   type AerosolModeSpec,
   type AerosolParticles,
@@ -1020,9 +1024,10 @@ function rayleighReasons(
         );
         break;
       case "none":
-        // e⁻, H⁻ and the ions scatter by no Rayleigh row: their optics are other terms' (Thomson,
-        // their continua and lines), which report their own.
-        if (!(flags.absorber && !flags.rayleigh)) {
+        // e⁻, H⁻ and the ions, the registry's charged gases, scatter by no Rayleigh row: their
+        // optics are other terms' (Thomson, their continua and lines), which report their own, or
+        // none where the registry asks for none (27's S⁺, C⁺, H⁺, N⁺ and O⁺).
+        if (!CHARGED_BROADENERS.has(species)) {
           reasons.add(
             `scattering:${species}`,
             `${substanceName(species)}: no scattering data on file, its scattering not drawn`,

@@ -156,13 +156,14 @@ describe("the client's table of the registry's optics flags (R08.T10.a)", () => 
     );
   });
 
-  it("holds 115 rows at generator version 24, 54 of them absorbers and 43 Rayleigh scatterers", () => {
+  // 24's 115 and, from 27, P14.T52.e's twelve further carriers, none flagged.
+  it("holds 127 rows at generator version 27, 54 of them absorbers and 43 Rayleigh scatterers", () => {
     const flags = [...REGISTRY_OPTICS_FLAGS.values()];
     expect([
       flags.length,
       flags.filter((f) => f.absorber).length,
       flags.filter((f) => f.rayleigh).length,
-    ]).toEqual([115, 54, 43]);
+    ]).toEqual([127, 54, 43]);
   });
 });
 

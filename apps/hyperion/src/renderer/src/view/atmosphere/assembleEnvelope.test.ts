@@ -514,6 +514,21 @@ describe("the protocol fixture's hot Jupiter (generator version 27's record)", (
     expect(modesAbove(modes, HOT_JUPITER_PHOTOSPHERE_PA)).toBe(0);
   });
 
+  it("knows every gas of its composition, P14.T52.e's further carriers among them", () => {
+    // From 27 its composition carries SH, OH, P, P₂, PO, PH₂ and Cl, which the client's table of
+    // the registry's flags holds from the same generator version, neither flag set: each notes its
+    // scattering not drawn, and none is unknown or left out as an absorber.
+    const { result } = drawnOf("hotJupiter");
+    const carriers = ["SH", "OH", "P", "P2", "PO", "PH2", "Cl"];
+    expect([
+      result.reasons.filter((r) => r.includes("not known to this console")),
+      carriers.filter((key) =>
+        result.reasons.includes(`${key}: no scattering data on file, its scattering not drawn`),
+      ),
+      result.reasons.filter((r) => carriers.some((key) => r.startsWith(`${key}: left out`))),
+    ]).toEqual([[], carriers, []]);
+  });
+
   it("is self-luminous", () => {
     const { result } = drawnOf("hotJupiter");
     expect(result.medium === undefined ? null : result.regime.selfLuminous).toBe(true);

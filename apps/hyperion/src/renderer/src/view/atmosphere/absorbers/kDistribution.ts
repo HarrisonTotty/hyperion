@@ -662,15 +662,20 @@ const AIR_GASES: ReadonlySet<string> = new Set(["air", "N2", "O2", "Ar"]);
  *   114, molecular-beam Fourier-transform microwave Stark spectroscopy, as McKemmish, Yurchenko and
  *   Tennyson 2016, Mol. Phys., doi:10.1080/00268976.2016.1225994, quote it);
  * - FeH 2.63 ± 0.03 in X ⁴Δ₇/₂ (Steimle, Chen, Harrison and Brown 2006, J. Chem. Phys. 124, 184307,
- *   optical Stark spectroscopy in a molecular beam).
+ *   optical Stark spectroscopy in a molecular beam);
+ * - OH 1.66 and PO 1.88, each in X ²Π (recalled, not read at source), two of the further carriers
+ *   P14.T52.e's equilibrium network added to the registry at generator version 27.
  *
  * Every other molecule of the registry lies below it: PH₃ 0.57395 (Davies, Neumann, Wofsy and
  * Klemperer 1971, J. Chem. Phys. 55, 3564), O₃ 0.5337 (Mack and Muenter 1977, J. Chem. Phys. 66,
  * 5278), N₂O 0.160830 (Scharpen, Muenter and Laurie 1970, J. Chem. Phys. 53, 2513), CO 0.11011
  * (the JPL catalogue's entry 28001, after Goorvitch 1994, ApJS 95, 535), and H₂, N₂, O₂, CO₂, CH₄,
- * C₂H₂, C₂H₄, C₂H₆ and S₈ 0 by symmetry. The nearest above the threshold is HCl, at 1.13 times it,
- * and the nearest below PH₃, at 0.59 times it, so no source's figure for H₂S moves a molecule
- * across it (R08.T10.d's science check, NIST CCCBDB Release 22 read 2026-10-27).
+ * C₂H₂, C₂H₄, C₂H₆ and S₈ 0 by symmetry; and of 27's further carriers SH 0.758 in X ²Π and PH₂
+ * about 0.5, a computed figure (each recalled, not read at source; PH₂'s with low confidence), and
+ * P₂ 0 by symmetry. The nearest above the threshold is HCl, at 1.13 times it, and the nearest below
+ * SH, at 0.78 times it (PH₃, at 0.59 times it, to 26), so no source's figure for H₂S moves a
+ * molecule across it (R08.T10.d's science check, NIST CCCBDB Release 22 read 2026-10-27; 27's
+ * radicals' figures not checked at source).
  */
 export const DIPOLAR_BROADENERS: ReadonlySet<string> = new Set([
   "H2O",
@@ -685,6 +690,8 @@ export const DIPOLAR_BROADENERS: ReadonlySet<string> = new Set([
   "TiO",
   "VO",
   "FeH",
+  "OH",
+  "PO",
 ]);
 
 /**
@@ -758,6 +765,11 @@ export const CHARGED_BROADENERS: ReadonlySet<string> = new Set([
   "Fe+",
   "Ni+",
   "Zn+",
+  "S+",
+  "C+",
+  "H+",
+  "N+",
+  "O+",
 ]);
 
 /** A species' broadening in a mixture ({@link broadeningFactor}). */
