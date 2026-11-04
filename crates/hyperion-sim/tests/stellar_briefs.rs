@@ -345,13 +345,17 @@ fn change_in(stars: &SystemStars, change: Change) -> Option<(f64, f64)> {
     })
 }
 
-/// Two primaries of the test galaxy whose companions, grown past them after a case-A transfer,
-/// overflow back onto them while they are still on their main sequences (24.5 and 26.0 M☉ then),
-/// found among the 7,900 systems of two rows of 150 layer-E cells near the solar circle: the
-/// engine feeds a main-sequence primary that rarely. The second was `0x826c_b2e0_0000_0013`
-/// (19.3 M☉ then) until P11.T4.n ended a pinned primary's main sequence at its own track's end:
-/// its primary has left it when its companion's overflow returns, at 8.8257 Myr.
-const REJUVENATED: [u64; 2] = [0x8211_b2e0_0000_0010, 0x821e_b320_0000_001b];
+/// Two primaries of the test galaxy whose companions overflow onto them while they are still on
+/// their main sequences (12.0 and 12.5 M☉ then, at 3.98 and 3.90 Myr), the first two found among
+/// the 4,823 systems of two rows of 150 layer-E cells near the solar circle at 27: the engine feeds
+/// a main-sequence primary that rarely. Until 27 they were `0x8211_b2e0_0000_0010` and
+/// `0x821e_b320_0000_001b` (24.5 and 26.0 M☉ then, fed back by companions grown past them after a
+/// case-A transfer), of the 7,900 systems those rows held until 27, where 27's grid places other
+/// systems (plan 08's displaced classes, P08.T12, and the field's share, P09.T2.c). The second was
+/// `0x826c_b2e0_0000_0013` (19.3 M☉ then) until P11.T4.n ended a pinned primary's main sequence at
+/// its own track's end: its primary has left it when its companion's overflow returns, at
+/// 8.8257 Myr.
+const REJUVENATED: [u64; 2] = [0x8211_b2e0_0000_0001, 0x8226_b2e0_0000_0002];
 
 /// `record` with its age at the epoch `age` years and nothing else changed: a real record whose
 /// history moves on the clock, so that one of its ages falls at the epoch.
@@ -411,7 +415,8 @@ fn assert_row_is_the_summary(
 /// its age at the epoch changed: so that the epoch falls 5,000 years before the change, in the
 /// middle of it, and 20,000 years after it ends. At both ends of the clock window and at the
 /// epoch, each row's model's brief is the summary's primary then, bit for bit, with the first
-/// attempt's star count, and the model takes the paired route during and after. Some rows are not
+/// attempt's star count (or, from 27, where a supernova has unbound part of the system, the stars
+/// its summary shows: P11.T10), and the model takes the paired route during and after. Some rows are not
 /// the class their primary's single-star track has then, which they read before P11.T11.a.
 #[test]
 fn now_rows_read_the_pair_before_during_and_after_it_changes_the_primary() {
@@ -479,6 +484,14 @@ fn now_rows_read_the_pair_before_during_and_after_it_changes_the_primary() {
                     "{:?} {change:?} {when}, at age {age:.0} yr, at {t}",
                     record.id()
                 );
+                // A system a supernova has unbound counts the stars it shows (P11.T10, on the
+                // record from 27); a whole one, the first attempt's.
+                let shown = u8::try_from(summary.stars().len()).expect("a few stars");
+                let count = if summary.hierarchy() == Some(stars.hierarchy()) {
+                    count
+                } else {
+                    shown
+                };
                 assert_row_is_the_summary(row, summary.stars().first(), count, &what);
                 let single =
                     SystemStars::generate_in(&galaxy, &record, MultiplicityContext::ForcedSingle)

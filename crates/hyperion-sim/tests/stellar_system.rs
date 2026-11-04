@@ -18,7 +18,7 @@ use hyperion_sim::stellar::multiplicity::{
 use hyperion_sim::stellar::rotation::Magnetism;
 use hyperion_sim::stellar::system::{
     ClockDeath, RemnantDetail, StarModel, StarSummary, SystemExistence, SystemStars,
-    draw_metallicity,
+    draw_metallicity, grid_multiplicity,
 };
 use hyperion_sim::time::{ClockWindow, Span, UniverseTime};
 use hyperion_sim::units::{SolarMasses, Years};
@@ -254,7 +254,10 @@ fn summaries_are_pinned() {
 /// pins is plan 06's model, built from the record alone, with plan 06's death, and unless the
 /// binary engine ran it in a pair (P11.T11) its summaries and its brief at the pinned times are the
 /// same, bit for bit, as those of the system with its companions ruled out. A paired primary's
-/// brief is its summary's since P11.T11.a.
+/// brief is its summary's since P11.T11.a. From 27 the primary of a record whose class constrains
+/// its kick (plan 08's retained and displaced remnants) is the attempt its kick loop keeps
+/// (P08.T12.c), not the model of the record's first draws: it is checked against its system ruled
+/// single alone.
 #[test]
 fn companions_move_no_primary() {
     let galaxy = milky_way();
@@ -271,8 +274,10 @@ fn companions_move_no_primary() {
             record.age_at_epoch(),
         )
         .expect("a grid primary");
-        assert_eq!(stars.primary(), &plan06, "{:?}", record.id());
-        assert_eq!(alone.primary(), &plan06, "{:?}", record.id());
+        assert_eq!(stars.primary(), alone.primary(), "{:?}", record.id());
+        if record.kick_constraint(&galaxy).is_none() {
+            assert_eq!(stars.primary(), &plan06, "{:?}", record.id());
+        }
         assert_eq!(stars.death_time(), alone.death_time());
         for y in PINNED_YEARS {
             let (with, without) = (stars.summary_at(years(y)), alone.summary_at(years(y)));
@@ -308,8 +313,11 @@ fn companions_move_no_primary() {
     assert!(multiples > 0, "no pinned system has a companion");
 }
 
-/// Each companion is its hierarchy slot's star (P11.T2.c): the slot's initial mass, the draws of
-/// its own body at attempt 0, the system's composition and the record's age; the summary covers
+/// Each companion is its hierarchy slot's star (P11.T2.c), the hierarchy drawn under the record's
+/// own context (single for one of plan 08's displaced classes from 27, P08.T12.c): the slot's
+/// initial mass, the draws of its own body at attempt 0 (but for a primary whose kick its class
+/// constrains, whose remnant draws are its kick loop's kept attempt's from 27), the system's
+/// composition and the record's age; the summary covers
 /// every star by body index and carries the hierarchy while the system exists, and the brief
 /// counts the stars. A system a supernova has unbound part of shows the stars it still holds
 /// (P11.T10): a part of the drawn stars, the primary first, on a hierarchy of their own.
@@ -326,7 +334,7 @@ fn every_companion_is_its_slots_star_with_the_systems_composition_and_age() {
                 &draw_hierarchy(
                     &galaxy,
                     &record,
-                    MultiplicityContext::Free,
+                    grid_multiplicity(&record),
                     RedrawAttempt::FIRST
                 )
             );
@@ -338,10 +346,12 @@ fn every_companion_is_its_slots_star_with_the_systems_composition_and_age() {
                 );
                 assert_eq!(model.composition(), stars.primary().composition());
                 assert_eq!(model.age_at_epoch(), record.age_at_epoch());
-                assert_eq!(
-                    model.draws(),
-                    &StarDraws::for_attempt(galaxy.seed(), slot.body(), 0)
-                );
+                if slot.body().body_index() > 0 || record.kick_constraint(&galaxy).is_none() {
+                    assert_eq!(
+                        model.draws(),
+                        &StarDraws::for_attempt(galaxy.seed(), slot.body(), 0)
+                    );
+                }
             }
             companions += stars.stars().len() - 1;
             let summary = stars.summary_at(UniverseTime::EPOCH);
@@ -651,8 +661,10 @@ fn a_hundred_thousand_systems_live_and_die_in_order() {
     check_life_and_death(0x0629_b000_0000_0002, 100_000);
 }
 
-/// Regression (P11.T4.h): record 0x61f85aa800000001 of the census's galaxy. Its 0.84 M☉
-/// companion loses its envelope to its wind on the early AGB. The early AGB's remnant τ once fell
+/// Regression (P11.T4.h): record 0x61f7daa800000009 of the census's galaxy, a triple whose 0.83 M☉
+/// companion loses its envelope to its wind on the early AGB (until 27 record 0x61f85aa800000001,
+/// whose 0.84 M☉ companion did, which 27's grid no longer places, P08.T12's displaced classes and
+/// P09.T2.c's field share; found at 27 by a search of its row of cells for such a companion). The early AGB's remnant τ once fell
 /// from at least 1 to 0 as the mass passed the helium core, where SSE's type 5 never goes, and the
 /// mass-loss integrator stepped towards the envelope's loss without end, a knot at each pass, until
 /// the machine ran out of memory. Each star's fate is found, and the companion dies when its
@@ -662,7 +674,7 @@ fn a_companion_stripped_by_its_wind_on_the_early_agb_has_a_fate() {
     use hyperion_sim::stellar::remnant::{DeathKind, Stripping};
 
     let galaxy = milky_way();
-    let id = hyperion_sim::id::SystemId::from_raw(0x61f8_5aa8_0000_0001).expect("a grid ID");
+    let id = hyperion_sim::id::SystemId::from_raw(0x61f7_daa8_0000_0009).expect("a grid ID");
     let record = hyperion_sim::galaxy::placement::resolve(&galaxy, id).expect("it resolves");
     let stars = SystemStars::generate(&galaxy, &record);
     assert_eq!(stars.star_count(), 3);
@@ -684,36 +696,39 @@ fn a_companion_stripped_by_its_wind_on_the_early_agb_has_a_fate() {
     assert!(stripped.age().value() > 1e10, "{stripped:?}");
 }
 
-/// Regression (found by rendering plan R06.T5.c), then P11.T4.g: record 0x81fd865fd000000f of
-/// seed `0x0926_0000` (15.05 + 12.65 M☉, bulge, layer E). A common envelope strips the primary to a
-/// 4.93 M☉ helium star at 15.457 Myr, and from 15.688 Myr the main-sequence star feeds it. Its
-/// held state was once an early-AGB supergiant of 1,054 R☉ with no envelope (M = Mc), which
-/// touched its companion and recursed through the common envelope and the merger. Now a star with
-/// no envelope is a helium star from that step (HPT section 6; BSE `hrdiag`): the primary stays
-/// compact (under 3 R☉) to its pinned collapse at 15.896 Myr, no living hydrogen giant has
-/// M ≤ Mc, and the pair meets no common envelope, contact or merger after 15.69 Myr. Until
-/// P11.T4.m, `swell` made the accretor a core-helium-burning giant with a thin envelope again and
-/// again between 15.69 Myr and the collapse, each stripped back at once (P11.T4.g's finding C2).
-/// Now its wind outweighs what it is fed, BSE's gate (`evolv2.f` 1480) refuses every swell (all
-/// 133 requests, counted when this was written), and from 15.457 Myr to the collapse the primary
-/// is a naked helium star at every sample (ruling p11-c2-swell of 2026-10-06). The companion's
-/// neutron star, at 20.31 Myr, moved by 2.1 × 10⁻⁷ M☉ with it.
+/// Regression (found by rendering plan R06.T5.c), then P11.T4.g, on record 0x8201865fe00001a2 of
+/// seed `0x0926_0000` (16.12 + 14.88 M☉, bulge, layer E; until 27 the regression's own record
+/// 0x81fd865fd000000f, 15.05 + 12.65 M☉, where 27's grid places another system, P08.T12's
+/// displaced classes and P09.T2.c's field share; found at 27 by a search of its neighbouring cells
+/// for a primary stripped by a common envelope to a helium star that its main-sequence companion
+/// then feeds less than its wind, the six 18–19 M☉ primaries found before it being fed more and
+/// swelled). A common envelope strips the primary to a 5.14 M☉ helium star at 12.566 Myr, and from
+/// 12.600 Myr the main-sequence star feeds it. The regression's held state was once an early-AGB
+/// supergiant of 1,054 R☉ with no envelope (M = Mc), which touched its companion and recursed
+/// through the common envelope and the merger. Now a star with no envelope is a helium star from
+/// that step (HPT section 6; BSE `hrdiag`): the primary stays compact (under 3 R☉) to its pinned
+/// collapse at 12.615 Myr, no living hydrogen giant has M ≤ Mc, and the pair meets no common
+/// envelope, contact or merger after it is fed. Until P11.T4.m, `swell` made the accretor a
+/// core-helium-burning giant with a thin envelope again and again between the feeding and the
+/// collapse, each stripped back at once (P11.T4.g's finding C2). Now its wind outweighs what it is
+/// fed, BSE's gate (`evolv2.f` 1480) refuses every swell, and from the envelope to the collapse
+/// the primary is a naked helium star at every sample (ruling p11-c2-swell of 2026-10-06).
 #[test]
 fn a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star() {
     let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
         .expect("the Milky Way-like parameters are valid");
-    let id = hyperion_sim::id::SystemId::from_raw(0x81fd_865f_d000_000f).expect("a grid ID");
+    let id = hyperion_sim::id::SystemId::from_raw(0x8201_865f_e000_01a2).expect("a grid ID");
     let record = hyperion_sim::galaxy::placement::resolve(&galaxy, id).expect("it resolves");
     let stars = SystemStars::generate(&galaxy, &record);
-    assert_eq!(stars.star_count(), 4);
+    assert_eq!(stars.star_count(), 2);
     let pair = stars
         .pairs()
         .iter()
         .find(|pair| {
-            let first = pair.timeline().state_at(Years::new(1.0e7));
-            (first.stars()[0].mass().value() - 15.0).abs() < 0.1
+            let first = pair.timeline().state_at(Years::new(1.0e6));
+            (first.stars()[0].mass().value() - 16.12).abs() < 0.1
         })
-        .expect("the 15 M☉ pair");
+        .expect("the 16.1 M☉ pair");
     let timeline = pair.timeline();
     let collapse = timeline
         .supernovae()
@@ -721,12 +736,27 @@ fn a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star() {
         .expect("the primary's collapse")
         .age()
         .value();
-    assert!((collapse / 15.896e6 - 1.0).abs() < 1e-4, "{collapse}");
-    let helium_from = 15.457e6;
+    assert!((collapse / 12.6152e6 - 1.0).abs() < 1e-4, "{collapse}");
+    let start_of = |kind: SegmentKind, after: f64| {
+        let found = timeline
+            .segments()
+            .iter()
+            .find(|s| s.start().value() >= after && s.kind() == kind);
+        found.map(|s| s.start().value())
+    };
+    let helium_from = start_of(SegmentKind::CommonEnvelope, 0.0).expect("the stripping envelope");
+    let fed = SegmentKind::StableTransfer {
+        donor: hyperion_sim::stellar::binary::Component::Secondary,
+    };
+    let fed_from = start_of(fed, helium_from).expect("the companion feeds the helium star");
+    assert!(
+        (helium_from / 12.5659e6 - 1.0).abs() < 1e-4 && (fed_from / 12.6003e6 - 1.0).abs() < 1e-4,
+        "stripped at {helium_from} yr, fed from {fed_from} yr"
+    );
     let mut checked = 0;
     for segment in timeline.segments() {
         let (from, to) = (segment.start().value(), segment.end().value());
-        if from > 15.69e6 && from < collapse {
+        if from > fed_from && from < collapse {
             assert!(
                 matches!(
                     segment.kind(),

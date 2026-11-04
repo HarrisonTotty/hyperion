@@ -712,7 +712,9 @@ mod tests {
     /// A record whose eight attempts all hold a pair the engine may run lists all eight, then the
     /// fallback; one whose attempt n holds none, after earlier ones that all do, lists attempts 0
     /// to n. Found among layer E's records near the Sun, where nine in ten attempts hold such a
-    /// pair, by a test of each attempt's draw written apart from the bound's.
+    /// pair, by a test of each attempt's draw written apart from the bound's, under the record's
+    /// own context ([`grid_multiplicity`]): from 27 a record of one of plan 08's displaced classes
+    /// is single by construction (P08.T12.c), and its bound lists its one attempt.
     #[test]
     fn eight_attempts_that_may_carve_are_all_listed_then_the_fallback() {
         let galaxy = galaxy();
@@ -737,7 +739,7 @@ mod tests {
                         &galaxy,
                         &record,
                         &composition,
-                        MultiplicityContext::Free,
+                        grid_multiplicity(&record),
                         attempt,
                     ))
                 })
@@ -785,7 +787,8 @@ mod tests {
     /// Each attempt the bound lists is the draw at that attempt alone, bit for bit, though the
     /// bound's attempts share their limits and the direct construction's period law
     /// (`RecordDraw`): every word read is the draw's own, and no attempt depends on those drawn
-    /// before it.
+    /// before it. Each is drawn under the record's own context ([`grid_multiplicity`]), single for
+    /// a record of one of plan 08's displaced classes from 27 (P08.T12.c).
     #[test]
     fn every_attempt_listed_is_the_draw_at_that_attempt_alone() {
         let galaxy = galaxy();
@@ -799,7 +802,7 @@ mod tests {
                         &galaxy,
                         &record,
                         &composition,
-                        MultiplicityContext::Free,
+                        grid_multiplicity(&record),
                         listed.attempt(),
                     );
                     assert_eq!(listed.hierarchy(), &alone, "{:?}", record.id());
