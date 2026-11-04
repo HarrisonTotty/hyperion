@@ -47,6 +47,13 @@ path = "junit.xml"
 # makes just before it in the same hold of the heavy-test lock.
 [profile.wasip1]
 
+# The profile under which `just hold-ci` (`tools/smart-ci/hold_ci.py`) runs each of the next
+# version's held tests and each slow census that reads holds, alone: the default one, with a test
+# past 2 h ended (TIMEOUT) and the output it wrote printed, so that one long census cannot hold the
+# rest of a round.
+[profile.hold-ci]
+slow-timeout = { period = "600s", terminate-after = 12 }
+
 # wasm32-wasip1 has no threads, so there every test runs on one: the sky's census and oracle helpers
 # and the bound checks run their jobs in turn (`THREADS` is 1 in `tests/common/sky.rs`; the others
 # branch on `target_family = "wasm"`). So under wasip1 each test takes one slot, whatever it

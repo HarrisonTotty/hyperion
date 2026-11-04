@@ -716,6 +716,19 @@ test-slow-client: gen-surface
 # check.
 slow_then_check := 'cargo nextest run --workspace --cargo-profile slow-test --profile slow --run-ignored only "$@" && start=$SECONDS && cargo run -q -p hyperion-fit -- check --rerun-fast && echo "hyperion-fit check --rerun-fast: $((SECONDS - start)) s" >&2'
 
+# `just hold-ci [--version N] [--since REV] [--plan] [--threads N]` (`tools/smart-ci/hold_ci.py`): the
+# next version's held tests on this tree, so that a train's blockers surface the day their code lands.
+# From the code's graph, it runs every test that reaches version N's holds (by default the newest
+# version with a union of them), then the slow censuses that read any version's holds, each alone on
+# 16 test threads and ended past 2 h (nextest's `hold-ci` profile), then, with `--since`, the tests
+# of the crates `REV..HEAD` touched; all at the slow-test profile, from one build. A test that passed
+# on the same Rust inputs is not run again. `--plan` lists the tests and runs nothing. It takes no
+# lock: run it where nothing else heavy runs, or under `just _locked`.
+# The next version's held tests, then the slow censuses that read holds, then the touched crates'.
+[positional-arguments]
+hold-ci *args:
+    @python3 "{{ justfile_directory() }}/tools/smart-ci/hold_ci.py" "$@"
+
 # The WebAssembly checks (plan R04). Two targets: `wasm32-wasip1` under wasmtime, a second
 # architecture with a 32-bit `usize`, for base, the surface crate, the testkit and the sim; and
 # `wasm32-unknown-unknown`, the client's, under wasm-bindgen-test (R04.T8). `just wasm-tools`
