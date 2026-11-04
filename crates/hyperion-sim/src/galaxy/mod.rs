@@ -277,8 +277,10 @@ impl Galaxy {
         )
     }
 
-    /// The galaxy of `params`, with `seed` keying the streams that place its stars (plan 03) and
-    /// the gas field's own draws (plan 07).
+    /// The galaxy of `params`, with `seed` keying the streams that place its stars (plan 03), the
+    /// gas field's own draws (plan 07) and, from generator version 27, the global list's dwarfs,
+    /// whose share of the halo's budget the halo's field gives up (plan 10, P10.T3.d.b's
+    /// [`discrete_share`]).
     ///
     /// The parameters are `params`, such as the Milky Way fixture
     /// ([`GalaxyParams::milky_way_like`]) or a builder's, not the seed's draws.

@@ -13,7 +13,7 @@ use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
 use hyperion_sim::galaxy::shares::{POPULATION_COLUMNS, ShareMatrix};
 use hyperion_sim::galaxy::substellar::{SubstellarAbundance, SubstellarParams};
-use hyperion_sim::galaxy::{Galaxy, POPULATIONS, PointLy};
+use hyperion_sim::galaxy::{Galaxy, POPULATIONS, PointLy, Population};
 use hyperion_sim::units::LightYears;
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::float::assert_same_bits;
@@ -178,6 +178,25 @@ fn a_galaxy_handle_holds_the_parts_built_one_by_one() {
     );
 }
 
+/// `text`, a fields' `Debug` text, without its displaced classes' table's field stays
+/// (`field: Some([…])`): the share of each component's budget its field keeps (plan 09,
+/// P09.T2.c).
+fn without_field_stays(text: &str) -> String {
+    const START: &str = "field: Some([";
+    const END: &str = "]]),";
+    assert_eq!(text.matches(START).count(), 1, "one table's field stays");
+    let start = text.find(START).expect("the class table's field stays");
+    let end = start + text[start..].find(END).expect("the field stays' end") + END.len();
+    format!("{}{}", &text[..start], &text[end..])
+}
+
+/// A galaxy from parameters keeps them and its seed. The seed keys placement, the gas field's
+/// draws and, from generator version 27, the halo's discrete share (plan 10, P10.T3.d.b): the
+/// global list's dwarfs, drawn on the seed, hold their share of the halo's budget, which the halo's
+/// field gives up, 0.0254 of it at this galaxy's seed and 0.0296 at the other's. So another seed
+/// gives the same galaxy otherwise: the same potential and share matrix, and the same fields but
+/// for the share of each halo component's budget its field keeps (the class table's field stays,
+/// P09.T2.c), which is its budget's stay share less that share.
 #[test]
 fn a_galaxy_handle_from_params_keeps_them_and_its_seed() {
     let params = GalaxyParams::milky_way_like();
@@ -186,12 +205,40 @@ fn a_galaxy_handle_from_params_keeps_them_and_its_seed() {
         Galaxy::from_params(seed, params.clone()).expect("this galaxy's gas is mostly neutral");
     assert_eq!(galaxy.seed(), seed);
     assert_same("params", galaxy.params(), &params);
-    // The seed keys placement only: another seed gives the same galaxy otherwise.
     let other =
         Galaxy::from_params(Seed::new(7), params).expect("this galaxy's gas is mostly neutral");
-    assert_same("fields", other.fields(), galaxy.fields());
+    assert_same(
+        "fields without their field stays",
+        &without_field_stays(&text(other.fields())),
+        &without_field_stays(&text(galaxy.fields())),
+    );
     assert_same("potential", other.potential(), galaxy.potential());
     assert_same("shares", other.shares(), galaxy.shares());
+    let phi = |g: &Galaxy, band| g.feature_shares().phi(Population::Halo, band);
+    let (ours, theirs) = (
+        galaxy.class_table().expect("the version's classes"),
+        other.class_table().expect("the version's classes"),
+    );
+    let mut halo_rows = 0;
+    for id in galaxy.fields().component_ids() {
+        let halo = galaxy.fields().component(id).population() == Population::Halo;
+        for band in MassBand::ALL.into_iter().chain(MassBand::SUBSTELLAR) {
+            let (a, b) = (ours.stay_share(band, id), theirs.stay_share(band, id));
+            if halo {
+                let moved =
+                    ours.budget_stay_share(band, id) * (phi(&galaxy, band) - phi(&other, band));
+                assert!(moved.abs() > 1e-4, "{id:?} {band:?}: {moved}");
+                assert!(
+                    (b - a - moved).abs() < 1e-14,
+                    "{id:?} {band:?}: {a} {b} {moved}"
+                );
+            } else {
+                assert_same_bits(b, a);
+            }
+        }
+        halo_rows += usize::from(halo);
+    }
+    assert!(halo_rows > 0, "the fixture has a halo");
 }
 
 #[test]
