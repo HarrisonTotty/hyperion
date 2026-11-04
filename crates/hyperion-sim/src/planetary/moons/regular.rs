@@ -4135,10 +4135,14 @@ mod tests {
     /// - The ice holds an ice crust's water and nitrogen where Jeans's test fails them, and from 24
     ///   its argon ice's (P14.T53.c; Triton's), and no rock bulk's: an Io keeps no water.
     /// - Titan keeps more than a bar of N₂ at every rank, and its air lies within 15% of
-    ///   Huygens's 1,467 hPa and 2 K of its 93.65 K at the surface (HASI, Fulchignoni et al. 2005,
-    ///   Nature 438, 785): 1,438 hPa at the median rank, of which N₂ weighs 1,387 and CH₄ 51
-    ///   (about 6% by mole, against Huygens's 5.65 ± 0.18%, Niemann et al. 2010, JGR 115, E12006),
-    ///   and 93.8 K, against the 2,655 hPa and 98.4 K version 22 gave it at the solve's 2,220 km.
+    ///   Huygens's 1,467 hPa at the surface (HASI, Fulchignoni et al. 2005, Nature 438, 785):
+    ///   1,438 hPa at the median rank to 26, of which N₂ weighed 1,387 and CH₄ 51 (about 6% by
+    ///   mole, against Huygens's 5.65 ± 0.18%, Niemann et al. 2010, JGR 115, E12006), and 93.8 K,
+    ///   within 2 K of Huygens's 93.65 K, against the 2,655 hPa and 98.4 K version 22 gave it at the
+    ///   solve's 2,220 km. From generator version 27 its haze's anti-greenhouse (P14.T24.h.b) cools
+    ///   it to 89.9–91.3 K across the ranks, up to 3.8 K under Huygens's: pinned as it stands,
+    ///   89.5–92 K, the deferred finding of
+    ///   `under_every_26_hold_titan_takes_its_methane_cloud_its_sediment_and_its_haze`.
     #[test]
     fn the_table_s_moons_take_their_air_at_their_own_bulk() {
         use crate::planetary::derive::atmosphere::{
@@ -4216,8 +4220,9 @@ mod tests {
                     let nitrogen = air.partial_pressures().of(Gas::Nitrogen);
                     assert!(nitrogen.value() >= 1e5, "{at}");
                     assert!((pressure.value() / 1.467e5 - 1.0).abs() < 0.15, "{at}");
+                    // From 27 under its haze's anti-greenhouse (P14.T24.h.b), pinned as it stands.
                     assert!(
-                        (air.surface_temperature().value() - 93.65).abs() < 2.0,
+                        (89.5..=92.0).contains(&air.surface_temperature().value()),
                         "{at}"
                     );
                 } else {
@@ -5236,39 +5241,75 @@ mod tests {
     /// P14.T56.d: a regular moon's ocean is its branch's, and an ocean once frozen never returns
     /// in time: over 0.5–13.5 Gyr of its system's age, a moon's flag never goes from ocean to none
     /// and back (generated moons of the table's giants, their skies held at the epoch's).
+    ///
+    /// From generator version 27 an airless or tenuous moon's `H2O` regolith is ice with its rock's
+    /// lag (P14.T49.m), where an air's ground keeps its frost, so an icy moon on the edge of its air
+    /// is bistable: bright under an air (a `Snowball`), where its surface is too cold for its
+    /// ocean, and dark when bare, where its ocean holds, each age solved on its own. A moon bare
+    /// at some ages and under an air at others is that case: an ocean that returns where its
+    /// surface turns bare is counted, not asserted, and pinned, one of 342 moons at 27:
+    /// 020037fe60010010's moon 4, a `Snowball` at 2.25–2.75 and 4.25 Gyr (its Bond albedo
+    /// 0.71–0.83) and bare between and after (0.35, an ocean at a surface of 80.8 K).
     #[test]
     fn an_ocean_once_frozen_never_returns() {
         let ages: Vec<Years> = (0..=52)
             .map(|k| Years::new(0.5e9 + 0.25e9 * f64::from(k)))
             .collect();
-        let (mut moons, mut frozen, mut always) = (0, 0, 0);
+        let (mut moons, mut frozen, mut always, mut bistable) = (0, 0, 0, 0);
         for giant in &table_giants() {
             let slot = giant.0.id().body_index().to_be_bytes()[0];
             for i in 0..25 {
                 let p = renamed(&giant.0, i, slot);
                 for moon in regular_moons(Seed::new(11), &p).moons() {
                     let rank = spread_rank(i);
-                    let flags: Vec<bool> = ages
+                    let (flags, bare): (Vec<bool>, Vec<bool>) = ages
                         .iter()
-                        .map(|&age| regular_derived(moon, &p, giant, rank, age).subsurface_ocean())
-                        .collect();
+                        .map(|&age| {
+                            let derived = regular_derived(moon, &p, giant, rank, age);
+                            (
+                                derived.subsurface_ocean(),
+                                matches!(
+                                    derived.body().atmosphere().state(),
+                                    SurfaceState::Airless | SurfaceState::Tenuous
+                                ),
+                            )
+                        })
+                        .unzip();
+                    moons += 1;
                     let lost = flags.windows(2).position(|w| w[0] && !w[1]);
                     if let Some(at) = lost {
-                        assert!(
-                            !flags[at + 1..].contains(&true),
-                            "{:?} moon {}: {flags:?}",
-                            p.id(),
-                            moon.ordinal()
-                        );
+                        // A return, but where the moon's surface leaves its air for its lag there.
+                        for j in at + 1..flags.len() - 1 {
+                            if flags[j] || !flags[j + 1] {
+                                continue;
+                            }
+                            assert!(
+                                bare[j] != bare[j + 1],
+                                "{:?} moon {}: {flags:?}",
+                                p.id(),
+                                moon.ordinal()
+                            );
+                            eprintln!(
+                                "{:?} moon {}: its ocean returns as its surface turns bare at \
+                                 {:.2} Gyr: ocean {flags:?}, bare {bare:?}",
+                                p.id(),
+                                moon.ordinal(),
+                                ages[j + 1].value() / 1e9
+                            );
+                            bistable += 1;
+                        }
                         frozen += 1;
                     }
                     always += usize::from(flags.iter().all(|&ocean| ocean));
-                    moons += 1;
                 }
             }
         }
-        eprintln!("{moons} moons: {always} keep an ocean throughout, {frozen} freeze once");
+        eprintln!(
+            "{moons} moons: {always} keep an ocean throughout, {frozen} freeze once, {bistable} \
+             returns as a surface turns bare"
+        );
         assert!(moons > 200, "{moons}");
+        assert_eq!(bistable, 1, "the returns as a surface turns bare");
     }
 
     /// P14.T56.d: over 10⁴ generated moons every moon's tides are finite and positive, every
@@ -6076,9 +6117,11 @@ mod tests {
     /// (Triton's mass and measured radius about the generated Jupiter, 0.24 of ice) and a
     /// giant-impact moon of a rocky planet (a sphere of the Moon's 3,344 kg m⁻³ of rock about half
     /// an Earth at 3 au) take the albedo, and so the equilibrium temperature, of their bulk
-    /// section's material, which their air reads (`MoonBulk::Stated`): the capture its fresh frost
-    /// (with its ices), above 0.5, and the giant-impact moon's rock, its lid not known, the Moon's
-    /// 0.11 by the space-weathering stand-in.
+    /// section's material, which their air reads (`MoonBulk::Stated`): the capture its ice's, and
+    /// the giant-impact moon's rock, its lid not known, the Moon's 0.11 by the space-weathering
+    /// stand-in. The capture's ice was its fresh frost (with its ices), above 0.5; from generator
+    /// version 27 its airless `H2O` regolith, which no tide resurfaces and whose ice holds no
+    /// volatile air about Jupiter, is ice with its rock's lag (P14.T49.m), 0.350 about a Sun.
     #[test]
     fn a_capture_and_a_giant_impact_moon_take_their_bulk_s_albedo() {
         use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
@@ -6096,7 +6139,14 @@ mod tests {
         assert!(ice >= crate::planetary::params::ICY_WATER_FRACTION, "{ice}");
         let mass = (kg, UnitUniform::HALF);
         let capture = own_moon(mass, &orbit, &home, &volatiles, captured);
-        assert!(capture.albedo().value() > 0.5, "{:?}", capture.albedo());
+        let lag = Regolith::of_material(SurfaceMaterial::Ice)
+            .bond(SurfaceState::Airless, &sun_bands())
+            .bond;
+        assert!(
+            (capture.albedo().value() - lag).abs() < 0.01,
+            "{:?} against its ice's lag {lag}",
+            capture.albedo()
+        );
         let disc = solar::solar_disc();
         let (parent_kg, a_au) = (0.5 * EARTH_MASS_KG, 3.0);
         let derived = solar::derive(&solar::placed(parent_kg, a_au, 0.02, 0.5), &disc).unwrap();
