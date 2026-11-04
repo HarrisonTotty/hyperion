@@ -96,3 +96,6 @@ apps/hyperion/src/renderer/src/view/atmosphere/reference/thickRuns.json
 # R08.T14.f's vector gates, written by `reference/vectorGate.test.ts` through `bless.ts` under
 # HYPERION_VECTOR_GATE=1, each list on a line (plan R08, R08.T14.f)
 apps/hyperion/src/renderer/src/view/atmosphere/reference/vectorGate.json
+
+# The lanes' inbox, checked out beside the repository's code but not part of it
+/.lc-inbox/

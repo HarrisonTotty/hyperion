@@ -34,5 +34,5 @@
     "typescript/no-unnecessary-condition": "error",
     "typescript/strict-boolean-expressions": "error"
   },
-  "ignorePatterns": ["**/out/**", "**/dist/**", "**/generated/**", "target/**"]
+  "ignorePatterns": ["**/out/**", "**/dist/**", "**/generated/**", "target/**", ".lc-inbox/**"]
 }
