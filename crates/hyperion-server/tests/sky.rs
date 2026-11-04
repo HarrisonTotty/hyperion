@@ -52,10 +52,14 @@ use hyperion_sim::coords::{GalacticPosition as SimPosition, UnitVector};
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::{CatalogueClassSource, NoClassCellCache};
 use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+use hyperion_sim::galaxy::features::centre::NoCentreOrbitCache;
 use hyperion_sim::galaxy::features::members::KeepInteriors;
 use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
 use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
+use hyperion_sim::galaxy::global_list::{
+    GlobalList, GlobalListSource, StreamNumber, TubeLookup, TubeTable,
+};
 use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
 use hyperion_sim::id::Layer;
 use hyperion_sim::observe::Observer;
@@ -65,9 +69,9 @@ use hyperion_sim::sky::band::{
 };
 use hyperion_sim::sky::caps::{REAL_LIMIT_LY, SYNTHETIC_CEILING_V};
 use hyperion_sim::sky::census::{
-    CellOffsets, CensusPlan, CensusTallies, Completeness, NoSkyCellCache, Shell, SkyCensus,
-    SkyContext, SkyQuery, SkyQueryBuilder, SkySource, SkyStar, census_cell, census_plan,
-    census_plan_with_edges, merge_census, merge_shells,
+    CellOffsets, CensusPlan, CensusTallies, Completeness, MemberPart, NoSkyCellCache, Shell,
+    SkyCensus, SkyContext, SkyQuery, SkyQueryBuilder, SkySource, SkyStar, census_cell,
+    census_members, census_plan, census_plan_with_edges, merge_census, merge_shells,
 };
 use hyperion_sim::sky::dgl::Illumination;
 use hyperion_sim::sky::disc::{HostDisc, host_discs};
@@ -363,14 +367,74 @@ fn sim_census(query: &SkyQuery) -> SkyCensus {
     sim_census_over(dark_tables(), query).1
 }
 
-/// [`sim_census`] with `sources` beside the grid in its cells' context, as the server's census takes
-/// the feature members' and the catalogue classes' from generator version 27 (R06.T16.a's switch).
+/// [`sim_census`] with `sources` beside the grid: each shell's members beyond the grid through them
+/// in one part ([`census_members`]), and the cells in a context that carries them, as the server's
+/// census takes the feature members', the catalogue classes' hosts and the global list's from
+/// generator version 27 in its members' jobs (R06.T16.a's switch; which part holds which member
+/// changes no star).
 fn sim_census_with(query: &SkyQuery, sources: &[&dyn SkySource]) -> SkyCensus {
     let tables = dark_tables();
     let plan = plan_over(tables, query);
     let mut cells = CellParts::over(tables, query);
     cells.ctx.sources = sources;
-    sim_census_of(&mut cells, &plan)
+    let mut parts: Vec<(Vec<SkyStar>, CensusTallies)> = plan
+        .shells()
+        .map(|shell| {
+            let mut stars = Vec::new();
+            let whole = (shell, MemberPart::WHOLE);
+            let tallies = census_members(galaxy(), &mut cells.ctx, &plan, whole, query, &mut stars);
+            (stars, tallies)
+        })
+        .collect();
+    parts.extend(cells.fold(plan.cells()));
+    merge_shells(parts, query.n_max(), plan.complete())
+}
+
+/// [`sim_census_with`] through the sources the server's census takes from generator version 27:
+/// the feature members' (P09.T40.a), the catalogue classes' hosts' (P09.T37.a) and, where the
+/// range query registers its source, the global list's (P10.T10.b).
+fn sim_census_with_members(query: &SkyQuery) -> SkyCensus {
+    let interiors = KeepInteriors::new(galaxy());
+    let members = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+    let classes = CatalogueClassSource::new().with_cells(&NoClassCellCache);
+    let tubes = Tubes::new();
+    let list = GlobalListSource::is_registered_in(galaxy()).then(|| {
+        GlobalListSource::new(galaxy(), &tubes, &NoCentreOrbitCache).expect("the centre builds")
+    });
+    let mut sources: Vec<&dyn SkySource> = vec![&members, &classes];
+    sources.extend(list.iter().map(|list| list as &dyn SkySource));
+    sim_census_with(query, &sources)
+}
+
+/// [`galaxy`]'s global list, its streams' tube tables built on first use and kept: the sim's side
+/// of the server's `ListedTubes`, for the global list's source (P10.T10.b).
+struct Tubes {
+    list: GlobalList,
+    kept: Mutex<BTreeMap<StreamNumber, Arc<TubeTable>>>,
+}
+
+impl Tubes {
+    /// [`galaxy`]'s list, no table built yet.
+    fn new() -> Self {
+        Self {
+            list: GlobalList::build(galaxy()),
+            kept: Mutex::default(),
+        }
+    }
+}
+
+impl TubeLookup for Tubes {
+    fn global_list(&self) -> &GlobalList {
+        &self.list
+    }
+
+    fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
+        let mut kept = self.kept.lock().expect("no reference census panics");
+        Arc::clone(kept.entry(stream).or_insert_with(|| {
+            let spec = self.list.stream(stream).expect("a stream of the list");
+            Arc::new(TubeTable::build(galaxy(), spec).expect("the galaxy's full potential"))
+        }))
+    }
 }
 
 /// The sim's own plan and census of `query` over `tables`, the census in one pass over the plan's
@@ -499,12 +563,9 @@ async fn a_sky_near_the_sun_takes_the_feature_members_from_27() {
     )
     .with_caps_forced(LightYears::new(SMALL_CAP_LY))
     .expect("a forced cap");
-    // From 27 the server's census takes the feature members and the catalogue classes' hosts
-    // through their sources, as the sim's does with them.
-    let interiors = KeepInteriors::new(galaxy());
-    let members = FeatureMemberSource::new(&NoFeatureCache, &interiors);
-    let classes = CatalogueClassSource::new().with_cells(&NoClassCellCache);
-    let sim = sim_census_with(&query, &[&members, &classes]);
+    // From 27 the server's census takes the members beyond the grid in its members' jobs, as the
+    // sim's does through the same sources.
+    let sim = sim_census_with_members(&query);
     // The reply states the ceiling and the real limit (R13.T2.b); a forced cap, standing in for
     // the real boundary, states no count beyond it brighter than the ceiling.
     assert_eq!(
