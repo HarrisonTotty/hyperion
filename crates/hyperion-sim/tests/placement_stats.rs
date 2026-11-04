@@ -547,7 +547,9 @@ fn assert_ks(name: &str, samples: &mut [f64], cdf: impl Fn(f64) -> f64) -> Kolmo
 }
 
 /// Primary initial masses, per layer, against the galaxy's mass function restricted to the layer's
-/// band, under both functions the sim supports (P03.T8.b).
+/// band, under both functions the sim supports (P03.T8.b). From generator version 27 layers D and
+/// E draw their masses from plan 08's class marks (P08.T12.c), whose own tests check them: here
+/// they are only held inside their bands.
 #[test]
 fn marks_draw_primary_masses_from_the_mass_function_in_each_band() {
     /// Masses per layer. The sampler takes one uniform through a closed-form quantile, so this is a
@@ -567,6 +569,9 @@ fn marks_draw_primary_masses_from_the_mass_function_in_each_band() {
                 "{kind:?}, layer {}: a primary outside its band",
                 spec.layer().letter()
             );
+            if matches!(band, MassBand::D | MassBand::E) {
+                continue;
+            }
             let function = galaxy.mass_function();
             let whole = function.integral(band.lo(), band.hi());
             assert!(whole > 0.0, "{kind:?}: the band {band:?} holds nothing");
@@ -592,7 +597,9 @@ fn marks_draw_primary_masses_from_the_mass_function_in_each_band() {
 /// sub-disc, a halo component — owns the age distribution (plan 03, Design note 3), so this is also
 /// the check that the pick and the age draw agree on which component a system came from. The places
 /// are chosen to reach every component: the discs near the Sun, the bulge and the bar in the inner
-/// galaxy, the nuclear disc at its own scale length, the halo far off the plane.
+/// galaxy, the nuclear disc at its own scale length, the halo far off the plane. From generator
+/// version 27 layers D and E draw their ages with their masses from plan 08's class marks
+/// (P08.T12.c), whose own tests check them, so the ages are layers A to C's.
 #[test]
 fn marks_draw_ages_from_the_picked_components_distribution() {
     /// The fewest systems a component needs before its ages are tested.
@@ -618,7 +625,10 @@ fn marks_draw_ages_from_the_picked_components_distribution() {
     let mut ages: Vec<Vec<f64>> = vec![Vec::new(); MAX_COMPONENTS];
     for place in places {
         let at = GalacticPosition::from_light_years(place).expect("a place inside the cube");
-        for spec in STELLAR_LAYERS {
+        for spec in STELLAR_LAYERS
+            .iter()
+            .filter(|spec| !matches!(spec.band(), MassBand::D | MassBand::E))
+        {
             take_systems(&galaxy, spec.layer(), &at, PER_PLACE, |record| {
                 let component = record
                     .component()

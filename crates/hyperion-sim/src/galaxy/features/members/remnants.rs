@@ -771,8 +771,9 @@ mod tests {
     fn the_ceiling_and_the_members_do_not_depend_on_what_was_asked_first() {
         let galaxy = galaxy();
         let [_, (feature, shared, table)] = clusters(galaxy);
-        // Other rules than the fixture's, the version's: 27's.
-        let version = StellarRules::every_27_hold();
+        // Other rules than the fixture's, the version's: the kick's test-only second table (from
+        // 27 every 27 hold is the version's).
+        let version = StellarRules::probe();
         assert_ne!(version, galaxy.rules().stellar);
         let floor_under_version = shared.co_core_floor(version);
         assert_same_bits(

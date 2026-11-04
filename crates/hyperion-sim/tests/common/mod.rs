@@ -463,21 +463,34 @@ pub fn for_each_box_midpoint(
     }
 }
 
-/// The field's density of a layer at `point`, systems per cubic light-year: each component's
-/// density times its field share in the band (`Galaxy::field_component_share`, plan 09, P09.T2.c),
-/// summed in component order. Where no rogue planet density saturates, it is the density the grid
-/// places.
+/// The density of a layer the grid places at `point`, systems per cubic light-year: each
+/// component's density times its field share in the band (`Galaxy::field_component_share`, plan
+/// 09, P09.T2.c), summed in component order, and, where the build has installed them, plan 08's
+/// displaced classes' (P08.T12.a), the part of `Fields::layer_density` past its components. Where
+/// no rogue planet density saturates, it is the density the grid places.
 #[must_use]
 pub fn field_layer_density(galaxy: &Galaxy, band: MassBand, point: &PointLy) -> f64 {
+    let fields = galaxy.fields();
     let mut densities = [0.0; MAX_COMPONENTS];
-    galaxy.fields().densities(point, &mut densities);
-    galaxy
-        .fields()
+    fields.densities(point, &mut densities);
+    let field = fields
         .component_ids()
         .zip(densities)
         .fold(0.0, |sum, (id, density)| {
             sum + galaxy.field_component_share(band, id) * density
-        })
+        });
+    let displaced = fields.displaced().map_or(0.0, |_| {
+        let shares = galaxy.shares();
+        let components = fields
+            .components()
+            .iter()
+            .zip(densities)
+            .fold(0.0, |sum, (component, density)| {
+                sum + shares.component_share(band, component) * density
+            });
+        fields.layer_density(shares, band, point) - components
+    });
+    field + displaced
 }
 
 /// The integral of a layer's field density ([`field_layer_density`]) over the box of whole

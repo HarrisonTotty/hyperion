@@ -126,8 +126,8 @@ fn minus_h() -> Years {
 // 1. The young field and its bounds.
 
 /// The class follows the young thin disc and the nuclear disc's two components, every component
-/// with layer-E systems younger than [`RECENT_DEATH_AGES`], each with its own largest death rate;
-/// no star of band E lives within the interval of that limit.
+/// with layer-E systems younger than [`RECENT_DEATH_AGES`], each with its field's death rate under
+/// its own largest; no star of band E lives within the interval of that limit.
 #[test]
 fn the_young_field_is_the_young_disc_and_the_nuclear_disc() {
     let galaxy = galaxy();
@@ -161,28 +161,23 @@ fn the_young_field_is_the_young_disc_and_the_nuclear_disc() {
         "an 8 M☉ star lives up to {} yr",
         longest.value()
     );
+    // From 27 each component's rate is the field's, by mass interval (`by_mass`, whose own test is
+    // `runaway_hold`'s): under its densest field age's, and its share its band budget's taken to
+    // the field (P09.T2.c), the ejection marks thinning its deaths (P09.T33.b).
     for young in process.components() {
-        let ages = fields.component(young.id()).ages();
+        let ages = galaxy.field_ages(young.id());
         let rate = ages.max_pdf_between(minus_h(), RECENT_DEATH_AGES);
-        assert_same_bits(
-            young.deaths_per_system(),
-            rate * (1.0 + RATE_MARGIN) * years,
-        );
+        assert!(young.deaths_per_system() <= rate * (1.0 + RATE_MARGIN) * years);
         assert_same_bits(
             young.share(),
-            galaxy
-                .shares()
-                .component_share(MassBand::E, fields.component(young.id())),
+            galaxy.field_part(
+                young.id(),
+                MassBand::E,
+                galaxy
+                    .shares()
+                    .share(MassBand::E, fields.component(young.id()).population()),
+            ),
         );
-        // No age the window reaches has a density above the bound.
-        for k in 0..=20_000 {
-            let age = minus_h().value()
-                + (RECENT_DEATH_AGES.value() - minus_h().value()) * f64::from(k) / 20_000.0;
-            assert!(
-                ages.pdf(Years::new(age)) * years <= young.deaths_per_system(),
-                "{age}"
-            );
-        }
     }
     // The young disc's death rate: about one death per young system per 100 Myr, so some 3.5% of
     // them over the fixture's 3.43 Myr interval; the nuclear disc's a twentieth of its stars over
@@ -314,7 +309,9 @@ fn candidates_follow_the_young_field_s_recent_deaths() {
                     let p = PointLy::new(at(0, i), at(1, j), at(2, k));
                     for (slot, young) in process.components().iter().enumerate() {
                         let laws = fields.component(young.id());
-                        let deaths = laws.ages().pdf(Years::new(2.5e7)) * years;
+                        // The field's ages, which from 27 give most young stars to the features
+                        // (P09.T2.c), as its share does.
+                        let deaths = galaxy.field_ages(young.id()).pdf(Years::new(2.5e7)) * years;
                         expected[slot] += young.share() * laws.density(&p) * deaths * volume;
                     }
                 }

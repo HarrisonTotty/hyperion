@@ -88,7 +88,7 @@ mod tests {
     use crate::rng::Seed;
 
     /// D3: a galaxy built the usual way carries the version's rules, and equals one built under
-    /// them explicitly; one built under every 27 hold does not.
+    /// them explicitly; from 27 one built under every 27 hold is the same galaxy.
     #[test]
     fn a_galaxy_carries_the_version_s_rules() {
         let seed = Seed::new(0x0928_bb00_0000_0001);
@@ -109,7 +109,7 @@ mod tests {
             GalaxyRules::every_27_hold(),
         )
         .expect("the Milky Way fixture builds");
-        assert_ne!(built, at_27);
+        assert_eq!(built, at_27);
         assert_eq!(at_27.rules(), GalaxyRules::every_27_hold());
         // The rules ride the builders that return the same galaxy with something added or
         // changed; `with_full_potential`'s is held by the exact orbit's D4 test, which builds one.

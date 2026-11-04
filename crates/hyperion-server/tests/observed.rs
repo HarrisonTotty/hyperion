@@ -390,7 +390,8 @@ async fn an_observer_outside_the_cube_is_a_bad_request_naming_the_mode() {
 }
 
 /// P12.T6: `resolve_system` answers one range row by its ID, the same row the range query gives in
-/// either mode, less the brief it does not ask for.
+/// either mode, less the brief it does not ask for and, from 27, the origin and member class the
+/// served range rows add (P09.T40.a), which it does not send.
 #[tokio::test]
 async fn resolve_system_answers_the_range_row_in_either_mode() {
     let server = TestServer::start().await;
@@ -425,6 +426,8 @@ async fn resolve_system_answers_the_range_row_in_either_mode() {
                 SystemRecord {
                     stellar: None,
                     fe_h_dex: None,
+                    origin: None,
+                    member_class: None,
                     ..row.clone()
                 },
                 "{mode:?}"
@@ -483,9 +486,10 @@ async fn resolve_system_names_the_system_or_the_time_it_cannot_use() {
 async fn the_central_black_hole_is_refused_until_its_orbit_is_built() {
     // Seen at 22; seen again at 23 by P14.T54.a's bump, at 24 by P14.T54.b's, which move no
     // galaxy member, at 25 by P14.T54.c's, whose Kepler regime moves the grid's systems near the
-    // black hole but builds no line for the black hole itself, and at 26 by its second, which
-    // builds none either.
-    assert_eq!(GENERATOR_VERSION.get(), 26, "the version this was seen at");
+    // black hole but builds no line for the black hole itself, at 26 by its second, which
+    // builds none either, and at 27 by its third, whose exact arc moves the centre's members but
+    // builds none for the black hole.
+    assert_eq!(GENERATOR_VERSION.get(), 27, "the version this was seen at");
     let server = TestServer::start().await;
     let mut client = server.connected().await;
     let universe = client.create_universe("Parallax", SEED).await;

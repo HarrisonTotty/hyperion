@@ -109,10 +109,18 @@ fn probe_rules() -> GalaxyRules {
     }
 }
 
-/// [`held`]'s galaxy with the second kick-rank table.
+/// [`held`]'s galaxy built under the second kick-rank table: from 27 its displaced classes' table
+/// reads the stellar rules, so `Galaxy::with_rules` keeps them and the galaxy is built under them.
 fn probed() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| held().clone().with_rules(probe_rules()))
+    GALAXY.get_or_init(|| {
+        Galaxy::from_params_with_rules(
+            Seed::new(SYSTEMS_SEED),
+            GalaxyParams::milky_way_like(),
+            probe_rules(),
+        )
+        .expect("the Milky Way fixture's gas is mostly neutral")
+    })
 }
 
 /// The pinned system `id`'s stars in `galaxy`.
@@ -380,7 +388,7 @@ fn the_members_draws_judge_kicks_by_their_galaxy_s_table() {
 }
 
 /// D4: a galaxy built under the second table, and its pinned systems, are the same twice, and the
-/// same as [`held`]'s galaxy put under it with `Galaxy::with_rules`.
+/// same as [`probed`]'s.
 #[test]
 fn the_second_table_gives_the_same_output_twice() {
     let build = || {
@@ -503,7 +511,15 @@ fn census_of_the_second_table() {
     let forms = FormTable::committed();
     for seed in [SYSTEMS_SEED, 0x0600_0029_b000_0001, 0x0600_0029_b000_0002] {
         let held = Galaxy::new(Seed::new(seed));
-        let probed = held.clone().with_rules(probe_rules());
+        let probed = Galaxy::from_params_with_rules(
+            Seed::new(seed),
+            GalaxyParams::from_seed(
+                Seed::new(seed),
+                crate::galaxy::imf::MassFunctionKind::default(),
+            ),
+            probe_rules(),
+        )
+        .expect("the census galaxy builds");
         let size = i32::try_from(Layer::E.cell_size_ly()).expect("a small cell size");
         let mut census = Census::default();
         let mut cell: Vec<SystemRecord> = Vec::new();

@@ -135,7 +135,12 @@ mod tests {
         let version = HeldRules::on_this_thread();
         for name in [27, 28] {
             let held = under(name, HeldRules::on_this_thread);
-            assert_ne!(held, version, "every {name} hold moves a rule");
+            // From 27 every 27 hold is on the record, so its helper moves no rule.
+            if name == 27 {
+                assert_eq!(held, version, "every {name} hold is the version's");
+            } else {
+                assert_ne!(held, version, "every {name} hold moves a rule");
+            }
             let (here, there) = under(name, reads);
             assert_eq!(here, held, "{name}");
             for (_, rules) in &there {

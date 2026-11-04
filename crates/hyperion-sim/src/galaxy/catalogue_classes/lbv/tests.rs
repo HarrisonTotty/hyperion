@@ -187,13 +187,12 @@ fn the_young_field_is_the_young_disc_and_the_nuclear_disc() {
     }
     // Some 0.23 Myr of ages per layer-E system, the nodes' placement's figure.
     assert!((2.0e5..2.6e5).contains(&weight), "{weight}");
+    // The field's share and ages, which from 27 give most young stars to the features (P09.T2.c).
     for young in process.components() {
-        let ages = fields.component(young.id()).ages();
+        let ages = galaxy.field_ages(young.id());
         assert_same_bits(
             young.share(),
-            galaxy
-                .shares()
-                .component_share(MassBand::E, fields.component(young.id())),
+            galaxy.field_component_share(MassBand::E, young.id()),
         );
         assert_same_bits(
             young.candidates_per_system(),
@@ -204,18 +203,19 @@ fn the_young_field_is_the_young_disc_and_the_nuclear_disc() {
             assert!(ages.pdf(Years::new(age)) <= young.rate_per_year(), "{age}");
         }
     }
-    // The young disc's age density is about one in 100 Myr; the nuclear disc's a twentieth of its
-    // stars over its last gigayear, some two hundred times less.
+    // The young disc's budget's age density is about one in 100 Myr, and from 27 its field's about
+    // one in 390 Myr, the features taking most of its youngest stars (P09.T2.c); the nuclear
+    // disc's a twentieth of its stars over its last gigayear, some fifty times less.
     let [young, nuclear, inner] = process.components() else {
         panic!("three components");
     };
     assert!(
-        (0.9e-8..1.1e-8).contains(&young.rate_per_year()),
+        (2.3e-9..2.9e-9).contains(&young.rate_per_year()),
         "{young:?}"
     );
     assert_same_bits(nuclear.rate_per_year(), inner.rate_per_year());
     let ratio = young.rate_per_year() / nuclear.rate_per_year();
-    assert!((150.0..250.0).contains(&ratio), "{ratio}");
+    assert!((40.0..65.0).contains(&ratio), "{ratio}");
 }
 
 /// No draw of a star's moves its window, which the class's thinning on attempt 0 rests on (the
@@ -925,7 +925,9 @@ fn candidates_follow_the_young_field_s_systems() {
         .iter()
         .map(|young| {
             let laws = fields.component(young.id());
-            let ages = laws.ages();
+            // The field's ages, which from 27 give most young stars to the features (P09.T2.c),
+            // as its share does.
+            let ages = galaxy.field_ages(young.id());
             let share = process.nodes().iter().fold(0.0, |sum, node| {
                 let (lo, hi) = node.ages();
                 sum + node.share() * (ages.cdf(hi) - ages.cdf(lo))

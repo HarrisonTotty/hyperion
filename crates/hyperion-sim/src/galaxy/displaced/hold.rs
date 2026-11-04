@@ -196,7 +196,7 @@ fn with_rules_refuses_another_displaced_arm() {
 fn with_rules_refuses_other_stellar_rules_once_the_classes_are_installed() {
     let galaxy = displaced();
     let _ = galaxy.clone().with_rules(GalaxyRules {
-        stellar: crate::stellar::rules::StellarRules::of_version(GENERATOR_VERSION),
+        stellar: crate::stellar::rules::StellarRules::probe(),
         ..galaxy.rules()
     });
 }
