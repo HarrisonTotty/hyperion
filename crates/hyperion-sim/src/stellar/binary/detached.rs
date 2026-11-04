@@ -837,9 +837,19 @@ impl Engine {
         let floor = (1e-9 * s.age).max(1e-3);
         let (dt, stop) = limits.resolve();
         if dt < floor && stop.is_none() {
-            (floor, None)
+            self.floored(s.age, floor)
         } else {
             (dt.max(0.0), stop)
+        }
+    }
+
+    /// The step's length at `age`, years, held at its `floor`, and the event it lands on: the
+    /// pinned primary's collapse where it falls inside the floor, which the engine would otherwise
+    /// step past and never act on (P11.T10's fix; `collapses.rs`'s leans), else none.
+    fn floored(&self, age: f64, floor: f64) -> (f64, Option<Stop>) {
+        match self.pin.as_ref().map(|pin| pin.death.age().value() - age) {
+            Some(to_pin) if to_pin > 0.0 && to_pin <= floor => (to_pin, Some(Stop::Pinned)),
+            _ => (floor, None),
         }
     }
 

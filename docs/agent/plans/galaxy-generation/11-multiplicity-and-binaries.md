@@ -7471,6 +7471,22 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     7,448th of `class_census_in` over the solar circle's slab, part 19 of 64. Both of
     `tables_hold`'s K–S tests stop on it. Their verdicts were taken with
     `CARGO_PROFILE_SLOW_TEST_DEBUG_ASSERTIONS=false`; release builds, the fits', run through it.
+  - _The pin's clock, fixed_ (lane `fix-p11-pin-clock`, 2026-11-03; folded at 27 with P11.T10's
+    `collapses`, its switch gone).
+    - Cause: the pair is about 1,800 au wide (75.6 and 23.0 M☉, e = 0.55). The collapses fix
+      runs it for its primary's collapse. The primary is stripped by its mark, and its pin falls
+      at 4,237,646.62 yr.
+    - Near the pin the rates limit the detached step below its floor, max(10⁻⁹ age, 10⁻³ yr).
+      The floored step, 0.0042 yr, passed the pin 0.0029 yr ahead.
+    - Nothing acts on a pin passed: the primary died on its own track with no supernova, and the
+      assertion fired at the next phase, at 8.4 Myr.
+    - Fix: a step held at its floor stops at a pin inside it (`detached.rs`'s `step_limit`).
+    - Test: `collapses_hold::a_floored_step_stops_at_the_pin`. It builds the system as the census
+      does and finds the primary's supernova at the pin. On round 11's head the system draws 69.0
+      and 21.0 M☉ at Z 0.024, no step near its pin is floored, and the test passes without the
+      fix: it needs a re-pin there.
+    - A floored step could pass a non-pinned star's death in the same way (`Stop::Death`, which
+      has no backstop). None was found; not changed.
   - _Deviation._ A timeline from marks has no history, so a Be star spun up by transfer is one in
     the engine's timeline alone; `classify`'s marks round trip skips such pairs.
   - _A Be star feeds a neutron star alone_ (main's ruling of 2026-11-01: the black holes' 0.145 of

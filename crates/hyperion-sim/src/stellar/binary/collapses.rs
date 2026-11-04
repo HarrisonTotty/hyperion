@@ -41,6 +41,11 @@
 //!   the system's age at +H, so a system shows one history. P11.T4.l's closed form, the drawn orbit
 //!   up to the collapse, was the held arm's; the ruling (p11-supernova-pins §4.3) found the two
 //!   routes' statistics the same.
+//! - Such a run brings the wide pairs of a pinned primary to the engine, where the rates can
+//!   limit a detached step under its floor, max(10⁻⁹ age, 10⁻³ yr). A step held at its floor
+//!   stops at the pin inside it (`Engine::step_limit`): passing it, nothing acted on the pin, and
+//!   the primary died on its own track with no supernova (P15.T10.b's refit at 27 found one,
+//!   system `0x81c9_b51f_c000_0001`; plan 11's records).
 //! - The outer orbit's state at the explosion is its drawn elements' at the explosion's universe
 //!   time (design note 6), widened for the mass both members have lost since zero age in Jeans
 //!   mode, as P11.T4.l's ruling widens a passed-over pair's ([`outer_orbit_after`]: a M is
