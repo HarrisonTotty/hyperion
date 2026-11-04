@@ -2201,16 +2201,23 @@ mod tests {
 
     use super::*;
     use crate::coords::GalacticPosition;
+    use crate::galaxy::ages::FieldShareRules;
+    use crate::galaxy::catalogue_classes::{CatalogueClassSource, NoClassCellCache};
+    use crate::galaxy::features::catalogue::NoFeatureCache;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
+    use crate::galaxy::features::members::KeepInteriors;
+    use crate::galaxy::features::members::source::FeatureMemberSource;
     use crate::galaxy::gas::CENTIMETRES_PER_LIGHT_YEAR;
     use crate::galaxy::gas::ccm::HYDROGEN_COLUMN_PER_MAG;
     use crate::galaxy::gas::extinction::{Quality, sightline};
     use crate::galaxy::gas::modifiers::{GasModifierSource, NoModifiers};
     use crate::galaxy::gas::noise::NoiseCache;
+    use crate::galaxy::rules::GalaxyRules;
     use crate::sky::caps::{CAP_RAYS, CapLattice};
     use crate::sky::census::{
-        CensusTallies, Cone, MAX_N_MAX, NoSkyCellCache, SkyStar, census_cell, census_plan,
-        census_plan_of, merge_census, merge_shells,
+        CensusTallies, Cone, MAX_N_MAX, MemberPart, NoSkyCellCache, SkySource, SkyStar,
+        census_cell, census_members, census_plan, census_plan_of, merge_census, merge_shells,
+        takes_class_hosts, takes_feature_members,
     };
     use crate::sky::eye::surface_brightness;
     use crate::sky::testing::{
@@ -3799,21 +3806,42 @@ mod tests {
         );
     }
 
-    /// The stars a census near the Sun lists to V [`CENSUS_CUT`] within 400 ly, every cap forced to
-    /// it, with no eye: its cells on up to four threads (the slots `.config/nextest.toml` reserves,
-    /// or the fewer a run grants; one on WebAssembly, which has none), each with its own context,
-    /// merged at [`MAX_N_MAX`], whose order is total, so the threads' count and timing change no
-    /// bit.
+    /// The fixture with its field holding every population's whole budget (P09.T2.c's φ held, the
+    /// test-only door), as the band reads it: from generator version 27 the fixture's own field
+    /// gives the features most of the young disc's stars (P09.T2.c), and the census takes them as
+    /// the features' members, most of whom lie farther than 400 ly from the Sun, while the band
+    /// spreads that light as the field is (R06.T16.a's lean, 2026-11-01). Its density fields, its
+    /// components and so its tables are the fixture's.
+    fn budget_galaxy() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| {
+            Galaxy::from_params_with_rules(
+                milky_way_galaxy().seed(),
+                crate::galaxy::params::GalaxyParams::milky_way_like(),
+                GalaxyRules {
+                    field_share: FieldShareRules::None,
+                    ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
+                },
+            )
+            .expect("the fixture builds")
+        })
+    }
+
+    /// The stars a census near the Sun lists to V [`CENSUS_CUT`] within 400 ly in
+    /// [`budget_galaxy`], every cap forced to it, with no eye: its cells on up to four threads (the
+    /// slots `.config/nextest.toml` reserves, or the fewer a run grants; one on WebAssembly, which
+    /// has none), each with its own context, and each shell's members beyond the grid where the
+    /// field gives them up, as the census takes them (R06.T16.a's switch): the carve-out's class
+    /// hosts (P09.T35), and with φ held no feature member. Merged at [`MAX_N_MAX`], whose order is
+    /// total, so the threads' count and timing change no bit.
     fn census_within_400_ly() -> Vec<SkyStar> {
-        let galaxy = milky_way_galaxy();
+        let galaxy = budget_galaxy();
         let query = query_near_the_sun(CENSUS_CUT, Eye::NotAsked)
             .with_caps_forced(LightYears::new(400.0))
             .expect("a forced cap");
         let mut ctx = context();
-        let keys: Vec<crate::galaxy::placement::CellKey> =
-            census_plan(galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise)
-                .cells()
-                .collect();
+        let plan = census_plan(galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise);
+        let keys: Vec<crate::galaxy::placement::CellKey> = plan.cells().collect();
         let next = std::sync::atomic::AtomicUsize::new(0);
         let job = || {
             let mut ctx = context();
@@ -3826,7 +3854,7 @@ mod tests {
                 census_cell(galaxy, &mut ctx, key, &query, &mut stars);
             }
         };
-        let stars: Vec<SkyStar> = if cfg!(target_family = "wasm") {
+        let mut stars: Vec<SkyStar> = if cfg!(target_family = "wasm") {
             job()
         } else {
             let held = crate::planetary::testing::HeldRules::on_this_thread();
@@ -3840,6 +3868,24 @@ mod tests {
                     .collect()
             })
         };
+        let interiors = KeepInteriors::new(galaxy);
+        let members = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+        let classes = CatalogueClassSource::new().with_cells(&NoClassCellCache);
+        let mut sources: Vec<&dyn SkySource> = Vec::new();
+        if takes_feature_members(galaxy) {
+            sources.push(&members);
+        }
+        if takes_class_hosts(galaxy) {
+            sources.push(&classes);
+        }
+        let mut ctx = SkyContext {
+            sources: &sources,
+            ..context()
+        };
+        for shell in plan.shells() {
+            let whole = (shell, MemberPart::WHOLE);
+            census_members(galaxy, &mut ctx, &plan, whole, &query, &mut stars);
+        }
         let census = merge_census([(stars, CensusTallies::default())], n(MAX_N_MAX));
         assert_eq!(census.overflow(), []);
         census.listed().to_vec()
@@ -3849,6 +3895,13 @@ mod tests {
     /// 200 and 400 ly (every cap forced, the census listing only the stars within each radius, its
     /// brightest 500 listed and the rest overflowing into the band) agree within 1% (R06.T9.f,
     /// the band ruling's item 5).
+    ///
+    /// The census is the budget's ([`budget_galaxy`]), whose field the band reads. From generator
+    /// version 27 the fixture's own sky falls short of the band between 100 and 400 ly by 1.33%
+    /// (8.740 × 10⁻⁴ against 8.624 × 10⁻⁴ lx, its members within 400 ly adding one star): the
+    /// field gives up φ of the young disc to the features (P09.T2.c), most of them farther out,
+    /// and the band spreads their light as the field is (R06.T16.a's lean). The budget's agree
+    /// within 0.95% (8.744, 8.675 and 8.661 × 10⁻⁴ lx).
     #[test]
     fn one_marchs_light_at_100_200_and_400_ly_agrees_within_1_percent() {
         let galaxy = milky_way_galaxy();
