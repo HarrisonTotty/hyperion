@@ -12,9 +12,8 @@
 //! zone at its pair's state at one of the pair's segment boundaries since it formed
 //! ([`OrbitZone::limits_at`]); and a planet of a zone that holds a star a supernova released from
 //! the system (P11.T10), which goes with its star or is unbound. The census runs under every 27
-//! hold, before with the binary hosts' holds set back to their held arms and after as 27 has them,
-//! and prints both. A zone that holds a released star is read for the last two columns alone, its
-//! stars' states not being the engine's to compare.
+//! hold and prints its counts. A zone that holds a released star is read for the last two columns
+//! alone, its stars' states not being the engine's to compare.
 //!
 //! The test is native only, as the other censuses are.
 
@@ -26,9 +25,7 @@ use crate::GeneratorVersion;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{Existence, SystemKind, SystemRecord};
-use crate::planetary::placement::zones::{
-    BinaryHostZonesRules, PairBound, ZONE_EDGE_TOLERANCE, with_binary_host_zones,
-};
+use crate::planetary::placement::zones::{PairBound, ZONE_EDGE_TOLERANCE};
 use crate::planetary::testing::{PairHistory, SampleFilter, sample_records, with_every_27_hold};
 use crate::stellar::system::SystemStars;
 use crate::stellar::system::{PairTimeline, SystemState, pair_of};
@@ -354,22 +351,17 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], census: &mut Census) {
     }
 }
 
-/// The binary hosts' holds at 27 set back to their held arms, on this thread.
-fn held<R>(run: impl FnOnce() -> R) -> R {
-    with_binary_host_zones(BinaryHostZonesRules::Birth, run)
-}
-
-/// The census before and after the binary hosts' holds at 27. After them, every present planet's
-/// zone light reads as the engine's (P14.T1.e) and the mass its orbit follows is the engine's, no
-/// S-type planet of a pair that went through a common envelope is left, and none orbits a host the
-/// engine left with no mass (P14.T28.g), none has left its zone at its pair's evaluated state, and
-/// none is of a zone that holds a star a supernova released (P14.T9.d), where before, in the
-/// research's sample of 500,000 systems, some 19,000, 19,600, 392, 549 and 1,432 did not
+/// The binary hosts' census at 27: every present planet's zone light reads as the engine's
+/// (P14.T1.e) and the mass its orbit follows is the engine's, no S-type planet of a pair that went
+/// through a common envelope is left, and none orbits a host the engine left with no mass
+/// (P14.T28.g), none has left its zone at its pair's evaluated state, and none is of a zone that
+/// holds a star a supernova released (P14.T9.d), where under the single models, in the research's
+/// sample of 500,000 systems, some 19,000, 19,600, 392, 549 and 1,432 did not
 /// (research-binary-hosts §1).
 #[test]
-#[ignore = "slow: the binary hosts' census, 100,000 systems under two rules, about 3 min"]
+#[ignore = "slow: the binary hosts' census, 100,000 systems, about 90 s"]
 fn the_binary_hosts_census_reads_every_paired_star_as_the_engine_does() {
-    let (mut before, mut after) = (Census::default(), Census::default());
+    let mut after = Census::default();
     for seed in GALAXY_SEEDS {
         let galaxy = Galaxy::from_params_at_version(
             Seed::new(seed),
@@ -378,19 +370,9 @@ fn the_binary_hosts_census_reads_every_paired_star_as_the_engine_does() {
         )
         .expect("the Milky Way fixture's gas is mostly neutral");
         let records = sample_records(&galaxy, SYSTEMS, SampleFilter::ALL).unwrap();
-        with_every_27_hold(|| held(|| census_of(&galaxy, &records, &mut before)));
         with_every_27_hold(|| census_of(&galaxy, &records, &mut after));
     }
-    eprintln!(
-        "{}\n{}",
-        before.table("before: every 27 hold, the binary hosts' set back"),
-        after.table("after: every 27 hold")
-    );
-    let held = before.total();
-    assert!(
-        held.outside > 0 && held.released > 0,
-        "the single models read every paired star as the engine does: {held:?}"
-    );
+    eprintln!("{}", after.table("every 27 hold"));
     for (history, row) in &after.rows {
         assert_eq!(
             row.light_unequal, 0,
@@ -411,5 +393,4 @@ fn the_binary_hosts_census_reads_every_paired_star_as_the_engine_does() {
         assert_eq!(row.outside, 0, "{history:?}: planets that left their zone");
         assert_eq!(row.released, 0, "{history:?}: planets of a released star");
     }
-    assert_eq!(before.total().planets, after.total().planets);
 }

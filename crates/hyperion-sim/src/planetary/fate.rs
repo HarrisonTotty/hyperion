@@ -112,7 +112,7 @@ use crate::planetary::hosts::evolved::{
 };
 use crate::planetary::hosts::young::Formation;
 use crate::planetary::placement::OrbitZone;
-use crate::planetary::placement::zones::{BinaryHostZonesRules, PairBound, ZONE_EDGE_TOLERANCE};
+use crate::planetary::placement::zones::{PairBound, ZONE_EDGE_TOLERANCE};
 use crate::planetary::record::BodyOrbit;
 use crate::stellar::Phase;
 use crate::stellar::binary::{BinaryTimeline, Component as PairComponent, SegmentKind};
@@ -414,7 +414,7 @@ pub struct FateHost<'a> {
     /// The first time one of the host's stars leaves the system, a supernova having released it
     /// (P11.T10), which unbinds the host's bodies (P14.T9.d): a star's planets go with it, and a
     /// circumbinary planet of the broken pair is left unbound. `None` for a host built from its
-    /// models alone, and below the zones' hold at 27.
+    /// models alone, and for one whose stars all stay.
     departure: Option<UniverseTime>,
 }
 
@@ -530,16 +530,11 @@ impl<'a> FateHost<'a> {
         let stars = ctx.stars();
         let mut host = Self::stars(zone.members().map(|member| &stars[usize::from(member)]))
             .expect("a zone has a component, and a system's stars are coeval");
-        match BinaryHostZonesRules::in_force() {
-            BinaryHostZonesRules::Birth => {}
-            BinaryHostZonesRules::Evaluated => {
-                host.departure = zone
-                    .members()
-                    .filter_map(|member| ctx.departure(usize::from(member)))
-                    .filter_map(|age| clock_time(host.stars[0], age))
-                    .min();
-            }
-        }
+        host.departure = zone
+            .members()
+            .filter_map(|member| ctx.departure(usize::from(member)))
+            .filter_map(|age| clock_time(host.stars[0], age))
+            .min();
         let members: Vec<u8> = zone.members().collect();
         for (k, &member) in members.iter().enumerate() {
             let Some((pair, component)) = pair_of(ctx.pairs(), member) else {
@@ -577,23 +572,20 @@ impl<'a> FateHost<'a> {
             }
             _ => None,
         };
-        host.bound = bound.and_then(|(pair, bound)| match BinaryHostZonesRules::in_force() {
-            BinaryHostZonesRules::Birth => None,
-            BinaryHostZonesRules::Evaluated => {
-                let timeline = host.timelines[pair];
-                let first = host.stars[0];
-                let mut knots: Vec<UniverseTime> = timeline
-                    .knot_ages(0.0, timeline.until().value())
-                    .into_iter()
-                    .filter_map(|age| clock_time(first, Years::new(age)))
-                    .collect();
-                knots.dedup();
-                Some(ZoneBound {
-                    zone: *zone,
-                    pair,
-                    bound,
-                    knots,
-                })
+        host.bound = bound.map(|(pair, bound)| {
+            let timeline = host.timelines[pair];
+            let first = host.stars[0];
+            let mut knots: Vec<UniverseTime> = timeline
+                .knot_ages(0.0, timeline.until().value())
+                .into_iter()
+                .filter_map(|age| clock_time(first, Years::new(age)))
+                .collect();
+            knots.dedup();
+            ZoneBound {
+                zone: *zone,
+                pair,
+                bound,
+                knots,
             }
         });
         host
@@ -620,10 +612,9 @@ impl<'a> FateHost<'a> {
 
     /// The limits at `t` of `zone`, the zone at birth whose bodies the host holds, m (P14.T9.d):
     /// its birth limits widened as its bodies' orbits are, by its mass at birth over
-    /// [`mass_at`](Self::mass_at) `t`, and where a pair the engine ran bounds it and the zones'
-    /// hold is lifted, those [`OrbitZone::limits_at`] gives on the pair's state then: a star's
-    /// outer limit intersected with Holman and Wiegert's fit, the pair's own inner limit their fit
-    /// alone.
+    /// [`mass_at`](Self::mass_at) `t`, and where a pair the engine ran bounds it, those
+    /// [`OrbitZone::limits_at`] gives on the pair's state then: a star's outer limit intersected
+    /// with Holman and Wiegert's fit, the pair's own inner limit their fit alone.
     ///
     /// # Panics
     ///
@@ -644,13 +635,13 @@ impl<'a> FateHost<'a> {
             zone.inner().map(|r| r * widening),
             zone.outer().map(|r| r * widening),
         );
-        match (BinaryHostZonesRules::in_force(), &self.bound) {
-            (BinaryHostZonesRules::Evaluated, Some(bound)) => {
+        match &self.bound {
+            Some(bound) => {
                 let age = Years::new(self.pair_age(bound.pair, t));
                 let state = self.timelines[bound.pair].state_at(age);
                 zone.limits_at(&state, bound.bound, widening)
             }
-            (BinaryHostZonesRules::Evaluated, None) | (BinaryHostZonesRules::Birth, _) => birth,
+            None => birth,
         }
     }
 
@@ -1694,16 +1685,12 @@ impl<'a> BodyFate<'a> {
     /// The first time in `segment` up to `end` at which the body's orbit leaves its zone at its
     /// pair's evaluated state (P14.T9.d, [`FateHost::limits_at`]), its apocentre beyond the outer
     /// limit or its pericentre inside the inner by more than [`ZONE_EDGE_TOLERANCE`] of it, if
-    /// any: `None` below the zones' hold at 27 and for a zone no pair the engine ran bounds.
+    /// any: `None` for a zone no pair the engine ran bounds.
     ///
     /// The scan's points are the segment's ends and every knot of the pair's timeline between
     /// them ([`BinaryTimeline::knot_ages`]), where the pair's orbit or its stars' masses may
     /// turn; the first crossing is bisected to within a second ([`first_crossing`]).
     fn crossing(&self, segment: &Segment, end: UniverseTime) -> Option<UniverseTime> {
-        match BinaryHostZonesRules::in_force() {
-            BinaryHostZonesRules::Birth => return None,
-            BinaryHostZonesRules::Evaluated => {}
-        }
         let bound = self.host.bound.as_ref()?;
         let mut points = vec![segment.start];
         if end > segment.start {

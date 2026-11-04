@@ -61,7 +61,6 @@ use std::error::Error;
 use std::fmt;
 
 use super::hosts::strip::{self, Surroundings};
-use super::placement::zones::BinaryHostZonesRules;
 use super::placement::{OrbitZone, ZoneHierarchy, ZoneStar, stable_zones};
 use crate::Seed;
 use crate::galaxy::catalogue_classes::{CatalogueSystem, system_of};
@@ -1045,17 +1044,13 @@ impl SystemContext {
     }
 
     /// Whether component `star` has left the system by `t`, a supernova having released it
-    /// (P11.T10): from generator version 27 (P14.T9.d, `BINARY_HOST_ZONES_VERSION`) once the
-    /// system's age reaches the star's [`departure`](Self::departure), after which the stage reads
-    /// no zone of it and none of its light; below 27, never.
+    /// (P11.T10): once the system's age reaches the star's [`departure`](Self::departure)
+    /// (P14.T9.d, from generator version 27), after which the stage reads no zone of it and none
+    /// of its light.
     #[must_use]
     pub(crate) fn has_left(&self, star: usize, t: UniverseTime) -> bool {
-        match BinaryHostZonesRules::in_force() {
-            BinaryHostZonesRules::Birth => false,
-            BinaryHostZonesRules::Evaluated => self
-                .departure(star)
-                .is_some_and(|left| self.age_at(t) >= left),
-        }
+        self.departure(star)
+            .is_some_and(|left| self.age_at(t) >= left)
     }
 
     /// Component `star`'s state at `t` as the planetary stage reads its light, or `None` before it

@@ -2,6 +2,7 @@
 //! its pair's timeline, on real systems of the sample.
 
 use super::*;
+use crate::GeneratorVersion;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::orbit::{Eccentricity, Orientation};
@@ -9,7 +10,6 @@ use crate::planetary::hosts::young::FormationDraws;
 use crate::planetary::testing::{PairHistory, first_paired_system, with_every_27_hold};
 use crate::stellar::system::SystemStars;
 use crate::units::{AstronomicalUnits, Megayears, Radians};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// The system tests' universe.
 const SEED: Seed = Seed::new(0x5eed_0014_0030);
@@ -83,6 +83,40 @@ fn has_pair_zone(galaxy: &Galaxy, stars: &SystemStars, k: usize) -> bool {
         .any(|zone| zone.members().eq(members.iter().copied()))
 }
 
+/// The circumbinary body [`a_circumbinary_planet_takes_a_common_envelope_as_a_sudden_loss`]
+/// places in a pair's own zone `zone`, a circular Earth at 40 times the zone's inner limit (1 au
+/// where it has none).
+fn circumbinary_body(zone: &OrbitZone) -> FateBody {
+    let a_au = 40.0
+        * zone
+            .inner()
+            .map_or(1.0, |inner| AstronomicalUnits::from(inner).value());
+    circular_body(a_au, EarthMasses::new(1.0), zone.host_mass())
+}
+
+/// Whether pair `k`'s zone, at the pair's evaluated state (P14.T9.d), keeps its
+/// [`circumbinary_body`] to the start of the pair's first common envelope.
+fn lasts_to_the_envelope(galaxy: &Galaxy, stars: &SystemStars, k: usize) -> bool {
+    let ctx = SystemContext::from_stars(galaxy, stars);
+    let members = pair_stars(&ctx, k);
+    let Some(zone) = ctx
+        .zones()
+        .into_iter()
+        .find(|zone| zone.members().eq(members.iter().copied()))
+    else {
+        return false;
+    };
+    let envelope = first_segment(&ctx, k, SegmentKind::CommonEnvelope);
+    let Some(at) = clock_time(&ctx.stars()[0], Years::new(envelope)) else {
+        return false;
+    };
+    let host = FateHost::evolved(&ctx, &zone);
+    BodyFate::resolve(&circumbinary_body(&zone), &host)
+        .ending()
+        .and_then(|ending| ending.ended_at())
+        .is_none_or(|ended| ended >= at)
+}
+
 /// The start of the first segment of `kind` on pair `k`'s timeline, Julian years.
 fn first_segment(ctx: &SystemContext, k: usize, kind: SegmentKind) -> f64 {
     ctx.pairs()[k]
@@ -149,7 +183,9 @@ fn a_common_envelope_engulfs_the_planets_of_either_star() {
 
 /// A circumbinary planet takes a common envelope's loss of its pair's mass as a sudden step: on
 /// a circular orbit it is `Unbound` where the pair loses more than half its mass at once, and
-/// otherwise stays bound with e = ΔM ÷ `M_after` (Hadjidemetriou 1963).
+/// otherwise stays bound with e = ΔM ÷ `M_after` (Hadjidemetriou 1963). Each pair is the first of
+/// its history whose planet its zone at the pair's evaluated state (P14.T9.d) keeps to the
+/// envelope ([`lasts_to_the_envelope`]).
 #[test]
 fn a_circumbinary_planet_takes_a_common_envelope_as_a_sudden_loss() {
     let galaxy = galaxy();
@@ -168,7 +204,10 @@ fn a_circumbinary_planet_takes_a_common_envelope_as_a_sudden_loss() {
             let age = envelope.start().value();
             let mass = |age: f64| timeline.state_at(Years::new(age)).total_mass().value();
             let kept = mass(age) / mass(age.next_down());
-            kept > 0.0 && (kept < 0.5) == most && has_pair_zone(galaxy, stars, k)
+            kept > 0.0
+                && (kept < 0.5) == most
+                && has_pair_zone(galaxy, stars, k)
+                && lasts_to_the_envelope(galaxy, stars, k)
         }
     };
     for (history, most) in [
@@ -183,11 +222,7 @@ fn a_circumbinary_planet_takes_a_common_envelope_as_a_sudden_loss() {
         let envelope = first_segment(&ctx, k, SegmentKind::CommonEnvelope);
         let at = clock_time(&ctx.stars()[0], Years::new(envelope)).unwrap();
         let (before, after) = masses_across(&ctx, k, envelope);
-        let a_au = 40.0
-            * zone
-                .inner()
-                .map_or(1.0, |inner| AstronomicalUnits::from(inner).value());
-        let body = circular_body(a_au, EarthMasses::new(1.0), zone.host_mass());
+        let body = circumbinary_body(&zone);
         let host = FateHost::evolved(&ctx, &zone);
         let fate = BodyFate::resolve(&body, &host);
         if most {
@@ -342,11 +377,9 @@ fn pair_limits_at(ctx: &SystemContext, k: usize, zone: &OrbitZone, age: f64) -> 
 
 /// A stable transfer that widens its pair moves the pair's P-type limit out past a circumbinary
 /// planet placed just outside it at birth: under the zones at the evaluated state the planet is
-/// `Unbound` at the crossing, inside the transfer, where under the zones at birth it is present
-/// then.
+/// `Unbound` at the crossing, inside the transfer.
 #[test]
 fn stable_transfer_s_widening_unbinds_an_inner_circumbinary_planet() {
-    use crate::planetary::placement::zones::{BinaryHostZonesRules, with_binary_host_zones};
     let galaxy = galaxy();
     let widens = |stars: &SystemStars, k: usize| {
         let ctx = SystemContext::from_stars(&galaxy, stars);
@@ -376,11 +409,8 @@ fn stable_transfer_s_widening_unbinds_an_inner_circumbinary_planet() {
     let first = &ctx.stars()[0];
     let [onset, end] =
         [transfer.start(), transfer.end()].map(|age| clock_time(first, age).unwrap());
-    // A host is read under the rules in force when it is built, as a system's is.
-    let ending = with_binary_host_zones(BinaryHostZonesRules::Evaluated, || {
-        let host = FateHost::evolved(&ctx, &zone);
-        BodyFate::resolve(&body, &host).ending()
-    });
+    let host = FateHost::evolved(&ctx, &zone);
+    let ending = BodyFate::resolve(&body, &host).ending();
     let Some(BodyState::Unbound { at }) = ending else {
         panic!("{:?}: {ending:?} as its pair widens", ctx.id());
     };
@@ -389,20 +419,14 @@ fn stable_transfer_s_widening_unbinds_an_inner_circumbinary_planet() {
         "{:?}: unbound outside the transfer",
         ctx.id()
     );
-    // The zones at birth keep it at the crossing, whatever its host's radii do to it later.
-    let birth = with_binary_host_zones(BinaryHostZonesRules::Birth, || {
-        let host = FateHost::evolved(&ctx, &zone);
-        BodyFate::resolve(&body, &host).at(at).state()
-    });
-    assert_eq!(birth, BodyState::Present, "{:?}", ctx.id());
 }
 
 /// A common envelope shrinks its pair's orbit, and the S-type zones its stars had at birth close
 /// with it: after the envelope each is smaller than its zone at birth, widened as its planets'
-/// orbits are, and the donor's, which the envelope stripped, is under a fifth of it.
+/// orbits are (its host's mass at birth over its mass then), and the donor's, which the envelope
+/// stripped, is under a fifth of it.
 #[test]
 fn a_post_common_envelope_pair_s_s_type_zones_close() {
-    use crate::planetary::placement::zones::{BinaryHostZonesRules, with_binary_host_zones};
     let galaxy = galaxy();
     let roomy = |stars: &SystemStars, k: usize| {
         let ctx = SystemContext::from_stars(&galaxy, stars);
@@ -417,12 +441,7 @@ fn a_post_common_envelope_pair_s_s_type_zones_close() {
     let system = crate::planetary::system::generate_planets(SEED, &ctx);
     let envelope = first_segment(&ctx, k, SegmentKind::CommonEnvelope);
     let after = clock_time(&ctx.stars()[0], Years::new(envelope + 1.0e3)).unwrap();
-    let (at_birth, evaluated) = (
-        with_binary_host_zones(BinaryHostZonesRules::Birth, || system.zones_at(&ctx, after)),
-        with_binary_host_zones(BinaryHostZonesRules::Evaluated, || {
-            system.zones_at(&ctx, after)
-        }),
-    );
+    let evaluated = system.zones_at(&ctx, after);
     let timeline = ctx.pairs()[k].timeline();
     let lost = |component: crate::stellar::binary::Component| {
         let mass = |age: f64| {
@@ -440,15 +459,20 @@ fn a_post_common_envelope_pair_s_s_type_zones_close() {
         ctx.pairs()[k].stars()[1].get()
     };
     for star in pair_stars(&ctx, k) {
-        let find = |zones: &[OrbitZone]| {
-            zones
-                .iter()
-                .find(|zone| zone.members().eq([star]))
-                .and_then(OrbitZone::outer)
-                .unwrap()
-                .value()
+        let zone = zone_of(&ctx, &[star]);
+        let mass = FateHost::evolved(&ctx, &zone).mass_at(after).value();
+        let widening = if mass > 0.0 {
+            zone.host_mass().value() / mass
+        } else {
+            1.0
         };
-        let (birth, now) = (find(&at_birth), find(&evaluated));
+        let birth = zone.outer().unwrap().value() * widening;
+        let now = evaluated
+            .iter()
+            .find(|zone| zone.members().eq([star]))
+            .and_then(OrbitZone::outer)
+            .unwrap()
+            .value();
         let share = if star == donor { 0.2 } else { 1.0 };
         assert!(
             now < share * birth,
@@ -458,51 +482,11 @@ fn a_post_common_envelope_pair_s_s_type_zones_close() {
     }
 }
 
-/// The binary hosts' zones are held until the 26 → 27 bump: the rules in force are the birth
-/// zones', the tests' switch and 27's helper reach the evaluated zones, and 26's and 25's helpers
-/// do not.
-#[test]
-fn the_binary_host_zones_are_held_only_until_the_27_bump() {
-    use crate::planetary::placement::zones::{
-        BINARY_HOST_ZONES_VERSION, BinaryHostZonesRules, with_binary_host_zones,
-    };
-    assert!(
-        GENERATOR_VERSION < BINARY_HOST_ZONES_VERSION,
-        "the 26 → 27 bump holds a binary host's bodies to their zones at its pair's evaluated \
-         state: delete `BINARY_HOST_ZONES_VERSION`, `BinaryHostZonesRules` with its `Birth` arm \
-         and its matches in `FateHost::limits_at` and `BodyFate::crossing`, the tests' \
-         `with_binary_host_zones`, its switch in `with_every_27_hold` (and the helper, if no other \
-         27 hold is left), and this test; restate the tests held below 27"
-    );
-    assert_eq!(
-        BinaryHostZonesRules::in_force(),
-        BinaryHostZonesRules::Birth
-    );
-    assert_eq!(
-        with_binary_host_zones(
-            BinaryHostZonesRules::Evaluated,
-            BinaryHostZonesRules::in_force
-        ),
-        BinaryHostZonesRules::Evaluated
-    );
-    assert_eq!(
-        with_every_27_hold(BinaryHostZonesRules::in_force),
-        BinaryHostZonesRules::Evaluated
-    );
-    assert_eq!(
-        with_every_27_hold(|| {
-            with_binary_host_zones(BinaryHostZonesRules::Birth, BinaryHostZonesRules::in_force)
-        }),
-        BinaryHostZonesRules::Birth
-    );
-}
-
-/// A star a supernova releases from its system (P11.T10) leaves with its planets: under the zones'
-/// rules at 27 a planet of its own zone is `Unbound` from the system at the release, where the
-/// zones at birth keep it, and the system's zones after the release hold no zone of it.
+/// A star a supernova releases from its system (P11.T10) leaves with its planets: a planet of its
+/// own zone is `Unbound` from the system at the release, and the system's zones after the release
+/// hold no zone of it.
 #[test]
 fn a_released_star_s_planets_leave_with_it() {
-    use crate::planetary::placement::zones::{BinaryHostZonesRules, with_binary_host_zones};
     use crate::planetary::testing::{SampleFilter, sample_records};
     let galaxy = Galaxy::from_params_at_version(
         SEED,
@@ -538,16 +522,14 @@ fn a_released_star_s_planets_leave_with_it() {
     let body = circular_body(a_au, EarthMasses::new(1.0), zone.host_mass());
     let at = clock_time(&ctx.stars()[0], left).unwrap();
     let system = crate::planetary::system::generate_planets(SEED, &ctx);
-    let evaluated = with_binary_host_zones(BinaryHostZonesRules::Evaluated, || {
-        let host = FateHost::evolved(&ctx, &zone);
-        let zones = system.zones_at(&ctx, UniverseTime::EPOCH);
-        assert!(
-            zones.iter().all(|zone| !zone.members().any(|m| m == star)),
-            "{:?}: a zone of the released star {star} at the epoch",
-            ctx.id()
-        );
-        BodyFate::resolve(&body, &host).ending()
-    });
+    let host = FateHost::evolved(&ctx, &zone);
+    let zones = system.zones_at(&ctx, UniverseTime::EPOCH);
+    assert!(
+        zones.iter().all(|zone| !zone.members().any(|m| m == star)),
+        "{:?}: a zone of the released star {star} at the epoch",
+        ctx.id()
+    );
+    let evaluated = BodyFate::resolve(&body, &host).ending();
     let ended = evaluated.and_then(|ending| ending.ended_at());
     assert!(
         ended.is_some_and(|ended| ended <= at),
@@ -556,13 +538,6 @@ fn a_released_star_s_planets_leave_with_it() {
     );
     if ended == Some(at) {
         assert_eq!(evaluated, Some(BodyState::Unbound { at }), "{:?}", ctx.id());
-    }
-    let birth = with_binary_host_zones(BinaryHostZonesRules::Birth, || {
-        let host = FateHost::evolved(&ctx, &zone);
-        BodyFate::resolve(&body, &host).at(at).state()
-    });
-    if ended == Some(at) {
-        assert_eq!(birth, BodyState::Present, "{:?}", ctx.id());
     }
 }
 
@@ -608,7 +583,6 @@ fn planets_of<'s>(
 /// out past the planet by 10⁻⁶ of it within 2 Myr: the fate unbound it a rounding past the limit.
 #[test]
 fn a_planet_on_its_zone_s_inner_limit_stays_while_nothing_moves_it() {
-    use crate::planetary::placement::zones::with_binary_host_zones;
     let galaxy = census_galaxy();
     with_every_27_hold(|| {
         let (ctx, system) = census_system(&galaxy, 0x41ff_acb1_ff80_0002);
@@ -656,7 +630,7 @@ fn a_planet_on_its_zone_s_inner_limit_stays_while_nothing_moves_it() {
             fate.ending()
         );
         // Where it leaves, the limit lies past its pericentre by the tolerance's 10⁻⁹ of it, on the
-        // orbit the zones at birth keep it on, and not by a rounding: half of it, a margin for the
+        // orbit its segment holds it on then, and not by a rounding: half of it, a margin for the
         // arithmetic's own rounding at the bisected second.
         let Some(BodyState::Unbound { at }) = fate.ending() else {
             panic!(
@@ -665,14 +639,8 @@ fn a_planet_on_its_zone_s_inner_limit_stays_while_nothing_moves_it() {
                 fate.ending()
             );
         };
-        let periapsis = with_binary_host_zones(BinaryHostZonesRules::Birth, || {
-            let host = FateHost::evolved(&ctx, zone);
-            BodyFate::resolve(body, &host)
-                .at(at)
-                .orbit()
-                .unwrap()
-                .periapsis()
-        });
+        let (segment, _) = fate.segment_at(at);
+        let periapsis = fate.orbit_in(segment, at, fate.host_mass(at)).periapsis();
         let inner = host.limits_at(zone, at).0.unwrap();
         assert!(
             at > quiet && inner / periapsis - 1.0 > 0.5e-9,

@@ -518,9 +518,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   `STEEPNESS_TAILS_VERSION` (rendering plan R10, R10.T6.a), at `SteepnessTailsRules::Marcum`
 ///   through `hyperion_surface::material::with_steepness_tails`, which the sim's tests have through
 ///   their dev-dependency on the surface crate's `hold-switches` feature.
-/// - a binary host's zones at its pair's evaluated state, `BINARY_HOST_ZONES_VERSION` (P14.T9.d),
-///   at `BinaryHostZonesRules::Evaluated` through `with_binary_host_zones`: a body that leaves the
-///   zone its pair bounds then, Holman and Wiegert's on the pair's orbit, is unbound.
 ///
 /// A system or a record is read under the rules in force when it is generated, so a test
 /// generates afresh inside it; the carriers' rules are read when a system's equilibrium network is
@@ -544,10 +541,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    let run = move || {
-        use crate::planetary::placement::zones::{BinaryHostZonesRules, with_binary_host_zones};
-        with_binary_host_zones(BinaryHostZonesRules::Evaluated, run)
-    };
     let run = move || {
         use hyperion_surface::material::{SteepnessTailsRules, with_steepness_tails};
         with_steepness_tails(SteepnessTailsRules::Marcum, run)

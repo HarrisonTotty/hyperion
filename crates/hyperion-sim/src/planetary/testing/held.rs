@@ -31,7 +31,6 @@ use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_daysi
 use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
 use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
 use crate::planetary::hosts::strip::{StripRules, with_stripping};
-use crate::planetary::placement::zones::{BinaryHostZonesRules, with_binary_host_zones};
 use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 use crate::substance::{CarriersRules, with_carriers};
 
@@ -92,8 +91,6 @@ held_rules! {
     steepness_tails: SteepnessTailsRules = steepness_tails_in_force => with_steepness_tails,
     steam_division: SteamDivisionRules =
         SteamDivisionRules::in_force => with_steam_division,
-    binary_host_zones: BinaryHostZonesRules =
-        BinaryHostZonesRules::in_force => with_binary_host_zones,
     binary_host_remnants: BinaryHostRemnantsRules =
         BinaryHostRemnantsRules::in_force => with_binary_host_remnants,
 }
