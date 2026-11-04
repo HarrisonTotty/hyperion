@@ -2516,6 +2516,8 @@ export interface MarchShareReads {
  *
  * @param otherWithinSteps - The pieces' shares taken to the other side of their rounding, as
  *   {@link rayPieces}'.
+ * @param otherTurnWithin - The pieces' placements taken to the other side of the turn
+ *   (`marchSteps.ts`'s `MARCH_TURN_ROUNDING`): 0, none, the kernels' own.
  * @throws RangeError as {@link rayPieces}, and for a two-sided sky segment given without its sun.
  */
 export function piecedSteps(
@@ -2525,6 +2527,7 @@ export function piecedSteps(
   geometry: MarchGeometry,
   shares: MarchShareReads | null = null,
   otherWithinSteps = 0,
+  otherTurnWithin = 0,
 ): MarchStep[] {
   const pieces = rayPieces(ray, samples, edgesM, geometry, otherWithinSteps);
   const warp = skyWarpOfSegment(ray, pieces.split);
@@ -2548,6 +2551,7 @@ export function piecedSteps(
       (fromLowestM) => (first === undefined ? 1 : shares.lightAlong(placeAt(fromLowestM), first)),
       (fromLowestM) => shares.extinctionPerMAt(placeAt(fromLowestM)),
       otherWithinSteps,
+      otherTurnWithin,
     ),
   );
 }
@@ -4154,12 +4158,14 @@ export function rayMarchRayAlongTwin(
  * count by a segment's optical depth, the bare ground's and a thin sky's (R08.T8.e), `null` for the
  * setting's count everywhere; and, for the smoke's envelope alone, `otherShareWithinSteps`, how
  * near its rounding a piece's share may stand to be taken to the other side of it
- * (`marchSteps.ts`'s `MARCH_SHARE_ROUNDING_STEPS`), 0 or absent for the kernels' rounding.
+ * (`marchSteps.ts`'s `MARCH_SHARE_ROUNDING_STEPS`), and `otherTurnWithin`, how near the turn a
+ * piece's placement may stand to be taken to its other side (`MARCH_TURN_ROUNDING`), each 0 or
+ * absent for the kernels' own.
  */
 export type RayMarchSettings = Pick<
   TableSizes,
   "rayMarchScale" | "rayMarchSamples" | "aerialPerspectiveReachM" | "marchBand" | "marchDepthSteps"
-> & { readonly otherShareWithinSteps?: number };
+> & { readonly otherShareWithinSteps?: number; readonly otherTurnWithin?: number };
 
 /**
  * One ray-march texel's twin along a clipped ray (`rayMarchRayTwin`, `rayMarchRayAlongTwin`): its
@@ -4227,6 +4233,8 @@ interface RayMarchContext {
   readonly deck: MarchDeck | null;
   /** The pieces' shares taken to the other side of their rounding ({@link RayMarchSettings}). */
   readonly otherShareWithinSteps: number;
+  /** The pieces' placements taken to the other side of the turn ({@link RayMarchSettings}). */
+  readonly otherTurnWithin: number;
 }
 
 /** A march's cloud deck at its ground (R08.T15.a.2; `thick/deckRead.ts`). */
@@ -4293,6 +4301,7 @@ function rayMarchContext(
     samples: Math.max(Math.floor(settings.rayMarchSamples), 2),
     depthSteps: settings.marchDepthSteps,
     otherShareWithinSteps: settings.otherShareWithinSteps ?? 0,
+    otherTurnWithin: settings.otherTurnWithin ?? 0,
     deck:
       planet.deck === undefined
         ? null
@@ -4349,7 +4358,15 @@ function rayMarchTexelInto(
       return local[4] ?? Number.NaN;
     },
   };
-  const steps = piecedSteps(ray, samples, edgesM, geometry, shares, context.otherShareWithinSteps);
+  const steps = piecedSteps(
+    ray,
+    samples,
+    edgesM,
+    geometry,
+    shares,
+    context.otherShareWithinSteps,
+    context.otherTurnWithin,
+  );
   for (const { tM, dtM } of steps) {
     marcher.step(tM, dtM);
   }
@@ -7269,6 +7286,7 @@ function oblateRayMarchContext(
     samples: Math.max(Math.floor(settings.rayMarchSamples), 2),
     depthSteps: settings.marchDepthSteps,
     otherShareWithinSteps: settings.otherShareWithinSteps ?? 0,
+    otherTurnWithin: settings.otherTurnWithin ?? 0,
     deck:
       planet.deck === undefined
         ? null

@@ -42,6 +42,7 @@ import {
   MARCH_PIECE_SHADE,
   MARCH_PIECE_TURN,
   MARCH_SHARE_ROUNDING_STEPS,
+  MARCH_TURN_ROUNDING,
   marchPieces,
   marchPiecesSteps,
   type MarchDepthSteps,
@@ -240,6 +241,29 @@ describe("depthSharedPieces: a cut side's steps by the light each piece returns 
       false,
       true,
     ]);
+  });
+
+  it("takes a placement within 2⁻⁴ of the turn to its other side for the smoke's envelope alone", () => {
+    // The cloud's top e^τ times its floor's brightness: 3% over the turn and 3% under it.
+    const cloudOf = (tau: number) => (fromLowestM: number) =>
+      fromLowestM <= -38_000
+        ? gasOverCloud(fromLowestM)
+        : 0.1 + (tau * (fromLowestM + 38_000)) / 38_000;
+    const placed = (tau: number, within = 0): ReadonlyArray<boolean> | null =>
+      depthSharedPieces(cloud, cloudOf(tau), lit, extinction, 0, within).beforeTowardStart;
+    const over = Math.log(MARCH_PIECE_TURN) + 0.03;
+    const under = Math.log(MARCH_PIECE_TURN) - 0.03;
+    expect(MARCH_TURN_ROUNDING).toBe(2 ** -4);
+    expect([placed(over), placed(under)]).toEqual([
+      [false, true],
+      [false, false],
+    ]);
+    expect([placed(over, MARCH_TURN_ROUNDING), placed(under, MARCH_TURN_ROUNDING)]).toEqual([
+      [false, false],
+      [false, true],
+    ]);
+    // A ratio 48% past the turn keeps its placement, as does the gas below the cloud.
+    expect(placed(5, MARCH_TURN_ROUNDING)).toEqual(placed(5));
   });
 
   it("gives a cloud in the ground's shadow its steps back to the lit gas above it", () => {

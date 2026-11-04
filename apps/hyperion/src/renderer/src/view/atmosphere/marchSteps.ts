@@ -694,6 +694,25 @@ export const MARCH_PIECE_SHADE = 0.01;
 export const MARCH_SHARE_ROUNDING_STEPS = 2 ** -8;
 
 /**
+ * How near {@link MARCH_PIECE_TURN} a piece's ends' brightness ratio may stand, as |ln(ratio ÷
+ * turn)|, for the kernel to take the other placement: 2⁻⁴, some 6% (plan R08, R08.T15.a.2 and
+ * R08.T16.a.2; the smoke's envelope of a march's placements, as {@link MARCH_SHARE_ROUNDING_STEPS}
+ * is of its shares).
+ *
+ * @remarks
+ * The turn is a threshold on b = σ e^−c (ε + l) at a piece's ends ({@link depthSharedPieces}), its
+ * c and l the lookups the kernel reads in `f32` through its tables and the twin in `f64`. A deck
+ * projected onto the kernels' levels (`tables.ts`'s `resampledDensity`) is cut at both its ends, so
+ * its piece holds its whole sheet, and the far end stands e^−τ/μ darker. On the hand Jupiter's deck
+ * route seen from 400 km its NH₃ sheet's piece stands at 100.5–102.3 times across a band of the
+ * frame (the twin, 2026-11-03), where the kernel and the twin placed its steps toward opposite ends
+ * and parted by up to 3.1% (test-render part 6). At 2⁻⁶, and with the shares' and the turns' other
+ * sides taken together, the check still missed. The kernels turn at the threshold; only the smoke's
+ * twin envelope takes the other placement there, each alone and with the shares' other sides.
+ */
+export const MARCH_TURN_ROUNDING = 2 ** -4;
+
+/**
  * `pieces` with each side that is cut into pieces sharing its steps among them by the light each can
  * return along the view, and each placed toward its brighter end (plan R08, R08.T16.a.2;
  * `rayMarch.wgsl`'s `rayMarchDepthShares`).
@@ -736,6 +755,8 @@ export const MARCH_SHARE_ROUNDING_STEPS = 2 ** -8;
  *
  * @param otherWithinSteps - The shares taken to the other side of their rounding
  *   ({@link MARCH_SHARE_ROUNDING_STEPS}): 0, none, the kernels' own.
+ * @param otherTurnWithin - The placements taken to the other side of the turn, where |ln(ratio ÷
+ *   {@link MARCH_PIECE_TURN})| is under it ({@link MARCH_TURN_ROUNDING}): 0, none, the kernels' own.
  */
 export function depthSharedPieces(
   pieces: MarchPieces,
@@ -743,6 +764,7 @@ export function depthSharedPieces(
   lightAt: PieceLightAt,
   extinctionPerMAt: PieceExtinctionAt,
   otherWithinSteps = 0,
+  otherTurnWithin = 0,
 ): MarchPieces {
   const { split, fromLowestM, crossingsBefore } = pieces;
   const capped = (t: number, back: boolean): number => {
@@ -802,9 +824,13 @@ export function depthSharedPieces(
       towardStart: shares.map((_, p) => {
         const start = brightness[p] ?? Number.NaN;
         const end = brightness[p + 1] ?? Number.NaN;
-        return placedTowardStart
+        const toward = placedTowardStart
           ? !(end > MARCH_PIECE_TURN * start)
           : start > MARCH_PIECE_TURN * end;
+        // The far end's ratio to the near one, against the turn: within the envelope's margin of
+        // it, the kernel may stand on its other side.
+        const ratio = placedTowardStart ? end / start : start / end;
+        return Math.abs(Math.log(ratio / MARCH_PIECE_TURN)) < otherTurnWithin ? !toward : toward;
       }),
     };
   };

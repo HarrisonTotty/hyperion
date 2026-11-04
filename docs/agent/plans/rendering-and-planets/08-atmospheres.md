@@ -24844,3 +24844,19 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     `MARCH_SHEET_NEGLIGIBLE` of its largest density are cut at both ends, so each spread sheet
     takes a piece; the marches keep the first `MARCH_EDGES_MAX` cuts, `packLayerEdges` and the
     twin alike.
+- **The deck route's twins at the turn, as built** (R08.T15.a.2, 2026-11-03; lane
+  `r08-t16a2-march-pieces`; test-render part 6 on land/next 28b08bc6). Its four ray-march checks over
+  the hand Jupiter's deck route missed their twins by up to 3.1% in red. The cause is the pair
+  dafe81aa (projected sheets cut at both ends) and ced3b644 (the twins take the decks); reverting
+  either holds them, and 1bc7172e is not involved.
+  - _Cause_: the NH₃ sheet's piece stands 100.5–102.3 times brighter at one end across a band of
+    the frame, at `MARCH_PIECE_TURN`, so the kernel's `f32` and the twin's `f64` placed its steps
+    toward opposite ends. With the turn off on both sides every check holds.
+  - _Fix_ (the smoke's envelope alone; the kernels turn as before): `marchSteps.ts`'s
+    `MARCH_TURN_ROUNDING` (2⁻⁴ of ln) and `depthSharedPieces`' `otherTurnWithin`; the twin's
+    `RayMarchSettings.otherTurnWithin`. `shareEnvelope` holds a texel between its twin, its shares'
+    other roundings, its placements' other sides and both. At 2⁻⁶, and with both taken together, it
+    still missed.
+  - _Left_: the turn is a step in a texel's light (to 3% here) as a piece's ratio crosses 100. A
+    turn blended over its ratio would take it away, and re-record every gate whose pieces stand
+    near it.

@@ -103,6 +103,7 @@ import {
   LOW_TWIN_WORST,
   MARCH_SHARE_ROUNDING_STEPS,
   MARCH_TOLERANCE,
+  MARCH_TURN_ROUNDING,
   TWILIGHT_TOLERANCE,
 } from "../view/atmosphere/marchSteps";
 import { type AtmosphereMedium, phaseTable, tabulatedDensity } from "../view/atmosphere/medium";
@@ -2115,13 +2116,15 @@ async function frameAgreements(
 }
 
 /**
- * A ray-march texel's envelope of its pieces' shares (plan R08, R08.T16.a.2): the twin's texel as
- * the kernel draws it, `target` its first target's (`light`) or its second's (`transmittance`),
- * and the same marched with each piece's share that stands within
- * {@link MARCH_SHARE_ROUNDING_STEPS} of its rounding taken to the other side of it, the share the
- * kernel's `f32` may take there (`marchSteps.ts`). A share is formed from the lookups at its
- * pieces' ends, so a routed giant, whose sheets cut each side into ten pieces, holds a few such
- * shares a frame; recorded with R08.T6.f's splits ({@link TexelEnvelope.split}), not §10.3's.
+ * A ray-march texel's envelope of its pieces' shares and placements (plan R08, R08.T16.a.2 and
+ * R08.T15.a.2): the twin's texel as the kernel draws it, `target` its first target's (`light`) or
+ * its second's (`transmittance`), and the same marched with each piece's share that stands within
+ * {@link MARCH_SHARE_ROUNDING_STEPS} of its rounding taken to the other side of it, with each
+ * placement whose ends' brightness ratio stands within {@link MARCH_TURN_ROUNDING} of the turn
+ * placed toward its other end, and with both, as the kernel's `f32` may take either there
+ * (`marchSteps.ts`). Both are formed from the lookups at its pieces' ends, so a routed giant,
+ * whose sheets cut each side into ten pieces, holds a few such shares and placements a frame;
+ * recorded with R08.T6.f's splits ({@link TexelEnvelope.split}), not §10.3's.
  */
 function shareEnvelope(
   planet: SmokePlanet,
@@ -2132,17 +2135,31 @@ function shareEnvelope(
   target: keyof TwinMarchedTexel,
 ): (index: number) => TexelEnvelope | null {
   const { widthTexels: w, heightTexels: h } = twin;
-  const settings = { ...sizes, otherShareWithinSteps: MARCH_SHARE_ROUNDING_STEPS };
+  // The shares at their other rounding, the placements at the turn's other side, and both: the
+  // kernel may take either alone.
+  const alternates = [
+    { ...sizes, otherShareWithinSteps: MARCH_SHARE_ROUNDING_STEPS },
+    { ...sizes, otherTurnWithin: MARCH_TURN_ROUNDING },
+    {
+      ...sizes,
+      otherShareWithinSteps: MARCH_SHARE_ROUNDING_STEPS,
+      otherTurnWithin: MARCH_TURN_ROUNDING,
+    },
+  ];
   return memoised((index) => {
     const x = index % w;
     const y = Math.floor(index / w);
-    const other =
+    const others = alternates.map((settings) =>
       planet.kind === "sphere"
         ? rayMarchTargetTexelsTwin(planet.twin, view, settings, x, y, depth)
-        : oblateRayMarchTargetTexelsTwin(planet.twin, view, settings, x, y, depth);
+        : oblateRayMarchTargetTexelsTwin(planet.twin, view, settings, x, y, depth),
+    );
     const d = unitRayTwin(view, (x + 0.5) / w, (y + 0.5) / h);
     return {
-      ...rangeOf([twin.texels.subarray(index * 4, index * 4 + 4), other[target]], 4),
+      ...rangeOf(
+        [twin.texels.subarray(index * 4, index * 4 + 4), ...others.map((other) => other[target])],
+        4,
+      ),
       tangentHeightM: tangentHeightOverM(view.figure, view.cameraM, d),
       split: true,
     };
