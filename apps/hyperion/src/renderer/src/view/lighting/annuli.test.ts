@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
 import {
+  ANNULUS_SETS_KEPT,
   annulusEdges,
   annulusVisibleFraction,
   circleOverlapArea,
   DISC_ANNULI_HIGH,
   DISC_ANNULI_LOW,
   eclipseVisible,
+  keptAnnulusEdges,
   type LimbDarkenedDisc,
   type Occluder,
+  occultationFrom,
 } from "./annuli";
 import { memoised } from "../../test/memo";
 import {
@@ -266,5 +269,100 @@ describe("eclipseVisible", () => {
     const visible = eclipseVisible(sun, point, [transit], 4);
     expect(visible).toBeLessThan(1);
     expect(visible).toBeGreaterThan(0.99);
+  });
+});
+
+describe("the annuli kept a law (lane perf-main-thread)", () => {
+  const laws: ReadonlyArray<readonly [number, number, number]> = [
+    [SUN_V.c, SUN_V.alpha, DISC_ANNULI_HIGH],
+    [SUN_V.c, SUN_V.alpha, DISC_ANNULI_LOW],
+    [0.71, 0.52, DISC_ANNULI_HIGH],
+    [0, 0.5, DISC_ANNULI_HIGH],
+  ];
+
+  it("keeps the sets annulusEdges makes, each law's and K's", () => {
+    const differing = laws.filter(([c, alpha, k]) => {
+      const kept = keptAnnulusEdges(c, alpha, k);
+      const made = annulusEdges(c, alpha, k);
+      return (
+        kept.dip !== made.dip ||
+        Array.from(kept.edges).join() !== Array.from(made.edges).join() ||
+        Array.from(kept.flux).join() !== Array.from(made.flux).join()
+      );
+    });
+    expect(differing).toEqual([]);
+  });
+
+  it("keeps the sets of the last ANNULUS_SETS_KEPT laws made", () => {
+    const first = keptAnnulusEdges(0.4, 0.61, DISC_ANNULI_LOW);
+    for (let i = 1; i < ANNULUS_SETS_KEPT; i += 1) {
+      keptAnnulusEdges(0.4 + i / 1000, 0.61, DISC_ANNULI_LOW);
+    }
+    expect(keptAnnulusEdges(0.4, 0.61, DISC_ANNULI_LOW)).toBe(first);
+  });
+
+  it("drops a law's set once ANNULUS_SETS_KEPT others are used after it", () => {
+    const first = keptAnnulusEdges(0.4, 0.62, DISC_ANNULI_LOW);
+    for (let i = 1; i <= ANNULUS_SETS_KEPT; i += 1) {
+      keptAnnulusEdges(0.4 + i / 1000, 0.62, DISC_ANNULI_LOW);
+    }
+    expect(keptAnnulusEdges(0.4, 0.62, DISC_ANNULI_LOW)).not.toBe(first);
+  });
+
+  it("keeps a law used each frame through ANNULUS_SETS_KEPT new ones", () => {
+    const first = keptAnnulusEdges(0.4, 0.63, DISC_ANNULI_LOW);
+    for (let i = 1; i <= ANNULUS_SETS_KEPT; i += 1) {
+      keptAnnulusEdges(0.4 + i / 1000, 0.63, DISC_ANNULI_LOW);
+      keptAnnulusEdges(0.4, 0.63, DISC_ANNULI_LOW);
+    }
+    expect(keptAnnulusEdges(0.4, 0.63, DISC_ANNULI_LOW)).toBe(first);
+  });
+
+  it("keeps a law of α −0 apart from one of +0, whose 1 ÷ α differ", () => {
+    expect(keptAnnulusEdges(0.5, -0, DISC_ANNULI_LOW)).not.toBe(
+      keptAnnulusEdges(0.5, 0, DISC_ANNULI_LOW),
+    );
+  });
+
+  it("hands the same set out again for the same law and K, and another for another K", () => {
+    const [c, alpha] = [SUN_V.c, SUN_V.alpha];
+    const first = keptAnnulusEdges(c, alpha, DISC_ANNULI_HIGH);
+    expect([
+      keptAnnulusEdges(c, alpha, DISC_ANNULI_HIGH) === first,
+      keptAnnulusEdges(c, alpha, DISC_ANNULI_LOW) === first,
+    ]).toEqual([true, false]);
+  });
+
+  it("dims a transit's light by its law's own annuli, as each call made them", () => {
+    const sun: LimbDarkenedDisc = {
+      centreM: vec3(0, 0, 0),
+      radiusM: 6.957e8,
+      limbC: SUN_V.c,
+      limbAlpha: SUN_V.alpha,
+    };
+    const point = vec3(1.496e11, 0, 0);
+    const offsets = [0, 1e8, 3e8, 5e8, 6.9e8];
+    const differing = offsets.filter((offsetM) => {
+      const transit: Occluder = { centreM: vec3(1.496e11 - 3.8e8, offsetM / 400, 0), radiusM: 4e5 };
+      const occultation = occultationFrom(sun, point, transit);
+      // `eclipseVisible`'s own sums over one occluder, with annuli made for the call.
+      const own =
+        occultation === "inside"
+          ? 0
+          : occultation === null
+            ? 1
+            : Math.max(
+                0,
+                1 -
+                  (1 -
+                    annulusVisibleFraction(
+                      annulusEdges(sun.limbC, sun.limbAlpha, DISC_ANNULI_HIGH),
+                      occultation.ratio,
+                      occultation.separation,
+                    )),
+              );
+      return eclipseVisible(sun, point, [transit], DISC_ANNULI_HIGH) !== own;
+    });
+    expect(differing).toEqual([]);
   });
 });

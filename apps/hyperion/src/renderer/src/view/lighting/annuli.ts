@@ -151,6 +151,54 @@ export function annulusEdges(c: number, alpha: number, k: number): AnnulusSet {
   return { edges, flux, dip: high };
 }
 
+/** The annulus sets {@link keptAnnulusEdges} keeps, at most: three channels of sixteen stars. */
+export const ANNULUS_SETS_KEPT = 48;
+
+/**
+ * An {@link AnnulusSet} as its readers take it, read-only, since a kept one is shared
+ * ({@link keptAnnulusEdges}).
+ */
+export interface AnnulusSetView {
+  readonly edges: ArrayLike<number>;
+  readonly flux: ArrayLike<number>;
+  readonly dip: number;
+}
+
+/** The kept annulus sets by their law and K, least recently used first. */
+const KEPT = new Map<string, AnnulusSetView>();
+
+/** A number as a key: its shortest round-trip decimal, −0 told from 0, as 1 ÷ α tells them. */
+function numberKey(x: number): string {
+  return Object.is(x, -0) ? "-0" : String(x);
+}
+
+/**
+ * {@link annulusEdges} kept for each law and K, at most {@link ANNULUS_SETS_KEPT}, the least
+ * recently used going first (lane perf-main-thread): the construction bisects, some 1.7 ms a law at
+ * K = 4, which the frames' glare and incident light made again for every star and channel at each
+ * frame. The same values as {@link annulusEdges}'s.
+ *
+ * @returns The law's set, the same one to every caller, read-only.
+ */
+export function keptAnnulusEdges(c: number, alpha: number, k: number): AnnulusSetView {
+  const key = `${numberKey(k)} ${numberKey(c)} ${numberKey(alpha)}`;
+  const held = KEPT.get(key);
+  if (held !== undefined) {
+    KEPT.delete(key);
+    KEPT.set(key, held);
+    return held;
+  }
+  const made = annulusEdges(c, alpha, k);
+  if (KEPT.size >= ANNULUS_SETS_KEPT) {
+    const unused = KEPT.keys().next();
+    if (unused.done !== true) {
+      KEPT.delete(unused.value);
+    }
+  }
+  KEPT.set(key, made);
+  return made;
+}
+
 /** The area of a circle of radius `radius` beyond a chord `d` from its centre. */
 function circularSegment(radius: number, d: number): number {
   const cosine = Math.min(Math.max(d / radius, -1), 1);
@@ -183,7 +231,7 @@ export function circleOverlapArea(r: number, k: number, z: number): number {
  * radii) whose centre is `separation` from the star's.
  */
 export function annulusVisibleFraction(
-  annuli: AnnulusSet,
+  annuli: AnnulusSetView,
   ratio: number,
   separation: number,
 ): number {
@@ -264,7 +312,7 @@ export function eclipseVisible(
   occluders: ReadonlyArray<Occluder>,
   k: number,
 ): number {
-  const annuli = annulusEdges(disc.limbC, disc.limbAlpha, k);
+  const annuli = keptAnnulusEdges(disc.limbC, disc.limbAlpha, k);
   let visible = 1;
   for (const occluder of occluders) {
     const occultation = occultationFrom(disc, fromM, occluder);
