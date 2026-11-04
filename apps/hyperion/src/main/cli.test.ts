@@ -896,6 +896,24 @@ describe("the several-views check's options", () => {
     },
   );
 
+  it.each(["depth-zero", "one-source", "no-lobes"] as const)(
+    "takes --march-probe %s, a probe of the step's sources (R08.T8.e)",
+    (probe) => {
+      const profile = [
+        "--views-check",
+        "--inspection",
+        "--universe",
+        UNIVERSE,
+        "--body",
+        BODY,
+        "--timing",
+        "--march-probe",
+        probe,
+      ];
+      expect(parse(profile).viewsCheck?.marchProbe).toBe(probe);
+    },
+  );
+
   it("refuses --march-probe without the frame profile, or naming no probe (R08.T8.d)", () => {
     const inspection = ["--views-check", "--inspection", "--universe", UNIVERSE, "--body", BODY];
     const error = refusal([...inspection, "--march-probe", "centre"]);

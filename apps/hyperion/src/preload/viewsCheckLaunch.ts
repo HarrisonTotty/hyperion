@@ -67,8 +67,13 @@ const COMPOSITE_PROBES: ReadonlyArray<CompositeProbeName> = [
   "surface-grey",
 ];
 
-/** The march's probes an inspection profile may draw under (plan R08, R08.T8.d). */
-const MARCH_PROBES: ReadonlyArray<MarchProbeName> = ["centre"];
+/** The march's probes an inspection profile may draw under (plan R08, R08.T8.d and R08.T8.e). */
+export const MARCH_PROBE_NAMES = [
+  "centre",
+  "depth-zero",
+  "one-source",
+  "no-lobes",
+] as const satisfies ReadonlyArray<MarchProbeName>;
 
 /**
  * `value` as the atmosphere's levers over a setting's (plan R08, R08.T8.d), or `null` if it is not
@@ -173,7 +178,7 @@ function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
   const run = RUN_KINDS.find((each) => each === value["run"]) ?? null;
   const fixture = TERRAIN_FIXTURES.find((each) => each === value["fixture"]) ?? null;
   const probe = COMPOSITE_PROBES.find((each) => each === compositeProbe) ?? null;
-  const march = MARCH_PROBES.find((each) => each === marchProbe) ?? null;
+  const march = MARCH_PROBE_NAMES.find((each) => each === marchProbe) ?? null;
   if (
     (compositeProbe !== undefined && probe === null) ||
     (marchProbe !== undefined && march === null) ||

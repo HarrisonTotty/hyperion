@@ -6,6 +6,7 @@ import {
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
+  RAY_MARCH_SLOTS_KERNEL,
   SKY_VIEW_KERNEL,
 } from "./hillaire";
 import {
@@ -33,7 +34,7 @@ const MARCH: ComputeBindings = {
   storage: {},
 };
 
-describe("the march's probe (plan R08, R08.T8.d)", () => {
+describe("the march's probe (plan R08, R08.T8.d and R08.T8.e)", () => {
   it("holds every march kernel's footprint test once, and no other kernel's", () => {
     const computes = WGSL_CATALOGUE.flatMap((entry) =>
       entry.kind === "compute" ? [entry.spec] : [],
@@ -55,6 +56,46 @@ describe("the march's probe (plan R08, R08.T8.d)", () => {
       RAY_MARCH_KERNEL.name,
       true,
     ]);
+  });
+
+  it.each([
+    ["depth-zero", "let light = SourceLight(1.0, vec3f(1.0), vec3f(0.0));"],
+    ["one-source", "return min(u32(view.sky.x), 1u);"],
+    ["no-lobes", "let lobes = false;"],
+  ] as const)(
+    "rewrites the step's sources of every march that steps under %s, and no other kernel (R08.T8.e)",
+    (probe, line) => {
+      const computes = WGSL_CATALOGUE.flatMap((entry) =>
+        entry.kind === "compute" ? [entry.spec] : [],
+      );
+      const stepping = computes.filter(
+        (pair) =>
+          pair.name.startsWith("atmosphere ray march") &&
+          pair.reference.includes("fn rayMarchSourcesAt("),
+      );
+      expect(stepping.map((pair) => pair.name)).toEqual(
+        expect.arrayContaining([RAY_MARCH_KERNEL.name, RAY_MARCH_SLOTS_KERNEL.name]),
+      );
+      for (const pair of stepping) {
+        const probed = marchProbedKernel(pair, probe);
+        expect([probed.name, probed.reference.includes(line)]).toEqual([pair.name, true]);
+      }
+      for (const pair of computes.filter((each) => !stepping.includes(each))) {
+        expect(marchProbedKernel(pair, probe)).toBe(pair);
+      }
+    },
+  );
+
+  it("compiles each step's lookup out of both reads under depth-zero, keeping the ray's own", () => {
+    for (const pair of [RAY_MARCH_KERNEL, RAY_MARCH_SLOTS_KERNEL]) {
+      const probed = marchProbedKernel(pair, "depth-zero").reference;
+      expect([
+        probed.includes("let light = sourceLightAt(body, start, bodyDir, slot);"),
+        probed.includes("slicedSlotDepthsOf(sliced, body, slot, lobes)"),
+        probed.includes("fn rayMarchGroundLightAt("),
+        probed.includes("return -log(sourceLightAt(body, start, d, 0u).toSun.g);"),
+      ]).toEqual([false, false, true, true]);
+    }
   });
 
   it("refuses a march whose footprint test it could not tell apart", () => {

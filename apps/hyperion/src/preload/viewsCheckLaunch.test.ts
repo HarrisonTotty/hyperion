@@ -175,6 +175,9 @@ describe("the views check's launch switch", () => {
       { ...profile, marchProbe: "centre" },
       { ...profile, compositeProbe: "per-pixel", marchProbe: "centre" },
       { ...profile, countGpuCalls: true, marchProbe: "centre" },
+      { ...profile, marchProbe: "depth-zero" },
+      { ...profile, marchProbe: "one-source" },
+      { ...profile, marchProbe: "no-lobes" },
     ] as const) {
       expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
     }

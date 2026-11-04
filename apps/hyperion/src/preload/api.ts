@@ -1192,10 +1192,13 @@ export type CompositeProbeName = "sky-off" | "transmittance-off" | "per-pixel" |
 /**
  * A probe of the atmosphere's march for the inspection run's frame profile (plan R08, R08.T8.d; the
  * owner's Mac): `centre` marches every texel's centre ray alone, with no far-limb footprint formed
- * or marched, so that a profile tells the footprint's node rays apart from the rest of the march.
- * A measurement's picture, never a player's: the limb from orbit then flickers as before R08.T8.c.
+ * or marched, so that a profile tells the footprint's node rays apart from the rest of the march;
+ * and of its step's sources (R08.T8.e's measurement): `depth-zero` lights each step through no air,
+ * its source lookups compiled out, `one-source` marches the first source alone, and `no-lobes`
+ * takes no forward lobes' higher orders. A measurement's picture, never a player's: under `centre`
+ * the limb from orbit flickers as before R08.T8.c.
  */
-export type MarchProbeName = "centre";
+export type MarchProbeName = "centre" | "depth-zero" | "one-source" | "no-lobes";
 
 /**
  * The atmosphere's levers a frame profile draws with over its setting's (plan R08, R08.T8.d): the

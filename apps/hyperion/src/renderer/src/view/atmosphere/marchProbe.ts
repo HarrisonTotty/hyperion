@@ -7,7 +7,8 @@
  * @remarks
  * - {@link marchProbedKernel}: the march with no far-limb footprint, every texel its centre ray
  *   alone, so that one build's profiles tell the footprint's node rays apart from the rest of the
- *   march.
+ *   march; or without a part of its step's sources (R08.T8.e's measurement), their lookups, all
+ *   but the first or the forward lobes' higher orders, so that they tell each part's share apart.
  * - {@link MARCH_CENSUS_KERNEL}: the footprint's rays counted over a march's area as its entry point
  *   marches them (`marchCensus.wgsl`), texel by texel and tile by tile, so that a profile names how
  *   many texels take how many node rays and how much of the area's work waits on them.
@@ -26,9 +27,12 @@ import viewWgsl from "./shaders/view.wgsl?raw";
 
 /**
  * A probe of the march (`--march-probe`): `centre`, every texel's centre ray alone, as a texel of
- * w_L 0 is marched, with no footprint formed or marched anywhere.
+ * w_L 0 is marched, with no footprint formed or marched anywhere (R08.T8.d); or one of the step's
+ * sources (plan R08, R08.T8.e's measurement; the owner's Mac): `depth-zero`, each step's source
+ * lit through no air, its sliced lookup compiled out; `one-source`, the march's first source alone;
+ * `no-lobes`, no forward lobes' higher orders. A measurement's picture, never a player's.
  */
-export type MarchProbe = "centre";
+export type MarchProbe = "centre" | "depth-zero" | "one-source" | "no-lobes";
 
 /**
  * The line of the march's entry points (`rayMarchFootprint.wgsl`, `rayMarchCentre.wgsl`) that a
@@ -36,8 +40,33 @@ export type MarchProbe = "centre";
  */
 const MARCH_ABOVE_LINE = "let above = view.camera.w * view.curvature.z >= medium.topHeightM;";
 
-/** What each probe puts in {@link MARCH_ABOVE_LINE}'s place: `centre`, the camera never above. */
-const MARCH_PROBE_LINES: Readonly<Record<MarchProbe, string>> = { centre: "let above = false;" };
+/** A step's source lit through no air: never shadowed, its transmittance 1, the lobes' depth 0. */
+const NO_LOOKUP_LINE = "let light = SourceLight(1.0, vec3f(1.0), vec3f(0.0));";
+
+/**
+ * Each probe's lines of the march's sources and what stands in each one's place, each line at most
+ * once in a march: `centre`'s footprint test ({@link MARCH_ABOVE_LINE}); `depth-zero`'s step's
+ * lookup, the shared read's (`source.wgsl`'s `sourceInScatteringAt`, which `rayMarchCurves.wgsl`'s
+ * step takes) and the read by slot's (`rayMarchSlots.wgsl`'s `rayMarchSourcesAt`), the bare
+ * ground's, the count's and the pieces' reads, once a ray, kept; `one-source`'s count of the drawn
+ * sources (`source.wgsl`'s `viewSourceCount`); and `no-lobes`' test (`rayMarch.wgsl`'s `marchRay`).
+ */
+const MARCH_PROBE_LINES: Readonly<Record<MarchProbe, ReadonlyArray<readonly [string, string]>>> = {
+  centre: [[MARCH_ABOVE_LINE, "let above = false;"]],
+  "depth-zero": [
+    ["let light = sourceLightAt(body, start, bodyDir, slot);", NO_LOOKUP_LINE],
+    ["let sliced = slicedRayOf(body, oblateBody, start, dir);", ""],
+    ["let read = slicedSlotDepthsOf(sliced, body, slot, lobes);", ""],
+    [
+      "let light = SourceLight(select(1.0, 0.0, sliced.shadowed), exp(-read[0]), read[1]);",
+      NO_LOOKUP_LINE,
+    ],
+  ],
+  "one-source": [
+    ["return min(u32(view.sky.x), MAX_SKY_SOURCES);", "return min(u32(view.sky.x), 1u);"],
+  ],
+  "no-lobes": [["let lobes = hasForwardLobes();", "let lobes = false;"]],
+};
 
 /** The names of the march's kernels, each of which begins with the general march's. */
 const MARCH_KERNEL_PREFIX = "atmosphere ray march";
@@ -45,26 +74,29 @@ const MARCH_KERNEL_PREFIX = "atmosphere ray march";
 /**
  * `pair` under `probe` where it is one of the march's kernels: `centre` holds the camera under the
  * top in the entry point's footprint test (`let above = false;`), so that no texel forms or marches
- * a footprint and the tile cull's centre ray classes no tile as the footprint's. Any other kernel,
- * and a march's that holds no such test (its fill), is `pair` itself. The name is kept, so that a
- * profile's kernels read as they do unprobed.
+ * a footprint and the tile cull's centre ray classes no tile as the footprint's; `depth-zero`,
+ * `one-source` and `no-lobes` rewrite the step's sources ({@link MARCH_PROBE_LINES}), so that the
+ * code they leave out is compiled out, which SwiftShader's times need (it runs both sides of a
+ * branch). Any other kernel, and a march's that holds none of the probe's lines (its fill), is
+ * `pair` itself. The name is kept, so that a profile's kernels read as they do unprobed.
  *
- * @throws Error naming the kernel where its WGSL holds the test more than once.
+ * @throws Error naming the kernel where its WGSL holds one of the probe's lines more than once.
  */
 export function marchProbedKernel(pair: KernelPair, probe: MarchProbe): KernelPair {
   if (!pair.name.startsWith(MARCH_KERNEL_PREFIX)) {
     return pair;
   }
-  const rewrite = (wgsl: string): string => {
-    const at = wgsl.indexOf(MARCH_ABOVE_LINE);
-    if (at < 0) {
-      return wgsl;
-    }
-    if (wgsl.indexOf(MARCH_ABOVE_LINE, at + 1) >= 0) {
-      throw new Error(`kernel ${pair.name} holds more than one place for: ${MARCH_ABOVE_LINE}`);
-    }
-    return wgsl.replace(MARCH_ABOVE_LINE, MARCH_PROBE_LINES[probe]);
-  };
+  const rewrite = (wgsl: string): string =>
+    MARCH_PROBE_LINES[probe].reduce((code, [line, probed]) => {
+      const at = code.indexOf(line);
+      if (at < 0) {
+        return code;
+      }
+      if (code.indexOf(line, at + 1) >= 0) {
+        throw new Error(`kernel ${pair.name} holds more than one place for: ${line}`);
+      }
+      return code.replace(line, probed);
+    }, wgsl);
   const reference = rewrite(pair.reference);
   return reference === pair.reference
     ? pair

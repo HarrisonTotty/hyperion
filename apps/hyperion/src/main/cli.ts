@@ -101,8 +101,11 @@
  * too (plan R14, the owner's Mac) that profile counts every WebGPU call each window makes, by kind
  * and by pass, at a little of the main thread's time; it is refused without `--timing`.
  * With `--march-probe centre` too (plan R08, R08.T8.d) that profile marches every texel's centre
- * ray alone, with no far-limb footprint, for an A/B of the footprint's node rays; it is refused
- * without `--timing`, and may stand beside `--composite-probe`.
+ * ray alone, with no far-limb footprint, for an A/B of the footprint's node rays; with
+ * `--march-probe depth-zero|one-source|no-lobes` (R08.T8.e's measurement) each step's sources lit
+ * through no air with no lookup, the first source alone, or no forward lobes' higher orders, for an
+ * A/B of the step's sources; it is refused without `--timing`, and may stand beside
+ * `--composite-probe`.
  * `--march-cover area|tiles` and `--limb-rays per-texel|packed` (plan R08, R08.T8.d) draw that
  * profile's atmospheres with that lever over its setting's, for the A/B of each lever on and off
  * on one build; each is refused without `--timing`.
@@ -153,6 +156,7 @@ import {
 } from "../preload/spikeLaunch";
 import {
   LIT_PROBE_NAMES,
+  MARCH_PROBE_NAMES,
   NAMED_HANDOVER_LOOK_NAMES,
   type ViewsCheckLaunch,
 } from "../preload/viewsCheckLaunch";
@@ -477,8 +481,8 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option(
         "--march-probe <PROBE>",
-        "the frame profile's march probe (R08.T8.d): every texel's centre ray alone, no far-limb footprint",
-      ).choices(["centre"]),
+        "the frame profile's march probe (R08.T8.d, R08.T8.e): every texel's centre ray alone, each step's sources through no air, the first source alone, or no forward lobes' higher orders",
+      ).choices(MARCH_PROBE_NAMES),
     )
     .addOption(
       new Option(
@@ -872,7 +876,8 @@ function compositeProbeOf(
 function marchProbeOf(
   options: Readonly<Record<string, unknown>>,
 ): { readonly marchProbe: MarchProbeName } | Record<string, never> {
-  return options["marchProbe"] === "centre" ? { marchProbe: "centre" } : {};
+  const probe = MARCH_PROBE_NAMES.find((each) => each === options["marchProbe"]);
+  return probe === undefined ? {} : { marchProbe: probe };
 }
 
 /**

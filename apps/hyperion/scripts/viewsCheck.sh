@@ -14,7 +14,8 @@
 #                  | --atmosphere
 #                  | --inspection --universe <ID> --body <ID>
 #                    [--timing [--composite-probe sky-off|transmittance-off|per-pixel|surface-grey]
-#                              [--count-gpu-calls] [--march-probe centre]
+#                              [--count-gpu-calls]
+#                              [--march-probe centre|depth-zero|one-source|no-lobes]
 #                              [--march-cover area|tiles] [--limb-rays per-texel|packed]
 #                              [--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment]]]
 #
@@ -124,9 +125,12 @@
 # made, passes, submissions) and by pass label, a draw of the primary, in the same files; its
 # frame times then carry the counter's own cost.
 # --march-probe centre (plan R08, R08.T8.d) marches every texel's centre ray alone, with no far-limb
-# footprint, the A/B of the footprint's node rays; its files end -march-centre. Each window also
-# records the far limb's census of the march the frame after it: the texels by node rays and the
-# tiles that hold one.
+# footprint, the A/B of the footprint's node rays; its files end -march-centre. --march-probe
+# depth-zero, one-source or no-lobes (R08.T8.e's measurement) marches each step's sources through no
+# air with their lookups compiled out, the first source alone, or with no forward lobes' higher
+# orders, the A/B of the step's sources; its files end -march-<probe>, and every probe's pictures
+# are not a player's. Each window also records the far limb's census of the march the frame after
+# it: the texels by node rays and the tiles that hold one.
 # --march-cover area|tiles and --limb-rays per-texel|packed draw that profile's atmospheres with that
 # lever over its setting's (plan R08, R08.T8.d), the A/B of each lever on and off on one build; its
 # files end -cover-<cover> and -limb-<rays>.
