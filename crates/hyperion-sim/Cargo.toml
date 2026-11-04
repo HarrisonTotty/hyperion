@@ -27,9 +27,6 @@ testing = ["hyperion-surface/testing"]
 [dev-dependencies]
 criterion.workspace = true
 hyperion-testkit.workspace = true
-# The version holds' switches that `with_every_27_hold` sets (R10.T6.a's steepness tails), for the
-# tests alone; 27's bump deletes it.
-hyperion-surface = { workspace = true, features = ["hold-switches"] }
 
 [[bench]]
 name = "foundation"

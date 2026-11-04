@@ -511,10 +511,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 /// - the haze layer, `HAZE_LAYER_VERSION` (P14.T24.h.b), at `HazeLayerRules::Absorbing` through
 ///   `with_haze_layer`: a hazy air's haze an absorbing layer over the rest of its disc, its
 ///   absorption the anti-greenhouse.
-/// - the class weights' steepness tails by Marcum's Q₁, the surface crate's
-///   `STEEPNESS_TAILS_VERSION` (rendering plan R10, R10.T6.a), at `SteepnessTailsRules::Marcum`
-///   through `hyperion_surface::material::with_steepness_tails`, which the sim's tests have through
-///   their dev-dependency on the surface crate's `hold-switches` feature.
 ///
 /// A system or a record is read under the rules in force when it is generated, so a test
 /// generates afresh inside it. A later hold at 27 adds its switch here, and 27's bump deletes it
@@ -535,10 +531,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    let run = move || {
-        use hyperion_surface::material::{SteepnessTailsRules, with_steepness_tails};
-        with_steepness_tails(SteepnessTailsRules::Marcum, run)
-    };
     run()
 }
 

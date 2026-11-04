@@ -32,11 +32,6 @@ wasm-bindgen.workspace = true
 # crates' tests; this crate's own tests see them through `cfg(test)`. The sim's `testing` feature
 # enables it.
 testing = []
-# The version holds' test switches (`material::with_steepness_tails`, R10.T6.a's steepness tails
-# held at 27), for the sim's tests' `with_every_27_hold`: only the sim's dev-dependency enables it,
-# so that no build of the server or the client carries a switch (the `testing` feature reaches
-# release builds through `hyperion-fit`'s dependency on the sim's). 27's bump deletes it.
-hold-switches = []
 
 # Golden files, test inputs and order checks, for the tests alone: a dev-dependency, so the crate's
 # runtime boundary, `hyperion-base` alone, holds (plan R05, T1.a).

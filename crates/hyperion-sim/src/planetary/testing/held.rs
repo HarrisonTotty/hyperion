@@ -12,10 +12,6 @@
 //! calling thread's, as that pool asks of a share. A hold's bump deletes its line here with its
 //! switch.
 
-use hyperion_surface::material::{
-    SteepnessTailsRules, steepness_tails_in_force, with_steepness_tails,
-};
-
 use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
 use crate::planetary::context::{BinaryHostRemnantsRules, with_binary_host_remnants};
 use crate::planetary::derive::atmosphere::{
@@ -86,7 +82,6 @@ held_rules! {
     rayleigh_adding: RayleighAddingRules = RayleighAddingRules::in_force => with_rayleigh_adding,
     haze_layer: HazeLayerRules = HazeLayerRules::in_force => with_haze_layer,
     locked_climate: LockedClimateRules = LockedClimateRules::in_force => with_locked_climate,
-    steepness_tails: SteepnessTailsRules = steepness_tails_in_force => with_steepness_tails,
     steam_division: SteamDivisionRules =
         SteamDivisionRules::in_force => with_steam_division,
     binary_host_remnants: BinaryHostRemnantsRules =

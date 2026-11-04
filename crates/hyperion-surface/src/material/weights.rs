@@ -21,7 +21,6 @@ use core::f64::consts::{SQRT_2, TAU};
 
 use hyperion_base::math;
 use hyperion_base::units::Metres;
-use hyperion_base::{GENERATOR_VERSION, GeneratorVersion};
 
 use super::classify::{
     IcePlacement, Point, Site, Steepness, cos_slope, finest_band, ice_share_at, kept_forms,
@@ -71,83 +70,6 @@ const PANEL_DEVIATIONS: f64 = 2.0;
 /// there the error stays below 3 × 10⁻⁷ at σ = 10⁻³ and 3 × 10⁻⁶ at σ = 3 × 10⁻⁵ (the science
 /// check's measurement), far below a byte's 1 ÷ 255.
 const MAX_PANELS: u32 = 16;
-
-/// The generator version from which a steepness tail is Marcum's Q₁ by its Bessel series
-/// ([`marcum_q1`]), in place of [`exceedance_by_quadrature`]'s Gauss–Legendre sums: 27 (R10.T6.a's
-/// lever, main's rule B, 2026-11-02).
-///
-/// It is the steepness tails' one hold. Below it [`SteepnessTailsRules::in_force`] is
-/// [`SteepnessTailsRules::Quadrature`], and every weight is the quadrature's, bit for bit. 27's
-/// bump deletes this hold, [`SteepnessTailsRules`] with its `Quadrature` arm, the tests'
-/// `with_steepness_tails` and its reader `steepness_tails_in_force`, the `hold-switches` feature
-/// with the sim's dev-dependency on it, its switch in the sim's `with_every_27_hold` and its line in
-/// the sim's `HeldRules`, and the tripwire
-/// `the_steepness_tails_are_held_only_until_the_27_bump`; [`exceedance_by_quadrature`] stays, as
-/// [`marcum_q1`]'s fallback past [`LARGEST_PRODUCT`]. It re-blesses the movers R10.T6.a's record
-/// lists.
-pub(crate) const STEEPNESS_TAILS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// How a vertex's steepness tails are made (the crate's `exceedance`), held at generator version
-/// 27, `STEEPNESS_TAILS_VERSION`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum SteepnessTailsRules {
-    /// Version 26's and before: the Gauss–Legendre sums.
-    Quadrature,
-    /// Version 27's: Marcum's Q₁ by its Bessel series.
-    Marcum,
-}
-
-impl SteepnessTailsRules {
-    /// The rules this generator version gives: Q₁ from [`STEEPNESS_TAILS_VERSION`], the quadrature
-    /// below it; in the tests, the rules a switch sets on its thread (`with_steepness_tails`).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(any(test, feature = "hold-switches"))]
-        if let Some(rules) = STEEPNESS_TAILS_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= STEEPNESS_TAILS_VERSION {
-            Self::Marcum
-        } else {
-            Self::Quadrature
-        }
-    }
-}
-
-#[cfg(any(test, feature = "hold-switches"))]
-thread_local! {
-    /// The steepness tails' rules a test sets on its thread, `None` for the version's.
-    static STEEPNESS_TAILS_RULES: core::cell::Cell<Option<SteepnessTailsRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the steepness tails' rules `rules` on this thread, for the tests to reach
-/// version 27's tails ahead of the bump, the sim's `with_every_27_hold` among them; the version's
-/// rules are set back after, a panic in `run` included. Only this crate's tests and the
-/// `hold-switches` feature, which only the sim's dev-dependency enables, have it, so no build of
-/// the server or the client carries the switch. 27's bump deletes it with the hold.
-#[cfg(any(test, feature = "hold-switches"))]
-pub fn with_steepness_tails<R>(rules: SteepnessTailsRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<SteepnessTailsRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            STEEPNESS_TAILS_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(STEEPNESS_TAILS_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// The steepness tails' rules in force on this thread (`SteepnessTailsRules::in_force`'s), for the
-/// sim's tests, which carry every hold's rules to the threads of their own pools. As
-/// [`with_steepness_tails`], only the `hold-switches` feature has it; 27's bump deletes it with the
-/// hold.
-#[cfg(any(test, feature = "hold-switches"))]
-#[must_use]
-pub fn steepness_tails_in_force() -> SteepnessTailsRules {
-    SteepnessTailsRules::in_force()
-}
 
 /// The gap b − a, in deviations, from which Marcum's Q₁(a, b) is below 2⁻⁵⁴ ([`marcum_q1`]): 8.6522,
 /// just above √(108 ln 2) = 8.65216, where e^(−gap² ÷ 2), which bounds it, is 2⁻⁵⁴. A tail that
@@ -579,22 +501,17 @@ fn steepness_cases(
 /// Tech. J. 24, 46, §3.10, eq. 3.10-11, p. 100), which is Marcum's Q₁(`mean` ÷ σ, t ÷ σ) (Marcum
 /// 1960, IRE Trans. Inf. Theory IT-6, 59; not read here).
 ///
-/// By the rules in force ([`SteepnessTailsRules::in_force`]): [`exceedance_by_quadrature`] below
-/// [`STEEPNESS_TAILS_VERSION`], and [`marcum_q1`] from it. `mean` and `threshold` are non-negative
-/// and `variance` positive.
+/// By Marcum's Q₁ ([`marcum_q1`], from generator version 27; R10.T6.a's lever, main's rule B,
+/// 2026-11-02), whose fallback past [`LARGEST_PRODUCT`] is [`exceedance_by_quadrature`]. `mean`
+/// and `threshold` are non-negative and `variance` positive.
 #[must_use]
 pub(crate) fn exceedance(mean: f64, variance: f64, threshold: f64) -> f64 {
-    match SteepnessTailsRules::in_force() {
-        SteepnessTailsRules::Quadrature => exceedance_by_quadrature(mean, variance, threshold),
-        SteepnessTailsRules::Marcum => {
-            let sd = variance.sqrt();
-            marcum_q1(mean / sd, threshold / sd)
-        }
-    }
+    let sd = variance.sqrt();
+    marcum_q1(mean / sd, threshold / sd)
 }
 
-/// [`exceedance`] as version 26 and before make it, verbatim (the hold's held arm,
-/// [`STEEPNESS_TAILS_VERSION`]).
+/// [`exceedance`] by Gauss–Legendre sums, as version 26 and before made it, verbatim:
+/// [`marcum_q1`]'s fallback past [`LARGEST_PRODUCT`].
 ///
 /// It is 1 less the probability of the disc, integrated in closed form along one axis and by
 /// Gauss–Legendre along the other, ∫ φ(x − mean) erf(√(t² − x²) ÷ σ√2) dx over |x| ≤ t with φ the
@@ -641,7 +558,7 @@ pub(crate) fn exceedance_by_quadrature(mean: f64, variance: f64, threshold: f64)
 /// Marcum's Q₁(`a`, `b`) = ∫ x e^(−(x² + a²) ÷ 2) I₀(a x) dx over x from `b` on, for `a` ≥ 0 and
 /// `b` > 0: the probability that the Rice variable of noncentrality `a` exceeds `b` (Marcum 1960,
 /// IRE Trans. Inf. Theory IT-6, 59; not read here), from the series of the modified Bessel
-/// functions `I_k` (version 27's [`exceedance`], [`STEEPNESS_TAILS_VERSION`]):
+/// functions `I_k` ([`exceedance`]'s from generator version 27):
 ///
 /// > Q₁(a, b) = e^(−(b − a)² ÷ 2) Σ_{k ≥ 0} ρ^k `Ĩ_k(ab)`, ρ = a ÷ b, where b ≥ a, and
 /// > 1 − Q₁(a, b) = e^(−(a − b)² ÷ 2) Σ_{k ≥ 1} ρ^k `Ĩ_k(ab)`, ρ = b ÷ a, where a > b,

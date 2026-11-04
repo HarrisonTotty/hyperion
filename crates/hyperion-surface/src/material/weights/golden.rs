@@ -248,8 +248,8 @@ fn material_weights_kernels_match_their_golden() {
     golden!("weights/kernels", &kernels_text());
 }
 
-/// Version 27's steepness tails ahead of their bump ([`STEEPNESS_TAILS_VERSION`]): [`exceedance`]
-/// over the kernels' grid under [`SteepnessTailsRules::Marcum`], and [`marcum_q1`] at a few
+/// Version 27's steepness tails, Marcum's Q₁ (R10.T6.a): [`exceedance`] over the kernels' grid,
+/// and [`marcum_q1`] at a few
 /// points about the class weights' domain, its scaled recurrence and its smallest product among
 /// them, so that the wasip1 and browser suites hold Q₁'s bits to the native ones before 27 makes
 /// them the kernels'. 27's bump re-blesses `weights/kernels` to this grid's values and deletes
@@ -258,18 +258,16 @@ fn kernels_27_text() -> String {
     let mut out = GoldenWriter::new();
     out.header(crate::generator_version());
     out.line("exceedance at 27");
-    with_steepness_tails(SteepnessTailsRules::Marcum, || {
-        for mean in [0.0, 0.05, 0.3, 0.8, 0.839, 0.85, 1.2, 2.0, 5.0] {
-            for variance in [1e-8, 9e-10, 1e-6, 1e-4, 1e-2, 0.1, 1.0, 4.0] {
-                for threshold in [0.1, 0.839_099_631_177_280, 1.732_050_807_568_877] {
-                    out.f64(
-                        &format!("exceedance({mean}, {variance}, {threshold})"),
-                        exceedance(mean, variance, threshold),
-                    );
-                }
+    for mean in [0.0, 0.05, 0.3, 0.8, 0.839, 0.85, 1.2, 2.0, 5.0] {
+        for variance in [1e-8, 9e-10, 1e-6, 1e-4, 1e-2, 0.1, 1.0, 4.0] {
+            for threshold in [0.1, 0.839_099_631_177_280, 1.732_050_807_568_877] {
+                out.f64(
+                    &format!("exceedance({mean}, {variance}, {threshold})"),
+                    exceedance(mean, variance, threshold),
+                );
             }
         }
-    });
+    }
     out.line("marcum_q1");
     for (a, b) in [
         (0.5, 2.0),
