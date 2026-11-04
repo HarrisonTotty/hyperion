@@ -1323,150 +1323,150 @@
             "internal_temperature_k": 104.86986160444255,
             "irradiation_temperature_k": 157.8262335608374,
             "profile": {
-              "thermal_opacity_m2_per_kg": 0.00287,
+              "thermal_opacity_m2_per_kg": 0.00292,
               "optical_depth_exponent": 2.0,
               "opacity_ratio": 0.4,
               "redistribution_factor": 0.25
             },
-            "join_pressure_pa": 101749.03768027548,
+            "join_pressure_pa": 100874.13758102986,
             "adiabat": [
               {
-                "pressure_pa": 101749.03768027548,
-                "temperature_k": 170.6113809067057
+                "pressure_pa": 100874.13758102986,
+                "temperature_k": 170.61138112013987
               },
               {
-                "pressure_pa": 135537.5609415486,
-                "temperature_k": 187.16616240873944
+                "pressure_pa": 134444.6717353014,
+                "temperature_k": 187.19848052053698
               },
               {
-                "pressure_pa": 180546.4783235507,
-                "temperature_k": 204.9827686728269
+                "pressure_pa": 179187.35358201628,
+                "temperature_k": 205.0523658856989
               },
               {
-                "pressure_pa": 240501.8255352406,
-                "temperature_k": 224.17580414233296
+                "pressure_pa": 238820.23191623314,
+                "temperature_k": 224.2883369212589
               },
               {
-                "pressure_pa": 320366.96934142546,
-                "temperature_k": 244.87706821567036
+                "pressure_pa": 318298.70820887876,
+                "temperature_k": 245.0390256876278
               },
               {
-                "pressure_pa": 426753.4968459971,
-                "temperature_k": 267.23730364954196
+                "pressure_pa": 424227.3229304005,
+                "temperature_k": 267.4561573248722
               },
               {
-                "pressure_pa": 568468.5516882887,
-                "temperature_k": 291.4268618434306
+                "pressure_pa": 565408.5828164667,
+                "temperature_k": 291.7112126448855
               },
               {
-                "pressure_pa": 757243.9280449484,
-                "temperature_k": 317.6350514107646
+                "pressure_pa": 753574.4357865745,
+                "temperature_k": 317.9947606663291
               },
               {
-                "pressure_pa": 1008707.2800385425,
-                "temperature_k": 346.0685791285838
+                "pressure_pa": 1004361.1779685126,
+                "temperature_k": 346.51487965558374
               },
               {
-                "pressure_pa": 1343675.847530016,
-                "temperature_k": 376.94982781736115
+                "pressure_pa": 1338608.8061193088,
+                "temperature_k": 377.4954221475533
               },
               {
-                "pressure_pa": 1789879.7985938198,
-                "temperature_k": 410.5156729894088
+                "pressure_pa": 1784092.7896521492,
+                "temperature_k": 411.1748320176142
               },
               {
-                "pressure_pa": 2384257.8545289272,
-                "temperature_k": 447.0171894530164
+                "pressure_pa": 2377832.1698901854,
+                "temperature_k": 447.8058627234543
               },
               {
-                "pressure_pa": 3176015.2393188267,
-                "temperature_k": 486.72009797585815
+                "pressure_pa": 3169165.786083953,
+                "temperature_k": 487.65603659300194
               },
               {
-                "pressure_pa": 4230697.104017043,
-                "temperature_k": 529.9053420804264
+                "pressure_pa": 4223852.25789462,
+                "temperature_k": 531.0082205183384
               },
               {
-                "pressure_pa": 5635614.642005629,
-                "temperature_k": 576.868924849984
+                "pressure_pa": 5629534.426650178,
+                "temperature_k": 578.1604342518386
               },
               {
-                "pressure_pa": 7507073.092761008,
-                "temperature_k": 627.9201556984401
+                "pressure_pa": 7503022.342129984,
+                "temperature_k": 629.4240340469139
               },
               {
                 "pressure_pa": 10000000.0,
-                "temperature_k": 683.3777632936723
+                "temperature_k": 685.1197314213198
               }
             ],
             "composition": [
               {
                 "species": "H2",
-                "mole_fraction": 0.8479933974727857
+                "mole_fraction": 0.8479936430246926
               },
               {
                 "species": "He",
-                "mole_fraction": 0.15011777633579776
+                "mole_fraction": 0.15011771948450936
               },
               {
                 "species": "CH4",
-                "mole_fraction": 0.0014993024772345736
+                "mole_fraction": 0.0014993018761960044
               },
               {
                 "species": "NH3",
-                "mole_fraction": 0.00023748366396118665
+                "mole_fraction": 0.00023710592570340834
               },
               {
                 "species": "Ne",
-                "mole_fraction": 0.00012188476024739836
+                "mole_fraction": 0.00012188471408827035
               },
               {
                 "species": "Ar",
-                "mole_fraction": 0.00001605550591017537
+                "mole_fraction": 0.000016055499829774905
               },
               {
                 "species": "N2",
-                "mole_fraction": 0.000012367652014305545
+                "mole_fraction": 0.00001255651287208988
               },
               {
                 "species": "PH3",
-                "mole_fraction": 1.4642795421422795e-6
+                "mole_fraction": 1.4642789876031665e-6
               },
               {
                 "species": "HCl",
-                "mole_fraction": 2.4879780121566716e-7
+                "mole_fraction": 2.4879770699314485e-7
               },
               {
                 "species": "Kr",
-                "mole_fraction": 9.674398995449664e-9
+                "mole_fraction": 9.674395331646075e-9
               },
               {
                 "species": "H2O",
-                "mole_fraction": 6.808285940237368e-9
+                "mole_fraction": 7.522833816391402e-9
               },
               {
                 "species": "CO",
-                "mole_fraction": 1.1897187899733496e-9
+                "mole_fraction": 1.2225871534274598e-9
               },
               {
                 "species": "Xe",
-                "mole_fraction": 9.454182788730905e-10
+                "mole_fraction": 9.454179208325673e-10
               },
               {
                 "species": "H2S",
-                "mole_fraction": 4.218712523655071e-10
+                "mole_fraction": 5.048001716628497e-10
               },
               {
                 "species": "HCN",
-                "mole_fraction": 7.61253966741059e-12
+                "mole_fraction": 7.778556365817656e-12
               },
               {
                 "species": "CO2",
-                "mole_fraction": 7.399869803066096e-12
+                "mole_fraction": 7.600910227224707e-12
               }
             ],
-            "mean_molar_mass_g_per_mol": 2.3420815201747036,
-            "heat_capacity_over_r": 3.0595433452161584,
+            "mean_molar_mass_g_per_mol": 2.342080650912379,
+            "heat_capacity_over_r": 3.061458026003184,
             "decks": [
               {
                 "material": "Fe",
@@ -1475,17 +1475,17 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.2247981361661778e-7,
+                  "effective_radius_m": 1.2242790118429756e-7,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 4171.409334093871,
-                "tau_550": 9816935.92533947,
+                "column_mass_kg_m2": 4359.214842800528,
+                "tau_550": 10261516.05958763,
                 "tau_basis": "sphere",
                 "base_pa": 999999999.9999993,
                 "top_pa": 2376312.8389387666,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2660.640622705595
+                "temperature_k": 2667.181190767556
               },
               {
                 "material": "CaTiO3",
@@ -1494,17 +1494,17 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.862624347107466e-7,
+                  "effective_radius_m": 1.862535528843121e-7,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 308.0975030700753,
-                "tau_550": 1264684.373788049,
+                "column_mass_kg_m2": 305.24264719879403,
+                "tau_550": 1252806.4315213272,
                 "tau_basis": "sphere",
-                "base_pa": 970517637.3453927,
+                "base_pa": 961511047.0060886,
                 "top_pa": 920143.2015283837,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2637.2428026433363
+                "temperature_k": 2636.4624727464343
               },
               {
                 "material": "Al2O3",
@@ -1513,17 +1513,17 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.8297629511063915e-7,
+                  "effective_radius_m": 1.82978163262921e-7,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 3474.6283994497826,
-                "tau_550": 10794378.866373379,
+                "column_mass_kg_m2": 3443.289120568879,
+                "tau_550": 10696806.640987393,
                 "tau_basis": "sphere",
-                "base_pa": 884280998.9052861,
+                "base_pa": 876293815.6183922,
                 "top_pa": 832687.2746623612,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2565.7932898160584
+                "temperature_k": 2565.2281242531612
               },
               {
                 "material": "Mg2SiO4",
@@ -1532,33 +1532,33 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.9662348244432887e-7,
+                  "effective_radius_m": 1.9662139708865834e-7,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 45855.94069538409,
-                "tau_550": 134908255.10253936,
+                "column_mass_kg_m2": 45419.29441994162,
+                "tau_550": 133609313.03198172,
                 "tau_basis": "sphere",
-                "base_pa": 728032201.368191,
+                "base_pa": 721073292.6668025,
                 "top_pa": 648706.4151794605,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2422.6920544564364
+                "temperature_k": 2421.788060361905
               },
               {
                 "material": "Cr",
                 "phase": "liquid",
                 "deck": "Cr",
                 "shape": "sphere",
-                "column_mass_kg_m2": 160.57983697680805,
-                "base_pa": 512851803.12578785,
+                "column_mass_kg_m2": 159.0067015115406,
+                "base_pa": 507794460.87337995,
                 "top_pa": 18410273.525621567,
                 "f_sed": 4.5,
                 "coverage": 1.0,
-                "temperature_k": 2184.6740173159983,
+                "temperature_k": 2183.6768731508855,
                 "not_modelled": {
                   "type": "no_grain_density",
                   "phase": "liquid",
-                  "temperature_k": 2184.6740173159983
+                  "temperature_k": 2183.6768731508855
                 }
               },
               {
@@ -1568,17 +1568,17 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 2.027167342693976e-7,
+                  "effective_radius_m": 2.0271766583368493e-7,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 22473.707038813704,
-                "tau_550": 63374524.6512924,
+                "column_mass_kg_m2": 22264.70827172801,
+                "tau_550": 62781769.16398853,
                 "tau_basis": "sphere",
-                "base_pa": 481602892.04240966,
+                "base_pa": 477097517.09112185,
                 "top_pa": 435065.0703075627,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2144.5090117377736
+                "temperature_k": 2143.856264691144
               },
               {
                 "material": "MnS",
@@ -1587,17 +1587,17 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.7444089346336713e-7,
+                  "effective_radius_m": 1.7444543694234138e-7,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 96.60214594137496,
-                "tau_550": 259412.6940173668,
+                "column_mass_kg_m2": 95.69708497182839,
+                "tau_550": 256976.05502683372,
                 "tau_basis": "phase_table",
-                "base_pa": 247684271.03032634,
+                "base_pa": 245357169.94787908,
                 "top_pa": 10111585.934398549,
                 "f_sed": 4.5,
                 "coverage": 1.0,
-                "temperature_k": 1762.331682368349
+                "temperature_k": 1761.7970554530941
               },
               {
                 "material": "Na2S",
@@ -1606,17 +1606,17 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 2.7092286238252834e-7,
+                  "effective_radius_m": 2.7093568802395514e-7,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 105.15875432193933,
-                "tau_550": 362846.78041380463,
+                "column_mass_kg_m2": 104.13051732184209,
+                "tau_550": 359285.08936909295,
                 "tau_basis": "phase_table",
-                "base_pa": 98714609.25356174,
+                "base_pa": 97744230.36490165,
                 "top_pa": 3724640.294832248,
                 "f_sed": 4.5,
                 "coverage": 1.0,
-                "temperature_k": 1343.2756379245793
+                "temperature_k": 1342.7184736159725
               },
               {
                 "material": "KCl",
@@ -1625,17 +1625,17 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 2.74741074678126e-7,
+                  "effective_radius_m": 2.7475269884034153e-7,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 5.078255387617501,
-                "tau_550": 13074.167286205291,
+                "column_mass_kg_m2": 5.028822734784238,
+                "tau_550": 12946.631567752387,
                 "tau_basis": "phase_table",
-                "base_pa": 38190023.649400406,
+                "base_pa": 37816628.9805175,
                 "top_pa": 1442235.377964425,
                 "f_sed": 4.5,
                 "coverage": 1.0,
-                "temperature_k": 1014.9175149850349
+                "temperature_k": 1014.5314782357518
               },
               {
                 "material": "ZnS",
@@ -1644,17 +1644,17 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.928076452778835e-7,
+                  "effective_radius_m": 1.928115408410443e-7,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 1.99285930212408,
-                "tau_550": 5400.074144916484,
+                "column_mass_kg_m2": 1.9742779706940652,
+                "tau_550": 5349.644517321332,
                 "tau_basis": "sphere_fallback",
-                "base_pa": 31630404.459532235,
+                "base_pa": 31334972.184615165,
                 "top_pa": 1305156.6802906974,
                 "f_sed": 4.5,
                 "coverage": 1.0,
-                "temperature_k": 960.0041347650357
+                "temperature_k": 959.767558476998
               },
               {
                 "material": "H2O",
@@ -1663,17 +1663,17 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 0.00002881689716132193,
+                  "effective_radius_m": 0.00002874184008604213,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 0.0323331168307826,
-                "tau_550": 1.7291286735758769,
+                "column_mass_kg_m2": 0.03221460198768326,
+                "tau_550": 1.7273664905191823,
                 "tau_basis": "sphere",
-                "base_pa": 487260.56951421977,
+                "base_pa": 482213.6330418643,
                 "top_pa": 177089.48342126535,
-                "f_sed": 4.918486320580371,
+                "f_sed": 4.922005870999762,
                 "coverage": 1.0,
-                "temperature_k": 278.1627007020195
+                "temperature_k": 278.01350206722844
               },
               {
                 "material": "NH4SH",
@@ -1682,17 +1682,17 @@
                 "shape": "crystal",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 0.000010180706089884296,
+                  "effective_radius_m": 0.00001015597232969573,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 0.012038894088536756,
-                "tau_550": 1.5953283322363634,
+                "column_mass_kg_m2": 0.011992560066260153,
+                "tau_550": 1.5931904120443872,
                 "tau_basis": "sphere_fallback",
-                "base_pa": 212776.17069147376,
+                "base_pa": 210663.76139592574,
                 "top_pa": 112982.72578934742,
-                "f_sed": 11.830940211009988,
+                "f_sed": 11.833486144881356,
                 "coverage": 1.0,
-                "temperature_k": 215.76648711777005
+                "temperature_k": 215.6759467191638
               },
               {
                 "material": "NH3",
@@ -1701,17 +1701,36 @@
                 "shape": "crystal",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 8.25927248965455e-6,
+                  "effective_radius_m": 8.237694817516572e-6,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 0.010194596641747053,
-                "tau_550": 2.3941855246856574,
+                "column_mass_kg_m2": 0.01014585725518485,
+                "tau_550": 2.3892333383051683,
                 "tau_basis": "sphere_fallback",
-                "base_pa": 64149.77329982213,
-                "top_pa": 10807.741278364832,
-                "f_sed": 5.646653275332412,
+                "base_pa": 63482.5543618753,
+                "top_pa": 10281.303813237791,
+                "f_sed": 5.64525218888992,
                 "coverage": 1.0,
-                "temperature_k": 149.15835454757962
+                "temperature_k": 149.08737899130898
+              },
+              {
+                "material": "NH3",
+                "phase": "solid",
+                "deck": "NH3",
+                "shape": "crystal",
+                "size_distribution": {
+                  "type": "gamma",
+                  "effective_radius_m": 1e-6,
+                  "effective_variance": 0.05
+                },
+                "column_mass_kg_m2": 0.004584068996292844,
+                "tau_550": 10.0,
+                "tau_basis": "sphere_fallback",
+                "base_pa": 63482.5543618753,
+                "top_pa": 10000.0,
+                "f_sed": 0.0,
+                "coverage": 1.0,
+                "temperature_k": 149.08275481495798
               }
             ],
             "hazes": [
@@ -1725,159 +1744,159 @@
                   "effective_radius_m": 5e-8,
                   "effective_variance": 0.05
                 },
-                "column_mass_kg_m2": 0.00063,
-                "tau_550": 0.30695725045434463,
+                "column_mass_kg_m2": 0.00024,
+                "tau_550": 0.11693609541117891,
                 "tau_basis": "sphere",
                 "base_pa": 25680.508333754828,
                 "top_pa": 15576.015661428097,
                 "f_sed": 0.0,
                 "coverage": 1.0,
-                "temperature_k": 123.45623861741636
+                "temperature_k": 123.60225041499203
               }
             ],
-            "haze_tau_550": 0.30695725045434463,
+            "haze_tau_550": 0.11693609541117891,
             "condensate_decks": [
               {
                 "condensate": "Fe",
                 "phase": "liquid",
                 "base_pa": 999999999.9999993,
-                "base_temperature_k": 2660.640622705595,
+                "base_temperature_k": 2667.181190767556,
                 "top_pa": 2376312.8389387666,
-                "vapour_mole_fraction_below": 0.00014599755903764452,
-                "vapour_mole_fraction_above": 5.019119322051006e-42,
+                "vapour_mole_fraction_below": 0.00014599750404224783,
+                "vapour_mole_fraction_above": 6.622733840292846e-42,
                 "f_sed": 2.0,
                 "extrapolated": true
               },
               {
                 "condensate": "CaTiO3",
                 "phase": "liquid",
-                "base_pa": 970517637.3453927,
-                "base_temperature_k": 2637.2428026433363,
+                "base_pa": 961511047.0060886,
+                "base_temperature_k": 2636.4624727464343,
                 "top_pa": 920143.2015283837,
-                "vapour_mole_fraction_below": 4.308693433026657e-7,
-                "vapour_mole_fraction_above": 5.252103960021839e-188,
+                "vapour_mole_fraction_below": 4.3086918099974365e-7,
+                "vapour_mole_fraction_above": 1.8742290629674048e-187,
                 "f_sed": 2.0,
                 "extrapolated": true
               },
               {
                 "condensate": "Al2O3",
                 "phase": "liquid",
-                "base_pa": 884280998.9052861,
-                "base_temperature_k": 2565.7932898160584,
+                "base_pa": 876293815.6183922,
+                "base_temperature_k": 2565.2281242531612,
                 "top_pa": 832687.2746623612,
-                "vapour_mole_fraction_below": 0.00001459975590376446,
-                "vapour_mole_fraction_above": 4.351260009901486e-125,
+                "vapour_mole_fraction_below": 0.000014599750404224794,
+                "vapour_mole_fraction_above": 1.0019762421981626e-124,
                 "f_sed": 2.0,
                 "extrapolated": true
               },
               {
                 "condensate": "Mg2SiO4",
                 "phase": "liquid",
-                "base_pa": 728032201.368191,
-                "base_temperature_k": 2422.6920544564364,
+                "base_pa": 721073292.6668025,
+                "base_temperature_k": 2421.788060361905,
                 "top_pa": 648706.4151794605,
-                "vapour_mole_fraction_below": 0.00017498430014214705,
-                "vapour_mole_fraction_above": 1.4718638588946552e-94,
+                "vapour_mole_fraction_below": 0.00017498423422781904,
+                "vapour_mole_fraction_above": 2.788648620445108e-94,
                 "f_sed": 2.0,
                 "extrapolated": false
               },
               {
                 "condensate": "Cr",
                 "phase": "liquid",
-                "base_pa": 512851803.12578785,
-                "base_temperature_k": 2184.6740173159983,
+                "base_pa": 507794460.87337995,
+                "base_temperature_k": 2183.6768731508855,
                 "top_pa": 18410273.525621567,
-                "vapour_mole_fraction_below": 2.261234457581602e-6,
-                "vapour_mole_fraction_above": 1.1472503966360717e-20,
+                "vapour_mole_fraction_below": 2.261233605803759e-6,
+                "vapour_mole_fraction_above": 1.3284388152578954e-20,
                 "f_sed": 4.5,
                 "extrapolated": false
               },
               {
                 "condensate": "MgSiO3",
                 "phase": "liquid",
-                "base_pa": 481602892.04240966,
-                "base_temperature_k": 2144.5090117377736,
+                "base_pa": 477097517.09112185,
+                "base_temperature_k": 2143.856264691144,
                 "top_pa": 435065.0703075627,
-                "vapour_mole_fraction_below": 0.00009065025987205138,
-                "vapour_mole_fraction_above": 5.3385018428090034e-95,
+                "vapour_mole_fraction_below": 0.00009065279126302594,
+                "vapour_mole_fraction_above": 1.0130376620083288e-94,
                 "f_sed": 2.0,
                 "extrapolated": false
               },
               {
                 "condensate": "MnS",
                 "phase": "solid",
-                "base_pa": 247684271.03032634,
-                "base_temperature_k": 1762.331682368349,
+                "base_pa": 245357169.94787908,
+                "base_temperature_k": 1761.7970554530941,
                 "top_pa": 10111585.934398549,
-                "vapour_mole_fraction_below": 1.6008314017490474e-6,
-                "vapour_mole_fraction_above": 2.3780994515924165e-26,
+                "vapour_mole_fraction_below": 1.6008307987365139e-6,
+                "vapour_mole_fraction_above": 2.9142059401711906e-26,
                 "f_sed": 4.5,
                 "extrapolated": false
               },
               {
                 "condensate": "Na2S",
                 "phase": "solid",
-                "base_pa": 98714609.25356174,
-                "base_temperature_k": 1343.2756379245793,
+                "base_pa": 97744230.36490165,
+                "base_temperature_k": 1342.7184736159725,
                 "top_pa": 3724640.294832248,
-                "vapour_mole_fraction_below": 0.00001010056330208084,
-                "vapour_mole_fraction_above": 3.5324803755435455e-21,
+                "vapour_mole_fraction_below": 0.000010100559497328972,
+                "vapour_mole_fraction_above": 4.146415135884911e-21,
                 "f_sed": 4.5,
                 "extrapolated": false
               },
               {
                 "condensate": "KCl",
                 "phase": "solid",
-                "base_pa": 38190023.649400406,
-                "base_temperature_k": 1014.9175149850349,
+                "base_pa": 37816628.9805175,
+                "base_temperature_k": 1014.5314782357518,
                 "top_pa": 1442235.377964425,
-                "vapour_mole_fraction_below": 6.521471411620743e-7,
-                "vapour_mole_fraction_above": 7.694110757287974e-24,
+                "vapour_mole_fraction_below": 6.52146895506661e-7,
+                "vapour_mole_fraction_above": 9.162940335386287e-24,
                 "f_sed": 4.5,
                 "extrapolated": false
               },
               {
                 "condensate": "ZnS",
                 "phase": "solid",
-                "base_pa": 31630404.459532235,
-                "base_temperature_k": 960.0041347650357,
+                "base_pa": 31334972.184615165,
+                "base_temperature_k": 959.767558476998,
                 "top_pa": 1305156.6802906974,
-                "vapour_mole_fraction_below": 2.2612344575815994e-7,
-                "vapour_mole_fraction_above": 6.271229659325747e-32,
+                "vapour_mole_fraction_below": 2.2612336058037562e-7,
+                "vapour_mole_fraction_above": 8.063013970298719e-32,
                 "f_sed": 4.5,
                 "extrapolated": false
               },
               {
                 "condensate": "H2O",
                 "phase": "liquid",
-                "base_pa": 487260.56951421977,
-                "base_temperature_k": 278.1627007020195,
+                "base_pa": 482213.6330418643,
+                "base_temperature_k": 278.01350206722844,
                 "top_pa": 177089.48342126535,
-                "vapour_mole_fraction_below": 0.0017922720583508083,
-                "vapour_mole_fraction_above": 1.6107385456412442e-6,
-                "f_sed": 7132.201803528546,
+                "vapour_mole_fraction_below": 0.0017922713500519425,
+                "vapour_mole_fraction_above": 1.7490025900043391e-6,
+                "f_sed": 7086.199181161585,
                 "extrapolated": false
               },
               {
                 "condensate": "NH4SH",
                 "phase": "solid",
-                "base_pa": 212776.17069147376,
-                "base_temperature_k": 215.76648711777005,
+                "base_pa": 210663.76139592574,
+                "base_temperature_k": 215.6759467191638,
                 "top_pa": 112982.72578934742,
-                "vapour_mole_fraction_below": 0.00006629487623186387,
-                "vapour_mole_fraction_above": 3.9489983312152815e-9,
-                "f_sed": 954.3914206577477,
+                "vapour_mole_fraction_below": 0.0000662948512594394,
+                "vapour_mole_fraction_above": 4.697210382420986e-9,
+                "f_sed": 948.5811945988693,
                 "extrapolated": true
               },
               {
                 "condensate": "NH3",
                 "phase": "solid",
-                "base_pa": 64149.77329982213,
-                "base_temperature_k": 149.15835454757962,
-                "top_pa": 10807.741278364832,
-                "vapour_mole_fraction_below": 0.00023678520857232374,
-                "vapour_mole_fraction_above": 8.620335112144301e-7,
-                "f_sed": 367.8636081900273,
+                "base_pa": 63482.5543618753,
+                "base_temperature_k": 149.08737899130898,
+                "top_pa": 10281.303813237791,
+                "vapour_mole_fraction_below": 0.00023640849839079577,
+                "vapour_mole_fraction_above": 8.657599971477811e-7,
+                "f_sed": 365.17245502814956,
                 "extrapolated": false
               }
             ],
@@ -1993,218 +2012,246 @@
             "internal_temperature_k": 557.9696478731355,
             "irradiation_temperature_k": 2049.1954518786147,
             "profile": {
-              "thermal_opacity_m2_per_kg": 0.00287,
+              "thermal_opacity_m2_per_kg": 0.00292,
               "optical_depth_exponent": 2.0,
               "opacity_ratio": 0.4,
               "redistribution_factor": 0.25
             },
-            "join_pressure_pa": 298897.6994424936,
+            "join_pressure_pa": 296856.9611349153,
             "adiabat": [
               {
-                "pressure_pa": 298897.6994424936,
-                "temperature_k": 2035.37341791605
+                "pressure_pa": 296856.9611349153,
+                "temperature_k": 2036.447407098905
               },
               {
-                "pressure_pa": 372222.3199295821,
-                "temperature_k": 2170.979535513768
+                "pressure_pa": 369839.2800573226,
+                "temperature_k": 2172.604187042072
               },
               {
-                "pressure_pa": 463534.7000401266,
-                "temperature_k": 2314.279316280783
+                "pressure_pa": 460764.3106982912,
+                "temperature_k": 2316.518772487698
               },
               {
-                "pressure_pa": 577247.53900287,
-                "temperature_k": 2465.6671162627295
+                "pressure_pa": 574043.2708509647,
+                "temperature_k": 2468.5908421716567
               },
               {
-                "pressure_pa": 718856.0452022783,
-                "temperature_k": 2625.575319283442
+                "pressure_pa": 715171.8767234291,
+                "temperature_k": 2629.2587561392775
               },
               {
-                "pressure_pa": 895203.4938364474,
-                "temperature_k": 2794.4836804076126
+                "pressure_pa": 890996.9670019902,
+                "temperature_k": 2799.0090934901236
               },
               {
-                "pressure_pa": 1114811.9303239358,
-                "temperature_k": 2972.9312136859658
+                "pressure_pa": 1110048.67647187,
+                "temperature_k": 2978.3887863870714
               },
               {
-                "pressure_pa": 1388294.0008047363,
-                "temperature_k": 3161.5306106981398
+                "pressure_pa": 1382954.2745617423,
+                "temperature_k": 3168.01983369067
               },
               {
-                "pressure_pa": 1728865.8115727012,
-                "temperature_k": 3360.9850298120955
+                "pressure_pa": 1722953.7461432775,
+                "temperature_k": 3368.6164274983435
               },
               {
-                "pressure_pa": 2152985.60153134,
-                "temperature_k": 3572.107011696287
+                "pressure_pa": 2146542.1279310854,
+                "temperature_k": 3581.00423997041
               },
               {
-                "pressure_pa": 2681149.0917184707,
-                "temperature_k": 3795.8392627423877
+                "pressure_pa": 2674269.7633623816,
+                "temperature_k": 3806.141604296061
               },
               {
-                "pressure_pa": 3338879.9474134073,
-                "temperature_k": 4033.277091803864
+                "pressure_pa": 3331739.300233243,
+                "temperature_k": 4045.142368800535
               },
               {
-                "pressure_pa": 4157963.2172166966,
-                "temperature_k": 4285.692358435979
+                "pressure_pa": 4150847.800321372,
+                "temperature_k": 4299.300277240472
               },
               {
-                "pressure_pa": 5177981.355430386,
-                "temperature_k": 4554.5588577055005
+                "pressure_pa": 5171334.221806189,
+                "temperature_k": 4570.114795220709
               },
               {
-                "pressure_pa": 6448227.056499093,
-                "temperature_k": 4841.579095676861
+                "pressure_pa": 6442707.350424488,
+                "temperature_k": 4859.318329697167
               },
               {
-                "pressure_pa": 8030085.339832379,
-                "temperature_k": 5148.712378461971
+                "pressure_pa": 8026647.712728203,
+                "temperature_k": 5168.904753141982
               },
               {
                 "pressure_pa": 10000000.0,
-                "temperature_k": 5478.204036783122
+                "temperature_k": 5501.159037167815
               }
             ],
             "composition": [
               {
                 "species": "H2",
-                "mole_fraction": 0.8341230102993181
+                "mole_fraction": 0.8341181277951516
               },
               {
                 "species": "He",
-                "mole_fraction": 0.16177512152366572
+                "mole_fraction": 0.16177363898544525
               },
               {
                 "species": "CO",
-                "mole_fraction": 0.0021287218618110193
+                "mole_fraction": 0.0021287098293742293
               },
               {
                 "species": "Ne",
-                "mole_fraction": 0.0008094065325642322
+                "mole_fraction": 0.000809399115007632
               },
               {
                 "species": "H2O",
-                "mole_fraction": 0.0005751324221396152
+                "mole_fraction": 0.0005789680073960903
               },
               {
                 "species": "N2",
-                "mole_fraction": 0.00023327883946563864
+                "mole_fraction": 0.00023327722929119036
               },
               {
                 "species": "H",
-                "mole_fraction": 0.00012280891580263899
+                "mole_fraction": 0.00012400765846911445
               },
               {
                 "species": "H2S",
-                "mole_fraction": 0.00010425025514029412
+                "mole_fraction": 0.00010248261294686516
               },
               {
                 "species": "SiO",
-                "mole_fraction": 0.0000739963845968997
+                "mole_fraction": 0.0000759226212820478
               },
               {
                 "species": "Ar",
-                "mole_fraction": 0.0000228121755583298
+                "mole_fraction": 0.000022811966503180625
               },
               {
                 "species": "Na",
-                "mole_fraction": 0.000014393382313607062
+                "mole_fraction": 0.000014393248742581055
               },
               {
                 "species": "Fe",
-                "mole_fraction": 4.663080918975471e-6
+                "mole_fraction": 4.744537964751099e-6
               },
               {
                 "species": "Cr",
-                "mole_fraction": 3.2223054443844364e-6
+                "mole_fraction": 3.2222759145461267e-6
               },
               {
                 "species": "Mn",
-                "mole_fraction": 2.2812175558262223e-6
+                "mole_fraction": 2.2811966503111506e-6
               },
               {
-                "species": "PH3",
-                "mole_fraction": 2.080495137848671e-6
+                "species": "SH",
+                "mole_fraction": 1.7667690193762261e-6
               },
               {
                 "species": "HCl",
-                "mole_fraction": 1.2828229033946064e-6
+                "mole_fraction": 1.2826630821243867e-6
               },
               {
                 "species": "K",
-                "mole_fraction": 9.273517951777331e-7
+                "mole_fraction": 9.27324154887047e-7
               },
               {
                 "species": "CO2",
-                "mole_fraction": 8.171245115626095e-7
+                "mole_fraction": 8.160266094060293e-7
               },
               {
                 "species": "CH4",
-                "mole_fraction": 6.728858264810911e-7
+                "mole_fraction": 6.66498801369578e-7
+              },
+              {
+                "species": "P2",
+                "mole_fraction": 6.601856940887449e-7
               },
               {
                 "species": "NH3",
-                "mole_fraction": 4.357742681914899e-7
+                "mole_fraction": 4.3471912752810273e-7
+              },
+              {
+                "species": "PH2",
+                "mole_fraction": 4.192107008095144e-7
               },
               {
                 "species": "Zn",
-                "mole_fraction": 3.2223054450666383e-7
+                "mole_fraction": 3.222275915241928e-7
               },
               {
                 "species": "Ni",
-                "mole_fraction": 2.745825613548228e-7
+                "mole_fraction": 2.7937910781372136e-7
+              },
+              {
+                "species": "PH3",
+                "mole_fraction": 2.265887465431846e-7
+              },
+              {
+                "species": "PO",
+                "mole_fraction": 9.224490987540415e-8
               },
               {
                 "species": "HCN",
-                "mole_fraction": 4.6599603089657e-8
+                "mole_fraction": 4.659504663951812e-8
+              },
+              {
+                "species": "P",
+                "mole_fraction": 2.206032638687227e-8
               },
               {
                 "species": "S",
-                "mole_fraction": 2.1504184993366767e-8
+                "mole_fraction": 2.1421799601721023e-8
               },
               {
                 "species": "Kr",
-                "mole_fraction": 1.3745695061882791e-8
+                "mole_fraction": 1.3745569093698663e-8
+              },
+              {
+                "species": "OH",
+                "mole_fraction": 9.379248647307482e-9
               },
               {
                 "species": "e-",
-                "mole_fraction": 2.09921427583237e-9
+                "mole_fraction": 2.120014519177216e-9
               },
               {
                 "species": "K+",
-                "mole_fraction": 1.971246449126314e-9
+                "mole_fraction": 1.990370245337809e-9
               },
               {
                 "species": "Xe",
-                "mole_fraction": 1.3432804842380336e-9
+                "mole_fraction": 1.343268174158215e-9
+              },
+              {
+                "species": "Cl",
+                "mole_fraction": 1.48065235257903e-10
               },
               {
                 "species": "Na+",
-                "mole_fraction": 1.273984926668581e-10
+                "mole_fraction": 1.2906463690186735e-10
               },
               {
                 "species": "Si",
-                "mole_fraction": 6.672767350356374e-11
+                "mole_fraction": 6.937026178896598e-11
               },
               {
                 "species": "C2H2",
-                "mole_fraction": 3.93783595978766e-11
+                "mole_fraction": 3.930752429238371e-11
               },
               {
                 "species": "Al",
-                "mole_fraction": 3.767657365568804e-11
+                "mole_fraction": 3.913042644032539e-11
               },
               {
                 "species": "C2H4",
-                "mole_fraction": 1.750774732103254e-12
+                "mole_fraction": 1.7336310077016078e-12
               }
             ],
-            "mean_molar_mass_g_per_mol": 2.431015501205701,
-            "heat_capacity_over_r": 3.7563209382058673,
+            "mean_molar_mass_g_per_mol": 2.4311541211807493,
+            "heat_capacity_over_r": 3.756758988274781,
             "decks": [
               {
                 "material": "Al2O3",
@@ -2213,17 +2260,17 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 7.296580398826533e-8,
+                  "effective_radius_m": 7.259061861311483e-8,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 5.670719494909922,
-                "tau_550": 9021.69471912449,
+                "column_mass_kg_m2": 5.613294819239496,
+                "tau_550": 8885.406029150474,
                 "tau_basis": "sphere_fallback",
-                "base_pa": 392369.52729903546,
+                "base_pa": 388557.7354197811,
                 "top_pa": 100000.0,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2204.5788038494443
+                "temperature_k": 2204.1297535385315
               },
               {
                 "material": "CaTiO3",
@@ -2232,17 +2279,17 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 7.054737624026277e-8,
+                  "effective_radius_m": 7.016470767655259e-8,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 0.41728914552882146,
-                "tau_550": 1453.0852534057447,
+                "column_mass_kg_m2": 0.4129703559147922,
+                "tau_550": 1436.710956363569,
                 "tau_basis": "phase_table",
-                "base_pa": 359298.11537695536,
+                "base_pa": 355801.1803385899,
                 "top_pa": 100000.0,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2148.535236761985
+                "temperature_k": 2147.9918380650083
               },
               {
                 "material": "Fe",
@@ -2251,17 +2298,17 @@
                 "shape": "sphere",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 5.3931728949490955e-8,
+                  "effective_radius_m": 5.34966419507198e-8,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 41.99416503824199,
-                "tau_550": 113813.59330568422,
+                "column_mass_kg_m2": 41.51185848799564,
+                "tau_550": 112382.59449535211,
                 "tau_basis": "sphere",
-                "base_pa": 300988.3774151456,
+                "base_pa": 297971.7868550666,
                 "top_pa": 100000.0,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 2039.5777792063043
+                "temperature_k": 2038.7111079052042
               },
               {
                 "material": "Mg2SiO4",
@@ -2270,17 +2317,17 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 6.267346708394273e-8,
+                  "effective_radius_m": 6.220272098223985e-8,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 45.17670678336659,
-                "tau_550": 73121.84684180774,
+                "column_mass_kg_m2": 44.57362672881351,
+                "tau_550": 71677.88090287388,
                 "tau_basis": "phase_table",
-                "base_pa": 221179.94797514466,
+                "base_pa": 218998.28905331623,
                 "top_pa": 100000.0,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 1883.2922757519689
+                "temperature_k": 1882.7283049817026
               },
               {
                 "material": "MgSiO3",
@@ -2289,17 +2336,17 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 3.332639027634131e-8,
+                  "effective_radius_m": 3.2933879725575285e-8,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 8.17554618932528,
-                "tau_550": 5458.663339500523,
+                "column_mass_kg_m2": 7.7989714286336875,
+                "tau_550": 5111.580725231274,
                 "tau_basis": "phase_table",
-                "base_pa": 126468.2220648575,
+                "base_pa": 125065.51796336236,
                 "top_pa": 100000.0,
                 "f_sed": 2.0,
                 "coverage": 1.0,
-                "temperature_k": 1724.3526264809439
+                "temperature_k": 1723.8520762736896
               },
               {
                 "material": "Cr",
@@ -2308,17 +2355,17 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 1.3040872686633646e-8,
+                  "effective_radius_m": 1.2905192691493336e-8,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 0.028051940697740203,
-                "tau_550": 97.39730418969339,
+                "column_mass_kg_m2": 0.027728229273985806,
+                "tau_550": 95.90695688294458,
                 "tau_basis": "phase_table",
-                "base_pa": 27541.944455503144,
+                "base_pa": 27237.7172702737,
                 "top_pa": 4861.239162480225,
-                "f_sed": 3.4950838026962217,
+                "f_sed": 3.4963611678804085,
                 "coverage": 0.0,
-                "temperature_k": 1520.5630104889915
+                "temperature_k": 1520.0214111521072
               },
               {
                 "material": "MnS",
@@ -2327,17 +2374,17 @@
                 "shape": "non_spherical_mineral",
                 "size_distribution": {
                   "type": "log_normal",
-                  "effective_radius_m": 9.146199205585498e-9,
+                  "effective_radius_m": 9.01166556124077e-9,
                   "effective_variance": 0.6168066722416747
                 },
-                "column_mass_kg_m2": 0.0005625279340204681,
-                "tau_550": 0.17023615597054997,
+                "column_mass_kg_m2": 0.0004681999691547377,
+                "tau_550": 0.1362716339408815,
                 "tau_basis": "phase_table",
-                "base_pa": 7722.021638687886,
+                "base_pa": 7533.222104960297,
                 "top_pa": 5371.808003398927,
-                "f_sed": 0.4881406493791829,
+                "f_sed": 0.4476963567736192,
                 "coverage": 0.0,
-                "temperature_k": 1345.0943179412786
+                "temperature_k": 1344.277816879166
               }
             ],
             "hazes": [],
@@ -2346,77 +2393,77 @@
               {
                 "condensate": "Al2O3",
                 "phase": "solid",
-                "base_pa": 392369.52729903546,
-                "base_temperature_k": 2204.5788038494443,
+                "base_pa": 388557.7354197811,
+                "base_temperature_k": 2204.1297535385315,
                 "top_pa": 362.2731476951932,
-                "vapour_mole_fraction_below": 0.000020780361114427448,
-                "vapour_mole_fraction_above": 2.222370101460233e-16,
+                "vapour_mole_fraction_below": 0.00002078029462754463,
+                "vapour_mole_fraction_above": 2.22252028682892e-16,
                 "f_sed": 2.0,
                 "extrapolated": false
               },
               {
                 "condensate": "CaTiO3",
                 "phase": "solid",
-                "base_pa": 359298.11537695536,
-                "base_temperature_k": 2148.535236761985,
+                "base_pa": 355801.1803385899,
+                "base_temperature_k": 2147.9918380650083,
                 "top_pa": 344.62707784172375,
-                "vapour_mole_fraction_below": 6.132719345435759e-7,
-                "vapour_mole_fraction_above": 4.527140929592055e-22,
+                "vapour_mole_fraction_below": 6.132699723765566e-7,
+                "vapour_mole_fraction_above": 4.527576274904748e-22,
                 "f_sed": 2.0,
                 "extrapolated": false
               },
               {
                 "condensate": "Fe",
                 "phase": "liquid",
-                "base_pa": 300988.3774151456,
-                "base_temperature_k": 2039.5777792063043,
-                "top_pa": 1882.343138101846,
-                "vapour_mole_fraction_below": 0.00020780361114427435,
-                "vapour_mole_fraction_above": 8.029385151226989e-8,
+                "base_pa": 297971.7868550666,
+                "base_temperature_k": 2038.7111079052042,
+                "top_pa": 1790.6555296923761,
+                "vapour_mole_fraction_below": 0.0002078029462754462,
+                "vapour_mole_fraction_above": 8.40881987091416e-8,
                 "f_sed": 2.0,
                 "extrapolated": false
               },
               {
                 "condensate": "Mg2SiO4",
                 "phase": "solid",
-                "base_pa": 221179.94797514466,
-                "base_temperature_k": 1883.2922757519689,
+                "base_pa": 218998.28905331623,
+                "base_temperature_k": 1882.7283049817026,
                 "top_pa": 659.5946257418727,
-                "vapour_mole_fraction_below": 0.00024906148912884167,
-                "vapour_mole_fraction_above": 1.0692328855938697e-8,
+                "vapour_mole_fraction_below": 0.00024906069225519973,
+                "vapour_mole_fraction_above": 1.0694023101127783e-8,
                 "f_sed": 2.0,
                 "extrapolated": false
               },
               {
                 "condensate": "MgSiO3",
                 "phase": "solid",
-                "base_pa": 126468.2220648575,
-                "base_temperature_k": 1724.3526264809439,
+                "base_pa": 125065.51796336236,
+                "base_temperature_k": 1723.8520762736896,
                 "top_pa": 983.4925723505299,
-                "vapour_mole_fraction_below": 0.00013156296323072505,
-                "vapour_mole_fraction_above": 1.2831609727779425e-7,
+                "vapour_mole_fraction_below": 0.00013156807357734976,
+                "vapour_mole_fraction_above": 1.283559226867598e-7,
                 "f_sed": 2.0,
                 "extrapolated": false
               },
               {
                 "condensate": "Cr",
                 "phase": "solid",
-                "base_pa": 27541.944455503144,
-                "base_temperature_k": 1520.5630104889915,
+                "base_pa": 27237.7172702737,
+                "base_temperature_k": 1520.0214111521072,
                 "top_pa": 4861.239162480225,
-                "vapour_mole_fraction_below": 3.2184968641027966e-6,
-                "vapour_mole_fraction_above": 2.0388356359101944e-7,
+                "vapour_mole_fraction_below": 3.2184865665038922e-6,
+                "vapour_mole_fraction_above": 2.049268240777567e-7,
                 "f_sed": 4.5,
                 "extrapolated": true
               },
               {
                 "condensate": "MnS",
                 "phase": "solid",
-                "base_pa": 7722.021638687886,
-                "base_temperature_k": 1345.0943179412786,
+                "base_pa": 7533.222104960297,
+                "base_temperature_k": 1344.277816879166,
                 "top_pa": 5371.808003398927,
-                "vapour_mole_fraction_below": 2.2785212869951424e-6,
-                "vapour_mole_fraction_above": 2.1565963772451344e-6,
+                "vapour_mole_fraction_below": 2.278513996853409e-6,
+                "vapour_mole_fraction_above": 2.171965873015618e-6,
                 "f_sed": 4.5,
                 "extrapolated": true
               }
@@ -2424,84 +2471,84 @@
             "absorbers": [
               {
                 "species": "SO2",
-                "column_m2": 5.274752986646601e19,
+                "column_m2": 5.274763606041425e19,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null
               },
               {
                 "species": "H",
-                "column_m2": 3.6426829163223077e23,
+                "column_m2": 3.643170277363506e23,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null
               },
               {
                 "species": "e-",
-                "column_m2": 6.06868997270316e18,
+                "column_m2": 6.069488096517982e18,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null
               },
               {
                 "species": "Na",
-                "column_m2": 3.884861737004105e23,
+                "column_m2": 3.884860211094059e23,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null
               },
               {
                 "species": "K",
-                "column_m2": 2.5076793061065745e22,
+                "column_m2": 2.5076782426269554e22,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null
               },
               {
                 "species": "Fe",
-                "column_m2": 2.2703841818297557e21,
+                "column_m2": 2.28836367365948e21,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null
               },
               {
                 "species": "Mn",
-                "column_m2": 5.88434285923948e22,
+                "column_m2": 5.92637980318901e22,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null
               },
               {
                 "species": "Ni",
-                "column_m2": 1.3369013206901426e20,
+                "column_m2": 1.3474884303805938e20,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null
               },
               {
                 "species": "Zn",
-                "column_m2": 8.697123932622477e21,
+                "column_m2": 8.697120516859494e21,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null
               },
               {
                 "species": "Na+",
-                "column_m2": 8.2260180786091e16,
+                "column_m2": 8.227465739887714e16,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null
               },
               {
                 "species": "K+",
-                "column_m2": 5.986347213803231e18,
+                "column_m2": 5.987130841930026e18,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null
               },
               {
                 "species": "Cr",
-                "column_m2": 5.551724939330357e21,
+                "column_m2": 5.59968259326856e21,
                 "base_pa": 1000.0,
                 "top_pa": 1.0,
                 "profile": null

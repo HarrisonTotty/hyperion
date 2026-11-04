@@ -4255,8 +4255,11 @@ mod tests {
     /// the envelope's chain fails it until the fixture is refreshed from [`envelope`]'s output for
     /// the same inputs (`serde_json::to_string_pretty` of it, pasted).
     ///
-    /// The values are the generator's under the rules in force, generator version 26's (refreshed
-    /// at its bump, the decks' grain sizes and τ moving in their last bits): from
+    /// The values are the generator's under the rules in force, generator version 27's (refreshed
+    /// at its bump: κ₁ refitted at the giants' own Bond albedos, 2.92 × 10⁻³, the chromophore at
+    /// the disc's column and the NH₃ deck's second mode, its haze, P14.T24.h.b parts 5–6, and the
+    /// hot Jupiter's composition with P14.T52.e's further carriers; at 26's bump the decks' grain
+    /// sizes and τ moved in their last bits): from
     /// P14.T54.b.l's bump the read densities (P14.T49.n) give the liquid refractory deck modes
     /// (Fe, `CaTiO3`, `Al2O3`, `Mg2SiO4`, `MgSiO3`) their grain density and so their size, where
     /// at 23 they had none (their optics are still not modelled).
