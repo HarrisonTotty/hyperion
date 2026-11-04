@@ -2182,3 +2182,12 @@ highest step`, naming the key held back as the field of view's ends name theirs;
     meridians and parallels, halves a span up to 8 times more until its chord sags within half the
     occluder's margin plus half a pixel of its least depth slope (lean, 2026-10-30: the margin alone
     cost 13 times the time). `projection.ts` gains `projector`.
+- **The render thread's per-frame terms** (perf-main-thread, 2026-11-04; the owner's M5 profile and
+  the pod's), each bit for bit.
+  - R07's eclipse term keeps each law's annuli (`annuli.ts`' `keptAnnulusEdges`, at most
+    `ANNULUS_SETS_KEPT`, read-only `AnnulusSetView`s), which `eclipseVisible` remade for every star
+    and channel at every frame of the glare and the incident meter.
+  - The graticule's cut over the image takes the camera's rotation and focal length once a body
+    (`bodies.ts`' `OutlineView`), not at each of its bisections' points.
+  - The star sprites take their projector and pixel solid angle once a frame
+    (`projection.ts`' `pixelSolidAngleBy`).

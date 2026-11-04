@@ -12,8 +12,10 @@ import type { ScreenBoxPx } from "../../spatial/symbols";
 import type { CameraPose } from "../camera/pose";
 import {
   pixelSolidAngle,
+  pixelSolidAngleBy,
   type ProjectionCamera,
   project,
+  projector,
   type Viewport,
 } from "../camera/projection";
 import { type CameraTarget, targetPosition } from "../camera/state";
@@ -1230,9 +1232,20 @@ export function spriteRecord(
   projection: ProjectionCamera,
   viewport: Viewport,
 ): SpriteRecord {
-  const perWeight = exposure / pixelSolidAngle(direction, projection, viewport);
+  return exposedSpriteRecord(
+    place,
+    exposedLight(illuminanceRgbLx, exposure, pixelSolidAngle(direction, projection, viewport)),
+  );
+}
+
+/**
+ * A sprite's pre-exposed light per unit of point-spread weight: its illuminance times the exposure
+ * scale over the solid angle of its pixel, sr.
+ */
+function exposedLight(illuminanceRgbLx: Rgb, exposure: number, solidAngleSr: number): Rgb {
+  const perWeight = exposure / solidAngleSr;
   const [r, g, b] = illuminanceRgbLx;
-  return exposedSpriteRecord(place, [r * perWeight, g * perWeight, b * perWeight]);
+  return [r * perWeight, g * perWeight, b * perWeight];
 }
 
 /** A sprite's record from its place and its pre-exposed light per unit of point-spread weight. */
@@ -1250,11 +1263,15 @@ function starSprites(
 ): StarSprite[] {
   const exposure = exposureScale(options.ev100);
   const sprites: StarSprite[] = [];
+  // The camera's projection and pixel solid angle taken once for the frame's stars, not once a
+  // star (lane perf-main-thread): the same sums, so the same sprites.
+  const projectStar = projector(projection, viewport);
+  const solidAngleOf = pixelSolidAngleBy(projection, viewport);
   for (const star of options.skyStars ?? interimSpriteStars(scene)) {
     // Interim stars are far enough that the direction from the barycentre is the direction from
     // the camera (Design note 19); the sky's sprites come already placed from the camera.
     const direction = star.direction;
-    const p = project(scale(direction, 1e3), projection, viewport);
+    const p = projectStar(scale(direction, 1e3));
     if (
       !p.inFront ||
       p.xPx < -SPRITE_MARGIN_PX ||
@@ -1265,20 +1282,12 @@ function starSprites(
       continue;
     }
     const [r, g, b] = star.illuminanceRgbLx;
-    const record = spriteRecord(
-      { xPx: p.xPx, yPx: p.yPx, depth: 0 },
-      star.illuminanceRgbLx,
-      exposure,
-      direction,
-      projection,
-      viewport,
-    );
     sprites.push({
       id: star.id,
       directionF32: narrow(direction),
       xPx: p.xPx,
       yPx: p.yPx,
-      exposedRgb: [record[4], record[5], record[6]],
+      exposedRgb: exposedLight(star.illuminanceRgbLx, exposure, solidAngleOf(direction)),
       // Rec. 709's luminance weights: the photopic illuminance the ranking keeps the brightest by.
       illuminanceLx: REC709_LUMA[0] * r + REC709_LUMA[1] * g + REC709_LUMA[2] * b,
     });

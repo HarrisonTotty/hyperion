@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { add, dot, norm, normalise, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ColourTokens } from "../../spatial/paint";
 import {
   aBody,
@@ -23,6 +23,7 @@ import {
   project,
   type Viewport,
 } from "../camera/projection";
+import { exposureScale } from "../photometry/exposure";
 import { overlayDrawList } from "../photoreal/overlay";
 import { surveyEdgeMark, type SurveyEdgeView } from "../terrain/surveyEdge";
 import { type CameraTarget, presetPose } from "../camera/state";
@@ -54,6 +55,7 @@ import {
   type LineOfSightOptions,
   LOW_SETTING_MAX_SPRITES,
   occluderSlopePxAt,
+  spriteRecord,
   STROKE_PX,
   strokeReachPx,
   type ViewStrokes,
@@ -520,6 +522,51 @@ describe("buildWireframeDrawList", () => {
       illuminanceRgbLx: [2e-6, 3e-6, 4e-6] as const,
     }));
     expect(build({ lowSetting: true, skyStars }).sprites).toHaveLength(2_048);
+  });
+
+  it("places and exposes each sky sprite as its star's own projection and pixel do, the camera taken once a frame (lane perf-main-thread)", () => {
+    // A Fibonacci lattice over the whole sky, whatever the camera's look.
+    const count = 8_192;
+    const skyStars = Array.from({ length: count }, (_, i) => {
+      const z = 1 - (2 * i + 1) / count;
+      const phi = i * Math.PI * (3 - Math.sqrt(5));
+      const r = Math.sqrt(1 - z * z);
+      return {
+        id: String(i),
+        direction: normalise(vec3(r * Math.cos(phi), r * Math.sin(phi), z)),
+        illuminanceRgbLx: [2e-6 * (1 + (i % 5)), 3e-6, 4e-6 / (1 + (i % 3))] as const,
+      };
+    });
+    const projection: ProjectionCamera = {
+      orientation: CAMERA.pose.orientation,
+      fovXRad: CAMERA.fovXRad,
+    };
+    const exposure = exposureScale(OPTIONS.ev100);
+    const sprites = build({ skyStars }).sprites;
+    const differing = sprites.filter((sprite) => {
+      const star = skyStars[Number(sprite.id)];
+      if (star === undefined) {
+        return true;
+      }
+      const p = project(scale(star.direction, 1e3), projection, VIEWPORT);
+      const record = spriteRecord(
+        { xPx: p.xPx, yPx: p.yPx, depth: 0 },
+        star.illuminanceRgbLx,
+        exposure,
+        star.direction,
+        projection,
+        VIEWPORT,
+      );
+      return (
+        sprite.xPx !== p.xPx ||
+        sprite.yPx !== p.yPx ||
+        sprite.exposedRgb.some((c, k) => c !== record[4 + k])
+      );
+    });
+    expect({ drawn: sprites.length > 200, differing: differing.length }).toEqual({
+      drawn: true,
+      differing: 0,
+    });
   });
 
   it("draws the flight path marker for the own ship's velocity", () => {

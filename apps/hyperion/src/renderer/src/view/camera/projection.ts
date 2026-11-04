@@ -190,9 +190,23 @@ export function projector(camera: ProjectionCamera, viewport: Viewport): (v: Vec
  * @param dir - The direction, along the camera's frame axes; any length.
  */
 export function pixelSolidAngle(dir: Vec3, camera: ProjectionCamera, viewport: Viewport): number {
-  const view = toViewAxes(dir, camera.orientation);
-  const length = Math.hypot(view.x, view.y, view.z);
-  const cosTheta = -view.z / length;
+  return pixelSolidAngleBy(camera, viewport)(dir);
+}
+
+/**
+ * {@link pixelSolidAngle} for one camera and view, its rotation and centre pixel taken once, for the
+ * many stars of a frame (lane perf-main-thread): the same sums, so the same values.
+ */
+export function pixelSolidAngleBy(
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): (dir: Vec3) => number {
+  const toView = viewAxesBy(camera.orientation);
   const centre = ((2 * Math.tan(camera.fovXRad / 2)) / viewport.widthPx) ** 2;
-  return centre * Math.max(cosTheta, 0) ** 3;
+  return (dir) => {
+    const view = toView(dir);
+    const length = Math.hypot(view.x, view.y, view.z);
+    const cosTheta = -view.z / length;
+    return centre * Math.max(cosTheta, 0) ** 3;
+  };
 }
