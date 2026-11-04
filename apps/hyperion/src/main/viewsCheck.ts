@@ -222,8 +222,11 @@ export const INSPECTION_TIMING_DIR = "target/views-check/timing";
  * in the software mode, which takes each of its 22 places from a stage of its own whose pipelines
  * SwiftShader makes afresh (R08.T17's by-eye list, 2 to 4 minutes a place in a pod); the inspection run's,
  * one body opened, its first photorealistic frames, its atmosphere and its surveyed ground awaited,
- * and a close look flown to and its terrain streamed, 8 and 15, and 10 more with its frame profile
- * (`--timing`; the owner's report), whose two windows each last up to two minutes. Each is
+ * and a close look flown to and its terrain streamed, 8 and 15, and 30 more with its frame profile
+ * (`--timing`; the owner's report): 10 for its orbit and close windows, each up to two minutes,
+ * and 20 for its low window, flown down to by up to 40 holds of three draws each (on SwiftShader at
+ * the high setting, draws of some 50 s, the step outlasted 125 minutes; perf-frame-encoding,
+ * 2026-11-04). Each is
  * {@link SOFTWARE_WAIT_FACTOR} times as long in the check-only software mode (plan R01, R01.T16),
  * as the renderer's waits are.
  */
@@ -245,8 +248,9 @@ export function viewsCheckWatchdogMs(
       ms = launch.smoke ? 8 * 60_000 : launchMode === "software" ? 30 * 60_000 : 15 * 60_000;
       break;
     case "inspection":
-      // A profile's two windows, each at most two minutes and a trace's reduction, 10 more.
-      ms = (launch.smoke ? 8 * 60_000 : 15 * 60_000) + (launch.timing === true ? 10 * 60_000 : 0);
+      // A profile's orbit and close windows, each at most two minutes and a trace's reduction, 10
+      // more, and its low window's descent and window 20.
+      ms = (launch.smoke ? 8 * 60_000 : 15 * 60_000) + (launch.timing === true ? 30 * 60_000 : 0);
       break;
   }
   return launchMode === "software" ? ms * SOFTWARE_WAIT_FACTOR : ms;

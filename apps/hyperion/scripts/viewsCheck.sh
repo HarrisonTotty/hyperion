@@ -307,15 +307,15 @@ fi
 # Each launch's limit: T20's smoke 5 minutes and its full run 25; the terrain run's 10 and 40, above
 # the client's own watchdogs (8 and 30 minutes); the atmosphere run's 10 and 20, above its (8 and
 # 15), its full run's 40 in the software mode, above its 30 there (its places, a stage each); the
-# inspection run's 10 and 17, above its (8 and 15), and 10 minutes more with its profile, as its
-# watchdog has. Given two, the client refuses the launch at once, so the first run's limit here
+# inspection run's 10 and 17, above its (8 and 15), and 30 minutes more with its profile, as its
+# watchdog has (its low window's descent 20 of them). Given two, the client refuses the launch at once, so the first run's limit here
 # stands.
 if [[ $terrain -eq 1 ]]; then
     limit=$(( (smoke == 1 ? 600 : 2400) + (served == 1 ? 1200 : 0) ))
 elif [[ $atmosphere -eq 1 ]]; then
     limit=$(( smoke == 1 ? 600 : (software == 1 ? 2400 : 1200) ))
 elif [[ $inspection -eq 1 ]]; then
-    limit=$(( (smoke == 1 ? 600 : 1020) + (timing == 1 ? 600 : 0) ))
+    limit=$(( (smoke == 1 ? 600 : 1020) + (timing == 1 ? 1800 : 0) ))
 else
     limit=$(( smoke == 1 ? 300 : 1500 ))
 fi

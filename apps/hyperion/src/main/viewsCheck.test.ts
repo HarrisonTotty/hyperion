@@ -684,11 +684,13 @@ describe("the inspection run's frame profile (the owner's report)", () => {
     return { run, deps, timed };
   }
 
-  it("is given ten minutes more, under target/ whatever the mode", () => {
+  it("is given ten minutes more for two windows and twenty for the low one, under target/ whatever the mode", () => {
+    // The low window's step, 40 holds of three draws, outlasted 125 minutes on SwiftShader at the
+    // high setting (perf-frame-encoding, 2026-11-04).
     expect([
       viewsCheckWatchdogMs(LAUNCH, "vulkan"),
       viewsCheckWatchdogMs(LAUNCH, "software"),
-    ]).toEqual([25 * 60_000, 125 * 60_000]);
+    ]).toEqual([45 * 60_000, 225 * 60_000]);
     expect(viewsCheckDirs(LAUNCH, "default").out).toBe("target/views-check/inspection");
   });
 

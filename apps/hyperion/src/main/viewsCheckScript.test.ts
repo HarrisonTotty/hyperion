@@ -302,7 +302,7 @@ describe.runIf(process.platform === "linux")("the views check's script", () => {
         ["--views-check", "--inspection", "--timing"].every((flag) => launch.includes(flag)),
       ),
       /each launch's limit (\d+) s/u.exec(run.output)?.[1],
-    ]).toEqual([0, ["high", "low"], true, "8100"]);
+    ]).toEqual([0, ["high", "low"], true, "14100"]);
   });
 
   it("keeps the inspection run's one launch, at the client's default, without --timing", () => {
