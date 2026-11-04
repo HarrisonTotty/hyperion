@@ -24,6 +24,8 @@
 
 mod awd;
 pub(crate) mod feature;
+#[cfg(test)]
+mod fitted_tables;
 mod hosts;
 mod merger;
 mod nsm;

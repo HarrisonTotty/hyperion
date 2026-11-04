@@ -1064,7 +1064,7 @@ fn awd_acceptance(fit: &AwdFit) -> String {
     }
     out.push_str(
         "; the K–S tests against the other half of the census are the sim's slow \
-         `tables_hold::the_accreting_white_dwarf_samplers_against_the_engine`",
+         `fitted_tables::the_accreting_white_dwarf_samplers_against_the_engine`",
     );
     out
 }

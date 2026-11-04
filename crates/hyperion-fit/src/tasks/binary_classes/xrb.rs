@@ -612,7 +612,7 @@ fn xrb_acceptance(fit: &XrbFit) -> String {
          black-hole transients {:.0} of {:e} (the census's {:.0}); high-mass hosts {:.0}; donor \
          mass's own nodes {}; layers C {:.3} D {:.3} E {:.3}; rates a system {}; scratch marks: \
          {}; the K–S tests against the other half of the census are the sim's slow \
-         `tables_hold::the_x_ray_binary_sampler_against_the_engine`",
+         `fitted_tables::the_x_ray_binary_sampler_against_the_engine`",
         joined(&s.slab_members),
         joined(&s.young_members),
         shares(&s.census_kinds),

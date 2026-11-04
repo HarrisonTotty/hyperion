@@ -62,7 +62,7 @@ const DISCLESS_BLACK_HOLE: u64 = 0x816d_5b1f_f000_0012;
 /// main-sequence star that gained mass in stable transfer.
 const SPUN_UP_BE_STAR: u64 = 0x81af_b360_0000_0006;
 
-/// The young thin disc's census site, `hyperion-fit`'s and `tables_hold`'s.
+/// The young thin disc's census site, `hyperion-fit`'s and `fitted_tables`'.
 const YOUNG_SITE: CensusSite = CensusSite::new([0, 0, 0], [40_000, 40_000, 600]);
 
 /// Each slow census's records, layers C–E together.

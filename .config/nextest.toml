@@ -263,9 +263,9 @@ filter = "package(hyperion-sim) & test(=stellar::binary::light::tests::the_pair_
 threads-required = 8
 
 # P15.T10.b's fitted samplers against the engine run their census of 10⁷ records through the
-# binary engine on sixteen threads of their own (`tables_hold::CENSUS_THREADS`).
+# binary engine on sixteen threads of their own (`fitted_tables::CENSUS_THREADS`).
 [[profile.slow.overrides]]
-filter = "package(hyperion-sim) & test(/^galaxy::catalogue_classes::binary::tables_hold::the_.*_against_the_engine$/)"
+filter = "package(hyperion-sim) & test(/^galaxy::catalogue_classes::binary::fitted_tables::the_.*_against_the_engine$/)"
 threads-required = 16
 
 # P08.T12 at 27's remnants through the stellar stage run on four threads of their own
