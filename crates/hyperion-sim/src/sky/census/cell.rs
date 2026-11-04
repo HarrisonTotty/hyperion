@@ -592,7 +592,8 @@ pub const GRID_STAR_BOUND: u8 = MAX_COMPANIONS as u8 + 2;
 /// The most stars a system of `record` can hold: one for a forced single (a free-floating brown
 /// dwarf, which takes no companion of any kind), [`GRID_STAR_BOUND`] otherwise (a grid system's
 /// redraws can change its count, so its first attempt's is not a bound). A grid record is a forced
-/// single exactly when its layer is [`always_single`], which a test checks.
+/// single exactly when its layer is [`always_single`] or plan 08 displaced it (P08.T12, from
+/// generator version 27), which a test checks.
 #[must_use]
 fn star_bound(record: &SystemRecord) -> u8 {
     match grid_multiplicity(record) {
@@ -2309,6 +2310,7 @@ mod tests {
     use super::super::super::photometry::absolute_v_of_state;
     use super::*;
     use crate::coords::UnitVector;
+    use crate::galaxy::displaced::PlacementClass;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
     use crate::galaxy::gas::modifiers::NoModifiers;
     use crate::galaxy::gas::noise::NoiseCache;
@@ -2496,8 +2498,9 @@ mod tests {
                 assert!(n <= star_bound(&record), "{record:?} holds {n}");
                 assert_eq!(
                     star_bound(&record) == 1,
-                    always_single(layer),
-                    "{record:?}: a forced single exactly in a layer of singles"
+                    always_single(layer)
+                        || matches!(record.placement_class(), PlacementClass::Displaced { .. }),
+                    "{record:?}: a forced single exactly in a layer of singles or displaced"
                 );
                 let stellar = stars
                     .stars()

@@ -17,14 +17,12 @@
 //! layer-E record once plan 09's P09.T35 gives its claim, and for none before (P08.T13.b); and the
 //! classes as placement reads them ([`fields`], P08.T12.a–b).
 //!
-//! # The hold
+//! # The build
 //!
-//! P08.T12 replaces layers D and E, so it lands behind a galaxy hold (decision-galaxy-25-train §1),
-//! `DISPLACED_VERSION`: its field of the galaxy's rules, `DisplacedRules`, is matched once, where
-//! the galaxy is built. Under `DisplacedRules::FieldOnly`, every galaxy built today, the build is
-//! version 25's verbatim and installs nothing, so every reader takes the field's path unchanged.
-//! Under `DisplacedRules::Displaced` the build makes the class table from the field
-//! galaxy and installs the classes ([`DisplacedFields`], in the galaxy's
+//! P08.T12 replaces layers D and E from generator version 27: its field of the galaxy's rules,
+//! `DisplacedRules`, is matched once, where the galaxy is built. Under `DisplacedRules::Displaced`,
+//! every version's, the build makes the class table from the field galaxy and installs the
+//! classes ([`DisplacedFields`], in the galaxy's
 //! [`Fields`](crate::galaxy::fields::Fields)) and the stay shares and class counts (in its
 //! [`ShareMatrix`](crate::galaxy::shares::ShareMatrix)); every reader of layers D and E (the layer
 //! densities and bounds, the census's expected counts, the index headroom, the map, the candidate
@@ -50,31 +48,17 @@ pub use scales::GalaxyScales;
 pub use site::{ExplosionSite, death_in_interval, explosion_site};
 pub(crate) use site::{death_in_interval_knowing, death_in_interval_under};
 
-use crate::GeneratorVersion;
-
-/// The generator version from which plan 08's displaced classes are placed: the hold of P08.T12
-/// (decision-galaxy-25-train §1; version 27, retargeted from 26 by train 26's frozen list, with
-/// plan 15's production form table).
-///
-/// It is the hold of one call site, the galaxy's build (`Galaxy::from_params` and its builders),
-/// which matches [`DisplacedRules`] once (E4′ of decision-stellar-holds, lean of 2026-10-31): the
-/// new arm builds the class table from the field galaxy and installs [`DisplacedFields`] and the
-/// share matrix's stay shares and class counts, and every reader of layers D and E reads those.
-/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`DisplacedRules::FieldOnly`], which installs nothing, so every reader takes version 25's path
-/// verbatim and every generated value keeps its bits; the tests reach the new arm through a galaxy
-/// built under `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold,
-/// [`DisplacedRules`] with its `FieldOnly` arm, the galaxy's `displaced` field and its tripwire
-/// (`the_displaced_classes_are_held_only_until_the_27_bump`).
-pub(crate) const DISPLACED_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether layers D and E hold plan 08's displaced classes (the hold of [`DISPLACED_VERSION`]).
+/// Whether layers D and E hold plan 08's displaced classes (P08.T12, on the record from generator
+/// version 27 with plan 15's production form table): every version's do. The galaxy's build
+/// matches it once (E4′ of decision-stellar-holds, lean of 2026-10-31).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum DisplacedRules {
-    /// Version 25's and before: layers D and E hold the field components alone, each at its
-    /// population's whole band share.
+    /// Layers D and E hold the field components alone, each at its population's whole band share,
+    /// which no version takes: the field the tests install the classes over (`hold`'s
+    /// `field_only_rules`).
+    #[cfg(test)]
     FieldOnly,
-    /// Version 26's: layers D and E hold the field components at their stay shares and, after
+    /// Every version's: layers D and E hold the field components at their stay shares and, after
     /// them, the displaced classes (P08.T12).
     Displaced,
 }

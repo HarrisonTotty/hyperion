@@ -15,7 +15,7 @@ use super::{CellKey, STELLAR_LAYERS, SystemRecord, candidate_count, evaluate_can
 use crate::coords::GalacticPosition;
 use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::displaced::class_table::{ClassKey, keeps_own_form};
-use crate::galaxy::displaced::hold::{MILKY_WAY_SEED, displaced, held};
+use crate::galaxy::displaced::hold::{MILKY_WAY_SEED, displaced};
 use crate::galaxy::displaced::marks::{StayCategory, age_bin_years, kind_index};
 use crate::galaxy::displaced::site::{CarveOutRules, explosion_site, explosion_site_knowing};
 use crate::galaxy::displaced::{DisplacedKind, PlacementClass, SPEED_EDGES};
@@ -963,25 +963,6 @@ fn histogram(density: &PiecewiseLinear) -> [f64; MASS_EDGES.len()] {
         let hi = MASS_EDGES.get(i + 1).copied().unwrap_or(density.hi());
         density.integral(lo.max(density.lo()), hi.min(density.hi()).max(lo)) / total
     })
-}
-
-/// Under the held arm the version's galaxy draws plan 03's marks: every record is alive, at
-/// attempt 0, with no kick constraint, and its metallicity is read at its epoch position and age.
-#[test]
-fn the_version_s_records_keep_plan_03_s_marks() {
-    let galaxy = held();
-    for layer in [Layer::D, Layer::E] {
-        for (_, record) in records(galaxy, &row(layer, &sunlike(), 2)) {
-            assert_eq!(record.placement_class(), PlacementClass::Alive);
-            assert_eq!(record.mark_attempt(), 0);
-            assert_eq!(record.kick_constraint(galaxy), None);
-            assert_eq!(record.metallicity_age(), None);
-            assert_eq!(
-                record.formation_site(galaxy),
-                PointLy::from(record.epoch_position())
-            );
-        }
-    }
 }
 
 /// Under every 26 hold `generate_cell_where` is `generate_cell` filtered by mass in layers D and E

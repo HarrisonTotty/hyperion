@@ -12,8 +12,8 @@
 //! per system of the column, not shares: a layer's density is `Σ row × density` either way, so the
 //! thinning needs nothing else (plan 13, Design notes 2 and 3).
 //!
-//! Plan 08 installs its displaced classes here (P08.T12.a), from generator version 26 (the hold of
-//! `DISPLACED_VERSION`). The matrix is keyed by
+//! Plan 08 installs its displaced classes here (P08.T12.a), from generator version 27. The matrix
+//! is keyed by
 //! population, while the sub-discs of different ages keep different shares of their layer-E
 //! budgets in the field, so each field component gets a factor of its own: the share of its band
 //! budget its field keeps, the class table's `stay_share` in rows D and E and 1 elsewhere, which

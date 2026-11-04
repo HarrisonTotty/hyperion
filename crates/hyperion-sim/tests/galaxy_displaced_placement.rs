@@ -2,8 +2,8 @@
 //! them (plan 08, P08.T12).
 //!
 //! P08.T12 replaces layers D and E: their bounds, counts, candidates and marks all change, while
-//! layers A to C do not move. It lands behind a hold (`DISPLACED_VERSION`, decision-galaxy-25-train
-//! §1), so below its version every galaxy keeps the field's layers bit for bit. This file pins what
+//! layers A to C do not move. It landed behind a hold (decision-galaxy-25-train §1), so below its
+//! version, 27, every galaxy kept the field's layers bit for bit. This file pins what
 //! the hold will move, at the version in force, before the hold lands (the ruling's D1): one cell
 //! of each layer at the Sun-like point, its bound, its density at the centre, its candidate count
 //! and a digest of every record; the expected counts of both layers in a 50 ly sphere there; the

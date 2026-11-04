@@ -458,13 +458,12 @@ impl Galaxy {
     /// [`build`](Self::build) with the share matrix's class shares from `class_shares`
     /// ([`CLASS_SHARES`], or the census galaxy's scratch rows).
     ///
-    /// This is the one `match` on the displaced classes' hold (P08.T12.a;
-    /// [`DISPLACED_VERSION`](displaced::DISPLACED_VERSION), E4′ of decision-stellar-holds, lean
-    /// of 2026-10-31). The field galaxy is built first, as every version has built it. Under the
-    /// held arm that is the galaxy. Under the new arm the class table is built from it (some
-    /// 0.4–0.5 s in a release build, plan 08's P08.T9 as built, and never kept as a static), and
-    /// the classes and the share matrix's stay shares and class counts are installed, so that every
-    /// reader of layers D and E reads them through the galaxy's fields and shares.
+    /// This is the one `match` on the displaced classes (P08.T12.a; [`DisplacedRules`], E4′ of
+    /// decision-stellar-holds, lean of 2026-10-31). The field galaxy is built first. The class
+    /// table is built from it (some 0.4–0.5 s in a release build, plan 08's P08.T9 as built, and
+    /// never kept as a static), and the classes and the share matrix's stay shares and class counts
+    /// are installed, so that every reader of layers D and E reads them through the galaxy's fields
+    /// and shares; the tests' field alone ([`DisplacedRules`]'s test-only arm) is the field galaxy.
     fn build_with_class_shares(
         seed: Seed,
         params: GalaxyParams,
@@ -473,6 +472,7 @@ impl Galaxy {
     ) -> Result<Self, BuildGalaxyError> {
         let field = Self::build_field(seed, params, rules, class_shares)?;
         match rules.displaced {
+            #[cfg(test)]
             DisplacedRules::FieldOnly => Ok(field),
             DisplacedRules::Displaced => field.with_displaced_classes(),
         }

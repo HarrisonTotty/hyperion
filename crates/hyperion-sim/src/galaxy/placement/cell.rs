@@ -678,6 +678,17 @@ mod tests {
             .expect("the Milky Way fixture's gas is mostly neutral")
     }
 
+    /// The fixture without plan 08's displaced classes (the tests' field alone,
+    /// `DisplacedRules::FieldOnly`): plan 03's field components alone in every layer.
+    fn field_only() -> Galaxy {
+        let rules = crate::galaxy::rules::GalaxyRules {
+            displaced: crate::galaxy::displaced::DisplacedRules::FieldOnly,
+            ..crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION)
+        };
+        Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
+            .expect("the Milky Way fixture's gas is mostly neutral")
+    }
+
     fn sunlike() -> GalacticPosition {
         GalacticPosition::from_light_years(SUNLIKE_LY).expect("the Sun-like point is in the cube")
     }
@@ -764,9 +775,11 @@ mod tests {
         }
     }
 
+    /// Plan 03's field alone ([`field_only`]): plan 08's displaced classes, whose forms reach the
+    /// cube's corner, are another layer E's.
     #[test]
     fn a_cell_of_negligible_density_draws_no_candidate() {
-        let galaxy = galaxy();
+        let galaxy = field_only();
         // The far corner of the cube: the discs and the bar have underflowed and the halo is past
         // its cut, so all that is left is the bulge's 10⁻⁶⁵ of its centre, under one candidate in
         // 10⁹ cells.

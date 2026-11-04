@@ -1142,7 +1142,8 @@ pub(crate) fn field_window_bound(
 /// # Examples
 ///
 /// A star that exploded ten thousand years ago is an entry; one that exploded ten million years
-/// ago, long after its shell merged, is not:
+/// ago, long after its shell merged, is not (the first of the cell's systems that dies on the
+/// clock and, re-aged, makes an entry ten thousand years on):
 ///
 /// ```
 /// use hyperion_sim::Seed;
@@ -1158,12 +1159,12 @@ pub(crate) fn field_window_bound(
 /// let galaxy = Galaxy::new(Seed::new(19));
 /// let mut cell = Vec::new();
 /// generate_cell(&galaxy, CellKey::new(Layer::E, [0, 203, 0])?, &mut cell);
-/// let record = cell.first().ok_or("the cell holds a system")?;
-/// let ClockDeath::At(death, _) = SystemStars::generate(&galaxy, record).death_time() else {
-///     return Err("a layer-E primary dies on the clock".into());
-/// };
-/// let lifetime = death.since_epoch().as_julian_years_f64() + record.age_at_epoch().value();
-/// let dead_for = |years: f64| -> Option<bool> {
+/// // Whether `record`, re-aged to have died `years` before the epoch, is an entry.
+/// let dead_for = |record: &SystemRecord, years: f64| -> Option<bool> {
+///     let ClockDeath::At(death, _) = SystemStars::generate(&galaxy, record).death_time() else {
+///         return None;
+///     };
+///     let lifetime = death.since_epoch().as_julian_years_f64() + record.age_at_epoch().value();
 ///     let dying = SystemRecord::from_parts(
 ///         record.id(),
 ///         *record.epoch_position(),
@@ -1180,8 +1181,11 @@ pub(crate) fn field_window_bound(
 ///     let marks = DeathMarks::of(&galaxy, &stars, &site, GalacticVelocity::default())?;
 ///     Some(claims(&galaxy, &site, &marks, Surroundings::Field))
 /// };
-/// assert_eq!(dead_for(1e4), Some(true));
-/// assert_eq!(dead_for(1e7), Some(false));
+/// let record = cell
+///     .iter()
+///     .find(|r| dead_for(r, 1e4) == Some(true))
+///     .ok_or("the cell holds a system that dies on the clock")?;
+/// assert_eq!(dead_for(record, 1e7), Some(false));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]

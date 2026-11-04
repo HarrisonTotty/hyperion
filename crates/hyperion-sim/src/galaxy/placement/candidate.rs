@@ -725,12 +725,14 @@ mod tests {
     }
 
     /// The fixture's budget, without the field share, which gives most of the young stars to their
-    /// features, and without the carve-out, which would take the records with a site from the
-    /// grid: the field as plan 03 places it, which the draws below re-derive.
+    /// features, without the carve-out, which would take the records with a site from the grid,
+    /// and without plan 08's displaced classes: the field as plan 03 places it, which the draws
+    /// below re-derive.
     fn budget() -> Galaxy {
         let rules = crate::galaxy::rules::GalaxyRules {
             field_share: crate::galaxy::ages::FieldShareRules::None,
             carve_out: crate::galaxy::displaced::site::CarveOutRules::Unclaimed,
+            displaced: crate::galaxy::displaced::DisplacedRules::FieldOnly,
             ..crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION)
         };
         Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
@@ -968,7 +970,7 @@ mod tests {
 
     #[test]
     fn accept_weights_are_folded_in_component_order() {
-        let galaxy = galaxy();
+        let galaxy = budget();
         let (fields, shares) = (galaxy.fields(), galaxy.shares());
         // Places where every kind of component contributes: the Sun, the bulge, the bar's end, an
         // arm ridge and well off the plane.

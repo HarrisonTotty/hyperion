@@ -19,9 +19,20 @@ use crate::id::Layer;
 use crate::stellar::remnant::{ProgenitorAtDeath, Stripping};
 use crate::units::{HydrogenPerCm3, Kelvin};
 
-/// The galaxy of every test here: the seed whose layer-E cell (0, 203, 0) the doctests read.
+/// The galaxy of every test here: the seed whose layer-E cell (0, 203, 0) the doctests read,
+/// without plan 08's displaced classes (the tests' field alone, `DisplacedRules::FieldOnly`), so
+/// that the cell's records are plan 03's.
 fn galaxy() -> Galaxy {
-    Galaxy::new(Seed::new(19))
+    let rules = crate::galaxy::rules::GalaxyRules {
+        displaced: crate::galaxy::displaced::DisplacedRules::FieldOnly,
+        ..crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION)
+    };
+    let seed = Seed::new(19);
+    let params = crate::galaxy::params::GalaxyParams::from_seed(
+        seed,
+        crate::galaxy::imf::MassFunctionKind::default(),
+    );
+    Galaxy::from_params_with_rules(seed, params, rules).expect("the fixture builds")
 }
 
 /// The record `record` with its age at the epoch set to `age`.

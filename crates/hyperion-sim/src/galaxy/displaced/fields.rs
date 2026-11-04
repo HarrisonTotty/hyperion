@@ -4,8 +4,8 @@
 //!
 //! Plan 02 caps [`Fields`] at [`MAX_COMPONENTS`](crate::galaxy::fields::MAX_COMPONENTS) field
 //! components in fixed arrays, so the hundred displaced classes are a list of their own,
-//! [`DisplacedFields`], which a galaxy's fields carry once its build has installed them (the hold of
-//! `DISPLACED_VERSION`) and which every sum over layers D and E reads
+//! [`DisplacedFields`], which a galaxy's fields carry once its build has installed them (from
+//! generator version 27) and which every sum over layers D and E reads
 //! after the field components:
 //!
 //! - a class's density is its form ([`forms`](super::forms)) normalised to unit integral over the

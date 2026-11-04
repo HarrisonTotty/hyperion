@@ -1,13 +1,12 @@
-//! The tests of P08.T12's hold, [`DISPLACED_VERSION`] (decision-galaxy-25-train §1.5 and §1.6):
-//! its tripwire; the version's galaxy holding no class (D3); under every 26 hold, the classes
-//! moving layers D and E and nothing else (D2) and the same seed twice (D4); and P08.T12.a's own
-//! tests of the shares and components: layer E's expected count against direct integration, the
-//! classes' order, their bounds, the share matrix's columns and the map.
+//! The tests of plan 08's displaced classes (P08.T12, from generator version 27;
+//! decision-galaxy-25-train §1.5 and §1.6): the version's galaxy holding them (D3); under every 26
+//! hold with its retargets, the classes moving layers D and E and nothing else against the field
+//! alone (D2) and the same seed twice (D4); and P08.T12.a's own tests of the shares and
+//! components: layer E's expected count against direct integration, the classes' order, their
+//! bounds, the share matrix's columns and the map.
 //!
-//! The bit-identity of the version in force is held by the goldens, the pre-pin of layers D and E
-//! (`tests/galaxy_displaced_placement.rs`, D1) among them, and by each test here comparing the held
-//! arm with the field. The bump to 26 deletes the tripwire and the held arm, and these become tests
-//! of the version's own galaxy.
+//! The field the classes are installed over is the tests' field alone ([`field_only_rules`],
+//! [`DisplacedRules::FieldOnly`], which no version takes).
 
 use std::sync::OnceLock;
 
@@ -35,7 +34,7 @@ use crate::units::LightYears;
 /// The seed of the tests' Milky Way fixture: plan 03's golden fixture's.
 pub(crate) const MILKY_WAY_SEED: u64 = 0x0308_d000_0000_0000;
 
-/// The Milky Way fixture under the generator version's rules: the held arm, the field alone.
+/// The Milky Way fixture under the generator version's rules, which hold the classes.
 pub(crate) fn held() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
@@ -154,39 +153,10 @@ fn sample_points(n: usize, key: u64) -> Vec<PointLy> {
         .collect()
 }
 
-/// P08.T12 is held until the bump to 27: the rules in force are version 26's and before, under
-/// which layers D and E hold the field components alone.
+/// D3: the version's galaxy is the one built under the version's rules explicitly and holds the
+/// classes, over the field components every 26 hold's galaxy holds them over.
 #[test]
-fn the_displaced_classes_are_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < DISPLACED_VERSION,
-        "the bump to 27 puts P08.T12 on the record (decision-galaxy-25-train §1; S2 with plan \
-         15's production `displaced_forms`): layers D and E with their displaced classes, their \
-         stay shares and their candidates. Delete `DISPLACED_VERSION`, `DisplacedRules` with its \
-         `FieldOnly` arm, `GalaxyRules::displaced`, the build's `match` on it and this test, in \
-         the bump's own checkpoint commit, blessed at 25 (§1.6, C2), and re-pin the 26 arm's \
-         figures by name on the production form table"
-    );
-    let galaxy = held();
-    assert_eq!(galaxy.rules().displaced, DisplacedRules::FieldOnly);
-    assert_eq!(
-        GalaxyRules::of_version(GENERATOR_VERSION).displaced,
-        DisplacedRules::FieldOnly
-    );
-    assert_eq!(
-        GalaxyRules::every_27_hold().displaced,
-        DisplacedRules::Displaced
-    );
-    assert!(galaxy.fields().displaced().is_none());
-    assert!(galaxy.class_table().is_none());
-    assert_eq!(galaxy.shares().column_count(), POPULATION_COLUMNS);
-}
-
-/// D3: the version's galaxy is the one built under the version's rules explicitly, holds no class,
-/// and its share matrix and fields are the field galaxy's; under every 26 hold the galaxy is
-/// another value.
-#[test]
-fn the_version_s_galaxy_holds_no_displaced_class() {
+fn the_version_s_galaxy_holds_the_displaced_classes() {
     let explicit = Galaxy::from_params_with_rules(
         Seed::new(MILKY_WAY_SEED),
         GalaxyParams::milky_way_like(),
@@ -195,12 +165,13 @@ fn the_version_s_galaxy_holds_no_displaced_class() {
     .expect("the Milky Way fixture builds");
     assert_eq!(held(), &explicit);
     assert_eq!(format!("{:?}", held()), format!("{explicit:?}"));
-    assert_ne!(held(), displaced());
+    assert_eq!(held().rules().displaced, DisplacedRules::Displaced);
+    assert!(held().fields().displaced().is_some());
+    assert!(held().class_table().is_some());
     assert_eq!(
         displaced().rules(),
         GalaxyRules::every_26_hold_with_its_retargets()
     );
-    // The field galaxy under the new arm is the held galaxy: what the classes are built from.
     assert_eq!(held().params(), displaced().params());
     assert_eq!(
         held().fields().components(),
@@ -754,10 +725,10 @@ fn the_map_counts_the_displaced_classes() {
             );
         }
         let all = column_density_face_on(galaxy.fields(), x, y, MapSelection::AllSystems);
-        let field = column_density_face_on(held().fields(), x, y, MapSelection::AllSystems);
+        let field = column_density_face_on(field_only().fields(), x, y, MapSelection::AllSystems);
         assert!((all / field - 1.0).abs() < 0.02, "{all} against {field}");
         assert_same_bits(
-            column_density_face_on(held().fields(), x, y, MapSelection::LayerERemnants),
+            column_density_face_on(field_only().fields(), x, y, MapSelection::LayerERemnants),
             0.0,
         );
     }
@@ -770,7 +741,7 @@ fn the_installed_share_matrix_is_the_class_table_s() {
     let galaxy = displaced();
     let classes = classes_of(galaxy);
     let (stay, counts) = classes.share_columns(galaxy.fields());
-    let by_hand: ShareMatrix = held().shares().clone().with_displaced(&stay, &counts);
+    let by_hand: ShareMatrix = field_only().shares().clone().with_displaced(&stay, &counts);
     assert_eq!(&by_hand, galaxy.shares());
 }
 
@@ -811,8 +782,13 @@ fn the_edge_on_map_counts_the_displaced_classes() {
             "({x}, {z_lo}–{z_hi}): {map} against {brute}"
         );
         let all = column_density_edge_on(fields, x, z_lo, z_hi, MapSelection::AllSystems);
-        let field =
-            column_density_edge_on(held().fields(), x, z_lo, z_hi, MapSelection::AllSystems);
+        let field = column_density_edge_on(
+            field_only().fields(),
+            x,
+            z_lo,
+            z_hi,
+            MapSelection::AllSystems,
+        );
         assert_same_bits(all, field);
     }
 }

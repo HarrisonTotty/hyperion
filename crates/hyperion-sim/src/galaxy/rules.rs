@@ -19,11 +19,6 @@
 //!   the tidal limit or an evolved donor whose common envelope merges it, and a neutron-star
 //!   merger's remnant keeps the pair's mass less its ejecta. It is read where a merger's scan
 //!   marks are drawn, and reaches none of the galaxy's memos.
-//! - [`displaced`](GalaxyRules::displaced), at [`DISPLACED_VERSION`] (plan 08, P08.T12): the
-//!   displaced classes in layers D and E. It is read when the galaxy is built, after the field share
-//!   and the carve-out, by the build's one `match` (`Galaxy::from_params`), which installs the
-//!   classes and the stay shares that every reader of the two layers then reads; so
-//!   `Galaxy::with_rules` refuses to change it as well.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -34,8 +29,8 @@
 use crate::GeneratorVersion;
 use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::catalogue_classes::binary::{MERGER_CLASS_VERSION, MergerClassRules};
+use crate::galaxy::displaced::DisplacedRules;
 use crate::galaxy::displaced::site::CarveOutRules;
-use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
 use crate::galaxy::features::members::recent::FeatureClassesRules;
 use crate::stellar::rules::StellarRules;
 
@@ -61,7 +56,7 @@ pub(crate) struct GalaxyRules {
     /// engine's channels and a neutron-star remnant less its ejecta (P11.T8.c–d's fix).
     pub(crate) merger_class: MergerClassRules,
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
-    /// reads.
+    /// reads: every version's do, and only the tests' field alone ([`DisplacedRules`]) does not.
     pub(crate) displaced: DisplacedRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
@@ -81,11 +76,7 @@ impl GalaxyRules {
             } else {
                 MergerClassRules::ContactOnly
             },
-            displaced: if version.get() >= DISPLACED_VERSION.get() {
-                DisplacedRules::Displaced
-            } else {
-                DisplacedRules::FieldOnly
-            },
+            displaced: DisplacedRules::Displaced,
             stellar: StellarRules::of_version(version),
         }
     }
@@ -101,15 +92,14 @@ impl GalaxyRules {
     pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
         Self {
             merger_class: MergerClassRules::Channels,
-            displaced: DisplacedRules::Displaced,
             stellar: StellarRules::every_26_hold_with_its_retargets(),
             ..Self::of_version(crate::GENERATOR_VERSION)
         }
     }
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
-    /// version's rules with the galaxy's holds retargeted from 26 (`merger_class`, P11.T8.c–d, and
-    /// `displaced`, P08.T12); the stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
+    /// version's rules with the galaxy's holds retargeted from 26 (`merger_class`, P11.T8.c–d); the
+    /// stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -165,12 +155,19 @@ mod tests {
     /// `Galaxy::with_rules` keeps the centre's model while the stellar rules stay as they were, and
     /// empties it when they change, so that the next read builds it under them. It keeps the
     /// centre's motion, which reads no stellar law. Built again, the model is the same, since its
-    /// classes read only the kick law's parameters, which no stellar arm changes.
+    /// classes read only the kick law's parameters, which no stellar arm changes. The galaxy holds
+    /// no displaced class (the tests' field alone, [`DisplacedRules`]), whose table read its own
+    /// stellar rules, so that `with_rules` may change them.
     #[test]
     fn with_rules_resets_the_centre_s_model_when_the_stellar_rules_change() {
-        let galaxy = Galaxy::from_params(
+        let field_only = GalaxyRules {
+            displaced: DisplacedRules::FieldOnly,
+            ..GalaxyRules::of_version(GENERATOR_VERSION)
+        };
+        let galaxy = Galaxy::from_params_with_rules(
             Seed::new(0x0928_bb00_0000_0002),
             GalaxyParams::milky_way_like(),
+            field_only,
         )
         .expect("the Milky Way fixture builds");
         let model = galaxy
@@ -181,7 +178,7 @@ mod tests {
         assert!(same.centre.0.get().is_some(), "the same stellar rules");
         let probed = galaxy.with_rules(GalaxyRules {
             stellar: StellarRules::probe(),
-            ..GalaxyRules::of_version(GENERATOR_VERSION)
+            ..field_only
         });
         assert!(probed.centre.0.get().is_none(), "other stellar rules");
         assert!(probed.centre_motion.0.get().is_some());
@@ -194,15 +191,6 @@ mod tests {
         assert_eq!(
             GalaxyRules::of_version(GENERATOR_VERSION).stellar,
             StellarRules::of_version(GENERATOR_VERSION)
-        );
-        let displaced = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).displaced;
-        assert_eq!(displaced(24), DisplacedRules::FieldOnly);
-        assert_eq!(displaced(25), DisplacedRules::FieldOnly);
-        assert_eq!(displaced(26), DisplacedRules::FieldOnly);
-        assert_eq!(displaced(27), DisplacedRules::Displaced);
-        assert_eq!(
-            GalaxyRules::every_27_hold().displaced,
-            DisplacedRules::Displaced
         );
         assert_eq!(
             GalaxyRules::of_version(crate::GENERATOR_VERSION).stellar,

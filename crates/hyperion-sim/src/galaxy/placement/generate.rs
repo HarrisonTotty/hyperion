@@ -170,6 +170,17 @@ mod tests {
             .expect("the Milky Way fixture's gas is mostly neutral")
     }
 
+    /// The fixture without plan 08's displaced classes (the tests' field alone,
+    /// `DisplacedRules::FieldOnly`): plan 03's field components alone in every layer.
+    fn field_only() -> Galaxy {
+        let rules = crate::galaxy::rules::GalaxyRules {
+            displaced: crate::galaxy::displaced::DisplacedRules::FieldOnly,
+            ..crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION)
+        };
+        Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
+            .expect("the Milky Way fixture's gas is mostly neutral")
+    }
+
     fn sunlike() -> GalacticPosition {
         GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap()
     }
@@ -262,9 +273,12 @@ mod tests {
         );
     }
 
+    /// Plan 03's field alone ([`field_only`]), whose marks give the mass before the predicate;
+    /// with plan 08's displaced classes it is `marks_hold`'s
+    /// `generate_cell_where_is_generate_cell_filtered_under_every_26_hold`.
     #[test]
     fn generate_cell_where_sees_every_candidate_once_in_index_order() {
-        let galaxy = galaxy();
+        let galaxy = field_only();
         let key = CellKey::containing(Layer::E, &sunlike()).unwrap();
         let seen = std::cell::RefCell::new(Vec::new());
         let mut kept = Vec::new();

@@ -49,6 +49,22 @@ fn galaxy() -> &'static Galaxy {
     GALAXY.get_or_init(|| milky_way(SEED))
 }
 
+/// The fixture without plan 08's displaced classes (the tests' field alone,
+/// `DisplacedRules::FieldOnly`), with its kinematic tables: the class's field term alone, with no
+/// runaway or walkaway, whose deaths `runaway_hold` tests; built once.
+fn field_only() -> &'static Galaxy {
+    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| {
+        let rules = crate::galaxy::rules::GalaxyRules {
+            displaced: crate::galaxy::displaced::DisplacedRules::FieldOnly,
+            ..crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION)
+        };
+        Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
+            .expect("the Milky Way fixture's gas is mostly neutral")
+            .with_full_potential()
+    })
+}
+
 /// The Milky Way fixture of `seed`, with its kinematic tables.
 fn milky_way(seed: u64) -> Galaxy {
     Galaxy::from_params(Seed::new(seed), GalaxyParams::milky_way_like())
@@ -74,17 +90,26 @@ fn sample_cells() -> Vec<CatalogueCellKey> {
 fn sample_entries() -> &'static [(CatalogueCellKey, Vec<CatalogueEntry<CoreCollapseEntry>>)] {
     static ENTRIES: OnceLock<Vec<(CatalogueCellKey, Vec<CatalogueEntry<CoreCollapseEntry>>)>> =
         OnceLock::new();
-    ENTRIES.get_or_init(|| {
-        let galaxy = galaxy();
-        let process = CoreCollapseProcess::new(galaxy);
-        sample_cells()
-            .into_iter()
-            .map(|key| {
-                let entries = CatalogueClassCell::generate(galaxy, &process, key).into_entries();
-                (key, entries)
-            })
-            .collect()
-    })
+    ENTRIES.get_or_init(|| entries_of(galaxy()))
+}
+
+/// The sample cells' entries in the field's term alone ([`field_only`]), generated once.
+fn field_entries() -> &'static [(CatalogueCellKey, Vec<CatalogueEntry<CoreCollapseEntry>>)] {
+    static ENTRIES: OnceLock<Vec<(CatalogueCellKey, Vec<CatalogueEntry<CoreCollapseEntry>>)>> =
+        OnceLock::new();
+    ENTRIES.get_or_init(|| entries_of(field_only()))
+}
+
+/// The sample cells' entries in `galaxy`.
+fn entries_of(galaxy: &Galaxy) -> Vec<(CatalogueCellKey, Vec<CatalogueEntry<CoreCollapseEntry>>)> {
+    let process = CoreCollapseProcess::new(galaxy);
+    sample_cells()
+        .into_iter()
+        .map(|key| {
+            let entries = CatalogueClassCell::generate(galaxy, &process, key).into_entries();
+            (key, entries)
+        })
+        .collect()
 }
 
 /// The instant a second before `t`: on a broken line's first leg when `t` is its break.
@@ -374,14 +399,15 @@ fn a_candidate_s_metallicity_is_read_at_age_zero() {
 /// Every entry is the one shared test's: plan 08's interval predicate puts its death at its T, its
 /// marks are `DeathMarks::of` its stars at its site with its one velocity, `claims` holds in the
 /// field's gas and its window is the one `claimed_window` cut, under the field's cap and its
-/// lifetime cap. Its record is a catalogue system's, counted in layer E, with no component.
+/// lifetime cap. Its record is a catalogue system's, counted in layer E, with no component. The
+/// field's entries ([`field_only`]): a runaway's has its own velocity.
 #[test]
 fn every_entry_is_the_shared_test_s() {
-    let galaxy = galaxy();
+    let galaxy = field_only();
 
     let cap = galaxy.window_caps().cap(ShellEnvironment::Field);
     let mut entries = 0;
-    for (cell, cell_entries) in sample_entries() {
+    for (cell, cell_entries) in field_entries() {
         for entry in cell_entries {
             let value = entry.value();
             let record = value.record();
@@ -446,7 +472,7 @@ fn every_entry_is_the_shared_test_s() {
             entries += 1;
         }
     }
-    eprintln!("{entries} entries in {} cells", sample_entries().len());
+    eprintln!("{entries} entries in {} cells", field_entries().len());
     assert!(entries >= 20, "{entries}");
 }
 
@@ -595,10 +621,11 @@ fn the_rest_of_the_sim_reads_an_entry_through_its_class() {
 }
 
 /// A candidate the thinning keeps but whose death makes no shell, or falls before its window's
-/// interval, is no entry, and its ID names nothing; both kinds occur.
+/// interval, is no entry, and its ID names nothing; both kinds occur, in the field's term
+/// ([`field_only`]).
 #[test]
 fn a_death_without_a_shell_or_too_early_is_thinned() {
-    let galaxy = galaxy();
+    let galaxy = field_only();
     let process = CoreCollapseProcess::new(galaxy);
     let (mut no_shell, mut too_early, mut kept) = (0, 0, 0);
     for cell in sample_cells() {
