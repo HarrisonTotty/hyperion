@@ -2415,6 +2415,16 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - Not built: the visibility path (T2.c–d are not); the edge patches the lit mesh draws (with
     `finClusters` off) are not tested, drawn in the first raster; the wireframe (after T4.c).
   - Pending: the Mac's and the RTX's GPU times with `occlusion` on and off; Windows NOT RUN.
+  - (`r14-t3d-occlusion`) `TIMING_FRAMES_IN_FLIGHT` is 153, not 135: with the occlusion a
+    photorealistic view resolves 17 times a frame, so three views resolve 51.
+  - (`r14-t3d-occlusion`) `InspectionTimingWindow.clusters` (`InspectionTimingClusters`, by pass),
+    read by `InspectionClusters` through `CheckedView.watchTerrain`; the timing file's schema is 4.
+    `TERRAIN_PASS_LABELS` takes `bodies late`, `depth pyramid`, `terrain cluster cull` and `compact`.
+  - (`r14-t3d-occlusion`) The seamless probe models the two rasters with `SEAM_OCCLUSION=hzb`
+    (`SEAM_OCCLUSION_STRIDE`, `SEAM_OCCLUSION_SCALE`), as `meta.seamless.occlusion`. Part 15
+    adds a ridge check through the renderer, whose pyramid refuses clusters.
+  - (`r14-t3d-occlusion`) Rule E: the pod did not measure `hzb` faster, so both settings stay
+    `off`.
 - **R14, the WGSL digest pins** (`tool-pin-digests`, 2026-11-03): `just pin-digests` rewrites the
   `<NAME>_DIGESTS` tables' hex strings in `discReflectance.test.ts` and `thickKernels.test.ts` from
   the kernels' sources, and `--check` only compares. Run it after moving a kernel, or after resolving
