@@ -1425,11 +1425,19 @@ impl SystemContext {
             return history;
         };
         // The star the first interaction leaves: at the next detached segment's start, or at the
-        // coalescence's.
-        let left = segments[first + 1..]
-            .iter()
-            .find(|segment| matches!(segment.kind(), SegmentKind::Detached | SegmentKind::Merged))
-            .map_or(timeline.until(), crate::stellar::binary::Segment::start);
+        // coalescence's; a coalescence that is itself the first interaction (a dynamical merger's,
+        // which no transfer leads to) leaves its product at its own start, where its next segment
+        // starts only at the product's next phase.
+        let left = if segments[first].kind() == SegmentKind::Merged {
+            segments[first].start()
+        } else {
+            segments[first + 1..]
+                .iter()
+                .find(|segment| {
+                    matches!(segment.kind(), SegmentKind::Detached | SegmentKind::Merged)
+                })
+                .map_or(timeline.until(), crate::stellar::binary::Segment::start)
+        };
         let after = timeline.state_at(left).stars()[component.index()];
         if after.phase() != Phase::MainSequence || after.mass() < sse::MIN_INITIAL_MASS {
             return history;
