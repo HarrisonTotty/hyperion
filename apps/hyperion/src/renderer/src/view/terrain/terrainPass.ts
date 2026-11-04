@@ -1163,8 +1163,8 @@ interface ViewState {
   targetTauPx: number | null;
   /**
    * Its strides this frame (plan R14, R14.T3.c; the shared bands, `clusters/strides.ts`' remarks):
-   * each patch it draws, by draw set index, its scale at its unslewed τ′ ({@link
-   * ViewState.targetTauPx}) or `null` for none, and its place among the view's patches in {@link
+   * each patch it draws, by draw set index, its scale at its bands' τ′ ({@link
+   * ViewState.bandTauPx}) or `null` for none, and its place among the view's patches in {@link
    * ViewState.strideEdges}, −1 for one it does not draw; its patches' edges' bands, shared with the
    * patches beside; and each patch's holds' onsets' shares word, by draw set index
    * ({@link StrideHoldFades}).
@@ -5534,8 +5534,10 @@ export class TerrainPass {
 
   /**
    * View `state`'s strides this frame (plan R14, R14.T3.c; the shared bands, `clusters/strides.ts`'
-   * remarks): each patch of `drawSet` it draws (`mask`'s views) its scale at its unslewed τ′ ({@link
-   * ViewState.targetTauPx}, Design note 3's) over its viewport's px per radian, W ÷ (2 tan(fov_h ÷
+   * remarks): each patch of `drawSet` it draws (`mask`'s views) its scale at its bands' τ′ ({@link
+   * ViewState.bandTauPx}, Design note 3's reached at most {@link BAND_SLEW_PER_STEP} a step, as the
+   * morph bands are, so that a jump of the budget's τ′ re-morphs no stride at once; lean,
+   * 2026-11-04) over its viewport's px per radian, W ÷ (2 tan(fov_h ÷
    * 2)) as `screenSpaceErrorPx` takes it, none for a sub-patch or an unmeasured bake; and its
    * patches' edges' shared bands over them, the area each draws at the level it draws it, beside a
    * patch that is not measured the larger of its own need and its level's largest error's
@@ -5552,7 +5554,7 @@ export class TerrainPass {
   ): void {
     const { viewport, fovXRad } = input.view;
     const pxPerRad = viewport.widthPx / (2 * Math.tan(fovXRad / 2));
-    const toleranceRad = (state.targetTauPx ?? 0) / pxPerRad;
+    const toleranceRad = (state.bandTauPx ?? state.targetTauPx ?? 0) / pxPerRad;
     const scales = state.strideScales;
     scales.length = drawSet.count;
     const patches: StrideEdgePatch[] = [];

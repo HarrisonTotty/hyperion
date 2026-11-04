@@ -9,7 +9,9 @@
  * - **The stated-bound rule.** A camera pass draws a level-L patch's cluster at stride s only where
  *   the level's stated error E_L (`selectionErrorM`) plus e_s, projected at the cluster's own
  *   distance by `screenSpaceErrorPx`'s one function, is within the view's τ′ (Design note 3's,
- *   `effectiveTauPx(τ, limitExcess, w)`, unslewed): at distances of at least A(L, s) = (E_L + e_s) ÷
+ *   `effectiveTauPx(τ, limitExcess, w)`, reached a step at a time as the morph bands' is, so that a
+ *   jump of the budget's τ′, up to 1.8 times a frame on the seamless probe, re-morphs no stride at
+ *   once): at distances of at least A(L, s) = (E_L + e_s) ÷
  *   τ′_rad, τ′_rad = τ′ ÷ (W ÷ (2 tan(fov_h ÷ 2))), a cluster's need ({@link strideNeedM}, of its
  *   patch's {@link StrideScale}).
  * - **The shared bands** (fix-r14-t3c-shared-bands, research-leans-35's ruling, 2026-11-03): on a
