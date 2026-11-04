@@ -87,8 +87,9 @@
 //! # The entry
 //!
 //! An entry has one member, its system, at its position at the epoch and moving at its velocity on
-//! a straight line. The table's recoils, at most 43 km/s for 20 Myr (Be/X) and 120 km/s for 5
-//! Myr (supergiant), take it under 3,000 ly from its site, so that with its motion over the source
+//! a straight line. Its recoil takes it at most 3,000 ly from its site, its years since the
+//! supernova held where it would pass that (`MAX_RECOIL_TRAVEL_LY`; the table refitted at 27
+//! draws Be/X recoils to 59.3 km/s over 3.0 × 10⁷ years), so that with its motion over the source
 //! horizon it stays within plan 09's 4,096 ly reach of its cell. Its record is a catalogue
 //! system's, counted in its primary's layer, D or E: its primary is the compact star's
 //! progenitor. Its stars are the pair: each star's own model at its initial mass and the system's

@@ -608,19 +608,28 @@ fn hosts_stay_within_the_reach() {
 }
 
 /// The largest displacement a recoil can give: the table's fastest recoil over its longest time
-/// since a supernova, under 3,000 ly for either high-mass kind.
+/// since a supernova, the years held where the recoil reaches [`MAX_RECOIL_TRAVEL_LY`], at most
+/// 3,000 ly for either high-mass kind. Unheld, the table refitted at 27 would carry a Be/X host
+/// 5,940 ly (59.3 km/s for 3.0 × 10⁷ years), past plan 09's 4,096 ly reach.
+///
+/// [`MAX_RECOIL_TRAVEL_LY`]: crate::stellar::binary::scan::MAX_RECOIL_TRAVEL_LY
 #[test]
 fn the_recoil_s_largest_displacement_is_inside_the_reach() {
+    use crate::stellar::binary::scan::MAX_RECOIL_TRAVEL_LY;
     let sampler = ClassSampler::new(&XRB_SAMPLER);
     for (speed, since) in [
         (XrbMark::BexRecoil, XrbMark::BexSinceSupernova),
         (XrbMark::SupergiantRecoil, XrbMark::SupergiantSinceSupernova),
     ] {
         let v = sampler.value_at(speed, 0.0, 1.0) * 1.0e3;
-        let t = math::exp10(sampler.value_at(since, 0.0, 1.0)) * SECONDS_PER_JULIAN_YEAR;
+        let drawn = math::exp10(sampler.value_at(since, 0.0, 1.0)) * SECONDS_PER_JULIAN_YEAR;
+        let t = drawn.min(MAX_RECOIL_TRAVEL_LY * METRES_PER_LIGHT_YEAR / v);
         let ly = v * t / METRES_PER_LIGHT_YEAR;
-        println!("{speed:?}: at most {ly:.0} ly");
-        assert!(ly < 3_000.0, "{ly}");
+        println!(
+            "{speed:?}: at most {ly:.0} ly, {:.0} unheld",
+            v * drawn / METRES_PER_LIGHT_YEAR
+        );
+        assert!(ly <= MAX_RECOIL_TRAVEL_LY * (1.0 + 1e-12), "{ly}");
     }
 }
 

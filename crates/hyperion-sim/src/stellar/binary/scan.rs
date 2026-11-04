@@ -84,7 +84,8 @@ use crate::stellar::draws::isotropic;
 use crate::tables::binary::{AwdMark, XrbHostKind, XrbMark, XrbPick};
 use crate::time::{SourceHorizon, Span, UniverseTime};
 use crate::units::consts::{
-    GM_SUN, SECONDS_PER_DAY, SECONDS_PER_JULIAN_YEAR, SOLAR_MASS_KG, SOLAR_RADIUS_M, SPEED_OF_LIGHT,
+    GM_SUN, METRES_PER_LIGHT_YEAR, SECONDS_PER_DAY, SECONDS_PER_JULIAN_YEAR, SOLAR_MASS_KG,
+    SOLAR_RADIUS_M, SPEED_OF_LIGHT,
 };
 use crate::units::{
     GravitationalParameter, Metres, PerCubicLightYear, Radians, Seconds, SolarMasses,
@@ -479,6 +480,14 @@ impl XrbRecoil {
         ))
     }
 }
+
+/// The farthest a high-mass host's recoil carries it from its site, ly: 3,000, so that with its
+/// motion over the source horizon it stays within plan 09's 4,096 ly reach of its cell (the X-ray
+/// binaries' class, "The entry"). The table refitted at 27 draws Be/X recoils to 59.3 km/s and
+/// years since the supernova to 3.0 × 10⁷, whose product would carry 0.28% of its hosts past it and
+/// 0.077% past the reach, so a host's years since its supernova are held where its recoil reaches
+/// it (train 27's lean, 2026-11-04).
+pub const MAX_RECOIL_TRAVEL_LY: f64 = 3_000.0;
 
 /// The least distance of a low-mass host's transfer rate from the irradiated disc's instability
 /// line, dex: 10⁻⁶, so that the rate falls on its kind's side of the line however `classify`
@@ -953,7 +962,10 @@ pub(crate) fn xrb_marks_at(
         let mut stream = Stream::open(seed, tags::CLASS_XRB_RECOIL, key);
         let metres_per_second = sampler.draw(speed_mark, 0.0, &mut stream) * 1.0e3;
         let direction = isotropic(&mut stream).components();
-        let since = math::exp10(sampler.draw(since_mark, 0.0, &mut stream));
+        let since = math::exp10(sampler.draw(since_mark, 0.0, &mut stream)).min(
+            MAX_RECOIL_TRAVEL_LY * METRES_PER_LIGHT_YEAR
+                / (metres_per_second * SECONDS_PER_JULIAN_YEAR),
+        );
         XrbRecoil {
             velocity: GalacticVelocity::new(direction.map(|u| u * metres_per_second)),
             since_supernova: Years::new(since),
