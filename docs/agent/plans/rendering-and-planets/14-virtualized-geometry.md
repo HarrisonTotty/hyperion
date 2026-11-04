@@ -2440,3 +2440,14 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     patches, 49 interior) was the budget hold's other fixed point, reached by bakes' timing.
   - (lean, 2026-11-03) R10.T9.b's "darker at some" is stated, not asked: its pose casts no shadow
     the frame shows (0 texels in lockstep's settle; BASE's 1 lay under its floor). Re-pose, restore.
+- **R14.T6.a–b on R10.T9.b's new pose** (`fix-r10-t9b-cascade-pose`, 2026-11-04):
+  - Part 7's cascades view now looks across a crater rim's shadow (R10.T9.b's records), so the far
+    cascades hold a real shadow edge; the lean of 2026-11-03 above is closed.
+  - (lean, 2026-11-04) T6.b's acne tolerance is split: `ACNE_SHARE_TOLERANCE` (2.5 × 10⁻⁴) holds
+    the lit mean alone, and the new `DARKER_SHARE_TOLERANCE` (2.5 × 10⁻³) the darker share, 68
+    texels apart at rate 4 and every frame (1.6 × 10⁻³). The share now counts the rim shadow's
+    edge, cast by maps held from up to three frames before under that frame's sun; the lit mean,
+    the plan's acne measure, stands 1.2 × 10⁻⁴ apart.
+  - Unchanged on it: T6.b's layers `0123 01 013 01`; T6.a's `0123 01 013 01 2 - 3 -` (13 passes) and
+    `0123 01 013 01 012 01 013 01` (21). The far maps hold 99.980% and more within a texel (99.995%
+    before), against `FAR_MAP_WITHIN_SHARE`'s 99.9%.

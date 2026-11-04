@@ -22,16 +22,18 @@
  *
  * Beside it, on the page's own engine, whose variant decides the capability path, the high
  * setting's shadow cascades (plan R10, R10.T9.b; decision-r10-t9b-design D2): one high-setting
- * pass with cascades of its own streams a view 40 m over the fixture's ground under the centre
- * patch, looking west 20° below the horizon, the sun 12° up in the east, and draws one frame with
- * its body taking the cascades. It checks that the four caster passes are drawn at w > 0, the
- * nearest with the terrain's draw, on the path the device's `depth-clip-control` gives (logged:
- * unclipped, or pulled back); that `shadows` holds 67,108,864 B while the set lives and its figure
- * from before once it is let go; and that the frame is finite at every texel, darker than the same
- * draw at w = 0 at some (the cascades shadow something the horizon map does not: 585 of 2,108
- * terrain texels on SwiftShader with the cascades fitted to the disc's centre, before
- * decision-r10-t9b-penumbra's fit to its top edge, which leaves only where the two disagree) and
- * nowhere brighter, since the minimum never brightens. Then plan R14's levers against the way back
+ * pass with cascades of its own streams a view 40 m over the floor of a crater of the fixture's,
+ * some 1.5 km across and 150 m deep, looking south-east 20° below the horizon, the sun 12° up in
+ * the east behind its east rim, and draws one frame with its body taking the cascades. It checks
+ * that the four caster passes are drawn at w > 0, the nearest with the terrain's draw, on the path
+ * the device's `depth-clip-control` gives (logged: unclipped, or pulled back); that `shadows` holds
+ * 67,108,864 B while the set lives and its figure from before once it is let go; and that the frame
+ * is finite at every texel, darker than the same draw at w = 0 at some and nowhere brighter, since
+ * the minimum never brightens. Fitted to the disc's top edge (decision-r10-t9b-penumbra), the
+ * cascades darken only where the horizon map still sees part of the disc that they see hidden:
+ * here a band along the edge of the rim's shadow across the floor, 119 of 2,294 terrain texels
+ * darker, 29 of them by more than half, on SwiftShader, both variants (2026-11-04); over flat
+ * ground, looking west away from the sun, none were. Then plan R14's levers against the way back
  * (T1–T1.d), and the far cascades at a rate of 4 against every frame over four frames flown at
  * R05's descent's 300 m/s under a setting sun (T6.b): the passes each frame renders, every
  * surface of every frame's far maps held within a texel, the frame within a third of a stop at
@@ -82,6 +84,7 @@ import {
 import { HeightWorkerPool } from "../view/terrain/workers/pool";
 import { moonLikeFixture } from "../test/moonLikeFixture";
 import type { CapturedImage } from "./atmosphere";
+import { againstUnshadowed, NEVER_BRIGHTER } from "./cascadeDarkening";
 import { bytesDigest, type Checks, halfTexels, pause, projection } from "./harness";
 import {
   captureOf,
@@ -521,15 +524,39 @@ function fail(): never {
   throw new Error("a view's frame is missing");
 }
 
+/**
+ * Where the cascades' camera stands, east and north of the centre patch's centre along its horizon,
+ * m: over the floor of a crater of the fixture's, some 1.5 km across and 150 m deep below its rim,
+ * centred about 2.5 km east and 0.75 km north, the ground there 149 m below the centre's (the
+ * workers' ground readouts on a 250 m grid, 2026-11-04).
+ */
+const CASCADES_EAST_M = 2_400;
+const CASCADES_NORTH_M = 1_000;
+
 /** The cascades' camera's height above the fixture's ground under it, m (D2: a few to 100 m). */
 const CASCADES_HEIGHT_M = 40;
 
-/** The cascades' view's depression below the horizon and heading, west, away from the sun, °. */
+/**
+ * The cascades' view's depression below the horizon and heading, south-east, across the floor
+ * that the crater's east rim shadows, °.
+ */
 const CASCADES_DEPRESSION_DEG = 20;
-const CASCADES_HEADING_DEG = 270;
+const CASCADES_HEADING_DEG = 135;
 
 /** The sun's elevation in the cascades' frame, towards the east, rad: 12°, low, so shadows are long. */
 const CASCADES_SUN_RAD = (12 * Math.PI) / 180;
+
+/**
+ * The direction of the place `eastM` east and `northM` north of the centre patch's centre, along
+ * its horizon.
+ */
+function placeOverCentre(eastM: number, northM: number): readonly [number, number, number] {
+  const a = MOON_LIKE.equatorialRadiusM;
+  const { east, north } = frameOverCentre();
+  const centre = vector(vertexDir(CENTRE, 32, 32));
+  const place = unit(along(along(centre, 1, east, eastM / a), 1, north, northM / a));
+  return [place.x, place.y, place.z];
+}
 
 /** How long the cascades' pass may stream before its frame is drawn, ms (part 7's watchdog). */
 const CASCADES_STREAM_MS = 25_000;
@@ -545,7 +572,8 @@ const CASCADES_STREAM_MS = 25_000;
  * @remarks
  * The budget binds here (50 patches, τ′ some 4 × 10⁵ times τ): stepped every 50 ms whatever had
  * landed, the pass settled on 43 patches in some runs and other sets in others under load, and
- * R14.T1.d's and R14.T6.b's frames with them; in lockstep, on 48 in every run.
+ * R14.T1.d's and R14.T6.b's frames with them; in lockstep, on one set in every run (50 patches
+ * over the crater, 48 at the pose before it).
  */
 async function streamedFor(
   made: TerrainPass,
@@ -586,9 +614,6 @@ async function streamedFor(
  * R10.T9.a's figures, S6), for the cascades' caster reach.
  */
 const MOON_LIKE_RELIEF_M = 14_921.5;
-
-/** How much brighter than at w = 0 a texel of the frame with cascades may be, relative. */
-const NEVER_BRIGHTER = 1e-3;
 
 /** `view`'s frame inputs under `light`, its body taking the cascades or not. */
 function frameInput(
@@ -705,17 +730,27 @@ const FLIGHT_STEP_M = 300 / 60;
 const DAY_STEP_RAD = (2 * Math.PI) / 86_400 / 60;
 
 /**
- * How far the flight's last frame at a rate of 4 may stand from every frame's in the acne's measures
- * (plan R14, R14.T6.b), the share of its terrain's texels darker than at w = 0 and its mean lit
- * fraction: 2.5 × 10⁻⁴, some ten of the comparison's 39,379 terrain texels, against the 6 and 7 the
- * cascades darken there at 4 and every frame (both variants, SwiftShader, 2026-11-02).
+ * How far the flight's last frame at a rate of 4 may stand from every frame's in its terrain's mean
+ * lit fraction, the acne's measure (plan R14, R14.T6.b): 2.5 × 10⁻⁴, against the 1.2 × 10⁻⁴ between
+ * them, 0.987927 at 4 and 0.987809 every frame, over the comparison's 43,689 terrain texels (both
+ * variants, SwiftShader, 2026-11-04).
  */
 const ACNE_SHARE_TOLERANCE = 2.5e-4;
 
 /**
+ * How far the flight's last frame at a rate of 4 may stand from every frame's in the share of its
+ * terrain's texels darker than at w = 0 (plan R14, R14.T6.b): 2.5 × 10⁻³, some 110 texels, against
+ * the 68 between them, 1,937 at 4 and 1,869 every frame (both variants, SwiftShader, 2026-11-04).
+ * The share counts the crater rim's shadow, whose edge the held maps cast under the sun as it stood
+ * up to three frames before; over flat ground, with only acne to count, 6 and 7 texels stood within
+ * 2.5 × 10⁻⁴ (2026-11-02).
+ */
+const DARKER_SHARE_TOLERANCE = 2.5e-3;
+
+/**
  * The share of every frame's drawn far-map texels the held maps must hold within a texel, and the
- * fewest that must be compared, for each of cascades 2 and 3 (plan R14, R14.T6.b): 99.995% and more
- * held, of 0.96 to 2.2 million compared (both variants, SwiftShader, 2026-11-02).
+ * fewest that must be compared, for each of cascades 2 and 3 (plan R14, R14.T6.b): 99.980% and more
+ * held, of 0.92 to 3.2 million compared (both variants, SwiftShader, 2026-11-04).
  */
 const FAR_MAP_WITHIN_SHARE = 0.999;
 const FAR_MAP_COMPARED_LEAST = 100_000;
@@ -955,41 +990,6 @@ function shadowShare(
 }
 
 /**
- * The frame with cascades against the same draw at w = 0, over the texels both draw as terrain:
- * how many, how many are darker by more than {@link NEVER_BRIGHTER}, and the most any is brighter,
- * relative, a channel under a millionth of the frame's brightest taken at that millionth.
- */
-function againstUnshadowed(
-  shadowed: Float32Array,
-  open: Float32Array,
-): { readonly terrain: number; readonly darker: number; readonly brighter: number } {
-  let brightest = 0;
-  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
-    brightest = Math.max(brightest, open[4 * p] ?? 0, open[4 * p + 1] ?? 0, open[4 * p + 2] ?? 0);
-  }
-  const floor = Math.max(1e-6 * brightest, Number.MIN_VALUE);
-  let terrain = 0;
-  let darker = 0;
-  let brighter = 0;
-  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
-    const meter = open[4 * p + 3];
-    if (meter !== 2 && meter !== 3) {
-      continue;
-    }
-    terrain += 1;
-    let dark = false;
-    for (let c = 0; c < 3; c += 1) {
-      const lit = Math.max(open[4 * p + c] ?? Number.NaN, floor);
-      const seen = shadowed[4 * p + c] ?? Number.NaN;
-      brighter = Math.max(brighter, (seen - lit) / lit);
-      dark ||= seen < lit * (1 - NEVER_BRIGHTER);
-    }
-    darker += dark ? 1 : 0;
-  }
-  return { terrain, darker, brighter };
-}
-
-/**
  * R10.T9.b's cascades on the high setting: see the module's remarks. With `captures`, R14.T1.d's
  * frames at stride 1 and at the casters' texel and their terrain's mask, for a person to look at
  * and for `scripts/compareCaptures.mjs`.
@@ -1035,11 +1035,12 @@ export async function checkShadowCascades(
     if (!held) {
       throw new Error("the workers did not take the fixture's blocks in time");
     }
-    // The field's own ground under the centre patch, along the datum's normal, which the drawn
+    // The field's own ground under the place, along the datum's normal there, which the drawn
     // ground converges on as the finer bakes land.
-    const { nu } = frameOverCentre();
+    const place = placeOverCentre(CASCADES_EAST_M, CASCADES_NORTH_M);
+    const nu = vector(spheroidNormal(MOON_LIKE_FIGURE, place));
     const ground = await pool.groundReadout(field.body, field.seed, {
-      originM: vector(surfacePoint(MOON_LIKE_FIGURE, vertexDir(CENTRE, 32, 32), 20_000)),
+      originM: vector(surfacePoint(MOON_LIKE_FIGURE, place, 20_000)),
       direction: { x: -nu.x, y: -nu.y, z: -nu.z },
       maxM: 40_000,
       slopeBaselineM: 2,
@@ -1109,31 +1110,18 @@ export async function checkShadowCascades(
     const open = await texelsOf(engine, "cascades: w = 0", view, atNoWeight(frame.draws));
     const finite = shadowed.every(Number.isFinite) && open.every(Number.isFinite);
     const seen = againstUnshadowed(shadowed, open);
-    // Its darkening, stated, not asked (lean, 2026-11-03): in lockstep's settle no texel differs
-    // from w = 0's, by luminance at the comparison's size too, and the one `againstUnshadowed`
-    // counted before lay under its floor in two frames byte for byte alike. The pose casts no
-    // shadow the frame shows; R10.T9.b's "darker at some" waits on a pose that does.
-    const darkened = shadowShare(
-      await texelsOf(engine, "cascades: shadowed, compared", view, frame.draws, COMPARISON),
-      await texelsOf(
-        engine,
-        "cascades: w = 0, compared",
-        view,
-        atNoWeight(frame.draws),
-        COMPARISON,
-      ),
-    ).darkerTexels;
     const target = shadows.target;
     const layers =
       target === null
         ? ["none"]
         : await layerDigests(engine, target.depth, target.layers, target.sizePx);
     checks.check(
-      "R10.T9.b the frame with cascades is finite at every texel and nowhere brighter than at w = 0",
+      "R10.T9.b the frame with cascades is finite at every texel, darker at some and nowhere brighter than at w = 0",
       finite &&
         seen.terrain >= 0.3 * FRAME.widthPx * FRAME.heightPx &&
+        seen.darker > 0 &&
         seen.brighter <= NEVER_BRIGHTER,
-      `${path}; finite ${String(finite)}; terrain ${String(seen.terrain)} texels, ${String(seen.darker)} darker under the cascades (${String(darkened)} by luminance at ${String(COMPARISON.widthPx)} × ${String(COMPARISON.heightPx)}), the most brighter ${seen.brighter.toExponential(2)} (at most ${String(NEVER_BRIGHTER)}); digests ${bytesDigest(shadowed)} shadowed, ${bytesDigest(open)} at w = 0, layers ${layers.join(", ")}`,
+      `${path}; finite ${String(finite)}; terrain ${String(seen.terrain)} texels, ${String(seen.darker)} darker under the cascades, ${String(seen.halved)} of them by more than half, the most brighter ${seen.brighter.toExponential(2)} (at most ${String(NEVER_BRIGHTER)}); digests ${bytesDigest(shadowed)} shadowed, ${bytesDigest(open)} at w = 0, layers ${layers.join(", ")}`,
     );
     // R14.T6.a: the same frame again, of a still camera with time paused: no cascade rendered,
     // and the frame and the layers the frame before's, byte for byte.
@@ -1269,12 +1257,13 @@ export async function checkShadowCascades(
       );
     }
     // R14.T6.b: the far cascades at the high setting's rate of 4 against every frame, over the same
-    // frames from the same selection and residents: the camera flown west at R05's descent's
-    // 300 m/s, and the sun setting a quarter of the holds' share of its disc a frame, so that the
-    // last frame samples cascade 2 as the first drew it, 15 m back under a sun three quarters of the
-    // share higher, and cascade 3 as the third did. Its frame at the comparison's size, with T1.c's
-    // cull as the setting has it; and its far maps against every frame's, texel by texel, with the
-    // cull off in both, which otherwise leaves the layers apart where no receiver samples them.
+    // frames from the same selection and residents: the camera flown on along its heading at R05's
+    // descent's 300 m/s, and the sun setting a quarter of the holds' share of its disc a frame, so
+    // that the last frame samples cascade 2 as the first drew it, 15 m back under a sun three
+    // quarters of the share higher, and cascade 3 as the third did. Its frame at the comparison's
+    // size, with T1.c's cull as the setting has it; and its far maps against every frame's, texel
+    // by texel, with the cull off in both, which otherwise leaves the layers apart where no
+    // receiver samples them.
     const star = light.lights[0];
     const discRad =
       star === undefined ? 0 : 2 * Math.asin(Math.min(1, star.radius / star.distance));
@@ -1374,7 +1363,7 @@ export async function checkShadowCascades(
         withinShare.every((each) => each >= FAR_MAP_WITHIN_SHARE) &&
         edges.terrain > 0.3 * COMPARISON.widthPx * COMPARISON.heightPx &&
         edgeShare >= 0.995 &&
-        Math.abs(acneAtFour.darker - acneEvery.darker) <= ACNE_SHARE_TOLERANCE &&
+        Math.abs(acneAtFour.darker - acneEvery.darker) <= DARKER_SHARE_TOLERANCE &&
         Math.abs(acneAtFour.litMean - acneEvery.litMean) <= ACNE_SHARE_TOLERANCE,
       `${path}; layers by frame ${layersAt(atFour.layers)} at 4, ${layersAt(everyFrame.layers)} every frame; the camera ${String(FLIGHT_STEP_M)} m a frame, the sun ${(stepRad * 1e6).toFixed(1)} µrad a frame; far maps held within a texel: cascade 2 ${String(within[0]?.found)} of ${String(within[0]?.compared)} texels, cascade 3 ${String(within[1]?.found)} of ${String(within[1]?.compared)}; caster triangles by frame ${trianglesOf(atFour.triangles)} at 4, ${trianglesOf(everyFrame.triangles)} every frame; ${String(edges.terrain)} terrain texels, ${String(edges.differing)} differing, ${(100 * edgeShare).toFixed(2)}% within a third of a stop, the largest ${edges.largestStops.toFixed(3)} stops; darker than at w = 0 ${String(acneAtFour.darkerTexels)} texels at 4 and ${String(acneEvery.darkerTexels)} every frame, mean lit fraction ${acneAtFour.litMean.toFixed(6)} and ${acneEvery.litMean.toFixed(6)}; digests ${bytesDigest(everyShadowed)}, ${bytesDigest(fourShadowed)}`,
     );
