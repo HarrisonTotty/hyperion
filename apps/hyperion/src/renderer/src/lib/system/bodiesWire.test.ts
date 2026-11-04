@@ -2110,9 +2110,11 @@ describe("body-state times beyond 2^53 s (P14.T35.d)", () => {
     const { bodies } = bodiesOf(goldenAnswer("wide_binary", "epoch"));
     const moon = bodies.bodies.find((body) => body.id === "41ffecae00000004.0401");
 
+    // Re-pinned at generator version 27, as its re-blessed golden gives it: 56 kyr later than
+    // 26's -67,192,167,787,324,024 s.
     expect(moon?.state).toEqual({
       kind: "unbound",
-      at: { seconds: -67_192_167_787_324_024, nanos: 0 },
+      at: { seconds: -67_190_388_769_518_040, nanos: 0 },
     });
   });
 

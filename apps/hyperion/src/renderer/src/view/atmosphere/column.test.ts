@@ -603,6 +603,8 @@ function envelopeColumn(
 
 describe("temperatureAt over P14.T24.d's envelopes (R08.T16.a)", () => {
   it("reads the sim's golden: six envelopes, their nodes and levels", () => {
+    // Saturn's adiabat has 18 nodes from generator version 27 (19 before): κ₁ refitted and its own
+    // Bond albedo (P14.T24.h.b) put its join at 0.612 bar, 0.584 before, one segment fewer.
     expect(
       GOLDEN_ENVELOPES.map(({ name, profile, levels }) => [
         name,
@@ -611,7 +613,7 @@ describe("temperatureAt over P14.T24.d's envelopes (R08.T16.a)", () => {
       ]),
     ).toEqual([
       ["jupiter", 17, 15],
-      ["saturn", 19, 15],
+      ["saturn", 18, 15],
       ["uranus", 17, 15],
       ["neptune", 18, 15],
       ["sub_neptune", 17, 15],

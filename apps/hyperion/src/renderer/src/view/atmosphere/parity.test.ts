@@ -447,10 +447,12 @@ describe("τ(550), the record's against the client's (R08.T19's fifth row)", () 
   });
 
   it("finds a water deck's mode and a sulphate layer's, each with its basis and the client's τ(550)", () => {
+    // From generator version 27 the temperate world's water deck is ice: its base at 269.5 K, below
+    // water's freezing point (275.8 K, liquid, at 26).
     expect(
       depths.map(({ name, basis, clientTau550 }) => [name, basis, clientTau550 !== undefined]),
     ).toEqual([
-      ["liquid H2O", "geometric_limit", true],
+      ["solid H2O", "geometric_limit", true],
       ["liquid H2SO4", "sphere", true],
     ]);
   });
