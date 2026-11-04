@@ -1873,23 +1873,40 @@ fn under_24_s_densities_an_argon_ice_has_its_solid_s_cap_and_layer() {
 
 use crate::planetary::derive::atmosphere::{RunawayDeck, SurfaceMaterial};
 use crate::planetary::derive::photometry::area_mix::{
-    HostShade, OPTICS_BANDS, Regolith, cloud_albedo, cloud_fraction, solid_bond, surface_bond,
+    HostShade, IcyResurfacing, OPTICS_BANDS, Regolith, VolatileFrost, band_weighted, cloud_albedo,
+    cloud_fraction, rayleigh_added, rayleigh_bins, reference_earth_air, solid_bond, surface_bond,
     under_cloud,
 };
 
 /// The area-mix Bond albedo of the partition `p`, published over `cover`, of a body of `material`
-/// in the cover's state about a Sun: the published condensates over the material's regolith, under
-/// the state's cloud.
-fn area_mix(p: &Partition, cover: &Cover<'_>, material: SurfaceMaterial) -> (f64, f64) {
+/// in the cover's state about a Sun: the published condensates over the material's regolith, as a
+/// pass that knows its body's resurfacing as `resurfacing` takes it (P14.T49.m), under the state's
+/// cloud, with the clear sky's ground's under `air`'s Rayleigh layer at `gravity` m s⁻², where
+/// given, laid over it by the adding rule (P14.T24.h.b), as the record's area mix takes it.
+fn area_mix(
+    p: &Partition,
+    cover: &Cover<'_>,
+    (material, resurfacing): (SurfaceMaterial, IcyResurfacing),
+    air: Option<(&crate::planetary::derive::atmosphere::PartialPressures, f64)>,
+) -> (f64, f64) {
     let sun = HostShade::sun();
     let published = p.publish(cover);
     let regolith = Regolith::of_material(material)
+        .with_resurfacing(resurfacing)
         .bond(cover.state, sun.bands())
         .bond;
     let ground = surface_bond(&published, p, (regolith, &[]), &sun);
+    let clear = air
+        .and_then(|(partials, g)| rayleigh_bins(partials, MetresPerSecondSquared::new(g)))
+        .map_or(ground, |layers| {
+            band_weighted(
+                &layers.map(|layer| rayleigh_added(layer, ground)),
+                sun.bands(),
+            )
+        });
     let cloud = cloud_fraction((cover.state, RunawayDeck::Kept), p, &sun);
     let bond = under_cloud(
-        ground,
+        clear,
         cloud,
         cloud_albedo((cover.state, RunawayDeck::Kept), &sun),
     );
@@ -1900,7 +1917,10 @@ fn area_mix(p: &Partition, cover: &Cover<'_>, material: SurfaceMaterial) -> (f64
 /// builds it (an ocean of 0.70–0.76 and 5% of ice), takes a Bond albedo within 0.01 of NASA's
 /// 0.294, by the water cloud's calibration on the reference Earth (`area_mix`'s 0.708 of ocean and
 /// 0.0289 of land ice): its ice's larger share and its ocean's own make the difference. Its cloud is
-/// Earth's 0.67, its water's column well above the reference's.
+/// Earth's 0.67, its water's column well above the reference's. From generator version 27 the
+/// calibration is the reference Earth's under its own Rayleigh layer, laid over its clear sky by the
+/// adding rule (P14.T24.h.b, Earth's cloud re-split), so the by-hand Earth lays its own air's layer
+/// (the reference Earth's air, at its gravity) over its clear sky too.
 #[test]
 fn the_by_hand_earth_takes_a_bond_albedo_near_0_294() {
     let body = earth();
@@ -1911,7 +1931,13 @@ fn the_by_hand_earth_takes_a_bond_albedo_near_0_294() {
         state: SurfaceState::Temperate,
         water: water_cover(&earth, &profile, 1.0),
     };
-    let (bond, cloud) = area_mix(&earth, &cover, SurfaceMaterial::Rock);
+    let air = reference_earth_air();
+    let (bond, cloud) = area_mix(
+        &earth,
+        &cover,
+        (SurfaceMaterial::Rock, IcyResurfacing::NOT_KNOWN),
+        Some((&air, EARTH_GRAVITY)),
+    );
     assert_same_bits(cloud, SurfaceState::Temperate.cloud_fraction());
     assert!((bond - 0.294).abs() < 0.01, "{bond}");
     eprintln!("T51.a's Earth by hand: Bond albedo {bond:.5} under {cloud} of cloud");
@@ -1928,7 +1954,9 @@ enum Anchor {
 }
 
 /// A Pluto and a Triton given their measured N₂, CH₄ and CO by hand (T51.a's fixtures), airless
-/// over water frost's regolith about a Sun, against 0.6–0.8 and 0.72–0.92 (Buratti et al. 2017,
+/// over water frost's regolith about a Sun (from generator version 27 the frost the icy regolith
+/// keeps where its ice holds a volatile air, `VolatileFrost::Held`, whose seasonal frost refreshes
+/// it, P14.T49.m, as each's N₂ ice does), against 0.6–0.8 and 0.72–0.92 (Buratti et al. 2017,
 /// Icarus 287, 207: Pluto 0.72 ± 0.07; Hillier et al. 1990, Science 250, 419: Triton 0.82 ± 0.05;
 /// decision-triton-and-e101 §1.6), asserted since T51.b's area mix weights P14.T49.i's bins over
 /// the host's whole spectrum (decision-p14-t49c-split §1.3; main's ruling, 2026-10-19). Their
@@ -1961,7 +1989,8 @@ fn a_pluto_and_a_triton_given_their_ices_take_their_bond_albedos() {
         let nitrogen = published.entry(id("N2"), CondensatePhase::Solid).unwrap();
         let frost = solid_bond(id("N2"), HostShade::sun().bands());
         assert_eq!(frost.stand_in, None, "{}", body.name);
-        let (bond, cloud) = area_mix(&p, &cover, SurfaceMaterial::Ice);
+        let frosted = IcyResurfacing::new(None, VolatileFrost::Held);
+        let (bond, cloud) = area_mix(&p, &cover, (SurfaceMaterial::Ice, frosted), None);
         assert_same_bits(cloud, 0.0);
         let entries: Vec<String> = published
             .entries()
@@ -2006,7 +2035,12 @@ fn a_mars_with_its_caps_takes_almost_no_cloud() {
         state: SurfaceState::Temperate,
         water: water_cover(&mars, &profile, cover::DRY_SURFACE_WATER_SHARE),
     };
-    let (bond, cloud) = area_mix(&mars, &cover, SurfaceMaterial::Rock);
+    let (bond, cloud) = area_mix(
+        &mars,
+        &cover,
+        (SurfaceMaterial::Rock, IcyResurfacing::NOT_KNOWN),
+        None,
+    );
     let dominance = of(&mars, "CO2").dominance();
     eprintln!(
         "Mars by hand, with its caps: CO2's dominance {dominance:.4}, cloud {cloud:.2e}, Bond \

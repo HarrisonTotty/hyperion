@@ -388,14 +388,16 @@ fn parmentier_s_fit_is_transcribed() {
 ///
 /// - **H₂O within 0.3 dex**, the fit's own scatter about their CEA map (their Fig. 12, read cell by
 ///   cell by the lane: 133 of 141 cells within 0.3 dex). As built, at nine points, within 0.15 dex:
-///   the farthest +0.14 dex at 3,000 K and 10 mbar, where OH, not carried (P14.T52.e), would hold
-///   some of the oxygen.
-/// - **TiO within 0.5 dex**: the network dissociates it more, by 0.14–0.45 dex at eight points (the
-///   farthest −0.45 dex at 3,500 K and 1 bar), its thermochemistry against CEA's in Parmentier et
-///   al.'s grid, with TiO₂ not carried; a recorded figure.
-/// - **VO within 1.1 dex**: more again, by 0.50–1.02 dex at nine points (the farthest −1.02 dex at
+///   the farthest −0.13 dex at 4,000 K and 1 bar. At 3,000 K and 10 mbar it is +0.01 dex from 27,
+///   where OH, carried from then (P14.T52.e), holds some of the oxygen (+0.14 dex before).
+/// - **TiO within 0.6 dex**: the network dissociates it more, by 0.17–0.56 dex at eight points (the
+///   farthest −0.56 dex at 3,500 K and 1 bar), its thermochemistry against CEA's in Parmentier et
+///   al.'s grid, with TiO₂ not carried; a recorded figure, re-measured at 27, whose further
+///   carriers (P14.T52.e) take it from 0.14–0.45 dex (within 0.5 dex before).
+/// - **VO within 1.2 dex**: more again, by 0.59–1.14 dex at nine points (the farthest −1.14 dex at
 ///   3,500 K and 1 bar), the network's CEA record of VO (Gurvich 1982) being about 19 kJ mol⁻¹ less
-///   bound than FastChem's JANAF fit (P14.T52.a's recorded finding); a recorded figure.
+///   bound than FastChem's JANAF fit (P14.T52.a's recorded finding); a recorded figure, re-measured
+///   at 27 as TiO's is (0.50–1.02 dex, within 1.1 dex, before).
 #[test]
 fn the_network_dissociates_as_parmentier_s_fit_does() {
     let network = Network::registry().expect("the registry's network builds");
@@ -405,8 +407,8 @@ fn the_network_dissociates_as_parmentier_s_fit_does() {
         .collect();
     for (molecule, tolerance) in [
         (Dissociating::Water, 0.3),
-        (Dissociating::TitaniumOxide, 0.5),
-        (Dissociating::VanadiumOxide, 1.1),
+        (Dissociating::TitaniumOxide, 0.6),
+        (Dissociating::VanadiumOxide, 1.2),
     ] {
         let id = by_key(molecule.key()).expect("a row");
         let solve = |t: f64, p: f64| {
