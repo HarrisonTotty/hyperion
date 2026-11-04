@@ -1,5 +1,11 @@
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import { type ProjectionCamera, projector, toViewAxes, type Viewport } from "../camera/projection";
+import {
+  type ProjectionCamera,
+  projector,
+  toViewAxes,
+  viewAxesBy,
+  type Viewport,
+} from "../camera/projection";
 import { rotate } from "../camera/quaternion";
 import {
   IDENTITY_ROTATION,
@@ -698,6 +704,16 @@ function outlineConicOf(body: GraticuleBody, camera: ProjectionCamera): OutlineC
   };
 }
 
+/**
+ * A camera and view as {@link outlineInsetPx} reads them, taken once for a body's lines rather than
+ * at each of its points (lane perf-main-thread): the camera's rotation into its view axes
+ * (`viewAxesBy`, `toViewAxes`' sums) and its focal length, px.
+ */
+interface OutlineView {
+  readonly toViewAxes: (v: Vec3) => Vec3;
+  readonly focalPx: number;
+}
+
 /** How many Newton steps {@link outlineInsetPx} takes at most. */
 const OUTLINE_NEWTON_STEPS = 32;
 
@@ -716,13 +732,8 @@ const OUTLINE_NEWTON_STEPS = 32;
  * semi-axes A ≥ B, its least radius of curvature B² ÷ A, which the reach, at most B ÷ 6.8, stays
  * under wherever B ÷ A is above 0.15, and every flattening the wire allows keeps it above 0.8.
  */
-function outlineInsetPx(
-  conic: OutlineConic,
-  p: Vec3,
-  camera: ProjectionCamera,
-  viewport: Viewport,
-): number {
-  const v = toViewAxes(p, camera.orientation);
+function outlineInsetPx(conic: OutlineConic, p: Vec3, view: OutlineView): number {
+  const v = view.toViewAxes(p);
   if (!(-v.z > 0)) {
     return Number.NEGATIVE_INFINITY;
   }
@@ -757,7 +768,7 @@ function outlineInsetPx(
     }
     mu = next;
   }
-  const distancePx = Math.hypot(xa - qa, xb - qb) * focalPx(camera, viewport);
+  const distancePx = Math.hypot(xa - qa, xb - qb) * view.focalPx;
   return fq > 0 ? distancePx : -distancePx;
 }
 
@@ -962,6 +973,10 @@ export function graticule(
         );
   const thresholdsM = { thin: facingAboveM(false), heavy: facingAboveM(true) };
   const conic = inside === null ? null : outlineConicOf(body, camera);
+  const outlineView: OutlineView = {
+    toViewAxes: viewAxesBy(camera.orientation),
+    focalPx: focalPx(camera, viewport),
+  };
   /**
    * A line's windows of α cos u + β sin u > threshold − `offsetM` over [`uMin`, `uMax`]: its facing
    * arcs (`cosineWindows`), or inside the figure those arcs cut at the line's reach inside the
@@ -987,7 +1002,7 @@ export function graticule(
     return windowsInside(
       facing,
       cosineWindows(alpha, beta, thresholdM - offsetM, uMin, uMax),
-      (u) => outlineInsetPx(conic, pointAt(u), camera, viewport),
+      (u) => outlineInsetPx(conic, pointAt(u), outlineView),
       (major ? inside.reachPx.heavy : inside.reachPx.thin) + DATUM_INSIDE_MARGIN_PX,
     );
   };

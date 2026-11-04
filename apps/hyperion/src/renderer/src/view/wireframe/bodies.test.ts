@@ -31,6 +31,7 @@ import {
 import { cosineWindows, type Polyline } from "./curve";
 import { occluderRadius } from "../depth/depth";
 import { CASING_PX, occluderSlopePxAt, STROKE_PX } from "./drawList";
+import { fnv1a64 } from "../terrain/workers/f32Digest";
 import { datumSpheroidOf } from "./spheroid";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
@@ -1873,5 +1874,25 @@ describe("a body's drawn disc's extent about its mark (the owner's request, 2026
       halfPx: Number.POSITIVE_INFINITY,
       leastPx: Number.POSITIVE_INFINITY,
     });
+  });
+});
+
+describe("the datum's cuts over the image, its camera taken once a body (lane perf-main-thread)", () => {
+  it("draws the lines it drew while each point took the camera's rotation afresh, bit for bit", () => {
+    const lines = [
+      ...sampledSphereViews(20_261_104, 64).map(insideLines),
+      ...SATURN_VIEWS.map(
+        ([, xPx, yPx, pole]) =>
+          graticule(saturnAt(xPx, yPx, pole), FIELD_CAMERA, FIELD, 2, false, reachesAt(2)).lines,
+      ),
+    ];
+    const points = Float64Array.from(
+      lines.flat().flatMap((line) => line.runs.flat().flatMap((p) => [p.x, p.y, p.z])),
+    );
+    // FNV-1a 64 of the points' f64 bytes as the cut drew them at 8b9a1607.
+    expect([points.length, fnv1a64(new Uint8Array(points.buffer)).toString(16)]).toEqual([
+      17_949,
+      "c7e39691ca43397b",
+    ]);
   });
 });
