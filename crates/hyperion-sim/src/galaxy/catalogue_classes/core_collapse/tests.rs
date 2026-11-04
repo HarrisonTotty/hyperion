@@ -266,21 +266,76 @@ fn no_cell_comes_near_the_index() {
 
 // 2. The candidates follow the field's own intensity.
 
-/// The candidates the thinning keeps are the young field's recent deaths: in each component, as
-/// many as its layer-E systems × its deaths per system over the interval, integrated over the
-/// cells (a midpoint rule of 40³ points per cell), at α = 10⁻³. The nuclear disc's age density is
-/// flat over its last gigayear, so its expectation is exact; the young disc's rises by under 1%
-/// over its stars' death ages and is taken at 25 Myr.
+/// Each young component's deaths per system in the field's term over `process`'s interval, from 27
+/// (P09.T33.b): band E's mean, over the mass function on 256 log-spaced masses, of `1 − e(m)`, the
+/// share of the deaths at mass m that its ejection marks leave in the field (`runaway_hold`'s
+/// closed form), × the field's age density at the mass's reference lifetime less T, averaged over
+/// T across the interval on 32 points, × the interval's length.
+fn field_term_deaths(galaxy: &Galaxy, process: &CoreCollapseProcess) -> Vec<f64> {
+    const MASSES: u32 = 256;
+    const DEATHS: u32 = 32;
+    let table = galaxy
+        .class_table()
+        .expect("the version's galaxy holds plan 08's displaced classes");
+    let interval = process.interval();
+    let years = interval.length().as_julian_years_f64();
+    let (start, end) = (
+        interval.start().since_epoch().as_julian_years_f64(),
+        interval.end().since_epoch().as_julian_years_f64(),
+    );
+    let imf = galaxy.mass_function();
+    let nodes = table.nodes(MassBand::E).masses();
+    let (lo, hi) = (nodes[0], nodes[INTERVALS]);
+    let band = imf.integral(lo, hi);
+    let edge =
+        |k: u32| lo * crate::math::exp(f64::from(k) / f64::from(MASSES) * crate::math::ln(hi / lo));
+    process
+        .components()
+        .iter()
+        .map(|young| {
+            let source = table.component_source(young.id());
+            let ages = galaxy.field_ages(young.id());
+            (0..MASSES).fold(0.0, |sum, k| {
+                let (a, b) = (edge(k), edge(k + 1));
+                let m = SolarMasses::new((a * b).sqrt());
+                let kept = 1.0 - super::runaway_hold::closed_form_share(table, source, m);
+                let life = table.reference_lifetime(source, MassBand::E, m).value();
+                let density = (0..DEATHS).fold(0.0, |sum, j| {
+                    let t = start + (f64::from(j) + 0.5) / f64::from(DEATHS) * (end - start);
+                    sum + ages.pdf(Years::new(life - t))
+                }) / f64::from(DEATHS);
+                sum + imf.integral(a, b) / band * kept * density
+            }) * years
+        })
+        .collect()
+}
+
+/// The candidates the thinning keeps in the field's term are the young field's recent deaths that
+/// its ejection marks leave in the field: in each component, as many as its layer-E systems × its
+/// deaths per system over the interval, integrated over the cells (a midpoint rule of 24³ points
+/// per cell), at α = 10⁻³. From 27 (P09.T33.b) the field's term takes its component's band budget
+/// taken to the field and keeps a death only where the star's ejection marks say it was not
+/// ejected before it died, `1 − e(m)` of the deaths at mass m, `e` the closed form's ejected share
+/// (`runaway_hold`'s, whose own test holds the marks to it); the runaways' and walkaways' terms
+/// follow their classes' forms, not the component's density, and are `runaway_hold`'s. So a
+/// component's deaths per system are [`field_term_deaths`]'; the candidates are those drawn with
+/// no screen ([`Screening::Off`]), since the screen refuses deaths the shared test would, by their
+/// windows. The nuclear disc's age density is flat over its last gigayear, so its expectation is
+/// exact but for the lifetimes' spread about the reference; the young field's, `1 − φ(a)` times the
+/// budget's (P09.T2.c), rises over its stars' death ages. The young field keeps some tenth of the
+/// young disc's youngest stars, so its cells are a run through the inner disc four cells wide, on
+/// both sides of the plane; the nuclear disc's are the eight about the centre.
 #[test]
 fn candidates_follow_the_young_field_s_recent_deaths() {
-    const STEPS: u32 = 40;
+    const STEPS: u32 = 24;
     let galaxy = galaxy();
     let process = CoreCollapseProcess::new(galaxy);
     let fields = galaxy.fields();
-    let years = process.interval().length().as_julian_years_f64();
+    let deaths = field_term_deaths(galaxy, &process);
     let cells: Vec<CatalogueCellKey> = (8..28)
-        .map(|y| key([0, y, 0]))
-        .chain([[0, 0, 0], [-1, -1, -1], [0, -1, -1], [-1, 0, 0]].map(key))
+        .flat_map(|y| (-2..2).flat_map(move |x| [[x, y, 0], [x, y, -1]]))
+        .chain((0..8).map(|o| [0, 1, 2].map(|axis| -((o >> axis) & 1))))
+        .map(key)
         .collect();
     let n = process.components().len();
     let mut observed = vec![0_u64; n];
@@ -289,14 +344,18 @@ fn candidates_follow_the_young_field_s_recent_deaths() {
         let bound = process.bound(galaxy, cell);
         for index in 0..candidate_count(galaxy.seed(), cell, bound) {
             let id = cell.candidate_id(index, 0).unwrap();
-            if let Some(candidate) = process.candidate(galaxy, cell, id, bound) {
-                let slot = process
-                    .components()
-                    .iter()
-                    .position(|young| young.id() == candidate.component)
-                    .unwrap();
-                observed[slot] += 1;
-            }
+            let Some(candidate) = process
+                .unscreened_candidate(galaxy, cell, id, bound)
+                .filter(|candidate| candidate.ejection.is_none())
+            else {
+                continue;
+            };
+            let slot = process
+                .components()
+                .iter()
+                .position(|young| young.id() == candidate.component)
+                .unwrap();
+            observed[slot] += 1;
         }
         let origin = cell.origin_ly();
         let step = f64::from(cell.edge_ly()) / f64::from(STEPS);
@@ -309,10 +368,7 @@ fn candidates_follow_the_young_field_s_recent_deaths() {
                     let p = PointLy::new(at(0, i), at(1, j), at(2, k));
                     for (slot, young) in process.components().iter().enumerate() {
                         let laws = fields.component(young.id());
-                        // The field's ages, which from 27 give most young stars to the features
-                        // (P09.T2.c), as its share does.
-                        let deaths = galaxy.field_ages(young.id()).pdf(Years::new(2.5e7)) * years;
-                        expected[slot] += young.share() * laws.density(&p) * deaths * volume;
+                        expected[slot] += young.share() * laws.density(&p) * deaths[slot] * volume;
                     }
                 }
             }
@@ -320,10 +376,12 @@ fn candidates_follow_the_young_field_s_recent_deaths() {
     }
     for (slot, young) in process.components().iter().enumerate() {
         eprintln!(
-            "{:?}: {} candidates kept against {:.1} expected",
+            "{:?}: {} candidates kept in the field's term against {:.1} expected ({:.4e} deaths per \
+             system)",
             young.id(),
             observed[slot],
-            expected[slot]
+            expected[slot],
+            deaths[slot]
         );
     }
     assert_poisson_count(
@@ -339,7 +397,7 @@ fn candidates_follow_the_young_field_s_recent_deaths() {
         expected[1] + expected[2],
         ALPHA,
     );
-    assert!(observed[0] > 50 && nuclear > 500, "{observed:?}");
+    assert!(observed[0] > 30 && nuclear > 500, "{observed:?}");
 }
 
 /// A candidate's \[Fe/H\] is its component's law at its site read at age zero, one normal on
@@ -348,18 +406,25 @@ fn candidates_follow_the_young_field_s_recent_deaths() {
 /// candidate's age at the epoch would, the age plan 06's `draw_metallicity` reads a grid record's
 /// law at, and a read at [`RECENT_DEATH_AGES`] too (determinism audit). A slope in either law fails
 /// the second half: the class must then read its candidate's age, which moves its draws. The
-/// candidates of a cell of the young disc and of the cell at the centre, every component's.
+/// field term's candidates of the sample cells, the run through the young disc and the cell at the
+/// centre, every component's, drawn with no screen ([`Screening::Off`]): from 27 the young field
+/// keeps some tenth of the young disc's stars (P09.T2.c), the screen refuses most candidates, by
+/// their windows, before their \[Fe/H\], and a runaway's or a walkaway's term reads its \[Fe/H\]
+/// at its source's reference site, as plan 08's displaced records do (P09.T33.b; `runaway_hold`'s).
 #[test]
 fn a_candidate_s_metallicity_is_read_at_age_zero() {
     let galaxy = galaxy();
     let process = CoreCollapseProcess::new(galaxy);
     let fields = galaxy.fields();
     let mut checked = vec![0_u32; process.components().len()];
-    for cell in [key([0, 16, 0]), key([0, 0, 0])] {
+    for cell in sample_cells() {
         let bound = process.bound(galaxy, &cell);
         for index in 0..candidate_count(galaxy.seed(), &cell, bound) {
             let id = cell.candidate_id(index, 0).unwrap();
-            let Some(candidate) = process.candidate(galaxy, &cell, id, bound) else {
+            let Some(candidate) = process
+                .unscreened_candidate(galaxy, &cell, id, bound)
+                .filter(|candidate| candidate.ejection.is_none())
+            else {
                 continue;
             };
             let laws = fields.component(candidate.component);
@@ -554,7 +619,9 @@ fn entries_resolve_to_themselves() {
 /// The rest of the sim reads an entry through its class (P09.T33.a): plan 06's stars, through
 /// `stars_of`, and their range brief, which is theirs on every route; the planetary context; the
 /// lensing mass; plan 03's position and epoch velocity, its class's line; the loss cone, which its
-/// line does not meet; and the observer's drift, which refuses a broken line.
+/// line does not meet; and the observer's drift, which refuses a broken line. Up to six entries of
+/// each sample cell: from 27 the young field keeps some tenth of the young disc's stars (P09.T2.c),
+/// so the run through the young disc holds a few, and the centre's cell most.
 #[test]
 fn the_rest_of_the_sim_reads_an_entry_through_its_class() {
     use crate::galaxy::features::members::NoInteriorCache;
@@ -567,7 +634,7 @@ fn the_rest_of_the_sim_reads_an_entry_through_its_class() {
     let galaxy = galaxy();
     let mut checked = 0;
     for (_, entries) in sample_entries() {
-        for entry in entries.iter().take(2) {
+        for entry in entries.iter().take(6) {
             let record = entry.value().record();
             let system = system_of(galaxy, entry.id()).unwrap();
             let stars = system.stars(galaxy).unwrap();

@@ -111,7 +111,7 @@ fn ejected_share(source: BirthSource, m: SolarMasses) -> f64 {
 
 /// The share of a band-E star of initial mass `m` of `source` ejected before its death at its
 /// reference lifetime under `table`, the closed form: each kind's ([`closed_form_kind_share`]).
-fn closed_form_share(table: &ClassTable, source: BirthSource, m: SolarMasses) -> f64 {
+pub(super) fn closed_form_share(table: &ClassTable, source: BirthSource, m: SolarMasses) -> f64 {
     KINDS.iter().fold(0.0, |sum, &kind| {
         sum + closed_form_kind_share(table, source, kind, m)
     })
