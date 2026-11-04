@@ -739,13 +739,18 @@ async fn shutdown_returns_within_the_network_timeout_with_work_queued() {
     let mut client = server.connected().await;
     let universe = client.create_universe("Kepler Reach", SEED).await;
     open(&mut client, &universe.id).await;
+    // From generator version 27 a range query reads the galaxy's global list, which the first
+    // builds at bulk priority (P10.T10.b): warmed here, or the queries below would wait behind the
+    // map's bands for it, with no job of their own queued.
+    let query = Query::around([0, 26_000, 0]).with_radius(50.0);
+    let warm = client.request(query.body(&universe.id)).await;
+    assert!(warm.is_ok(), "the warming query is answered: {warm:?}");
 
     client
         .send_request(map_body(&universe.id, MapView::FaceOn, 128))
         .await;
     // The in-flight cap is per connection, so the queries come from a second one.
     let mut other = server.connected().await;
-    let query = Query::around([0, 26_000, 0]).with_radius(50.0);
     for _ in 0..MAX_IN_FLIGHT_REQUESTS {
         other.send_request(query.body(&universe.id)).await;
     }
