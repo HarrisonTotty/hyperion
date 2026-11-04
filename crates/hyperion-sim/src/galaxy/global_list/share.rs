@@ -399,12 +399,14 @@ mod tests {
     }
 
     /// The globular tubes' share of the halo inside 65,000 ly, pinned over drawn galaxies:
-    /// 0.13–3.9% over the 2,000 galaxies of the summary (median 0.55%) at `GENERATOR_VERSION` 23.
+    /// 0.17–5.3% over the 2,000 galaxies of the summary (median 0.75%) at `GENERATOR_VERSION` 27,
+    /// whose fitted streams per globular (P15.T11.b) give the globulars more tubes (0.13–3.9%,
+    /// median 0.55%, at 23).
     /// P10.T3.d.a's 0.3–1% is a Milky Way figure, which the fixture meets (0.46%). Plan 02's
     /// globular count follows the dark halo's mass and the halo's budget the stars', so a galaxy of
     /// a low stellar-to-halo mass ratio has many globulars for a small halo: variety, not error
     /// (plan 10's records, "P10.T3.d.a's globular part").
-    const GLOBULAR_SHARE_PIN: (f64, f64) = (0.001, 0.045);
+    const GLOBULAR_SHARE_PIN: (f64, f64) = (0.001, 0.06);
 
     /// The percentiles the golden summary records.
     const PERCENTILES: [u32; 11] = [0, 1, 5, 10, 25, 50, 75, 90, 95, 99, 100];
@@ -424,8 +426,8 @@ mod tests {
 
     /// P10.T3.d.a over 2,000 seeds: the applied share is never above the greater of the drawn
     /// share and the globular tubes' share; the globular tubes' share inside 65,000 ly is recorded
-    /// and pinned ([`GLOBULAR_SHARE_PIN`], the median to 0.4–0.7%), P10.T3.d.a's 0.3–1% being a
-    /// Milky Way figure; and the distribution of the applied share is recorded in a golden
+    /// and pinned ([`GLOBULAR_SHARE_PIN`], the median to 0.6–0.9% from 27), P10.T3.d.a's 0.3–1%
+    /// being a Milky Way figure; and the distribution of the applied share is recorded in a golden
     /// summary, with a digest of every galaxy's applied share in seed order, for the brainstorm's
     /// owner (plan 10, Risks, "The discrete share against the dwarf mass range"). It moves with the
     /// potential, the dwarfs and [`GLOBULAR_TUBES_INSIDE`], and is re-blessed then.
@@ -452,7 +454,7 @@ mod tests {
             );
         }
         let median = summary(&globular).0[5];
-        assert!((0.004..=0.007).contains(&median), "{median}");
+        assert!((0.006..=0.009).contains(&median), "{median}");
         let outside = globular
             .iter()
             .filter(|g| !(0.003..=0.01).contains(*g))
