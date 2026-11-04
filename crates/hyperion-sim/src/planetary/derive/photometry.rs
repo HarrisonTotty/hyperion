@@ -864,7 +864,6 @@ mod tests {
 
     use super::*;
     use crate::planetary::derive::DerivedBody;
-    use crate::planetary::derive::atmosphere::Gas;
     use crate::planetary::derive::radius::CoreComposition;
     use crate::planetary::derive::solar::{found, solar_system};
 
@@ -988,10 +987,13 @@ mod tests {
     /// (b) The Solar System table: each planet chooses its own template (Uranus Neptune's), and
     /// each analogue at its reference, its derivation's Bond albedo the template's
     /// ([`TemplateRow::reference_bond`]), draws Table 7's p to 10⁻¹² (decision-p14-phase-j, 9):
-    /// Mercury, Venus and the four giants. Earth and Mars take their area mix at the passes'
-    /// stand-ins (no basins, all their condensed water at their surface), off their references, so
-    /// their p is printed against Table 7's until P14.T54.a's Batch C gives the passes their basins
-    /// and water share.
+    /// Mercury and Venus. Earth and Mars take their area mix at the passes' stand-ins (no basins,
+    /// all their condensed water at their surface), off their references, so their p is printed
+    /// against Table 7's until P14.T54.a's Batch C gives the passes their basins and water share.
+    /// From generator version 27 the four giants take their own envelopes' Bond albedos
+    /// (P14.T24.h.b part 5: Jupiter 0.500, Saturn 0.388, Uranus 0.308, Neptune 0.324), off their
+    /// references, which stay T51.b's class I (its anchor on the analogue's own albedo left as it
+    /// was at the bump), so theirs are printed too.
     #[test]
     fn the_solar_system_draws_itself() {
         let planets = solar_system();
@@ -1028,10 +1030,7 @@ mod tests {
             }
             assert!(!photometry.provisional(), "{name}");
         }
-        assert_eq!(
-            at_reference,
-            ["Mercury", "Venus", "Jupiter", "Saturn", "Uranus", "Neptune"]
-        );
+        assert_eq!(at_reference, ["Mercury", "Venus"]);
         // The stated ratios, findings for P14.T13.c and not failures: Mercury's 0.62
         // (decision-p14-phase-j) and Earth's 0.959 at the temperate 0.294 (decision-p11-t4k-faults;
         // 0.92 at 0.306, decision-r07-earth-albedo; Mallama's p gave 1.86).
@@ -1242,14 +1241,17 @@ mod tests {
     /// P14.T51.b: each template's reference is the Bond albedo the area mix gives its analogue
     /// about a Sun, where its rule changes it in closed form (the gas giants' hazy class I of
     /// Sudarsky, Burrows and Pinto and the ice giants' class I, decision-p14-t54a-ganymede §2–3;
-    /// airless ice's fresh `H2O` frost), read from the registry, and the airless
-    /// rock analogues' the Moon's 0.11 while no lid is known; the rest are their state's table
-    /// albedo, and the snowball's Europa's 0.68. An analogue in its own state at its reference is
-    /// drawn with its row's p.
+    /// airless ice's `H2O` regolith, from generator version 27 ice with its rock's lag, 0.350,
+    /// P14.T49.m, where it was fresh frost's 0.832), read from the registry, and the airless rock
+    /// analogues' the Moon's 0.11 while no lid is known; the rest are their state's table albedo,
+    /// and the snowball's Europa's 0.68. An analogue in its own state at its reference is drawn
+    /// with its row's p.
     #[test]
     fn the_references_are_the_area_mix_s() {
         let sun = area_mix::sun_bands();
-        let water = area_mix::solid_bond(Gas::Water.substance(), &sun).bond;
+        let water = area_mix::Regolith::of_material(SurfaceMaterial::Ice)
+            .bond(SurfaceState::Airless, &sun)
+            .bond;
         let rock = SurfaceMaterial::Rock;
         for template in PhaseTemplate::ALL {
             let reference = template.row().reference_bond().value();
