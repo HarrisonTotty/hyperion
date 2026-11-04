@@ -357,7 +357,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "sky_binary_light_e",
         revision: 0,
-        since_generator_version: 26,
+        since_generator_version: 27,
         provisional: false,
     },
     TableInfo {
