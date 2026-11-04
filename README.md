@@ -272,6 +272,9 @@ it that the change needs (below); integration runs the whole.
   is a finding to raise, never a failure.
 - `just bless` rewrites the golden files under `crates/*/tests/golden/` after a deliberate
   `GENERATOR_VERSION` bump; it refuses to run under `CI`.
+- `just repin <test name>…` re-pins the figures those tests pin (`hyperion_testkit::pins`, kept in
+  `crates/*/tests/pins/`), blessing by test name as goldens are; `just repin --check` fails on a
+  stale pin.
 - `just test-wasm-fast`, part of `just ci`, checks generated output bit for bit on WebAssembly as
   well as on native x86-64: it runs the fast tests of `hyperion-base`, `hyperion-surface`,
   `hyperion-sim` and `hyperion-testkit`, goldens included, as `wasm32-wasip1` under wasmtime, where

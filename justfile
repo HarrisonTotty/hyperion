@@ -1268,9 +1268,22 @@ fit-check:
 _fit-check-built:
     "${CARGO_TARGET_DIR:-target}/debug/hyperion-fit" check
 
+# Pinned figures only compare here (`HYPERION_PINS_KEEP`): they are re-pinned by test name, with
+# `just repin` below, so that a figure that moved fails here first.
 # Regenerate the golden files after a deliberate GENERATOR_VERSION bump.
 bless:
-    HYPERION_BLESS=1 cargo test --workspace
+    HYPERION_BLESS=1 HYPERION_PINS_KEEP=1 cargo test --workspace
+
+# The figures that tests pin (`hyperion_testkit::pins`, in `crates/*/tests/pins/`) are blessed by
+# test name: every test of the workspace with one of the names given (its function's name) runs
+# alone, one at a time, at 16 test threads, under `HYPERION_BLESS=1`, its slow tests under the
+# slow-test profile; then the keys under those names that no test pins any more are dropped.
+# `--check` runs them unblessed and fails on a stale, missing or no longer pinned key, and with no
+# names checks every test a pins file names (`tools/repin/repin.py`).
+# Re-pin the figures the named tests pin, e.g. `just repin the_census_is_pinned`.
+[positional-arguments]
+repin *args:
+    python3 "{{ justfile_directory() }}/tools/repin/repin.py" "$@"
 
 # Regenerate the TypeScript protocol bindings from the Rust protocol crate.
 gen-protocol:
