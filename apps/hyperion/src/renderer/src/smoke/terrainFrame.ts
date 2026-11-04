@@ -138,6 +138,7 @@ import {
 } from "./surveyEdge";
 import { BROKEN_CULL_KERNEL, type SmokeFixture } from "./catalogue";
 import { smokeGeometry } from "./geometry";
+import { LaneHold, type LockstepStep, settleInLockstep } from "./lockstep";
 
 /** The passes' cache budget, 32 MiB: a few hundred lit slots, as the survey-edge check takes. */
 const CACHE_BYTES = 2 ** 25;
@@ -309,6 +310,9 @@ interface LiveFrame {
 
 /** The patches the last frame of each pass drew (plan R14, R14.T1.a), by pass. */
 const drawnPatches = new WeakMap<TerrainPass, TerrainDrawnPatches>();
+
+/** The hold on each pass's lanes, which {@link settled} releases and holds again (`lockstep.ts`). */
+const laneHolds = new WeakMap<TerrainPass, LaneHold>();
 
 /** The view's frame terrain over `pass` and the body's mask, `VIEW`'s session's seams. */
 function sourceOf(pass: TerrainPass, mask: CoverageMask): FrameTerrainSource {
@@ -501,19 +505,24 @@ function chordSagM(level: number): number {
  * The grazing views'
  * ground out to the horizon goes on standing in over the survey's margin, which the checks never
  * read, and their fine patches at the points stream for longer than the part allows.
+ *
+ * Each step waits for every bake `pool` was asked for to land, and the frame is the first that a
+ * step leaves as it was, its bands resting (`lockstep.ts`), so that it is the same whatever the
+ * workers' pace; and the pass's lanes are held from then until its next settle, so that the frames
+ * a check draws after it draw what it settled on.
  */
 async function settled(
   pass: TerrainPass,
+  pool: HeightWorkerPool,
   mask: CoverageMask,
   pose: Pose,
   near: ReadonlyArray<Vec3> | null = null,
   grounded: ReadonlyArray<GroundContact> = [],
   timeoutMs = STREAM_TIMEOUT_MS,
 ): Promise<{ readonly done: boolean; readonly frame: LiveFrame; readonly state: string }> {
-  const started = performance.now();
-  for (;;) {
-    const now = performance.now();
-    const frame = liveFrame(pass, mask, pose, now, grounded);
+  let state = "";
+  const step = (): LockstepStep<LiveFrame> => {
+    const frame = liveFrame(pass, mask, pose, performance.now(), grounded);
     const drawSet = pass.lastStep?.drawSet;
     const role = frame.plan.meshes[0]?.role;
     const standsInNear = (): boolean =>
@@ -531,14 +540,19 @@ async function settled(
       drawSet.missing === 0 &&
       pass.refining === 0 &&
       (near === null ? drawSet.standingIn === 0 : !standsInNear());
-    if (done || now - started > timeoutMs) {
-      const state = `role ${String(role?.kind)}, ${String(frame.terrainDraws.length)} terrain draws, ${String(drawSet?.missing)} missing, ${String(drawSet?.standingIn)} standing in, ${String(pass.refining)} refining${near === null ? "" : `, near ${String(standsInNear())}`}`;
-      return { done, frame, state };
-    }
-    // Streaming runs in the workers; give them the event loop between frames.
-    // oxlint-disable-next-line no-await-in-loop
-    await pause(50);
-  }
+    state = `role ${String(role?.kind)}, ${String(frame.terrainDraws.length)} terrain draws, ${String(drawSet?.missing)} missing, ${String(drawSet?.standingIn)} standing in, ${String(pass.refining)} refining${near === null ? "" : `, near ${String(standsInNear())}`}`;
+    return { done, frame, drawSet, resting: pass.bandsAtTarget(VIEW) };
+  };
+  const streamed = (): boolean =>
+    pool.queuedCount === 0 &&
+    pool.inFlightCount === 0 &&
+    pool.waitingCount === 0 &&
+    pass.refining === 0;
+  const hold = laneHolds.get(pass);
+  hold?.release();
+  const { done, frame } = await settleInLockstep(step, streamed, timeoutMs);
+  hold?.hold();
+  return { done, frame, state };
 }
 
 /** Whether two frames show the same marks, mark by mark. */
@@ -726,6 +740,7 @@ export async function checkTerrainFrame(
     lay: ((bake: BakedPatch) => BakedPatch) | null,
     clusterCullKernel?: KernelPair,
   ): Promise<TerrainPass> => {
+    const hold = new LaneHold();
     const pass = new TerrainPass({
       engine,
       setting: "low",
@@ -733,13 +748,15 @@ export async function checkTerrainFrame(
       geometry: smokeGeometry("low"),
       planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
       source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
-      createPool: (bake) => (lay === null ? pool.lane(bake) : onTheDatumLane(pool.lane(bake), lay)),
+      createPool: (bake) =>
+        hold.wrap(lay === null ? pool.lane(bake) : onTheDatumLane(pool.lane(bake), lay)),
       survey,
       ...(clusterCullKernel === undefined ? {} : { clusterCullKernel }),
     });
     // The harness compares frames drawn at different times, byte for byte: the time morph's
     // changes cut at their first draw (R10.T16.i), as under reduced motion.
     pass.setReducedMotion(true);
+    laneHolds.set(pass, hold);
     passes.push(pass);
     await pass.ready();
     return pass;
@@ -770,7 +787,7 @@ export async function checkTerrainFrame(
 
     // With relief: the reference surface, then the terrain over it, as the bodies pass draws them.
     const relief = await makePass(null);
-    const withRelief = await settled(relief, mask, pose);
+    const withRelief = await settled(relief, pool, mask, pose);
     const both = await drawn(engine, pose, [
       {
         label: bodies,
@@ -1032,7 +1049,7 @@ export async function checkTerrainFrame(
     // states the refusal.
     if (fixture === "broken-wgsl") {
       const refused = await makePass(null, BROKEN_CULL_KERNEL);
-      const settledRefused = await settled(refused, mask, pose);
+      const settledRefused = await settled(refused, pool, mask, pose);
       const frameBy = async (geometry: GeometrySettings): Promise<Float32Array> => {
         refused.setGeometry(geometry);
         const frame = liveFrame(refused, mask, pose, performance.now());
@@ -1052,7 +1069,7 @@ export async function checkTerrainFrame(
 
     // On the datum: each surface alone, through the same live path.
     const datum = await makePass(onTheDatum);
-    const onDatum = await settled(datum, mask, pose);
+    const onDatum = await settled(datum, pool, mask, pose);
     const terrainAlone = await drawn(engine, pose, [
       { label: "terrain", draws: onDatum.frame.terrainDraws },
     ]);
@@ -1324,6 +1341,7 @@ export async function checkTerrainFrame(
     };
     const grazed = await settled(
       flat,
+      pool,
       mask,
       graze,
       [20, 44].map((x) => add(graze.cameraM, datumOnRay(graze, x + 0.5, GRAZE_ROW + 0.5))),
@@ -1382,6 +1400,7 @@ export async function checkTerrainFrame(
       };
       const viewSettled = await settled(
         flat,
+        pool,
         mask,
         view,
         points.map((p) => add(view.cameraM, p)),
@@ -1449,7 +1468,7 @@ export async function checkTerrainFrame(
       add(graze.cameraM, p),
       add(graze.cameraM, scale(p, 1 - RIDGE_LEAD_M / norm(p))),
     ]);
-    const ridgeSettled = await settled(ridgePass, mask, graze, ridgeNear);
+    const ridgeSettled = await settled(ridgePass, pool, mask, graze, ridgeNear);
     await photoreal.prepare(VIEWPORT, "low", "eye", graze.camera);
     const ridgeList = { ...emptyDrawList(viewStrokesAt(1)), lines: [ridgeLine] };
     const behindRidge = await drawFrame(
@@ -1521,6 +1540,7 @@ export async function checkStridesUnderCraft(engine: RenderEngine, checks: Check
   });
   const passes: TerrainPass[] = [];
   const makePass = async (): Promise<TerrainPass> => {
+    const hold = new LaneHold();
     const pass = new TerrainPass({
       engine,
       setting: "low",
@@ -1528,10 +1548,11 @@ export async function checkStridesUnderCraft(engine: RenderEngine, checks: Check
       geometry: smokeGeometry("low"),
       planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
       source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
-      createPool: (bake) => pool.lane(bake),
+      createPool: (bake) => hold.wrap(pool.lane(bake)),
       survey,
     });
     pass.setReducedMotion(true);
+    laneHolds.set(pass, hold);
     passes.push(pass);
     await pass.ready();
     return pass;
@@ -1562,13 +1583,14 @@ export async function checkStridesUnderCraft(engine: RenderEngine, checks: Check
     // pixels.
     const foot = datumAt(OVER, 48, 20);
     const groundPass = await makePass();
-    await settled(groundPass, mask, grazingPose(RAD_70, 1_500, RAD_8, 48, 20), [foot.p]);
+    await settled(groundPass, pool, mask, grazingPose(RAD_70, 1_500, RAD_8, 48, 20), [foot.p]);
     const groundUnder = heldGroundUnder(MOON_LIKE_FIGURE, groundPass.heights);
     const craft: GroundContact = { positionM: groundUnder(foot.p).groundPointM, radiusM: 20 };
     // From 1.5 km over the craft's ground, looking at it, through a field of 8°.
     const overhead = poseLookingAt(craft.positionM, foot.nu, RAD_70, 1_500, RAD_8);
     const groundSettled = await settled(
       groundPass,
+      pool,
       mask,
       overhead,
       null,

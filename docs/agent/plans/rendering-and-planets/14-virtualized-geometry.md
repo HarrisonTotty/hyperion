@@ -2420,3 +2420,13 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   the kernels' sources, and `--check` only compares. Run it after moving a kernel, or after resolving
   a digest conflict. A new table there is a top-level `const` named `<NAME>_DIGESTS`, each row
   ending in its pin, a string literal, after what the file's `digestOf` digests.
+- **R14.T1.a, the terrain checks settled in lockstep** (`fix-part15-interior-flake`, 2026-11-03):
+  - `smoke/lockstep.ts`: `settleInLockstep` steps only once the pool is quiet, then steps at once
+    until the draw set and the bands rest; `LaneHold` keeps a pass's arrivals until it is released.
+  - Parts 15 and 16's `settled(pass, pool, …)` (`terrainFrame.ts`) and part 7's `stream` and
+    `streamedFor` (`sharedPass.ts`) settle through it, and hold the pass's lanes after it.
+  - `TerrainPass.bandsAtTarget(id)` (new): whether a view's morph bands have reached its τ′.
+  - Part 15 now settles on 77 patches (46 interior), digest 93e51627, in every run; 615542ff (80
+    patches, 49 interior) was the budget hold's other fixed point, reached by bakes' timing.
+  - (lean, 2026-11-03) R10.T9.b's "darker at some" is stated, not asked: its pose casts no shadow
+    the frame shows (0 texels in lockstep's settle; BASE's 1 lay under its floor). Re-pose, restore.
