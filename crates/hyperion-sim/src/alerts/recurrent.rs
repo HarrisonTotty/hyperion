@@ -1251,14 +1251,17 @@ mod tests {
 
     /// The core collapses' magnetar is the entry's own: its host's star is the stellar stage's
     /// primary of the entry's system, whose neutron star is the entry's and dies at its T; and an
-    /// entry is a host exactly when that neutron star is born above the critical field.
+    /// entry is a host exactly when that neutron star is born above the critical field. The cells
+    /// span 8,192 ly along x and 10,240 ly along y about the solar circle: from 27 the young field
+    /// gives most of its young stars to the features that bore them (P09.T2.c), and the 32 cells
+    /// that held 26's sample hold two pulsars.
     #[test]
     fn a_core_collapses_magnetar_is_its_entrys_own() {
         let galaxy = Galaxy::new(Seed::new(9));
         let process = CoreCollapseProcess::new(&galaxy);
         let (mut pulsars, mut magnetars) = (0, 0);
-        for y in 46..54 {
-            for x in -2..2 {
+        for y in 40..60 {
+            for x in -8..8 {
                 let key = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [x, y, 0]).unwrap();
                 for entry in CatalogueClassCell::generate(&galaxy, &process, key).entries() {
                     let entry = entry.value();

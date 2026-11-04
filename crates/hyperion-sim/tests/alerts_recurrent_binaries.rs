@@ -224,6 +224,15 @@ fn about_the_centre() -> Vec<[i32; 3]> {
         .collect()
 }
 
+/// The cells of the disc within 51,200 ly of the centre along x and y, in and just below the
+/// plane, x first: from 27 the refit gives the galaxy's catalogue about four Be/X binaries
+/// (P15.T10.b), and seed 9's five lie in the disc, none about the centre.
+fn across_the_disc() -> Vec<[i32; 3]> {
+    (-100..100)
+        .flat_map(|x| (-100..100).flat_map(move |y| [-1, 0].map(move |z| [x, y, z])))
+        .collect()
+}
+
 /// `query`'s walk over `class` is the brute force's; returns the walk's detections.
 fn assert_walk_is_the_brute_force(
     galaxy: &Galaxy,
@@ -313,8 +322,9 @@ fn nova_alerts_are_the_brute_forces() {
 
 /// The X-ray binaries' events on the 2,000 ly sphere, about the centre where they crowd: beside a
 /// burster over ten days, beside a transient over a year that holds an outburst's arrival and
-/// over a day a month later, and beside a Be/X binary over a year that holds a giant outburst's
-/// arrival. The walk is the brute force's, and each observer sees its host's events.
+/// over a day a month later, and beside a Be/X binary of the disc ([`across_the_disc`]) over a
+/// year that holds a giant outburst's arrival. The walk is the brute force's, and each observer
+/// sees its host's events.
 #[test]
 fn x_ray_binary_alerts_are_the_brute_forces() {
     let galaxy = Galaxy::new(Seed::new(SEED));
@@ -372,7 +382,7 @@ fn x_ray_binary_alerts_are_the_brute_forces() {
     let bex = target(
         &galaxy,
         class,
-        about_the_centre(),
+        across_the_disc(),
         BinaryEventKind::BeXGiantOutburst,
         window(UniverseTime::EPOCH, 100.0 * YEAR),
         10.0,
