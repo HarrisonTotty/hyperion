@@ -153,6 +153,15 @@ filter = "package(hyperion-server) & binary(=sky) & test(=a_sky_near_the_sun_ret
 threads-required = 4
 priority = 50
 
+# From generator version 27 a sky's census takes the features' members and the catalogue classes'
+# hosts beside its grid (R06.T16.a's switch), its jobs on the server's three workers: under a whole
+# run's load at one slot each, seven of the server's sky tests waited past the harness's patience
+# for their replies (train 27's gate), so each takes four slots and starts as early as the group.
+[[profile.default.overrides]]
+filter = "package(hyperion-server) & binary(=sky)"
+threads-required = 4
+priority = 50
+
 # R13.T2.b's real boundary in jobs builds the server's galaxy's luminosity tables on its pool of
 # three workers, as the server builds them (`build_on_pool`), counts the caps' rays in jobs on that
 # pool beside its runtime's threads, and runs the sim's three references on threads of their own, so
