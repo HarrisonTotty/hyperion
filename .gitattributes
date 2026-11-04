@@ -17,3 +17,7 @@ crates/*/src/tables/*.rs text eol=lf
 # Golden files are LF text, read line by line by the Rust and TypeScript tests; a CRLF checkout
 # (Git for Windows' default) would fail every comparison (decision-r10-t16d-part1, item 6).
 *.golden text eol=lf
+
+# Pins files are LF text in a canonical form, which `hyperion_testkit::pins` reads byte for byte and
+# refuses in any other, so a CRLF checkout would fail every test that pins figures.
+*.pins text eol=lf

@@ -4,6 +4,8 @@
 //! generator itself must not contain:
 //!
 //! - [`golden`](mod@golden): the golden-file harness that pins generated output bit for bit.
+//! - [`pins`](mod@pins): pinned figures, the values a test measures, kept in data files and blessed by
+//!   test name as goldens are.
 //! - [`order`]: the order-independence check ("A then B equals B then A equals B alone").
 //! - [`stats`]: hand-written statistical tests (chi-square, Kolmogorov–Smirnov, Poisson counts).
 //! - [`lcg`]: a small fixed generator for test inputs, independent of the sim's own streams.
@@ -19,5 +21,6 @@ pub mod float;
 pub mod golden;
 pub mod lcg;
 pub mod order;
+pub mod pins;
 pub mod stats;
 pub mod threads;
