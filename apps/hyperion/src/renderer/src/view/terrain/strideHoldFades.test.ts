@@ -55,18 +55,17 @@ describe("the onsets of a view's coarse–fine holds (plan R14, R14.T3.c)", () =
     ]);
   });
 
-  it("takes no fade for a patch first seen held, nor for one whose hold has let go", () => {
-    const none = Array.from({ length: 8 }, () => NONE);
-    expect([
-      framesOf([[0, HELD_X64, null]])[0],
+  it("takes no fade for a patch first seen held", () => {
+    expect(framesOf([[0, HELD_X64, null]])[0]).toEqual([0, Array.from({ length: 8 }, () => NONE)]);
+  });
+
+  it("takes no fade for an edge whose hold has let go, its bands its own", () => {
+    expect(
       framesOf([
         [0, HELD_X64, null],
         [10, 0, 90],
       ])[1],
-    ]).toEqual([
-      [0, none],
-      [0, Array.from({ length: 8 }, () => 90)],
-    ]);
+    ).toEqual([0, Array.from({ length: 8 }, () => 90)]);
   });
 
   it("forgets a patch a frame does not fade, so that it comes back as first seen", () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import vertexGolden from "../../../../../../../../crates/hyperion-surface/tests/golden/vertex_f32.golden?raw";
 import { vec3 } from "../../../geometry/vec3";
+import { TERRAIN_SUB_PATCH_MASK } from "../../clusters/terrain";
 import { MAX_MORPH_HOLDS } from "../coarseFineHolds";
 import type { Face, PatchKey } from "../patchKey";
 import {
@@ -13,6 +14,7 @@ import {
   MIX_STEPS,
   CLASS_MORPH,
   cellAncestorPlace,
+  clusterSubPatchOf,
   INSTANCE_RECORD_BYTES,
   InstanceRecords,
   MAX_CELL_ANCESTOR_LEVELS,
@@ -310,6 +312,54 @@ describe("an instance record", () => {
       expect(copy.count).toBe(0);
     },
   );
+});
+
+describe("an instance record's camera strides (plan R14, R14.T3.c)", () => {
+  it("holds its holds' onsets' shares in word 14, a byte an edge, 0 by default", () => {
+    const records = new InstanceRecords(2);
+    records.push(1, vec3(0, 0, 0), 0, 1);
+    records.push(
+      2,
+      vec3(0, 0, 0),
+      0,
+      1,
+      NO_PARENT_SLOT,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      undefined,
+      false,
+      undefined,
+      (255 << 8) | 7,
+    );
+    const u = new Uint32Array(records.buffer);
+    expect([u[14], u[WORDS + 14]]).toEqual([0, (255 << 8) | 7]);
+  });
+});
+
+describe("a stand-in's sub-patch word on the cluster path (plan R14, Design note 19)", () => {
+  const patch: PatchKey = { face: 2, level: 7, i: 40, j: 9 };
+
+  it("marks a stand-in one to three levels below its slot's patch a mask of that patch's own blocks", () => {
+    expect(
+      [1, 2, 3].map((levels) => {
+        const side = 2 ** levels;
+        const within = { face: 2 as const, level: 7 + levels, i: 40 * side + 1, j: 9 * side };
+        return (
+          clusterSubPatchOf(patch, within) ===
+          (subPatchOf(patch, within) | TERRAIN_SUB_PATCH_MASK) >>> 0
+        );
+      }),
+    ).toEqual([true, true, true]);
+  });
+
+  it("leaves a stand-in more than three levels below its slot's patch its own grid", () => {
+    const within = { face: 2 as const, level: 11, i: 40 * 16 + 3, j: 9 * 16 + 5 };
+    expect(clusterSubPatchOf(patch, within)).toBe(subPatchOf(patch, within));
+  });
 });
 
 describe("an instance record's class sets (lane fix-coast-class-map)", () => {

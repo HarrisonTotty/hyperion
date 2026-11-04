@@ -55,7 +55,9 @@ struct PatchInstance {
   parentSlot : u32,
   parentQuadrant : u32,
   sub : vec4u,
-  strides : vec4f,
+  strides : vec2f,
+  holdFades : u32,
+  stridesPad : u32,
   cells : vec4u,
   edgeBands : array<vec4u, 12>,
 }

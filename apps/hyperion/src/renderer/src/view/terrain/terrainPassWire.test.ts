@@ -839,11 +839,18 @@ describe("the wireframe's interior patches on the cluster path (plan R14, R14.T4
     ]);
   });
 
-  it("draws a stand-in of an interior bake among them, a sub-patch one to three levels down as a mask its cull tests and a deeper one kept whole (Design note 19)", async () => {
+  /**
+   * The interior records' sub-patch words and cull inputs from `altitudeM` over the pole, nothing
+   * baked there (stand-ins).
+   */
+  async function standIns(altitudeM: number): Promise<{
+    readonly words: number[];
+    readonly whole: boolean[];
+  }> {
     const made = await clusteredPass();
     streamed(made);
     // Nearer, with nothing baked: the finer patches asked for are drawn by their resident ancestors.
-    const nearer = northPole(200_000);
+    const nearer = northPole(altitudeM);
     made.pass.step({ views: [passView(nearer)], grounded: [] });
     made.pass.drawFor(PRIMARY, frameOf(nearer, WIRE));
     const records = new Uint32Array(
@@ -855,15 +862,18 @@ describe("the wireframe's interior patches on the cluster path (plan R14, R14.T4
     const subPatches = Array.from({ length: records.length / WORDS }, (_, k) => k).filter(
       (k) => (records[k * WORDS + INSTANCE_SUB_PATCH_WORD] ?? 0) !== 0,
     );
-    const masked = (k: number): boolean =>
-      ((records[k * WORDS + INSTANCE_SUB_PATCH_WORD] ?? 0) & TERRAIN_SUB_PATCH_MASK) !== 0;
-    const levels = (k: number): number => (records[k * WORDS + INSTANCE_SUB_PATCH_WORD] ?? 0) & 31;
-    const whole = (k: number): boolean => ((inputs[2 * k] ?? 0) & CULL_INPUT_WHOLE) !== 0;
+    return {
+      words: subPatches.map((k) => records[k * WORDS + INSTANCE_SUB_PATCH_WORD] ?? 0),
+      whole: subPatches.map((k) => ((inputs[2 * k] ?? 0) & CULL_INPUT_WHOLE) !== 0),
+    };
+  }
+
+  it("draws a stand-in of an interior bake one to three levels down among them as a mask its cull tests by its spheres (Design note 19)", async () => {
+    const { words, whole } = await standIns(200_000);
+    const masks = words.flatMap((word, n) => ((word & 31) <= TERRAIN_MASK_LEVELS ? [n] : []));
     expect([
-      subPatches.length > 0,
-      subPatches.every((k) =>
-        levels(k) <= TERRAIN_MASK_LEVELS ? masked(k) && !whole(k) : !masked(k) && whole(k),
-      ),
+      masks.length > 0,
+      masks.every((n) => ((words[n] ?? 0) & TERRAIN_SUB_PATCH_MASK) !== 0 && whole[n] === false),
     ]).toEqual([true, true]);
   });
 

@@ -195,15 +195,19 @@ describe("a stand-in's mask of its slot's patch's own blocks (plan R14, Design n
       const of = Array.from({ length: TERRAIN_PAGE_CLUSTERS }, (_, c) =>
         terrainMaskCluster(word, c),
       );
-      return [of.filter((m) => m === 1).length, of.filter((m) => m === 2).length];
+      return [of.filter((m) => m === "sphere").length, of.filter((m) => m === "whole").length];
     });
-    expect([counts, terrainMaskCluster(subPatchWord(2, 1, 1), 100)]).toEqual([
-      [
-        [16, 16],
-        [4, 8],
-        [1, 4],
-      ],
-      1,
+    expect(counts).toEqual([
+      [16, 16],
+      [4, 8],
+      [1, 4],
+    ]);
+  });
+
+  it("draws every cluster of an instance that is not a mask by its sphere, a sub-patch's too", () => {
+    expect([terrainMaskCluster(0, 100), terrainMaskCluster(subPatchWord(2, 1, 1), 100)]).toEqual([
+      "sphere",
+      "sphere",
     ]);
   });
 

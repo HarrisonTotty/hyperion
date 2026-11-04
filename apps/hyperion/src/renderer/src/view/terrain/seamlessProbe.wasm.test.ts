@@ -337,7 +337,10 @@ interface DrawnArea {
 interface Camera {
   readonly view: ViewSelectionInput;
   readonly bands: Float64Array;
-  /** The view's τ′ over its px per radian (plan R14, R14.T3.c's rule): Design note 3's, unslewed. */
+  /**
+   * The view's τ′ over its px per radian, Design note 3's, unslewed: the bare rules' (`StrideFrame`'s
+   * own and patch shares); the drawn strides take their records' scale, at the bands' slewed τ′.
+   */
   readonly tauPrimeRad: number;
 }
 
@@ -2462,6 +2465,12 @@ const AT_DEFAULT_KNOBS =
 /** The camera's strides' bound on a frame's move (plan R14, R14.T3.c's acceptance), px. */
 const STRIDE_MOVE_PX: Readonly<Record<QualitySetting, number>> = { high: 1, low: 2 };
 
+/**
+ * The camera's strides' lit triangles, of stride 1's, as research-leans-35 restated T3.c's bound:
+ * the shared bands' own share on its probe, within 10%.
+ */
+const STRIDE_SHARE: Readonly<Record<QualitySetting, number>> = { high: 0.031, low: 0.018 };
+
 /** The script's first draws on high: past the hand-over at 40.55 s. */
 const SHORT_TO_S = 42;
 
@@ -2522,7 +2531,8 @@ describe.runIf(SLOW)("the seamless probe's acceptance (HYPERION_SLOW_TESTS=1)", 
             ].filter(([, value, bound]) => Number(value) > Number(bound));
       expect(over).toEqual([]);
       // The camera's strides (plan R14, R14.T3.c's acceptance): no frame's change of them moves a
-      // vertex past 1 px on high and 2 px on low, nor turns a normal past 2°.
+      // vertex past 1 px on high and 2 px on low, nor turns a normal past 2°, and the seen blocks
+      // draw at most 0.031 and 0.018 of stride 1's lit triangles, within 10%.
       const strides = strideSummaryOf(played.strides);
       expect(
         STRIDED
@@ -2530,9 +2540,10 @@ describe.runIf(SLOW)("the seamless probe's acceptance (HYPERION_SLOW_TESTS=1)", 
               strided: strides.framesStrided > 0,
               movePx: strides.movePxMax <= STRIDE_MOVE_PX[setting],
               normalDeg: strides.normalDegMax <= POP_NORMAL_DEG,
+              litTriangles: strides.litTriangleShare <= 1.1 * STRIDE_SHARE[setting],
             }
-          : { strided: true, movePx: true, normalDeg: true },
-      ).toEqual({ strided: true, movePx: true, normalDeg: true });
+          : { strided: true, movePx: true, normalDeg: true, litTriangles: true },
+      ).toEqual({ strided: true, movePx: true, normalDeg: true, litTriangles: true });
     },
   );
 

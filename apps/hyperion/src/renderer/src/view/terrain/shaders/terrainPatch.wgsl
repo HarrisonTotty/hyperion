@@ -35,8 +35,8 @@ const TERRAIN_MIXES : bool = true;
 // to `sub.w` are its fades (R10.T16.i): its edges' and its corners' bytes, then its own fade's
 // byte, its rebake's fade's and the slot of the bake it fades from (`fadeFloor`, `rebakeOf`).
 // `strides` are its stride scale at its view's τ′ (plan R14, R14.T3.c; `terrainStrides.wgsl`): E_L ÷
-// τ′_rad, m, then 1 ÷ τ′_rad, at or below 0 for none, then its holds' onsets' shares a byte an edge
-// in `EDGES`' order, a u32's bits (uniforms.ts' `InstanceRecords.push`), and bit 18 of `parentQuadrant` holds its
+// τ′_rad, m, then 1 ÷ τ′_rad, at or below 0 for none; `holdFades` its holds' onsets' shares a byte
+// an edge in `EDGES`' order (uniforms.ts' `InstanceRecords.push`); and bit 18 of `parentQuadrant` holds its
 // camera passes at stride 1 (uniforms.ts' `INSTANCE_FINEST`). `cells` are its class sets' (lane
 // fix-coast-class-map; uniforms.ts' `InstanceRecords.setCells`): x the slot of its ancestor of the
 // field's cells' level, L − 6, whose class weights it fades to near the hand-over range, or
@@ -52,7 +52,9 @@ struct Instance {
   parentSlot : u32,
   parentQuadrant : u32,
   sub : vec4u,
-  strides : vec4f,
+  strides : vec2f,
+  holdFades : u32,
+  stridesPad : u32,
   cells : vec4u,
   edgeBands : array<vec4u, 12>,
 }

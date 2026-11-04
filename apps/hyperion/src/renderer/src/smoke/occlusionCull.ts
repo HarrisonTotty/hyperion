@@ -215,7 +215,7 @@ export async function checkOcclusionCull(engine: RenderEngine, checks: Checks): 
         page,
         passMask: 1,
         unitM: 0.1,
-        subPatch: true,
+        subWord: 1,
       })),
     ];
     const historyWords = PAGES * Math.ceil(CLUSTERS / 32);
@@ -229,7 +229,7 @@ export async function checkOcclusionCull(engine: RenderEngine, checks: Checks): 
     const inputs = new Uint32Array(2 * instances.length);
     instances.forEach((instance, n) => {
       words.setUint32(bytes * n + 12, instance.page, true);
-      words.setUint32(bytes * n + 32, instance.subPatch === true ? 1 : 0, true);
+      words.setUint32(bytes * n + 32, instance.subWord ?? 0, true);
       inputs[2 * n] = (instance.passMask | (instance.whole === true ? CULL_INPUT_WHOLE : 0)) >>> 0;
       inputs[2 * n + 1] = new Uint32Array(Float32Array.of(instance.unitM).buffer)[0] ?? 0;
     });

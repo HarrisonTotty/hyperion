@@ -113,6 +113,7 @@ import type { TerrainLighting } from "./terrainMaterial";
 import {
   appendCasterRecord,
   cascadeHorizonTexelM,
+  BAND_SLEW_PER_STEP,
   castsInto,
   meanRadiusM,
   morphRangeM,
@@ -1736,13 +1737,6 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
     ]).toEqual([true, true]);
   });
 
-  it("keeps a sub-patch of an interior bake more than three levels down whole in the cull, its grid not its slot's records'", async () => {
-    const made = await clusteredPass();
-    nearerUnbaked(made);
-    const deeper = subPatchesOf(made).filter(({ levels }) => levels > TERRAIN_MASK_LEVELS);
-    expect(deeper.every(({ masked, kept }) => !masked && kept)).toBe(true);
-  });
-
   it("draws a stand-in of an edge bake by the lit mesh", async () => {
     const made = await edgePass();
     nearerUnbaked(made);
@@ -1940,6 +1934,65 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
       subPatches.every(({ none }) => none),
       records.some(({ subPatch, none }) => !subPatch && !none),
     ]).toEqual([true, true, true]);
+  });
+
+  /** Each measured interior record's slot, its holds at k = 0 and its onsets' shares word. */
+  function heldOf(made: Made): Array<{ slot: number; held: number; shares: number }> {
+    const per = INSTANCE_RECORD_BYTES / 4;
+    const words = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+    return stridesOf(made).flatMap(({ strideScale, quadrant }, k) =>
+      strideScale.perErrorM > 0
+        ? [
+            {
+              slot: words[k * per + INSTANCE_SLOT_WORD] ?? -1,
+              held: (quadrant >>> 2) & 0xf,
+              shares: words[k * per + 14] ?? 0,
+            },
+          ]
+        : [],
+    );
+  }
+
+  it("fades a hold at k = 0 in as a finer patch arrives beside a measured patch's edge, its share 255 the frame it switches on", async () => {
+    const made = await measuredPass();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const before = new Map(heldOf(made).map(({ slot, held }) => [slot, held]));
+    // Nearer, its patches baked: some refine beside patches that stay.
+    const nearer = viewOver(20);
+    for (let n = 0; n < 24; n += 1) {
+      made.pass.step({ views: [passView(PRIMARY, nearer)], grounded: [] });
+      made.lane().bakeDemand(made.pass);
+    }
+    made.pass.step({ views: [passView(PRIMARY, nearer)], grounded: [] });
+    made.pass.drawFor(PRIMARY, frameOf(nearer, true));
+    const onsets = heldOf(made).flatMap(({ slot, held, shares }) => {
+      const was = before.get(slot);
+      const fresh = was === undefined ? 0 : held & ~was;
+      return fresh === 0 ? [] : [{ fresh, shares }];
+    });
+    expect([
+      onsets.length > 0,
+      onsets.every(({ fresh, shares }) =>
+        [0, 1, 2, 3].every(
+          (e) => ((fresh >>> e) & 1) === 0 || ((shares >>> (8 * e)) & 0xff) === 255,
+        ),
+      ),
+    ]).toEqual([true, true]);
+  });
+
+  it("takes its scale at the bands' slewed tolerance, a jump of the view's τ moving it by at most a slew's step", async () => {
+    const made = await measuredPass();
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const scaleOf = (): number =>
+      stridesOf(made).find(({ strideScale }) => strideScale.perErrorM > 0)?.strideScale.perErrorM ??
+      Number.NaN;
+    const before = scaleOf();
+    // Three times the view's τ: its target jumps, its bands' τ a step of the slew.
+    const laxer = { ...passView(PRIMARY, NEAR), tauPx: 3 * TERRAIN_SETTINGS.high.tauPx };
+    made.pass.step({ views: [laxer], grounded: [] });
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const ratio = before / scaleOf();
+    expect([ratio > 1, ratio <= 1 + BAND_SLEW_PER_STEP + 1e-6]).toEqual([true, true]);
   });
 
   it("draws at stride 1, every record without a scale or edges' bands, while the lever is off", async () => {

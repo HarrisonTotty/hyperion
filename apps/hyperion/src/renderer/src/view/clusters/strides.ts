@@ -66,7 +66,7 @@
  *   the finer patch's vertices there are its block corners, falling to it over
  *   {@link STRIDE_HOLD_FADE_MS} as the hold switches on; and where a coarser one does (its hold
  *   at k = 1), the edge's level-0 vertices, at the coarser grid's midpoints, move wholly, so that
- *   they stand on its edge wherever its vertices move ({@link strideHeldFactor}).
+ *   they stand on its edge wherever its vertices move ({@link strideFactor}).
  */
 
 import type { PlanetGeometry } from "../terrain/planet";

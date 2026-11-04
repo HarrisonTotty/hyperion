@@ -273,15 +273,21 @@ export const TERRAIN_SUB_PATCH_MASK = 0x8000_0000;
 export const TERRAIN_MASK_LEVELS = 3;
 
 /**
- * How a terrain instance of sub-patch word `subWord` draws its page's cluster `cluster`
- * (`clusterCull.wgsl`'s `mask_cluster`): 1, as its sphere says, for every cluster of an instance
- * that is not a mask ({@link TERRAIN_SUB_PATCH_MASK}) and for a mask's own blocks; 2, whatever its
- * sphere says, for one of a mask's strips, the first (8 ÷ 2^levels) of each side's, which its
- * sphere, an edge strip's, does not bound; 0 for any other.
+ * How a terrain instance draws a cluster of its page ({@link terrainMaskCluster}): as its sphere
+ * says, whatever its sphere says, or not at all (`clusterCull.wgsl`'s `mask_cluster`'s 1, 2 and 0).
  */
-export function terrainMaskCluster(subWord: number, cluster: number): 0 | 1 | 2 {
+export type TerrainMaskDraw = "sphere" | "whole" | "none";
+
+/**
+ * How a terrain instance of sub-patch word `subWord` draws its page's cluster `cluster`
+ * (`clusterCull.wgsl`'s `mask_cluster`): `sphere` for every cluster of an instance that is not a
+ * mask ({@link TERRAIN_SUB_PATCH_MASK}) and for a mask's own blocks; `whole` for one of a mask's
+ * strips, the first (8 ÷ 2^levels) of each side's, which its sphere, an edge strip's, does not
+ * bound; `none` for any other.
+ */
+export function terrainMaskCluster(subWord: number, cluster: number): TerrainMaskDraw {
   if ((subWord & TERRAIN_SUB_PATCH_MASK) === 0) {
-    return 1;
+    return "sphere";
   }
   const side = BLOCKS_PER_SIDE >> (subWord & 31);
   const bx0 = ((subWord >>> 5) & 0x1fff) * side;
@@ -289,12 +295,12 @@ export function terrainMaskCluster(subWord: number, cluster: number): 0 | 1 | 2 
   if (cluster < TERRAIN_BLOCKS) {
     const bx = cluster % BLOCKS_PER_SIDE;
     const by = Math.floor(cluster / BLOCKS_PER_SIDE);
-    return bx >= bx0 && bx < bx0 + side && by >= by0 && by < by0 + side ? 1 : 0;
+    return bx >= bx0 && bx < bx0 + side && by >= by0 && by < by0 + side ? "sphere" : "none";
   }
   if (cluster < TERRAIN_CLUSTERS_PER_PAGE) {
-    return (cluster - TERRAIN_BLOCKS) % BLOCKS_PER_SIDE < side ? 2 : 0;
+    return (cluster - TERRAIN_BLOCKS) % BLOCKS_PER_SIDE < side ? "whole" : "none";
   }
-  return 0;
+  return "none";
 }
 
 /**

@@ -138,15 +138,10 @@ export interface CullInstance {
    */
   readonly quadrantWord?: number;
   /**
-   * Whether it is a sub-patch of its page (terrain's `Instance.sub.x`, its low five bits not 0),
-   * which shares its page's visibility with others: never marked by the occlusion's early pass,
-   * and writing no visibility (T3.d); absent, not.
-   */
-  readonly subPatch?: boolean;
-  /**
-   * Its sub-patch word (terrain's `Instance.sub.x`, word 8), whose bit 31 makes it a stand-in's mask
-   * of its page's own blocks (plan R14, Design note 19; `terrain.ts`' `terrainMaskCluster`); absent,
-   * 0.
+   * Its sub-patch word (terrain's `Instance.sub.x`, word 8; absent, 0): its low five bits not 0, a
+   * sub-patch of its page, which shares its page's visibility with others, never marked by the
+   * occlusion's early pass and writing no visibility (T3.d); its bit 31 a stand-in's mask of its
+   * page's own blocks (plan R14, Design note 19; `terrain.ts`' `terrainMaskCluster`).
    */
   readonly subWord?: number;
 }
@@ -572,9 +567,9 @@ function recordKept(
   if (
     !(record.radiusM >= 0) ||
     (instance.passMask & (1 << p)) === 0 ||
-    masked === 0 ||
+    masked === "none" ||
     (instance.whole !== true &&
-      masked !== 2 &&
+      masked !== "whole" &&
       !passKeeps(pass, input.viewAxis, centreM, record.radiusM, slackScale))
   ) {
     return false;
@@ -611,9 +606,15 @@ function orderedPass(
   return pass?.kind === "camera" ? { pass, p } : null;
 }
 
+/** Whether `instance` is a sub-patch of its page: its sub-patch word's low five bits not 0. */
+function isSubPatch(instance: CullInstance): boolean {
+  return ((instance.subWord ?? 0) & 31) !== 0;
+}
+
 /**
- * Whether the occlusion's late pass sees a kept cluster (T3.d): its instance kept whole, or its
- * sphere not refused by the pyramid.
+ * Whether the occlusion's late pass sees kept cluster `cluster` of `instance` (T3.d): its instance
+ * kept whole, a mask's strip, which its sphere does not bound, or its sphere not refused by the
+ * pyramid.
  */
 function lateSees(
   occlusion: CullOcclusionTwin,
@@ -624,7 +625,7 @@ function lateSees(
 ): boolean {
   return (
     instance.whole === true ||
-    terrainMaskCluster(instance.subWord ?? 0, cluster) === 2 ||
+    terrainMaskCluster(instance.subWord ?? 0, cluster) === "whole" ||
     occlusion.refuses === null ||
     !occlusion.refuses(centreM, radiusM)
   );
@@ -669,7 +670,7 @@ export function cullMarksTwin(
       (occlusion === undefined ||
         phase === undefined ||
         (phase === "early"
-          ? instance.subPatch !== true && occlusion.visible(instance.page, cluster)
+          ? !isSubPatch(instance) && occlusion.visible(instance.page, cluster)
           : (occlusion.earlyMarks?.[at] ?? NO_MARK) === NO_MARK &&
             lateSees(occlusion, instance, cluster, centre, record.radiusM)));
     if (marked) {
@@ -697,7 +698,7 @@ export function cullVisibilityTwin(
   }
   const { pass, p } = ordered;
   eachCluster(input, (_n, instance, cluster, record, centre) => {
-    if (instance.subPatch === true) {
+    if (isSubPatch(instance)) {
       return;
     }
     const kept =

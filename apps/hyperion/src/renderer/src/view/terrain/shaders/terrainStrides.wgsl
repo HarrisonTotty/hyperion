@@ -10,7 +10,7 @@
 // scale; on a block's side the smaller of its two blocks'; on a patch's edge its instance's shared
 // band there), held at each contact as the CDLOD morph is; at 0 for the level-2 vertices of an
 // edge a finer patch touches, whose vertices there are block corners, falling to it over the hold's
-// onset by the instance's share (`Instance.strides.z`); and at 1 for the level-0
+// onset by the instance's share (`Instance.holdFades`); and at 1 for the level-0
 // vertices of an edge a coarser patch touches, which stand at the coarser grid's midpoints
 // (R10.T8.c's hold at k = 1), so that they follow its vertices wherever those move. The morph mixes
 // the height, the grid vertex's height, the CDLOD k and the datum's normal with the place, so that
@@ -185,7 +185,7 @@ fn stride_factor(inst : Instance, level : u32, x : u32, y : u32, at : vec3f) -> 
   // The share of its stride morph a hold at k = 0 still leaves the vertex as it switches on.
   var share = 1.0;
   if (level == 2u && held != 0u) {
-    share = f32((bitcast<u32>(inst.strides.z) >> (8u * firstTrailingBit(held))) & 0xffu) / 255.0;
+    share = f32((inst.holdFades >> (8u * firstTrailingBit(held))) & 0xffu) / 255.0;
     if (share <= 0.0) {
       return 0.0;
     }

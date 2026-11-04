@@ -7,7 +7,7 @@
  * @remarks
  * While an edge's hold switches on, its level-2 shared bands are the edge's last before the hold
  * (`StrideEdges` gives none beside a finer patch), and its byte of the instance's shares word
- * (`Instance.strides.z`) falls from 255 to 0, the share of its stride morph the vertex stage leaves
+ * (`Instance.holdFades`) falls from 255 to 0, the share of its stride morph the vertex stage leaves
  * a level-2 vertex there (`clusters/strides.ts`' `strideFactor`). The cull holds the edge's blocks at
  * stride 4 from the first frame, so their stride's flip moves nothing; meanwhile the two patches
  * part by at most the edge's stride-8 displacement, falling, over the skirts.
@@ -20,7 +20,7 @@ interface Track {
   /** Its holds at k = 0 last frame, a bit an edge in `EDGES`' order. */
   held: number;
   /** Each edge's level-2 bands at its 8 blocks, m, the last frame it was not held. */
-  readonly level2: Float64Array;
+  readonly level2M: Float64Array;
   /** When each edge's hold switched on, ms; NaN for none. */
   readonly onsetMs: Float64Array;
   /** The frame it was last faded in. */
@@ -44,7 +44,7 @@ export class StrideHoldFades {
     if (track === undefined) {
       track = {
         held: heldEdges,
-        level2: new Float64Array(32).fill(NO_STRIDE_BAND),
+        level2M: new Float64Array(32).fill(NO_STRIDE_BAND),
         onsetMs: new Float64Array(4).fill(Number.NaN),
         seen: this.#frame,
       };
@@ -56,7 +56,7 @@ export class StrideHoldFades {
       if (!on) {
         track.onsetMs[e] = Number.NaN;
         for (let t = 0; t < 8; t += 1) {
-          track.level2[8 * e + t] = bandsM[edgeBandIndex(e, t, 2)] ?? NO_STRIDE_BAND;
+          track.level2M[8 * e + t] = bandsM[edgeBandIndex(e, t, 2)] ?? NO_STRIDE_BAND;
         }
         continue;
       }
@@ -68,7 +68,7 @@ export class StrideHoldFades {
       if (share > 0) {
         word |= share << (8 * e);
         for (let t = 0; t < 8; t += 1) {
-          bandsM[edgeBandIndex(e, t, 2)] = track.level2[8 * e + t] ?? NO_STRIDE_BAND;
+          bandsM[edgeBandIndex(e, t, 2)] = track.level2M[8 * e + t] ?? NO_STRIDE_BAND;
         }
       }
     }

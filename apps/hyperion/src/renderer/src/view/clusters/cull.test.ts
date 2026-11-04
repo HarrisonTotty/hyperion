@@ -1223,7 +1223,7 @@ describe("the two-pass occlusion's passes (plan R14, R14.T3.d)", () => {
   const AT_CAMERA = { x: 0, y: 0, z: 0 };
   const INSTANCES: ReadonlyArray<CullInstance> = [
     { originM: AT_CAMERA, page: 0, passMask: 0b10, unitM: 0.1 },
-    { originM: AT_CAMERA, page: 1, passMask: 0b10, unitM: 0.1, subPatch: true },
+    { originM: AT_CAMERA, page: 1, passMask: 0b10, unitM: 0.1, subWord: 1 },
     { originM: AT_CAMERA, page: 2, passMask: 0b10, unitM: 0.1, whole: true },
     { originM: AT_CAMERA, page: 3, passMask: 0b00, unitM: 0.1 },
   ];

@@ -25,6 +25,7 @@ import {
   type StrideEdgeBandsM,
   type StrideScale,
 } from "../../clusters/strides";
+import { TERRAIN_MASK_LEVELS, TERRAIN_SUB_PATCH_MASK } from "../../clusters/terrain";
 import { MAX_MORPH_HOLDS } from "../coarseFineHolds";
 import type { Face, PatchKey } from "../patchKey";
 import type { GraticulePatch } from "../terrainWire";
@@ -72,10 +73,11 @@ export const SLOT_RECORD_BYTES = 496;
  *                           // patch ({@link subPatchWord}); y its edges' fades and z its corners',
  *                           // a byte each; w its own fade, its rebake's and the slot it fades
  *                           // from ({@link fadeWord}; R10.T16.i)
- *   strides : vec4f,        // its stride scale at its view's τ′ (plan R14, R14.T3.c; `clusters/
+ *   strides : vec2f,        // its stride scale at its view's τ′ (plan R14, R14.T3.c; `clusters/
  *                           // strides.ts`' `StrideScale`): E_L ÷ τ′_rad, m, then 1 ÷ τ′_rad, at or
- *                           // below 0 for none, then its holds' onsets' shares (a u32's bits; a
- *                           // byte an edge, `strideFactor`) and 0
+ *                           // below 0 for none
+ *   holdFades : u32,        // its holds' onsets' shares, a byte an edge (`strideFactor`)
+ *   stridesPad : u32,       // 0
  *   cells : vec4u,          // its class sets (lane fix-coast-class-map; {@link InstanceRecords.setCells}):
  *                           // x its ancestor of the field's cells' level, L − 6, or NO_PARENT_SLOT;
  *                           // y its place there ({@link cellAncestorPlace}); z the fade to it, an
@@ -221,6 +223,21 @@ export function subPatchOf(patch: PatchKey, within: PatchKey): number {
     throw new RangeError(`a sub-patch on face ${within.face} of a patch on face ${patch.face}`);
   }
   return subPatchWord(levels, within.i - patch.i * side, within.j - patch.j * side);
+}
+
+/**
+ * The sub-patch word of a stand-in for `within` drawn on the cluster path by the slot of `patch`:
+ * {@link subPatchOf}'s, with `clusters/terrain.ts`' `TERRAIN_SUB_PATCH_MASK` where it lies one to
+ * `TERRAIN_MASK_LEVELS` levels below, so that it draws `patch`'s own blocks over its area (plan R14,
+ * Design note 19); a deeper one its own grid.
+ *
+ * @throws RangeError as {@link subPatchOf} does.
+ */
+export function clusterSubPatchOf(patch: PatchKey, within: PatchKey): number {
+  const word = subPatchOf(patch, within);
+  return within.level - patch.level <= TERRAIN_MASK_LEVELS
+    ? (word | TERRAIN_SUB_PATCH_MASK) >>> 0
+    : word;
 }
 
 /**

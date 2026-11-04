@@ -120,11 +120,7 @@ import {
   type StrideScale,
 } from "../clusters/strides";
 import { type ClusterPassStats, ClusterStats } from "../clusters/stats";
-import {
-  TERRAIN_MASK_LEVELS,
-  TERRAIN_PAGE_CLUSTERS,
-  TERRAIN_SUB_PATCH_MASK,
-} from "../clusters/terrain";
+import { TERRAIN_PAGE_CLUSTERS, TERRAIN_SUB_PATCH_MASK } from "../clusters/terrain";
 import { type Stride, TERRAIN_DISCARD_TEMPLATES } from "../clusters/templates";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type {
@@ -204,6 +200,7 @@ import {
   NO_PARENT_SLOT,
   PARENT_MIX_SLOT,
   parentQuadrant,
+  clusterSubPatchOf,
   subPatchOf,
   WirePhaseRecords,
 } from "./gpu/uniforms";
@@ -1263,7 +1260,9 @@ interface ViewState {
    * Of the interior records, whether each one's slot's cluster records do not bound what it draws,
    * so that the cull keeps it whole (`CULL_INPUT_WHOLE`): its heights fade from another surface this
    * frame (plan R10, R10.T16.i: a rebake's older bake, a rise's datum, a refine's or a coarsen's
-   * parent), or it is a sub-patch, its grid placed over a finer area (`DrawnPatch.within`).
+   * parent), or it is a sub-patch more than three levels down, its grid placed over a finer area
+   * (`DrawnPatch.within`); one to three levels down it is a mask of its slot's patch's own blocks
+   * (Design note 19), not whole.
    */
   readonly interiorWhole: boolean[];
   /**
@@ -4335,11 +4334,13 @@ export class TerrainPass {
    * records (plan R14, R14.T1.a) are written apart from the others', each in the draw set's order,
    * and drawn first, by the interior patches' mesh; without it every patch is drawn by the lit
    * mesh, as before the split. A stand-in of an interior bake is an interior patch too, whole or a
-   * sub-patch (seamless-1's, or the time morph's coarser patch over a finer area, R10.T16.i): a
-   * sub-patch draws its own grid on its ancestor's triangles (`terrainPatch.wgsl`'s
-   * `sourceGridOf`), which its slot's cluster records do not bound, so that the cull keeps it whole
-   * ({@link ViewState.interiorWhole}), as the lit mesh drew it. A stand-in of an edge bake takes the
-   * edge path in every pass.
+   * sub-patch (seamless-1's, or the time morph's coarser patch over a finer area, R10.T16.i): one to
+   * three levels down, where every pass draws the interior records from the buckets, it is a mask
+   * of its slot's patch's own blocks over its area and its strips along their sides (plan R14,
+   * Design note 19; `clusterSubPatchOf`); else it draws its own grid on its ancestor's triangles
+   * (`terrainPatch.wgsl`'s `sourceGridOf`), which its slot's cluster records do not bound, so that
+   * the cull keeps it whole ({@link ViewState.interiorWhole}), as the lit mesh drew it. A stand-in
+   * of an edge bake takes the edge path in every pass.
    *
    * On the lit pass's cluster path (plan R14, R14.T2.a; `GeometrySettings.litClusters`), the
    * interior patches draw from the lit pass's buckets at stride 1 in their interior draw's place,
@@ -4352,7 +4353,7 @@ export class TerrainPass {
    * from the strided buckets, their may-discard ones (the survey's edge, their skirt heads and
    * fins) from the may-discard buckets by the fin forms, in the lit pass, the casters and the
    * overlay's depth, and the lit mesh draws only the stand-ins. Each record whose heights fade
-   * (R10.T16.i), and each sub-patch, is marked in {@link ViewState.interiorWhole}.
+   * (R10.T16.i), and each sub-patch that is not a mask, is marked in {@link ViewState.interiorWhole}.
    */
   #write(
     device: Device,
@@ -4385,6 +4386,14 @@ export class TerrainPass {
     const fades = this.#fadesAt(device, input.nowMs);
     // The edge patches join the interior patches' records only where every pass draws them there.
     const fins = lit && split && this.#finsDrawn(device, state, forms);
+    // A stand-in's mask only where every pass that draws the interior records draws them from the
+    // buckets, as `#finsDrawn` holds for the fins: today's instanced draws would place its slot's
+    // patch whole (Design note 19).
+    const masks =
+      wireSplit ||
+      (lit &&
+        this.#litClustersReady(device, state, forms) &&
+        device.clusterShadowMaterial !== null);
     // The camera's strides (plan R14, R14.T3.c): each patch's scale and its edges' shared bands.
     const strides = this.#stridesOn() && this.#litClustersReady(device, state, forms);
     // The class sets a lit pass's patches take (lane fix-coast-class-map), none on another shading.
@@ -4432,35 +4441,39 @@ export class TerrainPass {
         const parentSlot = this.#parentSlotOf(device, patch.key);
         const fadesWord = fadeWordOf(fades.own[n] ?? 0, heights);
         mixes ||= ((fadesWord >>> 8) & MIX_STEPS) !== 0;
+        // A stand-in on the cluster path one to three levels below its slot's patch draws that
+        // patch's own blocks over its area, its strips along their sides (Design note 19's mask),
+        // its area's holds and edges' fades none of that grid's; a deeper one its own grid.
+        const subWord =
+          within === null
+            ? 0
+            : inner && masks
+              ? clusterSubPatchOf(patch.key, within)
+              : subPatchOf(patch.key, within);
+        const masked = (subWord & TERRAIN_SUB_PATCH_MASK) !== 0;
+        const instanceHolds = masked ? 0 : (holds[n] ?? 0);
+        const edgeFades = masked ? 0 : (fades.edges[n] ?? 0);
+        const cornerFades = masked ? 0 : (fades.corners[n] ?? 0);
         drawnGround.push({
           key: patch.key,
           area: within ?? patch.key,
           morphStartM: morph[2 * level] ?? 0,
           morphEndM: morph[2 * level + 1] ?? 0,
           hasParent: parentSlot !== NO_PARENT_SLOT,
-          holds: holds[n] ?? 0,
-          edgeFades: fades.edges[n] ?? 0,
-          cornerFades: fades.corners[n] ?? 0,
+          holds: instanceHolds,
+          edgeFades,
+          cornerFades,
           fades: fadesWord,
         });
         // Every measured patch takes its scale, whichever path draws it, and its edges' bands shared
         // with the patches beside, so that a vertex it shares is placed alike; a camera pass draws
-        // the forced region's at stride 1. A sub-patch stand-in takes none: its grid is not its
-        // slot's records', which the cull keeps whole.
+        // the forced region's at stride 1. A sub-patch stand-in takes none: its edges are not its
+        // slot's patch's, so it draws at stride 1.
         const scale = strides ? (state.strideScales[n] ?? NO_STRIDE_SCALE) : NO_STRIDE_SCALE;
         const at = strides ? (state.strideAt[n] ?? -1) : -1;
         const edgeBands = at < 0 ? NO_STRIDE_EDGE_BANDS : state.strideEdges.edgesOf(at);
         const holdFades = at < 0 ? 0 : (state.strideHoldWords[n] ?? 0);
         const finest = strides && this.#nearContact(patch, contacts, patchM);
-        // A stand-in on the cluster path one to three levels below its slot's patch draws that
-        // patch's own blocks over its area, its strips along their sides (Design note 19's mask),
-        // its area's holds and edges' fades none of that grid's; a deeper one its own grid.
-        const masked =
-          inner && within !== null && within.level - patch.key.level <= TERRAIN_MASK_LEVELS;
-        const subWord =
-          within === null
-            ? 0
-            : (subPatchOf(patch.key, within) | (masked ? TERRAIN_SUB_PATCH_MASK : 0)) >>> 0;
         if (inner) {
           state.interiorFins.push(!interiorBake);
           // A deeper sub-patch's grid, over its finer area, is not its slot's records'
@@ -4480,10 +4493,10 @@ export class TerrainPass {
           morph[2 * level + 1] ?? 0,
           parentSlot,
           parentQuadrant(patch.key),
-          masked ? 0 : (holds[n] ?? 0),
+          instanceHolds,
           subWord,
-          masked ? 0 : (fades.edges[n] ?? 0),
-          masked ? 0 : (fades.corners[n] ?? 0),
+          edgeFades,
+          cornerFades,
           fadesWord,
           scale,
           finest,
