@@ -124,8 +124,10 @@ fn the_centre_lists_a_handful_past_its_victims() {
 /// each one's ID (high, low 32 bits), class, initial mass, age, local position, velocity, death
 /// and window, in index order. Blessed natively on x86-64; the wasip1 suite compares it. Pinned at
 /// generator version 25 under every 26 hold (P09.T36's tests), and re-pinned at 26 with P09.T37's
-/// entries drawn over the reach (it was `0x236e_004f_0fff_a27f` at 26 before).
-const CENTRE_ENTRIES_DIGEST: u64 = 0x045b_0cd0_0f31_084f;
+/// entries drawn over the reach (it was `0x236e_004f_0fff_a27f` at 26 before), and at 27 (it was
+/// `0x045b_0cd0_0f31_084f`), whose galaxy the fixture is, every 27 hold's, and every 26 hold's with
+/// its retargets until the bump.
+const CENTRE_ENTRIES_DIGEST: u64 = 0x17d1_bc5a_f4d9_1a50;
 
 /// The centre's entries' bits, pinned before the bump, each the member its ID resolves to in any
 /// order.

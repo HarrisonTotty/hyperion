@@ -455,8 +455,9 @@ fn placement_code(class: PlacementClass) -> f64 {
 /// (D5). A 26-arm figure on plan 15's provisional form table, re-pinned by name when the
 /// production table lands; re-pinned on the rebase onto P09.T2.c's field share and P09.T35's
 /// carve-out, which every 26 hold composes with the classes; re-pinned at generator versions 25
-/// and 26.
-const DISPLACED_CELLS_DIGEST: u64 = 0x9f41_f812_1008_a969;
+/// and 26, and at 27 (it was `0x9f41_f812_1008_a969`), whose galaxy the fixture is, every 27
+/// hold's, and every 26 hold's with its retargets until the bump.
+const DISPLACED_CELLS_DIGEST: u64 = 0x8bb9_7c3f_e9db_adfc;
 
 /// The new arm's cells, census and map, pinned on every target (named `pinned` for the
 /// WebAssembly suite's filter).

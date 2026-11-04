@@ -275,8 +275,10 @@ fn layer_d_gives_up_its_ancient_type_ia() {
 /// luminous blue variable), in cell and index order. Blessed natively on x86-64; the wasip1 suite
 /// compares it. Re-pinned by name when plan 08's displaced classes joined every 26 hold
 /// (P08.T12), whose marks redraw layer E's records; re-pinned at generator versions 25 and 26
-/// (under 26's with the retargets, the carve-out at 27).
-const CLAIMED_DIGEST: u64 = 0x69d8_3742_c8f4_ae5e;
+/// (under 26's with the retargets, the carve-out at 27), and at 27 (it was `0x69d8_3742_c8f4_ae5e`),
+/// whose galaxy the fixture is, every 27 hold's, and every 26 hold's with its retargets until the
+/// bump.
+const CLAIMED_DIGEST: u64 = 0x9440_c055_5711_2d4b;
 
 /// D2 under every 26 hold: in the sample's layer-E cells on the arm ridges, the classes claim
 /// some of the records the grid places without the carve-out, each the core collapses' or the
@@ -870,8 +872,9 @@ fn the_claimed_cells_are_order_independent() {
 
 /// The digest of [`the_moving_galaxy_s_claims_are_pinned`]'s claimed records, as
 /// [`CLAIMED_DIGEST`]'s. Blessed natively on x86-64; the wasip1 suite compares it. Re-pinned by
-/// name with [`CLAIMED_DIGEST`] (P08.T12, and at generator versions 25 and 26).
-const MOVING_CLAIMED_DIGEST: u64 = 0xcf32_0fb1_b816_96b9;
+/// name with [`CLAIMED_DIGEST`] (P08.T12, and at generator versions 25, 26 and 27; it was
+/// `0xcf32_0fb1_b816_96b9` at 26).
+const MOVING_CLAIMED_DIGEST: u64 = 0x7cb2_2fec_b1a6_222e;
 
 /// The claims of a galaxy with its kinematic tables, as every production galaxy has them: each
 /// site is the epoch position moved along the record's drawn velocity to its death. The pre-pin's

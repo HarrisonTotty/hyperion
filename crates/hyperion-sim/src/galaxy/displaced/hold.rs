@@ -229,8 +229,9 @@ fn the_same_seed_twice_gives_the_same_classes() {
 /// points, then its classes' counts in both layers, in class order. Blessed natively on x86-64;
 /// the wasip1 suite compares it (D5). It is a 26-arm figure on plan 15's provisional form table,
 /// re-pinned by name when the production table lands; re-pinned at generator versions 25 and 26,
-/// whose layers D and E move.
-const DISPLACED_DENSITIES_DIGEST: u64 = 0x4615_5273_32ef_919a;
+/// whose layers D and E move, and at 27 (it was `0x4615_5273_32ef_919a`), whose galaxy the fixture
+/// is, every 27 hold's, and every 26 hold's with its retargets until the bump.
+const DISPLACED_DENSITIES_DIGEST: u64 = 0x92d4_41bd_01f7_6e7b;
 
 /// D2 under every 26 hold: the classes move layers D and E, and nothing else. Against the field
 /// under every other 26 hold ([`field_only`]), at 400 points over the cube layers A to C and the
