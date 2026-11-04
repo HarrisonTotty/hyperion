@@ -1360,10 +1360,11 @@ export class TerrainSession {
     if (this.#disposed) {
       return;
     }
-    // The frame's slice: first the class maps' takes (lane perf-main-thread), each answer packed and
-    // uploaded a few rows a step, then in what is left of it the class-mapped points' builds and
-    // refreshes (R10.T14.f), which the store queues as it takes each map, so that no frame's point
-    // makes them itself: only theirs whose bodies a frame drew near the switch.
+    // The frame's slice: first the class maps' takes (lane perf-main-thread), each answer packed a
+    // few rows a step and uploaded at its last, then in what is left of it the class-mapped
+    // points' builds and refreshes (R10.T14.f), which the store queues as it takes each map, so
+    // that no frame's point makes them itself: only theirs whose bodies a frame drew near the
+    // switch.
     const sliceStartMs = sliceClock();
     this.#classMaps.step(CLASS_MAP_POINT_SLICE_MS, sliceClock);
     stepClassMapPoints(

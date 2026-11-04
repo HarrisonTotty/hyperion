@@ -101,9 +101,9 @@ let MORTON_CELLS: Uint16Array | null = null;
 /**
  * The cell of each Morton code below 2¹⁶, a face's codes at the levels R09 serves, as j · 256 + i:
  * {@link fieldCellAt}'s (i, j) by a look-up, for the loops over a field's cells (lane
- * perf-main-thread). Made once, 128 KiB.
+ * perf-main-thread). Made once, 128 KiB, and read-only.
  */
-export function mortonCells(): Uint16Array {
+export function mortonCells(): ArrayLike<number> {
   if (MORTON_CELLS === null) {
     MORTON_CELLS = new Uint16Array(2 ** 16);
     for (let morton = 0; morton < MORTON_CELLS.length; morton += 1) {

@@ -231,7 +231,7 @@ async function settle(store?: ClassMapStore): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
-  store?.step(Number.POSITIVE_INFINITY);
+  store?.step(Number.POSITIVE_INFINITY, () => 0);
 }
 
 /** A class's law as the map should take it: its photometry on its law's row law on the body. */
@@ -1240,7 +1240,7 @@ describe("the class-map store's takes in the frames' slices (lane perf-main-thre
     expect(digests).toEqual(PINS.map(([, texels, normals]) => [texels, normals]));
   });
 
-  /** A store holding the Moon's small map, with an answer to a surveying block's query out. */
+  /** A store holding the Moon's small map, with a surveying block's query out. */
   async function holdingMoon(): Promise<{
     readonly engine: CountingRenderEngine;
     readonly pool: ScriptedPool;
@@ -1257,10 +1257,22 @@ describe("the class-map store's takes in the frames' slices (lane perf-main-thre
     return { engine, pool, store, held: store.classMapOf(MOON, ELSEWHERE) };
   }
 
-  it("takes an answer in slices that each end at the first step past their budget, the map it held drawn until the new one's textures are made", async () => {
+  /** The bench's matured eight-class map with a fine page at its cells' corners. */
+  const BENCH_ANSWER = surveyedAnswer({ classes: 8, maturity: true, fine: "corners" });
+
+  /**
+   * The Moon's surveying block's answer, {@link BENCH_ANSWER}, taken in slices of 2 ms on a clock of
+   * a quarter of a millisecond a reading: the clock's readings in each slice, and whether the map it
+   * held was drawn before each.
+   */
+  async function takenInSlices(): Promise<{
+    readonly engine: CountingRenderEngine;
+    readonly store: ClassMapStore;
+    readonly readings: ReadonlyArray<number>;
+    readonly drawnHeld: ReadonlyArray<boolean>;
+  }> {
     const { engine, pool, store, held } = await holdingMoon();
-    const answer = surveyedAnswer({ classes: 8, maturity: true, fine: "corners" });
-    pool.asked[1]?.resolve(answer);
+    pool.asked[1]?.resolve(BENCH_ANSWER);
     await settle();
     const clock = quarterClock();
     const readings: number[] = [];
@@ -1271,63 +1283,81 @@ describe("the class-map store's takes in the frames' slices (lane perf-main-thre
       store.step(2, clock.now);
       readings.push(clock.readings() - before);
     }
-    const taken = store.classMapOf(MOON, ELSEWHERE);
-    const texels = classMapTexelsOf(answer);
-    const normals = normalMapTexelsOf(answer);
-    expect({
-      sliced: readings.length > 10,
-      // Its start, then a reading before each step, the slice ending at the first past 2 ms.
-      fullSlices: readings.slice(0, -1).every((count) => count === 9),
-      drawnHeld: drawnHeld.every((drawn) => drawn),
-      texels: taken?.texels.data.every((byte, at) => byte === texels?.data[at]),
-      normals: taken?.normals?.texels.data.every((pair, at) => Object.is(pair, normals?.data[at])),
-      written: engine.textureWritten
-        .findLast((write) => write.texture === `class map ${MOON}`)
-        ?.data.every((byte, at) => byte === texels?.data[at]),
-    }).toEqual({
-      sliced: true,
-      fullSlices: true,
-      drawnHeld: true,
-      texels: true,
-      normals: true,
-      written: true,
-    });
+    return { engine, store, readings, drawnHeld };
+  }
+
+  it("takes an answer in slices, each ending at the first step past its budget", async () => {
+    const { store, readings } = await takenInSlices();
+    // Its start, then a reading before each step, the slice ending at the first past 2 ms.
+    expect([readings.length > 10, readings.slice(0, -1).every((count) => count === 9)]).toEqual([
+      true,
+      true,
+    ]);
     store.dispose();
   });
 
-  it("takes a newer answer in place of one not yet taken, and drops an unfinished take with its body", async () => {
-    const { engine, pool, store } = await holdingMoon();
-    const made = (): number =>
-      engine.textureSpecs.filter((spec) => spec.name === `class map ${MOON}`).length;
-    pool.asked[1]?.resolve(surveyedAnswer({ classes: 8, maturity: false }));
+  it("draws the map it held until the new map's textures are made", async () => {
+    const { store, drawnHeld } = await takenInSlices();
+    expect(drawnHeld.every((drawn) => drawn)).toBe(true);
+    store.dispose();
+  });
+
+  it("hands out the new map's texels as its answer packs them at once", async () => {
+    const { store } = await takenInSlices();
+    const texels = classMapTexelsOf(BENCH_ANSWER);
+    const taken = store.classMapOf(MOON, ELSEWHERE)?.texels;
+    expect(taken?.data.every((byte, at) => byte === texels?.data[at])).toBe(true);
+    store.dispose();
+  });
+
+  it("hands out the new map's normals as its answer packs them at once", async () => {
+    const { store } = await takenInSlices();
+    const normals = normalMapTexelsOf(BENCH_ANSWER);
+    const taken = store.classMapOf(MOON, ELSEWHERE)?.normals?.texels;
+    expect(taken?.data.every((pair, at) => Object.is(pair, normals?.data[at]))).toBe(true);
+    store.dispose();
+  });
+
+  it("writes the new map's texels to its texture", async () => {
+    const { engine, store } = await takenInSlices();
+    const texels = classMapTexelsOf(BENCH_ANSWER);
+    const written = engine.textureWritten.findLast(
+      (write) => write.texture === `class map ${MOON}`,
+    );
+    expect(written?.data.every((byte, at) => byte === texels?.data[at])).toBe(true);
+    store.dispose();
+  });
+
+  it("asks again only once its take has landed, the blocks meanwhile asked as one", async () => {
+    const { pool, store } = await holdingMoon();
+    pool.asked[1]?.resolve(BENCH_ANSWER);
     await settle();
     store.step(2, quarterClock().now);
     pool.change(MOON, 2, [9]);
-    pool.asked[2]?.resolve(answerOf(TEXELS.slice(1)));
-    await settle(store);
-    const newer = store.classMapOf(MOON, ELSEWHERE)?.texels;
-    const madeThen = made();
     pool.change(MOON, 3, [10]);
-    pool.asked[3]?.resolve(surveyedAnswer({ classes: 8, maturity: false }));
-    await settle();
-    store.step(2, quarterClock().now);
-    store.release(MOON);
-    store.step(Number.POSITIVE_INFINITY);
-    const newest = classMapTexelsOf(answerOf(TEXELS.slice(1)));
-    expect([
-      newer?.data.every((byte, at) => byte === newest?.data[at]),
-      madeThen,
-      made(),
-      store.taking(MOON),
-    ]).toEqual([true, 2, 2, false]);
+    const whileTaking = pool.asked.length;
+    store.step(Number.POSITIVE_INFINITY, () => 0);
+    expect([whileTaking, pool.asked.length]).toEqual([2, 3]);
     store.dispose();
   });
 
-  it("reports an answer it cannot pack once, and keeps the map it held", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { pool, store, held } = await holdingMoon();
-    // A refinement of 3 cells a side, which no fine page holds.
-    pool.asked[1]?.resolve({
+  it("drops an unfinished take with its body, its textures never made", async () => {
+    const { engine, pool, store } = await holdingMoon();
+    const made = (): number =>
+      engine.textureSpecs.filter((spec) => spec.name === `class map ${MOON}`).length;
+    pool.asked[1]?.resolve(BENCH_ANSWER);
+    await settle();
+    store.step(2, quarterClock().now);
+    const before = made();
+    store.release(MOON);
+    store.step(Number.POSITIVE_INFINITY, () => 0);
+    expect([store.taking(MOON), made() - before]).toEqual([false, 0]);
+    store.dispose();
+  });
+
+  /** An answer of a refinement of 3 cells a side, which no fine page holds. */
+  function unpackable(): ClassMapAnswer {
+    return {
       ...answerOf(TEXELS),
       refinement: {
         side: 3,
@@ -1337,13 +1367,29 @@ describe("the class-map store's takes in the frames' slices (lane perf-main-thre
         weights: new Uint8Array(27),
         codes: new Uint16Array(0),
       },
-    });
+    };
+  }
+
+  it("reports an answer it cannot pack once", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { pool, store } = await holdingMoon();
+    pool.asked[1]?.resolve(unpackable());
     await settle(store);
-    expect([
-      error.mock.calls.map(([message]) => String(message)),
-      store.classMapOf(MOON, ELSEWHERE) === held,
-      store.taking(MOON),
-    ]).toEqual([[`the class map of ${MOON} could not be made:`], true, false]);
+    pool.change(MOON, 2, [9]);
+    pool.asked[2]?.resolve(unpackable());
+    await settle(store);
+    expect(error.mock.calls.map(([message]) => String(message))).toEqual([
+      `the class map of ${MOON} could not be made:`,
+    ]);
+    store.dispose();
+  });
+
+  it("keeps the map it held where an answer cannot be packed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { pool, store, held } = await holdingMoon();
+    pool.asked[1]?.resolve(unpackable());
+    await settle(store);
+    expect(store.classMapOf(MOON, ELSEWHERE)).toBe(held);
     store.dispose();
   });
 });

@@ -12,7 +12,7 @@
  * - **The layout** is the class map's (`discSurface.ts`) at N = 2^L texels a face side: a 2D array of
  *   six layers, one a face, each (N + 2) × (N + 2) texels of {@link NORMAL_MAP_FORMAT}, face texel
  *   (i, j), the cell (f, L, i, j), at (i + 1, j + 1), and a one-texel gutter about it holding the
- *   neighbouring faces' edge texels ({@link forEachGutterTexel}, shared with the class map). The
+ *   neighbouring faces' edge texels ({@link gutterTexels}, shared with the class map). The
  *   pair is in the body-fixed axes, which every face shares, so a gutter texel is its neighbour's
  *   pair as it stands. The gutter's corners and every unsurveyed texel hold {@link NO_NORMAL}.
  * - **The reconstruction** ({@link normalMapNormalAt}, the twin of the shader's) is the class map's
@@ -117,7 +117,7 @@ export function* packNormalMapSteps(
   level: number,
   cells: ArrayLike<number>,
   pairs: ArrayLike<number>,
-): Generator<void, NormalMapTexels> {
+): Generator<void, NormalMapTexels, undefined> {
   if (!(Number.isInteger(level) && level >= MIN_FIELD_LEVEL && level <= MAX_FIELD_LEVEL)) {
     throw new Error(
       `a normal map is at a field's level, ${String(MIN_FIELD_LEVEL)} to ${String(MAX_FIELD_LEVEL)}, not ${String(level)}`,

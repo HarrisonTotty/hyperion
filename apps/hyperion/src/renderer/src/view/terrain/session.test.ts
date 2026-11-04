@@ -50,7 +50,7 @@ import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import type { AllocationEvent } from "../engine/memory";
 import type { ViewBody, ViewScene } from "../scene/model";
 import { TERRAIN_COMPUTATION_FAILED, TERRAIN_NOT_AVAILABLE } from "./annunciation";
-import { CLASS_MAP_LEVEL } from "./classMap";
+import { CLASS_MAP_LEVEL, ClassMapStore } from "./classMap";
 import { fieldCellAt } from "./coverage";
 import { allocationTally } from "./gpu/allocationTally";
 import { limbDistanceM } from "./handover";
@@ -82,9 +82,11 @@ async function settle(): Promise<void> {
 
 /**
  * Steps the session, as its frames would, until its store has taken the Moon's answered class map
- * in their slices (lane perf-main-thread), at most 1,000 steps.
+ * in their slices (lane perf-main-thread), at most 1,000 steps, the slices' clock
+ * {@link tickingPerformance}'s.
  */
 function takeMoonMap(h: Harness): void {
+  tickingPerformance();
   const law = lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon");
   for (let k = 0; k < 1_000 && h.session.classMaps.classMapOf(MOON, law) === null; k += 1) {
     h.session.step();
@@ -600,6 +602,35 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
     }
     return surface;
   }
+
+  it("runs the class maps' takes first in each step's slice, and the points' work only in what is left (lane perf-main-thread)", async () => {
+    tickingPerformance();
+    const h = await harness();
+    const surface = await answeredMoonMap(h);
+    // Takes that hold the whole slice at each step; the elements alone take some 230 steps.
+    const takes = vi
+      .spyOn(ClassMapStore.prototype, "step")
+      .mockImplementation((budgetMs = 2, now = () => performance.now()) => {
+        const startMs = now();
+        let readings = 0;
+        while (now() - startMs < budgetMs) {
+          readings += 1;
+        }
+        return readings > 0;
+      });
+    for (let k = 0; k < 400; k += 1) {
+      drawMoonPoint(surface);
+      h.session.step();
+    }
+    const whileTaking = classMapPointState(surface);
+    takes.mockRestore();
+    for (let k = 0; k < 10_000 && classMapPointState(surface) === "queued"; k += 1) {
+      drawMoonPoint(surface);
+      h.session.step();
+    }
+    expect([whileTaking, classMapPointState(surface)]).toEqual(["queued", "made"]);
+    h.session.dispose();
+  });
 
   it("makes a class map's point elements in its steps, a slice a step, while a frame draws its body near the switch (R10.T14.f)", async () => {
     tickingPerformance();

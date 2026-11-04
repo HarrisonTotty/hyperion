@@ -224,6 +224,9 @@ export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null 
   return finishedSteps(classMapTexelsSteps(answer));
 }
 
+/** The answer's texels a step of {@link classMapTexelsSteps}' index takes before it yields. */
+const INDEX_STEP = 4096;
+
 /**
  * {@link classMapTexelsOf} as steps (lane perf-main-thread; R10.T14.f's slices), for the store's
  * take in the frames' slices: R07's `packClassMapSteps` reading the answer's bytes where they are,
@@ -233,7 +236,7 @@ export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null 
  */
 export function* classMapTexelsSteps(
   answer: ClassMapAnswer,
-): Generator<void, ClassMapTexels | null> {
+): Generator<void, ClassMapTexels | null, undefined> {
   const classes = classCount(answer);
   if (answer.level !== CLASS_MAP_LEVEL) {
     throw new Error(
@@ -258,6 +261,9 @@ export function* classMapTexelsSteps(
   const byTexel = new Int32Array(6 * n * n).fill(-1);
   for (let t = 0; t < count; t += 1) {
     byTexel[fieldCellGridIndex(CLASS_MAP_LEVEL, answer.texels[t] ?? 0)] = t;
+    if ((t + 1) % INDEX_STEP === 0) {
+      yield;
+    }
   }
   yield;
   const { maturity } = answer;
@@ -418,7 +424,7 @@ export function normalMapTexelsOf(answer: ClassMapAnswer): NormalMapTexels | nul
  */
 export function* normalMapTexelsSteps(
   answer: ClassMapAnswer,
-): Generator<void, NormalMapTexels | null> {
+): Generator<void, NormalMapTexels | null, undefined> {
   if (answer.normalCells.length === 0 && answer.normalPairs.length === 0) {
     return null;
   }
@@ -466,15 +472,19 @@ interface HeldMap {
   handedOut: ClassMapDiscSurface | null;
 }
 
-/** An answer being taken in the frames' slices: its take's steps ({@link ClassMapStore.step}). */
+/** An answer being taken in the frames' slices ({@link ClassMapStore.step}): its body and steps. */
 interface PendingTake {
-  readonly steps: Generator<void, void>;
+  readonly held: HeldBody;
+  readonly steps: Generator<void, void, undefined>;
 }
 
 /** A body the store is asked for. */
 interface HeldBody {
   readonly detailSeed: DetailSeedHex;
-  /** Whether a query is out, and whether a change came since it was posted. */
+  /**
+   * Whether a query is out, its answer not yet taken (lane perf-main-thread), and whether a change
+   * came since it was posted.
+   */
   asking: boolean;
   again: boolean;
   map: HeldMap | null;
@@ -495,8 +505,9 @@ interface HeldBody {
  *
  * An answer is taken in the frames' slices ({@link ClassMapStore.step}; lane perf-main-thread): its
  * texels and normals packed a few rows a step, then its textures made, the body's map until then
- * the one it held; a newer answer for the body takes the place of one not yet taken, so that no
- * queue grows. An answer that cannot be packed is reported as a refused query is.
+ * the one it held. The body's query is out until its answer is taken, so that the blocks meanwhile
+ * ask again once, after it, as they did while a query was out: no take is begun again and no queue
+ * grows. An answer that cannot be packed is reported as a refused query is.
  */
 export class ClassMapStore implements ClassMapSource {
   readonly #engine: Pick<
@@ -616,8 +627,9 @@ export class ClassMapStore implements ClassMapSource {
   /**
    * The frame's slice of the answers' takes (lane perf-main-thread; R10.T14.f's slices): their
    * packing's steps, the oldest answer's first, until a step ends past `budgetMs`, and each answer's
-   * textures made as its last step. An answer that cannot be packed or uploaded is reported once a
-   * body, as a refused query is, and the body keeps the map it held.
+   * textures made as its last step; a body whose answer is taken asks again if a block came
+   * meanwhile. An answer that cannot be packed is reported once a body, as a refused query is, and
+   * the body keeps the map it held.
    *
    * @param budgetMs - The slice's length, ms.
    * @param now - A monotonic clock, ms.
@@ -639,11 +651,13 @@ export class ClassMapStore implements ClassMapSource {
         try {
           if (take.steps.next().done === true) {
             this.#takes.delete(body);
+            this.#answered(body, take.held);
             break;
           }
         } catch (error: unknown) {
           this.#takes.delete(body);
           this.#refused(body, error);
+          this.#answered(body, take.held);
           break;
         }
       }
@@ -694,19 +708,24 @@ export class ClassMapStore implements ClassMapSource {
   }
 
   /**
-   * Asks the pool for `body`'s map, takes the answer if `held` is still the body's, and asks again
-   * if a change came meanwhile.
+   * Asks the pool for `body`'s map and, if `held` is still the body's, queues the answer's take for
+   * the frames' slices, the query out until it is taken; otherwise ends the query at once.
    */
   async #query(body: BodyIdHex, held: HeldBody): Promise<void> {
     try {
       const answer = await this.#pool.classMap(body, held.detailSeed);
       if (this.#bodies.get(body) === held && !this.#disposed && answer !== null) {
-        // In the frames' slices, in place of an answer of the body's not yet taken.
-        this.#takes.set(body, { steps: this.#takeSteps(body, held, answer) });
+        this.#takes.set(body, { held, steps: this.#takeSteps(body, held, answer) });
+        return;
       }
     } catch (error: unknown) {
       this.#refused(body, error);
     }
+    this.#answered(body, held);
+  }
+
+  /** Ends `held`'s query, its answer taken or none, and asks again if a change came meanwhile. */
+  #answered(body: BodyIdHex, held: HeldBody): void {
     held.asking = false;
     if (held.again && this.#bodies.get(body) === held) {
       this.#ask(body);
@@ -726,7 +745,11 @@ export class ClassMapStore implements ClassMapSource {
    * texels and normals packed, then the new map's point elements queued for the slices, the old
    * map's point standing in meanwhile (R10.T14.f), and its textures made.
    */
-  *#takeSteps(body: BodyIdHex, held: HeldBody, answer: ClassMapAnswer): Generator<void, void> {
+  *#takeSteps(
+    body: BodyIdHex,
+    held: HeldBody,
+    answer: ClassMapAnswer,
+  ): Generator<void, void, undefined> {
     const texels = yield* classMapTexelsSteps(answer);
     yield;
     const normals = yield* normalMapTexelsSteps(answer);
@@ -760,6 +783,7 @@ export class ClassMapStore implements ClassMapSource {
       handedOut: null,
     };
     held.map = map;
+    // In the step that installs the map, so that no frame meets the body with neither map's.
     this.#upload(body, map);
   }
 

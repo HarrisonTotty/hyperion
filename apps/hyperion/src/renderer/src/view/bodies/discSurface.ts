@@ -440,17 +440,22 @@ function faceAtIndex(n: number): Face {
 }
 
 /**
- * The one-texel gutter about every face of a cube-sphere map of N texels a face side, as a table
- * {@link forEachGutterTexel} visits in its order: {@link GUTTER_STRIDE} numbers a side texel, its
- * face and stored (x, y), then the face texel across the edge whose value it holds, its face, i and
- * j. Made once an N and kept, so that a map's packing finds no edge again (lane perf-main-thread).
+ * The one-texel gutter about every face of a cube-sphere map of N texels a face side, as the class
+ * map (R10.T10.d) and the normal map (R10.T10.g, `discNormals.ts`) lay it out, as a table:
+ * {@link GUTTER_STRIDE} numbers a side texel, its face and stored (x, y), x or y 0 or N + 1 and the
+ * other 1 to N, then the face texel across the edge whose value it holds, the neighbouring face's
+ * own edge texel there, its face, i and j; the four corners are not in it. Made once an N and kept,
+ * read-only, so that a map's packing finds no edge again (lane perf-main-thread).
  */
-export function gutterTexels(faceTexels: number): Int32Array {
+export function gutterTexels(faceTexels: number): ArrayLike<number> {
   const held = GUTTERS.get(faceTexels);
   if (held !== undefined) {
     return held;
   }
-  const table = new Int32Array(FACES * Math.max(faceTexels, 0) * 4 * GUTTER_STRIDE);
+  if (!(Number.isInteger(faceTexels) && faceTexels > 0)) {
+    throw new RangeError(`a map has a positive whole number of texels a side, got ${faceTexels}`);
+  }
+  const table = new Int32Array(FACES * faceTexels * 4 * GUTTER_STRIDE);
   let at = 0;
   for (const face of FACE_INDICES) {
     for (let along = 1; along <= faceTexels; along += 1) {
@@ -473,27 +478,6 @@ export function gutterTexels(faceTexels: number): Int32Array {
   }
   GUTTERS.set(faceTexels, table);
   return table;
-}
-
-/**
- * Visits each side texel of the one-texel gutter about every face of a cube-sphere map of N texels a
- * face, as the class map (R10.T10.d) and the normal map (R10.T10.g, `discNormals.ts`) lay it
- * out: stored texel (x, y), x or y 0 or N + 1 and the other 1 to N, with the face texel across the
- * edge whose value it holds, the neighbouring face's own edge texel there. The four corners are not
- * visited.
- */
-export function forEachGutterTexel(
-  faceTexels: number,
-  visit: (face: Face, x: number, y: number, from: ClassMapTexel) => void,
-): void {
-  const table = gutterTexels(faceTexels);
-  for (let at = 0; at < table.length; at += GUTTER_STRIDE) {
-    visit(faceAtIndex(table[at] ?? 0), table[at + 1] ?? 0, table[at + 2] ?? 0, {
-      face: faceAtIndex(table[at + 3] ?? 0),
-      i: table[at + 4] ?? 0,
-      j: table[at + 5] ?? 0,
-    });
-  }
 }
 
 /**
@@ -631,7 +615,7 @@ function callbackFineSource(
  * Runs a packing's steps to their end at once: the synchronous path of a sliced one (lane
  * perf-main-thread), the same code in the same order.
  */
-export function finishedSteps<T>(steps: Generator<void, T>): T {
+export function finishedSteps<T>(steps: Generator<void, T, undefined>): T {
   for (;;) {
     const step = steps.next();
     if (step.done === true) {
@@ -701,7 +685,7 @@ export function* packClassMapSteps(
   source: ClassMapTexelSource,
   maturity?: ClassMapMaturity,
   fine?: ClassMapFineSource,
-): Generator<void, ClassMapTexels> {
+): Generator<void, ClassMapTexels, undefined> {
   if (!(Number.isInteger(faceTexels) && faceTexels > 0)) {
     throw new Error(`a class map has a positive whole number of texels a side, got ${faceTexels}`);
   }
@@ -810,7 +794,7 @@ function* keptRefinedSteps(
   classes: number,
   maturity: boolean,
   fine: ClassMapFineSource,
-): Generator<void, ReadonlyArray<number>> {
+): Generator<void, ReadonlyArray<number>, undefined> {
   const r = fine.side;
   if (r !== 2 && r !== 4) {
     throw new Error(`a fine page refines a texel to 2 or 4 cells a side, not ${r}`);
@@ -991,7 +975,7 @@ function putReading(
   reading: Float64Array,
   bytes: Float64Array,
   code: number | null,
-  what: () => string,
+  of: { readonly kind: "cell" | "corner"; readonly texel: ClassMapTexelSlot },
 ): void {
   weightBytesInto(reading, map.classes, bytes);
   for (let k = 0; k < map.classes; k += 1) {
@@ -1000,8 +984,9 @@ function putReading(
   }
   if (code !== null) {
     if (!(Number.isInteger(code) && code >= 0 && code <= MATURITY_CODE_MAX)) {
+      const { face, i, j } = of.texel;
       throw new Error(
-        `${what()} has maturity code ${code}, not an integer 0 to ${MATURITY_CODE_MAX}`,
+        `a ${of.kind} of refined texel (${face}, ${i}, ${j}) has maturity code ${code}, not an integer 0 to ${MATURITY_CODE_MAX}`,
       );
     }
     const to = tileOffset(map, page, tile, x, y, weightGroups(map.classes));
@@ -1019,11 +1004,12 @@ function* packFinePageSteps(
   page: ClassMapFine,
   fine: ClassMapFineSource,
   kept: ReadonlyArray<number>,
-): Generator<void, void> {
+): Generator<void, void, undefined> {
   const r = page.side;
   const groups = weightGroups(map.classes);
   const coded = map.maturity !== undefined;
   const texel: ClassMapTexelSlot = { face: 0, i: 0, j: 0 };
+  const cell = { kind: "cell", texel } as const;
   const reading = new Float64Array(map.classes);
   const bytes = new Float64Array(map.classes);
   for (let tile = 0; tile < kept.length; tile += 1) {
@@ -1036,17 +1022,7 @@ function* packFinePageSteps(
       }
       const x = (n % r) + 1;
       const y = Math.floor(n / r) + 1;
-      putReading(
-        map,
-        page,
-        tile,
-        x,
-        y,
-        reading,
-        bytes,
-        coded ? fine.codeAt(order, n) : null,
-        () => `a cell of refined texel (${texel.face}, ${texel.i}, ${texel.j})`,
-      );
+      putReading(map, page, tile, x, y, reading, bytes, coded ? fine.codeAt(order, n) : null, cell);
     }
     if ((tile + 1) % FINE_STEP === 0) {
       yield;
@@ -1097,10 +1073,11 @@ function* packFineCornersSteps(
   page: ClassMapFine,
   fine: ClassMapFineSource,
   kept: ReadonlyArray<number>,
-): Generator<void, void> {
+): Generator<void, void, undefined> {
   const r = page.side;
   const coded = map.maturity !== undefined;
   const texel: ClassMapTexelSlot = { face: 0, i: 0, j: 0 };
+  const corner = { kind: "corner", texel } as const;
   const reading = new Float64Array(map.classes);
   const bytes = new Float64Array(map.classes);
   for (let tile = 0; tile < kept.length; tile += 1) {
@@ -1125,7 +1102,7 @@ function* packFineCornersSteps(
         reading,
         bytes,
         coded ? fine.codeAt(order, n) : null,
-        () => `a corner of refined texel (${texel.face}, ${texel.i}, ${texel.j})`,
+        corner,
       );
     }
     if ((tile + 1) % FINE_STEP === 0) {
