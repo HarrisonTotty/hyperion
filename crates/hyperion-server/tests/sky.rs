@@ -50,6 +50,10 @@ use hyperion_server::{KeptSkies, ServerConfigBuilder, ServerStats, SkyService};
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition as SimPosition, UnitVector};
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::catalogue_classes::{CatalogueClassSource, NoClassCellCache};
+use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+use hyperion_sim::galaxy::features::members::KeepInteriors;
+use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
 use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
@@ -62,7 +66,7 @@ use hyperion_sim::sky::band::{
 use hyperion_sim::sky::caps::{REAL_LIMIT_LY, SYNTHETIC_CEILING_V};
 use hyperion_sim::sky::census::{
     CellOffsets, CensusPlan, CensusTallies, Completeness, NoSkyCellCache, Shell, SkyCensus,
-    SkyContext, SkyQuery, SkyQueryBuilder, SkyStar, census_cell, census_plan,
+    SkyContext, SkyQuery, SkyQueryBuilder, SkySource, SkyStar, census_cell, census_plan,
     census_plan_with_edges, merge_census, merge_shells,
 };
 use hyperion_sim::sky::dgl::Illumination;
@@ -359,6 +363,16 @@ fn sim_census(query: &SkyQuery) -> SkyCensus {
     sim_census_over(dark_tables(), query).1
 }
 
+/// [`sim_census`] with `sources` beside the grid in its cells' context, as the server's census takes
+/// the feature members' and the catalogue classes' from generator version 27 (R06.T16.a's switch).
+fn sim_census_with(query: &SkyQuery, sources: &[&dyn SkySource]) -> SkyCensus {
+    let tables = dark_tables();
+    let plan = plan_over(tables, query);
+    let mut cells = CellParts::over(tables, query);
+    cells.ctx.sources = sources;
+    sim_census_of(&mut cells, &plan)
+}
+
 /// The sim's own plan and census of `query` over `tables`, the census in one pass over the plan's
 /// cells, merged as one part to the plan's whole completeness (`merge_shells`): the one-shot census,
 /// but at a synthetic ceiling, where C, D and E list only within their caps towards each star's
@@ -450,20 +464,20 @@ const CAPPED: [(Layer, MassLayer); 6] = [
     (Layer::BrownDwarf, MassLayer::BrownDwarf),
 ];
 
-/// A sky near the Sun lists the feature members as not modelled, as every sky does until
-/// R06.T16.a (`decision-r06-t16a-scope.md`), and the census its jobs merged is the sim's own, layer
-/// by layer. Its server marches the coarse band ([`COARSE_BAND`]), whose size and bytes the reply
+/// A sky near the Sun takes the feature members: from generator version 27 the field gives them
+/// up (P09.T2.c) and the census takes them (R06.T16.a's switch, `decision-r06-t16a-scope.md`), so
+/// they are not listed as not modelled, as every sky's were below 27; and the census its jobs
+/// merged is the sim's own, layer by layer. Its server marches the coarse band ([`COARSE_BAND`]), whose size and bytes the reply
 /// states; the standard band's are asserted by the tests that keep it
 /// (`decision-test-coverage.md`, N13).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
+async fn a_sky_near_the_sun_takes_the_feature_members_from_27() {
     let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 2).await;
     let (mut client, universe) = opened(&server).await;
     let response = served(&mut client, sky(&universe)).await.response;
 
-    assert_eq!(
-        response.not_modelled.first(),
-        Some(&SkyGapDto::FeatureMembers),
+    assert!(
+        !response.not_modelled.contains(&SkyGapDto::FeatureMembers),
         "{:?}",
         response.not_modelled
     );
@@ -485,7 +499,12 @@ async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
     )
     .with_caps_forced(LightYears::new(SMALL_CAP_LY))
     .expect("a forced cap");
-    let sim = sim_census(&query);
+    // From 27 the server's census takes the feature members and the catalogue classes' hosts
+    // through their sources, as the sim's does with them.
+    let interiors = KeepInteriors::new(galaxy());
+    let members = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+    let classes = CatalogueClassSource::new().with_cells(&NoClassCellCache);
+    let sim = sim_census_with(&query, &[&members, &classes]);
     // The reply states the ceiling and the real limit (R13.T2.b); a forced cap, standing in for
     // the real boundary, states no count beyond it brighter than the ceiling.
     assert_eq!(
@@ -533,7 +552,8 @@ async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
             ),
             "{layer:?}"
         );
-        assert!(dto.feature_members_absent);
+        // From 27 the census takes the feature members, so no layer lacks them.
+        assert!(!dto.feature_members_absent, "{layer:?}");
     }
     assert_eq!(
         response
@@ -1047,7 +1067,11 @@ async fn a_range_query_sent_while_a_skys_jobs_run_is_answered_first() {
     let config = sky_config(data_dir.path(), caps, 1).bulk_gate(gate.clone());
     let server = TestServer::start_with(config.build()).await;
     let (mut client, universe) = opened(&server).await;
-    // The query's own jobs, on an idle pool.
+    // The query's own jobs, on an idle pool: a second query's, since from generator version 27 the
+    // first builds the galaxy's global list and its streams' tables for every later one, once
+    // (P10.T10.b's registration).
+    let warm = client.send_request(range_query(&universe)).await;
+    expect_range_answer(&mut client, warm).await;
     let idle = server.stats().pool().completed();
     let alone = client.send_request(range_query(&universe)).await;
     expect_range_answer(&mut client, alone).await;
