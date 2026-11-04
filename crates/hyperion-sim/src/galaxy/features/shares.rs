@@ -861,7 +861,11 @@ mod tests {
 
     /// Plan 11's P11.T7: the field factor, the feature share and the carved binary classes' share
     /// return each population's budget in every band, and the classes' shares, summed over the
-    /// fixture's systems, hold the hosts the scratch table scales to.
+    /// fixture's systems, hold the hosts the table scales to: each population's mass formed, its
+    /// systems times the mass formed per system, times its rows' rates. From generator version 27
+    /// the accreting white dwarfs' and the X-ray binaries' rows are plan 15's fits (P15.T10.b),
+    /// apart by population, so each population's hosts are its own rows' and not one population's
+    /// rates times the galaxy's mass formed.
     #[test]
     fn the_field_features_and_carved_classes_add_up_to_the_budget() {
         let galaxy = milky_way();
@@ -880,20 +884,21 @@ mod tests {
                 assert!(shares.class_share(population, band).abs() < 1e-300);
             }
         }
-        let mut hosts = 0.0;
+        let (mut hosts, mut expected) = (0.0, 0.0);
         for component in galaxy.fields().components() {
+            let population = component.population();
             for band in MassBand::ALL {
                 hosts += component.count()
-                    * galaxy.shares().share(band, component.population())
-                    * shares.class_share(component.population(), band);
+                    * galaxy.shares().share(band, population)
+                    * shares.class_share(population, band);
             }
+            let rates: f64 = crate::tables::binary::CLASS_SHARES
+                .rows()
+                .iter()
+                .map(|row| row.hosts_per_formed_mass(population))
+                .sum();
+            expected += component.count() * galaxy.mean_formed_mass().value() * rates;
         }
-        let expected: f64 = crate::tables::binary::CLASS_SHARES
-            .rows()
-            .iter()
-            .map(|row| row.hosts_per_formed_mass(Population::Halo))
-            .sum::<f64>()
-            * crate::tables::binary::MILKY_WAY_FORMED_MASS;
         assert!(
             (hosts / expected - 1.0).abs() < 1e-6,
             "{hosts:e} against {expected:e}"

@@ -408,7 +408,6 @@ mod tests {
     use super::*;
     use crate::Seed;
     use crate::coords::GalacticPosition;
-    use crate::galaxy::Population;
     use crate::galaxy::catalogue_classes::ClassId;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
     use crate::galaxy::features::interior::{ClassProfile, ProfileShape};
@@ -430,11 +429,15 @@ mod tests {
         root * root
     }
 
-    /// The five rows' rates summed, hosts per solar mass formed: equal in every population.
+    /// The five rows' rates summed, hosts per solar mass formed, each row's largest over the seven
+    /// populations ([`largest_rate`]), as the forecast takes it: from generator version 27 the
+    /// accreting white dwarfs' and the X-ray binaries' rows are plan 15's fits (P15.T10.b), apart
+    /// by population, and only the merger classes' rows are equal in every population.
     fn summed_rates() -> f64 {
-        CLASS_SHARES.rows().iter().fold(0.0, |sum, row| {
-            sum + row.hosts_per_formed_mass(Population::YoungThinDisc)
-        })
+        CLASS_SHARES
+            .rows()
+            .iter()
+            .fold(0.0, |sum, row| sum + largest_rate(row))
     }
 
     /// Prints a forecast's figures, for the plan's records.
@@ -493,8 +496,8 @@ mod tests {
     }
 
     /// The forecast at the Milky Way fixture is its primaries formed times its mass formed per
-    /// system times the five rates, over the acceptance floor, and its classes' hosts are in the
-    /// rows' proportion; its entries add the 27.30 victims of its black hole's disruptions in the
+    /// system times the five rates, each row's largest, over the acceptance floor, and its classes'
+    /// hosts are in those rates' proportion; its entries add the 27.30 victims of its black hole's disruptions in the
     /// source horizon (P09.T30.b; 27.31 until generator version 26).
     #[test]
     fn the_milky_way_s_forecast_is_its_formed_mass_at_the_classes_rates() {
@@ -522,7 +525,7 @@ mod tests {
             .map(|row| f.hosts(row.class()))
             .sum();
         for row in CLASS_SHARES.rows() {
-            let share = row.hosts_per_formed_mass(Population::Halo) / summed_rates();
+            let share = largest_rate(row) / summed_rates();
             let got = f.hosts(row.class()) / hosts;
             assert!(
                 (got / share - 1.0).abs() < 1e-12,
