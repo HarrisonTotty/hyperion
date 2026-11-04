@@ -19,6 +19,7 @@ use hyperion_protocol::{
     RequestError, ResponseBody, ServerMessage, StellarBriefDto, SystemRecord, SystemsInRange,
     SystemsInRangeRequest, UniverseIdHex, UniverseInfo, UniverseTime,
 };
+use hyperion_server::FeatureMembers;
 use hyperion_server::limits::MAX_QUERY_CELLS;
 use hyperion_sim::coords::LyCell;
 use hyperion_sim::galaxy::catalogue_classes::CatalogueClassSource;
@@ -897,11 +898,13 @@ async fn a_query_over_the_cell_budget_still_answers(server: &TestServer) {
     let universe = client
         .create_universe("Kepler Reach: over the cell budget", SEED)
         .await;
-    // Five thousand light-years of the halo, 30,000 ly above the centre: layer E alone would take
-    // more than the 262,144 cells one query may visit, so every layer is out for the budget and the
-    // answer says which rule stopped it (design note 24).
+    // Five thousand light-years of the outer halo, 58,000 ly above the centre: layer E alone would
+    // take more than the 262,144 cells one query may visit, so every layer is out for the budget
+    // and the answer says which rule stopped it (design note 24). From generator version 27 plan
+    // 08's displaced remnants, which count in layer E, give a sphere 30,000 ly above the centre,
+    // where this was asked until 27, 41,690 expected in layer E, past the limit before the budget.
     let mut query = Query::sunlike();
-    query.centre = at_cell([0, 0, 30_000]);
+    query.centre = at_cell([0, 0, 58_000]);
     query.radius_ly = 5_000.0;
     let answer = ask(&mut client, &universe.id, &query).await.unwrap();
 
@@ -912,10 +915,12 @@ async fn a_query_over_the_cell_budget_still_answers(server: &TestServer) {
         assert_eq!(line.status, LayerStatus::OverCellBudget, "{line:?}");
         assert_eq!(line.returned, 0, "{line:?}");
     }
-    // The connection is healthy afterwards, and a smaller sphere at the same point answers with
-    // systems in it.
-    query.radius_ly = 200.0;
-    let smaller = ask(&mut client, &universe.id, &query).await.unwrap();
+    // The connection is healthy afterwards, and a small sphere by the Sun-like point answers with
+    // layers in it (from 27 one out in the halo reads the global list's streams' tables, minutes
+    // of a test build).
+    let smaller = ask(&mut client, &universe.id, &Query::sunlike())
+        .await
+        .unwrap();
     assert!(
         smaller
             .census
@@ -1107,16 +1112,35 @@ async fn the_edges_of_every_range_are_where_design_note_24_puts_them(server: &Te
             "{radius_ly}"
         );
     }
-    // The widest radius is served, from the census alone: nothing that wide fits any limit.
+    // The widest radius is served, from the census alone: nothing that wide fits any limit. From
+    // generator version 27 a served query's census asks every source beside the grid for its
+    // expected count there, the global list's reading every stream's tube table in reach, minutes
+    // of a test build; the edge is the census's, so it is asked of a server that holds the
+    // feature members back, whose census is the grid's alone (P09.T40.a's door).
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let held = TestServer::start_with(
+        TestServer::config(data_dir.path())
+            .feature_members(FeatureMembers::Held)
+            .build(),
+    )
+    .await;
+    let mut held_client = held.connected().await;
+    let held_universe = held_client
+        .create_universe("Kepler Reach: the widest", SEED)
+        .await;
     let mut widest = tiny();
     widest.radius_ly = hyperion_server::limits::MAX_QUERY_RADIUS_LY;
-    let answer = ask(&mut client, &universe.id, &widest).await.unwrap();
+    let answer = ask(&mut held_client, &held_universe.id, &widest)
+        .await
+        .unwrap();
     assert!(answer.systems.is_empty(), "{:?}", answer.census);
     widest.radius_ly = widest.radius_ly.next_up();
     assert_eq!(
         refused(&mut client, &universe.id, &widest).await,
         (ErrorCode::BadRequest, Some("radius_ly".to_owned()))
     );
+    held_client.close().await;
+    held.stop().await;
 
     // The clock window is inclusive at both ends, and a nanosecond past either end is outside it.
     let h_seconds = 1_000 * SECONDS_PER_JULIAN_YEAR;
