@@ -435,12 +435,26 @@ export function strideMorphFactor(bandM: number, distanceM: number): number {
 
 /**
  * How long a coarse–fine hold at k = 0 takes to hold its edge's level-2 vertices once it switches on,
- * ms (a hand value, lean, 2026-11-03): its stride morph falls from its last k to 0 over it, so that
- * a finer patch arriving beside a coarse edge moves the edge's vertices at most 1 ÷ 18 of their
- * stride's displacement a frame at 60 Hz, the two patches meanwhile parting by at most that
- * displacement over the skirts (`StrideHoldFades`).
+ * and to let them go once it switches off, ms (a hand value, lean, 2026-11-03; its release's,
+ * 2026-11-05): their stride morph falls from its last k to 0 over it, or rises from 0 to its band's,
+ * so that a finer patch arriving beside a coarse edge, or leaving it, moves the edge's vertices at
+ * most 1 ÷ 18 of their stride's displacement a frame at 60 Hz, the two patches meanwhile parting by
+ * at most that displacement over the skirts (`StrideHoldFades`).
  */
 export const STRIDE_HOLD_FADE_MS = 300;
+
+/**
+ * The edges, a bit each in `EDGES`' order, whose hold at k = 0 is fading in or out by
+ * `holdFadesWord` (`Instance.holdFades`): those whose byte is not 0. The cull holds their blocks at
+ * stride 4 as it holds a held edge's, so that their level-2 vertices are drawn while they move.
+ */
+export function strideFadingEdges(holdFadesWord: number): number {
+  let edges = 0;
+  for (let e = 0; e < 4; e += 1) {
+    edges |= ((holdFadesWord >>> (8 * e)) & 0xff) === 0 ? 0 : 1 << e;
+  }
+  return edges;
+}
 
 /**
  * The stride morph's k at grid vertex (x, y) of morph level `level` (below 3) of a patch whose
@@ -449,7 +463,8 @@ export const STRIDE_HOLD_FADE_MS = 300;
  * edge a coarser patch touches (its coarse–fine hold at k = 1, bits 10 to 13); at a level-2 vertex
  * on an edge a finer one touches (k = 0, bits 2 to 5) its band's k times that edge's byte of
  * `holdFadesWord` over 255, the share of its stride morph the hold's onset still leaves it (0 once
- * the hold is whole); else its band's.
+ * the hold is whole); at a level-2 vertex on an edge not held whose byte is not 0, its band's k
+ * times 1 less the byte over 255, the share its hold's release has given back; else its band's.
  */
 export function strideFactor(
   x: number,
@@ -461,10 +476,15 @@ export function strideFactor(
   distanceM: number,
 ): number {
   const edges = (x === 0 ? 1 : 0) | (x === 64 ? 2 : 0) | (y === 0 ? 4 : 0) | (y === 64 ? 8 : 0);
-  const held = (quadrantWord >>> 2) & edges;
-  if (level === 2 && held !== 0) {
-    const share = ((holdFadesWord >>> (8 * Math.log2(held & -held))) & 0xff) / 255;
-    return share > 0 ? strideMorphFactor(bandM, distanceM) * share : 0;
+  // A level-2 vertex lies on one edge at most.
+  if (level === 2 && edges !== 0) {
+    const share = ((holdFadesWord >>> (8 * Math.log2(edges & -edges))) & 0xff) / 255;
+    if (((quadrantWord >>> 2) & edges) !== 0) {
+      return share > 0 ? strideMorphFactor(bandM, distanceM) * share : 0;
+    }
+    if (share > 0) {
+      return strideMorphFactor(bandM, distanceM) * (1 - share);
+    }
   }
   if (level === 0 && ((quadrantWord >>> 10) & edges) !== 0) {
     return 1;

@@ -292,6 +292,8 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
   // Each origin narrowed as an instance record holds it, so that the twin takes the device's.
   // The edges' bands from a generator of their own, as the strides' are.
   const nextEdge = random(0x5eed_3e);
+  // The holds' fades from one of their own too (R14.T3.c's release fade).
+  const nextFade = random(0x5eed_3f);
   const instances = Array.from({ length: INSTANCES }, (_, n) => {
     const bandsM = smokeEdgeBandsOf(nextEdge);
     return {
@@ -322,6 +324,16 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       quadrantWord:
         (n % 5 === 0 ? INSTANCE_FINEST : 0) |
         (n % 3 === 0 ? Math.floor(nextStride() * 16) << 2 : 0),
+      // Every fourth's edges fading in or out at random, each byte 0 or 1 to 255.
+      holdFadesWord:
+        n % 4 === 1
+          ? [0, 1, 2, 3].reduce(
+              (word, e) =>
+                (word | (nextFade() < 0.5 ? 0 : (1 + Math.floor(nextFade() * 255)) << (8 * e))) >>>
+                0,
+              0,
+            )
+          : 0,
     };
   });
   const axes = frame(next);
@@ -436,6 +448,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       words.setUint32(bytes * n + 12, instance.page, true);
       words.setUint32(bytes * n + 28, instance.quadrantWord, true);
       words.setUint32(bytes * n + 32, instance.subWord, true);
+      words.setUint32(bytes * n + 56, instance.holdFadesWord, true);
       words.setFloat32(bytes * n + 48, instance.strideScale.statedM, true);
       words.setFloat32(bytes * n + 52, instance.strideScale.perErrorM, true);
       for (let h = 0; h < EDGE_BANDS; h += 1) {

@@ -1098,6 +1098,7 @@ class StrideFrames {
             strideScale: inst.strideScale,
             edgeBandsM: inst.edgeBandsM,
             quadrantWord: inst.quadrantWord,
+            holdFadesWord: inst.holdFadesWord,
           },
           { records: recordOf, clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE },
           centre,

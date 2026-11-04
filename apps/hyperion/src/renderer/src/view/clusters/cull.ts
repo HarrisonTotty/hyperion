@@ -36,6 +36,7 @@ import {
   INSTANCE_FINEST,
   NO_STRIDE_EDGE_BANDS,
   type StrideEdgeBandsM,
+  strideFadingEdges,
   type StrideScale,
 } from "./strides";
 import { STRIDES } from "./templates";
@@ -137,6 +138,12 @@ export interface CullInstance {
    * (`INSTANCE_FINEST`), stride 1 (T3.c); absent, 0.
    */
   readonly quadrantWord?: number;
+  /**
+   * Its instance record's shares word (terrain's `Instance.holdFades`, word 14): an edge's byte not
+   * 0, its hold at k = 0 fading in or out, a camera pass's stride at most 4 on it as on a held edge
+   * (T3.c, `StrideHoldFades`); absent, 0.
+   */
+  readonly holdFadesWord?: number;
   /**
    * Its sub-patch word (terrain's `Instance.sub.x`, word 8; absent, 0): its low five bits not 0, a
    * sub-patch of its page, which shares its page's visibility with others, never marked by the
@@ -483,7 +490,7 @@ function blockErrorsOf(
  * at stride 1 or kept whole (its heights fading from another surface, which its spheres do not
  * bound), else `cameraStrideLevel` at the sphere's nearest point of its shared bands
  * (`clusterStrideBandsM`, its page's records' measured errors under its scale and its edges' bands),
- * up to the pass's cap and to 2 on an edge a finer patch touches.
+ * up to the pass's cap and to 2 on an edge a finer patch touches or whose hold fades in or out.
  */
 export function cameraPassStrideLevel(
   pass: CameraCullPass,
@@ -506,7 +513,8 @@ export function cameraPassStrideLevel(
   }
   const edges = recordEdges(record);
   let cap = Math.min(Math.log2(pass.strideCap), STRIDES.length - 1);
-  if ((edges & ((quadrant >>> 2) & 0xf)) !== 0) {
+  const held = ((quadrant >>> 2) & 0xf) | strideFadingEdges(instance.holdFadesWord ?? 0);
+  if ((edges & held) !== 0) {
     cap = Math.min(cap, 2);
   }
   const bands = clusterStrideBandsM(

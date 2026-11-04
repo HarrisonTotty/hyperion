@@ -1980,6 +1980,37 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     ]).toEqual([true, true]);
   });
 
+  it("fades a hold at k = 0 out as the finer patch leaves, its byte 255 the frame it lets go", async () => {
+    const made = await measuredPass();
+    const nearer = viewOver(20);
+    for (let n = 0; n < 24; n += 1) {
+      made.pass.step({ views: [passView(PRIMARY, nearer)], grounded: [] });
+      made.lane().bakeDemand(made.pass);
+    }
+    made.pass.step({ views: [passView(PRIMARY, nearer)], grounded: [] });
+    made.pass.drawFor(PRIMARY, frameOf(nearer, true));
+    const before = new Map(heldOf(made).map(({ slot, held }) => [slot, held]));
+    // Back where it was, the finer patches coarsen away beside patches that stay.
+    for (let n = 0; n < 24; n += 1) {
+      made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
+      made.lane().bakeDemand(made.pass);
+    }
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const releases = heldOf(made).flatMap(({ slot, held, shares }) => {
+      const was = before.get(slot);
+      const gone = was === undefined ? 0 : was & ~held;
+      return gone === 0 ? [] : [{ gone, shares }];
+    });
+    expect([
+      releases.length > 0,
+      releases.every(({ gone, shares }) =>
+        [0, 1, 2, 3].every(
+          (e) => ((gone >>> e) & 1) === 0 || ((shares >>> (8 * e)) & 0xff) === 255,
+        ),
+      ),
+    ]).toEqual([true, true]);
+  });
+
   it("takes its scale at the bands' slewed tolerance, a jump of the view's τ moving it by at most a slew's step", async () => {
     const made = await measuredPass();
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));

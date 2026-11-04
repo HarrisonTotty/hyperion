@@ -28,6 +28,7 @@ import {
   type StrideEdgeBandsM,
   type StrideErrorsM,
   strideFactor,
+  strideFadingEdges,
   strideMorphFactor,
   strideMorphLevel,
   strideNeedM,
@@ -385,6 +386,21 @@ describe("the stride morph's vertices", () => {
       strideFactor(64, 4, 2, word, 0, 100, far),
       strideFactor(4, 4, 2, word, 128 << 8, 100, far),
     ]).toEqual([128 / 255, 0, 1]);
+  });
+
+  it("gives a level-2 vertex on an edge whose hold lets go its band's k times 1 less its release's byte, wholly once it is 0", () => {
+    // Edge x = 64 not held, its release's byte 64 of 255; edge y = 64's byte alone elsewhere.
+    const far = (1 + STRIDE_BAND_FRACTION) * 100;
+    expect([
+      strideFactor(64, 4, 2, 0, 64 << 8, 100, far),
+      strideFactor(64, 4, 2, 0, 0, 100, far),
+      strideFactor(4, 4, 2, 0, 64 << 8, 100, far),
+      strideFactor(64, 2, 1, 0, 64 << 8, 100, far),
+    ]).toEqual([1 - 64 / 255, 1, 1, 1]);
+  });
+
+  it("finds the edges whose hold fades in or out by their bytes", () => {
+    expect([strideFadingEdges(0), strideFadingEdges((1 << 8) | (255 << 24))]).toEqual([0, 0b1010]);
   });
 
   it("moves a level-0 vertex on an edge a coarser patch touches wholly, whatever its band", () => {

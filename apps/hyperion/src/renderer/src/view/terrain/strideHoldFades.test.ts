@@ -37,7 +37,7 @@ function framesOf(
 
 const HELD_X64 = 0b0010;
 
-describe("the onsets of a view's coarse–fine holds (plan R14, R14.T3.c)", () => {
+describe("the onsets and releases of a view's coarse–fine holds (plan R14, R14.T3.c)", () => {
   it("fades an edge's hold in from its last level-2 bands, its share falling from 255 to 0 over its span", () => {
     const frames = framesOf([
       [0, 0, 120],
@@ -59,13 +59,31 @@ describe("the onsets of a view's coarse–fine holds (plan R14, R14.T3.c)", () =
     expect(framesOf([[0, HELD_X64, null]])[0]).toEqual([0, Array.from({ length: 8 }, () => NONE)]);
   });
 
-  it("takes no fade for an edge whose hold has let go, its bands its own", () => {
-    expect(
-      framesOf([
-        [0, HELD_X64, null],
-        [10, 0, 90],
-      ])[1],
-    ).toEqual([0, Array.from({ length: 8 }, () => 90)]);
+  it("fades an edge's hold out as it lets go, its bands its own, its byte falling from 255 to 0 over its span", () => {
+    const frames = framesOf([
+      [0, HELD_X64, null],
+      [1_000, 0, 90],
+      [1_000 + STRIDE_HOLD_FADE_MS / 2, 0, 90],
+      [1_000 + STRIDE_HOLD_FADE_MS, 0, 90],
+    ]);
+    const own = Array.from({ length: 8 }, () => 90);
+    expect(frames).toEqual([
+      [0, Array.from({ length: 8 }, () => NONE)],
+      [255 << 8, own],
+      [128 << 8, own],
+      [0, own],
+    ]);
+  });
+
+  it("turns a fade back from where it had come to when the hold switches back mid-fade", () => {
+    const frames = framesOf([
+      [0, 0, 120],
+      [1_000, HELD_X64, null],
+      // A quarter of the way to held: three quarters of the morph left.
+      [1_000 + STRIDE_HOLD_FADE_MS / 4, 0, 90],
+      [1_000 + STRIDE_HOLD_FADE_MS / 2, 0, 90],
+    ]);
+    expect(frames.map(([word]) => word >>> 8)).toEqual([0, 255, 64, 0]);
   });
 
   it("forgets a patch a frame does not fade, so that it comes back as first seen", () => {

@@ -727,6 +727,16 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
     expect(recordEdges(record(Z, 1, "mesh"))).toBe(0);
   });
 
+  it("holds a block on an edge whose hold fades in or out at stride 4 too, by its byte of the shares word (R14.T3.c)", () => {
+    const at = (x0: number, holdFadesWord: number): number =>
+      cameraStride({ ...PAGE_BLOCK, templateRef: x0 | (24 << 8) }, 1_000, {
+        strideScale: SCALE,
+        holdFadesWord,
+      });
+    // Edge x = 64's byte (edge 1): its blocks held, edge x = 0's free.
+    expect([at(56, 64 << 8), at(0, 64 << 8), at(56, 0)]).toEqual([4, 8, 8]);
+  });
+
   it("puts a may-discard record in its shape's may-discard bucket at stride 1, a fin run and a head run in theirs (R14.T1.g)", () => {
     const records = [
       { ...record({ x: 0, y: 0, z: 0 }, 1), mayDiscard: true },

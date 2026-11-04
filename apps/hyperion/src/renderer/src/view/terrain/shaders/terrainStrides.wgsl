@@ -181,13 +181,18 @@ fn stride_factor(inst : Instance, level : u32, x : u32, y : u32, at : vec3f) -> 
     return 0.0;
   }
   let edges = holdBitsAt(x, y) & 0xfu;
-  let held = (inst.parentQuadrant >> 2u) & edges;
-  // The share of its stride morph a hold at k = 0 still leaves the vertex as it switches on.
+  // The share of its stride morph a hold at k = 0 still leaves the vertex as it switches on, or has
+  // given back as it switches off; a level-2 vertex lies on one edge at most.
   var share = 1.0;
-  if (level == 2u && held != 0u) {
-    share = f32((inst.holdFades >> (8u * firstTrailingBit(held))) & 0xffu) / 255.0;
-    if (share <= 0.0) {
-      return 0.0;
+  if (level == 2u && edges != 0u) {
+    let fade = f32((inst.holdFades >> (8u * firstTrailingBit(edges))) & 0xffu) / 255.0;
+    if (((inst.parentQuadrant >> 2u) & edges) != 0u) {
+      share = fade;
+      if (share <= 0.0) {
+        return 0.0;
+      }
+    } else if (fade > 0.0) {
+      share = 1.0 - fade;
     }
   }
   if (level == 0u && ((inst.parentQuadrant >> 10u) & edges) != 0u) {

@@ -86,7 +86,8 @@
 //   region's) and where it is kept whole (its heights fade from another surface, which its records'
 //   spheres do not bound, so that its vertices may stand nearer than its spheres), and at most 4 for
 //   a block or a strip on an edge whose coarse–fine hold at k = 0 is set (bits 2 to 5 of that word:
-//   a finer patch touches it), whose level-2 vertices stay.
+//   a finer patch touches it), whose level-2 vertices stay, or fading in or out (its byte of the
+//   instance's shares word, `Instance.holdFades`, word 14, not 0), whose level-2 vertices move.
 // - _The bucket_: the record's shape (its flags' bits 0–3) less the consumer's first shape
 //   (`shapes.x`) × STRIDE_LEVELS + l, from the pass's first bucket; or, for a record that may
 //   discard (its flags' bit 5) of a shape with a may-discard template (`shapes.y` and `shapes.z`,
@@ -481,16 +482,26 @@ fn mask_cluster(sub : u32, c : u32) -> u32 {
   return 0u;
 }
 
+// The edges whose hold at k = 0 fades in or out by an instance's shares word (`strides.ts`'
+// `strideFadingEdges`): those whose byte is not 0.
+fn fading_edges(hold_fades : u32) -> u32 {
+  var edges = 0u;
+  for (var e = 0u; e < 4u; e = e + 1u) {
+    edges = edges | select(0u, 1u << e, ((hold_fades >> (8u * e)) & 0xffu) != 0u);
+  }
+  return edges;
+}
+
 // A camera pass's stride's level for a strided record (see the module's head; `strides.ts`'
-// `cameraStrideLevel`): `bands` the record's (`cluster_bands`), `quadrant` its instance's quadrant
-// word, `distance` the record's sphere's nearest point.
-fn camera_stride_level(cull_pass : CullPass, record : ClusterRecord, bands : vec3f, quadrant : u32, distance : f32) -> u32 {
+// `cameraStrideLevel`): `bands` the record's (`cluster_bands`), `quadrant` and `hold_fades` its
+// instance's quadrant and shares words, `distance` the record's sphere's nearest point.
+fn camera_stride_level(cull_pass : CullPass, record : ClusterRecord, bands : vec3f, quadrant : u32, hold_fades : u32, distance : f32) -> u32 {
   if ((quadrant & INSTANCE_FINEST) != 0u) {
     return 0u;
   }
   let edges = record_edges(record.flags & 0xfu, record.templateRef);
   var cap = min(cull_pass.header.y, STRIDE_LEVELS - 1u);
-  if ((edges & ((quadrant >> 2u) & 0xfu)) != 0u) {
+  if ((edges & (((quadrant >> 2u) & 0xfu) | fading_edges(hold_fades))) != 0u) {
     cap = min(cap, 2u);
   }
   var level = 0u;
@@ -566,12 +577,14 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
   // The instance's quadrant word and stride bands, where its record holds them (T3.c), and whether
   // it is a sub-patch of its slot (T3.d).
   var quadrant = 0u;
+  var hold_fades = 0u;
   var scale = vec2f(0.0);
   var sub = false;
   var sub_word = 0u;
   if (params.counts.y >= 16u) {
     quadrant = instance_words[base + 7u];
     sub_word = instance_words[base + 8u];
+    hold_fades = instance_words[base + 14u];
     sub = (sub_word & 31u) != 0u;
     scale = vec2f(bitcast<f32>(instance_words[base + 12u]), bitcast<f32>(instance_words[base + 13u]));
   }
@@ -611,7 +624,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
       if (cull_pass.header.x == PASS_CASCADE) {
         level = stride_level(cull_pass, unit);
       } else if (cull_pass.header.y > 0u && !whole) {
-        level = camera_stride_level(cull_pass, record, bands, quadrant, group_distance(centre, record.radius));
+        level = camera_stride_level(cull_pass, record, bands, quadrant, hold_fades, group_distance(centre, record.radius));
       }
       let t = template_of(cull_pass, shape, record.flags, level);
       let mark = instance * clusters + c;
