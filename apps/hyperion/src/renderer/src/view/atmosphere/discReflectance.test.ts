@@ -191,7 +191,7 @@ function digestOf(source: string): string {
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "e29de864d360e7a5"],
   ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "e29de864d360e7a5"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "87aa4a373ea92e8f"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "29660aa49f4d291a"],
   ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "68aabfba513c8d28"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
@@ -206,19 +206,19 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // stands, are the texel's own place, map and normal, bit for bit; the depth and the casters
   // compose the shared module alone.
   ...[
-    ["terrain-lit-baked-offsets", "2f1d51e7dca5638c"],
-    ["terrain-lit-face-differences", "f6fa79d7b7bedac5"],
+    ["terrain-lit-baked-offsets", "bbfb6565a15b6abe"],
+    ["terrain-lit-face-differences", "a00ac5f8f3e3557f"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "625ac236b3f0f5"],
-    ["terrain-depth-face-differences", "ecc920e6e2ccecd8"],
-    ["terrain-shadow-baked-offsets", "164034387f222ea7"],
-    ["terrain-shadow-face-differences", "1f9288dbaf5eee52"],
-    ["terrain-lit-baked-offsets-still", "ac74e6144029f9ad"],
-    ["terrain-lit-face-differences-still", "6cdc2c9431bb5940"],
-    ["terrain-depth-baked-offsets-still", "68f5a1db2655cb1a"],
-    ["terrain-depth-face-differences-still", "6d903b3d9a1978eb"],
-    ["terrain-shadow-baked-offsets-still", "dbdf5be2e18c970a"],
-    ["terrain-shadow-face-differences-still", "9b69cd7c5b56485b"],
+    ["terrain-depth-baked-offsets", "d37ebac5554389cb"],
+    ["terrain-depth-face-differences", "2f3d2f001d1b7466"],
+    ["terrain-shadow-baked-offsets", "cb1399fc6ddb4a29"],
+    ["terrain-shadow-face-differences", "b6462e00d05fe7c"],
+    ["terrain-lit-baked-offsets-still", "7bd84cbf402395cd"],
+    ["terrain-lit-face-differences-still", "488bb270989a67a0"],
+    ["terrain-depth-baked-offsets-still", "d599111f1a96c33a"],
+    ["terrain-depth-face-differences-still", "a77ed7bdecf3ed4b"],
+    ["terrain-shadow-baked-offsets-still", "39c418e88a2e9eea"],
+    ["terrain-shadow-face-differences-still", "56b674bbb8a5297b"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const still = name.endsWith("-still");
     const spec = [
