@@ -2267,8 +2267,11 @@ mod tests {
     fn atmosphere_reference_bits_are_pinned() {
         // Two of the sample case's values to the last bit, so that a change to the estimator,
         // its draws or `births::Draws` shows here before it moves every committed reference
-        // (R08.T12.b). A deliberate change updates both, and the references are traced again.
-        let pinned = |estimator: Estimator| {
+        // (R08.T12.b). A deliberate change re-pins both (`tests/pins/atmosphere.pins`), and the
+        // references are traced again.
+        let mut pins =
+            hyperion_testkit::pins!("atmosphere", "atmosphere_reference_bits_are_pinned");
+        let mut pin = |key: &str, estimator: Estimator| {
             let reference = trace_with(
                 &case::tests::sample_case(),
                 Polarisation::Scalar,
@@ -2276,24 +2279,21 @@ mod tests {
                 1,
                 estimator,
             );
-            [
-                format!("{:?}", reference.geometries()[0].radiance()[0]),
-                format!("{:?}", reference.aggregates()[0].upwelling_top()[1]),
-            ]
+            pins.exact(
+                key,
+                (
+                    reference.geometries()[0].radiance()[0],
+                    reference.aggregates()[0].upwelling_top()[1],
+                ),
+            );
         };
         // The ground view moved with R08.T12.c's sun-directed draws, which its Cornette–Shanks
         // aerosol takes where it is forward-peaked; it was 0.039731668489903935 in R08.T12.a.
         // R08.T12.f leaves that estimator unchanged to the bit.
-        assert_eq!(
-            pinned(Estimator::SunwardDraws),
-            ["0.04009082837728386", "0.5324772871217555"]
-        );
+        pin("sunward_draws", Estimator::SunwardDraws);
         // Both values moved with R08.T12.f's VROOM, which the aerosol's forward value of
         // 4.1 sr⁻¹ turns on at both wavelengths.
-        assert_eq!(
-            pinned(Estimator::ByMedium),
-            ["0.04122938235795757", "0.5181556568558089"]
-        );
+        pin("by_medium", Estimator::ByMedium);
     }
 
     #[test]
