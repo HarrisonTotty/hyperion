@@ -6374,7 +6374,8 @@ fn the_steps_of_t4o_are_the_same_whatever_age_they_are_run_to() {
 /// floor"), on the check research-leans-2 asked for: the one capped timeline that P11.T4.o's
 /// re-run of the follow-up's probes left, sample 11 of D's cell 2027 under the probe's seed (the
 /// fit's with its last byte changed; 3.68 + 2.76 M☉ at 108.2 d, e 0.90, Z 0.0142), ends as it
-/// does with the engine's cap on segments raised.
+/// does with the engine's cap on segments raised. From 27 the engine's cap is 256, and the sample
+/// is not capped: the comparison is run under the cap of 64 it had until 27.
 ///
 /// A common envelope at 275.38 Myr leaves a 0.61 M☉ helium star beside a 1.03 M☉ one at 0.72 R☉.
 /// The heavier fills its lobe at 290.22 Myr and, shrinking as it loses mass and as it ages, gives
@@ -6397,24 +6398,29 @@ fn the_steps_of_t4o_are_the_same_whatever_age_they_are_run_to() {
 fn the_last_capped_sample_ends_as_it_does_with_the_cap_raised() {
     use super::star::Member;
 
+    /// The engine's cap on segments until 27, under which the sample was capped.
+    const CAP_UNTIL_27: usize = 64;
+
     let grid = pair_light::PairGrid::of(crate::id::Layer::D).expect("D's grid");
     let (cell, index) = (2_027, 11);
     let input = pair_light::sample_input(&grid, cell, index, pair_light::FIT_SEED ^ 0x0d);
     let until = Years::new(pair_light::LAST_AGE_YEARS);
-    let capped = evolve(&input, until);
+    let capped = super::evolve::evolve_with_segment_cap(&input, until, CAP_UNTIL_27);
     let raised = super::evolve::evolve_with_segment_cap(&input, until, 64 * MAX_SEGMENTS);
     assert!(capped.hit_segment_cap(), "{}", describe(&capped));
     assert!(!raised.hit_segment_cap(), "{}", describe(&raised));
-    assert_eq!(capped.segments().len(), MAX_SEGMENTS);
+    // From 27 the engine's own cap (MAX_SEGMENTS) is above the sample's history.
+    assert_eq!(evolve(&input, until), raised);
+    assert_eq!(capped.segments().len(), CAP_UNTIL_27);
     assert_eq!(
         raised.segments().len(),
-        MAX_SEGMENTS + 1,
+        CAP_UNTIL_27 + 1,
         "{}",
         describe(&raised)
     );
     let (last, before) = capped.segments().split_last().expect("segments");
-    assert_eq!(before, &raised.segments()[..MAX_SEGMENTS - 1]);
-    let [merged, birth] = [MAX_SEGMENTS - 1, MAX_SEGMENTS].map(|k| &raised.segments()[k]);
+    assert_eq!(before, &raised.segments()[..CAP_UNTIL_27 - 1]);
+    let [merged, birth] = [CAP_UNTIL_27 - 1, CAP_UNTIL_27].map(|k| &raised.segments()[k]);
     let cap = last.start();
     assert_eq!((merged.kind(), merged.start()), (last.kind(), cap));
     assert!((cap.value() / 294.853e6 - 1.0).abs() < 1e-5, "{cap:?}");
@@ -6680,4 +6686,58 @@ fn no_pinned_pair_shows_a_dwarf_above_the_limit() {
             describe(&timeline)
         );
     }
+}
+
+/// `MAX_SEGMENTS` at 27: the sky-light fit's system 984 of layer E's cell 48
+/// (`sky::binary_light::fit_record`; Z = 0.002, 2.89 Gyr old), whose inner pair of 110.77 +
+/// 99.79 M☉ at 27.4 d (e 0.13) the old cap of 64 stopped at 3.176 Myr with its companion on its
+/// main sequence for good. After the primary's first transfer, from its Hertzsprung gap, it gives
+/// mass in 32 spells, detaching after each until its swelling refills its lobe some 5 years on, to
+/// its helium star at 3.1761 Myr: 71 segments, under the cap, to two black holes of 37.94 and
+/// 32.33 M☉.
+#[test]
+fn a_massive_gap_donor_s_spells_of_transfer_end_under_the_cap() {
+    use crate::id::Layer;
+    use crate::sky::binary_light::{fit_galaxy, fit_record};
+    use crate::stellar::multiplicity::MultiplicityContext;
+    use crate::stellar::system::SystemStars;
+
+    let galaxy = fit_galaxy();
+    let (record, composition) = fit_record(&galaxy, Layer::E, 48, 984);
+    let stars =
+        SystemStars::generate_with(&galaxy, &record, &composition, MultiplicityContext::Free);
+    let pair = stars
+        .pairs()
+        .iter()
+        .find(|p| {
+            let primary = &stars.stars()[usize::from(p.stars()[0].get())];
+            (primary.initial_mass().value() - 110.77).abs() < 0.01
+        })
+        .expect("the 110.8 + 99.8 M☉ pair");
+    let timeline = pair.timeline();
+    assert!(!timeline.hit_segment_cap(), "{}", describe(timeline));
+    assert_eq!(timeline.segments().len(), 71, "{}", describe(timeline));
+    let spells = timeline
+        .segments()
+        .iter()
+        .filter(|s| {
+            s.kind()
+                == SegmentKind::StableTransfer {
+                    donor: Component::Primary,
+                }
+        })
+        .count();
+    assert_eq!(spells, 32, "spells of transfer");
+    let end = *timeline.state_at(record.age_at_epoch()).stars();
+    assert_eq!(end.map(|s| s.phase()), [Phase::BlackHole, Phase::BlackHole]);
+    assert!(
+        (end[0].mass().value() - 37.943).abs() < 1e-3,
+        "{:?}",
+        end[0]
+    );
+    assert!(
+        (end[1].mass().value() - 32.329).abs() < 1e-3,
+        "{:?}",
+        end[1]
+    );
 }

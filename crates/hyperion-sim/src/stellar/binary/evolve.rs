@@ -54,8 +54,14 @@ use super::timeline::{
 use super::{collapses, wind_accretion};
 
 /// The most segments a timeline holds (P11.T4.f): reaching it is a broken invariant, counted in
-/// the tests.
-pub const MAX_SEGMENTS: usize = 64;
+/// the tests. 64 until 27, when the sky-light fit's layer E (`sky_binary_light_e`) met four inner
+/// pairs of 78–111 + 66–100 M☉ whose Hertzsprung-gap primary, after its first transfer, gives
+/// mass in spells, detaching after each until its swelling refills its lobe a few years on (32
+/// spells in cell 48's system 984), to its helium star in 71–87 segments: the cap stopped them at
+/// about 3.2–3.6 Myr and stretched the last segment to the system's age, leaving a companion of
+/// 59–94 M☉ on its main sequence for gigayears. The cap is a guard against a loop, which
+/// `MAX_EVENTS` and `MAX_STEPS` bound too, so it is set well above such a history.
+pub const MAX_SEGMENTS: usize = 256;
 
 #[cfg(test)]
 thread_local! {
