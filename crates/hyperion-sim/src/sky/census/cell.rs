@@ -4104,6 +4104,11 @@ mod tests {
         /// shines (P06.T43.b), and plan 11's pair light holds nothing fainter than M<sub>V</sub>
         /// 20.45, so its bound says it cannot (a finding, counted, not asserted).
         faint_white_dwarfs: u64,
+        /// Stars a detached partner's wind grew past their initial mass that outshine their bound:
+        /// from generator version 27 a wide pair's star takes its partner's wind (P11.T12), which
+        /// the bound's `Detached` verdict reaches only at 28 (its wind reach, retargeted; train
+        /// 27's findings), so they are counted, not asserted.
+        wind_fed: u64,
     }
 
     impl RealisedCheck {
@@ -4115,6 +4120,7 @@ mod tests {
             self.pairs.add(&other.pairs);
             self.least_margin = self.least_margin.min(other.least_margin);
             self.faint_white_dwarfs += other.faint_white_dwarfs;
+            self.wind_fed += other.wind_fed;
         }
     }
 
@@ -4194,6 +4200,10 @@ mod tests {
                         )
                     });
                     let margin = m_v.value() - bound.value();
+                    if margin < 0.0 && star.mass() > stars.stars()[i].initial_mass() {
+                        check.wind_fed += 1;
+                        continue;
+                    }
                     assert!(
                         margin >= 0.0,
                         "{}: M_V {} over its bound {} ({:?})",
@@ -4311,6 +4321,9 @@ mod tests {
     fn the_star_bound_holds_for_some_realised_systems() {
         let (all, _) = check_realised(300);
         assert!(all.own > 3_000 && all.pairs.detached() > 50, "{all:?}");
+        // A wind-fed star past its bound is rare (one, bulge system 0x4200217600000090's 0.70 M☉
+        // companion grown to 0.95 M☉ at M_V 4.26 against its bound's 6.02, at 27).
+        assert!(all.wind_fed * 1_000 < all.own, "{all:?}");
     }
 
     /// R06.T8.g's slow test: over 10⁵ records of each layer near the Sun and again in the bulge, at
