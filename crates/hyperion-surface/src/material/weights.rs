@@ -91,7 +91,7 @@ const SMALLEST_PRODUCT: f64 = 8.673_617_379_884_035e-19;
 /// 10¹⁰, where the recurrence would take 900,020 steps. No bake's tail comes near it: the class
 /// weights' largest is about 7,300 (a to 36, b to 202), and one past it needs a deviation below
 /// 10⁻⁵ of the threshold with the mean within 8.65 deviations of it. The quadrature is the poorer
-/// there, its panels' bound binding: at z = 7.8 × 10⁸ (`kernels_27`'s σ² = 9 × 10⁻¹⁰) it is
+/// there, its panels' bound binding: at z = 7.8 × 10⁸ (`weights/kernels`' σ² = 9 × 10⁻¹⁰) it is
 /// 1.7 × 10⁻⁸ off and the series 5 × 10⁻¹⁵.
 const LARGEST_PRODUCT: f64 = 1e10;
 
