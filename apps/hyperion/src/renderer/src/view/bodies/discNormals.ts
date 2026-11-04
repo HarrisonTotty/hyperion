@@ -29,11 +29,11 @@ import type { DiscNormalMap } from "../appearance/bodyAppearance";
 import { TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { TextureSpec } from "../engine/memory";
 import type { RenderEngine } from "../engine/types";
-import { fieldCellAt, MAX_FIELD_LEVEL, MIN_FIELD_LEVEL } from "../terrain/coverage";
+import { MAX_FIELD_LEVEL, MIN_FIELD_LEVEL, mortonCells } from "../terrain/coverage";
 import { uvToSt, type Xyz, xyzToFaceUv } from "../terrain/cube";
 import type { Face } from "../terrain/patchKey";
 import { decodeOctahedral } from "../terrain/shadingNormal";
-import { classMapSide, forEachGutterTexel } from "./discSurface";
+import { classMapSide, finishedSteps, GUTTER_STRIDE, gutterTexels } from "./discSurface";
 
 /** The normal map's texel format: an octahedral pair as two half floats, as the terrain's normals. */
 export const NORMAL_MAP_FORMAT = "rg16float" as const;
@@ -72,7 +72,11 @@ export interface NormalMapTexels {
 
 /** The index in `map.data` of the first coordinate of stored texel (x, y) of `face`'s layer. */
 function pairOffset(map: NormalMapTexels, face: Face, x: number, y: number): number {
-  const side = classMapSide(map.faceTexels);
+  return storedPairOffset(classMapSide(map.faceTexels), face, x, y);
+}
+
+/** {@link pairOffset} in a map of `side` stored texels a layer's side, its face by number. */
+function storedPairOffset(side: number, face: number, x: number, y: number): number {
   return ((face * side + y) * side + x) * PAIR;
 }
 
@@ -82,7 +86,8 @@ export function isNoNormal(x: number): boolean {
 }
 
 /**
- * Packs a worker's normal map in the layout the disc reads, its gutter from each face's neighbours.
+ * Packs a worker's normal map in the layout the disc reads, its gutter from each face's neighbours:
+ * {@link packNormalMapSteps} run to its end.
  *
  * @param level - The field's level L, 5 to 8, whose cells `cells` names: N = 2^L.
  * @param cells - The cell index at `level` (`fieldCellIndex`'s) of each cell answered, each once.
@@ -95,6 +100,24 @@ export function packNormalMap(
   cells: ArrayLike<number>,
   pairs: ArrayLike<number>,
 ): NormalMapTexels {
+  return finishedSteps(packNormalMapSteps(level, cells, pairs));
+}
+
+/** The cells a step of {@link packNormalMapSteps} packs before it yields. */
+const NORMAL_STEP = 4096;
+
+/**
+ * {@link packNormalMap} as steps (lane perf-main-thread; R10.T14.f's slices): it yields after every
+ * {@link NORMAL_STEP} cells and after the gutter, and makes no object a cell; run to its end, the
+ * same texels.
+ *
+ * @throws Error as {@link packNormalMap} does, at the step that meets it.
+ */
+export function* packNormalMapSteps(
+  level: number,
+  cells: ArrayLike<number>,
+  pairs: ArrayLike<number>,
+): Generator<void, NormalMapTexels> {
   if (!(Number.isInteger(level) && level >= MIN_FIELD_LEVEL && level <= MAX_FIELD_LEVEL)) {
     throw new Error(
       `a normal map is at a field's level, ${String(MIN_FIELD_LEVEL)} to ${String(MAX_FIELD_LEVEL)}, not ${String(level)}`,
@@ -112,6 +135,8 @@ export function packNormalMap(
     data: new Float16Array(FACES * side * side * PAIR).fill(NO_NORMAL[0]),
   };
   const count = FACES * 4 ** level;
+  const perFace = faceTexels * faceTexels;
+  const morton = mortonCells();
   for (let k = 0; k < cells.length; k += 1) {
     const index = cells[k] ?? -1;
     if (!(Number.isInteger(index) && index >= 0 && index < count)) {
@@ -124,17 +149,29 @@ export function packNormalMap(
         `cell ${String(index)}'s pair (${String(x)}, ${String(y)}) has a coordinate outside [-1, 1]`,
       );
     }
-    const cell = fieldCellAt(level, index);
-    const at = pairOffset(map, cell.face, cell.i + 1, cell.j + 1);
+    // The cell (face, i, j) of its index, `fieldCellAt`'s, by the Morton codes' table: below 4⁸.
+    const face = Math.floor(index / perFace);
+    const cell = morton[index - face * perFace] ?? 0;
+    const at = storedPairOffset(side, face, (cell % 256) + 1, Math.floor(cell / 256) + 1);
     map.data[at] = x;
     map.data[at + 1] = y;
+    if ((k + 1) % NORMAL_STEP === 0) {
+      yield;
+    }
   }
-  forEachGutterTexel(faceTexels, (face, x, y, from) => {
-    const to = pairOffset(map, face, x, y);
-    const source = pairOffset(map, from.face, from.i + 1, from.j + 1);
+  const gutter = gutterTexels(faceTexels);
+  for (let at = 0; at < gutter.length; at += GUTTER_STRIDE) {
+    const to = storedPairOffset(side, gutter[at] ?? 0, gutter[at + 1] ?? 0, gutter[at + 2] ?? 0);
+    const source = storedPairOffset(
+      side,
+      gutter[at + 3] ?? 0,
+      (gutter[at + 4] ?? 0) + 1,
+      (gutter[at + 5] ?? 0) + 1,
+    );
     map.data[to] = map.data[source] ?? NO_NORMAL[0];
     map.data[to + 1] = map.data[source + 1] ?? NO_NORMAL[1];
-  });
+  }
+  yield;
   return map;
 }
 

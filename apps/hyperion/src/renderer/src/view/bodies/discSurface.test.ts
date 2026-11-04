@@ -254,6 +254,28 @@ function f32(values: ReadonlyArray<number>): number[] {
   return values.map((v) => Math.fround(v));
 }
 
+/**
+ * A texel's bytes by the rule as the packing ran it before it allocated nothing (lane
+ * perf-main-thread): a sort by remainder, then class.
+ */
+function bySort(weights: ReadonlyArray<number>): number[] {
+  const scaled = weights.map((w) => Math.min(Math.max(w, 0), 1) * 255);
+  const total = Math.min(255, Math.round(scaled.reduce((sum, w) => sum + w, 0)));
+  const bytes = scaled.map((w) => Math.floor(w));
+  let short = total - bytes.reduce((sum, b) => sum + b, 0);
+  const order = scaled
+    .map((w, k) => ({ k, remainder: w - Math.floor(w) }))
+    .toSorted((a, b) => (b.remainder !== a.remainder ? b.remainder - a.remainder : a.k - b.k));
+  for (const { k } of order) {
+    if (short <= 0) {
+      break;
+    }
+    bytes[k] = (bytes[k] ?? 0) + 1;
+    short -= 1;
+  }
+  return bytes;
+}
+
 describe("the class map's layout", () => {
   it("puts each cell of R05's quadtree at its own texel: a level-2 patch's centre in (face, i, j) of a 4-texel map", () => {
     const misplaced: string[] = [];
@@ -293,6 +315,27 @@ describe("the class map's layout", () => {
       return Math.round(255 * weights.reduce((sum, w) => sum + w, 0));
     });
     expect(sums).toEqual([255, 255]);
+  });
+
+  it("gives the bytes a texel's rounding leaves short to its largest remainders, ties to the lower class, as a sort by them did (lane perf-main-thread)", () => {
+    let state = 7;
+    const next = (): number => {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+      return state / 2 ** 32;
+    };
+    // Whole quarters of a byte, so that remainders tie often; some texels summing past 1.
+    const texels = Array.from({ length: 400 }, (_, n) =>
+      Array.from(
+        { length: 1 + (n % MAX_DISC_CLASSES) },
+        () => Math.floor((next() * 4 * 255 * (n % 3 === 0 ? 2 : 1)) / (1 + (n % 16))) / (4 * 255),
+      ),
+    );
+    const differing = texels.filter((weights) => {
+      const map = packClassMap(1, weights.length, () => weights);
+      const bytes = classWeightsAt(map, [1, 0, 0]).map((w) => Math.round(w * 255));
+      return bytes.join() !== bySort(weights).join();
+    });
+    expect(differing).toEqual([]);
   });
 
   it("reads an unsurveyed texel as no weight, which leaves the whole share to the uniform law", () => {

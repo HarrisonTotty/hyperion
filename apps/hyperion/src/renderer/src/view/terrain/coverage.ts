@@ -80,6 +80,39 @@ export function fieldCellAt(level: number, index: number): PatchKey {
   return { face: faceOfIndex(face), level, i: compact(morton), j: compact(morton >>> 1) };
 }
 
+/**
+ * The coarse cell of `level` whose {@link fieldCellIndex} is `index`, as its place on the faces'
+ * grid, (face · 2ᴸ + j) · 2ᴸ + i: {@link fieldCellAt}'s cell with no object made, for the loops over
+ * a map's cells (lane perf-main-thread).
+ *
+ * @throws Error for an index past the level's six faces, as {@link fieldCellAt}.
+ */
+export function fieldCellGridIndex(level: number, index: number): number {
+  const perFace = 4 ** level;
+  const face = faceOfIndex(Math.floor(index / perFace));
+  const morton = index - face * perFace;
+  const n = 2 ** level;
+  return (face * n + compact(morton >>> 1)) * n + compact(morton);
+}
+
+/** {@link mortonCells}' table, made at its first use. */
+let MORTON_CELLS: Uint16Array | null = null;
+
+/**
+ * The cell of each Morton code below 2¹⁶, a face's codes at the levels R09 serves, as j · 256 + i:
+ * {@link fieldCellAt}'s (i, j) by a look-up, for the loops over a field's cells (lane
+ * perf-main-thread). Made once, 128 KiB.
+ */
+export function mortonCells(): Uint16Array {
+  if (MORTON_CELLS === null) {
+    MORTON_CELLS = new Uint16Array(2 ** 16);
+    for (let morton = 0; morton < MORTON_CELLS.length; morton += 1) {
+      MORTON_CELLS[morton] = compact(morton >>> 1) * 256 + compact(morton);
+    }
+  }
+  return MORTON_CELLS;
+}
+
 function faceOfIndex(n: number): Face {
   switch (n) {
     case 0:

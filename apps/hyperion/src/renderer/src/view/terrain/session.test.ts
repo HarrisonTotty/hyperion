@@ -80,6 +80,17 @@ async function settle(): Promise<void> {
   });
 }
 
+/**
+ * Steps the session, as its frames would, until its store has taken the Moon's answered class map
+ * in their slices (lane perf-main-thread), at most 1,000 steps.
+ */
+function takeMoonMap(h: Harness): void {
+  const law = lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon");
+  for (let k = 0; k < 1_000 && h.session.classMaps.classMapOf(MOON, law) === null; k += 1) {
+    h.session.step();
+  }
+}
+
 interface Harness {
   readonly socket: () => FakeWebSocket;
   readonly link: () => ServerLink;
@@ -554,7 +565,7 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
     expect([whileDown, h.socket().requestsOfKind("body_detail").length]).toEqual([0, 1]);
   });
 
-  it("gives the views the class map it holds", async () => {
+  it("gives the views the class map it holds, taken in its steps (lane perf-main-thread)", async () => {
     const h = await harness();
     await holdMoon(h);
     h.socket().serverAnswers("body_detail", () => detailWithSeed(SEED));
@@ -563,6 +574,9 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
     query?.w.reply({ kind: "class-map", id: query.q.id, body: MOON, map: oneTexelMap() });
     await settle();
     const elsewhere = lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon");
+    const beforeStep = h.session.classMaps.classMapOf(MOON, elsewhere);
+    takeMoonMap(h);
+    expect(beforeStep).toBeNull();
     expect(h.session.classMaps.classMapOf(MOON, elsewhere)?.kind).toBe("class-map");
     // Its map's point build cancelled with it (R10.T14.f), so that no later test steps it.
     h.session.dispose();
@@ -576,6 +590,7 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
     const query = h.workers.flatMap((w) => w.pendingClassMaps.map((q) => ({ w, q })))[0];
     query?.w.reply({ kind: "class-map", id: query.q.id, body: MOON, map: oneTexelMap() });
     await settle();
+    takeMoonMap(h);
     const surface = h.session.classMaps.classMapOf(
       MOON,
       lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
@@ -828,6 +843,7 @@ describe("the terrain session's pool, memory and teardown (R10.T16.a)", () => {
       const query = h.workers.flatMap((w) => w.pendingClassMaps.map((q) => ({ w, q })))[0];
       query?.w.reply({ kind: "class-map", id: query.q.id, body: MOON, map: oneTexelMap() });
       await settle();
+      takeMoonMap(h);
       const from = h.allocations.length;
       h.session.dispose();
       const destroyed = h.allocations

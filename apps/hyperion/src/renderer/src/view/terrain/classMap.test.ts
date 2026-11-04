@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
+import { surveyedAnswer, type SurveyedAnswerOptions } from "../../test/classMapFixtures";
 import { type CountingRenderEngine, countingRenderEngine } from "../../test/countingRenderEngine";
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import type { PhotometricLaw } from "../appearance/law";
@@ -43,6 +44,7 @@ import type { BodyFigure } from "./planet";
 import { materialFormName } from "./readouts";
 import { classRowLaw, MELT_CLASS_CODE, PHASE_LAW } from "./terrainMaterial";
 import { type ClassMapAnswer, PALETTE_NONE } from "./workers/messages";
+import { fnv1a64 } from "./workers/f32Digest";
 import type { FieldChange } from "./workers/pool";
 
 const MOON = "0200080020000000.0300";
@@ -219,13 +221,17 @@ function bytesOf(view: ArrayBufferView): Uint8Array {
   return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
 }
 
-/** Lets the store's answered promises run: a few turns of the microtask queue. */
-async function settle(): Promise<void> {
+/**
+ * Lets the store's answered promises run, a few turns of the microtask queue, and then `store`'s
+ * takes of the answers to their end, as the frames' slices would (lane perf-main-thread).
+ */
+async function settle(store?: ClassMapStore): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+  store?.step(Number.POSITIVE_INFINITY);
 }
 
 /** A class's law as the map should take it: its photometry on its law's row law on the body. */
@@ -527,7 +533,7 @@ describe("the class map's laws on their body (R10.T10.e)", () => {
     try {
       store.want(MOON, SEED);
       pool.asked[0]?.resolve(answerOf(TEXELS));
-      await settle();
+      await settle(store);
       const onMars = store.classMapOf(MOON, MARS);
       expect(onMars?.laws.slice(0, 2)).toEqual(classMapLawsOf(answerOf(TEXELS), MARS).slice(0, 2));
       expect(onMars?.laws[2]).toBe(MARS);
@@ -558,7 +564,7 @@ describe("the class-map store", () => {
     expect(pool.asked.map((q) => [q.body, q.detailSeed])).toEqual([[MOON, SEED]]);
     expect(store.classMapOf(MOON, ELSEWHERE)).toBeNull();
     pool.asked[0]?.resolve(answerOf(TEXELS));
-    await settle();
+    await settle(store);
     expect(engine.textureSpecs.at(-1)).toMatchObject({
       name: `class map ${MOON}`,
       size: { width: 66, height: 66, depthOrArrayLayers: 6 },
@@ -603,10 +609,10 @@ describe("the class-map store", () => {
     pool.change(MOON, 1, [5, 6]);
     expect(pool.asked).toHaveLength(1);
     pool.asked[0]?.resolve(answerOf(TEXELS.slice(0, 1)));
-    await settle();
+    await settle(store);
     expect(pool.asked).toHaveLength(2);
     pool.asked[1]?.resolve(answerOf(TEXELS));
-    await settle();
+    await settle(store);
     const before = store.classMapOf(MOON, ELSEWHERE);
     // A block that surveys nothing over a complete map asks nothing.
     pool.change(MOON, 2, [], [40, 41]);
@@ -617,7 +623,7 @@ describe("the class-map store", () => {
     pool.change(MOON, 3, [7, 8]);
     expect(pool.asked).toHaveLength(3);
     pool.asked[2]?.resolve(answerOf(TEXELS.slice(1)));
-    await settle();
+    await settle(store);
     const after = store.classMapOf(MOON, ELSEWHERE);
     expect(after).not.toBe(before);
     expect(engine.textureSpecs.filter((s) => s.category === "coarse-field-gpu")).toHaveLength(3);
@@ -630,11 +636,11 @@ describe("the class-map store", () => {
     const store = new ClassMapStore(engine, pool);
     store.want(MOON, SEED);
     pool.asked[0]?.resolve(answerOf(TEXELS, false));
-    await settle();
+    await settle(store);
     pool.change(MOON, 4, [], [90]);
     expect(pool.asked).toHaveLength(2);
     pool.asked[1]?.resolve(answerOf(TEXELS));
-    await settle();
+    await settle(store);
     pool.change(MOON, 0, []);
     expect(pool.asked).toHaveLength(3);
     store.dispose();
@@ -646,7 +652,7 @@ describe("the class-map store", () => {
     const store = new ClassMapStore(engine, pool);
     store.want(MOON, SEED);
     pool.asked[0]?.resolve(null);
-    await settle();
+    await settle(store);
     expect(store.classMapOf(MOON, ELSEWHERE)).toBeNull();
     pool.change(MOON, 0, [3]);
     expect(pool.asked).toHaveLength(2);
@@ -660,16 +666,16 @@ describe("the class-map store", () => {
     store.want(MOON, SEED);
     store.release(MOON);
     pool.asked[0]?.resolve(answerOf(TEXELS));
-    await settle();
+    await settle(store);
     expect(store.classMapOf(MOON, ELSEWHERE)).toBeNull();
     store.want(MOON, SEED);
     store.want(MOON, "00000000000000a6");
     expect(pool.asked.map((q) => q.detailSeed)).toEqual([SEED, SEED, "00000000000000a6"]);
     pool.asked[1]?.resolve(answerOf(TEXELS));
-    await settle();
+    await settle(store);
     expect(store.classMapOf(MOON, ELSEWHERE)).toBeNull();
     pool.asked[2]?.resolve(answerOf(TEXELS));
-    await settle();
+    await settle(store);
     expect(store.classMapOf(MOON, ELSEWHERE)).not.toBeNull();
     expect(engine.textureSpecs.filter((s) => s.category === "coarse-field-gpu")).toHaveLength(1);
     store.dispose();
@@ -689,7 +695,7 @@ describe("the class-map store", () => {
     const store = new ClassMapStore(engine, pool);
     store.want(MOON, SEED);
     pool.asked[0]?.resolve(answerOf(TEXELS));
-    await settle();
+    await settle(store);
     return { engine, events, pool, store };
   }
 
@@ -720,7 +726,7 @@ describe("the class-map store", () => {
     store.release(MOON);
     store.want(MOON, SEED);
     pool.asked[1]?.resolve(answerOf(TEXELS));
-    await settle();
+    await settle(store);
     expect(pool.listening).toBe(1);
     store.dispose();
   });
@@ -753,7 +759,7 @@ describe("the class-map store", () => {
     const store = new ClassMapStore(engine, pool);
     store.want(MOON, SEED);
     pool.asked[0]?.resolve(answerOf(TEXELS, true, NORMALS, normalsComplete));
-    await settle();
+    await settle(store);
     return { engine, events, pool, store };
   }
 
@@ -808,7 +814,7 @@ describe("the class-map store", () => {
     pool.change(MOON, 4, [], [90]);
     expect(pool.asked).toHaveLength(2);
     pool.asked[1]?.resolve(answerOf(TEXELS, true, NORMALS));
-    await settle();
+    await settle(store);
     // Complete in both: a block that surveys nothing asks nothing more.
     pool.change(MOON, 5, [], [91]);
     expect(pool.asked).toHaveLength(2);
@@ -867,7 +873,7 @@ describe("the class-map store", () => {
     const store = new ClassMapStore(refusing, pool);
     store.want(MOON, SEED);
     pool.asked[0]?.resolve(answerOf(TEXELS, true, NORMALS));
-    await settle();
+    await settle(store);
     expect([store.classMapOf(MOON, ELSEWHERE), kindsOf(events)]).toEqual([
       null,
       ["created", "destroyed"],
@@ -887,10 +893,10 @@ describe("the class-map store", () => {
     const store = new ClassMapStore(engine, pool);
     store.want(MOON, SEED);
     pool.asked[0]?.reject(new Error("refused"));
-    await settle();
+    await settle(store);
     pool.change(MOON, 1, [2]);
     pool.asked[1]?.reject(new Error("refused again"));
-    await settle();
+    await settle(store);
     expect(error).toHaveBeenCalledTimes(1);
     expect(pool.asked).toHaveLength(2);
     expect(store.classMapOf(MOON, ELSEWHERE)).toBeNull();
@@ -947,17 +953,17 @@ describe("the class-map store's points (R10.T14.f)", () => {
     const store = new ClassMapStore(engine, pool);
     store.want(MOON, SEED);
     pool.asked[0]?.resolve(answerOf(TEXELS, true, NORMALS));
-    await settle();
+    await settle(store);
     const first = surfaceOf(store);
     makeClassMapPointNow(first);
     return { engine, pool, store, first, drawnFirst: pointOf(first) };
   }
 
   /** A block that surveys cells, and the new map it brings, answered as the store's second. */
-  async function remade(pool: ScriptedPool): Promise<void> {
+  async function remade(pool: ScriptedPool, store: ClassMapStore): Promise<void> {
     pool.change(MOON, 1, [7, 8]);
     pool.asked[1]?.resolve(answerOf(TEXELS.slice(1), true, NORMALS));
-    await settle();
+    await settle(store);
   }
 
   it("queues a map's point elements as it takes the map", async () => {
@@ -966,7 +972,7 @@ describe("the class-map store's points (R10.T14.f)", () => {
     const store = new ClassMapStore(engine, pool);
     store.want(MOON, SEED);
     pool.asked[0]?.resolve(answerOf(TEXELS));
-    await settle();
+    await settle(store);
     expect(classMapPointState(surfaceOf(store))).toBe("queued");
     store.dispose();
   });
@@ -977,7 +983,7 @@ describe("the class-map store's points (R10.T14.f)", () => {
     const store = new ClassMapStore(engine, pool);
     store.want(MOON, SEED);
     pool.asked[0]?.resolve(answerOf(TEXELS));
-    await settle();
+    await settle(store);
     const surface = surfaceOf(store);
     store.release(MOON);
     expect(classMapPointState(surface)).toBe("unmade");
@@ -988,7 +994,7 @@ describe("the class-map store's points (R10.T14.f)", () => {
     const { pool, store, first, drawnFirst } = await drawnMoon();
     // A block that surveys cells brings a new map, its texels and normals new objects (R10.T10.g's
     // remake), whose elements are made again.
-    await remade(pool);
+    await remade(pool, store);
     const second = surfaceOf(store);
     expect([
       second.texels === first.texels,
@@ -1001,7 +1007,7 @@ describe("the class-map store's points (R10.T14.f)", () => {
 
   it("draws the new map's own point once the slices have made its elements and found its light", async () => {
     const { pool, store, drawnFirst } = await drawnMoon();
-    await remade(pool);
+    await remade(pool, store);
     const second = surfaceOf(store);
     drain();
     // The first frame after draws what it was drawn with, and queues its own light.
@@ -1018,7 +1024,7 @@ describe("the class-map store's points (R10.T14.f)", () => {
     const { engine, pool, store, drawnFirst } = await drawnMoon();
     // The restore makes the textures again and forgets the surface handed out.
     engine.restore();
-    await remade(pool);
+    await remade(pool, store);
     expect(pointOf(surfaceOf(store))).toEqual(drawnFirst);
     store.dispose();
   });
@@ -1167,7 +1173,7 @@ describe("a class map's maturity from a worker's answer (R10.T1.c)", () => {
       store.want(MOON, SEED);
       const answer = maturedAnswer(answerOf(TEXELS));
       pool.asked[0]?.resolve(answer);
-      await settle();
+      await settle(store);
       expect(engine.textureSpecs.at(-1)?.size).toEqual({
         width: 66,
         height: 66,
@@ -1184,5 +1190,160 @@ describe("a class map's maturity from a worker's answer (R10.T1.c)", () => {
     }
     const { builds, refreshes } = classMapPointWork();
     expect({ builds, refreshes }).toEqual({ builds: 0, refreshes: 0 });
+  });
+});
+
+/** A clock that moves on a quarter of a millisecond at each reading, and its readings. */
+function quarterClock(): { readonly now: () => number; readonly readings: () => number } {
+  let readings = 0;
+  return {
+    now: () => {
+      readings += 1;
+      return readings / 4;
+    },
+    readings: () => readings,
+  };
+}
+
+describe("the class-map store's takes in the frames' slices (lane perf-main-thread)", () => {
+  /**
+   * Maps the size of R10.T14.f's bench, and their bytes as the take packed them before it was
+   * sliced and allocated nothing a texel (at 8b9a1607): the class map's and the normal map's,
+   * FNV-1a 64.
+   */
+  const PINS: ReadonlyArray<readonly [SurveyedAnswerOptions, string, string]> = [
+    [{ classes: 8, maturity: true, fine: "corners" }, "f74f298066f8ed29", "448ead50c0aa5de"],
+    [{ classes: 8, maturity: false }, "26659c33fdd6765e", "448ead50c0aa5de"],
+    [
+      { classes: 16, maturity: false, fine: "centres", fineSide: 2, normalLevel: 7 },
+      "5b268c0fc17c1190",
+      "ca4e80d23df3de67",
+    ],
+    [
+      { classes: 3, maturity: true, fine: "centres", fineSide: 4, normalLevel: 5 },
+      "699c3581be149f6f",
+      "977ce5955e65c90d",
+    ],
+    [{ classes: 1, maturity: false, normalLevel: 6 }, "39f106301a457123", "da49c17212e4a717"],
+  ];
+
+  it("packs the bytes it packed before its take was sliced, on maps the size of R10.T14.f's bench", () => {
+    const digests = PINS.map(([options]) => {
+      const answer = surveyedAnswer(options);
+      const texels = classMapTexelsOf(answer);
+      const normals = normalMapTexelsOf(answer);
+      return [
+        texels === null ? null : fnv1a64(texels.data).toString(16),
+        normals === null ? null : fnv1a64(bytesOf(normals.data)).toString(16),
+      ];
+    });
+    expect(digests).toEqual(PINS.map(([, texels, normals]) => [texels, normals]));
+  });
+
+  /** A store holding the Moon's small map, with an answer to a surveying block's query out. */
+  async function holdingMoon(): Promise<{
+    readonly engine: CountingRenderEngine;
+    readonly pool: ScriptedPool;
+    readonly store: ClassMapStore;
+    readonly held: ClassMapDiscSurface | null;
+  }> {
+    const engine = await countingRenderEngine();
+    const pool = new ScriptedPool();
+    const store = new ClassMapStore(engine, pool);
+    store.want(MOON, SEED);
+    pool.asked[0]?.resolve(answerOf(TEXELS, true, NORMALS));
+    await settle(store);
+    pool.change(MOON, 1, [7, 8]);
+    return { engine, pool, store, held: store.classMapOf(MOON, ELSEWHERE) };
+  }
+
+  it("takes an answer in slices that each end at the first step past their budget, the map it held drawn until the new one's textures are made", async () => {
+    const { engine, pool, store, held } = await holdingMoon();
+    const answer = surveyedAnswer({ classes: 8, maturity: true, fine: "corners" });
+    pool.asked[1]?.resolve(answer);
+    await settle();
+    const clock = quarterClock();
+    const readings: number[] = [];
+    const drawnHeld: boolean[] = [];
+    while (store.taking(MOON) && readings.length < 10_000) {
+      drawnHeld.push(store.classMapOf(MOON, ELSEWHERE) === held);
+      const before = clock.readings();
+      store.step(2, clock.now);
+      readings.push(clock.readings() - before);
+    }
+    const taken = store.classMapOf(MOON, ELSEWHERE);
+    const texels = classMapTexelsOf(answer);
+    const normals = normalMapTexelsOf(answer);
+    expect({
+      sliced: readings.length > 10,
+      // Its start, then a reading before each step, the slice ending at the first past 2 ms.
+      fullSlices: readings.slice(0, -1).every((count) => count === 9),
+      drawnHeld: drawnHeld.every((drawn) => drawn),
+      texels: taken?.texels.data.every((byte, at) => byte === texels?.data[at]),
+      normals: taken?.normals?.texels.data.every((pair, at) => Object.is(pair, normals?.data[at])),
+      written: engine.textureWritten
+        .findLast((write) => write.texture === `class map ${MOON}`)
+        ?.data.every((byte, at) => byte === texels?.data[at]),
+    }).toEqual({
+      sliced: true,
+      fullSlices: true,
+      drawnHeld: true,
+      texels: true,
+      normals: true,
+      written: true,
+    });
+    store.dispose();
+  });
+
+  it("takes a newer answer in place of one not yet taken, and drops an unfinished take with its body", async () => {
+    const { engine, pool, store } = await holdingMoon();
+    const made = (): number =>
+      engine.textureSpecs.filter((spec) => spec.name === `class map ${MOON}`).length;
+    pool.asked[1]?.resolve(surveyedAnswer({ classes: 8, maturity: false }));
+    await settle();
+    store.step(2, quarterClock().now);
+    pool.change(MOON, 2, [9]);
+    pool.asked[2]?.resolve(answerOf(TEXELS.slice(1)));
+    await settle(store);
+    const newer = store.classMapOf(MOON, ELSEWHERE)?.texels;
+    const madeThen = made();
+    pool.change(MOON, 3, [10]);
+    pool.asked[3]?.resolve(surveyedAnswer({ classes: 8, maturity: false }));
+    await settle();
+    store.step(2, quarterClock().now);
+    store.release(MOON);
+    store.step(Number.POSITIVE_INFINITY);
+    const newest = classMapTexelsOf(answerOf(TEXELS.slice(1)));
+    expect([
+      newer?.data.every((byte, at) => byte === newest?.data[at]),
+      madeThen,
+      made(),
+      store.taking(MOON),
+    ]).toEqual([true, 2, 2, false]);
+    store.dispose();
+  });
+
+  it("reports an answer it cannot pack once, and keeps the map it held", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { pool, store, held } = await holdingMoon();
+    // A refinement of 3 cells a side, which no fine page holds.
+    pool.asked[1]?.resolve({
+      ...answerOf(TEXELS),
+      refinement: {
+        side: 3,
+        corners: false,
+        texels: Uint32Array.of(0),
+        surveyed: new Uint8Array(9),
+        weights: new Uint8Array(27),
+        codes: new Uint16Array(0),
+      },
+    });
+    await settle(store);
+    expect([
+      error.mock.calls.map(([message]) => String(message)),
+      store.classMapOf(MOON, ELSEWHERE) === held,
+      store.taking(MOON),
+    ]).toEqual([[`the class map of ${MOON} could not be made:`], true, false]);
+    store.dispose();
   });
 });

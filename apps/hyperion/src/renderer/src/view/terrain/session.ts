@@ -961,6 +961,11 @@ function cancelled(code: string): boolean {
   return code === "aborted" || code === "superseded";
 }
 
+/** The frame's slice's clock, ms: the render thread's monotonic one. */
+function sliceClock(): number {
+  return globalThis.performance.now();
+}
+
 /**
  * One source's terrain for every view of `VIEW` (plan R10, R10.T16.a; see the module's remarks):
  * made by `useTerrainSession` for the server's scene of the open universe, or a kept scene's
@@ -1341,8 +1346,9 @@ export class TerrainSession {
    * view's last report judges them (T7's `follow` over {@link viewFieldCandidates}), makes or
    * releases each body's mask, detail seed and class map with its want, and steps each body's
    * pass (R10.T16.b) once over the views that hand its body over, making the pass at its first
-   * hand-over. First it runs the frame's slice of the class-mapped points' work (R10.T14.f,
-   * `stepClassMapPoints`): at most 2 ms of the elements' builds and the ratios' refreshes of the
+   * hand-over. First it runs the frame's slice, at most 2 ms: the class maps' takes
+   * (`ClassMapStore.step`; lane perf-main-thread), then in what is left the class-mapped points'
+   * work (R10.T14.f, `stepClassMapPoints`), the elements' builds and the ratios' refreshes of the
    * maps whose bodies a frame drew near the 3 px switch lately (`nearClassMapPointSwitch`), none
    * for a body drawn larger in every view.
    *
@@ -1354,10 +1360,17 @@ export class TerrainSession {
     if (this.#disposed) {
       return;
     }
-    // The frame's slice of the class-mapped points' builds and refreshes (R10.T14.f), which the
-    // store queues as it takes each map, so that no frame's point makes them itself: only theirs
-    // whose bodies a frame drew near the switch.
-    stepClassMapPoints(CLASS_MAP_POINT_SLICE_MS, () => globalThis.performance.now(), "near");
+    // The frame's slice: first the class maps' takes (lane perf-main-thread), each answer packed and
+    // uploaded a few rows a step, then in what is left of it the class-mapped points' builds and
+    // refreshes (R10.T14.f), which the store queues as it takes each map, so that no frame's point
+    // makes them itself: only theirs whose bodies a frame drew near the switch.
+    const sliceStartMs = sliceClock();
+    this.#classMaps.step(CLASS_MAP_POINT_SLICE_MS, sliceClock);
+    stepClassMapPoints(
+      Math.max(0, CLASS_MAP_POINT_SLICE_MS - (sliceClock() - sliceStartMs)),
+      sliceClock,
+      "near",
+    );
     // With no view's report there is nothing to judge the fields by: a loop that starts again on
     // a living session, before its first report, keeps every field (D1; the batch review's S2).
     if (this.#reports.size > 0) {

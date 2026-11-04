@@ -52,22 +52,28 @@ import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import type { PhotometricLaw } from "../appearance/law";
-import { cancelClassMapPoint, queueClassMapPoint } from "../bodies/classMapPoint";
-import { type NormalMapTexels, normalMapTexture, packNormalMap } from "../bodies/discNormals";
 import {
-  type ClassMapFineInput,
-  type ClassMapRefinedInput,
-  type ClassMapTexel,
+  CLASS_MAP_POINT_SLICE_MS,
+  cancelClassMapPoint,
+  queueClassMapPoint,
+} from "../bodies/classMapPoint";
+import { type NormalMapTexels, normalMapTexture, packNormalMapSteps } from "../bodies/discNormals";
+import {
+  type ClassMapFineSource,
   type ClassMapTexels,
+  type ClassMapTexelSlot,
+  type ClassMapTexelSource,
   classMapSurface,
+  finishedSteps,
   MAX_DISC_CLASSES,
-  packClassMap,
+  packClassMapSteps,
 } from "../bodies/discSurface";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { RenderEngine, TextureHandle } from "../engine/types";
 import type { Rgb } from "../photometry/toneCurve";
-import { fieldCellAt } from "./coverage";
+import { fieldCellGridIndex } from "./coverage";
 import { MATURITY_NODES } from "./maturityNodes";
+import type { Face } from "./patchKey";
 import {
   type ClassPhotometry,
   classPhotometryOf,
@@ -205,7 +211,8 @@ function displayNodesOf(maturity: ClassMapMaturityAnswer, classes: number): Floa
  * survey touches its weights byte ÷ 255 times its surveyed share, every other texel `null`; `null`
  * for a map of no class, which draws as the uniform law. Where the answer carries its maturity
  * (R10.T1.c's client half), each texel's code and the classes' nodes in the display channels, a
- * class drawn from its nodes where its palette names a substance (a law of its own).
+ * class drawn from its nodes where its palette names a substance (a law of its own). It is
+ * {@link classMapTexelsSteps} run to its end.
  *
  * @throws Error for an answer at another level than {@link CLASS_MAP_LEVEL}, of more than
  *   `MAX_DISC_CLASSES` classes, or whose texels, shares, weights and maturity codes do not agree in
@@ -214,6 +221,19 @@ function displayNodesOf(maturity: ClassMapMaturityAnswer, classes: number): Floa
  *   codes are not r² cells a refined texel.
  */
 export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null {
+  return finishedSteps(classMapTexelsSteps(answer));
+}
+
+/**
+ * {@link classMapTexelsOf} as steps (lane perf-main-thread; R10.T14.f's slices), for the store's
+ * take in the frames' slices: R07's `packClassMapSteps` reading the answer's bytes where they are,
+ * with no array or object a texel or a refined texel's reading. Run to its end, the same texels.
+ *
+ * @throws Error as {@link classMapTexelsOf} does, at the step that meets it.
+ */
+export function* classMapTexelsSteps(
+  answer: ClassMapAnswer,
+): Generator<void, ClassMapTexels | null> {
   const classes = classCount(answer);
   if (answer.level !== CLASS_MAP_LEVEL) {
     throw new Error(
@@ -233,40 +253,42 @@ export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null 
     return null;
   }
   const n = CLASS_MAP_FACE_TEXELS;
-  const byTexel = new Map<number, number>();
+  // Each face texel's place among the answer's texels, (face · N + j) · N + i, −1 for none; a texel
+  // given twice is its later place.
+  const byTexel = new Int32Array(6 * n * n).fill(-1);
   for (let t = 0; t < count; t += 1) {
-    const cell = fieldCellAt(CLASS_MAP_LEVEL, answer.texels[t] ?? 0);
-    byTexel.set((cell.face * n + cell.j) * n + cell.i, t);
+    byTexel[fieldCellGridIndex(CLASS_MAP_LEVEL, answer.texels[t] ?? 0)] = t;
   }
-  const indexOf = ({ face, i, j }: ClassMapTexel): number | undefined =>
-    byTexel.get((face * n + j) * n + i);
-  const weightsOf = (texel: ClassMapTexel): number[] | null => {
-    const t = indexOf(texel);
-    if (t === undefined) {
-      return null;
-    }
-    const share = answer.fractions[t] ?? 0;
-    return Array.from(
-      { length: classes },
-      (_, k) => ((answer.weights[t * classes + k] ?? 0) / BYTE_MAX) * share,
-    );
-  };
+  yield;
   const { maturity } = answer;
-  const fine = fineInputOf(answer, classes);
+  const source: ClassMapTexelSource = {
+    weightsInto: (face, i, j, out) => {
+      const t = byTexel[(face * n + j) * n + i] ?? -1;
+      if (t < 0) {
+        return -1;
+      }
+      const share = answer.fractions[t] ?? 0;
+      for (let k = 0; k < classes; k += 1) {
+        out[k] = ((answer.weights[t * classes + k] ?? 0) / BYTE_MAX) * share;
+      }
+      return classes;
+    },
+    codeAt: (face, i, j) => maturity?.codes[byTexel[(face * n + j) * n + i] ?? -1] ?? Number.NaN,
+  };
+  const fine = fineSourceOf(answer, classes, source);
   if (maturity === undefined) {
-    return packClassMap(n, classes, weightsOf, undefined, fine);
+    return yield* packClassMapSteps(n, classes, source, undefined, fine);
   }
   if (maturity.codes.length !== count) {
     throw new Error(
       `a class map's ${String(count)} texels have ${String(maturity.codes.length)} maturity codes`,
     );
   }
-  return packClassMap(
+  return yield* packClassMapSteps(
     n,
     classes,
-    weightsOf,
+    source,
     {
-      codeOf: (texel) => maturity.codes[indexOf(texel) ?? -1] ?? Number.NaN,
       nodes: displayNodesOf(maturity, classes),
       drawn: Array.from(
         { length: classes },
@@ -279,15 +301,19 @@ export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null 
 
 /**
  * An answered map's refined texels as R07's fine page takes them (lane fix-coast-class-map;
- * `packClassMap`'s `fine`): each refined texel's r² cells, byte ÷ 255, a cell of no weight not
- * surveyed, and their codes under a maturity; or under the answer's `corners` its cells' survey and
- * the (r + 1)² corners of its cells, a corner of no weight not surveyed; `undefined` where the
- * answer refines none.
+ * `packClassMap`'s `fine`), read from the answer's bytes where they are (lane perf-main-thread):
+ * each refined texel's r² cells, byte ÷ 255, a cell of no weight not surveyed, and their codes under
+ * a maturity; or under the answer's `corners` its cells' survey and the (r + 1)² corners of its
+ * cells, a corner of no weight not surveyed; `undefined` where the answer refines none.
  *
  * @throws Error for a refined texel past the answer's texels, or a survey, weights or codes that
  *   are not a refined texel's cells or corners.
  */
-function fineInputOf(answer: ClassMapAnswer, classes: number): ClassMapFineInput | undefined {
+function fineSourceOf(
+  answer: ClassMapAnswer,
+  classes: number,
+  source: ClassMapTexelSource,
+): ClassMapFineSource | undefined {
   const { refinement } = answer;
   if (refinement === undefined || refinement.texels.length === 0) {
     return undefined;
@@ -305,53 +331,98 @@ function fineInputOf(answer: ClassMapAnswer, classes: number): ClassMapFineInput
       `a class map's ${String(refinedCount)} refined texels of ${String(cells)} cells and ${String(values)} readings have ${String(refinement.surveyed.length)} cells, ${String(refinement.weights.length)} weights over ${String(classes)} classes and ${String(refinement.codes.length)} codes`,
     );
   }
-  const refined = Array.from(refinement.texels, (t, k): ClassMapRefinedInput => {
+  // Each refined texel's place on the faces' grid, (face · N + j) · N + i.
+  const n = CLASS_MAP_FACE_TEXELS;
+  const grid = new Int32Array(refinedCount);
+  for (let k = 0; k < refinedCount; k += 1) {
+    const t = refinement.texels[k] ?? 0;
     const index = answer.texels[t];
     if (index === undefined) {
       throw new Error(
         `a class map's refined texel ${String(t)} is past its ${String(answer.texels.length)} texels`,
       );
     }
-    const texel = fieldCellAt(CLASS_MAP_LEVEL, index);
-    const first = k * values;
-    const readings = Array.from({ length: values }, (_, c) => {
-      const at = (first + c) * classes;
-      const bytes = refinement.weights.subarray(at, at + classes);
-      return bytes.some((byte) => byte > 0) ? Array.from(bytes, (byte) => byte / BYTE_MAX) : null;
-    });
-    const codes = coded
-      ? { codes: Array.from(refinement.codes.subarray(first, first + values)) }
-      : {};
-    return refinement.corners
-      ? {
-          texel: { face: texel.face, i: texel.i, j: texel.j },
-          surveyed: Array.from(
-            refinement.surveyed.subarray(k * cells, (k + 1) * cells),
-            (s) => s > 0,
-          ),
-          corners: readings,
-          ...codes,
-        }
-      : { texel: { face: texel.face, i: texel.i, j: texel.j }, cells: readings, ...codes };
-  });
-  return refinement.corners
-    ? { side: refinement.side, lattice: "corners", refined }
-    : { side: refinement.side, refined };
+    grid[k] = fieldCellGridIndex(CLASS_MAP_LEVEL, index);
+  }
+  const texelInto = (k: number, out: ClassMapTexelSlot): void => {
+    const at = grid[k] ?? 0;
+    const face = Math.floor(at / (n * n));
+    const j = Math.floor((at - face * n * n) / n);
+    out.face = faceAt(face);
+    out.i = at - face * n * n - j * n;
+    out.j = j;
+  };
+  const texel: ClassMapTexelSlot = { face: 0, i: 0, j: 0 };
+  return {
+    side: refinement.side,
+    corners: refinement.corners,
+    count: refinedCount,
+    texelInto,
+    ownInto: (k, out) => {
+      texelInto(k, texel);
+      return source.weightsInto(texel.face, texel.i, texel.j, out);
+    },
+    // The answer's lengths, checked above, are r² cells or (r + 1)² corners a refined texel.
+    checkReadings: () => undefined,
+    readingInto: (k, c, out) => {
+      const at = (k * values + c) * classes;
+      let any = false;
+      for (let q = 0; q < classes; q += 1) {
+        any ||= (refinement.weights[at + q] ?? 0) > 0;
+      }
+      if (!any) {
+        return -1;
+      }
+      for (let q = 0; q < classes; q += 1) {
+        out[q] = (refinement.weights[at + q] ?? 0) / BYTE_MAX;
+      }
+      return classes;
+    },
+    codeAt: (k, c) => refinement.codes[k * values + c] ?? Number.NaN,
+    surveyedAt: (k, c) => (refinement.surveyed[k * cells + c] ?? 0) > 0,
+  };
+}
+
+/** Face `n` of the cube, 0 to 5. */
+function faceAt(n: number): Face {
+  switch (n) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+      return n;
+    default:
+      throw new Error(`a face is 0 to 5, not ${String(n)}`);
+  }
 }
 
 /**
  * An answered normal map packed as R07's disc reads it (`packNormalMap`, with its gutter, at the
  * field's level): each surveyed cell answered its pair, every other texel `NO_NORMAL`; `null` for a
- * map of no cell, under which the datum's normal shades everywhere.
+ * map of no cell, under which the datum's normal shades everywhere. It is
+ * {@link normalMapTexelsSteps} run to its end.
  *
  * @throws Error for a level outside 5 to 8, pairs that are not two a cell, a cell past the level's,
  *   or a pair coordinate outside [−1, 1].
  */
 export function normalMapTexelsOf(answer: ClassMapAnswer): NormalMapTexels | null {
+  return finishedSteps(normalMapTexelsSteps(answer));
+}
+
+/**
+ * {@link normalMapTexelsOf} as steps (lane perf-main-thread), R07's `packNormalMapSteps`.
+ *
+ * @throws Error as {@link normalMapTexelsOf} does, at the step that meets it.
+ */
+export function* normalMapTexelsSteps(
+  answer: ClassMapAnswer,
+): Generator<void, NormalMapTexels | null> {
   if (answer.normalCells.length === 0 && answer.normalPairs.length === 0) {
     return null;
   }
-  return packNormalMap(answer.normalLevel, answer.normalCells, answer.normalPairs);
+  return yield* packNormalMapSteps(answer.normalLevel, answer.normalCells, answer.normalPairs);
 }
 
 /**
@@ -395,6 +466,11 @@ interface HeldMap {
   handedOut: ClassMapDiscSurface | null;
 }
 
+/** An answer being taken in the frames' slices: its take's steps ({@link ClassMapStore.step}). */
+interface PendingTake {
+  readonly steps: Generator<void, void>;
+}
+
 /** A body the store is asked for. */
 interface HeldBody {
   readonly detailSeed: DetailSeedHex;
@@ -416,6 +492,11 @@ interface HeldBody {
  * body's latest is dropped. A map of no class, or none (no field held yet), leaves the body
  * uniform; a map of no normal leaves its surface without one. A query refused by the module is
  * reported once a body, with `console.error`, and asked again after the next block.
+ *
+ * An answer is taken in the frames' slices ({@link ClassMapStore.step}; lane perf-main-thread): its
+ * texels and normals packed a few rows a step, then its textures made, the body's map until then
+ * the one it held; a newer answer for the body takes the place of one not yet taken, so that no
+ * queue grows. An answer that cannot be packed is reported as a refused query is.
  */
 export class ClassMapStore implements ClassMapSource {
   readonly #engine: Pick<
@@ -425,6 +506,8 @@ export class ClassMapStore implements ClassMapSource {
   readonly #pool: ClassMapPool;
   readonly #name: string;
   readonly #bodies = new Map<BodyIdHex, HeldBody>();
+  /** The answers being taken in the frames' slices, a body's latest, the oldest first. */
+  readonly #takes = new Map<BodyIdHex, PendingTake>();
   readonly #reported = new Set<BodyIdHex>();
   readonly #unsubscribe: ReadonlyArray<() => void>;
   #disposed = false;
@@ -478,6 +561,7 @@ export class ClassMapStore implements ClassMapSource {
     if (held === undefined) {
       return;
     }
+    this.#takes.delete(body);
     this.#drop(held);
     this.#bodies.delete(body);
     this.#reported.delete(body);
@@ -529,6 +613,49 @@ export class ClassMapStore implements ClassMapSource {
     return map.surface;
   }
 
+  /**
+   * The frame's slice of the answers' takes (lane perf-main-thread; R10.T14.f's slices): their
+   * packing's steps, the oldest answer's first, until a step ends past `budgetMs`, and each answer's
+   * textures made as its last step. An answer that cannot be packed or uploaded is reported once a
+   * body, as a refused query is, and the body keeps the map it held.
+   *
+   * @param budgetMs - The slice's length, ms.
+   * @param now - A monotonic clock, ms.
+   * @returns Whether an answer remains to be taken.
+   */
+  step(
+    budgetMs: number = CLASS_MAP_POINT_SLICE_MS,
+    now: () => number = () => globalThis.performance.now(),
+  ): boolean {
+    if (this.#takes.size === 0) {
+      return false;
+    }
+    const startMs = now();
+    for (const [body, take] of this.#takes) {
+      for (;;) {
+        if (!(now() - startMs < budgetMs)) {
+          return true;
+        }
+        try {
+          if (take.steps.next().done === true) {
+            this.#takes.delete(body);
+            break;
+          }
+        } catch (error: unknown) {
+          this.#takes.delete(body);
+          this.#refused(body, error);
+          break;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** Whether an answer for `body` is being taken in the frames' slices ({@link ClassMapStore.step}). */
+  taking(body: BodyIdHex): boolean {
+    return this.#takes.has(body);
+  }
+
   /** Releases every texture and stops listening; the store cannot be used afterwards. */
   dispose(): void {
     if (this.#disposed) {
@@ -573,14 +700,12 @@ export class ClassMapStore implements ClassMapSource {
   async #query(body: BodyIdHex, held: HeldBody): Promise<void> {
     try {
       const answer = await this.#pool.classMap(body, held.detailSeed);
-      if (this.#bodies.get(body) === held && !this.#disposed) {
-        this.#take(body, held, answer);
+      if (this.#bodies.get(body) === held && !this.#disposed && answer !== null) {
+        // In the frames' slices, in place of an answer of the body's not yet taken.
+        this.#takes.set(body, { steps: this.#takeSteps(body, held, answer) });
       }
     } catch (error: unknown) {
-      if (!this.#reported.has(body)) {
-        this.#reported.add(body);
-        console.error(`the class map of ${body} could not be made:`, error);
-      }
+      this.#refused(body, error);
     }
     held.asking = false;
     if (held.again && this.#bodies.get(body) === held) {
@@ -588,16 +713,27 @@ export class ClassMapStore implements ClassMapSource {
     }
   }
 
+  /** Reports a query refused or an answer that could not be taken, once a body. */
+  #refused(body: BodyIdHex, error: unknown): void {
+    if (!this.#reported.has(body)) {
+      this.#reported.add(body);
+      console.error(`the class map of ${body} could not be made:`, error);
+    }
+  }
+
   /**
-   * Takes an answer for `body` in place of the map it held, and queues the new map's point
-   * elements for the frames' slices, the old map's point standing in meanwhile (R10.T14.f).
+   * Takes an answer for `body` in place of the map it held, as steps for the frames' slices: its
+   * texels and normals packed, then the new map's point elements queued for the slices, the old
+   * map's point standing in meanwhile (R10.T14.f), and its textures made.
    */
-  #take(body: BodyIdHex, held: HeldBody, answer: ClassMapAnswer | null): void {
-    if (answer === null) {
+  *#takeSteps(body: BodyIdHex, held: HeldBody, answer: ClassMapAnswer): Generator<void, void> {
+    const texels = yield* classMapTexelsSteps(answer);
+    yield;
+    const normals = yield* normalMapTexelsSteps(answer);
+    yield;
+    if (this.#bodies.get(body) !== held || this.#disposed) {
       return;
     }
-    const texels = classMapTexelsOf(answer);
-    const normals = normalMapTexelsOf(answer);
     if (texels !== null) {
       // Before the old map is dropped, which would cancel its build and forget its stand-in.
       const previous = held.map;
