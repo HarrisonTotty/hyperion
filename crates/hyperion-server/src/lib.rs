@@ -530,10 +530,26 @@ fn sky_tables_service(
     let service =
         SkyTablesService::new(pool, config.sky_caps().tables(), config.sky_tables_bytes());
     match config.feature_members() {
-        FeatureMembers::Held => service,
-        FeatureMembers::Served => service.with_features(Arc::clone(feature_cells)),
+        FeatureMembers::Served if hyperion_sim::GENERATOR_VERSION >= SKY_FEATURE_GAS_FROM => {
+            service.with_features(Arc::clone(feature_cells))
+        }
+        FeatureMembers::Held | FeatureMembers::Served => service,
     }
 }
+
+/// The generator version from which the server's sky marches its sightlines through plan 09's
+/// features' gas (`FeatureGas`, P09.T40.a) beside the smooth field: 28 (train 27's lean,
+/// 2026-11-04).
+///
+/// P09.T40.a's gate opened at 27, with P09.T2.c's field share: the range query serves the features'
+/// members and every row its origin, the extinction lines take the features' gas, and the sky's
+/// census the members' stars. The features' gas on every sightline of a sky costs a shallow sky
+/// more than 20 minutes in the test profile, against 26 s without (train 26's measurement,
+/// `tests/sky.rs`' `a_shallow_sky_within_the_limit_is_served_as_r06s`), so the sky marches the
+/// smooth field alone until that cost is cut. Its tripwire,
+/// `the_sky_s_feature_gas_holds_until_its_version`, fails at the version.
+pub const SKY_FEATURE_GAS_FROM: hyperion_sim::GeneratorVersion =
+    hyperion_sim::GeneratorVersion::new(28);
 
 async fn healthz() -> &'static str {
     "ok"
@@ -805,9 +821,26 @@ mod tests {
         );
     }
 
-    /// The gate decides whether the sky's tables lend the feature cells: held, the default at the
-    /// version in force, a sky marches the smooth field alone; served, its jobs take the features'
-    /// gas (P09.T40.a).
+    /// The sky's features' gas holds until its version: below [`SKY_FEATURE_GAS_FROM`] every
+    /// server's sky marches the smooth field alone (train 27's lean), and the bump that reaches it
+    /// opens the gas.
+    #[test]
+    fn the_sky_s_feature_gas_holds_until_its_version() {
+        use hyperion_sim::GENERATOR_VERSION;
+        assert!(
+            GENERATOR_VERSION < SKY_FEATURE_GAS_FROM,
+            "generator version {} reaches the sky's features' gas's {}: if a sky with the \
+             features' gas on every sightline is served within its limits, open it (delete \
+             `SKY_FEATURE_GAS_FROM`, its guard in `sky_tables_service` and this test, and \
+             re-bless the sky's goldens); otherwise raise the constant",
+            GENERATOR_VERSION.get(),
+            SKY_FEATURE_GAS_FROM.get()
+        );
+    }
+
+    /// The gate and the sky's own version decide whether the sky's tables lend the feature cells:
+    /// held, or below [`SKY_FEATURE_GAS_FROM`], a sky marches the smooth field alone; served from
+    /// it, its jobs take the features' gas (P09.T40.a).
     #[tokio::test]
     async fn the_sky_takes_the_features_gas_only_once_the_gate_serves_them() {
         use hyperion_sim::galaxy::gas::modifiers::GasModifierSource;
@@ -845,8 +878,10 @@ mod tests {
                 .gas(&galaxy, t)
                 .modifiers_near_segment(&from, &to, &mut found);
             let expected = match members {
-                FeatureMembers::Held => Vec::new(),
-                FeatureMembers::Served => feature_gas_at(&galaxy, 1_000.0, &from, &to),
+                FeatureMembers::Served if GENERATOR_VERSION >= SKY_FEATURE_GAS_FROM => {
+                    feature_gas_at(&galaxy, 1_000.0, &from, &to)
+                }
+                FeatureMembers::Held | FeatureMembers::Served => Vec::new(),
             };
             assert_eq!(found, expected, "{members:?}");
         }
