@@ -292,7 +292,11 @@ fn a_query_a_century_either_way_finds_what_a_scan_of_the_inner_2_ly_finds() {
 
 /// The census: each band's expected candidates over the cells touching the unpadded sphere, the
 /// same at any time and whatever is cached, above what the sphere holds at the epoch, with the
-/// black hole as one system of layer E when the sphere holds it.
+/// black hole as one system of layer E when the sphere holds it. From generator version 27 the
+/// centre's list holds its recent classes and plan 11's binary classes (P09.T36.a–b, P11.T8.f),
+/// whose members expected in the sphere join the census, the same for any sphere at the same
+/// distance from the black hole and of the same radius, since their profiles are spherical: some
+/// 0.31 systems of layer E in a sphere of 0.01 ly 3 ly out, and 4.9 in one about the black hole.
 #[test]
 fn the_census_counts_the_cells_touching_the_sphere_and_the_black_hole() {
     let galaxy = milky_way();
@@ -343,16 +347,29 @@ fn the_census_counts_the_cells_touching_the_sphere_and_the_black_hole() {
                 sum + source.placement().expected_candidates(MassBand::E, cell)
             })
     };
-    let away = sphere([3.0, 0.0, 0.0], 0.01, UniverseTime::EPOCH);
-    assert_eq!(
-        source.expected_in_sphere(galaxy, &away).get(Layer::E),
-        cells_e(&away)
+    // What the list adds to layer E in `s`, beyond its cells' candidates and `black_hole`.
+    let listed = |s: &QuerySphere, black_hole: f64| {
+        source.expected_in_sphere(galaxy, s).get(Layer::E) - cells_e(s) - black_hole
+    };
+    for (centre, black_hole) in [([3.0, 0.0, 0.0], 0.0), ([1e-3, 0.0, 0.0], 1.0)] {
+        let s = sphere(centre, 0.01, UniverseTime::EPOCH);
+        let turned = sphere([0.0, 0.0, centre[0]], 0.01, UniverseTime::EPOCH);
+        let (list, again) = (listed(&s, black_hole), listed(&turned, black_hole));
+        println!("{centre:?}: the list's {list} in layer E, {again} turned onto the z axis");
+        assert!(list > 0.0, "{centre:?}: {list}");
+        assert!(
+            (list - again).abs() < 1e-9 * list.max(1.0),
+            "{centre:?}: {list} {again}"
+        );
+    }
+    // The black hole is one more: a sphere just holding it and one just missing it, whose lists'
+    // members differ by nothing measurable.
+    let edge = |share: f64| sphere([0.01 * share, 0.0, 0.0], 0.01, UniverseTime::EPOCH);
+    let (holding, missing) = (
+        listed(&edge(1.0 - 1e-9), 1.0),
+        listed(&edge(1.0 + 1e-9), 0.0),
     );
-    let close = sphere([1e-3, 0.0, 0.0], 0.01, UniverseTime::EPOCH);
-    assert_eq!(
-        source.expected_in_sphere(galaxy, &close).get(Layer::E),
-        cells_e(&close) + 1.0
-    );
+    assert!((holding - missing).abs() < 1e-6, "{holding} {missing}");
     let mut none = Vec::new();
     source.systems_in_sphere(galaxy, &now, LayerSet::EMPTY, &mut none);
     assert_eq!(none, []);
