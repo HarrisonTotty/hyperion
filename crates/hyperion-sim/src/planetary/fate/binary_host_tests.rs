@@ -425,18 +425,38 @@ fn stable_transfer_s_widening_unbinds_an_inner_circumbinary_planet() {
 /// with it: after the envelope each is smaller than its zone at birth, widened as its planets'
 /// orbits are (its host's mass at birth over its mass then), and the donor's, which the envelope
 /// stripped, is under a fifth of it.
+///
+/// The pair taken comes to its envelope on the orbit it was born on: the envelope is its first
+/// interaction, and neither star has died before it. From generator version 27 the sample's first
+/// post-common-envelope pair with both S-type zones, 0x8200b2dff000000b's, came to its envelope
+/// widened by a stable transfer and its companion's collapse to a black hole, so its donor's zone
+/// after it is 0.46 of its zone at birth.
 #[test]
 fn a_post_common_envelope_pair_s_s_type_zones_close() {
     let galaxy = galaxy();
     let roomy = |stars: &SystemStars, k: usize| {
         let ctx = SystemContext::from_stars(&galaxy, stars);
         let members = pair_stars(&ctx, k);
-        members
+        let timeline = ctx.pairs()[k].timeline();
+        let first = timeline
+            .segments()
             .iter()
-            .all(|&star| ctx.zones().iter().any(|zone| zone.members().eq([star])))
+            .find(|segment| segment.kind() != SegmentKind::Detached);
+        let on_its_birth_orbit = first.is_some_and(|segment| {
+            segment.kind() == SegmentKind::CommonEnvelope
+                && timeline
+                    .state_at(segment.start())
+                    .stars()
+                    .iter()
+                    .all(|star| !star.phase().is_remnant())
+        });
+        on_its_birth_orbit
+            && members
+                .iter()
+                .all(|&star| ctx.zones().iter().any(|zone| zone.members().eq([star])))
     };
     let (stars, k) = first_paired_system(&galaxy, SEARCH, PairHistory::PostCommonEnvelope, roomy)
-        .expect("a post-common-envelope pair with both S-type zones");
+        .expect("a post-common-envelope pair born to its envelope, with both S-type zones");
     let ctx = SystemContext::from_stars(&galaxy, &stars);
     let system = crate::planetary::system::generate_planets(SEED, &ctx);
     let envelope = first_segment(&ctx, k, SegmentKind::CommonEnvelope);
