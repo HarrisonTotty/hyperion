@@ -16,6 +16,7 @@ use super::*;
 use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::galaxy::PointLy;
+use crate::galaxy::catalogue_classes::binary::feature::catalogue_share;
 use crate::galaxy::catalogue_classes::grid::candidate_count;
 use crate::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
 use crate::galaxy::catalogue_classes::{
@@ -28,7 +29,7 @@ use crate::orbit::peters_merger_time;
 use crate::stellar::binary::BinaryClass;
 use crate::stellar::binary::scan::{engine_calls, scan_nsm_cell};
 use crate::stellar::remnant::collapse::MAX_NEUTRON_STAR_MASS;
-use crate::tables::binary::{MILKY_WAY_FORMED_MASS, NsmPairKind};
+use crate::tables::binary::{CLASS_SHARES, MILKY_WAY_FORMED_MASS, NsmPairKind};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, Span, UniverseTime};
 use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
 
@@ -144,9 +145,10 @@ fn shifted(t: UniverseTime, years: f64) -> UniverseTime {
 
 // 1. The count and the bounds.
 
-/// The class holds its share row's mergers: at the Milky Way fixture its components' expected
-/// entries in the source horizon are the row's ten, the brainstorm's "about 10", inside the plan's
-/// 8–12; and the fixture's own realised count is a Poisson draw of it.
+/// The class and the features' lists together hold its share row's mergers, the catalogue all but
+/// the features' share (P11.T8.f): at the Milky Way fixture the row's ten in the source horizon,
+/// the brainstorm's "about 10", inside the plan's 8–12, of which the catalogue's are 9.96; and the
+/// fixture's own realised count is a Poisson draw of the catalogue's.
 #[test]
 fn the_class_expects_about_ten_mergers_and_draws_them() {
     let galaxy = galaxy();
@@ -157,11 +159,22 @@ fn the_class_expects_about_ten_mergers_and_draws_them() {
         .fold(0.0, |sum, c| sum + c.count())
         * galaxy.mean_formed_mass().value();
     assert!((formed / MILKY_WAY_FORMED_MASS - 1.0).abs() < 1e-9);
-    let expected = NeutronStarMergers::new(galaxy)
+    let process = NeutronStarMergers::new(galaxy);
+    let row = CLASS_SHARES.row(CarvedClass::NeutronStarMerger);
+    let by_row: f64 = process
         .hosts()
-        .expected_hosts(galaxy);
-    assert!((expected / 10.0 - 1.0).abs() < 1e-9, "{expected}");
-    assert!((8.0..=12.0).contains(&expected));
+        .components()
+        .iter()
+        .map(|c| {
+            let component = galaxy.fields().component(c.id());
+            c.hosts_per_system() * component.count_with_unborn()
+                / catalogue_share(galaxy, row, component)
+        })
+        .sum();
+    let expected = process.hosts().expected_hosts(galaxy);
+    assert!((by_row / 10.0 - 1.0).abs() < 1e-9, "{by_row}");
+    assert!((8.0..=12.0).contains(&by_row));
+    assert!(expected < by_row && expected > 0.99 * by_row, "{expected}");
     let realised = all_entries().count();
     println!("{realised} neutron-star mergers against {expected:.3} expected");
     assert_poisson_count(
@@ -541,9 +554,10 @@ fn swallowing_black_holes_lower_the_class_s_kilonova_rate() {
 }
 
 /// The fixture's kilonovae a million years, with the black holes' and with the neutron-star
-/// pairs' alone, as measured.
-const KILONOVAE_PER_MYR: f64 = 30.96;
-const PAIRS_KILONOVAE_PER_MYR: f64 = 30.29;
+/// pairs' alone, as measured: re-measured at 27, whose features' lists hold 0.39% of the class's
+/// mergers (P11.T8.f), from 30.96 and 30.29.
+const KILONOVAE_PER_MYR: f64 = 30.84;
+const PAIRS_KILONOVAE_PER_MYR: f64 = 30.17;
 
 // 5. P11.T8.d's rider, from generator version 27.
 

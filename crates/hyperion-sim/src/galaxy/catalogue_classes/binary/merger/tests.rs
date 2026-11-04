@@ -15,6 +15,7 @@ use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::coords::GalacticPosition;
 use crate::galaxy::PointLy;
+use crate::galaxy::catalogue_classes::binary::feature::catalogue_share;
 use crate::galaxy::catalogue_classes::grid::candidate_count;
 use crate::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
 use crate::galaxy::catalogue_classes::{
@@ -25,7 +26,7 @@ use crate::galaxy::placement;
 use crate::id::Layer;
 use crate::stellar::binary::BinaryClass;
 use crate::stellar::binary::scan::{engine_calls, scan_merger_cell};
-use crate::tables::binary::{MILKY_WAY_FORMED_MASS, MergerChannel};
+use crate::tables::binary::{CLASS_SHARES, MILKY_WAY_FORMED_MASS, MergerChannel};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, SourceHorizon, Span, UniverseTime};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
@@ -90,9 +91,10 @@ fn shifted(t: UniverseTime, years: f64) -> UniverseTime {
 
 // 1. The share row, the rate and the bounds.
 
-/// The class holds its share row's mergers: at the Milky Way fixture its components' expected
-/// entries are the row's 9 × 10⁴ in the source horizon, 0.34 a year, inside Kochanek et al.'s
-/// (2014) 0.2–0.5 a year, the brainstorm's figure.
+/// The class and the features' lists together hold its share row's mergers, the catalogue all but
+/// the features' share (P11.T8.f): at the Milky Way fixture the row's 9 × 10⁴ in the source
+/// horizon, 0.34 a year, inside Kochanek et al.'s (2014) 0.2–0.5 a year, the brainstorm's figure,
+/// of which the catalogue's are 0.9962.
 #[test]
 fn the_class_holds_its_share_row_s_mergers_at_kochanek_s_rate() {
     let galaxy = galaxy();
@@ -104,10 +106,26 @@ fn the_class_holds_its_share_row_s_mergers_at_kochanek_s_rate() {
         * galaxy.mean_formed_mass().value();
     assert!((formed / MILKY_WAY_FORMED_MASS - 1.0).abs() < 1e-9);
     let process = StellarMergers::new(galaxy);
+    let row = CLASS_SHARES.row(CarvedClass::StellarMerger);
+    let by_row: f64 = process
+        .hosts()
+        .components()
+        .iter()
+        .map(|c| {
+            let component = galaxy.fields().component(c.id());
+            c.hosts_per_system() * component.count_with_unborn()
+                / catalogue_share(galaxy, row, component)
+        })
+        .sum();
     let hosts = process.hosts().expected_hosts(galaxy);
-    assert!((hosts / 9.0e4 - 1.0).abs() < 1e-9, "{hosts}");
+    println!(
+        "the row's {by_row:.1} mergers, the catalogue's {hosts:.1} ({:.4} of them)",
+        hosts / by_row
+    );
+    assert!((by_row / 9.0e4 - 1.0).abs() < 1e-9, "{by_row}");
+    assert!(hosts < by_row && hosts > 0.99 * by_row, "{hosts}");
     let rate = process.mergers_per_year(galaxy);
-    println!("{rate:.4} stellar mergers a year");
+    println!("{rate:.4} stellar mergers a year in the catalogue");
     assert!((0.2..=0.5).contains(&rate), "{rate}");
     assert_eq!(
         process.hosts().components().len(),
@@ -417,8 +435,9 @@ fn the_mergers_layers_against_the_share_row() {
     assert_eq!(counts, PINNED_LAYER_COUNTS);
 }
 
-/// The sample cells' mergers in layers A–E, as measured.
-const PINNED_LAYER_COUNTS: [u32; 5] = [37, 72, 189, 2, 0];
+/// The sample cells' mergers in layers A–E, as measured: re-measured at 27, whose engine channels
+/// (P11.T8.c) and features' share (P11.T8.f) give the cells other entries.
+const PINNED_LAYER_COUNTS: [u32; 5] = [40, 76, 173, 3, 0];
 
 // 4. Pins.
 
