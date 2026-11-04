@@ -1335,6 +1335,14 @@ impl Regolith {
         }
     }
 
+    /// What its pass knows of its body's resurfacing ([`with_resurfacing`](Self::with_resurfacing)),
+    /// for the tests that rebuild a pass's regolith.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn resurfacing(&self) -> IcyResurfacing {
+        self.resurfacing
+    }
+
     /// A weathered regolith on a body of `material`, of spherical albedos by bin `spherical_bins`
     /// ([`RegolithWeathering::Weathered`]): P14.T54.b.e's, which computes them from the lid's row
     /// ([`weathered_lid`](Self::weathered_lid)), so that it holds no row of its own.

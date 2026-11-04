@@ -38,9 +38,10 @@ mod tests {
 
     /// The first rocky belt's member P14.T33.c's census found with an airless `Ice` surface above
     /// the melting point at T0, by its system's rank in the sample and its ID: its solved bulk a
-    /// third water, its T0 371.3 K (the 10⁶ census's #7511, and from generator version 26, whose
-    /// solar circle holds more systems, the sample's #7546).
-    const HOT_ICE_MEMBER: (usize, &str) = (7_546, "41ffecb5ff000004.e106");
+    /// third water, its T0 371.3 K (the 10⁶ census's #7511; from generator version 26, whose
+    /// solar circle holds more systems, the sample's #7546; and from 27, whose galaxy places
+    /// another set, #7453).
+    const HOT_ICE_MEMBER: (usize, &str) = (7_453, "41ffecb5ff000004.e106");
 
     /// [`HOT_ICE_MEMBER`]'s system at the epoch: version 24's `Ice` member takes the rock lag, and
     /// the same system twice gives the same records.

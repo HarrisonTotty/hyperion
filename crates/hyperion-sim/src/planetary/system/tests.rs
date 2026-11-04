@@ -1985,13 +1985,14 @@ fn no_overlapping_orbits_in(systems: &'static [(SystemContext, PlanetarySystem)]
     );
 }
 
-/// How many real systems of primaries over 8 M☉ the supernova overlap test samples: 600. Since
+/// How many real systems of primaries over 8 M☉ the supernova overlap test samples: 800. Since
 /// plan 11's ruling 81 nearly every massive primary has close direct companions (Moe and Di
 /// Stefano's Table 13; 18 of 120 sampled are single), which leave its planets little room: 120
 /// systems held 33 surviving pairs about exploded hosts, where the test asks for more than 60;
 /// since ruling 106.2's rocky groups of 2–6, 360 held 57, and since ruling 116.1's farther first
-/// rocky planet 480 held 60.
-const MASSIVE_SAMPLE: usize = 600;
+/// rocky planet 480 held 60. At generator version 27, whose paired hosts' bodies take their fates
+/// and zones from their pairs' timelines (P14.T28.g, P14.T9.d), 600 hold 45 and 800 hold 63.
+const MASSIVE_SAMPLE: usize = 800;
 
 /// Ruling 71.3: the overlap property on post-supernova survivors. A sudden death gives each
 /// survivor its own eccentricity, and the scattering step (P14.T28.c) must leave no two orbits of
@@ -5362,7 +5363,11 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
 ///   published albedo under the context its own air gives, stated (§1.5); a fixed point's at
 ///   most 10⁻³. Its class: a diagonal jump (residual above `JUMP_RESIDUAL`), a context jump, a
 ///   lossless frost or a fixed point, and whether it took the second round. Derived twice, the
-///   same.
+///   same. A fixed point's residual is at most the bracket's 2⁻³² times its crossing's slope, under
+///   10⁻⁹ where that is gentle; from generator version 27 seven cross steeply, at 1.4 × 10⁻⁹ to
+///   7.1 × 10⁻⁷, under `JUMP_RESIDUAL`'s continuous slope of −4,000 (five gas envelopes, three
+///   giants and two sub-Neptunes, at a `T_eq` of 250.00–250.05 K under their own Bond albedos,
+///   P14.T24.h.b part 5, and two icy `Snowball`s): listed and counted, pinned as measured.
 /// - **The limits** (over all bodies, item 5): at most 3% bracketed and 1% jumping, and planets
 ///   jumping at most 2%. Reported by kind with each kind's pass histogram.
 /// - **The lid** (P14.T54.a's C3; the first relay's sample test 11, item 17's constraint 1): every
@@ -5632,6 +5637,8 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     // member (listed, not counted); and the cover rule with the water follow-up check.
     let mut jumps_by: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
     let mut context_jumps: Vec<String> = Vec::new();
+    // The fixed points that cross the diagonal steeply, their residual 10⁻⁹ or more.
+    let mut steep: Vec<String> = Vec::new();
     let mut settled_members: BTreeMap<&'static str, u32> = BTreeMap::new();
     let mut settled_changes: Vec<String> = Vec::new();
     let mut cover = CoverRuleTally::default();
@@ -5833,10 +5840,9 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                     } else if derived.albedo().value() > 1.0 - 1e-6 {
                         Class::Frost
                     } else {
-                        assert!(
-                            residual < 1e-9,
-                            "{what}: a fixed point's residual {residual:e}"
-                        );
+                        if residual >= 1e-9 {
+                            steep.push(format!("{what}: a fixed point's residual {residual:.3e}"));
+                        }
                         assert!(
                             joint <= 1e-3,
                             "{what}: a fixed point's joint residual {joint:e}"
@@ -6057,13 +6063,21 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
             && airless_read + thin_read + radiative_unread == radiative,
         "{airless_read} airless, {thin_read} thin, {radiative_unread} not modelled of {radiative}"
     );
+    eprintln!(
+        "fixed points crossing steeply: {}\n  {}",
+        steep.len(),
+        steep.join("\n  ")
+    );
+    assert_eq!(steep.len(), 7, "{steep:#?}");
     // The ruling's measures, over all bodies (decision-p14-t54a-passes §1.8 and item 5): at most
     // 1% jumping, a diagonal or a context jump, at most 3% bracketed. Above either goes to main.
     // From 24 both are missed, a finding pinned as it stands (P14.T54.b.l, to main): 24 of 954
     // jump (2.5%; 21 cover flips, most of them 15–28 K icy members whose cap gains or loses its
     // argon ice between passes, 2 onsets and a state edge) and 29 of 954 are bracketed (3.04%).
+    // At generator version 27, re-measured, 24 of 872 jump (2.75%; 22 cover flips, most of them
+    // icy members at 15–37 K, and 2 state edges) and 33 of 872 are bracketed (3.78%).
     assert!(jumps <= 24, "{jumps} of {total} jump");
-    assert!(held <= 29, "{held} of {total} bracketed");
+    assert!(held <= 33, "{held} of {total} bracketed");
     let planets = &tallies["planets"];
     let planet_jumps = count(planets, Class::Jump) + count(planets, Class::ContextJump);
     // The planets' 2% guard is over the 400 systems' planets (main, on C2's escalation:
@@ -6901,13 +6915,11 @@ const SECANT_PARTIALS_ONLY: [&str; 19] = [
     "close_binary.e501",
 ];
 
-/// The three bodies whose secant root is another crossing of the diagonal than the halvings', in
-/// the walk's order (P14.T51.l's record; `under_the_secant_root_the_passes_and_movers_are_stated`).
-const SECANT_OTHER_CROSSINGS: [&str; 3] = [
-    "01ffdb2c1fff0001.0b00",
-    "41ffecb200000004.0200",
-    "02003b2d1ffe0001.0200",
-];
+/// The bodies whose secant root is another crossing of the diagonal than the halvings', in the
+/// walk's order (P14.T51.l's record; `under_the_secant_root_the_passes_and_movers_are_stated`):
+/// three, of which 41ffecb200000004.0200 went from the sample with its system at generator version
+/// 27, whose galaxy places another set of systems at the solar circle.
+const SECANT_OTHER_CROSSINGS: [&str; 2] = ["01ffdb2c1fff0001.0b00", "02003b2d1ffe0001.0200"];
 
 /// P14.T51.l, a measurement for its record, run by name: every present planet, member and moon of
 /// the 400 sample systems and the golden systems at the epoch, each system generated and derived
@@ -7191,8 +7203,9 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
 /// 01ffdb2c1fff0001.0900 and .0b00, 01ffdb2c60020000.0100 and 01ffeb2d1ffc0000.0600), and
 /// 02003b2d1ffe0001.0200, whose bracket held several jumps, by P14.T53.e's present state; from 26
 /// 01ffeb2cdffd0000.0a02, and `close_binary`'s `.0800` and `.e501`, which the CO₂ cap's energy
-/// balance moves (P14.T53.h).
-const SECANT_PINNED_CONVERGED: [&str; 9] = [
+/// balance moves (P14.T53.h); and from 27 01ffdb2c1fff0000.0700, 01ffeb2d1ffc0000.0900 and
+/// 41ffecb1ffc00007.0d01.
+const SECANT_PINNED_CONVERGED: [&str; 12] = [
     "01ffeb2c5ffe0000.0400",
     "01ffdb2c1fff0001.0900",
     "01ffdb2c1fff0001.0b00",
@@ -7202,6 +7215,9 @@ const SECANT_PINNED_CONVERGED: [&str; 9] = [
     "02003b2d1ffe0001.0200",
     "close_binary.0800",
     "close_binary.e501",
+    "01ffdb2c1fff0000.0700",
+    "01ffeb2d1ffc0000.0900",
+    "41ffecb1ffc00007.0d01",
 ];
 
 /// P14.T51.l's pinned bodies end at crossings, not only at their pinned bits (research's condition
@@ -8818,8 +8834,21 @@ const DARK_THICK_AIRS: [&str; 13] = [
 /// 0800 is one, its Bond 0.595062 under its floor 0.611784 by its residual, and 0900 another,
 /// above its floor (main, 2026-10-27). Those the area mix alone left dark under 1 bar or more
 /// (a census gone with the floor's hold at the 23 → 24 bump) were among the 13.
+///
+/// From generator version 27 the floor is the adding rule's (P14.T24.h.b's fourth part), which
+/// keeps a clear sky at least its layer's, and a hazy air's haze is an absorbing layer over the
+/// rest (its third part), which can take its disc under its own Rayleigh layer: `close_binary` 0a00
+/// and 0b00 and `filler_c` 0300 and 0500, four hazy `Snowball`s of 1.6–26 bar at 0.21–0.30
+/// under floors of 0.42–0.69. Each such body is so by its haze: under the haze layer's oracle
+/// (`HazeLayerRules::Clear`) every body, its systems generated afresh, publishes at least its
+/// floor but a jump, those four among them.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the dark thick airs under the floor, and the hazy airs under it with the haze clear"
+)]
 fn the_rayleigh_floor_lifts_the_golden_systems_dark_thick_airs() {
+    use crate::planetary::derive::photometry::area_mix::{HazeLayerRules, with_haze_layer};
     let earth_column_kg_m2 = 101_325.0 / 9.806_65;
     let cases: Vec<FlooredCase> = golden_systems()
         .iter()
@@ -8843,10 +8872,7 @@ fn the_rayleigh_floor_lifts_the_golden_systems_dark_thick_airs() {
                 case.convergence
             ));
         } else if case.bond < case.floor * (1.0 - FLOOR_SETTLING) {
-            below.push(format!(
-                "{}: {:?}: Bond {} under its floor {}",
-                case.name, case.convergence, case.bond, case.floor
-            ));
+            below.push(case);
         }
         if !DARK_THICK_AIRS.contains(&case.name.as_str()) {
             continue;
@@ -8883,7 +8909,68 @@ fn the_rayleigh_floor_lifts_the_golden_systems_dark_thick_airs() {
         jumpers.len(),
         jumpers.join("\n  ")
     );
-    assert_eq!(below, Vec::<String>::new(), "bodies under their floor");
+    let clear: Vec<FlooredCase> = with_haze_layer(HazeLayerRules::Clear, || {
+        golden_systems_afresh()
+            .iter()
+            .flat_map(|(name, ctx, system)| floored_census(name, ctx, system))
+            .collect()
+    });
+    let under = |case: &FlooredCase| {
+        !case.convergence.is_jump() && case.bond < case.floor * (1.0 - FLOOR_SETTLING)
+    };
+    let hazed: Vec<String> = below
+        .iter()
+        .map(|case| {
+            let unhazed = clear
+                .iter()
+                .find(|other| other.name == case.name)
+                .unwrap_or_else(|| panic!("{} is walked with its haze clear", case.name));
+            format!(
+                "{}: {:?}, p_s {:.3} bar, Bond {:.4} under its floor {:.4}, {:.4} with its haze \
+                 clear (floor {:.4})",
+                case.name,
+                case.state,
+                case.pressure.value() / 1e5,
+                case.bond,
+                case.floor,
+                unhazed.bond,
+                unhazed.floor
+            )
+        })
+        .collect();
+    eprintln!(
+        "under their floor by their haze: {}\n  {}",
+        hazed.len(),
+        hazed.join("\n  ")
+    );
+    let clear_under: Vec<String> = clear
+        .iter()
+        .filter(|case| under(case))
+        .map(|case| {
+            format!(
+                "{}: Bond {} under its floor {}",
+                case.name, case.bond, case.floor
+            )
+        })
+        .collect();
+    assert_eq!(
+        clear_under,
+        Vec::<String>::new(),
+        "bodies under their floor with the haze clear"
+    );
+    assert_eq!(
+        below
+            .iter()
+            .map(|case| case.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "close_binary 0a00",
+            "close_binary 0b00",
+            "filler_c 0300",
+            "filler_c 0500"
+        ],
+        "the bodies under their floor by their haze"
+    );
     assert_eq!(lifted.len(), DARK_THICK_AIRS.len(), "{lifted:#?}");
 }
 
@@ -9183,12 +9270,17 @@ fn named(lines: &[String]) -> Vec<&str> {
 
 /// P14.T24.i's tests over the golden systems (decision-bump-plan-after-22, "Version-24 lanes after
 /// 23", V3.3, with main's ruling on its reach, 2026-10-22; P14.T24.i's follow-up,
-/// decision-t24i-airless-state D1.4): `fallback_black_hole`'s 19 unlit bodies, whose records
+/// decision-t24i-airless-state D1.4): `fallback_black_hole`'s unlit bodies, whose records
 /// published a mean surface temperature of 0 K at 23, read at least their night floor, and
-/// `for_body` reads all 19, none refused for an argon ice (13 hold one under P14.T53.c's ice-held
-/// argon, which 24's densities read); 11 lit airless or tenuous records stand at their floor, seven
-/// holding an argon ice, at 17.84–33.21 K; and the air whose `T_eq` lies under its floor,
-/// subgiant's moon 0504, rises with its greenhouse's base.
+/// `for_body` reads them all, none refused for an argon ice; lit airless or tenuous records stand
+/// at their floor; and an air whose `T_eq` lies under its floor rises with its greenhouse's base.
+///
+/// From generator version 27 `fallback_black_hole` is `0x8200_b2e0_0000_0002` (the golden systems'
+/// search at 27), with 21 unlit bodies, 19 of them holding an argon ice (P14.T53.c's ice-held
+/// argon, which 24's densities read); 7 lit airless or tenuous records stand at their floor, all
+/// holding an argon ice, at 17.84–33.18 K (to 26, 11 and 7 at 17.84–33.21 K: the icy lag,
+/// P14.T49.m, lifts `filler_b` e203's `T_eq` above its floor); and no air lies under its floor
+/// (to 26 subgiant's moon 0504, whose floor is 35.3 K under its 49.7 K `T_eq` at 27).
 ///
 /// Under every 24 hold against every 24 hold but the unlit mean's, 8 of the 11 changed their ices
 /// or condensates and none their `for_body` answer, no record settled again and every other record
@@ -9208,13 +9300,10 @@ fn under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor()
     );
     assert_eq!(
         (census.unlit.len(), census.unlit_read, census.unlit_argon),
-        (19, 19, 0)
+        (21, 21, 0)
     );
-    assert_eq!((census.raised, census.raised_argon), (11, 7));
-    assert_eq!(
-        named(&census.raised_airs),
-        ["subgiant 42006c9a00000004.0504"]
-    );
+    assert_eq!((census.raised, census.raised_argon), (7, 7));
+    assert_eq!(named(&census.raised_airs), Vec::<&str>::new());
 }
 
 /// P14.T24.i's tests over the 400 whole systems, a measurement run by name (P14.T24.i's
@@ -9268,10 +9357,12 @@ fn unlit_argon_ices(census: &UnlitRecords) -> usize {
 
 /// P14.T49.n's case of T24.i's golden-systems test (main moved T24.i's "`for_body` answers `Ok` on
 /// them" here, 2026-10-22): under 24's densities (solid argon's fcc read),
-/// `fallback_black_hole`'s 19 unlit records read at least their night floor and `for_body` reads
-/// all 19, 13 of them holding an argon ice (P14.T53.c's ice holds an argon that fails Jeans's test
-/// at its own temperature, 27–33 K, where its vapour is far under 100 Pa). Under 23's densities,
-/// a hold gone at the 23 → 24 bump, those 13 were refused, not modelled, and the other 6 read.
+/// `fallback_black_hole`'s unlit records read at least their night floor and `for_body` reads them
+/// all, those holding an argon ice too (P14.T53.c's ice holds an argon that fails Jeans's test at
+/// its own temperature, where its vapour is far under 100 Pa). Under 23's densities, a hold gone at
+/// the 23 → 24 bump, those were refused, not modelled. From generator version 27, its system the
+/// golden systems' search's at 27 (`0x8200_b2e0_0000_0002`), they are 21, 19 of them holding an
+/// argon ice (19 and 13 to 26).
 #[test]
 fn under_24_s_densities_the_golden_systems_unlit_records_all_read() {
     let census = unlit_records(golden_systems());
@@ -9283,7 +9374,7 @@ fn under_24_s_densities_the_golden_systems_unlit_records_all_read() {
             census.unlit_argon,
             unlit_argon_ices(&census)
         ),
-        (19, 19, 0, 13)
+        (21, 21, 0, 19)
     );
 }
 
@@ -10723,8 +10814,9 @@ fn floor_census() -> &'static FloorCensus {
 /// (decision-t24i-airless-state D1.4): no surface body's mean surface temperature lies below its
 /// night floor, and no `Airless` record's published partition holds
 /// [`AIRLESS_PRESSURE`](crate::planetary::derive::atmosphere::AIRLESS_PRESSURE) or more airborne;
-/// LOOK72's 62 triaged bodies are among them. The 18 unlit records' `for_body` answer waits for
-/// P14.T49.n's solid argon (D2).
+/// LOOK72's 62 triaged bodies are among them, but those generator version 27 no longer generates
+/// ([`LOOK72_GONE`]). The 18 unlit records' `for_body` answer waits for P14.T49.n's solid argon
+/// (D2).
 #[test]
 fn under_every_24_hold_no_surface_lies_below_its_night_floor() {
     use crate::planetary::derive::atmosphere::AIRLESS_PRESSURE;
@@ -10758,7 +10850,10 @@ fn under_every_24_hold_no_surface_lies_below_its_night_floor() {
                 .any(|b| b.label.starts_with("look72") && b.id == *id)
         })
         .collect();
-    assert_eq!(missing, Vec::<&str>::new(), "LOOK72's triaged bodies");
+    assert_eq!(
+        missing, LOOK72_GONE,
+        "LOOK72's triaged bodies, but those gone at 27"
+    );
     let airless = bodies.iter().filter(|b| b.airborne.is_some()).count();
     let under = bodies.iter().filter(|b| b.under_its_floor()).count();
     eprintln!(
@@ -10776,14 +10871,18 @@ fn under_every_24_hold_no_surface_lies_below_its_night_floor() {
 ///
 /// From the floor its nitrogen ice, the bulk of its airborne inventory, sublimes as its argon does
 /// (nitrogen's vapour is some kPa at 54–57 K), and its √p greenhouse warms the surface above the
-/// floor, so three of the four flip from `Airless` to their division's state (D1.4's "a state
-/// flipped"); the ruling's expectation of argon alone (331 Pa, and 2.5–9.1 Pa) counted no nitrogen:
+/// floor, so three of the four flipped from `Airless` to their division's state (D1.4's "a state
+/// flipped"), two from generator version 27; the ruling's expectation of argon alone (331 Pa, and
+/// 2.5–9.1 Pa) counted no nitrogen:
 ///
 /// - 01ffeb2b9ffc0000.0700, published `Airless` at 3.6 Pa from its `T_eq`, is a `Snowball` at
 ///   69.69 K over its 57.15 K floor with 40.9 kPa of air: nitrogen 35.4 kPa, argon 5.35 kPa (above
 ///   the 331 Pa of D1.1's partition at the floor), methane 64.6 Pa;
-/// - 01ffdb2c1fff0001.0d00 is a `Snowball` at 46.82 K over its 45.77 K floor at 100.67 Pa, a state
-///   edge (nitrogen 89.8 Pa, argon 10.9 Pa);
+/// - 01ffdb2c1fff0001.0d00 was a `Snowball` at 46.82 K over its 45.77 K floor at 100.67 Pa, a
+///   state edge (nitrogen 89.8 Pa, argon 10.9 Pa); from generator version 27, its floor 45.33 K
+///   (the same under the scattering's and the icy lag's oracles), it stays `Tenuous` at its floor
+///   to the bit, at 84.1 Pa (nitrogen 75.4 Pa, argon 8.64 Pa), its published partition holding
+///   81.8 Pa airborne (argon 3.98 Pa), as 0a00 does;
 /// - 01fffb2c20040000.0300 is a `Snowball` at 62.35 K over its 54.50 K floor with 11.5 kPa
 ///   (nitrogen 10.2 kPa, argon 1.29 kPa);
 /// - 02000b2b60020000.0a00 stays `Airless`, at its 44.36 K floor to the bit, publishing its floored
@@ -10792,13 +10891,9 @@ fn under_every_24_hold_no_surface_lies_below_its_night_floor() {
 #[test]
 fn under_every_24_hold_the_four_split_bodies_read_their_floor() {
     use crate::planetary::derive::atmosphere::AIRLESS_PRESSURE;
-    const FLIPPED: [&str; 3] = [
-        "01ffeb2b9ffc0000.0700",
-        "01ffdb2c1fff0001.0d00",
-        "01fffb2c20040000.0300",
-    ];
-    const AIRLESS: &str = "02000b2b60020000.0a00";
-    let ids = || FLIPPED.into_iter().chain([AIRLESS]);
+    const FLIPPED: [&str; 2] = ["01ffeb2b9ffc0000.0700", "01fffb2c20040000.0300"];
+    const AT_THE_FLOOR: [&str; 2] = ["02000b2b60020000.0a00", "01ffdb2c1fff0001.0d00"];
+    let ids = || FLIPPED.into_iter().chain(AT_THE_FLOOR);
     let systems: std::collections::BTreeSet<SystemId> = ids()
         .map(|id| {
             id.split_once('.')
@@ -10851,24 +10946,26 @@ fn under_every_24_hold_the_four_split_bodies_read_their_floor() {
         FLIPPED[0],
         floored[FLIPPED[0]].line()
     );
-    let body = &floored[AIRLESS];
-    assert!(
-        matches!(body.state, SurfaceState::Airless | SurfaceState::Tenuous),
-        "{AIRLESS}: {}",
-        body.line()
-    );
-    assert_same_bits(body.t_s, body.floor);
-    assert!(body.p_s > 1.0, "{AIRLESS}: {}", body.line());
-    let (total, argon) = body.airborne.expect("an Airless record's partition");
-    assert!(
-        total < AIRLESS_PRESSURE.value(),
-        "{AIRLESS}: {total} Pa airborne"
-    );
-    assert!(
-        (2.0..10.0).contains(&body.argon) && (2.0..10.0).contains(&argon),
-        "{AIRLESS}: argon {} Pa published, {argon} Pa in its partition",
-        body.argon
-    );
+    for id in AT_THE_FLOOR {
+        let body = &floored[id];
+        assert!(
+            matches!(body.state, SurfaceState::Airless | SurfaceState::Tenuous),
+            "{id}: {}",
+            body.line()
+        );
+        assert_same_bits(body.t_s, body.floor);
+        assert!(body.p_s > 1.0, "{id}: {}", body.line());
+        let (total, argon) = body.airborne.expect("an Airless record's partition");
+        assert!(
+            total < AIRLESS_PRESSURE.value(),
+            "{id}: {total} Pa airborne"
+        );
+        assert!(
+            (2.0..10.0).contains(&body.argon) && (2.0..10.0).contains(&argon),
+            "{id}: argon {} Pa published, {argon} Pa in its partition",
+            body.argon
+        );
+    }
 }
 
 /// The bistability re-check's driver from the generator's own first albedo, 0.3, is the solve to
@@ -11208,6 +11305,12 @@ const OVERSHOT_TEMPERATES: [(&str, u64, u16); 3] = [
 /// version 25 (P14.T53.e) the sample's two, frozen at 256.6 K and 267.4 K, are `Snowball`s by rule
 /// 5, and `close_binary`'s stays `Temperate`. Before the correction, each took all its carbon
 /// airborne at 723–861 K.
+///
+/// From generator version 27 the adding rule lays 02000b2ce0010000.0200's air's Rayleigh layer
+/// over its clear sky (P14.T24.h.b), its Bond albedo 0.64 (0.54 under the scattering's oracles),
+/// and it freezes past the set point to 201.0 K, its CO₂ condensing (230 bar of it, 0.22 bar
+/// airborne): with no liquid water to weather it, none of its carbon is stored, and it is a
+/// `Snowball` under freezing, past the thermostat's reach. The other two keep the correction.
 #[test]
 fn under_the_escape_batch_the_three_overshot_temperates_stop_at_the_set_point() {
     use crate::planetary::derive::atmosphere::{WaterPhase, water_phase};
@@ -11244,7 +11347,12 @@ fn under_the_escape_batch_the_three_overshot_temperates_stop_at_the_set_point() 
             SurfaceState::Temperate
         };
         assert_eq!(air.state(), state, "{set} {index:04x}");
-        assert!(share < 1.0, "{set} {index:04x}: all of its carbon airborne");
+        if id == 0x0200_0b2c_e001_0000 {
+            assert_same_bits(share, 1.0);
+            assert!(t.value() < 273.15, "{set} {index:04x}: {} K", t.value());
+        } else {
+            assert!(share < 1.0, "{set} {index:04x}: all of its carbon airborne");
+        }
         assert_ne!(water_phase(t, p), WaterPhase::Hot, "{set} {index:04x}");
         assert!(t.value() < 330.0, "{set} {index:04x}: {} K", t.value());
     }
@@ -12122,8 +12230,15 @@ pub(crate) const ITEM_33_WORLD: &str = "02000b2ca0000001.1100";
 
 /// LOOK72's 106 K runaway (decision-absurd-states-24 R4.1, item 1): at 23 a `RunawayGreenhouse`
 /// at 106.5 K under 5.33 bar, mostly O₂, its present runaway ratio 0.0405 and its
-/// maximum-greenhouse ratio 0.1152.
+/// maximum-greenhouse ratio 0.1152. From generator version 27 its system, four remnants (a black
+/// hole, two white dwarfs and a neutron star), places no planet, and it is not generated
+/// ([`LOOK72_GONE`]).
 const LOOK72_106_K_RUNAWAY: &str = "820e6ee00000008d.0900";
+
+/// The bodies of [`LOOK72_TRIAGED`] that generator version 27 no longer generates: its 106 K
+/// runaway ([`LOOK72_106_K_RUNAWAY`]), whose system's records are its belts' members and a moon
+/// of one alone.
+const LOOK72_GONE: [&str; 1] = [LOOK72_106_K_RUNAWAY];
 
 /// The census's hothouse between the limits (decision-t53b-arm-c §1): about a 2,456 K substellar
 /// host, its runaway ratio 61.9 at the peak and 0.547 now, its maximum-greenhouse ratio 2.11 now;
@@ -12160,9 +12275,9 @@ pub(super) const CLOSURE_HOTHOUSE_BODY: &str = "01ffeb2c5fff0000.0100";
 ///   publishes a present climate's state by rules 5–7 from generator version 25 (P14.T53.e),
 ///   `Snowball` or `Temperate`, whatever its insolation class, so that a dry desert inside the
 ///   runaway limit now is `Temperate` by rule 7; LOOK72's 106 K runaway ([`LOOK72_106_K_RUNAWAY`])
-///   is a `Snowball` whose
-///   water, kept beyond its escape's capacity from generator version 25, lies as its ice
-///   (P14.T53.b part 3; decision-p14-t53b-part3 §12 (0900));
+///   was a `Snowball` whose water, kept beyond its escape's capacity from generator version 25,
+///   lay as its ice (P14.T53.b part 3; decision-p14-t53b-part3 §12 (0900)), and from 27 is not
+///   generated ([`LOOK72_GONE`]);
 /// - decision-pre-23-review item 33's world ([`ITEM_33_WORLD`]) is not a runaway;
 /// - the census's five decked runaways ([`DECKED_FIVE`]) lie inside the present limit, each stated
 ///   with its present ratio, `T_s`, Bond albedo and `p_s`: three solved without the deck, and
@@ -12295,12 +12410,13 @@ fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_o
             runaway_waters += 1;
         }
     }
+    // From generator version 27 LOOK72's 106 K runaway is not generated (`LOOK72_GONE`).
     let runaway_106_k: Vec<&PresentBody> = census
         .present
         .iter()
         .filter(|b| b.label.starts_with("look72") && b.id == LOOK72_106_K_RUNAWAY)
         .collect();
-    assert_eq!(runaway_106_k.len(), 1, "{LOOK72_106_K_RUNAWAY}");
+    assert_eq!(runaway_106_k.len(), 0, "{LOOK72_106_K_RUNAWAY}");
     for now in runaway_106_k {
         eprintln!(
             "LOOK72's 106 K runaway {}: {}; its water {}",
@@ -12482,8 +12598,10 @@ fn under_every_24_hold_no_record_keeps_venus_s_deck_below_the_cycling_temperatur
 /// P14.T53.b part 1 (c) through the passes (decision-t53b-arm-c §3, §5.5): the census's hothouse
 /// between the limits, [`HOTHOUSE_BODY`], publishes a `RunawayGreenhouse` under Venus's deck,
 /// P14.T24.g's cycling case (`SulphurCycle::case_of`'s first arm), its `T_s`, A and `p_s` stated:
-/// under the thick-air closure (decision-p14-t53a-thick-co2 §6) 622.4 K, 0.76 and 414.8 bar, its
-/// `T_s` under water's saturation temperature, where T53.a's batch as built had 934.6 K above it,
+/// under the thick-air closure (decision-p14-t53a-thick-co2 §6) 622.4 K, 0.76 and 415.4 bar
+/// (re-measured at 27, 414.8 bar to 26, which the scattering's and the icy lag's oracles leave as
+/// it is), its `T_s` under water's saturation temperature, where T53.a's batch as built had 934.6 K
+/// above it,
 /// above water's critical pressure, so that its saturation temperature is 647.096 K. From
 /// generator version 25 (P14.T53.e) its first solve's passes carry rule 6's `RunawayGreenhouse`
 /// from a dry `Temperate`'s figures above water's saturation temperature, so that its first solve
@@ -12540,7 +12658,7 @@ fn under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck(
     assert_eq!(air.runaway_deck(), RunawayDeck::Kept);
     assert!((t_s - 622.4).abs() < 0.1, "{t_s} K");
     assert!((derived.albedo().value() - 0.76).abs() < 0.005);
-    assert!((bar - 414.8).abs() < 0.1, "{bar} bar");
+    assert!((bar - 415.4).abs() < 0.1, "{bar} bar");
     assert_same_bits(saturation, 647.096);
     assert!(air.surface_temperature().value() < saturation);
     assert_eq!(
@@ -12909,7 +13027,9 @@ pub(super) fn envelope_tag_faults(body: &EnvelopeBody) -> Vec<String> {
 /// [`SUPERCRITICAL_METHANE_BODY`] keeps its surface. The partition's cap holds its nitrogen at its
 /// critical isochore, about 95 bar at 1.29 `T_c`, so that its air cools under methane's 190.564 K
 /// critical point and its methane condenses there, a liquid at the surface, as the guide's
-/// `LIQUID COVER` row reads it, 27 K under that point and 3.3 times under the line.
+/// `LIQUID COVER` row reads it, 27 K under that point and 3.3 times under the line. Its `T_s` and
+/// `p_s`, 159.171 K and 95.75 bar, are re-measured at 27, whose minor clouds, sediment, adding
+/// rule and haze (P14.T24.h.b) move them from 163.414 K and 104.15 bar.
 #[test]
 fn part_three_returns_the_census_s_methane_snowball_its_surface() {
     use crate::planetary::chem::partition::CondensatePhase;
@@ -12952,8 +13072,8 @@ fn part_three_returns_the_census_s_methane_snowball_its_surface() {
         );
         assert!(air.supercritical_reservoir(g).is_none());
         assert_eq!(case.derived.convergence(), Convergence::Converged);
-        assert!((t_s - 163.414).abs() <= 0.001, "{t_s}");
-        assert!((p_s / 1e5 - 104.15).abs() <= 0.01, "{p_s}");
+        assert!((t_s - 159.171).abs() <= 0.001, "{t_s}");
+        assert!((p_s / 1e5 - 95.75).abs() <= 0.01, "{p_s}");
         assert!(diagram(methane).critical_temperature().value() - t_s >= 10.0);
         let (_, read) = (case.again)(PassDriver::Again(Under::Read));
         let read = read.expect("its published pass reads its partition");

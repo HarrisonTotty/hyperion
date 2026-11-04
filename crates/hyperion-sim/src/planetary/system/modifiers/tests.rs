@@ -1098,7 +1098,9 @@ fn regolith_bond(regolith: &Regolith) -> f64 {
 /// (the host, the orbit, what it orbits, the bulk section's gravity, the conditions' surface
 /// pressure and mean temperature, the mantle's sulphur, the crust's lid and the air's gases) are
 /// the record's own to the bit, and its field the figures'; the regolith its area mix read is the
-/// record's lid weathered at that maturity (or capped, `basalt_reduced`), to the bit; and the
+/// record's lid weathered at that maturity (or capped, `basalt_reduced`), to the bit, with what the
+/// pass knew of its body's resurfacing (from generator version 27 an `H2O` lid's fresh frost or its
+/// rock's lag, P14.T49.m, reads it); and the
 /// `ferric` deposit its area mix read is the record's. The context's surface age and heat flow,
 /// which the figures (K(P*)) read from the published pass's own air, are stated against the
 /// figures'.
@@ -1223,6 +1225,8 @@ fn under_the_weathered_area_mix_every_record_s_modifiers_are_its_published_pass_
             rebuilt.surface_age.value(),
         ));
         heat_moved = heat_moved.max(relative(parts.heat_flow.value(), rebuilt.heat_flow.value()));
+        // The pass's own knowledge of its body's resurfacing, which an `H2O` lid's lag reads from
+        // generator version 27 (P14.T49.m), is not the record's to rebuild: it is the pass's.
         let regolith = Regolith::weathered_lid(
             rebuilt.lid,
             surface.material(),
@@ -1232,7 +1236,8 @@ fn under_the_weathered_area_mix_every_record_s_modifiers_are_its_published_pass_
                 surface_age: parts.surface_age,
                 state: body.published.2,
             },
-        );
+        )
+        .with_resurfacing(pass.regolith().resurfacing());
         assert_eq!(
             regolith.is_weathered(),
             pass.regolith().is_weathered(),
@@ -1411,7 +1416,11 @@ fn airless_silicate(body: &BatchBody) -> Option<&PassWeathered> {
 
 /// decision-p14-t54b-e-findings §A.5's 42002cb1ffc00009.0301 and 42002cae0000000a.0101, the young
 /// lava worlds whose fresh `komatiite` rows P14.T54.b.e as built published (Bond 0.5217 and
-/// 0.3417), and their `T_eq` under the weathered area mix's hold, K (31.16 and 141.30).
+/// 0.3417), and their `T_eq` under the weathered area mix's hold, K (31.16 and 141.30). From
+/// generator version 27 neither is young: their surfaces are 3.19 Myr and 2.86 Gyr old, past
+/// [`REGOLITH_FORMATION_TIME`], so each is weathered (so under the scattering's and the icy lag's
+/// oracles too: 27's folds without an oracle move them, those of a moon's tides and heat among
+/// them).
 const YOUNG_LAVA_WORLDS: [(&str, f64); 2] = [
     ("42002cb1ffc00009.0301", 31.16),
     ("42002cae0000000a.0101", 141.30),
@@ -1428,7 +1437,8 @@ const YOUNG_LAVA_WORLDS: [(&str, f64); 2] = [
 /// 2. as built's airless (or tenuous) weathered regoliths below m = 10⁻³, split into the new arm
 ///    and still weathered, by lid, each with its surface age and k, and how many are the sample's
 ///    `Airless` ones, P14.T54.b.e's census's basis;
-/// 3. [`YOUNG_LAVA_WORLDS`] back at the cap's 0.1100;
+/// 3. [`YOUNG_LAVA_WORLDS`] back at the cap's 0.1100, and from generator version 27, neither young,
+///    weathered;
 /// 4. the airless silicate lids outside [`CAPPED_ROWS`] with a maturity by surface age, below
 ///    10⁴ yr, in [10⁴ yr, 1 Myr), [1, 10) Myr and above, how sensitive the result is to
 ///    [`REGOLITH_FORMATION_TIME`], each body in [10⁴ yr, 10 Myr) listed;
@@ -1595,7 +1605,22 @@ fn young_lava_census() {
                 .unwrap_or_else(|| panic!("{name} is in the sample"))
         };
         let (now, was) = (find(weathered_bodies()), find(as_built_bodies()));
-        assert!(young(now), "{name}");
+        // From generator version 27 neither is young ([`YOUNG_LAVA_WORLDS`]): each is weathered.
+        let pass = now.weathered.as_ref().ok();
+        let t_s = pass.map_or(f64::NAN, |pass| pass.parts().surface_age.value());
+        if !young(now) {
+            assert!(t_s >= formation, "{name}: t_s {t_s} yr");
+            assert!(
+                pass.is_some_and(|pass| pass.regolith().is_weathered()),
+                "{name}: weathered"
+            );
+            named.push(format!(
+                "{name}: not young at 27, t_s {t_s:.3e} yr, weathered: A as built {:.4} → fixed \
+                 {:.4}, T_eq {:.2} → {:.2} K",
+                was.published.0, now.published.0, was.published.1, now.published.1
+            ));
+            continue;
+        }
         assert_same_bits(now.published.0, moon);
         // At the cap, the fix's T_eq is the one the weathered area mix's hold gave (the ruling's).
         assert!(
@@ -1671,5 +1696,8 @@ fn young_lava_census() {
         Vec::<String>::new(),
         "an airless silicate lid under 1 Myr above 0.11"
     );
-    assert!(!on_arm.is_empty());
+    // From generator version 27 none of the census's surfaces is a lava younger than
+    // `REGOLITH_FORMATION_TIME` (its two named worlds' are older, [`YOUNG_LAVA_WORLDS`]), so the
+    // new arm holds none of them: pinned as measured, the arm's own cases its unit tests'.
+    assert!(on_arm.is_empty(), "{on_arm:?}");
 }

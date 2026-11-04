@@ -12,14 +12,16 @@ use crate::substance::phase::ice_ih_melting_temperature;
 use crate::units::{Metres, Pascals};
 
 /// The sample systems the research's pilot found in the deck's domain, by their index in the
-/// sample: s244 wholly, s365 and s188 in part (at their flux and pressure tapers). The pilot's
-/// s243, s363 and s187 (01ffeb2d5fff0001, 01ffcb2ba0010000 and 02002b2c20020000) are s244, s365
-/// and s188 from generator version 26, whose sample places one more system before each.
-const DOMAIN_SYSTEMS: [usize; 3] = [244, 365, 188];
+/// sample: s241 wholly, s361 and s185 in part (at their flux and pressure tapers). The pilot's
+/// s243, s363 and s187 (01ffeb2d5fff0001, 01ffcb2ba0010000 and 02002b2c20020000) were s244, s365
+/// and s188 from generator version 26, whose sample places one more system before each, and are
+/// s241, s361 and s185 from 27, whose galaxy places another set of systems.
+const DOMAIN_SYSTEMS: [usize; 3] = [241, 361, 185];
 
-/// The sample systems whose bodies the deck moves (the census, 2026-10-30): the pilot's three, and
-/// s59 and s102, whose published passes list no liquid water but whose earlier passes did.
-const MOVED_SYSTEMS: [usize; 5] = [59, 102, 188, 244, 365];
+/// The sample systems whose bodies the deck moves (the census, 2026-10-30, re-run at 27): the
+/// pilot's three, and s59 and s100 (01fffb2be0000001 and 01ffeb2c60020002; s59 and s102 at 26),
+/// whose published passes list no liquid water but whose earlier passes did.
+const MOVED_SYSTEMS: [usize; 5] = [59, 100, 185, 241, 361];
 
 /// FNV-1a 64 of `text`'s bytes: a record's digest, so that a census of some 6,000 bodies keeps no
 /// record.

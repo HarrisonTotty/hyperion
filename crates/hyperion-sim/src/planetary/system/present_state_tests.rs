@@ -98,6 +98,10 @@ impl Published {
 /// its whole surface at 199.8 K under 0.86 bar, its passes settling (P14.T53.e's census).
 const FROZEN_TEMPERATE: &str = "01fffb2c9fff0000.0300";
 
+/// The one of [`HOT_SNOWBALLS`] that generator version 27's haze cools under freezing
+/// (P14.T24.h.b's anti-greenhouse): a `Snowball` at 264.1 K, with no surface section.
+const FROZEN_AT_27: &str = "02001b2ba0000000.0300";
+
 /// The sample systems that hold the six hot `Snowball`s, one each, and [`FROZEN_TEMPERATE`], as
 /// audit sets.
 fn flipping_sets() -> Vec<AuditSet> {
@@ -119,10 +123,12 @@ fn flipping_sets() -> Vec<AuditSet> {
 /// above 273.15 K at 24 under the insolation class's state ([`HOT_SNOWBALLS`]) and a frozen
 /// `Temperate` of 24's ([`FROZEN_TEMPERATE`]), under the rules in force.
 ///
-/// - None of the six is a `Snowball`: each takes its climate's state, where its surface is `Ok`
-///   the state its figures give by rules 5–7 (or a jump of its passes); and the frozen world is a
-///   `Snowball` by rule 5, ice over at least half its surface, its passes settled and carrying the
-///   state they publish.
+/// - None of the six is a `Snowball` but one: each takes its climate's state, where its surface is
+///   `Ok` the state its figures give by rules 5–7 (or a jump of its passes); and the frozen world
+///   is a `Snowball` by rule 5, ice over at least half its surface, its passes settled and carrying
+///   the state they publish. The one is 02001b2ba0000000.0300, at 273.5 K at 24 and `Temperate` at
+///   274.2 K to 26: from generator version 27 its haze's anti-greenhouse (P14.T24.h.b) cools it
+///   under freezing, to 264.1 K under 663 bar, a `Snowball` by its climate ([`FROZEN_AT_27`]).
 /// - Generated twice, every body publishes the same figures: the lagged passes are deterministic.
 #[test]
 fn the_hot_snowballs_and_a_frozen_temperate_take_their_climate_s_state() {
@@ -158,6 +164,9 @@ fn the_hot_snowballs_and_a_frozen_temperate_take_their_climate_s_state() {
                 "{id}"
             );
             assert!(!now.published.jump, "{id}");
+        } else if id == FROZEN_AT_27 {
+            assert_eq!(now.published.state, SurfaceState::Snowball, "{id}");
+            assert!(now.published.t_s < 273.15, "{id}: {} K", now.published.t_s);
         } else {
             assert_ne!(now.published.state, SurfaceState::Snowball, "{id}");
             if let Some(verdict) = now.verdict {
