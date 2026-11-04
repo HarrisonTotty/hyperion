@@ -917,12 +917,14 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 15] = [
         // rocky belts at 434–461 and 543–568 au. Re-pinned by the search at version 16 (the
         // pin before, 0x8201_b2a0_0000_001a, still satisfies the predicate, but the search now
         // finds this system first); after plan 11's ruling 81 the first pin,
-        // 0x8200_b2e0_0000_000d, had stopped satisfying it.
+        // 0x8200_b2e0_0000_000d, had stopped satisfying it. Re-pinned by the search at version 27,
+        // whose field share and carve-out move layer E's records (0x8200_b2e0_0000_000a no longer
+        // satisfies the predicate).
         name: "fallback_black_hole",
         layer: Layer::E,
         budget: 200_000,
         predicate: fallback_black_hole_with_survivors,
-        id: 0x8200_b2e0_0000_000a,
+        id: 0x8200_b2e0_0000_0002,
     },
     GoldenSystem {
         // A 0.335 M☉ M dwarf of 3,600 K, [Fe/H] 0.00, `CompactMulti`: one rocky planet of 1.02 M⊕
@@ -961,12 +963,14 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 15] = [
         // −0.04, 3.6 Myr old, `TerrestrialOnly`: four planets of 0.11–0.15 M⊕ and two of their
         // giant-impact moons, three asteroid belts and a Kuiper belt, none of them formed yet; no
         // halo. Pinned by the search in round 9 (`track06`), once P06.T15 gave the tracks a
-        // pre-main sequence.
+        // pre-main sequence. Re-pinned by the search at version 27 (0x41fe_2c96_0000_000c is
+        // gone), its budget raised from 200,000: from 27 the young field gives most of its young
+        // stars to the features that bore them (P09.T2.c).
         name: "t_tauri",
         layer: Layer::C,
-        budget: 200_000,
+        budget: 2_000_000,
         predicate: t_tauri_star,
-        id: 0x41fe_2c96_0000_000c,
+        id: 0x4215_6b82_0000_0005,
     },
 ];
 

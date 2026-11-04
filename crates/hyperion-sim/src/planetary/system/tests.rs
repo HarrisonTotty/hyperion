@@ -7913,11 +7913,11 @@ const GOLDEN_SYSTEMS: [(&str, u64); 15] = [
     ("hierarchical_triple", 0x4200_2cb2_0000_0003),
     ("subgiant", 0x4200_6c9a_0000_0004),
     ("red_giant", 0x4200_ecd2_0000_0003),
-    ("fallback_black_hole", 0x8200_b2e0_0000_000a),
+    ("fallback_black_hole", 0x8200_b2e0_0000_0002),
     ("filler_a", 0x01ff_fb2c_6000_0000),
     ("filler_b", 0x2200_1659_8000_0000),
     ("filler_c", 0x4200_2cb2_0000_0000),
-    ("t_tauri", 0x41fe_2c96_0000_000c),
+    ("t_tauri", 0x4215_6b82_0000_0005),
 ];
 
 /// The golden systems ([`GOLDEN_SYSTEMS`]) in the Milky Way fixture at their seed, generated whole
