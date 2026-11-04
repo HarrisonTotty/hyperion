@@ -71,6 +71,28 @@ fn sample_cells() -> Vec<CatalogueCellKey> {
         .collect()
 }
 
+/// The eight cells about the centre, where the nuclear disc's candidates are: from 27 the young
+/// field keeps some tenth of the young disc's stars of a few million years (P09.T2.c), so the
+/// nuclear disc's, whose field is nearly its budget, are most of the class's candidates in a few
+/// cells. Each costs some 0.4 s.
+fn centre_cells() -> [CatalogueCellKey; 8] {
+    std::array::from_fn(|o| {
+        let o = i32::try_from(o).unwrap();
+        key([0, 1, 2].map(|axis| -((o >> axis) & 1)))
+    })
+}
+
+/// The cells of the disc within six of the centre's on both sides of the plane, but the eight about
+/// the centre ([`centre_cells`]): 330 cells, some 0.2 s, of which the young field's few entries
+/// are some 15.
+fn disc_cells() -> Vec<CatalogueCellKey> {
+    (-6..=6)
+        .flat_map(|x| (-6..=6).flat_map(move |y| [[x, y, 0], [x, y, -1]]))
+        .filter(|[x, y, _]| !((-1..=0).contains(x) && (-1..=0).contains(y)))
+        .map(key)
+        .collect()
+}
+
 /// The sample cells, generated once.
 fn sample_entries() -> &'static [CatalogueClassCell<LbvEntry>] {
     static CELLS: OnceLock<Vec<CatalogueClassCell<LbvEntry>>> = OnceLock::new();
@@ -345,14 +367,15 @@ fn no_cell_comes_near_the_index() {
 
 /// A candidate's \[Fe/H\] is its component's law at its site and age, one normal on
 /// `class.lbv.metallicity`, to the bit; its mass lies in its node's masses and its age in the
-/// node's span; and its record passes the prefilter.
+/// node's span; and its record passes the prefilter. A cell of the young disc and the eight about
+/// the centre ([`centre_cells`]).
 #[test]
 fn a_candidate_s_marks_are_its_node_s_and_its_component_s() {
     let galaxy = galaxy();
     let process = LbvProcess::new(galaxy);
     let fields = galaxy.fields();
     let mut checked = 0;
-    for cell in [key([0, 6, 0]), key([0, 0, 0])] {
+    for cell in core::iter::once(key([0, 5, 0])).chain(centre_cells()) {
         for candidate in kept_candidates(galaxy, &process, &cell) {
             let laws = fields.component(candidate.component);
             let feh = laws.metallicity(&PointLy::from(&candidate.site), candidate.age_at_epoch);
@@ -380,12 +403,21 @@ fn a_candidate_s_marks_are_its_node_s_and_its_component_s() {
 /// Every entry is the class test's: of layer E and a catalogue system of the class, passing the
 /// prefilter, its window its stars' with the model's own multiplicity and a single star's alike,
 /// overlapping the source horizon, unclaimed by the core collapses, and moving straight through
-/// its site at the epoch.
+/// its site at the epoch. The sample cells' entries and the rest of the disc's ([`disc_cells`]):
+/// from 27 the young field keeps some tenth of the young disc's stars of a few million years
+/// (P09.T2.c), and the sample's cells hold four entries.
 #[test]
 fn every_entry_is_the_class_test_s() {
     let galaxy = galaxy();
+    let process = LbvProcess::new(galaxy);
+    let sample = sample_cells();
+    let others: Vec<CatalogueClassCell<LbvEntry>> = disc_cells()
+        .into_iter()
+        .filter(|cell| !sample.contains(cell))
+        .map(|cell| CatalogueClassCell::generate(galaxy, &process, cell))
+        .collect();
     let mut entries = 0;
-    for cell in sample_entries() {
+    for cell in sample_entries().iter().chain(&others) {
         for entry in cell.entries() {
             let value = entry.value();
             let record = value.record();
@@ -496,16 +528,18 @@ fn the_grid_s_claim_holds_every_host_and_nothing_else() {
 /// a grid record of the candidate's component, mass and age at its site, with the candidate's
 /// composition, has the candidate's window, so the grid's claim on it and the class's window test
 /// give the same answer; and every kept candidate the test rejects for its window, the grid's
-/// claim rejects too.
+/// claim rejects too. Four cells of the young disc and the eight about the centre
+/// ([`centre_cells`]).
 #[test]
 fn the_class_and_the_grid_agree_on_sampled_candidates() {
     let galaxy = galaxy();
     let process = LbvProcess::new(galaxy);
     let (mut agreed, mut hosts) = (0, 0);
-    for (index, candidate) in [[0, 3, 0], [0, 4, -1], [0, 5, 0], [0, 6, -1], [0, 0, 0]]
+    for (index, candidate) in [[0, 3, 0], [0, 4, -1], [0, 5, 0], [0, 6, -1]]
         .map(key)
-        .iter()
-        .flat_map(|cell| kept_candidates(galaxy, &process, cell))
+        .into_iter()
+        .chain(centre_cells())
+        .flat_map(|cell| kept_candidates(galaxy, &process, &cell))
         .enumerate()
     {
         let record = grid_record(
@@ -540,8 +574,9 @@ fn the_class_and_the_grid_agree_on_sampled_candidates() {
         agreed += 1;
     }
     eprintln!("{agreed} candidates agree, {hosts} with a window");
-    // 113 and 6 at generator version 26, whose windows the enforced Humphreys–Davidson limit
-    // makes fewer and shorter.
+    // 113 and 6 at generator version 26 over the first four cells and the centre's, whose windows
+    // the enforced Humphreys–Davidson limit makes fewer and shorter; 22 and 1 there from 27, whose
+    // young field keeps some tenth of the young disc's stars of these ages (P09.T2.c).
     assert!(agreed > 100 && hosts > 4, "{agreed} {hosts}");
 }
 
