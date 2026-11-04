@@ -518,10 +518,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   `STEEPNESS_TAILS_VERSION` (rendering plan R10, R10.T6.a), at `SteepnessTailsRules::Marcum`
 ///   through `hyperion_surface::material::with_steepness_tails`, which the sim's tests have through
 ///   their dev-dependency on the surface crate's `hold-switches` feature.
-/// - a paired star's fate from its pair's timeline, `BINARY_HOST_FATE_VERSION` (P14.T28.g), at
-///   `BinaryHostFateRules::Engine` through `with_binary_host_fate`: a planet's orbit follows the
-///   engine's masses and radii, and the pair's common envelopes, mergers and supernovae are its
-///   host's sudden events.
 /// - a binary host's zones at its pair's evaluated state, `BINARY_HOST_ZONES_VERSION` (P14.T9.d),
 ///   at `BinaryHostZonesRules::Evaluated` through `with_binary_host_zones`: a body that leaves the
 ///   zone its pair bounds then, Holman and Wiegert's on the pair's orbit, is unbound.
@@ -548,10 +544,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
     let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
     let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    let run = move || {
-        use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
-        with_binary_host_fate(BinaryHostFateRules::Engine, run)
-    };
     let run = move || {
         use crate::planetary::placement::zones::{BinaryHostZonesRules, with_binary_host_zones};
         with_binary_host_zones(BinaryHostZonesRules::Evaluated, run)

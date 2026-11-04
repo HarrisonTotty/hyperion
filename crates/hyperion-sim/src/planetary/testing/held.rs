@@ -27,7 +27,6 @@ use crate::planetary::derive::photometry::area_mix::{
     with_haze_layer, with_icy_regolith, with_minor_clouds, with_organic_sediment,
     with_rayleigh_adding,
 };
-use crate::planetary::fate::{BinaryHostFateRules, with_binary_host_fate};
 use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
 use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
 use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
@@ -93,7 +92,6 @@ held_rules! {
     steepness_tails: SteepnessTailsRules = steepness_tails_in_force => with_steepness_tails,
     steam_division: SteamDivisionRules =
         SteamDivisionRules::in_force => with_steam_division,
-    binary_host_fate: BinaryHostFateRules = BinaryHostFateRules::in_force => with_binary_host_fate,
     binary_host_zones: BinaryHostZonesRules =
         BinaryHostZonesRules::in_force => with_binary_host_zones,
     binary_host_remnants: BinaryHostRemnantsRules =

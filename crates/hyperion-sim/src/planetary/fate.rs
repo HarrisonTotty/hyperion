@@ -57,9 +57,9 @@
 //! - [`FateHost`]: the [`StarModel`]s of the stars the body orbits (ruling 34), from the context:
 //!   one star for a planet of a star, and every star below the pair for a circumbinary planet,
 //!   which orbits the pair's total mass. A companion's planets have their own star alone as host,
-//!   so they see its mass loss and not their companion's. Below generator version 27 each star is
-//!   a single star; from it (P14.T28.g, `BINARY_HOST_FATE_VERSION`) a star of a pair the binary
-//!   engine ran is read from its pair's timeline (`FateHost::evolved`), as the next section says.
+//!   so they see its mass loss and not their companion's. A star of a pair the binary engine ran is
+//!   read from its pair's timeline (`FateHost::evolved`; P14.T28.g, from generator version 27), as
+//!   the next section says.
 //!
 //! # Hosts of a pair the engine ran
 //!
@@ -123,69 +123,6 @@ use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{
     EarthMasses, GravitationalParameter, KilogramsPerCubicMetre, Metres, SolarMasses, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
-
-/// The generator version from which the fate transform reads a star of a pair the binary engine
-/// ran from its pair's timeline (P14.T28.g; the [module documentation](self)): 27, held with the
-/// 27 train.
-///
-/// Below it [`BinaryHostFateRules::in_force`] is [`BinaryHostFateRules::SingleModels`]: every
-/// host star is its own single-star model, so that a planet of a star whose companion swallowed
-/// it in a common envelope survives about the mass of both, and every figure is version 26's bit
-/// for bit. 27's bump deletes this hold, [`BinaryHostFateRules`] with its `SingleModels` arm, the
-/// tests' switch and its tripwire (`the_binary_host_fate_is_held_only_until_the_27_bump`).
-pub(crate) const BINARY_HOST_FATE_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Where the fate transform reads a paired star (its hold, [`BINARY_HOST_FATE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum BinaryHostFateRules {
-    /// Version 26's and before: every star's own single-star model, with its own deaths.
-    SingleModels,
-    /// Version 27's: a star of a pair the engine ran from its pair's timeline, with the pair's
-    /// events.
-    Engine,
-}
-
-impl BinaryHostFateRules {
-    /// The rules this generator version gives: the engine's from [`BINARY_HOST_FATE_VERSION`],
-    /// the single models' below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_binary_host_fate`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = BINARY_HOST_FATE_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= BINARY_HOST_FATE_VERSION {
-            Self::Engine
-        } else {
-            Self::SingleModels
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The paired hosts' fate rules a test sets on its thread, `None` for the version's.
-    static BINARY_HOST_FATE_RULES: core::cell::Cell<Option<BinaryHostFateRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the paired hosts' fate rules `rules` on this thread, for the tests to reach
-/// the engine's fates ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 27's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_binary_host_fate<R>(rules: BinaryHostFateRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<BinaryHostFateRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            BINARY_HOST_FATE_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(BINARY_HOST_FATE_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// A body's state at a time: a prefix of not yet formed → present → destroyed or unbound
 /// (P14.T28's test).
@@ -602,10 +539,6 @@ impl<'a> FateHost<'a> {
                     .filter_map(|age| clock_time(host.stars[0], age))
                     .min();
             }
-        }
-        match BinaryHostFateRules::in_force() {
-            BinaryHostFateRules::SingleModels => return host,
-            BinaryHostFateRules::Engine => {}
         }
         let members: Vec<u8> = zone.members().collect();
         for (k, &member) in members.iter().enumerate() {
