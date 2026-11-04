@@ -115,7 +115,11 @@ fn members(entry: &CatalogueEntry<TypeIaEntry>) -> Vec<(SystemId, SystemRecord, 
 
 /// The class follows every component the delay-time distribution gives a Type Ia, each at its rate
 /// per system over the Type Ia's interval; summed over the components' systems, born and unborn,
-/// the rates are the galaxy's, and the interval is the Type Ia cap's.
+/// the rates are the distribution's, and the interval is the Type Ia cap's. From generator version
+/// 27 the class follows the field alone (P09.T2.c): the distribution is the field's
+/// ([`DelayTimeDistribution::of_field`], over each component's budget taken to the field in layer D
+/// and the young disc's field ages), and each component's Type Ia per system its rate there taken
+/// to the field, so that the features' and globulars' hosts are theirs.
 #[test]
 fn the_class_follows_every_population_s_type_ia() {
     let galaxy = galaxy();
@@ -126,17 +130,18 @@ fn the_class_follows_every_population_s_type_ia() {
         process.interval(),
         &SupernovaInterval::of_cap(galaxy.window_caps(), ShellEnvironment::TypeIa)
     );
-    assert_eq!(
-        process.delays(),
-        &DelayTimeDistribution::from_galaxy(galaxy)
-    );
+    assert_eq!(process.delays(), &DelayTimeDistribution::of_field(galaxy));
     let ids: Vec<ComponentId> = process.components().iter().map(IaComponent::id).collect();
     assert_eq!(ids, fields.component_ids().collect::<Vec<_>>());
     let mut total = 0.0;
     for ia in process.components() {
         let rate = process.delays().rate_per_system_per_year(ia.id());
-        assert_same_bits(ia.explosions_per_system(), rate * years);
-        total += fields.component(ia.id()).count_with_unborn() * rate;
+        assert_same_bits(
+            ia.explosions_per_system(),
+            galaxy.field_part(ia.id(), MassBand::D, rate * years),
+        );
+        let systems = fields.component(ia.id()).count_with_unborn();
+        total += galaxy.field_part(ia.id(), MassBand::D, systems) * rate;
     }
     let galaxy_rate = process.delays().rate_per_year();
     assert!(

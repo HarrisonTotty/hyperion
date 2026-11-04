@@ -516,14 +516,17 @@ mod tests {
     }
 
     /// The per-node sum of the rogue planets is the linear `Σ share × Iᶜ` where nothing saturates,
-    /// up to the order of the sums; at the Sun no node comes near the saturation density.
+    /// up to the order of the sums; at the Sun no node comes near the saturation density. From
+    /// generator version 27 each component's share is the field's
+    /// ([`Galaxy::field_component_share`], P09.T2.c), the budget's times its field factor, which
+    /// the field takes after the saturation; in the halo that factor gives up plan 10's discrete
+    /// share too (P10.T3.d.b).
     #[test]
     fn expected_rogue_planets_are_linear_where_nothing_saturates() {
         let galaxy = galaxy();
         let counts = expected_counts(&galaxy, &sunlike(), LightYears::new(50.0), EVERY);
         let rogue = counts.get(Layer::RoguePlanet);
         let fields = galaxy.fields();
-        let shares = galaxy.shares();
         let mut integrals = [0.0; MAX_COMPONENTS];
         let mut densities = [0.0; MAX_COMPONENTS];
         for_each_node(&PointLy::from(&sunlike()), 50.0, |point, weight| {
@@ -533,10 +536,9 @@ mod tests {
             }
         });
         let linear: f64 = fields
-            .components()
-            .iter()
+            .component_ids()
             .zip(integrals)
-            .map(|(c, i)| shares.component_share(MassBand::RoguePlanet, c) * i)
+            .map(|(id, i)| galaxy.field_component_share(MassBand::RoguePlanet, id) * i)
             .sum();
         assert!(
             (rogue / linear - 1.0).abs() < 1e-12,
