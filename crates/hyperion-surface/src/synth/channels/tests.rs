@@ -788,13 +788,16 @@ const READ_RADIUS: u8 = 3;
 const BENT_READ_RADIUS: u8 = 1;
 
 /// The farthest king moves from a coarse cell of a world wet now that its segments' reads reach, to
-/// L + 3: one further than [`READ_RADIUS`], each trunk's valley grading to its receiver's, which
-/// reads the receiver's own receiver (R09.T6.i's (d)).
-const TRIBUTARIES_READ_RADIUS: u8 = READ_RADIUS + 1;
+/// L + 3, on these fixtures: [`READ_RADIUS`]. A trunk's valley grades to its receiver's, which
+/// reads the receiver's own receiver (R09.T6.i's (d)), but a join searches the trunks by their
+/// courses and reads the grade of the one it joins only on its second chord, so no read reaches
+/// [`READ_RADIUS`] + 1 here.
+const TRIBUTARIES_READ_RADIUS: u8 = READ_RADIUS;
 
 #[test]
 fn the_segments_below_a_coarse_cell_read_within_four_king_moves_of_it() {
-    // Four on a world wet now, a trunk's grade reading its receiver's receiver (R09.T6.i).
+    // Three on a world wet now, where a trunk's grade read for every candidate of a join reached
+    // four (R09.T6.i).
     let mut bent_farthest = 0;
     let mut tributaries_farthest = 0;
     for field in [earth(), mars(), world(SyntheticWorld::MarsLike)] {

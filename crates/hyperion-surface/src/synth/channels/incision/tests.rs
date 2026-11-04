@@ -1011,12 +1011,15 @@ fn farthest_read(field: &CoarseField, channels: &Channels, coarse: PatchKey) -> 
         .unwrap_or(0)
 }
 
-/// The incision reads within the synthesis's margin: five king moves from its cell on the Earth and
-/// today's Mars, whose wet-now tributaries reach across coarse cells (R09.T6.i), and four on Mars
-/// at its epoch.
+/// The incision reads within the synthesis's margin less one, four king moves from its cell, so
+/// that a point on a surveyed cell's far edge, whose own cell is the margin's first ring, reads
+/// nothing past the margin: on the Earth and today's Mars, whose wet-now tributaries reach across
+/// coarse cells (R09.T6.i), as on Mars at its epoch. A groove list judges a trunk by its course
+/// before its onward grade reads its receiver's receiver, and a join searches trunks by their
+/// courses alone.
 #[test]
-fn the_incision_reads_within_five_king_moves_inside_the_margin() {
-    for (field, reach) in [(earth(), 5), (mars(), 5), (mars_epoch(), 4)] {
+fn the_incision_reads_within_four_king_moves_inside_the_margin() {
+    for (field, reach) in [(earth(), 4), (mars(), 4), (mars_epoch(), 4)] {
         let channels = Channels::new(field.header(), SEED);
         let cells = with_tributaries(field, 3)
             .into_iter()
@@ -1029,7 +1032,7 @@ fn the_incision_reads_within_five_king_moves_inside_the_margin() {
             farthest, reach,
             "the incision reads {farthest} king moves from its cell"
         );
-        assert!(farthest <= crate::field::SYNTHESIS_MARGIN_CELLS);
+        assert!(farthest < crate::field::SYNTHESIS_MARGIN_CELLS);
     }
 }
 

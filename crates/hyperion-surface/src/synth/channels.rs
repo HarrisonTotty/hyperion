@@ -1681,6 +1681,8 @@ pub(crate) struct NetworkId {
 pub(crate) struct NetworkMemo {
     key_points: BTreeMap<u64, KeyPoint>,
     segments: BTreeMap<u64, Option<Segment>>,
+    /// Per coarse cell, its trunk's course before its onward grade.
+    courses: BTreeMap<u64, Option<TrunkCourse>>,
     /// Per coarse cell, its corners' tributary steepness, runoff and cut (R09.T6.i).
     continuity: BTreeMap<u64, Continuity>,
 }
@@ -1692,6 +1694,7 @@ impl NetworkMemo {
         Self {
             key_points: BTreeMap::new(),
             segments: BTreeMap::new(),
+            courses: BTreeMap::new(),
             continuity: BTreeMap::new(),
         }
     }
@@ -1701,6 +1704,34 @@ impl NetworkMemo {
     fn len(&self) -> (usize, usize) {
         (self.key_points.len(), self.segments.len())
     }
+}
+
+/// Whether a trunk is made with its onward grade ([`ChannelNetwork::trunk_with`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Onward {
+    /// Read: the trunk whole.
+    Read,
+    /// Left out: its course, for a join's search.
+    Left,
+}
+
+/// What a trunk reads and draws before its onward grade ([`ChannelNetwork::trunk_course`]): its
+/// cell's and its receiver's records, its ends' and its crossing's spheroid points (metres), its
+/// bent course, its drainage area and its channel's mean discharge (m³ s⁻¹), bankfull width and
+/// depth (metres).
+#[derive(Debug, Clone)]
+struct TrunkCourse {
+    own: SynthesisCell,
+    receiver: PatchKey,
+    into: SynthesisCell,
+    from_m: [f64; 3],
+    to_m: [f64; 3],
+    crossing_m: [f64; 3],
+    bend: Arc<Bend>,
+    area: SquareMetres,
+    discharge: f64,
+    width_m: f64,
+    depth_m: f64,
 }
 
 /// A coarse cell's corners for R09.T6.i's continuity across coarse cells (its (e)): at each corner,
@@ -1894,39 +1925,42 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
     /// flow is terminal or no water reaches it, its catchment shedding none (R09.T6.c). On a world
     /// dry now its course is bent and its depth graded to its receiver's (R09.T6.h).
     fn trunk(&mut self, coarse: PatchKey) -> Result<Option<Segment>, ReadCellError> {
-        let own = read(self.field, coarse)?;
-        let Some(edge) = own.flow.edge() else {
+        self.trunk_with(coarse, Onward::Read)
+    }
+
+    /// [`trunk`](Self::trunk), or with its onward grade left out (`Onward::Left`): the same
+    /// segment but for a world wet now's receiver's valley, none, so that it reads nothing past
+    /// its receiver and its cell's edge neighbours ([`trunk_course`](Self::trunk_course)). Its
+    /// course, and so every point and chord of it, is the whole trunk's.
+    fn trunk_with(
+        &mut self,
+        coarse: PatchKey,
+        grade: Onward,
+    ) -> Result<Option<Segment>, ReadCellError> {
+        let Some(drawn) = self.trunk_course(coarse)? else {
             return Ok(None);
         };
-        if own.catchment_runoff == LogRunoff::NONE {
-            return Ok(None);
-        }
-        let receiver = coarse.edge_neighbour(edge);
-        let into = read(self.field, receiver)?;
-        let from = self.key_point(coarse).dir();
-        let to = self.key_point(receiver).dir();
-        let figure = self.channels.figure;
-        let (from_m, to_m) = (figure.point(from), figure.point(to));
-        let crossed = crossing(coarse, edge, from, to);
-        let crossing_m = figure.point(crossed);
-        // Every trunk is bent (R09.T6.h on a world dry now, R09.T6.i on one wet now); its ends
-        // stay the straight trunk's.
-        let ends = self.course_ends(coarse, receiver, into, [from, crossed, to])?;
-        let bend = Some(Arc::new(
-            self.channels.bend(&ends, [from_m, crossing_m, to_m]),
-        ));
+        let TrunkCourse {
+            own,
+            receiver,
+            into,
+            from_m,
+            to_m,
+            crossing_m,
+            bend,
+            area,
+            discharge,
+            width_m,
+            depth_m,
+        } = drawn;
+        let (own, into) = (&own, &into);
+        let bend = Some(bend);
         let exit = if let Some(bend) = &bend {
             bend.exit()
         } else {
             let before = distance(from_m, crossing_m);
             before / (before + distance(crossing_m, to_m))
         };
-        let area = own.drainage.area();
-        let (discharge, width_m, depth_m) = channel_size(
-            own.catchment_runoff.metres_per_year(),
-            area,
-            self.channels.gravity,
-        );
         // The relief its tributaries cut, from its cell's channel heads down to it, held to the
         // height its cell stands above its base level (R09.T6.f); none where the cell carries no
         // tributaries. On a world dry now, the epoch's valley instead (R09.T6.c): no deeper than
@@ -1944,7 +1978,7 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
             )
         } else {
             // Its valley grades to its receiver's where the receiver is dry (R09.T6.i).
-            let onward = if into.is_under_water() {
+            let onward = if into.is_under_water() || grade == Onward::Left {
                 None
             } else {
                 Some(num::assert_finite(self.onward_valley_m(receiver, into)?))
@@ -1975,6 +2009,109 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
                 receiver_valley_m,
             },
         }))
+    }
+
+    /// What the trunk of coarse cell `coarse` reads and draws before its onward grade, memoised: its
+    /// cell, its receiver, its cell's edge neighbours and its course, or `None` where it heads no
+    /// trunk ([`trunk`](Self::trunk)'s reads in its order, less its receiver's receiver).
+    fn trunk_course(&mut self, coarse: PatchKey) -> Result<Option<TrunkCourse>, ReadCellError> {
+        let key = coarse.to_u64();
+        if let Some(drawn) = self.memo.get().courses.get(&key) {
+            return Ok(drawn.clone());
+        }
+        let drawn = self.trunk_course_uncached(coarse)?;
+        self.memo.get().courses.insert(key, drawn.clone());
+        Ok(drawn)
+    }
+
+    /// [`trunk_course`](Self::trunk_course), not memoised.
+    fn trunk_course_uncached(
+        &mut self,
+        coarse: PatchKey,
+    ) -> Result<Option<TrunkCourse>, ReadCellError> {
+        let own = *read(self.field, coarse)?;
+        let Some(edge) = own.flow.edge() else {
+            return Ok(None);
+        };
+        if own.catchment_runoff == LogRunoff::NONE {
+            return Ok(None);
+        }
+        let receiver = coarse.edge_neighbour(edge);
+        let into = *read(self.field, receiver)?;
+        let from = self.key_point(coarse).dir();
+        let to = self.key_point(receiver).dir();
+        let figure = self.channels.figure;
+        let (from_m, to_m) = (figure.point(from), figure.point(to));
+        let crossed = crossing(coarse, edge, from, to);
+        let crossing_m = figure.point(crossed);
+        // Every trunk is bent (R09.T6.h on a world dry now, R09.T6.i on one wet now); its ends
+        // stay the straight trunk's.
+        let ends = self.course_ends(coarse, receiver, &into, [from, crossed, to])?;
+        let bend = Arc::new(self.channels.bend(&ends, [from_m, crossing_m, to_m]));
+        let area = own.drainage.area();
+        let (discharge, width_m, depth_m) = channel_size(
+            own.catchment_runoff.metres_per_year(),
+            area,
+            self.channels.gravity,
+        );
+        Ok(Some(TrunkCourse {
+            own,
+            receiver,
+            into,
+            from_m,
+            to_m,
+            crossing_m,
+            bend,
+            area,
+            discharge,
+            width_m,
+            depth_m,
+        }))
+    }
+
+    /// Whether the groove of the trunk of coarse cell `coarse` may reach the ball of `radius`
+    /// metres about `centre` (metres), judged before its onward grade reads its receiver's
+    /// receiver: by [`incision::wet_trunk_box_bound`], which holds its groove's box whatever that
+    /// grade, so that `false` is the groove's own box missing the ball. `false` where it heads no
+    /// trunk; `true` on a world dry now, whose trunk reads no onward grade.
+    ///
+    /// # Errors
+    ///
+    /// [`ReadCellError`] naming the first cell [`trunk_course`](Self::trunk_course) reads that the
+    /// view does not hold.
+    pub(crate) fn trunk_may_reach_ball(
+        &mut self,
+        coarse: PatchKey,
+        centre: [f64; 3],
+        radius: f64,
+    ) -> Result<bool, ReadCellError> {
+        let Some(drawn) = self.trunk_course(coarse)? else {
+            return Ok(false);
+        };
+        if drawn.own.epoch_incision.is_epoch() {
+            return Ok(true);
+        }
+        let body = self.channels.body();
+        let valley_m = trunk_valley_m(&drawn.own, &drawn.into, self.channels.sea_level(), body);
+        // The receiver's valley the grade reads is held to the receiver's base level, so it is at
+        // most its unheld depth, which the receiver alone gives; none where it is under water, or
+        // where it heads no trunk ([`onward_valley_m`](Self::onward_valley_m)'s zero).
+        let into = &drawn.into;
+        let onward_m = (!into.is_under_water()).then(|| {
+            if into.flow.edge().is_none() || into.catchment_runoff == LogRunoff::NONE {
+                0.0
+            } else {
+                incision::unheld_valley_m(into, body)
+            }
+        });
+        let bound = incision::wet_trunk_box_bound(
+            &drawn.bend,
+            (drawn.width_m, drawn.depth_m),
+            (valley_m, onward_m),
+            self.channels.radius.value(),
+            coarse.level(),
+        );
+        Ok(incision::box_reaches_ball(&bound, centre, radius))
     }
 
     /// The valley depth of the steady-state trunk of the dry coarse cell `receiver`, whose record is
@@ -2120,7 +2257,15 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
         };
         for level in first..cell.level() {
             for around in neighbourhood(ancestor(cell, level)).into_iter().flatten() {
-                let Some(segment) = self.segment(around)? else {
+                // A trunk is a candidate by its course alone, its onward grade left out: the
+                // search reads only its points, and the grade reads its receiver's receiver, which
+                // only a join on the winner's second chord needs (below).
+                let candidate = if level == first {
+                    self.trunk_with(around, Onward::Left)?
+                } else {
+                    self.segment(around)?
+                };
+                let Some(segment) = candidate else {
                     continue;
                 };
                 // A trunk's chords in order from its key point, the first offered first.
@@ -2141,6 +2286,17 @@ impl<F: FieldView> ChannelNetwork<'_, F> {
         // The join moves to the junction angle (R09.T6.i's (c)) and the course bends into it (its
         // (d)).
         best.at_the_junction_angle(q);
+        // A join on a trunk's second chord takes its valley top graded to its receiver's valley,
+        // so the trunk whole, its onward grade read. On its first chord the top is its own
+        // valley's ([`incision::graded_depth_m`]), which its course gives bit for bit, and its
+        // receiver's receiver is not read.
+        if let Kind::Trunk { exit, .. } = best.segment.kind
+            && best.at > exit
+        {
+            best.segment = self
+                .segment(best.owner)?
+                .expect("a trunk's course is of a trunk");
+        }
         let bend = Some(Arc::new(self.channels.tributary_bend(
             cell,
             self.key_point(cell).dir(),

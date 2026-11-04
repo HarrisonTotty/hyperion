@@ -642,6 +642,69 @@ fn a_cell_with_its_margin_held_answers_as_the_whole_field() {
     }
 }
 
+#[test]
+fn a_surveyed_cell_s_far_edges_are_answered_with_its_margin_held() {
+    // A point on a surveyed cell's far edge or corner lies in the cell beyond it, the margin's
+    // first ring, and its near corner may round into the cells before it. With the cell and its
+    // margin held, and nothing else, every such point of 60 of the Earth-like world's channelled
+    // cells and of its cell at a cube corner (the worker's Earth fixture's) is answered at every
+    // level as from the whole field: its channels' reads reach the margin from the point's own
+    // cell only towards the survey (R09.T6.i).
+    let field = world(SyntheticWorld::EarthLike);
+    let body = channels::ChannelBody::of(field.header());
+    let mut cells: Vec<PatchKey> = (0..field.header().level().cell_count())
+        .map(|n| crate::field::cell_at_index(body.level, n).unwrap())
+        .filter(|&c| {
+            let record = field.cell(c).unwrap();
+            !record.is_under_water() && channels::deepest_level(record, body) > body.level
+        })
+        .step_by(37)
+        .take(60)
+        .collect();
+    assert_eq!(cells.len(), 60);
+    cells.push(PatchKey::new(crate::cube::Face::PosX, body.level, 0, 0).unwrap());
+    let whole = Synthesiser::new(field, SEED);
+    let mut whole_cache = SynthCache::new();
+    let mut refused = Vec::new();
+    for cell in cells {
+        let held = Held {
+            inner: field,
+            held: king_distances(cell, SYNTHESIS_MARGIN_CELLS)
+                .into_keys()
+                .collect(),
+        };
+        let part = Synthesiser::new(&held, SEED);
+        let mut cache = SynthCache::new();
+        for (x, y) in [
+            (1.0, 0.5),
+            (0.5, 1.0),
+            (1.0, 1.0),
+            (1.0, 0.1),
+            (0.1, 1.0),
+            (0.0, 0.0),
+        ] {
+            let dir = point_in(cell, x, y);
+            for band in sampled_levels(&whole) {
+                let expected = whole.height_at(&mut whole_cache, dir, band).unwrap();
+                match part.height_at(&mut cache, dir, band) {
+                    Ok(got) => assert_eq!(
+                        sample_bits(got),
+                        sample_bits(expected),
+                        "{cell:?} ({x}, {y}) at {band:?}"
+                    ),
+                    Err(e) => refused.push((cell, (x, y), band, e)),
+                }
+            }
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "{} refused, the first {:?}",
+        refused.len(),
+        refused.first()
+    );
+}
+
 /// A patch of `level` inside `cell`, or `cell`'s ancestor at `level`.
 fn patch_in(cell: PatchKey, level: u8) -> PatchKey {
     if level >= cell.level() {

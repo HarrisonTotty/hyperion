@@ -379,10 +379,17 @@ pub(crate) fn trunk_valley_m(
     sea_level: Metres,
     body: ChannelBody,
 ) -> f64 {
-    let valley = tributary_steepness_of(cell)
-        .map_or(0.0, |k| valley_depth(k, body.radius, body.level).value());
+    let valley = unheld_valley_m(cell, body);
     let room = cell.water_surface().value() - base_level_m(receiver, sea_level);
     num::min(valley, VALLEY_RELIEF_SHARE * num::max(room, 0.0))
+}
+
+/// [`trunk_valley_m`] before its hold to the base level, metres: [`valley_depth`] at the cell's
+/// tributaries' steepness, zero where it carries none. It reads the cell alone, and the held
+/// valley is never deeper, whatever the cell's receiver.
+#[must_use]
+pub(super) fn unheld_valley_m(cell: &SynthesisCell, body: ChannelBody) -> f64 {
+    tributary_steepness_of(cell).map_or(0.0, |k| valley_depth(k, body.radius, body.level).value())
 }
 
 /// A steady-state trunk's groove depth at its axis, G = min(max(`valley_m`, `bankfull_m`),
@@ -1065,6 +1072,54 @@ fn reach_m(floor_m: f64, wall_m: f64) -> f64 {
     (floor_m + wall_m) * (1.0 + 1e-9) + 1e-6
 }
 
+/// Whether the box from `low` to `high` reaches the ball of `radius` about `centre` (metres). It
+/// never says no of a box inside one it says yes of: each axis's gap, its square and their sum
+/// only grow as the box shrinks, in floating point as in exact arithmetic.
+#[must_use]
+pub(super) fn box_reaches_ball(
+    (low, high): &([f64; 3], [f64; 3]),
+    centre: [f64; 3],
+    radius: f64,
+) -> bool {
+    let mut gap2 = 0.0;
+    for ((low, high), c) in low.iter().zip(high).zip(&centre) {
+        let gap = num::max(num::max(low - c, c - high), 0.0);
+        gap2 += gap * gap;
+    }
+    gap2 <= radius * radius
+}
+
+/// A box that holds the box of the groove of a world wet now's trunk of the first level `level`,
+/// on a body of mean radius `radius_m`, from what it reads before its onward grade (metres): its
+/// bent course `bend`, its channel's bankfull width `width_m` and depth `bankfull_m`, its own held
+/// valley `valley_m`, and `onward_m`, a depth its receiver's valley ([`trunk_valley_m`] of the
+/// receiver) is at most, `None` where the receiver is under water. Its sub-chords of both halves
+/// are grown by its floor and the wall of the deepest it can be, which [`Groove::bent`]'s halves
+/// grow theirs by at most, every step rising with the depth. A ball this box misses
+/// ([`box_reaches_ball`]) is missed by the trunk's groove, so a groove list may pass the trunk by
+/// before its onward grade reads its receiver's receiver (R09.T6.i).
+#[must_use]
+pub(super) fn wet_trunk_box_bound(
+    bend: &Bend,
+    (width_m, bankfull_m): (f64, f64),
+    (valley_m, onward_m): (f64, Option<f64>),
+    radius_m: f64,
+    level: u8,
+) -> ([f64; 3], [f64; 3]) {
+    let wall_m = VALLEY_WALL_SHARE * mean_cell_width(radius_m, level);
+    let cap_m = groove_cap_m(radius_m, level);
+    let own = trunk_depth_m(valley_m, bankfull_m, cap_m);
+    let deepest = onward_m.map_or(own, |to_m| {
+        num::max(own, trunk_depth_m(to_m, bankfull_m, cap_m))
+    });
+    let wall = Wall {
+        per_depth: WET_WALL_PER_DEPTH,
+        cap_m: wall_m,
+    };
+    let reach = reach_m(0.5 * width_m, wall.at(deepest, 0.0).0);
+    chords_box((0..bend.halves()).flat_map(|half| bend.chords(half)), reach)
+}
+
 /// Whether `q` lies inside the box from `low` to `high`.
 #[must_use]
 fn in_box(q: [f64; 3], (low, high): &([f64; 3], [f64; 3])) -> bool {
@@ -1411,12 +1466,7 @@ impl Groove {
     /// Whether the groove's box reaches the ball of `radius` about `centre` (metres).
     #[must_use]
     fn may_reach_ball(&self, centre: [f64; 3], radius: f64) -> bool {
-        let mut gap2 = 0.0;
-        for ((low, high), c) in self.low.iter().zip(&self.high).zip(&centre) {
-            let gap = num::max(num::max(low - c, c - high), 0.0);
-            gap2 += gap * gap;
-        }
-        gap2 <= radius * radius
+        box_reaches_ball(&(self.low, self.high), centre, radius)
     }
 
     /// The groove's depth at `q` (metres), positive, and its gradient there.
@@ -2172,6 +2222,12 @@ impl<F: FieldView> Incision<'_, F> {
             // read two king moves farther, past the margin from a point on a surveyed cell's far
             // edge (R09.T6.i).
             if level > first && level > self.deepest_of(ancestor(around, first))? {
+                continue;
+            }
+            // A trunk is judged by its course before its onward grade reads its receiver's
+            // receiver, four king moves from the cell, which from a point on a surveyed cell's far
+            // edge lies past the margin; a trunk passed by here is one whose groove would miss.
+            if level == first && !self.network().trunk_may_reach_ball(around, centre, ball)? {
                 continue;
             }
             let Some(segment) = self.segment(around)? else {
