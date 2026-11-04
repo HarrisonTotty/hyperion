@@ -40,6 +40,7 @@ import {
   type StrideBandsM,
   type StrideErrorsM,
   strideFactor,
+  strideMorphLevel,
   strideNeedM,
   stridePlace,
   type StrideScale,
@@ -160,6 +161,16 @@ import type { WorkerLike } from "./workers/pool";
  *   of this one through the stride morph's twin (`clusters/strides.ts`' `stridePlace`), both from
  *   this frame's camera ({@link StrideFrames}); and the lit triangles its seen blocks draw. Off by
  *   default, where the passes draw at stride 1.
+ * - `SEAM_STRIDES_FROM_S` and `SEAM_STRIDES_TO_S` (the whole run): the strides measured over a
+ *   segment of the script alone, from the frame at the first to the frame before the second's, the
+ *   rest played but not measured, the frame before the segment's first only read. A segment's
+ *   figures are sums, counts and the largest of each ({@link StrideSummary}), so its segments'
+ *   ({@link mergeStrideSummaries}) are the whole run's bit for bit. `scripts/seamSegments.mjs` plays
+ *   a run's segments, at once or one after another, and keeps each finished segment's figures in a
+ *   file of its own, so that a stopped run resumes at the segments it had not finished (the lane
+ *   rules' long runs, 2026-11-01: on high the strides' whole run takes 4.4 h on the pod).
+ * - `SEAM_SEGMENTS`: the segments' figures as that script keeps them, a JSON array; the strides'
+ *   acceptance over the whole script, from them, with no run.
  * - `SEAM_OCCLUSION=hzb` (plan R14, R14.T3.d): every `SEAM_OCCLUSION_STRIDE`th frame (4) a model of
  *   the lit pass's two rasters ({@link OcclusionFrames}): of the clusters on the path that the
  *   cull's twin keeps, those seen at the model's frame before drawn first, the first raster's ground
@@ -203,6 +214,27 @@ const RECORD = knob("SEAM_RECORD") === "1";
 const DRAFT_SHARE = Math.min(1, Math.max(0, numberKnob("SEAM_DRAFT_SHARE", 1)));
 const LOOKAHEAD = knob("SEAM_LOOKAHEAD") !== "0";
 const STRIDED = knob("SEAM_STRIDES") === "measured";
+
+/**
+ * The frames whose strides a run measures, by their numbers at {@link HZ} from the script's start:
+ * from `fromFrame` to before `toFrame`, `null` for no bound.
+ */
+interface StrideWindow {
+  readonly fromFrame: number | null;
+  readonly toFrame: number | null;
+}
+
+/** The knob `name`'s frame (`SEAM_STRIDES_FROM_S`, `SEAM_STRIDES_TO_S`), or `null` where unset. */
+function frameKnob(name: string): number | null {
+  const s = numberKnob(name, Number.NaN);
+  return Number.isFinite(s) ? Math.round(s * HZ) : null;
+}
+
+/** The knobs' window of the strides measured: the whole run where unset. */
+const STRIDE_WINDOW: StrideWindow = {
+  fromFrame: frameKnob("SEAM_STRIDES_FROM_S"),
+  toFrame: frameKnob("SEAM_STRIDES_TO_S"),
+};
 const OCCLUDED = knob("SEAM_OCCLUSION") === "hzb";
 const OCCLUSION_STRIDE = Math.max(1, Math.round(numberKnob("SEAM_OCCLUSION_STRIDE", 4)));
 const OCCLUSION_SCALE = Math.max(1, numberKnob("SEAM_OCCLUSION_SCALE", 4));
@@ -880,6 +912,35 @@ interface StrideFrame {
   readonly litTrianglesOwn: number;
   readonly litTrianglesPatch: number;
   readonly litTrianglesShared: number;
+  /** Where its largest move was, or `null` where it measured none on screen. */
+  readonly worst: StrideMove | null;
+}
+
+/**
+ * A frame's largest move by the camera's strides, and what made it: the block's strides and its
+ * instance's state at the frame before and at this one, each pair `[then, now]`.
+ */
+interface StrideMove {
+  readonly tS: number;
+  readonly movePx: number;
+  /** The patch, its block, and the grid vertex its stride's surface was measured over. */
+  readonly patch: string;
+  readonly block: number;
+  readonly x: number;
+  readonly y: number;
+  /** What changed of the block: its stride, its scale's bands, its edges' bands, its edges' holds. */
+  readonly causes: ReadonlyArray<"stride" | "scale" | "edges" | "holds">;
+  readonly strides: readonly [number, number];
+  /** The vertex's distance, m, its band towards its morph level's stride, m, and its morph's k. */
+  readonly distanceM: number;
+  readonly bandM: readonly [number, number];
+  readonly k: readonly [number, number];
+  /** The frame's τ′ (the selection's), and the τ′ the instance's stride scale was formed at, px. */
+  readonly tauPx: number;
+  readonly scaleTauPx: readonly [number, number];
+  /** The instance's quadrant words (its holds) and shares words (their onsets' fades). */
+  readonly quadrantWords: readonly [number, number];
+  readonly holdFadesWords: readonly [number, number];
 }
 
 /** Whether any of bands `then` moved by a quarter of its width or more in `now`. */
@@ -932,6 +993,12 @@ const BLOCK_TRIANGLES = 128;
  * camera's own motion apart. A block's surface is its stride's triangles over its vertices' morphed
  * places, the CDLOD morph's heights and k (`DrawnSurfaces.vertex`) placed on the figure, its
  * shading normal its tile's mixed by the morphed k.
+ *
+ * @remarks
+ * A frame only read, the one before a segment's first ({@link StrideWindow}), keeps its blocks'
+ * strides and its instances' state for the next frame's measure, and measures nothing itself: what
+ * a frame measures depends on it and the frame before alone, so a segment's frames measure as the
+ * whole run's do.
  */
 class StrideFrames {
   readonly #before = new WeakMap<
@@ -942,13 +1009,13 @@ class StrideFrames {
       readonly edgeBandsM: Float64Array;
       readonly quadrantWord: number;
       readonly holdFadesWord: number;
-      /** The frame that drew it, by {@link StrideFrames.frame}'s count. */
+      /** The frame that drew it, its number from the script's start. */
       readonly frame: number;
     }
   >();
   readonly frames: StrideFrame[] = [];
-  #frame = 0;
 
+  /** Frame `frameNumber`'s strides, measured, or with `measure` false only read. */
   frame(
     planet: PlanetGeometry,
     tauPrimeRad: number,
@@ -957,6 +1024,8 @@ class StrideFrames {
     records: SlotRecords,
     drawn: ReadonlyMap<string, DrawnInstance>,
     tS: number,
+    frameNumber: number,
+    measure: boolean,
   ): void {
     const { figure } = planet;
     /** The coarsest stride's level whose every band below it is past, no band's width taken. */
@@ -983,6 +1052,7 @@ class StrideFrames {
     let measured = 0;
     let movePx = 0;
     let normalDeg = 0;
+    let worst: StrideMove | null = null;
     let litTriangles = 0;
     let litTrianglesAtStride1 = 0;
     for (const inst of drawn.values()) {
@@ -1034,6 +1104,9 @@ class StrideFrames {
         );
         strides[block] = 1 << level;
         strided += level > 0 ? 1 : 0;
+        if (!measure) {
+          continue;
+        }
         const up = spheroidNormal(
           figure,
           vertexDir(inst.area, 8 * (block % 8) + 4, 8 * Math.floor(block / 8) + 4),
@@ -1066,21 +1139,22 @@ class StrideFrames {
         edgeBandsM: inst.edgeBandsM,
         quadrantWord: inst.quadrantWord,
         holdFadesWord: inst.holdFadesWord,
-        frame: this.#frame,
+        frame: frameNumber,
       });
       // Against the frame before alone: a bake that frame did not draw appears, as the fades'
       // checks hold, and is not a change of its strides.
-      if (was === undefined || was.frame !== this.#frame - 1) {
+      if (!measure || was === undefined || was.frame !== frameNumber - 1) {
         continue;
       }
       // Measured where a band, its scale's or an edge's, moves by a quarter of its width or more,
       // as the view's τ′ or a neighbour changes; and along an edge whose holds or their onsets'
       // shares change, its blocks there alone.
-      const bandsMoved =
-        bandsMovedBy(
-          scaleBandsM(was.strideScale, patchErrors),
-          scaleBandsM(inst.strideScale, patchErrors),
-        ) || bandsMovedBy(was.edgeBandsM, inst.edgeBandsM);
+      const scaleMoved = bandsMovedBy(
+        scaleBandsM(was.strideScale, patchErrors),
+        scaleBandsM(inst.strideScale, patchErrors),
+      );
+      const edgesMoved = bandsMovedBy(was.edgeBandsM, inst.edgeBandsM);
+      const bandsMoved = scaleMoved || edgesMoved;
       const heldXor = was.quadrantWord ^ inst.quadrantWord;
       const sharesXor = was.holdFadesWord ^ inst.holdFadesWord;
       const heldMoved =
@@ -1117,6 +1191,7 @@ class StrideFrames {
         };
       const nowFactor = factorBy(inst);
       const thenFactor = factorBy(was);
+      const scaleTauPx = (scale: StrideScale): number => pxPerRad / scale.perErrorM;
       for (let block = 0; block < 64; block += 1) {
         const sNow = strides[block] ?? 1;
         const sThen = was.strides[block] ?? 1;
@@ -1175,8 +1250,8 @@ class StrideFrames {
             const then = surface(morphedThen, thenFactor, sThen, lx, ly);
             const rel = sub(vec3(now[0] ?? 0, now[1] ?? 0, now[2] ?? 0), cam.positionM);
             const dir = vertexDir(inst.area, bx + lx, by + ly);
-            const n = spheroidNormal(figure, dir);
-            if (!onScreen(cam, rel, vec3(n[0], n[1], n[2]))) {
+            const up = spheroidNormal(figure, dir);
+            if (!onScreen(cam, rel, vec3(up[0], up[1], up[2]))) {
               continue;
             }
             const moved = vec3(
@@ -1184,7 +1259,45 @@ class StrideFrames {
               (now[1] ?? 0) - (then[1] ?? 0),
               (now[2] ?? 0) - (then[2] ?? 0),
             );
-            movePx = Math.max(movePx, (norm(cross(moved, normalise(rel))) * pxPerRad) / norm(rel));
+            const movedPx = (norm(cross(moved, normalise(rel))) * pxPerRad) / norm(rel);
+            movePx = Math.max(movePx, movedPx);
+            if (movedPx > (worst?.movePx ?? 0)) {
+              const x = bx + lx;
+              const y = by + ly;
+              const level = strideMorphLevel(x, y);
+              const bandOf = (state: {
+                readonly strideScale: StrideScale;
+                readonly edgeBandsM: Float64Array;
+              }): number =>
+                level >= 3
+                  ? NO_STRIDE_BAND
+                  : vertexStrideBandM(state.strideScale, own, state.edgeBandsM, x, y, level);
+              worst = {
+                tS,
+                movePx: movedPx,
+                patch: patchKeyString(inst.held.key),
+                block,
+                x,
+                y,
+                causes: [
+                  ...(sNow === sThen ? [] : ["stride" as const]),
+                  ...(scaleMoved ? ["scale" as const] : []),
+                  ...(edgesMoved ? ["edges" as const] : []),
+                  ...((blockEdges & heldMoved) === 0 ? [] : ["holds" as const]),
+                ],
+                strides: [sThen, sNow],
+                distanceM: norm(rel),
+                bandM: [bandOf(was), bandOf(inst)],
+                k:
+                  level >= 3
+                    ? [0, 0]
+                    : [thenFactor(x, y, level, then), nowFactor(x, y, level, now)],
+                tauPx: tauPrimeRad * pxPerRad,
+                scaleTauPx: [scaleTauPx(was.strideScale), scaleTauPx(inst.strideScale)],
+                quadrantWords: [was.quadrantWord, inst.quadrantWord],
+                holdFadesWords: [was.holdFadesWord, inst.holdFadesWord],
+              };
+            }
             const a = morphedNormal(inst.held, inst, bx + lx, by + ly, now[3] ?? 0);
             const b = morphedNormal(inst.held, inst, bx + lx, by + ly, then[3] ?? 0);
             if (a !== null && b !== null) {
@@ -1195,13 +1308,16 @@ class StrideFrames {
         }
       }
     }
-    this.#frame += 1;
+    if (!measure) {
+      return;
+    }
     this.frames.push({
       tS,
       strided,
       measured,
       movePx,
       normalDeg,
+      worst,
       litTriangles,
       litTrianglesAtStride1,
       litTrianglesOwn,
@@ -1211,8 +1327,17 @@ class StrideFrames {
   }
 }
 
-/** A run's stride figures (plan R14, R14.T3.c), as {@link strideSummaryOf} gives them. */
+/** The largest moves a {@link StrideSummary} keeps, each a frame's. */
+const WORST_MOVES = 12;
+
+/**
+ * A run's stride figures (plan R14, R14.T3.c), as {@link strideSummaryOf} gives them: over its
+ * window's frames, sums of whole numbers, counts and the largest of each, so that its segments'
+ * merge ({@link mergeStrideSummaries}) is the whole run's bit for bit.
+ */
 interface StrideSummary {
+  /** The frames measured. */
+  readonly window: StrideWindow;
   readonly frames: number;
   /** Frames with a block at a stride above 1, and frames that measured a change. */
   readonly framesStrided: number;
@@ -1223,21 +1348,54 @@ interface StrideSummary {
   readonly framesOverOnePx: number;
   readonly framesOverTwoPx: number;
   readonly framesOverTwoDeg: number;
-  /** The seen blocks' lit triangles over stride 1's: as drawn, and by each rule of `StrideFrame`. */
+  /** The seen blocks' lit triangles: as drawn, at stride 1, and by each rule of `StrideFrame`. */
+  readonly litTriangles: number;
+  readonly litTrianglesAtStride1: number;
+  readonly litTrianglesOwn: number;
+  readonly litTrianglesPatch: number;
+  readonly litTrianglesShared: number;
+  /** Their shares of stride 1's. */
   readonly litTriangleShare: number;
   readonly litTriangleShareOwn: number;
   readonly litTriangleSharePatch: number;
   readonly litTriangleShareShared: number;
+  /** The frames' largest moves, the largest first, at most {@link WORST_MOVES} of them. */
+  readonly worst: ReadonlyArray<StrideMove>;
 }
 
-/** A run's stride figures (plan R14, R14.T3.c): its frames' largest move and turn, and its lit triangles. */
-function strideSummaryOf(frames: ReadonlyArray<StrideFrame>): StrideSummary {
-  const lit = frames.reduce((sum, f) => sum + f.litTriangles, 0);
-  const at1 = frames.reduce((sum, f) => sum + f.litTrianglesAtStride1, 0);
-  const own = frames.reduce((sum, f) => sum + f.litTrianglesOwn, 0);
-  const patch = frames.reduce((sum, f) => sum + f.litTrianglesPatch, 0);
-  const shared = frames.reduce((sum, f) => sum + f.litTrianglesShared, 0);
+/** `moves`' largest {@link WORST_MOVES}, the largest first, the earlier first where equal. */
+function worstMovesOf(moves: ReadonlyArray<StrideMove>): StrideMove[] {
+  return moves.toSorted((a, b) => b.movePx - a.movePx || a.tS - b.tS).slice(0, WORST_MOVES);
+}
+
+/** A summary's figures, its window's and its sums', its shares from them. */
+function strideSummaryWith(
+  window: StrideWindow,
+  counts: Omit<
+    StrideSummary,
+    | "window"
+    | "litTriangleShare"
+    | "litTriangleShareOwn"
+    | "litTriangleSharePatch"
+    | "litTriangleShareShared"
+  >,
+): StrideSummary {
+  const at1 = counts.litTrianglesAtStride1;
+  const shareOf = (lit: number): number => (at1 > 0 ? lit / at1 : 1);
   return {
+    window,
+    ...counts,
+    litTriangleShare: shareOf(counts.litTriangles),
+    litTriangleShareOwn: shareOf(counts.litTrianglesOwn),
+    litTriangleSharePatch: shareOf(counts.litTrianglesPatch),
+    litTriangleShareShared: shareOf(counts.litTrianglesShared),
+  };
+}
+
+/** A run's stride figures (plan R14, R14.T3.c) over `window`'s `frames`: see {@link StrideSummary}. */
+function strideSummaryOf(frames: ReadonlyArray<StrideFrame>, window: StrideWindow): StrideSummary {
+  const sum = (of: (f: StrideFrame) => number): number => frames.reduce((n, f) => n + of(f), 0);
+  return strideSummaryWith(window, {
     frames: frames.length,
     framesStrided: frames.filter((f) => f.strided > 0).length,
     framesMeasured: frames.filter((f) => f.measured > 0).length,
@@ -1246,11 +1404,66 @@ function strideSummaryOf(frames: ReadonlyArray<StrideFrame>): StrideSummary {
     framesOverOnePx: frames.filter((f) => f.movePx > 1).length,
     framesOverTwoPx: frames.filter((f) => f.movePx > 2).length,
     framesOverTwoDeg: frames.filter((f) => f.normalDeg > 2).length,
-    litTriangleShare: at1 > 0 ? lit / at1 : 1,
-    litTriangleShareOwn: at1 > 0 ? own / at1 : 1,
-    litTriangleSharePatch: at1 > 0 ? patch / at1 : 1,
-    litTriangleShareShared: at1 > 0 ? shared / at1 : 1,
-  };
+    litTriangles: sum((f) => f.litTriangles),
+    litTrianglesAtStride1: sum((f) => f.litTrianglesAtStride1),
+    litTrianglesOwn: sum((f) => f.litTrianglesOwn),
+    litTrianglesPatch: sum((f) => f.litTrianglesPatch),
+    litTrianglesShared: sum((f) => f.litTrianglesShared),
+    worst: worstMovesOf(frames.flatMap((f) => (f.worst === null ? [] : [f.worst]))),
+  });
+}
+
+/**
+ * The stride figures of a run's segments as one (`SEAM_STRIDES_FROM_S`), equal to its whole run's
+ * bit for bit: their counts' and their whole numbers' sums, the largest of each, and their shares
+ * from the sums.
+ *
+ * @throws Error where `parts` do not tile one span, each segment from the frame the one before
+ *   ends at.
+ */
+function mergeStrideSummaries(parts: ReadonlyArray<StrideSummary>): StrideSummary {
+  const sorted = parts.toSorted(
+    (a, b) =>
+      (a.window.fromFrame ?? Number.NEGATIVE_INFINITY) -
+      (b.window.fromFrame ?? Number.NEGATIVE_INFINITY),
+  );
+  sorted.forEach((part, i) => {
+    const before = sorted[i - 1];
+    if (
+      before !== undefined &&
+      (before.window.toFrame === null || part.window.fromFrame !== before.window.toFrame)
+    ) {
+      throw new Error(
+        `the segments do not tile the run: one to frame ${String(before.window.toFrame)}, the next from ${String(part.window.fromFrame)}`,
+      );
+    }
+  });
+  const first = sorted[0];
+  const last = sorted.at(-1);
+  if (first === undefined || last === undefined) {
+    throw new Error("no segments to merge");
+  }
+  const sum = (of: (part: StrideSummary) => number): number =>
+    sorted.reduce((n, part) => n + of(part), 0);
+  return strideSummaryWith(
+    { fromFrame: first.window.fromFrame, toFrame: last.window.toFrame },
+    {
+      frames: sum((p) => p.frames),
+      framesStrided: sum((p) => p.framesStrided),
+      framesMeasured: sum((p) => p.framesMeasured),
+      movePxMax: Math.max(0, ...sorted.map((p) => p.movePxMax)),
+      normalDegMax: Math.max(0, ...sorted.map((p) => p.normalDegMax)),
+      framesOverOnePx: sum((p) => p.framesOverOnePx),
+      framesOverTwoPx: sum((p) => p.framesOverTwoPx),
+      framesOverTwoDeg: sum((p) => p.framesOverTwoDeg),
+      litTriangles: sum((p) => p.litTriangles),
+      litTrianglesAtStride1: sum((p) => p.litTrianglesAtStride1),
+      litTrianglesOwn: sum((p) => p.litTrianglesOwn),
+      litTrianglesPatch: sum((p) => p.litTrianglesPatch),
+      litTrianglesShared: sum((p) => p.litTrianglesShared),
+      worst: worstMovesOf(sorted.flatMap((p) => p.worst)),
+    },
+  );
 }
 
 /** One frame's model of the lit pass's two rasters (plan R14, R14.T3.d): see {@link OcclusionFrames}. */
@@ -1872,6 +2085,11 @@ interface ProbeOptions {
   readonly toS: number;
   /** A drafted bake's share of a bake's cost; {@link DRAFT_SHARE} by default. */
   readonly draftShare?: number;
+  /**
+   * The frames whose camera strides it measures, the passes drawing them, or `null` for none, the
+   * passes at stride 1; by default the knobs' ({@link STRIDE_WINDOW} with `SEAM_STRIDES=measured`).
+   */
+  readonly strides?: StrideWindow | null;
 }
 
 /** What a run gives: the record, and the trace of its selections in the trace's span. */
@@ -1880,8 +2098,9 @@ interface Played {
   /** A drafted bake's share of a bake's cost, the run's. */
   readonly draftShare: number;
   readonly trace: ReadonlyArray<TraceEntry>;
-  /** Each frame's camera strides, with `SEAM_STRIDES=measured` (plan R14, R14.T3.c); else none. */
+  /** Each measured frame's camera strides (plan R14, R14.T3.c), and their window; else none. */
   readonly strides: ReadonlyArray<StrideFrame>;
+  readonly strideWindow: StrideWindow | null;
   /** Each modelled frame's two rasters, with `SEAM_OCCLUSION=hzb` (plan R14, R14.T3.d); else none. */
   readonly occlusion: ReadonlyArray<OcclusionFrame>;
 }
@@ -1890,6 +2109,10 @@ interface Played {
 async function play(options: ProbeOptions): Promise<Played> {
   const { setting, fromS, toS } = options;
   const draftShare = options.draftShare ?? DRAFT_SHARE;
+  const strideWindow =
+    options.strides === undefined ? (STRIDED ? STRIDE_WINDOW : null) : options.strides;
+  const strideFrom = strideWindow?.fromFrame ?? Number.NEGATIVE_INFINITY;
+  const strideTo = strideWindow?.toFrame ?? Number.POSITIVE_INFINITY;
   initSync({ module: wasmBytes() });
   vi.useFakeTimers({
     toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
@@ -1910,7 +2133,9 @@ async function play(options: ProbeOptions): Promise<Played> {
     ...(LOOKAHEAD ? { lookaheadClockMs: () => Date.now() } : {}),
     morphInMs: MORPH_MS,
     ...budgetHoldKnob(),
-    ...(STRIDED ? { geometry: { ...SETTINGS[setting].geometry, strides: "measured" } } : {}),
+    ...(strideWindow === null
+      ? {}
+      : { geometry: { ...SETTINGS[setting].geometry, strides: "measured" } }),
   });
   link.onSurface((event) => {
     if (event.kind === "revisions") {
@@ -2124,7 +2349,7 @@ async function play(options: ProbeOptions): Promise<Played> {
       // The step's draw in the primary view, as the app draws it, and its change from the frame
       // before's; the engine's records cleared first, as a run's would fill the memory, the slots'
       // cluster records kept, which the strides' measure reads.
-      if (STRIDED || OCCLUDED) {
+      if (strideWindow !== null || OCCLUDED) {
         slotRecords.take(engine);
       }
       engine.writes.length = 0;
@@ -2159,7 +2384,15 @@ async function play(options: ProbeOptions): Promise<Played> {
           frameChanges.push(change);
         }
       }
-      if (STRIDED && drawingPass !== null && camNow !== null && latest.cam !== null) {
+      // In the window, and the frame before its first only read.
+      if (
+        strideWindow !== null &&
+        n >= strideFrom - 1 &&
+        n < strideTo &&
+        drawingPass !== null &&
+        camNow !== null &&
+        latest.cam !== null
+      ) {
         const figure = drawingPass.planet.figure;
         strideFrames.frame(
           drawingPass.planet,
@@ -2169,6 +2402,8 @@ async function play(options: ProbeOptions): Promise<Played> {
           slotRecords,
           drawnNow,
           tS,
+          n,
+          n >= strideFrom,
         );
       }
       frameIndex += 1;
@@ -2380,6 +2615,7 @@ async function play(options: ProbeOptions): Promise<Played> {
     draftShare,
     trace,
     strides: strideFrames.frames,
+    strideWindow,
     occlusion: occlusionFrames.frames,
   };
 }
@@ -2440,7 +2676,10 @@ function report(played: Played, summary: SeamSummary): Record<string, unknown> {
       .slice(0, 40),
     fadePopsBeside: run.pops.filter((pop) => pop.cause === "fade" && pop.beside).length,
     trace: played.trace,
-    ...(STRIDED ? { strides: strideSummaryOf(played.strides) } : {}),
+    knobs: PLAY_KNOBS,
+    ...(played.strideWindow === null
+      ? {}
+      : { strides: strideSummaryOf(played.strides, played.strideWindow) }),
     ...(OCCLUDED ? { occlusion: occlusionSummaryOf(played.occlusion) } : {}),
     ...(RECORD ? { record: run } : {}),
   };
@@ -2494,6 +2733,177 @@ const STRIDE_SHARE: Readonly<Record<QualitySetting, number>> = { high: 0.031, lo
 /** The script's first draws on high: past the hand-over at 40.55 s. */
 const SHORT_TO_S = 42;
 
+/**
+ * The camera's strides' acceptance (plan R14, R14.T3.c) over `summary`'s frames: no frame's change
+ * of them moves a vertex past 1 px on high and 2 px on low, nor turns a normal past 2°; and, over
+ * the whole script alone, some frame strides and the seen blocks draw at most 0.031 and 0.018 of
+ * stride 1's lit triangles, within 10%, which a segment's own share does not decide.
+ */
+function strideVerdict(
+  summary: StrideSummary,
+  setting: QualitySetting,
+): Readonly<Record<"strided" | "movePx" | "normalDeg" | "litTriangles", boolean>> {
+  const whole = (summary.window.fromFrame ?? 0) <= 0 && summary.window.toFrame === null;
+  return {
+    strided: !whole || summary.framesStrided > 0,
+    movePx: summary.movePxMax <= STRIDE_MOVE_PX[setting],
+    normalDeg: summary.normalDegMax <= POP_NORMAL_DEG,
+    litTriangles: !whole || summary.litTriangleShare <= 1.1 * STRIDE_SHARE[setting],
+  };
+}
+
+/** The verdict every bound passes. */
+const STRIDES_PASS = { strided: true, movePx: true, normalDeg: true, litTriangles: true } as const;
+
+/** A played run's stride figures. @throws Error for a run that measured none. */
+function stridesOf(played: Played): StrideSummary {
+  if (played.strideWindow === null) {
+    throw new Error("the run measured no strides");
+  }
+  return strideSummaryOf(played.strides, played.strideWindow);
+}
+
+/**
+ * The knobs a run's play depends on, as one string: a segment's figures merge only with those of
+ * the same (`SEAM_SEGMENTS`).
+ */
+const PLAY_KNOBS = JSON.stringify({
+  costMs: COST_MS,
+  workers: WORKERS,
+  hz: HZ,
+  stride: STRIDE,
+  frameStride: FRAME_STRIDE,
+  morphMs: MORPH_MS,
+  budgetHold: knob("SEAM_BUDGET_HOLD") ?? null,
+  draftShare: DRAFT_SHARE,
+  lookahead: LOOKAHEAD,
+});
+
+/** A segment's figures as `scripts/seamSegments.mjs` keeps them. */
+interface StrideSegment {
+  readonly setting: QualitySetting;
+  readonly knobs: string;
+  readonly strides: StrideSummary;
+}
+
+/** Whether `value` is an object whose `keys` are all finite numbers. */
+function hasNumbers(value: object, keys: ReadonlyArray<string>): boolean {
+  return keys.every((key) => {
+    const field: unknown = Reflect.get(value, key);
+    return typeof field === "number" && Number.isFinite(field);
+  });
+}
+
+/** Whether `value` is a pair of finite numbers. */
+function isPair(value: unknown): value is readonly [number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every((v: unknown) => typeof v === "number" && Number.isFinite(v))
+  );
+}
+
+const STRIDE_MOVE_CAUSES = ["stride", "scale", "edges", "holds"] as const;
+
+/** Whether `value` is a {@link StrideMove} as JSON holds it. */
+function isStrideMove(value: unknown): value is StrideMove {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const causes: unknown = Reflect.get(value, "causes");
+  const patch: unknown = Reflect.get(value, "patch");
+  return (
+    hasNumbers(value, ["tS", "movePx", "block", "x", "y", "distanceM", "tauPx"]) &&
+    typeof patch === "string" &&
+    Array.isArray(causes) &&
+    causes.every((c: unknown) => STRIDE_MOVE_CAUSES.some((known) => known === c)) &&
+    ["strides", "k", "scaleTauPx", "quadrantWords", "holdFadesWords"].every((key) =>
+      isPair(Reflect.get(value, key)),
+    ) &&
+    // A band of none is the largest float, which JSON holds as a number too.
+    isPair(Reflect.get(value, "bandM"))
+  );
+}
+
+/** Whether `value` is a window's bound: a frame's number, or `null` for none. */
+function isFrameBound(value: unknown): value is number | null {
+  return value === null || Number.isInteger(value);
+}
+
+/** Whether `value` is a {@link StrideSummary} as JSON holds it. */
+function isStrideSummary(value: unknown): value is StrideSummary {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const window: unknown = Reflect.get(value, "window");
+  const worst: unknown = Reflect.get(value, "worst");
+  return (
+    typeof window === "object" &&
+    window !== null &&
+    isFrameBound(Reflect.get(window, "fromFrame")) &&
+    isFrameBound(Reflect.get(window, "toFrame")) &&
+    hasNumbers(value, [
+      "frames",
+      "framesStrided",
+      "framesMeasured",
+      "movePxMax",
+      "normalDegMax",
+      "framesOverOnePx",
+      "framesOverTwoPx",
+      "framesOverTwoDeg",
+      "litTriangles",
+      "litTrianglesAtStride1",
+      "litTrianglesOwn",
+      "litTrianglesPatch",
+      "litTrianglesShared",
+      "litTriangleShare",
+      "litTriangleShareOwn",
+      "litTriangleSharePatch",
+      "litTriangleShareShared",
+    ]) &&
+    Array.isArray(worst) &&
+    worst.every(isStrideMove)
+  );
+}
+
+/**
+ * The segments `SEAM_SEGMENTS` gives, or `null` where unset.
+ *
+ * @throws Error where it is not a JSON array of segments' figures.
+ */
+function segmentsKnob(): StrideSegment[] | null {
+  const text = knob("SEAM_SEGMENTS");
+  if (text === undefined) {
+    return null;
+  }
+  const parsed: unknown = JSON.parse(text);
+  if (!Array.isArray(parsed)) {
+    throw new Error("SEAM_SEGMENTS is not an array");
+  }
+  return parsed.map((item: unknown, i) => {
+    const setting: unknown =
+      typeof item === "object" && item !== null ? Reflect.get(item, "setting") : null;
+    const knobs: unknown =
+      typeof item === "object" && item !== null ? Reflect.get(item, "knobs") : null;
+    const strides: unknown =
+      typeof item === "object" && item !== null ? Reflect.get(item, "strides") : null;
+    if (
+      (setting !== "high" && setting !== "low") ||
+      typeof knobs !== "string" ||
+      !isStrideSummary(strides)
+    ) {
+      throw new Error(`SEAM_SEGMENTS' segment ${String(i)} is not a segment's figures`);
+    }
+    return { setting, knobs, strides };
+  });
+}
+
+/** A run's segments' strides (`SEAM_SEGMENTS`), merged by the acceptance's test with no run. */
+const SEGMENTS = segmentsKnob();
+
+/** The resume check's span on high: past the first draws, to the first changes of the strides. */
+const RESUME_TO_S = 47;
+
 describe("the seamless probe over TERRAIN TEST", () => {
   it(
     "plays to the hand-over and draws the ground, whole",
@@ -2518,7 +2928,8 @@ describe.runIf(SLOW)("the seamless probe's acceptance (HYPERION_SLOW_TESTS=1)", 
   it.for(settingsPlayed())(
     "draws no collapse, jump or eviction of the selection on %s",
     // With the strides measured, every block whose bands a slew step of τ′ moves past a quarter of
-    // β's width draws twice through the morph's twin: about 3 h on high at β = 0.002.
+    // β's width draws twice through the morph's twin: 4.4 h on high at β = 0.002 on the pod, so
+    // `scripts/seamSegments.mjs` plays it in segments.
     { timeout: (STRIDED ? 5 : 2) * 60 * 60 * 1000 },
     async (setting, { task }) => {
       const played = await play({
@@ -2552,20 +2963,51 @@ describe.runIf(SLOW)("the seamless probe's acceptance (HYPERION_SLOW_TESTS=1)", 
               ["appearMovePx", summary.appearMovePxMax, bounds.appearMovePx],
             ].filter(([, value, bound]) => Number(value) > Number(bound));
       expect(over).toEqual([]);
-      // The camera's strides (plan R14, R14.T3.c's acceptance): no frame's change of them moves a
-      // vertex past 1 px on high and 2 px on low, nor turns a normal past 2°, and the seen blocks
-      // draw at most 0.031 and 0.018 of stride 1's lit triangles, within 10%.
-      const strides = strideSummaryOf(played.strides);
+      // The camera's strides (plan R14, R14.T3.c's acceptance), over the knobs' window.
       expect(
-        STRIDED
-          ? {
-              strided: strides.framesStrided > 0,
-              movePx: strides.movePxMax <= STRIDE_MOVE_PX[setting],
-              normalDeg: strides.normalDegMax <= POP_NORMAL_DEG,
-              litTriangles: strides.litTriangleShare <= 1.1 * STRIDE_SHARE[setting],
-            }
-          : { strided: true, movePx: true, normalDeg: true, litTriangles: true },
-      ).toEqual({ strided: true, movePx: true, normalDeg: true, litTriangles: true });
+        played.strideWindow === null ? STRIDES_PASS : strideVerdict(stridesOf(played), setting),
+      ).toEqual(STRIDES_PASS);
+    },
+  );
+
+  it.runIf(SEGMENTS !== null).for(settingsPlayed())(
+    "accepts the camera's strides on %s over the whole script from its segments' figures (SEAM_SEGMENTS)",
+    (setting, { task }) => {
+      const parts = (SEGMENTS ?? []).filter((segment) => segment.setting === setting);
+      expect(parts.map((segment) => segment.knobs === PLAY_KNOBS)).not.toContain(false);
+      const strides = mergeStrideSummaries(parts.map((segment) => segment.strides));
+      Object.assign(task.meta, {
+        seamless: { setting, knobs: PLAY_KNOBS, segments: parts.length, strides },
+      });
+      expect([strides.window.fromFrame ?? 0, strides.window.toFrame]).toEqual([0, null]);
+      expect(strideVerdict(strides, setting)).toEqual(STRIDES_PASS);
+    },
+  );
+
+  it(
+    "measures the camera's strides over a run's segments as over the whole run, bit for bit",
+    { timeout: 60 * 60 * 1000 },
+    async ({ task }) => {
+      const span = { setting: "high", fromS: 0, toS: RESUME_TO_S } as const;
+      const whole = stridesOf(await play({ ...span, strides: { fromFrame: null, toFrame: null } }));
+      // Split at the last frame that measured a move, another before it: the second segment's
+      // first frame then measures against the frame only read.
+      const moved = whole.worst.map((move) => Math.round(move.tS * HZ)).toSorted((a, b) => a - b);
+      const split = moved.at(-1) ?? 0;
+      const before = stridesOf(
+        await play({ ...span, strides: { fromFrame: null, toFrame: split } }),
+      );
+      const after = stridesOf(
+        await play({ ...span, strides: { fromFrame: split, toFrame: null } }),
+      );
+      const merged = mergeStrideSummaries([after, before]);
+      Object.assign(task.meta, { seamless: { split, whole, before, after } });
+      expect([moved.length > 1, before.framesMeasured > 0, after.framesMeasured > 0]).toEqual([
+        true,
+        true,
+        true,
+      ]);
+      expect(merged).toEqual(whole);
     },
   );
 
