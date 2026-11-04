@@ -471,65 +471,15 @@ impl Error for SampleContextsError {
     }
 }
 
-/// `run`'s result with the holds retargeted from 26 to 27 in force on this thread (train 26, 2026-11-01: P14.T49.m's icy regolith and P14.T24.h.b's minor
-/// clouds, organic sediment, Rayleigh adding and haze layer): the rules their tests were measured
-/// under while they were held at 26. The 27 bump deletes it with them.
-#[cfg(test)]
-pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::photometry::area_mix::{
-        HazeLayerRules, IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules,
-        RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
-        with_organic_sediment, with_rayleigh_adding,
-    };
-    let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
-    let run = move || with_minor_clouds(MinorCloudsRules::OwnShare, run);
-    let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
-    let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
-    let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
-    run()
-}
-
-/// `run`'s result with every landed hold at generator version 27 in force on this thread, for a
-/// test that asserts a 27 figure: those at 27, each with its switch, which sets its rules back as
-/// it returns, a panic in `run` included. A test may set one hold back inside it to compare 27 with
-/// and without it.
+/// `run`'s result under every hold at generator version 27, for a test that asserts a 27 figure:
+/// every 27 hold is on the record (train 27), so it runs `run` as it is, on the version's rules.
+/// It stays for the tests that name 27's rules and for the holds at 28 ([`with_every_28_hold`]
+/// builds on it); the 28 bump deletes it with them.
 ///
-/// The holds at 27:
-///
-/// - the icy lid's regolith, `ICY_REGOLITH_VERSION` (P14.T49.m), at `IcyRegolithRules::Mixture`
-///   through `with_icy_regolith`: an airless or tenuous body's `H2O` regolith ice with its rock's
-///   lag where its tidal heat does not resurface it.
-/// - a minor condensable's own cloud, `MINOR_CLOUDS_VERSION` (P14.T24.h.b), at
-///   `MinorCloudsRules::OwnShare` through `with_minor_clouds`: a cloud whose condensable is not
-///   water covers Titan's measured share.
-/// - the organic sediment, `ORGANIC_SEDIMENT_VERSION` (P14.T24.h.b), at
-///   `OrganicSedimentRules::Sediment` through `with_organic_sediment`: a hazy air's fallout covers
-///   its share of the regolith and the `H2O` ice.
-/// - the Rayleigh layer added, `RAYLEIGH_ADDING_VERSION` (P14.T24.h.b), at
-///   `RayleighAddingRules::Added` through `with_rayleigh_adding`: the air's layer over the area mix
-///   by the adding rule, Earth's cloud re-split.
-/// - the haze layer, `HAZE_LAYER_VERSION` (P14.T24.h.b), at `HazeLayerRules::Absorbing` through
-///   `with_haze_layer`: a hazy air's haze an absorbing layer over the rest of its disc, its
-///   absorption the anti-greenhouse.
-///
-/// A system or a record is read under the rules in force when it is generated, so a test
-/// generates afresh inside it. A later hold at 27 adds its switch here, and 27's bump deletes it
-/// with its holds.
-///
-/// The galaxy's own holds at 27 travel with its rules, not the thread: a test builds its galaxy
-/// under `GalaxyRules::every_27_hold()` and runs inside this helper for the planetary ones.
+/// The galaxy's rules travel with the galaxy, not the thread: a test builds its galaxy under
+/// `GalaxyRules::every_27_hold()` and runs inside this helper for the planetary ones.
 #[cfg(test)]
 pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::derive::photometry::area_mix::{
-        HazeLayerRules, IcyRegolithRules, MinorCloudsRules, OrganicSedimentRules,
-        RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
-        with_organic_sediment, with_rayleigh_adding,
-    };
-    let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
-    let run = move || with_minor_clouds(MinorCloudsRules::OwnShare, run);
-    let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
-    let run = move || with_rayleigh_adding(RayleighAddingRules::Added, run);
-    let run = move || with_haze_layer(HazeLayerRules::Absorbing, run);
     run()
 }
 

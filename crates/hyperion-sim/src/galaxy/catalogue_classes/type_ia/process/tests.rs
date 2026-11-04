@@ -1139,13 +1139,10 @@ fn type_ia_over_seeds_under_every_26_hold() {
         );
         // The field share is held at 27 from train 26's retarget: the census reads it with the
         // version's other rules, as it was measured under every 26 hold.
-        let galaxy = &Galaxy::from_params_with_rules(
-            Seed::new(seed),
-            params,
-            GalaxyRules::every_26_hold_with_its_retargets(),
-        )
-        .unwrap()
-        .with_full_potential();
+        let galaxy =
+            &Galaxy::from_params_with_rules(Seed::new(seed), params, GalaxyRules::every_27_hold())
+                .unwrap()
+                .with_full_potential();
         let census = census(galaxy);
         let process = TypeIaProcess::new(galaxy);
         let rate = process.delays().rate_per_year();

@@ -163,9 +163,7 @@ fn a_galaxy_carries_the_version_s_field_share() {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "the field share is read when a galaxy is built")]
 fn with_rules_refuses_to_change_the_field_share() {
-    let _ = held()
-        .clone()
-        .with_rules(GalaxyRules::every_26_hold_with_its_retargets());
+    let _ = held().clone().with_rules(GalaxyRules::every_27_hold());
 }
 
 /// Each component keeps its field factor of its budget in every band: its population's

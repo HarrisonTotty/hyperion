@@ -58,13 +58,9 @@ fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
         let params = GalaxyParams::milky_way_like();
-        Galaxy::from_params_with_rules(
-            Seed::new(SEED),
-            params,
-            GalaxyRules::every_26_hold_with_its_retargets(),
-        )
-        .expect("the Milky Way fixture's gas is mostly neutral")
-        .with_full_potential()
+        Galaxy::from_params_with_rules(Seed::new(SEED), params, GalaxyRules::every_27_hold())
+            .expect("the Milky Way fixture's gas is mostly neutral")
+            .with_full_potential()
     })
 }
 

@@ -67,30 +67,10 @@ impl GalaxyRules {
         }
     }
 
-    /// The version's rules with the holds retargeted from 26 to 27 in force too (train 26,
-    /// 2026-11-01: P09.T2.c's `field_share`, P09.T35's `carve_out` (2026-11-02), P09.T36's
-    /// `feature_classes`, P11.T8.c–d's `merger_class` and P08.T12's `displaced`; the stellar
-    /// rules', [`StellarRules::every_26_hold_with_its_retargets`], hold none since P11.T4.d's
-    /// `merger_mass` was folded): the rules their tests, and those of the 27 holds built over them,
-    /// were measured under while they were held at 26. The 27 bump deletes it with them.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
-        Self {
-            stellar: StellarRules::every_26_hold_with_its_retargets(),
-            ..Self::of_version(crate::GENERATOR_VERSION)
-        }
-    }
-
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
-    /// version's rules, every galaxy and stellar hold at 27 being on the record (train 27); the
-    /// helper stays for the 28 holds, whose planetary helper builds on it.
-    /// The planetary stage's holds at 27 are switched on the thread instead
-    /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
-    /// hold has no switch and joins here.
-    ///
-    /// A later hold at 27 joins it with nothing to edit, and "every 27 hold but one" is
-    /// struct-update syntax over it.
+    /// version's rules from 27, every galaxy and stellar hold at 27 being on the record (train 27).
+    /// It stays for the tests that name 27's rules and for the holds at 28, whose planetary helper
+    /// builds on `planetary::testing::with_every_27_hold`; the 28 bump deletes it with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_27_hold() -> Self {
@@ -202,7 +182,7 @@ mod tests {
             GalaxyRules::every_27_hold(),
             GalaxyRules {
                 stellar: StellarRules::of_version(GeneratorVersion::new(27)),
-                ..GalaxyRules::every_26_hold_with_its_retargets()
+                ..GalaxyRules::every_27_hold()
             }
         );
         assert_eq!(

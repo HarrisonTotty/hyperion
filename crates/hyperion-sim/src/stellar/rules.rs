@@ -61,24 +61,9 @@ impl StellarRules {
         }
     }
 
-    /// The version's stellar rules with those retargeted from 26 to 27 in force too: none is left,
-    /// P11.T4.d's `merger_mass` folded (the 27 folds), so they are the version's; the stellar part
-    /// of [`GalaxyRules::every_26_hold_with_its_retargets`].
-    ///
-    /// [`GalaxyRules::every_26_hold_with_its_retargets`]:
-    ///     crate::galaxy::rules::GalaxyRules::every_26_hold_with_its_retargets
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
-        Self::of_version(crate::GENERATOR_VERSION)
-    }
-
     /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
     /// none is left, the 27 folds having put each on the record, so these are the version's rules
-    /// (the lane deletes this helper after the merge).
-    ///
-    /// It is the stellar part of `GalaxyRules::every_27_hold()`, so a later hold at 27 joins both
-    /// with nothing to edit.
+    /// from 27. The stellar part of `GalaxyRules::every_27_hold()`; the 28 bump deletes it with it.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_27_hold() -> Self {

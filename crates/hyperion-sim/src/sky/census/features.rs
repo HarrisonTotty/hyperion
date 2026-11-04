@@ -763,7 +763,7 @@ mod tests {
     fn phi_rules() -> GalaxyRules {
         GalaxyRules {
             field_share: FieldShareRules::Phi,
-            ..GalaxyRules::every_26_hold_with_its_retargets()
+            ..GalaxyRules::every_27_hold()
         }
     }
 

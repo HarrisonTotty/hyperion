@@ -883,7 +883,7 @@ fn the_grid_and_the_catalogue_are_complementary_under_every_27_hold() {
 #[ignore = "slow: 10⁵ mark sets and the ridges' cells under every 26 hold (10⁴ on wasm)"]
 fn the_grid_and_the_catalogue_are_complementary_under_every_26_hold() {
     let (tally, (claimed, _)) = run(
-        GalaxyRules::every_26_hold_with_its_retargets(),
+        GalaxyRules::every_27_hold(),
         "every 26 hold with its retargets",
     );
     assert!(claimed > 0, "{claimed}");

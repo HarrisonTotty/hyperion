@@ -24,10 +24,10 @@ fn milky_way(rules: GalaxyRules) -> Galaxy {
 }
 
 /// The Milky Way under every 26 hold with its retargets
-/// (`GalaxyRules::every_26_hold_with_its_retargets`): the classes listed and the cells' claim.
+/// (`GalaxyRules::every_27_hold`): the classes listed and the cells' claim.
 fn listed() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_26_hold_with_its_retargets()))
+    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_27_hold()))
 }
 
 /// The same galaxy with features that list no class: the reference without the lists.
@@ -36,7 +36,7 @@ fn held() -> &'static Galaxy {
     GALAXY.get_or_init(|| {
         milky_way(GalaxyRules {
             feature_classes: FeatureClassesRules::Unlisted,
-            ..GalaxyRules::every_26_hold_with_its_retargets()
+            ..GalaxyRules::every_27_hold()
         })
     })
 }

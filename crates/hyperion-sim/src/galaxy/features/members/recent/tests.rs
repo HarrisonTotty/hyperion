@@ -37,7 +37,7 @@ const SEED: u64 = 0x0935_0000_0000_0001;
 
 /// Every 26 hold with its retargets.
 fn rules_26() -> GalaxyRules {
-    GalaxyRules::every_26_hold_with_its_retargets()
+    GalaxyRules::every_27_hold()
 }
 
 /// The Milky Way at [`SEED`] under `rules`, with its kinematic tables, which a list needs.

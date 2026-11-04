@@ -879,7 +879,7 @@ const fn marks_rules() -> GalaxyRules {
     GalaxyRules {
         field_share: FieldShareRules::None,
         carve_out: CarveOutRules::Unclaimed,
-        ..GalaxyRules::every_26_hold_with_its_retargets()
+        ..GalaxyRules::every_27_hold()
     }
 }
 

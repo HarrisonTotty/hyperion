@@ -109,7 +109,7 @@ fn table_assessments() -> [(&'static str, HabitabilityInputs, HabitabilityAssess
 }
 
 /// The table's Earth, Mars and Venus under the rules at generator version 25 and under every 26
-/// hold (`with_every_26_hold_with_its_retargets`), each printed with its surface pressure: Earth `Temperate` with no
+/// hold (`with_every_27_hold`), each printed with its surface pressure: Earth `Temperate` with no
 /// limit, Mars a frozen `Marginal` desert, below water's triple point exactly where its pressure
 /// is, and Venus a dry `Hostile` runaway.
 #[test]

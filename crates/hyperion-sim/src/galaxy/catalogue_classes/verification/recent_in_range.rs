@@ -59,7 +59,7 @@ use crate::galaxy::query::{
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::{Layer, MemberSlot, SystemId, SystemIdKind};
 use crate::observe::{Drift, Trajectory};
-use crate::planetary::testing::{with_every_26_hold_with_its_retargets, with_every_27_hold};
+use crate::planetary::testing::with_every_27_hold;
 use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::system::SystemStars;
@@ -735,8 +735,8 @@ fn assert_no_faults(what: &str, inside: usize, faults: &[String]) {
 #[test]
 #[ignore = "slow: range queries about four features' lists at three times under every 26 hold"]
 fn every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold() {
-    with_every_26_hold_with_its_retargets(|| {
-        let galaxy = milky_way(GalaxyRules::every_26_hold_with_its_retargets());
+    with_every_27_hold(|| {
+        let galaxy = milky_way(GalaxyRules::every_27_hold());
         let asked = features_asked(&galaxy, Kind::Recent);
         with_served(&galaxy, |sources, reads| {
             assert_eq!(sources.len(), 1, "at 26 the features' members alone");
