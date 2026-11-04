@@ -2066,8 +2066,9 @@ pub(super) mod tests {
     }
 
     /// The digest of [`the_arc_comes_back_to_the_epoch_and_is_pinned`]'s states, blessed natively
-    /// on x86-64.
-    const ARC_PINNED_DIGEST: u64 = 0x209e_6db3_face_2cb6;
+    /// on x86-64. Re-pinned at 27's re-pin (it was `0x209e_6db3_face_2cb6`), the figure the train's
+    /// base already measured, no fold of 27 moving it.
+    const ARC_PINNED_DIGEST: u64 = 0xb072_5bb1_53a5_7171;
 
     /// The arc's fixed step count converges: over a stress set of orbits bound in Ψ from 10⁻³ to
     /// 100 ly, eccentricities to 0.999 and orbits unbound about the mass inside
@@ -2275,10 +2276,14 @@ pub(super) mod tests {
     }
 
     /// A barely bound orbit (P09.T28.d.c): the Milky Way fixture's rogue planet
-    /// `0xd00020003fff0ae4`, 2 ly out under every 27 hold and bound only at 8.3 × 10⁵ ly, a radial
-    /// period of 4 × 10⁹ yr, whose solve a century on [`ARC_STEPS`] leave 10⁻⁴ of the span off its
-    /// root, from a poor start in the series: the [`ARC_MORE_STEPS`] more solve it, so that its
-    /// state is the arc's and not the series', out of phase by some 0.08 ly there.
+    /// `0xd00020003fff0ae4`, 2 ly out under every 27 hold, slowed by 0.17%: bound only at 7.7 × 10⁵
+    /// ly, a radial period of some 3.6 × 10⁹ yr, whose solve a century on [`ARC_STEPS`] leave
+    /// 8.5 × 10⁻⁵ of the span off its root, 2.3 times what [`ARC_RESIDUAL`] allows, from a poor
+    /// start in the series: the [`ARC_MORE_STEPS`] more solve it, so that its state is the arc's
+    /// and not the series', out of phase by some 0.08 ly there. The rogue planet itself, bound at
+    /// 8.2 × 10⁵ ly (8.3 when pinned), is off by 1.35 × 10⁻⁵ of the span after [`ARC_STEPS`], a
+    /// third of what is allowed, already so at the train's base before 27's re-pin; slowed by 0.29%
+    /// to 0.08% its solve needs more steps, by up to 2.26 times the allowance at 0.17%.
     #[test]
     fn the_arc_solves_a_barely_bound_orbit_with_more_steps() {
         let galaxy = Galaxy::from_params_with_rules(
@@ -2291,7 +2296,13 @@ pub(super) mod tests {
         let id = SystemId::from_raw(0xd000_2000_3fff_0ae4).expect("a grid system's ID");
         let record =
             crate::galaxy::placement::resolve(&galaxy, id).expect("the rogue planet resolves");
-        let trajectory = Trajectory::new(&galaxy, EpochState::of_grid_record(&galaxy, &record));
+        let velocity = EpochState::of_grid_record(&galaxy, &record)
+            .velocity()
+            .metres_per_second()
+            .map(|v| v * 0.9983);
+        let start = EpochState::new(record, crate::coords::GalacticVelocity::new(velocity))
+            .expect("a finite state");
+        let trajectory = Trajectory::new(&galaxy, start);
         let exact = trajectory.exact_orbit().expect("on an exact orbit");
         let arc = exact.arc.as_ref().expect("on the arc");
         assert!(

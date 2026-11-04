@@ -1512,9 +1512,10 @@ mod tests {
     }
 
     /// From generator version 27 (beside the band-E draw's fix) a living class yields its expected
-    /// count. The continuous component's band-E living stars (8–16.5 M☉), 626 expected, live only
+    /// count. The continuous component's band-E living stars (8–16.5 M☉), 628 expected, live only
     /// in its first some 35 Myr of 150; drawn age by age, every candidate of the class keeps one,
-    /// and the class's members in every cell of band E are within the Poisson interval of its 626.
+    /// and the class's members in every cell of band E are within the Poisson interval of its 628.
+    /// Re-pinned at 27's re-pin from 626, a figure the train's base already measured as 628.2.
     #[test]
     fn a_centre_living_class_yields_its_expected_count_from_27() {
         /// The two-sided Poisson interval's half-width, in standard deviations.
@@ -1529,7 +1530,7 @@ mod tests {
                 c.band == MassBand::E && c.component == 3 && c.kind == CentreClassKind::Living
             })
             .expect("the continuous component's living band-E class");
-        assert_eq!(class.expected.round(), 626.0, "{class:?}");
+        assert_eq!(class.expected.round(), 628.0, "{class:?}");
         let placement = CentrePlacement::new(model);
         // The class's members in every cell, each candidate drawn whole only where it picks the
         // class (the other classes' remnants take most of the time).

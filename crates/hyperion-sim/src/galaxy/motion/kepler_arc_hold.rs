@@ -117,8 +117,12 @@ fn member(p: PointLy, velocity: [f64; 3]) -> EpochState {
 
 /// The digest (`f64_digest`) of the arc's positions in the D2 test: each record's cell and offsets
 /// that the arc moves off the series, at −1,000, −100, +100 and +1,000 yr, in walk order. Blessed
-/// natively on x86-64; the wasip1 suite compares it.
-const ARC_POSITIONS_DIGEST: u64 = 0x0921_95a6_2b91_b2fa;
+/// natively on x86-64; the wasip1 suite compares it. Re-pinned at 27's re-pin (it was
+/// `0x0921_95a6_2b91_b2fa`), with D2's counts, 3,296 records on the arc and 13,184 record-times
+/// (3,281 and 13,124 when pinned), as the train's base already measured them; it is now the
+/// version's own exact orbits' digest (`kepler_secular_hold`'s), the version's orbits taking the
+/// arc.
+const ARC_POSITIONS_DIGEST: u64 = 0x9ed7_a4e3_2ae5_44e1;
 
 /// D2 under every 27 hold: the arc from the epoch moves the fixture's Kepler-regime grid records
 /// on exact orbits off the series' positions ([`position_by_the_series`]), bit for bit their
@@ -186,7 +190,7 @@ fn the_arc_moves_records_on_exact_orbits_and_no_others_pinned() {
     );
     assert_eq!(
         (laws.get("arc").copied(), moved),
-        (Some(3_281), 13_124),
+        (Some(3_296), 13_184),
         "pin the counts as measured"
     );
     assert_eq!(
