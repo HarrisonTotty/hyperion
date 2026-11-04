@@ -180,8 +180,8 @@ export interface GeometrySettings {
    * projected at the cluster's own distance, is within the view's τ′, each vertex the stride drops
    * moved onto the coarser mesh by a distance morph of its own (`clusters/strides.ts`), and stride
    * 1 in the forced region. Read where `litClusters` is on; the overlay's depth then takes its own
-   * pass at stride 1, whatever `overlayDepth` says. `off` on both settings until its acceptance on
-   * the pod (the brief's ruling, 2026-11-02).
+   * pass at stride 1, whatever `overlayDepth` says. On each setting where its acceptance passes on
+   * the pod's seamless probe, else `off` (the brief's ruling, 2026-11-02): `measured` on low.
    */
   readonly strides: "off" | "measured";
   /**
@@ -442,7 +442,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       pageBytes: 32 * 2 ** 20,
       meshTolerancePx: { camera: 2, wireframeOccluder: 0.5 },
       finClusters: true,
-      strides: "off",
+      strides: "measured",
       occlusion: "off",
     },
     decoration: false,

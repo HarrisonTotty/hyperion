@@ -2517,7 +2517,9 @@ describe("the seamless probe over TERRAIN TEST", () => {
 describe.runIf(SLOW)("the seamless probe's acceptance (HYPERION_SLOW_TESTS=1)", () => {
   it.for(settingsPlayed())(
     "draws no collapse, jump or eviction of the selection on %s",
-    { timeout: 2 * 60 * 60 * 1000 },
+    // With the strides measured, every block whose bands a slew step of τ′ moves past a quarter of
+    // β's width draws twice through the morph's twin: about 3 h on high at β = 0.002.
+    { timeout: (STRIDED ? 5 : 2) * 60 * 60 * 1000 },
     async (setting, { task }) => {
       const played = await play({
         setting,

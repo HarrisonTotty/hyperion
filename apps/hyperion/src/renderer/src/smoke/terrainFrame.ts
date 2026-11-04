@@ -144,6 +144,13 @@ import { LaneHold, type LockstepStep, settleInLockstep } from "./lockstep";
 /** The passes' cache budget, 32 MiB: a few hundred lit slots, as the survey-edge check takes. */
 const CACHE_BYTES = 2 ** 25;
 
+/**
+ * The low setting's geometry with every cluster at stride 1 (R14.T3.c's `strides` off): the frames
+ * the lit mesh and the way back draw byte for byte, and the stride-1 side of the strides' own
+ * checks, whatever the setting draws.
+ */
+const LOW_AT_STRIDE_1: GeometrySettings = { ...SETTINGS.low.geometry, strides: "off" };
+
 /** How long the workers may take over the field, and a pass over its streaming, milliseconds. */
 const FIELD_TIMEOUT_MS = 60_000;
 const STREAM_TIMEOUT_MS = 90_000;
@@ -998,11 +1005,14 @@ export async function checkTerrainFrame(
         { label: bodies, draws: [...renderer.meshDraws(frame.plan), ...frame.terrainDraws] },
       ]);
     };
+    // At stride 1 (R14.T3.c's strides the setting may take draw coarser ground by design).
+    relief.setGeometry(LOW_AT_STRIDE_1);
+    const clusterPath = await reliefFrame();
     relief.setGeometry(GEOMETRY_BEFORE_R14);
     const unlevered = await reliefFrame();
-    relief.setGeometry(SETTINGS.low.geometry);
+    relief.setGeometry(LOW_AT_STRIDE_1);
     const levered = await reliefFrame();
-    const digests = [both, unlevered, levered].map((texels) => bytesDigest(texels));
+    const digests = [clusterPath, unlevered, levered].map((texels) => bytesDigest(texels));
     if (captures) {
       // The terrain alone for its mask, and the exposure fixed by the way back's brightest terrain.
       const alone = await drawn(engine, pose, [
@@ -1024,17 +1034,17 @@ export async function checkTerrainFrame(
     checks.check(
       "R14.T1.a the interior patches' draw, without fins, skirt heads or discard, draws the frame the lit mesh draws, byte for byte",
       withRelief.done && patches.interior > 0 && new Set(digests).size === 1,
-      `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: ${String(litTriangles)} lit triangles, ${(litTriangles / unleveredTriangles).toFixed(4)} of the lit mesh's ${String(unleveredTriangles)}; digests ${digests[0] ?? ""} on the cluster path, ${digests[1] ?? ""} by the way back, ${digests[2] ?? ""} on the path again`,
+      `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: ${String(litTriangles)} lit triangles, ${(litTriangles / unleveredTriangles).toFixed(4)} of the lit mesh's ${String(unleveredTriangles)}; digests ${digests[0] ?? ""} on the cluster path at stride 1, ${digests[1] ?? ""} by the way back, ${digests[2] ?? ""} on the path again`,
     );
 
     // R14.T2.a: the lit pass's interior patches through the cull's ordered camera pass, the
     // body's horizon and the stable compaction, against T1.a's interior mesh, from the same
     // selection and residents, in one run; its counters on, so that its triangles are counted.
     relief.measureClusters(true);
-    relief.setGeometry({ ...SETTINGS.low.geometry, litClusters: false });
+    relief.setGeometry({ ...LOW_AT_STRIDE_1, litClusters: false });
     const byMesh = await reliefFrame();
     // The edge patches by their lit mesh, as T2.a drew them (R14.T1.g is checked apart below).
-    relief.setGeometry({ ...SETTINGS.low.geometry, finClusters: false });
+    relief.setGeometry({ ...LOW_AT_STRIDE_1, finClusters: false });
     const byClusters = await reliefFrame();
     let litClusterTriangles: number | null = null;
     for (let round = 0; round < 8 && litClusterTriangles === null; round += 1) {
@@ -1082,8 +1092,8 @@ export async function checkTerrainFrame(
       return { texels, counts: relief.counts(VIEW), stats: relief.clusterStats(VIEW) };
     };
     relief.measureClusters(true);
-    const byLitMesh = await countedFrame({ ...SETTINGS.low.geometry, finClusters: false });
-    const byFins = await countedFrame(SETTINGS.low.geometry);
+    const byLitMesh = await countedFrame({ ...LOW_AT_STRIDE_1, finClusters: false });
+    const byFins = await countedFrame(LOW_AT_STRIDE_1);
     relief.measureClusters(false);
     const finTies = differingTexels(byLitMesh.texels, byFins.texels);
     const finPatches = byFins.counts?.patches ?? NO_DRAWN_PATCHES;
@@ -1120,7 +1130,7 @@ export async function checkTerrainFrame(
     // selection and residents, in one run; the counters on, so that its lit triangles are counted.
     // The frames differ where the strides draw coarser ground; the terrain alone, drawn both ways,
     // shows no crack.
-    const STRIDED: GeometrySettings = { ...SETTINGS.low.geometry, strides: "measured" };
+    const STRIDED: GeometrySettings = { ...LOW_AT_STRIDE_1, strides: "measured" };
     const atStride1 = byFins;
     relief.measureClusters(true);
     const strided = await countedFrame(STRIDED);
@@ -1134,9 +1144,9 @@ export async function checkTerrainFrame(
         },
       ]);
     };
-    const aloneAt1 = await terrainAloneBy(SETTINGS.low.geometry);
+    const aloneAt1 = await terrainAloneBy(LOW_AT_STRIDE_1);
     const aloneStrided = await terrainAloneBy(STRIDED);
-    relief.setGeometry(SETTINGS.low.geometry);
+    relief.setGeometry(LOW_AT_STRIDE_1);
     const cracks = cracksOf(aloneAt1, aloneStrided);
     const strideChanges = differingTexels(atStride1.texels, strided.texels);
     const strideStops = stopsApart(atStride1.texels, strided.texels, aloneAt1);
@@ -1166,9 +1176,9 @@ export async function checkTerrainFrame(
     // one run: from a frame whose visibility is dropped, whose first raster draws no terrain, and
     // from the next, which draws first what the one before saw; the counters on, so that each pass's
     // clusters are counted, and those the pyramid refused with them.
-    const OCCLUDED: GeometrySettings = { ...SETTINGS.low.geometry, occlusion: "hzb" };
+    const OCCLUDED: GeometrySettings = { ...LOW_AT_STRIDE_1, occlusion: "hzb" };
     relief.measureClusters(true);
-    const oneRaster = await countedFrame(SETTINGS.low.geometry);
+    const oneRaster = await countedFrame(LOW_AT_STRIDE_1);
     relief.setGeometry(OCCLUDED);
     const pyramidKernel = await engine.createComputeAsync(DEPTH_PYRAMID_KERNEL);
     const pyramid = new DepthPyramid(engine, pyramidKernel, "terrain frame smoke");
@@ -1200,7 +1210,7 @@ export async function checkTerrainFrame(
       pyramid.dispose();
       engine.releaseCompute(pyramidKernel);
       relief.measureClusters(false);
-      relief.setGeometry(SETTINGS.low.geometry);
+      relief.setGeometry(LOW_AT_STRIDE_1);
     }
     const firstTies = differingTexels(oneRaster.texels, firstOccluded);
     const nextTies = differingTexels(oneRaster.texels, nextOccluded);
@@ -1244,7 +1254,7 @@ export async function checkTerrainFrame(
           { label: bodies, draws: [...renderer.meshDraws(frame.plan), ...frame.terrainDraws] },
         ]);
       };
-      const asked = bytesDigest(await frameBy(SETTINGS.low.geometry));
+      const asked = bytesDigest(await frameBy(LOW_AT_STRIDE_1));
       const back = bytesDigest(await frameBy(GEOMETRY_BEFORE_R14));
       const refusal = refused.clusterRefusal ?? "none";
       checks.check(
@@ -1411,13 +1421,13 @@ export async function checkTerrainFrame(
       const prints: string[] = [];
       try {
         for (const overlayDepth of modes) {
-          pass.setGeometry({ ...SETTINGS.low.geometry, overlayDepth });
+          pass.setGeometry({ ...LOW_AT_STRIDE_1, overlayDepth });
           // Each mode's frame is read back before the next is drawn.
           // oxlint-disable-next-line no-await-in-loop
           prints.push((await draw()).digest);
         }
       } finally {
-        pass.setGeometry(SETTINGS.low.geometry);
+        pass.setGeometry(LOW_AT_STRIDE_1);
       }
       overlays.push([name, prints]);
     };
@@ -1493,10 +1503,10 @@ export async function checkTerrainFrame(
 
     // R14.T3.c: no mark's visibility changes with the camera's strides, the overlay's depth its own
     // pass at stride 1: the marks under and over the ground, and the datum's lines, as at stride 1.
-    relief.setGeometry({ ...SETTINGS.low.geometry, strides: "measured" });
+    relief.setGeometry({ ...LOW_AT_STRIDE_1, strides: "measured" });
     const stridedMarks = await drawFrame(list, { withDepth: true, giveWay: true }, marksAt);
     const stridedLines = await drawFrame(datumList, { withDepth: true, giveWay: true }, linesAt);
-    relief.setGeometry(SETTINGS.low.geometry);
+    relief.setGeometry(LOW_AT_STRIDE_1);
     checks.check(
       "R14.T3.c over the image every mark is shown or hidden with the camera's strides as at stride 1",
       sameShown(stridedMarks.shown, withDepth.shown) &&
@@ -1778,7 +1788,7 @@ export async function checkStridesUnderCraft(engine: RenderEngine, checks: Check
       throw new Error("the workers did not take the fixture's blocks in time");
     }
     const bodies = PHOTOREAL_PASS_LABELS.bodies;
-    const STRIDED: GeometrySettings = { ...SETTINGS.low.geometry, strides: "measured" };
+    const STRIDED: GeometrySettings = { ...LOW_AT_STRIDE_1, strides: "measured" };
     // R14.T3.c (Design note 10): a craft of 20 m grounded on the surveyed column, seen from 1.5 km
     // over it at 70° below the horizon through a field of 8°, every patch it sees its own bake.
     // Its ground with the camera's strides is the stride-1 ground, byte for byte, at every pixel
@@ -1808,7 +1818,7 @@ export async function checkStridesUnderCraft(engine: RenderEngine, checks: Check
         { label: bodies, draws: [...renderer.meshDraws(frame.plan), ...frame.terrainDraws] },
       ]);
     };
-    const groundAt1 = await groundFrameBy(SETTINGS.low.geometry);
+    const groundAt1 = await groundFrameBy(LOW_AT_STRIDE_1);
     const groundStrided = await groundFrameBy(STRIDED);
     const heldM = heldRadiusM(craft, finestPatchSizeM(groundPass.planet));
     const craftRadiusM = norm(craft.positionM);
