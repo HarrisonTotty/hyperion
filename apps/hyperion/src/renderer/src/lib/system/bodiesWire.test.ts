@@ -1267,19 +1267,22 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       "NH3",
     ]);
     expect(envelope.adiabat[0]?.pressurePa).toBe(envelope.joinPressurePa);
+    // Generator version 27's record: κ₁ 2.92 × 10⁻³ m² kg⁻¹, refitted at the giants' own Bond
+    // albedos (P14.T24.h.b; 2.87 × 10⁻³ before).
     expect([
       envelope.profile.thermalOpacityM2PerKg,
       envelope.profile.opticalDepthExponent,
       envelope.profile.opacityRatio,
       envelope.profile.redistributionFactor,
-    ]).toEqual([0.00287, 2, 0.4, 0.25]);
-    // One inventory (R08's C1): the deck modes, each naming a listed deck, then the hazes.
+    ]).toEqual([0.00292, 2, 0.4, 0.25]);
+    // One inventory (R08's C1): the deck modes, each naming a listed deck, then the hazes. From 27
+    // two name the NH₃ deck, its cloud's haze the second (P14.T24.h.b part 6).
     expect(envelope.aerosols.modes.map((mode) => [mode.material, mode.deck])).toEqual([
       ...wire.decks.map((mode) => [mode.material, mode.deck]),
       ...wire.hazes.map((haze) => [haze.material, null]),
     ]);
     expect(envelope.aerosols.decks.map((deck) => deck.condensate)).toContain("NH3");
-    expect(envelope.aerosols.modes.some((mode) => mode.deck === "NH3")).toBe(true);
+    expect(envelope.aerosols.modes.filter((mode) => mode.deck === "NH3")).toHaveLength(2);
     expect(envelope.aerosols.modes.at(-1)).toMatchObject({ material: "chromophore", deck: null });
     expect(envelope.aerosols.notFormed.map((entry) => entry.condensate)).toContain("SiO2");
   });
