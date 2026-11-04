@@ -477,9 +477,10 @@ pub fn kind_reach(kind: TransientKind, sensor: &SensorHorizon) -> LightYears {
 /// assert!((11_150.0..11_250.0).contains(&ia));
 /// let collapse = class_reach(ClassId::CORE_COLLAPSE, &sensor).value();
 /// assert!((4_390.0..4_440.0).contains(&collapse));
-/// // A nova on the heaviest white dwarf peaks at 3.26 × 10³¹ W in V: some 170 ly.
+/// // A nova on the heaviest white dwarf, from 27 the fitted samplers' 1.38 M☉, peaks at
+/// // 3.46 × 10³¹ W in V: some 175 ly.
 /// let novae = class_reach(ClassId::ACCRETING_WHITE_DWARF, &sensor).value();
-/// assert!((169.0..171.0).contains(&novae));
+/// assert!((174.0..176.0).contains(&novae), "{novae}");
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]
