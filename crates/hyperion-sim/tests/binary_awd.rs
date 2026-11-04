@@ -52,8 +52,10 @@ fn processes(galaxy: &Galaxy) -> [AwdProcess; 2] {
     [AwdSide::Fast, AwdSide::Slow].map(|side| AwdProcess::new(galaxy, side))
 }
 
-/// The density of both classes' hosts at the Sun-like point, as the scratch share rows give it:
-/// 6.48 × 10⁻⁶ pc⁻³, 1.35 times Pala et al.'s figure, outside its 30% (a finding).
+/// The density of both classes' hosts at the Sun-like point, as the fitted rows give it
+/// (P15.T10.b's refit at 27, each donor kind scaled to its observed figure): 5.28 × 10⁻⁶ pc⁻³,
+/// 1.10 times Pala et al.'s figure, inside its 30% (the scratch share rows' 6.48 × 10⁻⁶, 1.35
+/// times it, missed).
 #[test]
 fn the_local_density_at_the_sun_like_point() {
     let galaxy = milky_way();
@@ -67,7 +69,8 @@ fn the_local_density_at_the_sun_like_point() {
         * LIGHT_YEARS_PER_PARSEC;
     let ratio = density / PALA_DENSITY;
     println!("{density:e} pc^-3 at the Sun-like point: {ratio:.4} of Pala et al.'s");
-    assert!((ratio - 1.350_381).abs() < 1e-5, "{ratio}");
+    assert!((ratio - 1.0).abs() < 0.3, "{ratio}");
+    assert!((ratio - 1.099_765).abs() < 1e-5, "{ratio}");
 }
 
 /// The galaxy's expected hosts, both classes, over ten Milky Way seeds (research-leans-10's reading

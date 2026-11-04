@@ -7,7 +7,6 @@
 
 use std::sync::OnceLock;
 
-use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::order::assert_order_independent;
@@ -95,8 +94,12 @@ fn all_entries() -> impl Iterator<Item = &'static CatalogueEntry<AwdEntry>> {
 
 // 1. The share rows and the bounds.
 
-/// Each class holds its share row's hosts: at the Milky Way fixture its components' expected hosts
-/// are the row's 4.5 × 10⁶, and both classes' recurrence ranks split [0, 1] at L, in halves.
+/// Each class and the features' lists together hold its share row's hosts, the catalogue all but
+/// the features' share (P11.T8.f): at the Milky Way fixture the fitted rows (P15.T10.b's refit at
+/// 27) give the fast class 0.47 × 10⁶ and the slow 7.6 × 10⁶ ([`PINNED_ROW_HOSTS`]), together
+/// inside the brainstorm's 6–12 × 10⁶ (the scratch rows' 4.5 × 10⁶ each); and each class draws
+/// over all its recurrence ranks, [0, 1], from its own fitted sampler, whose recurrence lies all on
+/// its side of L (the scratch classes shared one sampler, split at L in halves).
 #[test]
 fn each_class_holds_its_share_row_s_hosts() {
     let galaxy = galaxy();
@@ -109,20 +112,63 @@ fn each_class_holds_its_share_row_s_hosts() {
     assert!((formed / MILKY_WAY_FORMED_MASS - 1.0).abs() < 1e-9);
     let fast = AwdProcess::new(galaxy, AwdSide::Fast);
     let slow = AwdProcess::new(galaxy, AwdSide::Slow);
-    for process in [&fast, &slow] {
+    let mut rows = [0.0; 2];
+    for (k, (side, process)) in [(AwdSide::Fast, &fast), (AwdSide::Slow, &slow)]
+        .into_iter()
+        .enumerate()
+    {
+        let row = CLASS_SHARES.row(side.carved());
+        let fields = galaxy.fields();
+        // The row's hosts, before the features' lists take their share.
+        let by_row: f64 = process
+            .components()
+            .iter()
+            .map(|c| {
+                let component = fields.component(c.id());
+                row.hosts_per_formed_mass(component.population())
+                    * galaxy.mean_formed_mass().value()
+                    * component.ages().born_fraction()
+                    * component.count_with_unborn()
+            })
+            .sum();
+        let kept: f64 = process
+            .components()
+            .iter()
+            .map(|c| {
+                let component = fields.component(c.id());
+                c.hosts_per_system() * component.count_with_unborn()
+                    / catalogue_share(galaxy, row, component)
+            })
+            .sum();
         let hosts = process.expected_hosts(galaxy);
-        assert!((hosts / 4.5e6 - 1.0).abs() < 1e-9, "{hosts}");
+        println!(
+            "{side:?}: the row's {by_row:.6e} hosts, the catalogue's {hosts:.6e} ({:.4} of them)",
+            hosts / by_row
+        );
+        assert!(
+            (kept / by_row - 1.0).abs() < 1e-9,
+            "{side:?}: {kept} {by_row}"
+        );
+        assert!(hosts < by_row && hosts > 0.9 * by_row, "{side:?}: {hosts}");
+        rows[k] = by_row;
         assert_eq!(
             process.components().len(),
             galaxy.fields().components().len()
         );
     }
-    let (lo, split) = fast.recurrence_ranks();
-    let (split_again, hi) = slow.recurrence_ranks();
-    assert_eq!((lo, hi), (0.0, 1.0));
-    assert_same_bits(split, split_again);
-    assert!((split - 0.5).abs() < 1e-12, "{split}");
+    println!("the rows' hosts {rows:?}");
+    for (hosts, pinned) in rows.iter().zip(PINNED_ROW_HOSTS) {
+        assert!((hosts / pinned - 1.0).abs() < 1e-9, "{rows:?}");
+    }
+    assert!((6.0e6..=12.0e6).contains(&(rows[0] + rows[1])), "{rows:?}");
+    for process in [&fast, &slow] {
+        assert_eq!(process.recurrence_ranks(), (0.0, 1.0));
+    }
 }
+
+/// The fitted rows' hosts at the Milky Way fixture, fast then slow, before the features' share, as
+/// measured at 27: 4.70 × 10⁵ and 7.58 × 10⁶, 8.05 × 10⁶ together.
+const PINNED_ROW_HOSTS: [f64; 2] = [469_811.164_015_661_7, 7_577_577.927_368_357];
 
 /// A cell's bound holds the class's intensity at every point tried in it, in the disc and at the
 /// centre, and the centre's cell, the fullest, leaves the index its headroom.
@@ -187,13 +233,20 @@ fn no_fitted_white_dwarf_reaches_the_chandrasekhar_mass() {
 // 2. The entries.
 
 /// The sample cells hold entries of both classes, and each resolves by its ID to itself, through
-/// the class's process, the production lookup and plan 03's resolve.
+/// the class's process, the production lookup and plan 03's resolve. The fitted fast row gives the
+/// solar circle a tenth of the scratch row's hosts (P15.T10.b's refit at 27), so the sample holds
+/// a dozen fast hosts and under two hundred slow ones.
 #[test]
 fn entries_resolve_to_themselves() {
     let galaxy = galaxy();
     for side in [AwdSide::Fast, AwdSide::Slow] {
         let entries: Vec<_> = sample_entries(side).iter().flat_map(|(_, e)| e).collect();
-        assert!(entries.len() > 50, "{side:?}: {}", entries.len());
+        println!("{side:?}: {} entries", entries.len());
+        let least = match side {
+            AwdSide::Fast => 10,
+            AwdSide::Slow => 50,
+        };
+        assert!(entries.len() >= least, "{side:?}: {}", entries.len());
         for entry in entries {
             let member = match side {
                 AwdSide::Fast => {
@@ -360,7 +413,7 @@ fn cells_do_not_depend_on_order() {
 
 /// An entry's stars are its pair: two stars, whose states at the epoch are the marked white dwarf
 /// and donor, on the marked orbit, the pair of its class; plan 03's resolve and `system_of` give
-/// the same stars; and its record is counted in layer C or D.
+/// the same stars; and its record is counted in layer C, D or E (`the_hosts_layers_against_the_share_rows`).
 #[test]
 fn an_entry_s_stars_are_its_pair() {
     let galaxy = galaxy();
@@ -382,7 +435,7 @@ fn an_entry_s_stars_are_its_pair() {
         assert_eq!(system.stars(galaxy), Some(stars));
         assert!(matches!(
             value.record().layer(),
-            crate::id::Layer::C | crate::id::Layer::D
+            crate::id::Layer::C | crate::id::Layer::D | crate::id::Layer::E
         ));
     }
 }
@@ -409,30 +462,32 @@ fn hosts_stay_within_the_reach() {
     }
 }
 
-/// The hosts' primaries by layer, against the share rows' C 0.75 and D 0.25: the history's
-/// initial–final mass relation puts most in D, so the catalogue's layers and the field's do not
-/// agree band by band (a finding; the populations' totals do). Pinned as measured over the sample
-/// cells.
+/// The hosts' primaries by layer, against the fitted rows' (P15.T10.b's refit at 27): fast C
+/// 0.108, D 0.868 and E 0.024, slow C 0.378, D 0.608 and E 0.014, the engine's members whose
+/// primary of 8 M☉ or more left a white dwarf in the pair among them (the scratch rows' C 0.75 and D
+/// 0.25 alone). Pinned as measured over the sample cells.
 #[test]
 fn the_hosts_layers_against_the_share_rows() {
-    let mut counts = [0_u32; 2];
+    let mut counts = [0_u32; 3];
     for entry in all_entries() {
         match entry.value().record().layer() {
             crate::id::Layer::C => counts[0] += 1,
             crate::id::Layer::D => counts[1] += 1,
+            crate::id::Layer::E => counts[2] += 1,
             other => panic!("a host's primary in layer {other:?}"),
         }
     }
-    let share_d = f64::from(counts[1]) / f64::from(counts[0] + counts[1]);
+    let all = f64::from(counts.iter().sum::<u32>());
     println!(
-        "layer C {}, layer D {}: {share_d:.3} in D",
-        counts[0], counts[1]
+        "layers C, D and E {counts:?}: {:.3} in D, {:.3} in E",
+        f64::from(counts[1]) / all,
+        f64::from(counts[2]) / all
     );
     assert_eq!(counts, PINNED_LAYER_COUNTS);
 }
 
-/// The sample cells' hosts in layers C and D, as measured.
-const PINNED_LAYER_COUNTS: [u32; 2] = [29, 207];
+/// The sample cells' hosts in layers C, D and E, as measured at 27.
+const PINNED_LAYER_COUNTS: [u32; 3] = [57, 137, 2];
 
 // 4. Pins.
 
@@ -463,12 +518,17 @@ fn a_slow_host_s_eruptions_are_pinned() {
 /// The pinned slow host's ID.
 const PINNED_HOST: u64 = 0xfc87_db28_0000_0000;
 
-/// Its eruptions: seconds and nanoseconds from the epoch.
-const PINNED_ERUPTIONS: [(i64, u32); 1] = [(-58_087_627_229, 73_828_613)];
+/// Its eruptions: seconds and nanoseconds from the epoch, re-measured at 27, whose fitted slow
+/// sampler (P15.T10.b's refit on train 27's engine) gives the same host another recurrence, 7.9 ×
+/// 10⁵ years.
+const PINNED_ERUPTIONS: [(i64, u32); 1] = [(-135_777_676_293, 837_959_313)];
 
-/// The local density of both classes' hosts at the Sun-like point (the plan's test against Pala et
-/// al. 2020, 4.8 × 10⁻⁶ pc⁻³ within 30%), pinned as the scratch share rows give it, with the
-/// fixture's total of 9 × 10⁶: the density misses (a finding, `CLASS_SHARES` is not retuned).
+/// The local density of both classes' hosts at the Sun-like point, the plan's test against Pala et
+/// al. 2020, 4.8 × 10⁻⁶ pc⁻³ within 30%, and the fixture's catalogue total, pinned as the fitted
+/// rows give them (P15.T10.b's refit at 27, each donor kind scaled to its observed figure): the
+/// density 5.28 × 10⁻⁶, 1.10 of Pala et al.'s, now within its 30% (the scratch rows' 6.48 × 10⁻⁶
+/// missed it), and the catalogue's 8.02 × 10⁶ hosts, the features' lists holding the rest of the
+/// rows' (the scratch rows' 9 × 10⁶ in all).
 #[test]
 fn the_local_density_and_the_milky_way_s_total() {
     let galaxy = galaxy();
@@ -492,15 +552,22 @@ fn the_local_density_and_the_milky_way_s_total() {
         "{density:e} pc^-3 at the Sun-like point, {:.3} of Pala et al.'s 4.8e-6; {total:e} hosts",
         density / 4.8e-6
     );
-    assert!((total / 9.0e6 - 1.0).abs() < 1e-9, "{total}");
+    assert!((density / 4.8e-6 - 1.0).abs() < 0.3, "{density}");
+    assert!(
+        (total / PINNED_CATALOGUE_HOSTS - 1.0).abs() < 1e-9,
+        "{total}"
+    );
     assert!(
         (density / PINNED_LOCAL_DENSITY - 1.0).abs() < 1e-6,
         "{density}"
     );
 }
 
-/// The local density as the scratch rows give it, pc⁻³.
-const PINNED_LOCAL_DENSITY: f64 = 6.481_830_498e-6;
+/// The local density as the fitted rows give it, pc⁻³, as measured at 27.
+const PINNED_LOCAL_DENSITY: f64 = 5.278_873_005e-6;
+
+/// The fixture's catalogue hosts of both classes as the fitted rows give them, as measured at 27.
+const PINNED_CATALOGUE_HOSTS: f64 = 8_024_980.865_231_913;
 
 /// The first two sample cells of each class pinned: each cell's bound, candidates and entries, and
 /// each entry's scan marks, binary and history.

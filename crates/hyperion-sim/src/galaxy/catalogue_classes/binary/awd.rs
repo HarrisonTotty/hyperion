@@ -57,9 +57,9 @@
 //! An entry has one member, its system, at its site at the epoch and moving at its velocity on a
 //! straight line: over the source horizon, L + 2H, a host below 4,600 km/s stays within plan 09's
 //! 4,096 ly reach of its cell. Its record is a catalogue system's, counted in its primary's
-//! layer, C or D; its stars are the pair: each star's own model at its initial mass and the
-//! system's age, and the pair's timeline, which gives both stars' states
-//! ([`AwdEntry::stars`]).
+//! layer, C or D, or E for the few whose fitted primary is of 8 M☉ or more; its stars are the
+//! pair: each star's own model at its initial mass and the system's age, and the pair's
+//! timeline, which gives both stars' states ([`AwdEntry::stars`]).
 
 use super::super::grid::{CatalogueMember, ClassProcess, site_stream};
 use super::super::ids::CatalogueCellKey;
