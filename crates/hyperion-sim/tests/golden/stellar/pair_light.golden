@@ -1896,7 +1896,8 @@ query 016: 17.116097 + 9.958898 M☉, periastron 1.411935e0 R☉, age 1.674294e5
 query 016: M_V = 0xc017666666666666  # -5.85
 query 017: 2.867230 + 0.282679 M☉, periastron 2.291779e0 R☉, age 1.017182e9 yr, [Fe/H] -0.3543: Some(Bright(Magnitudes(-6.4)))
 query 017: M_V = 0xc01999999999999a  # -6.4
-query 018: 22.131561 + 0.111733 M☉, periastron 8.033167e0 R☉, age 2.999941e8 yr, [Fe/H] 0.2453: None
+query 018: 22.131561 + 0.111733 M☉, periastron 8.033167e0 R☉, age 2.999941e8 yr, [Fe/H] 0.2453: Some(Bright(Magnitudes(-7.74)))
+query 018: M_V = 0xc01ef5c28f5c28f6  # -7.74
 query 019: 8.142097 + 0.368421 M☉, periastron 2.844061e4 R☉, age 3.120938e7 yr, [Fe/H] -2.4677: Some(Detached)
 query 020: 2.087654 + 0.318066 M☉, periastron 4.953896e2 R☉, age 6.731220e9 yr, [Fe/H] -2.3107: Some(Bright(Magnitudes(-5.29)))
 query 020: M_V = 0xc01528f5c28f5c29  # -5.29
@@ -1944,8 +1945,8 @@ query 049: 3.587550 + 1.549876 M☉, periastron 8.009711e3 R☉, age 1.618513e6 
 query 050: 7.952385 + 4.839288 M☉, periastron 1.722229e1 R☉, age 6.242490e9 yr, [Fe/H] 0.2042: Some(Bright(Magnitudes(1.8)))
 query 050: M_V = 0x3ffccccccccccccd  # 1.8
 query 051: 17.617752 + 1.284439 M☉, periastron 6.434010e2 R☉, age 6.301950e5 yr, [Fe/H] -1.1682: Some(Detached)
-query 052: 148.923150 + 0.182759 M☉, periastron 4.155388e0 R☉, age 6.357552e9 yr, [Fe/H] -2.2137: Some(Bright(Magnitudes(-7.06)))
-query 052: M_V = 0xc01c3d70a3d70a3d  # -7.06
+query 052: 148.923150 + 0.182759 M☉, periastron 4.155388e0 R☉, age 6.357552e9 yr, [Fe/H] -2.2137: Some(Bright(Magnitudes(-4.87)))
+query 052: M_V = 0xc0137ae147ae147b  # -4.87
 query 053: 3.387583 + 0.111165 M☉, periastron 1.938043e4 R☉, age 2.926207e7 yr, [Fe/H] -1.8970: Some(Detached)
 query 054: 0.141535 + 0.080400 M☉, periastron 1.834482e1 R☉, age 5.165157e8 yr, [Fe/H] -0.1416: Some(Detached)
 query 055: 4.732263 + 0.995582 M☉, periastron 9.359218e0 R☉, age 2.055960e6 yr, [Fe/H] -2.2258: Some(Bright(Magnitudes(-1.93)))
@@ -1981,8 +1982,8 @@ query 072: M_V = 0xc02251eb851eb852  # -9.16
 query 073: 4.213928 + 0.801077 M☉, periastron 1.128261e0 R☉, age 1.381777e7 yr, [Fe/H] -0.1254: Some(Bright(Magnitudes(-1.86)))
 query 073: M_V = 0xbffdc28f5c28f5c3  # -1.86
 query 074: 2.512602 + 0.177632 M☉, periastron 7.359021e2 R☉, age 7.791177e7 yr, [Fe/H] -0.1376: Some(Detached)
-query 075: 23.857104 + 0.130583 M☉, periastron 3.764790e0 R☉, age 8.929569e9 yr, [Fe/H] -0.8132: Some(Bright(Magnitudes(-5.15)))
-query 075: M_V = 0xc01499999999999a  # -5.15
+query 075: 23.857104 + 0.130583 M☉, periastron 3.764790e0 R☉, age 8.929569e9 yr, [Fe/H] -0.8132: Some(Bright(Magnitudes(-3.86)))
+query 075: M_V = 0xc00ee147ae147ae1  # -3.86
 query 076: 36.451785 + 1.375827 M☉, periastron 7.017237e0 R☉, age 6.690195e8 yr, [Fe/H] 0.2939: Some(Bright(Magnitudes(-5.73)))
 query 076: M_V = 0xc016eb851eb851ec  # -5.73
 query 077: 76.155226 + 2.608270 M☉, periastron 1.405841e3 R☉, age 5.270163e5 yr, [Fe/H] -2.4261: Some(Bright(Magnitudes(10.64)))
@@ -2068,7 +2069,8 @@ query 137: 55.865269 + 13.076058 M☉, periastron 1.892190e4 R☉, age 4.300091e
 query 137: M_V = 0xc024eb851eb851ec  # -10.46
 query 138: 10.443444 + 10.292857 M☉, periastron 1.484047e3 R☉, age 1.409231e5 yr, [Fe/H] -0.1832: Some(Detached)
 query 139: 0.394171 + 0.090270 M☉, periastron 1.598406e3 R☉, age 1.284784e6 yr, [Fe/H] -1.5087: Some(Detached)
-query 140: 13.593546 + 0.909318 M☉, periastron 3.858575e0 R☉, age 2.232182e9 yr, [Fe/H] -2.1567: None
+query 140: 13.593546 + 0.909318 M☉, periastron 3.858575e0 R☉, age 2.232182e9 yr, [Fe/H] -2.1567: Some(Bright(Magnitudes(-5.9)))
+query 140: M_V = 0xc01799999999999a  # -5.9
 query 141: 0.474423 + 0.158509 M☉, periastron 7.323514e4 R☉, age 7.278786e7 yr, [Fe/H] -1.2911: Some(Detached)
 query 142: 2.407123 + 0.228945 M☉, periastron 3.229162e2 R☉, age 1.082795e10 yr, [Fe/H] -1.2167: Some(Bright(Magnitudes(-1.51)))
 query 142: M_V = 0xbff828f5c28f5c29  # -1.51
@@ -2117,8 +2119,8 @@ query 171: M_V = 0xc004cccccccccccd  # -2.6
 query 172: 0.264760 + 0.084196 M☉, periastron 2.824707e2 R☉, age 8.844026e7 yr, [Fe/H] -0.0653: Some(Detached)
 query 173: 3.110100 + 0.466205 M☉, periastron 1.171884e0 R☉, age 6.867446e9 yr, [Fe/H] -1.5801: Some(Bright(Magnitudes(-7.41)))
 query 173: M_V = 0xc01da3d70a3d70a4  # -7.41
-query 174: 56.518734 + 29.700546 M☉, periastron 9.762031e0 R☉, age 4.503329e6 yr, [Fe/H] -0.7452: Some(Bright(Magnitudes(-10.78)))
-query 174: M_V = 0xc0258f5c28f5c28f  # -10.78
+query 174: 56.518734 + 29.700546 M☉, periastron 9.762031e0 R☉, age 4.503329e6 yr, [Fe/H] -0.7452: Some(Bright(Magnitudes(-10.7)))
+query 174: M_V = 0xc025666666666666  # -10.7
 query 175: 1.510492 + 0.422879 M☉, periastron 6.288274e1 R☉, age 9.766713e6 yr, [Fe/H] -2.1786: Some(Detached)
 query 176: 1.632498 + 1.133867 M☉, periastron 9.568353e2 R☉, age 3.024438e5 yr, [Fe/H] -0.3848: Some(Detached)
 query 177: 0.526696 + 0.310262 M☉, periastron 6.805636e1 R☉, age 6.325782e7 yr, [Fe/H] -2.3307: Some(Detached)

@@ -30,7 +30,7 @@
           "layer": "a",
           "mass_min_msun": 0.08,
           "mass_max_msun": 0.5,
-          "expected": 795.0944511591467,
+          "expected": 795.0944511591562,
           "returned": 0,
           "status": "over_limit"
         },
@@ -38,7 +38,7 @@
           "layer": "b",
           "mass_min_msun": 0.5,
           "mass_max_msun": 0.75,
-          "expected": 140.49015850194547,
+          "expected": 140.49015850195488,
           "returned": 0,
           "status": "over_limit"
         },
@@ -46,7 +46,7 @@
           "layer": "c",
           "mass_min_msun": 0.75,
           "mass_max_msun": 2.5,
-          "expected": 197.7851447122355,
+          "expected": 197.78514423080196,
           "returned": 0,
           "status": "over_limit"
         },
@@ -54,7 +54,7 @@
           "layer": "d",
           "mass_min_msun": 2.5,
           "mass_max_msun": 8.0,
-          "expected": 39.18878684838455,
+          "expected": 39.18878720804958,
           "returned": 41,
           "status": "included"
         },
@@ -62,7 +62,7 @@
           "layer": "e",
           "mass_min_msun": 8.0,
           "mass_max_msun": 150.0,
-          "expected": 7.921644466235227,
+          "expected": 7.921644373937394,
           "returned": 3,
           "status": "included"
         }

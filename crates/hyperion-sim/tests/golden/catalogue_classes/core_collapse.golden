@@ -1,12 +1,12 @@
 # generator_version = 27
-component 0 share = 0x3f6f052c0067d399  # 0.00378664583262851
+component 0 share = 0x3f6f052c00444263  # 0.0037866458316176284
 component 0 deaths per system = 0x3fa200b231e50656  # 0.03516156062188418
-component 9 share = 0x3f835f6618330798  # 0.009459302533631406
+component 9 share = 0x3f835f6617541e36  # 0.009459302508289285
 component 9 deaths per system = 0x3f2675edf514b975  # 0.0001713612532880483
-component 10 share = 0x3f835f6618330798  # 0.009459302533631406
+component 10 share = 0x3f835f6617541e36  # 0.009459302508289285
 component 10 deaths per system = 0x3f2675edf514b975  # 0.0001713612532880483
 interval (T-108123548290157.640625000 s, T+31557600000.000000000 s]
-cell [0, 8, 0] bound = 0x3e7f447cc8027958  # 1.1648062248285386e-7
+cell [0, 8, 0] bound = 0x3e7f447cc7e86197  # 1.1648062246022197e-7
 cell [0, 8, 0] candidates 17 entries 1
 cell [0, 8, 0] fc08088800000050 component 0 explodes T-39049896688648.687500000 s as CoreCollapse(IIP)
 cell [0, 8, 0] fc08088800000050 window = 0x41300d1d50d8a381  # 1051933.315805644
@@ -29,7 +29,7 @@ cell [0, 8, 0] fc08088800000050 velocity before 2 = 0xc0c402e2ff1c06c5  # -10245
 cell [0, 8, 0] fc08088800000050 velocity after 0 = 0xc10d07290ca1e34d  # -237797.13116815165
 cell [0, 8, 0] fc08088800000050 velocity after 1 = 0xc108fa4e6e9fd254  # -204617.804015773
 cell [0, 8, 0] fc08088800000050 velocity after 2 = 0x40c0a9088b72aba5  # 8530.066755613147
-cell [0, 9, 0] bound = 0x3e7f4f323648831d  # 1.166364547796063e-7
+cell [0, 9, 0] bound = 0x3e7f4f32362e705b  # 1.1663645475699134e-7
 cell [0, 9, 0] candidates 20 entries 1
 cell [0, 9, 0] fc080898000000a0 component 0 explodes T-25327634661479.941406250 s as CoreCollapse(IIL)
 cell [0, 9, 0] fc080898000000a0 window = 0x412c60d80455f3f4  # 929900.0084682689
@@ -52,7 +52,7 @@ cell [0, 9, 0] fc080898000000a0 velocity before 2 = 0x40dab2cc58652679  # 27339.
 cell [0, 9, 0] fc080898000000a0 velocity after 0 = 0xc11019ebc30681c9  # -263802.94045450963
 cell [0, 9, 0] fc080898000000a0 velocity after 1 = 0x41275fe84f435b16  # 765940.154810759
 cell [0, 9, 0] fc080898000000a0 velocity after 2 = 0xc103b6ef92fa2a4e  # -161501.94676621485
-cell [0, 10, 0] bound = 0x3e7efaa75cfa7e89  # 1.154062012572717e-7
+cell [0, 10, 0] bound = 0x3e7efaa75ce0ae80  # 1.154062012348828e-7
 cell [0, 10, 0] candidates 10 entries 1
 cell [0, 10, 0] fc0808a800000020 component 0 explodes T-11984000604747.521484375 s as CoreCollapse(IIP)
 cell [0, 10, 0] fc0808a800000020 window = 0x412ed1705b831a16  # 1009848.1787346031
@@ -75,7 +75,7 @@ cell [0, 10, 0] fc0808a800000020 velocity before 2 = 0xc0cc2a066d6dfc1e  # -1442
 cell [0, 10, 0] fc0808a800000020 velocity after 0 = 0xc11788c6ec2305b8  # -385585.7306023496
 cell [0, 10, 0] fc0808a800000020 velocity after 1 = 0x40d1de6e3d9630fc  # 18297.72250895294
 cell [0, 10, 0] fc0808a800000020 velocity after 2 = 0xc0df3959626def56  # -31973.396632655837
-cell [0, 11, 0] bound = 0x3e7e6750c5e85d74  # 1.132621476402198e-7
+cell [0, 11, 0] bound = 0x3e7e6750c5cf04a0  # 1.1326214761823479e-7
 cell [0, 11, 0] candidates 15 entries 1
 cell [0, 11, 0] fc0808b8000000d0 component 0 explodes T-5902145353708.644531250 s as CoreCollapse(IIb)
 cell [0, 11, 0] fc0808b8000000d0 window = 0x4129978541747d47  # 838594.6278418683
@@ -98,7 +98,7 @@ cell [0, 11, 0] fc0808b8000000d0 velocity before 2 = 0x40c0f9cc105f3c26  # 8691.
 cell [0, 11, 0] fc0808b8000000d0 velocity after 0 = 0xc111145cb3abbf1c  # -279831.1754598485
 cell [0, 11, 0] fc0808b8000000d0 velocity after 1 = 0x40a39fd879d7b248  # 2511.9228045849923
 cell [0, 11, 0] fc0808b8000000d0 velocity after 2 = 0x40d11fdc7441e016  # 17535.44459578403
-cell [0, 12, 0] bound = 0x3e7d8dc141dddb54  # 1.1009622410776475e-7
+cell [0, 12, 0] bound = 0x3e7d8dc141c53002  # 1.1009622408636761e-7
 cell [0, 12, 0] candidates 17 entries 2
 cell [0, 12, 0] fc0808c8000000a0 component 0 explodes T-32378391707380.058593750 s as CoreCollapse(Ib)
 cell [0, 12, 0] fc0808c8000000a0 window = 0x412af82b4e85ace9  # 883733.6533636126
@@ -142,37 +142,37 @@ cell [0, 12, 0] fc0808c8000000d0 velocity before 2 = 0xc0c594b3b7c6c6b5  # -1104
 cell [0, 12, 0] fc0808c8000000d0 velocity after 0 = 0xc10a484bd5ce3186  # -215305.47939718905
 cell [0, 12, 0] fc0808c8000000d0 velocity after 1 = 0xc0ec9df56df65cee  # -58607.6696731391
 cell [0, 12, 0] fc0808c8000000d0 velocity after 2 = 0x4111211547d513dc  # 280645.32014876395
-cell [0, 13, 0] bound = 0x3e7c82ca40a6221b  # 1.0621137406218349e-7
+cell [0, 13, 0] bound = 0x3e7c82ca408e4b8c  # 1.0621137404150721e-7
 cell [0, 13, 0] candidates 13 entries 0
-cell [0, 14, 0] bound = 0x3e7b5737cd12cac6  # 1.0185202660682048e-7
+cell [0, 14, 0] bound = 0x3e7b5737ccfbe382  # 1.0185202658695497e-7
 cell [0, 14, 0] candidates 14 entries 0
-cell [0, 15, 0] bound = 0x3e7a17c8bd5df4c3  # 9.720365254195862e-8
+cell [0, 15, 0] bound = 0x3e7a17c8bd480d75  # 9.720365252296033e-8
 cell [0, 15, 0] candidates 16 entries 0
-cell [0, 16, 0] bound = 0x3e78cde9f13e1f96  # 9.240340786812894e-8
+cell [0, 16, 0] bound = 0x3e78cde9f1294181  # 9.240340785002926e-8
 cell [0, 16, 0] candidates 11 entries 0
-cell [0, 17, 0] bound = 0x3e778071bc414f24  # 8.755078712121863e-8
+cell [0, 17, 0] bound = 0x3e778071bc2d7e2d  # 8.755078710403076e-8
 cell [0, 17, 0] candidates 9 entries 0
-cell [0, 18, 0] bound = 0x3e7633efeb447764  # 8.271217205978382e-8
+cell [0, 18, 0] bound = 0x3e7633efeb31b3e5  # 8.271217204350894e-8
 cell [0, 18, 0] candidates 11 entries 0
-cell [0, 19, 0] bound = 0x3e74edf6c1306f07  # 7.796863625601927e-8
+cell [0, 19, 0] bound = 0x3e74edf6c11eb47d  # 7.79686362406421e-8
 cell [0, 19, 0] candidates 12 entries 0
-cell [0, 20, 0] bound = 0x3e73b33dddd69c7e  # 7.338882520320786e-8
+cell [0, 20, 0] bound = 0x3e73b33dddc5e23c  # 7.3388825188699e-8
 cell [0, 20, 0] candidates 11 entries 0
-cell [0, 21, 0] bound = 0x3e729197df655564  # 6.917388604051538e-8
+cell [0, 21, 0] bound = 0x3e729197df5584b0  # 6.917388602679784e-8
 cell [0, 21, 0] candidates 8 entries 0
-cell [0, 22, 0] bound = 0x3e717db342a0ee74  # 6.51591142439042e-8
+cell [0, 22, 0] bound = 0x3e717db34291fc9a  # 6.51591142309417e-8
 cell [0, 22, 0] candidates 11 entries 0
-cell [0, 23, 0] bound = 0x3e707e3cfbf44e54  # 6.144165264439398e-8
+cell [0, 23, 0] bound = 0x3e707e3cfbe62a11  # 6.144165263212806e-8
 cell [0, 23, 0] candidates 9 entries 0
-cell [0, 24, 0] bound = 0x3e6e72b52ef0cd3d  # 5.6713963185809534e-8
+cell [0, 24, 0] bound = 0x3e6e72b52ed6b5ce  # 5.671396317449413e-8
 cell [0, 24, 0] candidates 4 entries 0
-cell [0, 25, 0] bound = 0x3e6c2df03d520b45  # 5.248831028930972e-8
+cell [0, 25, 0] bound = 0x3e6c2df03d39de8b  # 5.248831027882561e-8
 cell [0, 25, 0] candidates 11 entries 0
-cell [0, 26, 0] bound = 0x3e6a0a9c3bbfd0ba  # 4.850597387632035e-8
+cell [0, 26, 0] bound = 0x3e6a0a9c3ba97345  # 4.8505973866621046e-8
 cell [0, 26, 0] candidates 6 entries 0
-cell [0, 27, 0] bound = 0x3e67ed4ebc2ac836  # 4.4567478170955685e-8
+cell [0, 27, 0] bound = 0x3e67ed4ebc163d35  # 4.4567478162046586e-8
 cell [0, 27, 0] candidates 6 entries 0
-cell [0, 0, 0] bound = 0x3f3251bee6ae0f4a  # 0.00027953062697626664
+cell [0, 0, 0] bound = 0x3f3251bee5def8ca  # 0.00027953062624054266
 cell [0, 0, 0] candidates 37479 entries 17
 cell [0, 0, 0] fc08080800001e60 component 9 explodes T-23220580435662.726562500 s as CoreCollapse(IIP)
 cell [0, 0, 0] fc08080800001e60 window = 0x411dc012f869c56d  # 487428.7425909851
