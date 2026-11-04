@@ -3,9 +3,10 @@
 //! contacts over a socket.
 //!
 //! P12.T9.b's test is to watch a pinned recurrent nova. Plan 11's novae are not walked yet (their
-//! registry row waits on P11.T9), so a supernova stands in: seed 9's one core collapse of the 288
-//! cells about the solar circle that goes off in the clock window's future, a Type IIP 874 years
-//! after the epoch, in core-collapse cell [-3, 48, 0].
+//! registry row waits on P11.T9), so a supernova stands in: seed 9's core collapse that goes off in
+//! the clock window's future 179 years after the epoch, in core-collapse cell [-2, 30, 0] (from
+//! generator version 27, whose young field gives most of its young stars to the features, P09.T2.c;
+//! at 26 a Type IIP 874 years after the epoch in cell [-3, 48, 0], which holds none at 27).
 
 use hyperion_protocol::{
     AlertBandDto, AlertsObserverRequest, AlertsSubscribeRequest, BandLimitsDto, CatalogueClassWire,
@@ -37,7 +38,7 @@ use super::TestClient;
 pub const SEED: u64 = 9;
 
 /// The core-collapse cell that holds it.
-pub const PINNED_CELL: [i32; 3] = [-3, 48, 0];
+pub const PINNED_CELL: [i32; 3] = [-2, 30, 0];
 
 /// How far from its site an observer first watches it, ly.
 pub const FAR_LY: f64 = 0.2;
@@ -58,7 +59,7 @@ pub fn pinned(galaxy: &Galaxy) -> OneShotEvent {
             (0.0..990.0).contains(&years)
         })
         .max_by_key(OneShotEvent::emitted)
-        .expect("seed 9's core collapse goes off 874 years after the epoch")
+        .expect("seed 9's core collapse goes off 179 years after the epoch")
 }
 
 /// The place `away` light-years from `event`'s site, spinward along x.

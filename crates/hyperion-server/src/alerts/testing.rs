@@ -1,9 +1,13 @@
 //! The alert scans' tests' fixtures (plan 12, P12.T8.b): seed 9's pinned supernova, the sensors
 //! that see it, and a server whose state the walks read.
 //!
-//! The supernova is the one core collapse of the 288 cells about the solar circle that goes off in
-//! the clock window's future, a Type IIP 874 years after the epoch in core-collapse cell
-//! [-3, 48, 0]; `tests/alerts_scans.rs` watches it over a socket.
+//! The supernova goes off in the clock window's future, 179 years after the epoch in core-collapse
+//! cell [-2, 30, 0], some 10,600 ly coreward of the Sun-like point; `tests/alerts_scans.rs` watches
+//! it over a socket. From generator version 27 the young field gives most of its young stars to the
+//! features that bore them (P09.T2.c), whose deaths their lists hold, and the class's are fewer:
+//! the 288 cells about the solar circle that held the pinned supernova at 26 (a Type IIP 874 years
+//! after the epoch in cell [-3, 48, 0]) hold none, and the 43,923 cells within 30,000 ly along x,
+//! from −5,000 to 56,000 ly along y and 768 ly of the plane three (re-pinned at 27).
 
 use std::num::NonZeroUsize;
 use std::sync::{Arc, OnceLock};
@@ -31,7 +35,7 @@ use crate::{Server, ServerConfig, ServerConfigBuilder, SkyService};
 pub(crate) const SEED: u64 = 9;
 
 /// The core-collapse cell that holds it.
-pub(crate) const PINNED_CELL: [i32; 3] = [-3, 48, 0];
+pub(crate) const PINNED_CELL: [i32; 3] = [-2, 30, 0];
 
 /// A day, s.
 pub(crate) const DAY: i64 = 86_400;
@@ -61,7 +65,7 @@ pub(crate) fn pinned() -> OneShotEvent {
             (0.0..990.0).contains(&years)
         })
         .max_by_key(OneShotEvent::emitted)
-        .expect("seed 9's core collapse goes off 874 years after the epoch")
+        .expect("seed 9's core collapse goes off 179 years after the epoch")
 }
 
 /// The place `away` light-years from `event`'s site, spinward along x.

@@ -273,15 +273,16 @@ fn reaching(band: AlertBand, kind: TransientKind, ly: f64) -> SensorHorizon {
 }
 
 /// The fast twin of the whole cube's supernovae, in the galaxy of seed 9 (`Galaxy::new`): 100 ly
-/// from its one core collapse of the 288 cells about the solar circle that goes off in the clock
-/// window's future, a Type IIP 874 years after the epoch in cell [-3, 48, 0] (the server's pinned
-/// supernova), through a V sensor that reaches 2,000 ly over the first 1,000 years, the cut walk
-/// over each slab's occupied cells is the walk as built, and sees its onset.
+/// from a core collapse that goes off in the clock window's future, 179 years after the epoch in
+/// cell [-2, 30, 0] (the server's pinned supernova, re-pinned at 27: the 288 cells about the solar
+/// circle that held one at 26 hold none once the young field gives most of its young stars to the
+/// features, P09.T2.c), through a V sensor that reaches 2,000 ly over the first 1,000 years, the
+/// cut walk over each slab's occupied cells is the walk as built, and sees its onset.
 #[test]
 fn alerts_galaxy_scan_finds_a_supernova_nearby_as_the_walk_as_built() {
     let galaxy = Galaxy::new(Seed::new(9));
     let process = CoreCollapseProcess::new(&galaxy);
-    let at = GalacticPosition::from_light_years([-1_320.4, 24_727.6, 145.3]).unwrap();
+    let at = GalacticPosition::from_light_years([-584.1, 15_392.2, 108.4]).unwrap();
     let v = reaching(
         AlertBand::Photometric(Band::V),
         TransientKind::CoreCollapse,
@@ -295,17 +296,20 @@ fn alerts_galaxy_scan_finds_a_supernova_nearby_as_the_walk_as_built() {
         .find(|detection| detection.phase() == DetectionPhase::Onset)
         .expect("the pinned supernova goes off");
     let arrival = onset.arrival().since_epoch().as_julian_years_f64();
-    assert!((arrival - 974.5).abs() < 0.1, "{arrival}");
+    assert!((arrival - 279.4).abs() < 0.1, "{arrival}");
 }
 
-/// The fast twin of the whole cube's magnetars: 1 ly from the one magnetar active at the epoch
-/// within 3,000 ly of the Sun-like point, at [-7,210.6, 28,386.8, 27.0] ly, through an X-ray sensor
-/// that reaches 500 ly over the first century, the cut walk over each slab's occupied cells is the
-/// walk as built, and sees it burst.
+/// The fast twin of the whole cube's magnetars: 1 ly from the nearest of the cube's 17 magnetars
+/// that bursts over the first century near itself, at [7,161.9, 16,283.3, 217.7] ly, 12,072 ly
+/// from the Sun-like point, through an X-ray sensor that reaches 500 ly over the first century,
+/// the cut walk over each slab's occupied cells is the walk as built, and sees it burst eleven
+/// times. (Re-pinned at 27: the field's young stars, most given to the features from 27,
+/// P09.T2.c, hold no magnetar active at the epoch within 3,000 ly, as at 26 at
+/// [-7,210.6, 28,386.8, 27.0] ly.)
 #[test]
 fn alerts_galaxy_scan_finds_a_magnetar_nearby_as_the_walk_as_built() {
     let galaxy = milky_way();
-    let at = GalacticPosition::from_light_years([-7_209.6, 28_386.8, 27.0]).unwrap();
+    let at = GalacticPosition::from_light_years([7_162.9, 16_283.3, 217.7]).unwrap();
     let x = reaching(AlertBand::XRay, TransientKind::MagnetarBurst, 500.0);
     let query = query(at, ClassId::CORE_COLLAPSE, x, 0, 100);
     let (built, cut) = magnetars_both(galaxy, &query);
@@ -354,8 +358,9 @@ fn alerts_galaxy_scan_finds_the_whole_cubes_supernovae_as_the_walk_as_built() {
 }
 
 /// The whole cube's magnetars through an X-ray limit of 10⁻¹⁴ W m⁻² over the first century from
-/// the Sun-like point: the cut walk over each slab's occupied cells is the walk as built, 27,059
-/// detections from 71 hosts (research's figures).
+/// the Sun-like point: the cut walk over each slab's occupied cells is the walk as built, 6,628
+/// detections from 17 hosts (re-measured at 27, whose field share gives most young stars to the
+/// features, P09.T2.c; 27,059 from 71 at 26, research's figures).
 #[test]
 #[ignore = "slow: walks every core-collapse cell of the cube's magnetars whole, some 100 CPU-s"]
 fn alerts_galaxy_scan_finds_the_whole_cubes_magnetars_as_the_walk_as_built() {
@@ -372,7 +377,7 @@ fn alerts_galaxy_scan_finds_the_whole_cubes_magnetars_as_the_walk_as_built() {
     let mut hosts: Vec<_> = cut.iter().map(Detection::host).collect();
     hosts.sort_unstable();
     hosts.dedup();
-    assert_eq!((cut.len(), hosts.len()), (27_059, 71));
+    assert_eq!((cut.len(), hosts.len()), (6_628, 17));
 }
 
 /// The whole cube's Type Ia through a V limit of 10⁻¹² W m⁻² over [−1,000, 1,000) years from the
