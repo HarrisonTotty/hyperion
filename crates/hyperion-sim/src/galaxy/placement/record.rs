@@ -357,17 +357,6 @@ pub enum Existence {
 
 #[cfg(test)]
 impl SystemRecord {
-    /// This record with its age at the epoch `age`, every other mark kept, its placement class
-    /// and metallicity age among them: a test's way to move a living grid runaway's death into
-    /// the supernova test's interval (plan 09, P09.T33.b).
-    #[must_use]
-    pub(crate) const fn with_age_at_epoch(self, age: Years) -> Self {
-        Self {
-            age_at_epoch: age,
-            ..self
-        }
-    }
-
     /// This record with its primary's initial mass `mass`, every other mark kept: with
     /// [`with_age_at_epoch`](Self::with_age_at_epoch), a test's way to sample the marks of a
     /// layer-E record across its band (plan 09, P09.T38's complementarity).
@@ -446,6 +435,21 @@ impl SystemRecord {
             placement: PackedPlacement::FIELD,
             mark_attempt: 0,
             metallicity_age_years: 0.0,
+        }
+    }
+
+    /// This record with its age at the epoch `age`, every other mark kept, its placement class
+    /// and metallicity age among them: the tests' way to move a real record's history on the
+    /// clock, as a living grid runaway's death into the supernova test's interval (plan 09,
+    /// P09.T33.b), or a stripped primary's stripping to the epoch. Unlike a record rebuilt by
+    /// [`from_parts`](Self::from_parts), which is a field record, a retained or displaced record so
+    /// re-aged keeps its class's composition and kick (P08.T12.c), and a living layer-E record its
+    /// drawn metallicity.
+    #[must_use]
+    pub const fn with_age_at_epoch(self, age: Years) -> Self {
+        Self {
+            age_at_epoch: age,
+            ..self
         }
     }
 

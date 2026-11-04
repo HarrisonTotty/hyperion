@@ -358,16 +358,11 @@ fn change_in(stars: &SystemStars, change: Change) -> Option<(f64, f64)> {
 const REJUVENATED: [u64; 2] = [0x8211_b2e0_0000_0001, 0x8226_b2e0_0000_0002];
 
 /// `record` with its age at the epoch `age` years and nothing else changed: a real record whose
-/// history moves on the clock, so that one of its ages falls at the epoch.
+/// history moves on the clock, so that one of its ages falls at the epoch. From 27 it keeps plan
+/// 08's marks (`SystemRecord::with_age_at_epoch`), which a record rebuilt from its parts, a field
+/// record, would drop: a retained or displaced record keeps its class's composition and kick.
 fn re_aged(record: &SystemRecord, age: f64) -> SystemRecord {
-    SystemRecord::from_parts(
-        record.id(),
-        *record.epoch_position(),
-        record.origin(),
-        record.population(),
-        record.primary_initial_mass(),
-        Years::new(age),
-    )
+    record.with_age_at_epoch(Years::new(age))
 }
 
 /// The now row `row` is the summary's primary `primary`: the same kind and class, the same
