@@ -1097,7 +1097,8 @@ mod tests {
         );
     }
 
-    /// The pinned cases of [`material_bearing_capacity_on_slope_keeps_its_bits`], by name.
+    /// The pinned cases of [`material_bearing_capacity_on_slope_keeps_its_bits`], by their pin
+    /// keys.
     fn pinned_cases() -> Vec<(&'static str, f64)> {
         let regolith = lunar_regolith();
         let moon = |deg: f64| {
@@ -1138,13 +1139,13 @@ mod tests {
         .unwrap()
         .value();
         vec![
-            ("lunar 1 m at 10°", moon(10.0)),
-            ("lunar 1 m at 20°", moon(20.0)),
-            ("lunar 1 m just under φ", near_phi),
-            ("Lander 2's soil at 10°", mars(MaterialClass::Soil)),
-            ("Mars's drift at 10°", mars(MaterialClass::Dust)),
-            ("lunar 30–60 cm at zero gravity, 10°", weightless),
-            ("cohesionless φ 30° at 10°", sand),
+            ("lunar_1m_at_10deg", moon(10.0)),
+            ("lunar_1m_at_20deg", moon(20.0)),
+            ("lunar_1m_just_under_phi", near_phi),
+            ("lander_2_soil_at_10deg", mars(MaterialClass::Soil)),
+            ("mars_drift_at_10deg", mars(MaterialClass::Dust)),
+            ("lunar_30_60cm_weightless_at_10deg", weightless),
+            ("cohesionless_phi_30deg_at_10deg", sand),
         ]
     }
 
@@ -1152,22 +1153,17 @@ mod tests {
     /// `math`'s pinned `libm` give the same `f64` natively and on both WebAssembly targets, where
     /// this test also runs. The bits were taken natively when the solve was built (2026-10-14),
     /// and read 3,730,032.64, 2,331,035.44, 5,386.74, 209,915.94, 27,841.61, 2,766,499.18 and
-    /// 56,305.47 Pa.
+    /// 56,305.47 Pa; they are pinned in `tests/pins/material/bearing.pins`.
     #[test]
     fn material_bearing_capacity_on_slope_keeps_its_bits() {
-        let bits: [u64; 7] = [
-            0x414c_7538_517b_58ac,
-            0x4141_c8cd_b808_5120,
-            0x40b5_0abe_9d7d_0eee,
-            0x4109_9fdf_86da_0070,
-            0x40db_3067_26e6_817c,
-            0x4145_1b51_96ff_4b0e,
-            0x40eb_7e2f_18a4_ce16,
-        ];
+        let mut pins = hyperion_testkit::pins!(
+            "material/bearing",
+            "material_bearing_capacity_on_slope_keeps_its_bits"
+        );
         let cases = pinned_cases();
-        assert_eq!(cases.len(), bits.len());
-        for ((name, q), bits) in cases.into_iter().zip(bits) {
-            same_bits(q, f64::from_bits(bits), name);
+        pins.exact("cases", cases.len());
+        for (key, q) in cases {
+            pins.exact(key, q);
         }
     }
 }

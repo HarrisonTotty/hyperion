@@ -357,6 +357,7 @@ mod tests {
     use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::golden;
     use hyperion_testkit::golden::GoldenWriter;
+    use hyperion_testkit::pins::Tolerance;
     use std::f64::consts::SQRT_2;
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -507,21 +508,21 @@ mod tests {
                 "w {w}: CO₂ {traps} against {traced}"
             );
         }
-        // Pinned as built on R09.T7.l's refit, findings: water at σ_s 26.6° is 29% over §8.13's
-        // 2.69%, outside the plan's 15%, and CO₂ at 11.3° and 16.7° is 2.1 times the 0.0215%
-        // and 0.0195% of an independent tracer (2026-10-29; 8 surfaces, not literature), just
-        // outside the plan's factor of two (those heat at the upper limb; heated at the disk's
-        // centre, as the refit is, they are 0.0367% and 0.0297%).
-        for (w, threshold, as_built) in [
-            (0.5, WATER, 0.0348),
-            (0.2, co2, 4.48e-4),
-            (0.3, co2, 4.09e-4),
+        // Pinned as built on R09.T7.l's refit, within 1%, findings: water at σ_s 26.6° is 29%
+        // over §8.13's 2.69%, outside the plan's 15%, and CO₂ at 11.3° and 16.7° is 2.1 times the
+        // 0.0215% and 0.0195% of an independent tracer (2026-10-29; 8 surfaces, not literature),
+        // just outside the plan's factor of two (those heat at the upper limb; heated at the
+        // disk's centre, as the refit is, they are 0.0367% and 0.0297%).
+        let mut pins = hyperion_testkit::pins!(
+            "cold_trap/rough_plains",
+            "the_plains_cold_traps_follow_the_ray_traces"
+        );
+        for (key, w, threshold) in [
+            ("water.sigma_26_6deg", 0.5, WATER),
+            ("co2.sigma_11_3deg", 0.2, co2),
+            ("co2.sigma_16_7deg", 0.3, co2),
         ] {
-            let traps = band(w, threshold);
-            assert!(
-                (traps / as_built - 1.0).abs() <= 0.01,
-                "w {w}, {threshold:?}: {traps} against {as_built} as built"
-            );
+            pins.within(key, band(w, threshold), Tolerance::relative(0.01));
         }
     }
 
