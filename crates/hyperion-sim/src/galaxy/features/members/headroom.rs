@@ -69,12 +69,14 @@
 //! # As measured
 //!
 //! On plan 15's production rank table (P06.T19.e), against the 16-bit index, the Milky Way
-//! fixture's centre fits, at 7,144.8 candidates and 27.3 victims with 57,060.3 indices to spare at
-//! eight standard deviations with plan 09's recent classes, 597.4 candidates (57,713.8 before the
-//! victims joined, P09.T30.b, at `GENERATOR_VERSION` 23; 57,685.4 before the recent classes joined,
-//! P09.T36.b), and so do both mass functions' capped clusters, the heaviest plan 02 draws, at
-//! 18,311.3 and 12,174.7 candidates (44,537.7 and 51,499.7 to spare with the recent classes), and
-//! every one of the first 10³ of plan 02's seeds
+//! fixture's centre fits, at 9,766.4 candidates and 27.3 victims with 54,325.9 indices to spare at
+//! eight standard deviations with plan 09's recent classes, 599.8 candidates, at generator version
+//! 27, whose rows are P15.T10.b's refit on 27's engine with the recent classes on the record
+//! (P09.T36.b; at 26 7,144.8 candidates with 57,060.3 to spare; 57,713.8 before the victims joined,
+//! P09.T30.b, at `GENERATOR_VERSION` 23; 57,685.4 before the recent classes joined, P09.T36.b), and
+//! so do both mass functions' capped clusters, the heaviest plan 02 draws, at 24,996.7 and
+//! 16,614.0 candidates (37,672.1 and 46,914.5 to spare with the recent classes; 18,311.3 and
+//! 12,174.7 candidates at 26), and every one of the first 10³ of plan 02's seeds
 //! (`tests/galaxy_sweeps.rs`). The cap bounds every drawn cluster, so no seed fails while it holds.
 //! Twice either cap's candidates still fit, which a test keeps as the tripwire for the ruling's
 //! fallback: a refit or a new class that brings the capped forecast within a factor of two of the
@@ -591,11 +593,12 @@ mod tests {
     }
 
     /// The check at the Milky Way fixture, under either mass function, against the centre's 16-bit
-    /// index: the default function's centre, 7,129.6 candidates, 27.3 victims and 599.8 of plan
-    /// 09's recent classes' candidates, fits with 57,073.8 indices to spare at eight standard
-    /// deviations, and Kroupa's, 6,449.9, 27.2 and 488.8, with 57,901.4, as measured on plan 15's
+    /// index: the default function's centre, 9,766.4 candidates, 27.3 victims and 599.8 of plan
+    /// 09's recent classes' candidates, fits with 54,325.9 indices to spare at eight standard
+    /// deviations, and Kroupa's, 8,835.4, 27.2 and 488.8, with 55,409.9, as measured on plan 15's
     /// production rank table (P06.T19.e) with the recent classes (P09.T36.b), re-measured at
-    /// generator version 26 (7,144.8 and 6,467.9 candidates until 26), and pinned to 10⁻⁵, with the
+    /// generator version 27 with P15.T10.b's refit of the binary rows on 27's engine (7,129.6 and
+    /// 6,449.9 candidates at 26, 7,144.8 and 6,467.9 until 26), and pinned to 10⁻⁵, with the
     /// primaries' share of `m̄_f` (module documentation) to 10⁻⁴.
     #[test]
     fn the_milky_way_s_centre_list_fits_under_either_mass_function() {
@@ -610,16 +613,16 @@ mod tests {
         for (kind, candidates, at_eight, at_five, want_share) in [
             (
                 MassFunctionKind::Chabrier,
-                7_129.562,
-                57_073.77,
-                57_337.98,
+                9_766.446,
+                54_325.87,
+                54_631.71,
                 0.703_48,
             ),
             (
                 MassFunctionKind::Kroupa,
-                6_449.899,
-                57_901.37,
-                58_151.75,
+                8_835.4,
+                55_409.9,
+                55_700.0,
                 0.713_27,
             ),
         ] {
@@ -642,27 +645,18 @@ mod tests {
     }
 
     /// The check at plan 02's cap on the cluster's mass, under either mass function: a capped
-    /// centre fits the 16-bit index, with 44,598.8 indices to spare under Chabrier's function and
-    /// 51,545.6 under Kroupa's at eight standard deviations, the victims and plan 09's recent
+    /// centre fits the 16-bit index, with 37,672.1 indices to spare under Chabrier's function and
+    /// 46,914.5 under Kroupa's at eight standard deviations, the victims and plan 09's recent
     /// classes (1,535.1 and 919.2 candidates) counted, as measured on plan 15's production rank
-    /// table (P06.T19.e) with the recent classes (P09.T36.b), re-measured at generator version 26,
-    /// and pinned to 10⁻⁵ with the candidates. The cap bounds
-    /// every drawn cluster.
+    /// table (P06.T19.e) with the recent classes (P09.T36.b), re-measured at generator version 27
+    /// with P15.T10.b's refit of the binary rows on 27's engine (18,247.7 and 12,128.3 candidates
+    /// with 44,598.8 and 51,545.6 to spare at 26), and pinned to 10⁻⁵ with the candidates. The cap
+    /// bounds every drawn cluster.
     #[test]
     fn the_cap_s_centre_list_fits_under_either_mass_function() {
         for (kind, seed, want, at_eight) in [
-            (
-                MassFunctionKind::Chabrier,
-                0x1108_e000,
-                18_247.726_469_135_578,
-                44_598.84,
-            ),
-            (
-                MassFunctionKind::Kroupa,
-                0x1108_e001,
-                12_128.295_040_318_952,
-                51_545.55,
-            ),
+            (MassFunctionKind::Chabrier, 0x1108_e000, 24_996.69, 37_672.1),
+            (MassFunctionKind::Kroupa, 0x1108_e001, 16_614.0, 46_914.5),
         ] {
             let params = scattered(kind, 1.0);
             let cap = NuclearClusterParams::mass_cap(kind);
@@ -687,9 +681,10 @@ mod tests {
     /// Failing it is the point at which the fallback is due: a refit of `CLASS_SHARES`, a new
     /// class on the centre's list or a higher cap has brought the heaviest centre within a factor
     /// of two of the bound, and the ruling's next step is the same rule with the index at
-    /// `[31:0]`. Measured on plan 15's production rank table (P06.T19.e): 27,511.2 indices to spare
-    /// at eight standard deviations under Chabrier's function and 40,032.4 under Kroupa's (at
-    /// generator version 26).
+    /// `[31:0]`. Measured on plan 15's production rank table (P06.T19.e): 13,752.9 indices to spare
+    /// at eight standard deviations under Chabrier's function and 30,848.8 under Kroupa's at
+    /// generator version 27, with P15.T10.b's refit of the binary rows on 27's engine and the
+    /// recent classes on the record (P09.T36.b; 27,511.2 and 40,032.4 at 26).
     #[test]
     fn twice_either_cap_s_candidates_fit_the_centre_s_index() {
         let limit = ListIndex::Centre.limit();
@@ -819,13 +814,16 @@ mod tests {
 
     /// The check of a built galaxy, which reads the galaxy's own mass model and mass function,
     /// forecasts what its parameters do, bit for bit, in every figure: the Milky Way fixture and
-    /// two drawn seeds, both of which fit the centre's 16-bit index (the first, at 11,351
-    /// candidates, overflowed the 13-bit one, which the second fits).
+    /// two drawn seeds, both of which fit the centre's 16-bit index (the first, at 15,510.1
+    /// candidates, overflows the 13-bit one, which the second, at 4,531.9, fits). From generator
+    /// version 27, with P15.T10.b's refit of the binary rows, the second is `0x1108_e102`, the next
+    /// seed that fits 13 bits: `0x1108_e101`, at 9,377.3 candidates, no longer does (the first had
+    /// 11,351 at 26).
     #[test]
     fn a_galaxy_s_check_reads_what_its_parameters_forecast() {
         let drawn = [
             Galaxy::new(Seed::new(0x1108_e100)),
-            Galaxy::new(Seed::new(0x1108_e101)),
+            Galaxy::new(Seed::new(0x1108_e102)),
         ];
         for galaxy in core::iter::once(milky_way_galaxy()).chain(&drawn) {
             let from_galaxy = galaxy_centre_forecast(galaxy).unwrap();

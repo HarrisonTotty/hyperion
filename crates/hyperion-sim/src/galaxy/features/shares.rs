@@ -903,11 +903,36 @@ mod tests {
             (hosts / expected - 1.0).abs() < 1e-6,
             "{hosts:e} against {expected:e}"
         );
-        let largest = MassBand::ALL
-            .iter()
-            .map(|&band| shares.class_share(Population::OldThinDisc, band))
-            .fold(0.0, f64::max);
-        assert!(largest < 1e-3, "{largest}");
+        // The old thin disc's carved share of each band is the rows' `r m̄_f w_b ÷ S_b` summed, and
+        // its largest is band D's, where the accreting white dwarfs' primaries lie: 1.568 × 10⁻³ on
+        // P15.T10.b's refit at 27, whose slow accreting white dwarfs carve the most (under 10⁻³ on
+        // the scratch rows), well under the hundredth that would move the field's factor off
+        // `1 − φ` by a per cent.
+        let rows = |band: MassBand| {
+            crate::tables::binary::CLASS_SHARES
+                .rows()
+                .iter()
+                .fold(0.0, |sum, row| {
+                    sum + row.hosts_per_formed_mass(Population::OldThinDisc) * row.layer_share(band)
+                })
+                * shares.formed_mass
+                / shares.band_shares[band.index()]
+        };
+        let mut largest = (MassBand::A, 0.0);
+        for band in MassBand::ALL {
+            let carved = shares.class_share(Population::OldThinDisc, band);
+            assert!(
+                (carved - rows(band)).abs() <= 1e-12 * rows(band),
+                "{band:?}: {carved} against the rows' {}",
+                rows(band)
+            );
+            if carved > largest.1 {
+                largest = (band, carved);
+            }
+        }
+        eprintln!("the old thin disc's largest carved share: {largest:?}");
+        assert_eq!(largest.0, MassBand::D, "{largest:?}");
+        assert!(largest.1 < 1e-2, "{largest:?}");
     }
 
     #[test]
