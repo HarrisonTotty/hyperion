@@ -7,11 +7,11 @@ path = "binary.rs"
 task = "binary_awd"
 revision = 0
 inputs_sha256 = "77b2d86b5c0e936218648dcaba146e41f9af9bc698b21286d75ee37dec5f5dd7"
-body_sha256 = "23720ca8afaadbc469f5277d45412a938cf7caefe657adde9f2556e5c89b5065"
+body_sha256 = "4b002411341240a9cdb72c860aa958d9688d6b16462183c63f9a81b341ec7d7c"
 fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 1.0960630250705998, 21.0, 1.0, 0.6529028848978797, 0.0322439496270119, 0.000000000012255222349553427]
 since_generator_version = 27
 provisional = false
-acceptance = "kind scales 1.6635e-1/7.4559e-2/1.0634e-2; fast: 2501 members, own nodes 0/15/14/0/6/17/0/4/16/17/17, donors 0.992/0.000/0.008, layers C 0.108 D 0.868 E 0.024, rates a system 7.01e-7/5.50e-5/1.11e-5/1.54e-5/1.96e-5/2.03e-5/6.31e-6, not its own: HeliumPeriod Scratch, HeliumDonorMass Scratch; slow: 25488 members, own nodes 0/16/17/16/5/17/16/9/17/17/17, donors 0.891/0.108/0.001, layers C 0.378 D 0.608 E 0.014, rates a system 4.91e-6/5.20e-4/8.53e-4/6.95e-4/6.23e-4/6.26e-4/1.01e-3; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_accreting_white_dwarf_samplers_against_the_engine`"
+acceptance = "kind scales 1.6635e-1/7.4574e-2/1.0634e-2; fast: 2501 members, own nodes 0/15/14/0/6/17/0/4/16/17/17, donors 0.992/0.000/0.008, layers C 0.108 D 0.868 E 0.024, rates a system 7.01e-7/5.50e-5/1.11e-5/1.54e-5/1.96e-5/2.03e-5/6.31e-6, not its own: HeliumPeriod Scratch, HeliumDonorMass Scratch; slow: 25487 members, own nodes 0/16/17/16/5/17/16/9/17/17/17, donors 0.891/0.108/0.001, layers C 0.378 D 0.608 E 0.014, rates a system 4.91e-6/5.20e-4/8.53e-4/6.95e-4/6.23e-4/6.26e-4/1.01e-3; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_accreting_white_dwarf_samplers_against_the_engine`"
 
 [[table]]
 name = "binary_cooling_floor"
