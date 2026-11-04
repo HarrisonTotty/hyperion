@@ -24972,3 +24972,41 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     and the packed limb's (compiled in part 16 only).
   - _Pending, the owner's Mac A/B_ (`--march-sources`, its command in the outbox's `gate.txt`) and
     the RTX QW.
+- **The chromophore gate, as built: it misses** (R08.T16.a.2, 2026-11-04; lane
+  `r08-t16a2-chromophore-gate`; research-leans-30 §5, research-rm4-rm5-close-out §1.1; figures in
+  the lane's outbox). Renderer only; no generated value moves.
+  - _The case_ (`test/jupiterEnvelopeCase.ts`, `reference/jupiter-envelope.case.json`, seed 15,
+    the next free after R08.T17's spectral cases' 11–14):
+    the hand Jupiter's medium as its envelope assembles, cut at green τ 20 from the top over a black
+    ground, on a sphere through the cut, split at its envelope floor 107,954 m above it. Above the
+    floor: τ 8.19/10.18/16.99, ω̄ 0.992/0.984/0.971, ḡ 0.575/0.436/0.253. The disc from 1,000 km
+    and the limb at 0.1–3 H (10 H, 1,515 km, stands past the top); no ground view or aggregate.
+    Levels under a millimetre apart are held 1 cm apart, against the 9 figures (H₂O's column −0.08%).
+  - _The trace_: pilots at 2,048 and 8,192 samples (seeds 1004 and 1005); ruling 8's counts
+    48,128–2,592,768 (disc-p60's), some 140 thread-h a trace on 16 threads. Traced at seed 11 over
+    two pods, then again at seed 15 on land/next over three, resumed from its work directory after
+    each lost pod and checkpointed hourly; every stored figure is a draw of its seed's streams.
+  - _The gate_ (`vectorGate.json` format 12's `jupiterEnvelope`; `routing.ts`'s
+    `CHROMOPHORE_GATE_TALLIES`): against the vector I at seed 15, 11 of 27 pass, 4 miss and 12 are
+    refused. The misses: disc-p75 red 1.11, disc-p60 blue 1.13, and the limb's blue at 0.3 H and
+    1 H, 0.91 and 0.85. At seed 11 they were disc-p60 red, disc-p85 blue and the same limb (10, 4
+    and 13): the same twin, its red at p60–p75 1.10–1.12 and its blue at p85 0.76 either side of a
+    refusal. Every refusal is the vector I's (its σ to 7 times the scalar's on the disc, 919 times
+    in disc-p30's blue); the scalar refuses none and misses 9 at both seeds.
+  - _The route_: closed; `ENVELOPE_ROUTE_RANGE` stays `giant-deck`'s, and step 4's widening is not
+    built. Outside it, named by `routing.test.ts`: the generated and the hand Jupiter, the new hand
+    Saturn (`handSaturnDetail`, the sim's own Saturn's 15 gases and decks at 1 µm; green τ 10.4,
+    blue 23.0 and its chromophore's τ (1 − ω̄) 0.065–0.49 above its floor at 103.5 bar) and the hand
+    ice giant (blue τ 10.29, red ḡ 0.7340).
+  - _Levers measured, not built_ (the twin against the reference): the deck's own light at 0, its
+    diffuse at 8 modes and 64 deck layers move no value; the floor white brightens 1–6%. The whole
+    column baked as a haze reads red p60–p75 at 0.99 and 0.90 and, at its own wavelengths, blue p0
+    1.12, but leaves blue p85 (0.73) and the limb (0.79–0.83) as dark: no lever found for those.
+  - _The disc at the switch_ (`thick/discBakeJupiter.test.ts`, by hand, on hold/after-25's
+    giant-disc-datum and again on land/next, 7 of 7 pass, the same figures; pod, 16 vCPU): the
+    table within 1.9% of the converged routed march
+    at 0° and 90°; the step at the switch +0.7% to +1.9% (0°) and −0.9% to −0.2% (90°); the full
+    passes' disc on the medium's datum reads as nothing drawn, and the table at 1.15 × 10⁹ m within
+    1.1% of them; the march at 36 within 1.1% of its 16×.
+  - _Pending_: the owner's RTX frame of a routed envelope, an RM4 close item (main's ruling); not
+    run, the route being closed.

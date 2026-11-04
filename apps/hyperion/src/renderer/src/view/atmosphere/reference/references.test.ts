@@ -6,7 +6,8 @@
  * the scalar radiance, every refusal pinned in `refusals.json` as R08's record lists it
  * (`decision-r08-t12b-scope.md`, rulings 6, 8 and 9). The Venus-class and Titan-class cases'
  * sanity ranges, pinned in `sanityRanges.json`. And the readers and the beam quadrature
- * themselves, on small inputs.
+ * themselves, on small inputs. R08.T16.a.2's `jupiter-envelope` (`test/jupiterEnvelopeCase.ts`) is
+ * among them, its disc and limb alone.
  *
  * @remarks
  * `refusals.json` and `sanityRanges.json` are rewritten with the references, by
@@ -24,6 +25,7 @@ import {
   type SampleCounts,
 } from "../../../test/atmosphereCases";
 import { expectCommittedTable } from "../../../test/bless";
+import { JUPITER_ENVELOPE_CASE, jupiterEnvelopeCase } from "../../../test/jupiterEnvelopeCase";
 import {
   aggregateRefusal,
   beamDepthAgrees,
@@ -38,6 +40,7 @@ import earthHighLimbReference from "./earth-high-limb.reference.json" with { typ
 import earthOzoneSlabReference from "./earth-ozone-slab.reference.json" with { type: "json" };
 import earthOzoneSlabHighLimbReference from "./earth-ozone-slab-high-limb.reference.json" with { type: "json" };
 import giantDeckReference from "./giant-deck.reference.json" with { type: "json" };
+import jupiterEnvelopeReference from "./jupiter-envelope.reference.json" with { type: "json" };
 import marsReference from "./mars.reference.json" with { type: "json" };
 import saturnOblateReference from "./saturn-oblate.reference.json" with { type: "json" };
 import titanClassReference from "./titan-class.reference.json" with { type: "json" };
@@ -71,6 +74,7 @@ const REFERENCES: Readonly<Record<string, ReferenceFile>> = {
   "venus-58bar": venus58barReference,
   "titan-class": titanClassReference,
   "giant-deck": giantDeckReference,
+  [JUPITER_ENVELOPE_CASE]: jupiterEnvelopeReference,
 };
 
 /** Each case's own counts. */
@@ -120,13 +124,16 @@ const CHEAP: ReadonlyMap<string, ReferenceCase> = new Map(
 );
 
 /** Every case with a committed reference, the thick ones by name until first asked. */
-const NAMES: ReadonlyArray<string> = [...CHEAP.keys(), ...THICK_CASE_NAMES];
+const NAMES: ReadonlyArray<string> = [...CHEAP.keys(), ...THICK_CASE_NAMES, JUPITER_ENVELOPE_CASE];
 
 /** A case by name: a thick one's Mie runs once, when a test first asks. */
 function caseNamed(name: string): ReferenceCase {
   const cheap = CHEAP.get(name);
   if (cheap !== undefined) {
     return cheap;
+  }
+  if (name === JUPITER_ENVELOPE_CASE) {
+    return jupiterEnvelopeCase().referenceCase;
   }
   const thick = thickReferenceCases();
   const found = THICK_CASE_NAMES.find((n) => n === name);

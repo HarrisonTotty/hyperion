@@ -10,7 +10,12 @@ import { describe, expect, it } from "vitest";
 
 import { venusClassMedium } from "../../../test/atmosphereFixtures";
 import { detailOf, recordInput } from "../../../test/atmosphereRecords";
-import { handJupiterDetail } from "../../../test/giantFixtures";
+import {
+  handIceGiantDetail,
+  handJupiterDetail,
+  handSaturnDetail,
+} from "../../../test/giantFixtures";
+import { jupiterDetail } from "../../../test/planetaryFixture";
 import { assembleMedium } from "../assemble";
 import { R05_EARTH_REFERENCE } from "../earth";
 import * as cases from "../reference/cases";
@@ -35,6 +40,7 @@ import {
 import {
   ABOVE_DECK_GATE_TALLIES,
   bakedAsHaze,
+  CHROMOPHORE_GATE_TALLIES,
   CORRECTION_ROUTED,
   correctionRouted,
   DECK_LOWEST_SUN_SINE,
@@ -492,6 +498,81 @@ describe("the Venus-class cases' deck gate (R08.T15.b.2)", () => {
       below.find((image) => image.image === "ground-s80")?.passes,
     ]).toEqual([expect.closeTo(Math.cos((80 * Math.PI) / 180), 15), 63]);
   });
+});
+
+describe("the absorbing envelope's gate (R08.T16.a.2)", () => {
+  it("holds the recorded verdict to vectorGate.json's jupiterEnvelope, image by image", () => {
+    expect(CHROMOPHORE_GATE_TALLIES).toEqual(
+      committedGate.jupiterEnvelope.tallies.images.map(
+        ([image, comparisons, passes, misses, refusals]) => ({
+          image,
+          comparisons,
+          passes,
+          misses,
+          refusals,
+        }),
+      ),
+    );
+  });
+
+  it("leaves the envelope's range giant-deck's alone, jupiter-envelope's gate not passing", () => {
+    expect([deckGatePasses(CHROMOPHORE_GATE_TALLIES), DECK_ROUTE_RANGE?.envelope]).toEqual([
+      false,
+      ENVELOPE_ROUTE_RANGE,
+    ]);
+  });
+
+  // Each channel's τ, τ (1 − ω̄) and ḡ above the giant's floor, each within the range or not.
+  it.each([
+    [
+      "the protocol fixture's generated Jupiter, by its depth and its chromophore",
+      jupiterDetail,
+      [
+        [true, false, true],
+        [false, false, true],
+        [false, false, true],
+      ],
+    ],
+    [
+      "the hand Saturn, by its depth and its chromophore",
+      handSaturnDetail,
+      [
+        [true, false, true],
+        [false, false, true],
+        [false, false, true],
+      ],
+    ],
+    [
+      "the hand ice giant, by its blue τ and its red ḡ",
+      handIceGiantDetail,
+      [
+        [true, true, false],
+        [true, true, true],
+        [false, true, true],
+      ],
+    ],
+  ] as const)(
+    "leaves %s out of the envelope's range",
+    (_, detail, within) => {
+      const assembled = assembleMedium(recordInput(detailOf(detail())), { envelopes: true });
+      if (assembled.medium === undefined || assembled.regime.kind !== "cloudDeck") {
+        throw new Error("the giant draws an envelope's medium, split at its floor");
+      }
+      const range = ENVELOPE_ROUTE_RANGE;
+      const channels = regimeChannels(
+        upperMediumOf(assembled.medium, assembled.regime.deckAltitudeM),
+      );
+      expect([
+        deckRouted(assembled.regime, assembled.medium, true),
+        channels.map((c) => [
+          c.opticalDepth <= range.mostOpticalDepth,
+          c.opticalDepth * (1 - c.singleScatteringAlbedo) <= range.mostAbsorbedDepth,
+          c.asymmetry <= range.mostAsymmetry,
+        ]),
+      ]).toEqual([false, within]);
+    },
+    180_000,
+  );
 });
 
 /** `titan-class`, and the regime it routes under a clear sky, how its gate reads it. */

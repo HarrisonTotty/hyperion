@@ -162,6 +162,32 @@ export const ENVELOPE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
 ];
 
 /**
+ * `jupiter-envelope`'s recorded verdict by image (R08.T16.a.2): `vectorGate.json`'s
+ * `jupiterEnvelope.tallies.images`, the hand Jupiter's medium split at its envelope floor through
+ * the route an envelope takes, its chromophore absorbing above the floor, against the vector I of
+ * its reference at seed 15, held to the file by the test. Of its 27 values 11 pass, 4 miss and 12
+ * are refused, so the envelope's range stays `giant-deck`'s ({@link ENVELOPE_ROUTE_RANGE}):
+ *
+ * - the disc's red at p60–p75 reads 1.11–1.12 of the reference, a miss at p75 (1.5 times the
+ *   gate's edge; refused at p60) and at seed 11 a miss at p60;
+ * - the blue reads 1.13 at p60, and on the limb 0.91 at 0.3 H and 0.85 at 1 H (2.3 times the edge),
+ *   its disc at p85 0.76 (refused here, a miss at seed 11): dark under every bake tried, the whole
+ *   column's as a haze bakes it among them.
+ *
+ * The refusals are the vector I's alone, on the disc in green and blue above all: its σ there is up
+ * to 7 times the scalar radiance's at the same counts (919 times in disc-p30's blue, a heavy tail),
+ * past T ÷ 8, where the scalar refuses none.
+ */
+export const CHROMOPHORE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
+  { image: "disc-p0", comparisons: 3, passes: 1, misses: 0, refusals: 2 },
+  { image: "disc-p30", comparisons: 3, passes: 1, misses: 0, refusals: 2 },
+  { image: "disc-p60", comparisons: 3, passes: 1, misses: 1, refusals: 1 },
+  { image: "disc-p75", comparisons: 3, passes: 1, misses: 1, refusals: 1 },
+  { image: "disc-p85", comparisons: 3, passes: 1, misses: 0, refusals: 2 },
+  { image: "limb", comparisons: 12, passes: 6, misses: 2, refusals: 4 },
+];
+
+/**
  * Whether a deck gate's recorded tallies pass (R08.T16.a.2; R08.T15.b.2, Titan's rule, main's ruling
  * of 2026-11-02): no image misses, and every image that holds a value not refused passes, so that a
  * route opens only on passes (research-leans-16, item 5, condition 2). An image refused throughout
@@ -459,7 +485,11 @@ export function bakedAsHaze(
  * ω̄ is 1 and τ (1 − ω̄) 0, and an envelope's floor is black. A Jupiter-class envelope lies outside
  * it, its chromophore absorbing (the hand Jupiter's τ (1 − ω̄) 0.025–0.19 and blue τ 17.0 above
  * its floor, its chromophore at generator version 27's disc column), and stays
- * `ATMOSPHERE: APPROXIMATE` until a gate covering it passes.
+ * `ATMOSPHERE: APPROXIMATE`: the gate covering it, `jupiter-envelope`'s, misses
+ * ({@link CHROMOPHORE_GATE_TALLIES}). Outside it too stand the hand Saturn, the sim's own
+ * Saturn's gases and decks (green τ 10.4 and blue 23.0 above its floor at 103.5 bar, its
+ * chromophore's τ (1 − ω̄) the hand Jupiter's), and the hand ice giant (blue τ 10.29, red ḡ
+ * 0.7340; `routing.test.ts`).
  */
 export const ENVELOPE_ROUTE_RANGE: ThickRouteRange = {
   mostOpticalDepth: 10.1,
@@ -516,8 +546,9 @@ export function deckRouteRangeOf(
  * ({@link ENVELOPE_GATE_TALLIES}); a deck over a surface's, {@link SURFACE_DECK_ROUTE_RANGE}, since
  * R08.T15's gates both pass, `giant-deck`'s above its split ({@link ABOVE_DECK_GATE_TALLIES}) and the
  * Venus-class cases' with their refused images passed over ({@link SURFACE_DECK_GATE_TALLIES}). A camera beneath a routed deck over a surface reads its low
- * sun as past the gates' range ({@link DECK_LOWEST_SUN_SINE}). Neither the hand nor the generated
- * Jupiter lies within the envelope's range (its chromophore absorbs), so neither routes on it. A
+ * sun as past the gates' range ({@link DECK_LOWEST_SUN_SINE}). No served giant tried lies within
+ * the envelope's range, the hand and the generated Jupiter and Saturn by their chromophore, the ice
+ * giant by its blue τ and red ḡ, so none routes on it ({@link CHROMOPHORE_GATE_TALLIES}). A
  * routed deck's frame waits on the owner's RTX run against `decision-r08-t11-frame.md`'s 16.67 ms,
  * an item on RM4's close list, not a condition of the route (main's ruling of 2026-11-02).
  */

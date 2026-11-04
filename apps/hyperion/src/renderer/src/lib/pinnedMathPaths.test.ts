@@ -73,10 +73,12 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/channels.ts",
     "../test/earthLinePaths.ts",
     "../view/atmosphere/reference/sweepBoundary.ts",
-    // The reference tracer's thick, higher-limb and albedo cases' writers (R08.T12.b.2, R08.T5.e).
+    // The reference tracer's thick, higher-limb, albedo and absorbing envelope cases' writers
+    // (R08.T12.b.2, R08.T5.e, R08.T16.a.2).
     "../view/atmosphere/reference/cases.ts",
     "../view/atmosphere/reference/thickCases.ts",
     "../test/venusAlbedo.ts",
+    "../test/jupiterEnvelopeCase.ts",
     // R08.T17's spectral cases and check, and the conversion and colours they read.
     "../view/atmosphere/reference/spectralCases.ts",
     "../view/atmosphere/reference/spectralCheck.ts",
@@ -99,6 +101,7 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/reference/absorberCurves.test.ts",
     "../view/atmosphere/reference/caseGate.test.ts",
     "../view/atmosphere/reference/cases.test.ts",
+    "../view/atmosphere/reference/jupiterEnvelope.test.ts",
     "../view/atmosphere/reference/metricVerdicts.test.ts",
     "../view/atmosphere/reference/references.test.ts",
     "../view/atmosphere/reference/spectralCases.test.ts",
@@ -116,7 +119,7 @@ const MODULES = import.meta.glob<string>(
 );
 
 /** How many modules the list names: the glob drops a path that no longer exists. */
-const LISTED = 77;
+const LISTED = 79;
 
 /** Every renderer test, as its text: the scan finds among them the tests that bless a table. */
 const TESTS = import.meta.glob<string>("../**/*.test.ts", {

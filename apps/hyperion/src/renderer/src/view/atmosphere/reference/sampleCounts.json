@@ -1105,5 +1105,18 @@
       "flux-s60": 70656,
       "flux-s80": 153600
     }
+  },
+  "jupiter-envelope": {
+    "geometries": {
+      "disc-p0": 98304,
+      "disc-p30": 293888,
+      "disc-p60": 2592768,
+      "disc-p75": 129024,
+      "disc-p85": 313344,
+      "limb-0.1H": 62464,
+      "limb-0.3H": 54272,
+      "limb-1H": 48128,
+      "limb-3H": 510976
+    }
   }
 }

@@ -12,6 +12,9 @@
  * - **The hand ice giant** is Uranus-like: a CH₄ deck of τ 13.5, the largest an ice giant's CH₄
  *   deck holds over set A at generator version 24 (B3 k-1's 01ffeb2d5fff0001.0700), over an H₂S
  *   deck, at hand bases near the observed ones.
+ * - **The hand Saturn** is the sim's own Saturn as `planetary/envelope_atmosphere`'s golden draws it
+ *   at generator version 24: its composition, μ, H₂O, NH₄SH and NH₃ decks and chromophore haze, the
+ *   decks at the hand Jupiter's 1 µm (the golden's are 28–100 µm, past the optics' budget).
  *
  * The fields a record carries that the medium does not read are the fixture's, and say nothing of
  * the body.
@@ -272,6 +275,90 @@ export function handJupiterDetail(nh3FSed?: number): DetailAnswer {
  */
 export function handJupiterRecord(): BodyDetail {
   return detailOf(handJupiterDetail());
+}
+
+/**
+ * The sim's Saturn's composition at 1 bar by mole fraction, largest first: the 15 gases
+ * `planetary/envelope_atmosphere`'s golden gives it (generator version 24), which sum to 1 within
+ * 10⁻¹⁵, inside the wire's 10⁻⁹.
+ */
+const SATURN_COMPOSITION: ReadonlyArray<GasShareDto> = [
+  { species: "H2", mole_fraction: 0.919_272_319_373_326_8 },
+  { species: "He", mole_fraction: 0.074_214_490_450_354_04 },
+  { species: "CH4", mole_fraction: 0.006_255_273_657_226_346 },
+  { species: "NH3", mole_fraction: 0.000_166_277_348_709_187_9 },
+  { species: "Ar", mole_fraction: 5.816_180_748_636_967e-5 },
+  { species: "N2", mole_fraction: 2.713_194_489_048_405_4e-5 },
+  { species: "PH3", mole_fraction: 5.304_419_886_410_08e-6 },
+  { species: "HCl", mole_fraction: 9.012_814_605_964_491e-7 },
+  { species: "Ne", mole_fraction: 1.001_384_369_870_857_8e-7 },
+  { species: "Kr", mole_fraction: 3.504_595_464_432_328_6e-8 },
+  { species: "Xe", mole_fraction: 3.424_821_132_236_196_4e-9 },
+  { species: "CO", mole_fraction: 1.021_305_650_163_863_2e-9 },
+  { species: "H2O", mole_fraction: 5.571_145_604_898_302e-11 },
+  { species: "CO2", mole_fraction: 2.524_073_825_600_432_6e-11 },
+  { species: "HCN", mole_fraction: 5.189_020_840_622_026e-12 },
+];
+
+/** The sim's Saturn's mean molar mass, g mol⁻¹: 2.2568, the golden's. */
+const SATURN_MEAN_MOLAR_MASS_G_PER_MOL = 2.256_821_101_118_976_3;
+
+/**
+ * The hand Saturn (the module's remarks): the fixture's Jupiter's record with the golden's Saturn
+ * profile at its gravity, the sim's Saturn's gases and μ ({@link SATURN_COMPOSITION}), its decks
+ * at the golden's bases, tops, base temperatures, optical depths and f_sed (liquid H₂O at
+ * 10.96–5.054 bar, τ 0.628; NH₄SH at 4.145–2.512 bar, τ 0.597; NH₃ ice at 1.272–0.5082 bar,
+ * τ 0.963), each at 1 µm, and the fixture's chromophore haze, the golden Saturn's in every field
+ * the golden prints (0.2568–0.1558 bar, τ 0.307); Saturn's 1-bar radius.
+ */
+export function handSaturnDetail(): DetailAnswer {
+  const golden = goldenEnvelope("saturn");
+  const envelope = handEnvelope(
+    golden,
+    SATURN_COMPOSITION,
+    SATURN_MEAN_MOLAR_MASS_G_PER_MOL,
+    [
+      deckMode(
+        "H2O",
+        "liquid",
+        "sphere",
+        1e-6,
+        0.628_268_955_982_142_5,
+        [1_095_594.921_249_072, 505_375.818_629_654_5],
+        96_363.329_669_900_98,
+        311.927_238_470_180_9,
+      ),
+      deckMode(
+        "NH4SH",
+        "solid",
+        "crystal",
+        1e-6,
+        0.597_289_752_979_824_1,
+        [414_508.394_118_045_5, 251_188.643_150_957_53],
+        11_615.199_485_369_712,
+        233.869_571_660_028_9,
+      ),
+      deckMode(
+        "NH3",
+        "solid",
+        "crystal",
+        1e-6,
+        0.962_560_241_342_463,
+        [127_164.230_628_933_7, 50_818.763_805_015_63],
+        4_584.518_181_497_106,
+        161.856_562_601_728_06,
+      ),
+    ],
+    fixtureEnvelope().hazes,
+  );
+  return withRecord(jupiterDetail(), (record) => {
+    const giant = withEnvelope(record, envelope, golden.profile.gravityMS2);
+    if (giant.bulk.state !== "ok") {
+      throw new Error("the fixture's giant has its bulk section");
+    }
+    // Saturn's 1-bar equatorial radius, 60,268 ± 4 km (Archinal et al. 2018, Table 4).
+    return { ...giant, bulk: { state: "ok", value: { ...giant.bulk.value, radius_m: 60_268e3 } } };
+  });
 }
 
 /** The hand ice giant's CH₄ deck's τ(550): 13.5, B3 k-1's 01ffeb2d5fff0001.0700's. */
