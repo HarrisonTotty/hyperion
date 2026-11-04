@@ -55,11 +55,11 @@ path = "binary_pair_light_e.rs"
 task = "binary_pair_light_e"
 revision = 0
 inputs_sha256 = "3562f5290d461477f352050a44bfef53a4a2cbf3e582024f4651996046ebb79d"
-body_sha256 = "ffe0c874cf8d3de195b413b77a623e2089cc61526d25d776bc113129878ac9b0"
+body_sha256 = "7e540fe6fe9675568a8cccbad480c2b763a36aac546c082e4ebb28c85bf77819"
 fingerprint = [7296.0, -68.29662491189316, -61.4966112474516, 16.0, 7.0, -55.62109318001828, -2.220056569989846, 14.0, 7.0, -88.41113556948793, -63.352662805502774, 12.0, 7.0, -64.08463410154253, -15.363152902101497, 3.0, 7.0, -94.59617429118984, -67.66164314950699, 12.0, 7.0, -91.86327966587562, -33.61044896867474, 8.0, 7.0, -86.0083629285052, -69.61060223387204, 12.0, 7.0, -72.60098732858754, -20.414818069328916, 3.0, 7.0, -89.00932828002672, -68.11663877968358, 9.0, 7.0, -88.62697183615137, -9.356515269520708, 1.0, 7.0, -71.05905699326136, -68.11663877968358, 9.0, 7.0, -70.67670054938601, 0.0, 0.0, 7.0]
 since_generator_version = 27
 provisional = false
-acceptance = "7296 cells, 7296 sampled, 525312 samples (64 + 8 held out a cell), 341777 holding a changed star; held out: 9577 of 325797 changed bins beyond their own cell's samples, 14 bins not bounded by the table of the first 64, the least room -1.724 mag before the 0.3 mag margin; 7124 cells with a changed star, the brightest -11.96 mag; packed 10650 rows, 108495 segments, 391149 characters"
+acceptance = "7296 cells, 7296 sampled, 525312 samples (64 + 8 held out a cell), 341777 holding a changed star; held out: 9271 of 324239 changed bins beyond their own cell's samples, 35 bins not bounded by the table of the first 64, the least room -0.611 mag before the 0.3 mag margin; 7124 cells with a changed star, the brightest -11.49 mag; packed 10545 rows, 111153 segments, 399123 characters"
 
 [[table]]
 name = "binary_reach"
