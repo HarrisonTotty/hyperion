@@ -176,12 +176,14 @@ export interface GeometrySettings {
   readonly finClusters: boolean;
   /**
    * R14.T3.c: the lit pass's camera strides. `off` draws every cluster at stride 1; `measured` at
-   * the coarsest stride whose level's stated error plus its level's largest measured e_s,
-   * projected at the cluster's own distance, is within the view's τ′, each vertex the stride drops
-   * moved onto the coarser mesh by a distance morph of its own (`clusters/strides.ts`), and stride
-   * 1 in the forced region. Read where `litClusters` is on; the overlay's depth then takes its own
-   * pass at stride 1, whatever `overlayDepth` says. On each setting where its acceptance passes on
-   * the pod's seamless probe, else `off` (the brief's ruling, 2026-11-02): `measured` on low.
+   * the coarsest stride whose shared band the cluster lies beyond by (1 + β), the band the distance
+   * past which its block, the blocks on its sides and its edges' neighbours all draw that stride's
+   * stated error plus e_s within the view's τ′ (`clusters/strides.ts`), each vertex the stride
+   * drops moved onto the coarser mesh by a distance morph of its own, and stride 1 in the forced
+   * region. Read where `litClusters` is on; the overlay's depth then takes its own pass at stride
+   * 1, whatever `overlayDepth` says. On each setting where its acceptance passes on the pod's
+   * seamless probe, else `off` (the brief's ruling, 2026-11-02): `measured` on low, `off` on high,
+   * where a frame's change moved the ground past its 1 px.
    */
   readonly strides: "off" | "measured";
   /**
