@@ -143,9 +143,11 @@ impl CellCache for KeepCells {
 /// record's cell and offsets at −1,000, −100, +100 and +1,000 yr, in walk order. Blessed natively
 /// on x86-64; the wasip1 suite compares it. Re-pinned by name for P09.T28.d.b's exact orbit (it was
 /// `0xdc2a_4657_d88c_161e` on the two-body law), again in `MGE_BOXY`'s potential (P15.T3.c; it
-/// was `0xce83_b24f_e65c_7554`), and at generator version 26, with its counts (it was
-/// `0xcd72_f9db_7c8d_d35d`, of 3,286 records inside, 9,381 outside and 13,144 record-times).
-const MOVED_POSITIONS_DIGEST: u64 = 0x57e7_bc54_4f65_c17b;
+/// was `0xce83_b24f_e65c_7554`), at generator version 26, with its counts (it was
+/// `0xcd72_f9db_7c8d_d35d`, of 3,286 records inside, 9,381 outside and 13,144 record-times), and at
+/// 27, whose exact orbits take their states near the epoch by the arc from the epoch (P09.T28.d.c;
+/// it was `0x57e7_bc54_4f65_c17b`, its counts the same).
+const MOVED_POSITIONS_DIGEST: u64 = 0x3c6a_ea7f_882a_2e7f;
 
 /// D2: the Kepler regime moves the fixture's grid records inside the influence radius onto their
 /// orbits, bit for bit [`position_velocity_at`]'s, and leaves every record outside it on its
@@ -247,7 +249,9 @@ fn the_walks_pad_for_the_orbits(galaxy: &Galaxy) {
 /// by its own reach, and P09.T37's source will. The class cell at the black hole, where the
 /// nuclear disc's young deaths lie, at the epoch, ±100 and ±1,000 yr and either side of any
 /// explosion inside the clock window; and, where the line and that drift part, a millennium on the
-/// far side of each explosion from the epoch. Its counts are pinned as measured.
+/// far side of each explosion from the epoch. Its counts are pinned as measured: 23 entries from
+/// generator version 27 (20 at 26), whose class follows the nuclear disc's runaways and walkaways
+/// and thins its field's deaths by their ejection marks (P09.T33.b).
 #[test]
 fn a_catalogue_system_moves_by_its_class_near_the_black_hole() {
     let galaxy = galaxy();
@@ -323,7 +327,7 @@ fn a_catalogue_system_moves_by_its_class_near_the_black_hole() {
         entries.len()
     );
     // None lies inside the fixture's 7.19 ly edge, so none would follow an orbit by its regime.
-    assert_eq!((entries.len(), inside), (20, 0));
+    assert_eq!((entries.len(), inside), (23, 0));
 }
 
 /// The Type Ia class moves by its class near the black hole too (P09.T34.a over P09.T28.b.b):
@@ -335,7 +339,8 @@ fn a_catalogue_system_moves_by_its_class_near_the_black_hole() {
 /// walk pad holds it; a survivor, at up to 2,500 km/s and of its own star's layer, can leave its
 /// layer's walk pad within the window, which P09.T34.b's pad for layer D and P09.T37's source,
 /// padding by the class's own `v_fast`, answer, so those are counted. The counts are pinned as
-/// measured.
+/// measured: from generator version 27 layer D pads at `UNBOUND_PAD_SPEED` (P09.T34.b), which no
+/// member outruns (three survivors outran its pad at 26).
 #[test]
 fn a_type_ia_s_members_move_by_their_class_near_the_black_hole() {
     let galaxy = galaxy();
@@ -414,7 +419,7 @@ fn a_type_ia_s_members_move_by_their_class_near_the_black_hole() {
         "{entries} Type Ia in the class cells about the black hole, {survivors} survivors, \
          {past_pad} members past their layer's walk pad, {inside} inside the influence radius"
     );
-    assert_eq!((entries, survivors, past_pad, inside), (12, 7, 3, 0));
+    assert_eq!((entries, survivors, past_pad, inside), (12, 7, 0, 0));
 }
 
 /// The seed whose central grid holds the one record of the census C1 that the loss cone carves

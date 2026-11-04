@@ -9,7 +9,7 @@
 //! are those orbits'; the propagator's own golden pins it alone.
 
 use std::f64::consts::TAU;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
 use hyperion_sim::galaxy::consts::G;
@@ -405,8 +405,10 @@ fn the_epoch_state_comes_back_to_the_bit() {
 /// An S2-like member follows its exact orbit in the centre's potential, from generator version 25
 /// (P09.T28.d.b): P09.T28.a's propagator about the black hole and the stars inside its epoch
 /// radius, as the centre's model weighs them, gives it a 16-year period; at every time across the
-/// clock window its state is its exact orbit's ([`Trajectory::in_potential`], in the potential
-/// built from the galaxy's centre motion), to the bit, which parts from the propagator's by no
+/// clock window its state is its exact orbit's, to the bit, from generator version 27 by the arc
+/// from the epoch within half a radial period of it (P09.T28.d.c;
+/// [`Trajectory::in_potential_by_arc`], in the potential built from the galaxy's centre motion),
+/// and by the series beyond; which parts from the propagator's by no
 /// more than the arc at its apocentre of the orbit's turn a radial period (the Schwarzschild
 /// advance's 12′ less the stars' retrograde turn, `s2_advances_12_arcminutes_an_orbit`) over the
 /// radial periods elapsed, to 5%: 0.0043 ly a thousand years on, of 0.0067 ly; and a period brings
@@ -442,7 +444,8 @@ fn an_s2_like_member_follows_its_exact_orbit() {
     let period = orbit.period().expect("bound").value() / SECONDS_PER_JULIAN_YEAR;
     assert!((period - 16.0).abs() < 0.1, "{period} yr");
     let motion = galaxy.centre_motion();
-    let exact = Trajectory::in_potential(motion, &CentrePotential::new(motion), start);
+    let exact =
+        Trajectory::in_potential_by_arc(motion, &Arc::new(CentrePotential::new(motion)), start);
     let bound = exact
         .exact_orbit()
         .expect("S2 is bound in the centre's potential");

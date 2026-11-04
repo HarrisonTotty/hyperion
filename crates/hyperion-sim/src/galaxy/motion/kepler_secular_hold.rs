@@ -109,9 +109,10 @@ fn member(p: PointLy, velocity: [f64; 3]) -> EpochState {
 /// offsets that the exact orbit moves, at −1,000, −100, +100 and +1,000 yr, in walk order. Blessed
 /// natively on x86-64; the wasip1 suite compares it. Re-pinned by name, with its counts, in
 /// `MGE_BOXY`'s potential (P15.T3.c; it was `0x5a3e_f8cd_0176_dd6d`, of 3,281 records and 13,124
-/// record-times), and at generator version 26 (it was `0xea8a_e8e2_d8ea_ee1e`, of 3,279 and
-/// 13,116).
-const EXACT_POSITIONS_DIGEST: u64 = 0x6511_054f_8c58_03dd;
+/// record-times), at generator version 26 (it was `0xea8a_e8e2_d8ea_ee1e`, of 3,279 and 13,116),
+/// and at 27, whose exact orbits take their states near the epoch by the arc from the epoch
+/// (P09.T28.d.c; it was `0x6511_054f_8c58_03dd`).
+const EXACT_POSITIONS_DIGEST: u64 = 0x9ed7_a4e3_2ae5_44e1;
 
 /// D2: the exact orbit moves the fixture's Kepler-regime grid records bound in the centre's
 /// potential off their two-body orbits ([`position_at_two_body`]), bit for bit their trajectories'
