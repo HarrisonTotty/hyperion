@@ -32,6 +32,12 @@
 //! - a main-sequence donor (BSE's type 1) heavier than its white dwarf, neutron star or black hole
 //!   is held to its thermal rate, and transfers at it wherever a step at it still leaves the donor
 //!   overfilling its lobe ([`thermal_rate`]);
+//! - a white dwarf such a donor feeds at BSE's swell rate, 2.71 × 10⁻⁷ M☉ yr⁻¹, or more keeps its
+//!   size: it keeps the larger of its steady-burning limit and that rate and blows the rest off
+//!   from itself in an optically thick wind (Hachisu, Kato and Nomoto 1996, ApJ 470, L97;
+//!   `Engine::accretion`), where BSE swells it into a giant (P11.T4's heavy-donor wind: every
+//!   donor of 1.3 M☉ or more at τ = 0.3 opens above that rate, and swelled its dwarf into a giant
+//!   that merged with it within 212–414 years of its onset);
 //! - what is not accreted leaves with the accretor's specific orbital angular momentum where the
 //!   accretion marks it so (`Accretion::from_accretor`);
 //! - onto a white dwarf, a neutron star or a black hole, the transfer's step returns no spin to the

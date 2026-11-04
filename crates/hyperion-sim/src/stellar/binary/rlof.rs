@@ -28,7 +28,9 @@
 //! - **Accretion** (section 2.6.6): a main-sequence, Hertzsprung-gap or core-helium-burning star
 //!   takes min(1, 10 `τ_Ṁ` ÷ `τ_KH`) of it (equations 64 and 65) and is rejuvenated; a giant takes all;
 //!   a white dwarf fed hydrogen keeps ε of it below 1.03 × 10⁻⁷ M☉ yr⁻¹ (novae, equation 66), all
-//!   of it up to 2.71 × 10⁻⁷, and above that swells into a giant; a helium star fed by a
+//!   of it up to 2.71 × 10⁻⁷, and above that swells into a giant (fed by a donor held to its
+//!   thermal rate, it keeps its size and blows the excess off in a wind instead:
+//!   [`heavy_donor`](super::heavy_donor), P11.T4's fix); a helium star fed by a
 //!   hydrogen-rich donor takes all of it and swells into a core-helium-burning or AGB star, and one
 //!   fed by any other donor takes the thermally limited share (BSE `evolv2.f` 1476–1479);
 //!   degenerate accretors take what the Eddington limit allows (equations 67 and 68, X the accreted
@@ -114,6 +116,14 @@ pub(crate) const CODE_Q: f64 = 3.0;
 pub(crate) const NOVA_RATE: f64 = 1.03e-7;
 /// From this rate a white dwarf fed hydrogen swells into a giant (BSE section 2.6.6), M☉ yr⁻¹.
 const GIANT_RATE: f64 = 2.71e-7;
+/// The scale, M☉ yr⁻¹, of a white dwarf's critical rate ([`critical_rate`]): Hachisu, Kato and
+/// Nomoto 1999 (ApJ 522, 487, equation 5), whose form with the accreted hydrogen fraction X
+/// generalises Hachisu, Kato and Nomoto 1996's (ApJ 470, L97) 0.75 × 10⁻⁶ at X = 0.70 (recalled,
+/// not read at source: the pod reached no literature).
+const CRITICAL_RATE_SCALE: f64 = 5.3e-7;
+/// The white dwarf's mass, M☉, at which its critical rate ([`critical_rate`]) falls to nothing
+/// (Hachisu, Kato and Nomoto 1996, ApJ 470, L97; recalled, as [`CRITICAL_RATE_SCALE`]).
+const CRITICAL_RATE_ZERO_MASS: f64 = 0.4;
 /// A fed helium star or white dwarf swells only where the step's accretion exceeds this many times
 /// its own net wind over the step (BSE `evolv2.f` 1480, `dmchk = dm2 - 1.05d0*dms(j2)`, for a
 /// helium star; the paper, section 2.6.6, states no gate; ruling p11-c2-swell of 2026-10-06, gate
@@ -887,7 +897,7 @@ impl Engine {
         let a_idx = 1 - d;
         let (md, ma) = (s.masses[d], s.masses[a_idx]);
         let rate = x / dt;
-        let accretion = self.accretion(kd, ka, rate, ma, sa);
+        let accretion = self.accretion(kd, md, ka, rate, ma, sa);
         let gained = accretion.share * x;
         let lost = x - gained;
         let wind = base.wind;
@@ -951,18 +961,24 @@ impl Engine {
         Some((next, crate::math::ln(radius / lobe), accretion))
     }
 
-    /// The accretion of a transfer at `rate` from a donor of type `kd` onto an accretor of type
-    /// `ka`, mass `ma` and structure `sa` (BSE section 2.6.6).
+    /// The accretion of a transfer at `rate` from a donor of type `kd` and mass `md` onto an
+    /// accretor of type `ka`, mass `ma` and structure `sa` (BSE section 2.6.6).
     ///
     /// A helium star takes the whole transfer, and may swell ([`Engine::swell`]), only from a
     /// hydrogen-rich donor (BSE `evolv2.f` 1478–1479, the else branch of `kstar(j1).ge.7`; Hurley,
     /// Tout and Pols 2002, section 2.6.6; ruling p11-c2-swell of 2026-10-06, item B): from a helium
     /// star, a white dwarf or anything else it takes the thermally limited share (1477), as from a
     /// helium donor.
+    ///
+    /// A white dwarf fed hydrogen at [`GIANT_RATE`] or more by a donor held to its thermal rate
+    /// (P11.T4's fix, [`thermal_rate`](super::heavy_donor::thermal_rate)) does not swell ([`Engine::optically_thick_wind`]). Every other white dwarf fed so swells as BSE
+    /// has it; the general wind against the swell stays with the calibration (ruling p11-c2-swell
+    /// §6).
     #[must_use]
     pub(super) fn accretion(
         &self,
         kd: Kind,
+        md: f64,
         ka: Kind,
         rate: f64,
         ma: f64,
@@ -1021,6 +1037,8 @@ impl Engine {
                         from_accretor: false,
                         swells: false,
                     }
+                } else if heavy_donor::thermal_rate(kd, ka, md, ma) {
+                    self.optically_thick_wind(kd, rate, ma)
                 } else {
                     let light = (ka == Kind::HeliumWhiteDwarf && ma < 0.05)
                         || (ka != Kind::HeliumWhiteDwarf && ma < 0.5);
@@ -1059,6 +1077,22 @@ impl Engine {
                 from_accretor: false,
                 swells: false,
             },
+        }
+    }
+
+    /// The accretion of a white dwarf of `ma` M☉ fed hydrogen by a donor of type `kd` at `rate`, at
+    /// least [`GIANT_RATE`], that is held to its thermal rate (P11.T4's fix, [`Engine::accretion`]):
+    /// it keeps the larger of its [`critical_rate`] and [`GIANT_RATE`], blows the rest off from
+    /// itself in an optically thick wind and keeps its size (Hachisu, Kato and Nomoto 1996, ApJ
+    /// 470, L97).
+    #[must_use]
+    fn optically_thick_wind(&self, kd: Kind, rate: f64, ma: f64) -> Accretion {
+        let hydrogen = hydrogen_fraction(&self.ctx, kd.surface());
+        let kept = critical_rate(ma, hydrogen).max(GIANT_RATE);
+        Accretion {
+            share: (kept / rate).min(1.0),
+            from_accretor: true,
+            swells: false,
         }
     }
 
@@ -1487,11 +1521,32 @@ pub(super) fn kelvin_helmholtz(s: &Structure, kind: Kind) -> f64 {
 /// surface, which is Case BB's (about 2.9 × 10⁻⁸ M☉ yr⁻¹ onto a neutron star).
 #[must_use]
 pub(super) fn eddington_rate(ctx: &super::timeline::Context, surface: Surface, radius: f64) -> f64 {
-    let hydrogen = match surface {
+    2.08e-3 / (1.0 + hydrogen_fraction(ctx, surface)) * radius
+}
+
+/// The hydrogen fraction X of matter of `surface` (ruling 132.1): 0.76 − 3Z for hydrogen-rich
+/// matter (BSE section 2.6.6), none for a helium or carbon surface.
+#[must_use]
+fn hydrogen_fraction(ctx: &super::timeline::Context, surface: Surface) -> f64 {
+    match surface {
         Surface::Hydrogen => 0.76 - 3.0 * ctx.composition().z_fit().value(),
         Surface::Helium | Surface::Carbon => 0.0,
-    };
-    2.08e-3 / (1.0 + hydrogen) * radius
+    }
+}
+
+/// The critical rate, M☉ yr⁻¹, of a white dwarf of `mass` M☉ fed matter of hydrogen fraction
+/// `hydrogen`: the most its shell burns steadily into helium, above which it blows the excess off in
+/// an optically thick wind and keeps its size, 5.3 × 10⁻⁷ (1.7 − X) ÷ X (M − 0.4) (Hachisu, Kato
+/// and Nomoto 1996, ApJ 470, L97, the wind and the 0.4 M☉; in this form Hachisu, Kato and Nomoto
+/// 1999, ApJ 522, 487, equation 5; recalled, not read at source). 4.2 × 10⁻⁷ for 0.95 M☉ at
+/// X = 0.70; BSE's 2.71 × 10⁻⁷ is it at 0.76 M☉. It is negative below 0.4 M☉ and unbounded as X
+/// falls to nothing; [`Engine::accretion`] reads it for hydrogen-rich matter only (X of 0.67–0.76),
+/// and holds it to BSE's [`GIANT_RATE`] at least, which is not Hachisu, Kato and Nomoto's (below
+/// 0.76 M☉ the dwarf keeps more than their rate: 1.8 times at 0.6 M☉), so that the share kept is
+/// continuous where the swell begins.
+#[must_use]
+fn critical_rate(mass: f64, hydrogen: f64) -> f64 {
+    CRITICAL_RATE_SCALE * (1.7 - hydrogen) / hydrogen * (mass - CRITICAL_RATE_ZERO_MASS)
 }
 
 /// The dynamical timescale of a star of structure `s`, years (BSE equation 63):

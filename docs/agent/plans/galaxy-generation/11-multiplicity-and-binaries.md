@@ -7624,3 +7624,14 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     stars' with a main-sequence or substellar donor; 1 of the 13 black holes not fed by a dwarf born
     a neutron star, against the brief's 5%, a finding), the engine channels' chi-squares and
     `the_pinned_neutron_star_keeps_a_tenth_under_the_arm`'s every-27-hold row, re-pinned.
+- **P11.T4's heavy-donor wind, under `HEAVY_DONOR_VERSION` = 27** (lane
+  `fix-p11-t4-heavy-donor-wind`, 2026-11-04; no new hold, nothing moves at 26; folded at 27 with
+  the heavy-donor hold, `HeavyDonorRules` gone). `Engine::accretion` now takes the donor's mass: a
+  white dwarf fed hydrogen at `GIANT_RATE` or more by a donor `heavy_donor::thermal_rate` holds
+  keeps max(`critical_rate`, `GIANT_RATE`) ÷ rate and blows the rest off from itself
+  (`Engine::optically_thick_wind`), with no swell; every other accretion keeps BSE's swell.
+  `heavy_donor_hold::while_heavier` stops at a merger, at an accretor no longer a white dwarf, and
+  at q ≤ `REVERSED_BELOW` = 1.02 (lean, 2026-11-04: the pinned pair falls inside its lobe at
+  q = 1.012). Open: the paper's cataclysmic variable
+  (donor τ ≈ 0.75) falls inside its lobe at q = 1.36 after 10 kyr and transfers on its nuclear
+  timescale while the heavier for 2.3 Gyr; its restated tests read it after the reversal.

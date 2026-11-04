@@ -1295,7 +1295,7 @@ mod tests {
     use crate::id::{BodyId, Layer, SystemId};
     use crate::orbit::{Eccentricity, KeplerElements, Orientation};
     use crate::stellar::StarState;
-    use crate::stellar::binary::tests::{describe, pair, period_days};
+    use crate::stellar::binary::tests::{describe, pair, period_days, reversal_age};
     use crate::stellar::binary::{
         BinaryInput, BinaryMarks, BinaryParams, MarkedMerger, MarkedPhase, evolve,
     };
@@ -1399,19 +1399,47 @@ mod tests {
         assert_eq!(t.class_at(mid(&t, straggler)), BinaryClass::BlueStraggler);
     }
 
-    /// P11.T5: BSE's cataclysmic variable (section 3.2) is one, of the kind its rate and period
-    /// give, and an accreting white dwarf of the carved class its recurrence period gives.
+    /// P11.T4's heavy donors under every 27 hold: BSE's cataclysmic variable (section 3.2), whose
+    /// main-sequence star is heavier than its white dwarf when it fills its lobe, is a Type Ia
+    /// progenitor as it opens, a steady-burning carbon–oxygen dwarf (the supersoft phase), and
+    /// once the mass ratio has reversed a cataclysmic variable, and then a symbiotic star
+    /// (P11.T5's classes; under the held arm, deleted, it was a cataclysmic variable from its
+    /// opening).
     #[test]
-    fn the_papers_cataclysmic_variable_is_one() {
-        let t = cataclysmic();
+    fn the_papers_cataclysmic_variable_is_one_under_every_27_hold() {
+        let t = evolve(
+            &pair(6.0, 1.3, 630.0, 0.0, 0.02)
+                .with_params(BinaryParams::GENERATOR.with_alpha_ce(1.0))
+                .with_rules(crate::stellar::rules::StellarRules::every_27_hold()),
+            Years::new(1.5e10),
+        );
         let cv = segment(&t, |k, s| {
             k == SegmentKind::StableTransfer {
                 donor: Component::Secondary,
             } && s.stars()[1].phase() == Phase::MainSequence
                 && is_white_dwarf(s.stars()[0].phase())
         })
-        .unwrap_or_else(|| panic!("no cataclysmic variable\n{}", describe(&t)));
-        let age = mid(&t, cv);
+        .unwrap_or_else(|| panic!("no transfer onto the dwarf\n{}", describe(&t)));
+        let opening = &t.segments()[cv];
+        let onset = Years::new(opening.start().value() + 1.0);
+        let [dwarf, donor] = *t.state_at(onset).stars();
+        assert!(donor.mass() > dwarf.mass(), "{}", describe(&t));
+        assert_eq!(
+            t.class_at(onset),
+            BinaryClass::TypeIaProgenitor,
+            "{}",
+            describe(&t)
+        );
+        let reversed =
+            reversal_age(&t, cv).unwrap_or_else(|| panic!("no reversal\n{}", describe(&t)));
+        let age = Years::new(f64::midpoint(reversed.value(), opening.end().value()));
+        papers_cataclysmic_variable_at(&t, age);
+    }
+
+    /// BSE's cataclysmic variable `t` (section 3.2) at `age` is one, of the kind its rate and
+    /// period give, and an accreting white dwarf of the carved class its recurrence period gives;
+    /// and later its donor's giant makes it a symbiotic star.
+    fn papers_cataclysmic_variable_at(t: &BinaryTimeline, age: Years) {
         let state = t.state_at(age);
         let rate = state.transfer_rate().expect("transfer");
         let line = cv_critical_rate(state.stars()[0].mass(), disc_radius(&state, 0));
@@ -1427,17 +1455,13 @@ mod tests {
         } else {
             CarvedClass::AccretingWdSlow
         };
-        assert_eq!(
-            carved_class(&t, age),
-            Some(expected),
-            "P_rec {recurrence:?}"
-        );
+        assert_eq!(carved_class(t, age), Some(expected), "P_rec {recurrence:?}");
         // Later its donor, a giant, fills its lobe: a symbiotic star.
-        let symbiotic = segment(&t, |k, s| {
+        let symbiotic = segment(t, |k, s| {
             matches!(k, SegmentKind::StableTransfer { .. }) && is_giant(s.stars()[1].phase())
         })
         .expect("the donor's giant branch");
-        assert_eq!(t.class_at(mid(&t, symbiotic)), BinaryClass::Symbiotic);
+        assert_eq!(t.class_at(mid(t, symbiotic)), BinaryClass::Symbiotic);
     }
 
     /// P11.T5: BSE's double neutron star (section 3.4, without kicks) is a supergiant high-mass

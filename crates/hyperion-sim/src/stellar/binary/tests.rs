@@ -290,23 +290,14 @@ fn early_agb_core_at(
     Some((tau, rc, filling))
 }
 
-/// BSE section 3.2's cataclysmic variable (6.0 + 1.3 M☉, 630 d, `α_CE` = 1): the primary fills its
-/// lobe on the early AGB at 78 Myr, a common envelope leaves a helium giant of 1.5 M☉ that soon
-/// fills its lobe again, and a second leaves a carbon–oxygen white dwarf of 0.94 M☉ with the
-/// 1.3 M☉ star in an orbit under a day. Angular-momentum loss brings the main-sequence star into
-/// contact with its lobe, and it gives its mass to the dwarf through novae, across the
-/// Hertzsprung gap and up the giant branch, until it is a helium white dwarf of about 0.16 M☉ in
-/// a 4.5 d orbit.
-#[test]
-fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
-    let timeline = run(
-        6.0,
-        1.3,
-        630.0,
-        0.0,
-        BinaryParams::GENERATOR.with_alpha_ce(1.0),
-    );
-    let stages = starts(&timeline);
+/// BSE section 3.2's cataclysmic variable (6.0 + 1.3 M☉, 630 d, `α_CE` = 1) to the carbon–oxygen
+/// white dwarf its second common envelope leaves: the pair's stages and the
+/// second envelope's, with the entry, both envelopes and the dwarf of 0.88–1.0 M☉ in an orbit under
+/// a day asserted as the paper has them.
+fn papers_cataclysmic_variable_to_its_dwarf(
+    timeline: &BinaryTimeline,
+) -> (Vec<(SegmentKind, BinaryState)>, usize) {
+    let stages = starts(timeline);
     let first =
         find(&stages, 0, |k, _| *k == SegmentKind::CommonEnvelope).expect("a common envelope");
     let (_, entry) = &stages[first];
@@ -344,11 +335,7 @@ fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
          would fill from τ = {filling:.4?}",
         entry.age().value() / 1e6
     );
-    assert!(
-        rc < lobe,
-        "the core fills its lobe: {}",
-        describe(&timeline)
-    );
+    assert!(rc < lobe, "the core fills its lobe: {}", describe(timeline));
     let second =
         find(&stages, first + 1, |k, _| *k == SegmentKind::CommonEnvelope).expect("a second one");
     let after = &stages[second + 1].1;
@@ -359,6 +346,59 @@ fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
         after.stars()[0].mass()
     );
     assert!(days(after) < 1.0, "{}", days(after));
+    (stages, second)
+}
+
+/// The age, years, at which the mass ratio of the pair in `timeline`'s segment `i` of stable
+/// transfer from its secondary reverses, the donor first no heavier than its white dwarf, by
+/// bisection; `None` if it is still the heavier at the segment's end.
+pub(super) fn reversal_age(timeline: &BinaryTimeline, i: usize) -> Option<Years> {
+    let s = &timeline.segments()[i];
+    let lighter = |age: f64| {
+        let [dwarf, donor] = *timeline.state_at(Years::new(age)).stars();
+        donor.mass() <= dwarf.mass()
+    };
+    let (mut lo, mut hi) = (
+        s.start().value(),
+        s.end().value().min(timeline.until().value()),
+    );
+    if !lighter(hi) {
+        return None;
+    }
+    for _ in 0..60 {
+        let mid = f64::midpoint(lo, hi);
+        if lighter(mid) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(Years::new(hi))
+}
+
+/// The paper's cataclysmic variable's helium white dwarf at the end under every 27 hold, (M☉, P d),
+/// as measured (2026-11-04, at generator version 26): a wider orbit than the paper's 4.5 d, since
+/// its donor transfers on its nuclear timescale while it is the heavier.
+const PAPERS_CV_END_27: (f64, f64) = (0.190_5, 9.178_6);
+
+/// BSE section 3.2's cataclysmic variable under every 27 hold (P11.T4's heavy donors on): the
+/// paper's sequence to its white dwarf ([`papers_cataclysmic_variable_to_its_dwarf`]); then its 1.3 M☉ main-sequence
+/// star, heavier than the dwarf, fills its lobe at no less than a tenth of its thermal rate,
+/// M ÷ `τ_KH`, and above the novae's 1.03 × 10⁻⁷ M☉ yr⁻¹, with the dwarf still a carbon–oxygen
+/// white dwarf, which blows the excess off in a wind rather than swell, and the pair unmerged; once
+/// the mass ratio has reversed, the transfer goes on in the paper's novae; and the donor ends a
+/// helium white dwarf, pinned as measured ([`PAPERS_CV_END_27`]; P11.T4's heavy-donor wind, its
+/// research of 2026-11-04).
+#[test]
+fn the_papers_cataclysmic_variable_reproduces_its_sequence_under_every_27_hold() {
+    let timeline = evolve(
+        &pair(6.0, 1.3, 630.0, 0.0, 0.02)
+            .with_params(BinaryParams::GENERATOR.with_alpha_ce(1.0))
+            .with_rules(StellarRules::every_27_hold()),
+        Years::new(1.5e10),
+    );
+    let (stages, second) = papers_cataclysmic_variable_to_its_dwarf(&timeline);
+    assert_eq!(timeline.merger_age(), None, "{}", describe(&timeline));
     let cv = find(&stages, second, |k, s| {
         matches!(
             k,
@@ -367,11 +407,26 @@ fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
             }
         ) && s.stars()[1].phase() == Phase::MainSequence
     })
-    .expect("the main-sequence star fills its lobe: a cataclysmic variable");
-    let mid = Years::new(f64::midpoint(
-        stages[cv].1.age().value(),
-        timeline.segments()[cv].end().value(),
-    ));
+    .expect("the main-sequence star fills its lobe");
+    let opening = &timeline.segments()[cv];
+    let state = timeline.state_at(Years::new(opening.start().value() + 1.0));
+    let [dwarf, donor] = state.stars();
+    assert_eq!(dwarf.phase(), Phase::CarbonOxygenWhiteDwarf);
+    assert!(donor.mass() > dwarf.mass(), "{:?}", state.stars());
+    // M ÷ τ_KH, with τ_KH = 10⁷ M² ÷ (R L) years (Hurley, Tout and Pols 2002, equation 61).
+    let (m, r, l) = (
+        donor.mass().value(),
+        donor.radius().value(),
+        donor.luminosity().value(),
+    );
+    let thermal = r * l / (1e7 * m);
+    let rate = state.transfer_rate().expect("transfer").value();
+    assert!(
+        rate >= 0.1 * thermal && rate >= 1.03e-7,
+        "{rate} against the thermal {thermal}"
+    );
+    let reversed = reversal_age(&timeline, cv).expect("the mass ratio reverses in the transfer");
+    let mid = Years::new(f64::midpoint(reversed.value(), opening.end().value()));
     let rate = timeline
         .state_at(mid)
         .transfer_rate()
@@ -382,17 +437,14 @@ fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
         "novae, below 1.03 × 10⁻⁷ M☉/yr: {rate}"
     );
     let end = timeline.state_at(Years::new(1.5e10));
+    let (mass, period) = PAPERS_CV_END_27;
     assert_eq!(end.stars()[1].phase(), Phase::HeliumWhiteDwarf);
     assert!(
-        (0.12..0.2).contains(&end.stars()[1].mass().value()),
+        (end.stars()[1].mass().value() / mass - 1.0).abs() < 1e-3,
         "{:?}",
         end.stars()[1].mass()
     );
-    assert!(
-        (2.5..7.0).contains(&days(&end)),
-        "the paper's 4.5 d: {}",
-        days(&end)
-    );
+    assert!((days(&end) / period - 1.0).abs() < 1e-3, "{}", days(&end));
 }
 
 /// BSE section 3.4's double neutron star, in the variant of 13.6 M☉ with a lighter companion that
@@ -5306,13 +5358,21 @@ fn the_second_pre_test_never_passes_over_an_interaction() {
 /// 2.5 M☉ main-sequence donor at τ = 0.5 in slot 1, in stable transfer from it on a circular
 /// 10 R☉ orbit: the state at the end of a step of transfer, for the swell's unit tests.
 fn fed_engine(accretor: super::star::Member, age_years: f64, z: f64) -> super::evolve::Engine {
+    fed_engine_of(&pair(2.0, 2.5, 1.0, 0.0, z), accretor, age_years)
+}
+
+/// [`fed_engine`]'s engine for the pair `input` (its composition and rules).
+fn fed_engine_of(
+    input: &BinaryInput,
+    accretor: super::star::Member,
+    age_years: f64,
+) -> super::evolve::Engine {
     use std::sync::Arc;
 
     use super::evolve::{Engine, LiveOrbit};
     use super::star::{Member, Path};
     use super::timeline::Context;
 
-    let input = pair(2.0, 2.5, 1.0, 0.0, z);
     let k = input.orbit();
     let donor = Member::MainSequence {
         helium: false,
@@ -5327,7 +5387,7 @@ fn fed_engine(accretor: super::star::Member, age_years: f64, z: f64) -> super::e
         k.mean_anomaly_at_epoch(),
     );
     let mut engine = Engine::new(
-        Arc::new(Context::of(&input)),
+        Arc::new(Context::of(input)),
         age_years,
         1.0e10,
         [accretor, donor],
@@ -5587,7 +5647,7 @@ fn a_white_dwarf_donor_does_not_swell_a_helium_star() {
             Kind::HeliumGiant,
             Kind::NeutronStar,
         ] {
-            let accretion = engine.accretion(kd, ka, rate, m, &sa);
+            let accretion = engine.accretion(kd, 1.0, ka, rate, m, &sa);
             assert!(!accretion.swells, "{kd:?} at {rate:e} M☉/yr");
             assert!(
                 (accretion.share - thermal).abs() <= 1e-15,
@@ -5596,7 +5656,7 @@ fn a_white_dwarf_donor_does_not_swell_a_helium_star() {
             );
         }
         for kd in [Kind::MainSequence, Kind::GiantBranch, Kind::PulsingAgb] {
-            let accretion = engine.accretion(kd, ka, rate, m, &sa);
+            let accretion = engine.accretion(kd, 1.0, ka, rate, m, &sa);
             assert!(accretion.swells, "{kd:?} at {rate:e} M☉/yr");
             assert!(
                 accretion.share.total_cmp(&1.0).is_eq(),
@@ -5808,6 +5868,59 @@ fn a_fed_white_dwarf_swells_around_itself() {
                 );
             }
         }
+    }
+}
+
+/// P11.T4's heavy-donor wind: a carbon–oxygen white dwarf fed hydrogen at
+/// 2.71 × 10⁻⁷ M☉ yr⁻¹ or more by a heavier main-sequence donor keeps the larger of its critical
+/// rate, 5.3 × 10⁻⁷ (1.7 − X) ÷ X (M − 0.4) (Hachisu, Kato and Nomoto 1996, ApJ 470, L97; in this
+/// form Hachisu, Kato and Nomoto 1999, ApJ 522, 487, equation 5), and 2.71 × 10⁻⁷, blows the rest
+/// off from itself and does not swell; fed by a lighter main-sequence donor or a giant, it swells
+/// as BSE has it.
+#[test]
+fn a_white_dwarf_fed_by_a_heavier_donor_blows_off_the_excess() {
+    use super::star::{Kind, Member, Path, cooling_origin};
+
+    let age = 1.0e9;
+    let co = Kind::CarbonOxygenWhiteDwarf;
+    for ma in [0.6, 0.95, 1.1] {
+        let arm = {
+            let input = pair(2.0, 2.5, 1.0, 0.0, 0.02);
+            let ctx = super::timeline::Context::of(&input);
+            let phase = Phase::CarbonOxygenWhiteDwarf;
+            let dwarf = Member::Remnant {
+                phase,
+                birth: 0.5 * age,
+                origin: cooling_origin(&ctx, phase, ma, None),
+                mass: Path::starting(age, ma),
+            };
+            fed_engine_of(&input, dwarf, age)
+        };
+        let sa = arm.structure(0, age, ma, 0.0).expect("a white dwarf");
+        assert_eq!(sa.state.phase(), Phase::CarbonOxygenWhiteDwarf);
+        let x = 0.76 - 3.0 * arm.ctx.composition().z_fit().value();
+        let limit = 5.3e-7 * (1.7 - x) / x * (ma - 0.4);
+        for rate in [2.71e-7, 4.17e-7, 1e-6, 1e-4] {
+            let case = format!("{ma} M☉ at {rate:e} M☉/yr");
+            let wind = arm.accretion(Kind::MainSequence, 1.3, co, rate, ma, &sa);
+            let kept = (limit.max(2.71e-7) / rate).min(1.0);
+            assert!(!wind.swells && wind.from_accretor, "{case}: {wind:?}");
+            assert!(
+                (wind.share - kept).abs() <= 1e-12 * kept,
+                "{case}: {wind:?} against {kept}"
+            );
+            for (kd, md) in [(Kind::MainSequence, 0.5), (Kind::GiantBranch, 1.3)] {
+                let swell = arm.accretion(kd, md, co, rate, ma, &sa);
+                let expected = super::rlof::Accretion {
+                    share: 1.0,
+                    from_accretor: false,
+                    swells: true,
+                };
+                assert_eq!(swell, expected, "{case}, from a {kd:?} of {md} M☉");
+            }
+        }
+        let below = arm.accretion(Kind::MainSequence, 1.3, co, 2.0e-7, ma, &sa);
+        assert!(!below.swells && !below.from_accretor, "{ma}: {below:?}");
     }
 }
 
