@@ -10071,6 +10071,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     one on √(ac) (`"occluders"`, the light over the part they leave). Not taken: a cloud deck's
     table, the gravity bands' scale heights and refraction, as the composite takes none of them
     for the disc.
+  - _The captures' settle_ (fix-view-light-bloom, 2026-11-04): `smoke/viewLight.ts` drains each
+    frame and waits up to 10 s for its histogram, as `viewLightAir.ts` does. Its 1 s wait let a
+    cut's hold run out before any reading on a slower or loaded pod, so (a) presented at EV100 −1.
   - _Pending: the owner's RTX run_ of the histogram's added cost, 1080p, high, a star in frame.
 - **Retina (lean, 2026-11-01; lane fix-retina-frame).**
   - Design note 18: high's `terrain.renderHeightPx` is 1080 (was `null`), low's 720 its twin; a

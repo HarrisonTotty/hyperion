@@ -128,9 +128,12 @@ interface Settled {
   readonly role: ViewRole;
 }
 
-/** Waits for the renderer's next histogram, read back after its frame's copy has settled. */
+/**
+ * Waits for the renderer's next histogram, read back after its frame's copy has settled: up to 10 s,
+ * since SwiftShader takes seconds over a framing's first frame, its tables baked.
+ */
 async function nextHistogram(renderer: PhotorealRenderer): Promise<Histogram | undefined> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
     const histogram = renderer.takeHistogram();
     if (histogram !== undefined) {
       return histogram;
@@ -199,6 +202,14 @@ async function settle(
     });
     renderer.render(view, frame);
     exposure.noteImage(true);
+    // Each frame's work is drained before the next, so that its own histogram meters the next, as
+    // `viewLightAir.ts` does: on a slower device the 1 s wait gave none, and a cut's hold ran out
+    // before any reading, the frame presented at the start's exposure (2026-11-04).
+    const target = renderer.frameColours;
+    if (target !== null) {
+      // oxlint-disable-next-line no-await-in-loop
+      await engine.readTexture(target.drawn);
+    }
     if (present) {
       if (Number.isNaN(firstPresentedEv100)) {
         firstPresentedEv100 = ev100;
