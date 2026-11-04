@@ -2450,6 +2450,14 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     where a draw changes them (`drawing.ts`' `BoundState`); a dispatch keeps its layouts, views and
     bind groups (`compute.ts`' `DispatchObjects`, over the draw path's `BindGroupCache`); a
     submission's pass-time resolve ends its own command buffer, with no `pass times` encoder.
+  - `RenderEngine.renderTargets(renders: ReadonlyArray<TargetRender>)` draws a chain of targets
+    in one submission, exactly as each `render` in turn (a disposed target left out, a target of
+    several mips ending the submission); bloom's levels go through it (`BloomChain.run`). Each
+    frame of a submission takes its own `Frame` block (`uniforms.ts`' `FrameBlocks`, one write a
+    submission). Every `RenderEngine` (the fakes and `ProbedEngine` too) implements it.
+  - The inspection's 4 km window: under MAXIMIZE VIEW `setFreeRate` shows the folded label block
+    to read the rate, then folds it again for the ground's readout. Reached at low on SwiftShader;
+    at high a hold can span two frames, the camera meets the ground and the step fails (handoff).
   - Pending: the owner's Mac re-profile, `views-check --inspection --timing --hidden` (gate.txt).
 - **R14.T3.d** (`r14-t3c-strides`):
   - Landed from this lane behind `occlusion: "off"` on both settings; its acceptance captures (off

@@ -42,6 +42,7 @@ import type {
   RenderTargetFormat,
   RenderTargetSpec,
   RenderView,
+  TargetRender,
   TexelRect,
   TextureHandle,
   ViewSize,
@@ -205,6 +206,11 @@ export class ResilientEngine implements RenderEngine {
 
   createRenderTarget(spec: RenderTargetSpec): RenderTarget {
     return this.#current("createRenderTarget").createRenderTarget(spec);
+  }
+
+  /** Nothing while there is no device, as a target's own `render` draws nothing then. */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    this.#inner?.renderTargets(renders);
   }
 
   /**

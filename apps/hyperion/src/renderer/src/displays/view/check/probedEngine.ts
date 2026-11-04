@@ -62,6 +62,7 @@ import type {
   RenderTargetFormat,
   RenderTargetSpec,
   RenderView,
+  TargetRender,
   TexelRect,
   TextureHandle,
   ViewSize,
@@ -150,6 +151,9 @@ class ProbedView implements RenderView {
   }
 }
 
+/** The target each probed target forwards to, for the engine's renders of several at once. */
+const INNER_TARGETS = new WeakMap<RenderTarget, RenderTarget>();
+
 /** A target that reports its renders and sizes. */
 class ProbedTarget implements RenderTarget {
   readonly name: string;
@@ -164,6 +168,7 @@ class ProbedTarget implements RenderTarget {
     this.#engine = engine;
     this.#probe = probe;
     this.#nowMs = nowMs;
+    INNER_TARGETS.set(this, inner);
   }
 
   // Read through, since a resize replaces the attachments.
@@ -425,6 +430,25 @@ export class ProbedEngine implements RenderEngine {
     const probed = new ProbedTarget(target, this, this.#probe, this.#nowMs);
     this.#probe.madeTarget(spec, probed);
     return probed;
+  }
+
+  /**
+   * Renders through the inner engine in one submission (plan R14), the probe told of each render
+   * as each target's own would tell it: the resolves the submission took and its time are the
+   * first render's, as its frame's passes are timed under one resolve, and each frame submitted.
+   */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    const first = this.#inner.passTimesFrame;
+    const startMs = this.#nowMs();
+    this.#inner.renderTargets(
+      renders.map(({ target, frame }) => ({ target: INNER_TARGETS.get(target) ?? target, frame })),
+    );
+    const cpuMs = this.#nowMs() - startMs;
+    const last = this.#inner.passTimesFrame;
+    renders.forEach(({ target, frame }, index) => {
+      this.#probe.rendered(target.name, index === 0 ? first : last, last, index === 0 ? cpuMs : 0);
+      this.#probe.submitted(target.name, frame);
+    });
   }
 
   createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget {

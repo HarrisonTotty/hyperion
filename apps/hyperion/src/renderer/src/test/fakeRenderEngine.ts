@@ -26,6 +26,7 @@ import type {
   PassTimes,
   RenderEngine,
   RenderView,
+  TargetRender,
   TextureHandle,
   ViewSize,
   WgslMaterialSpec,
@@ -206,6 +207,12 @@ export class FakeRenderEngine implements RenderEngine {
   }
   createRenderTarget(): never {
     throw notFaked("createRenderTarget");
+  }
+  /** Each target's own `render`, in order, as the engine's one submission draws them (plan R14). */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    for (const { target, frame } of renders) {
+      target.render(frame);
+    }
   }
   /**
    * A depth-layer target with nothing behind it (plan R10, R10.T9.b), its depth a handle as

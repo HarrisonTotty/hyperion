@@ -55,6 +55,7 @@ import type {
   RenderTargetSpec,
   RenderView,
   SamplerSpec,
+  TargetRender,
   TexelRect,
   TextureHandle,
   WgslMaterialSpec,
@@ -447,6 +448,54 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     const target = new WebGpuRenderTarget(this, spec);
     this.#targets.add(target);
     return target;
+  }
+
+  /**
+   * Renders each frame into its target, in order, in one submission, its passes' times resolved
+   * at its end (plan R14, the owner's Mac): exactly as each target's `render` in turn, whose frame
+   * would have been a submission of its own, since each frame takes its own `Frame` block and ring
+   * slots ({@link Drawing.encodeFrames}) and the queue runs the passes in the same order. A target
+   * of several mips ends a submission, its mips made after it, as its `render` makes them, before
+   * the next target's frame is encoded.
+   *
+   * @throws Error for a target this engine did not make, and as a target's `render` does, before
+   *   anything is encoded.
+   */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    const prepared = renders.flatMap(({ target, frame }) => {
+      if (
+        !(target instanceof WebGpuRenderTarget) ||
+        (!this.#targets.has(target) && !target.disposed)
+      ) {
+        throw new Error(`target ${target.name} was not made by this engine`);
+      }
+      // A disposed target draws nothing, as its `render` does.
+      const made = target.prepare(frame);
+      return made === null ? [] : [{ frame, ...made }];
+    });
+    const submissions: Array<typeof prepared> = [[]];
+    for (const each of prepared) {
+      submissions.at(-1)?.push(each);
+      if (each.mips) {
+        submissions.push([]);
+      }
+    }
+    for (const submission of submissions) {
+      const [first] = submission;
+      if (first === undefined) {
+        continue;
+      }
+      this.#submit(
+        first.frame.label,
+        (encoder) => {
+          this.#drawing.encodeFrames(encoder, submission, (label) => this.#timer.writesFor(label));
+        },
+        ALWAYS,
+      );
+      for (const { drawn } of submission) {
+        drawn();
+      }
+    }
   }
 
   /**

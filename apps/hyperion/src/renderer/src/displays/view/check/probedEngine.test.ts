@@ -1,6 +1,7 @@
 import { describe, expect, it, type Mock, vi } from "vitest";
 
 import { FakeAdapter, SWIFTSHADER_INFO } from "../../../test/fakeGpu";
+import { countingRenderEngine } from "../../../test/countingRenderEngine";
 import { FakeRenderEngine } from "../../../test/fakeRenderEngine";
 import {
   COMPOSITE_MATERIAL,
@@ -292,5 +293,49 @@ describe("a probed engine's lit probe (R08.T9.b's measurement)", () => {
     expect(litProbedWgsl(COMPOSITE_MATERIAL.fragmentWgsl, "transmittance-one")).toBe(
       COMPOSITE_MATERIAL.fragmentWgsl,
     );
+  });
+});
+
+describe("a probed engine's renders of several targets in one submission (plan R14)", () => {
+  it("forwards each to its own target, reporting the submission as the first render's", async () => {
+    const inner = await countingRenderEngine();
+    const probe = recordingProbe();
+    let clockMs = 0;
+    const engine = new ProbedEngine(inner, probe, () => {
+      clockMs += 2;
+      return clockMs;
+    });
+    const spec = {
+      size: { widthPx: 4, heightPx: 4 },
+      format: "rgba16float",
+      mips: 1,
+      depth: false,
+      category: "render-targets",
+    } as const;
+    const first = engine.createRenderTarget({ ...spec, name: "view:bloom down 1" });
+    const second = engine.createRenderTarget({ ...spec, name: "view:bloom down 2" });
+    const frame = {
+      label: "bloom",
+      viewRotation: new Float32Array(16),
+      projection: new Float32Array(16),
+      draws: [],
+      postProcesses: [],
+    };
+    engine.renderTargets([
+      { target: first, frame },
+      { target: second, frame },
+    ]);
+    expect([
+      inner.targetFrames.length,
+      probe.rendered.mock.calls,
+      probe.submitted.mock.calls.length,
+    ]).toEqual([
+      2,
+      [
+        ["view:bloom down 1", 0, 0, 2],
+        ["view:bloom down 2", 0, 0, 0],
+      ],
+      2,
+    ]);
   });
 });

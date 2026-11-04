@@ -129,6 +129,12 @@ export interface RenderTarget {
   dispose(): void;
 }
 
+/** One render of {@link RenderEngine.renderTargets}: a target and the frame drawn into it. */
+export interface TargetRender {
+  readonly target: RenderTarget;
+  readonly frame: FrameSubmission;
+}
+
 /** The GPU-side arguments of an indirect draw or dispatch, in WebGPU's layout. */
 export interface IndirectArgs {
   /** Created with `GPUBufferUsage.INDIRECT`. */
@@ -600,6 +606,17 @@ export interface RenderEngine {
    *   {@link RenderTargetSpec.depthOf} has no depth or is not this engine's live target's.
    */
   createRenderTarget(spec: RenderTargetSpec): RenderTarget;
+  /**
+   * Renders each frame into its target, in order, in one submission (plan R14, the owner's Mac): a
+   * chain of targets, each sampling the ones before, such as bloom's levels, draws exactly as each
+   * target's own `render` in turn would, in one command buffer and one write of its uniforms
+   * rather than one a target; a disposed target's render is left out, as its `render` draws
+   * nothing.
+   *
+   * @throws as each target's `render` does, before anything is encoded, so that nothing of the
+   *   chain is submitted; Error for a target another engine made.
+   */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void;
   /**
    * A depth-only target of array layers (plan R10, R10.T9.b): the terrain's shadow cascades, one
    * set for the engine, drawn again for each view.

@@ -20,6 +20,7 @@ import type {
   MeshHandle,
   RenderEngine,
   RenderTarget,
+  TargetRender,
   TextureHandle,
   ViewSize,
   WgslMaterialSpec,
@@ -206,25 +207,29 @@ export class BloomChain {
   }
 
   /**
-   * Runs the chain over `hdrColour`, the view's HDR colour at the chain's size.
+   * Runs the chain over `hdrColour`, the view's HDR colour at the chain's size: its levels' renders
+   * in order, in one submission (plan R14, the owner's Mac; `RenderEngine.renderTargets`), each
+   * level sampling the one before as its own render would.
    *
    * @param thresholdPreExposed - The threshold in the target's units (`bloomThreshold`).
    */
   run(hdrColour: TextureHandle, thresholdPreExposed: number): void {
     const last = this.lastLevel;
+    const renders: TargetRender[] = [];
     for (let m = 1; m <= last; m += 1) {
       const target = this.#down[m - 1];
       const source = m === 1 ? hdrColour : this.#down[m - 2]?.colour;
       if (target === undefined || source === undefined) {
         throw new Error(`bloom chain ${this.#name} has no level ${m}`);
       }
-      target.render(
-        this.#frame({
+      renders.push({
+        target,
+        frame: this.#frame({
           material: this.#downMaterial,
           uniforms: { threshold: new Float32Array([m === 1 ? thresholdPreExposed : 0]) },
           textures: { source },
         }),
-      );
+      });
     }
     for (let m = last - 1; m >= 1; m -= 1) {
       const target = this.#up[m - 1];
@@ -233,8 +238,9 @@ export class BloomChain {
       if (target === undefined || level === undefined || coarse === undefined) {
         throw new Error(`bloom chain ${this.#name} has no level ${m}`);
       }
-      target.render(
-        this.#frame({
+      renders.push({
+        target,
+        frame: this.#frame({
           material: this.#upMaterial,
           uniforms: {
             levelWeight: new Float32Array([levelWeight(this.#kernel, m)]),
@@ -242,8 +248,9 @@ export class BloomChain {
           },
           textures: { level, coarse },
         }),
-      );
+      });
     }
+    this.#engine.renderTargets(renders);
   }
 
   /** Releases the chain's targets. */

@@ -57,6 +57,7 @@ import type {
   RenderTargetFormat,
   RenderTargetSpec,
   RenderView,
+  TargetRender,
   TexelRect,
   TextureHandle,
   ViewSize,
@@ -144,7 +145,12 @@ class TwinTarget implements RenderTarget {
   }
 
   render(frame: FrameSubmission): void {
-    this.#inner.render(withTwins(frame, this.#twinOf));
+    this.#inner.render(this.twinned(frame));
+  }
+
+  /** `frame` as this target draws it, by the engine's twins where they stand in. */
+  twinned(frame: FrameSubmission): FrameSubmission {
+    return withTwins(frame, this.#twinOf);
   }
 
   /** The target as the engine made it, for an engine's `depthOf` (`RenderTargetSpec.depthOf`). */
@@ -273,6 +279,17 @@ export class SourceTableEngine implements RenderEngine {
       depthOf === undefined ? spec : { ...spec, depthOf },
     );
     return new TwinTarget(inner, this.#materialTwinOf, preparationOf(spec));
+  }
+
+  /** The inner engine's one submission of each render, its frame by the twins as its own would. */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    this.#inner.renderTargets(
+      renders.map(({ target, frame }) =>
+        target instanceof TwinTarget
+          ? { target: target.inner, frame: target.twinned(frame) }
+          : { target, frame },
+      ),
+    );
   }
 
   createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget {

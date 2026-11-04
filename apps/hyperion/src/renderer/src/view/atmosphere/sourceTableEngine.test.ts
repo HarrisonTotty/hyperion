@@ -117,6 +117,36 @@ describe("the lit passes' table-only twins (R08.T9.b's lever)", () => {
     });
   });
 
+  it("renders a chain of its targets in one submission by their twins, as each render would (plan R14)", async () => {
+    const { inner, engine, material, mesh, render } = await setUp();
+    const oneBand = tableOf(engine, ONE_BAND_SOURCE_TABLE_NAME);
+    render(drawOf(material, mesh, oneBand));
+    await engine.twinsSettled();
+    const second = engine.createRenderTarget({
+      name: "scene 2",
+      size: { widthPx: 4, heightPx: 4 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    const before = inner.targetFrames.length;
+    const frame = {
+      label: "bodies",
+      viewRotation: new Float32Array(16),
+      projection: new Float32Array(16),
+      draws: [drawOf(material, mesh, oneBand)],
+      postProcesses: [],
+    };
+    // A target of the scene's format, where the twin is prepared already.
+    second.render(frame);
+    engine.renderTargets([{ target: second, frame }]);
+    expect(inner.targetFrames.slice(before).map((drawn) => drawn.draws[0]?.material.name)).toEqual([
+      "bodies:disc (table only)",
+      "bodies:disc (table only)",
+    ]);
+  });
+
   it("dispatches a kernel's twin where a one-band table is bound, from the dispatch after it is made", async () => {
     const { inner, engine } = await setUp();
     const oneBand = tableOf(engine, ONE_BAND_SOURCE_TABLE_NAME);

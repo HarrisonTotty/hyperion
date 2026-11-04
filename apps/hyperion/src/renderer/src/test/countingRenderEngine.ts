@@ -67,6 +67,7 @@ import type {
   RenderTargetFormat,
   RenderTargetSpec,
   RenderView,
+  TargetRender,
   TextureHandle,
   WgslMaterialSpec,
   WgslPostProcessSpec,
@@ -442,6 +443,13 @@ export class CountingRenderEngine implements RenderEngine {
    * @throws Error naming the target where its size or layer count does not fit the device, as the
    *   engine refuses it.
    */
+  /** Each target's own `render`, in order, as the engine's one submission draws them (plan R14). */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    for (const { target, frame } of renders) {
+      target.render(frame);
+    }
+  }
+
   createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget {
     this.#available("createDepthLayers");
     assertDepthLayersFit(spec, this.#capabilities);

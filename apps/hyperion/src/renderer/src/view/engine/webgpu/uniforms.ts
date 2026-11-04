@@ -315,3 +315,105 @@ export class UniformRing {
     this.#bindGroups.clear();
   }
 }
+
+/**
+ * One submission's `Frame` blocks, each in a slot of its own of one uniform buffer, at the device's
+ * `minUniformBufferOffsetAlignment` (plan R14, the owner's Mac): a submission of several frames
+ * (`RenderEngine.renderTargets`) gives each its own block, uploaded in one write.
+ *
+ * @remarks
+ * A submission calls {@link FrameBlocks.write} with its frames' blocks, in order, before it is
+ * encoded, and binds block `i` through {@link FrameBlocks.bindGroup}: a bind group of the frame
+ * layout over the slot's {@link FRAME_BYTES}, as the one buffer of a single frame was before. The
+ * queue orders the write before the submission's commands and after the previous ones, so one
+ * buffer serves every submission. It grows by doubling, through the engine's one creation path.
+ */
+export class FrameBlocks {
+  readonly #host: RingHost;
+  readonly #layout: GPUBindGroupLayout;
+  readonly #strideBytes: number;
+  #buffer: BufferHandle | null = null;
+  #slots = 0;
+  #staging = new ArrayBuffer(0);
+  /** A bind group per slot, over the current buffer. */
+  readonly #bindGroups = new Map<number, GPUBindGroup>();
+
+  constructor(host: RingHost, layout: GPUBindGroupLayout) {
+    this.#host = host;
+    this.#layout = layout;
+    const alignment = host.device.limits.minUniformBufferOffsetAlignment;
+    this.#strideBytes = Math.ceil(FRAME_BYTES / alignment) * alignment;
+    // One slot from the start, as a single frame's one buffer was made with the draw path.
+    this.#ensureSlots(1);
+  }
+
+  /** Writes `blocks`, one a slot from the first, to the GPU, the buffer grown to hold them. */
+  write(blocks: ReadonlyArray<Float32Array<ArrayBuffer>>): void {
+    this.#ensureSlots(blocks.length);
+    if (this.#buffer === null || blocks.length === 0) {
+      return;
+    }
+    const bytes = (blocks.length - 1) * this.#strideBytes + FRAME_BYTES;
+    if (this.#staging.byteLength < bytes) {
+      this.#staging = new ArrayBuffer(this.#slots * this.#strideBytes);
+    }
+    blocks.forEach((block, index) => {
+      new Float32Array(this.#staging, index * this.#strideBytes, FRAME_BYTES / 4).set(block);
+    });
+    this.#host.writeBuffer(this.#buffer, 0, new Uint8Array(this.#staging, 0, bytes));
+  }
+
+  /** The bind group of slot `index`'s block, over the current buffer. */
+  bindGroup(index: number): GPUBindGroup {
+    let bindGroup = this.#bindGroups.get(index);
+    if (bindGroup === undefined) {
+      if (this.#buffer === null || index >= this.#slots) {
+        throw new Error(`the frame blocks hold no slot ${String(index)}`);
+      }
+      bindGroup = this.#host.device.createBindGroup({
+        label: "frame",
+        layout: this.#layout,
+        entries: [
+          {
+            binding: 0,
+            resource: {
+              buffer: this.#host.gpuBufferOf(this.#buffer),
+              offset: index * this.#strideBytes,
+              size: FRAME_BYTES,
+            },
+          },
+        ],
+      });
+      this.#bindGroups.set(index, bindGroup);
+    }
+    return bindGroup;
+  }
+
+  /** Destroys the buffer. */
+  dispose(): void {
+    if (this.#buffer !== null) {
+      this.#host.destroyBuffer(this.#buffer);
+      this.#buffer = null;
+    }
+    this.#slots = 0;
+    this.#bindGroups.clear();
+  }
+
+  #ensureSlots(count: number): void {
+    if (count <= this.#slots) {
+      return;
+    }
+    const slots = Math.max(1, 2 ** Math.ceil(Math.log2(count)));
+    if (this.#buffer !== null) {
+      this.#host.destroyBuffer(this.#buffer);
+    }
+    this.#buffer = this.#host.createBuffer({
+      name: "frame uniforms",
+      bytes: (slots - 1) * this.#strideBytes + FRAME_BYTES,
+      usage: BUFFER_USAGE.UNIFORM | BUFFER_USAGE.COPY_DST,
+      category: "other",
+    });
+    this.#slots = slots;
+    this.#bindGroups.clear();
+  }
+}

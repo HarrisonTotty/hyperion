@@ -13,11 +13,9 @@
  * submission of its own, as a frame is.
  */
 
-import { BUFFER_USAGE } from "../gpuFlags";
 import { ID_NONE } from "../idTarget";
 import { extentOf, type TextureSpec } from "../memory";
 import {
-  type BufferHandle,
   type DepthLayerPass,
   type DrawItem,
   type FrameSubmission,
@@ -45,7 +43,7 @@ import { BindGroupCache, type CachedBindGroupEntry } from "./bindGroupCache";
 import { viewDimensionBinds, viewDimensionOf } from "./resources";
 import type { TextureBindingSpec } from "../types";
 import {
-  FRAME_BYTES,
+  FrameBlocks,
   packFrame,
   type RingHost,
   type RingSlot,
@@ -236,8 +234,8 @@ export class Drawing {
   readonly #host: DrawingHost;
   readonly frameLayout: GPUBindGroupLayout;
   readonly drawLayout: GPUBindGroupLayout;
-  readonly #frameBuffer: BufferHandle;
-  readonly #frameBindGroup: GPUBindGroup;
+  /** Each submission's `Frame` blocks, one a frame (plan R14). */
+  readonly #frames: FrameBlocks;
   readonly #ring: UniformRing;
   readonly #fullScreen: GPUShaderModule;
   readonly #bindGroups: BindGroupCache;
@@ -255,17 +253,7 @@ export class Drawing {
       label: "draw",
       entries: [{ binding: 0, visibility, buffer: { type: "uniform", hasDynamicOffset: true } }],
     });
-    this.#frameBuffer = host.createBuffer({
-      name: "frame uniforms",
-      bytes: FRAME_BYTES,
-      usage: BUFFER_USAGE.UNIFORM | BUFFER_USAGE.COPY_DST,
-      category: "other",
-    });
-    this.#frameBindGroup = device.createBindGroup({
-      label: "frame",
-      layout: this.frameLayout,
-      entries: [{ binding: 0, resource: { buffer: host.gpuBufferOf(this.#frameBuffer) } }],
-    });
+    this.#frames = new FrameBlocks(host, this.frameLayout);
     this.#ring = new UniformRing(host, this.drawLayout);
     this.#bindGroups = new BindGroupCache(device);
     this.#fullScreen = device.createShaderModule({ label: "full screen", code: fullScreenWgsl });
@@ -408,9 +396,7 @@ export class Drawing {
    * Encodes `frame` into `output`: the draws' pass, then each post-process's.
    *
    * @remarks
-   * The `Frame` buffer and the ring are shared by every view and target and rewritten from the
-   * start for each frame, so the caller submits `encoder` before it encodes the next frame: the
-   * queue then orders each frame's uploads before its own commands and after the previous ones.
+   * {@link Drawing.encodeFrames} of the one frame.
    *
    * @param timestamps - The timestamp writes of a pass by its label, when the frame is timed.
    */
@@ -420,17 +406,58 @@ export class Drawing {
     output: FrameOutput,
     timestamps: (label: string) => GPURenderPassTimestampWrites | undefined,
   ): void {
-    const host = this.#host;
-    this.#ring.begin();
-    // A post-process whose shaders failed is left out of the chain; with none left, the draws go
-    // straight to the output.
-    const postProcesses = this.#resolvePostProcesses(frame, output.colourFormat);
-    const intermediates = postProcesses.length > 0 ? output.intermediates() : null;
-    const sceneFormat = intermediates === null ? output.colourFormat : INTERMEDIATE_FORMAT;
-    const draws = this.#resolveDraws(frame.draws, sceneFormat, output.depth !== null);
-    host.writeBuffer(this.#frameBuffer, 0, packFrame(frame, output.size));
-    this.#ring.upload();
+    this.encodeFrames(encoder, [{ frame, output }], timestamps);
+  }
 
+  /**
+   * Encodes each frame into its output, in order: its draws' pass, then each post-process's, as
+   * {@link Drawing.encodeFrame} would one by one (plan R14, the owner's Mac).
+   *
+   * @remarks
+   * The `Frame` blocks and the ring are shared by every view and target and rewritten from the
+   * start for each submission, so the caller submits `encoder` before it encodes the next: the
+   * queue then orders the submission's uploads before its own commands and after the previous
+   * ones. Within it each frame takes a `Frame` block and ring slots of its own, all uploaded before
+   * any is read, so that each frame's passes read what they would in a submission of their own.
+   *
+   * @param timestamps - The timestamp writes of a pass by its label, when the frame is timed.
+   */
+  encodeFrames(
+    encoder: GPUCommandEncoder,
+    frames: ReadonlyArray<{ readonly frame: FrameSubmission; readonly output: FrameOutput }>,
+    timestamps: (label: string) => GPURenderPassTimestampWrites | undefined,
+  ): void {
+    this.#ring.begin();
+    const resolved = frames.map(({ frame, output }) => {
+      // A post-process whose shaders failed is left out of the chain; with none left, the draws go
+      // straight to the output.
+      const postProcesses = this.#resolvePostProcesses(frame, output.colourFormat);
+      const intermediates = postProcesses.length > 0 ? output.intermediates() : null;
+      const sceneFormat = intermediates === null ? output.colourFormat : INTERMEDIATE_FORMAT;
+      const draws = this.#resolveDraws(frame.draws, sceneFormat, output.depth !== null);
+      return { frame, output, postProcesses, intermediates, draws };
+    });
+    this.#frames.write(frames.map(({ frame, output }) => packFrame(frame, output.size)));
+    this.#ring.upload();
+    resolved.forEach((each, index) => {
+      this.#encodeResolvedFrame(encoder, each, this.#frames.bindGroup(index), timestamps);
+    });
+  }
+
+  /** Encodes one frame of {@link Drawing.encodeFrames}, its uploads written, its `Frame` `frameGroup`. */
+  #encodeResolvedFrame(
+    encoder: GPUCommandEncoder,
+    resolved: {
+      readonly frame: FrameSubmission;
+      readonly output: FrameOutput;
+      readonly postProcesses: ReadonlyArray<ResolvedPostProcess>;
+      readonly intermediates: readonly [GPUTexture, GPUTexture] | null;
+      readonly draws: ReadonlyArray<ResolvedDraw>;
+    },
+    frameGroup: GPUBindGroup,
+    timestamps: (label: string) => GPURenderPassTimestampWrites | undefined,
+  ): void {
+    const { frame, output, postProcesses, intermediates, draws } = resolved;
     const sceneColour =
       intermediates === null ? output.colour : this.#viewOf(intermediates[0], "2d", false);
     // Another pass's colour, copied in, under a scissor that leaves the rest of it as it was.
@@ -466,10 +493,10 @@ export class Drawing {
       const { x, y, width, height } = frame.scissor;
       scene.setScissorRect(x, y, width, height);
     }
-    scene.setBindGroup(0, this.#frameBindGroup);
+    scene.setBindGroup(0, frameGroup);
     const bound = new BoundState();
-    for (const resolved of draws) {
-      encodeDraw(scene, resolved, this.#ring.bindGroup(resolved.slot), bound);
+    for (const draw of draws) {
+      encodeDraw(scene, draw, this.#ring.bindGroup(draw.slot), bound);
     }
     scene.end();
 
@@ -477,7 +504,7 @@ export class Drawing {
       return;
     }
     const steps = chainSteps(postProcesses.length);
-    postProcesses.forEach((resolved, index) => {
+    postProcesses.forEach((post, index) => {
       const step = steps[index];
       if (step === undefined) {
         return;
@@ -487,7 +514,7 @@ export class Drawing {
         step.output === "output"
           ? output.colour
           : this.#viewOf(intermediates[step.output], "2d", false);
-      const label = `${frame.label} ${resolved.record.spec.name}`;
+      const label = `${frame.label} ${post.record.spec.name}`;
       const pass = encoder.beginRenderPass({
         label,
         colorAttachments: [
@@ -495,10 +522,10 @@ export class Drawing {
         ],
         ...optionalTimestamps(timestamps(label)),
       });
-      pass.setPipeline(resolved.pipeline);
-      pass.setBindGroup(0, this.#frameBindGroup);
-      pass.setBindGroup(1, this.#ring.bindGroup(resolved.slot), [resolved.slot.offsetBytes]);
-      pass.setBindGroup(2, this.#postProcessResources(resolved, input));
+      pass.setPipeline(post.pipeline);
+      pass.setBindGroup(0, frameGroup);
+      pass.setBindGroup(1, this.#ring.bindGroup(post.slot), [post.slot.offsetBytes]);
+      pass.setBindGroup(2, this.#postProcessResources(post, input));
       pass.draw(3);
       pass.end();
     });
@@ -511,7 +538,7 @@ export class Drawing {
    * pipelines.
    *
    * @remarks
-   * It rewinds the ring and rewrites the one `Frame` buffer, as a frame does, so the caller submits
+   * It rewinds the ring and rewrites the first `Frame` block, as a frame does, so the caller submits
    * `encoder` before it encodes the next pass or frame: each layer is a submission of its own. A
    * draw whose pipeline is still being made is left out, as from a frame.
    *
@@ -525,7 +552,7 @@ export class Drawing {
   ): void {
     this.#ring.begin();
     const draws = this.#resolveDraws(pass.draws, "depth-only", true);
-    this.#host.writeBuffer(this.#frameBuffer, 0, packFrame(pass, output.size));
+    this.#frames.write([packFrame(pass, output.size)]);
     this.#ring.upload();
     const encoded = encoder.beginRenderPass({
       label: pass.label,
@@ -538,7 +565,7 @@ export class Drawing {
       },
       ...optionalTimestamps(timestamps(pass.label)),
     });
-    encoded.setBindGroup(0, this.#frameBindGroup);
+    encoded.setBindGroup(0, this.#frames.bindGroup(0));
     const bound = new BoundState();
     for (const draw of draws) {
       encodeDraw(encoded, draw, this.#ring.bindGroup(draw.slot), bound);
@@ -549,7 +576,7 @@ export class Drawing {
   /** Destroys the draw path's buffers. */
   dispose(): void {
     this.#ring.dispose();
-    this.#host.destroyBuffer(this.#frameBuffer);
+    this.#frames.dispose();
     this.#bindGroups.clear();
   }
 

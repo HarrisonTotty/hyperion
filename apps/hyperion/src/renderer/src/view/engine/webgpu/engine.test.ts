@@ -1233,16 +1233,18 @@ describe("depth-layer targets (R10.T9.b)", () => {
 
   it("write each pass's own Frame before its submission: its matrices and the layers' size", async () => {
     const { engine, gpu } = await engineOn();
-    const writes = vi.spyOn(gpu.queue, "writeBuffer");
+    // Copied as each is written, as the queue copies it: the blocks' staging is reused (plan R14).
+    const frames: Float32Array[] = [];
+    vi.spyOn(gpu.queue, "writeBuffer").mockImplementation(
+      (buffer, _bufferOffset, data, offset = 0, size = 0) => {
+        if (buffer.label === "frame uniforms" && data instanceof ArrayBuffer) {
+          frames.push(new Float32Array(data.slice(offset, offset + size)));
+        }
+        return undefined;
+      },
+    );
     const target = engine.createDepthLayers(LAYERS);
     target.render("view", [layerPass(1, [], 0.25), layerPass(3, [], 0.75)]);
-    const frames = writes.mock.calls
-      .filter(([buffer]) => buffer.label === "frame uniforms")
-      .map(([, , data, offset = 0, size = 0]) =>
-        data instanceof ArrayBuffer
-          ? new Float32Array(data, offset, size / 4)
-          : new Float32Array(0),
-      );
     // The projection's depth translation, then the viewport's width and height.
     expect(frames.map((frame) => [frame[16 + 14], frame[32], frame[33]])).toEqual([
       [0.25, 64, 64],

@@ -158,6 +158,15 @@ export function assertNoColourSelfSample(
   }
 }
 
+/** What a target's `render` draws a frame into, and records once it is encoded. */
+export interface PreparedRender {
+  readonly output: FrameOutput;
+  /** Records the draw's writes, and makes the colour's mips past the first where it has them. */
+  readonly drawn: () => void;
+  /** Whether `drawn` makes mips, in a submission of their own after the frame's. */
+  readonly mips: boolean;
+}
+
 /** A target's textures at one size. */
 interface Attachments {
   readonly size: ViewSize;
@@ -210,8 +219,29 @@ export class WebGpuRenderTarget implements RenderTarget {
    * @throws RangeError for a scissor outside the target.
    */
   render(frame: FrameSubmission): void {
-    if (this.#disposed) {
+    const prepared = this.prepare(frame);
+    if (prepared === null) {
       return;
+    }
+    this.#host.renderFrame(frame, prepared.output);
+    prepared.drawn();
+  }
+
+  /** Whether the target has been disposed, after which it draws nothing. */
+  get disposed(): boolean {
+    return this.#disposed;
+  }
+
+  /**
+   * What `render` checks and draws `frame` into, and what it records once the frame is encoded:
+   * the draw path's output, and the writes and mips that follow (plan R14's
+   * `RenderEngine.renderTargets`, which encodes several in one submission); `null` once disposed.
+   *
+   * @throws as {@link WebGpuRenderTarget.render} does, before anything is encoded.
+   */
+  prepare(frame: FrameSubmission): PreparedRender | null {
+    if (this.#disposed) {
+      return null;
     }
     assertNoDepthSelfSample(this.name, this.depth, frame.draws);
     assertNoColourSelfSample(this.name, this.colour, frame);
@@ -228,7 +258,7 @@ export class WebGpuRenderTarget implements RenderTarget {
     }
     const host = this.#host;
     const texture = host.gpuTextureOf(colour);
-    host.renderFrame(frame, {
+    const output: FrameOutput = {
       size,
       colour: texture.createView({ baseMipLevel: 0, mipLevelCount: 1 }),
       colourTexture: texture,
@@ -236,14 +266,17 @@ export class WebGpuRenderTarget implements RenderTarget {
       depth: depth === null ? null : host.gpuTextureOf(depth).createView(),
       ...(this.#spec.depthOf === undefined ? {} : { depthLoad: "load" as const }),
       intermediates: () => this.#intermediates.at(size),
-    });
-    host.wroteByDraw(colour);
-    if (depth !== null) {
-      host.wroteByDraw(depth);
-    }
-    if (this.#spec.mips > 1) {
-      host.generateMips(colour);
-    }
+    };
+    const drawn = (): void => {
+      host.wroteByDraw(colour);
+      if (depth !== null) {
+        host.wroteByDraw(depth);
+      }
+      if (this.#spec.mips > 1) {
+        host.generateMips(colour);
+      }
+    };
+    return { output, drawn, mips: this.#spec.mips > 1 };
   }
 
   dispose(): void {
