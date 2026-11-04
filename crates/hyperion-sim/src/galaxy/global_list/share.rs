@@ -707,15 +707,13 @@ mod tests {
     }
 
     /// The halo's records of a block of 6 × 6 × 4 of `layer`'s cells from the one about `centre` in
-    /// `before`, a galaxy under every 27 hold but the list's source, and in `after`, the same under
-    /// every 27 hold: those of `after` are a subset of `before`'s, bit for bit and finite, and the
-    /// expected counts about the first cell are finite and no more; the two counts of records, and
-    /// of the expected, for the census's table.
+    /// `galaxy`, each finite, and the expected counts about the first cell, finite: the count of
+    /// records, and the expected, for the census's table.
     fn halo_cell_census(
-        (before, after): (&crate::galaxy::Galaxy, &crate::galaxy::Galaxy),
+        galaxy: &crate::galaxy::Galaxy,
         layer: crate::id::Layer,
         centre: &crate::coords::GalacticPosition,
-    ) -> ([usize; 2], [f64; 2]) {
+    ) -> (usize, f64) {
         use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
         use crate::galaxy::query::{SubstellarRequest, expected_counts};
 
@@ -741,14 +739,8 @@ mod tests {
             }
             halo
         };
-        let (all, kept) = (halo(before), halo(after));
-        let mut rest = all.iter();
+        let kept = halo(galaxy);
         for record in &kept {
-            assert!(
-                rest.any(|other| other == record),
-                "{:?} of the halo changed",
-                record.id()
-            );
             assert!(
                 record.age_at_epoch().value().is_finite()
                     && record.primary_initial_mass().value().is_finite()
@@ -758,32 +750,24 @@ mod tests {
         let counts = |galaxy| {
             expected_counts(galaxy, centre, radius, SubstellarRequest::default()).get(layer)
         };
-        let expected = [counts(before), counts(after)];
-        assert!(expected[1].is_finite() && expected[1] <= expected[0]);
-        assert!(kept.len() <= all.len());
-        ([all.len(), kept.len()], expected)
+        let expected = counts(galaxy);
+        assert!(expected.is_finite());
+        (kept.len(), expected)
     }
 
     /// P10.T3.d.b's census: under every 27 hold a galaxy stores its applied share, the one
-    /// [`discrete_share`] gives its seed, parameters and in-plane tables, and the halo's field
-    /// gives it up, its factor φ less in every band; and in three blocks of cells off the plane
-    /// the halo's records are a subset of the unstored galaxy's, bit for bit and finite, and fewer
-    /// over the three galaxies, and the expected counts about them finite ([`halo_cell_census`]).
-    /// Over the Milky Way fixture and two drawn galaxies, each against itself under every 27 hold
-    /// but the list's source.
+    /// [`discrete_share`] gives its seed, parameters and in-plane tables, beside its globulars' φ
+    /// in every band; and in three blocks of cells off the plane the halo's records are finite, and
+    /// the expected counts about them ([`halo_cell_census`]). Over the Milky Way fixture and two
+    /// drawn galaxies.
     #[test]
     #[ignore = "slow: six galaxies under every 27 hold, their halo cells generated twice"]
     fn the_discrete_share_census() {
         use crate::coords::GalacticPosition;
         use crate::galaxy::Galaxy;
-        use crate::galaxy::global_list::ListSourceRules;
         use crate::galaxy::imf::MassBand;
         use crate::id::Layer;
 
-        let unstored = GalaxyRules {
-            list_source: ListSourceRules::Unregistered,
-            ..GalaxyRules::every_27_hold()
-        };
         let drawn = |seed: u64| {
             let seed = Seed::new(seed);
             (
@@ -804,10 +788,8 @@ mod tests {
             (Layer::D, at([8_000.0, 0.0, 4_000.0])),
             (Layer::C, at([0.0, 26_000.0, 2_000.0])),
         ];
-        let mut records = [0_usize; 2];
+        let mut records = 0_usize;
         for (seed, params) in galaxies {
-            let before = Galaxy::from_params_with_rules(seed, params.clone(), unstored)
-                .expect("a drawn galaxy builds");
             let after =
                 Galaxy::from_params_with_rules(seed, params.clone(), GalaxyRules::every_27_hold())
                     .expect("a drawn galaxy builds");
@@ -817,33 +799,25 @@ mod tests {
                 phi > 0.0 && phi < params.halo().discrete_share().max(0.05),
                 "{phi}"
             );
-            let (held, stored) = (before.feature_shares(), after.feature_shares());
+            let stored = after.feature_shares();
             for band in MassBand::ALL {
                 hyperion_testkit::float::assert_same_bits(
                     stored.phi(Population::Halo, band),
-                    phi + held.phi(Population::Halo, band),
-                );
-                let moved = held.field_factor(Population::Halo, band)
-                    - stored.field_factor(Population::Halo, band);
-                assert!(
-                    (moved - phi).abs() < 1e-15,
-                    "{seed:?} {band:?}: {moved} against {phi}"
+                    phi + stored.phi_globular(Population::Halo, band),
                 );
             }
             eprintln!("{seed:?}: the applied share {phi:.5} of the halo's budget");
             for (layer, centre) in &cells {
-                let ([all, kept], [expected_before, expected_after]) =
-                    halo_cell_census((&before, &after), *layer, centre);
-                records[0] += all;
-                records[1] += kept;
+                let (kept, expected) = halo_cell_census(&after, *layer, centre);
+                records += kept;
                 eprintln!(
-                    "  {layer:?} cells from {:?} ly: halo records {all} → {kept}, expected about \
-                     the first {expected_before:.2} → {expected_after:.2}",
+                    "  {layer:?} cells from {:?} ly: halo records {kept}, expected about the first \
+                     {expected:.2}",
                     centre.to_light_years_f64(),
                 );
             }
         }
-        eprintln!("the halo's records: {} → {}", records[0], records[1]);
-        assert!(records[1] < records[0], "{records:?}");
+        eprintln!("the halo's records: {records}");
+        assert!(records > 0, "{records}");
     }
 }

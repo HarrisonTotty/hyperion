@@ -1281,7 +1281,6 @@ mod tests {
     ///   force over every member of the cells near, each on its own orbit.
     #[test]
     fn the_census_takes_the_centres_members_once_where_the_list_is_registered() {
-        assert!(!GlobalListSource::is_registered_in(milky_way_galaxy()));
         let galaxy = list_galaxy();
         assert!(GlobalListSource::is_registered_in(galaxy));
         let lookup = list_lookup();

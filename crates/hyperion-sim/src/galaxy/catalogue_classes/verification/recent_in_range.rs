@@ -9,8 +9,7 @@
 //!
 //! The sources are those the server registers beside the grid (`compute::range::beside_the_grid`):
 //! the features' members, and from 27 the catalogue classes and the global list, which holds the
-//! centre's source. Below 27 no source places the centre (`LIST_SOURCE_VERSION`), so the centre's
-//! entries are asked under every 27 hold alone.
+//! centre's source, which places the centre's entries from 27.
 //!
 //! Each entry returned is also placed by its ID, as the server places a range row's system (plan
 //! 10's P10.T10.b): a feature's on its member's line, to the rounding plan 03's drift and the

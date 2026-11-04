@@ -113,7 +113,6 @@ use std::fmt;
 pub use debris::{Debris, DebrisPlan};
 pub use share::discrete_share;
 pub use source::{GlobalListModels, GlobalListSource};
-pub(crate) use source::{LIST_SOURCE_VERSION, ListSourceRules};
 pub use spec::{ClusterStars, DwarfCoreSpec, MassLoss, SphericalOrbit, StreamSpec};
 pub use tube::{TubeLookup, TubeTable};
 

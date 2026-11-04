@@ -42,8 +42,7 @@
 //! ([`GlobalListSource::is_registered_in`], P10.T10.b's registration member, with plan 09's
 //! P09.T37.b), in place of the [`CentreMemberSource`] it holds, not beside it, since their IDs
 //! would repeat. From the same version the galaxy stores the halo's discrete share, so the halo's
-//! field gives up what the list's members stand for in the train that first serves them
-//! (P10.T3.d.b).
+//! field gives up what the list's members stand for (P10.T3.d.b).
 
 use std::borrow::Cow;
 use std::num::NonZeroU32;
@@ -52,7 +51,6 @@ use std::sync::OnceLock;
 #[cfg(doc)]
 use crate::galaxy::features::interior::MemberClassTable;
 
-use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::features::centre::{BuildCentreError, CentreMemberSource, CentreOrbitCache};
@@ -77,34 +75,6 @@ use super::{
     BoundingShell, GlobalEntryKind, GlobalList, StreamNumber, TubeLookup, TubeTable,
     in_stream_shell,
 };
-
-/// The generator version from which the range query registers the global list's members, the
-/// centre's among them, and a galaxy stores its halo's discrete share (plan 10, P10.T10.b's
-/// registration member and P10.T3.d.b, riding with plan 09's P09.T37.b; the hold of
-/// [`ListSourceRules`]).
-///
-/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`ListSourceRules::Unregistered`]: [`GlobalListSource::is_registered_in`] says no, so a served
-/// query's census and hits are the grid's, the features' members' and the catalogue classes', and
-/// the halo's discrete share stays zero, bit for bit. The tests reach the new arm through a galaxy
-/// built under `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold,
-/// [`ListSourceRules`] with its `Unregistered` arm, `GalaxyRules::list_source`, the `match`es in
-/// [`GlobalListSource::is_registered_in`] (which then always says yes) and in the galaxy's build
-/// (which then always stores the share), `Galaxy::with_rules`' check of it and the tripwire
-/// (`the_list_source_is_held_only_until_the_27_bump`).
-pub(crate) const LIST_SOURCE_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether the range query registers the global list's source and the galaxy stores the halo's
-/// discrete share (the hold of [`LIST_SOURCE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum ListSourceRules {
-    /// Version 26's and before: no range query places a stream's, a dwarf core's or the centre's
-    /// member, and the halo's field keeps its discrete share.
-    Unregistered,
-    /// Version 27's: [`GlobalListSource`] beside the grid, and the halo's field gives up
-    /// [`discrete_share`](super::discrete_share).
-    Registered,
-}
 
 /// The first word of a stream's tube-cell keys for the sky's member parts ([`part_of_key`]),
 /// `"stream"` in ASCII.
@@ -313,15 +283,11 @@ impl<'a> GlobalListSource<'a> {
     }
 
     /// Whether a range query in `galaxy` registers this source beside the grid, in place of the
-    /// centre's bare source: from generator version 27 (P10.T10.b's registration member, the hold
-    /// of `LIST_SOURCE_VERSION`), and not below it, where a query takes no member of a stream, a
-    /// dwarf core or the centre.
+    /// centre's bare source: in every galaxy from generator version 27 (P10.T10.b's registration
+    /// member).
     #[must_use]
-    pub const fn is_registered_in(galaxy: &Galaxy) -> bool {
-        match galaxy.rules().list_source {
-            ListSourceRules::Unregistered => false,
-            ListSourceRules::Registered => true,
-        }
+    pub const fn is_registered_in(_galaxy: &Galaxy) -> bool {
+        true
     }
 
     /// The centre's source it holds and asks, if the list holds the centre.

@@ -19,7 +19,6 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{NoCache, SystemOrigin};
 use crate::galaxy::potential::{MassModel, PotentialTables};
 use crate::galaxy::query::{RangeQuery, range_query};
-use crate::galaxy::rules::GalaxyRules;
 use crate::id::Layer;
 use crate::rng::Seed;
 use crate::units::SolarMasses;
@@ -551,41 +550,6 @@ fn the_range_query_merges_the_list_s_members() {
     }
     let a = merged.census().expected().get(Layer::A);
     assert!(a > alone.census().expected().get(Layer::A), "{a}");
-}
-
-/// The list source's hold, P10.T10.b's registration member with P10.T3.d.b: until the bump to 27
-/// no galaxy built by `from_params` registers the source or stores the halo's discrete share, and
-/// under every 27 hold a galaxy does both.
-#[test]
-fn the_list_source_is_held_only_until_the_27_bump() {
-    assert!(
-        crate::GENERATOR_VERSION < LIST_SOURCE_VERSION,
-        "the 26 → 27 bump puts P10.T10.b's registration and P10.T3.d.b on the record: the range \
-         query takes the global list's streams, dwarf cores and centre, whose census and hits \
-         move, and the halo's field gives up its discrete share. Delete `LIST_SOURCE_VERSION`, \
-         `ListSourceRules` with its `Unregistered` arm, `GalaxyRules::list_source`, the `match`es \
-         in `GlobalListSource::is_registered_in` (which then always says yes) and in the galaxy's \
-         build (which then always stores the share), `Galaxy::with_rules`' check of it and this \
-         test, in the bump's own commit, and re-bless what the list's members and the halo's field \
-         move"
-    );
-    let built = Galaxy::from_params(SEED, GalaxyParams::milky_way_like()).expect("builds");
-    assert_eq!(built.rules().list_source, ListSourceRules::Unregistered);
-    assert!(!GlobalListSource::is_registered_in(&built));
-    // No discrete share stored: the halo's φ is its globulars' alone.
-    hyperion_testkit::float::assert_same_bits(
-        built.feature_shares().phi(Population::Halo, MassBand::A),
-        built
-            .feature_shares()
-            .phi_globular(Population::Halo, MassBand::A),
-    );
-    let at_27 = Galaxy::from_params_with_rules(
-        SEED,
-        GalaxyParams::milky_way_like(),
-        GalaxyRules::every_27_hold(),
-    )
-    .expect("builds");
-    assert!(GlobalListSource::is_registered_in(&at_27));
 }
 
 /// Every member of every cell of `tube`, whose stream's band shares are `shares`, in every band.

@@ -598,8 +598,11 @@ mod tests {
         }
     }
 
+    /// From generator version 27 the range query serves the centre's members (P10.T10.b's
+    /// registration), so none is refused at any time for want of its orbit (a victim disrupted by
+    /// then is refused as such).
     #[test]
-    fn the_centre_s_members_are_refused_at_every_time() {
+    fn the_centre_s_members_are_traced_at_every_time() {
         let galaxy = galaxy();
         for record in the_centre_s_members() {
             assert!(
@@ -608,7 +611,7 @@ mod tests {
                 record.id()
             );
             for t in times() {
-                assert_eq!(
+                assert_ne!(
                     system_motion(galaxy, MotionReads::uncached(), &record, t),
                     Err(TraceMotionError::CentreOrbitNotBuilt(record.id())),
                     "{:?} at {t}",
