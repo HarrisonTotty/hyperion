@@ -1,48 +1,48 @@
-# generator_version = 26
+# generator_version = 27
 largest colour offset = 0x3fdcf7aa62cbdce2  # 0.4526163067634582
 near the Sun (0, 26,000, 68) ly, the default eye, lit
-  first pass darkest limit = 0x401e5fadd6f4a526  # 7.593436583215668
-  repeat darkest limit = 0x401e7ba3501d399a  # 7.620740176948312
+  first pass darkest limit = 0x401e67e0ae59550e  # 7.601443027689369
+  repeat darkest limit = 0x401e84a0313daa36  # 7.629517335308767
 in the nuclear disc (0, 150, 0) ly, the default eye, lit
-  first pass darkest limit = 0x4015049097d9e676  # 5.254457829165053
-  first pass cut = 0x40173a71a46d0aaa  # 5.807074135928511
+  first pass darkest limit = 0x40150db6d4e69326  # 5.2633927598697365
+  first pass cut = 0x40174397e179b75a  # 5.816009066633194
   repeat: none
-  the eye's cut = 0x40173a71a46d0aaa  # 5.807074135928511
+  the eye's cut = 0x40174397e179b75a  # 5.816009066633194
 near the Sun, the eye-only request at its cut by its visibility, ceiling V 5: its plan's caps
   A radius = 0x4023f6612a76b62b  # 9.98121006678692
-  A rule bound = 0x40d31b7312372a5e  # 19565.797986785292
-  A expected beyond = 0x3fedeaa81566959d  # 0.9348946016295262
-  A bright beyond = 0x3f2e31ff4dbaf800  # 0.00023037187098923217
+  A rule bound = 0x40d32f42a192e44c  # 19645.041111681887
+  A expected beyond = 0x3fede94c47e3eedf  # 0.9347287563427605
+  A bright beyond = 0x3f2d355bd667519c  # 0.00022284265578654823
   A rays: 1536
-  A rays' digest = 0x2299bc11df9f1a7d
+  A rays' digest = 0x2ae5c620bd38dcfe
   B radius = 0x4050f942ba4fee3f  # 67.89469774060943
-  B rule bound = 0x40d77c34f43b056b  # 24048.827406649867
-  B expected beyond = 0x3feaf8eac73e9587  # 0.8428853885167634
+  B rule bound = 0x40d7948eb78928d3  # 24146.22995213496
+  B expected beyond = 0x3feb43317a7235f1  # 0.8519523040319524
   B bright beyond = 0x0000000000000000  # 0.0
   B rays: 1536
-  B rays' digest = 0x0999a65219975a9b
-  C radius = 0x409dc90f6f87f5bd  # 1906.265073894857
-  C rule bound = 0x40eb83bf8cda551e  # 56349.98594395279
-  C expected beyond = 0x406be9aebdad0a6f  # 223.30258067891143
-  C bright beyond = 0x3fed165f604c9b8c  # 0.9089810257763573
+  B rays' digest = 0x44752ea839fa46c7
+  C radius = 0x409dc58f5d11c5f7  # 1905.3900034691885
+  C rule bound = 0x40eba388d9130577  # 56604.2764983279
+  C expected beyond = 0x406debfac34c5bbc  # 239.37436070359934
+  C bright beyond = 0x3fed07367a4e15ff  # 0.907130469204901
   C rays: 1536
-  C rays' digest = 0x62558ebee53b7c61
+  C rays' digest = 0xa67888ebfc35b421
   D radius = 0x409f400000000000  # 2000.0
-  D rule bound = 0x40f25efcd0508346  # 75247.80085803298
-  D expected beyond = 0x4084ea65e4f730f7  # 669.2997531234568
-  D bright beyond = 0x401d5122a85c72f6  # 7.329233770983356
+  D rule bound = 0x40f294f5175abd77  # 76111.31820177088
+  D expected beyond = 0x40849c677b148d14  # 659.5505277257494
+  D bright beyond = 0x401c01798fb7c2f2  # 7.001440282431519
   D rays: 1536
-  D rays' digest = 0xe143cc6f40314655
+  D rays' digest = 0x8c3373b41377e383
   E radius = 0x409f400000000000  # 2000.0
   E rule bound = 0x40fd4c0000000000  # 120000.0
-  E expected beyond = 0x4099cd49a09e2e9d  # 1651.3219017711592
-  E bright beyond = 0x40615af2bbdaf356  # 138.84213059200073
+  E expected beyond = 0x408be54ced6e54d8  # 892.6625622386591
+  E bright beyond = 0x4053eaef671779ea  # 79.67086198132134
   E rays: 1536
-  E rays' digest = 0x9d6f26728c86bb61
+  E rays' digest = 0xaa9756b2a9a8c325
   BrownDwarf radius = 0x3ff0000000000000  # 1.0
-  BrownDwarf rule bound = 0x403674fbbe7c621c  # 22.456966309897425
-  BrownDwarf expected beyond = 0x3ee2405c2690568c  # 8.70294862135724e-6
-  BrownDwarf bright beyond = 0x3e5aad6eb470dabb  # 2.4845330484126602e-8
+  BrownDwarf rule bound = 0x40368c3fd5b4c720  # 22.547849041590894
+  BrownDwarf expected beyond = 0x3ee2ae079121c6b4  # 8.907224160223513e-6
+  BrownDwarf bright beyond = 0x3e5aacf29644d864  # 2.484356666326442e-8
   BrownDwarf rays: 1536
   BrownDwarf rays' digest = 0xebb7156067ec8325
-  cells: 969511
+  cells: 978797

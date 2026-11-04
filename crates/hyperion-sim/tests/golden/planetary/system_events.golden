@@ -1,31 +1,31 @@
-# generator_version = 26
+# generator_version = 27
 # P14.T31.c: each golden system's events in [-50, 50) Julian years about the epoch, under every 25 hold
 
-m_dwarf_resonant_chain 02002b2ca0000000: 17145 events: 6 impacts, 17139 eruptions, 0 storms, 0 dust storms, 0 comets
-  digest = 0xcba0243d04672fb7
-  0100 impacts: 1, digest 0x1edc22eae183f747
+m_dwarf_resonant_chain 02002b2ca0000000: 17459 events: 6 impacts, 17453 eruptions, 0 storms, 0 dust storms, 0 comets
+  digest = 0x69618aa05fbe5b9b
+  0100 impacts: 1, digest 0xd8da0158331d2118
     02002b2ca0000000.0100:0400fffffffff100 at T-456960173.797399214 s
-      diameter (m) = 0x404a403174623c16  # 52.501509235349815
-      energy (J) = 0x434fabf49047670c  # 1.7829582317997592e16
-      velocity (m/s) = 0x40ddf5cacb7fbd64  # 30679.168670592262
+      diameter (m) = 0x404a41609a6141c7  # 52.510760591019384
+      energy (J) = 0x434fabf4903d55f3  # 1.7829582316678118e16
+      velocity (m/s) = 0x40ddf3c3ee88ee3f  # 30671.061434014
       latitude (rad) = 0x3ff33ec6e3b3a3aa  # 1.2028263945196422
       longitude (rad) = 0x4003e025d3a5a0e2  # 2.4844471487923423
-  0100 eruptions: 1588, digest 0xf83429c250ecefd5
+  0100 eruptions: 1642, digest 0x20f782c5778b137f
     02002b2ca0000000.0100:0401fffffff5cf00 at T-1577810419.929437886 s for +972817.059707976 s
-  0200 impacts: 5, digest 0x8001299e5cbff0ab
+  0200 impacts: 5, digest 0x58e1b6362745429e
     02002b2ca0000000.0200:0400ffffffffec00 at T-618914540.313292105 s
-      diameter (m) = 0x4042da5ae26a07cc  # 37.70589857270497
-      energy (J) = 0x43312eeaff19b529  # 4836661441180969.0
-      velocity (m/s) = 0x40d9a36931c5523d  # 26253.643662767707
+      diameter (m) = 0x4042da62c489bf95  # 37.706139151821084
+      energy (J) = 0x43312eeaff19b139  # 4836661441179961.0
+      velocity (m/s) = 0x40d9a3591d1a0a84  # 26253.392401228208
       latitude (rad) = 0x3fd5f19b01ec8522  # 0.34287142932778825
       longitude (rad) = 0x40179d1ac5173e29  # 5.903422431510571
-  0200 eruptions: 6153, digest 0xbcf1c491f83c8d87
+  0200 eruptions: 6159, digest 0xe29d2400fa6daeef
     02002b2ca0000000.0200:0401fffffff5cf02 at T-1577873671.190301715 s for +17646722.536653481 s
-  0300 eruptions: 3144, digest 0xb576f70ab0d4b89f
+  0300 eruptions: 3205, digest 0x0a0356ca1611657f
     02002b2ca0000000.0300:0401fffffff5cf00 at T-1577646818.480264835 s for +5260363.118452649 s
-  0400 eruptions: 1228, digest 0x22e9015f554335e1
+  0400 eruptions: 1322, digest 0xd5ce10aff6035d06
     02002b2ca0000000.0400:0401fffffff5cf00 at T-1577347133.200155675 s for +1920261.821793596 s
-  0500 eruptions: 5026, digest 0xd032d6d34cdd9edb
+  0500 eruptions: 5125, digest 0x31e406cd20c798bc
     02002b2ca0000000.0500:0401fffffff5cf00 at T-1577357184.282468377 s for +736324.034242218 s
 
 hot_jupiter 41fcecba00000006: 6 events: 6 impacts, 0 eruptions, 0 storms, 0 dust storms, 0 comets
@@ -38,27 +38,27 @@ hot_jupiter 41fcecba00000006: 6 events: 6 impacts, 0 eruptions, 0 storms, 0 dust
       latitude (rad) = 0x3fe605951ed35ef5  # 0.6881814577163526
       longitude (rad) = 0x4016d7f36ab835eb  # 5.710889499181103
 
-solar_like 42006cba00000009: 7261 events: 6347 impacts, 727 eruptions, 9 storms, 0 dust storms, 178 comets
-  digest = 0x9baef1577b61ab05
-  0100 eruptions: 178, digest 0x34a48e0b48caff3a
+solar_like 42006cba00000009: 7255 events: 6347 impacts, 721 eruptions, 9 storms, 0 dust storms, 178 comets
+  digest = 0xbbe2d3da81ec76a2
+  0100 eruptions: 177, digest 0x9c3c490c27d6e0bb
     42006cba00000009.0100:0401fffffff60500 at T-1545016714.694386787 s for +852234.659662715 s
-  0200 impacts: 1, digest 0x39e8b8bbd6e5f430
+  0200 impacts: 1, digest 0x1738aee21c3aaf2c
     42006cba00000009.0200:0400fffffffffc00 at T-102691008.136905614 s
-      diameter (m) = 0x40438cf8399fbfd8  # 39.10132522869361
-      energy (J) = 0x43350f5c26cbb1c7  # 5927862973215175.0
-      velocity (m/s) = 0x40dae0b2edadca2b  # 27522.79575676673
+      diameter (m) = 0x40438cee30f73e77  # 39.10101902077161
+      energy (J) = 0x43350f5c26cbc015  # 5927862973218837.0
+      velocity (m/s) = 0x40dae0c79eb718e1  # 27523.119062208458
       latitude (rad) = 0x3ff212855723c95c  # 1.129521694555101
       longitude (rad) = 0x4014d66919d15e77  # 5.2093853029288
   0200 eruptions: 241, digest 0xb9b4788249546351
     42006cba00000009.0200:0401fffffff62200 at T-1527571793.979565770 s for +56571113.066497303 s
-  0400 impacts: 1, digest 0x15709d35e5429446
+  0400 impacts: 1, digest 0x55d53fd141f47750
     42006cba00000009.0400:0400ffffffffdc00 at T-1118529085.860567081 s
-      diameter (m) = 0x404beb8348bcb7d9  # 55.83994397368196
-      energy (J) = 0x43367ad8e7ee020d  # 6327521510294029.0
-      velocity (m/s) = 0x40d04587245940be  # 16662.111593545174
+      diameter (m) = 0x404beae58dc3d18d  # 55.83513042508557
+      energy (J) = 0x43367ad8e7ef8588  # 6327521510393224.0
+      velocity (m/s) = 0x40d046110b176b9a  # 16664.266301970558
       latitude (rad) = 0x3fb448e2eceea058  # 0.07923715862728054
       longitude (rad) = 0x40185aa534ccd46f  # 6.088520836831875
-  0400 eruptions: 308, digest 0x2e1fec8ee9e81783
+  0400 eruptions: 303, digest 0x5037b95ea461f763
     42006cba00000009.0400:0401fffffff5d300 at T-1575244736.347935438 s for +719431.071809436 s
   0500 impacts: 6344, digest 0xf16164934eb76ad3
     42006cba00000009.0500:0400ffffffffce31 at T-1577562148.592126968 s
@@ -128,389 +128,389 @@ eccentric_giant 4200acaa0000000a: 6479 events: 6470 impacts, 0 eruptions, 9 stor
 halo_star 02025b2be0000001: 0 events: 0 impacts, 0 eruptions, 0 storms, 0 dust storms, 0 comets
   digest = 0xcbf29ce484222325
 
-close_binary 42002cb200000009: 113647 events: 55319 impacts, 58322 eruptions, 0 storms, 6 dust storms, 0 comets
-  digest = 0x2e4b2efeae5b50dd
-  0500 impacts: 6293, digest 0xe1beb449c70b301b
+close_binary 42002cb200000009: 113904 events: 55372 impacts, 58526 eruptions, 0 storms, 6 dust storms, 0 comets
+  digest = 0xef7c13a31c30c924
+  0500 impacts: 6293, digest 0xafe8508a6552d69e
     42002cb200000009.0500:0400ffffffffce18 at T-1577840568.274279426 s
-      diameter (m) = 0x404d999353f99427  # 59.199808594574556
-      energy (J) = 0x434ae1ab3473e8b9  # 1.5132949660291442e16
-      velocity (m/s) = 0x40c2d2707e13a028  # 9636.878847554399
+      diameter (m) = 0x404d9c0d60b87417  # 59.219158258500265
+      energy (J) = 0x434ae63a31d1408d  # 1.5142974025531674e16
+      velocity (m/s) = 0x40c2d1ac41503b72  # 9635.345743207003
       latitude (rad) = 0x3fb19f7d1109a256  # 0.06883985200841755
       longitude (rad) = 0x3fb57369e583a0d5  # 0.08379232266782151
-  0600 impacts: 1237, digest 0xa48415af129b699a
+  0600 impacts: 1237, digest 0xb7869f15697d11b9
     42002cb200000009.0600:0400ffffffffce04 at T-1577296852.625512081 s
-      diameter (m) = 0x40419563aa8eaf69  # 35.16710407225657
-      energy (J) = 0x43333e4695d5a2e1  # 5416497439941345.0
-      velocity (m/s) = 0x40c89836938eb3f8  # 12592.426378095508
+      diameter (m) = 0x40419713f53b075c  # 35.18029656774772
+      energy (J) = 0x43333e4695d5a079  # 5416497439940729.0
+      velocity (m/s) = 0x40c894ac03c0448a  # 12585.343864472834
       latitude (rad) = 0xbfe6e316e73ac9bd  # -0.7152208820537492
       longitude (rad) = 0x400799843ac3f89a  # 2.9499592391067155
-  0600 eruptions: 16807, digest 0x68d6a9770c2948c5
+  0600 eruptions: 16903, digest 0x3cbc031cf6926ff2
     42002cb200000009.0600:0401fffffff5cf01 at T-1577710564.164847163 s for +74352.951903634 s
-  0601 impacts: 8, digest 0x52c04595c6659286
+  0601 impacts: 8, digest 0xa99c52f78bdfdfd3
     42002cb200000009.0601:0400ffffffffcf00 at T-1538023619.275446788 s
-      diameter (m) = 0x404d236d14bdfbef  # 58.276766388669664
-      energy (J) = 0x433557cad627690f  # 6007503198841103.0
-      velocity (m/s) = 0x40b848af7b930c45  # 6216.685479345794
+      diameter (m) = 0x404d23cfa1e7db80  # 58.27977393933452
+      energy (J) = 0x433557cad627677f  # 6007503198840703.0
+      velocity (m/s) = 0x40b848344aa1f509  # 6216.20426380379
       latitude (rad) = 0x3fe21b4e480179df  # 0.5658332258570303
       longitude (rad) = 0x40189081fc3ebc01  # 6.141120854691509
   0601 eruptions: 54, digest 0x2f6ddc389bf030a6
     42002cb200000009.0601:0401fffffff5f200 at T-1556554102.510897411 s for +659355.313378761 s
-  0700 impacts: 2454, digest 0xf5e44e04632ba109
+  0700 impacts: 2466, digest 0x5c0a86ef9a2ca7ec
     42002cb200000009.0700:0400ffffffffce0f at T-1577531420.803444337 s
-      diameter (m) = 0x404a717f650ef799  # 52.886700279529755
-      energy (J) = 0x434dfcdc7aae3ae7  # 1.6881596411704782e16
-      velocity (m/s) = 0x40c78b26cd8bcce3  # 12054.303147769015
+      diameter (m) = 0x404a72a2ad84d8b3  # 52.895589532724806
+      energy (J) = 0x434dfcdc7aae2b6b  # 1.6881596411696854e16
+      velocity (m/s) = 0x40c789a1df96e05f  # 12051.264635905796
       latitude (rad) = 0xbfd45504520014ce  # -0.3176890183243132
       longitude (rad) = 0x3fdc2b4ebcbe3e31  # 0.4401432841486637
-  0700 eruptions: 18795, digest 0x8d3d1962be2ef34e
+  0700 eruptions: 18835, digest 0xc0c5fbb69fcf2611
     42002cb200000009.0700:0401fffffff5cf04 at T-1577670789.618860535 s for +11976819.343112891 s
-  0800 impacts: 6534, digest 0x08f82f9ac62e980c
+  0800 impacts: 6534, digest 0x875879f7202c0da4
     42002cb200000009.0800:0400ffffffffce1c at T-1577587377.314955071 s
-      diameter (m) = 0x4044fe26bc5bf325  # 41.98555712213264
-      energy (J) = 0x433c4a163f50c51c  # 7962758759892252.0
-      velocity (m/s) = 0x40c6dc091fa8f0da  # 11704.071278684238
+      diameter (m) = 0x4044ff0d2e54f013  # 41.992589751695185
+      energy (J) = 0x433c4b6a674d457f  # 7964219719632255.0
+      velocity (m/s) = 0x40c6db1a30753ba8  # 11702.204603819016
       latitude (rad) = 0xbfe31d941535d464  # -0.5973606504691245
       longitude (rad) = 0x40025aa7c1af9b97  # 2.2942652827945937
-  0800 eruptions: 18899, digest 0x414e00edc7c21b74
+  0800 eruptions: 18929, digest 0x9ea20146a8769f64
     42002cb200000009.0800:0401fffffff5cf00 at T-1577808022.097006803 s for +1463010.383672606 s
-  0900 impacts: 1, digest 0x10fe203b41ff0357
+  0900 impacts: 1, digest 0xcf49d42cdc72b575
     42002cb200000009.0900:0400000000001e00 at T+948783188.575173533 s
-      diameter (m) = 0x405f2e698a93ffbc  # 124.72519173100494
-      energy (J) = 0x4334751474546ebb  # 5758230245699259.0
-      velocity (m/s) = 0x40b2998063a7e712  # 4761.501520627893
+      diameter (m) = 0x405f2e7596cb43b4  # 124.7259270653729
+      energy (J) = 0x433475147454150b  # 5758230245676299.0
+      velocity (m/s) = 0x40b299759c13e501  # 4761.459412806901
       latitude (rad) = 0x3fd04c5953a011fe  # 0.254659969010646
       longitude (rad) = 0x3febb625b2218577  # 0.86598477164459
-  0900 eruptions: 140, digest 0x0f254073816295b4
+  0900 eruptions: 149, digest 0x3e7db799ee3c1f2f
     42002cb200000009.0900:0401fffffff5ec00 at T-1560375718.414538009 s for +164732.595239835 s
   0900 dust storms: 2
     42002cb200000009.0900:0403000000000000 at T-966805290.510103645 s cycle 0 for +10593526.767942020 s
       true anomaly at onset (rad) = 0xbfaa18c5970bfb39  # -0.050970244110422454
     42002cb200000009.0900:0403000000000200 at T+1533210660.366740430 s cycle 2 for +12652951.271336281 s
       true anomaly at onset (rad) = 0xbf955083560dd018  # -0.020814945342365915
-  0a00 impacts: 10, digest 0xfb72a4c2d3996ddd
+  0a00 impacts: 10, digest 0x8634b553ce60d3c5
     42002cb200000009.0a00:0400ffffffffeb00 at T-642777902.685534369 s
-      diameter (m) = 0x406aabe37c3c8528  # 213.37151920147267
-      energy (J) = 0x4355852a1168affc  # 2.4229560952471536e16
-      velocity (m/s) = 0x40b10d2565ff0032  # 4365.146087586925
+      diameter (m) = 0x406aabf1f4b64e6f  # 213.3732856331512
+      energy (J) = 0x4355852a116363d9  # 2.4229560951082852e16
+      velocity (m/s) = 0x40b10d17858e19d3  # 4365.0918816388175
       latitude (rad) = 0x3fe7fc0782487b96  # 0.7495152992813583
       longitude (rad) = 0x40169f8a0ade0b62  # 5.655800027658957
-  0a00 eruptions: 132, digest 0xe138e501497a92a4
+  0a00 eruptions: 139, digest 0x2c3587a5b87fd649
     42002cb200000009.0a00:0401fffffff5d900 at T-1571311867.300561663 s for +1387399.670511157 s
-  0a01 impacts: 1, digest 0x05213b5e63d0cd7f
+  0a01 impacts: 1, digest 0x7bc3c9470daa1fd1
     42002cb200000009.0a01:0400ffffffffd300 at T-1409170835.735657025 s
-      diameter (m) = 0x4064ce1c7a2eb880  # 166.4409762299074
-      energy (J) = 0x432efbaf2487141c  # 4360489476000270.0
-      velocity (m/s) = 0x40a4ffbc6038c593  # 2687.8679216138057
+      diameter (m) = 0x4064ce1d7b9ad464  # 166.44109897842566
+      energy (J) = 0x432efbaf24870fed  # 4360489475999734.5
+      velocity (m/s) = 0x40a4ffbada7daf61  # 2687.864948203715
       latitude (rad) = 0xbfaa6614a9a9e22c  # -0.05156006404007871
       longitude (rad) = 0x3fe683b5b037e38d  # 0.7035778466953261
-  0b00 impacts: 16, digest 0xdce1de03370e796b
+  0b00 impacts: 16, digest 0xe729048757a140b3
     42002cb200000009.0b00:0400ffffffffd500 at T-1349700923.807382315 s
-      diameter (m) = 0x405fad9697785df9  # 126.71231638674352
-      energy (J) = 0x4339043779e173eb  # 7041510732297195.0
-      velocity (m/s) = 0x40b41609f89d83fb  # 5142.038949818346
+      diameter (m) = 0x405fadafd1965f4d  # 126.71385612187187
+      energy (J) = 0x4339043779e00ecd  # 7041510732205773.0
+      velocity (m/s) = 0x40b415f1fa5e3546  # 5141.945226562506
       latitude (rad) = 0xbfe1e0ecbc1800f0  # -0.5587066339212736
       longitude (rad) = 0x3fe8fa9dd205251e  # 0.780592832751754
-  0b00 eruptions: 309, digest 0xa318ab26161add7c
+  0b00 eruptions: 316, digest 0x8341feba5e674e88
     42002cb200000009.0b00:0401fffffff5d100 at T-1576156684.396706644 s for +1300284.602385468 s
-  e101 impacts: 6, digest 0x634e933bce419bbf
+  e101 impacts: 6, digest 0x958de1d68ab9da9a
     42002cb200000009.e101:0400ffffffffec00 at T-600333393.415373706 s
-      diameter (m) = 0x40356570699820db  # 21.39624652828284
-      energy (J) = 0x433b25e9e434a8fd  # 7641510857451773.0
-      velocity (m/s) = 0x40dec7216a935a72  # 31516.522129858327
+      diameter (m) = 0x40356570c6bfec39  # 21.39625208078016
+      energy (J) = 0x433b25e9e434a8f9  # 7641510857451769.0
+      velocity (m/s) = 0x40dec720a192df8f  # 31516.509861677474
       latitude (rad) = 0x3fe5c4e53f06e931  # 0.6802850943561564
       longitude (rad) = 0x400521883c20bc99  # 2.641373128651662
-  e102 impacts: 7, digest 0x6c6bb6f69e496cd0
+  e102 impacts: 7, digest 0xb588affaffe56fd5
     42002cb200000009.e102:0400ffffffffef00 at T-512283121.410900078 s
-      diameter (m) = 0x4048c8869e618421  # 49.566608235945985
-      energy (J) = 0x437452abc9c03b99  # 9.152635699067125e16
-      velocity (m/s) = 0x40de35a5abc601a0  # 30934.58860922011
+      diameter (m) = 0x4048c886b0e58ce1  # 49.5666104431964
+      energy (J) = 0x437452abc9c03b97  # 9.152635699067122e16
+      velocity (m/s) = 0x40de35a589eb3957  # 30934.586542898174
       latitude (rad) = 0xbfd8ab5d2adb42e3  # -0.38545922455982246
       longitude (rad) = 0x4012c3e45acb3650  # 4.691300791409574
-  e103 impacts: 6, digest 0xe670ba5694873342
+  e103 impacts: 6, digest 0x23372e33b523eaa1
     42002cb200000009.e103:0400ffffffffce00 at T-1547055470.437025078 s
-      diameter (m) = 0x402bdbd8cf55f550  # 13.929388503306342
+      diameter (m) = 0x402bdbd8d4acaf69  # 13.929388662414299
       energy (J) = 0x432ddd0596c1760d  # 4202895199222534.5
-      velocity (m/s) = 0x40e5ba21bd98aa62  # 44497.05439408567
+      velocity (m/s) = 0x40e5ba21b759cc7e  # 44497.05363168659
       latitude (rad) = 0x3ff213e746641a20  # 1.1298592328690873
       longitude (rad) = 0x3ff69e46c207a63d  # 1.4136416987697793
-  e201 impacts: 81, digest 0xf912c3a42bd2f686
+  e201 impacts: 82, digest 0xf58d9a68b3026bd8
     42002cb200000009.e201:0400ffffffffce01 at T-1553759508.170836109 s
-      diameter (m) = 0x4035aaeaec31ed5e  # 21.667647134961378
+      diameter (m) = 0x4035aaec8b9ca2a7  # 21.667671895733886
       energy (J) = 0x43422396ad8fd8c3  # 1.021135928948775e16
-      velocity (m/s) = 0x40e174c8532135af  # 35750.26014767156
+      velocity (m/s) = 0x40e174c65d1eb139  # 35750.19886717428
       latitude (rad) = 0xbfe4ac267c475ce4  # -0.6460144450492433
       longitude (rad) = 0x40121a9053ed2f24  # 4.525941192008563
-  e202 impacts: 28, digest 0x44fcff0efe72eafc
+  e202 impacts: 28, digest 0xc2ef72f7ed0d17db
     42002cb200000009.e202:0400ffffffffd201 at T-1434076511.589989884 s
-      diameter (m) = 0x40417c2ede883703  # 34.97018033648603
-      energy (J) = 0x43522f9a18b79278  # 2.047555386777853e16
-      velocity (m/s) = 0x40d81c9228926b99  # 24690.28372631557
+      diameter (m) = 0x40417c2ee78ba131  # 34.97018141095976
+      energy (J) = 0x43522f9a18b79277  # 2.0475553867778524e16
+      velocity (m/s) = 0x40d81c9215ed9964  # 24690.28258838634
       latitude (rad) = 0x3fc2668358050e13  # 0.14375345037306939
       longitude (rad) = 0x400425ba47f74a7f  # 2.518421709284041
-  e203 impacts: 39, digest 0xb6ed93364ccfb276
+  e203 impacts: 40, digest 0x9b2faeca90bade74
     42002cb200000009.e203:0400ffffffffd300 at T-1390011709.481298838 s
-      diameter (m) = 0x403c48ef48a11a9a  # 28.28490117963029
-      energy (J) = 0x435e65a8ee468c10  # 3.422410211132627e16
-      velocity (m/s) = 0x40e56d48a9930763  # 43882.27069999163
+      diameter (m) = 0x403c48efac702386  # 28.28490712869418
+      energy (J) = 0x435e65a8ee468c13  # 3.4224102111326284e16
+      velocity (m/s) = 0x40e56d483829369d  # 43882.25685558955
       latitude (rad) = 0xbfdf50a429c1d69c  # -0.4892969520363779
       longitude (rad) = 0x4004d083139cf3da  # 2.60181250879985
-  e204 impacts: 5, digest 0xf58c5dcc26476019
+  e204 impacts: 5, digest 0x1d415a8b41f46435
     42002cb200000009.e204:0400fffffffff900 at T-196604922.307232887 s
-      diameter (m) = 0x4040535ea4d2c634  # 32.651325800816636
-      energy (J) = 0x434f2acd333d1c55  # 1.7545570188671146e16
-      velocity (m/s) = 0x40d8bd438ab32e7e  # 25333.055340571787
+      diameter (m) = 0x4040535efb0b9836  # 32.65133607927457
+      energy (J) = 0x434f2acd333d1c5b  # 1.7545570188671158e16
+      velocity (m/s) = 0x40d8bd42c6b6af85  # 25333.043378516584
       latitude (rad) = 0x3fea0ba111b754b5  # 0.813919577218846
       longitude (rad) = 0x3ff761b982bbca1c  # 1.4613585573939707
-  e205 impacts: 29, digest 0x3df72926aece1269
+  e205 impacts: 29, digest 0x7026156aaee8f5cf
     42002cb200000009.e205:0400ffffffffce01 at T-1564786165.581477782 s
-      diameter (m) = 0x40370cb5ccfd01cb  # 23.04964905907563
+      diameter (m) = 0x40370cb60181223e  # 23.049652189280316
       energy (J) = 0x434c77957ca75a18  # 1.6025566546146352e16
-      velocity (m/s) = 0x40e3ee68c6d47c22  # 40819.27427124257
+      velocity (m/s) = 0x40e3ee6882b68f76  # 40819.265956192205
       latitude (rad) = 0x3fbe474a38de0211  # 0.11827529800758209
       longitude (rad) = 0x4009761781636944  # 3.182662020536698
-  e206 impacts: 7, digest 0x031b7e2252a89459
+  e206 impacts: 7, digest 0x79465d4f5685fb64
     42002cb200000009.e206:0400ffffffffce00 at T-1549777046.987243842 s
-      diameter (m) = 0x4043c7dcbdc8f41c  # 39.561423991319515
-      energy (J) = 0x43599452d3e567cf  # 2.879983152408966e16
-      velocity (m/s) = 0x40d7c3e6c39041c7  # 24335.605686249004
+      diameter (m) = 0x4043c7dd245d7f0f  # 39.56143621983767
+      energy (J) = 0x43599452d3e567cb  # 2.8799831524089644e16
+      velocity (m/s) = 0x40d7c3e60ab2c5a0  # 24335.594402974122
       latitude (rad) = 0x3faf20f42a489cd1  # 0.060798292314126486
       longitude (rad) = 0x401275c309f57885  # 4.6150018268655275
-  e207 impacts: 6, digest 0xff63467fedebf899
+  e207 impacts: 6, digest 0x75eee160bab94400
     42002cb200000009.e207:0400ffffffffeb00 at T-651434196.381146856 s
-      diameter (m) = 0x40363e0c75cfb9c3  # 22.24237762757708
-      energy (J) = 0x4335060039a532e4  # 5917572547818212.0
-      velocity (m/s) = 0x40d98dc4436ad69a  # 26167.0666148277
+      diameter (m) = 0x40363e0cdf9402c5  # 22.24238393176599
+      energy (J) = 0x4335060039a532e2  # 5917572547818210.0
+      velocity (m/s) = 0x40d98dc38d25d625  # 26167.055489977956
       latitude (rad) = 0xbff2d9a23b65135c  # -1.1781332321272293
       longitude (rad) = 0x3ffa7761e267eaf0  # 1.6541460842115008
-  e208 impacts: 13, digest 0x528c9c6e9b3d768b
+  e208 impacts: 13, digest 0xc597bea94c4a3b72
     42002cb200000009.e208:0400ffffffffd100 at T-1475934393.993568523 s
-      diameter (m) = 0x40303c2cdfb915c5  # 16.235059721648003
-      energy (J) = 0x4331e8169548f7c3  # 5040258295592899.0
-      velocity (m/s) = 0x40e2e8ba3ba5ef8d  # 38725.81978127277
+      diameter (m) = 0x40303c2cf7fa6fc6  # 16.235061167375328
+      energy (J) = 0x4331e8169548f7c1  # 5040258295592897.0
+      velocity (m/s) = 0x40e2e8ba1145d260  # 38725.81460848893
       latitude (rad) = 0xbfe2f47697de2c97  # -0.5923417059106154
       longitude (rad) = 0x3fe26a3858206008  # 0.5754663201541925
-  e301 impacts: 2309, digest 0x9427f642860366b6
+  e301 impacts: 2331, digest 0x0471ad2157517426
     42002cb200000009.e301:0400ffffffffce02 at T-1577859960.527164390 s
-      diameter (m) = 0x40475083d47e94c1  # 46.629023134047664
-      energy (J) = 0x433b13096eaa2db4  # 7620755603467700.0
-      velocity (m/s) = 0x40c31b78ed62e082  # 9782.94474445307
+      diameter (m) = 0x4047519620647b8a  # 46.63739399820686
+      energy (J) = 0x433b13096eaa276c  # 7620755603466092.0
+      velocity (m/s) = 0x40c31a27ce19fc19  # 9780.310977218718
       latitude (rad) = 0xbfd4b33a50090066  # -0.32343919578489133
       longitude (rad) = 0x400b127ed0bf92b8  # 3.38403094372401
-  e301 eruptions: 437, digest 0xa4a52e354139ba93
+  e301 eruptions: 442, digest 0x072e2291528345cc
     42002cb200000009.e301:0401fffffff5d400 at T-1574476207.596886614 s for +23282148.062551226 s
-  e302 impacts: 1759, digest 0x2984450b33306fab
+  e302 impacts: 1760, digest 0x2abe7a54913bd090
     42002cb200000009.e302:0400ffffffffce12 at T-1575963705.359945768 s
-      diameter (m) = 0x404bafb9a40d0791  # 55.37285280834397
-      energy (J) = 0x433f187d907eb0ff  # 8752651852230911.0
-      velocity (m/s) = 0x40bfa5c35811f88d  # 8101.763062594587
+      diameter (m) = 0x404bb0900925e82d  # 55.3793956217854
+      energy (J) = 0x433f187d907ea8c8  # 8752651852228808.0
+      velocity (m/s) = 0x40bfa453cbbd5af5  # 8100.327327570635
       latitude (rad) = 0xbfd21987e470c370  # -0.2828082781662067
       longitude (rad) = 0x400ef21a78c9731b  # 3.8682145534970807
-  e302 eruptions: 692, digest 0x6347300a27f2b9c0
+  e302 eruptions: 695, digest 0xb379058ba6cd28ff
     42002cb200000009.e302:0401fffffff5cf00 at T-1577577184.492159810 s for +9754504.675170959 s
-  e303 impacts: 958, digest 0x5442ddd60b95fc1b
+  e303 impacts: 958, digest 0x31d142e6fe4d8df3
     42002cb200000009.e303:0400ffffffffce00 at T-1575772333.474462361 s
-      diameter (m) = 0x40641220af5dae5b  # 160.5664898709973
-      energy (J) = 0x4383976ea2dce19d  # 1.764648317466838e17
-      velocity (m/s) = 0x40bcc73036d1ec1a  # 7367.188336486952
+      diameter (m) = 0x40641238642f900e  # 160.56938370980828
+      energy (J) = 0x4383976ea2dcce79  # 1.76464831746527e17
+      velocity (m/s) = 0x40bcc6fd3aa74523  # 7366.989176229838
       latitude (rad) = 0xbfe6b789ece6e839  # -0.7099046351424995
       longitude (rad) = 0x3ff189d8dfa43ab0  # 1.0961540924069304
   e303 eruptions: 409, digest 0x0839b336a3fb1c2f
     42002cb200000009.e303:0401fffffff5d700 at T-1572783753.256266895 s for +3596521.106486196 s
-  e304 impacts: 464, digest 0x00aab205ab231001
+  e304 impacts: 465, digest 0x1a4ffaa37ffd2a2d
     42002cb200000009.e304:0400ffffffffce06 at T-1576691962.545860551 s
-      diameter (m) = 0x405c4ba4fa43cf9b  # 113.18194443342365
-      energy (J) = 0x43676a6098ff16a9  # 5.2727100644832584e16
-      velocity (m/s) = 0x40ba94a85a37e3f7  # 6804.657626622348
+      diameter (m) = 0x405c4d277ff540a3  # 113.20553587866247
+      energy (J) = 0x43676a6098fea997  # 5.272710064460921e16
+      velocity (m/s) = 0x40ba9287d8f95c68  # 6802.530654511509
       latitude (rad) = 0xbfdce64fc5f08e6e  # -0.4515571053509352
       longitude (rad) = 0x400fef5ec025c616  # 3.9918799411323205
   e304 eruptions: 94, digest 0xa52e39f3fcd41d37
     42002cb200000009.e304:0401fffffff5f800 at T-1552889429.400182354 s for +1090134.077710171 s
-  e305 impacts: 720, digest 0x737d38be25931920
+  e305 impacts: 720, digest 0xb1612997e19370a9
     42002cb200000009.e305:0400ffffffffce04 at T-1576517954.970551985 s
-      diameter (m) = 0x4064c7d1bbd4b2e7  # 166.24435226004354
-      energy (J) = 0x4389d8de3d87fe24  # 2.3281035022170637e17
-      velocity (m/s) = 0x40bf6039883d03de  # 8032.224735082096
+      diameter (m) = 0x4064c7de90256088  # 166.245918343546
+      energy (J) = 0x4389d8de3d87efaf  # 2.3281035022158794e17
+      velocity (m/s) = 0x40bf601c7a009e47  # 8032.111236609117
       latitude (rad) = 0x3fe2be711aa933e6  # 0.5857472916337627
       longitude (rad) = 0x4011f1ecb3a40560  # 4.48625450790982
   e305 eruptions: 124, digest 0x958b2fe9654a56cf
     42002cb200000009.e305:0401fffffff5d900 at T-1571438197.329313188 s for +174154.103785184 s
-  e306 impacts: 233, digest 0x6a5105aa07855ce9
+  e306 impacts: 234, digest 0x4fa0cf4783774df8
     42002cb200000009.e306:0400ffffffffce02 at T-1565704248.548636439 s
-      diameter (m) = 0x404cd158f952cc3f  # 57.635527768543845
-      energy (J) = 0x433107303b25c63d  # 4792978336237117.0
-      velocity (m/s) = 0x40b60dc27469071a  # 5645.759588779672
+      diameter (m) = 0x404cd2b1bc999ee8  # 57.646049094209786
+      energy (J) = 0x433107303b25c483  # 4792978336236675.0
+      velocity (m/s) = 0x40b60c36c885822e  # 5644.21399721554
       latitude (rad) = 0xbfd45f35fc626b1b  # -0.31831121107977517
       longitude (rad) = 0x3fc2079a86d48d89  # 0.14085704406270974
-  e306 eruptions: 25, digest 0xf5dfd1fc3a483283
+  e306 eruptions: 26, digest 0xe03c5d0614bb3a16
     42002cb200000009.e306:0401fffffff6e000 at T-1412749759.228003875 s for +331865.331141106 s
-  e307 impacts: 276, digest 0xe3f6747fee311d1b
+  e307 impacts: 276, digest 0x7dae33cdee79e653
     42002cb200000009.e307:0400ffffffffce01 at T-1570352530.108518709 s
-      diameter (m) = 0x404d64de570c9f82  # 58.78803527943002
-      energy (J) = 0x4335d60de980b478  # 6146329751368824.0
-      velocity (m/s) = 0x40b83e411b554dc5  # 6206.254323321807
+      diameter (m) = 0x404d64e1bdb774ab  # 58.78813907106208
+      energy (J) = 0x4335d60de980b468  # 6146329751368808.0
+      velocity (m/s) = 0x40b83e3ce630cd8c  # 6206.237887430365
       latitude (rad) = 0x3fbfe2ae1f08882b  # 0.1245526147618256
       longitude (rad) = 0x4009efb40799d8d7  # 3.2420425981355083
-  e307 eruptions: 39, digest 0x67b7c3a5123b2a8d
+  e307 eruptions: 40, digest 0x6a02b2d42906fa05
     42002cb200000009.e307:0401fffffff63900 at T-1513250059.347643087 s for +9213711.570738932 s
-  e308 impacts: 168, digest 0x15fa1e76c3352152
+  e308 impacts: 168, digest 0xeab0379f6b440437
     42002cb200000009.e308:0400ffffffffce00 at T-1566075579.351159998 s
-      diameter (m) = 0x404f3a9759296adb  # 62.45774378321013
-      energy (J) = 0x4334b156052fbccc  # 5824482546531532.0
-      velocity (m/s) = 0x40b58d04441e3f32  # 5517.016664400509
+      diameter (m) = 0x404f3b1c6157eb1c  # 62.46180359642878
+      energy (J) = 0x4334b156052fbac3  # 5824482546531011.0
+      velocity (m/s) = 0x40b58c7a920cca4a  # 5516.478791045558
       latitude (rad) = 0xbfdacad57faff70b  # -0.4186300036379726
       longitude (rad) = 0x4011b5c61291b344  # 4.427513399260366
   e308 eruptions: 17, digest 0x9a679f7e688cfb22
     42002cb200000009.e308:0401fffffff62a00 at T-1522355371.042518415 s for +1150819.667438862 s
-  e401 impacts: 2114, digest 0x4232e1322bdadb5f
+  e401 impacts: 2118, digest 0x2e1c807b49fb161c
     42002cb200000009.e401:0400ffffffffce0d at T-1576983827.191753061 s
-      diameter (m) = 0x404a7adf2b3808b3  # 52.95993557201418
-      energy (J) = 0x43331614afb2afa9  # 5372302660382633.0
-      velocity (m/s) = 0x40ba8201121a3c84  # 6786.004182472014
+      diameter (m) = 0x404a7c2d6dc0967f  # 52.970136374508904
+      energy (J) = 0x43331614afb2acad  # 5372302660381869.0
+      velocity (m/s) = 0x40ba800b462e7296  # 6784.044039633727
       latitude (rad) = 0x3ff36ec1646b0b72  # 1.2145399019798018
       longitude (rad) = 0x400b6597b20b03e1  # 3.424605742417484
-  e401 eruptions: 589, digest 0xb13e3d2424874db4
+  e401 eruptions: 591, digest 0x81d3c11fe06751a2
     42002cb200000009.e401:0401fffffff5cf00 at T-1577730348.006637982 s for +3782166.985199373 s
   e401 dust storms: 2
     42002cb200000009.e401:0403000000000200 at T+385072167.243462929 s cycle 2 for +10421269.106093170 s
       true anomaly at onset (rad) = 0xbfe4d4217301c0f8  # -0.6508948560931733
     42002cb200000009.e401:0403000000000300 at T+698039041.506009049 s cycle 3 for +13178315.224500093 s
       true anomaly at onset (rad) = 0xbfd2709e363ba9a8  # -0.2881236581439688
-  e402 impacts: 2051, digest 0xf078a823ca092fe6
+  e402 impacts: 2051, digest 0xcd80cb72ca6cf24a
     42002cb200000009.e402:0400ffffffffce02 at T-1574655879.090923610 s
-      diameter (m) = 0x4050339aefdbd218  # 64.80633160082687
-      energy (J) = 0x434ba232b50065fd  # 1.5556326079908858e16
-      velocity (m/s) = 0x40c0a953f1fe1858  # 8530.655822526824
+      diameter (m) = 0x405033c1b4f6ffb4  # 64.80869793053608
+      energy (J) = 0x434ba232b5006140  # 1.5556326079906432e16
+      velocity (m/s) = 0x40c0a9182478a5c8  # 8530.188613015125
       latitude (rad) = 0x3fe591c9c823cc2e  # 0.6740464123707903
       longitude (rad) = 0x3fd0a1e9caeb1986  # 0.25988240066762847
   e402 eruptions: 348, digest 0x00ba65d0e157e5b2
     42002cb200000009.e402:0401fffffff5d200 at T-1576080152.151642807 s for +15486361.746294395 s
-  e403 impacts: 827, digest 0xb69a39a161c79d4e
+  e403 impacts: 828, digest 0xd14b3267c3c719d8
     42002cb200000009.e403:0400ffffffffce04 at T-1571013009.799190571 s
-      diameter (m) = 0x4062fb734cb915a6  # 151.8578246703084
-      energy (J) = 0x437eafd33efe5ae4  # 1.3820113809818784e17
-      velocity (m/s) = 0x40bbb08330f6bc96  # 7088.512465878526
+      diameter (m) = 0x4062fbf0aa3df55c  # 151.87312805272347
+      energy (J) = 0x437eafd33efdc8d8  # 1.3820113809758963e17
+      velocity (m/s) = 0x40bbaf70eb43b082  # 7087.441089850037
       latitude (rad) = 0xbfbbf29353577da1  # -0.10917015824042277
       longitude (rad) = 0x401827331877f0e5  # 6.0382808516699
   e403 eruptions: 92, digest 0xd42ec26e2b18f697
     42002cb200000009.e403:0401fffffff5dc00 at T-1569969630.262009245 s for +10358634.125128982 s
-  e404 impacts: 484, digest 0xde1e16d5410e6874
+  e404 impacts: 486, digest 0x9f99e1de74b19cf1
     42002cb200000009.e404:0400ffffffffce01 at T-1554029143.700630921 s
-      diameter (m) = 0x4051b4284582eac8  # 70.81495797905802
-      energy (J) = 0x43479d099d4ebb2f  # 1.3293178167588446e16
-      velocity (m/s) = 0x40baf7b3703b0c32  # 6903.7009312538885
+      diameter (m) = 0x4051b4d132c84c0f  # 70.82526845512642
+      energy (J) = 0x43479d099d4ea8f0  # 1.3293178167579104e16
+      velocity (m/s) = 0x40baf63186d9dae7  # 6902.1934639129095
       latitude (rad) = 0xbff1b3326f82fd18  # -1.1062492710041791
       longitude (rad) = 0x400ec65fc13a834a  # 3.8468623252851204
   e404 eruptions: 7, digest 0xc308bbf816f74e36
     42002cb200000009.e404:0401fffffff63200 at T-1517448990.180026152 s for +1768760.132188619 s
-  e405 impacts: 285, digest 0xac2e9e5b074bb991
+  e405 impacts: 286, digest 0xdea569fb4b963d87
     42002cb200000009.e405:0400ffffffffce00 at T-1576161062.104509363 s
-      diameter (m) = 0x404ce40d4c1af6b7  # 57.781655800977596
-      energy (J) = 0x433216e65a54396a  # 5091728194550122.0
-      velocity (m/s) = 0x40b6a4fdeafc828b  # 5796.9918668574055
+      diameter (m) = 0x404ce4d026dcfb0e  # 57.78760228910515
+      energy (J) = 0x433216e65a5437ee  # 5091728194549742.0
+      velocity (m/s) = 0x40b6a418dbb6388f  # 5796.097102536019
       latitude (rad) = 0xbfe8c8454c38c318  # -0.7744471062379459
       longitude (rad) = 0x3ffa830e169fe30e  # 1.6569958575984773
   e405 eruptions: 12, digest 0x43f81a32f3732191
     42002cb200000009.e405:0401fffffff80800 at T-1233400699.073533513 s for +3510708.892389145 s
-  e406 impacts: 159, digest 0x5b811fbe46e53b02
+  e406 impacts: 160, digest 0x2170f4daebcde945
     42002cb200000009.e406:0400ffffffffce00 at T-1547713544.478652273 s
-      diameter (m) = 0x4052ee1ae8bdf27a  # 75.72039240407494
-      energy (J) = 0x4339904f325153a5  # 7195544238773157.0
-      velocity (m/s) = 0x40b1f1c0a84e726e  # 4593.7525681523675
+      diameter (m) = 0x4052ee7374108b7b  # 75.72579671493251
+      energy (J) = 0x4339904f32514d29  # 7195544238771497.0
+      velocity (m/s) = 0x40b1f142c4bd7618  # 4593.26081451543
       latitude (rad) = 0xbfe41ba96ed186d8  # -0.6283766903327104
       longitude (rad) = 0x4007abc1581807c2  # 2.9588648683865992
-  e406 eruptions: 7, digest 0x67b29d8e758a9f67
+  e406 eruptions: 8, digest 0x38181e0f6f83f23f
     42002cb200000009.e406:0401fffffff68b00 at T-1464201911.827362355 s for +102410493.150624856 s
-  e407 impacts: 118, digest 0x50b80a376b22723d
+  e407 impacts: 119, digest 0x7ddf7b5a3ff3a946
     42002cb200000009.e407:0400ffffffffce01 at T-1570669004.850563633 s
-      diameter (m) = 0x405cc103a0befe24  # 115.01584643031725
-      energy (J) = 0x435e1ff340f9085b  # 3.3917515715584364e16
-      velocity (m/s) = 0x40b4cf964ad45807  # 5327.587079307071
+      diameter (m) = 0x405cc1f08315e243  # 115.03030469071477
+      energy (J) = 0x435e1ff340f8b6a4  # 3.391751571550069e16
+      velocity (m/s) = 0x40b4ce9529ad4930  # 5326.582667188995
       latitude (rad) = 0xbfd71805434397b1  # -0.36084109848740825
       longitude (rad) = 0x40106958f13f0698  # 4.102878350707805
-  e408 impacts: 290, digest 0x99d66a5ee6b93785
+  e408 impacts: 291, digest 0xb2a903b56d5149f7
     42002cb200000009.e408:0400ffffffffce01 at T-1565369704.852553596 s
-      diameter (m) = 0x404c1ebe8e0757bf  # 56.240190270982104
-      energy (J) = 0x433868b6db734b81  # 6870534016158593.0
-      velocity (m/s) = 0x40bb649e02c7c230  # 7012.617229924115
+      diameter (m) = 0x404c1ed5ed79605e  # 56.240903553262555
+      energy (J) = 0x433868b6db734afb  # 6870534016158459.0
+      velocity (m/s) = 0x40bb647bdbcee59d  # 7012.4838227568225
       latitude (rad) = 0xbfd96d8187fe9e29  # -0.3973087146827959
       longitude (rad) = 0x40188b82683b5adb  # 6.1362396513202055
-  e483 impacts: 227, digest 0x0263786ecf78e2bf
+  e483 impacts: 227, digest 0x3d936e23ea696f59
     42002cb200000009.e483:0400ffffffffce00 at T-1575357268.078822558 s
-      diameter (m) = 0x405dea3c3be3d6a6  # 119.65992638826228
-      energy (J) = 0x436a586ab098ed80  # 5.932451717653606e16
-      velocity (m/s) = 0x40b9efb597abbe7c  # 6639.709345563893
+      diameter (m) = 0x405dea41594242be  # 119.66023856611989
+      energy (J) = 0x436a586ab098ebb5  # 5.932451717653239e16
+      velocity (m/s) = 0x40b9efaef0d657fc  # 6639.683362385254
       latitude (rad) = 0x3feb591fbd330566  # 0.8546293921755648
       longitude (rad) = 0x3fd2f2c3b72dfdf5  # 0.29606717003477395
   e483 eruptions: 11, digest 0x8f78f171614b4913
     42002cb200000009.e483:0401fffffff6cd00 at T-1424003349.767736027 s for +70941.721522447 s
-  e501 impacts: 1289, digest 0x33c56732b78ff4fb
+  e501 impacts: 1290, digest 0x5677d5e3070201ed
     42002cb200000009.e501:0400ffffffffce03 at T-1568824950.251550296 s
-      diameter (m) = 0x404fc6a53bc6d0f9  # 63.55191752631976
-      energy (J) = 0x433640e0f3430b04  # 6263784385743620.0
-      velocity (m/s) = 0x40b5c62c60ede874  # 5574.173354024173
+      diameter (m) = 0x404fc810bb48a06c  # 63.563010607206564
+      energy (J) = 0x433640e0f34303bb  # 6263784385741755.0
+      velocity (m/s) = 0x40b5c4b6d5f37ecd  # 5572.714202135522
       latitude (rad) = 0x3fdf6939e1f3aa89  # 0.4907974916992904
       longitude (rad) = 0x40065b140b2b04b6  # 2.794471823931043
-  e501 eruptions: 283, digest 0xf02b5aef69eb35a9
+  e501 eruptions: 285, digest 0xb6b4dddac18bf87d
     42002cb200000009.e501:0401fffffff5d500 at T-1573702653.511829957 s for +3969735.714871274 s
   e501 dust storms: 2
     42002cb200000009.e501:0403000000000000 at T-219758311.929954550 s cycle 0 for +11359955.706447521 s
       true anomaly at onset (rad) = 0xbfe5841a59d23f0a  # -0.6723758463212743
     42002cb200000009.e501:0403000000000200 at T+1042027213.323612270 s cycle 2 for +11663310.411922661 s
       true anomaly at onset (rad) = 0xbfd1c16df61c923c  # -0.27743100199066695
-  e502 impacts: 320, digest 0x96ecfb4bce7d7300
+  e502 impacts: 321, digest 0x74f6a9dc7fe9375d
     42002cb200000009.e502:0400ffffffffce02 at T-1564626448.971752791 s
-      diameter (m) = 0x40557f6d8a9fdf58  # 85.99106088268798
-      energy (J) = 0x43447f5ae51378c9  # 1.1539055802511762e16
-      velocity (m/s) = 0x40b2c6d8a7242b75  # 4806.846300373659
+      diameter (m) = 0x405580e04ad3b262  # 86.01368971513287
+      energy (J) = 0x43447f5ae5135012  # 1.1539055802490916e16
+      velocity (m/s) = 0x40b2c4f3139d14dc  # 4804.949518029778
       latitude (rad) = 0xbfe3d42eaeaddf94  # -0.6196511661246284
       longitude (rad) = 0x4009f8226df5efea  # 3.2461594191245142
-  e503 impacts: 406, digest 0x3285fc371eab1ce9
+  e503 impacts: 407, digest 0xe1b8b4224e7cee66
     42002cb200000009.e503:0400ffffffffce03 at T-1561993657.335861949 s
-      diameter (m) = 0x4089ab0cbb8a0b57  # 821.3812170777045
-      energy (J) = 0x43ee690bbb228aac  # 1.7530364736470082e19
-      velocity (m/s) = 0x40b8ca7ca1f2a6ea  # 6346.486846128226
+      diameter (m) = 0x4089abb26531351a  # 821.4621070713358
+      energy (J) = 0x43ee690bbb0802a0  # 1.7530364732909093e19
+      velocity (m/s) = 0x40b8c98ca8fcac5c  # 6345.5494535370635
       latitude (rad) = 0xbfd5db36f1307d85  # -0.3415047984471687
       longitude (rad) = 0x3fb9bbeeaec8ff3d  # 0.10052387015548177
-  e504 impacts: 175, digest 0xe4656b27de14607c
+  e504 impacts: 175, digest 0x72dee59d6c207b1e
     42002cb200000009.e504:0400ffffffffce00 at T-1558939691.711491569 s
-      diameter (m) = 0x404fa4dd207bb0ca  # 63.287998257060806
-      energy (J) = 0x433543d0ec0e9017  # 5985539103559703.0
-      velocity (m/s) = 0x40b56b14b7e9c67c  # 5483.080931292494
+      diameter (m) = 0x404fa563653253f2  # 63.29209580380838
+      energy (J) = 0x433543d0ec0e8dc7  # 5985539103559111.0
+      velocity (m/s) = 0x40b56a8c68e8a7ea  # 5482.548475781436
       latitude (rad) = 0x3fecf704d3d0ecbd  # 0.905153669074387
       longitude (rad) = 0x40092cee120fda85  # 3.1469384585464604
-  e505 impacts: 193, digest 0x74efa75989ae3ca2
+  e505 impacts: 193, digest 0x19a01938ce712b44
     42002cb200000009.e505:0400ffffffffce01 at T-1574523541.623107337 s
-      diameter (m) = 0x405660ff6618426c  # 89.5155883061322
-      energy (J) = 0x43502dced0c3d4c9  # 1.8215863665513252e16
-      velocity (m/s) = 0x40b6365411e62249  # 5686.328398116465
+      diameter (m) = 0x4056612ab1a74120  # 89.5182308324188
+      energy (J) = 0x43502dced0c3cfda  # 1.82158636655082e16
+      velocity (m/s) = 0x40b636139cfe991a  # 5686.07661429632
       latitude (rad) = 0xbfd478971b016f0a  # -0.3198602451063698
       longitude (rad) = 0x3ffc8eb3a48587d5  # 1.7848392893433715
-  e506 impacts: 68, digest 0x05324ae2423d3d33
+  e506 impacts: 68, digest 0x0df70b142c9b63e1
     42002cb200000009.e506:0400ffffffffce01 at T-1559866938.674497532 s
-      diameter (m) = 0x405a635dbb738087  # 105.55259596137522
-      energy (J) = 0x434645ffda392155  # 1.2538829335577258e16
-      velocity (m/s) = 0x40acc90704dbbf99  # 3684.5137089415916
+      diameter (m) = 0x405a639d60d638ed  # 105.55648060722497
+      energy (J) = 0x434645ffda391701  # 1.253882933557197e16
+      velocity (m/s) = 0x40acc89ee1db117d  # 3684.310316892514
       latitude (rad) = 0xbfef6b85572ef907  # -0.9818751051714408
       longitude (rad) = 0x40159ea8e0783882  # 5.4049410889985
-  e507 impacts: 79, digest 0x7188e461262fcd34
+  e507 impacts: 79, digest 0xda7c686ecea5afff
     42002cb200000009.e507:0400ffffffffcf01 at T-1543762248.676940428 s
-      diameter (m) = 0x404ef7d7c6c8800d  # 61.93627247610139
-      energy (J) = 0x4330426d3dced909  # 4576636583205129.0
-      velocity (m/s) = 0x40b35857b0f58afc  # 4952.342543932373
+      diameter (m) = 0x404ef85e13f5fa37  # 61.940371031862405
+      energy (J) = 0x4330426d3dced891  # 4576636583205009.0
+      velocity (m/s) = 0x40b357d9dbeb02cb  # 4951.8510119325465
       latitude (rad) = 0x3fe4ed6e7120405b  # 0.6539833268634639
       longitude (rad) = 0x3ff7e94672fbd8c4  # 1.4944519511750949
-  e508 impacts: 45, digest 0xfc19f03465011b64
+  e508 impacts: 45, digest 0xe63a79bd19c7eea6
     42002cb200000009.e508:0400ffffffffd100 at T-1480695210.970643672 s
-      diameter (m) = 0x405c23753f0e7a1e  # 112.55403114713451
-      energy (J) = 0x434e5becd2b2d019  # 1.7090644013326386e16
-      velocity (m/s) = 0x40ae8516667a28df  # 3906.5437505888835
+      diameter (m) = 0x405c241a5d55dca2  # 112.56410916695543
+      energy (J) = 0x434e5becd2b2a219  # 1.7090644013302834e16
+      velocity (m/s) = 0x40ae8409cabf3195  # 3906.019124960711
       latitude (rad) = 0xbfd3ae263197e6f4  # -0.30750422328092886
       longitude (rad) = 0x4014c5830d975910  # 5.1928827403665
-  e582 impacts: 3, digest 0x98e2ac281ae96769
+  e582 impacts: 3, digest 0x5795992016906537
     42002cb200000009.e582:0400fffffffff000 at T-485503323.971583800 s
-      diameter (m) = 0x40621a0fcd02b24b  # 144.81442881132747
-      energy (J) = 0x4361277550dbd453  # 3.8627675402576536e16
-      velocity (m/s) = 0x40af7087c7967201  # 4024.265194608132
+      diameter (m) = 0x40621a20cd8a4133  # 144.81650425913685
+      energy (J) = 0x4361277550dbcb36  # 3.862767540255787e16
+      velocity (m/s) = 0x40af705b7c737fbb  # 4024.1786838620587
       latitude (rad) = 0xbfe5f3e0cdc91885  # -0.6860202807663575
       longitude (rad) = 0x401879d9ce100cd5  # 6.118994922380087
   e601 impacts: 1906, digest 0x879aad0bc8fcd23d
@@ -668,8 +668,8 @@ close_binary 42002cb200000009: 113647 events: 55319 impacts, 58322 eruptions, 0 
       latitude (rad) = 0xbfad6cd5a2b23f6f  # -0.057470966444383424
       longitude (rad) = 0x401671970d2c81d4  # 5.6109277780928615
 
-wide_binary 41ffecae00000004: 2464 events: 4 impacts, 2460 eruptions, 0 storms, 0 dust storms, 0 comets
-  digest = 0x894eb481648a0243
+wide_binary 41ffecae00000004: 2456 events: 4 impacts, 2452 eruptions, 0 storms, 0 dust storms, 0 comets
+  digest = 0x21af41cd7dafa2bf
   0101 eruptions: 2, digest 0xeb3297bc9607af5f
     41ffecae00000004.0101:0401fffffffb9d00 at T-679120596.152746190 s for +2018352.233861681 s
   0102 eruptions: 1, digest 0xbba321786ab86b4b
@@ -680,82 +680,82 @@ wide_binary 41ffecae00000004: 2464 events: 4 impacts, 2460 eruptions, 0 storms, 
     41ffecae00000004.0500:0401fffffff61800 at T-1533205652.861157580 s for +1380176.137496201 s
   0600 eruptions: 142, digest 0xb080452523d016f1
     41ffecae00000004.0600:0401fffffff5d300 at T-1575414776.380009693 s for +10055417.342774981 s
-  0700 impacts: 3, digest 0xc3f70d72633a9bff
+  0700 impacts: 3, digest 0x68dcb8d1945dba30
     41ffecae00000004.0700:0400ffffffffea00 at T-689768365.677912111 s
-      diameter (m) = 0x4042c6b8d75b19e5  # 37.55251590679453
+      diameter (m) = 0x4042c6b715c4095b  # 37.552462311478585
       energy (J) = 0x433610bcb6199159  # 6210852182659417.0
-      velocity (m/s) = 0x40c7de033656b150  # 12220.025095783785
+      velocity (m/s) = 0x40c7de068f93d8f5  # 12220.051256638466
       latitude (rad) = 0xbfa7c5079179d1e1  # -0.04642509127453188
       longitude (rad) = 0x4013f0d50651713a  # 4.985187624665111
-  0700 eruptions: 2058, digest 0xcaf59e60d1b6c058
+  0700 eruptions: 2050, digest 0x2d052651e1b7e282
     41ffecae00000004.0700:0401fffffff5d000 at T-1576732148.552698583 s for +3549619.937177860 s
-  e401 impacts: 1, digest 0x0a0bd13d9b6353ef
+  e401 impacts: 1, digest 0x8956027a26982a00
     41ffecae00000004.e401:0400ffffffffd600 at T-1294278270.206302481 s
-      diameter (m) = 0x404c5cee036ce573  # 56.7260135919304
-      energy (J) = 0x4331e49da6b84467  # 5036440362173543.0
-      velocity (m/s) = 0x40b7271dfc9ae231  # 5927.117135696623
+      diameter (m) = 0x404c5ced76b52162  # 56.72599681705721
+      energy (J) = 0x4331e49da6b84466  # 5036440362173542.0
+      velocity (m/s) = 0x40b7271ea8e859aa  # 5927.119764825717
       latitude (rad) = 0x3fe8704b572df316  # 0.7637078001713202
       longitude (rad) = 0x4003919973290ea3  # 2.44609346360251
 
-hierarchical_triple 42002cb200000003: 40561 events: 554 impacts, 39988 eruptions, 19 storms, 0 dust storms, 0 comets
-  digest = 0xfc5490b04ead91d1
-  0100 impacts: 4, digest 0x7cd365ce627750bc
+hierarchical_triple 42002cb200000003: 39802 events: 554 impacts, 39229 eruptions, 19 storms, 0 dust storms, 0 comets
+  digest = 0xaec17c8d1382100b
+  0100 impacts: 4, digest 0xc97571311bf66e48
     42002cb200000003.0100:0400ffffffffcf00 at T-1545039582.167528589 s
-      diameter (m) = 0x4038d41e82a203f1  # 24.828590549997845
-      energy (J) = 0x436545f8f008dad4  # 4.790327993793501e16
-      velocity (m/s) = 0x40eed2c61c5adbdd  # 63126.19096129362
+      diameter (m) = 0x4038d3f4927394a6  # 24.827950623720106
+      energy (J) = 0x436545f8f008db39  # 4.7903279937935816e16
+      velocity (m/s) = 0x40eed31435922544  # 63128.6315394142
       latitude (rad) = 0xbfe49fbbd7dc02f3  # -0.6444987503055856
       longitude (rad) = 0x400712fa49030004  # 2.8842664436379
-  0200 impacts: 1, digest 0xed117433edb9cb0c
+  0200 impacts: 1, digest 0x9c847ab5ed2b4bf7
     42002cb200000003.0200:0400ffffffffd700 at T-1267030228.225043344 s
-      diameter (m) = 0x4038576ee1963e84  # 24.341535662823404
-      energy (J) = 0x433f904daed3af9f  # 8884387598020511.0
-      velocity (m/s) = 0x40db596e837ef59e  # 28005.72677587496
+      diameter (m) = 0x4038564eb1707f41  # 24.33713826176177
+      energy (J) = 0x433f904daed3b1a9  # 8884387598021033.0
+      velocity (m/s) = 0x40db5b54523aebfe  # 28013.317518930875
       latitude (rad) = 0xbfe122130e89182f  # -0.5354094776055315
       longitude (rad) = 0x401851318dfea466  # 6.07929059855187
-  0400 eruptions: 2771, digest 0x98456c34fba9dbfe
+  0400 eruptions: 2764, digest 0x6b6bfffd91e1f5c0
     42002cb200000003.0400:0401fffffff5d200 at T-1575676428.012607398 s for +33930236.364123798 s
-  0500 impacts: 1, digest 0x08da5a25b5a71030
+  0500 impacts: 1, digest 0x2218a9e30e1036c5
     42002cb200000003.0500:0400000000000b00 at T+357395283.264755812 s
-      diameter (m) = 0x403799da1234768e  # 23.60098375111425
-      energy (J) = 0x4359457fc6430e77  # 2.8453158028851676e16
-      velocity (m/s) = 0x40e9a1fbd7eea258  # 52495.87010890682
+      diameter (m) = 0x4037996a8cac633c  # 23.599282066428017
+      energy (J) = 0x4359457fc6430f89  # 2.8453158028852772e16
+      velocity (m/s) = 0x40e9a2b18b163b6d  # 52501.548228374544
       latitude (rad) = 0xbfd8180cd40dca74  # -0.3764679022635058
       longitude (rad) = 0x40107a3d1f9c40c9  # 4.119373792564326
-  0500 eruptions: 3734, digest 0x5fbe4f600e5af4cf
+  0500 eruptions: 3645, digest 0xf47f1e410f0ab963
     42002cb200000003.0500:0401fffffff5cf01 at T-1577702473.668897009 s for +4686423.617583096 s
-  0600 eruptions: 5111, digest 0xf0f5bc82434c39a8
+  0600 eruptions: 4956, digest 0x381850520d980039
     42002cb200000003.0600:0401fffffff5cf01 at T-1577818032.767220630 s for +16178732.227610269 s
-  0b00 eruptions: 7020, digest 0x90e8f00e803dc710
+  0b00 eruptions: 6976, digest 0xac5e6da3b7a21059
     42002cb200000003.0b00:0401fffffff5d200 at T-1576000696.833706844 s for +24255541.060628060 s
-  0c00 eruptions: 7400, digest 0x9a4c0fbc9049a604
+  0c00 eruptions: 7307, digest 0xf328785e73e42b3b
     42002cb200000003.0c00:0401fffffff5cf00 at T-1577378363.109760606 s for +187145.922089785 s
-  0d00 impacts: 1, digest 0xe8f8f503c70df13e
+  0d00 impacts: 1, digest 0x1efff93f239439e9
     42002cb200000003.0d00:0400000000002f00 at T+1491406988.014645708 s
-      diameter (m) = 0x4059e21066d8e304  # 103.53225108318662
-      energy (J) = 0x43a86cfb47b97a65  # 8.800289199340387e17
-      velocity (m/s) = 0x40f30095738d1837  # 77833.34071073016
+      diameter (m) = 0x4059e1f9e39205a9  # 103.5308770109174
+      energy (J) = 0x43a86cfb47bcec9b  # 8.80028919962947e17
+      velocity (m/s) = 0x40f300ae3e6729d8  # 77834.89023510308
       latitude (rad) = 0x3fee2fb52630384b  # 0.9433236833444963
       longitude (rad) = 0x3f9e7d8d2c1b1fa5  # 0.029775815789235733
-  0e00 impacts: 3, digest 0x6809569bfd0abcac
+  0e00 impacts: 3, digest 0x281960d5f3378df1
     42002cb200000003.0e00:0400fffffffff200 at T-422118405.313414212 s
-      diameter (m) = 0x40458113c449054d  # 43.00841573300804
-      energy (J) = 0x4360279fb53aea86  # 3.637733216952837e16
-      velocity (m/s) = 0x40ecdbfbeeb2dade  # 59103.87288801906
+      diameter (m) = 0x4045805dffc7021f  # 43.002868625804915
+      energy (J) = 0x4360279fb53e17b1  # 3.6377332171193736e16
+      velocity (m/s) = 0x40ecdd69e5e9f7be  # 59115.309315666076
       latitude (rad) = 0xbfe5ffc99bdd2a1d  # -0.6874740642754805
       longitude (rad) = 0x40139597744901b8  # 4.896085564571358
-  0f00 impacts: 8, digest 0x0b7fe4a9b79e2201
+  0f00 impacts: 8, digest 0x9b90296e5ff0acd6
     42002cb200000003.0f00:0400ffffffffd300 at T-1389729604.676997177 s
-      diameter (m) = 0x404bcdfd6f5ee9ca  # 55.609296723694186
-      energy (J) = 0x43600e4989eb0bd1  # 3.615446909323636e16
-      velocity (m/s) = 0x40e391925408656c  # 40076.57275790986
+      diameter (m) = 0x404bcd7bfa234627  # 55.605345980857514
+      energy (J) = 0x43600e4989ede3f8  # 3.615446909472762e16
+      velocity (m/s) = 0x40e3921b01dbfd56  # 40080.843976969525
       latitude (rad) = 0x3feff757d51688f4  # 0.998943248927644
       longitude (rad) = 0x3ffd10c1caf44d14  # 1.8165910652067554
-  1000 impacts: 18, digest 0x7b30e723789db7ac
+  1000 impacts: 18, digest 0x2622fefaa706db55
     42002cb200000003.1000:0400ffffffffd400 at T-1366885469.909845187 s
-      diameter (m) = 0x4043694e37039d17  # 38.822699429287404
-      energy (J) = 0x4334040805bb70b5  # 5633932036632757.0
-      velocity (m/s) = 0x40da7c48c414ac26  # 27121.136967819322
+      diameter (m) = 0x404365e72b6998b1  # 38.796117235718505
+      energy (J) = 0x4334040805bf690d  # 5633932036892941.0
+      velocity (m/s) = 0x40da834104758970  # 27149.015897163597
       latitude (rad) = 0xbfeacf604f3f9999  # -0.8378144786664051
       longitude (rad) = 0x4013f343e3474389  # 4.9875636589284875
   1000 storms: 9
@@ -768,20 +768,18 @@ hierarchical_triple 42002cb200000003: 40561 events: 554 impacts, 39988 eruptions
     42002cb200000003.1000:0402000000000f00 at T+597800156.270100387 s cycle 15 for +1475182.890636085 s, Polar
     42002cb200000003.1000:0402000000001000 at T+933501385.302959267 s cycle 16 for +4423404.315510801 s, Polar
     42002cb200000003.1000:0402000000001100 at T+1308066288.791224904 s cycle 17 for +5015076.916381139 s, MidLatitude
-  1001 eruptions: 1, digest 0xbeb0b3dfe9d77400
-    42002cb200000003.1001:040100000001c300 at T+273211976.512607549 s for +9383765.124651277 s
-  1100 impacts: 115, digest 0xeeae61f34ab46723
+  1100 impacts: 115, digest 0x675df1821b3f2200
     42002cb200000003.1100:0400ffffffffce00 at T-1564782311.257935613 s
-      diameter (m) = 0x404ed7c574ceba59  # 61.6857133874334
-      energy (J) = 0x434e6def55a6ea85  # 1.7130248005866762e16
-      velocity (m/s) = 0x40d70f09e8b91c91  # 23612.15482929029
+      diameter (m) = 0x404ed7b1f626abd2  # 61.68511845482102
+      energy (J) = 0x434e6def55a7a014  # 1.713024800595972e16
+      velocity (m/s) = 0x40d70f1fc5772e1d  # 23612.49642734054
       latitude (rad) = 0xbfc29ae666fb0a10  # -0.14535217312193582
       longitude (rad) = 0x3ffb3bffad40caa4  # 1.7021481292437466
-  1200 impacts: 403, digest 0x18f92fd9bdbb6b51
+  1200 impacts: 403, digest 0xee33449efc00236b
     42002cb200000003.1200:0400ffffffffce04 at T-1577600696.590202061 s
-      diameter (m) = 0x4059bebf45f20a4d  # 102.98042439114325
-      energy (J) = 0x4366b5d0af42ede5  # 5.1138859086868264e16
-      velocity (m/s) = 0x40d278665c6074ef  # 18913.59938823146
+      diameter (m) = 0x4059beaa56952a92  # 102.97914661948224
+      energy (J) = 0x4366b5d0af456061  # 5.1138859088151304e16
+      velocity (m/s) = 0x40d2787ce3ebf67a  # 18913.951411238384
       latitude (rad) = 0x3fe7db11ebaea30d  # 0.7454919436614503
       longitude (rad) = 0x40012318a3b314d8  # 2.14213683977378
   1200 storms: 10
@@ -795,34 +793,32 @@ hierarchical_triple 42002cb200000003: 40561 events: 554 impacts, 39988 eruptions
     42002cb200000003.1200:0402fffffffffe00 at T+852522161.571699527 s cycle -2 for +1519278.000870688 s, Polar
     42002cb200000003.1200:0402ffffffffff00 at T+1225020486.512671477 s cycle -1 for +3500161.264102667 s, MidLatitude
     42002cb200000003.1200:0402000000000000 at T+1535492528.439959619 s cycle 0 for +1984868.813658668 s, MidLatitude
-  1201 eruptions: 3, digest 0x101e7c50274e321a
-    42002cb200000003.1201:0401fffffff6fe00 at T-1394240969.994049849 s for +2128913.844090620 s
   1500 eruptions: 279, digest 0xfca37b0fb9192a89
     42002cb200000003.1500:0401fffffff5db00 at T-1570202595.375472767 s for +390348.179863254 s
-  1600 eruptions: 1014, digest 0x99d57a0d7701cccc
+  1600 eruptions: 987, digest 0x5b5e934f0c76b663
     42002cb200000003.1600:0401fffffff5d300 at T-1575238237.048025023 s for +12417129.550385938 s
-  1700 eruptions: 783, digest 0x68caaccf1ac04d1e
+  1700 eruptions: 760, digest 0x14088fcb2cf0ed20
     42002cb200000003.1700:0401fffffff5d000 at T-1577016673.830196332 s for +80834871.282390445 s
-  1800 eruptions: 2354, digest 0x6f14a9854255b4da
+  1800 eruptions: 2270, digest 0x864af07a57b59a76
     42002cb200000003.1800:0401fffffff5d000 at T-1576761562.633872957 s for +752323.849834342 s
-  1900 eruptions: 2683, digest 0x1b2d73dd63d071ca
+  1900 eruptions: 2656, digest 0x1a1f1521f479e265
     42002cb200000003.1900:0401fffffff5cf00 at T-1577877924.423682438 s for +37395285.890526555 s
-  1a00 eruptions: 1592, digest 0xeebe394cb1bcd60e
+  1a00 eruptions: 1517, digest 0x875b7adaa4f371bf
     42002cb200000003.1a00:0401fffffff5d200 at T-1575594491.619794069 s for +3124215.647287774 s
-  1b00 eruptions: 2250, digest 0xaf52aa4bccd8f654
+  1b00 eruptions: 2219, digest 0xefa437132595666f
     42002cb200000003.1b00:0401fffffff5d001 at T-1577277967.878419650 s for +24890659.197256460 s
-  1c00 eruptions: 2993, digest 0x454f45d04669035b
+  1c00 eruptions: 2893, digest 0x64d0fcea6b8c624f
     42002cb200000003.1c00:0401fffffff5d201 at T-1575713905.453506025 s for +13264898.205690601 s
 
-subgiant 42006c9a00000004: 176697 events: 7290 impacts, 167862 eruptions, 7 storms, 1 dust storms, 1537 comets
-  digest = 0x5fb2c9578866f393
+subgiant 42006c9a00000004: 11533 events: 7290 impacts, 2698 eruptions, 7 storms, 1 dust storms, 1537 comets
+  digest = 0x2673b00463dda653
   0203 eruptions: 1, digest 0x235a683a4d67597d
     42006c9a00000004.0203:0401fffffffae300 at T-791396680.748149054 s for +315576000.000000000 s
-  0300 impacts: 2, digest 0x52bcb83b459468eb
+  0300 impacts: 2, digest 0xccdbfb1ec1da9051
     42006c9a00000004.0300:0400ffffffffe400 at T-883330467.267069919 s
-      diameter (m) = 0x4044e6f5f09f3526  # 41.80438049100694
-      energy (J) = 0x432fe9c31c10cc8b  # 4491374238393925.5
-      velocity (m/s) = 0x40d529dbad3d320d  # 21671.432448672178
+      diameter (m) = 0x4044e6dc9d7693d7  # 41.80360763826291
+      energy (J) = 0x432fe9c31c10d970  # 4491374238395576.0
+      velocity (m/s) = 0x40d52a0223c868e0  # 21672.033434011857
       latitude (rad) = 0x3fdbdf52e1c19cf4  # 0.43550560041917596
       longitude (rad) = 0x4018c1b324ec86d2  # 6.189159943520012
   0400 impacts: 896, digest 0x9d67184a766a7b68
@@ -839,10 +835,8 @@ subgiant 42006c9a00000004: 176697 events: 7290 impacts, 167862 eruptions, 7 stor
     42006c9a00000004.0400:0402000000000300 at T+384055054.795253747 s cycle 3 for +2674440.157154289 s, Equatorial
     42006c9a00000004.0400:0402000000000400 at T+926248290.925744945 s cycle 4 for +4626690.540724993 s, MidLatitude
     42006c9a00000004.0400:0402000000000500 at T+1537659704.907853423 s cycle 5 for +1566265.114374364 s, Equatorial
-  0401 eruptions: 22047, digest 0xc4f9d45a67921083
-    42006c9a00000004.0401:0401fffffff5cf04 at T-1577859332.291469003 s for +262573.222837878 s
-  0402 eruptions: 59, digest 0x647971b2340f9d29
-    42006c9a00000004.0402:0401fffffff5e400 at T-1564705886.538651653 s for +356916.281395495 s
+  0402 eruptions: 1, digest 0xfaf1c7efe3cc9fc4
+    42006c9a00000004.0402:0401000000085800 at T+1292131178.285935081 s for +1813876.932904539 s
   0402 dust storms: 1
     42006c9a00000004.0402:0403ffffffffff00 at T-558652145.197018462 s cycle -1 for +10623823.061478940 s
       true anomaly at onset (rad) = 0x3fde1d0123217852  # 0.47052029066788237
@@ -855,10 +849,6 @@ subgiant 42006c9a00000004: 176697 events: 7290 impacts, 167862 eruptions, 7 stor
       longitude (rad) = 0x3fd65b80e7b70299  # 0.3493349325981768
   0500 storms: 1
     42006c9a00000004.0500:0402000000000200 at T+1295056698.191965779 s cycle 2 for +28375095.983986485 s, Equatorial
-  0501 eruptions: 674, digest 0x204298ee9d9120f2
-    42006c9a00000004.0501:0401fffffff5db00 at T-1570631990.936762438 s for +1998193.972852348 s
-  0502 eruptions: 3428, digest 0xc52ce8ba2e54d69a
-    42006c9a00000004.0502:0401fffffff5d002 at T-1577051126.027856321 s for +368801.692110990 s
   0503 impacts: 11, digest 0x00eaf0fbe74464ae
     42006c9a00000004.0503:0400ffffffffd100 at T-1465220585.879992432 s
       diameter (m) = 0x403bf2d19238f396  # 27.948510302452256
@@ -866,8 +856,8 @@ subgiant 42006c9a00000004: 176697 events: 7290 impacts, 167862 eruptions, 7 stor
       velocity (m/s) = 0x40e7d41e95ea2b95  # 48800.955800137635
       latitude (rad) = 0xbff40d6444f36c17  # -1.2532694524186405
       longitude (rad) = 0x40019c655a10e653  # 2.201365188256014
-  0503 eruptions: 92816, digest 0xadec7f3479072579
-    42006c9a00000004.0503:0401fffffff5cf05 at T-1577721247.012125997 s for +162662875.776229441 s
+  0503 eruptions: 70, digest 0x2b077e02fb851048
+    42006c9a00000004.0503:0401fffffff62f00 at T-1519422617.830921836 s for +1362563.026095182 s
   0504 impacts: 11, digest 0xba2d12e4de72e069
     42006c9a00000004.0504:0400ffffffffda00 at T-1182935467.262868649 s
       diameter (m) = 0x4064084e1239d2f1  # 160.25953017514942
@@ -875,8 +865,8 @@ subgiant 42006c9a00000004: 176697 events: 7290 impacts, 167862 eruptions, 7 stor
       velocity (m/s) = 0x40e09b2c3695163c  # 34009.381662887026
       latitude (rad) = 0xbfc1768183734071  # -0.13642901342837235
       longitude (rad) = 0x4010305b53c9cc6d  # 4.047223385993772
-  0504 eruptions: 48837, digest 0x45bbfc8406e72690
-    42006c9a00000004.0504:0401fffffff5cf07 at T-1577878699.291256781 s for +82830835.589383736 s
+  0504 eruptions: 2626, digest 0x5611524b909ded54
+    42006c9a00000004.0504:0401fffffff5cf00 at T-1577429769.792725461 s for +4816741.471127434 s
   e101 impacts: 1, digest 0x807e86a9fefdbf49
     42006c9a00000004.e101:0400000000000b00 at T+352409074.555191952 s
       diameter (m) = 0x4058ff70b33289a2  # 99.9912536614925
@@ -905,24 +895,24 @@ subgiant 42006c9a00000004: 176697 events: 7290 impacts, 167862 eruptions, 7 stor
       eccentricity = 0x3fefaf3c6224b1b1  # 0.9901410977232016
       nucleus (m) = 0x40a844b88b40ddef  # 3106.360437419025
 
-red_giant 4200ecd200000003: 8840 events: 6460 impacts, 2341 eruptions, 0 storms, 0 dust storms, 39 comets
-  digest = 0xa7fadcc574f88942
-  0300 eruptions: 1278, digest 0x9736c16f8dc67361
+red_giant 4200ecd200000003: 8832 events: 6460 impacts, 2333 eruptions, 0 storms, 0 dust storms, 39 comets
+  digest = 0xe7371453b619ce26
+  0300 eruptions: 1275, digest 0x98d9ab86c64af847
     4200ecd200000003.0300:0401fffffff5d600 at T-1573248573.710351212 s for +28960.346440282 s
-  0400 eruptions: 1063, digest 0x593796ff31e95fa7
+  0400 eruptions: 1058, digest 0x2bbb077dccbe5e87
     4200ecd200000003.0400:0401fffffff5d000 at T-1577227604.891742385 s for +13796142.493869535 s
-  0500 impacts: 6459, digest 0xd9d763706bd3eae6
+  0500 impacts: 6459, digest 0x7a977226b851b35d
     4200ecd200000003.0500:0400ffffffffce2a at T-1577634357.507794602 s
-      diameter (m) = 0x405c45e00b9e2352  # 113.09179964488183
-      energy (J) = 0x438da32649136a3d  # 2.669490929504931e17
-      velocity (m/s) = 0x40e2559f9daefe02  # 37548.987998481854
+      diameter (m) = 0x405c45e2cce45b82  # 113.09196779537709
+      energy (J) = 0x438da329c61cc27f  # 2.6694957239581488e17
+      velocity (m/s) = 0x40e2559e03e0a359  # 37548.93797332672
       latitude (rad) = 0x3fd4da8ef2009017  # 0.3258397448828431
       longitude (rad) = 0x3ff082123089a9b6  # 1.031755628204889
-  0503 impacts: 1, digest 0x896f86ba268558a5
+  0503 impacts: 1, digest 0x05c14e8b7f088c72
     4200ecd200000003.0503:0400000000001d00 at T+929795966.125715243 s
-      diameter (m) = 0x40612ea5b8d4db0c  # 137.45772973607416
-      energy (J) = 0x4374c158800b0b99  # 9.347336613925518e16
-      velocity (m/s) = 0x40d03158d128ad9f  # 16581.387766046097
+      diameter (m) = 0x40612ea691e82850  # 137.45783324568993
+      energy (J) = 0x4374c158800aca3a  # 9.347336613898742e16
+      velocity (m/s) = 0x40d031579e4be437  # 16581.369036648623
       latitude (rad) = 0xbfd9f2bbc16b8b6b  # -0.4054402722232939
       longitude (rad) = 0x4008df202ee8407d  # 3.1089481033923776
   ef00 comets: 39, digest 0xfe31dc4d3e033353
@@ -939,188 +929,38 @@ red_giant 4200ecd200000003: 8840 events: 6460 impacts, 2341 eruptions, 0 storms,
       eccentricity = 0x3fefd76ea004874c  # 0.9950478673310754
       nucleus (m) = 0x40e6fd92db14d688  # 47084.589243334776
 
-fallback_black_hole 8200b2e00000000a: 97517 events: 644 impacts, 96873 eruptions, 0 storms, 0 dust storms, 0 comets
-  digest = 0x3273d66fd3dc7192
-  0200 impacts: 26, digest 0x669bcd182e9a2d26
-    8200b2e00000000a.0200:0400ffffffffe000 at T-1005493386.041586323 s
-      diameter (m) = 0x40468b46f7e70a8a  # 45.0881032827502
-      energy (J) = 0x4348a627aa8d25c1  # 1.387617747273613e16
-      velocity (m/s) = 0x40cb1db8185d4780  # 13883.438243541634
-      latitude (rad) = 0x3ff2880384758987  # 1.1582064794716602
-      longitude (rad) = 0x40188fcee6192b09  # 6.14043769386877
-  0200 eruptions: 47416, digest 0xf10c6a281ff16979
-    8200b2e00000000a.0200:0401fffffff5cf00 at T-1577834465.162819470 s for +3128649.532109308 s
-  0300 impacts: 30, digest 0xf65994f65d846d00
-    8200b2e00000000a.0300:0400ffffffffcf00 at T-1530987024.292289690 s
-      diameter (m) = 0x4040c926722cd20e  # 33.57148577869894
-      energy (J) = 0x433529f3c2f63be7  # 5957101435632615.0
-      velocity (m/s) = 0x40cba73dc7fe3035  # 14158.482665799655
-      latitude (rad) = 0xbff578c86e592090  # -1.3419880209421855
-      longitude (rad) = 0x400c7132df096d96  # 3.5552728104355067
-  0300 eruptions: 45670, digest 0x8d2454a757176c75
-    8200b2e00000000a.0300:0401fffffff5cf02 at T-1577799022.847140794 s for +809097.870099880 s
-  e101 impacts: 274, digest 0xca6eb59d05abda6c
-    8200b2e00000000a.e101:0400ffffffffce00 at T-1570895381.856904885 s
-      diameter (m) = 0x40536d217e7611bb  # 77.70516931085778
-      energy (J) = 0x4345dcc8ef062854  # 1.230746014530372e16
-      velocity (m/s) = 0x40b69327ea60bc61  # 5779.155920072547
-      latitude (rad) = 0x3fcb37b569589fb9  # 0.21263759273392482
-      longitude (rad) = 0x40023ecff1dc82c5  # 2.2806700606746255
-  e101 eruptions: 1364, digest 0x1bcdf5bb3886bed5
-    8200b2e00000000a.e101:0401fffffff5cf00 at T-1577782870.700858400 s for +8411883.837460687 s
-  e102 impacts: 112, digest 0x395cca182425d23f
-    8200b2e00000000a.e102:0400ffffffffce00 at T-1573385211.712850040 s
-      diameter (m) = 0x404f86fe4574a0ca  # 63.05463474459391
-      energy (J) = 0x4331884056437c57  # 4934884510628951.0
-      velocity (m/s) = 0x40b38e503be979c6  # 5006.3134141847895
-      latitude (rad) = 0xbfe6bf542d3400eb  # -0.7108555682061967
-      longitude (rad) = 0x4015caf948266024  # 5.4482165597364975
-  e102 eruptions: 421, digest 0xce02898671b11b88
-    8200b2e00000000a.e102:0401fffffff5da00 at T-1571245426.470659456 s for +2348962.131044152 s
-  e103 impacts: 39, digest 0xc8c774d54980ab44
-    8200b2e00000000a.e103:0400ffffffffce00 at T-1555546673.788706717 s
-      diameter (m) = 0x4061913213accdc5  # 140.53736289740314
-      energy (J) = 0x4362158fbdb21bd2  # 4.072205350291829e16
-      velocity (m/s) = 0x40b0e1f9751265f8  # 4321.974442624945
-      latitude (rad) = 0xbfe7334f5e9b665b  # -0.7250134322923246
-      longitude (rad) = 0x4015aa81da2e868b  # 5.41651097210855
-  e103 eruptions: 248, digest 0x7f23244f37fbd5b5
-    8200b2e00000000a.e103:0401fffffff5d100 at T-1576152039.870634329 s for +3378438.660924650 s
-  e104 impacts: 29, digest 0x1abd8afa96550f15
-    8200b2e00000000a.e104:0400ffffffffd101 at T-1469741567.728672233 s
-      diameter (m) = 0x4057f9264d98c588  # 95.89296283644774
-      energy (J) = 0x433e49ab6c0a3570  # 8525249902163312.0
-      velocity (m/s) = 0x40ab691d15ad79da  # 3508.5568060122723
-      latitude (rad) = 0x3ff3d30c76e91983  # 1.2390255589430985
-      longitude (rad) = 0x400c432c5122b280  # 3.5327993715966954
-  e104 eruptions: 194, digest 0x7085c286bdbe7e09
-    8200b2e00000000a.e104:0401fffffff5df00 at T-1567786463.000399888 s for +949449.553080701 s
-  e105 impacts: 32, digest 0x435eaa53586bc0a7
-    8200b2e00000000a.e105:0400ffffffffd000 at T-1513719426.996684800 s
-      diameter (m) = 0x405620ba2719fd9d  # 88.51136186159279
-      energy (J) = 0x433b359ce86f3c00  # 7658772401961984.0
-      velocity (m/s) = 0x40ad4c1564966c02  # 3750.0417830473752
-      latitude (rad) = 0xbfe66b3be31c73cb  # -0.7005900798573007
-      longitude (rad) = 0x3ffa75764e566342  # 1.653677278524086
-  e105 eruptions: 106, digest 0x305da5ff0e9ac304
-    8200b2e00000000a.e105:0401fffffff5d600 at T-1573538267.829418094 s for +274229.669073707 s
-  e106 impacts: 10, digest 0x0f0b09420ed8c403
-    8200b2e00000000a.e106:0400ffffffffed01 at T-587366242.017372567 s
-      diameter (m) = 0x40545e00d54719e2  # 81.46880084937541
-      energy (J) = 0x4332eba2aeebe34a  # 5325633532715850.0
-      velocity (m/s) = 0x40abaa73ff790d91  # 3541.226558478266
-      latitude (rad) = 0xbf9b362f9196ae33  # -0.026573889981291465
-      longitude (rad) = 0x3ffc7cca18814240  # 1.7804661709998442
-  e106 eruptions: 63, digest 0x3b73f5eb2c610698
-    8200b2e00000000a.e106:0401fffffff64a00 at T-1503289924.516281202 s for +30171190.900894068 s
-  e107 impacts: 2, digest 0x8bec64ba2e3c56ab
-    8200b2e00000000a.e107:0400ffffffffe600 at T-792341030.702268261 s
-      diameter (m) = 0x405cb7f325cf3ff7  # 114.87421555747265
-      energy (J) = 0x43466def2c32ee70  # 1.2626646987562208e16
-      velocity (m/s) = 0x40a971365b2863da  # 3256.6061642286195
-      latitude (rad) = 0x3fc8450091846525  # 0.18960578065233694
-      longitude (rad) = 0x401689f9c8ab4c89  # 5.6347419123222915
-  e108 impacts: 5, digest 0xbf19325fffb56216
-    8200b2e00000000a.e108:0400fffffffff600 at T-314795529.607128625 s
-      diameter (m) = 0x4060db19dd785075  # 134.84690736292728
-      energy (J) = 0x4350b1eb66f4cf74  # 1.879689692048533e16
-      velocity (m/s) = 0x40a8685e63d8b71e  # 3124.184355518678
-      latitude (rad) = 0xbfdf5c8ac879642e  # -0.49002332284505
-      longitude (rad) = 0x3fc507e7d930bf9e  # 0.1643037615299336
-  e108 eruptions: 8, digest 0x17fc4de8ffcd029a
-    8200b2e00000000a.e108:0401fffffff66400 at T-1487345825.579344757 s for +24725626.451341006 s
-  e201 impacts: 55, digest 0xdadf0543b2aad379
-    8200b2e00000000a.e201:0400ffffffffd000 at T-1507463733.695684376 s
-      diameter (m) = 0x4065d0a853d5ef35  # 174.520547788468
-      energy (J) = 0x437c0b00b5a617c3  # 1.2629435237384094e17
-      velocity (m/s) = 0x40b57c2ef5201d9c  # 5500.183427817563
-      latitude (rad) = 0x3fe17410b654a8ea  # 0.5454181252619297
-      longitude (rad) = 0x4017867e9205bee9  # 5.881342202759449
-  e201 eruptions: 900, digest 0x53bfd51328ddc6cf
-    8200b2e00000000a.e201:0401fffffff5d200 at T-1575791804.281799859 s for +734337.144428202 s
-  e202 impacts: 10, digest 0xd3635f9549209b4b
-    8200b2e00000000a.e202:0400ffffffffe600 at T-814621505.642389190 s
-      diameter (m) = 0x40515820e982e0de  # 69.37700879841893
-      energy (J) = 0x43315fa673250dbb  # 4890243105099195.0
-      velocity (m/s) = 0x40b0de245eed879c  # 4318.142073484047
-      latitude (rad) = 0xbff486526f7ee696  # -1.282793460397817
-      longitude (rad) = 0x3ffd874ca048c1a1  # 1.845532060728239
-  e202 eruptions: 286, digest 0x1fdaa984a6865688
-    8200b2e00000000a.e202:0401fffffff5d100 at T-1576384109.678281255 s for +143953.288004583 s
-  e203 impacts: 6, digest 0xbc5d59b5c44da3d5
-    8200b2e00000000a.e203:0400ffffffffd400 at T-1370998431.837625822 s
-      diameter (m) = 0x4057a72f15c63ee8  # 94.61224884376463
-      energy (J) = 0x433e3879dd6ad9c8  # 8506345358285256.0
-      velocity (m/s) = 0x40abf021c153055e  # 3576.065928072362
-      latitude (rad) = 0xbfea0c553da7f6b8  # -0.8140054897518985
-      longitude (rad) = 0x3ff32d957253df21  # 1.198628851501731
-  e203 eruptions: 43, digest 0x2dd3d3ff82ac2cac
-    8200b2e00000000a.e203:0401fffffff67700 at T-1476157718.875745603 s for +942388.804183609 s
-  e204 impacts: 4, digest 0x8068284e30bcbdbc
-    8200b2e00000000a.e204:0400ffffffffde00 at T-1068752174.551393480 s
-      diameter (m) = 0x4059dd57adfa3b20  # 103.45847653805367
-      energy (J) = 0x43437a1d81c6c9cf  # 1.096458341486275e16
-      velocity (m/s) = 0x40abbd3449db1e7a  # 3550.6021259760573
-      latitude (rad) = 0xbfbdcddb5d752e47  # -0.11642237693484346
-      longitude (rad) = 0x4004b96e39c7cdea  # 2.5905422700977754
-  e204 eruptions: 42, digest 0x089f8e0268a777cb
-    8200b2e00000000a.e204:0401fffffff79600 at T-1302242932.852008070 s for +3554275.233975153 s
-  e205 impacts: 6, digest 0x2e8113179dab5258
-    8200b2e00000000a.e205:0400ffffffffd000 at T-1513578811.746360504 s
-      diameter (m) = 0x4061e7fb6b20562b  # 143.24944073024503
-      energy (J) = 0x4355f9b1978e6fb3  # 2.474206263258286e16
-      velocity (m/s) = 0x40a993520eda415a  # 3273.6602695660376
-      latitude (rad) = 0x3fe15ee54c3f98ef  # 0.5428339471079918
-      longitude (rad) = 0x401470e78099eae9  # 5.110258111376177
-  e205 eruptions: 32, digest 0x2ee7a07a55ed6bd7
-    8200b2e00000000a.e205:0401fffffff60800 at T-1542920833.108903543 s for +1148056.116648410 s
-  e206 impacts: 1, digest 0x8a2b14aec576afda
-    8200b2e00000000a.e206:0400000000003000 at T+1538232332.430335236 s
-      diameter (m) = 0x4069833b8edbdb4d  # 204.10102026882888
-      energy (J) = 0x43646a8249dea7cd  # 4.5972858814676584e16
-      velocity (m/s) = 0x40a47fb04107cc5d  # 2623.844246143052
-      latitude (rad) = 0x3fc2bba591014aa3  # 0.14635152416538685
-      longitude (rad) = 0x3feaba4f131cc89c  # 0.8352427838601844
-  e206 eruptions: 28, digest 0x1506f8ee5efe15b8
-    8200b2e00000000a.e206:0401fffffff98f00 at T-997214999.622497382 s for +1264282.606224315 s
-  e207 impacts: 1, digest 0x3fbedac28d37b9f6
-    8200b2e00000000a.e207:0400fffffffff400 at T-367452104.353913712 s
-      diameter (m) = 0x4057b740079d1e75  # 94.8632830652585
-      energy (J) = 0x43348e5a01314b48  # 5786016752421704.0
-      velocity (m/s) = 0x40a6f34493290129  # 2937.6339352430264
-      latitude (rad) = 0xbfe476c42c3911d7  # -0.639497839329631
-      longitude (rad) = 0x400b4977ef0fe1e3  # 3.410873286888305
-  e207 eruptions: 11, digest 0x2b3fc2f07b03690f
-    8200b2e00000000a.e207:0401fffffff61500 at T-1535152629.228933551 s for +160361.570984992 s
-  e208 eruptions: 7, digest 0x250a7b3a03d433b4
-    8200b2e00000000a.e208:0401fffffff79f00 at T-1296765859.792136378 s for +1349540.830140463 s
-  e281 impacts: 2, digest 0x81889ea7a6f57179
-    8200b2e00000000a.e281:0400ffffffffd100 at T-1481861626.193140567 s
-      diameter (m) = 0x40733a4035fc7770  # 307.64067648524997
-      energy (J) = 0x438699883f665c13  # 2.0356031826909654e17
-      velocity (m/s) = 0x40a74f22f786fc04  # 2983.568294733299
-      latitude (rad) = 0xbf9348b0512d39bf  # -0.018831973032598755
-      longitude (rad) = 0x3ff83d3e4db6196c  # 1.5149519954298638
-  e281 eruptions: 34, digest 0x76470d874dcf4daf
-    8200b2e00000000a.e281:0401fffffff60c00 at T-1540720648.790275674 s for +88152490.924322098 s
+fallback_black_hole 8200b2e000000002: 36508 events: 0 impacts, 36508 eruptions, 0 storms, 0 dust storms, 0 comets
+  digest = 0xa3bfa87b534db919
+  0100 eruptions: 10913, digest 0x2a0baed348eabbe0
+    8200b2e000000002.0100:0401fffffff5cf00 at T-1577548949.692684597 s for +11454560.165551740 s
+  0200 eruptions: 10652, digest 0x8ffc9efe86ba8c27
+    8200b2e000000002.0200:0401fffffff5cf00 at T-1577839823.627215861 s for +1656142.523076687 s
+  0300 eruptions: 14608, digest 0xdb06aef7d749e792
+    8200b2e000000002.0300:0401fffffff5cf00 at T-1577826220.320518046 s for +1513694.872531502 s
+  e102 eruptions: 167, digest 0x20a79a8a9fff1ee4
+    8200b2e000000002.e102:0401fffffff5e500 at T-1564514809.144456532 s for +817937.241121298 s
+  e103 eruptions: 53, digest 0x09b08f1a02519548
+    8200b2e000000002.e103:0401fffffff66d00 at T-1481941291.610916625 s for +8055562.073182897 s
+  e201 eruptions: 115, digest 0xa069e88e26b5927d
+    8200b2e000000002.e201:0401fffffff5ee00 at T-1558798350.605688895 s for +315576000.000000000 s
 
-filler_a 01fffb2c60000000: 2810 events: 0 impacts, 2810 eruptions, 0 storms, 0 dust storms, 0 comets
-  digest = 0x34793a0132a7bf0b
-  0100 eruptions: 2810, digest 0x34793a0132a7bf0b
+filler_a 01fffb2c60000000: 2811 events: 0 impacts, 2811 eruptions, 0 storms, 0 dust storms, 0 comets
+  digest = 0xa02116febdade3b2
+  0100 eruptions: 2811, digest 0xa02116febdade3b2
     01fffb2c60000000.0100:0401fffffff5d100 at T-1576417194.364901498 s for +716305.050941847 s
 
-filler_b 2200165980000000: 22105 events: 13242 impacts, 8791 eruptions, 12 storms, 0 dust storms, 60 comets
-  digest = 0x47701d72729f5d91
-  0100 eruptions: 5147, digest 0x6ef082dc5e5d0643
+filler_b 2200165980000000: 21753 events: 13242 impacts, 8439 eruptions, 12 storms, 0 dust storms, 60 comets
+  digest = 0x7a0b79101f16ad0b
+  0100 eruptions: 5110, digest 0x667b6ed960ba257c
     2200165980000000.0100:0401fffffff5cf01 at T-1577787797.489628220 s for +40429089.024909242 s
-  0200 impacts: 1, digest 0xa52689aef96c25a6
+  0200 impacts: 1, digest 0xa00e55b7e4600364
     2200165980000000.0200:0400000000002d00 at T+1449140260.771002373 s
-      diameter (m) = 0x40420ef282798872  # 36.1167758077071
-      energy (J) = 0x4373ffc0c9088698  # 9.006764846536538e16
-      velocity (m/s) = 0x40fd81362e3a23a7  # 120851.38628591468
+      diameter (m) = 0x40420eee11743f86  # 36.11664026428393
+      energy (J) = 0x4373ffc0c9089ea1  # 9.006764846546382e16
+      velocity (m/s) = 0x40fd814110d35b1c  # 120852.06660781469
       latitude (rad) = 0xbfe43b3c61b6df90  # -0.63223094067415
       longitude (rad) = 0x4006f25f73e5c4f9  # 2.868346124124056
-  0200 eruptions: 3357, digest 0x8c325cbb225dcb67
+  0200 eruptions: 3311, digest 0xd8669974352af9f0
     2200165980000000.0200:0401fffffff5d000 at T-1577249942.993591785 s for +5950894.782263245 s
   0300 impacts: 6420, digest 0xba9a2dfd43863d57
     2200165980000000.0300:0400ffffffffce26 at T-1575545260.300632788 s
@@ -1147,8 +987,6 @@ filler_b 2200165980000000: 22105 events: 13242 impacts, 8791 eruptions, 12 storm
       velocity (m/s) = 0x40ded663875ae5b0  # 31577.55513641768
       latitude (rad) = 0x3fc9f74b0f1843be  # 0.2028592895226477
       longitude (rad) = 0x4010b2b5450af866  # 4.174519614023756
-  0301 eruptions: 3, digest 0x027b58a0c24834d1
-    2200165980000000.0301:0401fffffffdc400 at T-345382087.444000561 s for +17608088.395733777 s
   0302 impacts: 1, digest 0x222e79619a48d619
     2200165980000000.0302:0400ffffffffda00 at T-1189015955.623137496 s
       diameter (m) = 0x4050a4cab510803a  # 66.57487227069296
@@ -1196,8 +1034,6 @@ filler_b 2200165980000000: 22105 events: 13242 impacts, 8791 eruptions, 12 storm
       velocity (m/s) = 0x40de214c4a4d3886  # 30853.192035012435
       latitude (rad) = 0xbfe1fe1ab7722a1c  # -0.5622685988358316
       longitude (rad) = 0x4000bd98f50a49ef  # 2.0925768989338773
-  0403 eruptions: 266, digest 0x8dc9ac645c3953cf
-    2200165980000000.0403:0401fffffff5db00 at T-1570180626.910155178 s for +6225123.115667979 s
   e201 impacts: 2, digest 0x5b869e938fdf6cc9
     2200165980000000.e201:0400fffffffffd00 at T-93987974.894862132 s
       diameter (m) = 0x406d76ebd2d32daa  # 235.7162870525911
@@ -1247,38 +1083,38 @@ filler_b 2200165980000000: 22105 events: 13242 impacts, 8791 eruptions, 12 storm
       eccentricity = 0x3fefcbf844512c5a  # 0.9936486563032176
       nucleus (m) = 0x409f5a713dcdf1e5  # 2006.6105873278514
 
-filler_c 42002cb200000000: 29461 events: 2341 impacts, 27109 eruptions, 0 storms, 11 dust storms, 0 comets
-  digest = 0x7f5c79fb8acb22a9
-  0100 impacts: 241, digest 0x7578295d0d55ba39
+filler_c 42002cb200000000: 29376 events: 2341 impacts, 27024 eruptions, 0 storms, 11 dust storms, 0 comets
+  digest = 0x84524045842197ff
+  0100 impacts: 241, digest 0x8913292be993004e
     42002cb200000000.0100:0400ffffffffce00 at T-1549746399.439731056 s
-      diameter (m) = 0x4042ddf656a19e97  # 37.73408015147759
-      energy (J) = 0x4334af10040d71f2  # 5821982856540658.0
-      velocity (m/s) = 0x40c6f0ff8f0a870d  # 11745.996552768653
+      diameter (m) = 0x4042ddafdb94c1c0  # 37.731929252276586
+      energy (J) = 0x4334af10040d7284  # 5821982856540804.0
+      velocity (m/s) = 0x40c6f1801e969aca  # 11747.000933480816
       latitude (rad) = 0x3fdfe4a7544482f8  # 0.49833091000804997
       longitude (rad) = 0x3fdda3bd1657ee1b  # 0.4631188123891847
-  0200 impacts: 9, digest 0x79dc54ba678d2137
+  0200 impacts: 9, digest 0x25eb61576e148c5f
     42002cb200000000.0200:0400ffffffffd200 at T-1433949773.478800251 s
-      diameter (m) = 0x4049274610cdfa35  # 50.30682573373307
-      energy (J) = 0x434c4aed5e93d0a7  # 1.592736540469691e16
-      velocity (m/s) = 0x40c8a6658f3f4b8c  # 12620.793434059036
+      diameter (m) = 0x404926c461f534f0  # 50.302868122796895
+      energy (J) = 0x434c4aed5e93d69b  # 1.5927365404699958e16
+      velocity (m/s) = 0x40c8a72435a4d13a  # 12622.282887079393
       latitude (rad) = 0xbfdce1badf5a53cf  # -0.4512774640255061
       longitude (rad) = 0x3fed8b4576751f34  # 0.9232508958457175
-  0200 eruptions: 14186, digest 0xdaad3bab2454f31e
+  0200 eruptions: 14170, digest 0xe55c433e9beb599c
     42002cb200000000.0200:0401fffffff5cf00 at T-1577855355.104570823 s for +1618636.263321837 s
-  0300 impacts: 402, digest 0x0073c8d8d9c13e1d
+  0300 impacts: 402, digest 0x0a7bd70691345b97
     42002cb200000000.0300:0400ffffffffce00 at T-1572403680.976949896 s
-      diameter (m) = 0x40471190db0b4f9d  # 46.1372331433515
-      energy (J) = 0x43452793323a7aa0  # 1.1908975334585664e16
-      velocity (m/s) = 0x40c844c3e5a08e2b  # 12425.530445165079
+      diameter (m) = 0x4047118cfe69db59  # 46.13711528939047
+      energy (J) = 0x43452793323a7ab9  # 1.1908975334585714e16
+      velocity (m/s) = 0x40c844c9fdb80ed4  # 12425.57805538868
       latitude (rad) = 0x3fe44b4f4ee87d28  # 0.634193090550899
       longitude (rad) = 0x40191940fa9bd6c3  # 6.274661937486317
-  0300 eruptions: 8800, digest 0xf1603e0e644adef7
+  0300 eruptions: 8747, digest 0x885dd53320840b83
     42002cb200000000.0300:0401fffffff5cf00 at T-1577612673.511092114 s for +54577.893513331 s
-  0400 impacts: 1, digest 0xddca708c5a170fd5
+  0400 impacts: 1, digest 0xc618a90106493935
     42002cb200000000.0400:0400000000001600 at T+708630032.959528828 s
-      diameter (m) = 0x40588cc3177005b0  # 98.19940744342489
-      energy (J) = 0x435f1ba2ec38c145  # 3.5024443359298836e16
-      velocity (m/s) = 0x40bace6bdcfd6ec9  # 6862.421340789363
+      diameter (m) = 0x40588cb11e02c947  # 98.19831037780851
+      energy (J) = 0x435f1ba2ec38c68b  # 3.5024443359304236e16
+      velocity (m/s) = 0x40bace894da3f226  # 6862.5363409486945
       latitude (rad) = 0x3fd875512ad8f562  # 0.3821604650909959
       longitude (rad) = 0x4016bd741e76b255  # 5.6850132713267
   0400 dust storms: 2
@@ -1286,89 +1122,89 @@ filler_c 42002cb200000000: 29461 events: 2341 impacts, 27109 eruptions, 0 storms
       true anomaly at onset (rad) = 0x3fec777f2b158917  # 0.8895870057570247
     42002cb200000000.0400:0403000000000100 at T+342547603.648903399 s cycle 1 for +9516599.981525810 s
       true anomaly at onset (rad) = 0xbfa07c1c43a1a8e2  # -0.03219688726024274
-  0500 impacts: 9, digest 0xcf1bcc06d6909735
+  0500 impacts: 9, digest 0xba9afe0ff3ef266a
     42002cb200000000.0500:0400ffffffffcf00 at T-1517748094.022476866 s
-      diameter (m) = 0x4057be76bcaffd80  # 94.97599713503405
-      energy (J) = 0x4371a2a56635e4ee  # 7.9422493955084e16
-      velocity (m/s) = 0x40c538341899bea2  # 10864.407000749667
+      diameter (m) = 0x4057be74cb3e1258  # 94.97587853490529
+      energy (J) = 0x4371a2a56635e543  # 7.942249395508536e16
+      velocity (m/s) = 0x40c53836b36fd2fd  # 10864.427350976965
       latitude (rad) = 0xbfc8c26cd7efabe8  # -0.1934333853126582
       longitude (rad) = 0x4007ed5e2b5973ce  # 2.9909022699998564
-  0500 eruptions: 3801, digest 0xbecd29abe17ed9ed
+  0500 eruptions: 3786, digest 0x116784e352d52902
     42002cb200000000.0500:0401fffffff5cf00 at T-1577733432.372695901 s for +172730.952746366 s
   0501 eruptions: 15, digest 0x1db16428b5dc540b
     42002cb200000000.0501:0401fffffff6d700 at T-1417920475.392700313 s for +625120.807744593 s
-  e101 impacts: 65, digest 0x843a737db57182bc
+  e101 impacts: 65, digest 0x3b31d82b1ca21b58
     42002cb200000000.e101:0400ffffffffce00 at T-1566238273.150214869 s
-      diameter (m) = 0x404278e8be265d0b  # 36.94460274575439
-      energy (J) = 0x4335bf12f63e27cf  # 6121062672508879.0
-      velocity (m/s) = 0x40c848038d3e16ed  # 12432.027747880167
+      diameter (m) = 0x404278d21e3f9de0  # 36.94391229730877
+      energy (J) = 0x4335bf12f63e2808  # 6121062672508936.0
+      velocity (m/s) = 0x40c84830297051e6  # 12432.37626461028
       latitude (rad) = 0xbfe1cc9f3a4da8a6  # -0.556228269456615
       longitude (rad) = 0x40135bdc3b6ebac1  # 4.839707306512254
-  e101 eruptions: 33, digest 0x6ec63ee964be08fa
+  e101 eruptions: 32, digest 0x667f48990294838e
     42002cb200000000.e101:0401fffffff71400 at T-1381321342.965710344 s for +9031853.226174399 s
-  e102 impacts: 6, digest 0x5601b00cf75ad883
+  e102 impacts: 6, digest 0xc993e791e88503b3
     42002cb200000000.e102:0400ffffffffd700 at T-1285949500.062345634 s
-      diameter (m) = 0x406c423cd3979b7f  # 226.06992511378118
-      energy (J) = 0x4394a00344479eed  # 3.715478672066302e17
-      velocity (m/s) = 0x40b8fecbc225ea15  # 6398.795931214951
+      diameter (m) = 0x406c4223829ad39d  # 226.0668347381551
+      energy (J) = 0x4394a0034447c0e7  # 3.715478672071869e17
+      velocity (m/s) = 0x40b8feed5918d26d  # 6398.927140761732
       latitude (rad) = 0xbfc4232378fdf0ae  # -0.1573223439007782
       longitude (rad) = 0x4012bfed52050aa9  # 4.687428742940633
   e102 eruptions: 3, digest 0x90a64d476daf8d59
     42002cb200000000.e102:0401fffffff9f600 at T-934656153.967829538 s for +7987084.466152008 s
-  e103 impacts: 17, digest 0x3a5a8160c8c53a22
+  e103 impacts: 17, digest 0xa10de0e924d19511
     42002cb200000000.e103:0400ffffffffd600 at T-1320846564.680486443 s
-      diameter (m) = 0x4045ef23d21eaa56  # 43.86828066346486
-      energy (J) = 0x4335ecdbf6ed8ef7  # 6171403995680503.0
-      velocity (m/s) = 0x40c2d7d207864f27  # 9647.64085463395
+      diameter (m) = 0x4045ef1f867fbbfd  # 43.86814957844761
+      energy (J) = 0x4335ecdbf6ed8f07  # 6171403995680519.0
+      velocity (m/s) = 0x40c2d7d790836a7f  # 9647.684097697258
       latitude (rad) = 0xbfb62150ef39c165  # -0.08644586410969664
       longitude (rad) = 0x3ff4adc22c63cbc0  # 1.2924215063073774
-  e104 impacts: 10, digest 0x0d8b9c4f7e645095
+  e104 impacts: 10, digest 0x91491bdeadb89647
     42002cb200000000.e104:0400ffffffffce00 at T-1577545998.584319452 s
-      diameter (m) = 0x40580c1152cc4df3  # 96.18855733825312
-      energy (J) = 0x436bf759b0a247c3  # 6.2974311670103576e16
-      velocity (m/s) = 0x40c289ef0328e66f  # 9491.86728392841
+      diameter (m) = 0x40580c0a5eda07cd  # 96.18813296596564
+      energy (J) = 0x436bf759b0a249ac  # 6.297431167010749e16
+      velocity (m/s) = 0x40c289f70d820cdc  # 9491.930099731711
       latitude (rad) = 0x3ff1d788d8c8bb9f  # 1.1151207416657838
       longitude (rad) = 0x3fe4b14e2692a5c8  # 0.6466437104583571
-  e105 impacts: 15, digest 0x1a8b7ed12df48c7b
+  e105 impacts: 15, digest 0xb0472ccb22dc0161
     42002cb200000000.e105:0400ffffffffd000 at T-1494332671.465466124 s
-      diameter (m) = 0x405032794b7125b0  # 64.78865324067624
-      energy (J) = 0x43522cb3c95339e8  # 2.0462801076938656e16
-      velocity (m/s) = 0x40c31df22f791d11  # 9787.892073764031
+      diameter (m) = 0x4050327858ea5c95  # 64.78859541785125
+      energy (J) = 0x43522cb3c95339fd  # 2.046280107693874e16
+      velocity (m/s) = 0x40c31df3dcd7b577  # 9787.905177081686
       latitude (rad) = 0xbfd90590f94e6219  # -0.3909647402411181
       longitude (rad) = 0x400532354f57c7f2  # 2.6495157431281706
-  e106 impacts: 2, digest 0x98a05272c0b0668f
+  e106 impacts: 2, digest 0x0fdc7df2dfdc0ca3
     42002cb200000000.e106:0400fffffffff100 at T-453100058.980838177 s
-      diameter (m) = 0x404bc8edfb60fded  # 55.569762632712674
-      energy (J) = 0x4337cfc01cd8dfc1  # 6702348488990657.0
-      velocity (m/s) = 0x40bb8bf98a0ec9cd  # 7051.974762844341
+      diameter (m) = 0x404bc8e949b7a494  # 55.569619383496644
+      energy (J) = 0x4337cfc01cd8dfdb  # 6702348488990683.0
+      velocity (m/s) = 0x40bb8c00851bf430  # 7052.002031085125
       latitude (rad) = 0x3fb6fdd09eeeca75  # 0.08981040840334649
       longitude (rad) = 0x400f93838b9967d3  # 3.947028246516291
-  e107 impacts: 3, digest 0x754deffa0517d4dd
+  e107 impacts: 3, digest 0x0d710dcd9304d001
     42002cb200000000.e107:0400fffffffff000 at T-498145791.198316827 s
-      diameter (m) = 0x407046528457973f  # 260.39514574256094
-      energy (J) = 0x43a5b9c08f7d56b0  # 7.827470340018237e17
-      velocity (m/s) = 0x40bd590d8d2ab176  # 7513.052935283971
+      diameter (m) = 0x4070464d34bc25ba  # 260.393849120093
+      energy (J) = 0x43a5b9c08f7d68f1  # 7.827470340024219e17
+      velocity (m/s) = 0x40bd591bead27417  # 7513.109051850645
       latitude (rad) = 0xbff166eb7a07c0f4  # -1.0876269118126034
       longitude (rad) = 0x3fe4b9b44c4fa0db  # 0.6476689806413803
-  e108 impacts: 5, digest 0x6f76eba32980cb3a
+  e108 impacts: 5, digest 0x2ced304417c885de
     42002cb200000000.e108:0400ffffffffce00 at T-1558230758.417686362 s
-      diameter (m) = 0x4051d4a6b3b35eee  # 71.32267467991525
-      energy (J) = 0x4350b8de57bca239  # 1.8827458886404324e16
-      velocity (m/s) = 0x40bfc07b8cb8dacd  # 8128.482615998667
+      diameter (m) = 0x4051d4a2068833a3  # 71.3223892526717
+      energy (J) = 0x4350b8de57bca2a5  # 1.8827458886404756e16
+      velocity (m/s) = 0x40bfc0880a846d14  # 8128.5314104811005
       latitude (rad) = 0xbfd17d8217c3b0cb  # -0.27328541107887067
       longitude (rad) = 0x3fe6017732899990  # 0.6876789080677543
-  e182 impacts: 1, digest 0x01869b5f516de37f
+  e182 impacts: 1, digest 0x3b2537b184362748
     42002cb200000000.e182:0400000000000c00 at T+385825265.152711138 s
-      diameter (m) = 0x4051d2a8b3659127  # 71.2915466777673
-      energy (J) = 0x434319e8eac39ac7  # 1.0753025438594446e16
-      velocity (m/s) = 0x40b803007641628e  # 6147.001804434358
+      diameter (m) = 0x4051d2a7b63b9630  # 71.29148631876956
+      energy (J) = 0x434319e8eac39adc  # 1.0753025438594488e16
+      velocity (m/s) = 0x40b8030275dd878f  # 6147.009610982509
       latitude (rad) = 0xbfec0a500bbceefa  # -0.876258871961425
       longitude (rad) = 0x4017bdc0b3f931b7  # 5.935305416187865
-  e201 impacts: 112, digest 0x34ba96bcd66c1d05
+  e201 impacts: 112, digest 0x992b09618642a195
     42002cb200000000.e201:0400ffffffffd001 at T-1514298785.132831623 s
-      diameter (m) = 0x404b7df1c9db01c1  # 54.98394129937834
+      diameter (m) = 0x404b7deca121946e  # 54.98378385676993
       energy (J) = 0x432dc491a2d14ac5  # 4189452052768098.5
-      velocity (m/s) = 0x40b620bd11ef744f  # 5664.738554922004
+      velocity (m/s) = 0x40b620c34c7d1550  # 5664.762885873512
       latitude (rad) = 0x3fdcf3938ff5a15e  # 0.4523667245726041
       longitude (rad) = 0x3ff82ed5d2a83ff9  # 1.5114343861387154
   e201 eruptions: 175, digest 0x9768529b3c79e3af
@@ -1392,57 +1228,57 @@ filler_c 42002cb200000000: 29461 events: 2341 impacts, 27109 eruptions, 0 storms
       true anomaly at onset (rad) = 0x3fcac9c9e1e13daa  # 0.20928309945382512
     42002cb200000000.e201:0403000000000800 at T+1485066631.169181114 s cycle 8 for +13370243.385122159 s
       true anomaly at onset (rad) = 0x3fd5b57fdf1dc3f3  # 0.33920285023401603
-  e202 impacts: 46, digest 0x521466cbb6802301
+  e202 impacts: 46, digest 0xb7236ff4b7207c22
     42002cb200000000.e202:0400ffffffffce00 at T-1552092321.036700407 s
-      diameter (m) = 0x404b2050265e1c4d  # 54.25244598002664
-      energy (J) = 0x4330fbe70ae84117  # 4780569366380823.0
-      velocity (m/s) = 0x40b81dfd4ff28b52  # 6173.989501151098
+      diameter (m) = 0x404b2046491e56d9  # 54.2521449468747
+      energy (J) = 0x4330fbe70ae84123  # 4780569366380835.0
+      velocity (m/s) = 0x40b81e0a77a91b98  # 6174.040888375508
       latitude (rad) = 0xbfe8ceeea3162baf  # -0.7752602753911243
       longitude (rad) = 0x4011728dee3029ac  # 4.36186954659426
   e202 eruptions: 95, digest 0x5bb3faab7e92dcf9
     42002cb200000000.e202:0401fffffff5d000 at T-1576739160.971501152 s for +20090820.864186089 s
-  e203 impacts: 16, digest 0xebbba819286586dc
+  e203 impacts: 16, digest 0x4953b5e6ef3629fb
     42002cb200000000.e203:0400ffffffffd100 at T-1483171092.569804418 s
-      diameter (m) = 0x405ac71e64daa42e  # 107.11123010017101
-      energy (J) = 0x4360e99ac2541788  # 3.808360417517472e16
-      velocity (m/s) = 0x40b8899e629e39b6  # 6281.618692292299
+      diameter (m) = 0x405ac6ddc6dac52c  # 107.10728618015554
+      energy (J) = 0x4360e99ac254233a  # 3.808360417519867e16
+      velocity (m/s) = 0x40b889f734ce39c4  # 6281.965649499038
       latitude (rad) = 0xbfefe15ea4f49773  # -0.9962609502588137
       longitude (rad) = 0x3ff43ecbec62f77c  # 1.2653311952448965
   e203 eruptions: 1, digest 0x561910e479698654
     42002cb200000000.e203:0401000000074900 at T+1128312539.266498816 s for +484393.547183627 s
-  e204 impacts: 8, digest 0xc4f320709c75ca8f
+  e204 impacts: 8, digest 0xe9451a8a094431ff
     42002cb200000000.e204:0400ffffffffe800 at T-736379723.663414249 s
-      diameter (m) = 0x404bbe49470b0787  # 55.48661125219865
-      energy (J) = 0x4331c7a5dffd5681  # 5004589845534337.0
-      velocity (m/s) = 0x40b7db68b17635c1  # 6107.408957851528
+      diameter (m) = 0x404bbe21fd342480  # 55.48541226430916
+      energy (J) = 0x4331c7a5dffd56c1  # 5004589845534401.0
+      velocity (m/s) = 0x40b7db9b5f3dcbbb  # 6107.606922018279
       latitude (rad) = 0x3fc4ac3405a63a45  # 0.16150522495122935
       longitude (rad) = 0x4009a2dd67de0f31  # 3.2045238604204305
-  e205 impacts: 19, digest 0xe182622151740833
+  e205 impacts: 19, digest 0xc6b13f1327fd6944
     42002cb200000000.e205:0400ffffffffd100 at T-1461383661.141984449 s
-      diameter (m) = 0x4049cd69f338ebd0  # 51.60479584006646
-      energy (J) = 0x4335441d3a767a0d  # 5985866836507149.0
-      velocity (m/s) = 0x40bd17095eee56e1  # 7447.036604782305
+      diameter (m) = 0x4049cd58e5481752  # 51.60427537937234
+      energy (J) = 0x4335441d3a767a46  # 5985866836507206.0
+      velocity (m/s) = 0x40bd1726365bd3e2  # 7447.149266947965
       latitude (rad) = 0xbff286b3d8460cb0  # -1.1578863571346965
       longitude (rad) = 0x400ebbd24f6af6a2  # 3.8417097286718027
-  e206 impacts: 8, digest 0xa9759ba3edf331b6
+  e206 impacts: 8, digest 0xa0fd8cce7befca46
     42002cb200000000.e206:0400ffffffffcf00 at T-1528368980.478647544 s
-      diameter (m) = 0x4059931c0f9165d1  # 102.29858769606587
-      energy (J) = 0x43502e624962b343  # 1.8218397200993548e16
-      velocity (m/s) = 0x40b22ed995fe1a64  # 4654.849944955295
+      diameter (m) = 0x40599315de2e9147  # 102.29820971057516
+      energy (J) = 0x43502e624962b416  # 1.821839720099439e16
+      velocity (m/s) = 0x40b22ee030c31083  # 4654.875744048625
       latitude (rad) = 0x3fd11d2a37c8c3c0  # 0.2674050850646914
       longitude (rad) = 0x3f99cfd24284dcc3  # 0.025206837949750104
-  e207 impacts: 6, digest 0xbc7841317461527e
+  e207 impacts: 6, digest 0x653eb22a451cf0b9
     42002cb200000000.e207:0400ffffffffdf00 at T-1040423331.359056711 s
-      diameter (m) = 0x4050636f85d08605  # 65.55368180621743
-      energy (J) = 0x432ea8a93c01ca2c  # 4314847055504662.0
-      velocity (m/s) = 0x40b14022022d9654  # 4416.132845734788
+      diameter (m) = 0x40506369cfd9ec9d  # 65.55333324700992
+      energy (J) = 0x432ea8a93c01ca2f  # 4314847055504663.5
+      velocity (m/s) = 0x40b1402b067f0c0f  # 4416.168067875332
       latitude (rad) = 0x3fe26650de780c2e  # 0.5749897332283405
       longitude (rad) = 0x3ff1bdfe7c1c1e64  # 1.1088852737465453
-  e208 impacts: 12, digest 0x8238b53367001818
+  e208 impacts: 12, digest 0xfad1e04d8e3459bf
     42002cb200000000.e208:0400ffffffffde00 at T-1048604067.545627929 s
-      diameter (m) = 0x40474c5c593d00a2  # 46.59656825522076
-      energy (J) = 0x4330370cb9f8a495  # 4564127426585749.0
-      velocity (m/s) = 0x40bd9ad86370b590  # 7578.845267338111
+      diameter (m) = 0x40474c4dc8c5110c  # 46.59612378713982
+      energy (J) = 0x4330370cb9f8a49f  # 4564127426585759.0
+      velocity (m/s) = 0x40bd9af4261bd3d5  # 7578.953706492631
       latitude (rad) = 0xbfe1f586496fdc42  # -0.5612212595286865
       longitude (rad) = 0x40134a17d860beda  # 4.822356587319257
   e301 impacts: 388, digest 0x8cdeee5bf17f8950
@@ -1488,5 +1324,54 @@ filler_c 42002cb200000000: 29461 events: 2341 impacts, 27109 eruptions, 0 storms
       latitude (rad) = 0x3fd90599685e14af  # 0.39096675102366424
       longitude (rad) = 0x4015ac4b212d26c2  # 5.4182553466613985
 
-t_tauri 41fe2c960000000c: 0 events: 0 impacts, 0 eruptions, 0 storms, 0 dust storms, 0 comets
-  digest = 0xcbf29ce484222325
+t_tauri 42156b8200000005: 9360 events: 9360 impacts, 0 eruptions, 0 storms, 0 dust storms, 0 comets
+  digest = 0x0d8f68a077df5c3e
+  0200 impacts: 6414, digest 0x9943d99d9adab691
+    42156b8200000005.0200:0400ffffffffce05 at T-1577523760.437394096 s
+      diameter (m) = 0x40e1d21e85a26259  # 36496.95381278237
+      energy (J) = 0x45150b2973e13a17  # 6.360038227436214e24
+      velocity (m/s) = 0x40dedf6e2a191de4  # 31613.721319464865
+      latitude (rad) = 0xbfc48c5b61fd423b  # -0.1605333546126689
+      longitude (rad) = 0x3fbfd7eb210ff68b  # 0.12438840443788927
+  0201 impacts: 976, digest 0x34e7e5e3ae057da9
+    42156b8200000005.0201:0400ffffffffce02 at T-1575716056.249521172 s
+      diameter (m) = 0x406a51536349c37e  # 210.54142918021165
+      energy (J) = 0x4398306ce2cbd11f  # 4.357531942825676e17
+      velocity (m/s) = 0x40d2718ce924e60a  # 18886.201729988716
+      latitude (rad) = 0x3fd5e6e475707161  # 0.3422175547473412
+      longitude (rad) = 0x4000a13346d55666  # 2.0787110837798535
+  0202 impacts: 1945, digest 0x289e213128a13bf8
+    42156b8200000005.0202:0400ffffffffce05 at T-1577840021.759720451 s
+      diameter (m) = 0x4059ad143fcb7cd9  # 102.70436091300816
+      energy (J) = 0x435e91b66d3b959f  # 3.4417848016066172e16
+      velocity (m/s) = 0x40ce6d7e54f2177f  # 15578.986967336152
+      latitude (rad) = 0x3fe47769234e1ada  # 0.6395765008499794
+      longitude (rad) = 0x40165b0820ae4236  # 5.588898192058471
+  0203 impacts: 16, digest 0x0f724e54b74477c6
+    42156b8200000005.0203:0400ffffffffd700 at T-1292458315.334319127 s
+      diameter (m) = 0x40543c818067a2d3  # 80.94540414925295
+      energy (J) = 0x433093e9a10c2171  # 4666231265960305.0
+      velocity (m/s) = 0x40c0032a8ab4340f  # 8198.332357907695
+      latitude (rad) = 0xbff21ac38da403ab  # -1.131534150394354
+      longitude (rad) = 0x400d52f49bddf077  # 3.665505616865683
+  0204 impacts: 5, digest 0xa867c6c703c20bdb
+    42156b8200000005.0204:0400ffffffffdb00 at T-1141829359.287143546 s
+      diameter (m) = 0x4070cdbc7fa9edf6  # 268.85852018717503
+      energy (J) = 0x438d23f7c3db2b65  # 2.624742839815651e17
+      velocity (m/s) = 0x40c3d6c492a31dea  # 10157.53572501145
+      latitude (rad) = 0x3fd392bee0d6a284  # 0.30583164173962296
+      longitude (rad) = 0x40041089353049d6  # 2.508074203048845
+  0205 impacts: 3, digest 0xda648e5a501fac51
+    42156b8200000005.0205:0400ffffffffde00 at T-1051346615.712456415 s
+      diameter (m) = 0x405d321f83f86f0f  # 116.78317355404964
+      energy (J) = 0x434885d767a573dd  # 1.3805119288829882e16
+      velocity (m/s) = 0x40bfc94cf0f0c172  # 8137.30055145953
+      latitude (rad) = 0x3fe47b85339b436c  # 0.6400781639041333
+      longitude (rad) = 0x401603823658c351  # 5.50342640797392
+  0206 impacts: 1, digest 0xbc94a2a45f12c370
+    42156b8200000005.0206:0400000000000200 at T+72541276.522229700 s
+      diameter (m) = 0x4060aa32f44e3a41  # 133.31872000960178
+      energy (J) = 0x43560dab6324ae95  # 2.4829916966206036e16
+      velocity (m/s) = 0x40c1798b043f9165  # 8947.086067148202
+      latitude (rad) = 0x3fdd1a3e67a96b40  # 0.454726792556972
+      longitude (rad) = 0x400f86643df69d02  # 3.9406208840260897

@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 mercury_rule = nearest_belt
 mercury_excitation = 0x3fe5ca3437c63841  # 0.6809331025449482
 mercury_velocity = 0x40e4305fb53e92ad  # 41346.99087456367

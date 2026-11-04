@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 toy CORE_COLLAPSE: 512 ly cells, 12 candidates expected per cell, entries of 2 member(s)
 cell (0, 50, 0) word = 0xfc080b2800000000
 cell (0, 50, 0) candidates = 12

@@ -1,26 +1,26 @@
-# generator_version = 26
+# generator_version = 27
 # P14.T24.c's aerosol and absorber inventory, with P14.T24.g's sulphur
 # (hyperion_sim::planetary::hooks::aerosols): the Solar System table's Earth, Venus,
 # Mars and Titan at their own outgassing under a whole sky's coverage, and an Earth at
 # 1 PAL of O2. On the record from generator version 24 (P14.T54.b). The measured
 # Mars, by hand, carries its dust.
 earth deck H2O: Liquid
-earth deck H2O base = 0x40f0b1645fb8913b  # 68374.27336937647
-earth deck H2O base temperature = 0x4071c8141bef46ad  # 284.5049094530794
-earth deck H2O top = 0x40ca36516c86961c  # 13420.636124442382
-earth deck H2O vapour below = 0x3f94218100502998  # 0.019659057277786468
-earth deck H2O vapour above = 0x3f1d7183ee0f2cee  # 0.00011231773125002276
-earth deck H2O f_sed = 0x40896cbd237b4e34  # 813.5923528321496
+earth deck H2O base = 0x40f0b16e7b8e1d0f  # 68374.90516482688
+earth deck H2O base temperature = 0x4071cbc6cb97fedb  # 284.7360340058637
+earth deck H2O top = 0x40ca33ab1e963386  # 13415.33687093273
+earth deck H2O vapour below = 0x3f9470f28c3d4de9  # 0.01996211033777043
+earth deck H2O vapour above = 0x3f1dde07b9a8384a  # 0.0001139347281553248
+earth deck H2O f_sed = 0x4089ac3ea63f500e  # 821.5305905290895
 earth mode 0 H2O: Liquid sphere of deck H2O
 earth mode 0 H2O size: log-normal
-earth mode 0 H2O r_eff = 0x3f07f5655b3f7944  # 4.569736066150018e-5
+earth mode 0 H2O r_eff = 0x3f08132366eab19c  # 4.5918958553189964e-5
 earth mode 0 H2O v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
-earth mode 0 H2O column mass = 0x3fb3fcbdbdf0edc1  # 0.0780752743457276
+earth mode 0 H2O column mass = 0x3fb4169a527b0354  # 0.07846989167866286
 earth mode 0 H2O tau basis: GeometricLimit
-earth mode 0 H2O tau = 0x4004831e76f5d55b  # 2.564022950532189
-earth mode 0 H2O base = 0x40f0b1645fb8913b  # 68374.27336937647
-earth mode 0 H2O top = 0x40ca36516c86961c  # 13420.636124442382
-earth mode 0 H2O exponent = 0x400201587d8bfe00  # 2.250657063326571
+earth mode 0 H2O tau = 0x40048452146b89df  # 2.5646096797292866
+earth mode 0 H2O base = 0x40f0b16e7b8e1d0f  # 68374.90516482688
+earth mode 0 H2O top = 0x40ca33ab1e963386  # 13415.33687093273
+earth mode 0 H2O exponent = 0x4001fa3adff150b0  # 2.2471826072233725
 earth mode 0 H2O coverage = 0x3ff0000000000000  # 1.0
 earth mode 1 H2SO4: Liquid sphere of deck H2SO4
 earth mode 1 H2SO4 size: log-normal
@@ -29,13 +29,13 @@ earth mode 1 H2SO4 v_eff = 0x3fd23dcd2f5ef188  # 0.2850220644575292
 earth mode 1 H2SO4 column mass = 0x3eb28847753f5921  # 1.1046135641644161e-6
 earth mode 1 H2SO4 tau basis: Table(Sphere)
 earth mode 1 H2SO4 tau = 0x3f6a86ab129e14d1  # 0.0032380429519799155
-earth mode 1 H2SO4 base = 0x40ca866a09172647  # 13580.828402417841
-earth mode 1 H2SO4 top = 0x40a53854d4128506  # 2716.1656804835684
+earth mode 1 H2SO4 base = 0x40ca7923f5e81d04  # 13554.280941976707
+earth mode 1 H2SO4 top = 0x40a52db65e534a6a  # 2710.8561883953416
 earth mode 1 H2SO4 exponent = 0x0000000000000000  # 0.0
 earth mode 1 H2SO4 coverage = 0x3ff0000000000000  # 1.0
 earth absorber SO2 column = 0x43c0113095ff3a4d  # 2.3155200000023987e18
-earth absorber SO2 base = 0x40f2ce9f5d3a6686  # 77033.96026077316
-earth absorber SO2 top = 0x40ca866a09172647  # 13580.828402417841
+earth absorber SO2 base = 0x40f2cf94ebc8efb6  # 77049.30756467473
+earth absorber SO2 top = 0x40ca7923f5e81d04  # 13554.280941976707
 earth not formed: N2 BulkGas
 venus deck H2SO4: Liquid
 venus deck H2SO4 base = 0x41147f099d8c9d5a  # 335810.40385671484
@@ -93,59 +93,59 @@ venus absorber SO2 base = 0x415610b5664d1251  # 5784277.598454074
 venus absorber SO2 top = 0x40c58f31036fa577  # 11038.382917362016
 venus not formed: CO2 BulkGas
 mars deck H2O: Solid
-mars deck H2O base = 0x40d39a805fdd3c94  # 20074.005851086768
-mars deck H2O base temperature = 0x406f250ea57c36e4  # 249.15803789387348
-mars deck H2O top = 0x40a34ffa08e88aef  # 2471.988349215469
-mars deck H2O vapour below = 0x3f6c8b917020920f  # 0.003484520014369836
-mars deck H2O vapour above = 0x3ec95d3f30060f7c  # 3.0236536760503e-6
-mars deck H2O f_sed = 0x4072c7539f089aea  # 300.4579153381479
+mars deck H2O base = 0x40d3a01cc05e4735  # 20096.449241227663
+mars deck H2O base temperature = 0x406eeeaf89c23e9f  # 247.45892799318696
+mars deck H2O top = 0x40a369d700777744  # 2484.9199254353607
+mars deck H2O vapour below = 0x3f68113f3e12fc8c  # 0.002937911529982856
+mars deck H2O vapour above = 0x3ec53fac880bf918  # 2.5330455745146425e-6
+mars deck H2O f_sed = 0x4070ec9bb2dcca6c  # 270.7880123734128
 mars mode 0 H2O: Solid crystal of deck H2O
 mars mode 0 H2O size: log-normal
-mars mode 0 H2O r_eff = 0x3f01d5bb0ced49e2  # 3.4017344310872046e-5
+mars mode 0 H2O r_eff = 0x3f00e1ce5718db59  # 3.219996405017548e-5
 mars mode 0 H2O v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
-mars mode 0 H2O column mass = 0x3f93423bdc4a1271  # 0.01880734951056912
-mars mode 0 H2O tau basis: GeometricLimit
-mars mode 0 H2O tau = 0x3fecd78c7891d276  # 0.9013120989680619
-mars mode 0 H2O base = 0x40d39a805fdd3c94  # 20074.005851086768
-mars mode 0 H2O top = 0x40a34ffa08e88aef  # 2471.988349215469
-mars mode 0 H2O exponent = 0x40048320525b7110  # 2.5640264925151612
+mars mode 0 H2O column mass = 0x3f92151d8c09c2f7  # 0.0176586739275448
+mars mode 0 H2O tau basis: Table(PhaseTable)
+mars mode 0 H2O tau = 0x3fecc45365e4713c  # 0.8989655485234276
+mars mode 0 H2O base = 0x40d3a01cc05e4735  # 20096.449241227663
+mars mode 0 H2O top = 0x40a369d700777744  # 2484.9199254353607
+mars mode 0 H2O exponent = 0x4004c6f5188def08  # 2.597147170859788
 mars mode 0 H2O coverage = 0x3ff0000000000000  # 1.0
 mars not formed: CO2 BulkGas
 titan deck H2O: Solid
-titan deck H2O base = 0x41018b2ee5bd0880  # 143717.86217695847
-titan deck H2O base temperature = 0x4057166713f159c0  # 92.350041375822
-titan deck H2O top = 0x406df109a7404207  # 239.53242838430762
-titan deck H2O vapour below = 0x3b83e5cf2b8066e1  # 5.266875327341257e-22
-titan deck H2O vapour above = 0x3950ae69f19a6363  # 1.285080921064627e-32
+titan deck H2O base = 0x41016faf1cd724be  # 142837.8890822287
+titan deck H2O base temperature = 0x40569cc4fb5a3dd0  # 90.44952281773226
+titan deck H2O top = 0x407ac3152cb83519  # 428.192669601021
+titan deck H2O vapour below = 0x3b64855b69e0ef81  # 1.357960978429976e-22
+titan deck H2O vapour above = 0x3a2134c477e4be6a  # 1.0858590129343044e-28
 titan deck H2O f_sed = 0x3f847ae147ae147b  # 0.01
 titan deck CH4: Solid
-titan deck CH4 base = 0x40f8641648724414  # 99905.39268709748
-titan deck CH4 base temperature = 0x405553309f8798db  # 85.29984272233871
-titan deck CH4 top = 0x40d6ba25af6b88aa  # 23272.58883179041
-titan deck CH4 vapour below = 0x3faa735f291c96ca  # 0.05166146637774956
-titan deck CH4 vapour above = 0x3f57191afb25bc97  # 0.0014097941862834301
-titan deck CH4 f_sed = 0x40c63cad5fb806ee  # 11385.354483607658
+titan deck CH4 base = 0x40f8d8d19600d756  # 101773.09912189594
+titan deck CH4 base temperature = 0x4054ff1c849fd58a  # 83.98611560448458
+titan deck CH4 top = 0x40e477049f77bbec  # 41912.14446627334
+titan deck CH4 vapour below = 0x3fa4ef2f3bd93848  # 0.04088733296940511
+titan deck CH4 vapour above = 0x3f75dd756230fcad  # 0.005338152436762983
+titan deck CH4 f_sed = 0x40c3390fe49258d3  # 9842.12416295373
 titan mode 0 H2O: Solid crystal of deck H2O
 titan mode 0 H2O size: log-normal
-titan mode 0 H2O r_eff = 0x3e84a18b57e8e466  # 1.5371317015221878e-7
+titan mode 0 H2O r_eff = 0x3e84dbc8a36176f4  # 1.55408160731661e-7
 titan mode 0 H2O v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
-titan mode 0 H2O column mass = 0x3c837b91e3c79f2a  # 3.379708813357627e-17
+titan mode 0 H2O column mass = 0x3c63e174ac0a3833  # 8.621873407890419e-18
 titan mode 0 H2O tau basis: Table(SpheresOutsidePhaseTable)
-titan mode 0 H2O tau = 0x3d3c4f851aee426d  # 1.0057954389047617e-13
-titan mode 0 H2O base = 0x41018b2ee5bd0880  # 143717.86217695847
-titan mode 0 H2O top = 0x406df109a7404207  # 239.53242838430762
+titan mode 0 H2O tau = 0x3d1d1423578aeddc  # 2.582704208326469e-14
+titan mode 0 H2O base = 0x41016faf1cd724be  # 142837.8890822287
+titan mode 0 H2O top = 0x407ac3152cb83519  # 428.192669601021
 titan mode 0 H2O exponent = 0x3f847ae147ae147b  # 0.01
 titan mode 0 H2O coverage = 0x3ff0000000000000  # 1.0
 titan mode 1 CH4: Solid crystal of deck CH4
 titan mode 1 CH4 size: log-normal
-titan mode 1 CH4 r_eff = 0x3f320c52e8707f1a  # 0.00027539276237752294
+titan mode 1 CH4 r_eff = 0x3f30dca6942ed43a  # 0.0002572924315090184
 titan mode 1 CH4 v_eff = 0x3fe3bce158a77154  # 0.6168066722416747
-titan mode 1 CH4 column mass = 0x3fc128ed9d4d2bdb  # 0.13406152897581944
+titan mode 1 CH4 column mass = 0x3fbe6be5ef921c8a  # 0.11883389567275252
 titan mode 1 CH4 tau basis: GeometricLimit
-titan mode 1 CH4 tau = 0x3ff76d54b57b5007  # 1.4641921128395567
-titan mode 1 CH4 base = 0x40f8641648724414  # 99905.39268709748
-titan mode 1 CH4 top = 0x40d6ba25af6b88aa  # 23272.58883179041
-titan mode 1 CH4 exponent = 0x40002f8f3f878da0  # 2.023222442936188
+titan mode 1 CH4 tau = 0x3ff6302a0589c730  # 1.3867588249526754
+titan mode 1 CH4 base = 0x40f8d8d19600d756  # 101773.09912189594
+titan mode 1 CH4 top = 0x40e477049f77bbec  # 41912.14446627334
+titan mode 1 CH4 exponent = 0x40009cb3b9dd05d0  # 2.076514675195291
 titan mode 1 CH4 coverage = 0x3ff0000000000000  # 1.0
 titan mode 2 tholin: Solid aggregate of deck tholin
 titan mode 2 tholin monomer radius = 0x3e6ad7f29abcaf48  # 5e-8
@@ -153,9 +153,9 @@ titan mode 2 tholin monomers = 0x40a7700000000000  # 3000.0
 titan mode 2 tholin fractal dimension = 0x4000000000000000  # 2.0
 titan mode 2 tholin column mass: not modelled
 titan mode 2 tholin tau basis: Rule
-titan mode 2 tholin tau = 0x40200839311f8559  # 8.016061339471593
-titan mode 2 tholin base = 0x4101e57f6deafdd2  # 146607.92867086694
-titan mode 2 tholin top = 0x402d525371532286  # 14.660792867086695
+titan mode 2 tholin tau = 0x401f2fe532f7edda  # 7.796772762663261
+titan mode 2 tholin base = 0x4101c75c1b8b352b  # 145643.51344911134
+titan mode 2 tholin top = 0x402d20f2a8d3b1a2  # 14.564351344911135
 titan mode 2 tholin exponent = 0x0000000000000000  # 0.0
 titan mode 2 tholin coverage = 0x3ff0000000000000  # 1.0
 titan not formed: N2 BulkGas

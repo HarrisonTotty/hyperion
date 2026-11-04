@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 
 A system = 0x02001b2ca0000000
 initial mass = 0x3fcd810f5d2bb81f  # 0.23050109910349278
@@ -137,8 +137,8 @@ t = 500 yr:
   Teff = 0x40ad2ea0d3302965  # 3735.3141112375765
 
 E system = 0x8200b2e000000000
-initial mass = 0x404a49cdf88e95c6  # 52.57659823381577
-age at epoch = 0x41e83f01df848d48  # 3254259452.1422462
+initial mass = 0x402975db9baac281  # 12.730191101641369
+age at epoch = 0x41f8355b4603f978  # 6498399328.248405
 route Paired
 t = -500 yr:
   BlackHole BH in 4 stars
@@ -154,21 +154,21 @@ t = 500 yr:
   Teff = 0x0000000000000000  # 0.0
 
 E system = 0x8200b2e000000001
-initial mass = 0x402de953d7b4d99f  # 14.955717793299128
-age at epoch = 0x41ec2a8f32ec68e2  # 3780409751.387803
+initial mass = 0x4044ce33e9f883f6  # 41.610959287972875
+age at epoch = 0x41e79b2cdf226082  # 3168364281.0742807
 route Paired
 t = -500 yr:
-  NeutronStar NS in 2 stars
-  log L = 0xc0217ece783876a9  # -8.747668988125342
-  Teff = 0x40c1815d09ef2d9d  # 8962.726865670464
+  BlackHole BH in 2 stars
+  log L none
+  Teff = 0x0000000000000000  # 0.0
 t = 0 yr:
-  NeutronStar NS in 2 stars
-  log L = 0xc0217ece7c172fc9  # -8.747669103460696
-  Teff = 0x40c1815cf66f7b3d  # 8962.726270613837
+  BlackHole BH in 2 stars
+  log L none
+  Teff = 0x0000000000000000  # 0.0
 t = 500 yr:
-  NeutronStar NS in 2 stars
-  log L = 0xc0217ece7ff5e8e0  # -8.747669218796034
-  Teff = 0x40c1815ce2efc91d  # 8962.725675557327
+  BlackHole BH in 2 stars
+  log L none
+  Teff = 0x0000000000000000  # 0.0
 
 A below 0.1 M_sun system = 0x0200fb2ca0000000
 initial mass = 0x3fb8a884f0290df4  # 0.09632140029230368

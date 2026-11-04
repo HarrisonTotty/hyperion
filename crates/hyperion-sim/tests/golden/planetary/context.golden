@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 
 layer A: Stellar, 1 stars, 1 zones
 id = 0x0200bb2ca0000000
@@ -65,67 +65,56 @@ star 1 outer_m = 0x421388609beebbbd  # 20973102843.68334
 barycentre inner_m = 0x424bda88546edc8d  # 239260969181.72305
 barycentre outer none
 
-layer E: Stellar, 4 stars, 6 zones
+layer E: Stellar, 4 stars, 5 zones
 id = 0x8200b2e000000000
-fe_h = 0xbf889b1d181b72ca  # -0.0120146058065357
-age_at_epoch_yr = 0x41f2ea553584f047  # 5077554008.308661
-tidal_radius_m = 0x437680950f8fc197  # 1.0134123499514098e17
-strip_radius_m = 0x4366079c2ba697e4  # 4.96065345301215e16
+fe_h = 0x3fb5fa28fc94abe8  # 0.08584839025995417
+age_at_epoch_yr = 0x41f0fb3c58f1f040  # 4558407055.121155
+tidal_radius_m = 0x437fa6b9d91999f0  # 1.4254466271239347e17
+strip_radius_m = 0x436efc9197de708f  # 6.97756123977166e16
 star 0 Star
-star 0 mass = 0x4020e59765b0dcce  # 8.448420694198287
-star 0 zams_l = 0x40a91be7ea9e8e6f  # 3213.9529618786687
-star 0 zams_r = 0x400c6f94751bedfa  # 3.5544823788784443
+star 0 mass = 0x403881d96f115b12  # 24.50722402738308
+star 0 zams_l = 0x40f22e30faa3f8f8  # 74467.06119153264
+star 0 zams_r = 0x401c2330888f6877  # 7.03436482787412
 star 0 disc_rank = 0x3fe2ba96a682e97f  # 0.5852769138503361
 star 1 Star
-star 1 mass = 0x3ff49eb88c033e06  # 1.288750216412042
-star 1 zams_l = 0x4002d572b8830ab1  # 2.3542227187147877
-star 1 zams_r = 0x3ff4211f807ba5f3  # 1.2580866831652855
+star 1 mass = 0x40176b2b91febabc  # 5.854658394977999
+star 1 zams_l = 0x408c9d4b33e9ed62  # 915.6617201114243
+star 1 zams_r = 0x4007c22c77c37151  # 2.9698113781470643
 star 1 disc_rank = 0x3fe6baf34b8fca25  # 0.7103210902990368
 star 2 Star
-star 2 mass = 0x4007b03ebd13a904  # 2.961057164347155
-star 2 zams_l = 0x405322ce790b7e0d  # 76.54385210153869
-star 2 zams_r = 0x3fff51373caa369e  # 1.9573280687067505
+star 2 mass = 0x40134808e7200d6d  # 4.820346461612059
+star 2 zams_l = 0x407c8a51ef782d94  # 456.6450037664847
+star 2 zams_r = 0x40054163a9d2aef9  # 2.656928374044466
 star 2 disc_rank = 0x3fdcfd921641979e  # 0.4529767243715187
 star 3 Star
-star 3 mass = 0x3ff515a654c765d4  # 1.317785578887528
-star 3 zams_l = 0x4004dd85a36019ac  # 2.6081650508596876
-star 3 zams_r = 0x3ff4abf9eb574cad  # 1.2919863884933804
+star 3 mass = 0x400e94c400945e6c  # 3.8226394696501327
+star 3 zams_l = 0x406846d8fbf0754a  # 194.21398732151494
+star 3 zams_r = 0x4002a419a6241f63  # 2.3301270465635056
 star 3 disc_rank = 0x3fd6712fa793b3e6  # 0.35065833439767713
 star 0 inner none
-star 0 outer_m = 0x41ea5a01da26444b  # 3536850641.1958365
+star 0 outer_m = 0x423f54e8b45750ae  # 134568522839.31516
 star 1 inner none
-star 1 outer_m = 0x41d11bb05c949a87  # 1148109170.3219316
-pair 1 inner_m = 0x42105efd6e3cf088  # 17578285967.234894
-pair 1 outer_m = 0x42426303403eba59  # 157941137533.45584
+star 1 outer_m = 0x422c6b63a0334626  # 61030387737.63701
 star 2 inner none
-star 2 outer_m = 0x4234b8cb19696242  # 88999663977.38382
+star 2 outer_m = 0x4262eb2b35cad762  # 650039111254.7307
 star 3 inner none
-star 3 outer_m = 0x429e93bdd1738558  # 8404973411553.336
-barycentre inner_m = 0x43245bb34aa4fd56  # 2865162571906731.0
+star 3 outer_m = 0x429ef989ba440146  # 8514276593920.318
+barycentre inner_m = 0x432456a4d1c9dfc8  # 2862382714253284.0
 barycentre outer none
 
-layer E: Stellar, 2 stars, 3 zones
+layer E: Stellar, 1 stars, 1 zones
 id = 0x8200b2e000000001
-fe_h = 0xbfaae1fcc9e011d9  # -0.05250539745614775
-age_at_epoch_yr = 0x420233b061987ba3  # 9772076083.06037
-tidal_radius_m = 0x4378194bfc660be6  # 1.085314174214959e17
-strip_radius_m = 0x436797bdd8a25e14  # 5.312612882782224e16
+fe_h = 0x3fb5fa28fc94abe8  # 0.08584839025995417
+age_at_epoch_yr = 0x41fd7a5323693f53  # 7912895030.57796
+tidal_radius_m = 0x4374414f05ba1628  # 9.122091501626227e16
+strip_radius_m = 0x4363d46acd8aea2c  # 4.465263790046038e16
 star 0 Star
-star 0 mass = 0x402bb9de8865c6f8  # 13.86302591555021
-star 0 zams_l = 0x40cd747ba4ea262a  # 15080.965970295558
-star 0 zams_r = 0x4012d481d2e1d281  # 4.707526488335703
+star 0 mass = 0x40247a1b0eeaad23  # 10.238487688204776
+star 0 zams_l = 0x40b79ac045a032bf  # 6042.751062405004
+star 0 zams_r = 0x401079d902d345cd  # 4.11899189390665
 star 0 disc_rank = 0x3f8629743bd030c0  # 0.010821254802089064
-star 1 Star
-star 1 mass = 0x400b0aaf9648dba5  # 3.380217718218278
-star 1 zams_l = 0x40602503eed9b4d4  # 129.15673010369085
-star 1 zams_r = 0x40009fd9a7e89cb0  # 2.078051864420182
-star 1 disc_rank = 0x3fefd384e760f3a7  # 0.9945702094188292
 star 0 inner none
-star 0 outer_m = 0x42445d48fe49ff8e  # 174928821395.99652
-star 1 inner none
-star 1 outer_m = 0x4234c88abc5a7027  # 89263881306.4381
-barycentre inner_m = 0x42a12029f84279ae  # 9414920380732.84
-barycentre outer none
+star 0 outer none
 
 median sun: Stellar, 1 stars, 1 zones
 id = 0x42002cb200000384

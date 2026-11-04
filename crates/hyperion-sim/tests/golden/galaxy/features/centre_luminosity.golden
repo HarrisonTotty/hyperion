@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 Eddington luminosity per solar mass (W) = 0x4663d53eee8e1c5a  # 1.2570651798467908e31
 fallback time of a Sun-like star at the fixture's black hole (s) = 0x415c000072075f15  # 7340033.781699915
 a Sun-like tail at 1 yr (W) = 0x47849ac4056f5ecd  # 3.4235186768504066e36

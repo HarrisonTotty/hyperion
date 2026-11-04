@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 CoreCollapse: OneShot over ["CORE_COLLAPSE"], pending None, lasting Some(Unending), curve Some(SupernovaTemplate)
 CoreCollapse in Photometric(U) = 0x470cfec9645d155b  # 1.8819e34
 CoreCollapse in Photometric(B) = 0x4714b165f00725c3  # 2.6861e34
@@ -40,17 +40,17 @@ Kilonova in Photometric(J) = 0x46eeff77a6dea7a3  # 5.0297e33
 Kilonova in Photometric(H) = 0x46e0754e5c3a54df  # 2.6705e33
 Kilonova in Photometric(K) = 0x46d36c0852ccc99e  # 1.5757e33
 Kilonova in Photometric(MidInfrared) = 0x46905f4993a635d3  # 8.3017e31
-Nova: Recurrent over ["ACCRETING_WHITE_DWARF", "ACCRETING_WHITE_DWARF_SLOW"], pending None, lasting Some(AtMost(Span { seconds: 14624035, nanos: 0 })), curve Some(BinaryCurve)
-Nova in Photometric(U) = 0x467c596b5ac5e942  # 3.5937e31
-Nova in Photometric(B) = 0x4681e00cb1713c3b  # 4.5319e31
-Nova in Photometric(V) = 0x4679b9f0e22f6dd1  # 3.2612e31
-Nova in Photometric(R) = 0x46828790d688399c  # 4.6978e31
-Nova in Photometric(I) = 0x46768aace00f2aa2  # 2.8575e31
-Nova in Photometric(J) = 0x466517b2337ebdef  # 1.3369e31
-Nova in Photometric(H) = 0x46530f7a1f5e3bce  # 6.0405e30
-Nova in Photometric(K) = 0x46440e2ca2628ac8  # 3.1779e30
-Nova in Photometric(MidInfrared) = 0x45faca5c7b218aa7  # 1.3266e29
-DwarfNova: Local over ["ACCRETING_WHITE_DWARF", "ACCRETING_WHITE_DWARF_SLOW"], pending None, lasting Some(AtMost(Span { seconds: 174103279200, nanos: 0 })), curve Some(BinaryCurve)
+Nova: Recurrent over ["ACCRETING_WHITE_DWARF", "ACCRETING_WHITE_DWARF_SLOW"], pending None, lasting Some(AtMost(Span { seconds: 41453750, nanos: 0 })), curve Some(BinaryCurve)
+Nova in Photometric(U) = 0x467e0dd46fa1fa33  # 3.8098e31
+Nova in Photometric(B) = 0x4682f3344acbc56e  # 4.8044e31
+Nova in Photometric(V) = 0x467b45f63515b113  # 3.4573e31
+Nova in Photometric(R) = 0x4683a4d16060363b  # 4.9803e31
+Nova in Photometric(I) = 0x4677e5d317a07cb2  # 3.0294e31
+Nova in Photometric(J) = 0x46665c6dda4b7b49  # 1.4173e31
+Nova in Photometric(H) = 0x465434de1f45515c  # 6.4037e30
+Nova in Photometric(K) = 0x464542e9bde99774  # 3.369e30
+Nova in Photometric(MidInfrared) = 0x45fc66eae6ceb067  # 1.4064e29
+DwarfNova: Local over ["ACCRETING_WHITE_DWARF", "ACCRETING_WHITE_DWARF_SLOW"], pending None, lasting Some(AtMost(Span { seconds: 204745708800, nanos: 0 })), curve Some(BinaryCurve)
 DwarfNova in Photometric(U) = 0x457d9e44b3b18ce9  # 5.729e26
 DwarfNova in Photometric(B) = 0x4575e45067f38127  # 4.2345e26
 DwarfNova in Photometric(V) = 0x4563a149a3ea08ce  # 1.8985e26

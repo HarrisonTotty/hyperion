@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 H2O law: Diagram, limiting Reactant { vapour: Species(SubstanceKey("H2O")), count: 1 }, others [], share 1
 H2O law at 0.001 bar = 0x406422cdaa7dd202  # 161.08760571073805
 H2O law at 1 bar = 0x40689c31e3eb51e6  # 196.8810901256649
@@ -335,227 +335,227 @@ Uranus CH4 tau basis: Table(SphereFallback)
 Uranus CH4 tau = 0x410b2ccc4ce8b29e  # 222617.53755321068
 Uranus CH4 coverage = 0x3ff0000000000000  # 1.0
 a 1,200 K giant Al2O3: Crossing Solid
-a 1,200 K giant Al2O3 base = 0x4110eb00da36c981  # 277184.2130996213
-a 1,200 K giant Al2O3 base temperature = 0x409fd2b38e36d780  # 2036.6753471917182
+a 1,200 K giant Al2O3 base = 0x4110eb0033f623d7  # 277184.0507436371
+a 1,200 K giant Al2O3 base temperature = 0x409fd2b330659d9e  # 2036.6749893071606
 a 1,200 K giant Al2O3 top = 0x40a4e805c3b208fa  # 2676.011258662792
-a 1,200 K giant Al2O3 vapour below = 0x3ed6366d8444edec  # 5.295898578612756e-6
+a 1,200 K giant Al2O3 vapour below = 0x3ed6366118e59c87  # 5.295853397014407e-6
 a 1,200 K giant Al2O3 vapour above = 0x3a7eb15b9027d18b  # 6.1983622829306006e-27
-a 1,200 K giant Al2O3 gas left at its base = 0x3ed6366d8444edec  # 5.295898578612756e-6
+a 1,200 K giant Al2O3 gas left at its base = 0x3ed6366118e59c87  # 5.295853397014407e-6
 a 1,200 K giant Al2O3 gas left at its top = 0x0000000000000000  # 0.0
-a 1,200 K giant Al2O3 column mass = 0x3fd342857c2b259a  # 0.3009351456244872
-a 1,200 K giant Al2O3 r_eff = 0x3ec00b666c8033a3  # 1.9126572148365136e-6
+a 1,200 K giant Al2O3 column mass = 0x3fd34279fdedb1f0  # 0.3009324054499123
+a 1,200 K giant Al2O3 r_eff = 0x3ec00b6671e13af5  # 1.912657253056735e-6
 a 1,200 K giant Al2O3 tau basis: Table(SphereFallback)
-a 1,200 K giant Al2O3 tau = 0x40513ab8c0fe4c6e  # 68.91752648195117
+a 1,200 K giant Al2O3 tau = 0x40513aae7291130d  # 68.9168974320166
 a 1,200 K giant Al2O3 coverage = 0x3ff0000000000000  # 1.0
 a 1,200 K giant CaTiO3: Crossing Solid
-a 1,200 K giant CaTiO3 base = 0x410f6cd6171ff0fa  # 257434.76129139197
-a 1,200 K giant CaTiO3 base temperature = 0x409f2009c70466cc  # 1992.009548252844
+a 1,200 K giant CaTiO3 base = 0x410f6cd553c17013  # 257434.66589629705
+a 1,200 K giant CaTiO3 base temperature = 0x409f20098cf748b1  # 1992.0093268049352
 a 1,200 K giant CaTiO3 top = 0x40a3e402cc0c3283  # 2546.0054630099926
-a 1,200 K giant CaTiO3 vapour below = 0x3e84fa302f3619d1  # 1.562930474869135e-7
+a 1,200 K giant CaTiO3 vapour below = 0x3e84fa2474a75115  # 1.5629171408341456e-7
 a 1,200 K giant CaTiO3 vapour above = 0x380680892f7dbf7c  # 8.265963605611252e-39
-a 1,200 K giant CaTiO3 gas left at its base = 0x3e84fa302f3619d1  # 1.562930474869135e-7
+a 1,200 K giant CaTiO3 gas left at its base = 0x3e84fa2474a75115  # 1.5629171408341456e-7
 a 1,200 K giant CaTiO3 gas left at its top = 0x0000000000000000  # 0.0
-a 1,200 K giant CaTiO3 column mass = 0x3f970ce997f962a6  # 0.022510194683806127
-a 1,200 K giant CaTiO3 r_eff = 0x3ebfefea56ed75e8  # 1.9036036424594029e-6
+a 1,200 K giant CaTiO3 column mass = 0x3f970cdc27448a80  # 0.022509994408333345
+a 1,200 K giant CaTiO3 r_eff = 0x3ebfefea5da08f52  # 1.9036036662611867e-6
 a 1,200 K giant CaTiO3 tau basis: Table(PhaseTable)
-a 1,200 K giant CaTiO3 tau = 0x4012a17e1eb99c94  # 4.657707672194324
+a 1,200 K giant CaTiO3 tau = 0x4012a1733da9454a  # 4.657666171509229
 a 1,200 K giant CaTiO3 coverage = 0x3ff0000000000000  # 1.0
 a 1,200 K giant Fe: Crossing Liquid
-a 1,200 K giant Fe base = 0x410b165a9a8bea62  # 221899.32546218025
-a 1,200 K giant Fe base temperature = 0x409dc4c17bc66baf  # 1905.1889487269616
+a 1,200 K giant Fe base = 0x410b16585031ea3c  # 221899.03915770527
+a 1,200 K giant Fe base temperature = 0x409dc4c0ba751808  # 1905.188211278526
 a 1,200 K giant Fe top = 0x409d817d96aa8cc2  # 1888.3726450584804
-a 1,200 K giant Fe vapour below = 0x3f0bc408e556296b  # 5.295898578612758e-5
+a 1,200 K giant Fe vapour below = 0x3f0bc3f95f1f03b4  # 5.2958533970144146e-5
 a 1,200 K giant Fe vapour above = 0x3d71e89caeee8960  # 1.0179883700994069e-12
-a 1,200 K giant Fe gas left at its base = 0x3f0bc408e556296b  # 5.295898578612758e-5
+a 1,200 K giant Fe gas left at its base = 0x3f0bc3f95f1f03b4  # 5.2958533970144146e-5
 a 1,200 K giant Fe gas left at its top = 0x3d71e89cae000000  # 1.017988366942401e-12
-a 1,200 K giant Fe column mass = 0x4003ae5f6247aef2  # 2.4601428678632766
-a 1,200 K giant Fe r_eff = 0x3eb8478fc6ca4071  # 1.4471732142952682e-6
+a 1,200 K giant Fe column mass = 0x4003ae52c91346ce  # 2.460118838215613
+a 1,200 K giant Fe r_eff = 0x3eb8478fbe971b12  # 1.4471731851637657e-6
 a 1,200 K giant Fe tau basis: Table(Sphere)
-a 1,200 K giant Fe tau = 0x407bc228071795af  # 444.1347723885801
+a 1,200 K giant Fe tau = 0x407bc2161eae548a  # 444.1304003534102
 a 1,200 K giant Fe coverage = 0x3ff0000000000000  # 1.0
 a 1,200 K giant Mg2SiO4: Crossing Solid
-a 1,200 K giant Mg2SiO4 base = 0x41037d74bb40295c  # 159662.5914309722
-a 1,200 K giant Mg2SiO4 base temperature = 0x409af82e79ad61c2  # 1726.0453860369603
+a 1,200 K giant Mg2SiO4 base = 0x41037d73cedfd912  # 159662.47601289354
+a 1,200 K giant Mg2SiO4 base temperature = 0x409af82e178d1f39  # 1726.0450117159182
 a 1,200 K giant Mg2SiO4 top = 0x4097007ff48571fc  # 1472.124956212122
-a 1,200 K giant Mg2SiO4 vapour below = 0x3f11146586ba0bff  # 6.515378634656953e-5
+a 1,200 K giant Mg2SiO4 vapour below = 0x3f11145bfa0cd8ff  # 6.515323049147494e-5
 a 1,200 K giant Mg2SiO4 vapour above = 0x3ccb7fb8c08037fa  # 7.632481547096428e-16
-a 1,200 K giant Mg2SiO4 gas left at its base = 0x3f11146586ba0bff  # 6.515378634656953e-5
+a 1,200 K giant Mg2SiO4 gas left at its base = 0x3f11145bfa0cd8ff  # 6.515323049147494e-5
 a 1,200 K giant Mg2SiO4 gas left at its top = 0x0000000000000000  # 0.0
-a 1,200 K giant Mg2SiO4 column mass = 0x4007351c8d4a97b4  # 2.900933364714513
-a 1,200 K giant Mg2SiO4 r_eff = 0x3ec240c9131036f9  # 2.1759352866250397e-6
+a 1,200 K giant Mg2SiO4 column mass = 0x4007350e80ffcb7e  # 2.900906570249787
+a 1,200 K giant Mg2SiO4 r_eff = 0x3ec240c9196df9ee  # 2.1759353318600096e-6
 a 1,200 K giant Mg2SiO4 tau basis: Table(PhaseTable)
-a 1,200 K giant Mg2SiO4 tau = 0x40845c28d57770cf  # 651.519938405161
+a 1,200 K giant Mg2SiO4 tau = 0x40845c1c7b08495c  # 651.5139065406215
 a 1,200 K giant Mg2SiO4 coverage = 0x3ff0000000000000  # 1.0
 a 1,200 K giant MgSiO3: Crossing Solid
-a 1,200 K giant MgSiO3 base = 0x40fee0585d04c599  # 126469.52270962893
-a 1,200 K giant MgSiO3 base temperature = 0x409925f0fab09ba2  # 1609.4853313059798
+a 1,200 K giant MgSiO3 base = 0x40fee056d3084eca  # 126469.42652159478
+a 1,200 K giant MgSiO3 base temperature = 0x409925f09a6be9b0  # 1609.4849640714056
 a 1,200 K giant MgSiO3 top = 0x4091ee84767a43c7  # 1147.6293582061642
-a 1,200 K giant MgSiO3 vapour below = 0x3f0147abd515d7fc  # 3.2958918960199175e-5
+a 1,200 K giant MgSiO3 vapour below = 0x3f0147a218e6d5ef  # 3.295863563172382e-5
 a 1,200 K giant MgSiO3 vapour above = 0x3d39d97cdf0a9dac  # 9.183609120864575e-14
-a 1,200 K giant MgSiO3 gas left at its base = 0x3f0147abd515d7fc  # 3.2958918960199175e-5
+a 1,200 K giant MgSiO3 gas left at its base = 0x3f0147a218e6d5ef  # 3.295863563172382e-5
 a 1,200 K giant MgSiO3 gas left at its top = 0x0000000000000000  # 0.0
-a 1,200 K giant MgSiO3 column mass = 0x3ffa73ff298c7bc1  # 1.6533195136068886
-a 1,200 K giant MgSiO3 r_eff = 0x3ec26c79a8e5e6bd  # 2.196279928753967e-6
+a 1,200 K giant MgSiO3 column mass = 0x3ffa73eef95fc1ff  # 1.6533040753530484
+a 1,200 K giant MgSiO3 r_eff = 0x3ec26c79aee43705  # 2.196279971339724e-6
 a 1,200 K giant MgSiO3 tau basis: Table(PhaseTable)
-a 1,200 K giant MgSiO3 tau = 0x4076f2a804376a42  # 367.1660196461345
+a 1,200 K giant MgSiO3 tau = 0x4076f299f15a8e52  # 367.1625836884824
 a 1,200 K giant MgSiO3 coverage = 0x3ff0000000000000  # 1.0
 a 1,200 K giant Cr: Crossing Solid
-a 1,200 K giant Cr base = 0x40f97307030b8c5e  # 104240.4382434352
-a 1,200 K giant Cr base temperature = 0x4097bb38b63d11fc  # 1518.80538268492
+a 1,200 K giant Cr base = 0x40f973054f9bbc3f  # 104240.33193563017
+a 1,200 K giant Cr base temperature = 0x4097bb383c6d0854  # 1518.8049180065473
 a 1,200 K giant Cr top = 0x4095e26cd54d76b7  # 1400.606282434817
-a 1,200 K giant Cr vapour below = 0x3eab85c97f8cdd2b  # 8.202375730630425e-7
+a 1,200 K giant Cr vapour below = 0x3eab85ba1c23737d  # 8.202305752620038e-7
 a 1,200 K giant Cr vapour above = 0x3da30419fb6b3864  # 8.647485381269038e-12
-a 1,200 K giant Cr gas left at its base = 0x3eab85c97f8cdd2b  # 8.202375730630425e-7
+a 1,200 K giant Cr gas left at its base = 0x3eab85ba1c23737d  # 8.202305752620038e-7
 a 1,200 K giant Cr gas left at its top = 0x3da30419fb6b0000  # 8.647485381245715e-12
-a 1,200 K giant Cr column mass = 0x3f9183e3a8a14ada  # 0.017104680220948555
-a 1,200 K giant Cr r_eff = 0x3eb8222cc3bb5a1d  # 1.4384684296396833e-6
+a 1,200 K giant Cr column mass = 0x3f9183d8bc03e1e1  # 0.01710451743653774
+a 1,200 K giant Cr r_eff = 0x3eb8222cc6af94f0  # 1.4384684401344798e-6
 a 1,200 K giant Cr tau basis: Table(PhaseTable)
-a 1,200 K giant Cr tau = 0x4005f564f4294e91  # 2.744821460257136
+a 1,200 K giant Cr tau = 0x4005f5573f3a9a56  # 2.7447953166732004
 a 1,200 K giant Cr coverage = 0x3ff0000000000000  # 1.0
 a 1,200 K giant MnS: Crossing Solid
-a 1,200 K giant MnS base = 0x40f037d32685e543  # 66429.1969050365
-a 1,200 K giant MnS base temperature = 0x4094bb1edb0eaec6  # 1326.7801325124906
+a 1,200 K giant MnS base = 0x40f037d25ad4e001  # 66429.14717566968
+a 1,200 K giant MnS base temperature = 0x4094bb1e8cf22cee  # 1326.7798345413134
 a 1,200 K giant MnS top = 0x409ab5645c7169f2  # 1709.3480088921465
-a 1,200 K giant MnS vapour below = 0x3ea37c0907e8085c  # 5.806837320434567e-7
+a 1,200 K giant MnS vapour below = 0x3ea37bfe2304344a  # 5.806787779797113e-7
 a 1,200 K giant MnS vapour above = 0x3dcbc3af311d42c8  # 5.050313478118616e-11
-a 1,200 K giant MnS gas left at its base = 0x3ea37c0907e8085c  # 5.806837320434567e-7
+a 1,200 K giant MnS gas left at its base = 0x3ea37bfe2304344a  # 5.806787779797113e-7
 a 1,200 K giant MnS gas left at its top = 0x3dcbc3af311d4000  # 5.050313478118156e-11
-a 1,200 K giant MnS column mass = 0x3f8b2c36f5894242  # 0.013267926567238967
-a 1,200 K giant MnS r_eff = 0x3ec07315fd99f536  # 1.960939681576675e-6
+a 1,200 K giant MnS column mass = 0x3f8b2c267776c11f  # 0.013267803688763067
+a 1,200 K giant MnS r_eff = 0x3ec07315fe4560ed  # 1.9609396863345567e-6
 a 1,200 K giant MnS tau basis: Table(PhaseTable)
-a 1,200 K giant MnS tau = 0x400586e0616f018e  # 2.69085765953077
+a 1,200 K giant MnS tau = 0x400586d34fb1968d  # 2.6908327318258842
 a 1,200 K giant MnS coverage = 0x3ff0000000000000  # 1.0
 a 1,200 K giant SiO2 not formed: Displaced { by: SubstanceKey("MgSiO3") }
 a 1,200 K giant TiO2 not formed: Displaced { by: SubstanceKey("CaTiO3") }
 a 600 K sub-Neptune Al2O3: Crossing Liquid
-a 600 K sub-Neptune Al2O3 base = 0x412560169c1ee546  # 700427.3049232147
-a 600 K sub-Neptune Al2O3 base temperature = 0x40a4574edded7ba1  # 2603.654036923734
+a 600 K sub-Neptune Al2O3 base = 0x41255fe628accd91  # 700403.0794433822
+a 600 K sub-Neptune Al2O3 base temperature = 0x40a4574357121726  # 2603.631523671461
 a 600 K sub-Neptune Al2O3 top = 0x4024000000000006  # 10.00000000000001
-a 600 K sub-Neptune Al2O3 vapour below = 0x3f30c43fa6393626  # 0.0002558379548859034
+a 600 K sub-Neptune Al2O3 vapour below = 0x3f30c2e4163a86a9  # 0.0002557570316899885
 a 600 K sub-Neptune Al2O3 vapour above = 0x32d64d4da5dc4c8b  # 8.470793184524422e-64
-a 600 K sub-Neptune Al2O3 gas left at its base = 0x3f30c43fa6393626  # 0.0002558379548859034
+a 600 K sub-Neptune Al2O3 gas left at its base = 0x3f30c2e4163a86a9  # 0.0002557570316899885
 a 600 K sub-Neptune Al2O3 gas left at its top = 0x0000000000000000  # 0.0
-a 600 K sub-Neptune Al2O3 column mass = 0x406a5ab482534a28  # 210.83453480021967
-a 600 K sub-Neptune Al2O3 r_eff = 0x3ea1b78463981c6b  # 5.280036880502756e-7
+a 600 K sub-Neptune Al2O3 column mass = 0x406a58580832621c  # 210.76074609604336
+a 600 K sub-Neptune Al2O3 r_eff = 0x3ea1b7807a52028d  # 5.280019094306557e-7
 a 600 K sub-Neptune Al2O3 tau basis: Table(Sphere)
-a 600 K sub-Neptune Al2O3 tau = 0x41121b13af2950fd  # 296644.9210560469
+a 600 K sub-Neptune Al2O3 tau = 0x411219780e722b4a  # 296542.01410739555
 a 600 K sub-Neptune Al2O3 coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune CaTiO3: Crossing Liquid
-a 600 K sub-Neptune CaTiO3 base = 0x412299cd577fd548  # 609510.6708971644
-a 600 K sub-Neptune CaTiO3 base temperature = 0x40a3a56b4f358ede  # 2514.709588693323
+a 600 K sub-Neptune CaTiO3 base = 0x412299b2c7866686  # 609497.3896972693
+a 600 K sub-Neptune CaTiO3 base temperature = 0x40a3a5644ba8f355  # 2514.6958897397076
 a 600 K sub-Neptune CaTiO3 top = 0x4024000000000006  # 10.00000000000001
-a 600 K sub-Neptune CaTiO3 vapour below = 0x3edfab16532c67c8  # 7.550313329907376e-6
+a 600 K sub-Neptune CaTiO3 vapour below = 0x3edfa885dba2dcb9  # 7.547925117083032e-6
 a 600 K sub-Neptune CaTiO3 vapour above = 0x2c10812f48ceeee1  # 1.9317331373320956e-96
-a 600 K sub-Neptune CaTiO3 gas left at its base = 0x3edfab16532c67c8  # 7.550313329907376e-6
+a 600 K sub-Neptune CaTiO3 gas left at its base = 0x3edfa885dba2dcb9  # 7.547925117083032e-6
 a 600 K sub-Neptune CaTiO3 gas left at its top = 0x0000000000000000  # 0.0
-a 600 K sub-Neptune CaTiO3 column mass = 0x402ded209110ad61  # 14.963139088903235
-a 600 K sub-Neptune CaTiO3 r_eff = 0x3ea1c48c11eb0260  # 5.295205801267944e-7
+a 600 K sub-Neptune CaTiO3 column mass = 0x402dea8a3f0863dc  # 14.958085984968356
+a 600 K sub-Neptune CaTiO3 r_eff = 0x3ea1c487ac96763b  # 5.295185811386843e-7
 a 600 K sub-Neptune CaTiO3 tau basis: Table(Sphere)
-a 600 K sub-Neptune CaTiO3 tau = 0x40d4103377e46906  # 20544.80419264084
+a 600 K sub-Neptune CaTiO3 tau = 0x40d40e798f4645a8  # 20537.899369781517
 a 600 K sub-Neptune CaTiO3 coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune Fe: Crossing Liquid
-a 600 K sub-Neptune Fe base = 0x411b22b2b6174e78  # 444588.6778232823
-a 600 K sub-Neptune Fe base temperature = 0x40a227f5002884f0  # 2323.978516832569
+a 600 K sub-Neptune Fe base = 0x411b222cc7ddb930  # 444555.1951817451
+a 600 K sub-Neptune Fe base temperature = 0x40a227de98dd760e  # 2323.9347600180254
 a 600 K sub-Neptune Fe top = 0x4024000000000006  # 10.00000000000001
-a 600 K sub-Neptune Fe vapour below = 0x3f64f54f8fc783b3  # 0.0025583795488590354
+a 600 K sub-Neptune Fe vapour below = 0x3f64f39d1bc92853  # 0.0025575703168998847
 a 600 K sub-Neptune Fe vapour above = 0x3a73aa2c4b130e05  # 3.9712622860262704e-27
-a 600 K sub-Neptune Fe gas left at its base = 0x3f64f54f8fc783b3  # 0.0025583795488590354
+a 600 K sub-Neptune Fe gas left at its base = 0x3f64f39d1bc92853  # 0.0025575703168998847
 a 600 K sub-Neptune Fe gas left at its top = 0x0000000000000000  # 0.0
-a 600 K sub-Neptune Fe column mass = 0x4094af74ac3c3424  # 1323.8639382750343
-a 600 K sub-Neptune Fe r_eff = 0x3e9328e3de43ec17  # 2.855021803552315e-7
+a 600 K sub-Neptune Fe column mass = 0x4094ad6750b230ac  # 1323.350893768521
+a 600 K sub-Neptune Fe r_eff = 0x3e9328c7d1dfb5dc  # 2.854958028864984e-7
 a 600 K sub-Neptune Fe tau basis: Table(Sphere)
-a 600 K sub-Neptune Fe tau = 0x4136a6bb113d02b1  # 1484475.0673371966
+a 600 K sub-Neptune Fe tau = 0x4136a4948242b6d1  # 1483924.5088304768
 a 600 K sub-Neptune Fe coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune Mg2SiO4: Crossing Liquid
-a 600 K sub-Neptune Mg2SiO4 base = 0x41190088de709061  # 409634.2172262725
-a 600 K sub-Neptune Mg2SiO4 base temperature = 0x40a1c9c661c1e9c2  # 2276.8874645803307
+a 600 K sub-Neptune Mg2SiO4 base = 0x4119003ef6b3c692  # 409615.74092016474
+a 600 K sub-Neptune Mg2SiO4 base temperature = 0x40a1c9b93c810c3d  # 2276.861789734596
 a 600 K sub-Neptune Mg2SiO4 top = 0x4024000000000006  # 10.00000000000001
-a 600 K sub-Neptune Mg2SiO4 vapour below = 0x3f69c8c6390852ee  # 0.0031474944628463375
+a 600 K sub-Neptune Mg2SiO4 vapour below = 0x3f69c6afba8c377f  # 0.003146498890038651
 a 600 K sub-Neptune Mg2SiO4 vapour above = 0x377affdf084aa5c1  # 1.9371189053149517e-41
-a 600 K sub-Neptune Mg2SiO4 gas left at its base = 0x3f69c8c6390852ee  # 0.0031474944628463375
+a 600 K sub-Neptune Mg2SiO4 gas left at its base = 0x3f69c6afba8c377f  # 0.003146498890038651
 a 600 K sub-Neptune Mg2SiO4 gas left at its top = 0x0000000000000000  # 0.0
-a 600 K sub-Neptune Mg2SiO4 column mass = 0x409fceffd61dfb99  # 2035.7498402294934
-a 600 K sub-Neptune Mg2SiO4 r_eff = 0x3ea1a36b6fd33da6  # 5.256640346565423e-7
+a 600 K sub-Neptune Mg2SiO4 column mass = 0x409fcc11af236452  # 2035.0172696619015
+a 600 K sub-Neptune Mg2SiO4 r_eff = 0x3ea1a36196503dba  # 5.256595555519572e-7
 a 600 K sub-Neptune Mg2SiO4 tau basis: Table(Sphere)
-a 600 K sub-Neptune Mg2SiO4 tau = 0x41483ad61fe7579e  # 3175852.2492475053
+a 600 K sub-Neptune Mg2SiO4 tau = 0x414838a3c3033403  # 3174727.523535253
 a 600 K sub-Neptune Mg2SiO4 coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune MgSiO3: Crossing Liquid
-a 600 K sub-Neptune MgSiO3 base = 0x410f873d2e2c9f88  # 258279.64754604944
-a 600 K sub-Neptune MgSiO3 base temperature = 0x409fb3aeb6c10eee  # 2028.9206190266955
+a 600 K sub-Neptune MgSiO3 base = 0x410f86e1264bb741  # 258268.143699104
+a 600 K sub-Neptune MgSiO3 base temperature = 0x409fb3979440c6b5  # 2028.898026477936
 a 600 K sub-Neptune MgSiO3 top = 0x4024000000000006  # 10.00000000000001
-a 600 K sub-Neptune MgSiO3 vapour below = 0x3f596b41834d1132  # 0.0015514507078516313
+a 600 K sub-Neptune MgSiO3 vapour below = 0x3f5969305731cf6a  # 0.0015509578777512475
 a 600 K sub-Neptune MgSiO3 vapour above = 0x3892960e01e0acbc  # 3.495666524836371e-36
-a 600 K sub-Neptune MgSiO3 gas left at its base = 0x3f596b41834d1132  # 0.0015514507078516313
+a 600 K sub-Neptune MgSiO3 gas left at its base = 0x3f5969305731cf6a  # 0.0015509578777512475
 a 600 K sub-Neptune MgSiO3 gas left at its top = 0x0000000000000000  # 0.0
-a 600 K sub-Neptune MgSiO3 column mass = 0x408c44849c3f6e26  # 904.564751143979
-a 600 K sub-Neptune MgSiO3 r_eff = 0x3ea079ab09ae7684  # 4.910011911389772e-7
+a 600 K sub-Neptune MgSiO3 column mass = 0x408c41e85c7d1258  # 904.2384576579307
+a 600 K sub-Neptune MgSiO3 r_eff = 0x3ea0799f3b945235  # 4.909958228072131e-7
 a 600 K sub-Neptune MgSiO3 tau basis: Table(Sphere)
-a 600 K sub-Neptune MgSiO3 tau = 0x413783b8363624d4  # 1541048.2117636697
+a 600 K sub-Neptune MgSiO3 tau = 0x413781999fdd064c  # 1540505.6244663177
 a 600 K sub-Neptune MgSiO3 coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune Cr: Crossing Solid
-a 600 K sub-Neptune Cr base = 0x4101a909c59d077a  # 144673.2214909157
-a 600 K sub-Neptune Cr base temperature = 0x409b6d02576dac2a  # 1755.25228663791
+a 600 K sub-Neptune Cr base = 0x4101a8ca22010e60  # 144665.26660357695
+a 600 K sub-Neptune Cr base temperature = 0x409b6ce9a23a473a  # 1755.2281579118703
 a 600 K sub-Neptune Cr top = 0x4024000000000006  # 10.00000000000001
-a 600 K sub-Neptune Cr vapour below = 0x3f04c65326a926b9  # 3.962460762758691e-5
+a 600 K sub-Neptune Cr vapour below = 0x3f04c4a480a93f46  # 3.961207410851804e-5
 a 600 K sub-Neptune Cr vapour above = 0x3ab0304c60480a3c  # 5.230839909219809e-26
-a 600 K sub-Neptune Cr gas left at its base = 0x3f04c65326a926b9  # 3.962460762758691e-5
+a 600 K sub-Neptune Cr gas left at its base = 0x3f04c4a480a93f46  # 3.961207410851804e-5
 a 600 K sub-Neptune Cr gas left at its top = 0x0000000000000000  # 0.0
-a 600 K sub-Neptune Cr column mass = 0x401a17dfb50bb0ee  # 6.523314312780924
-a 600 K sub-Neptune Cr r_eff = 0x3e87b13286177def  # 1.765204756106821e-7
+a 600 K sub-Neptune Cr column mass = 0x401a156898e31512  # 6.520906819210056
+a 600 K sub-Neptune Cr r_eff = 0x3e87b10841d59460  # 1.7651567045109185e-7
 a 600 K sub-Neptune Cr tau basis: Table(PhaseTable)
-a 600 K sub-Neptune Cr tau = 0x40c3354d0809241e  # 9834.601807730327
+a 600 K sub-Neptune Cr tau = 0x40c3339e901c16b7  # 9831.238772879688
 a 600 K sub-Neptune Cr coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune MnS: Crossing Solid
-a 600 K sub-Neptune MnS base = 0x40fc739689e80b22  # 116537.40866855954
-a 600 K sub-Neptune MnS base temperature = 0x4099fb7d09c09d11  # 1662.8721075149408
+a 600 K sub-Neptune MnS base = 0x40fc734517fbd664  # 116532.3183554053
+a 600 K sub-Neptune MnS base temperature = 0x4099fb6a718ddef1  # 1662.8539487998316
 a 600 K sub-Neptune MnS top = 0x4024000000000006  # 10.00000000000001
-a 600 K sub-Neptune MnS vapour below = 0x3efd6a2bd7785348  # 2.8052073927825675e-5
+a 600 K sub-Neptune MnS vapour below = 0x3efd67ca1716b27e  # 2.804320087583739e-5
 a 600 K sub-Neptune MnS vapour above = 0x39fa3135c30b2522  # 2.0662023578583303e-29
-a 600 K sub-Neptune MnS gas left at its base = 0x3efd6a2bd7785348  # 2.8052073927825675e-5
+a 600 K sub-Neptune MnS gas left at its base = 0x3efd67ca1716b27e  # 2.804320087583739e-5
 a 600 K sub-Neptune MnS gas left at its top = 0x0000000000000000  # 0.0
-a 600 K sub-Neptune MnS column mass = 0x4019a04f1be9c626  # 6.406551777022775
-a 600 K sub-Neptune MnS r_eff = 0x3e919940555302e2  # 2.622401401135679e-7
+a 600 K sub-Neptune MnS column mass = 0x40199df4ef0b8b50  # 6.404254660682298
+a 600 K sub-Neptune MnS r_eff = 0x3e9199294828d595  # 2.622348988263825e-7
 a 600 K sub-Neptune MnS tau basis: Table(PhaseTable)
-a 600 K sub-Neptune MnS tau = 0x40c63834e81ff8bb  # 11376.413333889437
+a 600 K sub-Neptune MnS tau = 0x40c6364a17ab2551  # 11372.578847306462
 a 600 K sub-Neptune MnS coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune Na2S: Crossing Solid
-a 600 K sub-Neptune Na2S base = 0x40da8cafa3da46d4  # 27186.744375771683
-a 600 K sub-Neptune Na2S base temperature = 0x40920ea88cf64a6c  # 1155.6646002276348
+a 600 K sub-Neptune Na2S base = 0x40da8c52a28563c9  # 27185.291169497916
+a 600 K sub-Neptune Na2S base temperature = 0x40920e98bc7ef82e  # 1155.6491565550782
 a 600 K sub-Neptune Na2S top = 0x4024000000000006  # 10.00000000000001
-a 600 K sub-Neptune Na2S vapour below = 0x3f2733056521c928  # 0.0001769966207266296
+a 600 K sub-Neptune Na2S vapour below = 0x3f2731247c6f2401  # 0.00017694063555342979
 a 600 K sub-Neptune Na2S vapour above = 0x3d364b03ee0976fa  # 7.92007480558124e-14
-a 600 K sub-Neptune Na2S gas left at its base = 0x3f2733056521c928  # 0.0001769966207266296
+a 600 K sub-Neptune Na2S gas left at its base = 0x3f2731247c6f2401  # 0.00017694063555342979
 a 600 K sub-Neptune Na2S gas left at its top = 0x3d364b0400000000  # 7.92007518596316e-14
-a 600 K sub-Neptune Na2S column mass = 0x40107f48f26d0991  # 4.124301708130944
-a 600 K sub-Neptune Na2S r_eff = 0x3e8dac89c8b8525c  # 2.2108836038370625e-7
+a 600 K sub-Neptune Na2S column mass = 0x40107dbb73979892  # 4.122785383346256
+a 600 K sub-Neptune Na2S r_eff = 0x3e8dac43a15d8a30  # 2.2108038482810502e-7
 a 600 K sub-Neptune Na2S tau basis: Table(PhaseTable)
-a 600 K sub-Neptune Na2S tau = 0x40d0293c96d37ba1  # 16548.946705694896
+a 600 K sub-Neptune Na2S tau = 0x40d027d0c269018a  # 16543.261865855697
 a 600 K sub-Neptune Na2S coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune ZnS: Crossing Solid
-a 600 K sub-Neptune ZnS base = 0x40c423fff4810161  # 10311.999649167703
-a 600 K sub-Neptune ZnS base temperature = 0x408c5783bb24e4df  # 906.9393217928263
+a 600 K sub-Neptune ZnS base = 0x40c423d1f11d4c5b  # 10311.640170728953
+a 600 K sub-Neptune ZnS base temperature = 0x408c57738b1b02b1  # 906.931417666454
 a 600 K sub-Neptune ZnS top = 0x4024000000000006  # 10.00000000000001
-a 600 K sub-Neptune ZnS vapour below = 0x3ed09ea8ebba8562  # 3.962460762758692e-6
+a 600 K sub-Neptune ZnS vapour below = 0x3ed09d5066edcc39  # 3.961207410851805e-6
 a 600 K sub-Neptune ZnS vapour above = 0x3d3083565580996f  # 5.866608923879841e-14
-a 600 K sub-Neptune ZnS gas left at its base = 0x3ed09ea8ebba8562  # 3.962460762758692e-6
+a 600 K sub-Neptune ZnS gas left at its base = 0x3ed09d5066edcc39  # 3.961207410851805e-6
 a 600 K sub-Neptune ZnS gas left at its top = 0x3d30835654000000  # 5.866608892066529e-14
-a 600 K sub-Neptune ZnS column mass = 0x3fb77e3ada981f18  # 0.09176986538670595
-a 600 K sub-Neptune ZnS r_eff = 0x3e69c3c7afc6be60  # 4.7990615900810595e-8
+a 600 K sub-Neptune ZnS column mass = 0x3fb77c1f9355d4ef  # 0.0917377218919062
+a 600 K sub-Neptune ZnS r_eff = 0x3e69c3982e97728f  # 4.798926573807891e-8
 a 600 K sub-Neptune ZnS tau basis: Table(SphereFallback)
-a 600 K sub-Neptune ZnS tau = 0x4068c91571eea43d  # 198.2838678036659
+a 600 K sub-Neptune ZnS tau = 0x4068c6a6821180ea  # 198.2078256933085
 a 600 K sub-Neptune ZnS coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune KCl: Crossing Solid
-a 600 K sub-Neptune KCl base = 0x40bc70da7db1e8d0  # 7280.853480452861
-a 600 K sub-Neptune KCl base temperature = 0x4089fadd31215d78  # 831.3580038649225
+a 600 K sub-Neptune KCl base = 0x40bc7084cd1c8209  # 7280.518754750964
+a 600 K sub-Neptune KCl base temperature = 0x4089fac99f6c8d7a  # 831.3484486084628
 a 600 K sub-Neptune KCl top = 0x4024000000000006  # 10.00000000000001
-a 600 K sub-Neptune KCl vapour below = 0x3ee7f749592a98e4  # 1.1427861669699139e-5
+a 600 K sub-Neptune KCl vapour below = 0x3ee7f5588bfdf313  # 1.1424246963315178e-5
 a 600 K sub-Neptune KCl vapour above = 0x3e209871795d0d93  # 1.9319683170169215e-9
-a 600 K sub-Neptune KCl gas left at its base = 0x3ee7f749592a98e4  # 1.1427861669699139e-5
+a 600 K sub-Neptune KCl gas left at its base = 0x3ee7f5588bfdf313  # 1.1424246963315178e-5
 a 600 K sub-Neptune KCl gas left at its top = 0x3e209871795d1000  # 1.9319683170171783e-9
-a 600 K sub-Neptune KCl column mass = 0x3fc1c3a74c2c3b44  # 0.13878337115644446
-a 600 K sub-Neptune KCl r_eff = 0x3e73d49f9323a364  # 7.387459247425718e-8
+a 600 K sub-Neptune KCl column mass = 0x3fc1c203533d8202  # 0.1387333065458876
+a 600 K sub-Neptune KCl r_eff = 0x3e73d46ef04aae43  # 7.38718278307452e-8
 a 600 K sub-Neptune KCl tau basis: Table(PhaseTable)
-a 600 K sub-Neptune KCl tau = 0x40727a13f0fde8b7  # 295.62986849959583
+a 600 K sub-Neptune KCl tau = 0x40727839fd208def  # 295.51415741650175
 a 600 K sub-Neptune KCl coverage = 0x3ff0000000000000  # 1.0
 a 600 K sub-Neptune SiO2 not formed: Displaced { by: SubstanceKey("MgSiO3") }
 a 600 K sub-Neptune TiO2 not formed: Displaced { by: SubstanceKey("CaTiO3") }
@@ -563,9 +563,9 @@ a hot Jupiter Fe: Bottom Liquid
 a hot Jupiter Fe base = 0x4197d7840000000c  # 100000000.00000018
 a hot Jupiter Fe base temperature = 0x40a2c00000000000  # 2400.0
 a hot Jupiter Fe top = 0x40ac13a0988acda2  # 3593.813663804628
-a hot Jupiter Fe vapour below = 0x3f0c6168dafaeb6d  # 5.4131519730180436e-5
+a hot Jupiter Fe vapour below = 0x3f0c6166fc0ed890  # 5.413146528303423e-5
 a hot Jupiter Fe vapour above = 0x3e5bb0c16cf85543  # 2.5788742528679076e-8
-a hot Jupiter Fe gas left at its base = 0x3f0c6168dafaeb6d  # 5.4131519730180436e-5
+a hot Jupiter Fe gas left at its base = 0x3f0c6166fc0ed890  # 5.413146528303423e-5
 a hot Jupiter Fe gas left at its top = 0x3e5bb0c16cf85800  # 2.5788742528681395e-8
 a hot Jupiter Fe column mass = 0x4051c0c565cd12e3  # 71.01204819704758
 a hot Jupiter Fe r_eff = 0x3eb94791abaec48b  # 1.5067795817553762e-6
@@ -573,69 +573,69 @@ a hot Jupiter Fe tau basis: Table(Sphere)
 a hot Jupiter Fe tau = 0x40c9a78afe25971c  # 13135.085880945953
 a hot Jupiter Fe coverage = 0x3fe0000000000000  # 0.5
 a hot Jupiter CaTiO3: Crossing Solid
-a hot Jupiter CaTiO3 base = 0x4177388ece5dffda  # 24348908.897949077
-a hot Jupiter CaTiO3 base temperature = 0x40a17927580253ac  # 2236.576843331064
+a hot Jupiter CaTiO3 base = 0x4177388de9064c0d  # 24348894.56403737
+a hot Jupiter CaTiO3 base temperature = 0x40a179274f64dc62  # 2236.576777603056
 a hot Jupiter CaTiO3 top = 0x40e096eea2ab3396  # 33975.457357025865
-a hot Jupiter CaTiO3 vapour below = 0x3e8571161f82d7a3  # 1.5975344048118194e-7
+a hot Jupiter CaTiO3 vapour below = 0x3e857114b5ae4acf  # 1.5975327979626152e-7
 a hot Jupiter CaTiO3 vapour above = 0x3ca96fc61f6df7ac  # 1.7650198569073405e-16
-a hot Jupiter CaTiO3 gas left at its base = 0x3e8571161f82d7a3  # 1.5975344048118194e-7
+a hot Jupiter CaTiO3 gas left at its base = 0x3e857114b5ae4acf  # 1.5975327979626152e-7
 a hot Jupiter CaTiO3 gas left at its top = 0x3ca96fc600000000  # 1.7650197269177253e-16
-a hot Jupiter CaTiO3 column mass = 0x400ee2c8f39d4e98  # 3.860734847295884
-a hot Jupiter CaTiO3 r_eff = 0x3ec00d45916452c5  # 1.9135287728878436e-6
+a hot Jupiter CaTiO3 column mass = 0x400ee2c5c4c51234  # 3.860728776229985
+a hot Jupiter CaTiO3 r_eff = 0x3ec00d4591eecd23  # 1.91352877673138e-6
 a hot Jupiter CaTiO3 tau basis: Table(PhaseTable)
-a hot Jupiter CaTiO3 tau = 0x4088d44923fb5576  # 794.5357131610351
+a hot Jupiter CaTiO3 tau = 0x4088d446940e396d  # 794.5344620810771
 a hot Jupiter CaTiO3 coverage = 0x3fe0000000000000  # 0.5
 a hot Jupiter Al2O3: Crossing Solid
-a hot Jupiter Al2O3 base = 0x4174f544d7df34a9  # 21976141.49199358
-a hot Jupiter Al2O3 base temperature = 0x40a1625125020ebb  # 2225.158485473917
+a hot Jupiter Al2O3 base = 0x4174f543d5db8c05  # 21976125.36610033
+a hot Jupiter Al2O3 base temperature = 0x40a162511a5302f4  # 2225.1584039631944
 a hot Jupiter Al2O3 top = 0x40cb0494844ad217  # 13833.16028723963
-a hot Jupiter Al2O3 vapour below = 0x3ed6b453e26255ec  # 5.4131519730180395e-6
+a hot Jupiter Al2O3 vapour below = 0x3ed6b452633f139b  # 5.413146528303413e-6
 a hot Jupiter Al2O3 vapour above = 0x3d0cf8b041cbacb7  # 1.2865903661828877e-14
-a hot Jupiter Al2O3 gas left at its base = 0x3ed6b453e26255ec  # 5.4131519730180395e-6
+a hot Jupiter Al2O3 gas left at its base = 0x3ed6b452633f139b  # 5.413146528303413e-6
 a hot Jupiter Al2O3 gas left at its top = 0x3d0cf8b040000000  # 1.286590361429963e-14
-a hot Jupiter Al2O3 column mass = 0x40444ecb5d461368  # 40.61558118745489
-a hot Jupiter Al2O3 r_eff = 0x3ec029fb5e7397e2  # 1.9268979830509373e-6
+a hot Jupiter Al2O3 column mass = 0x40444ec9152ffc56  # 40.61551155894328
+a hot Jupiter Al2O3 r_eff = 0x3ec029fb5f28fb0b  # 1.9268979880854474e-6
 a hot Jupiter Al2O3 tau basis: Table(SphereFallback)
-a hot Jupiter Al2O3 tau = 0x40c204d22f02cad5  # 9225.642059659041
+a hot Jupiter Al2O3 tau = 0x40c204d027e35ae2  # 9225.626217288376
 a hot Jupiter Al2O3 coverage = 0x3fe0000000000000  # 0.5
 a hot Jupiter Mg2SiO4: Crossing Solid
-a hot Jupiter Mg2SiO4 base = 0x40fbaf3092552e14  # 113395.03572576522
-a hot Jupiter Mg2SiO4 base temperature = 0x409abace960a8906  # 1710.7017442365773
+a hot Jupiter Mg2SiO4 base = 0x40fbaf2eb70f433e  # 113394.91969228999
+a hot Jupiter Mg2SiO4 base temperature = 0x409abace7f221dd9  # 1710.7016568499296
 a hot Jupiter Mg2SiO4 top = 0x40a82bec49ab1cdb  # 3093.961499545357
-a hot Jupiter Mg2SiO4 vapour below = 0x3f11753409173727  # 6.659631824065521e-5
+a hot Jupiter Mg2SiO4 vapour below = 0x3f117532e27d3be2  # 6.659625125603156e-5
 a hot Jupiter Mg2SiO4 vapour above = 0x3e4b3c8122bf2998  # 1.268291168606629e-8
-a hot Jupiter Mg2SiO4 gas left at its base = 0x3f11753409173727  # 6.659631824065521e-5
+a hot Jupiter Mg2SiO4 gas left at its base = 0x3f117532e27d3be2  # 6.659625125603156e-5
 a hot Jupiter Mg2SiO4 gas left at its top = 0x0000000000000000  # 0.0
-a hot Jupiter Mg2SiO4 column mass = 0x4010d4e69b3e81bc  # 4.207910943689452
-a hot Jupiter Mg2SiO4 r_eff = 0x3ec16fac5aeb9078  # 2.078559837458536e-6
+a hot Jupiter Mg2SiO4 column mass = 0x4010d4e501f1d6a2  # 4.2079048446518375
+a hot Jupiter Mg2SiO4 r_eff = 0x3ec16fac5486db61  # 2.0785597920307805e-6
 a hot Jupiter Mg2SiO4 tau basis: Table(PhaseTable)
-a hot Jupiter Mg2SiO4 tau = 0x408ef9fa9560eb49  # 991.2473552295497
+a hot Jupiter Mg2SiO4 tau = 0x408ef9f7aff7e155  # 991.2459411016122
 a hot Jupiter Mg2SiO4 coverage = 0x3fe0000000000000  # 0.5
 a hot Jupiter MgSiO3: Crossing Solid
-a hot Jupiter MgSiO3 base = 0x40e4890cafa45195  # 42056.39644065794
-a hot Jupiter MgSiO3 base temperature = 0x4098819bbb8e3a62  # 1568.402082655252
+a hot Jupiter MgSiO3 base = 0x40e4890c37e5a4d0  # 42056.381823369884
+a hot Jupiter MgSiO3 base temperature = 0x4098819bae434c46  # 1568.4020319476417
 a hot Jupiter MgSiO3 top = 0x40a968aaf106c3c8  # 3252.333870135688
-a hot Jupiter MgSiO3 vapour below = 0x3f01bfc029b65b2e  # 3.38535803294154e-5
+a hot Jupiter MgSiO3 vapour below = 0x3f01bfbefc0e3b82  # 3.3853546035015315e-5
 a hot Jupiter MgSiO3 vapour above = 0x3e8196adba346c26  # 1.3104519523067247e-7
-a hot Jupiter MgSiO3 gas left at its base = 0x3f01bfc029b65b2e  # 3.38535803294154e-5
+a hot Jupiter MgSiO3 gas left at its base = 0x3f01bfbefc0e3b82  # 3.3853546035015315e-5
 a hot Jupiter MgSiO3 gas left at its top = 0x0000000000000000  # 0.0
-a hot Jupiter MgSiO3 column mass = 0x3ff393aed8472f25  # 1.223555416904625
-a hot Jupiter MgSiO3 r_eff = 0x3ebf7b3acb0321d8  # 1.876435629143583e-6
+a hot Jupiter MgSiO3 column mass = 0x3ff393ad1ca7a462  # 1.2235537642793806
+a hot Jupiter MgSiO3 r_eff = 0x3ebf7b3aa38fe538  # 1.8764354889885174e-6
 a hot Jupiter MgSiO3 tau basis: Table(PhaseTable)
-a hot Jupiter MgSiO3 tau = 0x40740a29a53131e5  # 320.6351673051525
+a hot Jupiter MgSiO3 tau = 0x40740a27f997db5f  # 320.6347595149909
 a hot Jupiter MgSiO3 coverage = 0x3fe0000000000000  # 0.5
 a hot Jupiter Cr: Crossing Solid
-a hot Jupiter Cr base = 0x40cf50389dceac6e  # 16032.442315897173
-a hot Jupiter Cr base temperature = 0x40966750656d1484  # 1433.8285119098446
+a hot Jupiter Cr base = 0x40cf50379f485359  # 16032.434548416802
+a hot Jupiter Cr base temperature = 0x40966750547c9676  # 1433.8284472910723
 a hot Jupiter Cr top = 0x40ad838b649d52cf  # 3777.772252003058
-a hot Jupiter Cr vapour below = 0x3eac21c8a4371e88  # 8.383979736509233e-7
+a hot Jupiter Cr vapour below = 0x3eac21c6c97cbbde  # 8.383971303644728e-7
 a hot Jupiter Cr vapour above = 0x3e7c412d3c2acbaa  # 1.052565741604217e-7
-a hot Jupiter Cr gas left at its base = 0x3eac21c8a4371e88  # 8.383979736509233e-7
+a hot Jupiter Cr gas left at its base = 0x3eac21c6c97cbbde  # 8.383971303644728e-7
 a hot Jupiter Cr gas left at its top = 0x3e7c412d3c2acb90  # 1.0525657416042136e-7
-a hot Jupiter Cr column mass = 0x3f75556a9927dce0  # 0.005208412551375136
-a hot Jupiter Cr r_eff = 0x3ea3d1c663a50545  # 5.906651446079033e-7
+a hot Jupiter Cr column mass = 0x3f755568735637b2  # 0.005208404550456723
+a hot Jupiter Cr r_eff = 0x3ea3d1c60086eb2e  # 5.906649685397022e-7
 a hot Jupiter Cr tau basis: Table(PhaseTable)
-a hot Jupiter Cr tau = 0x400164ca08870ceb  # 2.1742134729589586
+a hot Jupiter Cr tau = 0x400164c8a6870aff  # 2.174210835453209
 a hot Jupiter Cr coverage = 0x3fe0000000000000  # 0.5
 a hot Jupiter SiO2 not formed: Displaced { by: SubstanceKey("MgSiO3") }
 a hot Jupiter TiO2 not formed: Displaced { by: SubstanceKey("CaTiO3") }

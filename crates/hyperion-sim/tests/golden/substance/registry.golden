@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 [elements]
 element 0 H
 element 1 He
@@ -256,6 +256,30 @@ identity 113 N: atom, charge 0, elements [N 1]
 identity 113 N: molar_mass_g_per_mol = 0x402c0395810624dd  # 14.007
 identity 114 C: atom, charge 0, elements [C 1]
 identity 114 C: molar_mass_g_per_mol = 0x402805a1cac08312  # 12.011
+identity 115 SH: molecule, charge 0, elements [H 1 S 1]
+identity 115 SH: molar_mass_g_per_mol = 0x404088b439581062  # 33.068
+identity 116 OH: molecule, charge 0, elements [H 1 O 1]
+identity 116 OH: molar_mass_g_per_mol = 0x403101cac083126f  # 17.007
+identity 117 S+: ion, charge 1, elements [S 1]
+identity 117 S+: molar_mass_g_per_mol = 0x4040079c1aa87efe  # 32.05945142009112
+identity 118 C+: ion, charge 1, elements [C 1]
+identity 118 C+: molar_mass_g_per_mol = 0x40280559e376f9eb  # 12.01045142009112
+identity 119 H+: ion, charge 1, elements [H 1]
+identity 119 H+: molar_mass_g_per_mol = 0x3ff01e8561599a15  # 1.00745142009112
+identity 120 N+: ion, charge 1, elements [N 1]
+identity 120 N+: molar_mass_g_per_mol = 0x402c034d99bc9bb5  # 14.00645142009112
+identity 121 O+: ion, charge 1, elements [O 1]
+identity 121 O+: molar_mass_g_per_mol = 0x402fff350647df4b  # 15.99845142009112
+identity 122 P: atom, charge 0, elements [P 1]
+identity 122 P: molar_mass_g_per_mol = 0x403ef95810624dd3  # 30.974
+identity 123 P2: molecule, charge 0, elements [P 2]
+identity 123 P2: molar_mass_g_per_mol = 0x404ef95810624dd3  # 61.948
+identity 124 PO: molecule, charge 0, elements [P 1 O 1]
+identity 124 PO: molar_mass_g_per_mol = 0x40477c8b43958106  # 46.973
+identity 125 PH2: molecule, charge 0, elements [P 1 H 2]
+identity 125 PH2: molar_mass_g_per_mol = 0x40407eb851eb851f  # 32.99
+identity 126 Cl: atom, charge 0, elements [Cl 1]
+identity 126 Cl: molar_mass_g_per_mol = 0x4041b9999999999a  # 35.45
 [optics]
 optics 0 H2: rayleigh true, absorber true, aerosol_material false
 optics 1 He: rayleigh true, absorber true, aerosol_material false
@@ -372,6 +396,18 @@ optics 111 cometary: rayleigh false, absorber false, aerosol_material false
 optics 112 S: rayleigh false, absorber false, aerosol_material false
 optics 113 N: rayleigh false, absorber false, aerosol_material false
 optics 114 C: rayleigh false, absorber false, aerosol_material false
+optics 115 SH: rayleigh false, absorber false, aerosol_material false
+optics 116 OH: rayleigh false, absorber false, aerosol_material false
+optics 117 S+: rayleigh false, absorber false, aerosol_material false
+optics 118 C+: rayleigh false, absorber false, aerosol_material false
+optics 119 H+: rayleigh false, absorber false, aerosol_material false
+optics 120 N+: rayleigh false, absorber false, aerosol_material false
+optics 121 O+: rayleigh false, absorber false, aerosol_material false
+optics 122 P: rayleigh false, absorber false, aerosol_material false
+optics 123 P2: rayleigh false, absorber false, aerosol_material false
+optics 124 PO: rayleigh false, absorber false, aerosol_material false
+optics 125 PH2: rayleigh false, absorber false, aerosol_material false
+optics 126 Cl: rayleigh false, absorber false, aerosol_material false
 [gas]
 gas 0 H2: rotation InLevels
 gas 0 H2: level set 0, term (0, 0) cm = 0x40a0f4bf8bac710c  # 2170.3741124999997
@@ -1153,6 +1189,154 @@ gas 114 C: heat_capacity_over_r at 2000 K = 0x400428dff8f53264  # 2.519958443625
 gas 114 C: enthalpy_over_r_k at 298.15 K = 0x408890cfed63ce6a  # 786.1015270039909
 gas 114 C: entropy_over_r at 298.15 K = 0x403070273ffba9ee  # 16.4380989064611
 gas 114 C: rayleigh_cross_section_550nm_m2 none
+gas 115 SH: rotation Linear
+gas 115 SH: vibration 0, degeneracy 1, wavenumber_cm = 0x40a43f999999999a  # 2591.8
+gas 115 SH: level set 0, 2 levels, digest 83b6c61a00542a27, weight = 0x3ff0000000000000  # 1.0
+gas 115 SH: heat_capacity_over_r at 30 K = 0x400c000269888302  # 3.500004600981243
+gas 115 SH: heat_capacity_over_r at 100 K = 0x400d076a00deb31c  # 3.628620154186491
+gas 115 SH: heat_capacity_over_r at 200 K = 0x400f6f939afc1174  # 3.929480753724585
+gas 115 SH: heat_capacity_over_r at 298.15 K = 0x400f2ee81281d174  # 3.8979035802714694
+gas 115 SH: heat_capacity_over_r at 500 K = 0x400e08bc4d48060c  # 3.754265407333838
+gas 115 SH: heat_capacity_over_r at 1000 K = 0x400f5a14b7282f13  # 3.9189848240984104
+gas 115 SH: heat_capacity_over_r at 2000 K = 0x4011170f2f86560a  # 4.27251886613295
+gas 115 SH: enthalpy_over_r_k at 298.15 K = 0x40917ce2f9e1e868  # 1119.2216563509082
+gas 115 SH: entropy_over_r at 298.15 K = 0x403509f69ab1d7ba  # 21.038919132631897
+gas 115 SH: rayleigh_cross_section_550nm_m2 none
+gas 116 OH: rotation Linear
+gas 116 OH: vibration 0, degeneracy 1, wavenumber_cm = 0x40abdfff2e48e8a7  # 3567.9984
+gas 116 OH: level set 0, 2 levels, digest 9acbc8298924ba5a, weight = 0x3ff0000000000000  # 1.0
+gas 116 OH: heat_capacity_over_r at 30 K = 0x400c72c2e8248545  # 3.556035817732353
+gas 116 OH: heat_capacity_over_r at 100 K = 0x400f5cb43e8cea3d  # 3.9202656637910693
+gas 116 OH: heat_capacity_over_r at 200 K = 0x400d9390d3fec1c8  # 3.6970535814400343
+gas 116 OH: heat_capacity_over_r at 298.15 K = 0x400ccedaf4358ab2  # 3.6010035590018896
+gas 116 OH: heat_capacity_over_r at 500 K = 0x400c56743666ab8b  # 3.5422138452608514
+gas 116 OH: heat_capacity_over_r at 1000 K = 0x400d56508edff3b3  # 3.6671458398909293
+gas 116 OH: heat_capacity_over_r at 2000 K = 0x40106251e04b555f  # 4.096015457723609
+gas 116 OH: enthalpy_over_r_k at 298.15 K = 0x40915cf9522280d6  # 1111.2434773818145
+gas 116 OH: entropy_over_r at 298.15 K = 0x40354645c1d05613  # 21.274501908648812
+gas 116 OH: rayleigh_cross_section_550nm_m2 none
+gas 117 S+: rotation None
+gas 117 S+: level set 0, 3 levels, digest d1c67ee19728e0ac, weight = 0x3ff0000000000000  # 1.0
+gas 117 S+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 117 S+: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 117 S+: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 117 S+: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 117 S+: heat_capacity_over_r at 500 K = 0x4004000000000003  # 2.5000000000000013
+gas 117 S+: heat_capacity_over_r at 1000 K = 0x400400004e4c09d2  # 2.500000583358294
+gas 117 S+: heat_capacity_over_r at 2000 K = 0x40040d3a5f5757ee  # 2.5064589928178895
+gas 117 S+: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 117 S+: entropy_over_r at 298.15 K = 0x402f42b4ddc31c30  # 15.630286150042679
+gas 117 S+: rayleigh_cross_section_550nm_m2 none
+gas 118 C+: rotation None
+gas 118 C+: level set 0, 2 levels, digest cd0266ad6fca72d4, weight = 0x3ff0000000000000  # 1.0
+gas 118 C+: heat_capacity_over_r at 30 K = 0x4009e3eb1715dc99  # 3.236288242678324
+gas 118 C+: heat_capacity_over_r at 100 K = 0x4005a535581c42b1  # 2.705668152201121
+gas 118 C+: heat_capacity_over_r at 200 K = 0x400469178d2d553c  # 2.5513144521197813
+gas 118 C+: heat_capacity_over_r at 298.15 K = 0x40042e33fb8c0e15  # 2.5225600864521405
+gas 118 C+: heat_capacity_over_r at 500 K = 0x40040ffc99b156b9  # 2.5078060157055373
+gas 118 C+: heat_capacity_over_r at 1000 K = 0x400403e625b9e621  # 2.5019038150174002
+gas 118 C+: heat_capacity_over_r at 2000 K = 0x400400f61da88ade  # 2.50046942873574
+gas 118 C+: enthalpy_over_r_k at 298.15 K = 0x4088fdc38aeb0314  # 799.7204798088374
+gas 118 C+: entropy_over_r at 298.15 K = 0x40300654976d9026  # 16.024728264092253
+gas 118 C+: rayleigh_cross_section_550nm_m2 none
+gas 119 H+: rotation None
+gas 119 H+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 119 H+: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 119 H+: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 119 H+: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 119 H+: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 119 H+: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 119 H+: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 119 H+: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 119 H+: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 119 H+: rayleigh_cross_section_550nm_m2 none
+gas 120 N+: rotation None
+gas 120 N+: level set 0, 3 levels, digest 0c0709999b42cf68, weight = 0x3ff0000000000000  # 1.0
+gas 120 N+: heat_capacity_over_r at 30 K = 0x400d752b99c2567b  # 3.682212067836017
+gas 120 N+: heat_capacity_over_r at 100 K = 0x4007cb32b7fec901  # 2.9742178320531143
+gas 120 N+: heat_capacity_over_r at 200 K = 0x400511812ebb035e  # 2.6335471773931394
+gas 120 N+: heat_capacity_over_r at 298.15 K = 0x40047ac63ea32f1b  # 2.5599484342145735
+gas 120 N+: heat_capacity_over_r at 500 K = 0x40042ad9e31ab320  # 2.5209233992121796
+gas 120 N+: heat_capacity_over_r at 1000 K = 0x40040a7722a6d0cf  # 2.5051100451620196
+gas 120 N+: heat_capacity_over_r at 2000 K = 0x40040293ffbf0358  # 2.5012588482062874
+gas 120 N+: enthalpy_over_r_k at 298.15 K = 0x408abf5576138742  # 855.9167291188862
+gas 120 N+: entropy_over_r at 298.15 K = 0x40306967b752be98  # 16.411738832188888
+gas 120 N+: rayleigh_cross_section_550nm_m2 none
+gas 121 O+: rotation None
+gas 121 O+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 121 O+: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 121 O+: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 121 O+: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 121 O+: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 121 O+: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 121 O+: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 121 O+: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 121 O+: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 121 O+: rayleigh_cross_section_550nm_m2 none
+gas 122 P: rotation None
+gas 122 P: level set 0, 3 levels, digest 0d970da233b811c9, weight = 0x3ff0000000000000  # 1.0
+gas 122 P: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 122 P: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 122 P: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 122 P: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 122 P: heat_capacity_over_r at 500 K = 0x400400000000914e  # 2.5000000000165192
+gas 122 P: heat_capacity_over_r at 1000 K = 0x4004001b8ede56fa  # 2.500052562866469
+gas 122 P: heat_capacity_over_r at 2000 K = 0x40045fe1946d6a95  # 2.5468169780627457
+gas 122 P: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 122 P: entropy_over_r at 298.15 K = 0x402f42b4ddc31c30  # 15.630286150042679
+gas 122 P: rayleigh_cross_section_550nm_m2 none
+gas 123 P2: rotation Linear
+gas 123 P2: vibration 0, degeneracy 1, wavenumber_cm = 0x408838cccccccccd  # 775.1
+gas 123 P2: heat_capacity_over_r at 30 K = 0x400c0000000000df  # 3.500000000000099
+gas 123 P2: heat_capacity_over_r at 100 K = 0x400c03a7838f1742  # 3.5017843511622297
+gas 123 P2: heat_capacity_over_r at 200 K = 0x400cf306747e087c  # 3.6186646557771933
+gas 123 P2: heat_capacity_over_r at 298.15 K = 0x400ec9d9bd343f7d  # 3.84855983558367
+gas 123 P2: heat_capacity_over_r at 500 K = 0x4010af5cb7ee7860  # 4.171252130441729
+gas 123 P2: heat_capacity_over_r at 1000 K = 0x40119c294e2a790d  # 4.402501317350709
+gas 123 P2: heat_capacity_over_r at 2000 K = 0x4011e5e03f047361  # 4.47448824371972
+gas 123 P2: enthalpy_over_r_k at 298.15 K = 0x4090ba98eaec4a50  # 1070.6493336601598
+gas 123 P2: entropy_over_r at 298.15 K = 0x40340e7d08af4722  # 20.05659536628003
+gas 123 P2: rayleigh_cross_section_550nm_m2 none
+gas 124 PO: rotation Linear
+gas 124 PO: vibration 0, degeneracy 1, wavenumber_cm = 0x409310e147ae147b  # 1220.22
+gas 124 PO: level set 0, 2 levels, digest 495d2f12398cf9dc, weight = 0x3ff0000000000000  # 1.0
+gas 124 PO: heat_capacity_over_r at 30 K = 0x400c051950708746  # 3.502489689287276
+gas 124 PO: heat_capacity_over_r at 100 K = 0x400f0fb7fa4fd2c1  # 3.8826751285181165
+gas 124 PO: heat_capacity_over_r at 200 K = 0x400efa0cdd5f3d7a  # 3.8720948500337586
+gas 124 PO: heat_capacity_over_r at 298.15 K = 0x400e8aa04703bef3  # 3.8176885173814923
+gas 124 PO: heat_capacity_over_r at 500 K = 0x400fe12efa73cbf1  # 3.9849528853023846
+gas 124 PO: heat_capacity_over_r at 1000 K = 0x401136f6e3a1a480  # 4.303676182499771
+gas 124 PO: heat_capacity_over_r at 2000 K = 0x4011c74f717ef641  # 4.444638989805356
+gas 124 PO: enthalpy_over_r_k at 298.15 K = 0x4091a832c3cb4c1f  # 1130.0495750203334
+gas 124 PO: entropy_over_r at 298.15 K = 0x403538452b826b20  # 21.21980544981045
+gas 124 PO: rayleigh_cross_section_550nm_m2 none
+gas 125 PH2: rotation NonLinear
+gas 125 PH2: vibration 0, degeneracy 1, wavenumber_cm = 0x40a29e0000000000  # 2383.0
+gas 125 PH2: vibration 1, degeneracy 1, wavenumber_cm = 0x40a2860000000000  # 2371.0
+gas 125 PH2: vibration 2, degeneracy 1, wavenumber_cm = 0x4092080000000000  # 1154.0
+gas 125 PH2: level set 0, 1 levels, digest 88205fb960ffd125, weight = 0x3ff0000000000000  # 1.0
+gas 125 PH2: heat_capacity_over_r at 30 K = 0x4010000000000000  # 4.0
+gas 125 PH2: heat_capacity_over_r at 100 K = 0x40100004729d3507  # 4.000016966672098
+gas 125 PH2: heat_capacity_over_r at 200 K = 0x4010118a07b8665d  # 4.017128105764269
+gas 125 PH2: heat_capacity_over_r at 298.15 K = 0x40107ce39007ac20  # 4.121961832493099
+gas 125 PH2: heat_capacity_over_r at 500 K = 0x40121ddc43cdada4  # 4.529160556248289
+gas 125 PH2: heat_capacity_over_r at 1000 K = 0x4016777657f15c4a  # 5.616662382227398
+gas 125 PH2: heat_capacity_over_r at 2000 K = 0x401a156872dc67b4  # 6.520906252577266
+gas 125 PH2: enthalpy_over_r_k at 298.15 K = 0x4092bc1e71164d4b  # 1199.0297282681156
+gas 125 PH2: entropy_over_r at 298.15 K = 0x4037824a0ef8640b  # 23.50894254268864
+gas 125 PH2: rayleigh_cross_section_550nm_m2 none
+gas 126 Cl: rotation None
+gas 126 Cl: level set 0, 2 levels, digest 28039e55e6be1d2f, weight = 0x3ff0000000000000  # 1.0
+gas 126 Cl: heat_capacity_over_r at 30 K = 0x4004000000000001  # 2.5000000000000004
+gas 126 Cl: heat_capacity_over_r at 100 K = 0x400400818ab842e7  # 2.500247081516466
+gas 126 Cl: heat_capacity_over_r at 200 K = 0x4004481e81a39ccf  # 2.535214436345633
+gas 126 Cl: heat_capacity_over_r at 298.15 K = 0x4005030b3bf91033  # 2.6264862714179116
+gas 126 Cl: heat_capacity_over_r at 500 K = 0x4005e24eeaf79c95  # 2.7355020863356665
+gas 126 Cl: heat_capacity_over_r at 1000 K = 0x4005647e37bfc984  # 2.6740688662914085
+gas 126 Cl: heat_capacity_over_r at 2000 K = 0x400488a88ef65f54  # 2.566727749723137
+gas 126 Cl: enthalpy_over_r_k at 298.15 K = 0x4087925b1dc29bc9  # 754.2944903568069
+gas 126 Cl: entropy_over_r at 298.15 K = 0x402f55a22fe27cb2  # 15.667253013989782
+gas 126 Cl: rayleigh_cross_section_550nm_m2 none
 equilibrium hydrogen: heat_capacity_over_r at 30 K = 0x400b73d05d523960  # 3.4315497675626574
 equilibrium hydrogen: heat_capacity_over_r at 100 K = 0x400b16be9808b2f6  # 3.3861057164816613
 equilibrium hydrogen: heat_capacity_over_r at 200 K = 0x400a693162e0e507  # 3.3013637280352017

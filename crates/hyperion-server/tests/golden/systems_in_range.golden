@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 {
   "type": "response",
   "id": 2,
@@ -30,7 +30,7 @@
           "layer": "a",
           "mass_min_msun": 0.08,
           "mass_max_msun": 0.5,
-          "expected": 821.8721032751592,
+          "expected": 795.0944511591467,
           "returned": 0,
           "status": "over_limit"
         },
@@ -38,7 +38,7 @@
           "layer": "b",
           "mass_min_msun": 0.5,
           "mass_max_msun": 0.75,
-          "expected": 145.22142520926778,
+          "expected": 140.49015850194547,
           "returned": 0,
           "status": "over_limit"
         },
@@ -46,7 +46,7 @@
           "layer": "c",
           "mass_min_msun": 0.75,
           "mass_max_msun": 2.5,
-          "expected": 204.27925709211596,
+          "expected": 197.7851447122355,
           "returned": 0,
           "status": "over_limit"
         },
@@ -54,16 +54,16 @@
           "layer": "d",
           "mass_min_msun": 2.5,
           "mass_max_msun": 8.0,
-          "expected": 41.90624522828199,
-          "returned": 44,
+          "expected": 39.18878684838455,
+          "returned": 41,
           "status": "included"
         },
         {
           "layer": "e",
           "mass_min_msun": 8.0,
           "mass_max_msun": 150.0,
-          "expected": 11.588222978848343,
-          "returned": 7,
+          "expected": 7.921644466235227,
+          "returned": 3,
           "status": "included"
         }
       ]
@@ -88,11 +88,15 @@
         "initial_mass_msun": 4.101392310629136,
         "age_myr": 8629.199522763261,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -241.72373282785716,
           13.16262908177812,
           -2.8113457393814163
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "6200596800000009",
@@ -113,11 +117,15 @@
         "initial_mass_msun": 4.345606699259232,
         "age_myr": 8257.661705998304,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -240.77075681262136,
           73.60576275428853,
           -18.117654048252657
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd9680000001b",
@@ -138,11 +146,15 @@
         "initial_mass_msun": 3.90121791500526,
         "age_myr": 3572.9621103508657,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -247.9808621505607,
           19.2448882037577,
           10.663158819278214
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "620059680000000e",
@@ -163,11 +175,15 @@
         "initial_mass_msun": 3.093402002389267,
         "age_myr": 5463.190502423186,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -196.5351526553229,
           16.555353824000715,
           17.430736753881224
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "62005967fe000002",
@@ -188,11 +204,15 @@
         "initial_mass_msun": 6.1605854394732,
         "age_myr": 5119.634947763265,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -238.00795195330446,
           -60.108244061292616,
           -11.755960811183071
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "6200596800000014",
@@ -213,36 +233,15 @@
         "initial_mass_msun": 3.155126925753407,
         "age_myr": 9565.01704201546,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -264.0555464156711,
           -40.896052815363056,
           -31.11004208306818
-        ]
-      },
-      {
-        "id": "6200596800000007",
-        "designation": "GPG 000P00 D-7",
-        "position": {
-          "cell_ly": [
-            0,
-            26016,
-            13
-          ],
-          "offset_m": [
-            6237647065527669.0,
-            4859092444277077.0,
-            2084464687830532.0
-          ]
-        },
-        "layer": "d",
-        "initial_mass_msun": 4.004473846312418,
-        "age_myr": 26.00489207167079,
-        "population": "young_thin_disc",
-        "velocity_km_s": [
-          -253.00022587299298,
-          -8.362255425418592,
-          2.9981170669919965
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd967fe000016",
@@ -263,11 +262,15 @@
         "initial_mass_msun": 3.107623280094627,
         "age_myr": 9318.011164332665,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -234.76699726679362,
           -8.95829547896307,
           -19.27680524821827
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd967fe00000d",
@@ -288,11 +291,15 @@
         "initial_mass_msun": 2.670457645260327,
         "age_myr": 5583.780457201096,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -226.44952255649721,
           9.472604532095128,
           9.996815099818537
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "6200595800000027",
@@ -313,11 +320,15 @@
         "initial_mass_msun": 2.9318231804944572,
         "age_myr": 2579.201225942359,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -239.157979980197,
           23.833895552300152,
           -8.801965567796515
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd96800000006",
@@ -329,20 +340,24 @@
             15
           ],
           "offset_m": [
-            6848464541740789.0,
-            8215607945050224.0,
-            9053002037189554.0
+            6815745115268286.0,
+            8164910061791716.0,
+            9085964793136796.0
           ]
         },
         "layer": "d",
         "initial_mass_msun": 5.852895055811929,
-        "age_myr": 393.1941992168016,
+        "age_myr": 1327.8289742890393,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
-          -231.08133077148491,
-          25.650751920217093,
-          -8.68787587228409
-        ]
+          -226.93406653434357,
+          32.0768278269411,
+          -12.8659826924786
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd9680000001a",
@@ -363,36 +378,15 @@
         "initial_mass_msun": 6.604109253068797,
         "age_myr": 6574.17586560426,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -229.42149717600114,
           20.981404879654804,
           -0.32919990246523717
-        ]
-      },
-      {
-        "id": "8200b2dff0000057",
-        "designation": "GPF 000B0Z E-87",
-        "position": {
-          "cell_ly": [
-            20,
-            25986,
-            -6
-          ],
-          "offset_m": [
-            7074589908977361.0,
-            8507796903426246.0,
-            469676268020856.25
-          ]
-        },
-        "layer": "e",
-        "initial_mass_msun": 8.969266119788237,
-        "age_myr": 1068.493012138957,
-        "population": "old_thin_disc",
-        "velocity_km_s": [
-          -225.4224095736858,
-          2.063318343137935,
-          -7.320991257409061
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd957fe000004",
@@ -413,11 +407,15 @@
         "initial_mass_msun": 3.7490577784928494,
         "age_myr": 5629.091861434472,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -220.29255110321208,
           0.23899314672778849,
           25.14944493405422
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "62005967fe00000c",
@@ -438,11 +436,15 @@
         "initial_mass_msun": 3.355725036461081,
         "age_myr": 7621.965862904737,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -197.26770189603502,
           29.460536553176837,
           -6.94673061029403
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd967fe000000",
@@ -463,11 +465,15 @@
         "initial_mass_msun": 3.613075868934202,
         "age_myr": 7199.557026108021,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -214.88349289223876,
           -51.27863175068053,
           -23.25814986965907
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "62005957fe000026",
@@ -488,11 +494,15 @@
         "initial_mass_msun": 3.284226486730012,
         "age_myr": 4453.367501581098,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -208.9845644557497,
           50.67792020355261,
           -24.020383484010253
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd96800000018",
@@ -513,36 +523,15 @@
         "initial_mass_msun": 3.3523319039431043,
         "age_myr": 3540.519975790082,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -218.81188650781195,
           -29.981783148921952,
           6.545956609488863
-        ]
-      },
-      {
-        "id": "8200b2e00000002d",
-        "designation": "GPG 000B00 E-45",
-        "position": {
-          "cell_ly": [
-            1,
-            26028,
-            11
-          ],
-          "offset_m": [
-            8846653950293868.0,
-            7547063220986720.0,
-            5386028651498693.0
-          ]
-        },
-        "layer": "e",
-        "initial_mass_msun": 11.80099271436342,
-        "age_myr": 11742.030802852194,
-        "population": "halo",
-        "velocity_km_s": [
-          14.392574666592111,
-          125.40476789956,
-          -23.118114585948074
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd9680000000c",
@@ -563,11 +552,15 @@
         "initial_mass_msun": 5.758969783117937,
         "age_myr": 9012.347269301306,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -164.91454405149645,
           27.80832684260894,
           14.427553609799705
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "62005967fe00000b",
@@ -588,11 +581,15 @@
         "initial_mass_msun": 2.8417961257357636,
         "age_myr": 872.1914686577767,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -227.78897812383414,
           9.526150277280289,
           -5.08377441004571
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd957fe00000b",
@@ -613,36 +610,15 @@
         "initial_mass_msun": 2.8794365755735445,
         "age_myr": 2104.4148393648907,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -222.10642930400837,
           -36.75736414603227,
           11.73751562237422
-        ]
-      },
-      {
-        "id": "6200596800000029",
-        "designation": "GPG 000P00 D-41",
-        "position": {
-          "cell_ly": [
-            22,
-            25995,
-            22
-          ],
-          "offset_m": [
-            6963609109814885.0,
-            2501458245424698.0,
-            9225194525137544.0
-          ]
-        },
-        "layer": "d",
-        "initial_mass_msun": 2.7245018449935587,
-        "age_myr": 6343.489983844306,
-        "population": "old_thin_disc",
-        "velocity_km_s": [
-          -207.9449245917512,
-          35.270890651726525,
-          4.6857141871207695
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd95800000004",
@@ -663,11 +639,15 @@
         "initial_mass_msun": 3.048537909020415,
         "age_myr": 3162.3041995054323,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -259.3462971574013,
           5.415964243653631,
           -12.84799850712058
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "6200596800000019",
@@ -688,11 +668,15 @@
         "initial_mass_msun": 2.5225215296387655,
         "age_myr": 7561.43177411874,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -223.3671208345316,
           40.54167431005076,
           -4.053093490938099
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd967fe000025",
@@ -713,11 +697,15 @@
         "initial_mass_msun": 2.886317560002948,
         "age_myr": 11097.413773188497,
         "population": "thick_disc",
+        "placement": "field",
         "velocity_km_s": [
           -212.07849265371627,
           -28.779359167065643,
           72.35625657025047
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd967fe000003",
@@ -738,36 +726,15 @@
         "initial_mass_msun": 6.598563228477547,
         "age_myr": 2661.691270922395,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -212.77953269510414,
           -38.7391638511959,
           -1.292780335663071
-        ]
-      },
-      {
-        "id": "81ffb2e000000061",
-        "designation": "FPG 0Z0B00 E-97",
-        "position": {
-          "cell_ly": [
-            -13,
-            26026,
-            18
-          ],
-          "offset_m": [
-            5326141149629656.0,
-            1378010963763436.5,
-            9244906658619600.0
-          ]
-        },
-        "layer": "e",
-        "initial_mass_msun": 75.4099437644932,
-        "age_myr": 7878.734260367334,
-        "population": "old_thin_disc",
-        "velocity_km_s": [
-          -199.0883106828117,
-          -73.17360331338197,
-          7.009635978183511
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "62005957fe000006",
@@ -788,36 +755,15 @@
         "initial_mass_msun": 7.761722594194765,
         "age_myr": 8626.264309174507,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -229.6039575217818,
           57.3065267811146,
           -6.379845719333791
-        ]
-      },
-      {
-        "id": "61ffd96800000010",
-        "designation": "FPG 1Z0P00 D-16",
-        "position": {
-          "cell_ly": [
-            -3,
-            26018,
-            29
-          ],
-          "offset_m": [
-            5839284120992659.0,
-            643589714292508.2,
-            5134549882167604.0
-          ]
-        },
-        "layer": "d",
-        "initial_mass_msun": 3.749503317346491,
-        "age_myr": 39.957053284443035,
-        "population": "young_thin_disc",
-        "velocity_km_s": [
-          -248.90853234197874,
-          -7.710449693335435,
-          7.2546186757502085
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "620059580000001e",
@@ -838,11 +784,15 @@
         "initial_mass_msun": 3.9001805245058474,
         "age_myr": 3489.4460300867463,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -256.42779660806264,
           38.43091412913854,
           -1.1472002690026863
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd9680000001d",
@@ -863,11 +813,15 @@
         "initial_mass_msun": 6.2860056032008504,
         "age_myr": 7637.646318878792,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -226.5071416111133,
           33.6043777690768,
           -1.1963738544994327
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd96800000011",
@@ -888,11 +842,15 @@
         "initial_mass_msun": 3.2645229639429383,
         "age_myr": 2977.342709529489,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -231.72498609038158,
           9.100082409210241,
           -16.778318790865853
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd957fe00001e",
@@ -913,11 +871,15 @@
         "initial_mass_msun": 3.5076439094498695,
         "age_myr": 9050.840331439324,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -192.0465320213292,
           60.668125719648984,
           -33.4962923309111
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd96800000016",
@@ -938,11 +900,15 @@
         "initial_mass_msun": 4.021832160148823,
         "age_myr": 796.6737542178154,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -239.934712614729,
           26.781765508743355,
           5.813011441389288
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd967fe000024",
@@ -963,11 +929,15 @@
         "initial_mass_msun": 6.004564600672747,
         "age_myr": 7069.680947930195,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -223.33441740870612,
           65.26616551769669,
           -16.0397820899492
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "620059580000000b",
@@ -988,11 +958,15 @@
         "initial_mass_msun": 2.914913391298701,
         "age_myr": 1815.4689177118548,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -206.96732195890874,
           16.75119765810956,
           1.1215302420950641
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd96800000003",
@@ -1013,11 +987,15 @@
         "initial_mass_msun": 3.6244523748186106,
         "age_myr": 6534.055037007603,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -226.21477677128908,
           8.424035918049347,
           -23.441653719480538
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "6200596800000018",
@@ -1038,36 +1016,15 @@
         "initial_mass_msun": 2.974300078290767,
         "age_myr": 9739.142648026791,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -214.2111167578655,
           -39.40094806539574,
           15.630546235907646
-        ]
-      },
-      {
-        "id": "81ffb2a000000038",
-        "designation": "FPG 0Z0A00 E-56",
-        "position": {
-          "cell_ly": [
-            -7,
-            25983,
-            33
-          ],
-          "offset_m": [
-            7032145393065445.0,
-            5860822685855560.0,
-            1801325717136182.0
-          ]
-        },
-        "layer": "e",
-        "initial_mass_msun": 23.399182143175423,
-        "age_myr": 97.53591735380967,
-        "population": "young_thin_disc",
-        "velocity_km_s": [
-          -231.7052350199564,
-          0.7546162904199812,
-          3.8160986070970737
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "62005957fe000024",
@@ -1088,11 +1045,15 @@
         "initial_mass_msun": 5.70933463563163,
         "age_myr": 659.9046775083604,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -263.5040831482953,
           -11.703171920337372,
           -6.024680429469575
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd96800000015",
@@ -1113,11 +1074,15 @@
         "initial_mass_msun": 3.7771600803215684,
         "age_myr": 72.86316725598903,
         "population": "young_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -248.61421218485526,
           -7.750476697615878,
           -7.16893661658375
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "81ffb2dff0000017",
@@ -1135,14 +1100,18 @@
           ]
         },
         "layer": "e",
-        "initial_mass_msun": 16.822539365190107,
-        "age_myr": 9832.457564712746,
+        "initial_mass_msun": 11.758709646705906,
+        "age_myr": 9454.809063991552,
         "population": "old_thin_disc",
+        "placement": "retained",
         "velocity_km_s": [
           -223.48161226389135,
           -21.923127139274666,
           21.64909351599818
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "61ffd96800000013",
@@ -1163,11 +1132,15 @@
         "initial_mass_msun": 4.2503337356139514,
         "age_myr": 4810.720245966374,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -226.55242964564044,
           2.2901498741287964,
           -6.25458493237552
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "8200b2dff0000019",
@@ -1185,14 +1158,18 @@
           ]
         },
         "layer": "e",
-        "initial_mass_msun": 9.739257758396915,
-        "age_myr": 7909.271216167104,
+        "initial_mass_msun": 8.226436844568548,
+        "age_myr": 9838.545153805622,
         "population": "old_thin_disc",
+        "placement": "retained",
         "velocity_km_s": [
           -204.34658340023844,
           21.99513392345526,
           -5.730279049031305
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "6200596800000011",
@@ -1213,11 +1190,15 @@
         "initial_mass_msun": 3.656327034887574,
         "age_myr": 7501.191795873864,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -215.10324353021917,
           19.42515585570399,
           -9.843916428007066
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "6200596800000013",
@@ -1238,11 +1219,15 @@
         "initial_mass_msun": 2.6310216501508643,
         "age_myr": 7211.543879843585,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -215.80928859579709,
           -8.86961208200278,
           21.8971086822134
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "62005957fe00001c",
@@ -1263,11 +1248,15 @@
         "initial_mass_msun": 2.5580479646769967,
         "age_myr": 5586.9939970400055,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -216.06322340492102,
           28.012330404830504,
           17.78843417665365
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "8200b2dff0000000",
@@ -1279,20 +1268,24 @@
             -4
           ],
           "offset_m": [
-            7366734106802976.0,
-            4064445158492752.0,
-            3954669920619244.0
+            7086163017314446.0,
+            3982402405927890.0,
+            3944984985299360.0
           ]
         },
         "layer": "e",
-        "initial_mass_msun": 16.367408979643034,
-        "age_myr": 9734.499246502544,
+        "initial_mass_msun": 19.043950324673805,
+        "age_myr": 2255.0624386075438,
         "population": "old_thin_disc",
+        "placement": "displaced_remnant",
         "velocity_km_s": [
-          -194.7671139320341,
-          14.675444097485194,
-          1.3587958539301845
-        ]
+          -159.20406864487285,
+          25.0745558886052,
+          2.586384177488711
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "62005957fe00002b",
@@ -1313,11 +1306,15 @@
         "initial_mass_msun": 4.428599066302316,
         "age_myr": 5850.372615184057,
         "population": "old_thin_disc",
+        "placement": "field",
         "velocity_km_s": [
           -204.76035272535498,
           62.951522606743225,
           13.006997520212861
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       },
       {
         "id": "62005967fe000013",
@@ -1338,11 +1335,15 @@
         "initial_mass_msun": 2.6035766495457384,
         "age_myr": 10614.769423928557,
         "population": "thick_disc",
+        "placement": "field",
         "velocity_km_s": [
           -85.83779443903477,
           -35.868569344851394,
           8.210297466850252
-        ]
+        ],
+        "origin": {
+          "type": "grid"
+        }
       }
     ]
   }

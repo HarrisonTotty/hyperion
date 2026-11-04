@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 # features in range, epoch
 {
   "type": "response",
@@ -85,7 +85,7 @@
         "extent_ly": 26.907211220412645,
         "age_myr": 8.408509092144168,
         "mass_msun": 267.61955894113163,
-        "expected_members": 459.101930879694,
+        "expected_members": 424.67306095087673,
         "emission": null,
         "bubble_radius_ly": 378.17154755790216
       },
@@ -315,7 +315,7 @@
         "extent_ly": 15.607251366671505,
         "age_myr": 75.42755801673007,
         "mass_msun": 53.68786674197775,
-        "expected_members": 337.9205003535081,
+        "expected_members": 321.9507263322321,
         "emission": null,
         "bubble_radius_ly": null
       },
@@ -361,7 +361,7 @@
         "extent_ly": 22.6427678337899,
         "age_myr": 81.1536916207397,
         "mass_msun": 158.33859466338401,
-        "expected_members": 616.2176908460227,
+        "expected_members": 588.7022290949755,
         "emission": null,
         "bubble_radius_ly": null
       },
@@ -914,7 +914,7 @@
         "extent_ly": 26.907211220412645,
         "age_myr": 8.409509092144168,
         "mass_msun": 267.61602556202314,
-        "expected_members": 459.101930879694,
+        "expected_members": 424.67306095087673,
         "emission": null,
         "bubble_radius_ly": 378.1987004324199
       },
@@ -1144,7 +1144,7 @@
         "extent_ly": 15.607251366671505,
         "age_myr": 75.42855801673008,
         "mass_msun": 53.68628839462534,
-        "expected_members": 337.9205003535081,
+        "expected_members": 321.9507263322321,
         "emission": null,
         "bubble_radius_ly": null
       },
@@ -1190,7 +1190,7 @@
         "extent_ly": 22.6427678337899,
         "age_myr": 81.15469162073971,
         "mass_msun": 158.33617738710333,
-        "expected_members": 616.2176908460227,
+        "expected_members": 588.7022290949755,
         "emission": null,
         "bubble_radius_ly": null
       },
@@ -1687,7 +1687,7 @@
       "extent_ly": 26.907211220412645,
       "age_myr": 8.408609092144168,
       "mass_msun": 267.6192056021592,
-      "expected_members": 459.101930879694,
+      "expected_members": 424.67306095087673,
       "emission": null,
       "bubble_radius_ly": 378.17426290385214
     },
@@ -1712,7 +1712,7 @@
           "initial_mass_min_msun": 0.08,
           "initial_mass_max_msun": 0.5,
           "mean_mass_msun": 0.28767242113987773,
-          "expected": 41.129147953220915
+          "expected": 39.48848556526328
         },
         {
           "class": {
@@ -1725,7 +1725,7 @@
           "initial_mass_min_msun": 0.08,
           "initial_mass_max_msun": 0.5,
           "mean_mass_msun": 0.43150863170981657,
-          "expected": 17.62677769423754
+          "expected": 14.905129456905767
         },
         {
           "class": {
@@ -1738,7 +1738,7 @@
           "initial_mass_min_msun": 0.5,
           "initial_mass_max_msun": 0.75,
           "mean_mass_msun": 0.6244102617282977,
-          "expected": 25.52542383219185
+          "expected": 21.822009439365637
         },
         {
           "class": {
@@ -1751,7 +1751,7 @@
           "initial_mass_min_msun": 0.5,
           "initial_mass_max_msun": 0.75,
           "mean_mass_msun": 0.9366153925924465,
-          "expected": 10.939467356653651
+          "expected": 11.935560223518962
         },
         {
           "class": {
@@ -1764,7 +1764,7 @@
           "initial_mass_min_msun": 0.75,
           "initial_mass_max_msun": 2.5,
           "mean_mass_msun": 1.2474198491343977,
-          "expected": 53.58405584539156
+          "expected": 38.9285431509464
         },
         {
           "class": {
@@ -1777,7 +1777,7 @@
           "initial_mass_min_msun": 0.75,
           "initial_mass_max_msun": 2.5,
           "mean_mass_msun": 1.8711297737015966,
-          "expected": 22.964595362310668
+          "expected": 31.936783509738397
         },
         {
           "class": {
@@ -1789,8 +1789,8 @@
           },
           "initial_mass_min_msun": 2.5,
           "initial_mass_max_msun": 8.0,
-          "mean_mass_msun": 4.0935737605717115,
-          "expected": 10.712560348466178
+          "mean_mass_msun": 4.0910701842135815,
+          "expected": 3.9480508456522907
         },
         {
           "class": {
@@ -1802,8 +1802,8 @@
           },
           "initial_mass_min_msun": 2.5,
           "initial_mass_max_msun": 8.0,
-          "mean_mass_msun": 6.140360640857567,
-          "expected": 4.591097292199792
+          "mean_mass_msun": 6.136605276320372,
+          "expected": 10.253106738229267
         },
         {
           "class": {
@@ -1815,8 +1815,8 @@
           },
           "initial_mass_min_msun": 8.0,
           "initial_mass_max_msun": 22.37706829293803,
-          "mean_mass_msun": 12.48192646051746,
-          "expected": 1.9575416704063378
+          "mean_mass_msun": 11.672285007469934,
+          "expected": 0.18806305035678028
         },
         {
           "class": {
@@ -1828,8 +1828,8 @@
           },
           "initial_mass_min_msun": 8.0,
           "initial_mass_max_msun": 22.37706829293803,
-          "mean_mass_msun": 18.722889690776192,
-          "expected": 0.8389464301741448
+          "mean_mass_msun": 17.5084275112049,
+          "expected": 2.024059527232424
         },
         {
           "class": {
@@ -1842,7 +1842,7 @@
           "initial_mass_min_msun": 8.0,
           "initial_mass_max_msun": 150.0,
           "mean_mass_msun": 1.35,
-          "expected": 0.0003272845623221647
+          "expected": 0.000036797474994071596
         },
         {
           "class": {
@@ -1855,7 +1855,7 @@
           "initial_mass_min_msun": 8.0,
           "initial_mass_max_msun": 150.0,
           "mean_mass_msun": 2.0250000000000004,
-          "expected": 0.00014026481242378487
+          "expected": 0.000396038880038097
         },
         {
           "class": {
@@ -1867,8 +1867,8 @@
           },
           "initial_mass_min_msun": 0.08,
           "initial_mass_max_msun": 0.5,
-          "mean_mass_msun": 0.2495999068198409,
-          "expected": 250.66451240348493
+          "mean_mass_msun": 0.24678089429409228,
+          "expected": 232.05402412011279
         },
         {
           "class": {
@@ -1880,8 +1880,8 @@
           },
           "initial_mass_min_msun": 0.5,
           "initial_mass_max_msun": 0.75,
-          "mean_mass_msun": 0.6737856388026872,
-          "expected": 18.208429420979435
+          "mean_mass_msun": 0.6894780854208014,
+          "expected": 16.856551729364732
         },
         {
           "class": {
@@ -1893,8 +1893,8 @@
           },
           "initial_mass_min_msun": 0.75,
           "initial_mass_max_msun": 2.5,
-          "mean_mass_msun": 0.8813642117532596,
-          "expected": 0.3589077206022324
+          "mean_mass_msun": 0.9391007273788203,
+          "expected": 0.33226075783498743
         }
       ]
     }

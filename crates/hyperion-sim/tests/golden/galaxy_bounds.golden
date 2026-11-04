@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 # milky_way
 milky_way(0, 0, 0; 8).component[0] = 0x20aa4afdab8fa3ca  # 2.5101011791915438e-151
 milky_way(0, 0, 0; 8).component[1] = 0x20d910fdf2237143  # 1.9144045050522914e-150

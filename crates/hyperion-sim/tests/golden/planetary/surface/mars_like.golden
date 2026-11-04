@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 world mars_like level 7 cells 98304 climate cells 24576 craters 325
 header body system 0 index 2
 header radius m = 0x4149dc1e00000000  # 3389500.0

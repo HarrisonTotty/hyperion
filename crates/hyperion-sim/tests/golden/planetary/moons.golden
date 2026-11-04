@@ -1,4 +1,4 @@
-# generator_version = 26
+# generator_version = 27
 
 regular moons of jupiter, seed 0000000000000001
 drawn mass (M⊕) = 0x3fa245009971f916  # 0.035682696086029406
@@ -142,7 +142,7 @@ moonlets = 10
 moon 1 mass (M⊕) = 0x3f678a8f0b07f01a  # 0.0028736871538495136
 moon 1 resonance None
 moon 1 a (m) = 0x41a997c4ed2462f2  # 214688374.5710674
-moon 1 e = 0x3f84433cfc9d87ed  # 0.009893871745308725
+moon 1 e = 0x3f82cce8b1c00c6e  # 0.00917989532900362
 moon 1 i (rad) = 0x3f94a8d997348a9e  # 0.02017536149390741
 moon 1 node (rad) = 0x40172b72403bc7ec  # 5.792428020142307
 moon 1 periapsis (rad) = 0x40147f0ecb34ce1c  # 5.124079871271103
@@ -150,7 +150,7 @@ moon 1 mean anomaly (rad) = 0x400f68af9a600d88  # 3.92611618619566
 moon 2 mass (M⊕) = 0x3f81f26d369d89ac  # 0.008763173321942506
 moon 2 resonance None
 moon 2 a (m) = 0x41c2f33472a9503c  # 635857125.322761
-moon 2 e = 0x3f875a68ace4dfdb  # 0.011402910019214054
+moon 2 e = 0x3f852e1f226b54f5  # 0.010341876256840335
 moon 2 i (rad) = 0x3f8572132604081c  # 0.010471486661575873
 moon 2 node (rad) = 0x40126bff024e8545  # 4.605464969675556
 moon 2 periapsis (rad) = 0x4016dd45b07a5d8a  # 5.716086156338301
