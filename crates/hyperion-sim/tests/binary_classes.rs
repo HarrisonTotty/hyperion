@@ -442,20 +442,24 @@ fn pulsars_recycled_beside_heavy_companions_are_mildly_recycled() {
     );
 }
 
-/// P11.T4.l (ruling p11-supernova-pins of 2026-10-06): a kicked wide pair whose new orbit can
-/// interact is run from its collapse. Layer-E prior pair 35928 (8.30 + 5.88 M☉ at 56,573 d, e
-/// 0.47) is passed over by the pre-test to the age of the universe, its drawn periastron out of
-/// the giants' reach. Its primary's neutron star, born at 38.92 Myr, is kicked onto an orbit of e
-/// 0.994, whose periastron the companion reaches as a giant: the pre-test asked again of the new
-/// orbit passes, and the engine runs the pair from the collapse, to a common envelope at 72.33 Myr
-/// from the companion's first giant branch, after which its helium star feeds the neutron star.
-/// (The ruling's pair 6441, at version 21, went the same way; a search of 10⁵ layer-E prior pairs
-/// found seven such pairs at version 23.) A run to 60 Myr, before the giant, keeps the new orbit
-/// fixed: the same states to the collapse, record and orbit after it.
+/// P11.T4.l (ruling p11-supernova-pins of 2026-10-06), as P11.T10's fix leaves it: a kicked wide
+/// pair whose new orbit can interact. Layer-E prior pair 17367 (12.18 + 10.23 M☉ at 36,708 d,
+/// e 0.77) is passed over by the pre-test to the age of the universe, its drawn periastron out of
+/// the giants' reach. From 27 the engine runs it from its start, since its primary dies by the age
+/// it is run to (P11.T10's fix): every segment before the collapse is detached. Its primary's
+/// neutron star, born at 21.46 Myr, is kicked onto an orbit of e 0.975, whose periastron the
+/// companion reaches as a giant: a common envelope at 28.01 Myr from the companion's early AGB,
+/// after which its helium star feeds the neutron star. A run to 25 Myr, before the giant, is the
+/// full run's to then, bit for bit, states and record. (Until 27 the test read pair 35928, which
+/// P11.T4.l's closed form ran from its collapse on its drawn orbit: from 27 the engine's orbit,
+/// widened by the winds before the collapse, leaves it unbound by its kick. The ruling's pair 6441,
+/// at version 21, went the same way; a search of 10⁵ layer-E prior pairs found seven such pairs at
+/// version 23, 17367 among them, and three at 27, 4236, 17367 and 57273, of which 17367 alone is
+/// fed after its envelope.)
 #[test]
 fn a_kicked_wide_pair_that_closes_is_run_from_its_collapse() {
     let (lo, hi, _) = LAYERS[4];
-    let input = prior_pair(4, 35_928, (lo, hi));
+    let input = prior_pair(4, 17_367, (lo, hi));
     assert!(!can_interact(&input, AGE_OF_UNIVERSE));
     let timeline = evolve(&input, AGE_OF_UNIVERSE);
     let record = timeline.supernovae()[0];
@@ -464,38 +468,39 @@ fn a_kicked_wide_pair_that_closes_is_run_from_its_collapse() {
     assert!(record.bound(), "bound by the kick");
     assert!(record.kick().is_some_and(|k| k.speed().value() > 0.0));
     let collapse = record.age();
-    assert!((collapse.value() - 38.92e6).abs() < 1.0e4, "{collapse:?}");
+    assert!((collapse.value() - 21.46e6).abs() < 1.0e4, "{collapse:?}");
     let segments = timeline.segments();
-    assert_eq!(segments[0].kind(), SegmentKind::Detached);
-    assert_eq!(segments[0].end(), collapse);
-    let before = Years::new(collapse.value() * (1.0 - 1e-12));
-    assert_eq!(timeline.state_at(before).orbit(), Some(input.orbit()));
+    assert!(
+        segments
+            .iter()
+            .filter(|s| s.end() <= collapse)
+            .all(|s| s.kind() == SegmentKind::Detached),
+        "detached to the collapse"
+    );
     let after = *timeline.state_at(collapse).orbit().expect("bound");
-    assert!(after.eccentricity().value() > 0.99, "{after:?}");
+    assert!(after.eccentricity().value() > 0.97, "{after:?}");
     let envelope = segments
         .iter()
         .find(|s| s.kind() == SegmentKind::CommonEnvelope)
         .expect("the engine runs the pair to a common envelope");
     assert!(
-        envelope.start() > collapse && (envelope.start().value() - 72.33e6).abs() < 1.0e5,
+        envelope.start() > collapse && (envelope.start().value() - 28.01e6).abs() < 1.0e5,
         "{:?}",
         envelope.start()
     );
     let giant = timeline.state_at(Years::new(envelope.start().value() * (1.0 - 1e-9)));
-    assert_eq!(giant.stars()[1].phase(), Phase::FirstGiantBranch);
+    assert_eq!(giant.stars()[1].phase(), Phase::EarlyAgb);
     assert!(segments.iter().any(|s| s.kind()
         == SegmentKind::StableTransfer {
             donor: Component::Secondary
         }));
-    let early = evolve(&input, Years::new(6.0e7));
-    assert_eq!(early.segments().len(), 2);
-    assert_eq!(early.segments()[0].end(), collapse);
+    let until = Years::new(2.5e7);
+    let early = evolve(&input, until);
     for k in 0..=32_u32 {
-        let age = Years::new(collapse.value() * f64::from(k) / 32.0);
+        let age = Years::new(until.value() * f64::from(k) / 32.0);
         assert_eq!(early.state_at(age), timeline.state_at(age), "at {age:?}");
     }
     assert_eq!(early.supernovae(), &timeline.supernovae()[..1]);
-    assert_eq!(early.state_at(collapse).orbit(), Some(&after));
 }
 
 /// P11.T4.l (ruling p11-supernova-pins of 2026-10-06, section 3.4): the double-neutron-star class
@@ -656,12 +661,13 @@ fn sample_ages(timeline: &BinaryTimeline, until: Years) -> Vec<Years> {
 /// placement's miss, which a common envelope or T4.g's strip took off again, until the timeline's
 /// 64 segments capped it short of the pin. Now BSE's gate (`evolv2.f` 1480) refuses the swell: the
 /// helium star stays a helium star from its strip to its pin, where plan 06's neutron star is born
-/// bound, and the timeline is not capped.
+/// bound, and the timeline is not capped: 10 and 12 segments at 27 (16 and 18 until 27, whose
+/// engine moves both histories).
 #[test]
 fn a_helium_star_fed_less_than_its_wind_stays_a_helium_star() {
     let (lo, hi, _) = LAYERS[4];
     for (index, born, remnant, segments) in
-        [(1_723, 36.342e6, 1.188, 16), (8_002, 37.709e6, 1.208, 18)]
+        [(1_723, 36.342e6, 1.188, 10), (8_002, 37.709e6, 1.208, 12)]
     {
         let input = prior_pair(4, index, (lo, hi));
         let timeline = evolve(&input, AGE_OF_UNIVERSE);

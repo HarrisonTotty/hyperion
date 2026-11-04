@@ -1375,8 +1375,12 @@ mod tests {
         /// Pairs a star of which may have died suddenly by the window's end, which the bound
         /// therefore leaves unbounded (the module's item 3).
         collapsed: u64,
-        /// Pairs the bound calls `Detached` that the pre-test passes, described.
+        /// Pairs the bound calls `Detached` that the pre-test's lobe and decay tests pass,
+        /// described.
         missed: Vec<String>,
+        /// Pairs the bound calls `Detached` that the pre-test sends to the engine for its wind
+        /// alone (P11.T12's fix): the bound's `Detached` takes the wind's reach from 28.
+        wind_fed: u64,
     }
 
     impl Tally {
@@ -1386,6 +1390,7 @@ mod tests {
             self.detached += other.detached;
             self.collapsed += other.collapsed;
             self.missed.extend(other.missed);
+            self.wind_fed += other.wind_fed;
         }
 
         fn check(&mut self, input: &BinaryInput, age: f64) {
@@ -1402,6 +1407,12 @@ mod tests {
                 Tables::Skip,
             );
             let interacts = can_interact(input, at);
+            // The pre-test's lobe and decay tests alone, without the wind's onset.
+            let reaches = super::super::evolve::interacts(
+                input,
+                &super::super::evolve::own_members(input, age, None),
+                age,
+            );
             let collapsed = [m1, m2].iter().any(|&m| {
                 crate::stellar::binary::largest_radius_bound(m..=m, input.composition(), at)
                     .is_some_and(|bound| bound.may_have_collapsed())
@@ -1411,7 +1422,8 @@ mod tests {
             self.passed_over += u64::from(!interacts);
             if bound == Some(PairLight::Detached) {
                 self.detached += 1;
-                if interacts {
+                self.wind_fed += u64::from(interacts && !reaches);
+                if reaches {
                     self.missed.push(format!(
                         "{:.4} + {:.4} M_sun, periastron {:.4e} R_sun, e {:.3}, [Fe/H] {:.3}, \
                          age {age:.4e} yr",
@@ -1468,7 +1480,10 @@ mod tests {
     }
 
     /// Checks `per_layer` generated pairs of each stellar layer, printing each layer's shares, and
-    /// asserts that no `Detached` pair passes the pre-test.
+    /// asserts that no `Detached` pair passes the pre-test's lobe and decay tests. From 27 the
+    /// pre-test also sends a pair to the engine where its main-sequence star takes 10⁻⁴ M☉ of its
+    /// partner's wind (P11.T12's fix), which the bound's `Detached` does not bound until 28 (its
+    /// wind's reach, retargeted from 27): those pairs are counted apart, not asserted.
     fn no_detached_pair_interacts(per_layer: usize) {
         let galaxy = milky_way();
         let mut missed = 0;
@@ -1482,14 +1497,15 @@ mod tests {
                 let share = |k: u64| k as f64 / t.pairs as f64;
                 println!(
                     "layer {layer:?}, {class}: {} pairs; the pre-test passes over {} ({:.4}); \
-                     Detached {} ({:.4}), {:.4} of those passed over; a star may have collapsed \
-                     in {} ({:.4})",
+                     Detached {} ({:.4}), {:.4} of those passed over, {} of them wind-fed; a star \
+                     may have collapsed in {} ({:.4})",
                     t.pairs,
                     t.passed_over,
                     share(t.passed_over),
                     t.detached,
                     share(t.detached),
                     share(t.detached) / share(t.passed_over.max(1)),
+                    t.wind_fed,
                     t.collapsed,
                     share(t.collapsed),
                 );
@@ -1499,11 +1515,17 @@ mod tests {
                 missed += t.missed.len();
             }
         }
-        assert_eq!(missed, 0, "Detached pairs that the pre-test passes");
+        assert_eq!(
+            missed, 0,
+            "Detached pairs that the pre-test's lobe and decay tests pass"
+        );
     }
 
     /// P11.T17.a: 2,000 of the generator's pairs, 400 of each stellar layer, each at its record's
-    /// age and at a young one: no `Detached` pair passes `can_interact` at its window's end.
+    /// age and at a young one: no `Detached` pair passes `can_interact`'s lobe and decay tests at
+    /// its window's end. At 27, 67 of the 4,000 runs are `Detached` pairs the pre-test sends to the
+    /// engine for their wind alone, 27 of layer C's and 40 of layer D's at their records' ages
+    /// (P11.T12's fix; the bound takes the wind's reach from 28).
     #[test]
     fn detached_generated_pairs_are_passed_over() {
         no_detached_pair_interacts(400);

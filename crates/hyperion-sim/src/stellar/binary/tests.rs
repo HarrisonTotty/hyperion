@@ -2474,9 +2474,11 @@ fn wide_massive_pair(mix: &mut Mix, i: u32) -> (BinaryInput, f64) {
 
 /// The engine's history does not depend on the age it is run to (P11's build-age dependence,
 /// 2026-10-05): [`check_any_age`] over 60 pairs, between their stars' arrivals (P11.T4.i), and
-/// over six wide massive pairs whose collapses the closed form applies (P11.T4.l). No pair the
-/// pre-test passes over interacts before its age in the later run (P11.T4.j: the pre-test bounds
-/// the decay that magnetic braking, tides and gravitational radiation make).
+/// over six wide massive pairs. No pair the pre-test passes over interacts before its age in the
+/// later run (P11.T4.j: the pre-test bounds the decay that magnetic braking, tides and
+/// gravitational radiation make). From 27 a pair a star of which collapses by its age is the
+/// engine's (P11.T10's fix), so no pair is passed over through a collapse, as P11.T4.l's closed
+/// form passed them, and the wide massive pairs past their collapses are the same in both runs.
 #[test]
 fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
     // The runs between the arrivals are checked as the others are; none of them passes the
@@ -2485,13 +2487,15 @@ fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
     let [
         [same, passed, collapsed, missed],
         _,
-        [_, _, wide_collapsed, wide_missed],
+        [wide_same, _, wide_collapsed, wide_missed],
     ] = any_age_over(60, 0x0b1e_00a9);
     assert!(same > 10 && passed > 10, "{same} run, {passed} passed over");
-    assert!(
-        collapsed + wide_collapsed > 0,
+    assert_eq!(
+        collapsed + wide_collapsed,
+        0,
         "{collapsed} + {wide_collapsed} passed over through collapses"
     );
+    assert!(wide_same > 0, "{wide_same} wide massive pairs run");
     assert_eq!(missed + wide_missed, 0, "interactions missed");
 }
 
@@ -2576,7 +2580,10 @@ fn a_pair_s_first_sudden_death_is_either_star_s_collapse_and_no_white_dwarf_s_bi
 /// arrivals (P11.T4.i) and a hundred wide massive pairs (P11.T4.l). No interaction is missed
 /// (P11.T4.j): before the decay-aware pre-test, 4 of the first ages and 9 of the 721 between the
 /// arrivals were pairs under 1.4 d that braking or tides bring into contact or a merger before the
-/// age, which the drawn-orbit test passed over.
+/// age, which the drawn-orbit test passed over. From 27 the engine runs every pair a star of which
+/// collapses by its age (P11.T10's fix), so none is passed over through a collapse, and the wide
+/// massive pairs past their collapses are the same in both runs (restated with the fast suite at
+/// 27, not yet run there).
 #[test]
 #[ignore = "slow: about 3.6 × 10³ binaries run through the engine"]
 fn a_thousand_timelines_are_the_same_whatever_age_they_are_run_to() {
@@ -2598,9 +2605,14 @@ fn a_thousand_timelines_are_the_same_whatever_age_they_are_run_to() {
     );
     assert_eq!(missed_wide, 0, "{missed_wide} missed in the wide pairs");
     assert!(same_between > 0, "{same_between} run between arrivals");
+    assert_eq!(
+        collapsed + collapsed_wide,
+        0,
+        "{collapsed} + {collapsed_wide} passed over through collapses"
+    );
     assert!(
-        collapsed_wide > 10,
-        "{collapsed_wide} wide pairs through collapses"
+        same_wide > 10,
+        "{same_wide} wide pairs run through collapses"
     );
 }
 
@@ -3322,12 +3334,14 @@ fn a_core_stripped_past_its_end_is_held_until_its_pin() {
 /// has no life left at its stripping dies at once, through `Engine::die`. Two pairs of the pinned
 /// thousand ([`pinned_pair`]):
 ///
-/// - **0701** (28.20 + 11.45 M☉, 614 d, e 0.61, Z = 0.0005): the companion, grown to 27.07 M☉ by
-///   the primary's transfer, gives mass back to the primary's black hole from 14.30 Myr in its core
-///   helium burning, enters a common envelope around it at 14.4516 Myr, and collapses there to a
-///   10.696 M☉ black hole: recorded, bound, kick-free (a direct collapse), with no recoil. (Until
+/// - **0739** (34.46 + 12.07 M☉, 1,590 d, e 0.50, Z = 0.004): the companion, grown to 27.26 M☉ by
+///   the primary's transfer, gives mass back to the primary's black hole from 12.58 Myr in its core
+///   helium burning, enters a common envelope around it at 13.0375 Myr, and collapses there to a
+///   10.396 M☉ black hole: recorded, bound, kick-free (a direct collapse), with no recoil. (Until
 ///   generator version 26 the test read pair 0544, whose companion from 26, under the enforced
-///   Humphreys–Davidson limit, collapses detached at 8.4794 Myr, before any envelope.)
+///   Humphreys–Davidson limit, collapses detached at 8.4794 Myr, before any envelope; at 26 it read
+///   pair 0701, whose companion from 27 fills its lobe stably onto the black hole the wind has fed
+///   and collapses with no envelope, and 0739 is the one pair of the thousand that does so at 27.)
 /// - **0145** (1.22 + 0.77 M☉, 494 d, Z = 0.004): the primary's envelope at 4,377.6 Myr leaves a
 ///   0.524 M☉ helium star whose carbon–oxygen core is past its shell limit, a carbon–oxygen white
 ///   dwarf at once: the stripping's member dies now (before T4.k it was placed alive). The dwarf
@@ -3353,9 +3367,9 @@ fn a_core_stripped_past_its_end_dies_at_once() {
             .value()
     };
 
-    let collapse = evolve(&pinned_sample_pair(701), until);
+    let collapse = evolve(&pinned_sample_pair(739), until);
     let envelope = last_envelope(&collapse);
-    assert!((envelope / 14.4516e6 - 1.0).abs() < 1e-5, "{envelope} yr");
+    assert!((envelope / 13.0375e6 - 1.0).abs() < 1e-5, "{envelope} yr");
     let record = *collapse
         .supernovae()
         .iter()
@@ -3371,7 +3385,7 @@ fn a_core_stripped_past_its_end_dies_at_once() {
         crate::stellar::remnant::RemnantKind::BlackHole
     );
     assert!(
-        (record.remnant().mass().value() - 10.696).abs() < 1e-3,
+        (record.remnant().mass().value() - 10.396).abs() < 1e-3,
         "{:?}",
         record.remnant()
     );
@@ -3910,7 +3924,8 @@ fn the_decay_bound_never_passes_over_an_interaction() {
 /// tides that pass it to the orbit. A 0.3 + 0.3 M☉ pair at 0.2 d, below BSE's braking floor and
 /// inside its lobes on the drawn orbit, passes at 13.8 Gyr by gravitational radiation alone, which
 /// merges it in the engine at about 3.6 Gyr, and fails without it. A giant near its reach passes
-/// only with the wind's spin (P11.T4.l).
+/// the lobe and decay tests only with the wind's spin (P11.T4.l); from 27 its companion takes its
+/// wind (P11.T12's fix), which sends the pair to the engine with the switch off too.
 #[test]
 fn the_bound_follows_the_engines_switches() {
     let with = |params: BinaryParams| move |input: BinaryInput| input.with_params(params);
@@ -3949,19 +3964,29 @@ fn the_bound_follows_the_engines_switches() {
         "{merger:?}:\n{}",
         describe(&timeline)
     );
-    // P11.T4.l: a giant near its drawn reach, 1.5 + 0.45 M☉ at 2,300 d, passes by 13.8 Gyr only
-    // by the spin its wind takes beyond its inertia's share, which the tides restore from the
-    // orbit, and so only with the wind's spin switch on.
+    // P11.T4.l: a giant near its drawn reach, 1.5 + 0.45 M☉ at 2,300 d, passes the lobe and decay
+    // tests by 13.8 Gyr only by the spin its wind takes beyond its inertia's share, which the tides
+    // restore from the orbit, and so only with the wind's spin switch on. From 27 its companion
+    // takes 10⁻⁴ M☉ of that wind by then (P11.T12's fix), so the pre-test runs the pair either way.
     let no_wind_spin = with(BinaryParams {
         wind_angular_momentum: false,
         ..BinaryParams::GENERATOR
     });
+    let lobe_or_decay = |input: &BinaryInput| {
+        let at = until.value();
+        super::evolve::interacts(input, &super::evolve::own_members(input, at, None), at)
+    };
     let giant = || pair(1.5, 0.45, 2_300.0, 0.0, 0.02);
     assert!(!lobe_reached(&giant(), until));
+    assert!(lobe_or_decay(&generator(giant())));
+    assert!(
+        !lobe_or_decay(&no_wind_spin(giant())),
+        "without the wind's spin"
+    );
     assert!(can_interact(&generator(giant()), until));
     assert!(
-        !can_interact(&no_wind_spin(giant()), until),
-        "without the wind's spin"
+        can_interact(&no_wind_spin(giant()), until),
+        "wind-fed without the wind's spin"
     );
 }
 
@@ -4180,7 +4205,9 @@ fn a_transfers_last_step_applies_the_pin() {
 /// companion, its envelope taken, is a helium star, which transfers onto the primary's 1.51 M☉
 /// neutron star from 26.1266 Myr (case BB, ruling 129.4b) and dies in that transfer at 26.1370 Myr,
 /// as Tauris, Langer and Podsiadlowski (2015) find most such donors do. The transfer's last step
-/// lands on the death and acts on it: a 1.856 M☉ neutron star, bound beside the first. No merger
+/// lands on the death and acts on it: a 1.856 M☉ neutron star, whose 226 km/s kick unbinds the
+/// pair (re-measured at 27, whose engine feeds the first neutron star the companion's wind, 1.507
+/// to 1.514 M☉, P11.T4's neutron-star accretion; until 27 the pair stayed bound). No merger
 /// follows. Before T4.k the death was never seen, and the dead donor was read past its death on its
 /// closed forms. (Until P11.T4.o this test read pair 0741, whose helium star now collapses
 /// detached: F17's shorter steps leave its primary 0.005 M☉ heavier after its first transfer.)
@@ -4220,7 +4247,7 @@ fn a_transfers_last_step_applies_the_death() {
         "{:?}",
         record.remnant()
     );
-    assert!(record.bound(), "{}", describe(&timeline));
+    assert!(!record.bound(), "{}", describe(&timeline));
     assert_eq!(timeline.merger_age(), None, "{}", describe(&timeline));
 }
 
@@ -4415,9 +4442,12 @@ fn a_pinned_merger_product_leaves_its_main_sequence_at_the_primarys_end() {
     }
 }
 
-/// The pair of record 822C72E00000008C's primary in the universe LOOK72 (seed
+/// The pair of record 822C72E000000009's primary in the universe LOOK72 (seed
 /// `0xa49f_649b_ef43_4b20`, the full potential), as `SystemStars` runs it: its input, its timeline
-/// and the primary's model.
+/// and the primary's model. Until 27 it was record 822C72E00000008C, the look's own, which 27's
+/// grid no longer places (plan 08's displaced classes, P08.T12, and the field's share, P09.T2.c);
+/// 822C72E000000009, of the same cell, is the first of the cell's records whose pinned primary's
+/// main sequence ends so inside its case-A transfer.
 fn look72_case_a_pair() -> (
     BinaryInput,
     BinaryTimeline,
@@ -4429,7 +4459,7 @@ fn look72_case_a_pair() -> (
     use crate::stellar::system::SystemStars;
 
     let galaxy = Galaxy::new(crate::Seed::new(0xa49f_649b_ef43_4b20)).with_full_potential();
-    let id: crate::id::SystemId = "822c72e00000008c".parse().expect("a system ID");
+    let id: crate::id::SystemId = "822c72e000000009".parse().expect("a system ID");
     let record = resolve(&galaxy, id).expect("a grid system of LOOK72");
     let stars = SystemStars::generate(&galaxy, &record);
     let pair = stars
@@ -4453,17 +4483,16 @@ fn look72_case_a_pair() -> (
     (input, pair.timeline().clone(), primary.clone())
 }
 
-/// P11.T4.n (decision-observed-class-findings §B): record 822C72E00000008C of the universe LOOK72
-/// ([`look72_case_a_pair`]), a pinned primary of 10.486 M☉ at Z = 0.03
-/// whose companion keeps it on its main sequence through a case-A transfer. At its own track's
-/// main-sequence end, 21.8206 Myr, the segment closes inside the transfer, and the donor, a
-/// 6.674 M☉ main-sequence star the binary carries, goes on along the pin's own track at offset 0:
-/// a Hertzsprung-gap star of that mass with the track's 2.196 M☉ core (Mc,TMS at the track's own
-/// mass there, 10.15 M☉ after its wind; the ruling's ≈ 2.3 M☉ is that of 10.49 M☉). L steps up
-/// 0.766 dex there, from log L 3.517 to 4.282 (the ruling's 3.56 to 4.31). Case AB strips it to a
-/// naked helium star of 2.24 M☉ by 21.866 Myr, which collapses at its pin, 24.6187 Myr, into plan
-/// 06's 1.1927 M☉ neutron star with plan 06's kick, bit for bit. Before T4.n it collapsed from its
-/// main sequence, a 5.80 M☉ star at log L 3.31.
+/// P11.T4.n (decision-observed-class-findings §B), on record 822C72E000000009 of the universe
+/// LOOK72 ([`look72_case_a_pair`]; the finding's 822C72E00000008C until 27), a pinned primary of
+/// 10.734 M☉ at Z = 0.026 whose companion keeps it on its main sequence through a case-A transfer.
+/// At its own track's main-sequence end, 21.2574 Myr, the segment closes inside the transfer, and
+/// the donor, an 8.405 M☉ main-sequence star the binary carries, goes on along the pin's own track
+/// at offset 0: a Hertzsprung-gap star of that mass with the track's 2.274 M☉ core (Mc,TMS at the
+/// track's own mass there). L steps up 0.401 dex there, from log L 3.910 to 4.311. Case AB strips
+/// it to a naked helium star of 2.321 M☉ by 21.345 Myr (2.30 M☉ at 22 Myr), which collapses at its
+/// pin, 23.9374 Myr, into plan 06's 1.440 M☉ neutron star with plan 06's kick, bit for bit. (The
+/// finding's record, before T4.n, collapsed from its main sequence, a 5.80 M☉ star at log L 3.31.)
 #[test]
 fn a_pinned_case_a_donor_leaves_its_main_sequence_at_its_own_end() {
     use hyperion_testkit::float::bits;
@@ -4472,10 +4501,10 @@ fn a_pinned_case_a_donor_leaves_its_main_sequence_at_its_own_end() {
 
     let (input, timeline, primary) = look72_case_a_pair();
     let timeline = &timeline;
-    let what = || format!("822C72E00000008C: {}", describe(timeline));
+    let what = || format!("822C72E000000009: {}", describe(timeline));
     let (track, pin) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
     let end = track.main_sequence_end().expect("a main sequence").value();
-    assert!((end - 21.8206e6).abs() < 1.0e2, "{end}");
+    assert!((end - 21.2574e6).abs() < 1.0e2, "{end}");
     let closed = segment_ending_at(timeline, end);
     assert_eq!(
         closed.kind(),
@@ -4511,23 +4540,23 @@ fn a_pinned_case_a_donor_leaves_its_main_sequence_at_its_own_end() {
         [end * (1.0 - 1e-12), end].map(|t| timeline.state_at(Years::new(t)).stars()[0]);
     assert_eq!(was.phase(), Phase::MainSequence);
     assert_eq!(now.phase(), Phase::HertzsprungGap);
-    assert!((was.mass().value() - 6.674).abs() < 1e-3, "{was:?}");
+    assert!((was.mass().value() - 8.405).abs() < 1e-3, "{was:?}");
     assert!(
         (now.mass().value() / was.mass().value() - 1.0).abs() < 1e-9,
         "{now:?}"
     );
     let log_l = |s: &crate::stellar::StarState| crate::math::log10(s.luminosity().value());
-    assert!((log_l(&was) - 3.517).abs() < 1e-3, "{was:?}");
-    assert!((log_l(&now) - 4.282).abs() < 1e-3, "{now:?}");
-    assert!((now.core_mass().value() - 2.196).abs() < 1e-3, "{now:?}");
+    assert!((log_l(&was) - 3.910).abs() < 1e-3, "{was:?}");
+    assert!((log_l(&now) - 4.311).abs() < 1e-3, "{now:?}");
+    assert!((now.core_mass().value() - 2.274).abs() < 1e-3, "{now:?}");
     let stripped = timeline.state_at(Years::new(2.2e7)).stars()[0];
     assert_eq!(stripped.phase(), Phase::HeliumMainSequence, "{}", what());
     assert!(
-        (stripped.mass().value() - 2.24).abs() < 0.01,
+        (stripped.mass().value() - 2.30).abs() < 0.01,
         "{stripped:?}"
     );
     let at = pin.death.age().value();
-    assert!((at - 24.6187e6).abs() < 1.0e2, "{at}");
+    assert!((at - 23.9374e6).abs() < 1.0e2, "{at}");
     let collapse = primary_record(timeline);
     assert!(
         (collapse.age().value() - at).abs() <= 1e-9 * at,
@@ -4757,14 +4786,18 @@ fn assert_own_models(input: &BinaryInput, timeline: &BinaryTimeline) {
     }
 }
 
-/// P11.T4.l (ruling p11-supernova-pins of 2026-10-06, finding F3): a wide pair the pre-test passes
-/// over is unbound by its primary's collapse. 15 + 3 M☉ at P = 10⁵ d (about 23,760 R☉), circular,
-/// \[Fe/H\] 0 with the median draws, kicks off: the pinned primary collapses at plan 06's death
-/// (14.32 Myr) from its living 12.6 M☉ to a 1.43 M☉ neutron star, more than half the pair's mass,
-/// so the pair is `Disrupted` by the primary (Blaauw 1961). With no kick each star keeps the
-/// velocity it had in the barycentre's frame, on the orbit's rails widened by Jeans's mode, to
-/// 10⁻⁹; there is no recoil, and both stars are their own models throughout. Before T4.l the pair
-/// kept its drawn orbit through the collapse, with no record.
+/// P11.T4.l (ruling p11-supernova-pins of 2026-10-06, finding F3), as P11.T10's fix leaves it: a
+/// wide pair the pre-test passes over is unbound by its primary's collapse. 15 + 3 M☉ at
+/// P = 10⁵ d (about 23,760 R☉), circular, \[Fe/H\] 0 with the median draws, kicks off: the pinned
+/// primary collapses at plan 06's death (14.32 Myr) from its living 9.65 M☉ to a 1.43 M☉ neutron
+/// star, more than half the pair's mass, so the pair is `Disrupted` by the primary (Blaauw 1961).
+/// From 27 the engine runs the pair from its start, since its primary dies by the age it is run to
+/// (P11.T10's fix): its detached segments end at the primary's phases, and the orbit before the
+/// collapse is the engine's, widened by the winds to 33,845 R☉ (Jeans's mode gives 0.14% less;
+/// until 27 P11.T4.l's closed form kept the drawn orbit to the collapse). With no kick each star keeps
+/// the velocity it had in the barycentre's frame on that orbit, to 10⁻⁶; there is no recoil, and
+/// both stars are their own models throughout. Before T4.l the pair kept its drawn orbit through
+/// the collapse, with no record.
 #[test]
 fn a_wide_pair_is_unbound_by_its_primarys_collapse() {
     let params = BinaryParams {
@@ -4790,14 +4823,17 @@ fn a_wide_pair_is_unbound_by_its_primarys_collapse() {
     assert!(!record.bound());
     assert_eq!((record.recoil(), timeline.recoil()), (None, None));
     let kinds: Vec<SegmentKind> = timeline.segments().iter().map(Segment::kind).collect();
+    let (disrupted, detached) = kinds.split_last().expect("segments");
     assert_eq!(
-        kinds,
-        [
-            SegmentKind::Detached,
-            SegmentKind::Disrupted {
-                by: Component::Primary
-            }
-        ],
+        *disrupted,
+        SegmentKind::Disrupted {
+            by: Component::Primary
+        },
+        "{}",
+        describe(&timeline)
+    );
+    assert!(
+        detached.iter().all(|&k| k == SegmentKind::Detached),
         "{}",
         describe(&timeline)
     );
@@ -4808,42 +4844,56 @@ fn a_wide_pair_is_unbound_by_its_primarys_collapse() {
     let total = living + companion;
     let lost = total - (record.remnant().mass().value() + companion);
     assert!(lost > 0.5 * total, "{lost} of {total} M☉ lost");
-    assert_eq!(
-        before.orbit(),
-        Some(input.orbit()),
-        "the drawn orbit to the collapse"
+    // The engine's orbit before the collapse, widened by the winds about as Jeans's mode widens it.
+    let orbit = before.orbit().expect("bound before the collapse");
+    let (a0, e0) = axis_rsun_and_e(&before).expect("bound before the collapse");
+    let (drawn, _) = axis_rsun_and_e(&timeline.state_at(Years::new(0.0))).expect("drawn");
+    let f = (15.0 + 3.0) / total;
+    assert!(e0 < 1e-12, "circular: e {e0}");
+    assert!((a0 - 33_845.4).abs() < 0.1, "{a0} R☉");
+    assert!(
+        ((a0 / drawn) / f - 1.0).abs() < 5e-3,
+        "{a0} R☉ from {drawn} R☉, f {f}"
     );
     assert_eq!(timeline.state_at(record.age()).orbit(), None);
-    // Each star's velocity in the barycentre's frame before, on the widened rails.
-    let f = (15.0 + 3.0) / total;
-    let (_, v) = input
-        .orbit()
-        .relative_state_at(universe_time_of(&input, record.age().value()));
-    let v = v.metres_per_second().map(|c| c / f);
-    let speed = v.iter().map(|c| c * c).sum::<f64>().sqrt();
-    let expected = [
-        v.map(|c| -c * companion / total),
-        v.map(|c| c * living / total),
-    ];
-    for (shown, expected) in record.velocities().iter().zip(expected) {
-        for (a, b) in shown.metres_per_second().iter().zip(expected) {
-            assert!((a - b).abs() <= 1e-9 * speed, "{a} against {b} m/s");
-        }
+    // Each star's velocity in the barycentre's frame before, on that circular orbit: the relative
+    // speed is the orbit's, √(G M ÷ a), and the barycentre is at rest. (The engine's orbit carries
+    // its own phase, which the elements' mean anomaly at the epoch does not give.)
+    let [v0, v1] = record.velocities().map(|v| v.metres_per_second());
+    let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(total)).value();
+    let speed = (mu / orbit.semi_major_axis().value()).sqrt();
+    let relative: f64 = (0..3)
+        .map(|c| (v1[c] - v0[c]) * (v1[c] - v0[c]))
+        .sum::<f64>()
+        .sqrt();
+    assert!(
+        (relative / speed - 1.0).abs() < 1e-6,
+        "{relative} against {speed} m/s"
+    );
+    for c in 0..3 {
+        let momentum = living * v0[c] + companion * v1[c];
+        assert!(
+            momentum.abs() <= 1e-9 * speed * total,
+            "{momentum} M☉ m/s along {c}"
+        );
     }
     assert_own_models(&input, &timeline);
 }
 
-/// P11.T4.l: a direct-collapse primary beside a wide companion stays bound. 40 + 10 M☉ at
-/// P = 10⁵ d, circular, \[Fe/H\] 0 with the median draws: plan 06's 40 M☉ star, stripped by its
-/// own winds to a 9.83 M☉ helium star, collapses at 5.51 Myr into a black hole of its whole mass
-/// with no kick. BSE appendix A1 from the rails widened by Jeans's mode, by f = 50 ÷ 19.8 = 2.52
-/// for the winds of both stars, leaves the orbit at A1's a′ and e′ for the mass lost (none, to
-/// rounding, at version 23: the plan's "small mass lost" was the prototype's), here the widened
-/// 84,260 R☉ circular orbit, with a record and the pair's recoil. The stars stay their own
-/// models, and the companion's own collapse at 27.82 Myr is recorded on the orbit the first left.
-/// With kicks off that collapse, which loses most of the companion's mass but under half the
-/// pair's, keeps the pair bound: A1 from the first collapse's orbit, widened by Jeans's mode for the
-/// companion's wind since, gives Blaauw's a′ and e′ and the recoil v `m_BH` ΔM ÷ (M M′), to 10⁻⁹.
+/// P11.T4.l, as P11.T10's fix leaves it: a direct-collapse primary beside a wide companion stays
+/// bound. 40 + 10 M☉ at P = 10⁵ d, circular, \[Fe/H\] 0 with the median draws: plan 06's 40 M☉
+/// star, stripped by its own winds to a 9.83 M☉ helium star, collapses at 5.51 Myr into a black
+/// hole of its whole mass with no kick. From 27 the engine runs the pair from its start, since its
+/// primary dies by the age it is run to (P11.T10's fix), so the orbit before the collapse is the
+/// engine's, widened by the winds of both stars from the drawn 33,401 R☉ to 84,153 R☉ (Jeans's mode,
+/// f = 50 ÷ 19.8 = 2.52, gives 0.1% more; until 27 P11.T4.l's closed form widened the drawn rails
+/// by f at the collapse). BSE appendix A1 from that orbit leaves it at A1's a′ and e′ for the mass
+/// lost (none, to rounding, at version 23: the plan's "small mass lost" was the prototype's), with
+/// a record and the pair's recoil. The stars stay their own models, and the companion's own
+/// collapse at 27.82 Myr is recorded on the orbit the first left. With kicks off that collapse,
+/// which loses most of the companion's mass but under half the pair's, keeps the pair bound: A1
+/// from the engine's orbit just before it gives Blaauw's a′ and e′ and the recoil
+/// v `m_BH` ΔM ÷ (M M′), to 10⁻⁹.
 #[test]
 #[expect(
     clippy::many_single_char_names,
@@ -4865,8 +4915,10 @@ fn a_wide_black_hole_pair_stays_bound() {
     assert!(record.bound(), "{}", describe(&timeline));
     let before = timeline.state_at(Years::new(super::detached::last_living(d)));
     let after = timeline.state_at(record.age());
-    let (a0, e0) = axis_rsun_and_e(&before).expect("the drawn orbit");
-    assert!(e0 < 1e-12 && (a0 - 33_401.1).abs() < 0.1, "{a0} R☉, e {e0}");
+    let (drawn, _) = axis_rsun_and_e(&timeline.state_at(Years::new(0.0))).expect("drawn");
+    assert!((drawn - 33_401.1).abs() < 0.1, "{drawn} R☉");
+    let (a0, e0) = axis_rsun_and_e(&before).expect("the engine's orbit");
+    assert!(e0 < 1e-12 && (a0 - 84_153.2).abs() < 0.1, "{a0} R☉, e {e0}");
     let death = plan_06_star(&input).death().expect("a massive star dies");
     let p = death.progenitor();
     let living = p.helium_core_mass().value() + p.envelope_mass().value();
@@ -4874,15 +4926,22 @@ fn a_wide_black_hole_pair_stays_bound() {
     let total_after = record.remnant().mass().value() + before.stars()[1].mass().value();
     let f = 50.0 / total;
     assert!((f - 2.52).abs() < 0.01, "f {f}");
-    let (a1, e1) = blaauw_orbit_rsun(a0 * f, total, total_after).expect("bound");
+    assert!(
+        ((a0 / drawn) / f - 1.0).abs() < 5e-3,
+        "{a0} R☉ against {f} × {drawn}"
+    );
+    let (a1, e1) = blaauw_orbit_rsun(a0, total, total_after).expect("bound");
     let (a, e) = axis_rsun_and_e(&after).expect("bound after the collapse");
     assert!((a / a1 - 1.0).abs() < 1e-9, "a {a} R☉ against A1's {a1}");
     assert!((e - e1).abs() < 1e-9, "e {e} against A1's {e1}");
-    assert!((a - 84_263.4).abs() < 1.0, "{a} R☉");
+    assert!((a - 84_153.2).abs() < 1.0, "{a} R☉");
     let recoil = record.recoil().expect("a bound pair recoils");
     let lost = total - total_after;
-    let (_, v) = input.orbit().relative_state_at(universe_time_of(&input, d));
-    let speed = v.speed().value() / f;
+    let (_, v) = before
+        .orbit()
+        .expect("the engine's orbit")
+        .relative_state_at(universe_time_of(&input, d));
+    let speed = v.speed().value();
     let expected = speed * before.stars()[1].mass().value() * lost / (total * total_after);
     assert!(
         (recoil.speed().value() - expected).abs() <= 1e-9 * speed,
@@ -4917,15 +4976,13 @@ fn a_wide_black_hole_pair_stays_bound() {
         .progenitor();
     let living = p.helium_core_mass().value() + p.envelope_mass().value();
     let hole = first.remnant().mass().value();
-    let rails = hole + timeline.state_at(first.age()).stars()[1].mass().value();
     let (total, total_after) = (hole + living, hole + second.remnant().mass().value());
     let lost = total - total_after;
     assert!(
         lost > 0.25 * total && lost < 0.5 * total,
         "{lost} of {total} M☉ lost"
     );
-    let f = rails / total;
-    let (a1, e1) = blaauw_orbit_rsun(a0 * f, total, total_after).expect("bound");
+    let (a1, e1) = blaauw_orbit_rsun(a0, total, total_after).expect("bound");
     let (a, e) = axis_rsun_and_e(&after).expect("bound after the collapse");
     assert!((a / a1 - 1.0).abs() < 1e-9, "a {a} R☉ against A1's {a1}");
     assert!((e - e1).abs() < 1e-9, "e {e} against A1's {e1}");
@@ -4933,7 +4990,7 @@ fn a_wide_black_hole_pair_stays_bound() {
         .orbit()
         .expect("the first collapse's orbit")
         .relative_state_at(universe_time_of(&no_kicks, c));
-    let speed = v.speed().value() / f;
+    let speed = v.speed().value();
     let expected = speed * hole * lost / (total * total_after);
     let recoil = second.recoil().expect("a bound pair recoils");
     assert!(expected > 1.0e3, "{expected} m/s");
@@ -5048,10 +5105,15 @@ fn ages_around_collapses(timeline: &BinaryTimeline) -> Vec<Years> {
     ages.into_iter().map(Years::new).collect()
 }
 
-/// P11.T4.l's build-age contract: a pair the pre-test passes over at every age shows the drawn
-/// orbit up to its first collapse, and the closed form starts at each collapse, so a run to any age
-/// before, between or after its collapses is the run to 10⁸ years to then, bit for bit, with the
-/// same records. Over four wide pairs, kicks on and off, bound and unbound by each collapse.
+/// P11.T4.l's build-age contract, as P11.T10's fix leaves it: a pair the pre-test passes over at
+/// every age is run by the engine from its start to any age past its first collapse, so a run to
+/// an age between or after its collapses is the run to 10⁸ years to then, bit for bit, with the
+/// same records. A run to an age before the first collapse is passed over: its stars are their own
+/// models, as in the later run, with no record, on the drawn orbit where the later run's engine
+/// widens it by the winds (the lean of 2026-11-01 in `collapses.rs`: the pre-collapse orbit depends
+/// on the age the pair is run to; until 27 P11.T4.l's closed form kept the drawn orbit to the
+/// collapse in both runs). Over four wide pairs, kicks on and off, bound and unbound by each
+/// collapse.
 #[test]
 fn a_passed_over_pair_is_the_same_whatever_age_it_is_run_to() {
     let no_kicks = BinaryParams {
@@ -5076,10 +5138,21 @@ fn a_passed_over_pair_is_the_same_whatever_age_it_is_run_to() {
                 unbound += 1;
             }
         }
+        let first = late.supernovae()[0].age();
         for until in ages_around_collapses(&late) {
             assert!(!can_interact(&input, until), "to {until:?}");
             let early = evolve(&input, until);
-            assert_same_history(&early, &late, until);
+            if until < first {
+                assert_eq!(early.segments().len(), 1, "{}", describe(&early));
+                for k in 0..=64_u32 {
+                    let age = Years::new(until.value() * f64::from(k) / 64.0);
+                    let (a, b) = (early.state_at(age), late.state_at(age));
+                    assert_eq!(a.stars(), b.stars(), "at {age:?}");
+                    assert_eq!(a.orbit(), Some(input.orbit()), "at {age:?}");
+                }
+            } else {
+                assert_same_history(&early, &late, until);
+            }
             let reached: Vec<_> = late
                 .supernovae()
                 .iter()
@@ -5808,20 +5881,23 @@ fn a_fed_helium_star_swells_around_its_own_core() {
 
 /// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.1 item 3): a white dwarf fed hydrogen at
 /// 2.71 × 10⁻⁷ M☉ yr⁻¹ or more swells into a giant around itself. In pinned pair 0118 (2.64 +
-/// 2.42 M☉ at 605 d, Z = 0.004) the primary's 0.715 M☉ carbon–oxygen dwarf becomes a thermally
+/// 2.42 M☉ at 605 d, Z = 0.004) the primary's 0.720 M☉ carbon–oxygen dwarf becomes a thermally
 /// pulsing AGB star whose core is the dwarf's mass at the step's start, to 10⁻⁹, and whose
 /// envelope is the step's net gain. In pinned pair 0305 (3.30 + 2.22 M☉ at 76.9 d), whose dwarf
 /// was swelled bare before P11.T4.m, kept everything and grew to a 1.77 M☉ carbon–oxygen dwarf
-/// that collapsed at 526.2 Myr, the dwarf swells around its own 0.8036 M☉ at 532.19 Myr, fed by
-/// its companion's Hertzsprung gap, and no carbon–oxygen dwarf above the Chandrasekhar mass is
-/// shown. (Between P11.T4.m and P11.T4.o it swelled at 526.23 Myr around 1.2745 M☉, which one
+/// that collapsed at 526.2 Myr, the 0.790 M☉ dwarf, fed from 511.24 Myr by its companion's main
+/// sequence, swells around its own 0.9498 M☉ at 511.77 Myr, and no carbon–oxygen dwarf above the
+/// Chandrasekhar mass is shown. Both were re-measured at 27, whose heavy donors' dwarfs keep what
+/// they can burn and shed the rest in a wind (P11.T4's heavy donors): until 27 the two dwarfs
+/// swelled at 0.715 and 0.8036 M☉, 0305's at 532.19 Myr fed by its companion's Hertzsprung gap.
+/// (Between P11.T4.m and P11.T4.o 0305's swelled at 526.23 Myr around 1.2745 M☉, which one
 /// 1.57 Myr step of 0.49 M☉ had brought it to: finding F17.)
 #[test]
 fn a_fed_white_dwarf_swells_around_itself() {
     use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 
     let until = Years::new(1.2e10);
-    for (i, dwarf) in [(118, 0.715_027), (305, 0.803_613)] {
+    for (i, dwarf) in [(118, 0.720_355), (305, 0.949_758)] {
         let input = pinned_sample_pair(i);
         let timeline = evolve(&input, until);
         let swells = swells_of(&timeline);
@@ -6035,14 +6111,16 @@ fn a_fed_accretor_that_does_not_age_keeps_its_main_sequence() {
 /// landing (it closed one there before). Pinned pairs 0004, 0005, 0010 and 0015, each companion
 /// left on its own by its primary's death, have one, one, one and two segments fewer. From
 /// generator version 26 pair 0004's history moves: its companion's main sequence ends at
-/// 10.1938 Myr (10.1959 Myr until 26), in 13 segments (10); the other three are as they were.
+/// 10.1938 Myr (10.1959 Myr until 26), in 13 segments (10); the other three are as they were. From
+/// 27 pair 0005's timeline has 16 segments (15 until 27), its main sequence's end unmoved: its
+/// helium star's detached run to its pinned collapse is cut once more.
 #[test]
 fn an_unfed_main_sequence_ends_where_it_did() {
     use super::star::Member;
 
     for (i, end, segments) in [
         (4, 1.019_375_460_369_789_2e7, 13),
-        (5, 1.744_360_084_346_238_4e8, 15),
+        (5, 1.744_360_084_346_238_4e8, 16),
         (10, 7.287_576_551_262_443e7, 15),
         (15, 1.269_029_482_407_306e7, 14),
     ] {
@@ -6406,17 +6484,24 @@ fn merged_state(timeline: &BinaryTimeline) -> (BinaryState, f64) {
 /// P11.T4's dwarf limit: a merger's product around a carbon–oxygen core that no star of its kind
 /// can hold leaves the engine's own remnant. Pinned pairs 0252 and 0902 merge into a thermally
 /// pulsing AGB product around a carbon–oxygen core of 1.765 and 1.948 M☉ (which the held arm showed
-/// as a carbon–oxygen dwarf of that mass to 12 Gyr), which collapses at once to the 1.26 M☉
-/// neutron star of an accretion-induced collapse. The same pair twice gives the same timeline.
+/// as a carbon–oxygen dwarf of that mass to 12 Gyr). Their primaries' pins are pending, so from 27
+/// (P11.T4's pinned white dwarfs) each product is held at its core's mass to the pin, 28.414 and
+/// 33.894 Myr, where it collapses into plan 06's neutron star with plan 06's kick; until 27, under
+/// the dwarf limit alone, each collapsed at once to the 1.26 M☉ neutron star of an
+/// accretion-induced collapse. No pair of the pinned thousand leaves such a product unpinned at 27,
+/// so where no pin holds it the rule is checked on the cores themselves: the dwarf the fallback
+/// leaves is at or above the Chandrasekhar mass, which `Engine::finish_merger` collapses at once
+/// as an accreting one. The same pair twice gives the same timeline.
 #[test]
 fn an_unplaced_carbon_oxygen_core_collapses_at_the_chandrasekhar_mass() {
+    use super::dwarf_limit::{Unplaced, collapses, unplaced};
+    use super::star::Kind;
     use super::testing::shows_a_dwarf_above_the_limit;
-    use crate::stellar::remnant::RemnantKind;
 
     let until = Years::new(1.2e10);
-    for (name, input) in [
-        ("0252", pinned_sample_pair(252)),
-        ("0902", pinned_sample_pair(902)),
+    for (name, input, core, pin) in [
+        ("0252", pinned_sample_pair(252), 1.764_8, 28.4141e6),
+        ("0902", pinned_sample_pair(902), 1.947_7, 33.8942e6),
     ] {
         let timeline = evolve(&input, until);
         assert!(
@@ -6424,27 +6509,37 @@ fn an_unplaced_carbon_oxygen_core_collapses_at_the_chandrasekhar_mass() {
             "{name}: {}",
             describe(&timeline)
         );
-        let (_, age) = merged_state(&timeline);
-        let collapse = timeline
-            .supernovae()
-            .iter()
-            .find(|s| (s.age().value() - age).abs() <= 1e-9 * age)
-            .unwrap_or_else(|| {
-                panic!(
-                    "{name}'s product collapses at the merger: {}",
-                    describe(&timeline)
-                )
-            });
+        let (state, age) = merged_state(&timeline);
+        let held = state.stars()[0];
+        assert_eq!(held.phase(), Phase::ThermallyPulsingAgb, "{name}: {held:?}");
+        assert!(
+            (held.mass().value() - core).abs() < 1e-4,
+            "{name}: {held:?}"
+        );
+        assert!(
+            (held.core_mass().value() / held.mass().value() - 1.0).abs() < 1e-9,
+            "{name}: held at its core: {held:?}"
+        );
+        let at = super::evolve::pinned_death_age_years(&input).expect("a pinned primary");
+        assert!((at - pin).abs() < 1.0e2, "{name}: the pin at {at} yr");
+        assert!(at > age, "{name}: the pin after the merger at {age} yr");
+        let collapse = primary_record(&timeline);
+        assert!(
+            (collapse.age().value() - at).abs() <= 1e-9 * at,
+            "{name}: {collapse:?} against the pin at {at} yr"
+        );
+        let plan_06 = plan_06_star(&input);
+        assert_eq!(Some(collapse.remnant()), plan_06.remnant(), "{name}");
+        assert_eq!(collapse.kick(), plan_06.natal_kick(), "{name}");
         assert_eq!(
             collapse.remnant().kind(),
-            RemnantKind::NeutronStar,
+            crate::stellar::remnant::RemnantKind::NeutronStar,
             "{name}"
         );
-        assert_eq!(
-            collapse.remnant(),
-            crate::stellar::remnant::collapse::electron_capture_remnant(),
-            "{name}"
-        );
+        let Unplaced::WhiteDwarf { mass, .. } = unplaced(Kind::PulsingAgb, core, core, None) else {
+            panic!("{name}: a carbon–oxygen core leaves a dwarf");
+        };
+        assert!(collapses(mass), "{name}: a {mass} M☉ dwarf collapses");
         assert_eq!(evolve(&input, until), timeline, "{name}");
     }
 }
@@ -6453,9 +6548,13 @@ fn an_unplaced_carbon_oxygen_core_collapses_at_the_chandrasekhar_mass() {
 /// leaves the engine's own remnant. Pinned pair 0438 (13.7 + 3.7 M☉ at 16.7 d) and a 108 + 78 M☉
 /// pair at 8.67 d merge into a core-helium-burning product around a helium core of 3.22 and
 /// 28.6 M☉ (which the held arm showed as a carbon–oxygen dwarf), the naked helium star of that core,
-/// which then dies by plan 06; pinned pair 0787's product around a 0.457 M☉ carbon–oxygen core (a
-/// helium dwarf under the held arm) is a carbon–oxygen one. 0438 under the version's rules, the
-/// others under every 27 hold.
+/// which then dies by plan 06. A product around a carbon–oxygen core under 0.5 M☉ (a helium dwarf
+/// under the held arm) leaves a carbon–oxygen dwarf: pinned pair 0787's 0.457 M☉ core did under the
+/// dwarf limit alone, but under every 27 hold (on the train's base already) its 0.373 M☉ dwarf
+/// swells around itself beside its 1.87 M☉ companion and merges into a thermally pulsing AGB product
+/// around a 0.813 M☉ core, which its kind holds. No pair of the pinned thousand leaves such a
+/// product at 27, so the rule is checked on that core itself. 0438 under the version's rules, the
+/// other under every 27 hold.
 #[test]
 fn an_unplaced_helium_core_is_its_helium_star() {
     use super::testing::shows_a_dwarf_above_the_limit;
@@ -6499,13 +6598,26 @@ fn an_unplaced_helium_core_is_its_helium_star() {
             .unwrap_or_else(|| panic!("{name}'s helium star dies: {}", describe(&arm)));
         println!("{name}: a {core} M☉ helium star at {age} yr, then {death:?}");
     }
-    let input = pinned_sample_pair(787);
-    let (arm, _) = merged_state(&run(&input, every_27));
-    assert_eq!(arm.stars()[0].phase(), Phase::CarbonOxygenWhiteDwarf);
+    let (arm, _) = merged_state(&run(&pinned_sample_pair(787), every_27));
+    assert_eq!(arm.stars()[0].phase(), Phase::ThermallyPulsingAgb);
     assert!(
-        (arm.stars()[0].mass().value() - 0.457_2).abs() < 1e-4,
+        (arm.stars()[0].core_mass().value() - 0.813).abs() < 1e-3,
         "{arm:?}"
     );
+    for kind in [
+        super::star::Kind::PulsingAgb,
+        super::star::Kind::HeliumGap,
+        super::star::Kind::HeliumGiant,
+    ] {
+        assert_eq!(
+            super::dwarf_limit::unplaced(kind, 1.626, 0.457_2, None),
+            super::dwarf_limit::Unplaced::WhiteDwarf {
+                phase: Phase::CarbonOxygenWhiteDwarf,
+                mass: 0.457_2
+            },
+            "{kind:?}"
+        );
+    }
 }
 
 /// P11.T4's dwarf limit: a carbon–oxygen dwarf fed helium past the edge-lit detonation's 0.15 M☉
