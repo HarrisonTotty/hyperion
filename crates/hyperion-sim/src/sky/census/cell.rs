@@ -4280,6 +4280,12 @@ mod tests {
     /// bounded them. Since P11.T4.m (ruling p11-c2-swell of 2026-10-06) the accretor keeps its
     /// fraction burnt, the pair is not capped, and both stars have died by 8.7 Gyr: at both of the
     /// slow test's times no star shines, and none is brighter than its bound.
+    ///
+    /// Re-measured at 27: the pair light's layer D, refitted on 27's engine (P14.T54.c), answers
+    /// `None` for the pair of the record's sixth attempt (6.29 and 2.23 M☉, 3.84 au apart at
+    /// periastron), whose cell now holds a thin departing class, so at both times the record is
+    /// unbounded and the census generates it whole, under the widened envelope; its kept attempt,
+    /// the first, still shows no star.
     #[test]
     fn the_capped_bulge_record_is_bounded_star_by_star() {
         let galaxy = milky_way_galaxy();
@@ -4294,7 +4300,7 @@ mod tests {
         let check = check_realised_of(&[record]);
         assert_eq!(
             (check.systems, check.own + check.widened, check.unbounded),
-            (1, 0, 0),
+            (1, 0, 2),
             "{check:?}"
         );
     }
