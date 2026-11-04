@@ -149,6 +149,12 @@ const FIELD_TIMEOUT_MS = 60_000;
 const STREAM_TIMEOUT_MS = 90_000;
 
 /**
+ * The longest the occlusion's ridge check streams its pass on past its settle (plan R14, R14.T3.d),
+ * until nothing stands in; on the pod it rests well within it.
+ */
+const RIDGE_STREAM_MS = 30_000;
+
+/**
  * How long R14.T3.c's pass about a grounded craft may stream, milliseconds: its forced region to the
  * finest level, the part's alone (part 16).
  */
@@ -1672,7 +1678,11 @@ export async function checkTerrainFrame(
       `settled ${String(ridgeSettled.done)} (${ridgeSettled.state}), handed over ${String(behindRidge.handedOver)}, ${String(behindRidge.depthDraws)} depth draws: the edge's pixels ${String(behindRidge.marked)} (by row ${behindRidge.markedRows.slice(GRAZE_ROW - 3, GRAZE_ROW + 4).join(" ")} about its row); with no terrain depth, ${String(ridgeBare.marked)}; digests ${behindRidge.digest} with depth, ${ridgeBare.digest} without`,
     );
     // R14.T3.d over the ridge, through the renderer, as `VIEW` draws: the ground behind the ridge
-    // is hidden, so the pyramid refuses clusters, and the frame is still the one raster's.
+    // is hidden, so the pyramid refuses clusters, and the frame is still the one raster's. The
+    // ridge's settle holds its lanes at its first resting frame, whose ground is the survey edge's
+    // stand-ins, drawn by the lit mesh alone; this one streams it on, until nothing stands in, to
+    // the interior patches the cluster path draws.
+    const ridgeStreamed = await settled(ridgePass, pool, mask, graze, null, [], RIDGE_STREAM_MS);
     const overRidge = occlusionSummary(
       await occlusionRun(
         { engine, photoreal, canvas, pass: ridgePass, mask, view: graze },
@@ -1682,7 +1692,7 @@ export async function checkTerrainFrame(
     checks.check(
       "R14.T3.d over a ridge the renderer's two-pass occlusion refuses the clusters the ridge hides and draws the one raster's frame, its colour and depth byte for byte, where it drops the visibility and where it keeps it",
       ridgeSettled.done && overRidge.same && overRidge.refused !== null && overRidge.refused > 0,
-      overRidge.text,
+      `streamed on: ${ridgeStreamed.state}; ${overRidge.text}`,
     );
     // The cluster path is the setting's (plan R14, R14.T1.e's choice); the scene's depth is recorded
     // where it differs, its reference surfaces' depth hiding marks on their datum.
