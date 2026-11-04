@@ -457,8 +457,9 @@ export function bakedAsHaze(
  * Each bound is the case's extreme, rounded outward at its third figure (the test holds them to the
  * case): τ to 10.04 (blue), ḡ to 0.7323 (red), τ ḡ to 7.331 (red); its deck is conservative, so
  * ω̄ is 1 and τ (1 − ω̄) 0, and an envelope's floor is black. A Jupiter-class envelope lies outside
- * it, its chromophore absorbing (the hand Jupiter's τ (1 − ω̄) 0.065–0.49 and blue τ 17.0 above
- * its floor), and stays `ATMOSPHERE: APPROXIMATE` until a gate covering it passes.
+ * it, its chromophore absorbing (the hand Jupiter's τ (1 − ω̄) 0.025–0.19 and blue τ 17.0 above
+ * its floor, its chromophore at generator version 27's disc column), and stays
+ * `ATMOSPHERE: APPROXIMATE` until a gate covering it passes.
  */
 export const ENVELOPE_ROUTE_RANGE: ThickRouteRange = {
   mostOpticalDepth: 10.1,

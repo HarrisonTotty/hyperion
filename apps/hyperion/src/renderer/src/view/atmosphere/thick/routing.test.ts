@@ -346,6 +346,9 @@ describe("the envelope's gate (R08.T16.a.2)", () => {
     180_000,
   );
 
+  // Its chromophore is the fixture's, at the disc's column from generator version 27 (P14.T24.h.b
+  // part 6): τ(550) 0.117, 0.307 before. Measured 2026-11-04: τ (1 − ω̄) 0.025, 0.064 and 0.187 in
+  // red, green and blue above its floor (26's: 0.065–0.49), each over the range's 0.
   it("leaves the hand Jupiter out of the envelope's range: its chromophore absorbs", () => {
     const assembled = assembleMedium(recordInput(detailOf(handJupiterDetail())), {
       envelopes: true,
@@ -361,8 +364,11 @@ describe("the envelope's gate (R08.T16.a.2)", () => {
     expect([
       assembled.regime.kind,
       deckRouted(assembled.regime, assembled.medium, true, open),
-      regimeChannels(upper).map((c) => c.opticalDepth * (1 - c.singleScatteringAlbedo) > 0.05),
-    ]).toEqual(["cloudDeck", false, [true, true, true]]);
+      regimeChannels(upper).map(
+        (c) => Math.round(c.opticalDepth * (1 - c.singleScatteringAlbedo) * 1000) / 1000,
+      ),
+    ]).toEqual(["cloudDeck", false, [0.025, 0.064, 0.187]]);
+    expect(ENVELOPE_ROUTE_RANGE.mostAbsorbedDepth).toBe(0);
   }, 180_000);
 });
 
