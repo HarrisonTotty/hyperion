@@ -181,7 +181,11 @@ fn figures(census: &Census) -> CompactFigures {
 }
 
 /// The census's figures under every 27 hold, as measured (2026-11-01, at generator version 25,
-/// and again at 26).
+/// and again at 26). Not re-pinned at 27: the census rose to 1,738 members, 12 black holes, 2
+/// grown, 1 by a dwarf and 1,722 neutron stars on round 11's tree, and to 1,815, 12, 2, 1 and
+/// 1,799 under the heavy donors' white dwarfs' wind (2026-11-04), more than the white dwarfs'
+/// limit (P11.T4's `dwarf_limit`, its lane's 399 neutron stars to 1,190) and the wind's 77
+/// explain: a finding, for research, and the test fails until it is ruled.
 const CENSUS_FIGURES: CompactFigures = CompactFigures {
     members: 413,
     black_holes: 11,

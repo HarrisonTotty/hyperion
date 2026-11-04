@@ -603,14 +603,16 @@ fn the_engine_channels_against_the_engine_under_every_27_hold() {
 /// under every 27 hold, as measured (2026-11-01, re-measured once every 27 hold took P15.T11.b's
 /// orphan streams, whose galaxy draws this reference, and again once it took P11.T4's neutron-star
 /// accretion and P11.T6's Type Ia explosion together, and P11.T4's heavy donors; at generator
-/// versions 25 and 26, measured again), all over P15.T10.b's 3.1: a finding, for P15.T10.b's fit.
+/// versions 25 and 26, measured again; and on 2026-11-04 once the heavy donors' white dwarfs blew
+/// their excess off rather than swell and merge, which the engine's reference reads), all over
+/// P15.T10.b's 3.1: a finding, for P15.T10.b's fit.
 /// Version 26's two channels read 187, 153 and 289 here, and 14.2, 12.1 and 16.0 at an effective
 /// 73: the dynamical channel takes the mass ratio's from 153 to 62 (167 to 68 at 25, 170 to 61 at
 /// 24); the masses' stay high, the engine holding 13% of its primaries in layers D and E against
 /// the class's 1.3% and (at 24) its giant-branch donors heavier (median 1.69 M☉) than the class's
 /// at the turn-off.
 const PINNED_CHI_SQUARE: [f64; 3] = [
-    220.684_057_012_801_25,
-    61.883_954_795_534_14,
-    317.196_346_698_717_43,
+    211.460_643_010_974_56,
+    62.784_470_096_646_94,
+    310.649_928_385_407_6,
 ];

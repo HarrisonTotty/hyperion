@@ -19,7 +19,9 @@
 //! The heavy donors' white dwarfs' wind (2026-11-04) moved this module's pins, the paper's
 //! cataclysmic variable's tests under every 27 hold
 //! (`the_papers_cataclysmic_variable_reproduces_its_sequence_under_every_27_hold` and
-//! `the_papers_cataclysmic_variable_is_one_under_every_27_hold`) and the slow census.
+//! `the_papers_cataclysmic_variable_is_one_under_every_27_hold`), and of the slow tests the census
+//! here and the engine channels' chi-squares, re-pinned (their pins were stale on the tree before
+//! it too), and the neutron-star census, whose rise waits for a ruling.
 
 use super::*;
 use crate::GENERATOR_VERSION;
