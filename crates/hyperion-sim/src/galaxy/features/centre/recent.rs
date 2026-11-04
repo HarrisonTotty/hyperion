@@ -1,7 +1,6 @@
 //! The galactic centre's recently dead and its luminous blue variables (plan 09, P09.T36.b), on
-//! its feature-level list after the tidal disruptions' victims, from index N + 1, under P09.T36's
-//! hold (`FEATURE_CLASSES_VERSION`), and plan 11's binary classes after them, under P11.T8.f's
-//! (`centre::binaries`).
+//! its feature-level list after the tidal disruptions' victims, from index N + 1, from generator
+//! version 27, and plan 11's binary classes after them (P11.T8.f, `centre::binaries`).
 //!
 //! # The classes
 //!
@@ -110,7 +109,7 @@ pub(crate) struct CentreRecent {
 
 impl CentreRecent {
     /// The centre's recent classes in `galaxy`, whose centre is `model` and whose victims are
-    /// `victims`: none under the hold's held arm.
+    /// `victims`: none where the features list no class (the tests' reference alone).
     ///
     /// # Panics
     ///
@@ -539,8 +538,8 @@ pub(crate) fn forecast_candidates(
 }
 
 /// The member at the centre's list index `index` past its victims, if a recent class's test keeps
-/// it, or plan 11's binary class's draws and test (P11.T8.f): none under both holds' held arms,
-/// for an index before the classes' or past them.
+/// it, or plan 11's binary class's draws and test (P11.T8.f): none where the features list no
+/// class, for an index before the classes' or past them.
 #[must_use]
 pub(crate) fn recent_member(
     galaxy: &Galaxy,
@@ -743,8 +742,9 @@ pub(crate) fn list_claims(galaxy: &Galaxy, member: &CentreMemberRecord) -> bool 
 }
 
 /// Whether the centre's band-E cells give the list the members [`claimed_at_centre`] claims: a
-/// member of a young class (`component`) under the hold's new arm, the one switch the list's
-/// classes read too, so that the list holds a class exactly where the cells carve it.
+/// member of a young class (`component`) where the galaxy's features list their classes (every
+/// version's; [`FeatureClassesRules`]), the one switch the list's classes read too, so that the
+/// list holds a class exactly where the cells carve it.
 #[must_use]
 pub(crate) fn centre_cells_claim(galaxy: &Galaxy, component: u8) -> bool {
     match galaxy.rules().feature_classes {

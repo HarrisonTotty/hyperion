@@ -21,7 +21,7 @@
 //!   motion plus its own (P09.T10), against the unpadded radius. Members not yet born at that time
 //!   (a young nursery's, drawn with ages from −H) are dropped.
 //!
-//! - **The lists** (P09.T37). Under P09.T36's hold (`FEATURE_CLASSES_VERSION`) a feature's
+//! - **The lists** (P09.T37). From generator version 27 (P09.T36) a feature's
 //!   feature-level list holds its recent classes, the recently dead and the luminous blue
 //!   variables its band-E cells give up, and from 27 (P11.T8.f)
 //!   plan 11's binary classes after them, whose hosts the catalogue's classes give up; an
@@ -510,11 +510,11 @@ impl<'a> FeatureMemberSource<'a> {
     /// order, each with its interior where its nested grid may meet the sphere: those whose grid's
     /// reach bound does ([`FeatureInteriorCache::grid_reach`]; P09.T40.a). A grid that misses the
     /// sphere has no cell touching it, so its feature adds nothing from its cells to the census or
-    /// the hits, and its interior is not built. Under P09.T36's held arm, `lists`, only the
-    /// features with an interior are given, since nothing else of theirs is read; under its new
-    /// arm the features are those whose reach touches the sphere of `listed` about `centre`, at
-    /// least `radius`, since a list's dead may lie farther out than its feature's members
-    /// ([`lists_lookup_radius`]).
+    /// the hits, and its interior is not built. Where `lists` is [`FeatureClassesRules::Unlisted`]
+    /// only the features with an interior are given, since nothing else of theirs is read; where
+    /// it is [`FeatureClassesRules::Listed`] the features are those whose reach touches the sphere
+    /// of `listed` about `centre`, at least `radius`, since a list's dead may lie farther out than
+    /// its feature's members ([`lists_lookup_radius`]).
     fn near(
         &self,
         galaxy: &Galaxy,
@@ -812,8 +812,8 @@ fn lists_lookup_radius(galaxy: &Galaxy, sphere: &QuerySphere) -> LightYears {
 pub const LISTED_DEATH_REACH: LightYears = LightYears::new(2.0 * LIFETIME_REACH.value());
 
 /// How far from its candidate's line a listed core collapse's remnant may lie in `galaxy`:
-/// [`LISTED_DEATH_REACH`] under P09.T36's new arm; nothing under its held arm, whose lists hold no
-/// recent class.
+/// [`LISTED_DEATH_REACH`] where its features list their recent classes (every version's); nothing
+/// where they list none.
 #[must_use]
 pub(crate) fn death_reach(galaxy: &Galaxy) -> LightYears {
     match galaxy.rules().feature_classes {

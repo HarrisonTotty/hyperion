@@ -21,8 +21,8 @@
 //!   its disruption not yet passed, is propagated on its own parabola and tested there, unless its
 //!   reach ([`TidalDisruptionVictim::reach_at`](super::events::victims::TidalDisruptionVictim::reach_at),
 //!   below) misses the sphere.
-//! - **The recent entries** (P09.T37). After the victims, under P09.T36's hold
-//!   (`FEATURE_CLASSES_VERSION`), the list holds the recently dead and the luminous blue variables
+//! - **The recent entries** (P09.T37). After the victims, from generator version 27 (P09.T36),
+//!   the list holds the recently dead and the luminous blue variables
 //!   that the band-E cells give up, and from 27 (P11.T8.f)
 //!   plan 11's binary classes after them, which are placed the same way, each counted in the
 //!   layers its class's members can be of. The census adds each class's expected candidates times the

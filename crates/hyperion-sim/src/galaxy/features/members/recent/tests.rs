@@ -1,5 +1,7 @@
-//! The tests of P09.T36's hold, `FEATURE_CLASSES_VERSION` (decision-galaxy-25-train §1.5 and §1.6),
-//! and of the recent classes of catalogue features under every 26 hold.
+//! The tests of the recent classes of catalogue features (plan 09, P09.T36, from generator version
+//! 27; decision-galaxy-25-train §1.5 and §1.6), under every 26 hold with its retargets, against the
+//! features without their lists where a test measures what the lists take
+//! ([`FeatureClassesRules::Unlisted`]).
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,7 +12,6 @@ use hyperion_testkit::lcg::Lcg;
 use hyperion_testkit::order::assert_order_independent;
 
 use super::*;
-use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::coords::GalacticDisplacement;
 use crate::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
@@ -52,7 +53,7 @@ fn listed() -> &'static Galaxy {
     GALAXY.get_or_init(|| milky_way(rules_26()))
 }
 
-/// The same galaxy under every 26 hold but this one: the held arm.
+/// The same galaxy with features that list no class: the reference without the lists.
 fn held() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
@@ -108,55 +109,6 @@ fn list_id(feature: &FeatureRecord, index: u16) -> FeatureMemberId {
         MemberSlot::FeatureLevel { index },
     )
     .unwrap()
-}
-
-/// P09.T36 is held until the 26 → 27 bump: the rules in force are version 26's and before, under
-/// which no feature lists a recent class.
-#[test]
-fn the_feature_classes_are_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < FEATURE_CLASSES_VERSION,
-        "the 26 → 27 bump puts P09.T36 on the record: catalogue features and the centre list \
-         their recently dead and their luminous blue variables, and their band-E cells give them \
-         up. Delete `FEATURE_CLASSES_VERSION`, `FeatureClassesRules` with its `Unlisted` arm, \
-         `GalaxyRules::feature_classes`, the `match`es in `FeatureStars::listing`, \
-         `FeatureStars::claiming` and the centre's list, and this test, in the bump's own \
-         checkpoint commit, blessed at 25 (§1.6, C2)"
-    );
-    assert_eq!(
-        GalaxyRules::of_version(GENERATOR_VERSION).feature_classes,
-        FeatureClassesRules::Unlisted
-    );
-}
-
-/// The held arm is version 25's: a nursery that lists its classes under every 26 hold lists none
-/// under every 26 hold but this one, its list is index 0 alone, its interior claims no member, and
-/// the centre lists nothing past its victims.
-#[test]
-fn the_held_arm_lists_nothing_and_claims_nothing() {
-    let (off, on) = (held(), listed());
-    let features: Vec<FeatureRecord> = FeatureCatalogue::walk_process(on, FeatureProcess::Nursery)
-        .filter(|f| !recent_classes(on, f).is_empty())
-        .take(16)
-        .collect();
-    assert_eq!(features.len(), 16);
-    for feature in &features {
-        assert_eq!(
-            recent_classes(off, feature),
-            Vec::new(),
-            "{:?}",
-            feature.id()
-        );
-        let list = FeatureLevelList::of(off, feature);
-        assert_eq!(list.len(), 1);
-        assert_eq!(list.recent_entries(off).count(), 0);
-        assert_eq!(FeatureStars::listing(off, feature), None);
-        assert_eq!(FeatureStars::claiming(off, feature), None);
-        assert!(FeatureStars::claiming(on, feature).is_some());
-    }
-    let model = off.centre().unwrap();
-    let recent = CentreRecent::new(off, model, victim_count(off).unwrap());
-    assert_eq!(recent.expected(), Vec::new());
 }
 
 /// Design note 16's order: a nursery's classes are a run of `CORE_COLLAPSE`, `TYPE_IA` and
@@ -266,9 +218,9 @@ fn chart(galaxy: &Galaxy, feature: &FeatureRecord) -> Vec<SystemId> {
     shells
 }
 
-/// `feature`'s band-E cells under the held arm (`off`) against the new (`on`): each member the
+/// `feature`'s band-E cells without the lists (`off`) against with them (`on`): each member the
 /// cells' bit for bit where [`claimed_by`] claims it for no class, and none where it does, and no
-/// member of the new arm's cells claimed. Its members and those claimed.
+/// member of `on`'s cells claimed. Its members and those claimed.
 fn cells_against_the_list(off: &Galaxy, on: &Galaxy, feature: &FeatureRecord) -> (u32, u32) {
     let stars = FeatureStars::of(on, feature).unwrap();
     let (cells_off, cells_on) = (
@@ -470,7 +422,7 @@ fn within(centre: &GalacticPosition, reach: LightYears, lcg: &mut Lcg) -> Galact
 /// P09.T38's complementarity between a feature's band-E cells and its list, over the nurseries
 /// in the catalogue's walk order whose members' ages a core collapse or a variable can have:
 ///
-/// - **The cells**, 10⁴ band-E members drawn under the held arm: under the new arm each is the
+/// - **The cells**, 10⁴ band-E members drawn without the lists: with them each is the
 ///   cells' bit for bit where [`claimed_by`] claims it for no class, and no member of the cells
 ///   where it does. They are claimed rarely, and by a core collapse almost never: a bound
 ///   cluster's cells keep a remnant only if its kick leaves it bound (`remnant_attempt_fits`), so
@@ -540,7 +492,7 @@ fn list_against_its_claims(
 }
 
 /// [`the_cells_and_the_list_are_complementary_over_ten_thousand_members`], in `on` against `off`,
-/// its held arm.
+/// the reference without the lists.
 fn complementary_over_ten_thousand_members(off: &Galaxy, on: &Galaxy) {
     const MEMBERS: u32 = 10_000;
     let mut lcg = Lcg::new(0x0936_0000);

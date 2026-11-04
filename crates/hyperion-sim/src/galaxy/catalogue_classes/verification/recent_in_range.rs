@@ -46,7 +46,7 @@ use crate::galaxy::features::centre::recent::{CentreRecent, TracerProfiles};
 use crate::galaxy::features::centre::{CentreMemberSource, CentrePath, KeepCentreOrbits};
 use crate::galaxy::features::ids::{FeatureKind, FeatureProcess};
 use crate::galaxy::features::members::level_list::registered_classes;
-use crate::galaxy::features::members::recent::{FeatureClassesRules, RecentClass, moved};
+use crate::galaxy::features::members::recent::{RecentClass, moved};
 use crate::galaxy::features::members::{
     FeatureLevelList, FeatureMemberSource, KeepInteriors, resolve_member,
 };
@@ -731,18 +731,13 @@ fn assert_no_faults(what: &str, inside: usize, faults: &[String]) {
 
 /// Every 26 hold: the features' recent entries, through the features' members, the one source
 /// registered beside the grid at 26 (module documentation). Their IDs resolve through
-/// `resolve_member`. Should the features' lists be held to 27 (`FEATURE_CLASSES_VERSION`), no
-/// feature lists an entry at 26, and none is lost.
+/// `resolve_member`.
 #[test]
 #[ignore = "slow: range queries about four features' lists at three times under every 26 hold"]
 fn every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold() {
     with_every_26_hold_with_its_retargets(|| {
         let galaxy = milky_way(GalaxyRules::every_26_hold_with_its_retargets());
         let asked = features_asked(&galaxy, Kind::Recent);
-        if galaxy.rules().feature_classes == FeatureClassesRules::Unlisted {
-            assert_eq!(asked, Vec::new(), "no feature lists a recent class");
-            return;
-        }
         with_served(&galaxy, |sources, reads| {
             assert_eq!(sources.len(), 1, "at 26 the features' members alone");
             let (inside, faults) =

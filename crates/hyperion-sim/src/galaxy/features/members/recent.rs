@@ -1,6 +1,6 @@
 //! The recently dead and the luminous blue variables among a catalogue feature's members, on its
 //! feature-level list (plan 09, P09.T36.a; the globulars' Type Ia of P09.T36.b; the luminous blue
-//! variables' feature half, P09.T43), from generator version 27 (`FEATURE_CLASSES_VERSION`).
+//! variables' feature half, P09.T43), from generator version 27.
 //!
 //! # The classes
 //!
@@ -64,7 +64,6 @@
 
 use std::sync::OnceLock;
 
-use crate::GeneratorVersion;
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::Population;
@@ -107,26 +106,16 @@ use crate::units::{
 use super::MemberRecord;
 use super::level_list::ListClass;
 
-/// The generator version from which a catalogue feature lists its recently dead and its luminous
-/// blue variables, and its band-E cells give them up (plan 09, P09.T36; the hold of
-/// [`FeatureClassesRules`]).
-///
-/// Below it every galaxy built by `Galaxy::from_params` takes the held arm,
-/// [`FeatureClassesRules::Unlisted`], the code of version 25 verbatim: no class is registered on a
-/// feature's list and the cells claim nothing. The tests reach the new arm through a galaxy built
-/// under every 27 hold (`GalaxyRules::every_27_hold`). The bump to 27 deletes this hold,
-/// [`FeatureClassesRules`] with its `Unlisted` arm, `GalaxyRules::feature_classes`, the `match`es
-/// in [`FeatureStars::listing`], [`FeatureStars::claiming`], the features' source's (P09.T37) and
-/// the centre's list, and the tripwire
-/// (`the_feature_classes_are_held_only_until_the_27_bump`).
-pub(crate) const FEATURE_CLASSES_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// Whether catalogue features list their recently dead (the hold of [`FEATURE_CLASSES_VERSION`]).
+/// Whether catalogue features list their recently dead and their luminous blue variables, and
+/// their band-E cells give them up (plan 09, P09.T36, on the record from generator version 27):
+/// every version's features do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum FeatureClassesRules {
-    /// Version 25's and before: no feature lists a class, and the cells claim no member.
+    /// No feature lists a class, and the cells claim no member: which no version's galaxy takes.
+    /// The tests' reference for what the lists hold (P09.T38's complementarity, the lists'
+    /// budgets), and the features' source's lookup of their interiors alone.
     Unlisted,
-    /// Version 26's: the classes of the module documentation, and the cells' claim.
+    /// Every version's: the classes of the module documentation, and the cells' claim.
     Listed,
 }
 
@@ -219,8 +208,8 @@ pub(crate) struct FeatureStars {
 }
 
 impl FeatureStars {
-    /// The stars of `feature` whose list holds its recent classes: under the hold's new arm, a
-    /// feature [`of`](Self::of) gives.
+    /// The stars of `feature` whose list holds its recent classes: a feature [`of`](Self::of)
+    /// gives, where the galaxy's features list them (every version's; [`FeatureClassesRules`]).
     #[must_use]
     pub(crate) fn listing(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
         match galaxy.rules().feature_classes {
@@ -229,8 +218,9 @@ impl FeatureStars {
         }
     }
 
-    /// The stars of `feature` whose band-E cells give up the members [`claimed_by`] claims: under
-    /// the hold's new arm, a feature that lists the classes, which a globular's members never are.
+    /// The stars of `feature` whose band-E cells give up the members [`claimed_by`] claims: where
+    /// the galaxy's features list the classes, a feature that lists them, which a globular's
+    /// members never are.
     #[must_use]
     pub(crate) fn claiming(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
         match galaxy.rules().feature_classes {
@@ -1099,8 +1089,8 @@ impl RecentEntry {
     }
 }
 
-/// The classes `feature` registers on its list, in list order, with their expected candidates
-/// and profile: none under the hold's held arm, a feature without stars or a galaxy without its
+/// The classes `feature` registers on its list, in list order, with their expected candidates and
+/// profile: none where the features list no class, a feature without stars or a galaxy without its
 /// kinematic tables (module documentation).
 #[cfg(test)]
 #[must_use]

@@ -30,7 +30,7 @@ fn listed() -> &'static Galaxy {
     GALAXY.get_or_init(|| milky_way(GalaxyRules::every_26_hold_with_its_retargets()))
 }
 
-/// The same galaxy under the held arm of P09.T36's hold.
+/// The same galaxy with features that list no class: the reference without the lists.
 fn held() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
@@ -179,9 +179,9 @@ fn the_centre_s_entries_are_pinned() {
 
 /// Both or neither (research-leans-10, item 4, condition 1): the centre's list holds its core
 /// collapses and its luminous blue variables exactly where its band-E cells carve them, by the
-/// hold's one switch. Under the new arm every young class's cells claim and no old class's, the
-/// two classes' candidates are the young classes' alone and the Type Ia the old classes'; under
-/// the held arm the list holds neither and no cell claims.
+/// one switch ([`FeatureClassesRules`]). With the lists every young class's cells claim and no old
+/// class's, the two classes' candidates are the young classes' alone and the Type Ia the old
+/// classes'; without them the list holds neither and no cell claims.
 #[test]
 fn the_centre_lists_its_variables_exactly_where_its_cells_carve_them() {
     for (galaxy, listing) in [(held(), false), (listed(), true)] {
@@ -212,13 +212,13 @@ fn the_centre_lists_its_variables_exactly_where_its_cells_carve_them() {
 }
 
 /// P09.T38's complementarity at the centre, over 10⁴ mark sets of its young classes' band-E
-/// members, each drawn as the list draws an entry (its component by the classes' band-E shares,
-/// its position and velocity from its tracer) but with its mass uniform in ln m over band E and
-/// its age uniform over its component's: the cells give up a member ([`list_claims`]) exactly
-/// where [`claimed_at_centre`] claims it, and then its mass and age lie in its component's
-/// candidates of that class, so that the list draws it; the held arm claims none. The cells
-/// themselves are not walked: at version 24 one of the young burst's neutron-star classes
-/// exhausts its attempts there (`draw_centre_member`'s debug assertion), a finding of its own.
+/// members, each drawn as the list draws an entry (its component by the classes' band-E shares, its
+/// position and velocity from its tracer) but with its mass uniform in ln m over band E and its age
+/// uniform over its component's: the cells give up a member ([`list_claims`]) exactly where
+/// [`claimed_at_centre`] claims it, and then its mass and age lie in its component's candidates of
+/// that class, so that the list draws it; without the lists none is claimed. The cells themselves
+/// are not walked: at version 24 one of the young burst's neutron-star classes exhausts its
+/// attempts there (`draw_centre_member`'s debug assertion), a finding of its own.
 #[test]
 #[ignore = "slow: 10⁴ of the centre's young mark sets under either arm"]
 fn the_centre_s_cells_and_its_list_are_complementary() {
@@ -239,7 +239,7 @@ fn the_centre_s_cells_and_its_list_are_complementary_under_every_27_hold() {
 }
 
 /// The centre's complementarity of [`the_centre_s_cells_and_its_list_are_complementary`], in `on`
-/// against `off`, its held arm.
+/// against `off`, the reference without the lists.
 fn complementary_at_the_centre(off: &Galaxy, on: &Galaxy) {
     const SETS: u16 = 10_000;
     let model = on.centre().unwrap();

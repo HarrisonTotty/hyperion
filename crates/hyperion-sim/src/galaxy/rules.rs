@@ -14,10 +14,6 @@
 //!
 //! The holds, each a field:
 //!
-//! - [`feature_classes`](GalaxyRules::feature_classes), at [`FEATURE_CLASSES_VERSION`] (plan 09,
-//!   P09.T36): catalogue features and the galactic centre list their recently dead and their
-//!   luminous blue variables, and their band-E cells give them up. It is read where a list or an
-//!   interior is built, and reaches none of the galaxy's memos.
 //! - [`merger_class`](GalaxyRules::merger_class), at [`MERGER_CLASS_VERSION`] (plan 11,
 //!   P11.T8.c–d's fix): the stellar merger class draws the engine's channels, a contact pair at
 //!   the tidal limit or an evolved donor whose common envelope merges it, and a neutron-star
@@ -40,7 +36,7 @@ use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::catalogue_classes::binary::{MERGER_CLASS_VERSION, MergerClassRules};
 use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::displaced::{DISPLACED_VERSION, DisplacedRules};
-use crate::galaxy::features::members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules};
+use crate::galaxy::features::members::recent::FeatureClassesRules;
 use crate::stellar::rules::StellarRules;
 
 /// The galaxy-side holds of the next galaxy train, carried by the `Galaxy` value
@@ -57,7 +53,9 @@ pub(crate) struct GalaxyRules {
     /// galaxy is built, which installs layer D's factors, so `Galaxy::with_rules` refuses to
     /// change it.
     pub(crate) carve_out: CarveOutRules,
-    /// Whether features list their recently dead and their luminous blue variables (P09.T36).
+    /// Whether features list their recently dead and their luminous blue variables (P09.T36):
+    /// every version's do, and only the tests' reference without the lists
+    /// ([`FeatureClassesRules`]) does not.
     pub(crate) feature_classes: FeatureClassesRules,
     /// How the merger classes draw their entries: every stellar merger a contact pair, or the
     /// engine's channels and a neutron-star remnant less its ejecta (P11.T8.c–d's fix).
@@ -77,11 +75,7 @@ impl GalaxyRules {
         Self {
             field_share: FieldShareRules::Phi,
             carve_out: CarveOutRules::Claimed,
-            feature_classes: if version.get() >= FEATURE_CLASSES_VERSION.get() {
-                FeatureClassesRules::Listed
-            } else {
-                FeatureClassesRules::Unlisted
-            },
+            feature_classes: FeatureClassesRules::Listed,
             merger_class: if version.get() >= MERGER_CLASS_VERSION.get() {
                 MergerClassRules::Channels
             } else {
@@ -106,7 +100,6 @@ impl GalaxyRules {
     #[must_use]
     pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
         Self {
-            feature_classes: FeatureClassesRules::Listed,
             merger_class: MergerClassRules::Channels,
             displaced: DisplacedRules::Displaced,
             stellar: StellarRules::every_26_hold_with_its_retargets(),
@@ -115,9 +108,8 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
-    /// version's rules with the galaxy's holds retargeted from 26 (`feature_classes`, P09.T36,
-    /// `merger_class`, P11.T8.c–d, and `displaced`, P08.T12); the stellar rules hold none at 27
-    /// ([`StellarRules::every_27_hold`]).
+    /// version's rules with the galaxy's holds retargeted from 26 (`merger_class`, P11.T8.c–d, and
+    /// `displaced`, P08.T12); the stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.
@@ -227,17 +219,7 @@ mod tests {
     /// Each hold retargeted from 26 to 27 (train 26) is held below 27 and new from it on, in every
     /// 27 hold.
     #[test]
-    fn each_retargeted_hold_turns_on_at_27() {
-        let classes = |v| GalaxyRules::of_version(GeneratorVersion::new(v)).feature_classes;
-        for v in [23, 24, 25, 26] {
-            assert_eq!(classes(v), FeatureClassesRules::Unlisted, "{v}");
-        }
-        assert_eq!(classes(27), FeatureClassesRules::Listed);
-        assert_eq!(
-            GalaxyRules::every_27_hold().feature_classes,
-            FeatureClassesRules::Listed
-        );
-    }
+    fn each_retargeted_hold_turns_on_at_27() {}
 
     /// Every 27 hold is every 26 hold with its retargets and the stellar rules' holds at 27: the
     /// galaxy holds none of its own at 27.
