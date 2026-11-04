@@ -311,13 +311,14 @@ const GIANT_GROUND_ALBEDO = 0;
  * 1-bar figure lowered to its column's base, R08.T16.a.1), on which its medium above the floor
  * stands while its route is closed and its deck's once it opens, m, restated from its assembly
  * (the test holds the two equal): some 185 km under Jupiter's 1-bar 71,492 km (Archinal et al.
- * 2018), restated at generator version 27, whose chromophore at the disc's column (P14.T24.h.b
- * part 6) lowers it 3.7 km. `TEST JUPITER`'s figure; its disc stands on it until its medium lands,
- * and then on the cache's ground, this floor again while its route is closed.
+ * 2018), restated at generator version 27, whose chromophore at the disc's column and Jupiter
+ * profile at its refitted κ₁ (P14.T24.h.b) lower it 3.7 km. `TEST JUPITER`'s figure; its disc
+ * stands on it until its medium lands, and then on the cache's ground, this floor again while its
+ * route is closed.
  */
 const JUPITER_FLOOR: AtmosphereFixtureFigure = {
-  equatorialRadiusM: 71_307_202.585_108_52,
-  polarRadiusM: 66_693_886.483_073,
+  equatorialRadiusM: 71_307_239.518_876_14,
+  polarRadiusM: 66_693_920.130_801_49,
 };
 
 /** An envelope's floor, the hand Jupiter's ground: black, as its tables take it. */

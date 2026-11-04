@@ -9,7 +9,7 @@ import { detailOf, recordInput } from "../../test/atmosphereRecords";
 import { handJupiterDetail } from "../../test/giantFixtures";
 import { absorberCurveSlots, assembleMedium } from "./assemble";
 import { type AtmosphereMedium, columnLengthM } from "./medium";
-import { type AbsorberCurveSlots, kernelMedium } from "./tables";
+import { type AbsorberCurveSlots, kernelMedium, RESAMPLED_COLUMN_TOLERANCE } from "./tables";
 import { planetTwin } from "./tablesCpu";
 import { upperMediumOf } from "./thick/deckRead";
 
@@ -28,7 +28,7 @@ function largestMultiScattering(
 }
 
 describe("a gas envelope's tables (R08.T16.a.2)", () => {
-  it("draw each of the hand Jupiter's decks above its floor at its own column, though its levels alias their sheets", () => {
+  it("draw each of the hand Jupiter's decks above its floor at its own column, though its levels alias their sheets, and its chromophore within the resampling's tolerance", () => {
     const assembled = assembleMedium(recordInput(detailOf(handJupiterDetail())), {
       envelopes: true,
     });
@@ -39,17 +39,33 @@ describe("a gas envelope's tables (R08.T16.a.2)", () => {
     const top = upper.topHeightM;
     const drawn = kernelMedium(upper);
     // By its levels' densities the kernels kept 1.7% of its H₂O and NH₄SH decks' columns and 51% of
-    // its NH₃ deck's (2026-11-02).
-    const kept = upper.terms.flatMap((term, i) => {
-      const resampled = drawn.terms[i];
-      return term.name.startsWith("aerosol:") && resampled !== undefined
-        ? [columnLengthM(resampled.density, top) / columnLengthM(term.density, top)]
-        : [];
-    });
-    expect(kept).toHaveLength(4);
-    for (const share of kept) {
-      expect(share).toBeCloseTo(1, 9);
+    // its NH₃ deck's (2026-11-02), so each is projected, its column kept. Its chromophore, the
+    // fixture's, is a smooth layer, which from generator version 27 its levels keep to 0.64%
+    // (measured 2026-11-04; 97.4% at 26, projected): within the tolerance, it keeps its levels'
+    // densities. Its τ(550), 0.117 at the disc's column (P14.T24.h.b part 6) where 26's was 0.307,
+    // lowers the floor 3.7 km, which moves the levels about the layer.
+    const kept = new Map(
+      upper.terms.flatMap((term, i) => {
+        const resampled = drawn.terms[i];
+        return term.name.startsWith("aerosol:") && resampled !== undefined
+          ? [[term.name, columnLengthM(resampled.density, top) / columnLengthM(term.density, top)]]
+          : [];
+      }),
+    );
+    expect([...kept.keys()]).toEqual([
+      "aerosol:H2O",
+      "aerosol:NH4SH",
+      "aerosol:NH3",
+      "aerosol:chromophore",
+    ]);
+    for (const deck of ["aerosol:H2O", "aerosol:NH4SH", "aerosol:NH3"]) {
+      expect(kept.get(deck)).toBeCloseTo(1, 9);
     }
+    const chromophore = kept.get("aerosol:chromophore") ?? Number.NaN;
+    expect([
+      Math.abs(chromophore - 1) <= RESAMPLED_COLUMN_TOLERANCE,
+      Math.round(chromophore * 1e4) / 1e4,
+    ]).toEqual([true, 0.9936]);
   }, 180_000);
 
   it("hold the hand Jupiter's multiple scattering within rgba16float above its floor, where its whole column's diverges", () => {
@@ -62,9 +78,18 @@ describe("a gas envelope's tables (R08.T16.a.2)", () => {
     const curves = absorberCurveSlots(assembled.drawn);
     const radiusM = assembled.drawn.bottomRadiusM;
     const floorM = assembled.regime.deckAltitudeM;
+    const above = largestMultiScattering(
+      upperMediumOf(assembled.medium, floorM),
+      radiusM + floorM,
+      curves,
+    );
+    // Measured 2026-11-04: at most 1.216 above the floor, its chromophore at generator version 27's
+    // disc column (τ(550) 0.117, P14.T24.h.b part 6) absorbing less than 26's (0.307), under which
+    // it stayed under 1.
     expect([
       largestMultiScattering(assembled.medium, radiusM, curves) > HALF_FLOAT_MAX,
-      largestMultiScattering(upperMediumOf(assembled.medium, floorM), radiusM + floorM, curves),
-    ]).toEqual([true, expect.toSatisfy((most: number) => most > 0 && most < 1)]);
+      above > 0 && above < HALF_FLOAT_MAX,
+      Math.round(above * 1000) / 1000,
+    ]).toEqual([true, true, 1.216]);
   }, 180_000);
 });
