@@ -2035,7 +2035,10 @@ describe("a gas envelope's entry (R08.T16.a.2)", () => {
   });
 
   // research-rm4-rm5-close-out §1.2 (giant-disc-datum's acceptance): a served Jupiter-class record.
-  it("stands a served Jupiter-class record's disc on its tables' figure at albedo 0, below its record's 1-bar figure, while its route is closed", async () => {
+  // Generator version 27's record puts its floor at 0.566 bar, inside its NH₃ deck's haze, τ 10 of
+  // its own (P14.T24.h.b part 6), so its tables' figure lies 12.8 km above its 1-bar figure; 26's
+  // floor, at 14.45 bar, lay below it.
+  it("stands a served Jupiter-class record's disc on its tables' figure at albedo 0, above its record's 1-bar figure, while its route is closed", async () => {
     const answered = answerFor(A, jupiterDetail());
     const detail = detailOf(answered);
     const bare = assembleMedium(recordInput(detail), { envelopes: true });
@@ -2093,7 +2096,7 @@ describe("a gas envelope's entry (R08.T16.a.2)", () => {
     expect([
       ground,
       madeAt(h, 0).body?.figure,
-      floor.equatorialRadiusM < oneBar.equatorialRadiusM,
+      floor.equatorialRadiusM > oneBar.equatorialRadiusM,
       record?.radiusOverDistance,
       plan.laws[record?.tableRows[0] ?? -1]?.a,
     ]).toEqual([

@@ -27,6 +27,7 @@ import {
   type MediumTerm,
 } from "./medium";
 import { phaseTableAsymmetry } from "./aerosol";
+import { materialApproximations } from "./materials/materials";
 import { gravityRatio } from "./oblate";
 import { molecularMixture } from "./rayleigh";
 
@@ -118,7 +119,8 @@ function molecularDepth550(fixture: Fixture, heightM: number): number {
 
 /**
  * A drawn mode's whole τ(550): its source's σ_ext(550) at relative density 1 times its density's
- * column (the term and its source share an index).
+ * column (the term and its source share an index). `material` is its term's name after `aerosol:`,
+ * `NH3:2` for a material's second mode.
  */
 function drawnDepth550(fixture: Fixture, material: string): number {
   const { medium, drawn } = drawnOf(fixture);
@@ -149,6 +151,19 @@ function modeOf(fixture: Fixture, material: string): AerosolMode {
 }
 
 /**
+ * The fixture's NH₃ deck's haze: its second NH₃ mode, after the deck's own (P14.T24.h.b part 6,
+ * from generator version 27).
+ */
+function hazeOf(fixture: Fixture): AerosolMode {
+  const modes = envelopeOf(ANSWERS[fixture]()).aerosols.modes.filter((m) => m.material === "NH3");
+  const haze = modes[1];
+  if (modes.length !== 2 || haze === undefined) {
+    throw new Error(`the ${fixture}'s NH₃ deck has its haze`);
+  }
+  return haze;
+}
+
+/**
  * An envelope's photosphere, Pa: where its grey profile's thermal optical depth is ⅔, κ₁ p₁
  * (p ÷ p₁)ⁿ ÷ (n g) = ⅔ at its bulk gravity (P14.T24.d's `EnvelopeProfile::photosphere_pressure`).
  */
@@ -163,7 +178,7 @@ function photospherePa(answer: DetailAnswer): number {
   return 1e5 * (((2 / 3) * n * g) / (profile.thermalOpacityM2PerKg * 1e5)) ** (1 / n);
 }
 
-/** The hot Jupiter fixture's photosphere, Pa: 0.2067 bar. */
+/** The hot Jupiter fixture's photosphere, Pa: 0.2049 bar at 27's κ₁ (0.2067 at 26's). */
 const HOT_JUPITER_PHOTOSPHERE_PA = photospherePa(hotJupiterDetail());
 
 describe("an envelope's medium, asked for", () => {
@@ -174,7 +189,8 @@ describe("an envelope's medium, asked for", () => {
 
   // The fixture Jupiter's assembly, which the file's later tests share. Measured 2026-11-01 at load
   // 34: 9.1–11.2 s alone (8.3–9.4 s on 24's record, its molten decks not drawn), 19.4 s in the
-  // whole suite.
+  // whole suite; 2026-11-04 at load 8, on 27's record, its NH₃ deck's two modes and its chromophore
+  // its only modes drawn: 0.88–0.89 s alone.
   it("is drawn when asked, with no NOT YET MODELLED", { timeout: 60_000 }, () => {
     const { result } = drawnOf("jupiter");
     expect(result.labels).not.toContain("atmosphereNotYetModelled");
@@ -296,31 +312,46 @@ describe("the hand Jupiter's medium", () => {
   });
 });
 
-describe("the protocol fixture's Jupiter (generator version 26's record)", () => {
-  it("bases its NH₃, NH₄SH and H₂O decks at 0.6415, 2.128 and 4.873 bar, τ 2.39, 1.60 and 1.73", () => {
+describe("the protocol fixture's Jupiter (generator version 27's record)", () => {
+  // From 27 its NH₃ deck carries its cloud's haze as its second mode (P14.T24.h.b part 6): NH₃ ice
+  // of 1 µm, well mixed from the deck's base to 0.1 bar at τ(550) 10, which alone reaches the
+  // split's τ, so its floor lies inside it, above every other deck. 26's record had no haze and
+  // its decks' τ 5.7 lay under the split's 10, its floor at 14.45 bar in its molten silicate
+  // decks' tails, below its water deck.
+  it("bases its NH₃, NH₄SH and H₂O decks at 0.6348, 2.107 and 4.822 bar, τ 2.39, 1.59 and 1.73, and its NH₃ deck's haze at its base, τ 10 to 0.1 bar", () => {
     const decks = ["NH3", "NH4SH", "H2O"].map((m) => modeOf("jupiter", m));
-    expect(decks.map((m) => Math.round(m.basePa / 10) / 1e4)).toEqual([0.6415, 2.1278, 4.8726]);
+    expect(decks.map((m) => Math.round(m.basePa / 10) / 1e4)).toEqual([0.6348, 2.1066, 4.8221]);
     expect(decks.map((m) => Math.round(skyOpticalDepth550(m) * 100) / 100)).toEqual([
-      2.39, 1.6, 1.73,
+      2.39, 1.59, 1.73,
     ]);
-    // 5.7 together, under the split's 10: the gas and the molten decks' tails set the floor below
-    // the water deck.
+    // 5.7 together, under the split's 10; the haze's 10 alone reaches it.
     expect(decks.reduce((sum, m) => sum + skyOpticalDepth550(m), 0)).toBeLessThan(
       CLOUD_DECK_SPLIT_OPTICAL_DEPTH,
     );
+    const haze = hazeOf("jupiter");
+    expect([haze.basePa, haze.topPa, skyOpticalDepth550(haze), haze.fSed]).toEqual([
+      modeOf("jupiter", "NH3").basePa,
+      1e4,
+      10,
+      0,
+    ]);
   });
 
-  it("draws its NH₃, NH₄SH and H₂O decks, past Mie's reach, conservative and forward by their sizes (R08.T16.a)", () => {
-    const { medium, result } = drawnOf("jupiter");
-    for (const material of ["NH3", "NH4SH", "H2O"]) {
-      const term = termOf(medium, `aerosol:${material}`);
-      // Above the floor whole, each draws its record's τ(550).
-      const tau = skyOpticalDepth550(modeOf("jupiter", material));
-      expect(Math.abs(drawnDepth550("jupiter", material) / tau - 1)).toBeLessThan(1e-12);
+  it("draws its NH₃ deck, past Mie's reach, and its haze, each conservative and forward by its sizes and cut at the floor (R08.T16.a)", () => {
+    const { medium, drawn, result } = drawnOf("jupiter");
+    const { floorPa } = drawn.envelope;
+    for (const [name, mode] of [
+      ["NH3", modeOf("jupiter", "NH3")],
+      ["NH3:2", hazeOf("jupiter")],
+    ] as const) {
+      const term = termOf(medium, `aerosol:${name}`);
+      // Each straddles the floor, so draws the τ(550) its profile puts above it.
+      const tau = skyOpticalDepth550(mode) * shareAbove(mode, floorPa);
+      expect(Math.abs(drawnDepth550("jupiter", name) / tau - 1)).toBeLessThan(1e-12);
       const scattering = term.scattering[1];
       expect(term.absorption[1] / (scattering + term.absorption[1])).toBeLessThan(1e-5);
       if (term.phase.kind !== "tabulated") {
-        throw new Error(`the ${material} deck's phase is tabulated`);
+        throw new Error(`the ${name} mode's phase is tabulated`);
       }
       const asymmetry = phaseTableAsymmetry(term.phase.table, 1);
       expect(asymmetry).toBeGreaterThan(0.7);
@@ -329,73 +360,105 @@ describe("the protocol fixture's Jupiter (generator version 26's record)", () =>
     expect(result.reasons.filter((r) => r.includes("sizes lie outside the optics"))).toEqual([]);
   });
 
-  it("puts its floor below its water deck, in its molten silicate decks' tails, at 14.45 bar", () => {
-    const { floorPa } = drawnOf("jupiter").drawn.envelope;
-    // Measured 2026-11-01: 14.45 bar, the gas's τ 1.31 and the modes' 8.69 above it (24's: 42.10).
-    // Not decision-deep-decks-split's 41 bar: from 25 its molten decks' tails put τ 2.66 above it.
-    expect(floorPa).toBeGreaterThan(modeOf("jupiter", "H2O").basePa);
-    for (const material of ["Mg2SiO4", "MgSiO3"]) {
-      const mode = modeOf("jupiter", material);
+  it("puts its floor inside its NH₃ deck and its haze, above its NH₄SH deck's top, at 0.5661 bar", () => {
+    const { floorPa, floorAltitudeM } = drawnOf("jupiter").drawn.envelope;
+    // Measured 2026-11-04 at 27: 0.5661 bar, the gas's τ 0.052 and the modes' 9.948 above it: the
+    // NH₃ deck's 1.116, its haze's 8.715 and the chromophore's 0.117 (26's: 14.45 bar).
+    for (const mode of [modeOf("jupiter", "NH3"), hazeOf("jupiter")]) {
       expect(floorPa).toBeGreaterThan(mode.topPa);
       expect(floorPa).toBeLessThan(mode.basePa);
     }
-    expect(Math.abs(floorPa / 14.45e5 - 1)).toBeLessThan(1e-3);
+    expect(floorPa).toBeLessThan(modeOf("jupiter", "NH4SH").topPa);
+    const modes = envelopeOf(ANSWERS.jupiter()).aerosols.modes;
+    const depth = molecularDepth550("jupiter", floorAltitudeM) + modesAbove(modes, floorPa);
+    expect(Math.abs(depth / CLOUD_DECK_SPLIT_OPTICAL_DEPTH - 1)).toBeLessThan(1e-4);
+    expect(Math.abs(floorPa / 0.5661e5 - 1)).toBeLessThan(1e-3);
   });
 
-  it("drops the decks whose tops lie below the floor, Fe, Cr, MnS and Na₂S, with no term and no label", () => {
+  it("drops every deck whose top lies below the floor, all but its NH₃ deck's two modes, with no term and no label", () => {
     const { medium, drawn, result } = drawnOf("jupiter");
-    // Measured 2026-11-01: Fe's top, 23.76 bar, and Na₂S's, 37.25, above 24's floor, lie below 25's.
-    const named = /\b(?:Fe|Cr|MnS|Na2S)\b/u;
-    expect(drawn.envelope.dropped).toEqual(["Fe", "Cr", "MnS", "Na2S"]);
-    expect(medium.terms.map((t) => t.name).filter((n) => named.test(n))).toEqual([]);
-    expect(result.reasons.filter((r) => named.test(r))).toEqual([]);
+    // Measured 2026-11-04 at 27: the NH₄SH deck's top, 1.130 bar, and every deck's below it lie
+    // below the floor; 26's floor dropped Fe, Cr, MnS and Na₂S alone.
+    const dropped = [
+      "Fe",
+      "CaTiO3",
+      "Al2O3",
+      "Mg2SiO4",
+      "Cr",
+      "MgSiO3",
+      "MnS",
+      "Na2S",
+      "KCl",
+      "ZnS",
+      "H2O",
+      "NH4SH",
+    ];
+    expect(drawn.envelope.dropped).toEqual(dropped);
+    expect(medium.terms.map((t) => t.name).filter((n) => n.startsWith("aerosol:"))).toEqual([
+      "aerosol:NH3",
+      "aerosol:NH3:2",
+      "aerosol:chromophore",
+    ]);
+    // Two reasons name H₂O, but not its deck: its vapour's, and the H₂O ice NH₃ ice is drawn on.
+    const named = new RegExp(`\\b(?:${dropped.join("|")})\\b`, "u");
+    expect(result.reasons.filter((r) => named.test(r))).toEqual([
+      expect.stringMatching(/^H2O: no absorption data on file/u),
+      expect.stringMatching(/^NH3 ice drawn on H2O ice's /u),
+    ]);
   });
 
-  it("lets its molten Mg₂SiO₄ and MgSiO₃ decks' tails enter with the τ their profiles put above the floor, cut there", () => {
+  it("lets its NH₃ deck and its haze enter with the τ their profiles put above the floor, cut there", () => {
     const { floorPa } = drawnOf("jupiter").drawn.envelope;
-    const tails = ["Mg2SiO4", "MgSiO3"].map((material) => {
-      const mode = modeOf("jupiter", material);
-      const tau = skyOpticalDepth550(mode) * shareAbove(mode, floorPa);
-      expect(Math.abs(drawnDepth550("jupiter", material) / tau - 1)).toBeLessThan(1e-12);
-      return Math.round(tau * 1000) / 1000;
-    });
-    // Measured 2026-11-01: 0.958 of Mg₂SiO₄'s 1.35 × 10⁸ and 1.663 of MgSiO₃'s 6.34 × 10⁷.
-    expect(tails).toEqual([0.958, 1.663]);
+    const cut = [modeOf("jupiter", "NH3"), hazeOf("jupiter")].map(
+      (mode) => Math.round(skyOpticalDepth550(mode) * shareAbove(mode, floorPa) * 1000) / 1000,
+    );
+    // Measured 2026-11-04 at 27: 1.116 of the deck's 2.39 and 8.715 of the haze's 10. 26's record
+    // let its molten Mg₂SiO₄ and MgSiO₃ decks' tails in so, 0.958 and 1.663, which 27's floor drops.
+    expect(cut).toEqual([1.116, 8.715]);
   });
 
-  it("lays its molten decks' tails above the floor", () => {
+  it("lays its cut NH₃ deck and haze above the floor", () => {
     const { medium, drawn } = drawnOf("jupiter");
-    for (const material of ["Mg2SiO4", "MgSiO3"]) {
-      const term = termOf(medium, `aerosol:${material}`);
+    for (const name of ["aerosol:NH3", "aerosol:NH3:2"]) {
+      const term = termOf(medium, name);
       expect(shareAboveHeight(medium, term, drawn.envelope.floorAltitudeM)).toBeCloseTo(1, 6);
     }
   });
 
-  it("lets its KCl deck's tail enter, its top just above the floor, and leaves it out at the term limit, labelled", () => {
+  it("drops its KCl deck, its top far below the floor, with no reason of its own", () => {
     const kcl = modeOf("jupiter", "KCl");
     const { medium, drawn, result } = drawnOf("jupiter");
-    // Measured 2026-11-01: its top at 14.42 bar, 0.16% above the floor; its τ there 1.7 × 10⁻⁶ of its
-    // 13,074 (24's: 0.071), left out with ZnS's, CaTiO₃'s and Al₂O₃'s tails, the least.
-    expect(kcl.topPa).toBeLessThan(drawn.envelope.floorPa);
-    expect(skyOpticalDepth550(kcl) * shareAbove(kcl, drawn.envelope.floorPa)).toBeLessThan(1e-5);
+    // Measured 2026-11-04 at 27: its top at 14.42 bar, 25 times the floor's pressure. 26's floor
+    // lay 0.16% below its top, let its tail in and left it out at the term limit, labelled
+    // (`assembleEarth.test.ts` holds a mode left out at the term limit).
+    expect(kcl.topPa).toBeGreaterThan(drawn.envelope.floorPa);
+    expect(shareAbove(kcl, drawn.envelope.floorPa)).toBe(0);
     expect(medium.terms.map((t) => t.name)).not.toContain("aerosol:KCl");
-    expect(result.reasons).toContain(
-      "solid KCl particles: left out, the console can draw no more layers",
-    );
+    expect(result.reasons.filter((r) => r.includes("KCl"))).toEqual([]);
   });
 
   it("labels none of its dropped decks and none below the floor by the stand-in rule", () => {
     // materials.ts's depth rule: a stand-in shown while less than τ 10 lies above its top, which
-    // every mode the cut lets in has, and none it drops.
-    const { result } = drawnOf("jupiter");
-    const dropped = drawnOf("jupiter").drawn.envelope.dropped;
-    expect(result.reasons.filter((r) => dropped.some((m) => r.includes(m)))).toEqual([]);
+    // every mode the cut lets in has, and none it drops. Eight of its twelve dropped decks would
+    // carry one drawn at the top (its liquid metals and silicates, its Na₂S and NH₄SH).
+    const { result, drawn } = drawnOf("jupiter");
+    const standIns = materialApproximations(
+      drawn.envelope.dropped.map((material) => ({
+        material,
+        form: { phase: modeOf("jupiter", material).phase },
+        opticalDepthAbove550: 0,
+      })),
+    ).map((a) => a.reason);
+    expect(standIns).toHaveLength(8);
+    expect(result.reasons.filter((r) => standIns.includes(r))).toEqual([]);
   });
 });
 
-describe("the protocol fixture's hot Jupiter (generator version 26's record)", () => {
+describe("the protocol fixture's hot Jupiter (generator version 27's record)", () => {
   // From 26 a hot envelope's dayside decks are cut at 1 bar (P14.T52.h): every silicate and Fe
-  // deck's top lies there, below the photosphere at 0.2067 bar.
+  // deck's top lies there, below the photosphere at 0.2049 bar (27's κ₁, refitted at the giants'
+  // own Bond albedos, P14.T24.h.b; 0.2067 bar at 26). 27's composition adds P14.T52.e's further
+  // carriers (40 species, 33 before).
   it("puts its floor below its photosphere, at its silicate decks' 1-bar tops", () => {
     const { floorPa } = drawnOf("hotJupiter").drawn.envelope;
     const forsterite = modeOf("hotJupiter", "Mg2SiO4");
@@ -405,7 +468,7 @@ describe("the protocol fixture's hot Jupiter (generator version 26's record)", (
     expect(floorPa).toBeLessThan(forsterite.basePa);
   });
 
-  it("draws of Mg₂SiO₄'s τ of 7.3 × 10⁴ only the share its profile puts above the floor", () => {
+  it("draws of Mg₂SiO₄'s τ of 7.2 × 10⁴ only the share its profile puts above the floor", () => {
     const forsterite = modeOf("hotJupiter", "Mg2SiO4");
     const { floorPa } = drawnOf("hotJupiter").drawn.envelope;
     const tau = skyOpticalDepth550(forsterite) * shareAbove(forsterite, floorPa);
@@ -436,16 +499,18 @@ describe("the protocol fixture's hot Jupiter (generator version 26's record)", (
     const fe = modeOf("hotJupiter", "Fe");
     const { drawn, result } = drawnOf("hotJupiter");
     expect([fe.opticalDepth.kind, Math.round(fe.topPa) / 1e5]).toEqual(["value", 1]);
-    // Measured 2026-11-03: 2.44 of its 1.14 × 10⁵ above the floor, at 1.0002 bar.
+    // Measured 2026-11-04 at 27: 2.46 of its 1.12 × 10⁵ above the floor, at 1.0002 bar (26's: 2.44
+    // of 1.14 × 10⁵).
     const tau = skyOpticalDepth550(fe) * shareAbove(fe, drawn.envelope.floorPa);
     expect(Math.abs(drawnDepth550("hotJupiter", "Fe") / tau - 1)).toBeLessThan(1e-12);
     expect(result.reasons.filter((r) => r.includes("Fe particles"))).toEqual([]);
   });
 
   it("puts no deck's τ above its photosphere", () => {
-    expect(Math.round(HOT_JUPITER_PHOTOSPHERE_PA / 10) / 1e4).toBe(0.2067);
+    expect(Math.round(HOT_JUPITER_PHOTOSPHERE_PA / 10) / 1e4).toBe(0.2049);
     const modes = envelopeOf(ANSWERS.hotJupiter()).aerosols.modes;
-    // Measured 2026-11-03: none, where 25's record put 172.9 there, its Fe's 38.2 of it.
+    // Measured 2026-11-03, and 2026-11-04 at 27: none, where 25's record put 172.9 there, its Fe's
+    // 38.2 of it.
     expect(modesAbove(modes, HOT_JUPITER_PHOTOSPHERE_PA)).toBe(0);
   });
 
