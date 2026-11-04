@@ -35,17 +35,26 @@ use hyperion_testkit::float::bits;
 /// The seed of look-72's universe, LOOK72.
 const LOOK72: u64 = 0xa49f_649b_ef43_4b20;
 
-/// GDG 0E0V00 E-141: a 10.96 M☉ primary that a 6.38 M☉ companion strips in a common envelope at
-/// 20.195 Myr, and a neutron star at the epoch.
-const STRIPPED: &str = "820e6ee00000008d";
+/// A 9.68 M☉ primary of LOOK72 that its companion strips in a common envelope at 26.100 Myr, a
+/// stripped helium star 20,000 years before the epoch and at it. Until 27 it was look-72's own
+/// GDG 0E0V00 E-141 (`820e6ee00000008d`, a 10.96 M☉ primary stripped in a common envelope at
+/// 20.195 Myr and a neutron star at the epoch), which 27's grid redraws (plan 08's displaced
+/// classes, P08.T12, and the field's share, P09.T2.c). A scan of 155,000 layer-E cells about it
+/// at 27 finds no primary stripped so whose helium star is a neutron star 20,000 years on; this is
+/// the one stripped in a common envelope of the nine helium stars of 2–4 M☉ its 6,600 nearest
+/// cells hold then, 36 cells (4,600 ly) along x from it.
+const STRIPPED: &str = "82326e9ff00000cd";
 
 /// A pinned case-A donor of LOOK72 whose companion strips it on its main sequence, from its own
 /// track's end of which case AB strips it to a helium star (P11.T4.n,
-/// `decision-observed-class-findings.md` §B). Until 27 it was the finding's 822C72E00000008C,
-/// which 27's grid no longer places (P08.T12's displaced classes and P09.T2.c's field share);
-/// 822C72E000000009, of the same cell, is the cell's first such record at 27, as the lib's
-/// `look72_case_a_pair` reads it.
-const CASE_A: &str = "822c72e000000009";
+/// `decision-observed-class-findings.md` §B): a 16.31 M☉ primary 11.0 Myr old, in case A from
+/// 6.67 Myr and a 3.86 M☉ helium star at the epoch. Until 27 it was the finding's
+/// 822C72E00000008C, which 27's grid no longer places (P08.T12's displaced classes and P09.T2.c's
+/// field share). The lib's `look72_case_a_pair` reads the first such record of its cell at 27,
+/// 822C72E000000009, a retained remnant's system, which cannot be re-aged to before its primary's
+/// death ([`look72_now_rows_read_the_pair`]); this is the nearest to [`STRIPPED`] (24 cells) of
+/// the five such records the classes leave alone, alive at their ages, in its 6,600 nearest cells.
+const CASE_A: &str = "821a6f9ff0000086";
 
 /// LOOK72's galaxy, as the server builds it ([`Galaxy::with_full_potential`]), once per process.
 ///
@@ -156,13 +165,14 @@ fn observer_of(record: &SystemRecord, emitted: UniverseTime) -> Observer {
     Observer::new(place, UniverseTime::EPOCH).expect("inside the root cube and the clock window")
 }
 
-/// look-72's case: GDG 0E0V00 E-141 seen from 20,000 ly at the epoch. The light left 2.5 Myr after
+/// look-72's case, on [`STRIPPED`] seen from 20,000 ly at the epoch. The light left 0.9 Myr after
 /// its companion stripped it in a common envelope, so both the row and the summary show the
-/// stripped helium star, of 2–4 M☉ as stripping leaves an 11 M☉ primary (Götberg et al. 2018, A&A
-/// 615, A78; Laplace et al. 2020, A&A 637, A6), where its single-star track is a red supergiant
+/// stripped helium star, of 2–4 M☉ as stripping leaves a 10 M☉ primary (Götberg et al. 2018, A&A
+/// 615, A78; Laplace et al. 2020, A&A 637, A6), where its single-star track is a cool supergiant
 /// then. Its kind is a stripped helium star, `He-sdO`, in the observed summary and in the now
 /// summary at that time alike, since Götberg et al. find subdwarf-like spectra only up to 1.7 M☉
-/// (P06.T24.c).
+/// (P06.T24.c). (Look-72's E-141 was a neutron star at the epoch; at 27 the replacement is still
+/// the stripped star then, its collapse to come.)
 ///
 /// Run on its one build of the galaxy by [`observed_rows_and_summaries_read_one_state`].
 fn look72_stripped_primary_is_the_stripped_star_in_the_row_and_the_summary() {
@@ -192,9 +202,9 @@ fn look72_stripped_primary_is_the_stripped_star_in_the_row_and_the_summary() {
         brief.is_some_and(|b| b.kind() != ObjectKind::Supergiant),
         "{brief:?}"
     );
-    // A stripped helium star of 2.25 M☉, not a hot subdwarf (P06.T24.c), observed and in the now
-    // summary at the same instant alike (at the epoch it is a neutron star in both modes).
-    assert!((mass - 2.25).abs() < 0.01, "{mass} M☉");
+    // A stripped helium star of 2.03 M☉, not a hot subdwarf (P06.T24.c), observed and in the now
+    // summary at the same instant alike.
+    assert!((mass - 2.03).abs() < 0.01, "{mass} M☉");
     assert_eq!(primary.kind(), ObjectKind::StrippedHeliumStar);
     assert_eq!(primary.classification().to_string(), "He-sdO3");
     let now = stars.summary_at(emitted);
@@ -208,26 +218,26 @@ fn look72_stripped_primary_is_the_stripped_star_in_the_row_and_the_summary() {
             .map(|b| (b.kind(), b.class().to_string())),
         Some((ObjectKind::StrippedHeliumStar, "He-sdO3".to_owned()))
     );
-    // Just after the common envelope that strips it, the 2.37 M☉ helium star is one too.
+    // Just after the common envelope that strips it, the 2.04 M☉ helium star is one too.
     let (_, stripped) = stripping(&stars).expect("its companion strips it");
     let age = record.age_at_epoch();
     let just_after = stars.summary_at(clock_at(age, Years::new(stripped.value() + 100.0)));
     let fresh = just_after.stars().first().expect("born then");
     assert_eq!(fresh.state().phase(), Phase::HeliumMainSequence);
     let fresh_mass = fresh.state().mass().value();
-    assert!((fresh_mass - 2.37).abs() < 0.01, "{fresh_mass} M☉");
+    assert!((fresh_mass - 2.04).abs() < 0.01, "{fresh_mass} M☉");
     assert_eq!(fresh.kind(), ObjectKind::StrippedHeliumStar);
-    // Its single-star track is a red supergiant then, which the row read before the fix.
+    // Its single-star track is a cool supergiant then, which the row read before the fix.
     let own = stars.primary().state_at(emitted).expect("formed");
-    assert_eq!(own.phase(), Phase::EarlyAgb);
+    assert_eq!(own.phase(), Phase::CoreHeliumBurning);
     assert_eq!(
         single_star_brief(&record, emitted).map(|b| (b.kind(), b.class().to_string())),
-        Some((ObjectKind::Supergiant, "M6.5Ib".to_owned()))
+        Some((ObjectKind::Supergiant, "K6Ib".to_owned()))
     );
-    // At the epoch it is a neutron star either way.
+    // At the epoch it is the stripped helium star still, in the system's one brief.
     assert_eq!(
         stars.brief_at(UniverseTime::EPOCH).map(|b| b.kind()),
-        Some(ObjectKind::NeutronStar)
+        Some(ObjectKind::StrippedHeliumStar)
     );
 }
 
@@ -268,7 +278,7 @@ fn clock_at(age_at_epoch: Years, age: Years) -> UniverseTime {
 }
 
 /// Before, during and after a companion strips the primary, the row and the summary read one
-/// state: systems of layer E near GDG 0E0V00 E-141 whose primary its pair strips, each re-aged so
+/// state: systems of layer E near [`STRIPPED`] whose primary its pair strips, each re-aged so
 /// that its stripping begins 40,000 years before the epoch (a real record with only its age at the
 /// epoch changed, which moves its history on the clock and nothing else), and observed at the
 /// epoch from where the light that left 20,000 years before, during and 20,000 years after its
@@ -294,14 +304,7 @@ fn stripped_primaries_read_one_state_before_during_and_after_stripping() {
             let Some((first, _)) = stripping(&SystemStars::generate(galaxy, grown)) else {
                 continue;
             };
-            let record = SystemRecord::from_parts(
-                grown.id(),
-                *grown.epoch_position(),
-                grown.origin(),
-                grown.population(),
-                grown.primary_initial_mass(),
-                Years::new(first.value() + LEAD_YR),
-            );
+            let record = grown.with_age_at_epoch(Years::new(first.value() + LEAD_YR));
             let stars = SystemStars::generate(galaxy, &record);
             // The re-aged pair runs to a later age; its history up to the old one is the same.
             let Some((onset_yr, end_yr)) = stripping(&stars)
@@ -361,15 +364,17 @@ fn pair_has_changed_primary(stars: &SystemStars, t: UniverseTime) -> bool {
     summary.stars().first().map(StarSummary::state) != own.as_ref()
 }
 
-/// P11.T11.a: the now-mode rows of look-72's two systems read the summary's primary. Each of GDG
-/// 0E0V00 E-141 (820E6EE00000008D, stripped in a common envelope) and 822C72E000000009 (a case-A
-/// donor, stripped to a helium star in case AB) is re-aged so that an age at which its pair has
-/// changed its primary, the first such at the start or middle of a segment of its pair's
-/// timeline, falls at the epoch, a real record with only its age at the epoch changed. Its range
-/// row's model takes the paired route, and the row at both ends of the clock window and at the
-/// epoch is the summary's primary then, with the first attempt's star count. At the epoch the
+/// P11.T11.a: the now-mode rows of look-72's two systems read the summary's primary. Each of
+/// [`STRIPPED`] (stripped in a common envelope) and [`CASE_A`] (a case-A donor, stripped to a
+/// helium star in case AB) is re-aged so that an age at which its pair has changed its primary,
+/// the first such at the start or middle of a segment of its pair's timeline, falls at the epoch,
+/// a real record with only its age at the epoch changed (`SystemRecord::with_age_at_epoch`). Its
+/// range row's model takes the paired route, and the row at both ends of the clock window and at
+/// the epoch is the summary's primary then, with the first attempt's star count. At the epoch the
 /// stripped primary's row is not the class its single-star track has then, which the row read
-/// before P11.T11.a.
+/// before P11.T11.a. Both are records plan 08's classes leave alone, alive at their ages: from 27
+/// a retained or displaced record is dead at its age, and re-aged to before its primary's death it
+/// is no record of its class (its primary's kick loop reads the death, P08.T12.c).
 ///
 /// Run on its one build of the galaxy by [`observed_rows_and_summaries_read_one_state`].
 fn look72_now_rows_read_the_pair() {
@@ -418,14 +423,7 @@ fn look72_now_rows_read_the_pair() {
             .find(|&at| reclassed(at))
             .or_else(|| candidates.first().copied())
             .unwrap_or_else(|| panic!("{id}: its pair never changes its primary"));
-        let record = SystemRecord::from_parts(
-            grown.id(),
-            *grown.epoch_position(),
-            grown.origin(),
-            grown.population(),
-            grown.primary_initial_mass(),
-            Years::new(changed),
-        );
+        let record = grown.with_age_at_epoch(Years::new(changed));
         let stars = SystemStars::generate(galaxy, &record);
         assert!(
             pair_has_changed_primary(&stars, UniverseTime::EPOCH),
