@@ -540,7 +540,9 @@ const E: LayerSet = LayerSet::EMPTY.with(Layer::E);
 /// Each is its class's own statement: a core collapse's and a luminous blue variable's primary is
 /// of band E (P09.T33.a, P09.T43); a Type Ia's of layer D, "every primary is of layer D", and its
 /// survivor's its own star's, the donor's of A–D or a Type Iax's partly burnt dwarf's, D
-/// (P09.T34.a); an accreting white dwarf's C or D; an X-ray binary's the compact star's
+/// (P09.T34.a); an accreting white dwarf's C to E, the fitted rows giving layer E a share of the
+/// hosts (P15.T10.b's refit at 27: a primary of a little over 8 M☉ whose transfer left a white
+/// dwarf, as host 0xfc68bbc7f0000020's of 8.07 M☉); an X-ray binary's the compact star's
 /// progenitor's, D or E under the fitted tables (P15.T10.b), whose engine-fitted progenitors reach
 /// down to 10^0.54 M☉, 3.5 M☉, for a neutron star and 10^0.51 M☉, 3.2 M☉, for a black hole
 /// (`XRB_RESIDUALS_26`'s lowest quantiles), the accretors of earlier transfer that grew past the
@@ -554,7 +556,7 @@ pub(crate) fn member_layers(class: ClassId) -> Option<&'static [LayerSet]> {
         .with(Layer::B)
         .with(Layer::C)
         .with(Layer::D);
-    const WHITE_DWARF: LayerSet = LayerSet::EMPTY.with(Layer::C).with(Layer::D);
+    const WHITE_DWARF: LayerSet = LayerSet::EMPTY.with(Layer::C).with(Layer::D).with(Layer::E);
     const COMPACT_PROGENITOR: LayerSet = LayerSet::EMPTY.with(Layer::D).with(Layer::E);
     match class {
         ClassId::CORE_COLLAPSE | ClassId::LUMINOUS_BLUE_VARIABLE | ClassId::NEUTRON_STAR_MERGER => {

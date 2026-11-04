@@ -791,6 +791,19 @@ mod tests {
         })
     }
 
+    /// [`budget_galaxy`] with the grid keeping the carved classes' hosts too, the tests' door to the
+    /// grid without the carve-out (P09.T35).
+    fn unclaimed_budget_galaxy() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| {
+            fixture(GalaxyRules {
+                field_share: FieldShareRules::None,
+                carve_out: CarveOutRules::Unclaimed,
+                ..phi_rules()
+            })
+        })
+    }
+
     /// One job of a census: a slab's cells, or a part of a shell's members.
     enum Job {
         Cells(Box<CellSlab>),
@@ -1780,9 +1793,11 @@ mod tests {
             );
         }
 
-        // Where the field keeps φ, it keeps the binary classes' share, and the census takes none
-        // of their hosts by the Sun.
-        let budget = budget_galaxy();
+        // Where the field keeps φ, it keeps the binary classes' share, and where the grid keeps the
+        // carved classes' hosts too (the tests' door to the grid without the carve-out, P09.T35,
+        // which from 27 claims them whatever φ does: one host within 400 ly here), the
+        // census takes none of their hosts by the Sun.
+        let budget = unclaimed_budget_galaxy();
         let query = forced(budget, SUN_LY, 11.0, &[]);
         let (_, tallies) =
             checked_class_census(budget, (&query, 400.0), &KeepClassCells::default(), &[]);
