@@ -478,17 +478,13 @@ async fn resolve_system_names_the_system_or_the_time_it_cannot_use() {
     server.stop().await;
 }
 
-/// The galactic centre's black hole is refused in either mode with a typed error, `unknown_system`
-/// naming `system` as `system_summary` refuses it, rather than a panic: its members have no line
-/// until plan 09's P09.T28 builds the centre's orbits (P12.T2 as built), and plan 08's velocity draw
-/// is a grid record's.
+/// The galactic centre's black hole resolves in either mode: from generator version 27 the
+/// centre's members have their lines (P09.T28's orbits, P10.T10.b's registration of the centre
+/// through the galaxy's list), so `resolve_system` places the black hole at the centre, where
+/// below 27 it refused it with `unknown_system` naming `system` (P12.T2 as built).
 #[tokio::test]
-async fn the_central_black_hole_is_refused_until_its_orbit_is_built() {
-    // Seen at 22; seen again at 23 by P14.T54.a's bump, at 24 by P14.T54.b's, which move no
-    // galaxy member, at 25 by P14.T54.c's, whose Kepler regime moves the grid's systems near the
-    // black hole but builds no line for the black hole itself, at 26 by its second, which
-    // builds none either, and at 27 by its third, whose exact arc moves the centre's members but
-    // builds none for the black hole.
+async fn the_central_black_hole_resolves_at_the_centre() {
+    // Seen at 22 to 26 refused, at 27 resolved.
     assert_eq!(GENERATOR_VERSION.get(), 27, "the version this was seen at");
     let server = TestServer::start().await;
     let mut client = server.connected().await;
@@ -496,7 +492,7 @@ async fn the_central_black_hole_is_refused_until_its_orbit_is_built() {
     let black_hole =
         SystemIdHex::from_u64(SystemId::from(CentreMemberId::CENTRAL_BLACK_HOLE).raw());
     for mode in [QueryModeDto::Now, coreward()] {
-        let error = resolve_one(
+        let resolved = resolve_one(
             &mut client,
             ResolveSystemRequest {
                 universe: universe.id.clone(),
@@ -506,18 +502,9 @@ async fn the_central_black_hole_is_refused_until_its_orbit_is_built() {
             },
         )
         .await
-        .unwrap_err();
-        assert_eq!(
-            (error.code, error.field.as_deref()),
-            (ErrorCode::UnknownSystem, Some("system")),
-            "{mode:?}: {error:?}"
-        );
-        assert!(
-            error.message.contains("cannot be placed yet"),
-            "{}",
-            error.message
-        );
-        assert!(error.message.contains("not built yet"), "{}", error.message);
+        .unwrap();
+        assert_eq!(resolved.record.id, black_hole, "{mode:?}");
+        assert_eq!(resolved.record.position.cell_ly, [0, 0, 0], "{mode:?}");
     }
     // The server is well and answers the next request.
     let seen = ask(&mut client, sphere(&universe.id, coreward())).await;

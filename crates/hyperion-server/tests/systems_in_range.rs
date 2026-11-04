@@ -21,9 +21,13 @@ use hyperion_protocol::{
 };
 use hyperion_server::limits::MAX_QUERY_CELLS;
 use hyperion_sim::coords::LyCell;
+use hyperion_sim::galaxy::catalogue_classes::CatalogueClassSource;
+use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+use hyperion_sim::galaxy::features::members::KeepInteriors;
+use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
 use hyperion_sim::galaxy::placement::{NoCache, resolve};
 use hyperion_sim::galaxy::query::{
-    MassFloor, RangeQuery, RangeResult, SubstellarRequest, range_query,
+    MassFloor, RangeQuery, RangeResult, SubstellarRequest, SystemSource, range_query,
 };
 use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{Layer, SystemId};
@@ -197,7 +201,14 @@ fn sim_answer(galaxy: &Galaxy, query: &Query) -> (RangeQuery, RangeResult) {
         .cell_budget(MAX_QUERY_CELLS)
         .build()
         .expect("the test's queries are valid");
-    let result = range_query(galaxy, &mut NoCache::new(), &[], &sim_query);
+    // From generator version 27 a served query takes the features' members and the catalogue
+    // classes' hosts beside the grid (P09.T40.a, P09.T37.a), as the server's does.
+    let interiors = KeepInteriors::new(galaxy);
+    let members = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+    let classes = CatalogueClassSource::registered_in(galaxy);
+    let mut sources: Vec<&dyn SystemSource> = vec![&members];
+    sources.extend(classes.iter().map(|classes| classes as &dyn SystemSource));
+    let result = range_query(galaxy, &mut NoCache::new(), &sources, &sim_query);
     (sim_query, result)
 }
 

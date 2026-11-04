@@ -18,14 +18,18 @@ use hyperion_protocol::{
 };
 use hyperion_sim::coords::{LyCell, SystemPosition};
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+use hyperion_sim::galaxy::features::gas_overlay::FeatureGas;
 use hyperion_sim::galaxy::gas::ccm::Band;
-use hyperion_sim::galaxy::gas::extinction::{NoiseMode, SIGHTLINE_QUALITY, sightline};
+use hyperion_sim::galaxy::gas::extinction::{NoiseMode, SIGHTLINE_QUALITY, Sightline, sightline};
+use hyperion_sim::galaxy::gas::modifiers::GasModifierSource;
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::placement::{SystemRecord, resolve};
 use hyperion_sim::galaxy::query::position_at;
 use hyperion_sim::id::SystemId;
 use hyperion_sim::observe::{Drift, Trajectory};
 use hyperion_sim::time;
+use hyperion_sim::units::Years;
 use hyperion_sim::units::consts::METRES_PER_AU;
 
 fn sim_time(at: UniverseTime) -> time::UniverseTime {
@@ -80,8 +84,11 @@ async fn a_client_s_system_is_placed_by_its_origin_in_every_request() {
 }
 
 /// Run by [`a_client_s_system_is_placed_by_its_origin_in_every_request`] on its shared server: a
-/// grid target ends at `position_at`, a feature member at its line's position, and each centre
-/// member and a catalogue system are `no_such_system`, beside the others, at the epoch and a
+/// grid target ends at `position_at`, its line through plan 09's features' gas at the request's
+/// time as the server's lines take it from generator version 27 (P09.T40.a), a feature member at
+/// its line's position, and the centre's member, its black hole and a catalogue system on their
+/// lines, which the server traces from 27 (below it `no_such_system`), beside the others, the
+/// black hole's tidal disruption victim `no_such_system` after its disruption, at the epoch and a
 /// century after it; and the next request is answered.
 async fn extinction_ends_each_line_where_the_target_s_origin_places_it(
     server: &TestServer,
@@ -126,19 +133,7 @@ async fn extinction_ends_each_line_where_the_target_s_origin_places_it(
         let Ok(ResponseBody::Extinction(result)) = answer else {
             panic!("extinction at {time:?} answers: {answer:?}");
         };
-        let to_grid = sightline(
-            galaxy.gas(),
-            &hyperion_sim::coords::GalacticPosition::new(
-                LyCell::new(origin.cell_ly),
-                origin.offset_m,
-            )
-            .expect("a canonical position"),
-            &position_at(galaxy, &origins.grid, t),
-            NoiseMode::Realised,
-            SIGHTLINE_QUALITY,
-            &[],
-            &mut NoiseCache::with_capacity(64),
-        );
+        let to_grid = grid_line(galaxy, &origin, &origins.grid, t);
         let [grid, member, on_line, centre @ .., catalogue] = result.targets.as_slice() else {
             panic!("seven answers at {time:?}: {:?}", result.targets);
         };
@@ -155,15 +150,22 @@ async fn extinction_ends_each_line_where_the_target_s_origin_places_it(
         );
         assert!(matches!(member, TargetExtinction::Ok { .. }), "{member:?}");
         assert_eq!(member, on_line, "the feature member at {time:?}");
-        assert_eq!(
-            centre,
-            [const { TargetExtinction::NoSuchSystem }; 3],
-            "the centre's members at {time:?}"
+        // The centre's member and its black hole on their lines; its victim, disrupted before the
+        // epoch, is no system then.
+        assert!(
+            matches!(
+                centre,
+                [
+                    TargetExtinction::Ok { .. },
+                    TargetExtinction::Ok { .. },
+                    TargetExtinction::NoSuchSystem
+                ]
+            ),
+            "the centre's members at {time:?}: {centre:?}"
         );
-        assert_eq!(
-            *catalogue,
-            TargetExtinction::NoSuchSystem,
-            "the catalogue system at {time:?}"
+        assert!(
+            matches!(catalogue, TargetExtinction::Ok { .. }),
+            "the catalogue system at {time:?}: {catalogue:?}"
         );
     }
     let next = client
@@ -184,6 +186,36 @@ async fn extinction_ends_each_line_where_the_target_s_origin_places_it(
     client.close().await;
 }
 
+/// The sim's line from `origin` to `grid` at `t`, through plan 09's features' gas at `t`, as the
+/// server's lines take it from generator version 27 (P09.T40.a).
+fn grid_line(
+    galaxy: &Galaxy,
+    origin: &GalacticPosition,
+    grid: &SystemRecord,
+    t: time::UniverseTime,
+) -> Sightline {
+    let from =
+        hyperion_sim::coords::GalacticPosition::new(LyCell::new(origin.cell_ly), origin.offset_m)
+            .expect("a canonical position");
+    let to = position_at(galaxy, grid, t);
+    let mut modifiers = Vec::new();
+    FeatureGas::new(
+        galaxy,
+        &NoFeatureCache,
+        Years::new(t.since_epoch().as_julian_years_f64()),
+    )
+    .modifiers_near_segment(&from, &to, &mut modifiers);
+    sightline(
+        galaxy.gas(),
+        &from,
+        &to,
+        NoiseMode::Realised,
+        SIGHTLINE_QUALITY,
+        &modifiers,
+        &mut NoiseCache::with_capacity(64),
+    )
+}
+
 /// The wire's pose 1 au from `system`'s barycentre in its frame, at rest, at `time`.
 fn in_frame_of(system: SystemId, time: UniverseTime) -> KinematicsDto {
     KinematicsDto {
@@ -197,35 +229,34 @@ fn in_frame_of(system: SystemId, time: UniverseTime) -> KinematicsDto {
 }
 
 /// Run by [`a_client_s_system_is_placed_by_its_origin_in_every_request`] on its shared server: a
-/// system frame on the grid system or the feature member is accepted, and on each centre member
-/// and the catalogue system is `unknown_system` naming `ship.position`, at the epoch and a century
-/// after it.
+/// system frame on the grid system, the feature member, the centre's member and black hole and the
+/// catalogue system is accepted, at the epoch and a century after it: from generator version 27
+/// the server traces the centre's members and the catalogue's hosts on their lines, where below it
+/// a frame on them was `unknown_system` naming `ship.position`, as one on the black hole's victim,
+/// disrupted before the epoch, still is.
 async fn scene_ship_places_a_system_frame_by_its_origin(server: &TestServer, origins: &Origins) {
     let (mut client, universe) = universe_on(server, "Origins: scene_ship").await;
     for time in [at_years(0), at_years(100)] {
         for record in [origins.grid, origins.member] {
             set_ship(&mut client, &universe, in_frame_of(record.id(), time), 0).await;
         }
-        for id in origins.centre.into_iter().chain([origins.catalogue]) {
-            let error = client
-                .request(RequestBody::SceneShip(SceneShipRequest {
-                    universe: universe.clone(),
-                    ship: in_frame_of(id, time),
-                    time_rate: 0,
-                }))
-                .await
-                .expect_err("a centre member or a catalogue system cannot be placed yet");
-            assert_eq!(
-                (error.code, error.field.as_deref()),
-                (ErrorCode::UnknownSystem, Some("ship.position")),
-                "{id:?} at {time:?}: {error:?}"
-            );
-            assert!(
-                error.message.contains("cannot be placed yet"),
-                "{}",
-                error.message
-            );
+        let [member, black_hole, victim] = origins.centre;
+        for id in [member, black_hole, origins.catalogue] {
+            set_ship(&mut client, &universe, in_frame_of(id, time), 0).await;
         }
+        let error = client
+            .request(RequestBody::SceneShip(SceneShipRequest {
+                universe: universe.clone(),
+                ship: in_frame_of(victim, time),
+                time_rate: 0,
+            }))
+            .await
+            .expect_err("a victim after its disruption cannot be placed");
+        assert_eq!(
+            (error.code, error.field.as_deref()),
+            (ErrorCode::UnknownSystem, Some("ship.position")),
+            "{victim:?} at {time:?}: {error:?}"
+        );
     }
     client.close().await;
 }

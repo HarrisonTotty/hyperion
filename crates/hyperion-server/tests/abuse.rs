@@ -289,15 +289,17 @@ async fn two_hundred_queries_fired_at_once_end_in_exactly_two_hundred_terminal_m
 /// Closing the socket with a 1,024-pixel map in flight leaves the pool with nothing queued.
 ///
 /// One worker and the dearest raster there is: 32 bands, each of them seconds of work (plan 04,
-/// "Measured map costs"), so the map cannot finish while the test runs. The galaxy is warmed first,
-/// or the one worker would still be building it and no band would ever be queued; the pool's
+/// "Measured map costs"), so the map cannot finish while the test runs. The galaxy and its global
+/// list are warmed first, or the one worker would still be building them and no band or query
+/// would ever be queued; the pool's
 /// counters are then read before the close, so that a map which never reached the pool fails this
 /// test instead of letting it pass on an empty queue. Four range queries are then queued behind the
 /// band in hand, because the two kinds of work stop by different routes: a band nobody waits for is
 /// skipped because its flight is dropped with the last waiter, while a query's job is skipped only
 /// because the closing connection cancels its request's token. After the close every job still
 /// queued is skipped rather than computed, which the pool's `cancelled` counter shows — the 31
-/// bands and the 4 queries, measured, against two jobs run: the galaxy and the band in hand. That
+/// bands and the 4 queries, measured, against the jobs that warmed the galaxy and its list and the
+/// band in hand. That
 /// band runs to its end, which is a CPU wait of some seconds and not a network one; the harness's
 /// [`patience`](common::patience) is sized for it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -314,6 +316,14 @@ async fn closing_a_socket_with_a_map_in_flight_leaves_the_pool_idle() {
     let universe = client.create_universe("Kepler Reach", SEED).await;
     open(&mut client, &universe.id).await;
     assert_eq!(server.stats().galaxies().builds(), 1, "the galaxy is warm");
+    // From generator version 27 a range query reads the galaxy's global list, which the first
+    // builds at bulk priority (P10.T10.b): warmed too, or the queries below would wait behind the
+    // bands for it, with no job of their own queued.
+    let warm = client
+        .request(Query::around([0, 26_000, 0]).body(&universe.id))
+        .await;
+    assert!(warm.is_ok(), "the warming query is answered: {warm:?}");
+    let warmed = server.stats().pool().completed();
 
     client
         .send_request(map_body(&universe.id, MapView::EdgeOn, 1_024))
@@ -372,16 +382,16 @@ async fn closing_a_socket_with_a_map_in_flight_leaves_the_pool_idle() {
     );
     // The jobs still queued were skipped rather than computed. One of them may have reached a
     // worker in the instant between the count above and the close taking effect, so the count is
-    // held to one less; that job is also why `completed` is allowed a third beside the galaxy build
-    // and the band in hand. A query that ran would be a fourth.
+    // held to one less; that job is also why `completed` is allowed a second beside the band in
+    // hand, after the jobs that warmed the galaxy and its list. A query that ran would be a third.
     assert!(
         idle.pool().cancelled() + 1 >= queued,
         "the {queued} jobs still queued were skipped: {:?}",
         idle.pool()
     );
     assert!(
-        idle.pool().completed() <= 3,
-        "no job that nobody waited for was computed: {:?}",
+        idle.pool().completed() - warmed <= 2,
+        "no job that nobody waited for was computed: {:?} after {warmed} warming",
         idle.pool()
     );
     assert_eq!(

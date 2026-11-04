@@ -1276,28 +1276,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn the_remnants_map_of_a_galaxy_without_displaced_classes_is_empty() {
-        // Below version 26 no galaxy holds plan 08's classes (P08.T15.b's lean, 2026-11-01).
-        assert!(galaxy().fields().displaced().is_none());
-        let (pool, service) = service(4);
-        for view in [MapView::FaceOn, MapView::EdgeOn] {
-            let map = get(&service, key(view, MapPopulation::LayerERemnants)).await;
-            assert!(
-                map.log10()
-                    .iter()
-                    .all(|value| value.to_bits() == EMPTY.to_bits()),
-                "{view:?}"
-            );
-            // Plan 04's map with no systems: floor and ceiling 0, and every code 0.
-            let quantised = quantise_map(&map, view, CodeDepth::Sixteen);
-            assert_same_bits(quantised.floor_log10, 0.0);
-            assert_same_bits(quantised.ceiling_log10, 0.0);
-            assert!(quantised.bytes.iter().all(|&byte| byte == 0), "{view:?}");
-        }
-        pool.shutdown().await.unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn under_every_27_hold_the_remnants_map_counts_some_of_every_systems_column() {
         // Face-on alone: the edge-on remnants map integrates each class across a pixel, 117 s for
         // 128 pixels on 16 workers (2026-11-01), too long for the fast suite.
@@ -1388,26 +1366,19 @@ mod tests {
                 .map(|((view, population), digests)| (view, population, digests))
                 .collect()
         };
-        // Below 27 no galaxy holds a displaced class, so 25's and 26's maps are 24's.
-        let below_27 = [
-            [0x28fe_6e26_a1f8_9459, 0x38de_73f1_0602_7e29],
-            [0x5cf9_55c1_1e72_5bb5, 0x3e53_0f4f_1938_81ad],
-            [0xc47b_e078_1812_156d, 0xa490_3c53_7e32_c7ed],
-            [0x6100_71ec_88ba_0635, 0xb229_d6bf_983c_12dd],
-        ];
-        let at_24 = all_and_young(below_27);
-        let at_25 = all_and_young(below_27);
-        let at_26 = all_and_young(below_27);
         // The edge-on view keeps the field's picture for every system and the young disc (lean,
         // 2026-10-31), so only the face-on maps move at 27: the young disc's as the displaced
         // classes moved it at 26 before they rode 27, and every system's, which 27's other holds
-        // move too, as measured (2026-11-01).
+        // move too, as measured (2026-11-01). From 27 a galaxy of every version holds the
+        // displaced classes, which the build reads at every version (P08.T12), so 24's to 26's
+        // maps are 27's (re-pinned at 27; below it they were the field's alone).
         let at_27 = all_and_young([
             [0x67ee_098e_33c7_e281, 0x93af_5b4a_58a3_a369],
             [0x7983_a2b3_48a4_17ad, 0x0a05_9b07_aaea_486d],
-            below_27[2],
-            below_27[3],
+            [0xc47b_e078_1812_156d, 0xa490_3c53_7e32_c7ed],
+            [0x6100_71ec_88ba_0635, 0xb229_d6bf_983c_12dd],
         ]);
+        let (at_24, at_25, at_26) = (at_27.clone(), at_27.clone(), at_27.clone());
         let mut all = moved(galaxy_24, "24", &at_24).await;
         all.extend(moved(galaxy_25, "25", &at_25).await);
         all.extend(moved(galaxy_26, "26", &at_26).await);

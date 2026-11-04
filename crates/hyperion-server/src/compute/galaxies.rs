@@ -2,11 +2,12 @@
 //!
 //! A [`Galaxy`] is where a universe's seed becomes a model: the drawn and derived parameters, the
 //! mass model with its potential tables in the plane, the density fields and the layer shares.
-//! Building one costs about 130 ms and about 1.4 MiB of heap (plan 02, Risks, R19), so it is built
-//! once per universe on the CPU pool and then kept. Because a `Galaxy` is fixed-size, bounding the
-//! entries bounds the bytes, so this cache holds [`GALAXY_CACHE_ENTRIES`] galaxies rather than a
-//! budget in bytes (plan 04, design note 23): four of them, about 5.5 MiB, which is a bridge's worth
-//! of universes open at once.
+//! Building one costs about 130 ms and about 1.4 MiB of heap (plan 02, Risks, R19), from generator
+//! version 27 about 2.9 MiB with plan 08's displaced classes and their class table (P08.T12), so it
+//! is built once per universe on the CPU pool and then kept. Because a `Galaxy` is fixed-size,
+//! bounding the entries bounds the bytes, so this cache holds [`GALAXY_CACHE_ENTRIES`] galaxies
+//! rather than a budget in bytes (plan 04, design note 23): four of them, about 12 MiB, which is a
+//! bridge's worth of universes open at once.
 //!
 //! The key is a [`GalaxyKey`], `(seed, generator_version)`, so two saves of one seed share one
 //! galaxy. Callers that ask for one key at once share one build through a [`SingleFlight`], and if
@@ -222,7 +223,7 @@ impl GalaxyCache {
                     return Ok(galaxy);
                 }
                 let galaxy = build_on_pool(&pool, build, key).await?;
-                // The galaxy it replaces or evicts is dropped outside the lock: freeing 1.4 MiB is
+                // The galaxy it replaces or evicts is dropped outside the lock: freeing 2.9 MiB is
                 // not the business of a critical section every request passes through.
                 let dropped = lock(&held).insert(key, Arc::clone(&galaxy));
                 drop(dropped);
@@ -382,9 +383,11 @@ mod tests {
         let counters = cache.counters();
         assert_eq!((counters.builds(), counters.entries()), (1, 1));
         assert_eq!(counters.bytes(), first.heap_bytes(), "the galaxy held");
+        // From 27 a galaxy holds plan 08's displaced classes and their class table (P08.T12),
+        // which take it from about 1.4 MiB to about 2.9 MiB (3,048,066 bytes, measured at 27).
         assert!(
-            (1 << 20..2 << 20).contains(&counters.bytes()),
-            "a galaxy is about 1.4 MiB, not {} bytes",
+            (2 << 20..4 << 20).contains(&counters.bytes()),
+            "a galaxy is about 2.9 MiB, not {} bytes",
             counters.bytes()
         );
 

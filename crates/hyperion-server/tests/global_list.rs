@@ -202,11 +202,11 @@ fn a_stream_member() -> GlobalMemberRecord {
 }
 
 /// P10.T10.b: a stream's member is summarised through the galaxy's list, now, with its stars,
-/// and the table of its stream is built and kept for it; observed, it is refused naming `mode`,
-/// and `resolve_system` refuses it naming `system`, since the sim does not trace a list member's
-/// motion yet.
+/// and the table of its stream is built and kept for it; from generator version 27, which traces a
+/// list member's motion on its line (P10.T10.b's registration), it is summarised observed too and
+/// `resolve_system` places it, where below 27 both refused it.
 #[tokio::test]
-async fn a_stream_member_is_summarised_through_the_list_and_refused_where_its_motion_is_needed() {
+async fn a_stream_member_is_summarised_through_the_list_and_placed_on_its_line() {
     let member = a_stream_member();
     let (server, mut client, universe) = a_universe().await;
     let system = SystemIdHex::from_u64(member.record().id().raw());
@@ -236,29 +236,20 @@ async fn a_stream_member_is_summarised_through_the_list_and_refused_where_its_mo
             offset_m: [0.0; 3],
         },
     };
-    let refused = client
-        .request(summary(observer))
-        .await
-        .expect_err("its motion is not traced");
-    assert_eq!(
-        (refused.code, refused.field.as_deref()),
-        (ErrorCode::BadRequest, Some("mode"))
-    );
+    match client.request(summary(observer)).await {
+        Ok(ResponseBody::SystemSummary(answer)) => assert_eq!(answer.system, system),
+        other => panic!("expected the member's observed summary, got {other:?}"),
+    }
     let resolve = RequestBody::ResolveSystem(ResolveSystemRequest {
         universe: universe.clone(),
         system: system.clone(),
         time: origins::at_years(0),
         mode: QueryModeDto::Now,
     });
-    let refused = client.request(resolve).await.expect_err("not placed yet");
-    assert_eq!(
-        (refused.code, refused.field.as_deref()),
-        (ErrorCode::UnknownSystem, Some("system"))
-    );
-    assert!(
-        refused.message.contains("cannot be placed yet"),
-        "{refused:?}"
-    );
+    match client.request(resolve).await {
+        Ok(ResponseBody::ResolveSystem(answer)) => assert_eq!(answer.record.id, system),
+        other => panic!("expected the member placed on its line, got {other:?}"),
+    }
     client.close().await;
     server.stop().await;
 }

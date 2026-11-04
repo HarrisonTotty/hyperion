@@ -805,10 +805,21 @@ async fn a_pinned_systems_summary_is_the_sims_companions_included(server: &TestS
             assert_eq!(answer.existence, SystemExistenceDto::Exists);
             assert_eq!(answer.stars.len(), usize::from(stars.star_count()));
             assert_summary_is_the_sims(&answer, &stars, sim_time(answer.time));
-            // From version 26 every star's running events are computed and sent (P06.T28.g).
-            for star in &answer.stars {
-                assert!(star.active_events.is_some());
+            // From version 26 every star's running events are computed and sent (P06.T28.g), but
+            // a star its pair has changed, whose events are not composed (`None`): from 27 the
+            // pairs' timelines change some of the pinned systems' stars (P14.T1.e–g).
+            let sim = stars.summary_at(sim_time(answer.time));
+            for (star, own) in answer.stars.iter().zip(sim.stars()) {
+                assert_eq!(
+                    star.active_events.is_some(),
+                    own.active_events().is_some(),
+                    "{raw:#x} at {years} yr"
+                );
             }
+            assert!(
+                answer.stars.iter().any(|star| star.active_events.is_some()),
+                "{raw:#x} at {years} yr"
+            );
         }
         shapes.push(stars.star_count());
     }

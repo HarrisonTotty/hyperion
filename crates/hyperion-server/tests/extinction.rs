@@ -18,13 +18,17 @@ use hyperion_server::limits::MAX_EXTINCTION_TARGETS;
 use hyperion_sim::Seed;
 use hyperion_sim::coords::LyCell;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+use hyperion_sim::galaxy::features::gas_overlay::FeatureGas;
 use hyperion_sim::galaxy::gas::ccm::Band;
 use hyperion_sim::galaxy::gas::extinction::{NoiseMode, SIGHTLINE_QUALITY, sightline};
+use hyperion_sim::galaxy::gas::modifiers::GasModifierSource;
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve};
 use hyperion_sim::galaxy::query::position_at;
 use hyperion_sim::id::{DecodeSystemIdError, SystemId};
 use hyperion_sim::time;
+use hyperion_sim::units::Years;
 
 /// The seed of every universe these tests create, the other integration tests' own.
 const SEED: u64 = 0x4d2;
@@ -144,13 +148,23 @@ async fn a_system_target_is_the_sims_line_to_where_the_system_is() {
 
     let record = resolve(galaxy(), SystemId::from_raw(SYSTEM).unwrap()).unwrap();
     let at = time::UniverseTime::new(time.seconds, time.nanos).unwrap();
+    // From generator version 27 the server's lines take plan 09's features' gas at the request's
+    // time (P09.T40.a): a hole of a superbubble along this one.
+    let (from, to) = (sim_position(&origin), position_at(galaxy(), &record, at));
+    let mut modifiers = Vec::new();
+    FeatureGas::new(
+        galaxy(),
+        &NoFeatureCache,
+        Years::new(at.since_epoch().as_julian_years_f64()),
+    )
+    .modifiers_near_segment(&from, &to, &mut modifiers);
     let line = sightline(
         galaxy().gas(),
-        &sim_position(&origin),
-        &position_at(galaxy(), &record, at),
+        &from,
+        &to,
         NoiseMode::Realised,
         SIGHTLINE_QUALITY,
-        &[],
+        &modifiers,
         &mut NoiseCache::with_capacity(64),
     );
     assert_eq!(
