@@ -1,6 +1,5 @@
-//! The network under generator version 27's registry (P14.T52.e, `CARRIERS_VERSION`): its
-//! further carriers, SH, OH, S⁺, C⁺, H⁺, N⁺, O⁺, P, P₂, PO, PH₂ and Cl, P and Cl solved, with the
-//! plan's tests and 26's network's tests rerun under it.
+//! The network under generator version 27's registry (P14.T52.e): its further carriers, SH, OH,
+//! S⁺, C⁺, H⁺, N⁺, O⁺, P, P₂, PO, PH₂ and Cl, P and Cl solved, with the plan's tests.
 //!
 //! The FastChem values are FastChem 4.0.3's, run by hand outside the repository as the asserted
 //! cases' ([`Case`]) were, as pyfastchem 4.0.3 from `PyPI` built under `CPython` 3.12, its data
@@ -22,18 +21,20 @@ const CARRIERS: [&str; 12] = [
 ];
 
 /// Under 27's registry the network carries every carrier as a species of its solved elements
-/// (each holds only H, C, N, O, S, P and Cl), over the same 300–6,000 K; 26's network carries
-/// none.
+/// (each holds only H, C, N, O, S, P and Cl), over the same 300–6,000 K, its last species.
 #[test]
 fn under_27_the_network_carries_the_carriers() {
-    let held: Vec<SubstanceId> = network().species().collect();
     with_every_27_hold(|| {
         let network = network();
         assert!((network.floor().value() - 300.0).abs() < 1e-9);
         assert!((network.ceiling().value() - 6_000.0).abs() < 1e-9);
         let carried: Vec<SubstanceId> = network.species().collect();
-        assert_eq!(carried.len(), held.len() + CARRIERS.len());
-        assert_eq!(&carried[..held.len()], &held[..]);
+        let last = carried.len() - CARRIERS.len();
+        let keys: Vec<String> = carried[last..]
+            .iter()
+            .map(|id| id.substance().key().as_str().to_owned())
+            .collect();
+        assert_eq!(keys, CARRIERS);
         for key in CARRIERS {
             let place = carried
                 .iter()
@@ -82,7 +83,6 @@ fn under_27_phosphorus_and_chlorine_are_solved() {
             Err(BuildNetworkError::TwoTraceAtoms { .. })
         ));
     });
-    assert_eq!(network().solved, MAJOR_ELEMENTS.len());
 }
 
 /// A gas row holding two atoms of a trace element is refused until the element is solved: 27's
@@ -165,15 +165,12 @@ fn under_27_oh_holds_its_share_at_3000_k_and_10_mbar() {
 
 /// The electrons at 6,000 K and 10 mbar, where H⁺ gives most of them: 6.329 × 10⁻⁴ here, against
 /// FastChem's 6.316 × 10⁻⁴ (matched) and 6.326 × 10⁻⁴ (full), within 1% (+0.2% and +0.04%); 26's
-/// network, without H⁺, C⁺ or S⁺, is about 6× low. H⁺ gives over three quarters of them
+/// network, without H⁺, C⁺ or S⁺, was about 6× low. H⁺ gives over three quarters of them
 /// (FastChem's full run: 0.80).
 #[test]
 fn under_27_the_electrons_at_6000_k_and_10_mbar_are_the_run_s() {
     let g = gas(1.0, None, None);
     let electron = row("e-");
-    let held = solve_at(&network(), &g, 6_000.0, 0.01)
-        .mole_fraction(electron)
-        .unwrap();
     with_every_27_hold(|| {
         let got = solve_at(&network(), &g, 6_000.0, 0.01);
         let electrons = got.mole_fraction(electron).unwrap();
@@ -184,7 +181,6 @@ fn under_27_the_electrons_at_6000_k_and_10_mbar_are_the_run_s() {
             );
         }
         assert!(got.mole_fraction(row("H+")).unwrap() > 0.75 * electrons);
-        assert!(electrons > 4.0 * held, "26's {held:e}");
     });
 }
 
@@ -205,7 +201,32 @@ fn under_27_every_asserted_case_is_within_its_tolerance() {
     with_every_27_hold(|| every_case_is_within_its_tolerance(&CASES_27));
 }
 
-/// [`CASES`] rerun under 27's network with condensation, the species condensation moves left out
+/// The asserted cases.
+///
+/// - **In Heng and Tsai's domain** (500–3,000 K; C, H, O, N and He, with S in one case), FastChem's
+///   full `logK.dat` network: each carrier within 2.5%. Heng and Tsai find their own solution
+///   "accurate at the ∼1% level"; the misses here, at most 1.9% (CO at 1,100 K and 1 bar), are the
+///   two thermochemistries', CEA's records and FastChem's fits.
+/// - **Network-matched** (`logK.dat`'s entries for this network's species alone, cut from it by
+///   the lane's scratch script, every element but Ni, P and Cl; FastChem adds every element's
+///   atom, so the species are this network's but CH₃OH and C₂H₆, which its data does not hold and
+///   which hold under 0.2% of the carbon on the grid here): each carrier holding most of its
+///   element within 1% (2% for H₂O and CO at 2,500 K and 100 bar), the rest within the
+///   thermochemistries' difference, entry by entry: NH₃, CO, CO₂, CH₄ and TiO 5% where they hold a
+///   minor share, HCN 20%, CH₄ beside CO 30% at 2,500 K, Ti 25%; on the 4,600 K dayside the
+///   iron's ionisation, CEA's K for Fe ⇌ Fe⁺ + e⁻ being 0.92 of FastChem's there (the two runs'
+///   x(Fe⁺) x(e⁻) ÷ x(Fe)): Fe⁺ 5% though it holds 56–82% of the iron, Fe 10%, the electrons and
+///   H⁻, which carry it, 2%, and Mg and Si⁺, each the minor state of its metal, 2%; and vanadium,
+///   whose VO record differs most (CEA's K for VO is 0.10–0.41 of FastChem's at 1,000–2,500 K),
+///   VO 20–80% and the V atom up to 4.5 times.
+///
+/// The runs: `fastchem_run.py <site-packages> <logK file> <cases.json> <work dir> <out.json>`, a
+/// scratch driver that writes each case's abundance file (`e-` at 0, then A(X) per element), builds
+/// `pyfastchem.FastChem(abundance file, logK file, 0)`, sets the case's parameters, calls
+/// `calcDensities` over its (T, p) points in bar, and writes each species' number density over the
+/// sum of all of them, electrons included; every point's flag was `FASTCHEM_SUCCESS`.
+///
+/// Each rerun under 27's network with condensation, the species condensation moves left out
 /// ([`under_27_every_asserted_case_is_within_its_tolerance`]).
 const CASES_27: [Case; 11] = [
     Case {
@@ -487,33 +508,6 @@ fn under_27_an_absent_element_leaves_its_species_at_zero() {
             }
         }
         assert!(got.charge_imbalance().abs() < 1e-12);
-    });
-}
-
-/// 26's network's tests, but the hydrogen-alone case and the start's (each beside them), hold
-/// under 27's network as they stand: conservation over the domain, the boundaries and fields, the
-/// dayside, the held floor, the refusals, continuity, determinism, order independence and the
-/// fixed point's bits.
-#[test]
-fn under_27_the_network_meets_26_s_tests() {
-    with_every_27_hold(|| {
-        the_registry_s_network_builds();
-        elements_and_charge_are_conserved_over_the_domain();
-        methane_equals_carbon_monoxide_at_lodders_and_fegley_s_boundary();
-        ammonia_equals_nitrogen_at_lodders_and_fegley_s_boundary();
-        hydrogen_sulphide_is_the_dominant_sulphur_gas();
-        atomic_sulphur_is_the_dominant_sulphur_gas_past_its_line();
-        iron_is_monatomic_above_its_cloud();
-        a_kelt_9b_like_dayside_is_atomic_and_ionised();
-        below_the_floor_the_floor_s_composition_is_held();
-        carbon_richer_than_oxygen_is_accepted();
-        a_gas_beyond_hydrogen_dominance_is_refused();
-        each_refusal_names_its_cause();
-        the_composition_is_continuous_in_temperature();
-        the_solution_is_deterministic();
-        a_shared_network_is_order_independent();
-        stopping_at_the_fixed_point_gives_the_fixed_count_s_bits();
-        a_network_that_cannot_be_built_is_refused();
     });
 }
 

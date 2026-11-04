@@ -62,7 +62,7 @@
 //! `FeH` has no CEA record ([`NOT_MODELLED`]; a closed set, for the composition audit), so P14.T52.d
 //! takes its thermochemistry from elsewhere or labels it. P14.T52.e's carriers (SH, OH, S⁺, C⁺,
 //! H⁺, N⁺, O⁺, P, P₂, PO, PH₂ and Cl), rows from generator version 27, take their records
-//! from `tables::thermo_27` until then (P₂ its reference gas's); P⁺ and Cl⁺ are not registry rows:
+//! from `tables::thermo_27` (P₂ its reference gas's); P⁺ and Cl⁺ are not registry rows:
 //! CEA holds them, and a row added later takes its record by a refit.
 //!
 //! # A second thermochemistry
@@ -99,8 +99,7 @@ pub const NOT_MODELLED: [(&str, &str); 1] = [(
 
 /// Each gas row's record, by key, in registry order: every gas row but [`NOT_MODELLED`]'s, with
 /// P14.T52.e's carriers last, from their own table (`tables::thermo_27`; P₂'s is phosphorus's
-/// reference gas), which join the registry at generator version 27 (`CARRIERS_VERSION`); until
-/// then no id reaches theirs.
+/// reference gas), rows from generator version 27.
 const RECORDS: [(&str, &[Interval]); 72] = [
     ("H2", &table::H2),
     ("He", &table::HE),
@@ -600,10 +599,7 @@ impl Error for BalanceReactionError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::substance::{
-        CarriersRules, EQUILIBRIUM_HYDROGEN, by_key, carriers_ahead, heat_capacity_over_r_at, ids,
-        with_carriers,
-    };
+    use crate::substance::{EQUILIBRIUM_HYDROGEN, by_key, heat_capacity_over_r_at, ids};
 
     /// The row whose key is `key`.
     fn row(key: &str) -> SubstanceId {
@@ -1206,14 +1202,6 @@ mod tests {
     /// independent Python evaluation gives them. Measured, every value is the Python's to the bit.
     #[test]
     fn substance_formation_reproduces_the_cea_records() {
-        // Under 27's registry, so that P14.T52.e's carriers are rows; the others' are the same.
-        with_carriers(CarriersRules::Carried, || {
-            the_cea_records_are_reproduced_under_the_rules_in_force();
-        });
-    }
-
-    /// [`substance_formation_reproduces_the_cea_records`]'s checks, every entry's row in force.
-    fn the_cea_records_are_reproduced_under_the_rules_in_force() {
         let mut worst = 0.0_f64;
         for (key, temperatures, values) in CEA {
             for (t, expected) in temperatures.into_iter().zip(values) {
@@ -1254,29 +1242,16 @@ mod tests {
         "Cr+", "Mn+", "Ni+", "Zn+", "TiO", "VO", "SiO", "FeH", "OH", "S", "N", "C",
     ];
 
-    /// The species T52.a may want that are not registry rows below generator version 27: CEA holds
-    /// each, and a row added later takes its record by a refit.
-    const NOT_ROWS: [&str; 5] = ["P", "Cl", "P+", "Cl+", "OH"];
-
-    /// Those of [`NOT_ROWS`] that P14.T52.e's carriers make rows at 27.
-    const ROWS_AT_27: [&str; 3] = ["P", "Cl", "OH"];
+    /// The species T52.a may want that are not registry rows: CEA holds each, and a row added later
+    /// takes its record by a refit. (P, Cl and OH, rows from generator version 27, were too.)
+    const NOT_ROWS: [&str; 2] = ["P+", "Cl+"];
 
     /// Every gas row that T52.a or T52.b names has an entry, but `FeH`, which CEA does not hold (and
     /// the species that are not rows); and every gas row of the registry has one but `FeH`, the
-    /// records of P14.T52.e's carriers following, under 26's registry and 27's.
+    /// records of P14.T52.e's carriers last.
     #[test]
     fn substance_formation_every_gas_row_of_the_chemistry_has_an_entry() {
-        for rules in [CarriersRules::Held, CarriersRules::Carried] {
-            with_carriers(rules, || every_gas_row_has_an_entry(rules));
-        }
-    }
-
-    /// [`substance_formation_every_gas_row_of_the_chemistry_has_an_entry`]'s checks under `rules`.
-    fn every_gas_row_has_an_entry(rules: CarriersRules) {
-        let not_rows: Vec<&str> = NOT_ROWS
-            .into_iter()
-            .filter(|key| rules == CarriersRules::Held || !ROWS_AT_27.contains(key))
-            .collect();
+        let not_rows = NOT_ROWS;
         for key in NAMED {
             match by_key(key) {
                 None => assert!(not_rows.contains(&key), "{key} is a row"),
@@ -1290,9 +1265,7 @@ mod tests {
         for &key in &not_rows {
             assert_eq!(by_key(key), None, "{key}");
         }
-        // The carriers ahead of their bump have their records already, last.
         let gas_rows: Vec<String> = ids()
-            .chain(carriers_ahead())
             .filter(|id| id.substance().gas().is_some())
             .map(|id| id.substance().key().as_str().to_owned())
             .collect();
@@ -1322,12 +1295,6 @@ mod tests {
     /// below or above it, nor at a temperature that is not positive and finite.
     #[test]
     fn substance_formation_is_never_extrapolated() {
-        // Under 27's registry, so that every record's row is in force.
-        with_carriers(CarriersRules::Carried, no_record_is_extrapolated);
-    }
-
-    /// [`substance_formation_is_never_extrapolated`]'s checks.
-    fn no_record_is_extrapolated() {
         for &(key, _) in &RECORDS {
             let (lower, upper) = formation_range(row(key)).unwrap();
             let (lower, upper) = (lower.value(), upper.value());

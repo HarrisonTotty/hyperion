@@ -340,289 +340,6 @@ const CHONS: [Element; 6] = [
     Element::S,
 ];
 
-/// The asserted cases.
-///
-/// - **In Heng and Tsai's domain** (500–3,000 K; C, H, O, N and He, with S in one case), FastChem's
-///   full `logK.dat` network: each carrier within 2.5%. Heng and Tsai find their own solution
-///   "accurate at the ∼1% level"; the misses here, at most 1.9% (CO at 1,100 K and 1 bar), are the
-///   two thermochemistries', CEA's records and FastChem's fits.
-/// - **Network-matched** (`logK.dat`'s entries for this network's species alone, cut from it by
-///   the lane's scratch script, every element but Ni, P and Cl; FastChem adds every element's
-///   atom, so the species are this network's but CH₃OH and C₂H₆, which its data does not hold and
-///   which hold under 0.2% of the carbon on the grid here): each carrier holding most of its
-///   element within 1% (2% for H₂O and CO at 2,500 K and 100 bar), the rest within the
-///   thermochemistries' difference, entry by entry: NH₃, CO, CO₂, CH₄ and TiO 5% where they hold a
-///   minor share, HCN 20%, CH₄ beside CO 30% at 2,500 K, Ti 25%; on the 4,600 K dayside the
-///   iron's ionisation, CEA's K for Fe ⇌ Fe⁺ + e⁻ being 0.92 of FastChem's there (the two runs'
-///   x(Fe⁺) x(e⁻) ÷ x(Fe)): Fe⁺ 5% though it holds 56–82% of the iron, Fe 10%, the electrons and
-///   H⁻, which carry it, 2%, and Mg and Si⁺, each the minor state of its metal, 2%; and vanadium,
-///   whose VO record differs most (CEA's K for VO is 0.10–0.41 of FastChem's at 1,000–2,500 K),
-///   VO 20–80% and the V atom up to 4.5 times.
-///
-/// The runs: `fastchem_run.py <site-packages> <logK file> <cases.json> <work dir> <out.json>`, a
-/// scratch driver that writes each case's abundance file (`e-` at 0, then A(X) per element), builds
-/// `pyfastchem.FastChem(abundance file, logK file, 0)`, sets the case's parameters, calls
-/// `calcDensities` over its (T, p) points in bar, and writes each species' number density over the
-/// sum of all of them, electrons included; every point's flag was `FASTCHEM_SUCCESS`.
-const CASES: [Case; 12] = [
-    Case {
-        label: "Heng and Tsai, protosolar, 1,100 K, 1 bar",
-        metallicity: 1.0,
-        c_to_o: None,
-        elements: &CHON,
-        temperature: 1_100.0,
-        bar: 1.0,
-        species: &[
-            ("H2", 8.363_465e-1, 0.025),
-            ("He", 1.622_554e-1, 0.025),
-            ("H2O", 8.673_945e-4, 0.025),
-            ("CH4", 3.193_520e-4, 0.025),
-            ("NH3", 2.029_436e-6, 0.025),
-            ("N2", 6.708_772e-5, 0.025),
-            ("CO", 1.420_280e-4, 0.025),
-        ],
-    },
-    Case {
-        label: "Heng and Tsai, ten times protosolar, 2,000 K, 1 bar",
-        metallicity: 10.0,
-        c_to_o: None,
-        elements: &CHON,
-        temperature: 2_000.0,
-        bar: 1.0,
-        species: &[
-            ("H2", 8.265_517e-1, 0.025),
-            ("He", 1.612_634e-1, 0.025),
-            ("H2O", 5.440_817e-3, 0.025),
-            ("N2", 6.766_539e-4, 0.025),
-            ("CO", 4.580_428e-3, 0.025),
-        ],
-    },
-    Case {
-        label: "Heng and Tsai, C/O 1, 1,500 K, 1 bar",
-        metallicity: 1.0,
-        c_to_o: Some(1.0),
-        elements: &CHON,
-        temperature: 1_500.0,
-        bar: 1.0,
-        species: &[
-            ("H2", 8.367_801e-1, 0.025),
-            ("He", 1.620_775e-1, 0.025),
-            ("H2O", 4.957_920e-5, 0.025),
-            ("CH4", 4.933_600e-5, 0.025),
-            ("N2", 6.771_651e-5, 0.025),
-            ("CO", 9.589_850e-4, 0.025),
-        ],
-    },
-    Case {
-        label: "Heng and Tsai with sulphur, protosolar, 1,100 K, 1 bar",
-        metallicity: 1.0,
-        c_to_o: None,
-        elements: &CHONS,
-        temperature: 1_100.0,
-        bar: 1.0,
-        species: &[
-            ("H2", 8.363_194e-1, 0.025),
-            ("H2O", 8.673_858e-4, 0.025),
-            ("CH4", 3.193_433e-4, 0.025),
-            ("N2", 6.708_777e-5, 0.025),
-            ("CO", 1.420_366e-4, 0.025),
-            ("H2S", 2.717_599e-5, 0.025),
-        ],
-    },
-    Case {
-        label: "network-matched, protosolar, 1,000 K, 1 bar",
-        metallicity: 1.0,
-        c_to_o: None,
-        elements: &NETWORK_MATCHED,
-        temperature: 1_000.0,
-        bar: 1.0,
-        species: &[
-            ("H2", 8.358_690e-1, 0.01),
-            ("He", 1.622_282e-1, 0.01),
-            ("H2O", 9.262_451e-4, 0.01),
-            ("CH4", 4.435_390e-4, 0.01),
-            ("NH3", 3.679_173e-6, 0.05),
-            ("N2", 6.625_232e-5, 0.01),
-            ("CO", 1.788_374e-5, 0.05),
-            ("H2S", 2.717_229e-5, 0.01),
-            ("Na", 3.750_821e-6, 0.01),
-            ("K", 2.421_733e-7, 0.01),
-            ("Fe", 5.421_585e-5, 0.01),
-            ("Mg", 6.670_007e-5, 0.01),
-            ("Ca", 3.927_591e-6, 0.01),
-            ("SiO", 6.518_179e-5, 0.01),
-            ("TiO", 1.600_022e-7, 0.01),
-            ("VO", 1.836_965e-8, 0.01),
-            ("Al", 5.421_585e-6, 0.01),
-            ("Mn", 5.944_650e-7, 0.01),
-            ("Zn", 8.397_041e-8, 0.01),
-            ("Cr", 8.397_041e-7, 0.01),
-        ],
-    },
-    Case {
-        label: "network-matched, protosolar, 1,500 K, 10 mbar",
-        metallicity: 1.0,
-        c_to_o: None,
-        elements: &NETWORK_MATCHED,
-        temperature: 1_500.0,
-        bar: 0.01,
-        species: &[
-            ("H2", 8.363_122e-1, 0.01),
-            ("H2O", 4.821_642e-4, 0.01),
-            ("N2", 6.802_390e-5, 0.01),
-            ("CO", 4.609_005e-4, 0.01),
-            ("H2S", 2.711_017e-5, 0.01),
-            ("K", 2.406_126e-7, 0.01),
-            ("Fe", 5.416_324e-5, 0.01),
-            ("SiO", 6.511_853e-5, 0.01),
-            ("TiO", 1.596_606e-7, 0.01),
-            ("VO", 1.769_126e-8, 0.2),
-            ("V", 6.616_335e-10, 4.5),
-        ],
-    },
-    Case {
-        label: "network-matched, a hundred times protosolar, 1,000 K, 10 mbar",
-        metallicity: 100.0,
-        c_to_o: None,
-        elements: &NETWORK_MATCHED,
-        temperature: 1_000.0,
-        bar: 0.01,
-        species: &[
-            ("H2", 7.218_645e-1, 0.01),
-            ("He", 1.481_949e-1, 0.01),
-            ("H2O", 4.089_967e-2, 0.01),
-            ("N2", 6.220_039e-3, 0.01),
-            ("CO2", 3.199_365e-3, 0.05),
-            ("CO", 3.895_267e-2, 0.01),
-            ("H2S", 2.482_179e-3, 0.01),
-            ("Fe", 4.952_599e-3, 0.01),
-            ("SiO", 5.954_333e-3, 0.01),
-            ("TiO", 1.461_615e-5, 0.01),
-            ("VO", 1.678_157e-6, 0.01),
-        ],
-    },
-    Case {
-        label: "network-matched, C/O 1.5, 1,500 K, 1 bar",
-        metallicity: 1.0,
-        c_to_o: Some(1.5),
-        elements: &NETWORK_MATCHED,
-        temperature: 1_500.0,
-        bar: 1.0,
-        species: &[
-            ("H2", 8.358_586e-1, 0.01),
-            ("CH4", 5.690_782e-4, 0.05),
-            ("N2", 6.657_252e-5, 0.01),
-            ("CO", 9.392_597e-4, 0.01),
-            ("H2S", 2.715_002e-5, 0.01),
-            ("HCN", 2.534_431e-6, 0.2),
-            ("Ti", 1.890_727e-8, 0.25),
-            ("TiO", 1.409_660e-7, 0.05),
-            ("VO", 3.466_488e-9, 0.8),
-            ("V", 1.488_942e-8, 0.25),
-        ],
-    },
-    Case {
-        label: "network-matched, protosolar, 700 K, 100 bar",
-        metallicity: 1.0,
-        c_to_o: None,
-        elements: &NETWORK_MATCHED,
-        temperature: 700.0,
-        bar: 100.0,
-        species: &[
-            ("H2", 8.357_572e-1, 0.01),
-            ("H2O", 9.443_452e-4, 0.01),
-            ("CH4", 4.615_294e-4, 0.01),
-            ("NH3", 1.361_336e-4, 0.01),
-            ("H2S", 2.717_687e-5, 0.01),
-            ("SiO", 6.519_276e-5, 0.01),
-        ],
-    },
-    Case {
-        label: "network-matched, protosolar, 2,500 K, 100 bar",
-        metallicity: 1.0,
-        c_to_o: None,
-        elements: &NETWORK_MATCHED,
-        temperature: 2_500.0,
-        bar: 100.0,
-        species: &[
-            ("H2", 8.343_248e-1, 0.01),
-            ("H2O", 4.982_646e-4, 0.02),
-            ("CH4", 1.537_136e-5, 0.3),
-            ("NH3", 6.497_332e-6, 0.05),
-            ("N2", 6.424_622e-5, 0.01),
-            ("CO", 4.441_246e-4, 0.02),
-            ("H2S", 2.704_621e-5, 0.01),
-            ("K", 2.245_198e-7, 0.01),
-            ("Ti", 3.501_137e-8, 0.25),
-            ("TiO", 1.246_709e-7, 0.05),
-            ("VO", 3.704_144e-9, 0.8),
-            ("V", 1.462_982e-8, 0.25),
-            ("K+", 1.716_930e-8, 0.01),
-        ],
-    },
-    Case {
-        label: "network-matched, protosolar, 4,600 K, 10 mbar",
-        metallicity: 1.0,
-        c_to_o: None,
-        elements: &NETWORK_MATCHED,
-        temperature: 4_600.0,
-        bar: 0.01,
-        species: &[
-            ("H", 9.101_264e-1, 0.01),
-            ("He", 8.822_768e-2, 0.01),
-            ("O", 4.704_315e-4, 0.01),
-            ("C", 1.723_650e-4, 0.01),
-            ("CO", 7.859_521e-5, 0.01),
-            ("N", 7.330_713e-5, 0.01),
-            ("N2", 3.782_238e-7, 0.01),
-            ("S", 1.477_763e-5, 0.01),
-            ("Mg+", 3.290_739e-5, 0.01),
-            ("Mg", 3.367_398e-6, 0.02),
-            ("Si", 1.925_706e-5, 0.01),
-            ("Si+", 1.617_827e-5, 0.02),
-            ("Fe+", 2.407_293e-5, 0.05),
-            ("Fe", 5.412_325e-6, 0.1),
-            ("Ca+", 2.131_321e-6, 0.01),
-            ("Na+", 2.038_386e-6, 0.01),
-            ("e-", 8.119_206e-5, 0.02),
-            ("H-", 2.589_810e-9, 0.02),
-        ],
-    },
-    Case {
-        label: "network-matched, protosolar, 4,600 K, 50 mbar",
-        metallicity: 1.0,
-        c_to_o: None,
-        elements: &NETWORK_MATCHED,
-        temperature: 4_600.0,
-        bar: 0.05,
-        species: &[
-            ("H", 9.079_423e-1, 0.01),
-            ("He", 8.842_236e-2, 0.01),
-            ("O", 3.862_262e-4, 0.01),
-            ("CO", 1.639_335e-4, 0.01),
-            ("C", 8.758_006e-5, 0.01),
-            ("N", 7.070_789e-5, 0.01),
-            ("N2", 1.759_390e-6, 0.01),
-            ("S", 1.481_023e-5, 0.01),
-            ("Mg+", 2.666_307e-5, 0.01),
-            ("Mg", 9.691_755e-6, 0.02),
-            ("Si", 2.866_397e-5, 0.01),
-            ("Si+", 6.779_337e-6, 0.02),
-            ("Fe+", 1.642_934e-5, 0.05),
-            ("Fe", 1.312_098e-5, 0.1),
-            ("Ca+", 2.124_105e-6, 0.01),
-            ("Na+", 2.039_069e-6, 0.01),
-            ("e-", 5.768_125e-5, 0.02),
-            ("H-", 9.177_311e-9, 0.02),
-        ],
-    },
-];
-
-#[test]
-fn every_asserted_case_is_within_its_tolerance() {
-    every_case_is_within_its_tolerance(&CASES);
-}
-
 /// Each of `cases` solved and held to FastChem's values within its tolerances.
 fn every_case_is_within_its_tolerance(cases: &[Case]) {
     let network = network();
@@ -892,19 +609,11 @@ fn each_refusal_names_its_cause() {
     }
 }
 
-/// An element the gas does not hold leaves its species at zero, and the rest solved.
+/// An element the gas does not hold leaves its species at zero, and the rest solved (hydrogen
+/// alone: `under_27_an_absent_element_leaves_its_species_at_zero`).
 #[test]
 fn an_absent_element_leaves_its_species_at_zero() {
     let network = network();
-    let hydrogen_alone = [(Element::H, 1.0)];
-    let got = solve_at(&network, &hydrogen_alone, 3_000.0, 0.01);
-    for (id, x) in got.mole_fractions() {
-        let key = id.substance().key();
-        match key.as_str() {
-            "H2" | "H" => assert!(x > 0.0, "{key}"),
-            _ => assert_same_bits(x, 0.0),
-        }
-    }
     let carbon_free = gas(
         1.0,
         None,
@@ -1091,52 +800,30 @@ fn hill(id: SubstanceId) -> String {
         .collect()
 }
 
-/// P14.T52.e's tripwire: no species the network in force does not carry ([`not_carried`]) is a
-/// registry gas row, under 26's registry and 27's; each of [`CARRIED_FROM_27`]'s is one under
-/// 27's alone; and both sets are sorted by formula, charge and isomer, and unique. As a row joins
-/// the network its entry must go.
+/// P14.T52.e's tripwire: no species the network does not carry ([`not_carried`]) is a registry
+/// gas row, and the set is sorted by formula, charge and isomer, and unique. As a row joins the
+/// network its entry must go.
 #[test]
 fn no_species_not_carried_is_a_registry_gas_row() {
-    use crate::substance::{CarriersRules, with_carriers};
     assert_eq!(hill(row("CH3OH")), "CH4O");
     assert_eq!(hill(row("NH3")), "H3N");
-    for rules in [CarriersRules::Held, CarriersRules::Carried] {
-        with_carriers(rules, || {
-            let rows: Vec<(String, i8)> = crate::substance::ids()
-                .filter(|id| id.substance().gas().is_some())
-                .map(|id| (hill(id), id.substance().charge()))
-                .collect();
-            for entry in not_carried() {
-                assert!(
-                    !rows.contains(&(entry.formula.to_owned(), entry.charge)),
-                    "{:?}: {} ({}) is a registry gas row",
-                    rules,
-                    entry.formula,
-                    entry.charge
-                );
-                assert!(entry.largest_share >= 0.01 && entry.largest_share <= 1.0);
-            }
-            for entry in &CARRIED_FROM_27 {
-                assert_eq!(
-                    rows.contains(&(entry.formula.to_owned(), entry.charge)),
-                    rules == CarriersRules::Carried,
-                    "{:?}: {} ({})",
-                    rules,
-                    entry.formula,
-                    entry.charge
-                );
-            }
-        });
+    let rows: Vec<(String, i8)> = crate::substance::ids()
+        .filter(|id| id.substance().gas().is_some())
+        .map(|id| (hill(id), id.substance().charge()))
+        .collect();
+    for entry in not_carried() {
+        assert!(
+            !rows.contains(&(entry.formula.to_owned(), entry.charge)),
+            "{} ({}) is a registry gas row",
+            entry.formula,
+            entry.charge
+        );
+        assert!(entry.largest_share >= 0.01 && entry.largest_share <= 1.0);
     }
-    assert_eq!(
-        not_carried().count(),
-        NOT_CARRIED.len() + CARRIED_FROM_27.len()
-    );
-    for set in [&NOT_CARRIED[..], &CARRIED_FROM_27[..]] {
-        for pair in set.windows(2) {
-            let key = |e: &NotCarried| (e.formula, e.charge, e.isomer);
-            assert!(key(&pair[0]) < key(&pair[1]), "{:?}", pair[1]);
-        }
+    assert_eq!(not_carried().count(), NOT_CARRIED.len());
+    for pair in NOT_CARRIED.windows(2) {
+        let key = |e: &NotCarried| (e.formula, e.charge, e.isomer);
+        assert!(key(&pair[0]) < key(&pair[1]), "{:?}", pair[1]);
     }
 }
 
@@ -1230,15 +917,12 @@ fn the_speciation_is_pinned() {
     golden!("planetary/equilibrium", w.as_str());
 }
 
-/// The start takes each major element's atom at the start's p(H₂) (`State::atom_ratio`, and
-/// `pair_root`'s linear share): `pair_root` solves total = linear a + 2 κ a², and gives total ÷
-/// linear at κ = 0. Where the atoms hold the sulphur, the nitrogen and most of the carbon (3,000 K
-/// at 10 mbar; the KELT-9b-like dayside at 4,600 K, 10 and 50 mbar; 5,750 K at 10 mbar, where
-/// the start without the atoms stalled at every metallicity; 6,000 K at 10⁻⁴ bar), the start's
-/// ln p of H₂, CH₄, NH₃, H₂O and H₂S and of the hydrogen nuclei lies within 0.25 of the
-/// solution's (0.12 at most, CH₄ and H₂O at 3,000 K), where H₂S taken all-in lay 7 to 31 off.
+/// The start's pair root, which takes each major element's atom at the start's p(H₂)
+/// (`State::atom_ratio`): `pair_root` solves total = linear a + 2 κ a², and gives total ÷ linear
+/// at κ = 0. The start's levels against the solution's are
+/// `under_27_the_start_takes_the_major_elements_atoms`'.
 #[test]
-fn the_start_takes_the_major_elements_atoms() {
+fn the_start_s_pair_root_takes_the_atoms() {
     for (total, linear, kappa) in [
         (1e-3, 1.0, 0.0),
         (1e-3, 50.0, 0.0),
@@ -1254,44 +938,6 @@ fn the_start_takes_the_major_elements_atoms() {
         if kappa == 0.0 {
             assert!((a * linear / total - 1.0).abs() < 1e-15, "{linear}");
         }
-    }
-    let network = network();
-    let mut per_hydrogen = [0.0; Element::ALL.len()];
-    for (e, x) in gas(1.0, None, None) {
-        per_hydrogen[element_index(e)] = x;
-    }
-    let gas = Gas::new(&network, &per_hydrogen);
-    for (t, bar) in [
-        (3_000.0, 0.01),
-        (4_600.0, 0.01),
-        (4_600.0, 0.05),
-        (5_750.0, 0.01),
-        (6_000.0, 1e-4),
-    ] {
-        let log_k: Vec<f64> = network
-            .species
-            .iter()
-            .map(|s| {
-                s.formation.as_ref().map_or(0.0, |(r, per)| {
-                    r.log10_equilibrium_constant(Kelvin::new(t)).unwrap()
-                        * core::f64::consts::LN_10
-                        * per
-                })
-            })
-            .collect();
-        let state = State::new(&network, &gas, &log_k, bar);
-        let start = state.start();
-        let (solved, _) = state.refine(start, Stop::AtFixedPoint);
-        for k in [0, 1, 2, 3, 4, NUCLEI] {
-            assert!(
-                (start[k] - solved[k]).abs() < 0.25,
-                "{t} K, {bar} bar: unknown {k} starts at {} against {}",
-                start[k],
-                solved[k]
-            );
-        }
-        let all_in = math::ln(gas.majors[4]) + start[NUCLEI];
-        assert!(all_in - solved[4] > 5.0, "{t} K, {bar} bar");
     }
 }
 

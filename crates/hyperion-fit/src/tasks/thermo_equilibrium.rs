@@ -2,13 +2,12 @@
 //! gas row and of the elements' reference states, re-emitted for
 //! `hyperion_sim::substance::formation`, which gives each row's equilibrium constant of formation.
 //!
-//! **P14.T52.e's carriers, held.** The rows P14.T52.e appends join the registry at generator
-//! version 27 (the sim's `CARRIERS_VERSION`), and the table that output reads since 24 cannot
-//! change before then (plan 15, Design note 10). Their records are the task's second table,
-//! [`ThermoEquilibrium27Task`]'s `thermo_27`, from `manifests/thermo_equilibrium_27.toml`, emitted
-//! at the version in force and read by `substance::formation` only under 27's registry. The bump to
-//! 27 moves [`CARRIERS`] into [`ROWS`] and their items into [`ITEMS`], re-emits `thermo` at 27,
-//! and deletes [`ThermoEquilibrium27Task`] with its manifest, table and lock entry.
+//! **P14.T52.e's carriers.** The rows P14.T52.e appends joined the registry at generator version
+//! 27. Their records are the task's second table, [`ThermoEquilibrium27Task`]'s `thermo_27`, from
+//! `manifests/thermo_equilibrium_27.toml`, which `substance::formation` reads beside the first;
+//! the first table's task reads every gas row but theirs. The tables' merge, still to come, moves
+//! [`CARRIERS`] into [`ROWS`] and their items into [`ITEMS`], re-emits `thermo`, and deletes
+//! [`ThermoEquilibrium27Task`] with its manifest, table and lock entry.
 //!
 //! # The data
 //!
@@ -70,7 +69,7 @@ use std::num::NonZeroUsize;
 
 use hyperion_sim::math;
 pub use hyperion_sim::substance::formation::NOT_MODELLED;
-use hyperion_sim::substance::{Element, SubstanceId, by_key, carriers_ahead, ids};
+use hyperion_sim::substance::{Element, SubstanceId, by_key, ids};
 
 use crate::emit::{RustTable, TableItem};
 use crate::manifest::{Manifest, SimFingerprint};
@@ -1082,7 +1081,7 @@ fn modelled_keys(gas_keys: Vec<String>) -> Result<Vec<String>, FitThermoError> {
 /// The registry's gas rows' items, in registry order, each checked against its row's stoichiometry
 /// and charge.
 fn row_items(library: &[Record], dropped: &mut Vec<String>) -> Result<Vec<Item>, FitThermoError> {
-    let gas_rows: Vec<_> = ids().filter(|id| id.substance().gas().is_some()).collect();
+    let gas_rows: Vec<_> = first_table_rows().collect();
     modelled_keys(
         gas_rows
             .iter()
@@ -1467,7 +1466,7 @@ impl FitTask for ThermoEquilibriumTask {
     /// gas row added or changed asks for a rerun.
     fn fingerprint(&self) -> SimFingerprint {
         let mut probes = Vec::new();
-        for id in ids().filter(|id| id.substance().gas().is_some()) {
+        for id in first_table_rows() {
             let row = id.substance();
             let key = row.key();
             probes.push((format!("{key} index"), f64::from(id.index())));
@@ -1522,10 +1521,29 @@ impl FitTask for ThermoEquilibriumTask {
     }
 }
 
+/// Whether `id` is one of P14.T52.e's carriers ([`CARRIERS`]), whose records the second table
+/// holds.
+fn is_carrier(id: SubstanceId) -> bool {
+    let key = id.substance().key();
+    CARRIERS.iter().any(|&(carrier, _)| carrier == key.as_str())
+}
+
+/// P14.T52.e's carriers among the registry's rows, in registry order: the rows the second table
+/// follows.
+fn carrier_rows() -> impl Iterator<Item = SubstanceId> {
+    ids().filter(|&id| is_carrier(id))
+}
+
+/// The registry's gas rows but P14.T52.e's carriers, in registry order: the rows the first table
+/// follows.
+fn first_table_rows() -> impl Iterator<Item = SubstanceId> {
+    ids().filter(|&id| id.substance().gas().is_some() && !is_carrier(id))
+}
+
 /// The second table's revision, [`ThermoEquilibrium27Task`]'s.
 pub const CARRIERS_REVISION: u32 = 0;
 
-/// P14.T52.e's carriers, the rows that join the registry at generator version 27, in registry
+/// P14.T52.e's carriers, the rows that joined the registry at generator version 27, in registry
 /// order: each row's key and its CEA record's name.
 pub const CARRIERS: [(&str, &str); 12] = [
     ("SH", "SH"),
@@ -1552,12 +1570,12 @@ pub const CARRIER_ITEMS: [&str; 11] = [
 ///
 /// # Errors
 ///
-/// [`FitThermoError::Rows`] if the rows ahead of their bump are not [`CARRIERS`] (so, at 27's
-/// bump, once they are in force, this table has nothing left to hold); [`FitThermoError`] for a
+/// [`FitThermoError::Rows`] if the registry's carriers are not [`CARRIERS`];
+/// [`FitThermoError`] for a
 /// record that is missing, names a gas twice or has another formula, or whose intervals do not
 /// join or lie above [`UPPER_TEMPERATURE_K`].
 pub fn fit_carriers(library: &[Record]) -> Result<Fit, FitThermoError> {
-    let rows: Vec<SubstanceId> = carriers_ahead()
+    let rows: Vec<SubstanceId> = carrier_rows()
         .filter(|id| id.substance().gas().is_some())
         .collect();
     let keys: Vec<String> = rows
@@ -1650,8 +1668,7 @@ fn carriers_acceptance(fit: &Fit) -> String {
     )
 }
 
-/// The second table: P14.T52.e's carriers' records, held until 27 (the [module](self)'s
-/// documentation).
+/// The second table: P14.T52.e's carriers' records (the [module](self)'s documentation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct ThermoEquilibrium27Task;
 
@@ -1680,7 +1697,7 @@ impl FitTask for ThermoEquilibrium27Task {
     /// [`ThermoEquilibriumTask`]'s probes.
     fn fingerprint(&self) -> SimFingerprint {
         let mut probes = Vec::new();
-        for id in carriers_ahead().filter(|id| id.substance().gas().is_some()) {
+        for id in carrier_rows().filter(|id| id.substance().gas().is_some()) {
             let row = id.substance();
             let key = row.key();
             probes.push((format!("{key} index"), f64::from(id.index())));
@@ -1873,7 +1890,7 @@ END PRODUCTS\r\nEND REACTANTS\r\n";
         assert_eq!(names, CARRIER_ITEMS);
         assert_eq!(fitted.dropped(), [] as [String; 0]);
         let keys: Vec<&str> = CARRIERS.iter().map(|&(key, _)| key).collect();
-        let rows: Vec<String> = carriers_ahead()
+        let rows: Vec<String> = carrier_rows()
             .map(|id| id.substance().key().as_str().to_owned())
             .collect();
         assert_eq!(rows, keys);

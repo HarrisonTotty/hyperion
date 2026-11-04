@@ -23,7 +23,7 @@
 //!   S-bearing gas throughout substellar atmospheres") in its field and the S atom beyond it (the
 //!   reach, below), and every other registry gas of these elements: the atoms H, C, N, O and S,
 //!   H⁻, O₂, O₃, N₂O, SO₂, CH₃OH and C₂H₆; and from generator version 27 (P14.T52.e's
-//!   carriers, behind `CARRIERS_VERSION`) SH, OH and the first ions H⁺, C⁺, N⁺, O⁺ and S⁺.
+//!   carriers) SH, OH and the first ions H⁺, C⁺, N⁺, O⁺ and S⁺.
 //! - **The trace elements**, every other element, each in species that hold one atom of it and no
 //!   other trace element: each metal as its neutral atom and its first ion, with SiO, TiO and VO;
 //!   phosphorus as PH₃, chlorine as HCl, the noble gases as their atoms. Given the major
@@ -175,7 +175,7 @@
 //! The network is the registry's, so a species that is not a row is not carried ([`not_carried`],
 //! a closed set, for the composition audit), and its element is held by the carriers that are.
 //! From FastChem's gas-only grid at protosolar abundances, for 26's network (from 27 SH, OH, S⁺, C⁺
-//! and H⁺ are carried, [`CARRIED_FROM_27`], so that the bullets on sulphur, oxygen, the non-metals'
+//! and H⁺ are carried, so that the bullets on sulphur, oxygen, the non-metals'
 //! ions and the electrons are 26's):
 //!
 //! - **Sulphur**: H₂S holds the sulphur in Visscher, Lodders and Fegley's H₂S field (§3.1: SH
@@ -233,8 +233,8 @@ use std::fmt;
 
 use crate::math;
 use crate::substance::{
-    BalanceReactionError, CarriersRules, Element, Reaction, SubstanceId, SubstanceKey, by_key,
-    formation_range, ids,
+    BalanceReactionError, Element, Reaction, SubstanceId, SubstanceKey, by_key, formation_range,
+    ids,
 };
 use crate::units::{Kelvin, Pascals};
 
@@ -251,7 +251,7 @@ pub const MAJOR_ELEMENTS: [(Element, &str); 5] = [
 ];
 
 /// The elements the network solves from generator version 27 beside [`MAJOR_ELEMENTS`]
-/// (P14.T52.e, `CARRIERS_VERSION`), each with its basis species' key: phosphorus and chlorine,
+/// (P14.T52.e), each with its basis species' key: phosphorus and chlorine,
 /// whose P₂ and chlorides hold two atoms of elements the closed form would otherwise share. Below
 /// 27 they are trace elements. Public as [`MAJOR_ELEMENTS`] is; 27's bump folds it into it.
 pub const SOLVED_FROM_27: [(Element, &str); 2] = [(Element::P, "PH3"), (Element::Cl, "HCl")];
@@ -357,7 +357,7 @@ pub struct NotCarried {
 ///
 /// It is sorted by formula, charge and isomer. P14.T52.e adds rows from it, and each entry goes
 /// as its row joins: its carriers' entries, which the network carries from generator version 27,
-/// are [`CARRIED_FROM_27`]'s (62 entries before it, 50 after).
+/// went with them (62 entries before them, 50 after).
 ///
 /// The set is closed by a rule, not by hand (decision-p14-t52a-rows): every gas species of
 /// FastChem 4.0.3's full network (its `logK.dat`, gas phase only, the 25 elements at the
@@ -874,140 +874,10 @@ pub const NOT_CARRIED: [NotCarried; 50] = [
     },
 ];
 
-/// The species of [`NOT_CARRIED`]'s rule that P14.T52.e's rows carry from generator version 27
-/// (`CARRIERS_VERSION`), with the shares the run gave them uncarried: below 27 they are not carried,
-/// and [`not_carried`] lists them with the rest. Sorted as [`NOT_CARRIED`], and public as it is,
-/// for the composition audit; 27's bump deletes it.
-pub const CARRIED_FROM_27: [NotCarried; 12] = [
-    NotCarried {
-        formula: "C",
-        isomer: None,
-        charge: 1,
-        element: Element::C,
-        largest_share: 0.88,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "Cl",
-        isomer: None,
-        charge: 0,
-        element: Element::Cl,
-        largest_share: 1.0,
-        temperature: Kelvin::new(3000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "H",
-        isomer: None,
-        charge: 1,
-        element: Element::H,
-        largest_share: 0.062,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "H2P",
-        isomer: None,
-        charge: 0,
-        element: Element::P,
-        largest_share: 0.66,
-        temperature: Kelvin::new(2500.0),
-        pressure: Pascals::new(1e7),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "HO",
-        isomer: None,
-        charge: 0,
-        element: Element::O,
-        largest_share: 0.21,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e7),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "HS",
-        isomer: None,
-        charge: 0,
-        element: Element::S,
-        largest_share: 0.48,
-        temperature: Kelvin::new(4000.0),
-        pressure: Pascals::new(1e7),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "N",
-        isomer: None,
-        charge: 1,
-        element: Element::N,
-        largest_share: 0.045,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "O",
-        isomer: None,
-        charge: 1,
-        element: Element::O,
-        largest_share: 0.054,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "OP",
-        isomer: None,
-        charge: 0,
-        element: Element::P,
-        largest_share: 0.78,
-        temperature: Kelvin::new(1500.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "P",
-        isomer: None,
-        charge: 0,
-        element: Element::P,
-        largest_share: 1.0,
-        temperature: Kelvin::new(3000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-    NotCarried {
-        formula: "P2",
-        isomer: None,
-        charge: 0,
-        element: Element::P,
-        largest_share: 1.0,
-        temperature: Kelvin::new(800.0),
-        pressure: Pascals::new(1e-1),
-        condensed: true,
-    },
-    NotCarried {
-        formula: "S",
-        isomer: None,
-        charge: 1,
-        element: Element::S,
-        largest_share: 0.97,
-        temperature: Kelvin::new(6000.0),
-        pressure: Pascals::new(1e-1),
-        condensed: false,
-    },
-];
-
-/// The species the network in force does not carry: [`NOT_CARRIED`], and below generator version
-/// 27 [`CARRIED_FROM_27`] too, each in its own order: the composition audit's list under either.
+/// The species the network does not carry: [`NOT_CARRIED`], in its order, the composition
+/// audit's list.
 pub fn not_carried() -> impl Iterator<Item = &'static NotCarried> {
-    let held = CarriersRules::in_force() == CarriersRules::Held;
-    NOT_CARRIED
-        .iter()
-        .chain(CARRIED_FROM_27.iter().filter(move |_| held))
+    NOT_CARRIED.iter()
 }
 
 /// Which composition a [`GasEquilibrium`] holds.
@@ -1493,11 +1363,7 @@ impl Network {
     /// ```
     pub fn registry() -> Result<Self, BuildNetworkError> {
         let rows: Vec<SubstanceId> = ids().filter(|&id| formation_range(id).is_some()).collect();
-        let solved = match CarriersRules::in_force() {
-            CarriersRules::Held => MAJOR_ELEMENTS.len(),
-            CarriersRules::Carried => SOLVED,
-        };
-        Self::of_rows(&rows, solved)
+        Self::of_rows(&rows, SOLVED)
     }
 
     /// The network of `rows`, each a gas row with a record, solving the first `solved` of

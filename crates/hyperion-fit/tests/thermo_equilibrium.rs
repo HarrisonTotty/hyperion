@@ -1,5 +1,5 @@
 //! The committed thermochemistry is exactly what `run thermo_equilibrium --since <current>` (and
-//! `run thermo_equilibrium_27`, P14.T52.e's carriers held until 27) would
+//! `run thermo_equilibrium_27`, P14.T52.e's carriers') would
 //! write (plan 14, P14.T49.d; plan 15, P15.T2), from the committed subset of NASA's CEA library.
 //!
 //! CI runs this, so a library or a record list changed without a rerun, or a table edited by hand,
@@ -36,7 +36,7 @@ fn thermo_equilibrium_table_is_reproduced() {
     assert!(!planned.body_changed);
 }
 
-/// The carriers' table the sim compiles, as committed (P14.T52.e, held until 27).
+/// The carriers' table the sim compiles, as committed (P14.T52.e).
 const COMMITTED_27: &str = include_str!("../../hyperion-sim/src/tables/thermo_27.rs");
 
 #[test]

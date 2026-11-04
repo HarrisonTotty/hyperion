@@ -496,9 +496,6 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///
 /// The holds at 27:
 ///
-/// - the equilibrium network's further carriers, `CARRIERS_VERSION` (P14.T52.e), at
-///   `CarriersRules::Carried` through `with_carriers`: the registry's rows from 115 on, which the
-///   network carries, P and Cl solved.
 /// - the icy lid's regolith, `ICY_REGOLITH_VERSION` (P14.T49.m), at `IcyRegolithRules::Mixture`
 ///   through `with_icy_regolith`: an airless or tenuous body's `H2O` regolith ice with its rock's
 ///   lag where its tidal heat does not resurface it.
@@ -520,9 +517,8 @@ pub(crate) fn with_every_26_hold_with_its_retargets<R>(run: impl FnOnce() -> R) 
 ///   their dev-dependency on the surface crate's `hold-switches` feature.
 ///
 /// A system or a record is read under the rules in force when it is generated, so a test
-/// generates afresh inside it; the carriers' rules are read when a system's equilibrium network is
-/// first built, lazily, so a test reads its envelopes inside the switch too. A later hold at 27
-/// adds its switch here, and 27's bump deletes it with its holds.
+/// generates afresh inside it. A later hold at 27 adds its switch here, and 27's bump deletes it
+/// with its holds.
 ///
 /// The galaxy's own holds at 27 travel with its rules, not the thread: a test builds its galaxy
 /// under `GalaxyRules::every_27_hold()` (P15.T11.b's `orphan_streams`, P11.T8.c's
@@ -534,8 +530,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
         RayleighAddingRules, with_haze_layer, with_icy_regolith, with_minor_clouds,
         with_organic_sediment, with_rayleigh_adding,
     };
-    use crate::substance::{CarriersRules, with_carriers};
-    let run = move || with_carriers(CarriersRules::Carried, run);
     let run = move || with_icy_regolith(IcyRegolithRules::Mixture, run);
     let run = move || with_minor_clouds(MinorCloudsRules::OwnShare, run);
     let run = move || with_organic_sediment(OrganicSedimentRules::Sediment, run);
@@ -655,28 +649,15 @@ pub(crate) fn first_paired_system(
         })
 }
 
-/// The registry's network ([`Network::registry`]) under the carriers' rules in force on this
-/// thread, built once a process for each of their arms, for the tests that solve many envelopes
-/// (P14.T52.a: build it once).
-///
-/// A network reads the registry as it is built (P14.T52.e's hold), so one network for both arms
-/// would be the arm of whichever test built it first, and a test's figures would hang on the order
-/// the tests run in: a test at 24 that rebuilt a record's envelope on it read 27's rows after a
-/// test under every 27 hold had built it, while the record's own network held none of them. 27's
-/// bump folds it back to one network with the hold.
+/// The registry's network ([`Network::registry`]), built once a process, for the tests that solve
+/// many envelopes (P14.T52.a: build it once).
 #[cfg(test)]
 #[must_use]
 pub(crate) fn network() -> &'static Network {
     use std::sync::OnceLock;
 
-    use crate::substance::CarriersRules;
-    static HELD: OnceLock<Network> = OnceLock::new();
-    static CARRIED: OnceLock<Network> = OnceLock::new();
-    let network = match CarriersRules::in_force() {
-        CarriersRules::Held => &HELD,
-        CarriersRules::Carried => &CARRIED,
-    };
-    network.get_or_init(|| Network::registry().expect("the registry's network builds"))
+    static NETWORK: OnceLock<Network> = OnceLock::new();
+    NETWORK.get_or_init(|| Network::registry().expect("the registry's network builds"))
 }
 
 #[cfg(test)]
@@ -867,50 +848,6 @@ mod tests {
             synthetic_star(id, SolarMasses::new(-1.0), fe_h, age),
             Err(BuildSystemContextError::MassOutsideRange { star: 0, .. })
         ));
-    }
-
-    /// 27's carriers' switch (P14.T52.e): in force inside 27's helper, held outside it and where a
-    /// test sets it back.
-    #[test]
-    fn the_carriers_hold_is_in_force_inside_27_s_helper_alone() {
-        use crate::substance::{CarriersRules, with_carriers};
-        assert_eq!(CarriersRules::in_force(), CarriersRules::Held);
-        assert_eq!(
-            with_every_27_hold(CarriersRules::in_force),
-            CarriersRules::Carried
-        );
-        assert_eq!(
-            with_every_27_hold(|| with_carriers(CarriersRules::Held, CarriersRules::in_force)),
-            CarriersRules::Held
-        );
-        assert_eq!(CarriersRules::in_force(), CarriersRules::Held);
-    }
-
-    /// The tests' network ([`network`]) is the registry's under the carriers' rules in force on
-    /// the reading thread, whichever arm a test reads first: read at 24 after it is read under
-    /// every 27 hold, it is 24's, without P14.T52.e's rows, and each arm's is built once.
-    #[test]
-    fn the_tests_network_follows_the_carriers_rules_whichever_is_read_first() {
-        use crate::substance::{CarriersRules, with_carriers};
-        let carried = with_every_27_hold(network);
-        let held = network();
-        assert_eq!(
-            held,
-            &Network::registry().expect("the registry's network builds")
-        );
-        assert_eq!(
-            carried,
-            &with_carriers(CarriersRules::Carried, Network::registry).expect("27's network builds")
-        );
-        assert!(
-            carried.species().len() > held.species().len(),
-            "27's network carries P14.T52.e's rows"
-        );
-        assert!(std::ptr::eq(held, network()), "24's network built once");
-        assert!(
-            std::ptr::eq(carried, with_every_27_hold(network)),
-            "27's network built once"
-        );
     }
 
     #[test]

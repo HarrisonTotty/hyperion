@@ -15,7 +15,7 @@
 //! constants ([`MolecularConstants`]), over which [`thermo`](super::thermo) sums its heat
 //! capacity. P14.T52.a appends rows 112–114, the S, N and C atoms its equilibrium speciation
 //! carries (decision-p14-t52a-rows), whose client optics R08.T4.i owes, and P14.T52.e rows 115 on,
-//! its further carriers, in force from generator version 27 (`CARRIERS_VERSION`), their client
+//! its further carriers, from generator version 27, their client
 //! optics R08.T4.i's too. P14.T54.a's switch
 //! retired the `c_p` ÷ R classes rows 0–8 held for generator version 22, and turned on the
 //! `absorber` flags held until then: `H2`'s, `He`'s, `N2`'s and `CO2`'s, for their

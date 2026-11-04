@@ -32,7 +32,6 @@ use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_cli
 use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
 use crate::planetary::hosts::strip::{StripRules, with_stripping};
 use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
-use crate::substance::{CarriersRules, with_carriers};
 
 /// Declares [`HeldRules`] over the holds, each its field, its rules' type, the reader of its rules
 /// in force on this thread and its switch.
@@ -87,7 +86,6 @@ held_rules! {
     rayleigh_adding: RayleighAddingRules = RayleighAddingRules::in_force => with_rayleigh_adding,
     haze_layer: HazeLayerRules = HazeLayerRules::in_force => with_haze_layer,
     locked_climate: LockedClimateRules = LockedClimateRules::in_force => with_locked_climate,
-    carriers: CarriersRules = CarriersRules::in_force => with_carriers,
     steepness_tails: SteepnessTailsRules = steepness_tails_in_force => with_steepness_tails,
     steam_division: SteamDivisionRules =
         SteamDivisionRules::in_force => with_steam_division,
@@ -127,20 +125,15 @@ mod tests {
     }
 
     /// A held rule is read on a pool's threads: under each helper every share reads the holds the
-    /// calling thread has in force, 27's carriers among them under every 27 and 28 hold, and the version's
-    /// outside them; and where the run grants the pool more than one thread, the shares ran on
-    /// threads of their own.
+    /// calling thread has in force, and the version's outside them; and where the run grants the
+    /// pool more than one thread, the shares ran on threads of their own.
     #[test]
     fn a_held_rule_is_read_on_a_pool_s_threads() {
         let caller = std::thread::current().id();
         let reads = || {
             let here = HeldRules::on_this_thread();
             let there = in_shares(4, 2, |_| {
-                (
-                    std::thread::current().id(),
-                    HeldRules::on_this_thread(),
-                    CarriersRules::in_force(),
-                )
+                (std::thread::current().id(), HeldRules::on_this_thread())
             });
             (here, there)
         };
@@ -150,9 +143,8 @@ mod tests {
             assert_ne!(held, version, "every {name} hold moves a rule");
             let (here, there) = under(name, reads);
             assert_eq!(here, held, "{name}");
-            for (_, rules, carriers) in &there {
+            for (_, rules) in &there {
                 assert_eq!(rules, &held, "every {name} hold on a share's thread");
-                assert_eq!(carriers, &CarriersRules::Carried, "{name}");
             }
             if hyperion_testkit::threads::granted(2) > 1 {
                 assert!(
@@ -163,7 +155,7 @@ mod tests {
         }
         let (here, there) = reads();
         assert_eq!(here, version);
-        for (_, rules, _) in &there {
+        for (_, rules) in &there {
             assert_eq!(rules, &version, "outside every helper");
         }
     }

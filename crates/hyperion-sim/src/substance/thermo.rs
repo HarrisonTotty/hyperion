@@ -1646,21 +1646,9 @@ mod tests {
     /// Every gas row's sum against NASA Glenn: H₂ (in equilibrium), He, N₂, O₂, CO, CO₂, H₂O and
     /// Ar within 1 per cent from 200 to 1,000 K and 2 per cent to 1,500 K, and every other row
     /// NASA Glenn has within 2 per cent to 700 K and 3 per cent to 1,000 K: P14.T52.e's carriers
-    /// with them, under 27's registry, and every row in force with and without them.
+    /// with them; and an oracle for every gas row.
     #[test]
     fn the_heat_capacities_follow_nasa_glenn() {
-        use crate::substance::{CarriersRules, with_carriers};
-        for rules in [CarriersRules::Held, CarriersRules::Carried] {
-            with_carriers(
-                rules,
-                the_heat_capacities_follow_nasa_glenn_under_the_rules_in_force,
-            );
-        }
-    }
-
-    /// [`the_heat_capacities_follow_nasa_glenn`] under the registry in force: every oracle whose
-    /// row is in force, and an oracle for every gas row.
-    fn the_heat_capacities_follow_nasa_glenn_under_the_rules_in_force() {
         for &(key, oracle) in NASA_GLENN {
             if by_key(key).is_none() {
                 continue;
