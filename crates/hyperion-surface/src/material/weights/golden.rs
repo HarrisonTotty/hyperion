@@ -253,9 +253,9 @@ fn material_weights_kernels_match_their_golden() {
 mod native_only {
     use std::path::Path;
 
-    /// The weights' goldens: one for each synthetic world, the cold-trapped pole's, the kernels'
-    /// and the kernels' at 27.
-    const WEIGHTS_GOLDENS: usize = 9;
+    /// The weights' goldens: one for each synthetic world, the cold-trapped pole's and the kernels'
+    /// (the kernels' at 27 went with the bump, which gave the kernels their values).
+    const WEIGHTS_GOLDENS: usize = 8;
 
     /// Every golden file of `tests/golden/weights/` carries `GENERATOR_VERSION`, not R05's
     /// `TEST_PLANET_VERSION`, which heads the files directly under `tests/golden/`.

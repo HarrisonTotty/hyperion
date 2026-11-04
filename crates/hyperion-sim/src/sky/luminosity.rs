@@ -2853,16 +2853,18 @@ mod tests {
     /// from `0x9d13_13d6_2725_9e79`, by the `sky_binary_light_*` tables refitted at 25 (P14.T54.c),
     /// generator version 26 from `0x8349_3e69_1055_20f5`, by 26's train, and 27 from
     /// `0x5136_0b79_d85f_08a6`, by the `sky_binary_light_*` tables refitted on 27's engine
-    /// (P14.T54.c).
-    const SERIAL_FINGERPRINT: u64 = 0x610a_db0f_c458_207a;
+    /// (P14.T54.c), and from `0x610a_db0f_c458_207a` by layer E's refitted under the engine's raised
+    /// segment cap.
+    const SERIAL_FINGERPRINT: u64 = 0xf144_5693_b27f_d886;
 
     /// [`fingerprint`] of the same halo build under [`BuildOptions::FULL`], the reference the
     /// shipped nodes are measured against: R06.T5.e's panels at 16 nodes a panel (decided
     /// 2026-10-05). It is new with T5.e's panel edges, which moved it from T5's
     /// `0x8c44_443c_67ac_13bf` to `0xa022_ae9e_49f0_c996`, and generator version 21 moved it here,
     /// as it moved [`SERIAL_FINGERPRINT`], and generator version 25 from `0xd063_b6fb_cde6_ee63`,
-    /// 26 from `0x1095_a21e_fcb9_96cf` and 27 from `0x96f2_5df6_cf9a_44a0`.
-    const FULL_SERIAL_FINGERPRINT: u64 = 0xab6d_b9ff_8d24_368d;
+    /// 26 from `0x1095_a21e_fcb9_96cf` and 27 from `0x96f2_5df6_cf9a_44a0`, then from
+    /// `0xab6d_b9ff_8d24_368d` under the engine's raised segment cap.
+    const FULL_SERIAL_FINGERPRINT: u64 = 0x6244_e52e_2f1b_0da7;
 
     /// [`fingerprint`] of the bulge's and the long bar's coarse build in
     /// `parallel_build_equals_serial`, under [`BuildOptions::STANDARD`]'s other options: their
@@ -2871,8 +2873,9 @@ mod tests {
     /// reach the white dwarf through the post-AGB crossing), which the halo's old edges do not
     /// (R06.T5.e). It moves with [`SERIAL_FINGERPRINT`]: generator version 21 moved it from
     /// `0x9bc9_1279_f62c_9962`, generator version 25 from `0xc6c9_59ed_9001_fd37`, 26 from
-    /// `0x99c6_f2fd_f3a6_11f9` and 27 from `0x306b_992b_2f79_27e9`.
-    const PAIR_SERIAL_FINGERPRINT: u64 = 0x976d_f140_82ab_1638;
+    /// `0x99c6_f2fd_f3a6_11f9` and 27 from `0x306b_992b_2f79_27e9`, then from
+    /// `0x976d_f140_82ab_1638` under the engine's raised segment cap.
+    const PAIR_SERIAL_FINGERPRINT: u64 = 0xe5b2_c017_247b_adf1;
 
     /// The shared tables' file holds every bit of a build: [`file::decode`] of [`file::encode`] is
     /// the build bit for bit, time included, and encodes again to the same bytes. A file with a

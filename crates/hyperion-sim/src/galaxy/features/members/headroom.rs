@@ -69,13 +69,13 @@
 //! # As measured
 //!
 //! On plan 15's production rank table (P06.T19.e), against the 16-bit index, the Milky Way
-//! fixture's centre fits, at 9,766.4 candidates and 27.3 victims with 54,325.9 indices to spare at
+//! fixture's centre fits, at 9,766.8 candidates and 27.3 victims with 54,325.5 indices to spare at
 //! eight standard deviations with plan 09's recent classes, 599.8 candidates, at generator version
 //! 27, whose rows are P15.T10.b's refit on 27's engine with the recent classes on the record
 //! (P09.T36.b; at 26 7,144.8 candidates with 57,060.3 to spare; 57,713.8 before the victims joined,
 //! P09.T30.b, at `GENERATOR_VERSION` 23; 57,685.4 before the recent classes joined, P09.T36.b), and
-//! so do both mass functions' capped clusters, the heaviest plan 02 draws, at 24,996.7 and
-//! 16,614.0 candidates (37,672.1 and 46,914.5 to spare with the recent classes; 18,311.3 and
+//! so do both mass functions' capped clusters, the heaviest plan 02 draws, at 24,997.6 and
+//! 16,614.6 candidates (37,671.2 and 46,913.9 to spare with the recent classes; 18,311.3 and
 //! 12,174.7 candidates at 26), and every one of the first 10³ of plan 02's seeds
 //! (`tests/galaxy_sweeps.rs`). The cap bounds every drawn cluster, so no seed fails while it holds.
 //! Twice either cap's candidates still fit, which a test keeps as the tripwire for the ruling's
@@ -593,9 +593,9 @@ mod tests {
     }
 
     /// The check at the Milky Way fixture, under either mass function, against the centre's 16-bit
-    /// index: the default function's centre, 9,766.4 candidates, 27.3 victims and 599.8 of plan
-    /// 09's recent classes' candidates, fits with 54,325.9 indices to spare at eight standard
-    /// deviations, and Kroupa's, 8,835.4, 27.2 and 488.8, with 55,409.9, as measured on plan 15's
+    /// index: the default function's centre, 9,766.8 candidates, 27.3 victims and 599.8 of plan
+    /// 09's recent classes' candidates, fits with 54,325.5 indices to spare at eight standard
+    /// deviations, and Kroupa's, 8,835.7, 27.2 and 488.8, with 55,409.6, as measured on plan 15's
     /// production rank table (P06.T19.e) with the recent classes (P09.T36.b), re-measured at
     /// generator version 27 with P15.T10.b's refit of the binary rows on 27's engine (7,129.6 and
     /// 6,449.9 candidates at 26, 7,144.8 and 6,467.9 until 26), and pinned to 10⁻⁵, with the
@@ -613,16 +613,16 @@ mod tests {
         for (kind, candidates, at_eight, at_five, want_share) in [
             (
                 MassFunctionKind::Chabrier,
-                9_766.446,
-                54_325.87,
-                54_631.71,
+                9_766.789,
+                54_325.53,
+                54_631.37,
                 0.703_48,
             ),
             (
                 MassFunctionKind::Kroupa,
-                8_835.4,
-                55_409.9,
-                55_700.0,
+                8_835.719,
+                55_409.6,
+                55_699.7,
                 0.713_27,
             ),
         ] {
@@ -645,8 +645,8 @@ mod tests {
     }
 
     /// The check at plan 02's cap on the cluster's mass, under either mass function: a capped
-    /// centre fits the 16-bit index, with 37,672.1 indices to spare under Chabrier's function and
-    /// 46,914.5 under Kroupa's at eight standard deviations, the victims and plan 09's recent
+    /// centre fits the 16-bit index, with 37,671.2 indices to spare under Chabrier's function and
+    /// 46,913.9 under Kroupa's at eight standard deviations, the victims and plan 09's recent
     /// classes (1,535.1 and 919.2 candidates) counted, as measured on plan 15's production rank
     /// table (P06.T19.e) with the recent classes (P09.T36.b), re-measured at generator version 27
     /// with P15.T10.b's refit of the binary rows on 27's engine (18,247.7 and 12,128.3 candidates
@@ -655,8 +655,13 @@ mod tests {
     #[test]
     fn the_cap_s_centre_list_fits_under_either_mass_function() {
         for (kind, seed, want, at_eight) in [
-            (MassFunctionKind::Chabrier, 0x1108_e000, 24_996.69, 37_672.1),
-            (MassFunctionKind::Kroupa, 0x1108_e001, 16_614.0, 46_914.5),
+            (
+                MassFunctionKind::Chabrier,
+                0x1108_e000,
+                24_997.566,
+                37_671.2,
+            ),
+            (MassFunctionKind::Kroupa, 0x1108_e001, 16_614.555, 46_913.9),
         ] {
             let params = scattered(kind, 1.0);
             let cap = NuclearClusterParams::mass_cap(kind);

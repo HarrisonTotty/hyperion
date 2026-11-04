@@ -432,12 +432,12 @@ fn a_feature_s_binary_members_hold_no_carved_pair() {
     assert!(checked > 100, "{checked}");
 }
 
-/// The globular clusters' listed X-ray binaries over the walk at 27, as measured: 367 against the
+/// The globular clusters' listed X-ray binaries over the walk at 27, as measured: 366 against the
 /// 419.9 expected, a finding (303 against 419.6 under the fit before train 27's engine; re-measured
-/// on P15.T10.b's refit on it). The floor refuses the ultracompact hosts the refit draws above
+/// on P15.T10.b's refit on it, and under the engine's raised segment cap, 367 before it). The floor refuses the ultracompact hosts the refit draws above
 /// about an hour, the scan's cold white dwarf donor being half the engine's mass there
 /// (`xrb::kinds_tests`' `PINNED_ULTRACOMPACT_ENTRIES`; for P11.T8.b).
-const PINNED_GLOBULAR_X_RAY_BINARIES: u32 = 367;
+const PINNED_GLOBULAR_X_RAY_BINARIES: u32 = 366;
 
 /// What the lists hold over the walk's features, by process and class: expected hosts and drawn
 /// entries, printed for the record.

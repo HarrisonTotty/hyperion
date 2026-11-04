@@ -458,8 +458,9 @@ fn placement_code(class: PlacementClass) -> f64 {
 /// and 26, and at 27 (it was `0x9f41_f812_1008_a969`), whose galaxy the fixture is, every 27
 /// hold's, and every 26 hold's with its retargets until the bump; and again with P15.T10.b's refit
 /// of the binary rows on 27's engine, whose carved shares the field's thinning reads (it was
-/// `0x8bb9_7c3f_e9db_adfc` before it).
-const DISPLACED_CELLS_DIGEST: u64 = 0x10e9_90be_dd90_9b4b;
+/// `0x8bb9_7c3f_e9db_adfc` before it), and under the engine's raised segment cap, whose
+/// refitted rows move them again (`0x10e9_90be_dd90_9b4b` before it).
+const DISPLACED_CELLS_DIGEST: u64 = 0xe866_1c41_934a_7779;
 
 /// The new arm's cells, census and map, pinned on every target (named `pinned` for the
 /// WebAssembly suite's filter).

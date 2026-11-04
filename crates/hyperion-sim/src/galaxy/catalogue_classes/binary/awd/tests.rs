@@ -168,7 +168,7 @@ fn each_class_holds_its_share_row_s_hosts() {
 
 /// The fitted rows' hosts at the Milky Way fixture, fast then slow, before the features' share, as
 /// measured at 27: 4.70 × 10⁵ and 7.58 × 10⁶, 8.05 × 10⁶ together.
-const PINNED_ROW_HOSTS: [f64; 2] = [469_811.164_015_661_7, 7_577_577.927_368_357];
+const PINNED_ROW_HOSTS: [f64; 2] = [469_811.164_015_661_7, 7_577_661.285_931_257_5];
 
 /// A cell's bound holds the class's intensity at every point tried in it, in the disc and at the
 /// centre, and the centre's cell, the fullest, leaves the index its headroom.
@@ -519,9 +519,9 @@ fn a_slow_host_s_eruptions_are_pinned() {
 const PINNED_HOST: u64 = 0xfc87_db28_0000_0000;
 
 /// Its eruptions: seconds and nanoseconds from the epoch, re-measured at 27, whose fitted slow
-/// sampler (P15.T10.b's refit on train 27's engine) gives the same host another recurrence, 7.9 ×
-/// 10⁵ years.
-const PINNED_ERUPTIONS: [(i64, u32); 1] = [(-135_777_676_293, 837_959_313)];
+/// sampler (P15.T10.b's refit on train 27's engine, then under its raised segment cap) gives the
+/// same host another recurrence, 7.9 × 10⁵ years.
+const PINNED_ERUPTIONS: [(i64, u32); 1] = [(-135_780_021_662, 346_627_560)];
 
 /// The local density of both classes' hosts at the Sun-like point, the plan's test against Pala et
 /// al. 2020, 4.8 × 10⁻⁶ pc⁻³ within 30%, and the fixture's catalogue total, pinned as the fitted
@@ -567,7 +567,7 @@ fn the_local_density_and_the_milky_way_s_total() {
 const PINNED_LOCAL_DENSITY: f64 = 5.278_873_005e-6;
 
 /// The fixture's catalogue hosts of both classes as the fitted rows give them, as measured at 27.
-const PINNED_CATALOGUE_HOSTS: f64 = 8_024_980.865_231_913;
+const PINNED_CATALOGUE_HOSTS: f64 = 8_025_063.778_068_277;
 
 /// The first two sample cells of each class pinned: each cell's bound, candidates and entries, and
 /// each entry's scan marks, binary and history.
