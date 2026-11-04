@@ -341,22 +341,25 @@ fn primary_kick_is(stars: &SystemStars, kind: RemnantKind, mode: KickMode) -> bo
         && stars.natal_kick().is_some_and(|k| k.mode() == mode)
 }
 
-/// The three pinned systems of layer E, found by [`find_kick`] near the solar circle.
+/// The three pinned systems of layer E, found by [`find_kick`] near the solar circle. Searched again
+/// at 27, whose grid places other systems of layer E (plan 08's displaced classes, P08.T12; until 27
+/// the three were `0x8200_b2e0_0000_0000`, `…_000c` and `…_0005`): the first and the third are
+/// displaced classes' remnants, each its kick loop's kept attempt, and the second a retained one.
 const PINNED_KICKS: [PinnedKick; 3] = [
     PinnedKick {
         name: "an ordinary-mode neutron star",
         predicate: |s| primary_kick_is(s, RemnantKind::NeutronStar, KickMode::Ordinary),
-        id: 0x8200_b2e0_0000_0000,
+        id: 0x8200_b2e0_0000_0001,
     },
     PinnedKick {
         name: "a low-mode neutron star",
         predicate: |s| primary_kick_is(s, RemnantKind::NeutronStar, KickMode::Low),
-        id: 0x8200_b2e0_0000_000c,
+        id: 0x8200_b2e0_0000_0002,
     },
     PinnedKick {
         name: "a kicked black hole",
         predicate: |s| primary_kick_is(s, RemnantKind::BlackHole, KickMode::Ordinary),
-        id: 0x8200_b2e0_0000_0005,
+        id: 0x8200_b2e0_0000_0000,
     },
 ];
 

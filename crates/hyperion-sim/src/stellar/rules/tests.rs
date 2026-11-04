@@ -59,20 +59,27 @@ use crate::units::{
 };
 
 /// The universe of the pinned kicks: `tests/stellar_kick.rs`' Milky Way fixture, whose
-/// `stellar/kicks` golden pins the first three systems below.
+/// `stellar/kicks` golden pins the low-mode neutron star and the black hole below.
 const SYSTEMS_SEED: u64 = 0x0600_0029_b000_5eed;
 
-/// A primary whose neutron star takes the ordinary mode (`stellar/kicks`).
-const ORDINARY_NEUTRON_STAR: u64 = 0x8200_b2e0_0000_0000;
+/// A primary whose neutron star takes the ordinary mode: the first record of layer E that
+/// `tests/stellar_kick.rs`' search reads (its 13th) whose kick keeps its direction under the second
+/// table. From 27 the search's own ordinary-mode neutron star (`stellar/kicks`,
+/// `0x8200_b2e0_0000_0001`) is a remnant of one of plan 08's displaced classes, whose kick loop
+/// (P08.T12.c) keeps another attempt under the second table.
+const ORDINARY_NEUTRON_STAR: u64 = 0x8201_b2e0_0000_0002;
 /// A primary whose neutron star takes the low mode (`stellar/kicks`).
-const LOW_MODE_NEUTRON_STAR: u64 = 0x8200_b2e0_0000_000c;
-/// A primary whose black hole takes the ordinary mode (`stellar/kicks`).
-const KICKED_BLACK_HOLE: u64 = 0x8200_b2e0_0000_0005;
-/// Two pairs of black holes, each bound after its supernovae, which the engine runs: the first
-/// pair's primary falls back completely, with no kick, and its secondary's ordinary kick goes
-/// through the engine's `companion_kick`; the second pair's primary takes an ordinary kick at its
-/// pinned death. It is the third record of layer E that `tests/stellar_kick.rs`' search reads.
-const PAIR: u64 = 0x8200_b2e0_0000_0002;
+const LOW_MODE_NEUTRON_STAR: u64 = 0x8200_b2e0_0000_0002;
+/// A primary whose black hole takes the ordinary mode (`stellar/kicks`), a displaced class's
+/// remnant whose kick loop keeps its attempt under either table.
+const KICKED_BLACK_HOLE: u64 = 0x8200_b2e0_0000_0000;
+/// A pair which the engine runs, whose primary's black hole takes an ordinary kick at its pinned
+/// death and stays bound, and whose secondary's ordinary kick, through the engine's
+/// `companion_kick`, unbinds it. It is the eighth record of layer E that `tests/stellar_kick.rs`'
+/// search reads, the first whose two ordinary kicks are slower under the second table (until 27
+/// the third, `0x8200_b2e0_0000_0002`, two pairs of black holes, where 27's grid places another
+/// system: plan 08's displaced classes, P08.T12).
+const PAIR: u64 = 0x8200_b2e0_0000_0008;
 
 /// The fitted tables built from the committed kick table, which a second table leaves stale until a
 /// wiring refits them: the retention's ordinary shares and the defaults' review from the law, and
@@ -128,6 +135,15 @@ fn stars(galaxy: &Galaxy, id: u64) -> SystemStars {
     let id = SystemId::from_raw(id).expect("a pinned ID is well formed");
     let record = resolve(galaxy, id).expect("a pinned ID names a system");
     SystemStars::generate(galaxy, &record)
+}
+
+/// [`held`]'s pinned system `id` generated in [`probed`], as the census compares them: from 27 the
+/// probed galaxy's displaced classes read its table, so its grid places other systems of layers D
+/// and E, and the pinned ID there names another record (P08.T12).
+fn probed_stars(id: u64) -> SystemStars {
+    let id = SystemId::from_raw(id).expect("a pinned ID is well formed");
+    let record = resolve(held(), id).expect("a pinned ID names a system");
+    SystemStars::generate(probed(), &record)
 }
 
 /// Every supernova of a system's pairs, in pair order.
@@ -205,7 +221,7 @@ fn the_version_s_rules_are_the_default_law() {
 #[test]
 fn a_single_remnant_s_kick_takes_its_galaxy_s_table() {
     for id in [ORDINARY_NEUTRON_STAR, KICKED_BLACK_HOLE] {
-        let (held, probed) = (stars(held(), id), stars(probed(), id));
+        let (held, probed) = (stars(held(), id), probed_stars(id));
         let (a, b) = (
             held.natal_kick().expect("a pinned primary has a kick"),
             probed.natal_kick().expect("a pinned primary has a kick"),
@@ -226,7 +242,7 @@ fn a_single_remnant_s_kick_takes_its_galaxy_s_table() {
     }
     let (held, probed) = (
         stars(held(), LOW_MODE_NEUTRON_STAR),
-        stars(probed(), LOW_MODE_NEUTRON_STAR),
+        probed_stars(LOW_MODE_NEUTRON_STAR),
     );
     assert_eq!(
         held.natal_kick().map(|k| k.mode()),
@@ -266,19 +282,19 @@ fn slower_ordinary_kicks(a: &[SupernovaRecord], b: &[SupernovaRecord]) -> usize 
     ordinary
 }
 
-/// D2, the engine in a galaxy: the pinned quadruple's ordinary kicks, one through
-/// `companion_kick` and one at a pinned death, take the second table's slower kicks; its complete
-/// fallback has none under either. A pair's pinned death stays its primary's own model's kick
-/// under either table (design note 16), so the engine and the model read one table.
+/// D2, the engine in a galaxy: the pinned pair's ordinary kicks, one through `companion_kick` and
+/// one at a pinned death, take the second table's slower kicks. A pair's pinned death stays its
+/// primary's own model's kick under either table (design note 16), so the engine and the model
+/// read one table.
 #[test]
 fn the_engine_s_kicks_take_its_galaxy_s_table() {
-    let (held, probed) = (stars(held(), PAIR), stars(probed(), PAIR));
+    let (held, probed) = (stars(held(), PAIR), probed_stars(PAIR));
     assert_eq!(
         slower_ordinary_kicks(&supernovae(&held), &supernovae(&probed)),
         2
     );
     for stars in [&held, &probed] {
-        let first = stars.pairs().first().expect("the quadruple's inner pair");
+        let first = stars.pairs().first().expect("the primary's pair");
         let pinned = first
             .timeline()
             .supernovae()
