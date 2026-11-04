@@ -156,8 +156,10 @@ fn the_centre_s_binary_entries_resolve_and_are_their_classes() {
 /// The digest (`f64_digest`) of the centre's first [`PINNED_BINARIES`] kept binary entries in index
 /// order ([`the_centre_s_binary_entries_are_pinned`]): each one's ID (high, low 32 bits), class,
 /// initial mass, age, position and velocity. Blessed natively on x86-64 after P09.T37 drew the
-/// centre's list over its reach, and again at generator version 26; the wasip1 suite compares it.
-const CENTRE_BINARIES_DIGEST: u64 = 0x4c49_2496_b09c_7610;
+/// centre's list over its reach, again at generator version 26, and at 27, whose accreting white
+/// dwarfs' samplers stop under the Chandrasekhar mass and are refitted on train 27's engine
+/// (P15.T10.b); the wasip1 suite compares it.
+const CENTRE_BINARIES_DIGEST: u64 = 0x1363_9a1a_4154_d0d4;
 
 /// The centre's binary entries the pin reads.
 const PINNED_BINARIES: usize = 40;
