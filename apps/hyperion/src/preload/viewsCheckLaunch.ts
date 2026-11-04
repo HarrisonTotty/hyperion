@@ -76,25 +76,27 @@ export const MARCH_PROBE_NAMES = [
 ] as const satisfies ReadonlyArray<MarchProbeName>;
 
 /**
- * `value` as the atmosphere's levers over a setting's (plan R08, R08.T8.d), or `null` if it is not
- * an object of at least one of them, each one of its names.
+ * `value` as the atmosphere's levers over a setting's (plan R08, R08.T8.d and R08.T8.e's table), or
+ * `null` if it is not an object of at least one of them, each one of its names.
  */
 export function readAtmosphereLevers(value: unknown): AtmosphereLeversOverride | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { marchCover, limbRays, ...rest } = value;
+  const { marchCover, limbRays, marchSourceTransmittance: sources, ...rest } = value;
   if (
     Object.keys(rest).length > 0 ||
-    (marchCover === undefined && limbRays === undefined) ||
+    (marchCover === undefined && limbRays === undefined && sources === undefined) ||
     !(marchCover === undefined || marchCover === "area" || marchCover === "tiles") ||
-    !(limbRays === undefined || limbRays === "per-texel" || limbRays === "packed")
+    !(limbRays === undefined || limbRays === "per-texel" || limbRays === "packed") ||
+    !(sources === undefined || sources === "table" || sources === "per-step")
   ) {
     return null;
   }
   return {
     ...(marchCover === undefined ? {} : { marchCover }),
     ...(limbRays === undefined ? {} : { limbRays }),
+    ...(sources === undefined ? {} : { marchSourceTransmittance: sources }),
   };
 }
 

@@ -178,6 +178,15 @@ export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>> = {
  * every lit pixel of R05's Earth's air bodies drawn both ways. A body of one band is drawn by the
  * lit modules' table-only twins, the sliced lookup compiled out (`SourceTableEngine`), which draw
  * the modules' bytes.
+ *
+ * `table` (plan R08, R08.T8.e's table, `marchSourceTransmittance`) takes the thin march's step's
+ * sources from the same table on both settings; `per-step` is the way back, which an inspection
+ * profile's `--march-sources per-step` draws in the same build. On SwiftShader from orbit (pod, 32
+ * vCPU, 28.9 Mm, the general march over several bands) the step's lookups were about 40% of the
+ * march (`--march-probe depth-zero` against as drawn), and the table took 33% off the march at low
+ * and 34% at high against `per-step`, 20% and 16% against the march before the lever. The smoke
+ * holds the march from the table within 1/3 stop of per step on 99.5% of its frames' sky texels
+ * or more, and a body of one band's table-only march twins to the module's bytes.
  */
 export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSettings>> = {
   high: {
@@ -186,6 +195,7 @@ export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSett
     marchCover: "area",
     limbRays: "packed",
     sourceTransmittance: "table",
+    marchSourceTransmittance: "table",
   },
   low: {
     compositeTransmittance: "march",
@@ -193,6 +203,7 @@ export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSett
     marchCover: "area",
     limbRays: "packed",
     sourceTransmittance: "table",
+    marchSourceTransmittance: "table",
   },
 };
 

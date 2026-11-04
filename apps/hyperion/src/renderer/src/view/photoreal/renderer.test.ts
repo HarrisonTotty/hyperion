@@ -66,6 +66,7 @@ import {
   type AtmosphereSettings,
   COMPOSITE_BEHIND_KERNEL,
   LIMB_KERNELS,
+  MARCH_TABLE_ONLY_KERNELS,
   RAY_MARCH_BELOW_DECK_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_CENTRE_ONE_BAND_KERNEL,
@@ -754,6 +755,33 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     tables.dispose();
   });
 
+  it("marches a body with air from its sources' table, the setting's lever, and per step under a frame profile's way back (R08.T8.e's table)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const frame: PhotorealFrame = {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    };
+    const bound = (): ReadonlyArray<unknown> =>
+      engine.dispatched
+        .filter((d) => d.kernel.startsWith("atmosphere ray march"))
+        .flatMap((d) => d.bindings.sampled["atmosphere_source_table"] ?? []);
+    renderer.render(view, frame);
+    const table = bound();
+    engine.dispatched.length = 0;
+    renderer.render(view, { ...frame, atmosphereLevers: { marchSourceTransmittance: "per-step" } });
+    const perStep = bound();
+    expect({
+      table: table.length > 0 && table.every((t) => t === tables.sourceTransmittance()),
+      perStep:
+        perStep.length > 0 && perStep.every((t) => t === tables.perFragmentSourceTransmittance),
+    }).toEqual({ table: true, perStep: true });
+    renderer.dispose();
+    tables.dispose();
+  });
+
   it("draws a far body's composite over its air's area alone, over a copy of the colour it reads (R08.T16.a.2)", async () => {
     const { engine, view, renderer } = await preparedRenderer();
     // Some 8 px across the test's 64 px view.
@@ -1269,14 +1297,15 @@ async function overlayDatums(
  * a deck; its per-planet tables' four, and since
  * R08.T14.d.4 the sky's irradiance over the thick table; since R08.T9.b's lever the sources'
  * transmittance, which the lit passes read on both settings, and the `disc cells` kernels' four
- * table-only twins, which the app's engine makes for a body of one band (`SourceTableEngine`);
+ * table-only twins, which the app's engine makes for a body of one band (`SourceTableEngine`), and
+ * since R08.T8.e's table the thin read's marches' twenty-four table-only twins, made likewise;
  * since plan R14's T4.a the cluster cull,
  * the mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; since R14.T3.d
  * the depth pyramid's, made with the renderer; and the sky bake's four. Each is a module constant,
  * its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 73,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 97,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
@@ -1339,6 +1368,7 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
     BODY_DISC_CELLS_AIR_KERNEL,
     BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   ].flatMap((pair) => tableOnlyKernel(pair) ?? []),
+  ...MARCH_TABLE_ONLY_KERNELS,
   CLUSTER_CULL_KERNEL,
   ...BAKE_KERNELS,
 ];
@@ -1526,7 +1556,7 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // (R08.T14.d.4), the thick read's six, made ahead; and the tables' five, the sources'
     // transmittance among them (R08.T9.b's lever). The thick pass makes
     // one more, the sky's irradiance over the thick table (R08.T14.d.4), and the deck's pass its four
-    // marches, 27 in all, bounded however many bodies follow. All but twenty-seven are made: the sky bake's four are the sky's, the `disc cells` kernels' four twins the app's engine's (this test's engine makes none), the march's fill
+    // marches, 27 in all, bounded however many bodies follow. All but fifty-one are made: the sky bake's four are the sky's, the `disc cells` kernels' four twins and the marches' twenty-four the app's engine's (this test's engine makes none), the march's fill
     // a reader's, which no frame asks, the tile cull's two centre ray's kernels its own cover's,
     // which a view takes only under a setting's `tiles` (R08.T11.d, R08.T8.d), the disc cells' emissive form a body's above the
     // thermal cut, which none of these is (R08.T18.a), their air form a body's drawn by its disc
@@ -1543,7 +1573,7 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     const limbMade = LIMB_KERNELS.filter((pair) => made.has(pair.name)).length;
     expect(limbMade > 0).toBe(!leverOff((levers) => levers.limbRays === "packed"));
     const unmade =
-      23 +
+      47 +
       (leverOff((levers) => levers.marchCover === "tiles") ? 4 : -2) +
       (LIMB_KERNELS.length - limbMade);
     expect([held[kinds.length - 1], held[2 * kinds.length - 1]]).toEqual([

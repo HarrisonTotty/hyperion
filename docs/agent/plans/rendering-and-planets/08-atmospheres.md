@@ -24938,3 +24938,37 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
       frame; until it is ready the module draws the same bytes.
     - `TABLE_ONLY_ENTRIES` catalogues them (smoke part 16), with their originals' display names.
   - _Pending, the owner's Mac run_: the A/B, its command in the outbox's `gate.txt`.
+- **R08.T8.e's table: the march's step's sources from the sources' table, as built** (2026-11-04;
+  lane perf-march-sources; no generated value moves). The pod's figures are in the lane's outbox,
+  `measurements.md`.
+  - _Measure first_ (check-only): `--march-probe depth-zero|one-source|no-lobes` (`marchProbe.ts`):
+    each step's sources lit through no air, both ways compiled out; the first source alone; no
+    forward lobes' higher orders.
+  - _Not reached_: the profile's close window on the pod (as R08.T8.d's), so orbit alone was timed.
+  - `AtmosphereSettings.marchSourceTransmittance` (`MarchSourceTransmittance`): `table` on both
+    settings, `per-step` the way back; `--march-sources table|per-step` for the Mac A/B, its files
+    ending `-sources-<way>`.
+  - `withMarchSourceTable` rewrites each thin march's step (`source.wgsl`'s light line, the read by
+    slot's three) and appends `marchSourceTable.wgsl`: `atmosphere_source_table` at group 0 binding
+    23, and `SOURCE_TABLE_ONLY`. Through the stub (`perFragmentSourceTransmittance`) a step is as
+    before.
+  - The thick, deck and thermal marches are made from `RAY_MARCH_PER_STEP_KERNEL` and
+    `RAY_MARCH_SLOTS_PER_STEP_KERNEL`, their bytes before it (pinned), and bind no table, so a
+    thick or self-luminous body keeps the per-step cost: with it the thermal march hung
+    SwiftShader's GPU process as it compiled (smoke part 12); the thick and deck ones untried.
+  - The sources' table gains a lobes' layer a band after the light slots' (layer B L + b,
+    `sourceTableBuild.w` 1), on every medium, 32 KB a band: the stored depth without the absorbers,
+    the march's lobes' read.
+  - A body of several bands takes a source within 0.1 of the horizon's cosine per step
+    (`MARCH_TABLE_HORIZON_COSINE`, the lit passes' lean of 2026-11-03).
+  - _Twins_: `MARCH_TABLE_ONLY_KERNELS` (24, every thin form and entry point of both reads), made by
+    `SourceTableEngine` as the lit twins are; `MARCH_TABLE_ONLY_ENTRIES` (smoke part 16). VIEW's
+    kernel bound 73 → 97. The thin marches' digests re-pinned (`thickKernels.test.ts`).
+  - _Smoke_: part 8 (by slot) and part 12 (the shared read) hold R08.T11.d's area frames from above
+    the top (per-texel limb) from the table within 1/3 stop of per step at 99.5% of sky texels, a
+    channel under the half float's smallest normal in both held, and the one-band twins to the bit.
+  - _Left per step_: the ray's count, the pieces' ends and the bare ground's light (once a ray).
+  - _Not byte-checked_: the twins of the general form (one band, several slices), the tile cull's
+    and the packed limb's (compiled in part 16 only).
+  - _Pending, the owner's Mac A/B_ (`--march-sources`, its command in the outbox's `gate.txt`) and
+    the RTX QW.

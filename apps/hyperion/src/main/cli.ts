@@ -106,9 +106,10 @@
  * through no air with no lookup, the first source alone, or no forward lobes' higher orders, for an
  * A/B of the step's sources; it is refused without `--timing`, and may stand beside
  * `--composite-probe`.
- * `--march-cover area|tiles` and `--limb-rays per-texel|packed` (plan R08, R08.T8.d) draw that
- * profile's atmospheres with that lever over its setting's, for the A/B of each lever on and off
- * on one build; each is refused without `--timing`.
+ * `--march-cover area|tiles` and `--limb-rays per-texel|packed` (plan R08, R08.T8.d), and
+ * `--march-sources table|per-step` (R08.T8.e's table), draw that profile's atmospheres with that
+ * lever over its setting's, for the A/B of each lever on and off on one build; each is refused
+ * without `--timing`.
  * With `--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment` too (plan R08,
  * R08.T9.b's measurement) that profile makes the lit materials and kernels under the probe, every
  * source's transmittance through the air 1, a planetshine source's at its centre node alone, the
@@ -480,6 +481,12 @@ export function buildCommand(version: string): Command {
     )
     .addOption(
       new Option(
+        "--march-sources <WAY>",
+        "the frame profile's march step's sources over its setting's (R08.T8.e): from the sources' table, or per step",
+      ).choices(["table", "per-step"]),
+    )
+    .addOption(
+      new Option(
         "--march-probe <PROBE>",
         "the frame profile's march probe (R08.T8.d, R08.T8.e): every texel's centre ray alone, each step's sources through no air, the first source alone, or no forward lobes' higher orders",
       ).choices(MARCH_PROBE_NAMES),
@@ -641,6 +648,7 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   for (const [option, flag] of [
     ["marchCover", "--march-cover"],
     ["limbRays", "--limb-rays"],
+    ["marchSources", "--march-sources"],
   ] as const) {
     if (options[option] !== undefined && options["timing"] !== true) {
       command.error(`error: ${flag} is an option of --timing, which was not given`);
@@ -881,17 +889,20 @@ function marchProbeOf(
 }
 
 /**
- * The atmosphere's levers `--march-cover` and `--limb-rays` name where either is given, else
- * nothing (plan R08, R08.T8.d); commander has checked their choices.
+ * The atmosphere's levers `--march-cover`, `--limb-rays` and `--march-sources` name where any is
+ * given, else nothing (plan R08, R08.T8.d and R08.T8.e's table); commander has checked their
+ * choices.
  */
 function atmosphereLeversOf(
   options: Readonly<Record<string, unknown>>,
 ): { readonly atmosphereLevers: AtmosphereLeversOverride } | Record<string, never> {
   const cover = options["marchCover"];
   const rays = options["limbRays"];
+  const sources = options["marchSources"];
   const levers: AtmosphereLeversOverride = {
     ...(cover === "area" || cover === "tiles" ? { marchCover: cover } : {}),
     ...(rays === "per-texel" || rays === "packed" ? { limbRays: rays } : {}),
+    ...(sources === "table" || sources === "per-step" ? { marchSourceTransmittance: sources } : {}),
   };
   return Object.keys(levers).length === 0 ? {} : { atmosphereLevers: levers };
 }

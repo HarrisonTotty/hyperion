@@ -1113,6 +1113,9 @@ function leversText(levers: AtmosphereLeversOverride | null): string {
   const named = [
     ...(levers.marchCover === undefined ? [] : [`march cover ${levers.marchCover}`]),
     ...(levers.limbRays === undefined ? [] : [`limb rays ${levers.limbRays}`]),
+    ...(levers.marchSourceTransmittance === undefined
+      ? []
+      : [`march sources ${levers.marchSourceTransmittance}`]),
   ];
   return `; atmosphere levers ${named.join(", ")} over the setting's`;
 }
@@ -1171,7 +1174,7 @@ export async function writeInspectionTimingResults(
   const march = results.run.marchProbe;
   const levers = results.run.atmosphereLevers;
   const lit = results.run.litProbe;
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}${levers?.marchCover === undefined ? "" : `-cover-${levers.marchCover}`}${levers?.limbRays === undefined ? "" : `-limb-${levers.limbRays}`}${lit === null ? "" : `-lit-${lit}`}`;
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}${levers?.marchCover === undefined ? "" : `-cover-${levers.marchCover}`}${levers?.limbRays === undefined ? "" : `-limb-${levers.limbRays}`}${levers?.marchSourceTransmittance === undefined ? "" : `-sources-${levers.marchSourceTransmittance}`}${lit === null ? "" : `-lit-${lit}`}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${String(i + 1)}`,
   );

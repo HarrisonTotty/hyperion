@@ -17,6 +17,7 @@
 #                              [--count-gpu-calls]
 #                              [--march-probe centre|depth-zero|one-source|no-lobes]
 #                              [--march-cover area|tiles] [--limb-rays per-texel|packed]
+#                              [--march-sources table|per-step]
 #                              [--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment]]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
@@ -131,9 +132,10 @@
 # orders, the A/B of the step's sources; its files end -march-<probe>, and every probe's pictures
 # are not a player's. Each window also records the far limb's census of the march the frame after
 # it: the texels by node rays and the tiles that hold one.
-# --march-cover area|tiles and --limb-rays per-texel|packed draw that profile's atmospheres with that
-# lever over its setting's (plan R08, R08.T8.d), the A/B of each lever on and off on one build; its
-# files end -cover-<cover> and -limb-<rays>.
+# --march-cover area|tiles and --limb-rays per-texel|packed (plan R08, R08.T8.d), and --march-sources
+# table|per-step (R08.T8.e's table), draw that profile's atmospheres with that lever over its
+# setting's, the A/B of each lever on and off on one build; its files end -cover-<cover>,
+# -limb-<rays> and -sources-<way>.
 # --lit-probe (plan R08, R08.T9.b's measurement) makes that profile's lit materials and kernels
 # with every source's transmittance through the air 1 (transmittance-one), with a planetshine
 # source's at its disc's centre node alone (planetshine-centre), with the eclipse term's annuli

@@ -17,6 +17,7 @@ import {
   COMPOSITE_BEHIND_KERNEL,
   COMPOSITE_MATERIAL,
   LIMB_KERNELS,
+  MARCH_TABLE_ONLY_KERNELS,
   RAY_MARCH_BELOW_DECK_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_CENTRE_ONE_BAND_KERNEL,
@@ -475,6 +476,17 @@ export const TABLE_ONLY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   return [];
 });
 
+/**
+ * R08.T8.e's table's table-only twins of the thin read's marches (`hillaire.ts`'s
+ * `MARCH_TABLE_ONLY_KERNELS`): each march a view's frame dispatches with a body of one band's
+ * sources' table bound, its sliced lookup a step compiled out (`sourceTableEngine.ts`). The smoke
+ * page compiles them in a part of their own (`smoke/page.ts`), for the watchdog of the part that
+ * compiles the rest.
+ */
+export const MARCH_TABLE_ONLY_ENTRIES: ReadonlyArray<CatalogueEntry> = MARCH_TABLE_ONLY_KERNELS.map(
+  (spec): CatalogueEntry => ({ kind: "compute", spec }),
+);
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
@@ -496,4 +508,5 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...DISC_EMISSIVE_AIR_ENTRIES,
   ...SKY_ENTRIES,
   ...TABLE_ONLY_ENTRIES,
+  ...MARCH_TABLE_ONLY_ENTRIES,
 ];

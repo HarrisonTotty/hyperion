@@ -22,6 +22,7 @@ import { boundNames, countingRenderEngine } from "../../test/countingRenderEngin
 import { patternedThickBake } from "../../test/thickTables";
 import { lookAlong, quaternion } from "../camera/quaternion";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
+import type { KernelPair } from "../engine/kernels";
 import type { TextureHandle } from "../engine/types";
 import { kernelBindings } from "../engine/webgpu/compute";
 import { SETTINGS } from "../quality/qualitySetting";
@@ -44,6 +45,7 @@ import {
 } from "./settings";
 import {
   AERIAL_PERSPECTIVE_KERNEL,
+  type AtmosphereSettings,
   ATMOSPHERE_BEHIND_PASS,
   atmosphereInputs,
   type AtmosphereCamera,
@@ -73,6 +75,9 @@ import {
   RAY_MARCH_SPECIAL_KERNEL,
   SKY_VIEW_KERNEL,
   localScaleHeightM,
+  MARCH_TABLE_ONLY_KERNELS,
+  RAY_MARCH_PER_STEP_KERNEL,
+  RAY_MARCH_SLOTS_PER_STEP_KERNEL,
   marchOneBandFor,
   marchSourcesOf,
   marchSpecialisedFor,
@@ -93,6 +98,7 @@ import {
 import { marchAreaOf, marchAreaPixels, marchAreaTexels } from "./marchArea";
 import { densityAt, extinction } from "./medium";
 import { opticalDepth } from "./opticalDepth";
+import { SourceTableEngine } from "./sourceTableEngine";
 import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
 import compositeWgsl from "./shaders/composite.wgsl?raw";
 import oblateWgsl from "./shaders/oblate.wgsl?raw";
@@ -1976,7 +1982,10 @@ describe("the ray march by slot (R08.T8.e, lever 5; decision-r08-t8-leans.md §1
   const functions = wgslFunctions(slots);
 
   it("is the ray-march kernel's own march, the hook appended after it apart", () => {
-    expect(slots.replace(rayMarchSlotsWgsl, rayMarchCurvesWgsl)).toBe(RAY_MARCH_KERNEL.reference);
+    // Each before R08.T8.e's table, which rewrites each read's own lines.
+    expect(
+      RAY_MARCH_SLOTS_PER_STEP_KERNEL.reference.replace(rayMarchSlotsWgsl, rayMarchCurvesWgsl),
+    ).toBe(RAY_MARCH_PER_STEP_KERNEL.reference);
   });
 
   // SwiftShader inlines every call, and its GPU process crashed on more copies of a read's code
@@ -2931,6 +2940,145 @@ describe("HillaireAtmosphere's march by slot (R08.T8.e, lever 5)", () => {
   });
 });
 
+/** Whether `pair` declares the sources' table (R08.T8.e's table, `marchSourceTable.wgsl`). */
+function declaresSourceTable(pair: KernelPair): boolean {
+  return kernelBindings(pair.reference).has("atmosphere_source_table");
+}
+
+describe("the march's step's sources from the sources' table (R08.T8.e's table)", () => {
+  const table: AtmosphereSettings = { ...PER_PIXEL_LEVERS, marchSourceTransmittance: "table" };
+  const absorbing = fourAbsorberMedium();
+
+  it.each([
+    ["the shared read's", R05_EARTH_REFERENCE, NO_ABSORBER_CURVES, RAY_MARCH_KERNEL.name],
+    ["the read by slot's", absorbing.medium, absorbing.curves, RAY_MARCH_SLOTS_KERNEL.name],
+  ] as const)(
+    "binds %s march the body's sources' table under `table`, and its stub per step",
+    async (_, medium, curves, name) => {
+      const bound = [];
+      for (const levers of [table, PER_PIXEL_LEVERS]) {
+        // One engine a way, each frame's dispatches its own.
+        // oxlint-disable-next-line no-await-in-loop
+        const engine = await countingRenderEngine();
+        const atmosphere = new HillaireAtmosphere(
+          engine,
+          medium,
+          TABLE_SIZES.high,
+          WGS84,
+          curves,
+          null,
+          levers,
+        );
+        engine.dispatched.length = 0;
+        atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+        const march = engine.dispatched.at(-1);
+        bound.push([
+          march?.kernel,
+          march?.bindings.sampled["atmosphere_source_table"] ===
+            (levers === table
+              ? atmosphere.tables.sourceTransmittance()
+              : atmosphere.tables.perFragmentSourceTransmittance),
+        ]);
+      }
+      expect(bound).toEqual([
+        [name, true],
+        [name, true],
+      ]);
+    },
+  );
+
+  it.each([
+    ["table", `${RAY_MARCH_KERNEL.name} (table only)`],
+    ["per-step", RAY_MARCH_KERNEL.name],
+  ] as const)(
+    "marches a body of one band by the march's table-only twin under %s only, once the twin is made",
+    async (way, kernel) => {
+      const counting = await countingRenderEngine();
+      const engine = new SourceTableEngine(counting);
+      const atmosphere = new HillaireAtmosphere(
+        engine,
+        R05_EARTH_REFERENCE,
+        TABLE_SIZES.high,
+        WGS84,
+        NO_ABSORBER_CURVES,
+        null,
+        { ...PER_PIXEL_LEVERS, marchSourceTransmittance: way },
+      );
+      atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+      await engine.twinsSettled();
+      counting.dispatched.length = 0;
+      atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+      expect([atmosphere.tables.plan.bands.length, counting.dispatched.at(-1)?.kernel]).toEqual([
+        1,
+        kernel,
+      ]);
+    },
+  );
+
+  it("binds a thick body's march no table under `table`, its step's sources per step", async () => {
+    const engine = await countingRenderEngine();
+    const kernels = await createAtmosphereFrameKernels(engine);
+    const tables = new AtmosphereTables(
+      engine,
+      EARTH_SLAB_REFERENCE,
+      tableRadiusM(WGS84),
+      EARTH_SLAB_REFERENCE_CURVES,
+      earthBody(),
+    );
+    tables.setThickTables(
+      patternedThickBake(
+        tables.plan.bands,
+        kernelMedium(tables.medium),
+        EARTH_SLAB_REFERENCE_CURVES.length,
+      ),
+    );
+    const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels, table);
+    engine.dispatched.length = 0;
+    view.drawFrame(CAMERA, [NOON], SCENE);
+    const march = engine.dispatched.find((d) => d.kernel === RAY_MARCH_SLOTS_THICK_KERNEL.name);
+    expect([
+      march === undefined,
+      Object.hasOwn(march?.bindings.sampled ?? {}, "atmosphere_source_table"),
+    ]).toEqual([false, false]);
+    tables.dispose();
+  });
+
+  it("declares the table in every thin march, and in no thick, deck or thermal one", () => {
+    const computes = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "compute" ? [entry.spec] : [],
+    );
+    const marches = computes.filter((pair) => pair.reference.includes("fn rayMarchSourcesAt("));
+    const perStep = marches.filter((pair) => /thick|thermal|deck/u.test(pair.name));
+    expect([
+      marches.filter((pair) => !perStep.includes(pair)).every(declaresSourceTable),
+      perStep.length,
+      perStep.some(declaresSourceTable),
+      computes
+        .filter((pair) => declaresSourceTable(pair) && !marches.includes(pair))
+        .every((pair) => pair.reference.includes("fn atmosphere_sun_transmittance(")),
+      [RAY_MARCH_PER_STEP_KERNEL, RAY_MARCH_SLOTS_PER_STEP_KERNEL].some(declaresSourceTable),
+    ]).toEqual([true, 14, false, true, false]);
+  });
+
+  it("twins every thin march of both reads, in every form and entry point, its step's lookup compiled out", () => {
+    const names = MARCH_TABLE_ONLY_KERNELS.map((pair) => pair.name);
+    expect([
+      MARCH_TABLE_ONLY_KERNELS.length,
+      new Set(names).size,
+      names.every(
+        (name) => name.startsWith("atmosphere ray march") && name.endsWith("(table only)"),
+      ),
+      MARCH_TABLE_ONLY_KERNELS.every(
+        (pair) =>
+          pair.reference.includes("const SOURCE_TABLE_ONLY : bool = true;") &&
+          !pair.reference.includes("const SOURCE_TABLE_ONLY : bool = false;"),
+      ),
+      names.includes(`${RAY_MARCH_SLOTS_SPECIAL_KERNEL.name} (table only)`),
+      names.some((name) => name.includes("thick") || name.includes("thermal")),
+    ]).toEqual([24, 24, true, true, true, false]);
+  });
+});
+
 /** The frame's dispatches of what lies behind the sky at the march's resolution. */
 function behindOf(
   engine: Awaited<ReturnType<typeof countingRenderEngine>>,
@@ -3037,7 +3185,7 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
     ]);
   });
 
-  it("takes the setting's levers in every view: the march's resolution, the channels, the march's cover and limb rays, and the sources' table on both (R08.T8.d, R08.T9.b)", () => {
+  it("takes the setting's levers in every view: the march's resolution, the channels, the march's cover and limb rays, and the sources' table on both, the lit passes' and the march's (R08.T8.d, R08.T9.b, R08.T8.e)", () => {
     expect([SETTINGS.high.atmosphereLevers, SETTINGS.low.atmosphereLevers]).toEqual([
       ATMOSPHERE_SETTINGS.high,
       ATMOSPHERE_SETTINGS.low,
@@ -3049,6 +3197,7 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
         marchCover: "area",
         limbRays: "packed",
         sourceTransmittance: "table",
+        marchSourceTransmittance: "table",
       },
       low: {
         compositeTransmittance: "march",
@@ -3056,6 +3205,7 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
         marchCover: "area",
         limbRays: "packed",
         sourceTransmittance: "table",
+        marchSourceTransmittance: "table",
       },
     });
   });

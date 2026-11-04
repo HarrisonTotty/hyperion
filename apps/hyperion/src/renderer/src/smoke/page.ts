@@ -64,6 +64,7 @@ import {
   DISC_EMISSIVE_AIR_ENTRIES,
   THERMAL_ENTRIES,
   TABLE_ONLY_ENTRIES,
+  MARCH_TABLE_ONLY_ENTRIES,
   WGSL_CATALOGUE,
 } from "../view/engine/catalogue";
 import { loadRenderEngine } from "../view/engine/loadEngine";
@@ -101,6 +102,8 @@ import {
   checkMarchOneBand,
   checkMarchOverBody,
   checkMarchPackedGeneral,
+  checkMarchTableBySlot,
+  checkMarchTableShared,
   checkMarchSpecialised,
   checkCorrectionFrameTwinsEarth,
   checkRoutedTwins,
@@ -466,7 +469,8 @@ async function run(
       !THERMAL_ENTRIES.includes(entry) &&
       !DISC_AIR_ENTRIES.includes(entry) &&
       !DISC_EMISSIVE_AIR_ENTRIES.includes(entry) &&
-      !TABLE_ONLY_ENTRIES.includes(entry),
+      !TABLE_ONLY_ENTRIES.includes(entry) &&
+      !MARCH_TABLE_ONLY_ENTRIES.includes(entry),
   );
   const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
   await group(1, "T9.b catalogue", () => checkCatalogue(engine, status, entries, checks));
@@ -479,6 +483,10 @@ async function run(
   // R08.T9.b's lever's table-only twins, in part 16, the lightest (36 s at 0e466e0's gate).
   await group(16, "T9.b catalogue: the table-only twins", () =>
     checkCatalogue(engine, status, TABLE_ONLY_ENTRIES, checks),
+  );
+  // R08.T8.e's table's march twins, in part 16 after R08.T9.b's.
+  await group(16, "T9.b catalogue: the march's table-only twins", () =>
+    checkCatalogue(engine, status, MARCH_TABLE_ONLY_ENTRIES, checks),
   );
   // R08.T15.a.2's deck's marches, in part 14 with its twins, first.
   await group(14, "T9.b catalogue: the deck's marches", () =>
@@ -583,6 +591,10 @@ async function run(
   // In part 8 after R08.T16.a.2's, over the march by slot that R08.T11.d's group compiled.
   await group(8, "the owner's priority: what lies behind the sky at the march's resolution", () =>
     checkCompositeBehind(engine, checks),
+  );
+  // In part 8 after the composite's, over the march by slot that R08.T11.d's group compiled.
+  await group(8, "R08.T8.e's table: the march by slot's sources from the sources' table", () =>
+    checkMarchTableBySlot(engine, checks, summary.fallback),
   );
   await group(12, "R08.T11.b the face's count on a drawn surface", () =>
     checkFaceCount(engine, checks, twins),
@@ -715,6 +727,10 @@ async function run(
   // Earth's shared read as the specialised march's, in the same part.
   await group(12, "fix-disc-air-rows the half-resolution march over a drawn body", () =>
     checkMarchOverBody(engine, checks),
+  );
+  // In part 12 after the specialised march's, over the shared read that its group compiled.
+  await group(12, "R08.T8.e's table: the shared read's sources from the sources' table", () =>
+    checkMarchTableShared(engine, checks, summary.fallback),
   );
   // R08.T18.b's thermal forms of the per-frame kernels, compiled and held to their twins, in part 12,
   // the lightest (54 s at 03e12ec's tree).

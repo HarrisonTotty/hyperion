@@ -534,16 +534,24 @@ describe("the frame profile's timing file (the owner's report)", () => {
     };
     const both = results(null, null, { marchCover: "tiles", limbRays: "packed" });
     const one = results(null, null, { limbRays: "per-texel" });
+    const sources = results(null, null, { marchSourceTransmittance: "per-step" });
     expect([
       (await writeInspectionTimingResults("/timing", both, files)).json,
       (await writeInspectionTimingResults("/timing", one, files)).json,
+      (await writeInspectionTimingResults("/timing", sources, files)).json,
       inspectionTimingMarkdown(both)
         .split("\n")
         .find((line) => line.startsWith("- **Launch:**"))
         ?.endsWith("; atmosphere levers march cover tiles, limb rays packed over the setting's"),
+      inspectionTimingMarkdown(sources)
+        .split("\n")
+        .find((line) => line.startsWith("- **Launch:**"))
+        ?.endsWith("; atmosphere levers march sources per-step over the setting's"),
     ]).toEqual([
       "/timing/2026-11-01-pod-low-inspection-timing-cover-tiles-limb-packed.json",
       "/timing/2026-11-01-pod-low-inspection-timing-limb-per-texel.json",
+      "/timing/2026-11-01-pod-low-inspection-timing-sources-per-step.json",
+      true,
       true,
     ]);
   });

@@ -532,11 +532,13 @@ describe("AtmosphereTables", () => {
     expect(engine.textureSpecs.slice(before).map((spec) => [spec.name, spec.size])).toEqual([
       ["atmosphere: sources' transmittance per fragment", { width: 1, height: 1 }],
     ]);
-    // The stub builds nothing; the table's first read builds one layer a band and light slot.
+    // The stub builds nothing; the table's first read builds one layer a band and light slot, then
+    // a lobes' layer a band (R08.T8.e's table).
     expect(engine.counts.dispatches).toBe(2);
     const table = tables.sourceTransmittance();
     expect(tables.sourceTransmittance()).toBe(table);
-    const build = engine.dispatched.at(-1);
+    const build = engine.dispatched.at(-2);
+    const lobes = engine.dispatched.at(-1);
     expect([
       engine.counts.dispatches,
       build?.kernel,
@@ -547,8 +549,10 @@ describe("AtmosphereTables", () => {
       Array.from(build?.bindings.uniforms["sourceTableBuild"] ?? []),
       build === undefined ? [] : boundNames(build.bindings),
       engine.textureSpecs.find((spec) => spec.name === table.name)?.format,
+      lobes?.kernel,
+      Array.from(lobes?.bindings.uniforms["sourceTableBuild"] ?? []),
     ]).toEqual([
-      3,
+      4,
       SOURCE_TRANSMITTANCE_KERNEL.name,
       tables.transmittance,
       tables.oblateBody,
@@ -557,6 +561,8 @@ describe("AtmosphereTables", () => {
       [0, 0, Math.fround(tables.plan.bands[0]?.latitudeRad ?? Number.NaN), 0],
       [...kernelBindings(SOURCE_TRANSMITTANCE_KERNEL.reference).keys()].toSorted(),
       "rgba16float",
+      SOURCE_TRANSMITTANCE_KERNEL.name,
+      [1, 0, Math.fround(tables.plan.bands[0]?.latitudeRad ?? Number.NaN), 1],
     ]);
     // A build leaves it to be built again at the next read; a restore makes it anew.
     tables.setMedium(HILLAIRE_REFERENCE, R);
@@ -567,7 +573,7 @@ describe("AtmosphereTables", () => {
     expect(tables.perFragmentSourceTransmittance).not.toBe(stub);
   });
 
-  it("builds each band and light slot's layer of the sources' transmittance at the band's latitude (R08.T9.b's lever)", async () => {
+  it("builds each band and light slot's layer of the sources' transmittance at the band's latitude, then each band's lobes' layer (R08.T9.b's lever, R08.T8.e's table)", async () => {
     const engine = await countingRenderEngine();
     const medium = saturnClassMedium();
     const tables = new AtmosphereTables(
@@ -584,11 +590,19 @@ describe("AtmosphereTables", () => {
       builds.map((d) => Array.from(d.bindings.uniforms["sourceTableBuild"] ?? [])),
       engine.textureSpecs.find((spec) => spec.name === table.name)?.size,
     ]).toEqual([
-      tables.plan.bands.map((band, b) => [b, 0, Math.fround(band.latitudeRad), 0]),
+      [
+        ...tables.plan.bands.map((band, b) => [b, 0, Math.fround(band.latitudeRad), 0]),
+        ...tables.plan.bands.map((band, b) => [
+          tables.plan.bands.length + b,
+          0,
+          Math.fround(band.latitudeRad),
+          1,
+        ]),
+      ],
       [
         SOURCE_TRANSMITTANCE_SIZE.widthTexels,
         SOURCE_TRANSMITTANCE_SIZE.heightTexels,
-        tables.plan.bands.length,
+        2 * tables.plan.bands.length,
       ],
     ]);
     tables.dispose();

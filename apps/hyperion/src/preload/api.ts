@@ -1202,13 +1202,16 @@ export type MarchProbeName = "centre" | "depth-zero" | "one-source" | "no-lobes"
 
 /**
  * The atmosphere's levers a frame profile draws with over its setting's (plan R08, R08.T8.d): the
- * march's cover (`area`, or `tiles`, the exact tile cull) and its far limb's node rays (`per-texel`,
- * or `packed`), each as `hillaire.ts`'s `AtmosphereSettings` names them; either may be absent, the
- * setting's then. The pictures are a player's, to the bit on a fallback adapter.
+ * march's cover (`area`, or `tiles`, the exact tile cull), its far limb's node rays (`per-texel`,
+ * or `packed`), and since R08.T8.e's table its step's sources (`table`, from the sources' table, or
+ * `per-step`, the sliced lookup), each as `hillaire.ts`'s `AtmosphereSettings` names them; any may
+ * be absent, the setting's then. The pictures are a player's, the cover's and the limb's to the bit
+ * on a fallback adapter.
  */
 export interface AtmosphereLeversOverride {
   readonly marchCover?: "area" | "tiles";
   readonly limbRays?: "per-texel" | "packed";
+  readonly marchSourceTransmittance?: "table" | "per-step";
 }
 
 /**

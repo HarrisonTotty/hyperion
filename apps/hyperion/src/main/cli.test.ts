@@ -856,7 +856,7 @@ describe("the several-views check's options", () => {
     ]);
   });
 
-  it("takes --march-cover and --limb-rays, the frame profile's levers over its setting's (R08.T8.d)", () => {
+  it("takes --march-cover, --limb-rays and --march-sources, the frame profile's levers over its setting's (R08.T8.d, R08.T8.e)", () => {
     const profile = [
       "--views-check",
       "--inspection",
@@ -871,11 +871,13 @@ describe("the several-views check's options", () => {
       parse([...profile, "--limb-rays", "packed"]).viewsCheck?.atmosphereLevers,
       parse([...profile, "--march-cover", "area", "--limb-rays", "per-texel"]).viewsCheck
         ?.atmosphereLevers,
+      parse([...profile, "--march-sources", "per-step"]).viewsCheck?.atmosphereLevers,
       parse(profile).viewsCheck?.atmosphereLevers,
     ]).toEqual([
       { marchCover: "tiles" },
       { limbRays: "packed" },
       { marchCover: "area", limbRays: "per-texel" },
+      { marchSourceTransmittance: "per-step" },
       undefined,
     ]);
   });
@@ -883,6 +885,7 @@ describe("the several-views check's options", () => {
   it.each([
     ["--march-cover", "tiles"],
     ["--limb-rays", "packed"],
+    ["--march-sources", "table"],
   ] as const)(
     "refuses %s without the frame profile, or naming no value (R08.T8.d)",
     (flag, value) => {

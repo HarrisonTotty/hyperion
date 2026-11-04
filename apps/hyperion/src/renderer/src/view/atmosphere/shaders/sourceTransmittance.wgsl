@@ -16,6 +16,11 @@
 // value is held to the half float's largest, as the transmittance tables' are. Composed after
 // `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `oblate.wgsl`, `belowDeck.wgsl` and
 // `surfaceLighting.wgsl` (`SURFACE_LIGHTING_WGSL`), whose tables it declares.
+//
+// Since R08.T8.e's table (`AtmosphereSettings.marchSourceTransmittance`) the table also holds a
+// lobes' layer a band after the bands' light slots, the ray march's read of a medium with forward
+// lobes (`marchSourceTable.wgsl`): each texel the same lookup's stored optical depth of every term
+// but the absorbers (`slicedStoredOf`'s, over s), which no curve takes.
 
 @group(0) @binding(0) var atmosphere_body : texture_2d<f32>;
 @group(0) @binding(1) var atmosphere_transmittance : texture_2d_array<f32>;
@@ -29,8 +34,9 @@
 @group(0) @binding(7) var atmosphere_below_deck : texture_2d_array<f32>;
 @group(0) @binding(8) var atmosphere_source_table : texture_2d_array<f32>;
 @group(0) @binding(9) var sourceTableOut : texture_storage_2d_array<rgba16float, write>;
-// One layer's build: x the layer it writes (band × light slots + slot), y the light slot whose
-// curves it takes, z the band's geodetic latitude, rad (`TablesBand.latitudeRad`), w unused.
+// One layer's build: x the layer it writes (band × light slots + slot, or a lobes' layer's), y the
+// light slot whose curves it takes, z the band's geodetic latitude, rad (`TablesBand.latitudeRad`),
+// w 1 for a lobes' layer, the stored depth alone, and 0 for a light slot's.
 @group(0) @binding(10) var<uniform> sourceTableBuild : vec4f;
 
 // The azimuth from north towards east each texel's ray takes, rad: π ÷ 4, where the vertical
@@ -73,7 +79,14 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let place = atmosphereSurfacePlace(body, scaledHeightM / s, latitudeRad);
   let direction = atmosphereDirection(place, clamp(mu, -1.0, 1.0), SOURCE_TABLE_AZIMUTH);
   let ray = slicedRayOf(body, atmosphere_body, place.start, direction);
-  let depth = atmosphereDepthOf(body, ray, u32(sourceTableBuild.y));
+  var depth = atmosphereDepthOf(body, ray, u32(sourceTableBuild.y));
+  if (sourceTableBuild.w > 0.5) {
+    let absorbers = oblateAbsorbersOf(atmosphere_body);
+    depth = slicedStoredOf(
+      ray, body, atmosphere_body, atmosphere_transmittance, atmosphere_absorber_columns,
+      atmosphere_absorber_pressure_columns, atmosphere_last_absorber_pressure_column, absorbers.x
+    ).depth;
+  }
   textureStore(
     sourceTableOut, id.xy, u32(sourceTableBuild.x), vec4f(min(depth, vec3f(SOURCE_TABLE_HALF_MAX)), 0.0)
   );

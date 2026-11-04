@@ -80,6 +80,7 @@ import {
   type MarchBand,
   type LimbRays,
   type MarchCover,
+  type MarchSourceTransmittance,
   marchSourcesOf,
   marchOneBandFor,
   marchSpecialisedFor,
@@ -92,6 +93,7 @@ import {
   tableRadiusM,
   tablesFigureOf,
 } from "../view/atmosphere/hillaire";
+import { SourceTableEngine } from "../view/atmosphere/sourceTableEngine";
 import {
   MARCH_TILE_CODES,
   MARCH_TILE_TEXELS,
@@ -3442,7 +3444,8 @@ function halvesDiffering(
 /**
  * One frame of `tables` drawn under `cover` by an atmosphere of its own, so that its march's
  * target starts empty, over the device's shared kernels, its far limb's node rays taken as
- * `limbRays` asks (R08.T8.d), and read back.
+ * `limbRays` asks (R08.T8.d) and its step's sources as `marchSources` does (R08.T8.e's table), and
+ * read back.
  */
 async function areaReadsOf(
   engine: RenderEngine,
@@ -3451,13 +3454,14 @@ async function areaReadsOf(
   frame: AreaFrame,
   cover: MarchCover,
   limbRays: LimbRays = "per-texel",
+  marchSources: MarchSourceTransmittance = "per-step",
 ): Promise<AreaReads> {
   const atmosphere = HillaireAtmosphere.over(
     engine,
     tables,
     twinSizes(TABLE_SIZES[frame.setting]),
     kernels,
-    { ...PER_PIXEL_LEVERS, limbRays },
+    { ...PER_PIXEL_LEVERS, limbRays, marchSourceTransmittance: marchSources },
   );
   atmosphere.setMarchCover(cover);
   // The surface's mesh and material, made once and let go with the frame.
@@ -3713,6 +3717,205 @@ export async function checkMarchPackedGeneral(
     engine.releaseMaterial(kernels.composite);
     engine.releaseMesh(kernels.triangle);
   }
+}
+
+// --- R08.T8.e's table: the march's step's sources from the sources' table ------------------------
+
+/** The most a held channel moves, in stops (a factor of 2^(1/3) either way): R08.T9.b's figure. */
+const THIRD_STOP = 1 / 3;
+
+/** The share of a frame's sky texels the march from the sources' table holds within 1/3 stop. */
+const MARCH_TABLE_HELD_SHARE = 0.995;
+
+/**
+ * The half float's smallest normal, 2⁻¹⁴ (IEEE 754-2008 binary16): a channel both marches leave
+ * under it is held, its ratio below the half float's precision, as R08.T9.b's check holds only the
+ * channels both ways leave dark.
+ */
+const HALF_SMALLEST_NORMAL = 2 ** -14;
+
+/** Whether a march's texel at `i` is the miss's (0, 0, 0, 1): its ray met no air. */
+function marchMissedAt(texels: Float32Array, i: number): boolean {
+  return texels[i] === 0 && texels[i + 1] === 0 && texels[i + 2] === 0 && texels[i + 3] === 1;
+}
+
+/**
+ * How a march's target drawn from the sources' table holds to the same frame's drawn per step: its
+ * sky texels, each whose ray met the air in either (not the miss's (0, 0, 0, 1)); those whose every
+ * light channel is within 1/3 stop of the per-step march's, or under {@link HALF_SMALLEST_NORMAL}
+ * in both; and the worst texel, in stops.
+ */
+function marchTableAgreement(
+  perStep: ArrayBuffer,
+  table: ArrayBuffer,
+): {
+  readonly sky: number;
+  readonly held: number;
+  readonly worstStops: number;
+  readonly at: string;
+} {
+  const a = halfTexels(perStep);
+  const b = halfTexels(table);
+  let sky = 0;
+  let held = 0;
+  let worstStops = 0;
+  let at = "no texel off";
+  for (let i = 0; i < a.length; i += 4) {
+    if (marchMissedAt(a, i) && marchMissedAt(b, i)) {
+      continue;
+    }
+    sky += 1;
+    let stops = 0;
+    for (let c = 0; c < 3; c += 1) {
+      const p = a[i + c] ?? 0;
+      const q = b[i + c] ?? 0;
+      if (Math.max(p, q) >= HALF_SMALLEST_NORMAL) {
+        stops = Math.max(stops, Math.abs(Math.log2(Math.max(q, 1e-30) / Math.max(p, 1e-30))));
+      }
+    }
+    if (stops <= THIRD_STOP) {
+      held += 1;
+    }
+    if (stops > worstStops) {
+      worstStops = stops;
+      at = `texel ${String(i / 4)}: ${[0, 1, 2].map((c) => (b[i + c] ?? 0).toPrecision(4)).join(", ")} against ${[0, 1, 2].map((c) => (a[i + c] ?? 0).toPrecision(4)).join(", ")}`;
+    }
+  }
+  return { sky, held, worstStops, at };
+}
+
+/**
+ * R08.T8.e's table (`AtmosphereSettings.marchSourceTransmittance` `table`): `bodies`' frames over
+ * the air's area drawn with each step's sources from the sources' table, by the march as written
+ * (on the engine the page's wraps), held to the same frames per step within 1/3 stop at
+ * {@link MARCH_TABLE_HELD_SHARE} of their sky texels or more, the far limb's footprint among them
+ * from above the top; and a body of one band's frames drawn again by the march's table-only twins
+ * (`SourceTableEngine`), the module's bytes on a fallback adapter and within T8.d's ulp on hardware.
+ * The march of `reads` alone is made, so that no part's GPU process compiles both reads' marches.
+ */
+async function checkMarchTableBodies(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+  bodies: ReadonlyArray<AreaBody>,
+  reads: "shared read" | "by slot",
+): Promise<void> {
+  const written = engine instanceof SourceTableEngine ? engine.inner : engine;
+  const kernels = await createAtmosphereFrameKernels(engine, { reads });
+  try {
+    for (const body of bodies) {
+      const sliced = body.body();
+      const tables = new AtmosphereTables(
+        engine,
+        body.medium,
+        tableRadiusM(sliced.figure),
+        body.curves,
+        sliced,
+      );
+      try {
+        for (const frame of body.frames) {
+          const what = `R08.T8.e's table ${body.name}, ${frame.setting}, ${frame.name}`;
+          // The harness's GPU work runs in order: each frame is read back before the next draws.
+          // oxlint-disable-next-line no-await-in-loop
+          const perStep = await areaReadsOf(written, tables, kernels, frame, "area");
+          // The same frame from the table, read back before the next draws.
+          // oxlint-disable-next-line no-await-in-loop
+          const table = await areaReadsOf(
+            written,
+            tables,
+            kernels,
+            frame,
+            "area",
+            "per-texel",
+            "table",
+          );
+          const { sky, held, worstStops, at } = marchTableAgreement(perStep.march, table.march);
+          const share = sky > 0 ? held / sky : 0;
+          checks.check(
+            `${what}: the march from the sources' table within 1/3 stop of the march per step at ${String(MARCH_TABLE_HELD_SHARE * 100)}% or more of its sky texels`,
+            sky > 0 && share >= MARCH_TABLE_HELD_SHARE,
+            `${String(held)} of ${String(sky)} sky texels (${(share * 100).toFixed(2)}%) within 1/3 stop; worst ${worstStops.toFixed(3)} stops, ${at}`,
+          );
+          if (tables.plan.bands.length !== 1 || !(engine instanceof SourceTableEngine)) {
+            continue;
+          }
+          // A first draw through the page's engine makes the twin; the next is drawn by it.
+          // oxlint-disable-next-line no-await-in-loop
+          await areaReadsOf(engine, tables, kernels, frame, "area", "per-texel", "table");
+          // The twin is made off the frame: the next draw takes it once it has settled.
+          // oxlint-disable-next-line no-await-in-loop
+          await engine.twinsSettled();
+          const swaps = engine.swaps;
+          // The frame by the twin, read back before the next draws.
+          // oxlint-disable-next-line no-await-in-loop
+          const twinned = await areaReadsOf(
+            engine,
+            tables,
+            kernels,
+            frame,
+            "area",
+            "per-texel",
+            "table",
+          );
+          const marched = halvesDiffering(table.march, twinned.march);
+          const composite = halvesDiffering(table.composite, twinned.composite);
+          const same = marched.texels === 0 && composite.texels === 0;
+          const withinUlp = marched.ulps <= 1 && composite.ulps <= 1;
+          checks.check(
+            `${what}: the march's table-only twin draws the march's bytes from the table, byte for byte on a fallback adapter and within 1 ulp on hardware`,
+            engine.swaps > swaps && (fallback ? same : withinUlp),
+            `${differenceOf("the march's target", marched)}, ${differenceOf("the composite's output", composite)}; ${String(engine.swaps - swaps)} dispatches by a twin`,
+          );
+        }
+      } finally {
+        tables.dispose();
+      }
+    }
+  } finally {
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/**
+ * R08.T8.e's table on the march by slot ({@link checkMarchTableBodies}): the measured Earth, of the
+ * specialised march, and the slab Earth, of the march for one band, edged, each of one band.
+ *
+ * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
+ */
+export async function checkMarchTableBySlot(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+): Promise<void> {
+  await checkMarchTableBodies(
+    engine,
+    checks,
+    fallback,
+    [...AREA_BODIES, ...ONE_BAND_BODIES],
+    "by slot",
+  );
+}
+
+/**
+ * R08.T8.e's table on the shared read's march ({@link checkMarchTableBodies}): R05's Earth, of the
+ * specialised march and one band, and the Saturn-class figure, of the general march and several
+ * bands, whose near-horizon sources the march takes per step.
+ *
+ * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
+ */
+export async function checkMarchTableShared(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+): Promise<void> {
+  await checkMarchTableBodies(
+    engine,
+    checks,
+    fallback,
+    [...SPECIALISED_BODIES, ...GENERAL_BODIES],
+    "shared read",
+  );
 }
 
 /** fix-disc-air-rows' frame: low's march at half resolution over it, 96 × 54 texels. */

@@ -1,6 +1,7 @@
 /**
  * The lit passes' table-only twins (plan R08, R08.T9.b's lever): an engine that draws a lit body of
- * one latitude band by modules with the per-fragment sliced lookup compiled out.
+ * one latitude band by modules with the per-fragment sliced lookup compiled out, and since R08.T8.e's
+ * table marches its air by the ray march's twins, the sliced lookup a step compiled out.
  *
  * @remarks
  * With `AtmosphereSettings.sourceTransmittance`'s `table` a lit module reads each source's
@@ -22,7 +23,9 @@
  *   body takes (they draw into the scene target), take none.
  * - **Kernels.** A kernel's twin is made at its first dispatch with a one-band table bound,
  *   asynchronously, and stands in from the first such dispatch after it is made: the table's own
- *   build, which never binds one there, takes none.
+ *   build, which never binds one there, takes none. The ray march's thin forms declare the same
+ *   table and constant (`marchSourceTable.wgsl`; `AtmosphereSettings.marchSourceTransmittance`'s
+ *   `table`), and take their twins the same way; their every step's source is the table's in both.
  * - So a frame of no one-band body with air makes no twin, and every other member is forwarded
  *   unchanged. A release releases the twin with its original; after a restore the callers make
  *   their materials and kernels again, and their twins come again with their draws.

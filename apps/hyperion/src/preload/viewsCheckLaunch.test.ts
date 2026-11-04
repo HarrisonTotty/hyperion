@@ -198,6 +198,8 @@ describe("the views check's launch switch", () => {
       { marchCover: "tiles" },
       { limbRays: "packed" },
       { marchCover: "area", limbRays: "per-texel" },
+      { marchSourceTransmittance: "per-step" },
+      { limbRays: "packed", marchSourceTransmittance: "table" },
     ] as const) {
       const launch: ViewsCheckLaunch = { ...profile, atmosphereLevers };
       expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
@@ -206,6 +208,7 @@ describe("the views check's launch switch", () => {
       {},
       { marchCover: "whole frame" },
       { limbRays: "per-node" },
+      { marchSourceTransmittance: "per-fragment" },
       { marchCover: "tiles", strides: true },
     ]) {
       expect(readViewsCheckLaunch({ ...profile, atmosphereLevers })).toBeNull();

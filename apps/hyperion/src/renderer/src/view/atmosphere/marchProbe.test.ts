@@ -7,6 +7,8 @@ import {
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
+  RAY_MARCH_SLOTS_THICK_KERNEL,
+  RAY_MARCH_THICK_KERNEL,
   SKY_VIEW_KERNEL,
 } from "./hillaire";
 import {
@@ -59,7 +61,7 @@ describe("the march's probe (plan R08, R08.T8.d and R08.T8.e)", () => {
   });
 
   it.each([
-    ["depth-zero", "let light = SourceLight(1.0, vec3f(1.0), vec3f(0.0));"],
+    ["depth-zero", "SourceLight(1.0, vec3f(1.0), vec3f(0.0));"],
     ["one-source", "return min(u32(view.sky.x), 1u);"],
     ["no-lobes", "let lobes = false;"],
   ] as const)(
@@ -86,15 +88,27 @@ describe("the march's probe (plan R08, R08.T8.d and R08.T8.e)", () => {
     },
   );
 
-  it("compiles each step's lookup out of both reads under depth-zero, keeping the ray's own", () => {
-    for (const pair of [RAY_MARCH_KERNEL, RAY_MARCH_SLOTS_KERNEL]) {
+  it("compiles the per-step march's lookup out under depth-zero, as before the table", () => {
+    for (const pair of [RAY_MARCH_THICK_KERNEL, RAY_MARCH_SLOTS_THICK_KERNEL]) {
       const probed = marchProbedKernel(pair, "depth-zero").reference;
       expect([
         probed.includes("let light = sourceLightAt(body, start, bodyDir, slot);"),
         probed.includes("slicedSlotDepthsOf(sliced, body, slot, lobes)"),
+        probed.includes("let light = SourceLight(1.0, vec3f(1.0), vec3f(0.0));"),
+      ]).toEqual([false, false, true]);
+    }
+  });
+
+  it("compiles both of each step's ways out of both reads under depth-zero, keeping the ray's own", () => {
+    for (const pair of [RAY_MARCH_KERNEL, RAY_MARCH_SLOTS_KERNEL]) {
+      const probed = marchProbedKernel(pair, "depth-zero").reference;
+      expect([
+        probed.includes("for (var fromTable = tabled; fromTable; fromTable = false) {"),
+        probed.includes("for (var direct = !tabled; direct; direct = false) {"),
+        probed.split("if (false) {").length - pair.reference.split("if (false) {").length,
         probed.includes("fn rayMarchGroundLightAt("),
         probed.includes("return -log(sourceLightAt(body, start, d, 0u).toSun.g);"),
-      ]).toEqual([false, false, true, true]);
+      ]).toEqual([false, false, 2, true, true]);
     }
   });
 

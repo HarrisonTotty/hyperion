@@ -43,24 +43,43 @@ const MARCH_ABOVE_LINE = "let above = view.camera.w * view.curvature.z >= medium
 /** A step's source lit through no air: never shadowed, its transmittance 1, the lobes' depth 0. */
 const NO_LOOKUP_LINE = "let light = SourceLight(1.0, vec3f(1.0), vec3f(0.0));";
 
+/** The line a thin march's step holds where it takes its sources from the sources' table. */
+const TABLED_STEP_LINE = "let tabled = marchTableTakes(";
+
+/**
+ * `depth-zero`'s lines in a march that takes each step's sources per step alone (the thick, deck
+ * and thermal marches, R08.T8.e's table): the step's lookup, the shared read's (`source.wgsl`'s
+ * `sourceInScatteringAt`, which `rayMarchCurves.wgsl`'s step takes) and the read by slot's
+ * (`rayMarchSlots.wgsl`'s `rayMarchSourcesAt`), each source lit through no air.
+ */
+const PER_STEP_DEPTH_ZERO_LINES: ReadonlyArray<readonly [string, string]> = [
+  ["let light = sourceLightAt(body, start, bodyDir, slot);", NO_LOOKUP_LINE],
+  ["let sliced = slicedRayOf(body, oblateBody, start, dir);", ""],
+  ["let read = slicedSlotDepthsOf(sliced, body, slot, lobes);", ""],
+  [
+    "let light = SourceLight(select(1.0, 0.0, sliced.shadowed), exp(-read[0]), read[1]);",
+    NO_LOOKUP_LINE,
+  ],
+];
+
 /**
  * Each probe's lines of the march's sources and what stands in each one's place, each line at most
  * once in a march: `centre`'s footprint test ({@link MARCH_ABOVE_LINE}); `depth-zero`'s step's
- * lookup, the shared read's (`source.wgsl`'s `sourceInScatteringAt`, which `rayMarchCurves.wgsl`'s
- * step takes) and the read by slot's (`rayMarchSlots.wgsl`'s `rayMarchSourcesAt`), the bare
- * ground's, the count's and the pieces' reads, once a ray, kept; `one-source`'s count of the drawn
- * sources (`source.wgsl`'s `viewSourceCount`); and `no-lobes`' test (`rayMarch.wgsl`'s `marchRay`).
+ * light in a thin march, each source lit through no air and both its ways, from the sources' table
+ * and by the read's own lookup (`hillaire.ts`' `withMarchSourceTable`), left out, or in a march
+ * per step alone {@link PER_STEP_DEPTH_ZERO_LINES}, the bare ground's, the count's and the pieces'
+ * reads, once a ray, kept; `one-source`'s count of the drawn sources (`source.wgsl`'s
+ * `viewSourceCount`); and `no-lobes`' test (`rayMarch.wgsl`'s `marchRay`).
  */
 const MARCH_PROBE_LINES: Readonly<Record<MarchProbe, ReadonlyArray<readonly [string, string]>>> = {
   centre: [[MARCH_ABOVE_LINE, "let above = false;"]],
   "depth-zero": [
-    ["let light = sourceLightAt(body, start, bodyDir, slot);", NO_LOOKUP_LINE],
-    ["let sliced = slicedRayOf(body, oblateBody, start, dir);", ""],
-    ["let read = slicedSlotDepthsOf(sliced, body, slot, lobes);", ""],
     [
-      "let light = SourceLight(select(1.0, 0.0, sliced.shadowed), exp(-read[0]), read[1]);",
-      NO_LOOKUP_LINE,
+      "var light = SourceLight(0.0, vec3f(0.0), vec3f(0.0));",
+      "var light = SourceLight(1.0, vec3f(1.0), vec3f(0.0));",
     ],
+    ["for (var fromTable = tabled; fromTable; fromTable = false) {", "if (false) {"],
+    ["for (var direct = !tabled; direct; direct = false) {", "if (false) {"],
   ],
   "one-source": [
     ["return min(u32(view.sky.x), MAX_SKY_SOURCES);", "return min(u32(view.sky.x), 1u);"],
@@ -87,7 +106,10 @@ export function marchProbedKernel(pair: KernelPair, probe: MarchProbe): KernelPa
     return pair;
   }
   const rewrite = (wgsl: string): string =>
-    MARCH_PROBE_LINES[probe].reduce((code, [line, probed]) => {
+    (probe === "depth-zero" && !wgsl.includes(TABLED_STEP_LINE)
+      ? PER_STEP_DEPTH_ZERO_LINES
+      : MARCH_PROBE_LINES[probe]
+    ).reduce((code, [line, probed]) => {
       const at = code.indexOf(line);
       if (at < 0) {
         return code;

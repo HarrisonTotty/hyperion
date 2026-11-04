@@ -2730,7 +2730,10 @@ export class AtmosphereTables {
    * `rgba16float` at {@link SOURCE_TRANSMITTANCE_SIZE} (plan R08, R08.T9.b's lever): a 2D array of
    * the irradiance's layers, band b's light slot k at layer b × {@link AtmosphereTables.layersPerBand}
    * + k, each texel the sliced lookup from the band's latitude (`sourceTransmittance.wgsl`), which
-   * the lit passes read in its place where their setting's `sourceTransmittance` is `table`.
+   * the lit passes read in its place where their setting's `sourceTransmittance` is `table`, and
+   * since R08.T8.e's table the ray march at each step where its setting's
+   * `marchSourceTransmittance` is; then a lobes' layer a band, band b's at B L + b, the same lookup's
+   * stored depth of every term but the absorbers, the march's forward lobes' read.
    *
    * @remarks
    * Built at the first call after each build of the tables, from them, as the irradiance is, so that
@@ -3841,9 +3844,11 @@ export class AtmosphereTables {
     const r = this.#resources;
     const slots = multiScatteringLayersOf(this.#medium, this.#curves);
     const bands = this.#plan.bands;
-    const layers = bands.length * slots;
-    // A body of one band's by a name of its own, which the lit passes' table-only twins take
-    // (`sourceTableEngine.ts`).
+    // The bands' light slots, then a lobes' layer a band (R08.T8.e's table): the march's read of a
+    // medium with forward lobes.
+    const layers = bands.length * (slots + 1);
+    // A body of one band's by a name of its own, which the lit passes' and the march's table-only
+    // twins take (`sourceTableEngine.ts`).
     const name = bands.length === 1 ? ONE_BAND_SOURCE_TABLE_NAME : SOURCE_TABLE_NAME;
     const held = this.#sourceTable;
     if (held === null || held.layers !== layers || held.texture.name !== name) {
@@ -3897,6 +3902,33 @@ export class AtmosphereTables {
           ATMOSPHERE_TABLES_PASS,
         );
       }
+    }
+    // Each band's lobes' layer: the same lookup's stored depth of every term but the absorbers,
+    // which no curve takes.
+    for (const [b, band] of bands.entries()) {
+      engine.dispatch(
+        kernel,
+        {
+          uniforms: {
+            sourceTableBuild: Float32Array.of(bands.length * slots + b, 0, band.latitudeRad, 1),
+          },
+          buffers: {},
+          sampled: {
+            atmosphere_body: r.oblateBody,
+            atmosphere_transmittance: r.slices.transmittance,
+            atmosphere_absorber_columns: r.slices.absorberColumns,
+            atmosphere_absorber_pressure_columns: r.slices.absorberPressureColumns,
+            atmosphere_last_absorber_pressure_column: r.slices.lastAbsorberPressureColumn,
+            atmosphere_absorber_curves: r.absorberCurves.texture,
+            atmosphere_irradiance: unread,
+            atmosphere_below_deck: unread,
+            atmosphere_source_table: unread,
+          },
+          storage: { sourceTableOut: { texture: table.texture, level: 0 } },
+        },
+        counts,
+        ATMOSPHERE_TABLES_PASS,
+      );
     }
   }
 

@@ -1292,7 +1292,8 @@ export class PhotorealRenderer {
       held !== undefined &&
       held.setting === setting &&
       held.levers?.marchCover === levers?.marchCover &&
-      held.levers?.limbRays === levers?.limbRays
+      held.levers?.limbRays === levers?.limbRays &&
+      held.levers?.marchSourceTransmittance === levers?.marchSourceTransmittance
     ) {
       held.atmosphere.setTables(air.tables);
       return held.atmosphere;

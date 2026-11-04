@@ -41,11 +41,13 @@ import {
   RAY_MARCH_DECK_THERMAL_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
+  RAY_MARCH_PER_STEP_KERNEL,
   RAY_MARCH_SLOTS_CENTRE_KERNEL,
   RAY_MARCH_SLOTS_DECK_KERNEL,
   RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
+  RAY_MARCH_SLOTS_PER_STEP_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_THICK_KERNEL,
   RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
@@ -122,17 +124,22 @@ function digestOf(pair: KernelPair): string {
  * `oblateLeastRiseOf`, 2026-11-03), which only a body of several bands reaches: a body of one band
  * returns before the fit, its every lookup as before. Every march's (its fill's too) re-pinned by
  * fix-disc-air-rows, whose shared `marchArea.wgsl` gives a half-resolution texel's centre ray the
- * farthest depth about it (2026-11-03).
+ * farthest depth about it (2026-11-03). The marches but the fill re-pinned by R08.T8.e's table, whose
+ * thin marches take each step's sources from the sources' table where one is bound
+ * (`withMarchSourceTable`); their marches per step, the thick and thermal forms' bases, keep the
+ * marches' pins before it, to the byte (2026-11-04).
  */
 const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
   [SKY_VIEW_KERNEL, "a1d12c8aae1e4f3b"],
   [AERIAL_PERSPECTIVE_KERNEL, "aa69ad50f1c34e8"],
-  [RAY_MARCH_KERNEL, "ff15d0e363afd630"],
-  [RAY_MARCH_SLOTS_KERNEL, "419c78da2322133c"],
-  [RAY_MARCH_CENTRE_KERNEL, "beacbb9851c87a8e"],
-  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "c62c1287851a5d8a"],
-  [RAY_MARCH_SPECIAL_KERNEL, "1ddfa742596c8c9c"],
-  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "1a4574b7ae78fab8"],
+  [RAY_MARCH_PER_STEP_KERNEL, "ff15d0e363afd630"],
+  [RAY_MARCH_SLOTS_PER_STEP_KERNEL, "419c78da2322133c"],
+  [RAY_MARCH_KERNEL, "f85332c46ae8a443"],
+  [RAY_MARCH_SLOTS_KERNEL, "bdb119be24cffcfa"],
+  [RAY_MARCH_CENTRE_KERNEL, "3c5f9fbed727a8d1"],
+  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "a6dc4cfccc571ccc"],
+  [RAY_MARCH_SPECIAL_KERNEL, "6a681ffbbff1b279"],
+  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "8fdf5b9a9c3ab986"],
   [RAY_MARCH_FILL_KERNEL, "fdc424b1001af7c6"],
 ];
 
@@ -157,8 +164,8 @@ const THICK_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
 const PAIRS: ReadonlyArray<readonly [string, KernelPair, KernelPair]> = [
   ["the sky view", SKY_VIEW_KERNEL, SKY_VIEW_THICK_KERNEL],
   ["the aerial perspective", AERIAL_PERSPECTIVE_KERNEL, AERIAL_PERSPECTIVE_THICK_KERNEL],
-  ["the ray march", RAY_MARCH_KERNEL, RAY_MARCH_THICK_KERNEL],
-  ["the ray march by slot", RAY_MARCH_SLOTS_KERNEL, RAY_MARCH_SLOTS_THICK_KERNEL],
+  ["the ray march", RAY_MARCH_PER_STEP_KERNEL, RAY_MARCH_THICK_KERNEL],
+  ["the ray march by slot", RAY_MARCH_SLOTS_PER_STEP_KERNEL, RAY_MARCH_SLOTS_THICK_KERNEL],
 ];
 
 /** The lines of `thick` that differ from `thin`'s, each as [thin's, thick's], trimmed. */
@@ -204,7 +211,7 @@ describe("the thick read's kernels (R08.T14.c)", () => {
       const appended = `\n${THICK_READ_WGSL}`;
       expect(thick.reference.endsWith(appended)).toBe(true);
       const head = thick.reference.slice(0, -appended.length);
-      const bySlot = thin === RAY_MARCH_SLOTS_KERNEL;
+      const bySlot = thin === RAY_MARCH_SLOTS_PER_STEP_KERNEL;
       expect(linesDiffering(thin.reference, head)).toEqual([
         [LOBES, THICK_LOBES],
         [SOURCE_AT, THICK_SOURCE_AT],

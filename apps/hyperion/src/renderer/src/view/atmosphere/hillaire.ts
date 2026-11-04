@@ -107,6 +107,7 @@ import limbNodesWgsl from "./shaders/limbNodes.wgsl?raw";
 import limbResolveWgsl from "./shaders/limbResolve.wgsl?raw";
 import marchAreaWgsl from "./shaders/marchArea.wgsl?raw";
 import marchFillWgsl from "./shaders/marchFill.wgsl?raw";
+import marchSourceTableWgsl from "./shaders/marchSourceTable.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
 import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
@@ -148,6 +149,7 @@ import {
   THICK_TRAVEL_COSINES,
 } from "./thick/read";
 import { belowDeckOpticalDepthInto, belowDeckReadScratch, belowDeckSplitM } from "./thick/deckRead";
+import { tableOnlyKernel } from "./surfaceLighting";
 import { atan2, log, sin, tan } from "../../lib/pinnedMath";
 
 /** A 3D table's size, texels. */
@@ -470,6 +472,17 @@ export type LimbRays = "per-texel" | "packed";
 export type SourceTransmittance = "table" | "per-fragment";
 
 /**
+ * Where the ray march takes each step's sources' light (plan R08, R08.T8.e's table; the owner's Mac):
+ * `table`, from R08.T9.b's sources' table by the step's h* and the source's zenith cosine, its
+ * lobes' layers for a medium with forward lobes (`marchSourceTable.wgsl`), a body of several bands
+ * taking a source within 0.1 of the horizon's cosine by the sliced lookup, and a body of one band
+ * drawn by the march's table-only twins (`sourceTableEngine.ts`); or `per-step`, the sliced lookup
+ * a source a step, the way back. The thin read's marches alone: a thick, deck or self-luminous
+ * body's march takes each step's sources per step under either.
+ */
+export type MarchSourceTransmittance = "table" | "per-step";
+
+/**
  * The atmosphere's levers on a setting, `SETTINGS[s].atmosphereLevers` (the owner's priority,
  * 2026-11-01), each with the way back beside it, as R14's `GeometrySettings` keeps its own.
  */
@@ -487,13 +500,19 @@ export interface AtmosphereSettings {
    * way back. The lit passes take it (`photoreal/renderer.ts`); the composite reads none.
    */
   readonly sourceTransmittance: SourceTransmittance;
+  /**
+   * {@link MarchSourceTransmittance} (R08.T8.e's table): the march's step's sources from the
+   * sources' table, or `per-step`, the way back.
+   */
+  readonly marchSourceTransmittance: MarchSourceTransmittance;
 }
 
 /**
  * The composite with its transmittance behind the sky per pixel, as before the cost levers, its
- * surfaces dimmed per channel (R08.T9.c), a view's march over the air's area per texel, and each
- * source's transmittance to a lit point per fragment: what an atmosphere drawn outside a view takes
- * (the smoke's checks, the descent spike), unless given its view's.
+ * surfaces dimmed per channel (R08.T9.c), a view's march over the air's area per texel, each
+ * source's transmittance to a lit point per fragment, and the march's sources per step: what an
+ * atmosphere drawn outside a view takes (the smoke's checks, the descent spike), unless given its
+ * view's.
  */
 export const PER_PIXEL_LEVERS: AtmosphereSettings = {
   compositeTransmittance: "per-pixel",
@@ -501,6 +520,7 @@ export const PER_PIXEL_LEVERS: AtmosphereSettings = {
   marchCover: "area",
   limbRays: "per-texel",
   sourceTransmittance: "per-fragment",
+  marchSourceTransmittance: "per-step",
 };
 
 /**
@@ -957,29 +977,123 @@ export const AERIAL_PERSPECTIVE_KERNEL = kernel(
   aerialPerspectiveWgsl,
 );
 /**
+ * The thin march's step's sources from the sources' table (plan R08, R08.T8.e's table;
+ * {@link MarchSourceTransmittance}; `marchSourceTable.wgsl`): the shared read's line that takes a
+ * source's light per step (`source.wgsl`'s `sourceInScatteringAt`, which `rayMarchCurves.wgsl`'s
+ * step takes), with what stands in its place: the light from the bound table where it holds the
+ * source, and the read's own lookup elsewhere, each a loop of at most one pass, not an `if`, as the
+ * composite's reads are (`composite.wgsl`), since SwiftShader runs both sides of a branch under its
+ * lanes' mask. The arithmetic of either way is the read's own.
+ */
+const TABLED_SHARED_READ: ReadonlyArray<readonly [string, string]> = [
+  [
+    "let light = sourceLightAt(body, start, bodyDir, slot);",
+    [
+      "let tabled = marchTableTakes(body, start.scaledHeightM, muSun);",
+      "  var light = SourceLight(0.0, vec3f(0.0), vec3f(0.0));",
+      "  for (var fromTable = tabled; fromTable; fromTable = false) {",
+      "    light = marchTabledLightAt(body, start, muSun, slot, lobes);",
+      "  }",
+      "  for (var direct = !tabled; direct; direct = false) {",
+      "    light = sourceLightAt(body, start, bodyDir, slot);",
+      "  }",
+    ].join("\n"),
+  ],
+];
+
+/**
+ * {@link TABLED_SHARED_READ}'s for the read by slot (`rayMarchSlots.wgsl`'s `rayMarchSourcesAt`):
+ * its sliced ray and slot read inside the loop of the read's own way, so that each stays at one call
+ * site (`rayMarchSlots.wgsl`'s head), the source's cosine formed for the table as the step forms it.
+ */
+const TABLED_SLOT_READ: ReadonlyArray<readonly [string, string]> = [
+  [
+    "let sliced = slicedRayOf(body, oblateBody, start, dir);",
+    [
+      "let stepMu = dot(dir, up);",
+      "    let tabled = marchTableTakes(body, start.scaledHeightM, stepMu);",
+      "    var light = SourceLight(0.0, vec3f(0.0), vec3f(0.0));",
+      "    for (var fromTable = tabled; fromTable; fromTable = false) {",
+      "      light = marchTabledLightAt(body, start, stepMu, slot, lobes);",
+      "    }",
+      "    for (var direct = !tabled; direct; direct = false) {",
+      "      let sliced = slicedRayOf(body, oblateBody, start, dir);",
+    ].join("\n"),
+  ],
+  [
+    "let read = slicedSlotDepthsOf(sliced, body, slot, lobes);",
+    "  let read = slicedSlotDepthsOf(sliced, body, slot, lobes);",
+  ],
+  [
+    "let light = SourceLight(select(1.0, 0.0, sliced.shadowed), exp(-read[0]), read[1]);",
+    "  light = SourceLight(select(1.0, 0.0, sliced.shadowed), exp(-read[0]), read[1]);\n    }",
+  ],
+];
+
+/**
+ * `pair`, a thin march's (the shared read's or the read by slot's), with its step's sources from the
+ * sources' table where one is bound ({@link TABLED_SHARED_READ}, {@link TABLED_SLOT_READ}), and
+ * `marchSourceTable.wgsl` appended, which declares the table at `atmosphere_source_table`: through
+ * the table's one-texel stub every step takes the read's own lookup, as before the lever. Its name
+ * is kept. The thick, deck and thermal marches are made from the march without it
+ * ({@link RAY_MARCH_PER_STEP_KERNEL}), so that their kernels keep their bytes.
+ *
+ * @throws Error naming the kernel when its sources hold a rewritten line nowhere, or twice.
+ */
+function withMarchSourceTable(pair: KernelPair): KernelPair {
+  const bySlot = pair.reference.includes("fn slicedSlotDepthsOf(");
+  const tabled = withMarchRewrites(
+    pair,
+    bySlot ? TABLED_SLOT_READ : TABLED_SHARED_READ,
+    "the sources' table",
+  );
+  return {
+    ...tabled,
+    name: pair.name,
+    reference: `${tabled.reference}\n${marchSourceTableWgsl}`,
+    subgroup: tabled.subgroup === null ? null : `${tabled.subgroup}\n${marchSourceTableWgsl}`,
+  };
+}
+
+/**
+ * The per-pixel ray-march kernel over the far limb's footprint (`farLimb.wgsl`, R08.T8.c), each
+ * source's light at each step read through the shared tables with its slot's curves applied on
+ * read (`rayMarchCurves.wgsl`), as before R08.T8.e's table: the base of the thick read's, the deck
+ * read's and the thermal forms' marches ({@link withThickRead}, {@link withThermalSource}), which
+ * take each step's sources per step. No frame dispatches it.
+ */
+export const RAY_MARCH_PER_STEP_KERNEL = kernel(
+  "atmosphere ray march",
+  `${farLimbWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${rayMarchFootprintWgsl}`,
+);
+/**
  * The per-pixel ray-march kernel over the far limb's footprint (`farLimb.wgsl`, R08.T8.c), each
  * source's light read through the shared tables with its slot's curves applied on read
- * (`rayMarchCurves.wgsl`): the march of every body whose tables hold no slot layers
+ * (`rayMarchCurves.wgsl`), or since R08.T8.e's table from the sources' table where one is bound
+ * ({@link withMarchSourceTable}): the march of every body whose tables hold no slot layers
  * (`tables.ts`'s `slotDepthsRefusal`; R08.T8.e). Since R08.T11.d's tile cull it marches the tiles
  * of the air's area whose footprints may blend (`rayMarchFootprint.wgsl`), after
  * {@link RAY_MARCH_CENTRE_KERNEL} took the rest, and under the reference path every tile.
  */
-export const RAY_MARCH_KERNEL = kernel(
-  "atmosphere ray march",
-  `${farLimbWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${rayMarchFootprintWgsl}`,
+export const RAY_MARCH_KERNEL = withMarchSourceTable(RAY_MARCH_PER_STEP_KERNEL);
+/**
+ * {@link RAY_MARCH_SLOTS_KERNEL}'s march as before R08.T8.e's table, each step's sources per step,
+ * as {@link RAY_MARCH_PER_STEP_KERNEL} is the shared read's: the base of the thick, deck and
+ * thermal marches by slot. No frame dispatches it.
+ */
+export const RAY_MARCH_SLOTS_PER_STEP_KERNEL = kernel(
+  "atmosphere ray march by slot",
+  `${farLimbWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${rayMarchFootprintWgsl}`,
 );
 /**
  * The per-pixel ray-march kernel of a body whose tables hold the slot layers (plan R08, R08.T8.e,
  * lever 5; `decision-r08-t8-leans.md` §10 and §13; `AtmosphereTables.slotDepths`): the same march,
  * each source's light at each step and the bare ground's one read of its light slot's layer
  * (`rayMarchSlots.wgsl`), which only this kernel and {@link RAY_MARCH_SLOTS_CENTRE_KERNEL}
- * declare. Chosen when the body's pipeline is made, so that neither form pays for the other's
- * registers.
+ * declare, each step's from the sources' table where one is bound (R08.T8.e's table). Chosen when
+ * the body's pipeline is made, so that neither form pays for the other's registers.
  */
-export const RAY_MARCH_SLOTS_KERNEL = kernel(
-  "atmosphere ray march by slot",
-  `${farLimbWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${rayMarchFootprintWgsl}`,
-);
+export const RAY_MARCH_SLOTS_KERNEL = withMarchSourceTable(RAY_MARCH_SLOTS_PER_STEP_KERNEL);
 /**
  * The ray march's first entry point under the tile cull (plan R08, R08.T11.d;
  * `decision-r08-t8-leans.md` §11, Ruling 4): {@link RAY_MARCH_KERNEL}'s march at the centre ray
@@ -987,14 +1101,18 @@ export const RAY_MARCH_SLOTS_KERNEL = kernel(
  * air and marches the tiles no footprint can blend in (`rayMarchCentre.wgsl`), holding none of the
  * footprint across its march.
  */
-export const RAY_MARCH_CENTRE_KERNEL = kernel(
-  "atmosphere ray march at the centre ray",
-  `${farLimbWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${rayMarchCentreWgsl}`,
+export const RAY_MARCH_CENTRE_KERNEL = withMarchSourceTable(
+  kernel(
+    "atmosphere ray march at the centre ray",
+    `${farLimbWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${rayMarchCentreWgsl}`,
+  ),
 );
 /** {@link RAY_MARCH_CENTRE_KERNEL} by slot, {@link RAY_MARCH_SLOTS_KERNEL}'s read (R08.T11.d). */
-export const RAY_MARCH_SLOTS_CENTRE_KERNEL = kernel(
-  "atmosphere ray march by slot at the centre ray",
-  `${farLimbWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${rayMarchCentreWgsl}`,
+export const RAY_MARCH_SLOTS_CENTRE_KERNEL = withMarchSourceTable(
+  kernel(
+    "atmosphere ray march by slot at the centre ray",
+    `${farLimbWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${rayMarchCentreWgsl}`,
+  ),
 );
 /**
  * The one-band march's two rewrites of the general one's sources (R08.T11.g), each made once and
@@ -1142,14 +1260,18 @@ const CENTRE_PAIRS: Readonly<Record<MarchRead, Readonly<Record<MarchForm, Kernel
  * ({@link RAY_MARCH_LIMB_KERNEL}) and the resolve ({@link LIMB_RESOLVE_KERNEL}); every other texel
  * as {@link RAY_MARCH_KERNEL} marches it.
  */
-export const RAY_MARCH_PACKED_KERNEL = kernel(
-  "atmosphere ray march, its limb packed",
-  `${farLimbWgsl}\n${limbListWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${rayMarchPackedWgsl}`,
+export const RAY_MARCH_PACKED_KERNEL = withMarchSourceTable(
+  kernel(
+    "atmosphere ray march, its limb packed",
+    `${farLimbWgsl}\n${limbListWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${rayMarchPackedWgsl}`,
+  ),
 );
 /** {@link RAY_MARCH_PACKED_KERNEL} by slot, {@link RAY_MARCH_SLOTS_KERNEL}'s read (R08.T8.d). */
-export const RAY_MARCH_SLOTS_PACKED_KERNEL = kernel(
-  "atmosphere ray march by slot, its limb packed",
-  `${farLimbWgsl}\n${limbListWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${rayMarchPackedWgsl}`,
+export const RAY_MARCH_SLOTS_PACKED_KERNEL = withMarchSourceTable(
+  kernel(
+    "atmosphere ray march by slot, its limb packed",
+    `${farLimbWgsl}\n${limbListWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${rayMarchPackedWgsl}`,
+  ),
 );
 
 /**
@@ -1179,17 +1301,21 @@ function withoutMarchTargets(pair: KernelPair): KernelPair {
  * The far limb's node pass (plan R08, R08.T8.d; `limbNodes.wgsl`): each node ray the packed entry
  * point listed, one an invocation, by the one `marchRay` call site, over the shared read.
  */
-export const RAY_MARCH_LIMB_KERNEL = withoutMarchTargets(
-  kernel(
-    "atmosphere ray march's limb rays",
-    `${limbListWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${limbNodesWgsl}`,
+export const RAY_MARCH_LIMB_KERNEL = withMarchSourceTable(
+  withoutMarchTargets(
+    kernel(
+      "atmosphere ray march's limb rays",
+      `${limbListWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${limbNodesWgsl}`,
+    ),
   ),
 );
 /** {@link RAY_MARCH_LIMB_KERNEL} by slot (R08.T8.d). */
-export const RAY_MARCH_SLOTS_LIMB_KERNEL = withoutMarchTargets(
-  kernel(
-    "atmosphere ray march's limb rays by slot",
-    `${limbListWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${limbNodesWgsl}`,
+export const RAY_MARCH_SLOTS_LIMB_KERNEL = withMarchSourceTable(
+  withoutMarchTargets(
+    kernel(
+      "atmosphere ray march's limb rays by slot",
+      `${limbListWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${limbNodesWgsl}`,
+    ),
   ),
 );
 
@@ -1276,6 +1402,28 @@ export const LIMB_KERNELS: ReadonlyArray<KernelPair> = [
 ];
 
 /**
+ * The thin read's marches' table-only twins (plan R08, R08.T8.e's table;
+ * {@link MarchSourceTransmittance} `table`; `surfaceLighting.ts`' `tableOnlyKernel`): every march a
+ * view's frame dispatches with a body of one band's sources' table bound, of both reads, in every
+ * form and entry point (the footprint's, the tile cull's centre ray's, the packed limb's footprint
+ * and its nodes), with `marchSourceTable.wgsl`'s SOURCE_TABLE_ONLY set, so that the sliced lookup a
+ * source a step is compiled out. The app's engine makes each at its first such dispatch
+ * (`sourceTableEngine.ts`); a thick, deck or self-luminous body's march is never given a table.
+ */
+export const MARCH_TABLE_ONLY_KERNELS: ReadonlyArray<KernelPair> = [
+  RAY_MARCH_KERNEL,
+  RAY_MARCH_SLOTS_KERNEL,
+  RAY_MARCH_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+  RAY_MARCH_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
+  ...Object.values(CENTRE_PAIRS).flatMap((forms) => Object.values(forms)),
+  ...Object.values(LIMB_PAIRS).flatMap((forms) =>
+    Object.values(forms).flatMap(({ footprint, nodes }) => [footprint, nodes]),
+  ),
+].flatMap((pair) => tableOnlyKernel(pair) ?? []);
+
+/**
  * The thick read's rewrites of a per-frame kernel's sources (plan R08, R08.T14.c): each source's
  * multiple scattering taken by `thickRead.wgsl`'s `thickSourceAt` in place of `source.wgsl`'s
  * `sourceAt`, and the forward lobes' higher orders at the analytic term's share. Each is one line;
@@ -1354,10 +1502,13 @@ export function withThickRead(pair: KernelPair): KernelPair {
 export const SKY_VIEW_THICK_KERNEL = withThickRead(SKY_VIEW_KERNEL);
 /** {@link AERIAL_PERSPECTIVE_KERNEL} reading the thick table (R08.T14.c). */
 export const AERIAL_PERSPECTIVE_THICK_KERNEL = withThickRead(AERIAL_PERSPECTIVE_KERNEL);
-/** {@link RAY_MARCH_KERNEL} reading the thick table (R08.T14.c). */
-export const RAY_MARCH_THICK_KERNEL = withThickRead(RAY_MARCH_KERNEL);
-/** {@link RAY_MARCH_SLOTS_KERNEL} reading the thick table (R08.T14.c). */
-export const RAY_MARCH_SLOTS_THICK_KERNEL = withThickRead(RAY_MARCH_SLOTS_KERNEL);
+/**
+ * {@link RAY_MARCH_KERNEL} reading the thick table (R08.T14.c), each step's sources per step: made
+ * from {@link RAY_MARCH_PER_STEP_KERNEL} (R08.T8.e's table).
+ */
+export const RAY_MARCH_THICK_KERNEL = withThickRead(RAY_MARCH_PER_STEP_KERNEL);
+/** {@link RAY_MARCH_SLOTS_KERNEL} reading the thick table (R08.T14.c), from its march per step. */
+export const RAY_MARCH_SLOTS_THICK_KERNEL = withThickRead(RAY_MARCH_SLOTS_PER_STEP_KERNEL);
 /**
  * {@link RAY_MARCH_THICK_KERNEL} specialised for one band and no layer edge, as
  * {@link RAY_MARCH_SPECIAL_KERNEL} is ({@link withMarchSpecialised}; R08.T14.c): the thick read
@@ -1649,10 +1800,14 @@ export const RAY_MARCH_BELOW_DECK_KERNEL = belowDeckKernel(
 export const SKY_VIEW_THERMAL_KERNEL = withThermalSource(SKY_VIEW_KERNEL);
 /** {@link AERIAL_PERSPECTIVE_KERNEL} drawing the medium's own light (R08.T18.b). */
 export const AERIAL_PERSPECTIVE_THERMAL_KERNEL = withThermalSource(AERIAL_PERSPECTIVE_KERNEL);
-/** {@link RAY_MARCH_KERNEL} drawing the medium's own light (R08.T18.b). */
-export const RAY_MARCH_THERMAL_KERNEL = withThermalSource(RAY_MARCH_KERNEL);
-/** {@link RAY_MARCH_SLOTS_KERNEL} drawing the medium's own light (R08.T18.b). */
-export const RAY_MARCH_SLOTS_THERMAL_KERNEL = withThermalSource(RAY_MARCH_SLOTS_KERNEL);
+/**
+ * {@link RAY_MARCH_KERNEL} drawing the medium's own light (R08.T18.b), each step's sources per step:
+ * made from {@link RAY_MARCH_PER_STEP_KERNEL} (R08.T8.e's table; SwiftShader's GPU process hung
+ * compiling the thermal march with the table's read as well, pod, 2026-11-04).
+ */
+export const RAY_MARCH_THERMAL_KERNEL = withThermalSource(RAY_MARCH_PER_STEP_KERNEL);
+/** {@link RAY_MARCH_SLOTS_KERNEL} drawing the medium's own light (R08.T18.b), from its march per step. */
+export const RAY_MARCH_SLOTS_THERMAL_KERNEL = withThermalSource(RAY_MARCH_SLOTS_PER_STEP_KERNEL);
 /** {@link SKY_VIEW_THICK_KERNEL} drawing the medium's own light and its thick bake's (R08.T18.b). */
 export const SKY_VIEW_THICK_THERMAL_KERNEL = withThermalSource(SKY_VIEW_THICK_KERNEL);
 /** {@link AERIAL_PERSPECTIVE_THICK_KERNEL} likewise (R08.T18.b). */
@@ -4052,6 +4207,18 @@ export class HillaireAtmosphere {
     // A body whose tables hold the slot layers marches by slot, each source's light one read of
     // its slot's layer (R08.T8.e, lever 5); every other the shared read.
     const slotDepths = tables.slotDepths;
+    // Each step's sources from the sources' table (R08.T8.e's table, `MarchSourceTransmittance`):
+    // the thin read's march under its lever's `table`, a body of one band's by the march's
+    // table-only twins where the engine has them (`sourceTableEngine.ts`), and through the table's
+    // one-texel stub per step under `per-step`. The thick and thermal marches declare no table.
+    let sourceTable: TextureHandle | null = null;
+    if (thick === null && thermal === null) {
+      sourceTable =
+        this.#levers.marchSourceTransmittance === "table"
+          ? tables.sourceTransmittance()
+          : tables.perFragmentSourceTransmittance;
+    }
+    const sourceTableBound = sourceTable === null ? {} : { atmosphere_source_table: sourceTable };
     // The march's kernels: the thin read's, with the tile cull's centre ray, or the thick read's.
     const march = (): FrameMarch =>
       thick === null
@@ -4089,6 +4256,7 @@ export class HillaireAtmosphere {
         sampled: {
           ...common.sampled,
           sceneDepth: scene.depth,
+          ...sourceTableBound,
           ...(slotDepths === null ? {} : { slotDepths }),
           ...(deckTable === null ? {} : { deckTable }),
         },
@@ -4169,6 +4337,7 @@ export class HillaireAtmosphere {
             sampled: {
               ...common.sampled,
               sceneDepth: scene.depth,
+              ...sourceTableBound,
               ...(slotDepths === null ? {} : { slotDepths }),
             },
             uniforms: {
