@@ -28,7 +28,10 @@
 //! The supernovae's bound in V is 2.1922 × 10³⁴ W for a core collapse and 1.4081 × 10³⁵ W for a
 //! Type Ia ([`CORE_COLLAPSE_BAND_PEAKS`], [`TYPE_IA_BAND_PEAKS`]); the mergers' is 7.6311 × 10³³ W
 //! for a luminous red nova and 4.6816 × 10³³ W for a kilonova ([`LUMINOUS_RED_NOVA_BAND_PEAKS`],
-//! [`KILONOVA_BAND_PEAKS`]; P12.T5.b), and a nova's 3.2612 × 10³¹ W ([`NOVA_BAND_PEAKS`]; P12.T5.c).
+//! [`KILONOVA_BAND_PEAKS`]; P12.T5.b), and a nova's 3.4573 × 10³¹ W ([`NOVA_BAND_PEAKS`]; P12.T5.c).
+//! The accreting white dwarfs' fitted samplers give their hosts dwarfs of 0.31298–1.38 M☉
+//! (P15.T10.b's refit at 27), and the nova's bounds are theirs: 3.4573 × 10³¹ W in V, 479.8 days,
+//! and the dwarf nova's 6,488 years.
 //! X-ray bursts are seen across the Galaxy, so they are walked over the X-ray binaries, as the
 //! magnetars are over the core collapses (main's ruling of 2026-10-30; P12.T5.b).
 //!
@@ -65,13 +68,14 @@
 //! - **Luminous red novae:** the heaviest merger the stellar mergers draw, two of the tracks'
 //!   150 M☉ stars.
 //! - **Kilonovae:** the most a neutron-star merger ejects, two neutron stars' 0.05 M☉.
-//! - **Novae:** at their peak for a 1.36 M☉ white dwarf, the top of the scratch sampler's white
-//!   dwarf masses, and as long as a 0.55 M☉ dwarf's, its bottom, whose decline is the slowest.
+//! - **Novae:** at their peak for a 1.38 M☉ white dwarf, the top of the fitted samplers' white
+//!   dwarf masses, and as long as a 0.31298 M☉ dwarf's, their bottom, whose decline is the
+//!   slowest (P15.T10.b's refit at 27).
 //! - **Dwarf novae:** at Warner's maximum for the 10-hour period at which the curve holds it, and
 //!   no longer than its rise, the light of the most mass a disc gathers at the faintest maximum,
 //!   and the slowest decay, each at its own extreme: a disc gathers at most
-//!   [`MAX_NOVA_TRANSFER_RATE`] over the longest cycle, 33 years, onto a 1.36 M☉ dwarf. That bound
-//!   is 5,517 years, against outbursts of days to months in sampled hosts: a recorded finding.
+//!   [`MAX_NOVA_TRANSFER_RATE`] over the longest cycle, 33 years, onto a 1.38 M☉ dwarf. That bound
+//!   is 6,488 years, against outbursts of days to months in sampled hosts: a recorded finding.
 //! - **X-ray transients:** at the Eddington luminosity of a 15 M☉ black hole, the top of the
 //!   scratch sampler's, for the donors' hydrogen, where the curve holds its peak; the shape is
 //!   fixed.
@@ -737,20 +741,23 @@ pub const MAGNETAR_BURST_XRAY_PEAK: Watts =
     Watts::new(MAGNETAR_BURST_PEAK.value() * super::recurrent::MAGNETAR_GIANT_FLARE_XRAY_SHARE);
 
 /// The bound on a classical or recurrent nova's light in each band, W, in [`AlertBand::ALL`]'s
-/// order: plan 11's curve ([`NovaCurve`], P11.T9.a) at its peak for a 1.36 M☉ white dwarf, the
-/// heaviest an accreting white dwarf host had (the scratch sampler's limit), rounded up at the
-/// fifth figure (P12.T5.c). A heavier dwarf peaks brighter (Livio's maximum magnitude), at 3.0662 ×
-/// 10³² W in all for 1.36 M☉, an 8,000 K blackbody's light through each band; no radio or X-rays.
+/// order: plan 11's curve ([`NovaCurve`], P11.T9.a) at its peak for a 1.38 M☉ white dwarf, the
+/// heaviest an accreting white dwarf host has (the fitted samplers' limit,
+/// [`ACCRETING_WHITE_DWARF_MAX_MASS`]; P15.T10.b's refit at 27), rounded up at the fifth figure
+/// (P12.T5.c). A heavier dwarf peaks brighter (Livio's maximum magnitude), at 3.2506 × 10³² W in all
+/// for 1.38 M☉, an 8,000 K blackbody's light through each band; no radio or X-rays.
+///
+/// [`ACCRETING_WHITE_DWARF_MAX_MASS`]: crate::tables::binary::ACCRETING_WHITE_DWARF_MAX_MASS
 pub const NOVA_BAND_PEAKS: [Watts; BAND_COUNT] = [
-    Watts::new(3.5937e31),
-    Watts::new(4.5319e31),
-    Watts::new(3.2612e31),
-    Watts::new(4.6978e31),
-    Watts::new(2.8575e31),
-    Watts::new(1.3369e31),
-    Watts::new(6.0405e30),
-    Watts::new(3.1779e30),
-    Watts::new(1.3266e29),
+    Watts::new(3.8098e31),
+    Watts::new(4.8044e31),
+    Watts::new(3.4573e31),
+    Watts::new(4.9803e31),
+    Watts::new(3.0294e31),
+    Watts::new(1.4173e31),
+    Watts::new(6.4037e30),
+    Watts::new(3.3690e30),
+    Watts::new(1.4064e29),
     Watts::ZERO,
     Watts::ZERO,
 ];
@@ -908,21 +915,22 @@ const STAR_FLARE_RISE: Span = Span::from_seconds(4_115);
 /// ([`fu_orionis::V1647_ORI_RISE_YEARS`]).
 const FU_ORIONIS_RISE: Span = Span::from_seconds(25 * 31_557_600);
 
-/// The longest a nova lasts (module documentation): a 0.55 M☉ white dwarf's, the lightest an
-/// accreting white dwarf host has, whose decline is the slowest, until its light stays under a
-/// hundredth of its peak, 14,624,034.9 s (169.26 days, t₃ = 95.8 days), rounded up to the second.
-const NOVA_DURATION: Span = Span::from_seconds(14_624_035);
+/// The longest a nova lasts (module documentation): a 0.31298 M☉ white dwarf's, the lightest an
+/// accreting white dwarf host has (the fitted slow sampler's limit), whose decline is the slowest,
+/// until its light stays under a hundredth of its peak, 41,453,749.4 s (479.79 days, t₃ = 271.6
+/// days), rounded up to the second.
+const NOVA_DURATION: Span = Span::from_seconds(41_453_750);
 
-/// The longest a nova's light rises: the same dwarf's tenth of t₃, 827,775.6 s (9.58 days),
+/// The longest a nova's light rises: the same dwarf's tenth of t₃, 2,346,438.6 s (27.16 days),
 /// rounded up to the second; a dwarf of 1.2 M☉ or more rises in the curve's least, a day.
-const NOVA_RISE: Span = Span::from_seconds(827_776);
+const NOVA_RISE: Span = Span::from_seconds(2_346_439);
 
-/// The longest a dwarf nova lasts (module documentation): its rise, a day, plus 2.6808 × 10³⁸ J,
-/// the fall of 3.3 × 10⁻⁶ M☉ onto a 1.36 M☉ white dwarf, at its faintest maximum, 1.5398 × 10²⁷
-/// W for a 1.3-hour orbit, plus the slowest decay's 3.2772 days an e-fold (a 10-hour orbit's) to a
-/// hundredth: 5,516.7 years, rounded up to the Julian year. No one outburst has all three extremes,
-/// so it bounds every one, loosely.
-const DWARF_NOVA_DURATION: Span = Span::from_seconds(5_517 * 31_557_600);
+/// The longest a dwarf nova lasts (module documentation): its rise, a day, plus 3.1526 × 10³⁸ J,
+/// the fall of 3.3 × 10⁻⁶ M☉ onto a 1.38 M☉ white dwarf, the heaviest a host has, at its faintest
+/// maximum, 1.5398 × 10²⁷ W for a 1.3-hour orbit, plus the slowest decay's 3.2772 days an e-fold
+/// (a 10-hour orbit's) to a hundredth: 6,487.7 years, rounded up to the Julian year. No one
+/// outburst has all three extremes, so it bounds every one, loosely.
+const DWARF_NOVA_DURATION: Span = Span::from_seconds(6_488 * 31_557_600);
 
 /// The longest a dwarf nova's light rises: the curve's day.
 const DWARF_NOVA_RISE: Span = Span::from_seconds(86_400);
@@ -1638,6 +1646,82 @@ mod tests {
         assert_eq!(row.light_curve(), Some(LightCurveSource::BinaryCurve));
     }
 
+    /// The white dwarf masses' limits of the fitted accreting samplers together.
+    fn dwarf_range() -> (f64, f64) {
+        let [fast, slow] = [&AWD_FAST_SAMPLER, &AWD_SLOW_SAMPLER]
+            .map(|sampler| sampler.mark(AwdMark::WhiteDwarfMass).limits());
+        (fast.0.min(slow.0), fast.1.max(slow.1))
+    }
+
+    /// The fitted accreting samplers' white dwarfs, M☉, as measured (P15.T10.b's refit at 27, the
+    /// heaviest held at `ACCRETING_WHITE_DWARF_MAX_MASS`).
+    const FITTED_DWARF_RANGE: (f64, f64) = (0.312_982_541_851_950_85, 1.38);
+
+    /// The nova rows' bounds are the fitted range's: novae over 0.31298–1.38 M☉ peak under
+    /// [`NOVA_BAND_PEAKS`], at it for the heaviest, and last and rise no longer than the lightest's,
+    /// `NOVA_DURATION` and `NOVA_RISE`, which they meet to the second; and the dwarf novae's sum of
+    /// extremes onto 1.38 M☉ is under 6,488 years.
+    #[test]
+    fn the_nova_bounds_hold_over_the_fitted_samplers() {
+        let range = dwarf_range();
+        assert_eq!(range, FITTED_DWARF_RANGE);
+        let nova = |m: f64| BinaryLightCurve::from(NovaCurve::of(SolarMasses::new(m)).unwrap());
+        let (lightest, heaviest) = (nova(range.0), nova(range.1));
+        for band in AlertBand::ALL {
+            let bound = NOVA_BAND_PEAKS[band.index()].value();
+            let at_top = binary_light(&heaviest, heaviest.peak(), band);
+            assert!(
+                at_top <= bound && (at_top <= 0.0 || bound / at_top - 1.0 < 1e-4),
+                "{band:?}: {at_top:e} against {bound:e}"
+            );
+            for i in 0..=81 {
+                let m = range.0 + (range.1 - range.0) * f64::from(i) / 81.0;
+                let curve = nova(m);
+                assert!(
+                    binary_light(&curve, curve.peak(), band) <= bound,
+                    "{band:?}, {m}"
+                );
+            }
+        }
+        let fades = lightest.fades_below(ACTIVE_SHARE).unwrap().as_seconds_f64();
+        assert!(
+            (41_453_750.0 - fades) > 0.0 && 41_453_750.0 - fades < 1.0,
+            "{fades}"
+        );
+        let rises = lightest.peak().as_seconds_f64();
+        assert!(
+            (2_346_439.0 - rises) > 0.0 && 2_346_439.0 - rises < 1.0,
+            "{rises}"
+        );
+        let gathered = MAX_NOVA_TRANSFER_RATE.value() * DWARF_NOVA_CYCLES_DAYS.1 / 365.25;
+        let dwarf = |h: f64, gathered: f64| {
+            BinaryLightCurve::from(
+                DwarfNovaCurve::of(
+                    SolarMasses::new(range.1),
+                    Days::new(h / 24.0),
+                    SolarMasses::new(gathered),
+                )
+                .unwrap(),
+            )
+        };
+        let faint = dwarf(1.3, gathered);
+        let slowest = dwarf(10.0, 1e-10);
+        let e_fold = slowest
+            .fades_below(1.0 / core::f64::consts::E)
+            .unwrap()
+            .as_seconds_f64()
+            - slowest.fades_below(1.0).unwrap().as_seconds_f64();
+        let sum = 86_400.0
+            + faint.radiated_joules() / faint.peak_luminosity().value()
+            + e_fold * math::ln(1.0 / ACTIVE_SHARE);
+        let bound = 6_488.0 * 31_557_600.0;
+        assert!(
+            sum <= bound && bound - sum < 31_557_600.0,
+            "{} yr",
+            sum / 31_557_600.0
+        );
+    }
+
     /// Plan 11's rows bound their kinds' curves over the masses plan 11's samplers give their
     /// hosts (P11.T8.a–b), at the top of each range: the heaviest white dwarf for a nova, a 10-hour
     /// orbit for a dwarf nova, the heaviest black hole for a transient, a helium burst on the
@@ -1645,14 +1729,12 @@ mod tests {
     /// dwarf, a burst burning hydrogen too, and a dwarf nova under its sum of extremes.
     #[test]
     fn plan_11s_rows_bound_their_curves_over_the_samplers_ranges() {
-        let [fast, slow] = [&AWD_FAST_SAMPLER, &AWD_SLOW_SAMPLER]
-            .map(|sampler| sampler.mark(AwdMark::WhiteDwarfMass).limits());
-        let white_dwarfs = (fast.0.min(slow.0), fast.1.max(slow.1));
+        let white_dwarfs = dwarf_range();
         let neutron_stars = XRB_SAMPLER.mark(XrbMark::NeutronStarMass).limits();
         let black_holes = XRB_SAMPLER.mark(XrbMark::BlackHoleMass).limits();
         assert_eq!(
             (white_dwarfs, neutron_stars, black_holes),
-            ((0.55, 1.36), (1.2, 2.2), (5.0, 15.0)),
+            (FITTED_DWARF_RANGE, (1.2, 2.2), (5.0, 15.0)),
             "the rows' documented ranges"
         );
         let over = |(lo, hi): (f64, f64), steps: u32| {
@@ -1663,7 +1745,7 @@ mod tests {
 
         let nova = |m| BinaryLightCurve::from(NovaCurve::of(m).unwrap());
         let novae: Vec<_> = over(white_dwarfs, 81).map(nova).collect();
-        let (lightest, heaviest) = (nova(solar(0.55)), nova(solar(1.36)));
+        let (lightest, heaviest) = (nova(solar(white_dwarfs.0)), nova(solar(white_dwarfs.1)));
         assert_row_bounds(TransientKind::Nova, &novae, &heaviest, Some(&lightest));
 
         let hours = |h: f64| Days::new(h / 24.0);
@@ -1680,7 +1762,7 @@ mod tests {
         }
         let dwarf = |h: f64, gathered: f64| {
             BinaryLightCurve::from(
-                DwarfNovaCurve::of(solar(1.36), hours(h), solar(gathered)).unwrap(),
+                DwarfNovaCurve::of(solar(white_dwarfs.1), hours(h), solar(gathered)).unwrap(),
             )
         };
         assert_row_bounds(

@@ -67,7 +67,8 @@ use hyperion_sim::stellar::binary::testing::{
     class_census_in,
 };
 use hyperion_sim::tables::binary::{
-    AWD_FAST_SAMPLER, AWD_SLOW_SAMPLER, AwdDonorKind, AwdMark, AwdPick,
+    ACCRETING_WHITE_DWARF_MAX_MASS, AWD_FAST_SAMPLER, AWD_SLOW_SAMPLER, AwdDonorKind, AwdMark,
+    AwdPick,
 };
 use hyperion_sim::time::LIGHT_CROSSING_L;
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion, Seed};
@@ -757,7 +758,7 @@ pub fn awd_samplers(
     std::array::from_fn(|side| {
         let own = &sides[side];
         let mut sources = [MarkSource::Scratch; 11];
-        let marks = std::array::from_fn(|k| {
+        let mut marks: [FittedMark; 11] = std::array::from_fn(|k| {
             let mark = AwdMark::ALL[k];
             let fit = |points: &[MarkPoint]| match mark {
                 AwdMark::Recurrence if AWD_CLASSES[side] == CarvedClass::AccretingWdFast => {
@@ -788,6 +789,10 @@ pub fn awd_samplers(
             }
             FittedMark::of_scratch(kept[side].mark(mark))
         });
+        // No draw reaches the Chandrasekhar mass, which a census of an engine without its dwarf
+        // limit could pass (the refit at 27 before P11.T4's `dwarf_limit`, to 2.12 M☉).
+        let dwarf = &mut marks[AwdMark::WhiteDwarfMass.index()].limits.1;
+        *dwarf = dwarf.min(ACCRETING_WHITE_DWARF_MAX_MASS);
         AwdSampler {
             marks,
             sources,

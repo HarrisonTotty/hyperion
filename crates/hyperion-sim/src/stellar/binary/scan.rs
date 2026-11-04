@@ -270,6 +270,14 @@ impl AwdScanMarks {
     pub fn eruptions_in(&self, window: TimeWindow, out: &mut Vec<CycleEvent>) {
         self.phase.events_in(&self.series, &self.clock, window, out);
     }
+
+    /// The same marks with a white dwarf of `mass`, for the events' test of a dwarf outside a
+    /// nova's range.
+    #[cfg(test)]
+    pub(crate) const fn with_white_dwarf_mass(mut self, mass: SolarMasses) -> Self {
+        self.white_dwarf_mass = mass;
+        self
+    }
 }
 
 /// What a galaxy-wide scan reads of an X-ray binary host (plan 11's Provides; P11.T8.b): its kind,

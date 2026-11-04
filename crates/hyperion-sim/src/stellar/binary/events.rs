@@ -316,9 +316,9 @@ impl<'a> BinarySystem<'a> {
     #[must_use]
     fn sources(&self) -> [Option<Source>; 2] {
         match self.host {
-            Host::AccretingWdScan(scan) => [Some(nova_source(scan)), None],
+            Host::AccretingWdScan(scan) => [nova_source(scan), None],
             Host::AccretingWd(entry) => [
-                Some(nova_source(entry.scan())),
+                nova_source(entry.scan()),
                 dwarf_nova_source(self.seed, entry),
             ],
             Host::XrayBinary(scan) => [xray_source(self.seed, scan), None],
@@ -403,24 +403,23 @@ impl Source {
     }
 }
 
-/// The nova source of an accreting white dwarf's scan marks: its own clock and phase.
-///
-/// # Panics
-///
-/// Never: a host's white dwarf is of 0.55–1.36 M☉, a nova's range.
+/// The nova source of an accreting white dwarf's scan marks: its own clock and phase, or `None`
+/// for a white dwarf outside a nova's range ([`NovaCurve::of`]), which no host's is: the scratch
+/// sampler's dwarfs are of 0.55–1.36 M☉, and from 27 the fitted ones' are held under the
+/// Chandrasekhar mass (`ACCRETING_WHITE_DWARF_MAX_MASS`). A refusal, not a panic, so that a table
+/// that passed it lists no nova and stops nothing (P15.T10.b's refit at 27).
 #[must_use]
-fn nova_source(scan: &AwdScanMarks) -> Source {
-    Source {
+fn nova_source(scan: &AwdScanMarks) -> Option<Source> {
+    let curve = NovaCurve::of(scan.white_dwarf_mass()).ok()?;
+    Some(Source {
         kind: BinaryEventKind::Nova,
         series: *scan.series(),
         construction: Construction::Phase {
             clock: *scan.clock(),
             phase: *scan.phase(),
         },
-        curve: NovaCurve::of(scan.white_dwarf_mass())
-            .expect("a host's white dwarf is of 0.55–1.36 M☉")
-            .into(),
-    }
+        curve: curve.into(),
+    })
 }
 
 /// The clock of period `period` whose origin is a share of one period before the epoch, the

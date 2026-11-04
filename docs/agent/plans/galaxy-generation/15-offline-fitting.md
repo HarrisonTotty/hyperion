@@ -3416,6 +3416,30 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     quarter of the engine's semi-degenerate donor's rate (0.012 M☉), under 10⁻¹² M☉ yr⁻¹. The
     globular clusters' listed X-ray binaries likewise fall to 303 of 419.6. Both are pinned
     (`kinds_tests`, `feature::tests`).
+  - _The dwarfs held under the Chandrasekhar mass_ (round 11, 2026-11-04; train 27's blocker).
+    - The refit's census predated P11.T4's `dwarf_limit`. Its slow table drew dwarfs of
+      0.313–2.122 M☉, 247 of 7,349 slow entries at 1.44 M☉ or more. `NovaCurve::of` refuses
+      them, and `nova_source` panicked.
+    - Refitted on round 11's engine (7cf1f39e, `--since 26`), the dwarfs reach 1.4399 M☉. There
+      the dwarf nova's bound diverges: 5,517 years at 1.36 M☉, 6,488 at 1.38 and 188,000 at
+      1.4399. So `awd_samplers` holds the white dwarf mass's limit at
+      `ACCRETING_WHITE_DWARF_MAX_MASS`, 1.38 M☉, where an accreting dwarf ignites carbon or
+      collapses (Nomoto and Kondo 1991, recalled). Limits: fast 0.3541–1.3705 M☉, slow
+      0.31298–1.38 M☉.
+    - `nova_source` refuses a dwarf outside `NovaCurve::of`'s range (`None`, no nova listed)
+      rather than panicking.
+    - The nova rows' bounds were the scratch range's, and the fitted lightest dwarf, 0.31298 M☉,
+      outlasts them. From 27 (`FITTED_DWARFS`) they are the fitted range's: 3.4573 × 10³¹ W in V,
+      a nova's 41,453,750 s and rise of 2,346,439 s, and a dwarf nova's 6,488 years. At 26 they
+      keep their values, so `registry_golden` holds.
+    - At round 11: fast 613 members, slow 17,500; kind scales 0.290/0.0756/0.0237.
+    - `binary_xrb`'s manifest line is back at 24, its lock's and its block's. Its probe #14 and
+      `sky_envelope`'s are already stale on 7cf1f39e.
+    - Moved at 27, both already failing on 7cf1f39e: `CENTRE_BINARIES_DIGEST`
+      (2413096003866284557) and `feature::tests`' listed hosts (301; 308 on 7cf1f39e, pinned 303).
+      Left for train 27's re-pins.
+    - Train 27 folded `FITTED_DWARFS` with the bump: the rows keep the fitted range's bounds,
+      the scratch range's go, and `binary_awd` is refitted on train 27's engine at 27.
 - **T9.b's target, after P11.T6's detonatable mark (lane `fix-p11-t6-ia-eligible`, 2026-11-01;
   research `research-p11-t6-ia-rate`, main's lean).** It replaces T9.b's Acceptance:
   - Fill `IA_YIELD` per delay bin and channel with η = min(1, target ÷ pool). The pool is

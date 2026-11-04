@@ -152,6 +152,38 @@ fn the_bound_holds_the_intensity_and_the_index_has_room() {
     }
 }
 
+/// No fitted accreting sampler draws a white dwarf at or above the Chandrasekhar mass, which
+/// `NovaCurve::of` refuses and `nova_source` would refuse: the white dwarf mass's limits and its
+/// draws at every rank, over the recurrence's span, are a nova's, under
+/// [`ACCRETING_WHITE_DWARF_MAX_MASS`](crate::tables::binary::ACCRETING_WHITE_DWARF_MAX_MASS). The
+/// refit at 27 before P11.T4's `dwarf_limit` drew the slow side's to 2.12 M☉ (train 27 found it).
+#[test]
+fn no_fitted_white_dwarf_reaches_the_chandrasekhar_mass() {
+    use crate::stellar::binary::light_curves::NovaCurve;
+    use crate::tables::binary::ACCRETING_WHITE_DWARF_MAX_MASS;
+    for (side, table) in [
+        (AwdSide::Fast, &AWD_FAST_SAMPLER),
+        (AwdSide::Slow, &AWD_SLOW_SAMPLER),
+    ] {
+        let sampler = ClassSampler::new(table);
+        let (lo, hi) = table.mark(AwdMark::WhiteDwarfMass).limits();
+        assert!(hi <= ACCRETING_WHITE_DWARF_MAX_MASS, "{side:?}: {hi}");
+        let (first, last) = table.mark(AwdMark::Recurrence).limits();
+        for i in 0..=64 {
+            let condition = first + (last - first) * f64::from(i) / 64.0;
+            for j in 0..=64 {
+                let mass =
+                    sampler.value_at(AwdMark::WhiteDwarfMass, condition, f64::from(j) / 64.0);
+                assert!(
+                    NovaCurve::of(crate::units::SolarMasses::new(mass)).is_ok(),
+                    "{side:?} at {condition}: {mass} M_sun"
+                );
+            }
+        }
+        println!("{side:?}: white dwarfs of {lo}–{hi} M_sun");
+    }
+}
+
 // 2. The entries.
 
 /// The sample cells hold entries of both classes, and each resolves by its ID to itself, through

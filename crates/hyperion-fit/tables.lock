@@ -7,11 +7,11 @@ path = "binary.rs"
 task = "binary_awd"
 revision = 0
 inputs_sha256 = "77b2d86b5c0e936218648dcaba146e41f9af9bc698b21286d75ee37dec5f5dd7"
-body_sha256 = "77c6a2df03c5d57008350d1209f1d7e5f24ae806505875dec1beb6e46ac5e5ba"
-fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 209269337.5076065, 45936457378.157074, 6844008411.66699, 20959775760.730156, 8982761040.312923, 1762332166.0042498, 855501051.4583737, 1.0960630250705998, 21.0, 2.0, 1.6993384978988408, 0.008030857747900286, 0.000000000000572158689940277, 0.6529018631807324, 0.03326566677467507, 0.00000000001411962450318061]
-since_generator_version = 24
+body_sha256 = "1647d3c9a4cb99b1df9451fbc579a6925f10d1f17b009a48bfdd287e45fc46c8"
+fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 1.0960630250705998, 21.0, 1.0, 0.6529028848978797, 0.0322439496270119, 0.000000000012255222349553427]
+since_generator_version = 26
 provisional = false
-acceptance = "kind scales 2.9035e-1/5.7242e-2/2.3102e-2; fast: 660 members, own nodes 0/9/11/0/4/13/0/4/13/11/11, donors 0.967/0.000/0.033, layers C 0.113 D 0.866 E 0.020, rates a system 7.01e-7/1.41e-5/1.11e-5/1.68e-5/1.54e-5/1.33e-5/7.71e-6, not its own: HeliumPeriod Scratch, HeliumDonorMass Scratch; slow: 19196 members, own nodes 0/16/17/16/4/15/17/4/17/17/17, donors 0.911/0.088/0.000, layers C 0.511 D 0.472 E 0.017, rates a system 8.41e-6/3.85e-4/7.50e-4/5.41e-4/4.75e-4/4.80e-4/9.24e-4, not its own: GiantPeriod Pooled, GiantDonorMass Pooled; the K–S tests against the other half of the census are the sim's slow `tables_hold::the_accreting_white_dwarf_samplers_against_the_engine`"
+acceptance = "kind scales 2.8979e-1/7.5593e-2/2.3673e-2; fast: 613 members, own nodes 0/8/11/0/2/13/0/3/14/11/10, donors 0.981/0.000/0.019, layers C 0.102 D 0.857 E 0.041, rates a system 7.01e-7/1.32e-5/7.66e-6/1.26e-5/1.26e-5/1.19e-5/6.31e-6, not its own: HeliumPeriod Scratch, HeliumDonorMass Scratch; slow: 17500 members, own nodes 0/16/17/16/0/14/16/0/17/17/17, donors 0.904/0.096/0.001, layers C 0.532 D 0.453 E 0.015, rates a system 4.91e-6/3.50e-4/7.04e-4/5.26e-4/4.51e-4/4.50e-4/9.00e-4; the K–S tests against the other half of the census are the sim's slow `tables_hold::the_accreting_white_dwarf_samplers_against_the_engine`"
 
 [[table]]
 name = "binary_cooling_floor"

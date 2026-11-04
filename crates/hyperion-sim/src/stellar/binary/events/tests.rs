@@ -421,6 +421,23 @@ fn the_novae_are_the_scan_marks_phase() {
     }
 }
 
+/// A host whose white dwarf is outside a nova's range has no nova source and lists no nova,
+/// where it panicked: the first slow table refitted at 27 drew dwarfs to 2.12 M☉ (P15.T10.b).
+#[test]
+fn a_dwarf_outside_a_nova_s_range_has_no_nova_source() {
+    let seed = galaxy().seed();
+    let horizon = TimeWindow::new(SourceHorizon::START, SourceHorizon::END).unwrap();
+    let scan = *awd_entries()[0].scan();
+    assert!(nova_source(&scan).is_some());
+    for mass in [0.05, 1.44, 2.12] {
+        let past = scan.with_white_dwarf_mass(SolarMasses::new(mass));
+        assert!(nova_source(&past).is_none(), "{mass} M☉");
+        let system = BinarySystem::accreting_white_dwarf_scan(seed, &past);
+        assert!(system.sources().iter().all(Option::is_none), "{mass} M☉");
+        assert!(listing(&system, horizon).is_empty(), "{mass} M☉");
+    }
+}
+
 /// A dwarf nova's outbursts recur on its cycle, some cycles skipped: the share of its cycles with
 /// no outburst is the skip share, by a binomial test at α, and its cycle is within its limits.
 #[test]
