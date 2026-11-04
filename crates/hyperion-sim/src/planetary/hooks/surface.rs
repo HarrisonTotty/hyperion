@@ -2807,9 +2807,10 @@ pub(crate) fn step_cap_figures(
 /// [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is fitted on it (0.4311 and 1.898 at 23,
 /// where [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] was; decision-p14-t57a-fits §1.3), the
 /// counterpart of Kaspi and Showman's prescribed τ, which they state stands in for water vapour,
-/// with no feedback of its own. The table's Earth gives 0.4230 (`B_eff` 1.948) through the passes'
-/// stand-ins (0.4545 and 1.841 at 23; version 22's rules gave it 0.3997, `B_eff` 1.987). Zero where
-/// no gas is held, or at a surface not above 0 K.
+/// with no feedback of its own. The table's Earth gives 0.4251 (`B_eff` 1.943) through the passes'
+/// stand-ins from 27, whose adding rule lays its air's Rayleigh layer over its clear sky (P14.T24.h.b;
+/// 0.4230 and 1.948 at 26, 0.4545 and 1.841 at 23; version 22's rules gave it 0.3997, `B_eff`
+/// 1.987). Zero where no gas is held, or at a surface not above 0 K.
 #[must_use]
 fn greenhouse_gain(
     surface: Kelvin,

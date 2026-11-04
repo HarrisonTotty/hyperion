@@ -202,7 +202,8 @@ fn no_deck_lies_on_a_rotator_a_dry_world_or_a_frozen_one() {
 /// The table's Earth locked 1:1 about the reference locked Earth's dwarf (21.10 d, no obliquity)
 /// under the deck: its mean 245.4 K, its day–night contrast 47.2 K and its equator–pole 25.2 K
 /// (the pilot's, each to 1 K), the deck whole over its open water; and under the hold its mean
-/// and day–night contrast as built, 290.38 and 59.85 K.
+/// and day–night contrast as built, 290.63 and 59.87 K, re-measured at 27, whose adding rule
+/// lays its air's Rayleigh layer over its clear sky (P14.T24.h.b; 290.38 and 59.85 K before).
 #[test]
 fn the_table_s_earth_under_the_lock_takes_the_whole_deck() {
     let earth = historic("Earth");
@@ -250,8 +251,8 @@ fn the_table_s_earth_under_the_lock_takes_the_whole_deck() {
         held.mean_surface_temperature().value(),
     );
     for (name, figure, built) in [
-        ("mean", held.mean_surface_temperature().value(), 290.38),
-        ("day–night", held.day_night_contrast_k(), 59.85),
+        ("mean", held.mean_surface_temperature().value(), 290.63),
+        ("day–night", held.day_night_contrast_k(), 59.87),
     ] {
         assert!(
             (figure - built).abs() < 0.01,
