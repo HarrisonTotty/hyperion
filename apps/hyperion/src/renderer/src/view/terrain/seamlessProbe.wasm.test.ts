@@ -926,8 +926,9 @@ const BLOCK_TRIANGLES = 128;
  * Each frame's camera strides and what their changes move (`SEAM_STRIDES=measured`): each block of
  * a whole patch drawn at the stride the cull's twin gives it, by its record's sphere and its bake's
  * measured errors, its instance's scale, edges' bands and quadrant word; and where a block's stride
- * or bands changed since the frame before drew its bake, its surface at both, each through the stride morph's twin at this frame's
- * camera, measured at its vertices every {@link STRIDE}th: the change the strides alone made, the
+ * or bands changed since the frame before, which drew its bake too, or the holds or their onsets'
+ * shares of an edge it lies on, its surface at both, each through the stride morph's twin at this
+ * frame's camera, measured at its vertices every {@link STRIDE}th: the change the strides alone made, the
  * camera's own motion apart. A block's surface is its stride's triangles over its vertices' morphed
  * places, the CDLOD morph's heights and k (`DrawnSurfaces.vertex`) placed on the figure, its
  * shading normal its tile's mixed by the morphed k.
@@ -941,9 +942,12 @@ class StrideFrames {
       readonly edgeBandsM: Float64Array;
       readonly quadrantWord: number;
       readonly holdFadesWord: number;
+      /** The frame that drew it, by {@link StrideFrames.frame}'s count. */
+      readonly frame: number;
     }
   >();
   readonly frames: StrideFrame[] = [];
+  #frame = 0;
 
   frame(
     planet: PlanetGeometry,
@@ -1062,20 +1066,30 @@ class StrideFrames {
         edgeBandsM: inst.edgeBandsM,
         quadrantWord: inst.quadrantWord,
         holdFadesWord: inst.holdFadesWord,
+        frame: this.#frame,
       });
-      if (was === undefined) {
+      // Against the frame before alone: a bake that frame did not draw appears, as the fades'
+      // checks hold, and is not a change of its strides.
+      if (was === undefined || was.frame !== this.#frame - 1) {
         continue;
       }
       // Measured where a band, its scale's or an edge's, moves by a quarter of its width or more,
-      // as the view's τ′ or a neighbour changes, or its holds or their onsets' shares change.
+      // as the view's τ′ or a neighbour changes; and along an edge whose holds or their onsets'
+      // shares change, its blocks there alone.
       const bandsMoved =
         bandsMovedBy(
           scaleBandsM(was.strideScale, patchErrors),
           scaleBandsM(inst.strideScale, patchErrors),
-        ) ||
-        bandsMovedBy(was.edgeBandsM, inst.edgeBandsM) ||
-        was.quadrantWord !== inst.quadrantWord ||
-        was.holdFadesWord !== inst.holdFadesWord;
+        ) || bandsMovedBy(was.edgeBandsM, inst.edgeBandsM);
+      const heldXor = was.quadrantWord ^ inst.quadrantWord;
+      const sharesXor = was.holdFadesWord ^ inst.holdFadesWord;
+      const heldMoved =
+        ((heldXor >>> 2) & 0xf) |
+        ((heldXor >>> 10) & 0xf) |
+        [0, 1, 2, 3].reduce(
+          (bits, e) => bits | (((sharesXor >>> (8 * e)) & 0xff) !== 0 ? 1 << e : 0),
+          0,
+        );
       const place = (x: number, y: number): number[] => {
         const [h, k] = surfaces.vertex(inst, x, y);
         const p = surfacePoint(figure, vertexDir(inst.area, x, y), h);
@@ -1106,7 +1120,12 @@ class StrideFrames {
       for (let block = 0; block < 64; block += 1) {
         const sNow = strides[block] ?? 1;
         const sThen = was.strides[block] ?? 1;
-        if (sNow === sThen && !bandsMoved) {
+        const blockEdges =
+          (block % 8 === 0 ? 1 : 0) |
+          (block % 8 === 7 ? 2 : 0) |
+          (block < 8 ? 4 : 0) |
+          (block >= 56 ? 8 : 0);
+        if (sNow === sThen && !bandsMoved && (blockEdges & heldMoved) === 0) {
           continue;
         }
         measured += 1;
@@ -1176,6 +1195,7 @@ class StrideFrames {
         }
       }
     }
+    this.#frame += 1;
     this.frames.push({
       tS,
       strided,
