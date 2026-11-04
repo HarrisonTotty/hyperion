@@ -29,17 +29,17 @@
 //!
 //! # The engine's channels, from 27
 //!
-//! From [`MERGER_CLASS_VERSION`] (research-leans-13 §2(c): the engine merges only some contact
-//! pairs on the main sequence, and the progenitors seen are mostly evolved, as M31-LRN-2015's and
-//! M101 OT2015-1's were, MacLeod et al. 2017 and Blagorodnova et al. 2017, `MERGER_SAMPLER`'s
-//! doc) the scan draws a channel first, by `MERGER_SAMPLER`'s weights: a contact pair as above,
-//! its mass ratio at the tidal limit, or an **evolved donor**, past its main sequence and living
-//! at T, beside a main-sequence companion. The scan asks the engine itself, built at T and not
-//! stepped, what the onset of transfer from the donor at its lobe does
+//! From generator version 27 (P11.T8.c's fix; research-leans-13 §2(c): the engine merges only some
+//! contact pairs on the main sequence, and the progenitors seen are mostly evolved, as
+//! M31-LRN-2015's and M101 OT2015-1's were, MacLeod et al. 2017 and Blagorodnova et al. 2017,
+//! `MERGER_SAMPLER`'s doc) the scan draws a channel first, by `MERGER_SAMPLER`'s weights: a contact
+//! pair as above, its mass ratio at the tidal limit, or an **evolved donor**, past its main
+//! sequence and living at T, beside a main-sequence companion. The scan asks the engine itself,
+//! built at T and not stepped, what the onset of transfer from the donor at its lobe does
 //! (`stellar::binary::class_merger`): its stability test, then a common envelope; the candidate is
-//! kept only if that merges the pair into one star. Before T the evolved donor fills its lobe on
-//! a circular orbit, detached, as the engine's segment before that onset is
-//! ([`MergerPair::before`]); from T it is the star the engine's envelope leaves, bit for bit.
+//! kept only if that merges the pair into one star. Before T the evolved donor fills its lobe on a
+//! circular orbit, detached, as the engine's segment before that onset is ([`MergerPair::before`]);
+//! from T it is the star the engine's envelope leaves, bit for bit.
 //!
 //! # The dynamical main sequence, from 27
 //!
@@ -75,7 +75,6 @@ use super::super::ids::CatalogueCellKey;
 use super::super::registry::ClassId;
 use super::super::system::{CatalogueMotion, CatalogueSystem};
 use super::hosts::ClassHosts;
-use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::placement::SystemRecord;
@@ -97,32 +96,6 @@ use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
     GravitationalParameter, Metres, PerCubicLightYear, Radians, SolarMasses, SolarRadii, Years,
 };
-
-/// The generator version whose stellar merger class draws the engine's channels (P11.T8.c's fix,
-/// research-leans-13 §2(c)): a contact pair of main-sequence stars at the tidal limit, or an
-/// evolved donor past its main sequence whose common envelope merges it with its companion, by
-/// the weights of `MERGER_SAMPLER`'s channel; and whose neutron-star mergers' remnants keep the
-/// pair's mass less the published ejecta (P11.T8.d's rider, research-leans-13 §2(b)).
-///
-/// Below it the class takes the held arm, [`MergerClassRules::ContactOnly`], the code of version
-/// 24 verbatim, so every generated value keeps its bits; the tests reach the new arm through
-/// `GalaxyRules::every_27_hold()`. The bump to 27 deletes this hold: [`MergerClassRules`] with its
-/// `ContactOnly` arm, the galaxy rules' `merger_class` field, the scan's and the neutron-star
-/// remnant's matches on it, `MergerMark::MassRatio`, and the tripwire
-/// (`the_merger_class_is_held_only_until_the_27_bump`).
-pub(crate) const MERGER_CLASS_VERSION: GeneratorVersion = GeneratorVersion::new(27);
-
-/// How the merger classes draw their entries (the galaxy rules' `merger_class` field, the hold of
-/// [`MERGER_CLASS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum MergerClassRules {
-    /// Version 25's and before: every stellar merger a contact pair of main-sequence stars, its
-    /// mass ratio `MergerMark::MassRatio`'s; a neutron-star merger's remnant the pair's mass.
-    ContactOnly,
-    /// Version 26's: the engine's channels, contact or evolved donor, and from 27 the dynamical
-    /// main sequence; a neutron-star merger's remnant the pair's mass less its ejecta.
-    Channels,
-}
 
 /// The share of the merged star's own main-sequence lifetime its track is built past the end of
 /// that main sequence: 5%, so that the main sequence on which the product is placed ends inside

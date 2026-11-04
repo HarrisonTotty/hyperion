@@ -1,11 +1,9 @@
-//! The tests of P11.T8.c's fix, [`MERGER_CLASS_VERSION`]: from 26 the stellar merger class
-//! draws the engine's channels, a contact pair at the tidal limit or an evolved donor whose common
-//! envelope merges it with its companion, by `MERGER_SAMPLER`'s channel weights, and from 27 a
-//! dynamical main-sequence merger beside them (`engine_channels_hold.rs`, which holds the three
-//! channels' shares). The version's class is its held arm verbatim (the class's own tests and
-//! golden hold it); these hold the new arm, under every 26 hold.
+//! The tests of P11.T8.c's fix, from generator version 27: the stellar merger class draws the
+//! engine's channels, a contact pair at the tidal limit or an evolved donor whose common envelope
+//! merges it with its companion, by `MERGER_SAMPLER`'s channel weights, and a dynamical
+//! main-sequence merger beside them (`engine_channels_hold.rs`, which holds the three channels'
+//! shares). These hold them under every 26 hold.
 //!
-//! - The tripwire.
 //! - Every evolved donor is past its main sequence and living at T, fills its lobe on its orbit,
 //!   detached before T; the engine itself, run on the pair rebuilt from the entry, sends its onset
 //!   of transfer to a common envelope after a detached history, and leaves the entry's merged star
@@ -29,7 +27,6 @@
 use std::sync::OnceLock;
 
 use super::*;
-use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::galaxy::catalogue_classes::grid::candidate_count;
 use crate::galaxy::catalogue_classes::{CatalogueClassCell, CatalogueEntry};
@@ -105,28 +102,6 @@ fn all_entries() -> impl Iterator<Item = &'static MergerEntry> {
     entries()
         .iter()
         .flat_map(|(_, cell)| cell.iter().map(CatalogueEntry::value))
-}
-
-/// The version's class keeps the held arm, every version below 27 does, and 27 and every 27 hold
-/// take the engine's channels. The tripwire: the bump to 27 deletes this hold.
-#[test]
-fn the_merger_class_is_held_only_until_the_27_bump() {
-    assert!(
-        GENERATOR_VERSION < MERGER_CLASS_VERSION,
-        "the bump to 27 deletes P11.T8.c's channel hold: `MERGER_CLASS_VERSION`, \
-         `MergerClassRules` with its `ContactOnly` arm, `GalaxyRules::merger_class`, the scan's \
-         match on it and its contact-only path's mark `MergerMark::MassRatio`, the neutron-star \
-         remnant's match in `scan::nsm::remnant_mass_under`, and this module's tripwire"
-    );
-    let at = |v: u32| GalaxyRules::of_version(GeneratorVersion::new(v)).merger_class;
-    for v in [GENERATOR_VERSION.get(), 25, 26] {
-        assert_eq!(at(v), MergerClassRules::ContactOnly, "version {v}");
-    }
-    assert_eq!(at(27), MergerClassRules::Channels);
-    assert_eq!(
-        GalaxyRules::every_27_hold().merger_class,
-        MergerClassRules::Channels
-    );
 }
 
 /// Every contact pair's mass ratio lies in the contact mark's 0.06–0.15: its primary is heavy

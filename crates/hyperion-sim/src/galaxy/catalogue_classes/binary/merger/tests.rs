@@ -25,7 +25,7 @@ use crate::galaxy::placement;
 use crate::id::Layer;
 use crate::stellar::binary::BinaryClass;
 use crate::stellar::binary::scan::{engine_calls, scan_merger_cell};
-use crate::tables::binary::MILKY_WAY_FORMED_MASS;
+use crate::tables::binary::{MILKY_WAY_FORMED_MASS, MergerChannel};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, SourceHorizon, Span, UniverseTime};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
@@ -164,14 +164,17 @@ fn entries_resolve_to_themselves() {
 }
 
 /// Every entry passes the shared test with its own class (design note 10), its pair's
-/// `merger_age` is T, and at every age of the source horizon it is the contact pair before T and
-/// the merged star from T: a contact binary of two main-sequence stars, then one main-sequence
-/// star, the secondary gone.
+/// `merger_age` is T, and at every age of the source horizon a contact entry is the contact pair
+/// before T and the merged star from T: a contact binary of two main-sequence stars, then one
+/// main-sequence star, the secondary gone (the other channels' are `channels_hold`'s).
 #[test]
 fn every_entry_is_its_class_at_every_age_of_the_horizon() {
     let start = SourceHorizon::START.since_epoch().as_julian_years_f64();
     let end = SourceHorizon::END.since_epoch().as_julian_years_f64();
     for entry in all_entries() {
+        if entry.value().scan().channel() != MergerChannel::Contact {
+            continue;
+        }
         let value = entry.value();
         let now = value.record().age_at_epoch();
         let timeline = value.timeline();
@@ -215,16 +218,19 @@ fn every_entry_is_its_class_at_every_age_of_the_horizon() {
     }
 }
 
-/// One ID on both sides of T: the system its ID resolves to is a pair of two stars in contact a
-/// year before T, and a single merged star, the pair's mass less no more than its main-sequence
-/// winds, a year after; the merged star is a main-sequence star younger in its main sequence than
-/// either star was (P11.T4.d's rejuvenation).
+/// One ID on both sides of T: the system a contact entry's ID resolves to is a pair of two stars in
+/// contact a year before T, and a single merged star, the pair's mass less no more than its
+/// main-sequence winds, a year after; the merged star is a main-sequence star younger in its main
+/// sequence than either star was (P11.T4.d's rejuvenation).
 #[test]
 fn one_id_is_the_pair_before_t_and_the_merged_star_after() {
     let galaxy = galaxy();
     let mut checked = 0;
     for entry in all_entries() {
         let value = entry.value();
+        if value.scan().channel() != MergerChannel::Contact {
+            continue;
+        }
         let t = value.scan().merger_time();
         let (before, after) = (shifted(t, -1.0), shifted(t, 1.0));
         if before < SourceHorizon::START || after >= SourceHorizon::END {
@@ -259,14 +265,18 @@ fn one_id_is_the_pair_before_t_and_the_merged_star_after() {
         assert!(product.phase_fraction() <= tau[0].max(tau[1]) + 1e-12);
         checked += 1;
     }
-    assert!(checked > 50, "{checked}");
+    // The contact channel holds some 15% of the entries (`MERGER_SAMPLER`'s weight).
+    assert!(checked > 20, "{checked}");
 }
 
-/// The contact orbit: the primary fills its Roche lobe exactly, the secondary its own, and the
-/// periods lie in hours to days, as contact binaries' do.
+/// The contact orbit of a contact entry: the primary fills its Roche lobe exactly, the secondary
+/// its own, and the periods lie in hours to days, as contact binaries' do.
 #[test]
 fn the_pair_before_t_is_in_contact() {
     for entry in all_entries() {
+        if entry.value().scan().channel() != MergerChannel::Contact {
+            continue;
+        }
         let pair = entry.value().pair();
         let [s1, s2] = pair.stars();
         let a = pair.orbit().semi_major_axis();

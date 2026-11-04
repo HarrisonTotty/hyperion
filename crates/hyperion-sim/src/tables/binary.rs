@@ -572,9 +572,6 @@ pub enum MergerMark {
     /// The rank, in [0, 1], of the primary's initial mass in the galaxy's mass function over its
     /// layer's band, cut at the turn-off at the merger, unconditional.
     PrimaryRank,
-    /// The mass ratio q = M₂ ÷ M₁ of the pair before the merger, unconditional: version 25's and
-    /// before, every merger a contact pair.
-    MassRatio,
     /// The mass ratio of a contact pair before the merger, at the tidal limit, unconditional:
     /// version 26's contact channel.
     ContactMassRatio,
@@ -603,10 +600,9 @@ pub enum MergerMark {
 
 impl MergerMark {
     /// Every mark, in [`MERGER_SAMPLER`]'s order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 10] = [
         Self::AgeRank,
         Self::PrimaryRank,
-        Self::MassRatio,
         Self::ContactMassRatio,
         Self::EvolvedPrimaryRank,
         Self::EvolvedMassRatio,
@@ -688,12 +684,6 @@ const IDENTITY_RANKS: [f64; 17] = [
 ///   law and the galaxy's own mass function as they are: the scratch merger rate per system is the
 ///   same at every age and mass within a layer, so a merger's history is a grid system's. The
 ///   primary is on its main sequence at the merger, so its mass is cut at the turn-off then.
-/// - **The mass ratio** of the contact pair before the merger: 0.06–1, median 0.25. W Ursae
-///   Majoris pairs hold mass ratios from about 0.07 to 1 (Rucinski 1993, PASP 105, 1433), and the
-///   pairs that merge are the low ones, below Rasio's (1995, ApJ 444, L41) tidal limit near 0.09
-///   and just above it: V1309 Scorpii's progenitor, the contact pair whose merger was seen in
-///   2008 (Tylenda et al. 2011, A&A 528, A114), held a mass ratio near 0.1 (Stępień, Pamyatnykh
-///   and Różyczka 2011, A&A 531, A18).
 /// - **The layer**: [`CLASS_SHARES`]'s row for the stellar mergers, A 0.1, B 0.2, C 0.5, D 0.15,
 ///   E 0.05, restricted to the layers with stars on their main sequence at the merger.
 ///
@@ -747,7 +737,7 @@ pub const MERGER_SAMPLER: ClassSamplerTable<MergerMark, MergerPick> = ClassSampl
 
 /// [`MERGER_SAMPLER`]'s marks, in [`MergerMark`]'s order.
 #[rustfmt::skip]
-const MERGER_MARKS: [SamplerMark; 11] = [
+const MERGER_MARKS: [SamplerMark; 10] = [
     SamplerMark {
         name: "age_rank",
         residual: IDENTITY_RANKS,
@@ -761,16 +751,6 @@ const MERGER_MARKS: [SamplerMark; 11] = [
         median: None,
         node_residuals: None,
         limits: (0.0, 1.0),
-    },
-    SamplerMark {
-        name: "mass_ratio",
-        residual: [
-            0.06, 0.08, 0.10, 0.12, 0.14, 0.16, 0.19, 0.22, 0.25,
-            0.29, 0.33, 0.38, 0.44, 0.52, 0.62, 0.76, 1.0,
-        ],
-        median: None,
-        node_residuals: None,
-        limits: (0.06, 1.0),
     },
     SamplerMark {
         name: "contact_mass_ratio",
@@ -2478,7 +2458,6 @@ mod tests {
         let names = [
             "age_rank",
             "primary_rank",
-            "mass_ratio",
             "contact_mass_ratio",
             "evolved_primary_rank",
             "evolved_mass_ratio",

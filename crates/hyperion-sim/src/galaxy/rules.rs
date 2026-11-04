@@ -14,11 +14,6 @@
 //!
 //! The holds, each a field:
 //!
-//! - [`merger_class`](GalaxyRules::merger_class), at [`MERGER_CLASS_VERSION`] (plan 11,
-//!   P11.T8.c–d's fix): the stellar merger class draws the engine's channels, a contact pair at
-//!   the tidal limit or an evolved donor whose common envelope merges it, and a neutron-star
-//!   merger's remnant keeps the pair's mass less its ejecta. It is read where a merger's scan
-//!   marks are drawn, and reaches none of the galaxy's memos.
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -28,7 +23,6 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::ages::FieldShareRules;
-use crate::galaxy::catalogue_classes::binary::{MERGER_CLASS_VERSION, MergerClassRules};
 use crate::galaxy::displaced::DisplacedRules;
 use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::features::members::recent::FeatureClassesRules;
@@ -52,9 +46,6 @@ pub(crate) struct GalaxyRules {
     /// every version's do, and only the tests' reference without the lists
     /// ([`FeatureClassesRules`]) does not.
     pub(crate) feature_classes: FeatureClassesRules,
-    /// How the merger classes draw their entries: every stellar merger a contact pair, or the
-    /// engine's channels and a neutron-star remnant less its ejecta (P11.T8.c–d's fix).
-    pub(crate) merger_class: MergerClassRules,
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads: every version's do, and only the tests' field alone ([`DisplacedRules`]) does not.
     pub(crate) displaced: DisplacedRules,
@@ -71,11 +62,6 @@ impl GalaxyRules {
             field_share: FieldShareRules::Phi,
             carve_out: CarveOutRules::Claimed,
             feature_classes: FeatureClassesRules::Listed,
-            merger_class: if version.get() >= MERGER_CLASS_VERSION.get() {
-                MergerClassRules::Channels
-            } else {
-                MergerClassRules::ContactOnly
-            },
             displaced: DisplacedRules::Displaced,
             stellar: StellarRules::of_version(version),
         }
@@ -91,15 +77,14 @@ impl GalaxyRules {
     #[must_use]
     pub(crate) const fn every_26_hold_with_its_retargets() -> Self {
         Self {
-            merger_class: MergerClassRules::Channels,
             stellar: StellarRules::every_26_hold_with_its_retargets(),
             ..Self::of_version(crate::GENERATOR_VERSION)
         }
     }
 
     /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
-    /// version's rules with the galaxy's holds retargeted from 26 (`merger_class`, P11.T8.c–d); the
-    /// stellar rules hold none at 27 ([`StellarRules::every_27_hold`]).
+    /// version's rules, every galaxy and stellar hold at 27 being on the record (train 27); the
+    /// helper stays for the 28 holds, whose planetary helper builds on it.
     /// The planetary stage's holds at 27 are switched on the thread instead
     /// (`planetary::testing::with_every_27_hold`), around a galaxy built under these; a galaxy
     /// hold has no switch and joins here.

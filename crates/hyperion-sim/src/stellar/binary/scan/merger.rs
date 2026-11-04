@@ -20,7 +20,7 @@
 //! 5. both stars' states at the merger, each on its own track at its initial mass;
 //! 6. its velocity at the site, plan 08's draw of its component's law (`class.merger.velocity`).
 //!
-//! From `MERGER_CLASS_VERSION` (26) the pair's words begin with the channel
+//! From generator version 27 (P11.T8.c's fix) the pair's words begin with the channel
 //! (`MergerChannel`): a contact pair, as above but its mass ratio at the tidal limit and its
 //! primary heavy enough to hold a secondary there, or an evolved donor, past its main sequence
 //! and living at T, its mass between the turn-off and the heaviest mass whose death comes after
@@ -47,7 +47,7 @@ use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::Population;
 use crate::galaxy::catalogue_classes::CatalogueCellKey;
-use crate::galaxy::catalogue_classes::binary::{BinaryHost, MergerClassRules, StellarMergers};
+use crate::galaxy::catalogue_classes::binary::{BinaryHost, StellarMergers};
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::imf::MassBand;
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
@@ -218,8 +218,8 @@ impl MergerScanMarks {
         &self.stars
     }
 
-    /// The merger's channel: always a contact pair under the version's rules, the engine's
-    /// channels from 26 (`MergerClassRules`), with the dynamical main sequence from 27.
+    /// The merger's channel: one of the engine's three, a contact pair, an evolved donor or the
+    /// dynamical main sequence (P11.T8.c's fix and its missing channel).
     #[must_use]
     pub const fn channel(&self) -> MergerChannel {
         match self.drawn {
@@ -333,36 +333,22 @@ pub(crate) fn merger_marks_at(galaxy: &Galaxy, host: BinaryHost) -> Option<Merge
         Years::new(age_at_epoch.value() + merger_time.since_epoch().as_julian_years_f64());
     // 3. The composition, at the site and the age.
     let composition = host.composition_at(galaxy, age_at_epoch, tags::CLASS_MERGER_METALLICITY);
-    // 4–5. The pair and both stars at T: under the version's arm a contact pair, from 26 the
-    // channel first (`MergerClassRules`), one of three from 27.
+    // 4–5. The pair and both stars at T: the channel first, one of three.
     let mut stream = Stream::open(seed, tags::CLASS_MERGER_MASS, key);
     let draws = [0_u16, 1].map(|body| StarDraws::for_star(seed, BodyId::new(system, body)));
     let at = (age_at_epoch, merger_age);
-    let pair = match galaxy.rules().merger_class {
-        MergerClassRules::ContactOnly => contact_pair(
+    let channel = MergerChannel::ALL[sampler.pick(MergerPick::EngineChannel, &mut stream)];
+    let pair = match channel {
+        MergerChannel::Contact => contact_pair(
             galaxy,
             &composition,
             &draws,
-            (merger_age, MergerMark::MassRatio),
+            (merger_age, MergerMark::ContactMassRatio),
             &mut stream,
         )?,
-        MergerClassRules::Channels => {
-            let channel = MergerChannel::ALL[sampler.pick(MergerPick::EngineChannel, &mut stream)];
-            match channel {
-                MergerChannel::Contact => contact_pair(
-                    galaxy,
-                    &composition,
-                    &draws,
-                    (merger_age, MergerMark::ContactMassRatio),
-                    &mut stream,
-                )?,
-                MergerChannel::EvolvedDonor => {
-                    evolved_pair(galaxy, &composition, &draws, at, &mut stream)?
-                }
-                MergerChannel::DynamicalMainSequence => {
-                    dynamical_pair(galaxy, &composition, &draws, at, &mut stream)?
-                }
-            }
+        MergerChannel::EvolvedDonor => evolved_pair(galaxy, &composition, &draws, at, &mut stream)?,
+        MergerChannel::DynamicalMainSequence => {
+            dynamical_pair(galaxy, &composition, &draws, at, &mut stream)?
         }
     };
     // 6. The velocity.

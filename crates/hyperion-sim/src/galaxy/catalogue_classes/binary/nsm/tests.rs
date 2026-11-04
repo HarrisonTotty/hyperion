@@ -267,8 +267,9 @@ fn every_entry_is_its_class_at_every_age_of_the_horizon() {
 }
 
 /// The inspiral is Peters's: the marked circular orbit merges by gravitational waves in the time
-/// from the source horizon's start to T; and the remnant follows the total mass, a black hole of
-/// the pair's mass above plan 06's heaviest neutron star.
+/// from the source horizon's start to T; and the remnant follows the total mass, a black hole for
+/// a pair above plan 06's heaviest neutron star, of the pair's mass less its own ejecta (P11.T8.d's
+/// rider).
 #[test]
 fn the_inspiral_is_peters_s_and_the_remnant_follows_the_total_mass() {
     for (_, value) in all_entries() {
@@ -288,8 +289,7 @@ fn the_inspiral_is_peters_s_and_the_remnant_follows_the_total_mass() {
         let product = value.product();
         assert!(scan.total_mass() > MAX_NEUTRON_STAR_MASS);
         assert_eq!(product.phase(), Phase::BlackHole);
-        assert_eq!(product.mass(), scan.total_mass());
-        assert_eq!(scan.remnant_mass(), scan.total_mass());
+        assert_eq!(product.mass(), scan.remnant_mass());
         let [bh, ns] = scan.masses();
         let ejecta = match scan.kind() {
             NsmPairKind::DoubleNeutronStar => {
@@ -300,6 +300,8 @@ fn the_inspiral_is_peters_s_and_the_remnant_follows_the_total_mass() {
             }
         };
         hyperion_testkit::float::assert_same_bits(scan.ejecta_mass().value(), ejecta.value());
+        let kept = scan.total_mass().value() - ejecta.value();
+        assert!((scan.remnant_mass().value() - kept).abs() < 1e-12);
         for (star, phase) in value.pair().stars().iter().zip(scan.phases()) {
             assert_eq!(star.phase(), phase);
             assert!(star.luminosity().value().is_finite() && star.luminosity().value() >= 0.0);
@@ -547,47 +549,37 @@ fn swallowing_black_holes_lower_the_class_s_kilonova_rate() {
 const KILONOVAE_PER_MYR: f64 = 30.96;
 const PAIRS_KILONOVAE_PER_MYR: f64 = 30.29;
 
-// 5. P11.T8.d's rider, at `MERGER_CLASS_VERSION`.
+// 5. P11.T8.d's rider, from generator version 27.
 
-/// The rider's arithmetic: under the held arm the remnant keeps the pair's mass, from 26 the pair's
-/// mass less the merger's own ejecta: GW170817's 2.74 M☉ leaves 2.69, and a black hole of 7 M☉ that
-/// swallows its 1.33 M☉ neutron star whole (`NsbhOutflow`) keeps all 8.33, while a 3 M☉ hole that
-/// tears a 1.2 M☉ star keeps the pair less what its outflow ejects.
+/// The rider's arithmetic: the remnant keeps the pair's mass less the merger's own ejecta:
+/// GW170817's 2.74 M☉ leaves 2.69, and a black hole of 7 M☉ that swallows its 1.33 M☉ neutron star
+/// whole (`NsbhOutflow`) keeps all 8.33, while a 3 M☉ hole that tears a 1.2 M☉ star keeps the pair
+/// less what its outflow ejects.
 #[test]
-fn from_26_the_remnant_keeps_the_pair_less_its_ejecta() {
-    use crate::galaxy::catalogue_classes::binary::MergerClassRules;
+fn the_remnant_keeps_the_pair_less_its_ejecta() {
     use crate::stellar::binary::light_curves::GW170817_EJECTA_MASS;
-    use crate::stellar::binary::scan::{NsbhOutflow, remnant_mass_under};
-    let (held, arm) = (MergerClassRules::ContactOnly, MergerClassRules::Channels);
+    use crate::stellar::binary::scan::{NsbhOutflow, remnant_mass_of};
     let gw170817 = SolarMasses::new(2.74);
-    assert_eq!(
-        remnant_mass_under(gw170817, GW170817_EJECTA_MASS, held),
-        gw170817
-    );
-    let kept = remnant_mass_under(gw170817, GW170817_EJECTA_MASS, arm).value();
+    let kept = remnant_mass_of(gw170817, GW170817_EJECTA_MASS).value();
     assert!((kept - 2.69).abs() < 1e-12, "{kept}");
     let m = SolarMasses::new;
     let whole = NsbhOutflow::of(m(7.0), m(1.33)).ejecta();
     assert_eq!(whole, m(0.0));
-    assert_eq!(remnant_mass_under(m(8.33), whole, arm), m(8.33));
+    assert_eq!(remnant_mass_of(m(8.33), whole), m(8.33));
     let torn = NsbhOutflow::of(m(3.0), m(1.2)).ejecta();
     assert!(torn.value() > 0.0);
-    let kept = remnant_mass_under(m(4.2), torn, arm).value();
+    let kept = remnant_mass_of(m(4.2), torn).value();
     assert!((kept - (4.2 - torn.value())).abs() < 1e-12, "{kept}");
 }
 
 /// Under every 26 hold every neutron-star merger of the fixture leaves a black hole of the pair's
 /// mass less its own ejecta, GW170817's for two neutron stars and the outflow's for a black hole
-/// and a neutron star; its kind is still the engine's rule on the total; and under the version's
-/// rules every remnant keeps the pair's mass.
+/// and a neutron star; its kind is still the engine's rule on the total.
 #[test]
 fn under_every_26_hold_every_remnant_keeps_the_pair_less_its_ejecta() {
     use crate::stellar::binary::light_curves::GW170817_EJECTA_MASS;
     use crate::stellar::binary::scan::NsbhOutflow;
     use crate::tables::binary::NsmPairKind;
-    for (_, value) in all_entries() {
-        assert_eq!(value.scan().remnant_mass(), value.scan().total_mass());
-    }
     let galaxy = galaxy_26();
     let process = NeutronStarMergers::new(galaxy);
     let mut seen = 0;
