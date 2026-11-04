@@ -17,6 +17,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::binary::{
     AccretingWdFast, AccretingWdSlow, AwdSide, NeutronStarMergers, StellarMergers, XrayBinaries,
 };
+use crate::galaxy::catalogue_classes::testing::HIGH_MASS_XRB;
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId};
 use crate::galaxy::params::GalaxyParams;
 use crate::stellar::binary::light_curves::GW170817_EJECTA_MASS;
@@ -64,20 +65,30 @@ fn awd_entries() -> &'static [AwdEntry] {
     })
 }
 
-/// The X-ray binaries' scan marks of the centre block and the inner-disc band.
+/// The X-ray binaries' scan marks of the centre block and the inner-disc band, then the band's
+/// high-mass hosts drawn through [`HIGH_MASS_XRB`]: the refit at 27 (P15.T10.b) gives the class
+/// about ten high-mass hosts in the galaxy, a supergiant host 0.06 of one, and the band none.
 fn xrb_hosts() -> &'static [XrbScanMarks] {
     static HOSTS: OnceLock<Vec<XrbScanMarks>> = OnceLock::new();
     HOSTS.get_or_init(|| {
         let galaxy = galaxy();
         let process = XrayBinaries::new(galaxy);
         let mut hosts = Vec::new();
+        let band = || (-12..12).flat_map(|x| (10..14).map(move |y| [x, y, 0]));
         let cells = (-4..4)
             .flat_map(|x| (-4..4).map(move |y| [x, y, 0]))
-            .chain((-12..12).flat_map(|x| (10..14).map(move |y| [x, y, 0])));
+            .chain(band());
         for cell in cells {
             let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, cell).unwrap();
             scan_cell(galaxy, &process, key, &mut hosts);
         }
+        let high_mass = XrayBinaries::of_table(galaxy, &HIGH_MASS_XRB);
+        let mut drawn = Vec::new();
+        for cell in band() {
+            let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, cell).unwrap();
+            scan_cell(galaxy, &high_mass, key, &mut drawn);
+        }
+        hosts.extend(drawn.into_iter().filter(|h| h.kind().is_high_mass()));
         hosts
     })
 }
