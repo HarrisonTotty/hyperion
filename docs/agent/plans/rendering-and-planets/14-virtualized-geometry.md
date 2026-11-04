@@ -2382,7 +2382,8 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     - low passes (moves, normals, lit triangles; no crack and every mark as at stride 1 in
       test-render), so `strides` is `measured` on low; the smoke frames that hold the lit mesh's
       byte for byte take low's geometry with `strides` off (`LOW_AT_STRIDE_1`).
-    - high: HIGH_VERDICT
+    - high fails on moves alone (10 frames' changes past its 1 px), normals and lit triangles
+      passing, so `strides` stays `off` on high (findings).
   - Not built: the counting harness's strides rule (its flat bakes hold no measured e_s); a GPU
     check of `stride_place` against its twin; the time-fade fallback.
   - For T2.c–d: the lit vertex stage places by `stride_place`; the resolve must too.
