@@ -47,8 +47,10 @@
 //! primaries with M-dwarf companions, in systems 5–7 Gyr old, that T8.e's oracle found the census
 //! missing when its bound read the envelope at the primary's own mass and age, and one merger
 //! still on its main sequence, in a system 267 Myr old. Each is now listed by the census of its
-//! cell, which equals its oracle bit for bit; each lies beyond the bound at its primary's own mass
-//! and age, and within the bound at twice that mass over ages from zero.
+//! cell, which equals its oracle bit for bit, and lies within the bound at twice its primary's
+//! mass over ages from zero. Each lay beyond the bound at its primary's own mass and age; from
+//! generator version 27, whose envelope holds the tracks' helium excesses (R06.T16.a), the main
+//! sequence's merger still does, and the two giants lie within it.
 //!
 //! On wasm32-wasip1, which has no threads, the oracle runs on one: there the fast identity tests
 //! are slow tests (`just test-wasm-slow` runs them, a 32-bit check of the identity), and the slow
@@ -248,12 +250,28 @@ fn within_ly(radii: &[(Layer, f64)]) -> Vec<(Layer, LightYears)> {
         .collect()
 }
 
+/// How a pinned merger product stands against the bound at its primary's own mass and age,
+/// R06.T8.b's, which the census read until R06.T16.b.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AtItsPrimary {
+    /// Brighter than that bound, and so skipped by T8.b's census for the query: a product only
+    /// T16.b's bound lists.
+    Beyond,
+    /// Within it: from generator version 27 the brightness envelope is built at every helium
+    /// excess too (R06.T16.a's helium nodes, refitted at 27 from 46,200 tracks against 9,240), and
+    /// a helium-rich star of a K dwarf's mass reaches its late giant phases within the galaxy's
+    /// ages (M<sub>V</sub> −5.18 by 5 Gyr at 0.67 M☉, which never passed +4.81 before), so T8.b's
+    /// bound would no longer miss these products.
+    Within,
+}
+
 /// Censuses the cell of grid system `raw` for `query` beside its oracle and asserts that the two
 /// agree star for star and bit for bit, and that the system's listed star is a merger product in
 /// `phase`: heavier than its primary was born and no heavier than [`max_star_mass`] allows, its
-/// companion merged away, brighter than the bound at its primary's own mass and age (R06.T8.b's,
-/// under which the census would have skipped it for `query`), and within R06.T16.b's bound.
-fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase) {
+/// companion merged away, standing `at` the bound at its primary's own mass and age (R06.T8.b's,
+/// under which the census would have skipped it for `query` were it beyond), and within R06.T16.b's
+/// bound and R06.T8.g's bound star by star.
+fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase, at: AtItsPrimary) {
     let g = galaxy();
     let id = SystemId::from_raw(raw).expect("a system ID");
     let what = format!("{id:?}");
@@ -300,16 +318,29 @@ fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase) {
         .value()
         - 2.5 * math::log10(f64::from(GRID_STAR_BOUND));
     let m_v = absolute_v_of_state(merged).expect("it shines").value();
-    assert!(m_v < at_m1, "{what}: M_V {m_v} within {at_m1}");
     // T8.b's census skipped a system whose bound could not pass the cut at its nearest; the eye
     // adds nothing to the cut since R06.T8.k.
     let nearest = star.distance().value() - star_offset_bound(g, record).value();
     let faintest =
         query.cut().value() - 5.0 * math::log10(nearest / (10.0 * LIGHT_YEARS_PER_PARSEC));
-    assert!(
-        at_m1 > faintest,
-        "{what}: the bound at m₁, {at_m1}, passes {faintest}"
+    eprintln!(
+        "{what}: {:?} of {:?} at V {} from {} ly, M_V {m_v}; the bound at m₁ {at_m1}, the \
+         faintest T8.b's census lists at its nearest {faintest}",
+        merged.mass(),
+        m1,
+        star.v().value(),
+        star.distance().value()
     );
+    match at {
+        AtItsPrimary::Beyond => {
+            assert!(m_v < at_m1, "{what}: M_V {m_v} within {at_m1}");
+            assert!(
+                at_m1 > faintest,
+                "{what}: the bound at m₁, {at_m1}, passes {faintest}"
+            );
+        }
+        AtItsPrimary::Within => assert!(m_v >= at_m1, "{what}: M_V {m_v} beyond {at_m1}"),
+    }
     let bound = flux_bound(&envelope, record, star.emitted()).expect("a bound");
     assert!(bound.value() <= m_v, "{what}: {} over {m_v}", bound.value());
     // R06.T8.g's bound star by star holds it too: its pair is one plan 11 cannot bound, so the
@@ -328,13 +359,16 @@ fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase) {
 
 /// T8.e's two merged giants near the Sun, which its oracle found the census missing (R06's Risks,
 /// "Merger products outshine the flux bound until T16.b"), listed at the eye's cut, 7.95: in B,
-/// a 1.19 M☉ giant of a 0.64 M☉ primary at V 7.27 from 354 ly; in C, a 1.12 M☉
-/// core-helium-burning giant of a 0.76 M☉ primary at V 7.08 from 620 ly. Before P11.T4.i (the
-/// integration branch's version 20) the second was a 1.23 M☉ giant on its first giant branch at
-/// V 7.44, and the first was at V 7.53. T4.i, which starts a pair at its first arrival on the main
-/// sequence (generator version 21), merges the first pair at 107.3 Myr rather than 136.0 Myr and
-/// the second at 58.4 rather than 144.2 Myr, so at the same age the second is past its helium
-/// flash.
+/// a 1.19 M☉ giant of a 0.64 M☉ primary at V 7.23 from 354 ly; in C, a 1.12 M☉
+/// core-helium-burning giant of a 0.76 M☉ primary at V 7.05 from 620 ly (re-measured at 27; V
+/// 7.27 and 7.08 when pinned). Before P11.T4.i (the integration branch's version 20) the second
+/// was a 1.23 M☉ giant on its first giant branch at V 7.44, and the first was at V 7.53. T4.i,
+/// which starts a pair at its first arrival on the main sequence (generator version 21), merges
+/// the first pair at 107.3 Myr rather than 136.0 Myr and the second at 58.4 rather than 144.2 Myr,
+/// so at the same age the second is past its helium flash. From version 27 both lie within the
+/// bound at their primaries' own mass and age ([`AtItsPrimary::Within`]): the envelope's helium
+/// nodes put it at M<sub>V</sub> −6.93 and −7.17, five stars' light included, against the giants'
+/// 1.86 and 0.45.
 #[test]
 fn the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them() {
     let query = eye_query(observer_near_sun(galaxy()), Magnitudes::new(7.95));
@@ -342,20 +376,27 @@ fn the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them() {
         (0x21fe_5648_7ff0_0001, Phase::FirstGiantBranch),
         (0x4204_6c99_ff00_000a, Phase::CoreHeliumBurning),
     ] {
-        pinned_merger(raw, &query, phase);
+        pinned_merger(raw, &query, phase, AtItsPrimary::Within);
     }
 }
 
 /// A merger on its main sequence near the Sun: a 0.90 M☉ primary and its near twin, merged into
 /// one 1.80 M☉ star of M<sub>V</sub> 1.98 in a system 267 Myr old, at V 5.87 from 191 ly. Its
-/// primary's own bound is M<sub>V</sub> 2.35, so a camera's cut of 5.95 lists it where T8.b's
-/// census skipped it.
+/// primary's own bound is M<sub>V</sub> 2.24, five stars' light included, so a camera's cut of
+/// 5.88 lists it where T8.b's census skipped it, which skipped it below 5.898. Re-measured at 27,
+/// whose envelope's helium nodes (R06.T16.a, the envelope refitted at 27) brighten the bound from
+/// 2.35: until then the cut was 5.95, at which T8.b's census would now list it.
 #[test]
 fn a_main_sequence_merger_is_listed_as_its_oracle_lists_it() {
-    let query = SkyQuery::builder(observer_near_sun(galaxy()), Magnitudes::new(5.95))
+    let query = SkyQuery::builder(observer_near_sun(galaxy()), Magnitudes::new(5.88))
         .build()
         .expect("a valid query");
-    pinned_merger(0x41fe_eca2_0000_0000, &query, Phase::MainSequence);
+    pinned_merger(
+        0x41fe_eca2_0000_0000,
+        &query,
+        Phase::MainSequence,
+        AtItsPrimary::Beyond,
+    );
 }
 
 #[test]
