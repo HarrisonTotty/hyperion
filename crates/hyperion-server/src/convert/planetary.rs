@@ -3020,6 +3020,12 @@ mod tests {
         );
     }
 
+    /// The golden solid surfaces whose records hold no crust (P14.T51.c's not modelled for one seen
+    /// before its formation window ends): from generator version 27 the T Tauri star's, whose
+    /// system the golden systems' search re-pinned at 27 (`0x4215_6b82_0000_0005`, 3.5 Myr old), a
+    /// regular moon and a captured one, their windows still open.
+    const UNFORMED_CRUSTS: [&str; 2] = ["42156b8200000005.0201", "42156b8200000005.0204"];
+
     /// The member of a sent crust that lies at the surface, by its key.
     fn lid_key(crust: &CrustCompositionDto) -> Option<&str> {
         match crust.lid {
@@ -3030,19 +3036,34 @@ mod tests {
     }
 
     /// P14.T54.a: every `ok` surface sends its record's crust (P14.T51.c), and every golden solid
-    /// surface's record holds one: each crust and the provinces by registry key, the lid, the
+    /// surface's record holds one but [`UNFORMED_CRUSTS`]', which send none (from generator version
+    /// 27, whose T Tauri golden system's moons are seen before their windows end): each crust and
+    /// the provinces by registry key, the lid, the
     /// redox class, the mantle's ΔIW and the melt area, the record's to the bit. The wire keeps
     /// the record's guarantees: `bulk` alone or at least one of `primary` and `secondary`, no
     /// `tertiary` without a `secondary`, a `lid` naming a present member, the redox class the
     /// ΔIW's ([`RedoxClass::of`]), and the melt area in `[0, 1]`: 1 in the magma-ocean state, and
     /// otherwise 0 on an `H2O` lid, whose liquid is a condensate.
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "every golden solid surface's crust, member by member, and those not modelled"
+    )]
     fn every_solid_surface_sends_its_record_s_crust() {
-        let (mut surfaces, mut pools, mut ice_lids) = (0, 0, 0);
+        let (mut surfaces, mut pools, mut ice_lids, mut unformed) = (0, 0, 0, Vec::new());
         for (sim, dto, wire) in ok_surfaces() {
             let id = wire.id.as_str();
             let RecordModelled::Ok(record) = sim.crust() else {
-                panic!("{id}: a golden solid surface's record holds its crust");
+                assert!(
+                    UNFORMED_CRUSTS.contains(&id),
+                    "{id}: a golden solid surface's record holds its crust"
+                );
+                assert!(
+                    dto.crust.is_not_modelled(),
+                    "{id}: its crust is not modelled"
+                );
+                unformed.push(id);
+                continue;
             };
             let Modelled::Value(sent) = &dto.crust else {
                 panic!("{id}: the crust is sent");
@@ -3128,11 +3149,15 @@ mod tests {
             pools += usize::from(melt > 0.0 && melt < 1.0);
             surfaces += 1;
         }
-        eprintln!("{surfaces} crusts, {pools} with a melt pool, {ice_lids} H2O lids");
+        eprintln!(
+            "{surfaces} crusts, {pools} with a melt pool, {ice_lids} H2O lids; not modelled on \
+             {unformed:?}"
+        );
         assert!(
             surfaces > 50 && pools > 0 && ice_lids > 0,
             "{surfaces} {pools} {ice_lids}"
         );
+        assert_eq!(unformed, UNFORMED_CRUSTS, "the crusts not modelled");
     }
 
     /// P14.T54.a: a crust's `mantle_redox_iw` is T50.a's inventory's ΔIW, the body's bulk
@@ -3209,7 +3234,9 @@ mod tests {
         for (sim, dto, wire) in ok_surfaces() {
             let id = wire.id.as_str();
             let Modelled::Value(sent) = &dto.crust else {
-                panic!("{id}: the crust is sent");
+                // A record that holds no crust (`UNFORMED_CRUSTS`) sends none.
+                assert!(UNFORMED_CRUSTS.contains(&id), "{id}: the crust is sent");
+                continue;
             };
             let surface = serde_json::to_value(dto).expect("a surface section serializes");
             let form = &surface["crust"];
@@ -3263,9 +3290,10 @@ mod tests {
                 "redox": "reduced",
                 // The record's values at generator version 22, as literals, the protocol's
                 // fixture's (`body_detail_lava_world`), so that the pin does not read back what it
-                // pins.
+                // pins; its melt area re-measured at 27, 3 × 10⁻¹⁰ of itself from 26's and the
+                // fixture's 0.249_954_828_560_677_97.
                 "mantle_redox_iw": -6.5,
-                "melt_area_fraction": 0.249_954_828_560_677_97,
+                "melt_area_fraction": 0.249_954_828_491_230_63,
             })
         );
         let melt = record.melt_area_fraction();

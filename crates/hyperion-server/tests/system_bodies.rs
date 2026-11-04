@@ -1293,7 +1293,8 @@ async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
 /// Holds the hooks of `record`, the present body `index`'s at `time` at `full`, to the sim's: its
 /// detail seed (R09.T1.b), and its habitability and resources to its server-only hooks
 /// (P14.T25–T26), the habitability in its state, with its class and its limits in their order, and
-/// the resources `not_modelled` below generator version 27, whatever the sim computes.
+/// the resources in theirs, each fraction and isotope to the bit: `not_modelled` below generator
+/// version 27, whatever the sim computed, and from 27, its serve gate opened, the sim's.
 fn assert_hooks_are_the_sims(
     record: &BodyRecordDto,
     planets: &PlanetarySystem,
@@ -1334,7 +1335,51 @@ fn assert_hooks_are_the_sims(
             .collect();
         assert_eq!(sent, limits, "{what}");
     }
-    assert_eq!(hooks.resources, Some(SectionDto::NotModelled), "{what}");
+    let resources = hooks
+        .resources
+        .as_ref()
+        .expect("the server sends the resources");
+    assert_same_state(what, resources, served.resources());
+    if let (SectionDto::Ok(sent), Section::Ok(sim)) = (resources, served.resources()) {
+        use hyperion_sim::planetary::hooks::figures::RadiogenicIsotope;
+        use hyperion_sim::planetary::hooks::resources::Resource;
+        let wire = serde_json::to_value(sent).expect("abundances serialise");
+        for resource in Resource::ALL {
+            let sent = wire.get(resource.key()).map(serde_json::Value::as_f64);
+            assert_eq!(
+                sent.map(|value| value.map(f64::to_bits)),
+                sim.modelled_fraction(resource)
+                    .map(|fraction| Some(fraction.to_bits())),
+                "{what}: {}",
+                resource.key()
+            );
+        }
+        let isotopes = [
+            (
+                sent.radioisotopes.uranium_238,
+                RadiogenicIsotope::Uranium238,
+            ),
+            (
+                sent.radioisotopes.uranium_235,
+                RadiogenicIsotope::Uranium235,
+            ),
+            (
+                sent.radioisotopes.thorium_232,
+                RadiogenicIsotope::Thorium232,
+            ),
+            (
+                sent.radioisotopes.potassium_40,
+                RadiogenicIsotope::Potassium40,
+            ),
+        ];
+        for (sent, isotope) in isotopes {
+            assert_eq!(
+                sent.to_bits(),
+                sim.radioactive(isotope).to_bits(),
+                "{what}: {isotope:?}"
+            );
+        }
+    }
 }
 
 /// A wire enum's string, its serde form's text.
