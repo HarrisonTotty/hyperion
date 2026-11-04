@@ -8,7 +8,7 @@
 //!   them, run to 13.8 Gyr under every 27 hold: none shows a white dwarf above the Chandrasekhar
 //!   mass (under the held arm some did).
 
-use hyperion_testkit::threads::in_shares;
+use crate::planetary::testing::in_shares;
 
 use super::*;
 use crate::galaxy::Galaxy;
