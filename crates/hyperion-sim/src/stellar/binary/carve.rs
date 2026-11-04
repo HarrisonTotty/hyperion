@@ -80,9 +80,10 @@ pub(crate) mod testing {
         )
     }
 
-    /// Candidate 21 of the test cell, a 12 M☉ primary 30 Myr old, whose first attempt holds an
-    /// X-ray binary (found by searching 300 candidates of 12 M☉ at 30 Myr; 4 of them carve).
-    pub(crate) const CARVED: (u32, f64, f64) = (21, 12.0, 3.0e7);
+    /// Candidate 4 of the test cell, a 12 M☉ primary 30 Myr old, whose first attempt holds an
+    /// X-ray binary (found by searching 300 candidates of 12 M☉ at 30 Myr; 24 of them carve at 27,
+    /// against 4 until 27, when it was candidate 21, whose first attempt 27 no longer carves).
+    pub(crate) const CARVED: (u32, f64, f64) = (4, 12.0, 3.0e7);
 }
 
 #[cfg(test)]

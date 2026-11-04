@@ -5,10 +5,10 @@
 //! - A donor of each helium phase gives no nova and every other donor hydrogen's recurrence, bit
 //!   for bit (`awd_donors.rs` holds the phases to the engine's helium surface and the census's
 //!   helium kind).
-//! - A pinned grid system: a layer-D record whose first attempt's 1.264 M☉ white dwarf is fed
-//!   3.8 × 10⁻⁸ M☉ yr⁻¹ by a 0.582 M☉ helium star (a fast host recurring every 60 years under the
-//!   held arm, at generator versions 25 and 26) is a slow one with no nova, in the census's marks
-//!   as in `carved_class`.
+//! - A pinned grid system: a layer-D record whose first attempt's 1.370 M☉ white dwarf is fed
+//!   5.3 × 10⁻⁸ M☉ yr⁻¹ by a 0.477 M☉ helium star (at 27; at 25 and 26 a 1.264 M☉ dwarf fed
+//!   3.8 × 10⁻⁸ M☉ yr⁻¹ by a 0.582 M☉ helium star, a fast host recurring every 60 years under the
+//!   held arm) is a slow one with no nova, in the census's marks as in `carved_class`.
 //! - The catalogue: the fast class's sample cells keep no host fed helium, its scan refusing them,
 //!   and the scan keeps exactly the cells' entries. A finding, pinned: the slow class's hosts fed
 //!   helium keep the nova clocks their scan draws.
@@ -121,9 +121,11 @@ fn a_white_dwarf_fed_helium_has_no_nova() {
     }
 }
 
-/// The pinned system's pair is a slow host, with no nova in its marks: its 1.264 M☉ white dwarf is
-/// fed 3.8 × 10⁻⁸ M☉ yr⁻¹ by a 0.582 M☉ helium star (under the held arm it recurred every 60 years,
-/// a fast host, at generator versions 25 and 26; 1.262 M☉, 0.583 M☉ and 61 years at 24).
+/// The pinned system's pair is a slow host, with no nova in its marks: its 1.370 M☉ white dwarf is
+/// fed 5.3 × 10⁻⁸ M☉ yr⁻¹ by a 0.477 M☉ helium star, re-measured at 27, whose engine and grid move
+/// the record's history (under the held arm, at generator versions 25 and 26, a 1.264 M☉ dwarf fed
+/// 3.8 × 10⁻⁸ M☉ yr⁻¹ by a 0.582 M☉ helium star recurred every 60 years, a fast host; 1.262 M☉,
+/// 0.583 M☉ and 61 years at 24).
 #[test]
 fn the_pinned_helium_fed_host_is_slow() {
     let id = SystemId::from_raw(PINNED).expect("a grid ID");
@@ -142,8 +144,8 @@ fn the_pinned_helium_fed_host_is_slow() {
     );
     assert_eq!(a.donor_kind(), AwdDonorKind::Helium);
     assert_eq!(a.donor_phase, Phase::HeliumMainSequence);
-    assert!((a.white_dwarf_mass.value() - 1.2645).abs() < 5e-4);
-    assert!((a.donor_mass.value() - 0.5823).abs() < 5e-4);
+    assert!((a.white_dwarf_mass.value() - 1.3700).abs() < 5e-4, "{a:?}");
+    assert!((a.donor_mass.value() - 0.4770).abs() < 5e-4, "{a:?}");
     assert!(
         a.recurrence.value().is_infinite() && a.recurrence.value() > 0.0,
         "no nova"

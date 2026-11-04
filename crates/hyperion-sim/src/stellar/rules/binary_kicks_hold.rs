@@ -49,9 +49,10 @@ const RECORDS: u32 = 286;
 /// stars among the sampler's systems).
 const RELEASED: usize = 24;
 
-/// A pair of 38.8 M☉ whose primary leaves a black hole of 6.29 M☉ that its companion's supernova
-/// unbinds at 9.07 Myr (the first such).
-const BY_THE_COMPANION: usize = 53;
+/// A pair of 34.6 M☉ whose primary leaves a black hole of 6.41 M☉ that its companion's supernova
+/// unbinds at 8.48 Myr (the first such at 27; until 27 it was system 53, a 38.8 M☉ primary's black
+/// hole of 6.29 M☉ unbound at 9.07 Myr, which 27's engine leaves bound).
+const BY_THE_COMPANION: usize = 163;
 
 /// A quadruple `((0, 1), (2, 3))` of a 23.8 M☉ primary whose outer pair the supernova of its star
 /// 2 unbinds at 22.4 Myr, releasing its star 3, a black hole of 3.72 M☉ at the epoch, and whose

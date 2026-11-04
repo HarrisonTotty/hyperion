@@ -4,11 +4,13 @@
 //! fold); these are its tests of the new arm, which the bump re-pins by name.
 //!
 //! - Four pinned grid systems, one a rule, found by censuses of 3 × 10⁵ slab and 3 × 10⁵ young thin
-//!   disc records: a neutron star fed 3.5 × 10⁻¹³ M☉ yr⁻¹ by a helium white dwarf is no X-ray
-//!   binary (from generator version 25); a 24.5 M☉ star's wind feeding a black hole 30 days out,
-//!   far inside its Roche lobe, makes none; a 12.3 M☉ main-sequence star that gained mass from its
-//!   neutron star's progenitor is a Be star, its pair a Be/X-ray binary; and a Be star beside a
-//!   black hole makes none.
+//!   disc records (the last three again at 27, by a census of 4 × 10⁴ young thin disc records of
+//!   layer E, among the records whose first attempt the census draws as the generator does): a
+//!   neutron star fed 3.5 × 10⁻¹³ M☉ yr⁻¹ by a helium white dwarf is no X-ray binary (from
+//!   generator version 25); a 25.9 M☉ star's wind feeding a black hole 20 days out, far inside its
+//!   Roche lobe, makes none; a 13.5 M☉ main-sequence star that gained mass from its neutron star's
+//!   progenitor is a Be star, its pair a Be/X-ray binary; and a Be star beside a black hole makes
+//!   none.
 //! - The catalogue: under plan 15's fitted tables the scan keeps no candidate its sampler feeds
 //!   under the floor, and keeps exactly the cells' entries; and a pair's classes at its ages do not
 //!   depend on the order they are asked in.
@@ -54,13 +56,18 @@ const SEED: u64 = 0x0b17_15a0_0000_0001;
 /// 2.7 × 10⁻¹⁴ M☉ yr⁻¹).
 const UNDER_THE_FLOOR: u64 = 0x61fb_d8d7_ea00_0007;
 
-/// A layer-E record of the young thin disc whose first attempt is a black hole fed by the wind of
-/// a 24.5 M☉ main-sequence star 30.3 days out.
-const DISCLESS_BLACK_HOLE: u64 = 0x816d_5b1f_f000_0012;
+/// A layer-E record of the young thin disc whose first attempt is a 6.3 M☉ black hole fed by the
+/// wind of a 25.9 M☉ main-sequence star (O7.5 V) 20.4 days out, a retained remnant's system (found
+/// at 27; until 27 `0x816d_5b1f_f000_0012`, a 24.5 M☉ star's black hole 30.3 days out, where 27's
+/// grid places another system: plan 08's displaced classes, P08.T12, and the field's share,
+/// P09.T2.c).
+const DISCLESS_BLACK_HOLE: u64 = 0x8225_9460_2000_0061;
 
-/// A layer-E record of the slab whose first attempt is a neutron star 70.5 days from a 12.3 M☉
-/// main-sequence star that gained mass in stable transfer.
-const SPUN_UP_BE_STAR: u64 = 0x81af_b360_0000_0006;
+/// A layer-E record of the young thin disc whose first attempt is a 1.26 M☉ neutron star 57.4 days
+/// from a 13.5 M☉ main-sequence star that gained mass in stable transfer (from 7.37 M☉), a
+/// retained remnant's system (found at 27; until 27 `0x81af_b360_0000_0006` of the slab, 70.5 days
+/// from a 12.3 M☉ star, where 27's grid places another system).
+const SPUN_UP_BE_STAR: u64 = 0x81be_8560_2000_0137;
 
 /// The young thin disc's census site, `hyperion-fit`'s and `fitted_tables`'.
 const YOUNG_SITE: CensusSite = CensusSite::new([0, 0, 0], [40_000, 40_000, 600]);
@@ -74,11 +81,13 @@ const CENSUS_PARTS: u64 = 16;
 /// The threads the slow censuses run on: their reservation in `.config/nextest.toml`.
 const CENSUS_THREADS: usize = 16;
 
-/// A layer-E record of the young thin disc whose first attempt is a 4.1 M☉ black hole 26.9 days
-/// from a 19.3 M☉ main-sequence star that gained mass in stable transfer, a Be/X-ray binary under
-/// the arm before its Be rule (found by a census of 3 × 10⁵ young thin disc records under the arm
-/// alone).
-const BLACK_HOLE_BESIDE_A_BE_STAR: u64 = 0x8273_a85f_d000_000b;
+/// A layer-E record of the young thin disc whose first attempt is a 5.9 M☉ black hole 87.1 days
+/// from a 26.6 M☉ main-sequence B star (B0 II) that gained mass in stable transfer (from
+/// 10.5 M☉), a retained remnant's system (found at 27; until 27 `0x8273_a85f_d000_000b`, a 4.1 M☉
+/// black hole 26.9 days from a 19.3 M☉ star, a Be/X-ray binary under the arm before its Be rule,
+/// found by a census of 3 × 10⁵ young thin disc records under the arm alone, where 27's grid places
+/// another system).
+const BLACK_HOLE_BESIDE_A_BE_STAR: u64 = 0x823c_8d5f_b000_003c;
 
 /// The bands a census runs, whose primaries can make a member.
 const CENSUS_BANDS: [MassBand; 3] = [MassBand::C, MassBand::D, MassBand::E];
@@ -255,7 +264,7 @@ fn the_scan_refuses_a_host_fed_under_the_floor() {
     assert!(kept > 0, "the cells keep hosts");
 }
 
-/// A Be star beside a black hole makes no X-ray binary: the pinned 19.3 M☉ star, spun up by its
+/// A Be star beside a black hole makes no X-ray binary: the pinned 26.6 M☉ star, spun up by its
 /// transfer, is a Be star but feeds no neutron star, and its wind, far inside its Roche lobe, makes
 /// the hole no disc.
 #[test]
