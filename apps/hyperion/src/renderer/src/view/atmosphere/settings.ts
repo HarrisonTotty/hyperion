@@ -175,7 +175,9 @@ export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>> = {
  * sliced lookups were 57–66% of the bodies pass and 72–74% of the disc cells (every source's
  * transmittance 1 against as drawn). The smoke holds the table's reads within 1/3 stop of the
  * lookups per fragment at 99.96% of Earth's lit points and all of the Saturn-class figure's, and
- * every lit pixel of R05's Earth's air bodies drawn both ways.
+ * every lit pixel of R05's Earth's air bodies drawn both ways. A body of one band is drawn by the
+ * lit modules' table-only twins, the sliced lookup compiled out (`SourceTableEngine`), which draw
+ * the modules' bytes.
  */
 export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSettings>> = {
   high: {

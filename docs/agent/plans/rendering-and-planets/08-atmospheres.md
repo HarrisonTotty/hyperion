@@ -24928,7 +24928,13 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - The exact cuts: a star's direct term is formed only where its eclipse and shadow factors leave a
     channel lit. `--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment` is an
     option of `--inspection --timing`.
-  - _The top term left_ (a step undone): the per-fragment sliced lookup compiled into the lit
-    modules beside the table's read. On SwiftShader, with it compiled out, the bodies pass fell a
-    further 37% at low. A table-only form of the lit modules a lever is next, if the Mac's A/B asks.
+  - _The table-only twins_ (the lever's second step, 2026-11-04): `loadRenderEngine` returns a
+    `SourceTableEngine` over the `ResilientEngine`. It draws a lit material, or dispatches a disc
+    cells kernel, by its twin (`tableOnlyMaterial`, `tableOnlyKernel`: `surfaceLighting.wgsl`'s
+    `SOURCE_TABLE_ONLY` set, the sliced lookup compiled out) where the bound table is a body of one
+    band's (`ONE_BAND_SOURCE_TABLE_NAME`) and the twin is prepared there.
+    - A body of several bands keeps the module, which takes its near-horizon sources per fragment.
+    - Twins are made at their first such draw and prepared off the frame, so a twin never stalls a
+      frame; until it is ready the module draws the same bytes.
+    - `TABLE_ONLY_ENTRIES` catalogues them (smoke part 16), with their originals' display names.
   - _Pending, the owner's Mac run_: the A/B, its command in the outbox's `gate.txt`.

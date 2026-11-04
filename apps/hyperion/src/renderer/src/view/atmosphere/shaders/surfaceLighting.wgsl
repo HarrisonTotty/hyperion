@@ -64,6 +64,12 @@ const SOURCE_AT_ZENITH : f32 = 1e-6;
 // way back in the same build. Never a player's picture but under 4, the way back's.
 const LIT_PROBE : u32 = 0u;
 
+// Whether this module is a lit module's table-only twin (R08.T9.b's lever; `sourceTableEngine.ts`):
+// false as written; true in the twin a lit pass draws by where its body's one-band sources' table
+// is bound, whose every lookup that table holds, so that the sliced lookup a source per fragment is
+// compiled out of it, its arithmetic else the module's own.
+const SOURCE_TABLE_ONLY : bool = false;
+
 // Whether the bound body has an atmosphere: a body table whose equatorial radius is above 0.
 fn atmosphereHasAir(body : OblateBody) -> bool {
   return body.figure.x > 0.0;
@@ -177,7 +183,13 @@ fn atmosphereTransmittanceAlong(body : OblateBody, place : SurfacePlace, d : vec
 // one-texel stub, through which each lookup is the sliced lookup per fragment, as under the lit
 // probe's `per-fragment` form.
 fn atmosphereTabled() -> bool {
-  return LIT_PROBE != 4u && textureDimensions(atmosphere_source_table).x > 1u;
+  return atmosphereTableOnly() || (LIT_PROBE != 4u && textureDimensions(atmosphere_source_table).x > 1u);
+}
+
+// Whether this module is the table-only twin (`SOURCE_TABLE_ONLY`), but under the lit probe's
+// `per-fragment` form, which takes the sliced lookup in either.
+fn atmosphereTableOnly() -> bool {
+  return SOURCE_TABLE_ONLY && LIT_PROBE != 4u;
 }
 
 // Within this of the horizon's zenith cosine a body of several bands takes a source's transmittance
@@ -188,10 +200,10 @@ fn atmosphereTabled() -> bool {
 const SOURCE_TABLE_HORIZON_COSINE : f32 = 0.1;
 
 // Whether a source at zenith cosine `mu` from h* `scaled_height_m` takes the bound sources' table:
-// on a body of one band always, on one of several unless it lies within
-// SOURCE_TABLE_HORIZON_COSINE of the horizon of the reference sphere R_ref.
+// on a body of one band always (the table-only twin draws no other), on one of several unless it
+// lies within SOURCE_TABLE_HORIZON_COSINE of the horizon of the reference sphere R_ref.
 fn atmosphereTableHolds(body : OblateBody, scaled_height_m : f32, mu : f32) -> bool {
-  if (oblateBandCount(body) == 1u) {
+  if (atmosphereTableOnly() || oblateBandCount(body) == 1u) {
     return true;
   }
   let bottom = body.figure.z;

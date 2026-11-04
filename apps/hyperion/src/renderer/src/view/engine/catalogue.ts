@@ -79,6 +79,7 @@ import {
   SOURCE_TRANSMITTANCE_KERNEL,
   TRANSMITTANCE_KERNEL,
 } from "../atmosphere/tables";
+import { tableOnlyKernel, tableOnlyMaterial } from "../atmosphere/surfaceLighting";
 import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
@@ -450,6 +451,30 @@ const ID_TARGET_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: ID_READ_MATERIAL },
 ];
 
+/**
+ * R08.T9.b's lever's table-only twins (`sourceTableEngine.ts`): each lit material and `disc cells`
+ * kernel of the entries before them with `surfaceLighting.wgsl`'s `SOURCE_TABLE_ONLY` set, which a
+ * lit body of one band is drawn by. The smoke page compiles them in part 16, the lightest.
+ */
+export const TABLE_ONLY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  ...TERRAIN_ENTRIES,
+  ...LIT_BODY_ENTRIES,
+  ...THERMAL_ENTRIES,
+  ...DISC_AIR_ENTRIES,
+  ...DISC_EMISSIVE_AIR_ENTRIES,
+].flatMap((entry): ReadonlyArray<CatalogueEntry> => {
+  if (entry.kind === "material") {
+    const spec = tableOnlyMaterial(entry.spec);
+    return spec === null ? [] : [{ ...entry, spec }];
+  }
+  // The table's own build and the lit-body probe bind no body's table where a twin would stand in.
+  if (entry.kind === "compute" && entry.spec.name.startsWith("BODY DISC CELLS")) {
+    const spec = tableOnlyKernel(entry.spec);
+    return spec === null ? [] : [{ kind: "compute", spec }];
+  }
+  return [];
+});
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
@@ -470,4 +495,5 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...DISC_AIR_ENTRIES,
   ...DISC_EMISSIVE_AIR_ENTRIES,
   ...SKY_ENTRIES,
+  ...TABLE_ONLY_ENTRIES,
 ];

@@ -139,7 +139,11 @@ import sourceTransmittanceWgsl from "./shaders/sourceTransmittance.wgsl?raw";
 import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
 import transmittanceWgsl from "./shaders/transmittance.wgsl?raw";
 import { log, sin } from "../../lib/pinnedMath";
-import { SURFACE_LIGHTING_WGSL } from "./surfaceLighting";
+import {
+  ONE_BAND_SOURCE_TABLE_NAME,
+  SOURCE_TABLE_NAME,
+  SURFACE_LIGHTING_WGSL,
+} from "./surfaceLighting";
 
 /**
  * The most terms a medium may have: `MAX_TERMS` in `common.wgsl`, the length of the kernels'
@@ -3838,12 +3842,15 @@ export class AtmosphereTables {
     const slots = multiScatteringLayersOf(this.#medium, this.#curves);
     const bands = this.#plan.bands;
     const layers = bands.length * slots;
+    // A body of one band's by a name of its own, which the lit passes' table-only twins take
+    // (`sourceTableEngine.ts`).
+    const name = bands.length === 1 ? ONE_BAND_SOURCE_TABLE_NAME : SOURCE_TABLE_NAME;
     const held = this.#sourceTable;
-    if (held === null || held.layers !== layers) {
+    if (held === null || held.layers !== layers || held.texture.name !== name) {
       // Made before the old one goes, so that a loss while making it leaves no released handle.
       const made = createBandLayers(
         engine,
-        "atmosphere sources' transmittance",
+        name,
         SOURCE_TRANSMITTANCE_SIZE,
         layers,
         SOURCE_TRANSMITTANCE_FORMAT,

@@ -31,6 +31,7 @@ import {
   type SurfaceLightingTables,
   surfaceLightingTablesOf,
 } from "../view/atmosphere/surfaceLighting";
+import { SourceTableEngine } from "../view/atmosphere/sourceTableEngine";
 import { AtmosphereTables } from "../view/atmosphere/tables";
 import {
   compositeDiscPixels,
@@ -697,6 +698,111 @@ export async function checkSourceTableFrames(engine: RenderEngine, checks: Check
     );
   } finally {
     renderer.dispose();
+    tables?.dispose();
+  }
+}
+
+/**
+ * R08.T9.b's lever on drawn bodies of one band, by their modules' table-only twins
+ * (`SourceTableEngine`): R05's Earth's air on a 13 px disc, a 96 px mesh body and a 220 px disc,
+ * the Sun 80° and 120° off the line of sight, its sources' table bound, drawn in-fragment and
+ * through the `disc cells` pass, once on the engine the page's wraps (its modules as written) and
+ * once on the page's, its twins made and prepared by a first draw; every byte the same, and the
+ * twins taken.
+ */
+export async function checkSourceTableTwins(engine: RenderEngine, checks: Checks): Promise<void> {
+  if (!(engine instanceof SourceTableEngine)) {
+    checks.check(
+      "R08.T9.b's lever: bodies of one band drawn by their table-only twins draw their modules' bytes",
+      false,
+      "the page's engine is not a SourceTableEngine",
+    );
+    return;
+  }
+  const written = keepingSums(engine.inner);
+  const twinned = keepingSums(engine);
+  const writtenRenderer = new LitBodyRenderer(written.engine, WIREFRAME_MATERIALS.starSprite);
+  const twinnedRenderer = new LitBodyRenderer(twinned.engine, WIREFRAME_MATERIALS.starSprite);
+  let tables: AtmosphereTables | null = null;
+  try {
+    tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_MEAN_RADIUS_M);
+    const atmosphere = surfaceLightingTablesOf(tables, "table");
+    const writtenKernel = await engine.inner.createComputeAsync(BODY_DISC_CELLS_KERNEL);
+    const twinnedKernel = await engine.createComputeAsync(BODY_DISC_CELLS_KERNEL);
+    const cases: ReadonlyArray<CellCase> = [
+      {
+        name: "a 13 px air body as a disc",
+        viewport: { widthPx: 48, heightPx: 48 },
+        bodies: one({ diameterPx: 13, atmosphere, mesh: false, samples: [4, 4] }),
+        twin: false,
+      },
+      {
+        name: "a 96 px air body in the mesh regime",
+        viewport: { widthPx: 128, heightPx: 112 },
+        bodies: one({ diameterPx: 96, atmosphere, mesh: true, samples: [1, 4] }),
+        twin: false,
+      },
+      {
+        name: "a 220 px air body as a disc",
+        viewport: { widthPx: 256, heightPx: 256 },
+        bodies: one({ diameterPx: 220, atmosphere, mesh: false, samples: [1, 4] }),
+        twin: false,
+      },
+    ];
+    const ways: ReadonlyArray<DrawnBy> = ["in-fragment", "pass"];
+    const draw = (
+      twin: boolean,
+      item: CellCase,
+      sunDeg: number,
+      by: DrawnBy,
+    ): Promise<{ readonly bytes: ArrayBuffer; readonly throughCells: boolean }> =>
+      drawPlan(
+        twin ? engine : engine.inner,
+        twin ? twinnedRenderer : writtenRenderer,
+        twin ? twinned.sums : written.sums,
+        planOf(item, sunDeg),
+        item.viewport,
+        twin ? twinnedKernel : writtenKernel,
+        by,
+      );
+    // A first draw of each through the page's engine makes and prepares its twins.
+    for (const item of cases) {
+      for (const by of ways) {
+        // The harness reads its targets back in order.
+        // oxlint-disable-next-line no-await-in-loop
+        await draw(true, item, 80, by);
+      }
+    }
+    await engine.twinsSettled();
+    const swapsBefore = engine.swaps;
+    let pixels = 0;
+    let differing = 0;
+    const results: string[] = [];
+    for (const item of cases) {
+      for (const sunDeg of [80, 120]) {
+        for (const by of ways) {
+          // oxlint-disable-next-line no-await-in-loop
+          const asWritten = await draw(false, item, sunDeg, by);
+          // oxlint-disable-next-line no-await-in-loop
+          const byTwins = await draw(true, item, sunDeg, by);
+          const apart = halfUlpsApart(asWritten.bytes, byTwins.bytes);
+          pixels += asWritten.bytes.byteLength / 8;
+          differing += apart.differing;
+          results.push(
+            `${item.name} at ${String(sunDeg)}° ${by}: ${String(apart.differing)} channels differ`,
+          );
+        }
+      }
+    }
+    const swaps = engine.swaps - swapsBefore;
+    checks.check(
+      "R08.T9.b's lever: bodies of one band drawn by their table-only twins draw their modules' bytes",
+      differing === 0 && swaps > 0,
+      `${String(pixels)} pixels, ${String(differing)} channels differing; ${String(swaps)} draws and dispatches by a twin; ${results.join("; ")}`,
+    );
+  } finally {
+    writtenRenderer.dispose();
+    twinnedRenderer.dispose();
     tables?.dispose();
   }
 }

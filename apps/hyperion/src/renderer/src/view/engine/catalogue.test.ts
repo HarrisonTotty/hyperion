@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type CatalogueEntry, WGSL_CATALOGUE } from "./catalogue";
+import { type CatalogueEntry, TABLE_ONLY_ENTRIES, WGSL_CATALOGUE } from "./catalogue";
 import { fragmentOutputAt } from "./webgpu/fragmentOutput";
 import { assertOutputsFit, ENTRY_POINTS } from "./webgpu/materials";
 import { pipelineOutputs } from "./webgpu/pipelineOutputs";
@@ -28,9 +28,12 @@ function displayNameOf(entry: CatalogueEntry): string | null {
   return name;
 }
 
-/** Every material's and post-process's display name. */
+/**
+ * Every material's and post-process's display name but the table-only twins' (R08.T9.b's lever),
+ * which a refusal names by their originals' effects.
+ */
 const DISPLAY_NAMES: ReadonlyArray<string> = WGSL_CATALOGUE.flatMap((entry) => {
-  const name = displayNameOf(entry);
+  const name = TABLE_ONLY_ENTRIES.includes(entry) ? null : displayNameOf(entry);
   return name === null ? [] : [name];
 });
 

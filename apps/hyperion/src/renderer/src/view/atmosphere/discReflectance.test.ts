@@ -182,13 +182,14 @@ function digestOf(source: string): string {
  * forms are constant branches that leave every lookup's arithmetic as before; and the disc's and
  * the terrain's by its exact cut, a star's direct term in a loop of one pass, skipped only where
  * its product is 0; and again by its lever, the sources' table, read only where one is bound, its
- * one-texel stub leaving every lookup's arithmetic as before.
+ * one-texel stub leaving every lookup's arithmetic as before; and by `SOURCE_TABLE_ONLY`, false
+ * as written, whose table-only twins the lever's second step draws a body of one band by.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "62c60abc53b33872"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "62c60abc53b33872"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "9fed56a1e5bad2e6"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "bf77ca931a806c71"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "e29de864d360e7a5"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "e29de864d360e7a5"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "87aa4a373ea92e8f"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "68aabfba513c8d28"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a
@@ -198,19 +199,19 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // settled frame (R10.T16.i): the mix behind `TERRAIN_MIXES`, true, and each material's still form
   // beside it, false (`stillMaterialSpec`), the arithmetic as before.
   ...[
-    ["terrain-lit-baked-offsets", "d492aaa08c4d86b6"],
-    ["terrain-lit-face-differences", "3332d68f2b535087"],
+    ["terrain-lit-baked-offsets", "a115221f2fabe8b9"],
+    ["terrain-lit-face-differences", "e23fe44ae444474c"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "88177dcf7aaf1a1e"],
-    ["terrain-depth-face-differences", "30bc712a507b1f9f"],
-    ["terrain-shadow-baked-offsets", "d8360ab08f8cb03e"],
-    ["terrain-shadow-face-differences", "2bdec035d0bd58ff"],
-    ["terrain-lit-baked-offsets-still", "41064d85c8957aef"],
-    ["terrain-lit-face-differences-still", "aa84060193cec6ea"],
-    ["terrain-depth-baked-offsets-still", "b67d1331f7fc2221"],
-    ["terrain-depth-face-differences-still", "823d15ff5d5e4704"],
-    ["terrain-shadow-baked-offsets-still", "ee07cf2b599046c3"],
-    ["terrain-shadow-face-differences-still", "2f21d446a1cbc8ee"],
+    ["terrain-depth-baked-offsets", "ef64e5361e32ad47"],
+    ["terrain-depth-face-differences", "a0511f6740cb4c32"],
+    ["terrain-shadow-baked-offsets", "faff40613c6b785"],
+    ["terrain-shadow-face-differences", "d529f9ee50f739a8"],
+    ["terrain-lit-baked-offsets-still", "69dab0033f4ad42a"],
+    ["terrain-lit-face-differences-still", "d4ce05b44b7c3e3b"],
+    ["terrain-depth-baked-offsets-still", "c34ae744d19a6422"],
+    ["terrain-depth-face-differences-still", "331a4e67469da043"],
+    ["terrain-shadow-baked-offsets-still", "1a576b578db6b272"],
+    ["terrain-shadow-face-differences-still", "719b5be04a76aa13"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const still = name.endsWith("-still");
     const spec = [

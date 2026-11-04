@@ -63,6 +63,7 @@ import {
   DISC_AIR_ENTRIES,
   DISC_EMISSIVE_AIR_ENTRIES,
   THERMAL_ENTRIES,
+  TABLE_ONLY_ENTRIES,
   WGSL_CATALOGUE,
 } from "../view/engine/catalogue";
 import { loadRenderEngine } from "../view/engine/loadEngine";
@@ -122,7 +123,11 @@ import {
   timeFarLimb,
 } from "./atmosphere";
 import { checkAtmosphereFrame } from "./atmosphereFrame";
-import { checkCellPassEveryRecord, checkSourceTableFrames } from "./cellPass";
+import {
+  checkCellPassEveryRecord,
+  checkSourceTableFrames,
+  checkSourceTableTwins,
+} from "./cellPass";
 import { checkDiscAir, checkJupiterDiscAir } from "./discAir";
 import { checkThermalDiscs } from "./thermal";
 import { captureDatum, checkDatumFrame } from "./datumFrame";
@@ -460,7 +465,8 @@ async function run(
       !ATMOSPHERE_THERMAL_ENTRIES.includes(entry) &&
       !THERMAL_ENTRIES.includes(entry) &&
       !DISC_AIR_ENTRIES.includes(entry) &&
-      !DISC_EMISSIVE_AIR_ENTRIES.includes(entry),
+      !DISC_EMISSIVE_AIR_ENTRIES.includes(entry) &&
+      !TABLE_ONLY_ENTRIES.includes(entry),
   );
   const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
   await group(1, "T9.b catalogue", () => checkCatalogue(engine, status, entries, checks));
@@ -469,6 +475,10 @@ async function run(
   );
   await group(9, "T9.b catalogue: the one-band march's kernels", () =>
     checkCatalogue(engine, status, ATMOSPHERE_ONE_BAND_ENTRIES, checks),
+  );
+  // R08.T9.b's lever's table-only twins, in part 16, the lightest (36 s at 0e466e0's gate).
+  await group(16, "T9.b catalogue: the table-only twins", () =>
+    checkCatalogue(engine, status, TABLE_ONLY_ENTRIES, checks),
   );
   // R08.T15.a.2's deck's marches, in part 14 with its twins, first.
   await group(14, "T9.b catalogue: the deck's marches", () =>
@@ -594,6 +604,9 @@ async function run(
   );
   await group(11, "R08.T9.b's lever: bodies drawn with the sources' table", () =>
     checkSourceTableFrames(engine, checks),
+  );
+  await group(11, "R08.T9.b's lever: bodies of one band drawn by their table-only twins", () =>
+    checkSourceTableTwins(engine, checks),
   );
   await group(9, "R08.T8.a the march band", () => checkMarchBand(engine, checks, twins));
   // In part 13 after the thick read's catalogue; the Saturn-class figure's in part 3, for the

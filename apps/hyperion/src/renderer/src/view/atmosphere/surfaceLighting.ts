@@ -14,7 +14,13 @@
  * (R08.T0's seam).
  */
 import { TEXTURE_USAGE } from "../engine/gpuFlags";
-import type { RenderEngine, TextureBindingSpec, TextureHandle } from "../engine/types";
+import type { KernelPair } from "../engine/kernels";
+import type {
+  RenderEngine,
+  TextureBindingSpec,
+  TextureHandle,
+  WgslMaterialSpec,
+} from "../engine/types";
 import type { Rgb } from "../photometry/toneCurve";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
@@ -69,6 +75,65 @@ export function litProbedWgsl(wgsl: string, probe: LitProbe): string {
       break;
   }
   return wgsl.replace(LIT_PROBE_LINE, `const LIT_PROBE : u32 = ${String(value)}u;`);
+}
+
+/** The line of `surfaceLighting.wgsl` a table-only twin replaces. */
+const TABLE_ONLY_LINE = "const SOURCE_TABLE_ONLY : bool = false;";
+
+/** The sources' table's name in a material's `DrawItem.textures` ({@link surfaceLightingTextures}). */
+export const SOURCE_TABLE_DRAW_TEXTURE = "atmosphereSourceTable";
+
+/** The sources' table's name in `surfaceLighting.wgsl` and a kernel's `sampled`. */
+export const SOURCE_TABLE_KERNEL_TEXTURE = "atmosphere_source_table";
+
+/**
+ * The sources' table of a body of one latitude band, by its texture's name
+ * (`AtmosphereTables.sourceTransmittance`): every lookup of its body is the table's, so that a lit
+ * pass may draw it by the table-only twins of its modules (`sourceTableEngine.ts`).
+ */
+export const ONE_BAND_SOURCE_TABLE_NAME = "atmosphere sources' transmittance, one band";
+
+/** The sources' table of a body of several bands, which takes some lookups per fragment. */
+export const SOURCE_TABLE_NAME = "atmosphere sources' transmittance";
+
+/**
+ * `spec`'s table-only twin (R08.T9.b's lever): its modules with `surfaceLighting.wgsl`'s
+ * `SOURCE_TABLE_ONLY` set, so that the sliced lookup a source per fragment is compiled out, under a
+ * name of its own and its original's display name, the same effect on the console; `null` for a
+ * material that binds no sources' table.
+ */
+export function tableOnlyMaterial(spec: WgslMaterialSpec): WgslMaterialSpec | null {
+  const binds = spec.textures?.some((texture) => texture.name === SOURCE_TABLE_DRAW_TEXTURE);
+  if (binds !== true || !spec.fragmentWgsl.includes(TABLE_ONLY_LINE)) {
+    return null;
+  }
+  return {
+    ...spec,
+    name: `${spec.name} (table only)`,
+    vertexWgsl: tableOnlyWgsl(spec.vertexWgsl),
+    fragmentWgsl: tableOnlyWgsl(spec.fragmentWgsl),
+  };
+}
+
+/**
+ * `pair`'s table-only twin (R08.T9.b's lever), as {@link tableOnlyMaterial} makes a material's;
+ * `null` for a kernel that declares no sources' table.
+ */
+export function tableOnlyKernel(pair: KernelPair): KernelPair | null {
+  if (!pair.reference.includes(TABLE_ONLY_LINE)) {
+    return null;
+  }
+  return {
+    ...pair,
+    name: `${pair.name} (table only)`,
+    reference: tableOnlyWgsl(pair.reference),
+    subgroup: pair.subgroup === null ? null : tableOnlyWgsl(pair.subgroup),
+  };
+}
+
+/** `wgsl` with `SOURCE_TABLE_ONLY` set, where it composes {@link SURFACE_LIGHTING_WGSL}. */
+function tableOnlyWgsl(wgsl: string): string {
+  return wgsl.replace(TABLE_ONLY_LINE, "const SOURCE_TABLE_ONLY : bool = true;");
 }
 
 /** A body's atmosphere tables as a lit pass binds them (`surfaceLighting.wgsl`'s head). */
@@ -161,8 +226,8 @@ const NAMES: Readonly<
   irradiance: { draw: "atmosphereIrradiance", wgsl: "atmosphere_irradiance", array: true },
   belowDeck: { draw: "atmosphereBelowDeck", wgsl: "atmosphere_below_deck", array: true },
   sourceTransmittance: {
-    draw: "atmosphereSourceTable",
-    wgsl: "atmosphere_source_table",
+    draw: SOURCE_TABLE_DRAW_TEXTURE,
+    wgsl: SOURCE_TABLE_KERNEL_TEXTURE,
     array: true,
   },
 };
