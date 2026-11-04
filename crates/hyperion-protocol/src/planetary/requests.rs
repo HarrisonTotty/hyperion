@@ -814,9 +814,10 @@ pub(crate) mod tests {
     /// applicable and its envelope `ok`, so that the client decodes an envelope the server is
     /// pinned to send. The envelope is read from the fixture itself (P14.T54.b.i), whose values
     /// `hyperion-server`'s `the_fixture_s_envelopes_are_the_generator_s` pins to the generator's:
-    /// an H₂/He envelope's, `supercritical` `null`, on the generator's grey profile (κ 2.87 × 10⁻³
-    /// m² kg⁻¹ at 1 bar, n 2), with an ammonia deck and the modes that name it, every deck mode
-    /// naming one of its decks and no haze naming any, each over the whole sky.
+    /// an H₂/He envelope's, `supercritical` `null`, on the generator's grey profile (κ 2.92 × 10⁻³
+    /// m² kg⁻¹ at 1 bar, n 2; 2.87 × 10⁻³ until 27 refitted κ₁ at the giants' own Bond albedos,
+    /// P14.T24.h.b), with an ammonia deck and the modes that name it, every deck mode naming one of
+    /// its decks and no haze naming any, each over the whole sky.
     #[test]
     fn the_shared_jupiter_fixture_holds_its_envelope() {
         let ServerMessage::Response {
@@ -867,7 +868,7 @@ pub(crate) mod tests {
         assert_eq!(envelope.supercritical, None);
         let profile = envelope.profile;
         assert!(
-            (profile.thermal_opacity_m2_per_kg - 2.87e-3).abs() < 1e-15
+            (profile.thermal_opacity_m2_per_kg - 2.92e-3).abs() < 1e-15
                 && (profile.optical_depth_exponent - 2.0).abs() < 1e-15,
             "{profile:?}"
         );

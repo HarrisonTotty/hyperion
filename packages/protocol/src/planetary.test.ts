@@ -343,24 +343,26 @@ describe("body_detail", () => {
       "NH3",
     ]);
     expect(envelope.composition.reduce((sum, gas) => sum + gas.mole_fraction, 0)).toBeCloseTo(1, 9);
-    // The volatile decks above the refractory ones, hottest base first, the modes naming them.
+    // The volatile decks above the refractory ones, hottest base first, the modes naming them:
+    // from generator version 27 the ammonia deck carries a second mode (P14.T24.h.b).
     expect(envelope.condensate_decks.slice(-3).map((deck) => deck.condensate)).toEqual([
       "H2O",
       "NH4SH",
       "NH3",
     ]);
-    expect(envelope.decks.map((mode) => mode.deck)).toEqual(
-      envelope.condensate_decks.map((deck) => deck.condensate),
-    );
+    expect(envelope.decks.map((mode) => mode.deck)).toEqual([
+      ...envelope.condensate_decks.map((deck) => deck.condensate),
+      "NH3",
+    ]);
     expect(envelope.hazes.map((haze) => [haze.material, haze.deck])).toEqual([
       ["chromophore", null],
     ]);
-    // The adiabat from the join, at 1.02 bar, to 100 bar, evenly in ln p.
+    // The adiabat from the join, at 1.009 bar, to 100 bar, evenly in ln p.
     const pressures = envelope.adiabat.map((node) => node.pressure_pa);
     expect(pressures[0]).toBe(envelope.join_pressure_pa);
     expect(pressures.at(-1)).toBe(1e7);
     expect(envelope.profile).toEqual({
-      thermal_opacity_m2_per_kg: 0.00287,
+      thermal_opacity_m2_per_kg: 0.00292,
       optical_depth_exponent: 2,
       opacity_ratio: 0.4,
       redistribution_factor: 0.25,

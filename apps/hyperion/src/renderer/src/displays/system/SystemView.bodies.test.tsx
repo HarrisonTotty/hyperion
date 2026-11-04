@@ -1968,7 +1968,8 @@ describe("SystemView's body readout", () => {
     await answerDetail(socket, jupiterDetail());
 
     expect(reading("ATMOSPHERE")).toBe("GAS ENVELOPE");
-    // The generator's composition at 1 bar (P14.T54.b.i), every gas of at least 10⁻¹².
+    // The generator's composition at 1 bar (P14.T54.b.i, as generator version 27 gives it), every
+    // gas of at least 10⁻¹².
     expect(reading("MOLE FRACTION")).toBe(
       partsReading(
         "H2 84.8 %",
@@ -1977,16 +1978,16 @@ describe("SystemView's body readout", () => {
         "NH3 0.0237 %",
         "Ne 0.0122 %",
         "Ar 0.00161 %",
-        "N2 0.00124 %",
+        "N2 0.00126 %",
         "PH3 1.46E-4 %",
         "HCl 2.49E-5 %",
         "Kr 9.67E-7 %",
-        "H2O 6.81E-7 %",
-        "CO 1.19E-7 %",
+        "H2O 7.52E-7 %",
+        "CO 1.22E-7 %",
         "Xe 9.45E-8 %",
-        "H2S 4.22E-8 %",
-        "HCN 7.61E-10 %",
-        "CO2 7.40E-10 %",
+        "H2S 5.05E-8 %",
+        "HCN 7.78E-10 %",
+        "CO2 7.60E-10 %",
       ),
     );
   });
