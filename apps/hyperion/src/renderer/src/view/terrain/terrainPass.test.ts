@@ -1163,6 +1163,30 @@ describe("the morph bands' slew (R10.T16.i)", () => {
     expect(Math.max(...steps)).toBeLessThanOrEqual(step32(1 + BAND_SLEW_PER_STEP));
     expect(frame.selection.limitExcess).toBeGreaterThan(1);
   });
+
+  it("tells its bands at the selection's τ′ once their slew reaches it, and from then on writes them alike", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    // The draw set's changes cut, so that the bands alone move the records once the demand is in.
+    pass.setReducedMotion(true);
+    pass.frame(inputAt(BUDGET_VIEW));
+    let n = 1;
+    for (; n < 60 && pool().bakeDemand(pass) > 0; n += 1) {
+      pass.frame(inputAt(BUDGET_VIEW, 16 * n));
+    }
+    // Nothing lands now, so no selection moves τ′, and the bands go on towards it a step at a time.
+    const told: boolean[] = [];
+    const written: string[] = [];
+    for (const stop = n + 400; n < stop; n += 1) {
+      const frame = pass.frame(inputAt(BUDGET_VIEW, 16 * n));
+      told.push(pass.bandsAtTarget(DEFAULT_TERRAIN_VIEW));
+      written.push(JSON.stringify([...writtenBands(engine, frame.drawSet)]));
+    }
+    const first = told.indexOf(true);
+    expect(first).toBeGreaterThan(0);
+    expect(told.slice(first).every(Boolean)).toBe(true);
+    expect(written[first - 1]).not.toBe(written[first]);
+    expect(new Set(written.slice(first)).size).toBe(1);
+  });
 });
 
 /** `ratio` widened by two `f32` roundings. */

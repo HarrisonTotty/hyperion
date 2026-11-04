@@ -2189,6 +2189,19 @@ export class TerrainPass {
   }
 
   /**
+   * Whether view `id`'s morph bands are at its last selection's τ′ (R10.T16.i;
+   * {@link slewedTauPx}): until they are, each step moves them, and the view's frame with them,
+   * though no bake lands. `true` for a view no selection has given a τ′ yet, whose bands stand at
+   * its own τ.
+   */
+  bandsAtTarget(id: TerrainViewId): boolean {
+    const state = this.#views.get(id);
+    return (
+      state === undefined || state.targetTauPx === null || state.bandTauPx === state.targetTauPx
+    );
+  }
+
+  /**
    * Whether the operator asks for reduced motion (plan R10, R10.T16.i; the UX guide's "Motion and
    * sound"): the drawn ground's changes then cut at their first draw rather than morph in, its
    * distance's morph, which moves with the camera alone, kept. Off as the pass is made.
