@@ -106,8 +106,8 @@ const PRODUCT_REACH_MARGIN: f64 = 1.05;
 ///
 /// # Examples
 ///
-/// A cell about the Sun-like point holds mergers, each resolving by its ID to itself, a contact
-/// pair before its merger time and the merged star from it:
+/// A cell about the Sun-like point holds mergers, each resolving by its ID to itself; one of the
+/// contact channel is a contact pair before its merger time and the merged star from it:
 ///
 /// ```
 /// use hyperion_sim::Seed;
@@ -117,13 +117,20 @@ const PRODUCT_REACH_MARGIN: f64 = 1.05;
 ///     CatalogueCellKey, CatalogueClassCell, ClassId, resolve_entry,
 /// };
 /// use hyperion_sim::stellar::binary::SegmentKind;
+/// use hyperion_sim::tables::binary::MergerChannel;
 ///
 /// let galaxy = Galaxy::new(Seed::new(9));
 /// let process = StellarMergers::new(&galaxy);
 /// let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [0, 6, 0])?;
 /// let cell = CatalogueClassCell::generate(&galaxy, &process, key);
-/// let entry = cell.entries().first().ok_or("the solar circle has mergers")?;
-/// assert_eq!(resolve_entry(&galaxy, &process, entry.id())?.entry(), entry);
+/// for entry in cell.entries() {
+///     assert_eq!(resolve_entry(&galaxy, &process, entry.id())?.entry(), entry);
+/// }
+/// let entry = cell
+///     .entries()
+///     .iter()
+///     .find(|e| e.value().scan().channel() == MergerChannel::Contact)
+///     .ok_or("the solar circle has contact mergers")?;
 /// let merger = entry.value();
 /// let at_t = merger.scan().merger_age();
 /// assert_eq!(merger.timeline().merger_age(), Some(at_t));

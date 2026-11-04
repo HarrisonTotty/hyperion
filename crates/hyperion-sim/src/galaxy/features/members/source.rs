@@ -361,11 +361,16 @@ impl<'a> FeatureMemberSource<'a> {
     /// let galaxy = Galaxy::new(Seed::new(9));
     /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in range");
     /// let query = RangeQuery::builder(sun, LightYears::new(50.0)).build()?;
-    /// // At the epoch the members have not moved, so the cells are the lookup's own.
-    /// assert_eq!(
-    ///     FeatureMemberSource::feature_cells(&galaxy, &query),
-    ///     FeatureCatalogue::cells_near(&galaxy, &sun, LightYears::new(50.0)),
-    /// );
+    /// // At the epoch the members have not moved, so the cells hold the lookup's own; the lists'
+    /// // dead, which may lie farther from their features (P09.T37), widen them, and a cell may be
+    /// // read through a later process there.
+    /// let cells: Vec<_> = FeatureMemberSource::feature_cells(&galaxy, &query)
+    ///     .into_iter()
+    ///     .map(|(cell, _)| cell)
+    ///     .collect();
+    /// for (cell, _) in FeatureCatalogue::cells_near(&galaxy, &sun, LightYears::new(50.0)) {
+    ///     assert!(cells.contains(&cell), "{cell:?}");
+    /// }
     /// # Ok::<(), hyperion_sim::galaxy::query::BuildRangeQueryError>(())
     /// ```
     #[must_use]

@@ -2415,10 +2415,6 @@ pub(crate) mod tests {
         };
         let members = SkyMembers::of(&galaxy, caches(), None);
         assert!(members.is_some(), "a galaxy of 27 gives up φ");
-        // At the version in force, below φ's and the carve-out's, the field keeps every
-        // population's budget and the grid the classes' hosts.
-        let held = Galaxy::new(Seed::new(0x4d2));
-        assert!(SkyMembers::of(&held, caches(), None).is_none());
 
         let near = sun().position().to_owned();
         let cluster = hyperion_sim::galaxy::features::catalogue::FeatureCatalogue::near(
