@@ -12,9 +12,9 @@
  *   centre where the centre's field cell is surveyed and otherwise their mean at its surveyed
  *   cells' centres, times that share, so that `elsewhere` takes the rest of it; an unsurveyed texel
  *   is `null`, no weight ({@link classMapTexelsOf}, through R07's `packClassMap`). Where the answer
- *   refines texels to the field's level (lane fix-coast-class-map; the crate's
- *   `REFINED_CLASS_MAP_FROM`), a coast's or another bound's, their cells go in the map's fine page
- *   (`ClassMapFine`), byte ÷ 255 a cell, a cell of no weight unsurveyed.
+ *   refines texels to the field's level (lane fix-coast-class-map, R10.T15.b.2), a coast's or
+ *   another bound's, their cells go in the map's fine page (`ClassMapFine`), byte ÷ 255 a cell, a
+ *   cell of no weight unsurveyed.
  * - **The laws** are one per class, the body's (form, entry) pairs, at most 16: the class's
  *   photometry as the worker resolves it (R10.T10.a's c A_N, its law's L(0)) on its law's row law
  *   on the body (`classRowLaw` with `elsewhere`: a Regolith class's the body's curve on a regolith

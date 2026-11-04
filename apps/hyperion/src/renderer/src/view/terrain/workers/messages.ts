@@ -365,7 +365,7 @@ export interface ClassMapAnswer {
   readonly maturity?: ClassMapMaturityAnswer;
   /**
    * The texels refined to the field's level (lane fix-coast-class-map; the crate's
-   * `ClassMap::refined`); absent where none is, as below the module's `REFINED_CLASS_MAP_FROM`.
+   * `ClassMap::refined`); absent where none is.
    */
   readonly refinement?: ClassMapRefinementAnswer;
 }

@@ -173,8 +173,7 @@
 //!   of K × 3 a class, its albedo nodes at band level 0 as `maturityNodes` lays out one level's,
 //!   all 0 where the palette names no substance; `fineSide`, r, the field cells along a texel's
 //!   side; `refined()`, a `Uint32Array` of the place in `texels()` of each texel refined to the
-//!   field's level ([`ClassMap::refined`]), rising, empty below the switch's version
-//!   ([`REFINED_CLASS_MAP_FROM`](crate::worker::REFINED_CLASS_MAP_FROM)); `fineWeights()`, a
+//!   field's level ([`ClassMap::refined`]), rising, empty where none is; `fineWeights()`, a
 //!   `Uint8Array` of r² cells a refined texel in rising (j, i), `classes` bytes each, all 0 for a
 //!   cell not surveyed; `fineMaturity()`, a `Uint16Array` of their codes alike, empty where the
 //!   header carries no maturity; and `complete`, `false` where some texel's weights read a cell the

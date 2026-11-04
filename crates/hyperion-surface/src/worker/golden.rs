@@ -172,7 +172,7 @@
 //!   alike, then for each refined texel `fine <place> <cell>…`, each cell `<bytes>/<code>` or `-`
 //!   for one not surveyed.
 //!
-//! From `REFINED_CLASS_MAP_FROM`, 27, the `default` lines are the `refined` lines' texels.
+//! The `default` lines are the `refined` lines' texels (R10.T15.b.2).
 //!
 //! # The maturity layer's format
 //!

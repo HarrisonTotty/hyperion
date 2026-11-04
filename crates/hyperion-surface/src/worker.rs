@@ -79,9 +79,9 @@
 //! survey with its weights over the body's classes, at most [`CLASS_MAP_CLASSES`], and the share of
 //! it surveyed. The render thread packs it into R07's map (`view/terrain/classMap.ts`). Where the
 //! header carries a maturity, each texel has its ground's maturity at the map's band level and
-//! each class its albedo nodes there (R10.T1.c's client half). From [`REFINED_CLASS_MAP_FROM`] a
-//! texel whose field cells' classes the disc would draw apart carries each cell's own weights too
-//! ([`RefinedTexel`]), which the disc draws at the field's level, as the terrain draws a coast.
+//! each class its albedo nodes there (R10.T1.c's client half). A texel whose field cells' classes
+//! the disc would draw apart carries each cell's own weights too ([`RefinedTexel`], R10.T15.b.2),
+//! which the disc draws at the field's level, as the terrain draws a coast.
 //!
 //! # The disc's normal map (plan R10, T10.g)
 //!
@@ -107,7 +107,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::{Kelvin, Metres, Pascals, Radians, SquareMetres};
-use hyperion_base::{GENERATOR_VERSION, GeneratorVersion};
 
 use crate::bake::{
     RefinedNormals, TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain, encode_maturity,
@@ -738,23 +737,22 @@ pub const CLASS_MAP_BAND: u8 = CLASS_MAP_LEVEL - 6;
 /// The classes a class map holds at most: R07's `MAX_DISC_CLASSES`, the laws its disc carries.
 pub const CLASS_MAP_CLASSES: usize = 16;
 
-/// The generator version from which [`WorkerFields::class_map`] refines the texels whose field
-/// cells' classes the disc would draw apart ([`ClassMap::refined`]): 27.
-///
-/// A coast, an ice edge, or a crust's or a climate's bound runs along the field's cells, and the
-/// terrain draws it so, while a texel of [`CLASS_MAP_LEVEL`] over a level-8 field reads one class
-/// mix for its 16 cells: the coast then popped by up to 2–3 stops at the hand-over (R10.T15.b.2's
-/// finding). The map is in the worker's goldens, so the change is held at the train's version
-/// (rule B, lane fix-coast-class-map's brief); below it the map refines no texel, as before, bit
-/// for bit.
-pub const REFINED_CLASS_MAP_FROM: GeneratorVersion = GeneratorVersion::new(27);
-
-/// How finely a [`ClassMap`] reads its texels: the map's detail, which the generator version
-/// chooses ([`ClassMapDetail::of_version`]).
+/// How finely a [`ClassMap`] reads its texels: the map's detail. [`WorkerFields::class_map`]
+/// answers at [`Refined`](Self::Refined) (R10.T15.b.2): a coast, an ice edge, or a crust's or a
+/// climate's bound runs along the field's cells, and the terrain draws it so, while a texel of
+/// [`CLASS_MAP_LEVEL`] over a level-8 field reads one class mix for its 16 cells, the coast then
+/// popped by up to 2–3 stops at the hand-over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ClassMapDetail {
     /// Each texel one reading at its centre, or its surveyed cells' mean where its centre's cell is
-    /// not surveyed: the map below [`REFINED_CLASS_MAP_FROM`].
+    /// not surveyed: the map before R10.T15.b.2, which the tests compare the refined one with.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the worker answers the refined map; the tests compare the coarse one"
+        )
+    )]
     Coarse,
     /// As [`Coarse`](Self::Coarse), but over a field finer than [`CLASS_MAP_LEVEL`] a texel two of
     /// whose surveyed field cells' classes, by their records (`cell_material`), are drawn apart
@@ -763,19 +761,6 @@ pub(crate) enum ClassMapDetail {
     /// is drawn apart from the surveyed cell beside it across the texel's edge carries its own
     /// reading for each of its surveyed cells.
     Refined,
-}
-
-impl ClassMapDetail {
-    /// The detail of the class map at generator version `version`: [`Refined`](Self::Refined)
-    /// from [`REFINED_CLASS_MAP_FROM`], [`Coarse`](Self::Coarse) below it.
-    #[must_use]
-    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
-        if version.get() >= REFINED_CLASS_MAP_FROM.get() {
-            Self::Refined
-        } else {
-            Self::Coarse
-        }
-    }
 }
 
 /// One class of a [`ClassMap`]: a form of a palette entry, with the photometry it is drawn with.
@@ -889,14 +874,14 @@ impl ClassMapTexel {
 /// later material), are left out, and their weight with them, which the disc gives the body's
 /// uniform law.
 ///
-/// From [`REFINED_CLASS_MAP_FROM`], over a field finer than [`CLASS_MAP_LEVEL`], a texel two of
-/// whose surveyed field cells' classes, by their records, the disc draws apart (more than a third
-/// of a stop in a band's normal albedo, or on another law) is refined ([`ClassMap::refined`]): its
-/// weights and maturity are the mean of its surveyed cells' at their centres, as above where its
-/// centre's cell is not surveyed, and it carries each cell's own, so that the disc draws a coast
-/// along the field's cells as the terrain does. A texel whose cells are drawn alike, one of which is
-/// drawn apart from the surveyed cell beside it across the texel's edge, is refined too, a coast
-/// along its edge, each surveyed cell carrying the texel's own reading.
+/// Over a field finer than [`CLASS_MAP_LEVEL`], a texel two of whose surveyed field cells'
+/// classes, by their records, the disc draws apart (more than a third of a stop in a band's normal
+/// albedo, or on another law) is refined ([`ClassMap::refined`]): its weights and maturity are the
+/// mean of its surveyed cells' at their centres, as above where its centre's cell is not surveyed,
+/// and it carries each cell's own, so that the disc draws a coast along the field's cells as the
+/// terrain does. A texel whose cells are drawn alike, one of which is drawn apart from the surveyed
+/// cell beside it across the texel's edge, is refined too, a coast along its edge, each surveyed
+/// cell carrying the texel's own reading.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassMap {
     field_level: u8,
@@ -979,8 +964,7 @@ impl ClassMap {
         1 << self.field_level.saturating_sub(CLASS_MAP_LEVEL)
     }
 
-    /// The texels refined to the field's level, in their texels' order; none below
-    /// [`REFINED_CLASS_MAP_FROM`].
+    /// The texels refined to the field's level, in their texels' order.
     #[must_use]
     pub fn refined(&self) -> &[RefinedTexel] {
         &self.refined
@@ -2373,11 +2357,10 @@ impl WorkerFields {
     /// surveyed cell are answered: 24,576 texels, each surveyed one at one [`weights_at`] or, where
     /// its centre's field cell is not surveyed, one a surveyed field cell under it. A texel whose
     /// weights read a cell the field does not hold yet is left out, and the map is then not
-    /// [complete](ClassMap::is_complete). From [`REFINED_CLASS_MAP_FROM`] each texel over a field
-    /// finer than [`CLASS_MAP_LEVEL`] takes its surveyed cells' classes by their records
-    /// (`cell_material`, once a cell a map) first, and those of the surveyed cells beside it; where
-    /// the disc would draw its own apart, it is read at each surveyed cell's centre, its own their
-    /// mean ([`ClassMap::refined`]).
+    /// [complete](ClassMap::is_complete). Each texel over a field finer than [`CLASS_MAP_LEVEL`]
+    /// takes its surveyed cells' classes by their records (`cell_material`, once a cell a map)
+    /// first, and those of the surveyed cells beside it; where the disc would draw its own apart, it
+    /// is read at each surveyed cell's centre, its own their mean ([`ClassMap::refined`]).
     ///
     /// # Errors
     ///
@@ -2391,7 +2374,7 @@ impl WorkerFields {
         body: BodyRef,
         seed: DetailSeed,
     ) -> Result<ClassMap, QueryBodyError> {
-        self.class_map_at(body, seed, ClassMapDetail::of_version(GENERATOR_VERSION))
+        self.class_map_at(body, seed, ClassMapDetail::Refined)
     }
 
     /// [`class_map`](Self::class_map) at an explicit detail, rather than the generator version's.
