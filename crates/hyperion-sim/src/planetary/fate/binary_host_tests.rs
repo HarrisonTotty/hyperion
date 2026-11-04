@@ -375,11 +375,21 @@ fn pair_limits_at(ctx: &SystemContext, k: usize, zone: &OrbitZone, age: f64) -> 
     zone.limits_at(&state, PairBound::Pair, widening).0
 }
 
-/// A stable transfer that widens its pair moves the pair's P-type limit out past a circumbinary
-/// planet placed just outside it at birth: under the zones at the evaluated state the planet is
-/// `Unbound` at the crossing, inside the transfer.
+/// A stable transfer that widens its pair moves the pair's P-type limit out, and the pair's mass
+/// loss widens a circumbinary planet's orbit too (its host's mass at birth over its mass then):
+/// under the zones at the evaluated state the planet stays bound while its widened orbit stays
+/// outside the limit, and the fate's clearance is that orbit's pericentre less the limit.
+///
+/// To generator version 26 the sample's first such pair unbound a planet placed just outside its
+/// limit at birth, inside the transfer. From 27 (the lean, rule E) none does: of the 12
+/// stable-transfer pairs with a pair zone among the sample's first 12,000 systems, the limit ends
+/// each transfer at 0.09–0.75 of the planet's widened orbit, falling through it. The first pair
+/// whose limit grows by a fifth, 0x6200596800000001's, lost a quarter of its mass before its
+/// transfer (5.53 to 4.04 M☉, 3.28 at its end): its limit grows from 2.84 to 3.46 × 10¹² m, the
+/// planet placed at 1.1 times its birth limit (3.08 × 10¹² m) from 4.22 to 5.20 × 10¹² m, and the
+/// clearance from 1.38 to 1.74 × 10¹² m.
 #[test]
-fn stable_transfer_s_widening_unbinds_an_inner_circumbinary_planet() {
+fn stable_transfer_s_widening_keeps_a_circumbinary_planet_its_mass_loss_widens() {
     let galaxy = galaxy();
     let widens = |stars: &SystemStars, k: usize| {
         let ctx = SystemContext::from_stars(&galaxy, stars);
@@ -405,19 +415,51 @@ fn stable_transfer_s_widening_unbinds_an_inner_circumbinary_planet() {
     let zone = zone_of(&ctx, &members);
     let (transfer, _) = accretor(&ctx, k).unwrap();
     let inner = AstronomicalUnits::from(zone.inner().unwrap()).value();
+    let placed = Metres::from(AstronomicalUnits::new(1.1 * inner)).value();
     let body = circular_body(1.1 * inner, EarthMasses::new(1.0), zone.host_mass());
     let first = &ctx.stars()[0];
-    let [onset, end] =
-        [transfer.start(), transfer.end()].map(|age| clock_time(first, age).unwrap());
     let host = FateHost::evolved(&ctx, &zone);
-    let ending = BodyFate::resolve(&body, &host).ending();
-    let Some(BodyState::Unbound { at }) = ending else {
-        panic!("{:?}: {ending:?} as its pair widens", ctx.id());
+    let fate = BodyFate::resolve(&body, &host);
+    let mut widened = Vec::new();
+    for age in [transfer.start(), transfer.end()] {
+        // The limit and the mass the fate reads at the clock's time, each on the side of the
+        // pair's events it lies on.
+        let t = clock_time(first, age).unwrap();
+        let limit = host
+            .limits_at(&zone, t)
+            .0
+            .expect("a pair's own zone has an inner limit")
+            .value();
+        let mass = host.mass_at(t).value();
+        let orbit = placed * zone.host_mass().value() / mass;
+        let clearance = fate
+            .zone_clearance_at(t)
+            .unwrap_or_else(|| panic!("{:?}: the planet is present at {age:?}", ctx.id()));
+        eprintln!(
+            "{:?} at {:.6e} yr: limit {limit:.4e} m, the planet's widened orbit {orbit:.4e} m, \
+             clearance {clearance:.4e} m, the pair's mass {mass:.3} M☉",
+            ctx.id(),
+            age.value()
+        );
+        assert!(clearance > 0.0, "{:?} at {age:?}: {clearance} m", ctx.id());
+        let expected = orbit - limit * (1.0 - ZONE_EDGE_TOLERANCE);
+        assert!(
+            (clearance / expected - 1.0).abs() < 1e-6,
+            "{:?} at {age:?}: {clearance} m against {expected} m",
+            ctx.id()
+        );
+        widened.push((limit, orbit));
+    }
+    // The limit grows by a fifth over the transfer, and the planet's orbit by more.
+    let [(limit_0, orbit_0), (limit_1, orbit_1)] = widened[..] else {
+        unreachable!("the transfer's two ends");
     };
+    assert!(limit_1 > limit_0 && orbit_1 / orbit_0 > limit_1 / limit_0);
     assert!(
-        onset < at && at <= end,
-        "{:?}: unbound outside the transfer",
-        ctx.id()
+        !matches!(fate.ending(), Some(BodyState::Unbound { .. })),
+        "{:?}: {:?}",
+        ctx.id(),
+        fate.ending()
     );
 }
 
